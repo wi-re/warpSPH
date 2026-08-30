@@ -17,8 +17,10 @@ DFSPH proper applies **both** corrections to the *velocity*, as warm-started
 pressure impulses `v -= dt a_p(kappa)`. That is what lets the pressure field
 accumulate the hydrostatic profile and hold the column. This module is that
 scheme, kept deliberately minimal and self-contained: no VD projection, no
-Eq.-17 position-shift/resample, no free-surface gauge by default (the Part 30
-`FREE_SURFACE_GAUGE` toggle is off), no `minShift`, no `rhoStar` 0.9 clamp.
+Eq.-17 position-shift/resample, no free-surface gauge and no damped warm
+start by default (the Part 30 `FREE_SURFACE_GAUGE` and Part 31
+`DAMPED_WARM_START` toggles are both off), no `minShift`, no `rhoStar`
+0.9 clamp.
 
 STATUS (troubleshooting artifact, not a landed solver). Structurally complete
 and it demonstrates the thesis directly: with the velocity warmstart + a
@@ -37,8 +39,16 @@ free-surface gauge (the `FREE_SURFACE_GAUGE` toggle: hold `kappa^v` = 0 on
 `detectFreeSurface`-flagged rows, pressure pinned to 0 at every iteration of
 the divergence solve) under this linear solve -- a measured negative (the
 degradation's onset is unchanged, the surface degrades deeper and never
-recovers, the slosh rises ~30-40%), so the toggle ships off; the recorded
-next lever is the reference's damped warm start against the full-kappa carry.
+recovers, the slosh rises ~30-40%), so the toggle ships off. Part 31
+re-ran the reference's damped warm start (the `DAMPED_WARM_START` toggle:
+seed each solve with `0.5*min(carried, cap)/dt**k` gated on the row being
+compressed, the carrier dt-scaled, the step-1 IC pressure zeroed) against
+the full-kappa carry -- also a measured negative (onset unchanged, surface
+depth mildly favourable at n=2, ~5x the CD iterations), and it exposed that
+the baseline's IC seed self-destructs at step 1 (the two forced CD
+iterations drive the hydrostatic seed to 0). The toggle ships off; the
+late-time degradation now survives three levers (Parts 26, 30, 31) and the
+harden track is at a decision point.
 The runner's divergence check is now `~isfinite` (not `isnan`), so the
 inf-velocity soup reports `diverged=True`. It is **not** yet a landed
 general scheme.
@@ -80,9 +90,12 @@ Harden-track progress (`DFSPH_IMPROVEMENT_PLAN.md` Parts 24-25):
   solve (70.9/inf -> 1.15/1.28 max |v|). At step ~1150 (t ≈ 1.1 s) a
   free-surface degradation failure hits 2 of 3 1500-step runs (surface
   rho_min 0.6 -> 0.14, then blowup or a uniform rho-0.139 soup with inf
-  velocities); Part 30's gauge re-run did not close it, so the recorded
-  next lever is the reference's damped warm start against the full-kappa
-  carry.
+  velocities); Part 30's gauge re-run did not close it, and Part 31's
+  reference damped warm start (`DAMPED_WARM_START` toggle, default off)
+  did not either (onset unchanged, depth mildly favourable at n=2, ~5x
+  the CD iterations) -- the late-time degradation now survives three
+  levers and the track is at a decision point (a targeted onset-mechanism
+  study, or a return to the ranked plan items).
 
 Per-step algorithm (SPlisHSPlasH order):
 
@@ -148,6 +161,19 @@ __all__ = ['dfsphReference_step']
 # baseline; the probes (`--gauge`) toggle it for the A/B.
 FREE_SURFACE_GAUGE = False
 
+# Part 31: the reference's damped warm start (SPlisHSPlasH
+# `USE_WARMSTART` / `USE_WARMSTART_V`), tested against this scheme's full
+# kappa carry (the Part 29/30 baseline). The reference does not carry the
+# solved pressure across steps as-is: it stores `p*h**2` (constant-density)
+# / `p*h` (divergence) -- dt-invariant -- and seeds the next solve with
+# `0.5*min(stored, cap)/h**k`, GATED on the row being compressed (CD:
+# `densityAdv > 1`; DF: clamped `delta > 0`; both are "the one-sided source
+# is negative" in this code's sign convention), zero otherwise. Caps in
+# stored units (re-verified in TimeStepDFSPH.cpp, 08-30): CD 2.5e-4,
+# DF 0.5. Default False = the full carry; the probes (`--warmStart`)
+# toggle it for the A/B.
+DAMPED_WARM_START = False
+
 
 def _rebuildAdjacency(state: Any, system: Any, config: Any):
     adjacency = buildVerletList(
@@ -202,7 +228,8 @@ def _jacobiSolve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
                  vEnter: torch.Tensor, rho0: float, warmStart: torch.Tensor,
                  opDt: float, solverCfg: Any, minIters: int,
                  fluidMask: torch.Tensor, mode: str,
-                 surfaceMask: torch.Tensor = None):
+                 surfaceMask: torch.Tensor = None,
+                 warmStartDamped: bool = False):
     """DFSPH pressure Jacobi (SPlisHSPlasH `pressureSolveIteration` /
     `divergenceSolveIteration`), the LINEAR form (Part 28). The earlier
     re-summed fixed point recomputed `Drho/Dt` from the trial velocity
@@ -260,6 +287,16 @@ def _jacobiSolve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
     tolerance (which would cost the solve its early exit). Never applied
     to the constant-density solve — Part 26 measured that mask there as a
     bad trade (sub-surface over-compression).
+
+    `warmStartDamped` (Part 31): seed with the reference's
+    `USE_WARMSTART` / `USE_WARMSTART_V` formula instead of the full carry:
+    `0.5*min(warmStart, cap)/opDt`, gated on the one-sided source being
+    negative (compressed), zero otherwise. `warmStart` is then the
+    dt-scaled STORED field (CD: `p*dt**2`, DF: `p*dt` — the reference
+    multiplies the solved pressure by `h**k` at the end of each step so
+    the stored value is dt-invariant), and `opDt` (`dt**2` CD / `dt` DF)
+    converts it back to pressure units. Caps in stored units
+    (re-verified in TimeStepDFSPH.cpp): CD 2.5e-4, DF 0.5.
     """
     dt = opDt if mode == 'divergence' else opDt ** 0.5   # opDt is dt or dt**2
     # SPlisHSPlasH's fixed relaxation is 0.5 -- measured here (Part 29,
@@ -316,12 +353,27 @@ def _jacobiSolve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
     if mode == 'divergence':
         source = torch.where(exempt, torch.zeros_like(source), source)
 
-    p = torch.where(fluidMask, warmStart, torch.zeros_like(warmStart))
-    if mode == 'divergence':
-        # The reference's deficient DF particles start from p = 0 (their
-        # densityAdv = 0 gates both warm-start and guess branches to 0), not
-        # from the carried kappa^v; the gauge's pinned rows do the same.
-        p = torch.where(exempt, torch.zeros_like(p), p)
+    if warmStartDamped:
+        # Part 31: the reference's `USE_WARMSTART` / `USE_WARMSTART_V` seed.
+        # `warmStart` holds the dt-scaled stored field (CD: p*dt**2, DF:
+        # p*dt), so `0.5*min(stored, cap)/opDt` is in pressure units with
+        # opDt = dt**2 (CD) / dt (DF). The gate is the reference's
+        # `densityAdv > 1` (CD) / clamped `delta > 0` (DF) in this code's
+        # sign convention -- `source = 1 - densityAdv` / `source = -delta` --
+        # evaluated AFTER the exemption zeroing, so deficient/pinned rows
+        # seed 0 exactly as the reference's zeroed densityAdv does.
+        cap = 2.5e-4 if mode == 'density' else 0.5
+        p = torch.where(fluidMask & (source < 0.0),
+                        0.5 * warmStart.clamp(max=cap) / opDt,
+                        torch.zeros_like(warmStart))
+    else:
+        p = torch.where(fluidMask, warmStart, torch.zeros_like(warmStart))
+        if mode == 'divergence':
+            # The reference's deficient DF particles start from p = 0 (their
+            # densityAdv = 0 gates both warm-start and guess branches to 0),
+            # not from the carried kappa^v; the gauge's pinned rows do the
+            # same.
+            p = torch.where(exempt, torch.zeros_like(p), p)
     err = 0.0
     it = 0
     for it in range(maxIters):
@@ -416,6 +468,15 @@ def dfsphReference_step(system: Any, dt: float, config: Any, schemeConfig: Any,
     if st.soundspeeds is None or st.soundspeeds.shape != st.densities.shape:
         st.soundspeeds = torch.zeros_like(st.densities)
     kappaV = st.soundspeeds.clone()
+    if DAMPED_WARM_START and system.t == 0.0:
+        # First step: the case's IC wrote a RAW pressure (the hydrostatic
+        # profile) into the carrier, but the damped carry is dt-scaled
+        # (p*dt**2 / p*dt, see the carry block below). The reference has no
+        # IC pressure at all -- its field starts at 0 -- so seed from 0.
+        # (A checkpoint resume at t > 0 carries a properly scaled field and
+        # skips this.)
+        kappa = torch.zeros_like(kappa)
+        kappaV = torch.zeros_like(kappaV)
 
     # --- 2. non-pressure accelerations -------------------------------------
     enforceDirichlet(system, system.t, dt, config, schemeConfig)
@@ -438,7 +499,7 @@ def dfsphReference_step(system: Any, dt: float, config: Any, schemeConfig: Any,
             st, config, schemeConfig, adjacency, vEnter=vEnter, rho0=rho0,
             warmStart=kappa, opDt=dt * dt, solverCfg=psCfg,
             minIters=max(psCfg.minIterations, 2), fluidMask=fluid,
-            mode='density')
+            mode='density', warmStartDamped=DAMPED_WARM_START)
     st.velocities = vEnter + dt * a_p_cd
 
     # --- 4. advance positions with the corrected velocity ------------------
@@ -469,12 +530,23 @@ def dfsphReference_step(system: Any, dt: float, config: Any, schemeConfig: Any,
             st, config, schemeConfig, adjacency, vEnter=vEnterDf, rho0=rho0,
             warmStart=kappaV, opDt=dt, solverCfg=dfCfg,
             minIters=max(dfCfg.minIterations, 1), fluidMask=fluid,
-            mode='divergence', surfaceMask=surfaceMask)
+            mode='divergence', surfaceMask=surfaceMask,
+            warmStartDamped=DAMPED_WARM_START)
     st.velocities = vEnterDf + dt * a_p_df
 
     # --- 7. carry kappa / kappa^v for the next step's warm start --------
-    st.pressures = kappa
-    st.soundspeeds = kappaV
+    if DAMPED_WARM_START:
+        # The reference stores the pressure scaled by that step's dt (CD:
+        # dt**2, DF: dt -- the `*= h**k` blocks at the end of
+        # pressureSolve / divergenceSolve) so the next step's damped seed
+        # 0.5*min(stored, cap)/dt**k is dt-invariant. The carrier therefore
+        # holds a dt-scaled field on this path, not the raw pressure (the
+        # step-1 IC zeroing above is the only raw value it ever holds).
+        st.pressures = kappa * dt * dt
+        st.soundspeeds = kappaV * dt
+    else:
+        st.pressures = kappa
+        st.soundspeeds = kappaV
 
     if verbose:
         vmax = float(st.velocities[fluid].norm(dim=-1).max()) if fluid.any() else 0.0

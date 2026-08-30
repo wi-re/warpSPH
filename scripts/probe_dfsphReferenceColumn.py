@@ -45,6 +45,10 @@ args.add_argument('--gauge', action='store_true',
                   help='free-surface kappa^v gauge (Part 30, step 3): hold '
                        'kappa^v = 0 on detectFreeSurface-flagged rows in the '
                        'divergence solve')
+args.add_argument('--warmStart', action='store_true',
+                  help='reference damped warm start (Part 31): seed each '
+                       'solve with 0.5*min(carried, cap)/dt**k gated on the '
+                       'row being compressed, instead of the full-kappa carry')
 args = args.parse_args()
 
 _orig_js = ref._jacobiSolve
@@ -93,6 +97,7 @@ def _run(scale, steps, verbose):
     ref.applyConsistentCoupling = _scale_forcing_coupling(scale)
     ref._jacobiSolve = _spy_js if verbose else _orig_js
     ref.FREE_SURFACE_GAUGE = args.gauge
+    ref.DAMPED_WARM_START = args.warmStart
     try:
         return run(hydrostaticColumn.hydrostaticColumnCase, nx=args.nx, nSteps=steps,
                    scheme='dfsphReference', quiet=True, plot=False, store=False,
@@ -101,6 +106,7 @@ def _run(scale, steps, verbose):
         ref.applyConsistentCoupling = _orig_acc
         ref._jacobiSolve = _orig_js
         ref.FREE_SURFACE_GAUGE = False
+        ref.DAMPED_WARM_START = False
 
 
 if args.sweep:
@@ -117,6 +123,7 @@ if args.sweep:
 else:
     print(f'dfsphReference  hydrostaticColumn  nx={args.nx}  '
           f'scale={"scheme default (2.0)" if args.scale is None else args.scale}  '
-          f'gauge={"on" if args.gauge else "off"}')
+          f'gauge={"on" if args.gauge else "off"}  '
+          f'warmStart={"damped" if args.warmStart else "full"}')
     r = _run(args.scale, args.steps, verbose=True)
     print(f'diverged={r.diverged}')

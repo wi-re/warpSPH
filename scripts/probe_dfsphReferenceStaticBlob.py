@@ -24,6 +24,10 @@ args.add_argument('--gauge', action='store_true',
                   help='free-surface kappa^v gauge (Part 30, step 3): hold '
                        'kappa^v = 0 on detectFreeSurface-flagged rows in the '
                        'divergence solve (the case runs freeSurface=True)')
+args.add_argument('--warmStart', action='store_true',
+                  help='reference damped warm start (Part 31): seed each '
+                       'solve with 0.5*min(carried, cap)/dt**k gated on the '
+                       'row being compressed, instead of the full-kappa carry')
 args = args.parse_args()
 
 from warpSPHBootstrap import bootstrap
@@ -49,6 +53,7 @@ def _factor_alpha(state, config, schemeConfig, adjacency):
 
 ref._factor = _factor_alpha if args.factor == 'alpha' else _orig_factor
 ref.FREE_SURFACE_GAUGE = args.gauge
+ref.DAMPED_WARM_START = args.warmStart
 try:
     r = run(staticBlob.staticBlobCase, nx=args.nx, nSteps=args.steps,
             scheme='dfsphReference', quiet=True, plot=False, store=False,
@@ -56,11 +61,13 @@ try:
 finally:
     ref._factor = _orig_factor
     ref.FREE_SURFACE_GAUGE = False
+    ref.DAMPED_WARM_START = False
 tr = r.trajectory
 vmax = max(x.get('maxVelocity', 0.0) for x in tr)
 dmax = max(x.get('dispMax', 0.0) for x in tr)
 print(f'dfsphReference  staticBlob  factor={args.factor}  '
-      f'gauge={"on" if args.gauge else "off"}  nx={args.nx}  '
+      f'gauge={"on" if args.gauge else "off"}  '
+      f'warmStart={"damped" if args.warmStart else "full"}  nx={args.nx}  '
       f'steps={args.steps}  diverged={r.diverged}')
 print(f'  run max |v|={vmax:.3g}   run max disp={dmax:.3g}')
 last = tr[-1]

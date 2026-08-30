@@ -437,6 +437,7 @@ again.
 | **`dambreak`'s published CFL** (`cflFactor = 0.4`, [BK]'s constant, safe on every other incompressible case here) | NaN by step 30; even `0.3` NaNs by step 76. Unlike every wall-bounded case measured so far, this one needs `cflFactor = 0.2` (§4, Part 20) — the falling column's impact is sharper than `randomFlowIncompressible`'s bounded shear and the CFL's lagged `vMax` does not see it coming. |
 | **`dambreak --scheme divergenceFree` at the case's default `nx = 128`** | Diverges at step 88 (t ≈ 0.175, mid free-fall, before the column reaches the floor): maxDensity 1.23, maxVelocity 4.65, "NaN detected in velocities". At `nx = 64` the same case runs past t = 1.0, but the free surface and boundary show clustering and distortion artifacts — the surface is not clean at either resolution, and the coarser one is the only one that survives. Finer is worse here. Do not spend compute on a full-resolution incompressible dam break until the baseline test cases (item 2 below) pass. |
 | **`dfsphReference` free-surface `kappa^v` mask** (harden step 3) | On `hydrostaticColumn`, holding `detectFreeSurface`'s flagged rows (~27% of fluid) at `kappa^v = 0` in the divergence solve cleans the `dp/dy` fit (tracks ~1.0 vs raw -2..+3) but makes the column slump *faster* (`|v|max` 23 by step 59 vs ~2 at step 55 without). Masking the constant-density solve the same way: `rho_max` 2.5 in 20 steps. SPlisHSPlasH's `< 20`-neighbour guard never fires at `n_h = 4` (surface particles keep 53+ neighbours). Parked — the slump is a CD-solve problem (§4, Part 26). **Re-run under the Part 29 linear solve (Part 30): same sign.** The gauge (now an A/B toggle, `FREE_SURFACE_GAUGE`, default off) does not delay the late-time surface degradation (onset ~step 300-400 in both arms), degrades the surface deeper (rho_min 0.15-0.21 vs 0.25-0.38) and blocks the recovery the gauge-off survivor shows, and raises the slosh ~30-40% (|v|max 1.8-2.0 vs 1.3-1.5) over 1500-step runs. Closed as a lever for this failure mode. |
+| **`dfsphReference` damped warm start** (harden step 5) | The reference's `USE_WARMSTART` / `USE_WARMSTART_V` — seed `0.5·min(p·h^k, cap)/h^k` gated on compression (CD cap 2.5e-4, DF cap 0.5, stored units; the carried field is dt-scaled) against the full-`kappa` carry (Part 31): onset of the late-time surface degradation unchanged (step 226-429 across all four runs), end-state comparable, surface depth mildly favourable at n=2 (rho_min low 0.259-0.260 vs 0.227-0.243, not conclusive), ~5x the CD iterations (median 22 vs 4), no blow-up in either arm this batch (0/4 — batch-stochastic). It exposed a baseline defect: the full-carry arm's IC hydrostatic seed (max 6.15) is destroyed by step 1's two forced CD iterations, so the baseline is an effective cold start. Not a fix — the late-time degradation now survives three levers (Part 26, Part 30, Part 31). Toggle ships off. |
 | **`dfsphReference` linear optimal-step divergence solve** (harden step 4) | The SPD operator `A(p) = -dt·_drhodt(a_p(p))` with the exact residual-minimizing step converges the DF solve in 14–25 iters (vs a permanent 32) for ~13 steps on `hydrostaticColumn`, then regresses `staticBlob` hard (`|v|max` 19 by step 2): the optimal step needs null-mode handling, and `solveDivergenceFree`'s per-iteration mean-centre is the spurious-force move §1.5 forbids at a free surface. The re-summed fixed-`omega` form is uglier but has no such failure mode. `|kappa^v|` clamp not tried (§4, Part 26). |
 | `convergenceCriterion` (per solver) | `flooredOneSided` (PS) / `meanAbsolute` (DF) | Each solver's historical statistic, now one setting instead of two inline tests. `oneSided` is the published form. On the constant-density solve the swap is **bit-identical** (its criterion never fires); on the divergence-free solve it collapses the solve to 3.0 iterations for 1.53x the density error (§1.7). | 3% better for 23% more time on the bounded case, against 115% better on the periodic one. At a wall the error is set by the boundary treatment, not by how well the PPE is solved. |
 
@@ -1711,6 +1712,7 @@ One line each, for locating the full write-up in git history.
 | 28 | 08-30 | Harden-track step 4, the linear solve, implemented in `dfsphReference._jacobiSolve` (fixed source from `vEnter` + `aij_pj = Drho/Dt(a_p)` recomputed each iteration + 0.5 relaxation + `max(p,0)`, replacing the nonlinear re-summed fixed point). The first draft **diverged** (DF pressure doubling per iteration, 2e-3→8e9 in 32 iters) and the root cause was a **sign-convention bug, fixed and verified against the reference source, not derived**: SPlisHSPlasH's `delta` operator (difference-form `V_i Σ (v_i−v_j)·∇W`) is the *negative* of the continuum divergence, this codebase's scatter Divergence (inside `_drhodt`) *is* the continuum one (probed: a `div=+1` field gives `_drhodt≈−1.0` in the bulk), their `factor = 1/(Σ|∇W|²·h^k) > 0`, and both solves iterate `p −= 0.5(s−aij_pj)·factor`. With all three signs (source, `aij_pj`, step) corrected to the reference convention, the **physics is now right** (under-compressed column → p=0; over-compressed particles → positive p; compressing flow → positive p) but the Jacobi **does not converge inside its budget**: CD oscillates at the 64-iter cap (err ~0.1), DF diverges by step 2, NaN at step 6. Also found: their convergence metric is one-sided (compression-only `min(s−aij,0)`, with a `<20`-neighbour guard), not the two-sided `mean|resid|` used here — on an under-compressed state the two-sided metric can never reach `tol`, so both solves run to their caps regardless. Blocker: iteration contraction, next is the one-sided metric + a spectral-radius study (omega sweep / iteration budget). |
 | 29 | 08-30 | **Step 4 closed: the linear Jacobi now contracts.** Adopted the reference's one-sided compression-only convergence metric (`residuum = min(s−aij_pj, 0)`, `err = rho0·mean(−residuum)` over the fluid; the 2D <7-neighbour deficiency guard zeroes the DF source, warm start, and residuum — the CD solve has no guard; Part 28's "3D-only" note is corrected: the guard is two-sided in the reference, `<7` in 2D, on both the setup and the metric side of the DF solve) — the CD solve now exits in 2 iterations on the under-compressed step 1 instead of running to the 64-iter cap. Contraction study (`probe_dfsphReferenceContraction.py`, omega sweep × 256 iters, what-if trajectories re-driven from the exact production inputs inside the same coupling context): the reference's **omega = 0.5 is OUTSIDE this composed operator's Jacobi window** — step-1 DF grows ~1.2×/iteration asymptotically (→4e14 at 256 iters), step-2 DF →2.7e18; 0.4 is marginal (step-1 DF still grows, p→187); **omega = 0.3 decays in all four (step, mode) states** (step-1 DF 2.5e-2→6.4e-5, step-2 CD →2.4e-6, step-2 DF 42→1.1e-3); 0.1/0.05 decay first then **regrow late** (the clamp-limited fixed point / a weak mode). Window ≈ [0.2, 0.35] → it is a **matrix problem (the window), not a budget problem** — a bigger budget at 0.5 only grows more. Landed: omega = 0.3, both budgets → the reference's 100 (local override in `dfsphReference_step`, the `akinciBoundaryVolumeScale` pattern). Validated: `hydrostaticColumn` (nx=32) — the ratchet is gone; every solve converges (2-100 iters), pressures bounded (CD ≤ ~11, DF ≤ ~10), |v|max 0.01→1.3-1.7 bounded post-slump slosh over hundreds-to-~1100 steps; `staticBlob` A/B (nx=128, 30 steps) — **Part 27's regression is fixed**: max |v| 70.9/inf → 1.15 (alpha) / 1.28 (dfsph factor), centroidDrift ~1e-9 (the residual |v|~1.1 blob slosh is pre-existing — it was 70.9 before the factor change). 20/20 tests pass. Residual: a **late-time free-surface degradation** at t ≈ 1.1 s (step ~1150): 2 of 3 1500-step runs fail there (one degrades surface rho_min 0.6→0.31→0.21→0.14 over ~100 steps then blows up p→1.8e6, NaN at step 1160; the other collapses into a uniform rho-0.139 soup with inf velocities that the runner's NaN-based divergence check does not catch), 1 of 3 completes 1500 steps bounded — same code, same seed, so the failure details are GPU-non-deterministic. That failure mode is step 3's (free-surface gauge) territory — parked in Part 26 under the old nonlinear solver, now testable. |
 | 30 | 08-30 | **Step 3 re-run under the linear solve: the free-surface gauge is a measured negative.** Part 26's gauge implemented under the Part 29 linear Jacobi: the divergence solve holds `kappa^v` = 0 on the rows the case's own (dilated) `detectFreeSurface` flags (124–177 of 465 fluid rows, 27–38%, matching Part 26's ~27%) — the gauge rows join the reference-deficient rows in the source / warm-start / metric-residuum zeroing, and the pressure is **pinned to 0 at every iteration** so the carried field (and the next warm start) is 0 there and the final acceleration sees no surface-row pressure; DF solve only, module flag `FREE_SURFACE_GAUGE` (default off = the Part 29 baseline), `--gauge` in both probes. Also landed the one-line runner fix: the divergence check is `~isfinite` instead of `isnan` (`runner/runner.py`), so Part 29's inf-velocity soup now reports `diverged=True` — verified: one soup run stops at step 1279 with `non-finite velocities detected`. A/B (`hydrostaticColumn` nx=32, 1500 steps, 2 runs per arm, sequential and uncontended): the degradation's **onset is the same in all four runs** (~step 300–400) — the gauge does not delay or prevent the late-time failure; the gauge-on surface degrades **deeper and never recovers** (rho_min 0.15–0.21 persistent, runs end 0.23–0.24) while the gauge-off survivor recovers (0.25 at step 600 → 0.49 at 1500), and the gauge raises the bounded slosh ~30–40% (|v|max 1.8–2.0 vs 1.3–1.5). Blow-up count 1/2 (off) vs 0/2 (on) is inconclusive at n=2 against Part 29's 2/3 baseline. `staticBlob` unaffected (1.12 on / 1.16 off vs 1.28 baseline); 20/20 tests pass. The sign reproduces Part 26 (worse slump): with the surface rows out of the unknowns the sub-surface layer loses the support even a noisy `kappa^v` was providing. The gauge stays in the tree as an A/B toggle, default off; the recorded next lever is the reference's damped warm start against the full-`kappa` carry. |
+| 31 | 08-30 | **The reference's damped warm start against the full-`kappa` carry: null on onset and end-state, mildly favourable on surface depth, ~5x the CD iterations — and it exposed that the baseline's IC seed self-destructs.** Verified against `TimeStepDFSPH.cpp` (08-30; constants re-verified): the reference does not carry the solved pressure as-is — it stores `p·h²` (CD) / `p·h` (DF), dt-invariant, and seeds the next solve with `0.5·min(stored, cap)/h^k` GATED on the row being compressed (CD: `densityAdv > 1`; DF: clamped `delta > 0`; both are "the one-sided source is negative" in this code's sign convention), zero otherwise; caps in stored units CD 2.5e-4, DF 0.5. Landed as the `DAMPED_WARM_START` toggle (default off = the Part 29/30 full carry): the same dt-scaled carry, the `source < 0` gate evaluated after the exemption zeroing (deficient/pinned rows seed 0, as the reference's zeroed `densityAdv` does), step 1 seeds from 0 (the reference has no IC pressure); `--warmStart` in both probes. **Baseline defect the A/B exposed:** the full-carry arm's step-1 CD solve is seeded with the IC hydrostatic profile (carried max 6.15 at t=0, measured), but its two forced iterations (minIters = 2; the one-sided metric reports err = 0 on the under-compressed column) run the TWO-SIDED update `p = max(p − 0.3(s − aij_pj)·invDiag, 0)` with s > 0 everywhere, driving the seed to exactly 0 in 2 iters (DE line `it=2 err=0.00 p[+0.00,+0.00]`) — the baseline is effectively a cold start at step 1, the CD pressure is rebuilt from 0 over ~10 steps (DE p max 0 → 2.9 by step 10), and that is the initial slump's true origin; the gated damped seed is structurally immune (it exists only where the update adds). A/B (`hydrostaticColumn` nx=32, 1500 steps, 2 runs per arm, sequential and uncontended): **all four runs complete 1500 steps bounded — no blow-up in this batch, either arm** (0/4 vs Part 30's 1/4 and Part 29's 2/3; the blow-up face is batch-stochastic, not an arm effect). The degradation's **onset is the same in all four runs** (first rho_min < 0.50 at step 226–429) — the damped warm start does not delay or prevent the late-time failure. Surface depth is mildly favourable (rho_min low 0.259–0.260 vs 0.227–0.243; one damped run holds the mid-run surface at 0.685 at step 301 vs 0.52–0.57 for both full runs) but not conclusive at n=2; end-state comparable (damped 0.480–0.490 consistent; full 0.342/0.626 split); late slosh unchanged (|v|max 1.18–1.79 both arms). Cost: the CD solve runs ~5x more iterations (median 22 vs 4; 18–39 vs 2–18) because the capped/gated seed starts far from the standing field; the 100 budget still covers it (no CD budget hits). `staticBlob` (nx=128, 30 steps, faithful factor): max |v| 0.348 (damped) vs 1.08 (full), KE 0.0015 vs 0.0305, centroidDrift ~5–7e-9 — the damped seed tames the blob's residual slosh (Part 29's 1.15–1.28). 20/20 tests pass. Verdict: **not a fix** — the late-time degradation now survives three levers (Part 26 nonlinear gauge, Part 30 linear gauge, Part 31 damped warm start); the toggle ships off and the track is at a decision point (a targeted onset-mechanism study, or a return to the ranked plan items). |
 
 ---
 
@@ -3073,6 +3075,88 @@ failing baseline), and the `relaxLattice` free-surface guard in
    probe DI line, the `~isfinite` divergence check in `runner/runner.py`,
    and this record. The gauge is left in the tree (default off) so the A/B
    can be re-run cheaply; it is not on by default.
+
+   **Part 31 — the reference's damped warm start against the full-`kappa`
+   carry: null on onset and end-state, mildly favourable on surface depth,
+   ~5x the CD iterations — and a baseline defect it exposed.**
+
+   **What landed.** The reference's `USE_WARMSTART` / `USE_WARMSTART_V`,
+   verified against `TimeStepDFSPH.cpp` (08-30, constants re-verified): the
+   reference does not carry the solved pressure as-is — it stores `p*h**2`
+   (CD) / `p*h` (DF), dt-invariant (the `*= h**k` blocks at the end of each
+   solve), and seeds the next solve with `0.5*min(stored, cap)/h**k` GATED
+   on the row being compressed (CD: `densityAdv > 1`; DF: clamped
+   `delta > 0` — both are "the one-sided source is negative" in this code's
+   sign convention, `source = 1 - densityAdv` / `source = -delta`), zero
+   otherwise; caps in stored units CD 2.5e-4, DF 0.5. Implemented as the
+   `DAMPED_WARM_START` module flag (default False = the Part 29/30 full
+   carry) in `dfsphReference`: the carry block stores the same dt-scaled
+   field, `_jacobiSolve` seeds with `0.5*min(warmStart, cap)/opDt` where
+   `opDt` is `dt**2` (CD) / `dt` (DF), gated on `source < 0` evaluated
+   AFTER the exemption zeroing (deficient/pinned rows seed 0, exactly as the
+   reference's zeroed `densityAdv` does), and step 1 seeds from 0 (the
+   reference has no IC pressure at all; the case's raw hydrostatic profile
+   is not a dt-scaled field). `--warmStart` in both probes.
+
+   **Baseline defect the A/B exposed.** The full-carry arm's step-1 CD solve
+   IS seeded with the IC hydrostatic profile (carried max 6.15 at t=0,
+   measured by wrapping `dfsphReference_step`), but the solve's two forced
+   iterations (minIters = 2; the one-sided metric reports err = 0 on the
+   under-compressed column) run the TWO-SIDED update `p = max(p - 0.3(s -
+   aij_pj)*invDiag, 0)` with `s = 1 - rho/rho0 > 0` everywhere, driving the
+   seed to exactly 0 in 2 iterations (the DE line: `it=2 err=0.00
+   p[+0.00,+0.00]`). The baseline is therefore effectively a cold start at
+   step 1: the CD pressure is rebuilt from 0 over ~10 steps (DE p max 0 →
+   2.9 by step 10), and that — not merely "the one-sided pressure
+   responding to an initial state with no standing over-compression" as the
+   Part 29 docstring had it — is the initial slump's true origin. The gated
+   damped seed is structurally immune to the destruction: it exists only on
+   compressed rows, where the update adds. (The A/B itself is unaffected:
+   both arms share the identical step-1 state — CD p = 0, DF p built from 0
+   in 65-66 iters.)
+
+   **A/B (measured).** `hydrostaticColumn` (nx=32), 1500 steps, 2 runs per
+   arm, sequential and uncontended (12.5 min for the four-run chain):
+
+   | run | arm | outcome | rho_min low → end | onset (first < 0.50) | CD iters |
+   |---|---|---|---|---|---|
+   | 1 | full | completed 1500 | 0.243 → 0.626 (recovers) | step 368 | 2-17 (med 4) |
+   | 2 | damped | completed 1500 | 0.260 → 0.480 | step 429 | 20-38 (med 22) |
+   | 3 | full | completed 1500 | 0.227 → 0.342 (degraded end) | step 381 | 2-18 (med 4) |
+   | 4 | damped | completed 1500 | 0.259 → 0.490 | step 226 | 18-39 (med 22) |
+
+   Read: **no blow-up in this batch, in either arm** (0/4 vs Part 30's 1/4
+   and Part 29's 2/3) — the blow-up face is batch-stochastic, not an arm
+   effect. The degradation's **onset is the same in all four runs** (step
+   226-429) — the damped warm start does not delay or prevent the late-time
+   surface failure. Surface depth is mildly favourable (rho_min low 0.259-
+   0.260 vs 0.227-0.243; the damped mid-run surface holds higher — 0.685 at
+   step 301 in run 2 vs 0.521/0.572 for the two full runs — though run 4
+   matches the full arm at 0.532), not conclusive at n=2; end-state is
+   comparable (damped 0.480-0.490, consistent; full 0.342/0.626, split);
+   late slosh is unchanged (|v|max 1.18-1.79 in the last 300 steps of every
+   run, early-slump peak 1.92-2.00 in all four). Cost: the CD solve runs
+   ~5x more iterations (median 22 vs 4; range 18-39 vs 2-18) because the
+   capped/gated seed starts far from the standing field; the 100 budget
+   still covers it (no CD budget hits in any run).
+
+   **Also measured.** `staticBlob` (nx=128, 30 steps, faithful factor):
+   max |v| **0.348 (damped) vs 1.08 (full)**, KE 0.0015 vs 0.0305,
+   centroidDrift ~5-7e-9 — the damped seed tames the blob's residual slosh
+   (Part 29's 1.15-1.28, Part 30's 1.12-1.16) without destabilising it.
+   20/20 incompressible tests pass.
+
+   **Verdict / what remains.** Not a fix: the late-time surface degradation
+   now survives three levers (Part 26's gauge under the nonlinear solve,
+   Part 30's gauge under the linear solve, Part 31's damped warm start).
+   The toggle ships off (default = the Part 29/30 full carry); the
+   mildly-favourable depth trend and the blob-slosh taming are real but do
+   not justify the ~5x CD cost while the blocker stands. The harden track
+   is at a decision point: either a targeted mechanism study of the
+   degradation itself (what the ~step 200-450 onset does to the surface
+   rows — which rows, what the rho/velocity structure is at onset — before
+   another lever is tried), or a return to the ranked plan items (item 1:
+   the dam-break dissipation mechanism).
 4. ~~Give `dambreak` an incompressible `timestep` hook.~~ **Done (Part 20)** —
    landed as `dambreakTimestep`, active only under `--scheme divergenceFree`.
    Worth ~1.7x fewer steps at the case's own safe `cflFactor = 0.2`, not the
@@ -3134,12 +3218,25 @@ blocks the recovery the gauge-off survivor shows, and raises the slosh
 runner's `~isfinite` divergence check also landed, so the inf-velocity soup
 now reports `diverged=True`.
 
-**The immediate next step is the reference's damped warm start** against the
-current full-`kappa` carry (Part 30's recorded lever): SPlisHSPlasH
-warm-starts `0.5·min(κ, cap)·scale` gated on `densityAdv` instead of
-carrying the full field (CD cap 2.5e-4·invH², DF cap 0.5·invH — re-verify
-the constants against the source), which may cap the surface accumulation
-both mask experiments showed is the live driver of the late-time failure.
+**The damped warm start is done (Part 31) — also not a fix.** It was
+implemented as the `DAMPED_WARM_START` toggle (default off, `--warmStart` in
+both `dfsphReference` probes), with the constants re-verified against
+`TimeStepDFSPH.cpp` (CD cap 2.5e-4, DF cap 0.5, in stored `p·h^k` units; the
+carrier is now dt-scaled on this path and the step-1 IC pressure is zeroed,
+matching the reference's zero-start field). The 1500-step column A/B: same
+onset in all four runs (step 226-429), comparable end-state, mildly
+favourable surface depth at n=2 (rho_min low 0.259-0.260 vs 0.227-0.243,
+not conclusive), no blow-up in either arm (0/4 — the blow-up face is
+batch-stochastic), at ~5x the CD iterations (median 22 vs 4). The A/B also
+exposed a baseline defect: the full-carry arm's IC hydrostatic seed
+(max 6.15 at t=0) is driven to 0 by step 1's two forced CD iterations, so
+the baseline is effectively a cold start. The late-time surface degradation
+now survives **three levers** (Part 26 nonlinear gauge, Part 30 linear
+gauge, Part 31 damped warm start). The toggle ships off, and the harden
+track is at a decision point — either a targeted mechanism study of the
+~step 200-450 onset itself (what it does to the surface rows: which rows,
+rho/velocity structure at onset) before another lever is tried, or a return
+to the ranked items below.
 
 The other immediate step is **item 1: the dam-break dissipation mechanism** —
 the `nx` convergence of the incompressibility-cycle net on the dam break, now
