@@ -164,6 +164,38 @@ def initialConditions(ctx: RunContext, system) -> None:
         jitterAmount=ctx.param('jitter'))
     particles.velocities[:] = 0.0
 
+    # Optional rest-density calibration (Part 33, `dfsphReference` only in
+    # practice). `tgv`/`kolmogorovIncompressible` normalise the fluid mass so
+    # the sampled lattice integrates to `rho0` (DFSPH_FINDINGS.md §1.1); this
+    # case does not, so at `n_h = 4` the at-rest bulk reads ~0.95 rho0. That
+    # ~5% deficit is the constant-density solve's source `s = 1 - rho/rho0` at
+    # rest: on step 1 the two forced Jacobi iterations (minIters = 2) see
+    # `s > 0` everywhere and drive the IC hydrostatic seed to exactly 0
+    # (Part 31), so the reference scheme cold-starts and the column slumps --
+    # the slump feeds the free-slip vortex pair Part 32 could only damp at the
+    # wall. Calibrating the bulk to `rho0` makes `s ~ 0` at rest, so the seed
+    # survives and the column starts balanced. Off by default: `divergenceFree`
+    # is graded against the uncalibrated sampling and §1.1 shows calibration
+    # hurts the periodic cases; this is the bounded free-surface case where
+    # `rho = rho0` at rest is the physically correct target.
+    if ctx.param('calibrateRestDensity'):
+        from ..modules import computeDensities
+        dens = computeDensities(particles, ctx.config, ctx.schemeConfig, None)
+        fluid0 = particles.kinds == 0
+        y = particles.positions[:, 1]
+        dx = ctx.config.dx
+        ylo = y[fluid0].min()
+        yhi = y[fluid0].max()
+        bulk = fluid0 & (y > ylo + 3.0 * dx) & (y < yhi - 4.0 * dx)
+        ref = float(dens[bulk].median()) if int(bulk.sum()) >= 8 \
+            else float(dens[fluid0].median())
+        rho0 = ctx.schemeConfig.fluid.restDensity
+        particles.masses = particles.masses / ref * rho0
+        if ctx.spec.verbose:
+            check = computeDensities(particles, ctx.config, ctx.schemeConfig, None)
+            print(f'[hydrostaticColumn] rest-density calibration: bulk median '
+                  f'{ref:.4f} -> {float(check[bulk].median()):.4f} (rho0={rho0})')
+
     # Start from the exact at-rest state, not from zero pressure. The step's
     # projection warm-starts from 75% of the incoming pressure (see
     # `solveDivergenceFree`), so a zero start spends its first steps *building*
@@ -188,14 +220,15 @@ def initialConditions(ctx: RunContext, system) -> None:
     p = torch.clamp(p, min=0.0)
     if ctx.param('wallPressure') == 'zero':
         p = torch.where(fluid, p, torch.zeros_like(p))
-    # `dfsphReference` (DFSPH proper) carries a *non-negative* pressure/kappa
-    # and warm-starts its constant-density solve from it directly, so it wants
-    # the raw hydrostatic profile (0 at the surface, rho0 g H at the floor).
-    # `divergenceFree` (VD+PS) re-centres the fluid pressure to zero mean every
-    # iteration, so it is initialised at that shifted profile instead -- a raw
-    # start would open a fluid-vs-wall jump of the mean's size. See the module
-    # docstring.
-    if ctx.scheme is IncompressibleSPHScheme.dfsphReference:
+    # `dfsphReference` (DFSPH proper) and `iisph` both carry a *non-negative*
+    # pressure/kappa and warm-start their constant-density solve from it
+    # directly, so they want the raw hydrostatic profile (0 at the surface,
+    # rho0 g H at the floor). `divergenceFree` (VD+PS) re-centres the fluid
+    # pressure to zero mean every iteration, so it is initialised at that
+    # shifted profile instead -- a raw start would open a fluid-vs-wall jump
+    # of the mean's size. See the module docstring.
+    if ctx.scheme in (IncompressibleSPHScheme.dfsphReference,
+                      IncompressibleSPHScheme.iisph):
         particles.pressures = p
     else:
         particles.pressures = p - p[fluid].mean()
@@ -313,6 +346,11 @@ hydrostaticColumnCase = registerCase(Case(
         gravityDirection=[0.0, -1.0],
         bandWidth=16.0,
         shifting=False,
+        # Part 33: normalise the fluid mass so the at-rest bulk summation
+        # density lands on `rho0` (see `initialConditions`). Off keeps the
+        # historical sampling; `dfsphReference` probes turn it on to stop the
+        # step-1 IC-seed cold start.
+        calibrateRestDensity=False,
         # Lattice de-correlation (`shuffleParticles`, `shiftIters=0`); see
         # `initialConditions` for why the constant-density pre-relaxation
         # `tgv`/`shearWave` use is not run here.

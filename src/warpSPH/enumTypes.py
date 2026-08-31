@@ -68,6 +68,13 @@ class IncompressibleSPHScheme(Enum):
     #: comparison for the hydrostatic-column failure -- see
     #: `DFSPH_IMPROVEMENT_PLAN.md` Part 23 and `schemes/dfsphReference.py`.
     dfsphReference = 1
+    #: Plain IISPH (Ihmsen et al. 2014): a single constant-density projection
+    #: per step, applied as a velocity impulse -- no divergence-free pass, no
+    #: VD+PS position shift. Shares `dfsphReference`'s body with the divergence
+    #: solve off (`iisph_step`). Part 33 measured it as the first scheme in the
+    #: codebase to hold `hydrostaticColumn`; it also holds `staticBlob` where
+    #: the two-solve `dfsphReference` diverges.
+    iisph = 2
 
 # @torch.jit.script
 class WaveEquationScheme(Enum):
