@@ -17,10 +17,11 @@ DFSPH proper applies **both** corrections to the *velocity*, as warm-started
 pressure impulses `v -= dt a_p(kappa)`. That is what lets the pressure field
 accumulate the hydrostatic profile and hold the column. This module is that
 scheme, kept deliberately minimal and self-contained: no VD projection, no
-Eq.-17 position-shift/resample, no free-surface gauge and no damped warm
-start by default (the Part 30 `FREE_SURFACE_GAUGE` and Part 31
-`DAMPED_WARM_START` toggles are both off), no `minShift`, no `rhoStar`
-0.9 clamp.
+Eq.-17 position-shift/resample, no free-surface gauge, no damped warm
+start, and no XSPH velocity filter by default (the Part 30
+`FREE_SURFACE_GAUGE`, the Part 31 `DAMPED_WARM_START`, and the Part 32
+`XSPH_FLUID_EPSILON` / `XSPH_BOUNDARY_EPSILON` toggles are all off), no
+`minShift`, no `rhoStar` 0.9 clamp.
 
 STATUS (troubleshooting artifact, not a landed solver). Structurally complete
 and it demonstrates the thesis directly: with the velocity warmstart + a
@@ -47,8 +48,19 @@ the full-kappa carry -- also a measured negative (onset unchanged, surface
 depth mildly favourable at n=2, ~5x the CD iterations), and it exposed that
 the baseline's IC seed self-destructs at step 1 (the two forced CD
 iterations drive the hydrostatic seed to 0). The toggle ships off; the
-late-time degradation now survives three levers (Parts 26, 30, 31) and the
-harden track is at a decision point.
+late-time degradation now survived three levers (Parts 26, 30, 31). Part 32
+resolved the decision point with a run video: the post-slump motion is the
+classic free-slip effect (particles slide freely down the walls, deflect
+along the floor, set up two counter-rotating vortices), and the code
+confirms the wall is *exactly* free-slip (the deltaSPH viscosity term is
+normal-only in both the alpha and the nu branch, and the case runs
+`nu = 0`), so nothing decays the slosh. The reference's XSPH velocity
+filter is now the `XSPH_FLUID_EPSILON` / `XSPH_BOUNDARY_EPSILON` toggles
+(default 0.0): wall-only drag (boundary epsilon = 0.1) is the first lever
+to hold the late-time surface (rho_min ends ~0.5 vs ~0.23 baseline) but
+does not decay the slosh, and fluid-only XSPH is a measured negative
+(earlier, deeper degradation; diverges ~step 1200). The remaining target
+is the slosh's origin, the initial collapse.
 The runner's divergence check is now `~isfinite` (not `isnan`), so the
 inf-velocity soup reports `diverged=True`. It is **not** yet a landed
 general scheme.
@@ -93,15 +105,23 @@ Harden-track progress (`DFSPH_IMPROVEMENT_PLAN.md` Parts 24-25):
   velocities); Part 30's gauge re-run did not close it, and Part 31's
   reference damped warm start (`DAMPED_WARM_START` toggle, default off)
   did not either (onset unchanged, depth mildly favourable at n=2, ~5x
-  the CD iterations) -- the late-time degradation now survives three
-  levers and the track is at a decision point (a targeted onset-mechanism
-  study, or a return to the ranked plan items).
+  the CD iterations). Part 32 resolved the decision point with a run
+  video: the post-slump motion is the classic free-slip effect (two
+  counter-rotating vortices fed by wall sliding + floor deflection), the
+  code confirms the wall is exactly free-slip (normal-only viscosity
+  term, `nu = 0`), and the reference's XSPH velocity filter
+  (`XSPH_FLUID_EPSILON` / `XSPH_BOUNDARY_EPSILON`, default 0.0) is the
+  first lever to hold the late-time surface (wall-only drag, boundary
+  epsilon = 0.1: rho_min ends ~0.5 vs ~0.23) -- without decaying the
+  slosh, and with fluid-only XSPH a measured negative (diverges ~step
+  1200). The remaining target is the slosh's origin, the initial
+  collapse.
 
 Per-step algorithm (SPlisHSPlasH order):
 
  1. neighbourhood, summation density (boundary particles included)
- 2. non-pressure accelerations -- gravity + physical viscosity + forcing --
-    into `v` : `v += dt a_nonp`
+ 2. non-pressure accelerations -- gravity + physical viscosity + forcing
+    + XSPH (off by default) -- into `v` : `v += dt a_nonp`
  3. **constantDensitySolver** (`correctDensityError`): warm-start `kappa` from
     the carried field; relaxed-Jacobi solve of `A p = rho0 - rho*` with the
     one-sided (compression-only) source; `v += dt a_p`
@@ -132,7 +152,8 @@ from typing import Any
 
 import torch
 
-from warpSPHCore import SupportScheme, buildVerletList
+from warpSPHCore import (OperationProperties, SupportScheme, WarpOperation,
+                         buildVerletList, warpOperation)
 
 from ..configurations import BoundaryPressureMode
 from ..modules.boundaryConditions import (computeForcing, enforceDirichlet,
@@ -148,7 +169,7 @@ from ..modules.surfaceDetection import detectFreeSurface
 from ..modules.util import countNeighbors
 from ..systems.incompressible import IncompressibleSystemUpdate
 
-__all__ = ['dfsphReference_step']
+__all__ = ['dfsphReference_step', 'iisph_step']
 
 # Part 30 (harden-track step 3): the free-surface `kappa^v` gauge, re-run
 # under the Part 29 linear solve. When True, the divergence solve holds
@@ -173,6 +194,36 @@ FREE_SURFACE_GAUGE = False
 # DF 0.5. Default False = the full carry; the probes (`--warmStart`)
 # toggle it for the A/B.
 DAMPED_WARM_START = False
+
+# Part 32: the reference's XSPH velocity filter (SPlisHSPlasH `XSPH.cpp`),
+# the only tangential-stress mechanism the scheme family has. The deltaSPH
+# viscosity term (`wp_viscosityDelta.py`) projects each pair's relative
+# velocity onto the pair axis and clamps it to the approaching case --
+# purely normal, compression-only, in BOTH the `alpha` and the `nu`
+# branch -- so at this case's `nu = 0` / `alpha = 0.01` there is no
+# tangential stress anywhere: the wall is exactly free-slip and the bulk
+# vorticity is undamped. Measured consequence: the column's post-slump
+# slosh is a wall-fed counter-rotating vortex pair that the pressure solve
+# can bound but nothing can decay, and the pair keeps working the free
+# surface (the late-time degradation Parts 26/30/31 could not close). The
+# reference's XSPH is `a_i -= (1/h) eps sum_j (m_j/rho_j) (v_i - v_j)
+# W(x_i - x_j)` over fluid AND static-boundary neighbours (its boundary
+# branch uses the boundary volume; in this codebase the boundary's
+# `m/rho` IS that volume), applied as a non-pressure acceleration -- the
+# boundary's v = 0 is what makes it a wall drag. Coefficients default 0.0
+# = the reference default (no shipped SPlisHSPlasH scene enables XSPH
+# either); the probes' `--xspH` / `--xspHBoundary` toggle them for the A/B.
+XSPH_FLUID_EPSILON = 0.0
+XSPH_BOUNDARY_EPSILON = 0.0
+
+# Part 33: drop the divergence-free pass and run only the constant-density
+# solve as a velocity impulse -- i.e. plain IISPH ([I], Ihmsen et al. 2014,
+# Alg. 1). The DF Jacobi has been the fragile component (Parts 26/28/29, the
+# Part 33 rest-density-calibration blow-up), and `hydrostaticColumn` is
+# IISPH's own benchmark, so this both isolates the instability and stands as
+# the missing [I] baseline next to `divergenceFree` (VD+PS) and the full
+# DFSPH path. Default False = the two-solve DFSPH order.
+SKIP_DIVERGENCE_SOLVE = False
 
 
 def _rebuildAdjacency(state: Any, system: Any, config: Any):
@@ -222,6 +273,34 @@ def _pressureAccel(state, config, adjacency, p, fluidMask):
     # the sum (default `OperationDirection.AllToAll`), so this only touches the
     # output rows.
     return torch.where(fluidMask.unsqueeze(-1), a_p, torch.zeros_like(a_p))
+
+
+def _xspH(state: Any, config: Any, schemeConfig: Any, adjacency: Any,
+          fluidMask: torch.Tensor) -> torch.Tensor:
+    """The reference's XSPH velocity filter, as a non-pressure acceleration
+    (see the `XSPH_FLUID_EPSILON` note). `warpOperation(Interpolate)`
+    computes `sum_j f_j (m_j/rho_j) W_ij` over all neighbours (fluid +
+    static boundary, `AllToAll`), so the reference's per-epsilon sums
+    collapse to two interpolations with the per-kind epsilon folded into
+    the reference values: with `c_j` = `XSPH_FLUID_EPSILON` /
+    `XSPH_BOUNDARY_EPSILON` by kind,
+    `- (1/h) sum_j c_j (m_j/rho_j) (v_i - v_j) W_ij`
+    = `-(1/h) (interp(c v) - v_i interp(c))`. The boundary takes no
+    reaction (static, like the rest of this scheme); the output is
+    masked to the fluid rows."""
+    c = torch.where(fluidMask,
+                    torch.full_like(state.densities, XSPH_FLUID_EPSILON),
+                    torch.full_like(state.densities, XSPH_BOUNDARY_EPSILON))
+    props = OperationProperties(
+        kernel=config.kernel, operation=WarpOperation.Interpolate,
+        supportMode=SupportScheme.SuperSymmetric)
+    cv = warpOperation(state, props, domain=config.domain,
+                       referenceValues=state.velocities * c.unsqueeze(-1),
+                       adjacency=adjacency)
+    cc = warpOperation(state, props, domain=config.domain,
+                       referenceValues=c, adjacency=adjacency)
+    a = -(cv - state.velocities * cc.unsqueeze(-1)) / state.supports.unsqueeze(-1)
+    return torch.where(fluidMask.unsqueeze(-1), a, torch.zeros_like(a))
 
 
 def _jacobiSolve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
@@ -420,7 +499,12 @@ def _jacobiSolve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
 
 
 def dfsphReference_step(system: Any, dt: float, config: Any, schemeConfig: Any,
-                        verbose: bool = False):
+                        verbose: bool = False, skipDivergence: bool = None):
+    # `skipDivergence` overrides the module flag when passed explicitly; the
+    # `iisph` scheme (see `iisph_step`) uses this to select plain IISPH
+    # without touching the process-global toggle.
+    if skipDivergence is None:
+        skipDivergence = SKIP_DIVERGENCE_SOLVE
     st = system.state
     fluid = st.kinds == 0
     fcol = fluid.unsqueeze(-1)
@@ -482,6 +566,10 @@ def dfsphReference_step(system: Any, dt: float, config: Any, schemeConfig: Any,
     enforceDirichlet(system, system.t, dt, config, schemeConfig)
     a_nonp = computeGravity(st, config, schemeConfig, adjacency)
     a_nonp = a_nonp + computeVelocityDiffusion(st, config, schemeConfig, adjacency)
+    if XSPH_FLUID_EPSILON != 0.0 or XSPH_BOUNDARY_EPSILON != 0.0:
+        # Part 32: the reference's XSPH velocity filter (module flag note) --
+        # the only tangential-stress term in the scheme family.
+        a_nonp = a_nonp + _xspH(st, config, schemeConfig, adjacency, fluid)
     forcing = computeForcing(system, dt, system.t, config, schemeConfig)
     a_nonp = a_nonp + forcing / st.masses.view(-1, 1)
     st.velocities = st.velocities + dt * torch.where(fcol, a_nonp, torch.zeros_like(a_nonp))
@@ -518,21 +606,33 @@ def dfsphReference_step(system: Any, dt: float, config: Any, schemeConfig: Any,
     # case leaves surface detection inactive (the wrapper returns an
     # all-false mask).
     surfaceMask = None
-    if FREE_SURFACE_GAUGE:
-        _, fs, _, _ = detectFreeSurface(
-            st, config, schemeConfig, schemeConfig.surfaceDetectionConfig,
-            adjacency, returnNormals=False)
-        surfaceMask = fluid & (fs > 0.5)
-    vEnterDf = st.velocities.clone()
-    with applyConsistentCoupling(st, config, schemeConfig, adjacency,
-                                 BoundaryPressureMode.consistent):
-        a_p_df, kappaV, nDf, errDf = _jacobiSolve(
-            st, config, schemeConfig, adjacency, vEnter=vEnterDf, rho0=rho0,
-            warmStart=kappaV, opDt=dt, solverCfg=dfCfg,
-            minIters=max(dfCfg.minIterations, 1), fluidMask=fluid,
-            mode='divergence', surfaceMask=surfaceMask,
-            warmStartDamped=DAMPED_WARM_START)
-    st.velocities = vEnterDf + dt * a_p_df
+    if skipDivergence:
+        # Part 33: run only the constant-density solve, applied as a velocity
+        # impulse -- i.e. plain IISPH ([I] Alg. 1: one density projection per
+        # step, no divergence-free pass). The DF Jacobi has been the fragile
+        # component through Parts 26/28/29 (and the Part 33 calibration test),
+        # and the hydrostatic column is IISPH's home benchmark, so this
+        # isolates "is the DF solve the instability" and doubles as the
+        # missing [I] baseline. `kappaV` is left untouched (no DF warm start
+        # to carry).
+        a_p_df = torch.zeros_like(st.velocities)
+        nDf, errDf = 0, 0.0
+    else:
+        if FREE_SURFACE_GAUGE:
+            _, fs, _, _ = detectFreeSurface(
+                st, config, schemeConfig, schemeConfig.surfaceDetectionConfig,
+                adjacency, returnNormals=False)
+            surfaceMask = fluid & (fs > 0.5)
+        vEnterDf = st.velocities.clone()
+        with applyConsistentCoupling(st, config, schemeConfig, adjacency,
+                                     BoundaryPressureMode.consistent):
+            a_p_df, kappaV, nDf, errDf = _jacobiSolve(
+                st, config, schemeConfig, adjacency, vEnter=vEnterDf, rho0=rho0,
+                warmStart=kappaV, opDt=dt, solverCfg=dfCfg,
+                minIters=max(dfCfg.minIterations, 1), fluidMask=fluid,
+                mode='divergence', surfaceMask=surfaceMask,
+                warmStartDamped=DAMPED_WARM_START)
+        st.velocities = vEnterDf + dt * a_p_df
 
     # --- 7. carry kappa / kappa^v for the next step's warm start --------
     if DAMPED_WARM_START:
@@ -565,3 +665,28 @@ def dfsphReference_step(system: Any, dt: float, config: Any, schemeConfig: Any,
         passive=torch.zeros_like(st.densities, dtype=torch.bool))
     enforceUpdates(update, system, dt, system.t, config, schemeConfig)
     return update, adjacency, st, ([], [errCd, errDf])
+
+
+def iisph_step(system: Any, dt: float, config: Any, schemeConfig: Any,
+               verbose: bool = False):
+    """Plain IISPH (Ihmsen et al. 2014, *Implicit Incompressible SPH*):
+    a single constant-density projection per step, applied as a velocity
+    impulse -- no divergence-free pass, no VD+PS position shift.
+
+    Shares `dfsphReference`'s step body with the divergence solve switched
+    off (`skipDivergence=True`). The constant-density Jacobi already uses
+    `computeAlpha`'s / `computeDFSPHFactor`'s IISPH diagonal `a_ii` and the
+    one-sided `rho0 - rho_adv` source, so this *is* [I]'s Algorithm 1.
+
+    Part 33: this is the first configuration in the codebase to hold
+    `hydrostaticColumn` -- stable geometry, stable bulk density, correct
+    hydrostatic pressure gradient (`pressureSlopeRatio` ~ 1.0) over 2000
+    steps -- and it holds `staticBlob` where the two-solve `dfsphReference`
+    diverges. The divergence-free Jacobi was the catastrophic-instability
+    source (the inf-velocity soup of Parts 29/30); removing it leaves a
+    bounded, undamped free-slip bulk slosh and cosmetic ballistic surface
+    spray, neither of which diverges or degrades. `DFSPH_IMPROVEMENT_PLAN.md`
+    Part 33.
+    """
+    return dfsphReference_step(system, dt, config, schemeConfig,
+                               verbose=verbose, skipDivergence=True)

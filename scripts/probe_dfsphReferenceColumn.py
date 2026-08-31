@@ -49,6 +49,14 @@ args.add_argument('--warmStart', action='store_true',
                   help='reference damped warm start (Part 31): seed each '
                        'solve with 0.5*min(carried, cap)/dt**k gated on the '
                        'row being compressed, instead of the full-kappa carry')
+args.add_argument('--xspH', type=float, default=0.0,
+                  help='reference XSPH fluid coefficient (Part 32): the '
+                       'velocity filter that damps kernel-scale shear in '
+                       'the bulk (0.0 = off)')
+args.add_argument('--xspHBoundary', type=float, default=0.0,
+                  help='reference XSPH boundary coefficient (Part 32): the '
+                       'wall drag -- damps tangential sliding against the '
+                       'static boundary (0.0 = off)')
 args = args.parse_args()
 
 _orig_js = ref._jacobiSolve
@@ -98,6 +106,8 @@ def _run(scale, steps, verbose):
     ref._jacobiSolve = _spy_js if verbose else _orig_js
     ref.FREE_SURFACE_GAUGE = args.gauge
     ref.DAMPED_WARM_START = args.warmStart
+    ref.XSPH_FLUID_EPSILON = args.xspH
+    ref.XSPH_BOUNDARY_EPSILON = args.xspHBoundary
     try:
         return run(hydrostaticColumn.hydrostaticColumnCase, nx=args.nx, nSteps=steps,
                    scheme='dfsphReference', quiet=True, plot=False, store=False,
@@ -107,6 +117,8 @@ def _run(scale, steps, verbose):
         ref._jacobiSolve = _orig_js
         ref.FREE_SURFACE_GAUGE = False
         ref.DAMPED_WARM_START = False
+        ref.XSPH_FLUID_EPSILON = 0.0
+        ref.XSPH_BOUNDARY_EPSILON = 0.0
 
 
 if args.sweep:
@@ -124,6 +136,7 @@ else:
     print(f'dfsphReference  hydrostaticColumn  nx={args.nx}  '
           f'scale={"scheme default (2.0)" if args.scale is None else args.scale}  '
           f'gauge={"on" if args.gauge else "off"}  '
-          f'warmStart={"damped" if args.warmStart else "full"}')
+          f'warmStart={"damped" if args.warmStart else "full"}  '
+          f'xspH={args.xspH:g}  xspHBoundary={args.xspHBoundary:g}')
     r = _run(args.scale, args.steps, verbose=True)
     print(f'diverged={r.diverged}')
