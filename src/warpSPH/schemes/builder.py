@@ -169,6 +169,27 @@ def _dfsphReference() -> SchemeBundle:
     )
 
 
+def _iisph() -> SchemeBundle:
+    # Plain IISPH ([I], Ihmsen et al. 2014): shares `dfsphReference`'s
+    # incompressible state/config/update, codecs and `DFSPHReferenceSystem`
+    # (the whole time integration happens inside the step), differing only in
+    # the step function -- the divergence-free pass is switched off. See
+    # `schemes/dfsphReference.py::iisph_step` and DFSPH_IMPROVEMENT_PLAN.md
+    # Part 33.
+    from .dfsphReference import iisph_step
+    from ..systems.incompressible import (DFSPHReferenceSystem, IncompressibleState,
+                                          IncompressibleSystemUpdate)
+    return SchemeBundle(
+        SimulationSystem=DFSPHReferenceSystem,
+        SimulationState=IncompressibleState,
+        SimulationConfig=IncompressibleSPHConfig,
+        SimulationUpdate=IncompressibleSystemUpdate,
+        stepFunction=iisph_step,
+        exportFunction=incompressibleConfigToDict,
+        importFunction=dictToIncompressibleSPHConfig,
+    )
+
+
 def _waveEquation() -> SchemeBundle:
     return SchemeBundle(
         SimulationSystem=WaveSystemv3,
@@ -189,6 +210,7 @@ _SCHEMES = {
     WeaklyCompressibleSPHScheme.deltaSPH: _deltaSPH,
     IncompressibleSPHScheme.divergenceFree: _divergenceFree,
     IncompressibleSPHScheme.dfsphReference: _dfsphReference,
+    IncompressibleSPHScheme.iisph: _iisph,
     WaveEquationScheme.waveEquation: _waveEquation,
 }
 
