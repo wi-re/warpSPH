@@ -63,6 +63,15 @@ found it injects energy on `tgv`, viable only near-quiescent), and
 
 ## Active track — `omniIncompressible` on `randomFlowIncompressible --bounded`
 
+**Status (Part 42): the divergence is fixed; the open piece is the
+free-surface CD solve.** `omniIncompressible` now *holds* the closed box —
+`WALL_PRESSURE_MODE = 'shepard'` (was `'mls'`, which diverged the sheared
+case) + `CD_SOURCE_PROJECT = 'auto'` (the pure-Neumann compatibility
+projection that makes the closed-box constant-density Jacobi actually
+converge). What remains is that the *free-surface* CD Jacobi still stalls
+(§1.7) — the runs hold only because the un-converged impulse decays. See
+**"Next, in order"** at the end of this section.
+
 **Why.** `omniIncompressible` + the Part 41 MLS wall pressure holds the
 *quiescent* `hydrostaticColumn` at nx=128, but **diverges on the wall-bounded
 *sheared* flow** `randomFlowIncompressible --bounded` (Part 42): it detonates on
@@ -177,6 +186,44 @@ ranked queue item 4/9):
 - feeding `p_b` into `alpha` (not just `a_p`).
 Not a blocker: `hydrostaticColumn` / `dambreak` currently *hold* — this is a
 §1.7 quality issue (open since Part 15), not a failure.
+
+**Next, in order.**
+
+1. **The free-surface CD solve — the live thread.** Try a **non-symmetric
+   Krylov** (BiCGStab, then GMRES; both in `modules/incompressible/krylov.py`)
+   on `omniIncompressible`'s constant-density `A p = s` for
+   `hydrostaticColumn` / `dambreak`, on the `CD_SOURCE_PROJECT`-handled (and
+   `p ≥ 0`-unclamped) system. Build the matvec from the existing `accel` /
+   `_divergence` closures in `_solve` (add a `CD_SOLVER ∈ {'jacobi',
+   'bicgstab', 'gmres'}` module flag). Grade: iteration count to a real
+   tolerance, and whether the run improves (tighter density band, less
+   over-dissipation) vs the capped Jacobi. If it lands, it is also the
+   divergence-pass any `iisph`-based general scheme needs (item 4/9). If
+   non-symmetric Krylov also stalls, the near-wall block is the problem →
+   `band2018pb` (item 0 sub-item) or symmetrise `A` via
+   `computePressureShiftIISPH`.
+2. **Grade `omniIncompressible` (shepard + auto) vs `divergenceFree` on
+   `randomFlowIncompressible --bounded`** — the density band and the energy
+   budget. It now *holds*, but KE decays to ~10–15 % over 300 steps where
+   `divergenceFree` keeps ~90 %. Is the over-dissipation the `XSPH_FLUID =
+   0.05` filter (try 0), the un-converged free-surface... no, it is a closed
+   box, the CD solve converges — so the loss is the XSPH filter and/or the
+   3-iter divergence pass. Pin it down; decide if `omniIncompressible` is a
+   *usable* closed-box scheme or only a non-diverging one.
+3. **`omniIncompressible` full `dambreak` grade** (item 0 leftover) and
+   **`dfsphReference` on `randomFlowIncompressible --bounded`** (untested —
+   does the two-solve path diverge there like `iisph`/`omniIncompressible`
+   did before Part 42?).
+4. **The shear-carrying Morris viscosity term** (item 0b TODO, independent of
+   the CD-solve work) — a real `DiffusionParameters`-wired laminar viscosity
+   that carries tangential stress, so `hydrostaticColumn`'s `wallBC=noSlip` +
+   `nu` gives a clean no-slip wall (Part 42 found the stock `viscidNu` term is
+   normal-projected). New `ViscosityTerms` value + `deltaSPH` regression pass;
+   fix `wp_viscosityDelta.py`'s docstring.
+5. **Full-suite validation of Parts 34–42** — `bash scripts/run_tests.sh` +
+   `run_sweep.py` (this session ran `gradcheck_incompressible` + the
+   `tgv/shearWave/dambreak` physics subset + Krylov green; the plan's
+   Known-open flags Parts 35–38 as not full-suite-validated).
 
 ---
 
