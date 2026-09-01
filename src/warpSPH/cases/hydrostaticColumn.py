@@ -40,6 +40,16 @@ surface (where the profile legitimately departs from the straight line, since
 the surface is where the pressure meets its gauge level) and a `wallMargin`
 off the walls (where the boundary treatment, not the bulk physics, rules).
 
+**The density axis is graded spray-robust.** Under `--scheme iisph` (and to a
+lesser extent the others) the bulk slosh throws 1-3 fluid particles 1-3 dx
+above the free surface; isolated, they read `rho` ~0.14-0.3 by kernel
+deficiency and dominate the plain `minDensity`, which then tracks cosmetic
+ballistic spray rather than the column (DFSPH_FINDINGS.md Part 33/34). So the
+diagnostics also report `densityP05` (5th percentile of the fluid density) and
+`embeddedMinDensity` (min over fluid rows more than 1 dx below the
+95th-percentile surface height) -- both grade the column body, and both hold
+~0.9 for a run `iisph` completes clean while `minDensity` swings 0.2-0.6.
+
 **One caveat on the pressure axis.** The stored pressure is the
 divergence-free solve's (the step's projection), which `solveDivergenceFree`
 re-centres to zero mean over the fluid every iteration -- a pure gauge choice,
@@ -100,6 +110,7 @@ from typing import Any, Dict
 import torch
 
 from ..configurations.moduleConfigurations.gravity import GravityType
+from ..configurations.region import BCType
 from ..enumTypes import IncompressibleSPHScheme
 from ..modules import shuffleParticles
 from ..runner import Case, RunContext, caseMain, registerCase
@@ -150,8 +161,14 @@ def configureScheme(ctx: RunContext) -> None:
 
 
 def buildSystem(ctx: RunContext):
+    # `wallBC` selects the container's boundary condition: `freeSlip` (the
+    # historical default -- reflect the normal component, no tangential drag)
+    # or `noSlip` (mirror the fluid velocity -> a real viscous wall once
+    # `nu > 0`, `DFSPH_FINDINGS.md` 1.14). Both go through
+    # `computeBoundaryVelocities`; the schemes pick it up in step 2.
+    wallBC = BCType[ctx.param('wallBC')]
     regions = [fluidRegion(ctx, columnSdf(ctx)),
-               boundaryRegion(ctx, domainBoundarySdf(ctx))]
+               boundaryRegion(ctx, domainBoundarySdf(ctx), kind=wallBC)]
     return buildRegionSystem(ctx, regions)
 
 
@@ -252,6 +269,25 @@ def hydrostaticDiagnostics(ctx: RunContext, state) -> Dict[str, float]:
         'densityStd': densities.std().detach().cpu().item(),
     }
 
+    # Spray-robust density FOMs (plan item 1 / Part 33). The plain `minDensity`
+    # on this case is dominated by 1-3 fluid particles thrown 1-3 dx above the
+    # free surface by the bulk slosh: isolated, reading low by kernel deficiency,
+    # never the same particles two samples running (measured in
+    # `probe_dfsphReferenceColumnSurface.py`). Cosmetic ballistic spray, not
+    # structural loss. These two grade the column body instead:
+    #   `densityP05`         -- 5th percentile of the fluid density, so a
+    #                           handful of low outliers cannot move it;
+    #   `embeddedMinDensity` -- the min over fluid rows more than 1 dx below the
+    #                           95th-percentile surface height, i.e. with the
+    #                           ballistic skin removed outright.
+    dx = ctx.config.dx
+    fluidY = positions[:, 1]
+    surfY95 = torch.quantile(fluidY, 0.95)
+    d['densityP05'] = torch.quantile(densities, 0.05).detach().cpu().item()
+    embedded = fluidY < surfY95 - dx
+    if bool(embedded.any()):
+        d['embeddedMinDensity'] = densities[embedded].min().detach().cpu().item()
+
     initial = ctx.scratch.get('initialPositions')
     if initial is not None:
         disp = positions - initial[fluid]
@@ -351,6 +387,10 @@ hydrostaticColumnCase = registerCase(Case(
         # historical sampling; `dfsphReference` probes turn it on to stop the
         # step-1 IC-seed cold start.
         calibrateRestDensity=False,
+        # Container boundary condition (`BCType` name): `freeSlip` (default,
+        # historical) or `noSlip` (a viscous no-slip wall once `nu > 0` --
+        # decays the free-slip bulk slosh, `DFSPH_FINDINGS.md` 1.14).
+        wallBC='freeSlip',
         # Lattice de-correlation (`shuffleParticles`, `shiftIters=0`); see
         # `initialConditions` for why the constant-density pre-relaxation
         # `tgv`/`shearWave` use is not run here.

@@ -120,8 +120,10 @@ Harden-track progress (`DFSPH_IMPROVEMENT_PLAN.md` Parts 24-25):
 Per-step algorithm (SPlisHSPlasH order):
 
  1. neighbourhood, summation density (boundary particles included)
- 2. non-pressure accelerations -- gravity + physical viscosity + forcing
-    + XSPH (off by default) -- into `v` : `v += dt a_nonp`
+ 2. extend the boundary velocity field per `BCType` (`computeBoundaryVelocities`);
+    non-pressure accelerations -- gravity + physical viscosity
+    (`computeVelocityDiffusion`, `viscidNu`) + forcing + XSPH (off by
+    default) -- into `v` : `v += dt a_nonp`
  3. **constantDensitySolver** (`correctDensityError`): warm-start `kappa` from
     the carried field; relaxed-Jacobi solve of `A p = rho0 - rho*` with the
     one-sided (compression-only) source; `v += dt a_p`
@@ -162,7 +164,9 @@ from ..modules.deltaSPH import computeVelocityDiffusion
 from ..modules.density import computeDensities
 from ..modules.gravity import computeGravity
 from ..modules.incompressible.consistent import applyConsistentCoupling
+from ..modules.incompressible.wallPressure import wallPressureExtrapolation
 from ..modules.incompressible.wp_dfsph_factor import computeDFSPHFactor
+from ..modules.mdbc import computeBoundaryVelocities
 from ..modules.momentum.incompressible import computeMomentumIncompressible
 from ..modules.pressure.iisph import computePressureAccelIISPH
 from ..modules.surfaceDetection import detectFreeSurface
@@ -216,6 +220,18 @@ DAMPED_WARM_START = False
 XSPH_FLUID_EPSILON = 0.0
 XSPH_BOUNDARY_EPSILON = 0.0
 
+# Physical (laminar) viscosity for this scheme family is the ordinary path:
+# `computeVelocityDiffusion` (already called in step 2, driven by
+# `schemeConfig.diffusionParams.viscidNu` / `inviscid`) plus the boundary
+# velocity field extended by `computeBoundaryVelocities` (also step 2, driven
+# by each boundary region's `BCType` -- `freeSlip` reflection / `noSlip`
+# mirror / `extended` MLS -- exactly as `schemes/deltaSPH.py` and
+# `schemes/dfsph.py` do). Part 39's `_physViscosity` + `PHYS_VISCOSITY_*`
+# module globals (a hand-rolled Brookshaw Laplacian and a hand-rolled Adami
+# no-slip mirror) duplicated that machinery and were removed; the wall no-slip
+# is `BCType.noSlip` on the boundary region (`hydrostaticColumn`'s `wallBC`
+# param). See `DFSPH_FINDINGS.md` 1.14 / Part 39.
+
 # Part 33: drop the divergence-free pass and run only the constant-density
 # solve as a velocity impulse -- i.e. plain IISPH ([I], Ihmsen et al. 2014,
 # Alg. 1). The DF Jacobi has been the fragile component (Parts 26/28/29, the
@@ -224,6 +240,23 @@ XSPH_BOUNDARY_EPSILON = 0.0
 # the missing [I] baseline next to `divergenceFree` (VD+PS) and the full
 # DFSPH path. Default False = the two-solve DFSPH order.
 SKIP_DIVERGENCE_SOLVE = False
+
+#: Per-iterate wall-pressure closure (Part 41), the same fix
+#: `omniIncompressible` ships by default. The composed Jacobi puts the wall
+#: into `alpha` only (`applyConsistentCoupling`'s Akinci band) and runs the
+#: pressure accel at boundary `p == 0`, so the near-wall iteration matrix is
+#: inconsistent and does not contract at a wall band (Part 41: omniSPH's
+#: `densitySolve` recomputes an MLS wall pressure every iterate; this port did
+#: not). When set (`'shepard'` / `'mls'`), every `_jacobiSolve` iterate refills
+#: the `kind == 1` rows with `modules.incompressible.wallPressure`'s
+#: extrapolation of the current fluid `p` before the pressure accel. Default
+#: `None` here -- `dfsphReference` is a troubleshooting artifact and `iisph`
+#: is a landed baseline; this is graded as an A/B first
+#: (`probe_hydrostaticColumnIisph.py`). omniSPH applies it in the density
+#: solve only; `WALL_PRESSURE_ON_DIVERGENCE` also applies it to the DF Jacobi
+#: (the fragile one, Parts 26/28/29/37) for the experiment.
+WALL_PRESSURE_MODE = None
+WALL_PRESSURE_ON_DIVERGENCE = False
 
 
 def _rebuildAdjacency(state: Any, system: Any, config: Any):
@@ -308,7 +341,8 @@ def _jacobiSolve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
                  opDt: float, solverCfg: Any, minIters: int,
                  fluidMask: torch.Tensor, mode: str,
                  surfaceMask: torch.Tensor = None,
-                 warmStartDamped: bool = False):
+                 warmStartDamped: bool = False,
+                 wallPressure: str = None):
     """DFSPH pressure Jacobi (SPlisHSPlasH `pressureSolveIteration` /
     `divergenceSolveIteration`), the LINEAR form (Part 28). The earlier
     re-summed fixed point recomputed `Drho/Dt` from the trial velocity
@@ -456,7 +490,10 @@ def _jacobiSolve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
     err = 0.0
     it = 0
     for it in range(maxIters):
-        a_p = _pressureAccel(state, config, adjacency, p, fluidMask)
+        pIn = wallPressureExtrapolation(
+            state, config, adjacency, p, fluidMask, mode=wallPressure) \
+            if wallPressure else p
+        a_p = _pressureAccel(state, config, adjacency, pIn, fluidMask)
         # SPlisHSPlasH's `aij_pj = delta_{a_p} = -div_std(a_p)`, scaled by
         # opDt (h^2 CD / h DF) to match their `aij_pj *= h^2` / `*= h`.
         # `_drhodt(a_p) = -rho0 div_std(a_p)`, so `aij_pj = +_drhodt(a_p)/rho0 * opDt`.
@@ -494,7 +531,10 @@ def _jacobiSolve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
         if it + 1 >= minIters and err < tol:
             break
 
-    a_p = _pressureAccel(state, config, adjacency, p, fluidMask)
+    pIn = wallPressureExtrapolation(
+        state, config, adjacency, p, fluidMask, mode=wallPressure) \
+        if wallPressure else p
+    a_p = _pressureAccel(state, config, adjacency, pIn, fluidMask)
     return a_p, p, it + 1, err
 
 
@@ -564,6 +604,14 @@ def dfsphReference_step(system: Any, dt: float, config: Any, schemeConfig: Any,
 
     # --- 2. non-pressure accelerations -------------------------------------
     enforceDirichlet(system, system.t, dt, config, schemeConfig)
+    # Extend the boundary velocity field per each boundary region's `BCType`
+    # (`freeSlip` reflection / `noSlip` mirror / `extended` MLS), exactly as
+    # `schemes/deltaSPH.py` and `schemes/dfsph.py` do -- this is what gives
+    # `computeVelocityDiffusion` (below) a real no-slip wall when the case
+    # asks for one. A strict no-op with no `kind == 1` particles (periodic
+    # cases). The boundary rows keep the extended velocity for the rest of the
+    # step, so the constant-density / divergence sources see it too.
+    st.velocities = computeBoundaryVelocities(st, config, schemeConfig, adjacency)
     a_nonp = computeGravity(st, config, schemeConfig, adjacency)
     a_nonp = a_nonp + computeVelocityDiffusion(st, config, schemeConfig, adjacency)
     if XSPH_FLUID_EPSILON != 0.0 or XSPH_BOUNDARY_EPSILON != 0.0:
@@ -587,7 +635,8 @@ def dfsphReference_step(system: Any, dt: float, config: Any, schemeConfig: Any,
             st, config, schemeConfig, adjacency, vEnter=vEnter, rho0=rho0,
             warmStart=kappa, opDt=dt * dt, solverCfg=psCfg,
             minIters=max(psCfg.minIterations, 2), fluidMask=fluid,
-            mode='density', warmStartDamped=DAMPED_WARM_START)
+            mode='density', warmStartDamped=DAMPED_WARM_START,
+            wallPressure=WALL_PRESSURE_MODE)
     st.velocities = vEnter + dt * a_p_cd
 
     # --- 4. advance positions with the corrected velocity ------------------
@@ -631,7 +680,9 @@ def dfsphReference_step(system: Any, dt: float, config: Any, schemeConfig: Any,
                 warmStart=kappaV, opDt=dt, solverCfg=dfCfg,
                 minIters=max(dfCfg.minIterations, 1), fluidMask=fluid,
                 mode='divergence', surfaceMask=surfaceMask,
-                warmStartDamped=DAMPED_WARM_START)
+                warmStartDamped=DAMPED_WARM_START,
+                wallPressure=(WALL_PRESSURE_MODE if WALL_PRESSURE_ON_DIVERGENCE
+                              else None))
         st.velocities = vEnterDf + dt * a_p_df
 
     # --- 7. carry kappa / kappa^v for the next step's warm start --------
