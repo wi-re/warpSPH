@@ -75,6 +75,13 @@ class IncompressibleSPHScheme(Enum):
     #: codebase to hold `hydrostaticColumn`; it also holds `staticBlob` where
     #: the two-solve `dfsphReference` diverges.
     iisph = 2
+    #: Direct port of the omniSPH incompressible solver loop
+    #: (`~/dev/omniSPH/simulation/{SPH,fluidMechanics}.cpp`): DFSPH-style
+    #: divergence + density solves on one neighbourhood, accelerations
+    #: accumulated into a single semi-implicit Euler step. No free-surface
+    #: gauge, deficiency guard, damped warm start, or masking -- just the
+    #: loop as omniSPH runs it. See `schemes/omniIncompressible.py`.
+    omniIncompressible = 3
 
 # @torch.jit.script
 class WaveEquationScheme(Enum):

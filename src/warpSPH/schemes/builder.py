@@ -190,6 +190,25 @@ def _iisph() -> SchemeBundle:
     )
 
 
+def _omniIncompressible() -> SchemeBundle:
+    # Direct port of omniSPH's incompressible solver loop. Same lazy-import
+    # rationale as `_divergenceFree`; reuses the incompressible
+    # state/config/update and `DFSPHReferenceSystem` (the whole time
+    # integration happens inside the step). See `schemes/omniIncompressible.py`.
+    from .omniIncompressible import omniIncompressible_step
+    from ..systems.incompressible import (DFSPHReferenceSystem, IncompressibleState,
+                                          IncompressibleSystemUpdate)
+    return SchemeBundle(
+        SimulationSystem=DFSPHReferenceSystem,
+        SimulationState=IncompressibleState,
+        SimulationConfig=IncompressibleSPHConfig,
+        SimulationUpdate=IncompressibleSystemUpdate,
+        stepFunction=omniIncompressible_step,
+        exportFunction=incompressibleConfigToDict,
+        importFunction=dictToIncompressibleSPHConfig,
+    )
+
+
 def _waveEquation() -> SchemeBundle:
     return SchemeBundle(
         SimulationSystem=WaveSystemv3,
@@ -211,6 +230,7 @@ _SCHEMES = {
     IncompressibleSPHScheme.divergenceFree: _divergenceFree,
     IncompressibleSPHScheme.dfsphReference: _dfsphReference,
     IncompressibleSPHScheme.iisph: _iisph,
+    IncompressibleSPHScheme.omniIncompressible: _omniIncompressible,
     WaveEquationScheme.waveEquation: _waveEquation,
 }
 
