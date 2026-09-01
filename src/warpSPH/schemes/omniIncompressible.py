@@ -52,16 +52,20 @@ Boundary: `kind == 1` particles enter both solves as "static fluid at rho0"
 with Akinci rest-density volumes via `applyConsistentCoupling`
 (`BoundaryPressureMode.consistent`) -- the particle-boundary analogue of
 omniSPH's triangle `boundaryFunc`, and the same coupling `iisph` /
-`dfsphReference` use. On top of that, `WALL_PRESSURE_MODE` (default `'mls'`
-since Part 41) ports omniSPH's per-iterate MLS boundary-pressure
-extrapolation into the *density* solve: every density-mode Jacobi iterate
-recomputes `p_b` on the `kind == 1` rows from the current fluid pressure and
-feeds its gradient into `a_p`, the Robin closure that makes the near-wall
-iteration contract (without it `hydrostaticColumn` nx=128 diverges at the
-bottom corners by step ~10 -- Part 35/41). `None` falls back to
-Bender-Westhofen-Jeske 2023 Eq. 33 at zero boundary pressure. The divergence
-solve always runs at zero boundary pressure (omniSPH's `divergenceSolve` has
-no wall-pressure term). See `WALL_PRESSURE_MODE` below.
+`dfsphReference` use. On top of that, `WALL_PRESSURE_MODE` (default `'shepard'`,
+Part 42) ports omniSPH's per-iterate boundary-pressure extrapolation into the
+*density* solve: every density-mode Jacobi iterate recomputes `p_b` on the
+`kind == 1` rows from the current fluid pressure and feeds its gradient into
+`a_p`, the Robin closure that makes the near-wall iteration contract (without
+it `hydrostaticColumn` nx=128 diverges at the bottom corners by step ~10 --
+Part 35/41). `'shepard'` is the zero-order mirror; `'mls'` (Part 41's first
+default) adds omniSPH's linear `beta*x + gamma*y` term but assumes a
+locally-linear near-wall pressure and diverges on the sheared
+`randomFlowIncompressible --bounded` (Part 42), so `'shepard'` -- which holds
+both -- is the default. `None` falls back to Bender-Westhofen-Jeske 2023
+Eq. 33 at zero boundary pressure. The divergence solve always runs at zero
+boundary pressure (omniSPH's `divergenceSolve` has no wall-pressure term).
+See `WALL_PRESSURE_MODE` below.
 
 The step does its own integration and hands the integrator a no-op update;
 `DFSPHReferenceSystem` (systems/incompressible.py) copies the advanced fields
@@ -156,12 +160,23 @@ XSPH_BOUNDARY = 0.0
 #:                 Taylor-correct to the owning boundary particle. This is
 #:                 omniSPH's `alpha + beta*x_b + gamma*y_b` in full.
 #:
-#: Default `'mls'` (Part 41): without it the composed density Jacobi does not
-#: contract at the wall band and `hydrostaticColumn` nx=128 diverges at the
-#: bottom corners by step ~10; with it the column holds 400+ steps at the
-#: exact hydrostatic gradient. No relaxation / cross-step lag (unlike
-#: `computeMdbcPressure`), so not the `mdbcMlsPressure` feedback instability.
-WALL_PRESSURE_MODE = 'mls'
+#: Default `'shepard'` (Part 42). Some wall-pressure closure is required:
+#: with `None` the composed density Jacobi does not contract at the wall
+#: band and `hydrostaticColumn` nx=128 diverges at the bottom corners by
+#: step ~10 (Part 41). Part 41 first shipped `'mls'`, but its linear term
+#: `beta*x + gamma*y` assumes a locally-linear near-wall pressure -- exact
+#: for the hydrostatic column, wrong for a sheared flow, where it amplifies
+#: the real near-wall pressure structure and pumps energy into the Jacobi:
+#: `'mls'` **diverges** `randomFlowIncompressible --bounded` on step 1
+#: (`errRho` 3.4e-2, `|v|max` ~84) where `None` and `'shepard'` hold it
+#: (Part 42). `'shepard'` (0th order, no linear term) threads both:
+#: `hydrostaticColumn` nx=128 holds (`|v|max` ~0.5, the exact hydrostatic
+#: gradient) and `randomFlowIncompressible --bounded` holds (`|v|max` decays
+#: to ~0.4). No relaxation / cross-step lag (unlike `computeMdbcPressure`),
+#: so not the `mdbcMlsPressure` feedback instability. `'mls'` is kept as an
+#: option for quiescent free-surface cases where its first-order accuracy
+#: recovers a slightly better near-wall density (Part 41).
+WALL_PRESSURE_MODE = 'shepard'
 
 
 def _rebuildAdjacency(state: Any, system: Any, config: Any):
