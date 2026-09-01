@@ -1,0 +1,35 @@
+# Hydrostatic column matched to warpSPH's hydrostaticColumn case:
+# 1x1 box, fluid fills the bottom half, gravity down, DFSPH incompressible.
+fluids:
+     - min: [0.03, 0.03]
+       max: [0.97, 0.50]
+       radius: 0.004377          # spacing ~= 1.785*r ~= 1/128
+       type: once
+       velocity: [0, 0]
+
+gravity:
+    - pointSource: false
+      direction: [0., -1.]
+      magnitude: 9.81
+
+props:
+    maxnumptcls: 262144
+    backgroundPressure: false
+
+dfsph:
+  divergenceSolve: true
+
+domain:
+    min: [0, 0]
+    max: [1, 1]
+    epsilon: 0.04
+
+sim:
+    maxDt: 0.001
+    minDt: 0.001
+    incompressible: true
+
+export:
+    active: false
+video:
+    active: false

@@ -10,17 +10,29 @@ even though the two agree in the bulk:
   i.e. every term is re-weighted by the query particle's apparent area
   `areaI = V_i` and (in the second sum) by `1/m_j`.
 - the DFSPH factor is
-  `sum_j |V_j gradW_ij|^2 + |sum_j V_j gradW_ij|^2`,
-  with the *first* (sum-of-squares) term restricted to fluid neighbours and
-  the boundary (`kind == 1`) entering *only* the vector-sum (second) term.
+  `sum_j |V_j gradW_ij|^2 + |sum_j V_j gradW_ij|^2`.
+
+  The gate on the *first* (sum-of-squares / back-reaction) term is on the
+  QUERY kind (`ki == 0`), not the neighbour kind: a fluid particle accumulates
+  it over **all** non-ghost neighbours (fluid AND boundary), a boundary/ghost
+  query gets 0 (it is not an unknown in the solve, so only the vector term is
+  ever read from it). This is a deliberate departure from SPlisHSPlasH's
+  `computeDFSPHFactor` and Bender-Westhofen-Jeske 2023 Eq. 32, which restrict
+  the sum-of-squares to fluid neighbours (a *static* boundary particle takes
+  no reaction). Folding the boundary into it instead treats the wall as the
+  "static fluid at rho0" that `applyConsistentCoupling` already models it as,
+  and gives near-wall fluid a larger denominator -> smaller `alpha` -> gentler
+  pressure updates at the wall (same intent as `akinciBoundaryVolumeScale`,
+  DFSPH_IMPROVEMENT_PLAN.md Part 24/25). In the bulk (no boundary neighbours)
+  it is identical to the reference form.
 
 For a uniform fluid (`rho_i = rho0 = 1`, equal masses) the two coincide, which
 is why `diag(A)/alphas ~ 1.0001` was measured in the bulk
 (`DFSPH_IMPROVEMENT_PLAN.md` 2). They diverge at a wall, where the boundary
 carries an Akinci apparent volume (`applyConsistentCoupling` substitutes it
 into `state.masses`) and the IISPH `areaI/m_i` / `1/m_j` weightings stop being
-`1`. This kernel returns the DFSPH form so the reference scheme's Jacobi step
-size matches SPlisHSPlasH exactly.
+`1`. This kernel returns the DFSPH form (bulk-identical to SPlisHSPlasH's;
+near-wall it folds the boundary into the back-reaction term, see above).
 
 The apparent volumes `V_j = m_j/rho_j` are supplied by the caller as
 `referenceApparentAreas`; for boundary rows the caller must run the kernel
@@ -78,13 +90,14 @@ def computeDFSPHFactor_Func_i_first(
     # when the caller runs this inside applyConsistentCoupling).
     referenceApparentAreas: wp.array(dtype=scalar_t),  # type: ignore
 ):
-    # Vector sum over ALL neighbours (fluid + boundary): the DFSPH second term
-    # |sum_j V_j gradW_ij|^2. SPlisHSPlasH's `grad_p_i`.
+    # Vector sum over ALL non-ghost neighbours (fluid + boundary): the DFSPH
+    # second term |sum_j V_j gradW_ij|^2. SPlisHSPlasH's `grad_p_i`.
     sumA = zero_like_warp(xi)
-    # Sum of |V_j gradW_ij|^2 over FLUID neighbours only: the DFSPH first term
-    # sum_j |V_j gradW_ij|^2. SPlisHSPlasH's `sum_grad_p_k` (before the
-    # grad_p_i.squaredNorm() is added). A static boundary particle takes no
-    # reaction, so it contributes nothing here.
+    # Sum of |V_j gradW_ij|^2 -- the back-reaction term. Gated on the QUERY
+    # kind below (`ki == 0`): a fluid query accumulates it over every non-ghost
+    # neighbour (fluid AND boundary); a boundary/ghost query leaves it at 0
+    # (only the vector term is ever read from a non-fluid row). See the module
+    # docstring for why this differs from the fluid-neighbours-only reference.
     sumSq = zero_like_warp(rhoi)
 
     for neighborIndex in range(numIndices):
@@ -112,8 +125,12 @@ def computeDFSPHFactor_Func_i_first(
         # Vector sum: fluid AND boundary (SPlisHSPlasH `grad_p_i -= grad_p_j`
         # for both, with grad_p_j = -V_j gradW).
         sumA += term
-        # |V_j gradW|^2 sum: fluid only. Bare apparent volume, no /mj, no areaI.
-        if kj == 0:
+        # Back-reaction sum: query-kind gated. `ki` is the query kind and is
+        # constant across the loop, so a fluid query (`ki == 0`) accumulates
+        # over every neighbour reached here (fluid + boundary; ghosts already
+        # filtered by the directionality check above), and a non-fluid query
+        # accumulates nothing. Bare apparent volume, no /mj, no areaI.
+        if ki == 0:
             sumSq += volumeJ * volumeJ * gradw_ij2
 
     return sumSq + wp.dot(sumA, sumA)
