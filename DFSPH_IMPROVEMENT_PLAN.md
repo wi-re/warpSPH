@@ -118,22 +118,54 @@ bit-identical `'shepard'` vs `'mls'` (no `kind == 1`, wall pressure a no-op);
 `dambreak` nx=64 identical and preserved (200 steps, `maxRho` 1.000).
 `gradcheck_incompressible` + physics green.
 
-**Still open — the deeper issue.** `'shepard'` *makes the run survive*, it does
-not make the constant-density Jacobi *converge*: it still hits the 256-iter
-cap on many steps (§1.7 — "the CD solve does not converge, it integrates"),
-and the run only holds because the un-converged impulse decays rather than
-compounds. A genuinely robust `omniIncompressible` (and any `iisph` + a
+**Chased the CD solve (Part 42): the closed-box divergence is an incompatible
+source, fixed by a compatibility projection.** Captured `omniIncompressible`'s
+constant-density linear system `A p = s` on `randomFlowIncompressible
+--bounded` step 1 (`scratchpad` probe: monkeypatch `_solve`, dump the operator
++ RHS, run offline solvers). Findings:
+- **The Jacobi stalls, it does not diverge.** `|r|_2`: 8.06e-2 → 8.10e-2 →
+  8.18e-2 over 256 iters — flat, from `|s|_2 = 7.72e-2`. The residual *cannot*
+  drop below `|s|`.
+- **The source is 99.98 % its own mean.** `mean(s_fluid) = -1.2e-3`,
+  `|s - mean(s)|_2 = 1.16e-5` (vs `|s|_2 = 7.7e-2`). `randomFlowIncompressible
+  --bounded` is a **fully closed box, no free surface** → the pressure
+  operator is pure-Neumann → `A·1 ≈ 0` → the constant part of `s` (which the
+  `n_h = 4` lattice density bias, §1.1, makes non-zero) is in `null(A)` and
+  has **no solution**. The Jacobi's residual floor is exactly that
+  incompatible component; `p` ramps linearly (§1.7 — "it integrates").
+  MINRES / CG break down immediately on the inconsistent system.
+- **Compatibility projection fixes it.** Subtract `mean(s_fluid)`; the Jacobi
+  on the residual (with `p` kept mean-zero, no `p ≥ 0` clamp — a closed box
+  has no tensile-instability free surface) converges: `|r|_2` 1.05e-5 →
+  6e-6 → 1.2e-6 over 256 iters (bulk of it in < 8). The residual
+  `mean(ρ) ≠ ρ0` is a rest-density calibration offset the solve legitimately
+  ignores.
+
+**Landed: `omniIncompressible.CD_SOURCE_PROJECT = 'auto'`** — projects the
+density source's mean only when `1 - |s - mean(s)| / |s| > CD_PROJECT_THRESHOLD`
+(= 0.7), i.e. when the source is mean-dominated. A free surface makes the
+spatial part of `s` large (`hydrostaticColumn` step 1: `frac_uniform ≈ 0.09`,
+step 30 `≈ 0.006`), so it is a **strict no-op there** and on `dambreak` /
+`tgv` / `kolmogorov`. Full matrix (`auto`, nx=64/128, 120–150 steps):
+`randomFlowIncompressible --bounded` holds, KE 0.34 → 0.10 (decays, density
+0.996–1.007 — the CD Jacobi now *converges*, not just survives);
+`hydrostaticColumn` nx=128 holds, `slope` 0.995, `|v|max` 0.52;
+`dambreak` / `tgv` / `kolmogorov` unchanged. `gradcheck_incompressible` +
+physics green.
+
+**Still open — the deeper issue.** Projection makes the *closed* box's CD
+solve converge. On the *free-surface* cases the Jacobi still hits the
+256-iter cap on many steps (§1.7) and holds only because the un-converged
+impulse decays. A genuinely robust `omniIncompressible` (and any `iisph` + a
 divergence pass, ranked queue item 4/9) still wants:
-- a **contractive constant-density solve** — a Krylov solve of the same
-  `A p = s` (item 10), or real preconditioning;
+- a **contractive constant-density solve** for the free-surface case — a
+  Krylov solve of the same `A p = s` (item 10; but MINRES/CG on the *clamped*
+  solve is a published negative — §2 — so this needs the projection + an
+  unclamped MINRES, or dedicated preconditioning);
 - **`band2018pb`** (boundary samples as solve unknowns, ranked-queue item 0
   sub-item) — the principled boundary that fixes the near-wall conditioning
   the wall-pressure mirror only patches;
 - feeding `p_b` into `alpha` (not just `a_p`).
-Next concrete steps: grade `'shepard'` on `dambreak` (has walls) and the
-periodic cases for regressions (wall pressure is a no-op with no `kind == 1`,
-but confirm), then a longer `randomFlowIncompressible --bounded` run vs
-`divergenceFree`'s density band.
 
 ---
 

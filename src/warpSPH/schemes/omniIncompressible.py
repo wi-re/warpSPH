@@ -178,6 +178,27 @@ XSPH_BOUNDARY = 0.0
 #: recovers a slightly better near-wall density (Part 41).
 WALL_PRESSURE_MODE = 'shepard'
 
+#: Compatibility projection of the constant-density source for a closed
+#: (pure-Neumann) domain (Part 42). On a fully-walled box with no free surface
+#: the pressure operator `A` is singular (`A·1 ≈ 0`), so the constant part of
+#: the source `s = (1 - ρ/ρ0) + dt·div(v*)` -- which the `n_h = 4` lattice
+#: density bias (§1.1) makes non-zero -- lies in `null(A)`: the relaxed Jacobi
+#: cannot reduce the residual below it and instead ramps `p` linearly to the
+#: iteration cap (§1.7; measured on `randomFlowIncompressible --bounded`,
+#: where it diverged). The fix is the textbook pure-Neumann compatibility
+#: projection: subtract `mean(s)` over the fluid and solve for the resolvable
+#: spatial part with `p` kept mean-zero (a closed box has no free surface, so
+#: no `p ≥ 0` tensile guard is needed). The residual `mean(ρ) ≠ ρ0` is a
+#: rest-density calibration offset the solve legitimately ignores.
+#:
+#:   'auto'   -- project only when the source is mean-dominated, i.e.
+#:               `1 - |s - mean(s)| / |s| > CD_PROJECT_THRESHOLD` (a free
+#:               surface makes the spatial part large, so this is a no-op there)
+#:   'always' -- project every density solve
+#:   'off'    -- never (the pre-Part-42 behaviour)
+CD_SOURCE_PROJECT = 'auto'
+CD_PROJECT_THRESHOLD = 0.7
+
 
 def _rebuildAdjacency(state: Any, system: Any, config: Any):
     adjacency = buildVerletList(
@@ -289,6 +310,19 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
             source = (1.0 - state.densities / rho0) + dt * divEnter
         else:
             source = dt * divEnter
+        source = torch.where(fluid, source, torch.zeros_like(source))
+
+        # Closed-domain compatibility projection (see `CD_SOURCE_PROJECT`).
+        project = False
+        if mode == 'density' and CD_SOURCE_PROJECT != 'off' and bool(fluid.any()):
+            bm = source[fluid].mean()
+            sn = source[fluid].norm().clamp_min(1e-30)
+            fracUniform = 1.0 - float((source[fluid] - bm).norm() / sn)
+            project = (CD_SOURCE_PROJECT == 'always'
+                       or fracUniform > CD_PROJECT_THRESHOLD)
+            if project:
+                source = source - torch.where(fluid, bm.expand_as(source),
+                                              torch.zeros_like(source))
 
         wallP = WALL_PRESSURE_MODE if mode == 'density' else None
 
@@ -306,7 +340,11 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
             aP = -dt * dt * _divergence(state, config, adjacency, a_p)
             p = p + invAlpha * (source - aP)
             if mode == 'density':
-                p = p.clamp(min=0.0)
+                if project:
+                    p = p - torch.where(fluid, p[fluid].mean().expand_as(p),
+                                        torch.zeros_like(p))
+                else:
+                    p = p.clamp(min=0.0)
             bad = alphaBad | (~torch.isfinite(p)) | (p.abs() > 1e25) | ~fluid
             p = torch.where(bad, torch.zeros_like(p), p)
             if fluid.any():
