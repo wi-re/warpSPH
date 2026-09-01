@@ -52,16 +52,92 @@ found it injects energy on `tgv`, viable only near-quiescent), and
 
 | case | status |
 |---|---|
-| `tgv`, `kolmogorovIncompressible`, `shearWave` (periodic) | healthy |
-| `randomFlowIncompressible --bounded` | best it has ever been (band 4.48e-3); still where all remaining wall error lives |
+| `tgv`, `kolmogorovIncompressible`, `shearWave` (periodic) | `divergenceFree` healthy. `iisph` **fails `tgv`** (injects energy, KE ×145 — CD-only, no divergence pass, Part 42); `omniIncompressible` holds them (over-dissipative from `XSPH_FLUID = 0.05`). |
+| `randomFlowIncompressible --bounded` | `divergenceFree` best it has ever been (band 4.48e-3); still where all remaining wall error lives. `iisph` **diverges** (`\|v\|max` → 1e6, Part 42); `omniIncompressible` **holds with `WALL_PRESSURE_MODE = 'shepard'`** (`\|v\|max` decays 2 → 0.3, 300 steps — Part 42; `'mls'` diverged here, step-1 CD-Jacobi blow-up). |
 | `staticBlob` (free space), `impact` (collision) | **pass** (baseline cases, Part 23) |
-| `hydrostaticColumn` (quiescent column under gravity) | `divergenceFree` **fails** (position shift cannot sustain a body force); **`--scheme iisph` holds it** — Part 33 at nx=32 / 2000 steps, **Part 34 confirmed at the default nx=128** (clean to `tLimit`, and to t=2.9 / 1500 steps): stable geometry, `embeddedMinDensity` ~0.92–0.96, `pressureSlopeRatio` ~0.99, with a bounded undamped free-slip bulk slosh (KE creeps ~0.025→0.05 at nx=128) and cosmetic surface spray (the graded FOMs `densityP05` / `embeddedMinDensity` now exclude it). `dfsphReference` (two-solve DFSPH) still does not — its divergence Jacobi is the instability (Part 37: `ki==0` factor buys ~940 steps, then the same late-time surface degradation). **`omniIncompressible` (omniSPH port, Part 35) now holds nx=128 (Part 41)** — the composed density Jacobi was not contracting at the wall band (blow-up at the bottom corners by step ~10) because it had the wall in `alpha` only, boundary `p ≡ 0`, where omniSPH recomputes an MLS wall pressure every iterate. `WALL_PRESSURE_MODE = 'mls'` (the shipped default, built on `modules/liu`) closes it: 400+ steps clean, `pressureSlopeRatio` 0.99–1.00, `densityP05` 1.000, `|v|max` ~0.56 (the undamped slosh, still wants a shear-carrying no-slip wall to damp — Part 42 TODO). **Part 38 nailed the interior: side walls removed (x-periodic / floor-only), `omniIncompressible` sits at vmax ~0.2, `ρ≡ρ0`, slope 1.00 — the vertical density-solve physics is sound.** **Part 39 / 42: a viscous no-slip wall takes the `iisph` nx=128 slosh from vmax ~1.7 toward ~0.8; Part 39's hand-rolled shear Laplacian did it with the surface intact, but the stock `viscidNu` term (Part 42's cleanup) is normal-projected and roughens the surface — a shear-carrying Morris term is the TODO.** `dfsphReference` (two-solve DFSPH) still under-builds the gradient (`pressureSlopeRatio` ~0.7) and its divergence Jacobi is GPU-stochastic near step ~940 (Part 37); the wall pressure helps its slosh but is inconclusive there (Part 41). SPlisHSPlasH's own DFSPH holds the matched case; importing its exact state reproduces the transient for ~0.3 s, then warpSPH's composed Jacobi loses it (Part 36). |
+| `hydrostaticColumn` (quiescent column under gravity) | `divergenceFree` **fails** (position shift cannot sustain a body force); **`--scheme iisph` holds it** — Part 33 at nx=32 / 2000 steps, **Part 34 confirmed at the default nx=128** (clean to `tLimit`, and to t=2.9 / 1500 steps): stable geometry, `embeddedMinDensity` ~0.92–0.96, `pressureSlopeRatio` ~0.99, with a bounded undamped free-slip bulk slosh (KE creeps ~0.025→0.05 at nx=128) and cosmetic surface spray (the graded FOMs `densityP05` / `embeddedMinDensity` now exclude it). `dfsphReference` (two-solve DFSPH) still does not — its divergence Jacobi is the instability (Part 37: `ki==0` factor buys ~940 steps, then the same late-time surface degradation). **`omniIncompressible` (omniSPH port, Part 35) now holds nx=128 (Part 41)** — the composed density Jacobi was not contracting at the wall band (blow-up at the bottom corners by step ~10) because it had the wall in `alpha` only, boundary `p ≡ 0`, where omniSPH recomputes a wall pressure every iterate. A per-iterate wall-pressure closure (`WALL_PRESSURE_MODE`, built on `modules/liu` / a Shepard mirror) closes it: 350+ steps clean, `pressureSlopeRatio` 0.99–1.00, `densityP05` 1.000, `|v|max` ~0.56 (the undamped slosh, still wants a shear-carrying no-slip wall to damp — Part 42 TODO). **Default is `'shepard'` (Part 42): `'mls'` (Part 41's first default) holds this case but diverges the sheared `randomFlowIncompressible --bounded`; `'shepard'` — no linear term — holds both.** **Part 38 nailed the interior: side walls removed (x-periodic / floor-only), `omniIncompressible` sits at vmax ~0.2, `ρ≡ρ0`, slope 1.00 — the vertical density-solve physics is sound.** **Part 39 / 42: a viscous no-slip wall takes the `iisph` nx=128 slosh from vmax ~1.7 toward ~0.8; Part 39's hand-rolled shear Laplacian did it with the surface intact, but the stock `viscidNu` term (Part 42's cleanup) is normal-projected and roughens the surface — a shear-carrying Morris term is the TODO.** `dfsphReference` (two-solve DFSPH) still under-builds the gradient (`pressureSlopeRatio` ~0.7) and its divergence Jacobi is GPU-stochastic near step ~940 (Part 37); the wall pressure helps its slosh but is inconclusive there (Part 41). SPlisHSPlasH's own DFSPH holds the matched case; importing its exact state reproduces the transient for ~0.3 s, then warpSPH's composed Jacobi loses it (Part 36). |
 | `dambreak --scheme divergenceFree` | **runs** (Part 19) — the only working free surface — but half `deltaSPH`'s run-out speed and most of the flow's KE dissipated on impact; needs its own `--cflFactor 0.2` (Part 20), not 0.4 |
 | `rotatingSquarePatch --scheme divergenceFree` | broken; [BK] §5 documents it as a method limitation, not an implementation bug |
 
 ---
 
-## Active track — a velocity-coupled incompressible scheme for the column
+## Active track — `omniIncompressible` on `randomFlowIncompressible --bounded`
+
+**Why.** `omniIncompressible` + the Part 41 MLS wall pressure holds the
+*quiescent* `hydrostaticColumn` at nx=128, but **diverges on the wall-bounded
+*sheared* flow** `randomFlowIncompressible --bounded` (Part 42): it detonates on
+step 1 (KE 0.35 → ~1.4e3, `|v|max` → 83 from an enormous near-wall pressure
+impulse — density stays fine at [1.001, 1.001], so a solve overshoots), briefly
+recovers over steps 2–7, then re-detonates by step ~10 → `|v|max` 1e15 by
+step 14. `iisph` also fails this case (KE → 5e9); `dfsphReference` untested
+here; `divergenceFree` (VD+PS) holds it (KE ratio 0.896, `|v|max` 1.06). So the
+DFSPH-family composed operators + the Akinci-band / MLS wall closure are not
+robust to a real wall-bounded shear flow — this is the gap to close before
+`omniIncompressible` (or any `iisph`+divergence-pass scheme, ranked queue
+item 4/9) can be a general incompressible solver.
+
+**Diagnosis so far** (`scratchpad` probe adapting `transient.py`'s solve/step
+spies; nx=64):
+1. **It is the constant-density Jacobi, not the divergence solve.** Step 1:
+   the 3-iter divergence solve *converges* (`errDiv` ~1e-10, `max|a_p|` ~6);
+   the constant-density solve **hits its 256-iter cap without converging**
+   (`errRho` above tol, `max|p|` ~4e4, `max|a_p|` ~3e5) → `|v|max` ~27–84 on
+   step 1. This is §1.7 ("the CD solve does not converge — it integrates") at
+   a fully-walled box: with `div v* ≈ 0` (the divergence solve just made it
+   so) and `rho ≈ rho0`, the source is near the operator's null space, so
+   the Jacobi increment is ~constant and `p` grows ~linearly in the iterate
+   count until the cap.
+2. **`WALL_PRESSURE_MODE = 'mls'` (the Part 41 default) makes step 1 much
+   worse here** — `errRho` 3.4e-2 vs 9.6e-4 without it, `|v|max` 84 vs 27.
+   The MLS `p_b = alpha + beta*x + gamma*y` assumes a locally-linear
+   near-wall pressure (exact for the hydrostatic column, Part 41); a sheared
+   flow has real near-wall pressure structure, so the linear term amplifies
+   and pumps energy into the Jacobi. `'mls'` is **regime-dependent**: it
+   rescues the quiescent column and breaks the sheared box.
+3. **`WALL_PRESSURE_MODE = None` HOLDS `randomFlowIncompressible --bounded`**
+   (120 steps confirmed: rough step 1 at `|v|max` 27, then decays — `|v|max`
+   ~1.0 by step 45, ~0.68 by step 120, density 0.97–1.02). The un-converged
+   step-1 impulse happens to decay rather than compound. `'shepard'` (0th
+   order, no linear term): promising on step 1 (`|v|max` ~2 vs mls's 84),
+   longer-run TBD.
+
+**Resolved for now (Part 42): `WALL_PRESSURE_MODE = 'shepard'` threads both.**
+The split was `'mls'` needed for the quiescent column (Part 41, `None`
+diverges there) vs `None` needed for the sheared bounded box (`'mls'`
+diverges here). `'shepard'` — the zero-order mirror, omniSPH's MLS `alpha`
+term with **no linear `beta*x + gamma*y`** — is stable in both regimes
+(there is no linear term to amplify the sheared flow's real near-wall
+pressure structure): `hydrostaticColumn` nx=128 holds (`|v|max` ~0.5, KE
+~1e-3, the exact hydrostatic gradient, 350 steps); `randomFlowIncompressible
+--bounded` holds (`|v|max` decays 2 → 0.4, density 0.99–1.01, 300 steps).
+`omniIncompressible.WALL_PRESSURE_MODE` default changed `'mls'` → `'shepard'`;
+`'mls'` kept as an option (Part 41 measured it recovers a slightly better
+near-wall density on the quiescent free-surface column). The `dfsphReference`
+/ `iisph` flag stays `None`. **Regression clean:** `tgv` / `kolmogorov`
+bit-identical `'shepard'` vs `'mls'` (no `kind == 1`, wall pressure a no-op);
+`dambreak` nx=64 identical and preserved (200 steps, `maxRho` 1.000).
+`gradcheck_incompressible` + physics green.
+
+**Still open — the deeper issue.** `'shepard'` *makes the run survive*, it does
+not make the constant-density Jacobi *converge*: it still hits the 256-iter
+cap on many steps (§1.7 — "the CD solve does not converge, it integrates"),
+and the run only holds because the un-converged impulse decays rather than
+compounds. A genuinely robust `omniIncompressible` (and any `iisph` + a
+divergence pass, ranked queue item 4/9) still wants:
+- a **contractive constant-density solve** — a Krylov solve of the same
+  `A p = s` (item 10), or real preconditioning;
+- **`band2018pb`** (boundary samples as solve unknowns, ranked-queue item 0
+  sub-item) — the principled boundary that fixes the near-wall conditioning
+  the wall-pressure mirror only patches;
+- feeding `p_b` into `alpha` (not just `a_p`).
+Next concrete steps: grade `'shepard'` on `dambreak` (has walls) and the
+periodic cases for regressions (wall pressure is a no-op with no `kind == 1`,
+but confirm), then a longer `randomFlowIncompressible --bounded` run vs
+`divergenceFree`'s density band.
+
+---
+
+## Earlier track — a velocity-coupled incompressible scheme for the column
 
 **Why.** `divergenceFree` cannot hold a quiescent, wall-bounded,
 free-surface-under-gravity state (`hydrostaticColumn`, Part 23): the VD+PS
@@ -181,10 +257,11 @@ choice, not a pressure-solve lever.
    wall.
 
 `dfsphReference` stays a troubleshooting artifact (its toggles all ship off);
-no `divergenceFree` default changed by any of Parts 24–41 — the one shipped
-default change from Parts 35–41 is `omniIncompressible.WALL_PRESSURE_MODE =
-'mls'` (a new scheme, nothing regresses); full suite +
-`gradcheck_incompressible.py` green.
+no `divergenceFree` default changed by any of Parts 24–42 — the one shipped
+default change from Parts 35–42 is `omniIncompressible.WALL_PRESSURE_MODE`
+(`'mls'` in Part 41, `'shepard'` since Part 42; a new scheme, nothing
+regresses), plus Part 42's `hydrostaticColumn.wallBC` param (default
+`freeSlip` = no-op). Full suite + `gradcheck_incompressible.py` green.
 
 ---
 
@@ -354,13 +431,16 @@ for `iisph` (already holds), inconclusive for the two-solve path.
      once) with boundary `p ≡ 0` (BWJ23 Eq. 33) — the near-wall iteration
      matrix is inconsistent (`D` carries a wall term `A·p` does not), the
      classic non-contraction (§1.8; §2 `diagonalOnly`).
-   **What landed:** `omniIncompressible.WALL_PRESSURE_MODE = 'mls'` (default) —
+   **What landed (Part 41):** `omniIncompressible.WALL_PRESSURE_MODE = 'mls'` —
    `modules/incompressible/wallPressure.py`'s `wallPressureExtrapolation`
    reuses `modules/liu`'s `interpolateLiuLiu` (the `computeMdbcPressure` fit,
    `p_b = α + β·x_b + γ·y_b`, **no relaxation / no carried state** so *not* the
    `mdbcMlsPressure` feedback instability). `hydrostaticColumn` nx=128: was
    diverging → **holds 400+ steps, `pressureSlopeRatio` 0.99–1.00,
-   `densityP05` 1.000, `|v|max` ~0.56**. Suite (102) + Krylov + runner +
+   `densityP05` 1.000, `|v|max` ~0.56**. **Part 42 changed the default to
+   `'shepard'`** (the same file's 0th-order mirror, no linear term): `'mls'`
+   diverges the sheared `randomFlowIncompressible --bounded`, `'shepard'`
+   holds both it and the column. Suite (102) + Krylov + runner +
    `gradcheck_incompressible` green. Shared with `dfsphReference` (→ `iisph`)
    behind `WALL_PRESSURE_MODE` (default `None` there — wash-to-negative for
    `iisph`, inconclusive for the two-solve path). Wall pressure is
@@ -644,12 +724,14 @@ for `iisph` (already holds), inconclusive for the two-solve path.
   `alpha` only where omniSPH recomputes an MLS wall pressure every iterate.
   **Landed:** `modules/incompressible/wallPressure.py` (`wallPressureExtrapolation`,
   `'shepard'` / `'mls'`, reuses `modules/liu`, no relaxation / no carried
-  state) + `omniIncompressible.WALL_PRESSURE_MODE = 'mls'` **default** — the
-  first setting that holds `hydrostaticColumn` at nx=128 under
-  `omniIncompressible` (was diverging, Part 35): 400+ steps,
-  `pressureSlopeRatio` 0.99–1.00. Same flag on `dfsphReference` / `iisph`
-  (default `None`, A/B negative-to-inconclusive). `omega = 0.3` is unchanged
-  — the `omega`-window is `n_h = 4` conditioning, not the wall.
+  state) + `omniIncompressible.WALL_PRESSURE_MODE` **default** — the first
+  setting that holds `hydrostaticColumn` at nx=128 under `omniIncompressible`
+  (was diverging, Part 35): 400+ steps, `pressureSlopeRatio` 0.99–1.00. Part 41
+  shipped `'mls'`; **Part 42 changed the default to `'shepard'`** (`'mls'`'s
+  linear term diverges the sheared `randomFlowIncompressible --bounded`;
+  `'shepard'` holds both). Same flag on `dfsphReference` / `iisph` (default
+  `None`, A/B negative-to-inconclusive). `omega = 0.3` is unchanged — the
+  `omega`-window is `n_h = 4` conditioning, not the wall.
 
 Full detail for all of the above: `git log -p DFSPH_IMPROVEMENT_PLAN.md`,
 indexed one line per part in `DFSPH_FINDINGS.md` §9.
