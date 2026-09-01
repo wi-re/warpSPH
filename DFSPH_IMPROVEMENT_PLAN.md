@@ -153,19 +153,30 @@ step 30 `≈ 0.006`), so it is a **strict no-op there** and on `dambreak` /
 `dambreak` / `tgv` / `kolmogorov` unchanged. `gradcheck_incompressible` +
 physics green.
 
-**Still open — the deeper issue.** Projection makes the *closed* box's CD
-solve converge. On the *free-surface* cases the Jacobi still hits the
-256-iter cap on many steps (§1.7) and holds only because the un-converged
-impulse decays. A genuinely robust `omniIncompressible` (and any `iisph` + a
-divergence pass, ranked queue item 4/9) still wants:
-- a **contractive constant-density solve** for the free-surface case — a
-  Krylov solve of the same `A p = s` (item 10; but MINRES/CG on the *clamped*
-  solve is a published negative — §2 — so this needs the projection + an
-  unclamped MINRES, or dedicated preconditioning);
+**Still open — the free-surface CD solve.** Projection makes the *closed*
+box's CD solve converge. On the *free-surface* cases (`hydrostaticColumn`,
+`dambreak`) the Jacobi still stalls: measured on `hydrostaticColumn` step 30
+(gradient forming), 2000 raw Jacobi iterations knock off only ~20 % of the
+residual (`|r|_2` 0.886 → 0.717, then flat) — non-contractive, not merely
+slow. The runs hold only because the un-converged impulse decays. **MINRES
+does not trivially apply here:** on the same free-surface system it breaks
+down immediately (`status -13`, `x` never leaves 0) — the composed operator
+`A p = -dt²·div(a_p_IISPH(p_with_wall))` is too non-symmetric at the wall
+(the `'shepard'`/Akinci wall terms). Options for a genuinely contractive
+free-surface solve (also what any `iisph` + divergence-pass scheme wants,
+ranked queue item 4/9):
+- a **non-symmetric Krylov** (BiCGStab / GMRES — `modules/incompressible/
+  krylov.py` already has them) of the same `A p = s`, on the projection-handled
+  (or unclamped) system;
+- **symmetrise `A`** — use `computePressureShiftIISPH` (the symmetric Laplacian
+  probe `krylov.py` builds) instead of the difference-form `_divergence`, with
+  a consistent wall block, then MINRES;
 - **`band2018pb`** (boundary samples as solve unknowns, ranked-queue item 0
-  sub-item) — the principled boundary that fixes the near-wall conditioning
-  the wall-pressure mirror only patches;
+  sub-item) — the principled boundary that makes the near-wall block
+  consistent (and symmetric) instead of the wall-pressure mirror patching it;
 - feeding `p_b` into `alpha` (not just `a_p`).
+Not a blocker: `hydrostaticColumn` / `dambreak` currently *hold* — this is a
+§1.7 quality issue (open since Part 15), not a failure.
 
 ---
 
