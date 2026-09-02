@@ -76,6 +76,27 @@ SURFACE_SOURCE = 'full'
 #: open central problem (Part 23 / the active track), not a one-line default.
 DIVERGENCE_SOLVER = 'omni'
 
+#: TEMP (option 1 experiment): whether the in-step constant-density `_solve`
+#: result is folded into `dvdt` (`inStepVelocity` semantics -- the column's
+#: safeguard). Set `False` to test the pre-tmp architecture: divergence
+#: projection in-step, constant-density applied only as the `finalize`
+#: VD+PS *position* shift (`systems/incompressible._RESTORE_PS_SHIFT`).
+#: Applying both double-counts the density error and blows up (tgv KE grows,
+#: column NaNs).
+INSTEP_CD = True
+
+#: TEMP (ordering experiment): order of the two `_solve` passes when
+#: `DIVERGENCE_SOLVER == 'omni'`.
+#:   'div_then_cd' -- as shipped: divergence projection first (sees
+#:                    `dvdt + dvdt_diss`), then the constant-density solve
+#:                    (sees `... + dvdt_pressure`). The CD impulse is only
+#:                    projected by *next* step's divergence pass.
+#:   'cd_then_div' -- constant-density first (sees `dvdt + dvdt_diss`), then
+#:                    divergence (sees `... + dvdt_inStep`), so the divergence
+#:                    pass cleans the CD impulse's non-div-free part *this*
+#:                    step. omniSPH's own loop is `div` then `density`.
+SOLVE_ORDER = 'div_then_cd'
+
 #: Post-solve XSPH velocity filter (omniSPH `SPHSimulation::XSPH`, folded into
 #: `dvdt` as `scale * sum_j c_j V_j (v_j - v_i) W_ij / dt`, `c` from
 #: `omniIncompressible.XSPH_FLUID`). The `hydrostaticColumn` residual `|v|` is
@@ -84,6 +105,13 @@ DIVERGENCE_SOLVER = 'omni'
 #: the only thing that can decay it. `scale = 1.0` == omniSPH's coefficient;
 #: `0.0` reproduces the historical no-filter behaviour.
 XSPH_SCALE = 0.0
+
+#: TEMP (ablation experiment): `None`, or `(amplitude, period)` -- multiplies
+#: the gravity acceleration by `amplitude * sin(2*pi * t / period)` each step,
+#: so a periodic no-wall no-free-surface box can be put under an *oscillating*
+#: body force. Isolates "does the position shift break under a body force"
+#: (Part 23) from "does it break at a free surface". `None` == inert.
+GRAVITY_OSC = None
 
 
 def dfsph_step(
@@ -207,6 +235,9 @@ def dfsph_step(
     # with TimedBlock('compute gravity', use_cuda=True, device=config.device) as tb_gravity:
     with record_function("[warpSPH] - [deltaSPH - 15] - compute gravity"):
         gravity = computeGravity(currentState, config, schemeConfig, adjacency)
+        if GRAVITY_OSC is not None:
+            _amp, _per = GRAVITY_OSC
+            gravity = gravity * (_amp * np.sin(2.0 * np.pi * currentSystem.t / _per))
         gravity[currentState.kinds != 0] = 0.0
         dvdt += gravity
 
@@ -228,25 +259,48 @@ def dfsph_step(
     currentState.pressures = torch.zeros_like(currentState.densities) if currentState.pressures is None else currentState.pressures
     fluid = currentState.kinds == 0
     rho0 = schemeConfig.fluid.restDensity
+    _zeros = torch.zeros_like(currentState.densities)
+
+    def _omniPass(mode, priorAccel, warmStart, minIters, maxIters, tol,
+                  surfaceSource='full'):
+        """One `omniIncompressible._solve` pass: build `vEnter` from
+        `dvdt + dvdt_diss + priorAccel`, refresh the Dirichlet wall velocity on
+        it, solve, restore the velocity."""
+        accel = dvdt + dvdt_diss + priorAccel
+        accel[currentState.kinds != 0] = 0.0
+        vEnter = currentState.velocities + dt * accel
+        vSaved = currentState.velocities.clone()
+        currentState.velocities = vEnter
+        vEnter = computeBoundaryVelocities(currentState, config, schemeConfig, adjacency)
+        currentState.velocities = vSaved
+        return _solve(currentState, config, schemeConfig, adjacency, fluid=fluid,
+                      rho0=rho0, vEnter=vEnter, warmStart=warmStart, dt=dt,
+                      mode=mode, minIters=minIters, maxIters=maxIters, tol=tol,
+                      surfaceSource=surfaceSource)
+
     if DIVERGENCE_SOLVER == 'vdps':
         dvdt_pressure, pressure, errDiv, _ = solveDivergenceFree(
             particles=currentState, config=config, schemeConfig=schemeConfig,
             adjacency=adjacency, dvdt=dvdt + dvdt_diss, dt=dt)
         currentState.pressures = pressure
+        a_p_rho, pRho, nRho, errRho = _omniPass(
+            'density', dvdt_pressure, 0.5 * _zeros, 3, 256, 1e-3, SURFACE_SOURCE)
+        dvdt_inStep = a_p_rho if INSTEP_CD else torch.zeros_like(a_p_rho)
     elif DIVERGENCE_SOLVER == 'omni':
-        accel = dvdt + dvdt_diss
-        accel[currentState.kinds != 0] = 0.0
-        vEnter = currentState.velocities + dt * accel
-        velocities = currentState.velocities.clone()
-        currentState.velocities = vEnter
-        vEnter = computeBoundaryVelocities(currentState, config, schemeConfig, adjacency)
-        currentState.velocities = velocities
-        a_p_div, _, nDiv, errDiv = _solve(
-            currentState, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0,
-            vEnter=vEnter, warmStart=torch.zeros_like(currentState.densities), dt=dt,
-            mode='divergence', minIters=2,
-            maxIters=32, tol=1e-2)
-        dvdt_pressure = a_p_div
+        if SOLVE_ORDER == 'cd_then_div':
+            a_p_rho, pRho, nRho, errRho = _omniPass(
+                'density', 0.0, 0.5 * _zeros, 3, 256, 1e-3, SURFACE_SOURCE)
+            dvdt_inStep = a_p_rho if INSTEP_CD else torch.zeros_like(a_p_rho)
+            a_p_div, _, nDiv, errDiv = _omniPass(
+                'divergence', dvdt_inStep, _zeros, 2, 32, 1e-2)
+            dvdt_pressure = a_p_div
+        else:  # 'div_then_cd' (shipped)
+            a_p_div, _, nDiv, errDiv = _omniPass(
+                'divergence', 0.0, _zeros, 2, 32, 1e-2)
+            dvdt_pressure = a_p_div
+            a_p_rho, pRho, nRho, errRho = _omniPass(
+                'density', dvdt_pressure, 0.5 * _zeros, 3, 256, 1e-3, SURFACE_SOURCE)
+            dvdt_inStep = a_p_rho if INSTEP_CD else torch.zeros_like(a_p_rho)
     else:
         raise ValueError(f'Unknown DIVERGENCE_SOLVER: {DIVERGENCE_SOLVER!r}')
     # print(f'step {currentSystem.t:.6g}: pressure stats: mean={pressure.mean().item():.6g}, min={pressure.min().item():.6g}, max={pressure.max().item():.6g}')
@@ -298,22 +352,7 @@ def dfsph_step(
         # currentState.soundspeeds = _p_incomp.detach()
 
 
-    # --- 4. densitySolve() -- min 3 / max 256, warm start 0.5 * p_prior ---
-    accel = dvdt + dvdt_diss + dvdt_pressure
-    accel[currentState.kinds != 0] = 0.0
-    vEnter = currentState.velocities + dt * accel
-    velocities = currentState.velocities.clone()
-    currentState.velocities = vEnter
-    vEnter = computeBoundaryVelocities(currentState, config, schemeConfig, adjacency)
-    currentState.velocities = velocities
-    fluid = currentState.kinds == 0
-    rho0 = schemeConfig.fluid.restDensity
-    a_p_rho, pRho, nRho, errRho = _solve(
-        currentState, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0,
-        vEnter=vEnter, warmStart=0.5 * torch.zeros_like(currentState.densities), dt=dt, mode='density',
-        minIters=3, maxIters=256,
-        tol=1e-3, surfaceSource=SURFACE_SOURCE)
-    dvdt_inStep = a_p_rho
+    # (divergence + constant-density solves run above, ordered by SOLVE_ORDER)
 
     # To resolve the issues with particle disorder and clustering, we can also solve for the incompressible pressure using the Incompressible SPH solver
     # This effectively acts as a particle shifting term that helps to maintain particle order and prevent clustering
