@@ -63,6 +63,42 @@ from ..configurations import ShiftApplication, DensityEvolution, resolveDensityE
 from ..modules.density import computeDensities
 import copy
 
+#: TEMP (option 1 experiment): restore the VD+PS particle shift in
+#: `IncompressibleSystem.finalize` that the `_solve` rewrite of `dfsph_step`
+#: dropped. `dfsph_step` now folds the constant-density solve into the velocity
+#: only (`inStepVelocity` semantics), so nothing regularises the particle
+#: *distribution* -- on `tgv` the jittered lattice re-snaps in the first steps
+#: (DFSPH_FINDINGS.md 1.16). This re-adds a post-integrator position shift plus
+#: the Cornelis et al. Eq. 17 velocity resample.
+#:
+#: RESULT (measured): as `'cd'` with `dfsph.INSTEP_CD = False` (the true
+#: pre-tmp VD+PS -- divergence projection in-step, constant density only as
+#: this shift) it **fully resolves the tgv energy injection**: KE x1.000,
+#: peak x1.000, monotone, and clean at nx=64 / 400 steps (no jitter=0 late
+#: detonation). BUT `hydrostaticColumn` then NaNs -- the finalize position
+#: shift alone cannot sustain a body force (Part 23); the column's safeguard
+#: is the in-step CD velocity. Both on (`INSTEP_CD = True`) double-counts the
+#: density error -> tgv KE x2.6, column NaN. `'delta'` + `INSTEP_CD = True`
+#: is compatible (column holds) but too weak to undo the jitter snap
+#: (tgv peak x1.05). No single setting holds both -> left OFF.
+_RESTORE_PS_SHIFT = False
+#: 'cd'    -- the VD+PS shift proper: `solveIncompressible` (dvdt=0). Double-
+#:            counts the density error when `dfsph.INSTEP_CD` is also on.
+#: 'delta' -- a Fickian concentration-gradient shift (`solveShifting`), a
+#:            different mechanism, so it can run *alongside* the in-step CD.
+_PS_SHIFT_MODE = 'cd'
+#: The VD+PS shift has two parts -- toggle each to see which does the work:
+#:   _PS_POSITION_SHIFT   -- `positions += dx` (dx = dt^2 * a_p).
+#:   _PS_VELOCITY_RESAMPLE -- `velocities += gradV . dx` (Cornelis Eq. 17).
+_PS_POSITION_SHIFT = True
+_PS_VELOCITY_RESAMPLE = True
+#: Apply the shift as a *velocity impulse* (`velocities += dx / dt`) instead of
+#: a position move -- i.e. the same quantity the position shift uses, routed to
+#: velocity. Predict: this stops regularising the distribution, so the tgv
+#: injection returns (mirror of `dfsph.INSTEP_CD = False`, which routes the CD
+#: solve to a position shift and breaks the column).
+_PS_SHIFT_AS_VELOCITY = False
+
 @dataclass
 class IncompressibleSystem(BaseIntegrationSystem):
     state: IncompressibleState = reference_state(tags=('physics_state',))
@@ -152,6 +188,50 @@ class IncompressibleSystem(BaseIntegrationSystem):
         )
         config = kwargs.get('config', None)
         schemeConfig = kwargs.get('schemeConfig', None)
+
+        # --- TEMP: restore the VD+PS particle shift (see `_RESTORE_PS_SHIFT`) --
+        if _RESTORE_PS_SHIFT and config is not None and schemeConfig is not None:
+            with record_function("[warpSPH] - [dfsph] - VD+PS particle shift"):
+                self.adjacency = buildVerletList(
+                    self.state, config.domain, verletScale=config.verletScale,
+                    supportMode=SupportScheme.SuperSymmetric,
+                    priorNeighborhood=self.adjacency, verbose=False)
+                self.state.densities = computeDensities(
+                    self.state, config, schemeConfig, self.adjacency)
+                if _PS_SHIFT_MODE == 'delta':
+                    dx_ps = solveShifting(
+                        systemState=self.state, config=config,
+                        schemeConfig=schemeConfig, adjacency=self.adjacency, dt=dt)
+                    dvdt_incomp = dx_ps / (dt * dt)
+                else:
+                    dvdt_incomp, _p_ps, _e_ps, _ps_ps = solveIncompressible(
+                        particles=self.state, config=config, schemeConfig=schemeConfig,
+                        adjacency=self.adjacency,
+                        dvdt=torch.zeros_like(self.state.velocities), dt=dt,
+                        verbose=False)
+                gradVel = warpOperation(
+                    self.state,
+                    operationProperties=OperationProperties(
+                        operation=WarpOperation.Gradient, kernel=config.kernel,
+                        supportMode=SupportScheme.Gather,
+                        operationMode=OperationDirection.AllToAll,
+                        gradientMode=GradientScheme.Difference),
+                    queryValues=self.state.velocities,
+                    domain=config.domain, adjacency=self.adjacency)
+                dx = dt * dt * dvdt_incomp
+                proj_vel = torch.einsum('nij, nj -> ni', gradVel, dx)
+                fluidCol = (self.state.kinds == 0).unsqueeze(-1)
+                if _PS_POSITION_SHIFT:
+                    if _PS_SHIFT_AS_VELOCITY:
+                        self.state.velocities = torch.where(
+                            fluidCol, self.state.velocities + dx / dt,
+                            self.state.velocities)
+                    else:
+                        self.state.positions = torch.where(
+                            fluidCol, self.state.positions + dx, self.state.positions)
+                if _PS_VELOCITY_RESAMPLE:
+                    self.state.velocities = torch.where(
+                        fluidCol, self.state.velocities + proj_vel, self.state.velocities)
 
         # self.adjacency = buildVerletList(
         #     self.state, 

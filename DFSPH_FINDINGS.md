@@ -707,6 +707,96 @@ wall-bounded column}. `DIVERGENCE_SOLVER` ships `'omni'` (hold the column, as
 the rewrite intends); closing both at once is Part 23 / the active track, not
 a default flip. `probe_dfsphXsphRegression.py` + `scripts/…Tune.py` cover it.
 
+### 1.17 The `tgv` energy injection is a *missing particle shift*, not the projection; it also detonates the bounded box; and the only case a restored shift cannot hold is the free surface (Part 47)
+
+§1.16's first read blamed the under-relaxed divergence Jacobi. The fuller
+picture: the tmp-commit rewrite of `dfsph_step` onto `omniIncompressible._solve`
+also **gutted the "PS" of VD+PS** — the post-integrator particle shift in
+`IncompressibleSystem.finalize` (`solveIncompressible` with `dvdt = 0`, plus
+the Cornelis et al. Eq. 17 resample). Nothing then keeps the particle
+*distribution* regular.
+
+**It is a shift instability with a snap.** On `tgv` (`probe_hydrostaticColumnDfsphSurface.py`
+lineage, `scripts/make_video_dfsphPsCompare.py`):
+
+- With a **perfect lattice** (`jitter = 0`) there is *no* injection at all —
+  KE ×0.9996, peak ×1.0000, monotone. The bump only appears once the jitter
+  perturbs the lattice, and it scales *with* the jitter (0.01 → peak ×1.017,
+  0.03 → ×1.043). The jitter is relaxed by `relaxLattice` against
+  `solveIncompressible`, but the run's `_solve` operator has a different fixed
+  point, so steps 1–15 re-snap the distribution — that snap is the KE jump.
+- `jitter = 0` only **delays** it: nx=64 detonates near step ~800.
+- Over the full second the baseline `tgv` injection *runs away*: KE 9.9 → 18.3
+  (×1.86), **peak ×46**, `|v|max` → 3.1 in a unit-speed vortex.
+
+**Restoring the shift resolves it.** `incompressible._RESTORE_PS_SHIFT = True`
+with `dfsph.INSTEP_CD = False` (the true pre-tmp VD+PS: divergence projection
+in-step, constant density *only* as the finalize position shift) →
+`tgv` KE ×0.975, **peak ×1.0000, monotone for the whole second**, and stable
+at nx=64 / 400 steps (no `jitter = 0` late detonation).
+
+**It is the position move, not the resample (`_PS_POSITION_SHIFT` /
+`_PS_VELOCITY_RESAMPLE`).** `_PS_POSITION_SHIFT` alone is bit-identical to
+position+resample; the Eq. 17 `_PS_VELOCITY_RESAMPLE` alone does not
+regularise the distribution (non-monotone at 400 steps, ≈ no shift). And the
+shift must be a *position* move: `_PS_SHIFT_AS_VELOCITY` (route `dx` to
+`v += dx/dt`) NaNs — the exact mirror of `INSTEP_CD = False` routing the CD
+solve to a position shift and breaking the column.
+
+**The double-count.** PS shift *and* the in-step CD velocity
+(`INSTEP_CD = True`) both solve the same `1 − ρ/ρ0`: `tgv` KE ×2.6, column
+NaN. `dfsph.SOLVE_ORDER = 'cd_then_div'` (the divergence pass projects the CD
+impulse's non-div-free part the *same* step, rather than next step) *contains*
+it — `tgv` bounded, column NaN → `|v| ≈ 2` — but does not fix it.
+
+**Ordering (`SOLVE_ORDER`).** `div_then_cd` (shipped) vs `cd_then_div`:
+**~neutral for `tgv`** (×1.061 vs ×1.064 at nx=32/20 — so the injection is
+*not* an ordering artifact), but `cd_then_div` degrades the column
+(`|v|` 0.067 → 4.5): running the divergence pass *last* projects out the CD
+impulse that holds the column against gravity. CD applied **last and
+unprojected** is load-bearing. (omniSPH's own loop is div-then-density.)
+
+**The bounded box detonates at fixed `dt`.** `randomFlowIncompressible
+--bounded` nx=64, `dt = 1e-3` fixed: the shipped scheme blows up — KE
+0.35 → 20.7 (**×60**), `|v|` → 10.7, peak KE ×116 (the adaptive-`dt` CFL clamp
+hides this in the graded runs). **PS-restore fixes it** — KE ×0.994, peak
+×1.0000, `|v|` ~ 1.0, density band 8.5e-3 (`scripts/make_video_dfsphBoundedRandom.py`).
+
+**Ablation — the one thing PS-restore cannot hold is a free surface**
+(`scripts/probe_dfsphAblation.py`, nx=48 / 300 steps / fixed `dt`). PS-restore
+holds:
+
+| test | geometry added | PS-restore |
+|---|---|---|
+| `tgv` | periodic, decaying | ✓ KE ×0.98 |
+| `randomFlowIncompressible --bounded` | domain wall band | ✓ KE ×0.99 |
+| periodic + **static obstacle** | solid internal boundary | ✓ finite (density rough near the obstacle, band 0.36 vs 0.003) |
+| `drivenSquare` | **moving** solid boundary | ✓ finite (band 0.24 near the body) |
+| periodic + **oscillating gravity** (`dfsph.GRAVITY_OSC`) | uniform mean-zero body force | ✓ **bit-for-bit as good as baseline** (KE ×19.5 both, band *better*: 1.8e-3 vs 3.1e-3) |
+| **`hydrostaticColumn`** | walls + **free surface** + gravity | ✗ **NaN** |
+
+So it is **not** walls (bounded box holds — and is the case baseline
+*detonates*), **not** the body force ("position shift cannot sustain a body
+force", Part 23, does *not* generalise — oscillating gravity in a periodic box
+is fine), **not** solid/moving boundaries. **Mechanism** (named in
+`relaxLattice`'s own docstring): the PS shift calls `solveIncompressible`,
+whose source `ρ0 − ρ*` with `ρ*` clamped at `0.9` drives the free-surface skin
+(legitimately ~0.5) toward that floor every step → surface collapse → NaN.
+**Fix direction:** a free-surface-aware shift — mask/scale it on
+`surfaceIndicators == 1`, or route it through the delta-SPH `solveShifting`
+path (which reads `shiftProperties.surfaceScaling` / `projectionScheme`);
+`_PS_SHIFT_MODE = 'delta'` was too weak *alongside* the in-step CD, but with
+`INSTEP_CD = False` it is the only shift and may suffice. The near-obstacle
+density roughening is a candidate for the same masking.
+
+**Secondary:** baseline holds the static obstacle but detonates the walled box,
+so **baseline's own instability is the domain wall band specifically**, not
+solid boundaries in general.
+
+Knobs (all off/inert by default): `dfsph.{INSTEP_CD, SOLVE_ORDER,
+GRAVITY_OSC}`, `incompressible.{_RESTORE_PS_SHIFT, _PS_SHIFT_MODE,
+_PS_POSITION_SHIFT, _PS_VELOCITY_RESAMPLE, _PS_SHIFT_AS_VELOCITY}`.
+
 ---
 
 ## 2. Negative results — do not re-run these
