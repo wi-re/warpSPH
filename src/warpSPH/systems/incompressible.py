@@ -80,8 +80,15 @@ import copy
 #: is the in-step CD velocity. Both on (`INSTEP_CD = True`) double-counts the
 #: density error -> tgv KE x2.6, column NaN. `'delta'` + `INSTEP_CD = True`
 #: is compatible (column holds) but too weak to undo the jitter snap
-#: (tgv peak x1.05). No single setting holds both -> left OFF.
-_RESTORE_PS_SHIFT = False
+#: (tgv peak x1.05).
+#:
+#: `'auto'` (default) resolves the tension by *case*: run the shift where
+#: there is no body force (`tgv`, the bounded box, `kolmogorov`, ...) -- it
+#: regularises the distribution and `dfsph.INSTEP_CD = 'auto'` drops the
+#: in-step CD there -- and skip it where a body force needs the in-step CD
+#: (`hydrostaticColumn`). No case runs both, so no double-count. `True` /
+#: `False` force it; `'cd'` is the shift mode (see `_PS_SHIFT_MODE`).
+_RESTORE_PS_SHIFT = 'auto'
 #: 'cd'    -- the VD+PS shift proper: `solveIncompressible` (dvdt=0). Double-
 #:            counts the density error when `dfsph.INSTEP_CD` is also on.
 #: 'delta' -- a Fickian concentration-gradient shift (`solveShifting`), a
@@ -98,6 +105,12 @@ _PS_VELOCITY_RESAMPLE = True
 #: injection returns (mirror of `dfsph.INSTEP_CD = False`, which routes the CD
 #: solve to a position shift and breaks the column).
 _PS_SHIFT_AS_VELOCITY = False
+#: Free-surface-aware shift (DFSPH_FINDINGS.md 1.17): zero the shift on
+#: `surfaceIndicators == 1` rows. `solveIncompressible`'s source `rho0 - rho*`
+#: with `rho*` clamped at 0.9 drives the surface skin (legit ~0.5) toward that
+#: floor every step -> `hydrostaticColumn` NaN; masking the surface is the
+#: cheapest guard. `taper` scales by `surfaceLambdas` instead of a hard cut.
+_PS_SURFACE_MASK = False   # False | 'hard' | 'taper'
 
 @dataclass
 class IncompressibleSystem(BaseIntegrationSystem):
@@ -190,7 +203,14 @@ class IncompressibleSystem(BaseIntegrationSystem):
         schemeConfig = kwargs.get('schemeConfig', None)
 
         # --- TEMP: restore the VD+PS particle shift (see `_RESTORE_PS_SHIFT`) --
-        if _RESTORE_PS_SHIFT and config is not None and schemeConfig is not None:
+        # `'auto'`: run the shift for the non-body-force cases (`tgv`, the
+        # bounded box) whose distribution it regularises, and skip it where a
+        # body force needs the in-step CD instead (`hydrostaticColumn`).
+        _psShift = _RESTORE_PS_SHIFT
+        if _psShift == 'auto':
+            _psShift = (schemeConfig is not None
+                        and not schemeConfig.gravityConfig.active)
+        if _psShift and config is not None and schemeConfig is not None:
             with record_function("[warpSPH] - [dfsph] - VD+PS particle shift"):
                 self.adjacency = buildVerletList(
                     self.state, config.domain, verletScale=config.verletScale,
@@ -221,6 +241,19 @@ class IncompressibleSystem(BaseIntegrationSystem):
                 dx = dt * dt * dvdt_incomp
                 proj_vel = torch.einsum('nij, nj -> ni', gradVel, dx)
                 fluidCol = (self.state.kinds == 0).unsqueeze(-1)
+                if _PS_SURFACE_MASK:
+                    si = getattr(self.state, 'surfaceIndicators', None)
+                    if si is not None:
+                        if _PS_SURFACE_MASK == 'taper':
+                            sl = getattr(self.state, 'surfaceLambdas', None)
+                            w = (sl.clamp(0.0, 1.0).unsqueeze(-1)
+                                 if sl is not None
+                                 else (si < 0.5).to(dx.dtype).unsqueeze(-1))
+                        else:  # 'hard'
+                            w = (si.to(torch.bool).logical_not()
+                                 ).to(dx.dtype).unsqueeze(-1)
+                        dx = dx * w
+                        proj_vel = proj_vel * w
                 if _PS_POSITION_SHIFT:
                     if _PS_SHIFT_AS_VELOCITY:
                         self.state.velocities = torch.where(
