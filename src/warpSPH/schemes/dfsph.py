@@ -50,6 +50,32 @@ __all__ = ['dfsph_step']
 #: is a wash. Kept as an off-by-default hook; `'full'` is the graded default.
 SURFACE_SOURCE = 'full'
 
+#: Which routine runs the divergence-free projection. Both use the same
+#: operator pair (`_divergence` difference form + `computePressureAccelIISPH`);
+#: they differ in *solver quality*, and that is where the `tgv` energy shows up.
+#:   'omni' -- `omniIncompressible._solve` (mode='divergence'): under-relaxed
+#:            Jacobi, `OMEGA = 0.3`, cold start, hard 2-iteration cap, no gauge
+#:            re-centre. Two sweeps from zero do not fully project `vEnter`, and
+#:            the semi-implicit integrator then does `+work` with the residual
+#:            divergence over the cold-start transient -- `tgv` fluid KE grows
+#:            ~6% in the first ~15 steps (the `test_tgvKineticEnergy*` failure).
+#:            Iterating it to `tol=1e-5` still leaves ~4.5% (the under-relaxed
+#:            Jacobi plateaus on this operator).
+#:   'vdps' -- `modules/incompressible.solveDivergenceFree`: optimal-step
+#:            (`omega_k = <r,q>/<q,q>`, the exact 1-D minimiser), 0.75x warm
+#:            start, per-iterate mean-zero gauge. A genuinely convergent
+#:            projection: `tgv` KE is flat to ~0.8% over 20 steps. BUT the
+#:            optimal step + mean-centre is the spurious-force move
+#:            DFSPH_FINDINGS.md 1.5 / Part 26 forbid at a free surface -- it
+#:            cannot sustain a body force and `hydrostaticColumn` blows up
+#:            (|v| -> 5, slope ratio 0.24), and with the position-shift path
+#:            removed from `IncompressibleSystem.finalize` it also no longer
+#:            *decays* `tgv` at the analytic rate. Kept for the A/B only.
+#: Default 'omni' holds the wall-bounded column (the tmp-commit's whole point)
+#: at the cost of the periodic KE tests. Closing both at once is the plan's
+#: open central problem (Part 23 / the active track), not a one-line default.
+DIVERGENCE_SOLVER = 'omni'
+
 #: Post-solve XSPH velocity filter (omniSPH `SPHSimulation::XSPH`, folded into
 #: `dvdt` as `scale * sum_j c_j V_j (v_j - v_i) W_ij / dt`, `c` from
 #: `omniIncompressible.XSPH_FLUID`). The `hydrostaticColumn` residual `|v|` is
@@ -200,29 +226,29 @@ def dfsph_step(
     # This is the standard incompressible approach
     # However, this can lead to issues with particle disorder and clustering 
     currentState.pressures = torch.zeros_like(currentState.densities) if currentState.pressures is None else currentState.pressures
-    # dvdt_pressure, pressure, errors, pressures = solveDivergenceFree(
-    #     particles = currentState,
-    #     config = config,
-    #     schemeConfig = schemeConfig,
-    #     adjacency = adjacency,
-    #     dvdt = dvdt + dvdt_diss,
-    #     dt = dt
-    # )
-    accel = dvdt + dvdt_diss 
-    accel[currentState.kinds != 0] = 0.0
-    vEnter = currentState.velocities + dt * accel
-    velocities = currentState.velocities.clone()
-    currentState.velocities = vEnter
-    vEnter = computeBoundaryVelocities(currentState, config, schemeConfig, adjacency)
-    currentState.velocities = velocities
     fluid = currentState.kinds == 0
     rho0 = schemeConfig.fluid.restDensity
-    a_p_div, _, nDiv, errDiv = _solve(
-        currentState, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0,
-        vEnter=vEnter, warmStart=torch.zeros_like(currentState.densities), dt=dt,
-        mode='divergence', minIters=2,
-        maxIters=32, tol=1e-2)
-    dvdt_pressure = a_p_div
+    if DIVERGENCE_SOLVER == 'vdps':
+        dvdt_pressure, pressure, errDiv, _ = solveDivergenceFree(
+            particles=currentState, config=config, schemeConfig=schemeConfig,
+            adjacency=adjacency, dvdt=dvdt + dvdt_diss, dt=dt)
+        currentState.pressures = pressure
+    elif DIVERGENCE_SOLVER == 'omni':
+        accel = dvdt + dvdt_diss
+        accel[currentState.kinds != 0] = 0.0
+        vEnter = currentState.velocities + dt * accel
+        velocities = currentState.velocities.clone()
+        currentState.velocities = vEnter
+        vEnter = computeBoundaryVelocities(currentState, config, schemeConfig, adjacency)
+        currentState.velocities = velocities
+        a_p_div, _, nDiv, errDiv = _solve(
+            currentState, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0,
+            vEnter=vEnter, warmStart=torch.zeros_like(currentState.densities), dt=dt,
+            mode='divergence', minIters=2,
+            maxIters=32, tol=1e-2)
+        dvdt_pressure = a_p_div
+    else:
+        raise ValueError(f'Unknown DIVERGENCE_SOLVER: {DIVERGENCE_SOLVER!r}')
     # print(f'step {currentSystem.t:.6g}: pressure stats: mean={pressure.mean().item():.6g}, min={pressure.min().item():.6g}, max={pressure.max().item():.6g}')
     # currentState.pressures = pressure
     # if boundaryPressureMode == BoundaryPressureMode.mdbcMlsPressure:
