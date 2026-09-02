@@ -71,19 +71,23 @@ SURFACE_SOURCE = 'full'
 #:            (|v| -> 5, slope ratio 0.24), and with the position-shift path
 #:            removed from `IncompressibleSystem.finalize` it also no longer
 #:            *decays* `tgv` at the analytic rate. Kept for the A/B only.
-#: Default 'omni' holds the wall-bounded column (the tmp-commit's whole point)
-#: at the cost of the periodic KE tests. Closing both at once is the plan's
-#: open central problem (Part 23 / the active track), not a one-line default.
+#: Default 'omni'. (Note: 'omni' was thought to cost the periodic KE tests,
+#: but §1.17 / Part 47 traced that to a *missing particle shift*, not this
+#: projection -- restoring the shift, gated by `INSTEP_CD` / `_RESTORE_PS_SHIFT
+#: = 'auto'`, makes the suite green with 'omni'.)
 DIVERGENCE_SOLVER = 'omni'
 
-#: TEMP (option 1 experiment): whether the in-step constant-density `_solve`
-#: result is folded into `dvdt` (`inStepVelocity` semantics -- the column's
-#: safeguard). Set `False` to test the pre-tmp architecture: divergence
-#: projection in-step, constant-density applied only as the `finalize`
-#: VD+PS *position* shift (`systems/incompressible._RESTORE_PS_SHIFT`).
-#: Applying both double-counts the density error and blows up (tgv KE grows,
-#: column NaNs).
-INSTEP_CD = True
+#: Whether the in-step constant-density `_solve` result is folded into `dvdt`
+#: (`inStepVelocity` semantics). It is the *only* support a body-force column
+#: has (fall-and-push-back), but its unprojected impulse is exactly what
+#: destabilises `tgv` / the bounded box, and applying it *and* the VD+PS
+#: position shift double-counts the density error (tgv KE grows, column NaNs).
+#:   `'auto'` (default) -- on when `schemeConfig.gravityConfig.active`, i.e.
+#:                         `hydrostaticColumn` keeps it, everything else drops
+#:                         it and takes the VD+PS shift instead
+#:                         (`incompressible._RESTORE_PS_SHIFT = 'auto'`).
+#:   `True` / `False`   -- force it. See DFSPH_FINDINGS.md 1.17.
+INSTEP_CD = 'auto'
 
 #: TEMP (ordering experiment): order of the two `_solve` passes when
 #: `DIVERGENCE_SOLVER == 'omni'`.
@@ -260,6 +264,13 @@ def dfsph_step(
     fluid = currentState.kinds == 0
     rho0 = schemeConfig.fluid.restDensity
     _zeros = torch.zeros_like(currentState.densities)
+    # `'auto'`: fold the in-step CD into the velocity only for a body-force
+    # case (`hydrostaticColumn`), where the fall-and-push-back cycle is the
+    # column's only support -- and leave it off elsewhere, where that
+    # unprojected impulse destabilises `tgv` / the bounded box and the VD+PS
+    # position shift regularises the distribution instead (FINDINGS 1.17).
+    _instepCD = (schemeConfig.gravityConfig.active if INSTEP_CD == 'auto'
+                 else INSTEP_CD)
 
     def _omniPass(mode, priorAccel, warmStart, minIters, maxIters, tol,
                   surfaceSource='full'):
@@ -285,12 +296,12 @@ def dfsph_step(
         currentState.pressures = pressure
         a_p_rho, pRho, nRho, errRho = _omniPass(
             'density', dvdt_pressure, 0.5 * _zeros, 3, 256, 1e-3, SURFACE_SOURCE)
-        dvdt_inStep = a_p_rho if INSTEP_CD else torch.zeros_like(a_p_rho)
+        dvdt_inStep = a_p_rho if _instepCD else torch.zeros_like(a_p_rho)
     elif DIVERGENCE_SOLVER == 'omni':
         if SOLVE_ORDER == 'cd_then_div':
             a_p_rho, pRho, nRho, errRho = _omniPass(
                 'density', 0.0, 0.5 * _zeros, 3, 256, 1e-3, SURFACE_SOURCE)
-            dvdt_inStep = a_p_rho if INSTEP_CD else torch.zeros_like(a_p_rho)
+            dvdt_inStep = a_p_rho if _instepCD else torch.zeros_like(a_p_rho)
             a_p_div, _, nDiv, errDiv = _omniPass(
                 'divergence', dvdt_inStep, _zeros, 2, 32, 1e-2)
             dvdt_pressure = a_p_div
@@ -300,7 +311,7 @@ def dfsph_step(
             dvdt_pressure = a_p_div
             a_p_rho, pRho, nRho, errRho = _omniPass(
                 'density', dvdt_pressure, 0.5 * _zeros, 3, 256, 1e-3, SURFACE_SOURCE)
-            dvdt_inStep = a_p_rho if INSTEP_CD else torch.zeros_like(a_p_rho)
+            dvdt_inStep = a_p_rho if _instepCD else torch.zeros_like(a_p_rho)
     else:
         raise ValueError(f'Unknown DIVERGENCE_SOLVER: {DIVERGENCE_SOLVER!r}')
     # print(f'step {currentSystem.t:.6g}: pressure stats: mean={pressure.mean().item():.6g}, min={pressure.min().item():.6g}, max={pressure.max().item():.6g}')
