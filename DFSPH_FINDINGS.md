@@ -614,6 +614,74 @@ mode measured, §2). Adami 2012 §3.2 is the outside-the-loop extrapolation
 `band2018pb` supersedes. omniSPH is also stable at `boundaryViscosity = 0.01`
 (not only `0.5`), so any wall no-slip should be light.
 
+### 1.16 On the current `divergenceFree` step the `hydrostaticColumn` residual is a bounded undamped free-surface limit cycle, and a light fluid XSPH decays it (Part 46)
+
+Context: `schemes/dfsph.py::dfsph_step` is now the omniSPH two-solve loop
+(`omniIncompressible._solve` for both the divergence and the constant-density
+pass) with DFSPH placement, `calibrateRestDensity` on, fixed `dt = 1e-3`, and
+the incoming `vEnter` re-passed through `computeBoundaryVelocities` before each
+solve. In that configuration it **holds `hydrostaticColumn` at nx=64 and
+nx=128** to `t = 1` — no divergence, `pressureSlopeRatio` 1.001, exact-gradient
+column. What is left is a **bounded residual `|v|`** that neither grows nor
+decays: nx=64 settles at `|v| ~ 0.07`, KE ~1.6e-5 flat for 1000 steps; nx=128
+peaks `|v| ~ 1.0` on the startup transient then settles at `|v| ~ 0.26`, KE
+~6.7e-4. Anatomy (`probe_hydrostaticColumnDfsphSurface.py`): the motion is in
+the **top ~3 fluid rows only** (bulk `|v| ~ 3e-3`), the same skin where plain
+summation density truncates to `rho ~ 0.69 rho0` (top row) / `~0.94` (second)
+/ `1.000` (row 3 down). The density deficit itself is **static** — those rows
+read the same low value at step 0 and step 1000 — so it is SPH free-surface
+kernel deficiency (§1.1), not an instability.
+
+Levers measured (`probe_hydrostaticColumnDfsph{SurfaceSource,Xsph,Tune}.py`,
+nx=64/128, 250–1000 steps, fixed `dt`):
+
+- **Reshaping the constant-density source at the surface is a wash.**
+  `omniIncompressible._solve` gained a `surfaceSource` kwarg
+  (`'full'` default = omniSPH; `'clamp'` = `min(1 - rho/rho0, 0)`, one-sided;
+  `'mask'` = drop the term on `surfaceIndicators == 1`; `'shepard'` = use the
+  0th-order density `rho_sum / sum_j (m_j/rho_j) W_ij`). `'shepard'` lifts
+  `densityP05` 0.947 → 0.972 and `minDensity` 0.76 → 0.80 but pushes `|v|`
+  0.066 → 0.20 and `embeddedMinDensity` 0.999 → 0.93; `'clamp'` moves nothing
+  by 500 steps; `'mask'` spikes `|v|` to 0.23. They trade the error between
+  the density axis and the velocity axis. `dfsph.SURFACE_SOURCE` ships
+  `'full'`. (Consistent with §2's "one-sided source clamping" published
+  negative — [I] §3.2.)
+
+- **Raising the inner-solve iteration counts makes it worse.** The Jacobi is a
+  smoother here, not a solver: `DIV_MIN_ITERS` 2 → 6 → 12 takes `|v|` 0.09 →
+  0.44 → 1.15 (the extra sweeps amplify the near-singular boundary mode the
+  mean-residual test cannot see — §1.7). `RHO_MIN_ITERS` 3 → 10: `|v|` → 0.18.
+  Left at the omniSPH values.
+
+- **A post-solve fluid XSPH decays the cycle cleanly, and this is new for the
+  DFSPH path.** Folding omniSPH's `SPHSimulation::XSPH` filter into `dvdt`
+  *before* the next step's divergence projection (so any divergence it adds is
+  cleaned up), `dfsph.XSPH_SCALE` in units of omniSPH's own `XSPH_FLUID =
+  0.05`:
+
+  | | nx=64, 1000 steps | nx=128, 500 steps |
+  |---|---|---|
+  | `XSPH_SCALE = 0` | KE 2.97e-5, `\|v\|` 0.115, `\|v\|@half` 0.066 (flat), presRes 1.2e-3, `densityP05` 0.979 | KE 6.7e-4, `\|v\|` 0.264, presRes 1.2e-2, `densityP05` 0.999, `embMin` 0.992 |
+  | `XSPH_SCALE = 1` | KE **5.4e-7** (55×), `\|v\|` **0.011**, `\|v\|@half` 0.025 (decaying), presRes 6.6e-4, `densityP05` 0.947 | KE **3.0e-7** (2250×), `\|v\|` **0.015**, presRes **3.4e-4** (36×), `densityP05` **1.000**, `embMin` **1.000** |
+
+  At nx=64 the only cost is `densityP05` 0.979 → 0.947 (the filter smears the
+  skin one row; `embeddedMinDensity` stays ~1.0). At nx=128 every axis
+  improves. `XSPH_SCALE = 2` is marginally better on `|v|` at nx=64 but
+  overshoots the nx=128 startup peak; `1.0` is the knee.
+
+  Why this is not §1.14 / Parts 37/39 (XSPH "a wash / null-to-negative"):
+  those were `iisph` (CD-only, energy-injecting on any vortical flow — Part
+  42) and `dfsphReference` in its *diverging* late-time regime, where XSPH fed
+  a marginal divergence Jacobi. Here the run is stable, the residual has no
+  energy source, and the increment is re-projected next step — so the smoother
+  monotonically removes energy.
+
+**`XSPH_SCALE` ships `0.0`** (inert; the periodic cases the scheme is clean on
+must stay clean — `tgv` KE at step 400 drops 33% at `XSPH_SCALE = 1`, the
+same over-dissipation §1.10 / the plan's "`omniIncompressible` over-dissipative
+from `XSPH_FLUID = 0.05`"). It is a per-case knob: turn it to ~1.0 for
+`hydrostaticColumn`, leave it off elsewhere.
+
 ---
 
 ## 2. Negative results — do not re-run these

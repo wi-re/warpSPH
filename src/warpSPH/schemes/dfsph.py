@@ -13,7 +13,7 @@ recomputed from scratch each step via `computeDensities`.
 """
 
 from warpSPH.configurations import SimulationConfig, WeaklyCompressibleSPHConfig
-from warpSPH.schemes.omniIncompressible import _solve
+from warpSPH.schemes.omniIncompressible import _solve, _xsphFilter
 from warpSPH.systems import CompSPHSystem, WeaklyCompressibleSystemUpdate
 from warpSPH.modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
 from warpSPH.modules.deltaSPH import computeVelocityDiffusion
@@ -39,6 +39,25 @@ from ..systems.incompressible import IncompressibleSystem, IncompressibleState, 
 import numpy as np
 
 __all__ = ['dfsph_step']
+
+#: How the constant-density solve's `(1 - rho/rho0)` source is treated at the
+#: kernel-truncated free surface (see `omniIncompressible._solve`). `'full'` is
+#: the omniSPH form; `'clamp'` / `'mask'` / `'shepard'` stop the solve chasing
+#: an unreachable rho0 in the surface skin. MEASURED (hydrostaticColumn nx=64,
+#: 500 steps): all three just trade the surface error between the density axis
+#: and the velocity axis -- `shepard` lifts `densityP05` 0.947 -> 0.972 but
+#: pushes `|v|` 0.066 -> 0.20 and `embeddedMinDensity` 0.999 -> 0.93; `clamp`
+#: is a wash. Kept as an off-by-default hook; `'full'` is the graded default.
+SURFACE_SOURCE = 'full'
+
+#: Post-solve XSPH velocity filter (omniSPH `SPHSimulation::XSPH`, folded into
+#: `dvdt` as `scale * sum_j c_j V_j (v_j - v_i) W_ij / dt`, `c` from
+#: `omniIncompressible.XSPH_FLUID`). The `hydrostaticColumn` residual `|v|` is
+#: an *undamped inviscid* free-surface limit cycle (it neither grows nor
+#: decays); the scheme carries no viscosity, so a light velocity smoother is
+#: the only thing that can decay it. `scale = 1.0` == omniSPH's coefficient;
+#: `0.0` reproduces the historical no-filter behaviour.
+XSPH_SCALE = 0.0
 
 
 def dfsph_step(
@@ -192,6 +211,10 @@ def dfsph_step(
     accel = dvdt + dvdt_diss 
     accel[currentState.kinds != 0] = 0.0
     vEnter = currentState.velocities + dt * accel
+    velocities = currentState.velocities.clone()
+    currentState.velocities = vEnter
+    vEnter = computeBoundaryVelocities(currentState, config, schemeConfig, adjacency)
+    currentState.velocities = velocities
     fluid = currentState.kinds == 0
     rho0 = schemeConfig.fluid.restDensity
     a_p_div, _, nDiv, errDiv = _solve(
@@ -253,13 +276,17 @@ def dfsph_step(
     accel = dvdt + dvdt_diss + dvdt_pressure
     accel[currentState.kinds != 0] = 0.0
     vEnter = currentState.velocities + dt * accel
+    velocities = currentState.velocities.clone()
+    currentState.velocities = vEnter
+    vEnter = computeBoundaryVelocities(currentState, config, schemeConfig, adjacency)
+    currentState.velocities = velocities
     fluid = currentState.kinds == 0
     rho0 = schemeConfig.fluid.restDensity
     a_p_rho, pRho, nRho, errRho = _solve(
         currentState, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0,
         vEnter=vEnter, warmStart=0.5 * torch.zeros_like(currentState.densities), dt=dt, mode='density',
         minIters=3, maxIters=256,
-        tol=1e-3)
+        tol=1e-3, surfaceSource=SURFACE_SOURCE)
     dvdt_inStep = a_p_rho
 
     # To resolve the issues with particle disorder and clustering, we can also solve for the incompressible pressure using the Incompressible SPH solver
@@ -312,12 +339,23 @@ def dfsph_step(
     #             currentState = currentState, config = config, schemeConfig = schemeConfig,
     #             adjacency = adjacency, advectionVelocities = advection)
 
+    # Post-solve XSPH velocity smoother (see `XSPH_SCALE`). The only sink for
+    # the undamped free-surface limit cycle in this otherwise-inviscid scheme.
+    # A case may override the module default via `schemeConfig.xsphFilterScale`
+    # (e.g. `hydrostaticColumn`'s `xsphScale` param); everything else is off.
+    xsphScale = getattr(schemeConfig, 'xsphFilterScale', XSPH_SCALE)
+    dvdt_xsph = torch.zeros_like(dvdt)
+    if xsphScale:
+        dvdt_xsph = xsphScale * _xsphFilter(
+            currentState, config, adjacency, currentState.kinds == 0) / dt
+        dvdt_xsph[currentState.kinds != 0] = 0.0
+
     # 16. build update
     # with TimedBlock('build update', use_cuda=True, device=config.device) as tb_update:
     with record_function("[warpSPH] - [deltaSPH - 16] - build update"):
         update = WeaklyCompressibleSystemUpdate(
             dxdt = currentState.velocities.clone(),# + dt * dvdt_incomp,
-            dvdt = (dvdt + dvdt_diss + dvdt_pressure + dvdt_inStep),
+            dvdt = (dvdt + dvdt_diss + dvdt_pressure + dvdt_inStep + dvdt_xsph),
                     # + (dvdt_inStep if dvdt_inStep is not None else 0.0)),
             drhodt = torch.zeros_like(currentState.densities),# + drhodt_diss,
             passive = torch.zeros(currentState.densities.shape, device=currentState.densities.device, dtype=torch.bool)
