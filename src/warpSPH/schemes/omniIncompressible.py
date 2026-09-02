@@ -348,7 +348,8 @@ def _pressureAccel(state: Any, config: Any, adjacency: Any,
 def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
            fluid: torch.Tensor, rho0: float, vEnter: torch.Tensor,
            warmStart: torch.Tensor, dt: float, mode: str,
-           minIters: int, maxIters: int, tol: float):
+           minIters: int, maxIters: int, tol: float,
+           surfaceSource: str = 'full'):
     """One omniSPH pressure solve (`divergenceSolve` / `densitySolve` inner
     loop, minus the boundary-triangle passes).
 
@@ -357,6 +358,22 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
 
       mode == 'divergence':  s = dt * _divergence(vEnter)
       mode == 'density':     s = (1 - rho/rho0) + dt * _divergence(vEnter)
+
+    `surfaceSource` reshapes the density-error part `(1 - rho/rho0)` of the
+    constant-density source (`mode == 'density'` only); `'full'` is omniSPH as
+    written. At a free surface plain SPH summation density is truncated
+    (`rho ~ 0.69 rho0` in the top row, `~0.94` in the second), so `'full'`
+    reads a large positive source there and the solve perpetually accelerates
+    the skin outward trying to "fill in" mass that kernel deficiency put out
+    of reach -- that push is the residual `|v|` on `hydrostaticColumn`. The
+    other modes stop demanding rho0 where it is unreachable:
+
+      'full'   -- (1 - rho/rho0), unmodified.
+      'clamp'  -- min(1 - rho/rho0, 0): one-sided, resist compression only
+                  (DFSPH-proper's non-negative pressure/kappa has the same
+                  effect). The bulk `dt*div` term is untouched.
+      'mask'   -- drop the density-error term on `surfaceIndicators == 1`
+                  rows outright; keep it in the bulk.
 
     Each iteration (omniSPH `computeAcceleration` + `updatePressure`):
       a_p   = _pressureAccel(p)
@@ -380,7 +397,32 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
 
         divEnter = _divergence(state, config, adjacency, vEnter)
         if mode == 'density':
-            source = (1.0 - state.densities / rho0) + dt * divEnter
+            densityError = 1.0 - state.densities / rho0
+            if surfaceSource == 'clamp':
+                densityError = densityError.clamp(max=0.0)
+            elif surfaceSource == 'mask':
+                surf = getattr(state, 'surfaceIndicators', None)
+                if surf is not None:
+                    densityError = torch.where(
+                        surf.to(torch.bool), torch.zeros_like(densityError),
+                        densityError)
+            elif surfaceSource == 'shepard':
+                # 0th-order (Shepard) density: rho_sum / sum_j (m_j/rho_j) W_ij.
+                # At a flat free surface both sums truncate the same way, so
+                # this reads ~rho0 in the skin (source ~0) while still seeing
+                # genuine bulk compression. No free-surface flag needed.
+                props = OperationProperties(
+                    kernel=config.kernel, operation=WarpOperation.Interpolate,
+                    supportMode=SupportScheme.SuperSymmetric)
+                weight = warpOperation(
+                    state, props, domain=config.domain,
+                    referenceValues=torch.ones_like(densityError),
+                    adjacency=adjacency)
+                rhoShep = state.densities / weight.clamp_min(1e-6)
+                densityError = 1.0 - rhoShep / rho0
+            elif surfaceSource != 'full':
+                raise ValueError(f'Unknown surfaceSource: {surfaceSource!r}')
+            source = densityError + dt * divEnter
         else:
             source = dt * divEnter
         source = torch.where(fluid, source, torch.zeros_like(source))

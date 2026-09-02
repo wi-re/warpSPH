@@ -152,6 +152,14 @@ def configureScheme(ctx: RunContext) -> None:
     schemeConfig.diffusionParams.inviscid = False
     schemeConfig.diffusionParams.viscidNu = ctx.param('nu')
     schemeConfig.shiftProperties.active = ctx.param('shifting', False)
+    # Post-solve fluid XSPH velocity smoother in `dfsph_step`, in units of
+    # omniSPH's own `XSPH_FLUID = 0.05` (DFSPH_FINDINGS.md 1.16). The residual
+    # `|v|` this case shows under `divergenceFree` is a bounded, undamped
+    # free-surface limit cycle; this otherwise-inviscid scheme has no other
+    # sink for it. `1.0` takes nx=64 KE 3e-5 -> 5e-7 and nx=128 KE 7e-4 ->
+    # 3e-7 (`densityP05` / `embeddedMinDensity` -> 1.000 at nx=128) for a ~3%
+    # `densityP05` cost at nx=64. Default 0.0 -- opt-in, and only this case.
+    schemeConfig.xsphFilterScale = ctx.param('xsphScale', 0.0)
     schemeConfig.gravityConfig.active = True
     schemeConfig.gravityConfig.type = GravityType.Directional
     schemeConfig.gravityConfig.magnitude = ctx.param('gravityMagnitude')
@@ -316,7 +324,11 @@ def hydrostaticDiagnostics(ctx: RunContext, state) -> Dict[str, float]:
     # Least-squares line p = a + b y.
     yBar, pBar = y.mean(), p.mean()
     denom = ((y - yBar) ** 2).sum()
-    b = ((y - yBar) * (p - pBar)).sum() / denom if denom > 0 else 0.0
+    # `denom == 0` (a single bulk y-level, e.g. a very coarse column) collapses
+    # the fit -- fall back to a zero slope, and keep `b` a tensor so the
+    # `.detach()` calls below still work.
+    b = (((y - yBar) * (p - pBar)).sum() / denom if denom > 0
+         else torch.zeros((), device=y.device, dtype=y.dtype))
     a = pBar - b * yBar
     residual = p - (a + b * y)
     # The analytic gradient: dp/dy = -rho0 g for gravity (0, -g).
@@ -392,6 +404,10 @@ hydrostaticColumnCase = registerCase(Case(
         # historical) or `noSlip` (a viscous no-slip wall once `nu > 0` --
         # decays the free-slip bulk slosh, `DFSPH_FINDINGS.md` 1.14).
         wallBC='freeSlip',
+        # Post-solve fluid XSPH scale for `divergenceFree` (`DFSPH_FINDINGS.md`
+        # 1.16), units of `XSPH_FLUID = 0.05`. 0 = the graded default; ~1.0
+        # decays the free-surface residual limit cycle.
+        xsphScale=0.0,
         # Lattice de-correlation (`shuffleParticles`, `shiftIters=0`); see
         # `initialConditions` for why the constant-density pre-relaxation
         # `tgv`/`shearWave` use is not run here.
