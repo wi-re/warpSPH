@@ -682,6 +682,31 @@ same over-dissipation §1.10 / the plan's "`omniIncompressible` over-dissipative
 from `XSPH_FLUID = 0.05`"). It is a per-case knob: turn it to ~1.0 for
 `hydrostaticColumn`, leave it off elsewhere.
 
+**The same rewrite regressed `tgv`: the `_solve` divergence projection injects
+energy.** `tests/test_physics.py::test_tgvKineticEnergy{DecaysAtRoughlyTheAnalyticRate,IsMonotoneDecreasing}`
+now fail — `tgv` nx=32 fluid KE *grows* ~6–8% over the first ~15 steps
+(`|v|` rises from 22.6 to 23.4 monotonically) before it turns over. The
+injector is the divergence-free projection itself, not the constant-density
+pass (killing the CD `_solve` leaves the growth unchanged) and not the
+pressure-mean gauge (per-iterate mean-centring the divergence `p` moves it
+< 1%). It is that `omniIncompressible._solve`'s divergence mode is an
+**under-relaxed Jacobi** (`OMEGA = 0.3`, cold start, hard 2-iteration cap):
+two sweeps from zero do not fully project `vEnter`, and the semi-implicit
+integrator does `+work` with the residual divergence over the cold-start
+transient. Iterating it to `tol = 1e-5` still leaves ~4.5% — the under-relaxed
+Jacobi plateaus on this operator. The convergent alternative,
+`solveDivergenceFree`'s optimal step (`omega_k = <r,q>/<q,q>`) + 0.75x warm
+start + per-iterate mean-zero gauge (`dfsph.DIVERGENCE_SOLVER = 'vdps'`), cuts
+the `tgv` injection to ~0.8% — **but** the optimal step + mean-centre is the
+spurious-force move §1.5 / Part 26 forbid at a free surface, so it cannot
+sustain a body force and `hydrostaticColumn` blows up (`|v|` → 5, slope ratio
+0.24), and with the position-shift path gone from
+`IncompressibleSystem.finalize` it also no longer *decays* `tgv` at the
+analytic rate. So the two projections each hold exactly one of {periodic KE,
+wall-bounded column}. `DIVERGENCE_SOLVER` ships `'omni'` (hold the column, as
+the rewrite intends); closing both at once is Part 23 / the active track, not
+a default flip. `probe_dfsphXsphRegression.py` + `scripts/…Tune.py` cover it.
+
 ---
 
 ## 2. Negative results — do not re-run these
