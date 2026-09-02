@@ -67,6 +67,11 @@ Eq. 33 at zero boundary pressure. The divergence solve always runs at zero
 boundary pressure (omniSPH's `divergenceSolve` has no wall-pressure term).
 See `WALL_PRESSURE_MODE` below.
 
+The density solve is omniSPH's relaxed Jacobi by default; `CD_SOLVER` can
+swap in a non-symmetric Krylov method (BiCGStab / GMRES) on the same linear
+system `A p = s`, for the free-surface cases where the Jacobi stalls
+(Part 42/43). See `CD_SOLVER` below.
+
 The step does its own integration and hands the integrator a no-op update;
 `DFSPHReferenceSystem` (systems/incompressible.py) copies the advanced fields
 across in `finalize`.
@@ -91,6 +96,8 @@ from ..modules.incompressible.consistent import applyConsistentCoupling
 from ..modules.incompressible.wallPressure import wallPressureExtrapolation
 from ..modules.incompressible.wp_alpha import computeAlpha
 from ..modules.pressure.iisph import computePressureAccelIISPH
+from ..modules.shifting.bicgstab import bicgstabSolve
+from ..modules.shifting.gmres import gmresSolve
 from ..systems.incompressible import IncompressibleSystemUpdate
 
 __all__ = ['omniIncompressible_step']
@@ -199,6 +206,73 @@ WALL_PRESSURE_MODE = 'shepard'
 CD_SOURCE_PROJECT = 'auto'
 CD_PROJECT_THRESHOLD = 0.7
 
+#: Constant-density (density-mode) linear solver (Part 43). omniSPH's own
+#: iteration is the relaxed Jacobi `p <- p + (omega/alpha)(s - A p)`
+#: (`'jacobi'` -- the default, and the ONLY usable setting today).
+#:
+#:   'jacobi'   -- omniSPH's relaxed Jacobi. The `p >= 0` free-surface guard
+#:                 and (closed box) the mean-zero projection are applied every
+#:                 iterate. Slow on the near-singular free-surface operator
+#:                 (`CD_TIKHONOV` restores its iteration budget), but stable.
+#:   'bicgstab' -- BiCGStab (`modules/shifting/bicgstab.py`) on `A p = s`,
+#:                 preconditioned by the Jacobi diagonal `1/alpha`, zero warm
+#:                 start, no per-iterate clamp (the operator must stay linear,
+#:                 so the wall-pressure closure runs `clampNonNeg=False`).
+#:   'gmres'    -- restarted GMRES(`CD_KRYLOV_RESTART`), same system / precond.
+#:
+#: `A p := -dt**2 * _divergence(accel(p))` with `accel` the same closure the
+#: Jacobi iterate uses (wall-pressure extrapolation + symmetric IISPH
+#: gradient), restricted to the fluid rows; the divergence solve is unaffected
+#: (always omniSPH's exact 3 Jacobi iterations).
+#:
+#: **`'bicgstab'` / `'gmres'` do NOT work yet** (Part 43): the composed wall
+#: operator is near-singular *and* strongly non-symmetric near the wall
+#: (MINRES: `status -13`; BiCGStab: breaks down at iteration ~1-3), so a
+#: matrix-free Krylov solve returns a tiny-residual / huge-norm (`|p| ~ 1e9`)
+#: iterate along the near-null space -- on every wall-bounded case, free
+#: surface AND compatibility-projected closed box, with or without
+#: `CD_TIKHONOV`. A reject guard (see `_solve`) stops the detonation but the
+#: run then loses density control. These are kept as scaffolding for the
+#: principled fix -- `band2018pb` (boundary samples as solve unknowns; makes
+#: the near-wall block consistent + symmetric) or an explicit symmetrisation
+#: of `A` via `computePressureShiftIISPH` -- see DFSPH_IMPROVEMENT_PLAN.md
+#: ranked-queue item 0.
+CD_SOLVER = 'jacobi'
+#: Krylov iteration cap / relative-residual tolerance / GMRES restart length,
+#: used only when `CD_SOLVER != 'jacobi'`.
+CD_KRYLOV_MAXITER = 256
+CD_KRYLOV_RTOL = 1e-3
+CD_KRYLOV_RESTART = 50
+
+#: Tikhonov diagonal shift on the density-mode operator, as a fraction of the
+#: IISPH diagonal `alpha` (Part 43). The *free-surface* constant-density
+#: operator `A p = -dt**2 div(a_p(p))` is **near-singular** -- the free
+#: surface pins the pressure constant only weakly (kernel deficiency), and in
+#: the relaxed-Jacobi path the per-iterate `p >= 0` clamp is what actually
+#: regularises it. Without the clamp (the linear system a Krylov method
+#: needs, or an unclamped Jacobi), the minimum-residual solution has a huge
+#: norm along the near-null space: measured on `hydrostaticColumn` nx=64
+#: step 30, raw BiCGStab / GMRES drive `|r|/|b|` to 1e-2 but with
+#: `|p|max ~ 450` (vs the clamped Jacobi's physical `~23`), which detonates
+#: the run. Deepening the (negative) diagonal by a uniform absolute shift
+#: `CD_TIKHONOV * median(|alpha_fluid|)` restores diagonal dominance and
+#: solves a nearby (slightly compressible) problem -- `(A - eps|D|) p = s` --
+#: the standard regularisation for a near-singular PPE. The shift is uniform,
+#: not per-row proportional to `alpha`: the kernel-deficient near-surface
+#: rows have tiny `|alpha|`, and that is exactly where the near-null space
+#: lives, so a proportional shift would leave it unregularised. Applied to
+#: both the Jacobi and the Krylov density path, ONLY when the compatibility
+#: projection did NOT fire (a closed box is handled by `CD_SOURCE_PROJECT`
+#: instead; a periodic case has no wall/surface singularity). Measured
+#: (`hydrostaticColumn` nx=128, `CD_SOLVER='jacobi'`, 400 steps): `0.1` takes
+#: the density solve off its 256-iteration cap (mean ~210 -> ~75 iters) with
+#: the run quality neutral-to-better (embeddedMinDensity 0.984 -> 0.99, slope
+#: 0.999 -> 1.005, maxRho 1.012 -> 1.027); a strict wash on `dambreak` (its
+#: CD solve already converges in the 3-iteration minimum). `0.0` = off (the
+#: pre-Part-43 behaviour, exact on the periodic / closed cases; a Krylov
+#: `CD_SOLVER` needs it non-zero but does not work regardless -- see there).
+CD_TIKHONOV = 0.0
+
 
 def _rebuildAdjacency(state: Any, system: Any, config: Any):
     adjacency = buildVerletList(
@@ -302,7 +376,6 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
         alpha = dt * dt * computeAlpha(
             state, config, schemeConfig, adjacency,
             apparentVolumes=apparent, includeBoundaryReaction=False)
-        invAlpha = OMEGA / alpha
         alphaBad = alpha.abs() < ALPHA_FLOOR
 
         divEnter = _divergence(state, config, adjacency, vEnter)
@@ -324,20 +397,106 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
                 source = source - torch.where(fluid, bm.expand_as(source),
                                               torch.zeros_like(source))
 
+        # Tikhonov diagonal shift for the near-singular free-surface operator
+        # (see `CD_TIKHONOV`). Applied only for the density solve when the
+        # compatibility projection did NOT fire (closed box / periodic need no
+        # shift). Uniform *absolute* shift `tik * med|alpha_fluid|`: a shift
+        # relative to each row's own `alpha` leaves the kernel-deficient
+        # near-surface rows (tiny `|alpha|`) unregularised, which is exactly
+        # where the near-null space lives.
+        tik = CD_TIKHONOV if (mode == 'density' and not project) else 0.0
+        if tik and bool(fluid.any()):
+            shift = tik * float(alpha[fluid].abs().median())
+        else:
+            shift = 0.0
+        alphaEff = alpha - shift
+        invAlpha = OMEGA / alphaEff
+
         wallP = WALL_PRESSURE_MODE if mode == 'density' else None
 
-        def accel(pt):
+        def accel(pt, clampWall=True):
             pin = wallPressureExtrapolation(
-                state, config, adjacency, pt, fluid, mode=wallP) \
-                if wallP else pt
+                state, config, adjacency, pt, fluid, mode=wallP,
+                clampNonNeg=clampWall) if wallP else pt
             return _pressureAccel(state, config, adjacency, pin, fluid)
+
+        def applyA(pt, a_p):
+            """`A_shift p = -dt**2 div(a_p(p)) - shift*p`, masked to fluid
+            (`shift >= 0`, so `- shift*p` deepens the negative diagonal)."""
+            aP = -dt * dt * _divergence(state, config, adjacency, a_p)
+            if shift:
+                aP = aP - shift * pt
+            return torch.where(fluid, aP, torch.zeros_like(aP))
+
+        # --- non-symmetric Krylov density solve (Part 43; CD_SOLVER) ---------
+        # The relaxed Jacobi below stalls on a free surface (Part 42). Drive
+        # the same linear system `A p = s` with BiCGStab / GMRES instead. The
+        # operator must be linear, so the wall-pressure closure runs
+        # `clampNonNeg=False` and the `p >= 0` free-surface guard is applied
+        # once, after the solve. The near-singular free-surface operator needs
+        # `CD_TIKHONOV` (a diagonal shift) to keep the solution bounded; even
+        # then a Krylov breakdown can hand back a wild iterate, so the result
+        # is only accepted if its true residual actually beats `|source|`
+        # (otherwise the step takes no density correction -- like a skipped
+        # solve -- rather than detonating).
+        if mode == 'density' and CD_SOLVER != 'jacobi':
+            alphaSafe = torch.clamp(alphaEff, max=-1e-6)
+            precond = torch.where(fluid, 1.0 / alphaSafe,
+                                  torch.zeros_like(alpha))
+
+            def matvec(pt):
+                pt = torch.where(fluid, pt, torch.zeros_like(pt))
+                return applyA(pt, accel(pt, clampWall=False))
+
+            # No warm start: the CD field "integrates" (ranked-queue item 3),
+            # so a carried iterate poisons the Krylov recurrence -- start clean.
+            x0 = torch.zeros_like(source)
+            if CD_SOLVER == 'bicgstab':
+                x, _status, conv = bicgstabSolve(
+                    matvec, source, x0, rtol=CD_KRYLOV_RTOL,
+                    maxiter=CD_KRYLOV_MAXITER, precond=precond, dim=1)
+            elif CD_SOLVER == 'gmres':
+                x, _status, conv = gmresSolve(
+                    matvec, source, x0, rtol=CD_KRYLOV_RTOL,
+                    maxiter=CD_KRYLOV_MAXITER, precond=precond,
+                    restart=CD_KRYLOV_RESTART, dim=1)
+            else:
+                raise ValueError(f'Unknown CD_SOLVER: {CD_SOLVER!r}')
+
+            # `conv[-1]` is the returned iterate's verified true residual norm
+            # `|A x - s|`. Reject the solve unless it (a) reduced the residual
+            # below `|s|` AND (b) returned a bounded solution -- a near-singular
+            # operator hands back a tiny-residual, huge-norm iterate along its
+            # near-null space (`|p| ~ 1e9` on `hydrostaticColumn` step 1), which
+            # detonates the run. `|x|_2 <= 1e3 * |s|` is the physical bound
+            # (pressure should not be orders of magnitude above the
+            # density-error source). On rejection the step takes no density
+            # correction, like a skipped solve.
+            srcNorm = float(source.norm())
+            resNorm = float(conv[-1]) if len(conv) else srcNorm
+            reject = (not (resNorm < srcNorm)
+                      or not bool(torch.isfinite(x).all())
+                      or float(x.norm()) > 1e3 * max(srcNorm, 1e-12)
+                      or float(x.abs().max()) > 1e5)
+            if reject:
+                return (torch.zeros_like(vEnter), torch.zeros_like(source),
+                        len(conv), resNorm)
+
+            if project:
+                x = x - torch.where(fluid, x[fluid].mean().expand_as(x),
+                                    torch.zeros_like(x))
+            else:
+                x = x.clamp(min=0.0)
+            bad = alphaBad | (~torch.isfinite(x)) | (x.abs() > 1e25) | ~fluid
+            x = torch.where(bad, torch.zeros_like(x), x)
+            return accel(x), x, len(conv), resNorm
 
         p = torch.where(fluid, warmStart, torch.zeros_like(warmStart))
         err = 0.0
         it = 0
         for it in range(maxIters):
             a_p = accel(p)
-            aP = -dt * dt * _divergence(state, config, adjacency, a_p)
+            aP = applyA(p, a_p)
             p = p + invAlpha * (source - aP)
             if mode == 'density':
                 if project:
@@ -352,6 +511,7 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
                 err = float(torch.clamp(residual, min=RESIDUAL_FLOOR)[fluid].mean())
             if it + 1 >= minIters and err <= tol:
                 break
+        print(f'[{mode}] {it + 1} iters, err {err:.3g}, p[{float(p.min()):+.3g}, {float(p.max()):+.3g}]')
         a_p = accel(p)
     return a_p, p, it + 1, err
 
@@ -407,14 +567,14 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
     # --- 5. XSPH velocity filter (omniSPH XSPH + BXSPH, post-solve) --------
     # omniSPH filters the start-of-step velocity (the solves only touched
     # `accel`), so this and the pressure impulse `dt*accel` add independently.
-    if XSPH_FLUID != 0.0 or XSPH_BOUNDARY != 0.0:
-        st.velocities = st.velocities + _xsphFilter(st, config, adjacency, fluid)
+    # if XSPH_FLUID != 0.0 or XSPH_BOUNDARY != 0.0:
+        # st.velocities = st.velocities + _xsphFilter(st, config, adjacency, fluid)
 
     # --- 6. integrate (omniSPH Integrate: single semi-implicit Euler) -----
     st.velocities = st.velocities + dt * torch.where(
         fcol, accel, torch.zeros_like(accel))
-    if DAMPING != 0.0:
-        st.velocities = st.velocities * (1.0 - DAMPING)
+    # if DAMPING != 0.0:
+        # st.velocities = st.velocities * (1.0 - DAMPING)
     st.positions = st.positions + dt * torch.where(
         fcol, st.velocities, torch.zeros_like(st.velocities))
 

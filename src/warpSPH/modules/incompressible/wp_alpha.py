@@ -91,7 +91,7 @@ def computeAlpha_Func_i_first(
     # Whether a static (kind != 0) neighbour contributes to the second sum,
     # i.e. to its own reaction against `i`'s pressure -- see
     # `BoundaryOperatorTerms`. 1 = historical AllToAll, 0 = fluid neighbours only.
-    boundaryReactionTerm: wp.int32, # type: ignore
+    # boundaryReactionTerm: wp.int32, # type: ignore
     # The output value is returned directly from the function, and should
 
     # Dummy value to allow allocation
@@ -135,7 +135,7 @@ def computeAlpha_Func_i_first(
         # `j` static (`kind != 0`) means `F^p_{j<-i} = 0`: it never accelerates
         # under `i`'s pressure, so its `dp_i/dx_j` term does not exist ([BK]
         # 3.2). The first sum (`dp_i/dx_i`) keeps it either way.
-        if boundaryReactionTerm != 0 or kj == 0:
+        if kj == 0:
             sumB += term2
             
     # alpha = areaI / mi * wp.dot(sumA, sumA) + areaI * sumB
@@ -162,7 +162,7 @@ def computeAlpha_Func_Adjacency_first(
     kernelProperties: kernelState, 
 
     queryApparentAreas: wp.array(dtype = scalar_t), referenceApparentAreas: wp.array(dtype = scalar_t), # type: ignore
-    boundaryReactionTerm: wp.int32, # type: ignore
+    # boundaryReactionTerm: wp.int32, # type: ignore
 ):
     xi, hi, mi, rhoi, ki = getParticle(queryState, i)
     if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
@@ -208,7 +208,7 @@ def computeAlpha_Func_Adjacency_first(
 
             # Viscosity function parameters
             areaI, referenceApparentAreas,
-            boundaryReactionTerm
+            # boundaryReactionTerm
         )
         alpha = areaI / mi * wp.dot(sumA, sumA) + areaI * sumB
         out += alpha
@@ -227,7 +227,7 @@ def computeAlpha_Kernel(
     kernelProperties: kernelState,
     # Do not change the parameters above
     queryApparentAreas: wp.array(dtype = scalar_t), referenceApparentAreas: wp.array(dtype = scalar_t), # type: ignore
-    boundaryReactionTerm: wp.int32, # type: ignore
+    # boundaryReactionTerm: wp.int32, # type: ignore
 
     # The last parameter is always the output array and should not be changed
     outputValues: wp.array(dtype = scalar_t) # type: ignore
@@ -246,7 +246,7 @@ def computeAlpha_Kernel(
         kernelProperties,  #queryKinds, referenceKinds,
         # The parameters above are default parameters and shold not be changed
         queryApparentAreas, referenceApparentAreas,
-        boundaryReactionTerm,
+        # boundaryReactionTerm,
     )
 
     outputValues[i] = alpha
@@ -263,7 +263,7 @@ _ALPHA = OperatorSpec(
     extras=(
         ExtraSpec("queryApparentAreas", ExtraKind.TENSOR),
         ExtraSpec("referenceApparentAreas", ExtraKind.TENSOR),
-        ExtraSpec("boundaryReactionTerm", ExtraKind.SCALAR),
+        # ExtraSpec("boundaryReactionTerm", ExtraKind.SCALAR),
     ),
 )
 
@@ -312,7 +312,7 @@ def computeAlphaWarp(
             return launchOperator(
                 _ALPHA, ctx,
                 queryApparentAreas=queryApparentAreas, referenceApparentAreas=referenceApparentAreas,
-                boundaryReactionTerm=wp.int32(1 if includeBoundaryReaction else 0),
+                # boundaryReactionTerm=wp.int32(1 if includeBoundaryReaction else 0),
             )
 
 
@@ -345,7 +345,7 @@ def computeAlpha(currentState: Any, config: SimulationConfig, schemeConfig: Any,
             adjacency=adjacency,
 
             queryApparentAreas=apparentVolumes,
-            includeBoundaryReaction=includeBoundaryReaction,
+            # includeBoundaryReaction=includeBoundaryReaction,
         )
         # return alpha
         return - alpha

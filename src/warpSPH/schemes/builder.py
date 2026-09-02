@@ -209,6 +209,25 @@ def _omniIncompressible() -> SchemeBundle:
     )
 
 
+def _band2018pb() -> SchemeBundle:
+    # IISPH with Pressure Boundaries (Band et al. 2018). Same lazy-import
+    # rationale as `_divergenceFree`; reuses the incompressible
+    # state/config/update and `DFSPHReferenceSystem` (the whole time
+    # integration happens inside the step). See `schemes/band2018pb.py`.
+    from .band2018pb import band2018pb_step
+    from ..systems.incompressible import (DFSPHReferenceSystem, IncompressibleState,
+                                          IncompressibleSystemUpdate)
+    return SchemeBundle(
+        SimulationSystem=DFSPHReferenceSystem,
+        SimulationState=IncompressibleState,
+        SimulationConfig=IncompressibleSPHConfig,
+        SimulationUpdate=IncompressibleSystemUpdate,
+        stepFunction=band2018pb_step,
+        exportFunction=incompressibleConfigToDict,
+        importFunction=dictToIncompressibleSPHConfig,
+    )
+
+
 def _waveEquation() -> SchemeBundle:
     return SchemeBundle(
         SimulationSystem=WaveSystemv3,
@@ -231,6 +250,7 @@ _SCHEMES = {
     IncompressibleSPHScheme.dfsphReference: _dfsphReference,
     IncompressibleSPHScheme.iisph: _iisph,
     IncompressibleSPHScheme.omniIncompressible: _omniIncompressible,
+    IncompressibleSPHScheme.band2018pb: _band2018pb,
     WaveEquationScheme.waveEquation: _waveEquation,
 }
 

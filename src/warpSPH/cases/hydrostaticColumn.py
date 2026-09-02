@@ -176,9 +176,9 @@ def initialConditions(ctx: RunContext, system) -> None:
     # Jitter the fluid only -- see the module docstring for why the
     # constant-density pre-relaxation is not run on a free-surface state.
     particles = system.state
-    particles.positions = shuffleParticles(
-        particles, ctx.config, ctx.schemeConfig, 0,
-        jitterAmount=ctx.param('jitter'))
+    # particles.positions = shuffleParticles(
+    #     particles, ctx.config, ctx.schemeConfig, 0,
+    #     jitterAmount=ctx.param('jitter'))
     particles.velocities[:] = 0.0
 
     # Optional rest-density calibration (Part 33, `dfsphReference` only in
@@ -212,6 +212,8 @@ def initialConditions(ctx: RunContext, system) -> None:
             check = computeDensities(particles, ctx.config, ctx.schemeConfig, None)
             print(f'[hydrostaticColumn] rest-density calibration: bulk median '
                   f'{ref:.4f} -> {float(check[bulk].median()):.4f} (rho0={rho0})')
+
+    # the above code is garbage
 
     # Start from the exact at-rest state, not from zero pressure. The step's
     # projection warm-starts from 75% of the incoming pressure (see
@@ -327,11 +329,10 @@ def hydrostaticDiagnostics(ctx: RunContext, state) -> Dict[str, float]:
 
 
 setupPlot, updatePlot = particlePlot([
-    Field('velocities', 'velocities', colorMap='viridis', mapping='L2Norm'),
+    Field('velocities', 'velocities', colorMap='viridis', mapping='L2Norm', boundary = 'Visualize'),
     # Pressure is the point of the case; span the hydrostatic range the
     # defaults imply (rho0 g H = 9.81 * 0.5, gauge-centred, so ~ +/- 2.5).
-    Field('pressures', 'pressures', colorMap='RdBu', colorMapKind='diverging',
-          flip=True, midPoint=0.0, vMin=-2.5, vMax=2.5),
+    Field('densities', 'densities', colorMap='viridis', boundary = 'Visualize'),
 ])
 
 
@@ -359,7 +360,7 @@ hydrostaticColumnCase = registerCase(Case(
         nx=128,
         L=1.0,
         tLimit=1.0,
-        periodic=False,
+        periodic=True,
         # `kolmogorovIncompressibleTimestep` applies `cflFactor` to the
         # particle diameter, so this is Bender & Koschier's published 0.4,
         # as on the other adaptive incompressible cases.
