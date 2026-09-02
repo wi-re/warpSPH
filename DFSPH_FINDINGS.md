@@ -682,8 +682,11 @@ same over-dissipation §1.10 / the plan's "`omniIncompressible` over-dissipative
 from `XSPH_FLUID = 0.05`"). It is a per-case knob: turn it to ~1.0 for
 `hydrostaticColumn`, leave it off elsewhere.
 
-**The same rewrite regressed `tgv`: the `_solve` divergence projection injects
-energy.** `tests/test_physics.py::test_tgvKineticEnergy{DecaysAtRoughlyTheAnalyticRate,IsMonotoneDecreasing}`
+**The same rewrite regressed `tgv` — but this paragraph's "the projection
+injects" reading is SUPERSEDED by §1.17 (it is the missing particle shift; the
+divergence-solver A/B below stands on its own merits). Kept for the trail.**
+
+**Original reading:** `tests/test_physics.py::test_tgvKineticEnergy{DecaysAtRoughlyTheAnalyticRate,IsMonotoneDecreasing}`
 now fail — `tgv` nx=32 fluid KE *grows* ~6–8% over the first ~15 steps
 (`|v|` rises from 22.6 to 23.4 monotonically) before it turns over. The
 injector is the divergence-free projection itself, not the constant-density
@@ -707,7 +710,7 @@ wall-bounded column}. `DIVERGENCE_SOLVER` ships `'omni'` (hold the column, as
 the rewrite intends); closing both at once is Part 23 / the active track, not
 a default flip. `probe_dfsphXsphRegression.py` + `scripts/…Tune.py` cover it.
 
-### 1.17 The `tgv` energy injection is a *missing particle shift*, not the projection; it also detonates the bounded box; and the only case a restored shift cannot hold is the free surface (Part 47)
+### 1.17 The `tgv` energy injection is a *missing particle shift*, not the projection; restoring it (gated by `gravityConfig.active`) fixes `tgv` + the bounded box with the column untouched — suite green (Part 47)
 
 §1.16's first read blamed the under-relaxed divergence Jacobi. The fuller
 picture: the tmp-commit rewrite of `dfsph_step` onto `omniIncompressible._solve`
@@ -782,20 +785,48 @@ is fine), **not** solid/moving boundaries. **Mechanism** (named in
 `relaxLattice`'s own docstring): the PS shift calls `solveIncompressible`,
 whose source `ρ0 − ρ*` with `ρ*` clamped at `0.9` drives the free-surface skin
 (legitimately ~0.5) toward that floor every step → surface collapse → NaN.
-**Fix direction:** a free-surface-aware shift — mask/scale it on
-`surfaceIndicators == 1`, or route it through the delta-SPH `solveShifting`
-path (which reads `shiftProperties.surfaceScaling` / `projectionScheme`);
-`_PS_SHIFT_MODE = 'delta'` was too weak *alongside* the in-step CD, but with
-`INSTEP_CD = False` it is the only shift and may suffice. The near-obstacle
-density roughening is a candidate for the same masking.
+**Free-surface fixes that DID NOT work.** `_PS_SURFACE_MASK` (zero the shift on
+`surfaceIndicators == 1`, hard or `surfaceLambdas`-tapered) NaNs
+`hydrostaticColumn` *faster* — it just moves the `rho*`-clamp compaction down
+one row and opens a discontinuity in the shift field at the surface.
+`_PS_SHIFT_MODE = 'delta'` (a surface-safe Fickian shift) as the *only* shift
+(`INSTEP_CD = False`) resolves `tgv` / the bounded box but still blows up the
+column at every strength — not from surface compaction this time but because
+with `INSTEP_CD = False` there is **no hydrostatic support at all** (the
+divergence projection stops further compression but never pushes back against
+gravity; a position shift cannot sustain a body force). `'delta'` *with*
+`INSTEP_CD = True` (no double-count — different mechanisms) holds the column
+and gets `tgv`'s decay-rate test to pass at `iterations ≈ 4`, but leaves a
+peak ×1.008 non-monotone bump (the in-step CD's own unprojected impulse) and
+degrades the bounded box past `iterations ≈ 8`.
+
+**The resolution (Part 47): gate by case.** `dfsph.INSTEP_CD = 'auto'` and
+`incompressible._RESTORE_PS_SHIFT = 'auto'` (both now the default) key off
+`schemeConfig.gravityConfig.active`:
+
+- **body-force case** (`hydrostaticColumn`): in-step CD **on**, VD+PS shift
+  **off** — byte-identical to the pre-Part-47 holding behaviour.
+- **everything else** (`tgv`, `randomFlowIncompressible` bounded/periodic,
+  `kolmogorovIncompressible`, `shearWave`, `staticBlob`, `impact`,
+  `squarePatch`): in-step CD **off**, VD+PS position shift (`'cd'` mode) **on**.
+
+No case runs both, so the double-count never arises. Measured:
+`tgv` nx=32/20 KE ×0.9996 / peak ×1.0000 / monotone — **passes both
+`test_tgvKineticEnergy*`** (rate/analytic 0.56, in the 0.6 ± 0.45 band);
+nx=64/400 the same. `hydrostaticColumn` nx=64 unchanged (`|v|` 0.066, slope
+1.0007, `densityP05` 0.947). `randomFlowIncompressible --bounded` KE ×0.994
+(was the ×60 detonation). **Full `tests/test_physics.py` + `test_runner.py`:
+82 passed / 0 failed** — green for the first time since the `_solve` rewrite.
 
 **Secondary:** baseline holds the static obstacle but detonates the walled box,
 so **baseline's own instability is the domain wall band specifically**, not
-solid boundaries in general.
+solid boundaries in general. And PS-restore roughens the density near a solid
+obstacle (band 0.36 vs 0.003) — a `--scheme divergenceFree` obstacle case is
+still not clean, just finite.
 
-Knobs (all off/inert by default): `dfsph.{INSTEP_CD, SOLVE_ORDER,
-GRAVITY_OSC}`, `incompressible.{_RESTORE_PS_SHIFT, _PS_SHIFT_MODE,
-_PS_POSITION_SHIFT, _PS_VELOCITY_RESAMPLE, _PS_SHIFT_AS_VELOCITY}`.
+Knobs: `dfsph.{INSTEP_CD ('auto'), SOLVE_ORDER, GRAVITY_OSC}`,
+`incompressible.{_RESTORE_PS_SHIFT ('auto'), _PS_SHIFT_MODE, _PS_POSITION_SHIFT,
+_PS_VELOCITY_RESAMPLE, _PS_SHIFT_AS_VELOCITY, _PS_SURFACE_MASK}`.
 
 ---
 
