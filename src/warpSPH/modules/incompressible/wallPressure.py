@@ -59,7 +59,7 @@ _SHEPARD_MIN = 1
 _LINEAR_MIN = 9
 
 
-def _shepardMirror(state, config, adjacency, p, fluid):
+def _shepardMirror(state, config, adjacency, p, fluid, clampNonNeg=True):
     boundary = state.kinds == 1
     props = OperationProperties(
         kernel=config.kernel, operation=WarpOperation.Interpolate,
@@ -69,28 +69,38 @@ def _shepardMirror(state, config, adjacency, p, fluid):
                         referenceValues=p, adjacency=adjacency)
     den = warpOperation(state, props, domain=config.domain,
                         referenceValues=torch.ones_like(p), adjacency=adjacency)
-    p_b = (num / den.clamp_min(1e-12)).clamp(min=0.0)
+    p_b = num / den.clamp_min(1e-12)
+    if clampNonNeg:
+        p_b = p_b.clamp(min=0.0)
     p_b = torch.where(den > _MIN_WEIGHT, p_b, torch.zeros_like(p_b))
     return torch.where(boundary, p_b, torch.where(fluid, p, torch.zeros_like(p)))
 
 
 def wallPressureExtrapolation(state: Any, config: Any, adjacency: Any,
                               p: torch.Tensor, fluid: torch.Tensor, *,
-                              mode: str = 'mls') -> torch.Tensor:
+                              mode: str = 'mls',
+                              clampNonNeg: bool = True) -> torch.Tensor:
     """Return `p` with the `kind == 1` rows filled with the extrapolated wall
     pressure. `mode` in {'shepard', 'mls'}; falls back to 'shepard' when there
     are no ghost points to run the Liu-Liu fit at. A no-op (returns `p`
-    unchanged) when the state has no boundary particles."""
+    unchanged) when the state has no boundary particles.
+
+    `clampNonNeg` (default True) clamps the extrapolated `p_b` to `>= 0`, the
+    physical (tensile-cut) wall pressure. Pass `False` to keep the closure a
+    genuine *linear* function of `p` -- required when a Krylov method drives
+    this operator (`omniIncompressible.CD_SOLVER in {'bicgstab', 'gmres'}`),
+    where the iterate `p` legitimately goes negative and the clamp would make
+    the matvec nonlinear."""
     boundary = state.kinds == 1
     if not bool(boundary.any()):
         return p
 
     if mode == 'shepard':
-        return _shepardMirror(state, config, adjacency, p, fluid)
+        return _shepardMirror(state, config, adjacency, p, fluid, clampNonNeg)
 
     ghost = state.kinds == 2
     if getattr(state, 'ghostIndices', None) is None or not bool(ghost.any()):
-        return _shepardMirror(state, config, adjacency, p, fluid)
+        return _shepardMirror(state, config, adjacency, p, fluid, clampNonNeg)
 
     hashMap = adjacency.hashMap if isinstance(adjacency, AdjacencyList) else None
     p_interp, p_grad, nNbr, A_g, b = interpolateLiuLiu(
@@ -106,7 +116,9 @@ def wallPressureExtrapolation(state: Any, config: Any, adjacency: Any,
     shep = torch.where(shepDen > 0, b[:, 0] / shepDen.clamp_min(1e-12),
                        torch.zeros_like(shepDen))
     p_b = torch.where(nNbr > _SHEPARD_MIN, shep, torch.zeros_like(shep))
-    p_b = torch.where(nNbr > _LINEAR_MIN, p_proj, p_b).clamp(min=0.0)
+    p_b = torch.where(nNbr > _LINEAR_MIN, p_proj, p_b)
+    if clampNonNeg:
+        p_b = p_b.clamp(min=0.0)
 
     out = torch.where(fluid, p, torch.zeros_like(p)).clone()
     out[bIdx] = p_b

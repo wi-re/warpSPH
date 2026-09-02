@@ -63,14 +63,79 @@ found it injects energy on `tgv`, viable only near-quiescent), and
 
 ## Active track — `omniIncompressible` on `randomFlowIncompressible --bounded`
 
-**Status (Part 42): the divergence is fixed; the open piece is the
-free-surface CD solve.** `omniIncompressible` now *holds* the closed box —
-`WALL_PRESSURE_MODE = 'shepard'` (was `'mls'`, which diverged the sheared
-case) + `CD_SOURCE_PROJECT = 'auto'` (the pure-Neumann compatibility
-projection that makes the closed-box constant-density Jacobi actually
-converge). What remains is that the *free-surface* CD Jacobi still stalls
-(§1.7) — the runs hold only because the un-converged impulse decays. See
-**"Next, in order"** at the end of this section.
+**Status (Part 45): `band2018pb` landed — a fresh operator module + a
+distinct scheme (`IncompressibleSPHScheme.band2018pb = 4`). Operator
+verified correct, the wall rank-deficiency removed; `hydrostaticColumn`
+nx=32 and nx=64 hold quiescent (`OMEGA_FLUID = 0.1`, `DIAG_TIKHONOV = 0.3`);
+nx=128 still sprays at the free surface. See "Next, in order" item 1.** Part 44 ruled out the "symmetrise `A`
++ MINRES" interim probe — `A` is *already* symmetric; the blocker is rank
+deficiency, and only full `band2018pb` addresses it. Part 42 fixed the
+divergence
+(`WALL_PRESSURE_MODE = 'shepard'`) and the closed-box compatibility
+(`CD_SOURCE_PROJECT = 'auto'`). Part 43 characterised the
+remaining free-surface CD stall: the constant-density operator
+`A p = -dt²·div(a_p(p))` is **near-singular**, not merely slow —
+`hydrostaticColumn` nx=128's CD Jacobi hits its 256-iteration cap every step
+(omniSPH's floored `mean(max(·,-1e-3))` metric reads "converged"; the true
+`|r|₂/|s| ≈ 0.94`; the per-iterate `p ≥ 0` clamp is what makes the run
+hold). `randomFlowIncompressible --bounded` nx=64 is the same — capped every
+step even *with* the compatibility projection.
+- **Landed (opt-in, default-inert): `omniIncompressible.CD_TIKHONOV`** — a
+  uniform absolute diagonal shift `tik·median(|alpha_fluid|)` on the
+  density-mode operator, applied only where `CD_SOURCE_PROJECT` did not fire.
+  On the Jacobi path, `tik = 0.1` takes `hydrostaticColumn` nx=128 off the
+  cap (mean 210 → ~75 iters, holds 400 steps, `embeddedMinDensity`
+  0.984 → 0.991, `slope` → 1.005, `maxRho` 1.012 → 1.027). Strict wash on
+  `dambreak` (its CD solve already converges in the 3-iter minimum). `tik = 0`
+  (the default) is bit-identical to pre-Part-43 on every case.
+- **Negative: `CD_SOLVER ∈ {bicgstab, gmres}`** — a non-symmetric Krylov
+  solve of the same `A p = s` **breaks down** on every wall-bounded case
+  (free surface *and* closed box), returning tiny-residual / `|p| ~ 1e9`
+  iterates along the near-null space. Uniform Tikhonov 0.1 is not enough; a
+  reject guard stops the detonation but the run then loses density control.
+  So the near-wall block needs `band2018pb` / an explicit symmetrisation of
+  `A` (`computePressureShiftIISPH`), not a diagonal patch — ranked-queue
+  item 0. The `CD_SOLVER` plumbing + guard are landed as the scaffold for
+  that; `'jacobi'` stays the default and only usable setting.
+- **Part 44 — the cheaper interim probe ("symmetrise `A` via
+  `computePressureShiftIISPH`, then MINRES") is a dead end, for a reason that
+  redirects item 1.** `scripts/probe_omniIncompressibleCDSymmetry.py` captures
+  the healthy density-mode system *inside* `applyConsistentCoupling` and, on
+  that one system, measures the symmetry defect of three operator forms and
+  runs relaxed Jacobi / MINRES / CG / BiCGStab on each. Findings
+  (`hydrostaticColumn` nx=64 s30, `randomFlowIncompressible --bounded` nx=64
+  s5, `dambreak` nx=64 s30):
+  - **`A` is already symmetric.** `A_plain` (boundary `p ≡ 0`, BWJ23 Eq. 33)
+    and `A_krylov` (`krylov.buildIISPHMatvec`, `staticBoundary`, `dt²`) have a
+    relative symmetry defect `|⟨Ax,y⟩−⟨x,Ay⟩| / (‖Ax‖‖y‖)` of 2.7e-5
+    (bounded box) to 8e-3 (dambreak) — i.e. fp32 + kernel-asymmetry noise. The
+    per-iterate `wallPressureExtrapolation` Robin closure (`A_wall`) adds only
+    ~4e-3 more defect and a ~10 % operator perturbation. **Symmetrising buys
+    nothing that is not already there.**
+  - **MINRES / CG / BiCGStab all diverge on the un-regularised system,
+    symmetric form included** — `|x|` → 1e4–1e7, status −14 / −16 / −10 — on
+    every wall-bounded case. The operator is **rank-deficient** (near-null
+    space from kernel deficiency at the free surface *and* the wall corners;
+    `median|alpha_fluid|` as low as 2.5e-5 on `dambreak`), so a symmetric
+    Krylov has nothing to converge to. Only a uniform Tikhonov shift bounds
+    `|x|`: on the closed box `tik = 0.1` gets every method to `|r|/|s| ≈ 0.1`
+    in 20–70 iters; on the free-surface column it bounds `|x|` (~23, physical)
+    but still `|r|/|s| ≈ 2.8` — the shifted (slightly-compressible) problem,
+    not the PPE.
+  - **`dambreak`'s CD "converges in the 3-iter minimum" is the floored
+    omniSPH metric, not a solved system** — the captured `A p = s` there has
+    `|r|/|s| = 1.000` after 2000 relaxed-Jacobi iterations (`Ax ≈ 0`; tiny
+    diagonal). Same mechanism as `hydrostaticColumn` (Part 43), just even more
+    kernel-deficient.
+  So `computePressureShiftIISPH`-symmetrisation is struck from item 1: the
+  operator's symmetry was never the blocker, its **near-singularity at the
+  wall** is, and the only listed fix that removes that is the *full*
+  `band2018pb` — boundary samples as PPE unknowns give the near-wall rows
+  their own non-trivial equation + diagonal, so `A` is no longer
+  rank-deficient there. (The free-surface near-null space is separate and
+  stays handled by the `p ≥ 0` clamp / `CD_TIKHONOV`.) Item 1 below is
+  rewritten around that.
+See **"Next, in order"** at the end of this section.
 
 **Why.** `omniIncompressible` + the Part 41 MLS wall pressure holds the
 *quiescent* `hydrostaticColumn` at nx=128, but **diverges on the wall-bounded
@@ -162,46 +227,170 @@ step 30 `≈ 0.006`), so it is a **strict no-op there** and on `dambreak` /
 `dambreak` / `tgv` / `kolmogorov` unchanged. `gradcheck_incompressible` +
 physics green.
 
-**Still open — the free-surface CD solve.** Projection makes the *closed*
-box's CD solve converge. On the *free-surface* cases (`hydrostaticColumn`,
-`dambreak`) the Jacobi still stalls: measured on `hydrostaticColumn` step 30
-(gradient forming), 2000 raw Jacobi iterations knock off only ~20 % of the
-residual (`|r|_2` 0.886 → 0.717, then flat) — non-contractive, not merely
-slow. The runs hold only because the un-converged impulse decays. **MINRES
-does not trivially apply here:** on the same free-surface system it breaks
-down immediately (`status -13`, `x` never leaves 0) — the composed operator
-`A p = -dt²·div(a_p_IISPH(p_with_wall))` is too non-symmetric at the wall
-(the `'shepard'`/Akinci wall terms). Options for a genuinely contractive
-free-surface solve (also what any `iisph` + divergence-pass scheme wants,
-ranked queue item 4/9):
-- a **non-symmetric Krylov** (BiCGStab / GMRES — `modules/incompressible/
-  krylov.py` already has them) of the same `A p = s`, on the projection-handled
-  (or unclamped) system;
-- **symmetrise `A`** — use `computePressureShiftIISPH` (the symmetric Laplacian
-  probe `krylov.py` builds) instead of the difference-form `_divergence`, with
-  a consistent wall block, then MINRES;
-- **`band2018pb`** (boundary samples as solve unknowns, ranked-queue item 0
-  sub-item) — the principled boundary that makes the near-wall block
-  consistent (and symmetric) instead of the wall-pressure mirror patching it;
-- feeding `p_b` into `alpha` (not just `a_p`).
-Not a blocker: `hydrostaticColumn` / `dambreak` currently *hold* — this is a
-§1.7 quality issue (open since Part 15), not a failure.
+**Part 43 — the free-surface CD solve: characterised, Jacobi made affordable,
+Krylov ruled out.** `scripts/probe_omniIncompressibleCDSolver.py` +
+`scripts/probe_omniIncompressibleCDSystem.py` (offline capture of the healthy density-mode
+`A p = s` at a chosen step).
+
+- **The operator is near-singular, not slow.** On `hydrostaticColumn` nx=128
+  the CD Jacobi hits its 256-iteration cap every step; omniSPH's convergence
+  metric `mean_i(max(residual_i, -1e-3))` floors the (large, negative)
+  residual and reads "converged", but the true `|r|₂/|s| ≈ 0.94`. The
+  quiescent column has `div v* ≈ 0` and `ρ ≈ ρ0`, so the source sits near the
+  operator's near-null space — the §1.7 mechanism, only *partly* removed by
+  the free surface (`frac_uniform ≈ 0.99` at nx=128 step 30, so
+  `CD_SOURCE_PROJECT` correctly does not fire). The per-iterate `p ≥ 0` clamp
+  is what regularises the *run*: drop it (as a linear Krylov solve needs) and
+  the minimum-residual `p` blows up to `|p| ~ 1e9` (vs the clamped Jacobi's
+  physical `~23`). `randomFlowIncompressible --bounded` nx=64 is the same —
+  capped every step *with* the compatibility projection.
+- **Landed: `omniIncompressible.CD_TIKHONOV` (default `0.0`, opt-in).** A
+  uniform absolute diagonal shift `tik·median(|alpha_fluid|)` — solving a
+  nearby slightly-compressible problem `(A − eps|D|) p = s`. Uniform, *not*
+  per-row `∝ alpha`: the kernel-deficient near-surface rows have tiny
+  `|alpha|` and that is where the near-null space lives. Applied only for the
+  density solve when `CD_SOURCE_PROJECT` did not fire (closed / periodic need
+  no shift). On the Jacobi path, `tik = 0.1`: `hydrostaticColumn` nx=128
+  density solve **mean 210 → ~75 iters** (off the cap), holds 400 steps,
+  `embeddedMinDensity` 0.984 → 0.991, `slope` 0.999 → 1.005, `maxRho`
+  1.012 → 1.027, KE band unchanged ~2e-3. `dambreak` nx=64: **strict wash**
+  (that CD solve already converges in the 3-iter minimum — dynamic surface,
+  well-conditioned source). `tik = 0` is bit-identical to pre-Part-43 on
+  every case (`gradcheck_incompressible` + tgv/shearWave/dambreak physics
+  green).
+- **Negative: non-symmetric Krylov (`CD_SOLVER ∈ {bicgstab, gmres}`).** A
+  BiCGStab / GMRES solve of the same `A p = s` (matvec built from the
+  existing `accel` / `_divergence` closures; Jacobi-diagonal preconditioner;
+  wall-pressure closure run `clampNonNeg=False` for linearity; zero warm
+  start) **breaks down on every wall-bounded case** — free surface *and*
+  compatibility-projected closed box. BiCGStab bails at iteration ~1–3 with a
+  tiny residual and `|p| ~ 1e9` along the near-null space; GMRES the same.
+  Uniform Tikhonov 0.1 does not rescue it. A reject guard (`|r| ≥ |s|`, or
+  `|x|₂ > 1e3·|s|`, or `|x|max > 1e5`, or non-finite → the step takes no
+  density correction) stops the 1e9 detonation, but the run then loses
+  density control (`maxRho ~ 1.4`, `slope 0`). So the composed operator
+  `-dt²·div(a_p_IISPH(p_with_wall))` is too non-symmetric / ill-conditioned
+  at the wall for a matrix-free Krylov method — MINRES already breaks down
+  here (`status -13`), and BiCGStab/GMRES do too. The `CD_SOLVER` flag +
+  guard are landed as scaffolding; `'jacobi'` is the default and only usable
+  setting.
+
+**The real fix (ranked-queue item 0):** make the near-wall block *consistent*
+— `band2018pb` (boundary samples as solve unknowns). Part 44 struck the
+"symmetrise `A` via `computePressureShiftIISPH`, then MINRES" alternative:
+`A` is *already* symmetric to fp32, and MINRES/CG diverge on it anyway
+because it is **rank-deficient** at the wall, not asymmetric — only the
+extra boundary equations of `band2018pb` remove that. A diagonal patch
+(`CD_TIKHONOV`) buys the Jacobi its iteration budget back but does not make
+the operator Krylov-solvable.
+
+Not a blocker: `hydrostaticColumn` / `dambreak` *hold* — this is a §1.7
+quality issue (open since Part 15), not a failure.
 
 **Next, in order.**
 
-1. **The free-surface CD solve — the live thread.** Try a **non-symmetric
-   Krylov** (BiCGStab, then GMRES; both in `modules/incompressible/krylov.py`)
-   on `omniIncompressible`'s constant-density `A p = s` for
-   `hydrostaticColumn` / `dambreak`, on the `CD_SOURCE_PROJECT`-handled (and
-   `p ≥ 0`-unclamped) system. Build the matvec from the existing `accel` /
-   `_divergence` closures in `_solve` (add a `CD_SOLVER ∈ {'jacobi',
-   'bicgstab', 'gmres'}` module flag). Grade: iteration count to a real
-   tolerance, and whether the run improves (tighter density band, less
-   over-dissipation) vs the capped Jacobi. If it lands, it is also the
-   divergence-pass any `iisph`-based general scheme needs (item 4/9). If
-   non-symmetric Krylov also stalls, the near-wall block is the problem →
-   `band2018pb` (item 0 sub-item) or symmetrise `A` via
-   `computePressureShiftIISPH`.
+1. **Full `band2018pb` for the free-surface / wall CD solve — the live
+   thread, and now the *only* listed path.** Parts 43–44 ruled out every
+   cheaper option: the diagonal patch (`CD_TIKHONOV`) only restores the
+   *Jacobi's* iteration budget; non-symmetric Krylov (BiCGStab / GMRES)
+   breaks down; and (Part 44) `A` is *already* symmetric to fp32, so
+   symmetrising it via `computePressureShiftIISPH` + MINRES changes nothing —
+   MINRES / CG / BiCGStab all diverge anyway because the operator is
+   **rank-deficient at the wall corners** (near-null space; `median|alpha|`
+   → 2.5e-5). **`band2018pb`** (Band, Gissler, Ihmsen, Cornelis, Peer,
+   Teschner 2018, ACM TOG 37(2):14, `literature/band2018pb_…pdf`) removes the
+   rank deficiency at its source: boundary samples enter the PPE as their own
+   unknowns, so the near-wall rows get a non-trivial equation + diagonal
+   instead of a near-zero one. Concretely, from the paper's §2.3
+   (volume-centric, cubic-spline `2h`; the derivation ports onto the DFSPH/
+   IISPH step this codebase already runs):
+   - **Unknown vector** `p = [p_f ; p_b]` over fluid *and* `kind == 1`
+     boundary rows (ghosts excluded).
+   - **Pressure accel, unified (Eq. 8):** `a^p_f = -(V_f/m_f) Σ_j V_j
+     (p_f + p_j) ∇W_fj` over *all* neighbours `j` (fluid + boundary) —
+     replaces `computePressureAccelIISPH`'s BWJ23-Eq.33 form (which drops the
+     boundary `p`). Linear-momentum preserving; no mirroring assumption.
+   - **Fluid rows (Eq. 9):** `dt² Σ_ff V_ff (a^p_f − a^p_ff)·∇W_fff
+     + dt² Σ_fb V_fb a^p_f·∇W_ffb = 1 − V^0_f/V_f + dt ∇·v*_f`.
+   - **Boundary rows (Eq. 10):** `-dt² Σ_bf V_bf a^p_b·∇W_bbf
+     = 1 − V^0_b/V_b + dt ∇·v*_b`, with `a^p_b = 0` (one-way static wall) —
+     so the LHS is `-dt² Σ_bf V_bf a^p_b·∇W_bbf` evaluated from the *fluid*
+     `a^p`, i.e. the boundary row couples back to `p_f` through `a^p`.
+   - **Volumes:** `V^0_f = h^d`; `V^0_b = γ / Σ_bb W_bbb` (γ = 0.7);
+     `V_f = V^0_f / (Σ_ff V^0_ff W_fff + Σ_fb V^0_fb W_ffb)`;
+     `V_b = V^0_b / (Σ_bf V^0_b W_bbf + γ + β)` (β = 0.15·h^d, one-sided
+     planar wall).
+   - **Divergences:** `∇·v*_f` = Eq. 16 (over fluid + boundary neighbours,
+     `v*_b` = 0 static); `∇·v*_b` = Eq. 17 (fluid neighbours only).
+   - **Diagonals** `a_ff` (Eq. 19) and `a_bb` (Eq. 20) — closed forms in the
+     same volume sums; per-sample relaxation `ω_i = 0.5 V^0_i/h^d`
+     (`ω_f = 0.5`, `ω_b = 0.5 γ/(h^d Σ W_bbb)`).
+   - **Convergence:** mean over *all* fluid+boundary rows of the residual
+     `(Ap)_i − s_i` (a relative volume error), not the fluid-only floored
+     omniSPH metric.
+   **Part 45 — scaffold landed as a fresh module + a distinct scheme;
+   operator verified, wall block healthy, nx=32 holds, nx≥64 unstable.**
+   - **`modules/incompressible/pressureBoundaries.py`** — the whole operator
+     set (`bandRestVolumes` / `bandActualVolumes` / `bandBoundaryUnknownMask`
+     / `bandVelocityDivergence` / `bandPressureAccel` / `bandApplyOperator`
+     / `bandDiagonal` / `bandRelaxation` + a `bandInjectVolumes` context
+     manager), composed **entirely from existing `warpOperation` primitives +
+     `computeAlpha`** — no new `@wp.kernel`, so no gradcheck burden. Band
+     volumes are injected by temporarily setting `state.densities :=
+     state.masses / V` so `warpOperation`'s `m_j/ρ_j` weight becomes `V_j`
+     (the `applyConsistentCoupling` trick).
+   - **`schemes/band2018pb.py`** + **`IncompressibleSPHScheme.band2018pb = 4`**
+     + `builder._band2018pb` — a distinct IISPH-style single-solve step over
+     `p = [p_f ; p_b]`, reusing `DFSPHReferenceSystem`.
+   - **Adaptations from the paper (one-layer cubic-spline `2h` → this
+     codebase's Wendland2 / `n_h = 4` / five-layer Akinci band):** `γ` (Eq. 12)
+     and `β` (Eq. 14) are **dropped** — they inflate `V_b` to ~1.4× `V0_b`
+     here, injecting a spurious +0.3 boundary source; boundary rows use the
+     nominal `V0 = m/ρ0` and the same full-neighbour `V_f = V0 / Σ_j V0_j W`
+     as the fluid. Only `kind == 1` rows with real fluid contact
+     (`Σ_bf V0_f W_bf > MIN_FLUID_CONTACT`) are unknowns — the 3–4 band
+     layers behind the interface have a zero Eq. 20 diagonal and are
+     excluded. For static walls Eq. 16 = Eq. 17 and Eqs. 9/10 collapse to one
+     difference-divergence of the (fluid-masked) Eq. 8 accel.
+   - **Verified (`scripts/probe_band2018pbSystem.py`):** the Eq. 8 accel on
+     the analytic hydrostatic `p` gives bulk `a^p_y ≈ +9.805` (cancels
+     gravity — correct scale + sign); `A` is symmetric to ~3e-3; **the wall
+     interface rows now have healthy non-singular diagonals** (`dt²·a_bb`
+     median 5.9e-4, *all* correct sign) — the rank deficiency this whole
+     item exists to remove **is removed**.
+   - **The nx≥64 divergence was the near-surface diagonal, fixed by a
+     Tikhonov floor.** The relaxed Jacobi diverged at nx≥64 even at step 1
+     (`|x| → ∞`). Cause (probed, not swept): the band diagonal is
+     `computeAlpha`-**exact** (matches the numerically-probed true `A_ii` to
+     round-off, fluid *and* boundary), but kernel-deficient near-surface rows
+     have `|dt²·a_ii| ~ 1e-6`, so the Jacobi step `omega / a_ii` on those
+     rows (which also carry `s > 0`) detonates. **Landed:
+     `band2018pb.DIAG_TIKHONOV`** (default `0.3`, non-zero — unlike
+     `omniIncompressible.CD_TIKHONOV`, `band2018pb` needs it) — solve the
+     nearby `(A − eps·median|dt²a_ii|·I) p = s`, the same device as Part 43,
+     applied to both the diagonal and the operator (`Ap − shift·p`).
+   - **What holds now** (`OMEGA_FLUID = 0.1`, `DIAG_TIKHONOV = 0.3`):
+     `hydrostaticColumn` **nx=32 (600+ steps)** — `|v|max` 0.18, `KE` 4e-4,
+     `embeddedMinDensity` 0.997, `maxDensity` 1.02 — and **nx=64 (400 steps)**
+     — `|v|max` 0.10, `KE` 2e-4, `embeddedMinDensity` 0.999, `maxDensity`
+     1.04 — both quiescent and near rest. `tgv` (periodic, no walls) clean.
+   - **What does not:** `hydrostaticColumn` **nx=128 still sprays** — bounded
+     (`maxDensity` 1.008, no `inf`) but `|v|max` ~4 and a thick ballistic
+     surface layer (`embeddedMinDensity` → 0.14); tuning `OMEGA` / `TIK` down
+     makes it worse, so it is the **free-surface** source pollution, not the
+     wall: `1 − V0/V → +0.32` at the surface (`n_h = 4` kernel deficiency,
+     §1.1 in volume-centric form), `s` is ~99 % positive, and the Jacobi /
+     MINRES / CG do **not** converge the linear system there. The `p ≥ 0`
+     clamp + floored metric hold it at nx≤64; nx=128 needs more.
+   **Next on this sub-thread:** the nx=128 surface spray — an
+   `omniIncompressible`-style per-iterate boundary/surface closure, a source
+   floor (`s ← min(s, ε)`), or a resolution-scaled `OMEGA`/`TIK`. Then point
+   `scripts/probe_omniIncompressibleCDSymmetry.py`'s operator builders at the
+   `band2018pb` `A` to see whether a symmetric Krylov (MINRES / CG) now
+   applies on the consistent operator. Then re-grade nx=128 and
+   `randomFlowIncompressible --bounded` vs the `omniIncompressible` `shepard`
+   + `CD_TIKHONOV` Jacobi. Whatever lands here is also the contractive
+   divergence-pass any `iisph`-based general scheme needs (item 4/9).
 2. **Grade `omniIncompressible` (shepard + auto) vs `divergenceFree` on
    `randomFlowIncompressible --bounded`** — the density band and the energy
    budget. It now *holds*, but KE decays to ~10–15 % over 300 steps where
@@ -220,10 +409,12 @@ Not a blocker: `hydrostaticColumn` / `dambreak` currently *hold* — this is a
    `nu` gives a clean no-slip wall (Part 42 found the stock `viscidNu` term is
    normal-projected). New `ViscosityTerms` value + `deltaSPH` regression pass;
    fix `wp_viscosityDelta.py`'s docstring.
-5. **Full-suite validation of Parts 34–42** — `bash scripts/run_tests.sh` +
-   `run_sweep.py` (this session ran `gradcheck_incompressible` + the
-   `tgv/shearWave/dambreak` physics subset + Krylov green; the plan's
-   Known-open flags Parts 35–38 as not full-suite-validated).
+5. **Full-suite validation of Parts 34–43** — `bash scripts/run_tests.sh` +
+   `run_sweep.py` (Part 43 ran `gradcheck_incompressible` + the
+   `tgv/shearWave/dambreak/incompressible` physics subset green; the plan's
+   Known-open flags Parts 35–38 as not full-suite-validated). Part 43's
+   `CD_TIKHONOV` / `CD_SOLVER` are default-inert (`0.0` / `'jacobi'`), so the
+   risk is confined to the `omniIncompressible` scheme.
 
 ---
 
@@ -822,6 +1013,37 @@ for `iisph` (already holds), inconclusive for the two-solve path.
   `'shepard'` holds both). Same flag on `dfsphReference` / `iisph` (default
   `None`, A/B negative-to-inconclusive). `omega = 0.3` is unchanged — the
   `omega`-window is `n_h = 4` conditioning, not the wall.
+- **The free-surface CD solve — characterised + `CD_TIKHONOV`** (Part 43):
+  `scripts/probe_omniIncompressibleCDSolver.py` (jacobi/bicgstab/gmres ×
+  Tikhonov sweep on `hydrostaticColumn` / `dambreak` / `randomFlowBounded`) +
+  `scripts/probe_omniIncompressibleCDSystem.py` (offline `A p = s` capture from a healthy run).
+  The free-surface constant-density operator is **near-singular** — the
+  quiescent column's source sits near its near-null space, the Jacobi hits
+  its 256-iter cap every step (omniSPH's floored metric hides it), and
+  removing the `p ≥ 0` clamp blows the solution to `|p| ~ 1e9`. **Landed
+  (default-inert): `omniIncompressible.CD_TIKHONOV`** (`0.0`), a uniform
+  diagonal shift `tik·median(|alpha_fluid|)` applied where `CD_SOURCE_PROJECT`
+  did not fire; on the Jacobi path `0.1` takes `hydrostaticColumn` nx=128 off
+  the cap (210 → ~75 iters, holds 400 steps, quality neutral-to-better) and
+  is a strict wash on `dambreak`. **Also landed (scaffold): `CD_SOLVER ∈
+  {jacobi, bicgstab, gmres}`** + a reject guard + `wallPressureExtrapolation`'s
+  `clampNonNeg=False` — but non-symmetric Krylov **breaks down** on the
+  composed wall operator on every wall-bounded case (returns tiny-residual /
+  `|p| ~ 1e9` iterates), so `'jacobi'` stays the only usable setting and the
+  real fix is `band2018pb` (ranked-queue item 0 / "Next" 1).
+  `gradcheck_incompressible` + tgv/shearWave/dambreak/incompressible physics
+  green; `tik = 0` / `'jacobi'` bit-identical to pre-Part-43.
+- **`A` is already symmetric — symmetrising it is not the fix** (Part 44):
+  `scripts/probe_omniIncompressibleCDSymmetry.py` measures the CD operator's
+  relative symmetry defect at **2.7e-5–8e-3** (fp32 noise) for the
+  boundary-`p ≡ 0` and `krylov.buildIISPHMatvec` forms; the per-iterate
+  wall-pressure Robin closure adds only ~4e-3 / ~10 %. MINRES / CG / BiCGStab
+  all still diverge (`|x|` → 1e4–1e7) because the operator is
+  **rank-deficient** at free surfaces + wall corners (`median|alpha_fluid|`
+  → 2.5e-5 on `dambreak`), which only `band2018pb`'s extra boundary equations
+  remove. Also: `dambreak`'s "3-iter" CD is the floored omniSPH metric — the
+  captured system has `|r|/|s| = 1.0` after 2000 Jacobi iters. Analysis only,
+  no code changed.
 
 Full detail for all of the above: `git log -p DFSPH_IMPROVEMENT_PLAN.md`,
 indexed one line per part in `DFSPH_FINDINGS.md` §9.

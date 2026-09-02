@@ -82,6 +82,14 @@ class IncompressibleSPHScheme(Enum):
     #: gauge, deficiency guard, damped warm start, or masking -- just the
     #: loop as omniSPH runs it. See `schemes/omniIncompressible.py`.
     omniIncompressible = 3
+    #: IISPH with Pressure Boundaries (Band et al. 2018, ACM TOG 37(2):14):
+    #: the extended PPE where `kind == 1` boundary samples are pressure
+    #: unknowns with their own equation + diagonal, iterated in the same
+    #: relaxed-Jacobi loop as the fluid -- removes the near-wall rank
+    #: deficiency that stalls the `omniIncompressible` / `iisph`
+    #: constant-density solve at a wall corner (DFSPH_IMPROVEMENT_PLAN.md
+    #: Parts 41-44). See `schemes/band2018pb.py`.
+    band2018pb = 4
 
 # @torch.jit.script
 class WaveEquationScheme(Enum):

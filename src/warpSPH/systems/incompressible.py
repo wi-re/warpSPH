@@ -133,14 +133,15 @@ class IncompressibleSystem(BaseIntegrationSystem):
         # this copy is exactly what used to make `integrateRho` inert: it
         # discards the `rho + dt*drhodt` the integrator just produced. See
         # `DensityEvolution`.
-        _densityEvolution = resolveDensityEvolution(
-            kwargs['schemeConfig'].solverConfig) if kwargs.get('schemeConfig') is not None \
-            else DensityEvolution.summation
-        if _densityEvolution is DensityEvolution.summation:
-            if self.state.densities is not None and lastState.densities is not None:
-                self.state.densities.copy_(lastState.densities)
-            else:
-                self.state.densities = lastState.densities.clone() if lastState.densities is not None else None
+        # _densityEvolution = resolveDensityEvolution(
+        #     kwargs['schemeConfig'].solverConfig) if kwargs.get('schemeConfig') is not None \
+        #     else DensityEvolution.summation
+        # if _densityEvolution is DensityEvolution.summation:
+        #     if self.state.densities is not None and lastState.densities is not None:
+        #         self.state.densities.copy_(lastState.densities)
+        #     else:
+        #         self.state.densities = lastState.densities.clone() if lastState.densities is not None else None
+        self.state.densities.copy_(lastState.densities)
 
         velocity_magnitudes = torch.linalg.vector_norm(self.state.velocities, dim=-1)
         finite_velocity_magnitudes = velocity_magnitudes[torch.isfinite(velocity_magnitudes)]
@@ -152,149 +153,149 @@ class IncompressibleSystem(BaseIntegrationSystem):
         config = kwargs.get('config', None)
         schemeConfig = kwargs.get('schemeConfig', None)
 
-        self.adjacency = buildVerletList(
-            self.state, 
-            config.domain, verletScale = config.verletScale, supportMode = SupportScheme.SuperSymmetric,
-            priorNeighborhood = self.adjacency,
-            verbose = False)
+        # self.adjacency = buildVerletList(
+        #     self.state, 
+        #     config.domain, verletScale = config.verletScale, supportMode = SupportScheme.SuperSymmetric,
+        #     priorNeighborhood = self.adjacency,
+        #     verbose = False)
 
-        # print(f"Finalizing state at t={self.t + dt}, dt={dt}, with {self.state.positions.shape[0]} particles.")
-        # print(f'Maximum Velocity Magnitude: {max_velocity_magnitude}')
-        dxDeltaShift = None
-        if schemeConfig.shiftProperties.active:
-            # shiftVector, self.adjacency = computeDeltaShift(
-            #     currentState = self.state,
-            #     config = config,
-            #     schemeConfig = schemeConfig,
-            #     domain = config.domain,
-            #     adjacency = self.adjacency,
-            # )
-            with record_function("[warpSPH] - [deltaSPH] - solve shifting"):
-                dxDeltaShift = solveShifting(
-                    systemState = self.state,
-                    config = config,
-                    schemeConfig = schemeConfig,
-                    adjacency = self.adjacency,
-                    dt = dt,
-                )
-                # print(f"Applied shifting update with max shift magnitude: {dx.norm(dim=1).max().item()}")
+        # # print(f"Finalizing state at t={self.t + dt}, dt={dt}, with {self.state.positions.shape[0]} particles.")
+        # # print(f'Maximum Velocity Magnitude: {max_velocity_magnitude}')
+        # dxDeltaShift = None
+        # if schemeConfig.shiftProperties.active:
+        #     # shiftVector, self.adjacency = computeDeltaShift(
+        #     #     currentState = self.state,
+        #     #     config = config,
+        #     #     schemeConfig = schemeConfig,
+        #     #     domain = config.domain,
+        #     #     adjacency = self.adjacency,
+        #     # )
+        #     with record_function("[warpSPH] - [deltaSPH] - solve shifting"):
+        #         dxDeltaShift = solveShifting(
+        #             systemState = self.state,
+        #             config = config,
+        #             schemeConfig = schemeConfig,
+        #             adjacency = self.adjacency,
+        #             dt = dt,
+        #         )
+        #         # print(f"Applied shifting update with max shift magnitude: {dx.norm(dim=1).max().item()}")
 
-                du = dxDeltaShift / dt
-                rho = self.state.densities
-                u = self.state.velocities
+        #         du = dxDeltaShift / dt
+        #         rho = self.state.densities
+        #         u = self.state.velocities
 
-                if schemeConfig.shiftProperties.correctdrhodt:
-                    with record_function("[warpSPH] - [deltaSPH] - compute drhodt_shift"):
-                        drhodt_shift = warpOperation(
-                            self.state,
-                            operationProperties = OperationProperties(
-                                operation=WarpOperation.Divergence,
-                                kernel = config.kernel, 
-                                supportMode = SupportScheme.Gather,
-                                operationMode = OperationDirection.AllToAll,
-                                gradientMode = GradientScheme.Summation
-                            ),
-                            queryValues = rho.view(-1,1) * du,
-                            domain = config.domain,
-                            adjacency = self.adjacency
-                        ) - rho * warpOperation(
-                            self.state,
-                            operationProperties = OperationProperties(
-                                operation=WarpOperation.Divergence,
-                                kernel = config.kernel, 
-                                supportMode = SupportScheme.Gather,
-                                operationMode = OperationDirection.AllToAll,
-                                gradientMode = GradientScheme.Difference
-                            ),
-                            queryValues = du,
-                            domain = config.domain,
-                            adjacency = self.adjacency
-                        )
-                if schemeConfig.shiftProperties.correctdvdt:
-                    with record_function("[warpSPH] - [deltaSPH] - compute dudt shift"):
-                        dudt = -u * warpOperation(
-                            self.state,
-                            operationProperties = OperationProperties(
-                                operation=WarpOperation.Divergence,
-                                kernel = config.kernel, 
-                                supportMode = SupportScheme.Gather,
-                                operationMode = OperationDirection.AllToAll,
-                                gradientMode = GradientScheme.Difference
-                            ),
-                            queryValues =  du,
-                            domain = config.domain,
-                            adjacency = self.adjacency
-                        ).view(-1,1)
+        #         if schemeConfig.shiftProperties.correctdrhodt:
+        #             with record_function("[warpSPH] - [deltaSPH] - compute drhodt_shift"):
+        #                 drhodt_shift = warpOperation(
+        #                     self.state,
+        #                     operationProperties = OperationProperties(
+        #                         operation=WarpOperation.Divergence,
+        #                         kernel = config.kernel, 
+        #                         supportMode = SupportScheme.Gather,
+        #                         operationMode = OperationDirection.AllToAll,
+        #                         gradientMode = GradientScheme.Summation
+        #                     ),
+        #                     queryValues = rho.view(-1,1) * du,
+        #                     domain = config.domain,
+        #                     adjacency = self.adjacency
+        #                 ) - rho * warpOperation(
+        #                     self.state,
+        #                     operationProperties = OperationProperties(
+        #                         operation=WarpOperation.Divergence,
+        #                         kernel = config.kernel, 
+        #                         supportMode = SupportScheme.Gather,
+        #                         operationMode = OperationDirection.AllToAll,
+        #                         gradientMode = GradientScheme.Difference
+        #                     ),
+        #                     queryValues = du,
+        #                     domain = config.domain,
+        #                     adjacency = self.adjacency
+        #                 )
+        #         if schemeConfig.shiftProperties.correctdvdt:
+        #             with record_function("[warpSPH] - [deltaSPH] - compute dudt shift"):
+        #                 dudt = -u * warpOperation(
+        #                     self.state,
+        #                     operationProperties = OperationProperties(
+        #                         operation=WarpOperation.Divergence,
+        #                         kernel = config.kernel, 
+        #                         supportMode = SupportScheme.Gather,
+        #                         operationMode = OperationDirection.AllToAll,
+        #                         gradientMode = GradientScheme.Difference
+        #                     ),
+        #                     queryValues =  du,
+        #                     domain = config.domain,
+        #                     adjacency = self.adjacency
+        #                 ).view(-1,1)
 
-                        duCross = warpOperation(
-                            self.state,
-                            operationProperties = OperationProperties(
-                                operation=WarpOperation.Divergence,
-                                kernel = config.kernel, 
-                                supportMode = SupportScheme.Gather,
-                                operationMode = OperationDirection.AllToAll,
-                                gradientMode = GradientScheme.Summation
-                            ),
-                            queryValues =  torch.einsum('ij,ik->ijk', u, du),
-                            domain = config.domain,
-                            adjacency = self.adjacency
-                        )
+        #                 duCross = warpOperation(
+        #                     self.state,
+        #                     operationProperties = OperationProperties(
+        #                         operation=WarpOperation.Divergence,
+        #                         kernel = config.kernel, 
+        #                         supportMode = SupportScheme.Gather,
+        #                         operationMode = OperationDirection.AllToAll,
+        #                         gradientMode = GradientScheme.Summation
+        #                     ),
+        #                     queryValues =  torch.einsum('ij,ik->ijk', u, du),
+        #                     domain = config.domain,
+        #                     adjacency = self.adjacency
+                        # )
 
         # The step's second full density summation. `continuity` skips it (the
         # constant-density solve then runs on the integrated density too);
         # `hybrid` runs it for this solve only and puts the integrated density
         # back afterwards, because the shift repairs particle-distribution
         # drift that `drho/dt = -rho div v` cannot see. See `DensityEvolution`.
-        densityEvolution = resolveDensityEvolution(schemeConfig.solverConfig)
-        carriedDensities = None
-        if densityEvolution is not DensityEvolution.continuity:
-            if densityEvolution is DensityEvolution.hybrid:
-                carriedDensities = self.state.densities
-            self.state.densities = computeDensities(self.state, config, schemeConfig, self.adjacency)
+        # densityEvolution = resolveDensityEvolution(schemeConfig.solverConfig)
+        # carriedDensities = None
+        # if densityEvolution is not DensityEvolution.continuity:
+        #     if densityEvolution is DensityEvolution.hybrid:
+        #         carriedDensities = self.state.densities
+        #     self.state.densities = computeDensities(self.state, config, schemeConfig, self.adjacency)
 
-        kernel = copy.deepcopy(config.kernel)
-        fs, fsm, n, renormalizationState_, lMin = detectFreeSurface(self.state, config, schemeConfig, schemeConfig.surfaceDetectionConfig, self.adjacency, returnNormals = True)
+        # kernel = copy.deepcopy(config.kernel)
+        # fs, fsm, n, renormalizationState_, lMin = detectFreeSurface(self.state, config, schemeConfig, schemeConfig.surfaceDetectionConfig, self.adjacency, returnNormals = True)
 
-        self.state.surfaceIndicator = fsm > 0.5
+        # self.state.surfaceIndicator = fsm > 0.5
 
         # config.kernel = KernelFunctions.Spiky
-        dvdt_incomp, pressure_incomp, errors_incomp, pressures_incomp = solveIncompressible(
-            particles = self.state,
-            config = config,
-            schemeConfig = schemeConfig,
-            adjacency = self.adjacency,
-            dvdt = torch.zeros_like(self.state.velocities),
-            dt = dt,
-            verbose=False
-        )
+        # dvdt_incomp, pressure_incomp, errors_incomp, pressures_incomp = solveIncompressible(
+            # particles = self.state,
+            # config = config,
+            # schemeConfig = schemeConfig,
+            # adjacency = self.adjacency,
+            # dvdt = torch.zeros_like(self.state.velocities),
+            # dt = dt,
+            # verbose=False
+        # )
         # config.kernel = kernel
 
-        if carriedDensities is not None:
-            # `hybrid`: the summation density existed for the solve above only.
-            self.state.densities = carriedDensities
+        # if carriedDensities is not None:
+        #     # `hybrid`: the summation density existed for the solve above only.
+        #     self.state.densities = carriedDensities
 
         # Gated on `verbose`, which the integrator forwards from the caller.
         # These fired unconditionally on every step, which made a DFSPH run
         # unusable under --quiet and buried the end-of-run report in a log.
-        if kwargs.get('verbose', False):
-            print(f"Finalizing state at t={self.t + dt}, dt={dt}, with {self.state.positions.shape[0]} particles.")
-            print(f'Solver Iterations: {len(errors_incomp)}, Incompressible Error: {errors_incomp[0]:.4g}->{errors_incomp[-1]:.4g}')
+        # if kwargs.get('verbose', False):
+        #     print(f"Finalizing state at t={self.t + dt}, dt={dt}, with {self.state.positions.shape[0]} particles.")
+        #     print(f'Solver Iterations: {len(errors_incomp)}, Incompressible Error: {errors_incomp[0]:.4g}->{errors_incomp[-1]:.4g}')
 
-        gradVel = warpOperation(
-            self.state,
-            operationProperties = OperationProperties(
-                operation=WarpOperation.Gradient,
-                kernel = config.kernel, 
-                supportMode = SupportScheme.Gather,
-                operationMode = OperationDirection.AllToAll,
-                gradientMode = GradientScheme.Difference
-            ),
-            queryValues =  self.state.velocities,
-            domain = config.domain,
-            adjacency = self.adjacency
-        )
+        # gradVel = warpOperation(
+        #     self.state,
+        #     operationProperties = OperationProperties(
+        #         operation=WarpOperation.Gradient,
+        #         kernel = config.kernel, 
+        #         supportMode = SupportScheme.Gather,
+        #         operationMode = OperationDirection.AllToAll,
+        #         gradientMode = GradientScheme.Difference
+        #     ),
+        #     queryValues =  self.state.velocities,
+        #     domain = config.domain,
+        #     adjacency = self.adjacency
+        # )
 
-        dx = dt**2 * dvdt_incomp
+        # dx = dt**2 * dvdt_incomp
 
         # `shiftProperties.active` used to be a no-op *that still paid for
         # itself*: `solveShifting`'s result was bound to `dx` above and then
@@ -306,14 +307,14 @@ class IncompressibleSystem(BaseIntegrationSystem):
         # "relax the distribution more directly" configuration. Still opt-in:
         # every incompressible case ships `shifting=False`, so the default path
         # is byte-identical (`dxDeltaShift is None` short-circuits below).
-        if dxDeltaShift is not None:
-            dx = dx + dxDeltaShift
+        # if dxDeltaShift is not None:
+            # dx = dx + dxDeltaShift
 
         # Resample against the *total* displacement: Cornelis et al. Eq. 17's
         # correction is a first-order Taylor step over however far the particle
         # actually moved, so if a second shift contributes to that move it
         # belongs here too.
-        proj_vel = torch.einsum('nij, nj -> ni', gradVel, dx)
+        # proj_vel = torch.einsum('nij, nj -> ni', gradVel, dx)
 
         # The density half of that same resample. Under `summation` it is
         # pointless -- the next step re-sums from the shifted positions, so the
@@ -323,56 +324,56 @@ class IncompressibleSystem(BaseIntegrationSystem):
         # the shift, so the carried field drifts from the truth by the whole
         # accumulated shift. This is Cornelis et al. Eq. 17 applied to `rho`
         # instead of `v`, i.e. exactly the correction `proj_vel` already is.
-        proj_rho = None
-        if densityEvolution is not DensityEvolution.summation:
-            gradRho = warpOperation(
-                self.state,
-                operationProperties = OperationProperties(
-                    operation=WarpOperation.Gradient,
-                    kernel = config.kernel,
-                    supportMode = SupportScheme.Gather,
-                    operationMode = OperationDirection.AllToAll,
-                    gradientMode = GradientScheme.Difference
-                ),
-                queryValues = self.state.densities,
-                domain = config.domain,
-                adjacency = self.adjacency
-            )
-            proj_rho = torch.einsum('ni, ni -> n', gradRho, dx)
+        # proj_rho = None
+        # if densityEvolution is not DensityEvolution.summation:
+        #     gradRho = warpOperation(
+        #         self.state,
+        #         operationProperties = OperationProperties(
+        #             operation=WarpOperation.Gradient,
+        #             kernel = config.kernel,
+        #             supportMode = SupportScheme.Gather,
+        #             operationMode = OperationDirection.AllToAll,
+        #             gradientMode = GradientScheme.Difference
+        #         ),
+        #         queryValues = self.state.densities,
+        #         domain = config.domain,
+        #         adjacency = self.adjacency
+        #     )
+        #     proj_rho = torch.einsum('ni, ni -> n', gradRho, dx)
 
-        shiftApplication = schemeConfig.solverConfig.shiftApplication
+        # shiftApplication = schemeConfig.solverConfig.shiftApplication
 
-        if shiftApplication is not ShiftApplication.inStepVelocity:
-            # `inStepVelocity` has already applied this solve's correction to
-            # the velocity inside the step (`schemes/dfsph.py`), which is the
-            # whole of DFSPH proper's constant-density treatment -- applying
-            # the position shift on top of it corrects the same density error
-            # twice per step, which on `tgv` injects energy rather than
-            # removing it (kinetic energy *grows* 6.6x over 200 steps).
-            self.state.positions += dx
-            self.state.velocities += proj_vel
-            if proj_rho is not None:
-                self.state.densities = self.state.densities + proj_rho
+        # if shiftApplication is not ShiftApplication.inStepVelocity:
+        #     # `inStepVelocity` has already applied this solve's correction to
+        #     # the velocity inside the step (`schemes/dfsph.py`), which is the
+        #     # whole of DFSPH proper's constant-density treatment -- applying
+        #     # the position shift on top of it corrects the same density error
+        #     # twice per step, which on `tgv` injects energy rather than
+        #     # removing it (kinetic energy *grows* 6.6x over 200 steps).
+        #     self.state.positions += dx
+        #     self.state.velocities += proj_vel
+        #     if proj_rho is not None:
+        #         self.state.densities = self.state.densities + proj_rho
 
-        if shiftApplication is ShiftApplication.positionAndVelocity:
-            # Also apply the constant-density solution the way DFSPH proper
-            # does -- to the velocity -- rather than only as the position shift
-            # above. Without this the scheme has no velocity-level response to
-            # a density *error* at all (the divergence-free solve enforces
-            # `div v = 0`, which stops further compression but never undoes
-            # existing compression), so wall-adjacent compression can only be
-            # relieved by moving particles, which near a wall pushes them
-            # through it. Dissipative -- applied here, after the integrator,
-            # nothing ever removes the non-divergence-free part of it. See
-            # `ShiftApplication`'s docstring, and `inStepVelocity` for the
-            # placement that does not have that problem.
-            self.state.velocities += dt * dvdt_incomp
+        # if shiftApplication is ShiftApplication.positionAndVelocity:
+        #     # Also apply the constant-density solution the way DFSPH proper
+        #     # does -- to the velocity -- rather than only as the position shift
+        #     # above. Without this the scheme has no velocity-level response to
+        #     # a density *error* at all (the divergence-free solve enforces
+        #     # `div v = 0`, which stops further compression but never undoes
+        #     # existing compression), so wall-adjacent compression can only be
+        #     # relieved by moving particles, which near a wall pushes them
+        #     # through it. Dissipative -- applied here, after the integrator,
+        #     # nothing ever removes the non-divergence-free part of it. See
+        #     # `ShiftApplication`'s docstring, and `inStepVelocity` for the
+        #     # placement that does not have that problem.
+        #     self.state.velocities += dt * dvdt_incomp
         # print(f"Applied incompressible update with max position change magnitude: {dvdt_incomp.norm(dim=1).max().item() * dt}")
 
         # print(returnValues[-1][2])
 
         returnValues[-1] = (
-            returnValues[-1][0], returnValues[-1][1], (returnValues[-1][2][0], returnValues[-1][2][1]), (errors_incomp, pressures_incomp)
+            returnValues[-1][0], returnValues[-1][1], (returnValues[-1][2][0], returnValues[-1][2][1]), (None, None)
         )
 
         # initialRho = initialState.state.densities

@@ -13,6 +13,7 @@ recomputed from scratch each step via `computeDensities`.
 """
 
 from warpSPH.configurations import SimulationConfig, WeaklyCompressibleSPHConfig
+from warpSPH.schemes.omniIncompressible import _solve
 from warpSPH.systems import CompSPHSystem, WeaklyCompressibleSystemUpdate
 from warpSPH.modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
 from warpSPH.modules.deltaSPH import computeVelocityDiffusion
@@ -71,10 +72,13 @@ def dfsph_step(
         # `drhodt` instead. `finalize`'s own re-sum is controlled separately --
         # see `DensityEvolution`, and note that this branch alone used to be
         # `integrateRho`'s whole effect, which `finalize` then overwrote.
-        densityEvolution = resolveDensityEvolution(schemeConfig.solverConfig)
-        if currentState.densities is None or densityEvolution is DensityEvolution.summation:
+        # densityEvolution = resolveDensityEvolution(schemeConfig.solverConfig)
+        # if currentState.densities is None or densityEvolution is DensityEvolution.summation:
             # print("Computing densities...")
-            currentState.densities = computeDensities(currentState, config, schemeConfig, adjacency)
+        currentState.densities = computeDensities(currentState, config, schemeConfig, adjacency)
+        currentState.densities[currentState.kinds==2] = 1.0 # reset boundary densities to 1.0
+
+    print(f'step {currentSystem.t:.6g}: density stats: mean={currentState.densities.mean().item():.6g}, min={currentState.densities.min().item():.6g}, max={currentState.densities.max().item():.6g}')
 
     # print(f'step {currentSystem.t:.6g}: density stats: mean={currentState.densities.mean().item():.6g}, min={currentState.densities.min().item():.6g}, max={currentState.densities.max().item():.6g}')
     # if currentState.densities.max() > 1.01:
@@ -85,9 +89,9 @@ def dfsph_step(
     # both other modes keep the historical always-on extrapolation.
     boundaryPressureMode = schemeConfig.solverConfig.boundaryPressureMode
     # with TimedBlock('compute mDBC density', use_cuda=True, device=config.device) as tb_mdbc:
-    with record_function("[warpSPH] - [deltaSPH - 03] - compute mDBC density"):
-        if boundaryPressureMode != BoundaryPressureMode.plain:
-            currentState.densities = computeMdbcDensity(currentState, config, schemeConfig, adjacency)
+    # with record_function("[warpSPH] - [deltaSPH - 03] - compute mDBC density"):
+    #     if boundaryPressureMode != BoundaryPressureMode.plain:
+    #         currentState.densities = computeMdbcDensity(currentState, config, schemeConfig, adjacency)
 
         # print(f'Fluid density stats: min={currentState.densities[currentState.kinds == 0].min().item()}, max={currentState.densities[currentState.kinds == 0].max().item()}, mean={currentState.densities[currentState.kinds == 0].mean().item()}')
         # print(f'Boundary density stats: min={currentState.densities[currentState.kinds == 1].min().item()}, max={currentState.densities[currentState.kinds == 1].max().item()}, mean={currentState.densities[currentState.kinds == 1].mean().item()}')
@@ -150,7 +154,7 @@ def dfsph_step(
     # 14. Apply forcing
     # with TimedBlock('compute forcing', use_cuda=True, device=config.device) as tb_forcing:
     with record_function("[warpSPH] - [deltaSPH - 14] - compute forcing"):
-        forcing = computeForcing(currentSystem, config.dt, currentSystem.t, config, schemeConfig)
+        forcing = computeForcing(currentSystem, config.dt, currentSystem.t, config, schemeConfig)*0
         dvdt = forcing / currentState.masses.view(-1,1)
 
 
@@ -158,39 +162,52 @@ def dfsph_step(
     # with TimedBlock('compute gravity', use_cuda=True, device=config.device) as tb_gravity:
     with record_function("[warpSPH] - [deltaSPH - 15] - compute gravity"):
         gravity = computeGravity(currentState, config, schemeConfig, adjacency)
+        gravity[currentState.kinds != 0] = 0.0
         dvdt += gravity
 
     # Revert boundary velocity
     # with TimedBlock('compute mDBC no-pen shift', use_cuda=True, device=config.device) as tb_nopenshift:
-    with record_function("[warpSPH] - [deltaSPH - 16] - compute mDBC no-pen shift"):
-        # Experimental A/B toggle (DFSPH_IMPROVEMENT_PLAN.md) -- the original
-        # DFSPH paper has no such term and relies on the pressure projection
-        # alone to prevent penetration; default True preserves this scheme's
-        # historical always-on behavior pending that comparison's outcome.
-        if schemeConfig.solverConfig.mdbcNoPenetrationShift:
-            nopenshift = computeMdbcNoPenShift(currentState, config, schemeConfig, adjacency)
-            dvdt += nopenshift / dt
+    # with record_function("[warpSPH] - [deltaSPH - 16] - compute mDBC no-pen shift"):
+    #     # Experimental A/B toggle (DFSPH_IMPROVEMENT_PLAN.md) -- the original
+    #     # DFSPH paper has no such term and relies on the pressure projection
+    #     # alone to prevent penetration; default True preserves this scheme's
+    #     # historical always-on behavior pending that comparison's outcome.
+    #     if schemeConfig.solverConfig.mdbcNoPenetrationShift:
+    #         nopenshift = computeMdbcNoPenShift(currentState, config, schemeConfig, adjacency)
+    #         dvdt += nopenshift / dt
     # currentState.velocities = currentVelocities
 
     # First we project the velocity field to be divergence free using the DFSph solver
     # This is the standard incompressible approach
     # However, this can lead to issues with particle disorder and clustering 
     currentState.pressures = torch.zeros_like(currentState.densities) if currentState.pressures is None else currentState.pressures
-    dvdt_pressure, pressure, errors, pressures = solveDivergenceFree(
-        particles = currentState,
-        config = config,
-        schemeConfig = schemeConfig,
-        adjacency = adjacency,
-        dvdt = dvdt + dvdt_diss,
-        dt = dt
-    )
-    currentState.pressures = pressure
-    if boundaryPressureMode == BoundaryPressureMode.mdbcMlsPressure:
+    # dvdt_pressure, pressure, errors, pressures = solveDivergenceFree(
+    #     particles = currentState,
+    #     config = config,
+    #     schemeConfig = schemeConfig,
+    #     adjacency = adjacency,
+    #     dvdt = dvdt + dvdt_diss,
+    #     dt = dt
+    # )
+    accel = dvdt + dvdt_diss 
+    accel[currentState.kinds != 0] = 0.0
+    vEnter = currentState.velocities + dt * accel
+    fluid = currentState.kinds == 0
+    rho0 = schemeConfig.fluid.restDensity
+    a_p_div, _, nDiv, errDiv = _solve(
+        currentState, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0,
+        vEnter=vEnter, warmStart=torch.zeros_like(currentState.densities), dt=dt,
+        mode='divergence', minIters=2,
+        maxIters=32, tol=1e-2)
+    dvdt_pressure = a_p_div
+    # print(f'step {currentSystem.t:.6g}: pressure stats: mean={pressure.mean().item():.6g}, min={pressure.min().item():.6g}, max={pressure.max().item():.6g}')
+    # currentState.pressures = pressure
+    # if boundaryPressureMode == BoundaryPressureMode.mdbcMlsPressure:
         # Project this step's fluid pressure solution onto boundary
         # particles (Part 2 Option c) -- see `computeMdbcPressure`'s own
         # docstring for why this runs after, not inside, the solve above.
-        with record_function("[warpSPH] - [deltaSPH - 03b] - compute mDBC pressure"):
-            currentState.pressures = computeMdbcPressure(currentState, config, schemeConfig, adjacency)
+        # with record_function("[warpSPH] - [deltaSPH - 03b] - compute mDBC pressure"):
+            # currentState.pressures = computeMdbcPressure(currentState, config, schemeConfig, adjacency)
 
     # `ShiftApplication.inStepVelocity`: run the constant-density solve here,
     # inside the step, and fold its correction into the same `dvdt` the
@@ -201,34 +218,49 @@ def dfsph_step(
     # `positionAndVelocity` adds the same correction *after* the integrator,
     # where nothing ever cleans it up -- and that uncorrected remainder is the
     # dissipation it shows on `tgv`. See `ShiftApplication`'s docstring.
-    dvdt_inStep = None
-    if schemeConfig.solverConfig.shiftApplication is ShiftApplication.inStepVelocity:
-        # `warmStartConstantDensity`: seed this solve from the previous step's
-        # constant-density pressure (carried on the unused `soundspeeds`) rather
-        # than the cold zero start. MEASURED NEGATIVE (Part 24): on
-        # `hydrostaticColumn` a warm start on `solveIncompressible` *as it
-        # stands* -- two-sided source, 0.9 rhoStar clamp, linear operator,
-        # nonNegativeClamp gauge -- NaNs by step 13 (the linear operator's wall
-        # truncation inflates kappa, and the warm start feeds it). It only helps
-        # paired with the one-sided / per-iteration-resummed inner loop the
-        # `dfsphReference` scheme uses. Kept as an off-by-default hook.
-        _cdWarm = None
-        _cdWS = getattr(schemeConfig.solverConfig, 'warmStartConstantDensity', False)
-        if _cdWS:
-            _s = getattr(currentState, 'soundspeeds', None)
-            if _s is not None and _s.shape == currentState.densities.shape:
-                _cdWarm = _s
-        dvdt_inStep, _p_incomp, _e_incomp, _ps_incomp = solveIncompressible(
-            particles = currentState,
-            config = config,
-            schemeConfig = schemeConfig,
-            adjacency = adjacency,
-            dvdt = dvdt + dvdt_diss + dvdt_pressure,
-            dt = dt,
-            warmStartPressure = _cdWarm,
-        )
-        if _cdWS:
-            currentState.soundspeeds = _p_incomp.detach()
+    # dvdt_inStep = None
+    # if schemeConfig.solverConfig.shiftApplication is ShiftApplication.inStepVelocity:
+    #     # `warmStartConstantDensity`: seed this solve from the previous step's
+    #     # constant-density pressure (carried on the unused `soundspeeds`) rather
+    #     # than the cold zero start. MEASURED NEGATIVE (Part 24): on
+    #     # `hydrostaticColumn` a warm start on `solveIncompressible` *as it
+    #     # stands* -- two-sided source, 0.9 rhoStar clamp, linear operator,
+    # nonNegativeClamp gauge -- NaNs by step 13 (the linear operator's wall
+    # truncation inflates kappa, and the warm start feeds it). It only helps
+    # paired with the one-sided / per-iteration-resummed inner loop the
+    # `dfsphReference` scheme uses. Kept as an off-by-default hook.
+    # _cdWarm = None
+    # _cdWS = getattr(schemeConfig.solverConfig, 'warmStartConstantDensity', False)
+    # if _cdWS:
+    #     _s = getattr(currentState, 'soundspeeds', None)
+    #     if _s is not None and _s.shape == currentState.densities.shape:
+    #         _cdWarm = _s
+    # dvdt_inStep, _p_incomp, _e_incomp, _ps_incomp = solveIncompressible(
+    #     particles = currentState,
+    #     config = config,
+    #     schemeConfig = schemeConfig,
+    #     adjacency = adjacency,
+    #     dvdt = dvdt + dvdt_diss + dvdt_pressure*0.0,
+    #     dt = dt,
+    #     warmStartPressure = None,
+    # )
+    # print(f'step {currentSystem.t:.6g}: incompressible pressure stats: mean={_p_incomp.mean().item():.6g}, min={_p_incomp.min().item():.6g}, max={_p_incomp.max().item():.6g}')
+    # if _cdWS:
+        # currentState.soundspeeds = _p_incomp.detach()
+
+
+    # --- 4. densitySolve() -- min 3 / max 256, warm start 0.5 * p_prior ---
+    accel = dvdt + dvdt_diss + dvdt_pressure
+    accel[currentState.kinds != 0] = 0.0
+    vEnter = currentState.velocities + dt * accel
+    fluid = currentState.kinds == 0
+    rho0 = schemeConfig.fluid.restDensity
+    a_p_rho, pRho, nRho, errRho = _solve(
+        currentState, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0,
+        vEnter=vEnter, warmStart=0.5 * torch.zeros_like(currentState.densities), dt=dt, mode='density',
+        minIters=3, maxIters=256,
+        tol=1e-3)
+    dvdt_inStep = a_p_rho
 
     # To resolve the issues with particle disorder and clustering, we can also solve for the incompressible pressure using the Incompressible SPH solver
     # This effectively acts as a particle shifting term that helps to maintain particle order and prevent clustering
@@ -243,7 +275,7 @@ def dfsph_step(
     # )
     # The shift is directly applied to the particle positions
     # As the timestep for our tests is small the shift is small and does not significantly affect the velocity field
-    vPrime = currentState.velocities + dt * (dvdt + dvdt_diss + dvdt_pressure)
+    # vPrime = currentState.velocities + dt * (dvdt + dvdt_diss + dvdt_pressure)
 
     # gradV = -warpOperation(
     #     queryParticles=currentState,
@@ -271,23 +303,23 @@ def dfsph_step(
     # the carried density exactly the error the solver was there to remove,
     # every step. Re-evaluate it on the velocity the integrator will actually
     # use, with the same operator the solvers form `rhoStar` from.
-    if densityEvolution is not DensityEvolution.summation:
-        with record_function("[warpSPH] - [deltaSPH - 12b] - recompute drhodt (projected)"):
-            advection = currentState.velocities + dt * (
-                dvdt + dvdt_diss + dvdt_pressure
-                + (dvdt_inStep if dvdt_inStep is not None else 0.0))
-            drhodt = computeMomentumIncompressible(
-                currentState = currentState, config = config, schemeConfig = schemeConfig,
-                adjacency = adjacency, advectionVelocities = advection)
+    # if densityEvolution is not DensityEvolution.summation:
+    #     with record_function("[warpSPH] - [deltaSPH - 12b] - recompute drhodt (projected)"):
+    #         advection = currentState.velocities + dt * (
+    #             dvdt + dvdt_diss + dvdt_pressure
+    #             + (dvdt_inStep if dvdt_inStep is not None else 0.0))
+    #         drhodt = computeMomentumIncompressible(
+    #             currentState = currentState, config = config, schemeConfig = schemeConfig,
+    #             adjacency = adjacency, advectionVelocities = advection)
 
     # 16. build update
     # with TimedBlock('build update', use_cuda=True, device=config.device) as tb_update:
     with record_function("[warpSPH] - [deltaSPH - 16] - build update"):
         update = WeaklyCompressibleSystemUpdate(
             dxdt = currentState.velocities.clone(),# + dt * dvdt_incomp,
-            dvdt = (dvdt + dvdt_diss + dvdt_pressure
-                    + (dvdt_inStep if dvdt_inStep is not None else 0.0)),
-            drhodt = drhodt,# + drhodt_diss,
+            dvdt = (dvdt + dvdt_diss + dvdt_pressure + dvdt_inStep),
+                    # + (dvdt_inStep if dvdt_inStep is not None else 0.0)),
+            drhodt = torch.zeros_like(currentState.densities),# + drhodt_diss,
             passive = torch.zeros(currentState.densities.shape, device=currentState.densities.device, dtype=torch.bool)
         )
     # update.drhodt = update.drhodt
@@ -326,4 +358,4 @@ def dfsph_step(
     #     tb.cuda_ms = tb._start_event.elapsed_time(tb._end_event) if tb.use_cuda else None
     #     print(f"[{key}] CPU: {tb.cpu_ms:.3f} ms | CUDA: {tb.cuda_ms:.3f} ms, ratio {tb.cuda_ms / tb.cpu_ms if tb.cuda_ms is not None else 'N/A'}")
 
-    return update, adjacency, currentState, (errors,pressures)#, (errors_incomp, pressures_incomp)
+    return update, adjacency, currentState, ([-1],[0])#, (errors_incomp, pressures_incomp)
