@@ -47,6 +47,36 @@ def dambreakResult():
     return _run(dambreakCase, nx=48)
 
 
+@pytest.fixture(scope='module')
+def kolmogorovIncompressibleResult():
+    from warpSPH.cases.kolmogorovIncompressible import kolmogorovIncompressibleCase
+    return _run(kolmogorovIncompressibleCase, nx=32)
+
+
+@pytest.fixture(scope='module')
+def randomFlowPeriodicResult():
+    from warpSPH.cases.randomFlowIncompressible import randomFlowIncompressibleCase
+    return _run(randomFlowIncompressibleCase, nx=48)
+
+
+@pytest.fixture(scope='module')
+def columnCollapseResult():
+    from warpSPH.cases.columnCollapse import columnCollapseCase
+    # Needs to run past the collapse impact (t ~ 0.4 at nx=32) for the wall
+    # penetration watch to mean anything -- longer than the suite's usual 20,
+    # so this bypasses `_run`'s fixed step count.
+    with contextlib.redirect_stdout(io.StringIO()):
+        return run(columnCollapseCase, nx=32, nSteps=260, progress=False)
+
+
+@pytest.fixture(scope='module')
+def randomFlowBoundedResult():
+    from warpSPH.cases.randomFlowIncompressible import randomFlowIncompressibleCase
+    # nx=96 detonates within a few steps under the post-c637785 scheme (see
+    # test_randomFlowBoundedDoesNotDiverge); nx=48 would need ~160 steps.
+    return _run(randomFlowIncompressibleCase, nx=96, params=dict(bounded=True))
+
+
 # --- Sod: compressible, energy conserving -----------------------------------
 
 def test_sodConservesTotalEnergy(sodResult):
@@ -397,6 +427,82 @@ def test_dambreakGravityDoesWorkOnTheFluid(dambreakResult):
 
 def test_dambreakDoesNotDiverge(dambreakResult):
     assert not dambreakResult.diverged
+
+
+# --- Incompressible (DFSPH) regressions the suite did not cover -------------
+#
+# `kolmogorovIncompressible` and `randomFlowIncompressible` regressed in the
+# `c637785` rewrite and were caught only by hand (`DFSPH_IMPROVEMENT_PLAN.md`
+# "Immediate", Parts 46-48). They live here so that class of silent regression
+# fails the pre-commit check next time.
+
+def test_kolmogorovIncompressibleForcingDrivesTheFlow(kolmogorovIncompressibleResult):
+    """The case starts from rest; its body force has to spin the flow up.
+
+    `c637785` left `computeForcing(...) * 0` in `dfsph_step`, which made the
+    forced case completely inert (`KE == 0` for all time). This asserts the
+    forcing term is actually wired in -- kinetic energy has to climb well off
+    zero over the short run.
+    """
+    kinetic = kolmogorovIncompressibleResult.series('kineticEnergy')
+    assert kinetic[0] == pytest.approx(0.0, abs=1e-12)
+    assert kinetic[-1] > 0.1
+    assert np.all(np.diff(kinetic) >= 0)
+
+
+def test_kolmogorovIncompressibleStaysIncompressible(kolmogorovIncompressibleResult):
+    maxDensity = max(row['maxDensity'] for row in kolmogorovIncompressibleResult.trajectory)
+    minDensity = min(row['minDensity'] for row in kolmogorovIncompressibleResult.trajectory)
+    assert 0.98 < minDensity <= maxDensity < 1.02
+
+
+def test_randomFlowPeriodicDoesNotDiverge(randomFlowPeriodicResult):
+    """The periodic decaying random flow holds -- KE decays, does not run away."""
+    assert not randomFlowPeriodicResult.diverged
+    kinetic = randomFlowPeriodicResult.series('kineticEnergy')
+    assert np.all(np.isfinite(kinetic))
+    assert kinetic[-1] < 1.1 * kinetic[0]
+
+
+def test_randomFlowPeriodicStaysIncompressible(randomFlowPeriodicResult):
+    maxDensity = max(row['maxDensity'] for row in randomFlowPeriodicResult.trajectory)
+    minDensity = min(row['minDensity'] for row in randomFlowPeriodicResult.trajectory)
+    assert 0.97 < minDensity <= maxDensity < 1.03
+
+
+def test_columnCollapseWallHoldsOnImpact(columnCollapseResult):
+    """The released column collapses into the far wall; the mDBC no-penetration
+    shift (`dfsph.NOPEN_SHIFT`, restored Part 49) has to keep fluid out of the
+    wall band. `c637785` had commented the shift's call out of `dfsph_step`,
+    leaving the pressure projection alone -- not enough for the impact, which
+    then put ~6 particles a full spacing past the wall. Asserts the run holds
+    and almost nothing crosses.
+    """
+    assert not columnCollapseResult.diverged
+    npen = np.array([row['nPenetrating'] for row in columnCollapseResult.trajectory])
+    pdx = np.array([row['maxPenetrationDx'] for row in columnCollapseResult.trajectory])
+    assert np.all(np.isfinite(columnCollapseResult.series('kineticEnergy')))
+    assert npen.max() <= 2
+    assert pdx.max() < 1.0
+
+
+@pytest.mark.xfail(reason='randomFlowIncompressible --bounded diverges under the '
+                          'post-c637785 divergenceFree scheme at every resolution '
+                          '(density excursion at the wall -> velocity detonation); '
+                          'root cause is the near-singular pure-Neumann near-wall '
+                          'constant-density solve in the VD+PS shift -- the plan\'s '
+                          'Active track / band2018pb. DFSPH_IMPROVEMENT_PLAN.md '
+                          '"Immediate A1", Part 48.',
+                   strict=True)
+def test_randomFlowBoundedDoesNotDiverge(randomFlowBoundedResult):
+    """XFAIL until the near-wall CD solve is fixed. Flips to XPASS (a suite
+    failure) the moment the bounded case starts holding -- that is the signal
+    to promote it back to a real assertion.
+    """
+    assert not randomFlowBoundedResult.diverged
+    kinetic = randomFlowBoundedResult.series('kineticEnergy')
+    assert np.all(np.isfinite(kinetic))
+    assert kinetic[-1] < 2 * kinetic[0]
 
 
 # --- Sedov-Taylor: point energy deposit, one case run at dim 1/2/3 ----------

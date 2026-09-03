@@ -195,13 +195,29 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     particles = state.state
     fluid = particles.kinds == 0
     velocities = particles.velocities[fluid]
-    return {
+    d = {
         'maxVelocity': torch.linalg.norm(velocities, dim=-1).max().detach().cpu().item(),
         'kineticEnergy': (0.5 * particles.masses[fluid]
                           * (velocities ** 2).sum(dim=-1)).sum().detach().cpu().item(),
         'maxDensity': particles.densities[fluid].max().detach().cpu().item(),
         'minDensity': particles.densities[fluid].min().detach().cpu().item(),
     }
+    # Wall-penetration watch (DFSPH_FINDINGS.md 1.6): fluid particles pushed
+    # more than half a spacing past the interior tank AABB. The `c637785`
+    # rewrite dropped the mDBC no-penetration shift from `dfsph_step`; this is
+    # how a re-grade of the wall-crossing metrics is read off this case.
+    interior = ctx.scratch.get('interiorDomain')
+    if interior is not None:
+        dx = ctx.config.dx
+        pos = particles.positions[fluid]
+        lo = interior.min.to(pos)
+        hi = interior.max.to(pos)
+        past = torch.maximum(lo - pos, pos - hi)          # >0 == outside, per axis
+        pen = (past > 0.5 * dx).any(dim=-1)
+        d['nPenetrating'] = int(pen.sum().detach().cpu().item())
+        d['maxPenetrationDx'] = float(
+            torch.clamp(past.max(), min=0.0).detach().cpu().item() / dx)
+    return d
 
 
 #: The two panels a dam break actually ships with (`plotDensity=False`).

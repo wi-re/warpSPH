@@ -66,6 +66,20 @@ def configureScheme(ctx: RunContext) -> None:
         ctx.spec.params['band'] = BOUNDED_BAND
     configureWeaklyCompressible(ctx)
 
+    # NOTE (`DFSPH_IMPROVEMENT_PLAN.md` "Immediate A1", Part 48): the
+    # `--bounded` variant DIVERGES under the post-`c637785` `divergenceFree`
+    # scheme at every resolution. A density excursion builds near the wall
+    # over many steps (rho spreads [0.98,1.02] -> [0.2,3.4] while KE/|v| stay
+    # flat), then the pressure response detonates the velocity; onset time
+    # scales with `nx` (nx=32 t~0.025, nx=48 t~0.16, nx=64 t~0.95, nx=128
+    # step 4). Isolated to the constant-density `solveIncompressible` inside
+    # the VD+PS shift (`systems/incompressible.finalize`) -- the near-singular
+    # pure-Neumann near-wall operator of the plan's Active track (Parts
+    # 42-45); `iisph` / `omniIncompressible` fail this same case. No knob
+    # tried (maxDt, cflFactor, `DIVERGENCE_SOLVER`, `boundaryPressureMode`,
+    # `nu`, disabling the shift) fixes it. Left open, folded into the
+    # near-wall CD-solve / `band2018pb` work; the regression test xfails it.
+
     # `configureWeaklyCompressible` wires the shared `inviscid`/`alpha`
     # (artificial-viscosity) knobs `deltaSPH` uses; DFSPH has no such term
     # (see `kolmogorovIncompressible`), so this scheme always runs with a

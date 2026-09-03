@@ -117,6 +117,21 @@ XSPH_SCALE = 0.0
 #: (Part 23) from "does it break at a free surface". `None` == inert.
 GRAVITY_OSC = None
 
+#: Whether to re-apply the mDBC no-penetration velocity shift the `c637785`
+#: rewrite dropped (FINDINGS 1.6). `computeMdbcNoPenShift` returns a per-fluid
+#: corrective velocity that damps motion closing on a nearby wall; it is folded
+#: into `dvdt` as `nopenshift / dt` *before* the pressure solves, exactly where
+#: the pre-rewrite `dfsph_step` and `schemes/deltaSPH.py` put it. The DFSPH
+#: paper (Bender & Koschier) has no such term and relies on the pressure
+#: projection alone, but FINDINGS 2 measured that removing it is strictly worse
+#: on the wall-crossing metrics, and post-`c637785` `columnCollapse` /
+#: `dambreak` penetrate the wall band on impact.
+#:   'config' (default) -- obey `schemeConfig.solverConfig.mdbcNoPenetrationShift`
+#:                         (itself default `True`), i.e. the historical
+#:                         always-on behaviour, now restored.
+#:   True / False        -- force on / off regardless of the solver config.
+NOPEN_SHIFT = 'config'
+
 
 def dfsph_step(
     system: CompSPHSystem,
@@ -155,7 +170,8 @@ def dfsph_step(
         currentState.densities = computeDensities(currentState, config, schemeConfig, adjacency)
         currentState.densities[currentState.kinds==2] = 1.0 # reset boundary densities to 1.0
 
-    print(f'step {currentSystem.t:.6g}: density stats: mean={currentState.densities.mean().item():.6g}, min={currentState.densities.min().item():.6g}, max={currentState.densities.max().item():.6g}')
+    if verbose:
+        print(f'step {currentSystem.t:.6g}: density stats: mean={currentState.densities.mean().item():.6g}, min={currentState.densities.min().item():.6g}, max={currentState.densities.max().item():.6g}')
 
     # print(f'step {currentSystem.t:.6g}: density stats: mean={currentState.densities.mean().item():.6g}, min={currentState.densities.min().item():.6g}, max={currentState.densities.max().item():.6g}')
     # if currentState.densities.max() > 1.01:
@@ -231,7 +247,7 @@ def dfsph_step(
     # 14. Apply forcing
     # with TimedBlock('compute forcing', use_cuda=True, device=config.device) as tb_forcing:
     with record_function("[warpSPH] - [deltaSPH - 14] - compute forcing"):
-        forcing = computeForcing(currentSystem, config.dt, currentSystem.t, config, schemeConfig)*0
+        forcing = computeForcing(currentSystem, config.dt, currentSystem.t, config, schemeConfig)
         dvdt = forcing / currentState.masses.view(-1,1)
 
 
@@ -245,17 +261,18 @@ def dfsph_step(
         gravity[currentState.kinds != 0] = 0.0
         dvdt += gravity
 
-    # Revert boundary velocity
-    # with TimedBlock('compute mDBC no-pen shift', use_cuda=True, device=config.device) as tb_nopenshift:
-    # with record_function("[warpSPH] - [deltaSPH - 16] - compute mDBC no-pen shift"):
-    #     # Experimental A/B toggle (DFSPH_IMPROVEMENT_PLAN.md) -- the original
-    #     # DFSPH paper has no such term and relies on the pressure projection
-    #     # alone to prevent penetration; default True preserves this scheme's
-    #     # historical always-on behavior pending that comparison's outcome.
-    #     if schemeConfig.solverConfig.mdbcNoPenetrationShift:
-    #         nopenshift = computeMdbcNoPenShift(currentState, config, schemeConfig, adjacency)
-    #         dvdt += nopenshift / dt
-    # currentState.velocities = currentVelocities
+    # mDBC no-penetration velocity shift (FINDINGS 1.6 / 2; `NOPEN_SHIFT`).
+    # The `c637785` rewrite commented this out, leaving the pressure projection
+    # alone to stop wall penetration -- not enough for a violent impact
+    # (`columnCollapse`, `dambreak`). Folded into `dvdt` before the pressure
+    # solves, matching the pre-rewrite step and `schemes/deltaSPH.py`.
+    with record_function("[warpSPH] - [deltaSPH - 16] - compute mDBC no-pen shift"):
+        _noPenOn = (schemeConfig.solverConfig.mdbcNoPenetrationShift
+                    if NOPEN_SHIFT == 'config' else NOPEN_SHIFT)
+        if _noPenOn:
+            nopenshift = computeMdbcNoPenShift(currentState, config, schemeConfig, adjacency)
+            nopenshift[currentState.kinds != 0] = 0.0
+            dvdt = dvdt + nopenshift / dt
 
     # First we project the velocity field to be divergence free using the DFSph solver
     # This is the standard incompressible approach
