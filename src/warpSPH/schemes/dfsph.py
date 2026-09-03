@@ -3,7 +3,17 @@ adjacency, density (mDBC-corrected), boundary velocities/Dirichlet BCs,
 free-surface detection, delta-SPH velocity diffusion, continuity `drhodt`,
 forcing/gravity/mDBC no-penetration shift folded into an explicit `dvdt`,
 then `solveDivergenceFree` projects that `dvdt` onto a divergence-free
-pressure correction (`dvdt_pressure`). Several stretches are commented out
+pressure correction (`dvdt_pressure`).
+
+Both projection pressures are persisted after the solves (they were computed
+and discarded before, so `dfsph` exposed no readable pressure field), on the
+same carriers `schemes/dfsphReference.py` uses:
+`currentState.pressures` holds the constant-density / particle-shift solve
+pressure, `currentState.soundspeeds` (a free slot -- this scheme has no
+acoustic sound speed) holds the divergence-free projection pressure. Raw
+solver iterates, fluid rows only.
+
+Several stretches are commented out
 rather than removed (tracked separately in CLEANUP_PLAN.md), including an
 alternate implicit-particle-shift path (`solveIncompressible`) and the
 delta-SPH density-diffusion term. Whether the returned `drhodt` actually
@@ -307,10 +317,9 @@ def dfsph_step(
                       surfaceSource=surfaceSource)
 
     if DIVERGENCE_SOLVER == 'vdps':
-        dvdt_pressure, pressure, errDiv, _ = solveDivergenceFree(
+        dvdt_pressure, pDiv, errDiv, _ = solveDivergenceFree(
             particles=currentState, config=config, schemeConfig=schemeConfig,
             adjacency=adjacency, dvdt=dvdt + dvdt_diss, dt=dt)
-        currentState.pressures = pressure
         a_p_rho, pRho, nRho, errRho = _omniPass(
             'density', dvdt_pressure, 0.5 * _zeros, 3, 256, 1e-3, SURFACE_SOURCE)
         dvdt_inStep = a_p_rho if _instepCD else torch.zeros_like(a_p_rho)
@@ -319,11 +328,11 @@ def dfsph_step(
             a_p_rho, pRho, nRho, errRho = _omniPass(
                 'density', 0.0, 0.5 * _zeros, 3, 256, 1e-3, SURFACE_SOURCE)
             dvdt_inStep = a_p_rho if _instepCD else torch.zeros_like(a_p_rho)
-            a_p_div, _, nDiv, errDiv = _omniPass(
+            a_p_div, pDiv, nDiv, errDiv = _omniPass(
                 'divergence', dvdt_inStep, _zeros, 2, 32, 1e-2)
             dvdt_pressure = a_p_div
         else:  # 'div_then_cd' (shipped)
-            a_p_div, _, nDiv, errDiv = _omniPass(
+            a_p_div, pDiv, nDiv, errDiv = _omniPass(
                 'divergence', 0.0, _zeros, 2, 32, 1e-2)
             dvdt_pressure = a_p_div
             a_p_rho, pRho, nRho, errRho = _omniPass(
@@ -331,6 +340,22 @@ def dfsph_step(
             dvdt_inStep = a_p_rho if _instepCD else torch.zeros_like(a_p_rho)
     else:
         raise ValueError(f'Unknown DIVERGENCE_SOLVER: {DIVERGENCE_SOLVER!r}')
+
+    # Persist BOTH projection pressures, which were computed and thrown away
+    # before (`currentState.pressures` stayed at its zero init unless the
+    # `vdps` branch ran, so `dfsph` had no readable wall pressure -- see the
+    # sloshingTank verification, `examples/sloshingTank/PLAN.md`). Same carrier
+    # convention as `schemes/dfsphReference.py`:
+    #   `pressures`   <- constant-density / particle-shift solve pressure (pRho)
+    #   `soundspeeds` <- divergence-free projection pressure (pDiv)
+    # This scheme has no acoustic sound speed, so `soundspeeds` is a free slot.
+    # Raw solver iterates (not EOS pressures), fluid rows only; non-fluid rows
+    # are held at 0. A gauge that wants Pa should read pRho -- it is the DFSPH
+    # analogue of the compression pressure that resists a slam.
+    _pRho = pRho if pRho is not None else _zeros
+    _pDiv = pDiv if pDiv is not None else _zeros
+    currentState.pressures = torch.where(fluid, _pRho, torch.zeros_like(_pRho))
+    currentState.soundspeeds = torch.where(fluid, _pDiv, torch.zeros_like(_pDiv))
     # print(f'step {currentSystem.t:.6g}: pressure stats: mean={pressure.mean().item():.6g}, min={pressure.min().item():.6g}, max={pressure.max().item():.6g}')
     # currentState.pressures = pressure
     # if boundaryPressureMode == BoundaryPressureMode.mdbcMlsPressure:

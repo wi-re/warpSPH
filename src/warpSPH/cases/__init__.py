@@ -40,6 +40,7 @@ CASE_MODULES = (
     'movingObstacle',
     'drivenSquare',
     'dambreak',
+    'sloshingTank',
     'channelFlow',
     # incompressible -- examples/incompressible/*.ipynb
     'tgv',
