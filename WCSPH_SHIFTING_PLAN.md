@@ -341,13 +341,22 @@ are the discriminating signals here.
 
 ## Actionable list
 
-> **Status (2026-09-03):** §1 done. §3 (`surfaceNormal` = real Sun 2019
-> Eq. 20–21) done, verified, **now the default** (commits `f078ac8`,
-> `8d3a1f5`, `107d86e`). §2d (`correctdrhodt`) audited: formula correct,
-> validated on periodic `kolmogorov` (`ε_V` 1.74 % → 0.16 %); still **off by
-> default** and off for violent free surface. Square-patch arm fragmentation
-> chased down to **under-resolution** (not a bug). Mach-scaling case bug fixed;
-> Eq. 14 shift limiter added.
+> **Status (2026-09-03) — the actionable list is worked through.** §1 done.
+> §3 (`surfaceNormal` = real Sun 2019 Eq. 20–21) done, verified, **the
+> default**. §4 payoff confirmed: `sloshingTank --scheme wcsph` runs the full
+> 7 s with wall pressure in the SPHERIC band, where `mat`/no-shift diverge at
+> `t ≈ 3.4 s`. §2a (`backgroundPressure`) and §3's `λ` taper implemented but
+> neither moves the needle (both trace to resolution / inherent WC acoustics).
+> §2d (`correctdrhodt`) audited, validated on periodic `kolmogorov`
+> (`ε_V` 1.74 % → 0.16 %), **stays opt-in** (harmful on violent free surface).
+> Mach-scaling case bug fixed; Eq. 14 shift limiter added; arm fragmentation
+> shown to be under-resolution, not a bug. `literature/`: `sun2017` + `sun2019`
+> synced to core.
+> Commits: `f078ac8` `8d3a1f5` `107d86e` `696178d` `a0f89b4` `95a8699`
+> `ade2f3e` `cfd79ce` `d5af6c1` `d6f3a99` `494c597`.
+>
+> **Nothing blocking remains.** Optional, low-value: cumulative
+> normal-displacement damping; a large-`p_b` §2a regime; `correctdvdt`.
 >
 > **What's left, roughly in priority order:**
 > 1. ✅ **§4 payoff — `sloshingTank` shift A/B**: `surfaceNormal` runs the full
@@ -355,8 +364,10 @@ are the discriminating signals here.
 >    SPHERIC band. `correctdrhodt` and `3× c₀` both explored, neither helps.
 > 2. ✅ **§2a background pressure** — `fluid.backgroundPressure` (EOS field,
 >    default 0, inert), exposed as the `backgroundPressure` case param /
->    `--background-pressure` runner flag. Verification sweep on `--shape circle`
->    running.
+>    `--background-pressure` runner flag. Swept on `--shape circle` / `box`:
+>    **no measurable effect** at `p_b ≤ 8` — the circle null and the arm
+>    fragmentation are under-resolution, not a mean-pressure problem. Kept as a
+>    knob; large-`p_b` regime untested and low-value.
 > 3. ✅ **`correctdrhodt` default — keep OFF, documented.** Validated for
 >    periodic/confined (`kolmogorov` `ε_V` 1.74 % → 0.16 %) but *harmful* on
 >    violent free surface (`sloshingTank` diverges at the first impact with it
@@ -545,16 +556,20 @@ first:
   `ϵ_V` drift is the target; only then consider it for free-surface cases (and
   only with `surfaceNormal` + the limiter). `correctdvdt` (momentum `δu`-terms)
   is the paper's "negligible" half — leave off.
-- **2a. Background pressure — ✅ implemented.** `fluid.backgroundPressure`
-  (`p ← p_EOS + p_b`, added in `modules/eos/weaklyCompressible.py`; default
-  `0.0`, inert). Exposed as the `backgroundPressure` case param (all WCSPH
-  cases via `configureWeaklyCompressible`, plus `sloshingTank`) and
-  `run_sloshingTank.py --background-pressure`. A positive `p_b` at the free
-  surface (where `p_EOS ≈ 0`) pushes particles together, opposing the shift's
-  outward drift and the tensile instability, with no surface special-casing.
-  Known cost: a surface-tension-like rounding of sharp features — the arms /
-  `cornerRetention` are the tolerance test. `probe_squarePatchFragmentation.py`
-  gained `--pb` for the sweep; verification on `--shape circle` running.
+- **2a. Background pressure — ✅ implemented; ✗ doesn't move the needle at
+  small `p_b`.** `fluid.backgroundPressure` (`p ← p_EOS + p_b`, in
+  `modules/eos/weaklyCompressible.py`; default `0.0`, inert). Exposed as the
+  `backgroundPressure` case param (all WCSPH cases via
+  `configureWeaklyCompressible`, plus `sloshingTank`) and
+  `run_sloshingTank.py --background-pressure`; `probe_squarePatchFragmentation.py
+  --pb` for the sweep. **Result** (`--shape circle` / `box`, `nx = 96`,
+  `p_b ∈ {0, 2, 8}`): essentially no effect — circle shatter `tω` 2.85 → 2.71,
+  box unchanged, `rmsRadius` flat. Because `p_b = 8` is only `~6e-4·c₀²`, and —
+  more fundamentally — the circle null and the arm fragmentation are
+  **under-resolution**, not a mean-pressure-level problem (a raised field adds
+  no cohesion to a 1–2-particle-thick rim). A much larger `p_b` (`~ ½ρU²`,
+  order 10–50 here) is untested but the resolution root cause caps its value.
+  Kept as an available knob.
 - **2b. Divergence-free projection of the shift field.** Before applying,
   project `δx` onto `∇·(δx) = 0` (a small least-squares / Poisson solve on the
   fluid). Volume-conserving by construction, no surface heuristic. Cost: one
@@ -611,7 +626,9 @@ first:
   the hard on/off cut; `> 0` = a smoothstep ramp of the shift weight from 0 at
   `lMin == surfaceLambdaThreshold` to 1 at `lMin == threshold + taper`).
   `probe_squarePatchFragmentation.py --lambda-taper` for tuning. Default-inert;
-  `test_physics.py` unchanged.
+  `test_physics.py` unchanged. Verified: `taper = 0.15` vs `0.0` on the box
+  (`nx = 96`) is identical to 3 sig figs — a safe generalisation of the hard
+  step, no regression; a value that actually helps is a future tuning exercise.
 - ⬜ (later, beyond the paper) cumulative normal-displacement damping so drift
   cannot ratchet through normal-estimate error. Low value now that
   `surfaceNormal` works and `sloshingTank` survives; the paper's own answer to
@@ -646,6 +663,13 @@ Now the default (`buildDefaultShiftProperties`). Verified:
 this plan was spun out of** — `mat`'s hard-zero-at-surface did not (it diverges
 at the same `t ≈ 3.4 s` as no shift at all). With `surfaceNormal` the smoothed
 wall pressure lands in the SPHERIC repeatability band on every roll cycle.
+
+`nx = 150` (the SPHERIC TC10 grid) also runs the full 7 s with `surfaceNormal`,
+smoothed wall pressure in the band — same picture as `nx = 100`, with the raw
+acoustic ring a touch worse (finer grid → sharper spray, deeper transient
+`ρ` spikes: `minρ` 0.49 vs 0.66, `sensorρ` `[0.82, 1.17]` vs `[0.77, 1.11]`).
+So resolution does not fix the raw ring; the smoothed / windowed trace is the
+comparison, and it holds at both grids.
 
 Quantitative pass — **plain `surfaceNormal` at the case defaults is the
 answer**:
