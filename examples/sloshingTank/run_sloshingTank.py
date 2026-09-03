@@ -59,6 +59,12 @@ def parseArgs(argv):
                         '(case default 2e-4 -> c_s ~16.6; diffSPH uses c_s=20)')
     p.add_argument('--alpha', type=float, default=None,
                    help='WCSPH artificial-viscosity coefficient (case default 0.02)')
+    p.add_argument('--no-shift', dest='shift', action='store_false', default=True,
+                   help='WCSPH: disable the δ⁺-SPH particle shift (shift A/B)')
+    p.add_argument('--shift-projection', dest='shiftProjection', default=None,
+                   choices=['surfaceNormal', 'mat', 'dot', 'zero'],
+                   help='WCSPH: free-surface shift projection scheme '
+                        '(default: surfaceNormal, the Sun 2019 Eq. 20-21 treatment)')
     p.add_argument('--smoothSigma', type=float, default=0.01,
                    help='Gaussian smoothing width for the simulated pressure [s]')
     p.add_argument('--replot', action='store_true', default=False,
@@ -104,6 +110,10 @@ def buildSpec(case, args):
         params['targetDt'] = args.targetDt
     if args.alpha is not None:
         params['alpha'] = args.alpha
+    if args.scheme == 'wcsph':
+        params['shifting'] = args.shift
+        if args.shiftProjection is not None:
+            params['shiftProjection'] = args.shiftProjection
     if params:
         overrides['params'] = params
     return spec.merged(**overrides)
