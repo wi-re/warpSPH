@@ -28,6 +28,7 @@ class fluidProperties:
     molarMass: Optional[float] = field(default=0.02897, metadata={"description": "Molar mass of the gas"})
 
     fixedSoundSpeed: Optional[float] = field(default=10.0, metadata={"description": "Fixed sound speed"})
+    backgroundPressure: float = field(default=0.0, metadata={"description": "Uniform background pressure p_b added to the weakly-compressible EOS output (p <- p_EOS + p_b). A small positive p_b pushes particles together near a free surface (where p_EOS ~ 0), opposing the delta+ shift's outward drift and the tensile instability, at the cost of a spurious surface-tension-like rounding of sharp features. 0.0 = off (the default; no change to any existing case)."})
 
 def buildDefaultFluidProperties() -> fluidProperties:
     return fluidProperties(
@@ -37,5 +38,6 @@ def buildDefaultFluidProperties() -> fluidProperties:
         kappa=1.3,
         gas_constant=8.314,
         molarMass=0.02897,
-        fixedSoundSpeed=10.0
+        fixedSoundSpeed=10.0,
+        backgroundPressure=0.0,
     )
