@@ -647,8 +647,15 @@ Open (quantitative, not blocking):
   collapse — between impacts `minρ` recovers to `0.99–1.00` and `sensorρ`
   stays in `[0.97, 1.01]` the whole run. So the volume consistency is already
   fine; the transient spikes track the same marginal-`c₀` impact stiffness as
-  the acoustic ring. (`--correctdrhodt` / higher `c₀` sweep running to see
-  which tames the transients.)
+  the acoustic ring.
+- **`--correctdrhodt` makes it *worse* here** — `surfaceNormal + correctdrhodt`
+  diverges at `t = 2.52 s` (first impact), earlier than no-shift's `3.43 s`;
+  with `1.7× c₀` it lasts to `3.43 s` but still diverges. Exactly the audit's
+  prediction: at a violent free surface the shift gets large (jets up the
+  wall, §2.5), and `correctdrhodt` amplifies it into a ρ runaway that the
+  Eq. 14 limiter can't contain. **`correctdrhodt` stays off for violent
+  free-surface flows** — plain `surfaceNormal` is the right config here and it
+  already works.
 - ⬜ Watch `maxρ`: `surfaceNormal` loosens it (1.020 vs 1.013 on the box at
   nx 96). If it grows with `nx`, revisit `surfaceLambdaThreshold` / add a
   `λ` taper (§3 later items).
