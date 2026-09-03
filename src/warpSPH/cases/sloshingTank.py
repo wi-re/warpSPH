@@ -174,6 +174,10 @@ def configureScheme(ctx: RunContext) -> None:
             proj = ctx.param('shiftProjection', None)
             if proj:
                 sc.shiftProperties.projectionScheme = ShiftingProjectionScheme[proj]
+            # Sun 2019 Eq. (9) continuity δu-terms -- the volume-consistency
+            # fix for the free-surface de-densification (WCSPH_SHIFTING_PLAN
+            # §2d). Off by default; opt in for the sloshing quantitative pass.
+            sc.shiftProperties.correctdrhodt = ctx.param('correctdrhodt', False)
 
     ctx.scratch['rollHistory'] = loadRollHistory(_rollFilePath(ctx))
 
