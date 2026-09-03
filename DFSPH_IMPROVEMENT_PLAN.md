@@ -2,8 +2,17 @@
 
 Working document for the incompressible SPH path (`schemes/dfsph.py`,
 registered as `IncompressibleSPHScheme.divergenceFree`), the `dfsphReference`
-troubleshooting scheme, the `iisph` baseline (Part 33), and the
-`omniIncompressible` omniSPH-loop port (Part 35).
+troubleshooting scheme, the `iisph` baseline (Part 33), the `omniIncompressible`
+omniSPH-loop port (Part 35), and `band2018pb` (Part 45).
+
+**Since commit `c637785` (the "tmp commit"), `dfsph_step` no longer runs the
+VD+PS `solveDivergenceFree` + `finalize` position shift. It runs
+`omniIncompressible._solve` for both the divergence-free and constant-density
+passes** — i.e. `divergenceFree` and `omniIncompressible` are now nearly the
+same code, and much of the pre-Part-46 prose below (VD+PS, `solveDivergenceFree`,
+the `finalize` resample) describes a path that is no longer live. See
+**"Status — Parts 46–47"** immediately below; `DFSPH_FINDINGS.md` §1.16–§1.17
++ §9 rows 46–47 have the detail.
 
 **This file is the current state and the actionable list only.** The durable
 findings — the physics lessons, the negative results, the literature notes, the
@@ -19,49 +28,72 @@ constant.
 
 ---
 
-## Current state
+## Current state — post-`c637785`, Parts 46–47
 
-The incompressible path is **VD+PS** (Cornelis et al.), faithfully
-implemented, registered as `divergenceFree`. Three shipped-default changes
-landed from this work, all measured first; every other switch is opt-in and
-default-inert. Three further schemes are now registered as baselines:
-`dfsphReference` (DFSPH-proper troubleshooting artifact, Parts 24–32),
-**`iisph`** (plain IISPH, Ihmsen et al. 2014 — Part 33, the first scheme to
-hold `hydrostaticColumn`; but **CD-only, so not a general scheme** — Part 42
-found it injects energy on `tgv`, viable only near-quiescent), and
-**`omniIncompressible`** (omniSPH's two-solve loop, Part 35 — **now holds
-`hydrostaticColumn` at nx=128**, Part 41, via a per-iterate MLS wall pressure).
+`c637785` swapped `dfsph_step`'s body to `omniIncompressible._solve` for both
+passes and gutted `IncompressibleSystem.finalize`'s VD+PS shift. That bought
+`hydrostaticColumn` and cost the periodic KE tests; Parts 46–47 characterised
+and closed the gap.
 
-- **`cflFactor = 0.4` against the particle diameter** (Part 12, committed).
-- **`ShiftPressureGauge.minShift` is the default** (Part 4) and now reaches
-  wall-bounded solves (Part 14); still falls back to `nonNegativeClamp` where
-  there is a free surface.
-- **`BoundaryOperatorTerms.staticBoundary` on both solvers** (Part 14). A
-  strict no-op on any case with no `kind != 0` particles.
-- The last two are one fix at two points: together they take bounded
-  `randomFlowIncompressible` at nx=128 from a density band of 1.78e-1 to
-  **4.48e-3** (40x, and 5.4x better than they compose independently).
-- Several real bugs fixed (`DFSPH_FINDINGS.md` §7), the largest being the
-  Eq. 17 resample, the boundary-row masking, and the `drhodt` pre-projection
-  evaluation.
-- Full suite passes (241 passed / 1 skipped), `gradcheck_incompressible.py`
-  passes, `run_sweep.py` 30/30. Two known pre-existing flakes
-  (`DFSPH_FINDINGS.md` §4-known-open list, carried below).
+**What `divergenceFree` is now:** `_solve` divergence projection + `_solve`
+constant-density pass, then — gated on `schemeConfig.gravityConfig.active` —
+either fold the CD result into `dvdt` (`INSTEP_CD='auto'`, body-force cases)
+**or** apply a VD+PS position shift in `finalize` (`_RESTORE_PS_SHIFT='auto'`,
+everything else). Never both. Plus opt-in knobs: `SURFACE_SOURCE`,
+`DIVERGENCE_SOLVER` (`'omni'`/`'vdps'`), `XSPH_SCALE` (per-case via
+`schemeConfig.xsphFilterScale`), `SOLVE_ORDER`, `GRAVITY_OSC` (ablation).
 
-**Case status at the shipped defaults.**
+**Suite: `tests/test_physics.py` + `tests/test_runner.py` = 82 passed / 0
+failed** — green for the first time since `c637785` (the 2 `tgv` KE tests that
+failed after the rewrite pass again, Part 47).
+
+**Case status at the shipped defaults (`divergenceFree`, verified 09-03):**
 
 | case | status |
 |---|---|
-| `tgv`, `kolmogorovIncompressible`, `shearWave` (periodic) | `divergenceFree` healthy. `iisph` **fails `tgv`** (injects energy, KE ×145 — CD-only, no divergence pass, Part 42); `omniIncompressible` holds them (over-dissipative from `XSPH_FLUID = 0.05`). |
-| `randomFlowIncompressible --bounded` | `divergenceFree` best it has ever been (band 4.48e-3); still where all remaining wall error lives. `iisph` **diverges** (`\|v\|max` → 1e6, Part 42); `omniIncompressible` **holds with `WALL_PRESSURE_MODE = 'shepard'`** (`\|v\|max` decays 2 → 0.3, 300 steps — Part 42; `'mls'` diverged here, step-1 CD-Jacobi blow-up). |
-| `staticBlob` (free space), `impact` (collision) | **pass** (baseline cases, Part 23) |
-| `hydrostaticColumn` (quiescent column under gravity) | `divergenceFree` **fails** (position shift cannot sustain a body force); **`--scheme iisph` holds it** — Part 33 at nx=32 / 2000 steps, **Part 34 confirmed at the default nx=128** (clean to `tLimit`, and to t=2.9 / 1500 steps): stable geometry, `embeddedMinDensity` ~0.92–0.96, `pressureSlopeRatio` ~0.99, with a bounded undamped free-slip bulk slosh (KE creeps ~0.025→0.05 at nx=128) and cosmetic surface spray (the graded FOMs `densityP05` / `embeddedMinDensity` now exclude it). `dfsphReference` (two-solve DFSPH) still does not — its divergence Jacobi is the instability (Part 37: `ki==0` factor buys ~940 steps, then the same late-time surface degradation). **`omniIncompressible` (omniSPH port, Part 35) now holds nx=128 (Part 41)** — the composed density Jacobi was not contracting at the wall band (blow-up at the bottom corners by step ~10) because it had the wall in `alpha` only, boundary `p ≡ 0`, where omniSPH recomputes a wall pressure every iterate. A per-iterate wall-pressure closure (`WALL_PRESSURE_MODE`, built on `modules/liu` / a Shepard mirror) closes it: 350+ steps clean, `pressureSlopeRatio` 0.99–1.00, `densityP05` 1.000, `|v|max` ~0.56 (the undamped slosh, still wants a shear-carrying no-slip wall to damp — Part 42 TODO). **Default is `'shepard'` (Part 42): `'mls'` (Part 41's first default) holds this case but diverges the sheared `randomFlowIncompressible --bounded`; `'shepard'` — no linear term — holds both.** **Part 38 nailed the interior: side walls removed (x-periodic / floor-only), `omniIncompressible` sits at vmax ~0.2, `ρ≡ρ0`, slope 1.00 — the vertical density-solve physics is sound.** **Part 39 / 42: a viscous no-slip wall takes the `iisph` nx=128 slosh from vmax ~1.7 toward ~0.8; Part 39's hand-rolled shear Laplacian did it with the surface intact, but the stock `viscidNu` term (Part 42's cleanup) is normal-projected and roughens the surface — a shear-carrying Morris term is the TODO.** `dfsphReference` (two-solve DFSPH) still under-builds the gradient (`pressureSlopeRatio` ~0.7) and its divergence Jacobi is GPU-stochastic near step ~940 (Part 37); the wall pressure helps its slosh but is inconclusive there (Part 41). SPlisHSPlasH's own DFSPH holds the matched case; importing its exact state reproduces the transient for ~0.3 s, then warpSPH's composed Jacobi loses it (Part 36). |
+| `tgv`, `shearWave`, `staticBlob` (periodic / free space) | **pass** — `tgv` KE ×0.9996 monotone (Part 47 gate); `staticBlob` `\|v\| ≡ 0`. |
+| `randomFlowIncompressible` **periodic** | **holds** — KE decays cleanly (0.45 → 0.38 / 200 steps, `\|v\|` ~1). |
+| `randomFlowIncompressible --bounded` | **REGRESSION — NaN at graded defaults** (adaptive `dt`, `\|v\|→∞`, `maxRho→3.4`). Fixed-`dt` 1e-3 holds *with* the PS shift (KE ×0.994); the graded run's lagged-CFL `vMax` misses the near-wall impulse. Pre-`c637785` `divergenceFree` (VD+PS) held it at band 4.48e-3. **Open — plan item A.** |
+| `kolmogorovIncompressible` | **REGRESSION — inert.** `dfsph_step` line ~234 zeroes the forcing (`computeForcing(...) * 0`, an undocumented `c637785` change), so the forced case does nothing (`KE ≡ 0`). Not in the suite. **Open — plan item A.** |
+| `hydrostaticColumn` (quiescent column under gravity) | **`divergenceFree` HOLDS it** (`c637785`'s point; confirmed nx=64 & nx=128 this session): `pressureSlopeRatio` 1.001, `densityP05` 0.94, `\|v\|` ~0.07–0.10. Residual is a bounded undamped free-surface limit cycle in the top ~3 rows (§1.16); the per-case `xsphScale` knob (`XSPH_SCALE=1.0`) decays it (KE ↓55×/2250× at nx=64/128) at a dissipation cost, so it is opt-in. The old note "position shift cannot sustain a body force" applied to the pre-`c637785` VD+PS path and is superseded for the shipped scheme. `iisph` also holds it (Part 33/34); `dfsphReference` does not (Part 37); `omniIncompressible` holds nx=128 (Part 41); `band2018pb` holds nx≤64 (Part 45). |
+| `impact` (collision) | **pass** (Part 23; `\|v\|` ~1.5, no NaN). |
+| `squarePatch` (`rotatingSquarePatch`) | **runs** — stable rotation; corner density → 0.50. [BK] §5 documents this as a method limitation, not an implementation bug. |
 | `dambreak --scheme divergenceFree` | **runs** (Part 19) — the only working free surface — but half `deltaSPH`'s run-out speed and most of the flow's KE dissipated on impact; needs its own `--cflFactor 0.2` (Part 20), not 0.4 |
-| `rotatingSquarePatch --scheme divergenceFree` | broken; [BK] §5 documents it as a method limitation, not an implementation bug |
+
+### Immediate — `c637785` / Parts 46–47 fallout
+
+The suite is green but two cases the suite does not cover regressed in the
+`c637785` rewrite:
+
+- **A1. `randomFlowIncompressible --bounded` NaNs at graded defaults.**
+  Fixed-`dt` 1e-3 holds *with* the PS shift (Part 47, KE ×0.994); the adaptive
+  run detonates near the wall. First: is it the CFL (does `--cflFactor 0.2`,
+  as `dambreak` needs, hold it?) or the CD/shift interaction with a larger
+  `dt`? If it is the near-wall CD solve, this is the same target as the
+  **Active track** (`band2018pb` / `CD_TIKHONOV`) — decide whether to fix it
+  as a `divergenceFree` regression now or fold it into that track.
+- **A2. `kolmogorovIncompressible` is inert** — `dfsph_step` (~line 234)
+  has `forcing = computeForcing(...) * 0`. Confirm whether the `*0` is
+  deliberate (the rewrite was mid-experiment) or an accident; if accidental,
+  drop it and re-verify `kolmogorovIncompressible` runs + nothing else moves
+  (`hydrostaticColumn` takes gravity through `computeGravity`, not forcing).
+- **A3. Add `kolmogorovIncompressible` + `randomFlowIncompressible --bounded`
+  to `tests/test_runner.py`** so this class of regression is caught.
+- **A4 (perf, lower).** `_RESTORE_PS_SHIFT='auto'` adds a `solveIncompressible`
+  + adjacency rebuild per step on every non-gravity case — measurable at
+  `tgv`'s default nx=256. Cache the adjacency / gate the shift to every N
+  steps if it bites.
 
 ---
 
-## Active track — `omniIncompressible` on `randomFlowIncompressible --bounded`
+## Active track — the near-wall CD solve on `randomFlowIncompressible --bounded`
+
+**Note (Parts 46–47):** `divergenceFree` now *is* the `omniIncompressible._solve`
+two-solve loop, so "grade `omniIncompressible` vs `divergenceFree`" below is
+largely one scheme against itself + the shift gate. The live question this
+track still owns: the **near-wall constant-density solve** — the same thing
+that NaNs `randomFlowIncompressible --bounded` at graded `dt` (Immediate A1)
+and that `band2018pb` / `CD_TIKHONOV` target.
 
 **Status (Part 45): `band2018pb` landed — a fresh operator module + a
 distinct scheme (`IncompressibleSPHScheme.band2018pb = 4`). Operator
@@ -144,7 +176,7 @@ step 1 (KE 0.35 → ~1.4e3, `|v|max` → 83 from an enormous near-wall pressure
 impulse — density stays fine at [1.001, 1.001], so a solve overshoots), briefly
 recovers over steps 2–7, then re-detonates by step ~10 → `|v|max` 1e15 by
 step 14. `iisph` also fails this case (KE → 5e9); `dfsphReference` untested
-here; `divergenceFree` (VD+PS) holds it (KE ratio 0.896, `|v|max` 1.06). So the
+here; the *pre-`c637785`* VD+PS `divergenceFree` held it (KE ratio 0.896, `|v|max` 1.06) — **the current `_solve`-based `divergenceFree` NaNs it at graded `dt`** (Immediate A1), so that reference point is gone. So the
 DFSPH-family composed operators + the Akinci-band / MLS wall closure are not
 robust to a real wall-bounded shear flow — this is the gap to close before
 `omniIncompressible` (or any `iisph`+divergence-pass scheme, ranked queue
@@ -391,14 +423,13 @@ quality issue (open since Part 15), not a failure.
    `randomFlowIncompressible --bounded` vs the `omniIncompressible` `shepard`
    + `CD_TIKHONOV` Jacobi. Whatever lands here is also the contractive
    divergence-pass any `iisph`-based general scheme needs (item 4/9).
-2. **Grade `omniIncompressible` (shepard + auto) vs `divergenceFree` on
-   `randomFlowIncompressible --bounded`** — the density band and the energy
-   budget. It now *holds*, but KE decays to ~10–15 % over 300 steps where
-   `divergenceFree` keeps ~90 %. Is the over-dissipation the `XSPH_FLUID =
-   0.05` filter (try 0), the un-converged free-surface... no, it is a closed
-   box, the CD solve converges — so the loss is the XSPH filter and/or the
-   3-iter divergence pass. Pin it down; decide if `omniIncompressible` is a
-   *usable* closed-box scheme or only a non-diverging one.
+2. **`randomFlowIncompressible --bounded` under `divergenceFree` (= the
+   `_solve` loop now)** — Immediate A1. It NaNs at graded `dt`; establish
+   whether a tighter CFL holds it or the near-wall CD solve is the blocker,
+   then either fix it here or fold it into the `band2018pb` work. (The
+   pre-Parts-46/47 "grade `omniIncompressible` vs `divergenceFree`" framing is
+   moot — they are the same code; what remains is the shift gate + `XSPH_SCALE`
+   dissipation trade, and the closed-box KE budget.)
 3. **`omniIncompressible` full `dambreak` grade** (item 0 leftover) and
    **`dfsphReference` on `randomFlowIncompressible --bounded`** (untested —
    does the two-solve path diverge there like `iisph`/`omniIncompressible`
@@ -409,22 +440,26 @@ quality issue (open since Part 15), not a failure.
    `nu` gives a clean no-slip wall (Part 42 found the stock `viscidNu` term is
    normal-projected). New `ViscosityTerms` value + `deltaSPH` regression pass;
    fix `wp_viscosityDelta.py`'s docstring.
-5. **Full-suite validation of Parts 34–43** — `bash scripts/run_tests.sh` +
-   `run_sweep.py` (Part 43 ran `gradcheck_incompressible` + the
-   `tgv/shearWave/dambreak/incompressible` physics subset green; the plan's
-   Known-open flags Parts 35–38 as not full-suite-validated). Part 43's
-   `CD_TIKHONOV` / `CD_SOLVER` are default-inert (`0.0` / `'jacobi'`), so the
-   risk is confined to the `omniIncompressible` scheme.
+5. **Full-suite validation of Parts 34–47** — `bash scripts/run_tests.sh` +
+   `run_sweep.py` + `gradcheck`. Parts 46–47 got `test_physics.py` +
+   `test_runner.py` green (82/0) but not the full sweep; Parts 34–45's
+   omni/band flags are default-inert, but Part 47's `INSTEP_CD` /
+   `_RESTORE_PS_SHIFT` `'auto'` **change the `divergenceFree` default path**
+   for every non-gravity case — this one needs the full sweep + `run_sweep.py`
+   before it can be called landed.
 
 ---
 
 ## Earlier track — a velocity-coupled incompressible scheme for the column
 
-**Why.** `divergenceFree` cannot hold a quiescent, wall-bounded,
-free-surface-under-gravity state (`hydrostaticColumn`, Part 23): the VD+PS
-density-invariance correction is a momentum-neutral position shift
-(`DFSPH_FINDINGS.md` §1.2/§1.3), and a position shift cannot sustain a body
-force. The correction has to be applied to *velocity*.
+**Why (pre-`c637785`).** The *old* VD+PS `divergenceFree` could not hold a
+quiescent, wall-bounded, free-surface-under-gravity state (`hydrostaticColumn`,
+Part 23): the density-invariance correction was a momentum-neutral position
+shift (`DFSPH_FINDINGS.md` §1.2/§1.3), and a position shift cannot sustain a
+body force. **This is resolved for the shipped scheme** — `c637785` moved the
+CD correction to velocity (`_solve` in the step) and Part 47's `INSTEP_CD=
+'auto'` gate keeps it there only where a body force needs it. The `iisph`
+work below stands as an independent baseline / cross-check.
 
 **Outcome (Part 33): `IncompressibleSPHScheme.iisph` — plain IISPH ([I],
 Ihmsen et al. 2014) — holds it, and is landed as the [I] baseline.** One
@@ -507,8 +542,9 @@ choice, not a pressure-solve lever.
    `tgv --scheme iisph` nx=64 *injects* energy — KE 9.86 → 1876 by t=0.1,
    `|v|max` 1.0 → 29, then a wrong bounded plateau (KE ~1200, `|v|max` ~25)
    for 300 steps; density stays near-perfect (`rho` [0.995, 1.007],
-   `rhoStd` 1.3e-3) throughout. `divergenceFree` holds it (KE ratio 0.996,
-   monotone) and so does `dfsphReference` (KE ratio 0.81, bounded) — the
+   `rhoStd` 1.3e-3) throughout. `divergenceFree` holds `tgv` (KE ratio ~1.0,
+   monotone — pre-`c637785` via VD+PS, now via the Part 47 shift gate) and so
+   does `dfsphReference` (KE ratio 0.81, bounded) — the
    *only* difference from `iisph` is the divergence-free pass. So plain IISPH
    (CD-only velocity-impulse) is **not a general incompressible scheme**: with
    the density-invariance constraint enforced but `div v = 0` not, the
@@ -835,7 +871,7 @@ for `iisph` (already holds), inconclusive for the two-solve path.
    family** — `modules/incompressible/wallPressure.py`'s
    `wallPressureExtrapolation` is the no-relaxation, no-carried-state,
    recompute-every-iterate version, and it holds `hydrostaticColumn` nx=128.
-   What is still open here is the `divergenceFree` (VD+PS) scheme's own
+   What is still open here is the (historical) `divergenceFree`
    `computeMdbcPressure` call in `schemes/dfsph.py` (once per step, carried as
    under-relaxed state) and [B]'s **SVD-safe inversion** on the MLS gradient
    system (the codebase falls back on a neighbour-count threshold of 9 with no
