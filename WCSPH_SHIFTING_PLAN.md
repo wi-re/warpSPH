@@ -341,15 +341,32 @@ are the discriminating signals here.
 
 ## Actionable list
 
-> **Status (2026-09-03):** §1 (metrics + probe) done. §3 (`surfaceNormal` =
-> real Sun 2019 Eq. 20–21) done, verified, and **now the default**. §4 mostly
-> done — remaining: high-res `sloshingTank` (SPHERIC TC10 grid) + wall-pressure
-> vs experiment, and watch `maxρ` at higher `nx`.
-> Open items:
-> - **§2d is blocked** on a `correctdrhodt` correctness audit — it collapses ρ
->   to 0.42 on the violent box flow (`surfaceNormalDeltaU`). Keep it off.
-> - **§2a** (background pressure) wanted to make the `circle` null valid and to
->   address the tensile instability `surfaceNormal` doesn't touch.
+> **Status (2026-09-03):** §1 done. §3 (`surfaceNormal` = real Sun 2019
+> Eq. 20–21) done, verified, **now the default** (commits `f078ac8`,
+> `8d3a1f5`, `107d86e`). §2d (`correctdrhodt`) audited: formula correct,
+> validated on periodic `kolmogorov` (`ε_V` 1.74 % → 0.16 %); still **off by
+> default** and off for violent free surface. Square-patch arm fragmentation
+> chased down to **under-resolution** (not a bug). Mach-scaling case bug fixed;
+> Eq. 14 shift limiter added.
+>
+> **What's left, roughly in priority order:**
+> 1. **Core-pressure sign** — `surfaceNormal`'s square-patch core reads
+>    `p ≈ +3` where it should be negative. Check vs the paper's Fig. 15
+>    centre-pressure trace; may be mild over-compression by the shift. The one
+>    correctness question the figures raised.
+> 2. **§4 payoff — high-res `sloshingTank`** (nx 150, SPHERIC TC10 grid): wave
+>    height @ `x/L = 0.05` and wall sensor-pressure vs the Bouscasse
+>    experiment. The transfer test (nx 60) only shows it *survives*; this is
+>    the quantitative check, and the downstream reason the plan exists.
+> 3. **§2a background pressure** — makes the `circle` null valid (a rotating
+>    circle destabilises on its own now) and addresses the tensile instability
+>    `surfaceNormal` doesn't touch.
+> 4. **`correctdrhodt` default** — validated for periodic/confined; decide flip
+>    vs keep-off-and-documented.
+> 5. **§3 polish** — smooth `λ` taper instead of the hard threshold;
+>    cumulative normal-displacement damping (beyond the paper).
+> 6. Low priority: `correctdvdt` (untested, paper says negligible); add
+>    Sun et al. 2017 to `literature/` if the original derivation is needed.
 
 ### 1. Baseline & metrics — "how bad is it, does the switch-off help"
 
