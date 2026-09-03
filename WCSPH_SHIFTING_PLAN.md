@@ -308,14 +308,14 @@ cached for retuning) sharpens the picture at `nx ≥ 288`:
   the base scheme's field is garbage well before the arms visibly break.
 - **`surfaceNormal` arms at `nx = 600`, `tω = 3` look genuinely paper-like**:
   four clean thin coherent arms, compact core.
-- **⚠ Core-pressure sign.** `surfaceNormal`'s core reads **mildly positive**
-  (`p ≈ +3`, i.e. `ρ ≈ +0.02 %`) and near-constant, where a rotating patch's
-  centrifugal core should be *negative* (paper §3.3 / Fig. 15). The value is
-  tiny and the field is otherwise clean, but it points at the shift **mildly
-  over-compressing the core** (packing particles into a region that wants to
-  cavitate). ⬜ Check against the paper's Fig. 15 centre-pressure trace before
-  trusting `surfaceNormal` for a quantitative pressure comparison — this is the
-  one open question the figures raised.
+- **Core-pressure sign — probably not a real issue.** `surfaceNormal`'s core
+  reads mildly positive (`p ≈ +3`, `ρ ≈ +0.02 %`) at the sampled instant where
+  a centrifugal core "should" be negative. But each figure is a *single*
+  snapshot, and a weakly-compressible pressure field carries an acoustic
+  oscillation whose amplitude and phase depend on the (fairly arbitrary)
+  sound-speed choice — so one instant's sign says little. Deferred; revisit
+  only if a time-averaged centre pressure (paper Fig. 15 style) still shows a
+  bias.
 
 ## Metrics — `rotatingSquarePatch.diagnostics` ✅ done (2026-09-03)
 
@@ -350,23 +350,22 @@ are the discriminating signals here.
 > Eq. 14 shift limiter added.
 >
 > **What's left, roughly in priority order:**
-> 1. **Core-pressure sign** — `surfaceNormal`'s square-patch core reads
->    `p ≈ +3` where it should be negative. Check vs the paper's Fig. 15
->    centre-pressure trace; may be mild over-compression by the shift. The one
->    correctness question the figures raised.
-> 2. **§4 payoff — high-res `sloshingTank`** (nx 150, SPHERIC TC10 grid): wave
->    height @ `x/L = 0.05` and wall sensor-pressure vs the Bouscasse
->    experiment. The transfer test (nx 60) only shows it *survives*; this is
->    the quantitative check, and the downstream reason the plan exists.
-> 3. **§2a background pressure** — makes the `circle` null valid (a rotating
+> 1. **§4 payoff — `sloshingTank` shift A/B (in progress)**: does WCSPH
+>    (`deltaSPH`) survive past the `t ≈ 3.4 s` divergence now that
+>    `surfaceNormal` is on, and does wall Sensor-1 pressure match the SPHERIC
+>    TC10 record (first impact ~3.6 kPa @ `t ≈ 2.40 s`, then 4.07 / 5.71 s)?
+>    This is the downstream reason the plan exists. `run_sloshingTank.py` now
+>    has `--no-shift` / `--shift-projection` for the A/B.
+> 2. **§2a background pressure** — makes the `circle` null valid (a rotating
 >    circle destabilises on its own now) and addresses the tensile instability
 >    `surfaceNormal` doesn't touch.
-> 4. **`correctdrhodt` default** — validated for periodic/confined; decide flip
+> 3. **`correctdrhodt` default** — validated for periodic/confined; decide flip
 >    vs keep-off-and-documented.
-> 5. **§3 polish** — smooth `λ` taper instead of the hard threshold;
+> 4. **§3 polish** — smooth `λ` taper instead of the hard threshold;
 >    cumulative normal-displacement damping (beyond the paper).
-> 6. Low priority: `correctdvdt` (untested, paper says negligible); add
->    Sun et al. 2017 to `literature/` if the original derivation is needed.
+> 5. Low priority: `correctdvdt` (untested, paper says negligible); add
+>    Sun et al. 2017 to `literature/`; the square-patch core-pressure sign
+>    (likely just a WC acoustic oscillation at one instant — deferred).
 
 ### 1. Baseline & metrics — "how bad is it, does the switch-off help"
 
