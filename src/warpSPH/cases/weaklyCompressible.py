@@ -34,7 +34,7 @@ __all__ = [
     'SHAPE_PRESETS', 'shapeArgs', 'sdfBounds', 'centredShapeSdf',
     'OBSTACLE_PARAMS', 'paramShapeSdf',
     'buildRegionSystem', 'fluidRegion', 'boundaryRegion', 'meanFlowForcingBC',
-    'setupTimestep', 'weaklyCompressibleDiagnostics',
+    'setupTimestep', 'weaklyCompressibleDiagnostics', 'squarePatchAreaMetrics',
     'VELOCITY_DENSITY_FIELDS', 'VELOCITY_UID_FIELDS', 'paramExtraData',
 ]
 
@@ -383,6 +383,93 @@ def weaklyCompressibleDiagnostics(ctx: RunContext, state) -> Dict[str, float]:
         'maxVelocity': torch.linalg.norm(velocities, dim=-1).max().detach().cpu().item(),
         'maxDensity': densities.max().detach().cpu().item(),
         'minDensity': densities.min().detach().cpu().item(),
+    }
+
+
+def _convexHullArea(points: 'Any') -> float:
+    """Area of the 2D convex hull of `points` (N x 2 array-like), monotone
+    chain + shoelace. `scipy` is not a dependency here, so this is hand-rolled;
+    it is O(N log N) and called once per step, which is negligible next to a
+    kernel sweep. Returns 0.0 for degenerate (< 3 distinct) inputs.
+    """
+    import numpy as np
+
+    pts = np.asarray(points, dtype=np.float64)
+    pts = np.unique(pts, axis=0)
+    if pts.shape[0] < 3:
+        return 0.0
+    pts = pts[np.lexsort((pts[:, 1], pts[:, 0]))]
+
+    def _halfHull(ordered):
+        hull: List[Any] = []
+        for p in ordered:
+            while len(hull) >= 2:
+                a, b = hull[-2], hull[-1]
+                # cross((b - a), (p - a)) <= 0  ->  right turn / collinear
+                if (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) <= 0:
+                    hull.pop()
+                else:
+                    break
+            hull.append(p)
+        return hull[:-1]
+
+    hull = np.array(_halfHull(pts) + _halfHull(pts[::-1]))
+    x, y = hull[:, 0], hull[:, 1]
+    return float(0.5 * abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))))
+
+
+def squarePatchAreaMetrics(ctx: RunContext, state) -> Dict[str, float]:
+    """Area / volume-conservation diagnostics for the rotating square patch
+    (`WCSPH_SHIFTING_PLAN.md` step 1). The δ⁺-SPH surface shift is not
+    volume-preserving; these are what make its outward drift measurable.
+
+    - ``sphVolume``      -- ``Σ_i m_i / ρ_i`` over fluid. The SPH volume; moves
+      only with density error, so it is the cleanest volume-drift signal.
+    - ``hullArea``       -- convex-hull area of the fluid point cloud. The
+      "inflation" number: grows with the physical arms *and* with any outward
+      surface drift, so read it against ``sphVolume`` and the ``--circle`` null.
+    - ``rmsRadius``      -- mass-weighted RMS distance from the centre of mass.
+      Grows if the patch spreads.
+    - ``surfaceFraction``-- fraction of fluid particles flagged as free surface
+      (``surfaceIndicators``); grows if the surface frays. ``nan`` when surface
+      detection is off.
+    - ``cornerRetention``-- current fluid extent along the initial corner
+      diagonals ÷ its t=0 value. ``~1`` until the arms form; ``< 1`` is corner
+      erosion. Baseline is cached in ``ctx.scratch`` on the first call.
+    """
+    import numpy as np
+
+    particles = state.state
+    fluid = particles.kinds == 0 if hasattr(particles, 'kinds') else slice(None)
+    positions = particles.positions[fluid]
+    masses = particles.masses[fluid]
+    densities = particles.densities[fluid]
+
+    totalMass = masses.sum()
+    centreOfMass = (masses.view(-1, 1) * positions).sum(dim=0) / totalMass
+    offsets = positions - centreOfMass
+    rmsRadius = torch.sqrt((masses * (offsets ** 2).sum(dim=-1)).sum() / totalMass)
+
+    rotation = float(ctx.param('rotation')) if 'rotation' in ctx.spec.params else 0.0
+    angles = rotation + np.deg2rad([45.0, 135.0, 225.0, 315.0])
+    diagonals = torch.tensor(np.stack([np.cos(angles), np.sin(angles)], axis=1),
+                             dtype=positions.dtype, device=positions.device)
+    # Signed extent of the cloud towards each initial corner, averaged.
+    cornerExtent = (offsets @ diagonals.T).amax(dim=0).mean().detach().cpu().item()
+    cornerExtent0 = ctx.scratch.setdefault('squarePatchCornerExtent0', cornerExtent)
+
+    surfaceFraction = float('nan')
+    indicators = getattr(particles, 'surfaceIndicators', None)
+    if indicators is not None:
+        indicators = indicators[fluid]
+        surfaceFraction = (indicators == 1).sum().item() / max(indicators.shape[0], 1)
+
+    return {
+        'sphVolume': (masses / densities).sum().detach().cpu().item(),
+        'hullArea': _convexHullArea(positions.detach().cpu().numpy()),
+        'rmsRadius': rmsRadius.detach().cpu().item(),
+        'surfaceFraction': surfaceFraction,
+        'cornerRetention': cornerExtent / cornerExtent0 if cornerExtent0 else float('nan'),
     }
 
 
