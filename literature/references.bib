@@ -296,6 +296,17 @@
   note    = {Needed to close the open background-pressure question (plan 5, Q7): a background pressure that is set rather than allowed to drift.}
 }
 
+@article{sun2019,
+  author  = {Sun, P. N. and Colagrossi, A. and Marrone, S. and Antuono, M. and Zhang, A.-M.},
+  title   = {A consistent approach to particle shifting in the {$\delta$}-Plus-{SPH} model},
+  journal = {Computer Methods in Applied Mechanics and Engineering},
+  year    = {2019},
+  volume  = {348},
+  pages   = {912--934},
+  doi     = {10.1016/j.cma.2019.01.045},
+  note    = {The consistent quasi-Lagrangian delta+-SPH: advecting by u + delta-u adds delta-u divergence terms to the continuity (and momentum) equations that make the shift volume-conserving. Reference method for WCSPH_SHIFTING_PLAN.md step 2; the codebase's ShiftProperties.correctdrhodt / correctdvdt implement its Eq. (9)-(10) terms.}
+}
+
 
 % --- Spatial adaptivity, data structures, analytic boundaries ------------------
 

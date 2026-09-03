@@ -5,16 +5,25 @@ projects the shift near the free surface before adding it to
 `systemState.positions`.
 
 Free-surface projection (`schemeConfig.shiftProperties.projectionScheme`,
-`ShiftingProjectionScheme`) has three modes: `dot` removes the shift's normal
+`ShiftingProjectionScheme`) has four modes: `dot` removes the shift's normal
 component and scales the tangential remainder by `surfaceScaling` for
 surface particles; `mat` instead projects through a `(I - n n^T)` matrix and
-scales by `lMin**2`; the fallback zeroes the shift outright for surface/
-near-surface particles. All three additionally zero the shift wherever
-`lMin < 0.4` (a fixed threshold, not currently exposed via config) and for
-non-fluid particles (`kinds != 0`). Normals/`lMin` are recomputed from
-`detectFreeSurface` each iteration unless `shiftProperties.reuseNormals` and
-a prior surface state is already cached on `systemState`.
+scales by `lMin**2` (then zeroes the surface set anyway); the `zero` fallback
+zeroes the shift outright for surface/near-surface particles; `surfaceNormal`
+is the actual Sun et al. 2019 (`literature/sun2019`) Eq. (20)-(21) treatment
+-- a surface particle whose shift points *into* the surface is cut to
+tangential and curvature-gated (`surfaceCurvatureAngle`), one whose shift
+points *away* keeps the full unconstrained shift, and `lMin` below
+`surfaceLambdaThreshold` in the surface set is zeroed. `dot`/`mat`/`zero`
+additionally zero the shift wherever `lMin < 0.4` (a fixed threshold);
+`surfaceNormal` uses the configurable `surfaceLambdaThreshold` (default 0.4,
+matching the old constant). All modes zero the shift for non-fluid particles
+(`kinds != 0`). Normals/`lMin` are recomputed from `detectFreeSurface` each
+iteration unless `shiftProperties.reuseNormals` and a prior surface state is
+already cached on `systemState`.
 """
+
+import math
 
 import warp as wp
 from warp.types import vector, matrix
@@ -45,6 +54,31 @@ from ...configurations.moduleConfigurations.shifting import ShiftProperties, Shi
 __all__ = ['solveShifting']
 
 
+def _curvatureGate(normals: torch.Tensor, surfaceMask: torch.Tensor,
+                   adjacency: Any, cosThreshold: float) -> torch.Tensor:
+    """`kappa` from Sun et al. 2019 Eq. (21): 0 for a particle any of whose
+    *surface-set* neighbours' normals deviate from its own by more than the
+    curvature angle (`arccos(n_i . n_j) >= angle`), 1 otherwise. Returned as a
+    float tensor of shape `(N,)`. Particles with no surface neighbour keep
+    `kappa = 1`.
+
+    Only edges where both ends are in `surfaceMask` (the set `F`) are
+    considered -- the normal field is only meaningful there, and interior
+    normals are ~0 from `LambdaGrad`, which would otherwise gate every
+    surface particle adjacent to the bulk.
+
+    `cosThreshold = cos(angle)`; a *larger* min dot product means a flatter
+    neighbourhood, so the gate is `min_j (n_i . n_j) >= cosThreshold`.
+    """
+    i, j = adjacency.i, adjacency.j
+    keep = surfaceMask[i] & surfaceMask[j]
+    dots = (normals[i] * normals[j]).sum(dim=-1)
+    dots = torch.where(keep, dots, dots.new_tensor(float('inf')))
+    minDot = normals.new_full((normals.shape[0],), float('inf'))
+    minDot.scatter_reduce_(0, i.to(torch.int64), dots, reduce='amin', include_self=False)
+    return (minDot >= cosThreshold).to(normals.dtype)
+
+
 def solveShifting(
     systemState: Any,
     config: SimulationConfig, schemeConfig: Any,
@@ -63,6 +97,9 @@ def solveShifting(
         projectionScheme = schemeConfig.shiftProperties.projectionScheme
         surfaceScaling = schemeConfig.shiftProperties.surfaceScaling
         shiftingThreshold = schemeConfig.shiftProperties.threshold
+        surfaceLambdaThreshold = getattr(schemeConfig.shiftProperties, 'surfaceLambdaThreshold', 0.4)
+        surfaceCurvatureAngle = getattr(schemeConfig.shiftProperties, 'surfaceCurvatureAngle', 15.0)
+        maxShiftVelocityFraction = getattr(schemeConfig.shiftProperties, 'maxShiftVelocityFraction', 0.5)
 
         rho0 = schemeConfig.fluid.restDensity
         spacing = torch.pow(systemState.masses / rho0, 1/systemState.positions.shape[1]).mean().cpu().item()
@@ -141,11 +178,47 @@ def solveShifting(
                         # update[surfaceIndicator] = 0.0
                         update[lMin < 0.4] = 0
                         update[surfaceIndicator]=0.0
+                    elif projectionScheme == ShiftingProjectionScheme.surfaceNormal:
+                        # Sun et al. 2019 (literature/sun2019) Eq. (20)-(21).
+                        # `n` is the outward surface normal (LambdaGrad/Maronne),
+                        # `surfaceIndicator` the dilated surface set F, `lMin`
+                        # the min renormalisation-matrix eigenvalue (paper's
+                        # lambda). Unlike dot/mat this reads only fields that are
+                        # also populated on the `reuseNormals` fast path.
+                        inF = surfaceIndicator
+                        lowLambda = lMin < surfaceLambdaThreshold
+                        outward = torch.einsum('ij,ij->i', update, n)   # n . delta-u*
+                        tangential = update - outward.view(-1, 1) * n
+                        if surfaceCurvatureAngle > 0.0:
+                            cosT = math.cos(math.radians(surfaceCurvatureAngle))
+                            kappa = _curvatureGate(n, inF, adjacency, cosT).view(-1, 1)
+                        else:
+                            kappa = update.new_ones((update.shape[0], 1))
+                        # in F, lambda ok, shift points into the surface -> tangential (kappa-gated);
+                        # in F, lambda ok, shift points away             -> full shift (anti-clustering);
+                        # not in F                                        -> full shift.
+                        restrict = inF & (outward >= 0) & ~lowLambda
+                        update = torch.where(restrict.view(-1, 1), kappa * tangential, update)
+                        # in F, lambda too low -> zero (Eq. 20 row 1).
+                        update[inF & lowLambda] = 0
                     else:
                         update[fsm > 0.5] = 0
                         update[lMin < 0.4] = 0
                         update[fs > 0.5] = 0
                 
+            # Sun et al. 2019 Eq. (14): cap the shift magnitude at a fraction of
+            # Umax * dt (Umax = max finite particle speed). Physically tied to
+            # the flow, unlike the fixed per-component `threshold` clamp below,
+            # and the thing that stops a locally exploding grad(C) from feeding
+            # an oversized shift into `correctdrhodt`.
+            if maxShiftVelocityFraction > 0.0:
+                velMag = torch.linalg.norm(systemState.velocities, dim=-1)
+                velMag = velMag[torch.isfinite(velMag)]
+                uMax = velMag.max() if velMag.numel() > 0 else update.new_tensor(0.0)
+                capLength = maxShiftVelocityFraction * uMax * dt
+                if capLength > 0:
+                    mag = torch.linalg.norm(update, dim=-1, keepdim=True)
+                    update = update * (capLength / mag.clamp_min(1e-30)).clamp_(max=1.0)
             update = torch.clamp(update, -shiftingThreshold * spacing, shiftingThreshold * spacing)
             update[systemState.kinds != 0] = 0
 
