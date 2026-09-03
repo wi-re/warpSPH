@@ -57,12 +57,14 @@ and had to be identified from their front matter alone.
 
 ## What is here
 
-114 documents. The first 36 are the curated core — every row abstracted in
+115 documents. The first 37 are the curated core — every row abstracted in
 `ABSTRACTS.md` and annotated for what it unblocks. The remaining 78, listed
 under **Extended set** below, arrived together on 2026-08-29 and were synced by
 bibliographic record only: `references.bib` has an entry for each, but they are
 not abstracted, not annotated for relevance, and three scanned arrivals with no
 text layer were parked in `literature/scans/` rather than indexed here.
+
+(`sun2019` was added to the core on 2026-09-03 for `WCSPH_SHIFTING_PLAN.md`.)
 
 `venue` is the **published** venue, which for an author's-version or preprint
 copy is not always what that copy's own front page says. Full bibliographic
@@ -105,6 +107,7 @@ detail is in `references.bib`; the abstract of every core row is in
 | — | `boettcher2025` | `boettcher2025_implicit-porous-flow.pdf` | ACM TOG 44(6) 2025 | Porous flow with overlapping phases; a new density estimate that permits the overlap. |
 | — | `bender2026` | `bender2026_primal-sph-solver.pdf` | CGF 2026 | A primal (not dual) pressure solver: stable to 1:1000 density ratios, strongly coupled to non-pressure forces. |
 | — | `adami2013` | `adami2013_transport-velocity.pdf` | J. Comput. Phys. 241 2013 | Transport velocity. Closes plan 5 Q7 (background pressure). |
+| — | `sun2019` | `sun2019_consistent-particle-shifting-delta-plus-sph.pdf` | Comput. Methods Appl. Mech. Engrg. 348 2019 | Consistent (quasi-Lagrangian) δ⁺-SPH: the δu divergence terms that make the WCSPH shift volume-conserving. Reference method for `WCSPH_SHIFTING_PLAN.md` step 2. |
 
 **Spatial adaptivity, data structures, analytic boundaries**
 

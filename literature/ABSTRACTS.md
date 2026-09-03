@@ -659,6 +659,18 @@ than sit here looking plausible.
 > accuracy and stability of the proposed modification even at previously
 > infeasible conditions.
 
+### `sun2019`
+
+- **file:** `sun2019_consistent-particle-shifting-delta-plus-sph.pdf`
+- **title:** A consistent approach to particle shifting in the δ-Plus-SPH model
+- **authors:** P. N. Sun, A. Colagrossi, S. Marrone, M. Antuono and A.-M. Zhang
+- **venue:** *Computer Methods in Applied Mechanics and Engineering* 348:912-934, 2019
+- **doi:** [10.1016/j.cma.2019.01.045](https://doi.org/10.1016/j.cma.2019.01.045)
+- **relevance:** The reference method for `WCSPH_SHIFTING_PLAN.md` step 2. Recasts δ⁺-SPH in a quasi-Lagrangian frame (advection velocity `u + δu`), which adds `δu`-divergence terms to the continuity and momentum equations that make the particle shift volume-conserving without a free-surface heuristic. The codebase's `ShiftProperties.correctdrhodt` / `correctdvdt` (both default off, unvalidated) implement its Eq. (9)-(10) continuity/momentum terms; §2.4 is the `λ<0.55` + `(I−nnᵀ)` + `15°` curvature surface treatment that `modules/shifting/wrapper.py` is a partial port of.
+- **abstract from:** PDF p.1
+
+> In the present work a consistent inclusion of a particle shifting technique (PST) in the weakly compressible Smoothed Particle Hydrodynamic (SPH) models is discussed. Recently, it has been shown that the use of PST can largely improve both the accuracy and the robustness of SPH models. In particular, the δ + -SPH model is a weakly-compressible SPH model where a PST is adopted along with a diffusive term in the continuity equation that helps removing the high-frequency noise on the pressure field. This specific SPH model is able to overcome the main drawbacks that afflict the standard weakly-compressible SPH model. In this work we demonstrate that a consistent introduction of the PST inside the SPH model leads to a new set of equations where some additional terms containing the particle shifting velocity δu have to be taken into account. The effects of these δu-terms become crucial for problems in confined or periodic domains, as well as for long-time simulations of free-surface flows. The proposed scheme is tested against challenging benchmark cases, highlighting when the δu-terms play an important role or not. Further improvements of the PST algorithms for the numerical treatment of the scheme close to the free surface and along the solid boundaries are also discussed.
+
 
 ## Spatial adaptivity, data structures, analytic boundaries
 

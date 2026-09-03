@@ -40,9 +40,28 @@ class ShiftingScheme(Enum):
 
 
 class ShiftingProjectionScheme(Enum):
+    """How `modules/shifting/wrapper.solveShifting` treats the raw shift near
+    the free surface.
+
+    - `zero`: hard-zero the shift for surface / near-surface / low-`lMin`
+      particles ("don't shift the free surface").
+    - `dot`: remove the shift's normal component and scale the tangential
+      remainder by `surfaceScaling` for the dilated surface set; then
+      hard-zero `lMin < 0.4`.
+    - `mat`: `(I - n n^T)` projection scaled by `lMin**2` for the surface
+      set, then hard-zero it anyway (the projection line is currently dead).
+    - `surfaceNormal`: the actual Sun et al. 2019 (`literature/sun2019`)
+      Eq. (20)-(21) algorithm -- a surface particle whose shift points *into*
+      the surface (`n . dx >= 0`, `n` outward) is cut to tangential and
+      gated by the `kappa` curvature test (`surfaceCurvatureAngle`); one
+      whose shift points *away* from the surface keeps the full, unconstrained
+      shift; `lMin < surfaceLambdaThreshold` in the surface set is zeroed.
+      The away-branch is the anti-clustering mechanism the other three lack.
+    """
     zero = 0
     dot = 1
     mat = 2
+    surfaceNormal = 3
 
 
 class ShiftingImplicitInitializer(Enum):
@@ -175,6 +194,10 @@ class ShiftProperties:
     surfaceScaling: float = field(default=0.1, metadata={"description": "Scaling factor for the surface detection"})
     threshold: float = field(default=0.5, metadata={"description": "Threshold for shifting magnitude"})
 
+    surfaceLambdaThreshold: float = field(default=0.4, metadata={"description": "lMin (min renormalisation-matrix eigenvalue) below which a surface-set particle's shift is zeroed. Was a hardcoded 0.4 in wrapper.py's dot/mat/zero paths; exposed here and used by the surfaceNormal projection scheme. Sun et al. 2019 Eq. (20) uses 0.55 for their lambda normalisation and C2 Wendland h=2dx -- calibrate per kernel."})
+    surfaceCurvatureAngle: float = field(default=15.0, metadata={"description": "Curvature gate for ShiftingProjectionScheme.surfaceNormal (Sun et al. 2019 Eq. 21): a surface particle is zeroed when any neighbour's surface normal deviates from its own by more than this angle (degrees), i.e. the local radius of curvature is below the kernel radius. 0.0 disables the gate. 15 deg is the paper's value for C2 Wendland with h=2dx."})
+    maxShiftVelocityFraction: float = field(default=0.5, metadata={"description": "Sun et al. 2019 Eq. (14) robustness limiter: cap the per-step shift magnitude at this fraction of Umax*dt (Umax = the max finite particle speed, the paper's 'maximum expected velocity'). The paper uses 1/2. This is a magnitude (L2) cap and the physically-scaled counterpart of the per-component `threshold` clamp (0.5*dx), which stays as a coarse backstop. 0.0 disables it. Without it the delta+ shift has no bound tied to the flow, and a locally exploding grad(C) -- e.g. an arm beading under tensile instability -- feeds an oversized shift straight into correctdrhodt."})
+
     projectQuantities: bool = field(default=False, metadata={"description": "Whether to project quantities after shifting"})
 
     correctdrhodt: bool = field(default=False, metadata={"description": "Whether to correct drhodt after shifting"})
@@ -203,7 +226,13 @@ def buildDefaultShiftProperties() -> ShiftProperties:
         maxC=0.3,
         active=True,
         scheme=ShiftingScheme.deltaSPH,
-        projectionScheme=ShiftingProjectionScheme.mat,
+        # The real Sun et al. 2019 Eq. (20)-(21) free-surface treatment. Was
+        # `mat` (which hard-zeroes the surface set); `surfaceNormal` keeps the
+        # surface regularised without the volume blow-up. See
+        # WCSPH_SHIFTING_PLAN.md: strictly better on the rotating square patch
+        # (nx 64/96, t up to 1), on par on `sloshingTank` (clears the t~2.6 s
+        # NaN), no `test_physics.py` regression.
+        projectionScheme=ShiftingProjectionScheme.surfaceNormal,
         summationDensity=False,
         surfaceScaling=0.1,
         threshold=0.5,
