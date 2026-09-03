@@ -31,6 +31,11 @@ parser.add_argument('--tLimit', type=float, default=1.0)
 parser.add_argument('--kernels', nargs='+', default=['Wendland2', 'Wendland4'])
 parser.add_argument('--modes', nargs='+', default=['shiftOff', 'surfaceNormal'])
 parser.add_argument('--samplings', nargs='+', default=['regular'])
+parser.add_argument('--shapes', nargs='+', default=['box'])
+parser.add_argument('--pb', type=float, nargs='+', default=[0.0],
+                    help='background-pressure values to sweep (WCSPH_SHIFTING_PLAN.md 2a)')
+parser.add_argument('--lambda-taper', dest='lambdaTaper', type=float, default=0.0,
+                    help='surfaceNormal lambda-gate smoothstep width (0 = hard step)')
 parser.add_argument('--every', type=int, default=200)
 parser.add_argument('--omega', type=float, default=4.0)
 args = parser.parse_args()
@@ -55,38 +60,43 @@ def _cfg(mode):
             sc.shiftProperties.projectionScheme = ShiftingProjectionScheme.mat
         elif mode == 'surfaceNormal':
             sc.shiftProperties.projectionScheme = ShiftingProjectionScheme.surfaceNormal
+        if args.lambdaTaper:
+            sc.shiftProperties.surfaceLambdaTaper = args.lambdaTaper
 
     return wrapped
 
 
-hdr = (f"{'nx':>5} {'kernel':>10} {'sampling':>9} {'mode':>13} "
+hdr = (f"{'nx':>5} {'shape':>9} {'kernel':>10} {'samp':>9} {'mode':>13} {'p_b':>6} "
        f"{'tw@sf.9':>8} {'sf@t1':>7} {'rms/rms0@t1':>11} {'maxRho@t1':>10}")
 print(hdr)
 print('-' * len(hdr))
 
 for nx in args.nx:
-    for kernel in args.kernels:
-        for sampling in args.samplings:
-            for mode in args.modes:
-                _orig = case.configureScheme
-                case.configureScheme = _cfg(mode)
-                try:
-                    r = run(case, params={'shape': 'box', 'omega': args.omega},
-                            nx=nx, tLimit=args.tLimit, nSteps=None,
-                            kernel=kernel, samplingScheme=sampling,
-                            store=False, plot=False, quiet=True, progress=False)
-                finally:
-                    case.configureScheme = _orig
+    for shape in args.shapes:
+        for kernel in args.kernels:
+            for sampling in args.samplings:
+                for mode in args.modes:
+                    for pb in args.pb:
+                        _orig = case.configureScheme
+                        case.configureScheme = _cfg(mode)
+                        try:
+                            r = run(case, params={'shape': shape, 'omega': args.omega,
+                                                  'backgroundPressure': pb},
+                                    nx=nx, tLimit=args.tLimit, nSteps=None,
+                                    kernel=kernel, samplingScheme=sampling,
+                                    store=False, plot=False, quiet=True, progress=False)
+                        finally:
+                            case.configureScheme = _orig
 
-                rows = [row for row in r.trajectory
-                        if 'rmsRadius' in row and row.get('step', -1) >= 0]
-                rms0 = rows[0]['rmsRadius'] if rows else 1.0
-                # tω at which the patch is 90% "surface" (shattered)
-                twShatter = next((row['t'] * args.omega for row in rows
-                                  if row['surfaceFraction'] >= 0.9), float('nan'))
-                last = rows[-1] if rows else {}
-                print(f"{nx:>5} {kernel:>10} {sampling:>9} {mode:>13} "
-                      f"{twShatter:>8.2f} {last.get('surfaceFraction', float('nan')):>7.3f} "
-                      f"{last.get('rmsRadius', rms0) / rms0:>11.3f} "
-                      f"{last.get('maxDensity', float('nan')):>10.4f}"
-                      + ('  DIVERGED' if r.diverged else ''))
+                        rows = [row for row in r.trajectory
+                                if 'rmsRadius' in row and row.get('step', -1) >= 0]
+                        rms0 = rows[0]['rmsRadius'] if rows else 1.0
+                        twShatter = next((row['t'] * args.omega for row in rows
+                                          if row['surfaceFraction'] >= 0.9), float('nan'))
+                        last = rows[-1] if rows else {}
+                        print(f"{nx:>5} {shape:>9} {kernel:>10} {sampling:>9} {mode:>13} "
+                              f"{pb:>6.1f} "
+                              f"{twShatter:>8.2f} {last.get('surfaceFraction', float('nan')):>7.3f} "
+                              f"{last.get('rmsRadius', rms0) / rms0:>11.3f} "
+                              f"{last.get('maxDensity', float('nan')):>10.4f}"
+                              + ('  DIVERGED' if r.diverged else ''))

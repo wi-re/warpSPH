@@ -68,6 +68,9 @@ def parseArgs(argv):
     p.add_argument('--correctdrhodt', action='store_true', default=False,
                    help='WCSPH: add the Sun 2019 Eq. (9) δu continuity terms '
                         '(volume-consistency fix for free-surface de-densification)')
+    p.add_argument('--background-pressure', dest='backgroundPressure', type=float,
+                   default=None, help='WCSPH: uniform p_b added to the EOS [Pa, '
+                        'case units are rho0=1 -- pass in the same scale as c_s^2]')
     p.add_argument('--smoothSigma', type=float, default=0.01,
                    help='Gaussian smoothing width for the simulated pressure [s]')
     p.add_argument('--replot', action='store_true', default=False,
@@ -118,6 +121,8 @@ def buildSpec(case, args):
         params['correctdrhodt'] = args.correctdrhodt
         if args.shiftProjection is not None:
             params['shiftProjection'] = args.shiftProjection
+        if args.backgroundPressure is not None:
+            params['backgroundPressure'] = args.backgroundPressure
     if params:
         overrides['params'] = params
     return spec.merged(**overrides)

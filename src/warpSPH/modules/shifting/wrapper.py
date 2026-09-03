@@ -98,6 +98,7 @@ def solveShifting(
         surfaceScaling = schemeConfig.shiftProperties.surfaceScaling
         shiftingThreshold = schemeConfig.shiftProperties.threshold
         surfaceLambdaThreshold = getattr(schemeConfig.shiftProperties, 'surfaceLambdaThreshold', 0.4)
+        surfaceLambdaTaper = getattr(schemeConfig.shiftProperties, 'surfaceLambdaTaper', 0.0)
         surfaceCurvatureAngle = getattr(schemeConfig.shiftProperties, 'surfaceCurvatureAngle', 15.0)
         maxShiftVelocityFraction = getattr(schemeConfig.shiftProperties, 'maxShiftVelocityFraction', 0.5)
 
@@ -186,7 +187,6 @@ def solveShifting(
                         # lambda). Unlike dot/mat this reads only fields that are
                         # also populated on the `reuseNormals` fast path.
                         inF = surfaceIndicator
-                        lowLambda = lMin < surfaceLambdaThreshold
                         outward = torch.einsum('ij,ij->i', update, n)   # n . delta-u*
                         tangential = update - outward.view(-1, 1) * n
                         if surfaceCurvatureAngle > 0.0:
@@ -194,13 +194,22 @@ def solveShifting(
                             kappa = _curvatureGate(n, inF, adjacency, cosT).view(-1, 1)
                         else:
                             kappa = update.new_ones((update.shape[0], 1))
-                        # in F, lambda ok, shift points into the surface -> tangential (kappa-gated);
-                        # in F, lambda ok, shift points away             -> full shift (anti-clustering);
-                        # not in F                                        -> full shift.
-                        restrict = inF & (outward >= 0) & ~lowLambda
+                        # in F, shift points into the surface -> tangential (kappa-gated);
+                        # in F, shift points away             -> full shift (anti-clustering);
+                        # not in F                             -> full shift.
+                        restrict = inF & (outward >= 0)
                         update = torch.where(restrict.view(-1, 1), kappa * tangential, update)
-                        # in F, lambda too low -> zero (Eq. 20 row 1).
-                        update[inF & lowLambda] = 0
+                        # lambda gate (Eq. 20 row 1): a hard zero below
+                        # `surfaceLambdaThreshold` (taper == 0), else a smoothstep
+                        # ramp over `[threshold, threshold + taper]` -- the hard
+                        # step is itself a disorder source one layer into the bulk.
+                        if surfaceLambdaTaper > 0.0:
+                            x = ((lMin - surfaceLambdaThreshold) / surfaceLambdaTaper).clamp(0.0, 1.0)
+                            wLambda = (x * x * (3.0 - 2.0 * x)).view(-1, 1)
+                        else:
+                            wLambda = (lMin >= surfaceLambdaThreshold).to(update.dtype).view(-1, 1)
+                        inFcol = inF.view(-1, 1)
+                        update = torch.where(inFcol, update * wLambda, update)
                     else:
                         update[fsm > 0.5] = 0
                         update[lMin < 0.4] = 0

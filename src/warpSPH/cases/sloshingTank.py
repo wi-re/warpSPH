@@ -165,6 +165,8 @@ def configureScheme(ctx: RunContext) -> None:
             'alpha', sc.diffusionParams.inviscidAlpha)
         if not ctx.param('inviscid'):
             sc.diffusionParams.viscidNu = ctx.param('nu')
+        if hasattr(sc.fluid, 'backgroundPressure'):
+            sc.fluid.backgroundPressure = ctx.param('backgroundPressure', 0.0)
         # The δ⁺-SPH particle shift near the free surface -- the reason this
         # case survives the wall slam at all (WCSPH_SHIFTING_PLAN.md). On by
         # default now that `surfaceNormal` is the projection default; the knobs
@@ -383,6 +385,8 @@ sloshingTankCase = registerCase(Case(
         inviscid=True,
         alpha=0.02,
         nu=1.0e-6,
+        # WCSPH: uniform background pressure added to the EOS (0 = off)
+        backgroundPressure=0.0,
         # divergenceFree only
         shifting=False,
         xsphScale=0.0,
