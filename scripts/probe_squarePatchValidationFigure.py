@@ -119,12 +119,17 @@ if args.fromCache:
     args.times = blob['times'].tolist()
     if 'nx' in blob:
         args.nx = int(blob['nx'])
+    cachedField = str(blob['field']) if 'field' in blob else None
+    if cachedField and cachedField != args.field:
+        print(f'NOTE: cache holds the "{cachedField}" field; --field {args.field} is '
+              f'ignored on a replot (re-run without --fromCache to switch fields).')
+        args.field = cachedField
     print(f'replotting from {args.fromCache}')
 else:
     data = {m: run_mode(m) for m in args.modes}
     np.savez(CACHE, data=np.array(data, dtype=object),
              modes=np.array(args.modes), times=np.array(sorted(args.times)),
-             nx=args.nx)
+             nx=args.nx, field=args.field)
     print(f'wrote {CACHE}  (--fromCache it to retune the figure without re-simulating)')
 
 # shared colour scale. The fragmented tω=4 frame is a pressure-noise firehose
