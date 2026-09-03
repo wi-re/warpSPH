@@ -296,6 +296,17 @@
   note    = {Needed to close the open background-pressure question (plan 5, Q7): a background pressure that is set rather than allowed to drift.}
 }
 
+@article{sun2017,
+  author  = {Sun, P. N. and Colagrossi, A. and Marrone, S. and Zhang, A. M.},
+  title   = {The {$\delta$plus}-{SPH} model: Simple procedures for a further improvement of the {SPH} scheme},
+  journal = {Computer Methods in Applied Mechanics and Engineering},
+  year    = {2017},
+  volume  = {315},
+  pages   = {25--49},
+  doi     = {10.1016/j.cma.2016.10.028},
+  note    = {Introduced delta+-SPH (delta-SPH density diffusion + particle shifting together). Source of the delta+ shift displacement `-CFL*Ma*2h^2*grad C' in modules/shifting/delta.py, the tensile term `[1 + R (W_ij/W(dx))^n]' (R=0.2, n=4) in wp_deltaShift, and the original free-surface n-nulling that sun2019 Sec. 2.4 extends (this repo's ShiftingProjectionScheme.surfaceNormal). Ref [5] in sun2019.}
+}
+
 @article{sun2019,
   author  = {Sun, P. N. and Colagrossi, A. and Marrone, S. and Antuono, M. and Zhang, A.-M.},
   title   = {A consistent approach to particle shifting in the {$\delta$}-Plus-{SPH} model},
