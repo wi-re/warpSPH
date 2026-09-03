@@ -642,10 +642,13 @@ Open (quantitative, not blocking):
   Ma ≈ 0.4 at the slam), not physical wall pressure. Higher `c₀` (smaller
   `targetDt`) or a light acoustic filter cleans it; the smoothed trace is
   already right.
-- Free surface **de-densifies to `ρ ≈ 0.66`** over the run (sensor ρ swings
-  `[0.77, 1.11]`). Candidates: `correctdrhodt` (§2d — now unblocked, the
-  surface treatment it needed is in), a background pressure (§2a), higher
-  resolution.
+- The `ρ ∈ [0.66, 1.34]` extremes are **transient spikes at the slam
+  instants** (a handful of spray particles), *not* a progressive free-surface
+  collapse — between impacts `minρ` recovers to `0.99–1.00` and `sensorρ`
+  stays in `[0.97, 1.01]` the whole run. So the volume consistency is already
+  fine; the transient spikes track the same marginal-`c₀` impact stiffness as
+  the acoustic ring. (`--correctdrhodt` / higher `c₀` sweep running to see
+  which tames the transients.)
 - ⬜ Watch `maxρ`: `surfaceNormal` loosens it (1.020 vs 1.013 on the box at
   nx 96). If it grows with `nx`, revisit `surfaceLambdaThreshold` / add a
   `λ` taper (§3 later items).
