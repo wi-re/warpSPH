@@ -1,5 +1,38 @@
 # warpSPH — Weakly-Compressible Particle-Shifting Near Free Surfaces
 
+> ## ✅ COMPLETE — 2026-09-03
+>
+> The δ⁺-SPH particle shift now works near free surfaces without the volume /
+> area growth that had it switched off there. **`ShiftingProjectionScheme.
+> surfaceNormal`** — the real Sun et al. 2019 (`literature/sun2019`) Eq. (20)–
+> (21) treatment — is implemented and is the default. Result: the downstream
+> `sloshingTank --scheme wcsph` case **runs the full 7 s with wall Sensor-1
+> pressure in the SPHERIC measured band**, where the old default (`mat`, a
+> hard-zero at the surface) and no shift at all both diverge at `t ≈ 3.4 s`.
+>
+> Shipped: `surfaceNormal` projection + `_curvatureGate`; `surfaceLambdaThreshold`
+> / `surfaceLambdaTaper` / `surfaceCurvatureAngle` / `maxShiftVelocityFraction`
+> (Eq. 14 limiter) on `ShiftProperties`; `fluid.backgroundPressure` (§2a, an
+> available knob); `correctdrhodt` audited + validated for periodic/confined
+> (stays opt-in — harmful on violent free surface); the
+> `rotatingSquarePatch` area metrics + a `mach` param fixing a resolution-
+> dependent Mach bug; `sun2017` + `sun2019` synced into `literature/`. Six new
+> probe scripts. Commits `f078ac8` … `03ee276`.
+>
+> Findings worth keeping: the square-patch **arm fragmentation is
+> under-resolution, not a bug** (shatter time scales with `nx`; kernel / IC /
+> tensile term / pressure switch all ruled out). `correctdrhodt` is a faithful
+> Eq. (9) implementation with **no headroom for a misbehaving shift**. Neither
+> §2a (small `p_b`) nor the `λ` taper moved the needle — both trace to
+> resolution / inherent WC acoustics.
+>
+> Optional, low-value leftovers: cumulative normal-displacement damping; a
+> large-`p_b` §2a regime; `correctdvdt` (paper says negligible).
+>
+> Everything below is the working record of how this was reached.
+
+---
+
 Working document for the **δ⁺-SPH particle shift on the weakly-compressible
 `deltaSPH` scheme** (`schemes/deltaSPH.py` /
 `systems/weaklyCompressible.py::finalize`, gated by
