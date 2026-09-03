@@ -296,6 +296,27 @@ Two findings:
 shift-work window (`tω ≲ 3`, `t ≲ 0.75`); a paper-faithful arm comparison to
 `tω = 4-8` needs `nx ≳ 600`, where `surfaceNormal`'s advantage grows.
 
+### Pressure figures at `nx = 192 / 288 / 384 / 600` (`scripts/probe_squarePatchValidationFigure.py`)
+
+The visual A/B (shiftOff vs surfaceNormal, pressure, to `tω = 4-4.6`; `.npz`
+cached for retuning) sharpens the picture at `nx ≥ 288`:
+
+- **`surfaceNormal` regularises the bulk visibly.** The core stays smooth and
+  compact through `tω = 3`; `shiftOff` develops tensile-instability speckle
+  from `tω = 2` on. At `nx = 600` the pressure range is `~[−2, +3.5]` for
+  `surfaceNormal` vs **`[−335, +1588]`** for `shiftOff` at the same instant —
+  the base scheme's field is garbage well before the arms visibly break.
+- **`surfaceNormal` arms at `nx = 600`, `tω = 3` look genuinely paper-like**:
+  four clean thin coherent arms, compact core.
+- **⚠ Core-pressure sign.** `surfaceNormal`'s core reads **mildly positive**
+  (`p ≈ +3`, i.e. `ρ ≈ +0.02 %`) and near-constant, where a rotating patch's
+  centrifugal core should be *negative* (paper §3.3 / Fig. 15). The value is
+  tiny and the field is otherwise clean, but it points at the shift **mildly
+  over-compressing the core** (packing particles into a region that wants to
+  cavitate). ⬜ Check against the paper's Fig. 15 centre-pressure trace before
+  trusting `surfaceNormal` for a quantitative pressure comparison — this is the
+  one open question the figures raised.
+
 ## Metrics — `rotatingSquarePatch.diagnostics` ✅ done (2026-09-03)
 
 Implemented in `cases/weaklyCompressible.py::squarePatchAreaMetrics`, wired into
