@@ -41,9 +41,29 @@ from ...configurations import PressureSolverType, JacobiRelaxationMode, ShiftPre
 from .convergence import evaluateResidual, sourceNorm
 from .krylov import solvePressureKrylov
 from .consistent import applyConsistentCoupling
+from .wallPressure import wallPressureExtrapolation
 from ...configurations import BoundaryPressureMode
 
 __all__ = ['solveIncompressible']
+
+#: EXPERIMENT (DFSPH_IMPROVEMENT_PLAN.md "Immediate A1", Part 48) -- the VD+PS
+#: shift's constant-density solve on a fully wall-closed box (`randomFlow
+#: Incompressible --bounded`) is a pure-Neumann system: `A.1 ~ 0`, so the
+#: constant (n_h=4 lattice-bias) component of the `1 - rhoStar/rho0` source has
+#: no solution and `p` ramps until the run detonates. `'auto'` subtracts the
+#: fluid-mean source only when it is mean-dominated (the closed-box signature,
+#: Part 42's `omniIncompressible.CD_SOURCE_PROJECT`); `True`/`False` force it.
+#: Default `False` == byte-identical to the historical solve.
+_CLOSED_BOX_SOURCE_PROJECT = False
+_CLOSED_BOX_PROJECT_THRESHOLD = 0.7
+
+#: EXPERIMENT (same) -- recompute the `kind==1` wall pressure from the current
+#: fluid iterate every Jacobi sweep (Part 41's `wallPressureExtrapolation`,
+#: no relaxation / no carried state), instead of freezing `boundaryPressure`
+#: at its pre-solve snapshot, so the near-wall iteration matrix is consistent.
+#: `None` (default) == the historical frozen-boundary solve; `'shepard'` /
+#: `'mls'` pick the extrapolation order.
+_SHIFT_WALL_PRESSURE = None
 
 
 def _solveIncompressibleImpl(
@@ -91,6 +111,14 @@ def _solveIncompressibleImpl(
         print(f'[IS] Source term: {sourceTerm.mean().cpu().item():.6g}, min: {sourceTerm.min().cpu().item():.6g}, max: {sourceTerm.max().cpu().item():.6g} abs mean: {sourceTerm.abs().mean().cpu().item():.6g}')
 
         # sourceTerm = sourceTerm - sourceTerm.mean()  # Remove mean to ensure zero-mean source term
+        _fluidRows = particles.kinds == 0
+        if _CLOSED_BOX_SOURCE_PROJECT and bool(_fluidRows.any()):
+                _sf = sourceTerm[_fluidRows]
+                _mean = _sf.mean()
+                _frac = 1.0 - (_sf - _mean).norm() / (_sf.norm() + 1e-30)
+                if (_CLOSED_BOX_SOURCE_PROJECT is True
+                                or _frac > _CLOSED_BOX_PROJECT_THRESHOLD):
+                        sourceTerm = sourceTerm - _mean
         if verbose:
             print(f'Incompressible Solver')
             print(f'[IS] Source term: {sourceTerm.mean().cpu().item():.6g}, min: {sourceTerm.min().cpu().item():.6g}, max: {sourceTerm.max().cpu().item():.6g} abs mean: {sourceTerm.abs().mean().cpu().item():.6g}')
@@ -235,6 +263,14 @@ def _solveIncompressibleImpl(
 
         for i in range(maxIters):
                 pressureA = pressureB.clone()
+                if _SHIFT_WALL_PRESSURE is not None:
+                        # Recompute the wall pressure from the current fluid
+                        # iterate (Part 41's Robin closure) so the near-wall
+                        # iteration matrix is consistent -- see
+                        # `_SHIFT_WALL_PRESSURE`.
+                        pressureA = wallPressureExtrapolation(
+                                particles, config, adjacency, pressureA,
+                                _fluidRows, mode=_SHIFT_WALL_PRESSURE)
                 a_p = computePressureAccelIISPH(
                         state = particles,
                         pressureValues = pressureA,
