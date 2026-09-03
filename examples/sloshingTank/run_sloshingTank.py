@@ -65,6 +65,9 @@ def parseArgs(argv):
                    choices=['surfaceNormal', 'mat', 'dot', 'zero'],
                    help='WCSPH: free-surface shift projection scheme '
                         '(default: surfaceNormal, the Sun 2019 Eq. 20-21 treatment)')
+    p.add_argument('--correctdrhodt', action='store_true', default=False,
+                   help='WCSPH: add the Sun 2019 Eq. (9) δu continuity terms '
+                        '(volume-consistency fix for free-surface de-densification)')
     p.add_argument('--smoothSigma', type=float, default=0.01,
                    help='Gaussian smoothing width for the simulated pressure [s]')
     p.add_argument('--replot', action='store_true', default=False,
@@ -112,6 +115,7 @@ def buildSpec(case, args):
         params['alpha'] = args.alpha
     if args.scheme == 'wcsph':
         params['shifting'] = args.shift
+        params['correctdrhodt'] = args.correctdrhodt
         if args.shiftProjection is not None:
             params['shiftProjection'] = args.shiftProjection
     if params:
