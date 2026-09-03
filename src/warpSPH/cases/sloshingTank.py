@@ -50,6 +50,7 @@ import numpy as np
 import torch
 
 from ..configurations.moduleConfigurations.gravity import GravityType
+from ..configurations.moduleConfigurations.shifting import ShiftingProjectionScheme
 from ..configurations.region import BCType
 from ..enumTypes import IncompressibleSPHScheme, WeaklyCompressibleSPHScheme
 from ..runner import Case, RunContext, caseMain, registerCase
@@ -164,6 +165,15 @@ def configureScheme(ctx: RunContext) -> None:
             'alpha', sc.diffusionParams.inviscidAlpha)
         if not ctx.param('inviscid'):
             sc.diffusionParams.viscidNu = ctx.param('nu')
+        # The δ⁺-SPH particle shift near the free surface -- the reason this
+        # case survives the wall slam at all (WCSPH_SHIFTING_PLAN.md). On by
+        # default now that `surfaceNormal` is the projection default; the knobs
+        # are for the shift A/B (`--shift-projection`, `--no-shift`).
+        if hasattr(sc, 'shiftProperties'):
+            sc.shiftProperties.active = ctx.param('shifting', True)
+            proj = ctx.param('shiftProjection', None)
+            if proj:
+                sc.shiftProperties.projectionScheme = ShiftingProjectionScheme[proj]
 
     ctx.scratch['rollHistory'] = loadRollHistory(_rollFilePath(ctx))
 
