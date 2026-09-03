@@ -48,6 +48,7 @@ CASE_MODULES = (
     'shearWave',
     'staticBlob',
     'hydrostaticColumn',
+    'columnCollapse',
     # non-fluid demo -- see WAVE_EQUATION_PLAN.md
     'waveEquation',
 )

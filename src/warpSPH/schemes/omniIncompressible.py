@@ -123,6 +123,9 @@ RESIDUAL_FLOOR = -1e-3
 ALPHA_FLOOR = 1e-25
 #: omniSPH `Integrate`: `vi *= (1.0 - damping)` with `props.damping` (0 here).
 DAMPING = 0.0
+#: Per-solve one-line iteration/residual/pressure-range trace on stdout. A
+#: `c637785`-era debug leftover; `False` silences it (the physics is unchanged).
+VERBOSE_SOLVE = False
 
 #: omniSPH's XSPH velocity filter (`SPHSimulation::XSPH` / `BXSPH`), the
 #: scheme's only dissipation -- a post-solve, isotropic smoothing of `v`
@@ -553,7 +556,8 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
                 err = float(torch.clamp(residual, min=RESIDUAL_FLOOR)[fluid].mean())
             if it + 1 >= minIters and err <= tol:
                 break
-        print(f'[{mode}] {it + 1} iters, err {err:.3g}, p[{float(p.min()):+.3g}, {float(p.max()):+.3g}]')
+        if VERBOSE_SOLVE:
+            print(f'[{mode}] {it + 1} iters, err {err:.3g}, p[{float(p.min()):+.3g}, {float(p.max()):+.3g}]')
         a_p = accel(p)
     return a_p, p, it + 1, err
 

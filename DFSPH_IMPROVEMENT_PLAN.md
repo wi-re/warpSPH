@@ -12,7 +12,12 @@ passes** — i.e. `divergenceFree` and `omniIncompressible` are now nearly the
 same code, and much of the pre-Part-46 prose below (VD+PS, `solveDivergenceFree`,
 the `finalize` resample) describes a path that is no longer live. See
 **"Status — Parts 46–47"** immediately below; `DFSPH_FINDINGS.md` §1.16–§1.17
-+ §9 rows 46–47 have the detail.
++ §9 rows 46–49 have the detail. Part 48 fixed the `kolmogorovIncompressible`
+forcing regression and added regression tests; `randomFlowIncompressible
+--bounded` is **confirmed unfixable without the near-wall CD-solve work** and
+stays open (xfailed in the suite). Part 49 re-wired the `mdbcNoPenetrationShift`
+the rewrite had dropped (FINDINGS §1.6) — wall crossing on `dambreak` /
+`columnCollapse` impacts back to ~0.
 
 **This file is the current state and the actionable list only.** The durable
 findings — the physics lessons, the negative results, the literature notes, the
@@ -43,46 +48,75 @@ everything else). Never both. Plus opt-in knobs: `SURFACE_SOURCE`,
 `DIVERGENCE_SOLVER` (`'omni'`/`'vdps'`), `XSPH_SCALE` (per-case via
 `schemeConfig.xsphFilterScale`), `SOLVE_ORDER`, `GRAVITY_OSC` (ablation).
 
-**Suite: `tests/test_physics.py` + `tests/test_runner.py` = 82 passed / 0
-failed** — green for the first time since `c637785` (the 2 `tgv` KE tests that
-failed after the rewrite pass again, Part 47).
+**Suite: `tests/test_physics.py` + `tests/test_runner.py` = 89 passed / 0
+failed / 1 xfail** — green since Part 47; Part 48 added `kolmogorovIncompressible`
+forcing + `randomFlowIncompressible` periodic regression tests, and one
+`xfail(strict)` marking `randomFlowIncompressible --bounded` as a known
+divergence that flips to a suite failure the moment it starts holding. (Two
+pre-existing full-suite failures, unrelated — see "Known-open".)
 
-**Case status at the shipped defaults (`divergenceFree`, verified 09-03):**
+**Case status at the shipped defaults (`divergenceFree`, verified 09-03;
+`randomFlow`/`kolmogorov` rows updated Part 48):**
 
 | case | status |
 |---|---|
 | `tgv`, `shearWave`, `staticBlob` (periodic / free space) | **pass** — `tgv` KE ×0.9996 monotone (Part 47 gate); `staticBlob` `\|v\| ≡ 0`. |
 | `randomFlowIncompressible` **periodic** | **holds** — KE decays cleanly (0.45 → 0.38 / 200 steps, `\|v\|` ~1). |
-| `randomFlowIncompressible --bounded` | **REGRESSION — NaN at graded defaults** (adaptive `dt`, `\|v\|→∞`, `maxRho→3.4`). Fixed-`dt` 1e-3 holds *with* the PS shift (KE ×0.994); the graded run's lagged-CFL `vMax` misses the near-wall impulse. Pre-`c637785` `divergenceFree` (VD+PS) held it at band 4.48e-3. **Open — plan item A.** |
-| `kolmogorovIncompressible` | **REGRESSION — inert.** `dfsph_step` line ~234 zeroes the forcing (`computeForcing(...) * 0`, an undocumented `c637785` change), so the forced case does nothing (`KE ≡ 0`). Not in the suite. **Open — plan item A.** |
+| `randomFlowIncompressible --bounded` | **OPEN REGRESSION — diverges at every resolution (Part 48 characterised it; no stopgap works).** A density excursion builds near the wall over many steps (ρ spreads [0.98, 1.02] → [0.2, 3.4] while KE / `\|v\|` stay flat) then the pressure response detonates `\|v\|`. Onset time scales with `nx`: nx=32 t≈0.025, nx=48 t≈0.16, nx=56 t≈0.15, **nx=64 t≈0.95** (longest-lived — the one a `maxDt = 1e-3` cap "held" for 400 steps, a false positive), nx=96 t≈0.9, **nx=128 (shipped default) step 4**. Isolated (Part 48) to the **constant-density `solveIncompressible` inside the VD+PS shift** (`systems/incompressible.finalize`) — B: `_RESTORE_PS_SHIFT=False` delays it (nx=64 → step 90) but cannot hold it and can't be global (tgv needs the shift, §1.17); the shift's velocity-resample term detonates fastest, its position-move term alone rots ρ to [0.14, 4.97]. Nothing fixes it: `maxDt` cap / `--cflFactor 0.2` / `DIVERGENCE_SOLVER='vdps'` (worse — step-1 blow) / `boundaryPressureMode` ∈ {density, mlsPressure, plain} (identical) / `nu = 0.01` (worse). Same near-singular pure-Neumann near-wall CD operator as Parts 42–45; `iisph` / `omniIncompressible` fail this same case. **Folded into the Active track / `band2018pb`; xfailed in the suite.** Pre-`c637785` `divergenceFree` (VD+PS, convergent `solveDivergenceFree`) held it at band 4.48e-3. Periodic variant holds. |
+| `kolmogorovIncompressible` | **FIXED (Part 48).** `dfsph_step` had `forcing = computeForcing(...) * 0` (a `c637785` mid-experiment leftover — `f401e4a` had it un-multiplied); dropped it. `computeForcing` returns 0 for every case without a forcing function, so only this case moves: KE 0 → 2.06 / 40 steps at nx=32, density [0.99, 1.003]. In the suite. |
 | `hydrostaticColumn` (quiescent column under gravity) | **`divergenceFree` HOLDS it** (`c637785`'s point; confirmed nx=64 & nx=128 this session): `pressureSlopeRatio` 1.001, `densityP05` 0.94, `\|v\|` ~0.07–0.10. Residual is a bounded undamped free-surface limit cycle in the top ~3 rows (§1.16); the per-case `xsphScale` knob (`XSPH_SCALE=1.0`) decays it (KE ↓55×/2250× at nx=64/128) at a dissipation cost, so it is opt-in. The old note "position shift cannot sustain a body force" applied to the pre-`c637785` VD+PS path and is superseded for the shipped scheme. `iisph` also holds it (Part 33/34); `dfsphReference` does not (Part 37); `omniIncompressible` holds nx=128 (Part 41); `band2018pb` holds nx≤64 (Part 45). |
 | `impact` (collision) | **pass** (Part 23; `\|v\|` ~1.5, no NaN). |
 | `squarePatch` (`rotatingSquarePatch`) | **runs** — stable rotation; corner density → 0.50. [BK] §5 documents this as a method limitation, not an implementation bug. |
-| `dambreak --scheme divergenceFree` | **runs** (Part 19) — the only working free surface — but half `deltaSPH`'s run-out speed and most of the flow's KE dissipated on impact; needs its own `--cflFactor 0.2` (Part 20), not 0.4 |
+| `dambreak --scheme divergenceFree` | **runs** (Part 19) — the only working free surface — but half `deltaSPH`'s run-out speed and most of the flow's KE dissipated on impact; needs its own `--cflFactor 0.2` (Part 20), not 0.4. Wall-crossing at the surge impact went 5 → **0** once the no-pen shift was re-wired (Part 49). |
+| `columnCollapse` (released water column in a closed tank) | **runs** (Part 49, new case) — gravity-gated in-step CD path, `cflFactor 0.2`. Collapse impact used to push ~6 fluid particles a full spacing past the wall; with the restored no-pen shift `nPenetrating` stays 0–1. `test_columnCollapseWallHoldsOnImpact` (nx=32, 260 steps) locks it. |
 
-### Immediate — `c637785` / Parts 46–47 fallout
+### Immediate — `c637785` / Parts 46–47 fallout (A2/A3/A5 closed, A1 open, Parts 48–49)
 
-The suite is green but two cases the suite does not cover regressed in the
-`c637785` rewrite:
-
-- **A1. `randomFlowIncompressible --bounded` NaNs at graded defaults.**
-  Fixed-`dt` 1e-3 holds *with* the PS shift (Part 47, KE ×0.994); the adaptive
-  run detonates near the wall. First: is it the CFL (does `--cflFactor 0.2`,
-  as `dambreak` needs, hold it?) or the CD/shift interaction with a larger
-  `dt`? If it is the near-wall CD solve, this is the same target as the
-  **Active track** (`band2018pb` / `CD_TIKHONOV`) — decide whether to fix it
-  as a `divergenceFree` regression now or fold it into that track.
-- **A2. `kolmogorovIncompressible` is inert** — `dfsph_step` (~line 234)
-  has `forcing = computeForcing(...) * 0`. Confirm whether the `*0` is
-  deliberate (the rewrite was mid-experiment) or an accident; if accidental,
-  drop it and re-verify `kolmogorovIncompressible` runs + nothing else moves
-  (`hydrostaticColumn` takes gravity through `computeGravity`, not forcing).
-- **A3. Add `kolmogorovIncompressible` + `randomFlowIncompressible --bounded`
-  to `tests/test_runner.py`** so this class of regression is caught.
-- **A4 (perf, lower).** `_RESTORE_PS_SHIFT='auto'` adds a `solveIncompressible`
-  + adjacency rebuild per step on every non-gravity case — measurable at
-  `tgv`'s default nx=256. Cache the adjacency / gate the shift to every N
-  steps if it bites.
+- **A1. `randomFlowIncompressible --bounded` diverges — INVESTIGATED (Part 48),
+  NOT fixable as a stopgap; folded into the Active track.** Full
+  characterisation in the case-status row above. Short version: it is the
+  constant-density `solveIncompressible` in the VD+PS shift losing density
+  control at the wall (the Parts 42–45 near-singular pure-Neumann near-wall
+  operator), it diverges at **every** resolution (nx=64 merely lasts longest,
+  which made the initial `maxDt = 1e-3` cap look like a fix — it holds nx=64
+  and nothing else), and no lever tried (`maxDt`, `cflFactor`,
+  `DIVERGENCE_SOLVER`, `boundaryPressureMode`, `nu`, disabling the shift)
+  holds it. The `boundedMaxDt` param was reverted. The case is now `xfail`ed
+  in `tests/test_physics.py` (nx=96, `strict` → flips to a suite failure when
+  it starts holding). **Real fix = the near-wall CD solve, Active track item
+  1 / `band2018pb`.**
+- **A2. `kolmogorovIncompressible` inert — DONE (Part 48).** The `*0` on
+  `dfsph_step`'s `computeForcing` was a `c637785` mid-experiment leftover
+  (`f401e4a` had it un-multiplied); dropped. `computeForcing` returns 0 for
+  every incompressible-path case without a forcing function (only
+  `kolmogorovIncompressible` has one), so the change is bit-identical
+  everywhere else; `hydrostaticColumn` takes gravity through `computeGravity`.
+  Verified: KE 0 → 2.06 / 40 steps, density [0.99, 1.003].
+- **A3. Regression tests — DONE (Part 48).** In `tests/test_physics.py` (not
+  `test_runner.py` — that file is runner-infra only): `kolmogorovIncompressible`
+  forcing drives the flow + stays incompressible; `randomFlowIncompressible`
+  **periodic** does not diverge + stays incompressible; `randomFlowIncompressible
+  --bounded` `xfail(strict)`. Suite 86 → 89 passed / 1 xfail.
+- **A4 (perf, lower) — still open.** `_RESTORE_PS_SHIFT='auto'` adds a
+  `solveIncompressible` + adjacency rebuild per step on every non-gravity case
+  — measurable at `tgv`'s default nx=256. Cache the adjacency / gate the shift
+  to every N steps if it bites.
+- **A5. `mdbcNoPenetrationShift` dropped by the rewrite — DONE (Part 49).**
+  `c637785` commented `computeMdbcNoPenShift`'s call out of `dfsph_step`, so
+  post-rewrite `divergenceFree` had only the pressure projection for
+  no-penetration and a violent wall impact crossed the band. Re-wired at the
+  pre-rewrite spot (fold `nopenshift/dt` into `dvdt` before the pressure
+  solves, as `schemes/deltaSPH.py`), gated by `dfsph.NOPEN_SHIFT` (`'config'`
+  default → obey `schemeConfig.solverConfig.mdbcNoPenetrationShift`, itself
+  `True`). A/B (`scripts/probe_dfsphWallPenetration.py`, nx=64): `dambreak`
+  wall crossing 5 → 0, `columnCollapse` 6 → 1, impact `|v|`max −30 % on both,
+  `hydrostaticColumn` quiescent untouched, `randomFlowIncompressible
+  --bounded` **unchanged** (still A1 — that is the near-wall CD operator, a
+  different failure). `dambreak.diagnostics` gained an `nPenetrating` /
+  `maxPenetrationDx` watch; `test_columnCollapseWallHoldsOnImpact` added.
+  `c637785`-era unconditional `print`s in `dfsph_step` / `omniIncompressible.
+  _solve` gated behind verbose (`omniIncompressible.VERBOSE_SOLVE`). FINDINGS
+  §1.6 / §2 / §9 row 49.
 
 ---
 
@@ -423,13 +457,17 @@ quality issue (open since Part 15), not a failure.
    `randomFlowIncompressible --bounded` vs the `omniIncompressible` `shepard`
    + `CD_TIKHONOV` Jacobi. Whatever lands here is also the contractive
    divergence-pass any `iisph`-based general scheme needs (item 4/9).
-2. **`randomFlowIncompressible --bounded` under `divergenceFree` (= the
-   `_solve` loop now)** — Immediate A1. It NaNs at graded `dt`; establish
-   whether a tighter CFL holds it or the near-wall CD solve is the blocker,
-   then either fix it here or fold it into the `band2018pb` work. (The
-   pre-Parts-46/47 "grade `omniIncompressible` vs `divergenceFree`" framing is
-   moot — they are the same code; what remains is the shift gate + `XSPH_SCALE`
-   dissipation trade, and the closed-box KE budget.)
+2. **`randomFlowIncompressible --bounded` under `divergenceFree`** — Immediate
+   A1, **investigated Part 48, no stopgap; xfailed in the suite.** Root-caused
+   to the constant-density `solveIncompressible` in the VD+PS shift — the same
+   near-singular pure-Neumann near-wall operator as item 1, so **this case is a
+   direct acceptance test for whatever lands there.** When `band2018pb` (or the
+   near-wall CD fix) is in: re-run `randomFlowIncompressible --bounded` at
+   nx=48/96/128, and if it holds, promote `test_randomFlowBoundedDoesNotDiverge`
+   from `xfail` to a real assertion. Detail: the case-status row + §9 row 48.
+   (The pre-Parts-46/47 "grade `omniIncompressible` vs `divergenceFree`"
+   framing is moot — they are the same code; what remains is the shift gate +
+   `XSPH_SCALE` dissipation trade, and the closed-box KE budget.)
 3. **`omniIncompressible` full `dambreak` grade** (item 0 leftover) and
    **`dfsphReference` on `randomFlowIncompressible --bounded`** (untested —
    does the two-solve path diverge there like `iisph`/`omniIncompressible`
@@ -440,9 +478,12 @@ quality issue (open since Part 15), not a failure.
    `nu` gives a clean no-slip wall (Part 42 found the stock `viscidNu` term is
    normal-projected). New `ViscosityTerms` value + `deltaSPH` regression pass;
    fix `wp_viscosityDelta.py`'s docstring.
-5. **Full-suite validation of Parts 34–47** — `bash scripts/run_tests.sh` +
-   `run_sweep.py` + `gradcheck`. Parts 46–47 got `test_physics.py` +
-   `test_runner.py` green (82/0) but not the full sweep; Parts 34–45's
+5. **Full-suite validation of Parts 34–48 — mostly done (Part 48).**
+   `bash scripts/run_tests.sh` green bar 2 pre-existing failures (see
+   "Known-open"); `gradcheck_incompressible` green; `run_sweep.py --nSteps 25`
+   **33/33**; a deeper nx=48 / ~200-step pass of every `divergenceFree` case
+   holds (gravity gate routes correctly). Left: `run_sweep.py --full`. Parts
+   34–45's
    omni/band flags are default-inert, but Part 47's `INSTEP_CD` /
    `_RESTORE_PS_SHIFT` `'auto'` **change the `divergenceFree` default path**
    for every non-gravity case — this one needs the full sweep + `run_sweep.py`
@@ -950,10 +991,19 @@ for `iisph` (already holds), inconclusive for the two-solve path.
 - **Ghost particles (`kind == 2`) are lumped in with boundaries** by the
   `kj == 0` test. Correct for this scheme (`dfsph_step` freezes them too),
   but no measurement here separates them.
-- **Two intermittent test flakes**, both pre-existing, neither a regression:
-  `test_implicitShiftingComparison.py`'s `implicitShiftAutomatic` assertions
-  (~1 run in 3) and
-  `test_incompressibleKrylov.py::test_minresGivensMatchesDenseLstsq`.
+- **Full-suite failures unrelated to this track (pre-existing on a clean
+  tree, verified Part 48 by `git stash` + re-run):**
+  - `test_implicitShiftingComparison.py::test_automaticImplicitShift_convergesLikeHandBuilt`
+    — the historical `implicitShiftAutomatic` flake (~1 run in 3; passed on
+    retry Part 48).
+  - `test_incompressibleKrylov.py::test_optimalStepRejectedForConstantDensitySolver`
+    — **fails consistently, not a flake.** It expects `solveIncompressible`
+    with `JacobiRelaxationMode.optimal` on the CD solver to raise
+    `ValueError('optimal')`; it no longer does. Related to the known-open
+    "`solveIncompressible` should raise on the Krylov path" item above — that
+    guard has regressed at some earlier point. Not touched by Part 48.
+  (`test_minresGivensMatchesDenseLstsq`, the previously-noted Krylov flake,
+  passed Part 48.)
 - **Parts 35–38 are not suite/gradcheck-validated.** The `wp_dfsph_factor.py`
   `ki == 0` change (Part 37) alters `computeDFSPHFactor` for `iisph` /
   `dfsphReference` and touches a `@wp.kernel` — run `gradcheck` (the
