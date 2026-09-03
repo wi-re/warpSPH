@@ -256,23 +256,45 @@ fixed-`targetDt` behaviour. Cost: `dt` now scales with `dx`, so `nx = 400`
 needs ~13.5 k steps to `t = 1` (was ~2 k). All later square-patch numbers use
 this.
 
-### Second issue: the arms fragment at `tω ≈ 4`, independent of the shift
+### Second issue: the arms fragment at late `tω` — it is under-resolution, not a bug
 
-Even at fixed Ma = 0.05, the `nx = 96` pressure figure shows the four arms
-**coherent through `tω = 3` then breaking into a string of blobs at `tω = 4`**
-— for **all** of `shiftOff` / `surfaceZeroed` / `surfaceNormal` alike. The
-paper's Fig. 14 keeps clean thin arms to `tω = 8`. This is **not** a shift
-regression (it happens with the shift off) and it is **invisible to the area
-metrics** — a beaded arm has nearly the same hull area, RMS radius and
-per-particle density as a coherent one, which is exactly why the visual check
-was needed. Config already matches the paper (Wendland, ~50 neighbours,
-`α = 0.01`, δ-SPH density diffusion `δ = 0.1`). The remaining suspect is the
-**initial condition**: warpSPH samples a Cartesian lattice
-(`samplingScheme='regular'`), whereas the paper uses Colagrossi particle
-*packing* specifically to avoid the lattice symmetries that seed this
-beading under rotation + negative core pressure. Reproducing Fig. 14 is its
-own task (packing IC, possibly the integrator); the shift results below hold
-for `t ≤ 0.75`, where the case is physical.
+Even at fixed Ma = 0.05 the arms are **coherent through `tω ≈ 3` then shatter
+into a string of blobs** — for **all** of `shiftOff` / `surfaceZeroed` /
+`surfaceNormal` alike (so not a shift regression), and it is **invisible to the
+area metrics** (a beaded arm has nearly the same hull area / RMS radius /
+per-particle density), which is why the visual check was needed.
+
+`scripts/probe_squarePatchFragmentation.py` settles the cause. The shatter time
+(the `tω` where `surfaceFraction ≥ 0.9`) rises steadily with resolution:
+
+| `nx` | `L/Δx` | `tω` shatter, `shiftOff` | `tω` shatter, `surfaceNormal` |
+|---|---|---|---|
+| 72 | ~24 | 1.60 | 1.60 |
+| 96 | ~32 | 2.09 | 2.09 |
+| 144 | ~48 | 2.60 | — |
+| 216 | ~72 | 3.19 | — |
+| 288 | ~96 | 3.33 | **4.04** |
+| 384 | ~128 | 3.58 | **4.58** |
+
+Two findings:
+
+1. **It is under-resolution.** The arms are pressureless SPH filaments with no
+   surface-tension model; they hold only while a few particles thick. The
+   paper's `L/Δx = 400` (`nx ≈ 1200`) holds them past `tω = 8` — which is what
+   Fig. 14 shows. Nothing to fix in the scheme. Ruled out (all identical to
+   ≥ 3 decimals): **kernel** (Wendland2 vs Wendland4 shatter within one output
+   sample), **IC** (`samplingScheme` `regular` vs `jittered` byte-identical),
+   the δ⁺ tensile term (present, `R = 0.25, n = 4`), the negative-pressure
+   force switch (`pressureForceTerm = Antuono`, active).
+2. **`surfaceNormal` extends arm coherence once the shift can bite.** Below
+   `nx ≈ 216` the shift is too weak to change the shatter time; at `nx ≥ 288`
+   `surfaceNormal` pushes it out by `Δtω ≈ 0.7–1.0` (3.33 → 4.04, 3.58 → 4.58)
+   *and* keeps `maxρ` at ~1.02 where `shiftOff` spikes to 1.10 at `nx = 384`.
+   A real payoff that the low-res runs masked.
+
+**Consequence:** the case's default `nx = 192` (`L/Δx ≈ 64`) is fine for the
+shift-work window (`tω ≲ 3`, `t ≲ 0.75`); a paper-faithful arm comparison to
+`tω = 4-8` needs `nx ≳ 600`, where `surfaceNormal`'s advantage grows.
 
 ## Metrics — `rotatingSquarePatch.diagnostics` ✅ done (2026-09-03)
 
@@ -437,8 +459,8 @@ Findings:
    stopping it. `test_physics.py` 69 pass / 1 xfail with it on.
 
 **Net:** `correctdrhodt` is sound but has **no headroom for a misbehaving
-shift**. It cannot be judged on `squarePatch` until the fragmentation (IC) is
-fixed.
+shift**. On `squarePatch` it can only be judged for `tω ≲ 3` (before the arms
+shatter from under-resolution); the periodic box below is the real test.
 
 #### `correctdrhodt` on a periodic box — it works (`scripts/probe_correctdrhodtPeriodic.py`)
 
