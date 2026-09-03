@@ -659,6 +659,18 @@ than sit here looking plausible.
 > accuracy and stability of the proposed modification even at previously
 > infeasible conditions.
 
+### `sun2017`
+
+- **file:** `sun2017_delta-plus-sph-model.pdf`
+- **title:** The δplus-SPH model: Simple procedures for a further improvement of the SPH scheme
+- **authors:** P. N. Sun, A. Colagrossi, S. Marrone and A. M. Zhang
+- **venue:** *Computer Methods in Applied Mechanics and Engineering* 315:25-49, 2017
+- **doi:** [10.1016/j.cma.2016.10.028](https://doi.org/10.1016/j.cma.2016.10.028)
+- **relevance:** The δ⁺-SPH origin paper — δ-SPH density diffusion + a particle-shifting technique combined, plus a free-surface treatment for the shift. Source of the `δx = −CFL·Ma·2h²·∇C` displacement `modules/shifting/delta.py` implements, the `[1 + R (W_ij/W(Δx))ⁿ]` tensile-instability term (R=0.2, n=4) in `sample/wp_deltaShift`, and the free-surface normal-nulling that `sun2019` §2.4 — and this repo's `ShiftingProjectionScheme.surfaceNormal` — extends. Ref [5] in `sun2019`.
+- **abstract from:** PDF p.1
+
+> The present work is dedicated to the improvement of the δ-SPH scheme. This is an enhanced weakly-compressible SPH model widely used in recent years thanks to its benefits to the standard SPH scheme, to its low CPU costs and to its ease of implementation. Nonetheless, the δ-SPH still presents some drawbacks as other SPH models. For example, in some critical conditions it does not prevent the tensile instability and the consequent numerical fragmentation. Furthermore, even if the use of a diffusive term in the SPH continuity equation is able to reduce numerical high frequencies on the pressure field, the velocity gradients are generally noisy because of the irregularities of the particle spatial configurations, which, in specific flow conditions, can induce also extra numerical-dissipation. For these reasons a particle shifting technique is used to improve the model and a special treatment has been developed for particles that are close to the free-surface region. The introduction of the particle-shifting procedure is generalized in the context of multi-resolutions for which a novel algorithm is formulated to handle the particle re-positioning in the different resolution levels. The proposed algorithms can be straightforwardly implemented in an SPH model without requiring cumbersome code modifications. The δ + -SPH is validated on seven different benchmarks giving a wide panorama on the improvements of this new SPH model.
+
 ### `sun2019`
 
 - **file:** `sun2019_consistent-particle-shifting-delta-plus-sph.pdf`

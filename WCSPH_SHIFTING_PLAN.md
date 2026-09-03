@@ -363,9 +363,9 @@ are the discriminating signals here.
 >    vs keep-off-and-documented.
 > 4. **§3 polish** — smooth `λ` taper instead of the hard threshold;
 >    cumulative normal-displacement damping (beyond the paper).
-> 5. Low priority: `correctdvdt` (untested, paper says negligible); add
->    Sun et al. 2017 to `literature/`; the square-patch core-pressure sign
->    (likely just a WC acoustic oscillation at one instant — deferred).
+> 5. Low priority: `correctdvdt` (untested, paper says negligible); the
+>    square-patch core-pressure sign (likely just a WC acoustic oscillation at
+>    one instant — deferred).
 
 ### 1. Baseline & metrics — "how bad is it, does the switch-off help"
 
@@ -636,12 +636,19 @@ this plan was spun out of** — `mat`'s hard-zero-at-surface did not (it diverge
 at the same `t ≈ 3.4 s` as no shift at all). With `surfaceNormal` the smoothed
 wall pressure lands in the SPHERIC repeatability band on every roll cycle.
 
-Open (quantitative, not blocking):
-- The **raw** signal has ±50–90 kPa acoustic spikes at each impact —
-  undamped weakly-compressible ringing at a marginal sound speed (local
-  Ma ≈ 0.4 at the slam), not physical wall pressure. Higher `c₀` (smaller
-  `targetDt`) or a light acoustic filter cleans it; the smoothed trace is
-  already right.
+Quantitative pass — **plain `surfaceNormal` at the case defaults is the
+answer**:
+- The **raw** signal has ±50–90 kPa acoustic spikes at each impact — undamped
+  weakly-compressible ringing (local Ma ≈ 0.4 at the slam), not physical wall
+  pressure. **`3× c₀` (`--targetDt 1e-4`) does *not* clean it** — it still
+  survives 7 s but the raw trace rings *longer* (stiffer EOS → higher-frequency
+  ring, less relative AV damping) and gains a spurious `t ≈ 3.0 s` spike;
+  smoothed impacts stay ~in band but no better than baseline. So raising the
+  sound speed is not the fix; the smoothed / windowed trace (what SPHERIC
+  benchmarks always compare) is already right at the default `c₀ ≈ 16.6`.
+  `3× c₀` *does* tighten the sensor-ρ swing (`[0.77,1.11]` → `[0.98,1.02]`) —
+  keep in reserve if a future run needs it, but it is not worth the 2× step
+  count by default.
 - The `ρ ∈ [0.66, 1.34]` extremes are **transient spikes at the slam
   instants** (a handful of spray particles), *not* a progressive free-surface
   collapse — between impacts `minρ` recovers to `0.99–1.00` and `sensorρ`
@@ -720,6 +727,7 @@ Open (quantitative, not blocking):
   confirms no incompressible regression.
 - `sun2019` (`literature/`, added 2026-09-03) is the reference for §2d and §3;
   its method and per-figure validation paths are summarised in "Reference
-  method" above. The 2017 δ⁺-SPH it corrects (its ref [5], Sun et al.,
-  *The δplus-SPH model*, CMAME 315 (2017) 25–49) is **not** in `literature/`;
-  add it if §2/§3 work needs the original derivation.
+  method" above. `sun2017` (*The δplus-SPH model*, CMAME 315 (2017) 25–49 —
+  its ref [5], the δ⁺-SPH origin paper) is also in `literature/` now: the
+  source of `delta.py`'s shift form, `wp_deltaShift`'s tensile term, and the
+  free-surface `n`-nulling `surfaceNormal` extends.
