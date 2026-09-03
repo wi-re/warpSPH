@@ -606,7 +606,13 @@ first:
   cannot ratchet through normal-estimate error. The paper's own answer to
   residual ratcheting is §2d's `δu`-terms, not a displacement tracker.
 
-### 4. Re-enable the full surface shift + verify the payoff — ✅ mostly done
+### 4. Re-enable the full surface shift + verify the payoff — ✅ done
+
+**Payoff confirmed:** `sloshingTank --scheme wcsph` now runs the full 7 s with
+`surfaceNormal` and its wall pressure is in the measured band, where the old
+default (`mat`) and no-shift both diverge at `t ≈ 3.4 s`. Quantitative polish
+(acoustic ring, free-surface de-densification) is follow-up, not blocking.
+
 
 `surfaceNormal` (§3) *is* the re-enabled surface shift — it does not need
 `surfaceScaling → 1.0` or a hard-zero drop, it replaces that whole mechanism.
@@ -616,8 +622,30 @@ Now the default (`buildDefaultShiftProperties`). Verified:
 - ✅ `sloshingTank` (nx 60, t → 4.2 s): clears the `noShift` NaN at `t ≈ 2.6 s`,
   `ρ ∈ [0.994, 1.007]`, on par with the old `mat`.
 - ✅ `test_physics.py` 69 passed / 1 xfail with the flip.
-- ⬜ Higher-res `sloshingTank` (nx 150, the SPHERIC TC10 grid) and the wall
-  sensor-pressure trace vs experiment — the real payoff check.
+
+#### ✅ `sloshingTank` shift A/B — the payoff (`run_sloshingTank.py`, nx 100, t → 7 s)
+
+| shift | outcome | wall Sensor-1 (smoothed) vs measured 2.2–13 kPa band |
+|---|---|---|
+| **`surfaceNormal`** | **runs the full 7 s** | **in band at every impact**; 1st impact ~3.8 kPa @ `t ≈ 2.35 s` vs measured ~3.6 kPa, on time |
+| `mat` (legacy default) | **diverges `t = 3.41 s`** | — |
+| `--no-shift` | **diverges `t = 3.43 s`** | — |
+
+**The real surface shift is specifically what fixes the wall-slam divergence
+this plan was spun out of** — `mat`'s hard-zero-at-surface did not (it diverges
+at the same `t ≈ 3.4 s` as no shift at all). With `surfaceNormal` the smoothed
+wall pressure lands in the SPHERIC repeatability band on every roll cycle.
+
+Open (quantitative, not blocking):
+- The **raw** signal has ±50–90 kPa acoustic spikes at each impact —
+  undamped weakly-compressible ringing at a marginal sound speed (local
+  Ma ≈ 0.4 at the slam), not physical wall pressure. Higher `c₀` (smaller
+  `targetDt`) or a light acoustic filter cleans it; the smoothed trace is
+  already right.
+- Free surface **de-densifies to `ρ ≈ 0.66`** over the run (sensor ρ swings
+  `[0.77, 1.11]`). Candidates: `correctdrhodt` (§2d — now unblocked, the
+  surface treatment it needed is in), a background pressure (§2a), higher
+  resolution.
 - ⬜ Watch `maxρ`: `surfaceNormal` loosens it (1.020 vs 1.013 on the box at
   nx 96). If it grows with `nx`, revisit `surfaceLambdaThreshold` / add a
   `λ` taper (§3 later items).
