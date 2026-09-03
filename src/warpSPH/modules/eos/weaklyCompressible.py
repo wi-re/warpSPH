@@ -44,16 +44,20 @@ def weaklyCompressibleEOS(particleState, schemeConfig):
 
         # rho = torch.clamp(particleState.densities, min=0.8)  # rough attempt at clamping against instabilities; left disabled on purpose -- non-physical densities should blow up rather than be silently masked, so they get caught instead. This is where you'd clamp it if that's ever actually wanted.
         rho = particleState.densities
-        
+
+        # Uniform background pressure (WCSPH_SHIFTING_PLAN.md 2a): p <- p_EOS + p_b.
+        # Default 0.0, so this is inert unless a case sets it.
+        p_b = getattr(schemeConfig.fluid, 'backgroundPressure', 0.0)
+
         if eosType == EquationOfState.stiffTait:
-            return stiffTaitEOS(rho, rho0, c_s, polytropicExponent)
+            return stiffTaitEOS(rho, rho0, c_s, polytropicExponent) + p_b
         elif eosType == EquationOfState.Tait:
-            return TaitEOS(rho, rho0, kappa)
+            return TaitEOS(rho, rho0, kappa) + p_b
         elif eosType == EquationOfState.isoThermal:
-            return isoThermalEOS(rho, rho0, c_s)
+            return isoThermalEOS(rho, rho0, c_s) + p_b
         elif eosType == EquationOfState.Polytropic:
-            return polytropicEOS(rho, polytropicExponent, kappa)
+            return polytropicEOS(rho, polytropicExponent, kappa) + p_b
         elif eosType == EquationOfState.Murnaghan:
-            return murnaghanEOS(rho, rho0, kappa, polytropicExponent)
+            return murnaghanEOS(rho, rho0, kappa, polytropicExponent) + p_b
         else:
             raise ValueError('EOS type not recognized')

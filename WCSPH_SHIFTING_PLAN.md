@@ -350,22 +350,25 @@ are the discriminating signals here.
 > Eq. 14 shift limiter added.
 >
 > **What's left, roughly in priority order:**
-> 1. **§4 payoff — `sloshingTank` shift A/B (in progress)**: does WCSPH
->    (`deltaSPH`) survive past the `t ≈ 3.4 s` divergence now that
->    `surfaceNormal` is on, and does wall Sensor-1 pressure match the SPHERIC
->    TC10 record (first impact ~3.6 kPa @ `t ≈ 2.40 s`, then 4.07 / 5.71 s)?
->    This is the downstream reason the plan exists. `run_sloshingTank.py` now
->    has `--no-shift` / `--shift-projection` for the A/B.
-> 2. **§2a background pressure** — makes the `circle` null valid (a rotating
->    circle destabilises on its own now) and addresses the tensile instability
->    `surfaceNormal` doesn't touch.
-> 3. **`correctdrhodt` default** — validated for periodic/confined; decide flip
->    vs keep-off-and-documented.
-> 4. **§3 polish** — smooth `λ` taper instead of the hard threshold;
->    cumulative normal-displacement damping (beyond the paper).
-> 5. Low priority: `correctdvdt` (untested, paper says negligible); the
->    square-patch core-pressure sign (likely just a WC acoustic oscillation at
->    one instant — deferred).
+> 1. ✅ **§4 payoff — `sloshingTank` shift A/B**: `surfaceNormal` runs the full
+>    7 s (mat / no-shift diverge at `t ≈ 3.4 s`), smoothed wall pressure in the
+>    SPHERIC band. `correctdrhodt` and `3× c₀` both explored, neither helps.
+> 2. ✅ **§2a background pressure** — `fluid.backgroundPressure` (EOS field,
+>    default 0, inert), exposed as the `backgroundPressure` case param /
+>    `--background-pressure` runner flag. Verification sweep on `--shape circle`
+>    running.
+> 3. ✅ **`correctdrhodt` default — keep OFF, documented.** Validated for
+>    periodic/confined (`kolmogorov` `ε_V` 1.74 % → 0.16 %) but *harmful* on
+>    violent free surface (`sloshingTank` diverges at the first impact with it
+>    on). The harm outweighs the periodic drift it fixes, so it does not become
+>    a default; it stays an opt-in flag, correct for periodic/confined WCSPH.
+> 4. ✅ **§3 polish — `λ` taper** — `ShiftProperties.surfaceLambdaTaper`
+>    (default 0 = hard step; > 0 = smoothstep ramp over
+>    `[threshold, threshold + taper]`). Cumulative normal-displacement damping
+>    still ⬜ (beyond the paper, low value now that `surfaceNormal` works).
+> 5. Low priority: `correctdvdt` (untested, paper says negligible — not
+>    pursued); the square-patch core-pressure sign (likely just a WC acoustic
+>    oscillation at one instant — deferred).
 
 ### 1. Baseline & metrics — "how bad is it, does the switch-off help"
 
@@ -542,12 +545,16 @@ first:
   `ϵ_V` drift is the target; only then consider it for free-surface cases (and
   only with `surfaceNormal` + the limiter). `correctdvdt` (momentum `δu`-terms)
   is the paper's "negligible" half — leave off.
-- **2a. Background pressure** (≈ 2 lines). Add a small uniform `p_b` to the
-  deltaSPH pressure (`p ← p + p_b`, or Antuono's form). A positive `p_b` at the
-  free surface pushes particles *together*, directly opposing the shift's
-  outward push, and needs no surface special-casing. Sweep `p_b` vs the area
-  drift on `squarePatch`. Known cost: a spurious surface-tension-like force
-  that rounds corners — the arms / `cornerRetention` are the tolerance test.
+- **2a. Background pressure — ✅ implemented.** `fluid.backgroundPressure`
+  (`p ← p_EOS + p_b`, added in `modules/eos/weaklyCompressible.py`; default
+  `0.0`, inert). Exposed as the `backgroundPressure` case param (all WCSPH
+  cases via `configureWeaklyCompressible`, plus `sloshingTank`) and
+  `run_sloshingTank.py --background-pressure`. A positive `p_b` at the free
+  surface (where `p_EOS ≈ 0`) pushes particles together, opposing the shift's
+  outward drift and the tensile instability, with no surface special-casing.
+  Known cost: a surface-tension-like rounding of sharp features — the arms /
+  `cornerRetention` are the tolerance test. `probe_squarePatchFragmentation.py`
+  gained `--pb` for the sweep; verification on `--shape circle` running.
 - **2b. Divergence-free projection of the shift field.** Before applying,
   project `δx` onto `∇·(δx) = 0` (a small least-squares / Poisson solve on the
   fluid). Volume-conserving by construction, no surface heuristic. Cost: one
@@ -600,11 +607,15 @@ first:
   after `test_implicitShifting.py` — the failing test name varies run-to-run
   and it reproduces on a clean tree; the Krylov comparison path does not read
   `projectionScheme`.
-- ⬜ (later) smooth taper in `λ` instead of the hard `surfaceLambdaThreshold`
-  step; expose taper width.
+- ✅ Smooth `λ` taper — `ShiftProperties.surfaceLambdaTaper` (default `0.0` =
+  the hard on/off cut; `> 0` = a smoothstep ramp of the shift weight from 0 at
+  `lMin == surfaceLambdaThreshold` to 1 at `lMin == threshold + taper`).
+  `probe_squarePatchFragmentation.py --lambda-taper` for tuning. Default-inert;
+  `test_physics.py` unchanged.
 - ⬜ (later, beyond the paper) cumulative normal-displacement damping so drift
-  cannot ratchet through normal-estimate error. The paper's own answer to
-  residual ratcheting is §2d's `δu`-terms, not a displacement tracker.
+  cannot ratchet through normal-estimate error. Low value now that
+  `surfaceNormal` works and `sloshingTank` survives; the paper's own answer to
+  residual ratcheting is §2d's `δu`-terms anyway, not a displacement tracker.
 
 ### 4. Re-enable the full surface shift + verify the payoff — ✅ done
 

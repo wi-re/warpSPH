@@ -74,6 +74,11 @@ WEAKLY_COMPRESSIBLE_PARAMS = dict(
     # radius -- and 0.01 is both the scheme default and the value below which
     # runs stop being reliably stable.
     alpha=0.01,
+    # Uniform background pressure added to the EOS (WCSPH_SHIFTING_PLAN.md 2a).
+    # 0.0 = off; a small positive value opposes the δ⁺ shift's outward
+    # free-surface drift / the tensile instability, at the cost of rounding
+    # sharp free-surface features.
+    backgroundPressure=0.0,
     markerSize=4,
 )
 
@@ -116,6 +121,8 @@ def configureWeaklyCompressible(ctx: RunContext) -> None:
 
     schemeConfig = ctx.schemeConfig
     schemeConfig.surfaceDetectionConfig.active = ctx.param('freeSurface')
+    if hasattr(schemeConfig.fluid, 'backgroundPressure'):
+        schemeConfig.fluid.backgroundPressure = ctx.param('backgroundPressure', 0.0)
     schemeConfig.diffusionParams.inviscid = ctx.param('inviscid')
     schemeConfig.diffusionParams.inviscidAlpha = ctx.param(
         'alpha', schemeConfig.diffusionParams.inviscidAlpha)
