@@ -486,6 +486,74 @@ def test_columnCollapseWallHoldsOnImpact(columnCollapseResult):
     assert pdx.max() < 1.0
 
 
+@pytest.fixture(scope='module')
+def bandColumnResult():
+    from warpSPH.cases.hydrostaticColumn import hydrostaticColumnCase
+    # Long enough for the hydrostatic gradient to build and for the nx=128
+    # spray failure (see test_band2018pbColumnStaysQuiescent) to have shown up.
+    with contextlib.redirect_stdout(io.StringIO()):
+        return run(hydrostaticColumnCase, nx=64, nSteps=200,
+                   scheme='band2018pb', progress=False,
+                   integrationScheme='semiImplicitEuler')
+
+
+@pytest.fixture(scope='module')
+def bandBoundedResult():
+    from warpSPH.cases.randomFlowIncompressible import randomFlowIncompressibleCase
+    with contextlib.redirect_stdout(io.StringIO()):
+        return run(randomFlowIncompressibleCase, nx=64, nSteps=120,
+                   scheme='band2018pb', params=dict(bounded=True),
+                   progress=False, integrationScheme='semiImplicitEuler')
+
+
+def test_band2018pbColumnStaysQuiescent(bandColumnResult):
+    """`band2018pb` (extended PPE, boundary samples as pressure unknowns) has
+    to hold a quiescent hydrostatic column: near rest, near rest density, and
+    the correct hydrostatic gradient.
+
+    Guards the `bandRelaxation` scaling fix. The paper's per-sample
+    `omega_i = 0.5 V0_i/h^d` scales every row by one base constant; this
+    codebase detunes that base to `OMEGA_FLUID` at `n_h = 4`, and applying the
+    detune to the fluid only (leaving boundary rows at a hardcoded 0.5) gave
+    them a Jacobi step ~100x the fluid's -- boundary pressure ran away, Eq. 8
+    turned it into `|a_p| ~ 1e3` on the near-wall fluid and the column was
+    kicked apart at nx=128 (`pressureSlopeRatio` 0.02, `embeddedMinDensity`
+    0.14, 1695 spray particles).
+    """
+    assert not bandColumnResult.diverged
+    kinetic = bandColumnResult.series('kineticEnergy')
+    assert np.all(np.isfinite(kinetic))
+    last = bandColumnResult.trajectory[-1]
+    assert last['maxVelocity'] < 0.5, 'column is not quiescent'
+    assert 0.95 < last['embeddedMinDensity'] <= last['maxDensity'] < 1.05
+    assert 0.9 < last['pressureSlopeRatio'] < 1.1, 'wrong hydrostatic gradient'
+
+
+def test_band2018pbBoundedRandomFlowDecays(bandBoundedResult):
+    """The closed-box sheared case that defeats every other incompressible
+    scheme here (`divergenceFree` NaNs by step ~20, `iisph` and
+    `omniIncompressible` detonate -- see `test_randomFlowBoundedDoesNotDiverge`
+    below) is held by `band2018pb`, and the flow *decays* as a viscous random
+    flow should.
+
+    Guards `CLOSED_DOMAIN_GAUGE`. Eq. 8 is a summation gradient, so a uniform
+    `p` accelerates nothing where the kernel support is complete: in a fully
+    enclosed domain the constant is a null mode of `A`, and the Eq. 18
+    `max(., 0)` clamp -- which can only push a row up -- ratchets it away
+    instead of pinning it (step 1 solved to `p in [1.6e3, 2.6e3]`, a pure
+    offset, and KE reached 1e8 by step 200 with the density still at
+    [0.992, 1.007]).
+    """
+    assert not bandBoundedResult.diverged
+    kinetic = bandBoundedResult.series('kineticEnergy')
+    assert np.all(np.isfinite(kinetic))
+    assert kinetic[-1] < kinetic[0], 'closed-box random flow should decay'
+    velocity = np.array(bandBoundedResult.series('maxVelocity'))
+    assert velocity.max() < 5.0, f'velocity spike: {velocity.max():.3g}'
+    last = bandBoundedResult.trajectory[-1]
+    assert 0.97 < last['minDensity'] <= last['maxDensity'] < 1.03
+
+
 @pytest.mark.xfail(reason='randomFlowIncompressible --bounded diverges under the '
                           'post-c637785 divergenceFree scheme at every resolution '
                           '(density excursion at the wall -> velocity detonation); '

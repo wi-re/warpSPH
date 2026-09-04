@@ -55,7 +55,11 @@ the case this codebase's `applyConsistentCoupling` schemes handle):
                                  (paper's per-sample factor; small boundary
                                  samples get a smaller step).
   * Update (Eq. 18)    p_i <- max(p_i + (omega_i / a_ii) (s_i - (A p)_i), 0)
-                                 on fluid AND boundary rows.
+                                 on fluid AND boundary rows. In a fully
+                                 enclosed domain the `max(., 0)` is replaced by
+                                 a zero-mean projection -- see
+                                 `bandConstantModeRatio` and
+                                 `band2018pb.CLOSED_DOMAIN_GAUGE`.
   * Convergence        mean over fluid+boundary rows of `(A p)_i - s_i`
                                  (a relative volume error -- Eq. 21).
 
@@ -84,6 +88,7 @@ __all__ = [
     'bandRestVolumes', 'bandActualVolumes', 'bandBoundaryUnknownMask',
     'bandWellPosedMask', 'bandVelocityDivergence', 'bandInjectVolumes',
     'bandPressureAccel', 'bandApplyOperator', 'bandDiagonal', 'bandRelaxation',
+    'bandConstantModeRatio',
 ]
 
 #: A row (fluid or boundary) is a pressure unknown only if its diagonal
@@ -267,13 +272,59 @@ def bandDiagonal(state: Any, config: Any, schemeConfig: Any, adjacency: Any,
     return dt * dt * alpha
 
 
+def bandConstantModeRatio(state: Any, config: Any, adjacency: Any,
+                          diag: torch.Tensor, V: torch.Tensor,
+                          fluid: torch.Tensor, solveRows: torch.Tensor,
+                          dt: float) -> float:
+    """`rms|A.1| / rms|a_ii|` over the solve rows -- how far the *constant*
+    pressure field is from the operator's null space.
+
+    Eq. 8 is a summation gradient, so a uniform `p = c` gives
+    `a^p_i = -(V_i/m_i) 2c sum_j V_j grad W_ij`, which vanishes wherever the
+    kernel support is complete. In a fully enclosed domain that holds
+    everywhere, so `A.1 ~ 0`: the pressure is determined only up to an additive
+    constant, and since the Eq. 18 `max(., 0)` clamp can only ever push a row
+    *up*, the unpinned constant ratchets away (measured on
+    `randomFlowIncompressible --bounded`: `p in [1.6e3, 2.6e3]` on step 1 --
+    the whole field offset, not a gradient). A free surface breaks the mode,
+    because `sum_j V_j grad W_ij != 0` there.
+
+    Measured at nx=64 step 1: `randomFlowIncompressible --bounded` (closed box)
+    0.032, `hydrostaticColumn` (free surface) 1.29 -- a ~40x separation, which
+    is what `band2018pb.CLOSED_DOMAIN_GAUGE = 'auto'` keys on. Costs one extra
+    operator application per step (not per iteration). Call inside
+    `bandInjectVolumes`.
+    """
+    if not bool(solveRows.any()):
+        return float('inf')
+    ones = torch.where(solveRows, torch.ones_like(diag), torch.zeros_like(diag))
+    a1 = bandPressureAccel(state, config, adjacency, ones, V, fluid)
+    A1 = bandApplyOperator(state, config, adjacency, a1, dt, solveRows)
+    rmsA1 = float(A1[solveRows].pow(2).mean().sqrt())
+    rmsD = float(diag[solveRows].pow(2).mean().sqrt())
+    return rmsA1 / rmsD if rmsD > 0.0 else float('inf')
+
+
 def bandRelaxation(state: Any, V0: torch.Tensor, rho0: float,
                    omegaFluid: float) -> torch.Tensor:
-    """Per-sample relaxation `omega_i` -- `omega_f = omegaFluid`,
-    `omega_b = 0.5 * V0_b / V0_f` (paper: small boundary samples take a smaller
-    step). `V0_f = m_f/rho0`."""
-    boundary = state.kinds == 1
+    """Per-sample relaxation `omega_i = omegaFluid * V0_i / V0_f` -- the paper's
+    `omega_i = 0.5 V0_i/h^d` with the base constant taken from `omegaFluid`
+    rather than pinned at the paper's 0.5.
+
+    The scaling is *relative*: the paper's single constant multiplies fluid and
+    boundary rows alike, and a boundary sample's smaller rest volume is what
+    gives it the smaller step. Detuning only the fluid (this codebase runs
+    `omegaFluid = 0.05`, not 0.5, at `n_h = 4`) while leaving the boundary at a
+    hardcoded 0.5 breaks that: with `V0_b ~ V0_f` here the boundary rows kept
+    `omega_b = 0.5` -- a 10x larger relaxation on rows whose Eq. 20 diagonal is
+    itself ~10x *smaller* than the fluid's Eq. 19 one (it lacks the first term),
+    i.e. a Jacobi step `omega/a_ii` about 100x the fluid's. Measured on
+    `hydrostaticColumn` nx=128: the boundary pressure ran away to 8x the peak
+    fluid pressure, Eq. 8 turned that into `|a_p| ~ 1e3` on the near-wall fluid,
+    and the column was kicked apart (`pressureSlopeRatio` 0.02,
+    `embeddedMinDensity` 0.14, 1695 spray particles). Scaling both rows by
+    `omegaFluid` gives `slope` 0.996 / `embMin` 0.96 / 37 spray at nx=128 and is
+    a wash at nx=32/64.
+    """
     V0f = state.masses / rho0
-    omegaB = 0.5 * V0 / V0f.clamp_min(1e-12)
-    return torch.where(boundary, omegaB,
-                       torch.full_like(V0, float(omegaFluid)))
+    return omegaFluid * V0 / V0f.clamp_min(1e-12)
