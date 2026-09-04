@@ -62,7 +62,7 @@ from .plotting import Field, particlePlot
 from .weaklyCompressible import (boundaryRegion, buildRegionSystem, fluidRegion,
                                  setupTimestep, shapeSdf,
                                  particleDistributionMetrics,
-                                 calibrateRestDensityMasses)
+                                 calibrateRestDensity)
 
 __all__ = ['sloshingTankCase']
 
@@ -211,7 +211,7 @@ def initialConditions(ctx: RunContext, system) -> None:
     # The sampled tank does not measure `rho0` at rest, and by how much depends
     # on `nx` (1.0016 at nx=200, 1.0153 at nx=100). The solver reads that as
     # compression and kicks the fluid on step 0 -- at nx=100 hard enough to
-    # delaminate the layer within ~0.07 s. See `calibrateRestDensityMasses`.
+    # delaminate the layer within ~0.07 s. See `calibrateRestDensity`.
     # `'auto'` = only the incompressible path needs it. `deltaSPH` evolves
     # density through the continuity equation from `rho = rho0` and never forms
     # a summation density, so it never sees the offset (measured: its step-0
@@ -226,7 +226,7 @@ def initialConditions(ctx: RunContext, system) -> None:
                 f'calibrateRestDensity must be True/False/"auto", got {calibrate!r}')
         calibrate = isIncompressibleScheme(ctx.scheme)
     if calibrate:
-        calibrateRestDensityMasses(ctx, system, verbose=ctx.spec.verbose)
+        calibrateRestDensity(ctx, system, verbose=ctx.spec.verbose)
 
     if isIncompressibleScheme(ctx.scheme):
         if ctx.config.dt is None:

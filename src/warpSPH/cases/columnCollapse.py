@@ -45,7 +45,7 @@ from .plotting import Field, particlePlot
 from .weaklyCompressible import (WEAKLY_COMPRESSIBLE_DEFAULTS,
                                  WEAKLY_COMPRESSIBLE_PARAMS, shapeSdf,
                                  particleDistributionMetrics,
-                                 calibrateRestDensityMasses)
+                                 calibrateRestDensity)
 
 __all__ = ['columnCollapseCase']
 
@@ -85,9 +85,9 @@ def buildSystem(ctx: RunContext):
 
 def initialConditions(ctx: RunContext, system) -> None:
     # Declared since Part 33 but never read until now -- see
-    # `calibrateRestDensityMasses`.
+    # `calibrateRestDensity`.
     if ctx.param('calibrateRestDensity'):
-        calibrateRestDensityMasses(ctx, system, verbose=ctx.spec.verbose)
+        calibrateRestDensity(ctx, system, verbose=ctx.spec.verbose)
     p = system.state
     p.velocities[:] = 0.0
     if p.pressures is None:

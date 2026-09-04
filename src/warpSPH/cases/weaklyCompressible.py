@@ -15,6 +15,7 @@ from __future__ import annotations
 import math
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+import numpy as np
 import torch
 
 from ..configurations import BoundaryCondition, BoundaryConditionType
@@ -35,7 +36,8 @@ __all__ = [
     'OBSTACLE_PARAMS', 'paramShapeSdf',
     'buildRegionSystem', 'fluidRegion', 'boundaryRegion', 'meanFlowForcingBC',
     'setupTimestep', 'weaklyCompressibleDiagnostics', 'squarePatchAreaMetrics',
-    'particleDistributionMetrics', 'calibrateRestDensityMasses',
+    'particleDistributionMetrics', 'calibrateRestDensity', 'calibrateRestDensityMasses',
+    'achievedLatticeSpacing', 'latticeDensityDecomposition',
     'VELOCITY_DENSITY_FIELDS', 'VELOCITY_UID_FIELDS', 'paramExtraData',
 ]
 
@@ -375,43 +377,153 @@ def setupTimestep(ctx: RunContext, system) -> None:
         verbose=ctx.spec.verbose)
 
 
-def calibrateRestDensityMasses(ctx: RunContext, system, *,
-                               quantile: float = 0.75,
-                               fluidOnly: bool = False,
-                               verbose: bool = False) -> float:
-    """Scale particle masses so an at-rest sampling measures `rho0`.
+def achievedLatticeSpacing(positions: torch.Tensor, dim: int) -> List[float]:
+    """The lattice spacing the sampler actually laid down, per axis.
 
-    An SPH density is a midpoint quadrature of `int W dV = 1` on the particle
-    lattice, so a defect-free lattice carrying the nominal mass does NOT
-    integrate to `rho0`: it reads `rho0 * L(h/s)`, a uniform offset set by the
-    support-to-spacing ratio (`scripts/lattice_density_offset.py` computes `L`
-    in closed form -- 1.0012 at `h/s = 4`, 1.0376 at 2.0). On top of that the
-    sampler's fit of the fluid block to its region leaves the achieved spacing
-    slightly inconsistent with the mass it assigned, which is the larger and
-    the resolution-dependent part: on `sloshingTank` the first-step density is
-    1.0016 at nx=200 but **1.0153 at nx=100**, and the pressure solver reads
-    that 1.5 % as physical compression and fires a startup impulse
-    (`|v|max` 1.74 at nx=100 against 0.06 at nx=200).
+    NOT `config.dx`. The samplers fit the fluid block to its region and pick
+    their own spacing, independently in each direction, so the lattice comes
+    out slightly anisotropic (`sloshingTank` nx=60: sx 0.009375 vs sy 0.009400)
+    and generally different from the nominal `dx` the particle mass was
+    computed from -- which is the larger, resolution-dependent half of the
+    initial density offset. Measured off the unique coordinates per axis, so it
+    is meaningful only for an axis-aligned sampling, i.e. at initialisation and
+    before any relaxation. Entries are `nan` for an axis with one layer.
+    """
+    pos = positions.detach().cpu().numpy()
+    spacings = []
+    for axis in range(dim):
+        unique = np.unique(np.round(pos[:, axis], 9))
+        spacings.append(float(np.median(np.diff(unique))) if len(unique) > 1
+                        else float('nan'))
+    return spacings
 
-    Correcting the **mass** removes both at once and is the fix that leaves the
-    geometry alone. The alternative -- re-sampling at a spacing that happens to
-    give a nicer `L` -- is not available here: `dx` is chosen to divide the
-    domain evenly, which is what puts the domain bounds a clean `dx/2` from the
-    real surface, and the boundary / ghost-particle representation depends on
-    that. (omniSPH takes the mirror-image route: it fixes `s = 0.3992 h` and
-    snaps the domain out to an integer multiple of the spacing, then folds the
-    residual into that packing constant. See the script's docstring.)
 
-    Measures the summation density of the sampled state and rescales so the
-    **interior** reads `rho0`. "Interior" is the `quantile` upper tail of the
-    fluid density rather than a hard-coded geometric margin, so this works for
-    any case: a free surface reads low by kernel deficiency and sits in the
-    lower tail, while every fully-supported particle shares one plateau value.
+def latticeDensityDecomposition(ctx: RunContext, system,
+                                measured: Optional[float] = None) -> Dict[str, float]:
+    """Split the initial density offset into its two independent causes.
 
-    Returns the measured reference density (1.0 means nothing needed doing).
+    `calibrateRestDensity` corrects a single measured number, but that
+    number is a product of two unrelated errors, and only one of them is a
+    sampling defect:
+
+    * `latticeFactor` (`L`) -- the ideal-lattice quadrature offset. A perfect
+      lattice at this `h/s` reads `rho0 * L` no matter how well it was sampled,
+      because the kernel normalises its integral and not its lattice sum.
+      Computed in closed form by `warpSPHCore.util.latticeDensity` from the
+      kernel, the dimension and the achieved `n_h = h/s` alone -- no particles
+      involved. For the Wendland family `L > 1` strictly at every `h`
+      (`latticeDensityIsStrictlyAbove1`), so this term cannot be tuned away by
+      widening the support; only bought down, as `n_h^-(d+2k+1)`.
+    * `massRatio` -- `m / (rho0 * prod(s_i))`, the sampler's block fit. This is
+      the resolution lottery: 1.0004 at `sloshingTank` nx=200 against **1.0142**
+      at nx=100, and it is a genuine inconsistency between the mass a particle
+      carries and the cell it actually occupies.
+
+    Their product predicts the measured summation density (validated against
+    live runs by `scripts/lattice_density_offset.py --validate`), so the
+    residual `predicted / measured` is the check that the model is complete.
+
+    Returns `{}` when the geometry cannot be read (non-lattice sampling, one
+    layer per axis, fewer than 8 fluid particles).
+    """
+    from warpSPHCore.util import latticeDensity, latticeDensityIsStrictlyAbove1
+
+    particles = system.state
+    fluid = particles.kinds == 0
+    if int(fluid.sum()) < 8:
+        return {}
+    dim = int(ctx.config.dim)
+    spacings = achievedLatticeSpacing(particles.positions[fluid], dim)
+    if not all(math.isfinite(s) and s > 0.0 for s in spacings):
+        return {}
+    cell = float(np.prod(spacings))
+    # Geometric mean is the isotropic-equivalent spacing for `h/s`; the mass
+    # ratio needs the true cell volume `prod(s_i)`, not `s**dim` from it --
+    # using the latter mispredicts by exactly the anisotropy (2.7e-3 at nx=60).
+    s = cell ** (1.0 / dim)
+    h = float(torch.median(particles.supports[fluid].detach().float()))
+    m = float(torch.median(particles.masses[fluid].detach().float()))
+    rho0 = float(ctx.schemeConfig.fluid.restDensity)
+    n_h = h / s
+    L = latticeDensity(ctx.config.kernel, n_h, dim)
+    massRatio = m / (rho0 * cell)
+    # If the kernel already carries 1/L (config.calibrateNormalization, see
+    # LATTICE_DENSITY_PLAN.md), the lattice term has been removed from the
+    # measurement and only the sampler's block fit is left to predict. Reported
+    # either way so the two routes stay comparable, but `predicted` has to
+    # follow whichever one is live or the residual is meaningless.
+    corrected = bool(getattr(ctx.config, 'calibrateNormalization', False))
+    out = {
+        'n_h': n_h,
+        'latticeFactor': L,
+        'massRatio': massRatio,
+        'kernelCorrected': corrected,
+        'predicted': massRatio if corrected else massRatio * L,
+        'spacing': s,
+        'irreducible': latticeDensityIsStrictlyAbove1(ctx.config.kernel),
+    }
+    if measured:
+        out['measured'] = measured
+        out['modelResidual'] = out['predicted'] / measured - 1.0
+    return out
+
+
+def calibrateRestDensity(ctx: RunContext, system, *,
+                         quantile: float = 0.75,
+                         tolerance: float = 1e-3,
+                         onResidual: str = 'raise',
+                         verbose: bool = False) -> float:
+    """Make an at-rest sampling measure `rho0`, and catch it if it doesn't.
+
+    Formerly `calibrateRestDensityMasses`: it scaled particle mass to paper
+    over TWO separate offsets in the initial summation density --
+    `massRatio` (the sampler assigning a particle a mass that did not match
+    the cell it was actually placed in) and `latticeFactor` (`L`, the kernel's
+    lattice-quadrature offset: `int W dV = 1` says nothing about `sum_j m_j
+    W_ij`, so a defect-free lattice reads `rho0 * L(h/s) != rho0` no matter how
+    well it was sampled). Both are still computed and reported here
+    (`latticeDensityDecomposition`, recorded on
+    `ctx.scratch['latticeDensitySplit']`), but they are no longer handled the
+    same way:
+
+    * `massRatio` is now `sample/regular.py`'s job, not this function's. It
+      used to be the larger, resolution-dependent term (1.0004 at
+      `sloshingTank` nx=200 vs **1.0142 at nx=100** -- the sampler's own block
+      fit, root-caused to `buildPointCloud` computing mass from the nominal
+      pre-snap spacing while placing particles at the achieved, per-axis
+      post-snap one). Fixed at the source, it now measures `1 +/- ~1e-6` for
+      any plain, unoptimized regular lattice -- see the **residual check**
+      below.
+    * `latticeFactor` is a *kernel normalisation* property, not a mass one --
+      `C_d` normalises the kernel's integral, and what a lattice SUM needs is a
+      slightly different constant. Folding it into mass rescaled every
+      operator that touches `m` (momentum, continuity, every force) exactly as
+      if `C_d` had been rescaled, while silently changing the fluid's total
+      mass by ~0.1 %. The two routes happen to agree for the density sum and
+      nowhere else. `LATTICE_DENSITY_PLAN.md` is that design; `calibrateRest`
+      is what actually flips `ctx.config.calibrateNormalization` on, which
+      applies `1/L` at the kernel level for the rest of the run -- so this
+      function still calibrates a rest density, just via the one lever that
+      is actually a density-normalisation constant.
+
+    **The residual check.** With `massRatio` fixed at the sampler, ANY
+    deviation of it from 1 -- for a plain regular, unjittered lattice -- is no
+    longer expected sampling noise; it means something corrupted the initial
+    state (overlapping regions, an SDF that clipped the lattice unevenly, an
+    unwanted per-particle mass override elsewhere). `onResidual` controls what
+    happens when `|massRatio - 1| > tolerance` (default `1e-3`, three orders
+    above the ~1e-6 float32 noise measured across `nx` in [30, 333], four
+    below the old bug): `'raise'` (default) stops the run with the offending
+    numbers; `'warn'` prints and continues; `'ignore'` skips reporting. The
+    check itself is skipped -- not raised, not warned -- whenever the sampling
+    is not "regular and not optimized" (`ctx.spec.samplingScheme != 'regular'`
+    or a nonzero `jitter` param), since neither this function nor the sampler
+    fix promises anything about `massRatio` there.
+
     Call from `initialConditions`, **before** any analytic pressure/velocity
     seeding, and only for an at-rest sampling -- on a genuinely compressed
-    initial state this would calibrate the physics away.
+    initial state this would calibrate the physics away. Returns the measured
+    reference density (1.0 means nothing needed doing).
     """
     from ..modules import computeDensities
 
@@ -424,18 +536,51 @@ def calibrateRestDensityMasses(ctx: RunContext, system, *,
     if not (reference > 0.0):
         return 1.0
     rho0 = ctx.schemeConfig.fluid.restDensity
-    scale = rho0 / reference
-    if fluidOnly:
-        particles.masses = torch.where(fluid, particles.masses * scale,
-                                       particles.masses)
-    else:
-        particles.masses = particles.masses * scale
-    if verbose:
-        check = computeDensities(particles, ctx.config, ctx.schemeConfig, None)
-        now = float(torch.quantile(check[fluid].detach().float(), quantile))
-        print(f'[restDensityCalibration] interior q{quantile:g} '
-              f'{reference:.6f} -> {now:.6f} (rho0={rho0}, mass x{scale:.6f})')
+
+    split = latticeDensityDecomposition(ctx, system, measured=reference / rho0)
+    ctx.scratch['latticeDensitySplit'] = split
+
+    isRegular = (getattr(ctx.spec, 'samplingScheme', 'regular') == 'regular'
+                and not ctx.param('jitter', 0.0))
+    if split and isRegular and onResidual != 'ignore':
+        residual = abs(split['massRatio'] - 1.0)
+        if residual > tolerance:
+            message = (
+                f'[restDensityCalibration] massRatio = {split["massRatio"]:.6f} '
+                f'(|residual| {residual:.1e} > tolerance {tolerance:.1e}) on a '
+                f"regular, unjittered sampling -- sample/regular.py's mass fix "
+                f'should make this ~1 exactly. This means the initial state is '
+                f'not the clean lattice it is supposed to be (overlapping '
+                f'regions, an uneven SDF clip, or a per-particle mass override '
+                f'elsewhere) -- not something to calibrate away.')
+            if onResidual == 'raise':
+                raise ValueError(message)
+            if onResidual == 'warn':
+                import warnings
+                warnings.warn(message)
+            else:
+                raise ValueError(f'onResidual must be raise/warn/ignore, got {onResidual!r}')
+
+    if not ctx.config.calibrateNormalization:
+        ctx.config.calibrateNormalization = True
+        if verbose:
+            check = computeDensities(particles, ctx.config, ctx.schemeConfig, None)
+            now = float(torch.quantile(check[fluid].detach().float(), quantile))
+            print(f'[restDensityCalibration] interior q{quantile:g} '
+                  f'{reference:.6f} -> {now:.6f} (rho0={rho0}, '
+                  f'calibrateNormalization enabled, mass untouched)')
+    elif verbose:
+        print(f'[restDensityCalibration] interior q{quantile:g} {reference:.6f} '
+              f'(calibrateNormalization already on, mass untouched)')
+    if verbose and split:
+        print(f'[restDensityCalibration]   massRatio {split["massRatio"]:.6f} '
+              f'(sampler) x latticeFactor {split["latticeFactor"]:.6f} at '
+              f'n_h={split["n_h"]:.4f} (kernel)')
     return reference
+
+
+#: Retired name -- see `calibrateRestDensity`'s docstring for what changed.
+calibrateRestDensityMasses = calibrateRestDensity
 
 
 def particleDistributionMetrics(ctx: RunContext, state) -> Dict[str, float]:

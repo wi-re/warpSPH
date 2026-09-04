@@ -32,6 +32,12 @@ def computeDensities(currentState: Any, config: SimulationConfig, schemeConfig: 
                 kernel = config.kernel,
                 operation = WarpOperation.Density,
                 supportMode = SupportScheme.Gather, # cullen switch E.1 in the CRK paper uses gather for density estimation
+                # Lattice-normalisation correction (LATTICE_DENSITY_PLAN.md).
+                # Off unless the config asks for it. The summation density is
+                # the operator the offset is defined on, so this is where it is
+                # wired first; the other operators still default to off.
+                n_h = getattr(config, 'n_h', None),
+                calibrateNormalization = getattr(config, 'calibrateNormalization', False),
             ),
             domain = config.domain,
             adjacency = adjacency,
