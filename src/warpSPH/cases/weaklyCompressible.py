@@ -35,6 +35,7 @@ __all__ = [
     'OBSTACLE_PARAMS', 'paramShapeSdf',
     'buildRegionSystem', 'fluidRegion', 'boundaryRegion', 'meanFlowForcingBC',
     'setupTimestep', 'weaklyCompressibleDiagnostics', 'squarePatchAreaMetrics',
+    'particleDistributionMetrics', 'calibrateRestDensityMasses',
     'VELOCITY_DENSITY_FIELDS', 'VELOCITY_UID_FIELDS', 'paramExtraData',
 ]
 
@@ -374,23 +375,197 @@ def setupTimestep(ctx: RunContext, system) -> None:
         verbose=ctx.spec.verbose)
 
 
+def calibrateRestDensityMasses(ctx: RunContext, system, *,
+                               quantile: float = 0.75,
+                               fluidOnly: bool = False,
+                               verbose: bool = False) -> float:
+    """Scale particle masses so an at-rest sampling measures `rho0`.
+
+    An SPH density is a midpoint quadrature of `int W dV = 1` on the particle
+    lattice, so a defect-free lattice carrying the nominal mass does NOT
+    integrate to `rho0`: it reads `rho0 * L(h/s)`, a uniform offset set by the
+    support-to-spacing ratio (`scripts/lattice_density_offset.py` computes `L`
+    in closed form -- 1.0012 at `h/s = 4`, 1.0376 at 2.0). On top of that the
+    sampler's fit of the fluid block to its region leaves the achieved spacing
+    slightly inconsistent with the mass it assigned, which is the larger and
+    the resolution-dependent part: on `sloshingTank` the first-step density is
+    1.0016 at nx=200 but **1.0153 at nx=100**, and the pressure solver reads
+    that 1.5 % as physical compression and fires a startup impulse
+    (`|v|max` 1.74 at nx=100 against 0.06 at nx=200).
+
+    Correcting the **mass** removes both at once and is the fix that leaves the
+    geometry alone. The alternative -- re-sampling at a spacing that happens to
+    give a nicer `L` -- is not available here: `dx` is chosen to divide the
+    domain evenly, which is what puts the domain bounds a clean `dx/2` from the
+    real surface, and the boundary / ghost-particle representation depends on
+    that. (omniSPH takes the mirror-image route: it fixes `s = 0.3992 h` and
+    snaps the domain out to an integer multiple of the spacing, then folds the
+    residual into that packing constant. See the script's docstring.)
+
+    Measures the summation density of the sampled state and rescales so the
+    **interior** reads `rho0`. "Interior" is the `quantile` upper tail of the
+    fluid density rather than a hard-coded geometric margin, so this works for
+    any case: a free surface reads low by kernel deficiency and sits in the
+    lower tail, while every fully-supported particle shares one plateau value.
+
+    Returns the measured reference density (1.0 means nothing needed doing).
+    Call from `initialConditions`, **before** any analytic pressure/velocity
+    seeding, and only for an at-rest sampling -- on a genuinely compressed
+    initial state this would calibrate the physics away.
+    """
+    from ..modules import computeDensities
+
+    particles = system.state
+    fluid = particles.kinds == 0
+    if int(fluid.sum()) < 8:
+        return 1.0
+    density = computeDensities(particles, ctx.config, ctx.schemeConfig, None)
+    reference = float(torch.quantile(density[fluid].detach().float(), quantile))
+    if not (reference > 0.0):
+        return 1.0
+    rho0 = ctx.schemeConfig.fluid.restDensity
+    scale = rho0 / reference
+    if fluidOnly:
+        particles.masses = torch.where(fluid, particles.masses * scale,
+                                       particles.masses)
+    else:
+        particles.masses = particles.masses * scale
+    if verbose:
+        check = computeDensities(particles, ctx.config, ctx.schemeConfig, None)
+        now = float(torch.quantile(check[fluid].detach().float(), quantile))
+        print(f'[restDensityCalibration] interior q{quantile:g} '
+              f'{reference:.6f} -> {now:.6f} (rho0={rho0}, mass x{scale:.6f})')
+    return reference
+
+
+def particleDistributionMetrics(ctx: RunContext, state) -> Dict[str, float]:
+    """Is the particle *arrangement* physical? -- the blind spot of every
+    field-valued metric in this file.
+
+    Density is a kernel sum, so it is nearly blind to how the particles are
+    actually laid out. Two particles sitting on top of each other still read
+    `rho ~ rho0` because the neighbourhood compensates; a delaminated column of
+    dense sheets separated by voids reads `rho ~ rho0` in every sheet. Measured
+    on `band2018pb`: `hydrostaticColumn` nx=64 holds `rho` in [0.997, 1.007]
+    -- a perfect-looking band -- while **7.2 % of its fluid particles are
+    paired** at under half a spacing, and `impact` passes a `maxDensity` check
+    while 27.9 % of particles are paired, 9.9 % have no neighbour within 2 dx,
+    and the blob has hollowed out to a median density of 0.64.
+
+    So these are geometric, not field, quantities:
+
+    * `nnDistP01`      -- 1st percentile of nearest-neighbour distance, in units
+                          of the run's OWN median spacing (self-normalising).
+                          Collapses toward 0 under the pairing (tensile)
+                          instability; ~1 for a healthy lattice.
+    * `pairedFraction` -- fraction of fluid particles whose nearest neighbour
+                          is closer than `dx/2`. The clumping signature.
+    * `voidFraction`   -- fraction whose nearest neighbour is further than
+                          `1.5 dx`. The void / de-densification signature.
+    * `neighbourCountCV` -- coefficient of variation of the neighbour count.
+                          Uniform sampling is ~0.1; layering and voids push it
+                          up because sheets are over- and gaps under-populated.
+    * `densityMedian`  -- the *bulk* density. `minDensity` at a free surface is
+                          legitimately low (Part 33 spray, one-sided support),
+                          but the median going low means the body itself is
+                          de-densifying, which is never legitimate.
+
+    Returns `{}` when no neighbour list is reachable (`system.adjacency` is set
+    by the schemes), so this is safe to call from any case.
+    """
+    adjacency = getattr(state, 'adjacency', None)
+    particles = state.state
+    if adjacency is None or not hasattr(adjacency, 'i'):
+        return {}
+    fluid = particles.kinds == 0
+    if int(fluid.sum()) == 0:
+        return {}
+    pos = particles.positions
+    i, j = adjacency.i.long(), adjacency.j.long()
+    # Fluid-FLUID pairs only. A wall is sampled as its own particle band that
+    # can sit closer than dx/2 to the fluid it supports (a five-layer Akinci
+    # band at a different effective spacing), so including fluid-boundary edges
+    # reports a large constant "pairing" that is just the wall: measured, it
+    # put `hydrostaticColumn` at 0.29 paired *at step 0*, before any physics,
+    # while the wall-free `staticBlob` and `impact` read exactly 0.0. The
+    # instability being measured is fluid particles collapsing onto each other.
+    keep = (i != j) & fluid[i] & fluid[j]
+    i, j = i[keep], j[keep]
+    if i.numel() == 0:
+        return {}
+    delta = pos[i] - pos[j]
+    domain = getattr(ctx.config, 'domain', None)
+    if domain is not None and getattr(domain, 'periodic', None) is not None:
+        span = (domain.max - domain.min).to(delta.dtype)
+        per = domain.periodic.to(pos.device)
+        wrapped = delta - span * torch.round(delta / span)
+        delta = torch.where(per.unsqueeze(0), wrapped, delta)
+    dist = torch.linalg.norm(delta, dim=-1)
+
+    n = pos.shape[0]
+    nn = torch.full((n,), float('inf'), device=pos.device, dtype=dist.dtype)
+    nn.scatter_reduce_(0, i, dist, reduce='amin', include_self=True)
+    counts = torch.zeros(n, device=pos.device, dtype=dist.dtype)
+    counts.scatter_add_(0, i, torch.ones_like(dist))
+
+    # Normalise by the MEDIAN nearest-neighbour distance, not `config.dx`.
+    # The samplers do not lay particles down at `config.dx`: measured on
+    # `sloshingTank`, the achieved lattice spacing is ~0.6 dx at every
+    # resolution (nx=100: s 0.0054 vs dx 0.009). Dividing by `dx` therefore put
+    # a healthy lattice at nn/dx ~ 0.6, so a "< 0.5 dx" pairing test was really
+    # firing at 0.83 of the true spacing -- common and harmless -- and reported
+    # a spurious ~6% "pairing" on runs that are known good. Self-normalising by
+    # the median makes the ratio mean what it says on any sampling.
+    nnF = nn[fluid]
+    nnF = nnF[torch.isfinite(nnF)]
+    if nnF.numel() == 0:
+        return {}
+    nnScale = torch.quantile(nnF.float(), 0.5).clamp_min(1e-30)
+    nnF = nnF / nnScale
+    cF = counts[fluid]
+    rhoF = particles.densities[fluid].detach().float()
+    return {
+        'nnDistP01': torch.quantile(nnF.float(), 0.01).cpu().item(),
+        'nnDistMedian': torch.quantile(nnF.float(), 0.5).cpu().item(),
+        'pairedFraction': (nnF < 0.5).float().mean().cpu().item(),
+        'voidFraction': (nnF > 1.5).float().mean().cpu().item(),
+        'neighbourCountCV': (cF.std() / cF.mean().clamp_min(1e-9)).cpu().item(),
+        'densityMedian': torch.quantile(rhoF, 0.5).cpu().item(),
+    }
+
+
 def weaklyCompressibleDiagnostics(ctx: RunContext, state) -> Dict[str, float]:
     """Kinetic energy, peak speed and the density bounds, over fluid only.
 
     Density bounds are the weakly compressible health check: the whole scheme
     rests on the fluid staying within about a percent of `rho0`.
+
+    `minDensity` is reported but is a **poor figure of merit at a free
+    surface**: it reads whichever one or two particles have been thrown clear
+    of the bulk, whose density is low purely by kernel deficiency and which
+    fall back a few steps later (DFSPH_FINDINGS.md Part 33 / Sec. 1.1 -- the
+    finding that a "late-time degradation" was cosmetic ballistic spray, not
+    structural loss). `densityP05`, the 5th percentile, is the spray-robust
+    companion: it moves only when a real fraction of the fluid de-densifies.
+    Grade free-surface runs on `densityP05`; keep `minDensity` for the
+    periodic/confined cases, where it means what it says.
     """
     particles = state.state
     fluid = particles.kinds == 0 if hasattr(particles, 'kinds') else slice(None)
     velocities = particles.velocities[fluid]
     densities = particles.densities[fluid]
-    return {
+    out = {
         'kineticEnergy': (0.5 * particles.masses[fluid]
                           * (velocities ** 2).sum(dim=-1)).sum().detach().cpu().item(),
         'maxVelocity': torch.linalg.norm(velocities, dim=-1).max().detach().cpu().item(),
         'maxDensity': densities.max().detach().cpu().item(),
         'minDensity': densities.min().detach().cpu().item(),
+        'densityP05': torch.quantile(
+            densities.detach().float(), 0.05).cpu().item()
+        if densities.numel() else float('nan'),
     }
+    out.update(particleDistributionMetrics(ctx, state))
+    return out
 
 
 def _convexHullArea(points: 'Any') -> float:

@@ -120,7 +120,8 @@ from .randomFlow import BOUNDED_BAND
 from .weaklyCompressible import (WEAKLY_COMPRESSIBLE_DEFAULTS,
                                  WEAKLY_COMPRESSIBLE_PARAMS, boundaryRegion,
                                  buildRegionSystem, configureWeaklyCompressible,
-                                 domainBoundarySdf, fluidRegion, shapeSdf)
+                                 domainBoundarySdf, fluidRegion, shapeSdf,
+                                 particleDistributionMetrics)
 
 __all__ = ['hydrostaticColumnCase']
 
@@ -303,6 +304,7 @@ def hydrostaticDiagnostics(ctx: RunContext, state) -> Dict[str, float]:
         disp = positions - initial[fluid]
         d['dispRms'] = torch.sqrt((disp ** 2).sum(dim=-1).mean()).detach().cpu().item()
         d['dispMax'] = torch.linalg.norm(disp, dim=-1).max().detach().cpu().item()
+    d.update(particleDistributionMetrics(ctx, state))
 
     pressures = particles.pressures
     if pressures is None:

@@ -80,7 +80,7 @@ from typing import Any, Dict, List
 
 import torch
 
-from ..enumTypes import IncompressibleSPHScheme
+from ..enumTypes import isIncompressibleScheme
 from ..runner import Case, RunContext, caseMain, registerCase
 from .kolmogorovIncompressible import kolmogorovIncompressibleTimestep
 from .plotting import Field, particlePlot
@@ -205,7 +205,7 @@ def _velocityField(velocity, spin: float):
 
 def configureScheme(ctx: RunContext) -> None:
     configureWeaklyCompressible(ctx)
-    if ctx.scheme is not IncompressibleSPHScheme.divergenceFree:
+    if not isIncompressibleScheme(ctx.scheme):
         return
     # `configureWeaklyCompressible` wires the shared `inviscid`/`alpha`
     # (artificial-viscosity) knobs `deltaSPH` uses; DFSPH has no such term
@@ -298,7 +298,7 @@ def impactTimestep(ctx: RunContext, state) -> float:
     `kolmogorovIncompressibleTimestep`'s formula, reused as-is the same way
     `dambreakTimestep` reuses it.
     """
-    if ctx.scheme is not IncompressibleSPHScheme.divergenceFree:
+    if not isIncompressibleScheme(ctx.scheme):
         return ctx.config.dt
     return kolmogorovIncompressibleTimestep(ctx, state)
 
