@@ -4,7 +4,7 @@ The incompressible sibling of :mod:`randomFlow` (weakly compressible
 `deltaSPH`), added for `DFSPH_IMPROVEMENT_PLAN.md` Part 2 steps 7/8: the
 bounded (`--bounded`) variant is what exercises this codebase's mDBC
 boundary-particle machinery (`BoundaryPressureMode` and its pressure-solver
-masking, `computeMdbcDensity`/`computeMdbcPressure`) end to end for the first
+masking, `computeMdbcDensity`) end to end for the first
 time -- no incompressible case samples `kind==1` boundary particles yet, and
 this is also the first case of *any* scheme to actually run mDBC's ghost
 particles (`kind==2`, produced generically by

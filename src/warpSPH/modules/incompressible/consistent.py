@@ -19,9 +19,11 @@ consequences fall out, and this codebase's relationship to each is different:
   p_j/rho_j^2) gradW_ij - sum_k m~_k (p_i/rho_i^2) gradW_ik` -- **no boundary
   pressure value appears at all.** This codebase's symmetric pressure gradient
   reduces to exactly that whenever boundary pressures are zero, which
-  `BoundaryPressureMode.plain`/`mdbcDensity` already arrange. It is
+  `BoundaryPressureMode.plain`/`mdbcDensity` already arrange. It was
   `mdbcMlsPressure` -- Band et al.'s MLS extrapolation, which the paper is
-  written against -- that departs from it.
+  written against -- that departed from it; that mode is removed (pre-merge
+  cleanup pass, 09-04, DFSPH_IMPROVEMENT_PLAN.md), so today only `consistent`
+  itself is a live counterexample to "boundary pressures are zero".
 
 So the operator side is already the paper's. What is genuinely different is
 the *state* the boundary particles enter the solve with. The paper treats them

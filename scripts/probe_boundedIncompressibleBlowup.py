@@ -36,14 +36,6 @@ parser.add_argument('--maxSteps', type=int, default=2000)
 parser.add_argument('--mode', type=str, default='mdbcDensity')
 parser.add_argument('--tail', type=int, default=25)
 parser.add_argument('--every', type=int, default=20)
-parser.add_argument('--mlsBeforeSolve', action='store_true',
-                    help="also run `computeMdbcPressure` *before* "
-                         "`solveDivergenceFree`, not only after it. As shipped, "
-                         "the MLS projection is one full step stale by the time "
-                         "the solve reads it: it is computed from the previous "
-                         "step's fluid pressure at the previous step's positions")
-parser.add_argument('--mlsRelaxation', type=float, default=None,
-                    help="override `mdbcPressureRelaxation` (default 0.3)")
 parser.add_argument('--mdbcFinalize', action='store_true',
                     help="apply the mDBC density extrapolation in `finalize` "
                          "before the shifting solve. `divergenceFree_step` gives boundary "
@@ -97,9 +89,6 @@ from warpSPH.runner.caseSpec import CaseSpec
 
 import warpSPH.systems.incompressible as sysmod
 import warpSPH.schemes.divergenceFree as dfsphmod
-from warpSPH.modules.mdbc import computeMdbcPressure as _mdbcPressure
-from warpSPH.configurations import BoundaryPressureMode as _BPMode
-
 solveLog = {}
 
 
@@ -107,15 +96,6 @@ def _wrap(module, name, tag):
     orig = getattr(module, name)
 
     def wrapped(*a, **kw):
-        if tag == 'DF' and args.mlsBeforeSolve:
-            particles = kw.get('particles', a[0] if a else None)
-            config = kw.get('config')
-            schemeConfig = kw.get('schemeConfig')
-            adjacency = kw.get('adjacency')
-            if (particles is not None and particles.pressures is not None
-                    and schemeConfig.solverConfig.boundaryPressureMode
-                    is _BPMode.mdbcMlsPressure):
-                particles.pressures = _mdbcPressure(particles, config, schemeConfig, adjacency)
         out = orig(*a, **kw)
         a_p, pressure, errors, _pressures = out
         if tag == 'PS' and args.shiftCap is not None:
@@ -204,8 +184,6 @@ if args.dfMaxIters is not None:
     df.maxIterations = args.dfMaxIters
 if args.psMaxIters is not None:
     ps.maxIterations = args.psMaxIters
-if args.mlsRelaxation is not None:
-    ctx.schemeConfig.solverConfig.mdbcPressureRelaxation = args.mlsRelaxation
 if args.shiftApplication is not None:
     from warpSPH.configurations import ShiftApplication
     ctx.schemeConfig.solverConfig.shiftApplication = ShiftApplication[args.shiftApplication]

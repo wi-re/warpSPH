@@ -19,9 +19,14 @@ The rows below are chosen so each isolates one step of that:
   mdbcDensity + staticBoundary  Part 9: the paper's operator terms only
   consistent                    + rho0 boundary density, + p_b pinned at 0
   consistent + akinciVolume     + the paper's m~_k = rho0 / sum_l W_kl
-  mdbcMlsPressure + full        Band et al.'s MLS extrapolation -- the method
-                                the paper is written against, and the mode
-                                Part 2 measured as this codebase's best
+
+`BoundaryPressureMode.mdbcMlsPressure` -- Band et al.'s MLS extrapolation, the
+method this paper is written against -- used to have a fifth row here. Part 2
+first measured it as this codebase's best mode; that call was later retracted
+(DFSPH_FINDINGS.md Sec. 3 item 1 -- worst configuration measured over a real
+900-step run) and the mode itself removed in the pre-merge cleanup pass
+(09-04): `wallPressureExtrapolation` supersedes it without the feedback-loop
+instability its one-step lag caused. See DFSPH_IMPROVEMENT_PLAN.md.
 
 Usage:
   python scripts/probe_consistentCoupling.py --nx 128 --nsteps 900
@@ -94,7 +99,6 @@ ROWS = [
     ('mdbcDensity+static',    BoundaryPressureMode.mdbcDensity,     BoundaryOperatorTerms.staticBoundary, False),
     ('consistent',            BoundaryPressureMode.consistent,      BoundaryOperatorTerms.full,           False),
     ('consistent+akinciVol',  BoundaryPressureMode.consistent,      BoundaryOperatorTerms.full,           True),
-    ('mdbcMlsPressure+full',  BoundaryPressureMode.mdbcMlsPressure, BoundaryOperatorTerms.full,           False),
     # `massInState` rows put `m~_k` on the particles instead of substituting it
     # inside the solve, so the density summation sees it too (Eq. 14).
     ('consistent+massInState', BoundaryPressureMode.consistent,     BoundaryOperatorTerms.full,           'state'),
