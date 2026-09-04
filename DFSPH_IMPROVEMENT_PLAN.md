@@ -48,12 +48,13 @@ everything else). Never both. Plus opt-in knobs: `SURFACE_SOURCE`,
 `DIVERGENCE_SOLVER` (`'omni'`/`'vdps'`), `XSPH_SCALE` (per-case via
 `schemeConfig.xsphFilterScale`), `SOLVE_ORDER`, `GRAVITY_OSC` (ablation).
 
-**Suite: `tests/test_physics.py` + `tests/test_runner.py` = 89 passed / 0
+**Suite: `tests/test_physics.py` + `tests/test_runner.py` = 91 passed / 0
 failed / 1 xfail** — green since Part 47; Part 48 added `kolmogorovIncompressible`
 forcing + `randomFlowIncompressible` periodic regression tests, and one
 `xfail(strict)` marking `randomFlowIncompressible --bounded` as a known
-divergence that flips to a suite failure the moment it starts holding. (Two
-pre-existing full-suite failures, unrelated — see "Known-open".)
+divergence that flips to a suite failure the moment it starts holding. Part 50
+added the first two `band2018pb` tests. (Two pre-existing full-suite failures,
+unrelated — see "Known-open".)
 
 **Case status at the shipped defaults (`divergenceFree`, verified 09-03;
 `randomFlow`/`kolmogorov` rows updated Part 48):**
@@ -64,7 +65,7 @@ pre-existing full-suite failures, unrelated — see "Known-open".)
 | `randomFlowIncompressible` **periodic** | **holds** — KE decays cleanly (0.45 → 0.38 / 200 steps, `\|v\|` ~1). |
 | `randomFlowIncompressible --bounded` | **OPEN REGRESSION — diverges at every resolution (Part 48 characterised it; no stopgap works).** A density excursion builds near the wall over many steps (ρ spreads [0.98, 1.02] → [0.2, 3.4] while KE / `\|v\|` stay flat) then the pressure response detonates `\|v\|`. Onset time scales with `nx`: nx=32 t≈0.025, nx=48 t≈0.16, nx=56 t≈0.15, **nx=64 t≈0.95** (longest-lived — the one a `maxDt = 1e-3` cap "held" for 400 steps, a false positive), nx=96 t≈0.9, **nx=128 (shipped default) step 4**. Isolated (Part 48) to the **constant-density `solveIncompressible` inside the VD+PS shift** (`systems/incompressible.finalize`) — B: `_RESTORE_PS_SHIFT=False` delays it (nx=64 → step 90) but cannot hold it and can't be global (tgv needs the shift, §1.17); the shift's velocity-resample term detonates fastest, its position-move term alone rots ρ to [0.14, 4.97]. Nothing fixes it: `maxDt` cap / `--cflFactor 0.2` / `DIVERGENCE_SOLVER='vdps'` (worse — step-1 blow) / `boundaryPressureMode` ∈ {density, mlsPressure, plain} (identical) / `nu = 0.01` (worse). Same near-singular pure-Neumann near-wall CD operator as Parts 42–45; `iisph` / `omniIncompressible` fail this same case. **Folded into the Active track / `band2018pb`; xfailed in the suite.** Pre-`c637785` `divergenceFree` (VD+PS, convergent `solveDivergenceFree`) held it at band 4.48e-3. Periodic variant holds. |
 | `kolmogorovIncompressible` | **FIXED (Part 48).** `dfsph_step` had `forcing = computeForcing(...) * 0` (a `c637785` mid-experiment leftover — `f401e4a` had it un-multiplied); dropped it. `computeForcing` returns 0 for every case without a forcing function, so only this case moves: KE 0 → 2.06 / 40 steps at nx=32, density [0.99, 1.003]. In the suite. |
-| `hydrostaticColumn` (quiescent column under gravity) | **`divergenceFree` HOLDS it** (`c637785`'s point; confirmed nx=64 & nx=128 this session): `pressureSlopeRatio` 1.001, `densityP05` 0.94, `\|v\|` ~0.07–0.10. Residual is a bounded undamped free-surface limit cycle in the top ~3 rows (§1.16); the per-case `xsphScale` knob (`XSPH_SCALE=1.0`) decays it (KE ↓55×/2250× at nx=64/128) at a dissipation cost, so it is opt-in. The old note "position shift cannot sustain a body force" applied to the pre-`c637785` VD+PS path and is superseded for the shipped scheme. `iisph` also holds it (Part 33/34); `dfsphReference` does not (Part 37); `omniIncompressible` holds nx=128 (Part 41); `band2018pb` holds nx≤64 (Part 45). |
+| `hydrostaticColumn` (quiescent column under gravity) | **`divergenceFree` HOLDS it** (`c637785`'s point; confirmed nx=64 & nx=128 this session): `pressureSlopeRatio` 1.001, `densityP05` 0.94, `\|v\|` ~0.07–0.10. Residual is a bounded undamped free-surface limit cycle in the top ~3 rows (§1.16); the per-case `xsphScale` knob (`XSPH_SCALE=1.0`) decays it (KE ↓55×/2250× at nx=64/128) at a dissipation cost, so it is opt-in. The old note "position shift cannot sustain a body force" applied to the pre-`c637785` VD+PS path and is superseded for the shipped scheme. `iisph` also holds it (Part 33/34); `dfsphReference` does not (Part 37); `omniIncompressible` holds nx=128 (Part 41); `band2018pb` holds nx=32/64/128 (Part 50 — `embeddedMinDensity` 0.9998 and `pressureSlopeRatio` 1.015 at nx=128). |
 | `impact` (collision) | **pass** (Part 23; `\|v\|` ~1.5, no NaN). |
 | `squarePatch` (`rotatingSquarePatch`) | **runs** — stable rotation; corner density → 0.50. [BK] §5 documents this as a method limitation, not an implementation bug. |
 | `dambreak --scheme divergenceFree` | **runs** (Part 19) — the only working free surface — but half `deltaSPH`'s run-out speed and most of the flow's KE dissipated on impact; needs its own `--cflFactor 0.2` (Part 20), not 0.4. Wall-crossing at the surge impact went 5 → **0** once the no-pen shift was re-wired (Part 49). |
@@ -129,11 +130,16 @@ track still owns: the **near-wall constant-density solve** — the same thing
 that NaNs `randomFlowIncompressible --bounded` at graded `dt` (Immediate A1)
 and that `band2018pb` / `CD_TIKHONOV` target.
 
-**Status (Part 45): `band2018pb` landed — a fresh operator module + a
-distinct scheme (`IncompressibleSPHScheme.band2018pb = 4`). Operator
-verified correct, the wall rank-deficiency removed; `hydrostaticColumn`
-nx=32 and nx=64 hold quiescent (`OMEGA_FLUID = 0.1`, `DIAG_TIKHONOV = 0.3`);
-nx=128 still sprays at the free surface. See "Next, in order" item 1.** Part 44 ruled out the "symmetrise `A`
+**Status (Part 50): `band2018pb` now holds `hydrostaticColumn` at nx=32/64/128
+*and* `randomFlowIncompressible --bounded` at nx=64/128 — the case that NaNs
+`divergenceFree` and detonates `iisph` / `omniIncompressible`. The two
+remaining blockers were both bugs in the port, not physics: `bandRelaxation`
+applied the `n_h = 4` relaxation detune to the fluid rows only (leaving
+boundary rows a ~100× larger Jacobi step), and a fully enclosed domain had no
+gauge for the constant null mode of the summation-gradient operator. Defaults
+now `OMEGA_FLUID = 0.1`, `DIAG_TIKHONOV = 0.05`, `CLOSED_DOMAIN_GAUGE =
+'auto'`. See "Next, in order" item 1.** Part 45 landed the scaffold (operator
+verified, wall rank-deficiency removed). Part 44 ruled out the "symmetrise `A`
 + MINRES" interim probe — `A` is *already* symmetric; the blocker is rank
 deficiency, and only full `band2018pb` addresses it. Part 42 fixed the
 divergence
@@ -435,36 +441,120 @@ quality issue (open since Part 15), not a failure.
      `omniIncompressible.CD_TIKHONOV`, `band2018pb` needs it) — solve the
      nearby `(A − eps·median|dt²a_ii|·I) p = s`, the same device as Part 43,
      applied to both the diagonal and the operator (`Ap − shift·p`).
-   - **What holds now** (`OMEGA_FLUID = 0.1`, `DIAG_TIKHONOV = 0.3`):
-     `hydrostaticColumn` **nx=32 (600+ steps)** — `|v|max` 0.18, `KE` 4e-4,
-     `embeddedMinDensity` 0.997, `maxDensity` 1.02 — and **nx=64 (400 steps)**
-     — `|v|max` 0.10, `KE` 2e-4, `embeddedMinDensity` 0.999, `maxDensity`
-     1.04 — both quiescent and near rest. `tgv` (periodic, no walls) clean.
-   - **What does not:** `hydrostaticColumn` **nx=128 still sprays** — bounded
-     (`maxDensity` 1.008, no `inf`) but `|v|max` ~4 and a thick ballistic
-     surface layer (`embeddedMinDensity` → 0.14); tuning `OMEGA` / `TIK` down
-     makes it worse, so it is the **free-surface** source pollution, not the
-     wall: `1 − V0/V → +0.32` at the surface (`n_h = 4` kernel deficiency,
-     §1.1 in volume-centric form), `s` is ~99 % positive, and the Jacobi /
-     MINRES / CG do **not** converge the linear system there. The `p ≥ 0`
-     clamp + floored metric hold it at nx≤64; nx=128 needs more.
-   **Next on this sub-thread:** the nx=128 surface spray — an
-   `omniIncompressible`-style per-iterate boundary/surface closure, a source
-   floor (`s ← min(s, ε)`), or a resolution-scaled `OMEGA`/`TIK`. Then point
+   **Part 50 — the two blockers were both bugs in the port, not physics.
+   nx=128 holds, and `randomFlowIncompressible --bounded` holds.**
+   - **Bug 1 — `bandRelaxation` scaled only the fluid.** The paper's
+     `ω_i = 0.5·V0_i/h^d` applies *one* base constant to every row; a boundary
+     sample takes a smaller step only because its rest volume is smaller. The
+     port detuned the fluid base to `OMEGA_FLUID` (0.05) for `n_h = 4` but left
+     boundary rows at a hardcoded `0.5`. Since `bandRestVolumes` gives
+     `V0_b = V0_f = m/ρ0` here, that was a flat **10× larger ω on rows whose
+     Eq. 20 diagonal is itself ~10× *smaller*** than the fluid's Eq. 19 one
+     (it lacks the first term) — a Jacobi step `ω/a_ii` ≈ **100×** the fluid's.
+     Measured at nx=128: `p_b` ran to 96 against a peak fluid `p` of 11.8,
+     Eq. 8 turned that into `|a_p| ~ 1.3e3` on the near-wall fluid, the column
+     was kicked apart, and — because the source then went 96 % positive and
+     every row clamped to `p = 0` — the floored metric read `err < 0` and the
+     solve **exited at the 8-iteration minimum doing nothing**. Fixed:
+     `ω_i = OMEGA_FLUID·V0_i/V0_f` for all rows.
+   - **Bug 2 — no gauge for a closed domain.** Eq. 8 is a *summation* gradient,
+     so a uniform `p` accelerates nothing wherever the kernel support is
+     complete; in a fully enclosed domain the constant is a null mode of `A`,
+     and the Eq. 18 `max(·,0)` clamp — which can only push a row *up* — ratchets
+     it away instead of pinning it. This is **not** Part 42's incompatible
+     source: `fracUniform ≈ 0.03` here (threshold 0.7), so
+     `CD_SOURCE_PROJECT`'s test would never fire. The *source* is fine; the
+     *solution* is unpinned. Landed **`band2018pb.CLOSED_DOMAIN_GAUGE`**
+     (`'auto'`), keyed on a direct null-mode test
+     `bandConstantModeRatio = rms|A·1| / rms|a_ii|` (nx=64 step 1: closed box
+     **0.032**, free-surface column **1.29** — a 40× separation, threshold
+     0.25); when it fires, each iterate is projected to zero mean over the
+     solve rows and the non-negativity clamp is dropped (a closed domain has no
+     free surface, so there is no tensile instability for it to suppress —
+     the same pairing Part 42 reached).
+   - **Retuned on the fixed operator:** `OMEGA_FLUID` 0.05 → **0.1** (0.2+ still
+     detonates nx=128), `DIAG_TIKHONOV` 0.3 → **0.05** (0.05 and 0.1 both hold
+     nx=32/64/128; 0.05 over-compresses least — bulk ρ 1.013 vs 1.023 at
+     nx=128 — and the paper has no Tikhonov term at all). `tik = 0` still
+     fails (`embMin` 0.44 at nx=64), so the floor is genuinely needed.
+   - **What holds now** (`hydrostaticColumn`, 200 steps): **nx=64** bulk ρ
+     1.0035, `embMin` 0.995, `slope` 1.004, `|v|max` 0.12, 0 spray; **nx=128**
+     bulk ρ 1.013, `embMin` 0.9998, `slope` 1.015, `|v|max` 0.16, **2** spray
+     (was: ρ 0.934, `embMin` 0.14, `slope` 0.020, `|v|max` 2.7, **1695** spray).
+     nx=32 unchanged. The nx=128 numbers are bit-identical with the gauge on
+     and off — it correctly does not fire at a free surface.
+   - **`randomFlowIncompressible --bounded` — the acceptance test — HOLDS
+     under `band2018pb`.** nx=64: KE decays 0.446 → 0.213 monotonically over
+     200 steps, `|v|max` ~1.0 (peak 1.37), ρ ∈ [0.991, 1.017]. nx=128: KE
+     0.322 → 0.302 / 150 steps, `|v|max` 1.0–1.36, ρ ∈ [0.995, 1.018]. This is
+     the case that NaNs `divergenceFree` by step ~21 and detonates `iisph` /
+     `omniIncompressible`. **nx=96 is the exception and it is a case-IC
+     artifact, not the scheme:** its step-0 state is already `KE 9.23` /
+     `|v|max 10.2` against ~0.3 / ~1.0 at nx=64 and nx=128, i.e. the random-flow
+     initial condition is anomalous at that resolution *before any solve runs*;
+     from there the run stays bounded but shows recurring KE injection
+     (0.36 → 35 → 26 → 38). Worth chasing in the case, separately.
+   - **Suite:** two new regression tests
+     (`test_band2018pbColumnStaysQuiescent`, nx=64/200 steps;
+     `test_band2018pbBoundedRandomFlowDecays`, nx=64/120 steps) lock both
+     fixes. `gradcheck_incompressible` green (no `@wp.kernel` touched — the
+     module is still composed from existing primitives).
+   - **Also fixed on the way in:** `literature/band2018pb_…pdf` was
+     **corrupt on disk** — its header read `%PDF-1.7` followed by `EF BF BD`
+     bytes, i.e. the file had been round-tripped through a text decode and
+     every binary stream destroyed (`pdftotext`/`mutool` both extracted 0
+     bytes; all 11 pages rendered blank). Re-fetched from the authors' copy at
+     `cg.informatik.uni-freiburg.de/publications/2018_TOG_pressureBoundaries.pdf`.
+     It is the only corrupt file in `literature/`, and it is gitignored, so
+     nothing was committed. **The equation transcription in this plan was
+     nonetheless correct** — re-checked line by line against the clean text.
+   **Part 51 -- graded across 14 cases by the new
+   `scripts/validate_scheme.py`: 13 pass, `staticBlob` is the one real
+   failure.** PASS includes `hydrostaticColumn` nx=64 (slope 1.002) and nx=128
+   (slope 1.016), `dambreak` (600 steps, `nPenetrating` 0), `columnCollapse`,
+   `impact`, `squarePatch`, all three `randomFlow` variants, `tgv`,
+   `kolmogorov`, `shearWave`, and **`sloshingTank` -- the full 8500 steps / 7 s
+   of SPHERIC TC10, Sensor-1 peak 7.0 kPa, inside the measured 2.2-13 kPa
+   band.** `tgv` passes at nx=64 but *fails* at nx=32, so Part 50's energy
+   injection is a coarse-grid artifact. **`staticBlob` fails for real:** a
+   free-space blob that should sit at `|v| = 0` reaches `|v|max` 1.02 with
+   `dispMax` > 0.1 while `centroidDrift` passes -- local surface distortion,
+   not a spurious net force. That is coherent with the paper, which is a
+   *boundary-pressure* method with no free-surface treatment at all (every
+   scenario in it is a wall-bounded tank): `band2018pb` fixes walls and
+   inherits the free-surface problem, masked on `hydrostaticColumn` by the
+   `p >= 0` clamp + `DIAG_TIKHONOV` and unmasked on a pure free-space body.
+   Also new: `sloshingTank.sensorPressureWall` reads the solved pressure at the
+   wall sample directly (the paper's Sec. 3.3 selling point); it peaks at
+   25.8 kPa, ~3.7x the smoothed fluid probe, so it needs its own calibration
+   before it is a validated figure. Detail + the harness's grading corrections:
+   FINDINGS Sec. 9 row 51.
+   **Next on this sub-thread:** the `staticBlob` free-surface defect is now the
+   clearest open `band2018pb` item. Then point
    `scripts/probe_omniIncompressibleCDSymmetry.py`'s operator builders at the
-   `band2018pb` `A` to see whether a symmetric Krylov (MINRES / CG) now
-   applies on the consistent operator. Then re-grade nx=128 and
-   `randomFlowIncompressible --bounded` vs the `omniIncompressible` `shepard`
-   + `CD_TIKHONOV` Jacobi. Whatever lands here is also the contractive
-   divergence-pass any `iisph`-based general scheme needs (item 4/9).
+   `band2018pb` `A` — with the wall rows consistent *and* the constant mode
+   gauged, a symmetric Krylov (MINRES / CG) may now apply where Part 44 found
+   only divergence. Then grade `dambreak` / `columnCollapse` (free surface +
+   violent impact) under `band2018pb`, which is the regime it has not been
+   tried in. The paper's own levers are still unused and are the cheap wins if
+   iteration count starts to matter: **warm start `λ = 1`** (the paper measures
+   λ=1 as best for Pressure Boundaries, vs 0.5 for IISPH — this port uses 0.5)
+   and the **unfloored all-row volume-error metric** of Eq. 21 (the floored
+   omniSPH metric is what let bug 1 exit at 8 iterations pretending to
+   converge). Whatever lands here is also the contractive divergence-pass any
+   `iisph`-based general scheme needs (item 4/9).
 2. **`randomFlowIncompressible --bounded` under `divergenceFree`** — Immediate
-   A1, **investigated Part 48, no stopgap; xfailed in the suite.** Root-caused
-   to the constant-density `solveIncompressible` in the VD+PS shift — the same
-   near-singular pure-Neumann near-wall operator as item 1, so **this case is a
-   direct acceptance test for whatever lands there.** When `band2018pb` (or the
-   near-wall CD fix) is in: re-run `randomFlowIncompressible --bounded` at
-   nx=48/96/128, and if it holds, promote `test_randomFlowBoundedDoesNotDiverge`
-   from `xfail` to a real assertion. Detail: the case-status row + §9 row 48.
+   A1, **still open; still xfailed.** Part 50 showed `band2018pb` *does* hold
+   this case (nx=64 and nx=128, clean decay), so the acceptance test for item 1
+   is met — but `test_randomFlowBoundedDoesNotDiverge` runs the case's **default
+   scheme**, which is `divergenceFree`, and that path is untouched. The xfail
+   therefore correctly stays. Two ways to close it, and they are different
+   pieces of work: (a) port the Part 50 findings into the VD+PS shift's
+   constant-density `solveIncompressible` — the closed-domain gauge is the
+   likelier of the two to transfer, since the shift solve has the same
+   summation-gradient null mode; or (b) decide `band2018pb` is the wall-bounded
+   scheme and re-point the case's default. Detail: the case-status row + §9
+   rows 48 and 50.
    (The pre-Parts-46/47 "grade `omniIncompressible` vs `divergenceFree`"
    framing is moot — they are the same code; what remains is the shift gate +
    `XSPH_SCALE` dissipation trade, and the closed-box KE budget.)
