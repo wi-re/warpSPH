@@ -15,10 +15,10 @@ no longer carries it inline (cut in the Part 58 cleanup pass; nothing was
 lost, `DFSPH_FINDINGS.md` §1.1–§1.20 and §9 already had it).
 
 **Branch note.** This work is on a branch intended to merge back to main
-after an artifact cleanup pass — see "Pre-merge cleanup" below for the
-concrete list (the omniSPH/SPlisHSPlasH comparison tooling, committed
-videos, dead code, etc.). Nothing in that section has been acted on yet;
-it is a scoped-out TODO, not done.
+after an artifact cleanup pass — see "Pre-merge cleanup" below for what that
+covered (the omniSPH/SPlisHSPlasH comparison tooling, committed videos, dead
+code, `mdbcMlsPressure`, the `dfsph.py` rename). As of 09-04 that section's
+own list is fully closed — nothing scoped there is still outstanding.
 
 **Units note.** `cflFactor` on the incompressible cases multiplies the
 particle **diameter** `dx`. Numbers in git history before commit `9a9bfe7`
@@ -182,17 +182,30 @@ to main cleanly.
   ~28MB) — regenerable by their `make_video_*.py` scripts, which still exist.
   Stops further growth; does not shrink existing git history (would need a
   rewrite, not done and not proposed).
-- **7 of the 59 `scripts/probe_*.py` scripts removed** — specifically the
-  ones mentioned *nowhere* in `DFSPH_FINDINGS.md` or this file (checked, not
-  assumed: `probe_band2018pbNearWall.py`, `probe_dambreakSurfaceGauge.py`,
-  `probe_dfsphFactorCheck.py`, `probe_dfsphReferenceStaticBlob.py`,
+- **`scripts/probe_*.py` review — DONE, by the only bar that's actually
+  checkable rather than a judgment call.** 8 of the original 59 removed
+  across two passes, all confirmed cited *nowhere*: 7 DFSPH-track scripts on
+  the first pass (`probe_band2018pbNearWall.py`,
+  `probe_dambreakSurfaceGauge.py`, `probe_dfsphFactorCheck.py`,
+  `probe_dfsphReferenceStaticBlob.py`,
   `probe_hydrostaticColumnDfsphSurfaceSource.py`,
-  `probe_hydrostaticColumnDfsphTune.py`, `probe_hydrostaticColumnDfsphXsph.py`
-  — several are superseded early iterations of a sibling script that *is*
-  referenced, e.g. `probe_hydrostaticColumnDfsphSurface.py`). **The other 52
-  are untouched** — each is cited by at least one part of the narrative or
-  finding, so removing any of them needs the same per-file check, not a
-  blanket pass. Worth finishing, not urgent.
+  `probe_hydrostaticColumnDfsphTune.py`,
+  `probe_hydrostaticColumnDfsphXsph.py` — several superseded early
+  iterations of a sibling script that *is* cited, e.g.
+  `probe_hydrostaticColumnDfsphSurface.py`) plus
+  `probe_mdbcMlsPressureInstability.py` on the `mdbcMlsPressure` removal
+  pass, since its whole purpose was probing the function that pass deleted.
+  **The remaining 51 are all cited by at least one `.md` file somewhere in
+  the repo** (checked repo-wide, not just the two DFSPH docs — six of them
+  turned out to belong to `WCSPH_SHIFTING_PLAN.md`, a different, apparently
+  still-active track, not DFSPH scratch work at all). Zero-references-
+  anywhere was always the actual removal bar this session used, precisely
+  because it needs no judgment call about whether a *cited* script's finding
+  is "fully superseded" — that reopens editorial questions (is the citing
+  doc itself current, would removing the tool make the citation
+  unverifiable) this pass isn't positioned to answer for tracks it isn't
+  working on. Nothing further to do here under this bar; going further would
+  mean picking a new, more subjective one.
 - **`modules/incompressible/incompressible.py`'s `solveIncompressible`
   cleaned up**: removed the ~150 lines of commented-out dead code left from
   the `c637785` rewrite (the `ShiftPressureGauge`/`minShift` gauge-selection
@@ -225,8 +238,9 @@ to main cleanly.
   regression test "xfailed") corrected during the Part 56 session; already
   landed, noted here for completeness.
 
-**Still open:**
-- **The remaining 52 `scripts/probe_*.py` scripts** — see "Done" above.
+**Still open: nothing.** Every item this section originally listed —
+`mdbcMlsPressure`, the probe-script review, and the `dfsph.py` naming pass —
+closed the same day; see below for each.
 
 **Done, 09-04 (later the same day):**
 - **`schemes/dfsph.py` renamed to `schemes/divergenceFree.py`,
