@@ -554,18 +554,20 @@ def test_band2018pbBoundedRandomFlowDecays(bandBoundedResult):
     assert 0.97 < last['minDensity'] <= last['maxDensity'] < 1.03
 
 
-@pytest.mark.xfail(reason='randomFlowIncompressible --bounded diverges under the '
-                          'post-c637785 divergenceFree scheme at every resolution '
-                          '(density excursion at the wall -> velocity detonation); '
-                          'root cause is the near-singular pure-Neumann near-wall '
-                          'constant-density solve in the VD+PS shift -- the plan\'s '
-                          'Active track / band2018pb. DFSPH_IMPROVEMENT_PLAN.md '
-                          '"Immediate A1", Part 48.',
-                   strict=True)
 def test_randomFlowBoundedDoesNotDiverge(randomFlowBoundedResult):
-    """XFAIL until the near-wall CD solve is fixed. Flips to XPASS (a suite
-    failure) the moment the bounded case starts holding -- that is the signal
-    to promote it back to a real assertion.
+    """Was XFAIL('density excursion at the wall -> velocity detonation';
+    DFSPH_IMPROVEMENT_PLAN.md "Immediate A1", Part 48) -- promoted per its own
+    instruction the moment it started holding (XPASS(strict), reproducible
+    across repeat runs with this case's fixed seed).
+
+    Root cause was not the near-wall CD solve the xfail blamed: it was
+    `sample/regular.py` assigning particle mass from the nominal pre-snap grid
+    spacing while placing particles at the achieved, per-axis post-snap one
+    (LATTICE_DENSITY_PLAN.md) -- a uniform mass/cell mismatch that reads as
+    density noise everywhere, and is worst exactly at a wall, where every
+    particle is already asymmetrically supported. This case never calls
+    `calibrateRestDensity`, so the fix is the sampler change alone, not the
+    kernel-side lattice-normalisation calibration landing alongside it.
     """
     assert not randomFlowBoundedResult.diverged
     kinetic = randomFlowBoundedResult.series('kineticEnergy')

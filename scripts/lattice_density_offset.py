@@ -38,14 +38,12 @@ TWO legitimate fixes, and one that is NOT:
     python scripts/lattice_density_offset.py --solve-h --tol 1e-3
     python scripts/lattice_density_offset.py --validate sloshingTank
 
-Method (the `n_h`-box direct sum). Put a particle at the origin of an infinite
-lattice of spacing `s`. Every neighbour within the support lies in the box
-`|k_i| <= ceil(h/s)`, so summing over that box is exact, not an approximation:
-
-    L = sum_{k in Z^d, |k| <= ceil(h/s)}  s^d * W(|k| s, h)     (k = 0 included)
-
-`W` is the repo's own kernel, transcribed from
-`warpSPHCore/kernels/kernelFunctions/` (verified against a live run below).
+Method. `warpSPHCore.util.latticeDensity` -- see its module docstring. It
+evaluates the repo's OWN kernel (`eval_k`/`eval_C_d`), so there is no
+transcription here to drift out of sync, and it offers three routes: the exact
+shell sum (default), the Poisson/reciprocal-space identity, and a sum-free
+closed form for the Wendland family. `--method` picks between them; they agree
+to 1e-6 or better and `shells` is exact to machine precision.
 
 How omniSPH handles this (checked in `~/dev/omniSPH`, same Wendland2 kernel:
 `7/pi/h^2 (1-q)^4 (1+4q)`, `simulation/2DMath.h:68`). It does address it, and by
@@ -97,44 +95,21 @@ import math
 
 import numpy as np
 
-#: Kernel `k(q)` and normalisation `C_d`, from
-#: `warpSPHCore/src/warpSPHCore/kernels/kernelFunctions/`. `W = C_d / h^d k(q)`,
-#: `q = r/h`, support `q <= 1`.
-KERNELS = {
-    'Wendland2': (
-        lambda q, d: (1 - q) ** 3 * (1 + 3 * q) if d == 1
-        else (1 - q) ** 4 * (1 + 4 * q),
-        lambda d: 5 / 4 if d == 1 else (7 / math.pi if d == 2 else 21 / (2 * math.pi)),
-    ),
-    'Wendland4': (
-        lambda q, d: (1 - q) ** 5 * (1 + 5 * q + 8 * q ** 2) if d == 1
-        else (1 - q) ** 6 * (1 + 6 * q + 35 / 3 * q ** 2),
-        lambda d: 3 / 2 if d == 1 else (9 / math.pi if d == 2 else 495 / (32 * math.pi)),
-    ),
-    'CubicSpline': (
-        lambda q, d: (1 - 6 * q ** 2 + 6 * q ** 3) if q <= 0.5 else 2 * (1 - q) ** 3,
-        lambda d: 4 / 3 if d == 1 else (40 / (7 * math.pi) if d == 2 else 8 / math.pi),
-    ),
-}
+from warpSPHCore.enumTypes import KernelFunctions
+from warpSPHCore.util import latticeDensity as _latticeDensity
+
+#: Every kernel the core evaluator knows about, by name.
+KERNELS = tuple(k.name for k in KernelFunctions)
 
 
-def latticeDensity(hOverS: float, dim: int = 2, kernel: str = 'Wendland2') -> float:
+def latticeDensity(hOverS: float, dim: int = 2, kernel: str = 'Wendland2',
+                   method: str = 'shells') -> float:
     """`L` -- the summation density of a unit-rest-density perfect lattice.
 
-    Exact for the infinite lattice: every point with `W != 0` satisfies
-    `|k_i| <= ceil(h/s)`, so the finite box below misses nothing.
+    Thin alias for `warpSPHCore.util.latticeDensity`, kept so this script reads
+    the same as it did when it carried its own transcribed kernel table.
     """
-    kfn, cfn = KERNELS[kernel]
-    C = cfn(dim)
-    reach = int(math.ceil(hOverS))
-    rng = range(-reach, reach + 1)
-    total = 0.0
-    for k in itertools.product(rng, repeat=dim):
-        q = math.sqrt(sum(ki * ki for ki in k)) / hOverS      # r/h, r = |k| s
-        if q < 1.0:
-            total += kfn(q, dim)
-    # m * W summed = (rho0 s^d) * (C / h^d) * sum k(q) = rho0 * C * sum / (h/s)^d
-    return C * total / hOverS ** dim
+    return _latticeDensity(KernelFunctions[kernel], hOverS, dim, method)
 
 
 def solveH(args) -> None:
@@ -155,13 +130,13 @@ def solveH(args) -> None:
     for tol in args.tol:
         hit = None
         for hs in grid:
-            if abs(latticeDensity(hs, args.dim, args.kernel) - 1.0) <= tol:
+            if abs(latticeDensity(hs, args.dim, args.kernel, args.method) - 1.0) <= tol:
                 hit = hs
                 break
         if hit is None:
             print(f'{tol:14.0e} {"unreachable":>12} {"-":>12} {"-":>11} {"-":>14}')
             continue
-        L = latticeDensity(hit, args.dim, args.kernel)
+        L = latticeDensity(hit, args.dim, args.kernel, args.method)
         n = _neighbourCount(hit, args.dim)
         if base is None:
             base = _neighbourCount(4.0, args.dim)
@@ -176,7 +151,7 @@ def _neighbourCount(hs: float, dim: int) -> int:
 
 def massCorrection(args) -> None:
     hs = args.hs or 4.0
-    L = latticeDensity(hs, args.dim, args.kernel)
+    L = latticeDensity(hs, args.dim, args.kernel, args.method)
     print(f'kernel={args.kernel} dim={args.dim} h/s={hs}')
     print(f'  ideal-lattice density   rho/rho0 = L = {L:.8f}')
     print(f'  mass correction factor      1/L  = {1.0 / L:.8f}')
@@ -192,9 +167,8 @@ def sweep(args) -> None:
     ratios = ([args.hs] if args.hs else
               [r / 100 for r in range(int(args.lo * 100), int(args.hi * 100) + 1,
                                       int(args.step * 100))])
-    kfn, _ = KERNELS[args.kernel]
     for hs in ratios:
-        L = latticeDensity(hs, args.dim, args.kernel)
+        L = latticeDensity(hs, args.dim, args.kernel, args.method)
         reach = int(math.ceil(hs))
         n = sum(1 for k in itertools.product(range(-reach, reach + 1), repeat=args.dim)
                 if 0 < math.sqrt(sum(i * i for i in k)) / hs < 1.0)
@@ -259,7 +233,7 @@ def validate(args) -> None:
         rows = [x for x in r.trajectory if x.get('step', -1) >= 0]
         measured = rows[0].get('densityMedian')
         d, s, h = cap['dim'], cap['s'], cap['h']
-        L = latticeDensity(h / s, d, args.kernel)
+        L = latticeDensity(h / s, d, args.kernel, args.method)
         massRatio = cap['m'] / (cap['rho0'] * cap['cell'])
         predicted = massRatio * L
         err = (predicted - measured) / measured if measured else float('nan')
@@ -273,6 +247,9 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--kernel', default='Wendland2', choices=sorted(KERNELS))
     ap.add_argument('--dim', type=int, default=2)
+    ap.add_argument('--method', default='shells',
+                    choices=['shells', 'fourier', 'closed'],
+                    help='exact shell sum / Poisson identity / sum-free closed form')
     ap.add_argument('--hs', type=float, default=None, help='a single h/s ratio')
     ap.add_argument('--lo', type=float, default=1.5)
     ap.add_argument('--hi', type=float, default=5.0)
