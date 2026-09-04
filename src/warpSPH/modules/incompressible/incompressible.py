@@ -205,9 +205,9 @@ def _solveIncompressibleImpl(
 
         # kind==1 (boundary) and kind==2 (ghost) particles are not pressure unknowns:
         # their pressure is held fixed at its incoming `particles.pressures` value
-        # (0 under `plain`, the mDBC-extrapolated/-projected value otherwise -- see
-        # `BoundaryPressureMode`'s docstring and `divergenceFree.py`'s copy of this
-        # comment for why freezing at the incoming value, not literal 0, matters),
+        # (0 under `plain`/`mdbcDensity` -- see `BoundaryPressureMode`'s docstring
+        # and `divergenceFree.py`'s copy of this comment for why freezing at the
+        # incoming value, not literal 0, matters),
         # excluded from the gauge statistic (under the default gauge there is
         # none to exclude them from -- it is a non-negativity clamp, not a
         # mean-center; under `minShift` the minimum is taken over fluid rows

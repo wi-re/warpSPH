@@ -50,7 +50,7 @@ args.add_argument('--shiftApplication', default=None,
 args.add_argument('--forceGauge', action='store_true',
                  help='set solverConfig.forceShiftPressureGauge=True (keep minShift on the free surface)')
 args.add_argument('--boundaryPressureMode', default=None,
-                 help='override solverConfig.boundaryPressureMode (plain/mdbcDensity/mdbcMlsPressure/consistent)')
+                 help='override solverConfig.boundaryPressureMode (plain/mdbcDensity/consistent)')
 args = args.parse_args()
 
 VERBOSE_DF = args.verboseDF

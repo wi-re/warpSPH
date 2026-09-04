@@ -57,9 +57,10 @@ Modes:
                `modules/mdbc/velocity.py`'s docstring on the same gap for the
                velocity mirror's dead `2*u_wall` term).
 
-Unlike `computeMdbcPressure` there is NO relaxation and NO cross-step carried
-state, so this is not the `mdbcMlsPressure` boundary-pressure feedback
-instability (DFSPH_FINDINGS.md Sec. 3.1 / probe_mdbcMlsPressureInstability.py):
+Unlike the removed `BoundaryPressureMode.mdbcMlsPressure` (its
+`computeMdbcPressure`, pre-merge cleanup pass 09-04) there is NO relaxation
+and NO cross-step carried state, so this does not have that mode's
+boundary-pressure feedback instability (DFSPH_FINDINGS.md Sec. 3.1):
 `p_b` is a fresh function of the current iterate, exactly as omniSPH's is.
 """
 

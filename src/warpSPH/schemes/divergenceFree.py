@@ -40,7 +40,6 @@ from warpSPH.modules.gravity import computeGravity
 from warpSPH.modules.incompressible import solveDivergenceFree, solveIncompressible
 from warpSPH.modules.mdbc import (
     computeBoundaryVelocities, computeMdbcDensity, computeMdbcNoPenShift,
-    computeMdbcPressure,
 )
 from warpSPH.configurations import BoundaryPressureMode, ShiftApplication, DensityEvolution, resolveDensityEvolution
 from warpSPH.modules.momentum import computeMomentum
@@ -364,14 +363,6 @@ def divergenceFree_step(
     _pDiv = pDiv if pDiv is not None else _zeros
     currentState.pressures = torch.where(fluid, _pRho, torch.zeros_like(_pRho))
     currentState.soundspeeds = torch.where(fluid, _pDiv, torch.zeros_like(_pDiv))
-    # print(f'step {currentSystem.t:.6g}: pressure stats: mean={pressure.mean().item():.6g}, min={pressure.min().item():.6g}, max={pressure.max().item():.6g}')
-    # currentState.pressures = pressure
-    # if boundaryPressureMode == BoundaryPressureMode.mdbcMlsPressure:
-        # Project this step's fluid pressure solution onto boundary
-        # particles (Part 2 Option c) -- see `computeMdbcPressure`'s own
-        # docstring for why this runs after, not inside, the solve above.
-        # with record_function("[warpSPH] - [deltaSPH - 03b] - compute mDBC pressure"):
-            # currentState.pressures = computeMdbcPressure(currentState, config, schemeConfig, adjacency)
 
     # `ShiftApplication.inStepVelocity`: run the constant-density solve here,
     # inside the step, and fold its correction into the same `dvdt` the

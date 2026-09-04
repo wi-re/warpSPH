@@ -72,12 +72,6 @@ class BoundaryPressureMode(Enum):
     - `mdbcDensity`: boundary density is mDBC-extrapolated
       (`computeMdbcDensity`, Liu-Liu MLS from fluid neighbors); boundary
       pressure is still held at 0 (no pressure extrapolation).
-    - `mdbcMlsPressure`: same density extrapolation as `mdbcDensity`, plus
-      the fluid pressure field is itself Liu-Liu MLS-projected onto
-      boundary particles after each `solveDivergenceFree` call
-      (`computeMdbcPressure`), so boundary particles carry a physically
-      consistent pressure for the *next* step's force computation on fluid
-      neighbors, rather than an artificial zero-pressure wall.
     - `consistent`: Bender, Westhofen & Jeske 2023, "Consistent SPH
       Rigid-Fluid Coupling". Their constraint-based derivation of DFSPH
       defines the density constraint for *fluid* particles only, so a static
@@ -94,10 +88,19 @@ class BoundaryPressureMode(Enum):
       density extrapolation still runs and is still used everywhere outside
       the pressure solve. See `modules/incompressible/consistent.py` and
       `DFSPH_IMPROVEMENT_PLAN.md` Part 11.
+
+    (`mdbcMlsPressure = 2`, removed in the pre-merge cleanup pass, 09-04: a
+    once-per-step, under-relaxed MLS extrapolation of boundary pressure with
+    the same intent as `mdbcMlsPressure` above -- but with a one-step lag
+    that closed a feedback loop with the fluid solve, needing damping to
+    avoid NaNing in single-digit steps. Its actual call site had been dead
+    code since before this session; `wallPressureExtrapolation`
+    (`modules/incompressible/wallPressure.py`) supersedes it properly -- no
+    lag, recomputed every Jacobi iterate, no feedback loop to damp. See
+    `DFSPH_IMPROVEMENT_PLAN.md`'s "What's deprecated about mdbcMlsPressure".)
     """
     plain = 0
     mdbcDensity = 1
-    mdbcMlsPressure = 2
     consistent = 3
 
 
@@ -506,8 +509,7 @@ class IncompressibleSolverConfig:
     divergenceFreeSolver: RelaxedJacobiSolverConfig = field(default_factory=buildDefaultDFConfig, metadata={"description": "Configuration for the divergence-free solver"})
     integrateRho: bool = field(default=False, metadata={"description": "Legacy alias for densityEvolution=continuity, kept for config round-tripping. It used to mean 'skip the summation at the top of the step', which was inert because finalize re-summed unconditionally (DFSPH_IMPROVEMENT_PLAN.md Part 3). resolveDensityEvolution maps True to DensityEvolution.continuity; set densityEvolution directly instead."})
     densityEvolution: DensityEvolution = field(default=DensityEvolution.summation, metadata={"description": "Where each step's density comes from: summation (the default and byte-identical history -- a fresh SPH summation at the top of every step and again in finalize), continuity (the WCSPH standard: integrate drho/dt = -rho div v and never re-sum), or hybrid (carry the integrated density through the step, but give the constant-density/shifting solve a fresh summation density that is not carried forward -- the shift repairs particle-distribution drift, which the continuity equation is blind to by construction). See DensityEvolution's docstring and DFSPH_IMPROVEMENT_PLAN.md Part 10."})
-    boundaryPressureMode: BoundaryPressureMode = field(default=BoundaryPressureMode.mdbcDensity, metadata={"description": "How kind==1 boundary particles are handled by the pressure solvers: plain (no mDBC), mdbcDensity (mDBC density extrapolation only, matching this scheme's historical always-on behavior), or mdbcMlsPressure (mDBC density + MLS-projected boundary pressure)"})
-    mdbcPressureRelaxation: float = field(default=0.3, metadata={"description": "Under-relaxation for BoundaryPressureMode.mdbcMlsPressure's boundary pressure update (new = old + factor*(projected - old), matching the divergence-free solver's own default relaxationFactor). Ignored by plain/mdbcDensity. The one-step-lagged MLS projection closes a positive feedback loop with the fluid pressure solve (a larger boundary pressure drives a larger nearby fluid pressure gradient, which projects to an even larger boundary pressure next step); without damping this diverges within single-digit steps even on a well-sampled boundary (see DFSPH_IMPROVEMENT_PLAN.md's mdbcMlsPressure instability finding)."})
+    boundaryPressureMode: BoundaryPressureMode = field(default=BoundaryPressureMode.mdbcDensity, metadata={"description": "How kind==1 boundary particles are handled by the pressure solvers: plain (no mDBC), mdbcDensity (mDBC density extrapolation only, matching this scheme's historical always-on behavior), or consistent (Bender/Westhofen/Jeske 2023)."})
     shiftApplication: ShiftApplication = field(default=ShiftApplication.positionShift, metadata={"description": "How finalize applies solveIncompressible's constant-density solution: positionShift (the default; a one-shot position displacement, this scheme's historical behavior) or positionAndVelocity (additionally apply it as a velocity correction, as DFSPH proper does). The latter is what makes the wall-bounded case stable -- it reaches t=8.0 at the default CFL instead of NaN-ing at t=5.54, with 9x lower near-wall density error -- but it is dissipative: it drives tgv's kinetic-energy decay to 1.93x the analytic rate. Opt-in for that reason. See ShiftApplication's docstring and DFSPH_IMPROVEMENT_PLAN.md Part 5."})
     shiftPressureGauge: ShiftPressureGauge = field(default=ShiftPressureGauge.minShift, metadata={"description": "How solveIncompressible (the implicit particle-shifting solve) pins the constant null-space component of its pressure field: minShift (the default; subtract the fluid minimum -- non-negative and gauge-fixed) or nonNegativeClamp (the historical clamp(p, min=0); a floor, not a gauge, so the constant mode drifts up without bound and NaNs kolmogorovIncompressible at nx=128/step 574). Only differs on solves where the constant mode is genuinely free -- see ShiftPressureGauge's docstring and DFSPH_IMPROVEMENT_PLAN.md Part 4."})
     forceShiftPressureGauge: bool = field(default=False, metadata={"description": "Bypass solveIncompressible's remaining guard, which downgrades ShiftPressureGauge.minShift to nonNegativeClamp on any solve that has free-surface particles. Experiment hook only (default False = shipped behaviour). The guard used to fire on pinned pressure rows too, i.e. on every wall-bounded case, and this flag existed to re-run the A/B that had rejected minShift there; that A/B was measured at 3x the published CFL, the re-run reversed it, and Part 13's factorial and Part 14's landing made minShift-on-bounded the default, so the pinned-row half of the guard is gone. What is left is the free-surface half, which is the case where kernel support genuinely is truncated and a constant pressure genuinely is not forceless -- untested, and off by default."})

@@ -96,11 +96,11 @@ def _solveDivergenceFreeOptimal(
 
         # kind==1 (boundary) and kind==2 (ghost) particles are not pressure unknowns:
         # their pressure is held fixed at its incoming `particles.pressures` value
-        # (0 under `plain`, the mDBC-extrapolated/-projected value otherwise -- see
-        # `BoundaryPressureMode`'s docstring) for the duration of the solve, excluded
+        # (0 under `plain`/`mdbcDensity` -- see `BoundaryPressureMode`'s docstring)
+        # for the duration of the solve, excluded
         # from the gauge mean, and their `a_p` is zeroed post-solve. Freezing at the
-        # incoming value (not literal 0) matters for `mdbcMlsPressure`: that fixed
-        # value is exactly what lets boundary particles source a pressure force onto
+        # incoming value (not literal 0) is what lets boundary particles source a
+        # pressure force onto
         # fluid neighbors through the ordinary SPH neighbor sum inside
         # `computePressureAccelIISPH`/`computePressureShiftIISPH` below -- no separate
         # RHS correction needed, since those sums already run over all neighbors
