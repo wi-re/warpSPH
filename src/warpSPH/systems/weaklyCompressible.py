@@ -1,5 +1,5 @@
 """State/update/system triad for the weakly-compressible delta-SPH schemes
-(`schemes/deltaSPH.py`, `schemes/dfsph.py`'s WCSPH path): density is
+(`schemes/deltaSPH.py`, `schemes/divergenceFree.py`'s WCSPH path): density is
 integrated via `drhodt`, with free-surface fields (`surfaceIndicators`/
 `surfaceNormals`/`surfaceLambdas`) and the boundary-ghost bookkeeping
 (`ghostIndices`/`ghostOffsets`) that mDBC and `rigidBody/` read and write.

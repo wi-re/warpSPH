@@ -1,5 +1,5 @@
 """`IncompressibleSPHConfig`, the scheme config for the DFSPH divergence-free
-incompressible solver (`schemes/dfsph.py`, `modules/incompressible/{incompressible,
+incompressible solver (`schemes/divergenceFree.py`, `modules/incompressible/{incompressible,
 divergenceFree}.py`), registered in the incompressible `SchemeBundle` in
 `schemes/builder.py`. Bundles fluid properties, adaptive support, diffusion,
 viscosity switch, boundary conditions, delta-SPH shifting, `regions`/

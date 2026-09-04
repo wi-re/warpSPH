@@ -153,7 +153,7 @@ def configureScheme(ctx: RunContext) -> None:
     schemeConfig.diffusionParams.inviscid = False
     schemeConfig.diffusionParams.viscidNu = ctx.param('nu')
     schemeConfig.shiftProperties.active = ctx.param('shifting', False)
-    # Post-solve fluid XSPH velocity smoother in `dfsph_step`, in units of
+    # Post-solve fluid XSPH velocity smoother in `divergenceFree_step`, in units of
     # omniSPH's own `XSPH_FLUID = 0.05` (DFSPH_FINDINGS.md 1.16). The residual
     # `|v|` this case shows under `divergenceFree` is a bounded, undamped
     # free-surface limit cycle; this otherwise-inviscid scheme has no other

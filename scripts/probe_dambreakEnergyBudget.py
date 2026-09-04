@@ -54,7 +54,7 @@ control of Part 19 carries the same viscosity, so the cross-scheme gap is the
 part this probe does not explain by itself.
 
 The probe monkey-patches the per-step force functions in
-`warpSPH.schemes.dfsph`, the `solveIncompressible` binding in
+`warpSPH.schemes.divergenceFree`, the `solveIncompressible` binding in
 `warpSPH.systems.incompressible`, and wraps `IncompressibleSystem.finalize`;
 the scheme runs untouched and every patch is restored on exit.
 
@@ -90,7 +90,7 @@ import torch
 from warpSPH.runner.cli import caseMain
 from warpSPH.cases.dambreak import dambreakCase as case
 
-import warpSPH.schemes.dfsph as dfsph_mod
+import warpSPH.schemes.divergenceFree as dfsph_mod
 import warpSPH.systems.incompressible as sysmod
 
 # ------------------------------------------------------------------
@@ -137,7 +137,7 @@ _wrap('computeVelocityDiffusion', 'visc')
 def _solveDF(*a, **kw):
     out = _origs['solveDF'](*a, **kw)
     # `particles.positions` is still the step-start x here: the integrator
-    # updates a different state, and nothing in `dfsph_step` touches positions.
+    # updates a different state, and nothing in `divergenceFree_step` touches positions.
     captured['x_n'] = kw['particles'].positions
     captured['a_DF'] = out[0]
     return out

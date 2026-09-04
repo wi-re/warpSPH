@@ -55,8 +55,8 @@ def relaxLattice(ctx, system, steps: int, dt: float, jitter: float) -> None:
     from ..modules import computeDensities, shuffleParticles, solveIncompressible
 
     state = system.initializeNewState()
-    # `dfsph_step` allocates the pressure array on the first step it runs
-    # (see `schemes/dfsph.py`); a region-built system has not stepped yet, so
+    # `divergenceFree_step` allocates the pressure array on the first step it runs
+    # (see `schemes/divergenceFree.py`); a region-built system has not stepped yet, so
     # give its scratch state one the same way, otherwise the `pressures[:] = 0.0`
     # below has nothing to write into.
     if state.state.pressures is None:

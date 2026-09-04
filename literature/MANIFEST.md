@@ -57,14 +57,17 @@ and had to be identified from their front matter alone.
 
 ## What is here
 
-116 documents. The first 38 are the curated core — every row abstracted in
-`ABSTRACTS.md` and annotated for what it unblocks. The remaining 78, listed
+116 documents. The first 39 are the curated core — every row abstracted in
+`ABSTRACTS.md` and annotated for what it unblocks. The remaining 77, listed
 under **Extended set** below, arrived together on 2026-08-29 and were synced by
 bibliographic record only: `references.bib` has an entry for each, but they are
 not abstracted, not annotated for relevance, and three scanned arrivals with no
 text layer were parked in `literature/scans/` rather than indexed here.
 
-(`sun2019` and `sun2017` were added to the core on 2026-09-03 for
+(`dehnen2012` was promoted from the extended set to the core on 2026-09-04,
+supplied by the user for the kernel-choice question behind the
+`columnCollapse` Wendland2-vs-Wendland4 experiment. `sun2019` and `sun2017`
+were added to the core on 2026-09-03 for
 `WCSPH_SHIFTING_PLAN.md`.)
 
 `venue` is the **published** venue, which for an author's-version or preprint
@@ -81,6 +84,12 @@ detail is in `references.bib`; the abstract of every core row is in
 | `[I]` | `ihmsen2014` | `ihmsen2014_implicit-incompressible-sph.pdf` | IEEE TVCG 20(3) 2014 | IISPH -- the solver the Jacobi loop discretises. |
 | `[B]` | `band2018` | `band2018_mls-pressure-boundaries.pdf` | Computers & Graphics 76 2018 | MLS pressure boundaries. |
 | `[BWJ23]` | `bender2023` | `bender2023_consistent-rigid-fluid-coupling.pdf` | VMV 2023 | The derivation behind `staticBoundary`. |
+
+**Kernel choice & the pairing instability**
+
+| plan | bib key | file | venue | what it is |
+|---|---|---|---|---|
+| — | `dehnen2012` | `dehnen2012_convergence-without-pairing-instability.pdf` | MNRAS 425(2) 2012 | The Wendland-kernel-for-SPH origin paper: linear stability analysis of why Wendland kernels avoid the pairing instability at any `N_H`, where truncated B-splines do not. Why this codebase runs Wendland2 at `n_h = 4`. |
 
 **Boundary handling and fluid-rigid coupling**
 
@@ -147,7 +156,6 @@ Background and related work one step removed from the core, added 2026-08-29. **
 | `monaghan2005` | `monaghan2005_smoothed-particle-hydrodynamics-review.pdf` | Reports on Progress in Physics 68(8), 2005 | Smoothed Particle Hydrodynamics |
 | `monaghan2002` | `monaghan2002_sph-compressible-turbulence.pdf` | Monthly Notices of the Royal Astronomical Society 335(3), 2002 | SPH Compressible Turbulence |
 | `monaghan1989` | `monaghan1989_on-the-problem-of-penetration.pdf` | Journal of Computational Physics 82(1), 1989 | On the Problem of Penetration in Particle Methods |
-| `dehnen2012` | `dehnen2012_convergence-without-pairing-instability.pdf` | Monthly Notices of the Royal Astronomical Society 425(2), 2012 | Improving Convergence in Smoothed Particle Hydrodynamics Simulations Without Pairing Instability |
 | `price2010` | `price2010_spmhd-vector-potential.pdf` | Monthly Notices of the Royal Astronomical Society 401(3), 2010 | Smoothed Particle Magnetohydrodynamics – IV. Using the Vector Potential |
 | `price2012` | `price2012_sph-and-magnetohydrodynamics.pdf` | Journal of Computational Physics 231(3), 2012 | Smoothed Particle Hydrodynamics and Magnetohydrodynamics |
 | `koschier2022` | `koschier2022_survey-sph-methods-computer-graphics.pdf` | Computer Graphics Forum 41(2), 2022 | A Survey on SPH Methods in Computer Graphics |

@@ -14,7 +14,7 @@ holds, and see which one breaks it:
                      free surface, no walls).
 
 Each run twice: baseline (as shipped) vs PS-restore (`_RESTORE_PS_SHIFT` +
-`dfsph.INSTEP_CD = False`).
+`divergenceFree.INSTEP_CD = False`).
 
     python scripts/probe_dfsphAblation.py [nsteps]
 """
@@ -27,7 +27,7 @@ import warpSPH.systems.incompressible as I
 from warpSPH.cases import drivenSquare, randomFlowIncompressible
 from warpSPH.configurations.moduleConfigurations.gravity import GravityType
 from warpSPH.runner import run
-from warpSPH.schemes import dfsph as D
+from warpSPH.schemes import divergenceFree as D
 
 NS = int(sys.argv[1]) if len(sys.argv) > 1 else 300
 GRAV = (9.81, 1.0)  # (magnitude-scale, period) for the oscillating body force

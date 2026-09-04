@@ -8,7 +8,7 @@ Two renders of `tgv --scheme divergenceFree`, nx=64, fixed dt=1e-3:
                   lattice re-snaps in the first ~15 steps and the fluid KE
                   grows ~6-8% before it turns over.
   * ps-restore -- `IncompressibleSystem._RESTORE_PS_SHIFT = True` +
-                  `dfsph.INSTEP_CD = False`: the true pre-tmp VD+PS
+                  `divergenceFree.INSTEP_CD = False`: the true pre-tmp VD+PS
                   (divergence projection in-step, constant density only as the
                   finalize position shift). KE x1.000, monotone, no snap.
 
@@ -26,7 +26,7 @@ import numpy as np
 import warpSPH.systems.incompressible as I
 from warpSPH.cases import hydrostaticColumn, tgv
 from warpSPH.runner import run
-from warpSPH.schemes import dfsph as D
+from warpSPH.schemes import divergenceFree as D
 
 OUT = "/home/lu26029/dev/warpSPH/scripts/videos/dfsph_ps_compare"
 os.makedirs(OUT, exist_ok=True)

@@ -17,7 +17,7 @@ Two claims, one physical statement (`BoundaryOperatorTerms`):
     does not have. SPlisHSPlasH's `TimeStepIISPH::pressureSolveIteration`
     boundary loop keeps only `i`'s displacement (`sum += V_j * dij_pj_i.gradW`).
 
-`schemes/dfsph.py` zeroes `dxdt`/`dvdt` for every `kind != 0` row, so both
+`schemes/divergenceFree.py` zeroes `dxdt`/`dvdt` for every `kind != 0` row, so both
 apply here. Two modes:
 
   --mode diag  (cheap, one warmed-up state)
@@ -210,7 +210,7 @@ def scopeToOneSolver():
     call, so a run isolates one of the step's two solves. Both solvers read the
     setting off `schemeConfig` when they are called, so wrapping the call is
     enough -- no second config field needed."""
-    import warpSPH.schemes.dfsph as dfsphmod
+    import warpSPH.schemes.divergenceFree as dfsphmod
 
     if args.solvers == 'divergenceFree':
         target, holder, attr = sysmod.solveIncompressible, sysmod, 'solveIncompressible'
@@ -317,7 +317,7 @@ def runDFTrace():
     `--mode spectrum` already rules the first one out on paper; this checks it
     on the running case and measures the second.
     """
-    import warpSPH.schemes.dfsph as dfsphmod
+    import warpSPH.schemes.divergenceFree as dfsphmod
 
     for label, mode in (('full', BoundaryOperatorTerms.full),
                         ('staticBoundary (DF only)', BoundaryOperatorTerms.staticBoundary)):

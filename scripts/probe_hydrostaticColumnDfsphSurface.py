@@ -1,5 +1,5 @@
 """Spatial anatomy of the near-surface error on `hydrostaticColumn --scheme
-divergenceFree` (the DFSPH `dfsph_step` path).
+divergenceFree` (the DFSPH `divergenceFree_step` path).
 
 The scalar FOMs say the column body is essentially perfect
 (`embeddedMinDensity` ~1.000) while `densityP05` ~0.94 and `minDensity`
