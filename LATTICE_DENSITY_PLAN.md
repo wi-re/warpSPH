@@ -343,3 +343,27 @@ wholesale:
   route would miss every operator that bypasses the volume path, and §3.2 makes
   the kernel route a one-line change per entry point rather than the 13-site
   edit that made `useVolume` look attractive.
+
+## 7. Left to do
+
+* **No test exercises the residual-check raise path.** `calibrateRestDensity`'s
+  `onResidual='raise'` was verified NOT to false-positive on every healthy run
+  in this session (`sloshingTank` at several `nx`), but nothing deliberately
+  corrupts an IC (mismatched mass, an overlapping region) and checks it
+  actually raises. That is the entire point of the redesign in §4 and it is
+  currently unverified by anything except manual inspection of the code.
+* **§3.9's "one operator" decision is now easier to make, not harder.** With
+  `massRatio` fixed at the sampler (this file's own supersession, §4), the
+  kernel term left uncorrected on gradient/divergence/laplacian/curl/
+  interpolate is `latticeFactor` alone — ≤0.04% on `sloshingTank`. Revisit
+  whether wiring the other 131 `OperationProperties(...)` call sites is worth
+  it at all, now that the number it would remove is this small; if the answer
+  stays yes for some case, build the `propsFromConfig` helper §3.9 already
+  flags rather than editing them by hand.
+* **The sampler fix is unverified outside the cases this session actually ran.**
+  `kelvinHelmholtz`, `rayleighTaylor`, `kidder`, `yeeVortex`, `triplePoint`,
+  `staticBlob`, `impact`, `squarePatch` all build on `sampleRegularParticles`
+  and now get a slightly different (more correct) mass, but none of them are
+  in `tests/test_physics.py`'s fixture set and none were re-run by hand. The
+  full `tests/` suite passing is evidence, not confirmation, for these
+  specifically.

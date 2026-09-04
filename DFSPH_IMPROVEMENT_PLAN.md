@@ -13,11 +13,14 @@ same code, and much of the pre-Part-46 prose below (VD+PS, `solveDivergenceFree`
 the `finalize` resample) describes a path that is no longer live. See
 **"Status — Parts 46–47"** immediately below; `DFSPH_FINDINGS.md` §1.16–§1.17
 + §9 rows 46–49 have the detail. Part 48 fixed the `kolmogorovIncompressible`
-forcing regression and added regression tests; `randomFlowIncompressible
---bounded` is **confirmed unfixable without the near-wall CD-solve work** and
-stays open (xfailed in the suite). Part 49 re-wired the `mdbcNoPenetrationShift`
-the rewrite had dropped (FINDINGS §1.6) — wall crossing on `dambreak` /
-`columnCollapse` impacts back to ~0.
+forcing regression and added regression tests. Part 49 re-wired the
+`mdbcNoPenetrationShift` the rewrite had dropped (FINDINGS §1.6) — wall
+crossing on `dambreak` / `columnCollapse` impacts back to ~0.
+**`randomFlowIncompressible --bounded`, Part 48's "confirmed unfixable without
+the near-wall CD-solve work" call, was wrong about the cause — FIXED, Part 54:
+the divergence was seeded by an unrelated sampler bug (`sample/regular.py`),
+not the CD operator. `nx=96` (the suite's fixture) re-verified; §"Left to do"
+below has the rest.**
 
 **This file is the current state and the actionable list only.** The durable
 findings — the physics lessons, the negative results, the literature notes, the
@@ -122,6 +125,18 @@ unrelated — see "Known-open".)
 ---
 
 ## Active track — the near-wall CD solve on `randomFlowIncompressible --bounded`
+
+**Update (Part 54) — the track's own motivating case no longer NaNs the
+default scheme, at least at one resolution.** `divergenceFree` at `nx=96`
+(the regression suite's fixture) held `randomFlowIncompressible --bounded`
+without any solver change once `sample/regular.py`'s mass bug was fixed — see
+`LATTICE_DENSITY_PLAN.md`. Not yet re-checked at the other resolutions this
+track's evidence was built on (`nx=32/48/56/64/128`, `nx=128` — the shipped
+default — being the most important since it was the fastest-diverging one).
+If those hold too, the near-wall CD solve this track exists to fix may no
+longer have a failing case to point at for `divergenceFree`, though
+`band2018pb`'s own near-wall weaknesses (Part 45, the CD-solve work below)
+are a separate, still-live question either way.
 
 **Note (Parts 46–47):** `divergenceFree` now *is* the `omniIncompressible._solve`
 two-solve loop, so "grade `omniIncompressible` vs `divergenceFree`" below is
