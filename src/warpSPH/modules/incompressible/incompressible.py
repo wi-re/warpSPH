@@ -4,15 +4,15 @@ solves for a pressure field driving the predicted density back to
 density-error formulation, as opposed to `divergenceFree.py`'s divergence
 formulation).
 
-Each iteration computes the pressure acceleration (`computePressureAccelIISPH`,
-scatter mode), its position-drift residual (`dt**2 * computePressureShiftIISPH`),
-and updates `pressure += omega * residual / alpha` (`dt**2 * computeAlpha`'s
-IISPH diagonal term), keeping pressures non-negative each step -- either by
-clamping at zero (`ShiftPressureGauge.nonNegativeClamp`, the historical
-default) or by subtracting the fluid minimum (`ShiftPressureGauge.minShift`,
-which additionally pins the operator's constant null-space mode; see that
-enum's docstring, since the clamp alone lets that mode drift to a run-ending
-magnitude).
+Each iteration recomputes the wall pressure from the current fluid iterate
+(`_SHIFT_WALL_PRESSURE`, a Robin closure -- see its docstring for why this
+solve needs it), then the pressure acceleration (`computePressureAccelIISPH`,
+scatter mode) and its position-drift residual (`dt**2 *
+computePressureShiftIISPH`), and updates `pressure += omega * residual /
+alpha` (`dt**2 * computeAlpha`'s IISPH diagonal term). Pressures are kept
+non-negative each iterate, except where `_CLOSED_DOMAIN_GAUGE` fires (a
+closed, wall-only domain has no free surface for the clamp to guard against,
+so the unconstrained constant mode is pinned by mean-centering instead).
 `rhoStar` is clamped to a minimum of 0.9 and `alpha` to a maximum of -1e-6 to
 avoid division blow-up. Iterates between `solverConfig.pressureSolver.
 {minIterations,maxIterations,tolerance,relaxationFactor}`, stopping early once
@@ -20,25 +20,17 @@ past `minIterations` and below `tolerance`.
 """
 
 from warpSPHCore import *
+import os
 import torch
 from warpSPH.systems import *
 from warpSPH.modules import *
 from warpSPH.configurations import SimulationConfig
-from typing import Optional, Union, Any
-
-
-
-from warpSPH.configurations import SimulationConfig
-from typing import Optional
-
-
 from typing import Any, Optional, Union
 from .wp_alpha import computeAlpha
 from ..momentum.incompressible import computeMomentumIncompressible
 from ..pressure.iisph import computePressureAccelIISPH
 from .drift import computePressureShiftIISPH
-from ...configurations import PressureSolverType, JacobiRelaxationMode, ShiftPressureGauge, BoundaryOperatorTerms, resolveBoundaryOperatorTerms
-from .convergence import evaluateResidual, sourceNorm
+from ...configurations import JacobiRelaxationMode, PressureSolverType
 from .krylov import solvePressureKrylov
 from .consistent import applyConsistentCoupling
 from .wallPressure import wallPressureExtrapolation
@@ -46,24 +38,84 @@ from ...configurations import BoundaryPressureMode
 
 __all__ = ['solveIncompressible']
 
-#: EXPERIMENT (DFSPH_IMPROVEMENT_PLAN.md "Immediate A1", Part 48) -- the VD+PS
-#: shift's constant-density solve on a fully wall-closed box (`randomFlow
+#: EXPERIMENT (DFSPH_IMPROVEMENT_PLAN.md Part 48; superseded as the fix by
+#: Part 56's `_SHIFT_WALL_PRESSURE`, kept as a still-available lever) -- the
+#: VD+PS shift's constant-density solve on a fully wall-closed box (`randomFlow
 #: Incompressible --bounded`) is a pure-Neumann system: `A.1 ~ 0`, so the
 #: constant (n_h=4 lattice-bias) component of the `1 - rhoStar/rho0` source has
 #: no solution and `p` ramps until the run detonates. `'auto'` subtracts the
 #: fluid-mean source only when it is mean-dominated (the closed-box signature,
 #: Part 42's `omniIncompressible.CD_SOURCE_PROJECT`); `True`/`False` force it.
-#: Default `False` == byte-identical to the historical solve.
+#: Default `False` == byte-identical to the historical solve. Part 56 fixed
+#: the actual divergence via the wall-pressure closure instead (see
+#: `_SHIFT_WALL_PRESSURE` below), so this projection is no longer load-bearing
+#: for that case -- it remains here as an independent, still-untested-in-
+#: combination lever, not as the current explanation for why the case holds.
 _CLOSED_BOX_SOURCE_PROJECT = False
 _CLOSED_BOX_PROJECT_THRESHOLD = 0.7
 
-#: EXPERIMENT (same) -- recompute the `kind==1` wall pressure from the current
-#: fluid iterate every Jacobi sweep (Part 41's `wallPressureExtrapolation`,
-#: no relaxation / no carried state), instead of freezing `boundaryPressure`
-#: at its pre-solve snapshot, so the near-wall iteration matrix is consistent.
-#: `None` (default) == the historical frozen-boundary solve; `'shepard'` /
-#: `'mls'` pick the extrapolation order.
-_SHIFT_WALL_PRESSURE = None
+#: LANDED DEFAULT (DFSPH_IMPROVEMENT_PLAN.md "Active track" item 2a, Part 56)
+#: -- recompute the `kind==1` wall pressure from the current fluid iterate
+#: every Jacobi sweep (Part 41's `wallPressureExtrapolation`, no relaxation /
+#: no carried state), instead of freezing `boundaryPressure` at its pre-solve
+#: snapshot, so the near-wall iteration matrix is consistent (the same fix
+#: Part 41 landed for `omniIncompressible`, just never previously pointed at
+#: this solve). This is the actual fix for `randomFlowIncompressible
+#: --bounded`, which the `_CLOSED_DOMAIN_GAUGE` mean-centering trick (Part 55)
+#: only delayed: `'shepard'` holds it cleanly at every resolution in
+#: {32,48,56,64,96,128}, 300-400 steps each, KE decaying throughout, no
+#: `_CLOSED_DOMAIN_GAUGE` needed at all (left default `'off'` -- superseded
+#: for this case, not proven harmful elsewhere, so not removed). `'mls'`
+#: measured comparably or slightly better here but is not the default,
+#: matching `omniIncompressible.WALL_PRESSURE_MODE`'s own Part 42 choice of
+#: `'shepard'` over `'mls'` on the same case family (cheaper, no ghost Liu-Liu
+#: fit, no risk from `'mls'`'s linear term on a sheared flow). `'mirror'`
+#: (Part 55/56, `wallPressureExtrapolation`'s new Adami-reflection mode) also
+#: holds alone but is the weakest of the three (least KE decay at nx=128) and
+#: is measurably unstable combined with `_CLOSED_DOMAIN_GAUGE='always'` (an
+#: unexplained interaction, not chased further since the combination is not
+#: needed). Blast radius: the only case in the codebase with both `kind==1`
+#: rows and `_psShift` active (this function only fires on non-gravity cases
+#: -- `finalize`'s `_RESTORE_PS_SHIFT='auto'` gate) is
+#: `randomFlowIncompressible --bounded`/`--obstacle`; every other caller
+#: (`tgv`/`shearWave`/`staticBlob`'s `relaxLattice`, `kolmogorovIncompressible`,
+#: the periodic random flow) has no boundary particles, so `wallPressureExtrapolation`
+#: no-ops there regardless of this setting -- verified bit-close on/off.
+#: `None` reverts to the historical frozen-boundary solve; `'mls'` / `'mirror'`
+#: are the other extrapolation orders.
+#:
+#: `WARPSPH_WALL_PRESSURE_MODE` overrides this at import time (`'none'` maps to
+#: `None`) -- for `scripts/validate_scheme.py` comparison sweeps
+#: (`--wallPressure`) across schemes/solves without editing this file. Shared
+#: with `schemes/omniIncompressible.py`'s `WALL_PRESSURE_MODE`, which reads the
+#: same variable: the two module globals govern different call sites
+#: (`_psShift`'s VD+PS shift here vs `INSTEP_CD`'s in-step fold there), so a
+#: `--scheme divergenceFree` sweep needs both toggled together to cover every
+#: boundary case regardless of whether it runs under gravity.
+_WALL_PRESSURE_ENV = os.environ.get('WARPSPH_WALL_PRESSURE_MODE')
+_SHIFT_WALL_PRESSURE = (
+    (None if _WALL_PRESSURE_ENV.lower() == 'none' else _WALL_PRESSURE_ENV)
+    if _WALL_PRESSURE_ENV is not None else 'shepard')
+
+#: EXPERIMENT (DFSPH_IMPROVEMENT_PLAN.md "Active track" item 2a) -- the
+#: `band2018pb.CLOSED_DOMAIN_GAUGE` fix (Part 50), ported to this operator.
+#: `_CLOSED_BOX_SOURCE_PROJECT` above patches an incompatible *source*
+#: (`omniIncompressible.CD_SOURCE_PROJECT`'s failure mode); this patches the
+#: other closed-domain failure Part 50 found -- an unpinned *solution*. This
+#: solve's pressure accel (`computePressureAccelIISPH`) is a summation
+#: gradient (BWJ23 Eq. 33's `-(V_i/m_i) sum_j m_j/rho_j (p_i+p_j) gradW_ij`
+#: form), so a uniform fluid `p = c` (boundary held at its frozen value) gives
+#: an accel that vanishes wherever the kernel support is complete -- true
+#: everywhere in a fully enclosed box (`randomFlowIncompressible --bounded`).
+#: The `p >= 0` clamp then only ever pushes the unpinned constant up, and it
+#: ratchets away every iterate. `'auto'` keys on the same
+#: `rms|A.1| / rms|a_ii|` test `band2018pb.bandConstantModeRatio` uses (cheap:
+#: one extra operator application per step, not per iteration); when it fires
+#: each iterate is mean-centered over fluid rows instead of clamped, since a
+#: closed domain has no free surface for the clamp to be guarding against.
+#: `'off'` (default) == byte-identical to the historical solve.
+_CLOSED_DOMAIN_GAUGE = 'off'
+_NULL_MODE_THRESHOLD = 0.25
 
 
 def _solveIncompressibleImpl(
@@ -81,36 +133,31 @@ def _solveIncompressibleImpl(
         maxIters = schemeConfig.solverConfig.pressureSolver.maxIterations
         threshold = schemeConfig.solverConfig.pressureSolver.tolerance
         omega = schemeConfig.solverConfig.pressureSolver.relaxationFactor
+        # This solve clamps pressures non-negative each iterate (except where
+        # `_CLOSED_DOMAIN_GAUGE` fires), which breaks the exact residual
+        # recurrence `optimal` relies on -- that mode is divergenceFree-only.
+        if schemeConfig.solverConfig.pressureSolver.relaxationMode is JacobiRelaxationMode.optimal:
+                raise ValueError(
+                        "relaxationMode 'optimal' is only supported by the divergenceFree "
+                        "(IISPH) solver: the constant-density solver clamps pressures to "
+                        "non-negative each iteration, which breaks the exact residual "
+                        "recurrence the optimal step relies on")
 
         predictedVelocities = particles.velocities + dt * dvdt
-        # dt = config.dt
-
-        print(f'Predicted velocities: mean: {predictedVelocities.mean().cpu().item():.6g}, min: {predictedVelocities.min().cpu().item():.6g}, max: {predictedVelocities.max().cpu().item():.6g}')
-
-        print(f'Particles masses: mean: {particles.masses.mean().cpu().item():.6g}, min: {particles.masses.min().cpu().item():.6g}, max: {particles.masses.max().cpu().item():.6g}')
-        print(f'Particles density: mean: {particles.densities.mean().cpu().item():.6g}, min: {particles.densities.min().cpu().item():.6g}, max: {particles.densities.max().cpu().item():.6g}')
-        apparentArea = particles.masses / particles.densities    
-
-        print(f'Apparent area: {apparentArea.mean().cpu().item():.6g}, min: {apparentArea.min().cpu().item():.6g}, max: {apparentArea.max().cpu().item():.6g}')
+        apparentArea = particles.masses / particles.densities
 
         divergence = computeMomentumIncompressible(
-                currentState = particles, 
-                config = config, 
-                schemeConfig = schemeConfig, 
-                adjacency = adjacency, 
+                currentState = particles,
+                config = config,
+                schemeConfig = schemeConfig,
+                adjacency = adjacency,
                 advectionVelocities = predictedVelocities
         )
 
         rho0 = schemeConfig.fluid.restDensity
         rhoStar = particles.densities + dt * divergence
+        sourceTerm = (1 - rhoStar/rho0)
 
-        # rhoStar = torch.clamp(rhoStar, min = 0.9)  # Clamp to avoid extreme density values
-
-        # sourceTerm = config.dt * divergence
-        sourceTerm = (1 - rhoStar/rho0)# / config.dt
-        print(f'[IS] Source term: {sourceTerm.mean().cpu().item():.6g}, min: {sourceTerm.min().cpu().item():.6g}, max: {sourceTerm.max().cpu().item():.6g} abs mean: {sourceTerm.abs().mean().cpu().item():.6g}')
-
-        # sourceTerm = sourceTerm - sourceTerm.mean()  # Remove mean to ensure zero-mean source term
         _fluidRows = particles.kinds == 0
         if _CLOSED_BOX_SOURCE_PROJECT and bool(_fluidRows.any()):
                 _sf = sourceTerm[_fluidRows]
@@ -120,45 +167,30 @@ def _solveIncompressibleImpl(
                                 or _frac > _CLOSED_BOX_PROJECT_THRESHOLD):
                         sourceTerm = sourceTerm - _mean
         if verbose:
-            print(f'Incompressible Solver')
+            print(f'[IS] Predicted velocities: mean: {predictedVelocities.mean().cpu().item():.6g}, min: {predictedVelocities.min().cpu().item():.6g}, max: {predictedVelocities.max().cpu().item():.6g}')
             print(f'[IS] Source term: {sourceTerm.mean().cpu().item():.6g}, min: {sourceTerm.min().cpu().item():.6g}, max: {sourceTerm.max().cpu().item():.6g} abs mean: {sourceTerm.abs().mean().cpu().item():.6g}')
             print(f'[IS] Mean density error: {(particles.densities - schemeConfig.fluid.restDensity).abs().mean().cpu().item():.6g}')
 
-        # Opt-in Krylov pressure solvers (BiCGStab/GMRES/CG/BiCG/MINRES) share the same
-        # matrix-free operator and IISPH-diagonal preconditioner as the relaxed
-        # Jacobi path below, which stays the byte-identical default
-        # (solverType == relaxedJacobi). The constant-density variant scales the
-        # operator by dt**2 and clamps the pressure non-negative (gauge='nonnegative').
-        # psSolver = schemeConfig.solverConfig.pressureSolver
-        # if psSolver.solverType != PressureSolverType.relaxedJacobi:
-        #     return solvePressureKrylov(
-        #         particles, config, schemeConfig, adjacency, sourceTerm, dt**2,
-        #         psSolver, gauge='nonnegative', verbose=verbose)
-
-        # if psSolver.relaxationMode is JacobiRelaxationMode.optimal:
-        #     raise ValueError(
-        #         "relaxationMode 'optimal' is only supported by the divergenceFree "
-        #         "(IISPH) solver: the constant-density solver clamps pressures to "
-        #         "non-negative each iteration, which breaks the exact residual "
-        #         "recurrence the optimal step relies on")
-
-        # Which terms a static (`kind != 0`) neighbour contributes to. `full`
-        # is the historical AllToAll behaviour; `staticBoundary` drops its
-        # reaction on both sides at once -- out of `alpha`'s second sum here,
-        # and out of the operator's neighbour-acceleration term in the loop
-        # below -- so the diagonal keeps matching the operator it
-        # preconditions. Read from *this* solver's config, since the two
-        # solves are configured separately (Part 14); the bundle-level field
-        # still overrides both. See `BoundaryOperatorTerms`.
-        # boundaryTerms = resolveBoundaryOperatorTerms(schemeConfig.solverConfig, psSolver)
-
-        # `BoundaryPressureMode.consistent` is Bender/Westhofen/Jeske 2023 in
-        # full: their Eqs. 32 and 34 *are* `staticBoundary`, so the mode forces
-        # it on rather than letting the two settings disagree.
-        # boundaryPressureMode = getattr(schemeConfig.solverConfig, 'boundaryPressureMode',
-                                #        BoundaryPressureMode.mdbcDensity)
-        # if boundaryPressureMode is BoundaryPressureMode.consistent:
-                # boundaryTerms = BoundaryOperatorTerms.staticBoundary
+        # Opt-in Krylov pressure solvers (BiCGStab/GMRES/CG/BiCG/MINRES) share
+        # the same matrix-free operator and IISPH-diagonal preconditioner as
+        # the relaxed-Jacobi path below, which stays the byte-identical
+        # default (solverType == relaxedJacobi). `gauge='nonnegative'`
+        # matches this solve's own clamp (`divergenceFree.py`'s analogous
+        # dispatch uses `gauge='center'` instead, since that solve has no
+        # tensile/free-surface concern to clamp against).
+        # KNOWN LIMITATION (DFSPH_IMPROVEMENT_PLAN.md Parts 43-44,
+        # `DFSPH_FINDINGS.md` §9 rows 43-44): non-symmetric Krylov breaks down
+        # on every wall-bounded case tried (free surface *and* closed box) --
+        # the composed operator is rank-deficient at the wall, which a
+        # symmetric method has nothing to converge to either. Safe on
+        # well-conditioned wall-free cases (this is what
+        # `tests/test_incompressibleKrylov.py` exercises, on periodic `tgv`);
+        # not validated as a general substitute for the Jacobi default.
+        psSolver = schemeConfig.solverConfig.pressureSolver
+        if psSolver.solverType != PressureSolverType.relaxedJacobi:
+            return solvePressureKrylov(
+                particles, config, schemeConfig, adjacency, sourceTerm, dt**2,
+                psSolver, gauge='nonnegative', verbose=verbose)
 
         alphas = dt**2 * computeAlpha(
                 currentState = particles,
@@ -166,19 +198,10 @@ def _solveIncompressibleImpl(
                 schemeConfig = schemeConfig,
                 adjacency = adjacency,
                 apparentVolumes = apparentArea,
-                # includeBoundaryReaction = boundaryTerms.alphaIncludesBoundaryReaction,
         )
-
-        print(f'[IS] Alpha: {alphas.mean().cpu().item():.6g}, min: {alphas.min().cpu().item():.6g}, max: {alphas.max().cpu().item():.6g}')
         alphas = torch.clamp(alphas, max=-1e-6)  # Avoid division by zero
-
-        # How the constant (null-space) component of the pressure field is
-        # pinned each iteration -- see `ShiftPressureGauge`'s docstring for why
-        # this solver needs a gauge at all and why mean-centering (what
-        # `solveDivergenceFree` does) is not the answer here.
-        # gauge = getattr(schemeConfig.solverConfig, 'shiftPressureGauge',
-        #                 ShiftPressureGauge.nonNegativeClamp)
-        # print(f'Alpha: {alphas.mean().cpu().item():.6g}, min: {alphas.min().cpu().item():.6g}, max: {alphas.max().cpu().item():.6g}')
+        if verbose:
+            print(f'[IS] Alpha: {alphas.mean().cpu().item():.6g}, min: {alphas.min().cpu().item():.6g}, max: {alphas.max().cpu().item():.6g}')
 
         # kind==1 (boundary) and kind==2 (ghost) particles are not pressure unknowns:
         # their pressure is held fixed at its incoming `particles.pressures` value
@@ -192,43 +215,37 @@ def _solveIncompressibleImpl(
         # particles (`fluidMask` all-True).
         fluidMask = particles.kinds !=2
         boundaryPressure = particles.pressures.clone()
-        # if boundaryPressureMode is BoundaryPressureMode.consistent:
-                # Eq. 33 has no boundary pressure term at all, so there is no
-                # value to carry: pin it at exactly 0 rather than at whatever
-                # the state happens to hold.
-                # boundaryPressure = torch.zeros_like(boundaryPressure)
 
-        # `minShift` is a *gauge* fix, so it is only valid where the constant
-        # mode is genuinely forceless: where the kernel support is truncated
-        # the gradients no longer sum to zero, a *constant* pressure exerts a
-        # large real force, and the offset stops being a gauge choice and
-        # becomes a background pressure blowing the truncated particles
-        # outward. **Free surfaces are truncated; this codebase's walls are
-        # not** (`probe_wallSupportCompleteness.py`: Shepard ~1.00 and
-        # `|A.1|/|A.rand|` 0.19 in the wall-adjacent bin against 0.17 in the
-        # bulk, because `BOUNDED_BAND = 5` samples a solid band wider than the
-        # kernel). So this guard tests for a free surface, and nothing else.
-        #
-        # It used to also downgrade whenever *any* pressure row was pinned
-        # (`kind != 0`), on the argument that Dirichlet data already fixes the
-        # constant so there is no null space left to gauge. That argument was
-        # measured wrong, twice over. Part 4's evidence for it -- `minShift`
-        # diverging at t=0.69 on the bounded case -- was taken at 3x [BK]'s
-        # CFL, and at the published CFL the same configuration does not
-        # diverge at all. And Part 13's factorial found the gauge and the
-        # static-boundary operator are one fix applied at two points: together
-        # they hold the bounded case's density band at 4.48e-3 against the old
-        # default's 1.78e-1, 40x, and 5.4x better than the two composing
-        # independently. Boundary rows are not really Dirichlet data here
-        # either -- they are pinned at an mDBC extrapolation that moves with
-        # the fluid field, not at a fixed level that anchors the constant.
-        #
-        # `forceShiftPressureGauge` now bypasses only the free-surface half.
-        # if gauge is ShiftPressureGauge.minShift and not getattr(
-        #                 schemeConfig.solverConfig, 'forceShiftPressureGauge', False):
-        #         surface = getattr(particles, 'surfaceIndicators', None)
-        #         if surface is not None and bool((surface > 0.5).any()):
-        #                 gauge = ShiftPressureGauge.nonNegativeClamp
+        # Closed-domain gauge test (see `_CLOSED_DOMAIN_GAUGE`): is the
+        # constant fluid mode a null mode of this operator? `rms|A.1| /
+        # rms|a_ii|` with boundary rows held at 0 -- the homogeneous system a
+        # fluid-only constant actually sees, since boundary rows are frozen
+        # during the real solve too. One extra operator application, not one
+        # per iteration.
+        closedDomainGauge = False
+        if _CLOSED_DOMAIN_GAUGE != 'off' and bool(_fluidRows.any()):
+                if _CLOSED_DOMAIN_GAUGE == 'always':
+                        closedDomainGauge = True
+                elif _CLOSED_DOMAIN_GAUGE == 'auto':
+                        onesTest = torch.where(_fluidRows, torch.ones_like(alphas),
+                                               torch.zeros_like(alphas))
+                        a1 = computePressureAccelIISPH(
+                                state = particles, pressureValues = onesTest, config = config,
+                                supportScheme = SupportScheme.Scatter, adjacency = adjacency)
+                        a1 = torch.where(particles.kinds.unsqueeze(-1)==0, a1, torch.zeros_like(a1))
+                        A1 = dt**2 * computePressureShiftIISPH(
+                                state = particles, config = config, pressureAccels = a1,
+                                supportScheme = SupportScheme.Scatter, adjacency = adjacency)
+                        rmsA1 = float(A1[_fluidRows].pow(2).mean().sqrt())
+                        rmsD = float(alphas[_fluidRows].abs().pow(2).mean().sqrt())
+                        ratio = rmsA1 / rmsD if rmsD > 0.0 else float('inf')
+                        closedDomainGauge = ratio < _NULL_MODE_THRESHOLD
+                        if verbose:
+                                print(f'[IS] closed-domain null-mode ratio: {ratio:.4g}'
+                                     f' (gauge {"ON" if closedDomainGauge else "off"})')
+                else:
+                        raise ValueError(
+                                f'Unknown _CLOSED_DOMAIN_GAUGE: {_CLOSED_DOMAIN_GAUGE!r}')
 
         # Warm start. Historically this solve starts cold every step
         # (`* 0.`), which is fine for the position-shift application -- the
@@ -248,18 +265,13 @@ def _solveIncompressibleImpl(
         pressures = []
         i = 0
         error = 0.
-        gaugeOffset = torch.zeros((), device=pressureB.device, dtype=pressureB.dtype)
 
-        # The stopping test: an absolute test on the configured statistic, and
-        # (when `rtol > 0`) a relative disjunct on `mean|r|`. See
-        # `convergence.py` and `JacobiConvergenceCriterion`; this solver's
-        # historical statistic is `flooredOneSided`, which is the one §1.7
-        # calls broken.
-        # criterion = psSolver.convergenceCriterion
-        # bNorm = sourceNorm(sourceTerm, fluidMask, psSolver.rtol)
-        # relTarget = None if bNorm is None else psSolver.atol + psSolver.rtol * bNorm
-
-        # print(f"Solving for divergence-free velocities with maxIters={maxIters}, threshold={threshold:.6g}, omega={omega:.6g}")
+        # The stopping test is an absolute test on the mean floored residual
+        # (`flooredOneSided`, the statistic §1.7 in DFSPH_FINDINGS.md calls
+        # broken -- kept for continuity with the historical behaviour rather
+        # than fixed here). See `convergence.py` /
+        # `JacobiConvergenceCriterion` for the general form this solve does
+        # not currently use.
 
         for i in range(maxIters):
                 pressureA = pressureB.clone()
@@ -278,15 +290,6 @@ def _solveIncompressibleImpl(
                         supportScheme = SupportScheme.Scatter,
                         adjacency = adjacency,
                 )
-                # if not boundaryTerms.operatorMovesBoundary:
-                        # `dx_p_i = sum_j V_j (a_i - a_j).gradW_ij` counts the
-                        # neighbour's pressure displacement; a static particle
-                        # has none, so only `i`'s own term survives for those
-                        # `j` (this is SPlisHSPlasH's boundary loop in
-                        # `TimeStepIISPH::pressureSolveIteration`). `i`'s own
-                        # acceleration still feels their frozen pressure --
-                        # that is the wall force, computed above.
-                        # a_p = torch.where(fluidMask.unsqueeze(-1), a_p, torch.zeros_like(a_p))
                 a_p = torch.where(particles.kinds.unsqueeze(-1)==0, a_p, torch.zeros_like(a_p))
                 dx_p = dt**2 * computePressureShiftIISPH(
                         state = particles,
@@ -295,52 +298,44 @@ def _solveIncompressibleImpl(
                         supportScheme = SupportScheme.Scatter,
                         adjacency = adjacency,
                 )
-                print(f'\t[IS] Pressure acceleration: mean: {a_p.mean().cpu().item():.6g}, min: {a_p.min().cpu().item():.6g}, max: {a_p.max().cpu().item():.6g}')
-                print(f'\t[IS] Pressure shift: mean: {dx_p.mean().cpu().item():.6g}, min: {dx_p.min().cpu().item():.6g}, max: {dx_p.max().cpu().item():.6g}')
+                if verbose:
+                    print(f'\t[IS] Pressure acceleration: mean: {a_p.mean().cpu().item():.6g}, min: {a_p.min().cpu().item():.6g}, max: {a_p.max().cpu().item():.6g}')
+                    print(f'\t[IS] Pressure shift: mean: {dx_p.mean().cpu().item():.6g}, min: {dx_p.min().cpu().item():.6g}, max: {dx_p.max().cpu().item():.6g}')
+                # NOTE: pins the relaxation at 0.3 regardless of
+                # `schemeConfig.solverConfig.pressureSolver.relaxationFactor`
+                # (read into the outer `omega` above, then never used) --
+                # long-standing, not touched here; changing it is a numerical
+                # behaviour change that needs its own validation, not a
+                # cleanup. See DFSPH_IMPROVEMENT_PLAN.md.
                 omega = 0.3
                 residual = sourceTerm - dx_p
                 pressureB = pressureA + omega * residual / alphas
-                print(f'\t[IS] Pressure before gauge: mean: {pressureB.mean().cpu().item():.6g}, min: {pressureB.min().cpu().item():.6g}, max: {pressureB.max().cpu().item():.6g}')
-                # if gauge is ShiftPressureGauge.minShift:
-                #         # Non-negative *and* gauge-fixed: pinning the fluid
-                #         # minimum at zero constrains the constant null-space mode
-                #         # (which the clamp below does not -- it is a floor, so
-                #         # that mode is free to drift upward without bound) while
-                #         # translating rather than discarding the field's negative
-                #         # part. The offset is a *gauge*, so it has to move the
-                #         # frozen boundary rows with it (`gaugeOffset` accumulates
-                #         # it, since `boundaryPressure` is a fixed pre-solve
-                #         # snapshot): shifting the fluid rows alone would open a
-                #         # fluid-vs-wall pressure jump of the offset's size, which
-                #         # is a spurious wall-normal force, not a gauge choice.
-                #         shift = pressureB[fluidMask].min()
-                #         gaugeOffset = gaugeOffset + shift
-                #         pressureB = pressureB - shift
-                #         pressureB = torch.where(fluidMask, pressureB, boundaryPressure - gaugeOffset)
-                # else:
-                #         pressureB = torch.clamp(pressureB, min=0.0)  # Ensure non-negative pressures
-                #         pressureB = torch.where(fluidMask, pressureB, boundaryPressure)
-                pressureB = torch.clamp(pressureB, min=0.0)  # Ensure non-negative pressures
+                if verbose:
+                    print(f'\t[IS] Pressure before gauge: mean: {pressureB.mean().cpu().item():.6g}, min: {pressureB.min().cpu().item():.6g}, max: {pressureB.max().cpu().item():.6g}')
+                if closedDomainGauge:
+                        # Pin the unconstrained constant instead of clamping --
+                        # a closed domain has no free surface, so there is no
+                        # tensile instability for the clamp to be guarding
+                        # against (`band2018pb.CLOSED_DOMAIN_GAUGE`'s pairing).
+                        offset = pressureB[_fluidRows].mean()
+                        pressureB = torch.where(_fluidRows, pressureB - offset,
+                                                boundaryPressure)
+                else:
+                        pressureB = torch.clamp(pressureB, min=0.0)  # Ensure non-negative pressures
+                        pressureB = torch.where(fluidMask, pressureB, boundaryPressure)
 
-                # error, rNorm = evaluateResidual(residual, fluidMask, criterion,
-                                                # threshold, bNorm)
                 error = torch.mean(torch.clamp(-residual, min=-threshold)).cpu().item()
                 errors.append(error)
 
                 pressures.append((pressureB.min().cpu().item(), pressureB.max().cpu().item(), pressureB.mean().cpu().item()))
 
                 if i >= minIters and (error < threshold):
-                                #       or (relTarget is not None and rNorm <= relTarget)):
-                #     print(f"Converged after {i+1} iterations with error: {error:.6g}")
                     break
-                
+
                 if verbose:
                     print(f"\t[IS] Iteration {i+1}/{maxIters}, error: {error:.6g}, pressure min/max/mean: {pressures[-1]}")
-
-                if len(errors) > 1 and error > errors[-2]:
-                    if verbose:
+                    if len(errors) > 1 and error > errors[-2]:
                         print(f"!!![IS] Warning: Error increased from {errors[-2]:.6g} to {error:.6g}.!!!")
-                print(f"\t[IS] Iteration {i+1}/{maxIters}, error: {error:.6g}, pressure min/max/mean: {pressures[-1]}")
 
         a_p = computePressureAccelIISPH(
                 state = particles,
@@ -350,12 +345,9 @@ def _solveIncompressibleImpl(
                 adjacency = adjacency,
         )
         a_p = torch.where(fluidMask.unsqueeze(-1), a_p, torch.zeros_like(a_p))
-        # print(f"Final pressure acceleration: mean: {a_p.mean().cpu().item():.6g}, min: {a_p.min().cpu().item():.6g}, max: {a_p.max().cpu().item():.6g}")
 
-        # print(f'final Residual: {residual.mean().cpu().item():.6g}, min: {residual.min().cpu().item():.6g}, max: {residual.max().cpu().item():.6g}')
         if verbose:
             print(f'[IS] final Residual: {residual.mean().cpu().item():.6g}, min: {residual.min().cpu().item():.6g}, max: {residual.max().cpu().item():.6g}')
-            # if residual.mean() > 
         return a_p, pressureB, errors, pressures
 
 

@@ -1,6 +1,6 @@
 # Abstracts -- extended set
 
-Companion to [`ABSTRACTS.md`](ABSTRACTS.md), for the 78 background papers added
+Companion to [`ABSTRACTS.md`](ABSTRACTS.md), for the 77 background papers added
 to `references.bib` on 2026-08-29 (see the "Extended set" section of
 [`MANIFEST.md`](MANIFEST.md)). Unlike `ABSTRACTS.md`, whose quotes are
 transcribed from the page, the abstracts here come from one of three lower-effort
@@ -19,7 +19,7 @@ sources, named on each block's `abstract from:` line:
 ones word-for-word, the API ones by word overlap -- so a block that has drifted
 onto the wrong paper fails the build.
 
-All 78 of the extended set have an abstract here.
+All 77 of the extended set have an abstract here.
 
 To find one by subject: `grep -i -B10 'transport velocity' literature/ABSTRACTS_EXTENDED.md`
 
@@ -425,33 +425,6 @@ To find one by subject: `grep -i -B10 'transport velocity' literature/ABSTRACTS_
 > we circumvent the typical excess damping arising from kernel-based evaluations of internal
 > forces or density without having recourse to auxiliary Eulerian grids. The versatility of our
 > solver is demonstrated by the simulation of multiphase flows and free surfaces.
-
-### `dehnen2012`
-
-- **file:** `dehnen2012_convergence-without-pairing-instability.pdf`
-- **title:** Improving Convergence in Smoothed Particle Hydrodynamics Simulations Without Pairing Instability
-- **authors:** Walter Dehnen and Hossam Aly
-- **venue:** Monthly Notices of the Royal Astronomical Society 425(2), 2012
-- **doi:** [10.1111/j.1365-2966.2012.21439.x](https://doi.org/10.1111/j.1365-2966.2012.21439.x)
-- **abstract from:** OpenAlex `abstract_inverted_index` (word order preserved; original punctuation not recoverable)
-
-> The numerical convergence of smoothed particle hydrodynamics (SPH) can be severely restricted
-> by random force errors induced by particle disorder, especially in shear flows, which are
-> ubiquitous in astrophysics. The increase in the number NH of neighbours when switching to more
-> extended smoothing kernels at fixed resolution (using an appropriate definition for the SPH
-> resolution scale) is insufficient to combat these errors. Consequently, trading resolution for
-> better convergence is necessary, but for traditional smoothing kernels this option is limited
-> by the pairing (or clumping) instability. Therefore, we investigate the suitability of the
-> Wendland functions as smoothing kernels and compare them with the traditional B-splines.
-> Linear stability analysis in three dimensions and test simulations demonstrate that the
-> Wendland kernels avoid the pairing instability for allNH, despite having vanishing derivative
-> at the origin (disproving traditional ideas about the origin of this instability; instead, we
-> uncover a relation with the kernel Fourier transform and give an explanation in terms of the
-> SPH density estimator). The Wendland kernels are computationally more convenient than the
-> higher order B-splines, allowing large NH and hence better numerical convergence (note that
-> computational costs rise sublinear with NH). Our analysis also shows that at low NH the
-> quartic spline kernel with NH ≈ 60 obtains much better convergence than the standard cubic
-> spline.
 
 ### `desbrun1996`
 

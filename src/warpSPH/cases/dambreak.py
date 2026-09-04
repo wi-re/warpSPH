@@ -210,7 +210,7 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     d.update(particleDistributionMetrics(ctx, state))
     # Wall-penetration watch (DFSPH_FINDINGS.md 1.6): fluid particles pushed
     # more than half a spacing past the interior tank AABB. The `c637785`
-    # rewrite dropped the mDBC no-penetration shift from `dfsph_step`; this is
+    # rewrite dropped the mDBC no-penetration shift from `divergenceFree_step`; this is
     # how a re-grade of the wall-crossing metrics is read off this case.
     interior = ctx.scratch.get('interiorDomain')
     if interior is not None:

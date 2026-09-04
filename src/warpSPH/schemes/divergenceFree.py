@@ -1,13 +1,21 @@
-"""The DFSPH (Divergence-Free SPH) step for the incompressible scheme:
-adjacency, density (mDBC-corrected), boundary velocities/Dirichlet BCs,
+"""`IncompressibleSPHScheme.divergenceFree`'s step (DFSPH, Divergence-Free
+SPH) -- renamed from `dfsph.py` in the pre-merge cleanup pass (09-04,
+DFSPH_IMPROVEMENT_PLAN.md) to match every other scheme file's convention of
+being named after its `IncompressibleSPHScheme` value (`omniIncompressible.py`,
+`band2018pb.py`, `dfsphReference.py`); it stopped being VD+PS-only at commit
+`c637785`, which is what made the old name stop fitting. Historical prose
+elsewhere in this repo (`DFSPH_FINDINGS.md`, `git log`) still says
+`schemes/divergenceFree.py` / `divergenceFree_step` -- that was the name at the time.
+
+Adjacency, density (mDBC-corrected), boundary velocities/Dirichlet BCs,
 free-surface detection, delta-SPH velocity diffusion, continuity `drhodt`,
 forcing/gravity/mDBC no-penetration shift folded into an explicit `dvdt`,
 then `solveDivergenceFree` projects that `dvdt` onto a divergence-free
 pressure correction (`dvdt_pressure`).
 
 Both projection pressures are persisted after the solves (they were computed
-and discarded before, so `dfsph` exposed no readable pressure field), on the
-same carriers `schemes/dfsphReference.py` uses:
+and discarded before, so this step exposed no readable pressure field), on
+the same carriers `schemes/dfsphReference.py` uses:
 `currentState.pressures` holds the constant-density / particle-shift solve
 pressure, `currentState.soundspeeds` (a free slot -- this scheme has no
 acoustic sound speed) holds the divergence-free projection pressure. Raw
@@ -48,7 +56,7 @@ from ..systems.incompressible import IncompressibleSystem, IncompressibleState, 
 
 import numpy as np
 
-__all__ = ['dfsph_step']
+__all__ = ['divergenceFree_step']
 
 #: How the constant-density solve's `(1 - rho/rho0)` source is treated at the
 #: kernel-truncated free surface (see `omniIncompressible._solve`). `'full'` is
@@ -131,7 +139,7 @@ GRAVITY_OSC = None
 #: rewrite dropped (FINDINGS 1.6). `computeMdbcNoPenShift` returns a per-fluid
 #: corrective velocity that damps motion closing on a nearby wall; it is folded
 #: into `dvdt` as `nopenshift / dt` *before* the pressure solves, exactly where
-#: the pre-rewrite `dfsph_step` and `schemes/deltaSPH.py` put it. The DFSPH
+#: the pre-rewrite `divergenceFree_step` and `schemes/deltaSPH.py` put it. The DFSPH
 #: paper (Bender & Koschier) has no such term and relies on the pressure
 #: projection alone, but FINDINGS 2 measured that removing it is strictly worse
 #: on the wall-crossing metrics, and post-`c637785` `columnCollapse` /
@@ -143,7 +151,7 @@ GRAVITY_OSC = None
 NOPEN_SHIFT = 'config'
 
 
-def dfsph_step(
+def divergenceFree_step(
     system: CompSPHSystem,
     dt: float,
     config: SimulationConfig,

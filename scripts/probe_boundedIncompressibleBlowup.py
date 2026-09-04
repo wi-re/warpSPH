@@ -46,7 +46,7 @@ parser.add_argument('--mlsRelaxation', type=float, default=None,
                     help="override `mdbcPressureRelaxation` (default 0.3)")
 parser.add_argument('--mdbcFinalize', action='store_true',
                     help="apply the mDBC density extrapolation in `finalize` "
-                         "before the shifting solve. `dfsph_step` gives boundary "
+                         "before the shifting solve. `divergenceFree_step` gives boundary "
                          "particles an extrapolated density for the "
                          "divergence-free solve, but `finalize` recomputes plain "
                          "summation densities and never re-applies mDBC, so the "
@@ -96,7 +96,7 @@ from warpSPH.runner.runner import buildContext
 from warpSPH.runner.caseSpec import CaseSpec
 
 import warpSPH.systems.incompressible as sysmod
-import warpSPH.schemes.dfsph as dfsphmod
+import warpSPH.schemes.divergenceFree as dfsphmod
 from warpSPH.modules.mdbc import computeMdbcPressure as _mdbcPressure
 from warpSPH.configurations import BoundaryPressureMode as _BPMode
 

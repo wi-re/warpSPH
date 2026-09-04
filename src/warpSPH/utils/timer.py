@@ -1,6 +1,6 @@
 """`TimedBlock`, a CPU-(and optionally CUDA-event-)based profiling context
 manager used by the commented-out timing scaffolds in `schemes/deltaSPH.py`
-and `schemes/dfsph.py`. Only `cpu_ms` is actually populated on exit -- the
+and `schemes/divergenceFree.py`. Only `cpu_ms` is actually populated on exit -- the
 CUDA event is recorded but `cuda_ms` is left `None` here (its computation and
 the `synchronize()` call it needs are commented out); the scaffolds that use
 `use_cuda=True` compute `cuda_ms` themselves afterward from the block's

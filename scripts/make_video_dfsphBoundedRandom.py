@@ -5,7 +5,7 @@ turns out to *also* fix.
   * baseline    -- as shipped (omni divergence solve, in-step CD velocity,
                    no VD+PS shift). At fixed dt=1e-3 nx=64 it DETONATES:
                    KE x60, |v| -> 10.7 in a unit-speed flow.
-  * ps-restore  -- IncompressibleSystem._RESTORE_PS_SHIFT + dfsph.INSTEP_CD=False
+  * ps-restore  -- IncompressibleSystem._RESTORE_PS_SHIFT + divergenceFree.INSTEP_CD=False
                    (the same setting that fixes tgv). KE x0.994, |v| ~ 1.0,
                    density band 8.5e-3.
 
@@ -16,7 +16,7 @@ import numpy as np
 import warpSPH.systems.incompressible as I
 from warpSPH.cases import randomFlowIncompressible as rf
 from warpSPH.runner import run
-from warpSPH.schemes import dfsph as D
+from warpSPH.schemes import divergenceFree as D
 
 OUT = "/home/lu26029/dev/warpSPH/scripts/videos/dfsph_bounded_random"
 os.makedirs(OUT, exist_ok=True)

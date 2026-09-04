@@ -4,14 +4,21 @@ parameterizations.
 
 `inviscid=True` (the default) gives a Monaghan-style artificial-viscosity
 term with coefficient `alpha * c_s * h_i / kernelXi`; `inviscid=False` gives
-a Morris-style physical-viscosity Laplacian term with coefficient
-`2*(dim+2) * nu`. Both are gated by the same "approach only" switch
+a physical-viscosity Laplacian term with coefficient `2*(dim+2) * nu`. **Not**
+a real Morris et al. 1997 laminar term despite the coefficient's shape: both
+branches are gated by the same "approach only" switch
 `mu_ij = dot(vel_ij, x_ij) / (|x_ij|^2 + eps*h_i^2)`, clamped to `<= 0` so the
 term only acts when neighbors are approaching (`mu_ij > 0` — receding — is
 zeroed); the contribution is `apparentVolume * mu_ij * factor * gradW_ij /
-mean(rho_i, rho_j)`. A `1e-14 * h_i^2` epsilon guards the `mu_ij` denominator
-at zero separation. Contains a commented-out alternative symmetrization
-factor for the physical-viscosity branch, left disabled.
+mean(rho_i, rho_j)`. That clamp is an artificial-viscosity device (it is what
+makes the `inviscid=True` branch stable), and it normal-projects the
+`inviscid=False` branch too — a real Morris term needs the full `v_ij` vector
+with no such clamp, i.e. real tangential/shear stress, which this branch does
+not carry (DFSPH_IMPROVEMENT_PLAN.md "What's realistically open" item 1: the
+shear-carrying Morris term is a separate, not-yet-added option). A `1e-14 *
+h_i^2` epsilon guards the `mu_ij` denominator at zero separation. Contains a
+commented-out alternative symmetrization factor for the physical-viscosity
+branch, left disabled.
 `alphaToNu`/`nuToAlpha` convert between the two coefficients (`alpha` given
 `c_s`, `h`, `n=dim`, and vice versa) so a case can be configured in either
 unit system.

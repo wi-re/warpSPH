@@ -1,5 +1,5 @@
 """State/update/system triad for the divergence-free incompressible scheme
-(DFSPH, `schemes/dfsph.py`): unlike the weakly-compressible schemes, density
+(DFSPH, `schemes/divergenceFree.py`): unlike the weakly-compressible schemes, density
 is itself an integrated quantity here (`drhodt`), corrected in `finalize` by a
 pressure-Poisson solve (`modules.incompressible.solveIncompressible`) plus the
 same delta-SPH-style particle shifting and rigid-body pose update
@@ -7,7 +7,7 @@ same delta-SPH-style particle shifting and rigid-body pose update
 Field layout otherwise mirrors `WeaklyCompressibleState` closely enough that
 `rigidBody.update.updateBodyParticlesWCSPH` rebuilds either interchangeably
 via `type(particleState)`. Not re-exported from `systems/__init__.py` --
-`schemes/dfsph.py` and `schemes/builder.py` import it directly.
+`schemes/divergenceFree.py` and `schemes/builder.py` import it directly.
 """
 
 from warpSPHIntegrators import *
@@ -64,14 +64,14 @@ from ..modules.density import computeDensities
 import copy
 
 #: TEMP (option 1 experiment): restore the VD+PS particle shift in
-#: `IncompressibleSystem.finalize` that the `_solve` rewrite of `dfsph_step`
-#: dropped. `dfsph_step` now folds the constant-density solve into the velocity
+#: `IncompressibleSystem.finalize` that the `_solve` rewrite of `divergenceFree_step`
+#: dropped. `divergenceFree_step` now folds the constant-density solve into the velocity
 #: only (`inStepVelocity` semantics), so nothing regularises the particle
 #: *distribution* -- on `tgv` the jittered lattice re-snaps in the first steps
 #: (DFSPH_FINDINGS.md 1.16). This re-adds a post-integrator position shift plus
 #: the Cornelis et al. Eq. 17 velocity resample.
 #:
-#: RESULT (measured): as `'cd'` with `dfsph.INSTEP_CD = False` (the true
+#: RESULT (measured): as `'cd'` with `divergenceFree.INSTEP_CD = False` (the true
 #: pre-tmp VD+PS -- divergence projection in-step, constant density only as
 #: this shift) it **fully resolves the tgv energy injection**: KE x1.000,
 #: peak x1.000, monotone, and clean at nx=64 / 400 steps (no jitter=0 late
@@ -84,13 +84,13 @@ import copy
 #:
 #: `'auto'` (default) resolves the tension by *case*: run the shift where
 #: there is no body force (`tgv`, the bounded box, `kolmogorov`, ...) -- it
-#: regularises the distribution and `dfsph.INSTEP_CD = 'auto'` drops the
+#: regularises the distribution and `divergenceFree.INSTEP_CD = 'auto'` drops the
 #: in-step CD there -- and skip it where a body force needs the in-step CD
 #: (`hydrostaticColumn`). No case runs both, so no double-count. `True` /
 #: `False` force it; `'cd'` is the shift mode (see `_PS_SHIFT_MODE`).
 _RESTORE_PS_SHIFT = 'auto'
 #: 'cd'    -- the VD+PS shift proper: `solveIncompressible` (dvdt=0). Double-
-#:            counts the density error when `dfsph.INSTEP_CD` is also on.
+#:            counts the density error when `divergenceFree.INSTEP_CD` is also on.
 #: 'delta' -- a Fickian concentration-gradient shift (`solveShifting`), a
 #:            different mechanism, so it can run *alongside* the in-step CD.
 _PS_SHIFT_MODE = 'cd'
@@ -102,7 +102,7 @@ _PS_VELOCITY_RESAMPLE = True
 #: Apply the shift as a *velocity impulse* (`velocities += dx / dt`) instead of
 #: a position move -- i.e. the same quantity the position shift uses, routed to
 #: velocity. Predict: this stops regularising the distribution, so the tgv
-#: injection returns (mirror of `dfsph.INSTEP_CD = False`, which routes the CD
+#: injection returns (mirror of `divergenceFree.INSTEP_CD = False`, which routes the CD
 #: solve to a position shift and breaks the column).
 _PS_SHIFT_AS_VELOCITY = False
 #: Free-surface-aware shift (DFSPH_FINDINGS.md 1.17): zero the shift on
@@ -177,7 +177,7 @@ class IncompressibleSystem(BaseIntegrationSystem):
             self.state.surfaceLambdas = lastState.surfaceLambdas.clone() if lastState.surfaceLambdas is not None else None
 
         # Under `DensityEvolution.summation` (the default) the carried density
-        # is the one `dfsph_step` computed at the start of the step, and the
+        # is the one `divergenceFree_step` computed at the start of the step, and the
         # re-sum further down replaces it anyway. Under `continuity`/`hybrid`
         # this copy is exactly what used to make `integrateRho` inert: it
         # discards the `rho + dt*drhodt` the integrator just produced. See
@@ -458,7 +458,7 @@ class IncompressibleSystem(BaseIntegrationSystem):
 
         # if shiftApplication is not ShiftApplication.inStepVelocity:
         #     # `inStepVelocity` has already applied this solve's correction to
-        #     # the velocity inside the step (`schemes/dfsph.py`), which is the
+        #     # the velocity inside the step (`schemes/divergenceFree.py`), which is the
         #     # whole of DFSPH proper's constant-density treatment -- applying
         #     # the position shift on top of it corrects the same density error
         #     # twice per step, which on `tgv` injects energy rather than

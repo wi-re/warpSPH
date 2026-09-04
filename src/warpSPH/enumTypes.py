@@ -59,6 +59,21 @@ class WeaklyCompressibleSPHScheme(Enum):
 
 # @torch.jit.script
 class IncompressibleSPHScheme(Enum):
+    #: VD+PS DFSPH (Bender & Koschier 2015/2017): a divergence-free Jacobi
+    #: pass plus a constant-density Jacobi pass, applied as a momentum-neutral
+    #: position shift for most cases or folded into the velocity update
+    #: in-step for body-force (gravity) cases (`schemes/divergenceFree.py`'s
+    #: `INSTEP_CD`/`_RESTORE_PS_SHIFT` gates). **The recommended default for
+    #: general use** -- as of DFSPH_IMPROVEMENT_PLAN.md Part 56/57/58, it does
+    #: not diverge on any case in the suite (including every wall-bounded one),
+    #: and where it has quality caveats they are modest and non-fatal: a
+    #: closed box's density sits ~5-8% high against a strict 5% target
+    #: (`randomFlowIncompressible --bounded`/`--obstacle`), and two cases
+    #: (`impact`, `columnCollapse`) develop growing particle pairing after an
+    #: impact while the walls themselves hold exactly. Reach for `band2018pb`
+    #: instead specifically when a closed, wall-dominated case needs tighter
+    #: incompressibility than the above and can tolerate rougher particle
+    #: distribution -- see that scheme's own docstring below.
     divergenceFree = 0
     #: Reference DFSPH (Bender & Koschier 2015/2017) as implemented in
     #: SPlisHSPlasH's `TimeStepDFSPH.cpp`: the constant-density and
@@ -89,6 +104,17 @@ class IncompressibleSPHScheme(Enum):
     #: deficiency that stalls the `omniIncompressible` / `iisph`
     #: constant-density solve at a wall corner (DFSPH_IMPROVEMENT_PLAN.md
     #: Parts 41-44). See `schemes/band2018pb.py`.
+    #: **A real trade-off against `divergenceFree`, not a strict upgrade**
+    #: (Part 57/58): tighter density control on closed wall-bounded cases
+    #: (~4-5% vs `divergenceFree`'s ~7-8%), at the cost of growing particle
+    #: pairing/voids there instead. Its bigger limitation is structural: the
+    #: paper has **no free-surface treatment at all** (every scenario in it is
+    #: a closed tank), so it inherits real free-surface problems on
+    #: `dambreak`-like violent impacts and fails `staticBlob` outright (a
+    #: free-space body just is not its regime, Part 51). Use it deliberately
+    #: for closed, wall-dominated flows where incompressibility matters more
+    #: than particle-distribution smoothness -- not as a general-purpose
+    #: replacement for `divergenceFree`.
     band2018pb = 4
 
 # @torch.jit.script

@@ -76,7 +76,7 @@ from warpSPH.configurations import BoundaryOperatorTerms
 from warpSPH.configurations.moduleConfigurations.boundaryConditions import BCType
 from warpSPH.cases.weaklyCompressible import domainBoundarySdf
 import warpSPH.modules.mdbc.velocity as velmod
-import warpSPH.schemes.dfsph as dfsphmod
+import warpSPH.schemes.divergenceFree as dfsphmod
 import warpSPH.systems.incompressible as sysmod
 import warpSPH.cases.randomFlow as rfmod
 

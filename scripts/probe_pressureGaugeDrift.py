@@ -48,7 +48,7 @@ from warpSPH.configurations import PressureSolverType, JacobiRelaxationMode
 log = []
 
 import warpSPH.modules.incompressible.divergenceFree as dfmod
-import warpSPH.schemes.dfsph as dfsphmod
+import warpSPH.schemes.divergenceFree as dfsphmod
 from warpSPH.modules.incompressible.divergenceFree import computeMomentumIncompressible
 
 _orig_solveDivergenceFree = dfmod.solveDivergenceFree

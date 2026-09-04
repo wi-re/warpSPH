@@ -4,7 +4,7 @@ existing warp operators, not dedicated kernels) allows.
 
 Why this exists
 ---------------
-`IncompressibleSPHScheme.divergenceFree` (`schemes/dfsph.py`) is Cornelis et
+`IncompressibleSPHScheme.divergenceFree` (`schemes/divergenceFree.py`) is Cornelis et
 al.'s VD+PS step, not DFSPH: it enforces `div v = 0` with a projection and then
 applies the *density-invariance* correction as a momentum-neutral **position
 shift** (`x += dt**2 a_p`, `DFSPH_IMPROVEMENT_PLAN.md` 1.2/1.3). A position
@@ -226,7 +226,7 @@ XSPH_BOUNDARY_EPSILON = 0.0
 # velocity field extended by `computeBoundaryVelocities` (also step 2, driven
 # by each boundary region's `BCType` -- `freeSlip` reflection / `noSlip`
 # mirror / `extended` MLS -- exactly as `schemes/deltaSPH.py` and
-# `schemes/dfsph.py` do). Part 39's `_physViscosity` + `PHYS_VISCOSITY_*`
+# `schemes/divergenceFree.py` do). Part 39's `_physViscosity` + `PHYS_VISCOSITY_*`
 # module globals (a hand-rolled Brookshaw Laplacian and a hand-rolled Adami
 # no-slip mirror) duplicated that machinery and were removed; the wall no-slip
 # is `BCType.noSlip` on the boundary region (`hydrostaticColumn`'s `wallBC`
@@ -606,7 +606,7 @@ def dfsphReference_step(system: Any, dt: float, config: Any, schemeConfig: Any,
     enforceDirichlet(system, system.t, dt, config, schemeConfig)
     # Extend the boundary velocity field per each boundary region's `BCType`
     # (`freeSlip` reflection / `noSlip` mirror / `extended` MLS), exactly as
-    # `schemes/deltaSPH.py` and `schemes/dfsph.py` do -- this is what gives
+    # `schemes/deltaSPH.py` and `schemes/divergenceFree.py` do -- this is what gives
     # `computeVelocityDiffusion` (below) a real no-slip wall when the case
     # asks for one. A strict no-op with no `kind == 1` particles (periodic
     # cases). The boundary rows keep the extended velocity for the rest of the

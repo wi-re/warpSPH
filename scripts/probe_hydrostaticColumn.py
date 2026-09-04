@@ -32,7 +32,7 @@ from warpSPH.modules.incompressible.drift import computePressureShiftIISPH
 from warpSPH.modules.momentum.incompressible import computeMomentumIncompressible
 from warpSPH.modules.pressure.iisph import computePressureAccelIISPH
 
-from warpSPH.schemes import dfsph as dfsph_mod
+from warpSPH.schemes import divergenceFree as dfsph_mod
 from warpSPH.systems import incompressible as sysmod
 from warpSPH.configurations import ShiftPressureGauge
 from warpSPH.cases.hydrostaticColumn import hydrostaticColumnCase as case

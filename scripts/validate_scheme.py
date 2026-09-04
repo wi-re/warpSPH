@@ -37,6 +37,25 @@ Two profiles, and the order matters:
 * **full** -- the resolution and duration each case is actually graded at,
   plus videos. Expensive (`sloshingTank` alone is 7 s of physics).
 
+`--fluidOnly` / `--boundaryOnly` filter the experiment table on
+`Experiment.hasBoundary` (does the case sample `kind==1` particles). Use them
+to grade a near-wall pressure-closure change without re-running the periodic /
+free-space experiments it cannot affect -- a boundary-only sweep is 7
+experiments instead of 14, and a fluid-only run is a one-shot "confirms the
+closure is a no-op away from a wall" check (DFSPH_IMPROVEMENT_PLAN.md Part 56).
+
+`--wallPressure {shepard,mls,mirror,none}` sets `WARPSPH_WALL_PRESSURE_MODE`
+for every child subprocess -- the shared env override
+`modules/incompressible/incompressible.py` (`_SHIFT_WALL_PRESSURE`, the VD+PS
+shift, non-gravity cases) and `schemes/omniIncompressible.py`
+(`WALL_PRESSURE_MODE`, the in-step CD fold, gravity cases) both read, so one
+flag covers every boundary experiment in this table regardless of which path
+its case takes. Omit it to run each module's own compiled-in default
+(`'shepard'` for both, as of Part 56). Meaningless for `--scheme band2018pb`
+(a different operator with boundary samples as solve unknowns, not an
+extrapolated closure -- see `band2018pb.CLOSED_DOMAIN_GAUGE` instead) and for
+`--fluidOnly` (no boundary particles for it to touch).
+
 Each experiment runs in **its own subprocess** so one divergence, CUDA OOM, or
 hard crash cannot take the sweep with it -- the same reason `run_sweep.py` does
 it. Results land in a timestamped directory under `sweeps/`:
@@ -140,6 +159,14 @@ class Experiment:
     maxPairedGrowth: float = 2.0
     maxVoid: float = 0.02
     timeout: int = 3600
+    #: Does this experiment sample `kind==1` boundary particles? Drives
+    #: `--fluidOnly`/`--boundaryOnly`. A near-wall pressure-closure choice
+    #: (`--wallPressure`, `WARPSPH_WALL_PRESSURE_MODE`) can only change a
+    #: `False` experiment's result if that closure leaks into `alpha`/other
+    #: fluid-only paths, which it should not -- `--fluidOnly` exists to make
+    #: that "no boundary particles -> the mode is provably a no-op" claim
+    #: checkable in one run instead of assumed, rather than to skip coverage.
+    hasBoundary: bool = False
 
 
 def _get(m: Dict[str, Any], key: str) -> Optional[float]:
@@ -261,12 +288,15 @@ EXPERIMENTS: List[Experiment] = [
     ),
     Experiment(
         name='randomFlow-bounded', case='randomFlowIncompressible',
-        purpose=('Closed box, no free surface -- the active-track acceptance test. '
-                 'NaNs under divergenceFree; needs the closed-domain gauge.'),
+        purpose=('Closed box, no free surface -- the near-wall pressure-closure '
+                 'acceptance test (DFSPH_IMPROVEMENT_PLAN.md Part 56). NaNs under '
+                 'divergenceFree with the historical frozen-boundary-pressure '
+                 'closure; `_SHIFT_WALL_PRESSURE`/`--wallPressure` picks the fix.'),
         params=dict(bounded=True),
         smoke=dict(nx=48, nSteps=60), full=dict(nx=64, nSteps=200),
         runKwargs=dict(integrationScheme='semiImplicitEuler'),
         rhoBand=RANDOMFLOW_RHO,
+        hasBoundary=True,
         checks=[chk('KE decays', lambda m: _decays(m)),
                 chk('no velocity spike (|v|max < 5)', lambda m: (
                     None if _get(m, 'vmaxPeak') is None else _get(m, 'vmaxPeak') < 5.0))],
@@ -278,6 +308,7 @@ EXPERIMENTS: List[Experiment] = [
         smoke=dict(nx=48, nSteps=60), full=dict(nx=64, nSteps=200),
         runKwargs=dict(integrationScheme='semiImplicitEuler'),
         rhoBand=RANDOMFLOW_RHO,
+        hasBoundary=True,
         checks=[chk('KE decays', lambda m: _decays(m)),
                 chk('no velocity spike (|v|max < 5)', lambda m: (
                     None if _get(m, 'vmaxPeak') is None else _get(m, 'vmaxPeak') < 5.0))],
@@ -292,6 +323,7 @@ EXPERIMENTS: List[Experiment] = [
         watch=['pressureSlopeRatio', 'embeddedMinDensity', 'densityP05'],
         rhoBand=(0.85, 1.10),
         freeSurface=True,
+        hasBoundary=True,
         checks=[chk('quiescent (|v|max < 0.5)', lambda m: (
                     None if _get(m, 'maxVelocity_tailMedian') is None
                     else _get(m, 'maxVelocity_tailMedian') < 0.5)),
@@ -310,6 +342,7 @@ EXPERIMENTS: List[Experiment] = [
         watch=['pressureSlopeRatio', 'embeddedMinDensity', 'densityP05'],
         rhoBand=(0.85, 1.10),
         freeSurface=True,
+        hasBoundary=True,
         checks=[chk('quiescent (|v|max < 0.5)', lambda m: (
                     None if _get(m, 'maxVelocity_tailMedian') is None
                     else _get(m, 'maxVelocity_tailMedian') < 0.5)),
@@ -328,6 +361,7 @@ EXPERIMENTS: List[Experiment] = [
         watch=['nPenetrating', 'maxPenetrationDx'],
         rhoBand=(0.70, 1.20),
         freeSurface=True,
+        hasBoundary=True,
         checks=[chk('wall holds (nPenetrating <= 3)', lambda m: (
                     None if _get(m, 'nPenetrating_max') is None
                     else _get(m, 'nPenetrating_max') <= 3))],
@@ -340,6 +374,7 @@ EXPERIMENTS: List[Experiment] = [
         watch=['nPenetrating', 'maxPenetrationDx'],
         rhoBand=(0.70, 1.20),
         freeSurface=True,
+        hasBoundary=True,
         checks=[chk('wall holds (nPenetrating <= 3)', lambda m: (
                     None if _get(m, 'nPenetrating_max') is None
                     else _get(m, 'nPenetrating_max') <= 3))],
@@ -399,6 +434,7 @@ EXPERIMENTS: List[Experiment] = [
         rhoBand=(0.60, 1.40),
         timeout=14400,
         freeSurface=True,
+        hasBoundary=True,
         checks=[chk('Sensor-1 peak in 1-30 kPa', lambda m: (
                     None if _get(m, 'sensorPressure_max') is None
                     else 1e3 < _get(m, 'sensorPressure_max') < 3e4)),
@@ -619,10 +655,13 @@ def fmt(v, width=10):
     return str(v).rjust(width)
 
 
-def report(graded: Dict[str, Dict[str, Any]], scheme: str, profile: str) -> str:
+def report(graded: Dict[str, Dict[str, Any]], scheme: str, profile: str,
+          wallPressure: Optional[str] = None) -> str:
     mark = {'PASS': 'PASS', 'FAIL': 'FAIL', 'PARTIAL': 'PART', 'ERROR': 'ERR '}
     lines: List[str] = []
     lines.append(f'# Scheme validation: `{scheme}` ({profile} profile)')
+    if wallPressure is not None:
+        lines.append(f'`WARPSPH_WALL_PRESSURE_MODE={wallPressure}`')
     lines.append('')
     counts: Dict[str, int] = {}
     for g in graded.values():
@@ -673,6 +712,16 @@ def main() -> int:
     ap.add_argument('--cases', nargs='*', default=None,
                     help='experiment names (default: all)')
     ap.add_argument('--skip', nargs='*', default=[])
+    scope = ap.add_mutually_exclusive_group()
+    scope.add_argument('--fluidOnly', action='store_true',
+                       help='only experiments with no kind==1 boundary particles')
+    scope.add_argument('--boundaryOnly', action='store_true',
+                       help='only experiments that sample kind==1 boundary particles')
+    ap.add_argument('--wallPressure', choices=('shepard', 'mls', 'mirror', 'none'),
+                    default=None,
+                    help=('override the near-wall pressure closure '
+                          '(WARPSPH_WALL_PRESSURE_MODE) for every child run -- '
+                          'see the module docstring'))
     ap.add_argument('--video', action='store_true')
     ap.add_argument('--out', default=None)
     ap.add_argument('--list', action='store_true')
@@ -684,7 +733,8 @@ def main() -> int:
 
     if args.list:
         for e in EXPERIMENTS:
-            print(f'{e.name:26s} {e.case:26s} {e.purpose}')
+            boundary = 'boundary' if e.hasBoundary else 'fluid-only'
+            print(f'{e.name:26s} {e.case:26s} {boundary:10s} {e.purpose}')
         return 0
 
     # -- child ------------------------------------------------------------
@@ -698,16 +748,29 @@ def main() -> int:
     # -- parent -----------------------------------------------------------
     selected = [e for e in EXPERIMENTS
                 if (args.cases is None or e.name in args.cases)
-                and e.name not in args.skip]
+                and e.name not in args.skip
+                and (not args.fluidOnly or not e.hasBoundary)
+                and (not args.boundaryOnly or e.hasBoundary)]
     if not selected:
         print('no experiments selected', file=sys.stderr)
         return 2
+
+    # Every child subprocess below inherits `os.environ` (`subprocess.run`'s
+    # default with no `env=` given), so setting this once here is enough to
+    # reach both `_SHIFT_WALL_PRESSURE` and `WALL_PRESSURE_MODE` -- see the
+    # module docstring on why a sweep needs both toggled together.
+    if args.wallPressure is not None:
+        os.environ['WARPSPH_WALL_PRESSURE_MODE'] = args.wallPressure
 
     stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
     outDir = Path(args.out) if args.out else (
         REPO / 'sweeps' / f'validate-{args.scheme}-{args.profile}-{stamp}')
     outDir.mkdir(parents=True, exist_ok=True)
+    scopeLabel = ('fluidOnly' if args.fluidOnly else
+                  'boundaryOnly' if args.boundaryOnly else 'all')
     print(f'scheme   {args.scheme}\nprofile  {args.profile}\n'
+          f'scope    {scopeLabel}\n'
+          f'wallPressure {args.wallPressure or "(module default)"}\n'
           f'output   {outDir}\nrunning  {len(selected)} experiments\n')
 
     graded: Dict[str, Dict[str, Any]] = {}
@@ -738,7 +801,7 @@ def main() -> int:
         graded[exp.name] = g
         print(f'{g["status"]:8s} {time.time() - t0:7.1f}s')
 
-    text = report(graded, args.scheme, args.profile)
+    text = report(graded, args.scheme, args.profile, args.wallPressure)
     (outDir / 'summary.md').write_text(text)
     (outDir / 'summary.json').write_text(json.dumps(
         {k: {'status': v['status'],

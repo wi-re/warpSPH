@@ -20,7 +20,7 @@ def test_everySchemeNamesItsConfigTheSame(caseName):
     """One loop drives every scheme only because they agree on the keyword.
 
     ``compSPH_step``/``crkSPH_step``/``compressibleSPH_Monaghan`` used to call it
-    ``compParams`` while ``deltaSPH_step``/``dfsph_step`` called it
+    ``compParams`` while ``deltaSPH_step``/``divergenceFree_step`` called it
     ``schemeConfig``; the integrator forwards ``**kwargs`` verbatim, so a caller
     that guessed wrong got a ``TypeError``. The runner passes ``schemeConfig=``
     unconditionally now, so this is the invariant holding that up.
