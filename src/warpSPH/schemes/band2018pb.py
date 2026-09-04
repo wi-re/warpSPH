@@ -42,24 +42,29 @@ from ..modules.boundaryConditions import (computeForcing, enforceDirichlet,
 from ..modules.density import computeDensities
 from ..modules.gravity import computeGravity
 from ..modules.incompressible.pressureBoundaries import (
-    bandActualVolumes, bandApplyOperator, bandBoundaryUnknownMask, bandDiagonal,
-    bandInjectVolumes, bandPressureAccel, bandRelaxation, bandRestVolumes,
-    bandVelocityDivergence, bandWellPosedMask)
+    bandActualVolumes, bandApplyOperator, bandBoundaryUnknownMask,
+    bandConstantModeRatio, bandDiagonal, bandInjectVolumes, bandPressureAccel,
+    bandRelaxation, bandRestVolumes, bandVelocityDivergence, bandWellPosedMask)
 from ..systems.incompressible import IncompressibleSystemUpdate
 
 __all__ = ['band2018pb_step']
 
-#: Relaxed-Jacobi fluid relaxation `omega_f`. The paper uses 0.5; on this
-#: codebase's composed operator at `n_h = 4` the fixed-point window is far
-#: tighter -- and tighter than `omniIncompressible`'s ~0.3, because folding
-#: the boundary interface rows into the same Jacobi loop stiffens the
-#: operator. The window is also resolution-dependent: nx=64 tolerates ~0.1,
-#: nx=128 needs ~0.05 (0.03 detonates -- non-monotone). `0.05` is the
-#: conservative single default that holds `hydrostaticColumn` nx=32/64/128
-#: and `tgv`; a resolution-scaled `omega` is a TODO. At `0.05` the nx=64
-#: column is very slightly over-compressed (bulk `ρ ~ 1.002`, deep layer
-#: `~1.013`) vs `0.1`'s `~1.0006`.
-OMEGA_FLUID = 0.05
+#: Relaxed-Jacobi base relaxation. The paper uses 0.5 (and states that only
+#: `0 < omega <= 0.5 V0_i/h^d` is stable); on this codebase's composed operator
+#: at `n_h = 4` the fixed-point window is tighter, in the same family as
+#: `omniIncompressible`'s ~0.3. `bandRelaxation` scales every row by this one
+#: constant, per the paper's `omega_i = omega_base V0_i/h^d`.
+#:
+#: `0.1` at every resolution measured (`hydrostaticColumn` 200-300 steps):
+#: nx=32 `embMin` 0.997; nx=64 `embMin` 0.999 / `slope` 1.007 / `|v|max` 0.13;
+#: nx=128 `embMin` 1.001 / `slope` 1.024 / `|v|max` 0.22 / 2 spray particles.
+#: `0.2` and above detonate at nx=128 (`|v|max` ~1e3).
+#:
+#: The earlier `0.05`, and the note that the window was resolution-dependent
+#: (nx=128 "needs" 0.05) because boundary rows "stiffen the operator", were
+#: both artifacts of the `bandRelaxation` scaling bug fixed alongside this --
+#: the boundary rows, not the fluid, were what the small value was protecting.
+OMEGA_FLUID = 0.1
 #: Paper Algorithm 1: `while not converged` with a 3-iteration floor, no hard
 #: cap stated; matched to `omniIncompressible`'s density solve budget.
 DENSITY_MIN_ITERATIONS = 8
@@ -84,12 +89,47 @@ DAMPING = 0.0
 #: by a uniform absolute `eps * median(|dt^2 a_ii|)` over the fluid rows, the
 #: same device as `omniIncompressible.CD_TIKHONOV` (Part 43). `band2018pb`
 #: needs it non-zero (unlike `omniIncompressible`, where it is opt-in): the
-#: relaxed Jacobi diverges outright at nx>=64 without it (measured -- the
-#: near-surface rows with `|a_ii| ~ 1e-6` detonate). With `bandWellPosedMask`
-#: dropping the worst of those rows, `0.1` (down from an earlier `0.3`) is
-#: enough and leaves the column near rest (bulk `ρ ~ 1.002` at nx=64 vs
-#: `~1.017` at `0.3`); `0.0` / `0.05` still detonate.
-DIAG_TIKHONOV = 0.1
+#: relaxed Jacobi loses the column at nx>=64 without it -- `tik = 0` gives
+#: `embMin` 0.44 / 107 spray at nx=64 and 0.87 / 117 at nx=128.
+#:
+#: Swept at `OMEGA_FLUID = 0.1` with the `bandRelaxation` scaling fixed:
+#: `0.05` and `0.1` both hold nx=32/64/128, `0.3` loses nx=128 (`embMin`
+#: 0.38). `0.05` is kept because it over-compresses least -- bulk `ρ` 1.0035
+#: vs 1.0063 at nx=64 and 1.013 vs 1.023 at nx=128, with `pressureSlopeRatio`
+#: correspondingly closer to 1 (1.004 / 1.015 vs 1.007 / 1.024) -- and because
+#: the paper carries no Tikhonov term at all, so less of it is more faithful.
+#: (The earlier `0.3`, then `0.1`, were tuned against the `bandRelaxation`
+#: bug, which is what actually needed the heavy damping.)
+DIAG_TIKHONOV = 0.05
+
+#: Closed-domain pressure gauge. `'off'` / `'auto'` (default) / `'always'`.
+#:
+#: Eq. 8 is a summation gradient, so a uniform `p` produces no acceleration
+#: wherever the kernel support is complete. In a fully enclosed domain that is
+#: everywhere, so the constant is a null mode of `A` and the pressure is fixed
+#: only up to an additive constant -- and the Eq. 18 `max(., 0)` clamp, which
+#: can only push a row up, ratchets that constant away instead of pinning it.
+#: On `randomFlowIncompressible --bounded` (a closed box, no free surface) this
+#: is fatal: step 1 already solves to `p in [1.6e3, 2.6e3]` -- a pure offset,
+#: `|a_p| ~ 2e3` -- and KE runs to 1e8 by step 200 while the density stays at
+#: [0.992, 1.007], the "a solve overshoots" signature of Part 42.
+#:
+#: When the gauge fires, each iterate has its mean over the solve rows removed
+#: and the non-negativity clamp is dropped: a closed domain has no free surface,
+#: so there is no tensile instability for the clamp to suppress, and Part 42
+#: reached the same pairing (`p` kept mean-zero, no clamp) for
+#: `omniIncompressible`'s closed-box compatibility projection.
+#:
+#: `'auto'` keys on `bandConstantModeRatio` (`rms|A.1| / rms|a_ii|`) rather than
+#: on the *source*: `omniIncompressible.CD_SOURCE_PROJECT`'s mean-dominated-
+#: source test does NOT fire here (measured `fracUniform ~ 0.03`, threshold
+#: 0.7), because the source is well-conditioned -- it is the *solution* that is
+#: unpinned, not the source that is incompatible. Two distinct closed-domain
+#: failure modes; this is the second.
+CLOSED_DOMAIN_GAUGE = 'auto'
+#: `bandConstantModeRatio` below this => the constant is a null mode => gauge.
+#: Measured at nx=64 step 1: closed box 0.032, free-surface column 1.29.
+NULL_MODE_THRESHOLD = 0.25
 
 #: Post-solve XSPH velocity filter, identical in form to
 #: `omniIncompressible._xsphFilter` (omniSPH `XSPH` + `BXSPH`). Default off --
@@ -142,6 +182,20 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
         invDiag = torch.where(diagBad, torch.zeros_like(diagEff),
                               omega / diagEff.clamp(max=-1e-30))
 
+        # Closed-domain gauge: is the constant a null mode of A? (See
+        # `CLOSED_DOMAIN_GAUGE`.) One extra operator application per step.
+        if CLOSED_DOMAIN_GAUGE == 'always':
+            gauge = True
+        elif CLOSED_DOMAIN_GAUGE == 'auto':
+            gauge = bandConstantModeRatio(
+                state, config, adjacency, diag, V, fluid, rows,
+                dt) < NULL_MODE_THRESHOLD
+        elif CLOSED_DOMAIN_GAUGE == 'off':
+            gauge = False
+        else:
+            raise ValueError(
+                f'Unknown CLOSED_DOMAIN_GAUGE: {CLOSED_DOMAIN_GAUGE!r}')
+
         p = torch.where(rows, warmStart, torch.zeros_like(warmStart))
         err = 0.0
         it = 0
@@ -151,7 +205,14 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
             if shift:
                 Ap = Ap - shift * p          # `(A - shift*I) p`
             p = p + invDiag * (source - Ap)
-            p = p.clamp(min=0.0)
+            if gauge:
+                # Pin the unconstrained constant instead of clamping (a closed
+                # domain has no free surface, so no tensile instability).
+                p = p - torch.where(rows, p[rows].mean().expand_as(p),
+                                    torch.zeros_like(p))
+                p = torch.where(rows, p, torch.zeros_like(p))
+            else:
+                p = p.clamp(min=0.0)
             bad = diagBad | (~torch.isfinite(p)) | (p.abs() > 1e25) | ~rows
             p = torch.where(bad, torch.zeros_like(p), p)
             if rows.any():
