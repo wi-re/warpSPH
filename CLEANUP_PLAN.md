@@ -1,5 +1,21 @@
 # warpSPH — Cleanup Plan
 
+> ## ✅ COMPLETE — 09-04
+>
+> Nothing actively tracked remains open. Of the three items still open as of
+> the last update, two were decided against (repo-weight rewrite: dropped, not
+> a concern — see below; notebook simplification remainder: dropped, notebooks
+> are fine as-is) and the third (dead commented-out code in 6 files) isn't, on
+> its own, a strong enough reason to keep a standing plan document alive — per
+> the user, 09-04; left below as an opportunistic note, not tracked work. The
+> one item actually completed this pass: the `warp-lang` version pin — upgraded
+> to 1.17.0, pinned, full `warpSPH` suite green, and cross-checked against
+> `warpSPHCore` (419/420 tests green, the one failure pre-existing and
+> unrelated; the specific ternary-adjoint bug this pin exists for was directly
+> reproduced as fixed via `warpSPHCore/scripts/repro_ternary_adjoint_zeroing.py`
+> — see "Deferred by decision" below). Kept as a historical record;
+> `LESSONS_LEARNED.md` still holds the reusable lessons.
+
 Status tracker for the cleanup sweep preceding forward-mode AD work. Core and
 Integrators (separate repos) are already overhauled; this repo was the lagging
 piece. For reusable lessons (bug classes, gotchas, process notes) rather than
@@ -11,13 +27,14 @@ current status, see `LESSONS_LEARNED.md` and, for AD/gradcheck specifically,
 | Phase | Status |
 |---|---|
 | 0 — GitHub/import renames, dead-code deletions, doc links | ✅ Done |
-| 1 — Mechanical fixes (editable installs, config round-trip, `__init__.py`s) | ✅ Done except repo weight (deferred, see below) |
+| 1 — Mechanical fixes (editable installs, config round-trip, `__init__.py`s) | ✅ Done |
 | 2 — Examples → runnable scripts + first tests | ✅ Done |
 | 2b — Every example as a runnable case (27/27) | ✅ Done |
-| 3 — Structural (`SchemeBundle`, `compParams`→`schemeConfig`, `DomainDescription`, namespace) | ✅ Done except `__all__` coverage (legibility, open) |
-| 3b — Post-reshuffle repair (`io/`, `math/`, `geometry/` packages) | ✅ Repair done; backlog open (below) |
+| 3 — Structural (`SchemeBundle`, `compParams`→`schemeConfig`, `DomainDescription`, namespace) | ✅ Done, including `__all__` coverage (97%, remainder explicitly out of scope) |
+| 3b — Post-reshuffle repair (`io/`, `math/`, `geometry/` packages) | ✅ Done — remaining backlog (below) resolved or dropped by decision, 09-04 |
 | 4 — AD-readiness (gradcheck Tiers 0-2, `.detach()`/`.item()`/`.cpu()`/`.numpy()` audits) | ✅ **Done (2026-08-12)** — zero open findings; the Phase 4.2 `balanceTerm` segfault no longer reproduces either (2026-08-15, see below) |
-| Repo weight (git-history rewrite) | ⏸ Deferred by decision |
+| Repo weight (git-history rewrite) | 🚫 Dropped, not pursuing (09-04) |
+| warp-lang version pin | ✅ **Done (09-04)** — 1.17.0 |
 
 Naming is fully unified: local dir == GitHub repo == import == PyPI dist for all
 four packages (`warpSPH`, `warpSPHCore`, `warpSPHIntegrators`, `warpSPHPlotting`) —
@@ -246,7 +263,7 @@ see README for the current layout, not reconstructed here.
         acceleration" path was started and abandoned mid-edit.
       - The `passive` field on every `*SystemUpdate` (`compressibleMonaghan.py`,
         `incompressible.py`, `weaklyCompressible.py`) is populated as an
-        all-`False` mask by every scheme (`crkSPH.py`, `dfsph.py`, `compSPH.py`,
+        all-`False` mask by every scheme (`crkSPH.py`, `divergenceFree.py`, `compSPH.py`,
         `deltaSPH.py`) but never read anywhere except the dead code above —
         declared, filled in, never consumed.
       - `rigidBody/integrate.py`: `integrateRigidBody(rigidBody, dudt, dwdt,
@@ -263,7 +280,7 @@ see README for the current layout, not reconstructed here.
       - `utils/timer.py`'s `TimedBlock.__exit__` never actually sets
         `cuda_ms` (the `elapsed_time`/`synchronize()` calls are commented
         out). Low-stakes: every current use site is itself commented-out
-        profiling scaffolding in `schemes/deltaSPH.py`/`dfsph.py` that
+        profiling scaffolding in `schemes/deltaSPH.py`/`divergenceFree.py` that
         computes `cuda_ms` externally instead.
       - `systems/compSPH.py`/`compressibleMonaghan.py`: `entropies` is tagged
         `'soundSpeed'` (duplicating `soundspeeds`' own tag) and `pressures` is
@@ -297,16 +314,20 @@ see README for the current layout, not reconstructed here.
       (listed in the module-documentation item above) — do opportunistically
       if those get touched, the way `schemes/` (converted to explicit imports)
       was the worked pattern before this pass.
-- [ ] **Dead commented-out code** in `schemes/crkSPH.py`,
+- [~] **Dead commented-out code** in `schemes/crkSPH.py`,
       `modules/mdbc/wp_nopenshift.py`, `shockCapturing/CullenDehnen2010.py`,
-      `schemes/dfsph.py`, `caseUtils/compressible/sod/sod.py`,
+      `schemes/divergenceFree.py`, `caseUtils/compressible/sod/sod.py`,
       `schemes/deltaSPH.py`. The "~421 lines" figure recorded here on 2026-08-12
       did not reproduce on 2026-08-15: a re-count over the same six files gave
       598 by one definition of "commented-out code" and 522 by a looser one, and
       every per-file number came out higher than listed. The counting rule was
       never written down, so **fix the definition first, then re-measure** —
       per LESSONS_LEARNED's "re-measure a stale plan's numbers" rule, which was
-      itself derived from this kind of drift.
+      itself derived from this kind of drift. **Dropped from active tracking,
+      09-04** (per the user: not a strong enough reason to keep a whole plan
+      document alive) — clean up opportunistically if one of these files gets
+      touched for another reason, the way other dead-code removal has happened
+      inline elsewhere this repo's history, rather than as scheduled work.
 - [x] **Notebook simplification, pilot (2026-08-12): Sod.** Started with
       `01-sod-shock-tube-1d.py`/`01-Sod_Shock_Tube_1D(_resume).ipynb`, moved into
       `examples/compressible/01-sod/` (`sod_1d.py`/`.ipynb`,
@@ -381,7 +402,10 @@ see README for the current layout, not reconstructed here.
       `refreshFieldPlotter`, is new in `cases/plotting.py`, piloted on `08`).
       `14`/`15` merged into one `14-triplePoint/` directory the way `06`/`07`
       merged into `06-sedov/` earlier in this item.
-- [ ] **Notebook simplification, the rest.** `examples/weaklyCompressible/` is
+- [~] **Notebook simplification, the rest — dropped, not pursuing further
+      (per the user, 09-04).** Notebooks are fine as they are at this stage;
+      the remaining slot below is left exactly as it was when this was last
+      touched, not tracked as active work. `examples/weaklyCompressible/` is
       12 of 13 slots done (see its own `MIGRATION_PLAN.md` for the per-slot
       table, which is the authority here). Only slot **13**
       (`channelFlow.openFlowCase`) remains: slot 11 was finished 2026-08-14 with
@@ -546,21 +570,19 @@ standing commands (89 tests, `check_imports.py`, 27/27 sweep).
 
 ## Deferred by decision
 
-- **Repo weight / git-history rewrite.** Its precondition (examples runnable as
-  `.py`, physics verified) is now met, but still deliberately last — the media in
-  question should be rewritten once, against the final polished assets, not against
-  output Phase 2 was about to regenerate anyway. `nbstripout` (the separable,
-  non-destructive piece) is already installed. When this is picked up: the media
-  (`.mp4`/`.gif`) was measured at 338 MB across 30 files, each committed exactly
-  once — no recommit churn to reclaim there; the actual bloat is 312 blob versions
-  of 42 notebooks (289 MB), which `nbstripout` addresses going forward. `git-lfs` is
-  not installed on this machine.
-- **warp-lang version pin.** `pyproject.toml` pins no version. Pin to **1.17** once
-  it ships (fixes the same-array-ternary/Interpolate adjoint bug at the source).
-  Until then any installed version is fine, provided kernel-code ternaries route
-  through warpSPHCore's `access_optional` (or an explicit `if`/`else`) rather than
-  an inline conditional expression. Don't pin to 1.15.0/1.16.0/1.12.0 as a
-  workaround — that's been explicitly ruled out.
+- **Repo weight / git-history rewrite — dropped, not a concern (per the user,
+  09-04).** Not just deferred any further: the validation-data commits since
+  (SPHERIC TestCase10's data/video files, ~intentionally~ added this session)
+  mean the repo is deliberately taking on more weight at this stage, not
+  trying to shed it. `nbstripout` stays installed and still applies going
+  forward regardless. If a history rewrite is ever wanted it would need
+  re-scoping from scratch against whatever the tree looks like then — the
+  338 MB / 312-blob-version numbers below are stale and shouldn't be reused.
+- **warp-lang version pin — DONE, 09-04.** Upgraded to **1.17.0** and pinned
+  in `pyproject.toml` (`warp-lang>=1.17.0`, fixes the same-array-ternary/
+  Interpolate adjoint bug at the source, so no more `access_optional`
+  workaround requirement going forward). Don't downgrade to 1.15.0/1.16.0/
+  1.12.0 — that's been explicitly ruled out.
 
 ## Notes
 

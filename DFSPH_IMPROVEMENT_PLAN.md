@@ -14,11 +14,12 @@ full part-by-part investigation narrative (58 parts, 09-04 and earlier) is in
 no longer carries it inline (cut in the Part 58 cleanup pass; nothing was
 lost, `DFSPH_FINDINGS.md` §1.1–§1.20 and §9 already had it).
 
-**Branch note.** This work is on a branch intended to merge back to main
-after an artifact cleanup pass — see "Pre-merge cleanup" below for what that
+**Branch note.** This work landed on `dfsph-shift-pressure-gauge` and was
+fast-forward-merged into `main` on 09-04 (commit `13b2c96`) after the
+pre-merge artifact cleanup pass — see "Pre-merge cleanup" below for what that
 covered (the omniSPH/SPlisHSPlasH comparison tooling, committed videos, dead
-code, `mdbcMlsPressure`, the `dfsph.py` rename). As of 09-04 that section's
-own list is fully closed — nothing scoped there is still outstanding.
+code, `mdbcMlsPressure`, the `dfsph.py` rename). That section's own list was
+fully closed before the merge; nothing scoped there is still outstanding.
 
 **Units note.** `cflFactor` on the incompressible cases multiplies the
 particle **diameter** `dx`. Numbers in git history before commit `9a9bfe7`
