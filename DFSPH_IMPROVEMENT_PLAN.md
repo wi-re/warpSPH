@@ -226,8 +226,6 @@ to main cleanly.
   landed, noted here for completeness.
 
 **Still open:**
-- **`BoundaryPressureMode.mdbcMlsPressure`** is a candidate for removal, not
-  removed yet — see "What's deprecated about it" below.
 - **The remaining 52 `scripts/probe_*.py` scripts** — see "Done" above.
 
 **Done, 09-04 (later the same day):**
@@ -249,29 +247,47 @@ to main cleanly.
   `dfsph.py`/`dfsph_step` on purpose — that was the name at the time; the new
   file's own docstring says so.
 
-**What's deprecated about `mdbcMlsPressure`, since it came up:** it isn't
-just "measured worse", its whole architecture is the wrong shape for the
-problem. `computeMdbcPressure` (`modules/mdbc/pressure2025.py`) extrapolates
-the boundary pressure **once per step**, before the pressure solve runs, and
-*carries* that value into the next step under relaxation
-(`mdbcPressureRelaxation`, default 0.3) — which exists only to damp a
-feedback loop the once-per-step lag itself creates: a larger boundary
+**`BoundaryPressureMode.mdbcMlsPressure` — REMOVED, 09-04 (later the same
+day).** What was deprecated about it: it isn't just "measured worse", its
+whole architecture was the wrong shape for the problem.
+`computeMdbcPressure` (`modules/mdbc/pressure2025.py`, now deleted)
+extrapolated the boundary pressure **once per step**, before the pressure
+solve ran, and *carried* that value into the next step under relaxation
+(`mdbcPressureRelaxation`, default 0.3) — which existed only to damp a
+feedback loop the once-per-step lag itself created: a larger boundary
 pressure pushes the fluid harder, which projects to an even larger boundary
-value next step. Undamped (`relaxation = 1.0`) it doubles every step and
-NaNs within 7-8 steps (`probe_mdbcMlsPressureInstability.py`); over a real
-900-step run at the published CFL it's the worst configuration measured
-(`|rho-1|` 1.86e-1, worse than the shipped baseline's 1.78e-1) and separately
-NaNs at t=0.21 under `inStepVelocity` (`DFSPH_FINDINGS.md` §3 item 1). Part
-41's `wallPressureExtrapolation` (`modules/incompressible/wallPressure.py`,
-its own `'mls'` mode — a **different** thing despite the shared name) closes
-the same gap properly: it recomputes the wall pressure from the *current*
-fluid iterate **every Jacobi sweep**, with no carried state, so there's no
-lag and nothing to feed back — which is also why it's the thing Part 56 this
-session used to actually fix `randomFlowIncompressible --bounded`, where
-`mdbcMlsPressure` was never even a candidate. Once the properly-shaped fix
-exists and is landed, continuing to patch the lagged one isn't worth it —
-hence "deprecate rather than repair." Not deleted yet, pending a check for
-test/case coverage that exercises the mode specifically.
+value next step. Undamped (`relaxation = 1.0`) it doubled every step and
+NaNed within 7-8 steps; over a real 900-step run at the published CFL it was
+the worst configuration measured (`|rho-1|` 1.86e-1, worse than the shipped
+baseline's 1.78e-1) and separately NaNed at t=0.21 under `inStepVelocity`
+(`DFSPH_FINDINGS.md` §3 item 1). Part 41's `wallPressureExtrapolation`
+(`modules/incompressible/wallPressure.py`, its own `'mls'` mode — a
+**different** thing despite the shared name) closes the same gap properly:
+it recomputes the wall pressure from the *current* fluid iterate **every
+Jacobi sweep**, with no carried state, so there's no lag and nothing to feed
+back — which is also why it's the thing Part 56 this session used to
+actually fix `randomFlowIncompressible --bounded`, where `mdbcMlsPressure`
+was never even a candidate.
+
+**What actually got removed, once a coverage check confirmed it was safe:**
+zero tests reference `mdbcMlsPressure`, `computeMdbcPressure`, or
+`mdbcPressureRelaxation` (checked, not assumed), and the mode's only real
+call site was already dead code (commented out, presumably since
+`c637785`) — selecting it did exactly what `mdbcDensity` does today, a
+silent no-op. Removed: the `BoundaryPressureMode.mdbcMlsPressure` enum value
+and the now-pointless `mdbcPressureRelaxation` config field (with its
+`incompressibleConfigToDict`/`dictToIncompressibleSPHConfig` round-trip
+entries), `modules/mdbc/pressure2025.py` itself, the dead call-site comment
+block in `schemes/divergenceFree.py`, and `scripts/
+probe_mdbcMlsPressureInstability.py` (its entire purpose was probing the
+now-deleted function; its finding is preserved in `DFSPH_FINDINGS.md`).
+Fixed four other probe scripts that swept `mdbcMlsPressure` as one of
+several `BoundaryPressureMode` arms (`probe_boundedIncompressibleBlowup.py`,
+`probe_hydrostaticColumn.py`, `probe_consistentCoupling.py`,
+`probe_randomFlowIncompressibleBoundaryModes.py`) to drop that arm instead
+of erroring on it. Verified: full suite green (112/112),
+`gradcheck_incompressible` green, a live `hydrostaticColumn` run plus a
+config round-trip both work.
 
 **Not a repo-cleanliness issue but worth knowing:** `sweeps/` (582MB) and
 `export/` (23GB) are already gitignored — no action needed before merge,

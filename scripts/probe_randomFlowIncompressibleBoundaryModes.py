@@ -5,11 +5,12 @@ density band ([0.78, 1.33]) was markedly looser than deltaSPH's ([0.998,
 showing a *larger* transient boundary velocity spike, which already ruled
 out "coarse-grid velocity noise" as the whole story. This script reruns that
 same comparison at the case's own production `nx=128` default, plus a
-same-resolution, same-physical-time comparison of the three
-`BoundaryPressureMode` values (`plain`/`mdbcDensity`/`mdbcMlsPressure`)
-against *each other*, which the nx=24 session only ever compared at matched
-step-count (not meaningful once `dt` differs run-to-run under DFSPH's
-adaptive timestep hook).
+same-resolution, same-physical-time comparison of the `BoundaryPressureMode`
+values (`plain`/`mdbcDensity`) against *each other*, which the nx=24 session
+only ever compared at matched step-count (not meaningful once `dt` differs
+run-to-run under DFSPH's adaptive timestep hook). (A third mode,
+`mdbcMlsPressure`, used to be swept here too; removed in the pre-merge
+cleanup pass, 09-04 -- see DFSPH_IMPROVEMENT_PLAN.md.)
 
 Uses `warpSPH.runner.runner.run()` directly (not the CLI) so every mode/case
 shares one in-process driver and `store=False, plot=False` keep this fast --
@@ -32,7 +33,7 @@ from warpSPH.cases.randomFlow import randomFlowCase
 from warpSPH.cases.randomFlowIncompressible import randomFlowIncompressibleCase
 from warpSPH.runner import run
 
-BOUNDARY_MODES = ['plain', 'mdbcDensity', 'mdbcMlsPressure']
+BOUNDARY_MODES = ['plain', 'mdbcDensity']
 
 
 def summarize(trajectory, tag, printEvery):

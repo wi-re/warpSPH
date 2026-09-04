@@ -183,8 +183,9 @@ XSPH_BOUNDARY = 0.0
 #: (Part 42). `'shepard'` (0th order, no linear term) threads both:
 #: `hydrostaticColumn` nx=128 holds (`|v|max` ~0.5, the exact hydrostatic
 #: gradient) and `randomFlowIncompressible --bounded` holds (`|v|max` decays
-#: to ~0.4). No relaxation / cross-step lag (unlike `computeMdbcPressure`),
-#: so not the `mdbcMlsPressure` feedback instability. `'mls'` is kept as an
+#: to ~0.4). No relaxation / cross-step lag (unlike the removed
+#: `BoundaryPressureMode.mdbcMlsPressure`'s `computeMdbcPressure`), so not
+#: that mode's feedback instability. `'mls'` is kept as an
 #: option for quiescent free-surface cases where its first-order accuracy
 #: recovers a slightly better near-wall density (Part 41).
 #:
