@@ -477,6 +477,105 @@
 }
 
 
+% --- Artificial compressibility (ACSPH) -----------------------------------------
+%
+% The scheme of ACSPH_PLAN.md and the papers it depends on. Added 2026-09-05.
+
+@article{decourcy2024,
+  author  = {De Courcy, Joe J. and Rendall, Thomas C. S. and Constantin, Lucian and Titurus, Brano and Cooper, Jonathan E.},
+  title   = {Incompressible {$\delta$}-{SPH} via artificial compressibility},
+  journal = {Computer Methods in Applied Mechanics and Engineering},
+  year    = {2024},
+  volume  = {420},
+  articleno = {116700},
+  pages   = {116700},
+  doi     = {10.1016/j.cma.2023.116700},
+  note    = {Open access (CC BY). The ACSPH scheme ACSPH_PLAN.md implements: the WCSPH equation of state is replaced by a pressure-evolution equation marched in pseudo-time to a divergence-free state at every real time step, via BDF2 + an inner Runge-Kutta loop. Its Eq. (33) pressure bi-Laplacian is Marrone et al.'s (marrone2011) density operator with rho -> p. Precursor: De Courcy et al., SPHERIC 2023 (its ref [32], not obtained).}
+}
+
+@article{antuono2010,
+  author  = {Antuono, M. and Colagrossi, A. and Marrone, S. and Molteni, D.},
+  title   = {Free-surface flows solved by means of {SPH} schemes with numerical diffusive terms},
+  journal = {Computer Physics Communications},
+  year    = {2010},
+  volume  = {181},
+  number  = {3},
+  pages   = {532--549},
+  doi     = {10.1016/j.cpc.2009.11.002},
+  note    = {Origin of the renormalised-gradient correction to the density Laplacian that decourcy2024 Eq. (33) recasts in pressure as AC-2L. Co-cited with antuono2012 for the linear stability bound behind k2 <= 0.2*h*beta.}
+}
+
+@article{antuono2012,
+  author  = {Antuono, M. and Colagrossi, A. and Marrone, S.},
+  title   = {Numerical diffusive terms in weakly-compressible {SPH} schemes},
+  journal = {Computer Physics Communications},
+  year    = {2012},
+  volume  = {183},
+  number  = {12},
+  pages   = {2570--2580},
+  doi     = {10.1016/j.cpc.2012.07.006},
+  note    = {The theoretical analysis of diffusive-term structure: why the plain density Laplacian (decourcy2024's AC-2) cannot hold a hydrostatic gradient at a truncated free surface, why the corrected form is really a bi-Laplacian, and the frozen-diffusion technique. Highest-priority dependency of ACSPH_PLAN.md Part 6.1.}
+}
+
+@article{letouze2013,
+  author  = {Le Touz\'{e}, D. and Colagrossi, A. and Colicchio, G. and Greco, M.},
+  title   = {A critical investigation of smoothed particle hydrodynamics applied to problems with free-surfaces},
+  journal = {International Journal for Numerical Methods in Fluids},
+  year    = {2013},
+  volume  = {73},
+  number  = {7},
+  pages   = {660--691},
+  doi     = {10.1002/fld.3819},
+  note    = {Source of the rotating/stretching square-patch benchmark: the initial pressure field (a Poisson solve) without which the case cannot be initialised, plus the analytic stretching solution and the BEM/LDFM reference data decourcy2024 Fig. 11-12 plot against.}
+}
+
+@article{michel2022,
+  author  = {Michel, J. and Vergnaud, A. and Oger, G. and Hermange, C. and Le Touz\'{e}, D.},
+  title   = {On Particle Shifting Techniques ({PSTs}): Analysis of existing laws and proposition of a convergent and multi-invariant law},
+  journal = {Journal of Computational Physics},
+  year    = {2022},
+  volume  = {459},
+  articleno = {110999},
+  pages   = {110999},
+  doi     = {10.1016/j.jcp.2022.110999},
+  note    = {The shifting law decourcy2024 Eqs. (55)-(57) adopt, chosen there because it has no sound-speed or Mach dependence -- which ACSPH has no way to supply. This codebase's modules/shifting/delta.py implements the Mach-scaled sun2017 law instead; ACSPH_PLAN.md Part 4.2 is the gap.}
+}
+
+@article{ramachandran2021,
+  author  = {Ramachandran, Prabhu and Muta, Abhinav and Ramakrishna, M.},
+  title   = {Dual-time smoothed particle hydrodynamics for incompressible fluid simulation},
+  journal = {Computers \& Fluids},
+  year    = {2021},
+  volume  = {227},
+  articleno = {105031},
+  pages   = {105031},
+  doi     = {10.1016/j.compfluid.2021.105031},
+  note    = {The closest prior art to decourcy2024: EDAC plus dual-time stepping. Source of the pseudo-time material-derivative correction (its Dv-tilde/Dtau terms, decourcy2024 Eqs. 27-31) and of the alpha_PI = 2dt/(2dt+3dtau) point-implicit weighting.}
+}
+
+@article{lobovsky2014,
+  author  = {Lobovsk\'{y}, L. and Botia-Vera, E. and Castellana, F. and Mas-Soler, J. and Souto-Iglesias, A.},
+  title   = {Experimental investigation of dynamic pressure loads during dam break},
+  journal = {Journal of Fluids and Structures},
+  year    = {2014},
+  volume  = {48},
+  pages   = {407--434},
+  doi     = {10.1016/j.jfluidstructs.2014.03.009},
+  note    = {The dam-break experiment behind this codebase's dambreak case geometry and the four wall pressure probes. Supplies the 2.5\%/97.5\% percentile bounds decourcy2024 Fig. 28/30 score against; the pressure signals and wave-height data are published as Supplementary Materials.}
+}
+
+@article{marrone2015,
+  author  = {Marrone, S. and Colagrossi, A. and Di Mascio, A. and Le Touz\'{e}, D.},
+  title   = {Prediction of energy losses in water impacts using incompressible and weakly compressible models},
+  journal = {Journal of Fluids and Structures},
+  year    = {2015},
+  volume  = {54},
+  pages   = {802--822},
+  doi     = {10.1016/j.jfluidstructs.2015.01.014},
+  note    = {The analytic incompressible kinetic-energy drop the two-jet impact case is scored against (decourcy2024 Fig. 25). Also the reference for why a weakly-compressible model dissipates impact energy differently from an incompressible one -- the effect ACSPH exists to remove.}
+}
+
+
 % --- Extended set (one step removed; bibliographic records only, added 2026-08-29) ---
 %
 % Background and related work reached from the core set. Verified against DOI

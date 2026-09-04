@@ -57,7 +57,7 @@ and had to be identified from their front matter alone.
 
 ## What is here
 
-116 documents. The first 39 are the curated core — every row abstracted in
+124 documents. The first 47 are the curated core — every row abstracted in
 `ABSTRACTS.md` and annotated for what it unblocks. The remaining 77, listed
 under **Extended set** below, arrived together on 2026-08-29 and were synced by
 bibliographic record only: `references.bib` has an entry for each, but they are
@@ -68,7 +68,8 @@ text layer were parked in `literature/scans/` rather than indexed here.
 supplied by the user for the kernel-choice question behind the
 `columnCollapse` Wendland2-vs-Wendland4 experiment. `sun2019` and `sun2017`
 were added to the core on 2026-09-03 for
-`docs/historic_plans/WCSPH_SHIFTING_PLAN.md`.)
+`docs/historic_plans/WCSPH_SHIFTING_PLAN.md`. The eight `[AC]` rows arrived on
+2026-09-05 for `ACSPH_PLAN.md`.)
 
 `venue` is the **published** venue, which for an author's-version or preprint
 copy is not always what that copy's own front page says. Full bibliographic
@@ -119,6 +120,19 @@ detail is in `references.bib`; the abstract of every core row is in
 | — | `adami2013` | `adami2013_transport-velocity.pdf` | J. Comput. Phys. 241 2013 | Transport velocity. Closes plan 5 Q7 (background pressure). |
 | — | `sun2017` | `sun2017_delta-plus-sph-model.pdf` | Comput. Methods Appl. Mech. Engrg. 315 2017 | The δ⁺-SPH origin paper: δ-SPH diffusion + PST together. Source of `delta.py`'s shift form, `wp_deltaShift`'s tensile term, and the free-surface `n`-nulling `surfaceNormal` extends. |
 | — | `sun2019` | `sun2019_consistent-particle-shifting-delta-plus-sph.pdf` | Comput. Methods Appl. Mech. Engrg. 348 2019 | Consistent (quasi-Lagrangian) δ⁺-SPH: the δu divergence terms that make the WCSPH shift volume-conserving. Reference method for `docs/historic_plans/WCSPH_SHIFTING_PLAN.md` step 2. |
+
+**Artificial compressibility (ACSPH)**
+
+| plan | bib key | file | venue | what it is |
+|---|---|---|---|---|
+| `[AC]` | `decourcy2024` | `decourcy2024_incompressible-delta-sph-artificial-compressibility.pdf` | Comput. Methods Appl. Mech. Engrg. 420 2024 | **The paper `ACSPH_PLAN.md` implements.** Pressure-evolution equation in place of the EOS, marched in pseudo-time to zero divergence every step. Three defects found on review, recorded in the plan's Part 5. |
+| `[AC]` | `antuono2012` | `antuono2012_numerical-diffusive-terms-weakly-compressible.pdf` | Comput. Phys. Comm. 183(12) 2012 | Why the plain density Laplacian cannot hold a hydrostatic gradient, why the corrected form is a bi-Laplacian, and the stability bound `k₂ = 0.1hβ` sits under. |
+| `[AC]` | `antuono2010` | `antuono2010_free-surface-flows-numerical-diffusive-terms.pdf` | Comput. Phys. Comm. 181(3) 2010 | Origin of the renormalised-gradient correction that lets the diffusive term reach the free surface. `decourcy2024`'s AC-2L is this in pressure. |
+| `[AC]` | `michel2022` | `michel2022_particle-shifting-techniques.pdf` | J. Comput. Phys. 459 2022 | The Mach-free shifting law ACSPH needs and this codebase does not have (`delta.py` is Mach-scaled). Plan Part 4.2. |
+| `[AC]` | `ramachandran2021` | `ramachandran2021_dual-time-sph-incompressible.pdf` | Computers & Fluids 227 2021 | Closest prior art: EDAC + dual-time. Source of the pseudo-time material derivative and the point-implicit weighting. Open-source reference implementation. |
+| `[AC]` | `letouze2013` | `letouze2013_critical-investigation-sph-free-surfaces.pdf` | Int. J. Numer. Meth. Fluids 73(7) 2013 | The square-patch benchmark: its initial pressure Poisson solve, analytic stretching solution and BEM reference data. |
+| `[AC]` | `lobovsky2014` | `lobovsky2014_experimental-dam-break-pressure-loads.pdf` | J. Fluids Struct. 48 2014 | The dam-break experiment: probe geometry and the percentile bounds SPH results are scored against. |
+| `[AC]` | `marrone2015` | `marrone2015_energy-losses-in-water-impacts.pdf` | J. Fluids Struct. 54 2015 | The analytic incompressible KE drop for the two-jet impact case, and why WCSPH gets it wrong. |
 
 **Spatial adaptivity, data structures, analytic boundaries**
 

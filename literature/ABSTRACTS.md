@@ -720,6 +720,108 @@ than sit here looking plausible.
 > In the present work a consistent inclusion of a particle shifting technique (PST) in the weakly compressible Smoothed Particle Hydrodynamic (SPH) models is discussed. Recently, it has been shown that the use of PST can largely improve both the accuracy and the robustness of SPH models. In particular, the δ + -SPH model is a weakly-compressible SPH model where a PST is adopted along with a diffusive term in the continuity equation that helps removing the high-frequency noise on the pressure field. This specific SPH model is able to overcome the main drawbacks that afflict the standard weakly-compressible SPH model. In this work we demonstrate that a consistent introduction of the PST inside the SPH model leads to a new set of equations where some additional terms containing the particle shifting velocity δu have to be taken into account. The effects of these δu-terms become crucial for problems in confined or periodic domains, as well as for long-time simulations of free-surface flows. The proposed scheme is tested against challenging benchmark cases, highlighting when the δu-terms play an important role or not. Further improvements of the PST algorithms for the numerical treatment of the scheme close to the free surface and along the solid boundaries are also discussed.
 
 
+## Artificial compressibility (ACSPH)
+
+The scheme of `ACSPH_PLAN.md` and its dependencies. Added 2026-09-05.
+
+### `decourcy2024`
+
+- **file:** `decourcy2024_incompressible-delta-sph-artificial-compressibility.pdf`
+- **title:** Incompressible δ-SPH via artificial compressibility
+- **authors:** Joe J. De Courcy, Thomas C. S. Rendall, Lucian Constantin, Brano Titurus and Jonathan E. Cooper
+- **venue:** *Computer Methods in Applied Mechanics and Engineering* 420:116700, 2024
+- **doi:** [10.1016/j.cma.2023.116700](https://doi.org/10.1016/j.cma.2023.116700)
+- **copy here:** published version, open access (CC BY)
+- **relevance:** **The paper `ACSPH_PLAN.md` implements.** Replaces the WCSPH equation of state with a pressure-evolution equation marched in pseudo-time to a divergence-free state at every real time step (BDF2 outer, Runge-Kutta inner). Its Eq. (33) pressure bi-Laplacian is `marrone2011`'s density operator with ρ→p, so this repo's `modules/deltaSPH/wp_densityDelta.py` already computes it once generalised off the density field. Three defects found on review and recorded in the plan's Part 5: Eq. (37)'s `ε₄ = min(0, κ₄−ε₂)` should be `max` (as printed the JST operator vanishes in smooth flow), Eq. (40) and Fig. 1 are mutually inconsistent for the 3- and 4-stage schemes, and Eq. (30) carries a stray `h` the other three statements of the same equation do not.
+- **abstract from:** PDF p.1
+
+> Smoothed particle hydrodynamics using artificial compressibility (ACSPH) is developed, with the inclusion of pressure smoothing terms. Theoretical links between pressure/velocity correction incompressible SPH and artificial compressibility are explored, illustrating that ACSPH may be considered an extension of, or closely related to, the 𝛿-SPH method. An implicit dual-time integration procedure is used to enforce an incompressible solution at every time-step, removing acoustic effects arising from the common assumption of weak compressibility. An established weakly-compressible quasi-Lagrangian 𝛿-SPH method is used for comparison against ACSPH, and a series of test cases show that ACSPH provides a similar solution cost to 𝛿-SPH. However, the residual acoustic effects in 𝛿-SPH are removed entirely in ACSPH, providing improved pressure prediction capabilities across all test cases, including intense fluid impacts. Improved modelling of fluid–structure-interaction cases and coupled energy dissipation are also recorded as a result of correctly capturing incompressible flow.
+
+### `antuono2010`
+
+- **file:** `antuono2010_free-surface-flows-numerical-diffusive-terms.pdf`
+- **title:** Free-surface flows solved by means of SPH schemes with numerical diffusive terms
+- **authors:** M. Antuono, A. Colagrossi, S. Marrone and D. Molteni
+- **venue:** *Computer Physics Communications* 181(3):532-549, 2010
+- **doi:** [10.1016/j.cpc.2009.11.002](https://doi.org/10.1016/j.cpc.2009.11.002)
+- **relevance:** Origin of the renormalised-gradient correction to the density Laplacian — the "enhanced formulation for the second-order derivatives ... consistent and convergent all over the fluid domain" of the abstract, which is what lets the diffusive term reach the free surface. `decourcy2024` Eq. (33) is this operator recast in pressure (AC-2L, its default). Co-cited with `antuono2012` for the linear stability bound behind `k₂ ≤ 0.2hβ`.
+- **abstract from:** PDF p.1
+
+> A novel system of equations has been defined which contains diffusive terms in both the continuity and energy equations and, at the leading order, coincides with a standard weakly-compressible SPH scheme with artificial viscosity. A proper state equation is used to associate the internal energy variation to the pressure field and to increase the speed of sound when strong deformations/compressions of the fluid occur. The increase of the sound speed is associated to the shortening of the time integration step and, therefore, allows a larger accuracy during both breaking and impact events. Moreover, the diffusive terms allows reducing the high frequency numerical acoustic noise and smoothing the pressure field. Finally, an enhanced formulation for the second-order derivatives has been defined which is consistent and convergent all over the fluid domain and, therefore, permits to correctly model the diffusive terms up to the free surface. The model has been tested using different free surface flows clearly showing to be robust, efficient and accurate. An analysis of the CPU time cost and comparisons with the standard SPH scheme is provided.
+
+### `antuono2012`
+
+- **file:** `antuono2012_numerical-diffusive-terms-weakly-compressible.pdf`
+- **title:** Numerical diffusive terms in weakly-compressible SPH schemes
+- **authors:** M. Antuono, A. Colagrossi and S. Marrone
+- **venue:** *Computer Physics Communications* 183(12):2570-2580, 2012
+- **doi:** [10.1016/j.cpc.2012.07.006](https://doi.org/10.1016/j.cpc.2012.07.006)
+- **relevance:** The "theoretical analysis of the diffusive term structure" the abstract promises is the highest-priority dependency of `ACSPH_PLAN.md`: why the plain density Laplacian (`decourcy2024`'s AC-2) cannot hold a hydrostatic gradient at a truncated free surface, why the corrected form is really a bi-Laplacian rather than a Laplacian, the frozen-diffusion technique, and the stability bound the `k₂ = 0.1hβ` choice sits under. Also the reference for what this codebase's `DensityDiffusionScheme` variants actually are.
+- **abstract from:** PDF p.1
+
+> A discussion on the use of numerical diffusive terms in SPH models is proposed. Such terms are, generally, added in the continuity equation, in order to reduce the spurious numerical noise that affects the density and pressure fields in weakly-compressible SPH schemes. Specific focus has been given to the theoretical analysis of the diffusive term structure, highlighting the main benefits and drawbacks of the most widespread formulations. Finally, specific test cases have been used to compare such formulations and to confirm the theoretical findings.
+
+### `letouze2013`
+
+- **file:** `letouze2013_critical-investigation-sph-free-surfaces.pdf`
+- **title:** A critical investigation of smoothed particle hydrodynamics applied to problems with free-surfaces
+- **authors:** D. Le Touzé, A. Colagrossi, G. Colicchio and M. Greco
+- **venue:** *International Journal for Numerical Methods in Fluids* 73(7):660-691, 2013
+- **doi:** [10.1002/fld.3819](https://doi.org/10.1002/fld.3819)
+- **relevance:** Source of the rotating/stretching square-patch benchmark (this repo's `rotatingSquarePatch`). Supplies the initial pressure field — a Poisson solve, without which the case cannot be initialised at all — plus the analytic stretching solution and the BEM/LDFM reference data `decourcy2024` Figs. 11-12 and 21-22 plot against. Its discussion of acoustic frequencies in the pressure signal and of the sound-velocity choice is the same effect ACSPH exists to remove.
+- **abstract from:** PDF p.1 (Wiley labels it SUMMARY)
+
+> In this paper, an in-depth study of SPH method, in its original weakly compressible version, is achieved on dedicated 2D and 3D free-surface flow test cases. These rather critical prototype problems shall constitute suitable test cases to get through when building a free-surface SPH model. The present work aims at investigating various numerical aspects of this method, often little mentioned in literature. In particular, a great care is paid to the dynamic part of the solution, which is critical to the local hydrodynamic load prediction. The role of numerical errors in the development of acoustic frequencies in the pressure signals is discussed, as well as the influence of the choice of the sound velocity. On the shown test problems, it is also evidenced that some numerical tools are crucial to ensure the robustness and accuracy of the standard SPH method. The convergence of our model is heuristically proved on these nonlinear prototype tests, showing at the same time the very satisfactory level of accuracy reached. Through these tests, some other numerical specificities of the SPH method are discussed, such as the self-redistribution of the particles occurring during the Lagrangian evolution. A higher order model is also proposed, and its advantages and drawbacks are discussed.
+
+### `michel2022`
+
+- **file:** `michel2022_particle-shifting-techniques.pdf`
+- **title:** On Particle Shifting Techniques (PSTs): Analysis of existing laws and proposition of a convergent and multi-invariant law
+- **authors:** J. Michel, A. Vergnaud, G. Oger, C. Hermange and D. Le Touzé
+- **venue:** *Journal of Computational Physics* 459:110999, 2022
+- **doi:** [10.1016/j.jcp.2022.110999](https://doi.org/10.1016/j.jcp.2022.110999)
+- **relevance:** The shifting law `decourcy2024` Eqs. (55)-(57) adopt, chosen there specifically because it carries no sound-speed or Mach dependence — which an artificial-compressibility scheme has no way to supply. This codebase implements the Mach-scaled `sun2017` law instead (`modules/shifting/delta.py`, whose docstring notes the Michel form sits in a comment, unused), so this is `ACSPH_PLAN.md` Part 4.2's gap. The "conditions that should be respected by a PST" the abstract sets out are also the cleanest available checklist for auditing the shifting this repo already has.
+- **abstract from:** PDF p.1
+
+> This paper addresses the Particle Shifting Technique (PST) in the SPH schemes. Improving the accuracy of SPH schemes leads to particle clustering along the flow streamlines which turns to be detrimental for the simulations. PSTs aim at avoiding this adverse effect by slightly disordering the particles, allowing to retrieve a regular particle distribution within the kernel interpolation support. The gain in accuracy is such that this technique is now commonly adopted by the SPH practitioners, however the conditions that should be respected by a PST are not clearly discussed in the literature. In this paper, such conditions are exposed and their fulfillment by the main existing PSTs of the literature is analyzed. None of these existing PSTs fully satisfying these conditions, a novel PST is introduced. The proposed PST is validated for three different SPH schemes on 2D and 3D test cases, in presence of free-surface and solid boundaries.
+
+### `ramachandran2021`
+
+- **file:** `ramachandran2021_dual-time-sph-incompressible.pdf`
+- **title:** Dual-time smoothed particle hydrodynamics for incompressible fluid simulation
+- **authors:** Prabhu Ramachandran, Abhinav Muta and M. Ramakrishna
+- **venue:** *Computers & Fluids* 227:105031, 2021
+- **doi:** [10.1016/j.compfluid.2021.105031](https://doi.org/10.1016/j.compfluid.2021.105031)
+- **relevance:** The closest prior art to `decourcy2024`: EDAC plus dual-time stepping, where ACSPH is momentum-divergence-driven plus dual-time stepping. Source of the pseudo-time material-derivative correction (`decourcy2024` Eqs. 27-31, which that paper implements and then recommends leaving off) and of the `α_PI = 2Δt/(2Δt+3Δτ)` point-implicit weighting its Eq. (41) generalises. Note the "completely open source implementation and a reproducible manuscript" the abstract advertises — the only reference implementation of a dual-time SPH scheme available to check ours against.
+- **abstract from:** PDF p.1
+
+> In this paper we propose a dual-time stepping scheme for the Smoothed Particle Hydrodynamics (SPH) method. Dual-time stepping has been used in the context of other numerical methods for the simulation of incompressible fluid flows. Here we provide a scheme that combines the entropically damped artificial compressibility (EDAC) along with dual-time stepping. The method is accurate, robust, and demonstrates up to seven times better performance than the standard weakly-compressible formulation. We demonstrate several benchmarks showing the applicability of the scheme. In addition, we provide a completely open source implementation and a reproducible manuscript.
+
+### `lobovsky2014`
+
+- **file:** `lobovsky2014_experimental-dam-break-pressure-loads.pdf`
+- **title:** Experimental investigation of dynamic pressure loads during dam break
+- **authors:** L. Lobovský, E. Botia-Vera, F. Castellana, J. Mas-Soler and A. Souto-Iglesias
+- **venue:** *Journal of Fluids and Structures* 48:407-434, 2014
+- **doi:** [10.1016/j.jfluidstructs.2014.03.009](https://doi.org/10.1016/j.jfluidstructs.2014.03.009)
+- **relevance:** The dam-break experiment behind the geometry and the four wall pressure probes of `decourcy2024` §4.5, and the source of the 2.5%/97.5% percentile bounds its Figs. 28/30 score against. The "substantial variability which has been statistically characterized" is why the comparison is against a band rather than a curve — worth knowing before reading any single-run agreement as meaningful. Pressure signals, wave heights and videos are published as Supplementary Materials.
+- **abstract from:** PDF p.1
+
+> The objective of this research work has been to conduct experimental measurements on a dam break flow over a horizontal dry bed in order to provide a detailed insight, with emphasis on the pressure loads, into the dynamics of the dam break wave impacting a vertical wall downstream the dam. The experimental setup is described in detail, comprising state of the art miniaturized pressure sensors, high sampling rate data acquisition systems and high frame-rate video camera. It is a 1:2 scale of the highly cited (Lee et al., 2002, Journal of Fluids Engineering, 124) article experimental apparatus. Kinematics has been analyzed focusing on the free surface and wave front evolution. Experimental observations regarding liquid height and wave front speed have found to be in agreement with existing literature. This agreement enables the authors, assuming a similar framework, to discuss the measured pressure loads as a consequence of the dam break wave front impacting on the downstream wall. These loads show a substantial variability which has been statistically characterized. The measured quantities have been compared with the scarce available data in the literature, whose consistency is discussed. Measurements have been conducted with two filling heights. Scaling effects for such heights are also analyzed. As a direct result of the present initiative, an extensive set of data for computational tools validation is provided as Supplementary Materials, including pressure signals, wave height measurements and experimental videos.
+
+### `marrone2015`
+
+- **file:** `marrone2015_energy-losses-in-water-impacts.pdf`
+- **title:** Prediction of energy losses in water impacts using incompressible and weakly compressible models
+- **authors:** S. Marrone, A. Colagrossi, A. Di Mascio and D. Le Touzé
+- **venue:** *Journal of Fluids and Structures* 54:802-822, 2015
+- **doi:** [10.1016/j.jfluidstructs.2015.01.014](https://doi.org/10.1016/j.jfluidstructs.2015.01.014)
+- **relevance:** Supplies the analytic incompressible kinetic-energy drop the two-jet impact case is scored against (`decourcy2024` Fig. 25, this repo's `impact`). More broadly it is the reference for *why* a weakly-compressible model dissipates impact energy differently from an incompressible one — the discrepancy ACSPH exists to remove, quantified here against a Level-Set Finite Volume reference rather than against another SPH scheme.
+- **abstract from:** PDF p.1
+
+> In the present work the simulation of water impacts is discussed. The investigation is mainly focused on the energy dissipation involved in liquid impacts in both the frameworks of the weakly compressible and incompressible models. A detailed analysis is performed using a weakly compressible Smoothed Particle Hydrodynamics (SPH) solver and the results are compared with the solutions computed by an incompressible meshbased Level-Set Finite Volume Method (LS-FVM). Impacts are numerically studied using single-phase models through prototypical problems in 1D and 2D frameworks. These problems were selected for the conclusions to be of interest for, e.g., the numerical computation of the flow around plunging breaking waves. The conclusions drawn are useful not only to SPH or LS-FVM users but also for other numerical models, for which accurate results on benchmark test-cases are provided.
+
+
 ## Spatial adaptivity, data structures, analytic boundaries
 
 ### `winchenbach2016`
