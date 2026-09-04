@@ -353,7 +353,7 @@ away.
 | Eq. (34) `L_i`, `⟨∇·⟩^L` | [gradRhoL.py](src/warpSPH/modules/density/gradRhoL.py), `computeRenormalizationMatrices` | ✅ generalise field |
 | Eq. (33) bi-Laplacian ψ operator | [wp_densityDelta.py](src/warpSPH/modules/deltaSPH/wp_densityDelta.py) `DensityDiffusionScheme.deltaSPH` | ✅ generalise field — **see note** |
 | Eq. (61) value term | [wallPressure.py](src/warpSPH/modules/incompressible/wallPressure.py) `'shepard'` mode | ✅ exact |
-| Eq. (61) body-force term | `'mirror'` mode's `bodyForceTerm` | ❌ raises, see §4.4 |
+| Eq. (61) body-force term | `wallPressureExtrapolation(bodyForce=)` | ✅ **built 2026-09-05**, §4.4 |
 | Eq. (62) Shepard + mirroring | [modules/mdbc/velocity.py](src/warpSPH/modules/mdbc/velocity.py) | ⚠ audit, see §4.4 |
 | §3.3 free-surface detection (Marrone/Sun) | [maronneDetection.py](src/warpSPH/modules/surfaceDetection/maronneDetection.py) + [dilation.py](src/warpSPH/modules/surfaceDetection/dilation.py) | ✅ gives `𝔽`, `𝕍`, `n`, `λ` |
 | Eq. (57) `λ < 0.4` surface gating | `ShiftingProjectionScheme.surfaceNormal`, `surfaceLambdaThreshold` | ✅ direct |
@@ -469,28 +469,51 @@ Then add, new:
 
 - **Eq. (61)'s value term is already exact.** Its `'shepard'` mode is literally
   `p_b = Σ_f V_f p_f W_bf / Σ_f V_f W_bf`.
-- **Eq. (61)'s body-force term is the gap.** The `ρ_f (g − a_b)·x_bf`
-  correction — the part that makes a hydrostatic wall hold — exists only in the
-  `'mirror'` mode's design, where it is fully specified in the docstring and then
-  `raise NotImplementedError` ([wallPressure.py:131](src/warpSPH/modules/incompressible/wallPressure.py#L131)).
-  It was left unwired because DFSPH's shift path only fires when gravity is off,
-  so the term was provably zero there. **ACSPH has no such excuse**: the
-  hydrostatic column is the first test case and cannot pass without it. Note the
-  wall-acceleration `a_b` also has no per-particle source anywhere in the
-  codebase yet (the same gap `modules/mdbc/velocity.py` documents for the
-  velocity mirror's dead `2 u_wall` term) — static walls make `a_b = 0`, which
-  covers every case in Part 7, but a moving-wall ACSPH case would need it.
-- **The exact form to implement**, taken from `adami2012` itself (its Eq. 27,
-  which the repo has):
+- ~~**Eq. (61)'s body-force term is the gap.**~~ **Done 2026-09-05.**
+  `wallPressureExtrapolation(..., bodyForce=g)` now adds
   ```
   p_w = [ Σ_f p_f W_wf + (g − a_w)·Σ_f ρ_f r_wf W_wf ] / Σ_f W_wf ,   r_wf = r_w − r_f
   ```
-  This matches `'mirror'`'s documented (unwired) spec exactly. Note Adami weights
-  by `W_wf` alone where De Courcy's Eq. (61) weights by `W_bf V_f`. The two
-  differ in general, but **not here**: ACSPH is density-invariant, so `V_f = V₀`
-  is constant and cancels. Our volume-weighted `'shepard'` is therefore exactly
-  right for this scheme — worth an assertion rather than an assumption if
-  adaptive resolution is ever combined with ACSPH.
+  (`adami2012` Eq. 27) on the `'shepard'` **and** `'mirror'` closures.
+  `'shepard' + bodyForce` is De Courcy's Eq. (61) exactly — Adami weights by
+  `W_wf` alone where Eq. (61) weights by `W_bf V_f`, and the two agree here
+  because ACSPH is density-invariant so `V_f = V₀` cancels. `'mls'` raises
+  rather than taking it: its Liu–Liu linear fit already carries the local
+  pressure gradient, so adding the correction would double-count.
+
+  *Implementation.* The vector moment `Σ_f V_f ρ_f (r_w − r_f) W_wf` is not
+  any single `WarpOperation` — it is assembled from two `Interpolate` gathers,
+  `r_w·Σ_f V_f ρ_f W_wf − Σ_f V_f ρ_f r_f W_wf`, which is legitimate because
+  `(g − a_w)` is a per-*wall* quantity and comes out of the sum. Both gathers
+  reuse the value term's `OperationProperties`, so numerator and denominator
+  share one kernel evaluation.
+
+  *Restriction, deliberate.* Splitting `r_w − r_f` across two gathers discards
+  the minimum-image convention, so a wrapping pair contributes `±L_d` of error
+  per periodic direction `d`. Dotting with `bodyForce` annihilates that error
+  whenever `bodyForce` has no component along a periodic axis — the only
+  physically sensible configuration — so the code **asserts** that instead of
+  silently returning a wrong wall pressure. A real moment kernel would lift it.
+
+  *Verified* by `tests/test_wallPressure.py`: for a pressure field linear in
+  space every neighbour's contribution `p_f + ρ_f g·(r_w − r_f)` is already
+  the analytic wall value, so the weighted average is exact regardless of how
+  truncated the wall neighbourhood is. Measured on a 24×24 column over three
+  wall rows: **corrected 2.0e−7 relative error (float32 machine precision),
+  plain Shepard 1.3e−1** — i.e. the uncorrected wall under-reads by up to
+  `3 Δx · ρ₀ g`, 12.5 % of the whole column's pressure drop. That is precisely
+  the error that stops a hydrostatic column from holding.
+
+  Note the wall-acceleration `a_b` still has no per-particle source anywhere in
+  the codebase (the same gap `modules/mdbc/velocity.py` documents for the
+  velocity mirror's dead `2 u_wall` term) — static walls make `a_b = 0`, which
+  covers every case in Part 7, but a moving-wall ACSPH case would need it. The
+  `(N, dim)` `bodyForce` form is already accepted, so wiring a source is all
+  that would be left.
+
+  Independently a DFSPH improvement: no caller passes `bodyForce` yet, so this
+  is purely additive, but it is exactly the term
+  `DFSPH_IMPROVEMENT_PLAN.md` Part 23 needs for a gravity-driven wall.
 - **A structural note**: these live under `modules/incompressible/`, i.e. they
   are DFSPH-facing. ACSPH needs them too, so either relocate to a shared module
   or import across. Prefer relocating — a third consumer makes the current home
@@ -707,8 +730,11 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
    to `EXPANSION_CANDIDATES.md`, and consider promoting `marrone2011` from the
    extended set to the core (it is cited throughout Parts 1 and 3 but carries no
    abstract, the same case that promoted `dehnen2012` on 2026-09-04).
-2. **Finish the Adami `bodyForce` term** (§4.4). Prerequisite for the first test
-   case, and independently a DFSPH improvement.
+2. ~~**Finish the Adami `bodyForce` term** (§4.4).~~ **Done 2026-09-05** —
+   `wallPressureExtrapolation(..., bodyForce=...)` on the `'shepard'` and
+   `'mirror'` closures, exact on a linear pressure field to float32 machine
+   precision (`tests/test_wallPressure.py`, 6 tests). See §4.4 for the
+   two-gather decomposition and its periodic-axis restriction.
 3. **Generalise the diffusion kernel to an arbitrary scalar field** (§4.3), and
    A/B the projected vs unprojected ψ form to confirm the Part 3 equivalence
    argument numerically. Run `/gradcheck deltaSPH` around this.

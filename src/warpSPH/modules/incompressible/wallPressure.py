@@ -47,15 +47,46 @@ Modes:
                image, so reflecting about it holds the derivative fixed at
                whatever `p_wall` already encodes) where 'shepard' is the
                zero-derivative-at-the-*fluid*-sample approximation instead.
-               `bodyForceTerm` is the full Adami correction `rho_f *
-               (bodyForce - a_wall) . (r_wall - r_f)`, Shepard-averaged the
-               same way as the value term; pass `bodyForce` (`g`, or `g` plus
-               any other per-particle acceleration) to enable it -- `None`
-               (default) omits it and the mirror is unforced. Static walls
-               have `a_wall = 0` (no per-particle prescribed wall
-               acceleration is tracked anywhere in this codebase yet -- see
-               `modules/mdbc/velocity.py`'s docstring on the same gap for the
-               velocity mirror's dead `2*u_wall` term).
+               `bodyForceTerm` is the full Adami correction (see below);
+               pass `bodyForce` to enable it -- `None` (default) omits it and
+               the mirror is unforced.
+
+The Adami body-force (hydrostatic) correction, shared by 'shepard' and
+'mirror' (`_bodyForceMoment`). Adami et al. 2012 Eq. 27 is
+
+    p_w = [ sum_f p_f W_wf + (g - a_w) . sum_f rho_f r_wf W_wf ] / sum_f W_wf
+
+with `r_wf = r_w - r_f`; De Courcy et al. 2024 Eq. (61) is the same thing
+volume-weighted, `sum_f [...] W_bf V_f / sum_f W_bf V_f`. This module's
+Shepard gather is volume-weighted, so 'shepard' + `bodyForce=g` reproduces
+Eq. (61) *exactly* -- that is the wall BC ACSPH needs, and without it a
+hydrostatic column cannot hold its gradient (the wall reads back the
+depth-averaged fluid pressure instead of the pressure at the wall plane).
+
+The moment `sum_f V_f rho_f (r_w - r_f) W_wf` is a *vector* moment of the
+neighbourhood, which no single `WarpOperation` returns. It is assembled from
+two `Interpolate` gathers instead, using the fact that `(g - a_w)` is constant
+over the sum (it is a per-*wall*-particle quantity):
+
+    sum_f V_f rho_f r_wf W_wf = r_w * sum_f V_f rho_f W_wf - sum_f V_f rho_f r_f W_wf
+                                \_____ scalar gather _____/   \____ vector gather ____/
+
+Both gathers run with the same `OperationProperties` as the value term, so
+numerator and denominator share one kernel evaluation. `bodyForce` is
+`(g - a_wall)`: pass a `(dim,)` tensor for a uniform field or `(N, dim)` for a
+per-particle one (read at the wall rows). Static walls have `a_wall = 0` -- no
+per-particle prescribed wall acceleration is tracked anywhere in this codebase
+yet, see `modules/mdbc/velocity.py`'s docstring on the same gap for the
+velocity mirror's dead `2*u_wall` term.
+
+    WARNING -- periodic domains. Splitting `r_w - r_f` across two gathers
+    discards the minimum-image convention: a pair that wraps the domain
+    contributes `+-L_d` of error in each periodic direction `d`. The dot with
+    `bodyForce` kills that error whenever `bodyForce` has no component along a
+    periodic axis, which is the only physically sensible configuration (a
+    domain cannot be periodic along gravity and still be hydrostatic), so
+    `_bodyForceMoment` *asserts* exactly that rather than silently returning a
+    wrong wall pressure. Lift the restriction by writing a real moment kernel.
 
 Unlike the removed `BoundaryPressureMode.mdbcMlsPressure` (its
 `computeMdbcPressure`, pre-merge cleanup pass 09-04) there is NO relaxation
@@ -101,9 +132,65 @@ def _shepardValue(state, config, adjacency, referenceValues):
     return num / den.clamp_min(1e-12), den
 
 
-def _shepardMirror(state, config, adjacency, p, fluid, clampNonNeg=True):
+def _normalizeBodyForce(bodyForce, state):
+    """`bodyForce` -> an `(N, dim)` tensor of `(g - a_wall)` per row. Accepts a
+    `(dim,)` uniform field, an `(N, dim)` per-particle one, or anything
+    `torch.as_tensor` turns into either."""
+    dim = state.positions.shape[1]
+    bf = torch.as_tensor(bodyForce, device=state.positions.device,
+                         dtype=state.positions.dtype)
+    if bf.ndim == 1 and bf.shape[0] == dim:
+        return bf.unsqueeze(0).expand(state.positions.shape[0], dim)
+    if bf.shape == state.positions.shape:
+        return bf
+    raise ValueError(
+        f"bodyForce must have shape ({dim},) or {tuple(state.positions.shape)}, "
+        f"got {tuple(bf.shape)}")
+
+
+def _bodyForceMoment(state, config, adjacency, den, bodyForce):
+    """The Adami hydrostatic correction
+
+        (g - a_w) . sum_f V_f rho_f (r_w - r_f) W_wf / sum_f V_f W_wf
+
+    at every row, assembled from two `Interpolate` gathers -- see the module
+    docstring for the decomposition, the shared normalisation `den`, and the
+    periodic-domain restriction it asserts."""
+    bf = _normalizeBodyForce(bodyForce, state)
+
+    periodic = getattr(config.domain, 'periodic', None)
+    if periodic is not None and bool(torch.as_tensor(periodic).any()):
+        per = torch.as_tensor(periodic, device=bf.device).reshape(1, -1)
+        if bool((bf.abs() * per).any()):
+            raise ValueError(
+                "bodyForce has a component along a periodic axis; the two-gather "
+                "moment decomposition is not minimum-image safe there -- see "
+                "`wallPressure.py`'s module docstring")
+
+    props = OperationProperties(
+        kernel=config.kernel, operation=WarpOperation.Interpolate,
+        supportMode=SupportScheme.SuperSymmetric,
+        operationMode=OperationDirection.FluidToBoundary)
+    rho = state.densities
+    # sum_f V_f rho_f W_wf  and  sum_f V_f rho_f r_f W_wf
+    rhoW = warpOperation(state, props, domain=config.domain,
+                         referenceValues=rho, adjacency=adjacency)
+    rhoXW = warpOperation(state, props, domain=config.domain,
+                          referenceValues=rho.unsqueeze(-1) * state.positions,
+                          adjacency=adjacency)
+    moment = state.positions * rhoW.unsqueeze(-1) - rhoXW
+    return (bf * moment).sum(-1) / den.clamp_min(1e-12)
+
+
+def _shepardMirror(state, config, adjacency, p, fluid, clampNonNeg=True,
+                   bodyForce=None):
+    """Zero-order Shepard mirror. With `bodyForce` this is Adami et al. 2012
+    Eq. 27 / De Courcy et al. 2024 Eq. (61) exactly -- see the module
+    docstring's Adami-correction section."""
     boundary = state.kinds == 1
     p_b, den = _shepardValue(state, config, adjacency, p)
+    if bodyForce is not None:
+        p_b = p_b + _bodyForceMoment(state, config, adjacency, den, bodyForce)
     if clampNonNeg:
         p_b = p_b.clamp(min=0.0)
     p_b = torch.where(den > _MIN_WEIGHT, p_b, torch.zeros_like(p_b))
@@ -117,24 +204,21 @@ def _adamiMirror(state, config, adjacency, p, fluid, clampNonNeg=True,
     rows (the incoming/carried value, the same role `bodyVelocity` plays in
     `modules/mdbc/velocity.py`'s no-slip mirror).
 
-    `bodyForce` (the Adami hydrostatic correction, `rho_f * (g - a_wall) .
-    (r_wall - r_f)`, Shepard-averaged) is **not implemented** -- it needs a
-    vector *moment* of the neighbourhood (`Interpolate` only returns scalar
-    sums), i.e. a `Gradient`-style operator applied to a constant field. Every
+    `bodyForce` is the Adami hydrostatic correction `(g - a_wall) . sum_f V_f
+    rho_f (r_wall - r_f) W / sum_f V_f W`, added to the reflected value the
+    same way `_shepardMirror` adds it to the interpolated one; see the module
+    docstring's Adami-correction section for the decomposition and its
+    periodic-domain restriction. `None` (the default) omits it -- every DFSPH
     call site so far runs this solve with the body force excluded from `dvdt`
     (the VD+PS shift only fires when `not gravityConfig.active`), so the term
-    would be provably zero anyway; wire it if a gravity-driven case ever needs
-    this solve path. Raises if passed a non-`None` value rather than silently
-    ignoring it.
+    is provably zero there.
     """
-    if bodyForce is not None:
-        raise NotImplementedError(
-            "_adamiMirror's bodyForce correction is not implemented -- see "
-            "this function's docstring")
     boundary = state.kinds == 1
     qP, den = _shepardValue(state, config, adjacency, p)
     p_wall = state.pressures
     p_b = 2.0 * p_wall - qP
+    if bodyForce is not None:
+        p_b = p_b + _bodyForceMoment(state, config, adjacency, den, bodyForce)
     if clampNonNeg:
         p_b = p_b.clamp(min=0.0)
     p_b = torch.where(den > _MIN_WEIGHT, p_b, torch.zeros_like(p_b))
@@ -144,7 +228,8 @@ def _adamiMirror(state, config, adjacency, p, fluid, clampNonNeg=True,
 def wallPressureExtrapolation(state: Any, config: Any, adjacency: Any,
                               p: torch.Tensor, fluid: torch.Tensor, *,
                               mode: str = 'mls',
-                              clampNonNeg: bool = True) -> torch.Tensor:
+                              clampNonNeg: bool = True,
+                              bodyForce: Any = None) -> torch.Tensor:
     """Return `p` with the `kind == 1` rows filled with the extrapolated wall
     pressure. `mode` in {'shepard', 'mls', 'mirror'}; `'mls'` falls back to
     'shepard' when there are no ghost points to run the Liu-Liu fit at. A
@@ -155,15 +240,30 @@ def wallPressureExtrapolation(state: Any, config: Any, adjacency: Any,
     genuine *linear* function of `p` -- required when a Krylov method drives
     this operator (`omniIncompressible.CD_SOLVER in {'bicgstab', 'gmres'}`),
     where the iterate `p` legitimately goes negative and the clamp would make
-    the matvec nonlinear."""
+    the matvec nonlinear.
+
+    `bodyForce` (default `None`) enables the Adami hydrostatic correction on
+    the 'shepard' and 'mirror' closures -- pass `(g - a_wall)` as a `(dim,)`
+    or `(N, dim)` tensor. `'shepard'` + `bodyForce` is Adami et al. 2012
+    Eq. 27 / De Courcy et al. 2024 Eq. (61) exactly. Not supported by 'mls',
+    whose first-order Liu-Liu fit already carries the local pressure gradient
+    (adding the correction on top would double-count it)."""
     boundary = state.kinds == 1
     if not bool(boundary.any()):
         return p
 
     if mode == 'shepard':
-        return _shepardMirror(state, config, adjacency, p, fluid, clampNonNeg)
+        return _shepardMirror(state, config, adjacency, p, fluid, clampNonNeg,
+                              bodyForce=bodyForce)
     if mode == 'mirror':
-        return _adamiMirror(state, config, adjacency, p, fluid, clampNonNeg)
+        return _adamiMirror(state, config, adjacency, p, fluid, clampNonNeg,
+                            bodyForce=bodyForce)
+
+    if bodyForce is not None:
+        raise ValueError(
+            "mode='mls' does not take a bodyForce correction -- the Liu-Liu "
+            "linear fit already carries the local pressure gradient. Use "
+            "mode='shepard' for the Adami/De Courcy Eq. (61) closure.")
 
     ghost = state.kinds == 2
     if getattr(state, 'ghostIndices', None) is None or not bool(ghost.any()):
