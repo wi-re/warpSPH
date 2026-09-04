@@ -318,13 +318,15 @@ scratchpad rather than a published example.
 
 ### The wave system
 
-There is a fourth thing in the tree that is **not** a fluid scheme and has no
-registered case: a scalar wave-equation solver, `d2u/dt2 = c^2 laplacian(u)`,
-with PML-style absorbing damping.
+A fourth thing in the tree that is **not** a fluid scheme: a scalar
+wave-equation solver, `d2u/dt2 = c^2 laplacian(u)`, with PML-style absorbing
+damping. Registered and runnable (`warpsph-run waveEquation`), unlike earlier
+in this repo's history — see `WAVE_EQUATION_PLAN.md` for how it got there.
 
 | piece | where |
 |---|---|
 | the scheme | [`schemes/waveEquation.py`](src/warpSPH/schemes/waveEquation.py) |
+| the case | [`cases/waveEquation.py`](src/warpSPH/cases/waveEquation.py) |
 | state and system | [`systems/waveSystem.py`](src/warpSPH/systems/waveSystem.py) |
 | configuration | [`configurations/waveEquationConfig.py`](src/warpSPH/configurations/waveEquationConfig.py) |
 | case generation | [`caseUtils/waveEquation/`](src/warpSPH/caseUtils/waveEquation/) |
@@ -337,13 +339,10 @@ the shape of problem graph and point-cloud ML models are usually posed on. The
 `randomize*` flags and `*Range` pairs in its config exist so that one TOML
 casefile describes a *family* of cases to sample from, rather than one case.
 
-Two things to know before reaching for it: the pipeline is
-`build_configs_from_casefile` → `sampleParticles` → `genInitial` →
-`finalizeWaveSystemSetup` → integrate with `f_wave_equation`, and **there is no
-entry point that runs those five stages for you** — no `Case`, no CLI, no
-example. No casefile ships either, though every key in the TOML schema has a
-default. It is also 2D in practice (`genInitial` allocates `nx**2`). Making it
-runnable means writing that glue and a casefile to go with it.
+It also now has both implicit time integration and forward-mode AD wiring
+(`tests/test_implicitWaveEquation.py`, `tests/test_forwardModeWave.py`) —
+originally scoped out of `WAVE_EQUATION_PLAN.md` as separate follow-ups, both
+landed since.
 
 ---
 

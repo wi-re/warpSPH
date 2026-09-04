@@ -1,12 +1,28 @@
 # warpSPH — Wave-Equation Case Salvage Plan
 
+> ## ✅ COMPLETE — superseded by work that landed without a matching plan doc
+>
+> Despite the header below still saying "Not started," the scheme has been
+> wired, tested, and taken well past this plan's own scope since it was
+> written (2026-08-18): `f_wave_equation` is registered in
+> `schemes/builder.py` and `waveEquation` in `cases/__init__.py`, both import
+> cleanly and build via `buildScheme`. Test coverage now spans
+> `tests/test_waveEquation.py`, `tests/test_physics.py` (3 dimension/energy/
+> divergence cases), `tests/test_forwardModeWave.py` (the "explicitly not
+> doing" forward-mode AD wiring this plan deferred), and
+> `tests/test_implicitWaveEquation.py` (implicit DIRK/JFNK time integration,
+> the other deferred item) — 20 tests, all green as of this cleanup pass
+> (09-04). Nothing in this plan's "Steps" or "Verification" sections is
+> outstanding. Left as a working record below; if picked back up, treat the
+> test files themselves as the current spec rather than the steps here.
+
 Plan for turning the wave-equation subsystem (`schemes/waveEquation.py`,
 `systems/waveSystem.py`, `configurations/waveEquationConfig.py`,
 `sample/waveSystem.py`, `caseUtils/waveEquation/`) from the unwired demo code
 described in `README.md`'s "The wave system" section and `CLEANUP_PLAN.md`
 into a runnable, tested, convention-aligned `Case`. Written up here (rather
 than only in an ephemeral plan file) so it can be picked up in a later
-session. Not started — no code changes have been made yet.
+session.
 
 ## Why
 

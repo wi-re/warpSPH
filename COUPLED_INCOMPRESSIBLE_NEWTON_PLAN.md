@@ -1,5 +1,20 @@
 # warpSPH — Automatic Newton-Krylov vs. IISPH for Incompressibility: Scoping
 
+> ## Sequenced, not dropped (per the user, 09-04)
+>
+> This is still wanted — there is already downstream motivation (an implicit
+> WCSPH scheme, among other things pointed at "coupled pressure/velocity")
+> that needs exactly this kind of solver. Answers "Open questions needing a
+> decision" item 1 below: the fully-coupled Newton solve is wanted, not
+> satisfied in spirit by the Krylov work. What's actually blocking it isn't
+> architecture uncertainty, it's sequencing — every one of these downstream
+> plans needs a **working, stable implicit incompressible scheme as the
+> comparison baseline first**, and that's exactly what
+> `DFSPH_IMPROVEMENT_PLAN.md` is (`divergenceFree`, stabilized as of that
+> plan's Part 56). `DFSPH_IMPROVEMENT_PLAN.md` is the current, ongoing
+> priority; this plan is next once that baseline is in a state worth building
+> a comparison against, not before.
+
 Scoping-only document for `warpSPHCore/docs/historic_plans/warpier_forward_mode_plan.md`'s
 Phase 6/Goal 4 ("automatic vs. IISPH for incompressibility"), written per that phase's own
 instruction to scope it as a separate plan once Phase 4's shifting-comparison findings were in.
@@ -78,7 +93,7 @@ need forming), because there is no Jacobian being avoided here.
 Phase 6's deferral reasons were three: *coupled pressure/velocity DOFs*, *boundary and
 free-surface handling*, and *EOS coupling*. Re-examined against the current tree:
 
-- **Coupled DOFs.** `dfsph_step` (`schemes/dfsph.py`) is a splitting/projection scheme, not an
+- **Coupled DOFs.** `divergenceFree_step` (`schemes/divergenceFree.py`) is a splitting/projection scheme, not an
   implicit coupled solve: `dvdt` (forces, gravity, diffusion) is computed explicitly *once*,
   `solveDivergenceFree` then solves a **linear** pressure-Poisson correction against that frozen
   `dvdt`, and the pressure correction is added back in afterward
@@ -94,7 +109,7 @@ free-surface handling*, and *EOS coupling*. Re-examined against the current tree
   own; would carry over to a coupled solve the same way.
 - **EOS coupling.** Confirmed **not currently exercised on the incompressible path at all**:
   `weaklyCompressibleEOS` is called from `schemes/deltaSPH.py` (the *explicit* weakly-compressible
-  scheme) but is dead-commented in `schemes/dfsph.py` (`# currentState.pressures =
+  scheme) but is dead-commented in `schemes/divergenceFree.py` (`# currentState.pressures =
   weaklyCompressibleEOS(...)`, line 92) — the incompressible/IISPH path computes pressure purely
   from the Poisson solve and never consults an equation of state. Weakly-compressible-explicit and
   incompressible-implicit are two structurally separate scheme families today, selected at the
@@ -133,16 +148,19 @@ version of the "automatic vs. hand-derived" comparison Phase 4 ran for shifting 
 already-identified, already-documented gap instead of a from-scratch architecture.
 
 This is offered as a candidate, not a commitment — it wasn't asked for, and
-`solveIncompressible`/the density-error variant is not on the live `dfsph_step` path today (see
+`solveIncompressible`/the density-error variant is not on the live `divergenceFree_step` path today (see
 `INCOMPRESSIBLE_SOLVER_PLAN.md`'s own "Current state" section), so the value of fixing it depends
 on whether that path matters to you. Flagging it here so the option is visible next to the bigger
 ask it was found while scoping.
 
 ## Open questions needing a decision (before any coupled-solve plan can be written)
 
-1. Is the fully-coupled pressure/velocity Newton solve still wanted at all, given it would be new
-   architecture with no current motivating bug/user request — or was Phase 6's ambition satisfied
-   in spirit by the Krylov work that already landed?
+1. **Answered, 09-04 (see the banner at the top): still wanted, not satisfied by the Krylov
+   work.** There's real downstream motivation — an implicit WCSPH scheme among other work that
+   needs coupled pressure/velocity — but all of it needs a working, stable implicit incompressible
+   scheme as the comparison baseline first. That baseline is `DFSPH_IMPROVEMENT_PLAN.md`'s
+   `divergenceFree` scheme, and getting it there is the current priority; this plan resumes once
+   that baseline is solid enough to build a comparison against, not before.
 2. If still wanted: should it unify with the explicit weakly-compressible/EOS scheme family, or
    stay a pressure-only extension (e.g. a Newton step that only linearizes the density-error
    residual's nonlinear pieces — the `clamp`, and `rhoStar`'s dependence on `dt*divergence` — while
@@ -150,7 +168,7 @@ ask it was found while scoping.
    proposed above but well short of full DOF coupling)?
 3. Is the bounded Phase 1 above (projected Newton for `solveIncompressible`'s `p >= 0` clamp)
    worth doing on its own, independent of the coupled-solve question, given that path is not on
-   `dfsph_step` today?
+   `divergenceFree_step` today?
 
 ## Pointers
 
@@ -161,6 +179,6 @@ ask it was found while scoping.
   this document's Phase 1 proposal builds on.
 - `warpSPHIntegrators/NOTES.md` §3.4 — the solver-ladder framing Phase 6 was reasoning from;
   still the right frame for a future coupled solve, just not for the pressure-only sub-problem.
-- `schemes/dfsph.py`, `schemes/deltaSPH.py`, `modules/incompressible/{incompressible,
+- `schemes/divergenceFree.py`, `schemes/deltaSPH.py`, `modules/incompressible/{incompressible,
   divergenceFree}.py`, `modules/eos/weaklyCompressible.py` — the architecture facts this document
   is based on.

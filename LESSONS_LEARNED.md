@@ -160,11 +160,15 @@ dimension, computed or cached once, by code that only ever saw one.
   `.item()`/`.detach()` shows up inside a call's keyword arguments.
 - **The installed warp-lang version can drift silently.** It moved three times
   across this sweep (1.12.0 → a local 1.17.0.dev3 dev checkout → 1.15.0 from PyPI)
-  because `pyproject.toml` deliberately pins nothing (see "Decisions in force" in
-  CLEANUP_PLAN.md). A script that passed last session can fail this one with zero
-  code changes on either side — check `python -c "import warp;
+  while `pyproject.toml` deliberately pinned nothing, waiting for the 1.17 stable
+  release that fixes the same-array-ternary/`Interpolate` adjoint bug at the
+  source (see `CLEANUP_PLAN.md`). A script that passed last session could fail
+  this one with zero code changes on either side — check `python -c "import warp;
   print(warp.__version__)"` against what a script last passed under before assuming
-  a new failure is a real code regression.
+  a new failure is a real code regression. **Resolved 09-04**: 1.17.0 shipped,
+  `pyproject.toml` now pins `warp-lang>=1.17.0`, so this specific drift mode is
+  closed — the general lesson (check the installed version before trusting a
+  failure) still applies to any future unpinned dependency.
 - **A kernel argument can be computed, threaded through several call layers, and
   never actually read inside the kernel.** `shifting/delta.py` computes `c_max`/`dx`
   and passes them into `computeDeltaShiftWarp`'s scalar args; the kernel uses them to

@@ -27,7 +27,7 @@ classifiers = [
 ]
 dependencies = [
     "torch",
-    "warp-lang",
+    "warp-lang>=1.17.0",
     "numpy",
     "warpSPHCore>=0.5.0",
     "warpSPHPlotting>=0.5.0",

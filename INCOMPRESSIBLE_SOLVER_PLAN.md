@@ -1,5 +1,28 @@
 # warpSPH — Incompressible (IISPH) Pressure-Solver Krylov Plan
 
+> ## ✅ COMPLETE
+>
+> All 7 phases (0–6) are implemented and verified, not just marked done in the
+> table below: `krylov.py`, `cg.py`, `bicg.py`, the `PressureSolverType` enum,
+> and the config round-trip all exist and are wired into both
+> `modules/incompressible/divergenceFree.py` and `incompressible.py`'s enum
+> branches; `tests/test_incompressibleKrylov.py`'s 20 tests are green (checked
+> 09-04, alongside the `warp-lang` 1.17 upgrade) — `test_minresGivensMatchesDenseLstsq`
+> is a known pre-existing fp32 tolerance flake (fails ~1 run in a few, passes
+> on retry, confirmed again this pass; unrelated to this plan's own code). The
+> per-phase `- [ ]` checklists below were never individually ticked off but are
+> superseded by this — read the *Status* table as authoritative, not the
+> checkboxes. Two small file-map deviations, neither a functional gap:
+> `tests/test_incompressibleOperatorProbe.py` and
+> `test_incompressibleSolverComparison.py` were never split out as separate
+> files — their content (the symmetry/definiteness probe, the cross-solver
+> agreement check, the regression guard) landed as sections of
+> `test_incompressibleKrylov.py` instead. The shipped default is still
+> byte-identical relaxed Jacobi, exactly as the "Invariant across all phases"
+> below requires; Krylov is opt-in, and per `DFSPH_IMPROVEMENT_PLAN.md`'s
+> "Known-open" section it's known to break down on wall-bounded cases — that
+> was never in this plan's scope to fix, only to make selectable.
+
 Plan for adding opt-in **CG / BiCG / BiCGStab / GMRES** Krylov pressure solvers
 to the DFSPH incompressible scheme (today a matrix-free **relaxed Jacobi**),
 reusing the existing matrix-free Krylov library from the implicit-shifting
@@ -310,13 +333,13 @@ Design (decided — implement as specified):
 
 ## Current state (what runs today)
 
-Live path: `schemes/dfsph.py:160` → `modules/incompressible/divergenceFree.py`
+Live path: `schemes/divergenceFree.py:160` → `modules/incompressible/divergenceFree.py`
 (`solveDivergenceFree`, the **relaxed Jacobi**). The commented-out
 `modules/incompressible/incompressible.py` (`solveIncompressible`) is the
 density-error variant (adds a `clamp(p, min=0)` nonlinearity); it is **not**
-on the live `dfsph_step` path today.
+on the live `divergenceFree_step` path today.
 
-`dfsph_step` (`schemes/dfsph.py:159-169`):
+`divergenceFree_step` (`schemes/divergenceFree.py:159-169`):
 ```python
 currentState.pressures = torch.zeros_like(currentState.densities) if currentState.pressures is None else currentState.pressures
 dvdt_pressure, pressure, errors, pressures = solveDivergenceFree(
@@ -614,7 +637,7 @@ and the adjoint derivation is isolated.
 - [ ] **`incompressible.py` (density-error variant):** wire the same enum
   branch; linear solve + `clamp(p, min=0)` as a **post-projection**, documented
   as an approximation (the inequality is not enforced inside the Krylov
-  iteration). Lower priority (path is currently inactive in `dfsph_step`).
+  iteration). Lower priority (path is currently inactive in `divergenceFree_step`).
 - [ ] **Docs:** update `modules/incompressible/` + `configurations/.../solver.py`
   docstrings; add `docs/regression/incompressible_pressure_solver_choice.md`
   (honest per-method findings — which converged, iteration/residual numbers, the
