@@ -13,7 +13,7 @@ and is narrow enough that the config default omega=0.5 diverges while the
 scheme default omega=0.3 has limited margin. See the
 "omega stability window" section of
 `docs/regression/incompressible_pressure_solver_choice.md` and the Session-4
-update in `INCOMPRESSIBLE_SOLVER_PLAN.md` for the full analysis.
+update in `docs/historic_plans/INCOMPRESSIBLE_SOLVER_PLAN.md` for the full analysis.
 
 **What this script does, concretely.** For each combination of
   * kernel function (`--kernels`: Wendland2/4/6, B7, splines, ...),

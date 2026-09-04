@@ -13,7 +13,7 @@ Goal is the same as `../compressible/MIGRATION_STATUS.md`: the case is the
 single source of the physics, the `.py` is a thin runner wrapper, and the
 notebook is the *fat*, editable form with a visible step loop.
 `../../PORTING_EXAMPLES.md` is the procedure and the *why*;
-`../../CLEANUP_PLAN.md` §"Notebook simplification, the rest" is the item this
+`../../docs/historic_plans/CLEANUP_PLAN.md` §"Notebook simplification, the rest" is the item this
 closes (the `examples/incompressible/` half stays open after this).
 
 ## Target end-state
@@ -169,7 +169,7 @@ editable if the reader knows what each knob means.
 | 13 | `13-open-flow.ipynb` | `channelFlow.openFlowCase` | open — 57 cells, 1199 code LOC, the worst one; do it last |
 
 `naca.ipynb` stays as it is: a standalone SDF-visualisation scratchpad with no
-case, already recorded as won't-fix in `CLEANUP_PLAN.md`. (It ships 214 KB of
+case, already recorded as won't-fix in `docs/historic_plans/CLEANUP_PLAN.md`. (It ships 214 KB of
 stored outputs — worth stripping while passing by, separately from this
 migration. It is *not* the only one here that does, as this said before:
 measured 2026-08-15, `13-open-flow.ipynb` carries 3660 KB across 46 outputs and
@@ -312,7 +312,7 @@ that `--shape moon --rotation 40` did what you meant.
    scratch, and `openFlowCase`'s defaults already encode the setup the notebook
    builds by hand.
 5. **Sweep-up:** delete `utils.py`, add `EXAMPLES_SUMMARY.md` for this directory
-   (the compressible one is the template), and flip the `CLEANUP_PLAN.md` item
+   (the compressible one is the template), and flip the `docs/historic_plans/CLEANUP_PLAN.md` item
    to note this family done and only `examples/incompressible/` remaining.
 
 ## `drivenSquare` was not a driven square — redesigned 2026-08-14

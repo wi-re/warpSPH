@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """torch.autograd.gradcheck against modules/util/{wp_sum,wp_numNeighbors}.py --
-Tier 2 of CLEANUP_PLAN.md's Phase 4.1 gradcheck rollout.
+Tier 2 of docs/historic_plans/CLEANUP_PLAN.md's Phase 4.1 gradcheck rollout.
 
 `warpSum` (`sumOverNeighbors`'s underlying kernel) sums a caller-supplied
 per-particle scalar field over each particle's kernel-support neighborhood:
@@ -109,7 +109,7 @@ def main():
     if ok:
         print("ALL PASSED.")
     else:
-        print("FAILED -- see this script's docstring and CLEANUP_PLAN.md Phase 4.1 Tier 2.")
+        print("FAILED -- see this script's docstring and docs/historic_plans/CLEANUP_PLAN.md Phase 4.1 Tier 2.")
     sys.exit(0 if ok else 1)
 
 

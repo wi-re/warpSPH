@@ -3,7 +3,7 @@
 kernel-argument mechanism (asScalarArg + a wp.array(dtype=scalar_t) kernel
 parameter read as param[0]) works in *this* repo's own environment.
 
-Context (see CLEANUP_PLAN.md, Phase 4.2): `computeCompSPHBalanceTermWarp`
+Context (see docs/historic_plans/CLEANUP_PLAN.md, Phase 4.2): `computeCompSPHBalanceTermWarp`
 (modules/compSPH/balance.py, shared by compSPH_step and crkSPH_step) used to
 declare its `dt` parameter as a plain by-value `scalar_t`, and every call
 site collapsed `dt` to a Python float via `.detach().cpu().item()` before
@@ -28,7 +28,7 @@ That segfault turned out to be a real, unrelated, pre-existing bug --
 fallback `referenceVelocities` already had, so a standalone call (like this
 script's, or any gradcheck-shaped call) reached the kernel launch with
 `referenceEnergies=None` regardless of the dt work. Root-caused and fixed in
-`modules/compSPH/balance.py` (see CLEANUP_PLAN.md Phase 4.2 for the full
+`modules/compSPH/balance.py` (see docs/historic_plans/CLEANUP_PLAN.md Phase 4.2 for the full
 fallback-chain trace and `scripts/troubleshoot_balanceTerm_segfault.py` for
 the harness that found it). With that fixed, the dt integration -- `dt:
 wp.array(dtype=scalar_t)` on the top-level `@wp.kernel`, read once via

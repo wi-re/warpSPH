@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """torch.autograd.gradcheck against modules/liu/wp_mat.py -- Tier 2 of
-CLEANUP_PLAN.md's Phase 4.1 gradcheck rollout.
+docs/historic_plans/CLEANUP_PLAN.md's Phase 4.1 gradcheck rollout.
 
 `computeLiuMatricesWarp` builds the Liu-style moving-least-squares moment
 matrix and its companion Shepard/gradient vector: for each query point it
@@ -99,7 +99,7 @@ def main():
     if ok:
         print("ALL PASSED.")
     else:
-        print("FAILED -- see this script's docstring and CLEANUP_PLAN.md Phase 4.1 Tier 2.")
+        print("FAILED -- see this script's docstring and docs/historic_plans/CLEANUP_PLAN.md Phase 4.1 Tier 2.")
     sys.exit(0 if ok else 1)
 
 

@@ -13,7 +13,7 @@ negative-definite, so the dispatch in ``incompressible.krylov`` flips the sign o
 the operator/RHS/preconditioner before calling this when the diagonal is
 negative, giving PCG a positive-definite system. If the operator is genuinely
 indefinite (not merely negative-definite) -- the question the Phase-0 operator
-probe settles -- PCG bails with ``-16``. See ``INCOMPRESSIBLE_SOLVER_PLAN.md``.
+probe settles -- PCG bails with ``-16``. See ``docs/historic_plans/INCOMPRESSIBLE_SOLVER_PLAN.md``.
 
 Status codes: ``>= 0`` converged at that iterate; ``-12`` per-particle ``|x|``
 threshold bailout; ``-14`` max-iteration budget exhausted; ``-16`` indefinite /

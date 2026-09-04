@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """torch.autograd.gradcheck against computePressureSurfaceAwareWarp -- Tier 0
-of CLEANUP_PLAN.md's Phase 4.1 gradcheck rollout.
+of docs/historic_plans/CLEANUP_PLAN.md's Phase 4.1 gradcheck rollout.
 
 modules/pressure/wp_surfaceAware.py backs deltaSPH's and Monaghan's pressure
 force (computePressureForceSurfaceAware) and was flagged, not measured, by
@@ -99,7 +99,7 @@ def main():
     if ok:
         print("ALL PASSED -- including the broadcast-pressure ternary branch; no adjoint-zeroing found.")
     else:
-        print("FAILED -- see this script's docstring and CLEANUP_PLAN.md Phase 4.1 Tier 0.")
+        print("FAILED -- see this script's docstring and docs/historic_plans/CLEANUP_PLAN.md Phase 4.1 Tier 0.")
     sys.exit(0 if ok else 1)
 
 

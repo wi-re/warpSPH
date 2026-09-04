@@ -68,7 +68,7 @@ text layer were parked in `literature/scans/` rather than indexed here.
 supplied by the user for the kernel-choice question behind the
 `columnCollapse` Wendland2-vs-Wendland4 experiment. `sun2019` and `sun2017`
 were added to the core on 2026-09-03 for
-`WCSPH_SHIFTING_PLAN.md`.)
+`docs/historic_plans/WCSPH_SHIFTING_PLAN.md`.)
 
 `venue` is the **published** venue, which for an author's-version or preprint
 copy is not always what that copy's own front page says. Full bibliographic
@@ -118,7 +118,7 @@ detail is in `references.bib`; the abstract of every core row is in
 | — | `bender2026` | `bender2026_primal-sph-solver.pdf` | CGF 2026 | A primal (not dual) pressure solver: stable to 1:1000 density ratios, strongly coupled to non-pressure forces. |
 | — | `adami2013` | `adami2013_transport-velocity.pdf` | J. Comput. Phys. 241 2013 | Transport velocity. Closes plan 5 Q7 (background pressure). |
 | — | `sun2017` | `sun2017_delta-plus-sph-model.pdf` | Comput. Methods Appl. Mech. Engrg. 315 2017 | The δ⁺-SPH origin paper: δ-SPH diffusion + PST together. Source of `delta.py`'s shift form, `wp_deltaShift`'s tensile term, and the free-surface `n`-nulling `surfaceNormal` extends. |
-| — | `sun2019` | `sun2019_consistent-particle-shifting-delta-plus-sph.pdf` | Comput. Methods Appl. Mech. Engrg. 348 2019 | Consistent (quasi-Lagrangian) δ⁺-SPH: the δu divergence terms that make the WCSPH shift volume-conserving. Reference method for `WCSPH_SHIFTING_PLAN.md` step 2. |
+| — | `sun2019` | `sun2019_consistent-particle-shifting-delta-plus-sph.pdf` | Comput. Methods Appl. Mech. Engrg. 348 2019 | Consistent (quasi-Lagrangian) δ⁺-SPH: the δu divergence terms that make the WCSPH shift volume-conserving. Reference method for `docs/historic_plans/WCSPH_SHIFTING_PLAN.md` step 2. |
 
 **Spatial adaptivity, data structures, analytic boundaries**
 

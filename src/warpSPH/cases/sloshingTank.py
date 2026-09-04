@@ -171,7 +171,7 @@ def configureScheme(ctx: RunContext) -> None:
         if hasattr(sc.fluid, 'backgroundPressure'):
             sc.fluid.backgroundPressure = ctx.param('backgroundPressure', 0.0)
         # The δ⁺-SPH particle shift near the free surface -- the reason this
-        # case survives the wall slam at all (WCSPH_SHIFTING_PLAN.md). On by
+        # case survives the wall slam at all (docs/historic_plans/WCSPH_SHIFTING_PLAN.md). On by
         # default now that `surfaceNormal` is the projection default; the knobs
         # are for the shift A/B (`--shift-projection`, `--no-shift`).
         if hasattr(sc, 'shiftProperties'):

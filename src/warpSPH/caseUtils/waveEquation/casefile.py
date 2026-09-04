@@ -4,7 +4,7 @@ defines (`SimulationConfig`, `WaveCaseConfig`, `WaveShapeSpec`, ...), so one
 casefile can describe a family of runs (see `WaveCaseConfig`'s
 ``randomize*``/``*Range`` fields). `build_configs_from_casefile` is the entry
 point; it is the first of the five stages the module docstring of
-`sample/waveSystem.py` and `CLEANUP_PLAN.md` describe as the (currently
+`sample/waveSystem.py` and `docs/historic_plans/CLEANUP_PLAN.md` describe as the (currently
 unwired -- no runner drives all five, and no TOML casefile ships in this repo)
 wave-equation pipeline. `argparse_defaults_from_casefile` maps the same TOML
 sections onto the CLI flag names a future runner would use; nothing in this

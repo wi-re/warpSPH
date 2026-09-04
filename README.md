@@ -321,7 +321,7 @@ scratchpad rather than a published example.
 A fourth thing in the tree that is **not** a fluid scheme: a scalar
 wave-equation solver, `d2u/dt2 = c^2 laplacian(u)`, with PML-style absorbing
 damping. Registered and runnable (`warpsph-run waveEquation`), unlike earlier
-in this repo's history — see `WAVE_EQUATION_PLAN.md` for how it got there.
+in this repo's history — see `docs/historic_plans/WAVE_EQUATION_PLAN.md` for how it got there.
 
 | piece | where |
 |---|---|
@@ -341,7 +341,7 @@ casefile describes a *family* of cases to sample from, rather than one case.
 
 It also now has both implicit time integration and forward-mode AD wiring
 (`tests/test_implicitWaveEquation.py`, `tests/test_forwardModeWave.py`) —
-originally scoped out of `WAVE_EQUATION_PLAN.md` as separate follow-ups, both
+originally scoped out of `docs/historic_plans/WAVE_EQUATION_PLAN.md` as separate follow-ups, both
 landed since.
 
 ---

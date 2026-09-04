@@ -1,7 +1,7 @@
 """Shared helpers for the scripts/gradcheck_*.py family.
 
 Not a standalone entrypoint (leading underscore) -- imported by the
-per-module gradcheck scripts. See CLEANUP_PLAN.md's Phase 4.1 for the
+per-module gradcheck scripts. See docs/historic_plans/CLEANUP_PLAN.md's Phase 4.1 for the
 methodology this mirrors (warpSPHCore's own scripts/_gradcheck_common.py,
 scripts/gradcheck_*_native.py): one standalone script per kernel-bearing
 module, each calling torch.autograd.gradcheck directly against the real

@@ -782,7 +782,7 @@ def test_waveEquationEnergyStaysBounded(waveResult):
 
 def test_waveEquationRunsInEveryDimension(waveResult):
     """The payoff of generalizing the base pipeline to N-D
-    (`WAVE_EQUATION_PLAN.md` step 1): the same scheme code is exercised by the
+    (`docs/historic_plans/WAVE_EQUATION_PLAN.md` step 1): the same scheme code is exercised by the
     neighbour search and Laplacian operator in 1D, 2D and 3D, not just the
     2D shape-source path."""
     name, result = waveResult

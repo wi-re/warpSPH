@@ -37,7 +37,7 @@ excitation and wave timing all check out against the measured record.
   **free-surface particle-distribution / tensile instability** — `deltaSPH`
   runs with no effective particle shift at the free surface.
 
-**Next work is spun out to `WCSPH_SHIFTING_PLAN.md`** (repo root): make the
+**Next work is spun out to `docs/historic_plans/WCSPH_SHIFTING_PLAN.md`** (now COMPLETE): make the
 weakly-compressible particle shift work *near free surfaces* without the volume
 growth that made it get switched off there. Target case: `rotatingSquarePatch`.
 The sloshing tank surviving the first impact is that plan's transfer test.

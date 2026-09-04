@@ -13,7 +13,7 @@ boundary particles.
 The first ~185 lines of this file are dead, commented-out code from an
 earlier `mDBCPenetrationCheck` implementation and are not executed; the live
 code begins at `computeMdbcNoPenShift_Func_i` below (separate, already-tracked
-cleanup item -- see CLEANUP_PLAN.md -- to remove them).
+cleanup item -- see docs/historic_plans/CLEANUP_PLAN.md -- to remove them).
 """
 
 __all__ = ['computeMdbcNoPenShift']

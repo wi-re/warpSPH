@@ -22,7 +22,7 @@ acoustic sound speed) holds the divergence-free projection pressure. Raw
 solver iterates, fluid rows only.
 
 Several stretches are commented out
-rather than removed (tracked separately in CLEANUP_PLAN.md), including an
+rather than removed (tracked separately in docs/historic_plans/CLEANUP_PLAN.md), including an
 alternate implicit-particle-shift path (`solveIncompressible`) and the
 delta-SPH density-diffusion term. Whether the returned `drhodt` actually
 drives the density update or is overridden depends on

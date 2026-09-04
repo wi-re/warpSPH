@@ -1,7 +1,7 @@
 # warpSPH — Lessons Learned (cleanup sweep, 2026-08)
 
 Reusable, still-relevant lessons from the pre-AD cleanup sweep tracked in
-`CLEANUP_PLAN.md`. That file is a status tracker now; this file is the "why" and
+`docs/historic_plans/CLEANUP_PLAN.md`. That file is a status tracker now; this file is the "why" and
 "watch out for" that's worth keeping around. Not a chronological log — if something
 here is superseded by a later fix, it's been removed rather than marked stale.
 
@@ -162,7 +162,7 @@ dimension, computed or cached once, by code that only ever saw one.
   across this sweep (1.12.0 → a local 1.17.0.dev3 dev checkout → 1.15.0 from PyPI)
   while `pyproject.toml` deliberately pinned nothing, waiting for the 1.17 stable
   release that fixes the same-array-ternary/`Interpolate` adjoint bug at the
-  source (see `CLEANUP_PLAN.md`). A script that passed last session could fail
+  source (see `docs/historic_plans/CLEANUP_PLAN.md`). A script that passed last session could fail
   this one with zero code changes on either side — check `python -c "import warp;
   print(warp.__version__)"` against what a script last passed under before assuming
   a new failure is a real code regression. **Resolved 09-04**: 1.17.0 shipped,

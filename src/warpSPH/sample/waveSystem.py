@@ -39,7 +39,7 @@ def finalizeWaveSystemSetup(
         # Not `torch.full_like(cGrid, speed)`: `full_like`'s fill value must be
         # a plain Number, so it silently requires `speed` to already be
         # detached. Broadcasting the add keeps the graph when `speed` is a
-        # `requires_grad` tensor (see `WAVE_EQUATION_PLAN.md` step 5).
+        # `requires_grad` tensor (see `docs/historic_plans/WAVE_EQUATION_PLAN.md` step 5).
         cGrid = torch.where(cSourceGrid == bId, torch.zeros_like(cGrid) + speed, cGrid)
         # print(f"Set speed {speed} for boundary ID {bId}")
     # print(torch.sum(cGrid))

@@ -2,7 +2,7 @@
 relaxed-Jacobi iteration for a Krylov method make the *constant-density*
 (PS/shifting) solve actually converge in a running simulation?
 
-`INCOMPRESSIBLE_SOLVER_PLAN.md` already characterised the operator and the
+`docs/historic_plans/INCOMPRESSIBLE_SOLVER_PLAN.md` already characterised the operator and the
 methods, but only as **single solves on a seeded state**: symmetric to fp32,
 negative-semi-definite with a gauge mode, `kappa(M^-1 A) ~ 1.1e8`, and per-method
 residuals at 200-1200 iterations (MINRES best at 9.7e-4 @200, CG strong,
@@ -60,7 +60,7 @@ parser.add_argument('--maxIters', type=int, default=None,
                     help="override pressureSolver.maxIterations (default 64)")
 parser.add_argument('--fp64', action='store_true',
                     help="set krylovFp64 (Krylov recurrence in float64, matvec "
-                         "stays fp32); INCOMPRESSIBLE_SOLVER_PLAN.md measured "
+                         "stays fp32); docs/historic_plans/INCOMPRESSIBLE_SOLVER_PLAN.md measured "
                          "~10x better residual for BiCGStab/CG")
 parser.add_argument('--noClamp', action='store_true',
                     help="pass gauge=None to the Krylov path instead of "

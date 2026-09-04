@@ -17,7 +17,7 @@ The solvers precondition by *multiplication* (``Mx = precond * x``), so the
 preconditioner handed to them is ``1/D`` -- the reciprocal of the IISPH
 diagonal -- not ``D`` itself.
 
-See ``INCOMPRESSIBLE_SOLVER_PLAN.md`` for the operator mapping, the
+See ``docs/historic_plans/INCOMPRESSIBLE_SOLVER_PLAN.md`` for the operator mapping, the
 SPD/symmetry probe, and the per-method phase plan.
 """
 
@@ -250,7 +250,7 @@ def solvePressureKrylov(
         # as the CG branch) hands BiCG a positive-definite system. Note BiCG is
         # still the least robust of the four on the indefinite/gauge-mode part of
         # the spectrum -- see the Phase-0 operator probe in
-        # INCOMPRESSIBLE_SOLVER_PLAN.md.
+        # docs/historic_plans/INCOMPRESSIBLE_SOLVER_PLAN.md.
         if float(precond.mean()) < 0:
             _m = matvec
             _mT = matvecT

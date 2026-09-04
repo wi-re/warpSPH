@@ -8,7 +8,7 @@ showed, including where the plan's own expectations were wrong.
 ## Context
 
 This is the backprop-over-trajectory demo flagged as deferred work when
-`01-sod/` was built (see `CLEANUP_PLAN.md`'s "Notebook simplification,
+`01-sod/` was built (see `docs/historic_plans/CLEANUP_PLAN.md`'s "Notebook simplification,
 pilot" entry and the hook-point comments already sitting in
 `sod_1d.ipynb`'s step loop). The per-kernel AD work this whole cleanup sweep
 has been doing (`.claude/skills/gradcheck/SKILL.md`, 58 gradcheck tests)

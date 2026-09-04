@@ -5,7 +5,7 @@ pressure operator and how the five opt-in Krylov solvers (BiCGStab, GMRES, CG,
 BiCG, MINRES) behave on it, versus the shipped **relaxed-Jacobi** default. The
 code's docstrings state the conclusion; this note keeps the evidence and the
 per-method numbers so a future reader can follow without re-running the probe.
-See `INCOMPRESSIBLE_SOLVER_PLAN.md` for the full plan.
+See `docs/historic_plans/INCOMPRESSIBLE_SOLVER_PLAN.md` for the full plan.
 
 **Outcome:** the operator is **symmetric** and **negative-semi-definite** (with a
 gauge mode), but **ill-conditioned** (κ ≈ 2.4e7) and **not diagonally

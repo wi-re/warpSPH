@@ -1,4 +1,4 @@
-"""Audit of `ShiftProperties.correctdrhodt` (`WCSPH_SHIFTING_PLAN.md` §2d):
+"""Audit of `ShiftProperties.correctdrhodt` (`docs/historic_plans/WCSPH_SHIFTING_PLAN.md` §2d):
 why does feeding the δ⁺ shift into the continuity equation collapse ρ to ~0.4
 on the rotating square patch?
 

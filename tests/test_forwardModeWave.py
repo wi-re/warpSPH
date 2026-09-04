@@ -14,7 +14,7 @@ because positions/support/adjacency are frozen here (this scheme never moves
 particles) and CRK/renorm corrections are off (`f_wave_equation` uses none).
 
 Both the forward-tangent rollout and the reverse-mode reference below use the
-*same* explicit-Euler step sequence (`WAVE_EQUATION_PLAN.md` step 5's
+*same* explicit-Euler step sequence (`docs/historic_plans/WAVE_EQUATION_PLAN.md` step 5's
 already-validated pattern, reused verbatim from
 `test_gradientsReachSourcePositionAndMagnitude` in `test_waveEquation.py`)
 rather than the `rungeKutta2` integrator `_buildStandingWaveSystem` uses

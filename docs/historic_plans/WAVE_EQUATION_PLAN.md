@@ -19,7 +19,7 @@
 Plan for turning the wave-equation subsystem (`schemes/waveEquation.py`,
 `systems/waveSystem.py`, `configurations/waveEquationConfig.py`,
 `sample/waveSystem.py`, `caseUtils/waveEquation/`) from the unwired demo code
-described in `README.md`'s "The wave system" section and `CLEANUP_PLAN.md`
+described in `README.md`'s "The wave system" section and `docs/historic_plans/CLEANUP_PLAN.md`
 into a runnable, tested, convention-aligned `Case`. Written up here (rather
 than only in an ephemeral plan file) so it can be picked up in a later
 session.

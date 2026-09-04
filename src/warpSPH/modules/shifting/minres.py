@@ -9,7 +9,7 @@ MINRES is the Krylov method designed for a **symmetric but not necessarily
 definite** operator -- exactly the IISPH pressure operator (symmetric to fp32
 precision, negative-semi-definite with a constant gauge null space; see the
 operator probe and the "BiCGStab deep-dive" section of
-``INCOMPRESSIBLE_SOLVER_PLAN.md``). Unlike CG it needs no positive
+``docs/historic_plans/INCOMPRESSIBLE_SOLVER_PLAN.md``). Unlike CG it needs no positive
 definiteness (no sign flip in the dispatch); unlike BiCGStab it has no shadow
 system, so there is no shadow orthogonality for fp32 round-off to destroy. It
 minimizes the true residual at every step and its residual estimate is

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """torch.autograd.gradcheck against CompSPH's core physics kernels -- Tier 1
-of CLEANUP_PLAN.md's Phase 4.1 gradcheck rollout.
+of docs/historic_plans/CLEANUP_PLAN.md's Phase 4.1 gradcheck rollout.
 
 `compSPH_step` (schemes/compSPH.py) always calls all three of
 `computeCompSPHAccelWarp` (modules/compSPH/accel.py),
@@ -231,7 +231,7 @@ def main():
     if ok:
         print("ALL PASSED.")
     else:
-        print("FAILED -- see this script's docstring and CLEANUP_PLAN.md Phase 4.1 Tier 1.")
+        print("FAILED -- see this script's docstring and docs/historic_plans/CLEANUP_PLAN.md Phase 4.1 Tier 1.")
     sys.exit(0 if ok else 1)
 
 
