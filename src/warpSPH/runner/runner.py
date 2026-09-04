@@ -104,7 +104,8 @@ def buildContext(case: Case, spec: CaseSpec) -> RunContext:
         domain=domain,
         dim=spec.dim,
         kernel=resolveEnum(KernelFunctions, spec.kernel),
-        targetNeighbors=_nHtoNH(spec.n_h, spec.dim),
+        n_h=spec.n_h,
+        calibrateNormalization=spec.calibrateNormalization,
         supportMode=resolveEnum(SupportScheme, spec.supportMode),
         gradientMode=resolveEnum(GradientScheme, spec.gradientMode),
         laplacianMode=resolveEnum(LaplacianScheme, spec.laplacianMode),
@@ -138,9 +139,6 @@ def buildContext(case: Case, spec: CaseSpec) -> RunContext:
     )
 
 
-def _nHtoNH(n_h, dim):
-    from warpSPHCore import n_h_to_nH
-    return n_h_to_nH(n_h, dim)
 
 
 def _scalar(value) -> float:

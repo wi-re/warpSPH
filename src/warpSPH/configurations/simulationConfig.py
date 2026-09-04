@@ -47,7 +47,21 @@ class SimulationConfig:
     dx: Optional[int] = field(default=None, metadata={'description': 'Initial particle spacing'})
     nx: Optional[int] = field(default=None, metadata={'description': 'Number of particles along one dimension'})
     
+    #: Neighbours per smoothing length, per axis -- the resolution knob that
+    #: stays comparable across dimensions (`h = n_h * dx` by construction; see
+    #: `n_h_to_nH`). Stored rather than re-derived because `targetNeighbors`
+    #: cannot be inverted without knowing `dim`, and the lattice-normalisation
+    #: correction needs `n_h` directly (LATTICE_DENSITY_PLAN.md 3.5).
+    n_h: float = 4.0
+    #: Derived from `n_h` and `dim` by `buildSimulationConfig`; the literal
+    #: default here assumes dim=2 and exists only for a bare `SimulationConfig()`.
     targetNeighbors: int = field(default_factory=lambda: n_h_to_nH(4, 2))
+    #: Scale every kernel value and derivative by `1 / L(kernel, n_h, dim)` so a
+    #: defect-free lattice measures `rho0` exactly. Off by default: it changes
+    #: the operators, and the mass-side calibration
+    #: (`cases/weaklyCompressible.calibrateRestDensityMasses`) currently absorbs
+    #: the same offset. Meaningful only at uniform resolution.
+    calibrateNormalization: bool = False
     supportMode: SupportScheme = field(default=SupportScheme.SuperSymmetric, metadata={'description': 'Support scheme for neighbor search'})
     
     
@@ -73,6 +87,8 @@ def buildConfig(
     dx: Optional[float] = None,
     nx: Optional[int] = None,
     targetNeighbors: Optional[int] = None,
+    n_h: Optional[float] = None,
+    calibrateNormalization: Optional[bool] = None,
     supportMode: Optional[SupportScheme] = None,
     gradientMode: Optional[GradientScheme] = None,
     laplacianMode: Optional[LaplacianScheme] = None,
@@ -96,8 +112,15 @@ def buildConfig(
         cflFactor = 0.3
     if adaptiveDt is None:
         adaptiveDt = True
+    # `n_h` is the source of truth; `targetNeighbors` is derived from it. Passing
+    # targetNeighbors directly still works (a caller that only has the neighbour
+    # count), in which case n_h is recovered by inverting the same relation.
+    if n_h is None:
+        n_h = 4.0 if targetNeighbors is None else nH_to_n_h(targetNeighbors, dim)
     if targetNeighbors is None:
-        targetNeighbors = n_h_to_nH(4, dim)
+        targetNeighbors = n_h_to_nH(n_h, dim)
+    if calibrateNormalization is None:
+        calibrateNormalization = False
     if supportMode is None:
         supportMode = SupportScheme.SuperSymmetric
     if gradientMode is None:
@@ -130,6 +153,8 @@ def buildConfig(
         dx=dx,
         nx=nx,
         targetNeighbors=targetNeighbors,
+        n_h=n_h,
+        calibrateNormalization=calibrateNormalization,
         supportMode=supportMode,
         gradientMode=gradientMode,
         laplacianMode=laplacianMode,

@@ -43,6 +43,7 @@ class CaseSpec:
     dim: int = 2
     L: float = 2.0
     n_h: float = 4.0
+    calibrateNormalization: bool = False
     periodic: bool = True
 
     # --- scheme selection ---------------------------------------------------
@@ -185,6 +186,8 @@ _FIELD_HELP = {
     'dim': 'spatial dimension (1, 2 or 3)',
     'L': 'domain edge length',
     'n_h': 'neighbours per smoothing length; converted to targetNeighbors',
+    'calibrateNormalization': 'scale the kernel by 1/L so a perfect lattice reads rho0 '
+                              '(LATTICE_DENSITY_PLAN.md); off by default',
     'periodic': 'wrap the domain at its edges',
     # -- operators --
     'kernel': 'SPH kernel function',

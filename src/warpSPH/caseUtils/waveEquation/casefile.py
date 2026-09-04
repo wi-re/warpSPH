@@ -173,6 +173,7 @@ def build_configs_from_casefile(
         domain=buildDomainDescription(l, dim, periodic, device, dtype),
         dim=dim,
         kernel=_parse_enum(KernelFunctions, core.get("kernel"), KernelFunctions.Wendland4),
+        n_h=n_h,
         targetNeighbors=n_h_to_nH(n_h, dim),
         supportMode=_parse_enum(SupportScheme, core.get("support_mode"), SupportScheme.SuperSymmetric),
         gradientMode=_parse_enum(GradientScheme, core.get("gradient_mode"), GradientScheme.Difference),
