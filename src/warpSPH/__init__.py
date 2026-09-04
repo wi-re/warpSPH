@@ -24,7 +24,7 @@ from .systems import *
 from .schemes import *
 from .modules import *
 from .utils import *
-from .enumTypes import EnergyScheme, AdaptiveSupportScheme, ViscositySwitch, CompressibleSPHScheme, WeaklyCompressibleSPHScheme, DensityDiffusionScheme, PressureForceScheme, IncompressibleSPHScheme
+from .enumTypes import EnergyScheme, AdaptiveSupportScheme, ViscositySwitch, CompressibleSPHScheme, WeaklyCompressibleSPHScheme, DensityDiffusionScheme, PressureForceScheme, IncompressibleSPHScheme, ArtificialCompressibleSPHScheme, PressureSmoothingScheme
 from .sample import *
 
 __all__.extend(configurations.__all__)
@@ -38,7 +38,7 @@ __all__.extend(sample.__all__)
 from .geometry import *
 __all__.extend(geometry.__all__)
 
-__all__.extend(['EnergyScheme', 'AdaptiveSupportScheme', 'ViscositySwitch', 'CompressibleSPHScheme', 'WeaklyCompressibleSPHScheme', 'DensityDiffusionScheme', 'PressureForceScheme', 'IncompressibleSPHScheme'])
+__all__.extend(['EnergyScheme', 'AdaptiveSupportScheme', 'ViscositySwitch', 'CompressibleSPHScheme', 'WeaklyCompressibleSPHScheme', 'DensityDiffusionScheme', 'PressureForceScheme', 'IncompressibleSPHScheme', 'ArtificialCompressibleSPHScheme', 'PressureSmoothingScheme'])
 
 
 from .io.parsers import parseKernelFunctions, parseIntegrationScheme, parseViscositySwitch, parseCompressibleSPHScheme, parseAdaptiveSupportScheme

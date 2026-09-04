@@ -24,6 +24,11 @@ from .region import RegionType, ParticleRegion
 from .rigidBody import RigidBody
 from .moduleConfigurations.surfaceDetection import SurfaceDetectionConfig, SurfaceDetectionScheme, NormalSource
 from .incompressible import IncompressibleSPHConfig, incompressibleConfigToDict, dictToIncompressibleSPHConfig
+from .artificialCompressible import (ArtificialCompressibilityParams,
+                                     ArtificialCompressibleSPHConfig,
+                                     buildDefaultArtificialCompressibilityParams,
+                                     artificialCompressibleConfigToDict,
+                                     dictToArtificialCompressibleConfig)
 
 
 
@@ -58,6 +63,11 @@ __all__ = [
     'WeaklyCompressibleSPHConfig',
     'weaklyCompressibleConfigToDict',
     'dictToWeaklyCompressibleConfig',
+    'ArtificialCompressibilityParams',
+    'ArtificialCompressibleSPHConfig',
+    'buildDefaultArtificialCompressibilityParams',
+    'artificialCompressibleConfigToDict',
+    'dictToArtificialCompressibleConfig',
     'RegionType',
     'ParticleRegion',
     'RigidBody',

@@ -22,8 +22,9 @@ import numpy as np
 import torch
 
 from ..configurations import buildConfig
-from ..enumTypes import (CompressibleSPHScheme, IncompressibleSPHScheme,
-                         WaveEquationScheme, WeaklyCompressibleSPHScheme)
+from ..enumTypes import (ArtificialCompressibleSPHScheme, CompressibleSPHScheme,
+                         IncompressibleSPHScheme, WaveEquationScheme,
+                         WeaklyCompressibleSPHScheme)
 from ..io.hdf5 import createOutFile
 from ..io.export import exportSimulationSystem, prepExport, writeFrame, writeInitialData
 from ..schemes import buildScheme
@@ -71,9 +72,9 @@ def resolveEnum(enumClass, value):
 
 
 def _resolveScheme(name: str):
-    """Map a scheme name onto whichever of the three scheme enums owns it."""
+    """Map a scheme name onto whichever of the five scheme enums owns it."""
     for enumClass in (CompressibleSPHScheme, WeaklyCompressibleSPHScheme, IncompressibleSPHScheme,
-                     WaveEquationScheme):
+                      ArtificialCompressibleSPHScheme, WaveEquationScheme):
         for member in enumClass:
             if member.name.lower() == str(name).lower():
                 return member

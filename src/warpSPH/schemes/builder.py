@@ -1,7 +1,7 @@
 """Resolve a scheme name/enum member to its `SchemeBundle`: the state, config,
-and update classes plus step/export/import functions for one of the six
-registered SPH schemes (Monaghan, CompSPH, CRKSPH, deltaSPH,
-divergence-free/DFSPH, and the non-fluid wave equation). `_divergenceFree`
+and update classes plus step/export/import functions for every registered SPH
+scheme (Monaghan, CompSPH, CRKSPH, deltaSPH, the five incompressible ones,
+artificial-compressibility, and the non-fluid wave equation). `_divergenceFree`
 imports `divergenceFree` (`divergenceFree.py`, renamed from `dfsph.py` in the
 pre-merge cleanup pass) lazily to avoid a circular import with
 `schemes/__init__.py`, which imports `divergenceFree` first.
@@ -30,8 +30,8 @@ from .crkSPH import crkSPH_step
 from .monaghan import compressibleSPH_Monaghan
 from .waveEquation import f_wave_equation
 from ..enumTypes import (
-    CompressibleSPHScheme, WeaklyCompressibleSPHScheme, IncompressibleSPHScheme,
-    WaveEquationScheme,
+    ArtificialCompressibleSPHScheme, CompressibleSPHScheme,
+    WeaklyCompressibleSPHScheme, IncompressibleSPHScheme, WaveEquationScheme,
 )
 
 __all__ = ['SchemeBundle', 'buildScheme']
@@ -230,6 +230,30 @@ def _band2018pb() -> SchemeBundle:
     )
 
 
+def _artificialCompressible() -> SchemeBundle:
+    # Same lazy-import rationale as `_divergenceFree`: keeps `builder` from
+    # importing the scheme module at its own import time. See
+    # `schemes/artificialCompressible.py` -- this scheme owns its whole real
+    # step (a dual-time solve) and hands the integrator an exact delta, which
+    # is why it pins `forwardEuler` and validates it at step entry.
+    from .artificialCompressible import artificialCompressible_step
+    from ..systems.artificialCompressible import (ArtificialCompressibleState,
+                                                  ArtificialCompressibleSystem,
+                                                  ArtificialCompressibleSystemUpdate)
+    from ..configurations.artificialCompressible import (
+        ArtificialCompressibleSPHConfig, artificialCompressibleConfigToDict,
+        dictToArtificialCompressibleConfig)
+    return SchemeBundle(
+        SimulationSystem=ArtificialCompressibleSystem,
+        SimulationState=ArtificialCompressibleState,
+        SimulationConfig=ArtificialCompressibleSPHConfig,
+        SimulationUpdate=ArtificialCompressibleSystemUpdate,
+        stepFunction=artificialCompressible_step,
+        exportFunction=artificialCompressibleConfigToDict,
+        importFunction=dictToArtificialCompressibleConfig,
+    )
+
+
 def _waveEquation() -> SchemeBundle:
     return SchemeBundle(
         SimulationSystem=WaveSystemv3,
@@ -253,6 +277,7 @@ _SCHEMES = {
     IncompressibleSPHScheme.iisph: _iisph,
     IncompressibleSPHScheme.omniIncompressible: _omniIncompressible,
     IncompressibleSPHScheme.band2018pb: _band2018pb,
+    ArtificialCompressibleSPHScheme.artificialCompressible: _artificialCompressible,
     WaveEquationScheme.waveEquation: _waveEquation,
 }
 
@@ -266,7 +291,8 @@ _ALIASES['monaghancompressiblesph'] = CompressibleSPHScheme.Monaghan
 
 def buildScheme(
     schemeName: Union[str, CompressibleSPHScheme, WeaklyCompressibleSPHScheme,
-                      IncompressibleSPHScheme, WaveEquationScheme]
+                      IncompressibleSPHScheme, ArtificialCompressibleSPHScheme,
+                      WaveEquationScheme]
 ) -> SchemeBundle:
     """Resolve a scheme name or enum member to its :class:`SchemeBundle`."""
     if isinstance(schemeName, str):

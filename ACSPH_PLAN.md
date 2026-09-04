@@ -811,9 +811,32 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
      equivalence to 2e−15 with renormalisation off, quantified the divergence
      with it on (100 %/54 %/32 %), **and found the ψ sign error** — see §3's
      "The sign error". Full suite green after the fix.
-4. **Scaffold the new family** (§4.6): enum, state, system, config, round-trip,
-   registration. No physics — get `--scheme artificialCompressible` to build and
-   run one no-op step first.
+4. ~~**Scaffold the new family** (§4.6).~~ **Done 2026-09-05.** `--scheme
+   artificialCompressible` resolves, builds, and runs a step end to end through
+   the real integrator; the step is a deliberate no-op
+   (`schemes/artificialCompressible.py::PHYSICS_IMPLEMENTED = False`, warns
+   once on entry) with a marked socket where step 5's driver goes.
+   - `ArtificialCompressibleSPHScheme` + `PressureSmoothingScheme` +
+     `isArtificialCompressibleScheme` in `enumTypes.py`.
+   - `systems/artificialCompressible.py`: state with `pressures` **integrated**
+     and `densities` **constant**; system carrying the BDF history plus
+     `rollHistory` and `bdfCoefficients` (Eq. 42, with the BDF1 first-step
+     fallback reported through an `order` return).
+   - `configurations/artificialCompressible.py`: `ArtificialCompressibilityParams`
+     (every Part 2 constant, `uChar` and `referenceSoundSpeedForViscosity`
+     `Optional` on purpose) + the round-trip pair.
+   - Registered in `schemes/builder.py`, `io/parsers.py`, `io/export.py`,
+     `io/importIO.py`, `runner/runner.py::_resolveScheme`,
+     `runner/caseSpec.py::schemeNames`, `warpSPH/__init__.py`.
+   - **The integrator trap is enforced**, not documented:
+     `validateIntegrationScheme` raises on anything but `forwardEuler` at step
+     entry, because the exact-delta hand-off is silently wrong under a
+     multi-stage integrator (it would run the whole dual-time solve per stage
+     and blend). `modules/timestep/wrapper.py` likewise raises rather than
+     letting an ACSPH system fall through to the acoustic timestep.
+   - `tests/test_artificialCompressibleScaffold.py`, 14 tests. Note
+     `test_variableStepBdf2DifferentiatesAQuadraticExactly`: the fixed-step
+     limit alone would not catch a swapped `Δtⁿ`/`Δtⁿ⁻¹` in Eq. (42).
 5. **The dual-time driver** (§4.1) with AC-2L and RK2 only, `ṽ` advection off,
    shifting off. Validate on `hydrostaticColumn`.
 6. **Timestep + convergence control** (§4.5, §1.6). Reproduce Tables 1 and 2 on

@@ -15,10 +15,13 @@ __all__ = [
     'CompressibleSPHScheme',
     'WeaklyCompressibleSPHScheme',
     'IncompressibleSPHScheme',
+    'ArtificialCompressibleSPHScheme',
+    'PressureSmoothingScheme',
     'WaveEquationScheme',
     'EquationOfState',
     'DensityDiffusionScheme',
     'PressureForceScheme',
+    'isArtificialCompressibleScheme',
 ]
 
 # @torch.jit.script
@@ -116,6 +119,62 @@ class IncompressibleSPHScheme(Enum):
     #: than particle-distribution smoothness -- not as a general-purpose
     #: replacement for `divergenceFree`.
     band2018pb = 4
+
+# @torch.jit.script
+class ArtificialCompressibleSPHScheme(Enum):
+    """Artificial-compressibility SPH (De Courcy et al. 2024,
+    `literature/decourcy2024_*`; `ACSPH_PLAN.md`).
+
+    A third structurally-distinct incompressible baseline: where DFSPH iterates
+    a pressure-Poisson-like Jacobi solve on a velocity constraint, this
+    integrates a *differential* pressure equation `Dp/Dtau = -k1 rho div v +
+    k2 D^p` to steady state in a pseudo-time loop nested inside each real step,
+    with a BDF2 source carrying the real-time derivatives. It is a delta-SPH
+    code with the equation of state removed -- which is why so much of it is a
+    config flag away here (`ACSPH_PLAN.md` Part 3).
+
+    Its own family rather than a `WeaklyCompressibleSPHScheme` member: the
+    pressure is an *integrated* field and the density a constant, which is the
+    opposite of every weakly-compressible state in this package.
+    """
+    artificialCompressible = 0
+
+
+class PressureSmoothingScheme(Enum):
+    """The `D^p` pressure-smoothing operator of De Courcy et al. 2024
+    Eqs. (32)-(37) -- ACSPH's analogue of `DensityDiffusionScheme`, which is
+    also what implements it (`modules/deltaSPH/densityDiffusion.py`'s
+    `computeScalarFieldDiffusion`, with the pressure in place of the density).
+    """
+    #: AC-2, Eq. (32). Plain Molteni-Colagrossi Laplacian of pressure. A
+    #: **negative control**, not a candidate default: it cannot hold a
+    #: hydrostatic gradient and diffuses the free surface (paper Sec. 4.1.1).
+    #: == `DensityDiffusionScheme.densityOnly`.
+    laplacian = 0
+    #: AC-2L, Eqs. (33)-(34). Antuono-renormalised bi-Laplacian. **The paper's
+    #: working default** and the operator in every head-to-head against
+    #: delta-SPH. == `DensityDiffusionScheme.deltaSPH`.
+    renormalizedBiLaplacian = 1
+    #: AC-4, Eq. (35). Nested (bi-harmonic) Laplacian: a second pass over AC-2's
+    #: output, no renormalisation. Inherits AC-2's truncation error, weaker.
+    biharmonic = 2
+    #: AC-JST, Eqs. (36)-(37). Jameson-Schmidt-Turkel blend of AC-2L and AC-4,
+    #: switched on a pressure-oscillation sensor, AC-2L alone near the free
+    #: surface. Not pairwise-symmetric, therefore **not locally conservative**
+    #: (the paper says so; see ACSPH_PLAN.md Sec. 5.1 on its `eps_4` typo).
+    jst = 3
+
+
+# @torch.jit.script
+def isArtificialCompressibleScheme(scheme) -> bool:
+    """Is `scheme` any member of `ArtificialCompressibleSPHScheme`?
+
+    The counterpart of `isIncompressibleScheme`, and for the same reason: a
+    case that branches on "does this scheme solve for pressure rather than
+    evaluate an EOS" must ask about the family, not identity-test one member.
+    """
+    return isinstance(scheme, ArtificialCompressibleSPHScheme)
+
 
 # @torch.jit.script
 def isIncompressibleScheme(scheme) -> bool:

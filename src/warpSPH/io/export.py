@@ -9,8 +9,9 @@ import numpy as np
 import torch
 
 from ..configurations import *
-from ..enumTypes import (CompressibleSPHScheme, WeaklyCompressibleSPHScheme,
-                         IncompressibleSPHScheme, WaveEquationScheme)
+from ..enumTypes import (ArtificialCompressibleSPHScheme, CompressibleSPHScheme,
+                         WeaklyCompressibleSPHScheme, IncompressibleSPHScheme,
+                         WaveEquationScheme)
 from ..utils import getCurrentTimestamp
 from .hdf5 import dumpAdjacency, dumpState, dumpStage, copy_dict_to_h5, _encode_callable
 
@@ -28,7 +29,8 @@ def schemeAttribute(scheme) -> str:
     """
     return scheme.name if isinstance(
         scheme, (CompressibleSPHScheme, WeaklyCompressibleSPHScheme,
-                 IncompressibleSPHScheme, WaveEquationScheme)) else scheme
+                 IncompressibleSPHScheme, ArtificialCompressibleSPHScheme,
+                 WaveEquationScheme)) else scheme
 
 
 def exportSimulationSystem(
