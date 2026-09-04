@@ -350,8 +350,8 @@ away.
 | Eq. (25) pressure gradient `(p_i+p_j)` | [surfaceAware.py](src/warpSPH/modules/pressure/surfaceAware.py), `PressureForceScheme.Antuono` | ✅ direct |
 | Eq. (25) Monaghan–Gingold viscosity | [velocityDissipation.py](src/warpSPH/modules/deltaSPH/velocityDissipation.py), `ViscosityTerms.MonaghanGingold1983` | ✅ direct |
 | Eq. (23) velocity divergence | [modules/momentum/](src/warpSPH/modules/momentum/), `WarpOperation.Divergence` | ✅ direct |
-| Eq. (34) `L_i`, `⟨∇·⟩^L` | [gradRhoL.py](src/warpSPH/modules/density/gradRhoL.py), `computeRenormalizationMatrices` | ✅ generalise field |
-| Eq. (33) bi-Laplacian ψ operator | [wp_densityDelta.py](src/warpSPH/modules/deltaSPH/wp_densityDelta.py) `DensityDiffusionScheme.deltaSPH` | ✅ generalise field — **see note** |
+| Eq. (34) `L_i`, `⟨∇·⟩^L` | [gradRhoL.py](src/warpSPH/modules/density/gradRhoL.py), `computeRenormalizationMatrices` | ✅ **generalised 2026-09-05** (`computeGradRhoL(field=)`) |
+| Eq. (33) bi-Laplacian ψ operator | [wp_densityDelta.py](src/warpSPH/modules/deltaSPH/wp_densityDelta.py) `DensityDiffusionScheme.deltaSPH` | ✅ **generalised 2026-09-05**; sign error found + fixed — see note |
 | Eq. (61) value term | [wallPressure.py](src/warpSPH/modules/incompressible/wallPressure.py) `'shepard'` mode | ✅ exact |
 | Eq. (61) body-force term | `wallPressureExtrapolation(bodyForce=)` | ✅ **built 2026-09-05**, §4.4 |
 | Eq. (62) Shepard + mirroring | [modules/mdbc/velocity.py](src/warpSPH/modules/mdbc/velocity.py) | ⚠ audit, see §4.4 |
@@ -364,22 +364,77 @@ away.
 
 ### The one that matters most: Eq. (33) ≡ our existing δ-SPH ψ
 
+> ⚠ **The A/B this section asked for found a sign error in the existing δ-SPH
+> kernel.** Fixed 2026-09-05, see "The sign error" below. Everything in this
+> subsection describes the operator *after* that fix.
+
 `wp_densityDelta.py`'s `deltaSPH` branch computes
-`ψ_ij = (∇ρ^L_i + ∇ρ^L_j) − 2(ρ_j−ρ_i) x_ij/‖x_ij‖²`, dotted with `∇W_ij` —
-the **unprojected** Marrone 2011 form (verified against
-`literature/marrone2011_delta-sph-violent-impact-flows.pdf`, its Eq. 6). The
-paper's Eq. (33) writes the **projected** form, gradient term contracted onto
-`x̂_ij` first.
+`ψ_ij = −(∇ρ^L_i + ∇ρ^L_j) − 2(ρ_j−ρ_i) x_ij/‖x_ij‖²`, dotted with `∇W_ij` —
+the **unprojected** Marrone 2011 form (its Eq. 6, read off the PDF:
+`ψ_ij = 2(ρ_j−ρ_i) r_ji/‖r_ij‖² − [⟨∇ρ⟩^L_i + ⟨∇ρ⟩^L_j]` with
+`r_ji = r_j − r_i = −x_ij`). The paper's Eq. (33) writes the **projected**
+form, gradient term contracted onto `x̂_ij` first.
 
 These are algebraically identical whenever `∇W_ij ∥ x_ij`, which holds for any
 isotropic kernel:
 ```
 ((∇p_i+∇p_j)·x̂)(x̂·∇W) = W'(r) (∇p_i+∇p_j)·x_ij / r = (∇p_i+∇p_j)·∇W
 ```
-So **reusing the existing kernel reproduces AC-2L exactly**, with one caveat:
-they diverge if `useGradientRenormalization` is enabled on `∇W` itself (then
-`L∇W ∦ x_ij`). Assert that path off for ACSPH, or implement the projected form
-explicitly. Worth a one-off numerical A/B to confirm.
+
+**Measured** (`scripts/probe_deltaSPHPsiProjection.py`, float64, 20×20 jittered
+lattice, rms over interior rows, against a from-scratch `O(N²)` torch reference
+that shares no code with the kernel):
+
+| claim | linear `f` | quadratic | cubic |
+|---|---|---|---|
+| warp kernel − torch reference (unprojected) | 6e−14 | 2e−13 | 3e−13 |
+| unprojected − projected, renormalisation **off** | 2e−15 | 2e−15 | 2e−15 |
+| unprojected − projected, renormalisation **on** (relative) | **1.00** | 0.54 | 0.32 |
+
+So **reusing the existing kernel reproduces AC-2L exactly**, with the caveat
+confirmed quantitatively: they diverge completely once
+`useGradientRenormalization` puts an `L_i` in front of `∇W` (then `L∇W ∦ x_ij`).
+Assert that path off for ACSPH. Note the probe also shows *which* form survives
+that: the projected one still annihilates a linear field with `L` on (its brace
+`{(p_i−p_j) − ½(⟨∇p⟩_i+⟨∇p⟩_j)·x_ij}` is a scalar that vanishes regardless of
+what multiplies `∇W`), while the unprojected one does not. If renormalised
+gradients on this operator ever become desirable, implement Eq. (33) literally.
+
+### The sign error (found by that A/B, fixed 2026-09-05)
+
+`ψ` had the gradient term's sign flipped — `+grad − rho` where Marrone Eq. (6)
+is `−grad − rho` — in all four gradient-carrying branches (`deltaSPH`,
+`deltaOnly`, `denormalized`, `denormalizedOnly`). `densityOnly`
+(Molteni–Colagrossi, no gradient term) was and is correct.
+
+The defining property of the Antuono correction is that the two terms **cancel
+pair-by-pair on a field linear in space**: for `f = a·x`,
+`(∇f_i+∇f_j)·∇W = 2a·∇W` and `2(f_j−f_i)(x_ij·∇W)/r² = −2a·∇W` identically.
+That is what promotes the Molteni–Colagrossi Laplacian to a *bi*-Laplacian and
+lets the diffusive term reach a free surface without eating the smooth field
+underneath. With the sign flipped the terms *added*: `deltaSPH` was numerically
+`2 × densityOnly` on any smooth field — a second-order diffusion twice as
+strong as the uncorrected one, in place of the fourth-order one. Measured
+before/after on the linear field, rms over interior rows:
+
+| | linear | quadratic |
+|---|---|---|
+| `deltaSPH`, before | 1.6e+00 | — |
+| `deltaSPH`, after | **1.0e−13** | 1.8e−02 |
+| `densityOnly` (unchanged, the control) | 6.2e−01 | 4.1e+00 |
+
+It never blew up — the sign was still diffusive — which is exactly why only a
+property test catches it. Pinned as `tests/test_deltaSPHDiffusion.py` (4 tests,
+including the specific shape of the bug: `deltaOnly` came out *equal* to
+`densityOnly` rather than its negative). Full suite green after the fix.
+
+**This is not cosmetic for either scheme.** For ACSPH it is the whole of
+§4.1.1: AC-2L is separated from AC-2 precisely by whether the operator can hold
+a hydrostatic — i.e. linear — pressure gradient, and before the fix ours could
+not. For WCSPH it means the repo's default δ-SPH density diffusion has been
+over-strong and second-order, actively diffusing exactly the density gradients
+it exists to preserve. **Worth reporting to the authors' circle / checking
+against diffSPH, which this kernel was ported from.**
 
 ---
 
@@ -448,11 +503,16 @@ not inside the ACSPH scheme.
 
 ## 4.3 Generalised scalar-field diffusion operators — modify existing
 
-`wp_densityDelta.py` reads `ρ_i`/`ρ_j` from `getParticle(referenceState, j)`,
+~~`wp_densityDelta.py` reads `ρ_i`/`ρ_j` from `getParticle(referenceState, j)`,
 i.e. bound to the state's density field. Add an optional
-`queryField`/`referenceField` tensor pair through the existing `ExtraSpec`
-mechanism (which is already how `queryGradRho`/`queryGradRhoL` are threaded), used
-in place of `ρ` when supplied. That yields AC-2 and AC-2L with no new kernel.
+`queryField`/`referenceField` tensor pair...~~ **Done 2026-09-05.** The pair is
+threaded through the existing `ExtraSpec` mechanism, guarded so both or neither
+must be supplied, and the volume weight `m_j/ρ_j` is deliberately left on the
+density (it is a quadrature weight, not the diffused quantity).
+`computeScalarFieldDiffusion` is the raw-operator entry point;
+`computeGradRhoL(field=)` supplies Eq. (34). AC-2 and AC-2L now exist with no
+new kernel. Gradcheck covers the new branch. See Part 3 for the sign error this
+work uncovered.
 
 Then add, new:
 - **AC-4** (Eq. 35): a second pass over the AC-2 output. Trivial once AC-2 is a
@@ -735,9 +795,22 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
    `'mirror'` closures, exact on a linear pressure field to float32 machine
    precision (`tests/test_wallPressure.py`, 6 tests). See §4.4 for the
    two-gather decomposition and its periodic-axis restriction.
-3. **Generalise the diffusion kernel to an arbitrary scalar field** (§4.3), and
-   A/B the projected vs unprojected ψ form to confirm the Part 3 equivalence
-   argument numerically. Run `/gradcheck deltaSPH` around this.
+3. ~~**Generalise the diffusion kernel to an arbitrary scalar field** (§4.3), and
+   A/B the projected vs unprojected ψ form.~~ **Done 2026-09-05.**
+   - `computeDensityDiffusionDeltaSPH` takes an optional
+     `queryField`/`referenceField` pair; the volume weight `m_j/ρ_j` is
+     untouched (it is quadrature, not the diffused quantity). New public entry
+     `computeScalarFieldDiffusion` (no `schemeConfig`, no prefactor);
+     `computeDensityDiffusion` is now its δ-SPH specialisation.
+     `computeGradRhoL` takes `field=` — with the pressure it is Eq. (34)
+     verbatim.
+   - `/gradcheck deltaSPH` green before and after; the script now runs every
+     `DensityDiffusionScheme` twice, once through the field pair, so the new
+     branch's adjoint is covered.
+   - The A/B (`scripts/probe_deltaSPHPsiProjection.py`) confirmed the Part 3
+     equivalence to 2e−15 with renormalisation off, quantified the divergence
+     with it on (100 %/54 %/32 %), **and found the ψ sign error** — see §3's
+     "The sign error". Full suite green after the fix.
 4. **Scaffold the new family** (§4.6): enum, state, system, config, round-trip,
    registration. No physics — get `--scheme artificialCompressible` to build and
    run one no-op step first.

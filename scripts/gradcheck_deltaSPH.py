@@ -16,6 +16,14 @@ differentiable inputs -- exercised here across all 5 `DensityDiffusionScheme`
 values, since the scheme enum selects between different linear combinations of
 those two gradient fields (see the module's `Func_i` for the branch table).
 
+Each scheme is checked twice: once diffusing the state's own density, and once
+through the `queryField`/`referenceField` pair (ACSPH_PLAN.md Sec. 4.3, which
+reuses this kernel as a general scalar Laplacian for the pressure). The second
+pass is the one that matters here -- `useField` is a branch inside the neighbour
+loop, so the field's adjoint is the thing that could silently vanish, and the
+field is an extra *scalar* array where every other differentiable extra on this
+operator is a vector one.
+
 `computeVelocityDiffusionDeltaSPH` takes `inviscid` (bool) which switches between
 an artificial-viscosity-style term and a physical-viscosity term (`alphaToNu`),
 plus the standard "moving apart doesn't dissipate" kink
@@ -63,12 +71,13 @@ def _particles(pos, sup, mass, dens, kinds, velocities=None):
     return p
 
 
-def _run_density(label, densityScheme) -> bool:
+def _run_density(label, densityScheme, withField=False) -> bool:
     domain, positions, supports, masses, densities, adjacency, kinds = _build_case()
     gradRho = torch.randn(N, DIM, dtype=DTYPE, device=DEVICE, requires_grad=True)
     gradRhoL = torch.randn(N, DIM, dtype=DTYPE, device=DEVICE, requires_grad=True)
+    field = torch.randn(N, dtype=DTYPE, device=DEVICE, requires_grad=True)
 
-    def f(pos, sup, mass, dens, gRho, gRhoL):
+    def f(pos, sup, mass, dens, gRho, gRhoL, fld=None):
         p = _particles(pos, sup, mass, dens, kinds)
         return computeDensityDiffusionDeltaSPH(
             queryParticles=p,
@@ -77,11 +86,14 @@ def _run_density(label, densityScheme) -> bool:
             densityScheme=densityScheme,
             queryGradRho=gRho,
             queryGradRhoL=gRhoL,
+            queryField=fld,
             adjacency=adjacency,
         )
 
     print(f"\n=== computeDensityDiffusionDeltaSPH [{label}]: torch.autograd.gradcheck ===")
     inputs = (positions, supports, masses, densities, gradRho, gradRhoL)
+    if withField:
+        inputs = inputs + (field,)
     try:
         ok = torch.autograd.gradcheck(f, inputs, eps=1e-6, atol=1e-5)
         print("PASSED" if ok else "FAILED (gradcheck returned False)")
@@ -127,6 +139,8 @@ def main():
     ok = True
     for scheme in DensityDiffusionScheme:
         ok &= _run_density(scheme.name, scheme)
+    for scheme in DensityDiffusionScheme:
+        ok &= _run_density(f"{scheme.name}, queryField", scheme, withField=True)
     for inviscid in (True, False):
         ok &= _run_velocity(f"inviscid={inviscid}", inviscid)
 
