@@ -1,7 +1,7 @@
 # Porting an example, and taking a case to 2D/3D
 
 Written 2026-08-12, after converting Sod (`examples/compressible/01-sod/`) and
-then extruding it into `sod2d`/`sod3d`. `CLEANUP_PLAN.md`'s open "Notebook
+then extruding it into `sod2d`/`sod3d`. `docs/historic_plans/CLEANUP_PLAN.md`'s open "Notebook
 simplification, the rest" item — 33 notebooks, ~13k LOC — is the work this is
 for. `LESSONS_LEARNED.md` holds the general "why" of the sweep; this file is
 the procedure, the conventions that have a reason behind them, and the specific
@@ -29,7 +29,7 @@ unpacking, the step loop, export, plotting, ffmpeg — is `warpSPH.runner` and
 does not get copied into a case.
 
 **The notebook does not shrink.** This is the correction recorded in
-`CLEANUP_PLAN.md` and it is easy to get backwards: a notebook that only
+`docs/historic_plans/CLEANUP_PLAN.md` and it is easy to get backwards: a notebook that only
 re-derives its `.py` sibling should *not* become another thin `caseMain`
 wrapper. Notebooks are where new physics and new hooks get prototyped, so they
 build ICs through the real case code but keep the step loop visible in a cell.

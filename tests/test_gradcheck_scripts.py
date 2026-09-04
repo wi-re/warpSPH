@@ -1,6 +1,6 @@
 """Runs the scripts/gradcheck_*.py canary scripts as pytest cases.
 
-Phase 4.1's gradcheck rollout (see CLEANUP_PLAN.md) produced these as
+Phase 4.1's gradcheck rollout (see docs/historic_plans/CLEANUP_PLAN.md) produced these as
 standalone scripts, one per kernel-bearing module, rather than in-process
 pytest functions -- for two independent reasons, both fatal to running them
 in-process here:

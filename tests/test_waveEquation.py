@@ -1,7 +1,7 @@
 """Standalone checks for the wave-equation scheme that do not go through the
 `Case`/CLI machinery: a spatial-convergence check against the closed-form
 standing-wave solution, and a check that gradients reach a smooth source's
-`position`/`magnitude` tensors. See `WAVE_EQUATION_PLAN.md` steps 5 and 6.
+`position`/`magnitude` tensors. See `docs/historic_plans/WAVE_EQUATION_PLAN.md` steps 5 and 6.
 """
 
 from __future__ import annotations
@@ -95,7 +95,7 @@ def _standingWaveError(nx: int, dim: int, c: float = 1.0, L: float = 2.0) -> flo
 def test_standingWaveErrorShrinksWithResolution(dim, resolutions):
     """The base pipeline's accuracy check: a smooth, resolved standing wave
     converges as the particle spacing refines, in every dimension the N-D
-    generalization (`WAVE_EQUATION_PLAN.md` step 1) now supports."""
+    generalization (`docs/historic_plans/WAVE_EQUATION_PLAN.md` step 1) now supports."""
     errors = [_standingWaveError(nx, dim) for nx in resolutions]
     assert all(after < before for before, after in zip(errors, errors[1:])), (
         f'dim={dim}: errors {errors} did not shrink monotonically with resolution')
@@ -107,7 +107,7 @@ def test_standingWaveErrorShrinksWithResolution(dim, resolutions):
 # --- Gradients reach a smooth source's position and magnitude ---------------
 
 def test_gradientsReachSourcePositionAndMagnitude():
-    """`WAVE_EQUATION_PLAN.md` step 5's verification: `position`/`magnitude`
+    """`docs/historic_plans/WAVE_EQUATION_PLAN.md` step 5's verification: `position`/`magnitude`
     are real leaf tensors, and a scalar probe of `u` after a short rollout
     has a finite, non-zero gradient w.r.t. both -- through the smooth
     kernel-weighted bump `sampleSmoothPointSourceWaveSystem` stamps onto `u`,

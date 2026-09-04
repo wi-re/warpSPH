@@ -950,7 +950,7 @@ again.
 | hypothesis | result |
 |---|---|
 | **Move the setpoint off the lattice floor** (`--setpointEps`) | Kills `kolmogorovIncompressible` **150 steps sooner**. The source's negative mean is the shifting solve's de-clumping drive; cancelling it is a static mean-centering. Under `minShift` the apparent `nIter` 64→6 is the stopping criterion going slack, not convergence (`rhoErr` 3.5x worse). |
-| **`computeAlpha` carries an extra power of `rho`** | Falsified decisively. `probe_operatorDiagonal.py` extracts the diagonal exactly: `diag(A)/alphas` = 1.00011 ± 0.0051 periodic, 0.99987 ± 0.0160 bounded with `rho` out to **1.303**. `omega_eff = omega` exactly. (`INCOMPRESSIBLE_SOLVER_PLAN.md` had already measured rel-L2 3.3e-7.) |
+| **`computeAlpha` carries an extra power of `rho`** | Falsified decisively. `probe_operatorDiagonal.py` extracts the diagonal exactly: `diag(A)/alphas` = 1.00011 ± 0.0051 periodic, 0.99987 ± 0.0160 bounded with `rho` out to **1.303**. `omega_eff = omega` exactly. (`docs/historic_plans/INCOMPRESSIBLE_SOLVER_PLAN.md` had already measured rel-L2 3.3e-7.) |
 | **Mean-centering the shift pressure** (what the VD solver does) | Worst of four gauges: NaN at step 155. The VD solver's source is a divergence, mean-zero by pair antisymmetry, so recentering costs it nothing; this solver's is not. |
 | **Centre-then-clamp** | NaN at step 136. Chops the field's shape every iteration rather than translating it. |
 | **Zero-meaning the source** (textbook compatibility projection) | **For `divergenceFree` (VD+PS, position shift): negative.** Makes the solver *converge* (nIter 64→13.4) and the density *worse* (`mean\|rho-1\|` 3.9e-3 vs 2.9e-3, `rhoStd` 3.4x). Only part of the source's mean is unreachable; the rest is the real de-clump signal for the shift. **For `omniIncompressible` (velocity impulse) on a *closed* box: correct (Part 42).** There the whole source mean is genuinely in `null(A)` (pure-Neumann, `A·1 ≈ 0`), the Jacobi cannot touch it, and a mean-zero pressure is the right gauge for a velocity impulse. See §1.7 Part 42 / `CD_SOURCE_PROJECT`. The two schemes differ because the correction is a shift vs an impulse and because the domain here has no free surface. |
@@ -1228,7 +1228,7 @@ permissive on this case, because the error it was permitting is gone.
 | MLS boundary pressure computed once per step and carried as under-relaxed state | **open** (§4 item 5) |
 | No SVD guard on the MLS gradient fit | **open** (§4 item 5) |
 | No warm start | **open** (§4 item 9), deliberately deferred |
-| `omega = 0.3` against both papers' 0.5 | **explained, not a bug.** `INCOMPRESSIBLE_SOLVER_PLAN.md`: `omega < 2/rho(D^-1 A)` with `rho(D^-1 A) ≈ 5.636`, a degenerate high-frequency lattice cluster, `dt`-invariant. Candidate contributor: `n_h = 4` gives ~50 neighbours in 2D against [I] §2.2's "typically 30-40", and the IISPH operator reaches neighbours-of-neighbours. |
+| `omega = 0.3` against both papers' 0.5 | **explained, not a bug.** `docs/historic_plans/INCOMPRESSIBLE_SOLVER_PLAN.md`: `omega < 2/rho(D^-1 A)` with `rho(D^-1 A) ≈ 5.636`, a degenerate high-frequency lattice cluster, `dt`-invariant. Candidate contributor: `n_h = 4` gives ~50 neighbours in 2D against [I] §2.2's "typically 30-40", and the IISPH operator reaches neighbours-of-neighbours. |
 | Krylov routed at the clamped solve | should **raise** (§4, known-open) |
 | Stopping criterion is absolute and floors negative contributions | **open**, §1.7 / §4 item 4 |
 | Two-way rigid coupling absent | **open**, no case needs it |

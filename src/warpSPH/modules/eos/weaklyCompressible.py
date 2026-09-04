@@ -45,7 +45,7 @@ def weaklyCompressibleEOS(particleState, schemeConfig):
         # rho = torch.clamp(particleState.densities, min=0.8)  # rough attempt at clamping against instabilities; left disabled on purpose -- non-physical densities should blow up rather than be silently masked, so they get caught instead. This is where you'd clamp it if that's ever actually wanted.
         rho = particleState.densities
 
-        # Uniform background pressure (WCSPH_SHIFTING_PLAN.md 2a): p <- p_EOS + p_b.
+        # Uniform background pressure (docs/historic_plans/WCSPH_SHIFTING_PLAN.md 2a): p <- p_EOS + p_b.
         # Default 0.0, so this is inert unless a case sets it.
         p_b = getattr(schemeConfig.fluid, 'backgroundPressure', 0.0)
 

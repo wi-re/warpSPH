@@ -10,7 +10,7 @@ of a hard wall.
 `shape_generation.py`'s SDF-based source/obstacle placement is 2D-only, so
 `--dim 1`/`--dim 3` fall back to a single smooth point source
 (`sample/waveSystem.py`'s `sampleSmoothPointSourceWaveSystem`) instead of
-going through it; see `WAVE_EQUATION_PLAN.md` for why -- that path also
+going through it; see `docs/historic_plans/WAVE_EQUATION_PLAN.md` for why -- that path also
 doubles as the differentiable one, since it contributes to `u` as a direct
 function of a `position`/`magnitude` tensor rather than through the SDF id
 grid's non-differentiable step function. Positions are static -- the

@@ -5,7 +5,7 @@ used both for `drhodt` (via its trace) and as an input to the CRK
 pressure/viscosity acceleration and dudt kernels, and the Monaghan-Price
 energy-balance term `f_ij`. Large stretches of an earlier
 `computeCompSPHAccelWarp`/grad-h formulation are commented out rather than
-removed (tracked separately in CLEANUP_PLAN.md); `gradHState` is
+removed (tracked separately in docs/historic_plans/CLEANUP_PLAN.md); `gradHState` is
 unconditionally `None` (its adaptive-support branch is also commented out).
 It used to only be assigned *after* the `currentState.divergence is None`
 fallback branch that reads it -- an `UnboundLocalError` waiting to happen on

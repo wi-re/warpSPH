@@ -198,7 +198,7 @@ to main cleanly.
   pass, since its whole purpose was probing the function that pass deleted.
   **The remaining 51 are all cited by at least one `.md` file somewhere in
   the repo** (checked repo-wide, not just the two DFSPH docs — six of them
-  turned out to belong to `WCSPH_SHIFTING_PLAN.md`, a different, apparently
+  turned out to belong to `docs/historic_plans/WCSPH_SHIFTING_PLAN.md`, a different, apparently
   still-active track, not DFSPH scratch work at all). Zero-references-
   anywhere was always the actual removal bar this session used, precisely
   because it needs no judgment call about whether a *cited* script's finding

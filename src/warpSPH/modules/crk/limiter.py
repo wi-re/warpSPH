@@ -5,7 +5,7 @@ reconstructed velocity gradient and applies a van Leer flux limiter; the
 zero-denominator branch must return early (before dividing) rather than
 patching a NaN afterward, since reverse-mode AD differentiates the
 un-guarded division itself (see the inline note referencing
-`scripts/gradcheck_crk.py`, CLEANUP_PLAN.md Phase 4.1 Tier 1). `crkLimiter`
+`scripts/gradcheck_crk.py`, docs/historic_plans/CLEANUP_PLAN.md Phase 4.1 Tier 1). `crkLimiter`
 tapers the viscosity to zero for particle pairs closer than `eta_crit`
 smoothing lengths apart, via a Gaussian fall-off scaled by `eta_fold`.
 """
@@ -94,7 +94,7 @@ def computeVanLeer(
     # the adjoint even though the forward value gets overwritten -- reverse
     # AD differentiates the expression that was evaluated, not the value it
     # was replaced with afterward. Confirmed via
-    # scripts/gradcheck_crk.py (CLEANUP_PLAN.md Phase 4.1 Tier 1): forward
+    # scripts/gradcheck_crk.py (docs/historic_plans/CLEANUP_PLAN.md Phase 4.1 Tier 1): forward
     # values were finite, but every gradient came back NaN.
     denom_j = sgn(grad_j) * abs(grad_j)
     if wp.abs(denom_j) > scalar_t(1.0e-30):

@@ -50,7 +50,7 @@ CASE_MODULES = (
     'staticBlob',
     'hydrostaticColumn',
     'columnCollapse',
-    # non-fluid demo -- see WAVE_EQUATION_PLAN.md
+    # non-fluid demo -- see docs/historic_plans/WAVE_EQUATION_PLAN.md
     'waveEquation',
 )
 

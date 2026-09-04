@@ -33,7 +33,7 @@ actually solves: **the pressure-Poisson matvec needs no JVP at all.** It's alrea
 *is* the unknown the operator acts on, not a tangent direction. That whole sub-problem —
 "replace IISPH's Jacobi smoother with a proper Krylov solve of the identical linear system,
 built from composable primitives" — is **already done**, landed in
-`INCOMPRESSIBLE_SOLVER_PLAN.md` (CG/BiCG/BiCGStab/GMRES/MINRES in
+`docs/historic_plans/INCOMPRESSIBLE_SOLVER_PLAN.md` (CG/BiCG/BiCGStab/GMRES/MINRES in
 `modules/incompressible/krylov.py`), with zero JVP anywhere in it.
 
 What's left of Phase 6's actual ambition — a genuinely *coupled*, *nonlinear* Newton solve over
@@ -54,7 +54,7 @@ to actually earn its keep.
 `modules/pressure/iisph.py` (`computePressureAccelIISPH`) and
 `modules/incompressible/drift.py` (`computePressureShiftIISPH`) — the two calls
 `solveDivergenceFree`/`solveIncompressible`'s Jacobi loop and every one of
-`INCOMPRESSIBLE_SOLVER_PLAN.md`'s five new Krylov solvers use as the matvec — are:
+`docs/historic_plans/INCOMPRESSIBLE_SOLVER_PLAN.md`'s five new Krylov solvers use as the matvec — are:
 
 ```python
 def computePressureAccelIISPH(state, pressureValues, config, ...):
@@ -80,7 +80,7 @@ differentiation step to automate here.
 
 This means Phase 6's own comparison axis ("automatic path avoids how much bespoke pressure-solver
 machinery" vs. `solveIncompressible`) already resolves in the automatic path's favor with *zero*
-new code: `INCOMPRESSIBLE_SOLVER_PLAN.md`'s Krylov solvers reuse the exact same composable matvec
+new code: `docs/historic_plans/INCOMPRESSIBLE_SOLVER_PLAN.md`'s Krylov solvers reuse the exact same composable matvec
 IISPH's own Jacobi loop does, just replacing the fixed-point relaxation with a real Krylov method.
 In `warpSPHIntegrators/NOTES.md` §3.4's ladder terms, that work is best read as **rung 2** (a
 proper linear solve of the frozen-state stage system) done with matrix-free primitives that
@@ -133,7 +133,7 @@ no new architecture, and is small enough to actually finish:
 line 145, and the Krylov path's `gauge='nonnegative'` post-projection in `krylov.py`). This is a
 box-constrained linear complementarity problem in disguise — solve `A p = b` subject to `p >= 0`
 — and today it's handled by solving the unconstrained linear system to convergence and then
-clamping the result, which `INCOMPRESSIBLE_SOLVER_PLAN.md`'s own Scope section already flags
+clamping the result, which `docs/historic_plans/INCOMPRESSIBLE_SOLVER_PLAN.md`'s own Scope section already flags
 honestly: *"a true constrained solve for the inactive `solveIncompressible` `clamp(p, min=0)`
 inequality — here we approximate with a linear solve + post-projection clamp, documented as
 such."*
@@ -149,7 +149,7 @@ already-identified, already-documented gap instead of a from-scratch architectur
 
 This is offered as a candidate, not a commitment — it wasn't asked for, and
 `solveIncompressible`/the density-error variant is not on the live `divergenceFree_step` path today (see
-`INCOMPRESSIBLE_SOLVER_PLAN.md`'s own "Current state" section), so the value of fixing it depends
+`docs/historic_plans/INCOMPRESSIBLE_SOLVER_PLAN.md`'s own "Current state" section), so the value of fixing it depends
 on whether that path matters to you. Flagging it here so the option is visible next to the bigger
 ask it was found while scoping.
 
@@ -174,7 +174,7 @@ ask it was found while scoping.
 
 - `warpSPHCore/docs/historic_plans/warpier_forward_mode_plan.md` — Phase 6/Goal 4, the origin of
   this scoping request.
-- `INCOMPRESSIBLE_SOLVER_PLAN.md` (this repo) — the Krylov-solver work that already closes the
+- `docs/historic_plans/INCOMPRESSIBLE_SOLVER_PLAN.md` (this repo) — the Krylov-solver work that already closes the
   linear pressure-Poisson sub-problem; read its "Scope" section for the `clamp(p, min=0)` caveat
   this document's Phase 1 proposal builds on.
 - `warpSPHIntegrators/NOTES.md` §3.4 — the solver-ladder framing Phase 6 was reasoning from;

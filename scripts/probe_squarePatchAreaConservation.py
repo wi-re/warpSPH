@@ -1,4 +1,4 @@
-"""Probe (`WCSPH_SHIFTING_PLAN.md` step 1): how badly does the δ⁺-SPH surface
+"""Probe (`docs/historic_plans/WCSPH_SHIFTING_PLAN.md` step 1): how badly does the δ⁺-SPH surface
 shift inflate the fluid footprint on the rotating square patch, and does the
 current "switch it off at the surface" mitigation actually bound it?
 

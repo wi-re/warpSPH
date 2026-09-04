@@ -10,7 +10,7 @@ mirroring warpSPHCore's own methodology (`~/dev/warpSPHCore/.claude/skills/
 gradcheck/SKILL.md`) but for this repo's scheme-specific physics layer, built
 *on top of* warpSPHCore's already-gradchecked operators. Every one calls
 `torch.autograd.gradcheck` directly against the module's real `compute*Warp`
-entry point -- no manual Jacobian, no per-call workaround. CLEANUP_PLAN.md's
+entry point -- no manual Jacobian, no per-call workaround. docs/historic_plans/CLEANUP_PLAN.md's
 Phase 4.1 has the full history; this file is the "how do I use/extend this"
 reference, and the bug-class catalog below is the "what should I watch for"
 one, distilled from every real bug the rollout found.
@@ -120,7 +120,7 @@ and broader than first suspected: not just same-array reads, *any* inline
 ternary. Use it (or an explicit `if`/`else` for non-array-read cases) instead
 of an inline conditional expression in any kernel code, full stop, until
 warp-lang 1.17 ships and this is fixed at the source (see "Decisions already
-made" in CLEANUP_PLAN.md -- don't propose pinning to 1.15.0/1.16.0/1.12.0 as
+made" in docs/historic_plans/CLEANUP_PLAN.md -- don't propose pinning to 1.15.0/1.16.0/1.12.0 as
 a fix, that's an intentional wait, not an oversight). If a gradcheck starts
 failing right after adding or touching a ternary in kernel code, check this
 first.
@@ -271,14 +271,16 @@ forward values with a one-line "not in scope" note, as
 
 ## warp-lang version
 
-`pyproject.toml` pins no version, by decision (see "Decisions already made"
-in CLEANUP_PLAN.md): pin to 1.17 once it ships, since that's confirmed to fix
-class 1's ternary bug at the source. Until then any installed version is
-fine to develop against, *as long as* new kernel code routes ternaries
-through `access_optional`/explicit `if`-`else` rather than an inline
-conditional expression. The installed version has drifted three times across
-this plan's history already (1.12.0 → a 1.17.0.dev3 local checkout → 1.15.0
-from PyPI) without anyone changing `pyproject.toml` -- if a previously-clean
-script starts failing with no code changes on your end, checking `python -c
-"import warp; print(warp.__version__)"` against what it last passed under is
-worth doing before assuming a new code bug.
+**Resolved, 2026-09-04**: `pyproject.toml` now pins `warp-lang>=1.17.0` (see
+`docs/historic_plans/CLEANUP_PLAN.md`). 1.17 fixes class 1's ternary bug at
+the source -- confirmed directly via `warpSPHCore/scripts/
+repro_ternary_adjoint_zeroing.py`, not just assumed from the changelog -- so
+the `access_optional`/explicit `if`-`else` workaround is no longer required
+for *new* kernel code, though existing uses of it are still correct and
+don't need to be reverted. Before this pin landed, the installed version had
+drifted three times with nobody changing `pyproject.toml` (1.12.0 → a
+1.17.0.dev3 local checkout → 1.15.0 from PyPI) -- the general lesson still
+applies to any future unpinned dependency: if a previously-clean script
+starts failing with no code changes on your end, check `python -c "import
+warp; print(warp.__version__)"` against what it last passed under before
+assuming a new code bug.

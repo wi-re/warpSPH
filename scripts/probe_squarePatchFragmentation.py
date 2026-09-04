@@ -1,5 +1,5 @@
 """Why does the rotating square patch shatter at late tω when Sun et al. 2019
-Fig. 14 keeps coherent arms to tω=8?  (`WCSPH_SHIFTING_PLAN.md`, the
+Fig. 14 keeps coherent arms to tω=8?  (`docs/historic_plans/WCSPH_SHIFTING_PLAN.md`, the
 "arms fragment" note.)
 
 Answer (this probe): **under-resolution.** The shatter time (`tw@sf.9`, the tω
@@ -33,7 +33,7 @@ parser.add_argument('--modes', nargs='+', default=['shiftOff', 'surfaceNormal'])
 parser.add_argument('--samplings', nargs='+', default=['regular'])
 parser.add_argument('--shapes', nargs='+', default=['box'])
 parser.add_argument('--pb', type=float, nargs='+', default=[0.0],
-                    help='background-pressure values to sweep (WCSPH_SHIFTING_PLAN.md 2a)')
+                    help='background-pressure values to sweep (docs/historic_plans/WCSPH_SHIFTING_PLAN.md 2a)')
 parser.add_argument('--lambda-taper', dest='lambdaTaper', type=float, default=0.0,
                     help='surfaceNormal lambda-gate smoothstep width (0 = hard step)')
 parser.add_argument('--every', type=int, default=200)

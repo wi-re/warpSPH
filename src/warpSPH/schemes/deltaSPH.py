@@ -25,7 +25,7 @@ motion comes entirely from the BC machinery, not integration. Large stretches
 of commented-out code (an alternate Shepard-corrected density path, per-term
 diagnostic prints, a `TimedBlock`/`performanceDict` profiling scaffold
 superseded by the active `record_function` markers) are left in place, not
-removed (tracked separately in CLEANUP_PLAN.md).
+removed (tracked separately in docs/historic_plans/CLEANUP_PLAN.md).
 """
 
 from ..configurations import SimulationConfig, WeaklyCompressibleSPHConfig

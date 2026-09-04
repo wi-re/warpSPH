@@ -17,7 +17,7 @@ Positions are static: the adjacency built once by `finalizeWaveSystemSetup`
 (:mod:`warpSPH.sample.waveSystem`) is reused every step rather than rebuilt,
 so this is an explicit, non-moving-neighbourhood scheme. Implicit time
 integration and forward-mode AD are not wired up here; see
-`WAVE_EQUATION_PLAN.md` for that follow-up.
+`docs/historic_plans/WAVE_EQUATION_PLAN.md` for that follow-up.
 
 See :mod:`warpSPH.systems.waveSystem` for the state it integrates,
 :mod:`warpSPH.cases.waveEquation` for the registered `Case`, and the README

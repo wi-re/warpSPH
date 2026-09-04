@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """torch.autograd.gradcheck against modules/incompressible/wp_alpha.py -- Tier 2 of
-CLEANUP_PLAN.md's Phase 4.1 gradcheck rollout.
+docs/historic_plans/CLEANUP_PLAN.md's Phase 4.1 gradcheck rollout.
 
 `computeAlphaWarp` computes the DFSPH pressure-solver diagonal coefficient
 `alpha_i = area_i/m_i * dot(sumA, sumA) + area_i * sumB`, where `sumA`/`sumB` are
@@ -127,7 +127,7 @@ def main():
     if ok:
         print("ALL PASSED.")
     else:
-        print("FAILED -- see this script's docstring and CLEANUP_PLAN.md Phase 4.1 Tier 2.")
+        print("FAILED -- see this script's docstring and docs/historic_plans/CLEANUP_PLAN.md Phase 4.1 Tier 2.")
     sys.exit(0 if ok else 1)
 
 

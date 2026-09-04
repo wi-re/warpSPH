@@ -5,7 +5,7 @@
 current style. This file is kept as a record of what that style is and how
 each case got there, in case a future case in this family needs the same
 treatment as a template. `../../PORTING_EXAMPLES.md` has the general
-procedure and the *why* behind each convention; `../../CLEANUP_PLAN.md` has
+procedure and the *why* behind each convention; `../../docs/historic_plans/CLEANUP_PLAN.md` has
 the wider cleanup context this was part of — the non-compressible notebooks
 (`examples/weaklyCompressible/`, `examples/incompressible/`) are a separate,
 still-open item there.

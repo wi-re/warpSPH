@@ -1,4 +1,4 @@
-"""Probe (`WCSPH_SHIFTING_PLAN.md` §4 transfer test): does the Sun 2019
+"""Probe (`docs/historic_plans/WCSPH_SHIFTING_PLAN.md` §4 transfer test): does the Sun 2019
 surface treatment (`ShiftingProjectionScheme.surfaceNormal`) let
 `sloshingTank --scheme deltaSPH` survive the first violent wave impact?
 

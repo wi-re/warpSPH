@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """torch.autograd.gradcheck against modules/adaptiveSupport/{wp_omega,wp_psi0}.py
--- Tier 2 of CLEANUP_PLAN.md's Phase 4.1 gradcheck rollout.
+-- Tier 2 of docs/historic_plans/CLEANUP_PLAN.md's Phase 4.1 gradcheck rollout.
 
 `computeOmegaWarp` computes the grad-h correction factor
 (1 - sum_j m_j dW/dh, used to correct for the h-dependence of the kernel) and
@@ -83,7 +83,7 @@ def main():
     if ok:
         print("ALL PASSED.")
     else:
-        print("FAILED -- see this script's docstring and CLEANUP_PLAN.md Phase 4.1 Tier 2.")
+        print("FAILED -- see this script's docstring and docs/historic_plans/CLEANUP_PLAN.md Phase 4.1 Tier 2.")
     sys.exit(0 if ok else 1)
 
 

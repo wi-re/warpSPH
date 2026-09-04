@@ -1,7 +1,7 @@
 """End-to-end tests for the opt-in Krylov pressure solvers in the DFSPH
 incompressible solve (BiCGStab / GMRES / CG / BiCG / MINRES), plus the Phase-0
 operator probe and the relaxed-Jacobi regression guard. See
-``INCOMPRESSIBLE_SOLVER_PLAN.md``.
+``docs/historic_plans/INCOMPRESSIBLE_SOLVER_PLAN.md``.
 
 One divergence-free TGV case is built once (session scope) and shared. The
 pressure operator is matrix-free, so the tests that need the operator matrix
@@ -416,7 +416,7 @@ def test_relaxedJacobiRegression(incompCase):
 # BiCGStab recurrence loses its shadow-system orthogonality (kappa(M^-1 A) is
 # ~1e8, above the fp32 precision limit) and stagnates; the fp64 bookkeeping
 # goes ~10x further at the same matvec cost. See the "BiCGStab deep-dive"
-# section of INCOMPRESSIBLE_SOLVER_PLAN.md.
+# section of docs/historic_plans/INCOMPRESSIBLE_SOLVER_PLAN.md.
 
 
 def test_krylovFp64ConfigRoundTrip():

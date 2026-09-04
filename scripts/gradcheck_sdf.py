@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """torch.autograd.gradcheck against geometry/sdf.py's sampleSDF and
-regions/domainSDF.py's sampleDomainSDF -- Tier 0 of CLEANUP_PLAN.md's
+regions/domainSDF.py's sampleDomainSDF -- Tier 0 of docs/historic_plans/CLEANUP_PLAN.md's
 Phase 4.1 gradcheck rollout.
 
 Different code shape from the other 24 gradcheck targets: no Warp kernel at
@@ -157,7 +157,7 @@ def main():
     if ok:
         print("ALL PASSED.")
     else:
-        print("FAILED -- see this script's docstring and CLEANUP_PLAN.md Phase 4.1 Tier 0.")
+        print("FAILED -- see this script's docstring and docs/historic_plans/CLEANUP_PLAN.md Phase 4.1 Tier 0.")
     sys.exit(0 if ok else 1)
 
 

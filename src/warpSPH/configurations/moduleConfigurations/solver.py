@@ -25,7 +25,7 @@ class PressureSolverType(Enum):
     ``b`` the IISPH divergence, preconditioned by the IISPH diagonal (``1/D``).
     ``relaxedJacobi`` (the default) keeps the historical matrix-free relaxed
     Jacobi iteration byte-for-byte; the Krylov options are opt-in alternatives
-    that solve the same ``A p = b``. See ``INCOMPRESSIBLE_SOLVER_PLAN.md``.
+    that solve the same ``A p = b``. See ``docs/historic_plans/INCOMPRESSIBLE_SOLVER_PLAN.md``.
     """
     relaxedJacobi = 0   # default: the existing relaxed-Jacobi path (unchanged)
     cg = 1              # (preconditioned) conjugate gradient -- gated on an SPD/symmetry probe

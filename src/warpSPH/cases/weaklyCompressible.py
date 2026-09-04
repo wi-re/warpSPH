@@ -77,7 +77,7 @@ WEAKLY_COMPRESSIBLE_PARAMS = dict(
     # radius -- and 0.01 is both the scheme default and the value below which
     # runs stop being reliably stable.
     alpha=0.01,
-    # Uniform background pressure added to the EOS (WCSPH_SHIFTING_PLAN.md 2a).
+    # Uniform background pressure added to the EOS (docs/historic_plans/WCSPH_SHIFTING_PLAN.md 2a).
     # 0.0 = off; a small positive value opposes the δ⁺ shift's outward
     # free-surface drift / the tensile instability, at the cost of rounding
     # sharp free-surface features.
@@ -747,7 +747,7 @@ def _convexHullArea(points: 'Any') -> float:
 
 def squarePatchAreaMetrics(ctx: RunContext, state) -> Dict[str, float]:
     """Area / volume-conservation diagnostics for the rotating square patch
-    (`WCSPH_SHIFTING_PLAN.md` step 1). The δ⁺-SPH surface shift is not
+    (`docs/historic_plans/WCSPH_SHIFTING_PLAN.md` step 1). The δ⁺-SPH surface shift is not
     volume-preserving; these are what make its outward drift measurable.
 
     - ``sphVolume``      -- ``Σ_i m_i / ρ_i`` over fluid. The SPH volume; moves

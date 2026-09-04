@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Manual troubleshooting harness for the computeCompSPHBalanceTermWarp
-segfault (CLEANUP_PLAN.md, Phase 4.2).
+segfault (docs/historic_plans/CLEANUP_PLAN.md, Phase 4.2).
 
 STATUS 2026-08-15: **resolved -- the crash no longer reproduces.** Clean in
 every mode (`forward`, `forward-grad`, `backward`) and for all six energy

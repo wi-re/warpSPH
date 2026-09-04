@@ -195,7 +195,7 @@ class ShiftProperties:
     threshold: float = field(default=0.5, metadata={"description": "Threshold for shifting magnitude"})
 
     surfaceLambdaThreshold: float = field(default=0.4, metadata={"description": "lMin (min renormalisation-matrix eigenvalue) below which a surface-set particle's shift is zeroed. Was a hardcoded 0.4 in wrapper.py's dot/mat/zero paths; exposed here and used by the surfaceNormal projection scheme. Sun et al. 2019 Eq. (20) uses 0.55 for their lambda normalisation and C2 Wendland h=2dx -- calibrate per kernel."})
-    surfaceLambdaTaper: float = field(default=0.0, metadata={"description": "Width of a smoothstep ramp above surfaceLambdaThreshold for the surfaceNormal lambda gate: 0.0 (default) = the hard on/off cut at the threshold; > 0 ramps the shift weight from 0 at lMin == threshold to 1 at lMin == threshold + taper. Softens the sharp cut, which is itself a disorder source one layer into the bulk (WCSPH_SHIFTING_PLAN.md 3)."})
+    surfaceLambdaTaper: float = field(default=0.0, metadata={"description": "Width of a smoothstep ramp above surfaceLambdaThreshold for the surfaceNormal lambda gate: 0.0 (default) = the hard on/off cut at the threshold; > 0 ramps the shift weight from 0 at lMin == threshold to 1 at lMin == threshold + taper. Softens the sharp cut, which is itself a disorder source one layer into the bulk (docs/historic_plans/WCSPH_SHIFTING_PLAN.md 3)."})
     surfaceCurvatureAngle: float = field(default=15.0, metadata={"description": "Curvature gate for ShiftingProjectionScheme.surfaceNormal (Sun et al. 2019 Eq. 21): a surface particle is zeroed when any neighbour's surface normal deviates from its own by more than this angle (degrees), i.e. the local radius of curvature is below the kernel radius. 0.0 disables the gate. 15 deg is the paper's value for C2 Wendland with h=2dx."})
     maxShiftVelocityFraction: float = field(default=0.5, metadata={"description": "Sun et al. 2019 Eq. (14) robustness limiter: cap the per-step shift magnitude at this fraction of Umax*dt (Umax = the max finite particle speed, the paper's 'maximum expected velocity'). The paper uses 1/2. This is a magnitude (L2) cap and the physically-scaled counterpart of the per-component `threshold` clamp (0.5*dx), which stays as a coarse backstop. 0.0 disables it. Without it the delta+ shift has no bound tied to the flow, and a locally exploding grad(C) -- e.g. an arm beading under tensile instability -- feeds an oversized shift straight into correctdrhodt."})
 
@@ -230,7 +230,7 @@ def buildDefaultShiftProperties() -> ShiftProperties:
         # The real Sun et al. 2019 Eq. (20)-(21) free-surface treatment. Was
         # `mat` (which hard-zeroes the surface set); `surfaceNormal` keeps the
         # surface regularised without the volume blow-up. See
-        # WCSPH_SHIFTING_PLAN.md: strictly better on the rotating square patch
+        # docs/historic_plans/WCSPH_SHIFTING_PLAN.md: strictly better on the rotating square patch
         # (nx 64/96, t up to 1), on par on `sloshingTank` (clears the t~2.6 s
         # NaN), no `test_physics.py` regression.
         projectionScheme=ShiftingProjectionScheme.surfaceNormal,

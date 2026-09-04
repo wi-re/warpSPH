@@ -90,7 +90,7 @@ setupPlot, updatePlot = particlePlot(VELOCITY_DENSITY_FIELDS)
 
 
 def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
-    # Area/volume-conservation metrics (`WCSPH_SHIFTING_PLAN.md` step 1) on top
+    # Area/volume-conservation metrics (`docs/historic_plans/WCSPH_SHIFTING_PLAN.md` step 1) on top
     # of the usual KE / v_max / density-bound health check: the δ⁺-SPH surface
     # shift is not volume-preserving, and this case is the controlled probe of
     # that drift.

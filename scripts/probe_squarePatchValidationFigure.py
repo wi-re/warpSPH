@@ -1,4 +1,4 @@
-"""Validation figure for the rotating square patch (`WCSPH_SHIFTING_PLAN.md`
+"""Validation figure for the rotating square patch (`docs/historic_plans/WCSPH_SHIFTING_PLAN.md`
 §3/§4): a grid of particle snapshots — rows are shift treatments, columns are
 time instants — coloured by pressure, in the style of Sun et al. 2019 Fig. 13.
 
