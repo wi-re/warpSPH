@@ -79,6 +79,7 @@ across in `finalize`.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import torch
@@ -186,7 +187,15 @@ XSPH_BOUNDARY = 0.0
 #: so not the `mdbcMlsPressure` feedback instability. `'mls'` is kept as an
 #: option for quiescent free-surface cases where its first-order accuracy
 #: recovers a slightly better near-wall density (Part 41).
-WALL_PRESSURE_MODE = 'shepard'
+#:
+#: `WARPSPH_WALL_PRESSURE_MODE` overrides this at import time (`'none'` maps
+#: to `None`) -- shared with `modules/incompressible/incompressible.py`'s
+#: `_SHIFT_WALL_PRESSURE`, which reads the same variable; see that module's
+#: docstring for why a comparison sweep needs both toggled together.
+_WALL_PRESSURE_ENV = os.environ.get('WARPSPH_WALL_PRESSURE_MODE')
+WALL_PRESSURE_MODE = (
+    (None if _WALL_PRESSURE_ENV.lower() == 'none' else _WALL_PRESSURE_ENV)
+    if _WALL_PRESSURE_ENV is not None else 'shepard')
 
 #: Compatibility projection of the constant-density source for a closed
 #: (pure-Neumann) domain (Part 42). On a fully-walled box with no free surface

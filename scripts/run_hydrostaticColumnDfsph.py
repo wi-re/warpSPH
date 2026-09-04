@@ -1,5 +1,5 @@
 """Run `hydrostaticColumn` through the standard divergence-free (DFSPH) path
--- `IncompressibleSPHScheme.divergenceFree`, solver `schemes/dfsph.py::dfsph_step`
+-- `IncompressibleSPHScheme.divergenceFree`, solver `schemes/divergenceFree.py::divergenceFree_step`
 -- at nx=64.
 
 This is the failing baseline documented in `cases/hydrostaticColumn.py` /
@@ -62,7 +62,7 @@ vmax = [x.get('maxVelocity', float('nan')) for x in rows]
 vmax = [v for v in vmax if v == v]
 tlast = rows[-1].get('t', float('nan')) if rows else float('nan')
 
-print(f'nx={args.nx}  scheme=divergenceFree (dfsph_step)')
+print(f'nx={args.nx}  scheme=divergenceFree (divergenceFree_step)')
 print(f'ran {len(rows)} steps  t={tlast:.5g}  diverged={r.diverged}')
 if vmax:
     print(f'|v|max: peak {max(vmax):.5g}  last {vmax[-1]:.5g}  '

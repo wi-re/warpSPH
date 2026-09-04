@@ -35,7 +35,7 @@ neighbour by its apparent volume `m_j / rho_j`.
 `applyConsistentCoupling` is the context manager that puts the boundary rows
 into the paper's state for the duration of a solve and restores them
 afterwards. It deliberately does *not* touch `computeMdbcDensity` in
-`schemes/dfsph.py`: the extrapolated density stays available to everything
+`schemes/divergenceFree.py`: the extrapolated density stays available to everything
 outside the pressure solve, so the A/B isolates the pressure solve alone.
 """
 

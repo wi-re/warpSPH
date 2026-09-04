@@ -16,16 +16,16 @@ direction), which this case does not do -- it is a one-shot release. A real
 variant.
 
 `gravityConfig.active` is True, so the Part 47 gate routes this through the
-in-step constant-density velocity impulse (`dfsph.INSTEP_CD` auto-on) -- the
+in-step constant-density velocity impulse (`divergenceFree.INSTEP_CD` auto-on) -- the
 same path `hydrostaticColumn` and `dambreak` take; the VD+PS position shift is
 off here. `configureScheme`, the walled-box `buildSystem`, `wallBC`, `nu`,
 `xsphScale` and the surface-detection bandwidth are all `hydrostaticColumn`'s.
 
 **Wall penetration (was a known issue; resolved Part 49):** the `c637785`
-rewrite had commented `computeMdbcNoPenShift`'s call out of `dfsph_step`,
+rewrite had commented `computeMdbcNoPenShift`'s call out of `divergenceFree_step`,
 leaving the pressure projection alone for no-penetration, and that let ~6
 fluid particles cross the wall band a full spacing at the collapse impact.
-`dfsph.NOPEN_SHIFT` re-wires the shift (default on); with it, `nPenetrating`
+`divergenceFree.NOPEN_SHIFT` re-wires the shift (default on); with it, `nPenetrating`
 stays 0-1 through the impact. `diagnostics` still reports `nPenetrating` /
 `maxPenetrationDx` each step. See `DFSPH_FINDINGS.md` 1.6 / 2.
 """

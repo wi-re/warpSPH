@@ -3,7 +3,7 @@ video -- the free-surface counterpart to the weakly-compressible
 `examples/weaklyCompressible/12-dambreak.py`.
 
 `dambreak` has gravity, so the Part 47 gate routes it through the in-step
-constant-density velocity impulse (`dfsph.INSTEP_CD` auto-on), same as
+constant-density velocity impulse (`divergenceFree.INSTEP_CD` auto-on), same as
 `hydrostaticColumn`. Per `DFSPH_IMPROVEMENT_PLAN.md` Part 20 this scheme needs
 `semiImplicitEuler` + `cflFactor = 0.2` (it diverges at the published 0.4/0.3),
 and holds at `nx = 64` but NOT the case default `nx = 128` (NaN ~step 88).

@@ -1,12 +1,12 @@
 """Boundary-penetration A/B for the post-`c637785` `divergenceFree` scheme.
 
 FINDINGS 1.6: the `c637785` rewrite dropped the mDBC no-penetration velocity
-shift (`computeMdbcNoPenShift`) -- the call is commented out in `dfsph_step`,
+shift (`computeMdbcNoPenShift`) -- the call is commented out in `divergenceFree_step`,
 so the shipped scheme relies on the pressure projection alone. FINDINGS 2 had
 measured (on the *pre*-rewrite VD+PS scheme) that removing it is strictly worse
 on the wall-crossing metrics. This re-grades that on the rewritten step.
 
-`schemes/dfsph.NOPEN_SHIFT` gates the restored call: 'config' (obey the solver
+`schemes/divergenceFree.NOPEN_SHIFT` gates the restored call: 'config' (obey the solver
 config, default True), True, or False. This probe runs each wall-bounded /
 free-surface case with the shift OFF and ON and reports the per-run wall
 penetration (`nPenetrating` peak, `maxPenetrationDx` peak) plus the usual
@@ -22,7 +22,7 @@ import sys
 import numpy as np
 
 from warpSPH.runner import run
-import warpSPH.schemes.dfsph as dfsph
+import warpSPH.schemes.divergenceFree as dfsph
 
 
 def _series(r, key, default=np.nan):
@@ -85,7 +85,7 @@ for case in CASES:
     c, kw, params = _load(case)
     emit(f"\n=== {case}  {kw} {params} ===")
     for label, mode in (("shift OFF", False), ("shift ON ", True)):
-        dfsph.NOPEN_SHIFT = mode
+        divergenceFree.NOPEN_SHIFT = mode
         r = run(c, params=dict(params), quiet=True, plot=False, store=False,
                 progress=False, **kw)
         g = _grade(r)
@@ -96,4 +96,4 @@ for case in CASES:
              f"pen peak {g['npen_peak']:4d} (final {g['npen_final']:4d})  "
              f"deepest {g['pdx_peak']:.2f} dx")
 
-dfsph.NOPEN_SHIFT = "config"
+divergenceFree.NOPEN_SHIFT = "config"

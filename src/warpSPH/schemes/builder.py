@@ -2,8 +2,9 @@
 and update classes plus step/export/import functions for one of the six
 registered SPH schemes (Monaghan, CompSPH, CRKSPH, deltaSPH,
 divergence-free/DFSPH, and the non-fluid wave equation). `_divergenceFree`
-imports `dfsph` lazily to avoid a circular import with `schemes/__init__.py`,
-which imports `dfsph` first.
+imports `divergenceFree` (`divergenceFree.py`, renamed from `dfsph.py` in the
+pre-merge cleanup pass) lazily to avoid a circular import with
+`schemes/__init__.py`, which imports `divergenceFree` first.
 """
 
 from dataclasses import dataclass
@@ -130,12 +131,13 @@ def _deltaSPH() -> SchemeBundle:
 
 def _divergenceFree() -> SchemeBundle:
     # Deferred, as the original branch was: it keeps `builder` from importing
-    # `dfsph` at its own import time. (`schemes/__init__` imports `dfsph` first
-    # in practice, so this is about the dependency edge, not about saving the
-    # load.) The config codecs come from `..configurations`, which is where they
-    # are defined -- `dfsph` used to relay them only as a side effect of star
+    # `divergenceFree` at its own import time. (`schemes/__init__` imports
+    # `divergenceFree` first in practice, so this is about the dependency
+    # edge, not about saving the load.) The config codecs come from
+    # `..configurations`, which is where they are defined --
+    # `divergenceFree` used to relay them only as a side effect of star
     # importing that package.
-    from .dfsph import dfsph_step
+    from .divergenceFree import divergenceFree_step
     from ..systems.incompressible import (IncompressibleSystem, IncompressibleState,
                                           IncompressibleSystemUpdate)
     return SchemeBundle(
@@ -143,7 +145,7 @@ def _divergenceFree() -> SchemeBundle:
         SimulationState=IncompressibleState,
         SimulationConfig=IncompressibleSPHConfig,
         SimulationUpdate=IncompressibleSystemUpdate,
-        stepFunction=dfsph_step,
+        stepFunction=divergenceFree_step,
         exportFunction=incompressibleConfigToDict,
         importFunction=dictToIncompressibleSPHConfig,
     )

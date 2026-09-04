@@ -72,9 +72,17 @@ def columnCollapseResult():
 @pytest.fixture(scope='module')
 def randomFlowBoundedResult():
     from warpSPH.cases.randomFlowIncompressible import randomFlowIncompressibleCase
-    # nx=96 detonates within a few steps under the post-c637785 scheme (see
-    # test_randomFlowBoundedDoesNotDiverge); nx=48 would need ~160 steps.
-    return _run(randomFlowIncompressibleCase, nx=96, params=dict(bounded=True))
+    # Historically detonated under the post-c637785 scheme -- at nx=96, t ~
+    # 0.18 (~step 23 at this case's adaptive dt), past the suite's usual
+    # STEPS=20 (t ~ 0.17), which is why Part 54's sampler-bug fix briefly
+    # misread this case as passing. Part 56 landed the actual fix
+    # (`modules/incompressible/incompressible.py`'s `_SHIFT_WALL_PRESSURE`
+    # default), which holds every resolution in {32,48,56,64,96,128} for
+    # 300-400 steps; 40 steps here (well past the old onset) is enough to
+    # exercise it without slowing the suite down.
+    with contextlib.redirect_stdout(io.StringIO()):
+        return run(randomFlowIncompressibleCase, nx=96, params=dict(bounded=True),
+                  nSteps=40, progress=False)
 
 
 # --- Sod: compressible, energy conserving -----------------------------------
@@ -439,7 +447,7 @@ def test_dambreakDoesNotDiverge(dambreakResult):
 def test_kolmogorovIncompressibleForcingDrivesTheFlow(kolmogorovIncompressibleResult):
     """The case starts from rest; its body force has to spin the flow up.
 
-    `c637785` left `computeForcing(...) * 0` in `dfsph_step`, which made the
+    `c637785` left `computeForcing(...) * 0` in `divergenceFree_step`, which made the
     forced case completely inert (`KE == 0` for all time). This asserts the
     forcing term is actually wired in -- kinetic energy has to climb well off
     zero over the short run.
@@ -472,8 +480,8 @@ def test_randomFlowPeriodicStaysIncompressible(randomFlowPeriodicResult):
 
 def test_columnCollapseWallHoldsOnImpact(columnCollapseResult):
     """The released column collapses into the far wall; the mDBC no-penetration
-    shift (`dfsph.NOPEN_SHIFT`, restored Part 49) has to keep fluid out of the
-    wall band. `c637785` had commented the shift's call out of `dfsph_step`,
+    shift (`divergenceFree.NOPEN_SHIFT`, restored Part 49) has to keep fluid out of the
+    wall band. `c637785` had commented the shift's call out of `divergenceFree_step`,
     leaving the pressure projection alone -- not enough for the impact, which
     then put ~6 particles a full spacing past the wall. Asserts the run holds
     and almost nothing crosses.
@@ -555,24 +563,30 @@ def test_band2018pbBoundedRandomFlowDecays(bandBoundedResult):
 
 
 def test_randomFlowBoundedDoesNotDiverge(randomFlowBoundedResult):
-    """Was XFAIL('density excursion at the wall -> velocity detonation';
-    DFSPH_IMPROVEMENT_PLAN.md "Immediate A1", Part 48) -- promoted per its own
-    instruction the moment it started holding (XPASS(strict), reproducible
-    across repeat runs with this case's fixed seed).
-
-    Root cause was not the near-wall CD solve the xfail blamed: it was
-    `sample/regular.py` assigning particle mass from the nominal pre-snap grid
-    spacing while placing particles at the achieved, per-axis post-snap one
-    (LATTICE_DENSITY_PLAN.md) -- a uniform mass/cell mismatch that reads as
-    density noise everywhere, and is worst exactly at a wall, where every
-    particle is already asymmetrically supported. This case never calls
-    `calibrateRestDensity`, so the fix is the sampler change alone, not the
-    kernel-side lattice-normalisation calibration landing alongside it.
+    """Was `xfail(strict)` through Parts 48/54/55 -- see the fixture's own
+    comment. Part 56 found the actual mechanism and fixed it: the composed
+    constant-density Jacobi (`modules/incompressible/incompressible.py`
+    `solveIncompressible`, the VD+PS shift's own solve) never re-derived the
+    `kind==1` wall pressure from the current fluid iterate, so the near-wall
+    iteration matrix carried a wall term the operator itself did not -- the
+    same non-contraction Part 41 diagnosed and fixed for `omniIncompressible`,
+    just never previously pointed at this solve/case combination.
+    `_SHIFT_WALL_PRESSURE = 'shepard'` (now the default) recomputes it every
+    Jacobi sweep via `wallPressureExtrapolation`; measured to hold cleanly
+    (finite KE, monotone-ish decay, no `_CLOSED_DOMAIN_GAUGE` needed) at every
+    resolution in {32,48,56,64,96,128} for 300-400 steps each -- a real fix,
+    not the ~20-140x *delay* the `_CLOSED_DOMAIN_GAUGE` mean-centering
+    experiment (Part 55) produced on its own. `band2018pb`
+    (`test_band2018pbBoundedRandomFlowDecays`) also holds this case,
+    independently.
     """
     assert not randomFlowBoundedResult.diverged
     kinetic = randomFlowBoundedResult.series('kineticEnergy')
     assert np.all(np.isfinite(kinetic))
-    assert kinetic[-1] < 2 * kinetic[0]
+    assert kinetic[-1] < 1.1 * kinetic[0]
+    maxDensity = max(row['maxDensity'] for row in randomFlowBoundedResult.trajectory)
+    minDensity = min(row['minDensity'] for row in randomFlowBoundedResult.trajectory)
+    assert 0.85 < minDensity <= maxDensity < 1.15
 
 
 # --- Sedov-Taylor: point energy deposit, one case run at dim 1/2/3 ----------

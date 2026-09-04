@@ -86,6 +86,21 @@
 }
 
 
+% --- Kernel choice and the pairing instability ----------------------------------
+
+@article{dehnen2012,
+  author    = {Dehnen, Walter and Aly, Hossam},
+  title     = {Improving Convergence in Smoothed Particle Hydrodynamics Simulations Without Pairing Instability},
+  journal   = {Monthly Notices of the Royal Astronomical Society},
+  year      = {2012},
+  volume    = {425},
+  number    = {2},
+  pages     = {1068--1082},
+  doi       = {10.1111/j.1365-2966.2012.21439.x},
+  note      = {The Wendland-kernel-for-SPH origin paper: linear stability analysis explaining why Wendland kernels avoid the pairing instability at any neighbour count where truncated B-splines do not. The reason this codebase runs Wendland2 at n_h=4 by default.}
+}
+
+
 % --- Boundary handling and fluid-rigid coupling --------------------------------
 
 @article{akinci2012,
@@ -681,17 +696,6 @@
   pages     = {50:1--50:11},
   numpages  = {11},
   doi       = {10.1145/2766901}
-}
-
-@article{dehnen2012,
-  author    = {Dehnen, Walter and Aly, Hossam},
-  title     = {Improving Convergence in Smoothed Particle Hydrodynamics Simulations Without Pairing Instability},
-  journal   = {Monthly Notices of the Royal Astronomical Society},
-  year      = {2012},
-  volume    = {425},
-  number    = {2},
-  pages     = {1068--1082},
-  doi       = {10.1111/j.1365-2966.2012.21439.x}
 }
 
 @inproceedings{desbrun1996,

@@ -173,6 +173,42 @@ than sit here looking plausible.
 > avoids the aforementioned problems.
 
 
+## Kernel choice and the pairing instability
+
+### `dehnen2012`
+
+- **file:** `dehnen2012_convergence-without-pairing-instability.pdf`
+- **title:** Improving Convergence in Smoothed Particle Hydrodynamics Simulations Without Pairing Instability
+- **authors:** Walter Dehnen and Hossam Aly
+- **venue:** *Monthly Notices of the Royal Astronomical Society* 425(2):1068-1082, 2012
+- **doi:** [10.1111/j.1365-2966.2012.21439.x](https://doi.org/10.1111/j.1365-2966.2012.21439.x)
+- **copy here:** arXiv preprint (`arXiv:1204.2471v2`)
+- **relevance:** The origin paper for using Wendland functions as SPH smoothing kernels, and the reason this codebase's default kernel is Wendland2 at `n_h = 4` rather than a cubic/quartic B-spline. Its linear stability analysis is the standing reference for diagnosing particle pairing/clumping when a case shows it (e.g. `columnCollapse`'s post-impact `pairedFraction` growth, DFSPH_IMPROVEMENT_PLAN.md "What's realistically open") and for reasoning about a kernel-order change (Wendland2 vs Wendland4) as a lever against it.
+- **abstract from:** PDF p.1
+
+> The numerical convergence of smoothed particle hydrodynamics (SPH) can be
+> severely restricted by random force errors induced by particle disorder,
+> especially in shear flows, which are ubiquitous in astrophysics. The
+> increase in the number NH of neighbours when switching to more extended
+> smoothing kernels at fixed resolution (using an appropriate definition for
+> the SPH resolution scale) is insufficient to combat these errors.
+> Consequently, trading resolution for better convergence is necessary, but
+> for traditional smoothing kernels this option is limited by the pairing (or
+> clumping) instability. Therefore, we investigate the suitability of the
+> Wendland functions as smoothing kernels and compare them with the
+> traditional B-splines. Linear stability analysis in three dimensions and
+> test simulations demonstrate that the Wendland kernels avoid the pairing
+> instability for all NH, despite having vanishing derivative at the origin
+> (disproving traditional ideas about the origin of this instability;
+> instead, we uncover a relation with the kernel Fourier transform and give
+> an explanation in terms of the SPH density estimator). The Wendland
+> kernels are computationally more convenient than the higher-order
+> B-splines, allowing large NH and hence better numerical convergence (note
+> that computational costs rise sub-linear with NH). Our analysis also shows
+> that at low NH the quartic spline kernel with NH ≈ 60 obtains much better
+> convergence then the standard cubic spline.
+
+
 ## Boundary handling and fluid-rigid coupling
 
 ### `akinci2012`

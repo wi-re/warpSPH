@@ -1,6 +1,6 @@
 """Probe (per the project owner's own instruction, 2026-08-26): does this
 codebase's existing incompressible SPH solver ("DFSPH", `scheme='divergenceFree'`,
-`schemes/dfsph.py`) already deliver -- for free, with no JFNK -- some or all of
+`schemes/divergenceFree.py`) already deliver -- for free, with no JFNK -- some or all of
 what `JFNK_PLAN.md`'s compressible-acoustic-core effort (Phases B/E1/E1.5/E1.6/
 E1.7) is chasing, on the *same* 2D forced Kolmogorov-flow shear-instability
 problem?
@@ -76,7 +76,7 @@ ALPHA_REFERENCE = 0.01
 # probe_kolmogorovSpinup.py's own nu -- DFSPH itself has no sound speed at all
 # (see the finding recorded in the writeup: `IncompressibleSPHConfig` still
 # carries a `fixedSoundSpeed`/`dt_acousticConstraint` field structurally,
-# inherited from the shared config shape, but nothing in `dfsph_step` or
+# inherited from the shared config shape, but nothing in `divergenceFree_step` or
 # `IncompressibleSystem.finalize` ever reads either).
 SOUND_SPEED_REFERENCE = 10.0
 L_DEFAULT = 2.0
@@ -173,9 +173,9 @@ def pickDt(state, h, nu, cflFactor, kernelScale, minDt, maxDt):
 
 def _extractDivFreeIterations(stepResult):
     """Pull `solveDivergenceFree`'s own iteration count (the projection inside
-    `dfsph_step` itself) off `stepResult.stages[0].aux`, which is
+    `divergenceFree_step` itself) off `stepResult.stages[0].aux`, which is
     `(adjacency, currentState, (errors, pressures))` -- confirmed by
-    inspection, not assumed (`dfsph_step` returns
+    inspection, not assumed (`divergenceFree_step` returns
     `(update, adjacency, currentState, (errors, pressures))`, and
     `warpSPHIntegrators.euler.integrateSemiImplicitEuler` binds everything
     past the first return value to `r1`, stashed verbatim as `StageResult.aux`).

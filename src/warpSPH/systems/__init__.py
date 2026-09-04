@@ -5,7 +5,7 @@
 every other module here extends. `systems/waveSystem.py`'s wave-equation
 triad is documented separately (not a fluid scheme). `systems/incompressible.py`
 (the divergence-free/DFSPH state) is deliberately not re-exported here --
-`schemes/dfsph.py` and `schemes/builder.py` import it directly from that
+`schemes/divergenceFree.py` and `schemes/builder.py` import it directly from that
 submodule instead.
 """
 

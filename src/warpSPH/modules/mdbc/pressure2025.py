@@ -12,7 +12,7 @@ pressure) the pressure field has no reference value of its own to fall back
 on -- it is *only* ever the incompressible pressure solve's own solution,
 linearly extrapolated to the wall.
 
-Called from `schemes/dfsph.py` right after `solveDivergenceFree`, once that
+Called from `schemes/divergenceFree.py` right after `solveDivergenceFree`, once that
 call has produced this step's fluid pressure field. The result is stored
 back onto `currentState.pressures` for boundary particles, so it is available
 to (a) `computePressureAccelIISPH`'s neighbor sums on the *next* step, giving

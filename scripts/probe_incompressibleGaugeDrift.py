@@ -316,7 +316,7 @@ if args.setpointEps != 0.0:
         from warpSPH.modules.density import computeDensities
         system.state.densities = computeDensities(
             system.state, ctx.config, ctx.schemeConfig, None)
-        # The forcing is `accel * mass` and `dfsph_step` divides it back out,
+        # The forcing is `accel * mass` and `divergenceFree_step` divides it back out,
         # so the applied acceleration is unchanged by the rescale.
         return system
 

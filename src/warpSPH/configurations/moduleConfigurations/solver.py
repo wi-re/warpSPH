@@ -4,7 +4,7 @@ and `IncompressibleSolverConfig`, which bundles two of the former
 `.solverConfig` on `IncompressibleSPHConfig` and read via
 `schemeConfig.solverConfig.{pressureSolver,divergenceFreeSolver}.*` by
 `modules/incompressible/{incompressible,divergenceFree}.py` and
-`schemes/dfsph.py`. `buildDefaultPSConfig`/`buildDefaultDFConfig` give the
+`schemes/divergenceFree.py`. `buildDefaultPSConfig`/`buildDefaultDFConfig` give the
 pressure and divergence-free solvers different tuned defaults (iteration caps,
 tolerances, relaxation) rather than sharing one default.
 """
@@ -57,14 +57,14 @@ class JacobiRelaxationMode(Enum):
 class BoundaryPressureMode(Enum):
     """How `kind==1` boundary particles are handled by the incompressible
     pressure solvers (`solveDivergenceFree`/`solveIncompressible`) and by
-    `schemes/dfsph.py`'s mDBC wiring.
+    `schemes/divergenceFree.py`'s mDBC wiring.
 
     In all three modes, boundary particles are excluded from the pressure
     *unknowns*: their pressure is held fixed (not driven by the
     Jacobi/Krylov update) for the duration of a solve, they are excluded
     from the gauge-fixing mean, and their pressure acceleration (`a_p`) is
     zeroed post-solve -- the one-way-coupling contract already enforced
-    downstream by `nonFluidMask` in `dfsph_step`. What differs is the value
+    downstream by `nonFluidMask` in `divergenceFree_step`. What differs is the value
     their pressure is held at, and how their density is computed:
 
     - `plain`: no mDBC at all. Boundary density comes from plain SPH
@@ -216,7 +216,7 @@ class ShiftApplication(Enum):
     use the raw source as it does now.
 
     - `inStepVelocity`: DFSPH proper. The correction is computed and applied
-      *inside* the step (`schemes/dfsph.py`), folded into the same `dvdt` the
+      *inside* the step (`schemes/divergenceFree.py`), folded into the same `dvdt` the
       integrator advects with, and the position shift is dropped entirely --
       two velocity-level solves per step and no repositioning, which is the
       original formulation. Best wall behavior of the three by a wide margin:
@@ -288,7 +288,7 @@ class BoundaryOperatorTerms(Enum):
     set, so a boundary particle is treated exactly like a fluid one.
 
     Two of those contributions describe the *neighbour's* response to `p_i`,
-    and they are wrong for a particle that never moves. `schemes/dfsph.py`
+    and they are wrong for a particle that never moves. `schemes/divergenceFree.py`
     zeroes `dxdt`/`dvdt` for every `kind != 0` row, so boundary and ghost
     particles are static by construction:
 
@@ -380,7 +380,7 @@ class DensityEvolution(Enum):
     Weakly-compressible SPH conventionally integrates `drho/dt = -rho div v`
     and never re-sums (`schemes/deltaSPH.py` does exactly that, which is why
     it carries a density-diffusion term at all). This scheme re-sums twice per
-    step instead: once at the top of `dfsph_step`, and once inside
+    step instead: once at the top of `divergenceFree_step`, and once inside
     `IncompressibleSystem.finalize` before the constant-density solve. The
     continuity term is still computed and still handed to the integrator --
     `update.drhodt` -- but `finalize` overwrote the result unconditionally, so
@@ -414,7 +414,7 @@ class DensityEvolution(Enum):
     Two interactions worth knowing before enabling either non-default value:
     `BoundaryPressureMode.plain` skips the mDBC extrapolation, so under
     `continuity`/`hybrid` nothing updates `kind != 0` rows at all (their
-    `drhodt` is zeroed by `dfsph_step`) and they freeze at their initial value;
+    `drhodt` is zeroed by `divergenceFree_step`) and they freeze at their initial value;
     and the carried density is only as good as the integrator's own order,
     which for this scheme's `semiImplicitEuler` default is first order.
 
@@ -514,7 +514,7 @@ class IncompressibleSolverConfig:
     boundaryOperatorTerms: Optional[BoundaryOperatorTerms] = field(default=None, metadata={"description": "Bundle-level OVERRIDE for both solvers' boundaryOperatorTerms. None (the default) means each solver uses its own RelaxedJacobiSolverConfig.boundaryOperatorTerms, which is where the shipped defaults live; setting it to full/staticBoundary/diagonalOnly/operatorOnly forces both solvers to that value, which is what every A/B recorded in DFSPH_IMPROVEMENT_PLAN.md does. The setting moved per-solver in Part 14, because the constant-density and divergence-free solves want different operators; this field is kept so the single-knob form still works. See BoundaryOperatorTerms' docstring and resolveBoundaryOperatorTerms."})
     akinciBoundaryVolume: bool = field(default=False, metadata={"description": "Whether BoundaryPressureMode.consistent also replaces boundary particle masses with Akinci et al.'s volume correction m~_k = rho0 / sum_l W_kl (l over boundary neighbours only), as the paper specifies. Default False because that correction is derived for a ONE-LAYER boundary sampling, where it makes the single layer stand in for the whole solid half-space; this codebase samples a five-layer band (randomFlow.BOUNDED_BAND), so the layers behind the interface already supply that volume and the correction inflates the interface layer instead. Ignored by every other BoundaryPressureMode."})
     akinciBoundaryVolumeScale: float = field(default=1.0, metadata={"description": "Multiplier on the boundary apparent volume that BoundaryPressureMode.consistent feeds every pressure-solve SPH sum (whether or not akinciBoundaryVolume is on -- it scales the substituted mass either way). Default 1.0 is a strict no-op and every A/B in DFSPH_IMPROVEMENT_PLAN.md keeps its meaning. dfsphReference sets it to 2.0: on the multi-layer BOUNDED_BAND the Akinci m~_k = rho0/sum_l W_kl comes out numerically equal to the nominal particle volume (measured, hydrostaticColumn nx=32), so the paper's correction is inert here and the boundary term in A*p under-resolves the wall by ~2x -- the one-sided constant-density drive then never releases and wall-adjacent kappa runs away (Part 24 step 1 / Part 25). 2.0 removes the runaway (|v|max over 25 steps 213 -> 0.97). Ignored by every other BoundaryPressureMode."})
-    mdbcNoPenetrationShift: bool = field(default=True, metadata={"description": "Whether dfsph_step applies computeMdbcNoPenShift's soft per-particle velocity-damping correction near mDBC boundaries. Default True preserves the scheme's historical always-on behavior; the original DFSPH paper (Bender & Koschier) has no such term and relies on the pressure projection alone to prevent penetration, so this is an experimental A/B toggle (DFSPH_IMPROVEMENT_PLAN.md) to check whether it is actually helping or is a crutch that makes the near-wall density error worse -- not a permanent design decision."})
+    mdbcNoPenetrationShift: bool = field(default=True, metadata={"description": "Whether divergenceFree_step applies computeMdbcNoPenShift's soft per-particle velocity-damping correction near mDBC boundaries. Default True preserves the scheme's historical always-on behavior; the original DFSPH paper (Bender & Koschier) has no such term and relies on the pressure projection alone to prevent penetration, so this is an experimental A/B toggle (DFSPH_IMPROVEMENT_PLAN.md) to check whether it is actually helping or is a crutch that makes the near-wall density error worse -- not a permanent design decision."})
     warmStartConstantDensity: bool = field(default=False, metadata={"description": "Only with shiftApplication=inStepVelocity: seed each step's constant-density (solveIncompressible) solve with the previous step's constant-density pressure (carried on the unused soundspeeds field) instead of the historical cold zero start. Without it a standing pressure field -- a quiescent hydrostatic column -- is rebuilt from zero every step and the fluid falls before the solve supports it; this is the missing ingredient behind Part 23's inStepVelocity divergence on hydrostaticColumn (see DFSPH_IMPROVEMENT_PLAN.md Part 24). Experiment hook, default False."})
 
 def buildDefaultIncompressibleSolverConfig() -> IncompressibleSolverConfig:
