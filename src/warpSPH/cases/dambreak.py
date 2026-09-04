@@ -55,11 +55,12 @@ import torch
 from ..caseUtils import (SimulationProperties, buildDomain, buildPresetObstacles,
                          buildRegions, sampleNoise, setupFreestream, setupKolmogorov)
 from ..configurations.moduleConfigurations.gravity import GravityType
-from ..enumTypes import IncompressibleSPHScheme
+from ..enumTypes import isIncompressibleScheme
 from ..initializers import initializeWeaklyCompressibleSimulation
 from ..modules import setupWeaklyCompressibleTimestep
 from ..runner import Case, RunContext, caseMain, registerCase
 from .kolmogorovIncompressible import kolmogorovIncompressibleTimestep
+from .weaklyCompressible import particleDistributionMetrics
 from .plotting import (Field, buildFieldPlotter, openWindow, pumpEvents,
                        refreshFieldPlotter)
 
@@ -186,7 +187,7 @@ def dambreakTimestep(ctx: RunContext, state) -> float:
     scheme (`configureScheme` never touches `diffusionParams`), so that
     function's viscous term is always inert here.
     """
-    if ctx.scheme is not IncompressibleSPHScheme.divergenceFree:
+    if not isIncompressibleScheme(ctx.scheme):
         return ctx.config.dt
     return kolmogorovIncompressibleTimestep(ctx, state)
 
@@ -201,7 +202,12 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
                           * (velocities ** 2).sum(dim=-1)).sum().detach().cpu().item(),
         'maxDensity': particles.densities[fluid].max().detach().cpu().item(),
         'minDensity': particles.densities[fluid].min().detach().cpu().item(),
+        # Spray-robust companion to `minDensity` -- see
+        # `weaklyCompressible.weaklyCompressibleDiagnostics`.
+        'densityP05': torch.quantile(
+            particles.densities[fluid].detach().float(), 0.05).cpu().item(),
     }
+    d.update(particleDistributionMetrics(ctx, state))
     # Wall-penetration watch (DFSPH_FINDINGS.md 1.6): fluid particles pushed
     # more than half a spacing past the interior tank AABB. The `c637785`
     # rewrite dropped the mDBC no-penetration shift from `dfsph_step`; this is

@@ -48,6 +48,7 @@ from ..modules.noise.sampleDivergenceFree import generateNoiseInterpolator
 from ..runner import Case, RunContext, caseMain, registerCase
 from ..sample.weaklyCompressible import setupBasicWeaklyCompressibleInitialState
 from ..utils import buildDomainDescription
+from .weaklyCompressible import particleDistributionMetrics
 from .plotting import Field, particlePlot
 
 __all__ = ['kolmogorovIncompressibleCase']
@@ -153,7 +154,7 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     fluid = particles.kinds == 0 if hasattr(particles, 'kinds') else slice(None)
     velocities = particles.velocities[fluid]
     densities = particles.densities[fluid]
-    return {
+    out = {
         'kineticEnergy': (0.5 * particles.masses[fluid]
                           * (velocities ** 2).sum(dim=-1)).sum().detach().cpu().item(),
         'maxVelocity': torch.linalg.norm(velocities, dim=-1).max().detach().cpu().item(),
@@ -161,6 +162,8 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
         'maxDensity': densities.max().detach().cpu().item(),
         'densityStd': densities.std().detach().cpu().item(),
     }
+    out.update(particleDistributionMetrics(ctx, state))
+    return out
 
 
 setupPlot, updatePlot = particlePlot([

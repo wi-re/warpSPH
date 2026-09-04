@@ -63,6 +63,7 @@ from ..caseUtils.incompressible import relaxLattice
 from ..modules import computeDensities
 from ..runner import Case, RunContext, caseMain, registerCase
 from ..sample.weaklyCompressible import setupBasicWeaklyCompressibleInitialState
+from .weaklyCompressible import particleDistributionMetrics
 from .plotting import Field, particlePlot
 
 __all__ = ['shearWaveCase', 'analyticAmplitude']
@@ -172,7 +173,7 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     residual[:, 0] = residual[:, 0] - amplitude * basis
     residualRms = torch.sqrt((residual ** 2).sum(dim=-1).mean()).detach().cpu().item()
 
-    return {
+    out = {
         'amplitude': amplitude,
         'amplitudeRatio': amplitude / analytic if analytic else float('nan'),
         'residualVelocity': residualRms / ctx.param('uMag'),
@@ -182,6 +183,8 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
         'maxDensity': densities.max().detach().cpu().item(),
         'densityStd': densities.std().detach().cpu().item(),
     }
+    out.update(particleDistributionMetrics(ctx, state))
+    return out
 
 
 setupPlot, updatePlot = particlePlot([

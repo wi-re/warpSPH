@@ -52,14 +52,17 @@ import torch
 from ..configurations.moduleConfigurations.gravity import GravityType
 from ..configurations.moduleConfigurations.shifting import ShiftingProjectionScheme
 from ..configurations.region import BCType
-from ..enumTypes import IncompressibleSPHScheme, WeaklyCompressibleSPHScheme
+from ..enumTypes import (WeaklyCompressibleSPHScheme,
+                         isIncompressibleScheme)
 from ..runner import Case, RunContext, caseMain, registerCase
 from ..utils import buildDomainDescription
 from ..regions import sampleDomainSDF
 from .kolmogorovIncompressible import kolmogorovIncompressibleTimestep
 from .plotting import Field, particlePlot
 from .weaklyCompressible import (boundaryRegion, buildRegionSystem, fluidRegion,
-                                 setupTimestep, shapeSdf)
+                                 setupTimestep, shapeSdf,
+                                 particleDistributionMetrics,
+                                 calibrateRestDensityMasses)
 
 __all__ = ['sloshingTankCase']
 
@@ -152,7 +155,7 @@ def configureScheme(ctx: RunContext) -> None:
     sc.gravityConfig.direction = [0.0, -1.0]
     sc.bandwith = L / ctx.param('bandWidth') / dx
 
-    if ctx.scheme is IncompressibleSPHScheme.divergenceFree:
+    if isIncompressibleScheme(ctx.scheme):
         sc.diffusionParams.inviscid = False
         sc.diffusionParams.viscidNu = ctx.param('nu')
         if hasattr(sc, 'shiftProperties'):
@@ -205,7 +208,27 @@ def initialConditions(ctx: RunContext, system) -> None:
     if getattr(particles, 'pressures', None) is not None:
         particles.pressures[:] = 0.0
 
-    if ctx.scheme is IncompressibleSPHScheme.divergenceFree:
+    # The sampled tank does not measure `rho0` at rest, and by how much depends
+    # on `nx` (1.0016 at nx=200, 1.0153 at nx=100). The solver reads that as
+    # compression and kicks the fluid on step 0 -- at nx=100 hard enough to
+    # delaminate the layer within ~0.07 s. See `calibrateRestDensityMasses`.
+    # `'auto'` = only the incompressible path needs it. `deltaSPH` evolves
+    # density through the continuity equation from `rho = rho0` and never forms
+    # a summation density, so it never sees the offset (measured: its step-0
+    # density is 1.000000 at every `nx`) -- which is why the WCSPH SPHERIC
+    # validation was always clean. Calibrating there is a no-op that still
+    # perturbs the fluid mass by ~1.5 % and moves the sensor peak ~1.6 %, so
+    # auto leaves it off. `True`/`False` force it either way.
+    calibrate = ctx.param('calibrateRestDensity', 'auto')
+    if isinstance(calibrate, str):
+        if calibrate != 'auto':
+            raise ValueError(
+                f'calibrateRestDensity must be True/False/"auto", got {calibrate!r}')
+        calibrate = isIncompressibleScheme(ctx.scheme)
+    if calibrate:
+        calibrateRestDensityMasses(ctx, system, verbose=ctx.spec.verbose)
+
+    if isIncompressibleScheme(ctx.scheme):
         if ctx.config.dt is None:
             ctx.config.dt = ctx.spec.dt if ctx.spec.dt is not None else 1e-3
     else:
@@ -221,7 +244,7 @@ def postStep(ctx: RunContext, state, step: int) -> None:
 
 
 def sloshingTimestep(ctx: RunContext, state) -> float:
-    if ctx.scheme is IncompressibleSPHScheme.divergenceFree:
+    if isIncompressibleScheme(ctx.scheme):
         return kolmogorovIncompressibleTimestep(ctx, state)
     return ctx.config.dt
 
@@ -270,8 +293,10 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
         'kineticEnergy': (0.5 * particles.masses[fluid] * (vel ** 2).sum(-1)).sum().item(),
         'maxDensity': rho.max().item(),
         'minDensity': rho.min().item(),
+        'densityP05': torch.quantile(rho.detach().float(), 0.05).cpu().item(),
         'rollAngleDeg': math.degrees(ctx.scratch.get('rollAngle', 0.0)),
     }
+    d.update(particleDistributionMetrics(ctx, state))
 
     if ctx.scratch.get('sensorIndex') is None:
         ctx.scratch['sensorIndex'] = _locateSensor(ctx, particles)
@@ -282,7 +307,7 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     d['sensorRho'] = sensorRho
     d['sensorDensityRatio'] = ratio
 
-    if ctx.scheme is IncompressibleSPHScheme.divergenceFree:
+    if isIncompressibleScheme(ctx.scheme):
         # DFSPH now persists both projection pressures (schemes/dfsph.py):
         #   pressures   -> constant-density / particle-shift solve pressure
         #   soundspeeds -> divergence-free projection pressure
@@ -297,6 +322,17 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
         if probeDF is not None:
             d['sensorPressureDF'] = probeDF
         d['sensorPressure'] = probe if probe is not None else 0.0
+
+        # `band2018pb` solves the pressure AT the boundary sample (that is the
+        # whole point of the extended PPE -- and the paper's own Sec. 3.3 tank
+        # scenario is exactly this: "Pressure Boundaries enable the analysis of
+        # computed pressure values at the boundary"). Where the wall row
+        # carries a solved pressure, report it directly as well: it is the
+        # quantity Sensor 1 physically measures, with no fluid-probe smoothing
+        # in between. Kept as an extra series rather than a replacement so the
+        # `sensorPressure` column stays comparable across schemes.
+        if pCD is not None and bool(particles.kinds[idx] != 0):
+            d['sensorPressureWall'] = float(pCD[idx]) * rho0Phys
     else:
         cs = float(ctx.schemeConfig.fluid.fixedSoundSpeed)
         scale = rho0Phys * cs * cs
@@ -374,6 +410,14 @@ sloshingTankCase = registerCase(Case(
         wallBC='freeSlip',
         gravityMagnitude=9.81,
         rho0Physical=1000.0,
+        # Normalise the particle mass so the at-rest sampling measures `rho0`.
+        # `'auto'` = on for incompressible schemes only (see
+        # `initialConditions`); `True`/`False` force it. Without it this case's startup impulse is an
+        # nx-dependent lottery under `divergenceFree` -- step-0 `|v|max` 0.06 at
+        # nx=200 but 1.74 at nx=100, which delaminates the layer within ~0.07 s
+        # -- and the reference runs only look clean because their `nx` happens
+        # to land well. With it, step-0 `|v|max` is 0.0098 at every `nx`.
+        calibrateRestDensity='auto',
         targetDt=2.0e-4,
         # roll excitation
         rollDataFile='',                 # '' -> the bundled lateral_water_1x.txt

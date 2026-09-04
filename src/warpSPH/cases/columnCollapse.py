@@ -43,7 +43,9 @@ from .hydrostaticColumn import configureScheme as _hcolConfigureScheme
 from .kolmogorovIncompressible import kolmogorovIncompressibleTimestep
 from .plotting import Field, particlePlot
 from .weaklyCompressible import (WEAKLY_COMPRESSIBLE_DEFAULTS,
-                                 WEAKLY_COMPRESSIBLE_PARAMS, shapeSdf)
+                                 WEAKLY_COMPRESSIBLE_PARAMS, shapeSdf,
+                                 particleDistributionMetrics,
+                                 calibrateRestDensityMasses)
 
 __all__ = ['columnCollapseCase']
 
@@ -82,6 +84,10 @@ def buildSystem(ctx: RunContext):
 
 
 def initialConditions(ctx: RunContext, system) -> None:
+    # Declared since Part 33 but never read until now -- see
+    # `calibrateRestDensityMasses`.
+    if ctx.param('calibrateRestDensity'):
+        calibrateRestDensityMasses(ctx, system, verbose=ctx.spec.verbose)
     p = system.state
     p.velocities[:] = 0.0
     if p.pressures is None:
@@ -105,11 +111,13 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
         'kineticEnergy': (0.5 * m * (vel ** 2).sum(-1)).sum().item(),
         'maxVelocity': torch.linalg.norm(vel, dim=-1).max().item(),
         'minDensity': rho.min().item(),
+        'densityP05': torch.quantile(rho.detach().float(), 0.05).cpu().item(),
         'maxDensity': rho.max().item(),
         'densityStd': rho.std().item(),
         'densityP05': torch.quantile(rho, 0.05).item(),
         'comX': (m * pos[:, 0]).sum().item() / m.sum().item(),
     }
+    d.update(particleDistributionMetrics(ctx, state))
     x, y = pos[:, 0], pos[:, 1]
     half = 0.5 * L
     nearLeft = x < -half + 3.0 * dx
