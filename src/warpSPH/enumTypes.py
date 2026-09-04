@@ -92,6 +92,19 @@ class IncompressibleSPHScheme(Enum):
     band2018pb = 4
 
 # @torch.jit.script
+def isIncompressibleScheme(scheme) -> bool:
+    """Is `scheme` any member of `IncompressibleSPHScheme`?
+
+    Cases that need "the pressure-projection path" (its own CFL, no acoustic
+    term, a solved `pressures` field rather than an EOS one) must test *this*,
+    not `scheme is IncompressibleSPHScheme.divergenceFree`. That identity test
+    was written when `divergenceFree` was the only incompressible scheme; it
+    silently routes `iisph` / `omniIncompressible` / `band2018pb` down the
+    weakly-compressible branch, which is wrong in every case that has one.
+    """
+    return isinstance(scheme, IncompressibleSPHScheme)
+
+
 class WaveEquationScheme(Enum):
     waveEquation = 0
 

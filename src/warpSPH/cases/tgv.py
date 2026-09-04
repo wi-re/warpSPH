@@ -18,6 +18,7 @@ from ..caseUtils.incompressible import relaxLattice
 from ..modules import computeDensities
 from ..runner import Case, RunContext, caseMain, registerCase
 from ..sample.weaklyCompressible import setupBasicWeaklyCompressibleInitialState
+from .weaklyCompressible import particleDistributionMetrics
 from .plotting import Field, particlePlot
 
 __all__ = ['tgvCase', 'analyticDecayRate']
@@ -88,13 +89,15 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     # (`DFSPH_IMPROVEMENT_PLAN.md` §1.2, Part 16). Additive -- nothing reads
     # this dict by position.
     densities = particles.densities
-    return {
+    out = {
         'kineticEnergy': kinetic.detach().cpu().item(),
         'maxVelocity': torch.linalg.norm(particles.velocities, dim=-1).max().detach().cpu().item(),
         'minDensity': densities.min().detach().cpu().item(),
         'maxDensity': densities.max().detach().cpu().item(),
         'densityStd': densities.std().detach().cpu().item(),
     }
+    out.update(particleDistributionMetrics(ctx, state))
+    return out
 
 
 # This was a hand-rolled matplotlib scatter, which at the case's default

@@ -61,7 +61,8 @@ from .plotting import Field, particlePlot
 from .weaklyCompressible import (WEAKLY_COMPRESSIBLE_DEFAULTS,
                                  WEAKLY_COMPRESSIBLE_PARAMS, buildRegionSystem,
                                  configureWeaklyCompressible, fluidRegion,
-                                 shapeSdf)
+                                 shapeSdf,
+                                 particleDistributionMetrics)
 
 __all__ = ['staticBlobCase']
 
@@ -113,9 +114,12 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
         'maxVelocity': torch.linalg.norm(velocities, dim=-1).max().detach().cpu().item(),
         'kineticEnergy': (0.5 * masses * (velocities ** 2).sum(dim=-1)).sum().detach().cpu().item(),
         'minDensity': densities.min().detach().cpu().item(),
+        'densityP05': torch.quantile(
+            densities.detach().float(), 0.05).cpu().item(),
         'maxDensity': densities.max().detach().cpu().item(),
         'densityStd': densities.std().detach().cpu().item(),
     }
+    d.update(particleDistributionMetrics(ctx, state))
 
     initial = ctx.scratch.get('initialPositions')
     if initial is not None:
