@@ -436,6 +436,27 @@ over-strong and second-order, actively diffusing exactly the density gradients
 it exists to preserve. **Worth reporting to the authors' circle / checking
 against diffSPH, which this kernel was ported from.**
 
+**Measured end-to-end on `sloshingTank --scheme wcsph`**, nx=100, `t ≤ 3.6 s`,
+today's code both sides, the only difference being the sign (the pre-fix
+operator is reproduced *exactly* by negating the gradient field handed to the
+kernel, so this is a clean single-variable A/B — see
+`scripts/probe_deltaSPHPsiSignAB.py`):
+
+| | pre-fix ψ | post-fix ψ |
+|---|---|---|
+| diverged | no | no |
+| min density over the run | 0.396 | **0.532** |
+| max density over the run | 1.849 | 1.837 |
+| peak \|p\| at Sensor 1, `t > 2 s` | 39.2 kPa | **32.5 kPa** |
+
+(Measured band for the first impact peak: 2.2–13.1 kPa.) So the fix improves
+both the density floor and the pressure overshoot, and degrades nothing. Note
+neither is *good* — the case has separate open problems recorded in
+`examples/sloshingTank/PLAN.md`, and the peak is still ~2.5× the band top. For
+reference the run recorded on 2026-09-03 (`examples/sloshingTank/output/`)
+**diverged** at `t = 3.41` with `ρ ∈ [0, ∞]`; that is older code, not this
+variable, and is why the A/B above was run rather than compared against it.
+
 ---
 
 # Part 4 — What has to be built
@@ -837,8 +858,35 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
    - `tests/test_artificialCompressibleScaffold.py`, 14 tests. Note
      `test_variableStepBdf2DifferentiatesAQuadraticExactly`: the fixed-step
      limit alone would not catch a swapped `Δtⁿ`/`Δtⁿ⁻¹` in Eq. (42).
-5. **The dual-time driver** (§4.1) with AC-2L and RK2 only, `ṽ` advection off,
-   shifting off. Validate on `hydrostaticColumn`.
+5. ~~**The dual-time driver** (§4.1) with AC-2L and RK2 only.~~ **Done
+   2026-09-05.** `schemes/artificialCompressible.py` now runs the full
+   Eqs. (38)–(48) loop: frozen stage-0 BDF source, frozen-per-iteration `D^p`,
+   a general explicit Butcher RK sweep, `I_c = diag{0,1,1}`, point-implicit
+   `α_PI`, and the `ε_v` convergence test on `ṽ`. `ṽ` advection, internal
+   shifting and `k₃` raise rather than silently no-opping; AC-4/AC-JST raise
+   pointing at step 8.
+   - **New supporting work.** `modules/artificialCompressible/pressureSmoothing.py`
+     (AC-2 / AC-2L dispatch onto `computeScalarFieldDiffusion`);
+     `approachOnly=False` on `computeVelocityDiffusion`, which turns its
+     `inviscid=False` branch into the Monaghan–Gingold velocity Laplacian
+     proper — the clamp that made it one-sided is an artificial-viscosity
+     device, and Eq. (25) has no such clamp. Both `nu * rho0` (for the kernel's
+     `mean(ρ)` division) and the `1/ρ_i` on the pressure gradient are applied
+     explicitly, so nothing here assumes `ρ₀ = 1` the way δ-SPH does.
+   - **Measured** (`tests/test_artificialCompressible.py`, 24×24 periodic box,
+     Taylor–Green plus a compressive perturbation, so only the solve is
+     graded): `rms(∇·v)` **1.84 → 2.6e−3**, monotone in the iteration budget
+     and flat between 100 and 400 iterations (converged). §4.3's finding
+     reproduces: RK3/RK4 buy no accuracy over RK2 at equal iteration count and
+     cost linearly more.
+   - **Still open on the driver itself:** convergence to `ε_v = −6` took ~400
+     iterations from that (deliberately extreme) initial transient. Whether
+     that is the initial condition, `Δt/Δτ`, or something real is exactly what
+     step 6's Table 1/2 reproduction answers — do not tune it before then.
+   - Not yet validated on `hydrostaticColumn`: that needs the Eq. (46) timestep
+     (step 6) and an ACSPH-aware case (the cases build their state through
+     `ctx.SimulationState` with weakly-compressible/incompressible field sets).
+     **Next action.**
 6. **Timestep + convergence control** (§4.5, §1.6). Reproduce Tables 1 and 2 on
    `oscillatingDroplet`. This is the real acceptance gate for the machinery.
 7. **Michel shifting** (§4.2). Validate on `rotatingSquarePatch`.

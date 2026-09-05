@@ -35,8 +35,8 @@ from typing import Any, Dict, List, Optional
 import torch
 from warpSPHCore import *
 
-from ..enumTypes import (AdaptiveSupportScheme, PressureSmoothingScheme,
-                         ViscositySwitch)
+from ..enumTypes import (AdaptiveSupportScheme, PressureForceScheme,
+                         PressureSmoothingScheme, ViscositySwitch)
 from .moduleConfigurations import *
 from .moduleConfigurations.boundaryConditions import (BoundaryCondition,
                                                       boundaryConditionToDict,
@@ -121,6 +121,9 @@ class ArtificialCompressibilityParams:
         default=None, metadata={'description': 'c0 used ONLY to fix nu (Part 2)'})
     #: `alpha_nu` in that same expression.
     alphaNu: float = field(default=0.01, metadata={'description': 'alpha_nu (Sec. 4)'})
+    #: Kinematic viscosity, used directly when `referenceSoundSpeedForViscosity`
+    #: is `None`. Exactly one of the two fixes `nu`.
+    nu: float = field(default=1e-6, metadata={'description': 'kinematic viscosity (used when referenceSoundSpeedForViscosity is None)'})
 
 
 def buildDefaultArtificialCompressibilityParams() -> ArtificialCompressibilityParams:
@@ -145,6 +148,12 @@ class ArtificialCompressibleSPHConfig:
     schemeName: str = field(default='Artificial Compressible SPH', metadata={'description': 'Name of the scheme'})
 
     boundaryConditions: List[BoundaryCondition] = field(default_factory=list, metadata={'description': 'List of boundary conditions to apply in the simulation'})
+
+    #: Eq. (25) is the plain symmetric `(p_i + p_j)` gradient, which is this
+    #: repo's (confusingly named) `nonConservative`. `Antuono` swaps in the
+    #: antisymmetric form for negative-pressure non-surface pairs as a
+    #: tensile-instability guard; the paper does not, so it is not the default.
+    pressureForceTerm: PressureForceScheme = field(default=PressureForceScheme.nonConservative, metadata={'description': 'Pressure force term (Eq. 25 is nonConservative == (p_i+p_j))'})
 
     dt_viscosityConstraint: bool = field(default=True, metadata={'description': 'Whether to apply the viscous constraint 0.125 h^2/nu in Eq. (46)'})
     dt_accelerationConstraint: bool = field(default=True, metadata={'description': 'Whether to apply the acceleration constraint in the timestep'})
@@ -176,7 +185,7 @@ def _acParamsToDict(p: ArtificialCompressibilityParams) -> Dict[str, Any]:
         'shiftInsidePseudoLoop': p.shiftInsidePseudoLoop,
         'bdfShiftCorrection': p.bdfShiftCorrection,
         'referenceSoundSpeedForViscosity': p.referenceSoundSpeedForViscosity,
-        'alphaNu': p.alphaNu,
+        'alphaNu': p.alphaNu, 'nu': p.nu,
     }
 
 
@@ -209,6 +218,7 @@ def _dictToAcParams(d: Optional[Dict[str, Any]]) -> ArtificialCompressibilityPar
             None if d.get('referenceSoundSpeedForViscosity', defaults.referenceSoundSpeedForViscosity) is None
             else float(d['referenceSoundSpeedForViscosity'])),
         alphaNu=float(d.get('alphaNu', defaults.alphaNu)),
+        nu=float(d.get('nu', defaults.nu)),
     )
 
 
@@ -231,6 +241,7 @@ def artificialCompressibleConfigToDict(config: ArtificialCompressibleSPHConfig) 
         'viscositySwitchParams': viscositySwitchConfigToDict(config.viscositySwitchParams),
         'schemeName': config.schemeName,
         'boundaryConditions': [boundaryConditionToDict(bc) for bc in config.boundaryConditions],
+        'pressureForceTerm': config.pressureForceTerm.name,
         'dt_viscosityConstraint': config.dt_viscosityConstraint,
         'dt_accelerationConstraint': config.dt_accelerationConstraint,
         'bandwith': config.bandwith,
@@ -284,6 +295,7 @@ def dictToArtificialCompressibleConfig(configDict: Dict[str, Any]) -> Artificial
     config.viscositySwitchParams = dictToViscositySwitchConfig(configDict['viscositySwitchParams'])
     config.schemeName = configDict['schemeName']
     config.boundaryConditions = [dictToBoundaryCondition(bcDict) for bcDict in configDict['boundaryConditions']]
+    config.pressureForceTerm = PressureForceScheme[configDict['pressureForceTerm']] if isinstance(configDict['pressureForceTerm'], str) else configDict['pressureForceTerm']
     config.dt_viscosityConstraint = bool(configDict['dt_viscosityConstraint'])
     config.dt_accelerationConstraint = bool(configDict['dt_accelerationConstraint'])
     config.bandwith = float(configDict.get('bandwith', 10.0))

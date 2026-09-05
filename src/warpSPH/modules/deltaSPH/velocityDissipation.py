@@ -26,7 +26,10 @@ from .wp_densityDelta import computeDensityDiffusionDeltaSPH
 
 __all__ = ['computeVelocityDiffusion']
 
-def computeVelocityDiffusion(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]]) -> torch.Tensor:
+def computeVelocityDiffusion(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], approachOnly: bool = True) -> torch.Tensor:
+    """`approachOnly=False` lifts the approaching-neighbours clamp, turning the
+    `inviscid=False` branch into the Monaghan & Gingold (1983) velocity
+    Laplacian proper -- see `wp_viscosityDelta.py`'s docstring."""
     with record_function("[warpSPH] - (deltaSPH) - computeVelocityDiffusion"):
         dvdt_diss = computeVelocityDiffusionDeltaSPH(
             currentState,
@@ -43,5 +46,6 @@ def computeVelocityDiffusion(currentState: Any, config: SimulationConfig, scheme
             c_s = schemeConfig.fluid.fixedSoundSpeed,
             alpha = schemeConfig.diffusionParams.inviscidAlpha,
             nu = schemeConfig.diffusionParams.viscidNu,
+            approachOnly = approachOnly,
         )
         return dvdt_diss

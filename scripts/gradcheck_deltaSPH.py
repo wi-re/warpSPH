@@ -28,7 +28,11 @@ operator is a vector one.
 an artificial-viscosity-style term and a physical-viscosity term (`alphaToNu`),
 plus the standard "moving apart doesn't dissipate" kink
 (`if mu_ij > 0: mu_ij = 0.0`) already gradchecked clean in this same shape by
-gradcheck_dissipation.py's Monaghan viscosity. Checked in both `inviscid` modes.
+gradcheck_dissipation.py's Monaghan viscosity. Checked in all four
+`inviscid` x `approachOnly` combinations -- `approachOnly=False` removes that
+kink entirely (ACSPH needs the unclamped Monaghan-Gingold form, Eq. 25), which
+makes the branch *smoother*, so it is the clamped cases that were ever at risk;
+both are checked so a future edit to either side is covered.
 
     python scripts/gradcheck_deltaSPH.py
 """
@@ -103,7 +107,7 @@ def _run_density(label, densityScheme, withField=False) -> bool:
         return False
 
 
-def _run_velocity(label, inviscid) -> bool:
+def _run_velocity(label, inviscid, approachOnly=True) -> bool:
     domain, positions, supports, masses, densities, adjacency, kinds = _build_case()
     velocities = torch.randn(N, DIM, dtype=DTYPE, device=DEVICE, requires_grad=True)
 
@@ -118,6 +122,7 @@ def _run_velocity(label, inviscid) -> bool:
             c_s=1.0,
             nu=5e-3,
             queryVelocities=vel,
+            approachOnly=approachOnly,
             adjacency=adjacency,
         )
 
@@ -142,7 +147,9 @@ def main():
     for scheme in DensityDiffusionScheme:
         ok &= _run_density(f"{scheme.name}, queryField", scheme, withField=True)
     for inviscid in (True, False):
-        ok &= _run_velocity(f"inviscid={inviscid}", inviscid)
+        for approachOnly in (True, False):
+            ok &= _run_velocity(f"inviscid={inviscid}, approachOnly={approachOnly}",
+                                inviscid, approachOnly)
 
     print()
     if ok:
