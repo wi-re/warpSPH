@@ -470,48 +470,41 @@ system, config, round-trip, registration, then physics. C reuses
 
 # Part 6 — Literature status
 
-**In hand:** `michel2022` (the target), **`antuono2021`** (δ-ALE-SPH — stage B′;
-it was already in `literature/` unclaimed by the manifest, which
-`scripts/check_literature.py` caught, and is now synced), `sun2017`, `sun2019`
-(the current law),
-`adami2013` (transport velocity — the §4.1 counterexample, and unimplemented
-here), `colagrossi2003`, `antuono2010`, `antuono2012`, `marrone2011`.
+**Nothing in this plan is blocked on a document we do not have.** All eight
+references it leans on were synced on 2026-09-05 (`literature/ADDING.md`
+procedure; `scripts/check_literature.py` green), and every bibliographic field
+below came from a DOI record rather than from the papers' own reference lists —
+which caught one disagreement worth having: `michel2022` cites [27] as
+*Quinlan, Lastiwka, Basa*, and the DOI record has *Quinlan, Basa, Lastiwka*.
 
-**Missing, and blocking to different degrees:**
+| ref | key | what it unblocks |
+|---|---|---|
+| — | `michel2022` | The target: the requirements (Part 2), the law, and the three-scheme validation. |
+| — | `antuono2021` | **Stage B′.** δ-ALE-SPH: an ALE in primitive variables, no Riemann solver, and the `𝒟^ρ`/`𝒟^m` diffusion without which it is unstable. Its §5 constant-mass variant is what we already have. |
+| [25] | `oger2016` | Stage B/D context: the weakly-compressible ALE study, and Table 1's Mach-scaled row. |
+| [37] | `vila1999` | **Stage D.** The ALE formalism itself, and *why* the conservative-variable route makes a Riemann solver mandatory. |
+| [26] | `parshikov2002` | **Stage C.** The contact-algorithm scheme `michel2022` §4.2.2 recovers from Vila. |
+| [17] | `lind2012` | Table 1's first row — the Fick's-law PST everything here descends from, including `delta.py`. |
+| [27] | `quinlan2006` | The truncation-error analysis §3.1's consistency requirement and `β = (R/Δx)³` rest on. |
+| [36] | `vanleer1979` | MUSCL, for stage B. |
+| [30] | `roe1986` | minmod, and a survey of the approximate Riemann solvers stage B must choose between. |
 
-| ref | paper | needed for | blocking? |
-|---|---|---|---|
-| [37] | Vila, *On particle weighted methods and smooth particle hydrodynamics*, Math. Models Methods Appl. Sci. **9**(2) (1999) 161–209, `doi:10.1142/s0218202599000117` | stage D | **yes** — Michel gives the equations but not the derivation or the solver |
-| [26] | Parshikov & Medin, *Smoothed particle hydrodynamics using interparticle contact algorithms*, J. Comput. Phys. **180**(1) (2002) 358–382, `doi:10.1006/jcph.2002.7099` | stage C | partly — Michel's Eqs. (28)–(31) are complete, but the contact algorithm is the point of the paper |
-| [25] | Oger, Marrone, Le Touzé, de Leffe, *SPH accuracy improvement through the combination of a quasi-Lagrangian shifting transport velocity and consistent ALE formalisms*, J. Comput. Phys. **313** (2016) 76–98, `doi:10.1016/j.jcp.2016.02.039` | stages B/D | **yes** — this is the WCSPH-context ALE study, closest prior art |
+Two provenance notes, both recorded in the entries themselves:
 
-| [17] | Lind, Xu, Stansby, Rogers (2012) | Table 1 row | no — Eq. (4) is complete |
-| [27] | Quinlan, Lastiwka, Basa (2006) | the truncation-error argument behind §3.1 | no, but it is *the* justification for `β_i = (R/Δx)³` |
-| [36] | van Leer (1979); [30] Roe (1986) | MUSCL / minmod | no — textbook |
+- **`vila1999`'s copy is an author's version**, paginated 1–48 rather than the
+  published 161–209. Fields are the DOI record's.
+- **`roe1986` has no abstract** and therefore no `ABSTRACTS.md` block — Annual
+  Reviews articles of that vintage print none. OpenAlex *does* return an
+  abstract for its DOI, but it belongs to a different paper (something about
+  machine learning in fluid mechanics); it is not used. This is the only core
+  row in the library without an abstract, and `MANIFEST.md` names the exception.
 
-All four records above were verified against Crossref, not recalled.
-
-**Recommended sync before stage B:** `oger2016`, `vila1999`, and
-`parshikov2002` if convenient. Stage B′ is **not** blocked — `antuono2021` is
-in hand.
-
-All three are paywalled (World Scientific / Elsevier), so they need the
-PDFs dropped into `literature/` by hand and then a sync per
-`literature/ADDING.md` — the DOIs and full records above are already verified,
-so the sync has nothing left to guess. **`antuono2021` is the exception**: its
-accepted manuscript is open access at
-`https://www.sciencedirect.com/science/article/am/pii/S0045793020303765` if the
-copy in hand ever needs replacing.
-
-> Its PDF's text layer is corrupted in the abstract — a floating `δu` overline
-> glyph lands mid-word and one hyphen is lost. That is now a declared
-> `**text-layer:**` repair in `ABSTRACTS.md`, a mechanism added to
-> `check_literature.py` for this: the repairs are applied to the extracted text
-> before matching, so the verbatim check still runs at full strictness against
-> a transformation that is written down rather than being switched off. See
-> `literature/ADDING.md`.
-
----
+`antuono2021` also arrived with a corrupted text layer — a floating `δu`
+overline glyph lands mid-word and one hyphen is lost. That is now a declared
+`**text-layer:**` repair, a mechanism added to `check_literature.py` for it: the
+repairs are applied to the extracted text before matching, so the verbatim check
+still runs at full strictness against a transformation written down in the file
+rather than being switched off. See `literature/ADDING.md`.
 
 # Part 7 — Validation
 

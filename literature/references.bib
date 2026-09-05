@@ -529,6 +529,89 @@
   note    = {Source of the rotating/stretching square-patch benchmark: the initial pressure field (a Poisson solve) without which the case cannot be initialised, plus the analytic stretching solution and the BEM/LDFM reference data decourcy2024 Fig. 11-12 plot against.}
 }
 
+@article{vila1999,
+  author  = {Vila, J. P.},
+  title   = {On particle weighted methods and smooth particle hydrodynamics},
+  journal = {Mathematical Models and Methods in Applied Sciences},
+  year    = {1999},
+  volume  = {9},
+  number  = {2},
+  pages   = {161--209},
+  doi     = {10.1142/s0218202599000117},
+  note    = {The ALE-SPH formalism itself: conservation laws in conservative variables with Godunov-type finite-difference fluxes between particles, which is what makes a Riemann solver mandatory. michel2022 Sec. 4.2.1 is this scheme; PST_ALE_PLAN.md stage D. The copy held here is an author's version paginated 1-48 rather than the published 161-209; the fields above are the DOI record's.}
+}
+
+@article{parshikov2002,
+  author  = {Parshikov, Anatoly N. and Medin, Stanislav A.},
+  title   = {Smoothed Particle Hydrodynamics Using Interparticle Contact Algorithms},
+  journal = {Journal of Computational Physics},
+  year    = {2002},
+  volume  = {180},
+  number  = {1},
+  pages   = {358--382},
+  doi     = {10.1006/jcph.2002.7099},
+  note    = {Riemann-solved velocity and stress at the contact point in place of pair averages, which removes the need for artificial viscosity. michel2022 Sec. 4.2.2 recovers it from vila1999 by cancelling the mass fluxes; PST_ALE_PLAN.md stage C, the cheap consumer of the Riemann subsystem.}
+}
+
+@article{oger2016,
+  author  = {Oger, G. and Marrone, S. and Le Touz\'{e}, D. and de Leffe, M.},
+  title   = {{SPH} accuracy improvement through the combination of a quasi-{Lagrangian} shifting transport velocity and consistent {ALE} formalisms},
+  journal = {Journal of Computational Physics},
+  year    = {2016},
+  volume  = {313},
+  pages   = {76--98},
+  doi     = {10.1016/j.jcp.2016.02.039},
+  note    = {The weakly-compressible ALE study michel2022 Table 1 lists as its own row, and the closest prior art for PST_ALE_PLAN.md stage B. Its transport velocity is Mach-scaled (U_char = Ma c_0), which is the property michel2022 shows breaks Galilean invariance and which ACSPH cannot supply.}
+}
+
+@article{lind2012,
+  author  = {Lind, S. J. and Xu, R. and Stansby, P. K. and Rogers, B. D.},
+  title   = {Incompressible smoothed particle hydrodynamics for free-surface flows: A generalised diffusion-based algorithm for stability and validations for impulsive flows and propagating waves},
+  journal = {Journal of Computational Physics},
+  year    = {2012},
+  volume  = {231},
+  number  = {4},
+  pages   = {1499--1523},
+  doi     = {10.1016/j.jcp.2011.10.027},
+  note    = {The Fick's-law PST every later shifting law descends from, including this codebase's. michel2022 Table 1's first row and PST_ALE_PLAN.md Part 1.1's first row; its 0.2h displacement cap is the ancestor of delta.py's own limiter.}
+}
+
+@article{quinlan2006,
+  author  = {Quinlan, N. J. and Basa, M. and Lastiwka, M.},
+  title   = {Truncation error in mesh-free particle methods},
+  journal = {International Journal for Numerical Methods in Engineering},
+  year    = {2006},
+  volume  = {66},
+  number  = {13},
+  pages   = {2064--2085},
+  doi     = {10.1002/nme.1617},
+  note    = {The truncation-error analysis michel2022 Sec. 3.1 builds its consistency requirement on: error depends on both h and dx/h separately, which is why a PST that converges at fixed dx/h is a real condition rather than a formality, and where beta_i = (R/dx)^3 comes from. Note the author order here is the DOI record's; michel2022's reference list gives it as Quinlan, Lastiwka, Basa.}
+}
+
+@article{vanleer1979,
+  author  = {van Leer, Bram},
+  title   = {Towards the ultimate conservative difference scheme. {V}. {A} second-order sequel to {Godunov}'s method},
+  journal = {Journal of Computational Physics},
+  year    = {1979},
+  volume  = {32},
+  number  = {1},
+  pages   = {101--136},
+  doi     = {10.1016/0021-9991(79)90145-1},
+  note    = {MUSCL. The reconstruction michel2022 Secs. 4.2.1-4.2.2 use to build the left/right states a Riemann solver needs; PST_ALE_PLAN.md stage B. Its monotonicity algorithms are the family modules/crk/limiter.py's van Leer limiter already belongs to.}
+}
+
+@article{roe1986,
+  author  = {Roe, P. L.},
+  title   = {Characteristic-Based Schemes for the {Euler} Equations},
+  journal = {Annual Review of Fluid Mechanics},
+  year    = {1986},
+  volume  = {18},
+  number  = {1},
+  pages   = {337--365},
+  doi     = {10.1146/annurev.fl.18.010186.002005},
+  note    = {The slope-limiter reference michel2022 cites for minmod, and a survey of the approximate Riemann solvers PST_ALE_PLAN.md stage B has to choose between. Carries no abstract -- Annual Reviews articles of this vintage print none -- so it has no ABSTRACTS.md block; OpenAlex has one attached to this DOI but it belongs to a different paper.}
+}
+
 @article{antuono2021,
   author  = {Antuono, M. and Sun, P. N. and Marrone, S. and Colagrossi, A.},
   title   = {The $\delta$-{ALE}-{SPH} model: An arbitrary {Lagrangian}-{Eulerian} framework for the $\delta$-{SPH} model with particle shifting technique},

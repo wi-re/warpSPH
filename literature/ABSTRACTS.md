@@ -773,6 +773,79 @@ The scheme of `ACSPH_PLAN.md` and its dependencies. Added 2026-09-05.
 
 > In this paper, an in-depth study of SPH method, in its original weakly compressible version, is achieved on dedicated 2D and 3D free-surface flow test cases. These rather critical prototype problems shall constitute suitable test cases to get through when building a free-surface SPH model. The present work aims at investigating various numerical aspects of this method, often little mentioned in literature. In particular, a great care is paid to the dynamic part of the solution, which is critical to the local hydrodynamic load prediction. The role of numerical errors in the development of acoustic frequencies in the pressure signals is discussed, as well as the influence of the choice of the sound velocity. On the shown test problems, it is also evidenced that some numerical tools are crucial to ensure the robustness and accuracy of the standard SPH method. The convergence of our model is heuristically proved on these nonlinear prototype tests, showing at the same time the very satisfactory level of accuracy reached. Through these tests, some other numerical specificities of the SPH method are discussed, such as the self-redistribution of the particles occurring during the Lagrangian evolution. A higher order model is also proposed, and its advantages and drawbacks are discussed.
 
+### `vila1999`
+
+- **file:** `vila1999_particle-weighted-methods-and-sph.pdf`
+- **title:** On particle weighted methods and smooth particle hydrodynamics
+- **authors:** J. P. Vila
+- **venue:** *Mathematical Models and Methods in Applied Sciences* 9(2):161–209, 1999
+- **doi:** [10.1142/s0218202599000117](https://doi.org/10.1142/s0218202599000117)
+- **relevance:** The ALE-SPH formalism itself, and the reason the Riemann route needs a Riemann solver: conservation laws in **conservative** variables with Godunov-type finite-difference fluxes between particles. `michel2022` Sec. 4.2.1 is this scheme rewritten with a velocity decomposition; `PST_ALE_PLAN.md` stage D. Contrast `antuono2021`, which reaches an ALE in primitive variables and needs no such flux.
+- **abstract from:** Crossref (publisher-deposited JATS abstract)
+- **note:** The copy held here is an author's version paginated 1–48 rather than the published 161–209; the fields above are the DOI record's.
+
+> This paper deal with designing of weighted particle approximation of conservation laws. New ideas concerning the use of variable smoothing length, renormalization and the use of Godunov type finite difference fluxes in particle methods are introduced and discussed in connection with standard implementation of the SPH method. A detailed analysis of boundary conditions approximation is also provided.
+
+### `parshikov2002`
+
+- **file:** `parshikov2002_sph-interparticle-contact-algorithms.pdf`
+- **title:** Smoothed Particle Hydrodynamics Using Interparticle Contact Algorithms
+- **authors:** Anatoly N. Parshikov and Stanislav A. Medin
+- **venue:** *Journal of Computational Physics* 180(1):358–382, 2002
+- **doi:** [10.1006/jcph.2002.7099](https://doi.org/10.1006/jcph.2002.7099)
+- **relevance:** The scheme `michel2022` Sec. 4.2.2 validates on, recovered from `vila1999` by cancelling the mass fluxes: Riemann-solved velocity and stress at the contact point in place of pair averages, which is what removes the need for artificial viscosity. `PST_ALE_PLAN.md` stage C — the cheap consumer of the Riemann subsystem, and the check that it is right in an SPH setting before `vila1999` adds mass fluxes on top.
+- **abstract from:** PDF p.1
+
+> Smoothed particle hydrodynamics (SPH) is a modern effective technique of computer simulation in continuous media mechanics. SPH approximations are quite flexible and allow various constructions. In this paper, contact interaction between particles is introduced in SPH formulation. The concept is to insert in SPH approximations of a strength medium the velocity and stresses determined at the contact point by Riemann solution, instead of mean values between velocities and stresses of basic and surrounding particles. In this case, there is no need to use artificial viscosity. In a heat-conducting medium, the contact temperature is determined by the solution of a thermal discontinuity breakup and heat fluxes in particles are computed with the use of this temperature. The modified SPH approximations easily pass various standard tests and are easily realized in multidimensional codes. 
+
+### `oger2016`
+
+- **file:** `oger2016_quasi-lagrangian-transport-velocity-ale.pdf`
+- **title:** SPH accuracy improvement through the combination of a quasi-Lagrangian shifting transport velocity and consistent ALE formalisms
+- **authors:** G. Oger, S. Marrone, D. Le Touzé and M. de Leffe
+- **venue:** *Journal of Computational Physics* 313:76–98, 2016
+- **doi:** [10.1016/j.jcp.2016.02.039](https://doi.org/10.1016/j.jcp.2016.02.039)
+- **relevance:** The weakly-compressible ALE study, and the closest prior art for the Riemann route (`PST_ALE_PLAN.md` stage B). It is also `michel2022` Table 1's third row: its transport velocity uses `U_char = Ma c₀`, the Mach scaling that breaks Galilean invariance and that an artificial-compressibility scheme has no way to supply — the same defect this codebase's `modules/shifting/delta.py` inherits from `sun2017`.
+- **abstract from:** PDF p.1
+
+> This paper addresses the accuracy of the weakly-compressible SPH method. Interpolation defects due to the presence of anisotropic particle structures inherent to the Lagrangian character of the Smoothed Particle Hydrodynamics (SPH) method are highlighted. To avoid the appearance of these structures which are detrimental to the quality of the simulations, a specific transport velocity is introduced and its inclusion within an Arbitrary Lagrangian Eulerian (ALE) formalism is described. Unlike most of existing particle disordering/shifting methods, this formalism avoids the formation of these anisotropic structures while a full consistency with the original Euler or Navier–Stokes equations is maintained. The gain in accuracy, convergence and numerical diffusion of this formalism is shown and discussed through its application to various challenging test cases.
+
+### `lind2012`
+
+- **file:** `lind2012_isph-free-surface-diffusion-shifting.pdf`
+- **title:** Incompressible smoothed particle hydrodynamics for free-surface flows: A generalised diffusion-based algorithm for stability and validations for impulsive flows and propagating waves
+- **authors:** S. J. Lind, R. Xu, P. K. Stansby and B. D. Rogers
+- **venue:** *Journal of Computational Physics* 231(4):1499–1523, 2012
+- **doi:** [10.1016/j.jcp.2011.10.027](https://doi.org/10.1016/j.jcp.2011.10.027)
+- **relevance:** The Fick's-law PST every later shifting law descends from, this codebase's included — `michel2022` Table 1's first row and `PST_ALE_PLAN.md` Part 1.1's. Its `0.2h` displacement cap is the ancestor of `delta.py`'s own limiter, and its `U_char = h/Δt` is the one entry in that table whose characteristic velocity is not built from a sound speed.
+- **abstract from:** PDF p.1
+
+> The incompressible smoothed particle hydrodynamics (ISPH) method with projectionbased pressure correction has been shown to be highly accurate and stable for internal flows and, importantly for many problems, the pressure field is virtually noise-free in contrast to the weakly compressible SPH approach (Xu et al., 2009 [31]). However for almost inviscid fluids instabilities at the free surface occur due to errors associated with the truncated kernels. A new algorithm is presented which remedies this issue, giving stable and accurate solutions to both internal and free-surface flows. Generalising the particle shifting approach of Xu et al. (2009) [31], the algorithm is based upon Fick’s law of diffusion and shifts particles in a manner that prevents highly anisotropic distributions and the onset of numerical instability. The algorithm is validated against analytical solutions for an internal flow at higher Reynolds numbers than previously, the flow due to an impulsively started plate and highly accurate solutions for wet bed dam break problems at zero and small times. The method is then validated for progressive regular waves with paddle motion defined by linear theory. The accurate predictions demonstrate the effectiveness of the algorithm in stabilising solutions and minimising the surface instabilities generated by the inevitable errors associated with truncated kernels. The test cases are thought to provide a more thorough quantitative validation than previously undertaken.
+
+### `quinlan2006`
+
+- **file:** `quinlan2006_truncation-error-mesh-free-particle-methods.pdf`
+- **title:** Truncation error in mesh-free particle methods
+- **authors:** N. J. Quinlan, M. Basa and M. Lastiwka
+- **venue:** *International Journal for Numerical Methods in Engineering* 66(13):2064–2085, 2006
+- **doi:** [10.1002/nme.1617](https://doi.org/10.1002/nme.1617)
+- **relevance:** Why `michel2022`'s consistency requirement is a real condition rather than a formality. SPH error depends on `h` and `Δx/h` *separately*, so refining at the fixed `Δx/h` every SPH code actually uses is its own convergence question — and that is the limit a PST has to vanish in. `β = (R/Δx)³` comes from counterbalancing the lowest-degree term of this expansion.
+- **abstract from:** Crossref (publisher-deposited JATS abstract)
+- **note:** Author order here is the DOI record's; `michel2022`'s reference list gives it as Quinlan, Lastiwka, Basa.
+
+> A truncation error analysis has been developed for the approximation of spatial derivatives in smoothed particle hydrodynamics (SPH) and related first‐order consistent methods such as the first‐order form of the reproducing kernel particle method. Error is shown to depend on both the smoothing length h and the ratio of particle spacing to smoothing length, Δ x / h . For uniformly spaced particles in one dimension, analysis shows that as h is reduced while maintaining constant Δ x / h , error decays as h 2 until a limiting discretization error is reached, which is independent of h . If Δ x / h is reduced while maintaining constant h (i.e. if the number of neighbours per particle is increased), error decreases at a rate which depends on the kernel function's smoothness. When particles are distributed non‐uniformly, error can grow as h is reduced with constant Δ x / h . First‐order consistent methods are shown to remove this divergent behaviour. Numerical experiments confirm the theoretical analysis for one dimension, and indicate that the main results are also true in three dimensions. This investigation highlights the complexity of error behaviour in SPH, and shows that the roles of both h and Δ x / h must be considered when choosing particle distributions and smoothing lengths. Copyright © 2005 John Wiley & Sons, Ltd.
+
+### `vanleer1979`
+
+- **file:** `vanleer1979_towards-the-ultimate-conservative-difference-scheme-v.pdf`
+- **title:** Towards the Ultimate Conservative Difference Scheme. V. A Second-Order Sequel to Godunov's Method
+- **authors:** Bram van Leer
+- **venue:** *Journal of Computational Physics* 32(1):101–136, 1979
+- **doi:** [10.1016/0021-9991(79)90145-1](https://doi.org/10.1016/0021-9991(79)90145-1)
+- **relevance:** MUSCL: the reconstruction that builds the left/right states a Riemann solver needs, which `michel2022` Secs. 4.2.1–4.2.2 use for both ALE schemes. `PST_ALE_PLAN.md` stage B. Its monotonicity algorithms are the family `modules/crk/limiter.py`'s van Leer limiter already belongs to, so half the machinery is here.
+- **abstract from:** PDF p.1
+
+> A method of second-order accuracy is described for integrating the equations of ideal compressible flow. The method is based on the integral conservation laws and is dissipative, so that it can be used across shocks. The heart of the method is a one-dimensional Lagrangean scheme that may be regarded as a second-order sequel to Godunov’s method. The second-order accuracy is achieved by taking the distributions of the state quantities inside a gas slab to be linear, rather than uniform as in Godunov’s method. The Lagrangean results are remapped with least-squares accuracy onto the desired Euler grid in a separate step. Several monotonicity algorithms are applied to ensure positivity, monotonicity and nonlinear stability. Higher dimensions are covered through time splitting. Numerical results for one-dimensional and two-dimensional flows are presented, demonstrating the efficiency of the method. The paper concludes with a summary of the results of the whole series “Towards the Ultimate Conservative Difference Scheme.”
 ### `antuono2021`
 
 - **file:** `antuono2021_delta-ale-sph-model.pdf`

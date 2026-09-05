@@ -57,8 +57,11 @@ and had to be identified from their front matter alone.
 
 ## What is here
 
-125 documents. The first 48 are the curated core — every row abstracted in
-`ABSTRACTS.md` and annotated for what it unblocks. The remaining 77, listed
+132 documents. The first 55 are the curated core — every row annotated for what
+it unblocks, and every row abstracted in `ABSTRACTS.md` **except `roe1986`**,
+which carries no abstract at all (Annual Reviews articles of that vintage print
+none; OpenAlex has one attached to the DOI, but it belongs to a different
+paper). The remaining 77, listed
 under **Extended set** below, arrived together on 2026-08-29 and were synced by
 bibliographic record only: `references.bib` has an entry for each, but they are
 not abstracted, not annotated for relevance, and three scanned arrivals with no
@@ -69,8 +72,9 @@ supplied by the user for the kernel-choice question behind the
 `columnCollapse` Wendland2-vs-Wendland4 experiment. `sun2019` and `sun2017`
 were added to the core on 2026-09-03 for
 `docs/historic_plans/WCSPH_SHIFTING_PLAN.md`. The eight `[AC]` rows arrived on
-2026-09-05 for `ACSPH_PLAN.md`; `antuono2021` the same day for
-`PST_ALE_PLAN.md`.)
+2026-09-05 for `ACSPH_PLAN.md`; the eight `[PST]` rows the same day for
+`PST_ALE_PLAN.md` — `antuono2021` was found already on disk, unclaimed by any
+manifest row, by `scripts/check_literature.py`.)
 
 `venue` is the **published** venue, which for an author's-version or preprint
 copy is not always what that copy's own front page says. Full bibliographic
@@ -120,8 +124,24 @@ detail is in `references.bib`; the abstract of every core row is in
 | — | `bender2026` | `bender2026_primal-sph-solver.pdf` | CGF 2026 | A primal (not dual) pressure solver: stable to 1:1000 density ratios, strongly coupled to non-pressure forces. |
 | — | `adami2013` | `adami2013_transport-velocity.pdf` | J. Comput. Phys. 241 2013 | Transport velocity. Closes plan 5 Q7 (background pressure). |
 | — | `sun2017` | `sun2017_delta-plus-sph-model.pdf` | Comput. Methods Appl. Mech. Engrg. 315 2017 | The δ⁺-SPH origin paper: δ-SPH diffusion + PST together. Source of `delta.py`'s shift form, `wp_deltaShift`'s tensile term, and the free-surface `n`-nulling `surfaceNormal` extends. |
-| `[PST]` | `antuono2021` | `antuono2021_delta-ale-sph-model.pdf` | Comput. Fluids 216 2021 | δ-ALE-SPH: an ALE formalism in **primitive** variables, so no Riemann solver — the cheap route to a real ALE for this codebase. Its constant-mass variant is what `correctdrhodt`/`correctdvdt` already are. `PST_ALE_PLAN.md` stage B′. |
 | — | `sun2019` | `sun2019_consistent-particle-shifting-delta-plus-sph.pdf` | Comput. Methods Appl. Mech. Engrg. 348 2019 | Consistent (quasi-Lagrangian) δ⁺-SPH: the δu divergence terms that make the WCSPH shift volume-conserving. Reference method for `docs/historic_plans/WCSPH_SHIFTING_PLAN.md` step 2. |
+
+**Particle shifting and ALE (PST)**
+
+Added 2026-09-05 for [`PST_ALE_PLAN.md`](../PST_ALE_PLAN.md). `michel2022` is
+already listed under ACSPH below, where it arrived; it is the target paper for
+this plan too.
+
+| plan | bib key | file | venue | what it is |
+|---|---|---|---|---|
+| `[PST]` | `antuono2021` | `antuono2021_delta-ale-sph-model.pdf` | Comput. Fluids 216 2021 | δ-ALE-SPH: an ALE formalism in **primitive** variables, so no Riemann solver — the cheap route to a real ALE here. Its constant-mass variant is exactly what `correctdrhodt`/`correctdvdt` already are, and it says so. Stage B′. |
+| `[PST]` | `oger2016` | `oger2016_quasi-lagrangian-transport-velocity-ale.pdf` | J. Comput. Phys. 313 2016 | The weakly-compressible ALE study, and the closest prior art for the Riemann route. Its transport velocity is Mach-scaled — the property `michel2022` shows breaks Galilean invariance, and that ACSPH cannot supply. |
+| `[PST]` | `vila1999` | `vila1999_particle-weighted-methods-and-sph.pdf` | Math. Models Methods Appl. Sci. 9(2) 1999 | The ALE-SPH formalism itself: conservative variables with Godunov-type fluxes between particles, which is *why* the Riemann solver is mandatory on that route. Stage D. Copy held is an author's version (paginated 1–48). |
+| `[PST]` | `parshikov2002` | `parshikov2002_sph-interparticle-contact-algorithms.pdf` | J. Comput. Phys. 180(1) 2002 | Riemann-solved velocity and stress at the contact point instead of pair averages, which removes the artificial viscosity. Stage C — the cheap consumer of the Riemann subsystem. |
+| `[PST]` | `lind2012` | `lind2012_isph-free-surface-diffusion-shifting.pdf` | J. Comput. Phys. 231(4) 2012 | The Fick's-law PST every later shifting law descends from, this codebase's included; its `0.2h` cap is the ancestor of `delta.py`'s limiter. |
+| `[PST]` | `quinlan2006` | `quinlan2006_truncation-error-mesh-free-particle-methods.pdf` | Int. J. Numer. Methods Eng. 66(13) 2006 | Why a PST that converges at *fixed* `Δx/h` is a real condition and not a formality — the analysis `michel2022`'s consistency requirement and its `β = (R/Δx)³` both rest on. |
+| `[PST]` | `vanleer1979` | `vanleer1979_towards-the-ultimate-conservative-difference-scheme-v.pdf` | J. Comput. Phys. 32(1) 1979 | MUSCL: the reconstruction that builds the left/right states a Riemann solver needs. Stage B. |
+| `[PST]` | `roe1986` | `roe1986_characteristic-based-schemes-euler-equations.pdf` | Annu. Rev. Fluid Mech. 18 1986 | minmod, and a survey of the approximate Riemann solvers stage B has to choose between. **No abstract** — see the note below. |
 
 **Artificial compressibility (ACSPH)**
 

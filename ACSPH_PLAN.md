@@ -868,11 +868,12 @@ Nothing in Parts 1–5 or Part 7 is now blocked on a document we do not have.
 | [70] | Marrone, Colagrossi, Le Touzé, Graziani (2010), *Fast free-surface detection and level-set function definition*, JCP 229(10) 3652–3663 | Already implemented here (`maronneDetection.py`); the citation is missing from the library, not the code. |
 | [77] | Monaghan & Rafiee (2013), IJNMF 71(5) 537–561 | Droplet analytic solution — already encoded as `DROPLET_STRETCH`/`DROPLET_PERIOD` in `cases/oscillatingDroplet.py`. |
 | [6] | Molteni & Colagrossi (2009), CPC 180(6) 861–872 | AC-2 (Eq. 32) is given in full. |
-| [15] | Antuono, Sun, Marrone, Colagrossi (2021), *δ-ALE-SPH*, C&F 216 104806 | Baseline scheme; `sun2019` covers it for our purposes. |
+| [15] | Antuono, Sun, Marrone, Colagrossi (2021), *δ-ALE-SPH*, C&F 216 104806 | ~~Not obtained~~ — **synced 2026-09-05** as `antuono2021`, for `PST_ALE_PLAN.md`. |
 | [50],[54],[55] | Monaghan & Gingold 1983; Bonet & Lok 1999; Randles & Libersky 1996 | Standard operators, already implemented. |
 | [19] | Sun, Pilloton, Antuono, Colagrossi (2023), *Acoustic damper term in WCSPH*, JCP 483 112056 | The competing "fix WCSPH instead" approach — interesting for the comparison narrative. |
 | [32] | De Courcy et al., SPHERIC 2023 | The precursor; may carry implementation detail cut from the journal version. |
-| [21],[23],[25],[39],[28],[27],[31],[26],[60] | Chorin 1997; Turkel 1987; McHugh & Ramshaw 1995; Dupuy 2020; Clausen 2013; Ramachandran & Puri 2019; Chola & Shintake 2021; Rouzbahani & Hejranfar 2017; Vila 1999 | §2 theory context only. No implementation content. |
+| [21],[23],[25],[39],[28],[27],[31],[26] | Chorin 1997; Turkel 1987; McHugh & Ramshaw 1995; Dupuy 2020; Clausen 2013; Ramachandran & Puri 2019; Chola & Shintake 2021; Rouzbahani & Hejranfar 2017 | §2 theory context only. No implementation content. |
+| [60] | Vila 1999 | ~~§2 theory context only~~ — **synced 2026-09-05** as `vila1999`, for `PST_ALE_PLAN.md` stage D, where it is the scheme rather than the context. |
 
 ## 6.3 Out of scope
 
