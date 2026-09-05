@@ -696,6 +696,25 @@ Eq. (36) (JST switching) and Eq. (57) (shifting). Whether the *same* dilation
 radius and the same underlying `𝔽` set are intended in both is not stated.
 Assume yes, expose the dilation iteration count separately.
 
+## 5.6 Eq. (46)'s first term is dimensionally impossible
+
+Verified against the rendered page 10, so not an extraction artefact:
+
+```
+Δtⁿ = max( min( CFL_t h , CFL_t h/‖v‖_max , 0.125 h²/ν , 1.2 Δtⁿ⁻¹ ) , 0.8 Δtⁿ⁻¹ )
+```
+
+`CFL_t h` is a **length**, not a time. The other two entries are the standard
+advective and viscous pair. What is conspicuously *missing* from the list is the
+body-force constraint every δ-SPH timestep carries, `~ 0.25 √(h/‖a‖_max)` — and
+`CFL_t h` sits exactly where it would go. Most likely reading: that constraint
+with its square root lost in typesetting.
+
+**Decision: implement the two well-formed constraints plus
+`CFL_t √(h/‖a‖_max)`** under the existing `dt_accelerationConstraint` flag, and
+do not implement `CFL_t h` at all; `config.maxDt` supplies the absolute cap it
+would otherwise be serving as. Ask the authors.
+
 ## 5.5 Under-specified
 
 - **`U_char`** in Eq. (48) is never given a definition per case. It is presumably
@@ -889,6 +908,14 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
      **Next action.**
 6. **Timestep + convergence control** (§4.5, §1.6). Reproduce Tables 1 and 2 on
    `oscillatingDroplet`. This is the real acceptance gate for the machinery.
+   - **Eq. (46) landed 2026-09-05**: `modules/timestep/artificialCompressible.py`,
+     wired into `modules/timestep/wrapper.py`'s dispatch. Advective in place of
+     acoustic, `0.125 h²/ν` viscous, the symmetric `[0.8, 1.2]×` step-ratio
+     clamp, and a `CFL_t > 0.4` warning (Tables 1–2's measured cliff). Eq. (46)
+     as printed is dimensionally impossible — see the new §5.6 — so the first
+     term is implemented as `CFL_t √(h/‖a‖_max)`, not `CFL_t h`.
+   - **Still to do:** the Table 1/2 sweep itself, which needs an ACSPH-aware
+     case.
 7. **Michel shifting** (§4.2). Validate on `rotatingSquarePatch`.
 8. **Remaining operators**: AC-2, AC-4, AC-JST. Reproduce Fig. 2 / Fig. 16.
 9. **Impact and dam break** (§4.4, §4.5), including the `𝒞_e` cost metric.

@@ -487,3 +487,82 @@ def test_ac2AndAc2lAreBothAvailableAndDifferent(periodicBox):
         schemeConfig.acParams.pressureSmoothing = original
     assert torch.isfinite(ac2).all() and torch.isfinite(ac2l).all()
     assert not torch.allclose(ac2, ac2l, rtol=1e-3)
+
+
+# --- the Eq. (46) timestep -------------------------------------------------
+
+def test_theTimestepDispatcherRoutesAnAcsphSystem(periodicBox):
+    """`modules/timestep/wrapper.py` used to send anything that was not a
+    `WeaklyCompressibleSystem` to the *compressible* branch, which would build
+    `dt` from a sound speed this scheme does not have."""
+    from warpSPH.modules.timestep import computeTimestep
+    system, config, schemeConfig = periodicBox
+    dt = computeTimestep(system, config, schemeConfig, dt=1e-3)
+    assert float(dt) > 0.0
+    assert torch.isfinite(torch.as_tensor(dt))
+
+
+def test_theTimestepIsAdvectiveNotAcoustic(periodicBox):
+    """Halving the velocity field must roughly double the advective limit --
+    `CFL_t h / |v|_max`. An acoustic constraint would not move at all."""
+    from warpSPH.modules.timestep.artificialCompressible import computeTimestep
+    import copy
+    system, config, schemeConfig = periodicBox
+    schemeConfig = copy.deepcopy(schemeConfig)
+    schemeConfig.dt_viscosityConstraint = False   # isolate the advective term
+    config = copy.copy(config)
+    config.maxDt = 1.0
+
+    fast = ArtificialCompressibleSystem(state=copy.deepcopy(system.state),
+                                        domain=config.domain)
+    slow = ArtificialCompressibleSystem(state=copy.deepcopy(system.state),
+                                        domain=config.domain)
+    slow.state.velocities = slow.state.velocities * 0.5
+
+    dtFast = float(computeTimestep(fast, config, schemeConfig, dt=None))
+    dtSlow = float(computeTimestep(slow, config, schemeConfig, dt=None))
+    assert dtSlow == pytest.approx(2.0 * dtFast, rel=1e-4)
+
+
+def test_theStepRatioIsClampedInBothDirections(periodicBox):
+    """Eq. (46)'s `[0.8, 1.2] x dt^{n-1}`. The symmetric part is the point: it
+    exists to protect BDF2 accuracy, so a *shrink* is bounded too -- which
+    `weaklyCompressible.py`'s growth-only clamp does not do."""
+    from warpSPH.modules.timestep.artificialCompressible import (
+        STEP_RATIO_BOUNDS, computeTimestep)
+    import copy
+    system, config, schemeConfig = periodicBox
+    config = copy.copy(config)
+    config.minDt, config.maxDt = 1e-12, 1.0
+    shrink, grow = STEP_RATIO_BOUNDS
+
+    tiny = float(computeTimestep(system, config, schemeConfig, dt=1e-9))
+    assert tiny == pytest.approx(grow * 1e-9, rel=1e-5), 'growth not clamped'
+
+    huge = float(computeTimestep(system, config, schemeConfig, dt=1.0))
+    assert huge == pytest.approx(shrink * 1.0, rel=1e-5), 'shrink not clamped'
+
+
+def test_aFixedTimestepIsLeftAlone(periodicBox):
+    from warpSPH.modules.timestep.artificialCompressible import computeTimestep
+    import copy
+    system, config, schemeConfig = periodicBox
+    config = copy.copy(config)
+    config.adaptiveDt = False
+    assert computeTimestep(system, config, schemeConfig, dt=1.234e-3) == 1.234e-3
+
+
+def test_aCflAboveTheCeilingWarnsRatherThanPassingSilently(periodicBox, capsys):
+    """Tables 1-2 measure a sharp accuracy cliff above `CFL_t = 0.4`. It is a
+    ceiling, not a guideline, so exceeding it has to be visible."""
+    from warpSPH.modules.timestep import artificialCompressible as tsmod
+    import copy
+    system, config, schemeConfig = periodicBox
+    schemeConfig = copy.deepcopy(schemeConfig)
+    schemeConfig.acParams.cflT = 0.9
+    tsmod._warnedCfl = False
+    try:
+        tsmod.computeTimestep(system, config, schemeConfig, dt=1e-3)
+        assert 'CFL_t' in capsys.readouterr().out
+    finally:
+        tsmod._warnedCfl = False
