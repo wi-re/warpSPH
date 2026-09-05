@@ -74,7 +74,8 @@ from ..modules.artificialCompressible import computePressureSmoothing
 from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
 from ..modules.deltaSPH import computeVelocityDiffusion
 from ..modules.gravity import computeGravity
-from ..modules.mdbc import computeBoundaryVelocities
+from ..modules.incompressible.wallPressure import wallPressureExtrapolation
+from ..modules.mdbc import computeBoundaryVelocities, computeMdbcNoPenShift
 from ..modules.pressure import computePressureForceSurfaceAware
 from ..modules.surfaceDetection import detectFreeSurface
 from ..systems.artificialCompressible import (ArtificialCompressibleSystem,
@@ -196,6 +197,32 @@ def _workingState(state, positions, velocities, pressures):
     return view
 
 
+def wallPressures(view, config, adjacency, bodyForce, clampNonNeg=False):
+    """`view.pressures` with the `kind == 1` rows filled by Eq. (61)/Adami
+    et al. 2012 Eq. 27, the Shepard interpolation of the fluid pressure plus the
+    hydrostatic correction `(g - a_w) . sum_f V_f rho_f (r_w - r_f) W_wf`.
+
+    **Not optional for this scheme.** Without the correction the wall reads the
+    depth-*average* of its fluid neighbours -- short by `rho0 g <y_f - y_w>`,
+    a fraction of `h` -- and a hydrostatic column cannot balance against it.
+    Without the extrapolation at all the wall reads `p = 0` (the non-fluid rows
+    are masked every step) and the column simply falls out of the box.
+
+    Recomputed at every residual evaluation, because it is a function of the
+    *current* fluid pressure: exactly the Robin closure
+    `modules/incompressible/wallPressure.py` was built for, applied per RK
+    stage here rather than per Jacobi iterate.
+
+    `clampNonNeg=False` by default, unlike the DFSPH call sites: ACSPH's
+    pressure is a solved field that legitimately goes negative, and clamping
+    the wall to `>= 0` would make it a one-sided constraint.
+    """
+    fluid = view.kinds == 0
+    return wallPressureExtrapolation(view, config, adjacency, view.pressures,
+                                     fluid, mode='shepard',
+                                     clampNonNeg=clampNonNeg, bodyForce=bodyForce)
+
+
 def _spatialResidual(view, config, schemeConfig, adjacency, k1, k2, diffusion,
                      bodyForce, nu):
     """`(r_p, r_v)`: the right-hand sides of Eqs. (23) and (25) at `view`.
@@ -206,7 +233,8 @@ def _spatialResidual(view, config, schemeConfig, adjacency, k1, k2, diffusion,
 
     `diffusion` is `D^p`, passed in rather than computed here: it is frozen
     across the RK stages (Antuono/Jameson) and only re-evaluated once per
-    dual-time iteration.
+    dual-time iteration. `view.pressures` is expected to already carry the
+    extrapolated wall values (`wallPressures`).
     """
     rho = view.densities
 
@@ -351,8 +379,33 @@ def artificialCompressible_step(
     vPrev2 = currentSystem.velocitiesPrev2 if currentSystem.velocitiesPrev2 is not None else vPrev
 
     with record_function("[warpSPH] - [acsph - 05] - forcing"):
-        bodyForce = computeGravity(currentState, config, schemeConfig, adjacency) \
-            + computeForcing(currentSystem, config.dt, currentSystem.t, config, schemeConfig)
+        # mDBC no-penetration, as an acceleration (`shift / dt`), exactly as
+        # `deltaSPH_step` applies it. **Not in the paper**: Eq. (62) enforces
+        # no-penetration through the *velocity mirror* alone, which
+        # `computeBoundaryVelocities` above already does. This repo's wall
+        # treatment adds an explicit position correction on top, and without it
+        # `hydrostaticColumn` loses fluid through the bottom corners (measured:
+        # a corner particle at (-0.52, -0.52) by step 40, i.e. through the wall
+        # plane). The paper never runs that case without particle shifting
+        # either -- ACSPH_PLAN.md step 7 -- so this is the repo's stand-in
+        # until the Michel et al. law lands, and `noPenetrationShift` turns it
+        # off to recover the paper's literal wall treatment.
+        noPenShift = torch.zeros_like(currentState.velocities)
+        if schemeConfig.noPenetrationShift:
+            noPenShift = computeMdbcNoPenShift(currentState, config, schemeConfig,
+                                               adjacency) / dt
+
+        gravity = computeGravity(currentState, config, schemeConfig, adjacency)
+        bodyForce = gravity + noPenShift + computeForcing(
+            currentSystem, config.dt, currentSystem.t, config, schemeConfig)
+        # `(g - a_wall)` for Eq. (61). Static walls have `a_wall = 0`; no
+        # per-particle prescribed wall acceleration is tracked anywhere in this
+        # codebase yet (`modules/mdbc/velocity.py` documents the same gap for
+        # the velocity mirror), so a moving-wall ACSPH case would need one --
+        # `wallPressureExtrapolation` already accepts the `(N, dim)` form.
+        # `None` when there is no gravity: the correction is then identically
+        # zero and skipping it saves two gathers per RK stage.
+        wallBodyForce = gravity if bool(gravity.abs().any()) else None
 
     # --- the dual-time loop -------------------------------------------------
     x, v, p = x0, v0, p0
@@ -369,9 +422,10 @@ def artificialCompressible_step(
             dvdtBdf = alphaT * vStage0 + betaT * vPrev + gammaT * vPrev2
 
             stage0 = _workingState(currentState, xStage0, vStage0, pStage0)
+            stage0.pressures = wallPressures(stage0, config, adjacency, wallBodyForce)
             diffusion = computePressureSmoothing(
                 stage0, config, schemeConfig, adjacency, renormalizationState,
-                pressures=pStage0)
+                pressures=stage0.pressures)
 
             kx, kv, kp = [], [], []
             for s in range(acParams.rkStages):
@@ -385,6 +439,7 @@ def artificialCompressible_step(
                     ps = ps + dtau * a * kp[l]
 
                 view = _workingState(currentState, xs, vs, ps)
+                view.pressures = wallPressures(view, config, adjacency, wallBodyForce)
                 rP, rV = _spatialResidual(view, config, schemeConfig, adjacency,
                                           k1, k2, diffusion, bodyForce, nu)
                 rX = vs

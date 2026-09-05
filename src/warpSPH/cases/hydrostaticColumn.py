@@ -119,9 +119,11 @@ from .plotting import Field, particlePlot
 from .randomFlow import BOUNDED_BAND
 from .weaklyCompressible import (WEAKLY_COMPRESSIBLE_DEFAULTS,
                                  WEAKLY_COMPRESSIBLE_PARAMS, boundaryRegion,
-                                 buildRegionSystem, configureWeaklyCompressible,
+                                 buildRegionSystem, configureArtificialCompressible,
+                                 configureWeaklyCompressible,
                                  domainBoundarySdf, fluidRegion, shapeSdf,
                                  particleDistributionMetrics)
+from ..enumTypes import isArtificialCompressibleScheme
 
 __all__ = ['hydrostaticColumnCase']
 
@@ -142,6 +144,10 @@ def configureScheme(ctx: RunContext) -> None:
     # `randomFlow`'s bounded band exactly the way `randomFlow --bounded` does.
     if not ctx.param('band'):
         ctx.spec.params['band'] = BOUNDED_BAND
+
+    if isArtificialCompressibleScheme(ctx.scheme):
+        return _configureArtificialCompressible(ctx)
+
     configureWeaklyCompressible(ctx)
 
     schemeConfig = ctx.schemeConfig
@@ -167,6 +173,66 @@ def configureScheme(ctx: RunContext) -> None:
     schemeConfig.gravityConfig.origin = ctx.param('gravityDirection')
     # The surface-detection bandwidth is measured in particle spacings.
     schemeConfig.bandwith = ctx.spec.L / ctx.param('bandWidth') / ctx.config.dx
+
+
+def _configureArtificialCompressible(ctx: RunContext) -> None:
+    """The ACSPH branch of `configureScheme`.
+
+    This is the paper's own Sec. 4.1.1 case and the first thing the scheme is
+    validated on (`ACSPH_PLAN.md` Part 7): a column at rest under gravity, whose
+    exact solution is `v = 0` with `p` linear in depth. It is the *operator*
+    discriminator -- AC-2L holds that linear gradient and AC-2 provably cannot
+    -- which is why the pressure-slope and pressure-residual diagnostics below
+    are the figures of merit and not just health checks.
+
+    Differences from the DFSPH branch, all structural rather than tuning:
+    ACSPH has no `diffusionParams` (its viscosity is `acParams.nu`), no XSPH
+    filter, and no equation of state. Shifting stays off until the Michel
+    et al. law lands (`ACSPH_PLAN.md` step 7) -- the existing delta+ shift is
+    Mach-scaled, and ACSPH has no Mach number.
+    """
+    # Walled on every side, so the domain's nominal periodicity buys nothing --
+    # and it actively breaks Eq. (61)'s wall pressure. That correction needs a
+    # *position moment* of each wall particle's fluid neighbourhood, assembled
+    # from two Shepard gathers, which is not minimum-image safe; once a fluid
+    # particle drifts within a support radius of the bottom face it becomes a
+    # wrapped neighbour of the top wall and the moment picks up a whole domain
+    # height along gravity. `wallPressureExtrapolation` refuses that outright
+    # rather than returning a wrong wall pressure (see its module docstring), so
+    # the case turns the periodicity off instead. The DFSPH branch keeps it
+    # because nothing there takes a position moment.
+    ctx.spec.periodic = False
+    configureArtificialCompressible(ctx)
+
+    schemeConfig = ctx.schemeConfig
+    schemeConfig.surfaceDetectionConfig.active = True
+    schemeConfig.gravityConfig.active = True
+    schemeConfig.gravityConfig.type = GravityType.Directional
+    schemeConfig.gravityConfig.magnitude = ctx.param('gravityMagnitude')
+    schemeConfig.gravityConfig.origin = ctx.param('gravityDirection')
+    schemeConfig.shiftProperties.active = False
+    schemeConfig.bandwith = ctx.spec.L / ctx.param('bandWidth') / ctx.config.dx
+    # Eq. (48)'s U_char. The paper never defines it per case (ACSPH_PLAN.md
+    # Sec. 5.5); for a column at rest the only velocity scale in the problem is
+    # sqrt(g H), the free-fall speed over the column depth.
+    if schemeConfig.acParams.uChar is None:
+        depth = ctx.param('fillRatio') * ctx.spec.L
+        schemeConfig.acParams.uChar = float(
+            (ctx.param('gravityMagnitude') * depth) ** 0.5)
+
+
+def columnTimestep(ctx: RunContext, state) -> float:
+    """Eq. (46) for ACSPH, the DFSPH advective/viscous CFL otherwise.
+
+    `kolmogorovIncompressibleTimestep` exists because the generic dispatcher
+    used to send everything non-weakly-compressible down the fully compressible
+    formula; ACSPH now has its own branch there, and it is Eq. (46) with the
+    BDF2 step-ratio clamp, which that DFSPH formula does not have.
+    """
+    if isArtificialCompressibleScheme(ctx.scheme):
+        from ..modules.timestep import computeTimestep
+        return computeTimestep(state, ctx.config, ctx.schemeConfig, dt=ctx.config.dt)
+    return kolmogorovIncompressibleTimestep(ctx, state)
 
 
 def buildSystem(ctx: RunContext):
@@ -255,8 +321,17 @@ def initialConditions(ctx: RunContext, system) -> None:
     # pressure to zero mean every iteration, so it is initialised at that
     # shifted profile instead -- a raw start would open a fluid-vs-wall jump
     # of the mean's size. See the module docstring.
+    # `artificialCompressible` also wants the raw profile, and for a stronger
+    # reason than the two above: it has **no pressure gauge at all**. Its
+    # pressure is an absolute, integrated field -- the wall extrapolation
+    # (Eq. 61) and the `(p_i + p_j)` gradient both read it directly, and the
+    # free-surface condition is `p = 0` there. Seeding the mean-shifted profile
+    # puts the surface at `-mean(p) ~ -rho0 g H / 2`, which is not a gauge
+    # choice for this scheme but an error of half the column's pressure drop
+    # at exactly the place the scheme is most sensitive.
     if ctx.scheme in (IncompressibleSPHScheme.dfsphReference,
-                      IncompressibleSPHScheme.iisph):
+                      IncompressibleSPHScheme.iisph) or \
+            isArtificialCompressibleScheme(ctx.scheme):
         particles.pressures = p
     else:
         particles.pressures = p - p[fluid].mean()
@@ -366,7 +441,7 @@ hydrostaticColumnCase = registerCase(Case(
     setupPlot=setupPlot,
     updatePlot=updatePlot,
     extraData=extraData,
-    timestep=kolmogorovIncompressibleTimestep,
+    timestep=columnTimestep,
     defaults=dict(
         WEAKLY_COMPRESSIBLE_DEFAULTS,
         caseName='07-hydrostaticColumn',

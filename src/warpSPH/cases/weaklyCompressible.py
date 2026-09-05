@@ -31,7 +31,8 @@ from .plotting import Field
 
 __all__ = [
     'WEAKLY_COMPRESSIBLE_DEFAULTS', 'WEAKLY_COMPRESSIBLE_PARAMS',
-    'configureWeaklyCompressible', 'domainFluidSdf', 'domainBoundarySdf', 'shapeSdf',
+    'configureWeaklyCompressible', 'configureArtificialCompressible',
+    'configureDomain', 'domainFluidSdf', 'domainBoundarySdf', 'shapeSdf',
     'SHAPE_PRESETS', 'shapeArgs', 'sdfBounds', 'centredShapeSdf',
     'OBSTACLE_PARAMS', 'paramShapeSdf',
     'buildRegionSystem', 'fluidRegion', 'boundaryRegion', 'meanFlowForcingBC',
@@ -103,8 +104,9 @@ VELOCITY_UID_FIELDS = [
 ]
 
 
-def configureWeaklyCompressible(ctx: RunContext) -> None:
-    """Domain, resolution and the scheme knobs the examples share.
+def configureDomain(ctx: RunContext) -> None:
+    """Domain and resolution. Scheme-independent, so both
+    `configureWeaklyCompressible` and `configureArtificialCompressible` call it.
 
     The simulated box is `band` particle layers wider than the *interior*
     domain on every side; the interior is what the walls are cut from, and it
@@ -121,6 +123,11 @@ def configureWeaklyCompressible(ctx: RunContext) -> None:
     ctx.config.dx = dx
     ctx.config.nx = ctx.spec.nx + band * 2
     ctx.scratch['interiorDomain'] = interior
+
+
+def configureWeaklyCompressible(ctx: RunContext) -> None:
+    """Domain, resolution and the scheme knobs the examples share."""
+    configureDomain(ctx)
 
     schemeConfig = ctx.schemeConfig
     schemeConfig.surfaceDetectionConfig.active = ctx.param('freeSurface')
@@ -140,6 +147,63 @@ def configureWeaklyCompressible(ctx: RunContext) -> None:
         schemeConfig.gravityConfig.origin = ctx.param('gravityDirection')
     else:
         schemeConfig.gravityConfig.active = False
+
+
+def configureArtificialCompressible(ctx: RunContext) -> None:
+    """`configureWeaklyCompressible` for the ACSPH config, which has a
+    different shape.
+
+    Same domain/resolution/gravity work -- that part is scheme-independent and
+    is shared verbatim via `configureDomain` -- but ACSPH has no
+    `diffusionParams` block (no equation of state, no density diffusion, no
+    artificial-viscosity `alpha`), so the viscosity lands in `acParams.nu`
+    instead. A case that supports both schemes branches on
+    `isArtificialCompressibleScheme(ctx.scheme)`.
+
+    `dt` is **not** set here. ACSPH's Eq. (46) timestep is advective, so a case
+    supplies `--dt` (or leaves `adaptiveDt` on and lets Eq. 46 run); there is no
+    `setupWeaklyCompressibleTimestep` equivalent, because the sound speed that
+    procedure back-solves for does not exist in this scheme.
+
+    The integrator **is** overridden here, to `forwardEuler`, and loudly. The
+    ACSPH step owns its whole real advance and returns an exact per-step delta;
+    any multi-stage integrator would run the dual-time solve once per stage and
+    blend the results (`schemes/artificialCompressible.py`). The step refuses
+    that outright, so without this override every dual-scheme case would need
+    `--integrationScheme forwardEuler` typed by hand and would otherwise fail at
+    the first step with a stack trace instead of running.
+    """
+    configureDomain(ctx)
+    _forceForwardEuler(ctx)
+
+    schemeConfig = ctx.schemeConfig
+    schemeConfig.surfaceDetectionConfig.active = ctx.param('freeSurface')
+    schemeConfig.acParams.nu = ctx.param('nu', schemeConfig.acParams.nu)
+
+    if ctx.param('gravity', False):
+        schemeConfig.gravityConfig.active = True
+        schemeConfig.gravityConfig.type = resolveEnum(GravityType,
+                                                      ctx.param('gravityType'))
+        schemeConfig.gravityConfig.magnitude = ctx.param('gravityMagnitude')
+        schemeConfig.gravityConfig.origin = ctx.param('gravityDirection')
+    else:
+        schemeConfig.gravityConfig.active = False
+
+
+def _forceForwardEuler(ctx: RunContext) -> None:
+    from warpSPHIntegrators import getIntegrator
+    from warpSPHIntegrators.integration import IntegrationSchemeType
+
+    wanted = IntegrationSchemeType.forwardEuler
+    current = ctx.config.integrationScheme
+    if current is wanted or current is IntegrationSchemeType.explicitEuler:
+        return
+    name = getattr(current, 'name', current)
+    print(f"[warpSPH] artificialCompressible: overriding integrationScheme "
+          f"{name!r} -> 'forwardEuler'. The step returns an exact per-step delta, "
+          f"which only a single-evaluation integrator applies unchanged.")
+    ctx.config.integrationScheme = wanted
+    ctx.integrator = getIntegrator(wanted)
 
 
 # -- SDF helpers -------------------------------------------------------------

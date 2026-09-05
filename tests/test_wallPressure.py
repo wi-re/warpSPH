@@ -175,19 +175,53 @@ def test_mlsRejectsABodyForce(column):
                                   bodyForce=[0.0, -G])
 
 
-def test_rejectsABodyForceAlongAPeriodicAxis(runtime):
+def buildWrappingColumn(device, periodicAxes):
+    """A column whose lattice reaches both faces of the domain, so a
+    minimum-image pair genuinely can wrap. `buildColumn`'s domain is four
+    times the lattice, which is exactly the case the guard must *not* fire on."""
+    dtype = torch.float32
+    state, config = buildColumn(device, dtype, periodic=periodicAxes)
+    positions = state.positions
+    low = positions.min(dim=0).values - 0.25 * DX
+    high = positions.max(dim=0).values + 0.25 * DX
+    config.domain = type(config.domain)(
+        min=low, max=high,
+        periodic=torch.as_tensor(periodicAxes, device=device).expand(2).clone(),
+        dim=2)
+    return state, config
+
+
+def test_acceptsABodyForceOnAPeriodicAxisNothingCanWrapAcross(column):
+    """The guard is about *pairs*, not about the domain flag. `buildColumn`'s
+    lattice sits well inside its domain, so no minimum-image pair can wrap even
+    with both axes periodic -- and the moment is then exact, so refusing would
+    be a false positive."""
+    state, _ = column
+    device = state.positions.device
+    wide, wideConfig = buildColumn(device, torch.float32,
+                                   periodic=torch.tensor([True, True], device=device))
+    p = hydrostatic(wide.positions)
+    fluid = wide.kinds == 0
+    # Along gravity, on a doubly-periodic domain: accepted, because nothing is
+    # within a support radius of either face.
+    out = wallPressureExtrapolation(wide, wideConfig, None, p, fluid,
+                                    mode='shepard', bodyForce=[0.0, -G])
+    assert torch.isfinite(out).all()
+
+
+def test_rejectsABodyForceAlongAnAxisAPairCanWrapAcross(runtime):
     """The two-gather moment decomposition is not minimum-image safe, so a
-    body force with a component along a periodic axis is refused rather than
-    silently returning a wrong wall pressure (see the module docstring)."""
+    body force along an axis where a fluid/boundary pair can genuinely wrap is
+    refused rather than silently returning a wrong wall pressure (see the
+    module docstring)."""
     device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
-    state, config = buildColumn(device, torch.float32,
-                                periodic=torch.tensor([True, False], device=device))
+    state, config = buildWrappingColumn(device, torch.tensor([True, False], device=device))
     p = hydrostatic(state.positions)
     fluid = state.kinds == 0
     # Along y (non-periodic): fine.
     wallPressureExtrapolation(state, config, None, p, fluid, mode='shepard',
                               bodyForce=[0.0, -G])
-    # Along x (periodic): refused.
+    # Along x (periodic, and the lattice touches both x faces): refused.
     with pytest.raises(ValueError, match='periodic'):
         wallPressureExtrapolation(state, config, None, p, fluid, mode='shepard',
                                   bodyForce=[-G, 0.0])

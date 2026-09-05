@@ -592,8 +592,15 @@ Then add, new:
   `(N, dim)` `bodyForce` form is already accepted, so wiring a source is all
   that would be left.
 
-  Independently a DFSPH improvement: no caller passes `bodyForce` yet, so this
-  is purely additive, but it is exactly the term
+  **Wired into ACSPH on 2026-09-05** (`schemes/artificialCompressible.py`'s
+  `wallPressures`): recomputed at every RK stage from the current fluid
+  pressure, `clampNonNeg=False` because ACSPH's pressure is a solved field that
+  legitimately goes negative. Without it the wall reads `p = 0` (the non-fluid
+  rows are masked every step) and the column simply falls out of the box.
+  Verified exact against the analytic profile on the real case — see step 5b.
+
+  Independently a DFSPH improvement: no DFSPH caller passes `bodyForce` yet, so
+  it stays additive there, but it is exactly the term
   `DFSPH_IMPROVEMENT_PLAN.md` Part 23 needs for a gravity-driven wall.
 - **A structural note**: these live under `modules/incompressible/`, i.e. they
   are DFSPH-facing. ACSPH needs them too, so either relocate to a shared module
@@ -696,7 +703,7 @@ Eq. (36) (JST switching) and Eq. (57) (shifting). Whether the *same* dilation
 radius and the same underlying `𝔽` set are intended in both is not stated.
 Assume yes, expose the dilation iteration count separately.
 
-## 5.6 Eq. (46)'s first term is dimensionally impossible
+## 5.6 Eq. (46)'s first term is dimensionally a length
 
 Verified against the rendered page 10, so not an extraction artefact:
 
@@ -704,16 +711,33 @@ Verified against the rendered page 10, so not an extraction artefact:
 Δtⁿ = max( min( CFL_t h , CFL_t h/‖v‖_max , 0.125 h²/ν , 1.2 Δtⁿ⁻¹ ) , 0.8 Δtⁿ⁻¹ )
 ```
 
-`CFL_t h` is a **length**, not a time. The other two entries are the standard
-advective and viscous pair. What is conspicuously *missing* from the list is the
-body-force constraint every δ-SPH timestep carries, `~ 0.25 √(h/‖a‖_max)` — and
-`CFL_t h` sits exactly where it would go. Most likely reading: that constraint
-with its square root lost in typesetting.
+`CFL_t h` is a **length**, not a time. What it *does*, though, is unambiguous
+from the structure — paired with the next entry it is exactly
 
-**Decision: implement the two well-formed constraints plus
-`CFL_t √(h/‖a‖_max)`** under the existing `dt_accelerationConstraint` flag, and
-do not implement `CFL_t h` at all; `config.maxDt` supplies the absolute cap it
-would otherwise be serving as. Ask the authors.
+```
+min( CFL_t h , CFL_t h/‖v‖_max )  ==  CFL_t h / max(1, ‖v‖_max)
+```
+
+i.e. the advective constraint with its denominator floored at one. In a code
+whose velocities are O(1) that floor is a reference velocity of 1 left implicit,
+which is precisely the missing dimension.
+
+**Decision: implement it that way**, with the floor named
+(`REFERENCE_VELOCITY`) rather than hidden as a bare `1`. Ask the authors whether
+their `h` there carries such an implicit reference velocity.
+
+**This is not pedantry — it is load-bearing.** Without that floor *nothing*
+bounds `Δt` in a quiescent case: `‖v‖_max → 0` makes the advective term
+infinite, and an inviscid run makes the viscous term infinite too, so `Δt`
+climbs 1.2× every step to `config.maxDt`. Measured on `hydrostaticColumn`:
+`Δt` went 5e−4 → 6.4e−3 in fifteen steps and the near-wall velocity error grew
+with it. With the floor, `Δt` settles at 4.9e−3 and stays there.
+
+**Separately**, Eq. (46) has no body-force constraint, which every other δ-SPH
+timestep in this repo and in the literature carries and which a gravity-driven
+case needs. `CFL_t √(h/‖a‖_max)` is implemented behind the existing
+`dt_accelerationConstraint` flag; turn it off for the paper's literal set. Also
+worth asking about.
 
 ## 5.5 Under-specified
 
@@ -902,10 +926,76 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
      iterations from that (deliberately extreme) initial transient. Whether
      that is the initial condition, `Δt/Δτ`, or something real is exactly what
      step 6's Table 1/2 reproduction answers — do not tune it before then.
-   - Not yet validated on `hydrostaticColumn`: that needs the Eq. (46) timestep
-     (step 6) and an ACSPH-aware case (the cases build their state through
-     `ctx.SimulationState` with weakly-compressible/incompressible field sets).
-     **Next action.**
+   - **Validated on `hydrostaticColumn`** (§4.1.1, the paper's own first case),
+     see step 5b below for the wiring that took and what it measures.
+5b. **`hydrostaticColumn` under ACSPH** — done 2026-09-05.
+
+   *Wiring.* `initializers/weaklyCompressible.py::initializeState` now builds
+   any of the three state classes from one construction (it had a
+   character-identical `if`-branch per class and no `else`, so an unknown class
+   fell through to a `NameError`); `cases/weaklyCompressible.py` gains
+   `configureDomain` + `configureArtificialCompressible`, which also **forces
+   `forwardEuler`** (loudly) since the exact-delta contract requires it;
+   `hydrostaticColumn` branches on `isArtificialCompressibleScheme` and takes
+   the *raw* hydrostatic seed rather than the mean-shifted one — ACSPH has no
+   pressure gauge, so the shift is a half-column-drop error at the free
+   surface, not a gauge choice.
+
+   *The domain is made non-periodic on this branch.* It is walled on every
+   side, so the periodicity buys nothing, and it actively breaks Eq. (61): the
+   wall-pressure moment is not minimum-image safe, so once a fluid particle
+   drifts within a support radius of the bottom face it becomes a wrapped
+   neighbour of the *top* wall and the moment picks up a whole domain height
+   along gravity. `wallPressureExtrapolation` now detects exactly that (an
+   `O(N)` per-axis test on whether such a pair can exist, one-sided, so it can
+   only over-report) and refuses rather than returning a wrong wall pressure.
+
+   *Measured — the scheme is right.* With `p` seeded analytically and `v = 0`
+   (`scratchpad` probe, nx=32):
+   - Adami wall pressure vs analytic at 199 wall rows: **max error 0.0000**
+     against a column pressure drop of 4.905. The Part-2 work does exactly its
+     job.
+   - Bulk momentum residual: **‖r_v‖ = 0.0079 against g = 9.81**, i.e. the
+     discrete pressure gradient balances gravity to 0.08 %. The hydrostatic
+     state *is* a discrete equilibrium for this scheme.
+   - `r_p = 0` in the bulk; density exactly invariant, as it must be.
+
+   *What it still lacks: the shift (step 7).* Run forward, the column holds its
+   pressure profile (`p ∈ [0.31, 4.87]` against an analytic drop of 4.5) but
+   develops a near-wall velocity error concentrated in the **bottom corners**,
+   and the free surface drifts down slowly. Two things were needed to keep it
+   bounded, both marked in code:
+   - the Eq. (46) advective floor (§5.6) — without it `Δt` ran to `maxDt` and
+     the corner error grew with it;
+   - the repo's mDBC no-penetration position correction, applied as an
+     acceleration the way `deltaSPH_step` applies it
+     (`acParams`-adjacent flag `noPenetrationShift`, default on). **Not in the
+     paper** — Eq. (62) relies on the velocity mirror alone — but the paper
+     never runs a walled case without particle shifting either. With it,
+     `‖v‖_max` peaks at 0.29 instead of 2.9 and no particle leaves the box; the
+     worst corner particle sits at `x = -0.497` against a wall plane at
+     `-0.5`, where before it reached `-0.62`, well inside the wall band.
+
+   *200 steps, nx=32, to `t = 0.94` (the case's full `tLimit`):* no divergence,
+   density **exactly 1.000** throughout (invariant by construction, as it must
+   be), `voidFraction 0`, `neighbourCountCV` flat at 0.24, `‖v‖_max` 0.58
+   (peak 0.73), KE 6.1e−3, `dispMax` 0.27. The one clearly bad number is
+   **`pairedFraction` 0.065** with `nnDistP01` down to 0.32 — particle pairing,
+   which is exactly and only what particle shifting exists to prevent.
+
+   So: **step 7 (Michel et al. shifting) is the next action**, and this case is
+   the thing to re-measure after it — `pairedFraction` and `‖v‖_max` are the
+   two numbers it has to move. Set `noPenetrationShift = False` then and check
+   whether the shift alone carries the corners, which is what the paper implies.
+
+   *One loose end:* the case's own `pressureSlope`/`pressureSlopeRatio` figures
+   of merit stop being reported once the run develops (`hydrostaticDiagnostics`
+   returns early when its bulk band has fewer than 8 rows). They report fine on
+   the first steps — `pressureSlopeRatio 0.79` after three. The direct probe
+   above is the stronger measurement anyway (the *residual* against `g`, not a
+   fit), but the band gate is worth understanding before quoting this case's
+   published axes for ACSPH.
+
 6. **Timestep + convergence control** (§4.5, §1.6). Reproduce Tables 1 and 2 on
    `oscillatingDroplet`. This is the real acceptance gate for the machinery.
    - **Eq. (46) landed 2026-09-05**: `modules/timestep/artificialCompressible.py`,

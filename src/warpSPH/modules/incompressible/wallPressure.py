@@ -81,12 +81,23 @@ velocity mirror's dead `2*u_wall` term.
 
     WARNING -- periodic domains. Splitting `r_w - r_f` across two gathers
     discards the minimum-image convention: a pair that wraps the domain
-    contributes `+-L_d` of error in each periodic direction `d`. The dot with
-    `bodyForce` kills that error whenever `bodyForce` has no component along a
-    periodic axis, which is the only physically sensible configuration (a
-    domain cannot be periodic along gravity and still be hydrostatic), so
-    `_bodyForceMoment` *asserts* exactly that rather than silently returning a
-    wrong wall pressure. Lift the restriction by writing a real moment kernel.
+    contributes `+-L_d` of error in each periodic direction `d`. Two things
+    make that harmless in every case this is used on, and `_bodyForceMoment`
+    checks both rather than assuming either:
+
+      1. The dot with `bodyForce` annihilates the error along any axis where
+         `bodyForce` has no component -- a box periodic across the flow but
+         walled along gravity contributes nothing.
+      2. Along an axis where `bodyForce` *does* act, a pair can only wrap if
+         there is a `kind == 1` row within one support radius of one domain
+         face and a fluid row within one support radius of the other. Wall
+         particles bound the domain in the walled directions, so in practice
+         there is no fluid on the far side to gather.
+
+    `_wrappingPairsArePossible` is that second test, `O(N)` and one-sided: it
+    can only over-report, never miss a genuine wrap. When both fail,
+    `_bodyForceMoment` raises rather than silently returning a wrong wall
+    pressure. Lift the restriction properly by writing a real moment kernel.
 
 Unlike the removed `BoundaryPressureMode.mdbcMlsPressure` (its
 `computeMdbcPressure`, pre-merge cleanup pass 09-04) there is NO relaxation
@@ -148,6 +159,51 @@ def _normalizeBodyForce(bodyForce, state):
         f"got {tuple(bf.shape)}")
 
 
+def _wrappingPairsArePossible(state, config, axis):
+    """Could a `kind == 1` row and a fluid row be minimum-image neighbours
+    *across* the domain in `axis`? One-sided: True means "cannot rule it out".
+
+    A wrap needs one of the pair within a support radius of the low face and
+    the other within a support radius of the high face. Checked in both
+    role assignments, since either can be the boundary row.
+    """
+    domain = config.domain
+    low = float(torch.as_tensor(domain.min)[axis])
+    high = float(torch.as_tensor(domain.max)[axis])
+    coordinate = state.positions[:, axis]
+    reach = state.supports
+
+    boundary = state.kinds == 1
+    fluid = state.kinds == 0
+    nearLow = (coordinate - low) < reach
+    nearHigh = (high - coordinate) < reach
+
+    return (bool((boundary & nearLow).any()) and bool((fluid & nearHigh).any())) or \
+           (bool((fluid & nearLow).any()) and bool((boundary & nearHigh).any()))
+
+
+def _checkPeriodicSafety(state, config, bodyForce):
+    """Raise unless the two-gather moment is exact for this configuration --
+    see the module docstring's two conditions."""
+    periodic = getattr(config.domain, 'periodic', None)
+    if periodic is None:
+        return
+    periodic = torch.as_tensor(periodic)
+    if not bool(periodic.any()):
+        return
+    acts = bodyForce.abs().amax(dim=0) > 0
+    for axis in range(state.positions.shape[1]):
+        if not bool(periodic[axis]) or not bool(acts[axis]):
+            continue
+        if _wrappingPairsArePossible(state, config, axis):
+            raise ValueError(
+                f"bodyForce acts along periodic axis {axis}, and fluid/boundary "
+                f"rows sit within a support radius of both faces there, so a "
+                f"minimum-image pair can wrap -- the two-gather moment "
+                f"decomposition would be wrong. See `wallPressure.py`'s module "
+                f"docstring; make the axis non-periodic, or wall it.")
+
+
 def _bodyForceMoment(state, config, adjacency, den, bodyForce):
     """The Adami hydrostatic correction
 
@@ -157,15 +213,7 @@ def _bodyForceMoment(state, config, adjacency, den, bodyForce):
     docstring for the decomposition, the shared normalisation `den`, and the
     periodic-domain restriction it asserts."""
     bf = _normalizeBodyForce(bodyForce, state)
-
-    periodic = getattr(config.domain, 'periodic', None)
-    if periodic is not None and bool(torch.as_tensor(periodic).any()):
-        per = torch.as_tensor(periodic, device=bf.device).reshape(1, -1)
-        if bool((bf.abs() * per).any()):
-            raise ValueError(
-                "bodyForce has a component along a periodic axis; the two-gather "
-                "moment decomposition is not minimum-image safe there -- see "
-                "`wallPressure.py`'s module docstring")
+    _checkPeriodicSafety(state, config, bf)
 
     props = OperationProperties(
         kernel=config.kernel, operation=WarpOperation.Interpolate,

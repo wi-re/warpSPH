@@ -502,26 +502,68 @@ def test_theTimestepDispatcherRoutesAnAcsphSystem(periodicBox):
     assert torch.isfinite(torch.as_tensor(dt))
 
 
-def test_theTimestepIsAdvectiveNotAcoustic(periodicBox):
-    """Halving the velocity field must roughly double the advective limit --
-    `CFL_t h / |v|_max`. An acoustic constraint would not move at all."""
-    from warpSPH.modules.timestep.artificialCompressible import computeTimestep
+def _advectiveOnly(periodicBox):
     import copy
     system, config, schemeConfig = periodicBox
     schemeConfig = copy.deepcopy(schemeConfig)
     schemeConfig.dt_viscosityConstraint = False   # isolate the advective term
     config = copy.copy(config)
     config.maxDt = 1.0
+    return system, config, schemeConfig
 
-    fast = ArtificialCompressibleSystem(state=copy.deepcopy(system.state),
-                                        domain=config.domain)
-    slow = ArtificialCompressibleSystem(state=copy.deepcopy(system.state),
-                                        domain=config.domain)
-    slow.state.velocities = slow.state.velocities * 0.5
 
-    dtFast = float(computeTimestep(fast, config, schemeConfig, dt=None))
-    dtSlow = float(computeTimestep(slow, config, schemeConfig, dt=None))
+def _scaledSystem(system, config, factor):
+    import copy
+    local = ArtificialCompressibleSystem(state=copy.deepcopy(system.state),
+                                         domain=config.domain)
+    local.state.velocities = local.state.velocities * factor
+    return local
+
+
+def test_theTimestepIsAdvectiveNotAcoustic(periodicBox):
+    """Halving the velocity field must double the advective limit --
+    `CFL_t h / |v|_max`. An acoustic constraint would not move at all. Both
+    velocities are kept well above `REFERENCE_VELOCITY` so the floor is not
+    what is being measured here (that is the next test)."""
+    from warpSPH.modules.timestep.artificialCompressible import computeTimestep
+    system, config, schemeConfig = _advectiveOnly(periodicBox)
+
+    dtFast = float(computeTimestep(_scaledSystem(system, config, 10.0),
+                                   config, schemeConfig, dt=None))
+    dtSlow = float(computeTimestep(_scaledSystem(system, config, 5.0),
+                                   config, schemeConfig, dt=None))
     assert dtSlow == pytest.approx(2.0 * dtFast, rel=1e-4)
+
+
+def test_theAdvectiveLimitIsFlooredSoARestingFlowStillBoundsDt(periodicBox):
+    """Eq. (46)'s `CFL_t h` term, read as the advective constraint with an
+    implicit reference velocity (module docstring / ACSPH_PLAN.md Sec. 5.6).
+    Without it a quiescent case has *nothing* bounding `dt`: `|v|_max -> 0`
+    makes the advective term infinite and an inviscid run makes the viscous
+    one infinite too, so `dt` climbs 1.2x per step to `maxDt`. Measured on
+    `hydrostaticColumn`, and the corner error climbed with it."""
+    from warpSPH.modules.timestep.artificialCompressible import (
+        REFERENCE_VELOCITY, computeTimestep)
+    system, config, schemeConfig = _advectiveOnly(periodicBox)
+
+    slow = float(computeTimestep(_scaledSystem(system, config, 1e-6),
+                                 config, schemeConfig, dt=None))
+    atRest = float(computeTimestep(_scaledSystem(system, config, 0.0),
+                                   config, schemeConfig, dt=None))
+    assert slow == pytest.approx(atRest, rel=1e-6), 'the floor is not binding'
+    assert atRest < float(config.maxDt), 'dt at rest is unbounded'
+
+    # And the floor is exactly REFERENCE_VELOCITY: a flow at that speed sits
+    # right at the transition.
+    atReference = float(computeTimestep(
+        _scaledSystem(system, config, REFERENCE_VELOCITY / _maxSpeed(system)),
+        config, schemeConfig, dt=None))
+    assert atReference == pytest.approx(atRest, rel=1e-4)
+
+
+def _maxSpeed(system):
+    fluid = system.state.kinds == 0
+    return float(system.state.velocities[fluid].norm(dim=-1).max())
 
 
 def test_theStepRatioIsClampedInBothDirections(periodicBox):

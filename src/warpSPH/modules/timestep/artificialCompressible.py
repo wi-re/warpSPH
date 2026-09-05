@@ -13,24 +13,33 @@ Three things separate it from `weaklyCompressible.py`'s:
   sharp accuracy cliff above it -- error jumps ~2.4x from 0.4 to 0.6 and ~10x
   by 1.0 -- so exceeding it is a warning, not a silent choice.
 
-    WARNING -- Eq. (46)'s first term is dimensionally impossible as printed.
-    The paper writes
+    WARNING -- Eq. (46)'s first term is dimensionally a length. The paper writes
 
         dt^n = max( min( CFL_t h , CFL_t h / |v|_max , 0.125 h^2 / nu ,
                          1.2 dt^{n-1} ) , 0.8 dt^{n-1} )
 
-    (verified against the rendered page 10) and `CFL_t h` is a *length*, not a
-    time. The other two constraints are the standard advective and viscous
-    pair; what is missing from the list is the body-force constraint every
-    delta-SPH timestep carries, `~ sqrt(h / |a|_max)`, which is exactly where
-    `CFL_t h` sits. So the most likely reading is that the first term is that
-    constraint with its square root lost in typesetting.
+    (verified against the rendered page 10) and `CFL_t h` is a length, not a
+    time. What it *does*, though, is unambiguous from the structure: paired
+    with `CFL_t h / |v|_max` it is
 
-    This module therefore implements the two well-formed constraints plus an
-    acceleration constraint `CFL_t sqrt(h / |a|_max)` under the existing
-    `dt_accelerationConstraint` flag, and does **not** implement `CFL_t h`.
-    `config.maxDt` supplies the absolute cap the literal term would otherwise
-    be doing. See ACSPH_PLAN.md Sec. 5.6 -- **ask the authors.**
+        min( CFL_t h , CFL_t h / |v|_max )  ==  CFL_t h / max(1, |v|_max)
+
+    i.e. the advective constraint with its denominator floored at one, which
+    stops `dt` running away when the flow is slow. In a code whose velocities
+    are O(1) that floor is a reference velocity of 1 left implicit -- which is
+    exactly the dimension that is missing.
+
+    Implemented that way, with the floor exposed as `REFERENCE_VELOCITY` so it
+    is a stated assumption rather than a hidden 1. It matters: without it
+    nothing bounds `dt` in a quiescent case. On `hydrostaticColumn` at rest,
+    `|v|_max ~ 0` makes the advective term infinite and `nu = 0` makes the
+    viscous one infinite too, so `dt` grew 1.2x every step straight to
+    `config.maxDt` -- and the corner error grew with it.
+
+    See ACSPH_PLAN.md Sec. 5.6 -- **ask the authors** whether their `h` there
+    carries an implicit reference velocity, and whether the body-force
+    constraint every delta-SPH timestep carries is genuinely absent or was
+    simply not written down.
 """
 
 from typing import Optional
@@ -51,6 +60,11 @@ CFL_T_CEILING = 0.4
 #: Eq. (46)'s symmetric step-ratio clamp, `[shrink, grow]`. Present to protect
 #: BDF2 accuracy, not stability.
 STEP_RATIO_BOUNDS = (0.8, 1.2)
+
+#: The floor on `|v|_max` in the advective constraint -- Eq. (46)'s first term,
+#: read as a reference velocity left implicit. See the module docstring. Change
+#: it (not `cflT`) if a case's natural velocity scale is not 1.
+REFERENCE_VELOCITY = 1.0
 
 _warnedCfl = False
 
@@ -95,11 +109,13 @@ def computeTimestep(
 
     candidates = [asTensor(config.maxDt)]
 
-    # Advective: CFL_t h / |v|_max. Replaces the acoustic constraint -- there
-    # is no sound speed here to divide by.
+    # Advective: `CFL_t h / max(REFERENCE_VELOCITY, |v|_max)`, which is
+    # Eq. (46)'s first two terms together. Replaces the acoustic constraint --
+    # there is no sound speed here to divide by -- and the floor is what keeps
+    # `dt` finite when the flow is at rest.
     fluid = state.kinds == 0
     vMax = float(state.velocities[fluid].norm(dim=-1).max()) if bool(fluid.any()) else 0.0
-    candidates.append(asTensor(cflT * h / (vMax + 1e-12) / kernelScale))
+    candidates.append(asTensor(cflT * h / max(REFERENCE_VELOCITY, vMax) / kernelScale))
 
     if compParams.dt_viscosityConstraint:
         if acParams.referenceSoundSpeedForViscosity is not None:
@@ -108,9 +124,11 @@ def computeTimestep(
             nu = acParams.nu
         candidates.append(asTensor(0.125 * h ** 2 / max(float(nu), 1e-30) / kernelScale))
 
-    # See the module docstring: this stands in for Eq. (46)'s dimensionally
-    # impossible `CFL_t h` term, on the reading that it is the body-force
-    # constraint with a lost square root.
+    # Not in Eq. (46) at all -- every other delta-SPH timestep in this repo and
+    # in the literature carries a body-force constraint, and a scheme that runs
+    # `dambreak` under gravity needs one. Kept behind the existing
+    # `dt_accelerationConstraint` flag so the paper's literal constraint set is
+    # still reachable by turning it off.
     if compParams.dt_accelerationConstraint and systemUpdate is not None:
         dvdt = getattr(systemUpdate, 'dvdt', None)
         if dvdt is not None and dvdt.numel():
