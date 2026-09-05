@@ -22,6 +22,8 @@ abstracts verified verbatim against their PDFs.
 step 7, Michel et al. particle shifting** — everything left on the column
 (`pairedFraction 0.065`, a residual near-wall `‖v‖_max` of 0.58) is what
 shifting exists to fix, and the paper never runs a walled case without it.
+Step 7 now has its own document: **`PST_ALE_PLAN.md`**, whose stage A is
+exactly this step.
 
 ## Decisions taken without you — overturn any of these if you disagree
 
@@ -75,7 +77,7 @@ shifting exists to fix, and the paper never runs a walled case without it.
 | §5.1 | Eq. (37) prints `ε₄ = min(0, κ₄ − ε₂)`, which makes the JST operator **vanish** in smooth flow. Standard JST is `max`. Which does the CUDA code do? |
 | §5.2 | Eq. (40)'s low-storage form cannot represent Fig. 1's SSPRK3 or RK4 at all. Which is the code — Jameson coefficients, or the full tableaus? |
 | §5.4 | Is `𝕍` the same set (same `𝔽`, same dilation radius) in Eq. (36) and Eq. (57)? |
-| §5.5 | `U_char` per case; the `𝕍` branch of Eq. (36) being unscaled; how `β` interpolates to 1 at the surface in Eq. (57). |
+| §5.5 | `U_char` per case; the `𝕍` branch of Eq. (36) being unscaled. (The `β` interpolation question is closed — `michel2022` §5.3 says linear.) |
 | §5.6 | Eq. (46)'s `CFL_t h` is a length. Is `h` there carrying an implicit reference velocity (which is what the term *does*)? And is the absence of a body-force constraint deliberate? |
 | Part 3 | The `ψ` sign error above — does their δ-SPH reference implementation have it? |
 
@@ -818,9 +820,11 @@ worth asking about.
   is a discontinuity in the operator at the `𝕍` boundary. Presumably intended
   (the text says the bi-Laplacian is "activated at the free surface"), but worth
   confirming.
-- **`β` in Eq. (57)'s surface decay** — "decreased to 1 for surface particles"
-  gives the endpoints but not the interpolation. Assume it rides `σ` or `λ²`;
-  ask.
+- ~~**`β` in Eq. (57)'s surface decay**~~ — **answered from `michel2022`
+  itself** (its §5.3), which De Courcy is restating: "`β_i = (R/Δx)³` for the
+  inner particles with a **linear** decreasing in the free-surface region to
+  reach `β_i = 1` for the free-surface particles". Not `σ`, not `λ²`. See
+  `PST_ALE_PLAN.md` §2.3.
 - **Symbol collision**: `β` is both the AC wave speed (Eq. 24) and the shifting
   scaling `(κh/Δx)³` (Eq. 56). Unrelated quantities. Use distinct names in code.
 
@@ -1080,6 +1084,13 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
    - **Still to do:** the Table 1/2 sweep itself, which needs an ACSPH-aware
      case.
 7. **Michel shifting** (§4.2). Validate on `rotatingSquarePatch`.
+   → **Split out into `PST_ALE_PLAN.md`** (2026-09-05). Reading `michel2022`
+   properly, this is not one law: it is a set of requirements, an audit of every
+   PST in the literature against them, the new law, and three SPH schemes to
+   validate it on — two of which (Vila's ALE and Parshikov & Medin) this repo
+   does not have, and both of which need a Riemann solver it also does not have.
+   That plan's **stage A is this step**, unchanged and still the next action;
+   stages B–D are the new scope it opens.
 8. **Remaining operators**: AC-2, AC-4, AC-JST. Reproduce Fig. 2 / Fig. 16.
 9. **Impact and dam break** (§4.4, §4.5), including the `𝒞_e` cost metric.
 10. **Optional/experimental**, only if the above is clean: `ṽ` material
