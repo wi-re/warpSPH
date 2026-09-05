@@ -57,7 +57,7 @@ and had to be identified from their front matter alone.
 
 ## What is here
 
-124 documents. The first 47 are the curated core — every row abstracted in
+125 documents. The first 48 are the curated core — every row abstracted in
 `ABSTRACTS.md` and annotated for what it unblocks. The remaining 77, listed
 under **Extended set** below, arrived together on 2026-08-29 and were synced by
 bibliographic record only: `references.bib` has an entry for each, but they are
@@ -69,7 +69,8 @@ supplied by the user for the kernel-choice question behind the
 `columnCollapse` Wendland2-vs-Wendland4 experiment. `sun2019` and `sun2017`
 were added to the core on 2026-09-03 for
 `docs/historic_plans/WCSPH_SHIFTING_PLAN.md`. The eight `[AC]` rows arrived on
-2026-09-05 for `ACSPH_PLAN.md`.)
+2026-09-05 for `ACSPH_PLAN.md`; `antuono2021` the same day for
+`PST_ALE_PLAN.md`.)
 
 `venue` is the **published** venue, which for an author's-version or preprint
 copy is not always what that copy's own front page says. Full bibliographic
@@ -119,6 +120,7 @@ detail is in `references.bib`; the abstract of every core row is in
 | — | `bender2026` | `bender2026_primal-sph-solver.pdf` | CGF 2026 | A primal (not dual) pressure solver: stable to 1:1000 density ratios, strongly coupled to non-pressure forces. |
 | — | `adami2013` | `adami2013_transport-velocity.pdf` | J. Comput. Phys. 241 2013 | Transport velocity. Closes plan 5 Q7 (background pressure). |
 | — | `sun2017` | `sun2017_delta-plus-sph-model.pdf` | Comput. Methods Appl. Mech. Engrg. 315 2017 | The δ⁺-SPH origin paper: δ-SPH diffusion + PST together. Source of `delta.py`'s shift form, `wp_deltaShift`'s tensile term, and the free-surface `n`-nulling `surfaceNormal` extends. |
+| `[PST]` | `antuono2021` | `antuono2021_delta-ale-sph-model.pdf` | Comput. Fluids 216 2021 | δ-ALE-SPH: an ALE formalism in **primitive** variables, so no Riemann solver — the cheap route to a real ALE for this codebase. Its constant-mass variant is what `correctdrhodt`/`correctdvdt` already are. `PST_ALE_PLAN.md` stage B′. |
 | — | `sun2019` | `sun2019_consistent-particle-shifting-delta-plus-sph.pdf` | Comput. Methods Appl. Mech. Engrg. 348 2019 | Consistent (quasi-Lagrangian) δ⁺-SPH: the δu divergence terms that make the WCSPH shift volume-conserving. Reference method for `docs/historic_plans/WCSPH_SHIFTING_PLAN.md` step 2. |
 
 **Artificial compressibility (ACSPH)**

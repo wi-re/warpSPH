@@ -21,9 +21,22 @@ have.** Hence its own document.
 
 **Is now the moment to implement the Vila and Parshikov & Medin ALE schemes?**
 
-Short answer: **the groundwork, yes; Vila itself, not first.** The honest
-ordering is PST → Riemann/MUSCL → Parshikov → Vila, and the reasons are
-concrete rather than a matter of taste:
+Short answer: **yes to an ALE now — but not via Vila, and not via a Riemann
+solver.** The ordering is **PST → δ-ALE-SPH → Riemann/MUSCL → Parshikov →
+Vila**, and the reason the second stage is not the one the question proposed is
+a paper that was already sitting in `literature/` unclaimed:
+
+> `antuono2021`, *The δ-ALE-SPH model* — "Differently from previous works on
+> ALE, which generally adopt conservative variables (i.e. mass and momentum)
+> and rely on the use of **Riemann solvers** inside the spatial operators, the
+> proposed model is expressed in terms of **primitive variables** (i.e. density
+> and velocity) and is written by using the **standard differential
+> formulations of the weakly-compressible SPH schemes**."
+
+That is a full ALE formalism this repo can reach with the operators it already
+has, and its §5 constant-mass variant is *literally* what
+`WCSPH_SHIFTING_PLAN.md` already built. Part 4.0 works through it. The rest of
+the reasoning below still holds and is what puts Vila last rather than first:
 
 - **The PST is the thing with a live consumer.** ACSPH needs it now
   (`ACSPH_PLAN.md` step 5b: `pairedFraction 0.065` on the hydrostatic column is
@@ -42,16 +55,19 @@ concrete rather than a matter of taste:
   it is structurally *today's* scheme plus a Riemann flux. Vila makes volume an
   integrated field and mass non-constant, and threads the PST through every
   equation.
-- **But one thing genuinely does argue for scoping the ALE now, and it is the
+- **And one thing genuinely does argue for scoping the ALE now, which is the
   reason to write this document rather than a one-line step:** Michel §3.1 says
   the PST's consistency requirement "can be theoretically alleviated when using
   an ALE formalism". A PST designed only against the Lagrangian case may be
   shaped wrong for the ALE one. The requirements in Part 2 are what keeps that
   from happening, and they cost nothing to respect up front.
 
-There is also a piece of good news that materially lowers Vila's cost — see
-Part 4.3: **the apparent-volume path is already threaded through every operator
-in the package**, so an integrated `V_i` does not need a single kernel change.
+Two further findings lower the cost of everything downstream:
+
+- **The apparent-volume path is already threaded through every operator in the
+  package** (Part 4.3), so an integrated `V_i` needs no kernel change at all.
+- **`antuono2021` is already on disk** — it was in `literature/` unclaimed by
+  the manifest, which `scripts/check_literature.py` caught. Now synced.
 
 ---
 
@@ -268,7 +284,59 @@ Three things are genuinely new here relative to §3.2:
 
 # Part 4 — Assessment: what it would actually take
 
-## 4.1 The shared blocker — a Riemann solver
+## 4.0 There are two routes to an ALE, and only one needs a Riemann solver
+
+**Route 1 — conservative variables + Riemann fluxes.** Vila (§3.3) and
+Parshikov & Medin (§3.2). `antuono2021` §2.3 states the constraint plainly:
+"The formulation in conservative variables is, however, mandatory if Riemann
+solvers are used to model the particle interactions." Blocked on §4.1.
+
+**Route 2 — primitive variables, standard operators.** `antuono2021`'s
+δ-ALE-SPH. The ALE volume equation is just
+
+```
+dV_i/dt = V_i ∇·(u + δu)_i                                    (its Eq. 8)
+```
+
+and the system is written in `(ρ, u)` with the same differential operators
+weakly-compressible SPH already uses. **No Riemann solver, no MUSCL, no
+conservative-variable state.**
+
+Two things make route 2 the obvious next stage for *this* repo:
+
+1. **Its §5 "constant mass" variant is already implemented here.** That variant
+   reads
+   ```
+   dρ_i/dt = −ρ_i ∇·(u+δu)_i + ∇·(ρ δu)_i + 𝒟^ρ_i
+   du_i/dt = −∇p_i/ρ + ∇·(T_v)_i + g + ∇·(u ⊗ δu)_i − u_i ∇·(δu)_i
+   ```
+   which is term-for-term `ShiftProperties.correctdrhodt` / `correctdvdt` in
+   `WeaklyCompressibleSystem.finalize` (`WCSPH_SHIFTING_PLAN.md`). We got there
+   from `sun2019`; `antuono2021` §5 is the same equations, and it says of them:
+   *"strictly speaking, the above variants cannot be regarded as ALE schemes on
+   their own."* So Part 1.3's claim is the paper's own, not an editorial one.
+
+2. **The delta to a real ALE is small and named.** Make `V` (equivalently `m`)
+   an integrated field — which needs *no kernel change*, see §4.3 — and add the
+   two diffusion terms. Those terms are the paper's actual contribution and the
+   thing that cannot be guessed:
+
+   > "We show that the above-mentioned ALE-SPH equations are, however, unstable
+   > when they are integrated in time. The instability appears in the form of
+   > large volume variations in those fluid regions characterised by high
+   > velocity strain rates. Nonetheless, the scheme can be stabilised if
+   > appropriate diffusion terms are included in **both** the equations of
+   > density and mass."
+
+   `𝒟^ρ` is the δ-SPH density diffusion we already have (and just fixed, see
+   `ACSPH_PLAN.md` Part 3). `𝒟^m` is new, and is the mass-equation counterpart.
+
+Route 2 is therefore **stage B′**: a genuine ALE formalism, reachable from what
+is already here, and it does not compete with route 1 — it is the primitive-
+variable half of the same picture, and having both is what makes the comparison
+Michel's paper is built around actually possible.
+
+## 4.1 Route 1's shared blocker — a Riemann solver
 
 Neither ALE scheme is implementable without `(ρ_E, u_E, P_E)`. Michel does not
 specify the solver, only that MUSCL [36, van Leer 1979] with a minmod limiter
@@ -314,16 +382,25 @@ otherwise be the largest and most error-prone part of the Vila work.
 | stage | what | blocked on | size |
 |---|---|---|---|
 | **A** | The Michel PST (Eqs. 21/22/47/48) | nothing | medium |
-| **B** | Riemann + MUSCL + minmod subsystem | nothing (`vila1999`/`oger2016` would help) | medium-large |
+| **B′** | **δ-ALE-SPH** (`antuono2021`): integrated `V`, `𝒟^ρ` + `𝒟^m` | A (it needs a PST), nothing else | **small-medium** |
+| **B** | Riemann + MUSCL + minmod subsystem | `vila1999`/`oger2016` would help | medium-large |
 | **C** | Parshikov & Medin scheme | B | small-medium |
 | **D** | Vila ALE scheme | B, C | medium |
 
-A is the one with a waiting consumer and no dependencies; do it first. B is the
-shared investment and the answer to "is now the time" — **yes for B**, because
-both ALE schemes and a better CRKSPH all want it, and because doing A without
-knowing B is coming risks a PST shaped only for the Lagrangian case. C then D:
-C is nearly free once B exists and gives an early check that the Riemann flux is
-right, before D adds mass fluxes on top.
+**A first** — it has a waiting consumer (ACSPH), no dependencies, and no
+literature gap. **Then B′**, which is the answer to "is now the time for an
+ALE": yes, and sooner and cheaper than the question assumed, because
+`antuono2021` reaches one without a Riemann solver and we are already two thirds
+of the way there. B′ also gives stage A its sharpest test — Michel §3.1's point
+that an ALE relaxes the PST consistency requirement is only checkable with an
+ALE in hand.
+
+**B, C, D remain worth doing** and are the second half of the picture: a
+Riemann-flux SPH is something this repo genuinely lacks (CRKSPH's
+pseudo-viscosity approximates one), and Vila + Parshikov are what make Michel's
+central claim — that a good PST is *scheme-independent* — testable across four
+schemes rather than asserted on one. But they are a bigger, separable
+investment, and nothing upstream is blocked on them.
 
 ---
 
@@ -352,7 +429,24 @@ right, before D adds mass fluxes on top.
 - Wire into ACSPH's `ArtificialCompressibleSystem.finalize` as the Eq. (58)
   displacement, and retire `noPenetrationShift` if it carries the corners.
 
-## 5.2 Stage B — Riemann and reconstruction
+## 5.2 Stage B′ — δ-ALE-SPH
+
+- **`volumes` becomes an integrated field** on a new `DeltaAleState`, with
+  `dV_i/dt = V_i ∇·(u+δu)_i` and `m_i = ρ_i V_i` no longer constant. Per §4.3
+  this needs **no kernel change** — the volume is passed as
+  `queryVolumes`/`referenceVolumes` and every operator already reads it.
+- **`𝒟^ρ`** is `computeScalarFieldDiffusion` (`ACSPH_PLAN.md` step 3 made it
+  field-agnostic), already in place.
+- **`𝒟^m`, the mass-equation diffusion, is the new physics.** Read it off
+  `antuono2021` §4 rather than guessing; it is the paper's contribution and the
+  thing without which the scheme is unstable.
+- The Lagrangian limit (`δu = 0`) and the constant-mass limit (§5) must both
+  reduce to schemes we already have — `deltaSPH`, and `deltaSPH` with
+  `correctdrhodt`/`correctdvdt` respectively. **Those two reductions are the
+  acceptance test**: they are exact, cheap, and they catch a sign or a factor in
+  the volume equation immediately.
+
+## 5.3 Stage B — Riemann and reconstruction
 
 - **`modules/riemann/`**: an acoustic solver first (closed form, no iteration),
   HLLC behind an enum. Inputs are the MUSCL-reconstructed left/right states at
@@ -365,7 +459,7 @@ right, before D adds mass fluxes on top.
   docstring records that a zero-denominator branch must return *before*
   dividing, or reverse-mode AD differentiates the unguarded division.
 
-## 5.3 Stages C and D — the two schemes
+## 5.4 Stages C and D — the two Riemann schemes
 
 Both follow the `ACSPH_PLAN.md` step 4 pattern exactly: enum member, state,
 system, config, round-trip, registration, then physics. C reuses
@@ -376,7 +470,10 @@ system, config, round-trip, registration, then physics. C reuses
 
 # Part 6 — Literature status
 
-**In hand:** `michel2022` (the target), `sun2017`, `sun2019` (the current law),
+**In hand:** `michel2022` (the target), **`antuono2021`** (δ-ALE-SPH — stage B′;
+it was already in `literature/` unclaimed by the manifest, which
+`scripts/check_literature.py` caught, and is now synced), `sun2017`, `sun2019`
+(the current law),
 `adami2013` (transport velocity — the §4.1 counterexample, and unimplemented
 here), `colagrossi2003`, `antuono2010`, `antuono2012`, `marrone2011`.
 
@@ -387,24 +484,32 @@ here), `colagrossi2003`, `antuono2010`, `antuono2012`, `marrone2011`.
 | [37] | Vila, *On particle weighted methods and smooth particle hydrodynamics*, Math. Models Methods Appl. Sci. **9**(2) (1999) 161–209, `doi:10.1142/s0218202599000117` | stage D | **yes** — Michel gives the equations but not the derivation or the solver |
 | [26] | Parshikov & Medin, *Smoothed particle hydrodynamics using interparticle contact algorithms*, J. Comput. Phys. **180**(1) (2002) 358–382, `doi:10.1006/jcph.2002.7099` | stage C | partly — Michel's Eqs. (28)–(31) are complete, but the contact algorithm is the point of the paper |
 | [25] | Oger, Marrone, Le Touzé, de Leffe, *SPH accuracy improvement through the combination of a quasi-Lagrangian shifting transport velocity and consistent ALE formalisms*, J. Comput. Phys. **313** (2016) 76–98, `doi:10.1016/j.jcp.2016.02.039` | stages B/D | **yes** — this is the WCSPH-context ALE study, closest prior art |
-| — | Antuono, Sun, Marrone, Colagrossi, *The δ-ALE-SPH model*, Comput. Fluids **216** (2021) 104806, `doi:10.1016/j.compfluid.2020.104806` | context for §1.3 | no, but it is **open access** and already in `EXPANSION_CANDIDATES.md` |
+
 | [17] | Lind, Xu, Stansby, Rogers (2012) | Table 1 row | no — Eq. (4) is complete |
 | [27] | Quinlan, Lastiwka, Basa (2006) | the truncation-error argument behind §3.1 | no, but it is *the* justification for `β_i = (R/Δx)³` |
 | [36] | van Leer (1979); [30] Roe (1986) | MUSCL / minmod | no — textbook |
 
 All four records above were verified against Crossref, not recalled.
 
-**Recommended sync before stage B:** `oger2016`, `vila1999`, `antuono2021`.
-`parshikov2002` with them if convenient.
+**Recommended sync before stage B:** `oger2016`, `vila1999`, and
+`parshikov2002` if convenient. Stage B′ is **not** blocked — `antuono2021` is
+in hand.
 
-Three of the four are paywalled (World Scientific / Elsevier), so they need the
+All three are paywalled (World Scientific / Elsevier), so they need the
 PDFs dropped into `literature/` by hand and then a sync per
 `literature/ADDING.md` — the DOIs and full records above are already verified,
 so the sync has nothing left to guess. **`antuono2021` is the exception**: its
 accepted manuscript is open access at
-`https://www.sciencedirect.com/science/article/am/pii/S0045793020303765`, and it
-is already listed in `EXPANSION_CANDIDATES.md` (which is generated from the
-citation graph, so it is not hand-edited — this plan is the record instead).
+`https://www.sciencedirect.com/science/article/am/pii/S0045793020303765` if the
+copy in hand ever needs replacing.
+
+> Its PDF's text layer is corrupted in the abstract — a floating `δu` overline
+> glyph lands mid-word and one hyphen is lost. That is now a declared
+> `**text-layer:**` repair in `ABSTRACTS.md`, a mechanism added to
+> `check_literature.py` for this: the repairs are applied to the extracted text
+> before matching, so the verbatim check still runs at full strictness against
+> a transformation that is written down rather than being switched off. See
+> `literature/ADDING.md`.
 
 ---
 
@@ -444,15 +549,22 @@ picture to reproduce.
    `ShiftingScheme.michel2022` wins on `tgv` and `sloshingTank`, propose it as
    the default — but as its own decision, with its own sweep, not folded into
    step 2.
-4. **Stage B, Riemann + MUSCL + minmod** (§5.2). Standalone, gradchecked,
+4. **Stage B′, δ-ALE-SPH** (§5.2). Integrated volume, `𝒟^ρ` + `𝒟^m`, graded
+   first by its two exact reductions (Lagrangian, and constant-mass = today's
+   `correctdrhodt`/`correctdvdt`) and then on `antuono2021`'s own benchmarks —
+   the inclined elliptical cylinder, the lid-driven cavity (`lidDrivenCavity`
+   exists), and dam-break-on-a-wall (`dambreak` exists).
+5. **Stage B, Riemann + MUSCL + minmod** (§5.3). Standalone, gradchecked,
    validated on `sod`/`sodND` against the analytic solution before any scheme
    consumes it.
-5. **Stage C, Parshikov & Medin.** The cheap consumer of B, and the check that B
+6. **Stage C, Parshikov & Medin.** The cheap consumer of B, and the check that B
    is right in an SPH setting.
-6. **Stage D, Vila ALE.** The `{x, V, Vρ, Vρu}` state, mass fluxes, PST in every
-   equation. Reproduce Michel Figs. 1–9 across all three schemes — which is the
-   point of the whole exercise: the PST is supposed to be scheme-independent,
-   and we would finally have the three schemes to show it on.
+7. **Stage D, Vila ALE.** The `{x, V, Vρ, Vρu}` state, mass fluxes, PST in every
+   equation. Then reproduce Michel Figs. 1–9 across **four** schemes — δ-SPH,
+   δ-ALE, Parshikov, Vila — which is the point of the whole exercise: the PST is
+   supposed to be scheme-independent, and we would finally have the schemes to
+   show it on, including one from each side of the primitive/conservative
+   divide.
 
 ## Relationship to the other plans
 

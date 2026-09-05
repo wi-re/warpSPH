@@ -22,6 +22,25 @@ differ in ligatures, dashes and the odd corrected typo. ABSTRACTS_EXTENDED.md
 holds the extended-set abstracts, most reconstructed from OpenAlex's inverted
 index; all carry a non-PDF source, so they take the loose check.
 
+A *corrupted* text layer is the third case, and it is not a paraphrase. Some
+publisher PDFs interleave a floating glyph (a vector overline, a subscript)
+into the middle of a word, or lose a hyphen entirely, so the extraction reads
+`weaklycompressible` or `obtained by modi given by a Particle Shifting fying the
+pure ...`. Quoting that verbatim would put gibberish in a file whose whole
+purpose is to be trustworthy; quoting the sentence as it actually reads would
+fail check 3 for a reason that has nothing to do with accuracy. So a block may
+declare the defect:
+
+    - **text-layer:** `weaklycompressible` -> `weakly compressible`
+    - **text-layer:** `by modi given by a particle shifting fying the` -> `by modifying the`
+
+Each line asserts "the document's text layer says the left-hand side where the
+document itself says the right-hand side". The repairs are applied to the
+*haystack* before matching, so check 3 still runs at full strictness against a
+transformation that is written down, reviewable, and minimal -- rather than
+being switched off. Both sides are normalised, so write them in whatever case
+and punctuation reads clearest.
+
 Requires `pdftotext` (poppler-utils) and the PDFs; skips check 3 with a notice
 if either is absent, since the PDFs are deliberately not in the repository.
 
@@ -42,6 +61,9 @@ LIT = os.path.join(ROOT, "literature")
 MAX_RUNS = 4        # column seams / copyright blocks an abstract may be split by
 MIN_RUN = 8         # words; a shorter "run" means the text was reworded
 MIN_OVERLAP = 0.80  # for DOI-sourced abstracts
+#: A declared text-layer repair may not rewrite more than this many words, so
+#: the escape hatch cannot quietly become "and here is the abstract I wanted".
+MAX_REPAIR_WORDS = 12
 
 
 def read(name):
@@ -148,6 +170,18 @@ def main():
                 continue
             body = " ".join(line[2:] for line in quote.strip().split("\n"))
             words, hay = norm(body).split(), pdf_text(path)
+            for bad, good in re.findall(
+                    r"\*\*text-layer:\*\* `([^`]+)` -> `([^`]*)`", meta):
+                bad, good = norm(bad), norm(good)
+                if max(len(bad.split()), len(good.split())) > MAX_REPAIR_WORDS:
+                    problems.append("%s: text-layer repair rewrites more than %d "
+                                    "words -- too broad to be a glyph artifact"
+                                    % (key, MAX_REPAIR_WORDS))
+                elif bad not in hay:
+                    problems.append("%s: declared text-layer defect %r is not in "
+                                    "%s -- stale repair?" % (key, bad, fname))
+                else:
+                    hay = hay.replace(bad, good)
             if source.startswith("PDF"):
                 runs = cover(words, hay)
                 if runs is None:

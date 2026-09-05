@@ -773,6 +773,21 @@ The scheme of `ACSPH_PLAN.md` and its dependencies. Added 2026-09-05.
 
 > In this paper, an in-depth study of SPH method, in its original weakly compressible version, is achieved on dedicated 2D and 3D free-surface flow test cases. These rather critical prototype problems shall constitute suitable test cases to get through when building a free-surface SPH model. The present work aims at investigating various numerical aspects of this method, often little mentioned in literature. In particular, a great care is paid to the dynamic part of the solution, which is critical to the local hydrodynamic load prediction. The role of numerical errors in the development of acoustic frequencies in the pressure signals is discussed, as well as the influence of the choice of the sound velocity. On the shown test problems, it is also evidenced that some numerical tools are crucial to ensure the robustness and accuracy of the standard SPH method. The convergence of our model is heuristically proved on these nonlinear prototype tests, showing at the same time the very satisfactory level of accuracy reached. Through these tests, some other numerical specificities of the SPH method are discussed, such as the self-redistribution of the particles occurring during the Lagrangian evolution. A higher order model is also proposed, and its advantages and drawbacks are discussed.
 
+### `antuono2021`
+
+- **file:** `antuono2021_delta-ale-sph-model.pdf`
+- **title:** The δ-ALE-SPH model: An arbitrary Lagrangian-Eulerian framework for the δ-SPH model with particle shifting technique
+- **authors:** M. Antuono, P. N. Sun, S. Marrone and A. Colagrossi
+- **venue:** *Computers & Fluids* 216:104806, 2021
+- **doi:** [10.1016/j.compfluid.2020.104806](https://doi.org/10.1016/j.compfluid.2020.104806)
+- **relevance:** The route to an ALE formalism that does **not** need a Riemann solver — primitive variables (ρ, u) and the standard weakly-compressible operators, where `vila1999` and `parshikov2002` need conservative variables and Riemann fluxes inside the spatial operators. Two things follow for this codebase. Its §5 constant-mass variant is *exactly* `ShiftProperties.correctdrhodt`/`correctdvdt` (`docs/historic_plans/WCSPH_SHIFTING_PLAN.md`), and the paper states plainly that such variants "cannot be regarded as ALE schemes on their own" — which settles what we do and do not already have. And its central finding is that the naive ALE-SPH is *unstable* (unbounded volume growth where the strain rate is high) until diffusion is added to **both** the density and the mass equations. `PST_ALE_PLAN.md` stage B′.
+- **abstract from:** PDF p.1
+- **text-layer:** `weaklycompressible` -> `weakly compressible`
+- **text-layer:** `by modi given by a particle shifting fying the` -> `by modifying the`
+- **text-layer:** `through a velocity u technique pst` -> `through a velocity u given by a particle shifting technique pst`
+
+> The behaviour of a weakly-compressible SPH scheme obtained by rewriting the Navier-Stokes equations in an arbitrary Lagrangian-Eulerian (ALE) format is studied. Differently from previous works on ALE, which generally adopt conservative variables (i.e. mass and momentum) and rely on the use of Riemann solvers inside the spatial operators, the proposed model is expressed in terms of primitive variables (i.e. density and velocity) and is written by using the standard differential formulations of the weakly-compressible SPH schemes. Similarly to ALE-SPH models, the arbitrary velocity field is obtained by modifying the pure Lagrangian velocity of the material point through a velocity δu given by a Particle Shifting Technique (PST). We show that the above-mentioned ALE-SPH equations are, however, unstable when they are integrated in time. The instability appears in the form of large volume variations in those fluid regions characterised by high velocity strain rates. Nonetheless, the scheme can be stabilised if appropriate diffusion terms are included in both the equations of density and mass. This latter scheme, hereinafter called δ-ALE-SPH scheme, is validated against reference benchmark test-cases: the viscous flow around an inclined elliptical cylinder, the lid-driven cavity and a dam-break flow impacting a vertical wall.
+
 ### `michel2022`
 
 - **file:** `michel2022_particle-shifting-techniques.pdf`

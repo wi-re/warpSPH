@@ -529,6 +529,18 @@
   note    = {Source of the rotating/stretching square-patch benchmark: the initial pressure field (a Poisson solve) without which the case cannot be initialised, plus the analytic stretching solution and the BEM/LDFM reference data decourcy2024 Fig. 11-12 plot against.}
 }
 
+@article{antuono2021,
+  author  = {Antuono, M. and Sun, P. N. and Marrone, S. and Colagrossi, A.},
+  title   = {The $\delta$-{ALE}-{SPH} model: An arbitrary {Lagrangian}-{Eulerian} framework for the $\delta$-{SPH} model with particle shifting technique},
+  journal = {Computers \& Fluids},
+  year    = {2021},
+  volume  = {216},
+  articleno = {104806},
+  pages   = {104806},
+  doi     = {10.1016/j.compfluid.2020.104806},
+  note    = {The Riemann-solver-free route to an ALE formalism: primitive variables and the standard weakly-compressible SPH operators, where vila1999 and parshikov2002 need conservative variables and a Riemann solver. Its Sec. 5 constant-mass variant is exactly what WCSPH_SHIFTING_PLAN.md already built as ShiftProperties.correctdrhodt/correctdvdt -- and the paper says plainly that such variants are not ALE schemes on their own. PST_ALE_PLAN.md stage B'.}
+}
+
 @article{michel2022,
   author  = {Michel, J. and Vergnaud, A. and Oger, G. and Hermange, C. and Le Touz\'{e}, D.},
   title   = {On Particle Shifting Techniques ({PSTs}): Analysis of existing laws and proposition of a convergent and multi-invariant law},
