@@ -12,6 +12,56 @@ Synced into `literature/` on 2026-09-05 together with seven of its references
 (see Part 6); `python scripts/check_literature.py` passes with all eight
 abstracts verified verbatim against their PDFs.
 
+---
+
+# Status board — read this first
+
+**Done (2026-09-05):** steps 1–6 of Part 8. The scheme runs end to end:
+`--scheme artificialCompressible` builds, the dual-time driver solves, and
+`hydrostaticColumn` runs to `t = 0.94` without diverging. **Next action:
+step 7, Michel et al. particle shifting** — everything left on the column
+(`pairedFraction 0.065`, a residual near-wall `‖v‖_max` of 0.58) is what
+shifting exists to fix, and the paper never runs a walled case without it.
+
+## Decisions taken without you — overturn any of these if you disagree
+
+1. **The δ-SPH `ψ` sign was wrong and is now fixed** (Part 3, "The sign
+   error"). This changes the *default WCSPH scheme's* behaviour repo-wide, so
+   it is the one with the widest blast radius. The evidence is not a judgement
+   call — the Antuono correction must annihilate a linear field pair-by-pair
+   and did the opposite — and a single-variable A/B on `sloshingTank` improves
+   both the density floor and the pressure peak. **Worth reporting upstream and
+   checking against diffSPH, which this kernel was ported from.**
+2. **ACSPH's pressure force defaults to `nonConservative`** (the literal
+   `(p_i + p_j)` of Eq. 25), not `Antuono`. The Antuono switch is a
+   tensile-instability guard the paper does not use; it is one config field
+   away.
+3. **`hydrostaticColumn` runs non-periodic under ACSPH** (§4.4 / step 5b). The
+   box is walled on every side, so periodicity buys nothing, and it breaks
+   Eq. (61)'s position moment. The DFSPH branch is untouched.
+4. **`noPenetrationShift` (the repo's mDBC position correction) is on by
+   default** and is *not* in the paper. It stands in for the particle shifting
+   the paper always has; the flag exists so the paper's literal wall treatment
+   is one setting away. Re-test with it **off** once step 7 lands — if the
+   shift carries the corners on its own, this should go.
+5. **`approachOnly=False` was added to `computeVelocityDiffusion`** rather than
+   writing a new kernel. It lifts an artificial-viscosity clamp that was making
+   the physical-viscosity branch one-sided; the default is unchanged, so no
+   existing scheme moves.
+
+## Questions for the authors, all in one place
+
+| Where | Question |
+|---|---|
+| §5.1 | Eq. (37) prints `ε₄ = min(0, κ₄ − ε₂)`, which makes the JST operator **vanish** in smooth flow. Standard JST is `max`. Which does the CUDA code do? |
+| §5.2 | Eq. (40)'s low-storage form cannot represent Fig. 1's SSPRK3 or RK4 at all. Which is the code — Jameson coefficients, or the full tableaus? |
+| §5.4 | Is `𝕍` the same set (same `𝔽`, same dilation radius) in Eq. (36) and Eq. (57)? |
+| §5.5 | `U_char` per case; the `𝕍` branch of Eq. (36) being unscaled; how `β` interpolates to 1 at the surface in Eq. (57). |
+| §5.6 | Eq. (46)'s `CFL_t h` is a length. Is `h` there carrying an implicit reference velocity (which is what the term *does*)? And is the absence of a body-force constraint deliberate? |
+| Part 3 | The `ψ` sign error above — does their δ-SPH reference implementation have it? |
+
+---
+
 ## Why this is worth doing
 
 The paper's own closing claim is the reason: *"in terms of software, it is clear
