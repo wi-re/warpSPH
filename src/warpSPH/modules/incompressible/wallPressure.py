@@ -64,40 +64,20 @@ hydrostatic column cannot hold its gradient (the wall reads back the
 depth-averaged fluid pressure instead of the pressure at the wall plane).
 
 The moment `sum_f V_f rho_f (r_w - r_f) W_wf` is a *vector* moment of the
-neighbourhood, which no single `WarpOperation` returns. It is assembled from
-two `Interpolate` gathers instead, using the fact that `(g - a_w)` is constant
-over the sum (it is a per-*wall*-particle quantity):
+neighbourhood, which no single `WarpOperation` returns; `wp_wallMoment.py` is
+that operator. `bodyForce` is `(g - a_wall)`: pass a `(dim,)` tensor for a
+uniform field or `(N, dim)` for a per-particle one (read at the wall rows).
+Static walls have `a_wall = 0` -- no per-particle prescribed wall acceleration
+is tracked anywhere in this codebase yet, see `modules/mdbc/velocity.py`'s
+docstring on the same gap for the velocity mirror's dead `2*u_wall` term.
 
-    sum_f V_f rho_f r_wf W_wf = r_w * sum_f V_f rho_f W_wf - sum_f V_f rho_f r_f W_wf
-                                \_____ scalar gather _____/   \____ vector gather ____/
-
-Both gathers run with the same `OperationProperties` as the value term, so
-numerator and denominator share one kernel evaluation. `bodyForce` is
-`(g - a_wall)`: pass a `(dim,)` tensor for a uniform field or `(N, dim)` for a
-per-particle one (read at the wall rows). Static walls have `a_wall = 0` -- no
-per-particle prescribed wall acceleration is tracked anywhere in this codebase
-yet, see `modules/mdbc/velocity.py`'s docstring on the same gap for the
-velocity mirror's dead `2*u_wall` term.
-
-    WARNING -- periodic domains. Splitting `r_w - r_f` across two gathers
-    discards the minimum-image convention: a pair that wraps the domain
-    contributes `+-L_d` of error in each periodic direction `d`. Two things
-    make that harmless in every case this is used on, and `_bodyForceMoment`
-    checks both rather than assuming either:
-
-      1. The dot with `bodyForce` annihilates the error along any axis where
-         `bodyForce` has no component -- a box periodic across the flow but
-         walled along gravity contributes nothing.
-      2. Along an axis where `bodyForce` *does* act, a pair can only wrap if
-         there is a `kind == 1` row within one support radius of one domain
-         face and a fluid row within one support radius of the other. Wall
-         particles bound the domain in the walled directions, so in practice
-         there is no fluid on the far side to gather.
-
-    `_wrappingPairsArePossible` is that second test, `O(N)` and one-sided: it
-    can only over-report, never miss a genuine wrap. When both fail,
-    `_bodyForceMoment` raises rather than silently returning a wrong wall
-    pressure. Lift the restriction properly by writing a real moment kernel.
+The moment used to be assembled from two `Interpolate` gathers,
+`r_w sum_f V_f rho_f W_wf - sum_f V_f rho_f r_f W_wf`, which is exact algebra
+but drops the minimum-image convention, so a wrapping pair contributed `+-L_d`
+per periodic direction. That cost a guard, a case-level `periodic = False`
+override, and a run that died at step 45. `wp_wallMoment.py` takes `x_ij` from
+`computeDistanceVec` like every other operator here, so periodic domains need
+none of it. See that module's docstring.
 
 Unlike the removed `BoundaryPressureMode.mdbcMlsPressure` (its
 `computeMdbcPressure`, pre-merge cleanup pass 09-04) there is NO relaxation
@@ -114,6 +94,7 @@ from warpSPHCore import (AdjacencyList, OperationDirection, OperationProperties,
                          SupportScheme, WarpOperation, warpOperation)
 
 from ..liu import interpolateLiuLiu
+from .wp_wallMoment import computeWallMomentWarp
 
 __all__ = ['wallPressureExtrapolation']
 
@@ -159,74 +140,20 @@ def _normalizeBodyForce(bodyForce, state):
         f"got {tuple(bf.shape)}")
 
 
-def _wrappingPairsArePossible(state, config, axis):
-    """Could a `kind == 1` row and a fluid row be minimum-image neighbours
-    *across* the domain in `axis`? One-sided: True means "cannot rule it out".
-
-    A wrap needs one of the pair within a support radius of the low face and
-    the other within a support radius of the high face. Checked in both
-    role assignments, since either can be the boundary row.
-    """
-    domain = config.domain
-    low = float(torch.as_tensor(domain.min)[axis])
-    high = float(torch.as_tensor(domain.max)[axis])
-    coordinate = state.positions[:, axis]
-    reach = state.supports
-
-    boundary = state.kinds == 1
-    fluid = state.kinds == 0
-    nearLow = (coordinate - low) < reach
-    nearHigh = (high - coordinate) < reach
-
-    return (bool((boundary & nearLow).any()) and bool((fluid & nearHigh).any())) or \
-           (bool((fluid & nearLow).any()) and bool((boundary & nearHigh).any()))
-
-
-def _checkPeriodicSafety(state, config, bodyForce):
-    """Raise unless the two-gather moment is exact for this configuration --
-    see the module docstring's two conditions."""
-    periodic = getattr(config.domain, 'periodic', None)
-    if periodic is None:
-        return
-    periodic = torch.as_tensor(periodic)
-    if not bool(periodic.any()):
-        return
-    acts = bodyForce.abs().amax(dim=0) > 0
-    for axis in range(state.positions.shape[1]):
-        if not bool(periodic[axis]) or not bool(acts[axis]):
-            continue
-        if _wrappingPairsArePossible(state, config, axis):
-            raise ValueError(
-                f"bodyForce acts along periodic axis {axis}, and fluid/boundary "
-                f"rows sit within a support radius of both faces there, so a "
-                f"minimum-image pair can wrap -- the two-gather moment "
-                f"decomposition would be wrong. See `wallPressure.py`'s module "
-                f"docstring; make the axis non-periodic, or wall it.")
-
-
 def _bodyForceMoment(state, config, adjacency, den, bodyForce):
     """The Adami hydrostatic correction
 
         (g - a_w) . sum_f V_f rho_f (r_w - r_f) W_wf / sum_f V_f W_wf
 
-    at every row, assembled from two `Interpolate` gathers -- see the module
-    docstring for the decomposition, the shared normalisation `den`, and the
-    periodic-domain restriction it asserts."""
+    at every row. `den` is `_shepardValue`'s denominator, shared with the value
+    term so numerator and denominator are normalised identically."""
     bf = _normalizeBodyForce(bodyForce, state)
-    _checkPeriodicSafety(state, config, bf)
-
-    props = OperationProperties(
-        kernel=config.kernel, operation=WarpOperation.Interpolate,
-        supportMode=SupportScheme.SuperSymmetric,
-        operationMode=OperationDirection.FluidToBoundary)
-    rho = state.densities
-    # sum_f V_f rho_f W_wf  and  sum_f V_f rho_f r_f W_wf
-    rhoW = warpOperation(state, props, domain=config.domain,
-                         referenceValues=rho, adjacency=adjacency)
-    rhoXW = warpOperation(state, props, domain=config.domain,
-                          referenceValues=rho.unsqueeze(-1) * state.positions,
-                          adjacency=adjacency)
-    moment = state.positions * rhoW.unsqueeze(-1) - rhoXW
+    moment = computeWallMomentWarp(
+        state,
+        OperationProperties(kernel=config.kernel,
+                            supportMode=SupportScheme.SuperSymmetric,
+                            operationMode=OperationDirection.FluidToBoundary),
+        domain=config.domain, adjacency=adjacency)
     return (bf * moment).sum(-1) / den.clamp_min(1e-12)
 
 

@@ -173,11 +173,15 @@ class ArtificialCompressibleSystem(BaseIntegrationSystem):
         """Copy back the derived fields the step recomputed, roll the BDF
         history, and advance any rigid bodies.
 
-        Deliberately much thinner than `WeaklyCompressibleSystem.finalize`:
-        there is no density update to reconcile (density is invariant) and the
-        particle shift is applied by the step itself, outside the pseudo-time
-        loop (Eq. 58), not here -- the step owns the whole real advance and the
-        integrator only applies its exact delta.
+        Thinner than `WeaklyCompressibleSystem.finalize` because there is no
+        density update to reconcile -- density is invariant here.
+
+        **This is where the particle shift goes** (`ACSPH_PLAN.md` step 7).
+        Eq. (58) applies it as a displacement *outside* the pseudo-time loop,
+        which in this framework is exactly `finalize`, the same place
+        `WeaklyCompressibleSystem.finalize` runs `solveShifting`. It is not in
+        the step function: the step owns the dual-time solve, and the shift by
+        construction happens after it has converged.
         """
         self.adjacency = returnValues[-1][0]
         lastState = returnValues[-1][1]

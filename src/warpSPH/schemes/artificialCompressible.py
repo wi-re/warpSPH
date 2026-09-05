@@ -380,16 +380,14 @@ def artificialCompressible_step(
 
     with record_function("[warpSPH] - [acsph - 05] - forcing"):
         # mDBC no-penetration, as an acceleration (`shift / dt`), exactly as
-        # `deltaSPH_step` applies it. **Not in the paper**: Eq. (62) enforces
-        # no-penetration through the *velocity mirror* alone, which
-        # `computeBoundaryVelocities` above already does. This repo's wall
-        # treatment adds an explicit position correction on top, and without it
-        # `hydrostaticColumn` loses fluid through the bottom corners (measured:
-        # a corner particle at (-0.52, -0.52) by step 40, i.e. through the wall
-        # plane). The paper never runs that case without particle shifting
-        # either -- ACSPH_PLAN.md step 7 -- so this is the repo's stand-in
-        # until the Michel et al. law lands, and `noPenetrationShift` turns it
-        # off to recover the paper's literal wall treatment.
+        # `deltaSPH_step` applies it. **Off by default, and not the particle
+        # shift**: it is a wall safeguard. Eq. (62) enforces no-penetration
+        # through the *velocity mirror* alone, which `computeBoundaryVelocities`
+        # above already does, and the real shift is a `finalize`-step
+        # displacement (Eq. 58, outside the pseudo-time loop) that
+        # `ACSPH_PLAN.md` step 7 builds. Available because it shows what a
+        # walled case does with neither -- on `hydrostaticColumn`, fluid leaves
+        # through the bottom corners by step ~40 (measured in step 5b).
         noPenShift = torch.zeros_like(currentState.velocities)
         if schemeConfig.noPenetrationShift:
             noPenShift = computeMdbcNoPenShift(currentState, config, schemeConfig,

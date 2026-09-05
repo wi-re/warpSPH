@@ -100,7 +100,16 @@ Ordered roughly by how concrete/actionable each is, not by importance.
    normal-projected — no tangential stress. Needs a real Morris et al. 1997
    laminar term (full `v_ij` vector, no approach-only clamp) as a new
    `DiffusionParameters`-wired option, gradcheck'd, with its own `deltaSPH`
-   regression pass. Well-specified, not started. (`DFSPH_FINDINGS.md` §1.14.)
+   regression pass. **The "no approach-only clamp" half landed 2026-09-05**
+   (`ACSPH_PLAN.md` step 5): `computeVelocityDiffusion(approachOnly=False)`
+   lifts the clamp, which turns the `inviscid=False` branch into Monaghan &
+   Gingold (1983)'s velocity Laplacian — De Courcy et al. 2024 Eq. (25) — and
+   is gradchecked in all four `inviscid` × `approachOnly` combinations. The
+   default is unchanged, so nothing here moved. **What remains is the other
+   half**, the one this item is actually about: the contribution is still
+   `mu_ij * gradW` with `mu_ij = (v_ij . x_ij)/|x_ij|^2`, i.e. a vector along
+   `x_ij`, so there is still no tangential stress. That needs the full `v_ij`
+   vector and a new kernel. (`DFSPH_FINDINGS.md` §1.14.)
 2. **`columnCollapse`'s post-impact particle pairing — partially triaged,
    Part 59.** Wall integrity is exactly correct (`nPenetrating` stays 0
    throughout); the clumping itself (`pairedFraction` 0.3%→9.0% after the

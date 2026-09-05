@@ -155,14 +155,15 @@ class ArtificialCompressibleSPHConfig:
     #: tensile-instability guard; the paper does not, so it is not the default.
     pressureForceTerm: PressureForceScheme = field(default=PressureForceScheme.nonConservative, metadata={'description': 'Pressure force term (Eq. 25 is nonConservative == (p_i+p_j))'})
 
-    #: The repo's explicit mDBC no-penetration position correction, applied as
-    #: an acceleration the way `deltaSPH_step` applies it. **Not in the paper**
-    #: -- Eq. (62) relies on the velocity mirror alone -- but the paper never
-    #: runs a walled case without particle shifting either, and until the
-    #: Michel et al. law lands (ACSPH_PLAN.md step 7) this is what stops
-    #: `hydrostaticColumn` losing corner particles through the wall. Set False
-    #: for the paper's literal wall treatment.
-    noPenetrationShift: bool = field(default=True, metadata={'description': 'mDBC no-penetration position correction (not in the paper; see ACSPH_PLAN.md step 7)'})
+    #: The repo's mDBC no-penetration correction, applied as an acceleration the
+    #: way `deltaSPH_step` applies it. **A safeguard, not particle shifting** --
+    #: the actual shift is a `finalize`-step displacement (Eq. 58, applied
+    #: outside the pseudo-time loop), which is what `ACSPH_PLAN.md` step 7
+    #: builds. Off by default: it is not in the paper (Eq. 62 relies on the
+    #: velocity mirror alone) and should not be needed once the shift exists.
+    #: Turn it on to see what a walled case does without either -- measured on
+    #: `hydrostaticColumn` in ACSPH_PLAN.md step 5b.
+    noPenetrationShift: bool = field(default=False, metadata={'description': 'mDBC no-penetration safeguard (off; not in the paper, and not the shift -- see ACSPH_PLAN.md step 7)'})
 
     dt_viscosityConstraint: bool = field(default=True, metadata={'description': 'Whether to apply the viscous constraint 0.125 h^2/nu in Eq. (46)'})
     dt_accelerationConstraint: bool = field(default=True, metadata={'description': 'Whether to apply the acceleration constraint in the timestep'})
@@ -306,7 +307,7 @@ def dictToArtificialCompressibleConfig(configDict: Dict[str, Any]) -> Artificial
     config.schemeName = configDict['schemeName']
     config.boundaryConditions = [dictToBoundaryCondition(bcDict) for bcDict in configDict['boundaryConditions']]
     config.pressureForceTerm = PressureForceScheme[configDict['pressureForceTerm']] if isinstance(configDict['pressureForceTerm'], str) else configDict['pressureForceTerm']
-    config.noPenetrationShift = bool(configDict.get('noPenetrationShift', True))
+    config.noPenetrationShift = bool(configDict.get('noPenetrationShift', False))
     config.dt_viscosityConstraint = bool(configDict['dt_viscosityConstraint'])
     config.dt_accelerationConstraint = bool(configDict['dt_accelerationConstraint'])
     config.bandwith = float(configDict.get('bandwith', 10.0))

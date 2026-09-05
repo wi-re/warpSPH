@@ -32,22 +32,41 @@ shifting exists to fix, and the paper never runs a walled case without it.
    and did the opposite — and a single-variable A/B on `sloshingTank` improves
    both the density floor and the pressure peak. **Worth reporting upstream and
    checking against diffSPH, which this kernel was ported from.**
+   → **Outstanding: run `deltaSPH` through the full validation-case sweep**,
+   see Part 9. The A/B covers one case; the sign touches every δ-SPH run in the
+   repo, and only the sweep can say what moved.
 2. **ACSPH's pressure force defaults to `nonConservative`** (the literal
    `(p_i + p_j)` of Eq. 25), not `Antuono`. The Antuono switch is a
    tensile-instability guard the paper does not use; it is one config field
    away.
-3. **`hydrostaticColumn` runs non-periodic under ACSPH** (§4.4 / step 5b). The
-   box is walled on every side, so periodicity buys nothing, and it breaks
-   Eq. (61)'s position moment. The DFSPH branch is untouched.
-4. **`noPenetrationShift` (the repo's mDBC position correction) is on by
-   default** and is *not* in the paper. It stands in for the particle shifting
-   the paper always has; the flag exists so the paper's literal wall treatment
-   is one setting away. Re-test with it **off** once step 7 lands — if the
-   shift carries the corners on its own, this should go.
+3. ~~**`hydrostaticColumn` runs non-periodic under ACSPH.**~~ **Withdrawn** —
+   the underlying limitation is gone. Eq. (61)'s position moment is now a real
+   operator (`modules/incompressible/wp_wallMoment.py`) that takes `x_ij` from
+   `computeDistanceVec` like everything else, so it is minimum-image correct and
+   periodic domains need no workaround. The case is back on the shared
+   `periodic=True` default and runs 120 steps at `band=5` where the old
+   two-gather decomposition died at step 45.
+4. **`noPenetrationShift` is off by default** and is *not* in the paper — it is
+   a wall *safeguard*, not particle shifting. The actual shift is a
+   `finalize`-step displacement (Eq. 58, outside the pseudo-time loop), which
+   is what step 7 builds; `ArtificialCompressibleSystem.finalize` is where it
+   goes, alongside where `WeaklyCompressibleSystem.finalize` runs
+   `solveShifting`. The flag stays because turning it on shows exactly what a
+   walled case does with neither — measured both ways in step 5b.
 5. **`approachOnly=False` was added to `computeVelocityDiffusion`** rather than
-   writing a new kernel. It lifts an artificial-viscosity clamp that was making
-   the physical-viscosity branch one-sided; the default is unchanged, so no
-   existing scheme moves.
+   writing a new kernel. The default is unchanged, so no existing scheme moves.
+
+   **This is half of `DFSPH_IMPROVEMENT_PLAN.md`'s open item 1** (the
+   shear-carrying Morris term), which asks for "full `v_ij` vector, *no
+   approach-only clamp*". `approachOnly=False` removes the clamp — the term is
+   now two-sided, which is what makes it Monaghan & Gingold (1983)'s velocity
+   Laplacian and what Eq. (25) requires. It does **not** remove the normal
+   projection: the contribution is still `mu_ij * gradW` with
+   `mu_ij = (v_ij . x_ij)/|x_ij|^2`, a vector along `x_ij`, so there is still no
+   tangential stress. A real Morris et al. 1997 laminar term needs the full
+   `v_ij` vector and is still a separate, unwritten operator. Both papers use
+   the normal-projected form, so ACSPH does not need it — but if that item is
+   picked up, the clamp half is already done and gradchecked.
 
 ## Questions for the authors, all in one place
 
@@ -1013,18 +1032,22 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
    *What it still lacks: the shift (step 7).* Run forward, the column holds its
    pressure profile (`p ∈ [0.31, 4.87]` against an analytic drop of 4.5) but
    develops a near-wall velocity error concentrated in the **bottom corners**,
-   and the free surface drifts down slowly. Two things were needed to keep it
-   bounded, both marked in code:
-   - the Eq. (46) advective floor (§5.6) — without it `Δt` ran to `maxDt` and
-     the corner error grew with it;
-   - the repo's mDBC no-penetration position correction, applied as an
-     acceleration the way `deltaSPH_step` applies it
-     (`acParams`-adjacent flag `noPenetrationShift`, default on). **Not in the
-     paper** — Eq. (62) relies on the velocity mirror alone — but the paper
-     never runs a walled case without particle shifting either. With it,
-     `‖v‖_max` peaks at 0.29 instead of 2.9 and no particle leaves the box; the
-     worst corner particle sits at `x = -0.497` against a wall plane at
-     `-0.5`, where before it reached `-0.62`, well inside the wall band.
+   and the free surface drifts down slowly.
+
+   The Eq. (46) advective floor (§5.6) was needed to keep `Δt` bounded at all —
+   without it `Δt` ran 1.2× per step to `maxDt` and the corner error grew with
+   it. Beyond that, the corner behaviour is measured **both ways**, because the
+   difference is exactly the size of the hole step 7 fills:
+
+   | | `‖v‖_max` peak | worst corner particle | verdict |
+   |---|---|---|---|
+   | as the paper has it (no safeguard) | 2.9 | `x = -0.62` | inside the wall band; fluid is leaving the box |
+   | `noPenetrationShift = True` | 0.29 | `x = -0.497` | bounded, wall plane at `-0.5` holds |
+
+   `noPenetrationShift` is **off by default** and is *not* the particle shift —
+   it is the repo's mDBC wall safeguard, applied as an acceleration the way
+   `deltaSPH_step` applies it. The paper has neither, because it always has the
+   shift. The 200-step figures below were taken with it on.
 
    *200 steps, nx=32, to `t = 0.94` (the case's full `tLimit`):* no divergence,
    density **exactly 1.000** throughout (invariant by construction, as it must
@@ -1061,6 +1084,44 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
 9. **Impact and dam break** (§4.4, §4.5), including the `𝒞_e` cost metric.
 10. **Optional/experimental**, only if the above is clean: `ṽ` material
     derivative (§1.7), internal shifting (Eq. 60), `k₃` term, RK3/RK4.
+
+---
+
+# Part 9 — The validation sweep (outstanding)
+
+**Two schemes need to go through the full case sweep, and neither has yet.**
+
+## 9.1 `deltaSPH`, because the `ψ` sign changed under it
+
+Part 3's sign fix alters the *default* density-diffusion operator: `deltaSPH`
+was behaving as twice the uncorrected Molteni–Colagrossi Laplacian on any smooth
+field and is now the fourth-order Antuono operator it was meant to be. That is a
+behaviour change in every WCSPH run in the repo. What exists so far is a
+single-variable A/B on one case (`sloshingTank`: density floor 0.396 → 0.532,
+peak sensor pressure 39.2 → 32.5 kPa, neither run diverging) plus a green test
+suite — but the suite has no `deltaSPH`-scheme physics case in it, so "green"
+is weaker evidence here than usual.
+
+Run `scripts/run_sweep.py` (or the per-case runners) across the weakly
+compressible set and record the before/after. `scripts/probe_deltaSPHPsiSignAB.py`
+reproduces the pre-fix operator exactly with no rebuild — it monkeypatches the
+gradient field's sign — so every case can be A/B'd as a single variable. Expect
+*less* diffusion of smooth density gradients and of the free surface; watch for
+anything that was relying on the extra damping.
+
+## 9.2 `artificialCompressible`, because it is new
+
+The five cases of Part 7, in the order given there. Nothing beyond §4.1.1 has
+been run at all yet.
+
+## 9.3 Note for later
+
+`ψ` is one member of a broader family of diffusion/dissipation operators worth
+implementing properly (the `DensityDiffusionScheme` enum is the current, narrow
+slice of it). Not scheduled here; recorded so the sign fix is understood as a
+correction to one operator rather than a redesign of the family.
+
+---
 
 ## Relationship to the other plans
 

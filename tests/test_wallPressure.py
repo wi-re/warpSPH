@@ -191,37 +191,111 @@ def buildWrappingColumn(device, periodicAxes):
     return state, config
 
 
-def test_acceptsABodyForceOnAPeriodicAxisNothingCanWrapAcross(column):
-    """The guard is about *pairs*, not about the domain flag. `buildColumn`'s
-    lattice sits well inside its domain, so no minimum-image pair can wrap even
-    with both axes periodic -- and the moment is then exact, so refusing would
-    be a false positive."""
-    state, _ = column
-    device = state.positions.device
-    wide, wideConfig = buildColumn(device, torch.float32,
-                                   periodic=torch.tensor([True, True], device=device))
-    p = hydrostatic(wide.positions)
-    fluid = wide.kinds == 0
-    # Along gravity, on a doubly-periodic domain: accepted, because nothing is
-    # within a support radius of either face.
-    out = wallPressureExtrapolation(wide, wideConfig, None, p, fluid,
-                                    mode='shepard', bodyForce=[0.0, -G])
-    assert torch.isfinite(out).all()
+def momentByTwoGathers(state, config, adjacency=None):
+    """The moment as it used to be computed: `r_w sum V rho W - sum V rho r W`.
+    Exact in an unwrapped domain, wrong by `+-L_d` per wrapping pair otherwise
+    -- which is what these tests are for."""
+    from warpSPHCore import (OperationDirection, OperationProperties, SupportScheme,
+                             WarpOperation, warpOperation)
+    props = OperationProperties(
+        kernel=config.kernel, operation=WarpOperation.Interpolate,
+        supportMode=SupportScheme.SuperSymmetric,
+        operationMode=OperationDirection.FluidToBoundary)
+    rho = state.densities
+    rhoW = warpOperation(state, props, domain=config.domain, referenceValues=rho,
+                         adjacency=adjacency)
+    rhoXW = warpOperation(state, props, domain=config.domain,
+                          referenceValues=rho.unsqueeze(-1) * state.positions,
+                          adjacency=adjacency)
+    return state.positions * rhoW.unsqueeze(-1) - rhoXW
 
 
-def test_rejectsABodyForceAlongAnAxisAPairCanWrapAcross(runtime):
-    """The two-gather moment decomposition is not minimum-image safe, so a
-    body force along an axis where a fluid/boundary pair can genuinely wrap is
-    refused rather than silently returning a wrong wall pressure (see the
-    module docstring)."""
+def test_theMomentKernelMatchesTheOldDecompositionWhereThatWasExact(column):
+    """The two-gather decomposition is exact algebra in an unwrapped domain, so
+    the kernel that replaced it has to agree with it there. This is the test
+    that says the swap changed nothing except the periodic case."""
+    from warpSPH.modules.incompressible.wp_wallMoment import computeWallMomentWarp
+    from warpSPHCore import OperationDirection, OperationProperties, SupportScheme
+    state, config = column
+
+    kernelMoment = computeWallMomentWarp(
+        state,
+        OperationProperties(kernel=config.kernel,
+                            supportMode=SupportScheme.SuperSymmetric,
+                            operationMode=OperationDirection.FluidToBoundary),
+        domain=config.domain)
+    twoGather = momentByTwoGathers(state, config)
+
+    boundary = state.kinds == 1
+    scale = float(twoGather[boundary].abs().max())
+    assert scale > 0
+    assert float((kernelMoment - twoGather)[boundary].abs().max()) < 1e-4 * scale
+
+
+def test_theMomentKernelIsMinimumImageWhereTheDecompositionIsNot(runtime):
+    """On a periodic domain whose lattice reaches both faces, pairs genuinely
+    wrap. The kernel takes `x_ij` from `computeDistanceVec` like every other
+    operator, so it stays correct; the old decomposition is off by a domain
+    length per wrapping pair. Graded against a brute-force `O(N^2)` sum with
+    explicit minimum-image, which shares no code with either."""
+    from warpSPH.modules.incompressible.wp_wallMoment import computeWallMomentWarp
+    from warpSPHCore import OperationDirection, OperationProperties, SupportScheme
     device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
-    state, config = buildWrappingColumn(device, torch.tensor([True, False], device=device))
+    state, config = buildWrappingColumn(device, torch.tensor([True, True], device=device))
+
+    kernelMoment = computeWallMomentWarp(
+        state,
+        OperationProperties(kernel=config.kernel,
+                            supportMode=SupportScheme.SuperSymmetric,
+                            operationMode=OperationDirection.FluidToBoundary),
+        domain=config.domain)
+    reference = bruteForceMoment(state, config)
+    twoGather = momentByTwoGathers(state, config)
+
+    boundary = state.kinds == 1
+    scale = float(reference[boundary].abs().max())
+    assert scale > 0
+
+    assert float((kernelMoment - reference)[boundary].abs().max()) < 1e-4 * scale
+    # ... and the old decomposition really was wrong here, so the test above is
+    # discriminating rather than vacuous.
+    assert float((twoGather - reference)[boundary].abs().max()) > 0.5 * scale
+
+
+def bruteForceMoment(state, config):
+    """`sum_f V_f rho_f (r_w - r_f) W_wf` over all pairs, with the minimum image
+    taken explicitly and a hand-written Wendland C2. Independent of the kernel
+    under test on purpose."""
+    positions = state.positions
+    span = (torch.as_tensor(config.domain.max) - torch.as_tensor(config.domain.min))
+    periodic = torch.as_tensor(config.domain.periodic).to(positions.dtype)
+    delta = positions.unsqueeze(1) - positions.unsqueeze(0)
+    wrapped = delta - span * torch.round(delta / span) * periodic
+
+    r = wrapped.norm(dim=-1)
+    h = state.supports[0]
+    q = (r / h).clamp(max=1.0)
+    cD = 7.0 / math.pi
+    w = torch.where(r <= h, (1 - q) ** 4 * (1 + 4 * q) * cD / h ** 2,
+                    torch.zeros_like(r))
+
+    volumes = state.masses / state.densities
+    weight = (volumes * state.densities).unsqueeze(0) * w
+    # FluidToBoundary: query rows are `kind == 1`, reference rows `kind == 0`.
+    weight = weight * (state.kinds == 0).unsqueeze(0).to(weight.dtype)
+    weight = weight * (state.kinds == 1).unsqueeze(1).to(weight.dtype)
+    return torch.einsum('ij,ijd->id', weight, wrapped)
+
+
+def test_aWrappingPeriodicDomainNoLongerNeedsAWorkaround(runtime):
+    """The end-to-end statement: the wall pressure is computable on a periodic
+    domain with gravity along a periodic axis and pairs that genuinely wrap.
+    That configuration used to raise, which is why `hydrostaticColumn` had to
+    be made non-periodic under ACSPH."""
+    device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+    state, config = buildWrappingColumn(device, torch.tensor([True, True], device=device))
     p = hydrostatic(state.positions)
     fluid = state.kinds == 0
-    # Along y (non-periodic): fine.
-    wallPressureExtrapolation(state, config, None, p, fluid, mode='shepard',
-                              bodyForce=[0.0, -G])
-    # Along x (periodic, and the lattice touches both x faces): refused.
-    with pytest.raises(ValueError, match='periodic'):
-        wallPressureExtrapolation(state, config, None, p, fluid, mode='shepard',
-                                  bodyForce=[-G, 0.0])
+    out = wallPressureExtrapolation(state, config, None, p, fluid, mode='shepard',
+                                    bodyForce=[0.0, -G])
+    assert torch.isfinite(out).all()

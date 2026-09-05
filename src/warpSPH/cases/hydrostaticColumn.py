@@ -191,17 +191,6 @@ def _configureArtificialCompressible(ctx: RunContext) -> None:
     et al. law lands (`ACSPH_PLAN.md` step 7) -- the existing delta+ shift is
     Mach-scaled, and ACSPH has no Mach number.
     """
-    # Walled on every side, so the domain's nominal periodicity buys nothing --
-    # and it actively breaks Eq. (61)'s wall pressure. That correction needs a
-    # *position moment* of each wall particle's fluid neighbourhood, assembled
-    # from two Shepard gathers, which is not minimum-image safe; once a fluid
-    # particle drifts within a support radius of the bottom face it becomes a
-    # wrapped neighbour of the top wall and the moment picks up a whole domain
-    # height along gravity. `wallPressureExtrapolation` refuses that outright
-    # rather than returning a wrong wall pressure (see its module docstring), so
-    # the case turns the periodicity off instead. The DFSPH branch keeps it
-    # because nothing there takes a position moment.
-    ctx.spec.periodic = False
     configureArtificialCompressible(ctx)
 
     schemeConfig = ctx.schemeConfig
