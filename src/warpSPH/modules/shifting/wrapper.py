@@ -5,7 +5,7 @@ projects the shift near the free surface before adding it to
 `systemState.positions`.
 
 Free-surface projection (`schemeConfig.shiftProperties.projectionScheme`,
-`ShiftingProjectionScheme`) has four modes: `dot` removes the shift's normal
+`ShiftingProjectionScheme`) has five modes: `dot` removes the shift's normal
 component and scales the tangential remainder by `surfaceScaling` for
 surface particles; `mat` instead projects through a `(I - n n^T)` matrix and
 scales by `lMin**2` (then zeroes the surface set anyway); the `zero` fallback
@@ -14,13 +14,17 @@ is the actual Sun et al. 2019 (`literature/sun2019`) Eq. (20)-(21) treatment
 -- a surface particle whose shift points *into* the surface is cut to
 tangential and curvature-gated (`surfaceCurvatureAngle`), one whose shift
 points *away* keeps the full unconstrained shift, and `lMin` below
-`surfaceLambdaThreshold` in the surface set is zeroed. `dot`/`mat`/`zero`
-additionally zero the shift wherever `lMin < 0.4` (a fixed threshold);
-`surfaceNormal` uses the configurable `surfaceLambdaThreshold` (default 0.4,
-matching the old constant). All modes zero the shift for non-fluid particles
-(`kinds != 0`). Normals/`lMin` are recomputed from `detectFreeSurface` each
-iteration unless `shiftProperties.reuseNormals` and a prior surface state is
-already cached on `systemState`.
+`surfaceLambdaThreshold` in the surface set is zeroed; `michel2022` is Michel
+et al. 2022's (`literature/michel2022`) Eq. (48) treatment -- see
+`ShiftingProjectionScheme.michel2022`'s own docstring -- and is the only mode
+paired with `ShiftingScheme.michel2022` rather than `deltaSPH`/`implicit`/
+`dynamic`. `dot`/`mat`/`zero` additionally zero the shift wherever
+`lMin < 0.4` (a fixed threshold); `surfaceNormal`/`michel2022` use the
+configurable `surfaceLambdaThreshold` and its own literal `0.4` respectively.
+All modes zero the shift for non-fluid particles (`kinds != 0`). Normals/
+`lMin` are recomputed from `detectFreeSurface` each iteration unless
+`shiftProperties.reuseNormals` and a prior surface state is already cached on
+`systemState`.
 """
 
 import math
@@ -47,6 +51,7 @@ from ..surfaceDetection import *
 from ..density import *
 from .delta import computeDeltaShift
 from .implicitShifting import computeImplicitShift, computeDynamicImplicitShift
+from .michel import computeMichelShift
 from ..util import *
 
 from ...configurations.moduleConfigurations.shifting import ShiftProperties, ShiftingProjectionScheme, ShiftingScheme
@@ -151,11 +156,62 @@ def solveShifting(
             else:
                 fs = fsm = n = lMin = None
 
+            michelDFS = michelNTilde = None
+            if schemeConfig.shiftProperties.scheme == ShiftingScheme.michel2022:
+                with record_function(f"[warpSPH] - (shift) - michel beta"):
+                    # Eq. (21)'s coefficient, counterbalancing the lowest-
+                    # degree truncation term; Eq. (48) requires its
+                    # free-surface decay to happen here, *before* the
+                    # interior law (modules/shifting/michel.py) is evaluated,
+                    # since both branches of that law's norm clamp depend on
+                    # beta -- see PST_ALE_PLAN.md Part 2.3.
+                    R_i = systemState.supports
+                    achievedDx_i = torch.pow(systemState.masses / rho0, 1.0 / systemState.positions.shape[1])
+                    betaInterior = (R_i / achievedDx_i) ** 3.0
+                    if freeSurface:
+                        # Eq. (47)'s search target is the *raw*, undilated
+                        # free-surface mask -- `fs` on the fresh-detect path
+                        # (detectFreeSurface returns `(fsm_raw, fs_dilated,
+                        # ...)`, and this file's own unpacking above binds
+                        # position 1 to the name `fs`), or the cached
+                        # indicator on the reuseNormals fast path.
+                        if (schemeConfig.shiftProperties.reuseNormals
+                                and systemState.surfaceNormals is not None
+                                and systemState.surfaceLambdas is not None):
+                            # Mirrors the reuseNormals fast-path condition
+                            # above, which is exactly when `fs`/`fsm` were
+                            # never freshly bound in this call.
+                            rawSurfaceMask = (systemState.surfaceIndicators == 1).to(n.dtype)
+                        else:
+                            rawSurfaceMask = fs
+                        michelDFS, michelNTilde = computeNearestSurfaceNormalWarp(
+                            systemState,
+                            operationProperties=OperationProperties(
+                                operation=WarpOperation.Density,
+                                kernel=kernel,
+                                supportMode=SupportScheme.Gather,
+                            ),
+                            domain=domain,
+                            adjacency=adjacency,
+                            freeSurfaceMask=rawSurfaceMask,
+                            normals=n,
+                        )
+                        # Linear decay from beta=1 at d^FS=0 (on the surface)
+                        # to beta=(R/dx)^3 at d^FS=R (the vicinity region's
+                        # own extent, matching where Eq. 48's sigma also
+                        # bottoms out).
+                        decay = torch.clamp(michelDFS / R_i, 0.0, 1.0)
+                        michelBeta = 1.0 + (betaInterior - 1.0) * decay
+                    else:
+                        michelBeta = betaInterior
+
             with record_function(f"[warpSPH] - (shift) - computeShift"):
                 if schemeConfig.shiftProperties.scheme == ShiftingScheme.implicit:
                     update, adjacency = computeImplicitShift(systemState, config, schemeConfig, domain, adjacency, iters = 1)
                 elif schemeConfig.shiftProperties.scheme == ShiftingScheme.dynamic:
                     update, adjacency = computeDynamicImplicitShift(systemState, config, schemeConfig, domain, adjacency, iters = 1)
+                elif schemeConfig.shiftProperties.scheme == ShiftingScheme.michel2022:
+                    update, adjacency = computeMichelShift(systemState, config, schemeConfig, domain, adjacency, beta = michelBeta, dt = dt, iters = 1)
                 else:
                     update, adjacency = computeDeltaShift(systemState, config, schemeConfig, domain, adjacency, iters = 1)
             # print(f"Iteration {i} [inside solveShifting], max shift magnitude: {update.norm(dim=1).max().item()}")
@@ -210,6 +266,19 @@ def solveShifting(
                             wLambda = (lMin >= surfaceLambdaThreshold).to(update.dtype).view(-1, 1)
                         inFcol = inF.view(-1, 1)
                         update = torch.where(inFcol, update * wLambda, update)
+                    elif projectionScheme == ShiftingProjectionScheme.michel2022:
+                        # Michel et al. 2022 (literature/michel2022) Eq. (48).
+                        # `n` here plays no role -- the projection uses the
+                        # *inherited* normal `michelNTilde` (Eq. 47) instead.
+                        R_i = systemState.supports
+                        sigma = torch.clamp(
+                            (michelDFS - R_i) / (0.5 * R_i - R_i), 0.0, 1.0
+                        )
+                        outward = torch.einsum('ij,ij->i', update, michelNTilde)
+                        projected = update - (sigma * outward).view(-1, 1) * michelNTilde
+                        lambdaGate = (lMin >= 0.4).to(update.dtype)
+                        result = (lambdaGate * lMin.pow(2.0)).view(-1, 1) * projected
+                        update = torch.where(surfaceIndicator.view(-1, 1), result, update)
                     else:
                         update[fsm > 0.5] = 0
                         update[lMin < 0.4] = 0

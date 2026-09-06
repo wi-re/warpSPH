@@ -33,10 +33,26 @@ import torch
 from enum import Enum
 
 class ShiftingScheme(Enum):
+    """- `none`: no shifting.
+    - `deltaSPH`: Sun et al. delta^+ law (`modules/shifting/delta.py`), Mach-
+      scaled -- unusable by ACSPH (no sound speed to form a Mach number from).
+    - `implicit` / `dynamic`: matrix-free Krylov solve, see
+      `ShiftingImplicitFallback`'s docstring.
+    - `michel2022`: Michel et al. 2022 (`literature/michel2022`,
+      `PST_ALE_PLAN.md`), `modules/shifting/michel.py`'s Eq. (22) --
+      the "consistent" Fick's-law PST. Its characteristic velocity
+      (`max_j |(u_j-u_i).x_hat_ij|`) is a *relative* quantity, Galilean- and
+      local-rotation-invariant without a Mach number, making it the only
+      scheme here usable by ACSPH. Should be paired with
+      `ShiftingProjectionScheme.michel2022` near a free surface -- Eq. (48)'s
+      treatment depends on this scheme's own Eq. (21) coefficient `beta`, so
+      the other projection schemes are not interchangeable with it.
+    """
     none = 0
     deltaSPH = 1
     implicit = 2
     dynamic = 3
+    michel2022 = 4
 
 
 class ShiftingProjectionScheme(Enum):
@@ -57,11 +73,23 @@ class ShiftingProjectionScheme(Enum):
       whose shift points *away* from the surface keeps the full, unconstrained
       shift; `lMin < surfaceLambdaThreshold` in the surface set is zeroed.
       The away-branch is the anti-clustering mechanism the other three lack.
+    - `michel2022`: Michel et al. 2022 (`literature/michel2022`) Eq. (48) --
+      `delta_u^FS = 0` if `lMin < 0.4`, else
+      `lMin**2 * (delta_u - sigma*(delta_u . n_tilde)*n_tilde)`, with
+      `sigma = clamp((d^FS - R)/(R/2 - R), 0, 1)` (full normal cancellation at
+      `d^FS <= R/2`, full freedom at `d^FS >= R`) and `n_tilde`
+      (`modules/surfaceDetection/wp_nearestSurfaceNormal.py`) the *inherited*
+      normal of the nearest actual free-surface particle, not `n` itself
+      (Eq. 47). No curvature gate -- that is Sun 2019's addition, kept only in
+      `surfaceNormal`. Requires `ShiftingScheme.michel2022` (its Eq. 21
+      coefficient `beta` is what Eq. 48 wraps); not interchangeable with the
+      other three schemes' shifts.
     """
     zero = 0
     dot = 1
     mat = 2
     surfaceNormal = 3
+    michel2022 = 4
 
 
 class ShiftingImplicitInitializer(Enum):
@@ -233,6 +261,23 @@ def buildDefaultShiftProperties() -> ShiftProperties:
         # docs/historic_plans/WCSPH_SHIFTING_PLAN.md: strictly better on the rotating square patch
         # (nx 64/96, t up to 1), on par on `sloshingTank` (clears the t~2.6 s
         # NaN), no `test_physics.py` regression.
+        #
+        # ⚠ The `sloshingTank` claim above no longer holds as of 2026-09-05.
+        # Commit 790a7c7 ("fix its psi sign") correctly fixed deltaSPH's
+        # density-diffusion operator, which had been accidentally 2x too
+        # strong (see that commit; `ACSPH_PLAN.md` decision 1). Confirmed
+        # side effect: `surfaceNormal` no longer clears sloshingTank's NaN --
+        # it now diverges at t=0.68 instead of surviving to t=4.0
+        # (reproduced directly against the pre-fix commit,
+        # `PST_ALE_PLAN.md` §7.1). `cases/sloshingTank.py` no longer
+        # defaults to this scheme/projection pair for that reason -- it uses
+        # `ShiftingScheme.michel2022`/`ShiftingProjectionScheme.michel2022`
+        # instead, the one configuration measured to still survive the full
+        # run post-fix. This shared default is untouched for now (rotating
+        # square patch's own claim above is unaffected, and `michel2022`
+        # becoming the shared default is `PST_ALE_PLAN.md` Part 8 step 3's
+        # own separate, not-yet-closed decision) -- but do not cite the
+        # sloshingTank half of this comment as current.
         projectionScheme=ShiftingProjectionScheme.surfaceNormal,
         summationDensity=False,
         surfaceScaling=0.1,

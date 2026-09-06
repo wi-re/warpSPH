@@ -1,13 +1,19 @@
 """Warp kernel computing the raw (unscaled) delta-SPH particle-shifting term:
-`sum_j [m_j / (rho_i + rho_j)] * [1 + R*(w_ij/W_0)^n] * gradW_ij` (Lind et al./
-Sun et al.-style anti-clustering correction), evaluated per-particle over an
-adjacency list or a compact hash grid. `computeDeltaShiftWarp` is the Python
-entry point; `modules.shifting.delta.computeDeltaShift` (which re-exports it)
-applies the actual `-CFL * Ma * 2 * h^2` position-delta scaling externally --
-by design this kernel does not apply it, so its `CFL`/`computeMach`/`c_max`/
-`dx` arguments are accepted but do not affect the returned value (only `rho0`
+`sum_j weight_ij * [1 + R*(w_ij/W_0)^n] * gradW_ij` (Lind et al./Sun et
+al.-style anti-clustering correction), evaluated per-particle over an
+adjacency list or a compact hash grid. `weight_ij` is
+`0.5*m_j/(rho_i+rho_j)` (Sun's mean-density weight, the historical default,
+`volumeWeighted=False`) or the plain apparent volume `V_j` (Michel 2022 Eq.
+2-3's weighting, `volumeWeighted=True`) -- these are different formulas, not
+just a naming difference; pass `R=0.2` to match Eq. 3 exactly when using the
+latter. `computeDeltaShiftWarp` is the Python entry point;
+`modules.shifting.delta.computeDeltaShift` (which re-exports it) applies the
+actual `-CFL * Ma * 2 * h^2` position-delta scaling externally -- by design
+this kernel does not apply it, so its `CFL`/`computeMach`/`c_max`/`dx`
+arguments are accepted but do not affect the returned value (only `rho0`
 feeds the output, via the reference spacing `dx_2`). Also used directly by
-`sample.optimal.sampleOptimal` to relax a lattice into a glass-like layout.
+`sample.optimal.sampleOptimal` to relax a lattice into a glass-like layout,
+and by `modules.shifting.michel` for the Michel 2022 PST's `grad-tilde(C)`.
 """
 
 import warp as wp
@@ -64,7 +70,7 @@ def computeDeltaShift_Func_i(
 
     # DeltaShift function parameters begin here
     R: float, n: int, CFL: float, computeMach: bool, c_max: float,
-    rho0: float, dx: float, 
+    rho0: float, dx: float, volumeWeighted: bool,
 
 ):
     # Initialize the output value
@@ -125,9 +131,10 @@ def computeDeltaShift_Func_i(
 
         term = scalar_t(scalar_t(1.0) + scalar_t(R) * wp.pow(k, scalar_t(n)))
         densityTerm =scalar_t(0.5) * mj / (rhoi + rhoj)
+        weight = scalar_t(apparentVolume) if volumeWeighted else densityTerm
 
-        phi_ij = scalar_t(1.0  )      
-        scalarTerm = term * densityTerm * phi_ij
+        phi_ij = scalar_t(1.0  )
+        scalarTerm = term * weight * phi_ij
 
         shiftAmount = scalarTerm * gradw_ij
 
@@ -157,12 +164,12 @@ def computeDeltaShift_Func_Adjacency(
     gridState: gridData,
     numOffsets: wp.int32,
 
-    kernelProperties: kernelState, 
-    
+    kernelProperties: kernelState,
+
     outputValue : Any, # type: ignore
 
     R: float, n: int, CFL: float, computeMach: bool, c_max: float,
-    rho0: float, dx: float,
+    rho0: float, dx: float, volumeWeighted: bool,
 ):
     xi, hi, mi, rhoi, ki = getParticle(queryState, i)
     if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
@@ -210,7 +217,7 @@ def computeDeltaShift_Func_Adjacency(
 
             # DeltaShift function parameters
             R, n, CFL, computeMach, c_max,
-            rho0, dx,
+            rho0, dx, volumeWeighted,
         )
     return out
 
@@ -229,18 +236,18 @@ def computeDeltaShift_Kernel(
     # Do not change the parameters above
 
     R: float, n: wp.int32, CFL: float, computeMach: wp.bool, c_max: float,
-    rho0: float, dx: float,
-    
+    rho0: float, dx: float, volumeWeighted: wp.bool,
+
     # The last parameter is always the output array and should not be changed
     outputValues : wp.array(dtype = Any) # type: ignore
-):                                                                                    
+):
     i = wp.tid()
     numParticles = queryState.positions.shape[0]
     if i >= numParticles:
         return
 
     outputValues[i] = computeDeltaShift_Func_Adjacency(
-        i, domainState.dim, 
+        i, domainState.dim,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,  #queryKinds, referenceKinds,
@@ -249,7 +256,7 @@ def computeDeltaShift_Kernel(
         zero_like_warp(outputValues),
 
         R, n, CFL, computeMach, c_max,
-        rho0, dx,
+        rho0, dx, volumeWeighted,
     )
 
 def _deltaShiftDtype(ctx, extras):
@@ -267,6 +274,7 @@ _DELTA_SHIFT = OperatorSpec(
         ExtraSpec("c_max", ExtraKind.SCALAR),
         ExtraSpec("rho0", ExtraKind.SCALAR),
         ExtraSpec("dx", ExtraKind.SCALAR),
+        ExtraSpec("volumeWeighted", ExtraKind.SCALAR),
     ),
 )
 
@@ -277,10 +285,10 @@ def computeDeltaShiftWarp(
     domain: DomainDescription,
 
     CFL: float, computeMach: bool, c_max: float,
-    rho0: float, dx: float, 
+    rho0: float, dx: float,
 
-    R: float = 0.25, n: int = 4,
-    
+    R: float = 0.25, n: int = 4, volumeWeighted: bool = False,
+
     queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
     adjacency: Optional[Union[AdjacencyList, CompactHashMap]] = None, # if none a datastructure is created for EVERY operation!,
     referenceParticles: Optional[ParticleState] = None,
@@ -300,6 +308,6 @@ def computeDeltaShiftWarp(
         return launchOperator(
             _DELTA_SHIFT, ctx,
             R=R, n=n, CFL=CFL, computeMach=computeMach, c_max=c_max,
-            rho0=rho0, dx=dx,
+            rho0=rho0, dx=dx, volumeWeighted=volumeWeighted,
         )
 

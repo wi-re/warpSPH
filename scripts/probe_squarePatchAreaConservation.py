@@ -12,9 +12,20 @@ reports the drift in the area/volume metrics
 Modes (`--modes`):
 
   shiftOff        `shiftProperties.active = False`          -- the floor: no shift.
-  surfaceZeroed   default                                   -- shift on, suppressed
-                                                               near the surface
-                                                               (today's behaviour).
+  surfaceZeroed   default                                   -- label is historical
+                                                               (from when the
+                                                               default projection
+                                                               was the hard-zero
+                                                               `mat`); the shared
+                                                               default is now
+                                                               `surfaceNormal`
+                                                               itself
+                                                               (`buildDefaultShiftProperties`),
+                                                               so this row is now
+                                                               identical to the
+                                                               `surfaceNormal` row
+                                                               below, not a
+                                                               separate treatment.
   surfaceActive   `surfaceDetectionConfig.active = False`   -- shift on, NOT
                                                                suppressed: the raw
                                                                drift the mitigation
@@ -26,6 +37,14 @@ Modes (`--modes`):
                                                                the shift into the
                                                                continuity equation.
   surfaceNormalDeltaU  surfaceNormal + correctdrhodt        -- the §4 target config.
+  michel2022      `scheme=michel2022, projectionScheme=michel2022` -- Michel
+                                                               et al. 2022
+                                                               (`PST_ALE_PLAN.md`
+                                                               Stage A), the
+                                                               Mach-free
+                                                               consistent PST,
+                                                               against the Sun
+                                                               2019 rows above.
 
 `--shape box` is the benchmark; `--shape circle` is the null experiment -- a
 circle in rigid rotation *is* an equilibrium, so any area drift there is pure
@@ -50,10 +69,10 @@ parser.add_argument('--nx', type=int, nargs='+', default=[48])
 parser.add_argument('--shapes', nargs='+', default=['box', 'circle'])
 parser.add_argument('--modes', nargs='+',
                     default=['shiftOff', 'surfaceZeroed', 'surfaceActive',
-                             'surfaceNormal', 'surfaceNormalDeltaU'],
+                             'surfaceNormal', 'surfaceNormalDeltaU', 'michel2022'],
                     choices=['shiftOff', 'surfaceZeroed', 'surfaceActive',
                              'surfaceNormal', 'deltaU', 'surfaceActiveDeltaU',
-                             'surfaceNormalDeltaU'])
+                             'surfaceNormalDeltaU', 'michel2022'])
 parser.add_argument('--tLimit', type=float, default=0.5)
 parser.add_argument('--omega', type=float, default=4.0)
 args = parser.parse_args()
@@ -77,7 +96,7 @@ def _configure(mode):
     def wrapped(ctx):
         base(ctx)
         sc = ctx.schemeConfig
-        from warpSPH.configurations.moduleConfigurations.shifting import ShiftingProjectionScheme
+        from warpSPH.configurations.moduleConfigurations.shifting import ShiftingProjectionScheme, ShiftingScheme
         if mode == 'shiftOff':
             sc.shiftProperties.active = False
         elif mode == 'surfaceZeroed':
@@ -94,6 +113,9 @@ def _configure(mode):
         elif mode == 'surfaceNormalDeltaU':
             sc.shiftProperties.projectionScheme = ShiftingProjectionScheme.surfaceNormal
             sc.shiftProperties.correctdrhodt = True
+        elif mode == 'michel2022':
+            sc.shiftProperties.scheme = ShiftingScheme.michel2022
+            sc.shiftProperties.projectionScheme = ShiftingProjectionScheme.michel2022
 
     return wrapped
 

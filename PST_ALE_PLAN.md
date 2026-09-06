@@ -381,7 +381,7 @@ otherwise be the largest and most error-prone part of the Vila work.
 
 | stage | what | blocked on | size |
 |---|---|---|---|
-| **A** | The Michel PST (Eqs. 21/22/47/48) | nothing | medium |
+| **A** | The Michel PST (Eqs. 21/22/47/48) — **landed 2026-09-05** | nothing | medium |
 | **B′** | **δ-ALE-SPH** (`antuono2021`): integrated `V`, `𝒟^ρ` + `𝒟^m` | A (it needs a PST), nothing else | **small-medium** |
 | **B** | Riemann + MUSCL + minmod subsystem | `vila1999`/`oger2016` would help | medium-large |
 | **C** | Parshikov & Medin scheme | B | small-medium |
@@ -408,26 +408,69 @@ investment, and nothing upstream is blocked on them.
 
 ## 5.1 Stage A — the PST itself
 
-- **`modules/shifting/michel.py`**, new `ShiftingScheme.michel2022`. Lives in
-  `modules/shifting/` because it is scheme-independent — δ-SPH, ACSPH and (later)
-  Parshikov all consume it.
-- **`U_char_i = max_j |(u_j−u_i)·x̂_ij|`** — a new neighbour-loop reduction. A
-  `max` over a runtime-length loop is exactly the shape
-  `scripts/gradcheck_incompressible.py`'s docstring warns about (`wp.max` in
-  `computeVsigWarp`), so it gets its own gradcheck from the start, and the
-  accumulator must be *returned* before any nonlinear read.
-- **`∇̃C_i` audit** — confirm `sample/wp_deltaShift.py` carries Eq. (3)'s
-  `1 + 0.2(W_ij/W(Δx))⁴` tensile factor, and that `W(Δx)` uses the *achieved*
-  spacing (`achievedLatticeSpacing`), not nominal `dx`.
-- **`d_i^FS` and `ñ_i`** — distance to, and normal of, the nearest free-surface
-  particle. Extend `modules/surfaceDetection/wp_dilate.py`, which already walks
-  that neighbourhood.
-- **Eq. (48) projection** — a new `ShiftingProjectionScheme.michel2022`
-  alongside `surfaceNormal`: same `λ<0.4` gate, but `σ` from `d^FS` rather than
-  the current `surfaceScaling`, the `λ²` prefactor, and `ñ` instead of `n`.
-- **`β_i` linear decay** from `(R/Δx)³` to 1 across the free-surface region.
-- Wire into ACSPH's `ArtificialCompressibleSystem.finalize` as the Eq. (58)
-  displacement, and retire `noPenetrationShift` if it carries the corners.
+**Landed 2026-09-05.** What actually shipped, against the checklist below:
+
+- **`modules/shifting/michel.py`**, `computeMichelShift` /
+  `ShiftingScheme.michel2022`. Consumes the tensile-corrected, pure-volume-
+  weighted `∇̃C_i` and `U_char_i` below; the free-surface `β` decay is computed
+  by the caller (`wrapper.py`) and passed in, since Eq. (48) requires it to
+  apply *before* the interior law's norm clamp, not as a post-hoc projection.
+- **`U_char_i = max_j |(u_j−u_i)·x̂_ij|`** — `modules/shifting/wp_michelUChar.py`,
+  the two-pass forward-argmax + re-evaluate-outside-the-loop split
+  `modules/shockCapturing/wp_vsig.py` established for exactly this `wp.max`
+  hazard. Gradchecked (`scripts/gradcheck_michelUChar.py`, positions +
+  velocities, plus an AdjacencyList-vs-grid consistency check) — clean.
+- **`∇̃C_i` audit — done, and it found a real discrepancy.**
+  `sample/wp_deltaShift.py` already had the `1 + R(W_ij/W(Δx))⁴` tensile
+  factor and an *achieved* `W(Δx)` (derived from `m_j/rho0`, not nominal
+  `dx`), but its weight was Sun's mean-density term
+  `0.5*m_j/(rho_i+rho_j)`, not Michel's Eq. (2)-(3) plain volume `V_j` — a
+  different formula, not just a naming difference. Fixed by adding a
+  `volumeWeighted` flag (default `False`, so every existing caller is
+  byte-identical) that selects the kernel's own already-computed but
+  previously-discarded `apparentVolume` instead. Regression-gradchecked
+  alongside the existing case.
+- **`d_i^FS` and `ñ_i`** — `modules/surfaceDetection/wp_nearestSurfaceNormal.py`,
+  the argmin variant of the same two-pass split, gated on the *raw* (undilated)
+  free-surface mask. Gradchecked
+  (`scripts/gradcheck_nearestSurfaceNormal.py`, positions + normals, plus a
+  hand-computed forward-value sanity check) — clean.
+- **Eq. (48) projection** — `ShiftingProjectionScheme.michel2022` in
+  `modules/shifting/wrapper.py`: `λ<0.4` gate, `σ` from `d^FS`, the `λ²`
+  prefactor, and `ñ` instead of `n`. No curvature gate (that's Sun 2019's
+  addition, kept only in `surfaceNormal`).
+- **`β_i` linear decay** from `1` at `d^FS=0` to `(R/Δx)³` at `d^FS=R` (the
+  paper states the endpoints but not the decay's outer bound; `R` was chosen
+  to match where `σ` itself bottoms out and where the dilated vicinity set's
+  own extent naturally is).
+- **Wired into ACSPH's `ArtificialCompressibleSystem.finalize`** as the
+  Eq. (58) displacement (no `correctdrhodt`/`correctdvdt` — density is
+  invariant there, nothing for them to correct). Found and fixed two real bugs
+  surfaced by wiring this in: a `config` `NameError` (never fetched from
+  `kwargs` in this method before), and `ArtificialCompressibleSPHConfig`'s
+  shared `shiftProperties` default (`buildDefaultShiftProperties()`) being
+  `active=True` with the Mach-based `deltaSPH` scheme — harmless while the
+  call was unwired, but would have silently turned shifting on with the wrong
+  law for every existing ACSPH config/test the moment it was wired up. Fixed
+  with a dedicated `buildDefaultACSPHShiftProperties()` (`active=False`,
+  `scheme=michel2022`) — no behavior change for anything that doesn't opt in,
+  and the right scheme when something does. `noPenetrationShift` is untouched
+  (still off by default, still not retired — that's a physics/validation call
+  for the next pass, not this one).
+- **Verified**: full repo test suite green; the §4.4 translation-invariance
+  acceptance test (`scripts/probe_michelTranslationInvariance.py`) passes to
+  `5.6e-16` for `michel2022` and, as the negative control, fails at `1.9e-2`
+  for `deltaSPH` — reproducing Part 7's discriminating claim directly; an
+  ACSPH smoke run (5-10 steps, `michel2022` active) stays finite with visibly
+  nonzero shift on a jittered lattice.
+
+**Deliberately not done in this pass** (next iteration, per Part 8's own
+sequencing): the `δu_max` convergence sweep on `tgv`/`hydrostaticColumn`/
+`rotatingSquarePatch`, re-measuring `ACSPH_PLAN.md` step 5b's
+`pairedFraction 0.065` with the shift actually on, and the "propose as new
+default" decision against Table 2 (Part 8 step 3) — none of those are
+implementation work, they're validation runs against a law that now exists
+to be measured.
 
 ## 5.2 Stage B′ — δ-ALE-SPH
 
@@ -528,20 +571,369 @@ Second acceptance test: `δu_max` vs resolution at fixed `R/Δx`. Michel's law
 converges at first order; ours should be flat. Fig. 1's bottom row is the
 picture to reproduce.
 
+## 7.1 Results so far (2026-09-05) — §4.4 passed; a units bug found and fixed along the way
+
+**⚠ A first pass at this section reported a "michel2022 roughly halves the
+`rotatingSquarePatch` footprint drift" finding. That finding was an
+artifact of a real bug and is retracted below — read the "units bug" note
+before anything else here.**
+
+**§4.4, `scripts/probe_michelTranslationInvariance.py`.** Passes as designed,
+unaffected by the bug below (an equality check is invariant to a shared
+scalar factor): `max|δu(u) − δu(u+U0)|` is `5.6e-16` for `michel2022`
+against `1.9e-2` for `deltaSPH` (the negative control) on a jittered
+periodic lattice. Confirms Part 2's Galilean-invariance claim directly, not
+just by construction.
+
+**Units bug, found and fixed while running the measurements below.**
+`computeMichelShift` was adding Eq. (22)'s `delta_u` straight into
+`positions`. Eq. (22)'s `delta_u` is a **velocity**
+(`ACSPH_PLAN.md` Eq. (58): `dx_i/dt = u_i + delta_u_i`), unlike
+`computeDeltaShift`'s Sun-style law, whose `-CFL*Ma*2*h^2` scaling bakes in
+an implicit acoustic timestep and so already returns a position-shaped
+displacement (`delta.py`'s own comment on this). Confirmed numerically on a
+representative jittered lattice: the un-fixed code produced a shift **~8x
+the local particle spacing** per call, against Sun's ~0.07x — physically
+absurd as a single displacement. Fixed by multiplying `delta_u` by the real
+simulation `dt` before accumulating into positions (ACSPH has no acoustic
+timestep to reuse — no sound speed — so the real `dt` is the only timescale
+available, and it is exactly what Eq. (58) asks for over one real step).
+`computeMichelShift` and `solveShifting`'s dispatch now both take `dt`
+explicitly. Full repo test suite re-verified green after the fix.
+
+**5.4, `rotatingSquarePatch` free surface — `scripts/probe_squarePatchAreaConservation.py --modes surfaceNormal michel2022`,
+re-run after the fix.** Not yet the `δu_max`-convergence-rate reproduction
+Michel's own §5.4 runs (that needs a resolution sweep reporting the rate
+itself, still open) — a cheaper first cut reusing the area/footprint drift
+metrics `docs/historic_plans/WCSPH_SHIFTING_PLAN.md` already built for
+exactly this comparison. `box` is the benchmark (real arm growth expected);
+`circle` is the null experiment (rigid rotation is an equilibrium, so any
+drift there is pure shift artifact):
+
+| shape | nx | mode | ΔhullArea% | ΔrmsRadius% |
+|---|---|---|---|---|
+| circle | 48 | `shiftOff` | +18.6% | +3.21% |
+| circle | 48 | `surfaceNormal` | +18.7% | +3.43% |
+| circle | 48 | `michel2022` | +18.3% | +2.98% |
+| circle | 96 | `shiftOff` | +58.9% | +9.79% |
+| circle | 96 | `surfaceNormal` | +72.2% | +10.11% |
+| circle | 96 | `michel2022` | +68.6% | +9.05% |
+| box | 48 | `shiftOff` | +221.4% | +48.95% |
+| box | 48 | `surfaceNormal` | +255.2% | +50.82% |
+| box | 48 | `michel2022` | +252.4% | +50.24% |
+| box | 96 | `shiftOff` | +302.4% | +56.55% |
+| box | 96 | `surfaceNormal` | +327.2% | +56.93% |
+| box | 96 | `michel2022` | +325.3% | +56.52% |
+
+**The corrected picture is much more muted than the retracted one:**
+`michel2022` now tracks `surfaceNormal` and even `shiftOff` closely at every
+cell — no resolvable win, on this metric, at this `tLimit=0.5`. Two
+non-exclusive readings: (a) most of this benchmark's footprint growth is the
+patch's own real arm-growth physics (`shiftOff` alone already shows nearly
+the full drift `surfaceNormal`/`michel2022` do), which a PST only perturbs
+at the margin regardless of which law; (b) now that `michel2022`'s shift is
+correctly scaled by the real (small, Mach-CFL-limited) `dt` at this `mach=0.05`
+setting, its per-step correction is small enough that its cumulative effect
+over one `tLimit=0.5` run doesn't move a coarse area metric — the opposite
+failure mode from the bug (too small to see, rather than artificially large).
+**This area-drift metric does not appear to discriminate these two laws at
+these settings; the real `δu_max`-convergence-rate reproduction (still open)
+is the test that actually speaks to Table 2 here, not this proxy.**
+
+**ACSPH `hydrostaticColumn`, `scripts/probe_michelHydrostaticColumn.py`,
+nx=32, 200 steps, re-run after the fix.** The actual re-measurement
+`ACSPH_PLAN.md` step 7 asked for. Caveat before the numbers: adaptive `dt`
+means each mode's 200 steps land at a *different* final `t`, so this is
+directional evidence from one seed/resolution, not a controlled comparison:
+
+| mode | final t | `‖v‖` peak | pairedFraction (final) | nnDistP01 (final) |
+|---|---|---|---|---|
+| neither | 0.41 | 6.78 | 0.000 (particles scattered, not paired) | 0.759 |
+| `noPenetrationShift` only | 0.91 | 0.75 | 0.043 | 0.275 |
+| `michel2022` shift only | 0.62 | 2.33 | **0.000** | **0.862** |
+| both | 0.80 | 1.63 | **0.000** | **0.849** |
+
+Unlike `rotatingSquarePatch`, this case's finding **survives the fix, and
+comes out cleaner**: `pairedFraction` was 0.008/0.004 (shift-only/both) under
+the buggy oversized shift — already good — and is now exactly **0.000**
+under the correctly-scaled one, with `nnDistP01` (higher is healthier —
+closer to the ideal lattice spacing) up from 0.53-0.67 to 0.85-0.86, well
+past even the safeguard-only run's 0.275. `‖v‖` peak also improved with the
+fix (3.16 → 2.33 shift-only; 2.18 → 1.63 both) but is still well short of
+`noPenetrationShift` alone (0.75). Two findings stand, the second
+**correcting an assumption in this repo's own notes**:
+
+1. **The shift does what a PST is for, cleanly.** `pairedFraction` —
+   "exactly and only what particle shifting exists to prevent" (step 5b) —
+   goes to exactly zero with the shift active, safeguard on or off, and the
+   particle-spacing distribution (`nnDistP01`) is healthier than under the
+   wall safeguard alone. Not a marginal effect, and not an artifact of the
+   fixed bug — it got *better*, not worse, once the shift was properly
+   dt-scaled down to a sane per-step magnitude.
+2. **The shift does not carry the corners on its own.** `ACSPH_PLAN.md`
+   Part "Decisions taken without you" item 4 speculated `noPenetrationShift`
+   "should not be needed once the shift exists". Measured, both before and
+   after the fix: it is still needed. `‖v‖` peak with the shift alone (2.33)
+   is well above the safeguard alone (0.75); `both` together (1.63) helps
+   further but still falls short of the safeguard's bound. The wall-corner
+   problem and the interior-pairing problem are apparently two different
+   failure modes, and the PST — faithfully implemented, and now cleanly
+   fixing the one it targets — does not also fix the other.
+   `noPenetrationShift` stays, and the paper's own Eq. (58)+(62) combination
+   (shift plus the velocity mirror) is worth rereading against this before
+   concluding anything stronger from a single seed/resolution.
+
+**`δu_max` convergence rate, `scripts/probe_michelConvergenceRate.py` — the
+real test, and it passes cleanly.** Michel's Fig. 1 headline claim,
+reproduced directly rather than via the inconclusive `squarePatch` proxy
+above: a jittered periodic Taylor-Green-vortex lattice, `nx` swept
+16→128 at **fixed `R/Δx = 2.5`** and fixed jitter fraction (`0.3*Δx`, so the
+disorder is self-similar across resolutions — essential for a fixed-`R/Δx`
+claim to mean anything). Measures each law's own *velocity* form of
+`delta_u` (Michel's Eq. (22), pre-`dt`, via a new `computeMichelShift(...,
+returnVelocity=True)` opt-in return — `dt` is a real-timestep artifact
+extraneous to the theoretical claim; Sun's `Table 1` velocity form,
+`2h * Ma*c0 * grad(C)`, computed directly since `computeDeltaShift`'s public
+contract returns a position delta with an implicit acoustic-timestep scaling
+that would be the wrong quantity here):
+
+| nx | Δx | `michel2022` `δu_max` | `deltaSPH` `δu_max` |
+|---|---|---|---|
+| 16 | 0.0625 | 0.498 | 0.352 |
+| 32 | 0.0313 | 0.258 | 0.403 |
+| 64 | 0.0156 | 0.137 | 0.396 |
+| 128 | 0.0078 | 0.070 | 0.411 |
+
+Log-log fit over all seven resolutions tested (16-128): **`michel2022`
+slope = 0.949** — first order, matching Michel's own headline result almost
+exactly. **`deltaSPH` slope = -0.063** — flat, exactly the "does not
+converge" claim Table 2 makes about every pre-2022 row. This is the
+strongest evidence yet that the Eq. (20)-(22) implementation itself
+(`modules/shifting/wp_michelUChar.py`, `modules/shifting/michel.py`) is
+correct, independent of whatever any given downstream case's `dt`/CFL
+happens to do to it — which is exactly the confound that made the
+`rotatingSquarePatch` proxy above inconclusive.
+
+**`sloshingTank`, `scripts/probe_sloshingTankSurfaceShift.py --modes noShift shiftZeroed shiftSurfaceNormal shiftMichel2022`,
+nx=60, tLimit=4.0 — Part 8 step 3's comparison target.** `michel2022` is a
+clean, unambiguous pass, and turned up something else along the way:
+
+| mode | steps | final t | diverged | minRho | maxRho | sensorP |
+|---|---|---|---|---|---|---|
+| `noShift` | 1696 | 0.34 | **yes** | 0.000 | 3.8e35 | -69832 |
+| `shiftZeroed` (`mat`) | 3664 | 0.73 | **yes** | 0.000 | inf | 0 |
+| `shiftSurfaceNormal` | 3407 | 0.68 | **yes** | 0.004 | inf | 3454 |
+| **`michel2022`** | 20001 | **4.00** | **no** | 0.994 | 1.011 | 4019 |
+
+`michel2022` runs the case **to completion** (the full `tLimit=4.0`, all
+20001 steps) with density held to `[0.994, 1.011]` — the tightest bound of
+any mode here by a wide margin, and the only one that doesn't diverge at
+all.
+
+**The regression is confirmed, root-caused, and fixed.** `docs/historic_plans/WCSPH_SHIFTING_PLAN.md`
+and this very probe's own docstring record `noShift` diverging at
+`t ≈ 3.5 s` (`ShiftProperties.projectionScheme`'s docstring says `t~2.6 s`)
+and `surfaceNormal` *clearing* that divergence — the whole reason
+`surfaceNormal` became the default. Measured here (current `HEAD`): `noShift`
+diverges at `t = 0.34`, **an order of magnitude earlier** than documented,
+and `surfaceNormal` — the fix — now diverges too, at `t = 0.68`.
+
+**Root cause, confirmed directly, not just suspected:** re-ran this exact
+probe (`noShift`, `shiftSurfaceNormal`) against commit `3d72163` — the parent
+of `790a7c7` ("fix its psi sign"), in an isolated `git worktree` so nothing
+in the working tree had to move — and got `noShift` diverging at `t = 2.76`
+and `shiftSurfaceNormal` surviving the full `t = 4.0` run
+(`minRho/maxRho = [0.969, 1.042]`), matching the documented pre-fix numbers
+almost exactly. **`790a7c7` is the cause**, definitively.
+
+That commit is not a bug to revert: it independently re-derives Marrone et
+al. 2011 Eq. (6), ships its own O(N²) torch reference confirming the old
+sign was wrong, adds `tests/test_deltaSPHDiffusion.py` pinning the
+linear/quadratic-field cancellation the corrected sign restores, and its own
+message is explicit that the old behavior was "diffusive either way, hence
+never a blow-up, hence never caught" — i.e. the bug was silently supplying
+extra numerical damping, not doing anything visibly wrong, which is exactly
+why `sloshingTank`'s stability quietly depended on it. Fixing `psi`'s sign
+correctly *weakens* `deltaSPH`'s density diffusion from an accidental
+second-order operator back to the intended fourth-order one, and this
+violent-impact case needed that accidental extra damping to survive under
+`surfaceNormal`'s free-surface treatment.
+
+**Fix applied**: `cases/sloshingTank.py`'s `deltaSPH` branch no longer
+inherits the shared `buildDefaultShiftProperties()` scheme/projection pair
+(`deltaSPH`/`surfaceNormal`) — it now sets
+`ShiftingScheme.michel2022`/`ShiftingProjectionScheme.michel2022` explicitly
+(new `--shift-scheme`/`shiftScheme` param added alongside the existing
+`shiftProjection` knob, same pattern). Confirmed end-to-end with the
+case's own real entry point, no test wrapper: `run(sloshingTankCase,
+params={'shifting': True}, nx=60, tLimit=4.0)` → 20001/20001 steps, not
+diverged, `minRho/maxRho = [0.994, 1.011]`. Full repo test suite green
+(one `test_incompressibleKrylov.py` failure did not reproduce in isolation —
+pre-existing test-order flakiness, unrelated to shifting). Also corrected:
+`buildDefaultShiftProperties()`'s own docstring, which cited the now-false
+"clears the sloshingTank NaN" claim for `surfaceNormal` — annotated with the
+regression and the fix, shared default left unchanged (that is Part 8 step
+3's own separate, larger decision, not something one case's fix should
+force).
+
+**§5.4, the free-surface `δu_max` convergence rate — done, `scripts/probe_michelFreeSurfaceConvergenceRate.py`.**
+Same jittered Taylor-Green lattice and velocity field as the interior
+convergence-rate probe above, at the same fixed `R/Δx = 2.5`, self-similar
+jitter, `nx` 16→128 — except the domain is not wrapped, so the box edge is a
+genuine free surface, and the measured quantity is Eq. (48)'s own
+`δu_i^FS`, built from the same three real modules production code uses
+(`detectFreeSurface`, `computeNearestSurfaceNormalWarp`,
+`computeMichelShift(..., returnVelocity=True)`) with Eq. (48)'s projection
+applied to the velocity form directly (legitimate: that projection is
+homogeneous of degree 1 in the vector it's given).
+
+A rigid-rotation field — the obvious first choice, matching
+`rotatingSquarePatch`'s own `t=0` state — turned out to be **degenerate for
+this specific measurement**: `U_char_i = max_j|(u_j-u_i)·x̂_ij|` is *exactly*
+zero for solid-body rotation at every pair and every resolution (`v_j-v_i =
+ω×x_ij` is exactly perpendicular to `x_ij`, an identity of rigid rotation, not
+a resolution effect), giving an all-machine-epsilon table with no signal to
+fit. Switched to the same Taylor-Green field the interior probe already
+validated, which has real local strain.
+
+The **global** `max_i` over every particle turned out to reproduce the
+periodic probe's bulk numbers almost exactly — a real finding, not a bug:
+Eq. (48) can only ever *shrink* a shift near the surface (project out a
+normal component, scale by `λ² ≤ 1`), so the domain-wide maximum stays
+pinned wherever the periodic case already had it, and never actually
+speaks to the free-surface law. The metric that does is the maximum
+**restricted to the dilated free-surface set `𝕍`** (`surfaceIndicator`,
+i.e. exactly the particles Eq. (48) modifies):
+
+| `nx` | `Δx` | `n` | `n` in `𝕍` | global `δu_max` | `𝕍`-restricted `δu_max` |
+|---|---|---|---|---|---|
+| 16 | 0.0625 | 256 | 156 | 0.498 | 0.416 |
+| 24 | 0.0417 | 576 | 252 | 0.355 | 0.231 |
+| 32 | 0.0313 | 1024 | 348 | 0.258 | 0.146 |
+| 48 | 0.0208 | 2304 | 540 | 0.180 | 0.0606 |
+| 64 | 0.0156 | 4096 | 732 | 0.137 | 0.0410 |
+| 96 | 0.0104 | 9216 | 1116 | 0.0926 | 0.0177 |
+| 128 | 0.0078 | 16384 | 1503 | 0.0698 | 0.0101 |
+
+Log-log slope: **global 0.949** (reproducing the interior probe's own
+0.949 almost exactly, as expected since it's measuring the same bulk
+saddle point), **`𝕍`-restricted 1.811** — convergent, and *faster* than
+first order. Consistent with the mechanism (the projection only ever
+shrinks the shift, and does so more aggressively as a particle sits deeper
+in the dilated band at fixed `R/Δx`), and clears Table 3's `lim_{Δx→0}
+δu^FS = 0` bar with margin rather than merely meeting it. Confirms the
+free-surface law converges; does not by itself distinguish "exactly first
+order with a favourable prefactor" from "genuinely super-first-order" —
+that would need a wider resolution range or a cleaner analytic test case
+than a synthetic bounded Taylor-Green box, which is a possible follow-up
+but not blocking.
+
+**`hydrostaticColumn`, multi-seed/multi-resolution — done, `scripts/probe_michelHydrostaticColumnSweep.py`.**
+The single-seed table above ran on a perfectly regular lattice — `hydrostaticColumn.initialConditions`'s
+own jitter call is dead code, commented out, despite the case declaring a
+`jitter` param nobody applies. A single regular configuration can hide (or
+manufacture) symmetric artefacts a disordered one would not share, so this
+re-enables that dead path from the outside (`shuffleParticles`, seeded per
+run) and sweeps `nx ∈ {24, 32, 48} × seeds {0, 1, 2}` across the same four
+modes, at 50 steps rather than 200 (measured cost ~1-2 s/step at this
+particle count, so the full matrix at 200 steps would run hours; the
+per-step diagnostics below stabilise well before 50 steps in the single-seed
+run, so this trades run length for breadth):
+
+| `nx` | mode | `‖v‖` peak (mean±std, 3 seeds) | `pairedFraction` (mean±std) |
+|---|---|---|---|
+| 24 | `neither` | 3.512±0.690 | 0.0637±0.0171 |
+| 24 | `noPenetrationShift` | 0.857±0.338 | 0.0637±0.0016 |
+| 24 | `michelShift` | 1.036±0.492 | 0.0347±0.0000 |
+| 24 | `both` | **0.663±0.227** | 0.0417±0.0057 |
+| 32 | `neither` | 3.306±0.801 | 0.0501±0.0160 |
+| 32 | `noPenetrationShift` | 0.612±0.068 | 0.0495±0.0066 |
+| 32 | `michelShift` | 0.470±0.036 | 0.0169±0.0074 |
+| 32 | `both` | **0.443±0.042** | **0.0130±0.0049** |
+| 48 | `neither` | 3.019±0.082 | 0.0556±0.0118 |
+| 48 | `noPenetrationShift` | 0.552±0.014 | 0.0532±0.0029 |
+| 48 | `michelShift` | 1.049±0.896 | 0.0240±0.0047 |
+| 48 | `both` | **0.415±0.009** | 0.0229±0.0032 |
+
+**This refines, and partly overturns, the single-seed conclusion rather than
+just confirming it.** Two things hold up: the shift consistently lowers
+`pairedFraction` relative to `neither` at every resolution and seed (the
+core claim), and `both` is the uniformly best *and* most seed-stable
+configuration at every resolution (lowest mean `‖v‖` peak, and — at nx 32/48 —
+the lowest variance too). But the single-seed claim that "the shift alone
+does not carry the corners the way the safeguard does" **does not
+robustly replicate**: at nx=32, `michelShift` alone (0.470) actually beats
+`noPenetrationShift` alone (0.612) on mean `‖v‖` peak; at nx=48 the two are
+comparable outside one outlier seed (`michelShift` seed 0 hit 2.316, seeds
+1-2 gave 0.42-0.43, matching `noPenetrationShift`'s 0.53-0.57 closely); only
+at nx=24 is `michelShift` clearly the worse of the two. The pattern that
+*does* hold at every resolution is a variance asymmetry:
+`noPenetrationShift`'s `‖v‖` peak is tightly seed-stable (std 0.014-0.338,
+shrinking with resolution) while `michelShift` alone is not (std 0.036-0.896,
+non-monotone in resolution, driven by occasional bad seeds). So the
+single-seed run's finding was directionally real (the regular lattice
+happened to be a seed where the shift alone underperforms) but overstated as
+a general claim — **the safeguard's real advantage is consistency across
+configurations, not a categorically lower velocity**, and `both` together is
+the actually-robust recommendation, not `noPenetrationShift` alone.
+
+Also visible: `pairedFraction` under the shift is no longer *exactly* 0.000
+here (0.0130-0.0347 vs. the single-seed run's exact zero) — most likely
+because that run went to 200 steps on the regular lattice and this one stops
+at 50 on a jittered one, and the metric is a slow-annealing steady-state
+quantity, not because the earlier finding was wrong; still, at every
+resolution and every seed, shift-active modes come in at roughly half of
+`neither`'s value or better, so the core claim survives even without a long
+run to confirm the exact-zero endpoint.
+
 ---
 
 # Part 8 — Sequencing
 
 1. **Sync `oger2016`, `vila1999`, `antuono2021`** (`literature/ADDING.md`). Cheap,
    and stage B should not start without them.
-2. **Stage A, the PST** (§5.1). Validate with the §4.4 translation-invariance
-   probe and the `δu_max` convergence sweep on `tgv`, then on ACSPH's
-   `hydrostaticColumn` (`ACSPH_PLAN.md` step 7's actual deliverable) and
-   `rotatingSquarePatch`.
-3. **Audit the existing shift against Table 2** and record it. If
-   `ShiftingScheme.michel2022` wins on `tgv` and `sloshingTank`, propose it as
-   the default — but as its own decision, with its own sweep, not folded into
-   step 2.
+2. **Stage A, the PST** (§5.1). **Implemented and wired in, 2026-09-05;
+   §4.4's translation-invariance probe passes, and so does the real
+   `δu_max` convergence-rate reproduction** (Fig. 1's headline result:
+   `michel2022` measures first order, slope 0.949, against `deltaSPH`'s flat
+   -0.063 — see §7.1). A units bug was found and fixed along the way
+   (`computeMichelShift` was applying Eq. (22)'s *velocity* as if it were
+   already a position delta) — the `hydrostaticColumn` finding below is
+   post-fix. `pairedFraction` does move — 0.065 → **exactly 0.000** — but
+   `‖v‖` at the corners does not; the shift and `noPenetrationShift` turn out
+   to fix two different failure modes, not one. **The free-surface `δu_max`
+   rate (Michel §5.4) is also done now** (`scripts/probe_michelFreeSurfaceConvergenceRate.py`,
+   §7.1): slope 1.811 on the dilated free-surface set, faster than first
+   order. **The multi-seed/multi-resolution version of the column table is
+   also done now** (`scripts/probe_michelHydrostaticColumnSweep.py`, §7.1):
+   it confirms the `pairedFraction` claim and that `both` (shift +
+   safeguard) is the uniformly best and most seed-stable configuration, but
+   refines the single-seed corner-velocity claim — `michelShift` alone is
+   not categorically worse than `noPenetrationShift` alone across
+   resolutions/seeds, just less seed-stable. See §7.1 for the full table.
+3. **Audit the existing shift against Table 2** and record it — **the real
+   evidence is now in, and it is decisive on the interior claim**: the
+   convergence-rate sweep (§7.1) confirms `michel2022` is first-order
+   convergent and `deltaSPH` is not, exactly as Table 2 predicts. The
+   `rotatingSquarePatch` footprint-drift proxy tried first was inconclusive
+   (post-fix, `michel2022` tracks `surfaceNormal`/`shiftOff` closely) — not a
+   contradiction, just the wrong metric for this claim. **`sloshingTank`
+   (§7.1) is done and closed out**: `michel2022` is the only mode of four
+   tested that completes the run, `noShift`/`surfaceNormal`'s early
+   divergence is root-caused (confirmed by re-running against the pre-fix
+   commit in an isolated worktree: `790a7c7`, a correct and independently
+   verified fix, removed accidental extra diffusion this case's stability
+   depended on — see `ACSPH_PLAN.md` decision 1), and the fix is applied:
+   `cases/sloshingTank.py`'s `deltaSPH` branch now defaults to
+   `michel2022`/`michel2022` rather than the shared default, confirmed
+   end-to-end through the case's real entry point. **Michel §5.4's own
+   free-surface convergence rate is now done too**
+   (`scripts/probe_michelFreeSurfaceConvergenceRate.py`, §7.1): the
+   `𝕍`-restricted `δu_max` converges at slope 1.811 (faster than first
+   order) against the interior law's own 0.949, clearing Table 3's
+   `lim_{Δx→0} δu^FS = 0` claim with margin. That closes out the interior
+   *and* free-surface halves of the Table 2/3 audit; proposing a *shared*
+   default for every WCSPH case remains its own separate decision.
 4. **Stage B′, δ-ALE-SPH** (§5.2). Integrated volume, `𝒟^ρ` + `𝒟^m`, graded
    first by its two exact reductions (Lagrangian, and constant-mass = today's
    `correctdrhodt`/`correctdvdt`) and then on `antuono2021`'s own benchmarks —

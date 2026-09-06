@@ -50,7 +50,7 @@ import numpy as np
 import torch
 
 from ..configurations.moduleConfigurations.gravity import GravityType
-from ..configurations.moduleConfigurations.shifting import ShiftingProjectionScheme
+from ..configurations.moduleConfigurations.shifting import ShiftingProjectionScheme, ShiftingScheme
 from ..configurations.region import BCType
 from ..enumTypes import (WeaklyCompressibleSPHScheme,
                          isIncompressibleScheme)
@@ -170,15 +170,31 @@ def configureScheme(ctx: RunContext) -> None:
             sc.diffusionParams.viscidNu = ctx.param('nu')
         if hasattr(sc.fluid, 'backgroundPressure'):
             sc.fluid.backgroundPressure = ctx.param('backgroundPressure', 0.0)
-        # The δ⁺-SPH particle shift near the free surface -- the reason this
-        # case survives the wall slam at all (docs/historic_plans/WCSPH_SHIFTING_PLAN.md). On by
-        # default now that `surfaceNormal` is the projection default; the knobs
-        # are for the shift A/B (`--shift-projection`, `--no-shift`).
+        # The particle shift near the free surface -- the reason this case
+        # survives the wall slam at all (docs/historic_plans/WCSPH_SHIFTING_PLAN.md). On by
+        # default; the knobs are for the shift A/B (`--shift-scheme`,
+        # `--shift-projection`, `--no-shift`).
+        #
+        # Default is `michel2022`/`michel2022`, not the shared
+        # `buildDefaultShiftProperties()` default (`deltaSPH`/`surfaceNormal`)
+        # -- **required**, not a preference. Commit 790a7c7 ("fix its psi
+        # sign") correctly fixed `deltaSPH`'s density-diffusion operator
+        # (it was accidentally 2x too strong, an over-diffusive bug that
+        # happened to add free numerical damping -- see that commit and
+        # `ACSPH_PLAN.md` decision 1). One confirmed side effect: this case's
+        # old default (`deltaSPH`/`surfaceNormal`) now diverges at `t=0.68`
+        # instead of surviving to `t=4.0` as `docs/historic_plans/
+        # WCSPH_SHIFTING_PLAN.md` documents -- reproduced directly by
+        # re-running the pre-fix commit unchanged (`PST_ALE_PLAN.md` §7.1).
+        # `michel2022`/`michel2022` (`PST_ALE_PLAN.md` Stage A) is the one
+        # configuration measured to still survive the full run post-fix
+        # (density held to [0.994, 1.011] over 20001 steps), so it is the
+        # default here now -- switching schemes is not "adding a feature",
+        # it is what makes this case's shipped default actually run.
         if hasattr(sc, 'shiftProperties'):
             sc.shiftProperties.active = ctx.param('shifting', True)
-            proj = ctx.param('shiftProjection', None)
-            if proj:
-                sc.shiftProperties.projectionScheme = ShiftingProjectionScheme[proj]
+            sc.shiftProperties.scheme = ShiftingScheme[ctx.param('shiftScheme', 'michel2022')]
+            sc.shiftProperties.projectionScheme = ShiftingProjectionScheme[ctx.param('shiftProjection', 'michel2022')]
             # Sun 2019 Eq. (9) continuity δu-terms -- the volume-consistency
             # fix for the free-surface de-densification (WCSPH_SHIFTING_PLAN
             # §2d). Off by default; opt in for the sloshing quantitative pass.

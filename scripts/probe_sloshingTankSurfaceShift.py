@@ -12,13 +12,18 @@ Modes:
   noShift            `shiftProperties.active = False`  (the case default)
   shiftZeroed        shifting on, `projectionScheme = mat`  (legacy hard-zero)
   shiftSurfaceNormal shifting on, `projectionScheme = surfaceNormal`  (§3)
+  shiftMichel2022    shifting on, `scheme = michel2022`,
+                     `projectionScheme = michel2022` (`PST_ALE_PLAN.md` Stage
+                     A) -- Part 8 step 3's `sloshingTank` comparison target,
+                     the Mach-free consistent PST against Sun 2019's own
+                     surface treatment.
 
 Reports, per mode: steps run, final `t`, whether it diverged, and the density
 bounds + wall-sensor pressure at the last finite step.
 
 Usage:
   python scripts/probe_sloshingTankSurfaceShift.py [--nx 60] [--tLimit 4.0]
-      [--modes noShift shiftZeroed shiftSurfaceNormal]
+      [--modes noShift shiftZeroed shiftSurfaceNormal shiftMichel2022]
 """
 from __future__ import annotations
 
@@ -28,8 +33,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--nx', type=int, default=60)
 parser.add_argument('--tLimit', type=float, default=4.0)
 parser.add_argument('--modes', nargs='+',
-                    default=['noShift', 'shiftZeroed', 'shiftSurfaceNormal'],
-                    choices=['noShift', 'shiftZeroed', 'shiftSurfaceNormal'])
+                    default=['noShift', 'shiftZeroed', 'shiftSurfaceNormal', 'shiftMichel2022'],
+                    choices=['noShift', 'shiftZeroed', 'shiftSurfaceNormal', 'shiftMichel2022'])
 args = parser.parse_args()
 
 from warpSPHBootstrap import bootstrap
@@ -39,7 +44,7 @@ import numpy as np
 
 from warpSPH.cases.sloshingTank import sloshingTankCase as case
 from warpSPH.runner import run
-from warpSPH.configurations.moduleConfigurations.shifting import ShiftingProjectionScheme
+from warpSPH.configurations.moduleConfigurations.shifting import ShiftingProjectionScheme, ShiftingScheme
 
 
 def _configure(mode):
@@ -58,6 +63,10 @@ def _configure(mode):
         elif mode == 'shiftSurfaceNormal':
             sc.shiftProperties.active = True
             sc.shiftProperties.projectionScheme = ShiftingProjectionScheme.surfaceNormal
+        elif mode == 'shiftMichel2022':
+            sc.shiftProperties.active = True
+            sc.shiftProperties.scheme = ShiftingScheme.michel2022
+            sc.shiftProperties.projectionScheme = ShiftingProjectionScheme.michel2022
 
     return wrapped
 

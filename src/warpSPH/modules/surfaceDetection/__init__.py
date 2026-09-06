@@ -16,6 +16,7 @@ from .barecascoDetection import detectFreeSurfaceBarecasco
 from .maronneDetection import detectFreeSurfaceMaronne
 
 from .wrapper import detectFreeSurface
+from .wp_nearestSurfaceNormal import computeNearestSurfaceNormalWarp
 
 __all__ = [
     'detectFreeSurfaceColorField',
@@ -28,4 +29,5 @@ __all__ = [
     'detectFreeSurfaceBarecasco',
     'detectFreeSurfaceMaronne',
     'detectFreeSurface',
+    'computeNearestSurfaceNormalWarp',
 ]
