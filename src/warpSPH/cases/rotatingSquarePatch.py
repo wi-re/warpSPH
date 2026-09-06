@@ -26,13 +26,15 @@ import torch
 
 from warpSPHCore import sphKernelScale
 
+from ..enumTypes import isArtificialCompressibleScheme
 from ..modules import setupWeaklyCompressibleTimestep
 from ..runner import Case, RunContext, caseMain, registerCase
 from ..utils.support import volumeToSupport
 from .plotting import particlePlot
 from .weaklyCompressible import (VELOCITY_DENSITY_FIELDS, WEAKLY_COMPRESSIBLE_DEFAULTS,
                                  WEAKLY_COMPRESSIBLE_PARAMS, buildRegionSystem,
-                                 centredShapeSdf, configureWeaklyCompressible, fluidRegion,
+                                 centredShapeSdf, configureArtificialCompressible,
+                                 configureWeaklyCompressible, fluidRegion,
                                  paramExtraData, shapeArgs,
                                  squarePatchAreaMetrics, weaklyCompressibleDiagnostics)
 
@@ -69,6 +71,34 @@ def _setupTimestep(ctx: RunContext, system) -> None:
         ctx.config, ctx.schemeConfig, system, baseDt, verbose=ctx.spec.verbose)
 
 
+def configureScheme(ctx: RunContext) -> None:
+    if isArtificialCompressibleScheme(ctx.scheme):
+        return _configureArtificialCompressible(ctx)
+    configureWeaklyCompressible(ctx)
+
+
+def _configureArtificialCompressible(ctx: RunContext) -> None:
+    """The ACSPH branch of `configureScheme` (`ACSPH_PLAN.md` §4.2/Part 7:
+    the paper's KE-decay/momentum-conservation case against BEM/LDFM
+    reference data, and -- since this is Michel's own §5.4 free-surface
+    validation case -- the first real (non-synthetic) test of Eq. (48)'s
+    convergence claim, complementing `PST_ALE_PLAN.md`'s bounded
+    Taylor-Green probe.
+
+    No gravity, no walls (`buildSystem` places fluid particles only), so
+    this is the simplest possible ACSPH case to wire: `configureArtificialCompressible`
+    handles domain/dt-integrator/surface-detection, and the only thing left
+    is Eq. (48)'s `U_char` (ACSPH_PLAN.md §5.5): the patch's own edge speed
+    under rigid rotation, `omega * size`.
+    """
+    configureArtificialCompressible(ctx)
+
+    schemeConfig = ctx.schemeConfig
+    schemeConfig.shiftProperties.active = False
+    if schemeConfig.acParams.uChar is None:
+        schemeConfig.acParams.uChar = float(ctx.param('omega') * ctx.param('size'))
+
+
 def buildSystem(ctx: RunContext):
     args = shapeArgs(ctx.param('shape'), ctx.param('size'), ctx.param('aspectRatio'))
     # Centred on the measured shape, not on the primitive's own origin, so the
@@ -83,7 +113,22 @@ def initialConditions(ctx: RunContext, system) -> None:
     positions = system.state.positions
     system.state.velocities[:, 0] = omega * positions[:, 1]
     system.state.velocities[:, 1] = -omega * positions[:, 0]
-    _setupTimestep(ctx, system)
+    if isArtificialCompressibleScheme(ctx.scheme):
+        # No sound speed to back-solve a `dt` from (`_setupTimestep` is
+        # WCSPH-only, tuned for a target Mach number); seed `targetDt` and
+        # let `squarePatchTimestep`'s Eq. (46) hook take over from step 2 on.
+        ctx.config.dt = ctx.param('targetDt')
+    else:
+        _setupTimestep(ctx, system)
+
+
+def squarePatchTimestep(ctx: RunContext, state) -> float:
+    """Eq. (46) for ACSPH; the fixed Mach-tuned `dt` otherwise (unchanged
+    WCSPH behaviour -- this case has never had a per-step adaptive `dt`)."""
+    if isArtificialCompressibleScheme(ctx.scheme):
+        from ..modules.timestep import computeTimestep
+        return computeTimestep(state, ctx.config, ctx.schemeConfig, dt=ctx.config.dt)
+    return ctx.config.dt
 
 
 setupPlot, updatePlot = particlePlot(VELOCITY_DENSITY_FIELDS)
@@ -103,12 +148,13 @@ rotatingSquarePatchCase = registerCase(Case(
     scheme='deltaSPH',
     description='Rotating square patch of fluid (2D), weakly compressible or incompressible.',
     buildSystem=buildSystem,
-    configureScheme=configureWeaklyCompressible,
+    configureScheme=configureScheme,
     initialConditions=initialConditions,
     diagnostics=diagnostics,
     setupPlot=setupPlot,
     updatePlot=updatePlot,
     extraData=paramExtraData,
+    timestep=squarePatchTimestep,
     defaults=dict(
         WEAKLY_COMPRESSIBLE_DEFAULTS,
         caseName='03-rotatingSquarePatch',

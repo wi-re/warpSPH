@@ -278,6 +278,14 @@ def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
                 schemeConfig=ctx.schemeConfig,
             )
         runningState = stepResult.state
+        # Scheme-specific extra step data that doesn't fit the state (e.g.
+        # ACSPH's `update.pseudoIterations`/`.epsilonV`, set ad hoc on the
+        # `ArtificialCompressibleSystemUpdate` `schemes/artificialCompressible.py`
+        # returns) rides on the last stage's `update` object, which `diagnostics`/
+        # `postStep` cannot otherwise reach -- neither gets `stepResult`, only
+        # `runningState`. Stashed here, read with `getattr(..., None)` by anything
+        # that wants it; `None` for every scheme that sets nothing extra.
+        ctx.scratch['lastStageUpdate'] = stepResult.stages[-1].update if stepResult.stages else None
 
         if case.postStep is not None:
             case.postStep(ctx, runningState, i)

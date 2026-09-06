@@ -34,11 +34,13 @@ from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 import torch
+from torch.profiler import record_function
 from warpSPHCore import *
 from warpSPHIntegrators import *
 
 from ..rigidBody.integrate import integrateRigidBody
 from ..rigidBody.update import updateBodyParticlesWCSPH
+from ..modules.shifting.wrapper import solveShifting
 
 __all__ = ['ArtificialCompressibleState', 'ArtificialCompressibleSystemUpdate',
            'ArtificialCompressibleSystem', 'bdfCoefficients']
@@ -170,18 +172,20 @@ class ArtificialCompressibleSystem(BaseIntegrationSystem):
 
     def finalize(self, initialState, dt, returnValues, updateValues, weights=...,
                  *args, **kwargs):
-        """Copy back the derived fields the step recomputed, roll the BDF
-        history, and advance any rigid bodies.
+        """Copy back the derived fields the step recomputed, apply the
+        particle shift, roll the BDF history, and advance any rigid bodies.
 
         Thinner than `WeaklyCompressibleSystem.finalize` because there is no
         density update to reconcile -- density is invariant here.
 
-        **This is where the particle shift goes** (`ACSPH_PLAN.md` step 7).
-        Eq. (58) applies it as a displacement *outside* the pseudo-time loop,
-        which in this framework is exactly `finalize`, the same place
-        `WeaklyCompressibleSystem.finalize` runs `solveShifting`. It is not in
-        the step function: the step owns the dual-time solve, and the shift by
-        construction happens after it has converged.
+        The particle shift (`ACSPH_PLAN.md` step 7, `PST_ALE_PLAN.md` Stage A)
+        runs here rather than in the step function: Eq. (58) applies it as a
+        displacement *outside* the pseudo-time loop, and `finalize` is exactly
+        that point -- the step owns the dual-time solve, and the shift by
+        construction happens after it has converged. Same place
+        `WeaklyCompressibleSystem.finalize` runs `solveShifting`, minus that
+        system's `correctdrhodt`/`correctdvdt` (nothing to correct: density is
+        invariant here).
         """
         self.adjacency = returnValues[-1][0]
         lastState = returnValues[-1][1]
@@ -197,7 +201,26 @@ class ArtificialCompressibleSystem(BaseIntegrationSystem):
                 setattr(self.state, name,
                         incoming.clone() if incoming is not None else None)
 
+        config = kwargs.get('config', None)
         schemeConfig = kwargs.get('schemeConfig', None)
+
+        if config is not None and schemeConfig is not None and schemeConfig.shiftProperties.active:
+            # Eq. (58): the particle shift applied as a displacement outside
+            # the pseudo-time loop -- see this method's own docstring. Unlike
+            # `WeaklyCompressibleSystem.finalize`, no `correctdrhodt`/
+            # `correctdvdt` here: those correct the shift's divergence
+            # contribution to density/momentum, and density is invariant in
+            # this scheme by construction (nothing for them to correct).
+            with record_function("[warpSPH] - [ACSPH] - solve shifting"):
+                dx = solveShifting(
+                    systemState=self.state,
+                    config=config,
+                    schemeConfig=schemeConfig,
+                    adjacency=self.adjacency,
+                    dt=dt,
+                )
+                self.state.positions = self.state.positions + dx
+
         if schemeConfig is not None:
             for rigidBody in schemeConfig.rigidBodies:
                 rigidBody = integrateRigidBody(rigidBody, 0, 0, dt)

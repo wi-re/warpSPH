@@ -130,6 +130,25 @@ def buildDefaultArtificialCompressibilityParams() -> ArtificialCompressibilityPa
     return ArtificialCompressibilityParams()
 
 
+def buildDefaultACSPHShiftProperties() -> ShiftProperties:
+    """`buildDefaultShiftProperties()` (shared with WCSPH/incompressible)
+    defaults to `active=True`, `scheme=deltaSPH` -- wrong for ACSPH on both
+    counts: `deltaSPH` is Mach-scaled and ACSPH has no sound speed
+    (`PST_ALE_PLAN.md` Part 1.2), and until `ArtificialCompressibleSystem.
+    finalize` actually called `solveShifting`, `active=True` here was a
+    silent no-op every existing case/test relied on. Now that it is wired in
+    (`PST_ALE_PLAN.md` Stage A), this keeps shifting **off** by default (no
+    behavior change for anything that does not opt in) but points `scheme`/
+    `projectionScheme` at the one PST pair ACSPH can actually use, so opting
+    in (`hydrostaticColumn.py`'s `ACSPH_PLAN.md` step 7) does not also
+    require rediscovering which scheme is valid here."""
+    props = buildDefaultShiftProperties()
+    props.active = False
+    props.scheme = ShiftingScheme.michel2022
+    props.projectionScheme = ShiftingProjectionScheme.michel2022
+    return props
+
+
 @dataclass
 class ArtificialCompressibleSPHConfig:
     fluid: fluidProperties = field(default_factory=buildDefaultFluidProperties, metadata={'description': 'Fluid properties (note: fixedSoundSpeed is NOT used by this scheme)'})
@@ -158,17 +177,22 @@ class ArtificialCompressibleSPHConfig:
     #: The repo's mDBC no-penetration correction, applied as an acceleration the
     #: way `deltaSPH_step` applies it. **A safeguard, not particle shifting** --
     #: the actual shift is a `finalize`-step displacement (Eq. 58, applied
-    #: outside the pseudo-time loop), which is what `ACSPH_PLAN.md` step 7
-    #: builds. Off by default: it is not in the paper (Eq. 62 relies on the
-    #: velocity mirror alone) and should not be needed once the shift exists.
-    #: Turn it on to see what a walled case does without either -- measured on
-    #: `hydrostaticColumn` in ACSPH_PLAN.md step 5b.
+    #: outside the pseudo-time loop; `ShiftProperties`/`PST_ALE_PLAN.md` Stage
+    #: A). Off by default: it is not in the paper (Eq. 62 relies on the
+    #: velocity mirror alone). Measured (`PST_ALE_PLAN.md` sec. 7.1) that the
+    #: shift does *not* make this redundant -- it fixes interior particle
+    #: pairing (completely: pairedFraction 0.065 -> 0.000), not the near-wall
+    #: corner velocity blow-up this guards against; `hydrostaticColumn` with
+    #: the Michel shift alone still peaks `|v|~2.3` vs. `~0.75` with this
+    #: safeguard alone. Turn it on to see what a walled case
+    #: does without either -- measured on `hydrostaticColumn` in
+    #: `ACSPH_PLAN.md` step 5b.
     noPenetrationShift: bool = field(default=False, metadata={'description': 'mDBC no-penetration safeguard (off; not in the paper, and not the shift -- see ACSPH_PLAN.md step 7)'})
 
     dt_viscosityConstraint: bool = field(default=True, metadata={'description': 'Whether to apply the viscous constraint 0.125 h^2/nu in Eq. (46)'})
     dt_accelerationConstraint: bool = field(default=True, metadata={'description': 'Whether to apply the acceleration constraint in the timestep'})
 
-    shiftProperties: ShiftProperties = field(default_factory=buildDefaultShiftProperties, metadata={'description': 'Particle-shifting properties (Michel et al. 2022 for this scheme)'})
+    shiftProperties: ShiftProperties = field(default_factory=buildDefaultACSPHShiftProperties, metadata={'description': 'Particle-shifting properties (Michel et al. 2022 for this scheme; off by default, see buildDefaultACSPHShiftProperties)'})
 
     regions: List[ParticleRegion] = field(default_factory=list, metadata={'description': 'List of particle regions in the simulation'})
     rigidBodies: List[RigidBody] = field(default_factory=list, metadata={'description': 'List of rigid bodies in the simulation'})
@@ -313,7 +337,7 @@ def dictToArtificialCompressibleConfig(configDict: Dict[str, Any]) -> Artificial
     config.bandwith = float(configDict.get('bandwith', 10.0))
 
     shiftPropsDict = configDict.get('shiftProperties', {})
-    defaultShift = buildDefaultShiftProperties()
+    defaultShift = buildDefaultACSPHShiftProperties()
     config.shiftProperties = ShiftProperties(
         iterations=int(shiftPropsDict.get('iterations', defaultShift.iterations)),
         CFL=float(shiftPropsDict.get('CFL', defaultShift.CFL)),
