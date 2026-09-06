@@ -154,10 +154,15 @@ def deltaSPH_step(
     with record_function("[warpSPH] - [deltaSPH - 10] - compute drhodt_diss"):
         drhodt_diss = computeDensityDiffusion(currentState, config, schemeConfig, adjacency, gradRho, gradRhoL)
 
-    # 11. Compute dvdt_diss
-    # with TimedBlock('compute dvdt_diss', use_cuda=True, device=config.device) as tb_dvdt_diss:
+    # 11. Compute dvdt_diss.
+    # `approachOnly=False`: Marrone 2011 Eq. (5b) / Sun 2017 Eq. (1) apply the
+    # artificial-viscosity term `alpha h c0 pi_ij` to *every* pair, not only
+    # approaching ones. The approach-only clamp is Monaghan's shock viscosity,
+    # a different term -- it under-damps the tensile/shear regions a violent
+    # free-surface impact grows. See `DELTASPH_VALIDATION_PLAN.md` Part 1.
     with record_function("[warpSPH] - [deltaSPH - 11] - compute dvdt_diss"):
-        dvdt_diss = computeVelocityDiffusion(currentState, config, schemeConfig, adjacency)
+        dvdt_diss = computeVelocityDiffusion(currentState, config, schemeConfig, adjacency,
+                                             approachOnly=False)
     
     # 12. Compute drhodt
     # with TimedBlock('compute drhodt', use_cuda=True, device=config.device) as tb_drhodt:

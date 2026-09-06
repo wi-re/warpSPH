@@ -75,11 +75,20 @@ def computeTimestep(
     dt_c = timestepCFL * particleSupport / c_s / kernelScale
     dt_c = torch.tensor(dt_c, dtype = dtype, device = device) if not isinstance(dt_c, torch.Tensor) else dt_c
 
-    # acceleration timestep condition
-    if systemUpdate is not None and hasattr(systemUpdate, 'velocities'):
-        dudt = systemUpdate.velocities
-        max_accel = torch.max(torch.linalg.norm(dudt[~torch.isnan(dudt)], dim = -1))
-        dt_a = 0.25 * torch.sqrt(particleSupport / (max_accel + 1e-7)) / kernelScale
+    # acceleration timestep condition -- Sun et al. 2017 Eq. (5) `dt_a =
+    # 0.25 min sqrt(h / ||a||)`. The per-particle acceleration is the update's
+    # `dvdt` (`WeaklyCompressibleSystemUpdate`); older callers passed an object
+    # carrying `.velocities` (a dv), so accept either.
+    dudt = getattr(systemUpdate, 'dvdt', None) if systemUpdate is not None else None
+    if dudt is None and systemUpdate is not None:
+        dudt = getattr(systemUpdate, 'velocities', None)
+    if dudt is not None and dudt.numel():
+        finite = dudt[~torch.isnan(dudt).any(dim=-1)] if dudt.ndim > 1 else dudt[~torch.isnan(dudt)]
+        if finite.numel():
+            max_accel = torch.max(torch.linalg.norm(finite, dim = -1))
+            dt_a = 0.25 * torch.sqrt(particleSupport / (max_accel + 1e-7)) / kernelScale
+        else:
+            dt_a = torch.tensor(maxDt, dtype = dtype, device = device)
     else:
         dt_a = torch.tensor(maxDt, dtype = dtype, device = device)
     dt_a = torch.tensor(dt_a, dtype = dtype, device = device) if not isinstance(dt_a, torch.Tensor) else dt_a
@@ -106,13 +115,45 @@ def computeTimestep(
 
 
 def setupWeaklyCompressibleTimestep(
-        config, schemeConfig, compressibleSystem, targetDt, verbose = True
+        config, schemeConfig, compressibleSystem, targetDt, verbose = True,
+        cSound = None, uMaxExpected = None, machTarget = 0.1,
 ):
+    """Fix the artificial sound speed `c0` and the initial `dt`.
+
+    Two ways to pick `c0`:
+
+    * **Sun et al. 2017 Eq. (2)** -- the physical way. Pass `cSound` directly,
+      or `uMaxExpected` and `machTarget` (default 0.1) so
+      `c0 = uMaxExpected / machTarget` (`>= 10 U_max` at the default). `dt` is
+      then the acoustic-CFL step `cflFactor * h / (c0 * kernelScale)` (with `h`
+      the support radius). This keeps the run genuinely weakly compressible
+      regardless of `dx`.
+    * **legacy back-solve** -- neither given: `c0` is inverted out of a fixed
+      `targetDt` through the acoustic CFL, `c0 = 0.3 h_vol / (kernelScale
+      targetDt)`, and `dt = targetDt`. This makes `c0 ~ 1/dx` and can push the
+      Mach number well past 0.1 at fine resolution (see the warning below);
+      prefer the Sun Eq. (2) path for any physical-scale case.
+    """
     dx = config.dx
+    h = float(compressibleSystem.state.supports.min())
+    kernelScale = float(sphKernelScale(config.kernel.value, config.dim))
+
+    if cSound is not None or uMaxExpected is not None:
+        c0 = float(cSound) if cSound is not None else float(uMaxExpected) / float(machTarget)
+        dt = float(config.cflFactor) * h / (c0 * kernelScale)
+        schemeConfig.fluid.fixedSoundSpeed = c0
+        if verbose:
+            print(f'Sun Eq. (2) sound speed: c0 = {c0:.4g}, acoustic dt = {dt:.4g}')
+        uMax = torch.max(torch.linalg.norm(compressibleSystem.state.velocities, dim=1))
+        if verbose:
+            print(f'Max velocity (init): {uMax}, Max Mach: {uMax / c0}')
+        config.dt = dt
+        return c0, dt
+
     c0 = 0.3 * volumeToSupport(dx**2, config.targetNeighbors, 2) / float(sphKernelScale(config.kernel.value, 2)) / targetDt
     if verbose:
         print(f'Computed c0: {c0}, target c0: {schemeConfig.fluid.fixedSoundSpeed}, diff: {abs(c0 - schemeConfig.fluid.fixedSoundSpeed)}')
-        
+
     schemeConfig.fluid.fixedSoundSpeed = c0
     # dt = computeTimestep(
     #     system = compressibleSystem,

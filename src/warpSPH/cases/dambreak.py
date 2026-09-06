@@ -55,9 +55,11 @@ import torch
 from ..caseUtils import (SimulationProperties, buildDomain, buildPresetObstacles,
                          buildRegions, sampleNoise, setupFreestream, setupKolmogorov)
 from ..configurations.moduleConfigurations.gravity import GravityType
-from ..enumTypes import isIncompressibleScheme
+from ..enumTypes import isArtificialCompressibleScheme, isIncompressibleScheme
 from ..initializers import initializeWeaklyCompressibleSimulation
 from ..modules import setupWeaklyCompressibleTimestep
+from ..modules.liu import interpolateLiuLiu
+from warpSPHCore import OperationDirection
 from ..runner import Case, RunContext, caseMain, registerCase
 from .kolmogorovIncompressible import kolmogorovIncompressibleTimestep
 from .weaklyCompressible import particleDistributionMetrics
@@ -114,8 +116,21 @@ def configureScheme(ctx: RunContext) -> None:
     ctx.scratch['args'] = args
     ctx.scratch['simSetup'] = simSetup
 
-    # buildDomain widens the box by `band` particle layers for the boundary.
+    # buildDomain widens the box by `band` particle layers for the boundary;
+    # those band layers are the tank walls (bed, back wall, downstream impact
+    # wall), sampled from the widened `domain` SDF -- the geometry needs no
+    # further work, only physical parameter values (`ACSPH_PLAN.md` §4.5).
+    #
+    # The box is walled on every side, so the domain is non-periodic by
+    # default. (It was briefly flipped to `periodic=True` while root-causing
+    # the Eq. (61) wall moment's minimum-image handling -- `ACSPH_PLAN.md`
+    # decision 3.) `wallPeriodic=True` restores the periodic wrap for
+    # diagnosing whether near-wall behaviour is a domain-edge neighbour-search
+    # artefact; the pressure probe forces its own non-periodic gather either
+    # way so it is unaffected.
     domain, interiorDomain = buildDomain(simSetup)
+    if not ctx.param('wallPeriodic'):
+        domain.periodic = torch.zeros_like(domain.periodic)
     ctx.config.domain = domain
     ctx.config.nx = simSetup.nx + 2 * simSetup.band
     ctx.config.dx = simSetup.dx
@@ -128,6 +143,65 @@ def configureScheme(ctx: RunContext) -> None:
     schemeConfig.gravityConfig.magnitude = ctx.param('gravityMagnitude')
     schemeConfig.gravityConfig.origin = ctx.param('gravityDirection')
     schemeConfig.bandwith = simSetup.L / ctx.param('bandWidth') / ctx.config.dx
+
+    if isArtificialCompressibleScheme(ctx.scheme):
+        _configureArtificialCompressibleExtra(ctx)
+
+
+def _configureArtificialCompressibleExtra(ctx: RunContext) -> None:
+    """ACSPH-only additions on top of the scheme-agnostic block above
+    (`ACSPH_PLAN.md` §4.5/Part 7: the paper's own 2D dam-break case, four
+    wall pressure probes and KE against Lobovsky et al.'s experiment).
+
+    Unlike the other cases wired for ACSPH, `dambreak`'s `configureScheme`
+    never went through `configureWeaklyCompressible`/`configureArtificialCompressible`
+    in the first place -- it builds `schemeConfig` by hand from `caseArgs` --
+    so there is no shared helper to dispatch to here; this only adds the
+    handful of things that helper would otherwise have done.
+    """
+    schemeConfig = ctx.schemeConfig
+    schemeConfig.shiftProperties.active = False
+
+    # Eq. (46) as the paper writes it has no body-force / acceleration
+    # constraint -- `modules/timestep/artificialCompressible.py` adds one
+    # behind `dt_accelerationConstraint` (default on) because a gravity-driven
+    # walled case generally needs it. On this violent dam break that
+    # constraint is *active and binding* through the wall impact: the ACSPH
+    # pressure field's `dvdt` spikes to O(1e6) there, driving `dt` down to
+    # ~5e-5 (≈10x below the advective limit) where the [0.8,1.2] BDF2 clamp
+    # then only lets it recover slowly -- a full `tLimit=2` run costs ~10x
+    # what delta-SPH does. `acAccelConstraint=False` restores the paper's
+    # literal constraint set (advective + viscous only); see `ACSPH_PLAN.md`
+    # §4.5 / §5.6 and the authors' question there.
+    if not ctx.param('acAccelConstraint'):
+        schemeConfig.dt_accelerationConstraint = False
+
+    # Eq. (48)'s U_char (ACSPH_PLAN.md §5.5): sqrt(g H), the free-fall speed
+    # over the column's own height -- the same choice `hydrostaticColumn`
+    # makes for the same reason (the only velocity scale in a column at rest
+    # under gravity).
+    if schemeConfig.acParams.uChar is None:
+        depth = ctx.param('fillRatio') * ctx.spec.L
+        schemeConfig.acParams.uChar = float(
+            (ctx.param('gravityMagnitude') * depth) ** 0.5)
+
+    # The ACSPH step owns its whole real-time advance and returns an exact
+    # per-step delta (`schemes/artificialCompressible.py`); any multi-stage
+    # integrator would run the dual-time solve once per stage and blend,
+    # which is silently wrong. `configureArtificialCompressible` enforces
+    # this for cases that go through it; this case does not, so it is
+    # enforced here instead, the same way and for the same reason.
+    from warpSPHIntegrators import getIntegrator
+    from warpSPHIntegrators.integration import IntegrationSchemeType
+    wanted = IntegrationSchemeType.forwardEuler
+    current = ctx.config.integrationScheme
+    if current is not wanted and current is not IntegrationSchemeType.explicitEuler:
+        name = getattr(current, 'name', current)
+        print(f"[warpSPH] artificialCompressible: overriding integrationScheme "
+              f"{name!r} -> 'forwardEuler'. The step returns an exact per-step "
+              f"delta, which only a single-evaluation integrator applies unchanged.")
+        ctx.config.integrationScheme = wanted
+        ctx.integrator = getIntegrator(wanted)
 
 
 def buildSystem(ctx: RunContext):
@@ -166,30 +240,62 @@ def initialConditions(ctx: RunContext, system) -> None:
     setupFreestream(system, ctx.config, ctx.schemeConfig, simSetup, args)
     setupKolmogorov(system, ctx.config, ctx.schemeConfig, simSetup, args)
 
+    if isArtificialCompressibleScheme(ctx.scheme):
+        # No sound speed to back-solve a `dt` from; seed `targetDt` and let
+        # `dambreakTimestep`'s Eq. (46) branch take over from step 2 on.
+        ctx.config.dt = ctx.param('targetDt')
+        return
+
     # The sound speed and dt are chosen together: dt follows from the acoustic
     # CFL, so this is what finally fixes config.dt for the run.
-    ctx.schemeConfig.fluid.fixedSoundSpeed, ctx.config.dt = setupWeaklyCompressibleTimestep(
-        ctx.config, ctx.schemeConfig, system, ctx.param('targetDt'), verbose=ctx.spec.verbose)
+    #
+    # `machTarget` (default None) selects how c0 is set:
+    #   None  -- legacy: back-solve c0 out of `targetDt` (c0 ~ 1/dx, so the Mach
+    #            number drifts well past 0.1 at fine resolution -- see
+    #            `DELTASPH_VALIDATION_PLAN.md` Part 1).
+    #   float -- Sun et al. 2017 Eq. (2): c0 = U_max / machTarget with
+    #            U_max = `referenceVelocity` or sqrt(2 g H) (dam-break front
+    #            speed), so the run stays genuinely weakly compressible at any
+    #            resolution. dt then adapts each step via `dambreakTimestep`.
+    machTarget = ctx.param('machTarget')
+    if machTarget is not None:
+        H = ctx.param('fillRatio') * ctx.spec.L
+        uMax = ctx.param('referenceVelocity')
+        if uMax is None:
+            uMax = float((2.0 * ctx.param('gravityMagnitude') * H) ** 0.5)
+        ctx.schemeConfig.fluid.fixedSoundSpeed, ctx.config.dt = setupWeaklyCompressibleTimestep(
+            ctx.config, ctx.schemeConfig, system, ctx.param('targetDt'),
+            verbose=ctx.spec.verbose, uMaxExpected=uMax, machTarget=machTarget)
+    else:
+        ctx.schemeConfig.fluid.fixedSoundSpeed, ctx.config.dt = setupWeaklyCompressibleTimestep(
+            ctx.config, ctx.schemeConfig, system, ctx.param('targetDt'), verbose=ctx.spec.verbose)
 
 
 def dambreakTimestep(ctx: RunContext, state) -> float:
-    """Bender & Koschier's advective CFL, but only under `--scheme
-    divergenceFree`.
+    """Per-step adaptive dt, dispatched by scheme.
 
-    `deltaSPH`'s own dt is fixed once, at setup, by `setupWeaklyCompressibleTimestep`
-    in `initialConditions` above -- `adaptiveDt` is not otherwise exercised
-    per step (nothing in the run loop revisits `config.dt` for a case without a
-    `timestep` hook), so returning it unchanged here reproduces that path
-    exactly. `divergenceFree` has no acoustic term and needs a real advective
-    dt instead, which is `kolmogorovIncompressibleTimestep`'s formula --
-    reused as-is, the same way `randomFlowIncompressible` reuses it for its own
-    bounded case. dambreak has no `nu` param and runs inviscid under this
-    scheme (`configureScheme` never touches `diffusionParams`), so that
-    function's viscous term is always inert here.
+    * `divergenceFree` -- Bender & Koschier's advective CFL
+      (`kolmogorovIncompressibleTimestep`), the same reuse
+      `randomFlowIncompressible` makes. dambreak has no `nu` param and runs
+      inviscid here, so that function's viscous term is inert.
+    * `artificialCompressible` -- De Courcy et al. 2024 Eq. (46)
+      (`modules.timestep.computeTimestep` -> ACSPH branch).
+    * `deltaSPH` (weakly compressible) -- Sun et al. 2017 Eq. (5): the min of
+      the viscous, acoustic and acceleration constraints
+      (`modules.timestep.computeTimestep` -> weakly-compressible branch). The
+      acceleration term needs the last stage update, stashed by the runner as
+      `ctx.scratch['lastStageUpdate']`. Previously this branch returned
+      `config.dt` unchanged (fixed dt for the whole run) -- that skipped the
+      acceleration constraint a gravity-driven impact needs
+      (`DELTASPH_VALIDATION_PLAN.md` Part 1).
     """
-    if not isIncompressibleScheme(ctx.scheme):
-        return ctx.config.dt
-    return kolmogorovIncompressibleTimestep(ctx, state)
+    from ..modules.timestep import computeTimestep
+    if isArtificialCompressibleScheme(ctx.scheme):
+        return computeTimestep(state, ctx.config, ctx.schemeConfig, dt=ctx.config.dt)
+    if isIncompressibleScheme(ctx.scheme):
+        return kolmogorovIncompressibleTimestep(ctx, state)
+    return computeTimestep(state, ctx.config, ctx.schemeConfig, dt=ctx.config.dt,
+                           systemUpdate=ctx.scratch.get('lastStageUpdate'))
 
 
 def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
@@ -223,6 +329,54 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
         d['nPenetrating'] = int(pen.sum().detach().cpu().item())
         d['maxPenetrationDx'] = float(
             torch.clamp(past.max(), min=0.0).detach().cpu().item() / dx)
+
+    # Downstream-wall pressure probes (`ACSPH_PLAN.md` §4.5, Lobovsky et al.
+    # 2014): a first-order MLS (Liu-Liu) interpolation of the fluid pressure at
+    # fixed sensor points on the impact wall, emitted every step so the
+    # trajectory carries the P(t) signal each experimental sensor records.
+    # `pressureProbeHeights` lists heights above the tank bed in the case's own
+    # length unit; empty (the default) skips this so no existing run changes.
+    # First order rather than a bare Shepard gather so the local fit carries
+    # the pressure gradient and needs no separate Adami hydrostatic correction
+    # at the one-sided wall support; points with < 5 fluid neighbours fall back
+    # to 0 (pre-arrival / thin run-up sheet), which `pProbe*Nnbr` makes visible.
+    probeHeights = ctx.param('pressureProbeHeights')
+    if probeHeights and interior is not None and getattr(particles, 'pressures', None) is not None:
+        allPos = particles.positions
+        xWall = float(interior.max[0].item()) - float(ctx.param('pressureProbeInset'))
+        yBed = float(interior.min[1].item())
+        pts = torch.tensor([[xWall, yBed + float(z)] for z in probeHeights],
+                           device=allPos.device, dtype=allPos.dtype)
+        # The probe sits ~1 kernel support from the +x domain edge; if the run
+        # is periodic (`wallPeriodic`) the MLS gather would wrap across to the
+        # back wall. Force a non-periodic domain for the interpolation only.
+        import copy as _copy
+        probeConfig = _copy.copy(ctx.config)
+        dom = ctx.config.domain
+        probeConfig.domain = type(dom)(dom.min, dom.max,
+                                       torch.zeros_like(dom.periodic), dom.dim)
+        # `pressureProbeSupportScale` widens the MLS gather radius. A real
+        # transducer integrates over its face (Marrone 2011 uses a phi = 90 mm
+        # disc); a scale > 1 averages the point reading over a comparable patch
+        # so the impulsive first-contact / jet-tip spikes a point probe catches
+        # are smoothed the way an area-integrated signal is. Default 1.0 leaves
+        # every existing run unchanged.
+        val, _grad, nnbr, _A, _b = interpolateLiuLiu(
+            pts, referenceParticles=particles, referenceQuantities=particles.pressures,
+            config=probeConfig, neighbor_threshold=4,
+            direction=OperationDirection.FluidToFluid,
+            supportScale=float(ctx.param('pressureProbeSupportScale') or 1.0))
+        val = val.clamp(min=0.0).detach().cpu()
+        nnbr = nnbr.detach().cpu()
+        H = ctx.param('fillRatio') * ctx.spec.L
+        g = ctx.param('gravityMagnitude')
+        pRef = ctx.schemeConfig.fluid.restDensity * g * H      # rho0 g H
+        t = float(state.t) if getattr(state, 't', None) is not None else 0.0
+        d['tStar'] = t * (g / H) ** 0.5
+        for k in range(len(probeHeights)):
+            d[f'pProbe{k}'] = float(val[k])
+            d[f'pProbe{k}Star'] = float(val[k]) / pRef
+            d[f'pProbe{k}Nnbr'] = int(nnbr[k])
     return d
 
 
@@ -299,7 +453,10 @@ dambreakCase = registerCase(Case(
         L=2.0,
         n_h=4.0,
         kernel='Wendland4',
-        integrationScheme='rungeKutta2',
+        # Sun et al. 2017 §2 integrate the δ-SPH system with RK4 (frozen
+        # diffusion is a performance option on top, not required for
+        # correctness). `DELTASPH_VALIDATION_PLAN.md` Part 1.
+        integrationScheme='rungeKutta4',
         supportMode='KernelMeanSymmetric',
         tLimit=4.0,
         dt=None,
@@ -314,6 +471,31 @@ dambreakCase = registerCase(Case(
         W=4.0,
         band=5,
         targetDt=0.0005,
+        # Downstream-wall pressure sensors (`ACSPH_PLAN.md` §4.5): heights above
+        # the tank bed, in the case's length unit. Empty -> no probing. See
+        # `diagnostics`; `scripts/probe_acsphDambreakLobovsky.py` sets these to
+        # Lobovsky et al. 2014's five-sensor matrix at that paper's tank scale.
+        pressureProbeHeights=[],
+        pressureProbeInset=0.0,
+        # MLS gather radius multiplier for the wall probe (1.0 = one kernel
+        # support). > 1 mimics a finite-face transducer's area integration --
+        # see `diagnostics`; `scripts/probe_deltaSPHMarrone.py` uses it to
+        # approach Marrone's φ = 90 mm probe disc.
+        pressureProbeSupportScale=1.0,
+        # Expected front speed U_max for the Sun Eq. (2) sound-speed pick
+        # (`initialConditions`, `machTarget` path). None -> sqrt(2 g H), the
+        # free-fall estimate. `scripts/probe_deltaSPHMarrone.py` sets it to
+        # Marrone 2011's measured 1.95 sqrt(g H) so c0 = c0Ratio * sqrt(g H)
+        # reproduces that paper's Mach number exactly.
+        referenceVelocity=None,
+        # Restore the periodic domain wrap (default: walled/non-periodic). A
+        # diagnostic for near-wall neighbour-search artefacts; the probe gather
+        # stays non-periodic regardless.
+        wallPeriodic=False,
+        # ACSPH only: keep the non-paper acceleration constraint in Eq. (46)'s
+        # timestep (default). Set False for the paper's literal advective +
+        # viscous constraint set -- see `_configureArtificialCompressibleExtra`.
+        acAccelConstraint=True,
         # The column is `fluidWidth * W` wide by `fillRatio * L` tall, in the
         # bottom-left corner of a `W x L` tank. These two give 0.667 x 1.333 in
         # the 4 x 2 tank: the canonical Koshizuka & Oka proportions, a column

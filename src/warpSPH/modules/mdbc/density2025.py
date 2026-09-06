@@ -82,15 +82,32 @@ def computeMdbcDensity(currentState: Any, config: SimulationConfig, schemeConfig
         rho_b = rho0 + P_b / c_s**2
         rho_b = torch.clamp(rho_b, min = rho0)
 
-        # rho_b = torch.where(numNeighbors > 4, rho_b, boundaryDensity[bIndices])
-
-        # boundaryDensity[bIndices] = torch.where(numNeighbors > 4, rho_b, boundaryDensity[bIndices])
         boundaryDensity[bIndices] = rho_b
+
+        # Bulk path: English et al. 2022 Eq. (12) linear extrapolation from the
+        # ghost node back to the boundary particle,
+        #   rho_b = rho_g + (r_b - r_g) . grad(rho)_g ,
+        # with the MLS value + gradient from `interpolateLiuLiu`. The
+        # Shepard-density + hydrostatic `rho_b` above is DualSPHysics'
+        # m2dbc-style fallback, used below this neighbour count.
+        #
+        # `threshold = 9`, NOT `interpolateLiuLiu`'s own 4: the MLS path here
+        # has no conditioning guard (English §3 / DualSPHysics both gate on a
+        # `determlimit`; `interp.py` only pinv's `A_g`, which passes a
+        # near-singular direction straight through). A boundary particle under
+        # the thin, fast dam-break front sliding over the dry bed sees ~5-9
+        # fluid neighbours all in a shallow horizontal band -> the vertical
+        # moment of `A_g` is tiny -> `rho_interp_grad` blows up -> `rho_proj`
+        # is wild -> `P_b = c0^2 (rho_proj - rho0)` (with c0 = 40 sqrt(gH),
+        # c0^2 ~ 9400) flings the sheet off the bed *before* it reaches the
+        # end wall (t ~ 0.54 s in the Marrone 3.1 case). Dropping this to 4
+        # this session is what broke that case; `DELTASPH_VALIDATION_PLAN.md`
+        # Part 3 owns the principled fix (a determinant / condition gate so
+        # the MLS path can safely extend below 9).
         threshold = 9
 
-        drho = -torch.einsum('nu, nu -> n',(relPos), rho_interp_grad)
+        drho = -torch.einsum('nu, nu -> n', relPos, rho_interp_grad)
         rho_proj = (rho_interp + drho)
-        # rho_proj = torch.where(drho < rho0 * (dot * dot2), rho_b, rho_proj)
         boundaryDensity[bIndices] = torch.where(numNeighbors > threshold, rho_proj, boundaryDensity[bIndices])
 
         mergedDensitities = currentState.densities.clone()
