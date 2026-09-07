@@ -134,7 +134,7 @@ ACCEPT = dict(
 
 def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
             plotInterval: int, kernel: str = None, freezeDiffusion: bool = None,
-            scheme: str = 'sun2017DeltaSPH'):
+            scheme: str = 'sun2017DeltaSPH', shifting: str = 'default'):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -157,7 +157,8 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
     # scheme's own default applies.
     tag = (f'{scheme}_nx{nx}_c{c0Ratio:g}' + (f'_{kernel}' if kernel else '')
           + ('_forceFreeze' if freezeDiffusion is True else '')
-          + ('_forceNoFreeze' if freezeDiffusion is False else ''))
+          + ('_forceNoFreeze' if freezeDiffusion is False else '')
+          + ('' if shifting == 'default' else f'_pst-{shifting}'))
     runRoot = os.path.join(out, tag + '_run')
 
     # Marrone reports each signal area-integrated over a phi = 90 mm probe disc
@@ -176,6 +177,9 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
         pressureProbeDiscRadius=PROBE_DISC_RADIUS,
         referenceVelocity=U_MAX, machTarget=machTarget,
         freezeDiffusionAcrossStages=freezeDiffusion,
+        # `--shifting off` is Marrone Sec. 3's actual configuration; the case's
+        # own default leaves the PST ON (`DELTASPH_VALIDATION_PLAN.md` 5.1.1).
+        shifting=None if shifting == 'default' else (shifting != 'off'),
     )
 
     kw = dict(
@@ -206,6 +210,13 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
     meta = dict(
         scheme=scheme, nx=nx, c0Ratio=float(c0Ratio), tLimit=tLimit,
         freezeDiffusionAcrossStages=bool(getattr(r.ctx.schemeConfig, 'freezeDiffusionAcrossStages', False)),
+        # Read back off the resolved config, not off the CLI flag -- the whole
+        # reason Sec. 5.1.1 exists is that what this case *actually* ran was not
+        # what its spec table said it ran.
+        shiftActive=bool(getattr(r.ctx.schemeConfig.shiftProperties, 'active', False)),
+        shiftScheme=str(getattr(r.ctx.schemeConfig.shiftProperties, 'scheme', '?')),
+        sun2017Eq7Shift=bool(getattr(r.ctx.schemeConfig.shiftProperties,
+                                     'sun2017Eq7Shift', False)),
         tReached=tReached, tStarReached=tReached * (G / H) ** 0.5,
         dx=dx, HdxRatio=H / dx, c0=c0, probeInset_dx=probeInset / dx,
         mach=(U_MAX / c0) if c0 else None,
@@ -612,6 +623,16 @@ def main():
                     help="force freezeDiffusionAcrossStages=True regardless of "
                          "--scheme (e.g. to test it on plain 'deltaSPH'). Omit to "
                          "use whichever scheme's own default applies.")
+    ap.add_argument('--shifting', choices=('default', 'off', 'on'),
+                    default='default',
+                    help="particle shifting (the delta+ PST). 'off' is what "
+                         "Marrone et al. 2011 Sec. 3 actually specifies and what "
+                         "DELTASPH_VALIDATION_PLAN.md Part 2.1 makes the "
+                         "acceptance gate -- but it is NOT the default here, "
+                         "because `ShiftProperties.active` defaults True and this "
+                         "case has therefore always run delta+-SPH (Sec. 5.1.1). "
+                         "'default' preserves that, so previously-recorded runs "
+                         "stay reproducible; 'on' forces it explicitly.")
     ap.add_argument('--report', action='store_true',
                     help='(re)build plots + REPORT.md from existing .npz runs')
     args = ap.parse_args()
@@ -620,7 +641,8 @@ def main():
         _report(args.out)
         return
     _runOne(args.nx, args.c0Ratio, args.tLimit, args.out, args.video,
-            args.plotInterval, args.kernel, args.freezeDiffusion, args.scheme)
+            args.plotInterval, args.kernel, args.freezeDiffusion, args.scheme,
+            args.shifting)
 
 
 if __name__ == '__main__':

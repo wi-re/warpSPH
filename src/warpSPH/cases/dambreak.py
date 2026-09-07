@@ -151,6 +151,25 @@ def configureScheme(ctx: RunContext) -> None:
     if freezeParam is not None and hasattr(schemeConfig, 'freezeDiffusionAcrossStages'):
         schemeConfig.freezeDiffusionAcrossStages = freezeParam
 
+    # `shifting`: the delta-SPH / delta+-SPH switch, and on *this* case it is a
+    # conformance knob rather than a tuning one.
+    #
+    # Marrone et al. 2011 Sec. 3's dam-break cases are plain delta-SPH with no
+    # PST -- `DELTASPH_VALIDATION_PLAN.md` Sec. 5.1's spec table says so, and
+    # Part 2.1 makes "stable with `shiftProperties.active = False`" the
+    # acceptance gate. The case could not honour that, because
+    # `ShiftProperties.active` defaults to **True** and the only `= False` here
+    # is in `_configureArtificialCompressibleExtra`, i.e. the ACSPH branch that
+    # the delta-SPH path never reaches. So every delta-SPH run of this case has
+    # been delta+-SPH (`DELTASPH_VALIDATION_PLAN.md` Sec. 5.1.1). This param is
+    # what lets the Marrone runs actually be delta-SPH.
+    #
+    # `None` (the default) leaves the selected scheme's own setting alone, so
+    # no existing run changes; `False` is the Marrone Sec. 3 configuration.
+    shiftingParam = ctx.param('shifting', None)
+    if shiftingParam is not None and hasattr(schemeConfig, 'shiftProperties'):
+        schemeConfig.shiftProperties.active = bool(shiftingParam)
+
     if isArtificialCompressibleScheme(ctx.scheme):
         _configureArtificialCompressibleExtra(ctx)
 
@@ -570,6 +589,12 @@ dambreakCase = registerCase(Case(
         # either way regardless of scheme. `DELTASPH_VALIDATION_PLAN.md`
         # Part 1/5.1.
         freezeDiffusionAcrossStages=None,
+        # Particle shifting (the delta+ PST). None (default) -> leave the
+        # selected scheme's own setting, which is ON -- `ShiftProperties.active`
+        # defaults True. False is Marrone et al. 2011 Sec. 3's actual
+        # configuration and this plan's own acceptance gate; see
+        # `configureScheme` and `DELTASPH_VALIDATION_PLAN.md` Sec. 5.1.1.
+        shifting=None,
         # Expected front speed U_max for the Sun Eq. (2) sound-speed pick
         # (`initialConditions`, `machTarget` path). None -> sqrt(2 g H), the
         # free-fall estimate. `scripts/probe_deltaSPHMarrone.py` sets it to
