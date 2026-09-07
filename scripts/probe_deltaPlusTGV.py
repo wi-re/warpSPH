@@ -180,13 +180,17 @@ ACCEPT = dict(
     # Fig. 6: every model sits on the analytic line at log scale.  6 % is what
     # "indistinguishable on that plot" is worth.
     #
-    # NOT widened for Re = 1000, deliberately.  The `L/dx = 200`, Re = 1000 run
-    # fails this at +11 % around `tU/L = 2-3` -- but Fig. 6's *right* panel was
-    # checked before touching the number, and the green delta+-2017 curve
-    # overlays the analytic there for the whole record (the ~7 % offset near
-    # `tU/L = 10` belongs to the red "present delta+-SPH").  So the failure is a
-    # real open finding, recorded in `DELTASPH_VALIDATION_PLAN.md` Sec. 5.3.1,
-    # not a band that was set too tight.
+    # NOT widened for Re = 1000, and the reason it was not is worth keeping.
+    # The `L/dx = 200`, Re = 1000 run fails this at +11 % around `tU/L = 2-3`.
+    # Fig. 6's *right* panel was checked before touching the number, and the
+    # green delta+-2017 curve overlays the analytic there for the whole record
+    # (the ~7 % offset near `tU/L = 10` belongs to the red "present
+    # delta+-SPH"), so the band was left alone and the failure investigated
+    # instead.  It was under-resolution: the same run at `L/dx = 400` -- Sun's
+    # own comparison resolution -- reads +1.8 % at the same instant and passes,
+    # a ~6x collapse for a 2x refinement.  Widening the band to 12 % would have
+    # buried that, and would have made the check unable to see the real thing it
+    # is there for.  `DELTASPH_VALIDATION_PLAN.md` Sec. 5.3.1.
     ke_rel_error_max=0.06,
     # Fig. 7 / Fig. 9: how far from the digitised δ⁺-2017 curve counts as a
     # match.  The digitisation itself is worth ~10 %; the pressure tolerance is

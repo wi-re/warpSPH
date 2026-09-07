@@ -890,42 +890,45 @@ within the digitisation error of reading them. `scripts/out_deltaPlusTGV/`
 holds both legs side by side (`*_eighthEq7.npz` are the pre-fix runs) with
 `REPORT.md` and the three-panel figure as the record.
 
-**`Re = 1000` — the pathology reproduces, but the KE decay does not. OPEN.**
-Sun's right-hand panels are the long-time run (`tU/L = 10`), where his
-δ⁺-2017's pressure error becomes dramatic. At `L/Δx = 200` (half his):
+**`Re = 1000` — the pathology reproduces too, and at Sun's own resolution the
+whole benchmark is 5/5.** Sun's right-hand panels are the long-time run
+(`tU/L = 10`), where his δ⁺-2017's pressure error becomes dramatic:
 
-| | ours | Sun δ⁺-2017 (Fig. 7/9, `L/Δx = 400`) |
-|---|---|---|
-| `p/p(t₀)` at `tU/L = 10` | **2.79** | 2.40 (+16 %) |
-| `ε_V` at `tU/L = 10` | **1.27 %** | 1.00 % (×1.27) |
-| `ε_V` growth `t=10 / t=3` | 2.23 (cumulates) | cumulates |
+| at `tU/L = 10` | ours, `L/Δx = 200` | ours, `L/Δx = 400` | Sun δ⁺-2017 (`L/Δx = 400`) |
+|---|---|---|---|
+| `p/p(t₀)` | 2.79 (+16 %) | **2.56 (+6 %)** | 2.40 |
+| `ε_V` | 1.27 % (×1.27) | **1.16 % (×1.16)** | 1.00 % |
+| `ε_V` growth `t=10 / t=3` | 2.23 | **2.40** | cumulates |
+| KE max rel. error | 0.112 ❌ | **0.045 ✅** | — |
 
-So the *characteristic Sun-2017 δ⁺ failure* — a centre pressure climbing
+The *characteristic Sun-2017 δ⁺ failure* — a centre pressure climbing
 monotonically to ~2.4× its initial value while the volume error accumulates
 past 1 % — is reproduced in shape and magnitude. That is the stronger of the
-two agreements: it says we match the scheme including its pathology, not just
-its good behaviour.
+two agreements: it says the implementation matches the scheme including its
+pathology, not merely its good behaviour.
 
-**But the kinetic energy is not right at this Reynolds number.** It decays
-*too slowly*: `+6 %` over analytic at `tU/L = 1`, peaking at **`+11 %` around
-`tU/L = 2–3`**, then relaxing back to `+2.3 %` by `tU/L = 10`. Fig. 6's right
-panel does **not** license this — the green δ⁺-2017 curve overlays the analytic
-there for the whole record (it is the *red* "present δ⁺-SPH" that sits ~7 %
-high near `tU/L = 10`), so this is a genuine deviation and not a band that was
-set too tight. Note the direction: **under**-dissipation, which is the opposite
-of what a numerical-dissipation floor would produce, and note that at
-`Re = 100` the same code at the same resolution is within 3 % throughout.
+**The KE excursion was under-resolution — resolved, not open.** At
+`L/Δx = 200` the kinetic energy decayed *too slowly*, peaking at `+11 %` over
+Eq. (22) around `tU/L = 2–3`, which Fig. 6's right panel does not license (the
+green δ⁺-2017 curve overlays the analytic for the whole record there). Two
+candidates were put up with opposite predictions — (a) plain under-resolution,
+which the paper's own warning about low viscosity supports, predicting the
+excursion roughly halves at `L/Δx = 400`; (b) kinetic energy leaking from the
+smooth TGV mode into small-scale particle-disorder motion, which does not
+dissipate at the mode's rate and would therefore largely persist. The
+`L/Δx = 400` run settles it:
 
-Candidate causes, untested: (a) plain under-resolution — `ν = 0.001` at
-`L/Δx = 200` against Sun's 400, and the paper itself warns that "for low
-viscosity values the vortex pattern becomes unstable... limiting the
-comparisons with the analytical solution to a smaller time interval", and that
-the advection error grows with `Re` at fixed `tU/(L Re)`; (b) kinetic energy
-leaking from the smooth TGV mode into small-scale particle-disorder motion,
-which does not dissipate at the mode's rate — total `Σ ½m|v|²` would then decay
-slower than `exp(−16π²νt)` while the *mode* decays correctly. **The discriminator
-is the `L/Δx = 400` run**: (a) predicts the excursion roughly halves, (b)
-predicts it largely does not. Queued.
+| `tU/L` | 0.5 | 1 | 2 | 3 | 5 | 7 | 9 |
+|---|---|---|---|---|---|---|---|
+| rel. err, `L/Δx = 200` | +2.1 % | +6.1 % | +11.1 % | +10.9 % | +9.6 % | +7.5 % | +4.4 % |
+| rel. err, `L/Δx = 400` | +0.9 % | +1.7 % | **+1.8 %** | +1.7 % | +0.9 % | −0.6 % | −3.0 % |
+
+The excursion collapses by ~6× for a 2× resolution increase — steeper than (a)
+even predicted, and flatly incompatible with (b). It also **changes sign** by
+`tU/L ≈ 7`, i.e. at the finer resolution the late-time error is ordinary
+numerical *over*-dissipation rather than the under-dissipation that looked
+anomalous. `Re = 1000` at `L/Δx = 200` is simply below the resolution this
+benchmark needs; Sun compares at 400 for the same reason.
 
 **Should `sun2017Eq7Shift` be the shared default? — swept, and the evidence
 says yes, but the decision is not taken here.** It is a correctness fix against
