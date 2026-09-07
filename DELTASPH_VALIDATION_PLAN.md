@@ -318,6 +318,10 @@ keep-or-change call.
 
 # Part 2 — δ⁺-SPH (Sun et al. 2017): what it adds, and is it wired
 
+**Audited — two of the four Eq. (7) constants were wrong, together making the
+shift 1/8 of the paper's. Root-caused and fixed in §5.3.2; the table in §2.1
+below carries the verdicts.**
+
 δ⁺-SPH = δ-SPH (Part 1) **plus**:
 
 1. **Particle-shifting technique (PST)**, Sun Eq. (7), applied to positions
@@ -350,9 +354,9 @@ through `WeaklyCompressibleSystem.finalize` → `solveShifting`, with
 
 | Sun 2017 item | repo | check |
 |---|---|---|
-| Eq. (7) shift magnitude `CFL·Ma·(2h_ij)²` | `modules/shifting/delta.py` | the plan's `delta.py` note says it is **Mach-scaled** — matches Sun. Confirm the `(2h)²` (not `(2h)`), and the `CFL·Ma` prefactor vs the `U_max` shifting-velocity form. |
-| tensile term `1 + R (W_ij/W(Δx))^n`, R=0.2 n=4 | `modules/shifting/` + `moduleConfigurations/shifting.py` | present? value? |
-| volume weight `2 m_j/(ρ_i+ρ_j)` not `V_j` | shifting kernel | conservation depends on this exact form |
+| Eq. (7) shift magnitude `CFL·Ma·(2h_ij)²` | `modules/shifting/delta.py` | ❌ **WRONG — was `2h²`, i.e. half of `(2h)² = 4h²`.** Fixed under `ShiftProperties.sun2017Eq7Shift`; see §5.3.2. |
+| tensile term `1 + R (W_ij/W(Δx))^n`, R=0.2 n=4 | `modules/shifting/` + `moduleConfigurations/shifting.py` | present; `n = 4` ✅, but `R` was `computeDeltaShiftWarp`'s default **0.25**, not Sun's 0.2. `delta.py` now passes 0.2 under `sun2017Eq7Shift`. |
+| volume weight `2 m_j/(ρ_i+ρ_j)` not `V_j` | shifting kernel | ❌ **WRONG — `wp_deltaShift.py` uses `0.5 m_j/(ρ_i+ρ_j)`, a quarter of it.** Not changed in the kernel (`modules/shifting/michel.py` shares it); compensated in `delta.py`'s scaling. §5.3.2. |
 | free-surface normal removal + `λ` cutoff | `ShiftingProjectionScheme.surfaceNormal`, `surfaceLambdaThreshold` | already claimed working (`ACSPH_PLAN.md` Part 3). Re-audit against Sun §3.1 vs Michel 2022 (they differ — `PST_ALE_PLAN.md` chose Michel). |
 | applied *outside* RK sub-steps | `WeaklyCompressibleSystem.finalize` | confirm it is post-step, not per-stage |
 | **dam break needs PST?** | — | **No.** Marrone 2011 §3 dam-break cases are plain δ-SPH (no shifting). Sun 2017's harder cases (square patch, bluff-body wakes) need it. So a correct δ-SPH dam break must be stable with `shiftProperties.active = False`. Use that as the Part 5 acceptance gate; PST is validated separately on the square patch. |
@@ -711,12 +715,260 @@ ready-made second reference and isolates "our δ-SPH" from "our mDBC".
 | English 2022 §4.1 | still water + wedge | mDBC discriminator — hydrostatic profile to the wall, KE decay |
 | English 2022 §4.2 | sloshing tank | `sloshingTank` — mDBC vs the current treatment on the SPHERIC sensors |
 
-## 5.3 δ⁺-SPH suite (after δ-SPH is clean) — Sun 2017 §4
+## 5.3 δ⁺-SPH suite (after δ-SPH is clean) — Sun 2017 §4 / Sun 2019 §3
 
 `rotatingSquarePatch` (N°1, the PST discriminator — tensile instability without
 it), `oscillatingDroplet` (N°2, conservation under a body force),
 `impact` (N°3). N°4–7 are bluff-body wake flows needing an inflow/outflow and a
 `movingObstacle`-class case — lower priority.
+
+**Start with Sun 2019 §3.1's Taylor–Green flow instead**, ahead of all of
+those. It is the only case in either suite with **no boundary of any kind** —
+no wall, no free surface, no inflow — so it measures the scheme and nothing
+else, and it has a closed-form answer (Sun 2019 Eq. 22,
+`f(t) = f(0) exp[−16π²ν t]`, governing *both* the kinetic energy and the
+pressure at a fixed point). Every case scored before it — Marrone §3.1's dam
+break, the sloshing tank, the hydrostatic column — measures the scheme *and*
+its wall closure together, so a 20 %-low answer there has two possible owners
+and no way to separate them.
+
+### 5.3.1 Sun 2019 §3.1 — Taylor–Green flow ← DONE, and it found the PST bug
+
+`scripts/probe_deltaPlusTGV.py` (new), on `cases/tgvWeaklyCompressible`
+(`tgv-wc`). Setup exactly as the paper: periodic `[0,L]²`, four counter-rotating
+vortices, `Re = UL/ν = 100`, `L/Δx = 50…400`, Wendland C2 at `h/Δx = 2`, RK4,
+`c₀ = 10 U` via the Sun 2017 Eq. (2) path, recorded to `tU/L = 1`.
+
+**Which curve is the target.** Sun 2019's Figs. 6–9 each plot *three* models:
+δ-SPH, "δ⁺-SPH by Sun et al. [5]" (= Sun 2017, which is what this repo
+implements) and "present δ⁺-SPH" (Sun 2019's own consistent-PST scheme, which
+folds the shifting transport back into the continuity and momentum equations —
+that one is `PST_ALE_PLAN.md`'s target, not this plan's). So the middle curve
+is what a correct implementation here must reproduce, **including its known
+errors**: a centre pressure that drifts progressively above the analytic
+solution, and a volume error that cumulates rather than settling.
+
+**Case changes needed to run it at all** (all default-off, no existing run
+changes):
+- `cases/weaklyCompressible.setupTimestep` now honours `machTarget` /
+  `referenceVelocity` (Sun Eq. 2), which had been wired only inside
+  `dambreak.py`'s own `initialConditions` — this is Part 6 step 2's "c₀ rework
+  for *other* WCSPH cases", done in the shared block so any case that declares
+  the two params gets it;
+- `tgv-wc` gained `shifting` (the δ vs δ⁺ A/B), `initialPressure` (start *on*
+  the analytic pressure field — a weakly compressible scheme carries its
+  pressure in the density, so a uniform-`ρ₀` start has to radiate the whole TGV
+  pressure field into existence, and that acoustic transient is the same size
+  as the signal being measured), `phase`, and the `pCentre` / `volumeError`
+  (Sun Eq. 23) diagnostics.
+- **`phase` matters and is not cosmetic.** Sun reads his pressure at the box
+  centre; his Fig. 8 profile along `y = 0.5L` peaks at `x/L = 0, 0.5, 1`, so
+  that point is a **stagnation point** (`p(t₀) = +P₀`), not a vortex core. The
+  case's own even-`k` rule put a vortex core there instead. What Figs. 7–9
+  measure is a drift of the *mean* pressure — an additive offset — so dividing
+  it by a `p(t₀)` of the wrong sign flips which side of the analytic curve it
+  lands on: measured, `p/p(t₀) = −0.33` against Sun's `+0.47`, purely from that.
+
+**Result — the δ-SPH half is validated; the δ⁺ half was not doing its job.**
+At `L/Δx = 400`, `tU/L = 1` (analytic `0.206`):
+
+| | our δ-SPH | Sun δ-SPH | our δ⁺ (before) | Sun δ⁺-2017 |
+|---|---|---|---|---|
+| `p/p(t₀)` at `tU/L=1` | **0.632** | 0.680 | 0.675 | 0.470 |
+| `ε_V` (Eq. 23) | **0.206 %** | 0.220 % | 0.227 % | 0.125 % |
+| `ε_V` growth `t=1 / t=0.3` | 1.26 (plateau) | plateau | 2.72 | cumulates |
+| KE max rel. error vs Eq. (22) | 0.037 | ~0 | 0.027 | ~0 |
+
+The δ-SPH leg lands within **7 %** of Sun's on both metrics, and the KE decay is
+within 3 % of Eq. (22) at every resolution (`ν_eff/ν = 0.983`). But the δ⁺ leg
+sat **on top of our own δ-SPH leg** instead of improving on it — where Sun's PST
+takes `ε_V` from 0.22 % to 0.125 %, ours moved it from 0.206 % to 0.227 %. The
+pressure and volume errors also tracked each other exactly (ours were 1.78× and
+1.82× Sun's), which is Sun §3.1's own claim — the mean-pressure offset *is* the
+volume error, since `p = c₀²(ρ−ρ₀)`.
+
+### 5.3.2 Root cause — the δ⁺ shift was 1/8 of Sun 2017 Eq. (7)
+
+Eq. (7) verbatim (`literature/sun2017_*.pdf` p. 28), `φ_ij = 1`, `h_ij = h`:
+
+```
+δr_i := −CFL·Ma·(2h)² Σ_j [1 + R (W_ij/W(Δx_i))^n] ∇_iW_ij · 2 m_j/(ρ_i+ρ_j)
+```
+
+with **R = 0.2, n = 4**. Against that:
+
+| Eq. (7) | the code | ratio |
+|---|---|---|
+| prefactor `(2h)² = 4h²` | `delta.py`: `2h²` | ½ |
+| volume weight `2 m_j/(ρ_i+ρ_j)` | `wp_deltaShift.py`: `0.5 m_j/(ρ_i+ρ_j)` | ¼ |
+| `R = 0.2` | `computeDeltaShiftWarp`'s default `R = 0.25` | — |
+
+The missing factor of 2 on the prefactor carried an in-code justification —
+"we include the 2 from the mean density term in the computation of the shift so
+it's not `(2h)²`". That accounting does not hold: the `2` in
+`2 m_j/(ρ_i+ρ_j)` is Eq. (7)'s own volume weight, a *separate* factor from the
+`(2h)²` prefactor, and the raw kernel sum carries `0.5 m_j/(ρ_i+ρ_j)` rather
+than either of them. Net: **1/8 of Eq. (7)**.
+
+Measured, not argued — `scripts/probe_deltaPlusShiftMagnitude.py` (new)
+recomputes the literal Eq. (7) from the same raw kernel sum on a running TGV
+state and reports the ratio: **0.131× at `L/Δx` = 50, 100 and 200 alike** (the
+residual over 1/8 is the `R = 0.25` vs `0.2` difference). It also checks Sun's
+own Eq. (8), `|δr_i|/Δx_i < 0.05` "in all the simulations performed": the
+historical shift reads `0.0007`, i.e. **70× below the scale the paper says its
+own PST operates at**; Eq. (7)'s reads `0.022`, inside the bound and the right
+order.
+
+**Fix — `ShiftProperties.sun2017Eq7Shift`, opt-in.** Same precedent as
+`freezeDiffusionAcrossStages`: default `False`, so every existing case using
+`ShiftingScheme.deltaSPH` is byte-for-byte unchanged, and
+`Sun2017DeltaSPHConfig` (`--scheme sun2017DeltaSPH`) defaults it `True`, so
+"the paper's own prescription" stays an explicit choice. `tests/test_physics.py`
+72/72 green before and after.
+
+**Validated — the disagreement is gone.** Same probe, `Re = 100`, `tU/L = 1`,
+at Sun's own compared resolution and at half of it:
+
+| | `L/Δx` | before (1/8 shift) | **after (Eq. 7)** | Sun δ⁺-2017 |
+|---|---|---|---|---|
+| `p/p(t₀)` | 200 | 0.771 (+64 %) | **0.479 (+2 %)** | 0.470 |
+| `ε_V` | 200 | 0.2737 % (+119 %) | **0.1293 % (+3.4 %)** | 0.125 % |
+| KE max rel. error | 200 | 0.030 | **0.021** | — |
+| `p/p(t₀)` | **400** | 0.675 (+44 %) | **0.458 (−2.6 %)** | 0.470 |
+| `ε_V` | **400** | 0.2273 % (+82 %) | **0.1241 % (−0.7 %)** | 0.125 % |
+| KE max rel. error | **400** | 0.027 | **0.019** | — |
+
+At the matched resolution all three of Figs. 6, 7 and 9 agree with the paper to
+within the digitisation error of reading them. `scripts/out_deltaPlusTGV/`
+holds both legs side by side (`*_eighthEq7.npz` are the pre-fix runs) with
+`REPORT.md` and the three-panel figure as the record.
+
+**`Re = 1000` — the pathology reproduces, but the KE decay does not. OPEN.**
+Sun's right-hand panels are the long-time run (`tU/L = 10`), where his
+δ⁺-2017's pressure error becomes dramatic. At `L/Δx = 200` (half his):
+
+| | ours | Sun δ⁺-2017 (Fig. 7/9, `L/Δx = 400`) |
+|---|---|---|
+| `p/p(t₀)` at `tU/L = 10` | **2.79** | 2.40 (+16 %) |
+| `ε_V` at `tU/L = 10` | **1.27 %** | 1.00 % (×1.27) |
+| `ε_V` growth `t=10 / t=3` | 2.23 (cumulates) | cumulates |
+
+So the *characteristic Sun-2017 δ⁺ failure* — a centre pressure climbing
+monotonically to ~2.4× its initial value while the volume error accumulates
+past 1 % — is reproduced in shape and magnitude. That is the stronger of the
+two agreements: it says we match the scheme including its pathology, not just
+its good behaviour.
+
+**But the kinetic energy is not right at this Reynolds number.** It decays
+*too slowly*: `+6 %` over analytic at `tU/L = 1`, peaking at **`+11 %` around
+`tU/L = 2–3`**, then relaxing back to `+2.3 %` by `tU/L = 10`. Fig. 6's right
+panel does **not** license this — the green δ⁺-2017 curve overlays the analytic
+there for the whole record (it is the *red* "present δ⁺-SPH" that sits ~7 %
+high near `tU/L = 10`), so this is a genuine deviation and not a band that was
+set too tight. Note the direction: **under**-dissipation, which is the opposite
+of what a numerical-dissipation floor would produce, and note that at
+`Re = 100` the same code at the same resolution is within 3 % throughout.
+
+Candidate causes, untested: (a) plain under-resolution — `ν = 0.001` at
+`L/Δx = 200` against Sun's 400, and the paper itself warns that "for low
+viscosity values the vortex pattern becomes unstable... limiting the
+comparisons with the analytical solution to a smaller time interval", and that
+the advection error grows with `Re` at fixed `tU/(L Re)`; (b) kinetic energy
+leaking from the smooth TGV mode into small-scale particle-disorder motion,
+which does not dissipate at the mode's rate — total `Σ ½m|v|²` would then decay
+slower than `exp(−16π²νt)` while the *mode* decays correctly. **The discriminator
+is the `L/Δx = 400` run**: (a) predicts the excursion roughly halves, (b)
+predicts it largely does not. Queued.
+
+**Open:** whether `sun2017Eq7Shift` should become the shared default. It is a
+correctness fix against the source equation, so the burden is on keeping the
+old value, not on changing it — but the 8× shift is a real physics change for
+every `ShiftingScheme.deltaSPH` case, and the free-surface cases
+(`WCSPH_SHIFTING_PLAN.md`'s `surfaceNormal` projection was calibrated against
+the old magnitude) have to be re-swept before that. `oscillatingDroplet` below
+is the first free-surface run under the new value.
+
+### 5.3.3 Sun 2017 §4.2 — oscillating droplet
+
+`scripts/probe_deltaPlusDroplet.py` (new). Sun's own spec: `f = −B²r`,
+inviscid, `A₀/B = 1`, `c₀ = 15 A₀R`, `α = 0.01`, `R/Δx = 50/100/200`, **15
+oscillation periods**. Scores his **Table 1** (maximum momenta-conservation
+errors — both momenta are identically zero in the continuum, so the recorded
+value *is* the error, with no reference-reading uncertainty at all) and
+**Figs. 10/13** (the semi-axis history against `oscillatingDroplet.
+analyticSolution`, which was already encoded).
+
+| R/Δx | linear momentum (ρA₀R³) | angular momentum (ρA₀R⁴) |
+|---|---|---|
+| 50 | 1.5e-3 | 4.6e-4 |
+| 100 | 3.3e-4 | 1.6e-4 |
+| 200 | 3.3e-5 | 5.7e-6 |
+
+Case changes: `machTarget`/`referenceVelocity` params (Sun's `c₀ = 15 A₀R`
+through the shared Eq. (2) path) and a `_conservationMetrics` diagnostic block
+emitting both momenta already in Table 1's normalisation, plus the
+mechanical/potential/elastic energy split.
+
+**Partly reproduced: Figs. 11–12's energy budget.** Sun's *total* energy is
+constant only because it includes what the artificial viscosity and the
+density-diffusion term (`Q_δ`) have dissipated, and neither is recoverable from
+the state a diagnostic sees — both are per-step integrals of terms
+`schemes/deltaSPH.py` folds into `dvdt`/`drhodt` and does not hand back.
+Exposing `dvdt_diss`/`drhodt_diss` on `WeaklyCompressibleSystemUpdate` would
+close it, and is the next piece of work on this case. His *mechanical* energy
+is scoreable as is: **Fig. 11 (R/Δx = 200) falls to −4.8 % of `E_M⁰` over 14
+periods**, so the δ⁺-SPH does lose mechanical energy here — to the artificial
+viscosity, as his text says — and the drop's oscillation amplitude decays with
+it. That is shared physics, not an error to score against zero.
+
+**Result — 15 periods, `α = 0.01`, Eq. (7) shift: 7/7 checks at both
+resolutions run.**
+
+| | R/Δx = 50 | R/Δx = 100 | Sun 2017 |
+|---|---|---|---|
+| linear momentum (ρA₀R³) | **7.5e-4** | **1.26e-4** | 1.5e-3 / 3.3e-4 (Table 1) |
+| angular momentum (ρA₀R⁴) | **1.41e-4** | **5.57e-5** | 4.6e-4 / 1.6e-4 (Table 1) |
+| `a(t)` RMSE, first 3 periods | **0.0070 R** | **0.0045 R** | Fig. 10, visually exact |
+| oscillation period | **4.800 (−0.55 %)** | **4.810 (−0.35 %)** | 4.827 analytic |
+| peak amplitude decay | **4.3 %** | **2.7 %** | — |
+| mechanical energy loss | **−7.6 %** | **−4.8 %** | −4.8 % at R/Δx = 200 (Fig. 11) |
+
+**Both momenta come out better than the paper's at both resolutions, and — the
+stronger statement — they converge at the paper's own rate**, so the errors
+have the same scaling and not merely a similar magnitude at one point:
+
+| | linear, 50 → 100 | order | angular, 50 → 100 | order |
+|---|---|---|---|---|
+| this repo | 5.96× | 2.58 | 2.53× | 1.34 |
+| Sun 2017 Table 1 | 4.55× | 2.18 | 2.88× | 1.52 |
+
+The mechanical loss at `R/Δx = 50` is larger than Fig. 11's, but that figure is
+`R/Δx = 200`, and the artificial viscosity `ν = α c₀ h / (2(n+2))` is linear in
+`h`; by `R/Δx = 100` the loss is already **−4.83 %** against Fig. 11's −4.8 %,
+and every other error above halves with resolution too. `R/Δx = 200` (Table 1's
+third row, and Figs. 10–13's own resolution) is the remaining run — ~3 h at
+345k steps, not yet done.
+
+**Two scoring traps, both hit and both fixed** — recorded because each looked
+like a scheme error and was not:
+1. **A pointwise `a(t)` RMSE over all 15 periods is the wrong measure.** It
+   reads 0.126 R, almost entirely because a 0.55 %-short period accumulates
+   ~0.08 of a period of phase by the end; over the first 3 periods the same
+   trace reads 0.0070 R. And no figure in the paper constrains the phase at 15
+   periods — Fig. 10 stops at 10, Fig. 13 zooms the last oscillation of an
+   `R/Δx = 200` run. Period and amplitude are scored directly instead.
+2. **The peak detector.** A strictly two-sided `>` comparison silently dropped
+   the `t = 20.49` peak, where two consecutive float32 samples tie at the top.
+   One missing peak turns a 4.82 interval into a 9.62 one and dragged the mean
+   period to 5.17 (**+7.1 %**) — a scheme-error-shaped number produced entirely
+   by the analysis. Fixed with a plateau-tolerant comparison, a prominence
+   floor (the signal has real small-scale noise near the trough, which a bare
+   plateau-tolerant test admits as half-amplitude peaks) and the **median**
+   rather than the mean of the intervals.
+
+This is also **the first free-surface case run under the 8× Eq. (7) shift**,
+and it is stable and accurate there — the first evidence bearing on whether
+`sun2017Eq7Shift` can become the shared default.
 
 ---
 

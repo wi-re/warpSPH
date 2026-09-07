@@ -193,11 +193,87 @@ def dropletTimestep(ctx: RunContext, state) -> float:
 setupPlot, updatePlot = particlePlot(VELOCITY_DENSITY_FIELDS)
 
 
+def _conservationMetrics(ctx: RunContext, particles) -> Dict[str, float]:
+    """Sun et al. 2017 §4.2's conservation ledger: the two momenta of his
+    Table 1 and the energy components of his Figs. 11-12.
+
+    Both momenta are **exactly zero** in the continuum for this flow -- the
+    straining field `u = A x`, `v = -A y` is symmetric about the droplet centre
+    and irrotational -- so the recorded value *is* the conservation error, and
+    Table 1's "maximum error recorded during 15 oscillation periods" is the
+    running max of these columns. Normalised as the paper reports them:
+    `rho A0 R^3` for linear momentum, `rho A0 R^4` for angular (in 2D, where
+    `m ~ rho R^2`, those are `[m][v]` and `[m][v][L]`).
+
+    The energy split follows the delta-SPH energy balance (Antuono et al.):
+
+    * `mechanical` = kinetic + potential. The potential of
+      `computePotentialFieldGravity`'s acceleration `-B^2 r` is `B^2 |r|^2 / 2`
+      per unit mass.
+    * `elastic` = the weakly-compressible internal energy of the linear
+      equation of state `p = c0^2 (rho - rho0)`: integrating `de = p/rho^2 drho`
+      from `rho0` gives `e = c0^2 [ln(rho/rho0) + rho0/rho - 1]`, which is
+      `c0^2 (rho-rho0)^2 / (2 rho0^2)` to leading order. Sun's Fig. 11 has this
+      "oscillating almost horizontally".
+    * `total` = the two summed, the quantity Fig. 12 tracks against resolution
+      (his coarsest run drifts 1.2 % of the initial mechanical energy over 14
+      periods; the drift is a genuine consequence of the PST doing work against
+      the body force, not a bug).
+
+    `Q_delta`, the fourth curve of Fig. 11 -- the energy the density-diffusion
+    term dissipates -- is **not** here: it is a per-step integral of the
+    diffusive term against `p/rho^2`, so it needs the scheme to hand back the
+    term itself rather than anything a diagnostic can recompute from the state.
+    """
+    fluid = particles.kinds == 0 if hasattr(particles, 'kinds') else slice(None)
+    mass = particles.masses[fluid]
+    vel = particles.velocities[fluid]
+    pos = particles.positions[fluid]
+    rho = particles.densities[fluid]
+
+    A0 = float(ctx.param('A'))
+    B = float(ctx.param('B'))
+    R = float(ctx.param('R'))
+    rho0 = float(ctx.param('rho0'))
+    c0 = float(getattr(ctx.schemeConfig.fluid, 'fixedSoundSpeed', 0.0) or 0.0)
+
+    origin = ctx.schemeConfig.gravityConfig.origin
+    if not isinstance(origin, torch.Tensor):
+        origin = torch.tensor(origin, dtype=pos.dtype, device=pos.device)
+    rel = pos - origin
+
+    linear = (mass[:, None] * vel).sum(dim=0)
+    angular = (mass * (rel[:, 0] * vel[:, 1] - rel[:, 1] * vel[:, 0])).sum()
+
+    kinetic = 0.5 * (mass * (vel ** 2).sum(dim=-1)).sum()
+    potential = 0.5 * B ** 2 * (mass * (rel ** 2).sum(dim=-1)).sum()
+    if c0 > 0:
+        ratio = (rho / rho0).clamp_min(1e-6)
+        elastic = (mass * c0 ** 2 * (torch.log(ratio) + 1.0 / ratio - 1.0)).sum()
+    else:
+        elastic = torch.zeros((), dtype=kinetic.dtype, device=kinetic.device)
+
+    out = {
+        'linearMomentum': float(torch.linalg.norm(linear).detach().cpu().item()),
+        'angularMomentum': float(angular.abs().detach().cpu().item()),
+        'potentialEnergy': float(potential.detach().cpu().item()),
+        'elasticEnergy': float(elastic.detach().cpu().item()),
+    }
+    out['mechanicalEnergy'] = float(kinetic.detach().cpu().item()) + out['potentialEnergy']
+    out['totalEnergy'] = out['mechanicalEnergy'] + out['elasticEnergy']
+    # Sun's Table 1 normalisations, so the probe compares against his printed
+    # numbers without re-deriving the scaling.
+    out['linearMomentumStar'] = out['linearMomentum'] / (rho0 * A0 * R ** 3)
+    out['angularMomentumStar'] = out['angularMomentum'] / (rho0 * A0 * R ** 4)
+    return out
+
+
 def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     out = weaklyCompressibleDiagnostics(ctx, state)
     a, b = _measuredSemiAxes(state.state)
     out['semiAxisA'] = a.detach().cpu().item()
     out['semiAxisB'] = b.detach().cpu().item()
+    out.update(_conservationMetrics(ctx, state.state))
     # Eq. (65)'s `s_RK`/`m_iter`: pseudo-iterations this step took, for ACSPH
     # (`ctx.scratch['lastStageUpdate']`, `runner.py`'s per-step stash of the
     # scheme's own update object -- `diagnostics` never otherwise sees it).
@@ -237,6 +313,13 @@ oscillatingDropletCase = registerCase(Case(
         R=1.0,
         A=1.0,
         B=1.0,
+        # Sun et al. 2017 §4.2 sets `c0 = 15 A0 R`, i.e. Mach 1/15 against the
+        # straining field's edge speed `A0 R`. Reached through the shared
+        # `setupTimestep`'s Eq. (2) path with `machTarget = 1/15` and
+        # `referenceVelocity = A0 R`; None (the default) keeps the legacy
+        # `targetDt` back-solve, so no existing run changes.
+        machTarget=None,
+        referenceVelocity=None,
         markerSize=8,
     ),
 ))

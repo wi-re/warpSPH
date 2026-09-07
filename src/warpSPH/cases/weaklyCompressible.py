@@ -429,13 +429,29 @@ def meanFlowForcingBC(fluidSdf: Callable, target: float, tau: float) -> Boundary
 
 
 def setupTimestep(ctx: RunContext, system) -> None:
-    """Pick the sound speed and `dt` together, from `targetDt`.
+    """Pick the sound speed and `dt` together.
 
-    Weakly compressible SPH is free to choose its own stiffness, so rather than
-    a sound speed being given and dt following, the notebooks fix the timestep
-    they want and let the sound speed follow from the acoustic CFL. This is the
-    call that finally sets `config.dt` for the run.
+    Two routes, the same two `setupWeaklyCompressibleTimestep` offers:
+
+    * `machTarget` set (with `referenceVelocity` as `U_max`) -- **Sun et al.
+      2017 Eq. (2)**, `c0 = U_max / machTarget`, and `dt` follows from the
+      acoustic CFL. This is the physically-scaled route: the run stays at the
+      Mach number it was asked for at every resolution.
+    * `machTarget` unset (the default, so every existing case is unchanged) --
+      the legacy back-solve: fix `targetDt` and invert `c0` out of the acoustic
+      CFL, which makes `c0 ~ 1/dx` and the Mach number a function of `nx`.
+
+    `dambreak` has carried the Eq. (2) route in its own `initialConditions`
+    since `DELTASPH_VALIDATION_PLAN.md` Part 6 step 2; this is the same wiring
+    in the shared block, so any case that declares the two params gets it.
     """
+    machTarget = ctx.param('machTarget', None)
+    if machTarget is not None:
+        ctx.schemeConfig.fluid.fixedSoundSpeed, ctx.config.dt = setupWeaklyCompressibleTimestep(
+            ctx.config, ctx.schemeConfig, system, ctx.param('targetDt'),
+            verbose=ctx.spec.verbose,
+            uMaxExpected=ctx.param('referenceVelocity'), machTarget=machTarget)
+        return
     ctx.schemeConfig.fluid.fixedSoundSpeed, ctx.config.dt = setupWeaklyCompressibleTimestep(
         ctx.config, ctx.schemeConfig, system, ctx.param('targetDt'),
         verbose=ctx.spec.verbose)

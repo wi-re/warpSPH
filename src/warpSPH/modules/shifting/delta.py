@@ -1,12 +1,20 @@
-"""delta^+ particle shifting (Sun et al. 2017 scaling, per in-code comments):
-iterates a raw kernel-gradient shift term (`computeDeltaShiftWarp`, imported
-from `warpSPH.sample.wp_deltaShift`) and rescales it to a position delta of
-`-CFL * Ma * 2 * h^2`, where `Ma = v_max / c0` is a per-call Mach number
-estimate (density, position and velocities are restored to their pre-call
-values afterwards; only the accumulated position `delta` is returned to the
-caller). An equivalent shifting-*velocity* form (Michel 2022 scaling) is
-present in a comment but not used. `v_max` falls back to `c_max = 0.1` when
-the finite velocity magnitudes are all ~zero, to avoid a zero shift.
+"""delta^+ particle shifting (Sun et al. 2017 Eq. (7)): iterates a raw
+kernel-gradient shift term (`computeDeltaShiftWarp`, imported from
+`warpSPH.sample.wp_deltaShift`) and rescales it to a position delta, where
+`Ma = v_max / c0` is a per-call Mach number estimate (density, position and
+velocities are restored to their pre-call values afterwards; only the
+accumulated position `delta` is returned to the caller). An equivalent
+shifting-*velocity* form (Michel 2022 scaling) is present in a comment but not
+used. `v_max` falls back to `c_max = 0.1` when the finite velocity magnitudes
+are all ~zero, to avoid a zero shift.
+
+**Two scalings live here**, selected by `ShiftProperties.sun2017Eq7Shift`:
+`16 h^2` (with `R = 0.2`), which is Eq. (7) literally, and the historical
+`2 h^2` (with `R = 0.25`), which is **1/8 of it** -- see the scaling block in
+`computeDeltaShift` for the factor-by-factor comparison against the paper, and
+`scripts/probe_deltaPlusShiftMagnitude.py` for the measurement. The historical
+value is still the default for `ShiftingScheme.deltaSPH`; `--scheme
+sun2017DeltaSPH` selects Eq. (7).
 """
 
 # 17. If finalize, compute shifting and update positions and velocities
@@ -43,6 +51,11 @@ def computeDeltaShift(currentState, config, schemeConfig, domain, adjacency, ite
         # )
         # display(currentState)
 
+        # Sun et al. 2017 Eq. (7)'s literal constants rather than the
+        # historical ones -- see the scaling block below for what differs and
+        # why it is opt-in.
+        eq7 = getattr(schemeConfig.shiftProperties, 'sun2017Eq7Shift', False)
+
         c0 = schemeConfig.fluid.fixedSoundSpeed if schemeConfig.fluid.fixedSoundSpeed is not None else 1.0
 
         velocity_magnitudes = torch.linalg.vector_norm(currentState.velocities, dim=-1)
@@ -75,10 +88,14 @@ def computeDeltaShift(currentState, config, schemeConfig, domain, adjacency, ite
             adjacency = adjacency,
 
             CFL = schemeConfig.shiftProperties.CFL, computeMach = schemeConfig.shiftProperties.computeMach, c_max = c_max.cpu().item(),
-            rho0 = 1.0, dx = config.dx if not isinstance(config.dx, torch.Tensor) else config.dx.cpu().item()
+            rho0 = 1.0, dx = config.dx if not isinstance(config.dx, torch.Tensor) else config.dx.cpu().item(),
+            # Sun's R = 0.2 (Eq. 7, Monaghan's tensile-control value) under
+            # `sun2017Eq7Shift`; `computeDeltaShiftWarp`'s own historical
+            # default is 0.25. `n = 4` agrees either way.
+            **({'R': 0.2} if eq7 else {})
         ) #* schemeConfig.fluid.fixedSoundSpeed * config.dt
         # The compute function returns the unscaled term
-        # \sum_j m_j * [ 2 / (rho_i + rho_j) ] * [ 1 + R * (w_ij / W_0)^n ] * gradW_ij
+        # \sum_j 0.5 * m_j / (rho_i + rho_j) * [ 1 + R * (w_ij / W_0)^n ] * gradW_ij
         # The scaling factor is applied here to get the final shift amount
         Ma = c_max
         CFL = schemeConfig.shiftProperties.CFL
@@ -86,9 +103,33 @@ def computeDeltaShift(currentState, config, schemeConfig, domain, adjacency, ite
         h = currentState.supports / kernelScale
         dt = config.dt
 
-        # If we follow the delta^+ approach we get the scaling
-        # - CFL * Ma * 2 h^2 (note that we include the 2 from the mean density term in the computation of the shift so its not (2h)^2 as in (7) in Sun et al. 2017)
-        scalingDeltaPlus = -CFL * Ma * 2 * h**2
+        # Sun et al. 2017 Eq. (7), verbatim (`literature/sun2017_*.pdf` p. 28):
+        #
+        #   dr_i = -CFL Ma (2 h_ij)^2 sum_j [1 + R (W_ij/W(dx_i))^n]
+        #          grad_i W_ij  2 m_j/(rho_i + rho_j)  phi_ij
+        #
+        # so the scaling that turns the raw sum above into Eq. (7) is
+        # `(2h)^2 = 4 h^2` for the prefactor, times 4 to lift the raw sum's
+        # `0.5 m_j/(rho_i+rho_j)` weight to Eq. (7)'s `2 m_j/(rho_i+rho_j)`:
+        # 16 h^2 in total.
+        #
+        # The historical scaling here was `2 h^2` with the raw weight left
+        # alone -- **1/8 of Eq. (7)** -- justified by an in-code comment that
+        # dropped the `(2h)^2`'s factor of 2 "because we include the 2 from
+        # the mean density term in the computation of the shift". That
+        # accounting does not hold: the `2` in `2 m_j/(rho_i+rho_j)` is Eq.
+        # (7)'s own volume weight, a separate factor from the `(2h)^2`
+        # prefactor, and the raw sum carries `0.5 m_j/(rho_i+rho_j)` rather
+        # than either. `scripts/probe_deltaPlusShiftMagnitude.py` measures the
+        # resulting ratio directly: 0.131x Eq. (7), flat across
+        # L/dx = 50/100/200.
+        #
+        # Landing this as the unconditional default would change the physics of
+        # every case using `ShiftingScheme.deltaSPH`, so it is opt-in
+        # (`ShiftProperties.sun2017Eq7Shift`, default False) and turned on by
+        # `Sun2017DeltaSPHConfig` / `--scheme sun2017DeltaSPH`, the same way
+        # `freezeDiffusionAcrossStages` is.
+        scalingDeltaPlus = -CFL * Ma * (16.0 if eq7 else 2.0) * h**2
 
         # If we follow the approach of Michel 2022 we can rewrite the shift as a shifting velocity instead of a shift amount, and then scale it by dt to get the final shift amount
         # The scaling factor here is

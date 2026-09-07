@@ -215,6 +215,8 @@ class ShiftProperties:
     maxC: float = field(default=0.3, metadata={"description": "Maximum sound speed for the delta-SPH shift"})
     active: bool = field(default=True, metadata={"description": "Whether to apply the shifting"})
 
+    sun2017Eq7Shift: bool = field(default=False, metadata={"description": "Scale ShiftingScheme.deltaSPH's shift by Sun et al. 2017 Eq. (7)'s literal constants (prefactor (2h)^2 = 4h^2, volume weight 2 m_j/(rho_i+rho_j), R = 0.2) instead of the historical ones (2h^2, 0.5 m_j/(rho_i+rho_j), R = 0.25). The historical combination is 1/8 of Eq. (7) -- measured, not argued: scripts/probe_deltaPlusShiftMagnitude.py reads 0.131x across L/dx = 50/100/200. Default False keeps every existing deltaSPH case unchanged; Sun2017DeltaSPHConfig (--scheme sun2017DeltaSPH) defaults it True. See modules/shifting/delta.py."})
+
     scheme: ShiftingScheme = field(default=ShiftingScheme.deltaSPH, metadata={"description": "Shifting scheme to use"})
     projectionScheme: ShiftingProjectionScheme = field(default=ShiftingProjectionScheme.dot, metadata={"description": "Projection scheme to use for shifting"})
 

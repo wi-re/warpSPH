@@ -92,12 +92,32 @@ class WeaklyCompressibleSPHConfig:
 
     bandwith: float = field(default=10.0, metadata={'description': 'Bandwith for the divergence-free noise sampling module'})
 
+def _buildSun2017ShiftProperties() -> ShiftProperties:
+    """`buildDefaultShiftProperties()` with Sun et al. 2017 Eq. (7)'s own
+    constants -- the `+` of delta+-SPH at the intensity the paper specifies.
+
+    The shared default is 1/8 of Eq. (7) (measured:
+    `scripts/probe_deltaPlusShiftMagnitude.py`), which on Sun et al. 2019
+    Sec. 3.1's Taylor-Green benchmark leaves delta+-SPH sitting on top of
+    plain delta-SPH instead of improving on it -- `eps_V = 0.227 %` against
+    the delta-SPH leg's 0.206 %, where the paper's delta+ reaches 0.125 %
+    from the same 0.22 %. See `ShiftProperties.sun2017Eq7Shift`.
+    """
+    props = buildDefaultShiftProperties()
+    props.sun2017Eq7Shift = True
+    return props
+
+
 @dataclass
 class Sun2017DeltaSPHConfig(WeaklyCompressibleSPHConfig):
     """Sun et al. 2017's own delta+-SPH prescription -- identical to
     `WeaklyCompressibleSPHConfig` (same step function, `schemes/deltaSPH.py`;
-    no new physics) except `freezeDiffusionAcrossStages` defaults `True`
-    (Sec. 2's RK4-with-frozen-diffusion pairing, Antuono/Jameson technique).
+    no new physics) except for two field defaults:
+
+    * `freezeDiffusionAcrossStages` -> `True` (Sec. 2's
+      RK4-with-frozen-diffusion pairing, Antuono/Jameson technique);
+    * `shiftProperties.sun2017Eq7Shift` -> `True` (Eq. (7)'s own shift
+      constants -- `(2h)^2`, `2 m_j/(rho_i+rho_j)`, `R = 0.2`).
 
     Selected via `WeaklyCompressibleSPHScheme.sun2017DeltaSPH` /
     `--scheme sun2017DeltaSPH` (`schemes/builder.py`) -- a *named* scheme
@@ -119,6 +139,11 @@ class Sun2017DeltaSPHConfig(WeaklyCompressibleSPHConfig):
         metadata={'description': "Sun et al. 2017 Sec. 2: freeze delta-SPH's "
                   "diffusive terms across RK sub-stages -- this preset's "
                   "default (the base WeaklyCompressibleSPHConfig defaults False)"})
+    shiftProperties: ShiftProperties = field(
+        default_factory=_buildSun2017ShiftProperties,
+        metadata={'description': "Sun et al. 2017 Eq. (7)'s own shift constants "
+                  "(sun2017Eq7Shift=True) -- this preset's default; the shared "
+                  "buildDefaultShiftProperties() is 1/8 of Eq. (7)"})
 
 
 from typing import Dict, Any
