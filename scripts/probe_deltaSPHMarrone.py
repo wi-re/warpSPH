@@ -414,16 +414,32 @@ def _report(out: str):
         sys.exit(1)
 
     def runLabel(meta):
-        # Runs from before this session's `scheme`/`freezeDiffusionAcrossStages`
-        # meta fields existed were all the generic, un-frozen `deltaSPH` scheme
-        # -- default to that, not the new 'sun2017DeltaSPH' default, so old
-        # cached .npz files keep reading as what they actually were.
+        # Label by the *physics configuration*, not by the scheme name. Two
+        # reasons, both learned the hard way:
+        #
+        #  - this label used to start every run with "δ-SPH", and that was
+        #    wrong for almost all of them: `ShiftProperties.active` defaults
+        #    True, so these runs were δ⁺-SPH (`DELTASPH_VALIDATION_PLAN.md`
+        #    Sec. 5.1.1). A plot legend asserting the wrong scheme is how that
+        #    went unnoticed for as long as it did;
+        #  - the axes that actually vary across the legs are the PST (off / ⅛
+        #    of Eq. (7) / Eq. (7)) and the frozen diffusion, and `--scheme`
+        #    alone no longer determines either.
+        #
+        # Runs recorded before those meta fields existed were the un-frozen
+        # `deltaSPH` scheme with the shift active at the ⅛ scaling, which is
+        # what the `.get` defaults below reconstruct.
         schemeName = meta.get('scheme', 'deltaSPH')
-        frozen = meta.get('freezeDiffusionAcrossStages')
-        tag = '' if schemeName == 'sun2017DeltaSPH' else \
-            f"  [{schemeName}{', frozen' if frozen else ''}]"
-        return (f"δ-SPH  H/Δx={meta['HdxRatio']:.0f}  "
-                f"c₀/√(gH)={meta['c0Ratio']:g}{tag}")
+        frozen = meta.get('freezeDiffusionAcrossStages',
+                          schemeName == 'sun2017DeltaSPH')
+        if not meta.get('shiftActive', True):
+            pst = 'δ-SPH (no PST)'
+        elif meta.get('sun2017Eq7Shift', False):
+            pst = 'δ⁺ Eq.(7)'
+        else:
+            pst = 'δ⁺ ⅛·Eq.(7)'
+        return (f"{pst}, {'frozen' if frozen else 'un-frozen'} diff.  "
+                f"H/Δx={meta['HdxRatio']:.0f}  c₀/√(gH)={meta['c0Ratio']:g}")
 
     palette = ['#0353a4', '#c1121f', '#2a9d8f', '#e76f51', '#6a4c93', '#8d99ae']
     colours = {runLabel(m): palette[i % len(palette)]
@@ -454,7 +470,20 @@ def _report(out: str):
         ax.set_title(f"{s}   (z = {SENSORS[k]['z_mm']:.0f} mm,  z/H = {zH:.3f})")
         ax.set_ylabel(f'{s}*  =  {s} / (ρ₀ g H)')
         ax.grid(alpha=0.25)
-        ax.legend(fontsize=8, loc='upper left')
+        ax.legend(fontsize=7, loc='upper left', framealpha=0.9)
+        # Scale to the *smoothed* traces and the reference points, not to the
+        # raw signal. The raw trace carries brief acoustic spikes an order of
+        # magnitude above everything else (`P1*` touches 20 where the entire
+        # physical signal lives below 1.5), and autoscaling to those squashes
+        # every curve this plot exists to compare into the bottom few percent
+        # of the axis. The raw trace stays drawn, faint, and simply runs off
+        # the top -- which is the honest presentation: it is noise around the
+        # median, not a signal being hidden.
+        top = [np.nanmax(psm) for _meta, col in runs
+               for psm in [_trace(col, k)[2]] if psm.size]
+        top += [p[1] for p in BUCHNER[s]]
+        if top:
+            ax.set_ylim(min(0.0, float(np.nanmin(top))), float(np.nanmax(top)) * 1.35)
     axes[1].set_xlabel('t*  =  t √(g/H)')
     axes[1].set_xlim(2, max(8.0, max(np.nanmax(c['tStar']) for _, c in runs)))
     fig.suptitle('Marrone et al. 2011 §3.1 — dam break against a vertical wall\n'
