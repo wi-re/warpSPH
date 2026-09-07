@@ -133,7 +133,7 @@ it cannot reproduce this regression — but it also does not extend the MLS
 path below 9 neighbours, i.e. it would not have fixed H/Δx = 15. Landing it
 would be a small, low-risk win over the status quo without solving what this
 part of the plan set out to solve; a real fix needs an empirically-calibrated
-`determinantThreshold` for this codebase's kernel/precision, not
+`determinantThreshold` for this codebase's kernel/precision, not 
 DualSPHysics' borrowed constant. **Not implemented yet — decision pending.**
 
 **Search-radius parity checked and ruled out as the cause.** DualSPHysics'
@@ -1006,33 +1006,45 @@ periods**, so the δ⁺-SPH does lose mechanical energy here — to the artifici
 viscosity, as his text says — and the drop's oscillation amplitude decays with
 it. That is shared physics, not an error to score against zero.
 
-**Result — 15 periods, `α = 0.01`, Eq. (7) shift: 7/7 checks at both
-resolutions run.**
+**Result — 15 periods, `α = 0.01`, Eq. (7) shift: 7/7 checks at all three of
+Table 1's resolutions.**
 
-| | R/Δx = 50 | R/Δx = 100 | Sun 2017 |
+| | R/Δx = 50 | R/Δx = 100 | R/Δx = 200 |
 |---|---|---|---|
-| linear momentum (ρA₀R³) | **7.5e-4** | **1.26e-4** | 1.5e-3 / 3.3e-4 (Table 1) |
-| angular momentum (ρA₀R⁴) | **1.41e-4** | **5.57e-5** | 4.6e-4 / 1.6e-4 (Table 1) |
-| `a(t)` RMSE, first 3 periods | **0.0070 R** | **0.0045 R** | Fig. 10, visually exact |
-| oscillation period | **4.800 (−0.55 %)** | **4.810 (−0.35 %)** | 4.827 analytic |
-| peak amplitude decay | **4.3 %** | **2.7 %** | — |
-| mechanical energy loss | **−7.6 %** | **−4.8 %** | −4.8 % at R/Δx = 200 (Fig. 11) |
+| linear momentum (ρA₀R³) | 7.51e-4 | 1.26e-4 | 4.88e-5 |
+| — Sun Table 1 | 1.5e-3 | 3.3e-4 | 3.3e-5 |
+| angular momentum (ρA₀R⁴) | 1.41e-4 | 5.57e-5 | 1.98e-5 |
+| — Sun Table 1 | 4.6e-4 | 1.6e-4 | 5.7e-6 |
+| `a(t)` RMSE, first 3 periods | 0.0070 R | 0.0045 R | 0.0034 R |
+| oscillation period | 4.800 (−0.55 %) | 4.810 (−0.35 %) | 4.816 (−0.22 %) |
+| peak amplitude decay, 15 periods | 4.3 % | 2.7 % | 1.7 % |
+| mechanical energy loss | −7.6 % | −4.8 % | **−3.2 %** (Fig. 11: −4.8 %) |
 
-**Both momenta come out better than the paper's at both resolutions, and — the
-stronger statement — they converge at the paper's own rate**, so the errors
-have the same scaling and not merely a similar magnitude at one point:
+Every error converges monotonically, and the semi-axis, period and amplitude
+columns are excellent throughout. **The momenta are the interesting column, and
+they do not tell a simple story.** Ours are 2–3× *better* than Table 1 at
+`R/Δx = 50` and `100`, then 1.5×/3.5× *worse* at `200` — not because ours stop
+converging, but because Sun's last refinement does something ours does not:
 
-| | linear, 50 → 100 | order | angular, 50 → 100 | order |
-|---|---|---|---|---|
-| this repo | 5.96× | 2.58 | 2.53× | 1.34 |
-| Sun 2017 Table 1 | 4.55× | 2.18 | 2.88× | 1.52 |
+| refinement | ours, linear | order | Sun, linear | order | ours, angular | order | Sun, angular | order |
+|---|---|---|---|---|---|---|---|---|
+| 50 → 100 | 5.96× | 2.58 | 4.55× | 2.18 | 2.53× | 1.34 | 2.88× | 1.52 |
+| 100 → 200 | 2.58× | 1.37 | **10.0×** | **3.32** | 2.81× | 1.49 | **28.1×** | **4.81** |
 
-The mechanical loss at `R/Δx = 50` is larger than Fig. 11's, but that figure is
-`R/Δx = 200`, and the artificial viscosity `ν = α c₀ h / (2(n+2))` is linear in
-`h`; by `R/Δx = 100` the loss is already **−4.83 %** against Fig. 11's −4.8 %,
-and every other error above halves with resolution too. `R/Δx = 200` (Table 1's
-third row, and Figs. 10–13's own resolution) is the remaining run — ~3 h at
-345k steps, not yet done.
+Ours converge at a consistent ~1.4 order across both refinements (2.6 for the
+first linear step). Sun's Table 1 agrees on the first refinement and then jumps
+to order 3.3 and 4.8 on the second — a 28× drop in angular-momentum error for a
+2× resolution change. That is very steep for a conservation error, and it is
+inconsistent with his own 50 → 100 rates. Not investigated further here, and
+**not** asserted to be an error in the paper: the honest statement is that our
+momenta converge steadily and land between his 100 and 200 rows, and that the
+entire disagreement at `R/Δx = 200` lives in that order jump rather than in our
+errors growing.
+
+The mechanical-energy loss now has a same-resolution comparison and comes out
+**−3.2 % against Fig. 11's −4.8 %** — i.e. this implementation is ~30 % *less*
+dissipative than the paper's at matched `R/Δx`, having been more dissipative at
+the coarse end (as `ν = α c₀ h / (2(n+2))`, linear in `h`, predicts).
 
 **Two scoring traps, both hit and both fixed** — recorded because each looked
 like a scheme error and was not:
