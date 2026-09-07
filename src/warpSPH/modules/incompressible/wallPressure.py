@@ -101,11 +101,12 @@ __all__ = ['wallPressureExtrapolation']
 #: Boundary rows whose Shepard fluid-weight `sum_f V_f W_kf` is below this
 #: (deep in a multi-layer band, no real fluid neighbours) get `p_b = 0`.
 _MIN_WEIGHT = 1e-6
-#: Liu-Liu neighbour-count thresholds: >`_SHEPARD_MIN` uses the 0th-order
-#: Shepard value, >`_LINEAR_MIN` uses the full value+gradient projection
-#: (matching `computeMdbcPressure`).
+#: Liu-Liu 0th-order Shepard tier: rows with more fluid neighbours than this
+#: use the 0th-order Shepard value; the full value+gradient projection tier is
+#: `interpolateLiuLiu`'s own `wellConditioned` gate (neighbour count AND
+#: `|det(A_g)| >= determinantThreshold`, mirroring DualSPHysics' `determlimit`
+#: -- see `DELTASPH_VALIDATION_PLAN.md` Part 3), not a second bare count.
 _SHEPARD_MIN = 1
-_LINEAR_MIN = 9
 
 
 def _shepardValue(state, config, adjacency, referenceValues):
@@ -245,7 +246,7 @@ def wallPressureExtrapolation(state: Any, config: Any, adjacency: Any,
         return _shepardMirror(state, config, adjacency, p, fluid, clampNonNeg)
 
     hashMap = adjacency.hashMap if isinstance(adjacency, AdjacencyList) else None
-    p_interp, p_grad, nNbr, A_g, b = interpolateLiuLiu(
+    p_interp, p_grad, nNbr, A_g, b, wellConditioned = interpolateLiuLiu(
         state.positions[ghost], referenceParticles=state, referenceQuantities=p,
         config=config, neighbor_threshold=4,
         direction=OperationDirection.FluidToGhost, supportScale=1.0,
@@ -258,7 +259,7 @@ def wallPressureExtrapolation(state: Any, config: Any, adjacency: Any,
     shep = torch.where(shepDen > 0, b[:, 0] / shepDen.clamp_min(1e-12),
                        torch.zeros_like(shepDen))
     p_b = torch.where(nNbr > _SHEPARD_MIN, shep, torch.zeros_like(shep))
-    p_b = torch.where(nNbr > _LINEAR_MIN, p_proj, p_b)
+    p_b = torch.where(wellConditioned, p_proj, p_b)
     if clampNonNeg:
         p_b = p_b.clamp(min=0.0)
 

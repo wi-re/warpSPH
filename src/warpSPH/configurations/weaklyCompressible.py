@@ -9,7 +9,7 @@ diffusion, viscosity switch, boundary conditions, delta-SPH shifting,
 `dictToWeaklyCompressibleConfig` do serialize `regions` and `rigidBodies`.
 """
 
-__all__ = ['WeaklyCompressibleSPHConfig', 'weaklyCompressibleConfigToDict', 'dictToWeaklyCompressibleConfig']
+__all__ = ['WeaklyCompressibleSPHConfig', 'Sun2017DeltaSPHConfig', 'weaklyCompressibleConfigToDict', 'dictToWeaklyCompressibleConfig']
 
 # from ..system import CompressibleSystem, CompressibleSystemUpdate
 # from ..config import SimulationConfig
@@ -55,6 +55,21 @@ class WeaklyCompressibleSPHConfig:
 
     diffusionParams: WeaklyCompressibleDiffusionParams = field(default_factory=buildDefaultDiffusionParamsWeaklyCompressibleSPH, metadata={'description': 'Diffusion parameters for the weakly compressible SPH simulation'})
 
+    # Sun et al. 2017 Sec. 2 (Antuono/Jameson technique): the delta-SPH
+    # diffusive terms (density diffusion + artificial viscosity) are evaluated
+    # ONCE per real step, at the committed t^n state, and held fixed across
+    # every RK4 sub-stage rather than recomputed fresh at each stage's
+    # (intermediate, possibly wildly different during a violent event) state.
+    # False (default) leaves every existing case's behaviour unchanged --
+    # `schemes/deltaSPH.py` recomputes fresh every stage as it always has.
+    # `DELTASPH_VALIDATION_PLAN.md` Part 1 flagged this as a known deviation
+    # from Sun 2017; Part 5.1's Marrone dam-break investigation is the first
+    # case to actually exercise the flag. Only meaningful with a multi-stage
+    # RK integrator (`integrationScheme=rungeKutta4` etc.) -- a no-op under
+    # any single-evaluation scheme (forwardEuler/semiImplicitEuler), since
+    # there is only one stage to freeze against.
+    freezeDiffusionAcrossStages: bool = field(default=False, metadata={'description': "Freeze delta-SPH's diffusive terms across RK sub-stages (Sun et al. 2017 Sec. 2), re-evaluating once per real step instead of once per stage"})
+
     viscositySwitchParams: ViscositySwitchConfig = field(default_factory=ViscositySwitchConfig)
 
     schemeName: str = field(default='Compressible SPH', metadata={'description': 'Name of the compressible SPH scheme to use'})
@@ -76,6 +91,35 @@ class WeaklyCompressibleSPHConfig:
     gravityConfig: gravityConfiguration = field(default_factory=buildDefaultGravityConfiguration, metadata={'description': 'Configuration for gravity module'})
 
     bandwith: float = field(default=10.0, metadata={'description': 'Bandwith for the divergence-free noise sampling module'})
+
+@dataclass
+class Sun2017DeltaSPHConfig(WeaklyCompressibleSPHConfig):
+    """Sun et al. 2017's own delta+-SPH prescription -- identical to
+    `WeaklyCompressibleSPHConfig` (same step function, `schemes/deltaSPH.py`;
+    no new physics) except `freezeDiffusionAcrossStages` defaults `True`
+    (Sec. 2's RK4-with-frozen-diffusion pairing, Antuono/Jameson technique).
+
+    Selected via `WeaklyCompressibleSPHScheme.sun2017DeltaSPH` /
+    `--scheme sun2017DeltaSPH` (`schemes/builder.py`) -- a *named* scheme
+    rather than a changed default on the generic `deltaSPH` scheme, so opting
+    into this paper's exact prescription is explicit, not a silent behaviour
+    change for every existing `deltaSPH` case. `DELTASPH_VALIDATION_PLAN.md`
+    Part 5.1 confirmed the un-frozen RK4 combination produces a spurious,
+    extended (~1.4 t*) violent-impact pressure transient a single-stage
+    integrator (e.g. DualSPHysics' symplectic Euler) never exhibits, since it
+    has no cross-stage inconsistency to freeze against in the first place --
+    frozen diffusion is specifically an RK-multi-stage companion technique.
+
+    Kernel and integrator (Wendland C2, RK4) are case-level settings either
+    way, not part of this config -- `cases/dambreak.py` already defaults to
+    both regardless of which `WeaklyCompressibleSPHScheme` is selected.
+    """
+    freezeDiffusionAcrossStages: bool = field(
+        default=True,
+        metadata={'description': "Sun et al. 2017 Sec. 2: freeze delta-SPH's "
+                  "diffusive terms across RK sub-stages -- this preset's "
+                  "default (the base WeaklyCompressibleSPHConfig defaults False)"})
+
 
 from typing import Dict, Any
 
@@ -129,6 +173,7 @@ def weaklyCompressibleConfigToDict(config: WeaklyCompressibleSPHConfig) -> Dict[
         'gravityConfig': gravityConfigurationToDict(config.gravityConfig),
         'regions': [region.toDict() for region in config.regions],
         'rigidBodies': [body.toDict() for body in config.rigidBodies],
+        'freezeDiffusionAcrossStages': config.freezeDiffusionAcrossStages,
     }
 
 def dictToWeaklyCompressibleConfig(configDict: Dict[str, Any]) -> WeaklyCompressibleSPHConfig:
@@ -182,5 +227,6 @@ def dictToWeaklyCompressibleConfig(configDict: Dict[str, Any]) -> WeaklyCompress
     config.gravityConfig = dictToGravityConfiguration(configDict['gravityConfig']) if configDict.get('gravityConfig') is not None else buildDefaultGravityConfiguration()
     config.regions = [ParticleRegion.fromDict(regionDict) for regionDict in configDict.get('regions', [])]
     config.rigidBodies = [RigidBody.fromDict(bodyDict) for bodyDict in configDict.get('rigidBodies', [])]
+    config.freezeDiffusionAcrossStages = bool(configDict.get('freezeDiffusionAcrossStages', False))
 
     return config

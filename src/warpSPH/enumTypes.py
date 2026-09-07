@@ -58,7 +58,22 @@ class CompressibleSPHScheme(Enum):
 
 # @torch.jit.script
 class WeaklyCompressibleSPHScheme(Enum):
+    #: Generic delta-SPH/WCSPH: every `WeaklyCompressibleSPHConfig` knob at its
+    #: own documented default (`freezeDiffusionAcrossStages=False` among them).
+    #: Not tied to any one paper's exact prescription.
     deltaSPH = 0
+    #: Sun et al. 2017's own delta+-SPH prescription: identical physics/step
+    #: function to `deltaSPH` (`schemes/deltaSPH.py`, no new code), but
+    #: `Sun2017DeltaSPHConfig` defaults `freezeDiffusionAcrossStages=True` --
+    #: Sec. 2's RK4-with-frozen-diffusion pairing (Antuono/Jameson), confirmed
+    #: to fix a genuine violent-impact pressure artefact in
+    #: `DELTASPH_VALIDATION_PLAN.md` Part 5.1. A *named* scheme rather than a
+    #: change to `deltaSPH`'s own default, so selecting a specific paper's
+    #: prescription is an explicit choice (`--scheme sun2017`), not a silent
+    #: behaviour change for every existing `deltaSPH` case. Kernel/integrator
+    #: choice (Wendland C2, RK4) remain case-level settings either way --
+    #: `cases/dambreak.py` already defaults to both, independent of scheme.
+    sun2017DeltaSPH = 1
 
 # @torch.jit.script
 class IncompressibleSPHScheme(Enum):

@@ -143,6 +143,13 @@ def configureScheme(ctx: RunContext) -> None:
     schemeConfig.gravityConfig.magnitude = ctx.param('gravityMagnitude')
     schemeConfig.gravityConfig.origin = ctx.param('gravityDirection')
     schemeConfig.bandwith = simSetup.L / ctx.param('bandWidth') / ctx.config.dx
+    # `None` (default): don't touch it -- let whichever scheme was selected
+    # keep its own `freezeDiffusionAcrossStages` default (`deltaSPH`: False;
+    # `sun2017DeltaSPH`: True, `Sun2017DeltaSPHConfig`). Only an explicit
+    # True/False override here should be able to stomp that choice.
+    freezeParam = ctx.param('freezeDiffusionAcrossStages')
+    if freezeParam is not None and hasattr(schemeConfig, 'freezeDiffusionAcrossStages'):
+        schemeConfig.freezeDiffusionAcrossStages = freezeParam
 
     if isArtificialCompressibleScheme(ctx.scheme):
         _configureArtificialCompressibleExtra(ctx)
@@ -298,6 +305,27 @@ def dambreakTimestep(ctx: RunContext, state) -> float:
                            systemUpdate=ctx.scratch.get('lastStageUpdate'))
 
 
+#: 7-point Gauss-Legendre quadrature on [-1, 1], used by `diagnostics`'
+#: `pressureProbeDiscRadius` path to area-integrate a wall pressure probe over
+#: a flush transducer disc instead of reading a single point. In 2D (no
+#: out-of-plane extent) the disc-area integral reduces to a 1D integral over
+#: its vertical chord: at height offset s from the disc centre (|s| <= R,
+#: x = s/R), the chord width is 2*sqrt(R^2-s^2) = 2R*sqrt(1-x^2), so the
+#: area-weighted average is (2/pi) * integral_{-1}^{1} P(R x) sqrt(1-x^2) dx.
+#: `_DISC_CHORD_WEIGHTS` folds the sqrt(1-x^2) chord factor into the standard
+#: Gauss-Legendre weights and is renormalised to sum to 1 at use (so the
+#: (2/pi) prefactor, which is exactly what makes unweighted quadrature sum to
+#: 1, need not be carried separately).
+_GAUSS7_NODES = (-0.9491079123427585, -0.7415311855993945, -0.4058451513773972,
+                 0.0, 0.4058451513773972, 0.7415311855993945, 0.9491079123427585)
+_GAUSS7_WEIGHTS = (0.1294849661688697, 0.2797053914892766, 0.3818300505051189,
+                   0.4179591836734694, 0.3818300505051189, 0.2797053914892766,
+                   0.1294849661688697)
+_DISC_CHORD_WEIGHTS = tuple(w * max(0.0, 1.0 - x * x) ** 0.5
+                            for x, w in zip(_GAUSS7_NODES, _GAUSS7_WEIGHTS))
+_DISC_CHORD_WEIGHT_SUM = sum(_DISC_CHORD_WEIGHTS)
+
+
 def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     particles = state.state
     fluid = particles.kinds == 0
@@ -345,8 +373,15 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
         allPos = particles.positions
         xWall = float(interior.max[0].item()) - float(ctx.param('pressureProbeInset'))
         yBed = float(interior.min[1].item())
-        pts = torch.tensor([[xWall, yBed + float(z)] for z in probeHeights],
-                           device=allPos.device, dtype=allPos.dtype)
+        discRadius = float(ctx.param('pressureProbeDiscRadius') or 0.0)
+        # `pressureProbeDiscRadius > 0`: area-integrate over a flush wall
+        # transducer disc (Marrone 2011 uses phi = 90 mm) via the 7-point
+        # Gauss-Legendre chord quadrature above, instead of one point per
+        # probe height. 0.0 (default): unchanged single-point behaviour.
+        sOffsets = [discRadius * x for x in _GAUSS7_NODES] if discRadius > 0.0 else [0.0]
+        pts = torch.tensor(
+            [[xWall, yBed + float(z) + s] for z in probeHeights for s in sOffsets],
+            device=allPos.device, dtype=allPos.dtype)
         # The probe sits ~1 kernel support from the +x domain edge; if the run
         # is periodic (`wallPeriodic`) the MLS gather would wrap across to the
         # back wall. Force a non-periodic domain for the interpolation only.
@@ -355,28 +390,58 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
         dom = ctx.config.domain
         probeConfig.domain = type(dom)(dom.min, dom.max,
                                        torch.zeros_like(dom.periodic), dom.dim)
-        # `pressureProbeSupportScale` widens the MLS gather radius. A real
-        # transducer integrates over its face (Marrone 2011 uses a phi = 90 mm
-        # disc); a scale > 1 averages the point reading over a comparable patch
-        # so the impulsive first-contact / jet-tip spikes a point probe catches
-        # are smoothed the way an area-integrated signal is. Default 1.0 leaves
-        # every existing run unchanged.
-        val, _grad, nnbr, _A, _b = interpolateLiuLiu(
+        # `pressureProbeSupportScale` widens the MLS gather radius -- a cheap
+        # single-point approximation to a finite-face transducer's area
+        # integration, superseded by `pressureProbeDiscRadius` above but kept
+        # for cases that still want it. Default 1.0 leaves every existing run
+        # unchanged.
+        val, _grad, nnbr, A_g, b, wellConditioned = interpolateLiuLiu(
             pts, referenceParticles=particles, referenceQuantities=particles.pressures,
             config=probeConfig, neighbor_threshold=4,
             direction=OperationDirection.FluidToFluid,
             supportScale=float(ctx.param('pressureProbeSupportScale') or 1.0))
-        val = val.clamp(min=0.0).detach().cpu()
-        nnbr = nnbr.detach().cpu()
+        # Two-tier fallback matching `modules/mdbc/density2025.py` /
+        # `modules/incompressible/wallPressure.py`'s own ladder: the
+        # first-order MLS fit where `wellConditioned`, else a 0th-order
+        # Shepard gather (`b[:,0] / A_g[:,0,0]`). A query point can have
+        # plenty of neighbours (double digits) and still fail the determinant
+        # check -- a thin sheet running up/down the wall is exactly this:
+        # near-coplanar neighbours, but many of them -- and `interpolateLiuLiu`
+        # hard-zeros the first-order fit there by design. Without this
+        # fallback every such point (point probe or disc quadrature sample)
+        # read a flat 0 regardless of how much real, valid neighbour support
+        # it had, which is not the local pressure.
+        shepDen = A_g[:, 0, 0]
+        shepVal = torch.where(shepDen > 0, b[:, 0] / shepDen.clamp_min(1e-12),
+                              torch.zeros_like(shepDen))
+        val = torch.where(wellConditioned, val, shepVal)
+        val = val.clamp(min=0.0).detach().cpu().view(len(probeHeights), len(sOffsets))
+        nnbr = nnbr.detach().cpu().view(len(probeHeights), len(sOffsets))
+        if discRadius > 0.0:
+            # Weight each quadrature sample by its disc chord factor, excluding
+            # only genuinely dry samples (`nnbr <= 1`, matching density2025.py's
+            # own Shepard-tier floor) and renormalising over the rest -- a
+            # sample with real neighbour support now always contributes its
+            # (MLS-or-Shepard) value rather than a hard zero.
+            baseW = torch.tensor(_DISC_CHORD_WEIGHTS, dtype=val.dtype)
+            validSample = nnbr > 1
+            w = baseW.unsqueeze(0) * validSample.to(val.dtype)
+            wSum = w.sum(dim=1)
+            valOut = torch.where(wSum > 0, (val * w).sum(dim=1) / wSum.clamp_min(1e-12),
+                                 torch.zeros_like(wSum))
+            nnbrOut = nnbr.amax(dim=1)
+        else:
+            valOut = val[:, 0]
+            nnbrOut = nnbr[:, 0]
         H = ctx.param('fillRatio') * ctx.spec.L
         g = ctx.param('gravityMagnitude')
         pRef = ctx.schemeConfig.fluid.restDensity * g * H      # rho0 g H
         t = float(state.t) if getattr(state, 't', None) is not None else 0.0
         d['tStar'] = t * (g / H) ** 0.5
         for k in range(len(probeHeights)):
-            d[f'pProbe{k}'] = float(val[k])
-            d[f'pProbe{k}Star'] = float(val[k]) / pRef
-            d[f'pProbe{k}Nnbr'] = int(nnbr[k])
+            d[f'pProbe{k}'] = float(valOut[k])
+            d[f'pProbe{k}Star'] = float(valOut[k]) / pRef
+            d[f'pProbe{k}Nnbr'] = int(nnbrOut[k])
     return d
 
 
@@ -452,7 +517,15 @@ dambreakCase = registerCase(Case(
         nx=128,
         L=2.0,
         n_h=4.0,
-        kernel='Wendland4',
+        # Sun/Marrone/DualSPHysics all use Wendland C2 (h/dp=2, support=2h=4dp
+        # -- the same 4*dx this case's n_h=4.0 already gives). This case used
+        # to default to C4; an A/B on the Marrone dam break
+        # (`scripts/probe_deltaSPHMarrone.py --kernel Wendland2`) came out
+        # marginally cleaner at every resolution tested than C4, and C4 was
+        # never a deliberate physics choice recorded anywhere in this plan --
+        # just the case's inherited default. `DELTASPH_VALIDATION_PLAN.md`
+        # Part 1 / Part 3.
+        kernel='Wendland2',
         # Sun et al. 2017 §2 integrate the δ-SPH system with RK4 (frozen
         # diffusion is a performance option on top, not required for
         # correctness). `DELTASPH_VALIDATION_PLAN.md` Part 1.
@@ -479,9 +552,24 @@ dambreakCase = registerCase(Case(
         pressureProbeInset=0.0,
         # MLS gather radius multiplier for the wall probe (1.0 = one kernel
         # support). > 1 mimics a finite-face transducer's area integration --
-        # see `diagnostics`; `scripts/probe_deltaSPHMarrone.py` uses it to
-        # approach Marrone's φ = 90 mm probe disc.
+        # see `diagnostics`. Superseded by `pressureProbeDiscRadius` for a
+        # true disc integral; kept for cases that still want the cheaper
+        # single-point-with-wide-support approximation.
         pressureProbeSupportScale=1.0,
+        # Physical radius (case length unit) of a flush wall transducer disc
+        # to area-integrate each probe over, rather than reading one point.
+        # 0.0 (default) -> old single-point behaviour, unchanged.
+        # `scripts/probe_deltaSPHMarrone.py` sets this to Marrone 2011's
+        # φ = 90 mm probe disc (radius 0.045 m) -- see `diagnostics`.
+        pressureProbeDiscRadius=0.0,
+        # Sun et al. 2017 Sec. 2: freeze the delta-SPH diffusive terms across
+        # RK sub-stages instead of recomputing them fresh at each stage's
+        # intermediate state. None (default) -> don't override; whichever
+        # scheme is selected keeps its own default (`--scheme sun2017DeltaSPH`
+        # already defaults this True). Pass True/False explicitly to force it
+        # either way regardless of scheme. `DELTASPH_VALIDATION_PLAN.md`
+        # Part 1/5.1.
+        freezeDiffusionAcrossStages=None,
         # Expected front speed U_max for the Sun Eq. (2) sound-speed pick
         # (`initialConditions`, `machTarget` path). None -> sqrt(2 g H), the
         # free-fall estimate. `scripts/probe_deltaSPHMarrone.py` sets it to

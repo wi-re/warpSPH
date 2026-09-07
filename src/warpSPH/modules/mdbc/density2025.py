@@ -6,10 +6,12 @@ Computes densities for ghost/boundary particles (kind 2) by Liu-Liu
 hydrostatic pressure correction along the ghost-offset normal, including a
 gravity term, clamped to at least rest density. One deviation from the cited
 paper's formula is called out inline (the ghost-normal normalization) as
-matching DualSPHysics rather than the paper. Falls back to a plain
-Shepard-interpolated density, then to rest density, when a ghost point has
-too few (<=1) or too few (<=9) fluid neighbors respectively. No-ops (returns
-`currentState.densities` unchanged) when there are no boundary particles.
+matching DualSPHysics rather than the paper. Falls back to a plain Shepard-interpolated density, then to rest density, when
+a ghost point has too few (<=1) fluid neighbors, or when its moment matrix is
+ill-conditioned (`interpolateLiuLiu`'s `wellConditioned` gate: too few (<=4)
+neighbors OR `|det(A_g)| < 1e-3`, mirroring DualSPHysics' `determlimit`). No-ops
+(returns `currentState.densities` unchanged) when there are no boundary
+particles.
 """
 
 import warp as wp
@@ -35,7 +37,7 @@ def computeMdbcDensity(currentState: Any, config: SimulationConfig, schemeConfig
     if not stateHasBoundaryParticles(currentState, config):
         return currentState.densities
     with record_function("[warpSPH] - (mdbc) - computeMdbcDensity"):
-        rho_interp, rho_interp_grad, numNeighbors, A_g, b = interpolateLiuLiu(
+        rho_interp, rho_interp_grad, numNeighbors, A_g, b, wellConditioned = interpolateLiuLiu(
             currentState.positions[currentState.kinds == 2],
             referenceParticles = currentState,
             referenceQuantities = currentState.densities,
@@ -89,26 +91,25 @@ def computeMdbcDensity(currentState: Any, config: SimulationConfig, schemeConfig
         #   rho_b = rho_g + (r_b - r_g) . grad(rho)_g ,
         # with the MLS value + gradient from `interpolateLiuLiu`. The
         # Shepard-density + hydrostatic `rho_b` above is DualSPHysics'
-        # m2dbc-style fallback, used below this neighbour count.
+        # m2dbc-style fallback, used wherever this is ill-conditioned.
         #
-        # `threshold = 9`, NOT `interpolateLiuLiu`'s own 4: the MLS path here
-        # has no conditioning guard (English §3 / DualSPHysics both gate on a
-        # `determlimit`; `interp.py` only pinv's `A_g`, which passes a
-        # near-singular direction straight through). A boundary particle under
-        # the thin, fast dam-break front sliding over the dry bed sees ~5-9
-        # fluid neighbours all in a shallow horizontal band -> the vertical
-        # moment of `A_g` is tiny -> `rho_interp_grad` blows up -> `rho_proj`
-        # is wild -> `P_b = c0^2 (rho_proj - rho0)` (with c0 = 40 sqrt(gH),
-        # c0^2 ~ 9400) flings the sheet off the bed *before* it reaches the
-        # end wall (t ~ 0.54 s in the Marrone 3.1 case). Dropping this to 4
-        # this session is what broke that case; `DELTASPH_VALIDATION_PLAN.md`
-        # Part 3 owns the principled fix (a determinant / condition gate so
-        # the MLS path can safely extend below 9).
-        threshold = 9
-
+        # `wellConditioned` (English Sec. 3 / DualSPHysics `determlimit`,
+        # `|det(A_g)| >= 1e-3` AND enough neighbours) replaces a bare
+        # neighbour-count threshold, which previously had to be hand-tuned to
+        # 9: at a lower count, a boundary particle under the thin, fast
+        # dam-break front sliding over the dry bed sees ~5-9 fluid neighbours
+        # all in a shallow horizontal band -> the vertical moment of `A_g` is
+        # tiny -> `rho_interp_grad` blows up -> `rho_proj` is wild ->
+        # `P_b = c0^2 (rho_proj - rho0)` (with c0 = 40 sqrt(gH), c0^2 ~ 9400)
+        # flings the sheet off the bed before it reaches the end wall (t ~
+        # 0.54 s in the Marrone 3.1 case). The determinant check catches that
+        # failure directly (rather than by proxy via neighbour count), so the
+        # MLS path can safely engage below 9 neighbours when the local
+        # stencil is in fact well-conditioned, and stays off above 9 when it
+        # isn't. See `DELTASPH_VALIDATION_PLAN.md` Part 3.
         drho = -torch.einsum('nu, nu -> n', relPos, rho_interp_grad)
         rho_proj = (rho_interp + drho)
-        boundaryDensity[bIndices] = torch.where(numNeighbors > threshold, rho_proj, boundaryDensity[bIndices])
+        boundaryDensity[bIndices] = torch.where(wellConditioned, rho_proj, boundaryDensity[bIndices])
 
         mergedDensitities = currentState.densities.clone()
         mergedDensitities[bIndices] = boundaryDensity[bIndices]

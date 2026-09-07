@@ -3,7 +3,31 @@
 `interpolateLiuLiu` fits a local linear field (value + gradient) at each query
 point from `computeLiuMatricesWarp`'s moment matrix/vector and solves it with
 a pseudo-inverse, falling back to zero for points with fewer than
-`neighbor_threshold` neighbors. `liuExtend`/`liuMirror` reuse that fit to
+`neighbor_threshold` neighbors OR whose moment matrix `A_g` is ill-conditioned
+(`|det(A_g)| < determinantThreshold`, mirroring DualSPHysics'
+`determlimit ~ 1e-3` gate in `JSphCpu_mdbc.cpp` -- see
+`DELTASPH_VALIDATION_PLAN.md` Part 3). The combined mask is returned as
+`wellConditioned` so callers can build the same 0th-order/Shepard/rest-value
+fallback ladder DualSPHysics uses, instead of re-deriving their own
+neighbour-count-only heuristic (a bare count missed the case of a thin, fast
+front sliding over a dry bed, whose fluid neighbours can be numerous but all
+sit in one shallow, nearly-coplanar band).
+
+`determinantThreshold` defaults to `None`, resolved per-call from
+`_DETERMINANT_THRESHOLDS[config.kernel]` -- DualSPHysics' `1e-3` is specific
+to *their* Wendland C2 kernel; an A/B on the Marrone dam break
+(`scripts/probe_deltaSPHMarrone.py --kernel Wendland2`) showed the same
+literal value is too loose for Wendland C4 at matched support radius (it let
+a coplanar, thin-sheet boundary stencil through as "well-conditioned",
+producing an explosive `P_b`), and `scripts/
+probe_mdbcKernelDeterminantScale.py` derived a C4-specific value from the
+ratio of `det(A_g)` between the two kernels on matched synthetic geometry.
+Passing `determinantThreshold` explicitly still overrides the lookup; an
+unlisted kernel falls back to the DualSPHysics constant with no calibration
+guarantee -- calibrate it with that probe before trusting mDBC/wall-pressure
+extrapolation on a new kernel choice.
+
+`liuExtend`/`liuMirror` reuse that fit to
 extrapolate a field across a signed-distance boundary: for points within two
 supports of (and behind) the boundary, they mirror the query position through
 the surface, evaluate the local fit there, and blend down to a Shepard
@@ -17,11 +41,25 @@ import torch
 from .wp_mat import computeLiuMatricesWarp
 
 from warpSPHCore import *
-from typing import Any
+from typing import Any, Optional
 from ...configurations.simulationConfig import SimulationConfig
 from torch.profiler import record_function
 
 __all__ = ['interpolateLiuLiu', 'liuExtend', 'liuMirror']
+
+#: Per-kernel `|det(A_g)|` acceptance floor for the mDBC/wall-pressure MLS fit
+#: (`DELTASPH_VALIDATION_PLAN.md` Part 3). `Wendland2` is DualSPHysics' own
+#: `determlimit` (`JSphCpu_mdbc.cpp`); `Wendland4` is derived from it via
+#: `scripts/probe_mdbcKernelDeterminantScale.py` (C4/C2 `det(A_g)` ratio ~1.79
+#: on matched synthetic geometry, at this repo's `n_h = 4.0` support). Any
+#: other kernel falls back to the C2 value uncalibrated -- run that probe for
+#: a new kernel rather than trusting this default on it.
+_DETERMINANT_THRESHOLDS = {
+    KernelFunctions.Wendland2: 1e-3,
+    KernelFunctions.Wendland4: 1.8e-3,
+}
+_DEFAULT_DETERMINANT_THRESHOLD = 1e-3
+
 
 def interpolateLiuLiu(
     queryPositions: torch.Tensor,
@@ -31,8 +69,12 @@ def interpolateLiuLiu(
     adjacency: AdjacencyList = None,
     neighbor_threshold: int = 4,
     direction: OperationDirection = OperationDirection.AllToAll,
-    supportScale: float = 1.0
+    supportScale: float = 1.0,
+    determinantThreshold: Optional[float] = None,
 ):
+    if determinantThreshold is None:
+        determinantThreshold = _DETERMINANT_THRESHOLDS.get(
+            config.kernel, _DEFAULT_DETERMINANT_THRESHOLD)
     with record_function("[warpSPH] - interpolateLiuLiu"):
         h = referenceParticles.supports.clone()
         referenceParticles.supports = h * supportScale
@@ -51,12 +93,18 @@ def interpolateLiuLiu(
         )
         referenceParticles.supports = h
 
+        determinant = torch.linalg.det(A_g)
+        wellConditioned = torch.logical_and(
+            neighCounts > neighbor_threshold,
+            torch.abs(determinant) >= determinantThreshold,
+        )
+
         A_g_inv = torch.zeros_like(A_g)
-        A_g_inv[neighCounts > neighbor_threshold] = torch.linalg.pinv(A_g[neighCounts > neighbor_threshold])
+        A_g_inv[wellConditioned] = torch.linalg.pinv(A_g[wellConditioned])
 
         res = torch.matmul(A_g_inv, b.unsqueeze(2))[:,:,0]
 
-        return res[:,0], res[:,1:], neighCounts, A_g, b
+        return res[:,0], res[:,1:], neighCounts, A_g, b, wellConditioned
 
 
 def liuExtend(

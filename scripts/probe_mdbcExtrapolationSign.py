@@ -82,7 +82,7 @@ cfg.domain = DomainDescription(
 cfg.dim = 2
 
 q = torch.tensor([[0.5, 0.5], [0.3, 0.7]], device=dev, dtype=dt)
-val, grad, nnbr, A_g, b = interpolateLiuLiu(
+val, grad, nnbr, A_g, b, _wellConditioned = interpolateLiuLiu(
     q, referenceParticles=st, referenceQuantities=field, config=cfg,
     neighbor_threshold=4, direction=OperationDirection.AllToAll, supportScale=1.0)
 
@@ -133,7 +133,7 @@ proj = s.positions @ gdir
 fs_proj = proj[fluid].min()
 depth = (proj - fs_proj).clamp(min=0.0)
 
-rho_g, grad_g, nnbr, A_g, bb = interpolateLiuLiu(
+rho_g, grad_g, nnbr, A_g, bb, _wellConditioned = interpolateLiuLiu(
     s.positions[ghost], referenceParticles=s, referenceQuantities=s.densities,
     config=ctx.config, neighbor_threshold=4,
     direction=OperationDirection.FluidToGhost, supportScale=1.0)

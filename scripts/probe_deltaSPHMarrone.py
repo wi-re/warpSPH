@@ -10,9 +10,11 @@ Reference geometry (Marrone 2011 Fig. 2, `literature/marrone2011_*.pdf`)
   P3 height, 1000 mm (Fig. 2 / Fig. 3).
 - Vertical impact wall on the right (x = L_w).  Pressure probes on it at
   z = 160 / 584 / 1000 mm above the bed  (z/H = 0.267 / 0.973 / 1.667), probe
-  diameter phi = 90 mm -- Marrone reports the signals area-integrated over that
-  disc; here they are a first-order MLS (Liu-Liu) point interpolation, the same
-  probe `cases/dambreak.py` already carries.
+  diameter phi = 90 mm, flush on the wall.  Marrone reports each signal
+  area-integrated over that disc; `cases/dambreak.py`'s `pressureProbeDiscRadius`
+  reproduces that directly -- a 7-point Gauss-Legendre quadrature over the
+  disc's vertical chord (the 2D reduction of the area integral, since there is
+  no out-of-plane extent to integrate over), not a single MLS point.
 - Free-slip walls; the flow is inviscid (Marrone's viscosity study is Sec. 3.4).
   The `dambreak` deltaSPH path never adds a physical-viscosity wall term, so the
   free-slip spec is met without a slip-mode knob.
@@ -44,7 +46,10 @@ Acceptance (`DELTASPH_VALIDATION_PLAN.md` Part 5.1)
 
 Usage
 -----
-  # one run  ->  <out>/deltaSPH_nx<N>_c<c0Ratio>.npz  (+ video with --video)
+  # one run  ->  <out>/sun2017DeltaSPH_nx<N>_c<c0Ratio>.npz  (+ video with --video)
+  # Default scheme is 'sun2017DeltaSPH' (Sun et al. 2017's own prescription --
+  # freezeDiffusionAcrossStages=True; --scheme deltaSPH reverts to the
+  # generic, un-frozen scheme for A/B).
   python scripts/probe_deltaSPHMarrone.py --nx 60 --c0Ratio 40 --video
   python scripts/probe_deltaSPHMarrone.py --nx 120 --c0Ratio 40
 
@@ -79,6 +84,7 @@ SENSORS = [
     dict(name='P3', z_mm=1000.0),
 ]
 PROBE_HEIGHTS = [s['z_mm'] / 1000.0 for s in SENSORS]
+PROBE_DISC_RADIUS = 0.045      # Marrone's phi = 90 mm transducer disc, in metres
 
 # --- Buchner (2002) experiment, digitised by eye from Marrone 2011 Fig. 5 -----
 # (c0Ratio = 40 panel).  P* = P / (rho0 g H) vs t* = t sqrt(g/H).  These are
@@ -99,10 +105,19 @@ BUCHNER = {'P1': BUCHNER_P1, 'P2': BUCHNER_P2}
 # --- acceptance envelopes (`DELTASPH_VALIDATION_PLAN.md` Part 5.1) ------------
 ACCEPT = dict(
     p1_arrival_tstar=(2.5, 3.0),          # first t* with P1* > 0.10
-    p1_first_peak_max=1.60,               # Buchner's own first-slam spike ~0.8; SPH overshoots
+    # Buchner's own first-slam spike ~0.8; SPH overshoots it regardless of
+    # probe method. Briefly raised 1.60 -> 2.2 when the true on-wall
+    # disc-integral probe (`pressureProbeDiscRadius`) first replaced the point
+    # probe inset one dx into the fluid and read a wide-median peak of 1.94 at
+    # t* ~ 3.82 -- but that turned out to be a real bug (un-frozen diffusive
+    # terms across RK4 sub-stages, `DELTASPH_VALIDATION_PLAN.md` Part 5.1),
+    # not a probe-method difference: with `freezeDiffusionAcrossStages=True`
+    # (Sun et al. 2017 Sec. 2 / `sun2017DeltaSPH` scheme) the measured peak
+    # drops to 0.60. Restored to 1.60 -- the 2.2 band was quietly hiding a
+    # real defect, not accommodating a benign one.
+    p1_first_peak_max=1.60,
     p1_plateau_window=(3.6, 7.5),         # the sustained plateau, past the first-impact dip
-    p1_plateau_band=(0.38, 0.65),         # median-trace mean; Buchner ~0.55, our point probe
-                                          #   inset 1 dx reads ~0.1 lower than his on-wall disc
+    p1_plateau_band=(0.38, 0.65),         # median-trace mean; Buchner ~0.55
     p2_quiescent_before=(3.6, 0.08),      # P2* < 0.08 while the probe is wet, t* < 3.6
     p2_quiescent_after=(6.4, 0.08),
     p2_peak_window=(4.5, 6.0),            # the run-up hump (narrow -- score its peak, not its mean)
@@ -118,7 +133,8 @@ ACCEPT = dict(
 
 
 def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
-            plotInterval: int):
+            plotInterval: int, kernel: str = None, freezeDiffusion: bool = None,
+            scheme: str = 'sun2017DeltaSPH'):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -132,30 +148,42 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
     machTarget = 1.95 / c0Ratio
     dx = TANK_L / nx
 
-    tag = f'deltaSPH_nx{nx}_c{c0Ratio:g}'
+    # Default scheme is `sun2017DeltaSPH` (frozen diffusion across RK4
+    # sub-stages, Sun et al. 2017 Sec. 2 -- `DELTASPH_VALIDATION_PLAN.md`
+    # Part 5.1 confirmed the plain `deltaSPH` scheme's un-frozen RK4 produces
+    # a spurious extended pressure transient at first impact). `--scheme
+    # deltaSPH` reverts to the un-frozen baseline for A/B; `freezeDiffusion`
+    # (None by default) only forces an explicit override on top of whichever
+    # scheme's own default applies.
+    tag = (f'{scheme}_nx{nx}_c{c0Ratio:g}' + (f'_{kernel}' if kernel else '')
+          + ('_forceFreeze' if freezeDiffusion is True else '')
+          + ('_forceNoFreeze' if freezeDiffusion is False else ''))
     runRoot = os.path.join(out, tag + '_run')
 
     # Marrone reports each signal area-integrated over a phi = 90 mm probe disc
-    # centred on the wall; the repo's probe is a single MLS point.  A point
-    # sitting exactly on the wall (inset 0) both over-reads the bare impact
-    # spike and keeps losing neighbour support as the sheet thins (many 0.0
-    # samples).  Inset by one particle spacing -- ~ the fluid-side half-width
-    # of Marrone's disc at H/dx = 40 -- so the MLS gather always has a full
-    # support and the reading is a small-neighbourhood average, closer to what
-    # an area-integrated transducer records.
-    probeInset = dx
+    # flush on the wall; `pressureProbeDiscRadius` reproduces that directly (a
+    # 7-point Gauss-Legendre quadrature over the disc's vertical chord --
+    # `cases/dambreak.py`'s `diagnostics` docstring), so the probe sits
+    # exactly on the wall (inset 0) like the real transducer, and the several
+    # dx of vertical averaging give it neighbour support even at first
+    # contact -- no need for the old single-point-inset-by-dx workaround.
+    probeInset = 0.0
 
     params = dict(
         W=TANK_W, fillRatio=H / TANK_L, fluidWidth=COL_W / TANK_W,
         gravityMagnitude=G,
         pressureProbeHeights=PROBE_HEIGHTS, pressureProbeInset=probeInset,
+        pressureProbeDiscRadius=PROBE_DISC_RADIUS,
         referenceVelocity=U_MAX, machTarget=machTarget,
+        freezeDiffusionAcrossStages=freezeDiffusion,
     )
 
     kw = dict(
-        scheme='deltaSPH', L=TANK_L, nx=nx, tLimit=tLimit,
+        scheme=scheme, L=TANK_L, nx=nx, tLimit=tLimit,
         quiet=True, store=False, progress=True, params=params,
     )
+    if kernel:
+        kw['kernel'] = kernel
     if video:
         kw.update(plot=True, video=True, plotBackend='matplotlib',
                   plotInterval=plotInterval, exportRoot=runRoot)
@@ -176,7 +204,8 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
     tReached = float(rows[-1].get('t', 0.0)) if rows else 0.0
     c0 = float(getattr(r.ctx.schemeConfig.fluid, 'fixedSoundSpeed', 0.0) or 0.0)
     meta = dict(
-        scheme='deltaSPH', nx=nx, c0Ratio=float(c0Ratio), tLimit=tLimit,
+        scheme=scheme, nx=nx, c0Ratio=float(c0Ratio), tLimit=tLimit,
+        freezeDiffusionAcrossStages=bool(getattr(r.ctx.schemeConfig, 'freezeDiffusionAcrossStages', False)),
         tReached=tReached, tStarReached=tReached * (G / H) ** 0.5,
         dx=dx, HdxRatio=H / dx, c0=c0, probeInset_dx=probeInset / dx,
         mach=(U_MAX / c0) if c0 else None,
@@ -285,7 +314,7 @@ def _score(col):
             or pl['peak'] <= A['p1_first_peak_max'],
             f"wide-median peak {pl['peak']:.2f} at t* {pl['tPeak']:.2f}  "
             f"(want <= {A['p1_first_peak_max']}; the SPH violent-impact "
-            f"overshoot a point probe keeps)")
+            f"acoustic transient, read directly by the on-wall disc probe)")
     else:
         add('P1 trace', False, 'fewer than 3 valid samples')
 
@@ -374,8 +403,16 @@ def _report(out: str):
         sys.exit(1)
 
     def runLabel(meta):
+        # Runs from before this session's `scheme`/`freezeDiffusionAcrossStages`
+        # meta fields existed were all the generic, un-frozen `deltaSPH` scheme
+        # -- default to that, not the new 'sun2017DeltaSPH' default, so old
+        # cached .npz files keep reading as what they actually were.
+        schemeName = meta.get('scheme', 'deltaSPH')
+        frozen = meta.get('freezeDiffusionAcrossStages')
+        tag = '' if schemeName == 'sun2017DeltaSPH' else \
+            f"  [{schemeName}{', frozen' if frozen else ''}]"
         return (f"δ-SPH  H/Δx={meta['HdxRatio']:.0f}  "
-                f"c₀/√(gH)={meta['c0Ratio']:g}")
+                f"c₀/√(gH)={meta['c0Ratio']:g}{tag}")
 
     palette = ['#0353a4', '#c1121f', '#2a9d8f', '#e76f51', '#6a4c93', '#8d99ae']
     colours = {runLabel(m): palette[i % len(palette)]
@@ -447,7 +484,8 @@ def _report(out: str):
     A('| Dam removal | instantaneous (no gate model) |')
     A('| Walls | free-slip; inviscid |')
     A(f'| Probes | downstream wall, z = 160 / 584 / 1000 mm '
-      '(z/H = 0.267 / 0.973 / 1.667); first-order MLS point interpolation |')
+      '(z/H = 0.267 / 0.973 / 1.667); phi = 90 mm disc, flush on the wall '
+      '(7-point Gauss-Legendre chord quadrature, `pressureProbeDiscRadius`) |')
     A(f'| Non-dim | t\\* = t √(g/H), P\\* = P / (ρ₀ g H) |')
     A(f'| U_max | 1.95 √(gH) = {U_MAX:.3f} m/s (Marrone §3.1) |')
     A('')
@@ -483,35 +521,51 @@ def _report(out: str):
       'c₀/√(gH) = 20 (M ≈ 0.098) is his Fig. 4 weak-compressibility cross-check.')
     A('- Buchner points are digitised by eye from a printed figure — treat as '
       '≈ ±0.05 in P\\*, ±0.15 in t\\*.')
-    A('- Stability (this run, after the mDBC MLS-threshold revert to 9 — '
-      '`DELTASPH_VALIDATION_PLAN.md` §5.1): whole-run **max ‖v‖ = 5.9**, **ρ ∈ '
-      '[0.977, 1.021]** (5–95 pct between events [0.995, 1.007]), '
-      '`maxPenetrationDx` = 0.8 — genuinely weakly compressible through the '
-      'cavity closure, no wall leakage. (Pre-revert the thin front sheet blew '
-      'off the dry bed at t\\* ≈ 2.1 with ‖v‖ → 56+.)')
-    A('- **P1 (z/H = 0.267)** — deeply submerged after impact. Arrival t\\* ≈ '
-      '2.78; a clean **≈ 0.43 P\\*** plateau from t\\* ≈ 3.5 to the end of the '
-      'record, with the gentle rise near t\\* ≈ 5.5–6 the Buchner points also '
-      'show; no first-impact overshoot on the median (0.52). Buchner / '
-      "Marrone's own H/Δx = 40 sit at ≈ 0.55 — we read ~20 % low, consistent "
-      'with a point probe inset one Δx vs. his on-wall φ = 90 mm disc.')
-    A('- **P2 (z/H = 0.973)** — a single narrow run-up hump: near-zero until '
-      't\\* ≈ 4, a t\\*≈0.1-median peak **≈ 0.19** at t\\* ≈ 5.0, back to zero by '
-      't\\* ≈ 5.5. Buchner ≈ 0.28 at t\\* ≈ 5.5 — again ~30 % low / ~0.5 t\\* '
-      'early, same probe-method bias (the sheet only partly covers the probe; '
-      "Marrone's disc carries the dry fraction as zero but at a fixed centre). "
-      'A single acoustic sample reaches 1.45.')
+    A('- Two variants appear above when both are present: plain `deltaSPH` '
+      '(un-frozen diffusive terms across RK4 sub-stages) and the default '
+      '`sun2017DeltaSPH` (Sun et al. 2017 Sec. 2\'s own prescription, '
+      '`freezeDiffusionAcrossStages=True`). Kept side by side deliberately -- '
+      'the difference between the two rows *is* the finding below.')
+    A('- The true on-wall φ = 90 mm disc integral (`pressureProbeDiscRadius`, '
+      'replacing an earlier single point inset one Δx into the fluid) brought '
+      'P1/P2 much closer to Buchner in level, but under plain `deltaSPH` it '
+      'also surfaced a first-impact overshoot the inset point probe never '
+      'showed (wide-median peak 1.94 at t\\* ≈ 3.8, above `p1_first_peak_max`). '
+      'Investigating that overshoot -- rather than loosening the band to fit '
+      'it -- found it was not a probe artefact: the raw trace stayed elevated '
+      'and multi-humped for ~1.4 t\\* (t\\* ≈ 2.8-4.3), far longer than '
+      'Buchner\'s brief single slam-then-settle. That duration pointed at '
+      'un-frozen diffusion under RK4 -- each of its 4 sub-stages evaluates '
+      'the diffusive terms at a different intermediate state, and during a '
+      'violent near-discontinuous impact those states diverge enough to make '
+      'the diffusion term itself a source of spurious feedback (DualSPHysics '
+      'never sees this: symplectic Euler is single-stage, nothing to freeze '
+      'against).')
+    A('- **`freezeDiffusionAcrossStages=True` (the `sun2017DeltaSPH` scheme) '
+      'fixes it directly**: P1 first-impact overshoot drops from 1.94 to '
+      '**0.60** (comfortably inside the original `p1_first_peak_max = 1.60`, '
+      'restored from a temporary 2.2), and the raw trace settles to one '
+      'brief hump instead of an extended multi-humped transient. Whole-run '
+      'stability is unaffected (if anything tighter): `max ‖v‖` 6.8 -> 5.4, '
+      '`ρ` range similar, no new wall leakage.')
+    A('- P1 plateau **0.46** / P2 peak **0.22** under `sun2017DeltaSPH` '
+      '(Buchner ≈ 0.55 / ≈ 0.28) -- both still comfortably inside band, '
+      'though closer to Buchner\'s low side than the un-frozen run\'s '
+      '0.63 / 0.33 was; not yet investigated further.')
     A('- P3 (z/H = 1.667) sits at the ceiling corner and barely wets — reported '
       'for completeness, not scored.')
-    A('- The acceptance bands are set wide enough to pass at this ~20–30 % '
-      'probe-method low bias; a true φ = 90 mm on-wall disc integral is what '
-      'would let them tighten to Marrone\'s scatter.')
+    A('- Neighbour support: even flush on the wall (no inset), the disc\'s own '
+      'vertical averaging keeps every quadrature sample above the '
+      '`neighbor_threshold` floor while wet — the old inset-by-one-Δx '
+      'workaround is no longer needed.')
     A('')
     A('## Next\n')
-    A('- H/Δx = 80 (`--nx 134`) for the Fig. 5 convergence pair.')
-    A('- A true φ = 90 mm disc-integral probe (∫p dA / πr², dry = 0) to make P2 '
-      'comparable to Marrone.')
+    A('- H/Δx = 80 (`--nx 134`) for the Fig. 5 convergence pair, now under '
+      '`sun2017DeltaSPH`.')
     A('- c₀/√(gH) = 20 cross-check (`--c0Ratio 20`).')
+    A('- Why the frozen-diffusion plateau/peak reads a bit lower than the '
+      'un-frozen run\'s (0.46/0.22 vs 0.63/0.33, Buchner 0.55/0.28) -- not '
+      'yet investigated.')
 
     md = os.path.join(out, 'REPORT.md')
     with open(md, 'w') as f:
@@ -543,6 +597,21 @@ def main():
     ap.add_argument('--video', action='store_true')
     ap.add_argument('--plotInterval', type=int, default=20)
     ap.add_argument('--out', default=DEFAULT_OUT)
+    ap.add_argument('--kernel', default=None,
+                    help="override the case's kernel (default Wendland2, matching "
+                         "Marrone/Sun/DualSPHysics); e.g. 'Wendland4' for a kernel "
+                         "A/B (DELTASPH_VALIDATION_PLAN.md Part 3)")
+    ap.add_argument('--scheme', default='sun2017DeltaSPH',
+                    help="scheme to run (default 'sun2017DeltaSPH': Sun et al. "
+                         "2017's own prescription, freezeDiffusionAcrossStages=True "
+                         "by default). 'deltaSPH' reverts to the generic, un-frozen "
+                         "scheme -- DELTASPH_VALIDATION_PLAN.md Part 5.1 confirmed "
+                         "that combination produces a spurious extended pressure "
+                         "transient at first impact under RK4.")
+    ap.add_argument('--freezeDiffusion', action='store_true', default=None,
+                    help="force freezeDiffusionAcrossStages=True regardless of "
+                         "--scheme (e.g. to test it on plain 'deltaSPH'). Omit to "
+                         "use whichever scheme's own default applies.")
     ap.add_argument('--report', action='store_true',
                     help='(re)build plots + REPORT.md from existing .npz runs')
     args = ap.parse_args()
@@ -551,7 +620,7 @@ def main():
         _report(args.out)
         return
     _runOne(args.nx, args.c0Ratio, args.tLimit, args.out, args.video,
-            args.plotInterval)
+            args.plotInterval, args.kernel, args.freezeDiffusion, args.scheme)
 
 
 if __name__ == '__main__':

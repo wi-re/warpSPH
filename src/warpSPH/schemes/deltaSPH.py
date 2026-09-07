@@ -55,7 +55,8 @@ def deltaSPH_step(
     dt: float,
     config: SimulationConfig,
     schemeConfig: WeaklyCompressibleSPHConfig,
-    verbose = False,        
+    verbose = False,
+    stageIndex = None,
 ):
     currentSystem = system#
     currentState = currentSystem.state
@@ -134,36 +135,53 @@ def deltaSPH_step(
         # print(f'Surface particles: {currentState.surfaceIndicators.sum().item()} / {currentState.surfaceIndicators.shape[0]} ({100 * currentState.surfaceIndicators.sum().item() / currentState.surfaceIndicators.shape[0]:.2f}%)')
 
 
-    #9. Compute gradRho and gradRhoL
-    # with TimedBlock('compute gradRho', use_cuda=True, device=config.device) as tb_gradRho:
-    with record_function("[warpSPH] - [deltaSPH - 09] - compute gradRho and gradRhoL"):
-        if schemeConfig.diffusionParams.densityDiffusionTerm == DensityDiffusionScheme.denormalized or schemeConfig.diffusionParams.densityDiffusionTerm == DensityDiffusionScheme.denormalizedOnly:
-            gradRho = computeGradRho(currentState, config, schemeConfig, adjacency)
-        else:
-            gradRho = None
-    # with TimedBlock('compute gradRhoL', use_cuda=True, device=config.device) as tb_gradRhoL:
-    with record_function("[warpSPH] - [deltaSPH - 09] - compute gradRhoL"):
-        if schemeConfig.diffusionParams.densityDiffusionTerm == DensityDiffusionScheme.deltaSPH or schemeConfig.diffusionParams.densityDiffusionTerm == DensityDiffusionScheme.deltaOnly:
-            gradRhoL = computeGradRhoL(currentState, config, schemeConfig, adjacency, L = renormalizationState_)
-        else:
-            gradRhoL = None
+    # 9-11. gradRho/gradRhoL + the two diffusive terms (density diffusion,
+    # velocity/artificial-viscosity diffusion). Sun et al. 2017 Sec. 2
+    # (Antuono/Jameson technique) evaluates these ONCE per real step, at the
+    # committed t^n state, and holds them fixed across every RK sub-stage --
+    # `schemeConfig.freezeDiffusionAcrossStages` (default False, so every
+    # existing case is unaffected) opts into that. `stageIndex` is threaded in
+    # by `warpSPHIntegrators.RungeKuttaB` (opt-in: only functions whose
+    # signature declares the parameter receive it), 0 (or None, e.g. under a
+    # single-evaluation integrator where freezing is a no-op anyway) for the
+    # first stage of a real step, 1.. for later sub-stages.
+    freezeDiffusion = getattr(schemeConfig, 'freezeDiffusionAcrossStages', False)
+    isFirstStage = stageIndex is None or stageIndex == 0
+    cached = getattr(schemeConfig, '_frozenDiffusionCache', None) if freezeDiffusion else None
 
+    if freezeDiffusion and not isFirstStage and cached is not None:
+        with record_function("[warpSPH] - [deltaSPH - 09-11] - reuse frozen diffusion"):
+            drhodt_diss, dvdt_diss = cached
+    else:
+        #9. Compute gradRho and gradRhoL
+        with record_function("[warpSPH] - [deltaSPH - 09] - compute gradRho and gradRhoL"):
+            if schemeConfig.diffusionParams.densityDiffusionTerm == DensityDiffusionScheme.denormalized or schemeConfig.diffusionParams.densityDiffusionTerm == DensityDiffusionScheme.denormalizedOnly:
+                gradRho = computeGradRho(currentState, config, schemeConfig, adjacency)
+            else:
+                gradRho = None
+        with record_function("[warpSPH] - [deltaSPH - 09] - compute gradRhoL"):
+            if schemeConfig.diffusionParams.densityDiffusionTerm == DensityDiffusionScheme.deltaSPH or schemeConfig.diffusionParams.densityDiffusionTerm == DensityDiffusionScheme.deltaOnly:
+                gradRhoL = computeGradRhoL(currentState, config, schemeConfig, adjacency, L = renormalizationState_)
+            else:
+                gradRhoL = None
 
-    # 10. Compute drhodt_diss
-    # with TimedBlock('compute drhodt_diss', use_cuda=True, device=config.device) as tb_drhodt_diss:
-    with record_function("[warpSPH] - [deltaSPH - 10] - compute drhodt_diss"):
-        drhodt_diss = computeDensityDiffusion(currentState, config, schemeConfig, adjacency, gradRho, gradRhoL)
+        # 10. Compute drhodt_diss
+        with record_function("[warpSPH] - [deltaSPH - 10] - compute drhodt_diss"):
+            drhodt_diss = computeDensityDiffusion(currentState, config, schemeConfig, adjacency, gradRho, gradRhoL)
 
-    # 11. Compute dvdt_diss.
-    # `approachOnly=False`: Marrone 2011 Eq. (5b) / Sun 2017 Eq. (1) apply the
-    # artificial-viscosity term `alpha h c0 pi_ij` to *every* pair, not only
-    # approaching ones. The approach-only clamp is Monaghan's shock viscosity,
-    # a different term -- it under-damps the tensile/shear regions a violent
-    # free-surface impact grows. See `DELTASPH_VALIDATION_PLAN.md` Part 1.
-    with record_function("[warpSPH] - [deltaSPH - 11] - compute dvdt_diss"):
-        dvdt_diss = computeVelocityDiffusion(currentState, config, schemeConfig, adjacency,
-                                             approachOnly=False)
-    
+        # 11. Compute dvdt_diss.
+        # `approachOnly=False`: Marrone 2011 Eq. (5b) / Sun 2017 Eq. (1) apply the
+        # artificial-viscosity term `alpha h c0 pi_ij` to *every* pair, not only
+        # approaching ones. The approach-only clamp is Monaghan's shock viscosity,
+        # a different term -- it under-damps the tensile/shear regions a violent
+        # free-surface impact grows. See `DELTASPH_VALIDATION_PLAN.md` Part 1.
+        with record_function("[warpSPH] - [deltaSPH - 11] - compute dvdt_diss"):
+            dvdt_diss = computeVelocityDiffusion(currentState, config, schemeConfig, adjacency,
+                                                 approachOnly=False)
+
+        if freezeDiffusion:
+            schemeConfig._frozenDiffusionCache = (drhodt_diss, dvdt_diss)
+
     # 12. Compute drhodt
     # with TimedBlock('compute drhodt', use_cuda=True, device=config.device) as tb_drhodt:
     with record_function("[warpSPH] - [deltaSPH - 12] - compute drhodt"):

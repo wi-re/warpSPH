@@ -19,7 +19,7 @@ from .compressibleConfig import CompressibleSPHConfig, compressibleConfigToDict,
 from .compSPHConfig import CompSPHConfig, compSPHConfigToDict, dictToCompSPHConfig
 from .crkSPH import CRKViscosity, CRKSPHConfig, crkSPHConfigToDict, dictToCRKSPHConfig
 from .moduleConfigurations.boundaryConditions import *
-from .weaklyCompressible import WeaklyCompressibleSPHConfig, weaklyCompressibleConfigToDict, dictToWeaklyCompressibleConfig
+from .weaklyCompressible import WeaklyCompressibleSPHConfig, Sun2017DeltaSPHConfig, weaklyCompressibleConfigToDict, dictToWeaklyCompressibleConfig
 from .region import RegionType, ParticleRegion
 from .rigidBody import RigidBody
 from .moduleConfigurations.surfaceDetection import SurfaceDetectionConfig, SurfaceDetectionScheme, NormalSource
@@ -61,6 +61,7 @@ __all__ = [
     'crkSPHConfigToDict',
     'dictToCRKSPHConfig',
     'WeaklyCompressibleSPHConfig',
+    'Sun2017DeltaSPHConfig',
     'weaklyCompressibleConfigToDict',
     'dictToWeaklyCompressibleConfig',
     'ArtificialCompressibilityParams',

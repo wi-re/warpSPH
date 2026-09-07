@@ -17,7 +17,8 @@ from ..systems import (
 )
 from ..configurations import (
     CRKSPHConfig, CompSPHConfig, CompressibleSPHConfig,
-    IncompressibleSPHConfig, WeaklyCompressibleSPHConfig, WaveEquationConfig,
+    IncompressibleSPHConfig, WeaklyCompressibleSPHConfig, Sun2017DeltaSPHConfig,
+    WaveEquationConfig,
     compSPHConfigToDict, compressibleConfigToDict, crkSPHConfigToDict,
     dictToCRKSPHConfig, dictToCompSPHConfig, dictToCompressibleConfig,
     dictToIncompressibleSPHConfig, dictToWeaklyCompressibleConfig,
@@ -122,6 +123,22 @@ def _deltaSPH() -> SchemeBundle:
         SimulationSystem=WeaklyCompressibleSystem,
         SimulationState=WeaklyCompressibleState,
         SimulationConfig=WeaklyCompressibleSPHConfig,
+        SimulationUpdate=CompressibleSystemUpdate,
+        stepFunction=deltaSPH_step,
+        exportFunction=weaklyCompressibleConfigToDict,
+        importFunction=dictToWeaklyCompressibleConfig,
+    )
+
+
+def _sun2017DeltaSPH() -> SchemeBundle:
+    # Same state/update/step/codecs as `deltaSPH` -- Sun et al. 2017's
+    # prescription is a parameter choice (`freezeDiffusionAcrossStages=True`),
+    # not different physics code. See `Sun2017DeltaSPHConfig`'s docstring and
+    # `DELTASPH_VALIDATION_PLAN.md` Part 5.1.
+    return SchemeBundle(
+        SimulationSystem=WeaklyCompressibleSystem,
+        SimulationState=WeaklyCompressibleState,
+        SimulationConfig=Sun2017DeltaSPHConfig,
         SimulationUpdate=CompressibleSystemUpdate,
         stepFunction=deltaSPH_step,
         exportFunction=weaklyCompressibleConfigToDict,
@@ -272,6 +289,7 @@ _SCHEMES = {
     CompressibleSPHScheme.CompSPH: _compSPH,
     CompressibleSPHScheme.CRKSPH: _crkSPH,
     WeaklyCompressibleSPHScheme.deltaSPH: _deltaSPH,
+    WeaklyCompressibleSPHScheme.sun2017DeltaSPH: _sun2017DeltaSPH,
     IncompressibleSPHScheme.divergenceFree: _divergenceFree,
     IncompressibleSPHScheme.dfsphReference: _dfsphReference,
     IncompressibleSPHScheme.iisph: _iisph,

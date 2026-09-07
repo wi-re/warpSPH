@@ -77,8 +77,192 @@ next (mDBC extrapolation sign — Part 3 — and/or the SPH sharp-impact spike).
   is the `c₀`-too-soft / uncalibrated-bulk problem of the `hydrostaticColumn`
   deltaSPH path, not the sign — that's the English §4.1 wedge validation, Part 5.)
 
+**mDBC determinant/condition gate — implemented, replacing the `threshold = 9`
+hack** (`modules/liu/interp.py` `interpolateLiuLiu`): the DualSPHysics
+`determlimit` idea (`JSphCpu_mdbc.cpp`, `|det(A_g)| >= 1e-3`, else 0th-order
+Shepard, else rest value) is now the function's own gate, combined with the
+existing neighbour-count floor into a `wellConditioned` mask it returns
+alongside `res`/`A_g`/`b`. This is a systemic fix, not a one-off: the same
+hand-tuned `numNeighbors > 9` heuristic had been copy-pasted into three call
+sites — `modules/mdbc/density2025.py` (this plan's own hack), `modules/
+incompressible/wallPressure.py` (`_LINEAR_MIN = 9`), and `modules/mdbc/
+velocity.py`'s `extendedVelocity` (`BCType.extended`) — all three now consume
+`wellConditioned` instead. Fixed a real bug found while editing `velocity.py`:
+its low-neighbour fallback branch read `vel[ghostMask]` (always zero — ghost
+rows are never written elsewhere in that function) instead of `vel[bIndices]`,
+silently discarding the Shepard fallback value just computed on the previous
+line for every point that didn't clear the old threshold.
+
+**H/Δx = 15 improved, but H/Δx = 40 REGRESSED — this change is NOT landed.**
+Confirmed via a same-args A/B (`git stash` the changes, rerun, `git stash
+pop`), not a fluke or reporting artifact:
+
+- **H/Δx = 15** (`--nx 25 --c0Ratio 40 --tLimit 3.2`, `t* ≈ 12.9` reached,
+  `scripts/out_deltaSPHMarrone_gatecheck/`): previously the recorded "worst
+  case" — no violent explosion, but *"a milder disturbance still builds by
+  t\* ≈ 2.7."* With the gate: no divergence to t\* ≈ 12.9, density settles to
+  `[0.9998, 1.0007]` by t\* ≈ 4 and stays there (a brief `ρ ∈ [0.86, 1.15]` /
+  `vmax ≈ 28` transient at t\* ≈ 2.3 — the known separate SPH sharp-impact
+  spike). Genuine improvement.
+- **H/Δx = 40** (`--nx 67 --c0Ratio 40 --tLimit 0.9`, identical args run
+  against this session's gate code and, separately, a `git stash`-reverted
+  baseline): the baseline reproduces the plan's previously-recorded whole-run
+  `max ‖v‖ = 5.86` almost exactly and stays smooth (`v` 3–5,
+  `ρ ∈ [0.979, 1.021]`) through t\* = 3.64. **The gate-code run instead spikes
+  to `vmax = 38`, `P1* = 45`, `ρ ∈ [0.85, 1.22]` starting at t\* ≈ 3.10** and
+  had not recovered by the end of the (short) window.
+
+**Root cause:** DualSPHysics' own mDBC has *no* separate neighbour-count
+floor — it gates purely on `|det(a_corr)| >= determlimit`. This session's
+first attempt collapsed the repo's existing two-stage guard
+(`interpolateLiuLiu`'s internal `neighbor_threshold` *and then* each caller's
+separate `> 9` check) into one `wellConditioned = (count > 4) & (|det(A_g)|
+>= 1e-3)` — net *looser* than before, since 4 < 9. Points with 5–9 neighbours
+near the impact front that happen to clear the borrowed `1e-3` determinant
+threshold now get promoted to the full MLS extrapolation, which the old `> 9`
+floor had been silently protecting against. DualSPHysics' constant — tuned to
+their own kernel/precision/unit convention — is not strict enough here to
+substitute for that margin on its own.
+
+A provably-safe fallback exists but doesn't reach the original goal: AND the
+new `wellConditioned` with the old `count > 9` floor (`(count > 9) &
+wellConditioned`). That can only ever *remove* points relative to the old
+`count > 9` gate (catching the coplanar-but-numerous-neighbour case Part 3
+also flagged) and can never admit a low-count point the old code rejected, so
+it cannot reproduce this regression — but it also does not extend the MLS
+path below 9 neighbours, i.e. it would not have fixed H/Δx = 15. Landing it
+would be a small, low-risk win over the status quo without solving what this
+part of the plan set out to solve; a real fix needs an empirically-calibrated
+`determinantThreshold` for this codebase's kernel/precision, not
+DualSPHysics' borrowed constant. **Not implemented yet — decision pending.**
+
+**Search-radius parity checked and ruled out as the cause.** DualSPHysics'
+mDBC ghost-node gather does *not* widen the interpolation stencil: it reuses
+`KernelSize = KernelK·h`, the identical radius every ordinary particle
+interaction (density sum, forces, viscosity) already uses — `KernelK = 2.0`
+for Wendland (`FunSphKernel.h`), so `KernelSize = 2h`, one normal compact
+support. `interpolateLiuLiu`'s default `supportScale = 1.0` does the same
+here — it reuses `referenceParticles.supports` unmodified, not an enlarged
+radius. And the two setups match in absolute size: this case's `n_h = 4.0` is
+literally `support / Δx` (`modules/adaptiveSupport/optimalSupportOwen.py`'s
+`n_h_to_nH`), giving support `= 4Δx`; DualSPHysics' own Wendland-C2-at-`h/dp
+= 2` setup gives support `= 2h = 4dp` — the same 4·spacing. So the
+neighbourhood size and expected neighbour count are matched to the reference
+almost exactly; a wider/narrower search radius is not what's driving the
+scale mismatch.
+
+What *is* still mismatched, and was already an open Part 1 item before this
+determinant-gate work started: this case runs **Wendland C4** (`Wendland4`),
+DualSPHysics/Sun run **Wendland C2**. Same support radius, same neighbour
+count, but a different kernel falloff shape (C4 sits flatter near the centre,
+sharper at the cutoff) — which changes the actual magnitude of the
+kernel-weighted moment matrix `A_g` even at matched geometry, so
+`|det(A_g)| >= 1e-3` does not mean the same thing in both codebases. That
+kernel-shape mismatch, not the search radius, is the more likely reason
+DualSPHysics' literal constant doesn't transfer; recalibrating
+`determinantThreshold` (or switching this case to Wendland C2 to match the
+reference kernel outright, which Part 1 already flagged as a deviation worth
+revisiting) are the two live options.
+
+**Kernel-shape hypothesis CONFIRMED** — same A/B (`--kernel Wendland2` on
+`probe_deltaSPHMarrone.py`, matching support radius via `n_h=4.0` both ways):
+under Wendland C2, `determinantThreshold=1e-3` works cleanly at *both*
+resolutions simultaneously — H/Δx=40 (`vmax=6.63`, `ρ∈[0.990,1.018]`,
+`maxPen=0.37`) matches the old C4 baseline (`vmax=5.86`) with **no** spike
+near t\*≈3.1, and H/Δx=15 (`vmax=6.80`, `ρ∈[0.953,1.042]`) is cleaner even
+than the earlier C4+gate result (`vmax=28.3`). Confirms this is a kernel-shape
+effect, not a search-radius one, and independently validates the Part 1 audit
+item that this case should be on Wendland C2 to match Marrone/Sun/DualSPHysics
+in the first place.
+
+**Deriving a Wendland C4 `determinantThreshold`** (`scripts/
+probe_mdbcKernelDeterminantScale.py`, new): computes `det(A_g)` for the same
+synthetic particle geometry under both kernels at matched support (no
+timestepping — a few ms). Two fixed reference points (a filled half-disc
+"healthy" point, a maximally coplanar "degenerate" band) gave inconsistent
+C4/C2 ratios (1.09 vs 2.68) because both sit 15–35x *below* 1e-3 for either
+kernel — too degenerate to be diagnostic of behaviour *at* the cutoff.
+Sweeping the neighbour band's vertical half-width instead (parametrising "how
+thin is the sheet," the actual failure axis) finds a stable **C4/C2 ratio of
+≈ 1.8** across the whole well-resolved range (16–56 neighbours; ratio decays
+toward 1.0 only as the geometry approaches a full, isotropic disc). The
+crossing-point method (locate where C2's own `det` hits `1e-3`, read C4's
+`det` at that same geometry) lands close to the same order (`1.47e-3`) but is
+noisier — the crossing falls at only 8–13 neighbours, where a coplanar
+lattice's determinant is jitter-dominated, not a clean smooth function of
+geometry. **Recommended: `determinantThreshold ≈ 1.8e-3` for Wendland C4**
+(the robust sweep-region value, `1e-3 * 1.79`).
+
+**Validated — CONFIRMED.** Monkeypatched `interpolateLiuLiu`'s default (no
+source changes) to `1.8e-3` and reran both resolutions on the case's default
+Wendland C4:
+
+| case | C4, threshold=1e-3 (broken) | **C4, threshold=1.8e-3 (derived)** | C2, threshold=1e-3 (reference) |
+|---|---|---|---|
+| H/Δx=40 | vmax=38.0, ρ∈[0.855,1.221] | **vmax=7.66, ρ∈[0.970,1.023], no spike near t\*≈3.1–3.6** | vmax=6.63, ρ∈[0.990,1.018] |
+| H/Δx=15 | vmax=28.3, ρ∈[0.86,1.15] | **vmax=9.49, ρ∈[0.960,1.049], maxPen=0** | vmax=6.80, ρ∈[0.953,1.042] |
+
+Both resolutions are simultaneously clean under the derived threshold,
+tracking the C2 reference numbers closely while keeping the case's original
+kernel. `determinantThreshold ≈ 1.8e-3` is the recommended Wendland C4 value
+at `n_h = 4.0` (support = 4·Δx) — **not yet wired into the actual call sites**
+(`density2025.py` / `wallPressure.py` / `velocity.py` still take
+`interpolateLiuLiu`'s bare `1e-3` default; only a scratch monkeypatch was
+used for this validation, no tracked source file changed since the last
+Status entry).
+
+Two open decisions before this is ready to land:
+1. **How to wire the threshold in** — a per-caller `determinantThreshold`
+   keyed off `config.kernel` (a small `{KernelFunctions.Wendland2: 1e-3,
+   KernelFunctions.Wendland4: 1.8e-3, ...}` lookup, extended as other kernels
+   are exercised through mDBC), vs. hardcoding `1.8e-3` as `interpolateLiuLiu`'s
+   new bare default (simpler, but wrong for any future Wendland C2 caller,
+   and silently wrong for any other kernel nobody has calibrated).
+2. **Keep Wendland C4 (with the derived threshold) or switch this case to
+   Wendland C2 outright** (already an independent Part 1 audit item — Sun/
+   DualSPHysics/Marrone all use C2). The C2 numbers were marginally cleaner
+   at both resolutions in every A/B run this session; C4 was never a
+   deliberate choice recorded anywhere in the plan, so there's no known
+   reason to prefer it over matching the reference kernel directly.
+
+**LANDED.** Both decisions resolved (kernel-keyed lookup; switch to C2):
+
+- `modules/liu/interp.py`: `determinantThreshold` is now `Optional[float] =
+  None`, resolved per-call from `_DETERMINANT_THRESHOLDS[config.kernel]`
+  (`{Wendland2: 1e-3, Wendland4: 1.8e-3}`, falling back to the C2 value for
+  any uncalibrated kernel) when the caller doesn't pass one explicitly —
+  `density2025.py` / `wallPressure.py` / `velocity.py` / the `dambreak.py`
+  pressure probe / `probe_mdbcExtrapolationSign.py` all take the lookup
+  automatically, no call-site changes needed.
+- `cases/dambreak.py`: default kernel `Wendland4` → `Wendland2`, matching
+  Marrone/Sun/DualSPHysics (support radius unchanged — `n_h=4.0` already gave
+  the same `4·Δx` as DualSPHysics' `h/dp=2`).
+- New: `scripts/probe_mdbcKernelDeterminantScale.py` (the calibration sweep,
+  kept for calibrating any future kernel through this gate) and a `--kernel`
+  override on `scripts/probe_deltaSPHMarrone.py` (kept for future kernel
+  A/Bs).
+
+**Final end-to-end confirmation**, production code path, no monkeypatch or
+override — the case's plain new defaults:
+
+| case | vmax | ρ range | maxPen |
+|---|---|---|---|
+| H/Δx=40 (`--nx 67 --tLimit 0.9`) | 6.63 (t\*≈2.80) | [0.990, 1.018] | 0.37 |
+| H/Δx=15 (`--nx 25 --tLimit 3.2`) | 6.80 (t\*≈2.52) | [0.953, 1.042] | 0.02 |
+
+Both exactly reproduce the earlier explicit `--kernel Wendland2` A/B numbers
+— the wiring is correct, not a fluke of the override path. `tests/
+test_wallPressure.py`, `tests/test_deltaSPHDiffusion.py`, and `tests/
+test_physics.py -k dambreak` all green under the new defaults. Uncommitted —
+7 modified files (`interp.py`, `density2025.py`, `wallPressure.py`,
+`velocity.py`, `cases/dambreak.py`, `probe_deltaSPHMarrone.py`,
+`probe_mdbcExtrapolationSign.py`) + 1 new (`probe_mdbcKernelDeterminantScale.py`).
+
 **Not done:** the `c₀` rework for *other* WCSPH cases (only `dambreak` wired);
-frozen diffusion; the validation cases themselves (Part 5).
+frozen diffusion; the validation cases themselves (Part 5) beyond §3.1's first
+pass; the c₀ = 20√(gH) cross-check; the DualSPHysics cross-validation run;
+H/Δx = 80 (`--nx 134`) for
+the Fig. 5 convergence pair.
 
 ---
 
@@ -357,17 +541,161 @@ H/Δx = 15 (worst case): the violent explosion is gone (‖v‖ < 10 through
 t\* ≈ 2.1); a milder disturbance still builds by t\* ≈ 2.7 — the front sheet is
 ~1 particle thick at that Δx.
 
-**Principled fix (Part 3):** a determinant / condition gate on the MLS path
-(DualSPHysics `determlimit ≈ 1e-3`, fall back to 0th-order then ρ₀) so it can
-safely extend below 9 neighbours — the reason the threshold was lowered.
+**Principled fix (Part 3) — DONE:** a determinant / condition gate on the MLS
+path (DualSPHysics `determlimit ≈ 1e-3`, fall back to 0th-order then ρ₀), now
+`interpolateLiuLiu`'s own `wellConditioned` return value, with a per-kernel
+`determinantThreshold` lookup (`Wendland2: 1e-3` DualSPHysics' own value,
+`Wendland4: 1.8e-3` derived from it — see the Status section above and
+`scripts/probe_mdbcKernelDeterminantScale.py`) after an initial attempt with
+the bare `1e-3` regressed H/Δx = 40 (fixed by the lookup, then independently
+by moving this case's default kernel to Wendland C2 to match Marrone/Sun/
+DualSPHysics outright). H/Δx = 15 — previously the case that still "built a
+milder disturbance" under the `threshold = 9` hack — is now clean to
+t\* ≈ 12.9, and H/Δx = 40 confirms no regression against its prior baseline.
 
 Probe tooling: `probe_deltaSPHMarrone.py` (Buchner geometry + P1/P2-vs-Fig.5
-scoring); `referenceVelocity` and `pressureProbeSupportScale` params on
+scoring, plus a `--kernel` override added this session for kernel A/Bs);
+`referenceVelocity` and `pressureProbeSupportScale` params on
 `cases/dambreak.py` (both default to the old behaviour).
 
-**Next:** H/Δx = 80 (`--nx 134`) for the Fig. 5 convergence pair; the
-determinant gate; a true φ = 90 mm on-wall disc-integral probe so the P1/P2
-bands can tighten to Marrone's scatter; the c₀ = 20√(gH) cross-check.
+**True φ = 90 mm on-wall disc-integral probe — implemented.**
+`cases/dambreak.py`'s `diagnostics` gained `pressureProbeDiscRadius`: a
+7-point Gauss-Legendre quadrature over the probe's vertical chord (the 2D
+reduction of a disc-area integral — no out-of-plane extent to integrate over,
+so `∫∫_disc P dA = ∫_{-R}^{R} P(s)·2√(R²−s²) ds`), replacing the single MLS
+point inset one Δx into the fluid. Validated standalone (a linear field
+recovers its exact centre value; a quadratic field matches the analytic disc
+moment `R²/4` to < 0.5%). `probe_deltaSPHMarrone.py` now sets
+`PROBE_DISC_RADIUS = 0.045` (Marrone's actual radius) with `probeInset = 0.0`
+(flush on the wall, matching the real transducer — the disc's own vertical
+averaging supplies the neighbour support the inset hack used to).
+
+**Full H/Δx = 40 rerun, disc probe, to t\* = 7.7 — 9/9 checks pass**:
+
+- Stability unchanged: whole-run `max ‖v‖ = 6.8`, `ρ ∈ [0.983, 1.020]`,
+  `maxPenetrationDx = 0.43`.
+- **P1 plateau moved from ≈ 0.43 to a mean 0.63** over t\* 3.6–7.5 (Buchner ≈
+  0.55) — the ~20% *low* bias the inset point probe carried is gone; it now
+  reads slightly *high* instead, well inside the `[0.38, 0.65]` band.
+- **P2 peak moved from ≈ 0.19 to 0.33** at t\* ≈ 5.24 (Buchner ≈ 0.28 at
+  t\* ≈ 5.5) — much closer in both level and timing than the point probe was.
+- **P1 first-impact overshoot, previously invisible, now surfaced.** Wide-median
+  peak now 1.94 at t\* ≈ 3.82; the old point probe never showed this at all
+  (median 0.52) — the disc probe, sitting flush on the wall instead of one Δx
+  into the fluid, reads the documented SPH violent-impact acoustic transient
+  (the plan's own "First result" note above records the same class of event, a
+  brief `vmax ≈ 28-30` spike at first contact) directly, where the inset point
+  probe happened to smooth it away.
+
+**The "1.94 is a real, benign transient, loosen the band" read above was
+wrong — it was a real bug, caught by inspection of the raw trace, not by
+trusting the smoothed/scored numbers.** Three rounds, each disproved by
+actually looking at the raw per-step signal rather than the report's
+rolling-median summary:
+
+1. **Disc-average masking bug.** The 7-point quadrature weighted every sample
+   by its fixed chord factor regardless of whether `interpolateLiuLiu`
+   actually trusted that sample (`wellConditioned`); an untrusted sample
+   silently contributed a hard `0` at full weight. The raw trace showed
+   `P1* = 0.451 (nnbr=10)` collapsing to a hard `0.000` one sample later and
+   staying pinned there for a long stretch while `nnbr` slowly decayed
+   `10→4` — a square-wave artefact, not a physical signal. **Fixed**: mask
+   the chord weights by `wellConditioned` and renormalise over the valid
+   subset.
+2. **Missing 0th-order fallback.** Fixing (1) did not fix the trace: a
+   `t* ≈ 3.02–3.28` stretch stayed at a hard `0.000` even with the
+   best-supported quadrature sample carrying 9–17 neighbours — every sample
+   was failing the *determinant* check (a thin run-up sheet along the wall is
+   near-coplanar however many neighbours it has) with no fallback tier, where
+   `modules/mdbc/density2025.py` already has one. **Fixed**: `dambreak.py`'s
+   probe now uses the same two-tier ladder (first-order MLS where
+   `wellConditioned`, else 0th-order Shepard `b[:,0]/A_g[:,0,0]`, matching
+   `density2025.py`/`wallPressure.py`) instead of a hard zero.
+3. **Still not smooth after both fixes — genuinely investigated, not
+   band-aided.** The disc-averaged trace *still* wasn't smooth: values up to
+   `5.9` (inset 1Δx: `11.7`, i.e. *worse* away from the wall, ruling out
+   "near-wall mDBC layer noise"). The stiff-EOS arithmetic (`c₀²/(gH) ≈ 1600`
+   here, so an ordinary `0.5%` density fluctuation reads as `P* ≈ 8`) looked
+   like a clean explanation until Marrone's own Fig. 5 (smooth, no such
+   excursions, same `c₀`) ruled it out — a stiff EOS could explain *some*
+   point noise, but not this. A properly-derived temporal filter (window
+   physically bounded between the acoustic timescale `h/c₀ ≈ 0.0025` and the
+   hydrodynamic timescale `~1`, both in `t*` units — matches the existing
+   ad hoc `0.10`/`0.30` windows) *also* failed to clean it up: the elevated,
+   multi-humped signal persisted for `~1.4 t*` (`t* ≈ 2.8–4.3`), far too long
+   for any noise filter to remove without destroying real dynamics elsewhere
+   — this was a real, extended simulated transient, not point noise.
+
+**Root cause: RK4 without Sun 2017's frozen-diffusion companion technique.**
+Part 1's audit table flagged this back at the start of this plan ("Sun 2017
+§2: RK4 with frozen diffusive terms... Repo uses RK4 and has no
+frozen-diffusion path") and it sat unactioned until this investigation forced
+the question. Each of RK4's 4 sub-stages evaluates the density-diffusion and
+artificial-viscosity terms at a different intermediate state; during a
+violent, near-discontinuous impact those states diverge enough that the
+diffusive term itself becomes a source of spurious feedback. A single-stage
+integrator (DualSPHysics' symplectic Euler) structurally cannot have this
+problem — there is no cross-stage inconsistency to freeze against in the
+first place, which is why "DualSPHysics doesn't freeze diffusion either" is
+not a counter-example, it is the reason the technique is RK-specific.
+
+**Fix — `freezeDiffusionAcrossStages`, and a new named scheme.** Implemented
+as a minimal, opt-in extension rather than a rewrite of `deltaSPH_step`'s
+architecture (`schemes/artificialCompressible.py` freezes its own diffusion
+term the same way, Antuono/Jameson, but owns a self-contained internal RK
+loop; `deltaSPH_step` is called 4 separate times *by* the external
+`warpSPHIntegrators.RungeKuttaB`, and is shared by 12 cases, so restructuring
+it was too wide a blast radius for what started as an experiment):
+
+- `warpSPHIntegrators.butcher.RungeKuttaB` now injects `stageIndex=0,1,2,...`
+  into the scheme's step function call — **only** if that function's own
+  signature declares a `stageIndex` parameter (checked via
+  `inspect.signature`). Every other scheme is untouched; nothing is added to
+  `kwargs` unless the callee asks for it. Full physics suite (74 tests) green
+  before and after.
+- `schemes/deltaSPH.py`'s `deltaSPH_step` gained `stageIndex=None`: on the
+  first stage of a real step it computes gradRho/gradRhoL/`drhodt_diss`/
+  `dvdt_diss` as before and, if `schemeConfig.freezeDiffusionAcrossStages`,
+  caches them (`schemeConfig._frozenDiffusionCache`); later stages reuse the
+  cache instead of recomputing at their own (intermediate) state.
+- `WeaklyCompressibleSPHConfig.freezeDiffusionAcrossStages` (new field,
+  default `False`) — every existing `deltaSPH` case is unaffected.
+- **Per the user's explicit call**: rather than flipping that default for the
+  generic `deltaSPH` scheme (which would silently change physics for all 12
+  cases that use it), a genuinely separate, registered scheme —
+  `WeaklyCompressibleSPHScheme.sun2017DeltaSPH` / `--scheme
+  sun2017DeltaSPH` (`schemes/builder.py`) — reuses the identical state/step/
+  update classes and just swaps in `Sun2017DeltaSPHConfig`, a
+  `WeaklyCompressibleSPHConfig` subclass overriding one field default:
+  `freezeDiffusionAcrossStages=True`. Selecting a specific paper's exact
+  prescription is now an explicit choice, not a default anyone inherits
+  silently. `dambreak.py`'s own `freezeDiffusionAcrossStages` case param
+  defaults to `None` (don't touch it — let the selected scheme's own default
+  stand) rather than `False`, so the two compose correctly.
+
+**Validated — confirmed fixed**, same nx=67/H/Δx=40 case, `--scheme
+sun2017DeltaSPH` (now `probe_deltaSPHMarrone.py`'s default):
+
+| | `deltaSPH` (un-frozen) | **`sun2017DeltaSPH`** | Buchner |
+|---|---|---|---|
+| P1 first-impact overshoot | 1.94 | **0.60** | ~0.78 |
+| P1 plateau | 0.63 | 0.46 | 0.55 |
+| P2 peak | 0.33 | 0.22 | 0.28 |
+| whole-run `max ‖v‖` | 6.8 | 5.4 | — |
+| `ρ` range | [0.983, 1.020] | [0.983, 1.017] | — |
+| raw trace, t\* 2.8–4.3 | elevated/multi-humped throughout | one brief hump (~0.2 t\* wide), then settles | — |
+
+`p1_first_peak_max` restored `2.2 → 1.60` (the temporary loosening was
+compensating for the bug above, not a genuine physical necessity) — **9/9
+checks pass** under `sun2017DeltaSPH`. `scripts/out_deltaSPHMarrone/` now
+holds both runs side by side (`REPORT.md` shows both score tables) as the
+record of the fix. Not yet investigated: P1 plateau / P2 peak both sit a
+little below Buchner under the frozen scheme (0.46/0.22 vs 0.55/0.28) —
+comfortably in-band, but not chased further this session.
+
+**Next:** H/Δx = 80 (`--nx 134`) for the Fig. 5 convergence pair, now under
+`sun2017DeltaSPH`; the c₀ = 20√(gH) cross-check; why the frozen-diffusion
+plateau/peak read a touch low.
 
 **Cross-validate against DualSPHysics** `examples/main/01_DamBreak` on matched
 geometry/resolution: same c₀, same Δt rule, DBC vs mDBC — its output is a

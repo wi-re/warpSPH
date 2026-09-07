@@ -169,7 +169,7 @@ def extendedVelocity(currentState: Any, config: SimulationConfig, schemeConfig: 
         neighbor_threshold = 4,
         direction = OperationDirection.FluidToGhost,
         supportScale = 1.0
-    ) for uv in uvs] # res[:,0], res[:,1:], neighCounts, A_g, b
+    ) for uv in uvs] # res[:,0], res[:,1:], neighCounts, A_g, b, wellConditioned
 
 
     ghostMask = currentState.kinds == 2
@@ -178,7 +178,7 @@ def extendedVelocity(currentState: Any, config: SimulationConfig, schemeConfig: 
     velocities = [currentState.velocities.new_zeros(currentState.velocities.shape[0], device = currentState.velocities.device, dtype = currentState.velocities.dtype) for uv in extendedVelocities]
 
     for d in range(currentState.velocities.shape[1]):
-        u_interp, u_interp_grad, numNeighbors, A_g, b = extendedVelocities[d]
+        u_interp, u_interp_grad, numNeighbors, A_g, b, wellConditioned = extendedVelocities[d]
 
         shepardNominator = b[:,0]
         shepardDenominator = A_g[:,0,0]
@@ -188,9 +188,13 @@ def extendedVelocity(currentState: Any, config: SimulationConfig, schemeConfig: 
         vel = velocities[d]
         vel[bIndices] = torch.where(numNeighbors > 0, shepardDensity, vel[bIndices])
 
-        threshold = 9
-
-        vel[bIndices] = torch.where(numNeighbors > threshold, (u_interp - torch.einsum('nu, nu -> n',(-relPos), u_interp_grad)), vel[ghostMask])
+        # `wellConditioned` (interpolateLiuLiu's neighbour-count-AND-determinant
+        # gate, DELTASPH_VALIDATION_PLAN.md Part 3) replaces a bare
+        # `numNeighbors > 9`. Also fixed: the fallback branch read
+        # `vel[ghostMask]` (always zero -- ghost rows are never written here)
+        # instead of `vel[bIndices]`, which discarded the Shepard value just
+        # written above for every ill-conditioned/low-neighbour row.
+        vel[bIndices] = torch.where(wellConditioned, (u_interp - torch.einsum('nu, nu -> n',(-relPos), u_interp_grad)), vel[bIndices])
 
     extendedVelocities = torch.stack(velocities, dim = -1)
     return extendedVelocities
