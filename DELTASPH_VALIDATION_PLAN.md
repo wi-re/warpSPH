@@ -485,7 +485,7 @@ comparison) — the earlier row here was guessed and several values were wrong:
 | resolution | **H/Δx = 40, 80, 320** (Fig. 5's convergence set — *not* 15/45/75) |
 | sound speed | **c₀ = 40 √(gH)** (Fig. 5, M = U_max/c₀ ≈ 0.049); c₀ = 20 √(gH) (M ≈ 0.098) is the Fig. 4 weak-compressibility check. Set via the Part 1 `machTarget` path with U_max = 1.95 √(gH) (Marrone's measured front speed). |
 | walls | free-slip; **inviscid** (viscosity is §3.4). The δ-SPH `dambreak` path adds no physical-viscosity wall term, so free-slip is met without a slip-mode knob. |
-| scheme | plain δ-SPH, `shiftProperties.active = False` (already the deltaSPH default), RK4, adaptive Δt (Sun Eq. 5). Frozen diffusion still not implemented (perf only). |
+| scheme | plain δ-SPH, `shiftProperties.active = False`, RK4, adaptive Δt (Sun Eq. 5). Frozen diffusion still not implemented (perf only). ⚠ **This row used to read "(already the deltaSPH default)". That was false and the case has never met this line of its own spec — see §5.1.1.** |
 | reference | Buchner (2002) P1/P2 traces, digitised by eye from Marrone Fig. 5 |
 | acceptance | P1 arrival 2.5 < t\* < 3.0, first-impact peak ≲ 1.1 P\*, plateau P\* ∈ [0.45, 0.68] over t\* ∈ [3.2, 4.8]; P2 quiescent then peak 0.22–0.40 at 5.2 < t\* < 6.1; density band + `maxPenetrationDx` ≲ 3; stable to the full record with the correct ψ sign and no PST |
 
@@ -705,6 +705,53 @@ plateau/peak read a touch low.
 geometry/resolution: same c₀, same Δt rule, DBC vs mDBC — its output is a
 ready-made second reference and isolates "our δ-SPH" from "our mDBC".
 
+### 5.1.1 This case has been running δ⁺-SPH, not δ-SPH — every result above
+
+Found while scoping §5.3.2's shift fix. The spec table above says
+`shiftProperties.active = False` and Part 2.1's acceptance gate says *"a
+correct δ-SPH dam break must be stable with `shiftProperties.active = False`.
+Use that as the Part 5 acceptance gate; PST is validated separately on the
+square patch."* **The case has never done that.** `ShiftProperties.active`
+defaults to **`True`** (`buildDefaultShiftProperties`), `cases/dambreak.py`'s
+only `active = False` sits inside `_configureArtificialCompressibleExtra` — the
+ACSPH branch, never reached on the δ-SPH path — so every run recorded in §5.1,
+including the 9/9 `sun2017DeltaSPH` result, was **δ⁺-SPH with the PST on**.
+Marrone 2011 §3 is plain δ-SPH.
+
+Verified directly rather than by reading the source: build the case exactly as
+`probe_deltaSPHMarrone.py` invokes it and read `shiftProperties` back off the
+resolved config — `active=True, scheme=deltaSPH, projection=surfaceNormal`
+under both `--scheme deltaSPH` and `--scheme sun2017DeltaSPH`.
+
+**The grep that produced the "(already the deltaSPH default)" claim is the
+trap.** `grep shiftProperties.active cases/*.py` shows `dambreak`, `impact` and
+`rotatingSquarePatch` all setting it `False`, and all three lines are inside
+ACSPH-only branches. A field that defaults to `True` cannot be audited by
+looking for the places that mention it — the cases that never mention it are
+the ones that have it on. `scripts/probe_deltaPlusShiftBlastRadius.py` exists
+because of this: it builds every registered case's context the way `runner.run`
+does, runs its `configureScheme`, and reads the resolved value. Answer: **11 of
+35 cases** run `ShiftingScheme.deltaSPH` with the shift active — `dambreak`,
+`drivenSquare`, `droplet`, `impact`, `kolmogorov`, `ldc`, `movingObstacle`,
+`openFlow`, `randomFlow`, `squarePatch`, `tgv-wc`.
+
+Consequences, in order of how much they matter:
+
+1. **§5.1's numbers are δ⁺-SPH numbers.** They are not wrong as measurements,
+   but they do not test what the section says they test, and the plan's own
+   PST-free acceptance gate has never been exercised. The P1 plateau reading
+   0.46 against Buchner's 0.55 is now a candidate for *this* rather than for
+   anything about the frozen diffusion.
+2. **§5.3.2's fix changed this case**, since `probe_deltaSPHMarrone.py` runs
+   `--scheme sun2017DeltaSPH`, which now selects Eq. (7) — an 8× shift on a
+   violent free-surface impact. The §5.1 re-run is required, not optional.
+3. `rotatingSquarePatch` is in the same position, and Part 2.1 nominates it as
+   the case where *"PST is validated separately"* — so the PST discriminator
+   has also never been run against its own no-PST control.
+
+`scripts/probe_deltaPlusShiftSweep.py` runs all 11 under three legs (`off` /
+`eighth` / `eq7`) to bound the damage before anything else is decided.
+
 ## 5.2 Then
 
 | next | case | notes |
@@ -880,13 +927,48 @@ slower than `exp(−16π²νt)` while the *mode* decays correctly. **The discrim
 is the `L/Δx = 400` run**: (a) predicts the excursion roughly halves, (b)
 predicts it largely does not. Queued.
 
-**Open:** whether `sun2017Eq7Shift` should become the shared default. It is a
-correctness fix against the source equation, so the burden is on keeping the
-old value, not on changing it — but the 8× shift is a real physics change for
-every `ShiftingScheme.deltaSPH` case, and the free-surface cases
-(`WCSPH_SHIFTING_PLAN.md`'s `surfaceNormal` projection was calibrated against
-the old magnitude) have to be re-swept before that. `oscillatingDroplet` below
-is the first free-surface run under the new value.
+**Should `sun2017Eq7Shift` be the shared default? — swept, and the evidence
+says yes, but the decision is not taken here.** It is a correctness fix against
+the source equation, so the burden is on keeping the old value; the 8× shift is
+still a real physics change for 11 cases, so it was swept first
+(`scripts/probe_deltaPlusShiftSweep.py`, three legs — `off` / `eighth` / `eq7`
+— 300 steps each). Comparing the **last** step of each run:
+
+- **no case diverges**, and the density band is unchanged everywhere;
+- `pairedFraction` — the tensile-instability signature the PST exists to
+  suppress — falls or stays at zero in all 11: `drivenSquare` 0.0002 → 0,
+  `movingObstacle` 0.0017 → 0.0003, `openFlow` 0.0027 → 0.0019;
+- `nnDistP01` (higher is better) improves in 8 and is flat in 2: `dambreak`
+  0.724 → 0.758, `movingObstacle` 0.798 → 0.843, `openFlow` 0.672 → 0.744,
+  `tgv-wc` 0.845 → 0.882;
+- two get slightly worse — `impact` 0.951 → 0.910 and `droplet` 0.953 → 0.942.
+  `droplet`'s own 15-period runs (§5.3.3) are excellent under Eq. (7), so that
+  one is noise at step 300; **`impact`'s −4 % is the one unexplained cost** and
+  should be checked over a full record before the default flips.
+
+**A startup transient, and the misreading it caused.** The first pass at this
+sweep reported geometric metrics as their worst value over the run, and on that
+table `tgv-wc` looked like the one case the fix breaks: `pairedFraction`
+0 → 0.146, `voidFraction` 0 → 0.167, `nnDistP01` 0.845 → 0.131. It is the
+opposite. The spike is at **step 0** and heals monotonically; the full-length
+validation runs in `scripts/out_deltaPlusTGV/` — the same runs that match Sun
+to 3 % — carry the identical `paired = 0.14` first sample and end at
+`paired = 0.0000`, `nnDistP01 = 0.877`, a *better* distribution than the ⅛
+leg's 0.814. A 300-step window caught the transient and nothing else.
+
+The transient itself is real and worth its own item: **on a freshly-shuffled
+lattice the Eq. (7) shift briefly violates Sun's own Eq. (8)** — measured
+`|δr|/Δx` mean 0.063, max 0.212 at step 0, against his `< 0.05` — because the
+raw kernel sum is large on a badly-relaxed distribution. By step ~40 of a
+running flow it is back to 0.003/0.017. Sun does not meet this because his
+§3.1 initial distribution comes from Colagrossi's **packing** algorithm, where
+ours comes from `shuffleParticles(jitter=1.0)`. So this is a *sampling* gap,
+independent of the shift scaling, and the fix is a better initial relaxation
+rather than a smaller shift.
+
+The sweep tool now reports `max (last)` for exactly this reason — a worst-value
+column cannot separate a transient from a degradation, and here that
+distinction was the entire answer.
 
 ### 5.3.3 Sun 2017 §4.2 — oscillating droplet
 
