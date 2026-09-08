@@ -246,9 +246,13 @@ def _score(meta, series, final, verbose=False):
     # The global near-wall RMSE averages the wedge's ~20 bad particles across
     # the ~4000 near-wall particles of the whole tank, so it cannot see a
     # corner hot spot. Rebuild the obstacle SDF and score bands ON the wedge.
+    # RMSE, not max |resid|: each corner band is only ~16 particles at
+    # dp = 0.02, so the worst single particle is a noisy statistic (a first
+    # A/B showed 0.02 run-to-run scatter in the corner max). RMSE over the band
+    # is what the face and bulk checks already use.
     m['rmseWedgeFace'] = float('nan')
-    m['maxResidApex'] = float('nan')
-    m['maxResidBaseCorner'] = float('nan')
+    m['rmseApex'] = m['maxResidApex'] = float('nan')
+    m['rmseBaseCorner'] = m['maxResidBaseCorner'] = float('nan')
     if meta.get('wedge'):
         try:
             sdfW, apex, corners = _wedgeGeometry(meta)
@@ -261,12 +265,14 @@ def _score(meta, series, final, verbose=False):
             dApex = np.hypot(xy[:, 0] - apex[0], xy[:, 1] - apex[1])
             near_apex = (dApex < R) & (dW > 0)
             if near_apex.any():
+                m['rmseApex'] = float(np.sqrt(np.nanmean(resid[near_apex] ** 2)))
                 m['maxResidApex'] = float(np.nanmax(np.abs(resid[near_apex])))
             dc = np.minimum(
                 np.hypot(xy[:, 0] - corners[0][0], xy[:, 1] - corners[0][1]),
                 np.hypot(xy[:, 0] - corners[1][0], xy[:, 1] - corners[1][1]))
             near_corner = (dc < R) & (dW > 0)
             if near_corner.any():
+                m['rmseBaseCorner'] = float(np.sqrt(np.nanmean(resid[near_corner] ** 2)))
                 m['maxResidBaseCorner'] = float(np.nanmax(np.abs(resid[near_corner])))
         except Exception as exc:                                # noqa: BLE001
             m['wedgeGeometryError'] = f'{type(exc).__name__}: {exc}'
@@ -329,11 +335,11 @@ def _score(meta, series, final, verbose=False):
         checks += [
             ('hydrostatic profile, wedge faces', m['rmseWedgeFace'] <= 0.05,
              f"RMSE {m['rmseWedgeFace']:.4f} in a 3-dx band off the sloped faces  (want <= 0.05)"),
-            ('hydrostatic profile, wedge apex', not (m['maxResidApex'] > 0.06),
-             f"max |resid| {m['maxResidApex']:.3f} within 4 dx of the apex  (want <= 0.06)"),
+            ('hydrostatic profile, wedge apex', not (m['rmseApex'] > 0.03),
+             f"RMSE {m['rmseApex']:.4f} (max {m['maxResidApex']:.3f}) within 4 dx of the apex  (want RMSE <= 0.03)"),
             ('hydrostatic profile, wedge base corners',
-             not (m['maxResidBaseCorner'] > 0.06),
-             f"max |resid| {m['maxResidBaseCorner']:.3f} within 4 dx of a base corner  (want <= 0.06)"),
+             not (m['rmseBaseCorner'] > 0.03),
+             f"RMSE {m['rmseBaseCorner']:.4f} (max {m['maxResidBaseCorner']:.3f}) within 4 dx of a base corner  (want RMSE <= 0.03)"),
         ]
     if verbose:
         npass = sum(c[1] for c in checks)
