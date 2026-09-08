@@ -95,7 +95,9 @@ start from.
   pen ≤ 1.4 Δx); pointwise jet-tip ρ/‖v‖ grow with Δx (fragmenting jet, as
   Marrone notes). **Rounded corner in isolation: 6/6 to t\* = 7, ZERO fillet
   penetration** — the fillet turns the surge into a clean wall run-up jet.
-  Open: H/dx = 128; the 9 surface probes vs Colicchio/Wagner; viscous §3.4.2.
+  **δ⁺-SPH + PST 6/6** (bulk ρ P99 ≤ 1.02 vs ~1.14 for plain δ-SPH); reusable
+  configs `examples/sweeps/marrone34_*.yaml`. Open: H/dx = 128; the 9 surface
+  probes vs Colicchio/Wagner; viscous §3.4.2.
 - **`runner/media.py`** — frame-ordering bug (glob sort breaks past 100k
   steps) fixed (`0810491`).
 
@@ -1265,6 +1267,18 @@ the fresh fluid-directed placement gets it out; tank-wall ghosts the init pass
 got right are never touched. At H/dx = 32 vs the init-only baseline: ρ pointwise
 max 1.14 → 1.11 (roof re-impact spike down), penetration and KE unchanged, no
 destabilisation. A small quality gain, kept **opt-in** (default 0).
+
+**δ⁺-SPH + particle shifting — the dataset config.** `--scheme sun2017DeltaSPH
+--shifting default` (PST on, Sun 2017 Eq. (7) shift magnitude), H/dx = 32:
+sharp-edge **6/6 to t\* = 5**, rounded-corner **6/6 to t\* = 7**. The shift
+regularises the distribution so the **bulk** ρ excursion drops sharply vs plain
+δ-SPH — P99 [0.999, **1.022**] (sharp-edge) / [0.999, **1.004**]
+(rounded-corner), against ~1.14 for plain δ-SPH; only isolated jet-tip
+particles still reach ρ ≈ 1.24. Penetration stays sub-Δx. The reusable
+configs are `examples/sweeps/marrone34_sharp_edge.yaml` /
+`marrone34_rounded_corner.yaml` (`warpsph-run dambreak --config …`) — a dataset
+source for violent free-surface / solid-boundary interaction; see
+`datagen/README.md`.
 
 **Still open:** (a) H/dx = 128 to t\* ≈ 7.4, and a re-run of the H/dx = 32/64
 pair with the `densityP99` diagnostic for a real bulk-max convergence number

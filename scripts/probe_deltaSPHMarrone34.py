@@ -38,9 +38,15 @@ the fillet lens, fed through `dambreak`'s normal single-obstacle SDF path.
 
 Usage
 -----
-  # stability / penetration run  ->  <out>/<scheme>_nx<N>_c<c0Ratio>.npz
+  # stability / penetration run  ->  <out>/<tag>.npz  (tag encodes scheme/nx/c0/...)
   python scripts/probe_deltaSPHMarrone34.py --nx 256 --tStar 4 --video
   python scripts/probe_deltaSPHMarrone34.py --nx 512 --tStar 7.4
+
+  # the rounded tank corner on its own -- drop the sharp-edged obstacle
+  python scripts/probe_deltaSPHMarrone34.py --nx 256 --tStar 7 --cornerOnly
+
+  # delta+-SPH with particle shifting (the dataset-generation config)
+  python scripts/probe_deltaSPHMarrone34.py --nx 256 --scheme sun2017DeltaSPH --shifting default
 
   # sampling check: render boundary + mDBC ghost particles at the edge, the two
   # re-entrant corners and the fillet (no time stepping)
@@ -50,6 +56,10 @@ Usage
   python scripts/probe_deltaSPHMarrone34.py --report
 
 Default --out: scripts/out_deltaSPHMarrone34/
+
+The reusable dataset configs (delta+ + shifting) are
+`examples/sweeps/marrone34_sharp_edge.yaml` / `marrone34_rounded_corner.yaml`
+-- see `datagen/README.md`.
 """
 from __future__ import annotations
 
@@ -94,7 +104,7 @@ def _probePoints():
     return list(zip(names, edge + roof + fil))
 
 
-def _params(scheme, cornerOnly=False):
+def _params(scheme, cornerOnly=False, shifting='off'):
     return dict(
         W=TANK_W,
         fillRatio=COL_H / TANK_L,
@@ -107,15 +117,19 @@ def _params(scheme, cornerOnly=False):
         # (the surge runs the full 10 H and impacts it directly).
         obstacleType='marroneRoundedCorner' if cornerOnly else 'marroneSharpEdge',
         referenceVelocity=U_MAX,
-        # Marrone Sec. 3 dam breaks are plain delta-SPH, no PST.
-        shifting='off',
+        # `shifting`: 'off' is Marrone Sec. 3's plain delta-SPH (the validation
+        # config); 'default' leaves the scheme's own PST setting (ON for
+        # `--scheme sun2017DeltaSPH` = delta+-SPH), 'on' forces it. The
+        # delta+ + PST run is the dataset-generation config -- more robust on
+        # the violent sharp-edge jet. `DELTASPH_VALIDATION_PLAN.md` Sec. 5.2.2.
+        shifting=None if shifting == 'default' else (shifting == 'on' or shifting is True),
         # violent free-surface jet off the sharp edge -> keep surface detection
         pressureProbeHeights=[],
     )
 
 
 def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme, ghostRefresh=0,
-            cornerOnly=False):
+            cornerOnly=False, shifting='off'):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -127,10 +141,11 @@ def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme, ghostRefresh=0
     tLimit = tStar * SQRT_H_G
     tag = (f'{scheme}_nx{nx}_c{c0Ratio:g}'
            + ('_cornerOnly' if cornerOnly else '')
+           + ('' if shifting == 'off' else f'_pst-{shifting}')
            + (f'_gr{ghostRefresh}' if ghostRefresh else ''))
     runRoot = os.path.join(out, tag + '_run')
 
-    params = _params(scheme, cornerOnly=cornerOnly)
+    params = _params(scheme, cornerOnly=cornerOnly, shifting=shifting)
     params['machTarget'] = machTarget
     params['mdbcGhostRefreshEvery'] = int(ghostRefresh)
 
@@ -162,6 +177,8 @@ def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme, ghostRefresh=0
         tStarLimit=float(tStar), tReached=tReached, tStarReached=tReached / SQRT_H_G,
         H=H, G=G, TANK_L=TANK_L, TANK_W=TANK_W, COL_W=COL_W, COL_H=COL_H,
         shiftActive=bool(getattr(r.ctx.schemeConfig.shiftProperties, 'active', False)),
+        sun2017Eq7Shift=bool(getattr(r.ctx.schemeConfig.shiftProperties, 'sun2017Eq7Shift', False)),
+        shiftingArg=str(shifting),
         ghostRefreshEvery=int(ghostRefresh), cornerOnly=bool(cornerOnly),
         diverged=bool(r.diverged), nSteps=int(r.nSteps),
         wallTime_s=float(r.wallTime or 0.0),
@@ -402,7 +419,13 @@ def main(argv=None):
     ap.add_argument('--nx', type=int, default=256, help='lattice resolution; H/dx = nx / 8')
     ap.add_argument('--c0Ratio', type=float, default=28.3, help='c0 = c0Ratio * sqrt(gH)')
     ap.add_argument('--tStar', type=float, default=4.0, help='t sqrt(g/H) to run to (Marrone Fig. 20: 7.32)')
-    ap.add_argument('--scheme', default='deltaSPH')
+    ap.add_argument('--scheme', default='deltaSPH',
+                    help="'deltaSPH' (Marrone Sec. 3 validation) or 'sun2017DeltaSPH' "
+                         "(delta+-SPH, the dataset-generation config)")
+    ap.add_argument('--shifting', choices=('off', 'default', 'on'), default='off',
+                    help="particle shifting / PST: 'off' = plain delta-SPH (validation); "
+                         "'default' keeps the scheme's own setting (ON for sun2017DeltaSPH); "
+                         "'on' forces it")
     ap.add_argument('--ghostRefresh', type=int, default=0,
                     help='re-place mDBC boundary ghosts from the current fluid every N steps '
                          '(0 = init-only, the default); §5.2.2')
@@ -421,7 +444,8 @@ def main(argv=None):
     if args.initdump:
         _initdump(args.nx, args.out, args.cornerOnly); return
     _runOne(args.nx, args.c0Ratio, args.tStar, args.out, args.video,
-            args.plotInterval, args.scheme, args.ghostRefresh, args.cornerOnly)
+            args.plotInterval, args.scheme, args.ghostRefresh, args.cornerOnly,
+            args.shifting)
 
 
 if __name__ == '__main__':

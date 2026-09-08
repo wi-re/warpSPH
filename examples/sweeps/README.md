@@ -9,6 +9,8 @@ back to the case's own default, so a sweep file only states what it changes.
 warpsph-run sod      --config examples/sweeps/sod_highres.yaml
 warpsph-run tgv      --config examples/sweeps/tgv_nu.yaml --nx 128
 warpsph-run dambreak --config examples/sweeps/dambreak_obstacle.yaml
+warpsph-run dambreak --config examples/sweeps/marrone34_sharp_edge.yaml       # Marrone 2011 Fig. 19
+warpsph-run dambreak --config examples/sweeps/marrone34_rounded_corner.yaml   # ... just the rounded corner
 ```
 
 CLI flags override the file, and the file overrides the case defaults — so one
