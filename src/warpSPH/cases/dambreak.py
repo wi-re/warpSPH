@@ -266,9 +266,76 @@ def buildSystem(ctx: RunContext):
             obstacle['maxExtent'], obstacle['aspectRatio'], obstacle['aoa'],
             ctx.config, ctx.schemeConfig, ctx.spec.L, ctx.param('W'))
 
-    return initializeWeaklyCompressibleSimulation(
+    system = initializeWeaklyCompressibleSimulation(
         ctx.schemeConfig.regions, ctx.config, ctx.schemeConfig,
         ctx.SimulationSystem, ctx.SimulationState, verbose=ctx.spec.verbose)
+
+    # mDBC ghost placement (`rigidBody/ghostParticles.addBoundaryGhostParticles`)
+    # runs *once* here, and its fluid-directed corner rule (`DELTASPH_VALIDATION_PLAN.md`
+    # §5.2.1 fix A) only fires for a boundary particle with fluid already within
+    # ~6 dx. On a dam break the obstacle is dry at t=0, so every obstacle-surface
+    # ghost keeps the legacy `2·s·∇(sdf)` reflection for the whole run -- wrong
+    # at the sharp edge / re-entrant corners / concave fillet of the Marrone
+    # §3.4 geometry (§5.2.2: 784/7608 ghosts land inside the solid). Boundary and
+    # ghost particles are static during stepping, so `mdbcGhostRefreshEvery > 0`
+    # lets `postStep` recompute the offsets against the *current* fluid every N
+    # steps, activating the corner rule as the jet arrives. Default 0 = off, so
+    # no existing case changes. Cache the static bits now.
+    every = int(ctx.param('mdbcGhostRefreshEvery', 0) or 0)
+    if every > 0 and getattr(system.state, 'ghostOffsets', None) is not None:
+        st = system.state
+        gRows = torch.where(st.kinds == 2)[0]
+        bRows = st.ghostIndices[gRows]                      # boundary row per ghost
+        ctx.scratch['ghostRefresh'] = dict(
+            every=every,
+            gRows=gRows, bRows=bRows,
+            bpos=st.positions[bRows].clone(),               # static all run
+            legacyOffsets=(st.positions[bRows] - st.positions[gRows]).clone(),
+            dx=float(ctx.config.dx),
+            hMean=float(st.supports.mean()),
+        )
+    return system
+
+
+def postStep(ctx: RunContext, state, step: int) -> None:
+    """`mdbcGhostRefreshEvery > 0`: re-place the mDBC boundary ghosts from the
+    *current* fluid every N steps (see `buildSystem`). In-place update of the
+    static ghost rows -- `_fluidDirectedGhostOffsets`' own wetted / misalignment
+    gates mean only ghosts the fluid has now reached and that sit at a corner
+    actually move; the rest keep `legacyOffsets`."""
+    gr = ctx.scratch.get('ghostRefresh')
+    if gr is None or (step % gr['every']) != 0:
+        return
+    from ..rigidBody.ghostParticles import _fluidDirectedGhostOffsets
+    st = state.state
+    fluidPos = st.positions[st.kinds == 0]
+    if fluidPos.shape[0] == 0:
+        return
+    gRows, bRows = gr['gRows'], gr['bRows']
+    with torch.no_grad():
+        newOff = _fluidDirectedGhostOffsets(
+            gr['bpos'], fluidPos, gr['dx'], gr['hMean'], gr['legacyOffsets'])
+        newPos = gr['bpos'] - newOff
+        # Only re-place a ghost that is *currently* mis-placed -- its node sits
+        # inside the obstacle/fillet solid (the §5.2.2 defect: 784 such at init)
+        # -- and only if the fresh fluid-directed placement actually gets it
+        # out. A blanket per-step refresh of every ghost (incl. the tank walls
+        # the init pass got right) destabilises: the fluid direction for a
+        # floor particle under the fast tangential surge front is noisy, and a
+        # ghost that jumps several dx between steps kicks the mDBC pressure
+        # (measured: 109 dx wall penetration at `mdbcGhostRefreshEvery = 5`).
+        obSDF = ctx.scratch.get('obstacleSDF')
+        if obSDF is None:
+            return                                         # nothing to target
+        badNow = obSDF(st.positions[gRows]) < 0.0
+        fixed = obSDF(newPos) >= 0.0
+        move = badNow & fixed
+    if not bool(move.any()):
+        return
+    bMove, gMove = bRows[move], gRows[move]
+    st.ghostOffsets[bMove] = newOff[move]
+    st.ghostOffsets[gMove] = -newOff[move]
+    st.positions[gMove] = newPos[move]
 
 
 def initialConditions(ctx: RunContext, system) -> None:
@@ -582,6 +649,7 @@ dambreakCase = registerCase(Case(
     setupPlot=setupPlot,
     updatePlot=updatePlot,
     extraData=extraData,
+    postStep=postStep,
     timestep=dambreakTimestep,
     defaults=dict(
         caseName='3-dambreak',
@@ -653,6 +721,12 @@ dambreakCase = registerCase(Case(
         # (a collapsing dam-break column does not want it); a still-water case
         # (English 2022 §4.1) does. `DELTASPH_VALIDATION_PLAN.md` §5.2.1.
         hydrostaticInit=False,
+        # Re-place the mDBC boundary ghosts from the current fluid every N steps
+        # (`buildSystem` / `postStep`). 0 (default) = off, ghost placement stays
+        # init-only. > 0 is for a dam break onto a dry obstacle where the
+        # init-only fluid-directed corner rule never sees the arriving jet
+        # (`DELTASPH_VALIDATION_PLAN.md` §5.2.2).
+        mdbcGhostRefreshEvery=0,
         # Expected front speed U_max for the Sun Eq. (2) sound-speed pick
         # (`initialConditions`, `machTarget` path). None -> sqrt(2 g H), the
         # free-fall estimate. `scripts/probe_deltaSPHMarrone.py` sets it to
