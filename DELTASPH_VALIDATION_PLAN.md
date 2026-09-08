@@ -883,37 +883,80 @@ still-water case would duplicate `hydrostaticColumn`'s diagnostics machinery
 (note `hydrostaticColumn` itself is a *DFSPH* case and a known-failing
 baseline — not a usable base here).
 
-**The actual work — corner-aware ghost placement** (`rigidBody/ghostParticles.py`
-`addBoundaryGhostParticles`). Today every boundary particle's ghost is placed
-at `boundaryPos − clampedDist·∇φ`, i.e. mirrored along the **SDF gradient**.
-Near a convex apex the SDF is a `min`/`max` of two half-plane fields and `∇φ`
-is discontinuous across the medial axis — a particle at the apex gets one
-face's normal, not the bisector, so its ghost lands *inside* or skimming the
-wedge rather than out in the fluid. English's remedy (their Fig. 1c/d): for a
-corner boundary particle, mirror the ghost **through the corner point** into
-the fluid region, not along a single normal. Concretely:
+**The actual work — ghost placement in `rigidBody/ghostParticles.py`
+(`addBoundaryGhostParticles`). Two coupled defects, and the second is the more
+fundamental.**
 
-1. **detect** corner boundary particles — e.g. where the spread of `∇φ` over a
-   particle's own boundary neighbours exceeds a threshold, or distance to the
-   `min`/`max` switch surface is < ~1 dp;
-2. **place** their ghost by reflecting through the nearest convex vertex of the
-   obstacle polygon (`sdPolygon` already carries the vertex list) — `r_g =
-   2·r_vertex − r_b`, clamped so `|r_g − r_b|` stays ≈ `dp`;
-3. leave flat-face particles on the existing `∇φ` path unchanged;
-4. the concave tank-floor / wedge-base re-entrant corners are the mirror image
-   and English handles them the same way — check both signs.
+Today: `sdfValues, sdfNormals = region.sdf(boundaryPos)`;
+`offset = (s − min(|s|, 1.5h))·∇φ`; `ghost = boundaryPos − offset`. For
+`|s| < 1.5h` this is `ghost = boundaryPos − 2s·∇φ` — the boundary particle
+**reflected across the surface by twice its own signed distance `s`**.
+
+**(A) The `dp/2` assumption does not hold for a general obstacle — the more
+important fix.** `regions/sample.py` builds the boundary layer by laying a
+*regular lattice* over the domain and keeping the points with `sdf < 0`. Only
+when the obstacle face is axis-aligned *and* grid-registered do those points
+sit at `s = −dp/2, −3dp/2, …`; for a tilted, curved or offset face each
+boundary particle's `s` is wherever the lattice happened to cut the geometry,
+anywhere in `(−dp, 0)`. The `ghost = boundaryPos − 2s·∇φ` reflection then puts
+the ghost node at depth `≈ |s|` *past the true surface* — so its penetration
+into the fluid, and hence the fluid support the Liu–Liu interpolation sees,
+**varies particle-to-particle from ~0 (ghost buried in the boundary/fluid
+transition, interpolation is garbage) to ~dp**. That is why nothing caught
+this until now: every case scored so far (`dambreak` tank, `hydrostaticColumn`
+box, the sloshing tank) has grid-aligned walls where `s ≡ −dp/2` and the
+reflection is uniform and correct. The wedge — and every obstacle/FSI case
+after it — is not aligned.
+
+Fix: decouple the ghost's fluid-side depth from the particle's own `s`.
+1. **project to the true surface**: `foot = boundaryPos − s·∇φ/|∇φ|²`
+   (a Newton step; iterate 1–2× because `∇φ` at the particle ≠ `∇φ` at the
+   foot on a curved face). The `/|∇φ|²` matters for any obstacle built with
+   `op_smooth_union` / `op_smooth_*` where the composite SDF is not a true
+   distance and `|∇φ| ≠ 1`; guard `|∇φ| → 0`.
+2. **place the ghost at a fixed fluid-side depth**: `ghost = foot + d_g·n_foot`,
+   `n_foot = ∇φ(foot)` re-normalised, `d_g` a new `ghostFluidDepth` param
+   defaulting to English's `dp/2` and sweepable for interpolation
+   conditioning the way `determinantThreshold` was in the Marrone work.
+3. **`ghostOffset = boundaryPos − ghost`** — an arbitrary vector now, which is
+   fine: `density2025.py` / `wallPressure.py` apply English Eq. (12)
+   `ρ_b = ρ_g + (r_b − r_g)·∇ρ_g` over the *actual* offset, so no downstream
+   change.
+   **Safety property:** on a grid-aligned flat wall (`s ≡ −dp/2`, `|∇φ| ≡ 1`)
+   this reproduces the current ghost position exactly, so no already-scored
+   case moves — only misaligned geometry changes.
+
+**(B) Corner-aware placement — rides on (A).** At a convex apex the SDF is a
+`min`/`max` of two half-plane fields and `∇φ` is discontinuous across the
+medial axis, so step (A)'s projection lands on a face or oscillates across the
+seam. English's remedy (their Fig. 1c/d): mirror the corner ghost **through
+the corner point**. So: **detect** corner particles (∇φ at `boundaryPos`
+disagrees with ∇φ at its `foot`; or `|∇φ| < 1 − ε` from the combine; or
+distance to the nearest obstacle-polygon vertex < ~1 dp — `sdPolygon` already
+carries the vertex list), and for those set `ghost = vertex + d_g·bisector`
+(convex apex) or the re-entrant mirror for the concave wedge-base / floor
+corners — check both signs.
 
 `interpolateLiuLiu`'s `wellConditioned` gate (from the Marrone work) already
-gives the Shepard fallback when a corner ghost still ends up with poor fluid
-support, so the failure mode is graceful while this is iterated.
+falls back to Shepard when a ghost still lands with poor fluid support, so the
+failure mode stays graceful while (A) and (B) are iterated.
 
-**Sequencing:** (a) stand up the probe on the *flat-wall* still-water tank
-first (no wedge) and confirm the hydrostatic profile + KE are clean there —
-isolates "does mDBC hold still water at all" from the corner question; (b) add
-the wedge with the current (broken) ghost placement and record how it fails —
-the Fig. 4 profile near the apex is the expected failure; (c) implement the
-corner rule and re-score. `rotatingSquarePatch`'s no-PST control (§5.1.1
-point 3) can run in parallel — it needs no new code.
+**Sequencing:**
+- (a) probe on the *flat-wall* still-water tank (no wedge) — confirms mDBC
+  holds still water at all, and is the baseline for the "grid-aligned cases
+  don't move" safety property of fix (A);
+- (b) add the wedge with the **current** ghost placement and record the
+  failure — expect both the apex (defect B) *and* a general noise band along
+  the two sloped wedge faces from defect (A), since those faces are not
+  grid-aligned;
+- (c) implement fix (A) — surface-projected, fixed-depth ghost — and re-score;
+  the sloped-face noise should clear even before the corner rule;
+- (d) implement fix (B) — corner rule — and re-score the apex;
+- (e) a tilted flat plate in still water is the cheapest isolated test of (A)
+  alone (no corner), worth adding as a probe variant.
+
+`rotatingSquarePatch`'s no-PST control (§5.1.1 point 3) can run in parallel —
+it needs no new code.
 
 ## 5.3 δ⁺-SPH suite (after δ-SPH is clean) — Sun 2017 §4 / Sun 2019 §3
 
