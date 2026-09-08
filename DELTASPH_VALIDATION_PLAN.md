@@ -802,9 +802,23 @@ out_deltaSPHMarrone_hires/`, ~4.8 h/leg):
   wall impact t\* ≈ 2.5 and growing through the run. Present in *both* legs, so
   it is the mDBC wall at fine resolution, not the PST — a Part 3 item, and it
   scaled the wrong way with Δx.
-- The δ⁺ Eq.(7) P1 raw trace grows a visible acoustic-oscillation envelope
-  over t\* ≈ 4–5.5 (stiff-EOS ringing at c₀ = 40√(gH)); the rolling median
-  scores through it, but it is larger here than at H/Δx = 40.
+- **P1's *raw* trace is acoustically dominated — a probing-methodology gap, not
+  a scheme error.** The rolling median tracks Buchner (0.556 vs 0.55), but the
+  un-averaged P1 signal swings through a range several times the hydrodynamic
+  pressure it sits on, growing from t\* ≈ 4 to the end (worse at H/Δx = 322
+  than at 40). This is genuine weak-compressibility ringing: P1 sits deep under
+  the settled pool (z/H = 0.267, ~0.44 H of water above), where acoustic waves
+  reflecting off the end wall and bed are trapped and resonate at
+  c₀ = 40√(gH); P2, near the free surface, has no trap and its raw trace stays
+  clean. **Marrone's Fig. 5 shows none of this because his probe is a
+  φ = 90 mm disc *area integral*** (≈ 1.5 Δx across at H/Δx = 40), which is a
+  spatial low-pass that annihilates the short-wavelength acoustic mode; a
+  point/small-disc probe at this c₀ cannot. So the P1 raw swings are not a
+  defect to fix in the scheme — they are the cost of reading a weakly
+  compressible field at a point, and the honest comparison against Marrone is
+  the disc-integrated median, which passes. (This does **not** apply to the
+  separate P2 finding above: P2's median, not its raw trace, is what is 2× low
+  and early, and P2 shows no acoustic ringing.)
 
 **Video export bug found and fixed while doing this** (`runner/media.py`):
 frames are `frame_{step:05d}.png`, a 5-wide pad that overflows past 100k steps,
@@ -825,8 +839,81 @@ to chase separately).
 | Marrone §3.2 | dam break vs a tall thin column | Yeh & Petroff force + LDV velocity; 3D effects — 2D first |
 | Marrone §3.3 | dam break vs a rectangular step | 3D; obstacle preset already in `buildPresetObstacles` |
 | Marrone §3.4 | viscosity influence | no-slip; `inviscid=False`, real `ν` |
-| English 2022 §4.1 | still water + wedge | mDBC discriminator — hydrostatic profile to the wall, KE decay |
+| English 2022 §4.1 | still water + wedge | mDBC discriminator — hydrostatic profile to the wall, KE decay. **Scoped in §5.2.1 — next up.** |
 | English 2022 §4.2 | sloshing tank | `sloshingTank` — mDBC vs the current treatment on the SPHERIC sensors |
+
+### 5.2.1 English 2022 §4.1 — still water on a bed with a sharp-cornered wedge — SCOPING
+
+**Why this case, now.** It is the cleanest possible mDBC discriminator: still
+water, so the exact answer is the analytic hydrostatic profile `p = ρg(H−z)`
+and *every* departure is the wall closure alone — no scheme/wall confound like
+the dam break has. It also directly follows up two open items: Part 3
+question 5 (the corner ghost has an ill-defined normal), and §5.1.2's
+finding that wall penetration failed at H/Δx = 322 in *both* legs, which
+pointed at ghost generation.
+
+**Paper spec** (English et al. 2022 §4.1, *Comp. Part. Mech.* 9:911–925):
+
+| item | value |
+|---|---|
+| tank | 2D, 2.4 m × 1.2 m, closed |
+| wedge | trigonal, bottom-centre, **height 0.24 m**, sharp apex pointing up into the fluid |
+| water | initial height **H = 0.5 m** |
+| kernel / resolution | `h/dp = 2`; **dp = 0.02 m and 0.01 m** (H/dp = 25 and 50) |
+| duration | 4 s physical (noise checks at 20 s and 200 s) |
+| scheme | δ-SPH + mDBC; **no PST** (still water) — so `--scheme deltaSPH --shifting off`, and this is also a clean test of the §5.1.1-corrected default |
+| EOS / c₀ | weakly compressible, `c₀ = 10√(gH)`-class (Mach ≈ 0.03 for still water); the Sun Eq. (2) `machTarget` path |
+| measures | (a) per-particle `p/(ρgH)` vs `z/H` at t = 4 s — Fig. 4, must stay on the hydrostatic line **down to the solid surface, including at the wedge corners**; (b) `Σ ½m‖v‖²` vs t, log scale — Fig. 5, mDBC ≪ DBC and must not grow; (c) noise onset time (paper: negligible to 20 s, small noise ~200 s) |
+| acceptance (proposed) | profile RMSE off `p = ρg(H−z)` ≤ 3 % of `ρgH` over the bulk **and** ≤ 8 % within 2 dp of the wedge faces/apex; KE per unit mass stays below ~1e-4·gH for the 4 s record and is not trending up; no particle penetrates the wedge or tank wall by > 1 dp |
+
+**Case construction — mostly free.** `caseUtils/weaklyCompressible.buildPresetObstacles`
+already has an `equilateralBottom` preset: an equilateral triangle sitting on
+the tank floor centre, which *is* the English wedge up to the apex angle
+(`maxExtent` / `aspectRatio` set the height and half-angle). `dambreak`
+already wires `obstacleActive` / `obstacleType` through to a boundary region.
+So the geometry is: `dambreak` with `disableGravity = False`,
+`fluidWidth = 1.0` (fill the whole box width → still pool, no column to
+collapse), `fillRatio = 0.5/1.2 ≈ 0.417`, `obstacleActive = True`,
+`obstacleType = 'equilateralBottom'` with `maxExtent`/`aspectRatio` tuned to
+0.24 m height. A thin `scripts/probe_englishWedge.py` (sibling of
+`probe_deltaSPHMarrone.py`) supplies the numbers and scores (a)–(c). **Open
+choice:** a dedicated `stillWaterWedge` case vs. a `dambreak` preset + probe.
+Lean preset+probe — the dam-break hooks already do everything, and a second
+still-water case would duplicate `hydrostaticColumn`'s diagnostics machinery
+(note `hydrostaticColumn` itself is a *DFSPH* case and a known-failing
+baseline — not a usable base here).
+
+**The actual work — corner-aware ghost placement** (`rigidBody/ghostParticles.py`
+`addBoundaryGhostParticles`). Today every boundary particle's ghost is placed
+at `boundaryPos − clampedDist·∇φ`, i.e. mirrored along the **SDF gradient**.
+Near a convex apex the SDF is a `min`/`max` of two half-plane fields and `∇φ`
+is discontinuous across the medial axis — a particle at the apex gets one
+face's normal, not the bisector, so its ghost lands *inside* or skimming the
+wedge rather than out in the fluid. English's remedy (their Fig. 1c/d): for a
+corner boundary particle, mirror the ghost **through the corner point** into
+the fluid region, not along a single normal. Concretely:
+
+1. **detect** corner boundary particles — e.g. where the spread of `∇φ` over a
+   particle's own boundary neighbours exceeds a threshold, or distance to the
+   `min`/`max` switch surface is < ~1 dp;
+2. **place** their ghost by reflecting through the nearest convex vertex of the
+   obstacle polygon (`sdPolygon` already carries the vertex list) — `r_g =
+   2·r_vertex − r_b`, clamped so `|r_g − r_b|` stays ≈ `dp`;
+3. leave flat-face particles on the existing `∇φ` path unchanged;
+4. the concave tank-floor / wedge-base re-entrant corners are the mirror image
+   and English handles them the same way — check both signs.
+
+`interpolateLiuLiu`'s `wellConditioned` gate (from the Marrone work) already
+gives the Shepard fallback when a corner ghost still ends up with poor fluid
+support, so the failure mode is graceful while this is iterated.
+
+**Sequencing:** (a) stand up the probe on the *flat-wall* still-water tank
+first (no wedge) and confirm the hydrostatic profile + KE are clean there —
+isolates "does mDBC hold still water at all" from the corner question; (b) add
+the wedge with the current (broken) ghost placement and record how it fails —
+the Fig. 4 profile near the apex is the expected failure; (c) implement the
+corner rule and re-score. `rotatingSquarePatch`'s no-PST control (§5.1.1
+point 3) can run in parallel — it needs no new code.
 
 ## 5.3 δ⁺-SPH suite (after δ-SPH is clean) — Sun 2017 §4 / Sun 2019 §3
 
