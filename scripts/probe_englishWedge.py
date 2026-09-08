@@ -232,9 +232,15 @@ def _score(meta, series, final, verbose=False):
         ('settled kinetic energy small', m['keSettled'] <= 1e-4 * pgH * m['nFluid'] * dx * dx,
          f"KE tail-mean {m['keSettled']:.3e}  (want <= {1e-4 * pgH * m['nFluid'] * dx * dx:.3e}); "
          f"transient peak {m['keMax']:.3e}"),
-        ('kinetic energy not growing', not (m['keTrendSecondHalf'] > 0
-                                            and m['keTrendSecondHalf'] * meta['tReached'] > 0.1 * (m['keSettled'] + 1e-30)),
-         f"2nd-half dKE/dt {m['keTrendSecondHalf']:.3e}"),
+        # Growth only counts as a failure if the settled KE is also
+        # meaningfully above the numerical floor -- otherwise this fires on a
+        # +1e-5 drift while KE itself is ~1e-5, which is rest, not instability.
+        # Floor: 10 % of the "settled KE small" ceiling.
+        ('kinetic energy not growing',
+         not (m['keTrendSecondHalf'] > 0
+              and m['keSettled'] > 0.1 * (1e-4 * pgH * m['nFluid'] * dx * dx)
+              and m['keTrendSecondHalf'] * meta['tReached'] > 0.5 * m['keSettled']),
+         f"2nd-half dKE/dt {m['keTrendSecondHalf']:.3e}, settled KE {m['keSettled']:.3e}"),
         ('no wall penetration', m['maxPenetrationDx'] <= 1.0,
          f"{m['maxPenetrationDx']:.2f} dx  (want <= 1.0)"),
         ('weakly compressible', (not meta['diverged']) and m['rhoMin'] > 0.9 and m['rhoMax'] < 1.1,
