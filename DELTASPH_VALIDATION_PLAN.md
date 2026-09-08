@@ -958,6 +958,77 @@ failure mode stays graceful while (A) and (B) are iterated.
 `rotatingSquarePatch`'s no-PST control (§5.1.1 point 3) can run in parallel —
 it needs no new code.
 
+### 5.2.1 status — steps (a)–(c) done; fix (A) works, dp = 0.02 corner is fix (B)
+
+**(a) flat still-water tank — mDBC holds it, once the fluid starts on its own
+pressure field.** `scripts/probe_englishWedge.py` (new): drives `dambreak` as a
+still pool (`fluidWidth = 1.0`, gravity on, `shifting = off`), scores English
+Fig. 4 (per-particle `p/(ρgH)` vs `z/H` against the hydrostatic line, split
+bulk / near-wall / — with the wedge — face-band / apex / base-corner) and
+Fig. 5 (fluid KE history, graded on the settled tail not the release
+transient). First run failed at the *finer* resolution: dp = 0.02 clean by
+t ≈ 1 s (bulk RMSE 1.4 %), dp = 0.01 still ringing at t = 4 s (bulk RMSE
+**21 %**, a 23 %-too-steep hydrostatic gradient). Cause: uniform-`ρ₀`
+initialisation — the pool has to compress into its hydrostatic pressure field,
+and the δ-SPH diffusion that damps that transient scales as `δ h c₀`, so it
+damps ~2× slower per second at half the `dx`. **`dambreak` gained
+`hydrostaticInit`** (default off; stamps `ρ(z) = ρ₀(1 + g max(H−z,0)/c₀²)`,
+same pattern as `tgv-wc`'s `initialPressure`). With it, dp = 0.01 flat →
+**1.1 %**, both resolutions 6/6.
+
+**(b) wedge with the legacy ghost placement — the predicted corner failure,
+localised.** Global near-wall RMSE passed (the ~20 bad particles are diluted
+across ~4000), so `_score` gained wedge-localised checks. Those show:
+base-corner max |resid| **0.135** (dp = 0.02) / 0.078 (dp = 0.01), wedge-face
+RMSE 0.074 / 0.025 — against a flat-wall baseline of ~0.03. **The failure is at
+the two *concave base corners* (sloped face meets bed), not the apex** — the
+apex reads ~0.02.
+
+Root-caused by inspecting the init `ghostOffsets` directly: `dambreak` runs
+`band = 5` boundary layers, and the legacy placement mirrors each particle
+across the boundary SDF by `2·(its own signed distance)` along `∇(sdf)`. So a
+4th/5th-layer particle 0.1 below the bed beside the wedge gets a ghost mirrored
+**straight up by 10·dp** into open fluid, and English Eq. (12)
+(`ρ_b = ρ_g + (r_b−r_g)·∇ρ_g`) then extrapolates over that 10·dp lever arm.
+Flat wall: `∇ρ` linear, exact. Re-entrant corner: `∇ρ` bends, and
+`error ~ arm² · ∇²ρ` → ~13 % of `ρgH`. `interpolateLiuLiu`'s determinant gate
+does **not** catch these — 59 of 66 corner ghosts are `wellConditioned`
+(30+ fluid neighbours); they are well-supported, just far.
+
+**(c) fix (A) — `_fluidDirectedGhostOffsets` rewritten, corner-gated
+(`17290ff`).** Direction and interface distance from the nearby *fluid*
+particles (not `∇(sdf)`); ghost mirrored across the fluid-facing interface with
+the offset **capped at `2·dp`** so the extrapolation stays in clean near-wall
+fluid; applied **only where the fluid direction disagrees with the legacy SDF
+normal by > ~10°** — i.e. at corners. On a flat grid-aligned wall the two are
+collinear, the gate stays shut, and every mid-wall boundary particle keeps its
+legacy offset byte-for-byte (of 1880, the 196 that move are all at tank corners
+/ the waterline). Two earlier iterations failed and are recorded in the commit:
+capping *every* wetted ghost pulled flat-wall inner-layer ghosts back inside
+the solid (dp = 0.02 flat near-wall 0.03 → 0.11); the misalignment gate fixed
+that.
+
+| still-water wedge, t = 4 s | legacy | **fix (A)** | gate |
+|---|---|---|---|
+| dp = 0.01 base-corner max \|resid\| | 0.078 | **0.022** | ≤ 0.06 |
+| dp = 0.01 wedge-face RMSE | 0.025 | **0.010** | ≤ 0.05 |
+| dp = 0.01 checks | 6/9 | **9/9** | |
+| dp = 0.02 base-corner max \|resid\| | 0.135 | **0.069** | ≤ 0.06 ❌ |
+| dp = 0.02 wedge-face RMSE | 0.074 | **0.037** | ≤ 0.05 |
+| dp = 0.02 checks | 7/9 | **8/9** | |
+| dp = 0.02 flat near-wall RMSE | 0.020 | 0.025 | ≤ 0.08 |
+
+**At English's fine resolution (dp = 0.01, H/dx = 50) the wedge is 9/9.** The
+coarse `dp = 0.02` base corner is halved but sits at 0.069 vs the 0.06 gate —
+the acute corner has only 3–4 fluid particles within the 4·dx scoring radius at
+that resolution, and one at 6.9 % is the "failure".
+
+**(d) fix (B) — the corner-point mirror (English Fig. 1c/d) — is next**, and is
+what the residual `dp = 0.02` base corner needs: at the exact corner the fluid
+direction is still one face's, not the bisector, so the ghost is offset toward
+one face. Mirror the corner ghost through the obstacle-polygon vertex instead.
+(e) the tilted-plate isolated-(A) test still stands.
+
 ## 5.3 δ⁺-SPH suite (after δ-SPH is clean) — Sun 2017 §4 / Sun 2019 §3
 
 `rotatingSquarePatch` (N°1, the PST discriminator — tensile instability without
