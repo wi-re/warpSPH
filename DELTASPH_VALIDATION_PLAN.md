@@ -752,6 +752,72 @@ Consequences, in order of how much they matter:
 `scripts/probe_deltaPlusShiftSweep.py` runs all 11 under three legs (`off` /
 `eighth` / `eq7`) to bound the damage before anything else is decided.
 
+### 5.1.2 Four-leg re-run + the H/Δx = 322 convergence — the P1 deficit was resolution
+
+All four legs, one code state, on `dambreak` with the `shifting` knob from
+§5.1.1 (`scripts/out_deltaSPHMarrone_pst/`, H/Δx = 40, to t\* = 7.7):
+
+| leg | P1 plateau | P1 1st peak | P2 peak | checks |
+|---|---|---|---|---|
+| δ⁺ ⅛·Eq.(7), frozen — *the recorded 9/9* | 0.46 | 0.60 | 0.22 | 9/9 |
+| δ⁺ Eq.(7), frozen — *current `sun2017DeltaSPH` default* | 0.396 | 0.49 | 0.126 | 8/9 |
+| δ-SPH, no PST, frozen — *Marrone §3's actual spec* | 0.405 | 0.46 | 0.079 | 8/9 |
+| δ⁺ ⅛·Eq.(7), un-frozen | 0.651 | 1.94 | 0.366 | 6/9 |
+| Buchner 2002 | 0.55 | ~0.78 | 0.28 | — |
+
+Two results here run *against* §5.3.1–5.3.3's direction:
+
+1. **Eq. (7) regresses this case**, 9/9 → 8/9, confirmed against a freshly-run
+   frozen+⅛ baseline (not the plan's recorded number). It is right on the TGV
+   and the droplet and wrong here.
+2. **The §5.1.1 spec violation is not the explanation for the gap.** Running
+   Marrone §3's actual no-PST configuration gives the *worst* P2 of any leg,
+   0.079 vs Buchner 0.28. The candidate raised in §5.1.1 point 1 is closed:
+   not it.
+
+At H/Δx = 40 the P1 plateau sat at ~0.40–0.46 in every frozen leg regardless
+of PST — "invariant to everything varied", which pointed at the wall or the
+probe. **It was under-resolution.** Re-run at **H/Δx = 322** (nx = 536, 251k
+particles, Marrone's own finest Fig. 5 resolution; `scripts/
+out_deltaSPHMarrone_hires/`, ~4.8 h/leg):
+
+| H/Δx = 322 | δ⁺ Eq.(7), frozen | δ⁺ ⅛, un-frozen | Buchner |
+|---|---|---|---|
+| P1 plateau (t\* 3.6–7.5) | **0.556** | 0.547 | 0.55 |
+| P1 first-impact peak | **0.72** | 0.80 | ~0.78 |
+| P2 run-up peak | 0.126 @ t\*≈4.5 | 0.141 @ t\*≈5.9 | 0.28 @ t\*≈5.5 |
+| wall penetration | 5.08 Δx ❌ | 5.36 Δx ❌ | (≤ 3 Δx gate) |
+| checks | 7/9 | 6/9 | — |
+
+- **P1 is converged.** Plateau 0.556 vs 0.55, first peak 0.72 vs ~0.78 — both
+  on Buchner, up from ~0.40 at H/Δx = 40. The scheme reproduces the lower-probe
+  pressure; it just needs the resolution the paper used.
+- **P2 does not converge with resolution** and is now the isolated
+  discrepancy: still ~2× low (0.13 vs 0.28) **and** the run-up pulse arrives
+  ~1 t\* unit early (peak at t\* ≈ 4.2–4.3 vs Buchner's 5.5). This is a *phase*
+  error in the plunging-wave / run-up jet reaching the upper probe, not only an
+  amplitude one — a different failure than "under-diffused" or "wrong PST".
+- **New at H/Δx = 322: wall penetration fails**, 5 Δx vs the ≤ 3 Δx gate
+  (0.43 Δx at H/Δx = 40). 130 of 251k particles leak, starting at the first
+  wall impact t\* ≈ 2.5 and growing through the run. Present in *both* legs, so
+  it is the mDBC wall at fine resolution, not the PST — a Part 3 item, and it
+  scaled the wrong way with Δx.
+- The δ⁺ Eq.(7) P1 raw trace grows a visible acoustic-oscillation envelope
+  over t\* ≈ 4–5.5 (stiff-EOS ringing at c₀ = 40√(gH)); the rolling median
+  scores through it, but it is larger here than at H/Δx = 40.
+
+**Video export bug found and fixed while doing this** (`runner/media.py`):
+frames are `frame_{step:05d}.png`, a 5-wide pad that overflows past 100k steps,
+and ffmpeg's `-pattern_type glob` then orders `frame_100100.png` before
+`frame_99840.png` — so at H/Δx = 322 (156k steps) the entire back half of every
+video played out of order. `encodeFrames` now sorts frames by their embedded
+step number and feeds ffmpeg a gapless `f%06d.png` symlink sequence, so
+filename width no longer matters.
+
+**Not yet run:** δ-SPH no-PST at H/Δx = 322 (deferred — the two legs above
+took 9.6 h between them at ~1.85× the benchmarked step cost, a perf regression
+to chase separately).
+
 ## 5.2 Then
 
 | next | case | notes |
