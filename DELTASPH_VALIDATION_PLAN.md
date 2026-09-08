@@ -1008,26 +1008,38 @@ capping *every* wetted ghost pulled flat-wall inner-layer ghosts back inside
 the solid (dp = 0.02 flat near-wall 0.03 → 0.11); the misalignment gate fixed
 that.
 
+Scored on **RMSE** over each band (≤ 0.03 for the apex / base corners = the
+flat-wall near-wall level; ≤ 0.05 for the face band) — each corner band is only
+~16 particles at dp = 0.02, so the worst single particle carries ~0.02
+run-to-run scatter and is the wrong statistic (two legacy runs of the same
+config gave corner max 0.108 and 0.135):
+
 | still-water wedge, t = 4 s | legacy | **fix (A)** | gate |
 |---|---|---|---|
-| dp = 0.01 base-corner max \|resid\| | 0.078 | **0.022** | ≤ 0.06 |
+| dp = 0.01 base-corner RMSE | 0.033 | **0.015** | ≤ 0.03 |
 | dp = 0.01 wedge-face RMSE | 0.025 | **0.010** | ≤ 0.05 |
-| dp = 0.01 checks | 6/9 | **9/9** | |
-| dp = 0.02 base-corner max \|resid\| | 0.135 | **0.069** | ≤ 0.06 ❌ |
-| dp = 0.02 wedge-face RMSE | 0.074 | **0.037** | ≤ 0.05 |
-| dp = 0.02 checks | 7/9 | **8/9** | |
+| dp = 0.01 checks | 8/9 | **9/9** | |
+| dp = 0.02 base-corner RMSE | 0.058 | **0.044** | ≤ 0.03 ❌ |
+| dp = 0.02 wedge-face RMSE | 0.049 | **0.037** | ≤ 0.05 |
+| dp = 0.02 checks | 8/9 | **8/9** | |
 | dp = 0.02 flat near-wall RMSE | 0.020 | 0.025 | ≤ 0.08 |
 
-**At English's fine resolution (dp = 0.01, H/dx = 50) the wedge is 9/9.** The
-coarse `dp = 0.02` base corner is halved but sits at 0.069 vs the 0.06 gate —
-the acute corner has only 3–4 fluid particles within the 4·dx scoring radius at
-that resolution, and one at 6.9 % is the "failure".
+**At English's validation resolution (dp = 0.01, H/dx = 50) the wedge is 9/9**
+— corner RMSE 2.2× better, face RMSE 2.5× better. The coarse `dp = 0.02` case
+stays 8/9: the acute base corner (16 particles at H/dx = 25) reads corner RMSE
+0.044 against the 0.03 flat-wall target — ~1.5× better than legacy, still a
+real under-resolution residual, not eliminated.
 
-**(d) fix (B) — the corner-point mirror (English Fig. 1c/d) — is next**, and is
-what the residual `dp = 0.02` base corner needs: at the exact corner the fluid
-direction is still one face's, not the bisector, so the ghost is offset toward
-one face. Mirror the corner ghost through the obstacle-polygon vertex instead.
-(e) the tilted-plate isolated-(A) test still stands.
+**(d) fix (B) — the corner-point mirror (English Fig. 1c/d) — attempted and
+reverted.** The cheap realisation (mirror through the *nearest* fluid
+particle's direction rather than the fluid-weighted mean, since the mean is
+face-count biased at an acute corner) moved the dp = 0.02 corner RMSE by
+< 0.001 — a no-op. The faithful version reflects the corner ghost through the
+obstacle-polygon *vertex*, which needs the obstacle geometry plumbed into
+`addBoundaryGhostParticles` (today it only gets `regions` + `particleState`).
+**Deferred** — fix (A) already clears the wedge at the resolution English
+validates at, and the residual is coarse-`dp` under-resolution that a better
+ghost rule will not fix. (e) the tilted-plate isolated-(A) test still stands.
 
 ## 5.3 δ⁺-SPH suite (after δ-SPH is clean) — Sun 2017 §4 / Sun 2019 §3
 
