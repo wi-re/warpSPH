@@ -76,6 +76,18 @@ start from.
 - **§5.3.2 blast-radius sweep** — `sun2017Eq7Shift` swept clean on 10 of 11
   cases that run `ShiftingScheme.deltaSPH` (`c465983`); `impact` −4 % on
   `nnDistP01` is the one unexplained cost. **Default NOT flipped.**
+- **§5.3.2a PST discriminator + shift-magnitude decision** (Open/next 1 & 2,
+  resolved). `probe_squarePatchPSTControl.py` (new): plain δ-SPH develops the
+  pairing/tensile instability on the rotating patch (paired 0.03 → 0.21 over
+  tω, `nnP01` collapses), both shift magnitudes suppress it, `eq7` best — so
+  the square patch **is** a working PST discriminator, prefers Eq. (7). The
+  2500-step free-surface re-sweep (`out_deltaPlusShiftSweep_fs/`): `droplet`
+  neutral, `squarePatch` better at `eq7`, `impact` a real small regression;
+  **`dambreak eq7` under un-frozen `deltaSPH` breaks** (21 % voids, localised
+  ρ 1122 / ‖v‖ 90762), and **frozen diffusion (`sun2017DeltaSPH`) fully
+  rescues it** (paired 0.028, void 0.003). **Decision: `sun2017Eq7Shift` stays
+  coupled to `sun2017DeltaSPH`, not a scheme-agnostic default** — the global
+  flip would give un-frozen `deltaSPH` the 8× shift and diverge `dambreak`.
 - **§5.1 Marrone §3.1** — §5.1.1: the case had always run δ⁺-SPH, not δ-SPH
   (`shiftProperties.active` defaults `True`); added the `shifting` param
   (`c14dd06`). §5.1.2: re-run at **H/Δx = 322** — **P1 converges to Buchner**
@@ -103,15 +115,18 @@ start from.
 
 ## Open / next — in rough priority order
 
-1. **`rotatingSquarePatch` no-PST control** (§5.1.1 pt 3 / §5.3). The PST
-   discriminator has *never* been run against its own no-PST control. **No new
-   code** — `--scheme deltaSPH` with the shift forced off vs on. Cheapest next
-   step.
-2. **`sun2017Eq7Shift` as the shared default — decision pending.** Blocked on:
-   (a) `impact`'s −4 % `nnDistP01` over a full record, not a 300-step smoke;
-   (b) a free-surface re-sweep, since `WCSPH_SHIFTING_PLAN.md`'s `surfaceNormal`
-   projection was calibrated against the ⅛ magnitude. `probe_deltaPlusShiftSweep.py`
-   is the tool.
+1. ~~**`rotatingSquarePatch` no-PST control**~~ **DONE (§5.3.2a).** Plain
+   δ-SPH develops the pairing instability on the patch; the shift suppresses
+   it; `eq7` best. The square patch + TGV are now a clean PST-needed /
+   PST-works pair. `scripts/probe_squarePatchPSTControl.py`.
+2. ~~**`sun2017Eq7Shift` as the shared default**~~ **DECIDED (§5.3.2a): no —
+   it stays coupled to `sun2017DeltaSPH`.** The 2500-step free-surface
+   re-sweep showed `dambreak eq7` diverges under un-frozen `deltaSPH` (21 %
+   voids, localised singularity); frozen diffusion rescues it. Flipping the
+   global default would hand un-frozen `deltaSPH` the 8× shift for no benefit.
+   `impact`'s −4 % `nnDistP01` confirmed as a real (small) cost. Remaining
+   micro-question: frozen-`eighth` run to isolate whether frozen diffusion or
+   `eq7` carries the good frozen result.
 3. **§5.1 Marrone P2** — median 2× low **and** ~1 t\* phase-early at H/Δx = 322.
    The user's read (2026-09-08): a **probing-methodology** gap, not a scheme
    error — P1's *raw* trace is dominated by weak-compressibility acoustic
@@ -1498,6 +1513,63 @@ rather than a smaller shift.
 The sweep tool now reports `max (last)` for exactly this reason — a worst-value
 column cannot separate a transient from a degradation, and here that
 distinction was the entire answer.
+
+### 5.3.2a The square-patch PST discriminator + the shift-magnitude decision
+
+Two follow-ups from Open/next 1 & 2, resolved together.
+
+**(1) The rotating square patch IS a working PST discriminator, and it had
+never been run as one.** `scripts/probe_squarePatchPSTControl.py` (new): the
+three legs (`off` / `eighth` / `eq7`) on `squarePatch`, scored on the
+*geometric* pairing signature over a time trace (not two points — the §5.3.2
+transient caution applies). At `nx = 384`, before the arms fragment
+(fragmentation is under-resolution, `probe_squarePatchFragmentation.py`, a
+different phenomenon):
+
+| tω | `off` paired / nnP01 | `eighth` | `eq7` |
+|---|---|---|---|
+| 1.0 | 0.031 / 0.35 | 0.007 / 0.52 | 0.002 / 0.65 |
+| 2.0 | 0.103 / 0.10 | 0.029 / 0.35 | 0.014 / 0.46 |
+| 3.0 | **0.213 / 0.060** | 0.061 / 0.28 | **0.044 / 0.32** |
+
+`off` (plain δ-SPH) pairing **grows monotonically** — 0.03 → 0.21, `nnP01`
+collapses 0.35 → 0.06, `voidFraction` → 0.11 — a real tensile instability, not
+a transient. Both shift magnitudes suppress it, monotonically in magnitude: at
+tω = 3, paired is 0.213 (`off`) → 0.061 (`eighth`) → 0.044 (`eq7`), and `nnP01`
+0.06 → 0.28 → 0.32. Snapshot (`out_squarePatchPSTControl/`): `off` is
+salt-and-pepper pressure noise everywhere, `eq7` keeps a coherent field. So the
+square patch + TGV (§5.3.1) are now a clean **PST-needed / PST-works** pair, and
+the discriminator prefers the Eq. (7) magnitude.
+
+**(2) The free-surface re-sweep — `eq7` is only safe with frozen diffusion.**
+The 300-step smoke was extended to **2500 steps** on the four free-surface
+cases (`scripts/out_deltaPlusShiftSweep_fs/`). `droplet` neutral, `squarePatch`
+clearly better at `eq7` (paired 0.056 → 0.017), `impact` a small regression
+(paired 0.015 → 0.018, `nnP01` 0.39 → 0.35 — the same −4 % the smoke flagged,
+now confirmed as a genuine small cost, not noise). But **`dambreak` at `eq7`
+under `--scheme deltaSPH` breaks** by t ≈ 1.25 s: 20 % paired, **21 % voids**,
+a localised singularity (ρ_max 1122, ‖v‖ 90762, KE up 11 orders) — the bulk
+(`densityP05` 0.993) survives but the run is destroyed. The `eighth` leg is
+clean at the same point.
+
+**Frozen diffusion (`--scheme sun2017DeltaSPH`) rescues it completely** —
+identical `dambreak eq7`, 2500 steps: ρ_max 1.06 (1.37 over the run), ‖v‖ 8.4,
+paired **0.028**, void **0.003**, `nnP01` 0.29 — a *better* distribution than
+the un-frozen `eighth` leg (0.034). So the `eq7` blow-up is specifically the
+8× shift interacting with per-sub-stage RK4 diffusion; freezing the diffusive
+terms across sub-stages (Sun 2017 §2, which `sun2017DeltaSPH` already does)
+removes it.
+
+**Decision: `sun2017Eq7Shift` stays coupled to `sun2017DeltaSPH`, NOT promoted
+to a scheme-agnostic default.** Flipping the global default would give
+`--scheme deltaSPH` runs the 8× shift *without* frozen diffusion — which
+diverges `dambreak` and slightly regresses `impact`, for no benefit: the cases
+that want the bigger shift (square patch, TGV, violent free-surface impacts)
+are run under `sun2017DeltaSPH` anyway, where it is already on. `eq7` is the
+correct magnitude (§5.3.2), and it is correctly *scoped* to the scheme that
+carries the rest of Sun's prescription with it. (Un-tested refinement: whether
+frozen diffusion or `eq7` is the load-bearing factor for the *good* frozen
+result — a frozen-`eighth` run would isolate it.)
 
 ### 5.3.3 Sun 2017 §4.2 — oscillating droplet
 
