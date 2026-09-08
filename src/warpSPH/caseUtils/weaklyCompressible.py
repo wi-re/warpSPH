@@ -284,8 +284,85 @@ def buildPresetObstacles(maxExtent: float, offsetX: float, L: float, fillRatio: 
             "obstacleType": "horseshoe",
             "aoa": angle,
         },
+        # Marrone et al. 2011 Fig. 19 -- dam break against a sharp-edged
+        # obstacle, with a concave quarter-circle fillet rounding the tank's
+        # downstream bottom corner. Geometry is fixed by the figure (all of it
+        # in units of the obstacle height H = W/10, see `_marroneSharpEdgeSDF`),
+        # so `maxExtent` / `offsetX` / `aspectRatio` / `aoa` are ignored -- the
+        # SDF is built straight from the domain `L`, `W`. The preset entry only
+        # has to exist so `buildSystem`'s `presets.get(...)` succeeds.
+        # `DELTASPH_VALIDATION_PLAN.md` Sec. 5.2.2.
+        "marroneSharpEdge": {
+            "maxExtent": maxExtent,
+            "offsetX": 0.0,
+            "offsetY": 0.0,
+            "aspectRatio": 1.0,
+            "obstacleType": "marroneSharpEdge",
+            "aoa": 0.0,
+        },
     }
     return obstacles
+
+
+#: Marrone et al. 2011 Fig. 19, all lengths in obstacle heights H. The tank is
+#: `10 H x 8 H`; the sharp-edged obstacle sits on the floor with its 45deg edge
+#: apex at `x = 5 H` (measured from the upstream wall), toe at `6 H`, vertical
+#: back face at `7 H`; the concave fillet (radius H) runs from `x = 9 H` on the
+#: floor to `x = 10 H` at height H where it meets the downstream wall.
+_MARRONE_SE = dict(apex_x=5.0, toe_x=6.0, back_x=7.0, fillet_x=9.0)
+
+
+def _marroneSharpEdgeSDF(L: float, W: float):
+    """`x -> signed distance` (negative inside solid) for the Marrone 2011
+    Fig. 19 sharp-edged obstacle **unioned with** the concave quarter-circle
+    fillet at the tank's downstream bottom corner.
+
+    Centred-domain coordinates: `x in [-W/2, W/2]`, `y in [-L/2, L/2]`, bed at
+    `y = -L/2`, downstream wall at `x = +W/2`. `H = W / 10` so the fillet meets
+    the wall exactly at its top point (`x = +W/2`, `y = -L/2 + H`); the caller
+    (`scripts/probe_deltaSPHMarrone34.py`) is responsible for `W = 10 H` and
+    `L = 8 H`.
+
+    The obstacle is `triangle[apex, (toe_x, top), (toe_x, bed)]` (the 45deg edge
+    is its hypotenuse apex->toe) unioned with `box[toe_x, back_x] x [bed, top]`
+    (the toe-to-back-face block). The fillet solid is the concave quarter-lens
+    `box[wall-H, wall] x [bed, bed+H]` minus the disc of radius H centred at
+    `(wall - H, bed + H)`. Built from `sdTriangle` / `sdBox` / `sdCircle` rather
+    than one polygon SDF so no primitive outside the audited set is used.
+    """
+    r = _MARRONE_SE
+    bed = -L / 2.0
+    wall = W / 2.0
+    H = W / 10.0
+    top = bed + H
+    apex_x = -wall + r['apex_x'] * H
+    toe_x = -wall + r['toe_x'] * H
+    back_x = -wall + r['back_x'] * H
+    fillet_x = -wall + r['fillet_x'] * H            # == wall - H when W = 10 H
+
+    trifn = getSDF("triangle")["function"]
+    boxfn = getSDF("box")["function"]
+    circfn = getSDF("circle")["function"]
+
+    discC = (fillet_x, top)
+    filletBoxC = (wall - H / 2.0, bed + H / 2.0)
+    blockC = (0.5 * (toe_x + back_x), 0.5 * (bed + top))
+    blockHalf = (0.5 * (back_x - toe_x), 0.5 * H)
+
+    def sdf(x: torch.Tensor) -> torch.Tensor:
+        dev, dt = x.device, x.dtype
+        t = lambda v: torch.tensor(v, device=dev, dtype=dt)
+        # obstacle: 45deg-edge wedge + rectangular block
+        dTri = trifn(x, t([apex_x, top]), t([toe_x, top]), t([toe_x, bed]))
+        dBlock = boxfn(x - t(blockC), t(blockHalf))
+        dObstacle = torch.minimum(dTri, dBlock)
+        # concave fillet lens: difference(cornerBox, disc) = max(box, -discSDF)
+        dFilletBox = boxfn(x - t(filletBoxC), t([H / 2.0, H / 2.0]))
+        dOutDisc = -circfn(x - t(discC), t(H))
+        dFillet = torch.maximum(dFilletBox, dOutDisc)
+        return torch.minimum(dObstacle, dFillet)
+
+    return sdf
 
 
 def _scale_points(points: torch.Tensor, scaleX: float, scaleY: float) -> torch.Tensor:
@@ -364,6 +441,10 @@ def buildObstacleSDF(
         )
     if obstacleType == "star":
         return lambda x: getSDF("star5")["function"](trs(x), maxExtent, maxExtent * 1.25)
+    if obstacleType == "marroneSharpEdge":
+        # Fixed by Marrone 2011 Fig. 19 in units of H = W/10; `trs` (offset /
+        # rotation / scale) does not apply. See `_marroneSharpEdgeSDF`.
+        return _marroneSharpEdgeSDF(L, W)
 
     raise ValueError(f"Unsupported obstacleType: {obstacleType}")
 

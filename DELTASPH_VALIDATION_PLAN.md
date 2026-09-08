@@ -54,6 +54,7 @@ start from.
 | `scripts/probe_deltaPlusTGV.py` | Sun 2019 §3.1 Taylor–Green | `--nx`, `--Re`, `--tLimit`, `--report` |
 | `scripts/probe_deltaPlusDroplet.py` | Sun 2017 §4.2 oscillating droplet | `--Rdx`, `--periods`, `--report` |
 | `scripts/probe_englishWedge.py` | English 2022 §4.1 still-water wedge | `--dp`, `--wedge` / `--no-wedge`, `--tilt`, `--tLimit`, `--report` |
+| `scripts/probe_deltaSPHMarrone34.py` | Marrone 2011 §3.4 / Fig. 19 sharp-edged obstacle + rounded tank corner | `--nx` (H/dx = nx/8), `--c0Ratio`, `--tStar`, `--initdump`, `--report`, `--video` |
 | `scripts/probe_deltaPlusShiftMagnitude.py` | measures the δ⁺ shift vs Sun Eq. (7) | — |
 | `scripts/probe_deltaPlusShiftBlastRadius.py` | which registered cases use `ShiftingScheme.deltaSPH` | — |
 | `scripts/probe_deltaPlusShiftSweep.py` | 3-leg (`off`/`eighth`/`eq7`) smoke sweep over the 11 affected cases | `--cases`, `--nSteps`, `--report` |
@@ -85,6 +86,17 @@ start from.
   fluid-directed + corner-gated (**fix A**, `17290ff`). **Wedge 9/9 at
   dp = 0.01 (H/dx = 50, English's resolution)**; RMSE corner gates
   (`982375d`). Fix (B) attempted and reverted as a no-op.
+- **§5.2.2 Marrone §3.4 / Fig. 19 sharp-edged obstacle + rounded tank corner**
+  — geometry added (`marroneSharpEdge` composite SDF in `caseUtils`: obstacle
+  polygon ∪ concave quarter-circle fillet), `probe_deltaSPHMarrone34.py`, and
+  an obstacle/fillet-SDF penetration metric in `dambreak.diagnostics`.
+  **Baseline H/dx = 32, δ-SPH + mDBC, no PST, c₀ = 28.3√(gH): runs stably to
+  t\* = 5 — no divergence, ZERO obstacle/fillet penetration, 0.6 Δx tank
+  penetration**, flow reproduces Fig. 20/22 (sharp-edge jet at t\* ≈ 2,
+  fragmenting sheet, roof re-impact at t\* ≈ 3.9). Open: a ρ_max ≈ 1.14 /
+  v_max ≈ 4.3 U_max excursion at those two impact events (jet-tip / thin-sheet
+  under-resolution, not a bulk instability); convergence sweep; the 9 surface
+  probes.
 - **`runner/media.py`** — frame-ordering bug (glob sort breaks past 100k
   steps) fixed (`0810491`).
 
@@ -115,16 +127,28 @@ start from.
    obstacle-polygon *vertex* (English Fig. 1c/d); needs the obstacle geometry
    plumbed into `addBoundaryGhostParticles`. Deferred — (A) clears the wedge at
    English's resolution, and the dp = 0.02 residual is under-resolution.
-7. **§5.2 the rest** — Marrone §3.2 / §3.3 / §3.4; English §4.2 (`sloshingTank`
+7. **§5.2.2 Marrone §3.4 — convergence + probes.** Baseline is stable at
+   H/Δx = 32 (§5.2.2 below). Left: (a) convergence sweep H/Δx = 64, 128 to
+   t\* ≈ 7.4 (Marrone Fig. 20/21 P1 vs H/dx = 33.5/67/134); (b) the 9 surface
+   pressure probes P1–P9 (on the 45° edge, the roof, the fillet arc — *not*
+   axis-aligned, so `diagnostics`' wall-probe path needs a general
+   surface-point probe) vs Colicchio's Level-Set (Fig. 24) and Wagner's
+   P1 ≈ 36.7 ρgH; (c) whether a **per-step ghost-offset refresh** (the ghost
+   placement is init-only, so on a dam break every obstacle-surface ghost keeps
+   the legacy SDF reflection — 784/7608 land in the solid — and fix (A)'s
+   fluid-directed rule never re-activates; graceful today via Shepard + the
+   no-pen shift, but it may be what caps the impact excursion); (d) the viscous
+   sub-case §3.4.2 (`inviscid=False`, Re = 1000 / 10000).
+8. **§5.2 the rest** — Marrone §3.2 / §3.3; English §4.2 (`sloshingTank`
    under mDBC); English §4.3 (3D dam break vs a cuboid).
-8. **Marrone §3.1 loose ends** — `c₀ = 20√(gH)` cross-check; DualSPHysics
+9. **Marrone §3.1 loose ends** — `c₀ = 20√(gH)` cross-check; DualSPHysics
    `01_DamBreak` cross-validation; H/Δx = 80 for the Fig. 5 convergence pair.
-9. **Perf** — sustained step cost ran ~1.85× the 40-step benchmark on the
-   H/Δx = 322 runs. Separate investigation, not a validation blocker.
-10. **Frozen diffusion** — still only the `sun2017DeltaSPH` default, no general
+11. **Perf** — sustained step cost ran ~1.85× the 40-step benchmark on the
+    H/Δx = 322 runs. Separate investigation, not a validation blocker.
+12. **Frozen diffusion** — still only the `sun2017DeltaSPH` default, no general
     path. Perf only (Sun says correctness doesn't need it).
 
-The detailed narrative for each is in §5.1 / §5.1.1 / §5.1.2 / §5.2.1 /
+The detailed narrative for each is in §5.1 / §5.1.1 / §5.1.2 / §5.2.1 / §5.2.2 /
 §5.3.1–3 below. The section immediately after this one is the **historical**
 first-session status (mDBC determinant gate, kernel choice) — kept for the
 reasoning trail, not a to-do list.
@@ -930,7 +954,7 @@ to chase separately).
 |---|---|---|
 | Marrone §3.2 | dam break vs a tall thin column | Yeh & Petroff force + LDV velocity; 3D effects — 2D first |
 | Marrone §3.3 | dam break vs a rectangular step | 3D; obstacle preset already in `buildPresetObstacles` |
-| Marrone §3.4 | viscosity influence | no-slip; `inviscid=False`, real `ν` |
+| Marrone §3.4 | dam break vs a **sharp-edged obstacle**, rounded tank corner (Fig. 19) | **§5.2.2 — geometry + stable baseline done**; boundary sampling / stability / convergence. §3.4.2 adds no-slip `ν` (Re = 1000 / 10000) |
 | English 2022 §4.1 | still water + wedge | mDBC discriminator — hydrostatic profile to the wall, KE decay. **Scoped in §5.2.1 — next up.** |
 | English 2022 §4.2 | sloshing tank | `sloshingTank` — mDBC vs the current treatment on the SPHERIC sensors |
 
@@ -1132,6 +1156,86 @@ obstacle-polygon *vertex*, which needs the obstacle geometry plumbed into
 **Deferred** — fix (A) already clears the wedge at the resolution English
 validates at, and the residual is coarse-`dp` under-resolution that a better
 ghost rule will not fix. (e) the tilted-plate isolated-(A) test still stands.
+
+### 5.2.2 Marrone 2011 §3.4 / Fig. 19 — dam break vs a sharp-edged obstacle with a rounded tank corner
+
+**Why this case, now.** The user's pick after §5.2.1. Marrone §3.4 merges every
+hard part of the boundary handling into one geometry: a **convex 45° edge**
+that ejects a violent jet, **two re-entrant (concave) corners** at the obstacle
+toe and the roof/back-face junction, and a genuinely **curved concave wall**
+(the fillet, radius H) rounding the tank's downstream bottom corner. Marrone
+uses it to show the fixed-ghost technique copes with "curvilinear parts and
+convex/concave angles" (Appendix A). Goal here: **a method that runs it
+stably, without significant boundary penetration, and converges** — the
+pressure traces vs Colicchio's Level-Set (their Fig. 24) and Wagner's
+P1 ≈ 36.7 ρgH are a later refinement.
+
+**Geometry** (Fig. 19, all lengths in the obstacle height H): tank 10 H × 8 H,
+closed, free-slip, inviscid (§3.4.1). Water column 3 H × 2.4 H in the upstream
+bottom corner. Obstacle on the floor: 45° edge apex at x = 5 H (height H), toe
+at 6 H, vertical back face at 7 H. Concave fillet radius H from x = 9 H (floor)
+to x = 10 H (height H, at the downstream wall). c₀ = c₀Ratio·√(gH); Marrone's
+Fig. 21 pair is 28.3 (M ≈ 0.085) and 56.6. Space resolutions H/dx = 33.5 / 67 /
+134; the probe uses **H/dx = 32 / 64 / 128** (`--nx 256/512/1024`, H/dx = nx/8)
+so H is an integer number of spacings and the reference points land on the
+lattice.
+
+**Construction — a preset + probe, like §5.2.1.** `caseUtils/weaklyCompressible.py`
+gained a `marroneSharpEdge` obstacle: `_marroneSharpEdgeSDF` returns the
+obstacle polygon (a `sdTriangle` wedge ∪ `sdBox` block) **unioned with** the
+fillet lens (`max(cornerBox, −disc)`), built straight from the domain `L`/`W`
+(so `maxExtent`/`offsetX`/`aoa` don't apply), fed through `dambreak`'s normal
+single-obstacle SDF path. `dambreak.diagnostics` gained `nObstaclePen` /
+`maxObstaclePenDx` from that SDF — the interior-AABB penetration watch cannot
+see a solid island in the flow or a fillet inside the tank AABB.
+`scripts/probe_deltaSPHMarrone34.py` (`--initdump` renders boundary + ghost
+sampling at the four hard spots with no stepping; `--report` builds the
+stability/penetration/convergence plots).
+
+**Boundary sampling — the ghost placement is init-only, and the obstacle is dry
+at t = 0.** `--initdump` at H/dx = 32, straight after `addBoundaryGhostParticles`:
+**784 of 7608 mDBC ghost particles are placed *inside* the obstacle/fillet
+solid** (min SDF ≈ −6 Δx), ghost-offset lever arms up to 21.75 Δx. Cause:
+`addBoundaryGhostParticles` runs **once** at init, and §5.2.1 fix (A)'s
+`_fluidDirectedGhostOffsets` only re-places a boundary particle's ghost when
+fluid is *already within 6 Δx*. In the English wedge the wedge is submerged from
+t = 0 so the correction always applies; on a **dam break** the obstacle is dry
+at init, so every obstacle-surface ghost keeps the legacy `2·s·∇(sdf)`
+reflection — wrong at the 45° edge, both re-entrant corners, and worst at the
+concave fillet (there `∇` of `max(box, −disc)` points into the wall/floor, not
+the fluid). Nothing re-places them when the jet arrives.
+
+**Baseline result — stable anyway (H/dx = 32, δ-SPH + mDBC, no PST,
+c₀ = 28.3√(gH), to t\* = 5, 7114 steps, ~15 min):**
+
+| check | result |
+|---|---|
+| divergence | **none**, ran the full t\* = 5 |
+| obstacle / fillet penetration | **0.00 Δx** into the solid, whole run |
+| tank-wall penetration | 0.6 Δx past the AABB (sub-Δx), flat after t\* ≈ 3.5 |
+| ρ (5-pct proxy / max), t\* > 1 | [0.996, **1.144**] — spikes at the two impact events |
+| max ‖v‖ | 26.2 = **4.3 U_max** — jet-tip / thin-sheet spike |
+| KE | smooth rise to a t\* ≈ 1.9 peak, then monotone decay — no runaway |
+| flow | reproduces Fig. 20 / 22 — sharp-edge jet ejection at t\* ≈ 2, fragmenting sheet arcing back over the reservoir, roof re-impact at t\* ≈ 3.9 |
+
+So **the user's stated goal is already met at H/dx = 32**: it runs stably with
+no meaningful boundary penetration, despite the 784 mis-placed init ghosts —
+`interpolateLiuLiu`'s `wellConditioned` → Shepard fallback and the always-on
+`computeMdbcNoPenShift` are the graceful-failure path §5.2.1 relied on, and here
+they hold the wall. What's left is **quality**: the ρ_max ≈ 1.14 / v_max ≈ 4.3
+U_max excursion at the sharp-edge ejection and the roof re-impact — localised
+jet-tip / thin-sheet under-resolution (Marrone says this case is not converged
+even at H/dx = 234), not a bulk instability.
+
+**Next (Open/next item 7):** (a) convergence sweep H/dx = 64, 128 to t\* ≈ 7.4;
+(b) the 9 surface probes P1–P9 — they sit on the 45° edge, the roof and the
+fillet arc, none axis-aligned, so `diagnostics`' wall-probe path needs a
+general surface-point MLS probe — vs Colicchio Fig. 24 and Wagner P1; (c) a
+**per-step (or every-K-step) ghost-offset refresh** so fix (A)'s fluid-directed
+placement activates as the jet reaches the obstacle (boundary/ghost particles
+are static during stepping, so this is an in-place update of
+`ghostOffsets` + the ghost rows' positions) — test whether it tightens the
+impact excursion; (d) the viscous sub-case §3.4.2.
 
 ## 5.3 δ⁺-SPH suite (after δ-SPH is clean) — Sun 2017 §4 / Sun 2019 §3
 

@@ -54,6 +54,7 @@ import torch
 
 from ..caseUtils import (SimulationProperties, buildDomain, buildPresetObstacles,
                          buildRegions, sampleNoise, setupFreestream, setupKolmogorov)
+from ..caseUtils.weaklyCompressible import buildObstacleSDF
 from ..configurations.moduleConfigurations.gravity import GravityType
 from ..enumTypes import isArtificialCompressibleScheme, isIncompressibleScheme
 from ..initializers import initializeWeaklyCompressibleSimulation
@@ -253,6 +254,18 @@ def buildSystem(ctx: RunContext):
     ctx.schemeConfig.boundaryConditions = []
     ctx.scratch['obstacle'] = obstacle
 
+    # Stash the obstacle's own SDF (negative inside the solid) so `diagnostics`
+    # can measure fluid penetration into the obstacle -- the interior-AABB
+    # penetration watch there only sees the tank walls, not a solid island in
+    # the flow or a concave fillet inside the AABB (the Marrone 2011 Fig. 19
+    # `marroneSharpEdge` geometry has both). Same snapped params `buildRegions`
+    # sampled the boundary from.
+    if ctx.param('obstacleActive'):
+        ctx.scratch['obstacleSDF'] = buildObstacleSDF(
+            obstacle['obstacleType'], obstacle['offsetX'], obstacle['offsetY'],
+            obstacle['maxExtent'], obstacle['aspectRatio'], obstacle['aoa'],
+            ctx.config, ctx.schemeConfig, ctx.spec.L, ctx.param('W'))
+
     return initializeWeaklyCompressibleSimulation(
         ctx.schemeConfig.regions, ctx.config, ctx.schemeConfig,
         ctx.SimulationSystem, ctx.SimulationState, verbose=ctx.spec.verbose)
@@ -403,6 +416,19 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
         d['nPenetrating'] = int(pen.sum().detach().cpu().item())
         d['maxPenetrationDx'] = float(
             torch.clamp(past.max(), min=0.0).detach().cpu().item() / dx)
+
+        # Penetration into a solid obstacle / concave wall fillet: the AABB
+        # watch above cannot see these (a solid island in the flow, or a fillet
+        # inside the tank AABB). `obstacleSDF` is negative inside the solid, so
+        # `-sdf` clamped at 0 is the depth a fluid particle has sunk in.
+        obSDF = ctx.scratch.get('obstacleSDF')
+        if obSDF is not None:
+            with torch.no_grad():
+                sd = obSDF(pos)
+            inside = sd < 0
+            d['nObstaclePen'] = int(inside.sum().detach().cpu().item())
+            d['maxObstaclePenDx'] = float(
+                torch.clamp(-sd.min(), min=0.0).detach().cpu().item() / dx)
 
     # Downstream-wall pressure probes (`ACSPH_PLAN.md` §4.5, Lobovsky et al.
     # 2014): a first-order MLS (Liu-Liu) interpolation of the fluid pressure at
