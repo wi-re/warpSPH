@@ -94,7 +94,7 @@ def _probePoints():
     return list(zip(names, edge + roof + fil))
 
 
-def _params(scheme):
+def _params(scheme, cornerOnly=False):
     return dict(
         W=TANK_W,
         fillRatio=COL_H / TANK_L,
@@ -102,7 +102,10 @@ def _params(scheme):
         gravityMagnitude=G,
         disableGravity=False,
         obstacleActive=True,
-        obstacleType='marroneSharpEdge',
+        # `marroneRoundedCorner` drops the sharp-edged floor obstacle, leaving
+        # only the concave fillet -- an isolated test of the smoothed corner
+        # (the surge runs the full 10 H and impacts it directly).
+        obstacleType='marroneRoundedCorner' if cornerOnly else 'marroneSharpEdge',
         referenceVelocity=U_MAX,
         # Marrone Sec. 3 dam breaks are plain delta-SPH, no PST.
         shifting='off',
@@ -111,7 +114,8 @@ def _params(scheme):
     )
 
 
-def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme, ghostRefresh=0):
+def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme, ghostRefresh=0,
+            cornerOnly=False):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -121,10 +125,12 @@ def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme, ghostRefresh=0
     os.makedirs(out, exist_ok=True)
     machTarget = 1.95 / c0Ratio                       # c0 = c0Ratio * sqrt(gH)
     tLimit = tStar * SQRT_H_G
-    tag = f'{scheme}_nx{nx}_c{c0Ratio:g}' + (f'_gr{ghostRefresh}' if ghostRefresh else '')
+    tag = (f'{scheme}_nx{nx}_c{c0Ratio:g}'
+           + ('_cornerOnly' if cornerOnly else '')
+           + (f'_gr{ghostRefresh}' if ghostRefresh else ''))
     runRoot = os.path.join(out, tag + '_run')
 
-    params = _params(scheme)
+    params = _params(scheme, cornerOnly=cornerOnly)
     params['machTarget'] = machTarget
     params['mdbcGhostRefreshEvery'] = int(ghostRefresh)
 
@@ -156,7 +162,7 @@ def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme, ghostRefresh=0
         tStarLimit=float(tStar), tReached=tReached, tStarReached=tReached / SQRT_H_G,
         H=H, G=G, TANK_L=TANK_L, TANK_W=TANK_W, COL_W=COL_W, COL_H=COL_H,
         shiftActive=bool(getattr(r.ctx.schemeConfig.shiftProperties, 'active', False)),
-        ghostRefreshEvery=int(ghostRefresh),
+        ghostRefreshEvery=int(ghostRefresh), cornerOnly=bool(cornerOnly),
         diverged=bool(r.diverged), nSteps=int(r.nSteps),
         wallTime_s=float(r.wallTime or 0.0),
     )
@@ -237,7 +243,7 @@ def _score(meta, cols, verbose=False):
     return checks, m
 
 
-def _initdump(nx, out):
+def _initdump(nx, out, cornerOnly=False):
     """Build the system (no stepping) and render the sampled boundary + mDBC
     ghost particles zoomed on the four hard spots: the 45deg edge, the toe
     re-entrant corner, the roof/back-face re-entrant corner, and the fillet."""
@@ -252,7 +258,7 @@ def _initdump(nx, out):
     from warpSPH.caseUtils.weaklyCompressible import buildObstacleSDF
 
     os.makedirs(out, exist_ok=True)
-    params = _params('deltaSPH')
+    params = _params('deltaSPH', cornerOnly=cornerOnly)
     params['machTarget'] = 1.95 / 28.3
     r = run(dambreakCase, scheme='deltaSPH', L=TANK_L, nx=nx, nSteps=1,
             tLimit=1e9, quiet=True, store=False, progress=False, params=params)
@@ -267,7 +273,8 @@ def _initdump(nx, out):
     ghost = pos[kinds == 2]
 
     dx = float(r.ctx.config.dx)
-    sdf = buildObstacleSDF('marroneSharpEdge', 0, 0, 1, 1, 0, None, None, TANK_L, TANK_W)
+    obType = 'marroneRoundedCorner' if cornerOnly else 'marroneSharpEdge'
+    sdf = buildObstacleSDF(obType, 0, 0, 1, 1, 0, None, None, TANK_L, TANK_W)
     gx = np.linspace(-TANK_W / 2 - 0.4, TANK_W / 2 + 0.4, 900)
     gy = np.linspace(-TANK_L / 2 - 0.4, -TANK_L / 2 + 3.2, 320)
     import torch
@@ -306,7 +313,7 @@ def _initdump(nx, out):
     fig.suptitle('Marrone 2011 Fig. 19 -- boundary + mDBC ghost sampling '
                  f'(nx = {nx})', fontsize=11)
     fig.tight_layout()
-    p = os.path.join(out, f'initdump_nx{nx}.png')
+    p = os.path.join(out, f'initdump_nx{nx}{"_cornerOnly" if cornerOnly else ""}.png')
     fig.savefig(p, dpi=110)
     print('->', p)
 
@@ -390,6 +397,9 @@ def main(argv=None):
     ap.add_argument('--ghostRefresh', type=int, default=0,
                     help='re-place mDBC boundary ghosts from the current fluid every N steps '
                          '(0 = init-only, the default); §5.2.2')
+    ap.add_argument('--cornerOnly', action='store_true',
+                    help='drop the sharp-edged obstacle; keep only the rounded tank corner '
+                         '(isolated fillet impact test)')
     ap.add_argument('--video', action='store_true')
     ap.add_argument('--plotInterval', type=int, default=25)
     ap.add_argument('--out', default=DEFAULT_OUT)
@@ -400,9 +410,9 @@ def main(argv=None):
     if args.report:
         _report(args.out); return
     if args.initdump:
-        _initdump(args.nx, args.out); return
+        _initdump(args.nx, args.out, args.cornerOnly); return
     _runOne(args.nx, args.c0Ratio, args.tStar, args.out, args.video,
-            args.plotInterval, args.scheme, args.ghostRefresh)
+            args.plotInterval, args.scheme, args.ghostRefresh, args.cornerOnly)
 
 
 if __name__ == '__main__':

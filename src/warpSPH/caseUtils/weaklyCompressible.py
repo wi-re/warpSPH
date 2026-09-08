@@ -300,6 +300,18 @@ def buildPresetObstacles(maxExtent: float, offsetX: float, L: float, fillRatio: 
             "obstacleType": "marroneSharpEdge",
             "aoa": 0.0,
         },
+        # Same tank + rounded downstream corner as `marroneSharpEdge`, but with
+        # the sharp-edged floor obstacle removed -- an isolated test of the
+        # concave quarter-circle fillet: the dam-break surge runs the full 10 H
+        # and impacts the smoothed corner directly.
+        "marroneRoundedCorner": {
+            "maxExtent": maxExtent,
+            "offsetX": 0.0,
+            "offsetY": 0.0,
+            "aspectRatio": 1.0,
+            "obstacleType": "marroneRoundedCorner",
+            "aoa": 0.0,
+        },
     }
     return obstacles
 
@@ -312,10 +324,12 @@ def buildPresetObstacles(maxExtent: float, offsetX: float, L: float, fillRatio: 
 _MARRONE_SE = dict(apex_x=5.0, toe_x=6.0, back_x=7.0, fillet_x=9.0)
 
 
-def _marroneSharpEdgeSDF(L: float, W: float):
+def _marroneSharpEdgeSDF(L: float, W: float, obstacle: bool = True):
     """`x -> signed distance` (negative inside solid) for the Marrone 2011
-    Fig. 19 sharp-edged obstacle **unioned with** the concave quarter-circle
-    fillet at the tank's downstream bottom corner.
+    Fig. 19 concave quarter-circle fillet at the tank's downstream bottom
+    corner, **unioned with** the sharp-edged floor obstacle when
+    `obstacle=True` (`marroneSharpEdge`) or on its own when `obstacle=False`
+    (`marroneRoundedCorner` -- the isolated fillet test).
 
     Centred-domain coordinates: `x in [-W/2, W/2]`, `y in [-L/2, L/2]`, bed at
     `y = -L/2`, downstream wall at `x = +W/2`. `H = W / 10` so the fillet meets
@@ -352,14 +366,16 @@ def _marroneSharpEdgeSDF(L: float, W: float):
     def sdf(x: torch.Tensor) -> torch.Tensor:
         dev, dt = x.device, x.dtype
         t = lambda v: torch.tensor(v, device=dev, dtype=dt)
-        # obstacle: 45deg-edge wedge + rectangular block
-        dTri = trifn(x, t([apex_x, top]), t([toe_x, top]), t([toe_x, bed]))
-        dBlock = boxfn(x - t(blockC), t(blockHalf))
-        dObstacle = torch.minimum(dTri, dBlock)
         # concave fillet lens: difference(cornerBox, disc) = max(box, -discSDF)
         dFilletBox = boxfn(x - t(filletBoxC), t([H / 2.0, H / 2.0]))
         dOutDisc = -circfn(x - t(discC), t(H))
         dFillet = torch.maximum(dFilletBox, dOutDisc)
+        if not obstacle:
+            return dFillet
+        # obstacle: 45deg-edge wedge + rectangular block
+        dTri = trifn(x, t([apex_x, top]), t([toe_x, top]), t([toe_x, bed]))
+        dBlock = boxfn(x - t(blockC), t(blockHalf))
+        dObstacle = torch.minimum(dTri, dBlock)
         return torch.minimum(dObstacle, dFillet)
 
     return sdf
@@ -445,6 +461,8 @@ def buildObstacleSDF(
         # Fixed by Marrone 2011 Fig. 19 in units of H = W/10; `trs` (offset /
         # rotation / scale) does not apply. See `_marroneSharpEdgeSDF`.
         return _marroneSharpEdgeSDF(L, W)
+    if obstacleType == "marroneRoundedCorner":
+        return _marroneSharpEdgeSDF(L, W, obstacle=False)
 
     raise ValueError(f"Unsupported obstacleType: {obstacleType}")
 
