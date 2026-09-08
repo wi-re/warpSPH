@@ -462,10 +462,16 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
                           * (velocities ** 2).sum(dim=-1)).sum().detach().cpu().item(),
         'maxDensity': particles.densities[fluid].max().detach().cpu().item(),
         'minDensity': particles.densities[fluid].min().detach().cpu().item(),
-        # Spray-robust companion to `minDensity` -- see
-        # `weaklyCompressible.weaklyCompressibleDiagnostics`.
+        # Spray-robust companions to `min`/`maxDensity` -- see
+        # `weaklyCompressible.weaklyCompressibleDiagnostics`. `maxDensity` at a
+        # violent impact tracks a single jet-tip particle whose peak *sharpens*
+        # with resolution (a fragmenting-jet case like Marrone 2011 §3.4 is not
+        # converged in that quantity even at H/dx = 234); `densityP99` is the
+        # bulk-compressibility measure a convergence check should band.
         'densityP05': torch.quantile(
             particles.densities[fluid].detach().float(), 0.05).cpu().item(),
+        'densityP99': torch.quantile(
+            particles.densities[fluid].detach().float(), 0.99).cpu().item(),
     }
     d.update(particleDistributionMetrics(ctx, state))
     # Wall-penetration watch (DFSPH_FINDINGS.md 1.6): fluid particles pushed
