@@ -1567,9 +1567,27 @@ diverges `dambreak` and slightly regresses `impact`, for no benefit: the cases
 that want the bigger shift (square patch, TGV, violent free-surface impacts)
 are run under `sun2017DeltaSPH` anyway, where it is already on. `eq7` is the
 correct magnitude (§5.3.2), and it is correctly *scoped* to the scheme that
-carries the rest of Sun's prescription with it. (Un-tested refinement: whether
-frozen diffusion or `eq7` is the load-bearing factor for the *good* frozen
-result — a frozen-`eighth` run would isolate it.)
+carries the rest of Sun's prescription with it.
+
+**Which factor is load-bearing — frozen diffusion, not the shift magnitude.**
+The 2×2 completed with a frozen-`eighth` run (`dambreak`, `--scheme
+sun2017DeltaSPH`, ⅛ shift, 2500 steps): no divergence, paired **0.031**, void
+**0.003**, `nnP01` 0.27 — statistically the same distribution as frozen-`eq7`
+(0.028 / 0.003 / 0.29). So:
+
+| | `eighth` (⅛·Eq.7) | `eq7` (full, 8×) |
+|---|---|---|
+| un-frozen (`deltaSPH`) | ✅ paired 0.034, ρ∈[0.80, 1.38], ‖v‖ 12.3 | ❌ **diverges** — ρ 1122, ‖v‖ 90762, 21 % void |
+| frozen (`sun2017DeltaSPH`) | ✅ paired 0.031, ρ∈[0.59, 1.39], ‖v‖ 19.5 | ✅ paired 0.028, ρ∈[0.77, 1.37], ‖v‖ 15.4 |
+
+Un-frozen + unscaled already works (it is the current default and nothing here
+changes it); the *only* broken corner is un-frozen + scaled, and **either**
+freezing the diffusion **or** keeping the ⅛ magnitude fixes it independently.
+Freezing is what delivers the clean distribution — on top of frozen diffusion
+the Eq. (7) magnitude is a marginal further gain (tighter ρ band: min 0.77 vs
+0.59, peak ‖v‖ 15.4 vs 19.5), not the load-bearing factor. This reinforces the
+scoping decision: the good result travels with `sun2017DeltaSPH`, and `eq7` is a
+mild bonus there.
 
 ### 5.3.3 Sun 2017 §4.2 — oscillating droplet
 
