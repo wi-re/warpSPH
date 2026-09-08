@@ -87,16 +87,15 @@ start from.
   dp = 0.01 (H/dx = 50, English's resolution)**; RMSE corner gates
   (`982375d`). Fix (B) attempted and reverted as a no-op.
 - **§5.2.2 Marrone §3.4 / Fig. 19 sharp-edged obstacle + rounded tank corner**
-  — geometry added (`marroneSharpEdge` composite SDF in `caseUtils`: obstacle
-  polygon ∪ concave quarter-circle fillet), `probe_deltaSPHMarrone34.py`, and
-  an obstacle/fillet-SDF penetration metric in `dambreak.diagnostics`.
-  **Baseline H/dx = 32, δ-SPH + mDBC, no PST, c₀ = 28.3√(gH): runs stably to
-  t\* = 5 — no divergence, ZERO obstacle/fillet penetration, 0.6 Δx tank
-  penetration**, flow reproduces Fig. 20/22 (sharp-edge jet at t\* ≈ 2,
-  fragmenting sheet, roof re-impact at t\* ≈ 3.9). Open: a ρ_max ≈ 1.14 /
-  v_max ≈ 4.3 U_max excursion at those two impact events (jet-tip / thin-sheet
-  under-resolution, not a bulk instability); convergence sweep; the 9 surface
-  probes.
+  — geometry added (`marroneSharpEdge` = obstacle polygon ∪ concave fillet;
+  `marroneRoundedCorner` = fillet only), `probe_deltaSPHMarrone34.py`,
+  obstacle/fillet-SDF penetration + `densityP99` metrics in `dambreak.diagnostics`,
+  opt-in targeted `mdbcGhostRefreshEvery`. **Runs stably, no boundary
+  penetration, bulk converges H/dx = 32→64** (KE overlies, `densityP05` flat,
+  pen ≤ 1.4 Δx); pointwise jet-tip ρ/‖v‖ grow with Δx (fragmenting jet, as
+  Marrone notes). **Rounded corner in isolation: 6/6 to t\* = 7, ZERO fillet
+  penetration** — the fillet turns the surge into a clean wall run-up jet.
+  Open: H/dx = 128; the 9 surface probes vs Colicchio/Wagner; viscous §3.4.2.
 - **`runner/media.py`** — frame-ordering bug (glob sort breaks past 100k
   steps) fixed (`0810491`).
 
@@ -127,17 +126,14 @@ start from.
    obstacle-polygon *vertex* (English Fig. 1c/d); needs the obstacle geometry
    plumbed into `addBoundaryGhostParticles`. Deferred — (A) clears the wedge at
    English's resolution, and the dp = 0.02 residual is under-resolution.
-7. **§5.2.2 Marrone §3.4 — convergence + probes.** Baseline is stable at
-   H/Δx = 32 (§5.2.2 below). Left: (a) convergence sweep H/Δx = 64, 128 to
-   t\* ≈ 7.4 (Marrone Fig. 20/21 P1 vs H/dx = 33.5/67/134); (b) the 9 surface
-   pressure probes P1–P9 (on the 45° edge, the roof, the fillet arc — *not*
-   axis-aligned, so `diagnostics`' wall-probe path needs a general
-   surface-point probe) vs Colicchio's Level-Set (Fig. 24) and Wagner's
-   P1 ≈ 36.7 ρgH; (c) whether a **per-step ghost-offset refresh** (the ghost
-   placement is init-only, so on a dam break every obstacle-surface ghost keeps
-   the legacy SDF reflection — 784/7608 land in the solid — and fix (A)'s
-   fluid-directed rule never re-activates; graceful today via Shepard + the
-   no-pen shift, but it may be what caps the impact excursion); (d) the viscous
+7. **§5.2.2 Marrone §3.4 — probes + fine Δx.** Stable + no penetration at
+   H/Δx = 32 and 64, bulk converges, rounded corner 6/6 in isolation, targeted
+   ghost refresh landed opt-in (§5.2.2 below). Left: (a) H/Δx = 128 to
+   t\* ≈ 7.4, and a `densityP99` re-run of the 32/64 pair for a real bulk-max
+   number; (b) the 9 surface pressure probes P1–P9 (on the 45° edge, the roof,
+   the fillet arc — *not* axis-aligned, so `diagnostics`' wall-probe path needs
+   a general surface-point probe) vs Colicchio's Level-Set (Fig. 24) and
+   Wagner's P1 ≈ 36.7 ρgH — Marrone's *converged* quantity; (c) the viscous
    sub-case §3.4.2 (`inviscid=False`, Re = 1000 / 10000).
 8. **§5.2 the rest** — Marrone §3.2 / §3.3; English §4.2 (`sloshingTank`
    under mDBC); English §4.3 (3D dam break vs a cuboid).
@@ -1227,15 +1223,56 @@ U_max excursion at the sharp-edge ejection and the roof re-impact — localised
 jet-tip / thin-sheet under-resolution (Marrone says this case is not converged
 even at H/dx = 234), not a bulk instability.
 
-**Next (Open/next item 7):** (a) convergence sweep H/dx = 64, 128 to t\* ≈ 7.4;
-(b) the 9 surface probes P1–P9 — they sit on the 45° edge, the roof and the
-fillet arc, none axis-aligned, so `diagnostics`' wall-probe path needs a
-general surface-point MLS probe — vs Colicchio Fig. 24 and Wagner P1; (c) a
-**per-step (or every-K-step) ghost-offset refresh** so fix (A)'s fluid-directed
-placement activates as the jet reaches the obstacle (boundary/ghost particles
-are static during stepping, so this is an in-place update of
-`ghostOffsets` + the ghost rows' positions) — test whether it tightens the
-impact excursion; (d) the viscous sub-case §3.4.2.
+**Convergence — H/dx = 32 vs 64 (init-only ghosts, c₀ = 28.3√(gH), to t\* = 5):**
+
+| | H/dx = 32 | H/dx = 64 |
+|---|---|---|
+| diverged | no | no |
+| KE history | — | **overlies H/dx = 32 through the collapse, tracks in decay** |
+| `densityP05` (bulk-low), t\* > 1 | 0.996 | 0.999 — no bulk drift with Δx |
+| tank-wall penetration | 0.6 Δx | 1.4 Δx |
+| obstacle / fillet penetration | 0.00 Δx | 0.06 Δx |
+| ρ pointwise max (1 jet-tip particle) | 1.14 | **1.27** |
+| max ‖v‖ | 4.3 U_max | **7.1 U_max** |
+
+The **bulk converges** — KE curves overlie, `densityP05` is flat, penetration
+stays sub-2 Δx. The **pointwise** jet-tip extremes (`maxDensity`, `maxVelocity`)
+*grow* with resolution: the fragmenting sharp-edge jet resolves thinner and
+faster with less numerical smoothing, exactly the non-convergence Marrone notes
+at H/dx = 234. `dambreak.diagnostics` gained `densityP99` and the probe's
+`_score` now bands the bulk (`[densityP05, densityP99]`) and demotes the
+pointwise max / v_max to report-only — the stability gate was reading a jet tip.
+
+**Rounded corner in isolation — `marroneRoundedCorner` (`--cornerOnly`), the
+fillet without the obstacle, H/dx = 32, to t\* = 7: 6/6.** The dam-break surge
+runs the full 10 H with nothing upstream to bleed it (KE peaks ~1.5× the
+sharp-edge case) and impacts the concave fillet directly. Result: **no
+divergence, ZERO fillet penetration the whole run**, ρ bulk [0.999, 1.05],
+max ‖v‖ = 1.9 U_max, tank penetration 0.9 Δx, KE clean. The fillet turns the
+horizontal surge into a smooth vertical wall run-up jet with no separation and
+no penetration — despite 218/6088 init ghosts placed inside the lens solid
+(`--initdump --cornerOnly`; the legacy SDF reflection scatters them where the
+box-face and disc-arc normals conflict). Same graceful-fallback path as the
+full case. **The smoothed corner works.**
+
+**Ghost-offset refresh (`mdbcGhostRefreshEvery`, `9763f12`).** A blanket
+per-step recompute of *every* ghost destabilises — the fluid direction for a
+floor particle under the fast tangential surge is noisy, and a ghost that jumps
+several Δx per refresh kicks the mDBC pressure: **109 Δx wall penetration** at
+`= 5`. So `postStep` is **targeted**: re-place a ghost only if its node
+currently sits inside the obstacle/fillet solid (the 784-at-init defect) *and*
+the fresh fluid-directed placement gets it out; tank-wall ghosts the init pass
+got right are never touched. At H/dx = 32 vs the init-only baseline: ρ pointwise
+max 1.14 → 1.11 (roof re-impact spike down), penetration and KE unchanged, no
+destabilisation. A small quality gain, kept **opt-in** (default 0).
+
+**Still open:** (a) H/dx = 128 to t\* ≈ 7.4, and a re-run of the H/dx = 32/64
+pair with the `densityP99` diagnostic for a real bulk-max convergence number
+(the table's "pointwise max" is `maxDensity`); (b) the 9 surface probes P1–P9 —
+on the 45° edge, the roof and the fillet arc, none axis-aligned, so
+`diagnostics`' wall-probe path needs a general surface-point MLS probe — vs
+Colicchio Fig. 24 and Wagner P1 ≈ 36.7 ρgH (Marrone's *converged* quantity);
+(c) the viscous sub-case §3.4.2 (`inviscid=False`, Re = 1000 / 10000).
 
 ## 5.3 δ⁺-SPH suite (after δ-SPH is clean) — Sun 2017 §4 / Sun 2019 §3
 
