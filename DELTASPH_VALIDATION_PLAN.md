@@ -39,7 +39,99 @@ Reference material now on disk:
 
 ---
 
-# Status — implemented this session (uncommitted)
+# Current state & how to resume  (as of 2026-09-08)
+
+Everything below is **committed**. The audit (Parts 1–4) and the original `c₀` /
+integrator / mDBC-determinant-gate work landed before and during the first
+sessions; this section tracks the validation cases (Part 5) and is the place to
+start from.
+
+## Probe scripts — the entry points
+
+| script | case | key flags |
+|---|---|---|
+| `scripts/probe_deltaSPHMarrone.py` | Marrone 2011 §3.1 dam break | `--shifting default\|off\|on`, `--scheme`, `--nx`, `--c0Ratio`, `--report`, `--video` |
+| `scripts/probe_deltaPlusTGV.py` | Sun 2019 §3.1 Taylor–Green | `--nx`, `--Re`, `--tLimit`, `--report` |
+| `scripts/probe_deltaPlusDroplet.py` | Sun 2017 §4.2 oscillating droplet | `--Rdx`, `--periods`, `--report` |
+| `scripts/probe_englishWedge.py` | English 2022 §4.1 still-water wedge | `--dp`, `--wedge` / `--no-wedge`, `--tilt`, `--tLimit`, `--report` |
+| `scripts/probe_deltaPlusShiftMagnitude.py` | measures the δ⁺ shift vs Sun Eq. (7) | — |
+| `scripts/probe_deltaPlusShiftBlastRadius.py` | which registered cases use `ShiftingScheme.deltaSPH` | — |
+| `scripts/probe_deltaPlusShiftSweep.py` | 3-leg (`off`/`eighth`/`eq7`) smoke sweep over the 11 affected cases | `--cases`, `--nSteps`, `--report` |
+
+## Done
+
+- **Part 1–4 audit** — ψ sign (`790a7c7`), `c₀` = Sun Eq. (2) via `machTarget`,
+  RK4, adaptive Δt, two-sided viscosity, mDBC determinant gate with a
+  per-kernel `determinantThreshold`, `dambreak` on Wendland C2. All landed.
+- **§5.3.1 TGV (Sun 2019 §3.1)** — DONE. Found the δ⁺ shift was **⅛ of Sun 2017
+  Eq. (7)** (`fac6d4f`). Fixed opt-in as `ShiftProperties.sun2017Eq7Shift`
+  (default on only for `--scheme sun2017DeltaSPH`). Re = 100 **and** Re = 1000
+  both **5/5 at Sun's own L/Δx = 400**, including the δ⁺-2017 pathology
+  (`3a51f61`). The Re = 1000 KE excursion at L/Δx = 200 was under-resolution.
+- **§5.3.3 droplet (Sun 2017 §4.2)** — **7/7 at all three of Table 1's
+  resolutions** (`06482e7`). Momenta beat Table 1 at R/Δx = 50/100 and converge
+  at a steady ~1.4 order; Sun's Table 1 has an unexplained order jump (→ 3.3 /
+  4.8) at its last refinement. Not chased.
+- **§5.3.2 blast-radius sweep** — `sun2017Eq7Shift` swept clean on 10 of 11
+  cases that run `ShiftingScheme.deltaSPH` (`c465983`); `impact` −4 % on
+  `nnDistP01` is the one unexplained cost. **Default NOT flipped.**
+- **§5.1 Marrone §3.1** — §5.1.1: the case had always run δ⁺-SPH, not δ-SPH
+  (`shiftProperties.active` defaults `True`); added the `shifting` param
+  (`c14dd06`). §5.1.2: re-run at **H/Δx = 322** — **P1 converges to Buchner**
+  (plateau 0.556 vs 0.55; the deficit was under-resolution, `2138c0f`). Eq. (7)
+  *regresses* this case 9/9 → 8/9 (`7fb6222`). Still open below.
+- **§5.2.1 English §4.1 wedge** — steps (a)–(d). `dambreak` gained
+  `hydrostaticInit` (`5d3fe07`); mDBC ghost placement rewritten to
+  fluid-directed + corner-gated (**fix A**, `17290ff`). **Wedge 9/9 at
+  dp = 0.01 (H/dx = 50, English's resolution)**; RMSE corner gates
+  (`982375d`). Fix (B) attempted and reverted as a no-op.
+- **`runner/media.py`** — frame-ordering bug (glob sort breaks past 100k
+  steps) fixed (`0810491`).
+
+## Open / next — in rough priority order
+
+1. **`rotatingSquarePatch` no-PST control** (§5.1.1 pt 3 / §5.3). The PST
+   discriminator has *never* been run against its own no-PST control. **No new
+   code** — `--scheme deltaSPH` with the shift forced off vs on. Cheapest next
+   step.
+2. **`sun2017Eq7Shift` as the shared default — decision pending.** Blocked on:
+   (a) `impact`'s −4 % `nnDistP01` over a full record, not a 300-step smoke;
+   (b) a free-surface re-sweep, since `WCSPH_SHIFTING_PLAN.md`'s `surfaceNormal`
+   projection was calibrated against the ⅛ magnitude. `probe_deltaPlusShiftSweep.py`
+   is the tool.
+3. **§5.1 Marrone P2** — median 2× low **and** ~1 t\* phase-early at H/Δx = 322.
+   The user's read (2026-09-08): a **probing-methodology** gap, not a scheme
+   error — P1's *raw* trace is dominated by weak-compressibility acoustic
+   ringing that Marrone's φ = 90 mm disc *area integral* low-passes and a
+   point/small-disc probe cannot. "Mostly good enough for now." A true
+   on-wall disc integral matching Marrone's transducer is the test.
+4. **Marrone wall penetration at H/Δx = 322** — 5 Δx (gate ≤ 3), in *both* PST
+   legs, from first wall impact. mDBC at fine resolution — a Part 3 item, and
+   it scaled the wrong way with Δx.
+5. **§5.2.1 (e)** — a tilted flat plate in still water: the isolated test of
+   fix (A) with no corner. `probe_englishWedge.py --tilt DEG` (wire the plate
+   geometry — currently `--tilt` only rotates the wedge).
+6. **§5.2.1 fix (B) faithful version** — reflect the corner ghost through the
+   obstacle-polygon *vertex* (English Fig. 1c/d); needs the obstacle geometry
+   plumbed into `addBoundaryGhostParticles`. Deferred — (A) clears the wedge at
+   English's resolution, and the dp = 0.02 residual is under-resolution.
+7. **§5.2 the rest** — Marrone §3.2 / §3.3 / §3.4; English §4.2 (`sloshingTank`
+   under mDBC); English §4.3 (3D dam break vs a cuboid).
+8. **Marrone §3.1 loose ends** — `c₀ = 20√(gH)` cross-check; DualSPHysics
+   `01_DamBreak` cross-validation; H/Δx = 80 for the Fig. 5 convergence pair.
+9. **Perf** — sustained step cost ran ~1.85× the 40-step benchmark on the
+   H/Δx = 322 runs. Separate investigation, not a validation blocker.
+10. **Frozen diffusion** — still only the `sun2017DeltaSPH` default, no general
+    path. Perf only (Sun says correctness doesn't need it).
+
+The detailed narrative for each is in §5.1 / §5.1.1 / §5.1.2 / §5.2.1 /
+§5.3.1–3 below. The section immediately after this one is the **historical**
+first-session status (mDBC determinant gate, kernel choice) — kept for the
+reasoning trail, not a to-do list.
+
+---
+
+# Status — first-session mDBC / c₀ / kernel work  (historical, all committed)
 
 Steps 2–4 and part of 5 of Part 6, on the `dambreak` case's δ-SPH path:
 
@@ -958,7 +1050,7 @@ failure mode stays graceful while (A) and (B) are iterated.
 `rotatingSquarePatch`'s no-PST control (§5.1.1 point 3) can run in parallel —
 it needs no new code.
 
-### 5.2.1 status — steps (a)–(c) done; fix (A) works, dp = 0.02 corner is fix (B)
+### 5.2.1 status — steps (a)–(d) done; fix (A) landed, wedge 9/9 at dp = 0.01
 
 **(a) flat still-water tank — mDBC holds it, once the fluid starts on its own
 pressure field.** `scripts/probe_englishWedge.py` (new): drives `dambreak` as a
@@ -1350,21 +1442,21 @@ and it is stable and accurate there — the first evidence bearing on whether
 
 # Part 6 — sequencing
 
-1. **Audit** (Parts 1–3). One probe script + one findings table. No behaviour
-   change yet. Output: the keep/change decision for every constant, the EOS
-   form, the kernel, the integrator, `c₀` selection, and the mDBC target.
-2. **`c₀` rework** — `setupWeaklyCompressibleTimestep` sets `c₀` from expected
-   `U_max` (Sun Eq. 2), `Δt` follows. This alone is the single biggest fix and
-   unblocks every physical-scale WCSPH case, not just the dam break.
-3. **Integrator** — RK4 + frozen diffusion path for the weakly-compressible
-   step; adaptive `Δt` (Sun Eq. 5) on the deltaSPH path (the `dambreakTimestep`
-   hook already exists, it just returns `config.dt`).
-4. **Revert the `# PSI-REVERT` hack** (Part 4); confirm dam break is now stable
-   with the correct operator + 2 + 3.
-5. **mDBC** — decide English-2022 vs m2dbc, implement/repair to match one of
-   them exactly, cross-check on English §4.1 (hydrostatic-to-the-wall).
-6. **Validation** — Part 5, Marrone §3.1 first, DualSPHysics cross-check.
-7. δ⁺-SPH suite (Part 5.3).
+**The original 7-step plan; steps 1–7 are all done. Live work is now tracked in
+"Current state & how to resume" at the top of this file.**
+
+1. ~~**Audit** (Parts 1–3)~~ — done.
+2. ~~**`c₀` rework**~~ — Sun Eq. (2) via `machTarget`, wired into the shared
+   `setupTimestep` (`3a51f61`), not just `dambreak`.
+3. ~~**Integrator**~~ — RK4 + adaptive Δt done. Frozen diffusion is the
+   `sun2017DeltaSPH` default only; no general path (perf only, open item 10).
+4. ~~**Revert `# PSI-REVERT`**~~ — done; `tests/test_deltaSPHDiffusion.py` green.
+5. ~~**mDBC**~~ — determinant gate + per-kernel threshold landed; English §4.1
+   hydrostatic-to-the-wall validated (fix A, wedge 9/9 at dp = 0.01).
+6. ~~**Validation — Marrone §3.1**~~ — P1 converges to Buchner at H/Δx = 322;
+   P2 + wall-penetration + DualSPHysics cross-check are open items 3/4/8.
+7. **δ⁺-SPH suite (§5.3)** — TGV and droplet done; `rotatingSquarePatch` (the
+   PST discriminator) is open item 1; the bluff-body wakes (N°4–7) are unstarted.
 
 ## Relationship to the other plans
 
