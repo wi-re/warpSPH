@@ -296,6 +296,33 @@ def initialConditions(ctx: RunContext, system) -> None:
         ctx.schemeConfig.fluid.fixedSoundSpeed, ctx.config.dt = setupWeaklyCompressibleTimestep(
             ctx.config, ctx.schemeConfig, system, ctx.param('targetDt'), verbose=ctx.spec.verbose)
 
+    # `hydrostaticInit`: stamp the fluid density with the weakly-compressible
+    # hydrostatic profile `rho(z) = rho0 (1 + g max(H-z,0) / c0^2)` instead of a
+    # uniform `rho0`. Same idea as `tgv-wc`'s `initialPressure`: a weakly
+    # compressible scheme carries its pressure in the density (`p = c0^2(rho -
+    # rho0)`), so a uniform-`rho0` still pool starts with its entire hydrostatic
+    # pressure field missing and has to compress into it -- a release-from-rest
+    # transient that the delta-SPH diffusion (~ delta h c0, so weaker at finer
+    # dx) damps ever more slowly. Measured on the English 2022 Sec. 4.1 still
+    # tank: clean by t ~ 1 s at dp = 0.02 (H/dx = 25) but still ringing at
+    # t = 4 s at dp = 0.01 (H/dx = 50), biasing the hydrostatic profile to
+    # ~20 % of rho g H (`DELTASPH_VALIDATION_PLAN.md` Sec. 5.2.1). Default off,
+    # so no existing dam-break run changes; a still-water case wants it on.
+    if ctx.param('hydrostaticInit', False):
+        c0 = float(ctx.schemeConfig.fluid.fixedSoundSpeed)
+        rho0 = float(ctx.schemeConfig.fluid.restDensity)
+        g = float(ctx.param('gravityMagnitude'))
+        H = ctx.param('fillRatio') * ctx.spec.L
+        bedY = -ctx.spec.L / 2.0
+        st = system.state
+        fluid = st.kinds == 0
+        depth = torch.clamp(H - (st.positions[:, 1] - bedY), min=0.0)
+        rhoHydro = rho0 * (1.0 + g * depth / (c0 ** 2))
+        st.densities = torch.where(fluid, rhoHydro.to(st.densities.dtype), st.densities)
+        if st.pressures is not None:
+            st.pressures = torch.where(fluid, (c0 ** 2 * (st.densities - rho0)).to(st.pressures.dtype),
+                                       st.pressures)
+
 
 def dambreakTimestep(ctx: RunContext, state) -> float:
     """Per-step adaptive dt, dispatched by scheme.
@@ -595,6 +622,11 @@ dambreakCase = registerCase(Case(
         # configuration and this plan's own acceptance gate; see
         # `configureScheme` and `DELTASPH_VALIDATION_PLAN.md` Sec. 5.1.1.
         shifting=None,
+        # Start the fluid on the weakly-compressible hydrostatic density profile
+        # rather than a uniform rho0 -- see `initialConditions`. Off by default
+        # (a collapsing dam-break column does not want it); a still-water case
+        # (English 2022 §4.1) does. `DELTASPH_VALIDATION_PLAN.md` §5.2.1.
+        hydrostaticInit=False,
         # Expected front speed U_max for the Sun Eq. (2) sound-speed pick
         # (`initialConditions`, `machTarget` path). None -> sqrt(2 g H), the
         # free-fall estimate. `scripts/probe_deltaSPHMarrone.py` sets it to

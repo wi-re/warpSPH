@@ -89,6 +89,11 @@ def _runOne(dp, wedge, tilt, tLimit, c0Ratio, out, video, plotInterval, scheme):
         machTarget=machTarget,
         # English §4.1 is plain delta-SPH + mDBC, no PST (still water).
         shifting='off',
+        # Start on the hydrostatic density profile -- without this the pool
+        # rings for seconds while it compresses into its own pressure field,
+        # and the ring damps slower at finer dx (delta-SPH diffusion ~ delta h
+        # c0). See `DELTASPH_VALIDATION_PLAN.md` §5.2.1.
+        hydrostaticInit=True,
         pressureProbeHeights=[],                 # per-particle profile, not wall probes
     )
     if wedge:
