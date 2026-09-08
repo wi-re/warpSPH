@@ -200,7 +200,7 @@ def particlePlot(fields: Sequence[Field], figsize: Tuple[float, float] = (11, 5)
 
 def _export(ctx: RunContext, plotter, step: int, dpi: int) -> None:
     if ctx.imagePath:
-        plotter.export(os.path.join(ctx.imagePath, f'frame_{step:05d}.png'), dpi=dpi)
+        plotter.export(os.path.join(ctx.imagePath, f'frame_{step:07d}.png'), dpi=dpi)
 
 
 @dataclass
@@ -303,4 +303,4 @@ def profilePlot(axes: Sequence[ProfileAxis], shape: Tuple[int, int],
 
 def _save(ctx: RunContext, fig, step: int, dpi: int) -> None:
     if ctx.imagePath:
-        fig.savefig(os.path.join(ctx.imagePath, f'frame_{step:05d}.png'), dpi=dpi)
+        fig.savefig(os.path.join(ctx.imagePath, f'frame_{step:07d}.png'), dpi=dpi)

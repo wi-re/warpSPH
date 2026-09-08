@@ -66,7 +66,7 @@ def _draw(ctx: RunContext, state, handle, step: int = 0) -> None:
               ctx.param('lamda'), ctx.param('c_s'))
     fig.tight_layout()
     if ctx.imagePath:
-        fig.savefig(os.path.join(ctx.imagePath, f'frame_{step:05d}.png'))
+        fig.savefig(os.path.join(ctx.imagePath, f'frame_{step:07d}.png'))
 
 
 def diagnostics(ctx: RunContext, state) -> Dict[str, float]:

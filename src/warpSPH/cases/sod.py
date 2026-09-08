@@ -70,7 +70,7 @@ def setupPlot(ctx: RunContext, state, scatter: bool = False):
                         ctx.param('gamma'), left, right,
                         plotReference=True, plotLabels=False, scatter=scatter, t_=state.t)
     if ctx.imagePath:
-        fig.savefig(os.path.join(ctx.imagePath, 'frame_00000.png'))
+        fig.savefig(os.path.join(ctx.imagePath, 'frame_0000000.png'))
     openWindow(ctx, (fig, axis))
     return (fig, axis)
 
@@ -84,7 +84,7 @@ def updatePlot(ctx: RunContext, state, handle, step: int) -> None:
              ctx.param('gamma'), left, right,
              plotReference=True, plotLabels=False, scatter=True, t_=state.t)
     if ctx.imagePath:
-        fig.savefig(os.path.join(ctx.imagePath, f'frame_{step:05d}.png'))
+        fig.savefig(os.path.join(ctx.imagePath, f'frame_{step:07d}.png'))
     pumpEvents(handle)
 
 
