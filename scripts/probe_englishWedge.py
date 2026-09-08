@@ -52,6 +52,11 @@ WEDGE_H = 0.24        # wedge apex height above the bed
 G = 9.81
 RHO0 = 1.0            # the case is non-dimensional in density; p is scaled by rho0 g H
 
+#: `equilateralBottom` preset (`sdEquilateralTriangle`, `aspectRatio = 2`)
+#: numerically probed: apex height above the bed scales ~linearly with
+#: `maxExtent`, apex z = 0.248 at maxExtent = 0.30. So for English's 0.24 m:
+WEDGE_MAX_EXTENT = 0.30 * (WEDGE_H / 0.248)
+
 #: c0 = c0Ratio * sqrt(g H). Still water needs no violent-impact headroom;
 #: 20 sqrt(gH) (Mach ~ 0.05 on any wave that does appear) is the stiff end of
 #: the "10 sqrt(gH)-class" the plan spec calls for and gives the sharpest
@@ -102,11 +107,9 @@ def _runOne(dp, wedge, tilt, tLimit, c0Ratio, out, video, plotInterval, scheme):
             obstacleType='equilateralBottom',
             offsetX=0.0,                          # bottom-centre
             aoa=float(tilt),
-            # `equilateralBottom` sits on the bed with offsetY = -L/2 + maxExtent/4
-            # and aspectRatio 2.0; `maxExtent` tuned so the apex reaches WEDGE_H
-            # above the bed is calibrated in step (b) -- seed with a value that
-            # is close for the equilateral/aspectRatio=2 preset geometry.
-            maxExtent=WEDGE_H * 2.0,
+            # `maxExtent` calibrated so the apex reaches WEDGE_H above the bed
+            # (numeric SDF probe -- see WEDGE_MAX_EXTENT).
+            maxExtent=WEDGE_MAX_EXTENT,
         )
 
     kw = dict(scheme=scheme, L=TANK_H, nx=nx, tLimit=tLimit,
@@ -149,6 +152,10 @@ def _runOne(dp, wedge, tilt, tLimit, c0Ratio, out, video, plotInterval, scheme):
         c0Ratio=float(c0Ratio), c0=c0, tLimit=tLimit, tReached=tReached,
         WATER_H=WATER_H, TANK_W=TANK_W, TANK_H=TANK_H, WEDGE_H=WEDGE_H, G=G,
         rho0=RHO0, bed_y=bed_y,
+        # wedge preset params, so `_score` / `_report` can rebuild the obstacle
+        # SDF and localise residuals to its faces / apex / base corners.
+        wedgeMaxExtent=float(WEDGE_MAX_EXTENT), wedgeAspectRatio=2.0,
+        wedgeOffsetX=0.0,
         shiftActive=bool(getattr(r.ctx.schemeConfig.shiftProperties, 'active', False)),
         diverged=bool(r.diverged), nSteps=int(r.nSteps),
         wallTime_s=float(r.wallTime or 0.0),
@@ -169,6 +176,40 @@ def _runOne(dp, wedge, tilt, tLimit, c0Ratio, out, video, plotInterval, scheme):
 
     _score(meta, series, final, verbose=True)
     return npz
+
+
+def _wedgeGeometry(meta):
+    """`(sdf_fn, apex_xy, (leftCorner_xy, rightCorner_xy))` for the wedge.
+
+    Rebuilds the `equilateralBottom` obstacle SDF from the params stored in
+    `meta`, and locates the apex (highest solid point) and base corners (solid
+    meets the bed) by a one-off coarse grid evaluation. `sdf_fn` takes an
+    (N, 2) world-xy array and returns the signed distance (>0 outside the
+    wedge). Torch under the hood; the wrapper is numpy in/out.
+    """
+    import numpy as np
+    import torch
+    from warpSPH.caseUtils.weaklyCompressible import buildObstacleSDF
+    L, W, bedY = meta['TANK_H'], meta['TANK_W'], meta['bed_y']
+    off = -L / 2 + meta['wedgeMaxExtent'] / 4                 # preset's offsetY
+    sdf_t = buildObstacleSDF('equilateralTriangle', meta['wedgeOffsetX'], off,
+                             meta['wedgeMaxExtent'], meta['wedgeAspectRatio'],
+                             meta.get('tilt', 0.0), None, None, L, W)
+
+    def sdf_fn(xy):
+        t = torch.as_tensor(np.asarray(xy), dtype=torch.float32)
+        return sdf_t(t).detach().cpu().numpy()
+
+    gx = np.linspace(-0.8, 0.8, 1201)
+    gy = np.linspace(bedY - 0.02, bedY + meta['WEDGE_H'] + 0.1, 400)
+    XX, YY = np.meshgrid(gx, gy, indexing='ij')
+    inside = sdf_fn(np.stack([XX.ravel(), YY.ravel()], axis=1)).reshape(XX.shape) < 0
+    ys, xs = YY[inside], XX[inside]
+    apex = (0.0, float(ys.max()))
+    at_bed = inside & (np.abs(YY - bedY) < (gy[1] - gy[0]))
+    bx = XX[at_bed]
+    hw = float(np.abs(bx).max()) if bx.size else meta['wedgeMaxExtent']
+    return sdf_fn, apex, ((-hw, bedY), (hw, bedY))
 
 
 def _score(meta, series, final, verbose=False):
@@ -200,6 +241,35 @@ def _score(meta, series, final, verbose=False):
         maxAbsResidNearWall=float(np.nanmax(np.abs(resid[near_wall]))) if near_wall.any() else float('nan'),
         rhoMin=float(np.nanmin(rho)), rhoMax=float(np.nanmax(rho)),
     )
+
+    # -- wedge-localised residuals ----------------------------------------
+    # The global near-wall RMSE averages the wedge's ~20 bad particles across
+    # the ~4000 near-wall particles of the whole tank, so it cannot see a
+    # corner hot spot. Rebuild the obstacle SDF and score bands ON the wedge.
+    m['rmseWedgeFace'] = float('nan')
+    m['maxResidApex'] = float('nan')
+    m['maxResidBaseCorner'] = float('nan')
+    if meta.get('wedge'):
+        try:
+            sdfW, apex, corners = _wedgeGeometry(meta)
+            xy = np.stack([x, z + meta['bed_y']], axis=1)   # back to world y
+            dW = sdfW(xy)                                    # signed dist to wedge
+            face = (dW > 0.3 * dx) & (dW < 3.0 * dx)         # a band just off the faces
+            if face.any():
+                m['rmseWedgeFace'] = float(np.sqrt(np.nanmean(resid[face] ** 2)))
+            R = 4.0 * dx
+            dApex = np.hypot(xy[:, 0] - apex[0], xy[:, 1] - apex[1])
+            near_apex = (dApex < R) & (dW > 0)
+            if near_apex.any():
+                m['maxResidApex'] = float(np.nanmax(np.abs(resid[near_apex])))
+            dc = np.minimum(
+                np.hypot(xy[:, 0] - corners[0][0], xy[:, 1] - corners[0][1]),
+                np.hypot(xy[:, 0] - corners[1][0], xy[:, 1] - corners[1][1]))
+            near_corner = (dc < R) & (dW > 0)
+            if near_corner.any():
+                m['maxResidBaseCorner'] = float(np.nanmax(np.abs(resid[near_corner])))
+        except Exception as exc:                                # noqa: BLE001
+            m['wedgeGeometryError'] = f'{type(exc).__name__}: {exc}'
 
     ke = series['s_kineticEnergy'] if 's_kineticEnergy' in series else series['kineticEnergy']
     t = series['s_t'] if 's_t' in series else series['t']
@@ -246,6 +316,25 @@ def _score(meta, series, final, verbose=False):
         ('weakly compressible', (not meta['diverged']) and m['rhoMin'] > 0.9 and m['rhoMax'] < 1.1,
          f"rho in [{m['rhoMin']:.4f}, {m['rhoMax']:.4f}], diverged={meta['diverged']}"),
     ]
+    if meta.get('wedge'):
+        # English Fig. 3/4: the hydrostatic pressure must be accurate at the
+        # wedge corners, not just on average. The target is corner accuracy
+        # *comparable to the flat wall* -- the flat still tank reads near-wall
+        # RMSE ~1.5 % and max |resid| ~3 %, so a corner at 8-11 % (the current
+        # ghost placement, `out_englishWedge_before/`) is a real 3-4x penalty
+        # and should fail. Face band <= 5 %, point-wise corner residuals <= 6 %
+        # (2x the flat-wall max, allowing some corner penalty but not 4x).
+        # These are the numbers fix (A) / (B) have to move -- see
+        # `DELTASPH_VALIDATION_PLAN.md` §5.2.1.
+        checks += [
+            ('hydrostatic profile, wedge faces', m['rmseWedgeFace'] <= 0.05,
+             f"RMSE {m['rmseWedgeFace']:.4f} in a 3-dx band off the sloped faces  (want <= 0.05)"),
+            ('hydrostatic profile, wedge apex', not (m['maxResidApex'] > 0.06),
+             f"max |resid| {m['maxResidApex']:.3f} within 4 dx of the apex  (want <= 0.06)"),
+            ('hydrostatic profile, wedge base corners',
+             not (m['maxResidBaseCorner'] > 0.06),
+             f"max |resid| {m['maxResidBaseCorner']:.3f} within 4 dx of a base corner  (want <= 0.06)"),
+        ]
     if verbose:
         npass = sum(c[1] for c in checks)
         print(f"  {npass}/{len(checks)} checks")
