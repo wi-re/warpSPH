@@ -92,6 +92,17 @@ start from.
   flip would give un-frozen `deltaSPH` the 8× shift and diverge `dambreak`.
   The frozen-`eighth` cell completed the 2×2: **freezing** is the load-bearing
   factor, `eq7`-vs-`eighth` a wash once diffusion is frozen (`7f658c6`).
+- **§5.2.3 English §4.2 sloshing tank (SPHERIC TC10)** — found & fixed two
+  IC-generation bugs (`9c7f878`): `buildPointCloud` was taking the lattice
+  spacing from the shortest domain axis (→ `sloshingTank` at 0.6× `config.dx`,
+  no dp/2 stagger, c_s regressed 16.6→11); and mDBC ghost placement keyed off
+  runtime fluid position (`_fluidDirectedGhostOffsets`) → scattered nodes.
+  Now: sampler honours `config.dx`; `_geometricGhostOffsets` places ghosts from
+  the boundary geometry alone. sloshing wcsph runs the full 7 s (was NaN at
+  t=0.6). First Sensor-1 impact matches (t 2.37 vs 2.40 s, 3.8 vs 3.6 kPa);
+  negative-pressure transients captured. Marrone §3.4 still 6/6 (penetration
+  1.4→0.06 dx). Open: `sloshingTank` needs a `machTarget` (c_s falls with
+  resolution → later-impact overshoot).
 - **§5.3.2b square patch vs Sun 2019 Fig. 13** — `probe_squarePatchValidationFigure.py`
   gained `--scheme` + ε_M/ε_E conservation errors (`12e5126`); added opt-in
   **Poisson pressure init** (square torsion function, `f718b78`) which replaces
@@ -163,10 +174,11 @@ start from.
    a general surface-point probe) vs Colicchio's Level-Set (Fig. 24) and
    Wagner's P1 ≈ 36.7 ρgH — Marrone's *converged* quantity; (c) the viscous
    sub-case §3.4.2 (`inviscid=False`, Re = 1000 / 10000).
-8. **§5.2 the rest** — English §4.2 (`sloshingTank` / TC10 — **scoped, §5.2.3**;
-   mDBC already shipped, next is Phase 1: grade Sensor 1 vs experiment at
-   dp = 0.004 / 0.002, check the negative-pressure transients); Marrone §3.2 /
-   §3.3; English §4.3 (3D dam break vs a cuboid).
+8. **§5.2 the rest** — English §4.2 (`sloshingTank` / TC10 — **§5.2.3 first
+   pass done**: 2 IC bugs fixed, first impact matches, transients captured;
+   left: `sloshingTank` `machTarget`, dp = 0.002, the mDBC-vs-DBC three-row
+   contrast, §3.4.2 viscous); Marrone §3.2 / §3.3; English §4.3 (3D dam break
+   vs a cuboid).
 9. **Marrone §3.1 loose ends** — `c₀ = 20√(gH)` cross-check; DualSPHysics
    `01_DamBreak` cross-validation; H/Δx = 80 for the Fig. 5 convergence pair.
 11. **Perf** — sustained step cost ran ~1.85× the 40-step benchmark on the
@@ -1316,7 +1328,73 @@ on the 45° edge, the roof and the fillet arc, none axis-aligned, so
 Colicchio Fig. 24 and Wagner P1 ≈ 36.7 ρgH (Marrone's *converged* quantity);
 (c) the viscous sub-case §3.4.2 (`inviscid=False`, Re = 1000 / 10000).
 
-### 5.2.3 English 2022 §4.2 — sloshing tank (SPHERIC TC10) under mDBC — SCOPING
+### 5.2.3 English 2022 §4.2 — sloshing tank (SPHERIC TC10) under mDBC
+
+**Result: first impact matches, negative-pressure transients captured; later
+impacts overshoot (soft EOS — the case has no `machTarget`).** Getting there
+took fixing two IC-generation bugs the case had been hiding behind.
+
+**Two IC bugs, fixed in `9c7f878`:**
+1. **`buildPointCloud` picked the lattice spacing from the *shortest* domain
+   axis** (`min over d of span_d/nx`, `shortEdge=True`). `sloshingTank` is
+   wide-and-shallow, so its short (y) axis won: particles landed at 0.0054
+   while `config.dx` stayed 0.009 — a lie that still fed `dt`/`c_s` (c_s
+   16.6 → 11) and the mDBC ghost offsets, with the lattice phase-anchored to
+   `domain.min` so there was **no dp/2 fluid–wall stagger**. Fix: `buildPointCloud`
+   takes an explicit `dx`; `sampleParticles` passes `config.dx` as
+   authoritative, each axis snapping to `round(span/dx)` cells. `dambreak`
+   et al. unchanged (their domains aren't axis-lopsided).
+2. **mDBC ghost placement keyed off where the fluid currently was**
+   (`_fluidDirectedGhostOffsets`, added `17290ff` for the §5.2.1 corner fix):
+   in an 18-particle-deep layer the whole lower wall reads as "near fluid", the
+   distance-weighted direction estimate isn't the wall normal, and the
+   misalignment gate opens everywhere → ghost nodes scattered into the bulk,
+   above the surface, and inside the wall (270–728 of them). The user's point:
+   boundary discretisation must be a function of the geometry, not runtime
+   state — an empty tank or a fill-in case would sample differently. Fix:
+   **`_geometricGhostOffsets`** — English reflection, then a geometry validity
+   pass (retract where the node crosses into any solid, collapse to Shepard/rest
+   where no clean node exists). No fluid consulted. Byte-identical to the
+   reflection on flat grid-aligned walls; `_fluidDirectedGhostOffsets` kept only
+   for `dambreak`'s opt-in refresh path.
+
+**Regressions clean:** Marrone §3.4 still 6/6, obstacle penetration
+**1.4 dx → 0.06 dx** (the validity pass beats the fluid-directed guess at the
+sharp edge); `dambreak` smoke healthy (80/5000 tank-corner ghosts collapse to
+the Shepard fallback — correct there); sloshing IC has **0/3320** ghost nodes
+in a solid (was 728).
+
+**English §4.2 run** (`examples/sloshingTank/output/english42_nx225_fixed/`,
+`--scheme wcsph --nx 225` = dp = 0.004, t → 7 s, `michel2022` shift, mDBC):
+
+| | sim | measured (SPHERIC TC10) |
+|---|---|---|
+| 1st impact | **t = 2.37 s, 3.8 kPa** (smoothed) | t ≈ 2.40 s, ≈ 3.6 kPa (band 2.2–13.1) |
+| 2nd impact | t = 4.02 s, 8.9 kPa smoothed / 25 kPa raw | t ≈ 4.07 s |
+| 3rd impact | t = 5.63 s, 8.7 kPa smoothed | t ≈ 5.71 s |
+| neg. transient | **min −16.5 kPa** at t = 4.28 s; 6.8 % of t>2 s samples < −0.5 kPa | experiment shows short −ve spikes at violent impacts (English's mDBC vs DBC discriminator) |
+
+**First impact — timing within 30 ms, magnitude within 6 %, in the
+repeatability band.** The **negative-pressure transients English calls the mDBC
+benefit over DBC are present** (short-lived spikes right after the violent
+impacts). Runs the full 7 s, no divergence — vs NaN at t = 0.6 s before the fix,
+in *every* scheme/c_s/AV combination tried.
+
+**Open:** the later-impact raw peaks overshoot ~2× and ring, and the raw signal
+carries heavy acoustic hash — because `c_s ∝ dx/targetDt` with no Mach target,
+so it *falls* with resolution (25 at nx=100 → **11 at nx=225**), softening the
+EOS exactly where the impacts get violent. The fix is the `machTarget` /
+`referenceVelocity` path `rotatingSquarePatch` and `dambreak` already have
+(pick `targetDt` so `c_s = U_max/Ma` at every resolution). `examples/sloshingTank/PLAN.md`'s
+stiffer trial (c_s ≈ 50) already showed it drops the first-impact peak onto the
+measured value and kills the density excursion. After that: `dp = 0.002`
+(nx=450); the mDBC-vs-DBC three-row contrast (Phase 2 below); English §3.4.2
+viscous sub-case.
+
+---
+_Original scoping notes:_
+
+### 5.2.3 (scoping) English 2022 §4.2 — sloshing tank (SPHERIC TC10) under mDBC
 
 **The plan's "mDBC vs the current treatment" framing is wrong: mDBC *is* the
 current treatment.** `sloshingTank` under `deltaSPH` already goes through
