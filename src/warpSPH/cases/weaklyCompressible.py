@@ -851,6 +851,7 @@ def squarePatchAreaMetrics(ctx: RunContext, state) -> Dict[str, float]:
     positions = particles.positions[fluid]
     masses = particles.masses[fluid]
     densities = particles.densities[fluid]
+    velocities = particles.velocities[fluid]
 
     totalMass = masses.sum()
     centreOfMass = (masses.view(-1, 1) * positions).sum(dim=0) / totalMass
@@ -871,12 +872,33 @@ def squarePatchAreaMetrics(ctx: RunContext, state) -> Dict[str, float]:
         indicators = indicators[fluid]
         surfaceFraction = (indicators == 1).sum().item() / max(indicators.shape[0], 1)
 
+    # Sun et al. 2019 §3.3 Eqs. (26)-(27): the conservation errors that
+    # discriminate the δ⁺-SPH variants on this case. Angular momentum is taken
+    # about the fixed domain centre r_A = (0,0) (the paper's choice, not the
+    # drifting CoM); in 2D the z-component is x·u_y − y·u_x. The PST feeds a
+    # known, non-negligible ε_M into the Sun 2017 flavour this repo implements
+    # (a few % over tω ~ 4) — that is the expected result, not a regression.
+    angMom = (masses * (positions[:, 0] * velocities[:, 1]
+                        - positions[:, 1] * velocities[:, 0])).sum()
+    linMom = (masses.view(-1, 1) * velocities).sum(dim=0)
+    kinEnergy = (0.5 * masses * (velocities ** 2).sum(dim=-1)).sum()
+    angMom0 = ctx.scratch.setdefault('squarePatchAngMom0', angMom.detach().cpu().item())
+    kinEnergy0 = ctx.scratch.setdefault('squarePatchKinEnergy0',
+                                        kinEnergy.detach().cpu().item())
+    epsM = (abs(angMom.detach().cpu().item() - angMom0) / abs(angMom0) * 100.0
+            if angMom0 else float('nan'))
+    epsE = (abs(kinEnergy.detach().cpu().item() - kinEnergy0) / abs(kinEnergy0) * 100.0
+            if kinEnergy0 else float('nan'))
+
     return {
         'sphVolume': (masses / densities).sum().detach().cpu().item(),
         'hullArea': _convexHullArea(positions.detach().cpu().numpy()),
         'rmsRadius': rmsRadius.detach().cpu().item(),
         'surfaceFraction': surfaceFraction,
         'cornerRetention': cornerExtent / cornerExtent0 if cornerExtent0 else float('nan'),
+        'epsAngularMomentum': epsM,
+        'epsKineticEnergy': epsE,
+        'linearMomentumMag': float(torch.linalg.norm(linMom).detach().cpu().item()),
     }
 
 

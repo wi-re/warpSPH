@@ -26,6 +26,11 @@ parser.add_argument('--modes', nargs='+',
                     default=['shiftOff', 'surfaceZeroed', 'surfaceNormal'])
 parser.add_argument('--field', default='pressure', choices=['pressure', 'density'])
 parser.add_argument('--omega', type=float, default=4.0)
+parser.add_argument('--scheme', default=None,
+                    help="scheme to run every mode under (default: the case default, "
+                         "deltaSPH); pass 'sun2017DeltaSPH' for the production δ⁺ "
+                         'config — frozen diffusion + Eq. (7) shift — that Sun 2019 '
+                         'Fig. 13 is drawn with')
 parser.add_argument('--out', default=None)
 parser.add_argument('--markerSize', type=float, default=1.0,
                     help='scatter marker size in points^2 (small: individual particles visible)')
@@ -50,7 +55,9 @@ from warpSPH.runner import run
 from warpSPH.configurations.moduleConfigurations.shifting import ShiftingProjectionScheme
 
 SCRATCH = os.environ.get('CLAUDE_SCRATCH', '.')
-OUT = args.out or os.path.join(SCRATCH, f'squarePatch_validation_nx{args.nx}_{args.field}.png')
+_schemeTag = f'_{args.scheme}' if args.scheme else ''
+OUT = args.out or os.path.join(
+    SCRATCH, f'squarePatch_validation_nx{args.nx}_{args.field}{_schemeTag}.png')
 
 
 def _configure(mode):
@@ -99,15 +106,33 @@ def run_mode(mode):
     case.postStep = postStep
     case.configureScheme = _configure(mode)
     try:
-        r = run(case, params={'shape': 'box', 'omega': args.omega},
-                nx=args.nx, tLimit=max(targets) * 1.05, nSteps=None,
-                store=False, plot=False, quiet=True, progress=False)
+        runKw = dict(params={'shape': 'box', 'omega': args.omega},
+                     nx=args.nx, tLimit=max(targets) * 1.05, nSteps=None,
+                     store=False, plot=False, quiet=True, progress=False)
+        if args.scheme:
+            runKw['scheme'] = args.scheme
+        r = run(case, **runKw)
     finally:
         case.postStep, case.configureScheme = _origPost, _origCfg
     # the step-limited loop can stop a hair short of the last target
     for t in pending:
         frames[t] = _snapshot(r.state, args.field)
-    return frames
+
+    # Sun 2019 §3.3's quantitative story alongside the Fig. 13 panels: the
+    # conservation errors ε_M / ε_E (Eqs. 26-27) and the footprint drift, read
+    # straight off the case diagnostics over the run.
+    trace = []
+    for row in getattr(r, 'trajectory', []) or []:
+        if row.get('step', -1) < 0 or 'epsAngularMomentum' not in row:
+            continue
+        trace.append((row['t'] * args.omega,
+                      row.get('epsAngularMomentum', float('nan')),
+                      row.get('epsKineticEnergy', float('nan')),
+                      row.get('linearMomentumMag', float('nan')),
+                      row.get('sphVolume', float('nan')),
+                      row.get('hullArea', float('nan')),
+                      row.get('cornerRetention', float('nan'))))
+    return frames, trace
 
 
 CACHE = (args.fromCache or (os.path.splitext(OUT)[0] + '.npz'))
@@ -115,6 +140,7 @@ CACHE = (args.fromCache or (os.path.splitext(OUT)[0] + '.npz'))
 if args.fromCache:
     blob = np.load(args.fromCache, allow_pickle=True)
     data = blob['data'].item()
+    traces = blob['traces'].item() if 'traces' in blob else {}
     args.modes = blob['modes'].tolist()
     args.times = blob['times'].tolist()
     if 'nx' in blob:
@@ -126,11 +152,26 @@ if args.fromCache:
         args.field = cachedField
     print(f'replotting from {args.fromCache}')
 else:
-    data = {m: run_mode(m) for m in args.modes}
+    _ran = {m: run_mode(m) for m in args.modes}
+    data = {m: frames for m, (frames, _) in _ran.items()}
+    traces = {m: trace for m, (_, trace) in _ran.items()}
     np.savez(CACHE, data=np.array(data, dtype=object),
+             traces=np.array(traces, dtype=object),
              modes=np.array(args.modes), times=np.array(sorted(args.times)),
              nx=args.nx, field=args.field)
     print(f'wrote {CACHE}  (--fromCache it to retune the figure without re-simulating)')
+
+# Sun 2019 §3.3 quantitative summary (Eqs. 26-27 + footprint drift), per mode.
+for m in args.modes:
+    tr = traces.get(m) or []
+    if not tr:
+        continue
+    twL, epsM, epsE, linM, vol, hull, corner = tr[-1]
+    vol0, hull0 = tr[0][4], tr[0][5]
+    print(f'[{m}]  tω={twL:.2f}  '
+          f'ε_M={epsM:6.2f}%  ε_E={epsE:6.2f}%  |p|_lin={linM:.2e}  '
+          f'ΔsphVol={100*(vol/vol0-1):+.3f}%  ΔhullArea={100*(hull/hull0-1):+.2f}%  '
+          f'cornerRetention={corner:.3f}')
 
 # shared colour scale. The fragmented tω=4 frame is a pressure-noise firehose
 # that would wash out every earlier panel, so the auto scale is taken from the
@@ -172,7 +213,8 @@ for r, mode in enumerate(args.modes):
             ax.set_ylabel(mode, fontsize=11)
 
 fig.suptitle(f'Rotating square patch — {args.field}, nx = {args.nx} '
-             f'(L/Δx ≈ {int(2 / (6.0 / args.nx))})', fontsize=12)
+             f'(L/Δx ≈ {int(2 / (6.0 / args.nx))})'
+             + (f', scheme = {args.scheme}' if args.scheme else ''), fontsize=12)
 sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vmin, vmax=vmax))
 fig.colorbar(sm, ax=axes.ravel().tolist(), shrink=0.6, label=args.field)
 fig.savefig(OUT, dpi=args.dpi, bbox_inches='tight')
