@@ -133,10 +133,11 @@ start from.
   at the **obstacle-toe re-entrant corner** where the composed-SDF-gradient
   ghost placement failed. **FIXED (`_bodyNodeGhostOffsets`, Marrone App. A /
   English §3, `1e145a1`): penetration 29.8 → 4.66 dx to t\* = 5 (≤ 1 dx through
-  t\* = 3.3); englishWedge still 9/9, re-entrant-corner RMSE 10× better; all
-  tests pass.** 4.66 dx is a residual, still > the ≤ 3 gate. `mdbcGhostRefreshEvery`
-  removed (`76af473`). Open: chase the 4.66 dx residual; H/dx = 128; the 9
-  surface probes; viscous §3.4.2.
+  t\* = 3.9); englishWedge still 9/9, re-entrant-corner RMSE 10× better; all
+  tests pass.** The 4.66 dx is one particle slow-creeping through the toe after
+  t\* ≈ 4.5 — Marrone's bisector rule (θ > π) seals it. `mdbcGhostRefreshEvery`
+  removed (`76af473`). Open: bisector rule; H/dx = 128; the 9 surface probes;
+  viscous §3.4.2.
 - **`runner/media.py`** — frame-ordering bug (glob sort breaks past 100k
   steps) fixed (`0810491`).
 
@@ -160,13 +161,14 @@ start from.
    mDBC ghosts at the obstacle-toe re-entrant corner. Replaced (2D) by a
    marching-squares polyline of `region.sdf` as the body-node set + mirror
    through the nearest polyline point. **M34 nx = 256 plain δ-SPH tank-wall
-   penetration 29.8 → 4.66 dx to t\* = 5** (≤ 1 dx through t\* = 3.3; was 5.3
-   climbing to 30) — 5/6, the 4.66 dx is a residual still 1.7 over the ≤ 3
-   gate (§5.2.3). **englishWedge 9/9** and *better* — base-corner hydrostatic
-   RMSE 0.024 → 0.0022, wedge-face 0.0013, apex 0.0020, wall penetration 0.
-   All `test_physics` / `test_wallPressure` / `test_deltaSPHDiffusion` pass.
-   Left: chase the 4.66 dx residual; an analytic per-primitive normal (exact
-   on curves, cheaper than the polyline); Marrone's explicit bisector rule.
+   penetration 29.8 → 4.66 dx to t\* = 5** (≤ 1 dx through t\* = 3.9; was 5.3
+   climbing to 30) — 5/6; the 4.66 dx is **one particle** slow-creeping through
+   the toe after t\* ≈ 4.5, still 1.7 over the ≤ 3 gate (§5.2.3). **englishWedge
+   9/9** and *better* — base-corner hydrostatic RMSE 0.024 → 0.0022, wedge-face
+   0.0013, apex 0.0020, wall penetration 0. All `test_physics` /
+   `test_wallPressure` / `test_deltaSPHDiffusion` pass. Left: Marrone's bisector
+   rule for θ > π (seals that last toe particle); an analytic per-primitive
+   normal (exact on curves, no marching-squares grid).
 3. **§5.1 Marrone P2** — median 2× low **and** ~1 t\* phase-early at H/Δx = 322.
    The user's read (2026-09-08): a **probing-methodology** gap, not a scheme
    error — P1's *raw* trace is dominated by weak-compressibility acoustic
@@ -1490,10 +1492,11 @@ unchanged (5e-7); dam-break wall-impact ALL-boundary p95 error vs a linear field
     `_bodyNodeGhostOffsets` (`1e145a1`) — full write-up in the "IMPLEMENTED"
     block below. Net: M34 nx = 256 plain δ-SPH penetration **29.8 → 4.66 dx**
     to t\* = 5 (≤ 1 dx through t\* = 3.3), englishWedge 9/9 + better, all tests
-    pass. The 4.66 dx is a residual (builds after t\* ≈ 3.3) still 1.7 over the
-    ≤ 3 gate — chase separately (roof re-impact ≈ t\* 3.9 suspect). Earlier
-    heuristics (CD normal, ascent, Newton) had been tested against the *wrong*
-    (fillet / deep-interior) particle sets and so looked useless.
+    pass. The 4.66 dx is **one particle** slow-creeping through the toe after
+    t\* ≈ 4.5 (Marrone's bisector rule for θ > π is the fix); still 1.7 over
+    the ≤ 3 gate. Earlier heuristics (CD normal, ascent, Newton) had been
+    tested against the *wrong* (fillet / deep-interior) particle sets and so
+    looked useless.
   - **Configs that pass** at HEAD, nx = 256, t\* = 5: `sun2017DeltaSPH` + PST
     (0.58 dx — the shift keeps particles off the wall regardless). The
     `deltaSPH` + `mdbcGhostRefreshEvery = 5` config that also passed (0.68 dx)
@@ -1546,11 +1549,20 @@ consulted, static for the run.
   corner RMSE **0.024 → 0.0022** (~10×), near-wall/bed **0.0069 → 0.0045**,
   apex 0.0020, faces 0.0013, 0 dx penetration, ρ ∈ [1.0001, 1.0025].
 - **Marrone §3.4 nx = 256 plain δ-SPH — the toe leak is gone.** Leak-tracking
-  run: `maxPenetrationDx` stays **≤ 1.0 dx through t\* = 3.3** (was 5.3 dx by
+  run: `maxPenetrationDx` stays **≤ 1.0 dx through t\* = 3.9** (was 5.3 dx by
   t\* = 2.5 and climbing to ~30 by t\* = 5), `nPenetrating` **1–2** (was 5–21),
-  no divergence. **Full t\* = 5 acceptance run: 29.8 → 4.66 dx** (5/6; the
-  4.66 dx is a residual that builds after t\* ≈ 3.3, still 1.7 over the ≤ 3
-  gate — chase separately; roof re-impact ≈ t\* 3.9 is the suspect).
+  no divergence. **Full t\* = 5 acceptance run: 29.8 → 4.66 dx** (5/6).
+  - The **4.66 dx residual is one particle** at the toe (x ≈ 0.87) that had
+    been stable at ≈ 0.9 dx through t\* ≈ 4.5, then resumes a slow creep
+    (~0.3 dx per 0.1 t\*, `w_rho ≈ 1.0`, near-zero velocity — not a jet, a
+    quasi-static leak through the imperfect re-entrant corner). Plus 6–7
+    particles at **~1–2 dx** on the *upstream* back wall (x = −W/2) from
+    t\* ≈ 3.9 — the fragmenting sheet arcing back over the reservoir
+    (Marrone Fig. 20/22) making contact; minor, flat wall.
+  - So the toe is 6× better and no longer a runaway, but not perfectly sealed.
+    **Marrone's explicit bisector rule** for θ > π (place the node on the angle
+    bisector, deeper into the fluid notch) is the known next refinement for
+    that last creeping particle. δ⁺-SPH + PST seals it fully (0.58 dx).
 - `test_physics` / `test_wallPressure` / `test_deltaSPHDiffusion`: all pass.
 
 Still a *quality* item, not done: an analytic per-primitive normal (vs the
