@@ -1,16 +1,25 @@
-"""mDBC boundary-particle density extrapolation.
+"""mDBC boundary-particle density extrapolation (English et al. 2022).
 
-Computes densities for ghost/boundary particles (kind 2) by Liu-Liu
-(moving-least-squares) extrapolation of fluid density to each ghost point
-(see the linked ScienceDirect paper in-code), then converts that to a
-hydrostatic pressure correction along the ghost-offset normal, including a
-gravity term, clamped to at least rest density. One deviation from the cited
-paper's formula is called out inline (the ghost-normal normalization) as
-matching DualSPHysics rather than the paper. Falls back to a plain Shepard-interpolated density, then to rest density, when
-a ghost point has too few (<=1) fluid neighbors, or when its moment matrix is
-ill-conditioned (`interpolateLiuLiu`'s `wellConditioned` gate: too few (<=4)
-neighbors OR `|det(A_g)| < 1e-3`, mirroring DualSPHysics' `determlimit`). No-ops
-(returns `currentState.densities` unchanged) when there are no boundary
+Each boundary particle (kind 1) has a ghost node (kind 2) placed in the fluid.
+`interpolateLiuLiu` fits a local linear fluid-density field (value + gradient)
+at the node; English Eq. (12), `rho_b = rho_g + (r_b - r_g) . grad(rho)_g`,
+extrapolates it back to the boundary particle. Where the node's stencil is too
+thin for a trustworthy 1st-order fit -- few neighbours, or a near-coplanar
+moment matrix (`|det(A_g)|` below `interpolateLiuLiu`'s per-kernel floor) -- the
+result blends smoothly down to the plain 0th-order Shepard value at the node,
+and to rest density where there is no fluid at all.
+
+The blend is a ramp, not a hard `where(wellConditioned, ...)` switch: the switch
+put a step in the boundary density right at the free-surface contact line (a
+large moving region in a violent flow), where roughly a third of the wetted
+boundary can land on the fallback during a dam-break run-up
+(`DELTASPH_VALIDATION_PLAN.md` 5.2.3). The Shepard fallback is used raw --
+**not** clamped to >= rho0 (that clamp is a DualSPHysics DBC anti-attraction
+guard, not in English 2022) and with **no** added hydrostatic-gravity term.
+One deviation from the cited paper, the ghost-normal normalization, is no longer
+relevant since the gravity term is gone.
+
+No-ops (returns `currentState.densities` unchanged) when there are no boundary
 particles.
 """
 
@@ -30,8 +39,20 @@ from warpSPH.configurations.simulationConfig import SimulationConfig
 from ...enumTypes import *
 from ...configurations.moduleConfigurations.gravity import GravityType, gravityConfiguration
 
-from ..liu import interpolateLiuLiu
+from ..liu import interpolateLiuLiu, determinantThresholdFor
 from ._util import stateHasBoundaryParticles
+
+#: 1st-order (English Eq. 12) -> 0th-order (Shepard) blend ramps. Below the
+#: `numNeighbors` floor / the `|det(A_g)|` floor the boundary particle gets the
+#: pure Shepard value; the MLS fit reaches full weight `_*_RAMP` past each floor.
+#: A smooth crossover instead of a hard `where(wellConditioned, ...)` switch, so
+#: a particle near the free-surface contact line (or under a thin climbing
+#: sheet), where the stencil is marginal, does not snap between the exact MLS
+#: value and a crude estimate -- the jump that made mDBC boundary densities look
+#: discontinuous from the fluid (DELTASPH_VALIDATION_PLAN 5.2.3).
+_MDBC_NBR_FLOOR = 4.0
+_MDBC_NBR_RAMP = 1.0
+_MDBC_DET_RAMP = 0.25
 
 def computeMdbcDensity(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]]) -> torch.Tensor:
     if not stateHasBoundaryParticles(currentState, config):
@@ -53,66 +74,49 @@ def computeMdbcDensity(currentState: Any, config: SimulationConfig, schemeConfig
         bIndices = currentState.ghostIndices[ghostMask]
 
         rho0 = schemeConfig.fluid.restDensity
-        c_s = schemeConfig.fluid.fixedSoundSpeed
-        g = torch.tensor(schemeConfig.gravityConfig.direction, dtype = currentState.positions.dtype, device = currentState.positions.device) * schemeConfig.gravityConfig.magnitude if schemeConfig.gravityConfig.active else torch.zeros_like(currentState.positions[0])
 
+        # -- 0th order: the Shepard value at each ghost node, Sum rho_j W_gj /
+        # Sum W_gj (= b[0] / A_g[0,0]). Always defined once the node has a fluid
+        # neighbour; this is the graceful floor, NOT clamped to >= rho0 (English
+        # et al. 2022 has no such clamp -- it is a DualSPHysics DBC anti-attraction
+        # guard that pins the near-surface wall to rest density even when the
+        # adjacent fluid is genuinely lighter) and with no hydrostatic-gravity
+        # term added (that term is a separate m2dbc assumption; layered on top of
+        # a Shepard density near a churning surface it just adds error).
+        shepardDenominator = A_g[:, 0, 0]
+        shepardDensity = torch.where(
+            (shepardDenominator > 0) & (numNeighbors > 1),
+            b[:, 0] / torch.where(shepardDenominator > 0, shepardDenominator,
+                                  torch.ones_like(shepardDenominator)),
+            torch.full_like(shepardDenominator, rho0))
 
-        boundaryDensity = currentState.densities.new_ones(currentState.densities.shape) * schemeConfig.fluid.restDensity
-        shepardNominator = b[:,0]
-        shepardDenominator = A_g[:,0,0]
-        shepardDensity = torch.where(shepardDenominator > 0, shepardNominator / shepardDenominator, rho0)
-
-        boundaryDensity[bIndices] = torch.where(numNeighbors > 1, shepardDensity, rho0)
-
-        rho_g = boundaryDensity[bIndices]
-        P_g = c_s**2 * (rho_g - rho0)
-
-
+        # -- 1st order: English et al. 2022 Eq. (12), rho_b = rho_g +
+        # (r_b - r_g) . grad(rho)_g, with the MLS value + gradient from
+        # `interpolateLiuLiu`.
         relPos = -currentState.ghostOffsets[ghostMask]
-        nb = relPos
-        # This normalization is not in the paper https://www.sciencedirect.com/science/article/pii/S0045793025003305?via%3Dihub
-        # But it is correct, see the dualsphysics code and thanks Aaron!
-        nb = torch.nn.functional.normalize(nb, dim = 1)
-
-        dot = torch.einsum('ni, i -> n', nb, g)
-        dot2 = torch.einsum('ni, ni -> n', relPos, nb)
-
-        # if the normal is pointing in the direction of the gravity then we disable the gravity contribution as we want to avoid negative densities in the boundary particles
-        # dot = torch.where(dot > 0, torch.zeros_like(dot), dot)
-
-        P_b = P_g + rho0 * (dot * dot2)
-        rho_b = rho0 + P_b / c_s**2
-        rho_b = torch.clamp(rho_b, min = rho0)
-
-        boundaryDensity[bIndices] = rho_b
-
-        # Bulk path: English et al. 2022 Eq. (12) linear extrapolation from the
-        # ghost node back to the boundary particle,
-        #   rho_b = rho_g + (r_b - r_g) . grad(rho)_g ,
-        # with the MLS value + gradient from `interpolateLiuLiu`. The
-        # Shepard-density + hydrostatic `rho_b` above is DualSPHysics'
-        # m2dbc-style fallback, used wherever this is ill-conditioned.
-        #
-        # `wellConditioned` (English Sec. 3 / DualSPHysics `determlimit`,
-        # `|det(A_g)| >= 1e-3` AND enough neighbours) replaces a bare
-        # neighbour-count threshold, which previously had to be hand-tuned to
-        # 9: at a lower count, a boundary particle under the thin, fast
-        # dam-break front sliding over the dry bed sees ~5-9 fluid neighbours
-        # all in a shallow horizontal band -> the vertical moment of `A_g` is
-        # tiny -> `rho_interp_grad` blows up -> `rho_proj` is wild ->
-        # `P_b = c0^2 (rho_proj - rho0)` (with c0 = 40 sqrt(gH), c0^2 ~ 9400)
-        # flings the sheet off the bed before it reaches the end wall (t ~
-        # 0.54 s in the Marrone 3.1 case). The determinant check catches that
-        # failure directly (rather than by proxy via neighbour count), so the
-        # MLS path can safely engage below 9 neighbours when the local
-        # stencil is in fact well-conditioned, and stays off above 9 when it
-        # isn't. See `DELTASPH_VALIDATION_PLAN.md` Part 3.
         drho = -torch.einsum('nu, nu -> n', relPos, rho_interp_grad)
-        rho_proj = (rho_interp + drho)
-        boundaryDensity[bIndices] = torch.where(wellConditioned, rho_proj, boundaryDensity[bIndices])
+        rho_proj = rho_interp + drho
+
+        # -- Blend 1st -> 0th order by a smooth conditioning weight. `w` is
+        # exactly 0 below the `|det(A_g)|` floor `interpolateLiuLiu` gates on
+        # (pinv can blow `rho_proj` up there) and below the neighbour floor;
+        # it reaches 1 a few multiples past each. Replaces the hard
+        # `where(wellConditioned, MLS, fallback)` switch -- the source of the
+        # step at the free-surface contact line. The determinant floor still
+        # matters (a thin, near-coplanar stencil under a fast dam-break front
+        # over a dry bed makes `grad(rho)_g` explode -- Marrone 3.1, Part 3);
+        # ramping through it rather than switching keeps that protection while
+        # removing the discontinuity.
+        det = torch.linalg.det(A_g).abs()
+        detFloor = determinantThresholdFor(config.kernel)
+        wDet = torch.clamp((det - detFloor) / (detFloor * _MDBC_DET_RAMP), 0.0, 1.0)
+        wN = torch.clamp((numNeighbors.to(det.dtype) - _MDBC_NBR_FLOOR) / _MDBC_NBR_RAMP,
+                         0.0, 1.0)
+        w = wDet * wN
+
+        rho_b = w * rho_proj + (1.0 - w) * shepardDensity
+        rho_b = torch.nan_to_num(rho_b, nan=rho0, posinf=rho0, neginf=rho0)
 
         mergedDensitities = currentState.densities.clone()
-        mergedDensitities[bIndices] = boundaryDensity[bIndices]
-
-        # print(f'Mdbc densities: min={boundaryDensity[bIndices].min():.3g}, max={boundaryDensity[bIndices].max():.3g}, mean={boundaryDensity[bIndices].mean():.3g}')
+        mergedDensitities[bIndices] = rho_b
         return mergedDensitities

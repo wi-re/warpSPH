@@ -45,7 +45,7 @@ from typing import Any, Optional
 from ...configurations.simulationConfig import SimulationConfig
 from torch.profiler import record_function
 
-__all__ = ['interpolateLiuLiu', 'liuExtend', 'liuMirror']
+__all__ = ['interpolateLiuLiu', 'liuExtend', 'liuMirror', 'determinantThresholdFor']
 
 #: Per-kernel `|det(A_g)|` acceptance floor for the mDBC/wall-pressure MLS fit
 #: (`DELTASPH_VALIDATION_PLAN.md` Part 3). `Wendland2` is DualSPHysics' own
@@ -59,6 +59,14 @@ _DETERMINANT_THRESHOLDS = {
     KernelFunctions.Wendland4: 1.8e-3,
 }
 _DEFAULT_DETERMINANT_THRESHOLD = 1e-3
+
+
+def determinantThresholdFor(kernel) -> float:
+    """The `|det(A_g)|` acceptance floor `interpolateLiuLiu` uses for `kernel`
+    (see `_DETERMINANT_THRESHOLDS`). Exposed so mDBC / wall-pressure callers can
+    ramp their own 1st-order -> 0th-order blend off the *same* number the
+    well-conditioned gate is built on."""
+    return _DETERMINANT_THRESHOLDS.get(kernel, _DEFAULT_DETERMINANT_THRESHOLD)
 
 
 def interpolateLiuLiu(
