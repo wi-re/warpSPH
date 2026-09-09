@@ -88,9 +88,64 @@ _GHOST_MAX_OFFSET = 2.0
 _GHOST_MISALIGN_COS = 0.985
 
 
+def _geometricGhostOffsets(bpos, solidSdfs, dx, legacyOffsets, *, nSamples: int = 16):
+    """Place each boundary particle's mDBC ghost node from the boundary geometry
+    alone -- no fluid particles consulted, so the layout is identical whether the
+    domain is wet, dry, or filling, and never needs a mid-run refresh.
+
+    Start from the English et al. 2022 / DualSPHysics reflection (`legacyOffsets`
+    -- mirror across this region's SDF surface, `r_g = r_b - 2 phi(r_b) n_hat`).
+    On a flat grid-aligned wall that node already sits `dp/2` into the fluid and
+    is returned unchanged. Otherwise a geometry validity pass: step the offset
+    magnitude down from the full reflection and take the *largest* value at which
+    the node clears `dp/2` from **every** solid region -- the far face of a thin
+    obstacle, the other wall of a re-entrant corner. If no point on the segment
+    clears (a boundary particle with no clean fluid-facing interface), the offset
+    collapses to zero: the node coincides with the boundary particle, its MLS
+    moment matrix is singular, and `computeMdbcDensity` falls back to Shepard /
+    rest density for that particle -- the correct behaviour there.
+
+    `solidSdfs` is the list of every boundary region's `sdf` callable; each
+    returns `(values, normals)` with `values > 0` on its fluid side.
+    """
+    m0 = torch.linalg.norm(legacyOffsets, dim=-1, keepdim=True)          # (n,1)
+    nHat = legacyOffsets / m0.clamp_min(1e-12)                           # (n,D)
+
+    # A node is "in the fluid" for a solid region when that region's SDF reads
+    # positive there. `eps` sits well below the `dp/2` a clean layer-1 node
+    # keeps from its *own* wall, but above zero, so it only trips when the node
+    # has actually crossed into another solid.
+    eps = 0.1 * float(dx)
+
+    def clearance(pos):
+        c = pos.new_full((pos.shape[0],), float('inf'))
+        for sdf in solidSdfs:
+            c = torch.minimum(c, sdf(pos)[0].reshape(-1))
+        return c
+
+    best = m0.clone()
+    ok = clearance(bpos - m0 * nHat) > eps                               # (n,)
+    if not bool(ok.all()):
+        found = ok.clone()
+        for frac in torch.linspace(1.0, 1.0 / nSamples, nSamples,
+                                   device=bpos.device, dtype=bpos.dtype):
+            m = m0 * frac
+            take = (~found) & (clearance(bpos - m * nHat) > eps)
+            best = torch.where(take.view(-1, 1), m, best)
+            found = found | take
+        best = torch.where(found.view(-1, 1), best, torch.zeros_like(best))
+    return best * nHat
+
+
 def _fluidDirectedGhostOffsets(bpos, fluidPos, dx, hMean, legacyOffsets, *,
                                chunk: int = 4096):
-    """Place every *wetted* boundary particle's ghost by mirroring it across the
+    """DEPRECATED -- superseded by `_geometricGhostOffsets`, which places ghosts
+    from the boundary geometry alone. This one keys the placement off where the
+    fluid currently is, so the same wall discretises differently wet vs dry vs
+    filling and needs a mid-run refresh (`dambreak.mdbcGhostRefreshEvery`). Kept
+    only for that opt-in refresh path; not on the default init route.
+
+    Place every *wetted* boundary particle's ghost by mirroring it across the
     fluid-facing interface, with the interface distance and direction taken from
     the nearby fluid particles' positions. Returns `bpos - ghostPos` per
     particle.
@@ -185,7 +240,10 @@ def addBoundaryGhostParticles(regions, particleState : Any):
     ghostPositions = []
     boundaryIndices = []
 
-    fluidPos = particleState.positions[particleState.kinds == 0]
+    # Every solid region's SDF (values > 0 on its fluid side). The ghost
+    # validity pass checks a candidate node against all of them, so a ghost is
+    # never placed inside another wall or the far face of a thin obstacle.
+    solidSdfs = [r.sdf for r in regions if r.type == RegionType.Boundary]
 
     for region in regions:
         # print(f"Processing region {region} of type {region.type}")
@@ -200,16 +258,18 @@ def addBoundaryGhostParticles(regions, particleState : Any):
             bpos = particleState.positions[relevantParticles]
             hMean = float(particleState.supports.mean())
 
-            # Legacy path, kept as the fallback: reflect across the boundary
-            # SDF surface by twice the signed distance.
+            # English et al. 2022 reflection: mirror across this region's SDF
+            # surface by twice the signed distance (capped so a deep layer does
+            # not project absurdly far).
             sdfValues, sdfNormals = region.sdf(bpos)
             clampedDist = sdfValues - torch.clamp(-sdfValues, max=1.5 * hMean)
             legacyOffsets = clampedDist.view(-1, 1) * sdfNormals
 
-            # Primary path: place the ghost `GHOST_FLUID_DEPTH * dx` into the
-            # fluid, past the fluid-facing interface, along the direction to the
-            # local fluid -- see the module docstring.
-            offsets = _fluidDirectedGhostOffsets(bpos, fluidPos, dx, hMean, legacyOffsets)
+            # Geometry validity pass: keep the reflection where it lands cleanly
+            # in the fluid, retract it toward the boundary particle where it
+            # would cross into another solid, collapse it (-> Shepard/rest
+            # fallback) where no clean node exists. Fluid-independent.
+            offsets = _geometricGhostOffsets(bpos, solidSdfs, dx, legacyOffsets)
 
             bIndices = relevantParticles
             boundaryIndices.append(bIndices)

@@ -41,19 +41,32 @@ import torch
 
 __all__ = ['sampleRegularParticles']
 
-def buildPointCloud(nx, domain: DomainDescription = None, targetNeighbors = 16, jitter = 0.0, band = 0, shortEdge = True):
+def buildPointCloud(nx, domain: DomainDescription = None, targetNeighbors = 16, jitter = 0.0, band = 0, shortEdge = True, dx = None):
     periodicity = domain.periodic
-    dxs = []
-    for d in range(domain.dim):
-        l = domain.max[d] - domain.min[d]
-        dx = l/(nx if periodicity[d] else nx-1)
-        dxs.append(dx)
+
+    # `dx` proposes a spacing; each axis is then snapped to a whole number of
+    # cells. Two ways to pick that proposal:
+    #  * `dx=None` (default, unchanged): the shortest -- or with `shortEdge=False`
+    #    the longest -- axis's `span/nx`. Fine for a roughly square domain, but a
+    #    wide-shallow one (a sloshing tank) lets its *short* axis dictate a
+    #    spacing the case never asked for, so `config.dx` ends up a lie that
+    #    still feeds `dt` / `c_s` (DELTASPH_VALIDATION_PLAN 5.2.3).
+    #  * an explicit `dx` (e.g. `config.dx`) is authoritative: every axis snaps
+    #    to `round(span/dx)` cells, so the realised `dn` stays within one part
+    #    in `nd` of `dx` on *every* axis. `round`, not `ceil` -- `ceil` sitting
+    #    on an integer boundary turns a 1e-6 round-trip residual into a whole
+    #    extra cell layer (see the module docstring, reason 2).
+    explicitDx = dx is not None
+    if explicitDx:
+        dx = torch.as_tensor(float(dx))
+    else:
+        dxs = []
+        for d in range(domain.dim):
+            l = domain.max[d] - domain.min[d]
+            dxs.append(l/(nx if periodicity[d] else nx-1))
+        dx = torch.min(torch.tensor(dxs)) if shortEdge else torch.max(torch.tensor(dxs))
 
     spaces = []
-    if shortEdge:
-        dx = torch.min(torch.tensor(dxs))
-    else:
-        dx = torch.max(torch.tensor(dxs))
 
     # `dns[d]` is the spacing actually realised on axis d -- see the module
     # docstring. `cellVolume` (= prod(dns)) is the true cell every particle
@@ -63,7 +76,8 @@ def buildPointCloud(nx, domain: DomainDescription = None, targetNeighbors = 16, 
     cellVolume = None
     for d in range(domain.dim):
         l = domain.max[d] - domain.min[d]
-        nd = (torch.ceil(l/dx)).to(torch.int32)
+        nd = (torch.round(l/dx) if explicitDx else torch.ceil(l/dx)).to(torch.int32)
+        nd = torch.clamp(nd, min=(1 if periodicity[d] else 2))
         dn = l / (nd if periodicity[d] else nd-1)
         dns.append(dn)
         cellVolume = dn if cellVolume is None else cellVolume * dn
@@ -93,7 +107,7 @@ def buildPointCloud(nx, domain: DomainDescription = None, targetNeighbors = 16, 
     return PointCloud(positions = pos, supports = supports), cellVolume, support
 
 
-def sampleRegularParticles(nx : int, domain : DomainDescription, targetNeighbors: int, jitter = 0.0, band = 0, shortEdge=True):
-    pc, cellVolume, support = buildPointCloud(nx, domain, targetNeighbors, jitter = jitter, band = band, shortEdge = shortEdge)
+def sampleRegularParticles(nx : int, domain : DomainDescription, targetNeighbors: int, jitter = 0.0, band = 0, shortEdge=True, dx = None):
+    pc, cellVolume, support = buildPointCloud(nx, domain, targetNeighbors, jitter = jitter, band = band, shortEdge = shortEdge, dx = dx)
     return ParticleSet(positions = pc.positions, supports = pc.supports, masses = torch.ones_like(pc.positions[:, 0]) * cellVolume,
     densities = torch.ones_like(pc.positions[:, 0]))
