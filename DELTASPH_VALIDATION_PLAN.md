@@ -187,8 +187,9 @@ start from.
    English's resolution, and the dp = 0.02 residual is under-resolution.
 7. **§5.2.2 Marrone §3.4 — probes + fine Δx.** Bulk converges H/Δx = 32→64,
    rounded corner 6/6 in isolation, δ⁺+PST 6/6. Plain δ-SPH toe-leak **fixed**
-   by `_bodyNodeGhostOffsets` (item 2b) — ≤ 1 dx to t\* = 3.3.
-   Left: (a) full t\* = 5 acceptance re-run; H/Δx = 128 to
+   by `_bodyNodeGhostOffsets` (item 2b) — ≤ 1 dx through t\* = 3.9; t\* = 5
+   acceptance run **5/6** (residual 4.66 dx = one creeping toe particle, needs
+   the θ > π bisector rule). Left: (a) H/Δx = 128 to
    t\* ≈ 7.4, and a `densityP99` re-run of the 32/64 pair for a real bulk-max
    number; (b) the 9 surface pressure probes P1–P9 (on the 45° edge, the roof,
    the fillet arc — *not* axis-aligned, so `diagnostics`' wall-probe path needs
