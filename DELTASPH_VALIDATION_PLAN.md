@@ -134,10 +134,12 @@ start from.
   ghost placement failed. **FIXED (`_bodyNodeGhostOffsets`, Marrone App. A /
   English §3, `1e145a1`): penetration 29.8 → 4.66 dx to t\* = 5 (≤ 1 dx through
   t\* = 3.9); englishWedge still 9/9, re-entrant-corner RMSE 10× better; all
-  tests pass.** The 4.66 dx is one particle slow-creeping through the toe after
-  t\* ≈ 4.5 — Marrone's bisector rule (θ > π) seals it. `mdbcGhostRefreshEvery`
-  removed (`76af473`). Open: bisector rule; H/dx = 128; the 9 surface probes;
-  viscous §3.4.2.
+  tests pass.** The 4.66 dx is one particle slow-creeping through the toe *apex*
+  after t\* ≈ 4.5 — the fluid wedge there is too thin for any single-ray node;
+  Marrone's continuity fill (borrow a neighbour's node) is the real fix,
+  deferred (§5.2.3). δ⁺-SPH + PST seals M34 fully (0.58 dx) — the production
+  config. `mdbcGhostRefreshEvery` removed (`76af473`). Open: H/dx = 128; the
+  9 surface probes; viscous §3.4.2.
 - **`runner/media.py`** — frame-ordering bug (glob sort breaks past 100k
   steps) fixed (`0810491`).
 
@@ -166,9 +168,12 @@ start from.
    the toe after t\* ≈ 4.5, still 1.7 over the ≤ 3 gate (§5.2.3). **englishWedge
    9/9** and *better* — base-corner hydrostatic RMSE 0.024 → 0.0022, wedge-face
    0.0013, apex 0.0020, wall penetration 0. All `test_physics` /
-   `test_wallPressure` / `test_deltaSPHDiffusion` pass. Left: Marrone's bisector
-   rule for θ > π (seals that last toe particle); an analytic per-primitive
-   normal (exact on curves, no marching-squares grid).
+   `test_wallPressure` / `test_deltaSPHDiffusion` pass. Bisector second pass
+   for θ > π **attempted and backed out** (§5.2.3) — a bisector still can't get
+   a useful node at the sharp toe *apex*; that needs Marrone's continuity fill
+   (borrow a neighbour's node), deferred. Left: an analytic per-primitive
+   normal (exact on curves, no marching-squares grid); the continuity fill.
+   The 4.66 dx / 5/6 is accepted — δ⁺+PST is the production config for M34.
 3. **§5.1 Marrone P2** — median 2× low **and** ~1 t\* phase-early at H/Δx = 322.
    The user's read (2026-09-08): a **probing-methodology** gap, not a scheme
    error — P1's *raw* trace is dominated by weak-compressibility acoustic
@@ -188,8 +193,9 @@ start from.
 7. **§5.2.2 Marrone §3.4 — probes + fine Δx.** Bulk converges H/Δx = 32→64,
    rounded corner 6/6 in isolation, δ⁺+PST 6/6. Plain δ-SPH toe-leak **fixed**
    by `_bodyNodeGhostOffsets` (item 2b) — ≤ 1 dx through t\* = 3.9; t\* = 5
-   acceptance run **5/6** (residual 4.66 dx = one creeping toe particle, needs
-   the θ > π bisector rule). Left: (a) H/Δx = 128 to
+   acceptance run **5/6** (residual 4.66 dx = one creeping toe-apex particle;
+   bisector tried, backed out — needs Marrone's continuity fill, §5.2.3).
+   δ⁺+PST is production for M34. Left: (a) H/Δx = 128 to
    t\* ≈ 7.4, and a `densityP99` re-run of the 32/64 pair for a real bulk-max
    number; (b) the 9 surface pressure probes P1–P9 (on the 45° edge, the roof,
    the fillet arc — *not* axis-aligned, so `diagnostics`' wall-probe path needs
@@ -1489,15 +1495,18 @@ unchanged (5e-7); dam-break wall-impact ALL-boundary p95 error vs a linear field
     disagreement — that region really is fine, which is why the first two
     checks mis-cleared "ghost placement"). Fluid piling into a wall of
     rest-density bed particles at the toe just sinks through.
-  - This is exactly **Marrone 2011 Fig. A.33** (re-entrant θ > π). **FIXED** by
-    `_bodyNodeGhostOffsets` (`1e145a1`) — full write-up in the "IMPLEMENTED"
-    block below. Net: M34 nx = 256 plain δ-SPH penetration **29.8 → 4.66 dx**
-    to t\* = 5 (≤ 1 dx through t\* = 3.3), englishWedge 9/9 + better, all tests
-    pass. The 4.66 dx is **one particle** slow-creeping through the toe after
-    t\* ≈ 4.5 (Marrone's bisector rule for θ > π is the fix); still 1.7 over
-    the ≤ 3 gate. Earlier heuristics (CD normal, ascent, Newton) had been
-    tested against the *wrong* (fillet / deep-interior) particle sets and so
-    looked useless.
+  - This is a **Marrone 2011 Fig. A.33** re-entrant corner (θ > π). **Mostly
+    fixed** by `_bodyNodeGhostOffsets` (`1e145a1`) — full write-up in the
+    "IMPLEMENTED" block below. Net: M34 nx = 256 plain δ-SPH penetration
+    **29.8 → 4.66 dx** to t\* = 5 (≤ 1 dx through t\* = 3.9), englishWedge 9/9 +
+    better, all tests pass. The 4.66 dx is **one particle** slow-creeping
+    through the toe *apex* after t\* ≈ 4.5 — 1.7 over the ≤ 3 gate. The bisector
+    rule for θ > π was tried and backed out (IMPLEMENTED block): at the sharp
+    apex the fluid wedge is too thin for any single-ray node; Marrone's
+    continuity fill (borrow a neighbour's node) is the real fix, deferred.
+    δ⁺+PST is production for M34 (0.58 dx). Earlier heuristics (CD normal,
+    ascent, Newton) had been tested against the *wrong* (fillet / deep-interior)
+    particle sets and so looked useless.
   - **Configs that pass** at HEAD, nx = 256, t\* = 5: `sun2017DeltaSPH` + PST
     (0.58 dx — the shift keeps particles off the wall regardless). The
     `deltaSPH` + `mdbcGhostRefreshEvery = 5` config that also passed (0.68 dx)
@@ -1561,16 +1570,27 @@ consulted, static for the run.
     t\* ≈ 3.9 — the fragmenting sheet arcing back over the reservoir
     (Marrone Fig. 20/22) making contact; minor, flat wall.
   - So the toe is 6× better and no longer a runaway, but not perfectly sealed.
-    **Marrone's explicit bisector rule** for θ > π (place the node on the angle
-    bisector, deeper into the fluid notch) is the known next refinement for
-    that last creeping particle. δ⁺-SPH + PST seals it fully (0.58 dx).
 - `test_physics` / `test_wallPressure` / `test_deltaSPHDiffusion`: all pass.
 
+**Bisector rule — attempted 2026-09-09, backed out.** Added a second pass:
+detect a re-entrant particle (a second wall face — different segment tangent,
+`|t̂·t̂| < 0.94` — comparably close, and the one-wall mirror only marginally
+clears) and place the node along the bisector of the two wall directions,
+walked out to the deepest clearance a support radius allows. It fires cleanly
+on flat walls (no false trigger) and *did* deepen the near-toe ghosts, **but
+does not fix the residual**: right at the toe *apex* the fluid wedge is
+genuinely too thin for any single ray (mirror, bisector, retract) to reach a
+useful depth — the best bisector node there is still only ~0.2–0.9 dx clear.
+Marrone's real treatment of that (Fig. A.32/33) is the **continuity fill**:
+those apex particles *borrow* the interpolation-point value of a neighbour
+further along a clean wall, rather than getting their own node. That is a
+bigger, separate piece (needs per-particle "borrow from" links). Deferred —
+the payoff is one creeping fluid particle at t\* = 5, and **δ⁺-SPH + PST
+already seals M34 fully (0.58 dx)** and is the production config.
+
 Still a *quality* item, not done: an analytic per-primitive normal (vs the
-polyline discretisation) would be exact on curved walls and cheaper; the
-polyline is `O(n · segments)` at init and marching-squares-coarse. And the
-Marrone bisector refinement for re-entrant corners (θ > π) — the plain
-mirror-through-nearest-point handles the toe well enough that it wasn't needed.
+polyline discretisation) would be exact on curved walls and cheaper than the
+`O(n · segments)` marching-squares polyline. Plus the continuity-fill above.
 
 The DFSPH wall-pressure path (`modules/incompressible/wallPressure.py`) has an
 analogous structure and was not touched.
