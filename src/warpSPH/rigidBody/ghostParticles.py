@@ -29,13 +29,18 @@ geometry ~1250 nodes collapse this way, but their median distance to the
 nearest fluid particle is ~110 dp -- deep obstacle interior, correctly inert).
 
 Known gap (`DELTASPH_VALIDATION_PLAN.md` §5.2.2 / §5.2.3): the reflection
-*direction* is `grad` of a composed `min`/`max` SDF, which is wrong on a curved
-or cornered wall (the fillet / 45° edge of Marrone §3.4). The papers instead
-discretise the boundary analytically -- body nodes with per-segment normals,
-mirror along the normal on flats and *through the corner point* at corners
-(Marrone 2011 App. A; DualSPHysics `JSphBoundCorr` precomputes this as a
-per-particle `boundnor` vector). Implementing that needs the geometry
-primitive decomposition carried through to here.
+*direction* is `grad` of a composed `min`/`max` SDF, which is fine on flats and
+smooth curves (the Marrone §3.4 fillet checks out at 0 % direction error) but
+**wrong at re-entrant and sharp corners** -- at the Marrone §3.4 obstacle toe
+(45° edge meets the floor) ~28 % of the near-surface bed ghosts collapse to
+rest density and ~14 % point the wrong way, and plain δ-SPH then leaks fluid
+through the bed there. The papers discretise the boundary analytically -- body
+nodes with per-segment normals, mirror along the normal on flats, bisector +
+support-radius cap at re-entrant corners, central symmetry through the vertex
+for convex wedges (Marrone 2011 App. A; English §3; DualSPHysics
+`JSphBoundCorr` precomputes this as a per-particle `boundnor` vector).
+Implementing that needs the geometry primitive decomposition carried through
+to here (plan item 2b).
 """
 
 import torch
