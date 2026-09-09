@@ -163,8 +163,10 @@ start from.
    a general surface-point probe) vs Colicchio's Level-Set (Fig. 24) and
    Wagner's P1 ≈ 36.7 ρgH — Marrone's *converged* quantity; (c) the viscous
    sub-case §3.4.2 (`inviscid=False`, Re = 1000 / 10000).
-8. **§5.2 the rest** — Marrone §3.2 / §3.3; English §4.2 (`sloshingTank`
-   under mDBC); English §4.3 (3D dam break vs a cuboid).
+8. **§5.2 the rest** — English §4.2 (`sloshingTank` / TC10 — **scoped, §5.2.3**;
+   mDBC already shipped, next is Phase 1: grade Sensor 1 vs experiment at
+   dp = 0.004 / 0.002, check the negative-pressure transients); Marrone §3.2 /
+   §3.3; English §4.3 (3D dam break vs a cuboid).
 9. **Marrone §3.1 loose ends** — `c₀ = 20√(gH)` cross-check; DualSPHysics
    `01_DamBreak` cross-validation; H/Δx = 80 for the Fig. 5 convergence pair.
 11. **Perf** — sustained step cost ran ~1.85× the 40-step benchmark on the
@@ -568,7 +570,7 @@ audit:
 | § | case | measures | repo case |
 |---|---|---|---|
 | 4.1 | Still water tank + triangular wedge (sharp corner), H = 0.5 m, h/dp = 2, dp = 0.02 / 0.01 | hydrostatic `p/(ρgH)` vs `z/H` down to the wall; KE decay (log scale); noise onset time | ≈ `hydrostaticColumn` + a wedge obstacle |
-| 4.2 | Sloshing tank, SPHERIC benchmark (moving boundary) | wall pressure sensors vs experiment | `sloshingTank` (TC10) exists |
+| 4.2 | Sloshing tank, SPHERIC benchmark (moving boundary) | wall pressure sensors vs experiment; mDBC captures negative-pressure transients DBC misses (Fig. 9) | `sloshingTank` (TC10) exists, already runs mDBC — **scoped §5.2.3** |
 | 4.3 | 3D dam break impacting a cuboid (Kleefsman/MARIN 2005) | pressure on the obstacle face | `dambreak` (3D + box obstacle) |
 | 4.4 | 3D fish pass with baffles | turbulent 3D structure | — (skip; no turbulence model) |
 
@@ -980,7 +982,7 @@ to chase separately).
 | Marrone §3.3 | dam break vs a rectangular step | 3D; obstacle preset already in `buildPresetObstacles` |
 | Marrone §3.4 | dam break vs a **sharp-edged obstacle**, rounded tank corner (Fig. 19) | **§5.2.2 — geometry + stable baseline done**; boundary sampling / stability / convergence. §3.4.2 adds no-slip `ν` (Re = 1000 / 10000) |
 | English 2022 §4.1 | still water + wedge | mDBC discriminator — hydrostatic profile to the wall, KE decay. **Scoped in §5.2.1 — next up.** |
-| English 2022 §4.2 | sloshing tank | `sloshingTank` — mDBC vs the current treatment on the SPHERIC sensors |
+| English 2022 §4.2 | sloshing tank | `sloshingTank` (TC10) — **§5.2.3 scoping done**: mDBC is already the shipped wall treatment; the work is grading Sensor 1 vs the experiment (incl. the negative-pressure transients) at English's dp, + an optional DBC A/B |
 
 ### 5.2.1 English 2022 §4.1 — still water on a bed with a sharp-cornered wedge — SCOPING
 
@@ -1313,6 +1315,55 @@ on the 45° edge, the roof and the fillet arc, none axis-aligned, so
 `diagnostics`' wall-probe path needs a general surface-point MLS probe — vs
 Colicchio Fig. 24 and Wagner P1 ≈ 36.7 ρgH (Marrone's *converged* quantity);
 (c) the viscous sub-case §3.4.2 (`inviscid=False`, Re = 1000 / 10000).
+
+### 5.2.3 English 2022 §4.2 — sloshing tank (SPHERIC TC10) under mDBC — SCOPING
+
+**The plan's "mDBC vs the current treatment" framing is wrong: mDBC *is* the
+current treatment.** `sloshingTank` under `deltaSPH` already goes through
+`addBoundaryGhostParticles` (every WC case with a `RegionType.Boundary` region
+does) and `deltaSPH_step` calls `computeMdbcDensity` unconditionally — verified:
+a 3-step run has 3984 kind==2 ghost rows and the Sensor-1 reading is the
+MLS-extrapolated boundary density through the EOS. There is no toggle on the WC
+path (the `BoundaryPressureMode` enum plain/mdbcDensity/consistent lives on
+`IncompressibleSolverConfig`, DFSPH only).
+
+**Prior work (`examples/sloshingTank/PLAN.md`, 2026-09-03/04):** TC10 verified
+for wiring (applied roll overlays prescribed, sensor first responds at t ≈ 2.35 s
+≈ measured). But that pass predates the §5.3.2 shift fixes — its WCSPH runs
+**diverged at t ≈ 3.4 s** (free-surface tensile instability at the sensor
+corner). The memory notes this was later fixed by making `surfaceNormal`
+(now `michel2022` for this case) the default shift; the tracked PLAN.md still
+shows the diverging behaviour. DFSPH reproduces the pressure (first impact on
+the money; wave runs 2–5 % fast, converges with resolution; free surface
+collapses, doesn't). None of it was framed as an English §4.2 mDBC validation.
+
+**English §4.2 spec** (their §4.2, *Comp. Part. Mech.* 9:911–925): SPHERIC TC10
+exactly — 0.9 × 0.508 m tank, H = 0.093 m, rolled per the benchmark table.
+**dp = 0.004 m and 0.002 m**, h/dp = 2 (→ our `nx` = L/dp = 225 and 450).
+First left-wall (Sensor 1) impact at t ≈ 2.47 s. Figure of merit is **Fig. 9**,
+three rows: (1) DBC, gauge at the true Sensor-1 location → *erroneous* (an ~h
+gap with no fluid particles); (2) DBC, gauge moved +h into the fluid → much
+better; (3) **mDBC, gauge at the true location → very good** agreement with the
+experiment. Plus: mDBC captures the **short-lived negative-pressure transients**
+(O(1) time steps) at violent impacts that the experiment shows and DBC misses;
+and mDBC wall-particle pressures are less spatially noisy (their Fig. 8).
+
+**Proposed work:**
+- **Phase 1 (no code).** Fresh WCSPH + mDBC run at dp = 0.004 and 0.002 with the
+  *current* shipped defaults (post shift-fix) to t ≈ 6–7 s via
+  `examples/sloshingTank/run_sloshingTank.py`. Confirm no divergence; grade
+  Sensor 1 vs the TC10 experiment + repeatability band (peak timing/magnitude,
+  already ~matched pre-fix at low res) and specifically check the
+  **negative-pressure transients** appear at the violent impacts — that is the
+  mDBC discriminator vs DBC, and the one thing the prior pass never looked for.
+  Also try `--scheme sun2017DeltaSPH` (frozen + Eq. 7) as an alternative to
+  `michel2022` now that it exists.
+- **Phase 2 (small scheme hook), only if Phase 1 leaves the mDBC>DBC contrast
+  unshown.** Add a WC-path boundary-density toggle (`plain` = skip
+  `computeMdbcDensity`, read the boundary particle's own evolved density) and a
+  gauge `+h` offset option, to reproduce Fig. 9's three rows directly.
+- Skip English §4.2's `dp = 0.002` if the `nx = 450` run is too slow; `nx = 225`
+  is already at their coarse resolution.
 
 ## 5.3 δ⁺-SPH suite (after δ-SPH is clean) — Sun 2017 §4 / Sun 2019 §3
 
