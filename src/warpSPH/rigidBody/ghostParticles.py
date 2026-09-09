@@ -22,18 +22,20 @@ particle mirrored across the region SDF surface along its gradient,
 fluid and a k-th-layer node ~`k dp`. Then a validity retract -- shorten (never
 lengthen) the offset so the node clears every solid region: the far face of a
 thin obstacle, the other wall of a re-entrant corner. A boundary particle with
-no clean fluid-facing node on that ray (deep solid interior; the medial region
-of a sharp convex solid edge; a concave fillet where `∇(sdf)` of the composed
-`min`/`max` points into the wall) keeps a zero offset -- its MLS moment matrix
-is singular and `computeMdbcDensity` Shepard-/rest-falls-back, the right answer
-for a particle the fluid barely reaches.
+no clean fluid-facing node on that ray keeps a zero offset -- its MLS moment
+matrix is singular and `computeMdbcDensity` Shepard-/rest-falls-back, the right
+answer for a particle the fluid never reaches (on the Marrone 2011 §3.4
+geometry ~1250 nodes collapse this way, but their median distance to the
+nearest fluid particle is ~110 dp -- deep obstacle interior, correctly inert).
 
-Known gap (`DELTASPH_VALIDATION_PLAN.md` §5.2.2 / §5.2.3): on the Marrone 2011
-§3.4 geometry the retract-along-`∇(sdf)` collapses ~1100/7600 ghost nodes at
-the 45° edge / re-entrant corners / concave fillet, and the resulting weak wall
-support lets a run-up jet leak. A literature-grounded per-boundary-layer normal
-(Marrone 2011 App. A; DualSPHysics `JSphBoundCorr::ComputeNormals`) is the
-right fix; δ⁺-SPH + PST sidesteps it by keeping fluid off the wall.
+Known gap (`DELTASPH_VALIDATION_PLAN.md` §5.2.2 / §5.2.3): the reflection
+*direction* is `grad` of a composed `min`/`max` SDF, which is wrong on a curved
+or cornered wall (the fillet / 45° edge of Marrone §3.4). The papers instead
+discretise the boundary analytically -- body nodes with per-segment normals,
+mirror along the normal on flats and *through the corner point* at corners
+(Marrone 2011 App. A; DualSPHysics `JSphBoundCorr` precomputes this as a
+per-particle `boundnor` vector). Implementing that needs the geometry
+primitive decomposition carried through to here.
 """
 
 import torch

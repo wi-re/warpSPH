@@ -129,11 +129,14 @@ start from.
   corner in isolation: 6/6 to t\* = 7, ZERO fillet penetration.** **δ⁺-SPH +
   PST 6/6** (bulk ρ P99 ≤ 1.02 vs ~1.14 for plain δ-SPH); reusable configs
   `examples/sweeps/marrone34_*.yaml`. **Plain δ-SPH leaks ~30 dx of tank-wall
-  penetration by t\* = 5 at nx = 256** — NOT a regression (§5.2.3), it is the
-  concave-fillet mDBC ghost nodes collapsing to Shepard. The `mdbcGhostRefreshEvery`
-  runtime fix was removed (`76af473`, dynamic ghost placement disallowed);
-  the real fix is a geometric per-boundary-layer normal. Open: that;
-  H/dx = 128; the 9 surface probes vs Colicchio/Wagner; viscous §3.4.2.
+  penetration by t\* = 5 at nx = 256** — NOT a regression (§5.2.3), and NOT the
+  collapsed ghost nodes (checked: they're ~110 dp from any fluid, correctly
+  inert). Root cause still open — likely the *placed* curved-wall ghost
+  directions (composed-SDF normal) or mDBC softness on the run-up jet. The
+  `mdbcGhostRefreshEvery` runtime fix was removed (`76af473`, dynamic ghost
+  placement disallowed). Open: root-cause the leak; a proper analytic per-body-
+  node normal (Marrone App. A, §5.2.3); H/dx = 128; the 9 surface probes;
+  viscous §3.4.2.
 - **`runner/media.py`** — frame-ordering bug (glob sort breaks past 100k
   steps) fixed (`0810491`).
 
@@ -151,15 +154,17 @@ start from.
    `impact`'s −4 % `nnDistP01` confirmed as a real (small) cost. Remaining
    micro-question: frozen-`eighth` run to isolate whether frozen diffusion or
    `eq7` carries the good frozen result.
-2b. **Geometric per-boundary-layer mDBC normal** (§5.2.2 / §5.2.3, user
-   2026-09-09). The dynamic `mdbcGhostRefreshEvery` fix was removed (`76af473`)
-   — ghost placement must be a static function of the geometry. But
-   `_geometricGhostOffsets`' retract-along-`∇(sdf)` collapses ~345 shallow
-   ghost nodes at the Marrone §3.4 45° edge / re-entrant corners / concave
-   fillet (CD-normal + ascent heuristic rescues only 7). Need a real
-   per-boundary-particle normal from the discretisation — Marrone 2011 App. A /
-   DualSPHysics `JSphBoundCorr::ComputeNormals`. Fixes the plain-δ-SPH nx = 256
-   wall leak; δ⁺+PST already sidesteps it. **← next**
+2b. **Analytic per-body-node mDBC normal** (§5.2.3 for the full spec + the
+   architectural plan; user 2026-09-09). `_geometricGhostOffsets` mirrors along
+   `∇` of the composed `min`/`max` SDF, wrong on any curved / cornered wall.
+   Marrone 2011 App. A + English §3 discretise the boundary analytically (body
+   nodes, per-segment normal; mirror along normal on flats, *through the corner
+   point* at corners). Needs the geometry-primitive decomposition carried
+   through to `addBoundaryGhostParticles`. Every SDF-gradient heuristic tried
+   (CD normal, ascent, Newton projection, contour nearest-point) was
+   inadequate. NB: this is a *correctness / quality* fix for cornered geometry,
+   **not** confirmed as the M34 wall-leak cause (the collapsed ghosts were
+   ruled out; the leak root cause is still open). δ⁺+PST already runs M34 clean.
 3. **§5.1 Marrone P2** — median 2× low **and** ~1 t\* phase-early at H/Δx = 322.
    The user's read (2026-09-08): a **probing-methodology** gap, not a scheme
    error — P1's *raw* trace is dominated by weak-compressibility acoustic
@@ -178,8 +183,9 @@ start from.
    English's resolution, and the dp = 0.02 residual is under-resolution.
 7. **§5.2.2 Marrone §3.4 — probes + fine Δx.** Bulk converges H/Δx = 32→64,
    rounded corner 6/6 in isolation, δ⁺+PST 6/6. **Plain δ-SPH leaks ~30 dx tank
-   penetration by t\* = 5 at nx = 256** (concave-fillet ghosts → Shepard; not a
-   regression, §5.2.3) — blocked on item 2b. Left: (a) H/Δx = 128 to
+   penetration by t\* = 5 at nx = 256** — not a regression (§5.2.3), root cause
+   open (collapsed ghosts ruled out; run to t\* ≈ 3 with trajectory storage to
+   find where fluid crosses `x = W/2`). Left: (a) H/Δx = 128 to
    t\* ≈ 7.4, and a `densityP99` re-run of the 32/64 pair for a real bulk-max
    number; (b) the 9 surface pressure probes P1–P9 (on the 45° edge, the roof,
    the fillet arc — *not* axis-aligned, so `diagnostics`' wall-probe path needs
@@ -1293,10 +1299,9 @@ even at H/dx = 234), not a bulk instability.
 identical config (plain δ-SPH, init-only ghosts, nx = 256, t\* = 5) leaks
 **~30 Δx** (a slow progressive escape of 15–20 particles up the fillet →
 downstream wall; see §5.2.3). Ruled out as a code regression (byte-identical
-init and results vs `9c7f878^`). Root cause: the concave-fillet ghost nodes
-collapse to the Shepard fallback because `_geometricGhostOffsets` inherits the
-composed-SDF normal, which points into the wall at the ridge. `gr5` and δ⁺+PST
-both hold it. The rest of this table (bulk convergence) still stands.
+init and results vs `9c7f878^`) and as a collapsed-ghost problem (those nodes
+are ~110 dp from any fluid). Root cause still open; δ⁺-SPH + PST runs it clean.
+The rest of this table (bulk convergence) still stands.
 
 The **bulk converges** — KE curves overlie, `densityP05` is flat. The **pointwise** jet-tip extremes (`maxDensity`, `maxVelocity`)
 *grow* with resolution: the fragmenting sharp-edge jet resolves thinner and
@@ -1443,8 +1448,9 @@ unchanged (5e-7); dam-break wall-impact ALL-boundary p95 error vs a linear field
 - **Marrone §3.1** (`sun2017DeltaSPH`, nx = 60, to t\* ≈ 4) — `diverged=False`.
   The det-gate sheet-fling protection held.
 - **Marrone §3.4 nx = 256 tank-wall penetration — FAIL, and it is NOT a
-  regression: it is the plain-δ-SPH concave-fillet ghost-placement limitation,
-  present since the case was created (`8d5e22e`).** Chased 2026-09-09:
+  regression** (present since the case was created, `8d5e22e`). Chased
+  2026-09-09; root cause still open (the two leading hypotheses below were both
+  killed):
   - **`9c7f878` ruled out directly.** A/B of the probe at HEAD vs `9c7f878^`
     (`2571265`, git worktree): the M34 nx = 256 init state is **byte-identical**
     — same `config.dx`, fluid count (7392), particle mass (10 sig figs), realised
@@ -1466,37 +1472,66 @@ unchanged (5e-7); dam-break wall-impact ALL-boundary p95 error vs a linear field
     numbers were t\* ≈ 4 samples of the same growing curve; the §5.2.2
     convergence table's "0.6 dx / 1.4 dx" for plain δ-SPH at t\* = 5 is **not
     reproducible** (mis-recorded, or scored before the leak develops).
-  - **Cause: the concave-fillet / re-entrant-corner mDBC ghost nodes.**
-    `--initdump` shows **~840 / 7628 ghost nodes inside the solid** at init;
-    a closer count (scratch probe, `region.sdf`) is **1125 collapsed to a zero
-    offset**, of which **345 are shallow** (parent boundary particle < 2 dx
-    deep — these genuinely want a node) and the rest are inert deep-band
-    interior particles (correctly → Shepard). `_geometricGhostOffsets` only
-    scales the offset *magnitude* along a fixed `nHat` from the
-    **autograd gradient of the composed boundary SDF** `min(tank_interior,
-    wedge∪block∪fillet)`, `fillet = max(box, −disc)`. At the concave switchover
-    ridges that gradient points into the floor/wall, so the retract search
-    never clears `dp/2` → **offset collapses to zero → Shepard/rest fallback**,
-    weak wall support, jet leaks.
-  - **Heuristic recovery tried in-session and it is not enough.** Central-
-    difference SDF normal + projected gradient-ascent up `min_k φ_k` from the
-    boundary particle: rescues only **7 / 345** shallow cases (analytic-grad
-    ascent: 0 / 345). Near the 45° edge / thin fillet-lens the SDF is
-    ridge-dominated or near-flat there; ascent walks parallel to the surface.
-    A real per-boundary-layer geometric normal is needed — **not** an ascent
-    hack. Left unimplemented; `_geometricGhostOffsets` kept as-is.
+  - **The collapsed ghost nodes are NOT the cause — that hypothesis was
+    checked and killed (2026-09-09).** `_geometricGhostOffsets` collapses
+    ~1254 ghosts to a zero offset (→ Shepard/rest), but of those **only 2 are
+    within 1.5 dx of a t = 0 fluid particle**, 10 within 12 dx, median nearest-
+    fluid distance **112 dx**. They are deep obstacle/tank-band interior
+    particles the fluid never reaches; rest density is the correct answer for
+    them (Marrone App. A / English §3 do the same). Whatever drives the leak,
+    it is not these.
+  - **Heuristic ghost-placement variants tried and all inadequate** (kept for
+    the record; none shipped): central-difference SDF normal, projected
+    gradient-ascent up `min_k φ_k`, Newton projection to the zero level set,
+    nearest-point on a high-res marching-squares contour. Each rescues ≲ 2 % of
+    the "shallow" set, and that set is itself mostly the min-of-SDFs mislabel
+    near a solid–solid crease (a point 1 dx inside per `min(φ_a, φ_b)` can be
+    7–16 dx from the true surface). The SDF-gradient family is the wrong tool;
+    Marrone/English use an **analytically discretised boundary** (below).
+  - **Real root cause: still open.** Most likely the *non-collapsed* fillet /
+    downstream-wall ghosts — placed, fluid nearby (the run-up jet), but
+    mirrored along the composed-SDF normal which is wrong on the curved wall —
+    or mDBC being too soft for a violent tangential run-up jet on a curved wall
+    at this resolution. Needs the deferred diagnostic: run to t\* ≈ 3 with the
+    trajectory stored and look at where fluid crosses `x = W/2` and what the
+    local boundary ghosts / wall pressures are doing.
   - **Configs that pass** at HEAD, nx = 256, t\* = 5: `sun2017DeltaSPH` + PST
     (0.58 dx — the shift keeps particles off the wall regardless). The
     `deltaSPH` + `mdbcGhostRefreshEvery = 5` config that also passed (0.68 dx)
-    has been **removed** (`76af473`) — dynamic ghost placement for a static
-    boundary is disallowed.
-  - **Fix belongs on the sampling side, literature-grounded** (user's call,
-    2026-09-09): a per-boundary-particle normal computed once from the
-    geometry — Marrone 2011 App. A (fixed-ghost on curvilinear / convex /
-    concave boundaries), English et al. 2022 §3, or DualSPHysics
-    `JSphBoundCorr::ComputeNormals` (`boundnor` from the actual boundary
-    discretisation, one normal per layer). Fluid-independent, static for the
-    run. **← next**
+    is **removed** (`76af473`) — dynamic ghost placement for a static boundary
+    is disallowed.
+
+**Ghost placement — the method the papers actually specify** (Marrone 2011
+App. A; English et al. 2022 §3, "a procedure similar to Marrone"):
+
+The boundary is **discretised into body nodes with analytic normal + tangent
+unit vectors** (the geometry is known parametrically — a polyline of wall
+segments and arcs — *not* a composed SDF). Fixed ghost particles sit in layers
+`ds/2` outside; each has an interpolation point (our "ghost node") placed by:
+
+| fluid-side angle θ at the node | rule |
+|---|---|
+| flat wall / along one side of a corner | mirror across the interface **along the analytic normal**, `r_g = r_b − 2 φ n̂` |
+| inside a convex solid wedge, π/2 ≤ θ ≤ π (English Fig. 1c) | **central symmetry**: reflect through the corner *point*, `r_g = 2 r_corner − r_b`. Keeps adjacent ghosts → adjacent interpolation points (needed for a smooth fluid response). |
+| re-entrant / concave corner, θ > π (Marrone Fig. A.33) | interpolation points along the **angle bisector**; any point mirrored **> one support radius** past the vertex is dropped and the ghost takes the value of the furthest valid bisector point within a support radius |
+| sharp convex, θ < π/2 (Marrone Fig. A.32) | central symmetry for nodes in the wedge; the uncovered solid sliver between `s'` and `s` is filled *by continuity* — each row takes the interpolation point of its intersection with the `s'` mirror line |
+| θ ≈ 2π | two ghost sets + a visibility criterion |
+
+DualSPHysics stores this as a precomputed per-boundary-particle vector
+`boundnor` (`JSphCpu_mdbc.cpp`: `ghost = pos + boundnor`, so `boundnor` is the
+*full* offset, not a unit normal), built once by `JSphBoundCorr` from the
+boundary discretisation / `_Dp.xml` normals.
+
+**Architectural gap in warpSPH.** There are no body nodes. The geometry is one
+composed SDF callable (`region.sdf` = `min(domainSDF, obstacleSDF)`, itself a
+`min`/`max` tree), and boundary particles are a lattice cut by `sdf < 0`; the
+only boundary polyline is a coarse `nGrid = 255` marching-squares `region.contour`.
+The fix is to **carry the primitive decomposition through** — each geometry
+builder (`_marroneSharpEdgeSDF`, `domainSDF`, `buildPresetObstacles`, …) returns
+its component `(sdf, kind)` list; `addBoundaryGhostParticles` tags each boundary
+particle with its nearest primitive and mirrors along **that primitive's smooth
+analytic normal**, with the corner rules above where the nearest two primitives
+are within ~dp. Fluid-independent, static for the run. **← next (item 2b)**
 
 The DFSPH wall-pressure path (`modules/incompressible/wallPressure.py`) has an
 analogous structure and was not touched.
