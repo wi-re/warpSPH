@@ -39,12 +39,21 @@ Reference material now on disk:
 
 ---
 
-# Current state & how to resume  (as of 2026-09-08)
+# Current state & how to resume  (as of 2026-09-09)
 
 Everything below is **committed**. The audit (Parts 1–4) and the original `c₀` /
 integrator / mDBC-determinant-gate work landed before and during the first
 sessions; this section tracks the validation cases (Part 5) and is the place to
 start from.
+
+**mDBC ghost placement, current (2026-09-09):** the dynamic `mdbcGhostRefreshEvery`
+path is gone (`76af473`); 2D uses `_bodyNodeGhostOffsets` (`1e145a1` — a
+marching-squares polyline of `region.sdf` as body nodes, mirror through the
+nearest polyline point; Marrone 2011 App. A / English §3), 3D still uses the
+`∇(sdf)` `_geometricGhostOffsets`. This fixed the Marrone §3.4 obstacle-toe
+leak (30 → 4.66 dx) and *improved* englishWedge (re-entrant RMSE 10×). Open:
+the toe-*apex* residual (one creeping particle, needs Marrone's continuity
+fill); an analytic per-primitive normal. See §5.2.3.
 
 ## Probe scripts — the entry points
 
@@ -97,12 +106,12 @@ start from.
   spacing from the shortest domain axis (→ `sloshingTank` at 0.6× `config.dx`,
   no dp/2 stagger, c_s regressed 16.6→11); and mDBC ghost placement keyed off
   runtime fluid position (`_fluidDirectedGhostOffsets`) → scattered nodes.
-  Now: sampler honours `config.dx`; `_geometricGhostOffsets` places ghosts from
-  the boundary geometry alone. sloshing wcsph runs the full 7 s (was NaN at
-  t=0.6). First Sensor-1 impact matches (t 2.37 vs 2.40 s, 3.8 vs 3.6 kPa);
-  negative-pressure transients captured. Marrone §3.4 still 6/6 (penetration
-  1.4→0.06 dx). Open: `sloshingTank` needs a `machTarget` (c_s falls with
-  resolution → later-impact overshoot).
+  Now: sampler honours `config.dx`; ghosts placed from the boundary geometry
+  alone (later superseded by `_bodyNodeGhostOffsets`, `1e145a1`). sloshing wcsph
+  runs the full 7 s (was NaN at t=0.6). First Sensor-1 impact matches (t 2.37 vs
+  2.40 s, 3.8 vs 3.6 kPa); negative-pressure transients captured. Open:
+  `sloshingTank` needs a `machTarget` (c_s falls with resolution → later-impact
+  overshoot).
 - **§5.3.2b square patch vs Sun 2019 Fig. 13** — `probe_squarePatchValidationFigure.py`
   gained `--scheme` + ε_M/ε_E conservation errors (`12e5126`); added opt-in
   **Poisson pressure init** (square torsion function, `f718b78`) which replaces
@@ -116,10 +125,11 @@ start from.
   (plateau 0.556 vs 0.55; the deficit was under-resolution, `2138c0f`). Eq. (7)
   *regresses* this case 9/9 → 8/9 (`7fb6222`). Still open below.
 - **§5.2.1 English §4.1 wedge** — steps (a)–(d). `dambreak` gained
-  `hydrostaticInit` (`5d3fe07`); mDBC ghost placement rewritten to
-  fluid-directed + corner-gated (**fix A**, `17290ff`). **Wedge 9/9 at
-  dp = 0.01 (H/dx = 50, English's resolution)**; RMSE corner gates
-  (`982375d`). Fix (B) attempted and reverted as a no-op.
+  `hydrostaticInit` (`5d3fe07`). **Wedge 9/9 at dp = 0.01 (H/dx = 50)**; RMSE
+  corner gates (`982375d`). Fix A (`_fluidDirectedGhostOffsets`, `17290ff`) then
+  fix B both superseded: ghost placement is now `_bodyNodeGhostOffsets`
+  (`1e145a1`), which re-runs the wedge 9/9 with the re-entrant base-corner RMSE
+  ~10× better (0.024 → 0.0022).
 - **§5.2.2 Marrone §3.4 / Fig. 19 sharp-edged obstacle + rounded tank corner**
   — geometry added (`marroneSharpEdge` = obstacle polygon ∪ concave fillet;
   `marroneRoundedCorner` = fillet only), `probe_deltaSPHMarrone34.py`,
