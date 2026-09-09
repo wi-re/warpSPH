@@ -1380,16 +1380,40 @@ benefit over DBC are present** (short-lived spikes right after the violent
 impacts). Runs the full 7 s, no divergence — vs NaN at t = 0.6 s before the fix,
 in *every* scheme/c_s/AV combination tried.
 
-**Open:** the later-impact raw peaks overshoot ~2× and ring, and the raw signal
-carries heavy acoustic hash — because `c_s ∝ dx/targetDt` with no Mach target,
-so it *falls* with resolution (25 at nx=100 → **11 at nx=225**), softening the
-EOS exactly where the impacts get violent. The fix is the `machTarget` /
-`referenceVelocity` path `rotatingSquarePatch` and `dambreak` already have
-(pick `targetDt` so `c_s = U_max/Ma` at every resolution). `examples/sloshingTank/PLAN.md`'s
-stiffer trial (c_s ≈ 50) already showed it drops the first-impact peak onto the
-measured value and kills the density excursion. After that: `dp = 0.002`
-(nx=450); the mDBC-vs-DBC three-row contrast (Phase 2 below); English §3.4.2
-viscous sub-case.
+**Open — soft EOS:** the later-impact raw peaks overshoot ~2× and ring, and the
+raw signal carries heavy acoustic hash — because `c_s ∝ dx/targetDt` with no
+Mach target, so it *falls* with resolution (25 at nx=100 → **11 at nx=225**),
+and the impacts run at local Ma ≈ 0.75 (ρ swings to 1.58 / 0.62 → slam ≈ 8.5 m/s,
+partly self-inflicted spray). The fix is the `machTarget` / `referenceVelocity`
+path `rotatingSquarePatch` and `dambreak` already have, sized off the *impact*
+velocity (c_s ≈ 40–85). `examples/sloshingTank/PLAN.md`'s stiffer trial
+(c_s ≈ 50) already showed it drops the first-impact peak onto the measured
+value and kills the density excursion. After that: `dp = 0.002` (nx=450); the
+mDBC-vs-DBC three-row contrast; English §3.4.2 viscous sub-case.
+
+**mDBC extrapolation quality (`afb6e59`).** Chasing the raw-signal roughness led
+to a controlled test of the mDBC MLS: freeze the config, overwrite the fluid
+density with an analytic field, run `computeMdbcDensity` once, compare the
+boundary result to the field at the boundary positions (a Liu-Liu-style unit
+check). Result: **the MLS operator is exact** — it reproduces a linear field to
+float32 eps on ~92 % of near-fluid boundary particles at *every* point of a dam
+break (still column through violent run-up). The roughness is the 8–33 % that
+fall to the fallback — all at the free-surface contact line, growing with the
+flow (8 % / 0.03 err at rest → 33 % / 0.6 err at dam-break run-up). The
+fallback was Shepard density **clamped to ≥ ρ₀** (a DualSPHysics DBC
+anti-attraction guard, not in English 2022) plus an **Adami hydrostatic term**,
+picked by a **hard `where(wellConditioned, …)` switch** — so adjacent boundary
+particles snapped between the exact MLS value and ~ρ₀, a visible step right where
+the surface meets the wall. Now: raw unclamped Shepard, no hydrostatic term, and
+a smooth MLS→Shepard ramp on `numNeighbors` / `|det(A_g)|` (`w = 0` exactly
+below `interpolateLiuLiu`'s determinant floor, so the Marrone §3.1 sheet-fling
+protection is intact by construction). Pristine-IC MLS-path error unchanged
+(5e-7); dam-break wall-impact ALL-boundary p95 error vs a linear field
+**0.38 → 0.027**. `determinantThresholdFor` added to the `liu` module.
+**Regression gates still to re-run** (englishWedge 9/9, Marrone §3.4 6/6) — GPU
+contended when landed. The DFSPH wall-pressure path
+(`modules/incompressible/wallPressure.py`) has an analogous structure and was
+not touched.
 
 ---
 _Original scoping notes:_
