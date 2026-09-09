@@ -58,6 +58,8 @@ start from.
 | `scripts/probe_deltaPlusShiftMagnitude.py` | measures the δ⁺ shift vs Sun Eq. (7) | — |
 | `scripts/probe_deltaPlusShiftBlastRadius.py` | which registered cases use `ShiftingScheme.deltaSPH` | — |
 | `scripts/probe_deltaPlusShiftSweep.py` | 3-leg (`off`/`eighth`/`eq7`) smoke sweep over the 11 affected cases | `--cases`, `--nSteps`, `--report` |
+| `scripts/probe_squarePatchPSTControl.py` | PST discriminator on the rotating patch (§5.3.2a) | `--nx`, `--legs`, `--twProbe`, `--figure` |
+| `scripts/probe_squarePatchValidationFigure.py` | square patch vs Sun 2019 Fig. 13 (§5.3.2b) | `--nx`, `--scheme`, `--times`, `--modes`, `--poissonInit`/`--noPoissonInit` |
 
 ## Done
 
@@ -88,6 +90,15 @@ start from.
   rescues it** (paired 0.028, void 0.003). **Decision: `sun2017Eq7Shift` stays
   coupled to `sun2017DeltaSPH`, not a scheme-agnostic default** — the global
   flip would give un-frozen `deltaSPH` the 8× shift and diverge `dambreak`.
+  The frozen-`eighth` cell completed the 2×2: **freezing** is the load-bearing
+  factor, `eq7`-vs-`eighth` a wash once diffusion is frozen (`7f658c6`).
+- **§5.3.2b square patch vs Sun 2019 Fig. 13** — `probe_squarePatchValidationFigure.py`
+  gained `--scheme` + ε_M/ε_E conservation errors (`12e5126`); added opt-in
+  **Poisson pressure init** (square torsion function, `f718b78`) which replaces
+  the undamped acoustic core mode with a stable negative pressure core. δ⁺ +
+  Poisson at L/Δx = 200 matches Fig. 13 through **tω ≈ 3** (ε_M < 0.2 %,
+  ε_E < 0.7 %, volume < 0.04 %, 4 coherent arms, noise-free field); tω = 4 arm
+  fragmentation is under-resolution (needs L/Δx = 400), not scheme/init.
 - **§5.1 Marrone §3.1** — §5.1.1: the case had always run δ⁺-SPH, not δ-SPH
   (`shiftProperties.active` defaults `True`); added the `shifting` param
   (`c14dd06`). §5.1.2: re-run at **H/Δx = 322** — **P1 converges to Buchner**
@@ -1588,6 +1599,50 @@ the Eq. (7) magnitude is a marginal further gain (tighter ρ band: min 0.77 vs
 0.59, peak ‖v‖ 15.4 vs 19.5), not the load-bearing factor. This reinforces the
 scoping decision: the good result travels with `sun2017DeltaSPH`, and `eq7` is a
 mild bonus there.
+
+### 5.3.2b The square-patch validation figure vs Sun 2019 Fig. 13
+
+`scripts/probe_squarePatchValidationFigure.py` gained `--scheme` (so the row
+runs the production δ⁺ config, `sun2017DeltaSPH` = frozen diffusion + Eq. (7)
+shift) and the Sun 2019 §3.3 conservation errors ε_M / ε_E (Eqs. 26–27) plus
+footprint drift, added to `squarePatchAreaMetrics` (`epsAngularMomentum`,
+`epsKineticEnergy`, `linearMomentumMag`). Run at L/Δx = 200 (`nx = 600`), times
+tω = 1/2/3/4.
+
+**Poisson pressure initialisation** (`squarePatch` param `poissonPressureInit`,
+opt-in, `box` only). The patch is not an equilibrium; its t=0 pressure is the
+solution of ∇²p = 2ρ₀ω² with p = 0 on the free surface — for the square, 2ρ₀ω²
+times the Saint-Venant torsion function (Prandtl stress function), negative in
+the interior with p(0,0) ≈ −0.589 ρ₀ω²a². The case previously seeded only the
+rotating velocity, so p developed from zero through an **undamped acoustic core
+mode** — blue (−5) → white → red (+5) → blue over tω = 1…4, nothing like
+Fig. 13. Seeding the torsion function (imposed via density, ρ = ρ₀ + p/c₀²,
+since the isothermal EOS recomputes p from ρ each step) gives a **stable
+coherent negative core through tω = 1–3**, matching Sun's "negative pressure
+core". Verified the series: ∇²v = 1 to machine precision, x↔y symmetric, v = 0
+on the boundary.
+
+**Result (nx = 600, δ⁺ + Poisson init):**
+
+| tω | ε_M | ε_E | ‖p‖_lin/ρωL³ | vol drift | field |
+|---|---|---|---|---|---|
+| 2 | 0.06 % | 0.19 % | 2e-5 | −0.03 % | negative core, 4 coherent arms, noise-free |
+| 3 | 0.19 % | 0.70 % | 8e-5 | −0.03 % | ″ |
+| 3.5 | 5.1 % | 2.8 % | — | −0.04 % | arm tips begin to break |
+| 4 | 36 % | 16 % | — | −0.06 % | fragmented |
+
+Through **tω ≈ 3** this is a clean qualitative + quantitative match to Fig. 13:
+area-conserving spiral rotation, four arms from the corners, smooth pressure
+with the negative core, near-perfect conservation (ε_M < 0.2 %, ε_E < 0.7 %,
+volume drift < 0.04 %, linear momentum ~1e-4 ρωL³). Poisson init does **not**
+delay the fragmentation onset (identical to the p=0 run at both L/Δx = 100 and
+200) — the arms are ~2 particles thick by tω ≈ 3.2 and break up regardless; the
+seed is long forgotten by then. Holding the arms to tω = 4 as Sun does needs
+L/Δx = 400 (`nx = 1200`, a multi-hour run); consistent with
+`probe_squarePatchFragmentation.py`'s finding that arm break-up here is
+under-resolution, not a PST or init failure. Figures:
+`scratchpad/sp_validation_nx600_poisson.png`,
+`scratchpad/sp_nx300_{poisson,nopoisson}.png` (the A/B).
 
 ### 5.3.3 Sun 2017 §4.2 — oscillating droplet
 
