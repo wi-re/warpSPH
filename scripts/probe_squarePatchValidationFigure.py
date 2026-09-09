@@ -26,6 +26,11 @@ parser.add_argument('--modes', nargs='+',
                     default=['shiftOff', 'surfaceZeroed', 'surfaceNormal'])
 parser.add_argument('--field', default='pressure', choices=['pressure', 'density'])
 parser.add_argument('--omega', type=float, default=4.0)
+parser.add_argument('--poissonInit', dest='poissonInit', action='store_true', default=True,
+                    help='seed the t=0 pressure with the incompressible Poisson '
+                         'solution (Sun 2019 §3.3); on by default for this figure')
+parser.add_argument('--noPoissonInit', dest='poissonInit', action='store_false',
+                    help='start from p=0 and eat the acoustic transient (the old behaviour)')
 parser.add_argument('--scheme', default=None,
                     help="scheme to run every mode under (default: the case default, "
                          "deltaSPH); pass 'sun2017DeltaSPH' for the production δ⁺ "
@@ -106,7 +111,8 @@ def run_mode(mode):
     case.postStep = postStep
     case.configureScheme = _configure(mode)
     try:
-        runKw = dict(params={'shape': 'box', 'omega': args.omega},
+        runKw = dict(params={'shape': 'box', 'omega': args.omega,
+                             'poissonPressureInit': args.poissonInit},
                      nx=args.nx, tLimit=max(targets) * 1.05, nSteps=None,
                      store=False, plot=False, quiet=True, progress=False)
         if args.scheme:
