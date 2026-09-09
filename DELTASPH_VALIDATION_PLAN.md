@@ -1404,16 +1404,35 @@ fallback was Shepard density **clamped to ≥ ρ₀** (a DualSPHysics DBC
 anti-attraction guard, not in English 2022) plus an **Adami hydrostatic term**,
 picked by a **hard `where(wellConditioned, …)` switch** — so adjacent boundary
 particles snapped between the exact MLS value and ~ρ₀, a visible step right where
-the surface meets the wall. Now: raw unclamped Shepard, no hydrostatic term, and
-a smooth MLS→Shepard ramp on `numNeighbors` / `|det(A_g)|` (`w = 0` exactly
-below `interpolateLiuLiu`'s determinant floor, so the Marrone §3.1 sheet-fling
-protection is intact by construction). Pristine-IC MLS-path error unchanged
-(5e-7); dam-break wall-impact ALL-boundary p95 error vs a linear field
+the surface meets the wall. Now (`afb6e59` + `80eabb9`): a smooth MLS→Shepard
+ramp on `numNeighbors` / `|det(A_g)|` (`w = 0` exactly below
+`interpolateLiuLiu`'s determinant floor, so the Marrone §3.1 sheet-fling
+protection is intact by construction), the hydrostatic term dropped from the
+fallback, and the ρ_b ≥ ρ₀ clamp kept (the m2dbc anti-attraction guard —
+`afb6e59` dropped it, `80eabb9` restored it). Pristine-IC MLS-path error
+unchanged (5e-7); dam-break wall-impact ALL-boundary p95 error vs a linear field
 **0.38 → 0.027**. `determinantThresholdFor` added to the `liu` module.
-**Regression gates still to re-run** (englishWedge 9/9, Marrone §3.4 6/6) — GPU
-contended when landed. The DFSPH wall-pressure path
-(`modules/incompressible/wallPressure.py`) has an analogous structure and was
-not touched.
+
+**Regression gates:**
+- **englishWedge 9/9 — PASS.** Fresh run (dp = 0.02, wedge, t = 4 s): near-wall
+  hydrostatic RMSE 0.0069 (gate ≤ 0.08), base-corners RMSE 0.024 (gate ≤ 0.03),
+  no penetration, ρ ∈ [1.0001, 1.0025]. English §4.1 is still water where every
+  departure is the wall closure alone, so this clears the change.
+- **Marrone §3.1** (`sun2017DeltaSPH`, nx = 60, to t\* ≈ 4) — `diverged=False`.
+  The det-gate sheet-fling protection held.
+- **Marrone §3.4 nx = 256 tank-wall penetration — FAIL (~5.5 dx), but NOT from
+  this change.** A revert-and-retest (mDBC files at `76f61b4`, pre-`afb6e59`)
+  reproduces the FAIL at 5.53 dx; `afb6e59` gives 6.0, `+80eabb9` gives 8.0 —
+  all within chaotic-jet run-to-run scatter, no trend. The cached "0.61 dx / 6/6"
+  was a different config (t\* = 5, and its failing check was
+  *weakly-compressible* at ρ 1.14). So `deltaSPH` Marrone §3.4 at nx = 256
+  flipped some time before `afb6e59` from "fails bulk-compressibility, passes
+  penetration" to "passes bulk-compressibility, fails penetration" — a real
+  behaviour change to chase separately (candidate: `9c7f878` sampler, or the
+  §5.1 two-sided-viscosity / ψ work).
+
+The DFSPH wall-pressure path (`modules/incompressible/wallPressure.py`) has an
+analogous structure and was not touched.
 
 ---
 _Original scoping notes:_
