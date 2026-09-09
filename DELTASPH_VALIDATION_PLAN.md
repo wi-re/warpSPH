@@ -128,15 +128,15 @@ start from.
   jet-tip ρ/‖v‖ grow with Δx (fragmenting jet, as Marrone notes). **Rounded
   corner in isolation: 6/6 to t\* = 7, ZERO fillet penetration.** **δ⁺-SPH +
   PST 6/6** (bulk ρ P99 ≤ 1.02 vs ~1.14 for plain δ-SPH); reusable configs
-  `examples/sweeps/marrone34_*.yaml`. **Plain δ-SPH leaks ~30 dx by t\* = 5 at
-  nx = 256** — NOT a regression (§5.2.3). Leak-tracked to **fluid sinking
-  through the bed at the obstacle-toe re-entrant corner** (45° edge ∧ floor);
-  28 % of the layer-1/2 bed ghosts there are collapsed to rest density (0 % on
-  a clean bed), 42 % of ghost directions wrong by > 45°. It **is** a
-  ghost-placement bug at a Marrone Fig. A.33 re-entrant corner — fix is the
-  body-node / bisector method (item 2b). δ⁺-SPH + PST runs it clean.
-  `mdbcGhostRefreshEvery` removed (`76af473`). Open: item 2b; H/dx = 128;
-  the 9 surface probes; viscous §3.4.2.
+  `examples/sweeps/marrone34_*.yaml`. **Plain δ-SPH leaked ~30 dx by t\* = 5 at
+  nx = 256** (NOT a regression) — leak-tracked to fluid sinking through the bed
+  at the **obstacle-toe re-entrant corner** where the composed-SDF-gradient
+  ghost placement failed. **FIXED (`_bodyNodeGhostOffsets`, Marrone App. A /
+  English §3, `1e145a1`): penetration 29.8 → 4.66 dx to t\* = 5 (≤ 1 dx through
+  t\* = 3.3); englishWedge still 9/9, re-entrant-corner RMSE 10× better; all
+  tests pass.** 4.66 dx is a residual, still > the ≤ 3 gate. `mdbcGhostRefreshEvery`
+  removed (`76af473`). Open: chase the 4.66 dx residual; H/dx = 128; the 9
+  surface probes; viscous §3.4.2.
 - **`runner/media.py`** — frame-ordering bug (glob sort breaks past 100k
   steps) fixed (`0810491`).
 
@@ -154,18 +154,19 @@ start from.
    `impact`'s −4 % `nnDistP01` confirmed as a real (small) cost. Remaining
    micro-question: frozen-`eighth` run to isolate whether frozen diffusion or
    `eq7` carries the good frozen result.
-2b. **Body-node mDBC ghost placement (Marrone 2011 App. A / English §3)** —
-   **this IS the M34 wall-leak fix** (§5.2.3: the leak is fluid sinking
-   through the bed at the obstacle-toe re-entrant corner, where 28 % of the
-   near-surface bed ghosts are collapsed to rest density and 42 % point the
-   wrong way). `_geometricGhostOffsets` mirrors along `∇` of the composed
-   `min`/`max` SDF, which is wrong at re-entrant / sharp corners. Replace with:
-   discretise the boundary into body nodes (per-segment analytic normal, or a
-   fine polyline from the SDF), then per boundary particle — nearest body node
-   → mirror along its normal on flats; **bisector + support-radius cap** at
-   re-entrant corners (θ > π, Fig. A.33); central symmetry through the vertex
-   for convex wedges (Fig. A.31–32). Acceptance: M34 nx = 256 plain δ-SPH
-   tank-wall penetration ≤ 3 dx to t\* = 5; englishWedge 9/9 unchanged. **← next**
+2b. ~~**Body-node mDBC ghost placement (Marrone 2011 App. A / English §3)**~~
+   **DONE (2026-09-09), `_bodyNodeGhostOffsets`** (`1e145a1`). Was the M34
+   wall-leak fix (§5.2.3): the composed-`min`/`max`-SDF gradient mis-placed the
+   mDBC ghosts at the obstacle-toe re-entrant corner. Replaced (2D) by a
+   marching-squares polyline of `region.sdf` as the body-node set + mirror
+   through the nearest polyline point. **M34 nx = 256 plain δ-SPH tank-wall
+   penetration 29.8 → 4.66 dx to t\* = 5** (≤ 1 dx through t\* = 3.3; was 5.3
+   climbing to 30) — 5/6, the 4.66 dx is a residual still 1.7 over the ≤ 3
+   gate (§5.2.3). **englishWedge 9/9** and *better* — base-corner hydrostatic
+   RMSE 0.024 → 0.0022, wedge-face 0.0013, apex 0.0020, wall penetration 0.
+   All `test_physics` / `test_wallPressure` / `test_deltaSPHDiffusion` pass.
+   Left: chase the 4.66 dx residual; an analytic per-primitive normal (exact
+   on curves, cheaper than the polyline); Marrone's explicit bisector rule.
 3. **§5.1 Marrone P2** — median 2× low **and** ~1 t\* phase-early at H/Δx = 322.
    The user's read (2026-09-08): a **probing-methodology** gap, not a scheme
    error — P1's *raw* trace is dominated by weak-compressibility acoustic
@@ -183,10 +184,9 @@ start from.
    plumbed into `addBoundaryGhostParticles`. Deferred — (A) clears the wedge at
    English's resolution, and the dp = 0.02 residual is under-resolution.
 7. **§5.2.2 Marrone §3.4 — probes + fine Δx.** Bulk converges H/Δx = 32→64,
-   rounded corner 6/6 in isolation, δ⁺+PST 6/6. **Plain δ-SPH leaks ~30 dx tank
-   penetration by t\* = 5 at nx = 256** — not a regression (§5.2.3); leak =
-   bed penetration at the obstacle-toe re-entrant corner, blocked on item 2b.
-   Left: (a) H/Δx = 128 to
+   rounded corner 6/6 in isolation, δ⁺+PST 6/6. Plain δ-SPH toe-leak **fixed**
+   by `_bodyNodeGhostOffsets` (item 2b) — ≤ 1 dx to t\* = 3.3.
+   Left: (a) full t\* = 5 acceptance re-run; H/Δx = 128 to
    t\* ≈ 7.4, and a `densityP99` re-run of the 32/64 pair for a real bulk-max
    number; (b) the 9 surface pressure probes P1–P9 (on the 45° edge, the roof,
    the fillet arc — *not* axis-aligned, so `diagnostics`' wall-probe path needs
@@ -1296,12 +1296,11 @@ even at H/dx = 234), not a bulk instability.
 | ρ pointwise max (1 jet-tip particle) | 1.14 | **1.27** |
 | max ‖v‖ | 4.3 U_max | **7.1 U_max** |
 
-⚠ **The tank-wall row is not reproducible** — a fresh 2026-09-09 run of the
-identical config (plain δ-SPH, init-only ghosts, nx = 256, t\* = 5) leaks
-**~30 Δx** (15–20 particles sinking through the **bed at the obstacle toe**;
-see §5.2.3). Not a code regression (byte-identical vs `9c7f878^`); it is
-broken mDBC ghost placement at that re-entrant corner (item 2b). δ⁺-SPH + PST
-runs it clean. The rest of this table (bulk convergence) still stands.
+⚠ **The tank-wall row predates the ghost-placement fix.** With the old
+composed-SDF-gradient ghosts, plain δ-SPH nx = 256 leaked **~30 Δx** by t\* = 5
+(15–20 particles sinking through the bed at the obstacle toe — a re-entrant
+corner the `∇(sdf)` mirror mishandled; not a code regression). Fixed by
+`_bodyNodeGhostOffsets` (§5.2.3): now ≤ 1 dx. Bulk convergence unaffected.
 
 The **bulk converges** — KE curves overlie, `densityP05` is flat. The **pointwise** jet-tip extremes (`maxDensity`, `maxVelocity`)
 *grow* with resolution: the fragmenting sharp-edge jet resolves thinner and
@@ -1448,9 +1447,11 @@ unchanged (5e-7); dam-break wall-impact ALL-boundary p95 error vs a linear field
 - **Marrone §3.1** (`sun2017DeltaSPH`, nx = 60, to t\* ≈ 4) — `diverged=False`.
   The det-gate sheet-fling protection held.
 - **Marrone §3.4 nx = 256 tank-wall penetration — FAIL, NOT a regression**
-  (present since `8d5e22e`). Chased 2026-09-09; **root cause found: broken mDBC
-  ghost placement at the obstacle-toe re-entrant corner** (fluid sinks through
-  the bed there once the sharp-edge jet forms). Fix = item 2b. Trail:
+  (present since `8d5e22e`). Chased 2026-09-09; **root cause found AND FIXED:
+  broken mDBC ghost placement at the obstacle-toe re-entrant corner** (fluid
+  sank through the bed there once the sharp-edge jet formed) — replaced by
+  `_bodyNodeGhostOffsets` (Marrone App. A / English §3; see below), leak now
+  ≤ 1 dx. Trail:
   - **`9c7f878` ruled out directly.** A/B of the probe at HEAD vs `9c7f878^`
     (`2571265`, git worktree): the M34 nx = 256 init state is **byte-identical**
     — same `config.dx`, fluid count (7392), particle mass (10 sig figs), realised
@@ -1485,12 +1486,14 @@ unchanged (5e-7); dam-break wall-impact ALL-boundary p95 error vs a linear field
     disagreement — that region really is fine, which is why the first two
     checks mis-cleared "ghost placement"). Fluid piling into a wall of
     rest-density bed particles at the toe just sinks through.
-  - This is exactly **Marrone 2011 Fig. A.33** (re-entrant θ > π): bisector
-    placement + support-radius cap, off the analytic body-node normals. The
-    fix is **item 2b**. Earlier heuristics (CD normal, ascent, Newton, contour
-    nearest-point) were tested against the *wrong* (fillet / deep-interior)
-    particle sets and so looked useless; against the toe corner a
-    body-node/bisector method is the right tool.
+  - This is exactly **Marrone 2011 Fig. A.33** (re-entrant θ > π). **FIXED** by
+    `_bodyNodeGhostOffsets` (`1e145a1`) — full write-up in the "IMPLEMENTED"
+    block below. Net: M34 nx = 256 plain δ-SPH penetration **29.8 → 4.66 dx**
+    to t\* = 5 (≤ 1 dx through t\* = 3.3), englishWedge 9/9 + better, all tests
+    pass. The 4.66 dx is a residual (builds after t\* ≈ 3.3) still 1.7 over the
+    ≤ 3 gate — chase separately (roof re-impact ≈ t\* 3.9 suspect). Earlier
+    heuristics (CD normal, ascent, Newton) had been tested against the *wrong*
+    (fillet / deep-interior) particle sets and so looked useless.
   - **Configs that pass** at HEAD, nx = 256, t\* = 5: `sun2017DeltaSPH` + PST
     (0.58 dx — the shift keeps particles off the wall regardless). The
     `deltaSPH` + `mdbcGhostRefreshEvery = 5` config that also passed (0.68 dx)
@@ -1518,24 +1521,43 @@ DualSPHysics stores this as a precomputed per-boundary-particle vector
 *full* offset, not a unit normal), built once by `JSphBoundCorr` from the
 boundary discretisation / `_Dp.xml` normals.
 
-**Architectural gap in warpSPH.** There are no body nodes. The geometry is one
-composed SDF callable (`region.sdf` = `min(domainSDF, obstacleSDF)`, itself a
-`min`/`max` tree), and boundary particles are a lattice cut by `sdf < 0`; the
-only boundary polyline is a coarse `nGrid = 255` marching-squares `region.contour`.
-The fix is to **carry the primitive decomposition through** — each geometry
-builder (`_marroneSharpEdgeSDF`, `domainSDF`, `buildPresetObstacles`, …) returns
-its component `(sdf, kind)` list; `addBoundaryGhostParticles` tags each boundary
-particle with its nearest primitive and mirrors along **that primitive's smooth
-analytic normal**, with the corner rules above where the nearest two primitives
-are within ~dp. Fluid-independent, static for the run.
+**IMPLEMENTED — `_bodyNodeGhostOffsets`, 2026-09-09** (`rigidBody/ghostParticles.py`).
+warpSPH has no analytic body nodes (the geometry is one composed `min`/`max`
+SDF; boundary particles are a lattice cut by `sdf < 0`). So the body-node
+discretisation is taken from the SDF itself: a **fine marching-squares polyline
+of `region.sdf`** (`_boundaryPolyline`, ~2.5 samples/dp, built once, no fluid).
+Then per boundary particle:
 
-**Scope note (2026-09-09):** this is the **M34 wall-leak fix** — the leak is
-fluid sinking through the bed at the obstacle-toe re-entrant corner, where the
-composed-SDF gradient collapses 28 % of the near-surface bed ghosts and turns
-another ~14 % the wrong way (§5.2.3). It also covers sharp / thin geometry
-(§5.2.1 fix B, plates, wedge apices). The *fillet* region, by contrast, is fine
-as-is (0 % direction disagreement) — the bug is specifically re-entrant /
-sharp corners. **← 2b, next**
+* nearest point `r_s` on the polyline → **mirror through it**, `r_g = 2 r_s − r_b`.
+  One rule for every Marrone case: flat wall → perpendicular foot → standard
+  mirror; convex solid wedge → `r_s` collapses to the apex → central symmetry
+  through the vertex; re-entrant corner → `r_s` on the nearest wall → mirror
+  across it into the fluid.
+* validity retract (shorten `r_g` toward `r_s`, never lengthen) so the node
+  clears every solid; cap the offset at `1.5 h`; past that → zero offset →
+  Shepard/rest (Marrone's "not considered" rule).
+
+Wired in `addBoundaryGhostParticles`: **2D uses `_bodyNodeGhostOffsets`**; 3D
+(no `find_contours`) keeps the old `∇(sdf)` `_geometricGhostOffsets`. No fluid
+consulted, static for the run.
+
+**Results:**
+- **englishWedge 9/9 — PASS, and better than before.** Re-entrant wedge-base
+  corner RMSE **0.024 → 0.0022** (~10×), near-wall/bed **0.0069 → 0.0045**,
+  apex 0.0020, faces 0.0013, 0 dx penetration, ρ ∈ [1.0001, 1.0025].
+- **Marrone §3.4 nx = 256 plain δ-SPH — the toe leak is gone.** Leak-tracking
+  run: `maxPenetrationDx` stays **≤ 1.0 dx through t\* = 3.3** (was 5.3 dx by
+  t\* = 2.5 and climbing to ~30 by t\* = 5), `nPenetrating` **1–2** (was 5–21),
+  no divergence. **Full t\* = 5 acceptance run: 29.8 → 4.66 dx** (5/6; the
+  4.66 dx is a residual that builds after t\* ≈ 3.3, still 1.7 over the ≤ 3
+  gate — chase separately; roof re-impact ≈ t\* 3.9 is the suspect).
+- `test_physics` / `test_wallPressure` / `test_deltaSPHDiffusion`: all pass.
+
+Still a *quality* item, not done: an analytic per-primitive normal (vs the
+polyline discretisation) would be exact on curved walls and cheaper; the
+polyline is `O(n · segments)` at init and marching-squares-coarse. And the
+Marrone bisector refinement for re-entrant corners (θ > π) — the plain
+mirror-through-nearest-point handles the toe well enough that it wasn't needed.
 
 The DFSPH wall-pressure path (`modules/incompressible/wallPressure.py`) has an
 analogous structure and was not touched.
