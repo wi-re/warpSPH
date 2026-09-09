@@ -128,7 +128,7 @@ def _params(scheme, cornerOnly=False, shifting='off'):
     )
 
 
-def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme, ghostRefresh=0,
+def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme,
             cornerOnly=False, shifting='off'):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
@@ -141,13 +141,11 @@ def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme, ghostRefresh=0
     tLimit = tStar * SQRT_H_G
     tag = (f'{scheme}_nx{nx}_c{c0Ratio:g}'
            + ('_cornerOnly' if cornerOnly else '')
-           + ('' if shifting == 'off' else f'_pst-{shifting}')
-           + (f'_gr{ghostRefresh}' if ghostRefresh else ''))
+           + ('' if shifting == 'off' else f'_pst-{shifting}'))
     runRoot = os.path.join(out, tag + '_run')
 
     params = _params(scheme, cornerOnly=cornerOnly, shifting=shifting)
     params['machTarget'] = machTarget
-    params['mdbcGhostRefreshEvery'] = int(ghostRefresh)
 
     kw = dict(scheme=scheme, L=TANK_L, nx=nx, tLimit=tLimit,
               quiet=True, store=False, progress=True, params=params)
@@ -178,8 +176,7 @@ def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme, ghostRefresh=0
         H=H, G=G, TANK_L=TANK_L, TANK_W=TANK_W, COL_W=COL_W, COL_H=COL_H,
         shiftActive=bool(getattr(r.ctx.schemeConfig.shiftProperties, 'active', False)),
         sun2017Eq7Shift=bool(getattr(r.ctx.schemeConfig.shiftProperties, 'sun2017Eq7Shift', False)),
-        shiftingArg=str(shifting),
-        ghostRefreshEvery=int(ghostRefresh), cornerOnly=bool(cornerOnly),
+        shiftingArg=str(shifting), cornerOnly=bool(cornerOnly),
         diverged=bool(r.diverged), nSteps=int(r.nSteps),
         wallTime_s=float(r.wallTime or 0.0),
     )
@@ -426,9 +423,6 @@ def main(argv=None):
                     help="particle shifting / PST: 'off' = plain delta-SPH (validation); "
                          "'default' keeps the scheme's own setting (ON for sun2017DeltaSPH); "
                          "'on' forces it")
-    ap.add_argument('--ghostRefresh', type=int, default=0,
-                    help='re-place mDBC boundary ghosts from the current fluid every N steps '
-                         '(0 = init-only, the default); §5.2.2')
     ap.add_argument('--cornerOnly', action='store_true',
                     help='drop the sharp-edged obstacle; keep only the rounded tank corner '
                          '(isolated fillet impact test)')
@@ -444,8 +438,7 @@ def main(argv=None):
     if args.initdump:
         _initdump(args.nx, args.out, args.cornerOnly); return
     _runOne(args.nx, args.c0Ratio, args.tStar, args.out, args.video,
-            args.plotInterval, args.scheme, args.ghostRefresh, args.cornerOnly,
-            args.shifting)
+            args.plotInterval, args.scheme, args.cornerOnly, args.shifting)
 
 
 if __name__ == '__main__':

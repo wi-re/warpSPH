@@ -7,37 +7,33 @@ region per boundary material ID, assigned in region order starting at 0
 (`boundaryMaterial`); called once during initialization, from
 `initializers/weaklyCompressible.py`.
 
-**Ghost placement** (`DELTASPH_VALIDATION_PLAN.md` §5.2.1). Every *wetted*
-boundary particle's ghost is the particle mirrored across the **fluid-facing
-interface**, with the interface distance and the mirror direction taken from
-the surrounding *fluid* particles' actual positions -- not from the boundary
-region's SDF gradient.
+**Ghost placement is a pure function of the boundary geometry**, evaluated once
+here (`_geometricGhostOffsets`). It never consults the fluid, so the layer is
+identical whether the domain starts wet, dry, or filling, and -- because the
+boundary is static in these cases -- the ghost offsets never change during a
+run. Re-placing ghost particles mid-simulation for a *static* boundary is a
+bug, not a feature: it makes the discretisation depend on the solution. A
+genuinely moving boundary would re-run this from the new geometry.
 
-Why not the SDF gradient: `regions/sample.py` cuts a regular lattice with
-`sdf < 0`, so a boundary particle's perpendicular distance to the true surface
-is only `dp/2` for the outer layer of an axis-aligned, grid-registered face.
-The old code reflected each particle by `2·s` along `∇(sdf)`, and `∇(sdf)`
-points to the nearest *solid* surface -- which past a thick wall band's medial
-axis, or in a re-entrant corner, is the wrong surface and the wrong direction.
-Measured on the English 2022 §4.1 wedge: a 4th/5th-layer boundary particle
-0.1 below the bed beside the wedge got a ghost mirrored *straight up* by
-`10·dp` into open fluid, and English Eq. (12)'s `ρ_b = ρ_g + (r_b−r_g)·∇ρ_g`
-then extrapolated the corner-contaminated fluid gradient back over that
-`10·dp` lever arm -- a ~13 % hydrostatic-pressure error at the re-entrant
-corner (`DELTASPH_VALIDATION_PLAN.md` §5.2.1).
+The method (English et al. 2022 §3, matching DualSPHysics
+`InteractionMdbcCorrectionT2`): each boundary particle's ghost node is the
+particle mirrored across the region SDF surface along its gradient,
+`r_g = r_b - 2 phi(r_b) n_hat`, so a first-layer node sits `dp/2` into the
+fluid and a k-th-layer node ~`k dp`. Then a validity retract -- shorten (never
+lengthen) the offset so the node clears every solid region: the far face of a
+thin obstacle, the other wall of a re-entrant corner. A boundary particle with
+no clean fluid-facing node on that ray (deep solid interior; the medial region
+of a sharp convex solid edge; a concave fillet where `∇(sdf)` of the composed
+`min`/`max` points into the wall) keeps a zero offset -- its MLS moment matrix
+is singular and `computeMdbcDensity` Shepard-/rest-falls-back, the right answer
+for a particle the fluid barely reaches.
 
-The fluid-direction mirror fixes both: the direction is toward the actual
-fluid (diagonally, at a corner), and the mirror distance is `2·(d_fluid −
-dp/2)` where `d_fluid` is the distance to the nearest fluid particle -- so a
-corner particle whose nearest fluid is `2·dp` away gets a `~3·dp` offset, not
-`10·dp`. On a grid-aligned flat wall `d_fluid` for the k-th layer is exactly
-`k·dp`, `2·(k·dp − dp/2)` reproduces the old `2·|s|` mirror for **every**
-layer, and the direction is the outward normal, so no grid-aligned case moves.
-
-Boundary particles whose nearest fluid is beyond `_GHOST_NEAR_FLUID·dp` (deep
-solid interior) keep the legacy SDF reflection and Shepard-fallback to rest
-density in `interpolateLiuLiu` -- which is the right answer for a particle the
-fluid never reaches.
+Known gap (`DELTASPH_VALIDATION_PLAN.md` §5.2.2 / §5.2.3): on the Marrone 2011
+§3.4 geometry the retract-along-`∇(sdf)` collapses ~1100/7600 ghost nodes at
+the 45° edge / re-entrant corners / concave fillet, and the resulting weak wall
+support lets a run-up jet leak. A literature-grounded per-boundary-layer normal
+(Marrone 2011 App. A; DualSPHysics `JSphBoundCorr::ComputeNormals`) is the
+right fix; δ⁺-SPH + PST sidesteps it by keeping fluid off the wall.
 """
 
 import torch
@@ -48,44 +44,8 @@ from typing import Any, Optional, Union
 __all__ = ['addBoundaryGhostParticles']
 
 #: The fluid-facing interface sits this many spacings `dp` proud of the
-#: outermost boundary layer (English et al. 2022 §3: `dp/2`). Used only as the
-#: floor on the mirror distance when fluid is touching the boundary particle.
+#: outermost boundary layer (English et al. 2022 §3: `dp/2`).
 GHOST_FLUID_DEPTH = 0.5
-
-#: Fluid-neighbour gather radius for the direction / interface estimate, as a
-#: multiple of the mean support radius.
-_GHOST_GATHER_SCALE = 2.5
-
-#: Minimum fluid neighbours before the fluid-direction mirror is trusted;
-#: below this the particle keeps the legacy SDF reflection (it will
-#: Shepard-fallback in `interpolateLiuLiu` anyway).
-_GHOST_MIN_FLUID_NBRS = 3
-
-#: A boundary particle is "wetted" -- and so gets the fluid-direction mirror --
-#: only if its nearest fluid particle is within this many spacings. A particle
-#: deeper in the solid does not exchange with the fluid and keeps rest density.
-#: ~ the kernel reach (2h = 4 dp at h/dp = 2), plus a margin for a re-entrant
-#: corner where the nearest fluid is diagonally offset.
-_GHOST_NEAR_FLUID = 6.0
-
-#: Cap on the ghost offset `|r_b - r_g|`, in spacings `dp`, applied *only* to
-#: boundary particles the misalignment gate below flags as being at a corner /
-#: curved region. English Eq. (12) is a *local* linear extrapolation of the
-#: fluid density gradient, error ~ `offset^2 * curvature(rho)`; capping the
-#: lever arm there keeps the extrapolation in the clean near-wall fluid. On a
-#: flat wall `curvature(rho) = 0` and the per-layer mirror (up to `2*band*dp`)
-#: is harmless -- so those particles are left exactly as the legacy path had
-#: them (`DELTASPH_VALIDATION_PLAN.md` §5.2.1; capping them too regressed the
-#: coarse flat tank).
-_GHOST_MAX_OFFSET = 2.0
-
-#: The fluid-direction placement replaces the legacy SDF reflection only where
-#: the two materially disagree: `dot(nHat_fluid, nHat_legacy) < this`. On a
-#: flat, grid-aligned wall they are collinear (~1.0) and every boundary
-#: particle keeps its legacy offset byte-for-byte; at a re-entrant corner the
-#: fluid direction bends away from the SDF normal and the gate opens. 0.985 ~
-#: 10 degrees.
-_GHOST_MISALIGN_COS = 0.985
 
 
 def _geometricGhostOffsets(bpos, solidSdfs, dx, legacyOffsets, *, nSamples: int = 16):
@@ -135,93 +95,6 @@ def _geometricGhostOffsets(bpos, solidSdfs, dx, legacyOffsets, *, nSamples: int 
             found = found | take
         best = torch.where(found.view(-1, 1), best, torch.zeros_like(best))
     return best * nHat
-
-
-def _fluidDirectedGhostOffsets(bpos, fluidPos, dx, hMean, legacyOffsets, *,
-                               chunk: int = 4096):
-    """DEPRECATED -- superseded by `_geometricGhostOffsets`, which places ghosts
-    from the boundary geometry alone. This one keys the placement off where the
-    fluid currently is, so the same wall discretises differently wet vs dry vs
-    filling and needs a mid-run refresh (`dambreak.mdbcGhostRefreshEvery`). Kept
-    only for that opt-in refresh path; not on the default init route.
-
-    Place every *wetted* boundary particle's ghost by mirroring it across the
-    fluid-facing interface, with the interface distance and direction taken from
-    the nearby fluid particles' positions. Returns `bpos - ghostPos` per
-    particle.
-
-    For the k-th layer of a grid-aligned flat wall the nearest fluid sits at
-    `k·dp`, the mirror distance `2·(k·dp − dp/2)` equals the old `2·|s|`
-    reflection, and the direction is the outward normal -- so a grid-aligned
-    wall is byte-identical to the legacy path at every layer. At a re-entrant
-    corner the direction bends toward the actual (diagonal) fluid and the
-    distance shrinks to the real fluid gap, killing the `10·dp` straight-up
-    lever arm the legacy SDF reflection produced there.
-
-    A boundary particle whose nearest fluid is beyond `_GHOST_NEAR_FLUID·dp`,
-    or that has too few fluid neighbours for a reliable direction, keeps
-    `legacyOffsets` and Shepard-falls-back to rest density downstream.
-    """
-    if fluidPos.shape[0] == 0:
-        return legacyOffsets.clone()
-
-    R = _GHOST_GATHER_SCALE * hMean
-    d_floor = GHOST_FLUID_DEPTH * dx
-    n = bpos.shape[0]
-    offsets = legacyOffsets.clone()
-
-    maxOff = _GHOST_MAX_OFFSET * dx
-
-    for lo in range(0, n, chunk):
-        hi = min(lo + chunk, n)
-        pc = bpos[lo:hi]                                    # (c, D)
-        legc = legacyOffsets[lo:hi]                         # (c, D)
-
-        rel = fluidPos.unsqueeze(0) - pc.unsqueeze(1)       # (c, F, D)
-        dist2 = (rel * rel).sum(-1)                         # (c, F)
-        dNearest = dist2.min(1).values.clamp_min(0.0).sqrt()
-        wetted = dNearest <= _GHOST_NEAR_FLUID * dx         # (c,) -- fluid can reach it
-
-        within = dist2 < R * R
-        cnt = within.sum(1)                                 # (c,)
-
-        # Direction to the local fluid: distance-weighted mean of the offsets
-        # to fluid particles in range. At a re-entrant corner this is the
-        # diagonal into the corner opening; on a flat wall it is the outward
-        # normal.
-        w = torch.clamp(1.0 - torch.sqrt(dist2.clamp_min(0.0)) / R, min=0.0) * within
-        meanRel = (w.unsqueeze(-1) * rel).sum(1) / w.sum(1, keepdim=True).clamp_min(1e-12)
-        dirNorm = torch.linalg.norm(meanRel, dim=-1, keepdim=True)
-        nHat = meanRel / dirNorm.clamp_min(1e-12)           # (c, D)
-        goodDir = (cnt >= _GHOST_MIN_FLUID_NBRS) & (dirNorm.squeeze(-1) > 1e-9)
-
-        # Distance to the nearest fluid particle *along* nHat (the fluid gap).
-        proj = (rel * nHat.unsqueeze(1)).sum(-1)            # (c, F)
-        projIn = torch.where(within & (proj > 0.0), proj,
-                             torch.full_like(proj, float('inf')))
-        dFluid = projIn.min(1).values
-        dFluid = torch.where(torch.isfinite(dFluid), dFluid,
-                             dNearest.clamp_max(_GHOST_NEAR_FLUID * dx))
-
-        # Mirror across the interface (dp/2 inside the fluid gap), capped to one
-        # fluid layer so the Eq. (12) extrapolation stays local -- see
-        # `_GHOST_MAX_OFFSET`.
-        mirror = torch.clamp(2.0 * (dFluid - 0.5 * dx), min=d_floor, max=maxOff)
-        fluidDirOff = -mirror.unsqueeze(-1) * nHat          # = pc - ghost
-
-        # The gate: does the fluid direction disagree with the legacy SDF
-        # reflection? `-legc` points from the boundary particle toward its
-        # legacy ghost. On a flat grid-aligned wall this is collinear with
-        # `nHat`, the gate stays shut, and the particle keeps its legacy offset
-        # exactly. At a corner the two diverge and the fluid-direction placement
-        # takes over.
-        legDir = torch.nn.functional.normalize(-legc, dim=-1)
-        aligned = (legDir * nHat).sum(-1) >= _GHOST_MISALIGN_COS
-
-        useFluidDir = (wetted & goodDir & ~aligned)
-        offsets[lo:hi] = torch.where(useFluidDir.unsqueeze(-1), fluidDirOff, legc)
-
-    return offsets
 
 
 def addBoundaryGhostParticles(regions, particleState : Any):
