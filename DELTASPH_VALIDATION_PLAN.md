@@ -1272,13 +1272,21 @@ even at H/dx = 234), not a bulk instability.
 | diverged | no | no |
 | KE history | — | **overlies H/dx = 32 through the collapse, tracks in decay** |
 | `densityP05` (bulk-low), t\* > 1 | 0.996 | 0.999 — no bulk drift with Δx |
-| tank-wall penetration | 0.6 Δx | 1.4 Δx |
+| tank-wall penetration | 0.6 Δx ⚠ | 1.4 Δx ⚠ |
 | obstacle / fillet penetration | 0.00 Δx | 0.06 Δx |
 | ρ pointwise max (1 jet-tip particle) | 1.14 | **1.27** |
 | max ‖v‖ | 4.3 U_max | **7.1 U_max** |
 
-The **bulk converges** — KE curves overlie, `densityP05` is flat, penetration
-stays sub-2 Δx. The **pointwise** jet-tip extremes (`maxDensity`, `maxVelocity`)
+⚠ **The tank-wall row is not reproducible** — a fresh 2026-09-09 run of the
+identical config (plain δ-SPH, init-only ghosts, nx = 256, t\* = 5) leaks
+**~30 Δx** (a slow progressive escape of 15–20 particles up the fillet →
+downstream wall; see §5.2.3). Ruled out as a code regression (byte-identical
+init and results vs `9c7f878^`). Root cause: the concave-fillet ghost nodes
+collapse to the Shepard fallback because `_geometricGhostOffsets` inherits the
+composed-SDF normal, which points into the wall at the ridge. `gr5` and δ⁺+PST
+both hold it. The rest of this table (bulk convergence) still stands.
+
+The **bulk converges** — KE curves overlie, `densityP05` is flat. The **pointwise** jet-tip extremes (`maxDensity`, `maxVelocity`)
 *grow* with resolution: the fragmenting sharp-edge jet resolves thinner and
 faster with less numerical smoothing, exactly the non-convergence Marrone notes
 at H/dx = 234. `dambreak.diagnostics` gained `densityP99` and the probe's
@@ -1420,16 +1428,52 @@ unchanged (5e-7); dam-break wall-impact ALL-boundary p95 error vs a linear field
   departure is the wall closure alone, so this clears the change.
 - **Marrone §3.1** (`sun2017DeltaSPH`, nx = 60, to t\* ≈ 4) — `diverged=False`.
   The det-gate sheet-fling protection held.
-- **Marrone §3.4 nx = 256 tank-wall penetration — FAIL (~5.5 dx), but NOT from
-  this change.** A revert-and-retest (mDBC files at `76f61b4`, pre-`afb6e59`)
-  reproduces the FAIL at 5.53 dx; `afb6e59` gives 6.0, `+80eabb9` gives 8.0 —
-  all within chaotic-jet run-to-run scatter, no trend. The cached "0.61 dx / 6/6"
-  was a different config (t\* = 5, and its failing check was
-  *weakly-compressible* at ρ 1.14). So `deltaSPH` Marrone §3.4 at nx = 256
-  flipped some time before `afb6e59` from "fails bulk-compressibility, passes
-  penetration" to "passes bulk-compressibility, fails penetration" — a real
-  behaviour change to chase separately (candidate: `9c7f878` sampler, or the
-  §5.1 two-sided-viscosity / ψ work).
+- **Marrone §3.4 nx = 256 tank-wall penetration — FAIL, and it is NOT a
+  regression: it is the plain-δ-SPH concave-fillet ghost-placement limitation,
+  present since the case was created (`8d5e22e`).** Chased 2026-09-09:
+  - **`9c7f878` ruled out directly.** A/B of the probe at HEAD vs `9c7f878^`
+    (`2571265`, git worktree): the M34 nx = 256 init state is **byte-identical**
+    — same `config.dx`, fluid count (7392), particle mass (10 sig figs), realised
+    lattice spacing, bbox, boundary/ghost counts, ghost-offset distribution,
+    `c₀`, `dt` — and the full t\* = 5 runs return **identical** numbers
+    (pen 29.81 dx, ρ P99 1.0232, max‖v‖ 28.20, KE trend, 7139 steps). `9c7f878`'s
+    `config.dx` sampler branch is inert here (domain axes are already integer ×
+    `config.dx`, so `round == ceil`) and `_geometricGhostOffsets` reduces to the
+    legacy reflection on M34's dry init.
+  - **afb6e59 / 80eabb9 already ruled out** (the 76f61b4 revert test above).
+    Those + `9c7f878` are the *only* behavioural src deltas on the plain-δ-SPH
+    M34 path since `8d5e22e`; everything else is opt-in
+    (`mdbcGhostRefreshEvery = 0`) or diagnostic (`densityP99`).
+  - **The leak is a slow progressive escape, not a transient.** `maxPenetrationDx`
+    grows monotonically `0.9 → 5.6 → 6.8 → 8.0 → 14.9 → 29.8 dx` across
+    t\* = 1.5 → 5.0, with `nPenetrating` 5–21 particles; `maxObstaclePenDx`
+    stays 0.10, so fluid escapes the **tank AABB** (the fillet → downstream-wall
+    run-up region), not the obstacle solid. The earlier "5.53 / 6.0 / 8.0 dx"
+    numbers were t\* ≈ 4 samples of the same growing curve; the §5.2.2
+    convergence table's "0.6 dx / 1.4 dx" for plain δ-SPH at t\* = 5 is **not
+    reproducible** (mis-recorded, or scored before the leak develops).
+  - **Cause: the concave-fillet / re-entrant-corner mDBC ghost nodes.**
+    `--initdump` shows **840 / 7628 ghost nodes inside the solid** at init
+    (min SDF −0.49 dx), unchanged by `9c7f878`. `_geometricGhostOffsets` only
+    scales the offset *magnitude* along a fixed `nHat` taken from the
+    **autograd gradient of the composed boundary SDF** `min(tank_interior,
+    wedge∪block∪fillet)` with `fillet = max(box, −disc)`. At the concave
+    switchover ridges that gradient points into the floor/wall, not out to the
+    fluid (plan §5.2.2 already notes this), so the retract search never clears
+    `dp/2` and the offset **collapses to zero → Shepard/rest fallback**. The
+    fillet run-up jet then gets weak wall support and leaks.
+  - **Configs that pass** at HEAD, nx = 256, t\* = 5: `deltaSPH` + `gr5`
+    (`mdbcGhostRefreshEvery = 5`, 0.68 dx — re-solves the buried ghost offsets
+    against the *live fluid* every 5 steps) and `sun2017DeltaSPH` + PST
+    (0.58 dx — the shift keeps particles off the wall regardless).
+  - **Fix belongs on the sampling side** (user's call, 2026-09-09): give
+    `_geometricGhostOffsets` a correct fluid-facing normal at curved / concave
+    regions — per-primitive analytic normal (the fillet arc is exactly
+    `(x − discC)/|x − discC|`), or `sampleSDFNumeric` (central-difference,
+    self-mollifying at the ridge), or a real 2-D descent of the candidate node
+    along `−∇(nearest individual solid SDF)` until it clears every region by
+    `dp/2`. All fluid-independent, once at init; would retire
+    `mdbcGhostRefreshEvery` for this geometry. **← next**
 
 The DFSPH wall-pressure path (`modules/incompressible/wallPressure.py`) has an
 analogous structure and was not touched.
