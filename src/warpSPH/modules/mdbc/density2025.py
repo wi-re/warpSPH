@@ -13,11 +13,13 @@ The blend is a ramp, not a hard `where(wellConditioned, ...)` switch: the switch
 put a step in the boundary density right at the free-surface contact line (a
 large moving region in a violent flow), where roughly a third of the wetted
 boundary can land on the fallback during a dam-break run-up
-(`DELTASPH_VALIDATION_PLAN.md` 5.2.3). The Shepard fallback is used raw --
-**not** clamped to >= rho0 (that clamp is a DualSPHysics DBC anti-attraction
-guard, not in English 2022) and with **no** added hydrostatic-gravity term.
-One deviation from the cited paper, the ghost-normal normalization, is no longer
-relevant since the gravity term is gone.
+(`DELTASPH_VALIDATION_PLAN.md` 5.2.3). The fallback is the plain Shepard value
+with **no** added hydrostatic-gravity term (that term is a separate m2dbc
+assumption that adds error near a churning surface, so the ghost-normal
+normalization the paper diverges on is also gone). The final `rho_b` is still
+clamped to >= rho0 (wall pressure >= 0) -- the m2dbc anti-attraction guard,
+kept so a boundary particle under a receding free surface cannot read
+rho_b < rho0 and pull the fluid in.
 
 No-ops (returns `currentState.densities` unchanged) when there are no boundary
 particles.
@@ -116,6 +118,15 @@ def computeMdbcDensity(currentState: Any, config: SimulationConfig, schemeConfig
 
         rho_b = w * rho_proj + (1.0 - w) * shepardDensity
         rho_b = torch.nan_to_num(rho_b, nan=rho0, posinf=rho0, neginf=rho0)
+
+        # Clamp the boundary density to >= rho0 (equivalently wall pressure
+        # >= 0) -- the DualSPHysics m2dbc anti-attraction guard (Part 3 Q2:
+        # "m2dbc clamps pressure >= 0"), so a boundary particle under a receding
+        # free surface cannot read rho_b < rho0 and turn the wall attractive.
+        # The contact-line step it leaves (fluid genuinely below rho0 vs a rho0
+        # wall) is ~0.02-0.05, far below the ~0.1-0.6 the old hard switch +
+        # hydrostatic-term fallback produced.
+        rho_b = torch.clamp(rho_b, min=rho0)
 
         mergedDensitities = currentState.densities.clone()
         mergedDensitities[bIndices] = rho_b
