@@ -273,6 +273,7 @@ def main(argv=None):
         minDensity=result.series('minDensity'),
         maxDensity=result.series('maxDensity'),
         sensorRho=result.series('sensorRho'),
+        maxVelocity=result.series('maxVelocity'),
         kineticEnergy=result.series('kineticEnergy'),
         nx=spec.nx, diverged=result.diverged, nSteps=result.nSteps, wallTime=wall,
     )
