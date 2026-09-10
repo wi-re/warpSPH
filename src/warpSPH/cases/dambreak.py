@@ -54,6 +54,7 @@ import torch
 
 from ..caseUtils import (SimulationProperties, buildDomain, buildPresetObstacles,
                          buildRegions, sampleNoise, setupFreestream, setupKolmogorov)
+from ..caseUtils.weaklyCompressible import alignInteriorDomainToLattice
 from ..caseUtils.weaklyCompressible import buildObstacleSDF
 from ..configurations.moduleConfigurations.gravity import GravityType
 from ..enumTypes import isArtificialCompressibleScheme, isIncompressibleScheme
@@ -132,6 +133,14 @@ def configureScheme(ctx: RunContext) -> None:
     domain, interiorDomain = buildDomain(simSetup)
     if not ctx.param('wallPeriodic'):
         domain.periodic = torch.zeros_like(domain.periodic)
+    # The tank is an axis-aligned box, so its walls are free to sit at any phase
+    # within the fixed sampling lattice; snap them onto the lattice mid-gaps so
+    # the first particle band lands ~dx/2 proud of each flat wall instead of a
+    # lattice row landing on the wall (which leaves the boundary layer a full dx
+    # out and a fluid row on the wall). Inward-only, < 1 dx, and `domain` / the
+    # lattice are untouched. `alignBoundaryLattice=False` restores the raw phase.
+    if ctx.param('alignBoundaryLattice', True):
+        alignInteriorDomainToLattice(domain, interiorDomain, simSetup.dx)
     ctx.config.domain = domain
     ctx.config.nx = simSetup.nx + 2 * simSetup.band
     ctx.config.dx = simSetup.dx
@@ -170,6 +179,22 @@ def configureScheme(ctx: RunContext) -> None:
     shiftingParam = ctx.param('shifting', None)
     if shiftingParam is not None and hasattr(schemeConfig, 'shiftProperties'):
         schemeConfig.shiftProperties.active = bool(shiftingParam)
+
+    # Physical viscosity. `dambreak` has always run inviscid on the delta-SPH
+    # path (the `# inviscid here` note in `dambreakTimestep`) -- Marrone 2011
+    # §3.1/§3.4.1 and the Lobovsky dam break are all inviscid. §3.4.2 is the
+    # exception: the same sharp-edged-obstacle flow *with* real viscosity at
+    # Re = √(gH)·H/ν ∈ {1000, 10000} (`DELTASPH_VALIDATION_PLAN.md` §5.2.2).
+    # `inviscid=True` (default) leaves every existing run unchanged; `False`
+    # swaps the artificial-viscosity term for the Monaghan & Gingold physical
+    # Laplacian with `nu` (`modules/deltaSPH/velocityDissipation.py`). Walls
+    # stay free-slip -- the no-slip half of §3.4.2 is a separate piece.
+    if not isArtificialCompressibleScheme(ctx.scheme) and hasattr(schemeConfig, 'diffusionParams'):
+        schemeConfig.diffusionParams.inviscid = ctx.param('inviscid', True)
+        if ctx.param('alpha', None) is not None:
+            schemeConfig.diffusionParams.inviscidAlpha = ctx.param('alpha')
+        if not ctx.param('inviscid', True):
+            schemeConfig.diffusionParams.viscidNu = ctx.param('nu', 0.0)
 
     if isArtificialCompressibleScheme(ctx.scheme):
         _configureArtificialCompressibleExtra(ctx)
@@ -436,33 +461,34 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
             d['maxObstaclePenDx'] = float(
                 torch.clamp(-sd.min(), min=0.0).detach().cpu().item() / dx)
 
-    # Downstream-wall pressure probes (`ACSPH_PLAN.md` §4.5, Lobovsky et al.
-    # 2014): a first-order MLS (Liu-Liu) interpolation of the fluid pressure at
-    # fixed sensor points on the impact wall, emitted every step so the
-    # trajectory carries the P(t) signal each experimental sensor records.
-    # `pressureProbeHeights` lists heights above the tank bed in the case's own
-    # length unit; empty (the default) skips this so no existing run changes.
-    # First order rather than a bare Shepard gather so the local fit carries
-    # the pressure gradient and needs no separate Adami hydrostatic correction
-    # at the one-sided wall support; points with < 5 fluid neighbours fall back
-    # to 0 (pre-arrival / thin run-up sheet), which `pProbe*Nnbr` makes visible.
+    # Pressure probes -- a first-order MLS (Liu-Liu) interpolation of the fluid
+    # pressure at fixed sensor points, emitted every step so the trajectory
+    # carries the P(t) signal each experimental sensor records. First order
+    # rather than a bare Shepard gather so the local fit carries the pressure
+    # gradient and needs no separate Adami hydrostatic correction at the
+    # one-sided wall support; points with too few / near-coplanar fluid
+    # neighbours fall back to a 0th-order Shepard gather, then to 0 (pre-arrival
+    # / thin run-up sheet), which `*Nnbr` makes visible.
+    #
+    #  - `pressureProbeHeights` (`ACSPH_PLAN.md` §4.5, Lobovsky et al. 2014):
+    #    sensors on the +x impact wall, given as heights above the tank bed in
+    #    the case length unit; optional φ-disc area integration.
+    #  - `surfacePressureProbes` (`DELTASPH_VALIDATION_PLAN.md` §5.2.2, Marrone
+    #    2011 §3.4): sensors anywhere on the solid surface -- the 45° edge, the
+    #    obstacle roof, the concave fillet arc -- none axis-aligned, so each is
+    #    `[x, y, nx, ny]` (centred-domain point + outward normal into the fluid)
+    #    and the query point is pushed `surfacePressureProbeInset` spacings along
+    #    that normal to sit in the fluid rather than exactly on the wall.
+    # Both are empty by default so no existing run changes.
+    canProbe = interior is not None and getattr(particles, 'pressures', None) is not None
     probeHeights = ctx.param('pressureProbeHeights')
-    if probeHeights and interior is not None and getattr(particles, 'pressures', None) is not None:
+    surfaceProbes = ctx.param('surfacePressureProbes')
+    haveSurface = surfaceProbes is not None and len(surfaceProbes) > 0
+    if canProbe and (probeHeights or haveSurface):
         allPos = particles.positions
-        xWall = float(interior.max[0].item()) - float(ctx.param('pressureProbeInset'))
-        yBed = float(interior.min[1].item())
-        discRadius = float(ctx.param('pressureProbeDiscRadius') or 0.0)
-        # `pressureProbeDiscRadius > 0`: area-integrate over a flush wall
-        # transducer disc (Marrone 2011 uses phi = 90 mm) via the 7-point
-        # Gauss-Legendre chord quadrature above, instead of one point per
-        # probe height. 0.0 (default): unchanged single-point behaviour.
-        sOffsets = [discRadius * x for x in _GAUSS7_NODES] if discRadius > 0.0 else [0.0]
-        pts = torch.tensor(
-            [[xWall, yBed + float(z) + s] for z in probeHeights for s in sOffsets],
-            device=allPos.device, dtype=allPos.dtype)
-        # The probe sits ~1 kernel support from the +x domain edge; if the run
-        # is periodic (`wallPeriodic`) the MLS gather would wrap across to the
-        # back wall. Force a non-periodic domain for the interpolation only.
+        # The probes sit ~1 kernel support from a domain edge; if the run is
+        # periodic (`wallPeriodic`) the MLS gather would wrap to the far wall.
+        # Force a non-periodic domain for the interpolation only.
         import copy as _copy
         probeConfig = _copy.copy(ctx.config)
         dom = ctx.config.domain
@@ -470,56 +496,89 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
                                        torch.zeros_like(dom.periodic), dom.dim)
         # `pressureProbeSupportScale` widens the MLS gather radius -- a cheap
         # single-point approximation to a finite-face transducer's area
-        # integration, superseded by `pressureProbeDiscRadius` above but kept
-        # for cases that still want it. Default 1.0 leaves every existing run
-        # unchanged.
-        val, _grad, nnbr, A_g, b, wellConditioned = interpolateLiuLiu(
-            pts, referenceParticles=particles, referenceQuantities=particles.pressures,
-            config=probeConfig, neighbor_threshold=4,
-            direction=OperationDirection.FluidToFluid,
-            supportScale=float(ctx.param('pressureProbeSupportScale') or 1.0))
-        # Two-tier fallback matching `modules/mdbc/density2025.py` /
-        # `modules/incompressible/wallPressure.py`'s own ladder: the
-        # first-order MLS fit where `wellConditioned`, else a 0th-order
-        # Shepard gather (`b[:,0] / A_g[:,0,0]`). A query point can have
-        # plenty of neighbours (double digits) and still fail the determinant
-        # check -- a thin sheet running up/down the wall is exactly this:
-        # near-coplanar neighbours, but many of them -- and `interpolateLiuLiu`
-        # hard-zeros the first-order fit there by design. Without this
-        # fallback every such point (point probe or disc quadrature sample)
-        # read a flat 0 regardless of how much real, valid neighbour support
-        # it had, which is not the local pressure.
-        shepDen = A_g[:, 0, 0]
-        shepVal = torch.where(shepDen > 0, b[:, 0] / shepDen.clamp_min(1e-12),
-                              torch.zeros_like(shepDen))
-        val = torch.where(wellConditioned, val, shepVal)
-        val = val.clamp(min=0.0).detach().cpu().view(len(probeHeights), len(sOffsets))
-        nnbr = nnbr.detach().cpu().view(len(probeHeights), len(sOffsets))
-        if discRadius > 0.0:
-            # Weight each quadrature sample by its disc chord factor, excluding
-            # only genuinely dry samples (`nnbr <= 1`, matching density2025.py's
-            # own Shepard-tier floor) and renormalising over the rest -- a
-            # sample with real neighbour support now always contributes its
-            # (MLS-or-Shepard) value rather than a hard zero.
-            baseW = torch.tensor(_DISC_CHORD_WEIGHTS, dtype=val.dtype)
-            validSample = nnbr > 1
-            w = baseW.unsqueeze(0) * validSample.to(val.dtype)
-            wSum = w.sum(dim=1)
-            valOut = torch.where(wSum > 0, (val * w).sum(dim=1) / wSum.clamp_min(1e-12),
-                                 torch.zeros_like(wSum))
-            nnbrOut = nnbr.amax(dim=1)
-        else:
-            valOut = val[:, 0]
-            nnbrOut = nnbr[:, 0]
+        # integration, superseded by `pressureProbeDiscRadius` for a true disc
+        # integral; kept for cases that still want it. Default 1.0 is unchanged.
+        supportScale = float(ctx.param('pressureProbeSupportScale') or 1.0)
+
+        def _mlsPressure(pts):
+            """(M,2) query points -> (P:(M,) cpu, nNeighbours:(M,) cpu,
+            wellConditioned:(M,) bool cpu), the first-order MLS fluid-pressure
+            fit with the density2025.py / wallPressure.py fallback ladder: the
+            MLS fit where well-conditioned, else a 0th-order Shepard gather
+            (`b[:,0] / A_g[:,0,0]`), else 0. A query point can have plenty of
+            neighbours (double digits) and still fail the determinant check --
+            a thin sheet running along a wall is exactly this, near-coplanar
+            neighbours but many of them -- and `interpolateLiuLiu` hard-zeros
+            the first-order fit there by design; without the Shepard tier every
+            such point reads a flat 0 regardless of how much real neighbour
+            support it had. The Shepard tier is only a 0th-order average of the
+            (one-sided) neighbourhood, so it reads biased *low* against a real
+            pressure gradient -- `pSurf{k}WC` records which tier a probe used.
+            Clamped >= 0."""
+            v, _g, nn, A_g, b, wc = interpolateLiuLiu(
+                pts, referenceParticles=particles,
+                referenceQuantities=particles.pressures,
+                config=probeConfig, neighbor_threshold=4,
+                direction=OperationDirection.FluidToFluid, supportScale=supportScale)
+            shepDen = A_g[:, 0, 0]
+            shepVal = torch.where(shepDen > 0, b[:, 0] / shepDen.clamp_min(1e-12),
+                                  torch.zeros_like(shepDen))
+            v = torch.where(wc, v, shepVal).clamp(min=0.0)
+            return v.detach().cpu(), nn.detach().cpu(), wc.detach().cpu()
+
         H = ctx.param('fillRatio') * ctx.spec.L
         g = ctx.param('gravityMagnitude')
-        pRef = ctx.schemeConfig.fluid.restDensity * g * H      # rho0 g H
+        pRef = ctx.schemeConfig.fluid.restDensity * g * H          # rho0 g H
         t = float(state.t) if getattr(state, 't', None) is not None else 0.0
         d['tStar'] = t * (g / H) ** 0.5
-        for k in range(len(probeHeights)):
-            d[f'pProbe{k}'] = float(valOut[k])
-            d[f'pProbe{k}Star'] = float(valOut[k]) / pRef
-            d[f'pProbe{k}Nnbr'] = int(nnbrOut[k])
+
+        if probeHeights:
+            xWall = float(interior.max[0].item()) - float(ctx.param('pressureProbeInset'))
+            yBed = float(interior.min[1].item())
+            discRadius = float(ctx.param('pressureProbeDiscRadius') or 0.0)
+            # `pressureProbeDiscRadius > 0`: area-integrate over a flush wall
+            # transducer disc (Marrone 2011 uses φ = 90 mm) via the 7-point
+            # Gauss-Legendre chord quadrature above, instead of one point per
+            # probe height. 0.0 (default): unchanged single-point behaviour.
+            sOffsets = [discRadius * x for x in _GAUSS7_NODES] if discRadius > 0.0 else [0.0]
+            pts = torch.tensor(
+                [[xWall, yBed + float(z) + s] for z in probeHeights for s in sOffsets],
+                device=allPos.device, dtype=allPos.dtype)
+            val, nnbr, _wc = _mlsPressure(pts)
+            val = val.view(len(probeHeights), len(sOffsets))
+            nnbr = nnbr.view(len(probeHeights), len(sOffsets))
+            if discRadius > 0.0:
+                # Weight each quadrature sample by its disc chord factor,
+                # excluding only genuinely dry samples (`nnbr <= 1`, matching
+                # density2025.py's own Shepard-tier floor) and renormalising
+                # over the rest -- a sample with real neighbour support always
+                # contributes its (MLS-or-Shepard) value rather than a hard 0.
+                baseW = torch.tensor(_DISC_CHORD_WEIGHTS, dtype=val.dtype)
+                validSample = nnbr > 1
+                w = baseW.unsqueeze(0) * validSample.to(val.dtype)
+                wSum = w.sum(dim=1)
+                valOut = torch.where(wSum > 0, (val * w).sum(dim=1) / wSum.clamp_min(1e-12),
+                                     torch.zeros_like(wSum))
+                nnbrOut = nnbr.amax(dim=1)
+            else:
+                valOut = val[:, 0]
+                nnbrOut = nnbr[:, 0]
+            for k in range(len(probeHeights)):
+                d[f'pProbe{k}'] = float(valOut[k])
+                d[f'pProbe{k}Star'] = float(valOut[k]) / pRef
+                d[f'pProbe{k}Nnbr'] = int(nnbrOut[k])
+
+        if haveSurface:
+            arr = torch.as_tensor(surfaceProbes, dtype=allPos.dtype,
+                                  device=allPos.device).view(-1, 4)
+            nrm = arr[:, 2:4] / arr[:, 2:4].norm(dim=-1, keepdim=True).clamp_min(1e-12)
+            inset = float(ctx.param('surfacePressureProbeInset') or 0.0) * float(ctx.config.dx)
+            val, nnbr, wc = _mlsPressure(arr[:, 0:2] + inset * nrm)
+            for k in range(arr.shape[0]):
+                d[f'pSurf{k}'] = float(val[k])
+                d[f'pSurf{k}Star'] = float(val[k]) / pRef
+                d[f'pSurf{k}Nnbr'] = int(nnbr[k])
+                d[f'pSurf{k}WC'] = int(bool(wc[k]))
     return d
 
 
@@ -640,6 +699,33 @@ dambreakCase = registerCase(Case(
         # `scripts/probe_deltaSPHMarrone.py` sets this to Marrone 2011's
         # φ = 90 mm probe disc (radius 0.045 m) -- see `diagnostics`.
         pressureProbeDiscRadius=0.0,
+        # Sensors anywhere on the solid surface -- not just the axis-aligned +x
+        # wall. Each entry is `[x, y, nx, ny]`: a point in centred-domain coords
+        # and the outward unit normal pointing into the fluid. `diagnostics`
+        # pushes the query point `surfacePressureProbeInset` spacings along the
+        # normal and MLS-interpolates the fluid pressure there, emitting
+        # `pSurf{k}` / `pSurf{k}Star` / `pSurf{k}Nnbr`. Empty -> skipped.
+        # `scripts/probe_deltaSPHMarrone34.py` sets Marrone 2011 §3.4's nine
+        # probes on the 45° edge, the obstacle roof and the fillet arc.
+        surfacePressureProbes=(),
+        # 0.0 = query exactly on the wall point. The first-order MLS fit
+        # recovers a linear field from the one-sided wall stencil, so on a
+        # hydrostatic column the on-wall probe reads ρg·depth to < 1 % (floor
+        # +0.4 %, side walls ±1 %, corners ±0.1 %) with no Shepard fallback --
+        # `scripts/probe_hydrostaticPressureProbe.py`. A positive inset just
+        # displaces the sample point `inset` spacings up the normal and reads
+        # the (lower) pressure there, so it *degrades* the wall reading.
+        surfacePressureProbeInset=0.0,
+        # Viscosity on the delta-SPH path. `inviscid=True` (default, Marrone
+        # §3.1/§3.4.1 + the Lobovsky dam break) uses the artificial-viscosity
+        # term with coefficient `alpha`; `inviscid=False` (Marrone §3.4.2) uses
+        # the physical Monaghan & Gingold Laplacian with kinematic viscosity
+        # `nu`. See `configureScheme`; `scripts/probe_deltaSPHMarrone34.py --Re`
+        # sets `nu = √(gH)·H / Re`. `alpha` (None -> leave the scheme's own
+        # artificial-viscosity coefficient) only matters on the inviscid path.
+        inviscid=True,
+        alpha=None,
+        nu=0.0,
         # Sun et al. 2017 Sec. 2: freeze the delta-SPH diffusive terms across
         # RK sub-stages instead of recomputing them fresh at each stage's
         # intermediate state. None (default) -> don't override; whichever
@@ -669,6 +755,11 @@ dambreakCase = registerCase(Case(
         # diagnostic for near-wall neighbour-search artefacts; the probe gather
         # stays non-periodic regardless.
         wallPeriodic=False,
+        # Snap the interior wall box onto the sampling-lattice mid-gaps so the
+        # first particle band sits ~dx/2 proud of each flat wall
+        # (`alignInteriorDomainToLattice`). Default on; False keeps the raw
+        # lattice phase (a row can land on the wall) for A/B.
+        alignBoundaryLattice=True,
         # ACSPH only: keep the non-paper acceleration constraint in Eq. (46)'s
         # timestep (default). Set False for the paper's literal advective +
         # viscous constraint set -- see `_configureArtificialCompressibleExtra`.

@@ -134,7 +134,8 @@ ACCEPT = dict(
 
 def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
             plotInterval: int, kernel: str = None, freezeDiffusion: bool = None,
-            scheme: str = 'sun2017DeltaSPH', shifting: str = 'default'):
+            scheme: str = 'sun2017DeltaSPH', shifting: str = 'default',
+            plotBackend: str = None, cflFactor: float = None):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -188,9 +189,21 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
     )
     if kernel:
         kw['kernel'] = kernel
+    if cflFactor is not None:
+        # Scales the acoustic-CFL term of the Sun Eq. (5) adaptive dt
+        # (`computeTimestep`: `dt_c = cflFactor * h / (c0 * kernelScale)`), the
+        # usually-binding constraint -- so halving it ~= halving the timestep.
+        kw['cflFactor'] = cflFactor
     if video:
-        kw.update(plot=True, video=True, plotBackend='matplotlib',
-                  plotInterval=plotInterval, exportRoot=runRoot)
+        # Leave `plotBackend` unset so the runner picks by dimension: 2D goes to
+        # vispy (headless EGL), which renders a ~10^5-particle scatter far
+        # faster than matplotlib -- with a frame every `plotInterval` steps the
+        # matplotlib path was the run's bottleneck (a ~5k-particle nx=67 run
+        # spent >2/3 of its wall time rendering Agg frames). Pass
+        # `--plotBackend matplotlib` to force the old path if vispy misbehaves.
+        kw.update(plot=True, video=True, plotInterval=plotInterval, exportRoot=runRoot)
+        if plotBackend:
+            kw['plotBackend'] = plotBackend
 
     print(f'[{tag}] running to t={tLimit:.3f}s  (t* ~ {tLimit * (G / H) ** 0.5:.2f}) ...',
           flush=True)
@@ -636,7 +649,13 @@ def main():
                     help='seconds; t* = t sqrt(g/H) ≈ 4.04 t, so 1.90 s ≈ t* 7.7')
     ap.add_argument('--video', action='store_true')
     ap.add_argument('--plotInterval', type=int, default=20)
+    ap.add_argument('--plotBackend', default=None,
+                    help="video backend; unset = vispy (headless EGL, fast). "
+                         "Pass 'matplotlib' only if vispy misbehaves.")
     ap.add_argument('--out', default=DEFAULT_OUT)
+    ap.add_argument('--cflFactor', type=float, default=None,
+                    help="override the acoustic-CFL factor of the adaptive dt "
+                         "(case default 0.3); halving it ~= halving the timestep")
     ap.add_argument('--kernel', default=None,
                     help="override the case's kernel (default Wendland2, matching "
                          "Marrone/Sun/DualSPHysics); e.g. 'Wendland4' for a kernel "
@@ -671,7 +690,7 @@ def main():
         return
     _runOne(args.nx, args.c0Ratio, args.tLimit, args.out, args.video,
             args.plotInterval, args.kernel, args.freezeDiffusion, args.scheme,
-            args.shifting)
+            args.shifting, args.plotBackend, args.cflFactor)
 
 
 if __name__ == '__main__':

@@ -82,30 +82,46 @@ G = 9.81
 U_MAX = 1.95 * (G * H) ** 0.5
 SQRT_H_G = (H / G) ** 0.5    # t = tStar * SQRT_H_G
 
-#: Probe points on the solid surface, in centred-domain coords
-#: (x from tank centre, y from tank centre; bed at y = -TANK_L/2).  Placed from
-#: the figure: three evenly along the 45deg edge, three along the roof, three
-#: around the fillet arc.  Used by `_initdump` / `_report` overlays only for now.
+#: Marrone 2011 Fig. 19's nine surface pressure probes as
+#: (name, x, y, nx, ny): a point in centred-domain coords (x from tank centre,
+#: y from tank centre; bed at y = -TANK_L/2) and the outward unit normal
+#: pointing into the fluid.  Six on the obstacle -- P1-P3 down the 45deg edge
+#: from the apex, P4-P6 along the roof apex->back -- and three on the concave
+#: fillet arc, P7 (floor) -> P9 (downstream wall).  The paper gives no
+#: coordinates, so the positions are read approximately from the sketch; the
+#: normals are analytic.  Fig. 24 compares P1 / P5 / P7 against Colicchio's
+#: Level-Set solver; Wagner's method gives P1 ~ 36.7 rho g H near the edge.
 def _probePoints():
+    import numpy as np
     wall = TANK_W / 2.0
     bed = -TANK_L / 2.0
-    apex = (-wall + 5.0 * H, bed + H)
-    toe = (-wall + 6.0 * H, bed)
-    backTop = (-wall + 7.0 * H, bed + H)
-    discC = (wall - H, bed + H)
-    import numpy as np
-    edge = [(apex[0] + (toe[0] - apex[0]) * f, apex[1] + (toe[1] - apex[1]) * f)
-            for f in (0.85, 0.55, 0.25)]                    # P1 (low) .. P3 (high)
-    roof = [(apex[0] + (backTop[0] - apex[0]) * f, bed + H)
-            for f in (0.17, 0.5, 0.83)]                     # P4 .. P6
-    fil = [(discC[0] + H * np.cos(a), discC[1] - H * np.sin(a))
-           for a in (np.deg2rad(d) for d in (90.0, 45.0, 2.0))]   # P7 (floor) .. P9 (wall)
-    names = [f'P{i}' for i in range(1, 10)]
-    return list(zip(names, edge + roof + fil))
+    apex = np.array([-wall + 5.0 * H, bed + H])
+    toe = np.array([-wall + 6.0 * H, bed])
+    backTop = np.array([-wall + 7.0 * H, bed + H])
+    discC = np.array([wall - H, bed + H])                   # fillet arc centre
+    s2 = 2.0 ** -0.5
+
+    out = []
+    for i, f in enumerate((0.15, 0.5, 0.85)):              # P1 (apex) .. P3 (toe)
+        p = apex + (toe - apex) * f
+        out.append((f'P{i + 1}', p[0], p[1], -s2, -s2))    # 45deg face -> up-left
+    for i, f in enumerate((0.17, 0.5, 0.83)):              # P4 .. P6  (P5 = mid roof)
+        p = apex + (backTop - apex) * f
+        out.append((f'P{i + 4}', p[0], p[1], 0.0, 1.0))    # obstacle top -> up
+    for i, deg in enumerate((90.0, 45.0, 5.0)):            # P7 (floor) .. P9 (wall)
+        a = np.deg2rad(deg)
+        p = discC + H * np.array([np.cos(a), -np.sin(a)])
+        out.append((f'P{i + 7}', p[0], p[1], -np.cos(a), np.sin(a)))  # -> disc centre
+    return out
 
 
-def _params(scheme, cornerOnly=False, shifting='off'):
-    return dict(
+#: `[x, y, nx, ny]` rows for `params['surfacePressureProbes']`.
+_SURF_PROBES = [[float(v) for v in row[1:]] for row in _probePoints()]
+_SURF_NAMES = [row[0] for row in _probePoints()]
+
+
+def _params(scheme, cornerOnly=False, shifting='off', Re=None):
+    p = dict(
         W=TANK_W,
         fillRatio=COL_H / TANK_L,
         fluidWidth=COL_W / TANK_W,
@@ -125,11 +141,25 @@ def _params(scheme, cornerOnly=False, shifting='off'):
         shifting=None if shifting == 'default' else (shifting == 'on' or shifting is True),
         # violent free-surface jet off the sharp edge -> keep surface detection
         pressureProbeHeights=[],
+        # Marrone Fig. 19's P1-P9 on the 45deg edge / roof / fillet arc, queried
+        # exactly on the wall point (inset 0 -- the first-order MLS fit handles
+        # the one-sided stencil; validated on a hydrostatic column by
+        # `scripts/probe_hydrostaticPressureProbe.py`). `dambreak.diagnostics`
+        # emits `pSurf{k}` (Pa) + `pSurf{k}Nnbr` + `pSurf{k}WC` (MLS vs Shepard).
+        surfacePressureProbes=[list(p) for p in _SURF_PROBES],
+        surfacePressureProbeInset=0.0,
     )
+    # Marrone §3.4.2: the same flow with real viscosity. Re = √(gH)·H / ν, so
+    # ν = √(gH)·H / Re (H = 1, g = 9.81). Walls stay free-slip here -- the
+    # no-slip half of §3.4.2 is separate. Re=None -> inviscid (§3.4.1).
+    if Re:
+        p['inviscid'] = False
+        p['nu'] = (G * H) ** 0.5 * H / float(Re)
+    return p
 
 
 def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme,
-            cornerOnly=False, shifting='off'):
+            cornerOnly=False, shifting='off', Re=None, plotBackend=None):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -141,39 +171,55 @@ def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme,
     tLimit = tStar * SQRT_H_G
     tag = (f'{scheme}_nx{nx}_c{c0Ratio:g}'
            + ('_cornerOnly' if cornerOnly else '')
-           + ('' if shifting == 'off' else f'_pst-{shifting}'))
+           + ('' if shifting == 'off' else f'_pst-{shifting}')
+           + ('' if not Re else f'_Re{Re:g}'))
     runRoot = os.path.join(out, tag + '_run')
 
-    params = _params(scheme, cornerOnly=cornerOnly, shifting=shifting)
+    params = _params(scheme, cornerOnly=cornerOnly, shifting=shifting, Re=Re)
     params['machTarget'] = machTarget
 
     kw = dict(scheme=scheme, L=TANK_L, nx=nx, tLimit=tLimit,
               quiet=True, store=False, progress=True, params=params)
     if video:
-        kw.update(plot=True, video=True, plotBackend='matplotlib',
-                  plotInterval=plotInterval, exportRoot=runRoot)
+        # Unset backend -> the runner picks vispy (headless EGL) for 2D, which
+        # renders large particle counts far faster than matplotlib Agg (the
+        # matplotlib frame render was dominating video-run wall time). Pass
+        # `--plotBackend matplotlib` to force the old path.
+        kw.update(plot=True, video=True, plotInterval=plotInterval, exportRoot=runRoot)
+        if plotBackend:
+            kw['plotBackend'] = plotBackend
 
     print(f'[{tag}] H/dx={H / (TANK_L / nx):.1f}  c0={c0Ratio:g}sqrt(gH)  '
           f'-> t={tLimit:.3f}s (t*={tStar:g}) ...', flush=True)
     r = run(dambreakCase, **kw)
 
     rows = [x for x in r.trajectory if x.get('step', -2) >= -1]
-    keys = ['step', 't', 'tStar', 'kineticEnergy', 'maxVelocity',
-            'minDensity', 'maxDensity', 'densityP05', 'densityP99',
-            'nPenetrating', 'maxPenetrationDx', 'nObstaclePen', 'maxObstaclePenDx']
+    keys = (['step', 't', 'tStar', 'kineticEnergy', 'maxVelocity',
+             'minDensity', 'maxDensity', 'densityP05', 'densityP99',
+             'nPenetrating', 'maxPenetrationDx', 'nObstaclePen', 'maxObstaclePenDx']
+            + [f'pSurf{k}' for k in range(len(_SURF_PROBES))]
+            + [f'pSurf{k}Nnbr' for k in range(len(_SURF_PROBES))])
     cols = {k: np.array([row.get(k, np.nan) for row in rows], dtype=float) for k in keys}
-    # tStar may not be emitted (no pressureProbeHeights); synthesise from t
-    if not np.isfinite(cols['tStar']).any():
-        cols['tStar'] = cols['t'] / SQRT_H_G
+    # `diagnostics` now emits its own `tStar` (surface probes are active) but it
+    # non-dimensionalises with `fillRatio * L` = the reservoir height, not the
+    # obstacle height H = 1 this case scales by -- always recompute from t.
+    cols['tStar'] = cols['t'] / SQRT_H_G
 
     dx = float(r.ctx.config.dx)
     c0 = float(getattr(r.ctx.schemeConfig.fluid, 'fixedSoundSpeed', 0.0) or 0.0)
+    rho0 = float(getattr(r.ctx.schemeConfig.fluid, 'restDensity', 1000.0) or 1000.0)
+    dp = r.ctx.schemeConfig.diffusionParams
     tReached = float(rows[-1].get('t', 0.0)) if rows else 0.0
     meta = dict(
         scheme=scheme, nx=nx, dx=dx, HdxRatio=H / dx, c0Ratio=float(c0Ratio),
-        c0=c0, mach=(U_MAX / c0) if c0 else None, tLimit=tLimit,
+        c0=c0, mach=(U_MAX / c0) if c0 else None, tLimit=tLimit, rho0=rho0,
+        Re=(None if Re is None else float(Re)),
+        inviscid=bool(getattr(dp, 'inviscid', True)),
+        nu=float(getattr(dp, 'viscidNu', 0.0)),
+        pRef=rho0 * G * H,                                 # rho0 g H (H = obstacle height = 1)
         tStarLimit=float(tStar), tReached=tReached, tStarReached=tReached / SQRT_H_G,
         H=H, G=G, TANK_L=TANK_L, TANK_W=TANK_W, COL_W=COL_W, COL_H=COL_H,
+        surfProbeNames=list(_SURF_NAMES),
         shiftActive=bool(getattr(r.ctx.schemeConfig.shiftProperties, 'active', False)),
         sun2017Eq7Shift=bool(getattr(r.ctx.schemeConfig.shiftProperties, 'sun2017Eq7Shift', False)),
         shiftingArg=str(shifting), cornerOnly=bool(cornerOnly),
@@ -328,6 +374,17 @@ def _initdump(nx, out, cornerOnly=False):
             gp = pos[i] - goff[i]
             ax.plot([pos[i, 0], gp[0]], [pos[i, 1], gp[1]], '-', c='#d62728',
                     lw=0.4, alpha=0.5, zorder=2)
+        # P1-P9 surface pressure probes: the marker is the query point (on the
+        # wall, inset 0); the short line shows the into-fluid normal direction.
+        for pn, px, py, pnx, pny in _probePoints():
+            if not (cx - rad < px < cx + rad and cy - rad < py < cy + rad):
+                continue
+            ax.plot([px, px + 1.5 * dx * pnx], [py, py + 1.5 * dx * pny],
+                    '-', c='#2ca02c', lw=1.0, zorder=4)
+            ax.scatter([px], [py], s=34, marker='s', facecolors='none',
+                       edgecolors='#2ca02c', linewidths=1.2, zorder=5)
+            ax.annotate(pn, (px, py), fontsize=7, color='#1a611a',
+                        xytext=(3, 3), textcoords='offset points', zorder=6)
         ax.set_title(f'{title}   (dx = {dx:.4g}, H/dx = {H / dx:.0f})', fontsize=9)
         ax.set_xlim(cx - rad, cx + rad); ax.set_ylim(cy - rad, cy + rad)
         ax.set_aspect('equal'); ax.legend(fontsize=7, loc='upper right')
@@ -353,6 +410,113 @@ def _initdump(nx, out, cornerOnly=False):
               f'  (min sdf {gd.min():.3g})')
 
 
+def _runLabel(meta):
+    """Short legend label for a run; None to leave it out of the trace figure
+    (the `--cornerOnly` runs have no obstacle probes)."""
+    if meta.get('cornerOnly'):
+        return None
+    lab = ('delta+-SPH + PST' if (meta.get('scheme') == 'sun2017DeltaSPH'
+                                  or meta.get('shiftActive')) else 'delta-SPH')
+    if not meta.get('inviscid', True):
+        lab += f", Re={meta.get('Re') or float('nan'):g}"
+    lab += f"  (H/dx {meta['HdxRatio']:.0f})"
+    return lab
+
+
+#: P1-P9 -> (region label, is this one of Marrone Fig. 24's three).
+_PROBE_REGION = {
+    'P1': ('45 deg edge', True), 'P2': ('45 deg edge', False), 'P3': ('45 deg edge', False),
+    'P4': ('obstacle roof', False), 'P5': ('obstacle roof', True), 'P6': ('obstacle roof', False),
+    'P7': ('fillet / bottom-right wall', True), 'P8': ('fillet / bottom-right wall', False),
+    'P9': ('fillet / bottom-right wall', False),
+}
+
+
+def _traceFigure(out):
+    """A clean 3x3 of the nine surface pressure traces P/(rho g H) vs t*, one
+    line per run, across every `*.npz` in `out`. Wagner's P1 ~ 36.7 rho g H is
+    drawn on the edge panels; P1 / P5 / P7 (Marrone Fig. 24's three) are boxed.
+    """
+    import numpy as np
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    runs = []
+    for npz in sorted(glob.glob(os.path.join(out, '*.npz'))):
+        d = np.load(npz, allow_pickle=True)
+        meta = json.loads(str(d['meta']))
+        lab = _runLabel(meta)
+        if lab is None:
+            continue
+        cols = {k[2:]: d[k] for k in d.files if k.startswith('s_')}
+        runs.append((meta, cols, lab))
+    if not runs:
+        print(f'no obstacle runs in {out}'); return
+
+    names = runs[0][0].get('surfProbeNames') or _SURF_NAMES
+    cmap = plt.get_cmap('tab10')
+
+    def _smooth(y, t):
+        """centred moving average over a ~0.15 t* window -- the point probe on a
+        violent thin sheet is spiky; the running mean is the readable signal
+        (Marrone's transducer area-integrates, which does the same)."""
+        y = np.nan_to_num(np.asarray(y, float))
+        if y.size < 5:
+            return y
+        dt = np.median(np.diff(t)) if t.size > 1 else 1.0
+        w = max(3, int(round(0.15 / max(dt, 1e-9))) | 1)
+        ker = np.ones(w) / w
+        return np.convolve(y, ker, mode='same')
+
+    fig, axes = plt.subplots(3, 3, figsize=(15, 11), sharex=True)
+    for k, ax in enumerate(axes.ravel()):
+        pn = names[k] if k < len(names) else f'P{k + 1}'
+        region, isFig24 = _PROBE_REGION.get(pn, ('', False))
+        anyWet = False
+        for i, (meta, cols, lab) in enumerate(runs):
+            raw = cols.get(f'pSurf{k}')
+            if raw is None or not np.isfinite(raw).any() or np.nanmax(raw) <= 0:
+                continue
+            anyWet = True
+            ts = cols['tStar']
+            star = np.nan_to_num(raw / float(meta.get('pRef') or (1000.0 * G * H)))
+            c = cmap(i % 10)
+            ax.plot(ts, star, lw=0.5, color=c, alpha=0.30)
+            ax.plot(ts, _smooth(star, ts), lw=1.6, color=c, label=lab)
+        if region.startswith('45'):
+            ax.axhline(36.7, color='k', ls=':', lw=1.0)
+            ax.text(0.02, 0.94, 'Wagner 36.7', transform=ax.transAxes,
+                    fontsize=7, va='top', color='#444')
+        if not anyWet:
+            ax.text(0.5, 0.5, 'never wetted', transform=ax.transAxes,
+                    ha='center', va='center', fontsize=10, color='#999')
+            ax.set_ylim(-1, 1)
+        ax.set_title(f'{pn}  --  {region}' + ('   [Fig. 24]' if isFig24 else ''),
+                     fontsize=9, fontweight=('bold' if isFig24 else 'normal'))
+        ax.grid(alpha=0.25)
+        if isFig24:
+            for s in ax.spines.values():
+                s.set_edgecolor('#1f77b4'); s.set_linewidth(1.6)
+        if k // 3 == 2:
+            ax.set_xlabel('t*  =  t sqrt(g/H)')
+        if k % 3 == 0:
+            ax.set_ylabel('P / (rho g H)')
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    if handles:
+        fig.legend(handles, labels, loc='lower center', ncol=min(4, len(handles)),
+                   fontsize=9, frameon=False, bbox_to_anchor=(0.5, -0.01))
+    fig.suptitle('Marrone 2011 Sec. 3.4 / Fig. 19 -- surface pressure probes P1-P9\n'
+                 'probe positions read approximately from the figure sketch; '
+                 'first-order MLS fluid-pressure interpolation 0.5 dx off the wall',
+                 fontsize=11)
+    fig.tight_layout(rect=(0, 0.03, 1, 0.96))
+    p = os.path.join(out, 'surface_pressure_traces.png')
+    fig.savefig(p, dpi=130, bbox_inches='tight')
+    print('->', p)
+    return p
+
+
 def _report(out):
     import numpy as np
     import matplotlib
@@ -368,7 +532,20 @@ def _report(out):
     if not runs:
         print(f'no runs in {out}'); return
 
-    fig, axes = plt.subplots(2, 2, figsize=(13, 9))
+    # P1 / P5 / P7 are the three probes Marrone Fig. 24 compares against the
+    # Level-Set solver (P1 near the sharp edge, P5 on the roof, P7 on the
+    # fillet floor). `surfProbeNames` -> column index.
+    def _pcol(meta, cols, pname):
+        names = meta.get('surfProbeNames') or _SURF_NAMES
+        if pname not in names:
+            return None
+        k = names.index(pname)
+        raw = cols.get(f'pSurf{k}')
+        if raw is None or not np.isfinite(raw).any():
+            return None
+        return raw / float(meta.get('pRef') or (1000.0 * G * H))
+
+    fig, axes = plt.subplots(2, 3, figsize=(18, 9))
     for meta, cols, name in runs:
         ts = cols['tStar']
         axes[0, 0].plot(ts, cols['kineticEnergy'], lw=1.1, label=name)
@@ -378,14 +555,24 @@ def _report(out):
         axes[1, 0].plot(ts, cols['maxDensity'], lw=0.6, ls=':', alpha=0.6)
         axes[1, 1].plot(ts, cols['maxObstaclePenDx'], lw=1.1, label=f'{name} obstacle')
         axes[1, 1].plot(ts, cols['maxPenetrationDx'], lw=0.8, ls='--', label=f'{name} tank')
+        p1 = _pcol(meta, cols, 'P1')
+        if p1 is not None:
+            axes[0, 2].plot(ts, p1, lw=1.1, label=name)
+        for pname, ls in (('P5', '-'), ('P7', '--')):
+            pv = _pcol(meta, cols, pname)
+            if pv is not None:
+                axes[1, 2].plot(ts, pv, lw=1.0, ls=ls, label=f'{name} {pname}')
     axes[0, 0].set_title('kinetic energy'); axes[0, 0].set_xlabel('t*')
     axes[0, 1].set_title('max |v| / U_max  (jet tip, sharpens with dx)'); axes[0, 1].set_xlabel('t*')
     axes[1, 0].set_title('density: P05 / P99 (solid) / pointwise max (dotted)'); axes[1, 0].set_xlabel('t*')
     axes[1, 0].axhspan(0.90, 1.10, color='green', alpha=0.08)
     axes[1, 1].set_title('penetration [dx]'); axes[1, 1].set_xlabel('t*')
+    axes[0, 2].set_title('P1 pressure / rho g H  (edge; Wagner ~ 36.7)'); axes[0, 2].set_xlabel('t*')
+    axes[0, 2].axhline(36.7, color='k', ls=':', lw=0.9, label='Wagner P1 = 36.7')
+    axes[1, 2].set_title('P5 (roof, solid) / P7 (fillet, dashed)  pressure / rho g H'); axes[1, 2].set_xlabel('t*')
     for ax in axes.ravel():
         ax.legend(fontsize=6); ax.grid(alpha=0.25)
-    fig.suptitle('Marrone 2011 Sec. 3.4 -- stability / penetration / convergence')
+    fig.suptitle('Marrone 2011 Sec. 3.4 -- stability / penetration / convergence / surface pressure')
     fig.tight_layout()
     p = os.path.join(out, 'stability_and_convergence.png')
     fig.savefig(p, dpi=110)
@@ -396,18 +583,33 @@ def _report(out):
         checks, m = _score(meta, cols)
         npass = sum(c[1] for c in checks)
         lines.append(f'## `{name}`  ({npass}/{len(checks)})')
+        visc = ('inviscid' if meta.get('inviscid', True)
+                else f"Re = {meta.get('Re') or float('nan'):g} (nu = {meta.get('nu', 0.0):.2e})")
         lines.append(f"- H/dx = {meta['HdxRatio']:.1f}, c0 = {meta['c0']:.1f} "
                      f"({meta['c0Ratio']:g} sqrt(gH)), M = {meta.get('mach') or float('nan'):.3f}, "
+                     f"{visc}, "
                      f"t* reached = {meta['tStarReached']:.2f} / {meta['tStarLimit']:g}, "
                      f"diverged = {meta['diverged']}, steps = {meta['nSteps']}, "
                      f"wall = {meta['wallTime_s']:.0f}s")
         for n, ok, det in checks:
             lines.append(f"  - {'PASS' if ok else 'FAIL'}  **{n}** -- {det}")
+        names = meta.get('surfProbeNames') or _SURF_NAMES
+        peaks = []
+        for k, pn in enumerate(names):
+            raw = cols.get(f'pSurf{k}')
+            if raw is None or not np.isfinite(raw).any():
+                continue
+            star = raw / float(meta.get('pRef') or (1000.0 * G * H))
+            peaks.append(f"{pn} {np.nanmax(star):.1f}")
+        if peaks:
+            lines.append(f"  - surface pressure peaks P/(rho g H): {', '.join(peaks)}  "
+                         f"(Wagner P1 ~ 36.7)")
         lines.append('')
     md = os.path.join(out, 'REPORT.md')
     open(md, 'w').write('\n'.join(lines) + '\n')
     print('->', md)
     print('\n'.join(lines))
+    _traceFigure(out)
 
 
 def main(argv=None):
@@ -426,19 +628,30 @@ def main(argv=None):
     ap.add_argument('--cornerOnly', action='store_true',
                     help='drop the sharp-edged obstacle; keep only the rounded tank corner '
                          '(isolated fillet impact test)')
+    ap.add_argument('--Re', type=float, default=None,
+                    help='Marrone Sec. 3.4.2 viscous case: Re = sqrt(gH) H / nu. '
+                         'Unset -> inviscid (Sec. 3.4.1). Marrone runs 1000 and 10000.')
     ap.add_argument('--video', action='store_true')
     ap.add_argument('--plotInterval', type=int, default=25)
+    ap.add_argument('--plotBackend', default=None,
+                    help="video backend; unset = vispy (headless EGL, fast). "
+                         "Pass 'matplotlib' only if vispy misbehaves.")
     ap.add_argument('--out', default=DEFAULT_OUT)
     ap.add_argument('--initdump', action='store_true', help='render boundary/ghost sampling, no stepping')
     ap.add_argument('--report', action='store_true')
+    ap.add_argument('--traceFigure', action='store_true',
+                    help='just the clean 3x3 of the P1-P9 surface pressure traces')
     args = ap.parse_args(argv)
 
+    if args.traceFigure:
+        _traceFigure(args.out); return
     if args.report:
         _report(args.out); return
     if args.initdump:
         _initdump(args.nx, args.out, args.cornerOnly); return
     _runOne(args.nx, args.c0Ratio, args.tStar, args.out, args.video,
-            args.plotInterval, args.scheme, args.cornerOnly, args.shifting)
+            args.plotInterval, args.scheme, args.cornerOnly, args.shifting, args.Re,
+            args.plotBackend)
 
 
 if __name__ == '__main__':

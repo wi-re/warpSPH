@@ -362,6 +362,111 @@ def test_exactJVPMatvecAgreesWithFDAndUsesNoMoreGMRESIterations():
     )
 
 
+# --- Step 7: warpSPHIntegrators IMPLICIT_ROADMAP.md Phase 2 -- the ---------
+# preconditioner hook, exercised on this real SPH operator: the block ------
+# lower-triangular factor of the backward-Euler stage Jacobian, applied ----
+# through warpOperationJVP (operator-based, no dense matrix). -------------
+#
+# For backward Euler (a_ii = 1) the stage residual is G(Y) = Y - y0 - dt*f(Y)
+# and its Jacobian -- the GMRES operator -- is
+#     G' = [[I,           -dt*I        ],
+#           [-dt*c^2*Lap,  I + dt*damping*I]]
+# whose lower block-triangular factor
+#     L = [[I,           0             ],
+#          [-dt*c^2*Lap,  I + dt*damping*I]]
+# inverts as  L^{-1} b = [b_u, (b_v + dt*c^2*Lap(b_u)) / (1 + dt*damping)],
+# one Laplacian apply -- a preconditioner in the "sparse/operator-based, no
+# dense Jacobian" sense the roadmap asks for. The PDE is linear, so G' is
+# constant and Newton is a single correction: the GMRES iteration count is
+# the whole solve cost, and it is what the preconditioner buys down.
+
+def _blockLowerTriangularWavePreconditioner(system: WaveSystemv3, dt: float, config,
+                                            schemeConfig: WaveEquationConfig):
+    """Build ``(preconditioner, context)`` for the backward-Euler wave stage.
+
+    Returns the 3-arg hook callable plus the extra ``preconditioner_context``
+    keys it reads. ``c`` and ``damping`` are read from the current Newton
+    iterate ``state`` (the 3-arg contract: the preconditioner approximates
+    ``J_G(Y)^{-1}`` at the current iterate); everything fixed for the step --
+    the Laplacian matvec, ``dt``, the u/v block size -- rides in the context.
+    """
+    n = system.state.u.shape[0]
+    laplacian = _laplacianMatvec(system, config, schemeConfig)
+
+    def preconditioner(v, state, context):
+        s = get_reference_state(state)
+        u_block = v[:n]
+        denom = 1.0 + context['dt'] * s.damping
+        v_block = (v[n:] + context['dt'] * s.c ** 2 * laplacian(u_block)) / denom
+        return torch.cat([u_block, v_block])
+
+    return preconditioner, {'dt': dt, 'n': n, 'laplacian': laplacian}
+
+
+@pytest.mark.parametrize('matvec', ['fd', 'jvp'])
+def test_blockLaplacianPreconditionerCutsGMRESIterationsOnTheStageSolve(matvec):
+    """At the linear-solver level, on the real SPH operator: the block
+    lower-triangular Laplacian preconditioner must materially cut the GMRES
+    iterations of the 2N backward-Euler stage solve, and the preconditioned
+    and unpreconditioned solves must land on the same fixed point."""
+    dt = 0.01
+    system, config, _k = _buildStandingWaveSystem(nx=32, dim=1)
+    schemeConfig = WaveEquationConfig()
+    y0, step_fn = _backwardEulerStageStepFn(system, dt, config, schemeConfig)
+    y_flat = flatten_integrated(y0)
+    G_y = y_flat - flatten_integrated(step_fn(y0))
+    mv = fd_matvec(step_fn, y0, y_flat, G_y) if matvec == 'fd' else jvp_matvec(step_fn, y0)
+
+    preconditioner, context = _blockLowerTriangularWavePreconditioner(system, dt, config, schemeConfig)
+
+    x_ref, it_ref = gmres(mv, -G_y, tol=1e-8, maxiter=y_flat.numel())
+    x_prec, it_prec = gmres(mv, -G_y, tol=1e-8, maxiter=y_flat.numel(),
+                            preconditioner=lambda v: preconditioner(v, system, context),
+                            preconditioning='right')
+
+    assert it_ref > 20, f'unpreconditioned stage solve should be stiff here, got {it_ref} iters'
+    assert it_prec < 0.6 * it_ref, f'preconditioned {it_prec} iters not < 0.6*{it_ref}'
+    torch.testing.assert_close(x_prec, x_ref, rtol=5e-3, atol=1e-4)
+
+
+@pytest.mark.parametrize('matvec', ['fd', 'jvp'])
+def test_jfnkWithPreconditionerMatchesReferenceAndReportsFewerIterations(matvec):
+    """End to end through `getIntegrator('Backward Euler (implicit)')`: the
+    preconditioned solve must agree with both the unpreconditioned JFNK solve
+    and the hand-eliminated CG reference, and report fewer GMRES iterations
+    in the `solver_diagnostics` a caller actually sees.
+    """
+    dt = 0.01
+    schemeConfig = WaveEquationConfig()
+    scheme = getIntegrator('Backward Euler (implicit)')
+
+    cgSystem, config, _k = _buildStandingWaveSystem(nx=32, dim=1)
+    cgResult = implicitBackwardEulerStep(cgSystem, dt, config, schemeConfig, tol=1e-10)
+
+    refSystem, _c2, _k2 = _buildStandingWaveSystem(nx=32, dim=1)
+    ref = scheme(refSystem, dt, f_wave_equation, config, schemeConfig,
+                 solver=JFNKSolver(matvec=matvec, tol=1e-8, max_iterations=15))
+    refState = get_reference_state(ref.state)
+
+    precSystem, _c3, _k3 = _buildStandingWaveSystem(nx=32, dim=1)
+    preconditioner, context = _blockLowerTriangularWavePreconditioner(precSystem, dt, config, schemeConfig)
+    prec = scheme(precSystem, dt, f_wave_equation, config, schemeConfig,
+                  solver=JFNKSolver(matvec=matvec, tol=1e-8, max_iterations=15,
+                                    preconditioner=preconditioner, preconditioning='right',
+                                    preconditioner_context=context))
+    precState = get_reference_state(prec.state)
+
+    torch.testing.assert_close(precState.u, refState.u, rtol=1e-4, atol=1e-5)
+    torch.testing.assert_close(precState.v, refState.v, rtol=1e-4, atol=1e-5)
+    torch.testing.assert_close(precState.u, cgResult.state.u, rtol=1e-4, atol=1e-5)
+    torch.testing.assert_close(precState.v, cgResult.state.v, rtol=1e-4, atol=1e-5)
+
+    it_ref = ref.solver_diagnostics[0].gmres_iterations
+    it_prec = prec.solver_diagnostics[0].gmres_iterations
+    assert it_ref > 20, f'unpreconditioned stage solve should be stiff here, got {it_ref} iters'
+    assert it_prec < 0.6 * it_ref, f'preconditioned {it_prec} iters not < 0.6*{it_ref}'
+
+
 # --- Cheap bonus: the driver is generic, so JFNK works on other DIRK -------
 # tableaus too, for free. ----------------------------------------------------
 

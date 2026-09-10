@@ -23,6 +23,20 @@ error in the round trip land it a hair on the wrong side of that integer, and
 into a whole extra row of cells. Reason (2) is not a resolution effect: it was
 measured adding an entire extra cell layer from a `1e-6`-relative residual.
 
+**Explicit `dx`, non-periodic axis -- count intervals, not points, and round
+`dn` down.** A non-periodic axis puts a particle on *both* faces, so `l` is
+spanned by `nCells` gaps between `nCells + 1` points. Picking the point count
+as `round(l / dx)` and then spanning `l` with `point_count - 1` gaps inflates
+`dn` to `l / (round(l/dx) - 1)`, which is *always* a hair above `dx` (~1.2 % at
+`l = 82 dx`) -- and a `dn > dx` first band opens a gap between the boundary
+layer and the fluid at every wall. So the explicit-`dx` non-periodic path takes
+`nCells = ceil(l / dx - 1e-3)` (the `- 1e-3` absorbs float32's ~1e-4 error on
+`l/dx`, so an exact multiple does not gain a spurious layer -- reason (2)) and
+`dn = l / nCells <= dx`: the lattice is a hair *tighter* than requested, never
+looser, so the wall bands touch rather than gap. The periodic path already did
+the right thing (`dn = l / round(l/dx)`, no endpoint), and the `dx = None` path
+is left as it was.
+
 Mass, support and the periodic half-cell offset are all computed from the
 *achieved* `dn`, not the nominal `dx` -- using the latter was exactly the bug:
 a particle's assigned mass silently disagreed with the cell it was actually
@@ -51,11 +65,13 @@ def buildPointCloud(nx, domain: DomainDescription = None, targetNeighbors = 16, 
     #    wide-shallow one (a sloshing tank) lets its *short* axis dictate a
     #    spacing the case never asked for, so `config.dx` ends up a lie that
     #    still feeds `dt` / `c_s` (DELTASPH_VALIDATION_PLAN 5.2.3).
-    #  * an explicit `dx` (e.g. `config.dx`) is authoritative: every axis snaps
-    #    to `round(span/dx)` cells, so the realised `dn` stays within one part
-    #    in `nd` of `dx` on *every* axis. `round`, not `ceil` -- `ceil` sitting
-    #    on an integer boundary turns a 1e-6 round-trip residual into a whole
-    #    extra cell layer (see the module docstring, reason 2).
+    #  * an explicit `dx` (e.g. `config.dx`) is authoritative. A periodic axis
+    #    snaps to `round(span/dx)` cells (`dn = span/nCells`, no endpoint). A
+    #    non-periodic axis snaps to `ceil(span/dx - eps)` *cells* -- points are
+    #    that + 1, one on each face -- so `dn = span/nCells <= dx`: a hair
+    #    tighter than asked, never looser, so the boundary and fluid bands
+    #    touch at a wall instead of gapping (see the module docstring). `eps`
+    #    is a 1e-6 residual guard so an exact multiple does not gain a layer.
     explicitDx = dx is not None
     if explicitDx:
         dx = torch.as_tensor(float(dx))
@@ -76,9 +92,26 @@ def buildPointCloud(nx, domain: DomainDescription = None, targetNeighbors = 16, 
     cellVolume = None
     for d in range(domain.dim):
         l = domain.max[d] - domain.min[d]
-        nd = (torch.round(l/dx) if explicitDx else torch.ceil(l/dx)).to(torch.int32)
-        nd = torch.clamp(nd, min=(1 if periodicity[d] else 2))
-        dn = l / (nd if periodicity[d] else nd-1)
+        if explicitDx:
+            # `nCells = ceil(l/dx - 1e-3)` -> `dn = l/nCells <= dx`: a hair
+            # *tighter* than the requested spacing, never looser, so the
+            # boundary and fluid bands touch at a wall instead of gapping. The
+            # `- 1e-3` (not `1e-6`) absorbs float32's ~1e-4 error on `l/dx` at a
+            # few hundred cells, which would otherwise make `ceil` add a
+            # spurious whole layer when `l` is an exact multiple of `dx`. For a
+            # canonical periodic box (`l/dx == nx` exactly) this is identical to
+            # the old `round(l/dx)`; it only bites a *padded* periodic axis,
+            # where it keeps `dn <= dx` too. A non-periodic axis carries a point
+            # on each face, so it needs `nCells + 1` points for `nCells` gaps --
+            # the off-by-one the old `points = round(l/dx)` / `dn = l/(points-1)`
+            # got wrong, always inflating `dn` above `dx`.
+            nCells = torch.clamp(torch.ceil(l / dx - 1e-3).to(torch.int32), min=1)
+            dn = l / nCells
+            nd = nCells if periodicity[d] else nCells + 1
+        else:
+            nd = torch.clamp(torch.ceil(l / dx).to(torch.int32),
+                             min=(1 if periodicity[d] else 2))
+            dn = l / (nd if periodicity[d] else nd - 1)
         dns.append(dn)
         cellVolume = dn if cellVolume is None else cellVolume * dn
 

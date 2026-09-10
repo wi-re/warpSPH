@@ -17,9 +17,35 @@ would re-run this from the new geometry.
 
 The method (Marrone 2011 App. A; English et al. 2022 §3): mirror each boundary
 particle across the fluid-facing interface so its ghost node sits ~`dp/2` into
-the fluid for the first layer, ~`k dp` for the k-th. Two implementations here:
+the fluid for the first layer, ~`k dp` for the k-th.
 
-* **2D -- `_bodyNodeGhostOffsets` (default).** The boundary is discretised into
+**Placement mode (`WARPSPH_GHOST_PLACEMENT`, or the `_GHOST_PLACEMENT_DEFAULT`
+constant).** Four paths, but only **`'gridsnap'` is used** -- nothing in the
+tree sets the env var. `'simple'`, `'bodynode'` and `'geometric'` are **parked**:
+kept as troubleshooting aids (each isolates a different piece of the placement
+-- raw mirror / polyline surface / analytic normal) for a geometry `'gridsnap'`
+might get wrong, not as alternatives to select in normal use.
+
+* **`'gridsnap'` -- `_gridSnapGhostOffsets` (default, the only live path).**
+  Take the distance `d`
+  behind, and inward normal `n`, from the **merged** solid SDF (every
+  boundary/obstacle SDF `min`-combined, so a wall running into an obstacle is
+  one surface with one normal through the junction -- `_mergedSurface`), then
+  place the node at `ceil(d/dx)*dx` **past the surface**: `r_g = r_b + (d +
+  ceil(d/dx)*dx) n`. Every first-layer node then sits exactly `dx` into the
+  fluid, every second-layer node `2 dx`, etc. -- **independent of where the
+  global lattice happened to fall against the surface**, so it needs no
+  lattice alignment and copes with an obstacle that breaks it (the Marrone 3.4
+  wedge on the floor). Deep layers (`d > 2 h`) -> zero offset; a node inside
+  another solid is retracted one `dx` at a time, floored at `dx` past the
+  surface.
+* **`'simple'` -- the plain capped mirror, no validity pass.** `r_g = r_b - 2
+  phi(r_b) n_hat` from this region's own SDF, node depth capped at `1.5 h`.
+  Exactly right where the boundary particles are already well placed -- flat,
+  grid-parallel walls with the first band `dp/2` proud
+  (`alignInteriorDomainToLattice`) -- but phase-fragile once an obstacle breaks
+  that alignment, which is why `'gridsnap'` supersedes it as the default.
+* **`'bodynode'` -- 2D `_bodyNodeGhostOffsets`.** The boundary is discretised into
   "body nodes" -- a fine marching-squares polyline of the region SDF
   (`_boundaryPolyline`) -- and each boundary particle is mirrored **through its
   nearest point on that polyline**, `r_g = 2 r_s - r_b`. One rule covers every
@@ -30,22 +56,26 @@ the fluid for the first layer, ~`k dp` for the k-th. Two implementations here:
   the SDF-gradient direction (below) mis-placed ~28 % of the near-surface bed
   ghosts (`DELTASPH_VALIDATION_PLAN.md` §5.2.3).
 
-* **3D, or no polyline -- `_geometricGhostOffsets`.** Mirror along `grad(sdf)`
-  of the composed region SDF, `r_g = r_b - 2 phi(r_b) n_hat`. Fine on flats and
+* **`'geometric'` -- `_geometricGhostOffsets`** (also the fallback for 3D and
+  for any 2D region with no extractable polyline). Mirror along `grad(sdf)` of
+  the composed region SDF, `r_g = r_b - 2 phi(r_b) n_hat`. Fine on flats and
   smooth curves; **wrong at re-entrant / sharp corners** where `grad` of a
   `min`/`max` tree points into a wall.
 
-Both then apply a **validity retract** -- shorten (never lengthen) the offset
-so the node clears every solid region, capped at ~one support radius -- and
-collapse to a zero offset where no clean fluid-facing node exists (deep solid
-interior; `computeMdbcDensity` then Shepard-/rest-falls-back, the right answer
-for a particle the fluid never reaches).
+The `'gridsnap'`, `'bodynode'` and `'geometric'` paths apply a **validity
+retract** -- shorten (never lengthen) the offset so the node clears every solid
+region -- and collapse to a zero offset where no clean fluid-facing node exists
+(deep solid interior; `computeMdbcDensity` then Shepard-/rest-falls-back, the
+right answer for a particle the fluid never reaches). `'simple'` does neither:
+it trusts the sample.
 
 Not done (quality, not correctness): an analytic per-primitive normal would be
 exact on curved walls and cheaper than the polyline; Marrone's explicit
 bisector rule for re-entrant corners (mirror-through-nearest-point suffices for
 the cases tried).
 """
+
+import os
 
 import numpy as np
 import torch
@@ -58,6 +88,36 @@ __all__ = ['addBoundaryGhostParticles']
 #: The fluid-facing interface sits this many spacings `dp` proud of the
 #: outermost boundary layer (English et al. 2022 §3: `dp/2`).
 GHOST_FLUID_DEPTH = 0.5
+
+#: mDBC ghost placement path, `WARPSPH_GHOST_PLACEMENT`.
+#:
+#: **`'gridsnap'` is the only production path** and no case / script / test sets
+#: the env var, so that is what everything runs. `'simple'`, `'bodynode'` and
+#: `'geometric'` are **parked** -- kept solely as troubleshooting aids for a
+#: geometry `'gridsnap'` might mishandle (they each isolate a different failure
+#: mode: `'simple'` = the raw capped mirror with no validity pass at all;
+#: `'bodynode'` = a marching-squares polyline instead of the merged SDF;
+#: `'geometric'` = the analytic `grad(sdf)` normal instead of the mollified
+#: central difference). Do not reach for them in normal use; if one of them
+#: fixes a case that `'gridsnap'` breaks, that is a bug report for
+#: `_gridSnapGhostOffsets`, not a mode to switch to.
+#:
+#:  * `'gridsnap'` -- node at `ceil(d/dx)*dx` past the merged solid surface, so
+#:    the layout is independent of the sub-dx lattice phase; the one strategy
+#:    that also copes with an obstacle touching the box wall
+#:    (`_gridSnapGhostOffsets`).
+#:  * `'simple'` (parked) -- the pristine capped mirror, no retract. Exact on a
+#:    lattice-aligned flat wall (`alignInteriorDomainToLattice`); phase-fragile
+#:    once an obstacle breaks the alignment.
+#:  * `'bodynode'` (parked) -- the 2D marching-squares polyline mirror (Marrone
+#:    2011 App. A). `'geometric'` (parked) -- grad(sdf) mirror + validity retract.
+_GHOST_PLACEMENT_DEFAULT = 'gridsnap'
+_GHOST_PLACEMENT_MODES = ('gridsnap', 'simple', 'bodynode', 'geometric')
+
+
+def _ghostPlacementMode():
+    m = os.environ.get('WARPSPH_GHOST_PLACEMENT', _GHOST_PLACEMENT_DEFAULT).strip().lower()
+    return m if m in _GHOST_PLACEMENT_MODES else _GHOST_PLACEMENT_DEFAULT
 
 #: Body-node polyline resolution, in samples per `dp`, for the 2D
 #: `_bodyNodeGhostOffsets` path.
@@ -106,7 +166,12 @@ def _boundaryPolyline(regionSdf, bpos, dx, samplesPerDp=_BODYNODE_SAMPLES_PER_DP
 
 def _bodyNodeGhostOffsets(bpos, regionSdf, solidSdfs, dx, hMean, *,
                           nSamples: int = 20, segChunk: int = 8192):
-    """mDBC ghost offset `r_b - r_g` per boundary particle, placed the way the
+    """PARKED -- reachable only via `WARPSPH_GHOST_PLACEMENT=bodynode`, which
+    nothing sets. Kept as a troubleshooting fallback that swaps the merged-SDF
+    surface for a marching-squares polyline; `_gridSnapGhostOffsets` is the live
+    path. See the module docstring.
+
+    mDBC ghost offset `r_b - r_g` per boundary particle, placed the way the
     papers specify (Marrone 2011 App. A; English et al. 2022 §3): from an
     analytic-ish boundary discretisation, **not** the gradient of a composed
     `min`/`max` SDF (which points into the wall at a re-entrant corner -- the
@@ -134,7 +199,17 @@ def _bodyNodeGhostOffsets(bpos, regionSdf, solidSdfs, dx, hMean, *,
     A, B = poly
     n = bpos.shape[0]
     eps = 0.1 * float(dx)
-    capMax = 1.5 * float(hMean)
+    # `nodeDepthCap`: how far past the surface a ghost node may sit at a corner.
+    # `layerReach`: a boundary particle whose nearest surface point is further
+    # than this cannot be within kernel support of any fluid particle, so its
+    # ghost is inert -- zero offset -> Shepard / rest fallback (Marrone's "not
+    # considered"). On a smooth wall these bound the node *position*, never the
+    # offset *magnitude*: a deep boundary layer of a multi-layer flat wall has a
+    # legitimate offset of ~2|s| and rejecting it on magnitude drops the whole
+    # deep layer to rest density, collapsing the wall pressure under a fast
+    # near-wall flow (Marrone 2011 3.1 wall-climb blowup, DELTASPH_VALIDATION_PLAN 5.1.2).
+    nodeDepthCap = 1.5 * float(hMean)
+    layerReach = 2.0 * float(hMean)
 
     # nearest point on the polyline, chunked over segments
     foot = torch.zeros_like(bpos)
@@ -151,36 +226,46 @@ def _bodyNodeGhostOffsets(bpos, regionSdf, solidSdfs, dx, hMean, *,
         dmin = torch.where(upd, dv, dmin)
         foot = torch.where(upd.unsqueeze(-1), proj[torch.arange(n, device=bpos.device), di], foot)
 
-    rg = 2.0 * foot - bpos                                  # mirror through r_s
-
     def clearance(pos):
         c = pos.new_full((pos.shape[0],), float('inf'))
         for sdf in solidSdfs:
             c = torch.minimum(c, sdf(pos)[0].reshape(-1))
         return c
 
-    # Returned offset is `r_b - r_g` (points from the fluid back to the boundary
-    # particle); the ghost node is `r_b - offset`.
-    offFull = bpos - rg                                     # (n,2)
-    tooFar = torch.linalg.norm(offFull, dim=-1) > capMax
+    # Mirror through the nearest surface point, node depth capped at
+    # `nodeDepthCap` (a standard mirror otherwise puts a k-th-layer node ~k dp
+    # deep). `dir` is the unit outward direction bpos -> foot -> fluid.
+    dmn = dmin.unsqueeze(-1)
+    dirUnit = (foot - bpos) / dmn.clamp_min(1e-12)
+    mirrorDepth = torch.clamp(dmn, max=nodeDepthCap)        # (n,1)
+    realLayer = dmin <= layerReach
+
+    # Returned offset is `r_b - r_g` (fluid -> boundary particle); ghost node is
+    # `r_b - offset`.
+    rgCap = foot + mirrorDepth * dirUnit
     best = torch.zeros_like(bpos)
-    found = (clearance(rg) > eps) & ~tooFar
-    best = torch.where(found.unsqueeze(-1), offFull, best)
-    if not bool(found.all()):
-        # retract the node from the full mirror toward the surface point
+    found = realLayer & (clearance(rgCap) > eps)
+    best = torch.where(found.unsqueeze(-1), bpos - rgCap, best)
+    if not bool((found | ~realLayer).all()):
+        # capped mirror landed in a solid (thin obstacle far face, the other
+        # wall of a re-entrant corner): slide the node in toward the surface
+        # foot along the same ray -- never past it into the solid.
         for frac in torch.linspace(1.0, 1.0 / nSamples, nSamples,
                                    device=bpos.device, dtype=bpos.dtype):
-            off = frac * offFull
-            cand = bpos - off
-            take = (~found) & (clearance(cand) > eps) & \
-                   (torch.linalg.norm(off, dim=-1) <= capMax)
-            best = torch.where(take.unsqueeze(-1), off, best)
+            cand = foot + frac * mirrorDepth * dirUnit
+            take = realLayer & (~found) & (clearance(cand) > eps)
+            best = torch.where(take.unsqueeze(-1), bpos - cand, best)
             found = found | take
     return best
 
 
 def _geometricGhostOffsets(bpos, solidSdfs, dx, legacyOffsets, *, nSamples: int = 16):
-    """Place each boundary particle's mDBC ghost node from the boundary geometry
+    """PARKED -- reachable only via `WARPSPH_GHOST_PLACEMENT=geometric`, which
+    nothing sets. Kept as a troubleshooting fallback that uses the analytic
+    `grad(sdf)` normal (no mollifier) with a magnitude-only validity retract;
+    `_gridSnapGhostOffsets` is the live path. See the module docstring.
+
+    Place each boundary particle's mDBC ghost node from the boundary geometry
     alone -- no fluid particles consulted, so the layout is identical whether the
     domain is wet, dry, or filling, and never needs a mid-run refresh.
 
@@ -228,6 +313,82 @@ def _geometricGhostOffsets(bpos, solidSdfs, dx, legacyOffsets, *, nSamples: int 
     return best * nHat
 
 
+def _mergedSurface(pos, solidSdfs, eps):
+    """Distance `d` behind, and unit inward normal `n`, of the *merged* solid
+    surface at each `pos` -- every boundary/obstacle SDF `min`-combined into one,
+    so a wall that runs into an obstacle (the Marrone 3.4 wedge sits on the
+    floor) is treated as one continuous surface with one consistent normal
+    through the junction, not two primitives fighting over the corner.
+
+    A point is in the fluid only if it is in the fluid of *every* solid, so the
+    merged value is `min_i sdf_i` (each `> 0` on its fluid side); `d = max(-min,
+    0)` is how far the point sits behind that surface. The normal is a **central
+    difference of the merged value over a step `eps ~ dx`**, not the analytic
+    gradient: the finite step mollifies the direction discontinuity at a
+    convex edge / re-entrant corner of the `min`/`max` tree (which is exactly
+    where the raw gradient points into a wall -- the Marrone 3.4 toe leak).
+    """
+    def mval(p):
+        v = None
+        for s in solidSdfs:
+            vi = s(p)[0].reshape(-1)
+            v = vi if v is None else torch.minimum(v, vi)
+        return v
+
+    d = (-mval(pos)).clamp_min(0.0)
+    grad = torch.zeros_like(pos)
+    for i in range(pos.shape[-1]):
+        o = torch.zeros_like(pos)
+        o[..., i] = eps
+        grad[..., i] = (mval(pos + o) - mval(pos - o)) / (2.0 * eps)
+    return d, torch.nn.functional.normalize(grad, dim=-1)
+
+
+def _gridSnapGhostOffsets(bpos, solidSdfs, dx, hMean, *, nRetract: int = 12):
+    """mDBC ghost offset `r_b - r_g`, placed so the layout is **independent of
+    where the global particle lattice happened to fall against the surface**
+    (`DELTASPH_VALIDATION_PLAN.md` 5.2.x).
+
+    A plain mirror puts the node a distance `d` (the boundary particle's own
+    distance behind the surface) into the fluid -- and with an obstacle in the
+    box, `d` is whatever the lattice phase gave, anywhere in `(0, dx)` for the
+    first layer, so the node can land right on the surface with no one-sided
+    support. Instead: take `d` and the mollified inward normal `n` from the
+    merged solid SDF (`_mergedSurface`), and place the node at **`ceil(d/dx)*dx`
+    past the surface** -- every first-layer boundary particle's node then sits
+    exactly `dx` into the fluid, every second-layer node `2 dx`, etc.,
+    regardless of the sub-`dx` offset of the particle itself:
+    `r_g = r_b + (d + ceil(d/dx)*dx) n`, with the node depth capped at `1.5 h`
+    so a slightly-off deep-layer normal cannot fling the node across the domain.
+
+    Deep layers (`d > 2 h`, past any fluid particle's kernel support) get a zero
+    offset -> Shepard / rest fallback (Marrone's "not considered"). A node that
+    lands inside another solid (thin obstacle far face, opposite wall of a
+    narrow gap) is retracted half a `dx` at a time toward the surface; if it
+    never clears, the offset collapses to zero.
+    """
+    eps = 0.1 * float(dx)
+    d, n = _mergedSurface(bpos, solidSdfs, float(dx))
+    realLayer = d <= 2.0 * float(hMean)
+    nodeDepth = (torch.ceil(d / dx - 1e-3).clamp_min(1.0) * dx).clamp_max(1.5 * float(hMean))
+
+    def clearance(pos):
+        c = pos.new_full((pos.shape[0],), float('inf'))
+        for s in solidSdfs:
+            c = torch.minimum(c, s(pos)[0].reshape(-1))
+        return c
+
+    best = torch.zeros_like(bpos)
+    found = ~realLayer                                                        # deep: leave at 0
+    for k in range(nRetract):
+        depth = (nodeDepth - k * 0.5 * dx).clamp_min(0.5 * dx)
+        rg = bpos + (d + depth).unsqueeze(-1) * n
+        take = (~found) & (clearance(rg) > eps)
+        best = torch.where(take.unsqueeze(-1), bpos - rg, best)
+        found = found | take
+    return best
+
+
 def addBoundaryGhostParticles(regions, particleState : Any):
     device = particleState.positions.device
     dtype = particleState.positions.dtype
@@ -262,23 +423,28 @@ def addBoundaryGhostParticles(regions, particleState : Any):
             bpos = particleState.positions[relevantParticles]
             hMean = float(particleState.supports.mean())
 
-            # Ghost placement, geometry-only. In 2D use the body-node method
-            # (Marrone 2011 App. A / English §3): a polyline discretisation of
-            # the surface, then mirror each boundary particle through its
-            # nearest surface point -- which does the right thing at re-entrant
-            # / sharp corners where `grad(sdf)` of a composed min/max points
-            # into the wall (the Marrone §3.4 obstacle-toe leak, §5.2.3).
+            # Ghost placement, geometry-only. `'gridsnap'` is the only live
+            # path; the other branches are parked troubleshooting aids (see the
+            # module docstring -- nothing sets `WARPSPH_GHOST_PLACEMENT`).
+            mode = _ghostPlacementMode()
             offsets = None
-            if int(dim) == 2:
-                offsets = _bodyNodeGhostOffsets(bpos, region.sdf, solidSdfs, dx, hMean)
-            if offsets is None:
-                # 3D, or no polyline: English et al. 2022 reflection along
-                # grad(sdf), capped, then a validity retract toward the boundary
-                # particle where the node would cross into another solid.
+            if mode == 'gridsnap':
+                # Node at ceil(d/dx)*dx past the merged solid surface -- layout
+                # independent of the sub-dx lattice phase, copes with an
+                # obstacle touching the box wall.
+                offsets = _gridSnapGhostOffsets(bpos, solidSdfs, dx, hMean)
+            else:
+                # Parked paths. The English et al. 2022 reflection along
+                # grad(sdf), node depth capped at 1.5 h, is their shared start.
                 sdfValues, sdfNormals = region.sdf(bpos)
                 clampedDist = sdfValues - torch.clamp(-sdfValues, max=1.5 * hMean)
                 legacyOffsets = clampedDist.view(-1, 1) * sdfNormals
-                offsets = _geometricGhostOffsets(bpos, solidSdfs, dx, legacyOffsets)
+                if mode == 'simple':
+                    offsets = legacyOffsets                      # raw capped mirror, no retract
+                elif mode == 'bodynode' and int(dim) == 2:
+                    offsets = _bodyNodeGhostOffsets(bpos, region.sdf, solidSdfs, dx, hMean)
+                if offsets is None:                              # 'geometric', or 3D bodynode
+                    offsets = _geometricGhostOffsets(bpos, solidSdfs, dx, legacyOffsets)
 
             bIndices = relevantParticles
             boundaryIndices.append(bIndices)

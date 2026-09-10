@@ -39,31 +39,148 @@ Reference material now on disk:
 
 ---
 
-# Current state & how to resume  (as of 2026-09-09)
+# Current state & how to resume  (as of 2026-09-10)
 
-Everything below is **committed**. The audit (Parts 1–4) and the original `c₀` /
-integrator / mDBC-determinant-gate work landed before and during the first
-sessions; this section tracks the validation cases (Part 5) and is the place to
-start from.
+The audit (Parts 1–4) and the original `c₀` / integrator / mDBC-determinant-gate
+work are **committed**. Everything from the 2026-09-10 boundary-sampling session
+onward (`sample/regular.py`, `caseUtils/weaklyCompressible.py`,
+`cases/dambreak.py`, `rigidBody/ghostParticles.py` — the block below, and the
+`marroneSharpEdge` polygon SDF) is **uncommitted** — one coherent change,
+verified but not yet landed.
 
-**mDBC ghost placement, current (2026-09-09):** the dynamic `mdbcGhostRefreshEvery`
-path is gone (`76af473`); 2D uses `_bodyNodeGhostOffsets` (`1e145a1` — a
-marching-squares polyline of `region.sdf` as body nodes, mirror through the
-nearest polyline point; Marrone 2011 App. A / English §3), 3D still uses the
-`∇(sdf)` `_geometricGhostOffsets`. This fixed the Marrone §3.4 obstacle-toe
-leak (30 → 4.66 dx) and *improved* englishWedge (re-entrant RMSE 10×). Open:
-the toe-*apex* residual (one creeping particle, needs Marrone's continuity
-fill); an analytic per-primitive normal. See §5.2.3.
+## Where the δ-SPH validation stands
+
+**The boundary handling is sound.** Root cause of the whole "won't run cleanly"
+history was the *sampling*, not the scheme: nothing pinned the tank box to a
+sensible lattice phase, so a lattice row landed on every flat wall and the mDBC
+ghost placement was papering over a bad sample with geometry heuristics. Fixed
+in three places (`dn ≤ dx` sampler + `alignInteriorDomainToLattice` +
+`'gridsnap'` ghost placement — full detail in the block below), plus the
+`marroneSharpEdge` obstacle SDF's internal-seam bug.
+
+**On the fixed sampling, with the un-frozen defaults and no case-specific
+tuning** (no `hydrostaticInit` / `alpha` / `nu` / frozen diffusion), every
+Marrone dam-break case now runs the full record stably with essentially no
+boundary leakage — see the Verified table below. Highlights:
+
+- **§3.1 flat wall (nx=72):** δ-SPH no-PST *and* δ⁺-SPH PST both survive to
+  t\*≈7.7 with **0 wall penetration**. (δ-SPH's free surface fragments to spray
+  by t\*≈5 — a real no-PST method limit, not a boundary artefact.)
+- **§3.4 rounded corner (nx=256):** δ-SPH no-PST and δ⁺ both stable to t\*=7,
+  **0 tank + 0 fillet penetration**, indistinguishable from each other.
+- **§3.4 full wedge (nx=256):** δ-SPH no-PST **and** δ⁺ both stable to t\*=7,
+  **0 tank penetration**; obstacle penetration 1.81 dx (δ-SPH) / 0.77 dx (δ⁺),
+  both well inside the ≤ 3 dx gate. **Marrone's own δ-SPH carries its own §3.4
+  cases** — PST tightens the jet and roughly halves the obstacle pen but is not
+  load-bearing for stability. cf. the toe-leak history: 30 → 4.66 → **0.77 dx**.
+
+**mDBC ghost placement (2026-09-10):** `'gridsnap'` (`_gridSnapGhostOffsets`) is
+the sole live path; nothing sets `WARPSPH_GHOST_PLACEMENT`. `_bodyNodeGhostOffsets`
+(the `1e145a1` polyline + item-4 `nodeDepthCap`/`layerReach` fix) and
+`_geometricGhostOffsets` are **parked** — kept in-file as troubleshooting aids,
+not reached in any run. Item 2b and the item-4 regression fix are therefore
+**superseded**: gridsnap has no `capMax` and does not consult the polyline, so
+neither the §3.1 flat-wall regression nor the M34 toe leak they fought exists on
+the live path.
+
+## Open / still to do
+
+- **Commit the session's work** (see file list above).
+- **Convergence** for §3.1 and §3.4 — the runs so far are the *stability +
+  penetration* gate at one resolution each; the pressure-trace scoring vs
+  Buchner (§3.1 P1/P2) and Colicchio/Wagner (§3.4 P1–P9), and the H/dx
+  convergence pairs, are still to do.
+- **§3.1 P2** median 2× low / phase-early at H/Δx=322 — probing-methodology gap
+  (item 3), not a scheme error.
+- **sloshingTank / other explicit-`dx` cases** — the sampler change is a strict
+  `dn ≤ dx` improvement but shifts particle counts slightly; re-run the ones
+  with tuned acceptance bands.
+- **§5.2.3 sloshingTank (TC10)** grading vs the experiment — separate work.
+
+**Boundary lattice alignment + dn≤dx sampler + pristine ghost placement
+(2026-09-10, item 4a):** root-caused the "abysmal" dam-break wall sampling —
+nothing pinned the tank box to a sensible phase in the fixed sampling lattice,
+so at nx = 72 a lattice row lands **on** every flat wall (innermost boundary
+−0.95 dx, first fluid +0.06 dx against the −0.5 / +0.5 ideal), and the
+ghost-placement heuristics above were compensating for a bad *sample*. Three
+changes:
+ * `sample/regular.py` `buildPointCloud` — the explicit-`dx` non-periodic path
+   picked the *point* count as `round(l/dx)` and spanned `l` with `points−1`
+   gaps, so realised `dn = l/(round(l/dx)−1) > dx` always (1.0034× x / 1.0124×
+   y at nx = 72), gapping every wall band. Now (both periodic + non-periodic
+   explicit-`dx`) `nCells = ceil(l/dx − 1e-3)` *intervals*, `dn = l/nCells ≤ dx`;
+   points = `nCells+1` non-periodic (endpoint per face), `nCells` periodic. The
+   `−1e-3` absorbs float32's ~1e-4 error on `l/dx` (nx=134: `l/dx`=144.0000076
+   → 145 cells, `dn/dx`=0.993 with `−1e-6`). Canonical periodic box (`l/dx==nx`
+   exact) is byte-identical to old `round`; `dx=None` untouched. Verified:
+   tgv-wc / randomFlow / hydrostaticColumn counts identical; sloshingTank +10
+   bnd (~1 %, fluid unchanged); dambreak ± M34 gain the endpoint layer (bnd
+   +~20 %, fluid unchanged), `dn/dx`→≤1.
+ * `alignInteriorDomainToLattice` (`caseUtils/weaklyCompressible.py`, called from
+   `dambreak.configureScheme`, param `alignBoundaryLattice` default on) — snap
+   the interior wall box onto the **nearest** lattice mid-gap (ties inward),
+   move ≤ dn/2; `domain` / the lattice untouched. Moving the wall never gaps —
+   the boundary/fluid rows straddling it are adjacent lattice points `dn` apart.
+   **Periodicity-aware**: the periodic sampler's half-cell wrap offset flips the
+   `nCells` parity that puts a mid-gap on centre; helper handles both, no longer
+   skips periodic axes (still skips a genuinely unpadded / fullyPeriodic axis).
+   nx = 72 → all four flat walls straddle at exactly ±0.5 dx in **both**
+   `wallPeriodic` modes, ghost offsets exact `(2k+1)`, NN spacing 0.9992 dx.
+   **`wallPeriodic=True` now samples virtually identically to non-periodic**
+   (identical fluid count at every nx 67–400, same `dn`; differs only by a
+   physically-irrelevant global dn/2 lattice stagger + one inert endpoint row).
+ * `WARPSPH_GHOST_PLACEMENT` env / `_GHOST_PLACEMENT_DEFAULT` in
+   `rigidBody/ghostParticles.py` — **`'gridsnap'` is the default**
+   (`_gridSnapGhostOffsets`): distance `d` behind + inward normal `n` from the
+   *merged* solid SDF (all boundary/obstacle SDFs `min`-combined so a wall
+   running into an obstacle is one surface — `_mergedSurface`), normal a
+   **central difference over `~dx`** (mollifies the `min`/`max` gradient
+   discontinuity at the wedge apex / re-entrant toe), node placed at
+   `ceil(d/dx)*dx` **past the surface** (layer-1 node exactly `dx` in, layer-2
+   `2 dx`, … — independent of the sub-`dx` lattice phase), depth capped at
+   `1.5 h`, deep layers (`d > 2 h`) → zero offset, retract `dx/2` at a time if
+   inside another solid. It also covers 3D (was `_geometricGhostOffsets`).
+   `'simple'` (raw capped mirror, no retract), `'bodynode'` (the `1e145a1`
+   polyline + item-4 fix) and `'geometric'` (`∇sdf` + magnitude retract) are
+   **parked** — reachable only via `WARPSPH_GHOST_PLACEMENT`, which nothing
+   sets; kept in-file as troubleshooting aids, each isolating one piece of the
+   placement, not as modes to select in normal use.
+
+**Verified (2026-09-10, nx used as noted; aligned grid + gridsnap ghosts +
+c₀-per-Marrone, no `hydrostaticInit`/`alpha`/`nu`/frozen-diffusion tuning):**
+| case | scheme (unfrozen) | result |
+|---|---|---|
+| §3.1 flat wall, nx=72 | δ-SPH no-PST | stable to t\*≈7.7, **0 wall pen**; free surface fragments to spray by t\*≈5 (method limit, not a boundary artefact); bulk ρ [0.984, 1.033] |
+| §3.1 flat wall, nx=72 | δ⁺-SPH PST | stable to t\*≈7.7, **0 wall pen**; clean plunging breaker + air cavity; ρ [0.98, 1.015] whole run; heavily dissipative (KE end 0.22 vs δ-SPH 3.9) |
+| §3.4 rounded-corner-only, nx=256 (H/dx=32) | δ⁺-SPH PST | stable to t\*=7, **0 tank pen, 0 fillet pen**; ρ bulk [0.999, 1.004]; KE 42→21 |
+| §3.4 rounded-corner-only, nx=256 | **δ-SPH no-PST** (Marrone §3's own config) | stable to t\*=7, **0 tank pen, 0 fillet pen**; ρ bulk [0.999, 1.004]; KE 42→21 — **indistinguishable from δ⁺** on the smooth corner |
+| §3.4 full wedge, nx=256 | δ⁺-SPH PST | stable to t\*=7, **0 tank pen, obstacle pen max 0.77 dx** (gate ≤3; → 0.23 dx/5 ptcls at end); sharp-edge jet ejects cleanly, bulk overtops without leaking through. cf. the toe leak history: 30 dx (SDF-grad) → 4.66 dx (bodynode) → **0.77 dx (gridsnap + one-polygon obstacle SDF, none of the nodeDepthCap/layerReach machinery)** |
+| §3.4 full wedge, nx=256 | **δ-SPH no-PST** (Marrone §3's own config) | stable to t\*=7, **0 tank pen, obstacle pen max 1.81 dx** (gate ≤3; → 0.77 dx/36 ptcls at end); same bulk flow as δ⁺, jet sheet more ragged (max\|v\| 15.6 vs 10.1 U_max·3.3), ρ bulk [0.999, 1.023]. **Marrone's own δ-SPH carries its own §3.4 cases** — PST tightens the jet + halves the obstacle pen but is not load-bearing for stability. |
+
+**`marroneSharpEdge` obstacle SDF was `min(triangle, box)` sharing an internal
+edge at `x = toe_x = -W/2 + 6H`** — an integer number of `dx` from the centre,
+so a lattice column lands exactly on it, `min ≈ 0` all up the seam, the `< 0`
+interior test drops that column, and fluid slides into the one-particle slot
+(the 1.25 → 0.77 dx of the two wedge runs above). Fixed: the wedge+block is one
+convex quadrilateral `[apex, (back_x, top), (back_x, bed), toe]` as a single
+`_convexPolygonSDF` (`max` over the 4 edge half-planes; only `+ - * @ maximum`,
+no new primitive). Same geometry, +31 boundary particles (the filled seam
+column), 0 misplaced ghosts.
+
+Runners in `scripts` scratch (`run_dambreak_marrone31.py`,
+`run_dambreak_marrone34.py`), videos in `marrone3{1,4}_out/`. Sampling dump:
+`dump_dambreak_sampling.py`.
 
 ## Probe scripts — the entry points
 
 | script | case | key flags |
 |---|---|---|
-| `scripts/probe_deltaSPHMarrone.py` | Marrone 2011 §3.1 dam break | `--shifting default\|off\|on`, `--scheme`, `--nx`, `--c0Ratio`, `--report`, `--video` |
+| `scripts/probe_deltaSPHMarrone.py` | Marrone 2011 §3.1 dam break | `--shifting default\|off\|on`, `--scheme`, `--nx`, `--c0Ratio`, `--cflFactor` (halve → half Δt), `--report`, `--video` (vispy by default now; `--plotBackend matplotlib` to force) |
+| `scripts/probe_hydrostaticPressureProbe.py` | still-water column — validates the `surfacePressureProbes` MLS probe on the analytic profile | `--dp`, `--inset` (dx, along the wall normal) |
 | `scripts/probe_deltaPlusTGV.py` | Sun 2019 §3.1 Taylor–Green | `--nx`, `--Re`, `--tLimit`, `--report` |
 | `scripts/probe_deltaPlusDroplet.py` | Sun 2017 §4.2 oscillating droplet | `--Rdx`, `--periods`, `--report` |
 | `scripts/probe_englishWedge.py` | English 2022 §4.1 still-water wedge | `--dp`, `--wedge` / `--no-wedge`, `--tilt`, `--tLimit`, `--report` |
-| `scripts/probe_deltaSPHMarrone34.py` | Marrone 2011 §3.4 / Fig. 19 sharp-edged obstacle + rounded tank corner | `--nx` (H/dx = nx/8), `--c0Ratio`, `--tStar`, `--initdump`, `--report`, `--video` |
+| `scripts/probe_deltaSPHMarrone34.py` | Marrone 2011 §3.4 / Fig. 19 sharp-edged obstacle + rounded tank corner | `--nx` (H/dx = nx/8), `--c0Ratio`, `--tStar`, `--Re` (§3.4.2 viscous), `--initdump`, `--report`, `--traceFigure` (P1–P9 surface pressure), `--video` |
 | `scripts/probe_deltaPlusShiftMagnitude.py` | measures the δ⁺ shift vs Sun Eq. (7) | — |
 | `scripts/probe_deltaPlusShiftBlastRadius.py` | which registered cases use `ShiftingScheme.deltaSPH` | — |
 | `scripts/probe_deltaPlusShiftSweep.py` | 3-leg (`off`/`eighth`/`eq7`) smoke sweep over the 11 affected cases | `--cases`, `--nSteps`, `--report` |
@@ -72,6 +189,18 @@ fill); an analytic per-primitive normal. See §5.2.3.
 
 ## Done
 
+- **§5.1 / §5.2.2 boundary sampling + mDBC ghost placement (2026-09-10, uncommitted)** —
+  root-caused the dam-break "won't run cleanly" history to the *sampling*: `dn ≤ dx`
+  sampler (`sample/regular.py`), `alignInteriorDomainToLattice` snapping the tank
+  box onto lattice mid-gaps (`caseUtils/weaklyCompressible.py`, param
+  `alignBoundaryLattice`), `'gridsnap'` mDBC ghost placement on the merged
+  mollified surface (`rigidBody/ghostParticles.py`), and the `marroneSharpEdge`
+  obstacle as a single seam-free `_convexPolygonSDF`. On the un-frozen defaults,
+  no tuning: §3.1 flat wall (nx=72) and §3.4 corner + wedge (nx=256) all run to
+  the full record with **0 tank-wall penetration** under **both** δ-SPH no-PST
+  and δ⁺-SPH PST; §3.4 obstacle pen 1.81 dx (δ-SPH) / 0.77 dx (δ⁺), well inside
+  the ≤ 3 dx gate. See "Current state". Convergence + pressure-trace scoring
+  still to do.
 - **Part 1–4 audit** — ψ sign (`790a7c7`), `c₀` = Sun Eq. (2) via `machTarget`,
   RK4, adaptive Δt, two-sided viscosity, mDBC determinant gate with a
   per-kernel `determinantThreshold`, `dambreak` on Wendland C2. All landed.
@@ -123,13 +252,18 @@ fill); an analytic per-primitive normal. See §5.2.3.
   (`shiftProperties.active` defaults `True`); added the `shifting` param
   (`c14dd06`). §5.1.2: re-run at **H/Δx = 322** — **P1 converges to Buchner**
   (plateau 0.556 vs 0.55; the deficit was under-resolution, `2138c0f`). Eq. (7)
-  *regresses* this case 9/9 → 8/9 (`7fb6222`). Still open below.
+  *regresses* this case 9/9 → 8/9 (`7fb6222`). **2026-09-10: `1e145a1` broke
+  this case catastrophically at H/Δx = 40** (its ghost `capMax` zeros deep
+  flat-wall mDBC layers); an uncommitted `ghostParticles.py` fix restores it —
+  δ⁺+PST un-frozen now the **best Buchner match yet** (P1\*/P2\* 0.51 / 0.25).
+  Two residual holes are separate & pre-existing: H/Δx ≈ 72–160 blows regardless
+  of scheme, and `no-PST + un-frozen` can't do the first impact at any Δt. Full
+  account: **item 4**.
 - **§5.2.1 English §4.1 wedge** — steps (a)–(d). `dambreak` gained
-  `hydrostaticInit` (`5d3fe07`). **Wedge 9/9 at dp = 0.01 (H/dx = 50)**; RMSE
-  corner gates (`982375d`). Fix A (`_fluidDirectedGhostOffsets`, `17290ff`) then
-  fix B both superseded: ghost placement is now `_bodyNodeGhostOffsets`
-  (`1e145a1`), which re-runs the wedge 9/9 with the re-entrant base-corner RMSE
-  ~10× better (0.024 → 0.0022).
+  `hydrostaticInit` (`5d3fe07`); mDBC ghost placement rewritten to
+  fluid-directed + corner-gated (**fix A**, `17290ff`). **Wedge 9/9 at
+  dp = 0.01 (H/dx = 50, English's resolution)**; RMSE corner gates
+  (`982375d`). Fix (B) attempted and reverted as a no-op.
 - **§5.2.2 Marrone §3.4 / Fig. 19 sharp-edged obstacle + rounded tank corner**
   — geometry added (`marroneSharpEdge` = obstacle polygon ∪ concave fillet;
   `marroneRoundedCorner` = fillet only), `probe_deltaSPHMarrone34.py`,
@@ -148,8 +282,13 @@ fill); an analytic per-primitive normal. See §5.2.3.
   after t\* ≈ 4.5 — the fluid wedge there is too thin for any single-ray node;
   Marrone's continuity fill (borrow a neighbour's node) is the real fix,
   deferred (§5.2.3). δ⁺-SPH + PST seals M34 fully (0.58 dx) — the production
-  config. `mdbcGhostRefreshEvery` removed (`76af473`). Open: H/dx = 128; the
-  9 surface probes; viscous §3.4.2.
+  config. `mdbcGhostRefreshEvery` removed (`76af473`). **Item 7 (2026-09-09):**
+  (b) surface probes P1–P9 done (`surfacePressureProbes` + `--traceFigure`;
+  plain δ-SPH edge P2 = 36.4 ρgH ≈ Wagner 36.7); (c) viscous wiring done
+  (`--Re`; Re = 1000/10000 both 5/6, flow ≈ inviscid, walls still free-slip);
+  (a) H/dx = 32/64 `densityP99` re-run — bulk P99 1.025 → 1.013 converges,
+  wall leak *worsens* 4.66 → 7.83 dx. Open: H/dx = 128 to t\* ≈ 7.4; Colicchio
+  Fig. 24 curve digitising; §3.4.2 no-slip walls. See §5.2.2.
 - **`runner/media.py`** — frame-ordering bug (glob sort breaks past 100k
   steps) fixed (`0810491`).
 
@@ -167,8 +306,12 @@ fill); an analytic per-primitive normal. See §5.2.3.
    `impact`'s −4 % `nnDistP01` confirmed as a real (small) cost. Remaining
    micro-question: frozen-`eighth` run to isolate whether frozen diffusion or
    `eq7` carries the good frozen result.
-2b. ~~**Body-node mDBC ghost placement (Marrone 2011 App. A / English §3)**~~
-   **DONE (2026-09-09), `_bodyNodeGhostOffsets`** (`1e145a1`). Was the M34
+2b. **Body-node mDBC ghost placement (Marrone 2011 App. A / English §3) —
+   SUPERSEDED (2026-09-10) by `'gridsnap'`.** `_bodyNodeGhostOffsets` is now a
+   parked path (see "Current state"); the M34 toe-leak and englishWedge
+   re-entrant-corner gains it delivered are subsumed by gridsnap on the fixed
+   sampling. The original 2026-09-09 note follows, for the record:
+   DONE (2026-09-09), `_bodyNodeGhostOffsets` (`1e145a1`). Was the M34
    wall-leak fix (§5.2.3): the composed-`min`/`max`-SDF gradient mis-placed the
    mDBC ghosts at the obstacle-toe re-entrant corner. Replaced (2D) by a
    marching-squares polyline of `region.sdf` as the body-node set + mirror
@@ -190,9 +333,92 @@ fill); an analytic per-primitive normal. See §5.2.3.
    ringing that Marrone's φ = 90 mm disc *area integral* low-passes and a
    point/small-disc probe cannot. "Mostly good enough for now." A true
    on-wall disc integral matching Marrone's transducer is the test.
-4. **Marrone wall penetration at H/Δx = 322** — 5 Δx (gate ≤ 3), in *both* PST
-   legs, from first wall impact. mDBC at fine resolution — a Part 3 item, and
-   it scaled the wrong way with Δx.
+4. **Marrone §3.1 mDBC wall — the `1e145a1` regression FOUND & FIXED, plus a
+   separate resolution hole (2026-09-10).** **SUPERSEDED (2026-09-10, same day)
+   by the boundary-sampling fix + `'gridsnap'` — see "Current state".** The
+   `1e145a1` `capMax` reject and the `nodeDepthCap`/`layerReach` fix below both
+   live in `_bodyNodeGhostOffsets`, now a parked path; gridsnap has no `capMax`
+   and reproduces §3.1 at nx=72 (both schemes, un-frozen, 0 wall pen) without
+   any of it. The "resolution hole" (H/Δx ≈ 72–160 blow-up) and the no-PST
+   un-frozen first-impact blow-up noted here were pre-fix; re-check on the live
+   path is part of the §3.1 convergence work. Investigation kept below for the
+   record; artefacts in `scratchpad/m31ab/`.
+
+   **(a) `1e145a1` (body-node mDBC ghost placement) is a real regression — FIXED.**
+   Its `_bodyNodeGhostOffsets` rejected any ghost offset with `|r_b − r_g| >
+   1.5·hMean ≈ 6 Δx` (`tooFar`); the retract loop then can't satisfy
+   `|off| ≤ capMax` **and** "node stays in fluid" for a deep boundary layer, so
+   the offset **zeros → the deep 2–3 layers of a `band = 5` flat wall read rest
+   density → wall pressure collapses at depth**. Under a fast near-wall flow
+   (the §3.1 downstream-wall run-up jet, t\* ≈ 4.4) the wall gives ~half its
+   back-pressure and the jet penetrates → monotone runaway (866 Δx at nx = 67).
+   Latent: englishWedge + `test_physics`/`test_wallPressure` never caught it
+   (still water / no violent impact). Confirmed by a 2×2 A/B (nx = 67, HEAD vs
+   `1e145a1~1` ghostParticles.py, both schemes): pre-`1e145a1` clean both
+   schemes (pen ≤ 1.1 Δx), HEAD diverges. The ghost-offset dump is Δx-dependent
+   — byte-identical at nx = 120 (the `capMax` doesn't bind there) but at nx = 67
+   HEAD caps at 6 Δx where pre-`1e145a1` spreads to 13 Δx — which is why it
+   first read as a pure "resolution hole".
+   **Fix (`rigidBody/ghostParticles.py`):** the offset-magnitude reject becomes
+   two *node-position* bounds — `nodeDepthCap = 1.5·hMean` slides a too-deep
+   mirror node inward along its own ray (matching `_geometricGhostOffsets`), and
+   `layerReach = 2·hMean` zeros only genuinely inert deep-interior ghosts (fluid
+   can't reach them). A clean, deep, correctly-mirrored flat-wall node is kept
+   regardless of offset length. Result at nx = 67 (H/Δx = 40):
+
+   | config | pre-fix (`1e145a1`) | with the fix |
+   |---|---|---|
+   | δ⁺-SPH ⅛-Eq.(7) PST, **un-frozen** | (plan §5.1.2: 6/9) | **clean, pen 0.69, P1\*/P2\* 0.51 / 0.25** (Buchner 0.55 / 0.28) — best match yet |
+   | δ-SPH frozen | blows up, pen 866 | clean, pen 0.87, P1\* 0.43 |
+   | δ-SPH **no PST, un-frozen** | — | **first-impact blowup (see (c))** |
+
+   *Cost:* M34 (§5.2.2) plain-δ-SPH obstacle-toe leak ≤ 1 Δx → **~6–7 Δx
+   bounded** (5/6, stable, plateaus — not the pre-body-node 30 Δx). δ⁺-SPH + PST,
+   M34's production config, is unaffected. Two discriminators to keep both
+   clean were tried and shelved (`smooth = ∠(mirror, ∇sdf)`; an extrapolation-
+   lever cap in `computeMdbcDensity`) — "is the near-wall density field linear
+   enough for a deep 1st-order extrapolation" is flow-dependent, not geometric.
+
+   **(b) A SEPARATE hole at H/Δx ≈ 72–160.** With the fix, nx = 67 (40) and the
+   plan's nx = 536 (322, δ⁺-Eq.(7) frozen, survived to t\* ≈ 7.7 at 5 Δx) are
+   OK, but **every config blows up at nx = 120 (H/Δx = 72)** in t\* ≈ 5.5–6.3 —
+   full Eq.(7) frozen, ⅛-Eq.(7) un-frozen, no-PST. The fix only *delays* it
+   (t\* ≈ 3 → 6). **Not a sampling artefact:** the nx = 120 IC is a perfectly
+   regular lattice (NN spacing 1.003 Δx, zero scatter), correct 2H × H column, 5
+   clean boundary layers, sane ghost offsets, 0 ghosts outside the domain —
+   structurally identical to nx = 67 (`m31_initsampling_nx{67,120}.png`). So
+   it's genuinely in the mDBC-wall *dynamics* at that Δx band. This is the plan's
+   old item-4 "scaled the wrong way / non-monotonic" — real, still open, likely
+   `modules/mdbc/` (density extrapolation / determinant gate at intermediate Δx).
+
+   **(c) `δ-SPH, no PST, un-frozen` cannot do the §3.1 first impact — and it is
+   NOT a CFL issue.** Blows up at t\* ≈ 2.5–2.8 regardless of the ghost fix;
+   **halving Δt (`--cflFactor 0.15`) makes it worse** (blows at t\* ≈ 2.4, pen
+   3054 vs 2035). A fundamental spatial-operator instability at the
+   near-discontinuous impact — PST *or* frozen diffusion is required to survive
+   it. Marrone's own δ-SPH *is* frozen (RK4 + frozen diffusive terms), so their
+   "plain δ-SPH no PST" is the frozen leg; the un-frozen no-PST combination
+   doesn't exist in their setup. Tension with [[validation-scheme-defaults]]'s
+   "no frozen default" — for violent-first-impact cases the un-frozen default is
+   δ⁺-SPH + PST, which does work.
+
+   **(d) latent, at every resolution:** the sampler gives **no dp/2 fluid↔wall
+   stagger** — the lowest fluid particle sits ~0.04 Δx *on* the bed surface and
+   the first boundary layer is a full ~1 Δx below it, not the English/Marrone
+   dp/2-each-side arrangement. Not the (b) trigger (same at 40 and 72) but a
+   plausible mDBC-roughness contributor worth a separate look. Also present at
+   every resolution: ~25 boundary particles per box corner mirror their ghost
+   onto the single corner vertex (a degenerate cluster; `1e145a1`'s cap culled
+   it, the fix keeps them).
+
+   *Also this session:* video runs were forced onto the matplotlib backend by
+   the probe scripts, overriding the runner's own default (`display.py`: "2D
+   goes to vispy"). For an nx = 67 §3.1 video that was **~3000 s of a 3760 s
+   wall time**. `probe_deltaSPHMarrone{,34}.py` no longer force it (vispy via
+   headless EGL works here); `--plotBackend matplotlib` forces the old path.
+   `probe_deltaSPHMarrone.py` also gained `--cflFactor`. Per
+   [[validation-scheme-defaults]], its `--scheme sun2017DeltaSPH` (frozen)
+   default should change to an un-frozen default.
 5. **§5.2.1 (e)** — a tilted flat plate in still water: the isolated test of
    fix (A) with no corner. `probe_englishWedge.py --tilt DEG` (wire the plate
    geometry — currently `--tilt` only rotates the wedge).
@@ -200,18 +426,21 @@ fill); an analytic per-primitive normal. See §5.2.3.
    obstacle-polygon *vertex* (English Fig. 1c/d); needs the obstacle geometry
    plumbed into `addBoundaryGhostParticles`. Deferred — (A) clears the wedge at
    English's resolution, and the dp = 0.02 residual is under-resolution.
-7. **§5.2.2 Marrone §3.4 — probes + fine Δx.** Bulk converges H/Δx = 32→64,
-   rounded corner 6/6 in isolation, δ⁺+PST 6/6. Plain δ-SPH toe-leak **fixed**
-   by `_bodyNodeGhostOffsets` (item 2b) — ≤ 1 dx through t\* = 3.9; t\* = 5
-   acceptance run **5/6** (residual 4.66 dx = one creeping toe-apex particle;
-   bisector tried, backed out — needs Marrone's continuity fill, §5.2.3).
-   δ⁺+PST is production for M34. Left: (a) H/Δx = 128 to
-   t\* ≈ 7.4, and a `densityP99` re-run of the 32/64 pair for a real bulk-max
-   number; (b) the 9 surface pressure probes P1–P9 (on the 45° edge, the roof,
-   the fillet arc — *not* axis-aligned, so `diagnostics`' wall-probe path needs
-   a general surface-point probe) vs Colicchio's Level-Set (Fig. 24) and
-   Wagner's P1 ≈ 36.7 ρgH — Marrone's *converged* quantity; (c) the viscous
-   sub-case §3.4.2 (`inviscid=False`, Re = 1000 / 10000).
+7. **§5.2.2 Marrone §3.4 — probes + viscous + fine Δx.** *(b) DONE* — general
+   surface-point MLS probe (`surfacePressureProbes`) + Fig. 19's P1–P9 +
+   `--traceFigure`: edge P2 = 36.4 ρgH on Wagner's 36.7 for plain δ-SPH (δ⁺+PST
+   damps it below), roof P5 ≈ 12.7 at the t\* ≈ 5.5 re-impact, fillet barely
+   wets by t\* = 7.4. Positions read approximately from the sketch; Colicchio
+   Fig. 24 curve-for-curve = digitising, not done. *(c) DONE (wiring)* —
+   `inviscid`/`nu`/`alpha` plumbed to `diffusionParams`; `--Re` sets
+   ν = √(gH)·H/Re; Re = 1000 / 10000 both 5/6, flow within noise of inviscid
+   (as Marrone states). Walls still free-slip (no-slip half deferred). *(a)
+   PARTIAL* — H/Δx = 32/64 `densityP99` re-run: bulk P99 **1.025 → 1.013**
+   converges; **H/Δx = 128 to t\* ≈ 7.4 (nx = 1024, multi-GPU-hour) still
+   open.** New finding: plain δ-SPH tank-wall leak *worsens* with resolution
+   (4.66 → 7.83 dx) even with body-node ghosts — the toe-apex creep needs
+   Marrone's continuity fill (§5.2.3). δ⁺+PST unaffected (6/6, wall pen 0.83
+   dx), stays production.
 8. **§5.2 the rest** — English §4.2 (`sloshingTank` / TC10 — **§5.2.3 first
    pass done**: 2 IC bugs fixed, first impact matches, transients captured;
    left: `sloshingTank` `machTarget`, dp = 0.002, the mDBC-vs-DBC three-row
@@ -1024,6 +1253,17 @@ filename width no longer matters.
 took 9.6 h between them at ~1.85× the benchmarked step cost, a perf regression
 to chase separately).
 
+**2026-09-10 update — supersedes the "wall penetration failed at H/Δx = 322"
+line above.** That 5 Δx leak, and a much worse H/Δx ≈ 72–160 catastrophe, are
+now understood: `1e145a1` (body-node ghost placement, committed *after* the
+H/Δx = 322 runs here) regressed the wall by zeroing deep flat-wall mDBC layers;
+an uncommitted `ghostParticles.py` fix restores H/Δx = 40 (δ⁺+PST un-frozen is
+now the **best Buchner match**, P1\*/P2\* 0.51 / 0.25). Separate & still open:
+H/Δx ≈ 72–160 blows up regardless of scheme (not a sampling artefact — the IC
+is identical across 40/72/322); `no-PST + un-frozen` cannot do the first impact
+at any Δt. **Full account: Open/next item 4.** The H/Δx = 322 legs should be
+*re-run* on the fixed code, not treated as current.
+
 ## 5.2 Then
 
 | next | case | notes |
@@ -1364,13 +1604,85 @@ configs are `examples/sweeps/marrone34_sharp_edge.yaml` /
 source for violent free-surface / solid-boundary interaction; see
 `datagen/README.md`.
 
-**Still open:** (a) H/dx = 128 to t\* ≈ 7.4, and a re-run of the H/dx = 32/64
-pair with the `densityP99` diagnostic for a real bulk-max convergence number
-(the table's "pointwise max" is `maxDensity`); (b) the 9 surface probes P1–P9 —
-on the 45° edge, the roof and the fillet arc, none axis-aligned, so
-`diagnostics`' wall-probe path needs a general surface-point MLS probe — vs
-Colicchio Fig. 24 and Wagner P1 ≈ 36.7 ρgH (Marrone's *converged* quantity);
-(c) the viscous sub-case §3.4.2 (`inviscid=False`, Re = 1000 / 10000).
+**Item 7 (2026-09-09) — surface probes (b), viscous wiring (c), a real
+bulk-max convergence number (a, partial). All in `scripts/out_deltaSPHMarrone34_item7/`.**
+
+*(b) Surface pressure probes — DONE.* `dambreak.diagnostics` gained a general
+surface-point probe: `surfacePressureProbes` = `[x, y, nx, ny]` rows (a
+centred-domain point + the into-fluid unit normal); the query point is pushed
+`surfacePressureProbeInset` = 0.5 dx off the wall along the normal and the fluid
+pressure is read there by the **same** `_mlsPressure` helper the axis-aligned
+wall probe now shares (first-order MLS fit → 0th-order Shepard → 0). Emits
+`pSurf{k}` / `pSurf{k}Star` / `pSurf{k}Nnbr`. `probe_deltaSPHMarrone34.py` sets
+Marrone Fig. 19's P1–P9 (P1–P3 down the 45° edge from the apex, P4–P6 roof,
+P7–P9 fillet arc) with analytic normals; `--traceFigure` (also emitted by
+`--report`) writes `surface_pressure_traces.png` — a 3×3 of P/(ρgH) vs t\*,
+~0.15 t\* running mean over faint raw, P1/P5/P7 (Fig. 24's three) boxed, Wagner
+36.7 on the edge panels. **Probe positions are read approximately from the
+figure sketch — the paper gives no coordinates.**
+- **Edge (P1–P3), first impact t\* ≈ 1.9–2.1.** Plain δ-SPH H/dx = 32: the
+  mid-edge probe **P2 peaks 36.4 ρgH — on Wagner's 36.7 ρgH**; the apex probe
+  P1 reads 11.6, the near-toe P3 overshoots (84, a point probe on a thin
+  under-resolved sheet). This reproduces Marrone's own "SPH close to Wagner".
+  δ⁺-SPH + PST damps the point peaks *below* Wagner (P2 20.6) — the PST
+  regularises the jet. H/dx = 64: P2 65.8 (the mean is resolution-robust, the
+  raw peak sharpens).
+- **Roof (P4–P6), δ⁺ t\* = 7.4:** wet from t\* ≈ 5.5 (the roof re-impact —
+  earlier than the plan's t\* ≈ 3.9, which was when the sheet *starts* arcing).
+  P4 ≈ 18.7, **P5 ≈ 12.7**, P6 ≈ 1.6 ρgH.
+- **Fillet (P7–P9):** barely wet even at t\* = 7.4 — P7 first wets at t\* ≈ 7.0
+  (peak ≈ 19 at the very end), P8 grazed, **P9 never** — the sharp-edge case
+  sends little flow that far downstream inside Marrone's own window, so their
+  Fig. 24 P7 trace is short too.
+Curve-for-curve against Colicchio's Level-Set (Fig. 24) still needs their
+traces digitised — not done.
+
+*(c) Viscous sub-case §3.4.2 — wiring DONE, runs stable.* `dambreak.configureScheme`
+now plumbs `inviscid` / `nu` / `alpha` into `schemeConfig.diffusionParams` on
+the non-ACSPH path (`inviscid=True` default → every existing run byte-identical;
+`alpha=None` → don't touch the scheme's own artificial-viscosity coefficient).
+`probe_deltaSPHMarrone34.py --Re` sets ν = √(gH)·H / Re. **Walls stay free-slip
+— the no-slip half of §3.4.2 is a separate piece.** Re = 1000 (ν = 3.13e-3) and
+Re = 10000 (ν = 3.13e-4), H/dx = 32, t\* = 5: both **5/6, no divergence**, bulk
+ρ P99 1.025 / 1.020, KE and v_max within noise of the inviscid run, edge P2
+34.1 / 22.6 ρgH — i.e. **viscosity barely moves the flow at these Re**, exactly
+as Marrone states.
+
+*(a) Bulk-max convergence — DONE for the H/dx = 32/64 pair.* Re-ran both with
+`densityP99` + body-node ghosts (plain δ-SPH, t\* = 5): bulk ρ [P05, P99]
+tightens **[0.9969, 1.0251] → [0.9992, 1.0127]** — the **bulk converges**; the
+pointwise jet-tip max still diverges (1.11 → 1.20). This is the real bulk-max
+number the old table lacked (it read `maxDensity`, 1.14 → 1.27). **H/dx = 128 to
+t\* ≈ 7.4 (nx = 1024, multi-GPU-hour) still open.**
+
+*Wall-leak residual scales the wrong way.* Plain δ-SPH tank-wall penetration
+**4.66 dx (H/dx = 32) → 7.83 dx (H/dx = 64)** to t\* = 5 even with
+`_bodyNodeGhostOffsets`; the viscous legs are the same order (8.06 / 7.33 dx).
+Still the one-particle toe-apex creep, still needs Marrone's continuity fill
+(§5.2.3). δ⁺ + PST is untouched by any of this — 6/6, wall pen 0.83 dx,
+obstacle/fillet pen 0.87 dx to t\* = 7.4 — and remains the production config;
+plain δ-SPH stays 5/6.
+
+**2026-09-10 — SUPERSEDED by the boundary-sampling fix + `'gridsnap'` (see
+"Current state").** All of the above (`_bodyNodeGhostOffsets`, the `capMax` /
+`nodeDepthCap` / `layerReach` tuning, the 4.66 → 7.83 dx wall-leak scaling, the
+one-particle toe-apex creep needing a continuity fill) was on the parked
+body-node path. On the live path — aligned grid, `dn ≤ dx`, gridsnap ghosts on
+the merged mollified surface, the wedge as a single seam-free `_convexPolygonSDF`
+— **M34 nx = 256, t\* = 7, both schemes un-frozen, no tuning:**
+
+| | tank-wall pen (whole run) | obstacle/fillet pen (whole run) |
+|---|---|---|
+| δ-SPH, no PST | **0.00 dx** | 1.81 dx → 0.77 dx / 36 ptcls at t\*=7 |
+| δ⁺-SPH, PST | **0.00 dx** | 0.77 dx → 0.23 dx / 5 ptcls at t\*=7 |
+| rounded-corner-only, either | **0.00 dx** | **0.00 dx** |
+
+Both inside the ≤ 3 dx gate; the toe-apex continuity fill is no longer needed.
+The `min(triangle, box)` obstacle SDF was itself a bug: the two primitives
+touch along `x = toe_x` (on a lattice column), `min ≈ 0` up the seam, the
+sampler drops that column, fluid slides in — that seam gap *was* the residual
+obstacle penetration (1.25 → 0.77 dx). Runner: `run_dambreak_marrone34.py`
+(`--mode {corner,wedge} --pst {on,off}`), videos in `scratchpad/marrone34_out/`.
 
 ### 5.2.3 English 2022 §4.2 — sloshing tank (SPHERIC TC10) under mDBC
 

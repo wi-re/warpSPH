@@ -337,12 +337,21 @@ def _marroneSharpEdgeSDF(L: float, W: float, obstacle: bool = True):
     (`scripts/probe_deltaSPHMarrone34.py`) is responsible for `W = 10 H` and
     `L = 8 H`.
 
-    The obstacle is `triangle[apex, (toe_x, top), (toe_x, bed)]` (the 45deg edge
-    is its hypotenuse apex->toe) unioned with `box[toe_x, back_x] x [bed, top]`
-    (the toe-to-back-face block). The fillet solid is the concave quarter-lens
-    `box[wall-H, wall] x [bed, bed+H]` minus the disc of radius H centred at
-    `(wall - H, bed + H)`. Built from `sdTriangle` / `sdBox` / `sdCircle` rather
-    than one polygon SDF so no primitive outside the audited set is used.
+    The obstacle is the convex quadrilateral `[apex, (back_x, top), (back_x,
+    bed), toe]` -- the 45deg edge is the apex->toe side -- as a **single**
+    half-plane-`max` SDF (`_convexPolygonSDF`). It used to be
+    `min(triangle[apex,(toe_x,top),(toe_x,bed)], box[toe_x,back_x]x[bed,top])`,
+    but a `min` of two primitives that only *touch* along `x = toe_x` leaves the
+    merged value pinned near 0 all along that internal seam (both primitives are
+    ~0 on their shared edge). A lattice column landing exactly on `toe_x` (it
+    does: `toe_x = -W/2 + 6 H` is an integer number of `dx` from the centre)
+    then samples `min = 0`, fails the `< 0` interior test, and drops a
+    one-particle-wide gap up the whole seam that fluid slides into (~1.25 dx
+    obstacle penetration, `DELTASPH_VALIDATION_PLAN` 5.2.2). One polygon has no
+    internal seam.
+
+    The fillet solid is the concave quarter-lens `box[wall-H, wall] x [bed,
+    bed+H]` minus the disc of radius H centred at `(wall - H, bed + H)`.
     """
     r = _MARRONE_SE
     bed = -L / 2.0
@@ -354,14 +363,14 @@ def _marroneSharpEdgeSDF(L: float, W: float, obstacle: bool = True):
     back_x = -wall + r['back_x'] * H
     fillet_x = -wall + r['fillet_x'] * H            # == wall - H when W = 10 H
 
-    trifn = getSDF("triangle")["function"]
     boxfn = getSDF("box")["function"]
     circfn = getSDF("circle")["function"]
 
     discC = (fillet_x, top)
     filletBoxC = (wall - H / 2.0, bed + H / 2.0)
-    blockC = (0.5 * (toe_x + back_x), 0.5 * (bed + top))
-    blockHalf = (0.5 * (back_x - toe_x), 0.5 * H)
+    #: wedge + toe-to-back-face block as one quadrilateral (apex -> along the
+    #: roof to the back face -> down it -> along the floor -> up the 45deg edge).
+    obstacleVerts = [(apex_x, top), (back_x, top), (back_x, bed), (toe_x, bed)]
 
     def sdf(x: torch.Tensor) -> torch.Tensor:
         dev, dt = x.device, x.dtype
@@ -372,13 +381,34 @@ def _marroneSharpEdgeSDF(L: float, W: float, obstacle: bool = True):
         dFillet = torch.maximum(dFilletBox, dOutDisc)
         if not obstacle:
             return dFillet
-        # obstacle: 45deg-edge wedge + rectangular block
-        dTri = trifn(x, t([apex_x, top]), t([toe_x, top]), t([toe_x, bed]))
-        dBlock = boxfn(x - t(blockC), t(blockHalf))
-        dObstacle = torch.minimum(dTri, dBlock)
+        dObstacle = _convexPolygonSDF(x, obstacleVerts)  # negative inside
         return torch.minimum(dObstacle, dFillet)
 
     return sdf
+
+
+def _convexPolygonSDF(x: torch.Tensor, verts) -> torch.Tensor:
+    """Signed distance (negative inside) to a **convex** polygon given by
+    `verts` (a list of `(x, y)`, either winding), as the `max` over its edges of
+    the outward half-plane distance. Exact everywhere inside and along an edge;
+    just past a vertex it under-reads slightly (half-plane distance, not the
+    point-to-vertex distance) -- irrelevant for interior sampling and for a
+    near-surface normal. Only `+ - * @` and `torch.maximum`, so it composes and
+    differentiates like the other primitives here without pulling in a new SDF.
+    """
+    K = len(verts)
+    area2 = sum(verts[i][0] * verts[(i + 1) % K][1] - verts[(i + 1) % K][0] * verts[i][1]
+                for i in range(K))
+    ccw = area2 > 0.0
+    V = torch.tensor(verts, device=x.device, dtype=x.dtype)
+    d = x.new_full((x.shape[0],), -1e30)
+    for i in range(K):
+        a, b = V[i], V[(i + 1) % K]
+        e = b - a
+        nrm = torch.stack([e[1], -e[0]]) if ccw else torch.stack([-e[1], e[0]])
+        nrm = nrm / nrm.norm().clamp_min(1e-12)
+        d = torch.maximum(d, (x - a) @ nrm)
+    return d
 
 
 def _scale_points(points: torch.Tensor, scaleX: float, scaleY: float) -> torch.Tensor:
@@ -571,6 +601,78 @@ def buildDomain(simSetup: SimulationProperties):
     interiorDomain.min = torch.tensor([-simSetup.W / 2, -simSetup.L / 2], device=device, dtype=dtype)
     interiorDomain.max = torch.tensor([simSetup.W / 2, simSetup.L / 2], device=device, dtype=dtype)
     return domain, interiorDomain
+
+
+def alignInteriorDomainToLattice(domain, interiorDomain, dx, periodic=None):
+    """Snap the interior (physical wall) box onto the sampling lattice so the
+    innermost band of particles ends up ~dx/2 proud of every flat, grid-parallel
+    wall -- i.e. so each wall falls *between* two lattice rows, not on top of one.
+
+    Why this is legitimate as a pure pre-pass: the outer `domain` for these
+    cases is always an axis-aligned box that never changes shape from run to
+    run, and the regular lattice `sampleRegularParticles` lays over it is fixed
+    once `domain` and `dx` are. Nothing about the physics pins the interior box
+    to land at an arbitrary phase within that lattice; a walled tank is the same
+    tank whether its wall sits at 5.00 dx or 5.43 dx from the domain edge. So we
+    are free to move the wall by up to half a spacing to the nearest lattice
+    mid-gap (ties broken *inward*, the "make the domain smaller" preference).
+    `domain` -- hence the lattice, the neighbour search and every already-sampled
+    particle -- is left exactly as it was. Moving the wall never opens a gap:
+    the boundary and fluid rows straddling it are adjacent lattice points, `dn`
+    apart no matter where between them the wall line is drawn.
+
+    Without this, a lattice row landing on the wall gives a boundary layer a
+    full dx out and a fluid row sitting on the wall (measured on the Marrone
+    3.1 dam break at H/dx ~ 43: innermost boundary -0.95 dx, first fluid
+    +0.02 dx, against the -0.5 / +0.5 dx ideal) -- which the mDBC ghost
+    placement then has to paper over with geometry-retracting heuristics.
+
+    Periodicity-aware: the explicit-`dx` sampler picks the same `nCells =
+    ceil(l/dx - 1e-3)` either way, so `dn = l/nCells <= dx` is identical, but a
+    *non-periodic* axis carries `nCells + 1` points (one on each face) at
+    `centre + (k - nCells/2)*dn`, while a *periodic* axis carries `nCells`
+    points at `centre + (k + 0.5 - nCells/2)*dn` (the half-cell wrap offset).
+    That offset just flips which parity of `nCells` puts a mid-gap on the
+    centre, so running this case with `wallPeriodic=True` lands the walls on the
+    same +-dn/2 straddle and samples virtually identically -- identical fluid
+    particle count, the same `dn`, differing only by a global dn/2 stagger of
+    the lattice (physically irrelevant for a box) and one inert outer boundary
+    row (the non-periodic closing endpoint). Mutates `interiorDomain.min` /
+    `.max` in place and returns it.
+    """
+    lo = interiorDomain.min.clone()
+    hi = interiorDomain.max.clone()
+    per = domain.periodic if periodic is None else periodic
+    for d in range(int(domain.min.shape[0])):
+        isPeriodic = bool(per[d]) if per is not None else False
+        pad = float(domain.max[d] - interiorDomain.max[d])
+        if pad <= 0.5 * dx:
+            continue                          # unpadded axis (truly periodic): no wall
+        l = float(domain.max[d] - domain.min[d])
+        nCells = max(1, int(np.ceil(l / dx - 1e-3)))   # matches buildPointCloud
+        dn = l / nCells
+        centre = 0.5 * float(domain.min[d] + domain.max[d])
+        hNom = 0.5 * float(interiorDomain.max[d] - interiorDomain.min[d])
+        # Mid-gap distances from the centre: `dn*{0.5, 1.5, ...}` when a lattice
+        # *point* sits on the centre, `dn*{0, 1, 2, ...}` when a *mid-gap* does.
+        # Non-periodic (points at integer*dn from centre): the former for even
+        # `nCells`. Periodic (points at half-integer*dn -- the wrap offset): the
+        # opposite parity. Snap the wall to the nearest such distance, ties
+        # broken toward the smaller (inward) box -- so the move is <= dn/2.
+        pointOnCentre = (nCells % 2 == 0) != isPeriodic
+        half = 0.5 if pointOnCentre else 0.0
+        # round-half-*down* (the `-1e-3` also absorbs float32 slop in `hNom/dn`
+        # at a tie, where `hNom` sits exactly on a lattice point): nearest
+        # mid-gap, ties inward.
+        m = max(0, int(np.floor(hNom / dn - half + 0.5 - 1e-3)))
+        hNew = dn * (m + half)
+        if hNew <= 0.0 or abs(hNom - hNew) > dx + 1e-9:
+            continue                          # nothing sensible within one spacing
+        lo[d] = centre - hNew
+        hi[d] = centre + hNew
+    interiorDomain.min = lo
+    interiorDomain.max = hi
+    return interiorDomain
 
 
 def buildRegions(config, schemeConfig, simSetup, args, domain, interiorDomain, obstacle):
