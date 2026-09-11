@@ -1,5 +1,15 @@
 # warpSPH — δ-SPH / δ⁺-SPH conformance audit + validation plan
 
+> **ALWAYS run validation cases with video output (vispy).** For a WCSPH run the
+> vispy encode overhead is negligible next to being able to *watch* the run and
+> see where and how it goes wrong — which the scalar diagnostics alone never
+> show (a density ratchet, a corner leak, a jet fragmenting all read the same in
+> a `minDensity` column). It needs no HDF5 trajectory. Every regression in this
+> plan that took a bisect to localise would have been obvious from the field
+> video. Pass `--video`; do **not** force `--plotBackend matplotlib` (that path
+> is ~50–80× slower — `probe_englishWedge.py`'s `--video` still hardcodes it and
+> needs fixing). See [[export-video-on-validation-runs]] (memory).
+
 ## Why this exists
 
 The Lobovský-scale dam break (`ACSPH_PLAN.md` §4.5) would not run cleanly under
@@ -41,12 +51,13 @@ Reference material now on disk:
 
 # Current state & how to resume  (as of 2026-09-10)
 
-The audit (Parts 1–4) and the original `c₀` / integrator / mDBC-determinant-gate
-work are **committed**. Everything from the 2026-09-10 boundary-sampling session
-onward (`sample/regular.py`, `caseUtils/weaklyCompressible.py`,
-`cases/dambreak.py`, `rigidBody/ghostParticles.py` — the block below, and the
-`marroneSharpEdge` polygon SDF) is **uncommitted** — one coherent change,
-verified but not yet landed.
+The audit (Parts 1–4), the original `c₀` / integrator / mDBC-determinant-gate
+work, **and** the 2026-09-10 boundary-sampling session (`sample/regular.py`,
+`caseUtils/weaklyCompressible.py`, `cases/dambreak.py`,
+`rigidBody/ghostParticles.py`, the `marroneSharpEdge` polygon SDF — the block
+below) are all **committed** (`01060d4`). `test_physics` + `test_latticeDensity`
+(219 tests) green on that commit. Explicit-`dx` acceptance-band re-runs after the
+sampler change are in progress — see "Open / still to do".
 
 ## Where the δ-SPH validation stands
 
@@ -85,17 +96,168 @@ the live path.
 
 ## Open / still to do
 
-- **Commit the session's work** (see file list above).
+- ~~**Commit the session's work**~~ **DONE** (`01060d4`).
 - **Convergence** for §3.1 and §3.4 — the runs so far are the *stability +
   penetration* gate at one resolution each; the pressure-trace scoring vs
   Buchner (§3.1 P1/P2) and Colicchio/Wagner (§3.4 P1–P9), and the H/dx
   convergence pairs, are still to do.
 - **§3.1 P2** median 2× low / phase-early at H/Δx=322 — probing-methodology gap
   (item 3), not a scheme error.
-- **sloshingTank / other explicit-`dx` cases** — the sampler change is a strict
-  `dn ≤ dx` improvement but shifts particle counts slightly; re-run the ones
-  with tuned acceptance bands.
-- **§5.2.3 sloshingTank (TC10)** grading vs the experiment — separate work.
+- **Explicit-`dx` tuned-acceptance re-runs after `01060d4` (2026-09-10) — two
+  bugs found and FIXED (uncommitted, on top of `01060d4`):**
+
+  **(A) `_gridSnapGhostOffsets` snapped mDBC ghost nodes to the wrong lattice
+  phase.** `nodeDepth = ceil(d/dx)·dx` put the node an integer number of `dx`
+  *past the wall surface*. But the sampler (post `alignInteriorDomainToLattice`)
+  straddles a flat wall cleanly at ±0.5 dx, so fluid rows sit at `(k+0.5)·dx`
+  and every gridsnap ghost node landed **0.5 dx off the fluid lattice, in the
+  interstitial gap** (measured: dist-to-nearest-fluid 0.4999 dx for every
+  flat-bottom-wall node at nx = 225; **0.0000 dx** for the plain mirror
+  `'geometric'` uses) → one-sided/biased MLS at every wall particle every step.
+  This was the `englishWedge` dp = 0.01 **9/9 → 8/9** regression (wedge
+  base-corner hydrostatic RMSE 0.0150 → 0.0316, gate ≤ 0.03). **Fix
+  (`rigidBody/ghostParticles.py`):** `nodeDepth = (floor(d/dx) + 0.5)·dx` — the
+  fluid-particle lattice phase. Verified: gridsnap flat-wall nodes now coincide
+  with fluid particles (dist 0.0000), offset stats back to the plain-mirror
+  baseline (1.0 / 5.0 / 12.4 dx). Dump: `scripts/dump_sloshing_sampling.py`,
+  `scratchpad/sloshing_sampling{,_fixed}/`.
+
+  **(B) `sloshingTank` (TC10) density ratchet — culprit `80eabb9`, FIXED by
+  removing its clamp.** Bulk ρ ratcheted to ≈ 1.09–1.15 and the sloshing
+  motion collapsed (KE 0.028 → 7e-4, maxVel → 0.4 by t = 7 s) vs the
+  2026-09-09 reference. **Not the sampler** (IC byte-identical: 12,415 ptcls,
+  domain, c_s 11.05; the `9c7f878` worktree re-run reproduces the reference to
+  every digit) and **not the ghost default** (ratchets under `geometric` too).
+  Bisect (nx = 225, --tLimit 4): `b584170` ratchets → `01060d4` cleared;
+  `d494d7f` (= `1e145a1~1`) ratchets → `1e145a1` cleared; `80eabb9` ratchets,
+  **`afb6e59` clean** (densityMedian 1.003, KE 0.025, sensorRho min 0.876).
+  `80eabb9` added `rho_b = torch.clamp(rho_b, min=rho0)` to the *whole* blended
+  `computeMdbcDensity` result — the m2dbc anti-attraction guard. On the rolling
+  free surface it pins `p_b ≥ 0` where the physics wants neutral/negative → the
+  wall does net positive work each roll cycle → ρ ratchets, KE bleeds into
+  compression, motion locks; and it deletes the negative-pressure wall
+  transients §5.2.3 exists to validate. `80eabb9`'s own message concedes the
+  revert "does not actually move Marrone 3.4's tank-wall penetration" (no
+  measured upside); the `0.38 → 0.027` p95 win is `afb6e59`'s smooth blend.
+  **Fix (`modules/mdbc/density2025.py`): drop the clamp line.** English 2022
+  Eq. (12) has no such clamp.
+
+  **HEAD + (A) + (B), sloshingTank nx = 225, t = 7, un-frozen, vispy video:**
+  | scheme | result |
+  |---|---|
+  | **δ⁺-SPH (michel2022 PST)** | **full 7 s, `diverged=False`. Ratchet gone:** densityMedian 1.008 (vs 1.005 baseline / 1.09–1.14 pre-fix), KE 0.024 (vs 0.028 baseline / 7e-4 pre-fix), maxVel 2.6 — still actively sloshing. ρ over run [0.581, 1.634] ≈ baseline [0.623, 1.585]. **sensorRho [0.900, 1.243]** — negative wall transients restored (pre-fix floored at exactly 1.000 by the clamp); raw sensor min −9.1 kPa. First impact t ≈ 2.34 s (meas 2.40). Back to baseline quality. |
+  | δ-SPH (no PST) | **diverges at t = 2.19 s** — a ~2 ms spatial-operator blowup as the first slam builds (maxVel 11 → 56, maxρ → 3). *Expected*: un-frozen no-PST cannot do a violent first impact (item 4c, [[validation-scheme-defaults]]). The fixes push it from the docstring's old t = 0.68 all the way to the impact, but not through it. |
+
+  `test_physics` + `test_wallPressure` green with both fixes.
+  Videos: `e42_HEADfixed_{delta,deltaplus}_vid/`, plus
+  `e42_nx225_{gridsnap,geometric,9c7f878}_vid/` and `e42_bisect_*/` from the hunt.
+
+  **Open-check re-runs on the dam-break family (HEAD + A + B + the new
+  post-step mDBC-density-to-state hook, `scripts/_mdbcDensityHook.py`):**
+  - **Marrone §3.1 nx = 72 (H/dx = 43), δ⁺ PST, un-frozen — CLEAN, no
+    regression.** Full record t\* = 7.68, `diverged=False`, **0 wall pen / 0
+    penetrating**, ρ ∈ [0.9905, 1.013] (M = 0.049 — weakly compressible held
+    tight). P1 plateau 0.47 (Buchner 0.55, in the [0.45, 0.68] band); P1 raw
+    peak 2.99 P\* and P2 peak 0.271 at t\* = 4.82 (band 5.2–6.1) are the
+    known point-probe ring / phase-early issues (item 3), unchanged.
+    `scratchpad/openchecks/m31_deltaplus/` (+ video).
+  - **Marrone §3.4 nx = 256 (H/dx = 32), δ⁺ PST, un-frozen — 6/6, no
+    regression.** tStar = 5, `diverged=False`, **0 tank-wall pen**, obstacle
+    pen **0.72 dx** (gate ≤ 3; was 0.77 dx pre-fix — unchanged), ρ [P05, P99]
+    [0.997, 1.027], KE 27 → 9 decaying. The production M34 config is unaffected
+    by (A)/(B)/the hook. `scratchpad/openchecks/m34_deltaplus/` (+ video).
+  - **englishWedge dp = 0.01 wedge — still 8/9, and the wedge base corner got
+    *worse*: RMSE 0.0316 → 0.0431** (max\|resid\| 0.062 → 0.081; gate ≤ 0.03).
+    Everything else passes (bulk 0.014, near-wall 0.019, apex 0.015, faces
+    0.033, 0 pen, ρ ∈ [1.0000, 1.0026]). The phase fix (A) only touches flat
+    walls; the base-corner residual is **gridsnap's corner rule** — ~40 corner
+    boundary particles collapse their ghost nodes onto one interior point
+    (unchanged by A) — and removing the clamp (B) made that already-bad
+    concave corner worse (still water wants ρ_b ≥ ρ0 there; the unclamped
+    noisy extrapolation now dips below). History: bodynode 0.0150 (9/9) →
+    gridsnap+clamp 0.0316 → gridsnap+phasefix+noclamp 0.0431.
+    `scratchpad/openchecks/wedge_dp01/`.
+
+  **Verdict on (A)+(B):** they fix sloshingTank cleanly (δ⁺ back to baseline,
+  ratchet gone, negative transients restored) and leave both Marrone dam-break
+  configs untouched (§3.1 0 pen ρ[0.99,1.01]; §3.4 6/6, 0.72 dx). The only cost
+  is englishWedge's *already-failing* concave base corner, 0.0316 → 0.0431.
+
+  **(B) REFINED — clamp moved to the Shepard-fallback share only, tested.**
+  `density2025.py`: `shepardDensity = torch.clamp(shepardDensity, min=rho0)`
+  right after it's computed; the final blend
+  `rho_b = w·rho_proj + (1−w)·shepardDensity` is **not** re-clamped. Re-ran both
+  confirmations (nx = 225 δ⁺ t = 7 video; dp = 0.01 wedge t = 4 video):
+  - **sloshingTank δ⁺ — still clean.** densityMedian 1.0053 final (vs 1.008
+    blanket-removal, 1.005 baseline), KE 0.023 (vs 0.024 / 0.028), sensorRho
+    min 0.932 (vs 0.900 blanket-removal — the fallback clamp bites slightly
+    harder, but negative transients are still there: raw sensor min −6.8 kPa).
+    Ratchet fix holds.
+  - **englishWedge dp = 0.01 — base-corner RMSE 0.0431, byte-identical (4+
+    sig figs, every check) to the blanket-removal run.** So the clamp's
+    *placement* was never the corner's problem: at the corner `w` is not near
+    0 (a clean 0/1 split would make the two clamp forms coincide) but
+    intermediate, and the badly-conditioned `rho_proj` component (from
+    gridsnap's collapsed corner ghost stencil) leaks through the blend
+    unclamped either way. The *old* blanket clamp's 0.0316 came from brute-force
+    flooring the whole blend, catching that leak as a side effect — at the cost
+    of also flooring sloshing's legitimate sub-ρ0 readings. **Conclusion: the
+    englishWedge base-corner regression is not a clamp question at all — it is
+    `_gridSnapGhostOffsets`' concave-corner ghost placement**, a separate open
+    item (target the fluid lattice at corners too, or fall back to the bodynode
+    polyline mirror there). The fallback-only clamp is kept as the more
+    principled form (matches the guard's actual intent, zero cost vs full
+    removal on every case tried) even though it doesn't move englishWedge.
+    `examples/sloshingTank/output/e42_fallbackclamp_deltaplus_vid/`,
+    `scratchpad/openchecks/wedge_dp01_fallbackclamp/`.
+
+  **(C) — two deeper WC-scheme concerns flagged by the user (2026-09-10), to
+  investigate once (A)+(B) are re-checked on the dam-break family:**
+  - **The density state update bypasses the RK integrator.**
+    `systems/weaklyCompressible.py:219` commits density as
+    `ρ^{n+1} = ρ^n · exp(Δt · drhodt_lastStage / ρ_lastStage)` — using only the
+    *final* RK stage's `drhodt` and `ρ`, from the *initial* `ρ^n`. Positions and
+    velocities get the full RK4 stage combination; **density does not** — it is a
+    single-evaluation exponential-Euler step (exact flow of `dρ/dt = ρ·g` with
+    `g` frozen), consistent with a symplectic / semi-implicit Euler (KDK) step,
+    not with a multi-stage RK where combining the stage rates *is* the method.
+    Marrone/Sun integrate the continuity eqn with the same RK4 as the momentum
+    eqn. Two consequences: (i) density is ~1st-order while v/x are 4th; (ii) the
+    convex `exp` **rectifies** an oscillatory `drhodt` — `exp(+x)` grows more
+    than `exp(−x)` shrinks — so acoustic ringing in `drhodt` integrates to a net
+    density *gain* (a ratchet), invisible under the commented-out linear /
+    Padé(1,1) form. `epsilon` is computed and clamped on the line above but
+    **unused** (the Padé line is commented out) — dead code. Try: the plain
+    RK-consistent `ρ^{n+1} = ρ^n + Δt·(RK-combined drhodt)`, or at least the
+    Padé form, and A/B the acoustic hash on sloshingTank / Marrone 3.1.
+  - **δ-SPH density diffusion runs fluid↔boundary; DualSPHysics does not.**
+    `modules/deltaSPH/densityDiffusion.py` calls `computeDensityDiffusionDeltaSPH`
+    (and `computeGradRhoL`, `computeGradRho`) with `OperationDirection.AllToAll`
+    — so a fluid particle's DDT sum includes boundary neighbours carrying the
+    **mDBC-extrapolated** wall density. DualSPHysics `JSphCpu.cpp` (~L925–939)
+    sets the DDT accumulator to the `FLT_MAX` "disable" sentinel for **every**
+    boundary neighbour under **all** DDT variants (`DDT_DDT`, `DDT_DDT2`,
+    `DDT_DDT2Full`) — its own comment: DBC neighbours "makes it boil". The mDBC
+    wall density is a phase-lagged extrapolation of the fluid's own field;
+    diffusing the fluid *toward* it is a delayed self-coupling that can sustain
+    / pump near-wall oscillations instead of draining them (compounds with the
+    `exp` rectification above). Try: restrict the DDT / `gradRhoL` / `gradRho`
+    sums to fluid↔fluid (exclude `kinds != 0` as sources) and A/B.
+- **§5.2.3 sloshingTank (TC10)** grading vs the experiment — unblocked (δ⁺
+  runs clean on HEAD + the two fixes). Remaining pre-existing open item: the
+  raw first-impact peak overshoots the repeatability band (~62 kPa vs ≤ 13 kPa)
+  because the case has no `machTarget` (c_s falls with resolution → local
+  Ma ≈ 0.75 at impacts) — the soft-EOS item already noted below.
+- Other explicit-`dx` cases (dambreak / M34) were re-verified inside `01060d4`;
+  periodic boxes (tgv-wc / randomFlow / hydrostaticColumn) are byte-identical.
+- **NEXT: `_gridSnapGhostOffsets`' concave-corner ghost collapse** — the
+  englishWedge base-corner 8/9 residual (RMSE 0.0431, stable across the clamp
+  A/B, so it's isolated to this). At a corner ~40 boundary particles collapse
+  their ghost node onto one interior point (a degenerate, near-coplanar
+  stencil `interpolateLiuLiu` can't fit well); the flat-wall phase fix (A)
+  doesn't touch this path. Try: target the fluid lattice at a corner the way
+  (A) does for a flat wall, or fall back to `_bodyNodeGhostOffsets`' polyline
+  mirror specifically at a detected corner (bodynode gave 0.0150 / 9/9 there).
 
 **Boundary lattice alignment + dn≤dx sampler + pristine ghost placement
 (2026-09-10, item 4a):** root-caused the "abysmal" dam-break wall sampling —

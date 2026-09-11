@@ -72,6 +72,11 @@ def _runOne(dp, wedge, tilt, tLimit, c0Ratio, out, video, plotInterval, scheme):
     import numpy as np
     from warpSPH.cases.dambreak import dambreakCase
     from warpSPH.runner import run
+    from _mdbcDensityHook import installMdbcDensityToState
+
+    # Refresh the wall-band densities with the mDBC extrapolation each step, so
+    # the p-vs-z scatter / KE series / video show the density the scheme uses.
+    installMdbcDensityToState(dambreakCase)
 
     os.makedirs(out, exist_ok=True)
     nx = int(round(TANK_H / dp))                 # dp = L / nx
@@ -115,8 +120,10 @@ def _runOne(dp, wedge, tilt, tLimit, c0Ratio, out, video, plotInterval, scheme):
     kw = dict(scheme=scheme, L=TANK_H, nx=nx, tLimit=tLimit,
               quiet=True, store=False, progress=True, params=params)
     if video:
-        kw.update(plot=True, video=True, plotBackend='matplotlib',
-                  plotInterval=plotInterval, exportRoot=runRoot)
+        # vispy (the runner's own 2D default), NOT matplotlib -- the mpl encode
+        # path is ~50-80x slower and dominates wall time. See the plan's banner.
+        kw.update(plot=True, video=True, plotInterval=plotInterval,
+                  exportRoot=runRoot)
 
     print(f'[{tag}] dp={dp} nx={nx} c0={c0Ratio:g}sqrt(gH)={c0Ratio*sqrt_gH:.2f}  '
           f'running to t={tLimit}s ...', flush=True)

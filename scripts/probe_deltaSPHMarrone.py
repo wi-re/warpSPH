@@ -141,6 +141,12 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
     import numpy as np
     from warpSPH.cases.dambreak import dambreakCase
     from warpSPH.runner import run
+    from _mdbcDensityHook import installMdbcDensityToState
+
+    # Wall-band densities re-extrapolated (mDBC) each step so the density field
+    # / video / P1-P2 traces reflect the value the scheme uses, not the drifted
+    # post-integration one.
+    installMdbcDensityToState(dambreakCase)
 
     os.makedirs(out, exist_ok=True)
 

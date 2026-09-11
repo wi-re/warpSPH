@@ -354,12 +354,16 @@ def _gridSnapGhostOffsets(bpos, solidSdfs, dx, hMean, *, nRetract: int = 12):
     box, `d` is whatever the lattice phase gave, anywhere in `(0, dx)` for the
     first layer, so the node can land right on the surface with no one-sided
     support. Instead: take `d` and the mollified inward normal `n` from the
-    merged solid SDF (`_mergedSurface`), and place the node at **`ceil(d/dx)*dx`
-    past the surface** -- every first-layer boundary particle's node then sits
-    exactly `dx` into the fluid, every second-layer node `2 dx`, etc.,
-    regardless of the sub-`dx` offset of the particle itself:
-    `r_g = r_b + (d + ceil(d/dx)*dx) n`, with the node depth capped at `1.5 h`
-    so a slightly-off deep-layer normal cannot fling the node across the domain.
+    merged solid SDF (`_mergedSurface`), and place the node at
+    **`(floor(d/dx) + 0.5)*dx` past the surface** -- the fluid-particle lattice
+    phase. When the boundary and fluid bands straddle the wall cleanly (the
+    usual case after `alignInteriorDomainToLattice`), the first fluid row sits
+    `0.5 dx` past the surface, the second `1.5 dx`, etc., so the node lands
+    *exactly on a fluid particle* (one-sided but well-conditioned MLS) rather
+    than `0.5 dx` into the gap between two fluid rows -- which `ceil(d/dx)*dx`
+    (an integer count from the *surface*, not the fluid) did, biasing the
+    extrapolation at every wall particle. Node depth is capped at `1.5 h` so a
+    slightly-off deep-layer normal cannot fling the node across the domain.
 
     Deep layers (`d > 2 h`, past any fluid particle's kernel support) get a zero
     offset -> Shepard / rest fallback (Marrone's "not considered"). A node that
@@ -370,7 +374,7 @@ def _gridSnapGhostOffsets(bpos, solidSdfs, dx, hMean, *, nRetract: int = 12):
     eps = 0.1 * float(dx)
     d, n = _mergedSurface(bpos, solidSdfs, float(dx))
     realLayer = d <= 2.0 * float(hMean)
-    nodeDepth = (torch.ceil(d / dx - 1e-3).clamp_min(1.0) * dx).clamp_max(1.5 * float(hMean))
+    nodeDepth = ((torch.floor(d / dx - 1e-3).clamp_min(0.0) + 0.5) * dx).clamp_max(1.5 * float(hMean))
 
     def clearance(pos):
         c = pos.new_full((pos.shape[0],), float('inf'))
