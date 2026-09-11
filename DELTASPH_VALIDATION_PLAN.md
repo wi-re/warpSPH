@@ -3111,3 +3111,130 @@ free slip, which is what Marrone 2011 Sec. 3 specifies.
 in 5.3 and the free-slip A/B in 5.7 were all measured with the mis-scaled term,
 so they shift under these fixes and need re-running before being compared
 against anything new.
+
+### 5.10 Normal-vector reflection — correct operator, exposes a pre-existing bug
+
+The no-penetration correction was decomposed per Cartesian component
+(`-factor * dv_d * n_d^2`), which is the right magnitude only when the wall
+normal **is** an axis. Three synthetic harnesses were built to characterise it
+rather than trace its branches, and each one killed a conclusion previously
+reached by reading the source:
+
+* `scripts/probe_nopenShiftResponse.py` -- one particle swept over normal
+  distance x tangential phase against a flat wall, three velocity directions.
+  Showed a hard on/off band, constant `+2` reflection, zero for tangential or
+  outward motion, no lattice dependence.
+* `scripts/probe_nopenShiftTrajectory.py` -- integrates a single ejected
+  particle. Measured restitution ~0.70 on one firing, **not** the perfectly
+  elastic bounce assumed.
+* `scripts/probe_nopenShiftCorner.py` -- an orthogonal corner with the radial
+  ghost-normal fan. Per-component form: fires at 25/1681 points, and where it
+  fires the particle is **stopped dead** (`|v_new| = 0.000`).
+
+An angle sweep pinned the defect: `shift_d = 2 v_d n_d^2`. At 45 deg each
+component receives exactly `|v_d|`, which **cancels** the velocity instead of
+reversing it.
+
+**Change:** reflect along the wall normal as a vector, and make `ratio`
+dimensionless (`|normDist| / norm_j`, where the old `|dr/norm|` divided metres
+by a unit-vector component and so was pinned to the 0.25 floor -- the distance
+ramp DualSPHysics intends was dead in both codes). `factor` now runs 0 (grazing,
+smooth onset) -> 1 (absorb) -> 2 (deep, full specular).
+
+Graded: flat wall unchanged (939 pts, tangential/outward exactly 0); tilted wall
+angle-independent; corner `|v_new|` min 0.000 -> 0.998.
+
+**Results (symplecticEuler + PST + `finalize` + freeSlip):**
+
+| case | outcome |
+|---|---|
+| Marrone 3.1, t* 7.5 | ran clean, nPen 0, **P1\* 45.6 -> 7.7** (Fig. 5 ref ~2-3) |
+| sloshingTank, t 4.5 | 45000 steps, rho [0.862, 1.250] |
+| **Marrone 3.4, t\* 6** | **all four gates FAIL** -- rho to 46.5 (pointwise 2.4e8), max\|v\| 296897 U_max, 3.5e7 dx outside the AABB |
+
+**Diagnosis of the 3.4 failure (from the field video, user):** particles are
+**sucked into the wedge**, then massively accelerated through the boundary, then
+fly out and destroy the fluid. It localises to the wedge toe -- the re-entrant
+corner where the 45 deg face meets the floor. **The explosion is at t* ~ 0.9**,
+so reproduction is cheap; no need to run the full record.
+
+The causal chain:
+
+1. **The wall attracts.** The uncommitted `density2025.py` change moved the
+   `rho_b >= rho0` clamp to the *fallback share only*, so on the MLS path
+   `rho_b` is unbounded below and `p_b` can go arbitrarily negative. Measured
+   independently in 5.7: `pb@front` = -0.014 / -0.018 under the dam-break front.
+2. **The per-component form was masking it.** Its 45 deg cancellation stopped
+   *any* particle reaching the wedge face dead -- not a reflection, an
+   absorption, and on a 45 deg geometry a hard backstop against penetration.
+3. **The vector reflection removes the backstop** (correctly -- it returns the
+   particle's speed instead of eating it), so attracted particles now reach the
+   solid.
+4. Inside the solid the stencil is one-sided and the density nonsense, hence the
+   1e6 velocities and the ejected particles tearing up the fluid.
+
+**So the reflection did not introduce a bug, it exposed one**, and what it
+removed was a bug acting as a safety net. Reverting it would restore the mask,
+not the fix. The fix is upstream: bound `rho_b` from below on the MLS path
+without reintroducing the sloshingTank density ratchet that motivated removing
+the blanket clamp (5.5) -- a cavitation-style floor, or clamping only where the
+particle is being drawn inward. `probe_mdbcDistance.py` + the corner/response
+sweeps can grade a candidate before it touches a case.
+
+**Confound, not yet controlled:** the 3.4 run changed the reflection form *and*
+the duration (t* 4 -> 6) together; the passing per-component run only reached
+t* = 4. The decisive control is normal-vector at t* = 4 (or just past the
+t* ~ 0.9 explosion). Until it runs, the normal-vector change is **unproven, not
+validated**.
+
+### 5.11 The velocity overshoot is thin-sheet collapse, not wall impact
+
+On Marrone 3.1 (normal-vector, t* 7.5) `maxVelocity` peaks at **40.80 m/s =
+8.6 U_max at t = 1.3582 s (t* = 5.492)** -- and the wall probe reads
+**P1\* = 0.28** at that instant. An impact would spike both. It does not:
+
+```
+t = 1.3364   vmax =  4.17   rho_min = 0.9929
+t = 1.3505   vmax = 18.73   rho_min = 0.9472
+t = 1.3582   vmax = 40.80   rho_min = 0.9114   <- peak, P1* = 0.28
+t = 1.3786   vmax = 11.04   rho_min = 0.9859
+t = 1.3927   vmax =  4.47   rho_min = 0.9939
+```
+
+4 -> 40 -> 4 m/s in ~55 ms with `rho_min` dipping to 0.91 in lockstep. Observed
+in the field video (user): when the fluid detaches from the top wall a thin
+sheet stays attached, then is accelerated down hard once it is only a few
+particles thick -- it loses kernel support, its density falls, and the remaining
+particles are yanked.
+
+**This reframes the metrics.** `vmax 40.8` and the widened `rho` range on the
+normal-vector 3.1 run were reported as a possible regression; they are a single
+free-surface event the longer run exposed, not wall behaviour. Like-for-like the
+wall metrics improved unambiguously (P1\* 45.6 -> 7.7, nPen 0).
+
+It also unifies the remaining open items: this, the 5.7 tongue fragmentation
+(tongue thinning to 2.8 dx, fliers 7-8 dx ahead of the front) and 5.5's fallback
+returning exactly `rho0` under thin fluid are **one problem -- SPH with too few
+neighbours**, not SPH against a wall. Next instrument: a thin-sheet probe
+(N-particle sheet, acceleration vs thickness), with a concrete target to
+reproduce: `rho_min ~ 0.91`, `8.6 U_max`, onset over ~55 ms.
+
+### 5.12 Gravity and the `finalize` velocity replacement -- orientation matters
+
+A particle was observed flying **parallel to the ceiling without dropping**.
+`finalize` applies `vNew = where(active, vPre + shift, vFree)` with `vPre` the
+*start-of-step* velocity, so every step the correction fires, that component
+loses the step's gravity.
+
+**That discard is correct for a floor and wrong for a ceiling** (user), with
+`n_hat` pointing into the fluid:
+
+| wall | `n_hat` | `n_hat . g` | gravity | discard? |
+|---|---|---|---|---|
+| floor | (0,+1) | **< 0** | presses *into* the wall | **yes** -- else the particle accumulates downward velocity every step and sinks through |
+| ceiling | (0,-1) | **> 0** | pulls *away* from the wall | **no** -- discarding is what makes it hover |
+
+So the rule is `n_hat . g < 0` -> keep discarding; `> 0` -> let gravity act. A
+blanket "use `vFree` instead of `vPre`" would fix the ceiling and start dropping
+particles through floors. The grazing probe must cover **both orientations**
+before any fix is accepted.

@@ -304,27 +304,38 @@ def computeMdbcNoPenShift_Func_i(
             condition_c = wp.dot(vel_i - vel_j, normal_j) < 0
 
             condition_ab = condition_a and condition_b
-            condition_abc = condition_ab and condition_c 
-            
-            for d in range(dim):
-                u_i = vel_i[d]
-                u_j = vel_j[d]
-                dv = u_i - u_j
-                norm = normal_j[d]
-                dr = x_ij[d]
-                
-                mask = condition_ab and (dr * normal_j[d] < scalar_t(0.75)) and (wp.abs(normal_j[d]) > scalar_t(0.001) * dp_i)
 
-                vfc = dv * norm
-                ratio = wp.clamp(wp.abs((dr / norm)), scalar_t(0.25), scalar_t(1.0))
-                factor = - scalar_t(4.0) * ratio + scalar_t(3.0)
+            # Reflect along the wall NORMAL as a vector, rather than
+            # decomposing per Cartesian component. `-factor * dv_d * n_d^2`
+            # (the per-component form, and DualSPHysics') is the right
+            # magnitude only when the normal IS an axis: measured on a tilted
+            # wall it gives `shift_d = 2 v_d n_d^2`, so at 45 deg each
+            # component receives exactly `|v_d|` -- which *cancels* the
+            # velocity instead of reversing it, and the particle is stopped
+            # dead rather than bounced. That is wrong for every non-axis-
+            # aligned wall: the Marrone 3.4 wedge face, and every domain corner
+            # where the ghost normals swing through 90 deg.
+            # `scripts/probe_nopenShiftCorner.py` / `...Response.py` grade this.
+            v_rel = vel_i - vel_j
+            vn = wp.dot(v_rel, normal_j)
 
-                nopenshiftTerm = -factor * dv * norm * norm
-                if mask and vfc < 0:
-                    tempOut[d] = nopenshiftTerm
+            # `ratio` is dimensionless now: how far inside the boundary-normal
+            # length the contact sits. The old `|dr / norm|` divided a LENGTH
+            # (metres) by a dimensionless unit-vector component, so it was
+            # ~5e-3 and always pinned to the 0.25 floor -- the distance ramp
+            # DualSPHysics intends was dead in both codes. With this form
+            # `factor` runs 1 (grazing contact, normal velocity absorbed) to 2
+            # (deep contact, full specular reflection).
+            ratio = wp.clamp(wp.abs(normDist) / (norm_j + scalar_t(1.0e-12)),
+                             scalar_t(0.25), scalar_t(1.0))
+            factor = - scalar_t(4.0) * ratio + scalar_t(3.0)
+
+            if condition_ab and vn < scalar_t(0.0):
+                tempOut = -factor * vn * normal_j
+                for d in range(dim):
                     tempCtr[d] = 1
 
-            out += tempOut 
+            out += tempOut
             outCounter += tempCtr
         
     return out, outCounter

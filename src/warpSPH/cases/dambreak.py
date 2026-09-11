@@ -583,21 +583,38 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
 
 
 #: The two panels a dam break actually ships with (`plotDensity=False`).
-#: Velocity is the flow; the cyclic-coloured particle IDs are how you see the
-#: fluid fold over itself at the free surface, which no scalar field shows.
+#: Velocity is the flow; density is what the boundary treatment is graded on --
+#: a wall that attracts, a tongue that de-densifies, or a corner that pumps
+#: shows up here and in no other field (`DELTASPH_VALIDATION_PLAN.md` 5.5-5.9).
+#: `scaling='Symmetric'` is what makes `midPoint` take effect at all --
+#: `warpSPHPlotting.math.getBounds` only applies it on the Symmetric branch, so
+#: a diverging map left on the default `Linear` silently becomes a plain min-max
+#: stretch with "white" wherever the data minimum happens to be, not at rho0
+#: (5.6).
+_DAMBREAK_DENSITY_FIELD = Field(
+    'densities', 'Particle Density', colorMap='RdBu', colorMapKind='diverging',
+    flip=True, midPoint=1.0, scaling='Symmetric', boundary='Visualize',
+    plotTitleGap=0.08)
+
+#: The cyclic-coloured particle IDs show the fluid folding over itself at the
+#: free surface, which no scalar field does. Kept for `--plotIDs`, but not the
+#: default: on these validation runs the question is almost always what the
+#: density is doing at a wall.
+_DAMBREAK_UID_FIELD = Field(
+    'UIDs', 'Particle IDs', colorMap='twilight', colorMapKind='cyclic',
+    midPoint=None, plotTitleGap=0.08)
+
 DAMBREAK_FIELDS = [
     Field('velocities', 'Particle Velocity Magnitude', colorMap='viridis',
           mapping='L2Norm', plotTitleGap=0.08),
-    Field('UIDs', 'Particle IDs', colorMap='twilight', colorMapKind='cyclic',
-          midPoint=None, plotTitleGap=0.08),
+    _DAMBREAK_DENSITY_FIELD,
 ]
 
-#: `--plotDensity`: the same, with the density panel between them.
+#: `--plotDensity`: velocity, density and the ID panel together.
 DAMBREAK_FIELDS_DENSITY = [
     DAMBREAK_FIELDS[0],
-    Field('densities', 'Particle Density', colorMap='RdBu', colorMapKind='diverging',
-          flip=True, midPoint=1.0, plotTitleGap=0.08),
-    DAMBREAK_FIELDS[1],
+    _DAMBREAK_DENSITY_FIELD,
+    _DAMBREAK_UID_FIELD,
 ]
 
 

@@ -128,7 +128,7 @@ def _plotOptions(field: Field, markerSize: float):
 
 #: Wall-clock time this process started, stamped into every figure title so a
 #: frame on disk can be traced back to the run that produced it.
-_LAUNCH_TIME = _dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+_LAUNCH_TIME = _dt.datetime.now().strftime('%Y-%m-%d %H:%M')
 
 
 def _gitHash() -> str:
@@ -164,20 +164,83 @@ def _gitHash() -> str:
 _GIT_HASH: Optional[str] = None
 
 
+def _boundaryConditions(ctx: RunContext) -> str:
+    """The wall treatment, as `BC <kinds>` (+ the mDBC no-penetration mode).
+
+    Two cases differing only in wall BC produce visually similar fields and
+    wildly different physics -- `DELTASPH_VALIDATION_PLAN.md` 5.7 -- so the
+    frame should say which one it is.
+    """
+    sc = getattr(ctx, 'schemeConfig', None)
+    bits = []
+    try:
+        from ..configurations.region import RegionType
+        kinds = {r.kind.name for r in (getattr(sc, 'regions', None) or [])
+                 if getattr(r, 'type', None) == RegionType.Boundary
+                 and getattr(r, 'kind', None) is not None}
+        if kinds:
+            bits.append('/'.join(sorted(kinds)))
+    except Exception:
+        pass
+    mode = getattr(sc, 'mdbcNoPenShiftMode', None)
+    if mode:
+        bits.append(f'noPen:{mode}')
+    return ' | '.join(bits)
+
+
+def _gravityString(ctx: RunContext) -> str:
+    """`g = (gx, gy)` -- direction times magnitude, the vector actually applied.
+
+    Recomputed per frame rather than cached with the rest of the provenance:
+    `sloshingTank` rotates gravity every step to solve in the tank frame, so a
+    cached value would be wrong for all but the first frame.
+    """
+    gc = getattr(getattr(ctx, 'schemeConfig', None), 'gravityConfig', None)
+    if gc is None or not getattr(gc, 'active', False):
+        return ''
+    try:
+        mag = float(gc.magnitude)
+        d = gc.direction
+        d = [float(v) for v in (d.tolist() if hasattr(d, 'tolist') else d)]
+        return 'g(' + ','.join(f'{mag * v:.3g}' for v in d) + ')'
+    except Exception:
+        return ''
+
+
 def _provenance(ctx: RunContext) -> str:
     """The static half of the title: what was run, with what, when, from which
-    commit. Cached per `RunContext` -- none of it changes during a run."""
+    commit. Cached per `RunContext` -- none of it changes during a run.
+
+    Gravity is deliberately NOT here (it can rotate per step); see
+    `_gravityString`.
+    """
     cached = ctx.scratch.get('_titleProvenance') if hasattr(ctx, 'scratch') else None
     if cached is not None:
         return cached
     spec = ctx.spec
     kernel = getattr(ctx.config, 'kernel', None)
     kernelName = getattr(kernel, 'name', None) or str(spec.kernel)
-    bits = [f'scheme {spec.scheme}',
-            f'integrator {spec.integrationScheme}',
-            f'kernel {kernelName}',
-            f'launched {_LAUNCH_TIME}',
-            f'git {_gitHash()}']
+    # Bare values, no labels: the scheme / integrator / kernel names are each
+    # unambiguous on their own, and spelling out "scheme ... integrator ...
+    # kernel ..." pushed the line past the figure width, where the backends
+    # clip rather than wrap.
+    bits = [str(spec.scheme), str(spec.integrationScheme), kernelName]
+    # The *absolute* sound speed, whatever route set it: cases disagree on
+    # whether the knob is `soundSpeed` (absolute) or `c0Ratio` (a multiple of
+    # sqrt(gH)), so the echoed input alone does not tell you what ran.
+    cs = getattr(getattr(ctx, 'schemeConfig', None), 'fluid', None)
+    cs = getattr(cs, 'fixedSoundSpeed', None) if cs is not None else None
+    if cs is not None:
+        try:
+            csv = float(cs.detach().cpu().item() if hasattr(cs, 'detach') else cs)
+            if csv > 0:
+                bits.append(f'c_s {csv:.4g}')
+        except Exception:
+            pass
+    bc = _boundaryConditions(ctx)
+    if bc:
+        bits.append(bc)
+    bits += [_LAUNCH_TIME, _gitHash()]
     text = ' | '.join(bits)
     if hasattr(ctx, 'scratch'):
         ctx.scratch['_titleProvenance'] = text
@@ -198,7 +261,11 @@ def figureTitle(ctx: RunContext, state, row: Optional[Dict[str, float]] = None) 
              f'ptcls = {len(state.state.positions)}']
     if row:
         parts += [f'{k} = {v:.4g}' for k, v in row.items()]
-    return ' | '.join(parts) + '\n' + _provenance(ctx)
+    tail = _provenance(ctx)
+    g = _gravityString(ctx)
+    if g:
+        tail = tail + ' | ' + g
+    return ' | '.join(parts) + '\n' + tail
 
 
 def _mosaicKeys(fields: Sequence[Field]) -> List[str]:
