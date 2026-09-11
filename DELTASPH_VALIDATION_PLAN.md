@@ -211,8 +211,67 @@ the live path.
     `examples/sloshingTank/output/e42_fallbackclamp_deltaplus_vid/`,
     `scratchpad/openchecks/wedge_dp01_fallbackclamp/`.
 
-  **(C) — two deeper WC-scheme concerns flagged by the user (2026-09-10), to
-  investigate once (A)+(B) are re-checked on the dam-break family:**
+  **(C) IMPLEMENTED (2026-09-11, uncommitted) — both changes made, sweep run,
+  a real corner regression found. Not committed pending the bisect below.**
+  `systems/weaklyCompressible.py`: the exponential override deleted, density
+  now left at the RK integrator's own combined update (only the non-fluid
+  band's post-mDBC carry-forward + a defensive NaN/negative floor added back).
+  `modules/deltaSPH/densityDiffusion.py`: `computeDensityDiffusion`'s own call
+  now passes `operationMode = OperationDirection.FluidToFluid` (the shared
+  `computeScalarFieldDiffusion`, also used by ACSPH, keeps its `AllToAll`
+  default — only δ-SPH's density-diffusion caller changed). `test_physics` /
+  `test_wallPressure` / `test_deltaSPHDiffusion` (ψ_ij cancellation pin) all
+  green; a quick englishWedge smoke came back 9/9 including the base corner.
+
+  **Sweep (nx=225 δ⁺ sloshing, nx=72 δ⁺ Marrone 3.1, both full record, both
+  fixes together):**
+  - **sloshingTank δ⁺ — clean, arguably the best result yet.** `diverged=False`,
+    densityMedian 1.009 (no ratchet), **KE final 0.031** (higher/healthier than
+    every earlier fix, close to the pre-regression baseline's 0.028 — less
+    over-damped). **First impact t=2.34 s (meas 2.40 s), smoothed peak 6.89 kPa
+    (meas 3.6 kPa, band 2.2–13.1)** — the best match of any run this session.
+    Raw sensor spiked to 156 kPa (vs ~55–70 kPa before) but it is a brief
+    needle the 10 ms smoothing erases cleanly; not a global effect.
+  - **Marrone §3.1 nx=72 δ⁺ — still 0 wall penetration, but a real localized
+    regression: the downstream-wall run-up jet fragments at the corner.**
+    maxVelocity peak 6.0 → **29.6** (5×), KE *final* 0.21 → **0.92** (4.4×, not
+    just a transient), ρ range [0.99,1.01] → [0.85,1.16], P1 raw peak 2.99 →
+    **85.4 P\*** at t\*=3.13. **Confirmed visually**, not just in the scalars: a
+    matched-sim-time frame pair (t\*≈3.13, `ffmpeg`-extracted from both videos)
+    shows the pre-fix run-up as a clean coherent jet (velocity colour-scale max
+    3.5) climbing the downstream corner smoothly, and the post-fix run at the
+    *identical instant* as a scattered, fragmenting cluster at the same corner
+    (colour-scale max **17.4**) — the user's own read ("that's definitely a
+    blow up in the corner") from the video, confirmed frame-by-frame.
+    **CORRECTION (checked, not just eyeballed): the static corner ghost
+    sampling is NOT obviously degenerate, so the "same as englishWedge" claim
+    above doesn't hold up.** Measured at t=0 in a 12 dx box around this exact
+    corner: 180 boundary particles' ghost nodes span **11 dx in both x and y**
+    (149/180 distinct even at 0.1 dx bins) — `_gridSnapGhostOffsets` mirroring
+    nearby particles toward a common corner *vertex* is English/Marrone's own
+    prescribed rule for a plain convex corner (π/2 ≤ θ ≤ π), not a bug; the
+    dense look in a zoomed crop is expected, not collapse. And a conditioning
+    check (`numNeighbors`/`det(A_g)` at the ghost nodes) is uninformative at
+    t=0 either way: the downstream corner is dry pre-dam-break, so
+    `numNeighbors=0` there regardless of placement quality. Also: englishWedge's
+    base corner is a genuinely different geometry (a re-entrant feature from a
+    *merged* wedge+bed SDF) than M31's tank corner (a plain single-primitive
+    box corner) — asserting they share a root cause was unjustified pattern-
+    matching, not a checked claim.
+    **So what we actually have, no more:** the fragmentation is real (video,
+    both mine and the user's read), it is spatially at the corner, and it
+    appears only after (C). Whether that's a corner-geometry defect at all, or
+    just "the flow is most violent/thinnest there so a general loss of
+    dissipation shows up there first," is open. **Not yet proven which of the
+    two (C) changes (or both) drives it** — bisect running
+    (`scratchpad/openchecks/m31_{ddtonly,densityonly}/`, each with only one of
+    the two changes on top of the committed `ea55e91`); its result plus a
+    conditioning check *during* the impact (not at t=0) are what would actually
+    settle this, not the static dump.
+  Videos: `examples/sloshingTank/output/e42_schemefix_{deltaplus,delta}_vid/`,
+  `scratchpad/openchecks/{m31,m34,wedge_dp01}_schemefix/`.
+
+  **(C) original notes, for the record:**
   - **The density state update bypasses the RK integrator.**
     `systems/weaklyCompressible.py:219` commits density as
     `ρ^{n+1} = ρ^n · exp(Δt · drhodt_lastStage / ρ_lastStage)` — using only the
@@ -681,7 +740,7 @@ Confirmed via a same-args A/B (`git stash` the changes, rerun, `git stash
 pop`), not a fluke or reporting artifact:
 
 - **H/Δx = 15** (`--nx 25 --c0Ratio 40 --tLimit 3.2`, `t* ≈ 12.9` reached,
-  `scripts/out_deltaSPHMarrone_gatecheck/`): previously the recorded "worst
+  `scripts/old/out_deltaSPHMarrone_gatecheck/`): previously the recorded "worst
   case" — no violent explosion, but *"a milder disturbance still builds by
   t\* ≈ 2.7."* With the gate: no divergence to t\* ≈ 12.9, density settles to
   `[0.9998, 1.0007]` by t\* ≈ 4 and stays there (a brief `ρ ∈ [0.86, 1.15]` /
@@ -1106,7 +1165,7 @@ c₀ = 40√(gH) (c₀² ≈ 9400) is an explosive repulsion. This is also why L
 ~5-particle transient ejection the Lobovský FINDINGS noted.
 
 **Reverted to `threshold = 9`** (reasoning in-code). **Full run, H/Δx = 40,
-c₀ = 40√(gH), to t\* = 7.7** (`scripts/out_deltaSPHMarrone/`, 9/9 acceptance
+c₀ = 40√(gH), to t\* = 7.7** (`scripts/old/out_deltaSPHMarrone/`, 9/9 acceptance
 checks, video):
 
 - **Stable and weakly compressible the whole way**, through the plunging-wave
@@ -1274,7 +1333,7 @@ sun2017DeltaSPH` (now `probe_deltaSPHMarrone.py`'s default):
 
 `p1_first_peak_max` restored `2.2 → 1.60` (the temporary loosening was
 compensating for the bug above, not a genuine physical necessity) — **9/9
-checks pass** under `sun2017DeltaSPH`. `scripts/out_deltaSPHMarrone/` now
+checks pass** under `sun2017DeltaSPH`. `scripts/old/out_deltaSPHMarrone/` now
 holds both runs side by side (`REPORT.md` shows both score tables) as the
 record of the fix. Not yet investigated: P1 plateau / P2 peak both sit a
 little below Buchner under the frozen scheme (0.46/0.22 vs 0.55/0.28) —
@@ -1338,7 +1397,7 @@ Consequences, in order of how much they matter:
 ### 5.1.2 Four-leg re-run + the H/Δx = 322 convergence — the P1 deficit was resolution
 
 All four legs, one code state, on `dambreak` with the `shifting` knob from
-§5.1.1 (`scripts/out_deltaSPHMarrone_pst/`, H/Δx = 40, to t\* = 7.7):
+§5.1.1 (`scripts/old/out_deltaSPHMarrone_pst/`, H/Δx = 40, to t\* = 7.7):
 
 | leg | P1 plateau | P1 1st peak | P2 peak | checks |
 |---|---|---|---|---|
@@ -1767,7 +1826,7 @@ source for violent free-surface / solid-boundary interaction; see
 `datagen/README.md`.
 
 **Item 7 (2026-09-09) — surface probes (b), viscous wiring (c), a real
-bulk-max convergence number (a, partial). All in `scripts/out_deltaSPHMarrone34_item7/`.**
+bulk-max convergence number (a, partial). All in `scripts/old/out_deltaSPHMarrone34_item7/`.**
 
 *(b) Surface pressure probes — DONE.* `dambreak.diagnostics` gained a general
 surface-point probe: `surfacePressureProbes` = `[x, y, nx, ny]` rows (a
@@ -2255,7 +2314,7 @@ at Sun's own compared resolution and at half of it:
 | KE max rel. error | **400** | 0.027 | **0.019** | — |
 
 At the matched resolution all three of Figs. 6, 7 and 9 agree with the paper to
-within the digitisation error of reading them. `scripts/out_deltaPlusTGV/`
+within the digitisation error of reading them. `scripts/old/out_deltaPlusTGV/`
 holds both legs side by side (`*_eighthEq7.npz` are the pre-fix runs) with
 `REPORT.md` and the three-panel figure as the record.
 
@@ -2323,7 +2382,7 @@ sweep reported geometric metrics as their worst value over the run, and on that
 table `tgv-wc` looked like the one case the fix breaks: `pairedFraction`
 0 → 0.146, `voidFraction` 0 → 0.167, `nnDistP01` 0.845 → 0.131. It is the
 opposite. The spike is at **step 0** and heals monotonically; the full-length
-validation runs in `scripts/out_deltaPlusTGV/` — the same runs that match Sun
+validation runs in `scripts/old/out_deltaPlusTGV/` — the same runs that match Sun
 to 3 % — carry the identical `paired = 0.14` first sample and end at
 `paired = 0.0000`, `nnDistP01 = 0.877`, a *better* distribution than the ⅛
 leg's 0.814. A 300-step window caught the transient and nothing else.
@@ -2371,7 +2430,7 @@ the discriminator prefers the Eq. (7) magnitude.
 
 **(2) The free-surface re-sweep — `eq7` is only safe with frozen diffusion.**
 The 300-step smoke was extended to **2500 steps** on the four free-surface
-cases (`scripts/out_deltaPlusShiftSweep_fs/`). `droplet` neutral, `squarePatch`
+cases (`scripts/old/out_deltaPlusShiftSweep_fs/`). `droplet` neutral, `squarePatch`
 clearly better at `eq7` (paired 0.056 → 0.017), `impact` a small regression
 (paired 0.015 → 0.018, `nnP01` 0.39 → 0.35 — the same −4 % the smoke flagged,
 now confirmed as a genuine small cost, not noise). But **`dambreak` at `eq7`
@@ -2583,3 +2642,472 @@ chasing the Lobovský dam break. `PST_ALE_PLAN.md` / `WCSPH_SHIFTING_PLAN.md` ow
 the δ⁺ shifting / δ-ALE work; Part 2 here is an audit of what they landed, not a
 re-do. `DFSPH_IMPROVEMENT_PLAN.md` owns the incompressible wall closure; Part 3's
 `computeMdbcNoPenShift` A/B overlaps its `mdbcNoPenetrationShift` item.
+
+---
+
+## Item 5 — diffSPH parity pass on `sloshingTank`  (2026-09-11)
+
+Comparing this repo's δ⁺-SPH against `~/dev/diffSPH`'s (the notebook
+`examples/weaklyCompressible/16_SloshingTank.ipynb`, which runs its sloshing
+tank cleanly). Step 1 was to remove the *setup* differences so any remaining
+gap is attributable to the solver.
+
+### 5.1 Matched the reference discretisation (done)
+
+| | diffSPH notebook | warpSPH before | warpSPH now |
+|---|---|---|---|
+| `nx` | 200 (dx = 0.0045) | 150 | **200** |
+| `dt` | 1e-4, fixed | back-solved, 2e-4 | **1e-4, fixed** |
+| `c_0` | 20, literal | back-solved from `dt` (11 at nx=225) | **20, literal** |
+| integrator | RK2 | RK2 | **`symplecticEuler`** (13, 2-stage KDK — see 5.3) |
+
+`caseUtils/weaklyCompressible.py:setupTimestep` grew a third route: with
+`soundSpeed` set, **both** `c_0` and `dt` are pinned to what the case asked for,
+no back-solve in either direction (the `machTarget` route and the legacy
+back-solve are untouched, so every other case is unchanged). `dt` is reported
+against the acoustic-CFL step and warned about rather than silently clamped, so
+an over-long step cannot quietly invalidate an A/B.
+
+### 5.2 The mDBC body-velocity path (done)
+
+Two independent holes, both fixed; **numerically a no-op for every case in the
+tree today**, verified by `tests/test_physics.py` (72/72 green):
+
+1. `rigidBody/update.py` only wrote the body's velocity into
+   `particleState.velocities` when `kind == BCType.constant`. A moving
+   `freeSlip` / `noSlip` / `extended` wall therefore had no velocity anywhere in
+   the state. How the wall's motion is imposed on the fluid is the BC's
+   business; how fast the wall moves is not a boundary condition. Now written
+   for every `BCType`. (`drivenSquare` and `movingObstacle` are the only cases
+   with rigid bodies and both are `constant`, hence the no-op.)
+2. `modules/mdbc/velocity.py` read its `u_body` at the **ghost** rows, where
+   nothing writes it, so even a `constant` body degenerated to a stationary
+   wall inside the BC. Both slip conditions are now written on the *relative*
+   velocity `w = Shepard(u_f) - u_body` with the wall's velocity added back:
+   `noSlip -> u_body - w_t`, `freeSlip -> u_body + w_t`. The boundary
+   particle's normal component is now `u_body . n` instead of pinned to 0.
+
+Why it matters beyond advection: a wall moving into the fluid has to enter
+`div(v)` with its own normal velocity, or the density change the wall drives is
+missing while gravity's forcing is not, and the two diverge. diffSPH reaches the
+same place by a different route — it restores `boundaryBodyVelocities` before
+`computeMomentum` (`schemes/deltaSPH.py:169`) rather than folding the body
+velocity into the BC. At `u_body = 0` both new forms reduce **exactly** to what
+this module computed before, so the measured "projects the fluid's normal
+component out rather than reflecting it" deviation (DFSPH Part 9 addendum) is
+untouched and still recorded.
+
+### 5.3 `semiImplicitEuler` (21) integrates density explicitly — use `symplecticEuler` (13)
+
+**There are two Euler-family entries and they are not the same scheme.**
+`IntegrationSchemeType.symplecticEuler` (13, `verlet.py:66`) is the **2-stage
+kick-drift-kick** scheme DualSPHysics runs; `IntegrationSchemeType.
+semiImplicitEuler` (21, `util.py:66`) is a **1-stage** scheme. Only the latter
+has the problem below. `symplecticEuler` advances both `v` and `rho` by
+`dt * k1`, where `k1` is evaluated on the half state `state^n + (dt/2) k0` --
+i.e. explicit midpoint on the `(rho, v)` pair, so the density rate *is*
+staggered against velocity and the acoustic amplification is the benign RK2
+one. That is the scheme this case should use.
+
+#### The `semiImplicitEuler` (21) failure
+
+**`semiImplicitEuler` (21) + the linear density update is unconditionally
+unstable for the WCSPH acoustic mode.** `sloshingTank` at the matched config above
+diverges at **t = 0.041 s (step 410)**, at rest, before any meaningful roll
+(0.018 deg), with `voidFraction` 0.44 and `maxDensity` 7.7e33.
+
+Mechanism, `warpSPHIntegrators/util.py:updateStateSemiImplicitEuler`:
+
+```python
+applyVelocityUpdate(..., explicit_step(dt), semiImplicit=True)   # v from state^n
+applyPositionUpdate(..., semi_implicit_position_step(dt))        # x from v^{n+1}  <- staggered
+applyQuantityUpdate(..., explicit_step(dt))                      # rho from state^n <- NOT staggered
+```
+
+`update_component` (`fields.py:660`) is a plain `rho^n + dt * drhodt^n`; there is
+no hook to re-evaluate a quantity's rate against the updated velocity. So
+position is correctly staggered against velocity — but for WCSPH the stiff
+oscillator is **(rho, v)**, not (x, v): `drho/dt = -rho div(v)` and
+`dv/dt = -grad(p(rho))/rho`. Leaving rho on the old velocity makes the acoustic
+pair plain **explicit Euler**, whose amplification factor is
+`|A| = sqrt(1 + (c k dt)^2) > 1` at every `dt`.
+
+Measured per-step amplification of that mode
+(`scratchpad/` oscillator check, `|A|` and `|A|^400`):
+
+| `omega*dt` | `semiImplicitEuler` (21) | `symplecticEuler` (13) | `rungeKutta2` (1) | `rungeKutta4` (9) | Padé(1,1)/`exp` map |
+|---|---|---|---|---|---|
+| 0.05 | 1.00125 -> **1.65** | 1.0000008 -> 1.00 | 1.0000008 -> 1.00 | 1.0 -> 1.0 | 1.0 -> 1.0 |
+| 0.2 | 1.01980 -> **2551** | 1.0002 -> 1.08 | 1.0002 -> 1.08 | 0.9999996 -> 1.00 | 1.0 -> 1.0 |
+| 0.5 | 1.11803 -> **2.4e19** | 1.0078 -> 22.2 | 1.0078 -> 22.2 | 0.99989 -> 0.96 | 1.0 -> 1.0 |
+
+`symplecticEuler` and `rungeKutta2` coincide because both reduce to explicit
+midpoint on the linearised pair. Reproduce: `scratchpad/acoustic_amplification.py`.
+
+This also explains, retroactively, why the `exp` / Padé density override was
+load-bearing and why removing it (item C) was safe **only** under RK: the
+Padé(1,1) map `(2-eps)/(2+eps)` is the Cayley transform, which has modulus
+**exactly 1** for an imaginary `eps` — it is neutrally stable on the acoustic
+mode by construction. `exp(-eps)` likewise. The linear map `1 - eps` is not.
+Item C's reasoning (single-evaluation, 1st-order-vs-RK-order, `exp` rectifies an
+oscillatory `drhodt` into net density gain) stands for the **RK** case, which is
+what it was measured on; it does not transfer to a single-stage integrator.
+
+**Bisect — the integrator is the sole cause.** Equal physical time (t = 0.15),
+`scratchpad/slosh_bisect.py`:
+
+| config | `rungeKutta2` | `semiImplicitEuler` |
+|---|---|---|
+| nx 150, dt 2e-4, back-solved c_s (**the old shipped default**) | clean | **diverged, step 251** |
+| nx 200, dt 2e-4, back-solved c_s | clean | **diverged, step 253** |
+| nx 200, dt 1e-4, c_s 20 (**matched, 5.1**) | clean | **diverged, step 440** |
+
+So 5.1's discretisation change is exonerated: the *original* configuration also
+diverges under `semiImplicitEuler`, and every configuration runs under RK2.
+`symplecticEuler` (13) was **not** in this first matrix -- that was the error;
+it is covered in the follow-up run (`scratchpad/slosh_bisect2.py`).
+
+**Resolution:** the case uses `symplecticEuler` (13). No solver change needed --
+the 2-stage form already staggers the density rate. `semiImplicitEuler` (21)
+remains unsuitable for any weakly-compressible scheme in this tree and should
+carry a warning at selection time (open, small); the only ways to make *it* work
+would be to stagger the continuity term explicitly (re-evaluate `-rho div(v)` at
+`v^{n+1}` in `finalize`, one extra divergence pass, and `drhodt_diss` would have
+to be split out of `drhodt` so the stabiliser is not also re-evaluated), or to
+restore the Padé/Cayley density map gated on single-stage integrators. Neither
+is needed for this case.
+
+`cases/sloshingTank.py` ships `integrationScheme='symplecticEuler'`;
+`--integrationScheme` (a new `run_sloshingTank.py` flag) selects any other for
+the A/B.
+
+### 5.4 Ghost sampling at nx=200 — clean
+
+`scripts/dump_sloshing_sampling.py --nx 200` (`scratchpad/sloshing_sampling_nx200/`):
+3230/3230 boundary particles carry a non-zero ghost offset (1.00–12.36 dx,
+median 5.00), **0** ghost nodes inside the wall solid. Flat walls mirror
+correctly through all 5 layers. The only artifact is the already-tracked
+`_gridSnapGhostOffsets` **concave-corner collapse** (the "NEXT" item above): at
+each tank corner all 5 layers' nodes fan onto the apex. It was equally present
+in the nx=225 baseline that ran clean, so it is not what 5.3 is about.
+
+### 5.5 The fluid/boundary density step in the field video — **not** mDBC
+
+Reported from the density video: a clear jump from the fluid to the boundary
+rows, present from the start; visually "as if the extrapolation uses half the
+distance, i.e. boundary-to-surface instead of boundary-to-ghost".
+
+**Ruled out — the mDBC operator is exact.** `scratchpad/probe_mdbcDistance.py`
+freezes the real `sloshingTank` configuration, overwrites the fluid density with
+an exact linear field `rho = 1 + a*y`, runs `computeMdbcDensity` once, and grades
+the boundary result against the analytic field. English Eq. (12) is exact on a
+linear field, so any residual is the operator's own:
+
+| boundary row `y/dx` | `\|r_b - r_g\|/dx` | `rho` got | `rho` want | err | implied `lambda` |
+|---|---|---|---|---|---|
+| -0.50 | 1.00 | 1.000114 | 1.000113 | +2e-9 | 1.001 |
+| -1.50 | 3.00 | 1.000338 | 1.000338 | -3e-10 | 1.000 |
+| -2.50 | 5.00 | 1.000563 | 1.000563 | -2e-9 | 1.000 |
+| -3.50 | 7.00 | 1.000787 | 1.000788 | -4e-10 | 1.000 |
+| -4.50 | 9.00 | 1.001012 | 1.001013 | -5e-10 | 1.000 |
+
+`|r_b - r_g|/dx` is 1, 3, 5, 7, 9 — exactly `2 x depth`, the **full** mirror, not
+the boundary-to-surface half; and `lambda = 1.000` at every layer, so the
+extrapolation travels exactly `(r_b - r_g)` with English's sign.
+`scripts/probe_mdbcExtrapolationSign.py` independently confirms the sign
+(`interpolateLiuLiu` returns `+grad`; the assembled path tracks `+ghostOffset`,
+mean|Δ| 6.0e-2 against 6.9e-1 for the flipped form).
+
+**The actual cause is upstream — the fluid's own near-wall density profile.**
+`scratchpad/probe_sloshWallDensity.py`, mid-span flat floor, 3000 steps at rest
+(nx=200, c_s=20, hydrostatic `d(rho)/dx = rho0 g dx / c^2 = 1.104e-4`):
+
+| fluid rows `y/dx` | measured `d(rho)/dx` | x hydrostatic |
+|---|---|---|
+| 0.5 -> 1.5 | 1.80e-05 | **0.16x** |
+| 1.5 -> 2.5 | 1.22e-04 | 1.11x |
+| 2.5 -> 3.5 | 2.34e-04 | **2.12x** |
+| 3.5 -> 4.5 | 1.71e-04 | 1.55x |
+| 4.5 -> 5.5 | 1.07e-04 | 0.97x |
+| 5.5 -> 6.5 | 1.02e-04 | 0.92x |
+
+The profile is only hydrostatic from row ~5 outward; the first four rows are
+badly non-linear. The mDBC ghost node for wall layer `k` sits at `+k dx` —
+inside that anomalous zone — so the MLS measures the locally-wrong gradient and
+continues it linearly over `2 phi`, roughly doubling the error by the time it
+reaches the wall particle. Hence a wall band whose slope is ~2.1x the fluid's
+(measured), and a visible step. The interface step itself is small in the static
+state (+5.3e-5, 2 % of the hydrostatic span); what the video shows is the band,
+plus the dry/near-surface wall reading **exactly** `rho0` (the rest-density
+fallback where the ghost node has no fluid) against a fluid at ~1.003.
+
+**Open — what makes the near-wall fluid profile non-hydrostatic.**
+
+*Not the DDT pair direction.* The obvious suspect was item C's uncommitted
+`OperationDirection.FluidToFluid` restriction on the DDT outer sum (near a wall
+roughly half a particle's stencil *is* boundary, so excluding it removes the
+diffusion where the lattice error is largest). A/B refutes it, and inverts it
+(`scratchpad/probe_nearWallDDT.py`, 3000 steps, same readout):
+
+| fluid rows `y/dx` | `FluidToFluid` (current) | `AllToAll` |
+|---|---|---|
+| 0.5 -> 1.5 | 0.17x | **0.99x** |
+| 1.5 -> 2.5 | 1.10x | 1.72x |
+| 2.5 -> 3.5 | **2.12x** | **2.62x** |
+| 3.5 -> 4.5 | 1.55x | 2.07x |
+| 4.5 -> 5.5 | 0.97x | 1.70x |
+| 5.5 -> 6.5 | 0.93x | 1.62x |
+| 7.5 -> 8.5 | 1.73x | 1.28x |
+| interface step | **+5.3e-5** | +1.13e-4 |
+
+`AllToAll` fixes only the *first* gap and makes every row from 1.5 outward
+worse, doubles the interface step, and is still at 1.28x out at row 8 where
+`FluidToFluid` has converged by row 5. So `FluidToFluid` stays (item C's change
+is not implicated) and the rows 2.5-4.5 anomaly, present in **both**, is
+something else.
+
+*Cause: the delta+ particle shift.* `scratchpad/probe_nearWallShift.py`,
+3000 steps, same readout (`d(rho)/dx` as a multiple of hydrostatic, per fluid
+row gap). All three legs are **pinned** to `symplecticEuler` in the script
+(`INTEGRATOR`, not the case default -- re-run pinned reproduced the original
+numbers to every printed digit, confirming the first run was already on it).
+Comparable to each other, **not** to the DDT / wall-profile tables above, which
+ran under `rungeKutta2`; the anomaly is qualitatively the same in both, so it is
+not integrator-specific:
+
+| row gap start `y/dx` | 0.5 | 1.5 | 2.5 | 3.5 | 4.5 | 5.5 | 6.5 | 7.5 | interface step |
+|---|---|---|---|---|---|---|---|---|---|
+| `michel2022` (default) | 1.39 | 1.60 | **2.33** | **2.11** | 1.15 | 1.07 | 1.46 | 1.80 | +1.19e-4 |
+| **shift OFF** | 0.61 | 0.69 | **0.91** | **0.85** | 0.95 | 1.02 | 1.41 | 1.75 | **+4.8e-5** |
+| shift + `correctdrhodt` | 0.72 | 1.36 | 2.28 | 2.00 | 1.29 | 1.25 | 1.35 | 1.51 | +7.0e-5 |
+
+With the shift off, rows 2.5-5.5 read 0.91 / 0.85 / 0.95 / 1.02 — essentially
+hydrostatic — and the interface step more than halves. With `michel2022` on they
+read 2.33 / 2.11. **The near-wall density anomaly is the particle shift**, not
+the DDT and not mDBC. Sun 2019 Eq. (9)'s volume-consistency term
+(`correctdrhodt`) recovers part of it (first row 1.39 -> 0.72, step 1.19e-4 ->
+7.0e-5) but leaves rows 2.5/3.5 at 2.28 / 2.00, so it is not the whole story.
+
+Not actionable as "turn the shift off": `cases/sloshingTank.py` documents why
+`michel2022` is the shipped default (the `deltaSPH`/`surfaceNormal` shift
+diverges at t=0.68 post-`790a7c7`). The open question is why *this* shift
+formulation drives a one-sided density error next to a wall, and whether the
+free-surface/wall projection is the part at fault.
+
+### 5.6 Three plotting bugs behind the "density field looks wrong" report
+
+None of them are solver bugs; together they made the wetted wall look
+discontinuous from the fluid when the data is continuous. All fixed.
+
+1. **Independent normalisation, shared colormap, one colorbar.** The vispy and
+   pyvista backends called `getBounds` separately on the fluid and on the
+   boundary set, drew both through the same colormap, and labelled the single
+   colorbar with the *fluid's* range only. A dry mDBC wall particle at exactly
+   `rho0` is the minimum of the boundary set, so it saturated one end of the map
+   against a fluid whose own minimum is a different number — a hard edge at the
+   waterline that is not in the data. (`visualize.py`/`update.py`, the
+   matplotlib path, already shared a norm.) Fixed: new
+   `warpSPHPlotting.math.getSharedBounds`, used by both backends' create and
+   update paths, and the colorbar now reports that shared norm.
+2. **`midPoint` silently ignored.** `getBounds` only applies it on the
+   `Symmetric`/`SymmetricLog` branch. Every case pairing `midPoint=1.0` with the
+   default `scaling='Linear'` got a plain min-max stretch wearing a diverging
+   colormap, so "white" landed at the data minimum rather than at `rho0`.
+   `cases/sloshingTank.py`'s density `Field` now passes `scaling='Symmetric'`.
+   **Still open for 7 other cases** that set `midPoint` with default scaling
+   (`tgv`, `kolmogorovIncompressible`, `shearWave`, `staticBlob`, `dambreak`,
+   `impact`, `weaklyCompressible`) — a presentation change, left alone.
+3. **`CenteredNorm(halfrange=maxScale)`** — `halfrange` is a half-*width*, but
+   `maxScale` is `midPoint + max|q - midPoint|`. Correct only for the default
+   `midPoint == 0`, which is why it never surfaced; at `midPoint = 1.0` it made
+   the halfrange 1.003 instead of 0.003, ~340x too wide, collapsing every value
+   onto the colormap midpoint. Fixed to `maxScale - midPoint`. No case in the
+   tree used `Symmetric` before, so this was a no-op on existing output.
+
+Also widened the vispy colorbar labels from `.3g`/`.4g` to `.6g`: at three
+significant figures both ends of `[0.997, 1.003]` render as "1".
+
+Verified end-to-end on `sloshingTank` frame 50: wall band now sits at white
+(`rho0`), wetted floor is continuous red with the fluid, colorbar reads
+`0.994236 .. 1.00576`.
+
+### 5.7 Marrone 3.1 wall boundary condition — the bed was effectively no-slip
+
+Chasing a reported "the front interacts violently with the far wall way too
+early" on `probe_deltaSPHMarrone.py --nx 67 --c0Ratio 40`, visible in every
+scheme/integrator combination.
+
+**What the frames actually show** (RK4, no PST, the *stable* baseline):
+
+| t* | state |
+|---|---|
+| 1.26 | coherent tongue, clean tip |
+| 2.51 | front at ~92 % of tank; last ~30 % of the tongue fragmented into singles |
+| 2.73 | `maxVelocity` spikes to 17.4 m/s = **3.7 x U_max** |
+| 3.14 | run-up jet climbing the far wall **with a gap behind it** -- bulk not arrived |
+| 3.18 | P1 peaks at **P\* = 27.4** (Marrone Fig. 5: ~2-3) |
+| 3.77 | detached cloud of fluid hanging in mid-air near the wall |
+
+So it is not an invisible wall: the *tip* sheds fliers 7-8 dx ahead of the bulk
+front while the tongue is only ~3 dx thick, and those arrive alone, slam, and
+eject the airborne cloud. The RK4 baseline is **stable but not correct** -- the
+density range and `nPenetrating` columns it was being graded on are blind to a
+wall probe reading 10x the reference.
+
+**Root cause found: the tank walls are `BCType.constant`.**
+`caseUtils/weaklyCompressible.py:buildRegions` hardcoded it. `constantVelocity()`
+returns the boundary velocities unchanged and nothing writes them (no rigid
+body), so the wall sits at `v = 0` while `computeVelocityDiffusion` runs
+`AllToAll` -- the artificial-viscosity term therefore drags the fluid against a
+stationary bed. That is an effective **no-slip** wall; Marrone 2011 Sec. 3
+specifies **free slip**. (`probe_deltaSPHMarrone.py`'s own docstring claimed the
+free-slip spec was met "without a slip-mode knob" because no *physical*
+viscosity term is added -- true, and beside the point: the artificial viscosity
+is the one that is on.) Fixed by a new `wallBC` param on `dambreak`, default
+`'constant'` so no recorded run changes.
+
+**Free-slip A/B** (`scratchpad/probe_m31_front.py`, H/dx = 40, RK4, no PST):
+
+| t* | v_front `constant` | v_front `freeSlip` | thick `constant` | thick `freeSlip` | tip lead `constant` | tip lead `freeSlip` |
+|---|---|---|---|---|---|---|
+| 1.60 | 3.44 | **3.88** | 5.4 dx | 4.6 dx | 6.4 dx | 7.6 dx |
+| 2.00 | 3.41 | **4.13** | 3.9 dx | 3.5 dx | 7.7 dx | 9.2 dx |
+| 2.20 | 3.43 | **4.14** | 3.5 dx | 3.0 dx | 7.4 dx | 7.8 dx |
+| 2.40 | 3.37 | **4.04** | 2.8 dx | 3.5 dx | 7.5 dx | 6.1 dx |
+| `pb@front` t*=2.6 / 2.8 | **-0.0137 / -0.0177** | +0.0007 / -0.0004 | | | | |
+
+- **Bed drag was the late-arrival cause.** Free slip takes the front from 3.4 to
+  **4.13 m/s** (Ritter 2 sqrt(gH) = 4.85, Marrone U_max = 4.73) and moves impact
+  from t* ~ 2.8 to ~ 2.6, toward the reference 2.3.
+- **Bed drag was the suction cause.** `pb@front` goes *negative* (-0.014 /
+  -0.018) under the no-slip bed exactly as the front passes -- an attracting
+  wall, which is what pulls a particle into the boundary band and poisons its
+  neighbourhood. Free slip removes it.
+- **Bed drag is NOT the fragmentation cause.** Tongue thickness (3.0-4.6 dx) and
+  tip lead (6-9 dx) are the same either way. **Still open**; remaining
+  candidates are under-resolution at H/dx = 40, the hydrostatic term missing
+  from the mDBC Shepard fallback (5.5), and tensile instability in the sheet.
+
+**Two corrections to earlier readings in this section, both from measurement
+error, both caught by re-measuring:**
+
+1. A first pass reported the front as "30 % slow" against Ritter's 4.85 m/s.
+   Ritter is the ideal inviscid dry-bed front, not what this case should
+   produce: the reference's own t* = 2.3 over the 2.004 m dam-to-wall distance
+   implies ~3.5 m/s. The terminal speed was never the problem; the acceleration
+   phase was.
+2. The first free-slip A/B reported the tongue thickening to 10-14 dx and the
+   tip lead halving, and the front speed *not* moving -- the opposite of the
+   table above on both counts. That run went through the `_ghostBodyVelocity`
+   compounding bug below, i.e. a wall ~3x stiffer than intended. Withdrawn.
+
+### 5.8 mDBC slip conditions — `freeSlip` now matches the published form
+
+`modules/mdbc/velocity.py`. Graded by
+`scripts/probe_boundaryVelocityModes.py --mode verify` as least-squares slopes
+of the boundary velocity against the fluid velocity at the ghost point,
+decomposed on the wall normal:
+
+| BCType | before | after | published |
+|---|---|---|---|
+| `noSlip` | (0, -1) | (0, -1) | (-1, -1) |
+| `freeSlip` | (0, +1) | **(-1, +1)** | (-1, +1) |
+
+`freeSlip` now **reflects** the fluid's normal component instead of projecting
+it out: `u_g = u_body + w_t - w_n`, `w = Shepard(u_f) - u_body`. `noSlip` is
+deliberately left projecting -- `DFSPH_IMPROVEMENT_PLAN.md` Part 9's addendum
+measured the reflecting form as *worse* on the bounded DFSPH case, so that one
+is revisited with that case in hand, not blind.
+
+**Bug found by the grader, introduced in 5.2 and live for several runs:
+`u_body` must come from a rigid body, not from the boundary row.** 5.2 changed
+`_ghostBodyVelocity` to read the *boundary* rows (correct for a real moving
+body, and the point of that fix). But for a wall with no rigid body those rows
+hold **the previous step's BC output**, so the condition compounded on itself:
+`u_g . n = 2(u_body . n) - f . n` with `u_body . n` already `= -f . n` gives
+`-3 f . n`, and the grader measured exactly **-3.0063**. The term had always
+been dead before (it read the ghost rows, which are identically zero), which is
+why the compounding had never surfaced. Now `_ghostBodyVelocity` takes a
+non-zero value **only** for particles owned by a `RigidBody`, zero elsewhere.
+Re-graded: `freeSlip` (-1.0000, +1.0000), `noSlip` (0, -1.0000) unchanged,
+`test_physics` green, and the `constant` front-probe leg reproduces
+bit-for-bit (that path never calls `_ghostBodyVelocity`, which is why 5.3's
+integrator comparison is unaffected).
+
+Lesson for the audit: "no existing case is affected" was argued in 5.2 from
+*which rigid bodies exist*, and never checked what non-rigid-body walls had
+sitting in those rows. The unit grader caught in one run what 72 passing
+physics tests did not.
+
+### 5.9 mDBC no-penetration shift — two fixes, and a characterisation harness
+
+`symplecticEuler` (enum 13) diverged on **both** active cases -- sloshingTank at
+t = 0.727 and Marrone 3.1 at t* = 1.295 with **473** penetrating particles
+against RK4's zero -- while RK2/RK4 ran clean. Ablating
+`computeMdbcNoPenShift` made sloshingTank clean immediately
+(rho [0.9972, 1.009] vs a 1e30 blow-up), which localised it to that term.
+
+**Fix 1 -- stage `dt` -> `config.dt`.** `deltaSPH_step` had
+`dvdt_nopenshift = nopenshift / dt`, where `dt` is the **stage** dt the
+derivative function was called with. `nopenshift` is a *velocity* correction,
+so `/dt` makes an acceleration the integrator multiplies by the step length
+again; with a full step those cancel and the particle gets exactly the intended
+correction. `symplecticEuler` calls the derivative with `dt/2` but updates with
+`dt`, so the correction landed at **2x** in both stages (RK4 is wrong by a
+different factor; a single-evaluation scheme is right by accident). Now divides
+by `config.dt`, the real step length, which is already in scope.
+
+**Fix 2 -- `wp.abs(normDist)` -> signed `normDist`.** DualSPHysics
+(`JSphGpu_ker.cu`) gates on `normdist < 0.75f*norm`, a **signed** test that
+stays true however deep a particle has penetrated. `wp.abs()` turned it into a
+band, so a particle more than 0.75*norm *past* the first boundary row got
+**zero** correction -- the anti-penetration term switched off exactly where
+penetration was worst.
+
+**Characterisation harness: `scripts/probe_nopenShiftResponse.py`.** A single
+fluid particle swept over normal distance (+2 dx to -2 dx) x tangential phase
+(-dx/2 to +dx/2) against a synthetic flat wall, at three velocity directions,
+all in one kernel launch; output as images plus a 1-D normal profile. What the
+term *actually does*, rather than what the branch structure suggests:
+
+- a **hard on/off band**, not a graded ramp: constant `+2` over
+  `n in (-1.17 dx, +0.2 dx]` before Fix 2, extending past `-1.5 dx` after;
+- exactly **zero** for tangential or outward motion (the `vfc < 0` gate is
+  correct);
+- **no tangential-phase dependence** (no lattice artefact);
+- magnitude `+2` for an approach velocity of `-1`, i.e. an elastic reflection --
+  which is what DualSPHysics' `v_new = v_pre + nopenshift` produces, so with
+  Fix 1 the magnitude now matches the reference.
+
+**Verification.** `test_physics` green. sloshingTank t = 1.5: symplecticEuler
+rho [0.9972, 1.009] vmax 0.5904, rungeKutta2 rho [0.9972, 1.009] vmax 0.5917 --
+the two integrators now agree to 3 digits where one previously blew up.
+Marrone 3.1 delta+ symplecticEuler: **full t* = 5.014, rho [0.835, 1.20],
+vmax 29.3, nPen_max 1** (was: disintegrating, vmax 4959, nPen 473).
+
+**Two audit claims retracted** -- both were read off the source and both were
+wrong; the synthetic sweep is what settled them:
+
+1. *"the counter is discarded, so the correction is never averaged"* -- false.
+   The averaging is in the launch kernel
+   (`avg_out[d] = ret_out[d] / ret_ctr[d]`) before the output is written;
+   `return nopenshift[0]` returns the already-averaged value and the counter is
+   a diagnostic. Measured: 3 contributing neighbours at `+2` each, output `+2`.
+2. *"`ratio` is clamped at 1.0 where DualSPHysics has no upper bound"* -- moot.
+   `ratio = |dr/norm|` divides a length by a dimensionless unit-vector
+   component, so it is ~5e-3 and always hits the `0.25` floor; `factor` is the
+   constant `2` in practice. **DualSPHysics has the identical expression**, so
+   the distance-dependent ramp is dead in both -- a shared defect, not a
+   deviation, and worth revisiting on its own.
+
+**Still deviating from the reference, recorded not fixed:** the term is applied
+as an acceleration summed into `dvdt` rather than DualSPHysics' post-integration
+velocity *replacement* (`v_new = v_pre + nopenshift`, displacement recomputed),
+and it is unconditional where DualSPHysics gates it on
+`SlipMode >= SLIP_NoSlip` and makes it opt-in -- i.e. never applies it under
+free slip, which is what Marrone 2011 Sec. 3 specifies.
+
+**Consequence for earlier results in this document:** the RK4 Marrone baselines
+in 5.3 and the free-slip A/B in 5.7 were all measured with the mis-scaled term,
+so they shift under these fixes and need re-running before being compared
+against anything new.

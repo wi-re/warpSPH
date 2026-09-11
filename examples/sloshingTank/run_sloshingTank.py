@@ -55,8 +55,27 @@ def parseArgs(argv):
     p.add_argument('--rollDataFile', type=str, default=None,
                    help='roll-history table (default: bundled lateral_water_1x.txt)')
     p.add_argument('--targetDt', type=float, default=None,
-                   help='WCSPH: acoustic dt target; c_s scales as ~1/targetDt '
-                        '(case default 2e-4 -> c_s ~16.6; diffSPH uses c_s=20)')
+                   help='WCSPH: the timestep itself when --soundSpeed is set '
+                        '(case default 1e-4, the diffSPH value); with '
+                        '--soundSpeed 0 it reverts to the legacy back-solve '
+                        'where c_s scales as ~1/targetDt')
+    p.add_argument('--soundSpeed', type=float, default=None,
+                   help='WCSPH: pin c_0 instead of back-solving it out of '
+                        'targetDt (case default 20, the diffSPH value). Pass 0 '
+                        'to restore the back-solve.')
+    p.add_argument('--integrationScheme', type=str, default=None,
+                   help='override the integrator (case default for wcsph: '
+                        'semiImplicitEuler; rungeKutta2/rungeKutta4 also valid)')
+    p.add_argument('--noPenShift', default=None,
+                   choices=('derivative', 'finalize', 'off'),
+                   help="mDBC no-penetration correction placement: 'derivative' "
+                        "(in dvdt, historical), 'finalize' (once per step, "
+                        "DualSPHysics-style velocity replacement) or 'off'. "
+                        "DELTASPH_VALIDATION_PLAN 5.9")
+    p.add_argument('--wallBC', type=str, default=None,
+                   choices=['freeSlip', 'noSlip', 'extended', 'zeros', 'constant'],
+                   help='wall boundary condition (case default freeSlip; '
+                        'diffSPH mirrors, i.e. noSlip, for its viscous term)')
     p.add_argument('--alpha', type=float, default=None,
                    help='WCSPH artificial-viscosity coefficient (case default 0.02)')
     p.add_argument('--no-shift', dest='shift', action='store_false', default=True,
@@ -112,10 +131,20 @@ def buildSpec(case, args):
     params = {}
     if args.rollDataFile is not None:
         params['rollDataFile'] = os.path.abspath(args.rollDataFile)
+    if args.integrationScheme is not None:
+        overrides['integrationScheme'] = args.integrationScheme
     if args.targetDt is not None:
         params['targetDt'] = args.targetDt
+    if args.soundSpeed is not None:
+        # 0 == "no explicit c_0", which is what setupTimestep reads as the
+        # legacy back-solve (None), so `--soundSpeed 0` is the escape hatch.
+        params['soundSpeed'] = args.soundSpeed if args.soundSpeed > 0 else None
     if args.alpha is not None:
         params['alpha'] = args.alpha
+    if args.wallBC is not None:
+        params['wallBC'] = args.wallBC
+    if args.noPenShift is not None:
+        params['noPenShift'] = args.noPenShift
     if args.scheme == 'wcsph':
         params['shifting'] = args.shift
         params['correctdrhodt'] = args.correctdrhodt

@@ -5,10 +5,11 @@ integrated via `drhodt`, with free-surface fields (`surfaceIndicators`/
 (`ghostIndices`/`ghostOffsets`) that mDBC and `rigidBody/` read and write.
 `finalize` applies delta-SPH particle shifting, then integrates every rigid
 body's pose and reprojects its particles (`rigidBody.integrate`/
-`rigidBody.update`) each step. Its density update computes a Padé-pole-clamped
-`epsilon` (kept well clear of the Padé(1,1) approximant's pole at +-2) but no
-longer uses it -- the update itself switched to an unclamped exponential form,
-so `epsilon` is now dead.
+`rigidBody.update`) each step. Density is left to the generic RK-combined
+continuity update the integrator already assembled before calling this hook;
+`finalize` only restores the non-fluid (mDBC) band's density, which the
+integrator can't see (`DELTASPH_VALIDATION_PLAN.md` item C -- this used to be
+a single-evaluation exponential override instead).
 """
 
 from warpSPHIntegrators import *
@@ -22,6 +23,7 @@ from ..rigidBody.update import updateBodyParticlesWCSPH
 
 from ..modules.shifting.delta import computeDeltaShift
 from ..modules.shifting.wrapper import solveShifting
+from ..modules.mdbc import computeMdbcNoPenShift
 from torch.profiler import profile, record_function, ProfilerActivity
 
 __all__ = ['WeaklyCompressibleState', 'WeaklyCompressibleSystemUpdate', 'WeaklyCompressibleSystem']
@@ -209,16 +211,38 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
 
 
 
-        initialRho = initialState.state.densities
+        # `self.state.densities` already holds the RK-combined continuity update
+        # by this point -- `densities` is declared `integrated('drhodt', ...)`,
+        # so the generic driver's `apply_state_update` -> `apply_quantity_update`
+        # -> `update_component` pass (`finalizeSystem` runs it before calling
+        # this hook) has already summed `rho^n + sum_i(b_i * dt * drhodt_i)` over
+        # every RK stage, the same combination positions/velocities get. Leave
+        # it alone for fluid particles.
+        #
+        # Previously this was overwritten with a single-evaluation exponential
+        # map `rho^n * exp(dt * drhodt_lastStage / rho_lastStage)` -- exact only
+        # for a frozen rate (a symplectic/semi-implicit-Euler shape), not for a
+        # multi-stage RK where combining the stage rates *is* the method: it
+        # used just the *last* stage's rate from the *initial* density, so
+        # density was ~1st order while position/velocity were the integrator's
+        # full order, and the convex `exp` rectifies an oscillatory drhodt into
+        # a net density gain (DELTASPH_VALIDATION_PLAN.md item C / sloshingTank
+        # acoustic ringing). The commented-out Padé(1,1) form below it was
+        # equally a single-evaluation override and was already dead (`epsilon`
+        # computed, never read).
+        #
+        # Non-fluid (boundary/rigid) particles: `enforceUpdates` masks their
+        # `drhodt` to zero, so the generic pass leaves them at rho^n, not at the
+        # mDBC value `deltaSPH_step` computed mid-step. Restore that explicitly.
         midRho = returnValues[-1][1].densities
-        
-        drhodtMid = updateValues[-1].drhodt
-        epsilon = -dt * drhodtMid / midRho
-        epsilon = torch.clamp(epsilon, min=-1.5, max=1.5)  # Pade approximant has a pole at +-2, stay well clear of it
-        # self.state.densities = initialRho * (2 - epsilon) / (2+epsilon)
-        self.state.densities = initialRho * torch.exp(dt * drhodtMid / midRho)  # Use exponential update to avoid negative densities
-
         self.state.densities = torch.where(self.state.kinds != 0, midRho, self.state.densities)
+        # Defensive floor only -- catches an actual sign flip / NaN from a
+        # pathological step, not part of the routine update (normal weakly-
+        # compressible density stays within a few percent of rho0).
+        self.state.densities = torch.nan_to_num(
+            self.state.densities, nan=schemeConfig.fluid.restDensity,
+            posinf=schemeConfig.fluid.restDensity, neginf=schemeConfig.fluid.restDensity
+        ).clamp_min(0.05 * schemeConfig.fluid.restDensity)
 
         if schemeConfig.shiftProperties.active:
             if schemeConfig.shiftProperties.correctdrhodt:
@@ -226,6 +250,29 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
             if schemeConfig.shiftProperties.correctdvdt:
                 self.state.velocities += (dudt + duCross) * dt
             self.state.positions += dx
+
+        # mDBC no-penetration correction, DualSPHysics placement: once per real
+        # step, here with the other post-integration corrections, rather than as
+        # a force re-evaluated at every RK sub-stage (`DELTASPH_VALIDATION_PLAN`
+        # 5.9). `JSphGpuSimple_ker.cu`'s `MDBC2_NoPen` blocks do exactly this --
+        # `v_new = v^n + nopenshift` **replacing** the integrated component, and
+        # the displacement recomputed from it -- so this is a velocity
+        # replacement, not another acceleration summed with pressure and
+        # gravity. Applied per component, only where the correction is non-zero,
+        # and only to fluid particles (the wall band's own motion comes from the
+        # BC machinery).
+        if getattr(schemeConfig, 'mdbcNoPenShiftMode', 'derivative') == 'finalize':
+            with record_function("[warpSPH] - [deltaSPH] - no-pen shift (finalize)"):
+                nopenshift = computeMdbcNoPenShift(
+                    self.state, config, schemeConfig, self.adjacency)
+                active = (nopenshift != 0) & (self.state.kinds == 0).unsqueeze(-1)
+                if bool(active.any()):
+                    vPre = initialState.state.velocities
+                    xPre = initialState.state.positions
+                    vNew = torch.where(active, vPre + nopenshift, self.state.velocities)
+                    self.state.positions = torch.where(
+                        active, xPre + vNew * dt, self.state.positions)
+                    self.state.velocities = vNew
 
         for rigidBody in schemeConfig.rigidBodies:
             rigidBody = integrateRigidBody(rigidBody, 0, 0, dt)

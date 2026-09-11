@@ -36,12 +36,15 @@ from .wp_densityDelta import computeDensityDiffusionDeltaSPH
 
 __all__ = ['computeDensityDiffusion', 'computeScalarFieldDiffusion']
 
-def computeScalarFieldDiffusion(currentState: Any, config: SimulationConfig, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], scheme: DensityDiffusionScheme, gradField: Optional[torch.Tensor] = None, gradFieldL: Optional[torch.Tensor] = None, field: Optional[torch.Tensor] = None) -> torch.Tensor:
+def computeScalarFieldDiffusion(currentState: Any, config: SimulationConfig, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], scheme: DensityDiffusionScheme, gradField: Optional[torch.Tensor] = None, gradFieldL: Optional[torch.Tensor] = None, field: Optional[torch.Tensor] = None, operationMode: OperationDirection = OperationDirection.AllToAll) -> torch.Tensor:
     """The raw (unscaled) delta-SPH diffusion divergence for an arbitrary scalar
     `field` and its gradients. `field=None` diffuses the state's density, i.e.
     reproduces `computeDensityDiffusion` without its prefactor. No
     `schemeConfig`: nothing here is scheme-specific, which is the point -- see
-    the module docstring."""
+    the module docstring.
+
+    `operationMode` defaults to `AllToAll` (unchanged for every caller besides
+    `computeDensityDiffusion`, e.g. ACSPH's pressure smoothing)."""
     with record_function("[warpSPH] - (deltaSPH) - computeScalarFieldDiffusion"):
         return computeDensityDiffusionDeltaSPH(
             currentState,
@@ -49,7 +52,7 @@ def computeScalarFieldDiffusion(currentState: Any, config: SimulationConfig, adj
                 kernel = config.kernel,
                 operation = WarpOperation.Divergence,
                 supportMode = SupportScheme.SuperSymmetric,
-                operationMode = OperationDirection.AllToAll,
+                operationMode = operationMode,
             ),
             domain = config.domain,
             adjacency = adjacency,
@@ -65,9 +68,19 @@ def computeDensityDiffusion(currentState: Any, config: SimulationConfig, schemeC
         delta = schemeConfig.diffusionParams.densityDelta
         xi = sphKernel_xi(config.kernel.value, config.dim)
         drhodt_scaling = delta * currentState.supports / xi * schemeConfig.fluid.fixedSoundSpeed
+        # Fluid-to-fluid only: a boundary neighbour's density is the mDBC
+        # extrapolation, a phase-lagged copy of the fluid's own field, not an
+        # independent measurement. Diffusing a fluid particle toward it is a
+        # delayed self-coupling that can sustain/pump near-wall oscillations
+        # instead of draining them (DELTASPH_VALIDATION_PLAN.md item C).
+        # DualSPHysics's DDT (all variants: DDT_DDT / DDT_DDT2 / DDT_DDT2Full,
+        # JSphCpu.cpp ~L925-939) excludes boundary neighbours from this same
+        # sum entirely. Only this outer pair-sum direction changes here --
+        # `gradRho`/`gradRhoL` (passed in, computed elsewhere) are untouched.
         drhodt_diss = drhodt_scaling * computeScalarFieldDiffusion(
             currentState, config, adjacency,
             schemeConfig.diffusionParams.densityDiffusionTerm,
             gradField = gradRho, gradFieldL = gradRhoL,
+            operationMode = OperationDirection.FluidToFluid,
         )
         return drhodt_diss

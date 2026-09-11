@@ -66,7 +66,7 @@ from ..runner import Case, RunContext, caseMain, registerCase
 from .kolmogorovIncompressible import kolmogorovIncompressibleTimestep
 from .weaklyCompressible import particleDistributionMetrics
 from .plotting import (Field, buildFieldPlotter, openWindow, pumpEvents,
-                       refreshFieldPlotter)
+                       refreshFieldPlotter, _export)
 
 __all__ = ['dambreakCase', 'caseArgs', 'simulationProperties',
            'DAMBREAK_FIELDS', 'DAMBREAK_FIELDS_DENSITY', 'dambreakFields']
@@ -613,8 +613,17 @@ def _figsize(ctx: RunContext):
 
 
 def setupPlot(ctx: RunContext, state):
-    plotter = buildFieldPlotter(ctx, state, dambreakFields(ctx), figsize=_figsize(ctx))
+    # `exportFrame0=False` + a manual export after `openWindow`: the vispy
+    # canvas has not settled to its real physical size until `openWindow`'s
+    # first show()/layout pass, so exporting frame 0 before it (as
+    # `buildFieldPlotter` does by default, for the no-window notebook case)
+    # captured every run's frame 0 at a different resolution than the rest
+    # of the video (measured: 2688x768 vs the steady 1440x768) -- the video's
+    # first frame rendered squished/wrong-aspect relative to every later one.
+    plotter = buildFieldPlotter(ctx, state, dambreakFields(ctx), figsize=_figsize(ctx),
+                                exportFrame0=False)
     openWindow(ctx, plotter)
+    _export(ctx, plotter, 0, dpi=300)
     return plotter
 
 
@@ -680,6 +689,15 @@ dambreakCase = registerCase(Case(
     params=dict(
         W=4.0,
         band=5,
+        # Tank wall boundary condition. `'constant'` is the historical default
+        # and is kept so no existing run changes -- but note what it means: the
+        # wall particles sit at v = 0 (nothing writes them; there is no rigid
+        # body) and `computeVelocityDiffusion` runs `AllToAll`, so the
+        # artificial-viscosity term drags the fluid against a stationary wall.
+        # That is an effective NO-slip bed, while Marrone 2011 Sec. 3 specifies
+        # FREE slip. `'freeSlip'` matches the fluid tangentially and exerts no
+        # such drag. See `DELTASPH_VALIDATION_PLAN.md` 5.7.
+        wallBC='constant',
         targetDt=0.0005,
         # Downstream-wall pressure sensors (`ACSPH_PLAN.md` §4.5): heights above
         # the tank bed, in the case's length unit. Empty -> no probing. See

@@ -695,8 +695,19 @@ def buildRegions(config, schemeConfig, simSetup, args, domain, interiorDomain, o
         invert=False,
     )
 
+    # Wall boundary condition. `BCType.constant` (the default, so nothing
+    # existing changes) leaves the wall particles at whatever velocity they
+    # hold -- zero, since no rigid body writes them -- which the AllToAll
+    # artificial-viscosity term then drags the fluid against. That is an
+    # effective NO-slip wall, while Marrone 2011 Sec. 3 (and most dam-break
+    # references) specify FREE slip; `--wallBC freeSlip` selects the
+    # tangential-matching condition that exerts no spurious bed drag.
+    # `DELTASPH_VALIDATION_PLAN.md` 5.7.
+    wallBC = getattr(args, 'wallBC', None) or 'constant'
+    if isinstance(wallBC, str):
+        wallBC = BCType[wallBC]
     regions = [
-        buildRegion(config, schemeConfig, domain_sdf, RegionType.Boundary, initialConditions={}, kind=BCType.constant),
+        buildRegion(config, schemeConfig, domain_sdf, RegionType.Boundary, initialConditions={}, kind=wallBC),
         buildRegion(config, schemeConfig, box_sdf, RegionType.Fluid, initialConditions={}),
     ]
 

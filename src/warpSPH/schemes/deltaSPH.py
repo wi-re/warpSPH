@@ -208,8 +208,23 @@ def deltaSPH_step(
     # Revert boundary velocity
     # with TimedBlock('compute mDBC no-pen shift', use_cuda=True, device=config.device) as tb_nopenshift:
     with record_function("[warpSPH] - [deltaSPH - 16] - compute mDBC no-pen shift"):
-        nopenshift = computeMdbcNoPenShift(currentState, config, schemeConfig, adjacency)
-        dvdt_nopenshift = nopenshift / dt
+        # Only the `'derivative'` placement contributes here; `'finalize'`
+        # applies the correction once per step in
+        # `WeaklyCompressibleSystem.finalize` instead (DualSPHysics' structure),
+        # and `'off'` drops it. `DELTASPH_VALIDATION_PLAN.md` 5.9.
+        if getattr(schemeConfig, 'mdbcNoPenShiftMode', 'derivative') == 'derivative':
+            nopenshift = computeMdbcNoPenShift(currentState, config, schemeConfig, adjacency)
+            # `config.dt`, the real step length -- NOT the stage `dt` this
+            # function was called with. `nopenshift` is a *velocity*
+            # correction, so `/dt` makes it an acceleration the integrator
+            # multiplies by the step length again; with the full step those
+            # cancel and the particle gets exactly the intended correction,
+            # with a stage `dt` they do not. `symplecticEuler` calls the
+            # derivative with `dt/2` but updates with `dt`, so the correction
+            # landed at **2x** in every stage.
+            dvdt_nopenshift = nopenshift / config.dt
+        else:
+            dvdt_nopenshift = torch.zeros_like(currentState.velocities)
     # currentState.velocities = currentVelocities
 
     # 16. build update

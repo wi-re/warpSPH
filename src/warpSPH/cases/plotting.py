@@ -28,7 +28,9 @@ the figure for it. ``--no-show`` turns the window off and keeps the frames.
 
 from __future__ import annotations
 
+import datetime as _dt
 import os
+import subprocess as _sp
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -124,14 +126,79 @@ def _plotOptions(field: Field, markerSize: float):
     )
 
 
+#: Wall-clock time this process started, stamped into every figure title so a
+#: frame on disk can be traced back to the run that produced it.
+_LAUNCH_TIME = _dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _gitHash() -> str:
+    """`git describe`-style short hash of the working tree, or `'nogit'`.
+
+    Resolved once per process and cached -- the title is rebuilt every frame and
+    a `subprocess` per frame would dominate the render. A dirty tree gets a
+    `-dirty` suffix, because a frame produced from uncommitted edits is not
+    reproducible from the hash alone and the title should say so.
+    """
+    global _GIT_HASH
+    if _GIT_HASH is not None:
+        return _GIT_HASH
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))))
+    try:
+        head = _sp.run(['git', '-C', repo, 'rev-parse', '--short', 'HEAD'],
+                       capture_output=True, text=True, timeout=5)
+        if head.returncode != 0:
+            _GIT_HASH = 'nogit'
+            return _GIT_HASH
+        h = head.stdout.strip()
+        dirty = _sp.run(['git', '-C', repo, 'status', '--porcelain'],
+                        capture_output=True, text=True, timeout=5)
+        if dirty.returncode == 0 and dirty.stdout.strip():
+            h += '-dirty'
+        _GIT_HASH = h
+    except Exception:
+        _GIT_HASH = 'nogit'
+    return _GIT_HASH
+
+
+_GIT_HASH: Optional[str] = None
+
+
+def _provenance(ctx: RunContext) -> str:
+    """The static half of the title: what was run, with what, when, from which
+    commit. Cached per `RunContext` -- none of it changes during a run."""
+    cached = ctx.scratch.get('_titleProvenance') if hasattr(ctx, 'scratch') else None
+    if cached is not None:
+        return cached
+    spec = ctx.spec
+    kernel = getattr(ctx.config, 'kernel', None)
+    kernelName = getattr(kernel, 'name', None) or str(spec.kernel)
+    bits = [f'scheme {spec.scheme}',
+            f'integrator {spec.integrationScheme}',
+            f'kernel {kernelName}',
+            f'launched {_LAUNCH_TIME}',
+            f'git {_gitHash()}']
+    text = ' | '.join(bits)
+    if hasattr(ctx, 'scratch'):
+        ctx.scratch['_titleProvenance'] = text
+    return text
+
+
 def figureTitle(ctx: RunContext, state, row: Optional[Dict[str, float]] = None) -> str:
-    """The `t = ..., dt = ..., ptcls = ...` banner every notebook wrote."""
+    """Two-line banner: the live `t / dt / ptcls` state over a provenance line.
+
+    The second line (scheme, time integrator, kernel, launch time, git hash)
+    exists so a frame or a video answers "what produced this?" on its own. Runs
+    of the same case differing only in integrator or scheme were otherwise
+    indistinguishable once the PNG left its directory -- which is exactly the
+    comparison this repo's validation work spends its time on.
+    """
     parts = [f'{ctx.case.name}  t = {float(state.t):.4g}',
              f'dt = {float(ctx.config.dt):.3g}',
              f'ptcls = {len(state.state.positions)}']
     if row:
         parts += [f'{k} = {v:.4g}' for k, v in row.items()]
-    return ' | '.join(parts)
+    return ' | '.join(parts) + '\n' + _provenance(ctx)
 
 
 def _mosaicKeys(fields: Sequence[Field]) -> List[str]:
@@ -139,12 +206,23 @@ def _mosaicKeys(fields: Sequence[Field]) -> List[str]:
 
 
 def buildFieldPlotter(ctx: RunContext, state, fields: Sequence[Field],
-                      figsize: Tuple[float, float] = (11, 5), dpi: int = 300):
+                      figsize: Tuple[float, float] = (11, 5), dpi: int = 300,
+                      exportFrame0: bool = True):
     """Build the `fields` plotter and export its frame 0 -- no window calls.
 
     This is `particlePlot`'s `setupPlot` minus `openWindow`; a notebook calls
     it directly instead of a case's `setupPlot` hook, the same reason
     `profilePlot` exports its `draw`.
+
+    `exportFrame0=False` skips the export here -- for a caller that is about
+    to call `openWindow` on the returned plotter before exporting frame 0
+    itself (`particlePlot`, `dambreak.setupPlot`). The vispy canvas has not
+    settled to its real physical size until `openWindow` runs (the first
+    `show()`/layout pass resizes it), so exporting here unconditionally
+    captured frame 0 at a *different* resolution than every later frame
+    (measured: 2688x768 vs the run's steady 1440x768) -- a real, if cosmetic,
+    per-run glitch: the exported video's first frame renders squished/at the
+    wrong aspect relative to the rest.
     """
     keys = _mosaicKeys(fields)
     markerSize = ctx.param('markerSize', 2)
@@ -159,7 +237,8 @@ def buildFieldPlotter(ctx: RunContext, state, fields: Sequence[Field],
         figsize=figsize,
         backendOptions=getattr(ctx.spec, 'plotBackendOptions', None),
     )
-    _export(ctx, plotter, 0, dpi)
+    if exportFrame0:
+        _export(ctx, plotter, 0, dpi)
     return plotter
 
 
@@ -187,8 +266,9 @@ def particlePlot(fields: Sequence[Field], figsize: Tuple[float, float] = (11, 5)
     """
 
     def setupPlot(ctx: RunContext, state):
-        plotter = buildFieldPlotter(ctx, state, fields, figsize, dpi)
+        plotter = buildFieldPlotter(ctx, state, fields, figsize, dpi, exportFrame0=False)
         openWindow(ctx, plotter)
+        _export(ctx, plotter, 0, dpi)
         return plotter
 
     def updatePlot(ctx: RunContext, state, plotter, step: int) -> None:

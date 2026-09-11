@@ -294,7 +294,13 @@ def computeMdbcNoPenShift_Func_i(
         tempCtr = zero_like_warp(outCtr)
         if w_ij > scalar_t(0.0):
             condition_a = r_ij < scalar_t(1.25) * dp_i
-            condition_b = wp.abs(normDist) < scalar_t(0.75) * norm_j and norm_j < scalar_t(1.75) * dp_i
+            # SIGNED, matching DualSPHysics `normdist < 0.75f*norm`. With
+            # `wp.abs()` here the test also rejects particles that have
+            # penetrated *deeper* than 0.75*norm past the first boundary row,
+            # so the anti-penetration correction switched off exactly where the
+            # penetration was worst -- measured as a hard cutoff at
+            # n = -1.17 dx by `scripts/probe_nopenShiftResponse.py`.
+            condition_b = normDist < scalar_t(0.75) * norm_j and norm_j < scalar_t(1.75) * dp_i
             condition_c = wp.dot(vel_i - vel_j, normal_j) < 0
 
             condition_ab = condition_a and condition_b

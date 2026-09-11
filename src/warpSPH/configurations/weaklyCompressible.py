@@ -81,6 +81,25 @@ class WeaklyCompressibleSPHConfig:
     dt_acousticConstraint: bool = field(default=True, metadata={'description': 'Whether to apply acoustic constraint in timestep computation'})
     pressureForceTerm: PressureForceScheme = field(default=PressureForceScheme.Antuono, metadata={'description': 'Pressure force term to use'})
 
+    #: Where (and whether) the mDBC no-penetration correction is applied.
+    #:
+    #: * ``'derivative'`` -- the historical placement: `deltaSPH_step` folds
+    #:   `nopenshift / config.dt` into `dvdt` alongside pressure/gravity/
+    #:   viscosity, so it is re-evaluated at every RK sub-stage and goes
+    #:   through the stage weighting.
+    #: * ``'finalize'`` -- DualSPHysics' placement: applied **once per step**
+    #:   in `WeaklyCompressibleSystem.finalize`, after the particle shift,
+    #:   as a post-integration *velocity replacement*
+    #:   (`v = v^n + nopenshift`, displacement recomputed from it) rather than
+    #:   a force. See `JSphGpuSimple_ker.cu`'s `MDBC2_NoPen` blocks.
+    #: * ``'off'`` -- not applied at all. DualSPHysics itself gates the term on
+    #:   `SlipMode >= SLIP_NoSlip` and makes it opt-in, i.e. it is **never**
+    #:   applied under free slip -- which is what Marrone 2011 Sec. 3
+    #:   specifies. diffSPH disables its equivalent outright (`/ dt * 0`).
+    #:
+    #: `DELTASPH_VALIDATION_PLAN.md` 5.9.
+    mdbcNoPenShiftMode: str = field(default='derivative', metadata={'description': "Where the mDBC no-penetration correction is applied: 'derivative' (in dvdt, historical), 'finalize' (once per step, DualSPHysics-style velocity replacement), or 'off'"})
+
     shiftProperties: ShiftProperties = field(default_factory=buildDefaultShiftProperties, metadata={'description': 'Properties for the delta-SPH shift'})
 
     regions: List[ParticleRegion] = field(default_factory=list, metadata={'description': 'List of particle regions in the simulation'})

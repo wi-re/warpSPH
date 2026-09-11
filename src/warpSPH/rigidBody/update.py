@@ -1,8 +1,9 @@
 """Applies a `RigidBody`'s current transform to its owning particle state:
 moves the body's own and its ghost particles' positions via
 `transformation.getTransformationMatrix`, derives their rigid-body velocity
-from angular velocity about the center of mass (only written into
-`particleState.velocities` when the body's `kind` is `BCType.constant`), and
+from angular velocity about the center of mass (written into
+`particleState.velocities` for every `BCType` -- `modules/mdbc/velocity.py`
+reads those rows as its `u_body` basis), and
 rewrites the boundary/ghost offset pair to match the new geometry. Called
 every step from `systems/weaklyCompressible.py`/`systems/incompressible.py`'s
 `finalize`, right after `rigidBody.integrate.integrateRigidBody` advances the
@@ -47,13 +48,20 @@ def updateBodyParticlesWCSPH(particleState, rigidBody: RigidBody):
     updatedPositions[rigidBody.particleIndices] = particlePositions
     updatedPositions[rigidBody.ghostParticleIndices] = ghostParticlePositions
 
+    # The body's own kinematics, written for *every* `BCType`. This used to be
+    # gated on `kind == BCType.constant`, which left a moving `freeSlip` /
+    # `noSlip` / `extended` wall with no velocity anywhere in the state -- and
+    # `modules/mdbc/velocity.py` reads exactly these rows as its `u_body`
+    # basis, so those walls silently behaved as stationary ones in both the BC
+    # and, through it, the continuity equation. How the wall's motion is
+    # imposed on the *fluid* is the BC's business; how fast the wall itself
+    # moves is not a boundary condition, it is the rigid body's state.
+    # No-op for every case in the tree today: `drivenSquare` and
+    # `movingObstacle` are the only cases with rigid bodies and both are
+    # `BCType.constant`.
     updatedVelocities = particleState.velocities.clone()
-    if rigidBody.kind == BCType.constant:
-        # print('updating velocities')
-        # print(particleVelocities)
-        updatedVelocities[rigidBody.particleIndices] = particleVelocities
-        updatedVelocities[rigidBody.ghostParticleIndices] = particleVelocities
-        # print(f'updated velocities to {particleVelocities[0]}')
+    updatedVelocities[rigidBody.particleIndices] = particleVelocities
+    updatedVelocities[rigidBody.ghostParticleIndices] = particleVelocities
 
     updatedOffsets = particleState.ghostOffsets.clone()
     updatedOffsets[rigidBody.particleIndices] = offsets

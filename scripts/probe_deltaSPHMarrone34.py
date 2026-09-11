@@ -159,7 +159,8 @@ def _params(scheme, cornerOnly=False, shifting='off', Re=None):
 
 
 def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme,
-            cornerOnly=False, shifting='off', Re=None, plotBackend=None):
+            cornerOnly=False, shifting='off', Re=None, plotBackend=None,
+            integrationScheme=None, noPenShift=None, wallBC=None):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -178,14 +179,21 @@ def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme,
     tag = (f'{scheme}_nx{nx}_c{c0Ratio:g}'
            + ('_cornerOnly' if cornerOnly else '')
            + ('' if shifting == 'off' else f'_pst-{shifting}')
-           + ('' if not Re else f'_Re{Re:g}'))
+           + ('' if not Re else f'_Re{Re:g}')
+           + (f'_{integrationScheme}' if integrationScheme else '')
+           + (f'_nopen-{noPenShift}' if noPenShift else '')
+           + (f'_wall-{wallBC}' if wallBC else ''))
     runRoot = os.path.join(out, tag + '_run')
 
     params = _params(scheme, cornerOnly=cornerOnly, shifting=shifting, Re=Re)
     params['machTarget'] = machTarget
+    if wallBC:
+        params['wallBC'] = wallBC
 
     kw = dict(scheme=scheme, L=TANK_L, nx=nx, tLimit=tLimit,
               quiet=True, store=False, progress=True, params=params)
+    if integrationScheme:
+        kw['integrationScheme'] = integrationScheme
     if video:
         # Unset backend -> the runner picks vispy (headless EGL) for 2D, which
         # renders large particle counts far faster than matplotlib Agg (the
@@ -197,6 +205,12 @@ def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme,
 
     print(f'[{tag}] H/dx={H / (TANK_L / nx):.1f}  c0={c0Ratio:g}sqrt(gH)  '
           f'-> t={tLimit:.3f}s (t*={tStar:g}) ...', flush=True)
+    if noPenShift:
+        _prevCfg = dambreakCase.configureScheme
+        def _cfg(ctx, _m=noPenShift, _p=_prevCfg):
+            _p(ctx); ctx.schemeConfig.mdbcNoPenShiftMode = _m
+        dambreakCase.configureScheme = _cfg
+
     r = run(dambreakCase, **kw)
 
     rows = [x for x in r.trajectory if x.get('step', -2) >= -1]
@@ -647,6 +661,18 @@ def main(argv=None):
     ap.add_argument('--report', action='store_true')
     ap.add_argument('--traceFigure', action='store_true',
                     help='just the clean 3x3 of the P1-P9 surface pressure traces')
+    ap.add_argument('--noPenShift', default=None,
+                    choices=('derivative', 'finalize', 'off'),
+                    help="mDBC no-penetration correction placement: 'derivative' (in dvdt, historical), 'finalize' (once per step, DualSPHysics-style velocity replacement) or 'off'. DualSPHysics gates this term on SlipMode>=NoSlip, i.e. never applies it under free slip -- which is what Marrone 2011 Sec. 3 specifies. DELTASPH_VALIDATION_PLAN 5.9.")
+    ap.add_argument('--wallBC', default=None,
+                    choices=('constant', 'freeSlip', 'noSlip', 'extended', 'zeros'),
+                    help="tank wall boundary condition. Marrone 2011 Sec. 3 specifies FREE SLIP; the case default 'constant' leaves the wall at v=0 while the AllToAll artificial viscosity drags against it, i.e. an effective no-slip bed. DELTASPH_VALIDATION_PLAN 5.7.")
+    ap.add_argument('--integrationScheme', default=None,
+                    help="override the case's integrator (default rungeKutta4). "
+                         "'symplecticEuler' is the 2-stage kick-drift-kick scheme "
+                         "DualSPHysics runs -- NOT 'semiImplicitEuler', which "
+                         "integrates density explicitly and is unstable for WCSPH "
+                         "(DELTASPH_VALIDATION_PLAN.md 5.3).")
     args = ap.parse_args(argv)
 
     if args.traceFigure:
@@ -657,7 +683,7 @@ def main(argv=None):
         _initdump(args.nx, args.out, args.cornerOnly); return
     _runOne(args.nx, args.c0Ratio, args.tStar, args.out, args.video,
             args.plotInterval, args.scheme, args.cornerOnly, args.shifting, args.Re,
-            args.plotBackend)
+            args.plotBackend, args.integrationScheme, args.noPenShift, args.wallBC)
 
 
 if __name__ == '__main__':

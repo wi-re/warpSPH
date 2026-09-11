@@ -135,7 +135,9 @@ ACCEPT = dict(
 def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
             plotInterval: int, kernel: str = None, freezeDiffusion: bool = None,
             scheme: str = 'sun2017DeltaSPH', shifting: str = 'default',
-            plotBackend: str = None, cflFactor: float = None):
+            plotBackend: str = None, cflFactor: float = None,
+            integrationScheme: str = None, noPenShift: str = None,
+            wallBC: str = None):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -165,7 +167,10 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
     tag = (f'{scheme}_nx{nx}_c{c0Ratio:g}' + (f'_{kernel}' if kernel else '')
           + ('_forceFreeze' if freezeDiffusion is True else '')
           + ('_forceNoFreeze' if freezeDiffusion is False else '')
-          + ('' if shifting == 'default' else f'_pst-{shifting}'))
+          + ('' if shifting == 'default' else f'_pst-{shifting}')
+          + (f'_{integrationScheme}' if integrationScheme else '')
+          + (f'_nopen-{noPenShift}' if noPenShift else '')
+          + (f'_wall-{wallBC}' if wallBC else ''))
     runRoot = os.path.join(out, tag + '_run')
 
     # Marrone reports each signal area-integrated over a phi = 90 mm probe disc
@@ -188,6 +193,8 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
         # own default leaves the PST ON (`DELTASPH_VALIDATION_PLAN.md` 5.1.1).
         shifting=None if shifting == 'default' else (shifting != 'off'),
     )
+    if wallBC:
+        params['wallBC'] = wallBC
 
     kw = dict(
         scheme=scheme, L=TANK_L, nx=nx, tLimit=tLimit,
@@ -195,6 +202,8 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
     )
     if kernel:
         kw['kernel'] = kernel
+    if integrationScheme:
+        kw['integrationScheme'] = integrationScheme
     if cflFactor is not None:
         # Scales the acoustic-CFL term of the Sun Eq. (5) adaptive dt
         # (`computeTimestep`: `dt_c = cflFactor * h / (c0 * kernelScale)`), the
@@ -213,6 +222,12 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
 
     print(f'[{tag}] running to t={tLimit:.3f}s  (t* ~ {tLimit * (G / H) ** 0.5:.2f}) ...',
           flush=True)
+    if noPenShift:
+        _prevCfg = dambreakCase.configureScheme
+        def _cfg(ctx, _m=noPenShift, _p=_prevCfg):
+            _p(ctx); ctx.schemeConfig.mdbcNoPenShiftMode = _m
+        dambreakCase.configureScheme = _cfg
+
     r = run(dambreakCase, **kw)
 
     rows = [x for x in r.trajectory if x.get('step', -2) >= -1]
@@ -687,6 +702,19 @@ def main():
                          "case has therefore always run delta+-SPH (Sec. 5.1.1). "
                          "'default' preserves that, so previously-recorded runs "
                          "stay reproducible; 'on' forces it explicitly.")
+    ap.add_argument('--integrationScheme', default=None,
+                    help="override the case's integrator (default rungeKutta4). "
+                         "'symplecticEuler' is the 2-stage kick-drift-kick scheme "
+                         "DualSPHysics runs -- note this is NOT "
+                         "'semiImplicitEuler', which integrates density "
+                         "explicitly and is unstable for WCSPH "
+                         "(DELTASPH_VALIDATION_PLAN.md 5.3).")
+    ap.add_argument('--noPenShift', default=None,
+                    choices=('derivative', 'finalize', 'off'),
+                    help="mDBC no-penetration correction placement: 'derivative' (in dvdt, historical), 'finalize' (once per step, DualSPHysics-style velocity replacement) or 'off'. DualSPHysics gates this term on SlipMode>=NoSlip, i.e. never applies it under free slip -- which is what Marrone 2011 Sec. 3 specifies. DELTASPH_VALIDATION_PLAN 5.9.")
+    ap.add_argument('--wallBC', default=None,
+                    choices=('constant', 'freeSlip', 'noSlip', 'extended', 'zeros'),
+                    help="tank wall boundary condition. Marrone 2011 Sec. 3 specifies FREE SLIP; the case default 'constant' leaves the wall at v=0 while the AllToAll artificial viscosity drags against it, i.e. an effective no-slip bed. DELTASPH_VALIDATION_PLAN 5.7.")
     ap.add_argument('--report', action='store_true',
                     help='(re)build plots + REPORT.md from existing .npz runs')
     args = ap.parse_args()
@@ -696,7 +724,8 @@ def main():
         return
     _runOne(args.nx, args.c0Ratio, args.tLimit, args.out, args.video,
             args.plotInterval, args.kernel, args.freezeDiffusion, args.scheme,
-            args.shifting, args.plotBackend, args.cflFactor)
+            args.shifting, args.plotBackend, args.cflFactor,
+            args.integrationScheme, args.noPenShift, args.wallBC)
 
 
 if __name__ == '__main__':

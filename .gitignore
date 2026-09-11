@@ -241,3 +241,10 @@ results/
 # is regenerable from its script; they only grow. The scripts stay tracked.
 /scripts/out_*/
 /scripts/_old_*/
+# Archived probe outputs moved out of scripts/ so the live runs are visible
+# (DELTASPH_VALIDATION_PLAN.md 5.7); ~34 GB of PNG frames and .npz.
+/scripts/old/
+
+# scratchpad/: the diagnostic probe scripts ARE tracked (several are cited by
+# DELTASPH_VALIDATION_PLAN.md), their output directories are not.
+/scratchpad/*/

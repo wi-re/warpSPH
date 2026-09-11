@@ -23,6 +23,7 @@ from ..configurations.moduleConfigurations.gravity import GravityType
 from ..configurations.region import BCType, RegionType
 from ..initializers import initializeWeaklyCompressibleSimulation
 from ..modules import setupWeaklyCompressibleTimestep
+from warpSPHCore import sphKernelScale
 from ..regions import buildRegion, filterRegion, sampleDomainSDF
 from ..runner import RunContext, resolveEnum
 from ..utils import buildDomainDescription
@@ -431,13 +432,21 @@ def meanFlowForcingBC(fluidSdf: Callable, target: float, tau: float) -> Boundary
 def setupTimestep(ctx: RunContext, system) -> None:
     """Pick the sound speed and `dt` together.
 
-    Two routes, the same two `setupWeaklyCompressibleTimestep` offers:
+    Three routes:
 
+    * `soundSpeed` set -- **both** `c0` and `dt` are pinned to what the case
+      asked for (`soundSpeed`, `targetDt`), with no back-solve in either
+      direction. The one route that lets `c0` and `dt` be chosen independently,
+      which is how the diffSPH reference notebooks are written (`16_Sloshing
+      Tank`: `c_s = 20`, `dt = 1e-4`, where the acoustic CFL would have allowed
+      a larger step). `dt` is *not* clamped to the acoustic CFL here -- it is
+      reported against it instead, so an over-long step shows up as a warning
+      rather than being silently changed out from under an A/B.
     * `machTarget` set (with `referenceVelocity` as `U_max`) -- **Sun et al.
       2017 Eq. (2)**, `c0 = U_max / machTarget`, and `dt` follows from the
       acoustic CFL. This is the physically-scaled route: the run stays at the
       Mach number it was asked for at every resolution.
-    * `machTarget` unset (the default, so every existing case is unchanged) --
+    * neither set (the default, so every existing case is unchanged) --
       the legacy back-solve: fix `targetDt` and invert `c0` out of the acoustic
       CFL, which makes `c0 ~ 1/dx` and the Mach number a function of `nx`.
 
@@ -445,6 +454,23 @@ def setupTimestep(ctx: RunContext, system) -> None:
     since `DELTASPH_VALIDATION_PLAN.md` Part 6 step 2; this is the same wiring
     in the shared block, so any case that declares the two params gets it.
     """
+    soundSpeed = ctx.param('soundSpeed', None)
+    if soundSpeed is not None:
+        c0 = float(soundSpeed)
+        dt = float(ctx.param('targetDt'))
+        ctx.schemeConfig.fluid.fixedSoundSpeed = c0
+        ctx.config.dt = dt
+        h = float(system.state.supports.min())
+        kernelScale = float(sphKernelScale(ctx.config.kernel.value, ctx.config.dim))
+        dtAcoustic = float(ctx.config.cflFactor) * h / (c0 * kernelScale)
+        if ctx.spec.verbose:
+            print(f'Fixed sound speed: c0 = {c0:.4g}, dt = {dt:.4g} '
+                  f'(acoustic-CFL dt = {dtAcoustic:.4g}, ratio {dt / dtAcoustic:.3g})')
+        if dt > dtAcoustic:
+            print(f'Warning: dt ({dt:.4g}) exceeds the acoustic-CFL step '
+                  f'({dtAcoustic:.4g}) at c0 = {c0:.4g}. Lower targetDt or c0.')
+        return
+
     machTarget = ctx.param('machTarget', None)
     if machTarget is not None:
         ctx.schemeConfig.fluid.fixedSoundSpeed, ctx.config.dt = setupWeaklyCompressibleTimestep(
