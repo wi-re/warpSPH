@@ -57,7 +57,7 @@ and had to be identified from their front matter alone.
 
 ## What is here
 
-132 documents. The first 55 are the curated core — every row annotated for what
+133 documents. The first 56 are the curated core — every row annotated for what
 it unblocks, and every row abstracted in `ABSTRACTS.md` **except `roe1986`**,
 which carries no abstract at all (Annual Reviews articles of that vintage print
 none; OpenAlex has one attached to the DOI, but it belongs to a different
@@ -74,7 +74,9 @@ were added to the core on 2026-09-03 for
 `docs/historic_plans/WCSPH_SHIFTING_PLAN.md`. The eight `[AC]` rows arrived on
 2026-09-05 for `ACSPH_PLAN.md`; the eight `[PST]` rows the same day for
 `PST_ALE_PLAN.md` — `antuono2021` was found already on disk, unclaimed by any
-manifest row, by `scripts/check_literature.py`.)
+manifest row, by `scripts/check_literature.py`. `sun2018` was added to the core
+on 2026-09-12, supplied by the user for `DELTASPH_VALIDATION_PLAN.md`'s
+Tensile Instability Control / `PressureForceScheme.Antuono` investigation.)
 
 `venue` is the **published** venue, which for an author's-version or preprint
 copy is not always what that copy's own front page says. Full bibliographic
@@ -124,6 +126,7 @@ detail is in `references.bib`; the abstract of every core row is in
 | — | `bender2026` | `bender2026_primal-sph-solver.pdf` | CGF 2026 | A primal (not dual) pressure solver: stable to 1:1000 density ratios, strongly coupled to non-pressure forces. |
 | — | `adami2013` | `adami2013_transport-velocity.pdf` | J. Comput. Phys. 241 2013 | Transport velocity. Closes plan 5 Q7 (background pressure). |
 | — | `sun2017` | `sun2017_delta-plus-sph-model.pdf` | Comput. Methods Appl. Mech. Engrg. 315 2017 | The δ⁺-SPH origin paper: δ-SPH diffusion + PST together. Source of `delta.py`'s shift form, `wp_deltaShift`'s tensile term, and the free-surface `n`-nulling `surfaceNormal` extends. |
+| — | `sun2018` | `sun2018_multi-resolution-delta-plus-sph-tensile-instability-control.pdf` | Comput. Phys. Commun. 224 2018 | The Tensile Instability Control (TIC) paper: Eq. (9) switches the pressure-gradient pair term between `(p_j+p_i)` and `(p_j-p_i)` conditioned only on the *query* particle (`p_i >= 0` or `i` in the free-surface region), never on the neighbour's pressure. `modules/pressure/wp_surfaceAware.py`'s `PressureForceScheme.Antuono` also switches on `P_j >= 0`, which this equation does not do -- the likely source of the one-sided wall-tension asymmetry behind `DELTASPH_VALIDATION_PLAN.md` §5.13's sloshingTank ceiling-hover bug. |
 | — | `sun2019` | `sun2019_consistent-particle-shifting-delta-plus-sph.pdf` | Comput. Methods Appl. Mech. Engrg. 348 2019 | Consistent (quasi-Lagrangian) δ⁺-SPH: the δu divergence terms that make the WCSPH shift volume-conserving. Reference method for `docs/historic_plans/WCSPH_SHIFTING_PLAN.md` step 2. |
 
 **Particle shifting and ALE (PST)**

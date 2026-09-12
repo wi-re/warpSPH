@@ -322,6 +322,17 @@
   note    = {Introduced delta+-SPH (delta-SPH density diffusion + particle shifting together). Source of the delta+ shift displacement `-CFL*Ma*2h^2*grad C' in modules/shifting/delta.py, the tensile term `[1 + R (W_ij/W(dx))^n]' (R=0.2, n=4) in wp_deltaShift, and the original free-surface n-nulling that sun2019 Sec. 2.4 extends (this repo's ShiftingProjectionScheme.surfaceNormal). Ref [5] in sun2019.}
 }
 
+@article{sun2018,
+  author  = {Sun, P. N. and Colagrossi, A. and Marrone, S. and Antuono, M. and Zhang, A. M.},
+  title   = {Multi-resolution {Delta}-plus-{SPH} with tensile instability control: Towards high {Reynolds} number flows},
+  journal = {Computer Physics Communications},
+  year    = {2018},
+  volume  = {224},
+  pages   = {63--80},
+  doi     = {10.1016/j.cpc.2017.11.016},
+  note    = {The Tensile Instability Control (TIC) paper: Eq. (9) switches the pressure-gradient term F_ji per-pair between (p_j+p_i) and (p_j-p_i), conditioned on p_i >= 0 OR i in the free-surface region SF -- not on p_j. This repo's PressureForceScheme.Antuono (modules/pressure/wp_surfaceAware.py) adds an extra `or P_j >= 0.0' branch this equation does not have, which the DELTASPH_VALIDATION_PLAN.md Sec. 5.13 sloshingTank ceiling-hover investigation traces to the wrong sign at a clamped (P_j=0) mDBC wall.}
+}
+
 @article{sun2019,
   author  = {Sun, P. N. and Colagrossi, A. and Marrone, S. and Antuono, M. and Zhang, A.-M.},
   title   = {A consistent approach to particle shifting in the {$\delta$}-Plus-{SPH} model},
