@@ -1,12 +1,17 @@
 """Pressure-force operator supporting several pressure-symmetrization
 formulations selected via `enumTypes.PressureForceScheme`
 (`conservative`, `nonConservative`, an Antuono-style surface-aware blend,
-one-sided `i`/`j`, and `symmetric`). The Antuono formulation switches to the
-symmetric form whenever either pressure is non-negative or the query
-particle is flagged as a free-surface particle (`querySurfaceMask`), and
-falls back to the antisymmetric ("conservative") form only in the
-negative-pressure, non-surface case, to avoid the tensile instability.
-Output is the negated pressure-gradient term divided by density.
+one-sided `i`/`j`, and `symmetric`). The Antuono formulation is the Tensile
+Instability Control switch of Sun, Colagrossi, Marrone, Antuono & Zhang,
+*Multi-resolution Delta-plus-SPH with tensile instability control*, Comput.
+Phys. Commun. 224:63-80 (2018) (`sun2018`), Eq. (9): it switches to the
+symmetric form when the *query* particle's own pressure is non-negative, or
+the query particle is flagged as a free-surface particle (`querySurfaceMask`),
+and falls back to the antisymmetric ("conservative") form only when the query
+particle is both in tension and away from the free surface. The condition is
+on the query particle alone -- the reference particle's pressure does not
+participate in the switch, per the equation. Output is the negated
+pressure-gradient term divided by density.
 """
 
 import warp as wp
@@ -100,8 +105,7 @@ def computePressureSurfaceAware_Func_i(
         elif pressureTerm == wp.static(wp.int32(PressureForceScheme.nonConservative.value)):
             p_ij = P_j + P_i
         elif pressureTerm == wp.static(wp.int32(PressureForceScheme.Antuono.value)):
-            sw = P_i >= 0.0 or P_j >= 0.0
-            sw = (sw) or (mask_i == 1) 
+            sw = P_i >= 0.0 or (mask_i == 1)
             p_ij = (P_j + P_i) if sw else (P_j - P_i)
         elif pressureTerm == wp.static(wp.int32(PressureForceScheme.i.value)):
             p_ij = P_i

@@ -3601,6 +3601,104 @@ localised from checkpoints.
    instrument 5.11 asks for (a thin-sheet probe, acceleration vs thickness) is
    still the right next step, and this gives it a second, milder target to
    reproduce alongside 5.11's.
+
+   **Term decomposition (2026-09-12, `scratchpad/probe_slosh_rightwallTerms.py`)
+   -- it is specifically the pressure-force term, not diffusion.** Monkeypatched
+   `computeVelocityDiffusion`/`computePressureForceSurfaceAware`/`computeForcing`/
+   `computeGravity`/`computeMdbcNoPenShift` in-process (no file edits --
+   `schemes.deltaSPH`'s bound names, matching the `_mdbcDensityHook.py` pattern)
+   to capture each term's per-particle contribution to `dvdt`, then resumed
+   `state_33000` and stepped through the event with all three UIDs traced. At
+   the kick, `computePressureForceSurfaceAware`'s contribution is **2-3 orders
+   of magnitude larger than `computeVelocityDiffusion`'s, every time** --
+   e.g. one representative step: pressure 3.44e3 vs diffusion 56.8 for UID 3792;
+   pressure 3.77e3 vs diffusion 23.3 for UID 4006. Gravity is the constant 9.81
+   background; forcing and the no-pen shift are inactive here (`finalize` mode
+   applies the no-pen correction outside this step function, so it never
+   appears in this decomposition -- expected, not a gap). All three UIDs sit
+   1.3-1.9 dx from the nearest boundary particle at the pre-event checkpoint
+   (`state_33500`), so this is genuinely wall-adjacent, matching the "right-wall"
+   name; checking the nearest boundary particles' mDBC ghost fits at that same
+   checkpoint found them well-conditioned (`det` 3-8x the threshold, `numNeighbors`
+   13-16) -- **not** the same under-conditioned-fallback mechanism §5.14 found
+   for UID 4104's ceiling hover. This looks like a different failure mode
+   sharing the same trigger (few real neighbours near a wall as a thin sheet
+   passes), not the same bug recurring.
+
+   **Caveat: the resumed re-simulation is measurably more violent than the
+   archived run at the same absolute step -- one candidate cause checked and
+   ruled out.** The archived checkpoints show all three UIDs' densities in
+   [0.993, 1.009] the whole time; the resumed re-simulation from the identical
+   `state_33000` checkpoint crashes to 0.94-0.98 with the pressure term in the
+   thousands by the same step count.
+
+   **Ruled out: this session's uncommitted §5.14 pressure-switch fix.** That
+   fix was live in the working tree for every probe run so far, including this
+   one -- a real methodological gap to control for, since it means every probe
+   in this session ran under different physics than whatever originally
+   produced the archived checkpoint if that checkpoint predates the fix.
+   Checked directly: `git stash` on `modules/pressure/wp_surfaceAware.py`
+   (back to the exact pre-fix code, `sw = P_i>=0 or P_j>=0 or mask_i==1`) and
+   re-ran the identical resume. **Still diverges, differently but no less
+   violently**: density spikes to 1.106 then crashes to 0.968 by step
+   33800-34000 (pressure term 6.93e3), vs. the with-fix run's crash to
+   0.94-0.98 (pressure 1.4e3-3.8e3). Neither matches the archived
+   [0.993, 1.009]. So the fix is not the cause; restored (`git stash pop`)
+   before continuing.
+
+   Also checked: the archived `config.json` confirms `pressureForceTerm:
+   Antuono` and the documented reproduction command's `WARPSPH_GHOST_PLACEMENT=hybrid`
+   / `--noPenShift finalize` both match what every probe script in this
+   session sets (hybrid is the code default, finalize is set explicitly) --
+   not a config mismatch either.
+
+   **Ruled out: stale pre-checkpoint adjacency reuse.** `running.adjacency`
+   after `run(..., nSteps=1)` is built from t=0 (at-rest) positions and is
+   never touched by grafting the checkpoint onto `running.state`; `deltaSPH_step`
+   reads it as `priorNeighborhood` and only rebuilds if
+   `_verlet_validity_metrics` says the Verlet buffer is exceeded --  computed
+   via `_minimum_image_delta`, i.e. *minimum-image* (wrap-around) distance,
+   and this domain is `periodic=[True,True]` (a closed tank, but the neighbour-search
+   infrastructure treats the box as periodic regardless -- boundary particles
+   fill the seam so it's a no-op physically, but it does change how this
+   validity check measures distance). A real candidate: if a particle's t=0
+   -> checkpoint displacement happened to look small under wrapping, the stale
+   adjacency could be reused. Tested directly: explicitly set
+   `running.adjacency = None` before stepping, forcing a from-scratch
+   `radiusSearchCompactHashMap_` build on the first resumed step regardless of
+   the validity check. **Byte-identical result** to leaving it alone -- same
+   trajectory, same spike, same step. Not the cause.
+
+   **Adjudicated: not a resume bug.** Three independent, direct mechanisms
+   checked and ruled out (the §5.14 fix, config parity, stale adjacency) is
+   enough to stop looking for a resume defect. What settles it further:
+   comparing the resumed trace against the *archived* checkpoints directly
+   (not just against each other) shows the two trajectories agree closely for
+   the first ~700 steps after resuming --
+
+   | step | archived rho (3792 / 4673 / 4006) | resumed rho |
+   |---|---|---|
+   | 33500 | 0.99962 / 0.99956 / 1.00037 | 1.00010 / 1.00002 / 1.00002 -- close |
+   | 33700 | (no archived checkpoint this fine) | 1.00038 / 0.99989 / 1.00002 -- still mild |
+   | 33900 | (no archived checkpoint this fine) | 0.96044 / 1.00094 / 0.97680 -- splitting |
+   | 34000 | 1.00209 / 1.00234 / 0.99827 | 1.00243 / 0.99497 / **0.93766** -- UID 4006 clearly split |
+
+   -- and only splits apart during the violent window itself (33700-34000),
+   the same window the pressure-force term spikes in. A resume-fidelity bug
+   would be expected to show divergence immediately on resuming (step
+   33000-33100), not after 700 clean, matching steps. **This is the signature
+   of a genuinely sensitive/marginal configuration**, not a resume defect:
+   floating-point-level differences an independent resume cannot avoid (GPU
+   hash/neighbour-search reduction order is not guaranteed bit-identical
+   across separate kernel launches even on identical inputs) get amplified by
+   the same too-few-neighbours pressure-sum mechanism the term decomposition
+   already identified. The pressure-vs-diffusion magnitude finding stands
+   confirmed on two independent trajectories now (fixed and pre-fix code, both
+   diverging differently from the archive but agreeing that pressure, not
+   diffusion, dominates); exact severity numbers from any single resumed run
+   still should not be quoted as matching the archived event's numbers, since
+   this is now understood to be inherent to the phenomenon, not fixable by
+   getting the resume "more correct."
 3. ~~Decide whether `'finalize'` becomes the default~~ **DONE -- both defaults
    switched**: `_GHOST_PLACEMENT_DEFAULT = 'hybrid'`
    (`rigidBody/ghostParticles.py`) and `mdbcNoPenShiftMode = 'finalize'`
@@ -3626,3 +3724,353 @@ localised from checkpoints.
    the fluid sliver between the wedge underside and the floor is genuinely
    thinner than dx. Accepted for now (obstacle penetration is 0.16 dx), but it
    is the remaining coverage gap.
+
+### 5.14 The Tensile Instability Control paper found -- `PressureForceScheme.Antuono` has an extra branch Eq. (9) does not have  (2026-09-12)
+
+The user supplied `literature/1-s2.0-S0010465517303995-main.pdf`, since renamed
+and synced to the four literature-tracking files as **`sun2018`** (Sun,
+Colagrossi, Marrone, Antuono, Zhang, *Multi-resolution Delta-plus-SPH with
+tensile instability control*, Comput. Phys. Commun. 224:63-80, 2018,
+`10.1016/j.cpc.2017.11.016`) -- ref [13] in `sun2019`, and the actual origin of
+the pressure-symmetrization switch this codebase names `PressureForceScheme.Antuono`
+(`modules/pressure/wp_surfaceAware.py`). Neither `sun2017` nor `sun2019`
+(already on disk) states this switch; `sun2017` Eq. (1)'s momentum equation
+always uses the plain symmetric `(p_i+p_j)` and controls tensile instability
+entirely through the PST's `[1 + R(W_ij/W(Δx))ⁿ]` term (§5.13's shifting, not
+the pressure force), and `sun2019` only paraphrases it ("the formula can be
+modified locally by using `p_j - p_i`") without the free-surface exception.
+
+**`sun2018` Eq. (9), exactly:**
+
+```
+F_ji = p_j + p_i    if  p_i >= 0  or  i in SF
+     = p_j - p_i    if  p_i <  0  and  i not in SF
+```
+
+`SF` is the free-surface region (the free-surface particles and their
+neighbours, §2.1). The switch is conditioned **only on the query particle i**
+-- its own pressure sign and its own free-surface membership -- never on the
+neighbour j's pressure.
+
+**The code's version adds a second OR-branch the equation does not have:**
+
+```python
+# modules/pressure/wp_surfaceAware.py, PressureForceScheme.Antuono, before this session
+sw = P_i >= 0.0 or P_j >= 0.0
+sw = (sw) or (mask_i == 1)
+p_ij = (P_j + P_i) if sw else (P_j - P_i)
+```
+
+`or P_j >= 0.0` switches to the symmetric (attractive-capable) form whenever
+the **neighbour's** pressure is non-negative, regardless of `P_i`'s sign or
+whether `i` is anywhere near a free surface. Every mDBC wall in this codebase
+clamps `rho_b` at-or-above `rho0` in every path that matters in practice (the
+fallback Shepard clamp kept by [[marrone31-mdbc-wall-regression]]'s (B)
+REFINED fix, and the `numNeighbors` gate that returns rest density outright),
+so **`P_j >= 0` at a solid wall essentially always**. The extra branch therefore
+forces the symmetric form for *every* fluid particle adjacent to a wall the
+instant that fluid goes into tension (`P_i < 0`) -- exactly the condition
+`sun2018` Eq. (9) is designed to route to the antisymmetric form instead. This
+is not a free-surface-only edge case: `PressureForceScheme.Antuono` is the
+**default** `pressureForceTerm` for both `configurations/weaklyCompressible.py`
+and `configurations/incompressible.py`, so the bug is live on every wall in
+every WCSPH/incompressible run, whether or not `--surfaceMask`-style free-surface
+flagging is in play.
+
+**Verified with the existing harness, no new script needed.**
+`scripts/probe_mdbcSparseFluid.py --rhoSweep` already assembles the real
+operator (`computePressureForceSurfaceAware`) against a synthetic wall + sparse
+fluid cluster and reports the *signed* normal acceleration, with a docstring
+that already half-diagnosed this ("by pair force `(p_i+p_j)` a mirrored wall is
+*more* attractive") but attributed the trigger only to the `--surfaceMask`
+flag. Run **without** `--surfaceMask` at rest (`rho_fluid=0.90`, a tensioned
+fluid particle 0.5 dx off a ceiling, `p_b` clamped to exactly `rho0` so
+`P_j=0`):
+
+| | `a_normal` (`+` = away from wall, `-` = pulled into it) |
+|---|---|
+| **before** (`P_i>=0 or P_j>=0 or mask_i`) | **-8.17e3** -- pulled *into* the ceiling |
+| **after** (`P_i>=0 or mask_i`, matching Eq. 9) | **+8.17e3** -- correctly repelled |
+
+Sign flips the same way across every shape (`single` / `pair-tangential` /
+`block-2x2` / `block-3x3`), both wall orientations, and both probe distances
+(0.5 / 1.0 dx) -- 36 configurations, all consistent, none regressed on the
+compression side (`rho_fluid > rho0` stays repulsive, unchanged, since
+`P_i >= 0` alone already covers it). The non-`--rhoSweep` mode (velocity x
+distance x shape sweep, the `|p_b|` magnitude check) still reports
+**PASS: every configuration produced `|p_b| <= 1e-4 rho0 c0^2`** -- the fix
+does not touch the *density* extrapolation this mode checks, only the force
+sign once a nonzero `p_b`/`P_i` exists.
+
+**Fix applied (uncommitted):**
+
+```python
+sw = P_i >= 0.0 or (mask_i == 1)
+p_ij = (P_j + P_i) if sw else (P_j - P_i)
+```
+
+`test_physics.py` + `test_wallPressure.py` green (exit 0, no failures) with the
+fix in place.
+
+**This is exactly the mechanism §5.13 item 1 (the sloshingTank ceiling-hover
+particle) describes without naming it:** "`dvdt_n` running -28 to -123 ... p ~
+-0.4 against a wall reading exactly rho0 (`p_b = 0`)" is precisely `P_i < 0`,
+`P_j = 0 >= 0`, non-free-surface -- the old code's extra branch forces the
+symmetric `(P_j+P_i) = P_i` (negative, attractive) where `sun2018` Eq. (9)
+calls for the antisymmetric `(P_j-P_i) = -P_i` (positive, repulsive). It is
+also the mechanism named in §5.13(d)(3)/(4)'s rejected-fix notes ("with
+`mask_i == 1` the Antuono switch takes `P_i + P_j` and a mirrored wall gives
+`2 P_i`") -- those attempts changed the density clamp to fight a force-sign bug
+downstream of it, which is why (d)(3)/(4) made sloshing worse rather than
+better: removing/relaxing the `rho_b` floor lets `P_j` swing negative too,
+which coincidentally satisfies neither OR-branch and hides the symptom without
+fixing the switch.
+
+**Checkpoint reproduction run (2026-09-12): the §5.14 fix alone does NOT
+resolve the ceiling-hover repro -- a second, independent bug does the actual
+damage here.** Resumed `export/16-sloshingTank-wcsph_2026-09-12_16-45-47` at
+`state_60000` (t=6.0) with the fix from this section already applied and
+stepped UID 4104 forward 200 steps (`scratchpad/probe_slosh_hoverPressure.py`,
+a `probe_slosh_resume.py` variant that also prints `P_i`, the nearest
+boundary/ghost neighbour's density/pressure, and `mask_i`):
+
+```
+  step        t         y   P_i  maskI  nearestBnd_rho  nearestBnd_P  dvdt_n
+ 60000   6.0002   0.50707  -0.321   1        1.00000        0.0000  -28.36
+ 60175   6.0177   0.50701  -1.119   1        1.00000        0.0000  -135.3
+```
+
+`maskI = 1` throughout -- **the particle is flagged as free-surface**. Per
+`sun2018` Eq. (9), `i in SF` alone is *sufficient* to select the symmetric
+branch regardless of `p_i`'s sign -- so with the fix applied exactly as the
+paper states it, this specific particle still gets `F_ji = p_j+p_i = p_i`
+(negative, attractive) every step, and `dvdt_n` stays in the same -28..-135
+range the pre-fix plan text recorded. The §5.14 fix is confirmed correct
+against the equation and against the synthetic mDBC-wall harness (still true,
+still worth keeping), but it is not sufficient for this reproduction because
+**the free-surface flag itself is wrong here, not the switch that consumes it.**
+
+**First analysis attempt was methodologically flawed -- caught by the user,
+not self-corrected.** The first pass (`scratchpad/probe_slosh_surfaceDetect.py`)
+found `numNeighbors (AllToAll, excludes ghost) = 30` against a 37.7 cutoff (52
+ghost query points inside the support radius don't count), and a follow-up
+angular-occupancy check appeared to confirm "no real gap" -- but that check
+included ghost particles (kind 2) as if they were matter occupying a
+direction. They are not: kind-2 points are pure MLS query locations for a
+boundary particle's density fit, they exert no force on the query fluid
+particle in any SPH sum, and the detector's own `AllToAll` mode already
+excludes them (`checkDirectionality_j` opInt 9: `queryKind != 2`). Counting
+them as "occupying" a sector was circular -- filling the picture with exactly
+the particles that neither interact with UID 4104 nor are seen by anything
+being audited. The user asked, correctly, why a particle genuinely at a
+surface shouldn't read as one, which is what forced this back open.
+
+**Redone with only fluid+boundary (the particles that actually exchange force
+and that the detector actually sees):**
+
+```
+UID 4104, fluid+boundary only:  10/16 sectors occupied  (a real ~35% gap)
+wave-crest particles (>6dx from any wall), same:  1-2/16 sectors occupied
+```
+
+A real gap, not the false 16/16. That still leaves it ambiguous by degree --
+10/16 is meaningfully more enclosed than 1-2/16, but not "clearly not a
+surface" either -- so the check was widened past one kernel support radius,
+since a gap that closes up just outside it would mean "locally thin, but
+still part of the bulk," while a gap that keeps widening means "genuinely cut
+off":
+
+```
+fluid count within 1x/2x/3x/4x support radius (4/8/12/16 dx): flat at 5, no change
+fluid count within 6x support radius (24 dx): jumps to 12 -- a spatially
+  SEPARATE cluster ~20 dx below UID 4104, not a gradual thickening
+```
+
+**UID 4104 is a real, physically isolated film of fluid stuck to the ceiling,
+cut off from the main body of water by a genuine ~20 dx span of open space.**
+This is not a within-kernel-support artifact of temporarily thin sampling --
+it is a real free surface. **Conclusion reversed from the first pass: the
+free-surface flag is correct here, and so is the Antuono switch** -- per
+`sun2018` Eq. (9), `i in SF` legitimately selects the symmetric branch for a
+genuine free-surface particle regardless of `p_i`'s sign; that is exactly what
+the paper's authors intend (§2.1: dropping this term near a real free surface
+"leads to problems... where the pressure generally oscillates around the
+zero value").
+
+**So what is actually wrong sits one layer further down: the mDBC ghost fit
+feeding `P_j` is under-conditioned, and its fallback value is being consumed
+as if it were a real reading.** The boundary particle nearest UID 4104
+(`scratchpad` ad-hoc check on `interpolateLiuLiu`'s own stencil):
+
+```
+ghost stencil: numNeighbors=6, det=1.711e-3, detFloor=1.800e-3  (BELOW the conditioning floor)
+rho_b = 1.00000 exactly, P_j = 0.0000 exactly
+```
+
+`det` below `detFloor` means `computeMdbcDensity` cannot trust the MLS
+extrapolation there (only 6 real neighbours to fit, because the real fluid
+nearby genuinely is this sparse -- the same isolated-film fact just
+established) and falls back to the Shepard/rest-density path, which floors at
+exactly `rho0` -> `P_j=0`. **That `P_j=0` is a "not enough data" placeholder,
+not a measured wall pressure**, but Eq. (9)'s switch has no way to
+distinguish a trustworthy `P_j` from a fallback one -- it sees `p_i < 0`,
+`i in SF`, and correctly (per the equation) returns the attractive symmetric
+form, pinning a real, legitimately-tensioned free-surface film against the
+wall instead of letting it fall.
+
+**Not fixed, and the earlier two candidate fixes in this section (angular-gap
+test, ghost-inclusive completeness count) are now understood to be treating
+the wrong layer** -- the free-surface classification and the pressure switch
+are both behaving as specified once the mDBC fallback is accounted for. The
+open question is what the fallback density path should hand the pressure
+switch when it does not have enough data to extrapolate: whether a starved
+mDBC ghost fit should suppress the wall's contribution to the SF branch
+specifically, report a value the switch can recognise as untrustworthy, or
+something else, is a design question this session did not resolve.
+
+**Scope: real but narrow, not systemic.** Scanning every fluid particle at
+this checkpoint: 1250 of 5175 fluid particles are flagged free-surface (a
+normal count for a sloshing wave crest); this specific compounding (a
+genuinely isolated free-surface film also touching a wall, whose nearest
+ghost fit is under-conditioned) is one plausible mechanism among however many
+of those 1250 are also wall-adjacent, not scanned exhaustively this session.
+
+**Also still open, unchanged by any of this:** the Marrone 3.1/3.4 +
+englishWedge full-record regression sweep for the §5.14 pressure-switch fix
+itself (`test_physics`/`test_wallPressure`/the synthetic harness are green,
+but per [[validation-scheme-defaults]]'s practice a default-pressure-term
+change this load-bearing needs the standard case sweep before being promoted
+past "characterized"), and the §5.13 open-item-2 right-wall thin-sheet cluster
+event, which this session did not touch.
+
+### 5.15 The synthetic thin-sheet probe -- one mechanism explains 5.13 item 2, 5.14, and the "chaos" reading  (2026-09-12)
+
+5.11 asked for this instrument two sessions ago ("a thin-sheet probe: N-particle
+sheet, acceleration vs thickness") and it finally got built:
+`scratchpad/probe_thinSheetPressure.py`. No wall, no mDBC, no resume, no case
+machinery -- a bare periodic-in-x slab of regular particles with a UNIFORM
+pressure field (so the physically correct force is exactly zero everywhere)
+run straight through `computePressureForceSurfaceAware`, the same production
+operator. It settles both open threads above from first principles.
+
+**The mechanism, confirmed directly.** The symmetric pair term
+`Sum_j V_j (P_i+P_j) grad_i W_ij` (`nonConservative`, and `Antuono` whenever
+its switch picks the symmetric branch) reduces, for uniform `P0`, to
+`2 P0 * Sum_j V_j grad_i W_ij` -- a real, nonzero force whenever a particle's
+kernel support is truncated, proportional to the local pressure and to how
+incomplete the support is, entirely independent of any actual pressure or
+density gradient. `conservative` (`P_j-P_i`) is *exactly* zero for uniform `P`
+at any truncation, term-by-term. This is textbook SPH kernel-consistency, not
+new physics, and it is why `sun2018`'s TIC switch trades it in specifically
+where it does: at a genuine free surface pressure is expected to be near zero,
+so the artifact is usually small there; the switch does not (and, per Eq. (9)
+as written, cannot) protect a particle whose local pressure is *not* small,
+whether because it's compressive (`P0>=0`, which Eq. (9) always routes to the
+symmetric form) or because it's a genuinely tensioned free-surface particle
+(`i in SF`, also always symmetric per Eq. (9) -- §5.14's UID 4104 exactly).
+
+**Measured directly** (support = 4 dx, a thick slab, edge row = depth 0):
+
+| depth from edge (dx) | nNb | force, `nonConservative`/`Antuono` (P0 either sign, magnitude only) |
+|---|---|---|
+| 0 | 25 | **5450** |
+| 1 | 32 | **2240** |
+| 2 | 39 | **300** |
+| 3+ | 44+ | ~0.001 (numerical noise) |
+
+`conservative` and `Antuono` under `P0<0` + not flagged SF are 0 at every
+depth, exactly. `Antuono` under `P0>=0` matches `nonConservative` at every
+depth, exactly (Eq. (9) always symmetric there); flagging any depth's particle
+free-surface (`mask_i=1`) makes `Antuono` match `nonConservative` there too,
+regardless of `P0`'s sign -- reproducing the UID 4104 mechanism on a bare
+lattice with no mDBC involved at all. For scale, depth-0's 5450 is **~550x
+gravity**.
+
+**On a perfect lattice this is a clean, 2-3 dx-deep, deterministic edge
+effect** -- confirmed insensitive to sub-dx lattice phase (`--phaseShifts`
+swept 0/0.1/0.25/0.5 dx: identical force at every depth, every shift, since a
+perfect lattice is translation-invariant). That *rules out* "the edge sits at
+an unlucky sub-dx phase" as an explanation for anything -- a real fluid's
+disorder is what matters, not where the lattice happens to sit.
+
+**With real disorder, the same mechanism reaches much deeper and becomes
+unpredictable -- this is the resume-fidelity "chaos" from 5.13 item 2,
+demonstrated on a bare lattice.** `--jitter 0.1` (each particle displaced by
+an independent random offset up to 0.1 dx -- an order of magnitude coarser
+than any floating-point-level difference a resume could introduce, chosen to
+be visible, not realistic) turns depth 3-4's ~0 into 76-537, **varying 5-7x
+between otherwise-identical random seeds**:
+
+| seed | depth 2 | depth 3 | depth 4 |
+|---|---|---|---|
+| 0 | 418 | 355 | 75.9 |
+| 1 | 285 | 87.4 | 372 |
+| 2 | 412 | 134 | 309 |
+| 3 | 79.6 | 397 | 362 |
+| 4 | 537 | 216 | 360 |
+
+Disorder does not just add noise on top of the deterministic depth profile --
+it changes *how deep* the artifact reaches and makes its magnitude at a given
+depth essentially a random draw. A real fluid near a wall or thinning into a
+sheet is never a perfect lattice, so this is the realistic regime, not the
+idealised one. This is why §5.13 item 2's resumed-vs-archived trajectories
+agreed closely for ~700 steps and then split sharply exactly in the violent
+window: not a resume bug (three independent candidates were checked and
+ruled out there), but this exact sensitivity, operating on real position
+differences too small to see directly.
+
+**What this does and does not settle.** It confirms the pressure-vs-diffusion
+magnitude finding (5.13 item 2) and the free-surface-flag mechanism (5.14)
+share one root cause, and that the mechanism is real, well-understood SPH
+theory rather than a codebase bug -- `PressureForceScheme.Antuono` is behaving
+exactly as `sun2018` Eq. (9) specifies in every case tested this session; the
+paper's own switch is what's exposed to this. It does **not** yet answer
+whether this codebase should do anything differently: the options (an
+explicit kernel-sum-completeness correction to the symmetric term, restricting
+`Antuono`'s free-surface branch more tightly, accepting the artifact as
+`sun2018` itself does, or something else) all have different blast radii
+across every case using the default `pressureForceTerm`, and this session
+did not pick one. That decision, and the still-open Marrone/englishWedge
+regression sweep for the already-applied §5.14 fix, are the concrete next
+steps.
+
+### 5.16 Two full 7 s confirmation runs with the §5.14 fix -- clean, and 5.9's `symplecticEuler` divergence looks superseded  (2026-09-12)
+
+With the §5.14 pressure-switch fix in the working tree, `examples/sloshingTank/run_sloshingTank.py --scheme wcsph --nx 225 --tLimit 7 --noPenShift finalize` (hybrid ghosts, the current defaults) run to the full record twice:
+
+| integrator | diverged | densityMedian final | voidFraction max | pairedFraction max | raw Sensor-1 peak (measured band 2.2-13.1 kPa) |
+|---|---|---|---|---|---|
+| `rungeKutta2` (case default) | False | 1.0062 | 0.00097 | 0.073 | 233.7 kPa |
+| `symplecticEuler` | **False** | 0.9997 | 0.00135 | 0.064 | **60.1 kPa** |
+
+Both runs are healthy by every other diagnostic (density range, void/paired
+fractions, KE still actively decaying, not frozen) -- consistent with the
+baselines this plan already established, no regression from the §5.14 fix.
+
+**`symplecticEuler` no longer diverges on this case.** The case file
+(`cases/sloshingTank.py`) recorded it diverging at t = 0.727 s (§5.9),
+prime-suspecting `deltaSPH_step`'s `nopenshift/dt` term, whose magnitude
+depends on the integrator's stage splitting under
+`mdbcNoPenShiftMode='derivative'`. That mode is no longer the default --
+`'finalize'` (§5.13) applies the no-pen correction once per step outside
+`deltaSPH_step` entirely, removing the suspected mechanism -- and under
+today's defaults `symplecticEuler` ran the full 7 s clean, with a
+meaningfully better Sensor-1 match than `rungeKutta2` (60.1 vs 233.7 kPa raw
+peak against the same band). Case comment updated to record this as
+superseded rather than current fact. **Not switched as the case default** --
+this is one comparison run, not the Marrone/englishWedge sweep the plan's
+other default changes went through before being adopted. `semiImplicitEuler`
+(the other Euler-family scheme, diverges at t=0.041s at rest from a genuine
+acoustic-mode instability unrelated to the no-pen mechanism) was not
+re-tested and has no reason to behave differently.
+
+Videos: `examples/sloshingTank/output/e44_fixedAntuono_full7s/` (RK2),
+`e45_symplecticEuler_full7s/` (symplecticEuler) -- both are ordinary
+`--out` run dirs (`**/output/` is gitignored, not durable). The field video
+(mp4 + gif), Sensor-1 plot (png + pdf) and raw series (npz) for both runs are
+additionally copied to
+`examples/sloshingTank/output/reference_antuonoFix_2026-09-12/{rk2,symplecticEuler}/`
+as a stable, clearly-named pair kept specifically for reuse in future
+documentation (write-ups, presentations) -- still gitignored (these are
+large binaries, ~50-75 MB each), so reference the path, don't expect `git
+show` to find them.

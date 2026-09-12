@@ -420,22 +420,29 @@ sloshingTankCase = registerCase(Case(
         L=0.9,                           # tank internal width B
         n_h=4.0,
         kernel='Wendland4',
-        # RK2. **Neither** Euler-family scheme works on this case, for two
-        # different reasons -- `DELTASPH_VALIDATION_PLAN.md` 5.3 and 5.9:
-        #   * `semiImplicitEuler` (enum 21, 1-stage) integrates density with a
-        #     plain `explicit_step`, and for WCSPH the stiff oscillator is
-        #     (rho, v), not (x, v) -- so the acoustic mode runs explicit Euler
-        #     and grows by `sqrt(1 + (c k dt)^2)` every step. Diverges at
-        #     t = 0.041 s *at rest*, at every discretisation tried.
-        #   * `symplecticEuler` (enum 13, 2-stage kick-drift-kick, the scheme
-        #     DualSPHysics runs) staggers density correctly and is benign on
-        #     the linear acoustic analysis -- but still diverges here at
-        #     t = 0.727 s, and on Marrone 3.1 at t* = 1.295 with 473 penetrating
-        #     particles against RK4's zero. Open (5.9); prime suspect is
-        #     `deltaSPH_step`'s `nopenshift / dt`, the one term whose magnitude
-        #     depends on the integrator's stage splitting.
-        # Measured on the current tree, t* = 3: RK2 clean (30000 steps,
-        # rho [0.740, 1.175]); symplecticEuler diverged at t = 0.727.
+        # RK2. `semiImplicitEuler` (enum 21, 1-stage) integrates density with a
+        # plain `explicit_step`, and for WCSPH the stiff oscillator is
+        # (rho, v), not (x, v) -- so the acoustic mode runs explicit Euler and
+        # grows by `sqrt(1 + (c k dt)^2)` every step. Diverges at t = 0.041 s
+        # *at rest*, at every discretisation tried (`DELTASPH_VALIDATION_PLAN.md`
+        # 5.3) -- still true, unrelated to the no-pen mechanism below.
+        #
+        # `symplecticEuler` (enum 13, 2-stage kick-drift-kick, the scheme
+        # DualSPHysics runs) was ALSO found to diverge here, at t = 0.727 s,
+        # and on Marrone 3.1 at t* = 1.295 with 473 penetrating particles
+        # against RK4's zero (5.9); prime suspect at the time was
+        # `deltaSPH_step`'s `nopenshift / dt` term, whose magnitude depends on
+        # the integrator's stage splitting under `mdbcNoPenShiftMode='derivative'`.
+        # **Superseded, 2026-09-12**: with `mdbcNoPenShiftMode='finalize'` and
+        # `'hybrid'` ghost placement now the defaults (5.13) -- which route the
+        # no-pen correction outside `deltaSPH_step` entirely, removing the
+        # suspected term -- `symplecticEuler` ran the *full* 7 s record clean
+        # (nx=225, `diverged=False`), and with a visibly better Sensor-1 match
+        # than RK2: raw peak 60.1 kPa vs. RK2's 233.7 kPa against the same
+        # 2.2-13.1 kPa measured band. Not switched as the default here (a
+        # single comparison run, not the full validation sweep this plan's
+        # other default changes went through), but the old divergence should
+        # no longer be treated as current fact.
         integrationScheme='rungeKutta2',
         supportMode='KernelMeanSymmetric',
         gradientMode='Difference',
