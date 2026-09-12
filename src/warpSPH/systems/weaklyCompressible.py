@@ -24,7 +24,57 @@ from ..rigidBody.update import updateBodyParticlesWCSPH
 from ..modules.shifting.delta import computeDeltaShift
 from ..modules.shifting.wrapper import solveShifting
 from ..modules.mdbc import computeMdbcNoPenShift
+from ..modules.gravity import computeGravity
 from torch.profiler import profile, record_function, ProfilerActivity
+
+
+#: Restore the normal share of the step's gravity when the no-penetration
+#: correction fires against a wall that gravity pulls *away* from (a ceiling).
+#: **Off: implemented, unvalidated, left for a case that needs it.**
+#:
+#: `finalize` rebuilds the velocity from `vPre`, so a particle whose correction
+#: fires loses that step's gravity along the corrected component. For a floor
+#: that is required (otherwise it accumulates downward velocity and sinks
+#: through); for a ceiling it would make a particle hover, which is the rule
+#: `DELTASPH_VALIDATION_PLAN.md` 5.12 sets out: `g . n_hat < 0` keep
+#: discarding, `> 0` put the gravity back.
+#:
+#: The rule is real, but the hovering particle it was written for turns out
+#: **not** to be caused by it: on sloshingTank UID 4104 the correction is not
+#: firing at all (`nopen_n = 0.000` every step, `v_norm ~ 0`, so the approach
+#: gate is false and `vPre` is never used). It is pinned by a steady
+#: into-the-wall acceleration of 3-12x gravity from the wall-tension
+#: asymmetry instead -- see 5.13 open item 1. So this path has no known
+#: reproduction, and enabling it would be a behaviour change to `finalize`
+#: that nothing in the suite exercises. Turn it on together with a case where
+#: a particle genuinely *approaches* a ceiling.
+_RESTORE_GRAVITY_ON_CEILING_NOPEN = False
+
+
+def _meanBoundaryNormal(state, adjacency):
+    """Mean inward normal of each fluid particle's boundary neighbours, from
+    their ghost offsets (`n_j = -offset_j / |offset_j|`, the same normal the
+    no-penetration kernel reflects along).
+
+    Returns `None` when the neighbour pairs are not available (a hash-map
+    adjacency), in which case the caller leaves its behaviour unchanged rather
+    than guessing an orientation. The shift vector itself is *not* a usable
+    proxy: its `factor = -4 ratio + 3` turns negative at deep contact, so the
+    shift can point back into the wall (`scripts/probe_nopenShiftResponse.py`
+    measures the reversal past ~1.25 dx).
+    """
+    ii = getattr(adjacency, 'i', None)
+    jj = getattr(adjacency, 'j', None)
+    if ii is None or jj is None:
+        return None
+    sel = (state.kinds[ii] == 0) & (state.kinds[jj] == 1)
+    if not bool(sel.any()):
+        return None
+    off = state.ghostOffsets[jj[sel]]
+    nj = -off / off.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+    acc = torch.zeros_like(state.positions)
+    acc.index_add_(0, ii[sel], nj)
+    return torch.nn.functional.normalize(acc, dim=-1)
 
 __all__ = ['WeaklyCompressibleState', 'WeaklyCompressibleSystemUpdate', 'WeaklyCompressibleSystem']
 
@@ -269,7 +319,36 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
                 if bool(active.any()):
                     vPre = initialState.state.velocities
                     xPre = initialState.state.positions
-                    vNew = torch.where(active, vPre + nopenshift, self.state.velocities)
+                    # `vPre + nopenshift` rebuilds from the *start-of-step*
+                    # velocity, so every step the correction fires the particle
+                    # loses that step's gravity along the corrected component.
+                    # For a floor that is required -- otherwise it accumulates
+                    # downward velocity and sinks through -- but for a ceiling
+                    # it is what makes a particle hover: measured on
+                    # sloshingTank, UID 4104 sat at y = 0.50700 with vy ~ 0 for
+                    # the final 10,000 steps, healthy rho and zero fluid
+                    # neighbours (`DELTASPH_VALIDATION_PLAN.md` 5.12 / 5.13).
+                    #
+                    # The orientation decides it. With `n_hat` the mean inward
+                    # normal of the boundary neighbours: `g . n_hat < 0` means
+                    # gravity presses into the wall (fluid resting on a floor)
+                    # and the discard is correct; `> 0` means gravity pulls
+                    # away from the wall (a ceiling) and the step's gravity has
+                    # to be put back, or nothing ever makes the particle fall.
+                    # Restoring only the normal share, and only in that case,
+                    # leaves the floor path untouched.
+                    gravityRestore = torch.zeros_like(nopenshift)
+                    nHat = (_meanBoundaryNormal(self.state, self.adjacency)
+                            if _RESTORE_GRAVITY_ON_CEILING_NOPEN else None)
+                    if nHat is not None:
+                        g = computeGravity(self.state, config, schemeConfig,
+                                           self.adjacency)
+                        gProj = (g * nHat).sum(dim=-1, keepdim=True)
+                        gravityRestore = torch.where(
+                            gProj > 0, dt * gProj * nHat,
+                            torch.zeros_like(gravityRestore))
+                    vNew = torch.where(active, vPre + nopenshift + gravityRestore,
+                                       self.state.velocities)
                     self.state.positions = torch.where(
                         active, xPre + vNew * dt, self.state.positions)
                     self.state.velocities = vNew

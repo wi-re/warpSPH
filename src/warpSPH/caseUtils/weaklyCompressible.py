@@ -324,7 +324,7 @@ def buildPresetObstacles(maxExtent: float, offsetX: float, L: float, fillRatio: 
 _MARRONE_SE = dict(apex_x=5.0, toe_x=6.0, back_x=7.0, fillet_x=9.0)
 
 
-def _marroneSharpEdgeSDF(L: float, W: float, obstacle: bool = True):
+def _marroneSharpEdgeSDF(L: float, W: float, obstacle: bool = True, dx: float = 0.0):
     """`x -> signed distance` (negative inside solid) for the Marrone 2011
     Fig. 19 concave quarter-circle fillet at the tank's downstream bottom
     corner, **unioned with** the sharp-edged floor obstacle when
@@ -352,12 +352,34 @@ def _marroneSharpEdgeSDF(L: float, W: float, obstacle: bool = True):
 
     The fillet solid is the concave quarter-lens `box[wall-H, wall] x [bed,
     bed+H]` minus the disc of radius H centred at `(wall - H, bed + H)`.
+
+    Both the obstacle's bottom edge (`(back_x, bed)` -> `(toe_x, bed)`) and the
+    fillet box's bottom edge sit at exactly `y = bed` -- the same level as the
+    *separate* tank-floor SDF this shape gets `union`-ed with in
+    `build_sdfs`. Two independent SDFs sharing an exact zero-level seam make
+    `_mergedSurface`'s central-difference normal (`rigidBody/ghostParticles.py`)
+    ill-conditioned right along it: near the toe the merged value hovers near 0
+    from *both* sides with no clear winner, so the numerical gradient can end up
+    pointing along the seam instead of out of the true surface, and
+    `_gridSnapGhostOffsets`' retraction loop then can't find a candidate node
+    that clears every solid, silently falling back to a zero offset (ghost =
+    the boundary particle's own, inside-solid position). Measured at nx = 256:
+    637 of 2219 boundary particles near the toe, and 99 of 1550 near the fillet,
+    landed exactly there (`scratchpad/probe_m34_ghostdump...`,
+    `DELTASPH_VALIDATION_PLAN.md` 5.10). `dx` (when given) embeds the
+    obstacle's bottom edge `dx / 2` below the true bed, and the fillet box's
+    bottom *and* right edges `dx / 2` past the true bed / downstream wall
+    respectively (the fillet touches both at once, at its bottom-right
+    corner), breaking both coincidences without changing the obstacle's
+    height or the fillet's intended radius/centre.
     """
     r = _MARRONE_SE
     bed = -L / 2.0
     wall = W / 2.0
     H = W / 10.0
     top = bed + H
+    embed = 0.5 * float(dx)
+    obstacleBed = bed - embed
     apex_x = -wall + r['apex_x'] * H
     toe_x = -wall + r['toe_x'] * H
     back_x = -wall + r['back_x'] * H
@@ -367,16 +389,22 @@ def _marroneSharpEdgeSDF(L: float, W: float, obstacle: bool = True):
     circfn = getSDF("circle")["function"]
 
     discC = (fillet_x, top)
-    filletBoxC = (wall - H / 2.0, bed + H / 2.0)
+    #: box spanning y in [bed - embed, bed + H] (top fixed at `top`, bottom
+    #: pushed `embed` below the true bed) and x in [wall - H, wall + embed]
+    #: (left fixed at the fillet's inner edge, right pushed `embed` past the
+    #: downstream wall) -- see the embedding note above.
+    filletBoxHalfY = (H + embed) / 2.0
+    filletBoxHalfX = (H + embed) / 2.0
+    filletBoxC = (wall - H / 2.0 + 0.5 * embed, top - filletBoxHalfY)
     #: wedge + toe-to-back-face block as one quadrilateral (apex -> along the
     #: roof to the back face -> down it -> along the floor -> up the 45deg edge).
-    obstacleVerts = [(apex_x, top), (back_x, top), (back_x, bed), (toe_x, bed)]
+    obstacleVerts = [(apex_x, top), (back_x, top), (back_x, obstacleBed), (toe_x, obstacleBed)]
 
     def sdf(x: torch.Tensor) -> torch.Tensor:
         dev, dt = x.device, x.dtype
         t = lambda v: torch.tensor(v, device=dev, dtype=dt)
         # concave fillet lens: difference(cornerBox, disc) = max(box, -discSDF)
-        dFilletBox = boxfn(x - t(filletBoxC), t([H / 2.0, H / 2.0]))
+        dFilletBox = boxfn(x - t(filletBoxC), t([filletBoxHalfX, filletBoxHalfY]))
         dOutDisc = -circfn(x - t(discC), t(H))
         dFillet = torch.maximum(dFilletBox, dOutDisc)
         if not obstacle:
@@ -489,10 +517,13 @@ def buildObstacleSDF(
         return lambda x: getSDF("star5")["function"](trs(x), maxExtent, maxExtent * 1.25)
     if obstacleType == "marroneSharpEdge":
         # Fixed by Marrone 2011 Fig. 19 in units of H = W/10; `trs` (offset /
-        # rotation / scale) does not apply. See `_marroneSharpEdgeSDF`.
-        return _marroneSharpEdgeSDF(L, W)
+        # rotation / scale) does not apply. See `_marroneSharpEdgeSDF`. `dx`
+        # (when a `config` is given) embeds the obstacle/fillet bottom edges
+        # half a cell below the tank floor -- see the embedding note there.
+        return _marroneSharpEdgeSDF(L, W, dx=float(getattr(config, 'dx', 0.0) or 0.0))
     if obstacleType == "marroneRoundedCorner":
-        return _marroneSharpEdgeSDF(L, W, obstacle=False)
+        return _marroneSharpEdgeSDF(L, W, obstacle=False,
+                                     dx=float(getattr(config, 'dx', 0.0) or 0.0))
 
     raise ValueError(f"Unsupported obstacleType: {obstacleType}")
 

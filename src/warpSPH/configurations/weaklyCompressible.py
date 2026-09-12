@@ -98,7 +98,7 @@ class WeaklyCompressibleSPHConfig:
     #:   specifies. diffSPH disables its equivalent outright (`/ dt * 0`).
     #:
     #: `DELTASPH_VALIDATION_PLAN.md` 5.9.
-    mdbcNoPenShiftMode: str = field(default='derivative', metadata={'description': "Where the mDBC no-penetration correction is applied: 'derivative' (in dvdt, historical), 'finalize' (once per step, DualSPHysics-style velocity replacement), or 'off'"})
+    mdbcNoPenShiftMode: str = field(default='finalize', metadata={'description': "Where the mDBC no-penetration correction is applied: 'finalize' (default; once per step, DualSPHysics-style velocity replacement), 'derivative' (summed into dvdt, historical), or 'off'. 'derivative' can only *oppose* an into-wall velocity, never replace it, so a particle grazing a wall keeps its normal velocity indefinitely while the correction cancels the displacement; the continuity equation then integrates that phantom velocity into a density collapse. Root cause of the sloshingTank divergence at t = 4.57 s -- measured rho 0.995 -> 0.60 on one particle pinned at the ceiling, fixed by this default (DELTASPH_VALIDATION_PLAN.md 5.13(c))."})
 
     shiftProperties: ShiftProperties = field(default_factory=buildDefaultShiftProperties, metadata={'description': 'Properties for the delta-SPH shift'})
 

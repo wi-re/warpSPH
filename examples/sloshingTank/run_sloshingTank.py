@@ -96,6 +96,14 @@ def parseArgs(argv):
                    help='skip the sim; rebuild the figure from <scheme>_series.npz')
     p.add_argument('--plot', dest='plot', action='store_true', default=False,
                    help='open the live field window during the run')
+    p.add_argument('--storeInterval', type=int, default=None,
+                   help='steps between stored states (storeMode=states). Checkpoints '
+                        'are resumable, so a run that blows up can be reopened just '
+                        'before it rather than re-run per hypothesis.')
+    p.add_argument('--storeMode', type=str, default=None,
+                   choices=('states', 'trajectory'),
+                   help="'states' = one HDF5 per stored step; 'trajectory' = one "
+                        'growing file')
     p.add_argument('--store', dest='store', action='store_true', default=False,
                    help='write the HDF5 trajectory')
     p.add_argument('--video', action='store_true', default=False,
@@ -128,6 +136,10 @@ def buildSpec(case, args):
         overrides['nx'] = args.nx
     if args.nSteps is not None:
         overrides['nSteps'] = args.nSteps
+    if args.storeInterval is not None:
+        overrides['storeInterval'] = args.storeInterval
+    if args.storeMode is not None:
+        overrides['storeMode'] = args.storeMode
     params = {}
     if args.rollDataFile is not None:
         params['rollDataFile'] = os.path.abspath(args.rollDataFile)

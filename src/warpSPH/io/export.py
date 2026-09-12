@@ -94,6 +94,15 @@ def exportSimulationSystem(
             outFile.attrs[key] = 'list'
         elif isinstance(value, torch.Tensor):
             outFile.create_dataset(key, data=value.cpu().numpy())
+        elif value is None:
+            # An unset optional case parameter. `None` maps to numpy object
+            # dtype, which h5py rejects ("no native HDF5 equivalent"), and that
+            # aborted the *whole* state write -- so any case carrying an unset
+            # optional in `extraData` could not be checkpointed at all
+            # (`sloshingTank`'s `noPenShift`). Record the key as an explicit
+            # sentinel instead of dropping it, so a reader can tell "unset"
+            # apart from "absent".
+            outFile.attrs[key] = 'None'
         else:
             # print(f'Exporting extra data key {key} with value {value} of type {type(value)}')
             outFile.attrs[key] = value

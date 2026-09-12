@@ -51,6 +51,15 @@ Reference material now on disk:
 
 # Current state & how to resume  (as of 2026-09-10)
 
+> **Superseded in part -- read §5.13 (2026-09-12) first.** Marrone 3.4 is now
+> **6/6 over the full record** under `'hybrid'` mDBC ghost placement, and
+> englishWedge's base-corner residual (the "NEXT" item below) is **fixed**
+> (RMSE 0.0431 -> 0.0178). sloshingTank's divergence is root-caused to
+> `mdbcNoPenShiftMode = 'derivative'` and runs the full 7 s under `'finalize'`.
+> §5.13 also lists four scheme changes **rejected on measurement** -- including
+> the `rho_b` clamp work §5.10 points at -- so check it before retrying any of
+> them. §5.10's causal chain for the 3.4 blow-up is superseded.
+
 The audit (Parts 1–4), the original `c₀` / integrator / mDBC-determinant-gate
 work, **and** the 2026-09-10 boundary-sampling session (`sample/regular.py`,
 `caseUtils/weaklyCompressible.py`, `cases/dambreak.py`,
@@ -3238,3 +3247,382 @@ So the rule is `n_hat . g < 0` -> keep discarding; `> 0` -> let gravity act. A
 blanket "use `vFree` instead of `vPre`" would fix the ceiling and start dropping
 particles through floors. The grazing probe must cover **both orientations**
 before any fix is accepted.
+
+### 5.13 Marrone 3.4 fixed; sloshingTank root-caused to the no-pen mode  (2026-09-12)
+
+Two independent boundary defects, found by instrumenting rather than inferring.
+Marrone 3.4 is now **6/6 over the full record**; sloshingTank's divergence is
+root-caused and has a one-flag fix. Four plausible-looking scheme changes were
+tried and **rejected on measurement** -- recorded below so they are not retried.
+
+#### (a) mDBC ghost placement -- `'hybrid'`, and what M34's blow-up actually was
+
+5.10's account of the 3.4 failure (wall attracts -> per-component reflection was
+masking it -> vector reflection exposed it) is **superseded**. The real cause was
+ghost *placement*, and 5.10's own severity claim was overstated in one respect:
+gridsnap never places a node inside the solid. Measured with a sign test on the
+merged SDF at nx = 256, every node it *places* clears the solid (min sdf
++0.0038); the 1187 particles at issue are **declined** -- the retraction loop
+exhausts, the offset collapses to zero, and the ghost then coincides with its own
+boundary particle (which is inside the solid band by construction, which is what
+an earlier "637 ghosts inside the solid" count was really seeing). So the defect
+is lost *coverage*, not corrupted data: those particles fall back to Shepard /
+rest density instead of getting an extrapolation.
+
+Root cause of the decline, from the SDF field export
+(`scratchpad/dump_m34_sdfField.py`): the merged solid is built entirely from
+`min`/`max` CSG combinations, and every such combination is only C0 -- it has a
+real gradient kink wherever two terms cross, and the kink locus can be a *curve*
+with awkward topology, not a line. Isolating `dFillet = max(box, -disc)` alone
+reproduces a spurious crescent kink sitting in open fluid, where `|grad|`
+measures **0.005** instead of 1. `_mergedSurface`'s central difference
+(`eps = 0.1 dx`) cannot survive that, so the normal is mis-aimed, the retraction
+never finds a clearing node, and the offset zeroes. Pointwise the merged SDF is
+*correct* everywhere tested (sign and value); only the derivative is unusable.
+
+Two fixes were tried on the placement itself:
+
+* **`'lattice'` (`_latticeGhostOffsets`, new)** -- sign-only, no gradient
+  anywhere. Classify the sampling lattice fluid/solid by sign, take the nearest
+  fluid site as the escape direction, step out to the mirror distance
+  `2 |sdf(r_b)|`, snap back to the lattice. Flat walls reproduce `'gridsnap'`
+  **exactly** (570/570 identical offsets), and at the convex 45 deg apex it is
+  strictly better: **21/21 nodes land on a lattice site vs 0/21** for gridsnap,
+  which averages 0.41 dx (up to 0.62 dx) off-lattice there because its
+  `(floor(d/dx)+0.5) dx` arithmetic assumes an axis-aligned wall and cannot hit
+  the lattice on a 45 deg face. But *as a wholesale replacement it is worse on
+  the case* -- 3/6 gates, obstacle penetration unchanged at 16.24 dx -- because
+  its longer levers (max 20.5 vs 14.0 dx) and its ghost sharing at the apex
+  (16 distinct sites for 21 particles) cost more than the conditioning gains.
+* **`'hybrid'` (`_hybridGhostOffsets`, the keeper)** -- gridsnap everywhere it
+  produces a fluid-side node, lattice **only** for the particles it declines.
+  Spatially the rescue is entirely at the wedge base and the fillet (737
+  particles); the tank walls are untouched, so it is a no-op on flat geometry by
+  construction.
+
+| Marrone 3.4, nx=256, delta-SPH + PST, symplecticEuler, freeSlip | gridsnap | lattice | **hybrid** |
+|---|---|---|---|
+| gates | 1/6 | 3/6 | **6/6** |
+| max\|v\| | 14090 (2307 U_max) | 93.2 | **27.7 (4.5 U_max)** |
+| tank-wall penetration | 72706 dx | 6.89 dx | **0.00 dx** |
+| obstacle penetration | 15.95 dx | 16.24 dx | **0.16 dx** |
+| rho [P05, P99] | [0.717, 1.307] | [0.964, 1.079] | **[0.9983, 1.0184]** |
+| rho pointwise max | 93.4 | 18.4 | **1.150** |
+| KE_end | 2.04e5 | 58.4 | **22.5**, decaying |
+| zero-offset fallbacks | 1187 | 450 | 450 (toe 440, **fillet 0**) |
+
+**The onset does not move** -- maxv lifts off at t ~ 0.61 s in every variant.
+That event is the front reaching the obstacle, a real flow feature; the boundary
+treatment was amplifying it into a runaway, not causing it. Under hybrid it
+peaks 27.7 at t\* = 1.97 and decays monotonically.
+
+**Full record t\* = 7.5 holds 6/6** (10741 steps): max\|v\| still 27.7 (nothing
+later exceeds the first impact), obstacle penetration 0.16 -> 0.21 dx over twice
+the duration, tank walls 0.00 dx throughout. The P1-P9 probes fire in the right
+order and match the documented phenomenology -- edge P1-P3 peak at t\* 1.84-1.98
+(68 / 58 / 89 rho g H), roof P4-P6 at t\* 5.9-6.2 (the re-impact 5.2.2 predicts
+at ~5.5), fillet P7-P9 at t\* 7.1-7.5 with only 61-573 wet samples and still
+rising at the end ("barely wets by t\* = 7.4"). Raw edge peaks sit above
+Wagner's 36.7 rho g H, which is item 3's point-probe gap, not a scheme error.
+
+**englishWedge dp = 0.01 also improves, resolving the plan's open
+concave-corner item:** base-corner RMSE **0.0431 -> 0.0178** (gate 0.03), better
+than the old bodynode 0.0150/9-9 reference; faces 0.033 -> 0.012, apex
+0.015 -> 0.008, 0 dx penetration. Still 8/9, but the failing check is now
+"kinetic energy not growing" (2nd-half dKE/dt 5.3e-05 against a settled KE of
+1.7e-04, itself under the 5.6e-04 gate) -- suspected an artifact of running
+t = 8 s against English's 4 s, since that envelope compares halves of the
+record. Unresolved.
+
+#### (b) The solid/fluid partition had a hole -- `regions/filter.py`
+
+`regions/sample.py:31` claims `sdf < 0` for the boundary band and
+`regions/filter.py:20` claimed `sdf > 0` for fluid, leaving `== 0` claimed by
+**neither**. That is not hypothetical: the 3.4 obstacle is built from exact
+multiples (`H = W/10`, `toe_x` an integer number of dx from the centre), so its
+top and back faces land exactly on lattice rows and lost a full row from *both*
+bands -- a one-particle hole in the wall on the faces the jet hits hardest, the
+same mechanism 5.2.2 blames for the old 1.25 dx obstacle penetration at the
+`toe_x` seam. Fixed by `filter.py` taking `>= 0` (the zero goes to fluid, so the
+solid stays exactly what the SDF calls negative; giving it to the boundary would
+grow every lattice-coincident wall by a row). A no-op wherever nothing is
+lattice-coincident. With it, wedge-top ghosts sit at exactly +1, +2, +3, +4, +5 dx
+mirroring boundary rows at -1..-5, and the fallback count drops 932 -> 450.
+
+A `dx/2` embedding of the obstacle/fillet bottom edges (and the fillet's right
+edge, into the downstream wall) was tried first, to break the same coincidence
+geometrically -- `_marroneSharpEdgeSDF` now takes `dx` for it. **It did not
+help on its own**: the ghost fallback counts barely moved (toe 756 -> 759,
+fillet 342 -> 336), and it is resolution- and geometry-specific where the
+`filter.py` partition fix is universal. **Kept anyway, not reverted**, for two
+reasons: it removes a genuine coincident-surface seam between the obstacle and
+the tank's own SDF (two independent SDFs sharing an exact zero level, which is
+what makes `_mergedSurface`'s central difference ambiguous there), and every
+M34 result in this section -- including the 6/6 -- was measured with it in
+place, so removing it now would mean shipping something other than what was
+validated. Treat it as a neutral cleanup whose effect is bundled into those
+numbers, not as an independently justified fix.
+
+#### (c) sloshingTank -- `mdbcNoPenShiftMode = 'derivative'` is the root cause
+
+The divergence at **t = 4.5726** (45,726 steps, NaN, rho -> 1.9e30, void
+fraction 0.36) is **pre-existing on HEAD and unrelated to (a)/(b)**, which are
+provable no-ops on this case: 0 fluid sites at `sdf == 0` (the tank walls
+straddle at exactly +-0.5 dx), 0 of 3620 gridsnap nodes declined, hence 0
+rescued and **bit-identical offset arrays**. 5.10's own results table lists only
+`sloshingTank, t 4.5 | 45000 steps` for the committed normal-vector reflection --
+the same numbers -- and warns that earlier baselines "need re-running before
+being compared against anything new". This is that.
+
+Found by checkpointing and resuming (below) rather than by inference. It is **one
+particle**, UID 4804, sliding along the ceiling:
+
+| step | y | v_norm | nopen_n | rho | fluid nb |
+|---|---|---|---|---|---|
+| 43500 | 0.50819 | -0.012 | +0.014 | 0.995 | 6 |
+| 43580 | 0.50809 | -5.545 | +6.063 | 0.938 | 6 |
+| 43700 | 0.50803 | -19.87 | +20.44 | 0.800 | 3 |
+| 44000 | 0.50802 | -20.38 | +20.88 | 0.602 | **0** |
+
+`v_norm` is the velocity on the inward normal (negative = into the ceiling).
+`nopen_n ~ -v_norm` at **every** step: the correction cancels the *displacement*
+exactly -- `y` is pinned to five decimals -- but the stored velocity keeps its
+-21 m/s normal component indefinitely, because in `'derivative'` mode the term
+is summed into `dvdt` as a force and a force can only oppose a velocity, never
+replace it. The continuity equation then dots that phantom normal velocity into
+the gradient sum and grinds rho from 0.995 down to 0.60 while the particle sheds
+all six fluid neighbours. 5.9 already recorded this deviation -- "applied as an
+acceleration summed into `dvdt` rather than DualSPHysics' post-integration
+velocity replacement" -- without connecting it to a failure.
+
+**The tangential story is a red herring, disproved by measurement** (user's
+call, confirmed): `SUM_j (m_j/rho_j) grad W_ij` over the wall stencil is purely
+normal to 1 part in 1e4, and the wall particles share one velocity exactly
+(`spread = 0`, because the roll is applied as a *rotating gravity vector*, not
+tank motion), so `(v_i - v_wall)` factors out and tangential sliding contributes
+**+0.0085 of a total +1352**. A one-sided stencil does not manufacture density
+error from tangential motion.
+
+**`'finalize'` fixes it.** Swapping only the mode on a resume from the same
+checkpoint:
+
+| mode | v_norm over 300 steps | rho | y |
+|---|---|---|---|
+| `derivative` | -0.012 -> **-21.0** | 0.995 -> **0.707** | pinned 0.50803 |
+| **`finalize`** | -0.012 -> **~0** | 0.995 -> **0.995** | 0.50819 -> **0.50704** (drops away) |
+| `off` | stays small | healthy | 0.50819 -> **0.51205** (drifts up, nothing arrests it) |
+
+Under `finalize` the velocity is genuinely replaced, the particle reflects and
+**falls away from the ceiling**, rho recovers within a few steps, and
+`nopen_n -> 0.000` because there is no longer any into-wall motion. Full 7 s
+run: `diverged=False`, 70001 steps, densityMedian 1.0029 (baseline ~1.005), KE
+final 0.0247 (~0.028), voidFraction max **0.00097** (vs 0.36-0.43),
+pairedFraction max 0.080 (vs 0.29-0.36), maxDensity max 2.0056 (vs 1.9e30),
+`sensorRho` [0.853, 1.249] so the negative-pressure transients 5.2.3 validates
+are present. The raw sensor peak 213.8 kPa against the measured 2.2-13.1 kPa
+band is the pre-existing `machTarget` item, not a no-pen question.
+
+**Not flipped as the default.** `'derivative'` is labelled historical and
+`'finalize'` is the reference behaviour, but 5.12's ceiling/gravity concern is
+specifically about `finalize`'s `vPre` discarding the step's gravity, which
+wants its own check first -- and see the open items below, where a ceiling
+particle under `finalize` hovers without dropping.
+
+#### (d) Rejected on measurement -- do not retry
+
+All four looked right on a synthetic harness or from the source and failed on
+the real case. All reverted; `density2025.py` and `wp_surfaceAware.py` are at
+HEAD.
+
+1. **Cavitation-style floor on `rho_b`** (`clamp(rho_b, min=rho_floor)` from an
+   EOS-inverted ~1 atm tension limit). Engaged exactly as designed (min pinned
+   at 0.9871 from t = 0.6 s) and changed nothing: 3.4 still failed 5/6 gates
+   with the same onset. The floor was bounding the wrong side.
+2. **Symmetric ceiling as well** (bound `rho_b` above too). Also failed, and
+   is fragile on its own terms -- hydrostatic pressure exceeds a fixed 1 atm
+   bound at scale (user's objection).
+3. **Dropping the fallback `min=rho0` clamp** + relaxing `numNeighbors > 1` to
+   `> 0`, so the wall can follow the fluid into tension. `probe_mdbcSparseFluid
+   --rhoSweep` shows the clamp *is* one-sided and rectifying -- the wall tracks
+   rho_fluid exactly above rho0 (dp = 0) but floors every sub-rho0 reading, so a
+   tensioned near-wall particle faces `p_b = 0` and an unbalanced jump. But
+   removing it made sloshing **worse** (died t=2.39 vs 4.57), because with
+   `mask_i == 1` the Antuono switch takes `P_i + P_j` and a mirrored wall gives
+   `2 P_i`: measured -6.06e3 -> **-1.04e4** on the harness.
+4. **The three-part combination** -- clamp removal + restricting the Antuono
+   free-surface override to fluid-fluid pairs + `supportScale 1.0 -> 2.0` for the
+   ghost search (Marrone's larger boundary radius, which addresses the real
+   inconsistency that a deep wall particle is inside the fluid's kernel support
+   while its ghost reaches no fluid). On the harness this is excellent and the
+   three are strictly coupled -- any two without the third is neutral or worse,
+   and together the spurious attraction goes -6.06e3 -> **+1.9e-4** at 3.0x, i.e.
+   zero to float noise. On the case it **diverged at t = 2.39 s**. Best read:
+   at enlarged reach the ghosts start reading fluid that is not physically
+   adjacent, including free-surface spray (`sensorRho` hit the 0.05 floor), and
+   with `numNeighbors > 0` a single distant stray can set `rho_b` outright.
+   The harness has one clean cluster and no spray, so it could not show this.
+
+Note for (3)/(4): `supportScale` is silently capped by a precomputed adjacency,
+which is built at fluid support -- the first two attempts to enlarge it measured
+byte-identical until the call was made to fall through to `interpolateLiuLiu`'s
+own grid search.
+
+#### (e) Checkpoint / resume now works -- two bugs fixed
+
+`storeMode='states'` was unusable, which is why this session burned runs on
+hypotheses instead of reading the failing state:
+
+* `io/export.py` -- a `None` in `extraData` (sloshingTank's unset
+  `noPenShift`) maps to numpy object dtype, h5py rejects it, and the exception
+  aborted the **whole** state write. Now recorded as the sentinel `'None'`.
+* `io/hdf5.py` `loadState` -- `UIDcounter` is a scalar, so the writer never
+  emits it and rebuilding the state dataclass failed on the missing required
+  argument, making every checkpoint unloadable. Now derived from `UIDs.max()+1`,
+  the reconstruction `importIO.py:210` already uses.
+* `examples/sloshingTank/run_sloshingTank.py` gained `--storeInterval` /
+  `--storeMode`; the flags were unreachable from the CLI.
+
+Still broken, worked around: `schemeNameToSimulationScheme` loops
+`CompressibleSPHScheme` before `WeaklyCompressibleSPHScheme`, so `deltaSPH`
+resolves to the compressible variant and `importSimulationSystem`'s stage loader
+builds the wrong Update class (`CompressibleSystemUpdate` missing `dudt`/`dEdt`).
+Load the `state` group directly with `loadState` to sidestep it.
+
+The resume loop that cracked (c): `scratchpad/probe_slosh_resume.py` grafts a
+checkpoint into a live system (the integrator wants the *system* wrapper, with
+particles at `.state`) and steps forward with per-step instrumentation on one
+UID, including a `--noPenShift` override so modes can be A/B-ed from an
+identical state in seconds rather than one 1.5 h run per hypothesis.
+
+#### New probes
+
+| script | what it answers |
+|---|---|
+| `scripts/probe_mdbcSparseFluid.py` | does the wall generate pressure against sparse fluid it shouldn't? `--rhoSweep` sweeps the cluster density above *and* below rho0 and reports the jump `p_fluid - p_b`; `--surfaceMask` flags the cluster as free-surface, which is the realistic case and the one that flips the Antuono branch |
+| `scratchpad/probe_slosh_resume.py` | resume a checkpoint, step forward, per-step trace of one UID; `--noPenShift` A/B |
+| `scratchpad/probe_slosh_gradsum.py` | recovers `SUM (m_j/rho_j) grad W_ij` from the real operator (zero the query velocity, set all others to a uniform `e`) to decompose drho/dt into normal vs tangential |
+| `scratchpad/dump_m34_sdfField.py` | merged SDF value + central-difference gradient + zero isoline, whole domain / wedge / fillet -- how the CSG kinks were found |
+| `scratchpad/cmp_apex_sampling.py`, `dump_hybrid_rescue_map.py` | apex ghost placement gridsnap vs lattice; which particles the hybrid rule rescues |
+
+#### Reproductions -- both issues have a named particle and an exact checkpoint
+
+Everything below is in **`export/16-sloshingTank-wcsph_2026-09-12_16-45-47`**
+(nx = 225, `--noPenShift finalize`, hybrid ghosts, 7 s clean, 141 checkpoints
+every 500 steps, 9.6 GB). Keep or regenerate with:
+
+```
+WARPSPH_GHOST_PLACEMENT=hybrid python examples/sloshingTank/run_sloshingTank.py \
+  --scheme wcsph --nx 225 --tLimit 7 --noPenShift finalize \
+  --store --storeMode states --storeInterval 500 --plot --video --out <dir>
+```
+
+| issue | reproduction |
+|---|---|
+| **hovering ceiling particle** | `UID 4104`, checkpoints `state_60000` (t = 6.0) onward. `python scratchpad/probe_slosh_resume.py --dir <dir> --from-step 60000 --steps 200 --every 25 --uid 4104 --noPenShift finalize` |
+| **few-neighbour cluster kick** | `UID 3792 / 4673 / 4006`, checkpoints `state_33500`-`state_36000` (t = 3.35-3.60), peak at `state_34500` (t = 3.45). `python scratchpad/probe_slosh_hover.py --dir <dir> --what rightwall` for the band summary; the resume probe with `--uid 3792` for the per-step trace |
+
+`scratchpad/probe_slosh_hover.py --what hover` lists the ceiling residents in
+the final checkpoint and traces them back; `probe_slosh_residual.py` scans all
+141 for the two signatures. Note the cluster event never touches
+`maxVelocity` (1.66 m/s absolute), so **neither issue is visible in the
+aggregate diagnostics** -- both were found from the field video and then
+localised from checkpoints.
+
+#### Open / next
+
+1. **Under `finalize`, a ceiling particle hovers without dropping -- NOT 5.12's
+   gravity discard.** The obvious attribution is wrong and was checked:
+   resuming at `state_60000` with `finalize`, `nopen_n = 0.000` at **every**
+   step and `v_norm ~ 0`, so the approach gate never fires, `active` is false,
+   and `vPre` is never used. What pins it is `dvdt_n` running **-28 to -123**,
+   i.e. a steady acceleration *into* the ceiling at 3-12x gravity, already net
+   of gravity's +9.81 the other way. With rho = 0.9992 the particle carries
+   p ~ -0.4 against a wall reading exactly rho0 (p_b = 0) -- the same
+   one-sided tension asymmetry `probe_mdbcSparseFluid --rhoSweep` measures in
+   (d)(3). It is mild but permanent, and it only has to beat 9.81 to pin a
+   particle indefinitely. **So the hover and (c)'s density collapse are two
+   different bugs**, and this one is in the pressure/wall-density path, not the
+   no-pen path -- nothing in the no-pen term will fix it.
+
+   5.12's rule itself still stands as a latent issue (a particle that *does*
+   approach a ceiling loses its gravity). It is **implemented and gated off**
+   behind `_RESTORE_GRAVITY_ON_CEILING_NOPEN` in `systems/weaklyCompressible.py`
+   (mean inward boundary normal from the neighbours' ghost offsets, restore
+   `dt (g . n_hat) n_hat` only where `g . n_hat > 0`). Left inactive on purpose:
+   there is no case that exercises it, and an unvalidated behaviour change to
+   `finalize` is how (d)'s four rejected fixes got expensive. Enable it
+   alongside a case where a particle genuinely approaches a ceiling. Note the
+   shift vector is *not* a usable proxy for the normal there -- its
+   `factor = -4 ratio + 3` goes negative past ~1.25 dx, so the shift can point
+   back into the wall.
+
+2. **The right-wall cluster just after t = 3.4 s is a thin-sheet event, not a
+   boundary one** -- an instance of 5.11's open class rather than a new
+   mechanism. Traced (UIDs 3792 / 4673 / 4006, checkpoints 33500-36000):
+   (bobbing at y ~ 0.05-0.16) until t ~ 5.8, is thrown to the ceiling, and then
+   sits there for the **last full second of the run -- 10,000 steps**:
+
+   | t | y | vy |
+   |---|---|---|
+   | 6.000 | 0.50707 | -0.0000 |
+   | 6.400 | 0.50701 | +0.0021 |
+   | 7.000 | 0.50700 | -0.0003 |
+
+   Under gravity it should cross the whole tank in that second. Its velocity is
+   purely tangential (0.1787, -0.0003), it has **0 fluid neighbours**, and
+   `rho = 0.99966` -- perfectly healthy, which is why it hovers rather than
+   exploding (contrast UID 4804 in (c), whose rho collapsed). So `finalize`
+   trades a density-destroying phantom velocity for a kinematically stuck
+   particle: strictly better, still wrong. This is 5.12's `vPre` discard, in
+   the orientation 5.12 says must *not* discard (ceiling: `n_hat . g > 0`,
+   gravity pulls away from the wall). Fix per 5.12's rule, and check a floor
+   too so it does not start dropping particles through beds. **Blocks making
+   `finalize` the default.**
+2. **The right-wall cluster just after t = 3.4 s is a thin-sheet event, not a
+   boundary one** -- an instance of 5.11's open class rather than a new
+   mechanism. Traced (UIDs 3792 / 4673 / 4006, checkpoints 33500-36000):
+
+   | t | \|v\| | rho | fluid nb |
+   |---|---|---|---|
+   | 3.350 | 1.22 | ~1.000 | **17** |
+   | 3.450 | **1.66** | 1.004 | **9** |
+   | 3.500 | **0.17** | 1.004 | 9 |
+   | 3.600 | 0.86 | ~1.000 | **18** |
+
+   Densities stay in [0.993, 1.009] throughout, so neither the wall reading nor
+   the density is implicated; what tracks the event is the **neighbour count
+   halving, 17 -> 9 -> 18**. The cluster thins away from the bulk, takes a ~2x
+   kick, decelerates 10x on reattachment, and recovers inside 0.1 s. Absolutely
+   it is mild (1.66 m/s) but it is **6.6x the local bulk median** (0.252),
+   which is why it reads as violent on screen while never touching the
+   aggregate maxima -- worth remembering when grading by `maxVelocity`. Same
+   family as 5.11's `rho_min 0.91` / 8.6 U_max sheet collapse and 5.7's tongue
+   fragmentation: "SPH with too few neighbours, not SPH against a wall". The
+   instrument 5.11 asks for (a thin-sheet probe, acceleration vs thickness) is
+   still the right next step, and this gives it a second, milder target to
+   reproduce alongside 5.11's.
+3. ~~Decide whether `'finalize'` becomes the default~~ **DONE -- both defaults
+   switched**: `_GHOST_PLACEMENT_DEFAULT = 'hybrid'`
+   (`rigidBody/ghostParticles.py`) and `mdbcNoPenShiftMode = 'finalize'`
+   (`configurations/weaklyCompressible.py`). Item 1 is *not* a blocker after
+   all -- it turned out not to be the `vPre` discard, so nothing in the no-pen
+   path gates it.
+3b. **`test_incompressibleKrylov.py::test_minresGivensMatchesDenseLstsq` is
+   skipped** -- it fails intermittently in a full-suite run but passes
+   standalone every time (3/3), so it is suite-ordering or RNG state rather
+   than the MINRES core, and it was red on every commit. Low priority, but
+   worth a look eventually: the random SPD/NSD systems in it are drawn with no
+   explicit seed, which is the obvious suspect.
+4. Marrone 3.1 under hybrid scored 5/9 with all four failures on P2, but the
+   comparison is confounded -- the ghost mode, the integrator/wall BC
+   (`symplecticEuler` + `freeSlip`, which postdate the last recorded M31
+   numbers) and the duration all changed at once, and one failure ("P2 back to
+   quiescent, max 3.034 for t\* > 6.4") is partly an artifact of running to
+   t\* = 10.1 when that envelope assumes the record ends near t\* ~ 7.7. P1
+   passes everything (arrival 2.51, plateau 0.47 vs Buchner 0.55, overshoot
+   0.89); wall penetration 0.95 dx / 1 particle. Needs the gridsnap control at
+   the identical config.
+5. `_gridSnapGhostOffsets` still declines 440 particles at the 3.4 toe, where
+   the fluid sliver between the wedge underside and the floor is genuinely
+   thinner than dx. Accepted for now (obstacle penetration is 0.16 dx), but it
+   is the remaining coverage gap.

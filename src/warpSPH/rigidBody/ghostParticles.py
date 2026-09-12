@@ -20,11 +20,15 @@ particle across the fluid-facing interface so its ghost node sits ~`dp/2` into
 the fluid for the first layer, ~`k dp` for the k-th.
 
 **Placement mode (`WARPSPH_GHOST_PLACEMENT`, or the `_GHOST_PLACEMENT_DEFAULT`
-constant).** Four paths, but only **`'gridsnap'` is used** -- nothing in the
-tree sets the env var. `'simple'`, `'bodynode'` and `'geometric'` are **parked**:
-kept as troubleshooting aids (each isolates a different piece of the placement
--- raw mirror / polyline surface / analytic normal) for a geometry `'gridsnap'`
-might get wrong, not as alternatives to select in normal use.
+constant).** **`'hybrid'` is the default** (`DELTASPH_VALIDATION_PLAN.md` 5.13):
+`'gridsnap'` everywhere it yields a fluid-side node, `'lattice'` only for the
+particles it declines. That took Marrone 3.4 from 1/6 to **6/6** gates over the
+full record (obstacle penetration 15.95 -> 0.16 dx) and fixed englishWedge's
+base corner (RMSE 0.0431 -> 0.0178); it is a no-op wherever gridsnap never
+declines, i.e. on flat geometry. `'simple'`, `'bodynode'` and `'geometric'` are
+**parked**: kept as troubleshooting aids (each isolates a different piece of the
+placement -- raw mirror / polyline surface / analytic normal), not as
+alternatives to select in normal use.
 
 * **`'gridsnap'` -- `_gridSnapGhostOffsets` (default, the only live path).**
   Take the distance `d`
@@ -91,16 +95,17 @@ GHOST_FLUID_DEPTH = 0.5
 
 #: mDBC ghost placement path, `WARPSPH_GHOST_PLACEMENT`.
 #:
-#: **`'gridsnap'` is the only production path** and no case / script / test sets
-#: the env var, so that is what everything runs. `'simple'`, `'bodynode'` and
+#: **`'hybrid'` is the production path** and no case / script / test sets the env
+#: var, so that is what everything runs; `'gridsnap'` remains the base it builds
+#: on and the thing to compare against. `'simple'`, `'bodynode'` and
 #: `'geometric'` are **parked** -- kept solely as troubleshooting aids for a
-#: geometry `'gridsnap'` might mishandle (they each isolate a different failure
+#: geometry the default might mishandle (they each isolate a different failure
 #: mode: `'simple'` = the raw capped mirror with no validity pass at all;
 #: `'bodynode'` = a marching-squares polyline instead of the merged SDF;
 #: `'geometric'` = the analytic `grad(sdf)` normal instead of the mollified
 #: central difference). Do not reach for them in normal use; if one of them
-#: fixes a case that `'gridsnap'` breaks, that is a bug report for
-#: `_gridSnapGhostOffsets`, not a mode to switch to.
+#: fixes a case the default breaks, that is a bug report for
+#: `_gridSnapGhostOffsets` / `_hybridGhostOffsets`, not a mode to switch to.
 #:
 #:  * `'gridsnap'` -- node at `ceil(d/dx)*dx` past the merged solid surface, so
 #:    the layout is independent of the sub-dx lattice phase; the one strategy
@@ -111,8 +116,21 @@ GHOST_FLUID_DEPTH = 0.5
 #:    once an obstacle breaks the alignment.
 #:  * `'bodynode'` (parked) -- the 2D marching-squares polyline mirror (Marrone
 #:    2011 App. A). `'geometric'` (parked) -- grad(sdf) mirror + validity retract.
-_GHOST_PLACEMENT_DEFAULT = 'gridsnap'
-_GHOST_PLACEMENT_MODES = ('gridsnap', 'simple', 'bodynode', 'geometric')
+#:  * `'lattice'` -- `_latticeGhostOffsets`. Never evaluates an SDF *gradient*,
+#:    only its sign, so none of the `min`/`max` CSG kink loci that break
+#:    `_mergedSurface`'s central difference can reach it
+#:    (`DELTASPH_VALIDATION_PLAN.md` 5.10). The full sampling lattice is
+#:    classified fluid/solid by sign; each boundary particle takes the nearest
+#:    *fluid* lattice point as both its escape direction and its depth scale,
+#:    then steps out along that ray to the mirror distance and snaps to the
+#:    nearest fluid lattice point again. Exact on a lattice-aligned flat wall
+#:    (reproduces `'gridsnap'` layer for layer) and degrades softly rather than
+#:    collapsing to a zero offset where the geometry is unresolvable.
+#:  * `'hybrid'` -- `_hybridGhostOffsets`. Trial: `'gridsnap'`, with
+#:    `'lattice'` substituted only for the particles whose gridsnap node lands
+#:    inside the solid (its declined / zero-offset set).
+_GHOST_PLACEMENT_DEFAULT = 'hybrid'
+_GHOST_PLACEMENT_MODES = ('gridsnap', 'simple', 'bodynode', 'geometric', 'lattice', 'hybrid')
 
 
 def _ghostPlacementMode():
@@ -393,6 +411,131 @@ def _gridSnapGhostOffsets(bpos, solidSdfs, dx, hMean, *, nRetract: int = 12):
     return best
 
 
+def _nearestFluidCell(query, fluidCells, chunk: int = 512):
+    """Index of the nearest `fluidCells` row to each `query` row, brute force in
+    chunks (setup-only, and the lattice is small)."""
+    out = torch.empty(query.shape[0], dtype=torch.int64, device=query.device)
+    for lo in range(0, query.shape[0], chunk):
+        hi = min(lo + chunk, query.shape[0])
+        d2 = torch.cdist(query[lo:hi], fluidCells)
+        out[lo:hi] = torch.argmin(d2, dim=1)
+    return out
+
+
+def _latticeGhostOffsets(bpos, solidSdfs, dx, hMean, *, margin: int = 8):
+    """mDBC ghost offset `r_b - r_g` placed purely on the **sampling lattice**,
+    using only the *sign* of the solid SDFs -- never a gradient.
+
+    `_mergedSurface`'s central difference is unreliable wherever two terms of the
+    `min`/`max` CSG tree cross (the merged field is only C0 there, and the kink
+    locus can be a curve: the Marrone 3.4 fillet's `max(box, -disc)` puts one in
+    open fluid, where `|grad|` measures 0.005 instead of 1). Downstream that mis-
+    aimed normal makes `_gridSnapGhostOffsets`' retraction exhaust and silently
+    fall back to a zero offset -- i.e. a ghost node left *inside the solid*, at
+    the boundary particle's own position: 637 of 2219 particles at the wedge toe
+    and 99 of 521 at the fillet, at nx = 256. The sign of the same field is
+    correct everywhere, so this path uses nothing else.
+
+    Method: lay the sampling lattice (phase anchored on the boundary particles
+    themselves) over the boundary's neighbourhood, label each site fluid where
+    every solid SDF reads `> 0`, and for each boundary particle
+
+      1. take `g0`, the nearest fluid site -- a direction that provably points
+         into resolved fluid;
+      2. step out along that ray to the mirror distance `2 |sdf(r_b)|` (the SDF
+         *value* is sound everywhere; only its gradient is not);
+      3. snap to the nearest fluid site again, keeping the node on the lattice.
+
+    Flat wall, cleanly straddled: layer 1 sits `0.5 dx` behind, so the target is
+    `dx` and the node is `g0` itself (offset `dx`); layer 3 targets `5 dx` and
+    lands on fluid row 3 (offset `5 dx`) -- identical to `'gridsnap'`, so flat
+    regions do not move. On a face that lands *on* lattice rows instead of
+    straddling them (the Marrone 3.4 obstacle: `H = W/10` with `H/dx` integral)
+    a layer-1 particle sits a full `dx` behind, targets `2 dx`, and still lands
+    on its true mirror. At a concave corner the diagonal `sqrt(2) dx` spacing
+    is handled by the snap rather than by a hop count, which would overshoot.
+
+    Deep layers (`depth > 2 h`, past any fluid particle's support) keep the
+    existing zero-offset -> Shepard/rest fallback.
+    """
+    dx = float(dx)
+    dim = bpos.shape[-1]
+    anchor = bpos[0]
+
+    lo = bpos.min(dim=0).values - margin * dx
+    hi = bpos.max(dim=0).values + margin * dx
+    iLo = torch.floor((lo - anchor) / dx - 0.5).to(torch.int64)
+    iHi = torch.ceil((hi - anchor) / dx + 0.5).to(torch.int64)
+    axes = [torch.arange(int(iLo[k]), int(iHi[k]) + 1, device=bpos.device,
+                         dtype=bpos.dtype) for k in range(dim)]
+    grids = torch.meshgrid(*axes, indexing='ij')
+    cells = anchor.unsqueeze(0) + torch.stack([g.reshape(-1) for g in grids], dim=-1) * dx
+
+    def merged(p):
+        v = None
+        for s in solidSdfs:
+            vi = s(p)[0].reshape(-1)
+            v = vi if v is None else torch.minimum(v, vi)
+        return v
+
+    # `>= 0` (not `> 0`) so a site exactly on the interface counts as fluid --
+    # the same total-partition convention as `regions/filter.py`, and the
+    # reason the wedge top (whose faces land exactly on lattice rows) no longer
+    # loses a row from the ghost lattice.
+    fluidCells = cells[merged(cells) >= 0]
+    if fluidCells.shape[0] == 0:
+        return torch.zeros_like(bpos)
+
+    # Depth behind the surface from the SDF *value*. Magnitude is sound
+    # everywhere (it is only the gradient that the CSG kinks corrupt), and
+    # using it keeps the mirror distance independent of how the geometry
+    # happens to land on the lattice: `2 l - dx` would silently assume the
+    # clean straddle and, on a lattice-coincident face, place the node exactly
+    # *on* the surface -- the most one-sided stencil there is.
+    depth = (-merged(bpos)).clamp_min(0.0)
+
+    g0 = fluidCells[_nearestFluidCell(bpos, fluidCells)]
+    ray = g0 - bpos
+    length = ray.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+    # Mirror distance, but never shorter than the first available fluid site
+    # (a sub-dx sliver can leave nothing closer).
+    target = (2.0 * depth).unsqueeze(-1).clamp_min(length)
+    ideal = bpos + ray / length * target
+    rg = fluidCells[_nearestFluidCell(ideal, fluidCells)]
+
+    offsets = bpos - rg
+    # Past 2 h no fluid particle can reach the node, so leave it at zero (the
+    # Shepard / rest-density fallback -- Marrone's "not considered").
+    return torch.where((depth <= 2.0 * float(hMean)).unsqueeze(-1),
+                       offsets, torch.zeros_like(offsets))
+
+
+def _hybridGhostOffsets(bpos, solidSdfs, dx, hMean):
+    """`'gridsnap'` everywhere it produces a fluid-side node, `'lattice'` only
+    where it does not -- i.e. where its retraction loop exhausted and the offset
+    collapsed to zero, leaving the ghost on the boundary particle itself (inside
+    the solid). A trial hybrid: it keeps gridsnap's placement, including its
+    off-lattice nodes on non-axis-aligned faces, and only rescues the declined
+    particles (1187 of 8711 on Marrone 3.4 at nx = 256, concentrated at the toe
+    and the fillet)."""
+    base = _gridSnapGhostOffsets(bpos, solidSdfs, dx, hMean)
+
+    def merged(p):
+        v = None
+        for s in solidSdfs:
+            vi = s(p)[0].reshape(-1)
+            v = vi if v is None else torch.minimum(v, vi)
+        return v
+
+    # `< 0` (strictly inside), matching the total-partition convention: a node
+    # exactly on the interface is fluid and needs no rescue.
+    inSolid = merged(bpos - base) < 0
+    if not bool(inSolid.any()):
+        return base
+    alt = _latticeGhostOffsets(bpos, solidSdfs, dx, hMean)
+    return torch.where(inSolid.unsqueeze(-1), alt, base)
+
+
 def addBoundaryGhostParticles(regions, particleState : Any):
     device = particleState.positions.device
     dtype = particleState.positions.dtype
@@ -437,6 +580,15 @@ def addBoundaryGhostParticles(regions, particleState : Any):
                 # independent of the sub-dx lattice phase, copes with an
                 # obstacle touching the box wall.
                 offsets = _gridSnapGhostOffsets(bpos, solidSdfs, dx, hMean)
+            elif mode == 'lattice':
+                # Sign-only: nearest fluid lattice site for direction + depth,
+                # stepped out to the mirror distance, snapped back to the
+                # lattice. No SDF gradient anywhere.
+                offsets = _latticeGhostOffsets(bpos, solidSdfs, dx, hMean)
+            elif mode == 'hybrid':
+                # gridsnap, with the lattice snap rescuing only the nodes it
+                # would otherwise leave inside the solid.
+                offsets = _hybridGhostOffsets(bpos, solidSdfs, dx, hMean)
             else:
                 # Parked paths. The English et al. 2022 reflection along
                 # grad(sdf), node depth capped at 1.5 h, is their shared start.
