@@ -816,7 +816,28 @@ def weaklyCompressibleDiagnostics(ctx: RunContext, state) -> Dict[str, float]:
         if densities.numel() else float('nan'),
     }
     out.update(particleDistributionMetrics(ctx, state))
+    out.update(stepAccelerationDiagnostics(state))
     return out
+
+
+def stepAccelerationDiagnostics(state) -> Dict[str, float]:
+    """Per-step fluid acceleration / mDBC no-pen shift stats, if
+    `WeaklyCompressibleSystem.finalize` stashed any on `state.stepDiagnostics`.
+
+    Added so tracing an outlier acceleration (a sudden-ejection report like
+    `DELTASPH_VALIDATION_PLAN.md`'s Marrone 3.1/3.4 overnight-batch findings)
+    does not require re-instrumenting a probe script and re-running the case
+    from scratch every time: the min/max/mean/p05/p95 of the *actual*
+    per-step fluid acceleration (`(v_after - v_before) / dt`, magnitude and
+    per axis) and, when `mdbcNoPenShiftMode == 'finalize'` (the default), how
+    many fluid particles the no-pen correction touched and by how much, ride
+    on every trajectory row already -- no guessing after the fact whether
+    `nopenshift` was the cause of a spike.
+
+    Returns `{}` when `finalize` populated nothing (e.g. a non-WC scheme, or
+    the case's own `diagnostics` runs before any step has happened).
+    """
+    return dict(getattr(state, 'stepDiagnostics', None) or {})
 
 
 def _convexHullArea(points: 'Any') -> float:

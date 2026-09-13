@@ -242,9 +242,14 @@ rotatingSquarePatchCase = registerCase(Case(
         rotation=0.0,
         omega=4.0,
         # Seed t=0 pressure with the incompressible Poisson solution
-        # (Sun 2019 §3.3). Off by default so recorded runs are unchanged;
-        # `box` shape only. See `_seedPoissonPressure`.
-        poissonPressureInit=False,
+        # (Sun 2019 §3.3), `box` shape only (see `_seedPoissonPressure`).
+        # Was off by default; that left p to ring up from zero through the
+        # documented ~2 tω acoustic start-up transient, which at this case's
+        # `tLimit=1.0`/`omega=4.0` (tω=4) spans essentially the whole run and
+        # drives the observed early arm fragmentation. On by default now --
+        # `_seedPoissonPressure` no-ops (prints and leaves p=0) for any shape
+        # other than `box`, so non-box presets are unaffected.
+        poissonPressureInit=True,
         # Target Mach number: pick `dt`/`c0` so `Umax/c0 = mach` at every
         # resolution (see `_setupTimestep`). `None` falls back to the fixed
         # `targetDt`, whose Mach number climbs with `nx`. Sun et al. 2019 keep

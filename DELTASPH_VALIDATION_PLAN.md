@@ -4074,3 +4074,1677 @@ as a stable, clearly-named pair kept specifically for reuse in future
 documentation (write-ups, presentations) -- still gitignored (these are
 large binaries, ~50-75 MB each), so reference the path, don't expect `git
 show` to find them.
+
+### 5.17 The §5.14/5.15 artifact confirmed on Marrone 3.1 itself, not just sloshingTank  (2026-09-13)
+
+An overnight batch (`scratchpad/run_overnight_batch.sh`) ran Marrone 3.1
+(nx=67, plain `deltaSPH`, PST on) to t=5.0s (t*≈20.2) and flagged a visible
+free-surface destabilisation around t≈1.5s that "doesn't look energy
+conserving" -- the scalar trace (`kineticEnergy` in the run's npz) shows real
+*increases*, not just noisy decay: e.g. 0.248→0.339→0.474→0.554 over 0.15s at
+t≈2.05-2.25s with nothing external doing work.
+
+Re-ran the identical config to t=2.6s with `store='states'`/`storeMode='states'`
+(full per-particle export every 100 steps, `scratchpad/m31_dig/`) and diffed
+consecutive stored frames for anomalous velocity jumps. Two clusters, both
+matching the §5.15 signature exactly:
+
+- **t≈1.50-1.65s (t*≈6.0-6.7)**, the reported event: particles on the
+  left-side backwash sheet (x≈-1.07 near the original dam wall, and a second
+  cluster at x≈0.05-0.22 spanning the surface down to ≈0.24 depth) show
+  O(450-720 m/s²) (45-70 g) accelerations between consecutive stored frames
+  (~0.01s apart).
+- **t≈2.1-2.3s (t*≈8.6-9.2)**: the same signature spread across the *entire*
+  free surface (x from -1.6 to 0), not one location.
+
+In every case: `surfaceIndicators=1` (flagged free surface), density near
+rest (0.97-1.04 -- mild disorder, not a torn sheet), and **pressure flipping
+sign between consecutive stored frames** on the same particle (e.g. P = 333 →
+-271; another: -161 → 151 → -176). Sign-flipping pressure under mild disorder
+at truncated kernel support, on particles the Antuono switch (§5.14) routes
+to the symmetric branch, is exactly the mechanism §5.15 characterised on a
+bare synthetic slab -- not a resume/config/mDBC-wall defect, and not
+something specific to sloshingTank.
+
+**This raises the priority of §5.15's still-open decision.** It was left as
+"understood, not fixed" because it had only been shown on a secondary case
+(sloshingTank); it now demonstrably reaches Marrone 2011 §3.1 itself, at a
+resolution (H/dx=40) and duration inside the paper's own tested range. The
+next concrete step on this thread is picking one of §5.15's three options (a
+kernel-sum completeness correction to the symmetric term, tightening when the
+free-surface branch fires, or accepting the artifact as `sun2018` itself
+does) rather than another characterisation pass.
+
+Diagnostic scripts: `scratchpad/m31_dig_run.py` (the instrumented re-run),
+`scratchpad/m31_dig_analyze.py` (the frame-diff anomaly finder) -- both
+throwaway, not added to `scripts/`.
+
+### 5.18 Per-step acceleration / no-pen-shift instrumentation  (2026-09-13)
+
+Added because both this session's Marrone 3.1 dig (5.17) and the Marrone 3.4
+re-investigation (Part 7 below) kept needing to answer "was `nopenshift`
+involved in this spike, and how many particles did it touch?", which
+previously meant writing a one-off probe script and re-running the case from
+scratch each time.
+
+`WeaklyCompressibleSystem.finalize` (`systems/weaklyCompressible.py`) now
+computes, every step, on `self.stepDiagnostics` (a plain dict of Python
+floats):
+
+- `accelMag{Min,Max,Mean,P05,P95}` and `accel{X,Y}{Min,Max,Mean,P05,P95}` --
+  the *net* fluid acceleration actually applied this step,
+  `(v_after - v_before) / dt`, magnitude and per axis;
+- when `mdbcNoPenShiftMode == 'finalize'` (the default): `nopenshiftNActive`
+  (how many fluid particles the correction fired on) and
+  `nopenshiftMag{Min,Max,Mean,P05,P95}` (the correction's magnitude among
+  those particles). NaN-filled, not omitted, when nothing fired, so the
+  trajectory's columns stay a fixed shape.
+- `'derivative'`-mode's per-RK-stage no-pen term (`schemes/deltaSPH.py`,
+  `dvdt_nopenshift`) is **not** separately instrumented yet -- it is summed
+  into the stage acceleration alongside pressure/gravity/diffusion rather
+  than applied as a separate, easily-isolated correction, and the currently
+  active default is `'finalize'`.
+
+`cases/weaklyCompressible.py`'s new `stepAccelerationDiagnostics(state)`
+reads this dict back (returns `{}` before any step has run, or for a non-WC
+scheme) and is wired into every case's `diagnostics()` that already reports
+per-step scalars: `dambreak.py` (so every Marrone/englishWedge/openFlow run
+gets it), `sloshingTank.py`, and `weaklyCompressibleDiagnostics` (the shared
+helper `lidDrivenCavity`/`kolmogorov`/`randomFlow`/`impact`/`tgv`/
+`oscillatingDroplet`/`drivenSquare`/`movingObstacle`/`rotatingSquarePatch`
+already call) -- no per-case wiring needed beyond that one call. Every
+existing probe script's npz export keeps its own hardcoded column list, so
+picking these up in a saved `.npz` still needs that list extended (as done
+ad hoc in `scratchpad/m34_dig_run.py`); reading `r.trajectory` directly (a
+list of per-step dicts) already has them with no changes.
+
+### 5.19 Quantitative driver of §5.17: the artifact scales with c0², and Marrone 3.1's own weak-compressibility spec is what exposes it  (2026-09-13)
+
+The user noticed that `examples/weaklyCompressible/12-dambreak.py` (the plain
+gallery `dambreakCase`, default params) shows none of §5.17's free-surface
+destabilisation, and pointed at the one obvious difference: it runs at a much
+lower sound speed. Checked directly: `12-dambreak`'s legacy back-solved `c0`
+at its default `nx=128` is **19.76 m/s**; Marrone 3.1's validation config
+(`c0Ratio=40`, matching Marrone's own weak-compressibility spec) is
+**97.04 m/s** -- a 4.9x ratio.
+
+**This EOS is exact, not approximate, about why that matters.**
+`modules/eos/weaklyCompressible.py`'s `isoThermalEOS` (the scheme both cases
+use) is literally `P = c0² * (rho - rho0)`. The density noise that drives the
+§5.15/§5.17 symmetric-pressure-truncation artifact is a geometric/disorder
+effect (kernel-sum incompleteness at a truncated or sparse support) --
+nothing about *how much* a real particle's position is disordered depends on
+`c0`. So for the same absolute density noise `Δrho`, a higher `c0` produces a
+quadratically larger spurious pressure `P0 = c0² Δrho`, and the artifact's
+own force (`~2 P0 Sum V_j grad W_ij`, §5.15) scales with it directly.
+Marrone's validation protocol deliberately runs weakly-compressible (high
+`c0`, low Mach) to stay physically accurate to real water -- which is exactly
+what maximises this pre-existing artifact's absolute size. The two are not
+separate concerns: **making the compressibility more physically correct makes
+this artifact worse**, not better.
+
+**Confirmed by direct A/B** (`scratchpad/m31_c0sweep_run.py`): the identical
+Marrone 3.1 config (nx=67, PST on) run to t=1.9s at `c0Ratio=40` (c0=97.04,
+the validation config) vs `c0Ratio=8` (c0=19.41 -- matching `12-dambreak`'s
+own c0 almost exactly) --
+
+| c0Ratio | c0 (m/s) | peak `accelMagMax`, t in [1,1.9]s | peak `accelMagP95` (typical, t=1.4-1.85s) |
+|---|---|---|---|
+| 40 | 97.04 | **19,632 m/s²** | 250-3900 |
+| 8  | 19.41 | **1,146 m/s²**  | 45-75 |
+
+A 5x drop in `c0` gave a **17x drop** in the peak spurious acceleration --
+well above the 5x a linear relationship would give, and in the right
+neighbourhood of the 25x (5²) an exact quadratic would give (not exact
+because dt, substep count and the actual disorder realised also differ
+between the two legs, not just `c0`). `minDensity`/`maxDensity` move the
+*other* way (0.94/1.06 at `c0Ratio=40` vs 0.89/1.22 at `c0Ratio=8`) -- also
+expected, not a contradiction: a softer EOS (lower `c0`) lets any given
+velocity divergence, spurious or real, show up as a *larger* density swing
+(compressibility ~ 1/c0²), so density range is the wrong metric to grade this
+by; the force/acceleration columns (§5.18) are the ones that isolate the
+artifact from the EOS's own response to it.
+
+**Read for §5.15's still-open decision:** this doesn't change what the fix
+should be, but it does mean the fix is not optional for any case that wants
+to run genuinely weakly-compressible (high `c0Ratio`) *and* touch a free
+surface or sparse/truncated region -- the artifact is not a fixed-size
+nuisance, it scales directly with how physically accurate the compressibility
+is set to be. A case that only ever runs at a low, back-solved `c0` (like the
+gallery's default `12-dambreak`) is not "fine" in the sense of not having the
+bug; it simply isn't running weakly-compressible enough to expose it at a
+visible scale.
+
+### 5.20 Ruled out: PST/shifting is not the cause (and §5.17's "free-surface" framing was incomplete -- it's compressive-bulk too)  (2026-09-13)
+
+The user, from a video frame, flagged that the destabilisation looked like it
+was starting *in the bulk*, a few particle layers under the free surface, and
+asked whether particle shifting (PST) -- which Marrone 2011 Sec. 3 runs
+without -- could be the cause or a contributing factor, since every
+validation run so far (§5.17, §5.19's sweep included) left `shifting=None`,
+i.e. the scheme default of PST **on**, never Marrone's own no-PST spec.
+
+**Re-examining the existing §5.17 per-particle dump (with PST) first**:
+counting every anomalous-jump event over the full t=0-2.6s run, not just the
+hand-picked examples quoted in §5.17 --
+
+| | count | share |
+|---|---|---|
+| total anomalous events | 29,617 | -- |
+| flagged bulk (`surfaceIndicators=0`) both before and after | 10,823 | 36.5% |
+| touches `surfaceIndicators=1` (before or after) | 18,794 | 63.5% |
+
+So §5.17's write-up, which only quoted `surfaceIndicators=1` examples, was
+**incomplete, not wrong about the mechanism**: over a third of the events are
+on particles flagged bulk on both sides of the jump. This is not a surprise
+once you re-read §5.14's own description of the Antuono switch -- `sun2018`
+Eq. (9) picks the artifact-prone symmetric branch whenever the query
+particle's own pressure is non-negative **or** it's flagged free-surface; the
+`P_i >= 0` half of that condition fires for any compressive particle,
+anywhere, bulk included. The user's video observation is real and is the
+same mechanism, not a second bug.
+
+**Then a direct test of the PST hypothesis**: re-ran the identical Marrone
+3.1 validation config (nx=67, `c0Ratio=40`) with `shifting=False` -- Marrone's
+actual spec, and *also* the config the 2026-09-10 memory
+(`marrone31-mdbc-wall-regression`) recorded as unable to survive the first
+impact at all (t*~2.5, a spatial-operator instability, "halving dt makes it
+worse -- not CFL"). That finding no longer holds: this run went the full
+t=2.6s (t*~10.5) `diverged=False`, past both the first impact and the whole
+§5.17 destabilisation window -- consistent with the mDBC hybrid-ghost,
+`nopenshift='finalize'`, and Antuono-switch fixes landed since then having
+incidentally fixed it too (not confirmed further; a full no-PST regression
+pass is separate future work).
+
+**But turning PST off does not fix, or even clearly reduce, the
+destabilisation:**
+
+| | with PST (§5.17/5.19) | no PST (`shifting=False`) |
+|---|---|---|
+| peak `accelMagMax`, t in [1,2.6]s | 19,632 m/s² | **25,615 m/s²** (higher) |
+| total anomalous events, t=0-2.6s | 29,617 | 23,650 (~20% fewer) |
+| bulk-flagged share of those events | 36.5% | 38.7% (same, within noise) |
+| `pairedFraction` at t=1.5-1.7s | 3-7% | **9-17%** (2-3x higher) |
+
+PST is doing exactly what it's for -- `pairedFraction` (the clumping/tensile-
+instability signature) is 2-3x lower with it on, confirming it isn't inert
+here. But the peak spurious acceleration is *not* lower without PST (it's
+somewhat higher), the event count only drops ~20% (not the order-of-magnitude
+a primary cause being removed should give), and the bulk/surface split is
+unchanged. **Read: PST suppresses one disorder channel (particle pairing)
+that this codebase already knows can drive kernel-truncation artifacts
+(§5.15), but removing it just lets a different disorder channel (natural
+tensile-instability clumping, which is what PST exists to prevent) feed the
+same mechanism instead.** PST is not the cause, and is not a viable fix on
+its own -- it is a wash at best, and this specific run says slightly worse at
+the peak.
+
+**Net effect on §5.15's open decision: unchanged.** Both the c0² scaling
+(§5.19) and this PST A/B point at the same place -- the mechanism is
+`sun2018` Eq. (9)'s own switch condition acting on a *given* level of
+particle disorder, and neither compressibility nor shifting are things this
+plan should tune to avoid it; the fix has to be in the switch or the
+truncated symmetric term itself.
+
+Scripts: `scratchpad/m31_noPST_run.py` (the no-PST re-run, full per-particle
+states + video); reused `scratchpad/m31_dig_analyze.py`'s method for the
+recount, not the file itself.
+
+### 5.21 Also ruled out: the DDT's L-renormalization is not the cause -- disabling it trades fewer/smaller spikes for a chronically noisier free surface and ~2x the retained energy  (2026-09-13)
+
+Third candidate tested: `modules/deltaSPH/wp_densityDelta.py`'s density-
+diffusion (DDT) flux normally uses the Antuono-corrected, L-renormalized
+gradient `gradRhoL` (`DensityDiffusionScheme.deltaSPH`, the default) rather
+than the plain kernel-sum `gradRho` (`DensityDiffusionScheme.denormalized`).
+The renormalization matrix `L` comes from `detectFreeSurface`'s per-particle
+covariance fit -- structurally the same kind of fit (an MLS/covariance solve
+over the local neighbourhood) already found ill-conditioned at truncated/
+sparse support elsewhere in this codebase (the mDBC ghost-density fallback,
+`antuono-pressure-switch-bug`). Worth checking whether a bad `L` was itself
+injecting the density noise that then feeds the c0²-amplified pressure
+artifact (§5.19), on top of (or instead of) the Antuono pressure-switch's own
+truncation behaviour (§5.14/5.15).
+
+Same validation config as §5.17/5.19 (nx=67, `c0Ratio=40`, PST on) with only
+`schemeConfig.diffusionParams.densityDiffusionTerm` switched to
+`denormalized` (`scratchpad/m31_denorm_run.py`, via the same
+`configureScheme`-monkeypatch pattern `probe_deltaSPHMarrone34.py` uses for
+`noPenShift`). `diverged=False`, full t=2.6s.
+
+| | renormalized (`gradRhoL`, default, §5.17/5.19) | no PST (§5.20) | **denormalized (`gradRho`)** |
+|---|---|---|---|
+| peak `accelMagMax`, t=[1,2.6]s | 19,632 | 25,615 | **15,853** (lowest) |
+| total anomalous events, t=0-2.6s | 29,617 | 23,650 | **122,894** (4.1-5.2x more) |
+| bulk-flagged share of those events | 36.5% | 38.7% | **6.8%** |
+| touches free surface | 63.5% | 61.3% | **93.2%** |
+| peak `kineticEnergy`, t=[1,2.6]s | 0.714 | 0.662 | **1.519** (~2.1x higher) |
+
+**Worse overall, not better, despite the single worst spike shrinking.**
+Denormalizing the DDT does knock down the peak acceleration (lowest of the
+three configs tried), but at the cost of a **4-5x larger number** of
+anomalous events, now overwhelmingly (93%) at the free surface rather than
+split between bulk and surface, and roughly **double the sustained kinetic
+energy** through the same window -- visible directly in the video
+(`marrone31_denorm_clip_t1.0-2.5.mp4`): the free surface stays visibly
+noisier throughout, not just at the two previously-flagged spike windows.
+This is consistent with the renormalization's documented purpose (Antuono et
+al. 2010/2012 -- promotes the plain Molteni-Colagrossi Laplacian to a
+*bi*-Laplacian specifically so the diffusive term can reach a free surface
+without eating the real hydrostatic gradient, `wp_densityDelta.py`'s own
+docstring): removing it doesn't fail to help by being neutral, it measurably
+degrades exactly the free-surface dissipation the renormalization exists to
+provide. A smaller worst-case spike is a real effect, but comes from a
+generally noisier, less-dissipated flow overall, not from fixing anything.
+
+**Three for three now: neither PST (§5.20), the DDT renormalization
+(this section), nor a lower, less physically-correct sound speed (§5.19, and
+only as an artifact-hiding side effect, not a fix) address the root cause.**
+All three are existing pieces of numerical machinery doing legitimate
+regularising work (suppressing pairing, properly diffusing surface noise,
+or -- inversely -- not being run in the regime that exposes the bug); turning
+any of them off does not fix the mechanism and generally makes some other
+metric worse. This continues to point at the Antuono/`sun2018` Eq. (9)
+pressure switch itself (§5.14/5.15) as the place the actual fix belongs.
+
+Scripts: `scratchpad/m31_denorm_run.py`.
+
+### 5.22 Zeroing either dissipation term outright -- expected-null, confirms both are load-bearing, no new signal
+
+Two more short elimination trials, flagged in advance by the user as
+"probably destabilize... unlikely to really point to something" since both
+terms are known stability requirements, not candidate root causes: same
+validation config (nx=67, `c0Ratio=40`, PST on) to t=2.0s, with (1) density
+diffusion fully off (`densityDelta=0`, not just denormalized -- §5.21 already
+covers the renormalization question) and (2) artificial viscosity fully off
+(`alpha=0`).
+
+Neither hit the hard non-finite-velocity divergence check inside t=2.0s, but
+both are severely degraded relative to baseline -- exactly the destabilisation
+predicted, just short of a hard crash in the time tried:
+
+| | baseline (§5.17/5.19) | no density diffusion | no artificial viscosity |
+|---|---|---|---|
+| peak `kineticEnergy` | 0.714 | **8.326** (11.7x) | 1.094 (1.5x) |
+| peak `accelMagMax` | 19,632 | **141,906** (7.2x) | 55,085 (2.8x) |
+| density range over the run | ~[0.94,1.06] | **[0.699, 1.433]** | [0.809, 1.231] |
+
+`densityDelta=0` is the more severe of the two -- a 40%+ density excursion is
+well outside anything "weakly compressible" should tolerate, effectively a
+soft blow-up the hard divergence check doesn't catch inside this short a
+window. Confirms both terms are load-bearing for stability, as expected;
+does not implicate either as the destabilisation's root cause -- if anything,
+consistent with §5.19-5.21, removing stabilising machinery makes the same
+underlying artifact worse, not different.
+
+Scripts: `scratchpad/m31_zeroterms_run.py`.
+
+### 5.23 First candidate fix tried: renormalizing the pressure-force gradient -- makes the peak 8.8x WORSE, likely the renormalization matrix itself is ill-conditioned exactly where it would matter
+
+With PST, the DDT's own renormalization, and both dissipation terms all
+ruled out (5.20-5.22), tried an actual fix at the operator the artifact lives
+in: `wp_surfaceAware.py`'s pressure-force kernel already had an unused
+`useGradientRenormalization`/`Li` path (`gradw_ij = matmul(Li, gradw_ij)`,
+applied before the `P_i`/`P_j` combination) -- the same kind of correction
+`gradRhoL` already applies to the DDT term. Wired it up as an opt-in
+`schemeConfig.pressureForceRenormalized` flag (default `False`, so every
+existing case is unaffected):
+
+- `configurations/weaklyCompressible.py`: new field + `toDict`/`fromDict`.
+- `modules/pressure/surfaceAware.py`: `computePressureForceSurfaceAware`
+  gained an optional `renormalizationState` parameter, forwarded to
+  `computePressureSurfaceAwareWarp`.
+- `schemes/deltaSPH.py`: passes the *same* `renormalizationState_` already
+  computed once per step for `gradRhoL` (`detectFreeSurface`'s output) when
+  the flag is set -- no new computation, reuses the existing per-step fit.
+
+Full regression suite green, and the flag is off by default, so this is a
+safe, permanent, opt-in addition regardless of the result below.
+
+**Result: substantially worse, not better.** Same validation config
+(nx=67, `c0Ratio=40`, PST on), full t=2.6s, `diverged=False`:
+
+| | baseline (5.17/5.19) | **pressureForceRenormalized=True** |
+|---|---|---|
+| peak `accelMagMax`, t=[1,2.6]s | 19,632 | **172,386 (8.8x worse)** |
+| peak `kineticEnergy` | 0.714 | **1.397 (~2x worse)** |
+| density range | ~[0.94,1.06] | **[0.80, 1.18]** |
+| total anomalous events, t=0-2.6s | 29,617 | 32,596 (~10% more, not dramatic) |
+| bulk-flagged share of those events | 36.5% | 34.4% (essentially unchanged) |
+
+The nearly-unchanged event *count* and bulk/surface *split* alongside a
+massively worse peak is the tell: this isn't making the mechanism fire more
+often or somewhere new, it's making a subset of the *same* events far more
+extreme. The likely explanation is conditioning, not the correction's
+mathematical form: `Li` comes from `detectFreeSurface`'s per-particle
+covariance fit over the local neighbourhood -- the *same* sparse/disordered
+neighbourhoods already identified as where this artifact lives are exactly
+where that fit is most likely near-singular. Elsewhere in this codebase
+(the mDBC ghost-density MLS fit) an ill-conditioned local fit is already
+known to need an explicit `detFloor` fallback rather than being trusted
+as-is; this pressure-force path has no such guard -- it applies whatever
+`Li` `detectFreeSurface` produced unconditionally, so at the handful of
+particles where that matrix is poorly conditioned, multiplying the kernel
+gradient by it amplifies noise rather than correcting it.
+
+**Not adopted -- flag stays off by default.** A follow-up worth trying
+before abandoning gradient renormalization as a direction entirely: gate
+`Li`'s use on `detectFreeSurface`'s own conditioning output (it already
+returns `lMin`, currently unused by this call site) and fall back to the raw
+gradient below some threshold, mirroring the mDBC `detFloor` pattern -- i.e.
+the fix might be "renormalize, but only where the fit is trustworthy," not
+"renormalize unconditionally" or "don't renormalize." Not attempted this
+session.
+
+Scripts: `scratchpad/m31_pforceRenorm_run.py`.
+
+### 5.24 Redirected to the PST itself per the user: `ShiftProperties.correctdrhodt`/`correctdvdt` -- the Sun et al. 2019 "consistent shifting" terms this codebase already implements but has never turned on -- make it categorically worse: a hard NaN divergence, not just a worse artifact
+
+The user pushed back on the operator-level fix attempts (5.14-5.23) and
+asked to scrutinize the PST itself instead: a well-behaved PST should
+*improve* particle regularity near the free surface, reducing the need for
+any post-hoc renormalization, so it's worth checking whether this codebase's
+PST is actually doing that job properly, and specifically flagged
+`literature/`'s "consistent shifting for delta-plus SPH" paper (Sun,
+Colagrossi, Marrone, Antuono, Zhang 2019, *A consistent approach to particle
+shifting in the δ-Plus-SPH model*, CMAME 348:912-934,
+`literature/sun2019_consistent-particle-shifting-delta-plus-sph.pdf`) as the
+one to look at, versus the "Michel PST" the user believed was in current use.
+
+**Checked what's actually configured for Marrone 3.1**, directly off the
+live `schemeConfig`, not by re-reading source: `ShiftingScheme.deltaSPH`
+(magnitude law: Sun et al. 2017 Eq. (7), historical 1/8 scaling) +
+`ShiftingProjectionScheme.surfaceNormal` (the free-surface treatment, which
+*is* Sun et al. 2019 Eqs. (20)-(21) per the code's own docstring -- not
+Michel's). So the near-surface projection is already the right paper's
+algorithm. But `ShiftingProjectionScheme` is only half of what Sun 2019 is
+actually about.
+
+**Reading the paper (pp. 913-918) surfaced the real gap.** Its central
+contribution is not the free-surface projection (that's Section 2.4, a
+secondary refinement) but Section 2.1-2.3: once particles are advected by
+`u + δu` instead of `u`, the continuity equation picks up an extra
+`div(ρ δu)` term (Eq. (9)) that must be included, or -- direct quote from the
+paper's own highlights -- **"Unphysical drift of the solution is shown when
+PST is not included in a consistent way."** The paper explicitly grades the
+two new terms differently: the continuity-equation one is "of crucial
+importance," while the momentum-equation counterpart (`div(u ⊗ δu)`)
+"plays a minor role" and "does not seem to induce sensible differences."
+
+Checked the actual `ShiftProperties` on the live Marrone 3.1 config:
+`correctdrhodt=False`, `correctdvdt=False` -- **both off**. This codebase
+already has the full machinery for both terms implemented and ready
+(`systems/weaklyCompressible.py` `finalize`: `drhodt_shift` = `div(ρ·du) -
+ρ·div(du)` for continuity, `dudt`+`duCross` for momentum), gated behind
+these two flags, and every single run in this whole investigation
+(5.17-5.23) had them both off -- i.e. every configuration tested so far,
+including the "baseline," has been running the exact *inconsistent* PST
+the paper's abstract warns against.
+
+**Tested it directly** (`scratchpad/m31_consistentPST_run.py`): identical
+Marrone 3.1 validation config (nx=67, `c0Ratio=40`, PST on) with
+`correctdrhodt=True` and `correctdvdt=True`. Result: **a hard divergence**,
+the only one of six configurations tried (baseline, no-PST, denormalized-DDT,
+zero-dissipation x2, renormalized-pressure-force, this one) to actually hit
+non-finite velocities rather than a bounded-but-severe artifact:
+
+- Runs cleanly and comparably to baseline through t≈2.2s (`accelMagMax`
+  staying in the same few-thousand range as baseline over that stretch).
+- At t=2.25s (t*=9.10) -- **inside the same second flagged window
+  (t*=8.5-9.3) already identified in §5.17** -- `maxVelocity` jumps to 16.0,
+  density crashes to `[0.8655, 1.2059]`, `accelMagMax` to 33,685.
+- From there it's an uncontrolled cascade, not a bounded spike: by step
+  23865 (six steps later, same reported `t` at float32 resolution) density
+  has gone **negative** (`minDensity = -4.2e18`), `kineticEnergy` reaches
+  `2.6e14`, and step 23868 is all-NaN. `nSteps=23869` of a planned 26748;
+  stopped by the runner's own non-finite-velocity check.
+
+**Verdict: consistent shifting does not fix this, and makes the failure mode
+categorically worse** -- a genuine, unrecoverable blow-up in the *same*
+already-identified window, not a reduction of the existing artifact. This
+doesn't mean Sun 2019's argument is wrong in general (their own benchmarks
+are calmer flows without this codebase's specific truncation-artifact
+background, §5.15/5.17/5.19); it means adding the continuity-equation
+correction on top of a scheme that already has the symmetric-pressure-
+truncation artifact live compounds rather than cancels it here -- plausibly
+because `div(ρδu)` amplifies whatever density noise the artifact is already
+injecting, rather than correcting a clean signal the way it would in the
+paper's own (non-pathological) benchmarks.
+
+**The `ShiftingProjectionScheme.surfaceNormal` regression flagged in the
+code comments (5.20's PST discussion did not re-check this) is still an open
+thread**, separate from the correctdrhodt/correctdvdt result here: a
+2026-09-05 comment in `configurations/moduleConfigurations/shifting.py`
+records that `surfaceNormal` (Marrone 3.1's active projection scheme) was
+found to diverge early on `sloshingTank` after commit 790a7c7 fixed the
+density-diffusion sign, and `sloshingTank.py` moved to
+`ShiftingScheme.michel2022`/`ShiftingProjectionScheme.michel2022` instead --
+but Marrone 3.1 was never re-checked against that same regression, and this
+session didn't either (found while investigating this section, not chased
+further). Whether swapping to the `michel2022` scheme+projection pair changes
+anything on Marrone 3.1 specifically is the next concrete thing to try on
+this thread, not `correctdrhodt`/`correctdvdt` again.
+
+Scripts: `scratchpad/m31_consistentPST_run.py`.
+
+### 5.25 `ShiftingScheme.michel2022`/`ShiftingProjectionScheme.michel2022` -- mixed: calmer in both previously-flagged windows, but a new, larger, later event appears
+
+Tested the pairing `sloshingTank.py` moved to (5.24's closing question):
+Michel et al. 2022's shift-magnitude law (a relative, Galilean-invariant
+characteristic velocity, not Sun 2017 Eq. (7)'s Mach-scaled one) and its
+Eq. (48) free-surface projection (inherited nearest-surface-particle normal,
+not Sun 2019's own-normal Eqs. (20)-(21)). `correctdrhodt`/`correctdvdt` left
+at their `False` defaults, per 5.24. Same validation config otherwise
+(nx=67, `c0Ratio=40`), full t=2.6s, `diverged=False`.
+
+| | baseline (5.17/5.19) | **michel2022/michel2022** |
+|---|---|---|
+| peak `accelMagMax`, t=[1,2.6]s | 19,632 | **111,475 (5.7x worse)** -- but see below |
+| peak `kineticEnergy` | 0.714 | 0.859 (comparable) |
+| density range | ~[0.94,1.06] | [0.89, 1.15] |
+| total anomalous events, t=0-2.6s | 29,617 | **24,190 (~18% fewer)** |
+| bulk-flagged share | 36.5% | 33.8% (essentially unchanged) |
+
+**Genuinely calmer in both of §5.17's originally-flagged windows.** Sampling
+`accelMagMax` through t*=5.9-6.9 and t*=8.1-9.3 (the two windows the whole
+investigation has centred on), this run stays in the 1,000-5,000 range
+throughout -- comparable to or better than baseline's 500-8,500 range over
+the same windows, and total event count is down, not up.
+
+**But the single worst spike of the whole t=[1,2.6]s window is a *new* event,
+later and larger than anything seen before**: at t=2.47-2.52s (t*=9.98-10.15)
+-- past both previously-flagged windows -- `accelMagMax` reaches 111,475,
+the highest peak of any configuration tried except 5.24's outright
+divergence. Per-particle trace: a spatially coherent cluster
+(x drifting -0.78 -> -0.96 as t goes 2.469 -> 2.518, all `surfaceIndicators=1`
+throughout), and the video frame at t=2.479s shows it as a small, sharp
+splash right at the **left wall**, at bed height -- visually consistent with
+a genuine second reflected-wave return impact (the front travels right,
+hits the far wall, returns left, and by t*~10 is back at the origin wall),
+not an obviously non-physical isolated-particle cluster like §7.4's Marrone
+3.4 finding. Whether this is (a) a real secondary impact whose genuinely
+sharp local dynamics get amplified by the same ever-present truncation
+artifact, amplified differently because `michel2022` moved the bulk flow's
+timing/shape enough to change where the second impact lands, or (b) the same
+artifact simply relocated by the changed particle distribution, was not
+resolved this session -- the video is consistent with either reading, and
+distinguishing them needs the same pressure-sign-flip check §5.17 used, not
+attempted here for lack of time.
+
+**Net read: not a fix, but not strictly worse either -- a genuinely
+different failure profile.** `michel2022` measurably calms exactly the
+regions this investigation has been tracking, at the cost of a larger,
+later event this investigation had not previously characterised. This is
+the first tested change that improves *any* concrete metric in the
+originally-flagged windows without an outright divergence (5.24) or a
+board-wide degradation (5.21-5.23) -- worth pursuing further (a longer run
+past t*=10 to see if a third window opens up too, and the pressure-sign
+check on the new cluster to classify it), but not yet a result to adopt as
+a default.
+
+Scripts: `scratchpad/m31_michel_run.py`.
+
+### 5.26 Double resolution + `symplecticEuler` on top of 5.25's `michel2022`/`michel2022` -- 5.25's late event converges away (~100x smaller), but a new, earlier one appears at comparable magnitude
+
+Per the user: "the same event happens at 1.5 [in 5.25] but its kept in check
+more, still not great" -- asked for double resolution (nx=134, H/dx=80.4 vs
+nx=67's 40.2) with `symplecticEuler` in place of `rungeKutta4`, on top of
+5.25's best-so-far `michel2022`/`michel2022` shifting. Rationale: `t*` is
+resolution-independent, so if a flagged event shrinks at higher resolution
+it's a genuine (if under-resolved) physical/numerical feature; if it stays
+the same absolute size, that's further evidence of a resolution-independent
+consistency defect. `symplecticEuler` evaluates the pressure force once per
+step instead of RK4's four sub-stage evaluations, and already has a track
+record on this case (5.16: full 7s sloshingTank record, better Sensor-1
+match than `rungeKutta2`, once `mdbcNoPenShiftMode='finalize'` fixed its old
+divergence). `scratchpad/m31_michel_hires_symplectic_run.py`: `diverged=False`,
+full t=2.6s, 53,476 steps (~2x nx=67's step count, as expected from the
+acoustic-CFL `dt ~ dx`), 1765s wall (symplecticEuler's single evaluation
+per step roughly offset the 4x particle count from doubling resolution --
+not the ~8x-longer run this was expected to need).
+
+**5.25's worst event (t*~10) converges away almost completely.** At
+t=2.47-2.50s (the same `t*` window that hit `accelMagMax=111,475` at nx=67),
+this run reads **935-1,144** -- essentially two orders of magnitude smaller.
+Strong evidence that specific event is a genuine, resolvable physical
+feature (read in 5.25 as a second reflected-wave return impact at the origin
+wall) that was simply under-resolved at nx=67, not a resolution-independent
+defect.
+
+**But the run's own worst event moved earlier, to t*~5.6, at comparable
+magnitude to 5.25's original worst case.** Peak `accelMagMax` over
+t=[1,2.6]s is 48,439, at t=1.386s (t*=5.60-5.61, sustained over dozens of
+consecutive steps) -- a cluster near the impact wall (x~1.28-1.36,
+y~-0.33 to -0.36, all `surfaceIndicators=1`), consistent with the falling/
+re-impacting jet right after the first wall slam rather than either of the
+two previously-tracked windows (t*=6-6.7, 8.5-9.3), whose own readings here
+(1,700-5,400) are comparable to 5.25's nx=67 numbers -- neither clearly
+better nor worse.
+
+| | baseline (5.17/5.19) | michel2022 nx=67 (5.25) | **michel2022 nx=134 + symplecticEuler** |
+|---|---|---|---|
+| peak `accelMagMax`, t=[1,2.6]s | 19,632 | 111,475 (at t*~10) | **48,439 (at t*~5.6, new location)** |
+| peak `kineticEnergy` | 0.714 | 0.859 | 0.883 |
+| density range | ~[0.94,1.06] | [0.89, 1.15] | [0.85, 1.15] |
+
+Per-particle-frame anomaly rate (normalizing for 4x the particles and 269
+states either way): nx=134 run 0.0253 events per fluid-particle-frame, vs
+nx=67 michel2022's raw 24,190 events over ~10,272 particles x 269 frames =
+0.0087 -- **higher, not lower**, though the bulk/surface split flips
+(65.9% bulk vs nx=67's 33.8%) which may partly reflect the fixed absolute
+`dv > 1.0` detection threshold interacting differently with the finer `dx`
+rather than a real change in character; not resolved further this session.
+
+**Net read: genuinely informative, not a fix.** The ~100x shrinkage of
+5.25's specific late event is a real, useful data point -- it says that
+particular symptom is legitimate physics colliding with under-resolution,
+consistent with how the rest of this investigation (5.15/5.17/5.19)
+distinguishes "genuine but under-resolved" from "resolution-independent
+consistency defect." But the whole exercise does not converge to a clean
+result overall: the peak simply relocated to an earlier, comparably severe
+event, and the two originally-tracked windows (t*=6-6.7, 8.5-9.3) did not
+measurably improve. Whether the new t*~5.6 cluster is itself another
+instance of genuine-but-under-resolved physics (a further doubling of
+resolution would be the direct test) or the same background consistency
+artifact was not determined this session.
+
+Scripts: `scratchpad/m31_michel_hires_symplectic_run.py`.
+
+### 5.27 The properly-scaled "full" Sun 2019 recipe diverges even sooner than 5.24's mismatched one -- the consistency corrections are ruled out on their own terms, not just on a scaling technicality
+
+The user's screenshots of 5.26's video confirmed the same near-surface
+"sudden upward push" as the fluid thins, just bounded now rather than
+catastrophic -- still a surface artifact, not fixed. They then pointed out a
+real gap in 5.24's test: `ShiftProperties.sun2017Eq7Shift` (literal Eq. (7)/
+Eq. (13) shift magnitude) defaults to `False`, and `modules/shifting/
+delta.py`'s own docstring measures the historical default at only **~0.131x**
+(~1/8) of the literal value -- so 5.24 paired the continuity/momentum
+consistency corrections with a shift an order of magnitude smaller than the
+one those corrections were actually derived against. Worth checking whether
+that mismatch, not the corrections themselves, was what blew it up.
+
+Re-ran with all three together for the first time -- `sun2017Eq7Shift=True`,
+`correctdrhodt=True`, `correctdvdt=True` -- on `ShiftingScheme.deltaSPH` /
+`ShiftingProjectionScheme.surfaceNormal` (Sun 2019 on its own terms, not
+mixed with 5.25/5.26's Michel results). `scratchpad/m31_fullConsistentPST_run.py`.
+
+**Result: diverges again, and *sooner*, not later.** Clean through t=1.25s
+(`accelMagMax` in the low hundreds, density held to [0.997,1.004] -- calmer
+than baseline at the same times). Then at t=1.28-1.30s (**t\*=5.18-5.26,
+before every window this investigation has tracked, including 5.26's new
+t*~5.6 cluster**): `maxVelocity` 21.7 -> 30.1, density crashes to
+`[0.75, 1.08]`, `accelMagMax` 3,840 -> 35,485 in two consecutive samples.
+From there the same runaway cascade as 5.24 -- density negative, `KE` into
+the billions, all-NaN by step 13,668 (t*=5.36, `nSteps=13,669` of a planned
+26,748) -- reached in *roughly half* the steps 5.24 took to blow up
+(13,669 vs 23,869).
+
+**This rules out the consistency corrections on their own terms, not on a
+scaling technicality.** If 5.24's failure had been an artifact of the
+scale mismatch, using the shift magnitude the corrections were actually
+derived for should have made it *more* stable, or at least fail later at a
+comparable severity. Instead it failed categorically faster with a larger,
+more "correct" `delta u` feeding the same `div(rho delta u)` /
+`div(u tensor delta u)` terms -- consistent with those terms amplifying
+whatever noise the pre-existing symmetric-pressure-truncation artifact
+(5.14/5.15) puts into the density/velocity field in the first place, in
+direct proportion to the shift magnitude: a bigger, more textbook-correct
+`delta u` just means a bigger amplifier on the same underlying noise, not a
+closer-to-correct physical increment.
+
+**Where this leaves the PST thread:** two independent, internally-consistent
+attempts at "the full delta+SPH recipe" (mismatched-scale 5.24, correctly-
+scaled 5.27) both diverge, getting *worse* as the implementation gets
+*more faithful* to the paper. Whether this points to a genuine bug in
+`systems/weaklyCompressible.py`'s `drhodt_shift`/`dudt`/`duCross` warp-
+operator calls (the sign/form matched the paper's Eq. (9) by inspection when
+checked this session, but was not independently unit-tested against a
+synthetic case the way `sun2018`'s pressure switch was in 5.15) or a real
+incompatibility between Sun 2019's consistency assumption (mild `delta u`
+relative to a *clean* field) and this codebase's specific truncation-
+artifact background was not resolved. Either way, `correctdrhodt`/
+`correctdvdt` are not a usable direction on Marrone 3.1 as it stands.
+5.25/5.26's `michel2022`/`michel2022` pairing remains the only tested change
+that helps at all (reduces event count and, at higher resolution, converges
+away one specific late-window event) without diverging.
+
+Scripts: `scratchpad/m31_fullConsistentPST_run.py`.
+
+### 5.28 Found it: the Sun 2019 shift-correction terms have the SAME kernel-truncation-sum defect as the Antuono pressure switch (5.14/5.15) -- not a sign bug, the paper's own prescribed SUM discretization
+
+The user, from 5.27's result, suspected a sign error in `drhodt_shift`/
+`dudt`/`duCross` -- "it almost looks like the sign is wrong" -- and asked
+for a line-by-line check against the paper.
+
+**Hand-derivation + code inspection: no sign error.** Substituting the
+quasi-Lagrangian derivative (Eq. (5)/(6)) into the plain Lagrangian
+Navier-Stokes system reproduces Eq. (7) exactly, and the added terms beyond
+the base continuity/momentum equations are `-rho*div(delta_u) +
+div(rho*delta_u)` (continuity) and `div(u tensor delta_u) - u*div(delta_u)`
+(momentum, as acceleration). Checked `warpSPHCore/coreOperations/
+wp_divergence.py`'s actual kernel (not assumed): `GradientScheme.Difference`
+computes `(fj-fi)`, `GradientScheme.Summation` computes `(fj+fi)`, per pair,
+exactly Eq. (8)/(9)'s difference/sum conventions. `systems/
+weaklyCompressible.py`'s `drhodt_shift = [Summation-div(rho*du)] -
+rho*[Difference-div(du)]` and `momentum_extra = [Summation-div(u tensor du)]
+- u*[Difference-div(du)]` match the paper's added terms sign-for-sign,
+term-for-term. Not a bug by inspection.
+
+**So a zero-physics synthetic probe instead** (`scratchpad/
+probe_shiftCorrectionTruncation.py`, same slab/methodology as 5.15's
+`probe_thinSheetPressure.py`: periodic-x, finite-y, row 0 = open top edge/
+truncated support, real `buildVerletList` adjacency, no wall/mDBC/case
+machinery). Uniform `rho`, `u`, `delta_u` fields -> the TRUE continuum
+divergence of every added term is exactly zero *everywhere*, isolating pure
+SPH-discretization artifact with zero real physics involved.
+
+**First pass (`delta_u` tangential to the edge) read as clean -- `div(rho*
+delta_u)` came back ~1e-7 (float noise) at every depth including the edge.**
+That's a real result, not a null one: for a flat, translation-invariant edge
+the kernel-gradient defect `B_i = sum_j V_j grad_i W_ij` has **zero
+tangential component by symmetry** -- a `delta_u` aligned with the surface
+picks up none of it. But PST does not shift particles tangentially; it
+shifts them along the local density gradient, which right at a free surface
+is the **normal** direction, into the missing-neighbour side. Re-run with
+`delta_u` normal to the edge:
+
+| depth | `div(rho*delta_u)` (true value: exactly 0) | `momentum_extra`_y (true value: 0) |
+|---|---|---|
+| 0 (edge) | **-6.81** | **-2.04** |
+| 1 | **-2.80** | **-0.84** |
+| 2 | **-0.375** | **-0.113** |
+| 3+ | ~1e-6 (clean) | ~1e-8 (clean) |
+
+Exactly 5.15's pressure-switch signature: large at the truncated edge, ~2-3
+particle layers deep on a perfect lattice, decaying to float noise in the
+bulk. With 0.1dx of jitter (disorder, not lattice phase -- 5.15's own
+distinction) it reaches depth 3-4 and becomes seed-sensitive (`div(rho*
+delta_u)` at depth 3 across three seeds: -0.433 / -0.074 / -0.055, a 6-8x
+spread), the same "disorder makes it deep and unpredictable" reading 5.15
+found for the pressure term.
+
+**Root cause, precisely stated:** Sun 2019's own Eq. (9) *deliberately*
+prescribes a summation form (`rho_j delta_u_j + rho_i delta_u_i`, not a
+difference) for `div(rho delta_u)` and `div(u tensor delta_u)` -- for
+momentum-conservation reasons, explicitly stated in the paper, the same
+reason `<grad p>_i = sum_j(p_j+p_i) grad_i W_ij V_j` (Eq. (8)) uses a sum
+instead of a difference. A summation-form SPH pair term is mathematically
+exact only for complete, regular kernel support and produces a real,
+field-value-proportional artifact wherever that support is truncated or
+disordered -- 5.14/5.15's finding, now shown to apply identically here.
+PST's own defining behaviour is to shift particles along the density
+gradient, i.e. **normal** to a free surface -- precisely the direction this
+defect is largest, and precisely where a violently-thinning free surface
+(this session's whole investigation) is both truncated and disordered
+essentially continuously. This is why turning the corrections on made things
+worse (5.24) and why using the literal, ~8x larger Eq. (7)/(13) shift
+magnitude made it fail categorically faster (5.27): a bigger `delta_u` is a
+bigger amplifier on the same defect, not a closer-to-correct physical
+increment. Not an implementation bug; a real consequence of the paper's own
+discretization choice interacting with a background this codebase already
+has (5.14/5.15), which the paper's own (much calmer) benchmark cases never
+would have exposed.
+
+**This unifies three separate findings from this session under one root
+cause**: the Antuono pressure switch's symmetric branch (5.14/5.15), the
+DDT's L-renormalization amplifying noise at ill-conditioned fits (5.23), and
+now the PST consistency corrections -- all are summation/matrix-correction
+-style SPH operators that are exact only under complete, well-conditioned
+local support, and this codebase's violent free-surface regime does not
+reliably provide that. `correctdrhodt`/`correctdvdt` are conclusively ruled
+out as a fix direction, on their own mechanism now, not just empirically.
+
+Scripts: `scratchpad/probe_shiftCorrectionTruncation.py`.
+
+### 5.29 The free-surface projection (Eq. 20/21) itself checked against the paper -- two discrepancies, one matching the exact symptom this session has been chasing
+
+Per the user: the paper should also cover the near-surface shift projection
+itself (separate from 5.28's continuity/momentum corrections), and it may
+not be implemented correctly either. Checked `modules/shifting/wrapper.py`'s
+`ShiftingProjectionScheme.surfaceNormal` branch line-by-line against Sun
+2019 §2.4 (Eqs. (18)-(21)) and its immediately-following §2.5.
+
+**The branch structure and directionality are correct.** `outward = n . update`
+(the raw shift's component along the outward normal), `restrict = inF &
+(outward >= 0)` (shift points out of the fluid -> restrict to
+`kappa * tangential`), else keep the full shift -- matches Eq. (20)'s two
+`i in F` branches and the paper's own stated intent ("discriminates internal
+particles moving towards the free surface... from those moving away... the
+latter shift unconstrained... effective in preventing particle clusters on
+the free surface"). `_curvatureGate` matches Eq. (21) exactly (`kappa = 0`
+if any surface-neighbour's normal deviates by >= 15 deg, else 1).
+
+**Two real discrepancies found:**
+
+1. **Threshold value.** Eq. (20)'s hard-zero cutoff is `lambda_i < 0.55`;
+   `ShiftProperties.surfaceLambdaThreshold` defaults to **0.4**. The paper
+   itself caveats this isn't a universal constant ("this optimal threshold
+   value depends on the kernel function, on the adopted ratio h/dx and on
+   the algorithm of the free-surface correction"), so 0.4 isn't
+   automatically wrong for this codebase's own kernel/h-dx choices -- but
+   it's untested against the paper's own number, and a lower threshold is
+   strictly *less* conservative (lets the shift compute in more
+   marginally-conditioned territory than the paper's own tuning would).
+
+2. **Missing the ghost-exclusion refinement from Sun 2019 §2.5 (the
+   paragraph immediately after Eq. (21)) -- likely the more significant
+   one.** Direct quote: *"the field lambda evaluated with the ghost
+   particles cannot be used in (20), and it needs to be re-evaluated without
+   considering the ghost particles... This numerical treatment is crucial
+   for maintaining the simulation stable when thin liquid jets running on
+   the solid wall occurs."* Checked `modules/surfaceDetection/wrapper.py`'s
+   `computeNormals`: the renormalization matrix / `lambda` field is computed
+   ONCE, via `operationMode=OperationDirection.AllToAll` (no kind
+   filtering -- boundary and ghost particles included), and that same
+   `lambda` is what `solveShifting` uses both for the normal (Eq. (19),
+   where the paper wants ghosts included) *and* for Eq. (20)'s
+   magnitude-zeroing gate (where the paper explicitly requires them
+   excluded). Including ghosts makes a thin, wall-hugging layer of real
+   fluid read as artificially well-supported (`lambda` inflated by the
+   ghost padding), so the gate that's supposed to zero the shift there never
+   fires, and shift computation proceeds exactly where the paper says it
+   must not. This is not a mistuned default -- the second, ghost-excluded
+   `lambda` pass the paper specifies does not appear to exist in this
+   codebase at all.
+
+**Why this is the more promising lead of the two:** the paper ties this
+specific treatment to "thin liquid jets running on the solid wall" by
+name -- precisely this session's recurring symptom (Marrone 3.1's thinning
+free surface, §7.4's Marrone 3.4 wall-hugging ejected particles). Unlike
+5.28's finding (a fundamental defect in the paper's own prescribed
+discretization, not fixable by this codebase alone), this is a *specific
+missing implementation piece* the paper itself already prescribes the fix
+for.
+
+**Implemented and tested (5.30 below)** -- item 1 (the threshold value)
+remains untested and is cheap to A/B independently.
+
+### 5.30 Item 2 implemented (fluid-only lambda gate) -- modest, not a fix: fewer total events, but the worst case is unchanged
+
+Per the user: this should be simple to add, since `solveShifting` already
+has the machinery to (re-)compute the free surface, and the fix is really
+just "pass the right direction to the surface function." Implemented in
+`modules/shifting/wrapper.py`'s `surfaceNormal` branch: a second
+`computeRenormalizationMatrices` call with `operationMode=
+OperationDirection.FluidToFluid` (excludes both boundary *and* ghost
+kinds -- a superset of what the paper asks for, and the more conservative
+reading of "is there enough genuine local fluid to trust a shift here"),
+reusing the *same* adjacency already built earlier in the loop (a kind
+filter evaluated per-pair inside the existing neighbour list, not a new
+neighbour search) -- so the added cost is one more covariance-matrix solve
+per shift iteration, not a new spatial query. `lMinGate` (fluid-only) now
+feeds Eq. (20)'s magnitude gate; `n`/`lMin` (ghost-inclusive, from
+`detectFreeSurface`) are untouched for Eq. (19)'s normal and the
+outward/tangential direction test, matching the paper's own split. Full
+regression suite green; smoke-tested clean before the full trial.
+
+Same Marrone 3.1 validation config as the main line (nx=67, `c0Ratio=40`,
+`ShiftingScheme.deltaSPH`/`ShiftingProjectionScheme.surfaceNormal`, PST on --
+not Michel). `scratchpad/m31_ghostExcludedLambda_run.py`: `diverged=False`,
+full t=2.6s.
+
+| | baseline (5.17/5.19) | **fluid-only lambda gate** |
+|---|---|---|
+| peak `accelMagMax`, t=[1,2.6]s | 19,632 | 18,999 (~3% lower -- noise-level) |
+| peak `kineticEnergy` | 0.714 | 0.857 (higher, not lower) |
+| density range | ~[0.94,1.06] | [0.94, 1.07] (unchanged) |
+| total anomalous events, t=0-2.6s | 29,617 | **23,459 (~21% fewer)** |
+| bulk-flagged share | 36.5% | 41.4% |
+
+**Modest, real, but not a fix.** The ~21% drop in total event count is a
+genuine improvement of similar size to `michel2022`'s (5.25's 18% drop) --
+this specific piece of missing paper machinery does measurably calm the
+*typical* case. But the worst-case peak and the run's overall kinetic energy
+are not better (KE is if anything higher), and the two originally-tracked
+windows (t*=6-6.7, t*=8.5-9.3) still show the same order-of-magnitude spikes
+as baseline when sampled directly (e.g. t=1.5s: 9,237; t=1.65s: 7,874) --
+qualitatively indistinguishable from the unfixed run in the video. Given
+this system's already-established sensitivity to tiny perturbations (a
+resumed trajectory diverges sharply from its archive within one violent
+window, per earlier sloshingTank work), a single run's peak is a noisy
+statistic; the event-count drop, averaged over the whole t=0-2.6s record, is
+the more trustworthy signal here, and it says "somewhat better on average,
+not qualitatively different."
+
+**Net position after 5.14-5.30**: three changes now show a genuine, repeatable
+*reduction in event count* without diverging or regressing other metrics --
+`michel2022`/`michel2022` (5.25, -18%), the fluid-only lambda gate (5.30,
+-21%), and (partially) higher resolution (5.26, converges one specific event
+away entirely). None individually fixes it. The two haven't been tried
+together yet (`michel2022` doesn't use `ShiftingProjectionScheme.surfaceNormal`
+at all, so this session's fluid-only-lambda fix has no effect under it) --
+combining `michel2022`'s shift law with the fluid-only-lambda idea would
+need porting the same fix into `modules/shifting/wrapper.py`'s `michel2022`
+projection branch, not attempted this session.
+
+Scripts: `scratchpad/m31_ghostExcludedLambda_run.py`.
+
+### 5.31 Antuono-switch-removal test: forcing each branch unconditionally on Marrone 3.1 -- confirms the switch is load-bearing, not optional (2026-09-13)
+
+Per the user, a direct test of whether the `PressureForceScheme.Antuono`
+switch itself (rather than something adjacent to it, per 5.17-5.30's
+exhaustive elimination) is the thing keeping Marrone 3.1 alive: added a
+`--pressureForceTerm` override to `scripts/probe_deltaSPHMarrone.py`
+(`conservative`/`nonConservative`/`Antuono`/... plumbed straight to
+`schemeConfig.pressureForceTerm` via the same
+`dambreakCase.configureScheme` monkeypatch pattern `--noPenShift` already
+uses) and ran the identical §5.17 config (nx=67, plain `deltaSPH`, PST on,
+tLimit=5.0s, t*≈20.2) twice, forcing each of Eq. (9)'s two branches
+unconditionally instead of switching between them:
+
+| forced term | diverged (flag) | density range | final maxVel | final maxDensity | KE-increase events (>5%/step) |
+|---|---|---|---|---|---|
+| `nonConservative` (always `P_i+P_j`, the switch's "symmetric" branch) | False | [0.935, 1.062] -- physical | -- | -- | 229 clustered events over the whole run |
+| `conservative` (always `P_j-P_i`, the switch's "antisymmetric" branch) | **False (flag missed it)** | **[0.05, 8931]** | **976 m/s** | **3889x rest density** | 3 clustered (all in the first 0.03s) |
+
+**`conservative` alone is not a mild degradation, it is instantaneous
+catastrophic tensile instability** -- the textbook SPH failure mode Sun 2018
+Eq. (9) exists to prevent, not a slow drift: `minDensity` collapses from
+0.86 to 0.61 and `maxVelocity` rockets from 17 to 976 m/s within t*=0.03-0.04
+(the first ~40 steps), i.e. essentially at t=0, nowhere near first wall
+impact (t*≈2.3-2.7). The run's own `diverged` flag never trips (it checks
+for NaN/Inf, not physically-absurd magnitudes) and the run completes all
+56,908 steps to t=5.0s nominally "clean" while carrying a wildly unphysical
+state the whole time -- **a second, independent finding: this case's
+divergence check is too weak to catch this failure mode**, filed as a gap,
+not fixed here.
+
+**`nonConservative` alone is stable for the full 5s/t*=20.2 record** (density
+never leaves [0.935, 1.062], no catastrophic blowup) but reproduces 5.17's
+signature continuously: 229 distinct clustered KE-increase events spread
+across the whole run (vs `conservative`'s 3, all in the opening
+transient) -- consistent with 5.15/5.17's diagnosis that the always-symmetric
+form's spurious pressure force from a truncated/disordered kernel sum is a
+persistent, bounded nuisance, not the occasional/catastrophic thing
+`conservative` alone is.
+
+**Reading:** this rules out "drop the switch entirely" as a fix in either
+direction. `conservative`-only reproduces exactly the tensile instability
+the switch was added to prevent (worse: instantly, not eventually) --
+confirms the switch is load-bearing, not incidental. `nonConservative`-only
+is survivable but is literally 5.15/5.17's artifact running unconditionally
+everywhere instead of only where Eq. (9)'s condition fires it, i.e. running
+*more* of the mechanism already identified as the open problem, not a
+smaller amount of it. This leaves 5.17's original conclusion standing
+unchanged: **a fix has to live inside the switch's symmetric branch itself
+(e.g. a kernel-sum completeness correction per 5.15, or tightening when it
+fires) or be accepted as an inherent `sun2018` cost** -- it is not
+achievable by removing the switch, in either direction.
+
+Runtime note: each run took ~47-57 min wall time on an RTX PRO 6000 for
+5s/t*=20.2 (`nonConservative` 3420s/51,420 steps, `conservative` 2794s/56,908
+steps despite finishing "faster" -- the blown-up state took smaller,
+CFL-limited steps once velocities hit hundreds of m/s, hence *more* steps in
+*less* wall time per step, not evidence of being closer to correct).
+
+Script change: `scripts/probe_deltaSPHMarrone.py --pressureForceTerm
+{conservative,nonConservative,Antuono,i,j,symmetric}` (new flag, kept --
+useful for any future A/B on this axis). Output:
+`scratchpad/m31_antuonoAblation/` (not added to `scripts/out_*`, throwaway
+per-run npz + video pair, gitignored).
+
+### 5.32 What DualSPHysics itself actually does here -- its *default* WCSPH scheme has no pressure switch at all; the switch-like mechanism it does have is gated on kernel completeness, not pressure sign (2026-09-13)
+
+Per the user, read `~/dev/DualSPHysics/src/source/` directly (checked out locally,
+per the table at the top of this doc) rather than inferring from citations.
+Two separate things live in that codebase, easy to conflate:
+
+**(1) The classic/default WCSPH momentum equation -- what actually runs
+Marrone 2011 / the standard DualSPHysics dam-break example -- has NO
+pressure-sign switch whatsoever.** `JSphCpu.cpp::InteractionForcesFluid`,
+the `!ncpress` branch (line ~859-864, the only branch that runs unless the
+newer "advanced shifting" feature below is explicitly enabled):
+
+```cpp
+const float prs = (pressp1+press[p2])/(rhop1*velrhop2.w)
+  + (tker==KERNEL_Cubic ? fsph::GetKernelCubic_Tensil(...) : 0);
+const float p_vpm = -prs*massp2;
+acep1 += p_vpm*grad;
+```
+
+`(P_i+P_j)/(rho_i*rho_j)` is applied **unconditionally, to every particle,
+every step, everywhere** -- this is exactly `PressureForceScheme.
+nonConservative` in this repo, run permanently, with no antisymmetric branch
+at all. The only tensile-instability handling bolted onto this is Monaghan's
+artificial-pressure repulsive term (`GetKernelCubic_Tensil`, the
+`od_wdeltap` constant) -- and it is compiled in **only for the Cubic
+spline kernel**; for Wendland (what Marrone/Sun/DualSPHysics' own dam-break
+validation and this repo's `dambreak.py` all actually use) there is
+**zero** tensile-instability term in the base momentum equation. DualSPHysics
+relies entirely on its density-diffusion term (DDT) and basic (Lind-style)
+shifting to keep Wendland-kernel WCSPH stable -- not a pressure-force
+switch of any kind.
+
+**This directly reframes §5.31's ablation.** `--pressureForceTerm
+nonConservative` (always `P_i+P_j`, survived the full 5s record but carries
+5.15/5.17's truncation artifact continuously) is not some degraded special
+case -- **it is a faithful reproduction of what DualSPHysics itself runs by
+default**, unconditionally, for its own Marrone-class validation. The
+`Antuono` switch (this repo's current `pressureForceTerm` default, sun2018
+Eq. 9's pressure-sign test) is not what makes DualSPHysics' baseline stable;
+it isn't in DualSPHysics' baseline at all.
+
+**(2) DualSPHysics DOES have a switch-like mechanism, but only in its newer,
+optional "advanced shifting" / ALE-SPH extension** (`vs_advshift`, config
+flag `ncpress`, off by default -- a Vacondio/Fourtakas-lineage consistent-
+shifting scheme, a relative of `literature/sun2019_consistent-particle-
+shifting-delta-plus-sph.pdf`, i.e. the same paper family
+[[marrone31-truncation-artifact-vs-pst]] already traced this repo's
+`correctdrhodt`/`correctdvdt` flags to). When enabled, `InteractionForcesFluid`
+computes and stores **both** pressure forms every step without adding either
+to the acceleration yet (`presssym[p1] = (P_i+P_j)/(rho_i rho_j)` sum,
+`pressasym[p1] = (P_j-P_i)/(rho_i rho_j)` sum, plus a gradient-renormalization
+matrix `lcorr[p1]` accumulated alongside them, same shape as this repo's own
+`Li`/`useGradientRenormalization`). The actual blend happens once, after
+the neighbour loop closes, gated on **kernel-sum completeness**, not on
+pressure sign (`JSphCpu.cpp` ~1053-1078):
+
+```cpp
+poup1 += W(0)*m/rho;                  // Shepard-sum self term ("partition of unity")
+if(fstype[p1]==0 && poup1>0.95){      // bulk classification AND ~complete kernel support
+    acep1 += inverse(lcorr) * pressasymp1;   // renormalized ANTIsymmetric (conservative) form
+}else{                                 // free surface (any fstype>0) OR incomplete support
+    acep1 += presssymp1;               // raw, UNRENORMALIZED symmetric form
+}
+```
+
+`fstype` itself (0=bulk,1=surface,2=candidate,3=isolated) comes from a
+Marrone-style **divergence-of-position** test (`JSphCpu_preloop.cpp`
+`InteractionComputeFSNormals`: `fs_treshold = -sum_j V_j (dr . gradW)`,
+which equals the space dimension for a complete, regular neighbourhood and
+drops below it exactly where support truncates), refined by a
+neighbour-density ratio for the "isolated" tier -- a different free-surface
+detector from `warpSPH`'s resolved default here (`SurfaceDetectionScheme.
+Barecasco`, an angle-based coverage-vector test -- **correction, see
+§5.35**: an earlier draft of this entry said `ColorField`, misreading the
+`SurfaceDetectionConfig` dataclass's own per-field default instead of
+`buildDefaultSurfaceDetectionConfig()`, the factory actually used to
+construct it; `Barecasco` was never wired to gate the pressure term in
+DualSPHysics either way, only PST).
+
+**Reading, and how it changes the open Marrone 3.1 problem's shape:**
+DualSPHysics' own switch-like mechanism switches on the exact quantity
+[[sph-symmetric-pressure-truncation-artifact]] already root-caused this
+repo's artifact to -- kernel-sum completeness -- not on pressure sign the
+way `sun2018` Eq. (9) (and this repo's `Antuono` scheme) does. And critically,
+it only trusts the *sharper* antisymmetric/conservative gradient where the
+renormalization matrix is well-conditioned (`poup1>0.95` in the *bulk*,
+`fstype==0`); everywhere else -- including every free-surface particle --
+it falls back to the plain, unrenormalized symmetric sum, same as this
+repo's `nonConservative` branch. That is precisely §5.15/§5.17's original
+candidate direction (a) ("a kernel-sum completeness correction to the
+symmetric term") and is *also* why this repo's own attempt 4
+([[marrone31-truncation-artifact-vs-pst]], "pressure-force renormalization
+made the peak 8.8x WORSE") failed the way it did: attempt 4 applied
+`Li`-renormalization to the pressure gradient **unconditionally**, with no
+completeness gate, right where `Li` is most ill-conditioned; DualSPHysics
+gates the exact same idea behind `poup1>0.95 && fstype==0` for that reason.
+**Not implemented here -- this is a concrete, already-proven-elsewhere
+design for the fix §5.15/§5.30 said had to live inside the switch itself,
+not a new hypothesis.** Next step, if picked up: port a `poup1`-equivalent
+(Shepard-sum completeness, already computable from the existing
+`Li`/renormalization machinery) as the gate on `pressureForceRenormalized`,
+rather than applying it unconditionally or gating on `mask_i`/pressure sign.
+
+See [[antuono-pressure-switch-bug]],
+[[marrone31-truncation-artifact-vs-pst]],
+[[sph-symmetric-pressure-truncation-artifact]].
+
+### 5.33 DualSPHysics' two shifting implementations, and how each treats the free surface (2026-09-13)
+
+Per the user, continuing §5.32's source read into shifting specifically.
+DualSPHysics ships **two separate, independently-selected** shifting
+objects, not one scheme with options:
+
+**(1) `JSphShifting` -- the classic Lind et al. (2012)/Skillen et al. (2013)
+shift, the one actually used unless advanced shifting is explicitly
+enabled.** Direction and free-surface signal are both accumulated inline
+during the *same* main force loop, no separate pass:
+`JSphCpu.cpp` ~942-949 (the `shift` block already quoted in §5.32's
+neighbour loop) does, per neighbour:
+
+```cpp
+shiftposfs.xyz += (m_j/rho_j) * gradW_ij;             // raw concentration gradient, unrenormalized
+shiftposfs.w   -= (m_j/rho_j) * (dr . gradW_ij);      // divergence-of-position, same quantity as §5.32's fs_treshold
+```
+
+`JSphShifting::RunCpu` (`JSphShifting.cpp` ~390-420) then turns that into a
+displacement once per step:
+
+```cpp
+umagn = dt * ShiftCoef * KernelH * |v_p1|;
+if (ShiftTFS) {                          // free-surface threshold, OFF (0) by default
+    if (rs.w < ShiftTFS) umagn = 0;                          // full cancellation, all 3 components
+    else umagn *= (rs.w - ShiftTFS) / ((dim) - ShiftTFS);    // linear ramp back up to full strength
+}
+shift = clamp(rs.xyz * umagn, +/-0.1*Dp);
+```
+
+Three things worth naming: **(a) `ShiftTFS` defaults to 0 (disabled) in the
+library itself** -- `sxml->ReadElementFloat(lis,"fsthreshold","value",true,0)`
+-- so unless a case's XML explicitly sets `fsthreshold` (Lind's own
+recommended 1.5 in 2D / 2.75 in 3D, the exact numbers reappearing as
+literal constants in §5.32's ALE detector), classic DualSPHysics shifting
+has **no free-surface awareness at all** and shifts every fluid particle at
+full strength off the raw, unrenormalized gradient -- boundary-adjacency is
+the only thing that can zero it (`SHIFT_NoBound`/`SHIFT_NoFixed`, a
+sentinel `FLT_MAX` set inline, unrelated to `ShiftTFS`). **(b) When it *is*
+enabled, the treatment is a single SCALAR gate on the whole displacement
+vector** -- either shift at (a ramped fraction of) full strength in the raw
+gradient direction, or don't shift at all. There is no directional
+correction: it never tries to keep a tangential component while dropping
+only the outward-normal one. **(c) No gradient renormalization anywhere in
+this path** -- `gradW_ij` is used raw, same truncation exposure as the
+`nonConservative` pressure branch (§5.31/5.32) and the pressure-force
+artifact this plan is chasing, just for a different quantity (displacement,
+not force).
+
+**(2) The "advanced shifting" ALE extension (`ncpress`/`aleform`, off by
+default, §5.32's other finding) treats the free surface completely
+differently -- and matches this repo's own `surfaceNormal` idea.**
+`JSphCpu_preloop.cpp::ComputeShiftingVel` (~448-500), using the 4-tier
+`fstype` classification (0 bulk / 1 surface / 2 candidate / 3 isolated)
+from a dedicated normal-and-divergence pass (`InteractionComputeFSNormals`,
+already described in §5.32):
+
+```cpp
+theta = clamp((fsmindist - KernelSize) / (0.5*KernelSize - KernelSize), 0, 1);  // 0 far from FS, ->1 within half a kernel support
+if (fstype==0)         shift_final = shift;                              // bulk: untouched
+else if (fstype==1||2) shift_final = ale ? (shift - theta*n*(n.shift))   // project OUT only the along-normal component
+                                          : 0;                            // (non-ALE sub-variant: full cancel instead)
+else /* fstype==3 */   shift_final = 0;                                  // isolated particle: no shift, full stop
+```
+
+This -- keep the tangential component, remove only the outward-normal one,
+ramped smoothly by distance to the free surface -- is directionally the
+same correction this repo's `ShiftingProjectionScheme.surfaceNormal`
+implements (Sun et al. 2019, [[wcsph-shifting-free-surface]]), not the
+classic scheme's blunt all-or-nothing scalar gate. Isolated particles
+(`fstype==3`) getting an unconditional zero-shift is also a distinct,
+sharper rule this repo doesn't currently have an equivalent for.
+
+**Reading:** the two DualSPHysics shifting implementations sit on either
+side of this repo's own default. Our default (`surfaceNormal`, directional
+projection, distance-ramped) is architecturally the ALE/advanced scheme's
+answer, not the classic scheme's -- consistent with [[wcsph-shifting-free-surface]]
+already citing Sun 2019 as the source. The classic scheme's binary
+scalar-gate approach was not tried here and is a strictly cruder fallback,
+not a candidate replacement. **This does not change §5.20's finding that
+shifting/PST is not the cause of the Marrone 3.1 pressure artifact** -- that
+was tested directly (no-PST run, destabilisation persisted) -- but it does
+show DualSPHysics keeps its free-surface *shift* correction (directional,
+distance-ramped) and its free-surface *pressure* correction (§5.32's
+completeness-gated symmetric/antisymmetric blend) as two separately-tuned
+instruments built on the same underlying classification, whereas this
+repo's shift correction (`surfaceNormal`) and pressure correction
+(`Antuono`, sign-gated) currently read *different* free-surface signals
+(the shifting module's own renormalization-based normal/lambda fit vs.
+`detectFreeSurface`'s `Barecasco` mask, per §5.35's correction) that are not
+guaranteed to agree particle-by-particle -- a structural inconsistency
+worth keeping in mind alongside [[sph-symmetric-pressure-truncation-artifact]]'s
+"disorder makes it seed-sensitive" observation, though not established here
+as a contributing cause, just noted. **§5.35 makes this concrete and much
+more serious than "not guaranteed to agree": the mask itself is shown to
+flip for the same particle within a single real timestep.**
+
+See [[wcsph-shifting-free-surface]], [[marrone31-truncation-artifact-vs-pst]].
+
+### 5.34 What diffSPH does here -- per the user's observation that it "never had these issues to this extent." Reading `~/dev/diffSPH` directly (the local reference this repo's DDT was ported from) turns up three concrete differences, one of them a strong candidate (2026-09-13)
+
+**(1) diffSPH's `Antuono` pressure switch is the same equation, already bug-free -- not a differentiator.** `modules/pressureForce.py::computePressureForce`:
+`switch = (p_i>=0) | surfaceMask` -- no `p_j>=0` clause, i.e. it never had
+§5.14's extra-branch bug this repo had to fix. Same raw (unrenormalized)
+kernel gradient otherwise, same lack of any completeness gate on the
+pressure term itself. Not the explanation.
+
+**(2) Free-surface *detector* -- correction, not actually a difference (see
+§5.35).** diffSPH's `solveShifting`/pressure path defaults to
+`surfaceDetection: 'Barecasco'` (angle-based coverage-vector test, Barecasco
+et al. 2013). This entry originally reported this repo's own default as
+`ColorField`, misread from `SurfaceDetectionConfig`'s bare dataclass field
+default rather than `buildDefaultSurfaceDetectionConfig()`, the factory
+actually used to build it -- **verified empirically (§5.35): this repo's
+Marrone 3.1 case *also* resolves to `SurfaceDetectionScheme.Barecasco`**,
+`barecascoThreshold=pi/3`, matching diffSPH's own value exactly. Both
+codebases already run the identical detector choice here; this is not a
+difference at all, let alone the explanation.
+
+**(3) Free-surface *shifting* treatment is meaningfully more conservative in
+diffSPH -- the strongest candidate.** `modules/particleShifting.py::solveShifting`,
+default `projectionScheme='mat'` (matches `examples/weaklyCompressible/
+scripts/15_damBreak.py`'s actual run, no override):
+
+```python
+M = I - n(x)n                              # tangential projector, same idea as this repo's surfaceNormal
+update[fsMask>0.5]  = (M @ update)[fsMask>0.5]   # project OUT only the along-normal component (wide/expanded FS band)
+update[lMin<0.4]    = 0                          # ADDITIONAL: zero outright wherever the local renorm/covariance
+                                                  #   matrix's smallest eigenvalue says the support is too
+                                                  #   ill-conditioned to trust ANY shift direction
+update[fs>0.5]       *= surfaceScaling            # ADDITIONAL: uniformly damp to 10% (default) at the (narrower,
+                                                  #   literal) free-surface flag, even after tangential projection
+```
+
+This is a three-layer defense this repo's `surfaceNormal` doesn't have:
+this repo does the tangential projection (layer 1) but has no
+`lMin`-style hard conditioning gate on the shift itself (§5.30's fluid-only
+lambda gate is a related but different thing -- it gates Eq (20)'s
+*magnitude* threshold, not a direct zero-below-threshold cutoff on the final
+displacement), and has no analogue of `surfaceScaling`'s **unconditional 10x
+damping** right at the free surface on top of the projection. Less PST-driven
+motion at/near the surface means less disorder injected there per step,
+which is the direct input to [[sph-symmetric-pressure-truncation-artifact]]'s
+mechanism (disorder, not lattice phase, is what makes the truncation defect
+"deep and unpredictable") -- a materially calmer free surface from shifting
+alone would show up as fewer/smaller pressure-force spikes downstream, with
+no change needed to the pressure switch itself.
+
+**(4) Likely also relevant, unverified by an actual run: diffSPH's own
+dam-break demo may not run at Marrone's weak-compressibility spec at all.**
+`examples/weaklyCompressible/scripts/15_damBreak.py` back-solves its sound
+speed from a small *fixed* CFL timestep --
+`c_s = 0.3 * volumeToSupport(dx^2, targetNeighbors, 2) / Kernel_Scale(kernel,2) / targetDt`
+with `targetDt=0.0005` -- rather than targeting a physical Mach number the
+way this repo's Marrone 3.1 validation does (`c0 = c0Ratio * sqrt(g H)`,
+`c0Ratio=40`). A hand calculation from that formula (`L=2, nx=64 -> dx=1/32`,
+`n_h=4 -> targetNeighbors~50 -> support~4dx`) gives `c_s` corresponding to
+an effective `c0Ratio` of roughly **8**, not 40 -- and this repo's own
+§5.19 already measured a **17x drop** in peak spurious acceleration between
+those exact two `c0Ratio` values on the identical Marrone 3.1 config. If
+that estimate holds, diffSPH's own dam-break demo is likely running well
+below the compressibility level that exposes this artifact at visible
+scale, for the same reason `examples/weaklyCompressible/12-dambreak.py`
+(this repo's own legacy back-solved-c0 gallery case) shows none of it
+either. **Not confirmed by an actual diffSPH run this session** (its
+package has an unrelated circular-import bug when importing submodules
+directly outside its own top-level import order, blocking a quick script) --
+flagged as the most likely single largest factor, but the shifting
+difference (3) is the one directly verified by source inspection.
+
+**Net reading:** nothing here suggests this repo's `Antuono` switch or free
+surface *detector* choice is the problem (diffSPH runs materially the same
+switch, already bug-free, over a different-but-comparable detector). The
+concrete, verified difference is shifting's near-surface treatment being
+markedly more conservative (conditioning gate + 10x damping neither this
+repo nor DualSPHysics' explicit shift has) plus a plausible, unverified
+difference in how hard diffSPH's own dam-break example is actually pushed on
+compressibility. Neither is a fix for the pressure-switch mechanism itself
+(§5.32's DualSPHysics-derived completeness-gate design is still the
+concrete next step for that); (3) is a second, independent lever -- damping
+`surfaceNormal`'s near-surface shift the way diffSPH does -- worth an A/B on
+its own, since it touches the *input* disorder rather than the pressure
+operator's *response* to it.
+
+See [[marrone31-truncation-artifact-vs-pst]], [[wcsph-shifting-free-surface]],
+[[sph-symmetric-pressure-truncation-artifact]], [[antuono-pressure-switch-bug]].
+
+### 5.35 The user's hypothesis confirmed and quantified, at zero extra compute cost: the Antuono switch's free-surface flag is not just noisy, it visibly flips within a single RK4 timestep, and its branch changes for 15-60% of ALL fluid particles every ~0.01s throughout the ENTIRE run -- not only during the flagged anomaly windows (2026-09-13)
+
+**First, a correction this entry depends on.** §5.32/§5.34 both stated this
+repo's default free-surface detector is `SurfaceDetectionScheme.ColorField`.
+That was wrong -- it read `SurfaceDetectionConfig`'s bare dataclass field
+default, not `buildDefaultSurfaceDetectionConfig()` (the factory the config
+actually calls via `field(default_factory=...)` in `configurations/
+weaklyCompressible.py`), which sets `scheme=Barecasco, active=False,
+barecascoThreshold=pi/3`; `dambreak.py` only flips `.active` to `True` and
+never touches `.scheme`. **Verified empirically**, not just by reading
+source, by constructing the actual Marrone 3.1 case (`nx=67`, `scheme=
+deltaSPH`, tLimit=0.002s) and reading back `r.ctx.schemeConfig.
+surfaceDetectionConfig`: `scheme=Barecasco, active=True,
+barecascoThreshold=1.0472 (pi/3), normalSource=LambdaGrad`. This repo has
+been running `Barecasco` on Marrone 3.1 all along -- the same detector
+diffSPH defaults to, with the identical threshold constant. §5.32's and
+§5.34's ColorField-vs-Barecasco discussion is retracted; both entries edited
+in place to point here.
+
+**The user's hypothesis, prompted by §5.34's diffSPH read**: if surface
+detection is itself unstable frame to frame, particles could intermittently
+or wrongly flip in/out of the flagged set, swapping which branch of the
+Antuono switch they're on -- and that swapping, not disorder alone, could be
+what's driving the instability. This is directly testable on data already
+on disk from §5.17's dig run (`scratchpad/m31_dig/.../trajectory/`, 271
+`state_*.h5` files spanning t=0-2.6s, saved every 100 real steps) --
+**each file also stores all 4 RK4 sub-stage evaluations of `pressures` and
+`surfaceIndicators`for that one step**, so both intra-step and cross-frame
+switch stability are checkable with no new simulation run at all
+(`scratchpad/m31_switch_flicker.py`, this session).
+
+**Finding 1 -- the mask itself is recomputed fresh every RK sub-stage, and
+visibly changes within a single step.** Direct check on one file
+(`state_16000.h5`, t=1.555s): `surfaceIndicators` differs between RK
+stage 0 and each of stages 1/2/3 for 5 of 3240 fluid particles -- confirming
+the detector is not evaluated once per real step and held fixed (the way
+`freezeDiffusionAcrossStages` already does for the diffusive terms), it is
+re-run at every sub-stage's intermediate, possibly-jittered position, and
+the *committed* `state/surfaceIndicators` for the step is simply whatever
+the *last* sub-stage happened to produce.
+
+**Finding 2 -- across the full run, this is not rare.** Computing the full
+switch condition (`P_i>=0 OR surfaceIndicators`) at every RK sub-stage for
+every one of the 271 saved steps: the fraction of fluid particles whose
+switch value changes *within a single real timestep* runs **1-6%
+continuously throughout the whole run**, from t=0 onward -- e.g. 4.14% at
+t=0.02s (nothing violent has even happened yet), 5.90% at t=1.361s, 5.12% at
+t=2.080s. This is a steady background rate, not something that switches on
+only near the previously-flagged anomaly windows (t*~6-9, i.e. t~1.5-2.3s).
+
+**Finding 3 -- across saved frames (~100 steps, ~0.01s apart), the
+committed switch branch changes for a striking fraction of the whole fluid
+domain, continuously.** Same computation using each file's final committed
+`pressures`/`surfaceIndicators`, matched by UID: the fraction of fluid
+particles that flip branch between consecutive saved frames runs
+**15-60% for the entire run**, e.g. 22.3% at t=0.068s (still just the dam
+starting to fall), 43.8% at t=1.497s (the reported onset), 57.7% at
+t=2.177s (deep into the previously-reported window). This is not a
+sometimes-noisy detector occasionally misfiring near a hard case -- a large
+fraction of the fluid domain is swapping which term of Eq. (9) it evaluates
+every ~0.01s, for the entire simulation, calm periods included.
+
+**Finding 4 -- particles with a large pressure jump between frames are
+disproportionately (not exclusively) the ones that flipped branch.**
+`P(flip | |deltaP|>50)` vs `P(flip | |deltaP|<=50)` across the run: mostly
+1.5-3x higher conditional on a big jump (e.g. t=2.177s: 80.8% vs 36.1%;
+t=1.555s: 51.8% vs 47.8% -- closer together deep in the violent window,
+where nearly everything is flipping anyway). Read with the obvious caveat
+that switching which pressure-difference formula a particle evaluates can
+itself directly cause a pressure jump, so this correlation doesn't by
+itself distinguish cause from effect -- but it is consistent with, and does
+not rule out, the user's mechanism.
+
+**Reading.** This substantially reframes the artifact's shape. §5.15/§5.17
+characterised the failure as *disorder at a truncated kernel support making
+the symmetric branch's residual nonzero and unpredictable* -- correct, but
+incomplete: the mechanism making a given particle *evaluate* the symmetric
+branch at all is itself unstable at both the sub-step and multi-step
+timescale, for a large, steady fraction of the whole fluid domain,
+independent of whether that particle is anywhere near the violent window
+this plan has been focused on. A particle whose classification and/or
+`P_i>=0` sign genuinely toggles every step or two is not applying a
+consistently-conservative or consistently-symmetric pressure force at
+all -- it is applying whichever the last evaluation happened to land on,
+which is a form of numerical noise injection on top of (and possibly
+compounding) the truncation-sum residual itself.
+
+**Concrete next steps, not implemented this session, roughly cheapest-first:**
+1. **Freeze the free-surface mask (and arguably the switch decision itself)
+   across RK sub-stages** -- evaluate `detectFreeSurface` once per real step
+   at the committed t^n state, matching the existing
+   `freezeDiffusionAcrossStages` pattern (`configurations/
+   weaklyCompressible.py`), rather than recomputing it fresh (at a jittered
+   intermediate position) every sub-stage. Cheap, mechanical, directly
+   targets Finding 1; does not address the larger cross-frame (Finding 3)
+   churn, which reflects genuine per-step evolution, not just intra-step
+   recomputation noise.
+2. **Replace the hard binary switch with a continuous blend**, echoing both
+   reference codebases already read this session: DualSPHysics' ALE
+   extension smoothly ramps its shift correction by `theta` (distance to the
+   surface) and hard-gates its pressure blend on a Shepard-sum completeness
+   scalar (§5.32) rather than a binary classification; diffSPH ramps its own
+   shift's damping continuously via `surfaceScaling`/`lMin` (§5.34). A
+   pressure term that blends symmetric and antisymmetric forms by a
+   continuous function of (pressure sign, completeness) instead of an `OR`
+   over two booleans would not have a discrete branch to chatter across in
+   the first place -- addresses Findings 2 and 3 directly, not just 1, and
+   is the more likely actual fix; bigger change than (1).
+3. **Quantify how much of Findings 2/3 is `surfaceIndicators` re-flagging
+   vs. genuine `P_i` sign crossing.** Not separated in this pass (both feed
+   the same `OR`); re-run `m31_switch_flicker.py`'s Part A/B with the two
+   contributions counted separately to know how much of the chatter (1) can
+   fix outright vs. how much is inherent to the pressure-sign clause of Eq.
+   (9) and needs (2).
+
+Neither (1) nor (2) has been tried; this entry stops at diagnosis, per the
+user's request to confirm the hypothesis first. Script:
+`scratchpad/m31_switch_flicker.py` (throwaway, reused §5.17's existing dig
+data, no new run).
+
+See [[antuono-pressure-switch-bug]], [[sph-symmetric-pressure-truncation-artifact]],
+[[marrone31-truncation-artifact-vs-pst]].
+
+### 5.36 Found it (likely): Barecasco's own magnitude gate is checking the wrong vector -- it tests the norm of an already-normalized direction (~1 always), not the raw cover vector's relative magnitude, so the "isotropic neighbourhood -> definitely bulk" safety net never fires. Confirmed on real data: flip particles measurably weaker-signal than stable ones (2026-09-13)
+
+Per the user: rather than paper over the chatter (§5.35's freeze-mask/continuous-blend proposals), debug the actual surface-detection code paths directly -- Barecasco's own kernel, and the lambda/renormalization-derived normal.
+
+**`NormalSource.LambdaGrad` (this case's other resolved default, alongside
+`scheme=Barecasco`) is a dead end for this specific bug -- ruled out by
+reading `wrapper.py::detectFreeSurface`, not by running anything.**
+`normalSource` only ever changes which vector gets attached as `normals`
+(consumed downstream by PST/shifting); the boolean/scalar flag that feeds
+the Antuono switch (`fsm`, later dilated once by
+`expansionIterations=1` into `surfaceIndicators`) comes **strictly** from
+`surfaceConfig.scheme` (`Barecasco`), independent of `normalSource`. Also:
+`computeNormalsLambdaGrad` builds its normal from the SPH *gradient of the
+scalar* `min(|eigenvalues|)`, not from an eigenvector directly, so it
+sidesteps the classic eigenvector-sign-ambiguity bug that would otherwise
+be the obvious first suspect in "lambda terms and their derivation." Not
+where this bug lives.
+
+**Barecasco's own magnitude gate is where it lives.** Both `~/dev/diffSPH`'s
+reference (`modules/surfaceDetection.py::detectFreeSurfaceBarecasco`, the
+literal source `wp_barecasco.py`'s own header comment copies) and this
+repo's warp kernel (`wp_barecasco.py`,
+`computeBarecascoSurfaceDetection_Func_i_second`) implement Barecasco et
+al. (2013)'s two-part interior test identically:
+
+```python
+coverVector = sum_j( x_ij / |x_ij| )          # (negated in diffSPH, unnegated here -- a pure sign
+                                               #  convention difference, doesn't affect this bug)
+normalizedCoverVector = normalize(coverVector)
+# a particle is INTERIOR (not surface) if, for ANY neighbour j:
+#   (a) j falls within `threshold/2` of the cover-vector direction, OR
+#   (b) |normalizedCoverVector| <= 0.5
+```
+
+**(b) is checking the norm of an already-unit-normalized vector.**
+`torch.nn.functional.normalize`/`wp.normalize` return a vector of norm
+(very close to) exactly **1.0** for any input whose magnitude is
+meaningfully above float epsilon -- which is every real cover vector a
+simulation will ever produce, isotropic bulk particle or not. So condition
+(b) is, in practice, **only ever true in the literal machine-epsilon-exact-
+zero case** -- it does not implement "the directional imbalance is too weak
+to trust," which is what Barecasco's own magnitude criterion is for and
+what the variable name `normalized` (rather than `coverVector`) should have
+been the tell. The check should almost certainly be on the **raw**
+`coverVector`'s magnitude (typically relative to neighbour count, i.e. how
+close the vector sum is to fully cancelling for an isotropic neighbourhood)
+-- not on a vector `normalize()` has already rescaled to 1. With (b) never
+firing, EVERY particle's classification rests entirely on the single-neighbour
+angular cone test (a), including particles whose cover vector is pure
+positional noise with no real directional signal -- and that test's outcome
+is inherently unstable under a tiny position perturbation (a marginal
+neighbour a few degrees from the `threshold/2` boundary crosses it on the
+next RK sub-stage or timestep).
+
+**Confirmed directly on §5.17's existing dig data**
+(`scratchpad/m31_barecasco_magnitude.py`, reusing the same per-step
+adjacency + positions already stored, no new run): recomputed the raw,
+unnormalized cover-vector magnitude per particle per frame and compared it
+against §5.35's flip/stable labels and the stored `surfaceIndicators`.
+
+- **Particles that flip their Antuono branch between saved frames have a
+  ~40% smaller relative cover-vector magnitude than particles that don't**
+  (median `|coverVector|/nNeighbours`: **0.113 (flipped)** vs. **0.185
+  (stable)**, n=276,720 / 591,600 fluid-particle-frame samples across the
+  whole t=0-2.6s run) -- chatter concentrates exactly where the directional
+  signal is weakest, i.e. where a working magnitude gate should have
+  overridden the noisy angular test and called it bulk.
+- **The "flagged surface" and "flagged bulk" populations heavily overlap in
+  cover-vector magnitude** (sampled every 20th frame): `fs==1` median
+  relative magnitude 0.302, `fs==0` median 0.104, but `fs==0`'s own 90th
+  percentile (0.219) sits well inside `fs==1`'s populated range -- a
+  large fraction of particles flagged "surface" have a directional signal
+  no stronger than an ordinary bulk particle's noise floor, exactly what a
+  functioning magnitude gate exists to keep out.
+
+**Reading.** This is a plausible, mechanistic, and now numerically
+supported single root cause for a large share of §5.35's chatter: not a
+sign bug, not a wrong-formula bug, but a threshold check applied to the
+wrong (already-rescaled) vector, silently disabling half of Barecasco's own
+two-part test. It is shared between diffSPH and this repo (inherited via
+the port, not introduced here) -- consistent with the user's and this
+session's earlier read that diffSPH "never had these issues to this
+extent": diffSPH's own dam-break example (§5.34) very likely just doesn't
+run compressible enough (low effective `c0Ratio`) to turn this same latent
+instability into a visible pressure-force problem, not because its
+detector avoids the bug.
+
+**Proposed fix, not implemented this session:** replace condition (b) with
+a check on the **raw** `coverVector`'s magnitude (the value already computed
+in `_first`/`computeBarecascoSurfaceDetection_Func_Adjacency_first`, before
+`wp.normalize` discards it) relative to neighbour count -- e.g.
+`|coverVector| / nNeighbours <= someThreshold` -- restoring Barecasco's
+actual two-part interior test instead of running the angular test
+unconditionally on every particle. This directly targets the same
+mechanism as §5.35's "continuous blend" idea, but fixes it at the
+detector itself rather than downstream at the pressure switch -- the two
+are complementary, not alternatives (a correct magnitude gate reduces how
+often the mask flips at all; a continuous blend removes the consequence of
+whatever flipping remains).
+
+**Not yet done:** implementing the fix, and re-running §5.35's flicker
+analysis (and, if it substantially reduces flip rates, a full Marrone 3.1
+stability run) to confirm it actually calms both the switch chatter and
+the downstream pressure artifact -- this entry stops at diagnosis per the
+user's request to debug the actual path before changing anything. `lambda`
+term derivation itself (renormalization-matrix eigenvalues,
+`computeRenormalizationMatrices`) was not found to be implicated for this
+specific bug and was not separately audited beyond ruling out its role via
+`wrapper.py`'s dispatch logic above.
+
+Scripts: `scratchpad/m31_barecasco_magnitude.py` (throwaway, reused
+existing dig data).
+
+### 5.37 Checked §5.36 against the actual paper (user supplied it, `literature/1309.4290v1.pdf`) -- the proposed fix was wrong; the real finding is sharper and worse: the paper's authors themselves flag this exact instability as open and unsolved (2026-09-13)
+
+Read the paper term-by-term against both implementations rather than
+inferring further.
+
+**Eq. (6) (cover vector) and Eq. (7) (scan-cone test) are both implemented
+correctly.** `b_i = sum_j (x_i-x_j)/|x_i-x_j|` (Eq. 6) and `arccos((x_j-x_i)/
+|x_j-x_i| . b_i/|b_i|) <= theta_i/2 => interior` (Eq. 7, `theta_i = pi/3` in
+the paper, matching this repo's resolved `barecascoThreshold=pi/3` exactly)
+-- verified sign-by-sign against `wp_barecasco.py`'s `_first`/`_second`
+kernels: `computeDistanceVec` gives `x_ij = x_i-x_j`, so `_first`'s
+`out += n_ij` accumulates exactly Eq. (6), and `_second`'s
+`dot = wp.dot(-n_ij, coverVector)` is exactly `(x_j-x_i)/|x_j-x_i| .
+b_i/|b_i|` -- Eq. (7) verbatim. diffSPH's extra `-n_ij` negation in its own
+`coverVector = scatter_sum(-n_ij, ...)` is a sign convention difference in
+its `x_ij` (opposite of this repo's), not a bug -- both implementations
+correctly compute the same two published equations.
+
+**§5.36's proposed fix was wrong -- the paper has no cover-vector-magnitude
+gate at all, so there's nothing to "restore."** The paper's only fallback
+for degenerate/sparse neighbourhoods is Eq. (8): a **raw neighbour-count**
+threshold (`n_th = 4` in 2D, `15` in 3D) checked *before* the cone test --
+"a particle having the number of neighbour particles greater than `n_th`
+must be tested for its boundary status [i.e. run Eq. 7], otherwise it is a
+boundary particle [i.e. surface, unconditionally]" (Section 3.2/3.3, Step
+3). Neither diffSPH nor this repo implements Eq. (8) at all -- the
+`norm(normalize(coverVector))<=0.5` clause both share is not a broken port
+of Eq. (8), it is an *invented* extra condition with no equation behind it,
+and (per §5.36) numerically inert besides. **Checked whether restoring the
+real Eq. (8) would matter here: it would not.** Re-ran §5.36's flip/stable
+comparison using neighbour count instead of cover-vector magnitude (same
+data, same method): median neighbour count is **109-153** for this Marrone
+3.1 discretisation, three orders of magnitude above `n_th=4` -- Eq. (8)'s
+guard is aimed at genuinely degenerate cases (thin single-particle jets,
+isolated clusters), not the general bulk-vs-surface call, and would never
+fire in this simulation regardless of which neighbour list backs it. (Note:
+the `adjacency/numNeighbors` used for this check is a padded/Verlet spatial
+list, not the exact kernel-support count Barecasco's own kernel filters via
+`w_ij>0` -- immaterial here since both are far above 4, but worth flagging
+for anyone reusing this specific number elsewhere.)
+
+**The real finding: Section 5 of the paper itself is titled "Correction
+Method: Scan Circle" and describes precisely the instability this plan has
+been chasing, as an open problem the authors never solved.** Quoting
+directly: *"the cover vector of a boundary particle sometimes aims too
+close to another neighbour particle. The scan cone mistakenly regarded
+this boundary particle as interior... a drawback exists in the boundary
+detection accuracy because of random behavior of particle distribution. A
+research on correction method using a scan circle coverage is on going."*
+Figure 10 illustrates exactly the failure mode: a genuine surface particle
+whose nearest "gap-closing" neighbour happens to sit near the `theta_i/2`
+cone boundary gets classified interior, and the paper's own remedy (a
+"scan circle" refining the test) is presented as future work with no
+follow-up -- this 2013 conference-proceedings paper has no known published
+successor implementing it. **A hard `arccos(...) <= theta/2` boolean is, by
+the original authors' own account, inherently unstable for any particle
+near the classification boundary** -- exactly the population §5.36 found
+flips branch (weaker/more marginal directional signal, closer to the
+decision surface). This is not a porting bug to fix; it is a limitation of
+the published method itself when its output is consumed as a hard
+classification, which is exactly what the Antuono switch does with it.
+
+**Revised reading, replacing §5.36's fix proposal:** implementing Eq. (8)
+faithfully is still worth doing for correctness/completeness (it is a real,
+free, missing piece of the paper, and may matter for the genuinely
+degenerate cases this plan has separately flagged elsewhere -- Marrone
+3.4's bed-corner isolated-particle ejection, [[marrone34-sharp-edge-case]]
+-- population is disjoint from the general bulk/surface call, so it is a
+different, narrower fix than what §5.36 hoped for), **but it will not touch
+the pervasive chatter §5.35 measured.** For that, per the paper's own
+diagnosis of its method, the only sound directions are the ones §5.35
+already proposed independent of this reading: don't consume a boolean this
+unstable-by-nature as a hard switch input (a continuous blend, or the
+unfinished "scan circle" idea itself -- a continuous coverage fraction
+instead of a single yes/no cone test -- would be a from-scratch
+implementation of research the original paper never finished, not a
+one-line fix), or stabilise it in time (freeze across RK stages, §5.35 item
+1) even though that only addresses the intra-step half.
+
+Not implemented this session (still diagnosis, per the user's request).
+
+See [[antuono-pressure-switch-bug]], [[sph-symmetric-pressure-truncation-artifact]],
+[[marrone31-truncation-artifact-vs-pst]].
+
+# Part 7 — 2026-09-13 overnight gallery batch
+
+An overnight run (`scratchpad/run_overnight_batch.sh`: Marrone 3.1 + 3.4 at
+extended time horizons, then `scripts/render_examples.py` over the full
+`examples/weaklyCompressible` gallery) surfaced five separate failures.
+Marrone 3.1 is §5.17 above; the other four are here.
+
+## 7.1 Open-flow semi-periodic BC -- FIXED
+
+`channelFlow.openFlowCase` sets `semiPeriodic=True`, but `dambreak.
+configureScheme` unconditionally zeroed `domain.periodic` unless the
+(unrelated) `wallPeriodic` diagnostic knob was set -- so the case lost the
+periodicity `buildDomain` had already given it, and the neighbour search
+never saw the minimum-image distance across x.
+
+**First pass wrongly also added a `postStep` hook that rewrote particle
+positions back into the box every step (reverted -- flagged immediately as
+wrong).** Position wrap-around is already handled internally wherever it's
+needed (the compact hash map / neighbour search take `domain.periodic`
+directly and do the minimum-image wrap themselves, exactly as
+`13-open-flow.ipynb` -- which builds its own domain with
+`buildDomainDescription(..., True, ...)` and runs correctly with no core
+changes and no position rewriting anywhere) -- mutating `state.positions` to
+force them into `[min, max)` was redundant at best and risked breaking
+whatever *does* rely on a continuous, unwrapped trajectory.
+
+**Actual, minimal fix (`cases/dambreak.py` `configureScheme` only):**
+`buildDomain` already returns `domain.periodic` all-True for every case,
+`semiPeriodic`/`fullyPeriodic` included (only `domain.min`/`max` differ
+between them) -- exactly what the notebook sets by hand. `configureScheme`'s
+zeroing now only fires when the case is neither `semiPeriodic` nor
+`fullyPeriodic`, i.e. it leaves `buildDomain`'s value alone instead of
+stomping it. No `postStep`, no position mutation.
+
+Verified: `domain.periodic == [True, True]` after the fix (matches the
+notebook), run to t=1.5s with `diverged=False`. Fluid particles legitimately
+sit outside `[domain.min, domain.max]` in x at the end (322/1148) -- this is
+*expected*, not a bug, once `domain.periodic` is correctly set: positions
+drift unwrapped and the engine's own minimum-image handling is what makes
+that correct, the same as any other periodic case in this codebase.
+
+## 7.2 Lid-driven cavity density ramp / standing-wave amplification -- OPEN, deferred
+
+Reported: density keeps ramping up over a long run, with standing pressure
+waves that amplify rather than damp -- in a fully enclosed box (no free
+surface, no outlet) this reads as a lack of dissipation for a resonant
+acoustic mode.
+
+**First-pass hypothesis (from a triage pass, not yet the conclusion below):**
+`mdbcNoPenShiftMode='finalize'` (default since §5.13/e10469a) rebuilds a
+corrected particle's velocity from the *start-of-step* value, discarding that
+step's pressure/viscosity contribution along the corrected component -- LDC
+is entirely walled with a large near-wall population, so doing this
+continuously could plausibly suppress exactly the dissipation that would
+damp a reflecting wave.
+
+**Quick check with the new §5.18 instrumentation weakens this hypothesis.**
+`scratchpad/ldc_dig_run.py`, nx=64 to t=4s: `nopenshiftNActive` stays in the
+single digits (0-6, out of thousands of fluid particles) the entire run, with
+no growth trend, while `accelMagP95` clearly grows over the same window
+(0.08 at t=0.2s to 1.7-2.1 by t≈3.6-4.0s -- roughly a 20x rise) and
+`densityMedian` drifts up monotonically (1.00002 -> 1.00223). If `finalize`'s
+force-discarding were the energy source, `nopenshiftNActive` should track a
+meaningful, probably growing, fraction of the near-wall band; instead it is
+flat and negligible while the thing it's supposed to explain keeps growing.
+**This does not rule the mode out** (a handful of particles firing hard,
+repeatedly, at the same wall location could still matter locally -- was not
+checked), but it means "just turn `finalize` off and see" is not obviously
+where this goes anymore.
+
+**Left open, per explicit instruction -- not investigated further this
+session.** Next step whenever this is picked up: since `nopenshiftNActive`
+is off the table as the *primary* mechanism, look first at whether the
+`deltaSPH` DDT (density diffusion) coefficient / the artificial-viscosity
+`alpha` are strong enough to damp an acoustic mode in a domain with no
+free-surface energy sink at all -- LDC may simply need more dissipation than
+a free-surface case does, independent of any mDBC mechanism. The new
+`accelMag*`/`nopenshiftN*` columns (§5.18) are already available on every run
+of this case with no further instrumentation needed.
+
+## 7.3 Rotating square patch -- FIXED
+
+`rotatingSquarePatch.py`'s own docstring already named the cause:
+`poissonPressureInit=False` (the old default) leaves p to develop from zero
+through a documented ~2 tω acoustic start-up transient that "drives a
+spurious first-period fragmentation of the arms." At this case's
+`tLimit=1.0`/`omega=4.0` (tω=4), that transient spans essentially the whole
+run. `poissonPressureInit` default flipped to `True`; `_seedPoissonPressure`
+already no-ops (prints, leaves p=0) for any `shape` other than `box`, so
+non-box presets are unaffected. Smoke-tested (nx=48, t=0.3s, `diverged=False`).
+
+## 7.4 Marrone 3.4 -- REOPENED: not the sharp-edge jet tip, and not primarily `nopenshift`
+
+The overnight run's own report labelled its `max|v| = 9.9 U_max` gate
+"jet-tip, report-only" -- i.e. assumed it was Marrone's known unconverged
+sharp-edge singularity. **The user's direct observation of the video
+contradicts that**: the fast particles come off the flat bed/left-wall
+region, as isolated single particles ejected straight up along the wall, not
+off the obstacle's sharp edge.
+
+Confirmed two ways:
+
+1. **Visually**, on two independent runs (the original overnight
+   `deltaSPH_nx256_c28.3_output.mp4`, and a fresh instrumented re-run to
+   t=2.65s, `scratchpad/m34_dig_run.py`): both show, at t≈2.48s, several
+   particles completely detached from the bulk fluid and from each other,
+   scattered at increasing heights up the left wall -- consistent with
+   individual particles being left behind, isolated, as the reservoir at
+   that wall drains, rather than a coherent jet.
+2. **Quantitatively**, via the new §5.18 instrumentation
+   (`scratchpad/m34_dig/trace.json`): `accelMagMax` is already O(3x10^4) at
+   *every* step through the whole t=2.470-2.482s window, including steps
+   where `nopenshiftMagMax` is negligible (e.g. step 11123, t=2.4796s,
+   `maxVelocity=60.6`, `accelMagMax=31088`, `nopenshiftMagMax=0.029`,
+   `nopenshiftNActive=58` but with a tiny mean of 0.0011). `nopenshift`
+   itself does spike hard at a few individual steps (step 11086: 20.7; step
+   11104: 35.2; step 11124: 18.3) but these look like a large *reaction* --
+   the mode's own "rebuild from `v_pre`" design is exactly a velocity snap,
+   so a big value there means it detected and tried to arrest an
+   already-extreme velocity, not that it manufactured one from a small
+   input. The velocity at that location oscillates continuously between
+   ~26 and ~60 m/s for the entire 50+-step window, whether or not
+   `nopenshift` fires hard on a given step.
+
+**Read: this is the same failure family as §5.17's Marrone 3.1 artifact
+(a spurious SPH pressure force at severely truncated kernel support), not a
+`nopenshift` bug and not the sharp-edge jet tip.** Where §5.17's free-surface
+particles were merely disordered (still O(dozens) of fluid neighbours,
+producing O(500 m/s²) accelerations), these bed-corner particles are nearly
+*isolated* (visually, no fluid neighbour within several dx), which is a far
+more severe truncation and produces accelerations two orders of magnitude
+larger (O(3x10^4-1.6x10^5 m/s²)). `nopenshift`'s occasional large correction
+rides on top of this and adds its own per-step non-smoothness but is not
+the root driver -- the underlying pressure-force blow-up is present with or
+without it firing hard.
+
+**Not fixed this session.** Candidate next steps (not attempted): a minimum
+neighbour-count / kernel-completeness floor that suppresses the pressure
+force (or forces a Shepard fallback) below some support threshold, distinct
+from -- but philosophically the same fix family as -- §5.15/§5.17's open
+symmetric-pressure-truncation question; or preventing a fluid particle from
+becoming this isolated in the first place (a sampling / drainage issue at
+the flat-wall band). `scratchpad/m34_dig_run.py` is the reproduction (nx=256,
+t=2.65s, ~15-20 min including GPU contention from an unrelated local
+process); the ejection reproduced at the same t≈2.48s and the same wall
+location on a completely independent run, so it is not a one-off.
+
+## 7.5 Marrone 3.1 -- see §5.17
+
+Documented above in the existing Antuono/pressure-artifact investigation
+thread, since it is a direct continuation of that mechanism rather than a
+separate case-specific bug.

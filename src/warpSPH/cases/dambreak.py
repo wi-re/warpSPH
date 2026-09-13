@@ -64,7 +64,7 @@ from ..modules.liu import interpolateLiuLiu
 from warpSPHCore import OperationDirection
 from ..runner import Case, RunContext, caseMain, registerCase
 from .kolmogorovIncompressible import kolmogorovIncompressibleTimestep
-from .weaklyCompressible import particleDistributionMetrics
+from .weaklyCompressible import particleDistributionMetrics, stepAccelerationDiagnostics
 from .plotting import (Field, buildFieldPlotter, openWindow, pumpEvents,
                        refreshFieldPlotter, _export)
 
@@ -130,8 +130,17 @@ def configureScheme(ctx: RunContext) -> None:
     # diagnosing whether near-wall behaviour is a domain-edge neighbour-search
     # artefact; the pressure probe forces its own non-periodic gather either
     # way so it is unaffected.
+    #
+    # `buildDomain` always returns `domain.periodic` all-True (matching the
+    # `13-open-flow.ipynb` notebook's own direct `buildDomainDescription(...,
+    # True, ...)` call) -- minimum-image wrap is handled internally from that
+    # flag (`buildCompactHashMap` et al.), no position ever needs to be
+    # written back into the box. This case only zeroes it back out for the
+    # genuinely walled box; `semiPeriodic`/`fullyPeriodic` (`channelFlow.
+    # openFlowCase`'s wraparound channel) must keep what `buildDomain` set.
     domain, interiorDomain = buildDomain(simSetup)
-    if not ctx.param('wallPeriodic'):
+    if not (simSetup.semiPeriodic or simSetup.fullyPeriodic
+            or ctx.param('wallPeriodic')):
         domain.periodic = torch.zeros_like(domain.periodic)
     # The tank is an axis-aligned box, so its walls are free to sit at any phase
     # within the fixed sampling lattice; snap them onto the lattice mid-gaps so
@@ -432,6 +441,7 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
             particles.densities[fluid].detach().float(), 0.99).cpu().item(),
     }
     d.update(particleDistributionMetrics(ctx, state))
+    d.update(stepAccelerationDiagnostics(state))
     # Wall-penetration watch (DFSPH_FINDINGS.md 1.6): fluid particles pushed
     # more than half a spacing past the interior tank AABB. The `c637785`
     # rewrite dropped the mDBC no-penetration shift from `divergenceFree_step`; this is

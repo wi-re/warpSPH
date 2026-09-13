@@ -65,6 +65,7 @@ from .plotting import Field, particlePlot
 from .weaklyCompressible import (boundaryRegion, buildRegionSystem, fluidRegion,
                                  setupTimestep, shapeSdf,
                                  particleDistributionMetrics,
+                                 stepAccelerationDiagnostics,
                                  calibrateRestDensity)
 
 __all__ = ['sloshingTankCase']
@@ -322,6 +323,7 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
         'rollAngleDeg': math.degrees(ctx.scratch.get('rollAngle', 0.0)),
     }
     d.update(particleDistributionMetrics(ctx, state))
+    d.update(stepAccelerationDiagnostics(state))
 
     if ctx.scratch.get('sensorIndex') is None:
         ctx.scratch['sensorIndex'] = _locateSensor(ctx, particles)

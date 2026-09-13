@@ -80,6 +80,21 @@ class WeaklyCompressibleSPHConfig:
     dt_accelerationConstraint: bool = field(default=True, metadata={'description': 'Whether to apply acceleration constraint in timestep computation'})
     dt_acousticConstraint: bool = field(default=True, metadata={'description': 'Whether to apply acoustic constraint in timestep computation'})
     pressureForceTerm: PressureForceScheme = field(default=PressureForceScheme.Antuono, metadata={'description': 'Pressure force term to use'})
+    #: Apply the same kernel-gradient renormalization matrix `deltaSPH.py`
+    #: already computes for `gradRhoL` (`detectFreeSurface`'s per-particle
+    #: covariance fit) to the pressure-force gradient too
+    #: (`wp_surfaceAware.py`'s existing but previously-unused
+    #: `useGradientRenormalization`/`Li` path). False (default) leaves every
+    #: existing case unchanged -- the raw kernel gradient is used, as always.
+    #: `DELTASPH_VALIDATION_PLAN.md` 5.14/5.15/5.17/5.19-5.22: the Antuono
+    #: (`sun2018` Eq. 9) pressure switch's symmetric branch is a real,
+    #: nonzero force at any truncated/disordered kernel support even for a
+    #: uniform pressure field, because the raw `Sum_j V_j grad_i W_ij` is
+    #: only ~0 for a complete, regular neighbourhood -- exactly what a
+    #: renormalized gradient is meant to restore. Neither PST, the DDT
+    #: renormalization, nor either dissipation term fixed it (5.20-5.22);
+    #: this renormalizes the operator the artifact actually lives in.
+    pressureForceRenormalized: bool = field(default=False, metadata={'description': 'Apply gradient renormalization (the same L matrix used for gradRhoL) to the pressure-force kernel gradient'})
 
     #: Where (and whether) the mDBC no-penetration correction is applied.
     #:
@@ -192,6 +207,7 @@ def weaklyCompressibleConfigToDict(config: WeaklyCompressibleSPHConfig) -> Dict[
         'bandwith': config.bandwith,
 
         'pressureForceTerm': config.pressureForceTerm.name,
+        'pressureForceRenormalized': config.pressureForceRenormalized,
         'shiftProperties': {
             'iterations': config.shiftProperties.iterations,
             'CFL': config.shiftProperties.CFL,
@@ -242,6 +258,7 @@ def dictToWeaklyCompressibleConfig(configDict: Dict[str, Any]) -> WeaklyCompress
     config.dt_acousticConstraint = bool(configDict['dt_acousticConstraint'])
     # config.densityDiffusionTerm = DensityDiffusionScheme[configDict['densityDiffusionTerm']] if isinstance(configDict['densityDiffusionTerm'], str) else configDict['densityDiffusionTerm']
     config.pressureForceTerm = PressureForceScheme[configDict['pressureForceTerm']] if isinstance(configDict['pressureForceTerm'], str) else configDict['pressureForceTerm']
+    config.pressureForceRenormalized = bool(configDict.get('pressureForceRenormalized', False))
     config.bandwith = float(configDict.get('bandwith', 10.0))
     shiftPropsDict = configDict.get('shiftProperties', {})
     config.shiftProperties = ShiftProperties(

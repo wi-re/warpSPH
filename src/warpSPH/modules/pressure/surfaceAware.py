@@ -22,7 +22,7 @@ from .wp_surfaceAware import computePressureSurfaceAwareWarp
 
 __all__ = ['computePressureForceSurfaceAware']
 
-def computePressureForceSurfaceAware(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]]) -> torch.Tensor:
+def computePressureForceSurfaceAware(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], renormalizationState: Optional[Any] = None) -> torch.Tensor:
     with record_function("[warpSPH] - computePressureForceSurfaceAware"):
         dvdt = computePressureSurfaceAwareWarp(
             currentState,
@@ -35,5 +35,13 @@ def computePressureForceSurfaceAware(currentState: Any, config: SimulationConfig
             queryPressures = currentState.pressures,
             pressureTerm = schemeConfig.pressureForceTerm,
             querySurfaceMask = currentState.surfaceIndicators,
+            # `renormalizationState` (`None` unless the caller opts in via
+            # `schemeConfig.pressureForceRenormalized`) makes
+            # `wp_surfaceAware.py`'s existing but previously-unused
+            # `useGradientRenormalization`/`Li` path apply the same L matrix
+            # `deltaSPH.py` already computes for `gradRhoL` to this kernel
+            # gradient too. See `configurations/weaklyCompressible.py`'s
+            # `pressureForceRenormalized` docstring.
+            renormalizationState = renormalizationState,
         )
         return dvdt

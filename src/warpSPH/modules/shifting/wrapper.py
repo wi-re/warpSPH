@@ -259,11 +259,36 @@ def solveShifting(
                         # `surfaceLambdaThreshold` (taper == 0), else a smoothstep
                         # ramp over `[threshold, threshold + taper]` -- the hard
                         # step is itself a disorder source one layer into the bulk.
+                        #
+                        # Sun 2019 Sec. 2.5 (the paragraph right after Eq. (21)):
+                        # "the field lambda evaluated with the ghost particles
+                        # cannot be used in (20), and it needs to be re-evaluated
+                        # without considering the ghost particles... crucial for
+                        # maintaining the simulation stable when thin liquid jets
+                        # running on the solid wall occurs." `n`/`lMin` above come
+                        # from `detectFreeSurface`'s AllToAll pass (ghosts
+                        # included, correct for Eq. (19)'s normal) -- re-evaluate
+                        # lambda fluid-only, reusing the same adjacency (a kind
+                        # filter on an already-built neighbour list, no new
+                        # search), so a thin near-wall fluid layer that only
+                        # *looks* well-supported because of ghost padding still
+                        # gets gated here.
+                        _, gateEvals, _ = computeRenormalizationMatrices(
+                            systemState,
+                            operationProperties=OperationProperties(
+                                kernel=kernel,
+                                operation=WarpOperation.Gradient,
+                                operationMode=OperationDirection.FluidToFluid,
+                                supportMode=SupportScheme.SuperSymmetric,
+                            ),
+                            domain=domain, adjacency=adjacency, returnEigVals=True,
+                        )
+                        lMinGate = torch.min(torch.abs(gateEvals), dim=-1).values
                         if surfaceLambdaTaper > 0.0:
-                            x = ((lMin - surfaceLambdaThreshold) / surfaceLambdaTaper).clamp(0.0, 1.0)
+                            x = ((lMinGate - surfaceLambdaThreshold) / surfaceLambdaTaper).clamp(0.0, 1.0)
                             wLambda = (x * x * (3.0 - 2.0 * x)).view(-1, 1)
                         else:
-                            wLambda = (lMin >= surfaceLambdaThreshold).to(update.dtype).view(-1, 1)
+                            wLambda = (lMinGate >= surfaceLambdaThreshold).to(update.dtype).view(-1, 1)
                         inFcol = inF.view(-1, 1)
                         update = torch.where(inFcol, update * wLambda, update)
                     elif projectionScheme == ShiftingProjectionScheme.michel2022:

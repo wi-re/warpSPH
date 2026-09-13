@@ -137,7 +137,7 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
             scheme: str = 'sun2017DeltaSPH', shifting: str = 'default',
             plotBackend: str = None, cflFactor: float = None,
             integrationScheme: str = None, noPenShift: str = None,
-            wallBC: str = None):
+            wallBC: str = None, pressureForceTerm: str = None):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -170,7 +170,8 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
           + ('' if shifting == 'default' else f'_pst-{shifting}')
           + (f'_{integrationScheme}' if integrationScheme else '')
           + (f'_nopen-{noPenShift}' if noPenShift else '')
-          + (f'_wall-{wallBC}' if wallBC else ''))
+          + (f'_wall-{wallBC}' if wallBC else '')
+          + (f'_pft-{pressureForceTerm}' if pressureForceTerm else ''))
     runRoot = os.path.join(out, tag + '_run')
 
     # Marrone reports each signal area-integrated over a phi = 90 mm probe disc
@@ -227,6 +228,12 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
         def _cfg(ctx, _m=noPenShift, _p=_prevCfg):
             _p(ctx); ctx.schemeConfig.mdbcNoPenShiftMode = _m
         dambreakCase.configureScheme = _cfg
+    if pressureForceTerm:
+        from warpSPH.enumTypes import PressureForceScheme
+        _prevCfg2 = dambreakCase.configureScheme
+        def _cfg2(ctx, _t=PressureForceScheme[pressureForceTerm], _p=_prevCfg2):
+            _p(ctx); ctx.schemeConfig.pressureForceTerm = _t
+        dambreakCase.configureScheme = _cfg2
 
     r = run(dambreakCase, **kw)
 
@@ -251,6 +258,7 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
         shiftScheme=str(getattr(r.ctx.schemeConfig.shiftProperties, 'scheme', '?')),
         sun2017Eq7Shift=bool(getattr(r.ctx.schemeConfig.shiftProperties,
                                      'sun2017Eq7Shift', False)),
+        pressureForceTerm=str(getattr(r.ctx.schemeConfig, 'pressureForceTerm', '?')),
         tReached=tReached, tStarReached=tReached * (G / H) ** 0.5,
         dx=dx, HdxRatio=H / dx, c0=c0, probeInset_dx=probeInset / dx,
         mach=(U_MAX / c0) if c0 else None,
@@ -715,6 +723,15 @@ def main():
     ap.add_argument('--wallBC', default=None,
                     choices=('constant', 'freeSlip', 'noSlip', 'extended', 'zeros'),
                     help="tank wall boundary condition. Marrone 2011 Sec. 3 specifies FREE SLIP; the case default 'constant' leaves the wall at v=0 while the AllToAll artificial viscosity drags against it, i.e. an effective no-slip bed. DELTASPH_VALIDATION_PLAN 5.7.")
+    ap.add_argument('--pressureForceTerm', default=None,
+                    choices=('conservative', 'nonConservative', 'Antuono', 'i', 'j', 'symmetric'),
+                    help="override PressureForceScheme (case default 'Antuono', "
+                         "the sun2018 Eq. 9 tensile-instability-control switch). "
+                         "'nonConservative' forces the always-summation form "
+                         "(P_i + P_j) unconditionally; 'conservative' forces the "
+                         "always-difference form (P_j - P_i) unconditionally -- "
+                         "i.e. the switch's two branches with the switch itself "
+                         "removed. DELTASPH_VALIDATION_PLAN.md 5.14-5.17/5.28.")
     ap.add_argument('--report', action='store_true',
                     help='(re)build plots + REPORT.md from existing .npz runs')
     args = ap.parse_args()
@@ -725,7 +742,8 @@ def main():
     _runOne(args.nx, args.c0Ratio, args.tLimit, args.out, args.video,
             args.plotInterval, args.kernel, args.freezeDiffusion, args.scheme,
             args.shifting, args.plotBackend, args.cflFactor,
-            args.integrationScheme, args.noPenShift, args.wallBC)
+            args.integrationScheme, args.noPenShift, args.wallBC,
+            args.pressureForceTerm)
 
 
 if __name__ == '__main__':

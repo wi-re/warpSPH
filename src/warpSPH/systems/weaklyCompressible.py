@@ -51,6 +51,29 @@ from torch.profiler import profile, record_function, ProfilerActivity
 _RESTORE_GRAVITY_ON_CEILING_NOPEN = False
 
 
+_STAT_AXIS_NAMES = ('X', 'Y', 'Z')
+
+
+def _statBlock(prefix: str, x: torch.Tensor) -> dict:
+    """min/max/mean/p05/p95 of a 1D tensor, `{prefix}{Min,Max,Mean,P05,P95}`.
+
+    NaN-filled (not omitted) when `x` is empty, so a trajectory's columns stay
+    the same shape whether or not any particle triggered whatever `x` counts
+    this step (`np.savez`'s `row.get(k, nan)` pattern already expects this).
+    """
+    if x.numel() == 0:
+        nan = float('nan')
+        return {f'{prefix}Min': nan, f'{prefix}Max': nan, f'{prefix}Mean': nan,
+                f'{prefix}P05': nan, f'{prefix}P95': nan}
+    xf = x.detach().float()
+    q = torch.quantile(xf, torch.tensor([0.05, 0.95], device=xf.device, dtype=xf.dtype))
+    return {
+        f'{prefix}Min': xf.min().item(), f'{prefix}Max': xf.max().item(),
+        f'{prefix}Mean': xf.mean().item(),
+        f'{prefix}P05': q[0].item(), f'{prefix}P95': q[1].item(),
+    }
+
+
 def _meanBoundaryNormal(state, adjacency):
     """Mean inward normal of each fluid particle's boundary neighbours, from
     their ghost offsets (`n_j = -offset_j / |offset_j|`, the same normal the
@@ -311,11 +334,13 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
         # gravity. Applied per component, only where the correction is non-zero,
         # and only to fluid particles (the wall band's own motion comes from the
         # BC machinery).
+        nopenshiftDiag = None    # (nopenshift, active) for the diagnostics block below
         if getattr(schemeConfig, 'mdbcNoPenShiftMode', 'derivative') == 'finalize':
             with record_function("[warpSPH] - [deltaSPH] - no-pen shift (finalize)"):
                 nopenshift = computeMdbcNoPenShift(
                     self.state, config, schemeConfig, self.adjacency)
                 active = (nopenshift != 0) & (self.state.kinds == 0).unsqueeze(-1)
+                nopenshiftDiag = (nopenshift, active)
                 if bool(active.any()):
                     vPre = initialState.state.velocities
                     xPre = initialState.state.positions
@@ -356,6 +381,33 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
         for rigidBody in schemeConfig.rigidBodies:
             rigidBody = integrateRigidBody(rigidBody, 0, 0, dt)
             self.state = updateBodyParticlesWCSPH(self.state, rigidBody)
+
+        # Per-step diagnostics: the *net* fluid acceleration actually applied
+        # this step (magnitude + per axis), and -- only under
+        # `mdbcNoPenShiftMode == 'finalize'`, where `nopenshiftDiag` above was
+        # set regardless of whether any particle ended up `active` -- how many
+        # fluid particles the no-pen correction touched and by how much.
+        # Stashed on `self` (the same object every case's `diagnostics(ctx,
+        # state)` receives as `state`) rather than returned, so it rides every
+        # trajectory row for free (`cases/weaklyCompressible.py
+        # stepAccelerationDiagnostics`) without every case needing to know
+        # this system's internals. Added after the overnight batch
+        # (`DELTASPH_VALIDATION_PLAN.md`) made "was it nopenshift?" a
+        # recurring question across the lid-driven cavity, Marrone 3.1 and
+        # Marrone 3.4 investigations that otherwise needed a one-off probe
+        # script and a from-scratch re-run each time to answer.
+        fluidMask = self.state.kinds == 0
+        accel = (self.state.velocities - initialState.state.velocities)[fluidMask] / dt
+        stepDiag = _statBlock('accelMag', torch.linalg.norm(accel, dim=-1))
+        for axis in range(accel.shape[-1]):
+            stepDiag.update(_statBlock(f'accel{_STAT_AXIS_NAMES[axis]}', accel[:, axis]))
+        if nopenshiftDiag is not None:
+            nopenshift, active = nopenshiftDiag
+            activeAny = active.any(dim=-1)
+            stepDiag['nopenshiftNActive'] = int(activeAny.sum().item())
+            stepDiag.update(_statBlock(
+                'nopenshiftMag', torch.linalg.norm(nopenshift[activeAny], dim=-1)))
+        self.stepDiagnostics = stepDiag
 
         # Information for artificial viscosity switches
         # self.state.divergence.copy_(lastState.divergence)

@@ -190,7 +190,11 @@ def deltaSPH_step(
     # 13. Compute dvdt from pressure
     # with TimedBlock('compute dvdt', use_cuda=True, device=config.device) as tb_dvdt:
     with record_function("[warpSPH] - [deltaSPH - 13] - compute dvdt from pressure"):
-        dvdt_pressure = computePressureForceSurfaceAware(currentState, config, schemeConfig, adjacency)
+        dvdt_pressure = computePressureForceSurfaceAware(
+            currentState, config, schemeConfig, adjacency,
+            renormalizationState=(renormalizationState_
+                                   if getattr(schemeConfig, 'pressureForceRenormalized', False)
+                                   else None))
 
     # 14. Apply forcing
     # with TimedBlock('compute forcing', use_cuda=True, device=config.device) as tb_forcing:
