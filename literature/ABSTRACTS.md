@@ -465,6 +465,42 @@ than sit here looking plausible.
 > significantly reduced compared to simulations with constant time steps.
 
 
+### `english2022`
+
+- **file:** `english2022_mdbc-general-purpose-sph.pdf`
+- **title:** Modified dynamic boundary conditions (mDBC) for general-purpose smoothed particle hydrodynamics (SPH): application to tank sloshing, dam break and fish pass problems
+- **authors:** Aaron English, José M. Domínguez, Renato Vacondio, Alejandro J. C. Crespo, Peter K. Stansby, Steven J. Lind, Luca Chiapponi and Moncho Gómez-Gesteira
+- **venue:** *Computational Particle Mechanics* 9(5):911-925, 2022
+- **doi:** [10.1007/s40571-021-00403-3](https://doi.org/10.1007/s40571-021-00403-3)
+- **relevance:** The mDBC boundary density/pressure paper modules/mdbc/density2025.py implements Eq. 12 of. Distinct from english2025 (Computers & Fluids, river-bridges application paper) already in this manifest -- this is the original method paper. BOUNDARY_DENSITY_PLAN.md names it directly as the source of the Eq. 12 extrapolation this codebase implements.
+- **abstract from:** PDF p.3
+
+> Dynamic boundary conditions (DBC) for solid surfaces are standard in the weakly compressible smoothed particle hydrodynamics (SPH) code DualSPHysics. A stationary solid is simply represented by fixed particles with pressure from the
+> equation of state. Boundaries are easy to set up and computations are relatively stable and efficient, providing robust numerical simulation for complex geometries. However, a small unphysical gap between the fluid and solid boundaries can form,
+> decreasing the accuracy of pressures measured on the boundary. A method is presented where the density of solid particles
+> is obtained from ghost positions within the fluid domain by linear extrapolation. With this approach, the gap between fluid
+> and boundary is reduced and pressures in still water converge to hydrostatic, including the case of a bed with a sharp corner.
+> The violent free-surface cases of a sloshing tank and dam break impact on an obstacle show pressures measured directly
+> on solid surfaces in close agreement with experiments. The complex 3-D flow in a fish pass, with baffles to divert the flow,
+> is simulated showing close agreement with measured water levels with weirs open and gates closed, but less close with
+> gates open and weirs closed. This indicates the method is suitable for rapidly varying free-surface flows, but development
+> for complex turbulent flows is necessary. The code with the modified dynamic boundary condition (mDBC) is available in
+> DualSPHysics to run on CPUs or GPUs.
+
+## Free-surface detection
+
+### `barecasco2013`
+
+- **file:** `barecasco2013_free-surface-detection-sph.pdf`
+- **title:** Simple free-surface detection in two and three-dimensional SPH solver
+- **authors:** Agra Barecasco, Hanifa Terissa and Christian Fredy Naa
+- **venue:** arXiv:1309.4290 [physics.flu-dyn], 2013
+- **arXiv:** [1309.4290](https://arxiv.org/abs/1309.4290)
+- **relevance:** The Barecasco surface-detection scheme (configurations/incompressible.py's barecascoThreshold, and the detectFreeSurface mask discussed at length in DELTASPH_VALIDATION_PLAN.md §5.34-5.35): an angle-based coverage-vector test using overlapping spheres, distinct from the Marrone/Sun dilation approach already implemented alongside it. No DOI found on Crossref -- appears to be an arXiv-only preprint, never formally published.
+- **abstract from:** arXiv API
+
+> A simple free-surface particle detection method for two and three-dimensional SPH simulation has been implemented. The method uses sphere representation for the SPH particle. The fluid domain is covered by overlapping spheres. A sphere whose surface is not fully covered considered as boundary. To test particle boundary status, we used a sum of normalized relative position vectors from neighbouring particles to the test particle. By checking the existence of un- covered sphere surface by this vector sum, boundary status of the test particle can be determined. This boundary detection method can be easily embedded in the SPH solver algorithm.
+
 ## Pressure solvers, non-pressure forces, multiphase
 
 ### `bender2017`
@@ -784,6 +820,31 @@ The scheme of `ACSPH_PLAN.md` and its dependencies. Added 2026-09-05.
 - **abstract from:** PDF p.1
 
 > A discussion on the use of numerical diffusive terms in SPH models is proposed. Such terms are, generally, added in the continuity equation, in order to reduce the spurious numerical noise that affects the density and pressure fields in weakly-compressible SPH schemes. Specific focus has been given to the theoretical analysis of the diffusive term structure, highlighting the main benefits and drawbacks of the most widespread formulations. Finally, specific test cases have been used to compare such formulations and to confirm the theoretical findings.
+
+### `molteni2009`
+
+- **file:** `molteni2009_pressure-evaluation-density-diffusion.pdf`
+- **title:** A simple procedure to improve the pressure evaluation in hydrodynamic context using the SPH
+- **authors:** Diego Molteni and Andrea Colagrossi
+- **venue:** *Computer Physics Communications* 180(6):861-872, 2009
+- **doi:** [10.1016/j.cpc.2008.12.004](https://doi.org/10.1016/j.cpc.2008.12.004)
+- **relevance:** The origin paper of the SPH density diffusion term (DDT), which `antuono2010`/`antuono2012` later correct with a renormalized-gradient term. This paper's own DDT has no such correction at all -- a plain density-difference-weighted SPH Laplacian in the continuity equation. `DELTASPH_VALIDATION_PLAN.md` §8.15 found DualSPHysics' simplest DDT option (`TDensity=1`) implements close to this formula verbatim, and that this codebase's own `deltaSPH_wrongSign` diagnostic (§8.11, the pre-fix psi sign) empirically degenerates toward the same un-renormalized Laplacian family -- this paper is the reference for what that family actually is and why it was introduced (damping spurious pressure noise, §1).
+- **abstract from:** PDF p.1
+
+> In literature, it is well know that the Smoothed Particle Hydrodynamics method can be affected by numerical noise on the pressure field when dealing with liquids. This can be highly dangerous when an SPH code is dynamically coupled with a structural solver. In this work a simple procedure is proposed to improve the computation of the pressure distribution in the dynamics of liquids. Such a procedure is based on the use of a density diffusion term in the equation for the mass conservation. This diffusion is a pure numerical effect, similar to the well known artificial viscosity originally proposed in SPH method to smooth out the shock discontinuities. As the artificial viscosity, the density diffusion used here goes to zero increasing the number of particles recovering consistency and convergence of the final numerical scheme adopted. Different artificial density diffusion formulas have been studied, paying attention to prevent unphysical changes of the flows. To show the improvements of the new scheme proposed here, a suitable set of examples, for which reference solutions or experimental data are available, has been tested.
+
+### `fourtakas2019`
+
+- **file:** `fourtakas2019_lust-boundary-condition-ddt-correction.pdf`
+- **title:** Local uniform stencil (LUST) boundary condition for arbitrary 3-D boundaries in parallel smoothed particle hydrodynamics (SPH) models
+- **authors:** Georgios Fourtakas, Jose M. Dominguez, Renato Vacondio and Benedict D. Rogers
+- **venue:** *Computers & Fluids* 190:346-361, 2019
+- **doi:** [10.1016/j.compfluid.2019.06.009](https://doi.org/10.1016/j.compfluid.2019.06.009)
+- **copy here:** published version, open access (CC BY)
+- **relevance:** Primarily the LUST fictitious-particle boundary condition, not directly relevant here -- but its §3.2 "Improved density diffusion term for gravity driven flows" is DualSPHysics' `DDT_DDT2`/`DDT_DDT2Full` (`TDensity=2/3`): cancels the *hydrostatic* background density difference analytically (from the gravity direction and the EOS, Eq. following its Eq. (13)) instead of via a renormalized SPH gradient estimate -- structurally distinct from `antuono2010`/`antuono2012`'s correction and from this codebase's `deltaSPH` DDT. `DELTASPH_VALIDATION_PLAN.md` §8.15/8.16: neither of DualSPHysics' two real DDT options uses the renormalized-gradient machinery this codebase implements; this is the modern, DualSPHysics-recommended one, specifically built to fix `DDT_DDT`'s (`molteni2009`'s) known near-wall/sloped-free-surface errors. Adapted to this codebase's isothermal EOS, its hydrostatic term collapses to the same formula `cases/dambreak.py`'s existing `hydrostaticInit` already computes.
+- **abstract from:** PDF p.1
+
+> This paper presents the development of a new boundary treatment for free-surface hydrodynamics using the smoothed particle hydrodynamics (SPH) method accelerated with a graphics processing unit (GPU). The new solid boundary formulation uses a local uniform stencil (LUST) of fictitious particles that surround and move with each fluid particle and are only activated when they are located inside a boundary. This addresses the issues currently affecting boundary conditions in SPH, namely the accuracy, robustness and applicability while being amenable to easy parallelization such as on a GPU. In 3-D, the methodology uses triangles to represent the geometry with a ray tracing procedure to identify when the LUST particles are activated. A new correction is proposed to the popular density diffusion term treatment to correct for pressure errors at the boundary. The methodology is applicable to complex arbitrary geometries without the need of special treatments for corners and curvature is presented. The paper presents the results from 2-D and 3-D Poiseuille flows showing convergence rates typical for weakly compressible SPH. Still water in a complex 3-D geometry with a pyramid demonstrates the robustness of the technique with excellent agreement for the pressure distributions. The method is finally applied to the SPHERIC benchmark of a dry-bed dam-break impacting an obstacle showing satisfactory agreement and convergence for a violent flow.
 
 ### `letouze2013`
 
@@ -1352,4 +1413,465 @@ The scheme of `ACSPH_PLAN.md` and its dependencies. Added 2026-09-05.
 > implications for training neural networks and providing a theoretical
 > justification for temporal coarse-graining approaches that simplify the
 > learning task by focusing on longer timescales.
+
+## Geometric integration, operator splitting & conformal symplecticity
+
+Background for `../../warpSPHIntegrators/SPLITTING_PLAN.md`'s conservative/dissipative
+operator-splitting plan, added 2026-09-15.
+
+### `yoshida1990`
+
+- **file:** `yoshida1990_higher-order-symplectic-integrators.pdf`
+- **title:** Construction of higher order symplectic integrators
+- **authors:** Haruo Yoshida
+- **venue:** *Physics Letters A* 150(5-7):262-268, 1990
+- **doi:** [10.1016/0375-9601(90)90092-3](https://doi.org/10.1016/0375-9601(90)90092-3)
+- **relevance:** The Yoshida triple-jump: composes a symmetric order-2 base method into order 4/6/8 with explicit real coefficients. SPLITTING_PLAN.md §2.5 uses its coefficients (gamma1 ≈ 1.351, gamma0 ≈ -1.702) as the reference point for why a dissipative half-step forces a backward sub-step under this composition.
+- **abstract from:** PDF p.1
+- **text-layer:** `reversiblesymplectic` -> `reversible symplectic`
+- **text-layer:** `symplecticintegrator with` -> `symplectic integrator with`
+- **text-layer:** `symplecticintegrators with fewersteps` -> `symplectic integrators with fewer steps`
+- **text-layer:** `coefficientsare givenby solvinga set of simultaneousalgebraicequations` -> `coefficients are given by solving a set of simultaneous algebraic equations`
+
+> For Hamiltonian systemsof the form H= T(p) + V(q) a method is shown to construct explicit and time reversible symplectic
+> integrators of higher order. For any even order there exists at least one symplectic integrator with exact coefficients.The simplest
+> one is the 4th order integrator which agrees with one found by Forest and by Ned. For 6th and 8th orders, symplectic integrators
+> with fewer steps are obtained, for which the coefficients are given by solving a set of simultaneous algebraic equations numerically.
+
+### `suzuki1990`
+
+- **file:** `suzuki1990_fractal-decomposition-exponential-operators.pdf`
+- **title:** Fractal decomposition of exponential operators with applications to many-body theories and Monte Carlo simulations
+- **authors:** Masuo Suzuki
+- **venue:** *Physics Letters A* 146(6):319-323, 1990
+- **doi:** [10.1016/0375-9601(90)90962-N](https://doi.org/10.1016/0375-9601(90)90962-N)
+- **relevance:** The 5-stage fourth-order composition SPLITTING_PLAN.md §2.5 recommends over Yoshida's for a dissipative half: its largest backward coefficient (w3 ≈ -0.658) is smaller in magnitude than Yoshida's (gamma0 ≈ -1.702), so it tolerates roughly 2.6x the viscous stiffness before the reversed sub-step amplifies comparably.
+- **abstract from:** PDF p.1
+
+> A new systematic scheme ofdecomposition of exponential operators is presented, namely exp [x(A + B)] = S,,, (x) + 0 (x'"+ I)
+> for any positive integer m, where S,,,(x) =etIAet~e~e1~...etMA. A general scheme of construction of {t,} is given explicitly. The
+> decomposition cap [x(A +B)] = [S,,,(x/n) 1 "+0 (x"'~In") yields a new efficient approach to quantum Monte Carlo simulations.
+
+### `mclachlan2001`
+
+- **file:** `mclachlan2001_conformal-hamiltonian-systems.pdf`
+- **title:** Conformal Hamiltonian systems
+- **authors:** Robert McLachlan and Matthew Perlmutter
+- **venue:** *Journal of Geometry and Physics* 39(4):276-300, 2001
+- **doi:** [10.1016/S0393-0440(01)00020-1](https://doi.org/10.1016/S0393-0440(01)00020-1)
+- **relevance:** The definition SPLITTING_PLAN.md §2.4 cites for why constant-gamma damping (F_visc = -gamma*v) contracts the symplectic form by an exact factor exp(-gamma*t) -- the generalized det(D-Phi_h) check that section proposes.
+- **abstract from:** PDF p.1
+
+> Vector fields whose flow preserves a symplectic form up to a constant, such as simple mechanical
+> systems with friction, are called “conformal”. We develop a reduction theory for symmetric conformal Hamiltonian systems, analogous to symplectic reduction theory. This entire theory extends
+> naturally to Poisson systems: given a symmetric conformal Poisson vector field, we show that it
+> induces two reduced conformal Poisson vector fields, again analogous to the dual pair construction
+> for symplectic manifolds. Conformal Poisson systems form an interesting infinite-dimensional Lie
+> algebra of foliate vector fields. Manifolds supporting such conformal vector fields include cotangent bundles, Lie–Poisson manifolds, and their natural quotients.
+
+### `bhatt2016`
+
+- **file:** `bhatt2016_conformal-symplectic-damped-hamiltonian.pdf`
+- **title:** Second order conformal symplectic schemes for damped Hamiltonian systems
+- **authors:** Ashish Bhatt, Dwayne Floyd and Brian E. Moore
+- **venue:** *Journal of Scientific Computing* 66(3):1234-1259, 2016
+- **doi:** [10.1007/s10915-015-0062-z](https://doi.org/10.1007/s10915-015-0062-z)
+- **relevance:** Constructs Stormer-Verlet/implicit-midpoint schemes for exactly this codebase's split problem -- a separable H(q,p) = T(p) + V(q) plus linear damping -- and proves they preserve the exact dissipation-of-symplecticity rate. SPLITTING_PLAN.md §2.4's conformal check generalizes the direct 1-DOF phase-Jacobian test (tests/test_hamiltonian.py) using exactly this paper's target property.
+- **abstract from:** PDF p.1
+
+> Numerical methods for solving linearly damped Hamiltonian systems are constructed using the popular Störmer–Verlet and implicit midpoint methods. Each method is
+> shown to preserve dissipation of symplecticity and dissipation of angular momentum of an
+> N -body system with pairwise distance dependent interactions. Necessary and sufficient conditions for second order accuracy are derived. Analysis for linear equations gives explicit
+> relationships between the damping parameter and the step size to reveal when the methods
+> are most advantageous; essentially, the damping rate of the numerical solution is exactly preserved under these conditions. The methods are applied to several model problems, both ODEs
+> and PDEs. Additional structure preservation is discovered for the discretized PDEs, in one
+> case dissipation in total linear momentum and in another dissipation in mass are preserved
+> by the methods. The numerical results, along with comparisons to standard Runge–Kutta
+> methods and another structure-preserving method, demonstrate the usefulness and strengths
+> of the methods.
+
+### `goldman1996`
+
+- **file:** `goldman1996_nth-order-operator-splitting.pdf`
+- **title:** Nth-order operator splitting schemes and nonreversible systems
+- **authors:** Daniel Goldman and Tasso J. Kaper
+- **venue:** *SIAM Journal on Numerical Analysis* 33(1):349-367, 1996
+- **doi:** [10.1137/0733018](https://doi.org/10.1137/0733018)
+- **relevance:** The theorem SPLITTING_PLAN.md §2.5 rests on: no operator-splitting composition of order greater than 2 with real coefficients has all-positive coefficients, so any order-4+ composition run against a dissipative operator necessarily takes a backward sub-step somewhere.
+- **abstract from:** DOI record (Crossref)
+
+> This paper is concerned with partitioned Nth-order accurate split-operator schemes built using M distinct solution operators for semidiscrete equations of the form du_j/dt = f_j (u_k) + f_j (u_k), which arise, among others, from constant coefficient parabolic partial differential equations. We prove that, for every N > 3 and M > 2, each solution operator must be applied for at least one backward fractional time step during each complete time step. This result has important consequences for applications to the complex Ginzburg-Landau equation with periodic boundary conditions and other partial differential equations with both reversible and nonreversible components. Furthermore, for the special case of N = 3 and M = 2, we analytically determine all possible schemes.
+
+### `blanes2008`
+
+- **file:** `blanes2008_splitting-and-composition-methods.pdf`
+- **title:** Splitting and composition methods in the numerical integration of differential equations
+- **authors:** Sergio Blanes, Fernando Casas and Ander Murua
+- **venue:** *Boletín de la Sociedad Española de Matemática Aplicada* 45:89-145, 2008
+- **arXiv:** [0812.0377](https://arxiv.org/abs/0812.0377)
+- **relevance:** The survey SPLITTING_PLAN.md's references lean on for the general composition/splitting landscape: covers Lie-Trotter and Strang as the order-1/2 base cases, the composition theorem's symmetry requirement, and the processing techniques (§2.5's "escape routes") that do not evade Goldman-Kaper for order >= 3.
+- **abstract from:** arXiv API (0812.0377); the published Bol. Soc. Esp. Mat. Apl. record carries no abstract
+
+> We provide a comprehensive survey of splitting and composition methods for the numerical integration of ordinary differential equations (ODEs). Splitting methods constitute an appropriate choice when the vector field associated with the ODE can be decomposed into several pieces and each of them is integrable or at least easier to integrate than the original problem.
+
+### `hairer2006`
+
+- **file:** `hairer2006_geometric-numerical-integration.pdf`
+- **title:** Geometric Numerical Integration: Structure-Preserving Algorithms for Ordinary Differential Equations
+- **authors:** Ernst Hairer, Christian Lubich and Gerhard Wanner
+- **venue:** 2nd ed., Springer Series in Computational Mathematics 31 (Springer, 2006)
+- **isbn:** 978-3-540-30663-4
+- **relevance:** Carries essentially all of SPLITTING_PLAN.md's theory -- II.4 (composition methods and the order theorem), II.5 (splitting, Strang, the Baker-Campbell-Hausdorff expansion), III.4 (backward error analysis for splitting), V.4.1 (symmetric projection, the mechanism behind §2.7.1's substep-local compatible-energy rewrite).
+- **abstract:** none (a book; no abstract to quote)
+
+### `toro2009`
+
+- **file:** `toro2009_riemann-solvers-and-numerical-methods.pdf`
+- **title:** Riemann Solvers and Numerical Methods for Fluid Dynamics: A Practical Introduction
+- **authors:** Eleuterio F. Toro
+- **venue:** 3rd ed. (Springer, 2009)
+- **isbn:** 978-3-540-25202-3
+- **relevance:** The HLLC reference for the MFM/MFV direction (PESPH_PLAN.md §7): the Riemann solver structural correspondence between CRKSPH's conservative differencing (Eq. 35) and the MFM effective-face flux points here for the piece this codebase does not yet have.
+- **abstract:** none (a book; no abstract to quote)
+
+
+## PESPH, CRKSPH, compSPH & meshless hydrodynamics (MFM)
+
+Background for `PESPH_PLAN.md`, added 2026-09-15.
+
+### `hopkins2013`
+
+- **file:** `hopkins2013_general-class-lagrangian-sph.pdf`
+- **title:** A general class of Lagrangian smoothed particle hydrodynamics methods and implications for fluid mixing problems
+- **authors:** Philip F. Hopkins
+- **venue:** *Monthly Notices of the Royal Astronomical Society* 428(4):2840-2856, 2013
+- **doi:** [10.1093/mnras/sts210](https://doi.org/10.1093/mnras/sts210)
+- **relevance:** The pressure-entropy PESPH paper. PESPH_PLAN.md §1.2/§3.2 builds PESPH-A on this: pressure by summation over the entropic function A rather than energy, which is what makes the scheme separable (SPLITTING_PLAN.md §2.3.1) and the recommended first target for the splitting integrator work.
+- **abstract from:** OpenAlex `abstract_inverted_index` (word order preserved; original punctuation not recoverable)
+
+> Various formulations of smoothed particle hydrodynamics (SPH) have been proposed, intended to resolve certain difficulties in the treatment of fluid mixing instabilities. Most have involved changes to the algorithm which either introduces artificial correction terms or violates what is arguably the greatest advantage of SPH over other methods: manifest conservation of energy, entropy, momentum and angular momentum. Here, we show how a class of alternative SPH equations of motion (EOM) can be derived self-consistently from a discrete particle Lagrangian – guaranteeing manifest conservation – in a manner which tremendously improves treatment of these instabilities and contact discontinuities. Saitoh & Makino recently noted that the volume element used to discretize the EOM does not need to explicitly invoke the mass density (as in the ‘standard’ approach); we show how this insight, and the resulting degree of freedom, can be incorporated into the rigorous Lagrangian formulation that retains ideal conservation properties and includes the ‘∇h’ terms that account for variable smoothing lengths. We derive a general EOM for any choice of volume element (particle ‘weights’) and method of determining smoothing lengths. We then specify this to a ‘pressure–entropy formulation’ which resolves problems in the traditional treatment of fluid interfaces. Implementing this in a new version of the gadget code, we show it leads to good performance in mixing experiments (e.g. Kelvin–Helmholtz and ‘blob’ tests). And conservation is maintained even in strong shock/blastwave tests, where formulations without manifest conservation produce large errors. This also improves the treatment of subsonic turbulence and lessens the need for large kernel particle numbers. The code changes are trivial and entail no additional numerical expense. This provides a general framework for self-consistent derivation of different ‘flavours’ of SPH.
+
+### `hopkins2015`
+
+- **file:** `hopkins2015_new-class-meshfree-hydrodynamic-methods.pdf`
+- **title:** A new class of accurate, mesh-free hydrodynamic simulation methods
+- **authors:** Philip F. Hopkins
+- **venue:** *Monthly Notices of the Royal Astronomical Society* 450(1):53-110, 2015
+- **doi:** [10.1093/mnras/stv195](https://doi.org/10.1093/mnras/stv195)
+- **relevance:** MFM/MFV derivation (Appendix), and Appendix F2's pressure-energy PSPH -- the variant PESPH_PLAN.md builds PESPH-E on. Already cited from this repository's warpSPHIntegrators companion; the copy is duplicated here because both codebases cite it directly.
+- **abstract from:** OpenAlex `abstract_inverted_index` (word order preserved; original punctuation not recoverable)
+
+> We present two new Lagrangian methods for hydrodynamics, in a systematic comparison with moving-mesh, smoothed particle hydrodynamics (SPH), and stationary (non-moving) grid methods. The new methods are designed to simultaneously capture advantages of both SPH and grid-based/adaptive mesh refinement (AMR) schemes. They are based on a kernel discretization of the volume coupled to a high-order matrix gradient estimator and a Riemann solver acting over the volume ‘overlap’. We implement and test a parallel, second-order version of the method with self-gravity and cosmological integration, in the code gizmo:1 this maintains exact mass, energy and momentum conservation; exhibits superior angular momentum conservation compared to all other methods we study; does not require ‘artificial diffusion’ terms; and allows the fluid elements to move with the flow, so resolution is automatically adaptive. We consider a large suite of test problems, and find that on all problems the new methods appear competitive with moving-mesh schemes, with some advantages (particularly in angular momentum conservation), at the cost of enhanced noise. The new methods have many advantages versus SPH: proper convergence, good capturing of fluid-mixing instabilities, dramatically reduced ‘particle noise’ and numerical viscosity, more accurate sub-sonic flow evolution, and sharp shock-capturing. Advantages versus non-moving meshes include: automatic adaptivity, dramatically reduced advection errors and numerical overmixing, velocity-independent errors, accurate coupling to gravity, good angular momentum conservation and elimination of ‘grid alignment’ effects. We can, for example, follow hundreds of orbits of gaseous discs, while AMR and SPH methods break down in a few orbits. However, fixed meshes minimize ‘grid noise’. These differences are important for a range of astrophysical problems.
+
+### `saitoh2013`
+
+- **file:** `saitoh2013_density-independent-sph.pdf`
+- **title:** A density-independent formulation of smoothed particle hydrodynamics
+- **authors:** Takayuki R. Saitoh and Junichiro Makino
+- **venue:** *The Astrophysical Journal* 768(1):44, 2013
+- **doi:** [10.1088/0004-637X/768/1/44](https://doi.org/10.1088/0004-637X/768/1/44)
+- **relevance:** DISPH -- density-independent SPH -- which Hopkins (2013) builds the pressure-entropy formulation on and which Frontiere et al. cite as [60], the origin of the pressure-weighting idea PESPH generalizes.
+- **abstract from:** OpenAlex `abstract_inverted_index` (word order preserved; original punctuation not recoverable)
+
+> The standard formulation of the smoothed particle hydrodynamics (SPH) assumes that the local density distribution is differentiable. This assumption is used to derive the spatial derivatives of other quantities. However, this assumption breaks down at the contact discontinuity. At the contact discontinuity, the density of the low-density side is overestimated while that of the high-density side is underestimated. As a result, the pressure of the low-density (high-density) side is overestimated (underestimated). Thus, unphysical repulsive force appears at the contact discontinuity, resulting in the effective surface tension. This tension suppresses fluid instabilities. In this paper, we present a new formulation of SPH, which does not require the differentiability of density. Instead of the mass density, we adopt the internal energy density (pressure) and its arbitrary function, which are smoothed quantities at the contact discontinuity, as the volume element used for the kernel integration. We call this new formulation density-independent SPH (DISPH). It handles the contact discontinuity without numerical problems. The results of standard tests such as the shock tube, Kelvin–Helmholtz and Rayleigh–Taylor instabilities, point-like explosion, and blob tests are all very favorable to DISPH. We conclude that DISPH solved most of the known difficulties of the standard SPH, without introducing additional numerical diffusion or breaking the exact force symmetry or energy conservation. Our new SPH includes the formulation proposed by Ritchie & Thomas as a special case. Our formulation can be extended to handle a non-ideal gas easily.
+
+### `springel2002`
+
+- **file:** `springel2002_sph-entropy-equation.pdf`
+- **title:** Cosmological smoothed particle hydrodynamics simulations: the entropy equation
+- **authors:** V. Springel and L. Hernquist
+- **venue:** *Monthly Notices of the Royal Astronomical Society* 333(3):649-664, 2002
+- **doi:** [10.1046/j.1365-8711.2002.05445.x](https://doi.org/10.1046/j.1365-8711.2002.05445.x)
+- **relevance:** The entropy formulation and the canonical grad-h (Omega_i) derivation (SPLITTING_PLAN.md §2.3.1) -- the reference for why carrying entropy rather than internal energy keeps a compressible SPH scheme's conservative half a pure function of position. PESPH_PLAN.md §7.1 also cites it against the FIRE/GIZMO adoption history.
+- **abstract from:** OpenAlex `abstract_inverted_index` (word order preserved; original punctuation not recoverable)
+
+> We discuss differences in simulation results that arise between the use of either the thermal energy or the entropy as an independent variable in smoothed particle hydrodynamics (SPH). In this context, we derive a new version of SPH that, when appropriate, manifestly conserves both energy and entropy if smoothing lengths are allowed to adapt freely to the local mass resolution. To test various formulations of SPH, we consider point-like energy injection, as in certain models of supernova feedback, and find that powerful explosions are well represented by SPH even when the energy is deposited into a single particle, provided that the entropy equation is integrated. If the thermal energy is instead used as an independent variable, unphysical solutions can be obtained for this problem. We also examine the radiative cooling of gas spheres that collapse and virialize in isolation, and of haloes that form in cosmological simulations of structure formation. When applied to these problems, the thermal energy version of SPH leads to substantial overcooling in haloes that are resolved with up to a few thousand particles, while the entropy formulation is biased only moderately low for these haloes under the same circumstances. For objects resolved with much larger particle numbers, the two approaches yield consistent results. We trace the origin of the differences to systematic resolution effects in the outer parts of cooling flows. When the thermal energy equation is integrated and the resolution is low, the compressional heating of the gas in the inflow region is underestimated, violating entropy conservation and improperly accelerating cooling. The cumulative effect of this overcooling can be significant. In cosmological simulations of moderate size, we find that the fraction of baryons which cool and condense can be reduced by up to a factor ∼2 if the entropy equation is employed rather than the thermal energy equation, partly explaining discrepancies with semi-analytic treatments of galaxy formation. We also demonstrate that the entropy method leads to a greatly reduced scatter in the density–temperature relation of the low-density Lyα forest relative to the thermal energy approach, in accord with theoretical expectations.
+
+### `frontiere2017`
+
+- **file:** `frontiere2017_crksph.pdf`
+- **title:** CRKSPH -- A Conservative Reproducing Kernel Smoothed Particle Hydrodynamics Scheme
+- **authors:** Nicholas Frontiere, Cody D. Raskin and J. Michael Owen
+- **venue:** *Journal of Computational Physics* 332:160-209, 2017
+- **doi:** [10.1016/j.jcp.2016.12.004](https://doi.org/10.1016/j.jcp.2016.12.004)
+- **relevance:** The CRKSPH/compSPH/PESPH source paper. §3 CRKSPH, §3.3 the compatible energy discretization (PESPH_PLAN.md §4.2's subject), Appendix B (why CRKSPH is not variational, §4.1), Appendix E compSPH, Appendix G PESPH (pressure-energy). Eq. (24)'s partition-of-unity condition is PESPH_PLAN.md §7.2's structural bridge to MFM. Matches the copy already in warpSPHIntegrators/literature/.
+- **abstract from:** OpenAlex `abstract_inverted_index` (word order preserved; original punctuation not recoverable)
+
+> We present a formulation of smoothed particle hydrodynamics (SPH) that utilizes a first-order consistent reproducing kernel, a smoothing function that exactly interpolates linear fields with particle tracers. Previous formulations using reproducing kernel (RK) interpolation have had difficulties maintaining conservation of momentum due to the fact the RK kernels are not, in general, spatially symmetric. Here, we utilize a reformulation of the fluid equations such that mass, linear momentum, and energy are all rigorously conserved without any assumption about kernel symmetries, while additionally maintaining approximate angular momentum conservation. Our approach starts from a rigorously consistent interpolation theory, where we derive the evolution equations to enforce the appropriate conservation properties, at the sacrifice of full consistency in the momentum equation. Additionally, by exploiting the increased accuracy of the RK method's gradient, we formulate a simple limiter for the artificial viscosity that reduces the excess diffusion normally incurred by the ordinary SPH artificial viscosity. Collectively, we call our suite of modifications to the traditional SPH scheme Conservative Reproducing Kernel SPH, or CRKSPH. CRKSPH retains many benefits of traditional SPH methods (such as preserving Galilean invariance and manifest conservation of mass, momentum, and energy) while improving on many of the shortcomings of SPH, particularly the overly aggressive artificial viscosity and zeroth-order inaccuracy. We compare CRKSPH to two different modern SPH formulations (pressure based SPH and compatibly differenced SPH), demonstrating the advantages of our new formulation when modeling fluid mixing, strong shock, and adiabatic phenomena.
+
+### `owen2014`
+
+- **file:** `owen2014_compatibly-differenced-total-energy-sph.pdf`
+- **title:** A compatibly differenced total energy conserving form of SPH
+- **authors:** J. Michael Owen
+- **venue:** *International Journal for Numerical Methods in Fluids* 75(11):749-774, 2014
+- **doi:** [10.1002/fld.3912](https://doi.org/10.1002/fld.3912)
+- **relevance:** Frontiere et al.'s [48] -- the origin of the compatible energy discretization modules/compSPH/balance.py and multistep.py implement, and the subject of PESPH_PLAN.md §4.2's finding that the pairwise work-partition is a symmetric projection in disguise.
+- **abstract from:** DOI record (Crossref)
+
+> We describe a modified form of smoothed particle hydrodynamics (SPH) in which the specific thermal energy equation is based on a compatibly differenced formalism, guaranteeing exact conservation of the total energy. We compare the errors and convergence rates of the standard and compatible SPH formalisms on a variety of shock test problems with analytic answers. We find that the new compatible formalism reliably achieves the expected first‐order convergence for these analytic shock tests and, in all cases, improves the accuracy of the numerical solution over the standard formalism. We also examine the performance of our new formalism on a more complicated applied problem: the diversion of an asteroid by a kinetic impactor. We find the compatible discretization demonstrates measurable improvement in the convergence of properties such as the deflection velocity in this kind of applied problem as well. Copyright © 2014 John Wiley & Sons, Ltd.
+
+### `cullen2010`
+
+- **file:** `cullen2010_inviscid-sph.pdf`
+- **title:** Inviscid smoothed particle hydrodynamics
+- **authors:** Lee Cullen and Walter Dehnen
+- **venue:** *Monthly Notices of the Royal Astronomical Society* 408(2):669-683, 2010
+- **doi:** [10.1111/j.1365-2966.2010.17158.x](https://doi.org/10.1111/j.1365-2966.2010.17158.x)
+- **relevance:** The Cullen-Dehnen shock-detection switch PESPH's Appendix G specifies (ViscositySwitch.CullenDehnen2010, already registered in enumTypes.py).
+- **abstract from:** OpenAlex `abstract_inverted_index` (word order preserved; original punctuation not recoverable)
+
+> In smoothed particle hydrodynamics (SPH), artificial viscosity is necessary for the correct treatment of shocks, but often generates unwanted dissipation away from shocks. We present a novel method of controlling the amount of artificial viscosity, which uses the total time derivative of the velocity divergence as shock indicator and aims at completely eliminating viscosity away from shocks. We subject the new scheme to numerous tests and find that the method works at least as well as any previous technique in the strong-shock regime, but becomes virtually inviscid away from shocks, while still maintaining particle order. In particular sound waves or oscillations of gas spheres are hardly damped over many periods.
+
+### `balsara1995`
+
+- **file:** `balsara1995_von-neumann-stability-sph.pdf`
+- **title:** Von Neumann stability analysis of smoothed particle hydrodynamics—suggestions for optimal algorithms
+- **authors:** Dinshaw S. Balsara
+- **venue:** *Journal of Computational Physics* 121(2):357-372, 1995
+- **doi:** [10.1016/S0021-9991(95)90221-X](https://doi.org/10.1016/S0021-9991(95)90221-X)
+- **relevance:** The Balsara (1989/1995) shock-detection switch Hopkins' F2 (2015) specifies alongside Cullen-Dehnen; the older of the two, cited by both PESPH descriptions.
+- **abstract from:** OpenAlex `abstract_inverted_index` (word order preserved; original punctuation not recoverable)
+
+> We present a von Neumann stability analysis of the equations of smoothed particle hydrodynamics (SPH) along with a critical discussion of various parts of the algorithm. The stability analysis is done without any major restrictions and, hence, models the full Euler equations in one dimension. This then allows us to deduce optimal ranges for parameters that need to be used in SPH. Thus we show that for the commonly used M5 spline the ratio of smoothing length to interparticle distance should range between 1.0 to 1.4. We also show that the linear artificial viscosity coefficient and the coefficient of spatial filtering have to be bounded. The results of this von Neumann stability analysis provide us with several suggestions for future algorithm improvement. Because the SPH method is so unique we provide, wherever possible, comparisons with more familiar and well-used high resolution finite difference methods.
+
+### `dilts1999`
+
+- **file:** `dilts1999_mlsph-consistency-and-stability.pdf`
+- **title:** Moving-least-squares-particle hydrodynamics—I. Consistency and stability
+- **authors:** Gary A. Dilts
+- **venue:** *International Journal for Numerical Methods in Engineering* 44(8):1115-1155, 1999
+- **doi:** [10.1002/(SICI)1097-0207(19990320)44:8<1115::AID-NME547>3.0.CO;2-L](https://doi.org/10.1002/(SICI)1097-0207(19990320)44:8<1115::AID-NME547>3.0.CO;2-L)
+- **relevance:** Frontiere et al.'s [14] -- the MLSPH formalism CRKSPH's conservative differencing is derived from, and, per PESPH_PLAN.md §7.2, the same weak-formulation route MFM's effective face is built on. One paper behind both the scheme this codebase has and the one it is considering.
+- **abstract from:** PDF p.1
+
+> The Smooth-Particle-Hydrodynamics (SPH) method is derived in a novel manner by means of a Galerkin
+> approximation applied to the Lagrangian equations of continuum mechanics as in the finite-element
+> method. This derivation is modified to replace the SPH interpolant with the Moving-Least-Squares (MLS)
+> interpolant of Lancaster and Saulkaskas, and define a new particle volume which ensures thermodynamic
+> compatibility. A variable-rank modification of the MLS interpolants which retains their desirable summation properties is introduced to remove the singularities that occur when divergent flow reduces the number
+> of neighbours of a particle to less than the minimum required. A surprise benefit of the Galerkin SPH
+> derivation is a theoretical justification of a common ad hoc technique for variable-h SPH. The new MLSPH
+> method is conservative if an anti-symmetric quadrature rule for the stiffness matrix elements can be supplied.
+> In this paper, a simple one-point collocation rule is used to retain similarity with SPH, leading to
+> a non-conservative method. Several examples document how MLSPH renders dramatic improvements due
+> to the linear consistency of its gradients on three canonical difficulties of the SPH method: spurious
+
+### `garciasenz2012`
+
+- **file:** `garciasenz2012_integral-approach-gradients.pdf`
+- **title:** Improving smoothed particle hydrodynamics with an integral approach to calculating gradients
+- **authors:** D. García-Senz, R. M. Cabezón and J. A. Escartín
+- **venue:** *Astronomy & Astrophysics* 538:A9, 2012
+- **doi:** [10.1051/0004-6361/201117939](https://doi.org/10.1051/0004-6361/201117939)
+- **relevance:** The integral-approximation gradient estimator PESPH_PLAN.md §7.5 recommends as the shared upgrade across monaghan/compSPH/crkSPH/PESPH, independent of the MFM-vs-splitting choice and a prerequisite for MFM's own reconstruction step.
+- **abstract from:** OpenAlex `abstract_inverted_index` (word order preserved; original punctuation not recoverable)
+
+> Context. The smoothed particle hydrodynamics (SPH) technique is a well-known numerical method that has been applied to simulate the evolution of a wide variety of systems. Modern astrophysical applications of the method rely on the Lagrangian formulation of fluid Euler equations, which is fully conservative. A different scheme, based on a matrix approach to the SPH equations is currently being used in computational fluid dynamics. These matrix formulations achieve better interpolations of the physical magnitudes but they are, in general, not fully conservative. The matrix approach to the Euler equations has never been used in astrophysics.
+
+### `rosswog2015`
+
+- **file:** `rosswog2015_boosting-accuracy-sph.pdf`
+- **title:** Boosting the accuracy of SPH techniques: Newtonian and special-relativistic tests
+- **authors:** S. Rosswog
+- **venue:** *Monthly Notices of the Royal Astronomical Society* 448(4):3628-3664, 2015
+- **doi:** [10.1093/mnras/stv225](https://doi.org/10.1093/mnras/stv225)
+- **relevance:** The matrix-inversion gradient form, the other half of PESPH_PLAN.md §7.5's gradient upgrade alongside garciasenz2012; the two combine in MAGMA2 (rosswog2020).
+- **abstract from:** OpenAlex `abstract_inverted_index` (word order preserved; original punctuation not recoverable)
+
+> We study the impact of different discretization choices on the accuracy of smoothed particle hydrodynamics (SPH) and we explore them in a large number of Newtonian and special-relativistic benchmark tests. As a first improvement, we explore a gradient prescription that requires the (analytical) inversion of a small matrix. For a regular particle distribution, this improves gradient accuracies by approximately 10 orders of magnitude and the SPH formulations with this gradient outperform the standard approach in all benchmark tests. Secondly, we demonstrate that a simple change of the kernel function can substantially increase the accuracy of an SPH scheme. While the ‘standard’ cubic spline kernel generally performs poorly, the best overall performance is found for a high-order Wendland kernel which allows for only very little velocity noise and enforces a very regular particle distribution, even in highly dynamical tests. Thirdly, we explore new SPH volume elements that enhance the treatment of fluid instabilities and, last, but not least, we design new dissipation triggers. They switch on near shocks and in regions where the flow – without dissipation – starts to become noisy. The resulting new SPH formulation yields excellent results even in challenging tests where standard techniques fail completely.
+
+### `rosswog2020`
+
+- **file:** `rosswog2020_magma2.pdf`
+- **title:** The Lagrangian hydrodynamics code magma2
+- **authors:** S. Rosswog
+- **venue:** *Monthly Notices of the Royal Astronomical Society* 498(3):4230-4255, 2020
+- **doi:** [10.1093/mnras/staa2591](https://doi.org/10.1093/mnras/staa2591)
+- **relevance:** MAGMA2: integral-approximation + matrix-inversion gradients with slope-limited reconstruction, Wendland C6 with ~300 neighbours. The concrete code PESPH_PLAN.md §7.5 points at as the combined upgrade.
+- **abstract from:** DOI record (Crossref)
+
+> We present the methodology and performance of the new Lagrangian hydrodynamics code magma2, a smoothed particle hydrodynamics (SPH) code that benefits from a number of non-standard enhancements. By default it uses high-order smoothing kernels and wherever gradients are needed, they are calculated via accurate matrix inversion techniques, but a more conventional formulation with kernel gradients has also been implemented for comparison purposes. We also explore a matrix inversion formulation of SPH with a symmetrization in the particle indices that is not frequently used. We find interesting advantages of this formulation in some of the tests, for example, a substantial reduction of surface tension effects for non-ideal particle setups and more accurate peak densities in Sedov blast waves. magma2 uses artificial viscosity, but enhanced by techniques that are commonly used in finite-volume schemes such as reconstruction and slope limiting. While simple to implement, this approach efficiently suppresses particle noise, but at the same time drastically reduces dissipation in locations where it is not needed and actually unwanted. We demonstrate the performance of the new code in a number of challenging benchmark tests including, for example, multidimensional vorticity creating Schulz–Rinne-type Riemann problems and more astrophysical tests such as a collision between two stars to demonstrate its robustness and excellent conservation properties.
+
+### `cabezon2017`
+
+- **file:** `cabezon2017_sphynx.pdf`
+- **title:** SPHYNX: an accurate density-based SPH method for astrophysical applications
+- **authors:** R. M. Cabezón, D. García-Senz and J. Figueira
+- **venue:** *Astronomy & Astrophysics* 606:A78, 2017
+- **doi:** [10.1051/0004-6361/201630208](https://doi.org/10.1051/0004-6361/201630208)
+- **relevance:** The production code built on garciasenz2012's integral-approach gradients -- a worked example of the §7.5 gradient upgrade at full-code scale, complementing MAGMA2.
+- **abstract from:** OpenAlex `abstract_inverted_index` (word order preserved; original punctuation not recoverable)
+
+> Aims. Hydrodynamical instabilities and shocks are ubiquitous in astrophysical scenarios. Therefore, an accurate numerical simulation of these phenomena is mandatory to correctly model and understand many astrophysical events, such as supernovas, stellar collisions, or planetary formation. In this work, we attempt to address many of the problems that a commonly used technique, smoothed particle hydrodynamics (SPH), has when dealing with subsonic hydrodynamical instabilities or shocks. To that aim we built a new SPH code named SPHYNX, that includes many of the recent advances in the SPH technique and some other new ones, which we present here.
+
+### `gaburov2011`
+
+- **file:** `gaburov2011_weighted-particle-mhd.pdf`
+- **title:** Astrophysical weighted particle magnetohydrodynamics
+- **authors:** Evghenii Gaburov and Keigo Nitadori
+- **venue:** *Monthly Notices of the Royal Astronomical Society* 414(1):129-154, 2011
+- **doi:** [10.1111/j.1365-2966.2011.18313.x](https://doi.org/10.1111/j.1365-2966.2011.18313.x)
+- **relevance:** MFM-tier reference: a weighted-particle-method treatment adjacent to the Lanson-Vila / Hopkins MFM lineage, cited in PESPH_PLAN.md §7's MFM reading list.
+- **abstract from:** OpenAlex `abstract_inverted_index` (word order preserved; original punctuation not recoverable)
+
+> This paper presents applications of a weighted meshless scheme for conservation laws to the Euler equations and the equations of ideal magnetohydrodynamics (MHD). The divergence constraint of the latter is maintained to the truncation error by a new meshless divergence cleaning procedure. The physics of the interaction between the particles is described by a one-dimensional Riemann problem in a moving frame. As a result, the necessary diffusion which is required to treat dissipative processes is added automatically. Our scheme therefore has no free parameters that control the physics of interparticle interaction, with the exception of the number of interacting neighbours which control the resolution and accuracy. The resulting equations have a form similar to smoothed particle hydrodynamics (SPH) equations, and therefore existing SPH codes can be used to implement the weighed particle scheme. The scheme is validated in several hydrodynamic and MHD test cases. In particular, we demonstrate for the first time the ability of a meshless MHD scheme to model magnetorotational instability in accretion discs.
+
+### `lanson2008`
+
+- **file:** `lanson2008_renormalized-meshfree-schemes.pdf`
+- **title:** Renormalized meshfree schemes I: consistency, stability, and hybrid methods for conservation laws
+- **authors:** Nathalie Lanson and Jean-Paul Vila
+- **venue:** *SIAM Journal on Numerical Analysis* 46(4):1912-1934, 2008
+- **doi:** [10.1137/S0036142903427718](https://doi.org/10.1137/S0036142903427718)
+- **relevance:** The mathematical foundation Hopkins builds MFM on -- PESPH_PLAN.md §7.2's structural correspondence between CRKSPH's partition-of-unity interpolant and the MFM effective face traces back to this paper's renormalized meshfree derivatives.
+- **abstract from:** DOI record (Crossref)
+
+> This paper is devoted to the study of a new kind of meshfree scheme based on a new class of meshfree derivatives: the renormalized meshfree derivatives, which improve the consistency of the original weighted particle methods. The weak renormalized meshfree scheme, built from the weak formulation of general conservation laws, turns out to be L^2 stable under some geometrical conditions on the distribution of particles and some regularity conditions of the transport field. A time discretization is then performed by analogy with finite volume methods, and the L^1, L^infinity, and BV stabilities of the obtained time discretized scheme are studied. From the same analogy with finite volume methods, a hybrid particle scheme is built using the Godunov method and is numerically compared to the weak renormalized scheme.
+
+### `groth2023`
+
+- **file:** `groth2023_opengadget3-meshless-finite-mass.pdf`
+- **title:** The cosmological simulation code OpenGadget3 -- implementation of meshless finite mass
+- **authors:** Frederick Groth, Ulrich P. Steinwandel, Milena Valentini and Klaus Dolag
+- **venue:** *Monthly Notices of the Royal Astronomical Society* 526(1):616-644, 2023
+- **doi:** [10.1093/mnras/stad2717](https://doi.org/10.1093/mnras/stad2717)
+- **relevance:** A worked port of MFM into an existing SPH code -- the closest thing to a template for PESPH_PLAN.md §7's MFM direction, and probably the highest practical value in that reading tier.
+- **abstract from:** PDF p.1
+
+> Subsonic turbulence plays a major role in determining properties of the intra cluster medium (ICM). We introduce a new
+> Meshless Finite Mass (MFM) implementation in OpenGadget3 and apply it to this specific problem. To this end, we present
+> a set of test cases to validate our implementation of the MFM framework in our code. These include but are not limited to: the
+> soundwave and Kepler disk as smooth situations to probe the stability, a Rayleigh-Taylor and Kelvin-Helmholtz instability as
+> popular mixing instabilities, a blob test as more complex example including both mixing and shocks, shock tubes with various
+> Mach numbers, a Sedov blast wave, different tests including self-gravity such as gravitational freefall, a hydrostatic sphere,
+> the Zeldovich-pancake, and a 1015 galaxy cluster as cosmological application. Advantages over SPH include increased
+> mixing and a better convergence behavior. We demonstrate that the MFM-solver is robust, also in a cosmological context. We
+> show evidence that the solver performs extraordinarily well when applied to decaying subsonic turbulence, a problem very
+> difficult to handle for many methods. MFM captures the expected velocity power spectrum with high accuracy and shows a
+> good convergence behavior. Using MFM or SPH within OpenGadget3 leads to a comparable decay in turbulent energy due
+> to numerical dissipation. When studying the energy decay for different initial turbulent energy fractions, we find that MFM
+> performs well down to Mach numbers M ~ 0.01. Finally, we show how important the slope limiter and the energy-entropy
+> switch are to control the behavior and the evolution of the fluids.
+
+### `monaghan2013`
+
+- **file:** `monaghan2013_multi-fluid-high-density-ratios.pdf`
+- **title:** A simple SPH algorithm for multi-fluid flow with high density ratios
+- **authors:** J. J. Monaghan and Ashkan Rafiee
+- **venue:** *International Journal for Numerical Methods in Fluids* 71(5):537-561, 2013
+- **doi:** [10.1002/fld.3671](https://doi.org/10.1002/fld.3671)
+- **relevance:** The Lagrangian derivation of the SPH momentum/continuity pair from a constrained variational principle -- background for PESPH_PLAN.md's claim that PESPH-A's separability follows the same variational route as compSPH.
+- **abstract from:** DOI record (Crossref)
+
+> In this paper, we describe an SPH algorithm for multi‐fluid flow, which is efficient, simple and robust. We derive the inviscid equations of motion from a Lagrangian together with the constraint provided by the continuity equation. The viscous flow equations then follow by adding a viscous term. Rigid boundaries are simulated using boundary force particles in a manner similar to the immersed boundary method. Each fluid is approximated as weakly compressible with a speed of sound sufficiently large to guarantee that the relative density variations are typically 1%. When the SPH force interaction is between two particles of different fluids, we increase the pressure terms. This simple procedure stabilizes the interface between the fluids. The equations of motion are integrated using a time stepping rule based on a second‐order symplectic integrator. When linear and angular momentum should be conserved exactly, they are conserved to within round‐off errors. We test the algorithm by simulating a variety of problems involving fluids with a density ratio in the range 1–1000. The first of these is a free surface problem with no rigid boundaries. It involves the flow of an elliptical distribution with one fluid inside the other. We show that the simulations converge as the particle spacing decreases, and the results are in good agreement with the exact inviscid, incompressible theory. The second test is similar to the first but involves the nonlinear oscillation of the fluids. As in the first test, the agreement with theory is very good, and the method converges. The third test is the simulation of waves at the interface between two fluids. The method is shown to converge, and the agreement with theory is satisfactory. The fourth test is the Rayleigh–Taylor instability for a configuration considered by other authors. Key parameters are shown to converge, and the agreement with other authors is good. The fifth and final test is how well the SPH method simulates gravity currents with density ratios in the range 2–30. The results of these simulations are in very good agreement with those of other authors and in satisfactory agreement with experimental results.Copyright © 2012 John Wiley & Sons, Ltd.
+
+### `price2018`
+
+- **file:** `price2018_phantom.pdf`
+- **title:** Phantom: A Smoothed Particle Hydrodynamics and Magnetohydrodynamics Code for Astrophysics
+- **authors:** Daniel J. Price, James Wurster, Terrence S. Tricco, Chris Nixon, Stéven Toupin, Alex Pettitt, Conrad Chan, Daniel Mentiplay, Guillaume Laibe, Simon Glover, Clare Dobbs, Rebecca Nealon, David Liptai, Hauke Worpel, Clément Bonnerot, Giovanni Dipierro, Giulia Ballabio, Enrico Ragusa, Christoph Federrath, Roberto Iaconi, Thomas Reichardt, Duncan Forgan, Mark Hutchison, Thomas Constantino, Ben Ayliffe, Kieran Hirsh and Giuseppe Lodato
+- **venue:** *Publications of the Astronomical Society of Australia* 35:e031, 2018
+- **doi:** [10.1017/pasa.2018.25](https://doi.org/10.1017/pasa.2018.25)
+- **relevance:** A production comparison baseline (PESPH_PLAN.md §7.6): standard modern SPH, distinct from the MFM/CRK/PESPH lineage.
+- **abstract from:** DOI record (Crossref)
+
+> We present Phantom , a fast, parallel, modular, and low-memory smoothed particle hydrodynamics and magnetohydrodynamics code developed over the last decade for astrophysical applications in three dimensions. The code has been developed with a focus on stellar, galactic, planetary, and high energy astrophysics, and has already been used widely for studies of accretion discs and turbulence, from the birth of planets to how black holes accrete. Here we describe and test the core algorithms as well as modules for magnetohydrodynamics, self-gravity, sink particles, dust–gas mixtures, H 2 chemistry, physical viscosity, external forces including numerous galactic potentials, Lense–Thirring precession, Poynting–Robertson drag, and stochastic turbulent driving. Phantom is hereby made publicly available.
+
+### `borrow2022`
+
+- **file:** `borrow2022_sphenix.pdf`
+- **title:** SPHENIX: smoothed particle hydrodynamics for the next generation of galaxy formation simulations
+- **authors:** Josh Borrow, Matthieu Schaller, Richard G. Bower and Joop Schaye
+- **venue:** *Monthly Notices of the Royal Astronomical Society* 511(2):2367-2389, 2022
+- **doi:** [10.1093/mnras/stab3166](https://doi.org/10.1093/mnras/stab3166)
+- **relevance:** The SWIFT project's own modern-SPH scheme -- a second comparison baseline (PESPH_PLAN.md §7.6), and the sibling of sandnes2025/REMIX, both built on the same SWIFT code (schaller2024).
+- **abstract from:** DOI record (Crossref)
+
+> Smoothed particle hydrodynamics (SPH) is a ubiquitous numerical method for solving the fluid equations, and is prized for its conservation properties, natural adaptivity, and simplicity. We introduce the Sphenix SPH scheme, which was designed with three key goals in mind: to work well with sub-grid physics modules that inject energy, be highly computationally efficient (both in terms of compute and memory), and to be Lagrangian. sphenix uses a Density-Energy equation of motion, along with a variable artificial viscosity and conduction, including limiters designed to work with common sub-grid models of galaxy formation. In particular, we present and test a novel limiter that prevents conduction across shocks, preventing spurious radiative losses in feedback events. Sphenix is shown to solve many difficult test problems for traditional SPH, including fluid mixing and vorticity conservation, and it is shown to produce convergent behaviour in all tests where this is appropriate. Crucially, we use the same parameters within sphenix for the various switches throughout, to demonstrate the performance of the scheme as it would be used in production simulations. sphenix is the new default scheme in the swift cosmological simulation code and is available open source.
+
+### `sandnes2025`
+
+- **file:** `sandnes2025_remix-sph.pdf`
+- **title:** REMIX SPH -- improving mixing in smoothed particle hydrodynamics simulations using a generalised, material-independent approach
+- **authors:** T. D. Sandnes, V. R. Eke, J. A. Kegerreis, R. J. Massey, S. Ruiz-Bonilla, M. Schaller and L. F. A. Teodoro
+- **venue:** *Journal of Computational Physics* 532:113907, 2025
+- **doi:** [10.1016/j.jcp.2025.113907](https://doi.org/10.1016/j.jcp.2025.113907)
+- **relevance:** A modern mixing-focused SPH scheme, cited in PESPH_PLAN.md §7.1's synthesis of where the field stands post-2015; now published (was arXiv-only when the plan's outlook was written).
+- **abstract from:** PDF p.1
+
+> We present REMIX, a smoothed particle hydrodynamics (SPH) scheme designed to alleviate effects that typically
+> suppress mixing and instability growth at density discontinuities in SPH simulations. We approach this problem
+> by directly targeting sources of kernel smoothing error and discretisation error, resulting in a generalised, material-
+> independent formulation that improves the treatment both of discontinuities within a single material, for example in
+> an ideal gas, and of interfaces between dissimilar materials. This approach also leads to improvements in capturing
+> wider hydrodynamic behaviour unrelated to mixing. We demonstrate marked improvements in three-dimensional test
+> scenarios, focusing on cases with particles of equal mass across the simulation. This choice is particularly relevant for
+> use cases in astrophysics and engineering – specifically those in which particles are free to evolve over a large range
+> of density scales – where bespoke choices of unequal particle masses in the initial conditions cannot easily be used
+> to address emergent and evolving density discontinuities. We achieve these improvements while maintaining sharp
+> discontinuities; without introducing additional equation of state dependence in, for example, particle volume elements;
+> and without contrived or targeted corrections. Our methods build upon a fully compressible and thermodynamically
+> consistent core-SPH construction, retaining Galilean invariance as well as conservation of mass, momentum, and
+> energy. REMIX is integrated in the open-source, state-of-the-art Swift code and is designed with computational
+> efficiency also in mind, meaning that its improved hydrodynamic treatment can be used for high-resolution simulations
+> without prohibitive cost to run-speed.
+
+### `schaller2024`
+
+- **file:** `schaller2024_swift.pdf`
+- **title:** SWIFT: a modern highly parallel gravity and smoothed particle hydrodynamics solver for astrophysical and cosmological applications
+- **authors:** Matthieu Schaller, Josh Borrow, Peter W. Draper, Mladen Ivkovic, Stuart McAlpine, Bert Vandenbroucke, Yannick Bahé, Evgenii Chaikin, Aidan B. G. Chalk, Tsang Keung Chan, Camila Correa, Marcel van Daalen, Willem Elbers, Pedro Gonnet, Loïc Hausammann, John Helly, Filip Huško, Jacob A. Kegerreis, Folkert S. J. Nobels, Sylvia Ploeckinger, Yves Revaz, William J. Roper, Sergio Ruiz-Bonilla, Thomas D. Sandnes, Yolan Uyttenhove, James S. Willis and Zhen Xiang
+- **venue:** *Monthly Notices of the Royal Astronomical Society* 530(2):2378-2419, 2024
+- **doi:** [10.1093/mnras/stae922](https://doi.org/10.1093/mnras/stae922)
+- **relevance:** The code both borrow2022/SPHENIX and sandnes2025/REMIX are built on and validated in; background for PESPH_PLAN.md §7.1's adoption survey. First author is Schaller, not "Swift" -- the incoming filename named it for the project, not the author.
+- **abstract from:** DOI record (Crossref)
+
+> Numerical simulations have become one of the key tools used by theorists in all the fields of astrophysics and cosmology. The development of modern tools that target the largest existing computing systems and exploit state-of-the-art numerical methods and algorithms is thus crucial. In this paper, we introduce the fully open-source highly-parallel, versatile, and modular coupled hydrodynamics, gravity, cosmology, and galaxy-formation code Swift. The software package exploits hybrid shared- and distributed-memory task-based parallelism, asynchronous communications, and domain-decomposition algorithms based on balancing the workload, rather than the data, to efficiently exploit modern high-performance computing cluster architectures. Gravity is solved for using a fast-multipole-method, optionally coupled to a particle mesh solver in Fourier space to handle periodic volumes. For gas evolution, multiple modern flavours of Smoothed Particle Hydrodynamics are implemented. Swift also evolves neutrinos using a state-of-the-art particle-based method. Two complementary networks of sub-grid models for galaxy formation as well as extensions to simulate planetary physics are also released as part of the code. An extensive set of output options, including snapshots, light-cones, power spectra, and a coupling to structure finders are also included. We describe the overall code architecture, summarize the consistency and accuracy tests that were performed, and demonstrate the excellent weak-scaling performance of the code using a representative cosmological hydrodynamical problem with ≈300 billion particles. The code is released to the community alongside extensive documentation for both users and developers, a large selection of example test problems, and a suite of tools to aid in the analysis of large simulations run with Swift.
+
+### `crain2023`
+
+- **file:** `crain2023_hydrodynamical-simulations-galaxy-population.pdf`
+- **title:** Hydrodynamical Simulations of the Galaxy Population: Enduring Successes and Outstanding Challenges
+- **authors:** Robert A. Crain and Freeke van de Voort
+- **venue:** *Annual Review of Astronomy and Astrophysics* 61(1):473-515, 2023
+- **doi:** [10.1146/annurev-astro-041923-043618](https://doi.org/10.1146/annurev-astro-041923-043618)
+- **relevance:** The current-generation review of galaxy-formation hydrodynamics methods (SPH, MFM/MFV, moving mesh) -- the place PESPH_PLAN.md §7.1's framing was checked against.
+- **abstract from:** DOI record (Crossref)
+
+> We review the progress in modeling the galaxy population in hydrodynamical simulations of the ΛCDM cosmogony. State-of-the-art simulations now broadly reproduce the observed spatial clustering of galaxies; the distributions of key characteristics, such as mass, size, and SFR; and scaling relations connecting diverse properties to mass. Such improvements engender confidence in the insight drawn from simulations. Many important outcomes, however, particularly the properties of circumgalactic gas, are sensitive to the details of the subgrid models used to approximate the macroscopic effects of unresolved physics, such as feedback processes. We compare the outcomes of leading simulation suites with observations, and with each other, to identify the enduring successes they have cultivated and the outstanding challenges to be tackled with the next generation of models. Our key conclusions include the following:▪Realistic galaxies can be reproduced by calibrating the ill-constrained parameters of subgrid feedback models. Feedback is dominated by stars and black holes in low-mass and high-mass galaxies, respectively.▪Adjusting or disabling the processes implemented in simulations can elucidate their impact on observables, but outcomes can be degenerate.▪Similar galaxy populations can emerge in simulations with dissimilar feedback implementations. However, these models generally predict markedly different gas flow rates into, and out of, galaxies and their halos. CGM observations are thus a promising means of breaking this degeneracy and guiding the development of new feedback models.
+
+### `rosswog2015review`
+
+- **file:** `rosswog2015review_sph-methods-compact-objects.pdf`
+- **title:** SPH Methods in the Modelling of Compact Objects
+- **authors:** Stephan Rosswog
+- **venue:** *Living Reviews in Computational Astrophysics* 1:1, 2015
+- **doi:** [10.1007/lrca-2015-1](https://doi.org/10.1007/lrca-2015-1)
+- **relevance:** A field review distinct from rosswog2015 (the MNRAS numerics paper) and from rosswog2026, its 2026 major-revision update -- this is the original 2015 Living Reviews article.
+- **abstract from:** PDF p.1
+
+> We review the current status of compact object simulations that are based on the smooth
+> particle hydrodynamics (SPH) method. The first main part of this review is dedicated to SPH
+> as a numerical method. We begin by discussing relevant kernel approximation techniques and
+> discuss the performance of different kernel functions. Subsequently, we review a number of
+> different SPH formulations of Newtonian, special- and general relativistic ideal fluid dynamics. We particularly point out recent developments that increase the accuracy of SPH with
+> respect to commonly used techniques. The second main part of the review is dedicated to the
+> application of SPH in compact object simulations. We discuss encounters between two white
+> dwarfs, between two neutron stars and between a neutron star and a stellar-mass black hole.
+> For each type of system, the main focus is on the more common, gravitational wave-driven
+> binary mergers, but we also discuss dynamical collisions as they occur in dense stellar systems
+> such as cores of globular clusters.
+
+### `rosswog2026`
+
+- **file:** `rosswog2026_sph-compact-objects-review.pdf`
+- **title:** SPH Methods in the Modelling of Compact Objects
+- **authors:** Stephan Rosswog
+- **venue:** arXiv:2607.14828 [astro-ph.HE], 2026
+- **arXiv:** [2607.14828](https://arxiv.org/abs/2607.14828)
+- **relevance:** "Major revision, updated and expanded" of `rosswog2015review` (its own change-summary, page 2) -- same title and author, same underlying Living Reviews article, but arXiv-only at this point and not yet carrying the Living Reviews DOI as a fast-track revision. This is the copy PESPH_PLAN.md §7.1's framing should be checked against, since it is the more current version.
+- **abstract from:** arXiv API
+
+> We review the current status of compact object simulations that are based on the Smoothed Particle Hydrodynamics (SPH) method. The first section of this review is dedicated to SPH as a numerical method for Newtonian, ideal gas dynamics and it should be fairly self-contained. It begins with the basics of the method, but also describes recent advances including various meshless derivatives or methods for treating shocks. A separate chapter summarizes general relativistic SPH, including its special relativistic limit, and it explains in some detail the recent development of full numerical relativity in SPH where matter is evolved together with a dynamical spacetime. The remainder of the review has an astrophysical focus, here we discuss the status of the simulations of white dwarf--white dwarf, neutron star--neutron star and neutron star--black hole systems. For each type of system the emphasis is on gravitational-wave-driven mergers, but we also briefly summarize dynamical collisions that can occur in locations with large stellar densities.
 

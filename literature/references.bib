@@ -539,6 +539,29 @@
   note    = {The theoretical analysis of diffusive-term structure: why the plain density Laplacian (decourcy2024's AC-2) cannot hold a hydrostatic gradient at a truncated free surface, why the corrected form is really a bi-Laplacian, and the frozen-diffusion technique. Highest-priority dependency of ACSPH_PLAN.md Part 6.1.}
 }
 
+@article{molteni2009,
+  author  = {Molteni, Diego and Colagrossi, Andrea},
+  title   = {A simple procedure to improve the pressure evaluation in hydrodynamic context using the {SPH}},
+  journal = {Computer Physics Communications},
+  year    = {2009},
+  volume  = {180},
+  number  = {6},
+  pages   = {861--872},
+  doi     = {10.1016/j.cpc.2008.12.004},
+  note    = {Origin of the SPH density diffusion term (DDT): a density-difference-weighted SPH Laplacian added to the continuity equation, with no gradient-renormalization or covariance-matrix machinery at all. DualSPHysics' simplest DDT option (TDensity=1, `DDT_DDT`) implements this formula close to verbatim -- DELTASPH_VALIDATION_PLAN.md Part 8.15/8.16.}
+}
+
+@article{fourtakas2019,
+  author  = {Fourtakas, Georgios and Dominguez, Jose M. and Vacondio, Renato and Rogers, Benedict D.},
+  title   = {Local uniform stencil ({LUST}) boundary condition for arbitrary 3-{D} boundaries in parallel smoothed particle hydrodynamics ({SPH}) models},
+  journal = {Computers \& Fluids},
+  year    = {2019},
+  volume  = {190},
+  pages   = {346--361},
+  doi     = {10.1016/j.compfluid.2019.06.009},
+  note    = {Open access (CC BY). Primarily a boundary-condition (LUST) paper, but Sec. 3.2 "Improved density diffusion term for gravity driven flows" derives DualSPHysics' DDT_DDT2/DDT_DDT2Full: cancels the *hydrostatic* background density gradient analytically (from the gravity direction and the EOS) rather than an SPH-estimated one -- also no renormalization matrix. DELTASPH_VALIDATION_PLAN.md Part 8.15/8.16.}
+}
+
 @article{letouze2013,
   author  = {Le Touz\'{e}, D. and Colagrossi, A. and Colicchio, G. and Greco, M.},
   title   = {A critical investigation of smoothed particle hydrodynamics applied to problems with free-surfaces},
@@ -692,6 +715,411 @@
   note    = {The analytic incompressible kinetic-energy drop the two-jet impact case is scored against (decourcy2024 Fig. 25). Also the reference for why a weakly-compressible model dissipates impact energy differently from an incompressible one -- the effect ACSPH exists to remove.}
 }
 
+
+% --- Geometric integration, operator splitting & conformal symplecticity (added 2026-09-15) ---
+
+@article{yoshida1990,
+  author  = {Haruo Yoshida},
+  title   = {Construction of higher order symplectic integrators},
+  journal = {Physics Letters A},
+  year    = {1990},
+  volume  = {150},
+  number  = {5-7},
+  pages   = {262--268},
+  doi     = {10.1016/0375-9601(90)90092-3},
+  note    = {The Yoshida triple-jump: composes a symmetric order-2 base method into order 4/6/8 with explicit real coefficients. SPLITTING_PLAN.md §2.5 uses its coefficients (gamma1 ≈ 1.351, gamma0 ≈ -1.702) as the reference point for why a dissipative half-step forces a backward sub-step under this composition.}
+}
+
+@article{suzuki1990,
+  author  = {Masuo Suzuki},
+  title   = {Fractal decomposition of exponential operators with applications to many-body theories and Monte Carlo simulations},
+  journal = {Physics Letters A},
+  year    = {1990},
+  volume  = {146},
+  number  = {6},
+  pages   = {319--323},
+  doi     = {10.1016/0375-9601(90)90962-N},
+  note    = {The 5-stage fourth-order composition SPLITTING_PLAN.md §2.5 recommends over Yoshida's for a dissipative half: its largest backward coefficient (w3 ≈ -0.658) is smaller in magnitude than Yoshida's (gamma0 ≈ -1.702), so it tolerates roughly 2.6x the viscous stiffness before the reversed sub-step amplifies comparably.}
+}
+
+@article{mclachlan2001,
+  author  = {Robert McLachlan and Matthew Perlmutter},
+  title   = {Conformal Hamiltonian systems},
+  journal = {Journal of Geometry and Physics},
+  year    = {2001},
+  volume  = {39},
+  number  = {4},
+  pages   = {276--300},
+  doi     = {10.1016/S0393-0440(01)00020-1},
+  note    = {The definition SPLITTING_PLAN.md §2.4 cites for why constant-gamma damping (F_visc = -gamma*v) contracts the symplectic form by an exact factor exp(-gamma*t) -- the generalized det(D-Phi_h) check that section proposes.}
+}
+
+@article{bhatt2016,
+  author  = {Ashish Bhatt and Dwayne Floyd and Brian E. Moore},
+  title   = {Second order conformal symplectic schemes for damped Hamiltonian systems},
+  journal = {Journal of Scientific Computing},
+  year    = {2016},
+  volume  = {66},
+  number  = {3},
+  pages   = {1234--1259},
+  doi     = {10.1007/s10915-015-0062-z},
+  note    = {Constructs Stormer-Verlet/implicit-midpoint schemes for exactly this codebase's split problem -- a separable H(q,p) = T(p) + V(q) plus linear damping -- and proves they preserve the exact dissipation-of-symplecticity rate. SPLITTING_PLAN.md §2.4's conformal check generalizes the direct 1-DOF phase-Jacobian test (tests/test_hamiltonian.py) using exactly this paper's target property.}
+}
+
+@article{goldman1996,
+  author  = {Daniel Goldman and Tasso J. Kaper},
+  title   = {Nth-order operator splitting schemes and nonreversible systems},
+  journal = {SIAM Journal on Numerical Analysis},
+  year    = {1996},
+  volume  = {33},
+  number  = {1},
+  pages   = {349--367},
+  doi     = {10.1137/0733018},
+  note    = {The theorem SPLITTING_PLAN.md §2.5 rests on: no operator-splitting composition of order greater than 2 with real coefficients has all-positive coefficients, so any order-4+ composition run against a dissipative operator necessarily takes a backward sub-step somewhere.}
+}
+
+@article{blanes2008,
+  author        = {Sergio Blanes and Fernando Casas and Ander Murua},
+  title         = {Splitting and composition methods in the numerical integration of differential equations},
+  journal       = {Bolet{\'i}n de la Sociedad Espa{\~n}ola de Matem{\'a}tica Aplicada},
+  year          = {2008},
+  volume        = {45},
+  pages         = {89--145},
+  eprint        = {0812.0377},
+  archiveprefix = {arXiv},
+  primaryclass  = {math.NA},
+  note          = {The survey SPLITTING_PLAN.md's references lean on for the general composition/splitting landscape: covers Lie-Trotter and Strang as the order-1/2 base cases, the composition theorem's symmetry requirement, and the processing techniques (§2.5's "escape routes") that do not evade Goldman-Kaper for order >= 3.}
+}
+
+@book{hairer2006,
+  title     = {Geometric Numerical Integration: Structure-Preserving Algorithms for Ordinary Differential Equations},
+  author    = {Ernst Hairer and Christian Lubich and Gerhard Wanner},
+  edition   = {2nd},
+  series    = {Springer Series in Computational Mathematics},
+  volume    = {31},
+  year      = {2006},
+  publisher = {Springer},
+  address   = {Berlin Heidelberg},
+  isbn      = {978-3-540-30663-4},
+  note      = {Carries essentially all of SPLITTING_PLAN.md's theory -- II.4 (composition methods and the order theorem), II.5 (splitting, Strang, the Baker-Campbell-Hausdorff expansion), III.4 (backward error analysis for splitting), V.4.1 (symmetric projection, the mechanism behind §2.7.1's substep-local compatible-energy rewrite).}
+}
+
+@book{toro2009,
+  title     = {Riemann Solvers and Numerical Methods for Fluid Dynamics: A Practical Introduction},
+  author    = {Eleuterio F. Toro},
+  edition   = {3rd},
+  year      = {2009},
+  publisher = {Springer},
+  address   = {Berlin Heidelberg},
+  isbn      = {978-3-540-25202-3},
+  note      = {The HLLC reference for the MFM/MFV direction (PESPH_PLAN.md §7): the Riemann solver structural correspondence between CRKSPH's conservative differencing (Eq. 35) and the MFM effective-face flux points here for the piece this codebase does not yet have.}
+}
+
+% --- PESPH, CRKSPH, compSPH & meshless hydrodynamics (MFM) (added 2026-09-15) ---
+
+@article{hopkins2013,
+  author  = {Philip F. Hopkins},
+  title   = {A general class of Lagrangian smoothed particle hydrodynamics methods and implications for fluid mixing problems},
+  journal = {Monthly Notices of the Royal Astronomical Society},
+  year    = {2013},
+  volume  = {428},
+  number  = {4},
+  pages   = {2840--2856},
+  doi     = {10.1093/mnras/sts210},
+  note    = {The pressure-entropy PESPH paper. PESPH_PLAN.md §1.2/§3.2 builds PESPH-A on this: pressure by summation over the entropic function A rather than energy, which is what makes the scheme separable (SPLITTING_PLAN.md §2.3.1) and the recommended first target for the splitting integrator work.}
+}
+
+@article{hopkins2015,
+  author  = {Philip F. Hopkins},
+  title   = {A new class of accurate, mesh-free hydrodynamic simulation methods},
+  journal = {Monthly Notices of the Royal Astronomical Society},
+  year    = {2015},
+  volume  = {450},
+  number  = {1},
+  pages   = {53--110},
+  doi     = {10.1093/mnras/stv195},
+  note    = {MFM/MFV derivation (Appendix), and Appendix F2's pressure-energy PSPH -- the variant PESPH_PLAN.md builds PESPH-E on. Already cited from this repository's warpSPHIntegrators companion; the copy is duplicated here because both codebases cite it directly.}
+}
+
+@article{saitoh2013,
+  author  = {Takayuki R. Saitoh and Junichiro Makino},
+  title   = {A density-independent formulation of smoothed particle hydrodynamics},
+  journal = {The Astrophysical Journal},
+  year    = {2013},
+  volume  = {768},
+  number  = {1},
+  pages   = {44},
+  doi     = {10.1088/0004-637X/768/1/44},
+  note    = {DISPH -- density-independent SPH -- which Hopkins (2013) builds the pressure-entropy formulation on and which Frontiere et al. cite as [60], the origin of the pressure-weighting idea PESPH generalizes.}
+}
+
+@article{springel2002,
+  author  = {V. Springel and L. Hernquist},
+  title   = {Cosmological smoothed particle hydrodynamics simulations: the entropy equation},
+  journal = {Monthly Notices of the Royal Astronomical Society},
+  year    = {2002},
+  volume  = {333},
+  number  = {3},
+  pages   = {649--664},
+  doi     = {10.1046/j.1365-8711.2002.05445.x},
+  note    = {The entropy formulation and the canonical grad-h (Omega_i) derivation (SPLITTING_PLAN.md §2.3.1) -- the reference for why carrying entropy rather than internal energy keeps a compressible SPH scheme's conservative half a pure function of position. PESPH_PLAN.md §7.1 also cites it against the FIRE/GIZMO adoption history.}
+}
+
+@article{frontiere2017,
+  author  = {Nicholas Frontiere and Cody D. Raskin and J. Michael Owen},
+  title   = {CRKSPH -- A Conservative Reproducing Kernel Smoothed Particle Hydrodynamics Scheme},
+  journal = {Journal of Computational Physics},
+  year    = {2017},
+  volume  = {332},
+  pages   = {160--209},
+  doi     = {10.1016/j.jcp.2016.12.004},
+  note    = {The CRKSPH/compSPH/PESPH source paper. §3 CRKSPH, §3.3 the compatible energy discretization (PESPH_PLAN.md §4.2's subject), Appendix B (why CRKSPH is not variational, §4.1), Appendix E compSPH, Appendix G PESPH (pressure-energy). Eq. (24)'s partition-of-unity condition is PESPH_PLAN.md §7.2's structural bridge to MFM. Matches the copy already in warpSPHIntegrators/literature/.}
+}
+
+@article{owen2014,
+  author  = {J. Michael Owen},
+  title   = {A compatibly differenced total energy conserving form of SPH},
+  journal = {International Journal for Numerical Methods in Fluids},
+  year    = {2014},
+  volume  = {75},
+  number  = {11},
+  pages   = {749--774},
+  doi     = {10.1002/fld.3912},
+  note    = {Frontiere et al.'s [48] -- the origin of the compatible energy discretization modules/compSPH/balance.py and multistep.py implement, and the subject of PESPH_PLAN.md §4.2's finding that the pairwise work-partition is a symmetric projection in disguise.}
+}
+
+@article{cullen2010,
+  author  = {Lee Cullen and Walter Dehnen},
+  title   = {Inviscid smoothed particle hydrodynamics},
+  journal = {Monthly Notices of the Royal Astronomical Society},
+  year    = {2010},
+  volume  = {408},
+  number  = {2},
+  pages   = {669--683},
+  doi     = {10.1111/j.1365-2966.2010.17158.x},
+  note    = {The Cullen-Dehnen shock-detection switch PESPH's Appendix G specifies (ViscositySwitch.CullenDehnen2010, already registered in enumTypes.py).}
+}
+
+@article{balsara1995,
+  author  = {Dinshaw S. Balsara},
+  title   = {Von Neumann stability analysis of smoothed particle hydrodynamics—suggestions for optimal algorithms},
+  journal = {Journal of Computational Physics},
+  year    = {1995},
+  volume  = {121},
+  number  = {2},
+  pages   = {357--372},
+  doi     = {10.1016/S0021-9991(95)90221-X},
+  note    = {The Balsara (1989/1995) shock-detection switch Hopkins' F2 (2015) specifies alongside Cullen-Dehnen; the older of the two, cited by both PESPH descriptions.}
+}
+
+@article{dilts1999,
+  author  = {Gary A. Dilts},
+  title   = {Moving-least-squares-particle hydrodynamics—I. Consistency and stability},
+  journal = {International Journal for Numerical Methods in Engineering},
+  year    = {1999},
+  volume  = {44},
+  number  = {8},
+  pages   = {1115--1155},
+  doi     = {10.1002/(SICI)1097-0207(19990320)44:8<1115::AID-NME547>3.0.CO;2-L},
+  note    = {Frontiere et al.'s [14] -- the MLSPH formalism CRKSPH's conservative differencing is derived from, and, per PESPH_PLAN.md §7.2, the same weak-formulation route MFM's effective face is built on. One paper behind both the scheme this codebase has and the one it is considering.}
+}
+
+@article{garciasenz2012,
+  author  = {D. Garc{\'i}a-Senz and R. M. Cabez{\'o}n and J. A. Escart{\'i}n},
+  title   = {Improving smoothed particle hydrodynamics with an integral approach to calculating gradients},
+  journal = {Astronomy \& Astrophysics},
+  year    = {2012},
+  volume  = {538},
+  pages   = {A9},
+  doi     = {10.1051/0004-6361/201117939},
+  note    = {The integral-approximation gradient estimator PESPH_PLAN.md §7.5 recommends as the shared upgrade across monaghan/compSPH/crkSPH/PESPH, independent of the MFM-vs-splitting choice and a prerequisite for MFM's own reconstruction step.}
+}
+
+@article{rosswog2015,
+  author  = {S. Rosswog},
+  title   = {Boosting the accuracy of SPH techniques: Newtonian and special-relativistic tests},
+  journal = {Monthly Notices of the Royal Astronomical Society},
+  year    = {2015},
+  volume  = {448},
+  number  = {4},
+  pages   = {3628--3664},
+  doi     = {10.1093/mnras/stv225},
+  note    = {The matrix-inversion gradient form, the other half of PESPH_PLAN.md §7.5's gradient upgrade alongside garciasenz2012; the two combine in MAGMA2 (rosswog2020).}
+}
+
+@article{rosswog2020,
+  author  = {S. Rosswog},
+  title   = {The Lagrangian hydrodynamics code magma2},
+  journal = {Monthly Notices of the Royal Astronomical Society},
+  year    = {2020},
+  volume  = {498},
+  number  = {3},
+  pages   = {4230--4255},
+  doi     = {10.1093/mnras/staa2591},
+  note    = {MAGMA2: integral-approximation + matrix-inversion gradients with slope-limited reconstruction, Wendland C6 with ~300 neighbours. The concrete code PESPH_PLAN.md §7.5 points at as the combined upgrade.}
+}
+
+@article{cabezon2017,
+  author  = {R. M. Cabez{\'o}n and D. Garc{\'i}a-Senz and J. Figueira},
+  title   = {SPHYNX: an accurate density-based SPH method for astrophysical applications},
+  journal = {Astronomy \& Astrophysics},
+  year    = {2017},
+  volume  = {606},
+  pages   = {A78},
+  doi     = {10.1051/0004-6361/201630208},
+  note    = {The production code built on garciasenz2012's integral-approach gradients -- a worked example of the §7.5 gradient upgrade at full-code scale, complementing MAGMA2.}
+}
+
+@article{gaburov2011,
+  author  = {Evghenii Gaburov and Keigo Nitadori},
+  title   = {Astrophysical weighted particle magnetohydrodynamics},
+  journal = {Monthly Notices of the Royal Astronomical Society},
+  year    = {2011},
+  volume  = {414},
+  number  = {1},
+  pages   = {129--154},
+  doi     = {10.1111/j.1365-2966.2011.18313.x},
+  note    = {MFM-tier reference: a weighted-particle-method treatment adjacent to the Lanson-Vila / Hopkins MFM lineage, cited in PESPH_PLAN.md §7's MFM reading list.}
+}
+
+@article{lanson2008,
+  author  = {Nathalie Lanson and Jean-Paul Vila},
+  title   = {Renormalized meshfree schemes I: consistency, stability, and hybrid methods for conservation laws},
+  journal = {SIAM Journal on Numerical Analysis},
+  year    = {2008},
+  volume  = {46},
+  number  = {4},
+  pages   = {1912--1934},
+  doi     = {10.1137/S0036142903427718},
+  note    = {The mathematical foundation Hopkins builds MFM on -- PESPH_PLAN.md §7.2's structural correspondence between CRKSPH's partition-of-unity interpolant and the MFM effective face traces back to this paper's renormalized meshfree derivatives.}
+}
+
+@article{groth2023,
+  author  = {Frederick Groth and Ulrich P. Steinwandel and Milena Valentini and Klaus Dolag},
+  title   = {The cosmological simulation code OpenGadget3 -- implementation of meshless finite mass},
+  journal = {Monthly Notices of the Royal Astronomical Society},
+  year    = {2023},
+  volume  = {526},
+  number  = {1},
+  pages   = {616--644},
+  doi     = {10.1093/mnras/stad2717},
+  note    = {A worked port of MFM into an existing SPH code -- the closest thing to a template for PESPH_PLAN.md §7's MFM direction, and probably the highest practical value in that reading tier.}
+}
+
+@article{monaghan2013,
+  author  = {J. J. Monaghan and Ashkan Rafiee},
+  title   = {A simple SPH algorithm for multi-fluid flow with high density ratios},
+  journal = {International Journal for Numerical Methods in Fluids},
+  year    = {2013},
+  volume  = {71},
+  number  = {5},
+  pages   = {537--561},
+  doi     = {10.1002/fld.3671},
+  note    = {The Lagrangian derivation of the SPH momentum/continuity pair from a constrained variational principle -- background for PESPH_PLAN.md's claim that PESPH-A's separability follows the same variational route as compSPH.}
+}
+
+@article{price2018,
+  author  = {Daniel J. Price and James Wurster and Terrence S. Tricco and Chris Nixon and St{\'e}ven Toupin and Alex Pettitt and Conrad Chan and Daniel Mentiplay and Guillaume Laibe and Simon Glover and Clare Dobbs and Rebecca Nealon and David Liptai and Hauke Worpel and Cl{\'e}ment Bonnerot and Giovanni Dipierro and Giulia Ballabio and Enrico Ragusa and Christoph Federrath and Roberto Iaconi and Thomas Reichardt and Duncan Forgan and Mark Hutchison and Thomas Constantino and Ben Ayliffe and Kieran Hirsh and Giuseppe Lodato},
+  title   = {Phantom: A Smoothed Particle Hydrodynamics and Magnetohydrodynamics Code for Astrophysics},
+  journal = {Publications of the Astronomical Society of Australia},
+  year    = {2018},
+  volume  = {35},
+  pages   = {e031},
+  doi     = {10.1017/pasa.2018.25},
+  note    = {A production comparison baseline (PESPH_PLAN.md §7.6): standard modern SPH, distinct from the MFM/CRK/PESPH lineage.}
+}
+
+@article{borrow2022,
+  author  = {Josh Borrow and Matthieu Schaller and Richard G. Bower and Joop Schaye},
+  title   = {SPHENIX: smoothed particle hydrodynamics for the next generation of galaxy formation simulations},
+  journal = {Monthly Notices of the Royal Astronomical Society},
+  year    = {2022},
+  volume  = {511},
+  number  = {2},
+  pages   = {2367--2389},
+  doi     = {10.1093/mnras/stab3166},
+  note    = {The SWIFT project's own modern-SPH scheme -- a second comparison baseline (PESPH_PLAN.md §7.6), and the sibling of sandnes2025/REMIX, both built on the same SWIFT code (schaller2024).}
+}
+
+@article{sandnes2025,
+  author  = {T. D. Sandnes and V. R. Eke and J. A. Kegerreis and R. J. Massey and S. Ruiz-Bonilla and M. Schaller and L. F. A. Teodoro},
+  title   = {REMIX SPH -- improving mixing in smoothed particle hydrodynamics simulations using a generalised, material-independent approach},
+  journal = {Journal of Computational Physics},
+  year    = {2025},
+  volume  = {532},
+  pages   = {113907},
+  doi     = {10.1016/j.jcp.2025.113907},
+  note    = {A modern mixing-focused SPH scheme, cited in PESPH_PLAN.md §7.1's synthesis of where the field stands post-2015; now published (was arXiv-only when the plan's outlook was written).}
+}
+
+@article{schaller2024,
+  author  = {Matthieu Schaller and Josh Borrow and Peter W. Draper and Mladen Ivkovic and Stuart McAlpine and Bert Vandenbroucke and Yannick Bah{\'e} and Evgenii Chaikin and Aidan B. G. Chalk and Tsang Keung Chan and Camila Correa and Marcel van Daalen and Willem Elbers and Pedro Gonnet and Lo{\"i}c Hausammann and John Helly and Filip Hu{\v s}ko and Jacob A. Kegerreis and Folkert S. J. Nobels and Sylvia Ploeckinger and Yves Revaz and William J. Roper and Sergio Ruiz-Bonilla and Thomas D. Sandnes and Yolan Uyttenhove and James S. Willis and Zhen Xiang},
+  title   = {SWIFT: a modern highly parallel gravity and smoothed particle hydrodynamics solver for astrophysical and cosmological applications},
+  journal = {Monthly Notices of the Royal Astronomical Society},
+  year    = {2024},
+  volume  = {530},
+  number  = {2},
+  pages   = {2378--2419},
+  doi     = {10.1093/mnras/stae922},
+  note    = {The code both borrow2022/SPHENIX and sandnes2025/REMIX are built on and validated in; background for PESPH_PLAN.md §7.1's adoption survey. First author is Schaller, not "Swift" -- the incoming filename named it for the project, not the author.}
+}
+
+@article{crain2023,
+  author  = {Robert A. Crain and Freeke van de Voort},
+  title   = {Hydrodynamical Simulations of the Galaxy Population: Enduring Successes and Outstanding Challenges},
+  journal = {Annual Review of Astronomy and Astrophysics},
+  year    = {2023},
+  volume  = {61},
+  number  = {1},
+  pages   = {473--515},
+  doi     = {10.1146/annurev-astro-041923-043618},
+  note    = {The current-generation review of galaxy-formation hydrodynamics methods (SPH, MFM/MFV, moving mesh) -- the place PESPH_PLAN.md §7.1's framing was checked against.}
+}
+
+@article{rosswog2015review,
+  author  = {Stephan Rosswog},
+  title   = {SPH Methods in the Modelling of Compact Objects},
+  journal = {Living Reviews in Computational Astrophysics},
+  year    = {2015},
+  volume  = {1},
+  pages   = {1},
+  doi     = {10.1007/lrca-2015-1},
+  note    = {A field review distinct from rosswog2015 (the MNRAS numerics paper) and from rosswog2026, its 2026 major-revision update -- this is the original 2015 Living Reviews article.}
+}
+
+@misc{rosswog2026,
+  author        = {Stephan Rosswog},
+  title         = {SPH Methods in the Modelling of Compact Objects},
+  year          = {2026},
+  eprint        = {2607.14828},
+  archiveprefix = {arXiv},
+  primaryclass  = {astro-ph.HE},
+  note          = {"Major revision, updated and expanded" of rosswog2015review (its own change-summary, page 2) -- same title and author, same underlying Living Reviews article, but arXiv-only at this point and not yet carrying the Living Reviews DOI as a fast-track revision.}
+}
+
+% --- english2022 goes into the existing Boundary handling section; barecasco2013 near free-surface detection ---
+
+@article{english2022,
+  author  = {Aaron English and Jos{\'e} M. Dom{\'i}nguez and Renato Vacondio and Alejandro J. C. Crespo and Peter K. Stansby and Steven J. Lind and Luca Chiapponi and Moncho G{\'o}mez-Gesteira},
+  title   = {Modified dynamic boundary conditions (mDBC) for general-purpose smoothed particle hydrodynamics (SPH): application to tank sloshing, dam break and fish pass problems},
+  journal = {Computational Particle Mechanics},
+  year    = {2022},
+  volume  = {9},
+  number  = {5},
+  pages   = {911--925},
+  doi     = {10.1007/s40571-021-00403-3},
+  note    = {The mDBC boundary density/pressure paper modules/mdbc/density2025.py implements Eq. 12 of. Distinct from english2025 (Computers & Fluids, river-bridges application paper) already in this manifest -- this is the original method paper. BOUNDARY_DENSITY_PLAN.md names it directly as the source of the Eq. 12 extrapolation this codebase implements.}
+}
+
+@misc{barecasco2013,
+  author        = {Agra Barecasco and Hanifa Terissa and Christian Fredy Naa},
+  title         = {Simple free-surface detection in two and three-dimensional SPH solver},
+  year          = {2013},
+  eprint        = {1309.4290},
+  archiveprefix = {arXiv},
+  primaryclass  = {physics.flu-dyn},
+  note          = {The Barecasco surface-detection scheme (configurations/incompressible.py's barecascoThreshold, and the detectFreeSurface mask discussed at length in DELTASPH_VALIDATION_PLAN.md §5.34-5.35): an angle-based coverage-vector test using overlapping spheres, distinct from the Marrone/Sun dilation approach already implemented alongside it. No DOI found on Crossref -- appears to be an arXiv-only preprint, never formally published.}
+}
 
 % --- Extended set (one step removed; bibliographic records only, added 2026-08-29) ---
 %

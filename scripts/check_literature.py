@@ -117,6 +117,9 @@ def main():
     abstracts_ext = read("ABSTRACTS_EXTENDED.md") if os.path.exists(ext_path) else ""
 
     on_disk = {f for f in os.listdir(LIT) if f.endswith(".pdf")}
+    # `os.listdir`, not a walk: `literature/dump/` (ADDING.md's landing zone for
+    # not-yet-synced PDFs) is a subdirectory, so its contents are invisible here
+    # by construction -- an unsynced inbox produces no "problem" lines.
     # only the table rows claim files; prose may name a superseded filename
     in_manifest = set()
     for line in manifest.splitlines():

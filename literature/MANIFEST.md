@@ -57,15 +57,25 @@ and had to be identified from their front matter alone.
 
 ## What is here
 
-133 documents. The first 56 are the curated core — every row annotated for what
-it unblocks, and every row abstracted in `ABSTRACTS.md` **except `roe1986`**,
-which carries no abstract at all (Annual Reviews articles of that vintage print
-none; OpenAlex has one attached to the DOI, but it belongs to a different
-paper). The remaining 77, listed
+169 documents. The first 92 are the curated core — every row annotated for what
+it unblocks, and every row abstracted in `ABSTRACTS.md` **except `roe1986`,
+`hairer2006` and `toro2009`**, which carry no abstract at all (Annual Reviews
+articles of that vintage print none for `roe1986`; the latter two are books,
+which have none to quote). The remaining 77, listed
 under **Extended set** below, arrived together on 2026-08-29 and were synced by
 bibliographic record only: `references.bib` has an entry for each, but they are
 not abstracted, not annotated for relevance, and three scanned arrivals with no
 text layer were parked in `literature/scans/` rather than indexed here.
+
+**33 papers were added 2026-09-15** for two companion plans: the geometric
+integration / operator-splitting set (`SPLITTING_PLAN.md`, in
+`../warpSPHIntegrators/`) and the PESPH/CRKSPH/MFM set (`PESPH_PLAN.md`, this
+repository). Two of the 33 — `english2022` and `barecasco2013` — sit with the
+existing core sections they belong to (boundary handling; free-surface
+detection) rather than either new theme. One duplicate download
+(`goldman1996`, fetched twice under two filenames) was found and removed
+during the sync; see `scripts/check_literature.py`'s output for the mechanical
+check that catches this class of issue.
 
 (`dehnen2012` was promoted from the extended set to the core on 2026-09-04,
 supplied by the user for the kernel-choice question behind the
@@ -77,11 +87,15 @@ were added to the core on 2026-09-03 for
 manifest row, by `scripts/check_literature.py`. `sun2018` was added to the core
 on 2026-09-12, supplied by the user for `DELTASPH_VALIDATION_PLAN.md`'s
 Tensile Instability Control / `PressureForceScheme.Antuono` investigation.
-`english2025` was fully synced on 2026-09-15 -- it was already cited
-informally in `DELTASPH_VALIDATION_PLAN.md`'s reference table as a
-secondary application paper, but its actual mDBC pressure/density
-methodology (Eqs. 8-11) had not been read; `BOUNDARY_DENSITY_PLAN.md` found
-it directly relevant, not secondary.)
+`molteni2009` and `fourtakas2019` were added to the core on 2026-09-14,
+supplied by the user for `DELTASPH_VALIDATION_PLAN.md` §8.15/8.16's
+cross-check of this codebase's Marrone/Antuono density diffusion term
+against DualSPHysics' own two DDT formulations. `english2025` was fully
+synced on 2026-09-15 -- it was already cited informally in
+`DELTASPH_VALIDATION_PLAN.md`'s reference table as a secondary application
+paper, but its actual mDBC pressure/density methodology (Eqs. 8-11) had not
+been read; `BOUNDARY_DENSITY_PLAN.md` found it directly relevant, not
+secondary.)
 
 `venue` is the **published** venue, which for an author's-version or preprint
 copy is not always what that copy's own front page says. Full bibliographic
@@ -118,6 +132,13 @@ detail is in `references.bib`; the abstract of every core row is in
 | — | `bender2019vmaps` | `bender2019vmaps_volume-maps.pdf` | MIG 2019 | Volume maps -- the successor to density maps; kernel not baked into the map. |
 | — | `bender2020` | `bender2020_implicit-frictional-boundaries.pdf` | IEEE TVCG 26(10) 2020 | Journal extension of volume maps, adding implicit friction at the boundary. |
 | — | `english2025` | `english2025_river-flows-past-bridges.pdf` | Computers & Fluids 303 2025 | mDBC pressure cloning (Eqs. 8-11): ghost density fit + an *analytic* hydrostatic-gravity term extrapolating pressure to the boundary particle, instead of a fitted spatial gradient. `BOUNDARY_DENSITY_PLAN.md`'s candidate fix for the ghost-to-boundary extrapolation-distance amplification found there. |
+| — | `english2022` | `english2022_mdbc-general-purpose-sph.pdf` | Computational Particle Mechanics 9(5):911-925, 2022 | **The mDBC paper modules/mdbc/density2025.py implements Eq. 12 of.** Distinct from english2025. |
+
+**Free-surface detection**
+
+| plan | bib key | file | venue | what it is |
+|---|---|---|---|---|
+| — | `barecasco2013` | `barecasco2013_free-surface-detection-sph.pdf` | arXiv:1309.4290 [physics.flu-dyn], 2013 | **The Barecasco surface-detection scheme** already implemented (`configurations/incompressible.py`'s `barecascoThreshold`). |
 
 **Pressure solvers, non-pressure forces, multiphase**
 
@@ -159,6 +180,8 @@ this plan too.
 | `[AC]` | `decourcy2024` | `decourcy2024_incompressible-delta-sph-artificial-compressibility.pdf` | Comput. Methods Appl. Mech. Engrg. 420 2024 | **The paper `ACSPH_PLAN.md` implements.** Pressure-evolution equation in place of the EOS, marched in pseudo-time to zero divergence every step. Three defects found on review, recorded in the plan's Part 5. |
 | `[AC]` | `antuono2012` | `antuono2012_numerical-diffusive-terms-weakly-compressible.pdf` | Comput. Phys. Comm. 183(12) 2012 | Why the plain density Laplacian cannot hold a hydrostatic gradient, why the corrected form is a bi-Laplacian, and the stability bound `k₂ = 0.1hβ` sits under. |
 | `[AC]` | `antuono2010` | `antuono2010_free-surface-flows-numerical-diffusive-terms.pdf` | Comput. Phys. Comm. 181(3) 2010 | Origin of the renormalised-gradient correction that lets the diffusive term reach the free surface. `decourcy2024`'s AC-2L is this in pressure. |
+| — | `molteni2009` | `molteni2009_pressure-evaluation-density-diffusion.pdf` | Comput. Phys. Comm. 180(6) 2009 | Origin of the SPH density diffusion term (DDT) itself, pre-`antuono2010`'s renormalized-gradient correction: a density-difference-weighted Laplacian, no correction matrix at all. DualSPHysics' `DDT_DDT` option. `DELTASPH_VALIDATION_PLAN.md` §8.15/8.16. |
+| — | `fourtakas2019` | `fourtakas2019_lust-boundary-condition-ddt-correction.pdf` | Computers & Fluids 190 2019 | Primarily a boundary-condition (LUST) paper; its §3.2 derives DualSPHysics' `DDT_DDT2`, which cancels the hydrostatic density gradient analytically instead of via a renormalized gradient. `DELTASPH_VALIDATION_PLAN.md` §8.15/8.16. |
 | `[AC]` | `michel2022` | `michel2022_particle-shifting-techniques.pdf` | J. Comput. Phys. 459 2022 | The Mach-free shifting law ACSPH needs and this codebase does not have (`delta.py` is Mach-scaled). Plan Part 4.2. |
 | `[AC]` | `ramachandran2021` | `ramachandran2021_dual-time-sph-incompressible.pdf` | Computers & Fluids 227 2021 | Closest prior art: EDAC + dual-time. Source of the pseudo-time material derivative and the point-implicit weighting. Open-source reference implementation. |
 | `[AC]` | `letouze2013` | `letouze2013_critical-investigation-sph-free-surfaces.pdf` | Int. J. Numer. Meth. Fluids 73(7) 2013 | The square-patch benchmark: its initial pressure Poisson solve, analytic stretching solution and BEM reference data. |
@@ -188,6 +211,52 @@ this plan too.
 | — | `winchenbach2024pmac` | `winchenbach2024pmac_taylor-green-cross-validation.pdf` | PMAC 2024 | A Taylor-Green cross-validation benchmark for ML models, on a differentiable delta+-SPH solver. |
 | — | `winchenbach2024spheric` | `winchenbach2024spheric_physically-motivated-ml.pdf` | SPHERIC 2024 | Symmetry-built ML model using Chebyshev/Fourier bases and SPH-informed kernel choices. |
 | — | `winchenbach2025spheric` | `winchenbach2025spheric_morinet.pdf` | SPHERIC 2025 | Mori-Zwanzig view of WCSPH vs ISPH: density as a memory term, and its timescale dependence. |
+
+**Geometric integration, operator splitting & conformal symplecticity**
+
+Background for `../warpSPHIntegrators/SPLITTING_PLAN.md`'s conservative/dissipative operator-splitting plan, added 2026-09-15.
+
+| plan | bib key | file | venue | what it is |
+|---|---|---|---|---|
+| — | `yoshida1990` | `yoshida1990_higher-order-symplectic-integrators.pdf` | Physics Letters A 150(5-7):262-268, 1990 | The triple-jump order-4/6/8 composition SPLITTING_PLAN.md §2.5 uses as the reference point for the backward-substep obstruction. |
+| — | `suzuki1990` | `suzuki1990_fractal-decomposition-exponential-operators.pdf` | Physics Letters A 146(6):319-323, 1990 | The 5-stage order-4 composition SPLITTING_PLAN.md §2.5 recommends over Yoshida's for a dissipative half (smaller backward coefficient). |
+| — | `mclachlan2001` | `mclachlan2001_conformal-hamiltonian-systems.pdf` | Journal of Geometry and Physics 39(4):276-300, 2001 | Defines conformal Hamiltonian systems -- the exact exp(-gamma*t) symplectic-form contraction SPLITTING_PLAN.md §2.4's validation gate checks for. |
+| — | `bhatt2016` | `bhatt2016_conformal-symplectic-damped-hamiltonian.pdf` | Journal of Scientific Computing 66(3):1234-1259, 2016 | Conformal-symplectic schemes for exactly this codebase's target split problem; backs SPLITTING_PLAN.md §2.4's conformal check. |
+| — | `goldman1996` | `goldman1996_nth-order-operator-splitting.pdf` | SIAM Journal on Numerical Analysis 33(1):349-367, 1996 | The no-positive-coefficients theorem behind SPLITTING_PLAN.md §2.5's regime-gating of order-4+ composition against a dissipative operator. |
+| — | `blanes2008` | `blanes2008_splitting-and-composition-methods.pdf` | Boletín de la Sociedad Española de Matemática Aplicada 45, 2008 | Survey of splitting/composition methods; the general reference SPLITTING_PLAN.md leans on. |
+| — | `hairer2006` | `hairer2006_geometric-numerical-integration.pdf` | 2nd ed., Springer Series in Computational Mathematics 31 (Springer, 2006) | Carries essentially all of SPLITTING_PLAN.md's theory (II.4-5, III.4, V.4.1). No abstract (a book). |
+| — | `toro2009` | `toro2009_riemann-solvers-and-numerical-methods.pdf` | 3rd ed. (Springer, 2009) | The HLLC reference for the MFM/MFV direction in PESPH_PLAN.md §7. No abstract (a book). |
+
+**PESPH, CRKSPH, compSPH & meshless hydrodynamics (MFM)**
+
+Background for `PESPH_PLAN.md`, added 2026-09-15.
+
+| plan | bib key | file | venue | what it is |
+|---|---|---|---|---|
+| — | `hopkins2013` | `hopkins2013_general-class-lagrangian-sph.pdf` | Monthly Notices of the Royal Astronomical Society 428(4):2840-2856, 2013 | **The pressure-entropy PESPH paper** -- PESPH_PLAN.md's PESPH-A, and the separable/variational scheme SPLITTING_PLAN.md recommends as the first splitting target. |
+| — | `hopkins2015` | `hopkins2015_new-class-meshfree-hydrodynamic-methods.pdf` | Monthly Notices of the Royal Astronomical Society 450(1):53-110, 2015 | MFM/MFV derivation, and Appendix F2's pressure-energy PSPH -- PESPH_PLAN.md's PESPH-E. |
+| — | `saitoh2013` | `saitoh2013_density-independent-sph.pdf` | The Astrophysical Journal 768(1):44, 2013 | DISPH -- density-independent SPH -- the paper Hopkins (2013) builds pressure-entropy on. |
+| — | `springel2002` | `springel2002_sph-entropy-equation.pdf` | Monthly Notices of the Royal Astronomical Society 333(3):649-664, 2002 | The entropy formulation and canonical grad-h derivation; SPLITTING_PLAN.md §2.3.1's separability argument. |
+| — | `frontiere2017` | `frontiere2017_crksph.pdf` | Journal of Computational Physics 332, 2017 | **The CRKSPH/compSPH/PESPH source paper.** §3, §3.3, App. B/E/G. Already in warpSPHIntegrators/literature/. |
+| — | `owen2014` | `owen2014_compatibly-differenced-total-energy-sph.pdf` | International Journal for Numerical Methods in Fluids 75(11):749-774, 2014 | Origin of the compatible energy discretization modules/compSPH/balance.py implements. |
+| — | `cullen2010` | `cullen2010_inviscid-sph.pdf` | Monthly Notices of the Royal Astronomical Society 408(2):669-683, 2010 | The Cullen-Dehnen shock switch PESPH's Appendix G specifies. |
+| — | `balsara1995` | `balsara1995_von-neumann-stability-sph.pdf` | Journal of Computational Physics 121(2):357-372, 1995 | The older Balsara (1989/1995) shock switch, also specified by Hopkins F2. |
+| — | `dilts1999` | `dilts1999_mlsph-consistency-and-stability.pdf` | International Journal for Numerical Methods in Engineering 44(8):1115-1155, 1999 | MLSPH -- the formalism CRKSPH's conservative differencing is derived from, and MFM's route too. |
+| — | `garciasenz2012` | `garciasenz2012_integral-approach-gradients.pdf` | Astronomy & Astrophysics 538:A9, 2012 | Integral-approximation gradients -- the PESPH_PLAN.md §7.5 upgrade, shared across every scheme. |
+| — | `rosswog2015` | `rosswog2015_boosting-accuracy-sph.pdf` | Monthly Notices of the Royal Astronomical Society 448(4):3628-3664, 2015 | Matrix-inversion gradients -- the other half of the §7.5 upgrade. |
+| — | `rosswog2020` | `rosswog2020_magma2.pdf` | Monthly Notices of the Royal Astronomical Society 498(3):4230-4255, 2020 | MAGMA2 -- the production code combining both gradient upgrades. |
+| — | `cabezon2017` | `cabezon2017_sphynx.pdf` | Astronomy & Astrophysics 606:A78, 2017 | SPHYNX -- a second production code built on integral-approach gradients. |
+| — | `gaburov2011` | `gaburov2011_weighted-particle-mhd.pdf` | Monthly Notices of the Royal Astronomical Society 414(1):129-154, 2011 | MFM-tier background reference (weighted-particle MHD). |
+| — | `lanson2008` | `lanson2008_renormalized-meshfree-schemes.pdf` | SIAM Journal on Numerical Analysis 46(4):1912-1934, 2008 | The mathematical foundation Hopkins builds MFM on. |
+| — | `groth2023` | `groth2023_opengadget3-meshless-finite-mass.pdf` | Monthly Notices of the Royal Astronomical Society 526(1):616-644, 2023 | A worked port of MFM into an existing SPH code -- the closest thing to a template for the MFM direction. |
+| — | `monaghan2013` | `monaghan2013_multi-fluid-high-density-ratios.pdf` | International Journal for Numerical Methods in Fluids 71(5):537-561, 2013 | Lagrangian derivation of the SPH momentum/continuity pair -- background for PESPH-A's separability. |
+| — | `price2018` | `price2018_phantom.pdf` | Publications of the Astronomical Society of Australia 35:e031, 2018 | Phantom -- a production comparison baseline, standard modern SPH. |
+| — | `borrow2022` | `borrow2022_sphenix.pdf` | Monthly Notices of the Royal Astronomical Society 511(2):2367-2389, 2022 | SPHENIX -- SWIFT's own modern-SPH scheme, a second comparison baseline. |
+| — | `sandnes2025` | `sandnes2025_remix-sph.pdf` | Journal of Computational Physics 532, 2025 | REMIX -- modern mixing-focused SPH, now published (was arXiv-only). |
+| — | `schaller2024` | `schaller2024_swift.pdf` | Monthly Notices of the Royal Astronomical Society 530(2):2378-2419, 2024 | SWIFT -- the code SPHENIX and REMIX are both built on. |
+| — | `crain2023` | `crain2023_hydrodynamical-simulations-galaxy-population.pdf` | Annual Review of Astronomy and Astrophysics 61(1):473-515, 2023 | Current review of galaxy-formation hydrodynamics methods -- checked against PESPH_PLAN.md §7.1's framing. |
+| — | `rosswog2015review` | `rosswog2015review_sph-methods-compact-objects.pdf` | Living Reviews in Computational Astrophysics 1, 2015 | Field review of SPH for compact objects; superseded in content (not in citation) by `rosswog2026`. |
+| — | `rosswog2026` | `rosswog2026_sph-compact-objects-review.pdf` | arXiv:2607.14828 [astro-ph.HE], 2026 | The major-revision update of the same review -- checked against PESPH_PLAN.md §7.1's framing, since it is the more current version. |
 
 ## Extended set
 
@@ -361,7 +430,9 @@ Newly here, not previously on the wanted list, and bearing on open items:
 
 ## Adding a paper
 
-Drop the PDF in and ask for a sync:
+Drop the PDF in `literature/dump/` and ask for a sync — see
+[`ADDING.md`](ADDING.md) for why the landing zone exists and what a sync does
+with it:
 
 > Sync `literature/`: reconcile the PDFs against the manifest, verify the
 > BibTeX and the abstracts against the documents, and rename anything that does

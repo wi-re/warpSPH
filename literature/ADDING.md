@@ -1,18 +1,29 @@
 # Adding a paper
 
-Drop the PDF in `literature/` and ask for a sync. That is genuinely all the
-manual work there is — but the steps below are what a sync has to *do*, and
-they are written down because most of them exist to catch a specific mistake
-that has already happened here at least once.
+Drop the PDF in `literature/dump/` and ask for a sync. That is genuinely all
+the manual work there is — but the steps below are what a sync has to *do*,
+and they are written down because most of them exist to catch a specific
+mistake that has already happened here at least once.
+
+`dump/` is a landing zone, nothing more: `scripts/check_literature.py` only
+scans `literature/`'s top level (`os.listdir`, not a walk), so a file sitting
+in `dump/` — under whatever name it downloaded as — is invisible to the
+checker and produces no "problem" lines until a sync moves it. A sync's last
+step renames the file out of `dump/` into `literature/` proper as
+`<bibkey>_<slug>.pdf`; `dump/` should be empty between syncs, and a file left
+there across a session is exactly what a "what's still pending" check means to
+find.
 
 > **Never commit the PDF.** `.gitignore` covers `literature/*` (except `*.md`
-> and `*.bib`) and `*.pdf` repo-wide. The documents are third-party copyrighted
-> material; only the metadata is tracked. If `git status` ever shows a `.pdf`,
-> stop and fix the ignore rule rather than committing it.
+> and `*.bib`) and `*.pdf` repo-wide — `dump/` inherits this with no extra rule
+> needed, since it is itself a direct child of the ignored `literature/*`.
+> The documents are third-party copyrighted material; only the metadata is
+> tracked. If `git status` ever shows a `.pdf`, stop and fix the ignore rule
+> rather than committing it.
 
 ## The one-line version
 
-Copy the PDF in under any name, then:
+Copy the PDF into `literature/dump/` under any name, then:
 
 > Sync `literature/`: reconcile the PDFs against the manifest, verify the
 > BibTeX and the abstracts against the documents, and rename anything that does
