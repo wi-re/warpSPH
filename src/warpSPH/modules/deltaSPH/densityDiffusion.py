@@ -36,7 +36,7 @@ from .wp_densityDelta import computeDensityDiffusionDeltaSPH
 
 __all__ = ['computeDensityDiffusion', 'computeScalarFieldDiffusion']
 
-def computeScalarFieldDiffusion(currentState: Any, config: SimulationConfig, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], scheme: DensityDiffusionScheme, gradField: Optional[torch.Tensor] = None, gradFieldL: Optional[torch.Tensor] = None, field: Optional[torch.Tensor] = None, operationMode: OperationDirection = OperationDirection.AllToAll) -> torch.Tensor:
+def computeScalarFieldDiffusion(currentState: Any, config: SimulationConfig, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], scheme: DensityDiffusionScheme, gradField: Optional[torch.Tensor] = None, gradFieldL: Optional[torch.Tensor] = None, field: Optional[torch.Tensor] = None, operationMode: OperationDirection = OperationDirection.AllToAll, rho0: Optional[float] = None, c0: Optional[float] = None, gravity: Optional[torch.Tensor] = None) -> torch.Tensor:
     """The raw (unscaled) delta-SPH diffusion divergence for an arbitrary scalar
     `field` and its gradients. `field=None` diffuses the state's density, i.e.
     reproduces `computeDensityDiffusion` without its prefactor. No
@@ -44,7 +44,11 @@ def computeScalarFieldDiffusion(currentState: Any, config: SimulationConfig, adj
     the module docstring.
 
     `operationMode` defaults to `AllToAll` (unchanged for every caller besides
-    `computeDensityDiffusion`, e.g. ACSPH's pressure smoothing)."""
+    `computeDensityDiffusion`, e.g. ACSPH's pressure smoothing).
+
+    `rho0`/`c0`/`gravity` are only read by `DensityDiffusionScheme.
+    moltenicolagrossi2009`/`.fourtakas2019` -- every other scheme ignores
+    them, so callers that never select those two need not supply them."""
     with record_function("[warpSPH] - (deltaSPH) - computeScalarFieldDiffusion"):
         return computeDensityDiffusionDeltaSPH(
             currentState,
@@ -59,7 +63,8 @@ def computeScalarFieldDiffusion(currentState: Any, config: SimulationConfig, adj
             queryGradRho = gradField,
             queryGradRhoL = gradFieldL,
             queryField = field,
-            densityScheme = scheme
+            densityScheme = scheme,
+            rho0 = rho0, c0 = c0, gravity = gravity,
         )
 
 
@@ -77,10 +82,22 @@ def computeDensityDiffusion(currentState: Any, config: SimulationConfig, schemeC
         # JSphCpu.cpp ~L925-939) excludes boundary neighbours from this same
         # sum entirely. Only this outer pair-sum direction changes here --
         # `gradRho`/`gradRhoL` (passed in, computed elsewhere) are untouched.
+        # `moltenicolagrossi2009`/`fourtakas2019`-only; every other scheme
+        # ignores rho0/c0/gravity, so this is cheap even when unused.
+        gravityVec = None
+        if schemeConfig.diffusionParams.densityDiffusionTerm == DensityDiffusionScheme.fourtakas2019:
+            direction = schemeConfig.gravityConfig.direction
+            if not isinstance(direction, torch.Tensor):
+                direction = torch.tensor(direction, dtype=currentState.positions.dtype, device=currentState.positions.device)
+            gravityVec = direction[:currentState.positions.shape[1]] * schemeConfig.gravityConfig.magnitude
+
         drhodt_diss = drhodt_scaling * computeScalarFieldDiffusion(
             currentState, config, adjacency,
             schemeConfig.diffusionParams.densityDiffusionTerm,
             gradField = gradRho, gradFieldL = gradRhoL,
             operationMode = OperationDirection.FluidToFluid,
+            rho0 = schemeConfig.fluid.restDensity,
+            c0 = schemeConfig.fluid.fixedSoundSpeed,
+            gravity = gravityVec,
         )
         return drhodt_diss

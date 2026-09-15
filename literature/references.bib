@@ -205,6 +205,17 @@
   note    = {The wall boundary condition band2018 Eq. 3 extrapolates from, including its hydrostatic term.}
 }
 
+@article{english2025,
+  author  = {English, Aaron and Vacondio, Renato and Dazzi, Susanna and Dom{\'i}nguez, Jos{\'e} M.},
+  title   = {Smoothed particle hydrodynamics modelling of river flows past bridges},
+  journal = {Computers \& Fluids},
+  year    = {2025},
+  volume  = {303},
+  pages   = {106870},
+  doi     = {10.1016/j.compfluid.2025.106870},
+  note    = {An improved mDBC boundary pressure/density procedure (its Eqs. 8-11: a corrected-kernel-sum ghost density fit, a Shepard fallback gated on a different conditioning metric than this codebase's, then an ANALYTIC hydrostatic-gravity term -- not a fitted spatial gradient -- extrapolating ghost pressure to the boundary particle) plus a no-slip velocity extension to mDBC. BOUNDARY_DENSITY_PLAN.md's candidate fix for the ghost-to-boundary extrapolation-distance amplification found in that investigation's Band-2018-based prototype.}
+}
+
 @inproceedings{ihmsen2010,
   author    = {Ihmsen, Markus and Akinci, Nadir and Gissler, Marc and Teschner, Matthias},
   title     = {Boundary handling and adaptive time-stepping for {PCISPH}},

@@ -112,6 +112,17 @@ def parseArgs(argv):
     p.add_argument('--plotInterval', type=int, default=None,
                    help='steps between rendered frames (video); case default 50')
     p.add_argument('--out', type=str, default=OUTDIR, help='output directory')
+    p.add_argument('--mdbcDensityScheme', default=None, choices=('ramped', 'band', 'english2025'),
+                    help="override WeaklyCompressibleSPHConfig.mdbcDensityScheme "
+                         "(case default 'ramped'). Same override pattern and "
+                         "choices as scripts/probe_deltaSPHMarrone.py -- "
+                         "BOUNDARY_DENSITY_PLAN.md §5-6.")
+    p.add_argument('--densityDiffusionTerm', default=None,
+                    choices=('deltaSPH', 'denormalized', 'densityOnly', 'deltaOnly',
+                             'denormalizedOnly', 'deltaSPH_wrongSign',
+                             'moltenicolagrossi2009', 'fourtakas2019'),
+                    help="override DensityDiffusionScheme (case default "
+                         "'deltaSPH'). DELTASPH_VALIDATION_PLAN.md Part 8.16.")
     return p.parse_args(argv)
 
 
@@ -281,12 +292,19 @@ def main(argv=None):
     import numpy as np
     os.makedirs(args.out, exist_ok=True)
 
+    # File-naming tag: `args.scheme` plus any mDBC/DDT override, so an A/B run
+    # doesn't overwrite the plain scheme's own recorded output (same idea as
+    # scripts/probe_deltaSPHMarrone.py's `_mdbcRho-...`/`_ddt-...` suffixes).
+    tag = (args.scheme
+          + (f'_mdbcRho-{args.mdbcDensityScheme}' if args.mdbcDensityScheme else '')
+          + (f'_ddt-{args.densityDiffusionTerm}' if args.densityDiffusionTerm else ''))
+
     if args.replot:
-        series = loadSeries(args.out, args.scheme)
+        series = loadSeries(args.out, tag)
         nx = args.nx or 0
-        band, noField, tEnd = makeFigure(args.scheme, nx, series, args.smoothSigma,
+        band, noField, tEnd = makeFigure(tag, nx, series, args.smoothSigma,
                                          args.tLimit, args.out)
-        print(f'replotted {args.out}/{args.scheme}_sensor_pressure.pdf  '
+        print(f'replotted {args.out}/{tag}_sensor_pressure.pdf  '
               f'(noPressureField={noField}, t_end={tEnd:.2f})')
         return 0
 
@@ -298,8 +316,24 @@ def main(argv=None):
     case = getCase('sloshingTank')
     spec = buildSpec(case, args)
 
+    if args.mdbcDensityScheme:
+        # Same override pattern as scripts/probe_deltaSPHMarrone.py --
+        # BOUNDARY_DENSITY_PLAN.md §5-6.
+        _prevCfg = case.configureScheme
+        def _cfgMdbc(ctx, _t=args.mdbcDensityScheme, _p=_prevCfg):
+            _p(ctx); ctx.schemeConfig.mdbcDensityScheme = _t
+        case.configureScheme = _cfgMdbc
+    if args.densityDiffusionTerm:
+        from warpSPH.enumTypes import DensityDiffusionScheme
+        _prevCfg2 = case.configureScheme
+        def _cfgDdt(ctx, _t=DensityDiffusionScheme[args.densityDiffusionTerm], _p=_prevCfg2):
+            _p(ctx); ctx.schemeConfig.diffusionParams.densityDiffusionTerm = _t
+        case.configureScheme = _cfgDdt
+
     print(f'== sloshingTank / {args.scheme} ==  nx={spec.nx}  tLimit={spec.tLimit}  '
-          f'scheme={spec.scheme}')
+          f'scheme={spec.scheme}'
+          + (f'  mdbcRho={args.mdbcDensityScheme}' if args.mdbcDensityScheme else '')
+          + (f'  ddt={args.densityDiffusionTerm}' if args.densityDiffusionTerm else ''))
     t0 = time.perf_counter()
     result = run(case, spec)
     wall = time.perf_counter() - t0
@@ -318,7 +352,7 @@ def main(argv=None):
         kineticEnergy=result.series('kineticEnergy'),
         nx=spec.nx, diverged=result.diverged, nSteps=result.nSteps, wallTime=wall,
     )
-    np.savez(os.path.join(args.out, f'{args.scheme}_series.npz'), **series)
+    np.savez(os.path.join(args.out, f'{tag}_series.npz'), **series)
 
     if result.videoPath and os.path.exists(result.videoPath):
         import shutil
@@ -326,11 +360,11 @@ def main(argv=None):
         for src, ext in ((result.videoPath, 'mp4'),
                          (os.path.join(vdir, 'out.gif'), 'gif')):
             if os.path.exists(src):
-                dst = os.path.join(args.out, f'{args.scheme}_field.{ext}')
+                dst = os.path.join(args.out, f'{tag}_field.{ext}')
                 shutil.copy(src, dst)
                 print(f'   video -> {dst}')
 
-    band, noField, tEnd = makeFigure(args.scheme, spec.nx, series, args.smoothSigma,
+    band, noField, tEnd = makeFigure(tag, spec.nx, series, args.smoothSigma,
                                      spec.tLimit, args.out)
 
     t, p = series['t'], series['sensorPressure']
@@ -344,7 +378,7 @@ def main(argv=None):
         print(f'   measured impact-peak band: {band[0]:.0f} .. {band[1]:.0f} Pa')
     print(f'   density range over run   : '
           f'[{np.nanmin(series["minDensity"]):.3f}, {np.nanmax(series["maxDensity"]):.3f}]')
-    print(f'   wrote {args.out}/{args.scheme}_sensor_pressure.pdf and _series.npz')
+    print(f'   wrote {args.out}/{tag}_sensor_pressure.pdf and _series.npz')
     return 1 if result.diverged else 0
 
 

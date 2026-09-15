@@ -41,7 +41,7 @@ Reference material now on disk:
 | δ⁺-SPH shifting | `literature/sun2019_consistent-particle-shifting-delta-plus-sph.pdf` |
 | δ-ALE-SPH | `literature/antuono2021_delta-ale-sph-model.pdf` |
 | **mDBC (primary)** | `literature/s40571-021-00403-3.pdf` — English, Domínguez, Vacondio et al. (2022), *Comp. Part. Mech.* 9:911–925 |
-| mDBC in practice | `literature/1-s2.0-S0045793025003305-main.pdf` — English, Vacondio et al. (2025), river flows past bridges (an *application*, secondary) |
+| mDBC pressure cloning (Eqs. 8-11) | `english2025` (`literature/english2025_river-flows-past-bridges.pdf`) — English, Vacondio et al. (2025), *Computers & Fluids* 303:106870. Synced 2026-09-15; see `BOUNDARY_DENSITY_PLAN.md` §4 — its analytic-hydrostatic ghost-to-boundary extrapolation is a candidate fix for the depth/lever-arm amplification found there, not merely a secondary application reference. |
 | DualSPHysics source | `~/dev/DualSPHysics/src/source/` — `JSphCpu_mdbc.cpp` (mDBC + m2dbc), `DualSphDef.h` / `JSph.h` (DDT variants), `examples/main/01_DamBreak` |
 | existing local reference | `~/dev/diffSPH` (the kernel `wp_densityDelta.py` was ported from — plan's own note) |
 

@@ -160,7 +160,8 @@ def _params(scheme, cornerOnly=False, shifting='off', Re=None):
 
 def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme,
             cornerOnly=False, shifting='off', Re=None, plotBackend=None,
-            integrationScheme=None, noPenShift=None, wallBC=None):
+            integrationScheme=None, noPenShift=None, wallBC=None,
+            mdbcDensityScheme=None):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -182,7 +183,8 @@ def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme,
            + ('' if not Re else f'_Re{Re:g}')
            + (f'_{integrationScheme}' if integrationScheme else '')
            + (f'_nopen-{noPenShift}' if noPenShift else '')
-           + (f'_wall-{wallBC}' if wallBC else ''))
+           + (f'_wall-{wallBC}' if wallBC else '')
+           + (f'_mdbcRho-{mdbcDensityScheme}' if mdbcDensityScheme else ''))
     runRoot = os.path.join(out, tag + '_run')
 
     params = _params(scheme, cornerOnly=cornerOnly, shifting=shifting, Re=Re)
@@ -210,6 +212,13 @@ def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme,
         def _cfg(ctx, _m=noPenShift, _p=_prevCfg):
             _p(ctx); ctx.schemeConfig.mdbcNoPenShiftMode = _m
         dambreakCase.configureScheme = _cfg
+    if mdbcDensityScheme:
+        # BOUNDARY_DENSITY_PLAN.md §5 -- same override pattern as
+        # probe_deltaSPHMarrone.py, applied to the 3.4 sharp-edge case.
+        _prevCfg4 = dambreakCase.configureScheme
+        def _cfg4(ctx, _t=mdbcDensityScheme, _p=_prevCfg4):
+            _p(ctx); ctx.schemeConfig.mdbcDensityScheme = _t
+        dambreakCase.configureScheme = _cfg4
 
     r = run(dambreakCase, **kw)
 
@@ -243,6 +252,7 @@ def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme,
         shiftActive=bool(getattr(r.ctx.schemeConfig.shiftProperties, 'active', False)),
         sun2017Eq7Shift=bool(getattr(r.ctx.schemeConfig.shiftProperties, 'sun2017Eq7Shift', False)),
         shiftingArg=str(shifting), cornerOnly=bool(cornerOnly),
+        mdbcDensityScheme=str(getattr(r.ctx.schemeConfig, 'mdbcDensityScheme', 'ramped')),
         diverged=bool(r.diverged), nSteps=int(r.nSteps),
         wallTime_s=float(r.wallTime or 0.0),
     )
@@ -673,6 +683,12 @@ def main(argv=None):
                          "DualSPHysics runs -- NOT 'semiImplicitEuler', which "
                          "integrates density explicitly and is unstable for WCSPH "
                          "(DELTASPH_VALIDATION_PLAN.md 5.3).")
+    ap.add_argument('--mdbcDensityScheme', default=None, choices=('ramped', 'band', 'english2025'),
+                    help="override WeaklyCompressibleSPHConfig.mdbcDensityScheme "
+                         "(case default 'ramped'). 'band' = densityBand.py; "
+                         "'english2025' = english2025.py (Band's value fit + "
+                         "English 2025's analytic-hydrostatic extrapolation). "
+                         "BOUNDARY_DENSITY_PLAN.md §5.")
     args = ap.parse_args(argv)
 
     if args.traceFigure:
@@ -683,7 +699,8 @@ def main(argv=None):
         _initdump(args.nx, args.out, args.cornerOnly); return
     _runOne(args.nx, args.c0Ratio, args.tStar, args.out, args.video,
             args.plotInterval, args.scheme, args.cornerOnly, args.shifting, args.Re,
-            args.plotBackend, args.integrationScheme, args.noPenShift, args.wallBC)
+            args.plotBackend, args.integrationScheme, args.noPenShift, args.wallBC,
+            args.mdbcDensityScheme)
 
 
 if __name__ == '__main__':

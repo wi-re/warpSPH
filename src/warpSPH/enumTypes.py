@@ -223,6 +223,42 @@ class DensityDiffusionScheme(Enum):
     densityOnly = 2
     deltaOnly = 3
     denormalizedOnly = 4
+    # A/B-only: the pre-`790a7c7` sign (`psi_ij = grad_ij - rho_ij`, the
+    # gradient term NOT negated), which DELTASPH_VALIDATION_PLAN.md Part 4
+    # found degenerates the Antuono bi-Laplacian to 2x the plain
+    # Molteni-Colagrossi Laplacian on a smooth field -- second-order instead
+    # of fourth, and actively diffusing the gradients the correct (`deltaSPH`)
+    # sign is designed to leave alone. Kept as a distinct member per Part 4's
+    # own instruction ("do not overload deltaSPH") for exactly this kind of
+    # controlled comparison; never select it as a default.
+    deltaSPH_wrongSign = 5
+    # Molteni & Colagrossi 2009 Eq. (15)-(16) (`literature/molteni2009_*.pdf`,
+    # DELTASPH_VALIDATION_PLAN.md Part 8.15/8.16): the origin DDT, predating
+    # Antuono's renormalized-gradient correction entirely -- no `gradRhoL`/
+    # covariance-matrix dependency at all. Its own psi is a *ratio* term,
+    # `2(v_i/v_j - 1) x_ij/(|x_ij|^2 + eps_h h^2)` with `v = 1/rho`
+    # (specific volume) and `eps_h = 0.01` -- NOT the density-difference form
+    # `densityOnly` already implements (which is the same family but a
+    # different, later restatement; see that member's own docstring
+    # reference and `wp_densityDelta.py`'s module docstring for the
+    # discrepancy this uncovered against both DualSPHysics' C++ (which uses
+    # `rho_i/rho_j`, the *reciprocal* ratio) and Fourtakas et al. 2019's own
+    # citation of this formula (a plain difference, matching `densityOnly`
+    # instead of this member).
+    moltenicolagrossi2009 = 6
+    # Fourtakas et al. 2019 Sec. 3.2 Eq. (15)-(19) (`literature/
+    # fourtakas2019_*.pdf`, DELTASPH_VALIDATION_PLAN.md Part 8.15/8.16):
+    # DualSPHysics' `DDT_DDT2`. Same density-difference structure as
+    # `densityOnly`, but with the *hydrostatic* background density
+    # difference subtracted out analytically (from gravity + the EOS)
+    # before diffusing, rather than via a renormalized SPH gradient
+    # estimate -- restores free-surface consistency the way `deltaSPH`'s
+    # gradient correction does, without ever computing `gradRhoL`. Adapted
+    # here to this codebase's isothermal EOS (the paper's own Tait-EOS
+    # correction collapses to the same linear profile `hydrostaticInit`
+    # already uses at gamma -> 1); needs `rho0`/`c0`/gravity, which none of
+    # the other schemes do.
+    fourtakas2019 = 7
 
 class PressureForceScheme(Enum):
     conservative = 0

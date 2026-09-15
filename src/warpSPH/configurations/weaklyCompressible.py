@@ -126,6 +126,19 @@ class WeaklyCompressibleSPHConfig:
 
     bandwith: float = field(default=10.0, metadata={'description': 'Bandwith for the divergence-free noise sampling module'})
 
+    #: Which mDBC wall-density extrapolation `schemes/deltaSPH.py` calls.
+    #: `'ramped'` (default): `density2025.py`'s `computeMdbcDensity` --
+    #: English et al. 2022 Eq. (12) ghost-node extrapolation, smoothly
+    #: ramped down to a 0th-order Shepard fallback on `numNeighbors`/
+    #: `|det(A_g)|`, clamped to `>= rho0` on the fallback share only.
+    #: `'band'`: `densityBand.py`'s `computeMdbcDensityBand` -- Band et al.
+    #: 2018-style fit directly at the boundary particle with a centroid-
+    #: decoupled, Tikhonov-damped gradient block, UNCLAMPED. Prototyped in
+    #: `scripts/probe_bandMlsPressureBoundary.py` against the "few particle
+    #: large sheet" open item (DELTASPH_VALIDATION_PLAN.md); validate against
+    #: the Marrone dam break before trusting it beyond that.
+    mdbcDensityScheme: str = field(default='ramped', metadata={'description': "mDBC wall-density extrapolation: 'ramped' (default, density2025.py), 'band' (densityBand.py, unclamped Band et al. 2018-style fit), or 'english2025' (english2025.py, Band's value fit + English 2025's analytic-hydrostatic extrapolation, BOUNDARY_DENSITY_PLAN.md §5)"})
+
 def _buildSun2017ShiftProperties() -> ShiftProperties:
     """`buildDefaultShiftProperties()` with Sun et al. 2017 Eq. (7)'s own
     constants -- the `+` of delta+-SPH at the intensity the paper specifies.

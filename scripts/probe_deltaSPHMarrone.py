@@ -137,7 +137,8 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
             scheme: str = 'sun2017DeltaSPH', shifting: str = 'default',
             plotBackend: str = None, cflFactor: float = None,
             integrationScheme: str = None, noPenShift: str = None,
-            wallBC: str = None, pressureForceTerm: str = None):
+            wallBC: str = None, pressureForceTerm: str = None,
+            mdbcDensityScheme: str = None):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -171,7 +172,8 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
           + (f'_{integrationScheme}' if integrationScheme else '')
           + (f'_nopen-{noPenShift}' if noPenShift else '')
           + (f'_wall-{wallBC}' if wallBC else '')
-          + (f'_pft-{pressureForceTerm}' if pressureForceTerm else ''))
+          + (f'_pft-{pressureForceTerm}' if pressureForceTerm else '')
+          + (f'_mdbcRho-{mdbcDensityScheme}' if mdbcDensityScheme else ''))
     runRoot = os.path.join(out, tag + '_run')
 
     # Marrone reports each signal area-integrated over a phi = 90 mm probe disc
@@ -234,6 +236,11 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
         def _cfg2(ctx, _t=PressureForceScheme[pressureForceTerm], _p=_prevCfg2):
             _p(ctx); ctx.schemeConfig.pressureForceTerm = _t
         dambreakCase.configureScheme = _cfg2
+    if mdbcDensityScheme:
+        _prevCfg4 = dambreakCase.configureScheme
+        def _cfg4(ctx, _t=mdbcDensityScheme, _p=_prevCfg4):
+            _p(ctx); ctx.schemeConfig.mdbcDensityScheme = _t
+        dambreakCase.configureScheme = _cfg4
 
     r = run(dambreakCase, **kw)
 
@@ -259,6 +266,7 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
         sun2017Eq7Shift=bool(getattr(r.ctx.schemeConfig.shiftProperties,
                                      'sun2017Eq7Shift', False)),
         pressureForceTerm=str(getattr(r.ctx.schemeConfig, 'pressureForceTerm', '?')),
+        mdbcDensityScheme=str(getattr(r.ctx.schemeConfig, 'mdbcDensityScheme', 'ramped')),
         tReached=tReached, tStarReached=tReached * (G / H) ** 0.5,
         dx=dx, HdxRatio=H / dx, c0=c0, probeInset_dx=probeInset / dx,
         mach=(U_MAX / c0) if c0 else None,
@@ -732,6 +740,21 @@ def main():
                          "always-difference form (P_j - P_i) unconditionally -- "
                          "i.e. the switch's two branches with the switch itself "
                          "removed. DELTASPH_VALIDATION_PLAN.md 5.14-5.17/5.28.")
+    ap.add_argument('--mdbcDensityScheme', default=None, choices=('ramped', 'band', 'english2025'),
+                    help="override WeaklyCompressibleSPHConfig.mdbcDensityScheme "
+                         "(case default 'ramped', density2025.py's English Eq. 12 "
+                         "ghost-node extrapolation + smooth det/neighbour-count "
+                         "ramp). 'band' selects densityBand.py's unclamped Band "
+                         "et al. 2018-style fit at the boundary particle "
+                         "(centroid-decoupled, Tikhonov-damped gradient block) -- "
+                         "prototyped in scripts/probe_bandMlsPressureBoundary.py "
+                         "against the 'few particle large sheet' open item. "
+                         "'english2025' selects english2025.py: Band's value-only "
+                         "fit at the ghost + English et al. 2025's analytic-"
+                         "hydrostatic extrapolation instead of any fitted gradient "
+                         "-- BOUNDARY_DENSITY_PLAN.md §5, validated in a toy "
+                         "problem against the depth/lever-arm amplification "
+                         "failure §3.1 found in 'band'.")
     ap.add_argument('--report', action='store_true',
                     help='(re)build plots + REPORT.md from existing .npz runs')
     args = ap.parse_args()
@@ -743,7 +766,7 @@ def main():
             args.plotInterval, args.kernel, args.freezeDiffusion, args.scheme,
             args.shifting, args.plotBackend, args.cflFactor,
             args.integrationScheme, args.noPenShift, args.wallBC,
-            args.pressureForceTerm)
+            args.pressureForceTerm, args.mdbcDensityScheme)
 
 
 if __name__ == '__main__':

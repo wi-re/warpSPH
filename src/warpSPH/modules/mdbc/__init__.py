@@ -13,10 +13,14 @@ cleanup pass, 09-04; `modules/incompressible/wallPressure.py`'s
 """
 
 from .density2025 import computeMdbcDensity
+from .densityBand import computeMdbcDensityBand
+from .english2025 import computeMdbcDensityEnglish2025
 from .velocity import computeBoundaryVelocities
 from .wp_nopenshift import computeMdbcNoPenShift
 __all__ = [
     "computeMdbcDensity",
+    "computeMdbcDensityBand",
+    "computeMdbcDensityEnglish2025",
     "computeBoundaryVelocities",
     "computeMdbcNoPenShift",
 ]

@@ -602,7 +602,7 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
 #: stretch with "white" wherever the data minimum happens to be, not at rho0
 #: (5.6).
 _DAMBREAK_DENSITY_FIELD = Field(
-    'densities', 'Particle Density', colorMap='RdBu', colorMapKind='diverging',
+    'densities', 'Particle Density', colorMap='managua', colorMapKind='diverging',
     flip=True, midPoint=1.0, scaling='Symmetric', boundary='Visualize',
     plotTitleGap=0.08)
 
@@ -661,7 +661,14 @@ def updatePlot(ctx: RunContext, state, plotter, step: int) -> None:
 
 def extraData(ctx: RunContext, state) -> Dict[str, Any]:
     simSetup = ctx.scratch['simSetup']
-    data = {k: v for k, v in ctx.spec.params.items() if not isinstance(v, (list, dict))}
+    # `None`-default params (`alpha`, `referenceVelocity`, `shifting`, ...) must
+    # be filtered the same way list/dict ones are: `writeInitialData` sets each
+    # surviving value as an HDF5 attribute, and `h5py` has no native type for
+    # `None` (`numpy.array(None)` is `dtype=object`) -- writing one raises
+    # `TypeError: Object dtype dtype('O') has no native HDF5 equivalent` and
+    # aborts `store=True` runs outright, not just this attribute.
+    data = {k: v for k, v in ctx.spec.params.items()
+            if v is not None and not isinstance(v, (list, dict))}
     data.update(
         nx=ctx.spec.nx, L=ctx.spec.L, n_h=ctx.spec.n_h, timeLimit=ctx.spec.tLimit,
         freeSurface=simSetup.freeSurface, dx=simSetup.dx,
@@ -859,7 +866,7 @@ dambreakCase = registerCase(Case(
         kolmogorovForcingAmplitude=1 / 3,
         kolmogorovForcingWavenumber=2,
 
-        markerSize=4,
+        markerSize=None,
         plotWidth=28,
         plotHeight=8,
         plotDensity=False,

@@ -433,6 +433,18 @@ than sit here looking plausible.
 > flow around a cylinder and the backward facing step at Re = 100 to demonstrate
 > the general applicability of this new method.
 
+### `english2025`
+
+- **file:** `english2025_river-flows-past-bridges.pdf`
+- **title:** Smoothed particle hydrodynamics modelling of river flows past bridges
+- **authors:** Aaron English, Renato Vacondio, Susanna Dazzi and José M. Domínguez
+- **venue:** *Computers & Fluids* 303:106870, 2025
+- **doi:** [10.1016/j.compfluid.2025.106870](https://doi.org/10.1016/j.compfluid.2025.106870)
+- **relevance:** An improved mDBC boundary pressure/density procedure (Eqs. 8-11: a corrected-kernel-sum ghost density fit with a Shepard fallback, then pressure cloning via an *analytic* hydrostatic-gravity term -- not a fitted spatial gradient -- extrapolating ghost pressure to the boundary particle) plus a no-slip velocity extension to mDBC. `BOUNDARY_DENSITY_PLAN.md`'s candidate fix for the ghost-to-boundary extrapolation-distance amplification found in that investigation's Band-2018-based prototype.
+- **abstract from:** PDF p.1
+
+> In this work, Smoothed Particle Hydrodynamics (SPH) is assessed for the modelling of flow past bridges. An improved pressure extrapolation method and a no-slip extension for the widely used modified Dynamic Boundary Condition (mDBC) are presented. The no-slip condition is validated with benchmark test cases of Poiseuille flow and flow past a cylinder. The ability to simulate river flows past bridges is assessed by comparing with experimental measurements for two model bridges with multiple discharges. The results are also evaluated against numerical results from 2D Shallow Water Equation (SWE) simulations, which is the leading approach for this kind of flow. While both methods shows good agreement with the experimental data away from the bridge, the SWE assumptions fail in the immediate vicinity of the bridge. In this region, the SPH method demonstrates higher accuracy, captures additional flow features and offers deeper insight into local hydraulic behaviour. A new SPH restart procedure has been developed that enables high-resolution simulations to be initialized using results from lower-resolution simulations. This greatly reduces simulation run times for large and complex transient flow such as rivers. Advanced DualSPHysics boundary generation and pre-processing tools allow for easier creation of boundaries through STL files, and GPU acceleration on the latest hardware allow for faster simulation with larger domains. With all these features, the first full-scale SPH simulation of a real river flow past a bridge is presented, including the riverbed bathymetry and model of Ponte Vecchio on the Arno River (Italy).
+
 ### `ihmsen2010`
 
 - **file:** `ihmsen2010_pcisph-boundary-timestep.pdf`

@@ -25,7 +25,7 @@ def installMdbcDensityToState(case):
     if getattr(case, '_mdbcDensityToState', False):
         return case
 
-    from warpSPH.modules.mdbc import computeMdbcDensity
+    from warpSPH.modules.mdbc import computeMdbcDensity, computeMdbcDensityBand, computeMdbcDensityEnglish2025
     from warpSPH.enumTypes import isIncompressibleScheme
 
     prev = case.postStep
@@ -43,8 +43,22 @@ def installMdbcDensityToState(case):
         except Exception:  # noqa: BLE001 - scheme not in the WC enum -> just try
             pass
         adjacency = getattr(state, 'adjacency', None)
-        particles.densities = computeMdbcDensity(
-            particles, ctx.config, ctx.schemeConfig, adjacency)
+        # Must match whichever extrapolation `deltaSPH_step` actually used
+        # this run (`schemeConfig.mdbcDensityScheme`) -- otherwise this
+        # "honest post-step value" hook would silently overwrite an A/B
+        # scheme's boundary density back to the other scheme's value before
+        # any video/pressure-probe diagnostic reads it, making an A/B test
+        # against this hook meaningless.
+        _scheme = getattr(ctx.schemeConfig, 'mdbcDensityScheme', 'ramped')
+        if _scheme == 'band':
+            particles.densities = computeMdbcDensityBand(
+                particles, ctx.config, ctx.schemeConfig, adjacency)
+        elif _scheme == 'english2025':
+            particles.densities = computeMdbcDensityEnglish2025(
+                particles, ctx.config, ctx.schemeConfig, adjacency)
+        else:
+            particles.densities = computeMdbcDensity(
+                particles, ctx.config, ctx.schemeConfig, adjacency)
 
     case.postStep = _hook
     case._mdbcDensityToState = True

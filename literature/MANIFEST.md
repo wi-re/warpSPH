@@ -76,7 +76,12 @@ were added to the core on 2026-09-03 for
 `PST_ALE_PLAN.md` — `antuono2021` was found already on disk, unclaimed by any
 manifest row, by `scripts/check_literature.py`. `sun2018` was added to the core
 on 2026-09-12, supplied by the user for `DELTASPH_VALIDATION_PLAN.md`'s
-Tensile Instability Control / `PressureForceScheme.Antuono` investigation.)
+Tensile Instability Control / `PressureForceScheme.Antuono` investigation.
+`english2025` was fully synced on 2026-09-15 -- it was already cited
+informally in `DELTASPH_VALIDATION_PLAN.md`'s reference table as a
+secondary application paper, but its actual mDBC pressure/density
+methodology (Eqs. 8-11) had not been read; `BOUNDARY_DENSITY_PLAN.md` found
+it directly relevant, not secondary.)
 
 `venue` is the **published** venue, which for an author's-version or preprint
 copy is not always what that copy's own front page says. Full bibliographic
@@ -112,6 +117,7 @@ detail is in `references.bib`; the abstract of every core row is in
 | — | `koschier2017` | `koschier2017_density-maps.pdf` | SCA 2017 | Implicit (grid-sampled) boundary density instead of boundary particles. |
 | — | `bender2019vmaps` | `bender2019vmaps_volume-maps.pdf` | MIG 2019 | Volume maps -- the successor to density maps; kernel not baked into the map. |
 | — | `bender2020` | `bender2020_implicit-frictional-boundaries.pdf` | IEEE TVCG 26(10) 2020 | Journal extension of volume maps, adding implicit friction at the boundary. |
+| — | `english2025` | `english2025_river-flows-past-bridges.pdf` | Computers & Fluids 303 2025 | mDBC pressure cloning (Eqs. 8-11): ghost density fit + an *analytic* hydrostatic-gravity term extrapolating pressure to the boundary particle, instead of a fitted spatial gradient. `BOUNDARY_DENSITY_PLAN.md`'s candidate fix for the ghost-to-boundary extrapolation-distance amplification found there. |
 
 **Pressure solvers, non-pressure forces, multiphase**
 

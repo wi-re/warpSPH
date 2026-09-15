@@ -35,7 +35,7 @@ from ..modules.deltaSPH import computeDensityDiffusion, computeVelocityDiffusion
 from ..modules.density import computeDensities, computeGradRho, computeGradRhoL
 from ..modules.eos import weaklyCompressibleEOS
 from ..modules.gravity import computeGravity
-from ..modules.mdbc import computeBoundaryVelocities, computeMdbcDensity, computeMdbcNoPenShift
+from ..modules.mdbc import computeBoundaryVelocities, computeMdbcDensity, computeMdbcDensityBand, computeMdbcDensityEnglish2025, computeMdbcNoPenShift
 from ..modules.momentum import computeMomentum
 from ..modules.pressure import computePressureForceSurfaceAware
 from ..modules.surfaceDetection import detectFreeSurface
@@ -103,7 +103,13 @@ def deltaSPH_step(
         # currentState.densities[mask] = rho[mask] / shepDenom[mask]
         # currentState.densities[numNeighbors == 1] = schemeConfig.fluid.restDensity
 
-        currentState.densities = computeMdbcDensity(currentState, config, schemeConfig, adjacency)
+        _mdbcDensityScheme = getattr(schemeConfig, 'mdbcDensityScheme', 'ramped')
+        if _mdbcDensityScheme == 'band':
+            currentState.densities = computeMdbcDensityBand(currentState, config, schemeConfig, adjacency)
+        elif _mdbcDensityScheme == 'english2025':
+            currentState.densities = computeMdbcDensityEnglish2025(currentState, config, schemeConfig, adjacency)
+        else:
+            currentState.densities = computeMdbcDensity(currentState, config, schemeConfig, adjacency)
 
         # print(f'Fluid density stats: min={currentState.densities[currentState.kinds == 0].min().item()}, max={currentState.densities[currentState.kinds == 0].max().item()}, mean={currentState.densities[currentState.kinds == 0].mean().item()}')
         # print(f'Boundary density stats: min={currentState.densities[currentState.kinds == 1].min().item()}, max={currentState.densities[currentState.kinds == 1].max().item()}, mean={currentState.densities[currentState.kinds == 1].mean().item()}')
