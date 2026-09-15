@@ -51,6 +51,15 @@ Reference material now on disk:
 
 # Current state & how to resume  (as of 2026-09-10)
 
+> **Next priority (2026-09-14): the corner/edge "flyers" instability --
+> see "Next up" at the very end of the file (end of Part 8).** Three
+> independent sightings on Marrone 3.4 this session (§8.18 + its roof-crest
+> follow-up), present in the baseline and both new DDT schemes alike --
+> ranked above further DDT-scheme work. Root cause already diagnosed
+> ([[marrone31-truncation-artifact-vs-pst]] -- Antuono switch chatter,
+> confirmed open/unsolved in Barecasco 2013's own §5); three concrete next
+> steps listed at the end of the file, cheapest first.
+
 > **Superseded in part -- read §5.13 (2026-09-12) first.** Marrone 3.4 is now
 > **6/6 over the full record** under `'hybrid'` mDBC ghost placement, and
 > englishWedge's base-corner residual (the "NEXT" item below) is **fixed**
@@ -5748,3 +5757,1088 @@ location on a completely independent run, so it is not a one-off.
 Documented above in the existing Antuono/pressure-artifact investigation
 thread, since it is a direct continuation of that mechanism rather than a
 separate case-specific bug.
+
+# Part 8 -- diffSPH cross-engine comparison (2026-09-14)
+
+diffSPH (`~/dev/diffSPH`, this session's `diffSPHEnv` conda env has both
+codebases importable) is the local reference this repo's DDT/shifting was
+ported from (§5.34), and the user reported it "never had these issues to
+this extent." This part matches `dambreak`'s IC to diffSPH's own
+`15_Dambreak.ipynb`, confirms the match numerically and visually, then
+bisects the two engines' full trajectories down to a specific component.
+Tooling: `scripts/crossengine/` (own README there).
+
+## 8.1 IC match
+
+`--nx 64 --L 2.0 --n_h 4.0 --kernel Wendland4 --integrationScheme
+symplecticEuler --supportMode SuperSymmetric --band 7 --fillRatio 0.5
+--fluidWidth 5/12 --gravityMagnitude 10` reproduces diffSPH's notebook IC to
+the last displayed digit: dx=0.03125, targetNeighbors=50.265482,
+c0=34.542489334430705, 1696 fluid particles, uniform rho=1. `supportMode
+SuperSymmetric` (diffSPH's hardcoded neighbourhood mode, vs this case's own
+default `KernelMeanSymmetric`) and leaving `alignBoundaryLattice` at its
+default `True` (diffSPH has no equivalent, but disabling it *undershoots*
+the fluid count at 1674 instead of landing exactly on 1696) were the two
+non-obvious pieces. Boundary/ghost counts differ (3296+3296 vs 2856+2856) --
+each engine samples its own mDBC wall band independently; doesn't touch the
+fluid IC.
+
+Found and fixed in the same pass: `dambreak.py`'s `extraData()` filtered
+list/dict-valued params before writing HDF5 attributes but not `None`-valued
+ones (several params default to `None`), crashing every `store=True` run
+with `TypeError: Object dtype dtype('O') has no native HDF5 equivalent`.
+
+## 8.2 Full-trajectory comparison, and the first band gap
+
+Both engines' own complete runs (t=0-4, matched IC) are stable and visually
+near-identical at matched times (collapse -> wall jet -> plunge -> slosh),
+diverging in exact particle positions only after first impact, as expected
+for chaotic SPH. But the aggregate bands differ more than chaos alone would
+explain:
+
+| | diffSPH (own run) | warpSPH (own run) |
+|---|---|---|
+| peak maxVelocity | 9.56 | 12.39 |
+| peak kineticEnergy | 3.07 | 3.38 |
+| density range | [0.920, 1.140] | **[0.767, 1.291]** |
+
+warpSPH's density excursions run about twice as deep. This is the thread
+the rest of Part 8 chases.
+
+## 8.3 Per-step force agreement is tight -- the gap is not in the raw physics term at a point, or not there alone
+
+`compare_step_force.py`: pull a real mid-trajectory snapshot (t~0.1s, real
+non-zero velocities/densities, not the trivial uniform-density t=0 IC where
+every force is exactly zero by construction) from a completed warpSPH run,
+strip both sides to fluid-only symmetrically (removes boundary-bookkeeping
+asymmetry, not a fairness compromise since both sides lose the same wall
+neighbours), call each engine's raw force function
+(`deltaSPH_step`/`deltaPlusSPHScheme`) once on the identical array:
+
+- mean accel: warpSPH `(0, -10.0003)`, diffSPH `(0, -10.0003)`
+- per-particle `|dvdt_w - dvdt_d|`: mean 0.015 (0.15% relative), median
+  0.0035 (0.05% relative) against O(1-100) accelerations
+- `drhodt` agreement: mean |diff| 0.0069 against a +-1.3-1.6 range
+- disagreement concentrates 6x higher at the (now wall-less) patch edges
+  than in the interior -- expected, each engine's own free-surface handling
+  differs once the real wall neighbours are gone
+
+Sub-percent agreement at a point does not rule out a small systematic bias
+compounding over ~8000 steps; §8.5/8.6 pin the actual mechanism down to the
+shift step, not the raw force term, but see §8.7 for why a real, separate,
+physics-side residual likely remains regardless.
+
+## 8.4 diffSPH's full physics+shift, run on warpSPH's own IC -- rules out geometry/sampling
+
+`run_diffsph_physics_on_warpsph_ic.py`: build warpSPH's matched IC (fluid +
+warpSPH's *own* boundary/ghost mDBC complement -- 3296+3296, not diffSPH's
+2856+2856), translate to a diffSPH `WeaklyCompressibleState` (warpSPH's
+`ghostIndices`/`ghostOffsets` reused verbatim -- same per-particle
+convention in both codebases, confirmed by reading both `modules/mdbc/*.py`
+and diffSPH's `boundary.py`), run diffSPH's own symplecticEuler integrator
++ shift to t=4, measure bands via warpSPH's own `dambreakCase.diagnostics`
+(the same measurement code the pure-warpSPH bands above came from).
+
+| | pure warpSPH | pure diffSPH | diffSPH physics+shift on warpSPH's IC |
+|---|---|---|---|
+| maxDensity | 1.291 | 1.140 | **1.152** |
+| minDensity | 0.767 | 0.920 | **0.921** |
+| maxVelocity | 12.39 | 9.56 | 8.58 |
+
+Diffusing physics+shift on warpSPH's own (denser, differently-placed)
+walls/ghosts reproduces diffSPH's *tight* bands almost exactly. **Geometry/
+sampling is not the cause.** Along the way this also uncovered a real,
+reproducible upstream diffSPH bug: `math.py::pinv2x2` masks the assignment
+with `|o1| > 1e-5` but reads the reciprocal with `|o1| > 1e-7`, shape-
+mismatching whenever a covariance eigenvalue lands between them --
+diffSPH's own sparser sampling apparently never lands there; warpSPH's
+denser mDBC complement does, ~1200 steps into an unrelated run. Worked
+around in-process (single consistent threshold); diffSPH's repo itself
+untouched.
+
+## 8.5 Bisecting further: physics vs. shift, via monkey-patched hybrids
+
+Technique: run warpSPH's real `caseMain`/runner/integrator/diagnostics/
+export pipeline completely unmodified, and monkey-patch exactly one bound
+function name to redirect to a diffSPH-backed implementation (translating
+state in, translating the result back to warpSPH's own update/tensor shape
+on the way out). The patch target must be the *importing* module's
+namespace, not the defining one -- `warpSPH.schemes.builder.deltaSPH_step`
+(bound via `from .deltaSPH import deltaSPH_step` at builder.py's own import
+time), not `warpSPH.schemes.deltaSPH.deltaSPH_step`.
+
+| physics | shift | maxDensity | minDensity | maxVelocity | KE max | stable? |
+|---|---|---|---|---|---|---|
+| warpSPH | warpSPH | 1.291 | 0.767 | 12.39 | 3.38 | yes (pure warpSPH) |
+| diffSPH | diffSPH | 1.152 | 0.921 | 8.58 | 2.88 | yes (== 8.4) |
+| diffSPH | warpSPH | -- | -- | -- | -- | **diverges catastrophically, t~0.12** |
+| warpSPH | diffSPH | 1.171 | 0.839 | 10.09 | 3.41 | yes |
+
+The `diffSPH physics + warpSPH shift` divergence (maxVelocity through
+597,000 to inf within ~400 more integrator stages, dt collapsing to the
+floor and the run stalling in simulated time -- killed rather than let it
+spin) is itself informative: diffSPH's shift is stable paired with *either*
+force computation, but warpSPH's shift is only stable paired with its own
+force term. Not yet root-caused (candidate: warpSPH's shift step may depend
+on free-surface/covariance state that is normally a side effect of
+warpSPH's own force step and that the diffSPH-sourced force step never
+populates on the warpSPH-shaped state -- unconfirmed).
+
+`warpSPH physics + diffSPH shift` is the clean, actionable result: stable,
+and pulls the bands most of the way toward diffSPH's tight ones just by
+swapping the shift term. **Points at warpSPH's own shift/PST implementation,
+not the raw pressure/viscosity/DDT force terms, as the primary driver of
+the wider bands.**
+
+## 8.6 The shift vector itself: direction agrees, magnitude is ~4x off
+
+`compare_shift_vector.py`, same mid-trajectory snapshot as §8.3, but for the
+*raw* per-iteration shift computation each engine's `solveShifting` wrapper
+calls once (`computeDeltaShift`/`computeDeltaShifting` -- a self-contained
+kernel-gradient sum needing only positions/masses/supports/densities/
+velocities/soundspeeds + a neighbour list, no covariance/surface state):
+
+- direction: cosine similarity mean 0.951, median 0.998, p05 0.725 -- the
+  two engines agree on *where* to shift almost every particle
+- magnitude: warpSPH's raw shift is **~1/4 of diffSPH's** (ratio 0.250)
+
+This matches `modules/shifting/delta.py`'s own docstring, which already
+flags the *historical* (non-Eq7) scaling this case defaults to as ~0.131x
+Sun et al. 2017 Eq. (7) itself (measured by `scripts/probe_
+deltaPlusShiftMagnitude.py`) -- a known, previously-unconnected finding
+that directly explains this section's result.
+
+**Sign-convention trap, hit and fixed while building this comparison**: the
+first pass gave cosine ~ -0.95 (opposite directions!) because diffSPH's own
+caller does `update = -computeDeltaShifting(...)` then `positions -=
+update` -- the double negation means the net effect on positions is
+`+raw`, the same "added directly" convention warpSPH's own `shift`/`update`
+uses. Compare `raw_d` un-negated, not `-raw_d`.
+
+## 8.7 Narrowest swap: only the raw shift-vector computation, everything else (projection/thresholds/iteration) stays warpSPH's own
+
+`run_hybrid_shiftcore_only_swap.py`: monkey-patches only
+`warpSPH.modules.shifting.wrapper.computeDeltaShift` (called once per shift
+iteration at `wrapper.py:216`) with diffSPH's `computeDeltaShifting`.
+Everything around it in `solveShifting` -- free-surface detection, the
+dot/mat/surfaceNormal projection schemes, the Sun 2019 Eq. (14)
+velocity-fraction cap, the per-component `shiftingThreshold` clamp, the
+outer iteration loop -- stays warpSPH's own, untouched.
+
+| swap | maxDensity | minDensity | maxVelocity | KE max |
+|---|---|---|---|---|
+| pure warpSPH | 1.291 | 0.767 | 12.39 | 3.38 |
+| raw shift only (this run) | **1.277** | 0.854 | 10.76 | 3.42 |
+| whole shift step (§8.5) | 1.171 | 0.839 | 10.09 | 3.41 |
+| pure diffSPH | 1.152 | 0.921 | 8.58 | 2.88 |
+
+`minDensity` moves about as much either way; `maxDensity` barely moves with
+the raw term alone (1.291 -> 1.277) despite the input being ~4x larger, but
+moves substantially with the whole shift step swapped (-> 1.171). Read:
+**warpSPH's own `shiftingThreshold`/`maxShiftVelocityFraction` clamps are
+plausibly sized for warpSPH's own (weaker) raw shift and eat most of the
+extra magnitude from diffSPH's stronger raw term before it can act on the
+clustering side** -- the void/spray side (`minDensity`) rarely hits those
+caps, so it improves either way; the clustering side needs diffSPH's whole
+projection/capping logic, not just a bigger raw input. So the gap has (at
+least) two separable contributors: raw shift scaling, and the
+projection/threshold machinery around it.
+
+## 8.8 Open: `warpSPH physics + diffSPH shift` still has a real residual gap vs. pure diffSPH
+
+Even with the *whole* shift step swapped for diffSPH's (§8.5's best row),
+`minDensity` (0.839) is still well short of diffSPH's own 0.921 -- shift
+alone does not close the gap. Since §8.3's single-point force comparison
+showed sub-percent agreement, either (a) that small per-point agreement
+compounds into a meaningful bias over ~8000 steps, (b) the disagreement
+concentrates somewhere §8.3's aggregate `dvdt`/`drhodt` view doesn't
+surface -- individual force *terms* (pressure, artificial viscosity, DDT,
+mDBC boundary velocity/density) could partially cancel in the sum while
+each differing on its own, or (c) something in warpSPH's own force step
+that isn't captured by a single-snapshot comparison at all (a per-step
+bias that only shows up integrated, e.g. in the RK-vs-symplectic handling,
+though this thread uses symplecticEuler throughout so that specific
+variable is controlled out). **Not yet investigated**: rerun §8.3's
+comparison decomposed by individual force term rather than only the
+summed `dvdt`, and/or at multiple snapshot times rather than one, to see
+whether a term-level or time-dependent bias is hiding inside the tight
+aggregate agreement.
+
+## 8.9 §8.8 answered: pressure and continuity match to ~1e-6; the two DISSIPATIVE terms (artificial viscosity, density-diffusion/DDT) are where the physics-side gap actually lives, and it's not a coefficient mismatch
+
+`compare_step_terms.py`: spy-wraps each engine's own imported term
+functions (`warpSPH.schemes.deltaSPH.compute{PressureForceSurfaceAware,
+VelocityDiffusion,DensityDiffusion,Momentum,Gravity}` /
+`diffSPH.schemes.deltaSPH.compute{PressureForce,
+Viscosity_deltaSPH_inviscid,DensityDeltaTerm,Momentum,Gravity}` -- patch
+target is each *importing* module's own namespace, same gotcha as §8.5) so
+the real `deltaSPH_step`/`deltaPlusSPHScheme` runs completely unmodified;
+only the intermediate per-term tensors are additionally captured. Run at
+t~0.1/0.5/1.0 (fluid-only, same snapshot source as §8.3):
+
+| term | t=0.1 ratio (w/d) | t=0.5 ratio | t=1.0 ratio |
+|---|---|---|---|
+| pressure | 1.0000 (diff ~3e-6) | 1.0000 | 1.0000 (diff ~2e-5) |
+| continuity (momentum) | 1.0000 (diff ~3e-8) | 1.0000 | 1.0000 (diff ~1e-7) |
+| gravity | 1.0000 (exact) | 1.0000 | 1.0000 (exact) |
+| **artificial viscosity** | 0.737 | 0.722 | **0.300** |
+| **density-diffusion (DDT)** | 0.252 | 0.708 | 0.581 |
+
+Pressure and continuity are essentially bit-exact at every snapshot --
+§8.3's tight aggregate `dvdt` agreement was pressure dominating the sum
+(pressure `w_mean` is 50-150x the dissipative terms' magnitude at these
+snapshots), masking real disagreement underneath. The two *dissipative*
+terms genuinely diverge, and the artificial-viscosity mismatch gets much
+worse as the flow gets more violent (0.74x -> 0.30x from t=0.1 to t=1.0,
+past the first wall impact) -- consistent with a formulation difference
+that is itself velocity-gradient-dependent, not a fixed scale factor.
+
+**Ruled out as the explanation**: coefficient mismatch. Read both
+implementations directly -- diffSPH's `computeDensityDeltaTerm` defaults
+`delta=0.1` (`getSetConfig(config,'diffusion','delta',0.1)`), matching
+warpSPH's own default exactly (the run banner already reported "density
+diffusion deltaSPH delta 0.1"); diffSPH's `computeViscosity_
+deltaSPH_inviscid` hardcodes `alpha=0.01` absent an override, matching
+warpSPH's own default too ("viscosity artificial | alpha 0.01"). Both
+comparisons here are fluid-only (no boundary particles present in either
+engine's calculation), so [[wcsph-deltasph-scheme-concerns]]'s separate
+open item (warpSPH's DDT running fluid<->boundary AllToAll where
+DualSPHysics disables it for boundary neighbours) is not in play here --
+this is a fluid-fluid formula difference. **Not yet read line-by-line**:
+warpSPH's `modules/deltaSPH/{velocityDissipation,densityDelta}.py`(?) or
+wherever `computeVelocityDiffusion`/`computeDensityDiffusion` actually live,
+against diffSPH's `compute_Pi`/`computeDensityDeltaTerm_` (the latter takes
+a `scheme`/`xi` this session never inspected) -- kernel-gradient convention,
+h_ij averaging, or a limiter/switch are the likely candidates given the
+velocity-gradient-dependent growth.
+
+## 8.10 2x2 term-swap ablation: DDT is the real lever, viscosity is a trap
+
+`run_hybrid_term_swap.py` (`--swap none|viscosity|ddt|both`): the same
+monkey-patch technique as §8.5, applied to §8.9's two divergent terms
+specifically -- warpSPH's real `caseMain` pipeline, unmodified, with
+`computeVelocityDiffusion`/`computeDensityDiffusion` (or both) redirected to
+diffSPH's `computeViscosity_deltaSPH_inviscid`/`computeDensityDeltaTerm` on a
+per-call state translation (full IC, warpSPH's own boundary/ghost complement
++ ghostIndices/ghostOffsets, as in §8.4). `--swap none` is a baked-in
+integrity check: with no patches applied it reproduced the original
+pure-warpSPH numbers exactly (`maxVelocity_max=12.388`, `minDensity_
+min=0.7667`, `maxDensity_max=1.2905`, bit-for-bit against the run this
+whole Part 8 started from).
+
+Two prerequisites diffSPH's own pipeline needs before `computeGradRhoL`/
+`computeDensityDeltaTerm` that the earlier per-snapshot comparisons (§8.9)
+didn't need to supply, found via a 200-step pilot before committing to full
+runs: `particles.numNeighbors` (`ValueError: Particles must Number of
+Neighbors computed`) and the covariance/renormalization matrices from
+`computeCovarianceMatrices` (`ValueError: Gradient renormalization matrix
+is None`) -- both set from scratch inside the DDT wrapper, mirroring
+`deltaPlusSPHScheme`'s own step order.
+
+| viscosity | DDT | maxDensity | minDensity | maxVelocity | KE max | KE final |
+|---|---|---|---|---|---|---|
+| warpSPH | warpSPH (baseline) | 1.291 | 0.767 | 12.39 | 3.38 | 0.429 |
+| diffSPH | warpSPH | 1.299 | 0.793 | 12.19 | **3.88** | **0.848** |
+| warpSPH | **diffSPH** | **1.187** | **0.894** | 10.42 | 3.39 | 0.375 |
+| diffSPH | diffSPH | 1.161 | 0.896 | 10.39 | 3.81 | 0.664 |
+| *(pure diffSPH, reference)* | | *1.140* | *0.920* | *9.56* | *3.07* | |
+
+All four stable -- not a divergence question at this resolution, an accuracy
+one. **DDT alone closes most of the density-band gap** (maxDensity ~73% of
+the way to diffSPH's value, minDensity ~83%) **with no energy-dissipation
+cost** (KE final slightly *lower* than baseline, i.e. marginally more
+dissipation, not less). **Viscosity alone does almost nothing for the
+density bands** (1.291 -> 1.299, flat) **but roughly doubles retained
+kinetic energy** (0.429 -> 0.848) -- despite diffSPH's viscosity term being
+the larger one at some of §8.9's single-point snapshots, substituting it
+wholesale makes the full trajectory dissipate *less* overall, not more.
+Combining both is not simply additive: `both` tightens density slightly
+past DDT-alone (1.161 vs 1.187) but drags KE most of the way back toward
+the viscosity-only run's level (0.664 vs 0.375) -- trading a little more
+density accuracy for materially worse energy behaviour. **DDT-only is the
+better standalone candidate of the two.** None of the four fully reaches
+diffSPH's own numbers -- expected, since the shift/PST magnitude gap
+(§8.6/8.7) is untouched in all four (every one of these runs still uses
+warpSPH's own shift).
+
+## 8.11 Part 4's psi sign, revisited: the documented "wrong" sign alone reproduces §8.10's DDT-swap improvement, same codebase, one line
+
+Part 4 (2026-09-05, well before this Part 8 thread existed) already fully
+diagnosed a related fact: the pre-`790a7c7` psi sign (`psi_ij = grad_ij -
+rho_ij`, gradient term NOT negated) degenerates the Antuono-corrected
+bi-Laplacian to **2x the plain Molteni-Colagrossi Laplacian on a smooth
+field -- second-order instead of fourth, over-dissipative**. That section's
+own conclusion was to keep the fixed (correct, fourth-order) sign and look
+elsewhere for the Marrone 3.1 blow-up (which it did -- Part 1's other
+deviations). It also left an explicit instruction for exactly this
+situation: *"If a genuinely stronger-diffusion operator is ever wanted for
+a specific case, add it as a distinct `DensityDiffusionScheme` member --
+do not overload `deltaSPH`."*
+
+Followed that instruction: added `DensityDiffusionScheme.deltaSPH_wrongSign`
+(`enumTypes.py`) and its branch in `modules/deltaSPH/wp_densityDelta.py`
+(`psi_ij = grad_ij - rho_ij`, everything else identical to the `deltaSPH`
+branch it sits next to) -- the existing `deltaSPH` branch and
+`tests/test_deltaSPHDiffusion.py`'s sign-pinning tests are untouched
+(reverified green, `warp` conda env). Selected via `dambreakCase.
+configureScheme` wrapped to set `schemeConfig.diffusionParams.
+densityDiffusionTerm = DensityDiffusionScheme.deltaSPH_wrongSign`
+post-hoc -- no case/CLI plumbing needed. `scripts/crossengine/
+run_wrongsign_ddt.py`, matched-IC dambreak, t=0-4, pure warpSPH:
+
+| scheme | maxDensity | minDensity | maxVelocity | KE max | KE final |
+|---|---|---|---|---|---|
+| warpSPH, correct sign (baseline) | 1.291 | 0.767 | 12.39 | 3.38 | 0.429 |
+| **warpSPH, `deltaSPH_wrongSign`** | **1.162** | **0.878** | **11.49** | 3.34 | 0.490 |
+| diffSPH DDT swap (§8.10, cross-engine) | 1.187 | 0.894 | 10.42 | 3.39 | 0.375 |
+| *pure diffSPH (reference)* | *1.140* | *0.920* | *9.56* | *3.07* | -- |
+
+**The one-line, same-codebase sign flip lands within noise of §8.10's full
+cross-engine DDT-term swap** -- on `maxDensity` it's actually closer to
+diffSPH's own number (1.162 vs the swap's 1.187, against a 1.140 target),
+on `minDensity` slightly behind (0.878 vs 0.894, against 0.920), and
+crucially **without** the viscosity-swap's energy-retention cost (KE max
+3.34, flat against baseline's 3.38; KE final actually a touch *higher* than
+baseline, not lower, unlike the diffSPH-DDT-swap's 0.375 -- a real but
+minor difference, not the doubling viscosity showed). Stable, no
+divergence, 8001/8001 steps.
+
+**Reading**: this does not prove diffSPH's own DDT implementation has the
+identical historical sign bug -- diffSPH's own source was not read
+line-by-line for this (that remains open, see below) -- but it does show
+that whatever diffSPH's DDT is actually doing, its net effect on this case
+is well-approximated by "second-order, ~2x the plain Laplacian" rather than
+requiring anything beyond that. Given Part 4's own math derivation of why
+the wrong sign produces exactly this 2x-Laplacian degeneracy, this is a
+strong, cheap, mechanistic explanation for most of §8.9/§8.10's DDT
+mismatch -- worth checking directly (does diffSPH's `computeDensityDeltaTerm_`
+actually carry the same relative sign, or a different formula that happens
+to land in the same place) before assuming it's coincidence.
+
+**Not a recommended default change.** `deltaSPH_wrongSign` is an A/B-only
+member, same as Part 4 left it -- Part 4's own math (both source papers)
+says the negated-gradient sign is the mathematically correct one; this
+section is a diagnostic finding about where the *empirical* dambreak-band
+gap comes from, not a case for reverting the fix.
+
+## 8.12 `deltaSPH_wrongSign` on Marrone 2011 §3.1 itself, full spec and full record -- 8/9 acceptance checks pass
+
+Added `--densityDiffusionTerm` to `scripts/probe_deltaSPHMarrone.py`
+(mirrors the existing `--pressureForceTerm` override pattern exactly --
+wraps `dambreakCase.configureScheme`) so §8.11's finding could be checked
+against the actual Marrone case this whole investigation traces back to
+(§5.17/7.5's open Antuono-switch/truncation instability), not just the
+diffSPH-matched dambreak. Full spec, full record: `--nx 67 --c0Ratio 40
+--tLimit 1.90` (H/Δx=40.2, c0/√(gH)=40, default `sun2017DeltaSPH` scheme
+-- frozen diffusion, Sun Eq.(7) shift), `--densityDiffusionTerm
+deltaSPH_wrongSign`, `--video`. 19551 steps, t* reached 7.68 (the full
+record), wall time 911s.
+
+**Stable throughout, zero wall penetration, 8/9 of Part 5.1's acceptance
+checks pass** (`scripts/out_deltaSPHMarrone/sun2017DeltaSPH_nx67_c40_
+ddt-deltaSPH_wrongSign.npz` + `REPORT.md`, regenerable with `--report`):
+P1 arrival/plateau/first-impact-overshoot all pass, P2 quiescent-before/
+raw-spike/quiescent-after all pass, bulk density band [0.996,1.005]
+5-95pct (whole-run extremes [0.923,1.026]) well inside [0.93,1.07]. The
+one failure -- **P2 run-up peak reads 0.05 at t*=5.18, below the
+0.16-0.45 acceptance band** (Buchner ~0.28) -- is the predictable
+signature of the extra dissipation: a small transient bump damped below
+threshold, not a new failure mode.
+
+**Caveat worth stating plainly, not burying**: Part 4's own original
+warning was that the old sign "worked" on the ORIGINAL Marrone 3.1
+instability (the mDBC threshold regression, long since fixed a different
+way, §5.1 status) "only because...extra numerical density diffusion...
+papered over the other problems." The *separately* open Antuono-switch
+truncation artifact (§5.17-5.37, confirmed unsolved even in the source
+paper itself, §5.37) is exactly the kind of problem extra diffusion tends
+to paper over. This run passing 8/9 checks does not distinguish "the DDT
+sign genuinely explains the dambreak gap" from "extra dissipation is once
+again quietly smoothing over the open Antuono-switch issue on this
+specific case" -- both are consistent with what was measured here.
+Comparing this run's per-step `accelMag*`/Antuono-mask-flip diagnostics
+(§5.18/§5.35's instrumentation, already on every run) against a
+same-config correct-sign run would distinguish the two; not yet done.
+
+## 8.13 Fine-tooth-comb audit of `gradRhoL`/covariance/pseudo-inverse for a silent sign flip -- none found, verified against De Courcy et al. 2024 Eq. (34)
+
+Per the user's direct request, given §8.12's video showed the wrong-sign
+run's near-surface spurious plumes fully gone: before accepting "the DDT
+sign explains it," audit the machinery `psi_ij`'s `grad_ij` term actually
+depends on -- `gradRhoL` (`modules/density/gradRhoL.py`), the covariance
+matrix it renormalizes (`warpSPHCore/coreOperations/wp_covariance.py`),
+and the pseudo-inverse that turns covariance into the renormalization
+matrix `L` (`warpSPHCore/pinv/wp_pinv2x2.py`) -- for a sign bug Part 4
+never checked (Part 4 only verified the `psi_ij` *combination* formula,
+implicitly trusting `gradRhoL` itself was correct).
+
+**Traced the full chain, term by term:**
+
+1. `wp_covariance.py`'s kernel computes `fij = -computeDistanceVec(x_i,
+   x_j)`; `computeDistanceVec(x,y)` is confirmed `x - y` (its own inline
+   comment), so `fij = x_j - x_i`, and the accumulated matrix is `C_i =
+   Σ_j V_j (x_j-x_i) ⊗ ∇W_ij`. **The function's own docstring claims the
+   opposite** -- `C_i = Σ_j V_j (x_i-x_j) ⊗ ∇W_ij` -- a real docstring/code
+   mismatch, but (checked below) the CODE is the version that is actually
+   correct; the docstring is stale.
+2. `wp_pinv2x2.py`'s well-conditioned branch: closed-form symmetric 2x2
+   inverse `L = (1/det)[[d,-b],[-b,a]]`, `det=ad-b²` -- the textbook
+   formula, verified coefficient-by-coefficient. Its rank-deficient
+   fallback: standard closed-form symmetric eigendecomposition
+   (`theta=0.5*atan2(2b,a-d)`, `lam1` = the Rayleigh-quotient value at
+   eigenvector `v1=(cosθ,sinθ)`, `lam2=trace-lam1`), reconstructed as
+   `L = Σ eigVal_inv * outer(eigVec,eigVec)` -- also verified term-by-term,
+   standard.
+3. `wp_gradient.py`'s `GradientScheme.Difference` + `useGradientRenormalization`
+   path applies `L` to `∇W_ij` (`kernelGradient = matmul(L, kernelGradient)`)
+   *before* weighting by the scalar `(f_j-f_i)*V_j`, i.e. computes exactly
+   `L_i · Σ_j V_j (f_j-f_i) ∇W_ij`.
+4. Internal consistency: since `∇W_ij ∥ (x_j-x_i)` for any isotropic kernel
+   (no renormalization applied to the covariance computation itself), each
+   pairwise covariance term is proportional to `(x_j-x_i)⊗(x_j-x_i)`, which
+   is symmetric -- so `C_i` is symmetric by construction, which is what
+   makes `L_i · Σ_j V_j(f_j-f_i)∇W_ij` exactly reproduce a linear field's
+   true gradient (the property `tests/test_deltaSPHDiffusion.py` pins).
+
+**Checked against the primary literature source, not just internal
+self-consistency**, per the user's follow-up request -- `gradRhoL.py`'s own
+docstring names De Courcy et al. 2024 Eq. (34) as the exact formula being
+implemented for the pressure-gradient case (the identical operator, just
+applied to density here); pulled the real equation via `pdftotext` on
+`literature/decourcy2024_incompressible-delta-sph-artificial-compressibility.pdf`:
+
+  `⟨∇p⟩_i^L = -Σ_j (p_i-p_j) L_i ∇_i W_ij V_j`,
+  `L_i = [-Σ_j (x_i-x_j) ⊗ ∇_i W_ij V_j]^{-1} = [Σ_j (x_j-x_i) ⊗ ∇_i W_ij V_j]^{-1}`
+
+**Matches the code exactly, sign by sign**: `-(p_i-p_j) = (p_j-p_i)`, the
+same `Difference`-scheme sign the code uses; `L_i`'s own definition is
+`[Σ_j (x_j-x_i)⊗∇W_ij V_j]^{-1}`, exactly `C_i^{-1}` with `C_i` as
+*actually computed* by the code (not as the stale docstring claims).
+Marrone 2011's own citation for the renormalized gradient (its ref [25],
+Randles & Libersky 1996) is not in `literature/`, so De Courcy 2024 is the
+closest primary source actually on hand that spells the matrix out
+explicitly rather than only citing it -- Marrone 2011 and Sun 2017 both
+just write `⟨∇ρ⟩^L` and cite elsewhere without restating the formula.
+
+**Conclusion: no sign bug found anywhere in this chain**, checked against
+both internal consistency and an external primary source. Combined with
+Part 4's independent verification of the `psi_ij` combination itself, the
+*entire* `deltaSPH` (correct-sign) density-diffusion operator -- covariance,
+pseudo-inverse, renormalized gradient, and the psi combination -- is now
+verified correct end to end. This makes §8.11/8.12's "wrong sign helps"
+result LESS likely to be exposing a bug in the correct-sign code, and
+correspondingly MORE likely to be another instance of the already-
+documented pattern: extra dissipation masking the separately-open
+Barecasco/Antuono-switch chatter (§8.12's own caveat, `marrone31-
+truncation-artifact-vs-pst` memory) -- the DDT operator itself checks out
+clean; the surface-classification feeding the pressure switch is the piece
+already known, independently, to be unstable (confirmed against the
+Barecasco 2013 paper's own §5, §5.37).
+
+**One loose end, not chased further this session**: `wp_covariance.py`'s
+stale docstring should be fixed (say `(x_j-x_i)`, matching the code and De
+Courcy 2024) so a future reader auditing this file doesn't get misled the
+way this section's first pass briefly was. **Fixed** while at it (comment
+only, zero behaviour change).
+
+## 8.14 Direct same-config comparison: correct sign, fresh run -- 7/9 checks, and this case's known chaos shows up immediately
+
+Ran the exact §8.12 config with NO `--densityDiffusionTerm` override (the
+case default, correct sign) for a direct side-by-side against §8.12's
+wrong-sign run -- same nx=67, c0Ratio=40, full t*=7.68 record, video.
+`scripts/out_deltaSPHMarrone/sun2017DeltaSPH_nx67_c40.npz` + REPORT.md.
+
+| | correct sign (this run) | `deltaSPH_wrongSign` (§8.12) |
+|---|---|---|
+| checks passing | 7/9 | 8/9 |
+| failing | P1 plateau, P2 raw spike | P2 run-up peak |
+| P1 plateau level | **0.84** (want 0.38-0.65, Buchner ~0.55) | 0.39 |
+| density range (whole run) | [0.944, 1.065] | [0.923, 1.026] |
+| maxVelocity max | 8.04 | 9.38 |
+| diverged / wall penetration | no / 0.00 dx | no / 0.00 dx |
+
+P1 plateau reading 0.84 -- nearly double Buchner and above the entire
+acceptance band -- is the quantitative signature of the persistent
+spurious near-wall pressure activity the video shows. **But**: this exact
+scheme+config's own earlier recorded run (§5.1 status/this file's own
+Notes section, an older session) landed at P1 plateau **0.46**, inside the
+band. Two nominally-identical correct-sign runs of this case landing at
+0.46 and 0.84 is itself direct, immediate confirmation of what the whole
+§5.31-§5.37 Antuono/Barecasco thread already established: **this case is
+genuinely chaotic run-to-run** (consistent with the Barecasco cone-test
+chattering being sensitive to float-level particle-order/disorder
+differences, not a deterministic function of the config alone). This cuts
+both ways for interpreting §8.12: it means a single wrong-sign run passing
+8/9 is not yet proof the wrong sign *reliably* avoids the artifact (one
+clean run against a case known to sometimes also land clean on the correct
+sign) -- multiple seeds/repeats of both would be needed to say that with
+confidence, not attempted this session (each full run costs ~15 min).
+
+## 8.15 Does this formulation agree with DualSPHysics? No -- and the mismatch is structural, not a sign convention
+
+Read `DualSPHysics/src/source/JSphCpu.cpp`'s actual `InteractionForcesFluid`
+DDT block directly (`~/dev/DualSPHysics` checked out locally, already the
+source for §5.32/5.33's pressure-force/shifting comparisons; GPU kernel
+`JSphGpu_ker.cu` spot-checked, mirrors the CPU code exactly, same two
+branches). Three findings, each sharper than "which sign":
+
+1. **`TDensity` (DDT selector) defaults to `0: None`** (`JSph.h:172`).
+   DualSPHysics does not run a density diffusion term unless a case
+   explicitly turns one on.
+2. **When enabled, neither of its two options is the Marrone 2011 Eq. (6) /
+   Antuono bi-Laplacian this codebase (and diffSPH) implement.** Verbatim
+   from `JSphCpu.cpp:922-940`:
+
+   - **`DDT_DDT` (Molteni & Colagrossi 2009)**:
+     ```
+     visc_densi = DDTkh*cbar*(rho_i/rho_j - 1) / (r_ij^2 + eta^2)
+     delta_ij   = visc_densi * (x_ij . gradW_ij) * m_j
+     drho_i/dt += delta_ij
+     ```
+     A density-RATIO-weighted Brookshaw-style SPH Laplacian. **No gradient
+     term, no renormalization matrix, no covariance matrix, no
+     pseudo-inverse anywhere in it.** This is structurally *exactly* what
+     Part 4's own docstring already named as what the wrong sign
+     degenerates the correct 4th-order operator INTO: "2x the uncorrected
+     Molteni-Colagrossi Laplacian." DualSPHysics's simplest DDT option
+     *is*, by name and by formula, the uncorrected Molteni-Colagrossi
+     Laplacian -- not a bug-landing-place, a real, still-offered,
+     literature-named scheme.
+   - **`DDT_DDT2`/`DDT_DDT2Full` (Fourtakas et al. 2019)**:
+     ```
+     drho_hydrostatic = rho0*(1 + DDTgz*z_ij)^(1/gamma) - rho0   (analytic)
+     visc_densi = DDTkh*cbar*((rho_j-rho_i) - drho_hydrostatic) / (r_ij^2+eta^2)
+     delta_ij   = visc_densi * (x_ij . gradW_ij) * m_j / rho_j
+     drho_i/dt -= delta_ij
+     ```
+     Cancels the *hydrostatic* background gradient with a closed-form
+     analytic term (from the known gravity direction and EOS directly),
+     not an SPH-estimated one. **Also no gradient-renormalization matrix
+     anywhere.** This is the DDT DualSPHysics actually recommends today
+     (it exists specifically to fix DDT_DDT's known issues near sloped
+     free surfaces) -- and it still never touches a covariance matrix.
+3. **`DDTValue` (the delta coefficient) defaults to 0.1** (`JSph.h:173`) --
+   confirms the coefficient convention (delta=0.1) this codebase, diffSPH,
+   and DualSPHysics all already agree on (§8.9) was never the differing
+   piece.
+
+**Read this together with §8.13's audit**: the `gradRhoL`/covariance/
+pseudo-inverse machinery §8.13 verified mathematically correct against De
+Courcy 2024 Eq. (34) is real, working code for the operator Marrone 2011
+Eq. (6) actually specifies -- but **DualSPHysics, the most-validated
+production reference this whole investigation has been cross-checking
+against, does not run that operator at all**, on any of its DDT options.
+Exactly the same pattern §5.32 already found for the pressure force
+(DualSPHysics' actual default has no Antuono-style switch either, just
+the unconditional symmetric form): **the literal, paper-faithful,
+correction-matrix-dependent formulation is the minority/fragile choice;
+DualSPHysics's own validated defaults consistently pick the structurally
+simpler option that has no per-particle matrix inversion to go
+ill-conditioned at truncated support.** The wrong-sign DDT's empirical
+robustness (§8.11/8.12) is not a coincidence tied to *this* codebase's
+specific bug -- it lands structurally closer to a real, independently-
+validated, still-offered production scheme (Molteni-Colagrossi) than the
+"correct" sign's Marrone-literal bi-Laplacian does. This does not mean
+the correct sign is wrong (§8.13 already ruled that out) -- it means the
+Marrone/Antuono renormalized-gradient DDT is a genuinely more fragile
+*class* of operator than what the field's most production-tested
+implementation actually ships, independent of any implementation bug on
+either side.
+
+**Not yet done**: add `DDT_DDT`/`DDT_DDT2` as their own
+`DensityDiffusionScheme` members (mirroring `deltaSPH_wrongSign`'s
+pattern) and A/B them directly against `deltaSPH`/`deltaSPH_wrongSign` on
+Marrone 3.1 -- this would test the actual named DualSPHysics schemes, not
+just something that happens to resemble one, and would settle whether
+`deltaSPH_wrongSign`'s empirical behaviour really matches Molteni-Colagrossi's
+or only rhymes with it.
+
+**Default confirmed unchanged**: `weaklyCompressibleDiffusionParams.py`'s
+`densityDiffusionTerm` field default is, and was always,
+`DensityDiffusionScheme.deltaSPH` (the correct sign) -- `deltaSPH_wrongSign`
+is never referenced as a default anywhere in `src/`, only opted into
+explicitly by `scripts/crossengine/run_wrongsign_ddt.py` and
+`probe_deltaSPHMarrone.py --densityDiffusionTerm`. Nothing to revert.
+
+## 8.16 Plan: implement Molteni & Colagrossi 2009 and Fourtakas et al. 2019 as real `DensityDiffusionScheme` members
+
+### Citations (verified via Crossref/OpenAlex, not from memory)
+
+- **Molteni, D., Colagrossi, A. (2009). "A simple procedure to improve the
+  pressure evaluation in hydrodynamic context using the SPH." Computer
+  Physics Communications 180(6), 861-872.**
+  DOI [10.1016/j.cpc.2008.12.004](https://doi.org/10.1016/j.cpc.2008.12.004).
+  **Not open access** (OpenAlex: no OA location) -- could not fetch a PDF;
+  none in `literature/`. If the user has institutional access, the PDF
+  would let §8.13-style formula verification happen the same way De Courcy
+  2024 was checked; without it, the implementation below has to be
+  transcribed from DualSPHysics' actual running C++ (`JSphCpu.cpp`/
+  `JSphGpu_ker.cu`), which is a legitimate reference (it's the production
+  implementation of this exact paper) but not an independent literature
+  check the way §8.13's audit was.
+- **Fourtakas, G., Dominguez, J.M., Vacondio, R., Rogers, B.D. (2019).
+  "Local uniform stencil (LUST) boundary condition for arbitrary 3-D
+  boundaries in parallel smoothed particle hydrodynamics (SPH) models."
+  Computers & Fluids 190, 346-361.**
+  DOI [10.1016/j.compfluid.2019.06.009](https://doi.org/10.1016/j.compfluid.2019.06.009).
+  Confirmed as the *only* 2019 Fourtakas-authored paper in Crossref, and
+  its author list (Fourtakas, Dominguez, Vacondio, Rogers) matches
+  `JSphCpu.cpp`'s "Fourtakas et al 2019" citation exactly -- no ambiguity
+  about which paper, even without having read it directly. **Is legitimately
+  open access (CC-BY, hybrid OA per OpenAlex)** at
+  `sciencedirect.com/science/article/pii/S0045793019301859` -- but
+  ScienceDirect's JS-gated download blocked a scripted `curl` fetch (both a
+  plain and a browser-UA attempt returned an HTML challenge page, not the
+  PDF). A repository copy also exists at Manchester's Research Explorer and
+  UVigo's Investigo repository (OpenAlex lists both as OA locations) if
+  either is reachable by hand. Title indicates a boundary-condition paper,
+  not a DDT paper by name -- plausible (SPH BC papers routinely restate
+  the full governing-equation set including DDT before presenting their
+  own contribution), consistent with DualSPHysics' own citation, but **not
+  independently confirmed by reading the paper's text** the way Molteni's
+  formula also isn't. If the user can supply either PDF (or reach the OA
+  copy manually), both should go through the same verbatim-abstract check
+  `literature/ADDING.md`'s own sync procedure already uses before being
+  added to `literature/`.
+
+### Formulas to implement (transcribed from `JSphCpu.cpp:922-940`, already
+verified structurally distinct from the `deltaSPH` bi-Laplacian in §8.15)
+
+**Molteni & Colagrossi 2009** (`DDT_DDT`) -- no gradient-renormalization
+term, no covariance matrix:
+
+```
+drho_i/dt = DDTkh * c0 * sum_j  m_j * (rho_i/rho_j - 1) * (x_ij . gradW_ij) / (r_ij^2 + eta^2)
+```
+
+**Fourtakas et al. 2019** (`DDT_DDT2`) -- cancels the *hydrostatic*
+background analytically instead of via an SPH-estimated gradient:
+
+```
+drho_hydrostatic_ij = rho0 * (1 + DDTgz*z_ij)^(1/gamma) - rho0          [Tait EOS, DualSPHysics' own gamma]
+drho_i/dt = -DDTkh * c0 * sum_j  (m_j/rho_j) * [(rho_j-rho_i) - drho_hydrostatic_ij] * (x_ij . gradW_ij) / (r_ij^2+eta^2)
+```
+
+with `DDTgz = gamma*|g|/c0^2` (from `JSph.cpp:1535`'s `DDTgz = rho0*|g_z|/CteB`,
+`CteB = c0^2*rho0/gamma`). **For this codebase's isothermal EOS**
+(`p = c0^2(rho-rho0)`, i.e. the Tait exponent's `gamma -> 1` limit), the
+`(.)^(1/gamma)` collapses and `drho_hydrostatic_ij` reduces exactly to
+`rho0 * g * z_ij / c0^2` -- algebraically identical to `initialConditions`'
+existing `hydrostaticInit` hydrostatic-density formula
+(`cases/dambreak.py`, `rho(z) = rho0(1 + g*depth/c0^2)`). This is a
+genuine, already-verified building block to reuse, not a new derivation --
+the isothermal Fourtakas term is just that same profile evaluated as a
+pairwise difference instead of an absolute stamp.
+
+`eta^2` is DualSPHysics' small-separation regularizer, conventionally
+`eta^2 = (0.1*h)^2` (standard SPH epsilon, distinct from this codebase's
+own `1e-14*h_i` guard in `wp_densityDelta.py` -- same purpose, different
+magnitude; worth matching DualSPHysics' literal value for a faithful
+A/B rather than reusing this codebase's existing epsilon).
+
+### Implementation plan
+
+1. **Two new `DensityDiffusionScheme` members** (`moltenicolagrossi2009`,
+   `fourtakas2019`), same pattern as `deltaSPH_wrongSign` -- A/B-only
+   additions, no change to the `deltaSPH` default.
+2. **New kernel branches in `wp_densityDelta.py`**: neither needs
+   `gradRhoL`/`gradRho` (no covariance matrix, no renormalization state
+   dependency at all) -- structurally simpler than the existing branches,
+   just density/position/mass/support per pair, matching the transcribed
+   formulas above exactly. `fourtakas2019` additionally needs gravity
+   magnitude/direction and `c0` (both already on `schemeConfig` via
+   `gravityConfig`/`fluid.fixedSoundSpeed`) to build `DDTgz`.
+3. **Config plumbing**: a `DDTkh` coefficient (DualSPHysics: `DDTkh =
+   KernelSize * DDTValue`, `DDTValue` default 0.1 -- same delta=0.1
+   convention already confirmed shared across all three codebases, §8.9)
+   and, for `fourtakas2019`, the isothermal-collapsed `DDTgz`.
+4. **Validate the same way `deltaSPH_wrongSign` was**: pilot at a short
+   `tLimit` first (this session's own `wp_densityDelta.py` edit needed two
+   pilot-then-fix iterations before the full run worked cleanly -- expect
+   the same here), then the full matched-dambreak trajectory (§8.10-style
+   2x2-ish comparison against `deltaSPH`/`deltaSPH_wrongSign`) and the full
+   Marrone 3.1 record with `--densityDiffusionTerm` (§8.12/8.14-style, and
+   given §8.14's finding that this case is chaotic run-to-run, each variant
+   should get more than one seed before drawing a conclusion).
+5. **Report**: does `moltenicolagrossi2009` reproduce `deltaSPH_wrongSign`'s
+   band-tightening closely (the open question §8.15 raised -- "rhymes with"
+   vs. "matches"), and does `fourtakas2019` do better still (it's
+   DualSPHysics' own recommended, newer option, specifically built to fix
+   `DDT_DDT`'s known free-surface issues) -- if so, `fourtakas2019` would
+   be a stronger, better-motivated candidate than the diagnostic
+   `deltaSPH_wrongSign` for whatever eventually gets recommended for cases
+   like Marrone 3.1.
+
+Not started this session -- the above is the plan, pending the user's
+go-ahead (and, ideally, the Molteni 2009 PDF, which isn't fetchable
+without institutional access).
+
+## Next candidates (not yet attempted)
+
+- §8.15: implement `DDT_DDT` (Molteni-Colagrossi, no gradient term) and
+  `DDT_DDT2` (Fourtakas, analytic hydrostatic correction) as their own
+  `DensityDiffusionScheme` members and A/B against `deltaSPH`/
+  `deltaSPH_wrongSign` on Marrone 3.1 -- the concrete follow-up that would
+  settle whether DualSPHysics' actual production DDT (not just something
+  that resembles it) is what's really more robust here.
+- §8.14: repeat both the correct-sign and `deltaSPH_wrongSign` full Marrone
+  3.1 runs across a few seeds/perturbations each (this case's own
+  chattering already varies a single config 0.46->0.84 on P1 plateau) --
+  the only way to say "wrong sign reliably avoids the artifact" rather
+  than "one wrong-sign run happened to land clean" with actual confidence.
+  ~15 min/run; not attempted this session.
+- Read diffSPH's `computeDensityDeltaTerm_`
+  (`diffSPH/modules/densityDiffusion.py`) directly against §8.11's finding:
+  does it carry the same relative grad/rho sign as warpSPH's
+  `deltaSPH_wrongSign`, or a different formula that happens to produce a
+  similar net effect on this case? This is now the sharper, cheaper version
+  of the "line-by-line DDT diff" item below -- a concrete sign/formula
+  question, not an open-ended read.
+- §8.12's caveat: run the same Marrone 3.1 config with the *correct* sign
+  (no `--densityDiffusionTerm` override) and compare `accelMag*`/Antuono-
+  mask-flip-rate diagnostics against the wrong-sign run, to tell apart
+  "the DDT sign genuinely fixes the dambreak gap" from "extra dissipation
+  is quietly papering over the still-open §5.17-5.37 Antuono-switch
+  artifact again."
+- **DDT swap + shift swap together** (§8.10's DDT-only + §8.5's shift-only,
+  combined in one run): the two best-behaved single changes found so far,
+  neither yet tried alongside the other -- the natural next point on the
+  path toward closing the remaining gap to diffSPH's own numbers. §8.11
+  suggests trying `deltaSPH_wrongSign` + diffSPH-shift as a same-codebase-
+  cheaper variant of the same experiment.
+- `--scheme sun2017DeltaSPH` or an explicit `sun2017Eq7Shift=True` override
+  raises warpSPH's own raw shift magnitude 8x (its own literal Eq. (7)
+  scaling) without touching diffSPH at all -- a same-codebase, lower-risk
+  way to test whether closing the magnitude gap alone (independent of the
+  cross-engine harness) narrows the bands.
+- Audit `shiftingThreshold`/`maxShiftVelocityFraction` against what §8.7
+  implies they are actually capping, now that the raw magnitude they were
+  presumably tuned against is in question.
+- §8.5's `diffSPH physics + warpSPH shift` divergence: root-cause via the
+  free-surface/covariance-state hand-off hypothesis above.
+- Line-by-line diff of warpSPH's `computeVelocityDiffusion` against
+  diffSPH's `compute_Pi` -- §8.10 confirmed swapping it wholesale is a net
+  loss (density bands flat, KE retention roughly doubles), so the useful
+  question is no longer "should this be swapped" but *why* diffSPH's own
+  viscosity term dissipates differently in a way that doesn't help here --
+  worth understanding before touching this term at all. `computeMomentum`
+  (continuity) and the pressure force were both bit-exact in §8.9 and need
+  no further attention.
+
+## 8.17 §8.16 implemented: `moltenicolagrossi2009`/`fourtakas2019` land, and building the verification test catches a real sign bug in the new code before it ever ran a case
+
+Followed §8.16's plan. `DensityDiffusionScheme.moltenicolagrossi2009` (6)
+and `.fourtakas2019` (7) added to `enumTypes.py`, new branches in
+`wp_densityDelta.py`'s `computeDensityDiffusionDeltaSPH_Func_i` (same
+`densityScheme` ternary the existing branches use -- §8.16 point 1/2,
+`deltaSPH_wrongSign`'s hook). Both are structurally simpler than
+`deltaSPH`: neither reads `gradRhoL`/`gradRho`, so no covariance/
+renormalization dependency at all, matching §8.16's prediction. `rho0`,
+`c0`, and (for `fourtakas2019` only) a `gravity` vector threaded as new
+`ExtraSpec` scalar/tensor extras through `_Func_i` -> `_Func_Adjacency` ->
+`_Kernel` -> the `computeDensityDiffusionDeltaSPH` Python wrapper ->
+`computeScalarFieldDiffusion`/`computeDensityDiffusion`
+(`densityDiffusion.py`); production callers get `rho0`/`c0` from
+`schemeConfig.fluid`, gravity from `schemeConfig.gravityConfig`, so no new
+CLI/config surface for the production path -- selecting the scheme is
+enough (same pattern as every other scheme member).
+
+Per the transcribed formulas (§8.16):
+
+- `moltenicolagrossi2009` -- Molteni's own Eq. (16) ratio form, literally:
+  `psi_ij = -2*rho0*(f_j/f_i - 1)*x_ij/(r_ij^2 + eps_h*h_i^2)`,
+  `eps_h=0.01` (the paper's own regularizer, shared with its Eq. (14)
+  artificial-viscosity term -- kept distinct from this file's other
+  branches' `1e-14*h` divide-by-zero guard, which is not the same thing).
+- `fourtakas2019` -- the plain Molteni-style density difference with the
+  hydrostatic component analytically subtracted first (Eqs. 15-19,
+  isothermal-EOS collapse): `total_diff = (f_j - f_i) + rhoH_diff`,
+  `rhoH_diff = -rho0*dot(gravity,x_ij)/c0^2`, then
+  `psi_ij = -2*total_diff*n_ij/(r_ij + eps)`.
+
+**Verification test written before any case run** (per §8.16 point 4's
+own warning that this file's edits "needed two pilot-then-fix iterations"
+last time): `fourtakas2019`'s entire point is that `rhoH_diff` exactly
+cancels `f_j - f_i` on an exact hydrostatic field, so `psi_ij` (and the
+whole diffusion output) should vanish to floating precision there --
+mirrors how `tests/test_deltaSPHDiffusion.py` already pins `deltaSPH`'s
+own linear-field cancellation, just for this scheme's defining property
+instead. Script: build a real dambreak IC (genuine neighbour list,
+supports, kernel -- only the density field is overwritten with the exact
+isothermal hydrostatic profile `rho(x) = rho0 - rho0*dot(g,x)/c0^2`), then
+call `computeScalarFieldDiffusion` directly with `fourtakas2019` and
+compare against `densityOnly` (no hydrostatic term) as a non-vanishing
+control.
+
+**First run caught a real bug, not a test artifact.** `fourtakas2019`'s
+output on the exact hydrostatic field was *larger* than the `densityOnly`
+control (mean|.| 8.18e-3 vs. control's 4.09e-3 -- almost exactly 2x, not
+~0). Tracing it: `computeDistanceVec(xi, xj, ...)` returns `xi - xj`
+(confirmed by reading `warpSPHCore/math/wp_distance.py` directly, not
+assumed), so on this hydrostatic field `f_j - f_i = +(rho0/c0^2)*dot(g,
+x_ij)`. Cancelling that requires `rhoH_diff = -(rho0/c0^2)*dot(g,x_ij)`,
+but the as-written code had `rhoH_diff = +rho0*dot(gravity_i,x_ij)/c0^2`
+-- the opposite sign, which *adds* to `f_j-f_i` instead of subtracting,
+exactly doubling the residual instead of erasing it. One-line fix
+(negate `rhoH_diff`). Rerun: `fourtakas2019` mean|.| = 2.5e-8, max|.| =
+1.57e-7 (float32 noise floor, five orders below the 4.09e-3 control) --
+cancellation confirmed. This was a sign bug in code that had never been
+run against anything before the verification test was written for it; it
+would not have been caught by the 100-step pilot smoke test alone (that
+test only checks "does it run and stay bounded," not "does it compute the
+intended quantity") -- underscores why §8.13's kind of literature-checked,
+property-level verification is worth doing for new physics code, not just
+post-hoc when something looks wrong empirically.
+
+Pilot (200 steps, matched-dambreak IC, `scripts/crossengine/
+run_ddt_scheme.py --scheme <name> --nSteps 200`): both schemes stable,
+sane magnitudes, no divergence -- `moltenicolagrossi2009` and
+`fourtakas2019` track each other closely at this short horizon (maxV
+2.258/2.256, KE 0.2519/0.2519, density band [0.9979,1.0153]/
+[0.9979,1.0153]), as expected since they differ only in the hydrostatic
+correction term and gravity's own hydrostatic profile is exactly what
+this IC starts from.
+
+Full matched-dambreak (t=0-4) trajectories, both schemes, pure warpSPH
+(`scripts/crossengine/run_ddt_scheme.py --scheme <name> --video`), 8001/8001
+steps, no divergence:
+
+| scheme | maxDensity | minDensity | maxVelocity | KE max | KE final |
+|---|---|---|---|---|---|
+| warpSPH, correct sign (baseline, §8.11) | 1.291 | 0.767 | 12.39 | 3.38 | 0.429 |
+| warpSPH, `deltaSPH_wrongSign` (§8.11) | 1.162 | 0.878 | 11.49 | 3.34 | 0.490 |
+| **warpSPH, `moltenicolagrossi2009`** | **1.193** | **0.834** | **11.00** | 3.34 | 0.341 |
+| **warpSPH, `fourtakas2019`** | **1.148** | **0.897** | **10.49** | 3.35 | 0.327 |
+| diffSPH DDT swap (§8.10, cross-engine) | 1.187 | 0.894 | 10.42 | 3.39 | 0.375 |
+| *pure diffSPH (reference)* | *1.140* | *0.920* | *9.56* | *3.07* | -- |
+
+**Answers §8.16 point 5 directly.** `fourtakas2019` is the *closest
+same-codebase match to diffSPH's own band found in this entire Part 8
+thread* -- tighter than `deltaSPH_wrongSign` on both bounds (maxDensity
+1.148 vs 1.162 vs target 1.140; minDensity 0.897 vs 0.878 vs target
+0.920), and closer than the full cross-engine DDT-term swap itself
+(1.187/0.894). Unlike `deltaSPH_wrongSign`, this is not a diagnostic sign
+flip -- it's DualSPHysics' own validated, paper-faithful `DDT_DDT2`
+formula, structurally simpler (no covariance/renormalization dependency
+at all, §8.15) and correctly derived to cancel hydrostatic pressure
+analytically (§8.16, verified in §8.17 above). `moltenicolagrossi2009`
+lands between the correct-sign baseline and `fourtakas2019`/
+`deltaSPH_wrongSign` on both density bounds -- a real improvement over
+the Antuono bi-Laplacian but the weaker of the two real DualSPHysics
+options, consistent with DualSPHysics itself having moved on from
+`DDT_DDT` to `DDT_DDT2` as its recommended default. All three DDT
+variants (wrongSign, Molteni, Fourtakas) dissipate somewhat more kinetic
+energy than the correct-sign baseline (KE final 0.34-0.49 vs baseline's
+0.429 -- Molteni/Fourtakas actually dissipate MORE than wrongSign, unlike
+viscosity-swap's problematic doubling in §8.10), so none of this comes
+with the viscosity-swap's energy-retention trap.
+
+`--densityDiffusionTerm moltenicolagrossi2009`/`fourtakas2019` now
+selectable on `probe_deltaSPHMarrone.py` (added to the existing
+`--densityDiffusionTerm` choices list) -- Marrone 3.1 runs next, same
+protocol as §8.12/§8.14 (full spec, full t*=7.68 record).
+
+**Marrone 3.1, full spec and full record, both schemes**: `--nx 67
+--c0Ratio 40 --tLimit 1.90 --densityDiffusionTerm
+moltenicolagrossi2009`/`fourtakas2019`, `--video`. Both stable, zero wall
+penetration, 19551/19551 steps, t* reached 7.68. `--report` rebuilt
+against all four recorded runs at once (this config's baseline + the
+three DDT variants), mapped to rows by wall time / npz mtime:
+
+| run | checks pass | failing check | P1 plateau | P2 run-up peak | bulk density band |
+|---|---|---|---|---|---|
+| correct sign, fresh (§8.14) | 7/9 | P1 plateau (0.84), P2 spike | 0.84 | 0.37 | [0.984, 1.017] |
+| `deltaSPH_wrongSign` (§8.12) | 8/9 | P2 run-up peak (0.05) | 0.39 | **0.05** | [0.996, 1.005] |
+| **`fourtakas2019`** | **8/9** | P2 run-up peak (0.05) | 0.39 | **0.05** | [0.997, 1.005] |
+| **`moltenicolagrossi2009`** | **8/9** | P2 run-up peak (0.04) | 0.38 | **0.04** | [0.996, 1.005] |
+
+**Directly answers §8.16 point 5**: both real DualSPHysics-paper-faithful
+DDT schemes reproduce `deltaSPH_wrongSign`'s Marrone 3.1 improvement
+closely, not just "rhyme with" it -- same 7/9->8/9 jump, the *same single
+failing check* (P2 run-up peak reads low, the predictable signature of
+extra dissipation damping a small transient -- consistent across all
+three DDT variants), and P1 plateau / bulk density band numbers that
+match `deltaSPH_wrongSign` to within noise (0.38-0.39 vs 0.39; density
+bands overlapping to the third decimal). This strengthens §8.11's
+mechanistic reading: whatever is degenerating Marrone's bi-Laplacian
+toward "a plain, ~2nd-order Laplacian" -- the wrong sign, Molteni's own
+ratio form, or Fourtakas' hydrostatic-corrected difference -- lands in
+essentially the same place on this case, and all three are real,
+independently-motivated formulas (not just one sign bug happening to
+help). `fourtakas2019` remains the strongest standalone candidate of the
+three: same Marrone 3.1 result as the others, but the tightest
+same-codebase match to diffSPH's own dambreak band (§8.17 above) and
+DualSPHysics' own recommended, newer DDT option (§8.15) -- unlike
+`deltaSPH_wrongSign`, not a diagnostic-only sign flip.
+
+**Still open** (§8.12's caveat, restated): none of this distinguishes
+"extra DDT dissipation genuinely fixes the mechanism behind the Marrone
+3.1 free-surface excursions" from "extra dissipation is once again
+papering over the separately-open Antuono-switch/Barecasco chatter"
+([[marrone31-truncation-artifact-vs-pst]]) -- the Antuono-mask flip-rate
+diagnostic (§5.18/§5.35, already instrumented) would tell these apart and
+has not yet been run for any DDT variant. §8.14 also showed this case is
+genuinely chaotic run-to-run (two correct-sign runs landed at P1 plateau
+0.46 and 0.84) -- a single run per scheme here is suggestive, not
+conclusive; multiple seeds per scheme would be needed before recommending
+any of the three as a new default.
+
+## 8.18 All three DDT variants on Marrone 3.4 (sharp-edged obstacle), full t=5.0s -- the "flyers" phenomenon is real, shared across all three, and moves around rather than concentrating in one scheme
+
+Prompted by a visual oddity the user spotted in the §8.17 Marrone 3.1
+`fourtakas2019` video (a small excursion at t=0.553s in the fillet/wall
+runup region, resembling the "bed-corner isolated-particle ejection"
+[[marrone34-sharp-edge-case]] already flagged as an open, inherent feature
+of this case family). Ran the actual Marrone 2011 §3.4 sharp-edged-obstacle
+case (Sec. 5.2.2's geometry -- 45deg edge, two re-entrant corners, curved
+concave fillet) for all three DDT variants to check whether this is a
+`fourtakas2019`-specific regression or the same shared phenomenon.
+
+Added `--densityDiffusionTerm` to `scripts/probe_deltaSPHMarrone34.py`
+(identical override pattern to `probe_deltaSPHMarrone.py`, §8.12). Ran the
+documented dataset config -- `--nx 256 --scheme sun2017DeltaSPH --shifting
+default` (H/dx=32, c0Ratio=28.3, PST on) -- to **t=5.0s physical** (not t*;
+per the user's explicit request), i.e. t* ~ 15.66, more than 3x the
+Sec. 5.2.2 baseline table's t*=5 record, covering the first sharp-edge jet
+ejection (t*~2), the first roof re-impact (t*~3.9), and a second full
+wave-breaking/re-impact cycle at the fillet corner (t*~11-13) that Sec.
+5.2.2's shorter record never reached. All three: 22424/22424 steps, no
+divergence, **6/6 Sec. 5.2.2 stability/penetration checks pass**:
+
+| scheme | rho P05-P99 (bulk, t*>1) | rho pointwise max | max‖v‖ (U_max mult.) | wall pen | obstacle pen |
+|---|---|---|---|---|---|
+| baseline (correct sign) | [0.990, 1.049] | 1.300 | 33.8 (5.5x) | 0.01 dx | 0.67 dx |
+| `fourtakas2019` | [0.997, 1.023] | 1.329 | 32.4 (5.3x) | 0.09 dx | 0.66 dx |
+| `moltenicolagrossi2009` | [0.996, 1.022] | 1.295 | 36.4 (6.0x) | 0.22 dx | 0.69 dx |
+
+Same pattern as §8.17's dambreak/Marrone-3.1 results: `fourtakas2019`/
+`moltenicolagrossi2009` both tighten the bulk density band vs. the
+correct-sign baseline (P05 0.990->0.996-0.997), consistent with the extra
+dissipation. Peak velocity is comparable across all three -- notably
+`moltenicolagrossi2009` has the *highest* peak (36.4, not `fourtakas2019`),
+and it occurs during the *first* jet ejection (t*~2), not the fillet-corner
+region the user flagged.
+
+**Frame-by-frame visual inspection (ffmpeg-extracted, synchronized video
+timestamps across all three runs, zoomed on the fillet corner) confirms the
+"flyers" phenomenon is real and present in all three -- but it is not
+concentrated in `fourtakas2019`, and does not stay in one place:**
+
+- At the first roof re-impact (t*~3.2-3.8): **baseline** shows the most
+  scattered small isolated debris strung out along the top/roof edge, more
+  than either DDT variant at the same moment.
+- Mid-way through the second wave-breaking cycle (t*~11-12, approaching the
+  fillet from the floor): **`moltenicolagrossi2009`** develops a
+  conspicuously bright (high-velocity), floor-hugging band of particles not
+  present in the other two runs at the same instant.
+- Later in that same cycle, as the wave overturns into a breaking "tube" at
+  the fillet corner (t*~12-13): **`fourtakas2019`** develops the brightest,
+  most energetic thin jet at the leading tip of the overturning curl --
+  reproducible across several consecutive frames, not a single-frame
+  artifact -- while the other two show a calmer curl at the same moment.
+
+**Reading**: each DDT variant genuinely does perturb *where and when* this
+case's known corner/flyer instability manifests most visibly -- but the
+effect rotates between schemes rather than concentrating in the one the
+user happened to notice it in first (`fourtakas2019`'s Marrone 3.1 video).
+Combined with the comparable peak-velocity table above (moltenicolagrossi
+is quantitatively the "worst" by that single metric, not fourtakas), this
+reads as the same underlying, already-diagnosed mechanism
+([[marrone31-truncation-artifact-vs-pst]], [[sph-symmetric-pressure-truncation-artifact]])
+being nudged around by each formulation's slightly different local
+dissipation profile near a violently accelerating free surface at a solid
+corner -- not a defect specific to the new `fourtakas2019`/
+`moltenicolagrossi2009` implementations. This is consistent with
+[[marrone34-sharp-edge-case]]'s own prior characterisation of this
+phenomenon as inherent to the case (Marrone's own paper notes non-
+convergence of the pointwise jet-tip extremes even at H/dx=234) rather
+than a porting bug.
+
+**Not done**: a rigorous per-scheme flyer count/severity metric (the
+`_score` function's aggregate checks do not have a flyer-specific gate;
+the comparison above is a qualitative visual read across ~30 extracted
+frames per scheme, not an automated detector) -- would be needed before
+claiming any scheme is quantitatively better or worse on this specific
+axis, as opposed to "all three exhibit it, in different specific
+instances."
+
+**Follow-up, same session**: the user pointed at a more specific instance
+-- a thin sheet of fluid running along the obstacle's **flat roof** (not
+the fillet corner) that "violently falls apart", from a still around video
+t=4.26s in one of the §8.18 videos. That literal timestamp didn't line up
+(video-second != sim-time linearly here -- adaptive CFL dt means the
+step-to-video-frame mapping isn't linear, confirmed by cross-checking the
+burned-in `t=` label at several video-seconds and finding an inconsistent
+ratio), but the described visual -- a thin sheet crossing the obstacle top
+as the first jet overtops it, partially shedding debris -- is real and
+locates to **video t~8.0-10.0s** (sim t~2.2-2.7s, around the first
+roof-crossing event, well before the fillet-corner cycle discussed above).
+
+Extracted synchronized, zoomed frames (`scripts/out_deltaSPHMarrone34/roof_crest_comparison_v8.75.png`)
+across all three schemes through this window. Same finding as §8.18's
+fillet-corner comparison, different location: **each scheme's manifestation
+of the roof-overtopping event has its own distinct character, not a shared
+defect and not `fourtakas2019`-specific**:
+
+- **baseline**: smoothest crossing, no persistent surface feature at the
+  apex, no isolated flyers in this window.
+- **`fourtakas2019`**: develops a persistent, sharper standing crest/ridge
+  right at the apex (visible v~8.5-8.75 and again ~9.25-10) instead of a
+  flat sheet -- a real, reproducible shape difference in the free surface
+  as it crosses the corner, not literal particle ejection.
+- **`moltenicolagrossi2009`**: the one that actually sheds isolated flyer
+  specks in this window (v~9.5-9.75, small green/teal dots detaching above
+  the roof) -- closer to what "a thin sheet that violently falls apart"
+  describes literally, though `fourtakas2019`'s sharper standing crest is
+  the more visually striking feature at a glance.
+
+Confirms the §8.18 reading once more, now at a second, independent
+location on the same case: this is the shared corner/edge free-surface
+instability ([[marrone31-truncation-artifact-vs-pst]]) showing up
+differently depending on which DDT formulation's local dissipation is
+smoothing it, not a `fourtakas2019` regression.
+
+## Next up (planned, not started -- flagged 2026-09-14 for next week)
+
+**The corner/edge "flyers" instability is the next stability item to
+chase**, ranked above further DDT-scheme exploration. Three independent
+sightings now, all on Marrone 3.4, all the same underlying phenomenon
+wearing a different scheme-specific costume (§8.18 + its roof-crest
+follow-up): scattered roof debris at the first re-impact, a bright
+floor-hugging band approaching the fillet, a sharp overturning-jet tip as
+the wave breaks at the fillet, and a persistent standing crest / isolated
+flyer-shedding as the very first jet crosses the obstacle apex. Present in
+the correct-sign baseline and both new DDT schemes alike -- not something
+introduced by `moltenicolagrossi2009`/`fourtakas2019`, and not fixable by
+picking a different DDT term.
+
+**Root cause, per the existing diagnosis, is upstream of DDT entirely**:
+[[marrone31-truncation-artifact-vs-pst]] traced the mechanism to the
+Antuono pressure-switch mask chattering continuously near a truncated-
+kernel free surface at a solid corner -- confirmed against Barecasco
+2013's own §5, which admits this exact cone-test instability is open and
+unsolved in the source paper, not a porting bug. That section's own
+proposed directions (not yet implemented, still the live options):
+
+1. **A continuous blend instead of a hard switch** -- replace the Antuono
+   mask's boolean surface/bulk classification with a continuous coverage
+   fraction (the "scan circle" idea the original paper left unfinished),
+   so a particle near the classification boundary doesn't flip discretely
+   step-to-step.
+2. **Freeze the switch's classification across RK sub-stages** (same
+   fix already applied to diffusion freezing for `sun2017DeltaSPH`,
+   §5.31-ish) -- addresses only the intra-step half of the chatter, not
+   the frame-to-frame half, but is the cheaper first thing to try.
+3. **Eq. (8) from Barecasco et al., implemented faithfully** -- a real,
+   free, missing piece of the paper (§5.36/§5.37's revised reading) that
+   may specifically help the degenerate near-corner population this
+   session's flyers belong to, even though it won't touch the general
+   bulk/surface chatter §5.35 measured.
+
+**Suggested order of attack next week**: (2) first (cheapest, an existing
+pattern to copy), then measure whether the flyer frequency/severity drops
+on the Marrone 3.4 roof/fillet events documented above before committing
+to (1) or (3) -- both of those are real implementation work, not
+one-line changes. The Antuono-mask flip-rate diagnostic (§5.18/§5.35,
+already instrumented) is the right instrument to quantify "did this
+actually help" rather than eyeballing more frame grids.

@@ -138,7 +138,7 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
             plotBackend: str = None, cflFactor: float = None,
             integrationScheme: str = None, noPenShift: str = None,
             wallBC: str = None, pressureForceTerm: str = None,
-            mdbcDensityScheme: str = None):
+            densityDiffusionTerm: str = None, mdbcDensityScheme: str = None):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -173,6 +173,7 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
           + (f'_nopen-{noPenShift}' if noPenShift else '')
           + (f'_wall-{wallBC}' if wallBC else '')
           + (f'_pft-{pressureForceTerm}' if pressureForceTerm else '')
+          + (f'_ddt-{densityDiffusionTerm}' if densityDiffusionTerm else '')
           + (f'_mdbcRho-{mdbcDensityScheme}' if mdbcDensityScheme else ''))
     runRoot = os.path.join(out, tag + '_run')
 
@@ -236,6 +237,17 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
         def _cfg2(ctx, _t=PressureForceScheme[pressureForceTerm], _p=_prevCfg2):
             _p(ctx); ctx.schemeConfig.pressureForceTerm = _t
         dambreakCase.configureScheme = _cfg2
+    if densityDiffusionTerm:
+        # DELTASPH_VALIDATION_PLAN.md Part 4 / Part 8.11: `deltaSPH_wrongSign`
+        # is the pre-`790a7c7` psi sign (gradient term not negated), which
+        # degenerates the Antuono bi-Laplacian to 2x the plain
+        # Molteni-Colagrossi Laplacian (2nd-order, not 4th) -- A/B-only, never
+        # a default; see that enum member's own docstring.
+        from warpSPH.enumTypes import DensityDiffusionScheme
+        _prevCfg3 = dambreakCase.configureScheme
+        def _cfg3(ctx, _t=DensityDiffusionScheme[densityDiffusionTerm], _p=_prevCfg3):
+            _p(ctx); ctx.schemeConfig.diffusionParams.densityDiffusionTerm = _t
+        dambreakCase.configureScheme = _cfg3
     if mdbcDensityScheme:
         _prevCfg4 = dambreakCase.configureScheme
         def _cfg4(ctx, _t=mdbcDensityScheme, _p=_prevCfg4):
@@ -266,7 +278,7 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
         sun2017Eq7Shift=bool(getattr(r.ctx.schemeConfig.shiftProperties,
                                      'sun2017Eq7Shift', False)),
         pressureForceTerm=str(getattr(r.ctx.schemeConfig, 'pressureForceTerm', '?')),
-        mdbcDensityScheme=str(getattr(r.ctx.schemeConfig, 'mdbcDensityScheme', 'ramped')),
+        densityDiffusionTerm=str(getattr(r.ctx.schemeConfig.diffusionParams, 'densityDiffusionTerm', '?')),
         tReached=tReached, tStarReached=tReached * (G / H) ** 0.5,
         dx=dx, HdxRatio=H / dx, c0=c0, probeInset_dx=probeInset / dx,
         mach=(U_MAX / c0) if c0 else None,
@@ -740,6 +752,17 @@ def main():
                          "always-difference form (P_j - P_i) unconditionally -- "
                          "i.e. the switch's two branches with the switch itself "
                          "removed. DELTASPH_VALIDATION_PLAN.md 5.14-5.17/5.28.")
+    ap.add_argument('--densityDiffusionTerm', default=None,
+                    choices=('deltaSPH', 'denormalized', 'densityOnly', 'deltaOnly',
+                             'denormalizedOnly', 'deltaSPH_wrongSign',
+                             'moltenicolagrossi2009', 'fourtakas2019'),
+                    help="override DensityDiffusionScheme (case default 'deltaSPH', "
+                         "the correct/4th-order Antuono-corrected bi-Laplacian sign). "
+                         "'deltaSPH_wrongSign' is the pre-790a7c7 sign -- 2nd-order, "
+                         "over-dissipative, A/B-only -- DELTASPH_VALIDATION_PLAN.md "
+                         "Part 4 / Part 8.11. 'moltenicolagrossi2009'/'fourtakas2019' "
+                         "are the two DualSPHysics-paper-faithful DDT formulations -- "
+                         "DELTASPH_VALIDATION_PLAN.md Part 8.16.")
     ap.add_argument('--mdbcDensityScheme', default=None, choices=('ramped', 'band', 'english2025'),
                     help="override WeaklyCompressibleSPHConfig.mdbcDensityScheme "
                          "(case default 'ramped', density2025.py's English Eq. 12 "
@@ -766,7 +789,8 @@ def main():
             args.plotInterval, args.kernel, args.freezeDiffusion, args.scheme,
             args.shifting, args.plotBackend, args.cflFactor,
             args.integrationScheme, args.noPenShift, args.wallBC,
-            args.pressureForceTerm, args.mdbcDensityScheme)
+            args.pressureForceTerm, args.densityDiffusionTerm,
+            args.mdbcDensityScheme)
 
 
 if __name__ == '__main__':
