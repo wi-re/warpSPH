@@ -63,9 +63,23 @@ def updateBodyParticlesWCSPH(particleState, rigidBody: RigidBody):
     updatedVelocities[rigidBody.particleIndices] = particleVelocities
     updatedVelocities[rigidBody.ghostParticleIndices] = particleVelocities
 
+    # `offsets = x_b - x_g` (boundary minus ghost) is the right sign for the
+    # BOUNDARY row (matches `addBoundaryGhostParticles`'s convention there),
+    # but the ghost row's own convention is the negation, `x_g - x_b` --
+    # `addBoundaryGhostParticles` (`rigidBody/ghostParticles.py`) sets that up
+    # deliberately at construction. Writing the same un-negated `offsets` to
+    # both rows here silently overwrote that negation every step (and once at
+    # init, since this runs right after construction too), corrupting every
+    # ghost-row read of `ghostOffsets` codebase-wide.
+    # `BOUNDARY_DENSITY_PLAN.md` §9/§9.1 has the full audit: this one negation
+    # is one of four coordinated changes (with `mdbc/density2025.py`,
+    # `modules/incompressible/wallPressure.py`, `mdbc/velocity.py`'s
+    # `extendedVelocity`) needed together -- some existing call sites were
+    # accidentally self-correcting against the bug and need their own
+    # compensating negation removed/added in the same change.
     updatedOffsets = particleState.ghostOffsets.clone()
     updatedOffsets[rigidBody.particleIndices] = offsets
-    updatedOffsets[rigidBody.ghostParticleIndices] = offsets
+    updatedOffsets[rigidBody.ghostParticleIndices] = -offsets
     WeaklyCompressibleState = type(particleState)
     return WeaklyCompressibleState(
         positions = updatedPositions,

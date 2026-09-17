@@ -207,7 +207,13 @@ def extendedVelocity(currentState: Any, config: SimulationConfig, schemeConfig: 
 
 
     ghostMask = currentState.kinds == 2
-    relPos = currentState.ghostOffsets[ghostMask]
+    # Negated to match every other `ghostOffsets[ghostMask]` consumer's
+    # convention (`relPos = r_b - r_g`, e.g. `mdbc/density2025.py`). This
+    # function used to omit the `-` and still land on the right answer only
+    # because the ghost row's sign was itself wrong (`rigidBody/update.py`'s
+    # bug); now that the root cause is fixed, the negation has to be applied
+    # here explicitly. See `BOUNDARY_DENSITY_PLAN.md` §9.1.
+    relPos = -currentState.ghostOffsets[ghostMask]
 
     velocities = [currentState.velocities.new_zeros(currentState.velocities.shape[0], device = currentState.velocities.device, dtype = currentState.velocities.dtype) for uv in extendedVelocities]
 
