@@ -1875,3 +1875,202 @@ Background for `PESPH_PLAN.md`, added 2026-09-15.
 
 > We review the current status of compact object simulations that are based on the Smoothed Particle Hydrodynamics (SPH) method. The first section of this review is dedicated to SPH as a numerical method for Newtonian, ideal gas dynamics and it should be fairly self-contained. It begins with the basics of the method, but also describes recent advances including various meshless derivatives or methods for treating shocks. A separate chapter summarizes general relativistic SPH, including its special relativistic limit, and it explains in some detail the recent development of full numerical relativity in SPH where matter is evolved together with a dynamical spacetime. The remainder of the review has an astrophysical focus, here we discuss the status of the simulations of white dwarf--white dwarf, neutron star--neutron star and neutron star--black hole systems. For each type of system the emphasis is on gravitational-wave-driven mergers, but we also briefly summarize dynamical collisions that can occur in locations with large stellar densities.
 
+## Particle consistency and gradient renormalization
+
+The correction-matrix lineage behind this codebase's `Li`/`useGradientRenormalization` machinery (`modules/crk`, `wp_surfaceAware.py`), synced 2026-09-17.
+
+### `randles1996`
+
+- **file:** `randles1996_recent-improvements-applications.pdf`
+- **title:** Smoothed Particle Hydrodynamics: Some recent improvements and applications
+- **authors:** P.W. Randles and L.D. Libersky
+- **venue:** *Computer Methods in Applied Mechanics and Engineering* 139:375-408, 1996
+- **doi:** [10.1016/s0045-7825(96)01090-0](https://doi.org/10.1016/s0045-7825(96)01090-0)
+- **relevance:** Independently derives (citing Johnson-Beissel and Everhart) the corrective tensor `B` this codebase's `Li` matrix descends from (Eqs. 34-37), applying it to the momentum/energy divergence and outer-product kernel sums from the boundary-deficiency side, rather than `bonet1999`'s variational one.
+- **abstract from:** PDF p.1
+
+> The Smoothed Particle Hydrodynamics (SPH) computing technique has features which make it highly attractive for simulating dynamic response of materials involving fracture and fragmentation. However, full exploitation of the method's potential has been hampered by some unresolved problems including stability and the lack of generalized boundary conditions. We address these difficulties and propose solutions. Continuum damage modeling of fracture is discussed at length with scalar and tensor formulations proposed and tested within SPH. Several recent applications involving fracture with predicted fragment patterns and mass distributions are compared with experiment.
+
+### `bonet1999`
+
+- **file:** `bonet1999_variational-momentum-preservation.pdf`
+- **title:** Variational and momentum preservation aspects of Smooth Particle Hydrodynamic formulations
+- **authors:** J. Bonet and T.-S.L. Lok
+- **venue:** *Computer Methods in Applied Mechanics and Engineering* 180:97-115, 1999
+- **doi:** [10.1016/s0045-7825(99)00051-1](https://doi.org/10.1016/s0045-7825(99)00051-1)
+- **relevance:** The other foundational correction-matrix paper (with `randles1996`): derives the same gradient-renormalization matrix from a variational/momentum-conservation argument, and shows it is required for exact angular-momentum preservation under a linear velocity field -- the derivation this codebase's `Li` matrix is closer to in spirit.
+- **abstract from:** PDF p.1
+- **text-layer:** `linear velocity ®eld` -> `linear velocity field` (the PDF's text layer substitutes the registered-trademark glyph for the "fi" ligature; anchored to this phrase since `®eld`/`®elds` recur elsewhere on the page)
+- **text-layer:** `free surface ¯ows` -> `free surface flows` (the PDF's text layer substitutes the macron glyph for the "fl" ligature)
+
+> This paper presents a new variational framework for various existing Smooth Particle Hydrodynamic (SPH) techniques and presents a new corrected SPH formulation. The linear and angular momentum preserving properties of SPH formulations are also discussed. The paper will show that in general in order to preserve angular momentum, the SPH equations must correctly evaluate the gradient of a linear velocity field. A corrected algorithm that combines kernel correction with gradient correction is presented. The paper will illustrate the theory presented with several examples relating to simple free surface flows.
+
+### `liu2006`
+
+- **file:** `liu2006_restoring-particle-consistency.pdf`
+- **title:** Restoring particle consistency in smoothed particle hydrodynamics
+- **authors:** M.B. Liu and G.R. Liu
+- **venue:** *Applied Numerical Mathematics* 56(1):19-36, 2006
+- **doi:** [10.1016/j.apnum.2005.02.012](https://doi.org/10.1016/j.apnum.2005.02.012)
+- **relevance:** A later paper in the same correction-matrix lineage as `randles1996`/`bonet1999`: restores particle consistency while keeping the smoothing kernel itself unmodified, rather than reconstructing the kernel.
+- **abstract from:** PDF p.1
+
+> Though the smoothed particle hydrodynamics (SPH) method has been widely applied to different areas, it is associated with some inherent numerical problems. One notable problem is the particle inconsistency that results from the particle approximation process and can lead to low approximation accuracy. In this paper, the particle inconsistency problem is investigated and some methods to improve the particle inconsistency are discussed. A new approach is proposed to restore the particle consistency. The new approach retains the conventional non-negative smoothing function instead of reconstructing a new smoothing function. A series of numerical studies have been carried out to verify the performance of the new approach. It is found the new approach can successfully restore the particle consistency and can therefore significantly improve the approximation accuracy.
+
+### `liu1995`
+
+- **file:** `liu1995_reproducing-kernel-particle-methods.pdf`
+- **title:** Reproducing kernel particle methods
+- **authors:** Wing Kam Liu, Sukky Jun and Yi Fei Zhang
+- **venue:** *International Journal for Numerical Methods in Fluids* 20(8-9):1081-1106, 1995
+- **doi:** [10.1002/fld.1650200824](https://doi.org/10.1002/fld.1650200824)
+- **relevance:** The earliest paper in this set: RKPM's correction function predates and is the finite-element-adjacent parallel to `randles1996`/`bonet1999`'s SPH gradient-correction matrices, reached independently from a wavelet/window-function consistency argument.
+- **abstract from:** DOI record (Crossref)
+
+> A new continuous reproducing kernel interpolation function which explores the attractive features of the flexible time-frequency and space-wave number localization of a window function is developed. This method is motivated by the theory of wavelets and also has the desirable attributes of the recently proposed smooth particle hydrodynamics (SPH) methods, moving least squares methods (MLSM), diffuse element methods (DEM) and element-free Galerkin methods (EFGM). The proposed method maintains the advantages of the free Lagrange or SPH methods; however, because of the addition of a correction function, it gives much more accurate results. Therefore it is called the reproducing kernel particle method (RKPM). In computer implementation RKPM is shown to be more efficient than DEM and EFGM. Moreover, if the window function is C∞, the solution and its derivatives are also C∞ in the entire domain. Theoretical analysis and numerical experiments on the 1D diffusion equation reveal the stability conditions and the effect of the dilation parameter on the unusually high convergence rates of the proposed method. Two-dimensional examples of advection-diffusion equations and compressible Euler equations are also presented together with 2D multiple-scale decompositions.
+
+### `chen1999`
+
+- **file:** `chen1999_corrective-smoothed-particle-method-heat.pdf`
+- **title:** A corrective smoothed particle method for boundary value problems in heat conduction
+- **authors:** J.K. Chen, J.E. Beraun and T.C. Carney
+- **venue:** *International Journal for Numerical Methods in Engineering* 46(2):231-252, 1999
+- **doi:** [10.1002/(sici)1097-0207(19990920)46:2<231::aid-nme672>3.0.co;2-k](https://doi.org/10.1002/(sici)1097-0207(19990920)46:2<231::aid-nme672>3.0.co;2-k)
+- **relevance:** CSPM: a Taylor-series-expansion correction layered on top of the kernel estimate, rather than a renormalization matrix -- a distinct correction strategy from `randles1996`/`bonet1999`/`liu2006`, aimed at the same boundary-particle-deficiency problem those three also address.
+- **abstract from:** PDF p.1
+- **text-layer:** `de"ciency` -> `deficiency` (the PDF's text layer substitutes a straight double-quote for the "fi" ligature)
+
+> Combining the kernel estimate with the Taylor series expansion is proposed to develop a Corrective Smoothed Particle Method (CSPM). This algorithm resolves the general problem of particle deficiency at boundaries, which is a shortcoming in Standard Smoothed Particle Hydrodynamics (SSPH). In addition, the method's ability to model derivatives of any order could make it applicable for any time-dependent boundary value problems. An example of the applications studied in this paper is unsteady heat conduction, which is governed by second-order derivatives. Numerical results demonstrate that besides the capability of directly imposing boundary conditions, the present method enhances the solution accuracy not only near or on the boundary but also inside the domain. Published in 1999 by John Wiley & Sons, Ltd. This article is a U.S. government work and is in the public domain in the United States.
+
+## High-order and WENO/MLS-reconstruction SPH
+
+The modern successor direction `letouze2025`/`lind2020`/`meng2025` point to past this codebase's plain, first-order-consistent SPH gradients, synced 2026-09-17.
+
+### `avesani2014`
+
+- **file:** `avesani2014_moving-least-squares-weno-sph.pdf`
+- **title:** A new class of Moving-Least-Squares WENO-SPH schemes
+- **authors:** Diego Avesani, Michael Dumbser and Alberto Bellin
+- **venue:** *Journal of Computational Physics* 270:278-299, 2014
+- **doi:** [10.1016/j.jcp.2014.03.041](https://doi.org/10.1016/j.jcp.2014.03.041)
+- **relevance:** Origin of the MLS-WENO-SPH line: per-particle MLS reconstructions blended by a nonlinear WENO weighting, fed into a Riemann-solved flux at the particle midpoint -- the modern high-order successor direction `letouze2025`/`lind2020`/`meng2025` point to, and the origin `vergnaud2023`/`gao2023` cite for the MLS-WENO-SPH line.
+- **abstract from:** PDF p.1
+- **text-layer:** `Oshertype` -> `Osher-type` (the PDF's text layer drops the hyphen across the line wrap)
+
+> We present a new class of meshless Lagrangian particle methods based on the SPH formulation of Vila and Ben Moussa, combined with a new weighted essentially non-oscillatory (WENO) reconstruction technique on moving point clouds in multiple space dimensions. The key idea is to produce for each particle first a set of high order accurate Moving-Least-Squares (MLS) reconstructions on a set of different reconstruction stencils. Then, these reconstructions are combined with each other using a non-linear WENO technique in order to capture at the same time discontinuities and to maintain accuracy and low numerical dissipation in smooth regions. The numerical fluxes between interacting particles are subsequently evaluated using this MLS-WENO reconstruction at the midpoint between two particles, in combination with a Riemann solver that provides the necessary stabilization of the scheme based on the underlying physics of the governing equations. We propose the use of two different Riemann solvers: the Rusanov flux and an Osher-type flux. The use of monotone fluxes together with a WENO reconstruction ensures accuracy, stability, robustness and an essentially non-oscillatory solution without the artificial viscosity term usually employed in conventional SPH schemes. To our knowledge, this is the first time that the WENO method, which has originally been developed for mesh-based schemes in the Eulerian framework on fixed grids, is extended to meshfree Lagrangian particle methods like SPH in multiple space dimensions. We test the new algorithm on two dimensional blast wave problems and on the classical one-dimensional Sod shock tube problem for the Euler equations of compressible gas dynamics. We obtain a good agreement with the exact or numerical reference solution in all cases and an improved accuracy and robustness compared to existing standard SPH schemes.
+
+### `king2020`
+
+- **file:** `king2020_labfm-high-order-difference-schemes.pdf`
+- **title:** High order difference schemes using the local anisotropic basis function method
+- **authors:** J.R.C. King, S.J. Lind and A.M.A. Nasar
+- **venue:** *Journal of Computational Physics* 415:109549, 2020
+- **doi:** [10.1016/j.jcp.2020.109549](https://doi.org/10.1016/j.jcp.2020.109549)
+- **relevance:** LABFM: constructs high-order (4th-8th) difference operators from anisotropic basis functions on disordered nodes; the paper's own framing is that SPH is LABFM's low-order limit, making this the explicit high-order generalization of the kernel-gradient machinery this codebase uses.
+- **abstract from:** PDF p.1
+
+> Mesh-free methods have significant potential for simulations in complex geometries, as the time consuming process of mesh-generation is avoided. Smoothed Particle Hydrodynamics (SPH) is the most widely used mesh-free method, but suffers from a lack of consistency. High order, consistent, and local (using compact computational stencils) mesh-free methods are particularly desirable. Here we present a novel framework for generating local high order difference operators for arbitrary node distributions, referred to as the Local Anisotropic Basis Function Method (LABFM). Weights are constructed from linear sums of anisotropic basis functions (ABFs), chosen to ensure exact reproduction of polynomial fields up to a given order. The ABFs are based on a fundamental Radial Basis Function (RBF), and the choice of fundamental RBF has small effect on accuracy, but influences stability. LABFM is able to generate high order difference operators with compact computational stencils (4th order with N ≈ 25 nodes, 8th order with N ≈ 60 nodes in two dimensions). At domain boundaries (with incomplete support) LABFM automatically provides one-sided differences of the same order as the internal scheme, up to 4th order. We use the method to solve elliptic, parabolic and mixed hyperbolic-parabolic partial differential equations (PDEs), showing up to 8th order convergence. The inclusion of hyperviscosity is straightforward, and can effectively provide stability when solving hyperbolic problems. LABFM is a promising new mesh-free method for the numerical solution of PDEs in complex geometries. The method is highly scalable, and for Eulerian schemes, the computational efficiency is competitive with RBF-FD for a given accuracy. A particularly attractive feature is that in the low order limit, LABFM collapses to Smoothed Particle Hydrodynamics (SPH), and there is potential for Arbitrary Lagrangian-Eulerian schemes with natural adaptivity of resolution and accuracy.
+
+### `king2022`
+
+- **file:** `king2022_labfm-isothermal-flows.pdf`
+- **title:** High-order simulations of isothermal flows using the local anisotropic basis function method (LABFM)
+- **authors:** J.R.C. King and S.J. Lind
+- **venue:** *Journal of Computational Physics* 449:110760, 2022
+- **doi:** [10.1016/j.jcp.2021.110760](https://doi.org/10.1016/j.jcp.2021.110760)
+- **note:** The DOI's own path segment carries "2021", but the DOI record's `.issued` date and the journal's volume/issue dating (449, 2022) both place formal publication in 2022 -- "Available online 6 October 2021" is the preprint date. Year and volume here follow the DOI record per `ADDING.md`'s "DOI record wins" rule.
+- **relevance:** Journal extension of `king2020` to full isothermal Navier-Stokes at up to 10th order, adding stabilisation and high-order boundary conditions.
+- **abstract from:** PDF p.1
+- **text-layer:** `Re p` -> `Re_p` (the subscript on the Reynolds number renders as a space in the text layer)
+
+> Mesh-free methods have significant potential for simulations of flows in complex geometries, with the difficulties of domain discretisation greatly reduced. However, many mesh-free methods are limited to low order accuracy. In order to compete with conventional mesh-based methods, high order accuracy is essential. The Local Anisotropic Basis Function Method (LABFM) is a mesh-free method introduced in King et al. (2020) [20], which enables the construction of highly accurate difference operators on disordered node discretisations. Here, we introduce a number of developments to LABFM, in the areas of basis function construction, stencil optimisation, stabilisation, variable resolution, and high order boundary conditions. With these developments, direct numerical simulations of the Navier Stokes equations are possible at extremely high order (up to 10th order in characteristic node spacing internally). We numerically solve the isothermal compressible Navier Stokes equations for a range of geometries: periodic and channel flows, flows past a cylinder, and porous media. Excellent agreement is seen with analytical solutions, published numerical results (using a spectral element method), and experiments. The potential of the method for direct numerical simulations in complex geometries is demonstrated with simulations of subsonic and transonic flows through an inhomogeneous porous media at pore Reynolds numbers up to Re p = 968.
+
+### `vergnaud2023`
+
+- **file:** `vergnaud2023_high-order-sph-weno-reconstruction.pdf`
+- **title:** Investigations on a high order SPH scheme using WENO reconstruction
+- **authors:** A. Vergnaud, G. Oger and D. Le Touzé
+- **venue:** *Journal of Computational Physics* 477:111889, 2023
+- **doi:** [10.1016/j.jcp.2022.111889](https://doi.org/10.1016/j.jcp.2022.111889)
+- **relevance:** 1D WENO reconstruction per interacting pair, completed by MLS, inside a Riemann-SPH formulation -- reaches 6th-order convergence and is shown to beat plain Riemann-SPH on accuracy per CPU time. Direct evidence for the field's practical route past the roughly 2nd-order ceiling this codebase's plain SPH gradients sit at.
+- **abstract from:** PDF p.1
+
+> Theoretically, a 2nd order convergence can be reached with the Smoothed Particle Hydrodynamics (SPH) method. However, depending on the spatial disorder of particles, the order of convergence observed in practice can be lower than one. In this paper, a methodology is proposed for the reconstruction of high order numerical fluxes in Riemann-SPH formulations for weakly-compressible flows, so as to increase the global order of convergence of the scheme. This methodology is based on the use of one-dimensional Weighted Essentially Non-Oscillatory (WENO) reconstructions applied at each pair of interacting particles, and each 1D WENO stencil is completed using Moving-Least-Squares (MLS) reconstructions. It is shown that a 6th order convergence can be reached with the proposed SPH-WENO scheme. The gain in accuracy and convergence properties of this scheme is shown and discussed through its application to various one-dimensional and two-dimensional test cases. In particular, the influence of the number of neighbor particles and of the spatial particle disorder is studied. Finally, it is shown that the proposed high-order SPH scheme provides a better accuracy to CPU time ratio than usual Riemann-SPH schemes. The treatment of boundary conditions on rigid walls with the proposed scheme is also discussed.
+
+### `gao2023`
+
+- **file:** `gao2023_mls-teno-sph-compressible-flows.pdf`
+- **title:** A new smoothed particle hydrodynamics method based on high-order moving-least-square targeted essentially non-oscillatory scheme for compressible flows
+- **authors:** Tianrun Gao, Tian Liang and Lin Fu
+- **venue:** *Journal of Computational Physics* 489:112270, 2023
+- **doi:** [10.1016/j.jcp.2023.112270](https://doi.org/10.1016/j.jcp.2023.112270)
+- **relevance:** MLS-TENO-SPH: splits the domain into smooth/non-smooth regions via a TENO scale-separation test and only spends the expensive MLS high-order derivative where the flow is smooth, falling back to shock-capturing TENO elsewhere -- the compressible-flow counterpart to `vergnaud2023`'s weakly-compressible WENO-SPH.
+- **abstract from:** PDF p.1
+
+> In this study, we establish a hybrid high-order smoothed particle hydrodynamics (SPH) framework (MLS-TENO-SPH) for compressible flows with discontinuities, which is able to achieve genuine high-order convergence in smooth regions and also capture discontinuities well in non-smooth regions. The framework can be either fully Lagrangian, Eulerian or realizing arbitary-Lagrangian-Eulerian (ALE) feature enforcing the isotropic particle distribution in specific cases. In the proposed framework, the computational domain is divided into smooth regions and non-smooth regions, and these two regions are determined by a strong scale separation strategy in the targeted essentially non-oscillatory (TENO) scheme. In smooth regions, the moving-least-square (MLS) approximation is used for evaluating high-order derivative operator, which is able to realize genuine high-order construction; in non-smooth regions, the new TENO scheme based on Vila's framework with several new improvements will be deployed to capture discontinuities and high-wavenumber flow scales with low numerical dissipation. The present MLS-TENO-SPH method is validated with a set of challenging cases based on the Eulerian, Lagrangian or ALE framework. Numerical results demonstrate that the MLS-TENO-SPH method features lower numerical dissipation and higher efficiency than the conventional method, and can restore genuine high-order accuracy in smooth regions. Overall, the proposed framework serves as a new exploration in high-order SPH methods, which are potential for compressible flow simulations with shockwaves.
+
+## SPH reviews and the DualSPHysics lineage
+
+Broad-survey and DualSPHysics-project reference papers, synced 2026-09-17.
+
+### `lind2020`
+
+- **file:** `lind2020_review-converged-lagrangian-flow-modelling.pdf`
+- **title:** Review of smoothed particle hydrodynamics: towards converged Lagrangian flow modelling
+- **authors:** Steven J. Lind, Benedict D. Rogers and Peter K. Stansby
+- **venue:** *Proceedings of the Royal Society A* 476(2241), 2020
+- **doi:** [10.1098/rspa.2019.0801](https://doi.org/10.1098/rspa.2019.0801)
+- **relevance:** General SPH review centred on convergence; read against `BOUNDARY_DENSITY_PLAN.md` §10's kernel-truncation-artifact investigation, since a symmetric-pressure-pair-sum truncation error is exactly a convergence failure mode of the kind this review surveys.
+- **abstract from:** DOI record (Crossref)
+
+> This paper presents a review of the progress of smoothed particle hydrodynamics (SPH) towards high-order converged simulations. As a mesh-free Lagrangian method suitable for complex flows with interfaces and multiple phases, SPH has developed considerably in the past decade. While original applications were in astrophysics, early engineering applications showed the versatility and robustness of the method without emphasis on accuracy and convergence. The early method was of weakly compressible form resulting in noisy pressures due to spurious pressure waves. This was effectively removed in the incompressible (divergence-free) form which followed; since then the weakly compressible form has been advanced, reducing pressure noise. Now numerical convergence studies are standard. While the method is computationally demanding on conventional processors, it is well suited to parallel processing on massively parallel computing and graphics processing units. Applications are diverse and encompass wave-structure interaction, geophysical flows due to landslides, nuclear sludge flows, welding, gearbox flows and many others. In the state of the art, convergence is typically between the first- and second-order theoretical limits. Recent advances are improving convergence to fourth order (and higher) and these will also be outlined. This can be necessary to resolve multi-scale aspects of turbulent flow.
+
+### `meng2025`
+
+- **file:** `meng2025_high-order-sph-review.pdf`
+- **title:** High-order SPH: A Review of the Method and Applications
+- **authors:** Zi-Fei Meng, Peng-Nan Sun, Ping-Ping Wang, Boo Cheong Khoo and A.-Man Zhang
+- **venue:** *Archives of Computational Methods in Engineering* 33:1409-1444, 2026
+- **doi:** [10.1007/s11831-025-10346-0](https://doi.org/10.1007/s11831-025-10346-0)
+- **note:** The journal's own printed header dates the article "(2026) 33:1409-1444"; Crossref's `.issued` date is 2025-09-12 (first-online). Following this repository's `winchenbach2025analytic`/`winchenbach2025diffsph` precedent, the bib key keeps the earlier online year while the venue and year field here use the printed-volume year.
+- **relevance:** Already read for `BOUNDARY_DENSITY_PLAN.md` §10 -- see that section rather than re-deriving its relevance here.
+- **abstract from:** PDF p.1
+
+> Smoothed Particle Hydrodynamics (SPH), a widely-used numerical method for simulating fluid flows with complex interfaces and boundaries, has undergone decades of development. This paper reviews the efforts towards advancing high-order SPH and its applications. The fundamentals of SPH are briefly introduced, followed by an analysis of errors arising in kernel and particle approximations. The relationship between consistency and accuracy is also discussed. To achieve high-order accuracy, this paper details three approaches: correcting SPH derivative operators, constructing kernel functions and implementing spatial reconstructions in the Riemann-SPH formulation. Finally, the applications of these high-accuracy SPH methods are described to show their potential for further development.
+
+### `letouze2025`
+
+- **file:** `letouze2025_free-surface-multiphase-review.pdf`
+- **title:** Smoothed particle hydrodynamics for free-surface and multiphase flows: a review
+- **authors:** David Le Touzé and Andrea Colagrossi
+- **venue:** *Reports on Progress in Physics* 88(3):037001, 2025
+- **doi:** [10.1088/1361-6633/ada80f](https://doi.org/10.1088/1361-6633/ada80f)
+- **relevance:** Already read for `BOUNDARY_DENSITY_PLAN.md` §10 -- see that section rather than re-deriving its relevance here.
+- **abstract from:** DOI record (Crossref)
+
+> The smoothed particle hydrodynamics (SPH) method is expanding and is being applied to more and more fields, particularly in engineering. The majority of current SPH developments deal with free-surface and multiphase flows, especially for situations where geometrically complex interface configurations are involved. The present review article covers the last 25 years of development of the method to simulate such flows, discussing the related specific features of the method. A path is drawn to link the milestone articles on the topic, and the main related theoretical and numerical issues are investigated. In particular, several SPH schemes have been derived over the years, based on different assumptions. The main ones are presented and discussed in this review underlining the different contexts and the ways in which they were derived, resulting in similarities and differences. In addition, a summary is provided of the recent corrections proposed to increase the accuracy, stability and robustness of SPH schemes in the context of free-surface and multiphase flows. Future perspectives of development are identified, placing the method within the panorama of Computational Fluid Dynamics.
+
+### `vacondio2021`
+
+- **file:** `vacondio2021_grand-challenges-sph.pdf`
+- **title:** Grand challenges for Smoothed Particle Hydrodynamics numerical schemes
+- **authors:** Renato Vacondio, Corrado Altomare, Matthieu De Leffe, Xiangyu Hu, David Le Touzé, Steven Lind, Jean-Christophe Marongiu, Salvatore Marrone, Benedict D. Rogers and Antonio Souto-Iglesias
+- **venue:** *Computational Particle Mechanics* 8(3):575-588, 2021
+- **doi:** [10.1007/s40571-020-00354-1](https://doi.org/10.1007/s40571-020-00354-1)
+- **relevance:** The SPHERIC Grand Challenges statement -- the field-level framing this codebase's own DualSPHysics cross-checks (`molteni2009`, `fourtakas2019`, `english2022`, `english2025` elsewhere in this manifest) sit inside.
+- **abstract from:** PDF p.1
+
+> This paper presents a brief review of grand challenges of Smoothed Particle Hydrodynamics (SPH) method. As a meshless method, SPH can simulate a large range of applications from astrophysics to free-surface flows, to complex mixing problems in industry and has had notable successes. As a young computational method, the SPH method still requires development to address important elements which prevent more widespread use. This effort has been led by members of the SPH rEsearch and engineeRing International Community (SPHERIC) who have identified SPH Grand Challenges. The SPHERIC SPH Grand Challenges (GCs) have been grouped into 5 categories: (GC1) convergence, consistency and stability, (GC2) boundary conditions, (GC3) adaptivity, (GC4) coupling to other models, and (GC5) applicability to industry. The SPH Grand Challenges have been formulated to focus the attention and activities of researchers, developers, and users around the world. The status of each SPH Grand Challenge is presented in this paper with a discussion on the areas for future development.
+
+### `dominguez2022`
+
+- **file:** `dominguez2022_dualsphysics-multiphysics.pdf`
+- **title:** DualSPHysics: from fluid dynamics to multiphysics problems
+- **authors:** J.M. Domínguez, G. Fourtakas, C. Altomare, R.B. Canelas, A. Tafuni, O. García-Feal, I. Martínez-Estévez, A. Mokos, R. Vacondio, A.J.C. Crespo, B.D. Rogers, P.K. Stansby and M. Gómez-Gesteira
+- **venue:** *Computational Particle Mechanics* 9(5):867-895, 2022
+- **doi:** [10.1007/s40571-021-00404-2](https://doi.org/10.1007/s40571-021-00404-2)
+- **relevance:** The DualSPHysics reference/survey paper -- the code whose DDT and mDBC formulations this codebase's own `molteni2009`/`fourtakas2019`/`english2022`/`english2025` entries and its cross-engine harness (`DELTASPH_VALIDATION_PLAN.md` Part 8) are checked against.
+- **abstract from:** PDF p.1
+
+> DualSPHysics is a weakly compressible smoothed particle hydrodynamics (SPH) Navier-Stokes solver initially conceived to deal with coastal engineering problems, especially those related to wave impact with coastal structures. Since the first release back in 2011, DualSPHysics has shown to be robust and accurate for simulating extreme wave events along with a continuous improvement in efficiency thanks to the exploitation of hardware such as graphics processing units for scientific computing or the coupling with wave propagating models such as SWASH and OceanWave3D. Numerous additional functionalities have also been included in the DualSPHysics package over the last few years which allow the simulation of fluid-driven objects. The use of the discrete element method has allowed the solver to simulate the interaction among different bodies (sliding rocks, for example), which provides a unique tool to analyse debris flows. In addition, the recent coupling with other solvers like Project Chrono or MoorDyn has been a milestone in the development of the solver. Project Chrono allows the simulation of articulated structures with joints, hinges, sliders and springs and MoorDyn allows simulating moored structures. Both functionalities make DualSPHysics especially suited for the simulation of offshore energy harvesting devices. Lately, the present state of maturity of the solver goes beyond single-phase simulations, allowing multi-phase simulations with gas-liquid and a combination of Newtonian and non-Newtonian models expanding further the capabilities and range of applications for the DualSPHysics solver. These advances and functionalities make DualSPHysics an advanced meshless solver with emphasis on free-surface flow modelling.
+

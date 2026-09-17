@@ -57,7 +57,7 @@ and had to be identified from their front matter alone.
 
 ## What is here
 
-169 documents. The first 92 are the curated core — every row annotated for what
+185 documents. The first 108 are the curated core — every row annotated for what
 it unblocks, and every row abstracted in `ABSTRACTS.md` **except `roe1986`,
 `hairer2006` and `toro2009`**, which carry no abstract at all (Annual Reviews
 articles of that vintage print none for `roe1986`; the latter two are books,
@@ -96,6 +96,21 @@ synced on 2026-09-15 -- it was already cited informally in
 paper, but its actual mDBC pressure/density methodology (Eqs. 8-11) had not
 been read; `BOUNDARY_DENSITY_PLAN.md` found it directly relevant, not
 secondary.)
+
+**15 papers were synced 2026-09-17** from `literature/dump/`, in three groups:
+the correction-matrix lineage behind this codebase's `Li`/`useGradientRenormalization`
+machinery (`randles1996`, `bonet1999`, `liu2006`, `liu1995`, `chen1999`); the
+high-order/WENO-MLS-reconstruction successor direction the review papers point
+to (`avesani2014`, `king2020`, `king2022`, `vergnaud2023`, `gao2023`); and a
+set of broad SPH reviews and DualSPHysics-lineage reference papers
+(`lind2020`, `meng2025`, `letouze2025`, `vacondio2021`, `dominguez2022`).
+`king2022`'s DOI path carries a `2021` segment, but its DOI record, journal
+volume/issue and published-online-vs-issue dating all place it in 2022 —
+`references.bib`'s `note` field records this per `ADDING.md`'s "DOI record
+wins" rule. `meng2025` follows the `winchenbach2025analytic`/
+`winchenbach2025diffsph` precedent for a bib key/year split: keyed for its
+2025 first-online date, but the `year` field and venue string use the 2026
+printed-volume year its own header carries.
 
 `venue` is the **published** venue, which for an author's-version or preprint
 copy is not always what that copy's own front page says. Full bibliographic
@@ -257,6 +272,44 @@ Background for `PESPH_PLAN.md`, added 2026-09-15.
 | — | `crain2023` | `crain2023_hydrodynamical-simulations-galaxy-population.pdf` | Annual Review of Astronomy and Astrophysics 61(1):473-515, 2023 | Current review of galaxy-formation hydrodynamics methods -- checked against PESPH_PLAN.md §7.1's framing. |
 | — | `rosswog2015review` | `rosswog2015review_sph-methods-compact-objects.pdf` | Living Reviews in Computational Astrophysics 1, 2015 | Field review of SPH for compact objects; superseded in content (not in citation) by `rosswog2026`. |
 | — | `rosswog2026` | `rosswog2026_sph-compact-objects-review.pdf` | arXiv:2607.14828 [astro-ph.HE], 2026 | The major-revision update of the same review -- checked against PESPH_PLAN.md §7.1's framing, since it is the more current version. |
+
+**Particle consistency & gradient renormalization**
+
+The correction-matrix lineage behind this codebase's `Li`/`useGradientRenormalization`
+machinery, added 2026-09-17.
+
+| plan | bib key | file | venue | what it is |
+|---|---|---|---|---|
+| — | `randles1996` | `randles1996_recent-improvements-applications.pdf` | Comput. Methods Appl. Mech. Engrg. 139 1996 | Independently derives the corrective tensor `B` this codebase's `Li` matrix descends from (Eqs. 34-37), applied from the boundary-deficiency side. |
+| — | `bonet1999` | `bonet1999_variational-momentum-preservation.pdf` | Comput. Methods Appl. Mech. Engrg. 180 1999 | The variational/momentum-conservation derivation of the same correction matrix -- angular momentum is preserved only with the gradient correction present. |
+| — | `liu2006` | `liu2006_restoring-particle-consistency.pdf` | Appl. Numer. Math. 56(1) 2006 | Later paper in the same lineage: restores particle consistency while keeping the smoothing kernel itself unmodified, rather than reconstructing it. |
+| — | `liu1995` | `liu1995_reproducing-kernel-particle-methods.pdf` | Int. J. Numer. Methods Fluids 20(8-9) 1995 | RKPM -- the finite-element-adjacent parallel to the SPH correction matrix, reached independently from a wavelet/window-function consistency argument. |
+| — | `chen1999` | `chen1999_corrective-smoothed-particle-method-heat.pdf` | Int. J. Numer. Methods Eng. 46(2) 1999 | CSPM: a Taylor-series correction layered on the kernel estimate instead of a renormalization matrix, aimed at the same boundary-particle-deficiency problem. |
+
+**High-order and WENO/MLS-reconstruction SPH**
+
+The modern successor direction `letouze2025`/`lind2020`/`meng2025` point to past
+this codebase's plain, first-order-consistent SPH gradients, added 2026-09-17.
+
+| plan | bib key | file | venue | what it is |
+|---|---|---|---|---|
+| — | `avesani2014` | `avesani2014_moving-least-squares-weno-sph.pdf` | J. Comput. Phys. 270 2014 | Origin of the MLS-WENO-SPH line: per-particle MLS reconstructions blended by a nonlinear WENO weighting, fed into a Riemann-solved midpoint flux. |
+| — | `king2020` | `king2020_labfm-high-order-difference-schemes.pdf` | J. Comput. Phys. 415 2020 | LABFM: high-order (4th-8th) difference operators from anisotropic basis functions on disordered nodes; the paper states SPH is its own low-order limit. |
+| — | `king2022` | `king2022_labfm-isothermal-flows.pdf` | J. Comput. Phys. 449 2022 | Journal extension of `king2020` to full isothermal Navier-Stokes at up to 10th order, adding stabilisation and high-order boundary conditions. |
+| — | `vergnaud2023` | `vergnaud2023_high-order-sph-weno-reconstruction.pdf` | J. Comput. Phys. 477 2023 | 1D WENO+MLS reconstruction per interacting pair inside a Riemann-SPH formulation; reaches 6th-order convergence and beats plain Riemann-SPH on accuracy per CPU time. |
+| — | `gao2023` | `gao2023_mls-teno-sph-compressible-flows.pdf` | J. Comput. Phys. 489 2023 | MLS-TENO-SPH: spends the expensive high-order MLS derivative only where a TENO scale-separation test finds the flow smooth; the compressible-flow counterpart to `vergnaud2023`. |
+
+**SPH reviews and the DualSPHysics lineage**
+
+Broad-survey and DualSPHysics-project reference papers, added 2026-09-17.
+
+| plan | bib key | file | venue | what it is |
+|---|---|---|---|---|
+| — | `lind2020` | `lind2020_review-converged-lagrangian-flow-modelling.pdf` | Proc. R. Soc. A 476(2241) 2020 | General SPH review centred on convergence; read against `BOUNDARY_DENSITY_PLAN.md` §10's kernel-truncation-artifact investigation. |
+| — | `meng2025` | `meng2025_high-order-sph-review.pdf` | Arch. Comput. Methods Eng. 33 2026 | High-order-specific review; already read for `BOUNDARY_DENSITY_PLAN.md` §10 -- see that section rather than re-deriving its relevance here. |
+| — | `letouze2025` | `letouze2025_free-surface-multiphase-review.pdf` | Rep. Prog. Phys. 88(3) 2025 | Free-surface/multiphase-specific review; already read for `BOUNDARY_DENSITY_PLAN.md` §10 -- see that section rather than re-deriving its relevance here. |
+| — | `vacondio2021` | `vacondio2021_grand-challenges-sph.pdf` | Comput. Part. Mech. 8(3) 2021 | The SPHERIC Grand Challenges statement -- the field-level framing this codebase's own DualSPHysics cross-checks sit inside. |
+| — | `dominguez2022` | `dominguez2022_dualsphysics-multiphysics.pdf` | Comput. Part. Mech. 9(5) 2022 | The DualSPHysics reference paper -- the code `molteni2009`/`fourtakas2019`/`english2022`/`english2025` and the cross-engine harness (`DELTASPH_VALIDATION_PLAN.md` Part 8) are checked against. |
 
 ## Extended set
 
