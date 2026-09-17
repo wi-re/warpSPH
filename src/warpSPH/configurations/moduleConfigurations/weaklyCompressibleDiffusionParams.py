@@ -13,6 +13,7 @@ __all__ = ['WeaklyCompressibleDiffusionParams', 'buildDefaultDiffusionParamsWeak
 from ...enumTypes import *
 from typing import Optional, Union, List, Dict, Any
 from dataclasses import dataclass, field
+import os
 import torch
 from enum import Enum
 
@@ -29,12 +30,24 @@ class WeaklyCompressibleDiffusionParams():
     densityDiffusionTerm: DensityDiffusionScheme = field(default=DensityDiffusionScheme.deltaSPH, metadata={'description': 'Density diffusion term to use'})
 
 def buildDefaultDiffusionParamsWeaklyCompressibleSPH() -> WeaklyCompressibleDiffusionParams:
+    # DIAGNOSTIC ONLY: `WARPSPH_DEFAULT_DDT`, unset by default (every existing
+    # case/script that doesn't set it is unaffected), lets a batch driver
+    # (e.g. scratchpad/run_overnight_batch_2026-09-17.sh's gallery leg) force
+    # a different densityDiffusionTerm across every example in one run,
+    # without editing each example wrapper individually -- unlike
+    # `integrationScheme`, this field is not a generic CaseSpec knob
+    # `caseMain`/`buildArgumentParser` already exposes per-example, so there
+    # is no CLI flag to forward here.
+    ddt = DensityDiffusionScheme.deltaSPH
+    override = os.environ.get('WARPSPH_DEFAULT_DDT')
+    if override:
+        ddt = DensityDiffusionScheme[override]
     return WeaklyCompressibleDiffusionParams(
         inviscid=True,
         inviscidAlpha=0.01,
         viscidNu=1e-3,
         densityDelta=0.1,
-        densityDiffusionTerm=DensityDiffusionScheme.deltaSPH
+        densityDiffusionTerm=ddt
     )
 
 
