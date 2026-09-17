@@ -65,6 +65,13 @@ from ._util import stateHasBoundaryParticles
 
 __all__ = ['computeMdbcDensityEnglish2025']
 
+# DIAGNOSTIC ONLY (BOUNDARY_DENSITY_PLAN.md §10 ceiling-hover investigation).
+# `scripts/probe_ceilingHover.py` sets this to a list before `run()`; every
+# call appends one dict of per-ghost-row diagnostics. `None` (default): the
+# `if _CAPTURE is not None` check below is the only added cost, everywhere
+# else this module is used. Revert (`git checkout`) after use.
+_CAPTURE: Optional[list] = None
+
 
 def computeMdbcDensityEnglish2025(currentState: Any, config: SimulationConfig, schemeConfig: Any,
                                   adjacency: Optional[Union[AdjacencyList, CompactHashMap]]) -> torch.Tensor:
@@ -167,6 +174,23 @@ def computeMdbcDensityEnglish2025(currentState: Any, config: SimulationConfig, s
         # densityBand.py's own zero-neighbour behaviour.
         rho_b = torch.where(hasAny, rho_b, torch.full_like(rho_b, rho0))
         rho_b = torch.nan_to_num(rho_b, nan=rho0, posinf=rho0, neginf=rho0)
+
+        if _CAPTURE is not None:
+            _CAPTURE.append(dict(
+                boundaryUID=(currentState.UIDs[bIndices].detach().cpu().numpy()
+                             if currentState.UIDs is not None else None),
+                boundaryPos=currentState.positions[bIndices].detach().cpu().numpy(),
+                ghostPos=currentState.positions[ghost].detach().cpu().numpy(),
+                relPos=relPos.detach().cpu().numpy(),
+                Mb=Mb.detach().cpu().numpy(),
+                alpha=alpha.detach().cpu().numpy(),
+                hasAny=hasAny.detach().cpu().numpy(),
+                nNbFluid=nNbFluid.detach().cpu().numpy(),
+                g_b=g_b.detach().cpu().numpy(),
+                P_g=P_g.detach().cpu().numpy(),
+                P_b=P_b.detach().cpu().numpy(),
+                rho_b=rho_b.detach().cpu().numpy(),
+            ))
 
         merged = currentState.densities.clone()
         merged[bIndices] = rho_b
