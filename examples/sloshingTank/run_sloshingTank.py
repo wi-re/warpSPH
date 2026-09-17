@@ -123,6 +123,13 @@ def parseArgs(argv):
                              'moltenicolagrossi2009', 'fourtakas2019'),
                     help="override DensityDiffusionScheme (case default "
                          "'deltaSPH'). DELTASPH_VALIDATION_PLAN.md Part 8.16.")
+    p.add_argument('--pressureForceRenormalized', action='store_true',
+                    help="apply gradient renormalization to the pressure-force "
+                         "kernel gradient, gated on kernel-sum completeness "
+                         "(poup>0.95) and bulk classification -- DualSPHysics-"
+                         "style, per BOUNDARY_DENSITY_PLAN.md §10 / "
+                         "DELTASPH_VALIDATION_PLAN.md §5.23/§5.32/§5.38. Off "
+                         "by default (case default too).")
     return p.parse_args(argv)
 
 
@@ -297,7 +304,8 @@ def main(argv=None):
     # scripts/probe_deltaSPHMarrone.py's `_mdbcRho-...`/`_ddt-...` suffixes).
     tag = (args.scheme
           + (f'_mdbcRho-{args.mdbcDensityScheme}' if args.mdbcDensityScheme else '')
-          + (f'_ddt-{args.densityDiffusionTerm}' if args.densityDiffusionTerm else ''))
+          + (f'_ddt-{args.densityDiffusionTerm}' if args.densityDiffusionTerm else '')
+          + ('_pforceGate' if args.pressureForceRenormalized else ''))
 
     if args.replot:
         series = loadSeries(args.out, tag)
@@ -329,11 +337,17 @@ def main(argv=None):
         def _cfgDdt(ctx, _t=DensityDiffusionScheme[args.densityDiffusionTerm], _p=_prevCfg2):
             _p(ctx); ctx.schemeConfig.diffusionParams.densityDiffusionTerm = _t
         case.configureScheme = _cfgDdt
+    if args.pressureForceRenormalized:
+        _prevCfg3 = case.configureScheme
+        def _cfgPforce(ctx, _p=_prevCfg3):
+            _p(ctx); ctx.schemeConfig.pressureForceRenormalized = True
+        case.configureScheme = _cfgPforce
 
     print(f'== sloshingTank / {args.scheme} ==  nx={spec.nx}  tLimit={spec.tLimit}  '
           f'scheme={spec.scheme}'
           + (f'  mdbcRho={args.mdbcDensityScheme}' if args.mdbcDensityScheme else '')
-          + (f'  ddt={args.densityDiffusionTerm}' if args.densityDiffusionTerm else ''))
+          + (f'  ddt={args.densityDiffusionTerm}' if args.densityDiffusionTerm else '')
+          + ('  pforceGate=True' if args.pressureForceRenormalized else ''))
     t0 = time.perf_counter()
     result = run(case, spec)
     wall = time.perf_counter() - t0
