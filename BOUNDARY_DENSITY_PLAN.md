@@ -1802,9 +1802,12 @@ completeness measure §5.38 already computes) -- not yet attempted.
    divergence verdict this explains vs. its own architecture.
 2. `probe_deltaSPHMarrone34.py --report`'s velocity/NaN-handling looseness
    (§7) -- still unfixed, still means a 6/6 score can hide a real blow-up.
-3. A 3D implementation and a moving-boundary test (`a_b` is still
-   hardcoded to zero in `english2025.py`) before any default-scheme change
-   is considered.
+3. A moving-boundary test (`a_b` is still hardcoded to zero in
+   `english2025.py`) before any default-scheme change is considered.
+   **3D is explicitly OUT OF SCOPE for this plan for now** (§11) -- a real
+   feature gap (`english2025.py` raises `NotImplementedError` outside
+   `dim==2`), but a separate, larger undertaking than anything else tracked
+   here; not planned until picked up deliberately.
 4. (New, §10.4) A force-magnitude plausibility clamp for severely isolated
    free-surface particles, as a genuinely different lever from gradient
    renormalization -- not scoped or started.
@@ -1814,3 +1817,77 @@ does not belong on this list -- see [[sph-symmetric-pressure-truncation
 -artifact]] for that scope, and §10.1 for the resume-from-checkpoint tooling
 built to validate a candidate fix cheaply against the exact reproduced event
 whenever that memory's open item is picked up.
+
+## 11. What the current best-known combo does and doesn't resolve (2026-09-17)
+
+User question: given `shifting=True` + `mdbcNoPenShiftMode='finalize'` +
+`integrationScheme='symplecticEuler'` + `mdbcDensityScheme='english2025'`
+(sign-fixed, `eps=1e-30`-regularized -- "the clamp") -- the accumulated
+best-known-working combination this investigation has converged on -- what
+in this plan is still open regardless? Recorded here since it's a genuinely
+useful checklist, not just a restatement of the Next Steps above.
+
+**Caveat on the combo itself first: it has never been run end-to-end as one
+named unit outside this session's own testing.** `mdbcNoPenShiftMode=
+'finalize'` won one comparison run (`DELTASPH_VALIDATION_PLAN.md` §5.13)
+against `'derivative'`, not the full Marrone/englishWedge sweep every other
+default change in this codebase goes through before being adopted, and it
+is **not** the case default. "The current best-working scheme" is a
+validated-in-pieces composite, not a single thing with its own regression
+history.
+
+**Confirmed NOT touched by this combo, directly, not by inference:**
+
+1. **The ceiling-hover mechanism itself (§10).** Not "untested" -- actively
+   disproven: adding the completeness gate on top of exactly this combo
+   reproduced the traced kick bit-for-bit (`DELTASPH_VALIDATION_PLAN.md`
+   §5.38). The mechanism lives in `computePressureForceSurfaceAware`,
+   upstream of and orthogonal to every knob in this combo -- none of
+   shifting, nopen mode, integrator, or mDBC scheme choice reaches it.
+   diffSPH's own independent reference implementation (no PST, plain
+   `nonConservative` pressure, different mDBC formulation entirely) shows
+   the same pinning pattern under its own fixed-tank/rotating-gravity
+   SPHERIC TC10 reproduction, sustained ~1s at a time -- cross-implementation
+   confirmation that no WC-scheme configuration choice was ever going to
+   fix this. §10.4's proposed next lever (a conditioning-keyed
+   force-magnitude clamp *inside* the free-surface population, not a
+   renormalization gate) remains unbuilt.
+
+**Out of this combo's scope by construction, not by test result:**
+
+2. **3D.** `english2025.py` raises `NotImplementedError` outside `dim==2`,
+   unconditionally -- no configuration choice changes this, it needs actual
+   code. Explicitly deprioritized (see Next Steps §3 above) -- not planned
+   for now, a separate undertaking from everything else this plan tracks.
+3. **Moving/rotating boundary acceleration.** `a_b` is hardcoded to zero in
+   `english2025.py` regardless of any other setting -- correct for
+   sloshingTank (a fixed tank, rolled via rotating gravity, per §10's own
+   trace) but wrong for anything where the boundary itself truly
+   accelerates (a wavemaker paddle, a ship section).
+4. **`densityBand.py`.** Two known, unfixed bugs (§9.6/9.7's symmetric-eps
+   fix not yet ported; §9.1's Taylor-shift mirror-point bug from the
+   `ghostOffsets` sign fix) -- moot while on `english2025`, but `'band'`
+   stays broken if anyone reaches for it.
+5. **Incompressible/DFSPH's `wallPressure.py` `'mls'` mode.** Got the same
+   sign-bug fix as a byproduct (§9.2) but was never separately re-validated
+   on an actual incompressible-scheme case. This combo is WCSPH-only --
+   DFSPH users get none of this session's validation coverage.
+
+**Tooling gaps -- mean a clean run of this combo still can't be fully
+trusted at face value:**
+
+6. `probe_deltaSPHMarrone34.py --report`'s velocity check is report-only
+   below 12x `U_max` (`'ramped'` scored 6/6 at nx=256 with a visible
+   particle-ejection defect, §6.3d/§7), and its kinetic-energy check scores
+   **PASS on a NaN trace**. Neither fixed.
+
+**Accepted, not "unresolved bugs" this combo should have fixed:**
+
+7. sloshingTank's second-sensor-peak mismatch (t~2.71 measured vs 2.93
+   simulated, §6.4) -- diagnosed as a fragile bulk-flow-collision timing
+   coincidence, explicitly out of scope, unrelated to any knob in this
+   combo.
+8. The general "chaotic sensitivity" pattern (resume-fidelity drift, the
+   right-wall kick, [[sloshing-rightwall-thin-sheet-kick]]) -- adjudicated
+   as genuine SPH sensitivity this system has, not something any
+   configuration resolves.
