@@ -104,7 +104,13 @@ def computeMdbcDensity(currentState: Any, config: SimulationConfig, schemeConfig
         # (r_b - r_g) . grad(rho)_g, with the MLS value + gradient from
         # `interpolateLiuLiu`.
         relPos = -currentState.ghostOffsets[ghostMask]
-        drho = -torch.einsum('nu, nu -> n', relPos, rho_interp_grad)
+        # No leading `-` here: `ghostOffsets` read at a ghost row now
+        # correctly carries `x_g - x_b` (`rigidBody/update.py`'s sign fix,
+        # `BOUNDARY_DENSITY_PLAN.md` §9.1), so `relPos` above is already
+        # `r_b - r_g`. This used to need an extra `-` to compensate for that
+        # row being wrong (an accidental cancellation, not a derivation) --
+        # removed as part of the same coordinated fix.
+        drho = torch.einsum('nu, nu -> n', relPos, rho_interp_grad)
         rho_proj = rho_interp + drho
 
         # -- Blend 1st -> 0th order by a smooth conditioning weight. `w` is

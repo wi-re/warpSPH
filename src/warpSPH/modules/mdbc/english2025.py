@@ -117,8 +117,43 @@ def computeMdbcDensityEnglish2025(currentState: Any, config: SimulationConfig, s
 
         hasAny = nNbFluid >= 1
         Mb = M[ghost].clamp_min(0.0)
-        MbSafe = Mb.clamp_min(1e-30)
-        alpha = torch.where(hasAny, Sq[ghost] / MbSafe, torch.full_like(Mb, rho0))
+        # Regularize the Shepard ratio by adding the SAME epsilon to both
+        # numerator and denominator, rather than flooring the denominator
+        # alone (as this used to). A single-neighbour ghost row's weight can
+        # be a genuinely tiny but internally-consistent kernel value (a
+        # particle sitting almost exactly on the kernel's cutoff radius,
+        # `r ~ 0.99999h` -- confirmed directly, `BOUNDARY_DENSITY_PLAN.md`
+        # §9.4/§9.6): `Sq = w*rho_j` and `Mb = w` share that SAME `w`, so in
+        # exact arithmetic `Sq/Mb = rho_j` regardless of how small `w` is --
+        # the weight cancels. Flooring only `Mb` (the old `MbSafe =
+        # Mb.clamp_min(1e-30)`) broke that cancellation: once `Mb` dropped
+        # below the floor, `alpha` became `(tiny Sq) / (arbitrary floor)`,
+        # not `rho_j` -- confirmed exactly (`Mb=9.6e-42` -> `alpha=9.6e-12`
+        # instead of ~1.0), which is what fed the catastrophic pressure swing
+        # that diverged the run. Adding the SAME `eps` to both preserves the
+        # cancellation at every scale instead: `Mb=0` (no neighbours) ->
+        # `alpha=rho0` exactly, matching the explicit fallback below; `Mb`
+        # comparable to or below `eps` (a vanishing/underflowing weight) ->
+        # `alpha` blends smoothly toward `rho0`, not a wrong near-zero value;
+        # `Mb >> eps` (a healthy stencil) -> `alpha ~= Sq/Mb`, unaffected.
+        # `eps = 1e-30` reuses the OLD (buggy) denominator-only floor's own
+        # threshold, applied symmetrically instead -- deliberately NOT a
+        # larger value like `1e-8`. A first attempt at `1e-8` fixed the
+        # crash but measurably worsened sloshingTank's later behaviour
+        # (earlier onset, more frequent large excursions) -- because `1e-8`
+        # sits ABOVE this case's typical *non-degenerate* single-neighbour
+        # scale (`Mb ~ 1e-20` at `nNbFluid=1`, confirmed empirically), it was
+        # silently overriding every ordinary N=1 row's raw Shepard value
+        # toward `rho0`, not just the genuinely-underflowed one -- a much
+        # bigger behaviour change than intended, discarding real information
+        # the OLD code (bug aside) actually used successfully. `1e-30` sits
+        # far below that normal N=1 scale (negligible perturbation, matches
+        # the old code's behaviour there almost exactly) while still
+        # dominating genuine underflow (`Mb ~ 1e-42`) enough to fall back to
+        # `rho0` instead of the wrong `9.6e-12`. `BOUNDARY_DENSITY_PLAN.md`
+        # §9.6/§9.7 has the full comparison.
+        _ALPHA_EPS = 1e-30
+        alpha = (Sq[ghost] + _ALPHA_EPS * rho0) / (Mb + _ALPHA_EPS)
 
         # -- Eq. (10), corrected sign (module docstring / plan §5.1):
         # P_b = P_g + rho0 * dot(g - a_b, relPos). `a_b = 0` (static walls).

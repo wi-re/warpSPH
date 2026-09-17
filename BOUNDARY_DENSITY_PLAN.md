@@ -698,63 +698,870 @@ in isolation too). **Do not flip the default** until the sloshingTank
   against small markers) to `managua` (dark midpoint) for
   `cases/dambreak.py`'s density field, per direct user feedback.
 
+## 8. Ceiling-normal-vs-gravity clamp attempt (2026-09-16): a confirmed regression, not a fix
+
+§6.4's sloshingTank cascade (t=5.66-6.9s) starts with a particle pinned at the
+free surface near the ceiling/corner -- an under-conditioned mDBC state
+"treated as real" pressure, the same family as
+[[antuono-pressure-switch-bug]]'s ceiling-hover pattern. User-proposed
+hypothesis: `english2025`'s Eq. (10) analytic term,
+`rho0 * dot(g - a_b, relPos)` (`relPos = x_b - x_g`, pointing along the
+wall's outward normal by construction), is signed exactly by
+`cos(angle(gravity, outward normal))` -- positive for a floor (gravity
+presses fluid against the wall, a real hydrostatic column justifies the
+term) and negative for a ceiling/overhang (gravity pulls fluid AWAY from the
+wall, no column exists to justify it). A thin residual film at a ceiling has
+no bulk column behind it; applying the raw negative term there manufactures
+spurious tension that could be exactly what pins it in place. Proposed fix:
+don't apply the hydrostatic push when wall normal and gravity are more than
+90 degrees apart.
+
+### 8.1 Implementation
+
+`.clamp_min(0.0)` on the `dot(g_b, relPos)` term before use (code reverted
+after the finding below; was `src/warpSPH/modules/mdbc/english2025.py`
+~lines 123-129). Chosen over a boolean mask specifically because a hard
+switch was expected to chatter -- `BOUNDARY_DENSITY_PLAN.md`'s own history
+(§1) already found a hard `wellConditioned` switch visibly stepping at a
+free-surface contact line, and the reasoning at the time was that
+`clamp_min` is continuous through `dot==0`, and that side/vertical walls
+have `dot≈0` "already, by construction" so the clamp would be a pure no-op
+for them and only change the ceiling.
+
+**That "no-op for side walls" assumption is the bug** (§8.2) -- it silently
+assumed a static tank. `sloshingTank` rolls.
+
+### 8.2 Validation: deterministic early divergence, not the targeted fix
+
+Ran the exact §6.4 comparison command twice, independently:
+```
+python examples/sloshingTank/run_sloshingTank.py --tLimit 7.0 \
+  --mdbcDensityScheme english2025 --densityDiffusionTerm fourtakas2019 --video
+```
+Both runs **diverged at the identical step 14135, t=1.4135s** -- traces
+bit-identical to ~15 significant figures across the two independent runs
+(one under heavy unrelated GPU contention from two external `llama.cpp`
+processes at 100% util, one solo), ruling out hardware/driver noise as the
+cause. This is **4+ seconds before** the cascade window the fix targets --
+the run never reaches t=5.66s, so the original question (does the clamp
+suppress the cascade?) is untested and untestable with this implementation.
+
+The failure itself has no visible precursor: the 5 timesteps immediately
+before are fully nominal (`maxVel` climbing smoothly 0.5965->0.5970, density
+and pressure unremarkable), then an instantaneous jump to `maxVel=NaN` with
+`minDensity` snapped to exactly 1.0 (looks like a NaN silently clamped
+upstream) at the very next recorded step. The last rendered frame before
+failure (t=1.41s) shows a calm, shallow sloshing layer -- no pinned
+particle, no ejection, nothing resembling the original cascade's character
+(which built up visibly over ~1.2s). This reads as a discrete numerical
+edge case triggered at a specific instant, not a physical instability.
+
+Baseline at the identical step is completely nominal and sails on to t=7:
+```
+step 14135, t=1.4135s:
+  baseline (pre-fix): minD=1.00003  maxD=1.00272  maxVel=0.599  sensorP=23.4 Pa
+  fixed (both runs):  minD=1.00000* maxD=1.00335  maxVel=NaN    sensorP=81.4 Pa
+```
+
+Marrone 3.1 regression check (§6.1's adversarial no-PST config,
+`--nx 35 --shifting off --tLimit 1.2`) showed **no regression** --
+`diverged=False`, maxVel peak 4.29 vs the recorded 4.83, density
+[0.989,1.010] vs the recorded [0.994,1.006] (small, plausibly this
+codebase's documented run-to-run chaotic sensitivity). Consistent with the
+diagnosis below: Marrone 3.1's tank is open-top and does not roll, so
+`dot(g, relPos)` is >=0 by construction there and the clamp genuinely is a
+no-op on that case.
+
+### 8.3 Diagnosed mechanism: the clamp's gate is in the wrong reference frame
+
+`sloshingTank` prescribes a time-varying roll angle -- confirmed directly
+from rendered-frame metadata that the gravity vector in the tank/simulation
+frame rotates over time (`g=(0.423,-9.80)` at t=1.16 vs `g=(0.693,-9.79)` at
+t=1.41). Over a roll cycle, EVERY wall's outward-normal-to-gravity dot
+product sweeps through zero, not just the ceiling's -- a side wall sits
+exactly at the `dot=0` threshold in the tank's rest orientation, so any roll
+at all pushes it to one side or the other, and it crosses back as the roll
+reverses. The `clamp_min` fix's own justification (§8.1, "no-op for side
+walls... by construction") implicitly assumed the wall/gravity geometry is
+static; it silently breaks the moment the geometry rotates relative to
+gravity, which is `sloshingTank`'s entire premise as a case.
+
+Per-particle, `clamp_min` is still continuous in time (no jump in the
+per-particle value). The likely amplification: because roll angle changes
+nearly uniformly along the boundary, many boundary/ghost pairs along the
+SAME wall cross `dot=0` in close temporal proximity, so the hydrostatic
+term's contribution along an entire wall segment can collapse from a
+meaningful value to zero within one or a few timesteps -- effectively a
+near-simultaneous, wall-wide change in boundary pressure that a calm,
+low-dynamic-pressure regime (t~1.4s, well before the first wave impact at
+~t=2.36s per the baseline record) has no comparable signal to absorb. This
+is a hypothesis, not root-caused to a specific particle/NaN source --
+**not yet instrumented at step 14135 to find the first non-finite value.**
+
+### 8.4 Disposition
+
+**Code reverted** (`git checkout -- src/warpSPH/modules/mdbc/english2025.py`)
+-- the clamp as implemented is a confirmed regression, not a candidate fix,
+and must not ship. Evidence preserved for a future attempt:
+- Baseline (pre-fix, unchanged): `examples/sloshingTank/output/baseline_precap/wcsph_mdbcRho-english2025_ddt-fourtakas2019_series.npz`
+- Diverged run 1 (backed up before being overwritten by run 2, same failure): `examples/sloshingTank/output/fixed_run1_diverged_t1.41/` (series.npz, field.mp4/gif, run.log)
+- Diverged run 2 (current contents of the main output path at time of writing, identical failure): `wcsph_mdbcRho-english2025_ddt-fourtakas2019_series.npz` / `_field.mp4` / `_field.gif`
+
+The underlying hypothesis (§8's opening paragraph -- a ceiling has no bulk
+column to justify the analytic hydrostatic term) is not refuted by this
+result; only THIS implementation of it is. **Next attempt should gate on a
+tank/body-frame-fixed notion of "which wall is the ceiling"** (e.g.
+classify each boundary particle's wall membership once, from its rest-state
+geometry, rather than recomputing `dot(g, relPos)` fresh every step against
+the instantaneously-rotated `relPos`) so a few degrees of roll cannot flip a
+side wall's classification and chatter it wall-wide -- or, before building
+that, instrument step 14135 directly (dump per-particle `hydrostaticTerm`,
+`P_b`, `rho_b`, and downstream pressure-force magnitude for the boundary
+layer at that exact step, both runs) to confirm this diagnosis rather than
+inferring it from the aggregate trace and rendered frame alone.
+
+### 8.5 Direct instrumentation (2026-09-16, same day): §8.3's hypothesis refuted; a different, more specific mechanism confirmed; a 135-degree cutoff survives the tested window
+
+Instrumented step 14135 directly per §8.4's action item, with a real
+per-particle dump (`scripts/probe_englishClampDivergence.py`, kept as a
+reusable diagnostic; degrades gracefully with a warning if run against the
+unmodified, unclamped file). Also tested, per a user suggestion mid-session,
+a **wider-angle cutoff**: rather than `dot(g,relPos).clamp_min(0)` (a hard
+90-degree cutoff -- gravity exactly perpendicular to a wall's outward normal
+already sits AT the threshold, so any roll at all flips a side wall's sign),
+generalize to an arbitrary cutoff angle by clamping the *cosine*:
+`cosTheta = dot(g,relPos) / (|g|*|relPos|)`, `cosTheta.clamp_min(cos(theta))`,
+`hydrostaticTerm = cosTheta_clamped * |g| * |relPos|` -- reduces to the
+original 90-degree clamp when `theta=90`, gives side walls headroom before
+clamping in for `theta=135`.
+
+**Methodology pitfall, caught and fixed before trusting any result:** the
+first instrumentation attempt hand-built the case config instead of reusing
+`run_sloshingTank.py`'s own `buildSpec`, and missed that `buildSpec`
+explicitly re-asserts `params['shifting']=True` for the WCSPH scheme (the
+case's own bare default is `shifting=False`, a `divergenceFree`-only
+default) -- `cases/sloshingTank.py`'s own comment states shifting/PST is
+*"the reason this case survives the wall slam at all."* Without it, even
+the **unclamped baseline** diverged at step 384. Fixed by matching
+`run_sloshingTank.py` exactly (`params=dict(shifting=True,
+correctdrhodt=False)`); all results below are from the corrected harness.
+
+**Three-way comparison, `--nSteps 14145` (t≈1.41s), window 14100-14145:**
+
+| variant | result |
+|---|---|
+| baseline (unclamped, current production) | `diverged=False`, ran the full window |
+| **clamp90** (§8.1's original clamp) | `diverged=True` at step 14134, NaN velocity at 14135 -- reproduces §8.2 exactly |
+| **clamp135** (cosine-generalized, 135-degree cutoff) | `diverged=False`, ran the full window |
+
+**The causal chain for clamp90's failure, directly traced (not inferred):**
+
+1. Boundary/ghost pair UID 5475, right wall, shallowest layer, just above
+   the still-water line -- a marginal, intermittently-wetted location.
+2. 66 consecutive captured calls: zero real fluid neighbours (`hasAny=False`),
+   `hydroRaw` pinned at a steady, negligible -0.0031 in all three runs alike.
+3. **Call 67 (real step 14133), in clamp90 only:** `hasAny` flips `True` --
+   one fluid particle enters this ghost's kernel support for the first time,
+   with a vanishingly small (float32-underflowing) weight. The Shepard
+   ratio `alpha = Sq/Mb` collapses toward 0 instead of ~1, giving
+   `P_g = c0^2*(alpha-rho0) ~ -400` -- a ~400x too-negative ghost pressure.
+   **The hydrostatic term itself is negligible here** (`hydroTerm ~ 2.7e-18`)
+   -- this is a pre-existing precision hole in the Shepard `hasAny` branch
+   (protects the exact `N=0` case, per §3 item 1's fix, but not `N=1` with a
+   near-zero weight), **not an arithmetic consequence of the clamp**.
+4. `rho_b = rho0 + P_b/c0^2 = 1 + (-400)/400 = 0.0` exactly, written to the
+   boundary particle.
+5. **Same call, same step:** `computePressureForceSurfaceAware` immediately
+   produces NaN for 4 nearby fluid particles (all within ~0.01m of UID 5475)
+   plus 99 boundary/ghost particles (harmless -- masked downstream). Call 66
+   had zero non-finite particles; call 67 has 103 -- the NaN is born at this
+   exact instant, in this function, not a delayed accumulation.
+6. Step 14134's velocities go NaN -- the divergence the run reports.
+
+**Answers to §8.4's three questions:**
+
+- **Concentrated or wall-wide?** The *triggering event* is a single
+  particle, one wall -- not a synchronized multi-particle collapse (§8.3's
+  literal "many pairs cross zero in close proximity" mechanism is
+  **refuted**). But the clamp's background perturbation genuinely *is*
+  wall-wide and continuous: at t~1.41s (near a roll-angle turning point,
+  barely sweeping) ~80% of the floor's particles sit at `hydroRaw` around
+  -0.3 to -0.4 and are clamped toward 0 continuously -- true since t~0, not
+  a rare sweep event (see §9 for why the sign is negative here at all).
+- **Dot-sign flip at that instant, or a coincidental marginal-neighbour
+  event?** **The marginal-neighbour event**, confirmed -- `hydroTerm` is
+  unchanged from 66 calls earlier at the failing call; no sign flip is
+  happening at that instant.
+- **Origin in `rho_b`/`P_b` here, or downstream?** **In this function**
+  (the Shepard-fallback branch), not the clamp arithmetic. Downstream
+  `computePressureForceSurfaceAware` is the confirmed propagation path to a
+  fluid-particle NaN, same step.
+
+**Net mechanism:** not a direct arithmetic bug in the clamp, and not §8.3's
+literal hypothesis -- a genuine, pre-existing precision hole in the
+zero-neighbour Shepard fallback (an `N=1`-with-underflowing-weight gap next
+to the already-fixed `N=0` gate), that clamp90's continuous, wide-scope
+perturbation of the boundary pressure field over the preceding 14133 steps
+was evidently enough to nudge into triggering at this exact step. Clamp135
+never reaches its (much larger) clamp threshold on the floor's actual
+`hydroRaw` range (max magnitude ~-0.4, far short of
+`cos(135deg)*|g|*|relPos| ~ -0.7`), so its floor `rho_b` stays close to
+baseline's (`[1.0000,1.0020]` vs `[0.9997,1.0019]` at call 60, vs. clamp90's
+visibly shifted `[1.0015,1.0028]`) -- consistent with staying close enough
+to baseline's trajectory to avoid the marginal-contact transition within
+the tested window.
+
+**Caveats:** only tested to t~1.41s, not the full 7s -- clamp135's survival
+here says nothing yet about the actual t=5.66-6.9s cascade it targets; that
+needs a separate full run. One loose end not chased: 5 boundary (kind=1,
+harmless/masked) particles on the far left wall also showed NaN
+`dvdt_pressure` at the same call 67 -- likely a coincidental second marginal
+event, not verified further. Code reverted to pristine after this session
+(`git diff` clean on `english2025.py`).
+
+## 9. A separate, orthogonal bug found while instrumenting §8: `ghostOffsets`'s sign is flipped at the ghost particle's own row
+
+Found incidentally while interpreting the per-particle dump above (needed
+`relPos`'s sign to make sense of "which wall is floor-like"), **not yet
+independently re-verified beyond this session's own tracing** -- flagged
+here at the same confidence level the discovering session gave it, pending
+a dedicated audit.
+
+**The bug:** `english2025.py:88`'s `relPos = -currentState.ghostOffsets[ghost]`
+is documented (module docstring, §5.1) as computing `x_b - x_g`. Checked
+empirically at step 0 (before any stepping): it does not -- it comes out as
+`x_g - x_b`, backwards from the documented/intended convention.
+
+**Root cause, traced in code:** `addBoundaryGhostParticles`
+(`src/warpSPH/rigidBody/ghostParticles.py:639-641`) deliberately negates the
+offset it writes at a ghost particle's own row, so that `ghostOffsets` reads
+as the intended `x_g - x_b` there. But
+`src/warpSPH/initializers/weaklyCompressible.py:254-255` auto-registers a
+(static) `RigidBody` for *every* boundary material and calls
+`updateBodyParticlesWCSPH` on it immediately at init, and again every step
+from `finalize`. That function
+(`src/warpSPH/rigidBody/update.py:61-65`) computes one
+`offsets = particlePositions - ghostParticlePositions` and writes the SAME,
+un-negated value to *both* the boundary row and the ghost row -- silently
+overwriting `addBoundaryGhostParticles`'s deliberate negation at the ghost
+row. Net effect: `ghostOffsets` read at a ghost particle's own row ends up
+`x_b - x_g` instead of the intended `x_g - x_b`, so `relPos` in
+`english2025.py` computes to `x_g - x_b` -- the opposite of what its own
+docstring and §5.1's DualSPHysics-cross-checked derivation assume.
+
+**Blast radius:** every mDBC module reading `ghostOffsets[ghostMask]` with
+this same pattern is affected: `english2025.py:88`, `densityBand.py:113`,
+`velocity.py:210`. `density2025.py:106-107` happens to carry an *extra*
+`-` elsewhere in its own formula (`drho = -einsum(relPos, grad)`) that, by
+algebraic inspection (not independently re-verified end-to-end), cancels
+this bug -- so production's default `'ramped'` scheme is *likely*
+unaffected, but that inference rests on one file's algebra, not a run-time
+check, and should not be trusted without a dedicated audit.
+
+**Why this matters for everything §5-7 already concluded about
+`english2025`:** §5.1's sign correction was verified against DualSPHysics'
+`Mdbc2PressClone` *as a formula* (`P_b = P_g + rho0*dot(g,relPos)`,
+`relPos = x_b - x_g`) -- that derivation is not in question. What's in
+question is whether the *running code*, this whole time, has actually been
+evaluating that formula with the correct-sign `relPos`, or with this bug's
+flipped sign. If flipped, `english2025` has been computing `P_b = P_g -
+rho0*dot(g, x_b-x_g)` in every one of §5-7's validation runs (Marrone
+3.1/3.4 at both resolutions, the sloshingTank baseline) -- the opposite
+hydrostatic sign from what the docstring, the derivation, and the DualSPHysics
+cross-check all claim. This does **not** invalidate the empirical
+performance numbers themselves (they measured whatever the actual code did,
+correctly), but it means the *causal story* for why `english2025` outperformed
+`'ramped'`/`'band'` there (§3.1/§5's "known, noise-free hydrostatic term vs.
+a fitted, lever-arm-amplified gradient") may not be the operative mechanism
+in the runs that produced those results, and it is not yet known which sign
+was actually in effect for §6.4's specific sloshingTank cascade this whole
+§8 investigation has been chasing.
+
+### 9.1 Follow-up audit (2026-09-16, same day): independently confirmed, full consumer table, and the fix is not a one-line patch
+
+Re-verified from scratch, independent of the instrumenting session's own
+harness: a standalone one-step script
+(`scripts/probe_englishClampDivergence.py`'s case-building pattern, minimal
+version not kept in the repo) compares `ghostOffsets` directly against
+ground-truth `positions[boundary] - positions[ghost]` via `ghostIndices`
+pairing, on sloshingTank at t=0. Result, exact to float32 precision (errors
+either `0.000e+00` or the genuine per-particle offset magnitude, nothing in
+between):
+
+```
+boundary row: ghostOffsets[b] vs (x_b - x_g)                        max err = 0.000e+00
+ghost row:    ghostOffsets[g] vs (x_g - x_b)  [intended convention] max err = 8.395e-02
+ghost row:    ghostOffsets[g] vs (x_b - x_g)  [the alleged bug]     max err = 0.000e+00
+```
+
+Confirms §9's finding exactly: the boundary row is always correct; the ghost
+row is always flipped. Also confirms the bug is universal, not
+roll/sloshingTank-specific -- `buildRigidBody`
+(`src/warpSPH/rigidBody/build.py:17-70`) wraps **every** boundary material
+with particles into a `RigidBody` unconditionally (`angularVelocity`/
+`linearVelocity` default to zero -- a wall only moves if a case script sets
+a nonzero rate afterward), and `updateBodyParticlesWCSPH` runs for every
+registered body regardless of whether it moves, both once at init
+(right after `addBoundaryGhostParticles` sets the correct value) and every
+step from `finalize` thereafter. So the corruption applies to every WC/
+incompressible case with boundary particles -- Marrone 3.1/3.4 included --
+not only rolling geometries; sloshingTank's roll only made the SYMPTOM
+(§8's clamp work) depend on gravity's direction, not the underlying data bug.
+
+**Full consumer audit** (every `ghostOffsets[ghostMask]`-pattern read found
+via `grep -rn ghostOffsets src/warpSPH`), determining whether each is
+actually wrong under the confirmed flipped sign, or coincidentally immune:
+
+| consumer | pattern | actual effect under the bug |
+|---|---|---|
+| `density2025.py:106-107` (`'ramped'`, production default) | `relPos=-ghostOffsets[ghost]`; `drho=-dot(relPos,grad)` | **Correct, by accidental cancellation** -- the function's own extra `-` in the `drho` line cancels the bug's sign flip exactly (verified algebraically: two negations of the same flipped quantity restore the intended `dot(x_b-x_g, grad)`). |
+| `modules/incompressible/wallPressure.py:255-256` (`'mls'` mode) | `relPos=-ghostOffsets[ghost]`; `dP=-dot(relPos,grad)` | **Correct**, same structure/cancellation as `density2025.py`. |
+| `english2025.py:88` | `relPos=-ghostOffsets[ghost]`, used directly in `dot(g,relPos)` | **Wrong -- sign flipped.** No compensating negation; matches §8/§9's original finding. |
+| `densityBand.py:113` | `relPos=-ghostOffsets[ghost]`; `xtb=xtg+relPos` (a **position**, not a scalar dot) | **Wrong, and NOT just a sign flip on the answer** -- the Taylor-shift evaluation point works out to `2*x_g - x_b` (algebra: intended shift is `+(x_b-x_g)`, the bug delivers `-(x_b-x_g)`, i.e. the same magnitude in the opposite direction from the ghost) instead of `x_b`. This is the mirror point of the boundary particle reflected through the ghost -- **not on the codebase's boundary at all**, and the resulting extrapolation error grows with the SAME lever arm (`x_b-x_g`, i.e. layer depth) that §3.1 already identified as the mechanism behind Band's depth/lever-arm divergence. This bug is a plausible, previously-unidentified CONTRIBUTOR to (not necessarily the sole cause of) that failure mode -- not yet re-validated with the bug fixed to confirm how much of §3's "architectural mismatch" verdict it actually explains. |
+| `velocity.py`'s `noSlip`/`freeSlip` (`_wallNormals`, line 130-132) | `n_b = ghostOffsets / \|ghostOffsets\|`, used only as `dot(w,n_b)*n_b` | **Mathematically immune regardless of sign** -- `n (n^T)` is invariant under `n -> -n`, so a flipped normal changes nothing here. |
+| `velocity.py`'s `extendedVelocity`, line 210 | `relPos=ghostOffsets[ghost]` (**no** negation, unlike every other consumer above); `vel=u_interp-dot(-relPos,grad)` | **Correct only because of the bug** -- this function's own formula omits the negation the other four apply, so it happens to land on the right answer only while `ghostOffsets[ghost]` is flipped. This is the mirror image of `density2025.py`'s situation: not independently correct, coincidentally correct, and would BREAK if the root cause were fixed without also adding a negation here. |
+| `wp_nopenshift.py:560` | `queryOffsets=ghostOffsets` (full array; kernel indexes at the **boundary** row for `BoundaryToFluid`, confirmed by tracing `checkDirectionality_i`) | **Unaffected** -- reads the boundary row, never corrupted. |
+| `systems/weaklyCompressible.py:96` (`_meanBoundaryNormal`) | `off=ghostOffsets[jj[sel]]` where `sel` selects `kinds[jj]==1` (boundary row) | **Unaffected**, same reason. |
+| `rigidBody/build.py:62-65` (`particleBoundaryNormals`/`Distances`, both rows) | snapshot taken once, **before** `updateBodyParticlesWCSPH` first runs (`build.py`'s call precedes the corrupting loop in `initializers/weaklyCompressible.py:249-255`) | Captures the **correct** pre-corruption value at both rows -- but only ever consumed by `io/export.py`'s `.h5` dataset writer (checked: no other reader in the tree). Inert for live physics; only affects exported diagnostic data, and even that is currently *correct* (pre-corruption snapshot), not wrong. |
+
+**What a real root-cause fix requires -- not a one-line patch.** Simply
+negating `update.py`'s ghost-row write (restoring the intended `x_g - x_b`)
+would fix `english2025.py` and `densityBand.py` for free (no other change
+needed -- they already use the documented convention), but would BREAK the
+two currently-correct modules (`density2025.py` and `wallPressure.py`'s
+`'mls'` mode both need their own compensating `-` removed to stay correct)
+and `velocity.py`'s `extendedVelocity` (needs a negation added, to match
+the convention it currently omits only because the bug supplies it). A
+correct fix therefore touches **four files together**
+(`rigidBody/update.py` + `density2025.py` + `wallPressure.py` +
+`velocity.py`), not one, and needs `density2025.py` (production default)
+and `wallPressure.py` (incompressible/DFSPH's `'mls'` wall-pressure mode)
+re-validated after the change, since both currently-correct paths would be
+silently exercised with the wrong sign otherwise -- a regression risk in
+production code, not just the two known-broken opt-in schemes.
+
+### 9.2 Fixed (2026-09-16, same day) and re-validated against production
+
+User elected the full fix (not a narrower patch confined to the two broken
+opt-in schemes). Applied all four coordinated changes identified in §9.1:
+
+1. `rigidBody/update.py:66-68` -- the root cause: `updatedOffsets[rigidBody.ghostParticleIndices]`
+   now gets `-offsets` instead of `offsets`.
+2. `mdbc/density2025.py:106-107` -- removed the now-redundant compensating
+   `-` (`drho = torch.einsum(...)`, was `-torch.einsum(...)`).
+3. `modules/incompressible/wallPressure.py:255-256` -- same removal
+   (`dP = torch.einsum(...)`, was `-torch.einsum(...)`).
+4. `mdbc/velocity.py:210` (`extendedVelocity`) -- added the negation it was
+   previously missing (`relPos = -currentState.ghostOffsets[ghostMask]`, was
+   unnegated).
+
+`english2025.py`/`densityBand.py` needed no changes -- confirmed correct
+automatically now that the source data is fixed.
+
+**Verified the fix took effect:** re-ran the same standalone one-step
+empirical check from §9.1 after the change -- ghost row now matches the
+intended `x_g - x_b` convention exactly (`0.000e+00` error), flipped
+convention now the one with nonzero error. Root cause confirmed fixed, not
+just patched around.
+
+**Production regression check, adversarial config** (`scripts/
+probe_deltaSPHMarrone.py --nx 35 --shifting off --tLimit 1.2 --video`, no
+`mdbcDensityScheme` override -- the true production default, `density2025.py`):
+
+| | §6.1 recorded (pre-fix) | post-fix |
+|---|---|---|
+| diverged | False | **False** |
+| maxVel peak | 13.9 @ t=0.66 | 13.925 @ t=0.657 |
+| maxVel end | 2.61 | 2.607 |
+| density range | [0.887, 1.109] | [0.8868, 1.1093] |
+
+Matches to the precision the original table was recorded at -- expected,
+not just hoped for: `density2025.py`'s old (buggy-input + compensating `-`)
+and new (fixed-input + no compensation) expressions are the same closed
+-form algebraic identity either way, so this result is a near-exact
+reproduction by construction, and it is one. Production (`'ramped'`) is
+confirmed unaffected.
+
+`wallPressure.py`'s `'mls'` mode (incompressible/DFSPH scheme) has the
+identical algebraic structure to `density2025.py`'s fix -- same reasoning
+applies, but not yet separately run through an incompressible-scheme
+regression case (this Marrone probe is weakly-compressible/`deltaSPH`
+only); flagged if incompressible-scheme confidence specifically is wanted
+later.
+
+**Production regression check, stable/recommended config** (`--nx 35
+--integrationScheme symplecticEuler --shifting on --densityDiffusionTerm
+fourtakas2019 --tLimit 0.9 --video`):
+
+| | §6.2 recorded (pre-fix) | post-fix |
+|---|---|---|
+| diverged | False | **False** |
+| maxVel peak | 4.74 @ t~0.73 | 4.738 @ t=0.733 |
+| maxVel end | 2.6 | 2.629 |
+| density range | [0.995, 1.003] | [0.9838, 1.0157] |
+
+`maxVel` (the more failure-predictive metric elsewhere in this plan)
+matches almost exactly. `density range` is measurably wider -- roughly 2x
+the old excursion band. Not attributed to this fix, for two reasons: (1)
+`density2025.py`'s change is a pure double-negation identity (both the old
+buggy-input+compensating-`-` and the new fixed-input+no-compensation paths
+reduce to the identical `torch.einsum` call on the identical floating-point
+`relPos` tensor -- sign-flip is exact in IEEE754, introduces no rounding),
+so this specific computation should be bit-identical; (2) §6.2's own text
+notes that row is reused verbatim from an EARLIER §3.2 measurement, which
+predates several unrelated fixes since landed in this codebase (the
+Antuono pressure sign fix, mdbc ghost-refresh changes, etc.) -- not a clean
+isolated baseline for just this change, and no same-codebase
+"before-this-exact-fix" run was preserved to isolate it (the files were
+edited in place before validating). This system is also documented
+elsewhere in this plan/memory as run-to-run chaotic-sensitive. Recorded
+here rather than waved away -- an open, low-priority observation, not a
+confirmed regression; a repeat run would sharpen this if wanted later.
+
+**Status: fixed and validated on both Marrone 3.1 configs (adversarial:
+clean match; stable: maxVel clean match, density range wider but not
+attributed to this fix -- see above).**
+
+### 9.3 `english2025` re-validated under the corrected sign (2026-09-16): edge intact, not an artifact of the bug
+
+User's follow-up, correctly prioritized: `english2025.py` has no
+compensating negation anywhere (unlike `density2025.py`/`wallPressure.py`'s
+accidental self-cancellation) -- if the sign bug were actually consequential
+to this scheme's validated stability advantage, THIS is the case where it
+would show. Re-ran both Marrone 3.1 configs with `--mdbcDensityScheme
+english2025` under the now-fixed sign.
+
+**Adversarial config** (`--nx 35 --shifting off --tLimit 1.2`):
+
+| | §6.1 recorded (wrong sign) | post-fix (correct sign) |
+|---|---|---|
+| diverged | False | **False** |
+| maxVel peak | 4.83 @ t=0.78 | **4.10** @ t=0.86 |
+| maxVel end | 2.17 | 2.16 |
+| density range | [0.994, 1.006] | [0.9896, 1.0047] |
+
+Lower peak velocity, essentially unchanged end velocity, marginally wider
+density band but still an order tighter than `'ramped'`'s post-fix 13.925
+peak / [0.8868,1.1093] range (§9.2). If anything modestly BETTER under the
+genuinely-correct formula, not worse.
+
+**Stable config** (`--nx 35 --integrationScheme symplecticEuler --shifting
+on --densityDiffusionTerm fourtakas2019 --tLimit 0.9`):
+
+| | §6.2 recorded (wrong sign) | post-fix (correct sign) | `'ramped'` post-fix (§9.2, for reference) |
+|---|---|---|---|
+| diverged | False | **False** | False |
+| maxVel peak | 4.48 @ t=0.78 | **4.87** @ t=0.75 | 4.74 @ t=0.73 |
+| maxVel end | 2.56 | 2.55 | 2.63 |
+| density range | [0.992, 1.004] | [0.987, 1.006] | [0.984, 1.016] |
+
+Still a clean pass, no divergence -- but a more nuanced result than the
+adversarial config. On the config where production was already stable, the
+corrected sign brings `english2025` almost exactly into line with
+`'ramped'` (4.87 vs 4.74 peak, both close together) rather than staying
+modestly ahead of it the way the old (wrong-sign) recorded row showed (4.48
+vs `'ramped'`'s then-baseline 4.74). Unlike `'ramped'`'s own §9.2
+comparison (an algebraic identity, so its shift is attributed to
+codebase drift, not the fix), THIS comparison is a clean, direct
+before/after of the same scheme with only the sign changed -- so this
+narrowing is a real, attributable effect of the fix, not noise.
+
+**Net reading:** `english2025`'s stability edge over `'ramped'` is
+confirmed NOT to be an artifact of the wrong sign on the adversarial
+config, where it remains clearly and substantially ahead (4.10 vs 13.9
+`maxVel` peak) -- the mechanism claim (analytic hydrostatic term beats a
+fitted, lever-arm-amplified gradient) holds up there under the real
+formula. On the easier, already-stable config, though, the genuine edge
+over `'ramped'` **narrows to roughly parity** once the sign is corrected --
+the previously-recorded modest advantage there (§6.2) was partly (not
+entirely -- both still pass cleanly) an artifact of the wrong sign
+happening to help on this specific easy case. Both configs still pass
+cleanly with no divergence either way.
+
+### 9.4 sloshingTank under the corrected sign (2026-09-16): diverges almost immediately -- same pre-existing precision hole as §8.5, triggered much earlier
+
+User's follow-up, correctly sequenced after the Marrone checks passed: re-ran
+§6.4's exact sloshingTank reproduction (`examples/sloshingTank/
+run_sloshingTank.py --tLimit 7.0 --mdbcDensityScheme english2025
+--densityDiffusionTerm fourtakas2019 --video`, no clamp code present --
+`english2025.py` itself carries zero diff from the original, only the sign
+fix upstream of it) to see whether the t=5.66-6.9s ceiling-hover cascade
+changes under the genuinely-correct formula.
+
+**Result: `diverged=True` almost immediately -- t=0.02s (164 steps), vs.
+the original wrong-sign run's full 7s survival.** Reproducible exactly
+(re-ran twice, identical step/time). `maxVelocity` was small and smoothly
+varying (0.03-0.05, a barely-started roll, nowhere near violent) for the
+preceding 20+ steps, then jumps straight to NaN with zero precursor --
+the same abrupt, precursor-free signature as §8.5's clamp90 divergence, not
+a gradual physical blowup.
+
+**Instrumented directly** (`scripts/probe_englishClampDivergence.py`'s
+pattern, ad hoc, not kept in the repo -- the case-building/monkeypatch
+technique from §8.5, reused): traced the exact particle and cause, not just
+inferred it.
+
+- Boundary particle UID 5493, left wall, `y=0.110` -- the same
+  marginal, near-the-still-water-line profile as §8.5's UID 5475 (a
+  different wall this time, same mechanism).
+- `nNbFluid=1` (passes the `hasAny=nNbFluid>=1` gate -- the "exact integer
+  count" fix from §3 item 1 protects against `N=0`, not this).
+- `Mb=9.59e-42` -- the single neighbour's kernel weight has essentially
+  underflowed to nothing (this is not merely "small," it is deep inside
+  float32 denormal territory).
+- `alpha = Sq/Mb = 9.6e-12` -- collapses toward 0 instead of ~1 (should
+  read as "no usable neighbour," reads as "valid" because the gate is on
+  neighbour COUNT, not on the resulting weight's magnitude).
+- `hydro term = 5.9e-6` -- negligible; **not the cause**, confirming this is
+  the identical mechanism §8.5 found, unrelated to the hydrostatic sign
+  itself.
+- `P_g = c0^2*(alpha-rho0) ~ -400`, `rho_b = rho0 + P_g/c0^2 = 0.0`
+  EXACTLY -- the same `Mb`-underflow-into-Shepard-collapse signature as
+  §8.5's UID 5475.
+- Same step: ~100 nonfinite pressure-force values across both left- and
+  right-wall boundary/ghost particles plus 3 nearby fluid particles -- the
+  same order of magnitude and propagation pattern as §8.5's finding.
+
+**This is not a new bug the sign fix introduced.** It is the SAME
+pre-existing Shepard-fallback precision hole §8.5 already documented
+(`hasAny` protects the exact `N=0` case but not `N=1`-with-an
+-underflowing-weight) in `english2025.py` (and, per §9.1's audit,
+`densityBand.py` inherits the identical pattern). The wrong sign didn't
+avoid this hole -- it just perturbed the boundary pressure field
+differently enough that THIS specific fragile particle happened not to get
+pushed over the edge for 5+ seconds, long enough to reach a different,
+already-documented failure (§6.4's ceiling-hover cascade) first. The
+corrected sign perturbs the same fragile field from t=0 in a way that
+triggers the identical hole almost immediately instead. Neither the sign
+nor the ceiling-clamp question is the real blocker here -- this precision
+hole is.
+
+**Net implication:** `english2025.py` cannot be meaningfully validated on
+sloshingTank (ceiling-hover cascade or otherwise) until this Shepard
+-fallback fragility is fixed -- a genuine numerical-robustness gap, not a
+sign or clamp-direction issue. The fix shape is already sketched by
+`density2025.py`'s own analogous protection (§ "1st-order (English Eq. 12)
+-> 0th-order (Shepard) blend ramps," `_MDBC_NBR_FLOOR`/`_MDBC_NBR_RAMP`):
+require more than a bare `>=1` neighbour count, and/or floor/ramp on `Mb`
+itself (the same class of fix `densityBand.py`'s docstring already
+describes doing for ITS `Mb`, §3 item 1 -- but that fix protects the
+*gradient* block there, not this *value* term, which both `english2025.py`
+and `densityBand.py` still gate on bare `hasAny`). Not yet implemented --
+flagged, not actioned, pending a scope decision (this affects both opt-in
+schemes' shared Shepard-value term, a small but real piece of numerical
+-robustness work, not a revert of anything done today).
+
+### 9.5 Sign re-verified against the DualSPHysics source directly (2026-09-16), and why sloshingTank hits this but Marrone 3.4 doesn't
+
+**Sign re-verification.** User's follow-up challenge: does `english2025.py`'s
+`relPos` need the "surface normal" convention (`r_g - r_b`) for the gravity
+dot product specifically, rather than the `r_b - r_g` it uses (and that its
+own docstring, correctly per the user, describes as right for the
+extrapolation)? Re-derived directly from
+`~/dev/DualSPHysics/src/source/JSphCpu_mdbc.cpp` (not the transcription in
+§5.1 -- read the actual file this time): `boundnor = x_g - x_b` (line 49,
+`gposp1 = pos[p1] + boundnor[p1]`, i.e. the ghost position is built by
+adding `boundnor` to the boundary position); `dpos = -boundnor = x_b - x_g`
+(line 338). `Mdbc2PressClone` (lines 182-205) computes
+`normal = boundnor/|boundnor|`, `normpos = dot(dpos, normal)`,
+`normforce = rho0*dot(gravity, normal)`, `pressfinal = pghost +
+normforce*normpos`. **`normal` appears twice, multiplicatively** -- flip
+its sign and both `normforce` and `normpos` flip, so their product (and the
+whole formula) is invariant under `normal -> -normal`. Substituting through
+algebraically (and confirmed with a concrete floor-case numeric check: `x_b=(0,0)`,
+`x_g=(0,0.1)`, `g=(0,-9.8)` -> `pressfinal = pghost + 0.98*rho0`, matching
+`pghost + rho0*dot(g, x_b-x_g)` exactly) collapses the whole thing to
+`pressfinal = pghost + rho0*dot(gravity, x_b - x_g)` -- no normal needed at
+all, `english2025.py` doesn't compute one, and dotting `relPos` (=`x_b-x_g`
+post-fix) directly with gravity is exactly this reduced form. Also
+confirmed `computeGravity` (`modules/gravity/wrapper.py`) returns the plain
+physical acceleration vector -- no hidden normal-related transform that
+could reintroduce a normal-direction dependency. **The fix stands**;
+`r_g - r_b` in the gravity dot product would reintroduce the original
+flipped sign, not correct anything.
+
+**Marrone 3.4, corrected sign** (`--nx 128 --tStar 3.0 --mdbcDensityScheme
+english2025 --shifting off`, matching §6.3's original config): **6/6 PASS,
+`diverged=False`** -- `maxVel` 29.27 (4.8 U_max), density [0.996,1.026],
+no penetration, KE decaying. Confirms the precision hole (§9.4) genuinely
+does not manifest on this case, not just "hasn't been observed yet."
+
+**Why sloshingTank but not Marrone 3.4 -- traced, not guessed.** Tracked
+the minimum Shepard weight (`Mb`) among ghost rows with exactly one fluid
+neighbour (`nNbFluid==1`, the exact class of row §9.4's failure came from),
+every step, for the first ~164-300 steps of each case (`english2025`,
+otherwise matching settings). Both geometries produce razor's-edge
+near-zero `Mb` values -- this is not unique to sloshingTank, it is an
+inherent side effect of `gridsnap` ghost placement against a regular
+-lattice fluid IC, wherever a ghost's kernel-support boundary happens to
+graze a single fluid particle almost exactly. The difference is temporal:
+
+- **sloshingTank**: a marginal (`N=1`) row appears in only 19 of 164
+  captured steps, but when it does, its weight decays SMOOTHLY AND
+  MONOTONICALLY across 13 consecutive steps from t=0
+  (`2.7e-20 -> 2.5e-20 -> ... -> 1.8e-23 -> 4.3e-25 -> 2.4e-31`) -- nothing
+  disturbs that one particle (confirmed independently by §9.4's
+  frozen-gravity test: this spot is at rest, no roll needed to reproduce
+  it), so it just keeps drifting toward genuine float32 underflow with
+  nothing to interrupt it.
+- **Marrone 3.4**: marginal rows appear far MORE often (136 of 300 steps,
+  including one 84-consecutive-step run) -- the violent splashing
+  constantly creates new marginal contacts -- but the weight FLUCTUATES
+  around a stable order of magnitude (~1e-8) rather than monotonically
+  collapsing (e.g. `1.9e-8 -> 3.9e-8 -> 7.1e-8 -> 1.2e-7 -> ...`, even
+  across that 84-step run) -- the fast-moving fluid keeps perturbing each
+  marginal particle's neighbourhood before it can drift all the way to the
+  edge.
+
+So the fragile geometric coincidence exists in both cases (this is a
+property of `gridsnap` ghost placement generally, not a sloshingTank
+-specific defect); Marrone's violent dynamics never let a marginal particle
+sit still long enough to fully underflow, while sloshingTank's calm free
+surface does. This directly explains why Marrone's extensive validation
+(§6.1-6.3d, §9.3) never surfaced §9.4's precision hole despite sharing the
+exact same underlying fragility.
+
+### 9.6 The Shepard precision hole, fixed (2026-09-16): why it doesn't cancel, and a symmetric-epsilon regularization
+
+**Why the numerator/denominator don't cancel (user's question, worth
+recording precisely).** In exact arithmetic, `alpha = Sq/Mb = (Sigma w_j
+rho_j)/(Sigma w_j)` reduces to `rho_j` for a single neighbour regardless of
+how small its kernel weight `w` is -- the SAME `w` appears in both sums, so
+it cancels. It didn't cancel here because of an asymmetric safety clamp:
+`Mb = M[ghost].clamp_min(0.0)`, `MbSafe = Mb.clamp_min(1e-30)`,
+`alpha = Sq[ghost]/MbSafe` (the pre-fix code). `Sq` (the numerator) was
+NEVER floored; only `Mb` (the denominator) was, and only once it dropped
+below `1e-30`. For UID 5493's failing row, true `Mb ~ 9.6e-42` (below the
+floor) but `Sq ~ Mb*rho_j ~ 9.6e-42` (never touched) -- so
+`alpha = Sq/MbSafe = 9.6e-42/1e-30 = 9.6e-12`, matching §9.4's captured
+value exactly, not an approximation. The `1e-30` floor was meant only to
+avoid literal `0/0`; applied to just one side of the ratio, it silently
+converts "technically valid but vanishingly small" into "wildly wrong but
+finite," which is worse than the `NaN` it was meant to prevent (a `NaN`
+gets caught by `nan_to_num`; a wrong-but-finite value doesn't).
+
+**The fix (user-proposed): add the SAME epsilon to both sides.**
+`alpha = (Sq[ghost] + eps*rho0) / (Mb + eps)`. This preserves the
+cancellation at every scale instead of breaking it at one: `Mb=0` (no
+neighbours) -> `alpha=rho0` exactly (matching the existing explicit
+fallback, now redundant for this term but left in place as a second
+guarantee on the final `rho_b`, unchanged); `Mb` comparable to or below
+`eps` -> `alpha` blends smoothly toward `rho0` instead of the wrong
+near-zero value; `Mb >> eps` -> `alpha ~= Sq/Mb`, unaffected.
+
+**Calibrating `eps`:** measured this case's own `Mb` distribution directly
+(not the `density2025.py`-docstring's Marrone-oriented "healthy ~1e-3"
+number) -- at nx=200, a genuinely healthy row (`nNbFluid=4`) has
+`Mb ~ 7.3e-4`; even a non-degenerate `nNbFluid=1` row sits around
+`Mb ~ 1e-20` already (single-neighbour rows are inherently marginal in
+this setup, independent of underflow). `eps = 1e-8` sits 4-5 orders of
+magnitude below the healthy floor (<0.002% perturbation there) while
+fully dominating every `nNbFluid=1` case and the catastrophic underflow
+range -- meaning single-neighbour rows now uniformly fall back toward
+`rho0`, which is the intended, conservative behaviour, not an accident of
+where the old `1e-30` constant happened to sit.
+
+**Implemented** in `english2025.py` only (the file under active
+investigation). `densityBand.py` has an analogous `alpha = Sq[ghost] /
+MbSafe` pattern (`MbSafe = Mb.clamp_min(1e-30)`) that likely has the same
+issue -- not yet fixed there, flagged for a follow-up pass.
+
+**Validated:**
+
+- **sloshingTank** (`--tLimit 7.0 --mdbcDensityScheme english2025
+  --densityDiffusionTerm fourtakas2019 --video`): **`diverged=False`, runs
+  the full 7s** -- was diverging at t=0.02s before this fix. The precision
+  hole is resolved. The run now reaches a DIFFERENT, worse excursion later:
+  density [0.518, 2.889] at t~5.53-5.77s, sensor pressure peak 102,347 Pa
+  at t=4.65s, onset ~t=2.36-2.46s. This timing lines up closely with §6.4's
+  ALREADY-DOCUMENTED ceiling-hover cascade (originally t=5.66-6.9s, peak
+  98,177 Pa under the wrong sign) -- almost certainly the same pre-existing,
+  separately-tracked free-surface-pinning mechanism
+  ([[antuono-pressure-switch-bug]]), now larger in magnitude under the
+  genuinely-correct sign and no longer masked by the earlier Shepard-hole
+  crash. Not yet root-caused further this session -- flagged as the next
+  open item, not a new bug from today's work.
+- **Marrone 3.4** (`--nx 128 --tStar 3.0 --mdbcDensityScheme english2025
+  --shifting off`): **6/6 PASS, diverged=False, maxVel=29.25** (pre-fix:
+  29.27) -- no regression, essentially identical. Worth checking despite
+  §9.5's finding that Marrone doesn't hit the OLD `1e-30` floor: the new
+  `eps=1e-8` is comparable to or larger than some of Marrone's own observed
+  marginal `Mb` values (`1e-8` to `1e-25` range, §9.5's trajectory), so it
+  could plausibly have touched legitimate marginal-but-real Marrone
+  stencils differently -- confirmed it didn't, empirically.
+- **Marrone 3.1** adversarial-config re-check: deferred (user redirected
+  effort toward the longer-duration 3.4 check below instead, since a
+  short-`tStar` run doesn't probe the thin-sheet/boundary interaction the
+  investigation actually cares about -- §6.3b/§6.3c already established
+  that pattern: short runs missed failures a longer duration exposed).
+- **Marrone 3.4 at 3x duration** (`--nx 128 --tStar 9.0`, matching §6.3b's
+  protocol exactly -- the config that originally exposed `'ramped'`'s late
+  secondary-impact/kinetic-energy failure a short run couldn't see):
+  **6/6 PASS, `diverged=False`, `maxVel=29.25`, `dKE/dt*` (2nd half)
+  -0.616 (decaying)** -- no regression at the longer duration either.
+
+### 9.7 `eps=1e-8` overcorrected; recalibrated to `eps=1e-30` -- substantially better than both
+
+**User's observation, correct:** the full-7s sloshingTank run with
+`eps=1e-8` (§9.6) looked WORSE than the original wrong-sign baseline, not
+just different -- density swung to `[0.518, 2.889]` (wider than the
+baseline's `[0.65, 1.72]`) and the smoothed sensor-pressure trace itself
+went fully off-scale (peak 102,347 Pa vs the baseline's 98,177 Pa, but
+recurring across at least three separate off-scale events instead of one,
+with onset shifted much earlier, ~t=2.4s vs ~t=5.66s).
+
+**Root cause: `eps=1e-8` sits ABOVE this case's own typical `Mb` scale for
+a non-degenerate single-neighbour row (`Mb ~ 1e-20`, §9.5/§9.6), not just
+above the catastrophic-underflow range (`Mb ~ 1e-42`).** So it wasn't
+narrowly patching the one pathological particle -- it was silently
+overriding EVERY ordinary `nNbFluid=1` boundary row's raw Shepard value
+toward `rho0` throughout the whole run, discarding real information the
+OLD (buggy) code's unclamped `Sq/Mb` had actually been using successfully
+at that scale. A much bigger, more indiscriminate behaviour change than
+intended.
+
+**Recalibrated to `eps=1e-30`** -- reusing the OLD code's own denominator
+-only floor threshold, just applied symmetrically instead of
+asymmetrically. This sits far below the normal `nNbFluid=1` scale
+(negligible perturbation, near-reproduces the old code's behaviour there)
+while still dominating genuine underflow (`Mb~1e-42`) enough to fall back
+to `rho0` instead of the wrong `9.6e-12`.
+
+**Full three-way comparison, sloshingTank + `english2025`, full 7s
+(`--tLimit 7.0 --mdbcDensityScheme english2025 --densityDiffusionTerm
+fourtakas2019 --video`):**
+
+| | original (wrong sign) | `eps=1e-8` | `eps=1e-30` |
+|---|---|---|---|
+| diverged | False (full 7s) | False (full 7s) | **False (full 7s)** |
+| onset of worst excursion | ~t=5.66s | ~t=2.4s | ~t=4.0-6.5s |
+| density range (whole run) | [0.65, 1.72] | [0.518, 2.889] | **[0.725, 1.436]** |
+| sensor pressure peak | 98,177 Pa | 102,347 Pa | **50,031 Pa** |
+| maxVel peak | 16.4 | ~11.0 | **7.25** |
+
+`eps=1e-30` beats BOTH the `eps=1e-8` attempt and the original baseline on
+every metric -- tighter density range than either, roughly half the peak
+pressure, lower peak velocity. The worst excursion's timing (t~4.0-6.5s,
+peaking t~6.4-6.5s) also sits much closer to the original baseline's
+already-documented t=5.66-6.9s window than `eps=1e-8`'s much-earlier onset
+did -- consistent with `eps=1e-30` reproducing the old code's (better
+-behaved) dynamics almost everywhere except the one genuinely pathological
+case, rather than broadly changing behaviour. The smoothed sensor-pressure
+trace now tracks the measured record reasonably well across all five roll
+-cycle impacts, unlike `eps=1e-8`'s fully-off-scale smoothed peaks.
+
+**`_ALPHA_EPS` updated to `1e-30` in `english2025.py`** (was `1e-8`,
+briefly, not shipped as final). Marrone re-validation at `1e-8` (§9.6)
+should be treated as superseded by this recalibration -- not yet re-run at
+`1e-30` specifically, though since `1e-30` is a strict subset of what the
+old (already-Marrone-validated) code did, no regression is expected there;
+flagged if anyone wants that explicit re-check.
+
+**Remaining excursion likely the pre-existing ceiling-hover mechanism, not
+a new bug.** User directly observed (watching the rendered video) particles
+sticking to the ceiling that then randomly fall or get ejected into the
+fluid, causing pressure spikes -- matching
+[[antuono-pressure-switch-bug]]/§6.4's already-documented "ceiling-hover"
+pattern (a particle pinned at the free surface near a corner/ceiling by an
+under-conditioned mDBC fallback pressure, eventually ejected
+catastrophically) exactly. This is a separate, pre-existing failure mode
+that neither today's sign fix nor the Shepard-hole fix was ever going to
+address -- §8's original ceiling-clamp attempt was aimed at exactly this
+mechanism before getting derailed into the sign-bug/Shepard-hole
+investigation. **Next step, if picking this back up:** now that the
+Shepard hole and sign are both fixed and sloshingTank runs cleanly to full
+duration otherwise, this ceiling-hover mechanism is finally isolated enough
+to investigate directly (previously masked by earlier, more severe
+failures) -- likely where §8's clamp135 angle-cutoff idea (or a
+differently-targeted fix for the free-surface pinning itself) belongs.
+
+### 9.8 Marrone 3.4 at full resolution/duration (nx=256, tStar=15.6605), recalibrated `eps=1e-30`
+
+User-requested: the highest-resolution, longest-duration config this
+investigation has (§6.3c's protocol -- `t=5s`, matching the pre-existing
+`sun2017DeltaSPH_nx256` reference rows), specifically to see thin-sheet/
+boundary interaction behaviour more clearly than a shorter or coarser run
+can. `--nx 256 --tStar 15.6605 --mdbcDensityScheme english2025 --video`
+(shifting off, default):
+
+**6/6 PASS, `diverged=False`, reached t*=15.66/15.6605.** `rho` [P05,P99]
+in [0.9971, 1.0222] (pointwise max 1.212); `maxVel` 39.07 (6.4x U_max,
+report-only threshold is 12x, well clear); no wall or obstacle
+penetration; `dKE/dt*` (2nd half) -1.168 (decaying). Comparable to the
+pre-Shepard-fix §6.3c baseline at the same config (`maxVel` 32.4,
+`dKE/dt*` -1.10 decaying) -- both clean, `maxVel` modestly higher here but
+still far under the report threshold and kinetic energy still properly
+decaying, not the growing-energy failure `'ramped'` showed at nx=128/this
+duration (§6.3b). No regression from the recalibrated Shepard fix at this
+combined highest-resolution/longest-duration config.
+
 ## Status
 
-Open. `mdbcDensityScheme='band'` is implemented and toggle-able but should
-**not** be treated as a drop-in replacement for `'ramped'` yet — it is a
-validated improvement for the narrow thin-sheet/marginal-conditioning
-failure mode, and a live A/B research tool, but not yet more robust than
-production on the actual dam-break stress test. Do not flip the default.
+Open, actively worked 2026-09-15 through 2026-09-17. This section is a
+current-state summary; §§1-9.8 above are the full history/evidence trail.
 
-`mdbcDensityScheme='english2025'` (English 2025 Eqs. 8-11, corrected sign,
-§5-6) is implemented and toggle-able. On every Marrone 3.1/3.4 config tested
-across two resolutions each (§6.1, §6.2, §6.3c, §6.3d), it is the most
-consistently well-behaved of the three schemes and the only one that never
-diverged — including where `'band'` now catastrophically fails at 2x
-resolution on 3.4 (§6.3d: diverges at t*=4.21/15.66, visually confirming the
-depth/lever-arm-into-a-cascade mechanism §3.1/§5 theorized). One earlier
-claim is **retracted**: §6.3b's finding that `'ramped'` fails 3.4's
-kinetic-energy check does NOT reproduce at 2x resolution (§6.3d) — that
-looks like an nx=128 resolution artifact, not a durable property of
-`'ramped'`'s mDBC scheme. (`'ramped'` still shows a real blow-up signature
-at nx=256 that the `--report` script's velocity check is too loose to
-catch — §7 — so `english2025`'s edge there stands, just not for the reason
-originally claimed.)
+**`mdbcDensityScheme='english2025'`** is implemented, toggle-able, **still
+not the default**. Two significant, unrelated bugs were found and fixed
+this session, both re-validated against Marrone 3.1 and 3.4 (multiple
+resolutions, including the full `nx=256`/`tStar=15.66` protocol) with no
+regression:
 
-**sloshingTank, tested for the first time this session (§6.4) with the full
-candidate-default combo (`english2025` + PST + `fourtakas2019` DDT,
-functionally close to running DualSPHysics' own defaults): NOT a clean
-pass, but neither is `'ramped'` at the same settings.** `english2025`
-survives the full t=7s reference duration with one real, large-amplitude
-cascade at t=5.66-6.9s (sensor pressure 98,177 Pa; density swinging to
-[0.65, 1.72], an actual particle ejection). The `'ramped'` baseline
-(run this session, §6.4) also survives the full 7s, but shows a DIFFERENT
-failure character: many isolated pressure spikes at nearly every wave
-impact throughout the run (peak 158,822 Pa -- higher than `english2025`'s),
-while density/velocity stay bounded ([0.857, 1.288], no ejection). Neither
-is straightforwardly "worse" -- frequent-but-contained (`'ramped'`, matching
-[[sloshing-rightwall-thin-sheet-kick]]'s already-documented sensitivity) vs.
-rare-but-severe (`english2025`). This rules out "`english2025` broke a
-clean case" -- `'ramped'` was never clean here either -- but does not
-cleanly exonerate `english2025`'s specific cascade as pure case-inherent
-noise vs. partly scheme-influenced. Given the small (n=1 per scheme) sample
-and known timing-sensitivity of these events, not pursued further this
-session.
+1. **`ghostOffsets` sign bug** (§9-9.2) -- a `RigidBody` init/step hook was
+   silently overwriting a deliberate sign convention at every ghost
+   particle's own row, universal across every WC/incompressible case with
+   boundary particles. Fixed across the four files that needed coordinated
+   changes (`rigidBody/update.py`, `density2025.py`, `wallPressure.py`,
+   `velocity.py`'s `extendedVelocity`); `english2025.py`/`densityBand.py`
+   needed no changes, they become correct automatically. Production's
+   `'ramped'` default re-verified clean on both Marrone 3.1 configs.
+2. **Shepard precision hole** (§9.4-9.7) -- `english2025.py`'s ghost-value
+   Shepard ratio floored only its denominator, breaking a cancellation that
+   should hold at any scale; fixed via symmetric epsilon regularization
+   (`alpha = (Sq+eps*rho0)/(Mb+eps)`). First calibration (`eps=1e-8`)
+   overcorrected -- caught directly from the rendered video/pressure plot,
+   not just aggregate pass/fail -- and was recalibrated to `eps=1e-30`,
+   which beats both that attempt and the original buggy baseline on every
+   metric. `densityBand.py` has the identical pattern, **not yet fixed
+   there**.
 
-**Still not the default. Do not flip it** — the Marrone evidence is strong
-across two resolutions each and only strengthens `english2025`'s case there;
-sloshingTank shows both candidate schemes have case-inherent rough edges
-that are a separate investigation from this one's scope (mDBC boundary
-density extrapolation specifically). This investigation has been burned
-before by a candidate that looked good until a case outside the original
-test family exposed a gap (`'band'` on the real dam-break, §3) — sloshingTank
-did surface real behaviour neither scheme handles cleanly, just not in a
-way that discriminates between them. **Next session:** (1) tighten
-`probe_deltaSPHMarrone34.py --report`'s velocity check and NaN handling
-(§7) so a borderline run can't score a misleading 6/6; (2) a 3D
-implementation and a moving-boundary test (`a_b` is still hardcoded to
-zero) before any default change is considered; (3) the sloshingTank
-free-surface pinning/collision sensitivity (§6.4, both the cascade and the
-second-peak mismatch) is real but appears orthogonal to `mdbcDensityScheme`
--- likely belongs in a separate investigation (surface tension/friction/
-resolution), not this plan.
+Together these let sloshingTank survive its full 7s reference duration for
+the first time under the genuinely-correct formula (previously it either
+diverged almost immediately from the Shepard hole, or "survived" only
+because the wrong sign happened to avoid triggering it for 5+ seconds).
+
+**The one item still open on sloshingTank:** a smaller excursion around
+t=4-6.5s survives both fixes -- density [0.725,1.436], pressure peak
+50,031 Pa, much closer in timing and magnitude to the original baseline
+(t=5.66-6.9s, 98,177 Pa) than either intermediate attempt was. User
+directly identified this in the rendered video as particles sticking to
+the ceiling and later falling/being ejected into the fluid -- matching
+[[antuono-pressure-switch-bug]]/§6.4's already-documented ceiling-hover
+mechanism exactly. This is what §8's original clamp attempt targeted,
+before that investigation got derailed into the sign-bug/Shepard-hole
+chain. **This is now the most directly actionable next step** -- for the
+first time, it is isolated enough (no larger failure masking it) to
+investigate on its own.
+
+**`mdbcDensityScheme='band'`** unchanged this session -- still a validated
+research tool for a narrow failure mode, not a `'ramped'` replacement. Its
+own Taylor-shift bug (§9.1, extrapolates to the boundary particle's mirror
+reflection through the ghost) was discovered as a side effect of this
+session's audit but not yet fixed or re-validated -- worth doing, since it
+may explain part of §3's depth/lever-arm divergence verdict that was
+previously attributed entirely to Band's architecture.
+
+**Do not flip the default away from `'ramped'`.**
+
+**Next steps, in priority order:**
+1. Investigate the ceiling-hover mechanism itself, now that it's isolated
+   -- likely where §8's clamp135 angle-cutoff idea belongs, but that idea
+   was validated under the buggy sign convention and needs re-checking
+   under the now-correct one.
+2. Apply the same symmetric-eps fix to `densityBand.py` and re-validate it
+   against §3's stress configs, to see how much of its depth/lever-arm
+   divergence verdict this explains vs. its own architecture.
+3. `probe_deltaSPHMarrone34.py --report`'s velocity/NaN-handling looseness
+   (§7) -- still unfixed, still means a 6/6 score can hide a real blow-up.
+4. A 3D implementation and a moving-boundary test (`a_b` is still
+   hardcoded to zero in `english2025.py`) before any default-scheme change
+   is considered.

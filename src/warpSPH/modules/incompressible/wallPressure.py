@@ -253,7 +253,11 @@ def wallPressureExtrapolation(state: Any, config: Any, adjacency: Any,
         adjacency=hashMap)
     bIdx = state.ghostIndices[ghost]
     relPos = -state.ghostOffsets[ghost]
-    dP = -torch.einsum('nu,nu->n', relPos, p_grad)
+    # Same fix as `mdbc/density2025.py` (`BOUNDARY_DENSITY_PLAN.md` §9.1):
+    # `relPos` is already `r_b - r_g` now that the ghost row's sign is
+    # correct, so the extra `-` this used to need to compensate for that row
+    # being wrong is removed.
+    dP = torch.einsum('nu,nu->n', relPos, p_grad)
     p_proj = p_interp + dP
     shepDen = A_g[:, 0, 0]
     shep = torch.where(shepDen > 0, b[:, 0] / shepDen.clamp_min(1e-12),
