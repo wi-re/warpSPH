@@ -98,6 +98,21 @@ def parseArgs(argv):
                    help='|dvdt_pressure| threshold [m/s^2] to flag as extreme '
                         'in the inline scan (lower than the divergence probe '
                         'default -- we want the PRECURSOR, not just NaN).')
+    p.add_argument('--resumeFrom', type=str, default=None,
+                   help='path to a storeMode=states checkpoint .h5 to resume '
+                        'from (runner.py CaseSpec.resumeFrom) -- test a code '
+                        'change against an already-reproduced event in a few '
+                        'hundred steps instead of re-simulating from t=0.')
+    p.add_argument('--resumeStepOffset', type=int, default=0,
+                   help="the checkpoint's own absolute step number (e.g. "
+                        '65000 for state_65000.h5); --nSteps/--windowLo/'
+                        '--windowHi all stay in this same absolute step '
+                        'space, matching the original run.')
+    p.add_argument('--pressureForceRenormalized', action='store_true',
+                   help='apply the DualSPHysics-style completeness-gated '
+                        'pressure-force renormalization (schemes/deltaSPH.py '
+                        'step 13, BOUNDARY_DENSITY_PLAN.md §10 / '
+                        'DELTASPH_VALIDATION_PLAN.md §5.23/§5.32).')
     return p.parse_args(argv)
 
 
@@ -133,6 +148,9 @@ def main(argv=None):
     )
     if args.nx is not None:
         overrides['nx'] = args.nx
+    if args.resumeFrom:
+        overrides['resumeFrom'] = args.resumeFrom
+        overrides['resumeStepOffset'] = args.resumeStepOffset
     spec = spec.merged(**overrides)
 
     _prevCfg = case.configureScheme
@@ -140,6 +158,8 @@ def main(argv=None):
         _p(ctx)
         ctx.schemeConfig.mdbcDensityScheme = 'english2025'
         ctx.schemeConfig.diffusionParams.densityDiffusionTerm = DensityDiffusionScheme.fourtakas2019
+        if args.pressureForceRenormalized:
+            ctx.schemeConfig.pressureForceRenormalized = True
     case.configureScheme = _cfgMdbc
 
     captureEnabled = [False]

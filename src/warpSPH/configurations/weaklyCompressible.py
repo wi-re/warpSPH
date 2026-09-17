@@ -82,19 +82,31 @@ class WeaklyCompressibleSPHConfig:
     pressureForceTerm: PressureForceScheme = field(default=PressureForceScheme.Antuono, metadata={'description': 'Pressure force term to use'})
     #: Apply the same kernel-gradient renormalization matrix `deltaSPH.py`
     #: already computes for `gradRhoL` (`detectFreeSurface`'s per-particle
-    #: covariance fit) to the pressure-force gradient too
-    #: (`wp_surfaceAware.py`'s existing but previously-unused
-    #: `useGradientRenormalization`/`Li` path). False (default) leaves every
-    #: existing case unchanged -- the raw kernel gradient is used, as always.
+    #: covariance fit) to the pressure-force gradient too, but only where a
+    #: per-particle kernel-completeness (Shepard-sum) gate says the local
+    #: neighbourhood is complete AND the particle is not flagged free-surface
+    #: -- everywhere else (including every free-surface particle) the raw,
+    #: unrenormalized gradient is used, unchanged from the `False` behaviour.
+    #: False (default) leaves every existing case unchanged.
+    #:
     #: `DELTASPH_VALIDATION_PLAN.md` 5.14/5.15/5.17/5.19-5.22: the Antuono
     #: (`sun2018` Eq. 9) pressure switch's symmetric branch is a real,
     #: nonzero force at any truncated/disordered kernel support even for a
     #: uniform pressure field, because the raw `Sum_j V_j grad_i W_ij` is
     #: only ~0 for a complete, regular neighbourhood -- exactly what a
     #: renormalized gradient is meant to restore. Neither PST, the DDT
-    #: renormalization, nor either dissipation term fixed it (5.20-5.22);
-    #: this renormalizes the operator the artifact actually lives in.
-    pressureForceRenormalized: bool = field(default=False, metadata={'description': 'Apply gradient renormalization (the same L matrix used for gradRhoL) to the pressure-force kernel gradient'})
+    #: renormalization, nor either dissipation term fixed it (5.20-5.22).
+    #: 5.23's first attempt applied the renormalization unconditionally and
+    #: made the peak 8.8x WORSE -- `Li` comes from a covariance fit that is
+    #: itself most ill-conditioned exactly in the sparse/disordered
+    #: neighbourhoods where the artifact lives, so an ungated renormalization
+    #: amplifies noise there rather than correcting it. 5.32 traced what
+    #: DualSPHysics' own production advanced-shifting extension does instead
+    #: -- gate on kernel-sum completeness (`poup1>0.95`) and bulk
+    #: classification, falling back to the raw gradient everywhere else --
+    #: and this flag now reproduces exactly that gate (`schemes/deltaSPH.py`
+    #: step 13), rather than applying `Li` unconditionally.
+    pressureForceRenormalized: bool = field(default=False, metadata={'description': 'Apply gradient renormalization to the pressure-force kernel gradient, gated on kernel-sum completeness and bulk classification (DualSPHysics-style)'})
 
     #: Where (and whether) the mDBC no-penetration correction is applied.
     #:

@@ -5605,6 +5605,95 @@ Not implemented this session (still diagnosis, per the user's request).
 See [[antuono-pressure-switch-bug]], [[sph-symmetric-pressure-truncation-artifact]],
 [[marrone31-truncation-artifact-vs-pst]].
 
+### 5.38 §5.32's completeness gate, implemented and tested (2026-09-17): a mixed
+result on Marrone 3.1, and no effect at all on the sloshingTank ceiling-hover
+kick it was ultimately motivated by
+
+Four days later, `BOUNDARY_DENSITY_PLAN.md` §10 traced sloshingTank's
+ceiling-hover excursion to this exact mechanism (a live production
+reproduction, not a synthetic slab) and implemented §5.32's own recommended
+next step: gate `pressureForceRenormalized` on kernel-sum completeness
+(a Shepard/partition-of-unity sum, `Σ_j W_ij V_j`, computed with the same
+`OperationProperties` `computePressureForceSurfaceAware` itself uses) AND
+bulk classification (`currentState.surfaceIndicators == 0`), reproducing
+DualSPHysics' own `poup1>0.95 && fstype==0` design faithfully. Implementation:
+`schemes/deltaSPH.py` step 13 builds a per-particle-gated renormalization
+matrix (identity where the gate is off, so `matmul(Li, gradw_ij) ==
+gradw_ij` there -- exactly the unrenormalized fallback, no kernel changes
+needed since `wp_surfaceAware.py`'s `useGradientRenormalization` flag is
+call-wide, not per-particle). Sanity-checked directly (nx=20 smoke run): gate
+turns on for ~53% of fluid particles, completeness ranges 0.47 (near a
+boundary) to ~1.0 (bulk) -- sane, not the near-0 values a units bug first
+produced (`ones` as the Shepard-summed quantity, not `mass/density` --
+`english2025.py`'s own `gather(ones)` convention already volume-weights
+internally; multiplying by volume again silently produced completeness
+~0.002 everywhere on the first attempt).
+
+**Marrone 3.1 A/B, identical to §5.23's own config** (nx=67, c0Ratio=40,
+`--scheme deltaSPH`, PST on, t=2.6s, `scripts/probe_deltaSPHMarrone.py
+--pressureForceRenormalized`):
+
+| | baseline | gated |
+|---|---|---|
+| diverged | False | False |
+| peak KE, t=[1,2.6]s | 0.857 @ t=2.075 | **0.717** @ t=1.472 (better) |
+| peak maxVel, t=[1,2.6]s | 12.59 @ t=1.165 | **14.81** @ t=1.728 (worse) |
+| density range (whole run) | [0.935, 1.068] | [0.900, 1.072] (slightly wider) |
+| final KE / maxVel | 0.250 / 2.05 | 0.240 / **3.45** (worse) |
+
+**Not the clean win §5.32's reasoning predicted, and not §5.23's 8.8x
+catastrophe either -- a genuine mixed result.** Peak kinetic energy improves
+25%; peak and final velocity get measurably worse. The gate is doing
+something real (nowhere near baseline-identical, nowhere near the
+unconditional attempt's blowup), just not an unambiguous improvement on this
+config. **Not adopted as a default change on this evidence alone** -- worth
+revisiting (a different completeness threshold, or checking whether the
+`t=[1,2.6]s` window's velocity peak is a genuinely different mechanism the
+gate perturbs rather than fixes) before calling this settled either way.
+
+**The sloshingTank ceiling-hover kick itself: no measurable effect,
+confirmed by direct test, not inference.** Using the checkpoint/resume
+infrastructure built alongside `BOUNDARY_DENSITY_PLAN.md` §10
+(`CaseSpec.resumeFrom`), resumed from `state_65000.h5` (481 steps before the
+kick) with the gate on, ran 600 steps (`scripts/probe_ceilingHover.py
+--resumeFrom ... --pressureForceRenormalized`) instead of re-simulating
+65,000+ -- the user's own suggestion, and a ~19 second test instead of a
+~100-minute one. Result: **the same particle (UID 2951), at the identical
+timestamp (t=6.548150s), peaks at 39,060 m/s^2 -- 39,077 in the original,
+unfixed run.** Bit-for-bit the same event.
+
+**This is not a near-miss -- it is mechanistically guaranteed to do nothing
+here, and the reason is worth recording precisely.** The gate's whole
+design, faithfully ported from DualSPHysics, is to trust the renormalized
+gradient ONLY in the bulk (`surfaceIndicators == 0`) and fall back to the
+raw gradient everywhere else, INCLUDING every free-surface-flagged particle
+-- by design, matching DualSPHysics' own choice not to renormalize near a
+free surface at all. §10's traced mechanism lives entirely inside that
+excluded population: both particles in the collision (the calm raft UID
+2951/2953 and the self-oscillating UID 3726) are flagged free-surface the
+entire time, isolated from the bulk by ~0.36 m (~80 dx). The gate was never
+going to touch their pressure-force computation, because "never renormalize
+a free-surface particle" is exactly what it was built to do. This fix and
+the ceiling-hover mechanism are almost perfectly orthogonal by construction,
+not by bad luck.
+
+**Net implication:** §5.32's completeness gate is real, faithfully
+implemented, does not regress into §5.23's catastrophe, and is a legitimate
+avenue to keep investigating for the *general* Marrone-class truncation
+artifact in the bulk/near-surface transition -- but it is not, and by its
+own DualSPHysics-derived design cannot be, a fix for isolated free-surface
+fragment oscillation-then-collision. That problem needs an intervention
+that acts ON the free-surface-flagged/isolated population itself (a force
+-magnitude plausibility clamp keyed to how extreme the local conditioning
+is, rather than a bulk/surface binary; or damping the oscillation's cause
+directly), not one that, like this gate and like DualSPHysics' own
+production code, deliberately leaves that population's raw gradient alone.
+Not attempted this session -- see `BOUNDARY_DENSITY_PLAN.md` §10 for that
+still-open next step.
+
+See [[boundary-density-plan]], [[sph-symmetric-pressure-truncation-artifact]],
+[[warpsph-resume-checkpoint-support]].
+
 # Part 7 — 2026-09-13 overnight gallery batch
 
 An overnight run (`scratchpad/run_overnight_batch.sh`: Marrone 3.1 + 3.4 at

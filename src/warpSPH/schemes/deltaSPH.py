@@ -41,7 +41,8 @@ from ..modules.pressure import computePressureForceSurfaceAware
 from ..modules.surfaceDetection import detectFreeSurface
 from ..modules.util import countNeighbors
 from ..enumTypes import DensityDiffusionScheme
-from warpSPHCore import SupportScheme, buildVerletList
+from warpSPHCore import (SupportScheme, buildVerletList, OperationProperties,
+                         WarpOperation, warpOperation, RenormalizationState)
 
 import torch
 from ..utils.timer import TimedBlock
@@ -196,11 +197,52 @@ def deltaSPH_step(
     # 13. Compute dvdt from pressure
     # with TimedBlock('compute dvdt', use_cuda=True, device=config.device) as tb_dvdt:
     with record_function("[warpSPH] - [deltaSPH - 13] - compute dvdt from pressure"):
+        pressureRenormalizationState = None
+        if getattr(schemeConfig, 'pressureForceRenormalized', False):
+            # DELTASPH_VALIDATION_PLAN.md §5.23 found applying `Li` to the
+            # pressure-force gradient unconditionally makes Marrone 3.1's
+            # free-surface peak 8.8x WORSE, not better: `Li` comes from
+            # `detectFreeSurface`'s own covariance fit, which is most
+            # ill-conditioned exactly in the sparse/disordered neighbourhoods
+            # where the pressure-force truncation artifact
+            # ([[sph-symmetric-pressure-truncation-artifact]]) lives, so
+            # renormalizing there amplifies noise instead of correcting it.
+            # §5.32 traced what DualSPHysics' own (production, proven)
+            # advanced-shifting/ALE extension actually does instead: gate the
+            # renormalized form on kernel-sum COMPLETENESS (its `poup1`, a
+            # plain Shepard/partition-of-unity sum -- ~1.0 for a full,
+            # regular neighbourhood, well below 1 wherever support is
+            # truncated) AND bulk classification, falling back to the raw,
+            # unrenormalized gradient everywhere else -- including every
+            # free-surface particle. Reproduced here: same support scheme
+            # `computePressureForceSurfaceAware` itself uses (so the
+            # completeness measure reflects the identical neighbourhood the
+            # pressure force actually sees), `currentState.surfaceIndicators`
+            # as the bulk/free-surface classification (this codebase's own
+            # Barecasco-based analogue of DualSPHysics' `fstype`), and
+            # DualSPHysics' own `poup1>0.95` threshold. Gating is done here
+            # (on the renormalization MATRIX itself, per particle) rather
+            # than inside `wp_surfaceAware.py`'s kernel, since
+            # `useGradientRenormalization` there is a single call-wide flag,
+            # not per-particle -- substituting the identity matrix for a
+            # gated-off particle makes `matmul(Li, gradw_ij) == gradw_ij`,
+            # exactly the unrenormalized fallback, with no kernel changes.
+            completenessProps = OperationProperties(
+                kernel=config.kernel, operation=WarpOperation.Interpolate,
+                supportMode=SupportScheme.SuperSymmetric)
+            kernelCompleteness = warpOperation(
+                currentState, completenessProps, domain=config.domain,
+                referenceValues=torch.ones_like(currentState.densities),
+                adjacency=adjacency)
+            wellConditioned = (kernelCompleteness > 0.95) & (currentState.surfaceIndicators == 0)
+            Li = renormalizationState_.renormalizationMatrices
+            dim = currentState.positions.shape[1]
+            identity = torch.eye(dim, dtype=Li.dtype, device=Li.device)
+            gatedMatrices = torch.where(wellConditioned.view(-1, 1, 1), Li, identity)
+            pressureRenormalizationState = RenormalizationState(renormalizationMatrices=gatedMatrices)
         dvdt_pressure = computePressureForceSurfaceAware(
             currentState, config, schemeConfig, adjacency,
-            renormalizationState=(renormalizationState_
-                                   if getattr(schemeConfig, 'pressureForceRenormalized', False)
-                                   else None))
+            renormalizationState=pressureRenormalizationState)
 
     # 14. Apply forcing
     # with TimedBlock('compute forcing', use_cuda=True, device=config.device) as tb_forcing:
