@@ -138,7 +138,8 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
             plotBackend: str = None, cflFactor: float = None,
             integrationScheme: str = None, noPenShift: str = None,
             wallBC: str = None, pressureForceTerm: str = None,
-            densityDiffusionTerm: str = None, mdbcDensityScheme: str = None):
+            densityDiffusionTerm: str = None, mdbcDensityScheme: str = None,
+            pressureForceRenormalized: bool = False):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -253,6 +254,11 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
         def _cfg4(ctx, _t=mdbcDensityScheme, _p=_prevCfg4):
             _p(ctx); ctx.schemeConfig.mdbcDensityScheme = _t
         dambreakCase.configureScheme = _cfg4
+    if pressureForceRenormalized:
+        _prevCfg5 = dambreakCase.configureScheme
+        def _cfg5(ctx, _p=_prevCfg5):
+            _p(ctx); ctx.schemeConfig.pressureForceRenormalized = True
+        dambreakCase.configureScheme = _cfg5
 
     r = run(dambreakCase, **kw)
 
@@ -778,6 +784,13 @@ def main():
                          "-- BOUNDARY_DENSITY_PLAN.md §5, validated in a toy "
                          "problem against the depth/lever-arm amplification "
                          "failure §3.1 found in 'band'.")
+    ap.add_argument('--pressureForceRenormalized', action='store_true',
+                    help="apply gradient renormalization to the pressure-force "
+                         "kernel gradient, gated on kernel-sum completeness "
+                         "(poup>0.95) and bulk classification -- DualSPHysics-"
+                         "style, per BOUNDARY_DENSITY_PLAN.md §10 / "
+                         "DELTASPH_VALIDATION_PLAN.md §5.23/§5.32. Off by "
+                         "default (case default too).")
     ap.add_argument('--report', action='store_true',
                     help='(re)build plots + REPORT.md from existing .npz runs')
     args = ap.parse_args()
@@ -790,7 +803,7 @@ def main():
             args.shifting, args.plotBackend, args.cflFactor,
             args.integrationScheme, args.noPenShift, args.wallBC,
             args.pressureForceTerm, args.densityDiffusionTerm,
-            args.mdbcDensityScheme)
+            args.mdbcDensityScheme, args.pressureForceRenormalized)
 
 
 if __name__ == '__main__':

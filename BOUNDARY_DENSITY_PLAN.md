@@ -1648,12 +1648,78 @@ the choice... not decided"* -- `pressureForceTerm` defaults to `Antuono` for
 **every** WCSPH/incompressible case in this codebase, so any fix belongs to
 that memory's scope (or a new, dedicated plan), not here.
 
-**Not yet done, if this is picked up next** (deliberately not started here --
-see the blast-radius warning above): a candidate fix should be validated
-first against this EXACT reproduced event, cheaply, using §10.1's resume
-support (`--resumeFrom .../state_65000.h5 --resumeStepOffset 65000`, ~600
-steps to the kick, not 65,600) before spending a full-run validation pass on
-it.
+**Done (2026-09-17, same day): §10.1's resume support used exactly as
+described above, and it worked precisely as intended** -- see
+`DELTASPH_VALIDATION_PLAN.md` §5.38 for the full account.
+[[sph-symmetric-pressure-truncation-artifact]]'s own recommended next step
+(DualSPHysics' completeness+bulk-classification gate on
+`pressureForceRenormalized`) was implemented, and tested against this exact
+reproduced event via `--resumeFrom .../state_65000.h5 --resumeStepOffset
+65000` -- 19 seconds, not 100 minutes, the user's own suggestion. **Result:
+no effect.** The same particle (UID 2951) peaks at the same timestamp
+(t=6.548150s) with the same magnitude (39,060 vs the original 39,077
+m/s^2). Mechanistically guaranteed, not a near-miss: the gate's entire
+design (faithfully copied from DualSPHysics) is to trust the renormalized
+gradient ONLY away from the free surface, and fall back to the raw,
+unrenormalized gradient for every free-surface-flagged particle -- exactly
+where both particles in this collision live the whole time. This fix and
+the ceiling-hover mechanism are orthogonal by construction. (On the general
+Marrone 3.1 stress config the gate gives a mixed result -- better peak
+kinetic energy, worse peak/final velocity -- not the clean win its own
+reasoning predicted either; not adopted as a default.)
+
+### 10.4 What the free-surface review (`letouze2025`) adds, read specifically
+against this negative result
+
+Read for exactly this question after the gate result came back negative.
+Two findings, neither a ready-made fix, both worth recording:
+
+1. **Confirms this whole plan's TIC-switch framing is not a local
+   misreading.** The review's own Eq. (138) is `sun2018`'s Eq. (9) -- the
+   Antuono switch this codebase implements, unchanged -- and states
+   explicitly that using it *"alone in an SPH scheme drastically reduces
+   its robustness"* without a PST alongside it. Matches this codebase's own
+   independent finding (`DELTASPH_VALIDATION_PLAN.md` §5.31: forcing either
+   branch unconditionally confirms the switch is load-bearing, not
+   optional) via a completely different route. Reinforces that removing or
+   bypassing the switch is not on the table; any fix has to work around or
+   alongside it.
+2. **A concrete, so-far-unused signal already computed in this codebase, not
+   in the gate just tested.** §10.6's free-surface-detection discussion
+   describes the field's most widely used method ([Marrone et al. 2010]) as
+   a two-stage procedure whose FIRST stage is exactly the minimum eigenvalue
+   `lambda_i` of the renormalization tensor -- this codebase already
+   computes this every step (`deltaSPH.py`'s `currentState.surfaceLambdas =
+   lMin`, from `detectFreeSurface`) but has never used it for anything past
+   an internal step of the unused `maronneDetection.py` path (the default
+   detector is Barecasco's angle-coverage test instead). This is a
+   *continuous conditioning* signal, not the bulk/surface binary the gate
+   just tested used -- a genuinely different lever from "renormalize or
+   don't": e.g. a force-magnitude plausibility clamp keyed to how extreme
+   `lMin` (or the same completeness measure §5.38 already computes) gets,
+   applied INSIDE the free-surface population the gate deliberately never
+   touches, rather than a gate on whether to renormalize the gradient.
+   Not attempted -- a genuinely new direction, not something either review
+   prescribes outright, and would need its own dedicated investigation
+   before being tried.
+
+Also checked and ruled out as an explanation specifically: the review's
+dedicated surface-tension section (§6.6) is about deliberately-MODELED
+physical surface tension (an added force), not a spurious artifact from the
+plain free-surface treatment this codebase runs with no such model active --
+not the same phenomenon as UID 3726's self-sustained oscillation, despite
+the surface-level resemblance ("numerical surface-tension ringing" was this
+investigation's own phrase, not the review's). One adjacent, unverified
+observation worth keeping in mind for later: the review notes (§12,
+single-phase impact discussion) that neglecting air turns liquid impacts
+into acoustic-ringing events, "generally dissipated by viscous effects
+after several oscillation cycles" -- for an isolated fragment with no real
+neighbours, BOTH the artificial-viscosity/DDT dissipation AND the pressure
+-force truncation artifact are simultaneously absent, so whatever starts an
+oscillation there has nothing to damp it. Not confirmed as the actual
+mechanism behind UID 3726's own oscillation -- flagged as a plausible
+contributing factor, not traced with the same rigor as §10.2-§10.3's main
+finding.
 
 ## Status
 
@@ -1720,6 +1786,16 @@ previously attributed entirely to Band's architecture.
 
 **Do not flip the default away from `'ramped'`.**
 
+**§10's completeness gate is implemented, tested, and confirmed NOT to fix
+the ceiling-hover mechanism** (§10.3-10.4) -- real code, kept
+(`pressureForceRenormalized`'s gated behaviour, `schemes/deltaSPH.py` step
+13), off by default, mixed-not-clean result on the general Marrone stress
+config, orthogonal by design to the free-surface population where the
+ceiling-hover collision lives. The next lever, if this is picked up again,
+is §10.4 item 2 (a conditioning-keyed force-magnitude clamp INSIDE the
+free-surface population, using `currentState.surfaceLambdas`/`lMin` or the
+completeness measure §5.38 already computes) -- not yet attempted.
+
 **Next steps, in priority order:**
 1. Apply the same symmetric-eps fix to `densityBand.py` and re-validate it
    against §3's stress configs, to see how much of its depth/lever-arm
@@ -1729,6 +1805,9 @@ previously attributed entirely to Band's architecture.
 3. A 3D implementation and a moving-boundary test (`a_b` is still
    hardcoded to zero in `english2025.py`) before any default-scheme change
    is considered.
+4. (New, §10.4) A force-magnitude plausibility clamp for severely isolated
+   free-surface particles, as a genuinely different lever from gradient
+   renormalization -- not scoped or started.
 
 The former #1 (ceiling-hover) is resolved *as a diagnosis* (§10) but its fix
 does not belong on this list -- see [[sph-symmetric-pressure-truncation
