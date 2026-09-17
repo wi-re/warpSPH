@@ -1121,6 +1121,185 @@
   note          = {The Barecasco surface-detection scheme (configurations/incompressible.py's barecascoThreshold, and the detectFreeSurface mask discussed at length in DELTASPH_VALIDATION_PLAN.md §5.34-5.35): an angle-based coverage-vector test using overlapping spheres, distinct from the Marrone/Sun dilation approach already implemented alongside it. No DOI found on Crossref -- appears to be an arXiv-only preprint, never formally published.}
 }
 
+% --- Particle consistency & gradient renormalization (added 2026-09-17) ---------
+
+@article{randles1996,
+  author  = {P. W. Randles and L. D. Libersky},
+  title   = {Smoothed Particle Hydrodynamics: Some recent improvements and applications},
+  journal = {Computer Methods in Applied Mechanics and Engineering},
+  year    = {1996},
+  volume  = {139},
+  number  = {1-4},
+  pages   = {375--408},
+  doi     = {10.1016/s0045-7825(96)01090-0},
+  note    = {Independently derives (citing Johnson-Beissel and Everhart) the corrective tensor B = [sum_j (m_j/rho_j)(x_j-x_i) tensor-product grad(W_ij)]^{-1} applied to the momentum/energy divergence and outer-product kernel sums (Eqs. 34-37) -- the same correction-matrix idea this codebase's Li / useGradientRenormalization machinery (modules/crk, wp_surfaceAware.py) implements, arrived at from the boundary-deficiency side rather than bonet1999's variational one.}
+}
+
+@article{bonet1999,
+  author  = {J. Bonet and T.-S. L. Lok},
+  title   = {Variational and momentum preservation aspects of Smooth Particle Hydrodynamic formulations},
+  journal = {Computer Methods in Applied Mechanics and Engineering},
+  year    = {1999},
+  volume  = {180},
+  number  = {1-2},
+  pages   = {97--115},
+  doi     = {10.1016/s0045-7825(99)00051-1},
+  note    = {The other foundational correction-matrix paper (with randles1996): derives the same gradient-renormalization matrix from a variational/momentum-conservation argument, and shows it is required for exact angular-momentum preservation under a linear velocity field -- the derivation this codebase's Li matrix is closer to in spirit. The PDF text layer substitutes the registered-trademark glyph for the "fi" ligature and the macron glyph for "fl" (e.g. "gradient of a linear velocity ®eld", "simple free surface ¯ows"); the abstract quote below preserves this verbatim per the text-layer-defect convention, with the correction recorded alongside it.}
+}
+
+@article{liu2006,
+  author  = {M. B. Liu and G. R. Liu},
+  title   = {Restoring particle consistency in smoothed particle hydrodynamics},
+  journal = {Applied Numerical Mathematics},
+  year    = {2006},
+  volume  = {56},
+  number  = {1},
+  pages   = {19--36},
+  doi     = {10.1016/j.apnum.2005.02.012},
+  note    = {A later paper in the same correction-matrix lineage as randles1996/bonet1999: compares kernel-consistency and particle-consistency corrections and restores particle consistency while keeping a conventional non-negative kernel unmodified, rather than reconstructing the kernel itself.}
+}
+
+@article{liu1995,
+  author  = {Wing Kam Liu and Sukky Jun and Yi Fei Zhang},
+  title   = {Reproducing kernel particle methods},
+  journal = {International Journal for Numerical Methods in Fluids},
+  year    = {1995},
+  volume  = {20},
+  number  = {8-9},
+  pages   = {1081--1106},
+  doi     = {10.1002/fld.1650200824},
+  note    = {The earliest paper in this set: RKPM's correction function predates and is the finite-element-adjacent parallel to randles1996/bonet1999's SPH gradient-correction matrices, reached independently from a wavelet/window-function consistency argument rather than a boundary-deficiency or variational one.}
+}
+
+@article{chen1999,
+  author  = {J. K. Chen and J. E. Beraun and T. C. Carney},
+  title   = {A corrective smoothed particle method for boundary value problems in heat conduction},
+  journal = {International Journal for Numerical Methods in Engineering},
+  year    = {1999},
+  volume  = {46},
+  number  = {2},
+  pages   = {231--252},
+  doi     = {10.1002/(sici)1097-0207(19990920)46:2<231::aid-nme672>3.0.co;2-k},
+  note    = {CSPM: a Taylor-series-expansion correction layered on top of the kernel estimate, rather than a renormalization matrix -- a distinct correction strategy from randles1996/bonet1999/liu2006, aimed specifically at the same boundary-particle-deficiency problem those three also address. The PDF text layer substitutes a straight double-quote for the "fi" ligature (e.g. "particle de"ciency"); preserved verbatim in the abstract quote below, with the correction recorded alongside it.}
+}
+
+% --- High-order and WENO/MLS-reconstruction SPH (added 2026-09-17) --------------
+
+@article{avesani2014,
+  author  = {Diego Avesani and Michael Dumbser and Alberto Bellin},
+  title   = {A new class of Moving-Least-Squares WENO--SPH schemes},
+  journal = {Journal of Computational Physics},
+  year    = {2014},
+  volume  = {270},
+  pages   = {278--299},
+  doi     = {10.1016/j.jcp.2014.03.041},
+  note    = {MLS reconstruction blended across stencils by a nonlinear WENO weighting, feeding a Riemann-solved flux at the particle midpoint -- the modern high-order successor direction letouze2025/lind2020/meng2025 point to, and the origin vergnaud2023/gao2023 cite for the MLS-WENO-SPH line.}
+}
+
+@article{king2020,
+  author  = {J. R. C. King and S. J. Lind and A. M. A. Nasar},
+  title   = {High order difference schemes using the local anisotropic basis function method},
+  journal = {Journal of Computational Physics},
+  year    = {2020},
+  volume  = {415},
+  pages   = {109549},
+  doi     = {10.1016/j.jcp.2020.109549},
+  note    = {LABFM: constructs high-order (4th-8th) difference operators from anisotropic basis functions on disordered nodes; the paper's own framing is that SPH is LABFM's low-order limit, making this the explicit high-order generalization of the kernel-gradient machinery this codebase uses.}
+}
+
+@article{king2022,
+  author  = {J. R. C. King and S. J. Lind},
+  title   = {High-order simulations of isothermal flows using the local anisotropic basis function method (LABFM)},
+  journal = {Journal of Computational Physics},
+  year    = {2022},
+  volume  = {449},
+  pages   = {110760},
+  doi     = {10.1016/j.jcp.2021.110760},
+  note    = {Journal extension of king2020 to full isothermal Navier-Stokes at up to 10th order, with stabilisation and high-order boundary conditions added. The DOI's own path segment carries "2021" (10.1016/j.jcp.2021.110760), but the DOI record's own .issued date and the journal's volume/issue dating (449, 2022) both place formal publication in 2022 ("Available online 6 October 2021" is the preprint date); year and volume here follow the DOI record per ADDING.md's "DOI record wins" rule.}
+}
+
+@article{vergnaud2023,
+  author  = {A. Vergnaud and G. Oger and D. Le Touz{\'e}},
+  title   = {Investigations on a high order SPH scheme using WENO reconstruction},
+  journal = {Journal of Computational Physics},
+  year    = {2023},
+  volume  = {477},
+  pages   = {111889},
+  doi     = {10.1016/j.jcp.2022.111889},
+  note    = {1D WENO reconstruction per interacting pair, completed by MLS, inside a Riemann-SPH formulation -- reaches 6th-order convergence and is shown to beat plain Riemann-SPH on accuracy per CPU time. Direct evidence for the field's practical route past the roughly 2nd-order ceiling this codebase's plain SPH gradients sit at.}
+}
+
+@article{gao2023,
+  author  = {Tianrun Gao and Tian Liang and Lin Fu},
+  title   = {A new smoothed particle hydrodynamics method based on high-order moving-least-square targeted essentially non-oscillatory scheme for compressible flows},
+  journal = {Journal of Computational Physics},
+  year    = {2023},
+  volume  = {489},
+  pages   = {112270},
+  doi     = {10.1016/j.jcp.2023.112270},
+  note    = {MLS-TENO-SPH: splits the domain into smooth/non-smooth regions via a TENO scale-separation test and only spends the expensive MLS high-order derivative where the flow is smooth, falling back to shock-capturing TENO elsewhere -- the compressible-flow counterpart to vergnaud2023's weakly-compressible WENO-SPH.}
+}
+
+% --- SPH reviews & the DualSPHysics lineage (added 2026-09-17) ------------------
+
+@article{lind2020,
+  author  = {Steven J. Lind and Benedict D. Rogers and Peter K. Stansby},
+  title   = {Review of smoothed particle hydrodynamics: towards converged Lagrangian flow modelling},
+  journal = {Proceedings of the Royal Society A},
+  year    = {2020},
+  volume  = {476},
+  number  = {2241},
+  doi     = {10.1098/rspa.2019.0801},
+  note    = {General SPH review centred on convergence -- read against BOUNDARY_DENSITY_PLAN.md §10's kernel-truncation-artifact investigation, since a symmetric-pressure-pair-sum truncation error is exactly a convergence failure mode of the kind this review surveys.}
+}
+
+@article{meng2025,
+  author  = {Zi-Fei Meng and Peng-Nan Sun and Ping-Ping Wang and Boo Cheong Khoo and A.-Man Zhang},
+  title   = {High-order SPH: A Review of the Method and Applications},
+  journal = {Archives of Computational Methods in Engineering},
+  year    = {2026},
+  volume  = {33},
+  pages   = {1409--1444},
+  doi     = {10.1007/s11831-025-10346-0},
+  note    = {Already read for BOUNDARY_DENSITY_PLAN.md §10 -- see that section rather than re-deriving its relevance here. The journal's own printed header dates the article "(2026) 33:1409-1444"; Crossref's .issued date is 2025-09-12 (first-online). Following this repository's winchenbach2025analytic/winchenbach2025diffsph precedent, the bib key keeps the earlier online year while the year field and venue string here use the printed-volume year.}
+}
+
+@article{letouze2025,
+  author  = {David Le Touz{\'e} and Andrea Colagrossi},
+  title   = {Smoothed particle hydrodynamics for free-surface and multiphase flows: a review},
+  journal = {Reports on Progress in Physics},
+  year    = {2025},
+  volume  = {88},
+  number  = {3},
+  pages   = {037001},
+  doi     = {10.1088/1361-6633/ada80f},
+  note    = {Already read for BOUNDARY_DENSITY_PLAN.md §10 -- see that section rather than re-deriving its relevance here.}
+}
+
+@article{vacondio2021,
+  author  = {Renato Vacondio and Corrado Altomare and Matthieu De Leffe and Xiangyu Hu and David Le Touz{\'e} and Steven Lind and Jean-Christophe Marongiu and Salvatore Marrone and Benedict D. Rogers and Antonio Souto-Iglesias},
+  title   = {Grand challenges for Smoothed Particle Hydrodynamics numerical schemes},
+  journal = {Computational Particle Mechanics},
+  year    = {2021},
+  volume  = {8},
+  number  = {3},
+  pages   = {575--588},
+  doi     = {10.1007/s40571-020-00354-1},
+  note    = {The SPHERIC Grand Challenges statement (convergence/consistency/stability, boundary conditions, adaptivity, coupling, industrial applicability) -- the field-level framing this codebase's own DualSPHysics cross-checks (molteni2009, fourtakas2019, english2022, english2025 elsewhere in this manifest) sit inside.}
+}
+
+@article{dominguez2022,
+  author  = {J. M. Dom{\'i}nguez and G. Fourtakas and C. Altomare and R. B. Canelas and A. Tafuni and O. Garc{\'i}a-Feal and I. Mart{\'i}nez-Est{\'e}vez and A. Mokos and R. Vacondio and A. J. C. Crespo and B. D. Rogers and P. K. Stansby and M. G{\'o}mez-Gesteira},
+  title   = {DualSPHysics: from fluid dynamics to multiphysics problems},
+  journal = {Computational Particle Mechanics},
+  year    = {2022},
+  volume  = {9},
+  number  = {5},
+  pages   = {867--895},
+  doi     = {10.1007/s40571-021-00404-2},
+  note    = {The DualSPHysics reference/survey paper -- the code whose DDT and mDBC formulations this codebase's own molteni2009/fourtakas2019/english2022/english2025 entries and its cross-engine harness (DELTASPH_VALIDATION_PLAN.md Part 8) are checked against.}
+}
+
 % --- Extended set (one step removed; bibliographic records only, added 2026-08-29) ---
 %
 % Background and related work reached from the core set. Verified against DOI
