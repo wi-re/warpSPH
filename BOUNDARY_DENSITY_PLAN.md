@@ -1495,6 +1495,166 @@ decaying, not the growing-energy failure `'ramped'` showed at nx=128/this
 duration (§6.3b). No regression from the recalibrated Shepard fix at this
 combined highest-resolution/longest-duration config.
 
+## 10. The ceiling-hover mechanism, traced directly (2026-09-17): not an mDBC
+bug at all -- it's [[sph-symmetric-pressure-truncation-artifact]]
+
+§9.8's remaining sloshingTank excursion (t~4-6.5s, user-identified from video
+as particles sticking to the ceiling then falling/ejecting) was the last open
+item on this plan. Direct per-particle, per-step instrumentation of the
+actual kick -- not inference from aggregate traces or the rendered video --
+confirms it is **not** an `english2025` bug, not an mDBC-density-scheme issue
+of any kind, and not fixable from within this plan's scope. It is the
+already-documented, already-flagged-`understood-not-fixed`
+[[sph-symmetric-pressure-truncation-artifact]] (found 2026-09-12, five days
+before this session, entirely independent of every mDBC change made since)
+acting on isolated near-ceiling fluid fragments.
+
+### 10.1 Tooling built for this: real checkpoint/resume support (general,
+not a one-off)
+
+Investigating a single event 4-6.5s into a 7s run means simulating up to
+65,600 steps just to reach it. Built two pieces, both general-purpose (not
+throwaway):
+
+1. `scripts/probe_ceilingHover.py` -- runs the exact `run_sloshingTank.py
+   --mdbcDensityScheme english2025 --densityDiffusionTerm fourtakas2019`
+   reproduction with a capture window, using a `_CAPTURE` diagnostic hook in
+   `english2025.py` (DIAGNOSTIC ONLY block, `__all__`-excluded, zero cost
+   when unset -- same pattern as the historical `_DEBUG_HOOK`, but building
+   fresh since §8.4 reverted the old one) plus monkeypatches on
+   `computePressureForceSurfaceAware` for full per-particle state
+   (positions/kinds/densities/pressures/UIDs/`surfaceIndicators`/pressure
+   -force) every step in the window.
+2. **Real resume support, added to `runner.py`/`caseSpec.py` themselves**
+   (`CaseSpec.resumeFrom` + `.resumeStepOffset`), not ad hoc per prior
+   sessions' §8.5/§9.4 practice of building-and-discarding a one-off
+   resume harness. `_run()` now loads a `storeMode='states'` checkpoint's
+   particle state + simulated time in place of `case.initialConditions`'
+   fresh t=0 state (domain/config setup still runs normally first -- only
+   state/time are replaced), and every externally-visible step number
+   (diagnostics, `postStep`, checkpoint filenames) continues from the
+   checkpoint's own absolute step rather than restarting at 0. Verified
+   against a ground-truth checkpoint: resuming from step 100 and running
+   100 more steps reproduces the original run's step-200 checkpoint to
+   float32 round-off (position max-abs-diff 8.9e-8).
+
+`probe_ceilingHover.py --storeInterval 1000` now writes a full checkpoint
+every 1000 steps as it runs, so a future session investigating a *different*
+window, or testing a *candidate fix* against this exact event, can resume
+from the nearest checkpoint (e.g. `export/diag-ceilingHover-event2_
+2026-09-17_09-26-12/trajectory/state_65000.h5`, 481 steps before the kick
+traced below) instead of re-simulating 65,000+ steps.
+
+### 10.2 The t=6.548s kick, traced particle-by-particle
+
+Two instrumented runs (`--tag event1`, window around step 40078 / t=4.008s,
+the first sensor-pressure spike; `--tag event2`, window around steps
+64000-65600 / t=6.4-6.56s, the maxVel-peak/density-dip). **event1 is a
+different, unrelated phenomenon** -- its extreme particle (UID 4083, near
+the bottom-left corner, not the ceiling) has real, substantial pressure
+(30.9) matching well-populated, well-conditioned nearby boundary particles
+(pressures 20-39, not placeholder zeros) and 214 matter particles within 6x
+kernel support -- a genuine, if strong, wall-slam event, not isolation
+-driven. Not investigated further; not the mechanism the user's video
+observation was about.
+
+**event2 is the real one.** The extreme particle at the traced peak
+(`dvdt_pressure`=39,077 m/s^2, ~4000x gravity, at t=6.5482s) is UID 2951, at
+`y=0.5067` -- the ceiling sits at `y=0.508`, so this is ~0.3dx below it.
+`surfaceIndicator=1` (flagged free-surface, so the Antuono switch's symmetric
+branch applies regardless of its own pressure's sign per `sun2018` Eq. 9).
+Full causal chain, traced by sampling the captured window at increasing
+resolution around the trigger (`scripts/out_ceilingHover/event2_pressure.npz`,
+3198 per-step full-particle snapshots):
+
+1. **From t=6.400s (window start) through t=6.536s -- 1360+ consecutive
+   steps -- UID 2951 (paired with UID 2953, 0.0003m apart, essentially
+   touching -- a 2-particle raft) sits in a completely calm, exactly-correct
+   state: `rho=1.0000` exactly, `P=-0.013` exactly, `dvdt_pressure~9.8`
+   (just gravity), sliding back and forth along the ceiling underside as the
+   tank rolls.** Throughout this entire window the raft's nearest OTHER
+   fluid particle is 0.36m away -- roughly 80x the local particle spacing
+   (`dx~0.0045`) -- genuinely, severely isolated from the bulk fluid.
+   **Isolation alone is not the trigger**: this raft sits isolated with
+   textbook-correct physics for well over a thousand steps.
+2. **Separately, UID 3726 (initially part of the same local area, gap
+   0.0038m from its neighbours at t=6.400s) drifts away from ITS OWN
+   surroundings** (gap grows 0.001 -> 0.17m over t=6.401-6.490s), briefly
+   perturbs (`rho` dips to 0.94-0.96 around t=6.42-6.43s) then also
+   **relaxes to a completely calm isolated state** (`rho=1.0000`, `P=0.00`
+   exactly) for another few hundred steps (t=6.453-6.490s) -- confirming
+   isolation itself is not destabilizing on its own, a second time,
+   independently.
+3. **From t~6.498s, UID 3726 reverses course and drifts back toward the
+   2951/2953 raft** (gap 0.17m -> 0.023m by t=6.538s) -- and AS it
+   approaches, **its own pressure grows into a large, smooth, non-truncation
+   -sized oscillation entirely on its own**: `rho` climbs from 1.00 to a
+   peak of 1.23 (`P` up to +94), matching the WCSPH literature's known
+   "numerical surface tension" ringing mode for an isolated SPH free-surface
+   fragment (the same truncated symmetric pressure-sum mechanism
+   [[sph-symmetric-pressure-truncation-artifact]] measured directly on a
+   bare synthetic slab five days earlier) -- not obviously a consequence of
+   approaching 2951 specifically, since the growth is smooth and begins
+   while still ~0.03-0.04m away, well outside kernel support
+   (`n_h*dx~0.018m` at this case's `n_h=4`, `dx=0.0045`).
+4. **Once the gap closes to within kernel-support range (~0.025-0.03m,
+   consistent with `SuperSymmetric` support combining both particles'
+   radii), UID 3726's large pressure swing couples directly into UID 2951's
+   previously-calm state**: `dvdt_pressure` on UID 2951 climbs from its
+   baseline 9.8 through 57 (t=6.5381s) -> 777 (t=6.5401s) -> 4467 (t=6.5421s,
+   `rho` already dropping to 0.91) -> 10,948/11,638 (t=6.544-6.546s, `rho`
+   overshooting to 1.22-1.23 in COMPRESSION) -> the traced peak 39,077 m/s^2
+   at t=6.5482s (`rho=0.7184`, deep tension, `P=-113`) -- at which point
+   UID 2951 is violently ejected: its own nearest-fluid gap jumps from the
+   steady-state 0.0003m to 0.0114m in a single captured step, then continues
+   widening as it flies into the bulk. Relaxes back toward normal density
+   over the next ~10-15ms.
+
+### 10.3 Why this redirects the plan's scope
+
+This is a two-isolated-fragment collision, where at least one fragment
+(UID 3726) undergoes a **self-sustained pressure oscillation while isolated
+from the bulk** -- a capillary-like "ringing" driven by the truncated
+symmetric pressure-pair sum, exactly the mechanism
+[[sph-symmetric-pressure-truncation-artifact]] characterised on a bare
+synthetic lattice on 2026-09-12: *"disorder... makes this reach deep and
+become unpredictable"*, confirmed there to be **several-x sensitive to
+sub-dx position perturbations**. The collision, once the two fragments'
+independent trajectories bring them into mutual kernel support, is the
+proximate trigger for the violent kick -- but the oscillation that made the
+collision violent instead of benign predates any interaction between them.
+
+**None of this lives in the mDBC boundary-density code this plan has been
+changing.** `computePressureForceSurfaceAware` (the Antuono/`sun2018` TIC
+switch) and the underlying symmetric-pressure kernel-truncation artifact are
+upstream of, and independent from, `mdbcDensityScheme` -- consistent with
+§6.4's finding that BOTH `'ramped'` and `'english2025'` show *some* version
+of ceiling-region instability (different character: `'ramped'` frequent
+-small-spikes, `'english2025'` rare-but-severe) despite being completely
+different boundary-density implementations. Neither the ghostOffsets sign
+fix nor the Shepard-epsilon fix (§9.2-§9.7, both real, both correctly fixed,
+both necessary for `sloshingTank` to reach t=7s at all under `english2025`)
+could have touched this mechanism, because it isn't downstream of either bug.
+
+**This plan's mDBC-scheme work is, as far as this investigation can tell,
+complete and correct for what it targeted** (§9's Status section stands).
+The residual ceiling-region excursion is [[sph-symmetric-pressure-
+truncation-artifact]]'s open item, not this plan's -- that memory already
+recorded, five days before this session, that a real fix (a kernel-sum
+completeness correction to the symmetric term, or tightening when the
+free-surface branch fires, or accepting the tradeoff as `sun2018` itself
+does) is *"an open design question with different blast radii depending on
+the choice... not decided"* -- `pressureForceTerm` defaults to `Antuono` for
+**every** WCSPH/incompressible case in this codebase, so any fix belongs to
+that memory's scope (or a new, dedicated plan), not here.
+
+**Not yet done, if this is picked up next** (deliberately not started here --
+see the blast-radius warning above): a candidate fix should be validated
+first against this EXACT reproduced event, cheaply, using §10.1's resume
+support (`--resumeFrom .../state_65000.h5 --resumeStepOffset 65000`, ~600
+steps to the kick, not 65,600) before spending a full-run validation pass on
+it.
+
 ## Status
 
 Open, actively worked 2026-09-15 through 2026-09-17. This section is a
@@ -1529,18 +1689,26 @@ the first time under the genuinely-correct formula (previously it either
 diverged almost immediately from the Shepard hole, or "survived" only
 because the wrong sign happened to avoid triggering it for 5+ seconds).
 
-**The one item still open on sloshingTank:** a smaller excursion around
-t=4-6.5s survives both fixes -- density [0.725,1.436], pressure peak
-50,031 Pa, much closer in timing and magnitude to the original baseline
-(t=5.66-6.9s, 98,177 Pa) than either intermediate attempt was. User
-directly identified this in the rendered video as particles sticking to
-the ceiling and later falling/being ejected into the fluid -- matching
-[[antuono-pressure-switch-bug]]/§6.4's already-documented ceiling-hover
-mechanism exactly. This is what §8's original clamp attempt targeted,
-before that investigation got derailed into the sign-bug/Shepard-hole
-chain. **This is now the most directly actionable next step** -- for the
-first time, it is isolated enough (no larger failure masking it) to
-investigate on its own.
+**The one item still open on sloshingTank -- traced to closure, but resolved
+as OUT OF SCOPE for this plan (§10):** the t=4-6.5s excursion (density
+[0.725,1.436], pressure peak 50,031 Pa) is two separate phenomena. The
+t~4.0s spike is a genuine, well-populated wall-slam event, unrelated to
+anything this plan tracks. The t~6.5s event (what the user saw in the
+rendered video -- particles sticking to the ceiling, then falling/ejecting)
+was traced particle-by-particle to its root cause: **not an mDBC bug**, but
+[[sph-symmetric-pressure-truncation-artifact]] -- an isolated near-ceiling
+SPH fragment undergoing a self-sustained pressure oscillation (numerical
+"surface-tension" ringing from the truncated symmetric pressure-pair sum),
+which collides with a second, previously-calm isolated fragment once the
+tank's roll brings them into mutual kernel support, producing the violent
+kick. This mechanism lives entirely in `computePressureForceSurfaceAware`
+(the Antuono/TIC switch), upstream of and independent from
+`mdbcDensityScheme` -- already flagged as understood-but-unfixed, with an
+undecided fix (blast radius: every WC/incompressible case's default
+`pressureForceTerm`), five days before this mDBC investigation even began.
+See §10 for the full trace. **This plan's own mDBC-scheme work is complete
+for what it targeted; the residual excursion belongs to
+[[sph-symmetric-pressure-truncation-artifact]]'s scope, not this plan's.**
 
 **`mdbcDensityScheme='band'`** unchanged this session -- still a validated
 research tool for a narrow failure mode, not a `'ramped'` replacement. Its
@@ -1553,15 +1721,17 @@ previously attributed entirely to Band's architecture.
 **Do not flip the default away from `'ramped'`.**
 
 **Next steps, in priority order:**
-1. Investigate the ceiling-hover mechanism itself, now that it's isolated
-   -- likely where §8's clamp135 angle-cutoff idea belongs, but that idea
-   was validated under the buggy sign convention and needs re-checking
-   under the now-correct one.
-2. Apply the same symmetric-eps fix to `densityBand.py` and re-validate it
+1. Apply the same symmetric-eps fix to `densityBand.py` and re-validate it
    against §3's stress configs, to see how much of its depth/lever-arm
    divergence verdict this explains vs. its own architecture.
-3. `probe_deltaSPHMarrone34.py --report`'s velocity/NaN-handling looseness
+2. `probe_deltaSPHMarrone34.py --report`'s velocity/NaN-handling looseness
    (§7) -- still unfixed, still means a 6/6 score can hide a real blow-up.
-4. A 3D implementation and a moving-boundary test (`a_b` is still
+3. A 3D implementation and a moving-boundary test (`a_b` is still
    hardcoded to zero in `english2025.py`) before any default-scheme change
    is considered.
+
+The former #1 (ceiling-hover) is resolved *as a diagnosis* (§10) but its fix
+does not belong on this list -- see [[sph-symmetric-pressure-truncation
+-artifact]] for that scope, and §10.1 for the resume-from-checkpoint tooling
+built to validate a candidate fix cheaply against the exact reproduced event
+whenever that memory's open item is picked up.

@@ -204,6 +204,23 @@ def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
     # context rather than from the local it started with.
     spec = ctx.spec
 
+    if spec.resumeFrom:
+        # Overwrite the t=0 state `case.initialConditions` just built with a
+        # checkpoint's -- domain/config setup above still ran normally, so
+        # this only replaces particle state and simulated time, exactly what
+        # `system.initializeNewState()` (below) reads off `self.state`/`self.t`.
+        # The spec must describe the SAME configuration the checkpoint was
+        # written under (nx, params, scheme, ...); a mismatch loads a state
+        # whose shapes/geometry don't match what the rest of the run expects.
+        import h5py
+        from ..io.hdf5 import loadState
+        with h5py.File(spec.resumeFrom, 'r') as f:
+            system.state = loadState(f['state'], ctx.config.device, type(system.state))
+            system.t = float(f.attrs['time'])
+        if not spec.quiet:
+            print(f'-- resumed from {spec.resumeFrom} '
+                 f'(t={system.t:.6f}, step offset {spec.resumeStepOffset}) --')
+
     runningState = system.initializeNewState()
 
     # --- output setup -------------------------------------------------------
@@ -287,13 +304,21 @@ def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
         # that wants it; `None` for every scheme that sets nothing extra.
         ctx.scratch['lastStageUpdate'] = stepResult.stages[-1].update if stepResult.stages else None
 
+        # Absolute step number: equal to `i` for a fresh run (offset 0), or
+        # continues from where `spec.resumeFrom`'s checkpoint left off -- used
+        # everywhere a step number is externally visible (postStep,
+        # diagnostics' `step` column, checkpoint filenames) so a resumed run
+        # reads as a continuation, not a restart from 0. Purely-internal loop
+        # arithmetic (progress-bar total, `i == nSteps - 1`) stays on `i`.
+        absStep = i + spec.resumeStepOffset
+
         if case.postStep is not None:
-            case.postStep(ctx, runningState, i)
+            case.postStep(ctx, runningState, absStep)
         if case.timestep is not None:
             ctx.config.dt = case.timestep(ctx, runningState)
 
         t = _scalar(runningState.t)
-        row = {'step': i, 't': t, 'stepTime_ms': timer.elapsed_ms}
+        row = {'step': absStep, 't': t, 'stepTime_ms': timer.elapsed_ms}
         if case.diagnostics is not None:
             row.update(case.diagnostics(ctx, runningState))
         result.trajectory.append(row)
@@ -305,11 +330,11 @@ def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
                 _describeStep(i, None if timeLimited else nSteps, row, spec.tLimit))
 
         if timeLimited and t >= spec.tLimit:
-            _plotAndStore(ctx, case, spec, runningState, stepResult, i, extraData,
+            _plotAndStore(ctx, case, spec, runningState, stepResult, absStep, extraData,
                           groups, storeSteps, final=True)
             break
 
-        _plotAndStore(ctx, case, spec, runningState, stepResult, i, extraData,
+        _plotAndStore(ctx, case, spec, runningState, stepResult, absStep, extraData,
                       groups, storeSteps, final=(not timeLimited and i == nSteps - 1))
 
         # Read by tag rather than the `velocities` field name: every fluid
@@ -322,7 +347,7 @@ def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
         # (DFSPH_IMPROVEMENT_PLAN.md Part 29) where no NaN ever appears and
         # the run would otherwise report `diverged=False`.
         if torch.any(~torch.isfinite(velocities)):
-            print(f'non-finite velocities detected at step {i}; stopping.')
+            print(f'non-finite velocities detected at step {absStep}; stopping.')
             result.diverged = True
             break
 

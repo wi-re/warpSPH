@@ -102,6 +102,21 @@ class CaseSpec:
     #: Simulated-time export interval, used when storeMode == 'trajectory'.
     exportInterval: float = 0.002
     exportRoot: Optional[str] = None
+    #: Path to a `storeMode='states'` checkpoint (`.../trajectory/state_NNNN.h5`,
+    #: `initialState.h5`, or `finalState.h5`) to resume from, instead of
+    #: `case.initialConditions`' fresh t=0 state. The case/spec must still
+    #: describe the SAME configuration (nx, params, scheme, ...) the
+    #: checkpoint was written under -- this replaces the particle state and
+    #: simulated time only, not domain/config setup, so a mismatched spec
+    #: loads a state whose shapes/geometry don't match what the rest of the
+    #: run expects. `None`: a normal fresh-start run (default).
+    resumeFrom: Optional[str] = None
+    #: The checkpoint's own absolute step number (e.g. 64000 for
+    #: `state_64000.h5`) -- offsets every step number this run reports
+    #: (diagnostics' `step` column, `postStep`'s step arg, stored checkpoint
+    #: filenames) so they read as a continuation of the original run rather
+    #: than restarting from 0. Ignored when `resumeFrom` is unset.
+    resumeStepOffset: int = 0
     video: bool = False
     #: `None` means "when a terminal is watching". Redirected to a file, a tqdm
     #: bar writes a carriage-return smear that buries the report an unattended
@@ -221,6 +236,10 @@ _FIELD_HELP = {
     'exportInterval': 'simulated time between frames (storeMode=trajectory)',
     'exportRoot': "parent directory for run folders; unset uses "
                   "$WARPSPH_EXPORT_ROOT, else 'export'",
+    'resumeFrom': 'path to a storeMode=states checkpoint .h5 to resume from '
+                  '(replaces the state/time case.initialConditions would set)',
+    'resumeStepOffset': "the checkpoint's own absolute step number, so this "
+                        "run's step numbering continues from there",
     'video': 'encode the exported frames with ffmpeg; skipped if it is missing',
     'progress': 'show a progress bar; unset means "when a terminal is watching"',
     'verbose': 'print extra detail during setup',
