@@ -4,7 +4,9 @@ wave-equation setup (not by any compressible/weakly-compressible case).
 
 `regular`/`jittered`/`random` all start from `sampleRegularParticles` and
 differ only in how much position noise is layered on afterwards; `optimal`
-relaxes a lattice via `sampleOptimal`; `glass` loads a pre-relaxed particle
+relaxes a lattice via `sampleOptimal`; `densest` lays out the densest
+periodic packing (1D uniform, 2D hexagonal, 3D FCC) via
+`sampleDensestParticles`; `glass` loads a pre-relaxed particle
 configuration from a local `position_samples_*.h5` file sized to the
 requested particle count. `config.samplingScheme` defaults to
 `SamplingScheme.regular` and no case in this repo overrides it, so the other
@@ -15,6 +17,7 @@ from ..configurations import SimulationConfig
 from ..geometry import *
 from .regular import sampleRegularParticles
 from .optimal import sampleOptimal
+from .densest import sampleDensestParticles
 from warpSPHCore import KernelFunctions
 import h5py
 import torch
@@ -93,6 +96,12 @@ def sampleParticles(nx: int,config : SimulationConfig):
             jitter = 0.5,
             shiftScheme='delta',
             shiftIters=128
+        )
+    elif config.samplingScheme == SamplingScheme.densest:
+        particles = sampleDensestParticles(
+            nx = nx,
+            domain=config.domain,
+            targetNeighbors=config.targetNeighbors,
         )
     elif config.samplingScheme == SamplingScheme.glass:
         files = ['position_samples_1024.h5', 'position_samples_4096.h5', 'position_samples_16384.h5', 'position_samples_65536.h5']
