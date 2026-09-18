@@ -388,6 +388,31 @@ just don't let anyone `git add -f` into them.
 - **Parts 35–38's `wp_dfsph_factor.py` `ki == 0` change** touches a
   `@wp.kernel` and was gradcheck'd at the time (Part 37) but not re-verified
   since.
+- **The `ghostOffsets` sign fix (`BOUNDARY_DENSITY_PLAN.md` §9, 2026-09-16)
+  does not touch `omniIncompressible`'s `'mls'` wall-pressure regression.**
+  `WCSPH_DEFAULT_CLOSEOUT_PLAN.md` item G re-checked whether that WCSPH-side
+  fix (a `RigidBody` init/step hook was silently overwriting a sign
+  convention at every ghost particle's own row) happened to also fix the
+  `WALL_PRESSURE_MODE='mls'` divergence this file documents above
+  (`omniIncompressible.py`'s own comment: "`'mls'` diverges
+  `randomFlowIncompressible --bounded` on step 1"). **It does not** — re-ran
+  `randomFlowIncompressibleCase(nx=96, bounded=True, scheme='omniIncompressible')`
+  with `WARPSPH_WALL_PRESSURE_MODE=mls` post-fix: `kineticEnergy` goes
+  0.32 -> 4.3e34 and `maxVelocity` -> 4.0e17 by step 40 (`result.diverged`
+  itself reads `False`, since these are large-but-finite float32 values, not
+  NaN/Inf — a report/scoring blind spot worth remembering when grading a run
+  by that flag alone). Expected, not a surprise: this scheme's own comment
+  already attributes the failure to `'mls'`'s linear term amplifying real
+  near-wall pressure structure in a sheared flow and pumping energy into the
+  Jacobi iteration -- an amplification/numerical-stability problem in the
+  iterative solver, not a wrong-sign value, so a sign-convention fix was
+  never mechanistically going to reach it. (A first pass mistakenly tested
+  `randomFlowIncompressibleCase`'s own default scheme, `divergenceFree`,
+  under `mls` instead -- that one DOES run clean for 400 steps, but it goes
+  through a structurally different closure, `modules/incompressible/
+  incompressible.py`'s `_SHIFT_WALL_PRESSURE`, not `omniIncompressible.py`'s
+  Jacobi-iterate closure -- a different code path than the one this
+  regression note is about, not evidence either way for it.)
 
 ---
 

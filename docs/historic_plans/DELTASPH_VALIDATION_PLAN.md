@@ -1,14 +1,18 @@
 # warpSPH — δ-SPH / δ⁺-SPH conformance audit + validation plan
 
-> **ALWAYS run validation cases with video output (vispy).** For a WCSPH run the
-> vispy encode overhead is negligible next to being able to *watch* the run and
-> see where and how it goes wrong — which the scalar diagnostics alone never
-> show (a density ratchet, a corner leak, a jet fragmenting all read the same in
-> a `minDensity` column). It needs no HDF5 trajectory. Every regression in this
-> plan that took a bisect to localise would have been obvious from the field
-> video. Pass `--video`; do **not** force `--plotBackend matplotlib` (that path
-> is ~50–80× slower — `probe_englishWedge.py`'s `--video` still hardcodes it and
-> needs fixing). See [[export-video-on-validation-runs]] (memory).
+> **Video output (vispy) is now ON BY DEFAULT** for every `scripts/probe_*.py`/
+> `scripts/run_*.py`/`run_sloshingTank.py` (`WCSPH_DEFAULT_CLOSEOUT_PLAN.md`,
+> 2026-09-18) — pass `--no-video` to opt out, not the reverse. This used to be a
+> "remember to pass `--video`" rule that got violated repeatedly across
+> sessions; it's fixed at the tooling level now, not something to remember. For
+> a WCSPH run the vispy encode overhead is negligible next to being able to
+> *watch* the run and see where and how it goes wrong — which the scalar
+> diagnostics alone never show (a density ratchet, a corner leak, a jet
+> fragmenting all read the same in a `minDensity` column). It needs no HDF5
+> trajectory. Do **not** force `--plotBackend matplotlib` (that path is
+> ~50–80× slower). `probe_englishWedge.py`'s old matplotlib-hardcoding issue is
+> already resolved (uses the runner's vispy default). See
+> [[export-video-on-validation-runs]] (memory).
 
 ## Why this exists
 
@@ -618,7 +622,13 @@ Runners in `scripts` scratch (`run_dambreak_marrone31.py`,
    lever cap in `computeMdbcDensity`) — "is the near-wall density field linear
    enough for a deep 1st-order extrapolation" is flow-dependent, not geometric.
 
-   **(b) A SEPARATE hole at H/Δx ≈ 72–160.** With the fix, nx = 67 (40) and the
+   **(b) A SEPARATE hole at H/Δx ≈ 72–160 — RESOLVED under the 2026-09-18
+   default combo, see `WCSPH_DEFAULT_CLOSEOUT_PLAN.md` item H / `OPEN_
+   PROBLEMS.md` item 5.** Re-ran nx=120 under `english2025`+`fourtakas2019`+
+   `symplecticEuler` to t*≈7.68 (past the failure window below):
+   `diverged=False`, no NaN, moderate maxVel (7.4, decaying). Not root-caused
+   which part of the combo fixed it. Original finding, for the record:
+   with the fix, nx = 67 (40) and the
    plan's nx = 536 (322, δ⁺-Eq.(7) frozen, survived to t\* ≈ 7.7 at 5 Δx) are
    OK, but **every config blows up at nx = 120 (H/Δx = 72)** in t\* ≈ 5.5–6.3 —
    full Eq.(7) frozen, ⅛-Eq.(7) un-frozen, no-PST. The fix only *delays* it
@@ -6888,6 +6898,12 @@ differently depending on which DDT formulation's local dissipation is
 smoothing it, not a `fourtakas2019` regression.
 
 ## Next up (planned, not started -- flagged 2026-09-14 for next week)
+
+> **Tracked in `OPEN_PROBLEMS.md` item 1 as of 2026-09-18** (deliberately
+> out of `WCSPH_DEFAULT_CLOSEOUT_PLAN.md`'s scope, not dropped) -- this
+> section's own diagnosis and next-step list are unchanged and still the
+> live reference; `OPEN_PROBLEMS.md` is the shorter pointer for a future
+> session deciding what to pick up, this section is the full narrative.
 
 **The corner/edge "flyers" instability is the next stability item to
 chase**, ranked above further DDT-scheme exploration. Three independent

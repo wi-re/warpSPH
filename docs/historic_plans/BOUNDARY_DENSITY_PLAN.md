@@ -1891,3 +1891,61 @@ trusted at face value:**
    right-wall kick, [[sloshing-rightwall-thin-sheet-kick]]) -- adjudicated
    as genuine SPH sensitivity this system has, not something any
    configuration resolves.
+
+## 12. Closeout (2026-09-18): `mdbcDensityScheme`/`densityDiffusionTerm` are
+now the production defaults; `integrationScheme` stays opt-in
+
+`WCSPH_DEFAULT_CLOSEOUT_PLAN.md` worked through every remaining small item
+around this investigation and flipped the two components of §11's
+"best-known combo" that are validated, no-downside improvements:
+`mdbcDensityScheme` defaults to `'english2025'`
+(`configurations/weaklyCompressible.py`) and `densityDiffusionTerm` defaults
+to `fourtakas2019` (`weaklyCompressibleDiffusionParams.py`) -- both beat
+their predecessors on every Marrone config tested, at multiple resolutions,
+with no known regression.
+
+**`integrationScheme` deliberately did NOT become a blanket default.**
+Two real findings from executing the flip:
+
+- The combo's own `integrationScheme='symplecticEuler'` piece is not an
+  unconditional improvement the way the other two are -- it's a real
+  numerical-method choice with its own history (§8.5's earlier divergence,
+  since superseded by `mdbcNoPenShiftMode='finalize'`), and `dambreak.py`'s
+  original `rungeKutta4` default existed specifically to match Sun 2017/
+  Marrone's own numerical method for literature comparison, not for
+  stability. User's call, once this was surfaced: the burden belongs on a
+  script that needs a specific literature-matching method to anchor it
+  explicitly (`--integrationScheme rungeKutta4`), not on the case default to
+  protect implicit reproducibility -- so `dambreak.py`, `sloshingTank.py`,
+  `lidDrivenCavity.py`, and `movingObstacle.py` all got
+  `integrationScheme='symplecticEuler'` as an explicit per-case default too.
+  **Consequence:** this plan's own recorded Marrone comparison numbers that
+  relied on a bare no-override command (e.g. the "adversarial config",
+  `--nx 35 --shifting off --tLimit 1.2`) were produced under the *old*
+  implicit RK4 default -- reproducing them now requires
+  `--integrationScheme rungeKutta4` explicitly.
+- The shared `WEAKLY_COMPRESSIBLE_DEFAULTS` dict (`cases/weaklyCompressible.py`)
+  was NOT touched, despite being the obvious-looking single place to flip
+  this -- it's shared with `randomFlowIncompressible`, `staticBlob`,
+  `hydrostaticColumn`, and `columnCollapse`, all incompressible-scheme cases
+  never validated under `symplecticEuler` by this investigation. Each of the
+  four WCSPH cases above got its own explicit override instead.
+
+`densityBand.py` also got the `english2025.py`-style symmetric-epsilon fix
+(same asymmetric-floor bug, same fix) -- a real, substantial improvement
+(no longer diverges catastrophically on either Marrone 3.1 or 3.4), but
+`'band'` remains clearly the worst of the three schemes on every metric,
+confirming §3.1's separate architectural finding (depth/lever-arm
+amplification) is the dominant remaining failure mode for it, unrelated to
+the precision hole that's now fixed. Full numbers: `WCSPH_DEFAULT_CLOSEOUT_
+PLAN.md` item C.
+
+Real `a_b` (moving-boundary acceleration) support was also added --
+previously hardcoded to zero with no field to read even if it hadn't been --
+computed analytically from each `RigidBody`'s own centripetal kinematics,
+zero for every static wall (verified bit-for-bit against every recorded
+Marrone number). `WCSPH_DEFAULT_CLOSEOUT_PLAN.md` item D.
+
+The corner-flyer/ceiling-hover mechanism (§10 above) remains exactly as
+diagnosed -- out of this plan's scope, tracked in `OPEN_PROBLEMS.md` instead
+of here going forward.
