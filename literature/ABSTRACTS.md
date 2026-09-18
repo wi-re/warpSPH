@@ -208,6 +208,68 @@ than sit here looking plausible.
 > that at low NH the quartic spline kernel with NH ≈ 60 obtains much better
 > convergence then the standard cubic spline.
 
+### `read2010`
+
+- **file:** `read2010_resolving-mixing-sph.pdf`
+- **title:** Resolving Mixing in Smoothed Particle Hydrodynamics
+- **authors:** J. I. Read, T. Hayfield and O. Agertz
+- **venue:** *Monthly Notices of the Royal Astronomical Society* 405:1513, 2010
+- **doi:** [10.1111/j.1365-2966.2010.16577.x](https://doi.org/10.1111/j.1365-2966.2010.16577.x)
+- **copy here:** MNRAS typeset reprint (000 running-header placeholders, Printed 23 October 2018); arXiv:0906.0774v2
+- **relevance:** The OSPH scheme: proves the clumping and banding instabilities are cured by kernel choice (the source of the HOCT4 kernel), and cures the local mixing instability with a weighted density estimate. Source of the HOCT4 kernel definition that the `warpSPHCore/higherOrderSPH/dehnen2012` replication adds to the core kernel set (Phase 3).
+- **abstract from:** PDF p.1
+
+> Standard formulations of smoothed particle hydrodynamics (SPH) are unable to
+> resolve mixing at fluid boundaries. We use an error and stability analysis of
+> the generalised SPH equations of motion to prove that this is due to two
+> distinct problems. The first is a leading order error in the momentum
+> equation. This should decrease with increasing neighbour number, but does not
+> because numerical instabilities cause the kernel to be irregularly sampled.
+> We identify two important instabilities: the clumping instability and the
+> banding instability, and we show that both are cured by a suitable choice of
+> kernel. The second problem is the local mixing instability (LMI). This occurs
+> as particles attempt to mix on the kernel scale, but are unable to due to
+> entropy conservation. The result is a pressure discontinuity at boundaries
+> that pushes fluids of different entropy apart. We cure the LMI by using a
+> weighted density estimate that ensures that pressures are single valued
+> throughout the flow. This also gives a better volume estimate for the
+> particles, reducing errors in the continuity and momentum equations. We
+> demonstrate mixing in our new Optimised Smoothed Particle Hydrodynamics
+> (OSPH) scheme using a Kelvin Helmholtz instability (KHI) test with density
+> contrast 1:2, and the ‘blob test’ – a 1:10 density ratio gas sphere in a wind
+> tunnel – finding excellent agreement between OSPH and Eulerian codes.
+
+### `read2012`
+
+- **file:** `read2012_sphs-higher-order-dissipation-switch.pdf`
+- **title:** SPHS: Smoothed Particle Hydrodynamics with a Higher Order Dissipation Switch
+- **authors:** J. I. Read and T. Hayfield
+- **venue:** *Monthly Notices of the Royal Astronomical Society* 422(4):3037-3055, 2012
+- **doi:** [10.1111/j.1365-2966.2012.20819.x](https://doi.org/10.1111/j.1365-2966.2012.20819.x)
+- **copy here:** published version (OUP)
+- **relevance:** The SPHS higher-order dissipation switch: second-order detection of upcoming flow convergence, switching on conservative dissipation in all advected quantities (e.g. the entropy) — the "artificial conductivity" Dehnen & Aly 2012 cite for their Sod contact-discontinuity study. Source of the conductivity module that replication builds into the warpSPH compressible scheme (Phase 6).
+- **abstract from:** PDF p.1
+
+> We present a novel implementation of smoothed particle hydrodynamics that
+> uses the spatial derivative of the velocity divergence as a higher order
+> dissipation switch. Our switch – which is second order accurate – detects
+> flow convergence before it occurs. If particle trajectories are going to
+> cross, we switch on the usual SPH artificial viscosity, as well as
+> conservative dissipation in all advected fluid quantities (e.g. the
+> entropy). The viscosity and dissipation terms (that are numerical errors) are
+> designed to ensure that all fluid quantities remain single valued as
+> particles approach one another, to respect conservation laws, and to vanish
+> on a given physical scale as the resolution is increased. SPHS alleviates a
+> number of known problems with ‘classic’ SPH, successfully resolving mixing,
+> and recovering numerical convergence with increasing resolution. An
+> additional key advantage is that – treating the particle mass similarly to
+> the entropy – we are able to use multimass particles, giving significantly
+> improved control over the refinement strategy. We present a wide range of
+> code tests including the Sod shock tube, Sedov–Taylor blast wave,
+> Kelvin–Helmholtz Instability, the ‘blob test’ and some convergence tests.
+> Our method performs well on all tests, giving good agreement with analytic
+> expectations.
+
 
 ## Boundary handling and fluid-rigid coupling
 
