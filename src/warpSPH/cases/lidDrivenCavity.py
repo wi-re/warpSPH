@@ -41,10 +41,26 @@ def initialConditions(ctx: RunContext, system) -> None:
 
     lidHeight = ctx.param('lidHeight')
     lidVelocity = ctx.param('lidVelocity')
+    regularizeLid = ctx.param('regularizeLid', False)
+    halfWidth = ctx.spec.L / 2.0
 
     def lidDirichlet(state, config, schemeConfig, positions, d, n, t, dt):
         velocities = state.velocities.clone()
-        velocities[:, 0] = torch.where(positions[:, 1] > lidHeight, lidVelocity,
+        if regularizeLid:
+            # Botella & Peyret 1998's regularized-cavity lid profile,
+            # `u(x) = lidVelocity * (1 - x^2)^2` on the interior half-width --
+            # zero velocity *and* zero slope at the two top corners, instead
+            # of the hard step every other particle above `lidHeight` gets.
+            # The un-regularized cavity's corner is a genuine singularity
+            # (present in the continuum solution too, not just this
+            # discretization): default off so no existing run changes: RK2/
+            # RK4 already handle it, and this exists for schemes that don't
+            # (`--integrationScheme symplecticEuler`).
+            xi = torch.clamp(positions[:, 0] / halfWidth, -1.0, 1.0)
+            target = lidVelocity * (1.0 - xi ** 2) ** 2
+        else:
+            target = torch.full_like(positions[:, 0], lidVelocity)
+        velocities[:, 0] = torch.where(positions[:, 1] > lidHeight, target,
                                        velocities[:, 0])
         return velocities
 
@@ -87,6 +103,7 @@ lidDrivenCavityCase = registerCase(Case(
         band=5,
         lidHeight=1.0,
         lidVelocity=1.0,
+        regularizeLid=False,
         markerSize=8,
     ),
 ))
