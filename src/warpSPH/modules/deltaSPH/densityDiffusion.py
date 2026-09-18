@@ -83,9 +83,16 @@ def computeDensityDiffusion(currentState: Any, config: SimulationConfig, schemeC
         # sum entirely. Only this outer pair-sum direction changes here --
         # `gradRho`/`gradRhoL` (passed in, computed elsewhere) are untouched.
         # `moltenicolagrossi2009`/`fourtakas2019`-only; every other scheme
-        # ignores rho0/c0/gravity, so this is cheap even when unused.
+        # ignores rho0/c0/gravity, so this is cheap even when unused. Gated
+        # on `.active`, not just the scheme choice: `gravityConfig.magnitude`
+        # defaults to 9.81 even when gravity is off, so a case that never
+        # enables gravity (lidDrivenCavity, randomFlow) would otherwise still
+        # get a nonzero hydrostatic correction subtracted from a fluid with
+        # no actual gravitational stratification -- a spurious density
+        # source, not a no-op.
         gravityVec = None
-        if schemeConfig.diffusionParams.densityDiffusionTerm == DensityDiffusionScheme.fourtakas2019:
+        if (schemeConfig.diffusionParams.densityDiffusionTerm == DensityDiffusionScheme.fourtakas2019
+                and schemeConfig.gravityConfig.active):
             direction = schemeConfig.gravityConfig.direction
             if not isinstance(direction, torch.Tensor):
                 direction = torch.tensor(direction, dtype=currentState.positions.dtype, device=currentState.positions.device)

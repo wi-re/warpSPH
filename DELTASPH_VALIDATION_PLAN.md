@@ -6931,3 +6931,145 @@ to (1) or (3) -- both of those are real implementation work, not
 one-line changes. The Antuono-mask flip-rate diagnostic (§5.18/§5.35,
 already instrumented) is the right instrument to quantify "did this
 actually help" rather than eyeballing more frame grids.
+
+# Part 9 — 2026-09-17/18 overnight gallery batch (proposed-default-scheme variant)
+
+`scratchpad/run_overnight_batch_2026-09-17.sh`'s gallery step
+(`scripts/render_examples.py --only weaklyCompressible`) forced
+`densityDiffusionTerm=fourtakas2019` + `integrationScheme=symplecticEuler`
+across the entire 13-example gallery, on the theory that both knobs are
+free-surface-relevant everywhere. Two examples stood out: lidDrivenCavity
+blew up, randomFlowPeriodic decayed much faster than its own 2026-08-14
+baseline. Neither turned out to be caused by the combo itself.
+
+## 9.1 `fourtakas2019` silently assumed Earth gravity even with gravity off -- FIXED
+
+`computeDensityDiffusion` (`modules/deltaSPH/densityDiffusion.py`) built the
+`fourtakas2019` hydrostatic correction's gravity vector from
+`schemeConfig.gravityConfig.direction`/`.magnitude` unconditionally on scheme
+choice, never checking `.active`. `gravityConfiguration.magnitude` defaults
+to `9.81` even with gravity off, so any case that never enables gravity (LDC,
+both randomFlow variants) fed a phantom `(0, -9.81)` field into the DDT's
+hydrostatic subtraction. Now gated on `.active` too. A real bug, but a dormant
+one this session -- neither §9.2 nor §9.3's root cause traces back to it.
+
+## 9.2 Lid-driven cavity blow-up -- FIXED, and a different mechanism from §7.2
+
+Symptom: density -> ~2x rho0, velocities > 20x the lid speed, within a few
+seconds under the forced `symplecticEuler` + `fourtakas2019` combo (nx=64,
+tLimit=3). **Distinct from §7.2's still-open, far slower/milder "density
+ramp"** (densityMedian 1.00002 -> 1.00223 over t=0-4s under the shipped
+`rungeKutta2` default) -- §7.2 stays open, unaffected by anything below,
+since the mechanism found here is specific to `symplecticEuler`.
+
+Investigation, each step ruling out the previous hypothesis (nx=64,
+tLimit=3 unless noted):
+
+- **DDT term**: `fourtakas2019` (fixed, §9.1) vs default `deltaSPH` --
+  identical blow-up either way (density 1.92, vel 21.1, accelMagMax 25711
+  under `symplecticEuler` regardless of DDT). Not the DDT.
+- **Integrator**: `rungeKutta2` (shipped default) and `rungeKutta4` both stay
+  healthy (density ~1.004-1.006, vel ~0.71, accelMagMax ~20-26) under either
+  DDT; only `symplecticEuler` blows up. Isolated to the integrator.
+- **Spatial location**: instrumented `WeaklyCompressibleSystem.finalize` to
+  record the top-8 highest-`accelMag` particles' positions whenever
+  `accelMag > 15`. Every spike across the whole run sits at `y ∈ [0.95,
+  1.03]` -- the lid/fluid interface (`lidHeight=1.0`) -- seeded first at the
+  left corner (`x=-0.98`) then propagating along the whole lid line.
+- **BC-consistency hypothesis -- wrong, made it worse**: restricting
+  `lidDirichlet`'s velocity mask to boundary particles only (`kinds != 0`)
+  instead of every particle above `lidHeight` regardless of kind made the
+  blow-up *worse* (density 2.80, accelMagMax 47098) -- the fluid-side snap
+  was incidentally acting as a crude stabilizer, not a bug. Reverted.
+- **Corner-singularity hypothesis -- partial, real, not primary**: added an
+  opt-in `regularizeLid` param (`cases/lidDrivenCavity.py`, default off)
+  tapering the lid velocity to zero at the corners (Botella & Peyret 1998,
+  `u(x) = lidVelocity * (1-x^2)^2`). Meaningful improvement (KE peak -87%,
+  accelMagMax -44%) but not a full fix (velocity still spiked to ~19.5).
+  Kept as a harmless, independently-useful opt-in; not the actual bug.
+- **Actual root cause, confirmed empirically**: instrumented boundary-particle
+  positions directly. 370 lid-band boundary/ghost particles drift **linearly
+  in time**, reaching 1.5 domain-widths of displacement by t=3, at exactly
+  `lidVelocity * t / 2`. `schemes/deltaSPH.py` correctly zeroes the *masked*
+  `update.dxdt` for `kinds != 0` every stage, but `symplecticEuler`'s second
+  position half-step (`semi_implicit_position_step`,
+  `warpSPHIntegrators/verlet.py`) reads the *raw* current state velocity
+  directly (`x += dt/2 * v_current`), bypassing that mask entirely -- so any
+  boundary particle carrying a nonzero BC-prescribed velocity (the lid's
+  Dirichlet condition) drifts, wrecking the lattice the pressure/density
+  estimate at the interface depends on. Traces further to dead metadata:
+  `integrated()` (`warpSPHIntegrators/fields.py`) declares `fluid_only: bool
+  = True` on every integrated field, clearly meant to auto-mask exactly this,
+  but it is never consulted anywhere in that package.
+
+**Fix** (`systems/weaklyCompressible.py`'s `finalize`): boundary/ghost
+particle positions are now explicitly restored to their start-of-step value
+every step, mirroring the existing density-restore immediately above it
+(`self.state.densities = torch.where(kinds != 0, midRho, ...)`). Fixed at the
+`warpSPH` level rather than in `warpSPHIntegrators`, so the guarantee covers
+every WCSPH case with a moving/Dirichlet-driven boundary, not only this one,
+without touching the shared integrator library.
+
+Verified: boundary drift measured at exactly 0.0 for the full t=0-3 run after
+the fix (previously 1.5 at t=3). `symplecticEuler` + `fourtakas2019` now
+matches `rungeKutta2`'s numbers almost exactly -- density 1.006 vs 1.004,
+velocity 0.71 vs 0.71, accelMagMax 20.0 vs 26.
+
+## 9.3 randomFlow-periodic "very dissipative" -- NOT A BUG
+
+Symptom: decayed noticeably faster than its own 2026-08-14 baseline render
+(byte-identical `caseSpec.json`: same seed, `nu`, octaves, `nx`,
+`rungeKutta2`) under the forced combo.
+
+Ruled out, in order: the DDT term (`fourtakas2019` vs default `deltaSPH`:
+identical decay), the integrator (`symplecticEuler`/`rungeKutta2`/
+`rungeKutta4`: identical decay -- rules out both a scheme-level and a
+temporal-truncation-error explanation), the obstacle's BC (`freeSlip` by
+default, not `noSlip`; removing the obstacle entirely barely changes the
+decay: 10.1% KE retained at t=5 with it vs 12.9% without), the
+particle-shifting/PST (`deltaSPH`/`surfaceNormal`, on by default; forcing it
+off makes a negligible difference: 0.0520 vs 0.0533 final KE), lattice
+regularity (pre-shuffling the lattice the way TGV does before assigning
+velocities: no meaningful change), and the noise-field generator/interpolator
+(`d9ad712`'s scipy -> torch `RegularGridInterpolator` swap: bit-identical to
+machine epsilon against a reconstructed scipy comparison on the same
+grid/queries; that commit's octave-padding/resample logic is also a no-op at
+this resolution, since 256 already divides the octave LCM of 8).
+
+**Root cause**: bisected -- `warpSPHCore` ruled out entirely first (even its
+full current tip, paired with the 2026-08-14 `warpSPH`, reproduces the old,
+correct decay rate); bisection then run against `warpSPH` itself, holding
+`warpSPHCore` fixed at current -- to a single commit, `3e7b78e` ("two-sided
+pi_ij viscosity"): `computeVelocityDiffusion(..., approachOnly=False)`.
+Before this fix, the viscous Laplacian was wrongly gated to
+approaching-pairs-only (Monaghan's *artificial* shock-viscosity convention),
+which is not appropriate for the real physical (`nu`-based) viscosity both
+TGV and randomFlow use. This is the *same* fix that corrected TGV's
+kinetic-energy decay from half the analytic rate (per that case's own
+docstring) to matching it within <1% (measured this session: `nu_eff/nu` =
+0.991-0.996 across every integrator/DDT combination tested).
+randomFlow-periodic's broadband noise field has far more separating-pair/
+shear content than TGV's single smooth mode, so the same correctness fix
+dissipates it much harder than the old, under-damped baseline did. Nothing to
+fix here -- the current behavior is what `nu=0.01`, correctly implemented,
+predicts for this field.
+
+## 9.4 Infrastructure: batch script no longer forces the combo gallery-wide, and doesn't dirty shipped docs media
+
+The gallery step's forced `densityDiffusionTerm=fourtakas2019`/
+`integrationScheme=symplecticEuler` override is removed -- wrong for most of
+the 13 examples (only dambreak/impact/open-flow actually have a free
+surface), and directly responsible for §9.2. The three scheme-relevant legs
+(Marrone 3.1/3.4, sloshingTank) the combo is actually meant for are
+untouched.
+
+Separately: `render_examples.py`'s `collect()` step unconditionally copied
+each example's gif/mp4/png into its own git-tracked
+`examples/<family>/outputs/` folder regardless of `--outRoot`, so every
+nightly pass silently modified shipped documentation media whether or not
+anything had actually changed. New `--publishRoot` flag redirects that copy
+under a caller-chosen root instead (`<publishRoot>/<name>/`); the batch
+script now passes `--publishRoot "$BASE/gallery/published"` so the whole
+nightly run lands under one folder and touches nothing under `examples/`.
+Default (no `--publishRoot`) is unchanged, for a deliberate "refresh the
+shipped docs" invocation.

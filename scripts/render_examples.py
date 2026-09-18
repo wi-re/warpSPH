@@ -68,6 +68,20 @@ class Example:
     def outputs(self) -> Path:
         return self.script.parent / "outputs"
 
+    def publishDir(self, publishRoot: Path | None) -> Path:
+        """Where this example's gif/mp4/png get copied to.
+
+        `publishRoot` given (`--publishRoot`) -> `<publishRoot>/<name>/`,
+        `name` already being the notebook-derived, gallery-wide-unique
+        artefact name `outputs()` itself keys files by, so this needs no
+        further per-family nesting. `None` (default) -> the git-tracked
+        `outputs()` next to the notebook, i.e. today's always-on "refresh the
+        shipped docs" behavior, unchanged for a deliberate, manual re-render.
+        """
+        if publishRoot is None:
+            return self.outputs
+        return Path(publishRoot) / self.name
+
     @property
     def label(self) -> str:
         return str(self.script.relative_to(EXAMPLES))
@@ -162,11 +176,12 @@ def run(example: Example, root: Path, args, passthrough: list[str]) -> Result:
     result = Result(example.label, status, seconds, logPath=display(logPath))
     if status != "ok":
         return result
-    return collect(example, exportRoot, result)
+    return collect(example, exportRoot, result, args.publishRoot)
 
 
-def collect(example: Example, exportRoot: Path, result: Result) -> Result:
-    """Copy the run's gif/mp4/final frame into the example's `outputs/`."""
+def collect(example: Example, exportRoot: Path, result: Result,
+           publishRoot: Path | None = None) -> Result:
+    """Copy the run's gif/mp4/final frame into `example.publishDir(publishRoot)`."""
     runDirs = sorted((p for p in exportRoot.glob("*") if p.is_dir()),
                      key=lambda p: p.stat().st_mtime)
     if not runDirs:
@@ -174,17 +189,18 @@ def collect(example: Example, exportRoot: Path, result: Result) -> Result:
         return result
     runDir = runDirs[-1]
 
-    example.outputs.mkdir(parents=True, exist_ok=True)
+    publishDir = example.publishDir(publishRoot)
+    publishDir.mkdir(parents=True, exist_ok=True)
     for source, suffix in ((runDir / "out.gif", ".gif"),
                            (runDir / "output.mp4", ".mp4")):
         if source.exists():
-            target = example.outputs / f"{example.name}{suffix}"
+            target = publishDir / f"{example.name}{suffix}"
             shutil.copy(source, target)
             result.artefacts.append(display(target))
 
     frames = sorted((runDir / "images").glob("frame_*.png"))
     if frames:
-        target = example.outputs / f"{example.name}.png"
+        target = publishDir / f"{example.name}.png"
         shutil.copy(frames[-1], target)
         result.artefacts.append(display(target))
 
@@ -228,6 +244,12 @@ def main() -> int:
                         help="per-example timeout in seconds (default: 7200)")
     parser.add_argument("--outRoot", default=None,
                         help="parent for the run directories (default: <repo>/export/renders)")
+    parser.add_argument("--publishRoot", default=None,
+                        help="copy each example's gif/mp4/png under <publishRoot>/<name>/ "
+                             "instead of the git-tracked examples/<family>/outputs/ next to "
+                             "its notebook -- use this for an automated/nightly run so it "
+                             "doesn't dirty the shipped docs media on every pass; omit for a "
+                             "deliberate 'refresh the shipped docs' run")
     parser.add_argument("--list", action="store_true",
                         help="list the examples, their artefact names, and exit")
     parser.add_argument("--dry-run", dest="dryRun", action="store_true",
@@ -249,7 +271,7 @@ def main() -> int:
         for example in examples:
             notebook = "" if example.notebook else "   (no notebook)"
             print(f"  {example.label:<{width}}  ->  "
-                  f"{display(example.outputs)}/{example.name}.gif{notebook}")
+                  f"{display(example.publishDir(args.publishRoot))}/{example.name}.gif{notebook}")
         return 0
 
     if not examples:

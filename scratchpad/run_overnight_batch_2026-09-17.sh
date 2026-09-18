@@ -22,26 +22,51 @@
 # actually proposed, not every knob this investigation has touched.
 #
 # The gallery step (render_examples.py, --only weaklyCompressible) runs each
-# example at its own shipped settings EXCEPT densityDiffusionTerm and
-# integrationScheme, forced to fourtakas2019/symplecticEuler -- these
-# examples concern free-surface behaviour, so those two knobs (the ones a
-# non-mDBC WCSPH case can actually have an opinion on) still apply.
-# mdbcDensityScheme/noPenShift are left alone: most gallery examples have no
-# boundary/mDBC particles at all, so that knob wouldn't do anything there,
-# and this step is still primarily a broad regression net ("did anything
-# else break"), not a re-run of the three targeted legs above.
-# `densityDiffusionTerm` isn't a generic CaseSpec field the way
-# `integrationScheme` is (`caseMain` has no per-example CLI flag for it), so
-# it's forced via `WARPSPH_DEFAULT_DDT` -- see
-# configurations/moduleConfigurations/weaklyCompressibleDiffusionParams.py's
-# DIAGNOSTIC ONLY block, a no-op for everything else that doesn't set it.
+# example at its own shipped settings -- no forced overrides. It used to force
+# densityDiffusionTerm/integrationScheme to fourtakas2019/symplecticEuler on
+# the theory that "these examples concern free-surface behaviour, so those
+# two knobs still apply" -- wrong for most of the 13: only a few (dambreak,
+# impact, open-flow) have a free surface at all, and forcing symplecticEuler
+# on the rest actively broke two that were previously fine, unrelated to
+# either knob:
+#   - lidDrivenCavity blew up (density -> ~2x rho0, velocities > 20x the lid
+#     speed). Root cause had nothing to do with this combo: boundary/ghost
+#     particles carrying a nonzero BC-prescribed velocity (the lid's Dirichlet
+#     condition) drifted in *position* under symplecticEuler's second,
+#     semi-implicit half-step, which reads raw current velocity instead of
+#     the masked derivative every other update path uses -- 1.5 domain-widths
+#     of drift by t=3, wrecking the lattice at the lid interface. Fixed in
+#     `systems/weaklyCompressible.py`'s `finalize()` (boundary positions are
+#     now explicitly restored every step, matching the existing density
+#     restore right above it) -- symplecticEuler now matches rungeKutta2's
+#     numbers on this case, so the override is no longer the risk it was, but
+#     there's no reason to force it broadly now that the actual bug is fixed.
+#   - randomFlow-periodic decayed much faster than its own 2026-08-14
+#     baseline -- looked like a regression but wasn't: bisected to
+#     `3e7b78e`'s two-sided viscosity fix, which also corrected TGV's
+#     previously-wrong half-rate decay. Neither this combo's knobs nor the
+#     integrator moved that number at all in testing; it's the physically
+#     correct result for this field now, not a regression this batch's
+#     scheme choice caused. Nothing to override here either.
+# This step is a broad regression net ("did anything else break" against each
+# example's own default), not a re-run of the three targeted legs above --
+# letting each example run at its shipped default is what that actually
+# requires.
 #
-# All raw run output lands under one folder:
+# All output, raw run trees and the published gif/mp4/png alike, lands under
+# one folder:
 #   examples/weaklyCompressible/output/overnight_2026-09-17/
-# NOTE: render_examples.py ALSO copies each gallery example's gif/mp4/png
-# into that example's own (git-tracked) examples/weaklyCompressible/.../outputs/
-# folder -- refreshes shipped documentation media in place, `git status` will
-# show those files modified afterward. Left uncommitted deliberately for review.
+# render_examples.py's [4/4] step used to ALSO copy each gallery example's
+# gif/mp4/png into its own (git-tracked) examples/weaklyCompressible/.../outputs/
+# folder unconditionally -- every nightly pass silently refreshed the shipped
+# docs media in place, so `git status` would show those files modified
+# whether or not anything had actually changed, and an accidental `git add -A`
+# could ship a regenerated video nobody reviewed. `--publishRoot
+# "$BASE/gallery/published"` (see [4/4] below) redirects that copy under this
+# same output folder instead, alongside the raw run trees -- nothing under
+# `examples/` gets touched by this script anymore. Deliberately refreshing the
+# shipped docs media is still `scripts/render_examples.py --only weaklyCompressible`
+# with no `--publishRoot`, unchanged.
 set -o pipefail
 cd /home/lu26029/dev/warpSPH
 
@@ -92,8 +117,8 @@ fi
 
 echo "All three scheme-relevant runs completed without diverging -- proceeding to the gallery."
 echo
-echo "--- [4/4] examples/weaklyCompressible gallery (render_examples.py, shipped settings per example, EXCEPT densityDiffusionTerm=fourtakas2019 + integrationScheme=symplecticEuler forced -- these examples concern free-surface behaviour, so the two knobs this combo actually changes for a WCSPH case still apply. mdbcDensityScheme/noPenShift are left at each example's own default -- most gallery examples have no mDBC boundary particles at all, so that knob wouldn't do anything there.) ---"
-WARPSPH_DEFAULT_DDT=fourtakas2019 python scripts/render_examples.py --only weaklyCompressible --outRoot "$BASE/gallery" -- --integrationScheme symplecticEuler 2>&1 | tee "$BASE/gallery.log"
+echo "--- [4/4] examples/weaklyCompressible gallery (render_examples.py, each example at its own shipped default settings -- see the header comment for why this no longer forces fourtakas2019/symplecticEuler) ---"
+python scripts/render_examples.py --only weaklyCompressible --outRoot "$BASE/gallery" --publishRoot "$BASE/gallery/published" 2>&1 | tee "$BASE/gallery.log"
 
 echo
 echo "=== overnight batch finished $(date) ==="

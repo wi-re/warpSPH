@@ -309,6 +309,31 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
         # mDBC value `deltaSPH_step` computed mid-step. Restore that explicitly.
         midRho = returnValues[-1][1].densities
         self.state.densities = torch.where(self.state.kinds != 0, midRho, self.state.densities)
+
+        # Same guarantee for position. `integrated('dxdt', ...)`
+        # (`warpSPHIntegrators/fields.py`) declares `fluid_only=True` on this
+        # field, but that flag is never actually consulted by any generic
+        # integration path -- it's dead metadata. `schemes/deltaSPH.py` masks
+        # `update.dxdt` to zero for `kinds != 0` (belt) after every stage, which
+        # covers the explicit/RK integrators, but `symplecticEuler`'s second
+        # position half-step (`semi_implicit_position_step`,
+        # `warpSPHIntegrators/verlet.py`) reads the *raw* current velocity
+        # directly (`x += dt/2 * v_current`), not the masked `dxdt` -- so a
+        # boundary particle carrying a nonzero BC-prescribed velocity (a moving
+        # wall's Dirichlet condition, e.g. `cases/lidDrivenCavity.py`) drifts by
+        # `velocity * dt/2` **every step**, unboundedly, even though that
+        # velocity exists only to drive the SPH force sums, never to move the
+        # wall (suspender). Measured: 370 lid-band ghost/boundary particles
+        # drifting linearly, 1.5 domain-widths by t=3 at `lidVelocity=1`,
+        # wrecking the lattice the pressure/density estimate at the lid
+        # interface depends on -- the actual cause of the corner-seeded,
+        # lid-line shear instability under `--integrationScheme
+        # symplecticEuler` this was traced from (not a genuine corner
+        # singularity, though `regularizeLid` still helps by shrinking the
+        # velocity, hence the drift rate, near the corners).
+        self.state.positions = torch.where(
+            (self.state.kinds != 0).unsqueeze(-1),
+            initialState.state.positions, self.state.positions)
         # Defensive floor only -- catches an actual sign flip / NaN from a
         # pathological step, not part of the routine update (normal weakly-
         # compressible density stays within a few percent of rho0).
