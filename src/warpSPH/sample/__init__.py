@@ -14,12 +14,14 @@ from ..math import getPeriodicPositions
 
 from .regular import sampleRegularParticles
 from .optimal import sampleOptimal
+from .densest import sampleDensestParticles
 from .shell import sampleShell, sampleShellv2
 from .regions2D import sampleRegionSystem
 
 __all__ = [
-    'sampleRegularParticles', 'sampleOptimal', 'sampleShell', 'sampleShellv2',
-    
-    'PointCloud', 'ParticleSet', 
-    
+    'sampleRegularParticles', 'sampleOptimal', 'sampleDensestParticles',
+    'sampleShell', 'sampleShellv2',
+
+    'PointCloud', 'ParticleSet',
+
     'DomainDescription', 'volumeToSupport', 'getPeriodicPositions', 'sampleRegionSystem']
