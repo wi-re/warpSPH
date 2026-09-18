@@ -100,6 +100,29 @@
   note      = {The Wendland-kernel-for-SPH origin paper: linear stability analysis explaining why Wendland kernels avoid the pairing instability at any neighbour count where truncated B-splines do not. The reason this codebase runs Wendland2 at n_h=4 by default.}
 }
 
+@article{read2010,
+  author    = {Read, J. I. and Hayfield, T. and Agertz, O.},
+  title     = {Resolving mixing in smoothed particle hydrodynamics},
+  journal   = {Monthly Notices of the Royal Astronomical Society},
+  year      = {2010},
+  volume    = {405},
+  pages     = {1513},
+  doi       = {10.1111/j.1365-2966.2010.16577.x},
+  note      = {OSPH scheme: proves the clumping and banding instabilities are cured by kernel choice (source of the HOCT4 kernel) and cures the local mixing instability with a weighted density estimate. Source of the HOCT4 kernel definition for the higherOrderSPH/dehnen2012 replication (Phase 3). Copy here is an MNRAS typeset reprint whose running header carries 000 placeholders (Printed 23 October 2018); the Crossref and OpenAlex records both lack volume/pages, so volume 405 and first page 1513 are taken from the published reference list (Dehnen \& Aly 2012 cites it as MNRAS, 405, 1513). arXiv:0906.0774.}
+}
+
+@article{read2012,
+  author    = {Read, J. I. and Hayfield, T.},
+  title     = {SPHS: smoothed particle hydrodynamics with a higher order dissipation switch},
+  journal   = {Monthly Notices of the Royal Astronomical Society},
+  year      = {2012},
+  volume    = {422},
+  number    = {4},
+  pages     = {3037--3055},
+  doi       = {10.1111/j.1365-2966.2012.20819.x},
+  note      = {The SPHS higher-order dissipation switch: second-order detection of upcoming flow convergence, switching on conservative dissipation in all advected fluid quantities (e.g. the entropy) -- the 'artificial conductivity' Dehnen \& Aly 2012 sect. 4.3 uses to suppress thermal-energy overshoot at the Sod contact discontinuity. Source of the conductivity module the higherOrderSPH/dehnen2012 replication builds into the compressible scheme (Phase 6).}
+}
+
 
 % --- Boundary handling and fluid-rigid coupling --------------------------------
 

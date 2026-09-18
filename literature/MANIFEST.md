@@ -57,7 +57,7 @@ and had to be identified from their front matter alone.
 
 ## What is here
 
-185 documents. The first 108 are the curated core — every row annotated for what
+187 documents. The first 110 are the curated core — every row annotated for what
 it unblocks, and every row abstracted in `ABSTRACTS.md` **except `roe1986`,
 `hairer2006` and `toro2009`**, which carry no abstract at all (Annual Reviews
 articles of that vintage print none for `roe1986`; the latter two are books,
@@ -112,6 +112,16 @@ wins" rule. `meng2025` follows the `winchenbach2025analytic`/
 2025 first-online date, but the `year` field and venue string use the 2026
 printed-volume year its own header carries.
 
+**2 Read & Hayfield papers were synced 2026-09-17** from `literature/dump/`,
+supplied for the `warpSPHCore/higherOrderSPH/dehnen2012` replication:
+`read2010` (the OSPH paper — source of the HOCT4 kernel and the weighted
+density estimate) and `read2012` (the SPHS higher-order dissipation switch —
+the "artificial conductivity" Dehnen & Aly 2012 use to suppress thermal-energy
+overshoot at the Sod contact discontinuity). The Crossref and OpenAlex records
+for `read2010` both lack volume/pages, so volume 405 and first page 1513 are
+taken from the published reference list (Dehnen & Aly 2012 cites it as MNRAS,
+405, 1513); `references.bib`'s `note` field records this.
+
 `venue` is the **published** venue, which for an author's-version or preprint
 copy is not always what that copy's own front page says. Full bibliographic
 detail is in `references.bib`; the abstract of every core row is in
@@ -132,6 +142,8 @@ detail is in `references.bib`; the abstract of every core row is in
 | plan | bib key | file | venue | what it is |
 |---|---|---|---|---|
 | — | `dehnen2012` | `dehnen2012_convergence-without-pairing-instability.pdf` | MNRAS 425(2) 2012 | The Wendland-kernel-for-SPH origin paper: linear stability analysis of why Wendland kernels avoid the pairing instability at any `N_H`, where truncated B-splines do not. Why this codebase runs Wendland2 at `n_h = 4`. |
+| — | `read2010` | `read2010_resolving-mixing-sph.pdf` | MNRAS 405:1513 2010 | The OSPH scheme: clumping and banding instabilities cured by kernel choice (source of the HOCT4 kernel), local mixing cured by a weighted density estimate. Source of the HOCT4 definition for the `higherOrderSPH/dehnen2012` replication. |
+| — | `read2012` | `read2012_sphs-higher-order-dissipation-switch.pdf` | MNRAS 422(4) 2012 | The SPHS higher-order dissipation switch: conservative dissipation in all advected quantities — the "artificial conductivity" Dehnen & Aly 2012 use at the Sod contact discontinuity. Source of the conductivity module that replication builds into the compressible scheme. |
 
 **Boundary handling and fluid-rigid coupling**
 
