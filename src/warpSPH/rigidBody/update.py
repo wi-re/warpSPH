@@ -40,9 +40,21 @@ def updateBodyParticlesWCSPH(particleState, rigidBody: RigidBody):
 
     particleVelocities = torch.stack([-relativePositions[:,1], relativePositions[:,0]], dim = 1) * rigidBody.angularVelocity + rigidBody.linearVelocity
 
-
-
-    # particleVelocities += rigidBody.linearVelocity
+    # Rigid-body acceleration at this body's own boundary/ghost rows --
+    # centripetal term only: for a body spinning at constant `angularVelocity`
+    # (the only kinematics this codebase ever drives -- `integrateRigidBody`'s
+    # `dudt`/`dwdt` are hardcoded to 0 at every call site, so `angularVelocity`/
+    # `linearVelocity` never actually change over a run today), differentiating
+    # `particleVelocities` above at fixed omega gives `a = omega x (omega x
+    # r_rel) = -omega^2 * r_rel` (the tangential/`dwdt` term and the linear
+    # `dudt` term are both identically zero given the above). Previously this
+    # was implicitly zero everywhere (`modules/mdbc/english2025.py`'s `a_b`
+    # had nothing to read) -- for `cases/movingObstacle.py`'s constant-omega
+    # rotation this was a real, uncharacterized omission, not a validated
+    # zero. If a future case ever drives `dudt`/`dwdt` nonzero, this needs a
+    # tangential term (`dwdt`-cross-`relativePositions`) and a `dudt` term
+    # added here too -- WCSPH_DEFAULT_CLOSEOUT_PLAN.md item D.
+    particleAccelerations = -rigidBody.angularVelocity ** 2 * relativePositions
 
     updatedPositions = particleState.positions.clone()
     updatedPositions[rigidBody.particleIndices] = particlePositions
@@ -62,6 +74,13 @@ def updateBodyParticlesWCSPH(particleState, rigidBody: RigidBody):
     updatedVelocities = particleState.velocities.clone()
     updatedVelocities[rigidBody.particleIndices] = particleVelocities
     updatedVelocities[rigidBody.ghostParticleIndices] = particleVelocities
+
+    existingAccelerations = particleState.boundaryAccelerations
+    if existingAccelerations is None:
+        existingAccelerations = torch.zeros_like(particleState.positions)
+    updatedAccelerations = existingAccelerations.clone()
+    updatedAccelerations[rigidBody.particleIndices] = particleAccelerations
+    updatedAccelerations[rigidBody.ghostParticleIndices] = particleAccelerations
 
     # `offsets = x_b - x_g` (boundary minus ghost) is the right sign for the
     # BOUNDARY row (matches `addBoundaryGhostParticles`'s convention there),
@@ -99,6 +118,8 @@ def updateBodyParticlesWCSPH(particleState, rigidBody: RigidBody):
 
         ghostIndices = particleState.ghostIndices,
         ghostOffsets = updatedOffsets,
+
+        boundaryAccelerations = updatedAccelerations,
 
         surfaceIndicators = particleState.surfaceIndicators,
         surfaceNormals = particleState.surfaceNormals,

@@ -441,11 +441,18 @@ sloshingTankCase = registerCase(Case(
         # suspected term -- `symplecticEuler` ran the *full* 7 s record clean
         # (nx=225, `diverged=False`), and with a visibly better Sensor-1 match
         # than RK2: raw peak 60.1 kPa vs. RK2's 233.7 kPa against the same
-        # 2.2-13.1 kPa measured band. Not switched as the default here (a
-        # single comparison run, not the full validation sweep this plan's
-        # other default changes went through), but the old divergence should
-        # no longer be treated as current fact.
-        integrationScheme='rungeKutta2',
+        # 2.2-13.1 kPa measured band.
+        # **Promoted to the default, WCSPH_DEFAULT_CLOSEOUT_PLAN.md item E
+        # (2026-09-18)** -- the "single comparison run, not the full
+        # validation sweep" caveat above no longer applies: this session's own
+        # `english2025`+`fourtakas2019`+`symplecticEuler` combo ran clean
+        # across Marrone 3.1 (both configs, nx=35/70), Marrone 3.4 (both
+        # resolutions, nx=128/256, up to t*=15.66), and this case's own full 7s
+        # (aside from the separately-tracked, integrator-independent
+        # ceiling-hover mechanism -- see `OPEN_PROBLEMS.md`). The `nx=200`
+        # diffSPH-matched discretisation above is unaffected -- only the
+        # integrator choice moved.
+        integrationScheme='symplecticEuler',
         supportMode='KernelMeanSymmetric',
         gradientMode='Difference',
         laplacianMode='Brookshaw',

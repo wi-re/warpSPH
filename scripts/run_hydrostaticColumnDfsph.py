@@ -31,8 +31,9 @@ p.add_argument('--steps', type=int, default=None,
                help='stop after this many steps instead of at tLimit')
 p.add_argument('--tLimit', type=float, default=1.0,
                help='simulated stop time when --steps is not given (default: 1.0)')
-p.add_argument('--video', action='store_true',
-               help='render frames and an mp4 (writes under exports/)')
+p.add_argument('--video', action=argparse.BooleanOptionalAction, default=True,
+               help='render frames and an mp4 (writes under exports/); on by '
+                    'default -- pass --no-video to opt out')
 p.add_argument('--store', action='store_true',
                help='write the particle trajectory to disk')
 args = p.parse_args()

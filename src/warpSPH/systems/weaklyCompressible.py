@@ -124,6 +124,15 @@ class WeaklyCompressibleState(BaseState):
     ghostIndices : torch.Tensor = constant(tags=('ghostIndices',), default=None)
     ghostOffsets : torch.Tensor = constant(tags=('ghostOffsets',), default=None)
 
+    # Per-particle rigid-body acceleration at boundary/ghost rows (zero
+    # elsewhere), written by `rigidBody/update.py`'s `updateBodyParticlesWCSPH`
+    # every step. `None` until at least one rigid body has been updated once
+    # (readers must treat `None` as "zero everywhere", the same fallback this
+    # field replaces -- `modules/mdbc/english2025.py`'s `a_b` used to be
+    # hardcoded to zero because no such field existed at all;
+    # WCSPH_DEFAULT_CLOSEOUT_PLAN.md item D).
+    boundaryAccelerations : torch.Tensor = constant(tags=('boundaryAcceleration',), default=None)
+
 @dataclass
 class WeaklyCompressibleSystemUpdate:
     dxdt: torch.Tensor = tagged(tags=('position_derivative',))

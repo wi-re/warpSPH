@@ -15,8 +15,9 @@ ap.add_argument('--scheme', type=str, required=True,
                 help='DensityDiffusionScheme member name, e.g. moltenicolagrossi2009, fourtakas2019, deltaSPH_wrongSign, deltaSPH')
 ap.add_argument('--nSteps', type=int, default=None)
 ap.add_argument('--out', type=str, required=True)
-ap.add_argument('--video', action='store_true',
-                help='export frames + encode a video (vispy), like the other crossengine runs')
+ap.add_argument('--video', action=argparse.BooleanOptionalAction, default=True,
+                help='export frames + encode a video (vispy), like the other '
+                     'crossengine runs; on by default -- pass --no-video to opt out')
 cliArgs = ap.parse_args()
 
 from warpSPHBootstrap import bootstrap

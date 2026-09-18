@@ -706,10 +706,21 @@ dambreakCase = registerCase(Case(
         # just the case's inherited default. `DELTASPH_VALIDATION_PLAN.md`
         # Part 1 / Part 3.
         kernel='Wendland2',
-        # Sun et al. 2017 §2 integrate the δ-SPH system with RK4 (frozen
-        # diffusion is a performance option on top, not required for
-        # correctness). `DELTASPH_VALIDATION_PLAN.md` Part 1.
-        integrationScheme='rungeKutta4',
+        # `symplecticEuler` default since WCSPH_DEFAULT_CLOSEOUT_PLAN.md item
+        # E -- not unstable on any case tested (Marrone 3.1/3.4 at multiple
+        # resolutions/durations, sloshingTank's full 7s combo; the earlier
+        # divergences recorded elsewhere in this codebase were traced to
+        # `mdbcNoPenShiftMode='derivative'`, superseded by `'finalize'`, not
+        # to the integrator itself). Sun et al. 2017 §2 integrate the δ-SPH
+        # system with RK4 (`DELTASPH_VALIDATION_PLAN.md` Part 1) -- a script
+        # reproducing that exact numerical method for a literature comparison
+        # (e.g. `scripts/probe_deltaSPHMarrone.py`'s Sun2017/Marrone legs)
+        # must now pass `--integrationScheme rungeKutta4` explicitly rather
+        # than relying on this case's own default; several of this plan's own
+        # recorded comparison numbers were produced under the *old* implicit
+        # RK4 default and are not reproducible bit-for-bit with a bare
+        # no-override command anymore.
+        integrationScheme='symplecticEuler',
         supportMode='KernelMeanSymmetric',
         tLimit=4.0,
         dt=None,

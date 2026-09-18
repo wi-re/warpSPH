@@ -476,7 +476,10 @@ def main(argv=None):
                     help='artificial viscosity; Sun uses 0.01, and 0 for the Fig. 13 leg')
     ap.add_argument('--scheme', default='sun2017DeltaSPH')
     ap.add_argument('--kernel', default='Wendland2')
-    ap.add_argument('--video', action='store_true')
+    ap.add_argument('--video', action=argparse.BooleanOptionalAction, default=True,
+                    help='export a video (vispy); on by default so every run is '
+                         'observable, not just recorded metrics -- pass --no-video '
+                         'to opt out')
     ap.add_argument('--plotInterval', type=int, default=200)
     ap.add_argument('--out', default=DEFAULT_OUT)
     ap.add_argument('--report', action='store_true')

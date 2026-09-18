@@ -702,7 +702,10 @@ def main():
                     help='c₀ = c0Ratio * sqrt(g H)  (Marrone Fig. 5 uses 40)')
     ap.add_argument('--tLimit', type=float, default=1.90,
                     help='seconds; t* = t sqrt(g/H) ≈ 4.04 t, so 1.90 s ≈ t* 7.7')
-    ap.add_argument('--video', action='store_true')
+    ap.add_argument('--video', action=argparse.BooleanOptionalAction, default=True,
+                    help='export a video (vispy); on by default so every run is '
+                         'observable, not just recorded metrics -- pass --no-video '
+                         'to opt out')
     ap.add_argument('--plotInterval', type=int, default=20)
     ap.add_argument('--plotBackend', default=None,
                     help="video backend; unset = vispy (headless EGL, fast). "

@@ -45,10 +45,16 @@ case -- see `scripts/probe_deltaSPHMarrone.py --mdbcDensityScheme
 english2025` / `scripts/probe_deltaSPHMarrone34.py --mdbcDensityScheme
 english2025`.
 
-`a_b` (boundary acceleration) is always zero here -- this codebase does not
-track a per-particle rigid-body acceleration field for boundary particles
-yet, so this is static-wall-only (fine for Marrone 3.1/3.4 and the dam-break
-suite; flagged in the plan §5.3 for a moving-boundary case later).
+`a_b` (boundary acceleration) is read from `currentState.boundaryAccelerations`
+(`WeaklyCompressibleState`'s per-particle field, written every step by
+`rigidBody/update.py` from each `RigidBody`'s own centripetal + linear
+kinematics -- `WCSPH_DEFAULT_CLOSEOUT_PLAN.md` item D). For every static wall
+(the whole Marrone 3.1/3.4/dam-break/sloshingTank suite) this is exactly zero,
+matching the old hardcoded-zero behaviour bit-for-bit; it is only nonzero for
+a case with a genuinely rotating/translating rigid body (e.g.
+`cases/movingObstacle.py`'s constant angular velocity). If the field itself is
+`None` (no rigid body has been stepped yet in this run), `a_b` falls back to
+zero, the same as before this field existed.
 """
 
 from typing import Any, Optional, Union
@@ -163,11 +169,18 @@ def computeMdbcDensityEnglish2025(currentState: Any, config: SimulationConfig, s
         alpha = (Sq[ghost] + _ALPHA_EPS * rho0) / (Mb + _ALPHA_EPS)
 
         # -- Eq. (10), corrected sign (module docstring / plan §5.1):
-        # P_b = P_g + rho0 * dot(g - a_b, relPos). `a_b = 0` (static walls).
+        # P_b = P_g + rho0 * dot(g - a_b, relPos). `a_b` is the boundary
+        # particle's own rigid-body acceleration -- zero for every static wall
+        # (see module docstring).
         gAll = computeGravity(currentState, config, schemeConfig, adjacency)
         g_b = gAll[bIndices]
+        boundaryAccelerations = getattr(currentState, 'boundaryAccelerations', None)
+        if boundaryAccelerations is not None:
+            a_b = boundaryAccelerations[bIndices]
+        else:
+            a_b = torch.zeros_like(relPos)
         P_g = c0 ** 2 * (alpha - rho0)
-        P_b = P_g + rho0 * torch.einsum('nu,nu->n', g_b, relPos)
+        P_b = P_g + rho0 * torch.einsum('nu,nu->n', g_b - a_b, relPos)
         rho_b = rho0 + P_b / c0 ** 2
 
         # No-neighbour fallback: rest density, matching density2025.py /

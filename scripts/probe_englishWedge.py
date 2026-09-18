@@ -428,7 +428,10 @@ def main(argv=None):
     ap.add_argument('--tLimit', type=float, default=4.0, help='physical seconds (English: 4)')
     ap.add_argument('--c0Ratio', type=float, default=C0_RATIO)
     ap.add_argument('--scheme', default='deltaSPH')
-    ap.add_argument('--video', action='store_true')
+    ap.add_argument('--video', action=argparse.BooleanOptionalAction, default=True,
+                    help='export a video (vispy); on by default so every run is '
+                         'observable, not just recorded metrics -- pass --no-video '
+                         'to opt out')
     ap.add_argument('--plotInterval', type=int, default=40)
     ap.add_argument('--out', default=DEFAULT_OUT)
     ap.add_argument('--report', action='store_true')

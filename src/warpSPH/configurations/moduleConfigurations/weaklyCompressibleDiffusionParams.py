@@ -27,7 +27,7 @@ class WeaklyCompressibleDiffusionParams():
     viscidNu : float = field(default=1e-3, metadata={"description": "Kinematic viscosity for viscous diffusion"})
 
     densityDelta: float = field(default=0.1, metadata={"description": "Density diffusion coefficient for delta-SPH"})
-    densityDiffusionTerm: DensityDiffusionScheme = field(default=DensityDiffusionScheme.deltaSPH, metadata={'description': 'Density diffusion term to use'})
+    densityDiffusionTerm: DensityDiffusionScheme = field(default=DensityDiffusionScheme.fourtakas2019, metadata={'description': 'Density diffusion term to use'})
 
 def buildDefaultDiffusionParamsWeaklyCompressibleSPH() -> WeaklyCompressibleDiffusionParams:
     # DIAGNOSTIC ONLY: `WARPSPH_DEFAULT_DDT`, unset by default (every existing
@@ -38,7 +38,14 @@ def buildDefaultDiffusionParamsWeaklyCompressibleSPH() -> WeaklyCompressibleDiff
     # `integrationScheme`, this field is not a generic CaseSpec knob
     # `caseMain`/`buildArgumentParser` already exposes per-example, so there
     # is no CLI flag to forward here.
-    ddt = DensityDiffusionScheme.deltaSPH
+    #
+    # `fourtakas2019` (DualSPHysics' own DDT_DDT2) is the default since
+    # WCSPH_DEFAULT_CLOSEOUT_PLAN.md item E -- DELTASPH_VALIDATION_PLAN.md
+    # Part 8.17/8.18: the tightest same-codebase match to diffSPH's own
+    # dambreak band, structurally simpler than the Antuono bi-Laplacian (no
+    # covariance/renormalization dependency), and run clean across Marrone
+    # 3.1/3.4 at multiple resolutions/durations with no divergence.
+    ddt = DensityDiffusionScheme.fourtakas2019
     override = os.environ.get('WARPSPH_DEFAULT_DDT')
     if override:
         ddt = DensityDiffusionScheme[override]

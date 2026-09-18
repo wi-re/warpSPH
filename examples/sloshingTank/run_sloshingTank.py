@@ -106,9 +106,11 @@ def parseArgs(argv):
                         'growing file')
     p.add_argument('--store', dest='store', action='store_true', default=False,
                    help='write the HDF5 trajectory')
-    p.add_argument('--video', action='store_true', default=False,
+    p.add_argument('--video', action=argparse.BooleanOptionalAction, default=True,
                    help='render velocity/density frames every --plotInterval steps '
-                        'and encode <scheme>_field.{mp4,gif} (headless-safe)')
+                        'and encode <scheme>_field.{mp4,gif} (headless-safe); on by '
+                        'default so every run is observable -- pass --no-video to '
+                        'opt out')
     p.add_argument('--plotInterval', type=int, default=None,
                    help='steps between rendered frames (video); case default 50')
     p.add_argument('--out', type=str, default=OUTDIR, help='output directory')
