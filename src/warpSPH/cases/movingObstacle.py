@@ -74,6 +74,15 @@ movingObstacleCase = registerCase(Case(
         nx=128,
         L=2.0,
         tLimit=10.0,
+        # `symplecticEuler` override, not the shared `WEAKLY_COMPRESSIBLE_
+        # DEFAULTS['integrationScheme']` ('rungeKutta2', still shared with
+        # several incompressible-scheme cases untested under symplecticEuler)
+        # -- WCSPH_DEFAULT_CLOSEOUT_PLAN.md item E. This is the case whose
+        # rotating rigid body's real (nonzero, centripetal) boundary
+        # acceleration was wired into `english2025.py`'s `a_b` this same
+        # session (item D) -- short sanity run confirmed no divergence with
+        # this integrator; not yet run at the case's own full 10s `tLimit`.
+        integrationScheme='symplecticEuler',
     ),
     params=dict(
         WEAKLY_COMPRESSIBLE_PARAMS,

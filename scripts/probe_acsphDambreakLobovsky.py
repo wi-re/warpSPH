@@ -369,7 +369,10 @@ def main():
     ap.add_argument('--scheme', choices=['deltaSPH', 'artificialCompressible'])
     ap.add_argument('--nx', type=int, default=128)
     ap.add_argument('--tLimit', type=float, default=2.0)
-    ap.add_argument('--video', action='store_true')
+    ap.add_argument('--video', action=argparse.BooleanOptionalAction, default=True,
+                    help='export a video (vispy); on by default so every run is '
+                         'observable, not just recorded metrics -- pass --no-video '
+                         'to opt out')
     ap.add_argument('--plotInterval', type=int, default=20)
     ap.add_argument('--out', default=DEFAULT_OUT)
     ap.add_argument('--report', action='store_true',

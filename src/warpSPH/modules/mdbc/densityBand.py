@@ -83,6 +83,25 @@ __all__ = ['computeMdbcDensityBand']
 #: range.
 _TIKHONOV_LAMBDA = 5e-3
 
+#: Symmetric Shepard-ratio regularizer -- ported verbatim from
+#: `english2025.py`'s `_ALPHA_EPS` fix (`BOUNDARY_DENSITY_PLAN.md` §9.4-§9.7).
+#: This module had the identical asymmetric-floor bug english2025.py's had
+#: pre-fix: flooring only the denominator (`MbSafe = Mb.clamp_min(1e-30)`)
+#: breaks the numerator/denominator weight cancellation that should hold at
+#: any scale (a single fluid neighbour has `Sx = w*x_j`, `Sq = w*rho_j`,
+#: `Mb = w` all sharing the SAME `w`, so `Sq/Mb = rho_j` exactly regardless of
+#: how small `w` is -- until only `Mb` is floored, at which point a
+#: catastrophically underflowing `w` (e.g. `Mb ~ 1e-42`, a ghost's kernel
+#: support grazing a single fluid particle almost exactly at the cutoff
+#: radius) turns a should-be-~rho0 value into `(tiny Sq)/(arbitrary 1e-30
+#: floor)` ~ 1e-12*rho0 instead). Same calibration reasoning applies
+#: unchanged (`1e-30` reuses the old floor's own threshold, applied
+#: symmetrically instead of asymmetrically -- deliberately not `1e-8`, which
+#: sits above this case family's typical *non-degenerate* single-neighbour
+#: `Mb` scale and would silently override real information for every
+#: ordinary marginal row, not just the genuinely-underflowed ones).
+_ALPHA_EPS = 1e-30
+
 #: Debug-only: when `_DEBUG['on']` is set (a probe/diagnostic script's job,
 #: never a production run), each call records the worst (|rho_b - rho0|)
 #: boundary row's internals into `_DEBUG['worst']`. Not thread-safe, not for
@@ -186,11 +205,22 @@ def computeMdbcDensityBand(currentState: Any, config: SimulationConfig, schemeCo
         hasGradient = nNbFluid >= 3
 
         Mb = M[ghost].clamp_min(0.0)
+        # Denominator-only floor kept ONLY for the eigenvalue-scale reference
+        # below (`mbRef`/`absoluteFloor`) -- that's a numerical-scale floor,
+        # not a value-ratio, so it doesn't have a cancellation identity to
+        # break. `dbx`/`dby`/`alpha` below use the symmetric `_ALPHA_EPS`
+        # form instead (see that constant's docstring).
         MbSafe = Mb.clamp_min(1e-30)
 
-        dbx = Sx[ghost] / MbSafe
-        dby = Sy[ghost] / MbSafe
-        alpha = torch.where(hasAny, Sq[ghost] / MbSafe, torch.full_like(Mb, rho0))
+        # `dbx`/`dby`: same denominator floor as `alpha`, no numerator-side
+        # epsilon needed -- their numerators (`Sx`/`Sy`) already vanish along
+        # with `Mb` in the no/underflowing-neighbour case, so the symmetric
+        # floor's fallback is "centroid at the ghost's own position" (offset
+        # 0), which is already the intended safe default here.
+        dbx = Sx[ghost] / (Mb + _ALPHA_EPS)
+        dby = Sy[ghost] / (Mb + _ALPHA_EPS)
+        alpha = torch.where(hasAny, (Sq[ghost] + _ALPHA_EPS * rho0) / (Mb + _ALPHA_EPS),
+                            torch.full_like(Mb, rho0))
 
         Gxx = Sxx[ghost] - dbx * Sx[ghost]
         Gxy = Sxy[ghost] - dbx * Sy[ghost]

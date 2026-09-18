@@ -588,7 +588,10 @@ def main(argv=None):
                     help='Sun/Marrone/DualSPHysics all use Wendland C2')
     ap.add_argument('--shuffleIters', type=int, default=128,
                     help="initial-distribution relaxation (stands in for Sun's packing)")
-    ap.add_argument('--video', action='store_true')
+    ap.add_argument('--video', action=argparse.BooleanOptionalAction, default=True,
+                    help='export a video (vispy); on by default so every run is '
+                         'observable, not just recorded metrics -- pass --no-video '
+                         'to opt out')
     ap.add_argument('--plotInterval', type=int, default=60)
     ap.add_argument('--out', default=DEFAULT_OUT)
     ap.add_argument('--report', action='store_true',

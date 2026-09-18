@@ -97,6 +97,16 @@ lidDrivenCavityCase = registerCase(Case(
         L=2.0,
         # Long enough for the primary vortex to reach steady state.
         tLimit=30.0,
+        # `symplecticEuler` override, not the shared `WEAKLY_COMPRESSIBLE_
+        # DEFAULTS['integrationScheme']` ('rungeKutta2', still shared with
+        # several incompressible-scheme cases untested under symplecticEuler)
+        # -- WCSPH_DEFAULT_CLOSEOUT_PLAN.md item E. This is the exact case
+        # `symplecticEuler`'s own boundary-position-drift bug was found and
+        # fixed in (`DELTASPH_VALIDATION_PLAN.md` §9.2, `systems/
+        # weaklyCompressible.py`'s `finalize` now restores boundary/ghost
+        # positions every step) -- see WCSPH_DEFAULT_CLOSEOUT_PLAN.md item F
+        # for the full-`tLimit` regression run this flip is gated on.
+        integrationScheme='symplecticEuler',
     ),
     params=dict(
         WEAKLY_COMPRESSIBLE_PARAMS,

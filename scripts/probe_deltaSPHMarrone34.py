@@ -301,8 +301,11 @@ def _score(meta, cols, verbose=False):
     # fragmenting sharp-edge jet makes the *pointwise* extremes (`maxDensity`,
     # `maxVelocity`) sharpen with resolution -- Marrone says this case is not
     # converged in those even at H/dx = 234 -- so the stability gate bands the
-    # BULK: `densityP05` / `densityP99` (99-pct, one jet-tip particle excluded)
-    # and treats the literal max / v_max as report-only.
+    # BULK: `densityP05` / `densityP99` (99-pct, one jet-tip particle excluded).
+    # The literal max/v_max DOES still feed a real (if resolution-tolerant)
+    # hard-fail check below -- it used to be labeled report-only while
+    # actually being counted, which is why it missed a real defect
+    # (BOUNDARY_DENSITY_PLAN.md §6.3d); see that check's own comment.
     settled = ts > 1.0
     m = dict(
         tStarReached=float(meta['tStarReached']),
@@ -325,23 +328,41 @@ def _score(meta, cols, verbose=False):
 
     uScale = U_MAX
     keScaleGuess = m['keEnd'] if np.isfinite(m['keEnd']) and m['keEnd'] > 0 else 1.0
+    # WCSPH_DEFAULT_CLOSEOUT_PLAN.md item B: this used to read "report-only
+    # below 12 U_max" but was actually counted in `checks`/`npass` like every
+    # other entry here (`_report` sums it identically) -- so it was a hard
+    # gate in practice, just a badly-calibrated one. `'ramped'` scored 6/6 at
+    # nx=256 with a documented, visually-confirmed particle-ejection defect
+    # at 9.9x U_max (BOUNDARY_DENSITY_PLAN.md §6.3d) -- 12x never caught it.
+    # Retuned to 8x using this plan's own calibration data: every clean
+    # `english2025` run tested peaked 4.8-6.4x U_max across both resolutions
+    # (§6.1/§6.2/§9.3/§9.8); the flagged defect was 9.9x. 8x sits between the
+    # two with margin either side. If a legitimately-converging run trips
+    # this on the expected (Marrone-documented, non-convergent) sharp-edge
+    # jet-tip singularity at a resolution not yet tested, re-tune with that
+    # context rather than reverting to 12x.
+    velocityThresholdU = 8.0
+    keTrendFinite = np.isfinite(m['keTrend2ndHalf'])
+    keNotRunningAway = keTrendFinite and not (
+        m['keTrend2ndHalf'] > 0 and m['keTrend2ndHalf'] * m['tStarReached'] > 1.0 * keScaleGuess)
     checks = [
         ('runs to target t*', m['tStarReached'] >= 0.98 * meta['tStarLimit'] and not m['diverged'],
          f"reached t* {m['tStarReached']:.2f} / {meta['tStarLimit']:g}, diverged={m['diverged']}"),
         ('weakly compressible (bulk)', m['rhoLoMin'] > 0.90 and m['rhoHi99Max'] < 1.10,
          f"rho [P05, P99] in [{m['rhoLoMin']:.4f}, {m['rhoHi99Max']:.4f}]  (t* > 1); "
          f"pointwise max {m['rhoHiMax']:.3f}"),
-        ('no velocity divergence', m['vmaxMax'] < 12.0 * uScale,
+        ('no velocity divergence', m['vmaxMax'] < velocityThresholdU * uScale,
          f"max|v| {m['vmaxMax']:.2f} = {m['vmaxMax'] / uScale:.1f} U_max  "
-         f"(jet-tip, report-only below 12 U_max)"),
+         f"(jet-tip is expected to sharpen with resolution; gate at "
+         f"{velocityThresholdU:g} U_max)"),
         ('no tank-wall penetration', m['maxWallPenDx'] <= 3.0,
          f"{m['maxWallPenDx']:.2f} dx past the tank AABB  (want <= 3.0)"),
         ('no obstacle / fillet penetration', m['maxObstaclePenDx'] <= 3.0,
          f"{m['maxObstaclePenDx']:.2f} dx into the solid  (want <= 3.0)"),
-        ('kinetic energy not running away',
-         not (np.isfinite(m['keTrend2ndHalf']) and m['keTrend2ndHalf'] > 0
-              and m['keTrend2ndHalf'] * m['tStarReached'] > 1.0 * keScaleGuess),
-         f"dKE/dt* (2nd half) {m['keTrend2ndHalf']:.3e}, KE_end {m['keEnd']:.3e}"),
+        ('kinetic energy not running away', keNotRunningAway,
+         (f"dKE/dt* (2nd half) {m['keTrend2ndHalf']:.3e}, KE_end {m['keEnd']:.3e}"
+          if keTrendFinite else
+          f"KE trend non-finite -- run diverged (KE_end {m['keEnd']:.3e})")),
     ]
     if verbose:
         npass = sum(c[1] for c in checks)
@@ -671,7 +692,10 @@ def main(argv=None):
     ap.add_argument('--Re', type=float, default=None,
                     help='Marrone Sec. 3.4.2 viscous case: Re = sqrt(gH) H / nu. '
                          'Unset -> inviscid (Sec. 3.4.1). Marrone runs 1000 and 10000.')
-    ap.add_argument('--video', action='store_true')
+    ap.add_argument('--video', action=argparse.BooleanOptionalAction, default=True,
+                    help='export a video (vispy); on by default so every run is '
+                         'observable, not just recorded metrics -- pass --no-video '
+                         'to opt out')
     ap.add_argument('--plotInterval', type=int, default=25)
     ap.add_argument('--plotBackend', default=None,
                     help="video backend; unset = vispy (headless EGL, fast). "

@@ -149,7 +149,7 @@ class WeaklyCompressibleSPHConfig:
     #: `scripts/probe_bandMlsPressureBoundary.py` against the "few particle
     #: large sheet" open item (DELTASPH_VALIDATION_PLAN.md); validate against
     #: the Marrone dam break before trusting it beyond that.
-    mdbcDensityScheme: str = field(default='ramped', metadata={'description': "mDBC wall-density extrapolation: 'ramped' (default, density2025.py), 'band' (densityBand.py, unclamped Band et al. 2018-style fit), or 'english2025' (english2025.py, Band's value fit + English 2025's analytic-hydrostatic extrapolation, BOUNDARY_DENSITY_PLAN.md §5)"})
+    mdbcDensityScheme: str = field(default='english2025', metadata={'description': "mDBC wall-density extrapolation: 'english2025' (default since WCSPH_DEFAULT_CLOSEOUT_PLAN.md item E, english2025.py, Band's value fit + English 2025's analytic-hydrostatic extrapolation, BOUNDARY_DENSITY_PLAN.md §5 -- beats 'ramped'/'band' on every Marrone config tested, at multiple resolutions, with no known regression), 'ramped' (density2025.py's English et al. 2022 ghost-node extrapolation + smooth det/neighbour-count ramp, the previous default), or 'band' (densityBand.py, unclamped Band et al. 2018-style fit -- a research tool, not a default candidate: still the worst of the three on every Marrone metric even after its own Shepard-precision-hole fix)"})
 
 def _buildSun2017ShiftProperties() -> ShiftProperties:
     """`buildDefaultShiftProperties()` with Sun et al. 2017 Eq. (7)'s own

@@ -50,6 +50,11 @@ class IncompressibleState(BaseState):
     ghostIndices : torch.Tensor = constant(tags=('ghostIndices',), default=None)
     ghostOffsets : torch.Tensor = constant(tags=('ghostOffsets',), default=None)
 
+    # See `WeaklyCompressibleState`'s identical field -- `rigidBody/update.py`
+    # rebuilds either state type via the same keyword set, so both must carry
+    # it (WCSPH_DEFAULT_CLOSEOUT_PLAN.md item D).
+    boundaryAccelerations : torch.Tensor = constant(tags=('boundaryAcceleration',), default=None)
+
 @dataclass
 class IncompressibleSystemUpdate:
     dxdt: torch.Tensor = tagged(tags=('position_derivative',))
