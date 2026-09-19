@@ -42,9 +42,16 @@ class JacobiRelaxationMode(Enum):
     The update is ``p <- p + omega * D^-1 * r`` with ``D = diag(A)``. Because
     ``D^-1 A`` is similar to the symmetric ``|D|^-1/2 (-A) |D|^-1/2 >= 0``,
     ``fixed`` converges iff ``omega < 2/rho(D^-1 A)`` -- a state-dependent
-    stability window (measured ~0.355 on the TGV operator family, so the
-    historical omega=0.5 default diverges and 0.3 sits inside with ~15%
-    margin). ``optimal`` removes the window entirely: each step uses the
+    stability window (measured ~0.355 on the TGV operator family, where the
+    historical omega=0.5 default diverges; on a bounded wall subproblem the
+    window is tighter and resolution-dependent, ~0.29-0.34, margin shrinking
+    from ~13% at nx=32/64 to ~7% at nx=128 -- see ``divergenceFree.py``'s
+    module docstring and ``DFSPH_FINDINGS.md`` Part 61). Spending that margin
+    (lowering ``omega``) is not free, though: measured at 0.27, it tightens
+    density bounds slightly but makes peak ``maxVelocity`` worse by a margin
+    that grows with resolution (+6% at nx=32, +15-21% at nx=128) -- not a
+    clean win, so the shipped default stays ``omega = 0.3``. ``optimal``
+    removes the window entirely: each step uses the
     exact residual minimizer ``omega_k = (r . A D^-1 r)/||A D^-1 r||^2``,
     which costs the same single matvec as the fixed step and decreases the
     residual monotonically for any starting size. See
@@ -481,6 +488,24 @@ def buildDefaultPSConfig() -> RelaxedJacobiSolverConfig:
         minIterations=2,
         maxIterations=64,
         tolerance=5e-4,
+        # 0.3 was tuned against the TGV operator family (~15% margin below
+        # the stability window, `2/rho(D^-1 A)`). Part 61's `--mode spectrum`
+        # sweep found the margin is resolution-dependent on the staticBoundary
+        # operator's bounded-wall subproblem: ~13% at nx=32/64, only ~7% at
+        # nx=128 (`randomFlowIncompressible --bounded`, the only case this
+        # solve's own probe hook reaches -- gravity-active cases route through
+        # a different in-step fold, unmeasured here). **Tried lowering this to
+        # 0.27 to restore margin; measured, not adopted** -- it is not the
+        # free lunch "flat inside the window" implied (that claim was never
+        # actually exercised before Part 61: this solve had a separate,
+        # independently-fixed bug, see `incompressible.py`'s loop, that
+        # silently pinned it at 0.3 regardless of this field). With the bug
+        # fixed, a real A/B (nx=32 and 128, 50/200 steps) shows a genuine
+        # trade: density bounds tighten slightly (nx=128 maxDensity 1.080 ->
+        # 1.064, minDensity 0.981 -> 0.983) but peak `maxVelocity` gets worse
+        # by a margin that grows with resolution (+6% at nx=32, +15-21% at
+        # nx=128) -- not a clean win, so the default stays 0.3. See
+        # `DFSPH_FINDINGS.md` Part 61.
         relaxationFactor=0.3,
         # Both solvers run the published static-boundary operator (Part 14).
         # Stated explicitly here rather than left to the field default, since
@@ -496,6 +521,8 @@ def buildDefaultDFConfig() -> RelaxedJacobiSolverConfig:
         minIterations=2,
         maxIterations=32,
         tolerance=2.5e-3,
+        # See buildDefaultPSConfig's comment -- same operator family, same
+        # margin measurement, same "measured, not adopted" call (Part 61).
         relaxationFactor=0.3,
         boundaryOperatorTerms=BoundaryOperatorTerms.staticBoundary,
         # Both divergence-free loops' historical test (Part 15).
