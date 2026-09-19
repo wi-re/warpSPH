@@ -33,6 +33,10 @@ def configureScheme(ctx: RunContext) -> None:
     ctx.schemeConfig.rho0 = left.rho
     ctx.schemeConfig.viscositySwitchParams.scheme = resolveEnum(
         ViscositySwitch, ctx.param('viscositySwitch'))
+    ctx.schemeConfig.viscositySwitchParams.alpha_min = ctx.param(
+        'alpha_min', ctx.schemeConfig.viscositySwitchParams.alpha_min)
+    ctx.schemeConfig.viscositySwitchParams.alpha_max = ctx.param(
+        'alpha_max', ctx.schemeConfig.viscositySwitchParams.alpha_max)
     ctx.schemeConfig.adaptiveSupportScheme = resolveEnum(
         AdaptiveSupportScheme, ctx.param('adaptiveSupportScheme'))
     ctx.schemeConfig.adaptiveSupportCorrections = ctx.param('adaptiveSupportCorrections')

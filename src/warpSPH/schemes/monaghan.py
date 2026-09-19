@@ -187,7 +187,16 @@ def compressibleSPH_Monaghan(
         adjacency)
     currentState.divergence = -drhodt / currentState.densities
 
-    dEdt = currentState.masses * torch.einsum('ij,ij->i', currentState.velocities, (dvdt + dvdt_diss)) + currentState.masses * (dudt + dudt_diss)
+    # ReadHayfield2012 entropy-dissipation internal-energy rate (eqs. 33-35).
+    # Only the R&H switch populates `switchState.dudt_diss`; the Cullen-Dehnen,
+    # Hopkins and NoneSwitch baselines leave it `None` (or the switch state is
+    # itself `None`), so this collapses to zero for them.
+    if switchState is not None and getattr(switchState, 'dudt_diss', None) is not None:
+        dudt_entropy = switchState.dudt_diss
+    else:
+        dudt_entropy = torch.zeros_like(dudt)
+
+    dEdt = currentState.masses * torch.einsum('ij,ij->i', currentState.velocities, (dvdt + dvdt_diss)) + currentState.masses * (dudt + dudt_diss + dudt_entropy)
 
     forcing = computeForcing(currentSystem, dt, t, config, schemeConfig)
     dvdt += forcing / currentState.masses.view(-1,1)
@@ -196,7 +205,7 @@ def compressibleSPH_Monaghan(
     update = CompressibleSystemUpdate(
         dxdt = currentState.velocities,
         dvdt = dvdt + dvdt_diss,
-        dudt = dudt + dudt_diss + dudt_thermal,
+        dudt = dudt + dudt_diss + dudt_thermal + dudt_entropy,
         drhodt = drhodt,
         dEdt = dEdt,
     )
