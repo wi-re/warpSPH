@@ -129,3 +129,74 @@ Do NOT push. Commit per deliverable.
   on a manufactured state + 1D Sod contact-spike assertion); (c) commit deliverable 1;
   (d) deliverable 2: ReadHayfield2012.py (SPHS); (e) deliverable 3: enum + wrapper +
   config params; (f) gresho control; (g) Sod 1D/2D/3D validation + PNGs.
+
+### 2026-09-19 (session 3)
+
+**Deliverable 2 — `modules/shockCapturing/ReadHayfield2012.py`** (SPHS artificial
+conductivity + entropy dissipation, from the `rnh2012_sphs` transcription). Structure
+mirrors `CullenDehnen2010.py`:
+- `computeReadHayfieldTerms(dt, particleState, simConfig, schemeConfig, supportScheme,
+  adjacency)` -> (alpha0s, ViscositySwitchState). Steps:
+  1. `div v` (warpOperation Divergence), `grad(div v)` (warpOperation Gradient on the
+     scalar -> (N,dim); `.norm` for the magnitude), `curl v` (warpOperation Curl ->
+     (N,1); `.norm` for the magnitude).
+  2. **Switch eq.21:** `alpha_loc = where(div<0, h^2|gdiv| / (h^2|gdiv| + h|div| +
+     ns*c_s + 1e-14 h), 0)`. `h = particleState.supports` (code h = paper support H).
+  3. **Balsara eq.32:** `f = |div|/(|div| + |curl| + balsara_const c_s/h)`; `alpha_loc *= f`.
+  4. **Relaxation eqs.22-25:** pairwise `v_sig = c_i+c_j-3 w_ij` (w_ij = (v_ij.r_ij)/r),
+     `v_max = scatter_reduce_(amax)` over neighbours, `tau = h/v_max`; instantaneous
+     raise (eq.22) then decay toward `max(alpha_loc, alpha_min)` at rate 1/tau (eq.23).
+  5. **Entropy dissipation eqs.33-35** (torch pairwise, `scatter_sum`): `v_sig^p =
+     where(3 w_ij < c_i+c_j, c_i+c_j-3 w_ij, 0)` (eq.34); `L_ij = |P_i-P_j|/(P_i+P_j)`;
+     `K_ij = r_hat_ij . grad_i W_ij = dW/dr < 0` (eq.35) via a torch kernel helper
+     (`_kernel_dWdr`) with the B7 / Wendland2 shape-function derivatives; `A_dot_diss,i
+     = sum_j (m_j/rho_ij) alpha_ij v_sig^p L_ij (A_i-A_j) (rho_j/rho_i)^(gamma-1) K_ij`
+     (eq.33). The **negative** `K_ij = dW/dr` is what makes it a diffusion (reduces A
+     where A_i > A_j). Converted to an internal-energy rate by the ideal-gas relation
+     `u = A rho^(gamma-1)/(gamma-1)`: `dudt_diss = rho^(gamma-1)/(gamma-1) * A_dot_diss`
+     (the adiabatic drho/dt part is already in the Monaghan dudt).
+- The **viscosity momentum term (eqs.29-31)** is supplied by the existing Monaghan
+  viscosity in `schemes/monaghan.py` driven by this switch's alpha (`queryAlphas`);
+  the only R&H-specific scheme addition is `switchState.dudt_diss`.
+- `computeReadHayfieldUpdate` is a passthrough (relaxation lives in Terms).
+
+**Deliverable 3 — wiring:**
+- `enumTypes.py`: `ViscositySwitch.ReadHayfield2012 = 7`. (String parse is
+  `ViscositySwitch[name]`, so the new value is picked up automatically.)
+- `wrapper.py`: import + dispatch branches in `computeViscositySwitchTerms` /
+  `updateViscositySwitch`.
+- `viscositySwitchParameters.py`: added `ns=0.05`, `balsara_const=1e-4` to
+  `ViscositySwitchConfig` (+ to-dict; from-dict uses `.get(..., default)` so older
+  dicts without the keys still load).
+- `switchState.py`: added `dvdt_diss` / `dudt_diss` Optional fields (default `None`,
+  so the C&D / Hopkins constructors are unaffected).
+- `schemes/monaghan.py`: after the switch update, `dudt_entropy = switchState.dudt_diss
+  if not None else 0`; added to both `dudt` and `dEdt`.
+- `cases/sod.py`: `configureScheme` now reads `alpha_min` / `alpha_max` from case
+  params (default = the config value) so a run can request the R&H-designed alpha
+  range (alpha_min=0.2, alpha_max=1.0) without touching the shared config.
+
+**1D Sod validation (Monaghan, nx=400, nSteps=400, D&A IC, t=0.22262, window [0,1]):**
+R&H run with its designed alpha range (0.2-1.0; observed alpha 0.2-0.826, mean 0.239).
+No divergence for any of the three switches. Contact spike (window 0.07 around the
+contact at x=0.687) — **the Phase-6 acceptance is MET**: R&H suppresses the
+contact discontinuity overshoot vs NoneSwitch on every metric:
+  - P:  NoneSwitch +8.01%  ->  R&H +7.15%   (suppressed, -0.86 pp)
+  - e:  NoneSwitch +7.68%  ->  R&H +7.54%   (suppressed, -0.14 pp)
+  - A:  NoneSwitch +12.09% ->  R&H +11.13%  (suppressed, -0.96 pp)
+C&D 2010 (alpha/viscosity only) gives P +19.2% / e +7.1% / A +10.2% -- its alpha
+sharpens the density jump (higher P spike) but it has NO entropy-dissipation term, so
+it is not the contact-suppression method. The R&H entropy term is what pulls the P
+spike back below the NoneSwitch baseline (verified the `dudt_diss` rate is non-zero:
+min -10.7 / max +2.8 / mean -0.13, ~31% of particles non-zero, correctly signed as a
+diffusion). All three reproduce the exact head/foot/contact/shock within SPH smearing.
+Entropy rate confirmed active via a monkeypatch hook on `computeReadHayfieldTerms`.
+
+**Tests:** `tests/test_shockCapturing.py` extended with
+`test_sod1d_readHayfieldSuppressesContactOvershoot` (R&H P-spike and A-spike both
+strictly less than NoneSwitch, R&H does not diverge, alpha engages). All 5 tests in the
+file pass; the full 72-test `tests/test_physics.py` suite still passes (the
+config/enum/switchState changes are backward compatible).
+
+- NEXT: (f) deliverable 4 — greshoVortex control test (C&D on vs off, CRKSPH 2D);
+  (g) deliverable 5 — Sod 2D/3D validation + overlay PNGs; then commit deliverables 2+3.

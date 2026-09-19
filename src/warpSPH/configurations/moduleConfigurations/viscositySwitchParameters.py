@@ -35,6 +35,9 @@ class ViscositySwitchConfig:
     beta_xi: float = field(default=2.0, metadata={'description': 'Beta parameter for the xi limiter in the Cullen-Dehnen switch'})
     limitXi: bool = field(default=True, metadata={'description': 'Whether to limit the xi parameter in the Cullen-Dehnen switch'})
 
+    ns: float = field(default=0.05, metadata={'description': "Noise parameter for the ReadHayfield2012 switch (eq. 21 denominator)"})
+    balsara_const: float = field(default=1.0e-4, metadata={'description': "Balsara limiter constant for the ReadHayfield2012 switch (eq. 32)"})
+
 
 
 def viscositySwitchConfigToDict(viscositySwitchConfig: ViscositySwitchConfig) -> Dict[str, Any]:
@@ -47,7 +50,9 @@ def viscositySwitchConfigToDict(viscositySwitchConfig: ViscositySwitchConfig) ->
         'alpha_max': viscositySwitchConfig.alpha_max,
         'beta_c': viscositySwitchConfig.beta_c,
         'beta_d': viscositySwitchConfig.beta_d,
-        'beta_xi': viscositySwitchConfig.beta_xi
+        'beta_xi': viscositySwitchConfig.beta_xi,
+        'ns': viscositySwitchConfig.ns,
+        'balsara_const': viscositySwitchConfig.balsara_const
     }
 
 def dictToViscositySwitchConfig(viscositySwitchConfigDict: Dict[str, Any]) -> ViscositySwitchConfig:
@@ -61,5 +66,7 @@ def dictToViscositySwitchConfig(viscositySwitchConfigDict: Dict[str, Any]) -> Vi
     viscositySwitchConfig.beta_c = viscositySwitchConfigDict['beta_c']
     viscositySwitchConfig.beta_d = viscositySwitchConfigDict['beta_d']
     viscositySwitchConfig.beta_xi = viscositySwitchConfigDict['beta_xi']
-    
+    viscositySwitchConfig.ns = viscositySwitchConfigDict.get('ns', 0.05)
+    viscositySwitchConfig.balsara_const = viscositySwitchConfigDict.get('balsara_const', 1.0e-4)
+
     return viscositySwitchConfig

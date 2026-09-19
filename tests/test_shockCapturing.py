@@ -168,18 +168,23 @@ def test_secondOrderV_hasTheMinusSign(sod1d):
 
 # --- 1D Sod: the contact-spike metric under the switch ----------------------
 
-def _sod_contact_spike(switch, nx=200, nSteps=300):
+def _sod_contact_spike(switch, nx=200, nSteps=300, extra=None):
     """Run the 1D Sod under `switch` and return (t, contactX, P_spike, A_spike, alpha).
 
     The contact spike is the max pressure / specific-entropy in a window around
     the exact contact discontinuity, relative to the exact post-contact value.
+    `extra` is an optional dict of additional case params (e.g. the R&H alpha
+    range ``{'alpha_min': 0.2, 'alpha_max': 1.0}``).
     """
     from warpSPH.cases.sod import sodCase
     from warpSPH.caseUtils.compressible.sod.sodSolution import solve
 
+    params = dict(right_rho=0.125, right_pressure=0.1, viscositySwitch=switch)
+    if extra:
+        params.update(extra)
     res = _quiet(lambda: run(
         sodCase, progress=False, quiet=True, scheme='Monaghan', nx=nx, nSteps=nSteps,
-        params=dict(right_rho=0.125, right_pressure=0.1, viscositySwitch=switch)))
+        params=params))
     st = res.state.state
     t = float(res.state.t)
     x = st.positions[:, 0].detach().cpu().numpy()
@@ -216,3 +221,31 @@ def test_sod1d_cullenDehnenRunsAndSpikesBounded():
     assert alpha is not None
     assert alpha.max() > 0.3, f'switch never engaged: max alpha {alpha.max():.3f}'
     assert alpha.mean() < 0.3, f'switch over-active: mean alpha {alpha.mean():.3f}'
+
+
+def test_sod1d_readHayfieldSuppressesContactOvershoot():
+    """Phase 6 acceptance: R&H 2012 (SPHS artificial conductivity + entropy
+    dissipation) must SUPPRESS the contact-discontinuity pressure/entropy
+    overshoot relative to the NoneSwitch baseline.
+
+    R&H is run with its designed alpha range (alpha_min=0.2, alpha_max=1.0)
+    from the ``rnh2012_sphs`` transcription; the NoneSwitch baseline uses the
+    same scheme/resolution so the only difference is the switch.
+    """
+    rnh = dict(alpha_min=0.2, alpha_max=1.0)
+    _, _, P_ns, A_ns, _, res_ns = _sod_contact_spike('NoneSwitch')
+    _, _, P_rh, A_rh, alpha_rh, res_rh = _sod_contact_spike(
+        'ReadHayfield2012', extra=rnh)
+    assert not res_ns.diverged, 'NoneSwitch baseline diverged'
+    assert not res_rh.diverged, 'ReadHayfield2012 diverged'
+    assert np.isfinite(P_rh) and np.isfinite(A_rh), 'R&H contact spike is not finite'
+    # The R&H switch must engage (alpha in its designed range, not stuck at min).
+    assert alpha_rh is not None
+    assert alpha_rh.max() > 0.3, f'R&H switch never engaged: max alpha {alpha_rh.max():.3f}'
+    # The acceptance criterion: R&H suppresses the contact overshoot vs NoneSwitch.
+    assert P_rh < P_ns, (
+        f'R&H did not suppress the contact pressure overshoot: '
+        f'R&H {P_rh:.2%} >= NoneSwitch {P_ns:.2%}')
+    assert A_rh < A_ns, (
+        f'R&H did not suppress the contact entropy overshoot: '
+        f'R&H {A_rh:.2%} >= NoneSwitch {A_ns:.2%}')

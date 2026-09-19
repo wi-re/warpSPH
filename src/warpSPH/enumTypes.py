@@ -48,6 +48,7 @@ class ViscositySwitch(Enum):
     MorrisMonaghan1997 = 4
     Rosswog2000 = 5
     NoneSwitch = 6
+    ReadHayfield2012 = 7
 
 
 # @torch.jit.script
