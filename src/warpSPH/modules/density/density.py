@@ -7,9 +7,10 @@ it matches the Cullen-Dehnen switch's E.1 density estimate (per the CRK
 paper); callers with a different historical density mode pass `supportMode`
 explicitly (the Monaghan scheme passes `config.supportMode`, whose default
 is SuperSymmetric). This is the single scheme-level density entry point --
-a density correction that should apply to all schemes (e.g. the future D&A
-eq.-18 self-term correction, see the warpSPHCore replication's
-renorm_eps_design_note.md) hooks here rather than at each scheme call site.
+a density correction that should apply to all schemes (the D&A eq.-18
+self-term correction, `SimulationConfig.densityCorrection`, is wired here;
+see the warpSPHCore replication's renorm_eps_design_note.md) hooks here
+rather than at each scheme call site.
 """
 
 import warp as wp
@@ -31,7 +32,7 @@ __all__ = ['computeDensities']
 
 def computeDensities(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], supportMode: Optional[SupportScheme] = None) -> torch.Tensor:
     with record_function("[warpSPH] - computeDensities"):
-        return warpOperation(
+        densities = warpOperation(
             currentState,
             OperationProperties(
                 kernel = config.kernel,
@@ -49,4 +50,24 @@ def computeDensities(currentState: Any, config: SimulationConfig, schemeConfig: 
             ),
             domain = config.domain,
             adjacency = adjacency,
-    )
+        )
+        # The D&A (2012) eq. 18/19 self-term correction: a per-particle
+        # remap of the finished raw estimate (eps depends on N_H, which
+        # depends on the raw density), applied after the operator, so the
+        # warp kernel itself is unchanged. Off unless the config asks for
+        # it; the bool form is the runner's shorthand, the
+        # DensityCorrection dataclass carries the optional eps100/alpha
+        # overrides. `getattr(dc, 'eps100', None)` is None for the bool
+        # form, which selects the warpSPHCore-shipped constants.
+        dc = getattr(config, 'densityCorrection', None)
+        if isinstance(dc, bool) or getattr(dc, 'enabled', False):
+            densities = applyDensityCorrection(
+                densities,
+                currentState.masses,
+                currentState.supports,
+                config.kernel,
+                config.dim,
+                eps100 = getattr(dc, 'eps100', None),
+                alpha = getattr(dc, 'alpha', None),
+            )
+        return densities

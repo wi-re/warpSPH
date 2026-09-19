@@ -107,6 +107,7 @@ def buildContext(case: Case, spec: CaseSpec) -> RunContext:
         kernel=resolveEnum(KernelFunctions, spec.kernel),
         n_h=spec.n_h,
         calibrateNormalization=spec.calibrateNormalization,
+        densityCorrection=spec.densityCorrection,
         supportMode=resolveEnum(SupportScheme, spec.supportMode),
         gradientMode=resolveEnum(GradientScheme, spec.gradientMode),
         laplacianMode=resolveEnum(LaplacianScheme, spec.laplacianMode),

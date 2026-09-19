@@ -8,7 +8,8 @@ from `dataclasses.fields` rather than a hardcoded list (see their own
 docstrings for why), and are used by `io/{dataset,importIO,export}.py`.
 """
 
-__all__ = ['SimulationConfig', 'buildConfig', 'configurationToDict', 'dictToConfig']
+__all__ = ['SimulationConfig', 'buildConfig', 'configurationToDict', 'dictToConfig',
+           'DensityCorrection']
 
 import torch
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -23,6 +24,28 @@ from dataclasses import dataclass, field
 
 # from waves.utils.domain import buildDomainDescription
 from ..geometry import SamplingScheme
+
+@dataclass
+class DensityCorrection:
+    """The D&A (2012) eq. 18/19 density self-term correction.
+
+    A per-particle remap of the FINISHED raw estimate, applied after the
+    density operator and before the EOS (the hook is
+    `modules/density/density.py::computeDensities`), which subtracts
+    `eps m W(0, h)` with `eps = eps_100 (N_H/100)^(-alpha)`. Off by
+    default. `eps100` / `alpha` override the constants shipped in
+    `warpSPHCore.util.densityCorrection` (`None` = table lookup, which
+    raises for kernels/dimensions without fitted constants -- today the
+    Wendland C2/C4/C6 in 2D and 3D).
+
+    This is a DIFFERENT correction from `SimulationConfig.calibrateNormalization`
+    (a constant 1/L lattice-quadrature rescale applied at the kernel
+    level); do not enable both without refitting the constants (the
+    warpSPHCore replication's renorm_eps_design_note.md section 7).
+    """
+    enabled: bool = False
+    eps100: Optional[float] = None
+    alpha: Optional[float] = None
 
 @dataclass
 class SimulationConfig:
@@ -62,6 +85,11 @@ class SimulationConfig:
     #: (`cases/weaklyCompressible.calibrateRestDensityMasses`) currently absorbs
     #: the same offset. Meaningful only at uniform resolution.
     calibrateNormalization: bool = False
+    #: The D&A (2012) eq. 18/19 density self-term correction (subtract
+    #: `eps m W(0, h)` from the finished raw estimate). A sibling of
+    #: `calibrateNormalization` -- a different correction; see
+    #: `DensityCorrection`'s docstring. Off by default.
+    densityCorrection: DensityCorrection = field(default_factory=DensityCorrection)
     supportMode: SupportScheme = field(default=SupportScheme.SuperSymmetric, metadata={'description': 'Support scheme for neighbor search'})
     
     
@@ -89,6 +117,7 @@ def buildConfig(
     targetNeighbors: Optional[int] = None,
     n_h: Optional[float] = None,
     calibrateNormalization: Optional[bool] = None,
+    densityCorrection: Optional[Union[bool, DensityCorrection]] = None,
     supportMode: Optional[SupportScheme] = None,
     gradientMode: Optional[GradientScheme] = None,
     laplacianMode: Optional[LaplacianScheme] = None,
@@ -121,6 +150,11 @@ def buildConfig(
         targetNeighbors = n_h_to_nH(n_h, dim)
     if calibrateNormalization is None:
         calibrateNormalization = False
+    if densityCorrection is None:
+        densityCorrection = DensityCorrection()
+    elif isinstance(densityCorrection, bool):
+        # Bool shorthand: on/off with the warpSPHCore-shipped constants.
+        densityCorrection = DensityCorrection(enabled=densityCorrection)
     if supportMode is None:
         supportMode = SupportScheme.SuperSymmetric
     if gradientMode is None:
@@ -155,6 +189,7 @@ def buildConfig(
         targetNeighbors=targetNeighbors,
         n_h=n_h,
         calibrateNormalization=calibrateNormalization,
+        densityCorrection=densityCorrection,
         supportMode=supportMode,
         gradientMode=gradientMode,
         laplacianMode=laplacianMode,
@@ -165,7 +200,7 @@ import numpy as np
 import enum
 import types
 import typing
-from dataclasses import fields as _dataclassFields
+from dataclasses import fields as _dataclassFields, is_dataclass as _isDataclass
 
 # Bind the domain type explicitly rather than relying on whichever `import *` above
 # happens to win. `warpSPHCore.DomainDescription` is the single owner; `..utils.domain`
@@ -205,6 +240,13 @@ def _encodeValue(value: Any) -> Any:
             'periodic': _encodeValue(value.periodic),
             'dim': value.dim,
         }
+    if _isDataclass(value):
+        # A nested config dataclass (e.g. DensityCorrection): encode field by
+        # field, so a field added to the nested type round-trips without
+        # touching this function (the same `fields`-driven logic as
+        # `configurationToDict`).
+        return {f.name: _encodeValue(getattr(value, f.name))
+                for f in _dataclassFields(value)}
     if isinstance(value, np.generic):
         return value.item()
     if isinstance(value, np.ndarray):
@@ -245,6 +287,17 @@ def _decodeValue(annotation: Any, value: Any, device, dtype) -> Any:
                 periodic=torch.tensor(_atLeast1D(value['periodic']), device=device, dtype=torch.bool),
                 dim=int(value['dim']),
             )
+        if annotation is DensityCorrection:
+            # Keys absent from a dict written before the field existed fall
+            # back to the dataclass defaults (like every other field here).
+            hints = typing.get_type_hints(DensityCorrection)
+            nested = {}
+            for f in _dataclassFields(DensityCorrection):
+                if f.name not in value:
+                    continue
+                nested[f.name] = _decodeValue(
+                    hints.get(f.name, f.type), value[f.name], device, dtype)
+            return DensityCorrection(**nested)
         if annotation is bool:
             return bool(value)
     # Normalize numpy scalars that come back out of HDF5 without changing width.
