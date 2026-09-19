@@ -5,12 +5,24 @@ divergence and its sign-weighted SPH interpolation, derives a shear-based
 target alpha via the CRKSPH-style ``xi`` kernel-support normalization, and
 integrates it toward that target with a fixed decay length ``l = 0.05`` (eq.
 16). ``computeCullenTerms`` performs both the target-alpha computation and its
-time integration in one call (the original paper's convention); the trailing
-``correctVelocityGradient`` branches of ``computeSecondOrderV`` apply the
-CRKSPH gradient-renormalization matrix ``M_inv`` when configured. Several
-alternate/commented-out formulations (a naive second-order divergence
-estimate, an unused ``computeXi`` limiting workaround) are left in place from
-prior experimentation; only the active code paths are wired into the schemes.
+time integration in one call (the original paper's convention); the
+``correctVelocityGradient`` branch of ``computeSecondOrderV`` applies the
+CRKSPH gradient-renormalization matrix ``M_inv`` when configured.
+
+Second-order divergence sign convention (resolved 2026-09, Phase 6).
+``computeSecondOrderV`` returns the material time derivative of the velocity
+divergence, ``D(div v)/Dt``, estimated as ``div(dv/dt) - tr(V^2)`` where
+``V = grad(v)``. This follows from Cullen & Dehnen (2010) eq. (B11),
+``Vdot = A - V^2`` (``A = grad(dv/dt)``): writing ``V_ij = d v_j / d x_i`` and
+``D/Dt = d/dt + v_k d_k`` gives, component-wise,
+    D V_ij / Dt = d_i d_t v_j + v_k d_k d_i v_j
+                = d_i (d_t v_j + v_k d_k v_j) - (d_i v_k)(d_k v_j)
+                = d_i (D v_j / Dt) - V_ik V_kj
+                = A_ij - (V^2)_ij,
+and the trace yields ``D(div v)/Dt = div(dv/dt) - tr(V^2)``. The equivalent
+identity ``div(Dv/Dt) = D(div v)/Dt + tr(V^2)`` (expand
+``d_i (d_t v_i + v_j d_j v_i)``) confirms the minus sign. The old dead branch
+``tr(A + V^2)`` had the wrong (plus) sign and was removed.
 """
 
 from .common import *
@@ -37,7 +49,16 @@ def computeSecondOrderV(
         supportScheme: Optional[SupportScheme] = None,
         adjacency: Optional[Union[AdjacencyList, CompactHashMap]] = None):
     
-    # The signs here should have been wrong, double check!
+    # Cullen & Dehnen (2010) eq. (B11):  Vdot = A - V^2,  where V = grad(v)
+    # is the velocity-gradient matrix and A = grad(dv/dt) the acceleration
+    # gradient. Taking the trace (and using the product rule for the
+    # advective term) gives the material time derivative of the velocity
+    # divergence:
+    #     div(dv/dt) = D(div v)/Dt + tr(V^2)
+    # so  D(div v)/Dt = div(dv/dt) - tr(V^2).  The MINUS sign is load-bearing:
+    # it is the advective product-rule correction (see the derivation note at
+    # the top of this file). The previously present dead alternative
+    # `tr(A + V^2)` had the wrong (plus) sign and has been removed.
     V = warpOperation(
         particleState,
         OperationProperties(
@@ -50,53 +71,13 @@ def computeSecondOrderV(
         adjacency = adjacency,
         queryValues=particleState.velocities
     )
-    Vdot = warpOperation(
-        particleState,
-        OperationProperties(
-            kernel = simulationConfig.kernel,
-            operation = WarpOperation.Gradient,
-            supportMode = supportScheme if supportScheme is not None else simulationConfig.supportMode,
-            gradientMode = GradientScheme.Difference
-        ),
-        domain = simulationConfig.domain,
-        adjacency = adjacency,
-        queryValues=dvdt
-    )
-
-    # V = SPHOperation(particles, particles.velocities, kernel, neighborhood[0], neighborhood[1], operation = Operation.Gradient, supportScheme=supportScheme, gradientMode=GradientMode.Difference)
-    # Vdot = SPHOperation(particles, dvdt, kernel, neighborhood[0], neighborhood[1], operation = Operation.Gradient, supportScheme=supportScheme, gradientMode=GradientMode.Difference)
-    
-    # i, j        = neighborhood.row, neighborhood.col
-    # v_i, v_j    = particles_a.velocities[i], particles_b.velocities[j]
-    # dv_i, dv_j  = dvdt_a[i], dvdt_b[j]
-    # h_i         = particles_a.supports[i]
-    # m_j         = particles_b.masses[j]
-    # rho_j       = particles_b.densities[j]
-    # x_ij, r_ij  = compute_xij(particles_a, particles_b, neighborhood, domain)
-
-    # gradW_i = kernel.jacobian(x_ij, h_i)
-    # v_ij = v_i - v_j
-    # dv_ij = dv_i - dv_j
-    
-    # dyadicV = (m_j / rho_j).view(-1,1,1) * torch.einsum('ij,ik->ijk', v_ij, gradW_i)
-    # dyadicVdot = (m_j / rho_j).view(-1,1,1) * torch.einsum('ij,ik->ijk', dv_ij, gradW_i)
-    
-    # V = scatter_sum(dyadicV, i, dim = 0, dim_size = particles_a.positions.shape[0])
     correctVelocityGradient = schemeConfig.viscositySwitchParams.correctVelocityGradient
-    # correctVelocityGradient = getSetConfig(config, 'diffusionSwitch', 'correctGradient', False)
     if correctVelocityGradient:
         if correctionMatrix is not None:
             V = torch.einsum('ijk, ikl -> ijl', correctionMatrix, V)
         else:
             raise ValueError('Correction matrix is None, but correctVelocityGradient is True')
     V2 = torch.einsum('ijk, ikl -> ijl', V, V)
-    # Vdot_ = scatter_sum(dyadicVdot, i, dim = 0, dim_size = particles_a.positions.shape[0])
-    # From Cullen & Dehnen 2010 : We can estimate ∇˙ ·υ either from the change in the estimated ∇·υ over 
-    # the last time step or as the trace of V [This is not implemented here as this would require 
-    # storing the previous divergence estimate. Spheral (the code implementing CRKSPH by LLNL) does this.]    
-    # Note that, by virtue of equation (B11), we could estimate ∇˙·υ also as ∇· υ˙ - tr(V^2) with the 
-    # acceleration divergence ∇·υ˙ estimated using the standard divergence estimator, in the hope that 
-    # its O(h0) error term is small since the acceleration is hardly sheared.
     divdotdvdt = warpOperation(
         particleState,
         OperationProperties(
@@ -110,35 +91,7 @@ def computeSecondOrderV(
         adjacency = adjacency,
         queryValues=dvdt
     )
-
-    # divdotdvdt = SPHOperation(particles, dvdt, kernel, neighborhood[0], neighborhood[1], operation = Operation.Divergence, supportScheme=supportScheme, gradientMode=GradientMode.Difference, consistentDivergence=False)
-    
-    # divdotdvdt = sph_op(particles_a, particles_b, domain, kernel, neighborhood, 'gather', 'divergence', gradientMode = 'difference' , consistentDivergence = False, quantity=(dvdt_a, dvdt_b))
     return divdotdvdt - torch.einsum('...ii', V2)
-
-    # Naïve alternative solution as described above
-    A = warpOperation(
-        particleState,
-        OperationProperties(
-            kernel = simulationConfig.kernel,
-            operation = WarpOperation.Gradient,
-            supportMode = supportScheme if supportScheme is not None else simulationConfig.supportMode,
-            gradientMode = GradientScheme.Difference
-        ),
-        domain = simulationConfig.domain,
-        adjacency = adjacency,
-        queryValues=dvdt
-    )
-
-    # A = SPHOperation(particles, dvdt, kernel, neighborhood[0], neighborhood[1], operation = Operation.Gradient, supportScheme=supportScheme, gradientMode=GradientMode.Difference)
-    # A = sph_op(particles_a, particles_b, domain, kernel, neighborhood, 'gather', 'gradient', gradientMode = 'difference' , consistentDivergence = False, quantity=(dvdt_a, dvdt_b))
-    # correctVelocityGradient = getSetConfig(config, 'diffusionSwitch', 'correctGradient', False)
-    if correctVelocityGradient:
-        if correctionMatrix is not None: # This is an assumption, not described in the paper
-            A = torch.einsum('ijk, ikl -> ijl', correctionMatrix, A)
-        else:
-            raise ValueError('Correction matrix is None, but correctVelocityGradient is True')
-    return torch.einsum('...ii', A + V2)
 
     
 def computeR(
