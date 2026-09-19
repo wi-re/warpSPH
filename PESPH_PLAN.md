@@ -501,6 +501,28 @@ which direction is chosen next. `modules/crk/` already has the matrix machinery
 
 ---
 
+## Relationship to `AV_PLAN.md`
+
+[`AV_PLAN.md`](AV_PLAN.md) is the artificial-dissipation roadmap, and this plan is
+its Phase 8. Three concrete couplings:
+
+- **This plan is gated on AV_PLAN's M8** (the AV bake-off). The point of the gate
+  is that PESPH is then evaluated as `old SPH + known AV` vs `new PE-SPH + same
+  AV`, so the hydrodynamic change is isolated — §8.5 of that plan's predecessor
+  sketch, made enforceable.
+- **§8's dissipation comes from AV_PLAN's Phase-1 `DissipationOperator`,
+  unchanged.** PESPH does not port a new AV; it consumes the M8 recommended
+  configuration.
+- **The §2.1 state-tag bugs below are fixed in AV_PLAN Phase 1** (its §2.5),
+  together with the `limitXi` duplicate and the `correctXi`/Ξ naming collision.
+  Mark them closed here when that lands.
+
+AV_PLAN's Phase 6 work (Cullen & Dehnen 2010 wired into `schemes/monaghan.py`,
+Read & Hayfield 2012 added) is complete as of 2026-09-19, which satisfies the §2
+audit row that assumes a validated C&D switch.
+
+---
+
 ## Status
 
 **Not started.** Plan written 2026-09-15 from Frontiere et al. (2017) Appendix G and
