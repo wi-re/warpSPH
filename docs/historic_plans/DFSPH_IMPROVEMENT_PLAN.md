@@ -1,5 +1,12 @@
 # warpSPH — Incompressible (VD+PS / DFSPH) Improvement Plan
 
+**RETIRED 2026-09-19.** Moved to `docs/historic_plans/`, the existing
+convention for a finished plan (see `git log` on this file for how it got
+there) — the "Recommendation" below is the standing answer and nothing here
+is actively being worked. The one surviving open item (Morris viscosity, the
+ranked-queue's item 1) moved to `OPEN_PROBLEMS.md` item 7; the punch list
+version of this file's status, `DFSPH_TODO.md`, retired alongside it.
+
 Working document for the incompressible SPH path: `divergenceFree`
 (`schemes/divergenceFree.py`, renamed from `dfsph.py` in the pre-merge
 cleanup pass, 09-04), `dfsphReference` (troubleshooting artifact), `iisph`
@@ -99,22 +106,10 @@ clumping on this case (Part 58/59); `sloshingTank`'s voids (0.3%→3.0%, peak
 
 Ordered roughly by how concrete/actionable each is, not by importance.
 
-1. **The shear-carrying Morris viscosity term.** `hydrostaticColumn`'s
-   `wallBC=noSlip` + `viscidNu` bounds the free-slip slosh but roughens the
-   surface, because the stock `viscidNu` term (`wp_viscosityDelta.py`) is
-   normal-projected — no tangential stress. Needs a real Morris et al. 1997
-   laminar term (full `v_ij` vector, no approach-only clamp) as a new
-   `DiffusionParameters`-wired option, gradcheck'd, with its own `deltaSPH`
-   regression pass. **The "no approach-only clamp" half landed 2026-09-05**
-   (`ACSPH_PLAN.md` step 5): `computeVelocityDiffusion(approachOnly=False)`
-   lifts the clamp, which turns the `inviscid=False` branch into Monaghan &
-   Gingold (1983)'s velocity Laplacian — De Courcy et al. 2024 Eq. (25) — and
-   is gradchecked in all four `inviscid` × `approachOnly` combinations. The
-   default is unchanged, so nothing here moved. **What remains is the other
-   half**, the one this item is actually about: the contribution is still
-   `mu_ij * gradW` with `mu_ij = (v_ij . x_ij)/|x_ij|^2`, i.e. a vector along
-   `x_ij`, so there is still no tangential stress. That needs the full `v_ij`
-   vector and a new kernel. (`DFSPH_FINDINGS.md` §1.14.)
+1. **MOVED to `OPEN_PROBLEMS.md` item 7 (2026-09-19 retirement).** The
+   shear-carrying Morris viscosity term — the one item from this ranked queue
+   that survived the track's retirement. Full mechanism, evidence, and next
+   step are there now, not duplicated here.
 2. **CLOSED (Part 62).** `band2018pb` on `hydrostaticColumn-64`/`columnCollapse`/
    `sloshingTank` at full resolution. `hydrostaticColumn-64` flips to PASS,
    same resolution-artifact story as `divergenceFree`'s. `columnCollapse` and

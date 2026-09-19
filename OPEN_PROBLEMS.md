@@ -202,6 +202,55 @@ Three loose ends, all optional:
    but none are in `tests/test_physics.py`'s fixture set and none were
    re-run by hand.
 
+## 7. Missing shear-carrying laminar viscosity term (Morris et al. 1997) —
+no tangential stress at a no-slip wall
+
+**What it is:** the stock velocity-diffusion term
+(`computeVelocityDiffusion`'s `inviscid=False` branch, `wp_viscosityDelta.py`)
+is `mu_ij * gradW` with `mu_ij = (v_ij . x_ij)/|x_ij|^2` — a scalar built by
+contracting the relative velocity along the separation vector `x_ij`, not the
+full `v_ij` vector. That makes it a normal-projected diffusion: it damps the
+approach/separation component of relative velocity but carries no
+tangential/shear stress at all. A real Morris et al. (1997) laminar viscosity
+term needs the full vector Laplacian, which neither `viscidNu` nor
+`viscosityParams` currently has.
+
+**Why it matters:** `hydrostaticColumn`'s free-slip side walls leave a
+bounded, undamped limit-cycle slosh (documented as non-fatal — DFSPH_FINDINGS.md
+§1.12/§1.20). Switching to `wallBC=noSlip` + `viscidNu` through the existing
+(normal-projected) term does bound the slosh KE (~4x down) and hold the
+hydrostatic gradient, but roughens the free surface
+(`embeddedMinDensity` 0.94 -> 0.60, `|v|max` spikes to ~3.7-4.1) — a no-slip
+mirror through a normal-only diffusion term adds noisy *normal* wall damping
+with no tangential component, not the physically-correct shear stress a real
+no-slip wall should apply. A hand-rolled full-vector Brookshaw Laplacian
+(DFSPH_FINDINGS.md Part 39, since removed in the Part 41 cleanup) *did* hold
+the surface (embMin 0.94-0.97) while damping the slosh at the same time,
+confirming the mechanism — the module layer just doesn't have it as a real,
+supported option today.
+
+**Why it's not a quick fix:** it needs a new kernel term (the full `v_ij`
+vector, not the scalar `mu_ij` reduction), wired as a `DiffusionParameters`
+option, gradcheck'd (it touches a `@wp.kernel`), and given its own `deltaSPH`
+regression pass so it doesn't silently change WCSPH's diffusion behaviour
+too. Half of the groundwork already landed (2026-09-05, `ACSPH_PLAN.md` step
+5 — `computeVelocityDiffusion(approachOnly=False)` lifts the approach-only
+clamp, turning the `inviscid=False` branch into the Monaghan & Gingold
+(1983) Laplacian, De Courcy et al. 2024 Eq. (25), gradchecked in all four
+`inviscid` x `approachOnly` combinations, default unchanged) — what remains
+is the actual full-vector term, a new kernel, not a flag flip.
+
+**Concrete next step:** implement the full `v_ij` Morris Laplacian as a new
+`DiffusionParameters`-wired option alongside the existing `viscidNu` scalar
+term, gradcheck it, and re-run the `hydrostaticColumn` `wallBC=noSlip` A/B to
+confirm it reproduces Part 39's numbers (embMin held, KE damped) through the
+stock machinery instead of the since-removed bespoke path. `DFSPH_IMPROVEMENT_PLAN.md`'s
+ranked-queue item 1, `DFSPH_FINDINGS.md` §1.14 (both now retired to
+`docs/historic_plans/` — the incompressible/DFSPH track itself reached a
+stable, documented recommendation (`divergenceFree` default, `band2018pb` as
+a deliberate trade-off) and this is the one item that survived it).
+
 See also: [[boundary-density-plan]], [[wcsph-deltasph-scheme-concerns]],
 [[sph-symmetric-pressure-truncation-artifact]],
-[[marrone31-truncation-artifact-vs-pst]], [[antuono-pressure-switch-bug]].
+[[marrone31-truncation-artifact-vs-pst]], [[antuono-pressure-switch-bug]],
+[[incompressible-plan-sequencing]].
