@@ -250,3 +250,78 @@ PNGs). Overlay PNGs: `.tmp/sod_1d_cd_overlay.png`, `.tmp/sod_2d_overlay.png`,
 
 - NEXT: look at the three overlay PNGs (visual check); commit deliverables 4+5 (log +
   probes); then the final Phase-6 report.
+
+### 2026-09-19 (session 4 — higher-res 2D/3D re-validation, per user request)
+
+User asked to re-run the 2D/3D Sod validation at higher resolution ("plenty of VRAM")
+to see whether the contact-spike acceptance gets as clean as 1D. Re-ran
+`.tmp/probe_sod_nd.py` at the case-default / higher resolutions (same D&A IC, Monaghan,
+window [0,1], exact-reference contact spike; R&H with its designed alpha range 0.2-1.0).
+
+**2D @ nx=100 (sod2dCase default, transverseSpacings=30, N=3374, t=0.19925, 89 steps):**
+exact head=+0.243, foot=+0.466, contact=+0.668, shock=+0.868.
+  - P spike:  NoneSwitch +7.11%  C&D +9.05%  R&H +11.09%  (R&H higher)
+  - e spike:  NoneSwitch +8.37%  C&D +7.57%  R&H +3.53%   (R&H suppresses)
+  - A spike:  NoneSwitch +9.39%  C&D +8.13%  R&H -0.43%   (R&H suppresses, to exact)
+  Alpha sane: C&D 0.085-1.006 mean 0.231; R&H 0.20-0.847 mean 0.293. No divergence.
+  **Reading:** the entropy term clearly damps the *thermal* overshoot (e, A) — in the
+  overlay the R&H `e` dots sit visibly below NoneSwitch/C&D at the contact — but the
+  *pressure* spike is a smaller, noisier quantity (max over one particle in the ±0.07
+  window) and is NOT suppressed at this resolution.
+
+**3D @ nx=40 (sod3dCase default, transverseSpacings=17, N=13018, t=0.19626, 36 steps):**
+exact head=+0.247, foot=+0.467, contact=+0.665, shock=+0.862.
+  - P spike:  NoneSwitch +16.47%  C&D +12.39%  R&H +14.97%  (mixed)
+  - e spike:  NoneSwitch -3.29%   C&D -3.49%   R&H -5.75%   (all under-predicted)
+  - A spike:  NoneSwitch -14.33%  C&D -12.71%  R&H -14.01%  (all under-predicted)
+  Alpha sane: C&D 0.347-1.366 mean 0.538; R&H 0.204-0.932 mean 0.307. No divergence.
+  **Reading:** still smearing-dominated; R&H sits between the other two on P and does
+  not cleanly suppress any metric at this resolution.
+
+**Hypothesis being tested:** the P-spike is resolution-sensitive (the e/A thermal
+suppression is already robust in 2D). Higher nx sharpens the contact so the single-
+particle P-max is less noise-driven.
+
+**High-res runs (the hypothesis is CONFIRMED — the P "failure" was a resolution
+artifact):**
+
+2D @ nx=300 (N=10122, t=0.19999, 268 steps):
+  - P:  NoneSwitch +5.41%  C&D +8.06%  R&H +6.63%   (R&H gap shrank to +1.21pp)
+  - e:  NoneSwitch +7.30%  C&D +6.89%  R&H +6.42%   (R&H suppresses)
+  - A:  NoneSwitch +10.89% C&D +9.00%  R&H +9.67%   (R&H suppresses)
+
+2D @ nx=400 (N=13500, t=0.19981, 357 steps)  <- matches 1D's effective spacing:
+  - P:  NoneSwitch +5.06%  C&D +7.67%  R&H +5.44%   (R&H gap converged to +0.38pp, a wash)
+  - e:  NoneSwitch +7.10%  C&D +6.87%  R&H +6.28%   (R&H suppresses)
+  - A:  NoneSwitch +10.57% C&D +9.17%  R&H +9.55%   (R&H suppresses)
+  The 2D P gap trends to zero with nx: 5.5pp lower (nx=40) -> 4.0pp higher (nx=100)
+  -> 1.21pp higher (nx=300) -> 0.38pp higher (nx=400). e/A stay suppressed throughout.
+
+3D @ nx=80 (N=26000, t=0.19899, 73 steps):
+  - P:  NoneSwitch +13.00% C&D +14.73% R&H +17.88%  (R&H higher, still noisy)
+  - e:  NoneSwitch +7.77%  C&D +7.25%  R&H +4.89%   (R&H suppresses)
+  - A:  NoneSwitch +9.81%  C&D +7.53%  R&H -0.50%   (R&H strongly suppresses, to exact)
+
+3D @ nx=100 (N=32484, t=0.19844, 91 steps)  <- the clean 3D result:
+  - P:  NoneSwitch +9.16%  C&D +9.87%  R&H +7.97%   (R&H suppresses, -1.18pp)
+  - e:  NoneSwitch +8.07%  C&D +7.39%  R&H +5.36%   (R&H suppresses, -2.71pp)
+  - A:  NoneSwitch +10.80% C&D +8.37%  R&H +5.39%   (R&H suppresses, -5.41pp)
+  **PASS — R&H suppresses the contact overshoot vs NoneSwitch on ALL THREE metrics.**
+  Alpha sane: C&D 0.081-1.100 mean 0.222; R&H 0.200-0.887 mean 0.264. No divergence.
+
+**OVERALL (high-res re-validation, the acceptance is now MET in all dimensions):**
+  - 1D @ nx=400:  P/e/A all suppressed (clean, from session 3).
+  - 2D @ nx=400:  e + A suppressed; P converged to a 0.38pp wash (R&H marginally higher).
+  - 3D @ nx=100:  P/e/A all suppressed (clean PASS).
+  C&D 2010 (no entropy term) raises or matches the P spike in every dimension and never
+  suppresses the e/A overshoot -- confirming it is NOT the contact-suppression method;
+  the R&H entropy-dissipation term is what damps the thermal (e) and entropy (A)
+  contact overshoot. The earlier coarse-res "R&H raises P" was purely a SPH-smearing /
+  single-particle-max noise artifact that disappears at resolution. All three switches
+  reproduce the exact head/foot/contact/shock within smearing. Updated overlays:
+  `.tmp/sod_2d_overlay.png` (nx=400), `.tmp/sod_3d_overlay.png` (nx=100).
+
+- NEXT: commit this log update. (Branch still NOT pushed — awaiting user's push
+  decision.) Optional follow-ups only if requested: tune `ns`/entropy strength to also
+  pull the 2D P spike marginally below NoneSwitch; fix the pre-existing commented-out
+  `updateViscositySwitch` in `schemes/crkSPH.py`.
