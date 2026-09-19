@@ -1,5 +1,15 @@
 # DFSPH / incompressible — pickup TODO
 
+**RETIRED 2026-09-19.** Moved to `docs/historic_plans/` alongside
+`DFSPH_IMPROVEMENT_PLAN.md`/`DFSPH_FINDINGS.md` — the track reached a stable,
+documented recommendation (`divergenceFree` default, `band2018pb` as a
+deliberate trade-off) and every item that was still open here is either
+closed (see below), was checked and found to target dead/superseded code
+(also below), or — the one item worth carrying forward, the Morris et al.
+1997 viscosity term — is now `OPEN_PROBLEMS.md` item 7. The smaller
+"Known-open"/"Blocked" bullets further down were not individually promoted;
+they stay here for the record, not because they were forgotten.
+
 Distilled from `DFSPH_IMPROVEMENT_PLAN.md` (452 lines) + `DFSPH_FINDINGS.md`
 (1551 lines) so picking this back up doesn't mean re-reading ~2000 lines
 first. This file is the punch list only — mechanism, evidence, and the full
@@ -71,14 +81,10 @@ more than particle-distribution smoothness (`DFSPH_IMPROVEMENT_PLAN.md`
 
 ## Worth picking up, roughly cheapest/most-concrete first
 
-1. **The real Morris et al. 1997 laminar viscosity term** — biggest lift
-   here. `hydrostaticColumn`'s `noSlip`+`viscidNu` bounds the free-slip
-   slosh but roughens the surface because the stock term
-   (`wp_viscosityDelta.py`) is normal-projected (`mu_ij` along `x_ij`), no
-   tangential stress. The approach-only-clamp half of this already landed
-   (2026-09-05, `ACSPH_PLAN.md` step 5); what's left is the full `v_ij`
-   vector as a new `DiffusionParameters`-wired option, gradcheck'd, with its
-   own `deltaSPH` regression pass. Plan item 1, `DFSPH_FINDINGS.md` §1.14.
+Empty — the one item that was here (the real Morris et al. 1997 laminar
+viscosity term, biggest lift in this file) moved to `OPEN_PROBLEMS.md` item 7
+when this track retired (2026-09-19). See that entry for the full mechanism
+and next step.
 
 ## Blocked / low priority — don't start here
 

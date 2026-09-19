@@ -1,5 +1,10 @@
 # warpSPH — Incompressible (VD+PS / DFSPH) — Findings & Reference
 
+**RETIRED 2026-09-19**, alongside `DFSPH_IMPROVEMENT_PLAN.md`/`DFSPH_TODO.md`
+— moved to `docs/historic_plans/`. Kept for the part-by-part history (64
+parts in §9); the one item that was still actionable (Morris viscosity) moved
+to `OPEN_PROBLEMS.md` item 7.
+
 Durable reference material for the incompressible SPH path
 (`schemes/dfsph.py`, registered `IncompressibleSPHScheme.divergenceFree`;
 plus the `dfsphReference` troubleshooting scheme). Extracted 2026-08-31 from
