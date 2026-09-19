@@ -21,6 +21,7 @@ from ..modules.eos import idealGasEOS
 from ..modules.internalEnergy import computeDudtMonaghan
 from ..modules.momentum import computeMomentumConsistent
 from ..modules.pressure import computePressureForceSymmetric
+from ..modules.shockCapturing import computeViscositySwitchTerms, updateViscositySwitch
 from warpSPHCore import (
     GradHState, OperationProperties, SupportScheme,
     WarpOperation, buildVerletList, warpOperation,
@@ -92,7 +93,15 @@ def compressibleSPH_Monaghan(
     else:
         gradHState = None
 
-    # from monaghanScheme import *
+    # Viscosity switch (Cullen-Dehnen / Hopkins / none). Computes the
+    # per-particle alphas from the current state; the wrapper is a no-op that
+    # passes the stored alphas through for the NoneSwitch baseline.
+    currentState.alphas, switchState = computeViscositySwitchTerms(
+        dt,
+        currentState,
+        config, schemeConfig,
+        SupportScheme.SuperSymmetric,
+        adjacency)
 
     dvdt = computePressureForceSymmetric(
         currentState,
@@ -132,6 +141,7 @@ def compressibleSPH_Monaghan(
         domain = config.domain,
         adjacency = adjacency,
         viscosityParams = diffusionParams,
+        queryAlphas = currentState.alphas,
     )
 
 
@@ -145,6 +155,7 @@ def compressibleSPH_Monaghan(
         domain = config.domain,
         adjacency = adjacency,
         conductivityParams = diffusionParams,
+        queryAlphas = currentState.alphas,
     )
 
 
@@ -158,7 +169,23 @@ def compressibleSPH_Monaghan(
         domain = config.domain,
         adjacency = adjacency,
         conductivityParams = diffusionParams,
+        queryAlphas = currentState.alphas,
     )
+
+    # Advance the viscosity switch's stored alpha0 and store the velocity
+    # divergence for the next step's second-order-divergence finite
+    # difference. Mirrors the compSPH wiring; for the NoneSwitch baseline the
+    # wrapper is a no-op (alpha0 passes through unchanged). The hydrodynamic
+    # acceleration (pressure + viscosity, pre-forcing) is what the switch's
+    # second-order-divergence estimate needs.
+    currentState.alpha0s, switchState = updateViscositySwitch(
+        switchState,
+        dt, dvdt + dvdt_diss,
+        currentState,
+        config, schemeConfig,
+        SupportScheme.SuperSymmetric,
+        adjacency)
+    currentState.divergence = -drhodt / currentState.densities
 
     dEdt = currentState.masses * torch.einsum('ij,ij->i', currentState.velocities, (dvdt + dvdt_diss)) + currentState.masses * (dudt + dudt_diss)
 
