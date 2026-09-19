@@ -18,11 +18,27 @@ Relaxation mode (`relaxationMode`):
     `omega < 2/rho(D^-1*A)` (the `D^-1*A` spectrum lies in `[0, rho]`: the
     operator is symmetric negative-semi-definite with a constant gauge null
     space, so `D^-1*A` is similar to the symmetric `|D|^-1/2*(-A)*|D|^-1/2`).
-    On this operator family `rho ~= 5.64` (a degenerate high-frequency
+    On the TGV operator family `rho ~= 5.64` (a degenerate high-frequency
     lattice cluster, robust to grid deformation), i.e. the window is
-    `omega < 0.355`: the historical dataclass default 0.5 diverges, 0.3 sits
-    inside with ~15% margin, and fixed-omega performance is flat inside the
-    window (so only the margin matters, not the exact value).
+    `omega < 0.355`: the historical dataclass default 0.5 diverges. The
+    margin is not flat across cases, though: `scripts/probe_boundaryOperatorTerms.py
+    --mode spectrum` (`randomFlowIncompressible --bounded`, the only case this
+    solve's own capture hook reaches) measures `rho ~= 5.8-6.9` depending on
+    resolution, shrinking the window to `omega < 0.29-0.34` and the margin at
+    `omega = 0.3` from ~13% (nx=32/64) down to ~7% (nx=128) -- well short of
+    the TGV family's ~15%. **Lowering `omega` to spend that margin back was
+    tried (Part 61) and not adopted -- it is not a free lunch.** A real A/B
+    (nx=32/128, 50/200 steps, after fixing a separate bug that had been
+    silently pinning the *constant-density* solve's own omega at 0.3
+    regardless of config -- `incompressible.py`'s loop) shows `omega = 0.27`
+    tightens density bounds slightly (nx=128 `maxDensity` 1.080 -> 1.064,
+    `minDensity` 0.981 -> 0.983) but makes peak `maxVelocity` worse by a
+    margin that *grows* with resolution (+6% at nx=32, +15-21% at nx=128) --
+    the opposite of "flat inside the window" at these margins. Default stays
+    `omega = 0.3`. Not yet measured: the gravity-active in-step CD fold
+    (`hydrostaticColumn`/`dambreak`/`columnCollapse`) uses the same operator
+    family but a different code path this probe's capture hook does not
+    reach, so its own margin is unconfirmed.
   `optimal`: per-step exact residual minimizer
     `omega_k = (r . A*D^-1*r) / ||A*D^-1*r||^2` (the 1-D minimizer of
     `||r - w*A*D^-1*r||`). Costs the same single accel+shift pair per step

@@ -301,13 +301,21 @@ def _solveIncompressibleImpl(
                 if verbose:
                     print(f'\t[IS] Pressure acceleration: mean: {a_p.mean().cpu().item():.6g}, min: {a_p.min().cpu().item():.6g}, max: {a_p.max().cpu().item():.6g}')
                     print(f'\t[IS] Pressure shift: mean: {dx_p.mean().cpu().item():.6g}, min: {dx_p.min().cpu().item():.6g}, max: {dx_p.max().cpu().item():.6g}')
-                # NOTE: pins the relaxation at 0.3 regardless of
+                # Was a hardcoded `omega = 0.3` here, silently shadowing
                 # `schemeConfig.solverConfig.pressureSolver.relaxationFactor`
-                # (read into the outer `omega` above, then never used) --
-                # long-standing, not touched here; changing it is a numerical
-                # behaviour change that needs its own validation, not a
-                # cleanup. See DFSPH_IMPROVEMENT_PLAN.md.
-                omega = 0.3
+                # (read into the outer `omega` above at line 135, then
+                # overwritten every iteration and never actually used) --
+                # long-flagged in DFSPH_IMPROVEMENT_PLAN.md's "Known-open" as
+                # needing its own validation before touching. Fixed here
+                # (Part 61): `omega` now stays the configured value, matching
+                # `divergenceFree.py`'s analogous loop, which never had this
+                # shadow. The shipped default is still 0.3, so this is a
+                # correctness fix (the field can now actually change this
+                # solve's behaviour), not a behaviour change on its own --
+                # verified via the full test suite, and by reproducing the
+                # pre-fix numbers exactly with the config value forced to 0.3
+                # (`randomFlowIncompressible --bounded` nx=32). See
+                # `DFSPH_FINDINGS.md` Part 61.
                 residual = sourceTerm - dx_p
                 pressureB = pressureA + omega * residual / alphas
                 if verbose:

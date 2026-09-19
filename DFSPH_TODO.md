@@ -11,33 +11,67 @@ Current recommended default is unchanged: `divergenceFree` for general use,
 more than particle-distribution smoothness (`DFSPH_IMPROVEMENT_PLAN.md`
 "Recommendation").
 
+## Closed this session (2026-09-19)
+
+- **`columnCollapse`'s kernel `Wendland2` -> `Wendland4` — decided against.**
+  The 400-step win (0.099→0.063 final `pairedFraction`) does not survive a
+  3x-longer run (gap closes, slightly reverses: 0.174 vs 0.191 at 1200 steps)
+  and does not transfer to `impact`, the other pairing-prone case (Wendland4
+  is *worse* there: 0.183 vs 0.221 final). A real but transient early-post-
+  impact effect, not a persistent reduction — not promoted anywhere, no code
+  changed. Also surfaced in passing: at 1200 steps `columnCollapse` under
+  `Wendland2` shows one `nPenetrating` crossing where the 400-step
+  characterisation called wall integrity exactly correct — that claim was
+  scoped to 400 steps, not indefinitely. `DFSPH_FINDINGS.md` §9 Part 60, §2
+  negative-results table.
+- **`relaxationFactor=0.3`'s stability margin — measured, a real bug found
+  and fixed along the way, default NOT changed.** `--mode spectrum` confirms
+  the margin shrinks with resolution on a bounded wall subproblem (12.7% at
+  nx=32 down to 7.1% at nx=128, vs the ~15% the docstring quoted from the
+  un-walled TGV family); `boundaryOperatorTerms='full'` (not shipped) is
+  already outside the window at every resolution measured, a latent trap if
+  ever selected without also changing `relaxationFactor`. Along the way,
+  found and fixed a real bug: the constant-density solve hardcoded
+  `omega = 0.3` inside its loop, silently ignoring
+  `relaxationFactor` regardless of what it was configured to (the exact
+  "Known-open" item `DFSPH_IMPROVEMENT_PLAN.md`'s pre-merge cleanup log had
+  flagged and deliberately left for its own validation) — fixed,
+  bit-identical at the unchanged default, full suite green. With the bug
+  fixed, a real A/B of `0.3` vs `0.27` shows a genuine trade (density bounds
+  tighten slightly; peak `maxVelocity` gets worse by a margin that *grows*
+  with resolution, +21% at nx=128) rather than the "free" margin the first,
+  broken A/B attempt seemed to show — not adopted, `relaxationFactor` stays
+  `0.3`. `DFSPH_FINDINGS.md` §9 Part 61.
+- **`band2018pb`'s `columnCollapse`/`sloshingTank` smoke-profile FAILs —
+  settled, not a resolution artifact, but not new regressions either.**
+  `--scheme band2018pb --cases hydrostaticColumn-64 columnCollapse
+  sloshingTank --profile full --video`: `hydrostaticColumn-64` flips to PASS
+  (same story as `divergenceFree`'s, Part 58) but `columnCollapse` and
+  `sloshingTank` don't — both still fail the harness's automated grade at
+  full resolution. Neither is new information, though: `columnCollapse`'s
+  pairing growth (0.026→0.084) converges to the same magnitude as
+  `divergenceFree`'s own already-accepted, cosmetic post-impact clumping on
+  this case (Part 58/59); `sloshingTank`'s failure (voids 0.3%→3.0%, peak
+  4.4%) is the same free-surface void gap already documented on
+  `dambreak`/`randomFlow` (Part 51), just on a third case. `DFSPH_FINDINGS.md`
+  §9 Part 62. Videos in `sweeps/validate-band2018pb-full-20260919-125858/`.
+- **`DensityEvolution.hybrid` mDBC hypothesis — closed as moot, not
+  investigated.** The "cheap test" this item proposed (re-sum for the
+  extrapolation only) turned out untestable: `DensityEvolution` is dead code
+  on the production `divergenceFree`/`omniIncompressible` path (both branches
+  that used to read it are commented out since the 09-02 `band2018pb` rewrite,
+  `71a8ae7`, and no other scheme reads it either) — confirmed by code reading
+  and by `probe_densityEvolution.py` giving identical results across all three
+  settings. Part 10's `hybrid`-dies-at-286-steps finding was real for the code
+  that existed then; nothing today reads the config field it was made
+  through. Reviving it is a design decision (re-wire into the current step
+  function, decide whether `hybrid`'s semantics still make sense
+  post-rewrite), not a bug fix — not attempted here. `DFSPH_FINDINGS.md` §9
+  Part 63.
+
 ## Worth picking up, roughly cheapest/most-concrete first
 
-1. **Promote `columnCollapse`'s kernel to `Wendland4`, or decide not to.**
-   Already measured to substantially reduce post-impact pairing (0.099→0.063
-   final `pairedFraction`, no measured cost) at one resolution, one case.
-   Before promoting: run longer (does the gap widen or plateau?) and check
-   whether it transfers to `impact` (the other pairing case). Plan item 2,
-   Part 59.
-2. **`relaxationFactor=0.3`'s stability margin is ~4% on a bounded state**,
-   not the ~15% its docstring quotes from the TGV family — cheap, isolated
-   robustness win. `probe_boundaryOperatorTerms.py --mode spectrum`. Plan
-   item 6.
-3. **Cheap test for the `DensityEvolution.hybrid` mDBC hypothesis**:
-   `computeMdbcDensity` runs on carried (not re-summed) density under
-   `hybrid`, possibly why it dies at 286 steps at a wall but not
-   periodically. Try re-summing for the extrapolation only. Plan item 5.
-4. **One run settles whether `band2018pb`'s `columnCollapse` smoke-profile
-   FAIL is a resolution artifact.** `--scheme band2018pb --cases
-   hydrostaticColumn-64 columnCollapse sloshingTank --profile full --video`
-   — `divergenceFree` already flipped 2/3 of this table from smoke-FAIL to
-   full-PASS: unknown whether `band2018pb` does too. Plan item 3.
-5. **Dam-break dissipation mechanism, `nx` convergence study.** Isolated to
-   the incompressibility cycle (DF projection / Eq. 17 resample, net −8.5,
-   85% of the loss) but not explained: discretization error that vanishes
-   as `nx` grows, or a structural cost of the constraint? Independent of
-   everything else, can run any time. Plan item 4.
-6. **The real Morris et al. 1997 laminar viscosity term** — biggest lift
+1. **The real Morris et al. 1997 laminar viscosity term** — biggest lift
    here. `hydrostaticColumn`'s `noSlip`+`viscidNu` bounds the free-slip
    slosh but roughens the surface because the stock term
    (`wp_viscosityDelta.py`) is normal-projected (`mu_ij` along `x_ij`), no
@@ -49,14 +83,23 @@ more than particle-distribution smoothness (`DFSPH_IMPROVEMENT_PLAN.md`
 ## Blocked / low priority — don't start here
 
 - **`shearWave` vs [C] Fig. 3/4** — blocked on literature access
-  (`literature/MANIFEST.md`). Plan item 7.
+  (`literature/MANIFEST.md`). Plan item 5.
 - **`'mirror'` wall-pressure mode's rough edges** — low priority, `'shepard'`
-  is the shipped default and neither is needed. Plan item 8.
+  is the shipped default and neither is needed. Plan item 6.
 - **Re-scope before running, not just re-run as written**: the
   divergence-free half-state contraction under `minShift`, and warm-starting
   the divergence-free solve — both predate the Part 46-58 rewrite
   (`c637785`, Parts 46-47's shift gate) and may not mean what they used to
   against `omniIncompressible._solve`. Check relevance before running.
+- **Dam-break dissipation mechanism, `nx` convergence study — blocked, not
+  "can run any time" as it looked.** `probe_dambreakEnergyBudget.py` (the
+  source of the "net −8.5, 85% of the loss" figures) crashes against current
+  code (`KeyError: 'a_DF'`): it captures `DIVERGENCE_SOLVER='vdps'`'s
+  `solveDivergenceFree`, but the shipped default is `'omni'`
+  (`_omniPass`/`omniIncompressible._solve`), which never calls it. Needs the
+  probe's capture points re-scoped to the `'omni'` path's own force terms
+  before a convergence sweep is worth running. `DFSPH_FINDINGS.md` §9 Part 64,
+  Plan item 3.
 - **Likely moot, drop unless someone has a specific reason**: a from-scratch
   two-solve `dfsph` scheme — `band2018pb` + `divergenceFree` already cover
   the practical need.
@@ -95,12 +138,16 @@ more than particle-distribution smoothness (`DFSPH_IMPROVEMENT_PLAN.md`
   — flaky (~1 run in 3 as of Part 48), not re-verified this session.
 - `test_incompressibleKrylov.py::test_optimalStepRejectedForConstantDensitySolver`
   — already fixed (09-04), all 20 tests in that file pass.
+- `test_runner.py::test_everyCaseDeclaresItsParamsAsScalarsOrLists` — not
+  flaky, deterministically fails: `dambreak.surfacePressureProbes` is a tuple,
+  not a scalar/list/dict. Confirmed pre-existing (predates this session,
+  found via Part 61's git-stash A/B), unrelated to DFSPH/incompressible.
 
 ## Where the detail lives
 
 - `DFSPH_IMPROVEMENT_PLAN.md` — current status tables, the case-by-case pass
   grade, pre-merge cleanup log.
-- `DFSPH_FINDINGS.md` §9 — one paragraph per part (58 parts), fastest way to
+- `DFSPH_FINDINGS.md` §9 — one paragraph per part (64 parts), fastest way to
   find *when/why* something changed. §1.1-§1.20 — durable physics lessons.
   §2 — negative results (don't re-try these). §7 — a bug table.
 - `git log -p DFSPH_IMPROVEMENT_PLAN.md` — full prose narrative, part by
