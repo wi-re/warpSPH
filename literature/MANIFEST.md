@@ -57,7 +57,7 @@ and had to be identified from their front matter alone.
 
 ## What is here
 
-187 documents. The first 110 are the curated core — every row annotated for what
+196 documents. The first 119 are the curated core — every row annotated for what
 it unblocks, and every row abstracted in `ABSTRACTS.md` **except `roe1986`,
 `hairer2006` and `toro2009`**, which carry no abstract at all (Annual Reviews
 articles of that vintage print none for `roe1986`; the latter two are books,
@@ -121,6 +121,21 @@ overshoot at the Sod contact discontinuity). The Crossref and OpenAlex records
 for `read2010` both lack volume/pages, so volume 405 and first page 1513 are
 taken from the published reference list (Dehnen & Aly 2012 cites it as MNRAS,
 405, 1513); `references.bib`'s `note` field records this.
+
+**9 papers were synced 2026-09-19** from `literature/dump/` for the
+compressible shock-capturing frontend (`phase6.md`) and its open
+next-viscosity-switch question: the Sigalotti adaptive-kernel-estimation
+shock-capturing pair (`sigalotti2006`, `sigalotti2008`), a production astro
+code's gradient-based shock detection (`wadsley2017`), an entropy-growth-rate
+dissipation trigger (`rosswog2020entropy`), a 2026 argument that the heuristic
+switches can be dropped entirely (`garciasenz2026`), a switched quadratic
+viscosity coefficient for discs (`chen2025`), Monaghan's applications
+review (`monaghan2012`), and the two Riemann-solver reformulations of SPH that
+replace artificial viscosity entirely (`inutsuka2002`, `cha2003`). `wadsley2017`
+and `rosswog2020entropy` arrived as
+arXiv copies of published MNRAS/ApJ papers -- the bib keys and venue fields
+follow the published records; `rosswog2020entropy` is suffixed to avoid a
+collision with `rosswog2020` (the MAGMA2 code paper).
 
 `venue` is the **published** venue, which for an author's-version or preprint
 copy is not always what that copy's own front page says. Full bibliographic
@@ -322,6 +337,23 @@ Broad-survey and DualSPHysics-project reference papers, added 2026-09-17.
 | — | `letouze2025` | `letouze2025_free-surface-multiphase-review.pdf` | Rep. Prog. Phys. 88(3) 2025 | Free-surface/multiphase-specific review; already read for `BOUNDARY_DENSITY_PLAN.md` §10 -- see that section rather than re-deriving its relevance here. |
 | — | `vacondio2021` | `vacondio2021_grand-challenges-sph.pdf` | Comput. Part. Mech. 8(3) 2021 | The SPHERIC Grand Challenges statement -- the field-level framing this codebase's own DualSPHysics cross-checks sit inside. |
 | — | `dominguez2022` | `dominguez2022_dualsphysics-multiphysics.pdf` | Comput. Part. Mech. 9(5) 2022 | The DualSPHysics reference paper -- the code `molteni2009`/`fourtakas2019`/`english2022`/`english2025` and the cross-engine harness (`DELTASPH_VALIDATION_PLAN.md` Part 8) are checked against. |
+
+**Compressible dissipation & shock capture (Phase 6 frontend)**
+
+The compressible shock-capturing frontend (`phase6.md`) and the
+next-viscosity-switch question it raises, added 2026-09-19.
+
+| plan | bib key | file | venue | what it is |
+|---|---|---|---|---|
+| — | `sigalotti2006` | `sigalotti2006_shock-capturing-adaptive-kernel.pdf` | J. Comput. Phys. 212(1) 2006 | Shock capturing without a Riemann solver: adaptive kernel estimation (ADKE) applies the minimum necessary smoothing locally. The main non-switch alternative to the C&D/R&H dissipation control. |
+| — | `sigalotti2008` | `sigalotti2008_adaptive-kernel-tensile-instability.pdf` | Comput. Math. Appl. 55(1) 2008 | The stability analysis behind ADKE: linear perturbation shows the tensile instability is removed, so the kernel sharpening does not reintroduce clumping. |
+| — | `wadsley2017` | `wadsley2017_gasoline2-modern-sph-code.pdf` | MNRAS 471(2) 2017 | Gasoline2's Gradient-Based shock detection: keeps the artificial viscosity out of non-shocking compressive flows. A production code's tested switch design, comparable to `CullenDehnen2010`/`ReadHayfield2012`. |
+| — | `rosswog2020entropy` | `rosswog2020entropy_entropy-based-dissipation-trigger.pdf` | ApJ 898(1) 2020 | Entropy-growth-rate trigger: dissipation only on "troubled particles" (MAGMA2). A third trigger family alongside C&D's compression-based and R&H's entropy-conductivity switches -- candidate for the next `ViscositySwitch`. |
+| — | `garciasenz2026` | `garciasenz2026_heuristic-switches-sph-dissipation.pdf` | A&A 708:A205 2026 | Argues the heuristic switches can be dropped: remove the local bulk linear motion, modulate with the Balsara correction. Lower spurious dissipation than the reference switch. |
+| — | `chen2025` | `chen2025_minimizing-numerical-viscosity-discs.pdf` | MNRAS 540(3) 2025 | Phantom disc runs: default beta_SPH too high; proposes a switched beta_SPH = k * alpha_SPH. The linear/quadratic coefficient pairing in this codebase's Monaghan viscosity. |
+| — | `monaghan2012` | `monaghan2012_sph-diverse-applications-review.pdf` | Annu. Rev. Fluid Mech. 44 2012 | Monaghan's incompressible-SPH applications review. Background for the frontend design space; the Monaghan viscosity lineage `computeViscosity` implements. |
+| — | `inutsuka2002` | `inutsuka2002_sph-riemann-solver-reformulation.pdf` | J. Comput. Phys. 179(1) 2002 | Riemann-solver reformulation of SPH: pair forces come from solving the Riemann problem, strict conservation form, accurate strong shocks. The Riemann-solver branch of the frontend, complementary to the switch machinery. |
+| — | `cha2003` | `cha2003_godunov-particle-hydrodynamics.pdf` | MNRAS 340(1) 2003 | Godunov-type particle hydrodynamics (GPH): a Riemann solver replaces artificial viscosity entirely; von Neumann-stable at all wavelengths, captures shocks without it. The structural move the Riemann-solver branch would make. |
 
 ## Extended set
 
