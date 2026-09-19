@@ -325,3 +325,38 @@ artifact):**
   decision.) Optional follow-ups only if requested: tune `ns`/entropy strength to also
   pull the 2D P spike marginally below NoneSwitch; fix the pre-existing commented-out
   `updateViscositySwitch` in `schemes/crkSPH.py`.
+
+### 2026-09-19 (session 5 — literature sync for the next-viscosity-switch question)
+
+No code changes. Synced 9 PDFs from `literature/dump/` into the library
+(`MANIFEST.md` 187→196, core 110→119; new core section "Compressible dissipation &
+shock capture (Phase 6 frontend)" in MANIFEST, references.bib, ABSTRACTS.md):
+
+- `sigalotti2006` / `sigalotti2008` — ADKE shock capturing without a Riemann solver
+  + its tensile-instability stability analysis (the main non-switch alternative).
+- `wadsley2017` — Gasoline2's Gradient-Based shock detection (production switch design).
+- `rosswog2020entropy` — entropy-growth-rate dissipation trigger (MAGMA2); key suffixed
+  to avoid the existing `rosswog2020` (MAGMA2 code paper).
+- `garciasenz2026` — 2026 argument the heuristic switches can be dropped
+  (velocity-reconstruction + Balsara correction).
+- `chen2025` — switched quadratic coefficient beta_SPH = k·alpha_SPH (Phantom discs).
+- `monaghan2012` — incompressible-SPH applications review (design-space background).
+- `inutsuka2002` / `cha2003` — Riemann-solver reformulations of SPH that replace
+  artificial viscosity entirely (the Riemann-solver branch of the frontend).
+
+These two (inutsuka2002, cha2003) were missed by the session's initial 7-PDF
+identification pass — they sat in `dump/` and were found when the final `ls dump/`
+before running the checker showed the directory non-empty. `dump/` is now empty.
+
+`python scripts/check_literature.py` passes: 196 PDFs / 196 bib entries / 193
+abstract blocks, "literature/ is consistent." All 9 abstracts verified (8 verbatim
+against the PDF text layer, garciasenz2026 at 100% overlap from the JATS record).
+One stale text-layer repair removed: sigalotti2006's `Nohs -> Noh's` — the text layer
+actually renders the apostrophe as a floating `^A` glyph (`Noh^As`), which normalises
+to the same `noh s` as the quoted "Noh's", so the quote passes without the repair.
+
+- NEXT: branch still NOT pushed (5+1 unpushed commits, awaiting user's push
+  decision). The 9 synced papers are the reference set for the pending
+  "which viscosity switch next" decision — most actionable: `rosswog2020entropy`
+  (drop-in entropy trigger) and `garciasenz2026` (drop the switch machinery);
+  biggest structural move: the Riemann-solver branch (`inutsuka2002`, `cha2003`).

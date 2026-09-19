@@ -1323,6 +1323,118 @@
   note    = {The DualSPHysics reference/survey paper -- the code whose DDT and mDBC formulations this codebase's own molteni2009/fourtakas2019/english2022/english2025 entries and its cross-engine harness (DELTASPH_VALIDATION_PLAN.md Part 8) are checked against.}
 }
 
+% --- Compressible dissipation & shock capture (Phase 6 frontend) ----------------
+%
+% The compressible shock-capturing frontend of phase6.md (CullenDehnen2010 +
+% ReadHayfield2012) and the next-viscosity-switch question it raises. Nine
+% papers synced 2026-09-19 from literature/dump/.
+
+@article{sigalotti2006,
+  author  = {Sigalotti, Leonardo Di G. and Lo\'{p}ez, Hender and Donoso, Arnaldo and Sira, Eloy and Klapp, Jaime},
+  title   = {A shock-capturing {SPH} scheme based on adaptive kernel estimation},
+  journal = {Journal of Computational Physics},
+  year    = {2006},
+  volume  = {212},
+  number  = {1},
+  pages   = {124--149},
+  doi     = {10.1016/j.jcp.2005.06.016},
+  note    = {Shock capturing without a Riemann solver: adaptive kernel estimation (ADKE) of the density applies the minimum necessary smoothing locally, one scheme for strong shocks and rarefactions. The main non-switch alternative to the C&D/R&H dissipation control for the compressible frontend (phase6.md follow-up). No abstract in the Crossref record; abstract quoted from the PDF (one text-layer artifact declared in ABSTRACTS.md).}
+}
+
+@article{sigalotti2008,
+  author  = {Sigalotti, Leonardo Di G. and Lo\'{p}ez, Hender},
+  title   = {Adaptive kernel estimation and {SPH} tensile instability},
+  journal = {Computers \& Mathematics with Applications},
+  year    = {2008},
+  volume  = {55},
+  number  = {1},
+  pages   = {23--50},
+  doi     = {10.1016/j.camwa.2007.03.007},
+  note    = {The stability analysis behind ADKE (sigalotti2006): linear perturbation of the SPH equations for a heat-conducting, viscous, van der Waals fluid shows the tensile instability is removed for a wide range of the adaptive parameters -- the kernel sharpening does not reintroduce clumping.}
+}
+
+@article{wadsley2017,
+  author  = {Wadsley, James W. and Keller, Benjamin W. and Quinn, Thomas R.},
+  title   = {Gasoline2: a modern smoothed particle hydrodynamics code},
+  journal = {Monthly Notices of the Royal Astronomical Society},
+  year    = {2017},
+  volume  = {471},
+  number  = {2},
+  pages   = {2357--2369},
+  doi     = {10.1093/mnras/stx1643},
+  note    = {Gasoline2: Geometric-Density-Average force, explicit turbulent diffusion terms, and Gradient-Based shock detection that keeps the artificial viscosity out of non-shocking compressive flows. A production astro code's tested switch design, directly comparable to this codebase's CullenDehnen2010/ReadHayfield2012. Copy here is arXiv:1707.03824v1 (accepted-manuscript typesetting, "Accepted XXX" placeholders); the Crossref record carries no abstract, so the abstract is quoted from the PDF.}
+}
+
+@article{rosswog2020entropy,
+  author  = {Rosswog, S.},
+  title   = {A Simple, Entropy-based Dissipation Trigger for {SPH}},
+  journal = {The Astrophysical Journal},
+  year    = {2020},
+  volume  = {898},
+  number  = {1},
+  pages   = {60},
+  doi     = {10.3847/1538-4357/ab9a2e},
+  note    = {Entropy-growth-rate trigger: dissipation is added only to "troubled particles" (entropy non-conserving between two steps) and decays to a floor otherwise (MAGMA2). A third trigger family alongside C&D's compression-based and R&H's entropy-conductivity switches -- candidate for the next ViscositySwitch. Copy here is arXiv:1912.01095v2; the published ApJ abstract is a lightly revised version and stores its one formula as an image, so the abstract is quoted from the PDF. Key suffixed to avoid a collision with rosswog2020 (the MAGMA2 code paper).}
+}
+
+@article{garciasenz2026,
+  author  = {Garc{\'i}a-Senz, Domingo and Cabez{\'o}n, Rub{\'e}n M.},
+  title   = {Are heuristic switches necessary to control dissipation in modern smoothed particle hydrodynamics?},
+  journal = {Astronomy \& Astrophysics},
+  year    = {2026},
+  volume  = {708},
+  pages   = {A205},
+  doi     = {10.1051/0004-6361/202557800},
+  note    = {Argues the heuristic switches can be dropped: a velocity-reconstruction removes the local bulk linear motion, and the Balsara correction modulates the remaining dissipation; lower spurious dissipation than the reference switch on subsonic instabilities, shear flows and strong shocks. The strongest recent case against the switch machinery in the compressible frontend.}
+}
+
+@article{chen2025,
+  author  = {Chen, Cheng and Nixon, C. J.},
+  title   = {Minimizing the numerical viscosity in smoothed particle hydrodynamics simulations of discs},
+  journal = {Monthly Notices of the Royal Astronomical Society},
+  year    = {2025},
+  volume  = {540},
+  number  = {3},
+  pages   = {2465--2473},
+  doi     = {10.1093/mnras/staf881},
+  note    = {Phantom steady-disc runs: the default quadratic coefficient beta_SPH leaves excess effective disc viscosity; proposes beta_SPH as a switched constant multiple of alpha_SPH (the switch acting on the linear term). Directly relevant to the linear/quadratic coefficient pairing in this codebase's Monaghan viscosity.}
+}
+
+@article{monaghan2012,
+  author  = {Monaghan, J. J.},
+  title   = {Smoothed Particle Hydrodynamics and Its Diverse Applications},
+  journal = {Annual Review of Fluid Mechanics},
+  year    = {2012},
+  volume  = {44},
+  pages   = {323--346},
+  doi     = {10.1146/annurev-fluid-120710-101220},
+  note    = {Monaghan's review of incompressible/nearly-incompressible SPH applications (free surfaces, multiphase, rigid/elastic bodies, non-Newtonian, virtual surgery). Background for the frontend design space; the Monaghan artificial-viscosity lineage this codebase's computeViscosity implements.}
+}
+
+@article{inutsuka2002,
+  author  = {Inutsuka, Shu-ichiro},
+  title   = {Reformulation of Smoothed Particle Hydrodynamics with Riemann Solver},
+  journal = {Journal of Computational Physics},
+  year    = {2002},
+  volume  = {179},
+  number  = {1},
+  pages   = {238--267},
+  doi     = {10.1006/jcph.2002.7053},
+  note    = {Riemann-solver reformulation of SPH: the force on each particle is determined by solving the Riemann problem, so strong shocks are handled accurately without ad hoc dissipation control; strict conservation form, action-principle derivation, variable smoothing length. The Riemann-solver branch of the compressible frontend, complementary to the C&D/R&H switch machinery. No abstract in the Crossref record; abstract quoted from the PDF.}
+}
+
+@article{cha2003,
+  author  = {Cha, S.-H. and Whitworth, A. P.},
+  title   = {Implementations and tests of Godunov-type particle hydrodynamics},
+  journal = {Monthly Notices of the Royal Astronomical Society},
+  year    = {2003},
+  volume  = {340},
+  number  = {1},
+  pages   = {73--90},
+  doi     = {10.1046/j.1365-8711.2003.06266.x},
+  note    = {Godunov-type particle hydrodynamics (GPH): a Riemann solver replaces artificial viscosity entirely, so there are no viscosity parameters or switches to tune. Von Neumann analysis: GPH is stable for all wavelengths, where standard SPH is unstable for some; eight tests show shock capture without artificial viscosity and prevention of particle penetration. "Easily implemented from SPH by simple replacement of the artificial viscosity with a Riemann solver" -- the structural move the Riemann-solver branch of the compressible frontend would make. No abstract in the Crossref record; abstract quoted from the PDF.}
+}
+
 % --- Extended set (one step removed; bibliographic records only, added 2026-08-29) ---
 %
 % Background and related work reached from the core set. Verified against DOI

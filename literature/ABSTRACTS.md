@@ -2136,3 +2136,119 @@ Broad-survey and DualSPHysics-project reference papers, synced 2026-09-17.
 
 > DualSPHysics is a weakly compressible smoothed particle hydrodynamics (SPH) Navier-Stokes solver initially conceived to deal with coastal engineering problems, especially those related to wave impact with coastal structures. Since the first release back in 2011, DualSPHysics has shown to be robust and accurate for simulating extreme wave events along with a continuous improvement in efficiency thanks to the exploitation of hardware such as graphics processing units for scientific computing or the coupling with wave propagating models such as SWASH and OceanWave3D. Numerous additional functionalities have also been included in the DualSPHysics package over the last few years which allow the simulation of fluid-driven objects. The use of the discrete element method has allowed the solver to simulate the interaction among different bodies (sliding rocks, for example), which provides a unique tool to analyse debris flows. In addition, the recent coupling with other solvers like Project Chrono or MoorDyn has been a milestone in the development of the solver. Project Chrono allows the simulation of articulated structures with joints, hinges, sliders and springs and MoorDyn allows simulating moored structures. Both functionalities make DualSPHysics especially suited for the simulation of offshore energy harvesting devices. Lately, the present state of maturity of the solver goes beyond single-phase simulations, allowing multi-phase simulations with gas-liquid and a combination of Newtonian and non-Newtonian models expanding further the capabilities and range of applications for the DualSPHysics solver. These advances and functionalities make DualSPHysics an advanced meshless solver with emphasis on free-surface flow modelling.
 
+## Compressible dissipation & shock capture (Phase 6 frontend)
+
+The compressible shock-capturing frontend (`phase6.md`) and the next-viscosity-switch question it raises, synced 2026-09-19.
+
+### `sigalotti2006`
+
+- **file:** `sigalotti2006_shock-capturing-adaptive-kernel.pdf`
+- **title:** A shock-capturing SPH scheme based on adaptive kernel estimation
+- **authors:** Leonardo Di G. Sigalotti, Hender López, Arnaldo Donoso, Eloy Sira and Jaime Klapp
+- **venue:** *Journal of Computational Physics* 212(1):124-149, 2006
+- **doi:** [10.1016/j.jcp.2005.06.016](https://doi.org/10.1016/j.jcp.2005.06.016)
+- **relevance:** Shock capturing without a Riemann solver: adaptive kernel estimation (ADKE) of the density applies the minimum necessary smoothing locally, one scheme handling strong shocks and rarefactions alike. The main non-switch alternative to the C&D/R&H dissipation control in the compressible frontend (`phase6.md` follow-up).
+- **abstract from:** PDF p.1 (the Crossref record carries no abstract for this DOI)
+- **text-layer:** `shockcapturing` -> `shock capturing`
+
+> Here we report a method that converts standard smoothed particle hydrodynamics (SPH) into a working shock-capturing scheme without relying on solutions to the Riemann problem. Unlike existing adaptive SPH simulations, the present scheme is based on an adaptive kernel estimation of the density, which combines intrinsic features of both the kernel and nearest neighbor approaches in a way that the amount of smoothing required in low-density regions is effectively controlled. Symmetrized SPH representations of the gas dynamic equations along with the usual kernel summation for the density are used to guarantee variational consistency. Implementation of the adaptive kernel estimation involves a very simple procedure and allows for a unique scheme that handles strong shocks and rarefactions the same way. Since it represents a general improvement of the integral interpolation on scattered data, it is also applicable to other fluid-dynamic models. When the method is applied to supersonic compressible flows with sharp discontinuities, as in the classical one-dimensional shock-tube problem and its variants, the accuracy of the results is comparable, and in most cases superior, to that obtained from high quality Godunov-type methods and SPH formulations based on Riemann solutions. The extension of the method to two- and three-space dimensions is straightforward. In particular, for the two-dimensional cylindrical Noh's shock implosion and Sedov point explosion problems the present scheme produces much better results than those obtained with conventional SPH codes.
+
+### `sigalotti2008`
+
+- **file:** `sigalotti2008_adaptive-kernel-tensile-instability.pdf`
+- **title:** Adaptive kernel estimation and SPH tensile instability
+- **authors:** Leonardo Di G. Sigalotti and Hender López
+- **venue:** *Computers & Mathematics with Applications* 55(1):23-50, 2008
+- **doi:** [10.1016/j.camwa.2007.03.007](https://doi.org/10.1016/j.camwa.2007.03.007)
+- **relevance:** The stability analysis behind ADKE (`sigalotti2006`): linear perturbation of the SPH equations for a heat-conducting, viscous, van der Waals fluid shows the tensile instability is removed for a wide range of the adaptive parameters -- the kernel sharpening does not reintroduce clumping.
+- **abstract from:** PDF p.1
+
+> We propose an alternative method to remove the tensile instability in standard SPH simulations of a fluid. The method relies on an adaptive density kernel estimation (ADKE) algorithm, which allows the width of the kernel interpolant to vary locally in such a way that only the minimum necessary smoothing is applied to the data. By means of a linear perturbation analysis of the SPH equations for a heat-conducting, viscous, van der Waals fluid, we derive the corresponding dispersion relation. Solution of the dispersion relation in the short wavelength limit shows that the tensile instability is effectively removed for a wide range of the ADKE parameters. Application of the method to the formation of equilibrium liquid drops confirms the analytical results of the linear stability analysis. Examples of the resolving power of the method are also given for the nonlinear oscillations of an excited drop and the Sedov blast wave problem.
+
+### `wadsley2017`
+
+- **file:** `wadsley2017_gasoline2-modern-sph-code.pdf`
+- **title:** Gasoline2: a modern smoothed particle hydrodynamics code
+- **authors:** James W. Wadsley, Benjamin W. Keller and Thomas R. Quinn
+- **venue:** *Monthly Notices of the Royal Astronomical Society* 471(2):2357-2369, 2017
+- **doi:** [10.1093/mnras/stx1643](https://doi.org/10.1093/mnras/stx1643)
+- **copy here:** arXiv preprint (`arXiv:1707.03824v1`); accepted-manuscript typesetting, so the copy's front matter carries "Accepted XXX" placeholders
+- **relevance:** Gasoline2's Gradient-Based shock detection keeps the artificial viscosity out of non-shocking compressive flows. A production astro code's tested switch design, directly comparable to this codebase's `CullenDehnen2010`/`ReadHayfield2012`.
+- **abstract from:** PDF p.1 (the Crossref record carries no abstract for this DOI)
+
+> The methods in the Gasoline2 Smoothed Particle Hydrodynamics (SPH) code are described and tested. Gasoline2 is the most recent version of the Gasoline code for parallel hydrodynamics and gravity with identical hydrodynamics to the Changa code. As with other Modern SPH codes, we prevent sharp jumps in time steps, use upgraded kernels and larger neighbour numbers and employ local viscosity limiters. Unique features in Gasoline2 include its Geometric-Density-Average Force expression, explicit Turbulent Diffusion terms and Gradient-Based shock detection to limit artificial viscosity. This last feature allows Gasoline2 to completely avoid artificial viscosity in non-shocking compressive flows. We present a suite of tests demonstrating the value of these features with the same code configuration and parameter choices used for production simulations.
+
+### `rosswog2020entropy`
+
+- **file:** `rosswog2020entropy_entropy-based-dissipation-trigger.pdf`
+- **title:** A Simple, Entropy-based Dissipation Trigger for SPH
+- **authors:** S. Rosswog
+- **venue:** *The Astrophysical Journal* 898(1):60, 2020
+- **doi:** [10.3847/1538-4357/ab9a2e](https://doi.org/10.3847/1538-4357/ab9a2e)
+- **copy here:** arXiv preprint (`arXiv:1912.01095v2`)
+- **relevance:** Entropy-growth-rate trigger: dissipation is added only to "troubled particles" (those whose entropy is not conserved between two steps) and decays to a pre-described floor otherwise (MAGMA2). A third trigger family alongside C&D's compression-based and R&H's entropy-conductivity switches -- a candidate for the next `ViscositySwitch`. Key suffixed to avoid a collision with `rosswog2020` (the MAGMA2 code paper).
+- **abstract from:** PDF p.1 (the published ApJ abstract is a lightly revised version and stores its one formula as an image)
+
+> Smoothed Particle Hydrodynamics (SPH) schemes need to be enhanced by dissipation mechanisms to handle shocks. Most SPH formulations rely on artificial viscosity and while this working well in pure shocks, attention has to be payed to avoid dissipation where it is not wanted. Commonly used approaches include limiters and time-dependent dissipation parameters. The former try to distinguish shocks from other types of flows that do not require dissipation while in the latter approach the dissipation parameters are steered by some source term ("trigger") and, if not triggered, they decay to a pre-described floor value. The commonly used source terms trigger on either compression, −∇ ·~v, or its time derive. Here we explore a novel way to trigger SPH-dissipation: since an ideal fluid conserves entropy exactly, its numerical non-conservation can be used to identify "troubled particles" that need dissipation because they either pass through a shock or become noisy for other reasons. Our new scheme is implemented into the Lagrangian hydrodynamics code MAGMA2 and is scrutinized in a number of shock and fluid instability tests. We find excellent results in shocks and only a very moderate (and desired) switch-on in instability tests. The new scheme is robust, trivial to implement into existing SPH codes and does not add any computational overhead.
+
+### `garciasenz2026`
+
+- **file:** `garciasenz2026_heuristic-switches-sph-dissipation.pdf`
+- **title:** Are heuristic switches necessary to control dissipation in modern smoothed particle hydrodynamics?
+- **authors:** Domingo García-Senz and Rubén M. Cabezón
+- **venue:** *Astronomy & Astrophysics* 708:A205, 2026
+- **doi:** [10.1051/0004-6361/202557800](https://doi.org/10.1051/0004-6361/202557800)
+- **relevance:** Argues the heuristic switches can be dropped: a velocity-reconstruction removes the local bulk linear motion, and the Balsara correction modulates the remaining dissipation. Lower spurious dissipation than the reference switch on subsonic instabilities, shear flows and strong shocks -- the strongest recent case against the switch machinery in the compressible frontend.
+- **abstract from:** DOI record (publisher-deposited JATS abstract)
+
+> Context. Artificial viscosity is commonly employed in smoothed particle hydrodynamics (SPH) to model dissipation in hydrodynamic simulations. However, its practical implementation today relies, in many cases, on complex numerical switches to restrict its application to regions where dissipation is physically warranted, such as shocks. These switches, while essential, are imperfect and can introduce additional numerical noise. Aims. We investigated an efficient shock capture scheme for SPH that does not rely on artificial viscosity switches. The advantages of the proposed scheme have been validated through a representative number of test cases. Methods. Recent studies have proposed that subtracting the linear component of the velocity field can suppress spurious dissipation in shear-dominated regions. Building on this idea, we implemented a velocity-reconstruction technique that removes the bulk linear motion from the local velocity field and uses the Balsara correction to modulate the dissipation. Results. The methodology presented here yields a balanced dissipation scheme that performs well across a range of regimes, including subsonic instabilities, shear flows, and strong shocks. We demonstrate that this approach yields improved accuracy and lower spurious dissipation, compared to the reference viscosity switch used in this work.
+
+### `chen2025`
+
+- **file:** `chen2025_minimizing-numerical-viscosity-discs.pdf`
+- **title:** Minimizing the numerical viscosity in smoothed particle hydrodynamics simulations of discs
+- **authors:** Cheng Chen and C. J. Nixon
+- **venue:** *Monthly Notices of the Royal Astronomical Society* 540(3):2465-2473, 2025
+- **doi:** [10.1093/mnras/staf881](https://doi.org/10.1093/mnras/staf881)
+- **relevance:** Phantom steady-disc runs: the default quadratic coefficient beta_SPH leaves excess effective disc viscosity; proposes beta_SPH as a switched constant multiple of alpha_SPH (the switch acting on the linear term). Directly relevant to the linear/quadratic coefficient pairing in this codebase's Monaghan viscosity.
+- **abstract from:** PDF p.1
+
+> Simulations using the smoothed particle hydrodynamics (SPH) technique typically include numerical viscosity to model shocks and maintain particle order on the kernel scale. This numerical viscosity is composed of linear and quadratic terms, with coefficients αSPH and βSPH , respectively. Setting these coefficients too high results in excessive numerical dissipation, whereas setting them too low may lead to unwanted effects such as particle penetration, which also leads to excess dissipation. In this study, we simulate accretion discs using the SPH code PHANTOM to investigate the effective disc viscosity arising from numerical viscosity. We model steady-state coplanar and circular discs with different values of αSPH and βSPH , from which we determine the coefficients that lead to minimum levels of numerical viscosity by maximizing the steady-state disc surface density for the same mass input rate. We find that, for planar and circular discs, the default values of the numerical viscosity parameters in the PHANTOM code can be too high particularly for the quadratic term. As higher values of the coefficients are required to adequately capture strong shocks in the flow, we suggest that the coefficient of the quadratic term should be time-dependent in a similar manner to the presently used 'switches' on the linear term. This can be simply achieved by setting βSPH to be a constant multiple of αSPH with αSPH determined by an appropriate switch, as previously advocated in the literature.
+
+### `monaghan2012`
+
+- **file:** `monaghan2012_sph-diverse-applications-review.pdf`
+- **title:** Smoothed Particle Hydrodynamics and Its Diverse Applications
+- **authors:** J. J. Monaghan
+- **venue:** *Annual Review of Fluid Mechanics* 44:323-346, 2012
+- **doi:** [10.1146/annurev-fluid-120710-101220](https://doi.org/10.1146/annurev-fluid-120710-101220)
+- **relevance:** Monaghan's review of incompressible/nearly-incompressible SPH applications (free surfaces, multiphase, rigid/elastic bodies, non-Newtonian, virtual surgery). Background for the frontend design space; the Monaghan artificial-viscosity lineage this codebase's computeViscosity implements.
+- **abstract from:** PDF p.1
+- **text-layer:** `nonNewtonian` -> `non-Newtonian`
+
+> This review focuses on the applications of smoothed particle hydrodynamics (SPH) to incompressible or nearly incompressible flow. In the past 17 years, the range of applications has increased as researchers have realized the ability of SPH algorithms to handle complex physical problems. These include the disruption of free surfaces when a wave hits a rocky beach, multifluid problems that may involve the motion of rigid and elastic bodies, non-Newtonian fluids, virtual surgery, and chemical precipitation from fluids moving through fractured media. SPH provides a fascinating tool that has some of the properties of molecular dynamics while retaining the attributes of the macroscopic equations of continuum mechanics.
+
+### `inutsuka2002`
+
+- **file:** `inutsuka2002_sph-riemann-solver-reformulation.pdf`
+- **title:** Reformulation of Smoothed Particle Hydrodynamics with Riemann Solver
+- **authors:** Shu-ichiro Inutsuka
+- **venue:** *Journal of Computational Physics* 179(1):238-267, 2002
+- **doi:** [10.1006/jcph.2002.7053](https://doi.org/10.1006/jcph.2002.7053)
+- **relevance:** Riemann-solver reformulation of SPH: the force on each particle comes from solving the Riemann problem, so strong shocks are accurate without ad hoc dissipation control, in strict conservation form with a variable smoothing length. The Riemann-solver branch of the compressible frontend, complementary to the C&D/R&H switch machinery.
+- **abstract from:** PDF p.1 (the Crossref record carries no abstract for this DOI)
+
+> Smoothed particle hydrodynamics is reformulated in terms of the convolution of the original hydrodynamics equations, and the new evolution equations for the particles are derived. The same evolution equation of motion is also derived using a new action principle. The force acting on each particle is determined by solving the Riemann problem. The use of the Riemann solver strengthens the method, making it accurate for the study of phenomena with strong shocks. The prescription for the variable smoothing length is shown. These techniques are implemented in strict conservation form. The results of a few test problems are also shown.
+
+### `cha2003`
+
+- **file:** `cha2003_godunov-particle-hydrodynamics.pdf`
+- **title:** Implementations and tests of Godunov-type particle hydrodynamics
+- **authors:** S.-H. Cha and A. P. Whitworth
+- **venue:** *Monthly Notices of the Royal Astronomical Society* 340(1):73-90, 2003
+- **doi:** [10.1046/j.1365-8711.2003.06266.x](https://doi.org/10.1046/j.1365-8711.2003.06266.x)
+- **relevance:** Godunov-type particle hydrodynamics (GPH): a Riemann solver replaces artificial viscosity entirely, so there are no viscosity parameters or switches to tune. Von Neumann analysis: GPH is stable for all wavelengths, where standard SPH is unstable for some; eight tests show shock capture without artificial viscosity and prevention of particle penetration. The structural move the Riemann-solver branch of the compressible frontend would make.
+- **abstract from:** PDF p.1 (the Crossref record carries no abstract for this DOI)
+
+> Godunov-type particle hydrodynamics (GPH) is described. GPH inherits many good features from smoothed particle hydrodynamics (SPH), but it uses a Riemann solver to obtain the hydrodynamic acceleration and the rate of change of the internal energy of each particle. The grid-free nature of GPH converts a multidimensional problem into a locally one-dimensional problem, so that one only has to solve a one-dimensional Riemann problem, even in a globally three-dimensional situation. By virtue of the Riemann solver, it is unnecessary to introduce artificial viscosity in GPH. We have derived four different versions of GPH, and have performed a von Neumann stability analysis to understand the nature of GPH. GPH is stable for all wavelengths, while SPH is unstable for certain wavelengths. We have also performed eight tests in order to evaluate the performance of GPH. The results show that GPH can describe shock waves without artificial viscosity and prevents particle penetration. Furthermore, GPH shows better performance than SPH in a test involving velocity shear. GPH is easily implemented from SPH by simple replacement of the artificial viscosity with a Riemann solver, and appears to have some useful advantages over standard SPH.
+
