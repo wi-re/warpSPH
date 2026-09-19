@@ -16,6 +16,7 @@ import torch
 
 from ..modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
 from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
+from ..modules.density import computeDensities
 from ..modules.dissipation import computeConductivity, computeThermalDissipation, computeViscosity
 from ..modules.eos import idealGasEOS
 from ..modules.internalEnergy import computeDudtMonaghan
@@ -23,8 +24,7 @@ from ..modules.momentum import computeMomentumConsistent
 from ..modules.pressure import computePressureForceSymmetric
 from ..modules.shockCapturing import computeViscositySwitchTerms, updateViscositySwitch
 from warpSPHCore import (
-    GradHState, OperationProperties, SupportScheme,
-    WarpOperation, buildVerletList, warpOperation,
+    GradHState, OperationProperties, SupportScheme, buildVerletList,
 )
 
 __all__ = ['compressibleSPH_Monaghan']
@@ -57,16 +57,9 @@ def compressibleSPH_Monaghan(
 
     numNeighbors = adjacency.numNeighbors
 
-    currentState.densities = warpOperation(
-        currentState,
-        OperationProperties(
-            kernel = config.kernel,
-            operation = WarpOperation.Density,
-            supportMode = config.supportMode,
-        ),
-        domain = config.domain,
-        adjacency = adjacency,
-    )
+    currentState.densities = computeDensities(
+        currentState, config, schemeConfig, adjacency,
+        supportMode = config.supportMode)
 
     enforceDirichlet(currentSystem, t, dt, config, schemeConfig)
     currentState.entropies, _, currentState.pressures, currentState.soundspeeds = idealGasEOS(
