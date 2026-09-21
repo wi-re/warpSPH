@@ -487,8 +487,11 @@ def computeDensityDiffusionDeltaSPH(
             # to reuse the existing TENSOR-extra plumbing (see the kernel's
             # own comment) -- every other scheme ignores it, so the zero
             # dummy below is harmless when it is not supplied.
-            rho0_ = float(rho0) if rho0 is not None else 1.0
-            c0_ = float(c0) if c0 is not None else 1.0
+            # `scalar_t(...)` (not a bare `float`): the kernel is generic and
+            # warp infers a Python float as float32, which mismatches the
+            # scalar_t build precision (the viscosity wrapper does the same).
+            rho0_ = scalar_t(float(rho0) if rho0 is not None else 1.0)
+            c0_ = scalar_t(float(c0) if c0 is not None else 1.0)
             if gravity is not None:
                 queryGravity_ = gravity.to(dtype=get_torch_precision(), device=device).reshape(1, domain.dim).expand(outputSize, domain.dim).contiguous()
             else:

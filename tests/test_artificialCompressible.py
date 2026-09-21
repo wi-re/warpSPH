@@ -462,15 +462,41 @@ def test_theUnimplementedOptionsRaiseRatherThanNoOp(periodicBox, field, value):
 
 
 @pytest.mark.parametrize('scheme', [_PSS.biharmonic, _PSS.jst])
-def test_theUnimplementedSmoothingOperatorsRaise(periodicBox, scheme):
+def test_ac4AndAcJstRunWithFinitePressures(periodicBox, scheme):
+    """Step 8 implemented AC-4 (Eq. 35) and AC-JST (Eq. 36); the previous
+    version of this test asserted the `NotImplementedError` they used to
+    raise. One real step each must run and build a real pressure field.
+    (Multi-step stability is a separate, open question: AC-4 diverges when
+    run standalone at scale, which is why AC-2L stays the default -- see
+    the `pressureSmoothing` module docstring and ACSPH_PLAN.md Part 8
+    step 8.)"""
     system, config, schemeConfig = periodicBox
     original = schemeConfig.acParams.pressureSmoothing
-    schemeConfig.acParams.pressureSmoothing = scheme
     try:
-        with pytest.raises(NotImplementedError, match='step 8'):
-            acmod.artificialCompressible_step(system, config.dt, config, schemeConfig)
+        schemeConfig.acParams.pressureSmoothing = scheme
+        p = runOneStep(system, config, schemeConfig, 40).state.pressures
     finally:
         schemeConfig.acParams.pressureSmoothing = original
+    assert torch.isfinite(p).all()
+    assert float(p.abs().max()) > 0.0, 'the step must actually build a pressure field'
+
+
+def test_ac4AndAcJstAreDifferentOperators(periodicBox):
+    """AC-JST is AC-4 throttled by the JST switch (kappa4 capped at 1/32,
+    against AC-4's implicit epsilon4 = 1 when used alone, and zeroed out
+    where the flow is not close to smooth). If the two flags produced the
+    same pressures, the switch would be doing nothing."""
+    system, config, schemeConfig = periodicBox
+    original = schemeConfig.acParams.pressureSmoothing
+    try:
+        schemeConfig.acParams.pressureSmoothing = _PSS.biharmonic
+        ac4 = runOneStep(system, config, schemeConfig, 40).state.pressures.clone()
+        schemeConfig.acParams.pressureSmoothing = _PSS.jst
+        acJst = runOneStep(system, config, schemeConfig, 40).state.pressures.clone()
+    finally:
+        schemeConfig.acParams.pressureSmoothing = original
+    assert torch.isfinite(ac4).all() and torch.isfinite(acJst).all()
+    assert not torch.allclose(ac4, acJst, rtol=1e-3)
 
 
 def test_ac2AndAc2lAreBothAvailableAndDifferent(periodicBox):

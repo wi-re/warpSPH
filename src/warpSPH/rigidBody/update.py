@@ -6,10 +6,14 @@ from angular velocity about the center of mass (written into
 reads those rows as its `u_body` basis), and
 rewrites the boundary/ghost offset pair to match the new geometry. Called
 every step from `systems/weaklyCompressible.py`/`systems/incompressible.py`'s
-`finalize`, right after `rigidBody.integrate.integrateRigidBody` advances the
-pose. Rebuilds the state via `type(particleState)` with the same keyword set
-`WeaklyCompressibleState` and `IncompressibleState` both declare, rather than
-mutating in place, so it works for either.
+`finalize` (and once at construction from
+`initializers/weaklyCompressible.py`), right after
+`rigidBody.integrate.integrateRigidBody` advances the pose. Rebuilds the
+state via `type(particleState)` with the keyword set all three state
+families declare, rather than mutating in place, so it works for
+`WeaklyCompressibleState`, `IncompressibleState` and
+`ArtificialCompressibleState` alike -- the one field only two of them have,
+`boundaryAccelerations`, is threaded through conditionally.
 """
 
 from .transformation import getTransformationMatrix
@@ -75,12 +79,17 @@ def updateBodyParticlesWCSPH(particleState, rigidBody: RigidBody):
     updatedVelocities[rigidBody.particleIndices] = particleVelocities
     updatedVelocities[rigidBody.ghostParticleIndices] = particleVelocities
 
-    existingAccelerations = particleState.boundaryAccelerations
-    if existingAccelerations is None:
-        existingAccelerations = torch.zeros_like(particleState.positions)
-    updatedAccelerations = existingAccelerations.clone()
-    updatedAccelerations[rigidBody.particleIndices] = particleAccelerations
-    updatedAccelerations[rigidBody.ghostParticleIndices] = particleAccelerations
+    # `boundaryAccelerations` is a field on `WeaklyCompressibleState` /
+    # `IncompressibleState` but not on `ArtificialCompressibleState` (ACSPH
+    # has no density/velocity update to correct for), so read and thread it
+    # through only when the state type declares it.
+    if hasattr(particleState, 'boundaryAccelerations'):
+        existingAccelerations = particleState.boundaryAccelerations
+        if existingAccelerations is None:
+            existingAccelerations = torch.zeros_like(particleState.positions)
+        updatedAccelerations = existingAccelerations.clone()
+        updatedAccelerations[rigidBody.particleIndices] = particleAccelerations
+        updatedAccelerations[rigidBody.ghostParticleIndices] = particleAccelerations
 
     # `offsets = x_b - x_g` (boundary minus ghost) is the right sign for the
     # BOUNDARY row (matches `addBoundaryGhostParticles`'s convention there),
@@ -100,7 +109,7 @@ def updateBodyParticlesWCSPH(particleState, rigidBody: RigidBody):
     updatedOffsets[rigidBody.particleIndices] = offsets
     updatedOffsets[rigidBody.ghostParticleIndices] = -offsets
     WeaklyCompressibleState = type(particleState)
-    return WeaklyCompressibleState(
+    kwargs = dict(
         positions = updatedPositions,
         supports = particleState.supports,
         masses = particleState.masses,
@@ -119,12 +128,10 @@ def updateBodyParticlesWCSPH(particleState, rigidBody: RigidBody):
         ghostIndices = particleState.ghostIndices,
         ghostOffsets = updatedOffsets,
 
-        boundaryAccelerations = updatedAccelerations,
-
         surfaceIndicators = particleState.surfaceIndicators,
         surfaceNormals = particleState.surfaceNormals,
         surfaceLambdas = particleState.surfaceLambdas,
-
-        
-
     )
+    if hasattr(particleState, 'boundaryAccelerations'):
+        kwargs['boundaryAccelerations'] = updatedAccelerations
+    return WeaklyCompressibleState(**kwargs)

@@ -50,6 +50,7 @@ import torch
 
 from warpSPHCore import OperationDirection
 
+from ..enumTypes import isArtificialCompressibleScheme
 from ..modules import alphaToNu, nuToAlpha, shuffleParticles
 from ..modules.liu import interpolateLiuLiu
 from ..runner import Case, RunContext, caseMain, registerCase
@@ -57,6 +58,7 @@ from ..sample.weaklyCompressible import setupBasicWeaklyCompressibleInitialState
 from .plotting import particlePlot
 from .weaklyCompressible import (VELOCITY_DENSITY_FIELDS, WEAKLY_COMPRESSIBLE_DEFAULTS,
                                  WEAKLY_COMPRESSIBLE_PARAMS,
+                                 configureArtificialCompressible,
                                  configureWeaklyCompressible, paramExtraData,
                                  setupTimestep, weaklyCompressibleDiagnostics)
 
@@ -142,7 +144,22 @@ def effectiveViscosity(result) -> float:
 
 
 def configureScheme(ctx: RunContext) -> None:
-    configureWeaklyCompressible(ctx)
+    if isArtificialCompressibleScheme(ctx.scheme):
+        # ACSPH has no `diffusionParams` block, so the shared WCSPH
+        # configurator would crash on it; route to the ACSPH-specific one
+        # (same `configureDomain` domain work, and `acParams.nu` set to the
+        # physical viscosity this case is calibrated against).
+        configureArtificialCompressible(ctx)
+        # `U_char` in Eq. (48). De Courcy et al. never define it per case
+        # (ACSPH_PLAN.md 5.5), so every case supplies its own; the vortex's
+        # peak speed is `uMag` by construction of the initial field below.
+        # Without it the convergence metric falls back to the instantaneous
+        # `|v|_max`, which decays with the vortex and so silently tightens
+        # the `eps_v` target as the run proceeds.
+        if ctx.schemeConfig.acParams.uChar is None:
+            ctx.schemeConfig.acParams.uChar = float(ctx.param('uMag'))
+    else:
+        configureWeaklyCompressible(ctx)
     # The TGV box is [0, L]^2, not the symmetric box the shared block builds.
     domain = ctx.config.domain
     domain.min = torch.zeros(ctx.spec.dim, device=ctx.device, dtype=ctx.dtype)
@@ -206,6 +223,15 @@ def initialConditions(ctx: RunContext, system) -> None:
     system.state.velocities[:, 1] = (
         -uMag * torch.sin(k * positions[:, 0] + ph) * torch.cos(k * positions[:, 1] + ph))
 
+    if isArtificialCompressibleScheme(ctx.scheme):
+        # No sound speed to back-solve a `dt` from; seed `targetDt` and let
+        # `tgvTimestep`'s Eq. (46) branch take over. The TGV velocity field is
+        # divergence-free, so ACSPH starts on a valid incompressible state and
+        # its dual-time loop establishes the pressure field -- the
+        # weakly-compressible `initialPressure` stamp (a `c0` construct) is
+        # neither needed nor applicable.
+        ctx.config.dt = ctx.param('targetDt')
+        return
     setupTimestep(ctx, system)
 
     # The sound speed only exists after `setupTimestep`, which is why the
@@ -231,6 +257,22 @@ def initialConditions(ctx: RunContext, system) -> None:
             torch.cos(2.0 * (k * positions[:, 0] + ph))
             + torch.cos(2.0 * (k * positions[:, 1] + ph)))
         system.state.densities = rho0 + p / (c0 ** 2)
+
+
+def tgvTimestep(ctx: RunContext, state) -> float:
+    """Per-step dt, dispatched by scheme.
+
+    * `artificialCompressible` -- De Courcy et al. 2024 Eq. (46)
+      (`modules.timestep.computeTimestep` -> ACSPH branch).
+    * everything else (the `deltaSPH` default) -- fixed `targetDt`, the
+      pre-existing behaviour: this case historically had no `timestep` hook,
+      so the runner left `config.dt` at whatever `setupTimestep` set.
+    """
+    if isArtificialCompressibleScheme(ctx.scheme):
+        from ..modules.timestep import computeTimestep
+        return computeTimestep(state, ctx.config, ctx.schemeConfig,
+                               dt=ctx.config.dt)
+    return ctx.config.dt
 
 
 setupPlot, updatePlot = particlePlot(VELOCITY_DENSITY_FIELDS)
@@ -328,6 +370,7 @@ tgvWeaklyCompressibleCase = registerCase(Case(
     setupPlot=setupPlot,
     updatePlot=updatePlot,
     extraData=paramExtraData,
+    timestep=tgvTimestep,
     defaults=dict(
         WEAKLY_COMPRESSIBLE_DEFAULTS,
         caseName='05-taylorGreenVortex',

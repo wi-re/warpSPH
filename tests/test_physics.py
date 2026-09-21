@@ -537,6 +537,77 @@ def test_band2018pbColumnStaysQuiescent(bandColumnResult):
     assert 0.9 < last['pressureSlopeRatio'] < 1.1, 'wrong hydrostatic gradient'
 
 
+@pytest.fixture(scope='module')
+def acsphColumnResult():
+    from warpSPH.cases.hydrostaticColumn import hydrostaticColumnCase
+    # The configuration `ACSPH_PLAN.md` step 5b measured to hold the corners
+    # (`‖v‖` ~ 0.75 at 200 steps): Michel PST plus the mDBC no-penetration
+    # safeguard. Without the safeguard the fluid leaks out of the bottom
+    # corners (`‖v‖` peaks near 2.3-2.9, particles past the wall plane), so
+    # a safeguard-less assertion of boundedness would test the safeguard,
+    # not the scheme.
+    base = hydrostaticColumnCase.configureScheme
+
+    def configured(ctx):
+        base(ctx)
+        ctx.schemeConfig.shiftProperties.active = True
+        ctx.schemeConfig.noPenetrationShift = True
+
+    hydrostaticColumnCase.configureScheme = configured
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            return run(hydrostaticColumnCase, nx=32, nSteps=100,
+                       scheme='artificialCompressible', progress=False)
+    finally:
+        hydrostaticColumnCase.configureScheme = base
+
+
+def test_acsphColumnHoldsTheWall(acsphColumnResult):
+    """The walled hydrostatic column is the minimal case that exercises
+    ACSPH's boundary closure: the solved bulk pressure has to balance the
+    Eq. (61) wall pressure (Shepard extrapolation plus the hydrostatic
+    body-force correction) that
+    `schemes/artificialCompressible.py`'s `wallPressures` recomputes at
+    every RK stage. Without the extrapolation the wall reads `p = 0`
+    (the non-fluid rows are masked every step) and the column simply
+    falls out of the box; without the body-force correction it under-reads
+    by up to `3 Δx · ρ₀ g` (`tests/test_wallPressure.py` measures 13 % of
+    the column's pressure drop), and the column cannot hold.
+
+    Asserts the structural invariants, not golden numbers:
+    * density is exactly invariant at `rho0` -- the field is `constant`,
+      never integrated; every other scheme in this suite brackets 1.0 by
+      a few percent, so this one also guards against the field being
+      silently re-wired into an update path;
+    * the hydrostatic gradient is recovered against the wall;
+    * the column stays bounded (PST + safeguard configuration).
+    """
+    assert not acsphColumnResult.diverged
+    last = acsphColumnResult.trajectory[-1]
+    assert abs(last['minDensity'] - 1.0) < 1e-5, 'density is not invariant'
+    assert abs(last['maxDensity'] - 1.0) < 1e-5, 'density is not invariant'
+    # `pressureSlopeRatio` is reported only while the bulk band is
+    # well-populated: as the free surface drifts down, the band
+    # (`surfaceY - 8dx` down to the floor) degenerates, the linear fit goes
+    # ill-conditioned, and `hydrostaticDiagnostics` stops reporting it (the
+    # last row of the trajectory has no key). The ratio is ~1.0 in the
+    # settled window and its *median* over every reported step is robust to
+    # both the first-step transient and that diverging degenerate-band tail,
+    # so the median is the right statistic here rather than the last value.
+    ratios = [row['pressureSlopeRatio']
+              for row in acsphColumnResult.trajectory
+              if 'pressureSlopeRatio' in row]
+    assert len(ratios) >= 20, (
+        f'pressureSlopeRatio reported on only {len(ratios)} steps; the '
+        'bulk-band hydrostatic fit is not being exercised')
+    med = sorted(ratios)[len(ratios) // 2]
+    assert 0.8 < med < 1.2, (
+        f'the wall does not carry the hydrostatic column: median '
+        f'pressureSlopeRatio {med:.3f} over {len(ratios)} reported steps '
+        f'(values {ratios})')
+    assert last['maxVelocity'] < 1.5, 'column is not bounded'
+
+
 def test_band2018pbBoundedRandomFlowDecays(bandBoundedResult):
     """The closed-box sheared case that defeats every other incompressible
     scheme here (`divergenceFree` NaNs by step ~20, `iisph` and
