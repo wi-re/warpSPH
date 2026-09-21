@@ -15,9 +15,15 @@ Reference geometry (Marrone 2011 Fig. 2, `literature/marrone2011_*.pdf`)
   reproduces that directly -- a 7-point Gauss-Legendre quadrature over the
   disc's vertical chord (the 2D reduction of the area integral, since there is
   no out-of-plane extent to integrate over), not a single MLS point.
-- Free-slip walls; the flow is inviscid (Marrone's viscosity study is Sec. 3.4).
-  The `dambreak` deltaSPH path never adds a physical-viscosity wall term, so the
-  free-slip spec is met without a slip-mode knob.
+- Free-slip walls (`wallBC='freeSlip'`, the case default since 2026-09-21);
+  the flow is inviscid (Marrone's viscosity study is Sec. 3.4).  Note the
+  `dambreak` deltaSPH path adding no *physical*-viscosity wall term does NOT on
+  its own meet the free-slip spec -- the docstring used to claim that, wrongly.
+  The ARTIFICIAL viscosity runs `AllToAll`, so a `wallBC='constant'` wall (at
+  v = 0, since no rigid body writes it) drags the fluid exactly like a no-slip
+  bed.  `DELTASPH_VALIDATION_PLAN.md` 5.7 measured it: slower front, earlier
+  impact, and a negative near-wall pressure that attracts fluid into the
+  boundary band.  Pass `--wallBC constant` only to reproduce a pre-flip run.
 - Resolution: Marrone's Fig. 5 convergence set is H/dx = 40, 80, 320
   (`--nx 67 / 134 / 536`, since H/dx = 0.6 * nx here).  H/dx <= 30 is NOT a
   usable point: the impacting front tongue is then thinner than a particle
@@ -284,7 +290,12 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
         sun2017Eq7Shift=bool(getattr(r.ctx.schemeConfig.shiftProperties,
                                      'sun2017Eq7Shift', False)),
         pressureForceTerm=str(getattr(r.ctx.schemeConfig, 'pressureForceTerm', '?')),
-        densityDiffusionTerm=str(getattr(r.ctx.schemeConfig.diffusionParams, 'densityDiffusionTerm', '?')),
+        # `diffusionParams` is a delta-SPH-family block; ACSPH has no such
+        # block (its viscosity is one `acParams` number), so read it through
+        # a `None`-safe getattr.
+        densityDiffusionTerm=str(getattr(
+            getattr(r.ctx.schemeConfig, 'diffusionParams', None),
+            'densityDiffusionTerm', '?')),
         tReached=tReached, tStarReached=tReached * (G / H) ** 0.5,
         dx=dx, HdxRatio=H / dx, c0=c0, probeInset_dx=probeInset / dx,
         mach=(U_MAX / c0) if c0 else None,
@@ -498,6 +509,12 @@ def _report(out: str):
         # `deltaSPH` scheme with the shift active at the ⅛ scaling, which is
         # what the `.get` defaults below reconstruct.
         schemeName = meta.get('scheme', 'deltaSPH')
+        # Non-delta-SPH schemes are labelled by their own name: the δ / δ⁺ /
+        # PST / frozen-diffusion axes below are delta-SPH-specific and don't
+        # apply to e.g. ACSPH (no sound speed, no δ-SPH shift).
+        if schemeName == 'artificialCompressible':
+            pst = 'ACSPH' + (' (Michel PST)' if meta.get('shiftActive') else '')
+            return f"{pst}  H/Δx={meta['HdxRatio']:.0f}"
         frozen = meta.get('freezeDiffusionAcrossStages',
                           schemeName == 'sun2017DeltaSPH')
         if not meta.get('shiftActive', True):
@@ -600,8 +617,14 @@ def _report(out: str):
     A('| run | H/Δx | Δx | c₀/√(gH) | c₀ | Mach | t\\* reached | steps | wall time | diverged |')
     A('|---|---|---|---|---|---|---|---|---|---|')
     for meta, _ in runs:
-        A(f"| δ-SPH nx{meta['nx']} | {meta['HdxRatio']:.0f} | {meta['dx'] * 1000:.2f} mm "
-          f"| {meta['c0Ratio']:g} | {meta['c0']:.1f} | {meta['mach']:.3f} "
+        # ACSPH has no sound speed, so the c₀ / Mach columns don't apply to it.
+        acsph = meta.get('scheme') == 'artificialCompressible'
+        tag = 'ACSPH' if acsph else 'δ-SPH'
+        c0r = '—' if acsph else f"{meta['c0Ratio']:g}"
+        c0v = '—' if acsph else f"{meta['c0']:.1f}"
+        mach = '—' if acsph else f"{meta['mach']:.3f}"
+        A(f"| {tag} nx{meta['nx']} | {meta['HdxRatio']:.0f} | {meta['dx'] * 1000:.2f} mm "
+          f"| {c0r} | {c0v} | {mach} "
           f"| {meta['tStarReached']:.2f} | {meta['nSteps']} | {meta['wallTime_s']:.0f} s "
           f"| {'**yes**' if meta['diverged'] else 'no'} |")
     A('')
@@ -751,7 +774,7 @@ def main():
                     help="mDBC no-penetration correction placement: 'derivative' (in dvdt, historical), 'finalize' (once per step, DualSPHysics-style velocity replacement) or 'off'. DualSPHysics gates this term on SlipMode>=NoSlip, i.e. never applies it under free slip -- which is what Marrone 2011 Sec. 3 specifies. DELTASPH_VALIDATION_PLAN 5.9.")
     ap.add_argument('--wallBC', default=None,
                     choices=('constant', 'freeSlip', 'noSlip', 'extended', 'zeros'),
-                    help="tank wall boundary condition. Marrone 2011 Sec. 3 specifies FREE SLIP; the case default 'constant' leaves the wall at v=0 while the AllToAll artificial viscosity drags against it, i.e. an effective no-slip bed. DELTASPH_VALIDATION_PLAN 5.7.")
+                    help="tank wall boundary condition. Default (case-level) is 'freeSlip', which is what Marrone 2011 Sec. 3 specifies. 'constant' is the pre-2026-09-21 default and is NOT free slip -- it leaves the wall at v=0 while the AllToAll artificial viscosity drags against it, i.e. an effective no-slip bed; pass it to reproduce a pre-flip number. DELTASPH_VALIDATION_PLAN 5.7.")
     ap.add_argument('--pressureForceTerm', default=None,
                     choices=('conservative', 'nonConservative', 'Antuono', 'i', 'j', 'symmetric'),
                     help="override PressureForceScheme (case default 'Antuono', "

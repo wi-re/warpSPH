@@ -14,7 +14,213 @@ abstracts verified verbatim against their PDFs.
 
 ---
 
-# Status board — read this first
+# TO DO — extracted 2026-09-21 by a full audit pass
+
+This list is the output of a line-by-line audit of this document against
+(a) `literature/decourcy2024_*.pdf` itself, (b) the code it describes, and
+(c) the probe scripts it cites. **What the audit verified is in §0.4 below
+— don't redo it.** Everything here is either open work or a doc chore the
+audit could not settle without a judgement call.
+
+## 0.1 Real work, highest value first
+
+1. **Root-cause the `t* ≈ 6` ACSPH dam-break divergence.** The headline open
+   item (status board 2026-09-20 item 2): stable to `t ≈ 1.34`, then `maxV`
+   jumps 6.1 → 183 at the wave breaking and goes NaN, while density stays
+   exactly 1.00000 — a momentum/pressure failure, not a density one.
+
+   **Start by re-running it at the corrected free-slip wall** (§0.3). Every
+   stored run under `scripts/out_deltaSPHMarrone/` — the ACSPH divergence *and*
+   both δ-SPH references — carries `wallBC: None` in its metadata, i.e. all of
+   them were taken at the old `'constant'` default, which is an effective
+   no-slip bed. That is not a detail: `DELTASPH_VALIDATION_PLAN.md` §5.7
+   measured that same BC driving `pb@front` *negative* (−0.014/−0.018) as the
+   front passes — an **attracting** wall that pulls particles into the boundary
+   band — and this divergence is a wall-localised momentum blowup at the moment
+   of wave impact. The two could be the same mechanism. This is also much
+   cheaper than the alternative and re-baselines the A/B either way.
+
+   If it survives that, the plan's own next discriminating test — **the same
+   dam break with `wallPeriodic=True`** — is still unrun; the status board's
+   item 7 periodic TGV/randomFlow A/B already localises the fault to the wall /
+   free-surface interaction.
+2. **Register that divergence in `OPEN_PROBLEMS.md`.** It meets every bar the
+   file states (traced to a real mechanism, investigated across sessions, not
+   a quick fix), and the repo convention is to look there before
+   re-investigating. Currently `OPEN_PROBLEMS.md` has one passing ACSPH
+   mention and no entry.
+3. **Run the Lobovsky dam break** (§4.5 / step 9). The two prerequisites the
+   plan listed as blockers are both built and committed —
+   `scripts/probe_acsphDambreakLobovsky.py` and `dambreak.py`'s
+   `pressureProbeHeights` — and `scripts/out_acsphDambreakLobovsky/` does not
+   exist for either scheme. Match the paper's §4.5 settings (free-slip,
+   `H/Δx = 400`, RK3, `CFL_t = 0.4`, `Δt/Δτ = 2.0`, displacement shifting)
+   before quoting any discrepancy.
+4. **Re-run `impact` at `aspectRatio = 0.25`.** §4.4's headline (`0.2492` vs
+   the analytic `0.2495` at nx=64) was measured at `aspectRatio = 0.5`, which
+   is `H/L = 1` — Marrone's own figure configuration, not De Courcy's, whose
+   §4.4 case is `H = 2L` ⇒ `r = π/4` ⇒ `aspectRatio = 0.25` in this
+   parameterisation. Either run is defensible; the plan just has to say which
+   reference it is claiming.
+5. **Commit the working tree.** It now holds both the 2026-09-20 entry's
+   items 1 and 7 (which the plan already describes as landed —
+   `rigidBody/update.py`, `wp_densityDelta.py`, the two periodic cases, two
+   test files) and this audit's own changes (the `wallBC` flip in
+   `cases/dambreak.py` + `caseUtils/weaklyCompressible.py`, the three probe
+   docstrings, `uChar` on the two periodic cases, this plan and
+   `DELTASPH_VALIDATION_PLAN.md` §5.7). Worth splitting into two commits.
+
+   **Pre-existing red test, unrelated to any of it:**
+   `test_runner.py::test_everyCaseDeclaresItsParamsAsScalarsOrLists`. One half
+   was a real bug and is fixed (`dambreak.surfacePressureProbes` was a tuple,
+   which `buildArgumentParser` silently gives no CLI flag). The other half —
+   `dambreak.alpha is NoneType` — is the *test* being too strict: `None` is a
+   deliberate "leave the scheme's own default alone" sentinel in five cases
+   (`dambreak`, `openFlow`, `droplet`, `sloshingTank`, `tgv-wc`). Either the
+   test should allow `None` or those sentinels should go; not decided here.
+6. **Still open at scale** (unchanged, no new finding): the Table 1/2 error
+   cliff at paper resolution (§4.3 / step 6); Fig. 15/16 vs. `letouze2013`'s
+   BEM crosses, blocked on digitization (step 8); AC-4's standalone
+   divergence vs. the paper's milder "struggles to maintain a converged
+   kinetic energy" (step 8 / the §4.1.1 authors' question).
+
+## 0.2 Doc chores left open (each needs a call, not just a fix)
+
+- **`.claude/skills/gradcheck/SKILL.md`'s script list is stale** — it names 15
+  scripts and omits `gradcheck_jstSwitch.py` (this plan's step 8),
+  `gradcheck_michelUChar.py` and `gradcheck_nearestSurfaceNormal.py`. They
+  *do* run in CI (`tests/test_gradcheck_scripts.py` globs `gradcheck_*.py`),
+  so this is a skill-listing bug, not a coverage hole — but `/gradcheck`
+  users read that list.
+- **Promote `marrone2011` to the core literature set** and add the §6.2
+  residue to `literature/EXPANSION_CANDIDATES.md` (step 1's leftovers,
+  still open). Genuinely missing refs are now only [70] `marrone2010` and
+  [40] `jameson1981` (which would settle §5.1).
+
+## 0.3 Fixed in this pass (recorded so it isn't re-audited)
+
+### Model / config changes
+
+- **`dambreak`'s `wallBC` default flipped `'constant'` → `'freeSlip'`**
+  (`cases/dambreak.py`, `caseUtils/weaklyCompressible.py::buildRegions`, which
+  `dambreak` is the only caller of). Every reference this family is graded
+  against specifies free slip — De Courcy §4.5 explicitly, Marrone 2011 §3
+  (3.1 and 3.4.1), Lobovský 2014 / Buchner 2002 — and `'constant'` is not it:
+  it adds no *physical* viscosity term but leaves the wall at `v = 0` while the
+  **artificial** viscosity runs `AllToAll`, so the fluid is dragged against a
+  stationary bed. `DELTASPH_VALIDATION_PLAN.md` §5.7 measured that cost (front
+  3.4 → 4.13 m/s, impact `t*` 2.8 → 2.6 against a reference 2.3, and a
+  *negative* `pb@front` that attracts fluid into the boundary band) and then
+  kept `'constant'` as the default purely so recorded runs would not move.
+  **Blast radius:** every `dambreak`-family run taken without an explicit
+  `--wallBC` now changes — the Marrone 3.1/3.4 probes, the Lobovsky probe, and
+  the ACSPH cases. Every run recorded since §5.7 already passed `freeSlip`
+  explicitly, so the *current* baselines are unaffected; older stored numbers
+  taken at the old default are reproducible with `--wallBC constant`, and the
+  probes' `--wallBC` help now says so. §3.4.2's viscous half still wants
+  `noSlip` and must ask for it.
+  - **Every stored Marrone baseline predates the flip.** All the `.npz` runs
+    under `scripts/out_deltaSPHMarrone/` — the ACSPH `t* ≈ 6` divergence and
+    both δ-SPH references — record `wallBC: None`, i.e. the old `'constant'`
+    default. They are still reproducible (`--wallBC constant`) but they are no
+    longer what a bare re-run produces, and §0.1 item 1 now starts from that.
+  - Consistency argument, independent of the references: `hydrostaticColumn`,
+    `columnCollapse` and `sloshingTank` already defaulted to `'freeSlip'`.
+    `dambreak` was the only walled case that did not.
+  - The `scripts/crossengine/*` harness passes `--wallBC constant` explicitly
+    (it matches diffSPH's own configuration), so it is pinned and unaffected.
+  - Three stale docstrings fixed with it: `probe_deltaSPHMarrone.py` claimed
+    "the free-slip spec is met without a slip-mode knob" (it is not — that was
+    §5.7's exact finding), and `probe_acsphDambreakLobovsky.py` documented and
+    reported "no-slip tank walls (the case's own default)".
+- **`randomFlow` and `tgvWeaklyCompressible` now set `acParams.uChar`**
+  (`uMag` for TGV; the seeded field's own `|v|_max` for the noise case, which
+  has no closed-form velocity scale). They were the only ACSPH-wired cases
+  without one, so Eq. (48)'s `U_ε` fell back to the instantaneous `|v|_max` —
+  a moving target that makes a fixed `ε_v` mean different things at different
+  times, which is the exact failure §3.1.3 describes.
+- **§5.4 closed from the paper's own text** rather than worked around: `𝕍` is
+  one set, defined identically before Eq. (36) and before Eq. (57), so the
+  planned "expose the dilation iteration count separately" would have invented
+  a degree of freedom the paper does not have. Dropped from the authors'
+  questions.
+- **§5.5 corrected**: `uChar` is `Optional` with a documented `|v|_max`
+  fallback, not the "required per-case config value" the plan asked for — and
+  the section now lists what all seven wired cases actually use.
+
+### Doc errors found against the code and corrected in place
+
+- Step 5b's *"the domain is made non-periodic on this branch"* and §4.4's
+  *"Restriction, deliberate"* both contradicted decision 3 and the code:
+  `wp_wallMoment.py` made the moment minimum-image correct and
+  `hydrostaticColumn.py:441` is back on `periodic=True`. Both rewritten.
+- Step 6 claimed Eq. (46)'s first term is implemented as `CFL_t √(h/‖a‖_max)`.
+  It is not — the code implements §5.6's
+  `CFL_t h / max(REFERENCE_VELOCITY, ‖v‖_max)`; `CFL_t √(h/‖a‖_max)` is the
+  *separate* body-force constraint behind `dt_accelerationConstraint`.
+- Part 3 mapped Eq. (25)'s `(p_i+p_j)` to `PressureForceScheme.Antuono`; it is
+  `nonConservative` (as decision 2 and the config default already say).
+- §1.1 labelled the *continuous* momentum/velocity rows Eqs. (25)/(26); those
+  are the discrete forms — the continuous system is Eq. (50)/(51).
+- §1.6 called `Δt/Δτ = 5` "the best cost/accuracy point in Table 2" while
+  Part 2 said 2; Table 2 holds `Δt/Δτ = 5` fixed and cannot speak to the
+  ratio at all. Reconciled against the paper's own sentence (`Δt/Δτ = 2`,
+  `CFL_t = 0.4–0.6`).
+- Part 7's acceptance target omitted AC-4, which the paper says *does* resolve
+  the hydrostatic profile — sharpening what our AC-4 divergence contradicts.
+- Part 9.2 said "nothing beyond §4.1.1 has been run"; step 7 said PST Stage A
+  was "still the next action"; step 9 said the Lobovsky comparison needed
+  prerequisites that exist. All three replaced with the real state.
+- §6.2 listed [77] Monaghan & Rafiee and [6] Molteni & Colagrossi as "still
+  not obtained"; both are in `literature/` with bib entries and abstracts.
+- Paths: `DFSPH_IMPROVEMENT_PLAN.md` → `docs/historic_plans/` (4×);
+  `EXPANSION_CANDIDATES.md` → `literature/`;
+  `tests/test_artificialCompressibleScaffold.py` no longer exists (folded into
+  `tests/test_artificialCompressible.py`).
+- Drifted anchors: `runner.py:269` → `:288`; `caseSpec.py:286` → `:304`.
+  Integrator names `rungeKutta2`/`sspRK3`/`rungeKutta4` →
+  `getButcherTableau('midpoint'/'SSPRK3'/'RK4')`.
+  `validateIntegrationScheme` accepts `explicitEuler` too, not only
+  `forwardEuler`.
+- Counts/figures: `test_wallPressure.py` has 8 tests, not 6; the wall
+  under-read is 13 % (= the quoted `1.3e−1`), not 12.5 %; Table 1's floor is
+  0.43, not ~0.46. `𝒞_e` → the paper's own symbol `e`.
+
+Added: **Part 2's per-case settings table** (what §4.1–§4.5 actually ran, which
+was nowhere in the plan and is what a faithful reproduction needs), and
+**§5.7**, a new paper ambiguity — §4.4 prints `Δτ/Δt = 2` where Table 1, §4.5
+and §3.1.3 all imply `Δt/Δτ = 2`.
+
+## 0.4 What the audit verified — no action needed
+
+- **Every equation in Part 1 against the PDF**: Eqs. (23)–(26), (30)–(37),
+  (38)–(48), (49)–(51), (55)–(62), (63)–(65). All transcriptions match,
+  including the three the plan flags as paper errors — Eq. (37) really does
+  print `min(0, κ₄ − ε₂)` (§5.1), Eq. (30) really does carry the stray `h`
+  (§5.3), and Eq. (46)'s first term really is `CFL_t h`, a length (§5.6).
+- **Every constant in Part 2**: `δ = 0.1`, `k₂ = 0.1hβ` (ceiling `0.2hβ`),
+  `κ₂ = 0.5`, `κ₄ = 1/32`, `CFL_τ = 0.5/1.0/1.5`, `ε_s = 1e−5`,
+  `α_ν = 0.01` with `ν = α_ν h c₀/K`, `λ < 0.4`, the `1 + 0.2(W/W(Δx))⁴`
+  tensile term, `CFL_wc = 0.75`.
+- **Every acceptance target in Part 7**: square-patch KE loss 32.1/26.4/25 %
+  and cost 2.81/2.60/2.38×; jet-impact cost "no more than 50 % greater";
+  void closure at `t√(g/H) ≈ 8.4`; Table 1's 2.34× jump from `CFL_t` 0.4→0.6
+  and Table 2's ~10× at 1.0. Marrone 2015 Eq. (A.32) `r = (π/2)(L/H)` also
+  confirmed against its own PDF.
+- **The code the plan describes**: every `acParams` field of §4.6; the four
+  `PressureSmoothingScheme` members; Eq. (46) in
+  `modules/timestep/artificialCompressible.py`; Eqs. (47)/(48) in the
+  driver's `_convergenceMetric`; the Butcher dispatch; `ShiftingScheme`/
+  `ShiftingProjectionScheme.michel2022`; the per-case `uChar` defaults on all
+  five Part 7 cases; `ctx.scratch['lastStageUpdate']`; `config.maxDt = 1e-2`.
+- **All 16 probe scripts the plan cites exist and parse.**
+- **Tests green** (2026-09-21, `envs/warp`): `test_artificialCompressible.py`
+  + `test_wallPressure.py` + `test_deltaSPHDiffusion.py` = 46 passed;
+  `test_physics.py -k acsph` (`test_acsphColumnHoldsTheWall`) = 1 passed.
+
+---
+
+# Status board — the history behind the list above
 
 **Done (2026-09-05):** steps 1–6 of Part 8, and step 7 in full — implemented
 *and* measured. The scheme runs end to end: `--scheme artificialCompressible`
@@ -214,7 +420,7 @@ error side does not yet reproduce Table 1's sharp 0.4→0.6 jump** — `CFL_t=0.
 is if anything the *lowest*-error row here, not a cliff edge — most likely
 because one period at nx=24 is too short/coarse to resolve BDF2's accuracy
 cliff cleanly against this much noisier baseline (every ratio here sits well
-under the paper's own Table 1 floor of ~0.46, meaning ACSPH is doing
+under the paper's own Table 1 floor of 0.43, meaning ACSPH is doing
 comparatively better against δ-SPH at this coarser scale than at the
 paper's, which dilutes the accuracy-cliff signal specifically, not the cost
 one). **Open**: a longer, finer, multi-period reproduction before trusting
@@ -275,6 +481,89 @@ finer/longer versions of the four sweeps above, and the two deferred items'
 own prerequisite work (BEM digitization, dambreak geometry/probe matching).
 Nothing here blocks anything else. `PST_ALE_PLAN.md` Stages B′/B/C/D remain
 queued after all of this, per the user's own sequencing.
+
+**2026-09-20 — boundary regression fixes, the long-horizon Marrone run, and
+the §4.4 closeout.** Six things landed:
+
+1. **Two regressions that were blocking *every* walled ACSPH run, fixed.**
+   `updateBodyParticlesWCSPH` read/wrote `boundaryAccelerations`
+   unconditionally, which `ArtificialCompressibleState` does not declare →
+   `AttributeError` at init and in every `finalize`. It is now threaded
+   through only when the state type has it. Separately,
+   `computeDensityDiffusionDeltaSPH` passed bare Python floats for `rho0`/`c0`
+   into a generic kernel (warp infers them as float32, mismatching the
+   scalar_t build precision); wrapped in `scalar_t(...)` — gradcheck green.
+   The stale `test_theUnimplementedSmoothingOperatorsRaise` (AC-4/AC-JST now
+   *are* implemented) is replaced by `test_ac4AndAcJstRunWithFinitePressures`
+   + `test_ac4AndAcJstAreDifferentOperators`.
+
+2. **The Marrone §3.1 long-horizon run — the headline — *diverges* at
+   t\* ≈ 6.** ACSPH (nx=70, Michel PST on, `wallBC=constant`, `ε_v=−5.0`,
+   video) ran to `t = 1.477` (t\* = 5.97) then blew up (non-finite
+   velocities, step 7845, 20483 s ≈ 5.7 h wall). It is stable to `t ≈ 1.34`
+   (KE ≈ 0.7–0.9, `maxV` ≈ 6.1, steady `Δt` ≈ 3.5e-4), then at t\* ≈ 5.5
+   `maxV` jumps discontinuously 6.1 → 183 — right at the wave-impact/breaking
+   — oscillates, and goes NaN. **Density stays exactly 1.00000 throughout**
+   (the constant-density invariant holds), so this is a *momentum/pressure*
+   instability at the nonlinear wave breaking, not a density failure. The
+   delta-SPH reference (same tank, sensors, `wallBC`) runs cleanly to
+   t\* = 20.22 (density [0.977, 1.022], max penetration 0.01 dx). A/B
+   (`scripts/out_deltaSPHMarrone/`, `compare` in `.tmp`): ACSPH tracks the
+   reference through the early phase (P1 arrival t\* 2.57 vs 2.81;
+   KE@1 s 0.94 vs 0.65) but generates an unphysical P3 pressure spike (first
+   peak 5.77 vs 0.000) and then diverges. This is the concrete, measured
+   confirmation of the "seemed unstable" validation concern: **ACSPH as
+   implemented is not yet robust through a full dam-break impact/breaking**,
+   while the incompressible delta-SPH family is.
+
+3. **`ε_v` convergence plateau, measured.** At the nx=70 dam break the
+   dual-time fixed point asymptotes at `ε_v ≈ −5.8` and does not reach the
+   −6 default within the 200-iteration cap, so a −6 target runs the full
+   budget every step. `ε_v = −5.0` converges in ~31 iterations. (A cost
+   finding, not a correctness one; the long run used −5.0.)
+
+4. **Corner table re-measured post the `786e300` freeSlip fix** (the step 5b
+   table above). The fix changed the picture sharply: `neither` went 2.9 →
+   **6.77** (the old BC let fluid leak out; the correct one reflects it back
+   at high speed), `noPenetrationShift` stays the best `‖v‖` bound (0.77),
+   `michelShift` is unchanged (2.35), and `both` (2.54) is now *worse than
+   the safeguard alone* — so the pre-fix "both is uniformly best" reading
+   does not carry over to the regular lattice with the correct wall BC.
+
+5. **§4.4 boundary audit closed.** `v` is correct per BC type, `δv` is
+   satisfied trivially, and `ṽ` is a documented deviation whose magnitude is
+   now measured: the in-loop wall **position** excursion is **0.046 `Δx`**
+   (negligible) — **verdict: not worth fixing.** See §4.4.
+
+6. **New walled ACSPH test** `test_acsphColumnHoldsTheWall` (green): the
+   density invariant, the recovered hydrostatic gradient (median of the
+   reported `pressureSlopeRatio`, robust to the degenerate-band divergence
+   that closes the bulk fit once the surface drifts down), and boundedness.
+
+7. **Periodic A/B: the t\*≈6 dam-break blowup is boundary-related, not a
+   scheme-level instability.** Two wall-free, divergence-free-in-initial-state
+   cases were given ACSPH support and run under both schemes at the same
+   resolution and physical `ν` (`.tmp/probe_randomFlowAB.py`,
+   `.tmp/probe_tgvAB.py`):
+
+   * **TGV** (`tgvWeaklyCompressibleCase`, k=2, L=2π, uMag=1, ν=0.05, Re≈63):
+     the scheme-vs-*physics* comparison, since the analytic answer is
+     `KE(t) = KE(0) exp(−4νk²t)` (target 0.2 1/s). **Both schemes reproduce
+     it to ~3%**: nx=48 smoke — delta-SPH 0.199 (×0.995), ACSPH 0.2005
+     (×1.003); full nx=128, t=2.0 (KE down to ⅔) — delta-SPH 0.1976
+     (×0.988), ACSPH 0.2057 (×1.028). ACSPH's excess is the expected
+     BDF2/frozen-smoothing dissipation at its much larger dt (577 steps vs
+     2001); its density is exactly 1.0 throughout.
+   * **Random flow** (nx=64, t=1.0): both stable; ACSPH retains ~45% more KE
+     (0.381 vs 0.262), dominated by the dt artifact (delta-SPH at a fixed
+     2.5e-4, 4001 steps, vs ACSPH adaptive ~3e-3, 343 steps), and its maxV
+     doesn't decay (1.0→1.08 vs 1.0→0.75).
+
+   Conclusion: where there are no walls and no free surface, ACSPH is stable
+   and dissipates at the correct physical rate. The dam-break divergence
+   (item 2) localises to the **wall boundary / free-surface-breaking
+   interaction** — the next discriminating test is the same dam break with
+   `wallPeriodic=True`.
 
 ## Decisions taken without you — overturn any of these if you disagree
 
@@ -363,7 +652,7 @@ queued after all of this, per the user's own sequencing.
 5. **`approachOnly=False` was added to `computeVelocityDiffusion`** rather than
    writing a new kernel. The default is unchanged, so no existing scheme moves.
 
-   **This is half of `DFSPH_IMPROVEMENT_PLAN.md`'s open item 1** (the
+   **This is half of `docs/historic_plans/DFSPH_IMPROVEMENT_PLAN.md`'s open item 1** (the
    shear-carrying Morris term), which asks for "full `v_ij` vector, *no
    approach-only clamp*". `approachOnly=False` removes the clamp — the term is
    now two-sided, which is what makes it Monaghan & Gingold (1983)'s velocity
@@ -381,9 +670,9 @@ queued after all of this, per the user's own sequencing.
 |---|---|
 | §5.1 | Eq. (37) prints `ε₄ = min(0, κ₄ − ε₂)`, which makes the JST operator **vanish** in smooth flow. Standard JST is `max`. Which does the CUDA code do? |
 | §5.2 | Eq. (40)'s low-storage form cannot represent Fig. 1's SSPRK3 or RK4 at all. Which is the code — Jameson coefficients, or the full tableaus? |
-| §5.4 | Is `𝕍` the same set (same `𝔽`, same dilation radius) in Eq. (36) and Eq. (57)? |
 | §5.5 | `U_char` per case; the `𝕍` branch of Eq. (36) being unscaled. (The `β` interpolation question is closed — `michel2022` §5.3 says linear.) |
 | §5.6 | Eq. (46)'s `CFL_t h` is a length. Is `h` there carrying an implicit reference velocity (which is what the term *does*)? And is the absence of a body-force constraint deliberate? |
+| §5.7 | §4.4 prints `Δτ/Δt = 2` where Table 1, §4.5 and §3.1.3 all imply `Δt/Δτ = 2`. Transposition? |
 | Part 3 | The `ψ` sign error above — does their δ-SPH reference implementation have it? |
 | §4.1.1 | **AC-4 run standalone (not blended into AC-JST) diverges catastrophically for us** — pressure/velocity reaching `O(1e5-1e6)` within ~15 real steps on both `hydrostaticColumn` and a wall-free case (`rotatingSquarePatch`), nx=24. The paper reports only that AC-4 alone "struggles to maintain a converged kinetic energy" — bounded but non-convergent, not a blow-up — and separately that it resolves the hydrostatic free-surface profile fine at `t=50s`. Is the discrepancy resolution (our nx=24 vs. their finer grids), or something in `k2`/timestep tuning specific to AC-4 that isn't shared with AC-2L? We cross-checked the *formula* against the PDF character-by-character and again indirectly via AC-JST (which uses the identical AC-4 operator, scaled by `epsilon_4 <= kappa_4 = 1/32`, and stays bounded on the same cases) — confident the transcription is right, curious whether the severity we see is expected at coarser resolution or points at a parameter we're missing. |
 | §4.3 | **Table 1/2's `CFL_t=0.4 -> 0.6` error cliff did not reproduce cleanly for us at reduced scale** (nx=24, one oscillation period only, vs. the paper's `L/Δx=200`-class, presumably multi-period runs): our `CFL_t=0.4` row was the *lowest*-error row measured, not a cliff edge, though the **cost** trend (`w`/`e` falling sharply with `CFL_t`) reproduced cleanly at every scale we tried. Is the accuracy cliff itself only clean at finer resolution / longer integration, or is there a specific measurement window (post-transient, particular oscillation number) Table 1's numbers are drawn from that we should match? |
@@ -425,8 +714,8 @@ matching one:
 
 ```
 Dp/Dτ  = −k₁ ρ ∇·v  +  k₂ 𝒟^p                       (continuity, Eq. 50/51)
-Dv/Dτ  +  Dv/Dt  = −∇p/ρ + ν∇²v + f                 (momentum,   Eq. 25)
-Dx/Dτ  +  Dx/Dt  = v                                (velocity,   Eq. 26)
+Dv/Dτ  +  Dv/Dt  = −∇p/ρ + ν∇²v + f                 (momentum,   Eq. 50)
+Dx/Dτ  +  Dx/Dt  = v                                (velocity,   Eq. 51)
 ```
 
 `𝒟^p` is the pressure-smoothing operator (§1.4). It is *not* an ad-hoc artificial
@@ -603,8 +892,19 @@ Iterate until `ε_v` drops below target. Recommended targets from the paper:
 See §5.2 — these tableaus and Eq. (40) are mutually inconsistent for RK3/RK4.
 
 **§4.3 finding: higher-order pseudo-time RK buys nothing.** Accuracy is set by
-the BDF2, and cost rises near-linearly with stage count. RK2 at `CFL_t = 0.2`,
-`Δt/Δτ = 5` is the best cost/accuracy point in Table 2. Default to RK2.
+the BDF2, and cost rises near-linearly with stage count. Table 2 (all rows at
+`Δt/Δτ = 5`) puts RK2 at or below RK3/RK4 on error at every `CFL_t` while
+costing ~⅔ of RK3 and ~½ of RK4 — so **default to RK2**.
+
+On the *ratio* Table 2 cannot speak (it holds `Δt/Δτ = 5` fixed); that is
+Table 1's axis, and the paper's own sentence is *"for the same recorded error
+as δ-SPH the solution cost can be matched or reduced, in the region of
+`Δt/Δτ = 2` and `CFL_t = 0.4 − 0.6`"*. Table 1 also shows the trade directly:
+raising `Δt/Δτ` from 2 to 20 buys ~10 % error and costs ~9× — so **2 is the
+cost/accuracy point, 5–20 only if accuracy is the binding constraint.**
+Lowest-error cell in either table is Table 2's RK2/`CFL_t = 0.2` row
+(0.47/0.45), but its RK2/`CFL_t = 0.4` neighbour (0.50/0.48) is the same error
+at half the cost.
 
 ## 1.7 Optional `ṽ` material-derivative correction — Eqs. (27)–(31)
 
@@ -698,7 +998,7 @@ right control.
 | `κ₂`, `κ₄` (JST) | 0.5, 1/32 | Eq. (37) |
 | `CFL_τ` | 0.5 / 1.0 / 1.5 for RK2 / RK3 / RK4 | §3.1.3 |
 | `CFL_t` | ~0.2; hard ceiling 0.4 | Eq. (46), Table 1–2 |
-| `Δt/Δτ` | 2 (best cost/accuracy), 5–10 for accuracy | Table 1 |
+| `Δt/Δτ` | 2 (best cost/accuracy), 5–20 only if accuracy binds | Table 1, §1.6 |
 | `ε_v` target | −6 general, −8 impact-heavy | §4.2, §4.4, §4.5 |
 | `ε_s` | 1e−5 | Eq. (48) |
 | `α_ν` (artificial viscosity) | 0.01, `ν = α_ν h c₀ / K` | §4 |
@@ -708,6 +1008,34 @@ right control.
 | Kernel | Wendland C2, `h/Δx = 2` | §4 |
 | `α_PI` | `1 + α_s Δτ α_t`, or 1 | Eq. (41) |
 | `k₃` | 0 (dropped) | §3.1 |
+
+## The settings the paper actually ran each case with
+
+The Part 2 table above is the paper's *general* recommendation; §4 overrides it
+per case, and a faithful reproduction has to match the per-case row, not the
+general one. Read off §4.1–§4.5 directly:
+
+| Case | Operator | RK | `CFL_τ` | `CFL_t` | `Δt/Δτ` | `ε_v` | Resolution | Walls |
+|---|---|---|---|---|---|---|---|---|
+| §4.1.1 hydrostatic column | AC-2/2L/4/JST (the comparison) | RK2 | **0.3** | — | 5 | **−7** | — (read at `t = 50 s`) | rigid base |
+| §4.2 rotating square patch | AC-2L (Fig. 15); all four (Fig. 16) | — | — | — | — | −8 → −6 sweep (Fig. 13) | `L/Δx = 200/400/800` | none |
+| §4.3 oscillating droplet | AC-2L | RK3 (Table 1), RK2/3/4 (Table 2) | — | 0.1–1.0 sweep | 2–20 sweep | — | — | none |
+| §4.4 jet impact | AC-2L | **RK4** | — | 0.4 | **2** (printed `Δτ/Δt = 2`, see §5.7) | **−8** | `L/Δx = 200` | none; `H = 2L`, `L = 1 m`, `U = 1 m/s`, `ρ₀ = 1000`, `c₀ = 100` (δ-SPH only) |
+| §4.5 dam break | AC-2L | **RK3** | — | 0.4 | 2.0 | — | `H/Δx = 400` (2D), `75` (3D) | **free-slip**; geometry from Buchner [81] + Lobovský [82], displacement shifting |
+
+One deviation from what this repo currently runs: `§4.4`'s case is `H = 2L`,
+which in `impactCase`'s parameterisation is `aspectRatio = 0.25` (§4.4's own
+probe headline used `0.5`, i.e. `H/L = 1` — Marrone's own figure case, not
+De Courcy's).
+
+`§4.5`'s **free-slip** walls used to be a second one — `dambreak`'s `wallBC`
+defaulted to `'constant'`, which adds no *physical* viscosity term but still
+drags the fluid against a `v = 0` wall through the `AllToAll` **artificial**
+viscosity, i.e. an effective no-slip bed. Every reference this case family is
+graded against specifies free slip (De Courcy §4.5, Marrone 2011 §3,
+Lobovský/Buchner), so **the default was flipped to `'freeSlip'` on 2026-09-21**;
+`DELTASPH_VALIDATION_PLAN.md` §5.7 has the A/B that motivated it and §0.3 of
+this plan's to-do list has the blast radius.
 
 > ⚠ **`ν` still needs a nominal `c₀`.** The paper says ACSPH "*does not require
 > the definition of c₀*" and then defines `ν = α_ν h c₀ / K` with `α_ν = 0.01`,
@@ -725,19 +1053,19 @@ away.
 
 | Paper | Repo | Status |
 |---|---|---|
-| Eq. (25) pressure gradient `(p_i+p_j)` | [surfaceAware.py](src/warpSPH/modules/pressure/surfaceAware.py), `PressureForceScheme.Antuono` | ✅ direct |
+| Eq. (25) pressure gradient `(p_i+p_j)` | [surfaceAware.py](src/warpSPH/modules/pressure/surfaceAware.py), `PressureForceScheme.nonConservative` | ✅ direct (the literal `(p_i+p_j)`; `Antuono` is the tensile switch, decision 2) |
 | Eq. (25) Monaghan–Gingold viscosity | [velocityDissipation.py](src/warpSPH/modules/deltaSPH/velocityDissipation.py), `ViscosityTerms.MonaghanGingold1983` | ✅ direct |
 | Eq. (23) velocity divergence | [modules/momentum/](src/warpSPH/modules/momentum/), `WarpOperation.Divergence` | ✅ direct |
 | Eq. (34) `L_i`, `⟨∇·⟩^L` | [gradRhoL.py](src/warpSPH/modules/density/gradRhoL.py), `computeRenormalizationMatrices` | ✅ **generalised 2026-09-05** (`computeGradRhoL(field=)`) |
 | Eq. (33) bi-Laplacian ψ operator | [wp_densityDelta.py](src/warpSPH/modules/deltaSPH/wp_densityDelta.py) `DensityDiffusionScheme.deltaSPH` | ✅ **generalised 2026-09-05**; sign error found + fixed — see note |
 | Eq. (61) value term | [wallPressure.py](src/warpSPH/modules/incompressible/wallPressure.py) `'shepard'` mode | ✅ exact |
 | Eq. (61) body-force term | `wallPressureExtrapolation(bodyForce=)` | ✅ **built 2026-09-05**, §4.4 |
-| Eq. (62) Shepard + mirroring | [modules/mdbc/velocity.py](src/warpSPH/modules/mdbc/velocity.py) | ⚠ audit, see §4.4 |
+| Eq. (62) Shepard + mirroring | [modules/mdbc/velocity.py](src/warpSPH/modules/mdbc/velocity.py) | ✅ **audit closed 2026-09-20**, §4.4 (`ṽ` is a documented, measured deviation) |
 | §3.3 free-surface detection (Marrone/Sun) | [maronneDetection.py](src/warpSPH/modules/surfaceDetection/maronneDetection.py) + [dilation.py](src/warpSPH/modules/surfaceDetection/dilation.py) | ✅ gives `𝔽`, `𝕍`, `n`, `λ` |
 | Eq. (57) `λ < 0.4` surface gating | `ShiftingProjectionScheme.surfaceNormal`, `surfaceLambdaThreshold` | ✅ direct |
-| Eq. (46) adaptive `Δt` | [timestep/weaklyCompressible.py](src/warpSPH/modules/timestep/weaklyCompressible.py) | ⚠ recast, see §4.5 |
+| Eq. (46) adaptive `Δt` | [timestep/artificialCompressible.py](src/warpSPH/modules/timestep/artificialCompressible.py) | ✅ **recast 2026-09-05**, §4.5 / §5.6 |
 | §3.4 δ-ALE-SPH baseline | `--scheme deltaSPH` + `correctdrhodt`/`correctdvdt` | ✅ direct |
-| RK2/SSPRK3/RK4 tableaus | `warpSPHIntegrators` (`rungeKutta2`, `sspRK3`, `rungeKutta4`) | ✅ reuse tableaus |
+| RK2/SSPRK3/RK4 tableaus | `warpSPHIntegrators.getButcherTableau` (`'midpoint'`, `'SSPRK3'`, `'RK4'`) | ✅ reuse tableaus |
 | Test cases (§4.1–4.5) | `hydrostaticColumn`, `rotatingSquarePatch`, `oscillatingDroplet`, `impact`, `dambreak` | ✅ all five exist |
 
 ### The one that matters most: Eq. (33) ≡ our existing δ-SPH ψ
@@ -863,7 +1191,7 @@ roll history: (x^{n−1},v^{n−1}) ← (x^n,v^n) ← (x^{n+1},v^{n+1})
 
 **Framework integration — recommended approach.** The runner drives steps via
 `ctx.integrator.function(state, f=ctx.stepFunction, dt=...)`
-([runner.py:269](src/warpSPH/runner/runner.py#L269)), which does not fit a
+([runner.py:288](src/warpSPH/runner/runner.py#L288)), which does not fit a
 scheme that owns its own time advance. Rather than adding a `dualTime`
 integrator to `warpSPHIntegrators` (which would couple a general library to one
 scheme), use the **exact-delta trick**: have `acsph_step` run the full dual-time
@@ -940,19 +1268,21 @@ Then add, new:
   rather than taking it: its Liu–Liu linear fit already carries the local
   pressure gradient, so adding the correction would double-count.
 
-  *Implementation.* The vector moment `Σ_f V_f ρ_f (r_w − r_f) W_wf` is not
-  any single `WarpOperation` — it is assembled from two `Interpolate` gathers,
-  `r_w·Σ_f V_f ρ_f W_wf − Σ_f V_f ρ_f r_f W_wf`, which is legitimate because
-  `(g − a_w)` is a per-*wall* quantity and comes out of the sum. Both gathers
-  reuse the value term's `OperationProperties`, so numerator and denominator
-  share one kernel evaluation.
+  *Implementation.* The vector moment `Σ_f V_f ρ_f (r_w − r_f) W_wf` is its own
+  kernel, [wp_wallMoment.py](src/warpSPH/modules/incompressible/wp_wallMoment.py),
+  because it is not any single `WarpOperation`. It takes `x_ij` from
+  `computeDistanceVec` like every other operator in the package, so it is
+  minimum-image correct by construction.
 
-  *Restriction, deliberate.* Splitting `r_w − r_f` across two gathers discards
-  the minimum-image convention, so a wrapping pair contributes `±L_d` of error
-  per periodic direction `d`. Dotting with `bodyForce` annihilates that error
-  whenever `bodyForce` has no component along a periodic axis — the only
-  physically sensible configuration — so the code **asserts** that instead of
-  silently returning a wrong wall pressure. A real moment kernel would lift it.
+  ~~*Restriction, deliberate.*~~ **Lifted — superseded by the moment kernel.**
+  The first version assembled the moment from two `Interpolate` gathers,
+  `r_w·Σ_f V_f ρ_f W_wf − Σ_f V_f ρ_f r_f W_wf` (legitimate because `(g − a_w)`
+  is a per-*wall* quantity and comes out of the sum). That split discards the
+  minimum-image convention, so a wrapping pair contributed `±L_d` of error per
+  periodic direction `d`, which cost a guard, a case-level `periodic = False`
+  override, and a `hydrostaticColumn` run that died at step 45. `wp_wallMoment.py`
+  removed all three; `tests/test_wallPressure.py`'s last three tests pin the
+  equivalence, the minimum-image difference, and the lifted restriction.
 
   *Verified* by `tests/test_wallPressure.py`: for a pressure field linear in
   space every neighbour's contribution `p_f + ρ_f g·(r_w − r_f)` is already
@@ -960,7 +1290,7 @@ Then add, new:
   truncated the wall neighbourhood is. Measured on a 24×24 column over three
   wall rows: **corrected 2.0e−7 relative error (float32 machine precision),
   plain Shepard 1.3e−1** — i.e. the uncorrected wall under-reads by up to
-  `3 Δx · ρ₀ g`, 12.5 % of the whole column's pressure drop. That is precisely
+  `3 Δx · ρ₀ g`, 13 % of the whole column's pressure drop. That is precisely
   the error that stops a hydrostatic column from holding.
 
   Note the wall-acceleration `a_b` still has no per-particle source anywhere in
@@ -979,7 +1309,7 @@ Then add, new:
 
   Independently a DFSPH improvement: no DFSPH caller passes `bodyForce` yet, so
   it stays additive there, but it is exactly the term
-  `DFSPH_IMPROVEMENT_PLAN.md` Part 23 needs for a gravity-driven wall.
+  `docs/historic_plans/DFSPH_IMPROVEMENT_PLAN.md` Part 23 needs for a gravity-driven wall.
 - **A structural note**: these live under `modules/incompressible/`, i.e. they
   are DFSPH-facing. ACSPH needs them too, so either relocate to a shared module
   or import across. Prefer relocating — a third consumer makes the current home
@@ -990,6 +1320,53 @@ Eq. (62)'s Shepard + no-penetration/no-slip mirroring largely exists in
 where WCSPH extrapolates one** — `v` (no-penetration in the divergence, no-slip
 or free-slip in the Laplacian), `ṽ` (no-penetration), `δv` (no-penetration, so
 `δv·n = 0`). Confirm each gets the right condition rather than inheriting `v`'s.
+
+**Audit closed 2026-09-20**, field by field:
+
+- **`v` (the wall velocity): correct, per BC type.** `computeBoundaryVelocities`
+  (`modules/mdbc/velocity.py`) runs once per real step (driver step 02) and
+  writes the boundary rows through the ghost mapping: `freeSlip` is
+  `u_g = u_body + w_t − w_n` — the **reflected** normal, i.e. the published
+  no-penetration form of Eq. (62); `noSlip` is `u_body − w_t` ((0,−1), the
+  deliberate deviation — `docs/historic_plans/DFSPH_IMPROVEMENT_PLAN.md` Part 9 measured the
+  reflecting form as worse on the bounded DFSPH case); `constant` leaves the
+  row unchanged; `extended` is the Liu–Liu MLS extrapolation. The reflect
+  fix is from `786e300` (2026-09-11) — **every walled number this plan
+  recorded before that date predates it** (re-measured 2026-09-20, below).
+  The `dambreak` case runs `constant`, which for its static wall is
+  `u_g = 0` — an effective no-slip bed, the same condition the delta-SPH
+  Marrone reference runs used, so the A/B isolates the scheme.
+- **`δv` (the particle shift): satisfied trivially.** `solveShifting`
+  (driver `finalize`, Eq. (58)) zeroes the shift for `kinds != 0`
+  (`modules/shifting/wrapper.py`), so the wall is never shifted: `δv·n = 0`
+  holds identically rather than being imposed.
+- **`ṽ` (the pseudo-time velocity): not extrapolated — documented deviation,
+  measured.** The driver integrates x/v/p on **all** rows through the
+  dual-time loop: wall rows carry the full SPH residual (pressure force,
+  viscosity, and `bodyForce` — gravity — is not kind-masked), so their
+  velocity and position wander away from the BC values *inside* the loop.
+  The wander is discarded at hand-off: step 08 zeroes the non-fluid
+  `dxdt/dvdt/dpdt`, so at every real-step boundary the wall state is exactly
+  the BC value, and the time-level deviation is zero for a static wall.
+  What remains is that the fluid solves against the wandered wall during the
+  solve. Magnitude, measured 2026-09-20 on `hydrostaticColumn` (nx=32, 1 s,
+  static freeSlip container, `.tmp/probe_acsphWallDrift.py`, spies on
+  `wallPressures`/`convergenceMetric` capturing every in-loop wall slice):
+  the **position** excursion is at most **0.046 `Δx`** over the whole run
+  (1.45e-3 m against `Δx` = 3.1e-2 m, 1.31e6 in-loop samples) — the wall
+  stays pinned to within half a particle spacing. The in-loop wall
+  **velocity** does spike (up to 58 m/s, median 10 m/s, measured against the
+  step-start BC value — the freeSlip BC is a position-based construction that
+  itself changes as the near-wall fluid moves, so the absolute figure
+  overstates the "true" wander), but the BDF2 step-ratio makes the net
+  position change over the loop negligible, and step 08 resets it exactly at
+  hand-off. **Verdict: not worth fixing.** Re-imposing the BC on the wall
+  rows inside the loop (zeroing the normal increment per iteration) is a
+  small change, but the geometric quantity the fluid actually solves against
+  — the wall *position* — never wanders more than half a spacing, so the
+  documented deviation is benign. If a future walled case shows a pressure or
+  force artefact traceable to the in-loop wall *velocity*, clamping that is
+  the targeted change; there is no evidence for it on this case.
 
 ## 4.5 Timestep — recast
 
@@ -1028,7 +1405,7 @@ onto WCSPH:
 - **Registration touchpoints** (mirroring the `WeaklyCompressibleSPHScheme`
   surface): `schemes/builder.py` (`SchemeBundle`), `io/parsers.py`,
   `io/export.py`, `io/importIO.py`, `runner/caseSpec.py` (enum sweep at
-  [caseSpec.py:286](src/warpSPH/runner/caseSpec.py#L286)), `warpSPH/__init__.py`,
+  [caseSpec.py:304](src/warpSPH/runner/caseSpec.py#L304), `schemeNames`), `warpSPH/__init__.py`,
   `modules/timestep/wrapper.py` (dispatch on system type).
 
 ---
@@ -1074,12 +1451,26 @@ Eq. (30) reads `+ k₂ h 𝒟^p_i` (verified on the rendered page 8) while Eqs. 
 already carries the length scale, `𝒟^p ~ [p]/L²`, so `k₂𝒟^p ~ [p]β/L ~ [p]/T` ✓
 and the extra `h` is wrong. Typo in Eq. (30) only; use the `k₂ 𝒟^p` form.
 
-## 5.4 `𝕍` is used for two different things
+## 5.4 `𝕍` is used for two different things — **closed, it is one set**
 
-`𝕍` denotes "within a kernel support radius of a free-surface particle" in both
-Eq. (36) (JST switching) and Eq. (57) (shifting). Whether the *same* dilation
-radius and the same underlying `𝔽` set are intended in both is not stated.
-Assume yes, expose the dilation iteration count separately.
+`𝕍` appears in both Eq. (36) (JST switching) and Eq. (57) (shifting), and the
+original worry was that the same symbol might carry two different dilation
+radii. Re-read against the PDF, it does not: the paper defines it the same way
+both times, in the same words.
+
+- after Eq. (36): *"where `𝕍` is the free-surface region, any particle within a
+  kernel support radius to a free surface particle"*
+- before Eq. (57): *"Any particle within the free surface vicinity `𝕍` (within
+  the kernel support radius of a surface particle)"*
+
+Same `𝔽`, same one-support dilation, one set. **Resolved as written — no
+separate knob.** The implementation matches: both consumers read the single
+`currentState.surfaceIndicators` that `schemes/artificialCompressible.py`
+computes once per real step, dilated by the shared
+`SurfaceDetectionConfig.expansionIterations`. A second, JST-only dilation count
+would be inventing a degree of freedom the paper does not have; if a future
+measurement wants one, that is a deliberate extension, not a transcription
+choice.
 
 ## 5.6 Eq. (46)'s first term is dimensionally a length
 
@@ -1119,9 +1510,17 @@ worth asking about.
 
 ## 5.5 Under-specified
 
-- **`U_char`** in Eq. (48) is never given a definition per case. It is presumably
-  the case's own characteristic velocity (`√(gH)` for dam break, `ωL` for the
-  patch). Make it a required per-case config value.
+- **`U_char`** in Eq. (48) is never given a definition per case. It is the
+  case's own characteristic velocity, and every ACSPH-wired case now supplies
+  one: `√(g·fillRatio·L)` (column, dam break), `A·R` (droplet), `ω·size`
+  (patch), `impactVelocity` (jets), `uMag` (TGV), and — for `randomFlow`, which
+  is band-limited noise with no closed-form scale — the seeded field's own
+  `|v|_max`. **Not** a required field: `acParams.uChar` stays `Optional` and
+  `_convergenceMetric` falls back to the instantaneous `|v|_max`, so a new case
+  runs without one. But the fallback is a moving target — it drifts with the
+  flow, so a fixed `ε_v` means different things at different times — which is
+  exactly the failure mode §3.1.3 describes for a stationary dam break. Set one
+  per case.
 - **The `𝕍` branch of Eq. (36)** returns `𝒟^ΔL` *unscaled*, i.e. `ε₂ = 1`
   implicitly at the surface, while the interior uses `ε₂ 𝒟^ΔL + ε₄ 𝒟^Δ²`. That
   is a discontinuity in the operator at the `𝕍` boundary. Presumably intended
@@ -1134,6 +1533,18 @@ worth asking about.
   `PST_ALE_PLAN.md` §2.3.
 - **Symbol collision**: `β` is both the AC wave speed (Eq. 24) and the shifting
   scaling `(κh/Δx)³` (Eq. 56). Unrelated quantities. Use distinct names in code.
+
+## 5.7 §4.4 prints `Δτ/Δt = 2` where everything else is `Δt/Δτ`
+
+§4.4's jet-impact setup reads *"setting `Δτ/Δt = 2` and `CFL_t = 0.4`"*, the
+reciprocal of the ratio every other section uses. It is almost certainly a
+transposition: Table 1 sweeps `Δt/Δτ ∈ {2, 5, 10, 20}`, §4.5 writes
+`Δt/Δτ = 2.0`, and §3.1.3 is explicit that `Δτ` is *"set at a fixed fraction of
+`Δt`"* with `Δτ < Δt` — which `Δτ/Δt = 2` contradicts outright.
+
+**Decision: read it as `Δt/Δτ = 2`.** Low-risk (it is the ratio both other
+cases use) but worth one line to the authors alongside the §5.1/§5.2/§5.6
+questions.
 
 ---
 
@@ -1165,7 +1576,7 @@ Nothing in Parts 1–5 or Part 7 is now blocked on a document we do not have.
 | [82] | `lobovsky2014` | Dam-break probe geometry and the 2.5%/97.5% experimental bounds (Figs. 28/30). Supplementary Materials carry the raw signals. |
 | [80] | `marrone2015` | The analytic incompressible KE drop the jet-impact case (§4.4) is scored against. |
 | [66] | `michel2022` | The shifting law of §4.2 — its derivation of `β = (κh/Δx)³` and its PST-conditions checklist, which is also worth auditing our existing shift against. |
-| [29] | `ramachandran2021` | Cross-check `α_PI = 2Δt/(2Δt+3Δτ)` and the `ṽ` material derivative. Closest prior art, **with an open-source reference implementation**. |
+| [29] | `ramachandran2021` | Cross-check `1/α_PI = 2Δt/(2Δt+3Δτ)` (the paper's own §3.1.3 form, for `α_s = 1`) and the `ṽ` material derivative. Closest prior art, **with an open-source reference implementation**. |
 
 ## 6.2 Still not obtained — non-blocking, the paper reproduces the equations in full
 
@@ -1173,8 +1584,8 @@ Nothing in Parts 1–5 or Part 7 is now blocked on a document we do not have.
 |---|---|---|
 | [40] | Jameson, Schmidt, Turkel (1981), AIAA-81-1259 | Would settle §5.1 (`min` vs `max` in ε₄) definitively. |
 | [70] | Marrone, Colagrossi, Le Touzé, Graziani (2010), *Fast free-surface detection and level-set function definition*, JCP 229(10) 3652–3663 | Already implemented here (`maronneDetection.py`); the citation is missing from the library, not the code. |
-| [77] | Monaghan & Rafiee (2013), IJNMF 71(5) 537–561 | Droplet analytic solution — already encoded as `DROPLET_STRETCH`/`DROPLET_PERIOD` in `cases/oscillatingDroplet.py`. |
-| [6] | Molteni & Colagrossi (2009), CPC 180(6) 861–872 | AC-2 (Eq. 32) is given in full. |
+| [77] | Monaghan & Rafiee (2013), IJNMF 71(5) 537–561 | ~~Not obtained~~ — **in `literature/` as `monaghan2013`** (`monaghan2013_multi-fluid-high-density-ratios.pdf`, bib + abstract). Appendix A is the droplet ODE `oscillatingDroplet.analyticSolution` integrates. |
+| [6] | Molteni & Colagrossi (2009), CPC 180(6) 861–872 | ~~Not obtained~~ — **in `literature/` as `molteni2009`**. AC-2 (Eq. 32) is given in full in De Courcy anyway. |
 | [15] | Antuono, Sun, Marrone, Colagrossi (2021), *δ-ALE-SPH*, C&F 216 104806 | ~~Not obtained~~ — **synced 2026-09-05** as `antuono2021`, for `PST_ALE_PLAN.md`. |
 | [50],[54],[55] | Monaghan & Gingold 1983; Bonet & Lok 1999; Randles & Libersky 1996 | Standard operators, already implemented. |
 | [19] | Sun, Pilloton, Antuono, Colagrossi (2023), *Acoustic damper term in WCSPH*, JCP 483 112056 | The competing "fix WCSPH instead" approach — interesting for the comparison narrative. |
@@ -1211,8 +1622,15 @@ case with a clean analytic score and is the paper's own parameter-sweep vehicle
 dual-time machinery). Then §4.2 for conservation, then §4.4/§4.5.
 
 **Acceptance targets from the paper:**
-- AC-2L/AC-JST hold a hydrostatic gradient with no free-surface diffusion; AC-2
-  visibly fails. (§4.1.1, Figs. 2–4.)
+- AC-2L, **AC-4** and AC-JST all hold a hydrostatic gradient with no
+  free-surface diffusion; AC-2 visibly fails. AC-4 is separated from the other
+  two not on the *profile* (Fig. 2) but on a slight first-surface-row
+  separation (Fig. 3c) and a KE that "struggles to maintain a converged" value
+  (Fig. 4). (§4.1.1.) **Our AC-4 does not clear even the profile bar** — it
+  diverges outright, which is a stronger failure than the paper reports; see
+  step 8 and the authors' question on §4.1.1.
+- Paper's settings for this case: `CFL_τ = 0.3`, `Δt/Δτ = 5`, `ε_v = −7`, RK2,
+  read at `t = 50 s`.
 - Table 1/2 reproduce qualitatively: error flat for `CFL_t ≤ 0.4`, ~2.4× jump at
   0.6; cost linear in `Δt/Δτ` and in RK stage count; RK order buys no accuracy.
 - Square patch: KE loss 25–32% *less* than δ-SPH across `L/Δx = 200/400/800`;
@@ -1222,7 +1640,7 @@ dual-time machinery). Then §4.2 for conservation, then §4.4/§4.5.
 - Dam break: noise-free `P1` through the void-closure event at `t√(g/H) ≈ 8.4`
   where δ-SPH's acoustic noise swamps the signal.
 
-**Cost metric.** The paper's `𝒞_e = ∫ (m_iter · s_RK / Δt) dt` (Eq. 65) is
+**Cost metric.** The paper's effective cost `e = ∫₀ᵗ (m_iter · s_RK / Δt) dt` (Eq. 65) is
 implementation-independent and should be recorded alongside wall time — it is
 how their numbers are quoted and the only fair way to compare against our δ-SPH.
 
@@ -1232,14 +1650,15 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
 
 1. ~~**Literature sync.**~~ **Done 2026-09-05** — the paper and seven references
    synced, checker green (§6.0). Remaining optional follow-ups: add the §6.2 set
-   to `EXPANSION_CANDIDATES.md`, and consider promoting `marrone2011` from the
+   to `literature/EXPANSION_CANDIDATES.md`, and consider promoting `marrone2011` from the
    extended set to the core (it is cited throughout Parts 1 and 3 but carries no
    abstract, the same case that promoted `dehnen2012` on 2026-09-04).
 2. ~~**Finish the Adami `bodyForce` term** (§4.4).~~ **Done 2026-09-05** —
    `wallPressureExtrapolation(..., bodyForce=...)` on the `'shepard'` and
    `'mirror'` closures, exact on a linear pressure field to float32 machine
-   precision (`tests/test_wallPressure.py`, 6 tests). See §4.4 for the
-   two-gather decomposition and its periodic-axis restriction.
+   precision (`tests/test_wallPressure.py`, 8 tests — the last three cover
+   `wp_wallMoment.py`). See §4.4 for the moment kernel that replaced the
+   original two-gather decomposition and lifted its periodic-axis restriction.
 3. ~~**Generalise the diffusion kernel to an arbitrary scalar field** (§4.3), and
    A/B the projected vs unprojected ψ form.~~ **Done 2026-09-05.**
    - `computeDensityDiffusionDeltaSPH` takes an optional
@@ -1274,12 +1693,13 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
      `io/importIO.py`, `runner/runner.py::_resolveScheme`,
      `runner/caseSpec.py::schemeNames`, `warpSPH/__init__.py`.
    - **The integrator trap is enforced**, not documented:
-     `validateIntegrationScheme` raises on anything but `forwardEuler` at step
-     entry, because the exact-delta hand-off is silently wrong under a
+     `validateIntegrationScheme` raises on anything outside
+     `_EXACT_DELTA_INTEGRATORS` (`forwardEuler` / `explicitEuler`) at step entry, because the exact-delta hand-off is silently wrong under a
      multi-stage integrator (it would run the whole dual-time solve per stage
      and blend). `modules/timestep/wrapper.py` likewise raises rather than
      letting an ACSPH system fall through to the acoustic timestep.
-   - `tests/test_artificialCompressibleScaffold.py`, 14 tests. Note
+   - The scaffold tests (originally `tests/test_artificialCompressibleScaffold.py`,
+     14 tests; since folded into `tests/test_artificialCompressible.py`). Note
      `test_variableStepBdf2DifferentiatesAQuadraticExactly`: the fixed-step
      limit alone would not catch a swapped `Δtⁿ`/`Δtⁿ⁻¹` in Eq. (42).
 5. ~~**The dual-time driver** (§4.1) with AC-2L and RK2 only.~~ **Done
@@ -1322,14 +1742,18 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
    pressure gauge, so the shift is a half-column-drop error at the free
    surface, not a gauge choice.
 
-   *The domain is made non-periodic on this branch.* It is walled on every
-   side, so the periodicity buys nothing, and it actively breaks Eq. (61): the
-   wall-pressure moment is not minimum-image safe, so once a fluid particle
-   drifts within a support radius of the bottom face it becomes a wrapped
-   neighbour of the *top* wall and the moment picks up a whole domain height
-   along gravity. `wallPressureExtrapolation` now detects exactly that (an
-   `O(N)` per-axis test on whether such a pair can exist, one-sided, so it can
-   only over-report) and refuses rather than returning a wrong wall pressure.
+   ~~*The domain is made non-periodic on this branch.*~~ **Withdrawn — see
+   decision 3.** The reason it was is worth keeping: the original two-gather
+   wall-pressure moment was not minimum-image safe, so once a fluid particle
+   drifted within a support radius of the bottom face it became a wrapped
+   neighbour of the *top* wall and the moment picked up a whole domain height
+   along gravity, and `wallPressureExtrapolation` refused rather than returning
+   a wrong wall pressure. `modules/incompressible/wp_wallMoment.py` replaced
+   that decomposition with a real kernel taking `x_ij` from
+   `computeDistanceVec`, so the moment is minimum-image correct by construction.
+   The case is back on the shared `periodic=True` default
+   ([hydrostaticColumn.py:441](src/warpSPH/cases/hydrostaticColumn.py#L441)) and
+   needs no guard, no restriction and no case-level workaround.
 
    *Measured — the scheme is right.* With `p` seeded analytically and `v = 0`
    (`scratchpad` probe, nx=32):
@@ -1360,6 +1784,33 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
    it is the repo's mDBC wall safeguard, applied as an acceleration the way
    `deltaSPH_step` applies it. The paper has neither, because it always has the
    shift. The 200-step figures below were taken with it on.
+
+   **Re-measured 2026-09-20, after the `786e300` freeSlip fix** (same probe,
+   nx=32, 200 steps, one seed — the full four-mode table, with the
+   pairing/void metrics the two-mode table above dropped):
+
+   | mode | `‖v‖_max` | `pairedFraction` | `nnDistP01` | `voidFraction` | `dispMax` | KE | `t` |
+   |---|---|---|---|---|---|---|---|
+   | neither | **6.77** | 0.000 | 0.759 | 0.027 | 0.659 | 1.44e−1 | 0.408 |
+   | `noPenetrationShift` | **0.77** | 0.145 | 0.046 | 0.000 | 0.250 | 4.7e−3 | 0.913 |
+   | `michelShift` | 2.35 | 0.000 | 0.862 | 0.012 | 0.482 | 1.14e−2 | 0.616 |
+   | both | 2.54 | 0.000 | 0.826 | 0.020 | 0.250 | 1.34e−2 | 0.796 |
+
+   The freeSlip fix changed the picture sharply. The old ghost velocity
+   `u_g = u_body − w_t` carried **no normal reflection**; the published form
+   `u_g = u_body + w_t − w_n` does. So `neither` went from 2.9 to **6.77**:
+   the old BC let fluid leak out the corners at moderate speed, the correct one
+   reflects it back at high speed — the failure mode moved from "leaving the
+   box" to "violent corner oscillation" (and the adaptive `Δt` shrinks to
+   match, which is why 200 steps now reach only `t = 0.408`).
+   `noPenetrationShift` stays the best `‖v‖` bound (0.77, bounded,
+   `voidFraction 0`) but its pairing worsened (0.065 → 0.145). `michelShift`
+   is essentially unchanged (2.33 → 2.35) — the shift is insensitive to the
+   wall-velocity sign. And `both` (2.54) is now **worse than the safeguard
+   alone** on `‖v‖` (and marginally worse than `michelShift` alone), so the
+   pre-fix "both is the uniformly best configuration" reading (from the
+   jittered-lattice sweep) does **not** carry over to this regular lattice once
+   the wall BC is correct.
 
    *200 steps, nx=32, to `t = 0.94` (the case's full `tLimit`):* no divergence,
    density **exactly 1.000** throughout (invariant by construction, as it must
@@ -1394,8 +1845,13 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
      wired into `modules/timestep/wrapper.py`'s dispatch. Advective in place of
      acoustic, `0.125 h²/ν` viscous, the symmetric `[0.8, 1.2]×` step-ratio
      clamp, and a `CFL_t > 0.4` warning (Tables 1–2's measured cliff). Eq. (46)
-     as printed is dimensionally impossible — see the new §5.6 — so the first
-     term is implemented as `CFL_t √(h/‖a‖_max)`, not `CFL_t h`.
+     as printed is dimensionally impossible — see the new §5.6 — so its first
+     two terms are implemented together as
+     `CFL_t h / max(REFERENCE_VELOCITY, ‖v‖_max)`, with `REFERENCE_VELOCITY = 1`
+     a named module constant rather than a hidden floor. (Not to be confused
+     with the *separate* body-force constraint `CFL_t √(h/‖a‖_max)`, which
+     Eq. (46) does not have at all and which sits behind
+     `dt_accelerationConstraint` — see §5.6's second half.)
    - **The Table 1/2 sweep mechanism landed 2026-09-05**
      (`scripts/probe_acsphOscillatingDropletTable1.py`, `oscillatingDroplet`
      wired for ACSPH, Monaghan & Rafiee (2013)'s analytic solution re-derived
@@ -1410,8 +1866,12 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
    PST in the literature against them, the new law, and three SPH schemes to
    validate it on — two of which (Vila's ALE and Parshikov & Medin) this repo
    does not have, and both of which need a Riemann solver it also does not have.
-   That plan's **stage A is this step**, unchanged and still the next action;
-   stages B–D are the new scope it opens.
+   That plan's **stage A is this step** — **closed** (status board: law,
+   free-surface treatment, `finalize` wiring, Fig. 1 convergence rate, §5.4
+   free-surface rate, the `hydrostaticColumn` sweep and the `sloshingTank`
+   fix all landed 2026-09-05). Stages B′/B/C/D are the new scope it opens and
+   remain queued behind this plan's own remaining items, per the user's
+   sequencing.
 8. **Remaining operators**: AC-2, AC-4, AC-JST. Reproduce Fig. 2 / Fig. 16.
    → **Done, all four operators implemented, 2026-09-05.** AC-2/AC-2L from
      step 4/5; AC-4 and AC-JST land together in this pass, and AC-JST turned
@@ -1529,18 +1989,23 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
      (or at least a convergence sweep clearly trending to the analytic
      value) before treating any single number here as validated — logged as
      a real, resolution-limited attempt, not a pass.
-   - **`dambreak` vs. Lobovsky et al. 2014 — deferred, not attempted.**
+   - **`dambreak` vs. Lobovsky et al. 2014 — harness built, not yet run.**
      Their pressure bounds (Table 2, `H=300mm`: median/2.5%/97.5% percentile
-     peak pressure at 5 sensor heights) are genuine experimental statistics
-     from 100 repeated trials, quoted at their own physical tank scale.
-     Reproducing them validly needs (a) reconfiguring `dambreakCase`'s
-     geometry to match their exact column/tank proportions (currently
-     dimensionless, unrelated to their `mm` scale) rather than this repo's
-     own historical Koshizuka & Oka proportions, (b) adding per-height
-     pressure-probe diagnostics `dambreak.py` does not yet have, and
-     (c) their own non-dimensionalisation of both pressure and time. None of
-     that is a quick add-on to what exists; flagged here rather than forcing
-     a mismatched comparison.
+     peak pressure at 4 wall sensor heights) are genuine experimental
+     statistics from 100 repeated trials, quoted at their own physical tank
+     scale, so reproducing them validly needed (a) the tank/column geometry at
+     their `mm` scale rather than this repo's historical Koshizuka & Oka
+     proportions, (b) per-height wall pressure probes, and (c) their own
+     non-dimensionalisation (`t* = t√(g/H)`, `P* = P/(ρ₀gH)`).
+     **All three now exist**: `scripts/probe_acsphDambreakLobovsky.py`
+     (committed — tank 1610×600 mm, gate at 600 mm, column 600×300 mm,
+     sensors at z = 3/15/30/80 mm, Table 2 percentiles encoded in mbar against
+     `ρgH`) and `dambreak.py`'s `pressureProbeHeights` diagnostic (MLS
+     interpolation of the fluid pressure at fixed wall sensor points, emitted
+     every step). **What is missing is the run** — `scripts/out_acsphDambreakLobovsky/`
+     does not exist, for either scheme. Note the paper's own §4.5 uses
+     **free-slip** walls, `H/Δx = 400` (2D), RK3, `CFL_t = 0.4`, `Δt/Δτ = 2.0`
+     and displacement shifting; match those before quoting a discrepancy.
 10. **Optional/experimental**, only if the above is clean: `ṽ` material
     derivative (§1.7), internal shifting (Eq. 60), `k₃` term, RK3/RK4.
 
@@ -1594,8 +2059,16 @@ wants to re-check, but the broad sweep this section called for is complete.
 
 ## 9.2 `artificialCompressible`, because it is new
 
-The five cases of Part 7, in the order given there. Nothing beyond §4.1.1 has
-been run at all yet.
+All five cases of Part 7 are wired and have been run (status board, Part 8
+steps 5b/6/8/9). What remains on each is scale, not wiring:
+
+| § | Case | State |
+|---|---|---|
+| 4.1.1 | `hydrostaticColumn` | Run; Fig. 2 operator comparison reproduced qualitatively at nx=48/300 steps. Paper's own settings for this case: `CFL_τ = 0.3`, `Δt/Δτ = 5`, `ε_v = −7`, RK2, `t = 50 s`. |
+| 4.2 | `rotatingSquarePatch` | Run (smoke + AC-4/AC-JST). Fig. 15/16 vs. the BEM crosses of `letouze2013` still deferred on digitization. |
+| 4.3 | `oscillatingDroplet` | Table 1/2 sweep done at reduced scale (nx=24, one period, RK3); cost trend reproduces, error cliff does not. |
+| 4.4 | `impact` | Analytic Marrone Eq. (A.34) implemented; nx=64 crosses the target to 0.1 %. Run at `aspectRatio = 0.5` (`H/L = 1`, Marrone's own figure case), **not** De Courcy's `H = 2L` (`aspectRatio = 0.25` here). |
+| 4.5 | `dambreak` | Lobovsky harness built, not run (step 9). Separately, the Marrone §3.1 long-horizon ACSPH run **diverges at `t* ≈ 6`** — the headline open item (status board 2026-09-20 item 2). |
 
 ## 9.3 Note for later
 
@@ -1608,7 +2081,7 @@ correction to one operator rather than a redesign of the family.
 
 ## Relationship to the other plans
 
-This displaces `DFSPH_IMPROVEMENT_PLAN.md` as the active priority, per the
+This displaces `docs/historic_plans/DFSPH_IMPROVEMENT_PLAN.md` as the active priority, per the
 current decision. `COUPLED_INCOMPRESSIBLE_NEWTON_PLAN.md` remains queued behind
 both. Steps 2 and 3 above are shared infrastructure that benefit the DFSPH work
 regardless of ordering, so they are not sunk cost if priorities shift back.

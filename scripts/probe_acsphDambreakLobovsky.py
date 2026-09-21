@@ -17,7 +17,11 @@ Reference geometry (`literature/lobovsky2014_experimental-dam-break-pressure-loa
 Modelling choices, all standard for this benchmark and noted in the report:
 - Instantaneous dam removal (no gate model).  Lobovsky measure a ~0.069 s
   (t* ~ 0.4) gate motion and argue it is fast enough to disregard.
-- 2D.  No-slip tank walls (the case's own default).
+- 2D.  Free-slip tank walls (`dambreak`'s default since 2026-09-21).  This is
+  what De Courcy et al. 2024 Sec. 4.5 specifies for this case ("a free-slip
+  condition is imposed on the boundary conditions due to the relatively high
+  Reynolds number considered") and what Marrone 2011 Sec. 3 specifies for the
+  sibling dam breaks.
 - The case runs in code units with rho0 = 1; P* divides that out, so the
   comparison is unit-consistent without setting a physical density.
 
@@ -294,7 +298,7 @@ def _report(out: str):
     L(f'| Tank (2D) | {TANK_W*1000:.0f} mm long × {TANK_L*1000:.0f} mm tall |')
     L(f'| Reservoir | {RES_W*1000:.0f} mm wide × {H_FILL*1000:.0f} mm water (H) |')
     L('| Dam removal | instantaneous (no gate model) |')
-    L('| Walls | no-slip |')
+    L('| Walls | free-slip (De Courcy et al. 2024 §4.5) |')
     L(f'| Non-dim | t\\* = t √(g/H), P\\* = P / (ρ₀ g H), ρ₀ g H = {_RHO_G_H_MBAR:.2f} mbar |')
     L(f'| Probe | first-order MLS (Liu–Liu) interpolation of fluid pressure at '
       'the sensor points on the impact wall, every step |')

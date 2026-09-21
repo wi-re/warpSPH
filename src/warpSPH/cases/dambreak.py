@@ -734,15 +734,28 @@ dambreakCase = registerCase(Case(
     params=dict(
         W=4.0,
         band=5,
-        # Tank wall boundary condition. `'constant'` is the historical default
-        # and is kept so no existing run changes -- but note what it means: the
-        # wall particles sit at v = 0 (nothing writes them; there is no rigid
-        # body) and `computeVelocityDiffusion` runs `AllToAll`, so the
-        # artificial-viscosity term drags the fluid against a stationary wall.
-        # That is an effective NO-slip bed, while Marrone 2011 Sec. 3 specifies
-        # FREE slip. `'freeSlip'` matches the fluid tangentially and exerts no
-        # such drag. See `DELTASPH_VALIDATION_PLAN.md` 5.7.
-        wallBC='constant',
+        # Tank wall boundary condition. **FREE SLIP is the default**, because
+        # that is what every reference this case is graded against specifies:
+        # Marrone 2011 Sec. 3 (3.1 and 3.4.1), Lobovsky et al. 2014 / Buchner
+        # 2002, and De Courcy et al. 2024 Sec. 4.5 ("a free-slip condition is
+        # imposed on the boundary conditions due to the relatively high
+        # Reynolds number considered").
+        #
+        # `'constant'` was the historical default and is NOT free slip, despite
+        # adding no physical viscosity term: the wall particles sit at v = 0
+        # (nothing writes them; there is no rigid body) while
+        # `computeVelocityDiffusion` runs `AllToAll`, so the *artificial*
+        # viscosity drags the fluid against a stationary bed -- an effective
+        # NO-slip wall. `DELTASPH_VALIDATION_PLAN.md` 5.7 measured the cost:
+        # the front runs 3.4 m/s instead of 4.13 (reference ~3.5-4.7), impact
+        # moves from t* ~ 2.8 to ~ 2.6 (reference 2.3), and `pb@front` goes
+        # negative (-0.014/-0.018) as the front passes, i.e. an *attracting*
+        # wall that pulls particles into the boundary band. It was kept as the
+        # default only so recorded runs would not move; every run since has
+        # passed `freeSlip` explicitly, so the default is now the correct one.
+        # Pass `'constant'` to reproduce a pre-flip number, or `'noSlip'` for
+        # Marrone Sec. 3.4.2's viscous half, which genuinely wants it.
+        wallBC='freeSlip',
         targetDt=0.0005,
         # Downstream-wall pressure sensors (`ACSPH_PLAN.md` §4.5): heights above
         # the tank bed, in the case's length unit. Empty -> no probing. See
@@ -770,7 +783,10 @@ dambreakCase = registerCase(Case(
         # `pSurf{k}` / `pSurf{k}Star` / `pSurf{k}Nnbr`. Empty -> skipped.
         # `scripts/probe_deltaSPHMarrone34.py` sets Marrone 2011 §3.4's nine
         # probes on the 45° edge, the obstacle roof and the fillet arc.
-        surfacePressureProbes=(),
+        # A list, not a tuple: `buildArgumentParser` only emits flags for
+        # scalars/lists and `test_everyCaseDeclaresItsParamsAsScalarsOrLists`
+        # enforces that, so a tuple here is silently un-overridable from the CLI.
+        surfacePressureProbes=[],
         # 0.0 = query exactly on the wall point. The first-order MLS fit
         # recovers a linear field from the one-sided wall stencil, so on a
         # hydrostatic column the on-wall probe reads ρg·depth to < 1 % (floor

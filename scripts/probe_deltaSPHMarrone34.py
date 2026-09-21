@@ -710,7 +710,7 @@ def main(argv=None):
                     help="mDBC no-penetration correction placement: 'derivative' (in dvdt, historical), 'finalize' (once per step, DualSPHysics-style velocity replacement) or 'off'. DualSPHysics gates this term on SlipMode>=NoSlip, i.e. never applies it under free slip -- which is what Marrone 2011 Sec. 3 specifies. DELTASPH_VALIDATION_PLAN 5.9.")
     ap.add_argument('--wallBC', default=None,
                     choices=('constant', 'freeSlip', 'noSlip', 'extended', 'zeros'),
-                    help="tank wall boundary condition. Marrone 2011 Sec. 3 specifies FREE SLIP; the case default 'constant' leaves the wall at v=0 while the AllToAll artificial viscosity drags against it, i.e. an effective no-slip bed. DELTASPH_VALIDATION_PLAN 5.7.")
+                    help="tank wall boundary condition. Default (case-level) is 'freeSlip', which is what Marrone 2011 Sec. 3 specifies. 'constant' is the pre-2026-09-21 default and is NOT free slip -- it leaves the wall at v=0 while the AllToAll artificial viscosity drags against it, i.e. an effective no-slip bed; pass it to reproduce a pre-flip number. DELTASPH_VALIDATION_PLAN 5.7.")
     ap.add_argument('--integrationScheme', default=None,
                     help="override the case's integrator (default rungeKutta4). "
                          "'symplecticEuler' is the 2-stage kick-drift-kick scheme "

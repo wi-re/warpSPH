@@ -2994,6 +2994,15 @@ viscosity term is added -- true, and beside the point: the artificial viscosity
 is the one that is on.) Fixed by a new `wallBC` param on `dambreak`, default
 `'constant'` so no recorded run changes.
 
+> **Default flipped to `'freeSlip'` on 2026-09-21** (`ACSPH_PLAN.md` §0.3).
+> The `'constant'` default outlived its purpose: every run recorded since this
+> section was written passes `freeSlip` explicitly, and the ACSPH work found
+> the same mismatch independently from De Courcy et al. 2024 §4.5, which also
+> specifies free slip. `cases/dambreak.py` and
+> `caseUtils/weaklyCompressible.py::buildRegions` now default to `'freeSlip'`;
+> `--wallBC constant` reproduces any pre-flip number, and §3.4.2's viscous half
+> must now ask for `noSlip` explicitly.
+
 **Free-slip A/B** (`scratchpad/probe_m31_front.py`, H/dx = 40, RK4, no PST):
 
 | t* | v_front `constant` | v_front `freeSlip` | thick `constant` | thick `freeSlip` | tip lead `constant` | tip lead `freeSlip` |
