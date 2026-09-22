@@ -168,6 +168,31 @@ def computeMdbcDensityEnglish2025(currentState: Any, config: SimulationConfig, s
         _ALPHA_EPS = 1e-30
         alpha = (Sq[ghost] + _ALPHA_EPS * rho0) / (Mb + _ALPHA_EPS)
 
+        # -- Trust ramp: blend the 0th-order Shepard value `alpha` toward
+        # `rho0` as the fluid-neighbour count drops, instead of trusting it
+        # outright whenever `nNbFluid >= 1` (the `hasAny` gate below, kept
+        # only as the true-zero-neighbour hard fallback). `density2025.py`'s
+        # 'ramped' scheme already does exactly this to blend its 1st-order
+        # fit down to ITS OWN Shepard value (`_MDBC_NBR_FLOOR`/`_RAMP`); this
+        # scheme has no gradient block to blend away, so the same ramp is
+        # applied one level down, to `alpha` itself -- the quantity that
+        # `FREESLIP_DAMBREAK_FINDINGS.md` §6 measured collapsing to 0.525
+        # under a sparse/skewed impact-spray sample (`nNbFluid` a handful,
+        # not the well-supported ~15-30 of a quiescent wall row) while
+        # `P_b`/`rho_b` just carry that bad value through unchanged (no
+        # blend of their own downstream). A magnitude floor on the final
+        # `rho_b` (tried first, reverted here) caught the same rows but also
+        # any well-conditioned deep negative-pressure reading that happened
+        # to sit below the floor -- this ramp instead only discounts rows
+        # whose VALUE fit itself is under-supported, which is the actual
+        # failure condition, so it needs no per-case opt-in.
+        _ALPHA_NBR_FLOOR = 4.0
+        _ALPHA_NBR_RAMP = 1.0
+        wAlpha = torch.clamp(
+            (nNbFluid.to(alpha.dtype) - _ALPHA_NBR_FLOOR) / _ALPHA_NBR_RAMP,
+            0.0, 1.0)
+        alpha = wAlpha * alpha + (1.0 - wAlpha) * rho0
+
         # -- Eq. (10), corrected sign (module docstring / plan §5.1):
         # P_b = P_g + rho0 * dot(g - a_b, relPos). `a_b` is the boundary
         # particle's own rigid-body acceleration -- zero for every static wall

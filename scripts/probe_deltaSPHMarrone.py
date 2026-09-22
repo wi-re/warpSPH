@@ -281,6 +281,12 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
     c0 = float(getattr(r.ctx.schemeConfig.fluid, 'fixedSoundSpeed', 0.0) or 0.0)
     meta = dict(
         scheme=scheme, nx=nx, c0Ratio=float(c0Ratio), tLimit=tLimit,
+        # The *effective* wall BC, read back off the resolved spec rather than
+        # the CLI flag (which is None whenever the case default applies). Since
+        # the 2026-09-21 default flip ('constant' -> 'freeSlip') this is the
+        # only way to tell a free-slip run from a pre-flip no-slip-bed one;
+        # every npz written before that date simply lacks the key.
+        wallBC=str(r.ctx.spec.params.get('wallBC', 'freeSlip')),
         freezeDiffusionAcrossStages=bool(getattr(r.ctx.schemeConfig, 'freezeDiffusionAcrossStages', False)),
         # Read back off the resolved config, not off the CLI flag -- the whole
         # reason Sec. 5.1.1 exists is that what this case *actually* ran was not
