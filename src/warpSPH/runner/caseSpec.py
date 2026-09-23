@@ -69,6 +69,15 @@ class CaseSpec:
     # When set, overrides the tLimit-derived step count. Tests use this to run a
     # fixed, short trajectory without having to reason about the adaptive dt.
     nSteps: Optional[int] = None
+    #: Abort the run (`RunResult.diverged = True`) once the adaptive `dt`
+    #: has sat at `minDt` for this many consecutive steps. `None` (default):
+    #: no watchdog, unchanged behaviour. A healthy adaptive-`dt` run should
+    #: never need its floor for long -- pinning there usually means a single
+    #: outlier particle (e.g. an escaper past a wall) has driven the CFL
+    #: estimate to its minimum and simulated time has effectively frozen,
+    #: which otherwise burns wall-clock for the rest of `tLimit`/`nSteps`
+    #: without the run advancing. See `ACSPH_PLAN.md`'s dam-break stall.
+    stallDtSteps: Optional[int] = None
 
     # --- runtime ------------------------------------------------------------
     precision: str = 'float32'
@@ -224,6 +233,8 @@ _FIELD_HELP = {
     'minDt': 'floor on the adaptive timestep',
     'maxDt': 'ceiling on the adaptive timestep',
     'nSteps': 'stop after this many steps instead of at tLimit',
+    'stallDtSteps': 'abort once dt has sat at minDt for this many consecutive '
+                    'steps (a stuck-dt watchdog); unset disables it',
     # -- runtime --
     'precision': 'scalar precision; resolved before import, so pass it to '
                  'warpsph-run rather than to a case module',

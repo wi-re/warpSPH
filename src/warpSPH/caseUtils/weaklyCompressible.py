@@ -312,8 +312,88 @@ def buildPresetObstacles(maxExtent: float, offsetX: float, L: float, fillRatio: 
             "obstacleType": "marroneRoundedCorner",
             "aoa": 0.0,
         },
+        # `dambreak`'s own near/upstream bottom corner (where the column
+        # sits), rounded with a concave fillet of radius `maxExtent` (physical
+        # units) -- `offsetX`/`offsetY`/`aspectRatio`/`aoa` ignored, same as
+        # the Marrone types. See `_nearCornerFilletSDF`.
+        "nearCornerFillet": {
+            "maxExtent": maxExtent,
+            "offsetX": 0.0,
+            "offsetY": 0.0,
+            "aspectRatio": 1.0,
+            "obstacleType": "nearCornerFillet",
+            "aoa": 0.0,
+        },
     }
     return obstacles
+
+
+def _nearCornerFilletSDF(L: float, W: float, radius: float, side: str = 'left',
+                         dx: float = 0.0, interior: Any = None):
+    """Concave quarter-circle fillet at the tank's UPSTREAM (dam-release-side)
+    bottom corner -- `x -> signed distance` (negative inside solid), the same
+    box-minus-disc construction `_marroneSharpEdgeSDF` uses for the
+    *downstream* corner, generalised to an arbitrary radius and to either
+    bottom corner instead of that case's fixed `H = W/10` geometry.
+
+    Motivation (`FREESLIP_DAMBREAK_FINDINGS.md`'s ACSPH dam-break stall):
+    watching the video showed the dam column pumping particles through the
+    near/left corner under sustained hydrostatic load, well before the
+    far-wall impact -- the opposite corner from the one Marrone 2011's own
+    fillet rounds. `cases/weaklyCompressible.filletedDomainBoundarySdf`
+    reproduced and isolated the mechanism on `hydrostaticColumn` (a
+    periodic-vs-walled A/B: corners alone destabilise ACSPH almost
+    immediately); this is the same construction wired into `dambreak`'s own
+    obstacle-union path so the fix can be tested on the actual case and
+    scheme the failure was first seen on.
+
+    Centred-domain coordinates, `x in [-W/2, W/2]`, `y in [-L/2, L/2]`, bed at
+    `y = -L/2`. `side='left'` fillets the upstream wall corner at `x=-W/2`
+    (where `dambreak`'s column sits); `side='right'` the downstream one
+    (redundant with `marroneRoundedCorner`'s own fixed-H version, kept for
+    symmetry/A-B convenience).
+
+    `dx`, when given, embeds the two fillet-box edges that coincide with the
+    plain wall/floor SDF `dx/2` past the true wall/floor, exactly as
+    `_marroneSharpEdgeSDF` does -- breaking the exact-zero-level seam that
+    otherwise gives the ghost-gradient solver a degenerate direction right at
+    it (`DELTASPH_VALIDATION_PLAN.md` 5.10).
+
+    `interior`, when given, is the run's actual interior domain (after
+    `alignInteriorDomainToLattice`), and the corner is taken from it instead of
+    the nominal `W x L` box. The alignment moves the wall surfaces `dx/2` inward,
+    so a fillet built on the nominal box sits `dx/2` off diagonally: its arc
+    then crosses the real wall and floor at ~18 deg (r = 10 dx) instead of
+    meeting them tangentially, leaving two concave kinks, fluid particles
+    0.085 dx from the solid and ghost nodes right on the surface.
+    """
+    assert side in ('left', 'right')
+    if interior is not None:
+        bed = float(interior.min[1])
+        cornerX = float(interior.min[0]) if side == 'left' else float(interior.max[0])
+    else:
+        bed = -L / 2.0
+        cornerX = -W / 2.0 if side == 'left' else W / 2.0
+    sx = 1.0 if side == 'left' else -1.0
+    embed = 0.5 * float(dx)
+    r = float(radius)
+    halfX = (r + embed) / 2.0
+    halfY = (r + embed) / 2.0
+    Cx = cornerX + sx * (r / 2.0 - embed / 2.0)
+    Cy = bed + r / 2.0 - embed / 2.0
+    discC = (cornerX + sx * r, bed + r)
+
+    boxfn = getSDF("box")["function"]
+    circfn = getSDF("circle")["function"]
+
+    def sdf(x: torch.Tensor) -> torch.Tensor:
+        dev, dt = x.device, x.dtype
+        t = lambda v: torch.tensor(v, device=dev, dtype=dt)
+        dBox = boxfn(x - t([Cx, Cy]), t([halfX, halfY]))
+        dOutDisc = -circfn(x - t(discC), t(r))
+        return torch.maximum(dBox, dOutDisc)
+
+    return sdf
 
 
 #: Marrone et al. 2011 Fig. 19, all lengths in obstacle heights H. The tank is
@@ -473,6 +553,7 @@ def buildObstacleSDF(
     schemeConfig: Any,
     L: float,
     W: float | None = None,
+    interior: Any = None,
 ):
     if W is None:
         W = L
@@ -524,6 +605,15 @@ def buildObstacleSDF(
     if obstacleType == "marroneRoundedCorner":
         return _marroneSharpEdgeSDF(L, W, obstacle=False,
                                      dx=float(getattr(config, 'dx', 0.0) or 0.0))
+    if obstacleType in ("nearCornerFillet", "farCornerFillet"):
+        # `maxExtent` doubles as the fillet radius here (physical units,
+        # matching `spec.L`) rather than a shape half-extent -- `trs` (offset
+        # / rotation / scale) does not apply, same as the Marrone types.
+        # See `_nearCornerFilletSDF`.
+        side = 'left' if obstacleType == "nearCornerFillet" else 'right'
+        return _nearCornerFilletSDF(L, W, maxExtent, side=side,
+                                    dx=float(getattr(config, 'dx', 0.0) or 0.0),
+                                    interior=interior)
 
     raise ValueError(f"Unsupported obstacleType: {obstacleType}")
 
@@ -574,6 +664,7 @@ def build_sdfs(config, schemeConfig, band: int, args, domain, interiorDomain, ob
             schemeConfig,
             args.L,
             args.W,
+            interior=interiorDomain,
         )
 
     domain_sdf = lambda x: domainSDF(x, domain_domain, invert=False)

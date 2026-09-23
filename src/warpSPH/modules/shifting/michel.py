@@ -79,7 +79,20 @@ def computeMichelShift(currentState, config, schemeConfig, domain, adjacency, be
             R=0.2, n=4, volumeWeighted=True,
         )
 
-        # Eq. (20): U_char_i = U_lim_i = max_j |(u_j-u_i).x_hat_ij|
+        # Eq. (20): U_char_i = U_lim_i = max_j |(u_j-u_i).x_hat_ij|.
+        #
+        # **Deliberate deviation from Sec. 6.1**, which excludes wall/ghost
+        # particles here (their mirrored velocity adds 2 u.n next to a wall, so
+        # Eq. (50)'s consistency needs them out). Michel's walls are per-pair
+        # "moving ghosts" (Eq. 49); ours are fixed particles carrying a
+        # Shepard-averaged mirror, and including them measurably matters: on
+        # the ACSPH dam break (nx=24, FREESLIP_DAMBREAK_FINDINGS.md) the
+        # wall-inflated U_char strengthens the shift right at the wall -- and
+        # since grad C above includes the walls, that shift points *away* from
+        # them, countering the negative-pressure suction that pulls sparse
+        # particles into the wall. Fluid-only U_char failed at t* 5.1 (NaN,
+        # 2/2 runs); fluid + walls survived to t* 8.1 (2/2); no shift at all
+        # stalled at t* 7.1. Default `AllToAll` = fluid + wall particles.
         U_char = computeUCharWarp(
             currentState,
             operationProperties=OperationProperties(

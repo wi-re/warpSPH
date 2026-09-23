@@ -121,7 +121,8 @@ from .weaklyCompressible import (WEAKLY_COMPRESSIBLE_DEFAULTS,
                                  WEAKLY_COMPRESSIBLE_PARAMS, boundaryRegion,
                                  buildRegionSystem, configureArtificialCompressible,
                                  configureWeaklyCompressible,
-                                 domainBoundarySdf, fluidRegion, shapeSdf,
+                                 domainBoundarySdf, filletedDomainBoundarySdf,
+                                 fluidRegion, shapeSdf,
                                  particleDistributionMetrics)
 from ..enumTypes import isArtificialCompressibleScheme
 
@@ -231,8 +232,19 @@ def buildSystem(ctx: RunContext):
     # `nu > 0`, `DFSPH_FINDINGS.md` 1.14). Both go through
     # `computeBoundaryVelocities`; the schemes pick it up in step 2.
     wallBC = BCType[ctx.param('wallBC')]
+    # `cornerFilletRadius` (0 = off, the default -- plain sharp corners,
+    # unchanged behaviour): rounds the bottom-left/right corners the fluid
+    # column actually touches, in units of `dx`. See
+    # `filletedDomainBoundarySdf`'s own docstring for why -- the
+    # periodic-vs-walled A/B this option exists to follow up on.
+    filletRadiusDx = ctx.param('cornerFilletRadius')
+    if filletRadiusDx:
+        boundarySdf = filletedDomainBoundarySdf(
+            ctx, radius=float(filletRadiusDx) * ctx.config.dx, dx=ctx.config.dx)
+    else:
+        boundarySdf = domainBoundarySdf(ctx)
     regions = [fluidRegion(ctx, columnSdf(ctx)),
-               boundaryRegion(ctx, domainBoundarySdf(ctx), kind=wallBC)]
+               boundaryRegion(ctx, boundarySdf, kind=wallBC)]
     return buildRegionSystem(ctx, regions)
 
 
@@ -482,6 +494,16 @@ hydrostaticColumnCase = registerCase(Case(
         bulkMargin=8.0,
         wallMargin=6.0,
         markerSize=8,
+        # ACSPH only: override `acParams.epsilonV`/`noPenetrationShift` via
+        # the shared `configureArtificialCompressible` helper. `None`/`False`
+        # leave the paper's defaults alone -- see that helper's docstring.
+        epsilonV=None,
+        noPenetrationShift=False,
+        # 0 (default, off) = plain sharp bottom corners, unchanged behaviour.
+        # > 0 rounds the bottom-left/right corners with a concave fillet of
+        # this radius in units of `dx` -- see `buildSystem` and
+        # `filletedDomainBoundarySdf`'s docstring.
+        cornerFilletRadius=0.0,
     ),
 ))
 

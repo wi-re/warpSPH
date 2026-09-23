@@ -220,6 +220,14 @@ class ArtificialCompressibleSystem(BaseIntegrationSystem):
                     dt=dt,
                 )
                 self.state.positions = self.state.positions + dx
+                # Eq. (59): D(x)/Dt must stay Lagrangian across the shift.
+                # `rollHistory` below stores the *shifted* x^{n+1}, so without
+                # this the next BDF difference x^{n+1} - x^n reads the shift as
+                # real motion. Moving x^n (about to become x^{n-1}) by the same
+                # dx cancels it -- a shift is a relabelling of where the
+                # particle sits, not a displacement of the fluid.
+                if schemeConfig.acParams.bdfShiftCorrection and self.positionsPrev is not None:
+                    self.positionsPrev = self.positionsPrev + dx
 
         if schemeConfig is not None:
             for rigidBody in schemeConfig.rigidBodies:

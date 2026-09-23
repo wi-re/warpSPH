@@ -132,7 +132,19 @@ def solveShifting(
                 
             if freeSurface:
                 with record_function(f"[warpSPH] - (shift) - detectFreeSurface"):
-                    if schemeConfig.shiftProperties.reuseNormals and systemState.surfaceNormals is not None and systemState.surfaceLambdas is not None:
+                    # Michel et al. 2022's Eq. (47)/(48) need the *raw* free-surface
+                    # set (d^FS is the distance to the nearest surface particle),
+                    # but every scheme caches the *dilated* set in
+                    # `surfaceIndicators` (`fsm > 0.5` in deltaSPH/divergenceFree/
+                    # artificialCompressible). Reusing it put every particle within
+                    # one support of the surface at d^FS = 0 -- beta = 1 and the
+                    # normal fully cancelled across that whole layer -- so
+                    # michel2022 always re-detects.
+                    reuseCached = (schemeConfig.shiftProperties.reuseNormals
+                                   and schemeConfig.shiftProperties.scheme != ShiftingScheme.michel2022
+                                   and systemState.surfaceNormals is not None
+                                   and systemState.surfaceLambdas is not None)
+                    if reuseCached:
                         n = systemState.surfaceNormals
                         lMin = systemState.surfaceLambdas
                         surfaceIndicator = systemState.surfaceIndicators == 1
@@ -173,17 +185,9 @@ def solveShifting(
                         # free-surface mask -- `fs` on the fresh-detect path
                         # (detectFreeSurface returns `(fsm_raw, fs_dilated,
                         # ...)`, and this file's own unpacking above binds
-                        # position 1 to the name `fs`), or the cached
-                        # indicator on the reuseNormals fast path.
-                        if (schemeConfig.shiftProperties.reuseNormals
-                                and systemState.surfaceNormals is not None
-                                and systemState.surfaceLambdas is not None):
-                            # Mirrors the reuseNormals fast-path condition
-                            # above, which is exactly when `fs`/`fsm` were
-                            # never freshly bound in this call.
-                            rawSurfaceMask = (systemState.surfaceIndicators == 1).to(n.dtype)
-                        else:
-                            rawSurfaceMask = fs
+                        # position 1 to the name `fs`) -- always freshly bound
+                        # for michel2022, see `reuseCached`.
+                        rawSurfaceMask = fs.to(n.dtype)
                         michelDFS, michelNTilde = computeNearestSurfaceNormalWarp(
                             systemState,
                             operationProperties=OperationProperties(

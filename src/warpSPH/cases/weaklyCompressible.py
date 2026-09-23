@@ -24,7 +24,7 @@ from ..configurations.region import BCType, RegionType
 from ..initializers import initializeWeaklyCompressibleSimulation
 from ..modules import setupWeaklyCompressibleTimestep
 from warpSPHCore import sphKernelScale
-from ..regions import buildRegion, filterRegion, sampleDomainSDF
+from ..regions import buildRegion, filterRegion, sampleDomainSDF, domainSDF
 from ..runner import RunContext, resolveEnum
 from ..utils import buildDomainDescription
 from ..geometry import getSDF, operatorDict, sampleSDF
@@ -181,6 +181,22 @@ def configureArtificialCompressible(ctx: RunContext) -> None:
     schemeConfig.surfaceDetectionConfig.active = ctx.param('freeSurface')
     schemeConfig.acParams.nu = ctx.param('nu', schemeConfig.acParams.nu)
 
+    # `acParams.epsilonV`'s own docstring (`configurations/artificialCompressible.py`):
+    # `None` (default) leaves the paper's `-6.0` alone. This repo runs float32
+    # by default, where `-6.0` is measured to never converge (plateaus ~-5.8),
+    # so every step burns the full `maxPseudoIterations` budget -- pass
+    # `-5.0` for a >6x step-time cut with no measured behaviour change
+    # (`FREESLIP_DAMBREAK_FINDINGS.md`).
+    epsilonV = ctx.param('epsilonV')
+    if epsilonV is not None:
+        schemeConfig.acParams.epsilonV = float(epsilonV)
+
+    # `noPenetrationShift`: off by default repo-wide (not in the paper -- see
+    # the config field's own docstring). Available here as a case-agnostic
+    # opt-in for any case using this shared configurer.
+    if ctx.param('noPenetrationShift'):
+        schemeConfig.noPenetrationShift = True
+
     if ctx.param('gravity', False):
         schemeConfig.gravityConfig.active = True
         schemeConfig.gravityConfig.type = resolveEnum(GravityType,
@@ -221,6 +237,86 @@ def domainBoundarySdf(ctx: RunContext) -> Callable:
     """Walls: everything outside the interior domain."""
     interior = ctx.scratch['interiorDomain']
     return lambda x: sampleDomainSDF(x, interior, invert=False)
+
+
+def filletedDomainBoundarySdf(ctx: RunContext, radius: float,
+                              corners: Sequence[str] = ('bottomLeft', 'bottomRight'),
+                              dx: Optional[float] = None) -> Callable:
+    """`domainBoundarySdf`, with one or more bottom corners of the interior
+    domain rounded off by a concave quarter-circle fillet of the given
+    `radius` -- the same construction `caseUtils.weaklyCompressible.
+    _marroneSharpEdgeSDF` uses for Marrone 2011 Fig. 19's downstream corner
+    (box-corner minus a disc, unioned with the plain wall SDF), generalised
+    to an arbitrary corner/radius instead of that case's fixed `H = W/10`
+    downstream-only geometry.
+
+    Motivation (`FREESLIP_DAMBREAK_FINDINGS.md`'s ACSPH dam-break stall): a
+    sharp interior tank corner gives the ghost-particle surface-normal solver
+    an ambiguous direction to resolve. A periodic-vs-walled A/B on
+    `hydrostaticColumn` (identical everything else, only whether real side
+    walls/corners exist) confirmed corners alone -- not a slow hydrostatic
+    soak -- destabilise ACSPH's pressure field almost immediately
+    (`pressureSlopeRatio` swinging -50..+74 within 30 steps walled, vs. a
+    clean ~1.0 periodic). This helper tests whether removing the corner's
+    normal ambiguity (a smooth concave arc instead of a point) fixes that.
+
+    `corners`: any of `'bottomLeft'`/`'bottomRight'` -- the only two a
+    bottom-anchored fluid column (`hydrostaticColumn`, `dambreak`) can touch.
+
+    `dx`, when given (recommended: `ctx.config.dx`), embeds the two
+    fillet-box edges that coincide with the plain wall/floor SDF `dx/2` past
+    the true wall/floor -- breaking the exact-zero-level seam between the two
+    SDFs, which `_marroneSharpEdgeSDF`'s own docstring found otherwise gives
+    the ghost-gradient solver a degenerate direction to resolve right at the
+    seam (`DELTASPH_VALIDATION_PLAN.md` 5.10).
+    """
+    interior = ctx.scratch['interiorDomain']
+    xlo = float(interior.min[0])
+    xhi = float(interior.max[0])
+    ylo = float(interior.min[1])
+    embed = 0.5 * float(dx) if dx else 0.0
+    r = float(radius)
+
+    boxfn = getSDF("box")["function"]
+    circfn = getSDF("circle")["function"]
+
+    def _cornerFilletFn(cornerX: float, side: str) -> Callable:
+        # `side` picks which way the fluid lies from the corner along x:
+        # 'bottomLeft' -> fluid at +x, wall at x=cornerX (=xlo); 'bottomRight'
+        # -> fluid at -x, wall at x=cornerX (=xhi). The box's two edges that
+        # coincide with an adjoining SDF (the wall at `cornerX`, the floor at
+        # `ylo`) get pushed `embed` past it; the two "true" fillet edges (the
+        # box's far corner, where the disc is centred) stay exact.
+        sx = 1.0 if side == 'bottomLeft' else -1.0
+        halfX = (r + embed) / 2.0
+        halfY = (r + embed) / 2.0
+        Cx = cornerX + sx * (r / 2.0 - embed / 2.0)
+        Cy = ylo + r / 2.0 - embed / 2.0
+        discC = (cornerX + sx * r, ylo + r)
+
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            dev, dt = x.device, x.dtype
+            t = lambda v: torch.tensor(v, device=dev, dtype=dt)
+            dBox = boxfn(x - t([Cx, Cy]), t([halfX, halfY]))
+            dOutDisc = -circfn(x - t(discC), t(r))
+            return torch.maximum(dBox, dOutDisc)
+        return fn
+
+    filletFns = []
+    if 'bottomLeft' in corners:
+        filletFns.append(_cornerFilletFn(xlo, 'bottomLeft'))
+    if 'bottomRight' in corners:
+        filletFns.append(_cornerFilletFn(xhi, 'bottomRight'))
+    if not filletFns:
+        raise ValueError(f'filletedDomainBoundarySdf: no recognised corners in {corners!r}')
+
+    def combined(x: torch.Tensor) -> torch.Tensor:
+        d = domainSDF(x, interior, invert=False)
+        for fn in filletFns:
+            d = torch.minimum(d, fn(x))
+        return d
+
+    return lambda x: sampleSDF(x, combined, invert=False)
 
 
 def shapeSdf(name: str, size=None, offset=None, invert: bool = False, *,

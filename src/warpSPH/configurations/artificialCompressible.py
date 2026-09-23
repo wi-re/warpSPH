@@ -75,7 +75,24 @@ class ArtificialCompressibilityParams:
     rkStages: int = field(default=2, metadata={'description': 'Pseudo-time RK stages (2/3/4)'})
 
     #: `log10` convergence target for `eps_v` (Eqs. 47-48). -6 general use,
-    #: -8 for violent impact.
+    #: -8 for violent impact -- the paper's own recommended operating point,
+    #: kept as the default here for fidelity to it.
+    #:
+    #: **Performance trap at this repo's default `float32` precision**
+    #: (`CaseSpec.precision`): `convergenceMetric` normalizes the residual by
+    #: `1/N` particles, not `1/sqrt(N)`, so the target gets *stricter* at
+    #: higher resolution -- and float32 residual noise plus that scaling
+    #: together mean `-6.0` is often simply unreachable. Measured on the
+    #: dam break at nx=70 (`ACSPH_PLAN.md`'s 2026-09-20 pass, item 3): the
+    #: fixed point asymptotes at `eps_v ~ -5.8` and never reaches `-6.0`, so
+    #: *every* real step burns the full `maxPseudoIterations` (200) budget --
+    #: confirmed again in this repo's own `FREESLIP_DAMBREAK_FINDINGS.md`
+    #: session (the plateau holds from the very first step, not just under
+    #: violent impact). `-5.0` converges in ~31 iterations on that same case
+    #: -- a >6x step-time cut -- and is what that long run actually used.
+    #: Left at the paper's `-6.0` here (a float64 run, or a case relying on
+    #: exact paper fidelity, still wants it); pass `-5.0` explicitly for any
+    #: float32 run where step cost matters.
     epsilonV: float = field(default=-6.0, metadata={'description': 'log10 convergence target'})
     #: The floor in `U_eps = max(min(|v|_max, U_char), eps_s)`, Eq. (48).
     epsilonS: float = field(default=1e-5, metadata={'description': 'U_eps floor (Eq. 48)'})

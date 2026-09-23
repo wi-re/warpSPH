@@ -57,6 +57,7 @@ from ..caseUtils import (SimulationProperties, buildDomain, buildPresetObstacles
 from ..caseUtils.weaklyCompressible import alignInteriorDomainToLattice
 from ..caseUtils.weaklyCompressible import buildObstacleSDF
 from ..configurations.moduleConfigurations.gravity import GravityType
+from ..configurations.moduleConfigurations.shifting import ShiftingProjectionScheme, ShiftingScheme
 from ..enumTypes import isArtificialCompressibleScheme, isIncompressibleScheme
 from ..initializers import initializeWeaklyCompressibleSimulation
 from ..modules import setupWeaklyCompressibleTimestep
@@ -221,7 +222,15 @@ def _configureArtificialCompressibleExtra(ctx: RunContext) -> None:
     handful of things that helper would otherwise have done.
     """
     schemeConfig = ctx.schemeConfig
-    schemeConfig.shiftProperties.active = False
+    # Michel et al. 2022 shifting, as De Courcy et al. 2024 Sec. 4.5 run this
+    # case. It used to be forced off here, and without it the run pairs from
+    # step 1 (`pairedFraction` ~0.2, `nnDistP01` ~0.06 dx by the impact),
+    # which seeds the wall leak and the dt collapse in
+    # FREESLIP_DAMBREAK_FINDINGS.md. `--shifting False` still turns it off.
+    shiftingParam = ctx.param('shifting', None)
+    schemeConfig.shiftProperties.active = True if shiftingParam is None else bool(shiftingParam)
+    schemeConfig.shiftProperties.scheme = ShiftingScheme.michel2022
+    schemeConfig.shiftProperties.projectionScheme = ShiftingProjectionScheme.michel2022
 
     # Eq. (46) as the paper writes it has no body-force / acceleration
     # constraint -- `modules/timestep/artificialCompressible.py` adds one
@@ -236,6 +245,33 @@ def _configureArtificialCompressibleExtra(ctx: RunContext) -> None:
     # §4.5 / §5.6 and the authors' question there.
     if not ctx.param('acAccelConstraint'):
         schemeConfig.dt_accelerationConstraint = False
+
+    if ctx.param('noPenetrationShift'):
+        schemeConfig.noPenetrationShift = True
+
+    # `acParams.epsilonV`'s own docstring (`configurations/artificialCompressible.py`):
+    # `None` (default) leaves the paper's `-6.0` alone. This repo runs float32
+    # by default, where `-6.0` is measured to never converge on this case
+    # (plateaus ~-5.8, so every step burns the full 200-iteration pseudo-time
+    # cap) -- pass `-5.0` for a >6x step-time cut with no measured behaviour
+    # change (`FREESLIP_DAMBREAK_FINDINGS.md`).
+    epsilonV = ctx.param('epsilonV')
+    if epsilonV is not None:
+        schemeConfig.acParams.epsilonV = float(epsilonV)
+
+    # Viscous stabilisation, De Courcy et al. 2024 Sec. 4: `nu = alpha_nu h c0 / K`
+    # with `alpha_nu = 0.01` in every case, and `c0 = 50 sqrt(g H)` for the dam
+    # break (Sec. 4.5, the delta-SPH sound speed ACSPH borrows only to fix nu).
+    # Without it the run is effectively inviscid (`acParams.nu = 1e-6`, ~4000x
+    # less at nx=70) and a thinly-supported free-surface particle at a wall
+    # contact runs away in negative pressure (FREESLIP_DAMBREAK_FINDINGS.md).
+    # `acAlphaNu=None` keeps the directly-set physical `acParams.nu`.
+    alphaNu = ctx.param('acAlphaNu')
+    if alphaNu is not None:
+        depth = ctx.param('fillRatio') * ctx.spec.L
+        schemeConfig.acParams.alphaNu = float(alphaNu)
+        schemeConfig.acParams.referenceSoundSpeedForViscosity = float(
+            50.0 * (ctx.param('gravityMagnitude') * depth) ** 0.5)
 
     # Eq. (48)'s U_char (ACSPH_PLAN.md §5.5): sqrt(g H), the free-fall speed
     # over the column's own height -- the same choice `hydrostaticColumn`
@@ -298,7 +334,8 @@ def buildSystem(ctx: RunContext):
         ctx.scratch['obstacleSDF'] = buildObstacleSDF(
             obstacle['obstacleType'], obstacle['offsetX'], obstacle['offsetY'],
             obstacle['maxExtent'], obstacle['aspectRatio'], obstacle['aoa'],
-            ctx.config, ctx.schemeConfig, ctx.spec.L, ctx.param('W'))
+            ctx.config, ctx.schemeConfig, ctx.spec.L, ctx.param('W'),
+            interior=ctx.scratch['interiorDomain'])
 
     return initializeWeaklyCompressibleSimulation(
         ctx.schemeConfig.regions, ctx.config, ctx.schemeConfig,
@@ -843,6 +880,28 @@ dambreakCase = registerCase(Case(
         # timestep (default). Set False for the paper's literal advective +
         # viscous constraint set -- see `_configureArtificialCompressibleExtra`.
         acAccelConstraint=True,
+        # ACSPH only: `ArtificialCompressibleSPHConfig.noPenetrationShift`, the
+        # mDBC wall-confinement safeguard -- off by default repo-wide (it is
+        # not in De Courcy et al. 2024, only the free-slip velocity mirror
+        # is). `FREESLIP_DAMBREAK_FINDINGS.md` item 1: under a violent dam-break
+        # impact the mirror alone lets fluid leak past the wall (measured at
+        # nx=24: 77 particles / 7.4 dx of penetration by t* = 8.09), and at
+        # finer resolution (nx=70) that same leak has been observed to fling a
+        # single particle to extreme velocity, which pins Eq. (46)'s advective
+        # `dt` at its floor and freezes simulated time (`stallDtSteps`). With
+        # this on at nx=24 the leak drops to 0 particles / 1.05 dx by the same
+        # t*, peak velocity drops 9.68 -> 5.95 m/s, and the run needs *fewer*
+        # steps (no escaper tightening the CFL) -- not yet confirmed at nx=70,
+        # the resolution where the stall itself was observed.
+        noPenetrationShift=False,
+        # ACSPH only: override `acParams.epsilonV` (the paper's `-6.0`
+        # default). `None` leaves it alone; see `_configureArtificialCompressibleExtra`
+        # for why a float32 run wants `-5.0`.
+        epsilonV=None,
+        # ACSPH only: the paper's artificial viscosity `alpha_nu` (Sec. 4:
+        # 0.01, with `c0 = 50 sqrt(g H)`). `None` falls back to the physical
+        # `acParams.nu`; see `_configureArtificialCompressibleExtra`.
+        acAlphaNu=0.01,
         # The column is `fluidWidth * W` wide by `fillRatio * L` tall, in the
         # bottom-left corner of a `W x L` tank. These two give 0.667 x 1.333 in
         # the 4 x 2 tank: the canonical Koshizuka & Oka proportions, a column

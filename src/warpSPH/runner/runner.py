@@ -279,6 +279,9 @@ def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
                                       stepTime_ms=0.0))
 
     stepResult = None
+    # `stallDtSteps` watchdog state: counts consecutive steps whose *next*
+    # dt landed on the floor. Reset whenever dt lifts back off it.
+    dtAtFloorStreak = 0
 
     showProgress = spec.progress if spec.progress is not None else sys.stderr.isatty()
     steps, progress = _stepIterator(nSteps, spec.tLimit, timeLimited,
@@ -323,6 +326,25 @@ def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
         if case.diagnostics is not None:
             row.update(case.diagnostics(ctx, runningState))
         result.trajectory.append(row)
+
+        # `stallDtSteps` watchdog: a healthy adaptive-dt run should never sit
+        # at `minDt` for long. When it does, simulated time is effectively
+        # frozen (a single outlier particle typically pins the global CFL
+        # estimate -- see ACSPH_PLAN.md's dam-break stall) and every further
+        # step burns wall-clock without progress, so stop rather than run out
+        # the clock to tLimit/nSteps at the floor.
+        if spec.stallDtSteps is not None and ctx.config.minDt is not None:
+            if _scalar(ctx.config.dt) <= ctx.config.minDt * 1.0001:
+                dtAtFloorStreak += 1
+            else:
+                dtAtFloorStreak = 0
+            if dtAtFloorStreak >= spec.stallDtSteps:
+                print(f'dt has been pinned at the minDt floor '
+                      f'({ctx.config.minDt:g}) for {dtAtFloorStreak} consecutive '
+                      f'steps as of step {absStep} (t={t:g}); stopping -- '
+                      f'simulated time is effectively frozen.')
+                result.diverged = True
+                break
 
         if progress is not None:
             if timeLimited:

@@ -369,6 +369,7 @@ def artificialCompressible_step(
     alphaT, betaT, gammaT, bdfOrder = currentSystem.bdfCoefficients(dt)
     tableau = getButcherTableau(_TABLEAUS[acParams.rkStages])
     fluid = currentState.kinds == 0
+    fluidRows = fluid.unsqueeze(-1)
 
     x0 = currentState.positions
     v0 = currentState.velocities
@@ -394,8 +395,12 @@ def artificialCompressible_step(
                                                adjacency) / dt
 
         gravity = computeGravity(currentState, config, schemeConfig, adjacency)
-        bodyForce = gravity + noPenShift + computeForcing(
-            currentSystem, config.dt, currentSystem.t, config, schemeConfig)
+        # `computeForcing` returns a *force* (e.g. `meanFlowForcingBC`'s
+        # `m (U - <u>) / tau`); `deltaSPH_step` divides by mass the same way.
+        # Adding it raw scaled every ACSPH forcing by the particle mass.
+        forcing = computeForcing(currentSystem, config.dt, currentSystem.t, config,
+                                 schemeConfig) / currentState.masses.view(-1, 1)
+        bodyForce = gravity + noPenShift + forcing
         # `(g - a_wall)` for Eq. (61). Static walls have `a_wall = 0`; no
         # per-particle prescribed wall acceleration is tracked anywhere in this
         # codebase yet (`modules/mdbc/velocity.py` documents the same gap for
@@ -438,6 +443,14 @@ def artificialCompressible_step(
 
                 view = _workingState(currentState, xs, vs, ps)
                 view.pressures = wallPressures(view, config, adjacency, wallBodyForce)
+                # The wall velocity is a closure of the *current* fluid velocity
+                # (free-slip / no-slip mirror), exactly like the wall pressure
+                # above, so it is re-applied per stage. Without this the wall
+                # rows only carried the step-start mirror, then drifted with
+                # whatever the pseudo-time update did to them -- see the
+                # `nonFluidRows` freeze below.
+                view.velocities = computeBoundaryVelocities(view, config, schemeConfig,
+                                                            adjacency)
                 rP, rV = _spatialResidual(view, config, schemeConfig, adjacency,
                                           k1, k2, diffusion, bodyForce, nu)
                 rX = vs
@@ -459,9 +472,19 @@ def artificialCompressible_step(
                 # I_c = diag{0, 1, 1}: the pressure row has no real-time
                 # derivative to subtract. That is what makes r* -> 0 enforce
                 # div v = 0 at time level n+1 rather than in pseudo-time.
-                kp.append(rP / alphaPI)
-                kx.append((rX - dxdtBdf) / alphaPI)
-                kv.append((rV - dvdtBdf) / alphaPI)
+                #
+                # Only fluid rows are unknowns of the dual-time system. Wall and
+                # ghost rows are geometry plus closures (`wallPressures`,
+                # `computeBoundaryVelocities`), so their increments are zeroed:
+                # integrating them like fluid let the walls move and pick up
+                # O(|v_fluid|) velocities under gravity and pressure within one
+                # real step, which overrode the wall BC entirely (freeSlip and
+                # noSlip gave bit-identical runs) and drew the corner fluid
+                # particle diagonally through the wall (`hydrostaticColumn`,
+                # walled; FREESLIP_DAMBREAK_FINDINGS.md's ACSPH stall).
+                kp.append(torch.where(fluid, rP / alphaPI, torch.zeros_like(rP)))
+                kx.append(torch.where(fluidRows, (rX - dxdtBdf) / alphaPI, torch.zeros_like(rX)))
+                kv.append(torch.where(fluidRows, (rV - dvdtBdf) / alphaPI, torch.zeros_like(rV)))
 
             x, v, p = xStage0, vStage0, pStage0
             for l in range(acParams.rkStages):
