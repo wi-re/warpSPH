@@ -254,3 +254,47 @@ See also: [[boundary-density-plan]], [[wcsph-deltasph-scheme-concerns]],
 [[sph-symmetric-pressure-truncation-artifact]],
 [[marrone31-truncation-artifact-vs-pst]], [[antuono-pressure-switch-bug]],
 [[incompressible-plan-sequencing]].
+
+## 8. mDBC wall suction at wall/free-surface contact lines — both schemes
+
+**What it is:** a thinly-supported *free-surface* particle next to a solid
+wall (a run-up jet 1-2 particles thick, a corner, a particle on the ceiling)
+acquires negative pressure from the wall closure, the symmetric `(p_i + p_j)`
+pressure force pulls it into the wall, it loses fluid support, and the suction
+deepens — geometric growth (x1.2-2.5 per step on one ACSPH particle, p from
+-20 to -1.8e6 over ~20 steps) ending in a wall crossing and a velocity kick
+that collapses dt. Same event, two schemes:
+
+- **ACSPH** (`FREESLIP_DAMBREAK_FINDINGS.md` §9.5): Eq. (61) Shepard wall
+  pressure. After `fcaa998` (dual-time wall-row fix, paper viscosity, Michel
+  shifting) the nx=24 dam break survives to t* 8.1, but **nx=70 still fails at
+  the first far-wall run-up (t* 2.8)**; a ceiling-riding particle (constant
+  speed against gravity, ~1 s) appears in every nx=24 run.
+- **delta-SPH**: the ceiling hover of item 1 (sloshingTank UID 4104, "pinned by
+  an under-conditioned mDBC fallback pressure"), and the english2025 low-alpha
+  leak the neighbour-count ramp fixed (`FREESLIP_DAMBREAK_FINDINGS.md` §8) —
+  the same under-supported-extrapolation-at-a-wall family.
+
+Item 1 attributes its population to the truncated-kernel pressure-pair
+artifact and the Antuono switch; this entry is the wall half of it: the
+*wall closure* supplies the negative pressure, not just the fluid-fluid sum.
+
+**Ruled out (ACSPH):** Antuono pressure switch (no change); clamping
+surface-particle pressure to >= 0 (worse — the runaway moves one layer in);
+solver non-convergence (the pseudo-time loop converges every step; its
+velocity-only metric just does not see pressure).
+
+**Isolation:** the no-free-surface control (`FREESLIP_DAMBREAK_FINDINGS.md`
+§9.7 — periodic TGV, bounded random flow, moving obstacle) is clean in both
+schemes, so walls alone are fine; the free-surface contact is required.
+
+**Concrete next steps:** (1) a
+neighbour-count / conditioning ramp on the ACSPH Eq. (61) wall pressure, the
+analogue of english2025's `alpha` ramp — blend a wall particle's pressure
+toward a non-attracting value when its fluid support is a few sparse surface
+particles; (2) measure the wall-pressure sign/magnitude seen by the ceiling
+rider and the run-up jet directly before choosing between (2) and a
+contact-line-specific treatment.
+
+See also: [[sph-symmetric-pressure-truncation-artifact]],
+[[antuono-pressure-switch-bug]], [[english2025-alpha-neighbour-ramp]].
