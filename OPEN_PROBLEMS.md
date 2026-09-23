@@ -288,6 +288,8 @@ velocity-only metric just does not see pressure).
 §9.7 — periodic TGV, bounded random flow, moving obstacle) is clean in both
 schemes, so walls alone are fine; the free-surface contact is required.
 
+**Plan:** `MDBC_CONTACT_LINE_PLAN.md`.
+
 **Concrete next steps:** (1) a
 neighbour-count / conditioning ramp on the ACSPH Eq. (61) wall pressure, the
 analogue of english2025's `alpha` ramp — blend a wall particle's pressure
