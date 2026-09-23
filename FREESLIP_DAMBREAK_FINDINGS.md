@@ -362,13 +362,16 @@ OPEN_PROBLEMS.md 8, which tracks it as one mDBC contact-line item.
 
 ### 9.7 No-free-surface checks (isolating the contact-line issue)
 
-nx=64, streamed logs, post-`fcaa998` code (`scripts/_tmp_check.py`):
+nx=64, streamed logs, post-`fcaa998` code (throwaway `scripts/_tmp_check.py`,
+since deleted). **No video was recorded** for these six (the probe passed
+`video=False` — the rule now in `CLAUDE.md`); re-run with video before quoting
+them visually.
 
 | case | deltaSPH | ACSPH |
 |---|---|---|
 | `tgv-wc` (periodic, no walls), t=2 | clean: vmax <= 1.017, rho [0.9997, 1.001], paired 0 | clean: vmax <= 1.048, paired 0 |
 | `randomFlow --bounded` (4 walls, no FS), t=3 | clean: vmax 1.0 -> 0.53, rho [0.9998, 1.002], paired 0 | clean: vmax <= 1.22 -> 0.80, paired 0, nnDistP01 0.78 |
-| `movingObstacle` (spinning hexagon, driven), t=3 | clean: vmax <= 1.94, rho [0.996, 1.009], paired 0 | clean to t=0.87 (vmax 1.63, paired 0.003) when the session ended; re-run pending |
+| `movingObstacle` (spinning hexagon, driven), t=3 | clean: vmax <= 1.94, rho [0.996, 1.009], paired 0 | clean: vmax <= 2.47 -> 1.91, paired 0.0005, nnDistP01 0.66, 1643 steps |
 
 **Walls without a free surface are stable in both schemes**, including the
 fixed ACSPH wall treatment with fluid pressed against all four walls of the
