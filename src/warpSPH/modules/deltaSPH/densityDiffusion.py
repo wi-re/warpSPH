@@ -71,7 +71,7 @@ def computeScalarFieldDiffusion(currentState: Any, config: SimulationConfig, adj
 def computeDensityDiffusion(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], gradRho: Optional[torch.Tensor], gradRhoL: Optional[torch.Tensor]) -> torch.Tensor:
     with record_function("[warpSPH] - (deltaSPH) - computeDensityDiffusion"):
         delta = schemeConfig.diffusionParams.densityDelta
-        xi = sphKernel_xi(config.kernel.value, config.dim)
+        xi = float(sphKernel_xi(config.kernel.value, config.dim))
         drhodt_scaling = delta * currentState.supports / xi * schemeConfig.fluid.fixedSoundSpeed
         # Fluid-to-fluid only: a boundary neighbour's density is the mDBC
         # extrapolation, a phase-lagged copy of the fluid's own field, not an
