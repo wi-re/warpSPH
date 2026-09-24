@@ -179,7 +179,7 @@ def makeDiagnostics(baseDiagnostics, toy, record):
     return diagnostics
 
 
-def buildCase(toy: str, dambreakLikeAC: bool, cav: str = 'off', nuOff=False, shiftOff=False):
+def buildCase(toy: str, dambreakLikeAC: bool, cav: str = 'off', nuOff=False, shiftOff=False, ddt=None):
     import torch
     from warpSPH.cases.hydrostaticColumn import hydrostaticColumnCase as base
     from warpSPH.cases.plotting import Field, particlePlot
@@ -192,6 +192,21 @@ def buildCase(toy: str, dambreakLikeAC: bool, cav: str = 'off', nuOff=False, shi
         elif cav != 'off':
             raise SystemExit('--cav is ACSPH-only: the delta-SPH variants were tried '
                              'and removed (MDBC_CONTACT_LINE_PLAN.md §7.5)')
+        else:
+            # hydrostaticColumn is a DFSPH case and forces a physical nu = 0,
+            # which strips delta-SPH's artificial viscosity -- unstable on its
+            # own (a free-falling block blows up by t = 0.09, §8). Run the WC
+            # toys in sloshingTank's configuration instead: alpha = 0.02,
+            # Michel shifting.
+            sc = ctx.schemeConfig
+            sc.diffusionParams.inviscid = True
+            sc.diffusionParams.inviscidAlpha = 0.02
+            if ddt is not None:
+                from warpSPH.enumTypes import DensityDiffusionScheme
+                sc.diffusionParams.densityDiffusionTerm = DensityDiffusionScheme[ddt]
+            sc.shiftProperties.active = True
+            sc.shiftProperties.scheme = ShiftingScheme.michel2022
+            sc.shiftProperties.projectionScheme = ShiftingProjectionScheme.michel2022
         if dambreakLikeAC:
             # the dam-break ACSPH configuration the failures were seen under:
             # Michel shifting + the paper's alpha_nu viscosity + eps_v = -5
@@ -219,8 +234,13 @@ def buildCase(toy: str, dambreakLikeAC: bool, cav: str = 'off', nuOff=False, shi
             # free-fall speed over the box height; dt from the acoustic CFL
             from warpSPH.cases.weaklyCompressible import setupTimestep
             g = ctx.param('gravityMagnitude')
-            ctx.spec.params.setdefault('machTarget', 0.1)
-            ctx.spec.params.setdefault('referenceVelocity', (2.0 * g * ctx.spec.L) ** 0.5)
+            # c0 at Ma 0.1, but dt pinned at an acoustic Courant number
+            # c0 dt / dx = 0.3: the machTarget route's CFL gave 0.84 here, and
+            # even the at-rest column blew up by t = 0.1 (§8; sloshingTank
+            # runs at 0.42)
+            c0 = 10.0 * (2.0 * g * ctx.spec.L) ** 0.5
+            ctx.spec.params['soundSpeed'] = c0
+            ctx.spec.params['targetDt'] = 0.3 * float(ctx.config.dx) / c0
             setupTimestep(ctx, system)
         if ctx.param('keepIC'):
             return
@@ -334,6 +354,90 @@ def forensics(ctx, system, out, cav):
     return s
 
 
+class FlierTracker:
+    """Sparse-support fluid rows, split by wall contact (MDBC_CONTACT_LINE_PLAN.md §9).
+
+    Counts come straight from the step's own adjacency on the GPU
+    (`countNeighborsWarp`, FluidToFluid and FluidToBoundary, kernel support):
+    nF = fluid neighbours, nW = wall neighbours. A fluid row with nF <= `maxF`
+    (after removing itself) is *sparse*, and then either
+
+      wall-sparse  nW > 0   a thinly supported row hanging on a wall -- the
+                            population the contact-line fix is meant to remove
+      free flier   nW = 0   a lone particle in free space -- the population a
+                            bad fix creates
+
+    with `iso*` the nF == 0 subsets. `lastWallT` (per UID) remembers when each
+    row last had a wall neighbour; every row that becomes a free flier is kept
+    in `births` with `sinceWall` = t - lastWallT (inf: never touched a wall),
+    its speed, pressure and density, so the origin of the spray can be read off.
+    """
+
+    def __init__(self, maxF=2):
+        self.maxF = maxF
+        self.prevFree = None
+        self.lastWallT = None
+        self.births = []
+
+    @staticmethod
+    def counts(st, config, adjacency, mode):
+        from warpSPH.modules.util.wp_numNeighbors import countNeighborsWarp
+        from warpSPHCore import GradientScheme, OperationDirection, OperationProperties, SupportScheme, WarpOperation
+        return countNeighborsWarp(
+            st, OperationProperties(kernel=config.kernel, operation=WarpOperation.Gradient,
+                                    supportMode=SupportScheme.SuperSymmetric,
+                                    operationMode=mode, gradientMode=GradientScheme.Naive),
+            config.domain, adjacency=adjacency)
+
+    def __call__(self, system, ctx, out):
+        import torch
+        from warpSPHCore import OperationDirection
+        st, config = system.state, ctx.config
+        fluid = st.kinds == 0
+        # FluidToBoundary also gates on the *query* kind (returns 0 for every
+        # fluid row), so the wall count is AllToAll - FluidToFluid; both
+        # include the row itself (no i == j skip, W(0) > 0)
+        nFs = self.counts(st, config, system.adjacency, OperationDirection.FluidToFluid).to(torch.int64)
+        nAll = self.counts(st, config, system.adjacency, OperationDirection.AllToAll).to(torch.int64)
+        nF = nFs - self.selfCount
+        nW = nAll - nFs
+        sparse = fluid & (nF <= self.maxF)
+        iso = fluid & (nF == 0)
+        onWall = nW > 0
+        free, wallSparse = sparse & ~onWall, sparse & onWall
+        speed = st.velocities.norm(dim=-1)
+        out['nFree'] = int(free.sum())
+        out['nFreeIso'] = int((iso & ~onWall).sum())
+        out['nWallSparse'] = int(wallSparse.sum())
+        out['nWallIso'] = int((iso & onWall).sum())
+        out['freeVmax'] = float(speed[free].max()) if bool(free.any()) else 0.0
+        out['wallSparseVmax'] = float(speed[wallSparse].max()) if bool(wallSparse.any()) else 0.0
+        out['minDensity'] = float(st.densities[fluid].min())
+        uid = st.UIDs if getattr(st, 'UIDs', None) is not None else torch.arange(fluid.numel(), device=fluid.device)
+        uid = uid.to(torch.int64)
+        t = float(system.t)
+        if self.lastWallT is None:
+            self.lastWallT = torch.full((int(uid.max()) + 1,), float('inf'), device=uid.device)
+            self.prevFree = torch.zeros_like(self.lastWallT, dtype=torch.bool)
+        touching = fluid & onWall
+        self.lastWallT[uid[touching]] = t
+        freeNow = torch.zeros_like(self.prevFree)
+        freeNow[uid[free]] = True
+        born = free & ~self.prevFree[uid]
+        out['nFreeBirths'] = int(born.sum())
+        if bool(born.any()):
+            idx = torch.nonzero(born).squeeze(-1).tolist()
+            for i in idx:
+                lw = float(self.lastWallT[uid[i]])
+                self.births.append(dict(t=t, uid=int(uid[i]), v=float(speed[i]),
+                                        sinceWall=(t - lw) if lw != float('inf') else None,
+                                        nF=int(nF[i]), p=float(st.pressures[i]),
+                                        rho=float(st.densities[i])))
+        self.prevFree = freeNow
+
+    selfCount = 1   # the count includes the row itself (no i == j skip)
+
+
 def runMarrone(args):
     """Marrone et al. 2011 Sec. 3.1 dam break, the exact configuration of
     `probe_deltaSPHMarrone.py` (FREESLIP_DAMBREAK_FINDINGS.md Sec. 9), with the
@@ -351,11 +455,13 @@ def runMarrone(args):
     record = []
     baseDiag = baseCase.diagnostics
     hist = []
+    fliers = FlierTracker()
 
     def diagnostics(ctx, system):
         out = dict(baseDiag(ctx, system)) if baseDiag else {}
         if len(hist) % args.forensicsEvery == 0:
             forensics(ctx, system, out, args.cav)
+            fliers(system, ctx, out)
         t = float(system.t)
         hist.append(t)
         out['wall_s'] = time.perf_counter() - t0
@@ -364,6 +470,8 @@ def runMarrone(args):
         if len(record) % 500 == 0:
             with open(os.path.join(runRoot, 'record.json'), 'w') as f:
                 json.dump(record, f)
+            with open(os.path.join(runRoot, 'births.json'), 'w') as f:
+                json.dump(fliers.births, f)
         if len(hist) > 300 and hist[-1] - hist[-301] < args.stallSimTime:
             raise Stalled(f'sim time advanced {hist[-1] - hist[-301]:.2e} s over 300 steps')
         return out
@@ -406,6 +514,8 @@ def runMarrone(args):
         status = f'STALLED: {e}'
     with open(os.path.join(runRoot, 'record.json'), 'w') as f:
         json.dump(record, f)
+    with open(os.path.join(runRoot, 'births.json'), 'w') as f:
+        json.dump(fliers.births, f)
     last = record[-1] if record else {}
     print(f'[{tag}] {status}  t={last.get("t", 0):.4f} t*={last.get("tStar", 0):.3f}', flush=True)
 
@@ -432,6 +542,9 @@ def main():
     ap.add_argument('--cav', default='off', choices=['off', 'vicinity', 'fluid'])
     ap.add_argument('--nuOff', action='store_true')
     ap.add_argument('--shiftOff', action='store_true')
+    ap.add_argument('--ddt', default=None,
+                    help='WC density diffusion term (DensityDiffusionScheme name)')
+    ap.add_argument('--integrator', default=None, help='integrationScheme override')
     ap.add_argument('--tag', default='')
     ap.add_argument('--out', default=DEFAULT_OUT)
     args = ap.parse_args()
@@ -444,7 +557,7 @@ def main():
     if args.toy in ('marrone31', 'sloshing'):
         return runMarrone(args)
     patchWallMode(args.wallMode)
-    base, case = buildCase(args.toy, args.paperAC, args.cav, args.nuOff, args.shiftOff)
+    base, case = buildCase(args.toy, args.paperAC, args.cav, args.nuOff, args.shiftOff, args.ddt)
     record = []
     case = dataclasses.replace(case, diagnostics=makeDiagnostics(base.diagnostics, args.toy, record))
 
@@ -454,6 +567,10 @@ def main():
     params = dict(TOYS[args.toy], gravityMagnitude=args.gravity, epsilonV=-5.0)
     kw = dict(scheme=args.scheme, nx=args.nx, tLimit=args.tLimit, quiet=False,
               progress=True, params=params, stallDtSteps=200)
+    if args.integrator:
+        kw['integrationScheme'] = args.integrator
+    elif args.scheme == 'deltaSPH':
+        kw['integrationScheme'] = 'symplecticEuler'   # sloshingTank's default
     if args.video:
         kw.update(plot=True, video=True, plotInterval=args.plotInterval,
                   exportRoot=runRoot)

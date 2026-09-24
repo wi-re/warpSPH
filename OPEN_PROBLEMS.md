@@ -290,8 +290,10 @@ schemes, so walls alone are fine; the free-surface contact is required.
 
 **Plan:** `MDBC_CONTACT_LINE_PLAN.md`.
 
-**Status 2026-09-23 — mechanism identified, fix implemented (opt-in),
-ACSPH validated** (`MDBC_CONTACT_LINE_PLAN.md` §7). The wall is *bilateral*:
+**Status 2026-09-23 — mechanism identified, fix implemented (opt-in).
+2026-09-24: NOT validated -- the videos show the ACSPH fix (and the delta-SPH
+unilateral wall) spraying isolated high-speed fliers through the domain;
+the metrics used did not measure this (plan §9)** (`MDBC_CONTACT_LINE_PLAN.md` §7). The wall is *bilateral*:
 Eq. (61)'s hydrostatic term is negative at any ceiling / above any waterline,
 and ACSPH's converged `div v = 0` with the mirrored wall velocity is itself a
 no-separation constraint -- clamping the wall pressure alone (the literature's

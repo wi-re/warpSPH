@@ -1,7 +1,8 @@
 # mDBC contact-line suction — plan
 
-Status: **step 1 done, fix implemented (opt-in), ACSPH validated** — see §7
-(2026-09-23). Tracks `OPEN_PROBLEMS.md` §8. Background and all
+Status: **step 1 done; fix implemented (opt-in) but NOT validated** — see §7,
+§8 and §9 (2026-09-24: the videos show every variant spraying high-speed
+fliers through the whole domain; the §7/§8 checks did not measure this). Tracks `OPEN_PROBLEMS.md` §8. Background and all
 numbers: `FREESLIP_DAMBREAK_FINDINGS.md` §9 (commits `fcaa998`, `2738e21`,
 `cfcd796`). Run rules: `CLAUDE.md` (video on, stream progress, one run at a
 time).
@@ -325,3 +326,211 @@ is classified as *bulk*. `modules/surfaceDetection/isolated.py`
 for an empty support) is used by ACSPH's `vicinity` set. The shared detector
 itself is unchanged -- fixing it there would change shifting and the Antuono
 switch for every scheme; left as a decision (`OPEN_PROBLEMS.md` §8).
+
+## 8. delta-SPH, second pass (2026-09-24)
+
+### 8.1 What the CG solvers do differently (source, not memory)
+
+- **omniSPH DFSPH** (`~/dev/omniSPH/simulation/fluidMechanics.cpp`): density
+  is a fresh *summation* every step, boundary integral included (l. 5-21) --
+  nothing is carried; the density solve is a one-sided constraint on **every**
+  row, `p = max(p, 0)` (l. 316); the boundary pressure (MLS extrapolation) is
+  clamped `>= 0` too, both where it is computed (l. 391) and where it enters
+  the force (l. 464-465). The divergence solve is effectively inert (source
+  term 0, 3 iterations).
+- **SPlisHSPlasH** DFSPH: `densityAdv = max(densityAdv, 0)` and zeroed below
+  20 (3D) / 7 (2D) neighbours; IISPH/DFSPH pressure `max(., 0)`. Its **WCSPH**
+  is summation density with `density = max(density, density0)` on every row
+  -- the exact floor that ratcheted delta-SPH in §7.5 v2. It is harmless there
+  because summation density has no memory.
+- So the CG methods never stick for two structural reasons: the constraint is
+  unilateral (LCP, Batty's complementarity) everywhere, and density is
+  re-derived from positions, so separation is never *booked* anywhere.
+
+### 8.2 Literature (online, this pass)
+
+- **SPHinXsys / Zhang, Fan, Zhang, Adams & Hu 2023** (arXiv:2310.11179, water
+  entry/exit, WCSPH): wall pressure `p_d = p_j + rho_j r . max(0, (g - dv/dt).r)`
+  (Eq. 2.11) -- the hydrostatic extrapolation is **one-sided**, never tension
+  into a ceiling. Also Rezavand et al. 2022's density reinitialisation, every
+  step, against summation density: `rho = rho_sum + max(0, rho - rho_sum) rho0/rho`
+  (Eq. 2.8) -- bounds a continuity density below by its geometric value, so a
+  stored deficit cannot outlive the configuration that produced it.
+- **DualSPHysics** (`JSphCpu_mdbc.cpp`): pressure cloning is *not* clamped
+  (`pressfinal = pghost + normforce*normpos`); english2025 matches it. Its
+  guards are elsewhere: `max(RhopZero, .)` when the kernel sum < 0.1, unsubmerged
+  boundary switched off (`BMODE_MDBC2OFF`, rho0), and fluid outside
+  `[RhopOutMin, RhopOutMax]` is **deleted** -- the rho = 0.21 droplets of §7.5
+  would simply be removed there. Free slip copies the ghost velocity (no
+  reflection).
+- **delta+-SPH group** (Lyu, Sun et al. 2021, Appl. Ocean Res. 117 102938;
+  water entry/exit with TIC 2023): their concern is the opposite failure --
+  spurious *voids* at a wall under legitimate negative pressure -- fixed with
+  PST + TIC applied at boundaries. A fix here must keep tension where no air
+  can reach.
+
+### 8.3 Mechanism in delta-SPH: the reflected normal velocity
+
+`freeSlip` reflects the fluid's normal velocity (`u_g = u_body + w_t - w_n`,
+`DELTASPH_VALIDATION_PLAN.md` 5.7 -- right for *approaching* fluid). For a
+*receding* row the wall particle then moves the opposite way, so the wall pair
+books the separation as expansion at twice the relative speed in `drho/dt`:
+the continuity-form bilateral constraint, and the source of §7.5's stored
+deficit. Batty's complementarity in kinematic form is: reflect while
+approaching, copy while receding (`normal = |w.n| n`).
+
+Diagnostic switches (default off, bit-identical):
+`velocity._UNILATERAL_NORMAL` and `english2025._ONESIDED_HYDRO`
+(`'all'` / `'vicinity'`); `scripts/probe_contactLine.py --unilateralVel
+[vicinity] --oneSidedHydro [vicinity]`.
+
+### 8.4 Harness fix first
+
+The delta-SPH toys (run 2026-09-23, not written up) were invalid: the
+`hydrostaticColumn`-based WC toy ran `semiImplicitEuler` with physical nu = 0
+(DFSPH case settings), and even the **at-rest column blew up at t = 0.1**.
+The probe now runs the WC toys in sloshingTank's configuration (alpha = 0.02,
+Michel shifting, `symplecticEuler`); column/sealed are then stable to t = 0.5.
+(dt stays at the adaptive hook's value, Courant `c0 dt/dx` ~ 0.8 -- stable
+with symplecticEuler; the pinned `targetDt` is overridden per step.)
+Side finding: the runner reported `diverged=False` for runs at vmax 5e4 with
+rho = 0 rows -- its divergence check misses a bounded-NaN-free blowup.
+
+### 8.5 Toys (delta-SPH nx=32, fixed harness)
+
+| drop, t = 0.3 | fallRatio | fluid p | contact |
+|---|---|---|---|
+| baseline | 0.67 | -23 … +13 | held, wall pulls 0.4-1.3 g |
+| unilateral velocity (all) | 0.88 | ±0.6 | released by t 0.15 |
+| one-sided hydrostatic (all) | 0.67 | -13 … +13 | held |
+| **both (all)** | **0.984** (free fall reads ~0.97) | **±0.025** | released at once |
+| both (vicinity) | 0.85 | -9 … +1.6 early, ±0.9 at end | peels from the contact lines inward |
+
+Controls: `column` unchanged in all modes. `sealed` with **'all'**: pressure
+ratchets monotonically, pfMin 0 -> +38.6, median rho 1.00 -> 1.02 by t = 0.5
+(baseline oscillates ±7) -- the unilateral velocity rectifies acoustics at a
+wall (compression booked, rarefaction dropped), the continuity-form twin of
+§7.5 v2. With **'vicinity'** `sealed` is **bit-identical** to the baseline
+(846/846 records): no free surface, empty set. So, as for ACSPH, the rule is
+the complementarity restricted to where air can reach. The velocity half does
+most of the work in delta-SPH (the fluid's own pressure is a state function
+of the booked density); the hydrostatic half alone does nothing, but is
+needed for the last ~10 %.
+
+### 8.6 sloshingTank (case defaults, t = 6.5, both switches 'vicinity')
+
+`scripts/probe_contactLine.py --toy sloshing --scheme default --nx 0
+--unilateralVel vicinity --oneSidedHydro vicinity` (1 h 27 min, video in
+`out_contactLine/sloshing_default_nx0_cavoff_uniVic`).
+
+- **Survives the full 6.5 s** (v1/v3 of §7.5 diverged at t = 2.90); median
+  density 1.001-1.002 throughout -- no v2-style ratchet.
+- **Ceiling riders down**: mean 0.5-2.6 / max <= 6 through t = 5.5 (baseline
+  1.7-17.5 / max 25); last second 5-6.7 / max 10 (baseline 6-9.3 / max 16).
+- **But impacts 2 and 3 read 3-4x hot at Sensor 1**, above the TC10 measured
+  band (2.2-13.1 kPa):
+
+| sensor peak, 0.05 s mean (kPa) | 1.5-2.5 | 3.2-4.2 | 5.0-5.8 |
+|---|---|---|---|
+| baseline | 4.8 | 5.4 | 4.6 |
+| unilateral (vicinity) | 5.3 | **15.6** | **20.9** |
+
+  (0.01 s window: 13.5 / 9.6 baseline vs 56 / 39; raw steps > 20 kPa: 45 vs
+  331.) The first impact is unchanged, so the effect builds after the first
+  slam. Also a harder transient at t ~ 2.5 (vmax 9.0 vs 3.8, fluid p -97 vs
+  -19, min rho 0.76 vs 0.94).
+
+Not yet separated: whether the hot impacts come from the velocity half
+(dropped rarefaction at a wall in the vicinity, i.e. §8.5's sealed-box
+rectification, local to the contact layer) or the hydrostatic half, and
+where the t ~ 2.5 transient sits. Next: the two halves separately on
+sloshingTank (velocity-only / hydro-only), and the frames at t ~ 2.5 / 3.5 /
+5.3. Status: **promising on sticking, not shippable** -- the switches stay
+diagnostic, default off.
+
+## 9. Retraction (2026-09-24): the fixes spray fliers, the checks missed it
+
+The user reviewed the §8.6 sloshingTank video: every wall interaction with the
+unilateral wall ('vicinity') launches high-speed fliers through the entire
+domain; frames at t = 3.93 show ~20 isolated droplets (baseline 2-3).
+(Correction: the video's density colour range -0.48 … 2.48 includes wall /
+ghost rows; the logged *fluid* minimum is 0.76 vs 0.80 baseline -- no negative
+fluid density.) The
+Sensor-1 overshoots of §8.6 are those fliers hitting the wall, not a wall
+pressure build-up.
+
+Re-checking the ACSPH `vicinity` videos (§7.3) against that: **the same
+disease**. nx=70 (the "reaches t* 9.91" run): after the far-wall run-up
+(t ~ 1.26 s) a cloud of isolated single particles fills the air space, ~80-100
+by t ~ 1.8-2.2 s, ballistic, some at the ceiling. nx=24: 3-6 fliers vs 2 with
+`off`. §7.3's metrics (probe peaks, ceiling riders, penetration, survival,
+worst-row forensics) contain no measure of isolated particles, so "validated"
+was not supported. §7.4's verdict on the *mechanism* (bilateral wall) stands;
+the *fix* is not shown to be acceptable for either scheme.
+
+Required before any further claim:
+1. A flier metric streamed every step: fluid rows with an (almost) empty
+   fluid support (fragment size <= 3 particles), their count, max speed and
+   height above the connected bulk; plus min density (negative = invalid).
+2. The same metric on the `off` baselines (delta-SPH sloshingTank and Marrone
+   3.1 production, ACSPH where it survives) -- physical spray is attached
+   sheets/droplets; numerical fliers are single particles.
+3. Where the fliers originate (step / row / wall contact) before choosing a fix.
+
+### 9.1 Flier metric and baselines (2026-09-24)
+
+`FlierTracker` in `scripts/probe_contactLine.py`: from the step's own
+adjacency on the GPU (`countNeighborsWarp`; `FluidToBoundary` gates on the
+query kind too and returns 0 for fluid rows, so nW = AllToAll - FluidToFluid;
+both counts include the row itself). A fluid row with <= 2 fluid neighbours is
+**wall-sparse** (nW > 0: the population the contact fix targets) or a **free
+flier** (nW = 0: the population a bad fix creates). Each new free flier logs
+`sinceWall` (time since its last wall neighbour). Calibrated on ACSPH nx=24:
+off = 2-3 wall-sparse (the 2 pinned ceiling riders), 0 free; vicinity = 0
+wall-sparse, 2-5 free (5 distinct UIDs, the run-up tip released at t ~ 1.0 s,
+1-4 m/s ~ sqrt(gH) -- plausibly physical at this resolution).
+
+| run | free fliers | wall-sparse | min fluid rho |
+|---|---|---|---|
+| delta-SPH sloshingTank off, t <= 4.2 | **0 every step** | <= 7 | 0.80 |
+| delta-SPH sloshingTank unilateral (vicinity) | mean 10 -> 25, max 31, rising; <= 8.8 m/s | <= 8 | 0.76 |
+| delta-SPH Marrone 3.1 nx=70 off, t <= 2.45 | **0 every step** | <= 9 | 0.96 |
+| ACSPH Marrone 3.1 nx=70 off | 0 (diverges t ~ 0.62-0.69) | <= 1 | 1 |
+| ACSPH Marrone 3.1 nx=70 vicinity, t <= 2.45 | mean 22 (t 1.0) -> 96 (t 2.25), max 105; up to 23.7 m/s | <= 5 | 1 |
+
+Origins: delta-SPH unilateral -- 357 births / 63 particles, 150 within 0.02 s
+and 127 within 0.2 s of their last wall contact: launched off the walls.
+ACSPH vicinity -- 911 births / 134 particles, **432 never touched a wall**:
+the ACSPH projection clamps p >= 0 on *every* surface-vicinity fluid row, not
+only at walls, which removes the free surface's own cohesion -- spray breeds
+from the jet itself, not just from wall contacts.
+
+Verdict: neither fix is acceptable; the gate for any future contact-line fix
+is free fliers at the `off` baseline (0 here) with wall-sparse reduced.
+Videos (time-aligned, `scripts/out_contactLine/compare/`):
+`sloshing_t4.2_off_vs_unilateral.mp4`,
+`marrone31_nx70_3way_deltaSPHoff_ACSPHoff_ACSPHvicinity.mp4`.
+
+### 9.2 Why the ACSPH fliers accumulate: an elastic contact (user observation)
+
+User, from the nx=70 video: fliers fly back toward the fluid, dent a crater
+as if merging, and are flung back out -- so the flier count only builds.
+The births confirm it (911 births / 134 particles): median 6 re-ejections per
+particle (max 23), median 0.046 s between them, successive ejection speeds
+unchanged (median +0.01 m/s, 51 % faster -- restitution ~ 1), 72 % ejected
+with p > 0 (median 151).
+
+Mechanism: the flier (isolated) and the surface rows it hits are both in the
+projected set, p >= 0. Approach: div v < 0, pressure builds and repels --
+fine. Separation: div v > 0 would give the negative pressure that decelerates
+the rebound (the inelastic, merging half of the contact); the clamp removes
+it and the stored positive pressure is released like a spring. Droplet
+coalescence is inelastic; this is a hard elastic collision, so no flier ever
+merges back. Any complementarity-type fix must keep the dissipative
+(separation-resisting) half *between fluid rows* -- Batty's unilateral
+condition is for the solid wall only; applying it fluid-fluid (vicinity fluid
+rows, isolated rows) is what breaks coalescence.
+
+delta-SPH: the unilateral wall (§8) is worse than `off` on every measure;
+both diagnostic switches were removed from `src` and the probe (never
+committed). §8 stays as the record.
