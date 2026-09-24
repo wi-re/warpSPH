@@ -171,7 +171,7 @@ def configureScheme(ctx: RunContext) -> None:
     schemeConfig.gravityConfig.active = True
     schemeConfig.gravityConfig.type = GravityType.Directional
     schemeConfig.gravityConfig.magnitude = ctx.param('gravityMagnitude')
-    schemeConfig.gravityConfig.origin = ctx.param('gravityDirection')
+    schemeConfig.gravityConfig.direction = ctx.param('gravityDirection')
     # The surface-detection bandwidth is measured in particle spacings.
     schemeConfig.bandwith = ctx.spec.L / ctx.param('bandWidth') / ctx.config.dx
 
@@ -199,7 +199,7 @@ def _configureArtificialCompressible(ctx: RunContext) -> None:
     schemeConfig.gravityConfig.active = True
     schemeConfig.gravityConfig.type = GravityType.Directional
     schemeConfig.gravityConfig.magnitude = ctx.param('gravityMagnitude')
-    schemeConfig.gravityConfig.origin = ctx.param('gravityDirection')
+    schemeConfig.gravityConfig.direction = ctx.param('gravityDirection')
     schemeConfig.shiftProperties.active = False
     schemeConfig.bandwith = ctx.spec.L / ctx.param('bandWidth') / ctx.config.dx
     # Eq. (48)'s U_char. The paper never defines it per case (ACSPH_PLAN.md

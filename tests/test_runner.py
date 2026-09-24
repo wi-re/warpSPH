@@ -243,3 +243,24 @@ def test_formatDurationReadsAsTime():
     assert formatDuration(4.21) == '4.21s'
     assert formatDuration(192) == '3m 12s'
     assert formatDuration(3852) == '1h 04m 12s'
+
+
+def test_stallProgressStopsARunWhoseSimTimeIsFrozen(monkeypatch):
+    """`stallDtSteps` only sees dt exactly at `minDt`; a dt hovering just above
+    it (ACSPH's step-ratio clamp) freezes simulated time just as surely.
+    `stallProgress` watches the time itself."""
+    import warpSPH.runner.runner as runnerModule
+    from warpSPH.cases import importAll
+    from warpSPH.runner import getCase, run
+    importAll()
+    monkeypatch.setattr(runnerModule, 'STALL_WINDOW_STEPS', 5)
+
+    frozen = dataclasses.replace(getCase('sod'), timestep=lambda ctx, state: 1e-12)
+    result = run(frozen, nx=100, tLimit=1.0, stallProgress=1e-6,
+                 progress=False, plot=False, store=False, quiet=True)
+    assert result.diverged
+    assert len(result.trajectory) < 20
+
+    healthy = run(getCase('sod'), nx=100, tLimit=5e-4, stallProgress=1e-6,
+                  progress=False, plot=False, store=False, quiet=True)
+    assert not healthy.diverged

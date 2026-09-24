@@ -10,6 +10,7 @@ module is that code, parameterised by a :class:`~warpSPH.runner.case.Case`.
 
 from __future__ import annotations
 
+import collections
 import itertools
 import os
 import sys
@@ -37,6 +38,9 @@ from .media import encodeFrames
 from .report import describeRun, quietedWarp, reportRun
 
 __all__ = ['RunResult', 'run', 'buildContext', 'resolveEnum']
+
+#: Window of the `CaseSpec.stallProgress` sim-time watchdog, in steps.
+STALL_WINDOW_STEPS = 1000
 
 
 @dataclass
@@ -282,6 +286,9 @@ def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
     # `stallDtSteps` watchdog state: counts consecutive steps whose *next*
     # dt landed on the floor. Reset whenever dt lifts back off it.
     dtAtFloorStreak = 0
+    # `stallProgress` watchdog state: simulated time at each of the last
+    # `STALL_WINDOW_STEPS` steps.
+    recentTimes = collections.deque(maxlen=STALL_WINDOW_STEPS + 1)
 
     showProgress = spec.progress if spec.progress is not None else sys.stderr.isatty()
     steps, progress = _stepIterator(nSteps, spec.tLimit, timeLimited,
@@ -342,6 +349,18 @@ def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
                 print(f'dt has been pinned at the minDt floor '
                       f'({ctx.config.minDt:g}) for {dtAtFloorStreak} consecutive '
                       f'steps as of step {absStep} (t={t:g}); stopping -- '
+                      f'simulated time is effectively frozen.')
+                result.diverged = True
+                break
+
+        if spec.stallProgress is not None and spec.tLimit:
+            recentTimes.append(t)
+            if len(recentTimes) == recentTimes.maxlen and \
+                    recentTimes[-1] - recentTimes[0] < spec.stallProgress * spec.tLimit:
+                print(f'simulated time advanced {recentTimes[-1] - recentTimes[0]:.3g} '
+                      f'over the last {STALL_WINDOW_STEPS} steps as of step {absStep} '
+                      f'(t={t:g}), below stallProgress x tLimit = '
+                      f'{spec.stallProgress * spec.tLimit:.3g}; stopping -- '
                       f'simulated time is effectively frozen.')
                 result.diverged = True
                 break

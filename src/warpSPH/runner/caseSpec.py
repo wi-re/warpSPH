@@ -78,6 +78,14 @@ class CaseSpec:
     #: which otherwise burns wall-clock for the rest of `tLimit`/`nSteps`
     #: without the run advancing. See `ACSPH_PLAN.md`'s dam-break stall.
     stallDtSteps: Optional[int] = None
+    #: Sim-time progress watchdog: abort once the last `STALL_WINDOW_STEPS`
+    #: (1000) steps advanced simulated time by less than this fraction of
+    #: `tLimit`. `stallDtSteps` only fires when dt sits *exactly* at `minDt`;
+    #: ACSPH's [0.8, 1.2] step-ratio clamp lets dt hover just above it (one
+    #: probe ran 7 h frozen, FREESLIP_DAMBREAK_FINDINGS.md 9.6). Relative to
+    #: `tLimit`, so the same value means the same thing in every case: 1e-4
+    #: = "at this rate the run needs > 1e7 more steps". Needs `tLimit`.
+    stallProgress: Optional[float] = None
 
     # --- runtime ------------------------------------------------------------
     precision: str = 'float32'
@@ -235,6 +243,9 @@ _FIELD_HELP = {
     'nSteps': 'stop after this many steps instead of at tLimit',
     'stallDtSteps': 'abort once dt has sat at minDt for this many consecutive '
                     'steps (a stuck-dt watchdog); unset disables it',
+    'stallProgress': 'abort once the last 1000 steps advanced sim time by less '
+                     'than this fraction of tLimit (catches dt hovering just '
+                     'above minDt); unset disables it',
     # -- runtime --
     'precision': 'scalar precision; resolved before import, so pass it to '
                  'warpsph-run rather than to a case module',

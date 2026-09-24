@@ -290,13 +290,37 @@ schemes, so walls alone are fine; the free-surface contact is required.
 
 **Plan:** `MDBC_CONTACT_LINE_PLAN.md`.
 
-**Concrete next steps:** (1) a
-neighbour-count / conditioning ramp on the ACSPH Eq. (61) wall pressure, the
-analogue of english2025's `alpha` ramp — blend a wall particle's pressure
-toward a non-attracting value when its fluid support is a few sparse surface
-particles; (2) measure the wall-pressure sign/magnitude seen by the ceiling
-rider and the run-up jet directly before choosing between (2) and a
-contact-line-specific treatment.
+**Status 2026-09-23 — mechanism identified, fix implemented (opt-in),
+ACSPH validated** (`MDBC_CONTACT_LINE_PLAN.md` §7). The wall is *bilateral*:
+Eq. (61)'s hydrostatic term is negative at any ceiling / above any waterline,
+and ACSPH's converged `div v = 0` with the mirrored wall velocity is itself a
+no-separation constraint -- clamping the wall pressure alone (the literature's
+EDAC/PySPH/DualSPHysics fix) moves the tension onto the fluid row's own
+pressure and does not release the contact. Fix: Batty et al. 2007's
+complementarity `0 <= p ⊥ separation`, applied only where air can reach -- the
+surface *vicinity* (raw surface set dilated by one support, fluid AND wall
+rows, plus fully isolated rows): `acParams.cavitationProjection = 'vicinity'`
+(projected pseudo-time iteration). No threshold. **ACSPH only** -- three
+delta-SPH variants failed on sloshingTank (p-only clamp: stored density
+deficits released as kicks, diverges t 2.9; density floor: acoustic
+rectification ratchet, +3 % bulk density, KE / 85), so the delta-SPH option
+was removed; see the plan's §7.5.
+Marrone 3.1 ACSPH: nx=24 ceiling riders gone; **nx=70 passes the t* 2.8
+run-up and reaches t* 9.91** (one run, 7505 steps) (was: fails at 2.8). Default still 'off'.
+
+**Still open here:** (0) delta-SPH (plan §7.5): the complementarity has to
+live in the continuity equation, acoustically neutral; (a) rows next to a wall with a badly deficient support
+(lambda < 0.5) that Marrone's raw detection does not flag -- the vicinity set
+is only as good as the raw set (nx=70, t* 4.5-4.9, wall p to -23); (b) the
+entrapped-cavity / flyer population is §1's (fluid-fluid, positive-pressure
+ejections), not a wall contact. Side observation: a *sealed* box (no free
+surface) under gravity drifts to vmax ~ 1 with an all-negative ACSPH pressure
+field -- the `(p_i+p_j)` tensile instability under uniform tension,
+independent of this fix. Detection bug found on the way (all schemes): an
+isolated particle reads `lambda = 1` and is classified as bulk;
+`detectIsolated` is the exact fix, used by ACSPH's set only -- changing the
+shared detector would touch shifting / the Antuono switch everywhere
+(decision pending).
 
 See also: [[sph-symmetric-pressure-truncation-artifact]],
 [[antuono-pressure-switch-bug]], [[english2025-alpha-neighbour-ramp]].

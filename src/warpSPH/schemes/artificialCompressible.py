@@ -77,7 +77,7 @@ from ..modules.gravity import computeGravity
 from ..modules.incompressible.wallPressure import wallPressureExtrapolation
 from ..modules.mdbc import computeBoundaryVelocities, computeMdbcNoPenShift
 from ..modules.pressure import computePressureForceSurfaceAware
-from ..modules.surfaceDetection import detectFreeSurface
+from ..modules.surfaceDetection import detectFreeSurface, detectIsolated
 from ..systems.artificialCompressible import (ArtificialCompressibleSystem,
                                               ArtificialCompressibleSystemUpdate)
 
@@ -411,7 +411,34 @@ def artificialCompressible_step(
         wallBodyForce = gravity if bool(gravity.abs().any()) else None
 
     # --- the dual-time loop -------------------------------------------------
-    x, v, p = x0, v0, p0
+    # Unilateral contact (`acParams.cavitationProjection`, Batty et al. 2007
+    # Eq. 15): rows that may not carry tension because air can fill the gap
+    # they would open. 'vicinity' = every fluid AND wall row with a raw
+    # free-surface particle inside its kernel support -- the dilated set,
+    # which `dilateSurface` (AllToAll) already evaluates at the wall rows too.
+    # The raw set alone is not enough: a row pressed against a wall counts
+    # the wall as support and is not flagged, so it carries the tension
+    # (MDBC_CONTACT_LINE_PLAN.md step 1).
+    cavitation = acParams.cavitationProjection
+    contactRows = fluid | (currentState.kinds == 1)
+    if cavitation == 'off':
+        cavMask = None
+    elif cavitation == 'vicinity':
+        # plus fully isolated rows: detection reads an empty support as bulk
+        # (lambda = 1), though it is all air -- `detectIsolated`'s docstring
+        cavMask = contactRows & ((fsm > 0.5) | detectIsolated(currentState, config, adjacency))
+    elif cavitation == 'fluid':
+        cavMask = contactRows
+    else:
+        raise ValueError(f"acParams.cavitationProjection must be 'off', 'vicinity' "
+                         f"or 'fluid', got {cavitation!r}")
+
+    def project(pp):
+        if cavMask is None:
+            return pp
+        return torch.where(cavMask, pp.clamp_min(0.0), pp)
+
+    x, v, p = x0, v0, project(p0)
     epsV = float('inf')
     iterations = 0
     with record_function("[warpSPH] - [acsph - 06] - dual-time loop"):
@@ -425,7 +452,7 @@ def artificialCompressible_step(
             dvdtBdf = alphaT * vStage0 + betaT * vPrev + gammaT * vPrev2
 
             stage0 = _workingState(currentState, xStage0, vStage0, pStage0)
-            stage0.pressures = wallPressures(stage0, config, adjacency, wallBodyForce)
+            stage0.pressures = project(wallPressures(stage0, config, adjacency, wallBodyForce))
             diffusion = computePressureSmoothing(
                 stage0, config, schemeConfig, adjacency, renormalizationState,
                 pressures=stage0.pressures)
@@ -440,9 +467,10 @@ def artificialCompressible_step(
                     xs = xs + dtau * a * kx[l]
                     vs = vs + dtau * a * kv[l]
                     ps = ps + dtau * a * kp[l]
+                ps = project(ps)
 
                 view = _workingState(currentState, xs, vs, ps)
-                view.pressures = wallPressures(view, config, adjacency, wallBodyForce)
+                view.pressures = project(wallPressures(view, config, adjacency, wallBodyForce))
                 # The wall velocity is a closure of the *current* fluid velocity
                 # (free-slip / no-slip mirror), exactly like the wall pressure
                 # above, so it is re-applied per stage. Without this the wall
@@ -494,6 +522,7 @@ def artificialCompressible_step(
                 x = x + dtau * b * kx[l]
                 v = v + dtau * b * kv[l]
                 p = p + dtau * b * kp[l]
+            p = project(p)
 
             # `tilde v = v - Dx/Dt` is simultaneously the position-row residual
             # and the convergence metric (Eq. 26 / Sec. 1.6): it is zero exactly

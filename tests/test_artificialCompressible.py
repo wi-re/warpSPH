@@ -634,3 +634,74 @@ def test_aCflAboveTheCeilingWarnsRatherThanPassingSilently(periodicBox, capsys):
         assert 'CFL_t' in capsys.readouterr().out
     finally:
         tsmod._warnedCfl = False
+
+
+# --- unilateral contact (MDBC_CONTACT_LINE_PLAN.md §7) ---------------------
+
+def test_cavitationProjectionRoundTrips():
+    config = ArtificialCompressibleSPHConfig()
+    assert config.acParams.cavitationProjection == 'off'
+    config.acParams.cavitationProjection = 'vicinity'
+    back = dictToArtificialCompressibleConfig(artificialCompressibleConfigToDict(config))
+    assert back.acParams.cavitationProjection == 'vicinity'
+
+
+def test_anUnknownCavitationSetRaises(periodicBox):
+    system, config, schemeConfig = periodicBox
+    schemeConfig.acParams.cavitationProjection = 'surface'
+    try:
+        with pytest.raises(ValueError, match='cavitationProjection'):
+            acmod.artificialCompressible_step(system, config.dt, config, schemeConfig)
+    finally:
+        schemeConfig.acParams.cavitationProjection = 'off'
+
+
+def test_vicinityIsANoOpWithoutAFreeSurface(periodicBox):
+    """No free surface -> no row can reach air -> the vicinity set is empty and
+    the step must be bit-identical to the bilateral one. This is what keeps
+    legitimate tension (a sealed box, a submerged wall) untouched."""
+    system, config, schemeConfig = periodicBox
+    try:
+        schemeConfig.acParams.cavitationProjection = 'off'
+        off = runOneStep(system, config, schemeConfig, 20).state
+        schemeConfig.acParams.cavitationProjection = 'vicinity'
+        vic = runOneStep(system, config, schemeConfig, 20).state
+    finally:
+        schemeConfig.acParams.cavitationProjection = 'off'
+    assert float(off.pressures.min()) < 0.0, 'the box must carry tension for this to test anything'
+    assert torch.equal(off.pressures, vic.pressures)
+    assert torch.equal(off.velocities, vic.velocities)
+
+
+def test_theFluidProjectionLeavesNoTension(periodicBox):
+    system, config, schemeConfig = periodicBox
+    try:
+        schemeConfig.acParams.cavitationProjection = 'fluid'
+        out = runOneStep(system, config, schemeConfig, 20).state
+    finally:
+        schemeConfig.acParams.cavitationProjection = 'off'
+    assert float(out.pressures.min()) >= 0.0
+
+
+def test_detectIsolatedFindsExactlyTheEmptySupports(runtime):
+    """Marrone reads an empty support as bulk (lambda = 1); `detectIsolated`
+    is the exact complement: True only for a row with no neighbour at all."""
+    from warpSPH.modules.surfaceDetection import detectIsolated
+    device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+    system, config, _ = buildSystem(device, torch.float32)
+    st = system.state
+    far = torch.tensor([[3.0, 3.0]], device=device, dtype=st.positions.dtype)
+    n = st.positions.shape[0]
+    st.positions = torch.cat([st.positions, far])
+    for name in ('supports', 'masses', 'densities', 'pressures'):
+        v = getattr(st, name)
+        setattr(st, name, torch.cat([v, v[:1]]))
+    st.velocities = torch.cat([st.velocities, torch.zeros_like(far)])
+    for name in ('kinds', 'materials'):
+        v = getattr(st, name)
+        setattr(st, name, torch.cat([v, v[:1]]))
+    st.UIDs = torch.arange(n + 1, dtype=torch.int32, device=device)
+    st.UIDcounter = n + 1
+    iso = detectIsolated(st, config, None)
+    assert bool(iso[-1])
+    assert not bool(iso[:-1].any())

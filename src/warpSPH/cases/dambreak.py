@@ -161,7 +161,7 @@ def configureScheme(ctx: RunContext) -> None:
     schemeConfig.gravityConfig.active = not ctx.param('disableGravity')
     schemeConfig.gravityConfig.type = GravityType.Directional
     schemeConfig.gravityConfig.magnitude = ctx.param('gravityMagnitude')
-    schemeConfig.gravityConfig.origin = ctx.param('gravityDirection')
+    schemeConfig.gravityConfig.direction = ctx.param('gravityDirection')
     schemeConfig.bandwith = simSetup.L / ctx.param('bandWidth') / ctx.config.dx
     # `None` (default): don't touch it -- let whichever scheme was selected
     # keep its own `freezeDiffusionAcrossStages` default (`deltaSPH`: False;
@@ -266,6 +266,8 @@ def _configureArtificialCompressibleExtra(ctx: RunContext) -> None:
     # less at nx=70) and a thinly-supported free-surface particle at a wall
     # contact runs away in negative pressure (FREESLIP_DAMBREAK_FINDINGS.md).
     # `acAlphaNu=None` keeps the directly-set physical `acParams.nu`.
+    schemeConfig.acParams.cavitationProjection = ctx.param('acCavitationProjection', 'off')
+
     alphaNu = ctx.param('acAlphaNu')
     if alphaNu is not None:
         depth = ctx.param('fillRatio') * ctx.spec.L
@@ -902,6 +904,10 @@ dambreakCase = registerCase(Case(
         # 0.01, with `c0 = 50 sqrt(g H)`). `None` falls back to the physical
         # `acParams.nu`; see `_configureArtificialCompressibleExtra`.
         acAlphaNu=0.01,
+        # ACSPH only: `acParams.cavitationProjection` -- unilateral wall
+        # contact where air can reach ('vicinity'), `MDBC_CONTACT_LINE_PLAN.md`.
+        # 'off' is the paper.
+        acCavitationProjection='off',
         # The column is `fluidWidth * W` wide by `fillRatio * L` tall, in the
         # bottom-left corner of a `W x L` tank. These two give 0.667 x 1.333 in
         # the 4 x 2 tank: the canonical Koshizuka & Oka proportions, a column

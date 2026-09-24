@@ -127,6 +127,16 @@ class ArtificialCompressibilityParams:
     #: Shift inside the pseudo-time loop (Eq. 60) rather than outside it
     #: (Eq. 58). Sec. 4.2 tested both and chose *outside*.
     shiftInsidePseudoLoop: bool = field(default=False, metadata={'description': 'internal shifting (Eq. 60)'})
+    #: Unilateral (non-sticking) contact at air-exposed particles -- the
+    #: complementarity `0 <= p _|_ separation` of Batty et al. 2007 Eq. (15),
+    #: applied as a projected pseudo-time iteration: after every RK stage the
+    #: pressure of the rows in the set (fluid rows, and the Eq. 61 value of
+    #: wall rows) is projected onto `p >= 0`. 'off' (the paper), 'vicinity'
+    #: (rows with a free-surface particle inside their kernel support, i.e.
+    #: air can reach the gap), 'fluid' (every fluid and wall row -- the
+    #: IISPH/DFSPH global clamp; a bracket, not a physical model: it removes
+    #: legitimate tension where no air can reach). MDBC_CONTACT_LINE_PLAN.md.
+    cavitationProjection: str = field(default='off', metadata={'description': "p >= 0 projection set: 'off' | 'vicinity' | 'fluid'"})
     #: The BDF correction of Eq. (59) that keeps the real-time derivative
     #: Lagrangian across the shift. Cheap; Sec. 4.2 found it makes little
     #: difference either way.
@@ -234,6 +244,7 @@ def _acParamsToDict(p: ArtificialCompressibilityParams) -> Dict[str, Any]:
         'usePointImplicit': p.usePointImplicit,
         'useTildeVAdvection': p.useTildeVAdvection,
         'shiftInsidePseudoLoop': p.shiftInsidePseudoLoop,
+        'cavitationProjection': p.cavitationProjection,
         'bdfShiftCorrection': p.bdfShiftCorrection,
         'referenceSoundSpeedForViscosity': p.referenceSoundSpeedForViscosity,
         'alphaNu': p.alphaNu, 'nu': p.nu,
@@ -264,6 +275,7 @@ def _dictToAcParams(d: Optional[Dict[str, Any]]) -> ArtificialCompressibilityPar
         usePointImplicit=bool(d.get('usePointImplicit', defaults.usePointImplicit)),
         useTildeVAdvection=bool(d.get('useTildeVAdvection', defaults.useTildeVAdvection)),
         shiftInsidePseudoLoop=bool(d.get('shiftInsidePseudoLoop', defaults.shiftInsidePseudoLoop)),
+        cavitationProjection=str(d.get('cavitationProjection', defaults.cavitationProjection)),
         bdfShiftCorrection=bool(d.get('bdfShiftCorrection', defaults.bdfShiftCorrection)),
         referenceSoundSpeedForViscosity=(
             None if d.get('referenceSoundSpeedForViscosity', defaults.referenceSoundSpeedForViscosity) is None
