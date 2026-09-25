@@ -43,6 +43,7 @@ diagnostics those figures need are `kineticEnergy` (already here), `pCentre`
 
 from __future__ import annotations
 
+import copy
 from typing import Dict
 
 import numpy as np
@@ -184,8 +185,17 @@ def buildSystem(ctx: RunContext):
     # A perfectly regular lattice is an unstable SPH equilibrium; the shuffle is
     # what keeps the early trajectory free of lattice noise.
     if ctx.param('shuffleIters'):
+        shuffleSchemeConfig = ctx.schemeConfig
+        eq7 = ctx.param('shuffleEq7', None)
+        if eq7 is not None:
+            # Relax at the requested shift strength regardless of the selected
+            # scheme (see the `shuffleEq7` param docs): a shallow copy carrying
+            # its own `shiftProperties`, so the running scheme is untouched.
+            shuffleSchemeConfig = copy.copy(ctx.schemeConfig)
+            shuffleSchemeConfig.shiftProperties = copy.copy(ctx.schemeConfig.shiftProperties)
+            shuffleSchemeConfig.shiftProperties.sun2017Eq7Shift = bool(eq7)
         system.state.positions = shuffleParticles(
-            system.state, ctx.config, ctx.schemeConfig, ctx.param('shuffleIters'),
+            system.state, ctx.config, shuffleSchemeConfig, ctx.param('shuffleIters'),
             jitterAmount=ctx.param('jitter'))
     return system
 
@@ -394,6 +404,14 @@ tgvWeaklyCompressibleCase = registerCase(Case(
         # False runs the plain delta-SPH leg of the PST A/B. See
         # `configureScheme`.
         shifting=None,
+        # The Sun-2017-Eq.-(7) flag for the build-time shuffle *relaxation*
+        # only (None -> the selected scheme's own strength, unchanged
+        # behaviour). The relaxation is glass-construction, not scheme
+        # physics: at full strength it over-mixes the lattice (measured at
+        # nx=128: a2-rms 0.34 vs 8.5e-3 for the 1/8-strength glass; the
+        # higher-order survey's TGV_NOTES section 7), so studies that vary
+        # the scheme while holding the IC comparable should set False.
+        shuffleEq7=None,
         # Start on the analytic pressure field instead of a uniform rho0 --
         # see `initialConditions`. Off by default (unchanged behaviour); the
         # Sun 2019 Sec. 3.1 benchmark needs it on.
