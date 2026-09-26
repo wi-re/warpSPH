@@ -109,7 +109,18 @@ def buildPointCloud(nx, domain: DomainDescription = None, targetNeighbors = 16, 
             dn = l / nCells
             nd = nCells if periodicity[d] else nCells + 1
         else:
-            nd = torch.clamp(torch.ceil(l / dx).to(torch.int32),
+            # Same `- 1e-3` round-off guard as the explicit-dx branch above:
+            # `dx` here is `span/nx`, so `l/dx` is nx (or nx-1) up to
+            # round-off, and a result like 48.00000000000001 (float64,
+            # l = 2*pi, nx = 48 or 96) made `ceil` add a spurious whole
+            # layer -- e.g. the TGV case sampled 49^2 particles at nx=48 and
+            # 97^2 at nx=96 while reporting dx = 2*pi/48 (float32 L = 3 at
+            # nx = 100 / 200 was hit the same way; found by the
+            # higher-order convergence harness, warpSPHCore
+            # higher_order.md). Non-integer `l/dx` (a non-square domain's
+            # longer axis) is unaffected unless its fractional part is
+            # < 1e-3.
+            nd = torch.clamp(torch.ceil(l / dx - 1e-3).to(torch.int32),
                              min=(1 if periodicity[d] else 2))
             dn = l / (nd if periodicity[d] else nd - 1)
         dns.append(dn)
