@@ -114,13 +114,17 @@ def test_everyCaseDeclaresItsParamsAsScalarsOrLists():
     Only scalars get flags (`buildArgumentParser` skips lists and dicts) and
     only scalars are written per frame, so anything else has to be a deliberate
     list/dict rather than, say, an enum or a tensor that would fail at export.
+    `None` is allowed too: it is the deliberate "leave the scheme's own
+    setting" sentinel (e.g. dambreak's `alpha`, `shifting`), and both runtime
+    paths special-case it -- `_addField` infers the flag's type from the
+    annotation and `copy_dict_to_h5` skips it on export.
     """
     from warpSPH.cases import importAll
     from warpSPH.runner import getCase
     importAll()
     for name in listCases():
         for key, value in getCase(name).params.items():
-            assert isinstance(value, (int, float, str, bool, list, dict)), \
+            assert value is None or isinstance(value, (int, float, str, bool, list, dict)), \
                 f'{name}.{key} is {type(value).__name__}'
 
 
