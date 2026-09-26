@@ -1,16 +1,18 @@
 """Dispatch initial particle sampling by `config.samplingScheme`
-(`geometry.SamplingScheme`), used only by `warpSPH.systems.waveSystem`'s
-wave-equation setup (not by any compressible/weakly-compressible case).
+(`geometry.SamplingScheme`), used by `warpSPH.systems.waveSystem`'s
+wave-equation setup and by the weakly-compressible case build path
+(`cases/tgvWeaklyCompressible.buildSystem` routes every *non-regular* scheme
+here; `regular` keeps that case's own jitter+shuffle decorrelation, so its
+default start is unchanged).
 
 `regular`/`jittered`/`random` all start from `sampleRegularParticles` and
 differ only in how much position noise is layered on afterwards; `optimal`
-relaxes a lattice via `sampleOptimal`; `densest` lays out the densest
-periodic packing (1D uniform, 2D hexagonal, 3D FCC) via
-`sampleDensestParticles`; `glass` loads a pre-relaxed particle
-configuration from a local `position_samples_*.h5` file sized to the
-requested particle count. `config.samplingScheme` defaults to
-`SamplingScheme.regular` and no case in this repo overrides it, so the other
-branches are wired but currently unexercised.
+relaxes a lattice via `sampleOptimal` (the validated glass recipe, with the
+run's own `config.kernel`); `densest` lays out the densest periodic packing
+(1D uniform, 2D hexagonal, 3D FCC) via `sampleDensestParticles`; `glass`
+loads a pre-relaxed particle configuration from a local
+`position_samples_*.h5` file sized to the requested particle count.
+`config.samplingScheme` defaults to `SamplingScheme.regular`.
 """
 
 from ..configurations import SimulationConfig
@@ -18,7 +20,6 @@ from ..geometry import *
 from .regular import sampleRegularParticles
 from .optimal import sampleOptimal
 from .densest import sampleDensestParticles
-from warpSPHCore import KernelFunctions
 import h5py
 import torch
 
@@ -88,13 +89,15 @@ def sampleParticles(nx: int,config : SimulationConfig):
         )
         
     elif config.samplingScheme == SamplingScheme.optimal:
+        # The run's own kernel: the relaxation direction depends on the
+        # kernel shape. jitter=0.1 (in dx) is the validated glass recipe
+        # (`sample/optimal.py` docstring), not the earlier 0.5.
         particles = sampleOptimal(
             nx = nx,
             domain=config.domain,
             targetNeighbors=config.targetNeighbors,
-            kernel=KernelFunctions.Wendland4,
-            jitter = 0.5,
-            shiftScheme='delta',
+            kernel=config.kernel,
+            jitter = 0.1,
             shiftIters=128
         )
     elif config.samplingScheme == SamplingScheme.densest:

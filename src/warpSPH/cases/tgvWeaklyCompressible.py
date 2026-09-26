@@ -52,9 +52,11 @@ import torch
 from warpSPHCore import OperationDirection
 
 from ..enumTypes import isArtificialCompressibleScheme
+from ..geometry import SamplingScheme
 from ..modules import alphaToNu, nuToAlpha, shuffleParticles
 from ..modules.liu import interpolateLiuLiu
 from ..runner import Case, RunContext, caseMain, registerCase
+from ..sample.bySamplingScheme import sampleParticles
 from ..sample.weaklyCompressible import setupBasicWeaklyCompressibleInitialState
 from .plotting import particlePlot
 from .weaklyCompressible import (VELOCITY_DENSITY_FIELDS, WEAKLY_COMPRESSIBLE_DEFAULTS,
@@ -182,21 +184,34 @@ def configureScheme(ctx: RunContext) -> None:
 def buildSystem(ctx: RunContext):
     system = setupBasicWeaklyCompressibleInitialState(
         ctx.spec.nx, ctx.config, ctx.schemeConfig, ctx.SimulationState, ctx.SimulationSystem)
-    # A perfectly regular lattice is an unstable SPH equilibrium; the shuffle is
-    # what keeps the early trajectory free of lattice noise.
-    if ctx.param('shuffleIters'):
-        shuffleSchemeConfig = ctx.schemeConfig
-        eq7 = ctx.param('shuffleEq7', None)
-        if eq7 is not None:
-            # Relax at the requested shift strength regardless of the selected
-            # scheme (see the `shuffleEq7` param docs): a shallow copy carrying
-            # its own `shiftProperties`, so the running scheme is untouched.
-            shuffleSchemeConfig = copy.copy(ctx.schemeConfig)
-            shuffleSchemeConfig.shiftProperties = copy.copy(ctx.schemeConfig.shiftProperties)
-            shuffleSchemeConfig.shiftProperties.sun2017Eq7Shift = bool(eq7)
-        system.state.positions = shuffleParticles(
-            system.state, ctx.config, shuffleSchemeConfig, ctx.param('shuffleIters'),
-            jitterAmount=ctx.param('jitter'))
+    if ctx.config.samplingScheme == SamplingScheme.regular:
+        # A perfectly regular lattice is an unstable SPH equilibrium; the
+        # shuffle is what keeps the early trajectory free of lattice noise.
+        if ctx.param('shuffleIters'):
+            shuffleSchemeConfig = ctx.schemeConfig
+            eq7 = ctx.param('shuffleEq7', None)
+            if eq7 is not None:
+                # Relax at the requested shift strength regardless of the
+                # selected scheme (see the `shuffleEq7` param docs): a shallow
+                # copy carrying its own `shiftProperties`, so the running
+                # scheme is untouched.
+                shuffleSchemeConfig = copy.copy(ctx.schemeConfig)
+                shuffleSchemeConfig.shiftProperties = copy.copy(ctx.schemeConfig.shiftProperties)
+                shuffleSchemeConfig.shiftProperties.sun2017Eq7Shift = bool(eq7)
+            system.state.positions = shuffleParticles(
+                system.state, ctx.config, shuffleSchemeConfig, ctx.param('shuffleIters'),
+                jitterAmount=ctx.param('jitter'))
+    else:
+        # A non-regular `samplingScheme` is a complete initial-configuration
+        # strategy dispatched by `sample.bySamplingScheme.sampleParticles`
+        # (`optimal` relaxes the lattice into the validated glass, `densest`
+        # lays out the densest packing, ...). Only the positions come from
+        # it -- the WCSPH state stamps (uniform density, zero pressure and
+        # velocity) stay, exactly as the shuffle path returns uniform-density
+        # positions. The shuffle is deliberately skipped: it is the regular
+        # scheme's decorrelation step, and re-jittering a relaxed glass
+        # would destroy it.
+        system.state.positions = sampleParticles(ctx.spec.nx, ctx.config).positions
     return system
 
 
