@@ -267,6 +267,7 @@ def _configureArtificialCompressibleExtra(ctx: RunContext) -> None:
     # contact runs away in negative pressure (FREESLIP_DAMBREAK_FINDINGS.md).
     # `acAlphaNu=None` keeps the directly-set physical `acParams.nu`.
     schemeConfig.acParams.cavitationProjection = ctx.param('acCavitationProjection', 'off')
+    schemeConfig.acParams.isolatedZeroPressure = bool(ctx.param('acIsolatedZeroPressure', False))
 
     alphaNu = ctx.param('acAlphaNu')
     if alphaNu is not None:
@@ -908,6 +909,9 @@ dambreakCase = registerCase(Case(
         # contact where air can reach ('vicinity'), `MDBC_CONTACT_LINE_PLAN.md`.
         # 'off' is the paper.
         acCavitationProjection='off',
+        # ACSPH only: `acParams.isolatedZeroPressure` -- p = 0 on rows with an
+        # empty support (MDBC_CONTACT_LINE_PLAN.md §11.1). Off is the paper.
+        acIsolatedZeroPressure=False,
         # The column is `fluidWidth * W` wide by `fillRatio * L` tall, in the
         # bottom-left corner of a `W x L` tank. These two give 0.667 x 1.333 in
         # the 4 x 2 tank: the canonical Koshizuka & Oka proportions, a column

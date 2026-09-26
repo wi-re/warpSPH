@@ -205,7 +205,11 @@ def computeMdbcDensityEnglish2025(currentState: Any, config: SimulationConfig, s
         else:
             a_b = torch.zeros_like(relPos)
         P_g = c0 ** 2 * (alpha - rho0)
-        P_b = P_g + rho0 * torch.einsum('nu,nu->n', g_b - a_b, relPos)
+        hydro = rho0 * torch.einsum('nu,nu->n', g_b - a_b, relPos)
+        if getattr(schemeConfig, 'mdbcOneSidedHydrostatic', False):
+            # never tension from the hydrostatic extension (config docstring)
+            hydro = hydro.clamp_min(0.0)
+        P_b = P_g + hydro
         rho_b = rho0 + P_b / c0 ** 2
 
         # No-neighbour fallback: rest density, matching density2025.py /

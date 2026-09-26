@@ -69,6 +69,7 @@ from warpSPHCore import (GradientScheme, OperationDirection, OperationProperties
 from warpSPHIntegrators.butcher import getButcherTableau
 from warpSPHIntegrators.integration import IntegrationSchemeType
 
+from ..enumTypes import PressureForceScheme
 from ..configurations import ArtificialCompressibleSPHConfig, SimulationConfig
 from ..modules.artificialCompressible import computePressureSmoothing
 from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
@@ -223,8 +224,100 @@ def wallPressures(view, config, adjacency, bodyForce, clampNonNeg=False):
                                      clampNonNeg=clampNonNeg, bodyForce=bodyForce)
 
 
+def _unilateralWallForce(view, config, schemeConfig, adjacency):
+    """Pressure force with the fluid-solid pair terms made unilateral
+    (`cavitationProjection = 'wall'`, Batty et al. 2007 Eq. 15 applied to the
+    solid contact only; its kinematic partner is `_unilateralWallDivergence`): `-sum_wall V_j (p_i^+ + p_w^+) gradW` in place of
+    `-sum_wall V_j (p_i + p_w) gradW`, every other term untouched -- the
+    pressure solve, the divergence, and the fluid-fluid pairs, whose tension is
+    what lets a droplet coalesce (MDBC_CONTACT_LINE_PLAN.md §9.2: projecting
+    p >= 0 on fluid rows made every droplet-surface contact elastic). The wall
+    can push but not pull; omniSPH's boundary force does the same
+    (`max(0, p_fluid)`, `max(0, p_boundary)`, fluidMechanics.cpp:464-465).
+
+    Exact by linearity of Eq. (25)'s `(p_i + p_j)` form, with `A(q)` the force
+    operator on a pressure field `q`:
+      F' = A(p) + A((p^+ - p) 1_wall) + (p_i^+ - p_i) A(1_wall)
+    where `A(1_wall)` at a fluid row is the coefficient of its own `p_i` over
+    its wall pairs."""
+    if schemeConfig.pressureForceTerm != PressureForceScheme.nonConservative:
+        raise ValueError("cavitationProjection='wall' needs the linear "
+                         "pressureForceTerm=nonConservative ((p_i + p_j), Eq. 25)")
+    p = view.pressures
+    wall = view.kinds == 1
+
+    def A(q):
+        qView = _workingState(view, view.positions, view.velocities, q)
+        return computePressureForceSurfaceAware(qView, config, schemeConfig, adjacency)
+
+    zero = torch.zeros_like(p)
+    dp = p.clamp_min(0.0) - p
+    return (A(p) + A(torch.where(wall, dp, zero))
+            + dp.unsqueeze(-1) * A(wall.to(p.dtype)))
+
+
+def _unilateralWallDivergence(view, config, adjacency, divV):
+    """`div v` with the fluid-solid pairs made unilateral: the kinematic half
+    of Batty et al. 2007's complementarity `0 <= p ⊥ (u - v_s).n >= 0`, the
+    partner of `_unilateralWallForce`. With only the force unilateral, a row
+    separating from a wall kept the positive divergence of its mirrored wall
+    pairs, which the wall could no longer act on, and the pseudo-time drove
+    its pressure without bound (Marrone 3.1 nx=24: -12 -> -1.8e6 in 0.02 s,
+    MDBC_CONTACT_LINE_PLAN.md §9.3).
+
+    The wall pairs' share of a row's divergence (Difference form,
+    `sum_j V_j (v_j - v_i).gradW`) is split out by linearity,
+      divWall_i = D(v 1_wall)_i - v_i . G_i,   G_i = sum_wall V_j gradW_ij,
+    and kept only while it compresses (`min(divWall, 0)`): a wall can resist
+    approach, never separation. Clamped per row, not per pair -- exact for a
+    row against one wall, an approximation in a corner with one wall
+    approaching and another receding."""
+    wall = view.kinds == 1
+
+    def op(operation, values):
+        return warpOperation(
+            view,
+            OperationProperties(kernel=config.kernel, operation=operation,
+                                supportMode=SupportScheme.SuperSymmetric,
+                                operationMode=OperationDirection.AllToAll,
+                                gradientMode=GradientScheme.Difference),
+            queryValues=values, domain=config.domain, adjacency=adjacency)
+
+    vWall = torch.where(wall.unsqueeze(-1), view.velocities, torch.zeros_like(view.velocities))
+    G = op(WarpOperation.Gradient, wall.to(view.velocities.dtype))
+    divWall = op(WarpOperation.Divergence, vWall) - (view.velocities * G).sum(-1)
+    return divV - divWall + divWall.clamp_max(0.0)
+
+
+def _wallAdjacent(view, config, adjacency):
+    """Boolean per row: True when at least one wall (`kind == 1`) row lies in
+    its kernel support -- the SPH analogue of Batty et al. 2007's "pressure
+    unknowns on solid boundaries" (`cavitationProjection = 'contact'`).
+
+    Exact, no threshold, the `detectIsolated` construction restricted to the
+    wall pairs: `sum_wall V_j (x_j - x_i) . gradW_ij` is a sum of same-signed
+    terms, one per wall neighbour, and exactly 0.0 with none. Split out by
+    linearity as `D(x 1_wall)_i - x_i . G_i` (`_unilateralWallDivergence`)."""
+    wall = view.kinds == 1
+
+    def op(operation, values):
+        return warpOperation(
+            view,
+            OperationProperties(kernel=config.kernel, operation=operation,
+                                supportMode=SupportScheme.SuperSymmetric,
+                                operationMode=OperationDirection.AllToAll,
+                                gradientMode=GradientScheme.Difference),
+            queryValues=values, domain=config.domain, adjacency=adjacency)
+
+    x = view.positions
+    xWall = torch.where(wall.unsqueeze(-1), x, torch.zeros_like(x))
+    G = op(WarpOperation.Gradient, wall.to(x.dtype))
+    trace = op(WarpOperation.Divergence, xWall) - (x * G).sum(-1)
+    return trace != 0.0
+
+
 def _spatialResidual(view, config, schemeConfig, adjacency, k1, k2, diffusion,
-                     bodyForce, nu):
+                     bodyForce, nu, unilateralWall=False):
     """`(r_p, r_v)`: the right-hand sides of Eqs. (23) and (25) at `view`.
 
     Eq. (23):  Dp/Dtau = -k1 rho sum_j (v_j - v_i).gradW V_j + k2 D^p
@@ -245,13 +338,18 @@ def _spatialResidual(view, config, schemeConfig, adjacency, k1, k2, diffusion,
                             operationMode=OperationDirection.AllToAll,
                             gradientMode=GradientScheme.Difference),
         queryValues=view.velocities, domain=config.domain, adjacency=adjacency)
+    if unilateralWall:
+        divV = _unilateralWallDivergence(view, config, adjacency, divV)
     rP = -k1 * rho * divV + k2 * diffusion
 
     # `computePressureSurfaceAwareWarp` returns `-sum_j V_j p_ij gradW`, which
     # is `rho * dv/dt`; Eq. (25) carries the explicit `1/rho_i`. delta-SPH
     # omits that division because it runs at `restDensity = 1`, where it is a
     # no-op; ACSPH does not assume that.
-    rV = computePressureForceSurfaceAware(view, config, schemeConfig, adjacency) / rho.unsqueeze(-1)
+    if unilateralWall:
+        rV = _unilateralWallForce(view, config, schemeConfig, adjacency) / rho.unsqueeze(-1)
+    else:
+        rV = computePressureForceSurfaceAware(view, config, schemeConfig, adjacency) / rho.unsqueeze(-1)
 
     rV = rV + _viscosity(view, config, adjacency, nu)
 
@@ -421,22 +519,44 @@ def artificialCompressible_step(
     # (MDBC_CONTACT_LINE_PLAN.md step 1).
     cavitation = acParams.cavitationProjection
     contactRows = fluid | (currentState.kinds == 1)
-    if cavitation == 'off':
+    if cavitation in ('off', 'wall'):
+        # 'wall' projects nothing: it changes only the fluid-solid pair terms
+        # of the pressure force and of the divergence
+        # (`_unilateralWallForce`, `_unilateralWallDivergence`)
         cavMask = None
     elif cavitation == 'vicinity':
         # plus fully isolated rows: detection reads an empty support as bulk
         # (lambda = 1), though it is all air -- `detectIsolated`'s docstring
         cavMask = contactRows & ((fsm > 0.5) | detectIsolated(currentState, config, adjacency))
+    elif cavitation == 'contact':
+        # Batty et al. 2007 §4 as written: `p >= 0` on the unknowns at the
+        # solid boundary only -- every wall row and every fluid row with a
+        # wall in its support, submerged or not; divergence and force stay
+        # bilateral, the KKT fixed point of the projected pseudo-time supplies
+        # the kinematic half (MDBC_CONTACT_LINE_PLAN.md §10.3 A). Fluid rows
+        # away from walls keep their tension (coalescence, §9.2).
+        wallRows = currentState.kinds == 1
+        cavMask = wallRows | (fluid & _wallAdjacent(currentState, config, adjacency))
     elif cavitation == 'fluid':
         cavMask = contactRows
     else:
-        raise ValueError(f"acParams.cavitationProjection must be 'off', 'vicinity' "
-                         f"or 'fluid', got {cavitation!r}")
+        raise ValueError(f"acParams.cavitationProjection must be 'off', 'wall', "
+                         f"'vicinity', 'contact' or 'fluid', got {cavitation!r}")
+
+    # Isolated rows: Dirichlet p = 0 (`acParams.isolatedZeroPressure`). The
+    # adjacency is fixed for the step, so a row isolated at the start stays
+    # isolated through every pseudo-iteration and its p acts on nothing this
+    # step; zeroing it only stops it carrying stored pressure into its next
+    # contact (MDBC_CONTACT_LINE_PLAN.md §11.1).
+    isoMask = (fluid & detectIsolated(currentState, config, adjacency)
+               if acParams.isolatedZeroPressure else None)
 
     def project(pp):
-        if cavMask is None:
-            return pp
-        return torch.where(cavMask, pp.clamp_min(0.0), pp)
+        if cavMask is not None:
+            pp = torch.where(cavMask, pp.clamp_min(0.0), pp)
+        if isoMask is not None:
+            pp = torch.where(isoMask, torch.zeros_like(pp), pp)
+        return pp
 
     x, v, p = x0, v0, project(p0)
     epsV = float('inf')
@@ -480,7 +600,8 @@ def artificialCompressible_step(
                 view.velocities = computeBoundaryVelocities(view, config, schemeConfig,
                                                             adjacency)
                 rP, rV = _spatialResidual(view, config, schemeConfig, adjacency,
-                                          k1, k2, diffusion, bodyForce, nu)
+                                          k1, k2, diffusion, bodyForce, nu,
+                                          unilateralWall=cavitation == 'wall')
                 rX = vs
 
                 # alpha_PI = 1 + alpha_s dtau alpha_t (Eqs. 43-45), applied to

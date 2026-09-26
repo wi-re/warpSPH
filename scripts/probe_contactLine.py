@@ -43,6 +43,9 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# toy initial pressure (uniform); nonzero only to probe the closed-box gauge
+# drift (--p0, MDBC_CONTACT_LINE_PLAN.md §9.3)
+P0_OFFSET = 0.0
 DEFAULT_OUT = os.path.join(HERE, 'out_contactLine')
 
 TOYS = {
@@ -81,7 +84,7 @@ def pressureSplit(system, ctx):
         pass
     elif sc.acParams.cavitationProjection == 'vicinity' and state.surfaceIndicators is not None:
         pAll = torch.where(wall & (state.surfaceIndicators > 0), pAll.clamp_min(0.0), pAll)
-    elif sc.acParams.cavitationProjection == 'fluid':
+    elif sc.acParams.cavitationProjection in ('fluid', 'contact'):
         pAll = torch.where(wall, pAll.clamp_min(0.0), pAll)
     _, den = _shepardValue(view, config, adj, pAll)
 
@@ -90,12 +93,31 @@ def pressureSplit(system, ctx):
         return computePressureForceSurfaceAware(v, config, sc, adj) / state.densities.unsqueeze(-1)
 
     zero = torch.zeros_like(pAll)
-    fWallPj = A(torch.where(wall, pAll, zero))
     gWall = A(wall.to(pAll.dtype))                       # -sum_wall V gradW
-    fWallPi = pAll.unsqueeze(-1) * gWall
-    fFluid = A(torch.where(fluid, pAll, zero)) - fWallPi
+    fFluid = A(torch.where(fluid, pAll, zero)) - pAll.unsqueeze(-1) * gWall
+    # 'wall': the fluid-solid pair terms use max(0, .) on both sides
+    pPair = (pAll.clamp_min(0.0) if hasattr(sc, 'acParams')
+             and sc.acParams.cavitationProjection == 'wall' else pAll)
+    fWallPj = A(torch.where(wall, pPair, zero))
+    fWallPi = pPair.unsqueeze(-1) * gWall
     return dict(pAll=pAll, den=den, g=g, fWallPj=fWallPj, fWallPi=fWallPi,
                 fFluid=fFluid, gWall=gWall, fluid=fluid, wall=wall)
+
+
+def withWcSwitches(case, args):
+    """delta-SPH switches of MDBC_CONTACT_LINE_PLAN.md §12 on top of a case's
+    own configureScheme: `loneDensityReset`, `mdbcOneSidedHydrostatic`."""
+    if not (args.loneReset or args.oneSidedHydro):
+        return case
+    _cs = case.configureScheme
+
+    def configureScheme(ctx):
+        _cs(ctx)
+        if not hasattr(ctx.schemeConfig, 'loneDensityReset'):
+            raise SystemExit('--loneReset/--oneSidedHydro are weakly-compressible only')
+        ctx.schemeConfig.loneDensityReset = bool(args.loneReset)
+        ctx.schemeConfig.mdbcOneSidedHydrostatic = bool(args.oneSidedHydro)
+    return dataclasses.replace(case, configureScheme=configureScheme)
 
 
 def patchWallMode(mode):
@@ -109,6 +131,40 @@ def patchWallMode(mode):
         ac.wallPressures = lambda view, config, adj, bf, clampNonNeg=False: orig(view, config, adj, None)
     elif mode == 'blanketClamp':
         ac.wallPressures = lambda view, config, adj, bf, clampNonNeg=False: orig(view, config, adj, bf, clampNonNeg=True)
+    elif mode == 'dtsph':
+        # Dual-time SPH (Ramachandran, Muta & Ramakrishna; gitlab.com/pypr/dtsph,
+        # dtsph.py): SetPressureSolid = Adami Eq. 27 incl. the hydrostatic term,
+        # then max(0, p_w) (Hughes & Graham 2010), recomputed every pseudo-
+        # iteration; PredictPressure's VIJ uses the wall's OWN velocity (0 for
+        # a static tank), not the mirrored ghost velocity (that one, ug, only
+        # enters SolidWallNoSlipBC, and their dam break runs nu = 0). Static
+        # walls only.
+        import torch
+        ac.wallPressures = lambda view, config, adj, bf, clampNonNeg=False: orig(view, config, adj, bf, clampNonNeg=True)
+        ac.computeBoundaryVelocities = lambda view, config, sc, adj: torch.where(
+            (view.kinds == 1).unsqueeze(-1), torch.zeros_like(view.velocities), view.velocities)
+    elif mode == 'dtsphDiv':
+        # 'dtsph' with the static wall velocity in the pressure (continuity)
+        # row only; the viscosity keeps the case's free-slip mirror. Isolates
+        # the clamp + kinematics from the no-slip drag that zeroing the wall
+        # velocity everywhere adds to ACSPH's viscous term (Marrone 3.1 is
+        # free-slip; 'dtsph' slowed the whole surge).
+        import torch
+        ac.wallPressures = lambda view, config, adj, bf, clampNonNeg=False: orig(view, config, adj, bf, clampNonNeg=True)
+        origBV, origVisc = ac.computeBoundaryVelocities, ac._viscosity
+        last = {}
+
+        def staticWalls(view, config, sc, adj):
+            last['sc'] = sc
+            return torch.where((view.kinds == 1).unsqueeze(-1),
+                               torch.zeros_like(view.velocities), view.velocities)
+
+        def mirroredViscosity(view, config, adj, nu):
+            v = ac._workingState(view, view.positions, view.velocities, view.pressures)
+            v.velocities = origBV(v, config, last['sc'], adj)
+            return origVisc(v, config, adj, nu)
+        ac.computeBoundaryVelocities = staticWalls
+        ac._viscosity = mirroredViscosity
 
 
 def makeDiagnostics(baseDiagnostics, toy, record):
@@ -246,7 +302,7 @@ def buildCase(toy: str, dambreakLikeAC: bool, cav: str = 'off', nuOff=False, shi
             return
         # the exact solution of every toy here starts from p = 0 (free fall /
         # an unbalanced column); the base IC seeds downward hydrostatics
-        system.state.pressures = torch.zeros_like(system.state.pressures)
+        system.state.pressures = torch.full_like(system.state.pressures, P0_OFFSET)
 
     def buildSystem(ctx):
         from warpSPH.cases.hydrostaticColumn import columnSdf
@@ -378,6 +434,39 @@ class FlierTracker:
         self.prevFree = None
         self.lastWallT = None
         self.births = []
+        # §11.1 per-flier trace: every UID ever born is followed every step
+        # (own p, speed, nF, nW, how many of its fluid neighbours sit in the
+        # wall-adjacent band that 'contact' clamps, their p, and vn = the
+        # velocity relative to the neighbours' mean along centroid -> row,
+        # > 0 departing). Separates "partner clamped" from "own frozen p".
+        self.tracked = set()
+        self.trace = []
+
+    def _traceTracked(self, st, config, adjacency, uid, fluid, nF, nW, t):
+        import torch
+        from warpSPH.schemes.artificialCompressible import _wallAdjacent
+        rows = torch.nonzero(fluid & torch.isin(uid, torch.tensor(sorted(self.tracked), device=uid.device))).squeeze(-1)
+        if rows.numel() == 0:
+            return
+        band = fluid & _wallAdjacent(st, config, adjacency)
+        fIdx = torch.nonzero(fluid).squeeze(-1)
+        xs, xf = st.positions[rows], st.positions[fIdx]
+        d = torch.cdist(xs, xf)
+        H = st.supports[rows].unsqueeze(-1)
+        nb = (d < H) & (fIdx.unsqueeze(0) != rows.unsqueeze(-1))
+        for a, i in enumerate(rows.tolist()):
+            j = fIdx[nb[a]]
+            rec = dict(t=t, uid=int(uid[i]), p=float(st.pressures[i]),
+                       v=float(st.velocities[i].norm()), nF=int(nF[i]), nW=int(nW[i]),
+                       inBand=bool(band[i]), nNbr=int(j.numel()))
+            if j.numel() > 0:
+                rec['nBand'] = int(band[j].sum())
+                rec['pNbrMean'] = float(st.pressures[j].mean())
+                rec['pNbrMin'] = float(st.pressures[j].min())
+                n = st.positions[i] - st.positions[j].mean(0)
+                n = n / n.norm().clamp_min(1e-12)
+                rec['vn'] = float(((st.velocities[i] - st.velocities[j].mean(0)) * n).sum())
+            self.trace.append(rec)
 
     @staticmethod
     def counts(st, config, adjacency, mode):
@@ -433,6 +522,13 @@ class FlierTracker:
                                         sinceWall=(t - lw) if lw != float('inf') else None,
                                         nF=int(nF[i]), p=float(st.pressures[i]),
                                         rho=float(st.densities[i])))
+                self.tracked.add(int(uid[i]))
+        # also every row that is ever wall-sparse (a lone / thin row hanging on
+        # a wall: the ceiling riders), so its carried state is on record too
+        if bool(wallSparse.any()):
+            self.tracked.update(uid[wallSparse].tolist())
+        if self.tracked:
+            self._traceTracked(st, config, system.adjacency, uid, fluid, nF, nW, t)
         self.prevFree = freeNow
 
     selfCount = 1   # the count includes the row itself (no i == j skip)
@@ -451,6 +547,23 @@ def runMarrone(args):
     from warpSPH.runner import run
     sloshing = args.toy == 'sloshing'
     baseCase = sloshingTankCase if sloshing else dambreakCase
+    patchWallMode(args.wallMode)
+    baseCase = withWcSwitches(baseCase, args)
+    if args.jitter > 0.0:
+        # independent realisations (MDBC_CONTACT_LINE_PLAN.md §12): after the
+        # case's own initial conditions, move every fluid particle by a seeded
+        # uniform offset of at most `jitter * dx` per component
+        _ic = baseCase.initialConditions
+
+        def _jitteredIC(ctx, system):
+            if _ic is not None:
+                _ic(ctx, system)
+            st = system.state
+            gen = torch.Generator(device=st.positions.device).manual_seed(args.seed)
+            off = (torch.rand(st.positions.shape, generator=gen, device=st.positions.device,
+                              dtype=st.positions.dtype) * 2.0 - 1.0) * args.jitter * float(ctx.config.dx)
+            st.positions = torch.where((st.kinds == 0).unsqueeze(-1), st.positions + off, st.positions)
+        baseCase = dataclasses.replace(baseCase, initialConditions=_jitteredIC)
 
     record = []
     baseDiag = baseCase.diagnostics
@@ -472,19 +585,28 @@ def runMarrone(args):
                 json.dump(record, f)
             with open(os.path.join(runRoot, 'births.json'), 'w') as f:
                 json.dump(fliers.births, f)
+            with open(os.path.join(runRoot, 'trace.json'), 'w') as f:
+                json.dump(fliers.trace, f)
         if len(hist) > 300 and hist[-1] - hist[-301] < args.stallSimTime:
             raise Stalled(f'sim time advanced {hist[-1] - hist[-301]:.2e} s over 300 steps')
         return out
 
     case = dataclasses.replace(baseCase, diagnostics=diagnostics)
-    tag = f'{args.toy}_{args.scheme}_nx{args.nx}_cav{args.cav}' + (f'_{args.tag}' if args.tag else '')
+    tag = (f'{args.toy}_{args.scheme}_nx{args.nx}_cav{args.cav}'
+           + ('_iso0' if args.isoZero else '')
+           + ('_lone0' if args.loneReset else '')
+           + ('_hyd1' if args.oneSidedHydro else '')
+           + (f'_j{args.seed}' if args.jitter > 0.0 else '')
+           + (f'_wall{args.wallMode}' if args.wallMode != 'eq61' else '')
+           + (f'_{args.tag}' if args.tag else ''))
     runRoot = os.path.join(args.out, tag)
     os.makedirs(runRoot, exist_ok=True)
     params = dict(W=M.TANK_W, fillRatio=M.H / M.TANK_L, fluidWidth=M.COL_W / M.TANK_W,
                   gravityMagnitude=M.G, pressureProbeHeights=M.PROBE_HEIGHTS,
                   pressureProbeInset=0.0, pressureProbeDiscRadius=M.PROBE_DISC_RADIUS,
                   referenceVelocity=M.U_MAX, machTarget=1.95 / 40.0,
-                  acCavitationProjection=args.cav, epsilonV=-5.0)
+                  acCavitationProjection=args.cav, acIsolatedZeroPressure=args.isoZero,
+                  epsilonV=-5.0)
     if args.scheme != 'artificialCompressible' and args.cav != 'off':
         raise SystemExit('--cav is ACSPH-only: the delta-SPH variants were tried '
                          'and removed (MDBC_CONTACT_LINE_PLAN.md §7.5)')
@@ -516,6 +638,8 @@ def runMarrone(args):
         json.dump(record, f)
     with open(os.path.join(runRoot, 'births.json'), 'w') as f:
         json.dump(fliers.births, f)
+    with open(os.path.join(runRoot, 'trace.json'), 'w') as f:
+        json.dump(fliers.trace, f)
     last = record[-1] if record else {}
     print(f'[{tag}] {status}  t={last.get("t", 0):.4f} t*={last.get("tStar", 0):.3f}', flush=True)
 
@@ -537,14 +661,25 @@ def main():
     ap.add_argument('--paperAC', action='store_true',
                     help='dam-break ACSPH extras (Michel + alpha_nu + eps_v=-5)')
     ap.add_argument('--wallMode', default='eq61',
-                    choices=['eq61', 'noHydro', 'blanketClamp'],
+                    choices=['eq61', 'noHydro', 'blanketClamp', 'dtsph', 'dtsphDiv'],
                     help='A/B of the ACSPH wall closure (probe-side patch only)')
-    ap.add_argument('--cav', default='off', choices=['off', 'vicinity', 'fluid'])
+    ap.add_argument('--cav', default='off', choices=['off', 'wall', 'vicinity', 'contact', 'fluid'])
+    ap.add_argument('--isoZero', action='store_true',
+                    help='ACSPH acParams.isolatedZeroPressure (p = 0 on empty supports, §11.1)')
+    ap.add_argument('--loneReset', action='store_true',
+                    help='delta-SPH schemeConfig.loneDensityReset: rho = rho0 on rows with no fluid neighbour (§12)')
+    ap.add_argument('--oneSidedHydro', action='store_true',
+                    help='delta-SPH schemeConfig.mdbcOneSidedHydrostatic (english2025 max(0, .), §12)')
+    ap.add_argument('--jitter', type=float, default=0.0,
+                    help='seeded uniform IC perturbation of fluid positions, in units of dx (marrone31/sloshing)')
+    ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--nuOff', action='store_true')
     ap.add_argument('--shiftOff', action='store_true')
     ap.add_argument('--ddt', default=None,
                     help='WC density diffusion term (DensityDiffusionScheme name)')
     ap.add_argument('--integrator', default=None, help='integrationScheme override')
+    ap.add_argument('--p0', type=float, default=0.0,
+                    help='uniform initial toy pressure (closed-box gauge-drift control)')
     ap.add_argument('--tag', default='')
     ap.add_argument('--out', default=DEFAULT_OUT)
     args = ap.parse_args()
@@ -557,11 +692,16 @@ def main():
     if args.toy in ('marrone31', 'sloshing'):
         return runMarrone(args)
     patchWallMode(args.wallMode)
+    global P0_OFFSET
+    P0_OFFSET = args.p0
     base, case = buildCase(args.toy, args.paperAC, args.cav, args.nuOff, args.shiftOff, args.ddt)
+    case = withWcSwitches(case, args)
     record = []
     case = dataclasses.replace(case, diagnostics=makeDiagnostics(base.diagnostics, args.toy, record))
 
-    tag = f'{args.toy}_{args.scheme}_nx{args.nx}' + (f'_{args.tag}' if args.tag else '')
+    tag = (f'{args.toy}_{args.scheme}_nx{args.nx}'
+           + ('_lone0' if args.loneReset else '') + ('_hyd1' if args.oneSidedHydro else '')
+           + (f'_{args.tag}' if args.tag else ''))
     runRoot = os.path.join(args.out, tag)
     os.makedirs(runRoot, exist_ok=True)
     params = dict(TOYS[args.toy], gravityMagnitude=args.gravity, epsilonV=-5.0)

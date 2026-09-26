@@ -705,3 +705,179 @@ def test_detectIsolatedFindsExactlyTheEmptySupports(runtime):
     iso = detectIsolated(st, config, None)
     assert bool(iso[-1])
     assert not bool(iso[:-1].any())
+
+
+# --- unilateral fluid-solid pair force ('wall', MDBC_CONTACT_LINE_PLAN.md §9) -
+
+def _walledLattice():
+    """`buildSystem`'s lattice with the bottom three rows turned into wall."""
+    device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+    system, config, schemeConfig = buildSystem(device, torch.float32)
+    st = system.state
+    wall = st.positions[:, 1] < 3.0 / N_PER_SIDE
+    st.kinds = torch.where(wall, torch.ones_like(st.kinds), st.kinds)
+    return st, config, schemeConfig, wall
+
+
+def _force(st, config, schemeConfig, p, unilateral):
+    view = acmod._workingState(st, st.positions, st.velocities, p)
+    if unilateral:
+        return acmod._unilateralWallForce(view, config, schemeConfig, None)
+    return acmod.computePressureForceSurfaceAware(view, config, schemeConfig, None)
+
+
+def test_unilateralWallForceIsExactWithoutTension(runtime):
+    """No negative pressure anywhere -> nothing to clamp -> the standard force."""
+    st, config, schemeConfig, _ = _walledLattice()
+    p = torch.rand(st.positions.shape[0], device=st.positions.device)
+    assert torch.allclose(_force(st, config, schemeConfig, p, True),
+                          _force(st, config, schemeConfig, p, False), atol=1e-6)
+
+
+def test_aWallCannotPullOnTheFluid(runtime):
+    """Fluid at p = 0, wall in tension: bilaterally the wall pulls the fluid
+    toward it; unilaterally the fluid-wall pairs carry max(0, .) = 0 and
+    there is no force at all."""
+    st, config, schemeConfig, wall = _walledLattice()
+    p = torch.where(wall, torch.full_like(st.densities, -3.0), torch.zeros_like(st.densities))
+    fluid = ~wall
+    assert float(_force(st, config, schemeConfig, p, False)[fluid].abs().max()) > 0.0
+    assert float(_force(st, config, schemeConfig, p, True)[fluid].abs().max()) < 1e-6
+
+
+def test_fluidFluidPairsKeepTheirTension(runtime):
+    """Rows with no wall inside their support are untouched, negative pressure
+    and all: fluid-fluid tension is what lets a droplet coalesce (§9.2)."""
+    st, config, schemeConfig, wall = _walledLattice()
+    p = torch.rand(st.positions.shape[0], device=st.positions.device) * 2.0 - 1.5
+    H = float(st.supports.max())
+    far = (~wall) & (st.positions[:, 1] > 3.0 / N_PER_SIDE + H)
+    assert bool(far.any()) and float(p[far].min()) < 0.0
+    assert torch.equal(_force(st, config, schemeConfig, p, True)[far],
+                       _force(st, config, schemeConfig, p, False)[far])
+
+
+def test_wallModeIsANoOpWithoutWalls(periodicBox):
+    system, config, schemeConfig = periodicBox
+    try:
+        schemeConfig.acParams.cavitationProjection = 'off'
+        off = runOneStep(system, config, schemeConfig, 20).state
+        schemeConfig.acParams.cavitationProjection = 'wall'
+        uni = runOneStep(system, config, schemeConfig, 20).state
+    finally:
+        schemeConfig.acParams.cavitationProjection = 'off'
+    assert torch.allclose(off.pressures, uni.pressures, atol=1e-6)
+    assert torch.allclose(off.velocities, uni.velocities, atol=1e-6)
+
+
+def _divergence(st, config, v):
+    view = acmod._workingState(st, st.positions, v, st.pressures)
+    return acmod.warpOperation(
+        view, acmod.OperationProperties(kernel=config.kernel, operation=acmod.WarpOperation.Divergence,
+                                        supportMode=acmod.SupportScheme.SuperSymmetric,
+                                        operationMode=acmod.OperationDirection.AllToAll,
+                                        gradientMode=acmod.GradientScheme.Difference),
+        queryValues=v, domain=config.domain, adjacency=None)
+
+
+def test_theWallSplitOfTheDivergenceIsExact(runtime):
+    """divWall = D(v 1_wall) - v . G must equal the direct wall-pair sum: with
+    the fluid moving and the wall at rest, the full divergence minus the
+    fluid-only divergence (wall velocity equal to each row's own, i.e. zero
+    relative velocity on wall pairs) is exactly the wall share."""
+    st, config, _, wall = _walledLattice()
+    fluid = ~wall
+    v = torch.zeros_like(st.positions)
+    v[fluid, 1] = 0.3 + 0.1 * torch.sin(7.0 * st.positions[fluid, 0])
+    div = _divergence(st, config, v)
+    uni = acmod._unilateralWallDivergence(
+        acmod._workingState(st, st.positions, v, st.pressures), config, None, div)
+    # rows next to the floor: fluid moving up = away from the wall = separating,
+    # so the wall share is positive and must be dropped entirely
+    H = float(st.supports.max())
+    near = fluid & (st.positions[:, 1] < 3.0 / N_PER_SIDE + 0.9 * H)
+    far = fluid & (st.positions[:, 1] > 3.0 / N_PER_SIDE + H)
+    assert float(div[near].max()) > 0.0
+    assert torch.equal(uni[far], div[far])
+    assert float(uni[near].max()) < float(div[near].max())
+
+
+def test_anApproachingWallStillCompresses(runtime):
+    """Fluid moving INTO the floor: the wall share is compressive and is kept
+    unchanged -- the wall resists approach, only separation is released."""
+    st, config, _, wall = _walledLattice()
+    fluid = ~wall
+    v = torch.zeros_like(st.positions)
+    v[fluid, 1] = -0.3
+    div = _divergence(st, config, v)
+    uni = acmod._unilateralWallDivergence(
+        acmod._workingState(st, st.positions, v, st.pressures), config, None, div)
+    assert float(div[fluid].min()) < 0.0
+    assert torch.allclose(uni[fluid], div[fluid], atol=1e-6)
+
+
+def test_aSeparatingRowHasNoWallDivergence(runtime):
+    """Uniform upward motion off the floor: the bilateral divergence of the
+    first rows is pure wall share (the fluid moves rigidly); unilaterally it
+    vanishes."""
+    st, config, _, wall = _walledLattice()
+    fluid = ~wall
+    v = torch.zeros_like(st.positions)
+    v[fluid, 1] = 0.3
+    div = _divergence(st, config, v)
+    uni = acmod._unilateralWallDivergence(
+        acmod._workingState(st, st.positions, v, st.pressures), config, None, div)
+    H = float(st.supports.max())
+    near = fluid & (st.positions[:, 1] < 3.0 / N_PER_SIDE + 0.9 * H)
+    assert float(div[near].abs().max()) > 1e-3
+    assert float(uni[near].abs().max()) < 1e-5
+
+
+# --- Batty's own set ('contact', MDBC_CONTACT_LINE_PLAN.md §10.3 A) ----------
+
+def test_wallAdjacentIsExactlyTheRowsWithAWallInSupport(runtime):
+    """Brute-force reference: a fluid row is wall-adjacent iff some wall row
+    lies strictly inside its support radius. Rows at exactly one radius from a
+    wall row (gradW = 0 there, the lattice puts some on the edge) are a float
+    tie either way and are excluded."""
+    st, config, _, wall = _walledLattice()
+    adj = acmod._wallAdjacent(st, config, None)
+    d = torch.cdist(st.positions, st.positions[wall])
+    H = st.supports.unsqueeze(-1)
+    ref = (d < H).any(-1)
+    tie = ((d - H).abs() < 1e-5).any(-1)
+    rows = (~wall) & ~tie
+    assert bool(adj[rows].any()) and not bool(adj[rows].all())
+    assert torch.equal(adj[rows], ref[rows])
+
+
+def test_contactIsANoOpWithoutWalls(periodicBox):
+    """A periodic box has no wall row, so the 'contact' set is empty and the
+    step is bit-identical to the bilateral one, tension included."""
+    system, config, schemeConfig = periodicBox
+    try:
+        schemeConfig.acParams.cavitationProjection = 'off'
+        off = runOneStep(system, config, schemeConfig, 20).state
+        schemeConfig.acParams.cavitationProjection = 'contact'
+        con = runOneStep(system, config, schemeConfig, 20).state
+    finally:
+        schemeConfig.acParams.cavitationProjection = 'off'
+    assert float(off.pressures.min()) < 0.0
+    assert torch.equal(off.pressures, con.pressures)
+    assert torch.equal(off.velocities, con.velocities)
+
+
+def test_isolatedZeroPressureIsANoOpWithoutIsolatedRows(periodicBox):
+    """Every row of the periodic box has neighbours, so the Dirichlet set is
+    empty and the step is bit-identical, tension included (§11.1)."""
+    system, config, schemeConfig = periodicBox
+    try:
+        schemeConfig.acParams.isolatedZeroPressure = False
+        off = runOneStep(system, config, schemeConfig, 20).state
+        schemeConfig.acParams.isolatedZeroPressure = True
+        iso = runOneStep(system, config, schemeConfig, 20).state
+    finally:
+        schemeConfig.acParams.isolatedZeroPressure = False
+    assert float(off.pressures.min()) < 0.0
+    assert torch.equal(off.pressures, iso.pressures)
+    assert torch.equal(off.velocities, iso.velocities)

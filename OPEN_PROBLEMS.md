@@ -310,6 +310,26 @@ was removed; see the plan's §7.5.
 Marrone 3.1 ACSPH: nx=24 ceiling riders gone; **nx=70 passes the t* 2.8
 run-up and reaches t* 9.91** (one run, 7505 steps) (was: fails at 2.8). Default still 'off'.
 
+**2026-09-24/25 -- every fix tried so far fails** (plan §8-§9, flier metric
+in `scripts/probe_contactLine.py`, time-aligned videos via
+`scripts/align_run_videos.py`). Both scheme defaults produce **zero** free
+fliers (delta-SPH sloshingTank, delta-SPH and ACSPH Marrone 3.1); the
+contact is the only defect. ACSPH `vicinity` (p >= 0 on vicinity fluid+wall
+rows): ~100 free fliers at nx=70, each droplet-surface contact elastic
+(restitution ~1), so spray only accumulates. delta-SPH unilateral freeSlip
+velocity + one-sided hydrostatics: fliers launched off every wall, removed
+from the code. ACSPH `'wall'` (Batty on the fluid-solid pairs only, force
+alone): clean ceiling release on the toy, but a separating row's pressure
+runs away (the divergence stayed bilateral), Marrone nx=24 blows up t 0.48.
+Adding the kinematic half (wall-pair divergence kept only while
+compressive): the clamp rectifies discretisation noise at every wall (the
+SPH wall-pair divergence is not the normal relative velocity), the fluid
+body is pushed off the floor and floats, blowup t 0.34; sealed box NaN at
+t 0.13 (pure-Neumann compatibility violated). **Next idea, not tried:** a
+per-contact *normal relative velocity* criterion (Batty's `(u - v_s).n`)
+instead of the kernel-weighted wall-pair divergence; a sealed container
+stays incompatible with any unilateral wall unless a gap can open.
+
 **Still open here:** (0) delta-SPH (plan §7.5): the complementarity has to
 live in the continuity equation, acoustically neutral; (a) rows next to a wall with a badly deficient support
 (lambda < 0.5) that Marrone's raw detection does not flag -- the vicinity set
@@ -326,3 +346,52 @@ shared detector would touch shifting / the Antuono switch everywhere
 
 See also: [[sph-symmetric-pressure-truncation-artifact]],
 [[antuono-pressure-switch-bug]], [[english2025-alpha-neighbour-ramp]].
+
+## 9. ACSPH: a positive pressure level in a closed box grows exponentially
+
+**What it is:** in a fully sealed box (`probe_contactLine.py --toy sealed`,
+fillRatio 1, gravity up, nx=32, `--paperAC`), unmodified ACSPH (`off`)
+started from a uniform p = +10 grows the level exponentially -- 25 -> 75 ->
+201 -> 513 -> 1290 over t 0.06-0.38 (doubling ~ every 0.05 s) -- then
+collapses into disorder at t ~ 0.44 (`--p0 10`, 2026-09-24). Started from
+p = 0 the same box drifts the other way, to an all-negative field saturating
+near -16 with vmax ~ 1 (MDBC_CONTACT_LINE_PLAN.md §7.2). A closed box's
+pressure is defined only up to a constant (pure-Neumann null space); nothing
+in the dual-time solve anchors the level, and a positive level is unstable
+under the Eq. (61) wall closure + `(p_i + p_j)` force.
+
+**Why it matters:** any treatment that shifts a closed region's level
+(any unilateral wall does, by removing legitimate tension) triggers it;
+enclosed air-free regions are not exotic (a filled tank, a trapped pocket).
+
+**Next step:** a gauge fix (pin the mean or one row's pressure in a closed
+fluid region) vs. whether the growth is the truncation artefact of the
+symmetric sum near walls ([[sph-symmetric-pressure-truncation-artifact]])
+acting on a uniform level -- test with a uniform level in a periodic box (no
+walls): growth there would point at the solve, none at the wall closure.
+
+## 10. Runner divergence detection misses bounded-NaN-free blowups
+
+**What it is:** `run()` reported `diverged=False` for delta-SPH toy runs that
+had reached vmax 5e4 with rows at rho = 0 and pressures ~1e20
+(`scripts/out_contactLine/*_a0`, `*_u0`, 2026-09-24): the check only fires on
+non-finite values. `stallDtSteps` only fires on dt pinned exactly at minDt,
+and `stallProgress` (sim-time progress) only when time stops advancing -- an
+explosive but finite run passes all three.
+
+**Next step:** a relative velocity bound (e.g. vmax against the case's own
+`referenceVelocity` / sound speed -- a multiple of c0 is physically
+impossible in a WC run) or a kinetic-energy growth check, reported as
+diverged; decide whether it stops the run or only flags it.
+
+## 11. probe_contactLine delta-SPH toys: pinned dt is overridden
+
+**What it is (minor, probe-level):** the probe sets `soundSpeed` and
+`targetDt = 0.3 dx / c0` for the WC toys, but the per-step adaptive
+`computeTimestep` hook overrides dt (the runs still step at ~5.9e-4,
+acoustic Courant ~0.8). Stable with `symplecticEuler`, so results stand, but
+the toys do not run at the Courant number the probe claims.
+
+**Next step:** make the toys' timestep hook return the pinned dt (or report
+the achieved Courant number) before relying on dt-sensitive toy results.
+

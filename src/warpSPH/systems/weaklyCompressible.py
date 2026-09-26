@@ -351,12 +351,26 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
             posinf=schemeConfig.fluid.restDensity, neginf=schemeConfig.fluid.restDensity
         ).clamp_min(0.05 * schemeConfig.fluid.restDensity)
 
+        # Lone-particle density reset (`schemeConfig.loneDensityReset`,
+        # MDBC_CONTACT_LINE_PLAN.md §12): detected on the last stage's state
+        # with the adjacency it was evaluated with (positions and pair list
+        # consistent), applied to the final density below.
+        loneMask = None
+        if getattr(schemeConfig, 'loneDensityReset', False):
+            from ..modules.surfaceDetection import detectNoFluidNeighbours
+            loneMask = (lastState.kinds == 0) & detectNoFluidNeighbours(lastState, config, self.adjacency)
+
         if schemeConfig.shiftProperties.active:
             if schemeConfig.shiftProperties.correctdrhodt:
                 self.state.densities += drhodt_shift * dt
             if schemeConfig.shiftProperties.correctdvdt:
                 self.state.velocities += (dudt + duCross) * dt
             self.state.positions += dx
+
+        if loneMask is not None:
+            self.state.densities = torch.where(
+                loneMask, torch.full_like(self.state.densities, schemeConfig.fluid.restDensity),
+                self.state.densities)
 
         # mDBC no-penetration correction, DualSPHysics placement: once per real
         # step, here with the other post-integration corrections, rather than as

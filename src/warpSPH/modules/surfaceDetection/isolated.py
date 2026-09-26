@@ -19,7 +19,7 @@ import torch
 from warpSPHCore import (GradientScheme, OperationDirection, OperationProperties,
                          SupportScheme, WarpOperation, warpOperation)
 
-__all__ = ['detectIsolated']
+__all__ = ['detectIsolated', 'detectNoFluidNeighbours']
 
 
 def detectIsolated(state: Any, config: Any, adjacency: Any) -> torch.Tensor:
@@ -33,3 +33,22 @@ def detectIsolated(state: Any, config: Any, adjacency: Any) -> torch.Tensor:
                             gradientMode=GradientScheme.Difference),
         queryValues=state.positions, domain=config.domain, adjacency=adjacency)
     return trace == 0.0
+
+
+def detectNoFluidNeighbours(state: Any, config: Any, adjacency: Any) -> torch.Tensor:
+    """Boolean per row: True for a fluid row with no *other* fluid particle
+    (`kind == 0`) inside its kernel support; wall rows may be present.
+
+    Exact integer count (`countNeighborsWarp`, FluidToFluid, which counts the
+    row itself). Not `detectIsolated`'s trace restricted to fluid pairs by
+    linearity: that needs two wall sums from different kernels to cancel,
+    which float rounding does not do exactly, so a row with only wall
+    neighbours never read as exactly zero."""
+    from ..util.wp_numNeighbors import countNeighborsWarp
+    n = countNeighborsWarp(
+        state, OperationProperties(kernel=config.kernel, operation=WarpOperation.Gradient,
+                                   supportMode=SupportScheme.SuperSymmetric,
+                                   operationMode=OperationDirection.FluidToFluid,
+                                   gradientMode=GradientScheme.Naive),
+        config.domain, adjacency=adjacency)
+    return (state.kinds == 0) & (n.to(torch.int64) <= 1)

@@ -135,8 +135,17 @@ class ArtificialCompressibilityParams:
     #: (rows with a free-surface particle inside their kernel support, i.e.
     #: air can reach the gap), 'fluid' (every fluid and wall row -- the
     #: IISPH/DFSPH global clamp; a bracket, not a physical model: it removes
-    #: legitimate tension where no air can reach). MDBC_CONTACT_LINE_PLAN.md.
-    cavitationProjection: str = field(default='off', metadata={'description': "p >= 0 projection set: 'off' | 'vicinity' | 'fluid'"})
+    #: legitimate tension where no air can reach), 'contact' (Batty's own
+    #: set: every wall row and every fluid row with a wall neighbour).
+    #: MDBC_CONTACT_LINE_PLAN.md.
+    cavitationProjection: str = field(default='off', metadata={'description': "unilateral contact: 'off' | 'wall' (fluid-solid pair force only) | 'vicinity' | 'contact' | 'fluid' (p >= 0 projection sets)"})
+    #: Dirichlet `p = 0` on exactly isolated fluid rows (`detectIsolated`: no
+    #: particle in the support). Eq. (23) is an empty sum there, so without
+    #: this an isolated row keeps the pressure it had when it lost contact and
+    #: discharges it through `(p_i + p_j)` on its next contact -- stored
+    #: elastic energy (MDBC_CONTACT_LINE_PLAN.md §11.1). A droplet with
+    #: nothing in its support is surrounded by air. Default off (the paper).
+    isolatedZeroPressure: bool = field(default=False, metadata={'description': 'p = 0 on rows with an empty support'})
     #: The BDF correction of Eq. (59) that keeps the real-time derivative
     #: Lagrangian across the shift. Cheap; Sec. 4.2 found it makes little
     #: difference either way.

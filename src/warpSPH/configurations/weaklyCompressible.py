@@ -70,6 +70,24 @@ class WeaklyCompressibleSPHConfig:
     # there is only one stage to freeze against.
     freezeDiffusionAcrossStages: bool = field(default=False, metadata={'description': "Freeze delta-SPH's diffusive terms across RK sub-stages (Sun et al. 2017 Sec. 2), re-evaluating once per real step instead of once per stage"})
 
+    #: Lone fluid particles (no fluid neighbour in the support; wall rows may
+    #: be present) get `rho = rho0` (p = 0) at the end of every step. A lone
+    #: particle's continuity and DDT sums have no fluid pair to relax against,
+    #: so it otherwise carries the density it had when it lost contact (or
+    #: books a wall separation as a deficit) and releases it as a kick on the
+    #: next contact (MDBC_CONTACT_LINE_PLAN.md §11-12). Physical reading: its
+    #: mass is unchanged, a low density means the parcel is smeared out, and
+    #: surface tension would pull it back into a compact blob at rest. Default
+    #: off; diagnostic until validated.
+    loneDensityReset: bool = field(default=False, metadata={'description': 'rho = rho0 on fluid rows with no fluid neighbour, every step'})
+    #: english2025 mDBC: extrapolate the hydrostatic increment ghost -> wall
+    #: one-sided, `P_b = P_g + max(0, rho0 (g - a_b) . relPos)` (SPHinXsys,
+    #: Zhang et al. 2023 Eq. 2.11): a wall below the fluid gets the column's
+    #: extra weight, a wall above it (a ceiling) gets nothing instead of
+    #: tension. The two-sided term assumes a continuous column between ghost
+    #: and wall, which a lone particle or thin film under a ceiling is not
+    #: (MDBC_CONTACT_LINE_PLAN.md §12). Default off; diagnostic until validated.
+    mdbcOneSidedHydrostatic: bool = field(default=False, metadata={'description': 'english2025: max(0, .) on the ghost-to-wall hydrostatic increment'})
     viscositySwitchParams: ViscositySwitchConfig = field(default_factory=ViscositySwitchConfig)
 
     schemeName: str = field(default='Compressible SPH', metadata={'description': 'Name of the compressible SPH scheme to use'})
