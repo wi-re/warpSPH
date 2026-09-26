@@ -35,10 +35,8 @@ def test_silent_for_kernel_mean_symmetric():
 
 
 def test_visible_despite_blanket_ignore_filter():
-    # geometry/sdfFunctionality/implicitFunctions.py installs a global
-    # warnings.filterwarnings("ignore") at import; the CRK warning must
-    # still reach the user
-    import warpSPH.geometry.sdfFunctionality.implicitFunctions  # noqa: F401
+    # a blanket warnings.filterwarnings("ignore") (as the SDF module used to
+    # install at import) must not hide the CRK warning
     cfg = SimpleNamespace(supportMode=SupportScheme.Scatter)
     with warnings.catch_warnings(record=True) as rec:
         warnings.filterwarnings("ignore")        # what that module does

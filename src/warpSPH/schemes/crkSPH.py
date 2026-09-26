@@ -69,10 +69,10 @@ def _warnNonConservativeSupport(config: SimulationConfig) -> None:
     if mode is None or mode == _CRK_CONSERVATIVE_SUPPORT or mode in _warnedSupportModes:
         return
     _warnedSupportModes.add(mode)
-    # Force-show this category for this one call: geometry/sdfFunctionality/
-    # implicitFunctions.py installs a blanket warnings.filterwarnings("ignore")
-    # at import time, which would otherwise silence it in any process that
-    # loads the geometry module. The once-per-mode dedupe above keeps it quiet.
+    # Force-show this category for this one call, so a blanket
+    # warnings.filterwarnings("ignore") anywhere in the process (one used to
+    # sit in geometry/sdfFunctionality/implicitFunctions.py) cannot hide it.
+    # The once-per-mode dedupe above keeps it quiet.
     with warnings.catch_warnings():
         warnings.simplefilter('always', CRKSupportWarning)
         _emitSupportWarning(mode)
