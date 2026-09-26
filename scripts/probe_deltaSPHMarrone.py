@@ -145,7 +145,8 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
             integrationScheme: str = None, noPenShift: str = None,
             wallBC: str = None, pressureForceTerm: str = None,
             densityDiffusionTerm: str = None, mdbcDensityScheme: str = None,
-            pressureForceRenormalized: bool = False):
+            pressureForceRenormalized: bool = False,
+            jitter: float = 0.0, seed: int = 1):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -181,7 +182,8 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
           + (f'_wall-{wallBC}' if wallBC else '')
           + (f'_pft-{pressureForceTerm}' if pressureForceTerm else '')
           + (f'_ddt-{densityDiffusionTerm}' if densityDiffusionTerm else '')
-          + (f'_mdbcRho-{mdbcDensityScheme}' if mdbcDensityScheme else ''))
+          + (f'_mdbcRho-{mdbcDensityScheme}' if mdbcDensityScheme else '')
+          + (f'_j{seed}' if jitter > 0.0 else ''))
     runRoot = os.path.join(out, tag + '_run')
 
     # Marrone reports each signal area-integrated over a phi = 90 mm probe disc
@@ -266,13 +268,32 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
             _p(ctx); ctx.schemeConfig.pressureForceRenormalized = True
         dambreakCase.configureScheme = _cfg5
 
+    if jitter > 0.0:
+        # independent realisations (MDBC_CONTACT_LINE_PLAN.md §12, same as
+        # probe_contactLine.py --jitter): after the case's own initial
+        # conditions, move every fluid particle by a seeded uniform offset of
+        # at most `jitter * dx` per component
+        import torch
+        _ic = dambreakCase.initialConditions
+
+        def _jitteredIC(ctx, system, _ic=_ic):
+            if _ic is not None:
+                _ic(ctx, system)
+            st = system.state
+            gen = torch.Generator(device=st.positions.device).manual_seed(seed)
+            off = (torch.rand(st.positions.shape, generator=gen, device=st.positions.device,
+                              dtype=st.positions.dtype) * 2.0 - 1.0) * jitter * float(ctx.config.dx)
+            st.positions = torch.where((st.kinds == 0).unsqueeze(-1), st.positions + off, st.positions)
+        dambreakCase.initialConditions = _jitteredIC
+
     r = run(dambreakCase, **kw)
 
     rows = [x for x in r.trajectory if x.get('step', -2) >= -1]
     keys = ['step', 't', 'tStar', 'kineticEnergy', 'maxVelocity',
             'minDensity', 'maxDensity', 'nPenetrating', 'maxPenetrationDx']
     for k in range(len(SENSORS)):
-        keys += [f'pProbe{k}', f'pProbe{k}Star', f'pProbe{k}Nnbr']
+        keys += [f'pProbe{k}', f'pProbe{k}Star', f'pProbe{k}Nnbr',
+                 f'pProbe{k}In1Star', f'pProbe{k}ShepStar']
     cols = {k: np.array([row.get(k, np.nan) for row in rows], dtype=float)
             for k in keys}
 
@@ -281,6 +302,7 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
     c0 = float(getattr(r.ctx.schemeConfig.fluid, 'fixedSoundSpeed', 0.0) or 0.0)
     meta = dict(
         scheme=scheme, nx=nx, c0Ratio=float(c0Ratio), tLimit=tLimit,
+        jitter=float(jitter), seed=int(seed),
         # The *effective* wall BC, read back off the resolved spec rather than
         # the CLI flag (which is None whenever the case default applies). Since
         # the 2026-09-21 default flip ('constant' -> 'freeSlip') this is the
@@ -335,11 +357,13 @@ def _rollingMedian(x, w):
     return np.median(np.lib.stride_tricks.sliding_window_view(xp, w), axis=-1)
 
 
-def _trace(col, k, smoothTStar=0.10):
+def _trace(col, k, smoothTStar=0.10, reading=''):
     """(t*, raw P*, median-filtered P*, neighbour count) for sensor k, over the
-    samples where the probe is at least minimally wet (> 4 fluid neighbours)."""
+    samples where the probe is at least minimally wet (> 4 fluid neighbours).
+    `reading`: '' = the case probe (MLS evaluated at the wall), 'In1' = the same
+    MLS disc 1 dx into the fluid, 'Shep' = the Shepard disc at the wall."""
     import numpy as np
-    ts = col['tStar']; ps = col[f'pProbe{k}Star']; nn = col[f'pProbe{k}Nnbr']
+    ts = col['tStar']; ps = col[f'pProbe{k}{reading}Star']; nn = col[f'pProbe{k}Nnbr']
     ok = np.isfinite(ts) & np.isfinite(ps) & (nn > 4)
     ts, ps, nn = ts[ok], ps[ok], nn[ok]
     order = np.argsort(ts)
@@ -406,6 +430,14 @@ def _score(col):
         add('P1 plateau level', blo <= pl['mean'] <= bhi,
             f"mean {pl['mean']:.2f} over t* {lo}-{hi}  (want {blo}-{bhi}; "
             f"Buchner ≈ 0.55)")
+        # Non-extrapolating companions, informational only (not a check, so
+        # the pass counts stay comparable with every earlier report): the
+        # at-wall MLS extrapolates the fitted gradient over the last ~dx, which
+        # a disordered near-wall layer inflates (probe_marrone31P1Field.py).
+        for reading in ('In1', 'Shep'):
+            if f'pProbe0{reading}Star' in col and np.isfinite(col[f'pProbe0{reading}Star']).any():
+                tr, _raw, pr, nr = _trace(col, 0, reading=reading)
+                m[f'p1_plateau_{reading}'] = _windowLevel(tr, pr, nr, lo, hi)['mean']
         add('P1 first-impact overshoot', not np.isfinite(pl['peak'])
             or pl['peak'] <= A['p1_first_peak_max'],
             f"wide-median peak {pl['peak']:.2f} at t* {pl['tPeak']:.2f}  "
@@ -643,6 +675,13 @@ def _report(out: str):
         A('|---|---|---|')
         for name, ok, detail in checks:
             A(f'| {name} | {detail} | {"✅" if ok else "❌"} |')
+        if 'p1_plateau_In1' in mt or 'p1_plateau_Shep' in mt:
+            A('')
+            A(f"P1 plateau, non-extrapolating readings (informational, not a check): "
+              f"MLS disc 1 dx into the fluid **{mt.get('p1_plateau_In1', float('nan')):.2f}**, "
+              f"Shepard disc at the wall **{mt.get('p1_plateau_Shep', float('nan')):.2f}** "
+              f"(the checked value above evaluates the MLS fit at the wall, which "
+              f"extrapolates the fitted gradient over the last dx).")
         A('')
     A('## Figures\n')
     A('![P1 / P2 vs Buchner](pressure_P1_P2.png)\n')
@@ -823,6 +862,10 @@ def main():
                          "style, per BOUNDARY_DENSITY_PLAN.md §10 / "
                          "DELTASPH_VALIDATION_PLAN.md §5.23/§5.32. Off by "
                          "default (case default too).")
+    ap.add_argument('--jitter', type=float, default=0.0,
+                    help='seeded uniform IC perturbation of fluid positions, at most '
+                         'this many dx per component (independent realisations)')
+    ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--report', action='store_true',
                     help='(re)build plots + REPORT.md from existing .npz runs')
     args = ap.parse_args()
@@ -835,7 +878,8 @@ def main():
             args.shifting, args.plotBackend, args.cflFactor,
             args.integrationScheme, args.noPenShift, args.wallBC,
             args.pressureForceTerm, args.densityDiffusionTerm,
-            args.mdbcDensityScheme, args.pressureForceRenormalized)
+            args.mdbcDensityScheme, args.pressureForceRenormalized,
+            args.jitter, args.seed)
 
 
 if __name__ == '__main__':

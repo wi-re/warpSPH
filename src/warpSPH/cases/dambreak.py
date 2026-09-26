@@ -552,7 +552,7 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
 
         def _mlsPressure(pts):
             """(M,2) query points -> (P:(M,) cpu, nNeighbours:(M,) cpu,
-            wellConditioned:(M,) bool cpu), the first-order MLS fluid-pressure
+            wellConditioned:(M,) bool cpu, Shepard:(M,) cpu), the first-order MLS fluid-pressure
             fit with the density2025.py / wallPressure.py fallback ladder: the
             MLS fit where well-conditioned, else a 0th-order Shepard gather
             (`b[:,0] / A_g[:,0,0]`), else 0. A query point can have plenty of
@@ -564,7 +564,8 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
             support it had. The Shepard tier is only a 0th-order average of the
             (one-sided) neighbourhood, so it reads biased *low* against a real
             pressure gradient -- `pSurf{k}WC` records which tier a probe used.
-            Clamped >= 0."""
+            Clamped >= 0. The 4th return is the plain Shepard gather at every
+            point (no gradient term), also clamped >= 0."""
             v, _g, nn, A_g, b, wc = interpolateLiuLiu(
                 pts, referenceParticles=particles,
                 referenceQuantities=particles.pressures,
@@ -574,7 +575,8 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
             shepVal = torch.where(shepDen > 0, b[:, 0] / shepDen.clamp_min(1e-12),
                                   torch.zeros_like(shepDen))
             v = torch.where(wc, v, shepVal).clamp(min=0.0)
-            return v.detach().cpu(), nn.detach().cpu(), wc.detach().cpu()
+            return (v.detach().cpu(), nn.detach().cpu(), wc.detach().cpu(),
+                    shepVal.clamp(min=0.0).detach().cpu())
 
         H = ctx.param('fillRatio') * ctx.spec.L
         g = ctx.param('gravityMagnitude')
@@ -591,39 +593,58 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
             # Gauss-Legendre chord quadrature above, instead of one point per
             # probe height. 0.0 (default): unchanged single-point behaviour.
             sOffsets = [discRadius * x for x in _GAUSS7_NODES] if discRadius > 0.0 else [0.0]
-            pts = torch.tensor(
-                [[xWall, yBed + float(z) + s] for z in probeHeights for s in sOffsets],
-                device=allPos.device, dtype=allPos.dtype)
-            val, nnbr, _wc = _mlsPressure(pts)
-            val = val.view(len(probeHeights), len(sOffsets))
-            nnbr = nnbr.view(len(probeHeights), len(sOffsets))
-            if discRadius > 0.0:
-                # Weight each quadrature sample by its disc chord factor,
-                # excluding only genuinely dry samples (`nnbr <= 1`, matching
-                # density2025.py's own Shepard-tier floor) and renormalising
-                # over the rest -- a sample with real neighbour support always
-                # contributes its (MLS-or-Shepard) value rather than a hard 0.
-                baseW = torch.tensor(_DISC_CHORD_WEIGHTS, dtype=val.dtype)
-                validSample = nnbr > 1
-                w = baseW.unsqueeze(0) * validSample.to(val.dtype)
-                wSum = w.sum(dim=1)
-                valOut = torch.where(wSum > 0, (val * w).sum(dim=1) / wSum.clamp_min(1e-12),
-                                     torch.zeros_like(wSum))
-                nnbrOut = nnbr.amax(dim=1)
-            else:
-                valOut = val[:, 0]
-                nnbrOut = nnbr[:, 0]
+            nP, nS = len(probeHeights), len(sOffsets)
+
+            def _discPressure(xQuery):
+                """Probe readings with every quadrature point at x = xQuery:
+                (MLS-with-fallback, Shepard, max neighbour count), each (nP,)."""
+                pts = torch.tensor(
+                    [[xQuery, yBed + float(z) + s] for z in probeHeights for s in sOffsets],
+                    device=allPos.device, dtype=allPos.dtype)
+                val, nnbr, _wc, shep = _mlsPressure(pts)
+                val, shep, nnbr = val.view(nP, nS), shep.view(nP, nS), nnbr.view(nP, nS)
+                if discRadius > 0.0:
+                    # Weight each quadrature sample by its disc chord factor,
+                    # excluding only genuinely dry samples (`nnbr <= 1`,
+                    # matching density2025.py's own Shepard-tier floor) and
+                    # renormalising over the rest -- a sample with real
+                    # neighbour support always contributes its (MLS-or-Shepard)
+                    # value rather than a hard 0.
+                    baseW = torch.tensor(_DISC_CHORD_WEIGHTS, dtype=val.dtype)
+                    w = baseW.unsqueeze(0) * (nnbr > 1).to(val.dtype)
+                    wSum = w.sum(dim=1)
+
+                    def avg(q):
+                        return torch.where(wSum > 0, (q * w).sum(dim=1) / wSum.clamp_min(1e-12),
+                                           torch.zeros_like(wSum))
+                    return avg(val), avg(shep), nnbr.amax(dim=1)
+                return val[:, 0], shep[:, 0], nnbr[:, 0]
+
+            valOut, shepOut, nnbrOut = _discPressure(xWall)
+            # Non-extrapolating companions (scripts/probe_marrone31P1Field.py,
+            # 2026-09-26): the reading above evaluates a first-order MLS fit AT
+            # the wall, i.e. extrapolates the fitted gradient over the last
+            # ~dx of one-sided support. A disordered near-wall layer (delta-SPH
+            # without PST) gives a spurious gradient there -- Marrone 3.1 P1
+            # read 0.83 rho g H while the adjacent fluid averaged 0.48. Recorded
+            # alongside, not instead, so existing numbers stay comparable:
+            #   pProbe{k}In1  -- the same MLS disc 1 dx into the fluid;
+            #   pProbe{k}Shep -- the plain Shepard disc at the wall (no gradient
+            #                    term; biased low under a real gradient).
+            valIn1, _shepIn1, _nIn1 = _discPressure(xWall - float(ctx.config.dx))
             for k in range(len(probeHeights)):
                 d[f'pProbe{k}'] = float(valOut[k])
                 d[f'pProbe{k}Star'] = float(valOut[k]) / pRef
                 d[f'pProbe{k}Nnbr'] = int(nnbrOut[k])
+                d[f'pProbe{k}In1Star'] = float(valIn1[k]) / pRef
+                d[f'pProbe{k}ShepStar'] = float(shepOut[k]) / pRef
 
         if haveSurface:
             arr = torch.as_tensor(surfaceProbes, dtype=allPos.dtype,
                                   device=allPos.device).view(-1, 4)
             nrm = arr[:, 2:4] / arr[:, 2:4].norm(dim=-1, keepdim=True).clamp_min(1e-12)
             inset = float(ctx.param('surfacePressureProbeInset') or 0.0) * float(ctx.config.dx)
-            val, nnbr, wc = _mlsPressure(arr[:, 0:2] + inset * nrm)
+            val, nnbr, wc, _shep = _mlsPressure(arr[:, 0:2] + inset * nrm)
             for k in range(arr.shape[0]):
                 d[f'pSurf{k}'] = float(val[k])
                 d[f'pSurf{k}Star'] = float(val[k]) / pRef
