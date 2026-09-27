@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 import torch
-from torch.profiler import record_function
+from warpSPHCore.profiling import record_function
 from warpSPHCore import *
 from warpSPHIntegrators import *
 

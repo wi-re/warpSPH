@@ -62,7 +62,8 @@ import copy
 from typing import Any, Optional
 
 import torch
-from torch.profiler import record_function
+from ..modules.incompressible.convergence import ConvergenceCheckSchedule
+from warpSPHCore.profiling import record_function
 from warpSPHCore import (GradientScheme, OperationDirection, OperationProperties,
                          SupportScheme, WarpOperation, buildVerletList,
                          sphKernel_xi, warpOperation)
@@ -83,7 +84,7 @@ from ..systems.artificialCompressible import (ArtificialCompressibleSystem,
                                               ArtificialCompressibleSystemUpdate)
 
 __all__ = ['artificialCompressible_step', 'validateIntegrationScheme',
-           'acParameters', 'convergenceMetric', 'PHYSICS_IMPLEMENTED']
+           'acParameters', 'convergenceMetric', 'convergenceMetricDevice', 'PHYSICS_IMPLEMENTED']
 
 PHYSICS_IMPLEMENTED = True
 
@@ -184,6 +185,30 @@ def convergenceMetric(tildeV: torch.Tensor, velocities: torch.Tensor,
     if norm <= 0.0:
         return float('-inf')
     return float(torch.log10(torch.tensor(norm / (n * uEps))))
+
+
+def convergenceMetricDevice(tildeV: torch.Tensor, velocities: torch.Tensor,
+                            fluidIndex: torch.Tensor, n: int, schemeConfig) -> torch.Tensor:
+    """`convergenceMetric` as a 0-d device tensor -- no host sync, so the
+    dual-time loop reads it only at its check schedule's checkpoints.
+
+    `fluidIndex` / `n` are the fluid rows and their count, computed once per
+    step. Bitwise the same number: the host version does its arithmetic in
+    Python doubles on float32-exact values and rounds the ratio to float32
+    before the `log10`; this does exactly that on the device."""
+    if n == 0:
+        return torch.full((), float('-inf'), device=tildeV.device, dtype=tildeV.dtype)
+    acParams = schemeConfig.acParams
+    vMax = velocities.index_select(0, fluidIndex).norm(dim=-1).max().double()
+    uChar = vMax if acParams.uChar is None else torch.clamp(vMax, max=float(acParams.uChar))
+    uEps = torch.clamp(uChar, min=float(acParams.epsilonS))
+    norm = tildeV.index_select(0, fluidIndex).pow(2).sum().sqrt().double()
+    ratio = (norm / (n * uEps)).to(tildeV.dtype)
+    # the host takes log10 on the CPU; the correctly rounded value (log10 in
+    # float64 of the float32 ratio, rounded once) is what that returns --
+    # CUDA's single-precision log10f can be one ulp off
+    eps = torch.log10(ratio.double()).to(tildeV.dtype)
+    return torch.where(norm <= 0.0, torch.full_like(eps, float('-inf')), eps)
 
 
 def _workingState(state, positions, velocities, pressures):
@@ -395,13 +420,33 @@ def _viscosity(view, config, adjacency, nu):
     exact for the `nu_i` factor. (`nu_j` does not appear -- Eq. 25 has a single
     `nu`.) The rescale is skipped entirely when `nu` is uniform, which it is
     unless it was derived from a varying `h`."""
-    rho0 = float(view.densities[0]) if view.densities.numel() else 1.0
-    nuScalar = float(nu.mean()) if isinstance(nu, torch.Tensor) else float(nu)
+    rho0, nuScalar, nuVaries = _viscosityScalars(view.densities, nu)
     out = computeVelocityDiffusion(view, config, _ViscosityShim(nuScalar * rho0),
                                    adjacency, approachOnly=False)
-    if isinstance(nu, torch.Tensor) and float(nu.std()) > 0.0:
+    if nuVaries:
         out = out * (nu / nuScalar).unsqueeze(-1)
     return out
+
+
+_VISCOSITY_SCALARS: dict = {}
+
+
+def _viscosityScalars(densities, nu):
+    """`(rho0, mean nu, nu non-uniform)` -- three host reads that used to run
+    on every RK stage of every pseudo-iteration (~1200 syncs per real step at
+    200 pseudo-iterations). `densities` and `nu` are the same tensor objects
+    for a whole real step (`_workingState` only swaps x/v/p), so the values are
+    cached against those objects -- held, so an id can never be recycled."""
+    c = _VISCOSITY_SCALARS
+    if c.get('densities') is densities and c.get('nu') is nu:
+        return c['values']
+    rho0 = float(densities[0]) if densities.numel() else 1.0
+    if isinstance(nu, torch.Tensor):
+        values = (rho0, float(nu.mean()), float(nu.std()) > 0.0)
+    else:
+        values = (rho0, float(nu), False)
+    c.update(densities=densities, nu=nu, values=values)
+    return values
 
 
 def artificialCompressible_step(
@@ -561,97 +606,140 @@ def artificialCompressible_step(
     x, v, p = x0, v0, project(p0)
     epsV = float('inf')
     iterations = 0
+    # eps_v stays on the device and is read back only at the check schedule's
+    # checkpoints (`acParams.convergenceCheckSchedule`, convergence.py) --
+    # each read is a sync, and the loop runs up to maxPseudoIterations.
+    fluidIndex = fluid.nonzero().squeeze(1)
+    nFluid = int(fluidIndex.numel())
+    schedule = ConvergenceCheckSchedule(
+        schemeConfig, 'acsphDualTime', getattr(acParams, 'convergenceCheckSchedule', 'adaptive'),
+        max(0, acParams.minPseudoIterations - 1), acParams.maxPseudoIterations, verbose)
+    epsHistory = []
+    def pseudoIteration(x, v, p):
+        """One dual-time pseudo-iteration: (x, v, p) -> (x, v, p, eps_v).
+        Everything it closes over (dtau, BDF coefficients, k1/k2, nu,
+        adjacency, masks) is fixed for this real step."""
+        xStage0, vStage0, pStage0 = x, v, p
+
+        # The BDF source is evaluated at the FROZEN stage-0 value, not at
+        # the current stage (Eq. 41's `u^{n+1,m+1,0}`).
+        dxdtBdf = alphaT * xStage0 + betaT * xPrev + gammaT * xPrev2
+        dvdtBdf = alphaT * vStage0 + betaT * vPrev + gammaT * vPrev2
+
+        stage0 = _workingState(currentState, xStage0, vStage0, pStage0)
+        stage0.pressures = project(wallPressures(stage0, config, adjacency, wallBodyForce))
+        diffusion = computePressureSmoothing(
+            stage0, config, schemeConfig, adjacency, renormalizationState,
+            pressures=stage0.pressures)
+
+        kx, kv, kp = [], [], []
+        for s in range(acParams.rkStages):
+            xs, vs, ps = xStage0, vStage0, pStage0
+            for l in range(s):
+                a = float(tableau.a[s, l])
+                if a == 0.0:
+                    continue
+                xs = xs + dtau * a * kx[l]
+                vs = vs + dtau * a * kv[l]
+                ps = ps + dtau * a * kp[l]
+            ps = project(ps)
+
+            view = _workingState(currentState, xs, vs, ps)
+            view.pressures = project(wallPressures(view, config, adjacency, wallBodyForce))
+            # The wall velocity is a closure of the *current* fluid velocity
+            # (free-slip / no-slip mirror), exactly like the wall pressure
+            # above, so it is re-applied per stage. Without this the wall
+            # rows only carried the step-start mirror, then drifted with
+            # whatever the pseudo-time update did to them -- see the
+            # `nonFluidRows` freeze below.
+            view.velocities = computeBoundaryVelocities(view, config, schemeConfig,
+                                                        adjacency)
+            rP, rV = _spatialResidual(view, config, schemeConfig, adjacency,
+                                      k1, k2, diffusion, bodyForce, nu,
+                                      unilateralWall=cavitation == 'wall')
+            rX = vs
+
+            # alpha_PI = 1 + alpha_s dtau alpha_t (Eqs. 43-45), applied to
+            # all three rows for temporal consistency. `alpha_s` in Eq. (40)
+            # is the fraction of `dtau` at which stage `s`'s residual is
+            # applied; in Butcher terms that is the node of the stage it
+            # produces, i.e. `c[s+1]`, and 1 for the last (which feeds the
+            # `b` accumulation). For the RK2 midpoint tableau this is
+            # exactly Eq. (40)'s `alpha = {1/2, 1}`. For RK3/RK4 the mapping
+            # is ambiguous because Eq. (40) and Fig. 1 disagree there at all
+            # (ACSPH_PLAN.md Sec. 5.2) -- and it barely matters, since the
+            # paper reports `alpha_PI = 1` works fine here anyway
+            # (`usePointImplicit=False`).
+            alphaS = float(tableau.c[s + 1]) if s + 1 < acParams.rkStages else 1.0
+            alphaPI = 1.0 + alphaS * dtau * alphaT if acParams.usePointImplicit else 1.0
+
+            # I_c = diag{0, 1, 1}: the pressure row has no real-time
+            # derivative to subtract. That is what makes r* -> 0 enforce
+            # div v = 0 at time level n+1 rather than in pseudo-time.
+            #
+            # Only fluid rows are unknowns of the dual-time system. Wall and
+            # ghost rows are geometry plus closures (`wallPressures`,
+            # `computeBoundaryVelocities`), so their increments are zeroed:
+            # integrating them like fluid let the walls move and pick up
+            # O(|v_fluid|) velocities under gravity and pressure within one
+            # real step, which overrode the wall BC entirely (freeSlip and
+            # noSlip gave bit-identical runs) and drew the corner fluid
+            # particle diagonally through the wall (`hydrostaticColumn`,
+            # walled; FREESLIP_DAMBREAK_FINDINGS.md's ACSPH stall).
+            kp.append(torch.where(fluid, rP / alphaPI, torch.zeros_like(rP)))
+            kx.append(torch.where(fluidRows, (rX - dxdtBdf) / alphaPI, torch.zeros_like(rX)))
+            kv.append(torch.where(fluidRows, (rV - dvdtBdf) / alphaPI, torch.zeros_like(rV)))
+
+        x, v, p = xStage0, vStage0, pStage0
+        for l in range(acParams.rkStages):
+            b = float(tableau.b[l])
+            if b == 0.0:
+                continue
+            x = x + dtau * b * kx[l]
+            v = v + dtau * b * kv[l]
+            p = p + dtau * b * kp[l]
+        p = project(p)
+
+        # `tilde v = v - Dx/Dt` is simultaneously the position-row residual
+        # and the convergence metric (Eq. 26 / Sec. 1.6): it is zero exactly
+        # when the position row is satisfied at time level n+1.
+        tildeV = v - (alphaT * x + betaT * xPrev + gammaT * xPrev2)
+        epsT = convergenceMetricDevice(tildeV, v, fluidIndex, nFluid, schemeConfig)
+        return x, v, p, epsT
+
+    # With `schemeConfig.cudaGraph` (CaseSpec.cudaGraph), iterations 2.. are
+    # replayed from a graph captured once per real step: the body is
+    # sync-free and ~260 launches, and up to 200 of them run per step, so
+    # the step is otherwise launch-bound. The first capture of a run is
+    # checked bitwise against eager (utils/cudaGraph.py); a mismatch turns
+    # graphs off for the run.
+    graphed = None
+    if getattr(schemeConfig, 'cudaGraph', False) and x0.is_cuda \
+            and getattr(schemeConfig, '_acsphGraphDisabled', None) is None:
+        from ..utils.cudaGraph import GraphedTensorFunction
+        graphed = GraphedTensorFunction(
+            pseudoIteration, 'ACSPH dual-time pseudo-iteration',
+            validate=not getattr(schemeConfig, '_acsphGraphValidated', False))
     with record_function("[warpSPH] - [acsph - 06] - dual-time loop"):
         for m in range(acParams.maxPseudoIterations):
             iterations = m + 1
-            xStage0, vStage0, pStage0 = x, v, p
-
-            # The BDF source is evaluated at the FROZEN stage-0 value, not at
-            # the current stage (Eq. 41's `u^{n+1,m+1,0}`).
-            dxdtBdf = alphaT * xStage0 + betaT * xPrev + gammaT * xPrev2
-            dvdtBdf = alphaT * vStage0 + betaT * vPrev + gammaT * vPrev2
-
-            stage0 = _workingState(currentState, xStage0, vStage0, pStage0)
-            stage0.pressures = project(wallPressures(stage0, config, adjacency, wallBodyForce))
-            diffusion = computePressureSmoothing(
-                stage0, config, schemeConfig, adjacency, renormalizationState,
-                pressures=stage0.pressures)
-
-            kx, kv, kp = [], [], []
-            for s in range(acParams.rkStages):
-                xs, vs, ps = xStage0, vStage0, pStage0
-                for l in range(s):
-                    a = float(tableau.a[s, l])
-                    if a == 0.0:
-                        continue
-                    xs = xs + dtau * a * kx[l]
-                    vs = vs + dtau * a * kv[l]
-                    ps = ps + dtau * a * kp[l]
-                ps = project(ps)
-
-                view = _workingState(currentState, xs, vs, ps)
-                view.pressures = project(wallPressures(view, config, adjacency, wallBodyForce))
-                # The wall velocity is a closure of the *current* fluid velocity
-                # (free-slip / no-slip mirror), exactly like the wall pressure
-                # above, so it is re-applied per stage. Without this the wall
-                # rows only carried the step-start mirror, then drifted with
-                # whatever the pseudo-time update did to them -- see the
-                # `nonFluidRows` freeze below.
-                view.velocities = computeBoundaryVelocities(view, config, schemeConfig,
-                                                            adjacency)
-                rP, rV = _spatialResidual(view, config, schemeConfig, adjacency,
-                                          k1, k2, diffusion, bodyForce, nu,
-                                          unilateralWall=cavitation == 'wall')
-                rX = vs
-
-                # alpha_PI = 1 + alpha_s dtau alpha_t (Eqs. 43-45), applied to
-                # all three rows for temporal consistency. `alpha_s` in Eq. (40)
-                # is the fraction of `dtau` at which stage `s`'s residual is
-                # applied; in Butcher terms that is the node of the stage it
-                # produces, i.e. `c[s+1]`, and 1 for the last (which feeds the
-                # `b` accumulation). For the RK2 midpoint tableau this is
-                # exactly Eq. (40)'s `alpha = {1/2, 1}`. For RK3/RK4 the mapping
-                # is ambiguous because Eq. (40) and Fig. 1 disagree there at all
-                # (ACSPH_PLAN.md Sec. 5.2) -- and it barely matters, since the
-                # paper reports `alpha_PI = 1` works fine here anyway
-                # (`usePointImplicit=False`).
-                alphaS = float(tableau.c[s + 1]) if s + 1 < acParams.rkStages else 1.0
-                alphaPI = 1.0 + alphaS * dtau * alphaT if acParams.usePointImplicit else 1.0
-
-                # I_c = diag{0, 1, 1}: the pressure row has no real-time
-                # derivative to subtract. That is what makes r* -> 0 enforce
-                # div v = 0 at time level n+1 rather than in pseudo-time.
-                #
-                # Only fluid rows are unknowns of the dual-time system. Wall and
-                # ghost rows are geometry plus closures (`wallPressures`,
-                # `computeBoundaryVelocities`), so their increments are zeroed:
-                # integrating them like fluid let the walls move and pick up
-                # O(|v_fluid|) velocities under gravity and pressure within one
-                # real step, which overrode the wall BC entirely (freeSlip and
-                # noSlip gave bit-identical runs) and drew the corner fluid
-                # particle diagonally through the wall (`hydrostaticColumn`,
-                # walled; FREESLIP_DAMBREAK_FINDINGS.md's ACSPH stall).
-                kp.append(torch.where(fluid, rP / alphaPI, torch.zeros_like(rP)))
-                kx.append(torch.where(fluidRows, (rX - dxdtBdf) / alphaPI, torch.zeros_like(rX)))
-                kv.append(torch.where(fluidRows, (rV - dvdtBdf) / alphaPI, torch.zeros_like(rV)))
-
-            x, v, p = xStage0, vStage0, pStage0
-            for l in range(acParams.rkStages):
-                b = float(tableau.b[l])
-                if b == 0.0:
-                    continue
-                x = x + dtau * b * kx[l]
-                v = v + dtau * b * kv[l]
-                p = p + dtau * b * kp[l]
-            p = project(p)
-
-            # `tilde v = v - Dx/Dt` is simultaneously the position-row residual
-            # and the convergence metric (Eq. 26 / Sec. 1.6): it is zero exactly
-            # when the position row is satisfied at time level n+1.
-            tildeV = v - (alphaT * x + betaT * xPrev + gammaT * xPrev2)
-            epsV = convergenceMetric(tildeV, v, fluid, schemeConfig)
-            if m + 1 >= acParams.minPseudoIterations and epsV < acParams.epsilonV:
+            if graphed is not None and m >= 1:
+                x, v, p, epsT = graphed(x, v, p)
+                if graphed.disabled is not None:
+                    schemeConfig._acsphGraphDisabled = graphed.disabled
+                    graphed = None
+                else:
+                    schemeConfig._acsphGraphValidated = True
+            else:
+                x, v, p, epsT = pseudoIteration(x, v, p)
+            epsHistory.append(epsT)
+            # `m + 1 >= minPseudoIterations` is `m >= minPseudoIterations - 1`
+            if schedule.check(m) and bool(epsT < acParams.epsilonV):
                 break
+    if epsHistory:
+        epsHost = torch.stack(epsHistory).cpu().tolist()
+        epsV = epsHost[-1]
+        schedule.record([e < acParams.epsilonV for e in epsHost])
 
     if verbose:
         print(f"[acsph] t={currentSystem.t:.6g} dt={dt:.4g} BDF{bdfOrder} "

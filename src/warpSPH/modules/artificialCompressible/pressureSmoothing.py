@@ -65,7 +65,7 @@ the standalone risk. See `ACSPH_PLAN.md` Part 8 step 8.
 from typing import Any, Optional, Union
 
 import torch
-from torch.profiler import record_function
+from warpSPHCore.profiling import record_function
 from warpSPHCore import (AdjacencyList, CompactHashMap, OperationProperties,
                           SupportScheme, WarpOperation)
 

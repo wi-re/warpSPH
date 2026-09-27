@@ -30,7 +30,7 @@ import warp as wp
 from warp.types import vector, matrix
 from typing import Any, Optional, Tuple, Union
 import torch
-from torch.profiler import record_function
+from warpSPHCore.profiling import record_function
 from warpSPHCore import *
 
 __all__ = ['computeJstSwitchWarp']

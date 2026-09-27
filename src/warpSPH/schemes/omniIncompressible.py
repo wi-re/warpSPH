@@ -83,6 +83,7 @@ import os
 from typing import Any
 
 import torch
+from ..modules.incompressible.convergence import ConvergenceCheckSchedule
 
 from warpSPHCore import (GradientScheme, OperationDirection, OperationProperties,
                          SupportScheme, WarpOperation, buildVerletList,
@@ -358,7 +359,7 @@ def _pressureAccel(state: Any, config: Any, adjacency: Any,
     return torch.where(fluidMask.unsqueeze(-1), a_p, torch.zeros_like(a_p))
 
 
-def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
+def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *, checkSchedule: str = 'every',
            fluid: torch.Tensor, rho0: float, vEnter: torch.Tensor,
            warmStart: torch.Tensor, dt: float, mode: str,
            minIters: int, maxIters: int, tol: float,
@@ -549,23 +550,38 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
         p = torch.where(fluid, warmStart, torch.zeros_like(warmStart))
         err = 0.0
         it = 0
+        # Host syncs only at the check schedule's checkpoints (convergence.py,
+        # `convergenceCheckSchedule`): the error stays on the device, and the
+        # fluid rows are gathered through an index computed once per solve,
+        # which selects exactly what `x[fluid]` did (bitwise-equal statistic).
+        hasFluid = bool(fluid.any())
+        fluidIndex = fluid.nonzero().squeeze(1) if hasFluid else None
+        # `it + 1 >= minIters` here is `it >= minIters - 1` in the schedule's terms
+        schedule = ConvergenceCheckSchedule(schemeConfig, f'omniIncompressible.{mode}', checkSchedule,
+                                            max(0, minIters - 1), maxIters, VERBOSE_SOLVE)
+        errT, flags = None, []
         for it in range(maxIters):
             a_p = accel(p)
             aP = applyA(p, a_p)
             p = p + invAlpha * (source - aP)
             if mode == 'density':
                 if project:
-                    p = p - torch.where(fluid, p[fluid].mean().expand_as(p),
+                    p = p - torch.where(fluid, p.index_select(0, fluidIndex).mean().expand_as(p),
                                         torch.zeros_like(p))
                 else:
                     p = p.clamp(min=0.0)
             bad = alphaBad | (~torch.isfinite(p)) | (p.abs() > 1e25) | ~fluid
             p = torch.where(bad, torch.zeros_like(p), p)
-            if fluid.any():
+            if hasFluid:
                 residual = aP - source
-                err = float(torch.clamp(residual, min=RESIDUAL_FLOOR)[fluid].mean())
-            if it + 1 >= minIters and err <= tol:
+                errT = torch.clamp(residual, min=RESIDUAL_FLOOR).index_select(0, fluidIndex).mean()
+                flags.append(errT <= tol)
+            if schedule.check(it) and (errT is None or bool(errT <= tol)):
                 break
+        if errT is not None:
+            host = torch.stack([errT.float()] + [f.float() for f in flags]).cpu().tolist()
+            err = host[0]
+            schedule.record([bool(f) for f in host[1:]])
         if VERBOSE_SOLVE:
             print(f'[{mode}] {it + 1} iters, err {err:.3g}, p[{float(p.min()):+.3g}, {float(p.max()):+.3g}]')
         a_p = accel(p)
@@ -608,7 +624,8 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
         st, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0,
         vEnter=vEnter, warmStart=torch.zeros_like(st.densities), dt=dt,
         mode='divergence', minIters=DIVERGENCE_ITERATIONS,
-        maxIters=DIVERGENCE_ITERATIONS, tol=divCfg.tolerance)
+        maxIters=DIVERGENCE_ITERATIONS, tol=divCfg.tolerance,
+        checkSchedule=getattr(divCfg, 'convergenceCheckSchedule', 'every'))
     accel = accel + a_p_div
 
     # --- 4. densitySolve() -- min 3 / max 256, warm start 0.5 * p_prior ---
@@ -617,7 +634,8 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
         st, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0,
         vEnter=vEnter, warmStart=0.5 * pPrior, dt=dt, mode='density',
         minIters=DENSITY_MIN_ITERATIONS, maxIters=DENSITY_MAX_ITERATIONS,
-        tol=denCfg.tolerance)
+        tol=denCfg.tolerance,
+        checkSchedule=getattr(denCfg, 'convergenceCheckSchedule', 'every'))
     accel = accel + a_p_rho
 
     # --- 5. XSPH velocity filter (omniSPH XSPH + BXSPH, post-solve) --------

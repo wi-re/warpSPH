@@ -86,6 +86,7 @@ boundary-pressure feedback instability (DFSPH_FINDINGS.md Sec. 3.1):
 `p_b` is a fresh function of the current iterate, exactly as omniSPH's is.
 """
 
+from ..mdbc._util import stateHasBoundaryParticles
 from typing import Any
 
 import torch
@@ -224,8 +225,8 @@ def wallPressureExtrapolation(state: Any, config: Any, adjacency: Any,
     Eq. 27 / De Courcy et al. 2024 Eq. (61) exactly. Not supported by 'mls',
     whose first-order Liu-Liu fit already carries the local pressure gradient
     (adding the correction on top would double-count it)."""
-    boundary = state.kinds == 1
-    if not bool(boundary.any()):
+    # `kinds` is run-constant: the per-run cached check, not a sync per call
+    if not stateHasBoundaryParticles(state, config):
         return p
 
     if mode == 'shepard':

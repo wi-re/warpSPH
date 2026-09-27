@@ -15,6 +15,7 @@ import itertools
 import os
 import sys
 import time
+import warnings
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
@@ -199,6 +200,8 @@ def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
 
     if case.configureScheme is not None:
         case.configureScheme(ctx)
+    if spec.cudaGraph:
+        ctx.schemeConfig.cudaGraph = True
 
     system = case.buildSystem(ctx)
     if case.initialConditions is not None:
@@ -240,7 +243,7 @@ def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
     if spec.plot and case.setupPlot is not None:
         ctx.imagePath = os.path.join(ctx.exportPath, 'images')
         os.makedirs(ctx.imagePath, exist_ok=True)
-        ctx.scratch['plot'] = case.setupPlot(ctx, runningState)
+        ctx.scratch['plot'] = _setupPlot(ctx, case, runningState)
 
     extraData = case.extraData(ctx, runningState) if case.extraData is not None else {}
 
@@ -293,18 +296,44 @@ def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
     showProgress = spec.progress if spec.progress is not None else sys.stderr.isatty()
     steps, progress = _stepIterator(nSteps, spec.tLimit, timeLimited,
                                     showProgress and not spec.quiet)
+    # `spec.cudaGraph`: replay whole steps from a CUDA graph where the scheme
+    # allows it (utils/cudaGraph.py `GraphedIntegratorStep`; bitwise the eager
+    # step, self-checked, eager fallback on any Verlet rebuild). Not with
+    # trajectory/state storing, which reads the per-stage data a replayed
+    # step does not reconstruct.
+    stepGraph = None
+    if spec.cudaGraph and not spec.store and _stepGraphable(ctx):
+        from ..utils.cudaGraph import GraphedDiagnostics, GraphedIntegratorStep
+        stepGraph = GraphedIntegratorStep(ctx.integrator.function, ctx.stepFunction)
+        ctx.scratch['stepGraph'] = stepGraph
+        # cases whose diagnostics have a sync-free device part replay it too
+        # (`cases/dambreak.py:_diagnosticsHost`); ignored by every other case
+        ctx.scratch['graphedDiagnostics'] = GraphedDiagnostics()
+
+    if stepGraph is not None and spec.pipelineOutputs:
+        # Pipelined loop: step n+1 runs on the GPU while step n's diagnostics
+        # and frame are computed (see `_runPipelined`); same values, same rows.
+        runningState, stepResult = _runPipelined(
+            ctx, case, spec, result, stepGraph, steps, progress, runningState, nSteps,
+            timeLimited, extraData, groups, storeSteps, recentTimes)
+        steps = ()
+
     for i in steps:
         with _Timer(ctx.device) as timer:
-            stepResult = ctx.integrator.function(
-                state=runningState,
-                f=ctx.stepFunction,
-                dt=ctx.config.dt,
-                config=ctx.config,
-                # Forwarded to the step function *and* to `system.finalize`, so
-                # this is what makes --verbose reach the scheme's own reporting.
-                verbose=spec.verbose,
-                schemeConfig=ctx.schemeConfig,
-            )
+            if stepGraph is not None:
+                stepResult = stepGraph(runningState, ctx.config.dt, ctx.config, ctx.schemeConfig,
+                                       verbose=spec.verbose)
+            else:
+                stepResult = ctx.integrator.function(
+                    state=runningState,
+                    f=ctx.stepFunction,
+                    dt=ctx.config.dt,
+                    config=ctx.config,
+                    # Forwarded to the step function *and* to `system.finalize`, so
+                    # this is what makes --verbose reach the scheme's own reporting.
+                    verbose=spec.verbose,
+                    schemeConfig=ctx.schemeConfig,
+                )
         runningState = stepResult.state
         # Scheme-specific extra step data that doesn't fit the state (e.g.
         # ACSPH's `update.pseudoIterations`/`.epsilonV`, set ad hoc on the
@@ -395,6 +424,10 @@ def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
 
     if progress is not None:
         progress.close()
+    if ctx.scratch.get('renderThread') is not None:
+        ctx.scratch['renderThread'].drain()
+    if spec.plot:
+        _drainFrameWrites()
 
     result.state = runningState
     result.nSteps = len(result.trajectory) - (1 if case.diagnostics is not None else 0)
@@ -419,6 +452,246 @@ def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
     return result
 
 
+def _runPipelined(ctx, case, spec, result, stepGraph, steps, progress, runningState, nSteps,
+                  timeLimited, extraData, groups, storeSteps, recentTimes):
+    """The step loop with the next step overlapped with this step's outputs.
+
+    Per iteration, with step n just finished:
+
+    1. post-step hook, next `dt`, stall watchdogs, stop conditions and the
+       non-finite check -- everything that decides whether and how step n+1
+       runs (these need step n, not its diagnostics);
+    2. launch step n+1 (a graph replay: only enqueued);
+    3. step n's diagnostics row and plot frame, on a side CUDA stream (and
+       warp on the same stream) that waits only on an event recorded before
+       the launch -- so the CPU work, and the GPU work that fits alongside,
+       overlap step n+1 instead of following it;
+    4. finish step n+1.
+
+    Step n's state is a set of clones the replay of step n+1 never writes,
+    so every row and frame holds exactly the values the sequential loop
+    produced; a step that ends the run is diagnosed and plotted before the
+    loop stops, as there. Only used with a whole-step graph (no storing).
+    """
+    import warp as wp
+    # highest priority: the outputs' many small kernels are what the loop
+    # waits on, while the step replaying alongside has slack
+    side = torch.cuda.Stream(device=ctx.device, priority=torch.cuda.Stream.priority_range()[1])
+    wside = wp.stream_from_torch(side)
+    dtAtFloorStreak = 0
+    stepResult = None
+    handle = None
+    ts = time.perf_counter()
+
+    def outputs(i, absStep, state, stepRes, stepMs, ready, final):
+        """Diagnostics row + progress + frame for one finished step."""
+        with torch.cuda.stream(side), wp.ScopedStream(wside, sync_enter=False, sync_exit=False):
+            if ready is not None:
+                side.wait_event(ready)
+            row = {'step': absStep, 't': _scalar(state.t), 'stepTime_ms': stepMs}
+            if case.diagnostics is not None:
+                row.update(case.diagnostics(ctx, state))
+            result.trajectory.append(row)
+            if progress is not None:
+                if timeLimited:
+                    progress.n = min(progress.total, int(row['t'] / spec.tLimit * progress.total))
+                progress.set_description(
+                    _describeStep(i, None if timeLimited else nSteps, row, spec.tLimit))
+            _plotAndStore(ctx, case, spec, state, stepRes, absStep, extraData,
+                          groups, storeSteps, final=final)
+        # the next step (default stream) may reuse memory the side stream
+        # read from; make the default stream wait for it
+        torch.cuda.current_stream(ctx.device).wait_stream(side)
+
+    for i in steps:
+        if handle is None:
+            handle = stepGraph.launch(runningState, ctx.config.dt, ctx.config, ctx.schemeConfig,
+                                      verbose=spec.verbose)
+        stepResult = stepGraph.finish(handle)
+        # wall time launch -> finish: on this loop that spans the previous
+        # step's (overlapped) outputs too, i.e. the per-step throughput
+        stepMs = (time.perf_counter() - ts) * 1e3
+        handle = None
+        runningState = stepResult.state
+        ctx.scratch['lastStageUpdate'] = stepResult.stages[-1].update if stepResult.stages else None
+        absStep = i + spec.resumeStepOffset
+
+        if case.postStep is not None:
+            case.postStep(ctx, runningState, absStep)
+        if case.timestep is not None:
+            ctx.config.dt = case.timestep(ctx, runningState)
+        t = _scalar(runningState.t)
+
+        stop = None
+        if spec.stallDtSteps is not None and ctx.config.minDt is not None:
+            if _scalar(ctx.config.dt) <= ctx.config.minDt * 1.0001:
+                dtAtFloorStreak += 1
+            else:
+                dtAtFloorStreak = 0
+            if dtAtFloorStreak >= spec.stallDtSteps:
+                stop = (f'dt has been pinned at the minDt floor '
+                    f'({ctx.config.minDt:g}) for {dtAtFloorStreak} consecutive '
+                    f'steps as of step {absStep} (t={t:g}); stopping -- '
+                    f'simulated time is effectively frozen.')
+        if stop is None and spec.stallProgress is not None and spec.tLimit:
+            recentTimes.append(t)
+            if len(recentTimes) == recentTimes.maxlen and \
+                    recentTimes[-1] - recentTimes[0] < spec.stallProgress * spec.tLimit:
+                stop = (f'simulated time advanced {recentTimes[-1] - recentTimes[0]:.3g} '
+                    f'over the last {STALL_WINDOW_STEPS} steps as of step {absStep} '
+                    f'(t={t:g}), below stallProgress x tLimit = '
+                    f'{spec.stallProgress * spec.tLimit:.3g}; stopping -- '
+                    f'simulated time is effectively frozen.')
+        if stop is not None:
+            # as the sequential loop: the row is recorded, no frame, then stop
+            row = {'step': absStep, 't': t, 'stepTime_ms': stepMs}
+            if case.diagnostics is not None:
+                row.update(case.diagnostics(ctx, runningState))
+            result.trajectory.append(row)
+            print(stop)
+            result.diverged = True
+            break
+
+        last = (timeLimited and t >= spec.tLimit) or (not timeLimited and i == nSteps - 1)
+        velocities = get_tagged_attr(runningState.state, tag='velocity')
+        nonFinite = bool(torch.any(~torch.isfinite(velocities)))
+        if last or nonFinite:
+            ready = torch.cuda.Event()
+            ready.record(torch.cuda.current_stream(ctx.device))
+            outputs(i, absStep, runningState, stepResult, stepMs, ready, final=last)
+            if nonFinite and not (timeLimited and last):
+                # (the sequential loop stops at tLimit before this check)
+                print(f'non-finite velocities detected at step {absStep}; stopping.')
+                result.diverged = True
+            break
+
+        # step n+1 goes onto the GPU first, then step n's outputs overlap it
+        ready = torch.cuda.Event()
+        ready.record(torch.cuda.current_stream(ctx.device))
+        ts = time.perf_counter()
+        handle = stepGraph.launch(runningState, ctx.config.dt, ctx.config, ctx.schemeConfig,
+                                  verbose=spec.verbose)
+        outputs(i, absStep, runningState, stepResult, stepMs, ready, final=False)
+
+    if handle is not None:
+        stepGraph.finish(handle)
+    return runningState, stepResult
+
+
+class _RenderThread:
+    """Runs a case's plot hooks on one worker thread, off the step loop.
+
+    A frame is ~20-30 ms of host work (vispy scene update, draw, pixel
+    readback) that the loop otherwise waits for every `plotInterval` steps;
+    here it overlaps the steps that follow. The worker owns the plot from
+    `setupPlot` to teardown, so its GL context (EGL: offscreen and bound to
+    no thread in particular) is only ever current on that thread. Each frame
+    renders a snapshot of the state (device clones taken on the submitting
+    stream; the worker's own CUDA stream waits for them), so later steps are
+    free to reuse or modify theirs. At most `maxPending` frames queue up
+    before a submit waits; a failed frame raises at the next submit or at
+    `drain`, which the runner calls before encoding the video.
+    """
+
+    def __init__(self, device, maxPending: int = 2):
+        import concurrent.futures
+        self.executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix='warpSPH-render')
+        self.device = device
+        cuda = torch.cuda.is_available() and torch.device(device).type == 'cuda'
+        self.stream = torch.cuda.Stream(device=device) if cuda else None
+        self.pending = collections.deque()
+        self.maxPending = maxPending
+        self._switchInterval = sys.getswitchinterval()
+        sys.setswitchinterval(float(os.environ.get('WARPSPH_RENDER_SWITCH', self._switchInterval)))
+
+    def _job(self, fn, args, ready):
+        if self.stream is None:
+            return fn(*args)
+        with torch.cuda.device(self.device), torch.cuda.stream(self.stream):
+            if ready is not None:
+                self.stream.wait_event(ready)
+            return fn(*args)
+
+    def call(self, fn, *args):
+        """Run `fn(*args)` on the worker, wait, return its result."""
+        self.drain()
+        return self.executor.submit(self._job, fn, args, None).result()
+
+    def submitFrame(self, updatePlot, ctx, state, plotter, step):
+        """Queue `updatePlot(ctx, snapshot, plotter, step)`."""
+        from ..utils.cudaGraph import _cloneState
+        snapshot = _cloneState(state)
+        ready = None
+        if self.stream is not None:
+            ready = torch.cuda.Event()
+            ready.record(torch.cuda.current_stream(self.device))
+        self.pending.append(self.executor.submit(
+            self._job, updatePlot, (ctx, snapshot, plotter, step), ready))
+        while len(self.pending) > self.maxPending:
+            self.pending.popleft().result()
+
+    def drain(self):
+        while self.pending:
+            self.pending.popleft().result()
+
+    def close(self):
+        try:
+            self.drain()
+        finally:
+            self.executor.shutdown(wait=True)
+            sys.setswitchinterval(self._switchInterval)
+
+
+def _setupPlot(ctx: RunContext, case: Case, state):
+    """`case.setupPlot`, on a render thread when the run can use one
+    (`_RenderThread`): no live window (`show=False`; a window's event loop
+    belongs to the main thread) and the vispy backend, rendered through EGL.
+    Anything else -- or a setup that fails there -- plots on the main thread
+    as before."""
+    spec = ctx.spec
+    backend = spec.plotBackend or ('vispy' if spec.dim == 2 else None)
+    opts = dict(spec.plotBackendOptions or {})
+    if (spec.show or backend != 'vispy' or not spec.asyncPlot
+            or opts.get('app_backend', 'egl') != 'egl'):
+        return case.setupPlot(ctx, state)
+    original = spec.plotBackendOptions
+    spec.plotBackendOptions = dict(opts, app_backend='egl')
+    renderer = _RenderThread(ctx.device)
+    try:
+        handle = renderer.call(case.setupPlot, ctx, state)
+    except Exception as ex:  # noqa: BLE001 -- e.g. no EGL: plot on the main thread
+        renderer.close()
+        spec.plotBackendOptions = original
+        warnings.warn(f'[warpSPH] render thread unavailable, plotting on the main thread '
+                      f'({type(ex).__name__}: {str(ex).splitlines()[0][:200]})')
+        return case.setupPlot(ctx, state)
+    ctx.scratch['renderThread'] = renderer
+    return handle
+
+
+def _stepGraphable(ctx) -> bool:
+    """Whole-step graphs are only wired for the weakly-compressible delta-SPH
+    family (its RHS, integrator path and `finalize` were made sync-free; see
+    `schemes/deltaSPH.py:_rhsIsGraphable` for the per-configuration rules)."""
+    from ..enumTypes import WeaklyCompressibleSPHScheme
+    if not isinstance(ctx.scheme, WeaklyCompressibleSPHScheme):
+        return False
+    from ..schemes.deltaSPH import _rhsIsGraphable
+    return _rhsIsGraphable(ctx.schemeConfig, None)
+
+
+def _drainFrameWrites() -> None:
+    """Wait for frames the vispy backend is still encoding on its writer
+    threads (`cases/plotting.py:_fastPngOptions`), so every PNG is complete
+    before the video encode -- or the caller -- reads it."""
+    try:
+        from warpSPHPlotting import waitForExports
+    except ImportError:
+        return
+    waitForExports()
+
+
 def _teardownPlot(ctx: RunContext) -> None:
     """Hold the final figure if asked, then release it.
 
@@ -426,6 +699,12 @@ def _teardownPlot(ctx: RunContext) -> None:
     runs several cases would otherwise keep every one of their windows alive.
     """
     handle = ctx.scratch.pop('plot', None)
+    renderer = ctx.scratch.pop('renderThread', None)
+    if renderer is not None:
+        if handle is not None:
+            renderer.call(closeWindow, handle)
+        renderer.close()
+        return
     if handle is None:
         return
     holdWindow(ctx, handle)
@@ -438,7 +717,11 @@ def _plotAndStore(ctx: RunContext, case: Case, spec: CaseSpec, state, stepResult
     """The per-step output side of the loop: plot every N, export every M."""
     if spec.plot and case.updatePlot is not None and i > 0 and \
             (i % spec.plotInterval == 0 or final):
-        case.updatePlot(ctx, state, ctx.scratch.get('plot'), i)
+        renderer = ctx.scratch.get('renderThread')
+        if renderer is not None:
+            renderer.submitFrame(case.updatePlot, ctx, state, ctx.scratch.get('plot'), i)
+        else:
+            case.updatePlot(ctx, state, ctx.scratch.get('plot'), i)
 
     if spec.store and (i % storeSteps == 0 or final):
         frameExtra = dict(extraData,

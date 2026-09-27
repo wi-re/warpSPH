@@ -94,7 +94,8 @@ import warp as wp
 from warp.types import vector, matrix
 from typing import Any
 import torch
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
 
@@ -264,7 +265,7 @@ def computeDensityDiffusionDeltaSPH_Func_i(
 
 @wp.func
 def computeDensityDiffusionDeltaSPH_Func_Adjacency(
-    i : wp.int32, dim: wp.int32, 
+    i : wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32, 
 
     queryState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
     referenceState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
@@ -310,6 +311,9 @@ def computeDensityDiffusionDeltaSPH_Func_Adjacency(
 
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
+        # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
+        if not useAdjacency and (o % lanes) != lane:
+            continue
         beginIndex = wp.int32(0)
         numIndices = wp.int32(0)
         if useAdjacency:    
@@ -324,6 +328,7 @@ def computeDensityDiffusionDeltaSPH_Func_Adjacency(
             if beginIndex < 0:
                 continue
         
+        beginIndex, numIndices = laneSlice(beginIndex, numIndices, lane, lanes, useAdjacency)
         out += computeDensityDiffusionDeltaSPH_Func_i(
             i, dim, 
             xi, hi, mi, rhoi,
@@ -377,7 +382,7 @@ def computeDensityDiffusionDeltaSPH_Kernel(
         return
 
     outputValues[i] = computeDensityDiffusionDeltaSPH_Func_Adjacency(
-        i, domainState.dim,
+        i, domainState.dim, 0, 1,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
@@ -392,12 +397,54 @@ def computeDensityDiffusionDeltaSPH_Kernel(
     )
 
 
+@wp.kernel
+def computeDensityDiffusionDeltaSPH_KernelTiled(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+
+    kernelProperties: kernelState,
+    # Do not change the parameters above
+    queryGradRho: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceGradRho: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    queryGradRhoL: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceGradRhoL: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    useField: wp.int32, queryField: wp.array(dtype = scalar_t), referenceField: wp.array(dtype = scalar_t), # type: ignore
+    densityScheme: wp.int32,
+    rho0: scalar_t, c0: scalar_t, queryGravity: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+
+    # The last parameter is always the output array and should not be changed
+    outputValues : wp.array(dtype = scalar_t) # type: ignore
+):
+    # Multi-lane variant of computeDensityDiffusionDeltaSPH_Kernel (warpSPHCore autograd/lanes.py):
+    # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
+
+    i, lane = wp.tid()
+    partial = computeDensityDiffusionDeltaSPH_Func_Adjacency(
+        i, domainState.dim, lane, wp.block_dim(),
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+        queryGradRho, referenceGradRho,
+        queryGradRhoL, referenceGradRhoL,
+        useField, queryField, referenceField,
+        densityScheme,
+        rho0, c0, queryGravity,
+        zero_like_warp(outputValues)
+    )
+    total = laneSum(partial)
+    if lane == 0:
+        outputValues[i] = total
+
+
 def _densityDiffusionDtype(ctx, extras):
     return castTorchToWarpAsBuiltins(ctx.query.densities).dtype
 
 
 _DENSITY_DIFFUSION_DELTA_SPH = OperatorSpec(
     kernel=computeDensityDiffusionDeltaSPH_Kernel,
+    tiledKernel=computeDensityDiffusionDeltaSPH_KernelTiled,
     outputs=(OutputSpec(dtype=_densityDiffusionDtype, shape=ShapeOf.QUERY),),
     extras=(
         ExtraSpec("queryGradRho", ExtraKind.TENSOR),

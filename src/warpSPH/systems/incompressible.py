@@ -22,8 +22,8 @@ from ..rigidBody.update import updateBodyParticlesWCSPH
 
 from ..modules.shifting.delta import computeDeltaShift
 from ..modules.shifting.wrapper import solveShifting
-from torch.profiler import profile, record_function, ProfilerActivity
-
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
 __all__ = ['IncompressibleState', 'IncompressibleSystemUpdate', 'IncompressibleSystem',
            'DFSPHReferenceSystem']
 

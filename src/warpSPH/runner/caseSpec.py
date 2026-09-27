@@ -90,6 +90,19 @@ class CaseSpec:
     # --- runtime ------------------------------------------------------------
     precision: str = 'float32'
     device: Optional[str] = None
+    #: Capture the scheme's right-hand side in a CUDA graph and replay it
+    #: (`utils/cudaGraph.py`) -- removes the per-op CPU cost that dominates
+    #: small problems; bitwise identical to eager (self-checked at every
+    #: capture, falling back to eager on any mismatch). Only the delta-SPH
+    #: family acts on it, and only in configurations whose RHS is a pure
+    #: function of the state (`schemes/deltaSPH.py:_rhsIsGraphable`); a no-op
+    #: elsewhere. The scheme config must not be changed after the first step.
+    cudaGraph: bool = False
+    #: With a whole-step graph: run step n's diagnostics and plot frame on a
+    #: side stream while step n+1 replays (`runner.py:_runPipelined`). Same
+    #: rows and frames; `stepTime_ms` becomes the per-step wall throughput.
+    #: Off restores the one-thing-at-a-time loop (A/B timing, debugging).
+    pipelineOutputs: bool = True
 
     # --- output -------------------------------------------------------------
     plot: bool = False
@@ -112,6 +125,11 @@ class CaseSpec:
     #: connection where the `jupyter_rfb` widget's comm channel to the
     #: browser does not come up, even though the kernel itself renders fine.
     plotBackendOptions: Optional[Dict[str, Any]] = None
+    #: Without a live window (`show=False`) and with the vispy backend, render
+    #: the frames on a worker thread through EGL, overlapping the steps that
+    #: follow (`runner.py:_RenderThread`); the same frames. Off: render on the
+    #: loop's thread.
+    asyncPlot: bool = True
     store: bool = False
     #: 'states' writes one HDF5 file per stored step (the examples' pattern);
     #: 'trajectory' writes a single growing trajectory.h5 (the datagen pattern).

@@ -15,6 +15,8 @@ a single-evaluation exponential override instead).
 from warpSPHIntegrators import *
 from dataclasses import dataclass
 import torch
+from warpSPHCore import compileGlue
+from collections.abc import Mapping
 from typing import Optional
 from warpSPHCore import *
 
@@ -25,9 +27,8 @@ from ..modules.shifting.delta import computeDeltaShift
 from ..modules.shifting.wrapper import solveShifting
 from ..modules.mdbc import computeMdbcNoPenShift
 from ..modules.gravity import computeGravity
-from torch.profiler import profile, record_function, ProfilerActivity
-
-
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
 #: Restore the normal share of the step's gravity when the no-penetration
 #: correction fires against a wall that gravity pulls *away* from (a ceiling).
 #: **Off: implemented, unvalidated, left for a case that needs it.**
@@ -72,6 +73,98 @@ def _statBlock(prefix: str, x: torch.Tensor) -> dict:
         f'{prefix}Mean': xf.mean().item(),
         f'{prefix}P05': q[0].item(), f'{prefix}P95': q[1].item(),
     }
+
+
+_STAT_SUFFIXES = ('Min', 'Max', 'Mean', 'P05', 'P95')
+
+
+@compileGlue
+def _accelStatBlocks(accel: torch.Tensor, q: torch.Tensor) -> torch.Tensor:
+    """(blocks, 5) = [min, max, mean, p05, p95] of |a| and of each axis of
+    the fluid accelerations `accel`; `q` = [0.05, 0.95] on the device. One
+    sort per block, quantiles bitwise `torch.quantile`'s
+    (`utils/syncFree.py:quantilesFromSorted`). Pure torch (`compileGlue`)."""
+    from ..utils.syncFree import quantilesFromSorted
+    rows = []
+    for x in [torch.linalg.norm(accel, dim=-1)] + [accel[:, a] for a in range(accel.shape[-1])]:
+        xf = x.detach().float()
+        pq = quantilesFromSorted(torch.sort(xf)[0], q)
+        rows.append(torch.stack([xf.min(), xf.max(), xf.mean(), pq[0], pq[1]]))
+    return torch.stack(rows)
+
+
+class _LazyStepDiagnostics(Mapping):
+    """`finalize`'s step statistics, computed from the stashed raw tensors on
+    first access (see `finalize`).
+
+    Split for the runner's graphed diagnostics: `deviceValues` is the
+    sync-free part (every block over the fixed fluid subset, plus the no-pen
+    active count) as 0-d device tensors; `fromHost` turns its host values into
+    the mapping, computing the no-pen magnitude block -- the only part with a
+    data-dependent size -- eagerly, and only on steps where the correction
+    touched a particle. Values and key order are the eager ones exactly."""
+
+    def __init__(self, accelAll, fluidMask, nopenshiftDiag):
+        self.raw = (accelAll, fluidMask, nopenshiftDiag)
+        self._values = None
+
+    def deviceValues(self, fluidIndex: torch.Tensor) -> dict:
+        """`fluidIndex`: the fluid rows (ascending, as the mask selects them),
+        e.g. `utils.syncFree.cachedKindIndex(kinds, 0, config)`."""
+        accelAll, _fluidMask, nopenshiftDiag = self.raw
+        from ..utils.syncFree import deviceConstant
+        dev = {}
+        if fluidIndex.numel() > 0:
+            accel = accelAll.index_select(0, fluidIndex)
+            blocks = _accelStatBlocks(accel, deviceConstant([0.05, 0.95], torch.float32, accel.device))
+            names = ['accelMag'] + [f'accel{_STAT_AXIS_NAMES[a]}' for a in range(accel.shape[-1])]
+            for b, prefix in enumerate(names):
+                for c, suffix in enumerate(_STAT_SUFFIXES):
+                    dev[f'{prefix}{suffix}'] = blocks[b, c]
+        if nopenshiftDiag is not None:
+            dev['nopenshiftNActive'] = nopenshiftDiag[1].any(dim=-1).sum()
+        return dev
+
+    def fromHost(self, host: dict) -> dict:
+        """The mapping's values from `deviceValues`' (host) numbers."""
+        accelAll, fluidMask, nopenshiftDiag = self.raw
+        stepDiag = {}
+        blocks = ['accelMag'] + [f'accel{_STAT_AXIS_NAMES[a]}' for a in range(accelAll.shape[-1])]
+        for prefix in blocks:
+            if f'{prefix}Min' in host:
+                stepDiag.update({f'{prefix}{k}': host[f'{prefix}{k}']
+                                 for k in ('Min', 'Max', 'Mean', 'P05', 'P95')})
+            else:
+                stepDiag.update(_statBlock(prefix, accelAll[:0, 0]))
+        if nopenshiftDiag is not None:
+            nopenshift, active = nopenshiftDiag
+            nActive = int(host['nopenshiftNActive'])
+            stepDiag['nopenshiftNActive'] = nActive
+            if nActive > 0:
+                stepDiag.update(_statBlock(
+                    'nopenshiftMag', torch.linalg.norm(nopenshift[active.any(dim=-1)], dim=-1)))
+            else:
+                stepDiag.update(_statBlock('nopenshiftMag', nopenshift[:0, 0]))
+        return stepDiag
+
+    def _compute(self):
+        if self._values is None:
+            fluidIndex = self.raw[1].nonzero().squeeze(1)
+            dev = self.deviceValues(fluidIndex)
+            keys = list(dev)
+            vals = (torch.stack([dev[k].to(torch.float64).reshape(()) for k in keys]).cpu().tolist()
+                    if keys else [])
+            self._values = self.fromHost(dict(zip(keys, vals)))
+        return self._values
+
+    def __getitem__(self, key):
+        return self._compute()[key]
+
+    def __iter__(self):
+        return iter(self._compute())
+
+    def __len__(self):
+        return len(self._compute())
 
 
 def _meanBoundaryNormal(state, adjacency):
@@ -389,7 +482,10 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
                     self.state, config, schemeConfig, self.adjacency)
                 active = (nopenshift != 0) & (self.state.kinds == 0).unsqueeze(-1)
                 nopenshiftDiag = (nopenshift, active)
-                if bool(active.any()):
+                # Unconditional (was `if bool(active.any()):`): every write below
+                # is a torch.where on `active`, so with no active row the state
+                # comes out unchanged -- same values, no host sync.
+                if True:
                     vPre = initialState.state.velocities
                     xPre = initialState.state.positions
                     # `vPre + nopenshift` rebuilds from the *start-of-step*
@@ -444,18 +540,16 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
         # recurring question across the lid-driven cavity, Marrone 3.1 and
         # Marrone 3.4 investigations that otherwise needed a one-off probe
         # script and a from-scratch re-run each time to answer.
+        # The per-step statistics (quantiles over the fluid rows and over the
+        # no-pen-active subset) need host syncs and data-dependent sizes, and
+        # nothing in the step reads them -- only the case diagnostics do. So
+        # the raw full-size tensors are kept and the same statistics are
+        # computed on first read (`_LazyStepDiagnostics`), outside any
+        # captured step graph. Values are unchanged (elementwise ops commute
+        # with the row gather).
         fluidMask = self.state.kinds == 0
-        accel = (self.state.velocities - initialState.state.velocities)[fluidMask] / dt
-        stepDiag = _statBlock('accelMag', torch.linalg.norm(accel, dim=-1))
-        for axis in range(accel.shape[-1]):
-            stepDiag.update(_statBlock(f'accel{_STAT_AXIS_NAMES[axis]}', accel[:, axis]))
-        if nopenshiftDiag is not None:
-            nopenshift, active = nopenshiftDiag
-            activeAny = active.any(dim=-1)
-            stepDiag['nopenshiftNActive'] = int(activeAny.sum().item())
-            stepDiag.update(_statBlock(
-                'nopenshiftMag', torch.linalg.norm(nopenshift[activeAny], dim=-1)))
-        self.stepDiagnostics = stepDiag
+        accelAll = (self.state.velocities - initialState.state.velocities) / dt
+        self.stepDiagnostics = _LazyStepDiagnostics(accelAll, fluidMask, nopenshiftDiag)
 
         # Information for artificial viscosity switches
         # self.state.divergence.copy_(lastState.divergence)

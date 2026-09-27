@@ -119,7 +119,7 @@ def _scalarArgDemo_Kernel(
         return
 
     interpolated = computeSPHInterpolation_Func_Adjacency(
-        i, domainState.dim,
+        i, domainState.dim, 0, 1,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,

@@ -35,7 +35,8 @@ import warp as wp
 from warp.types import vector, matrix
 from typing import Any
 import torch
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
 
@@ -155,7 +156,7 @@ def nuToAlpha(
 
 @wp.func
 def computeVelocityDiffusionDeltaSPH_Func_Adjacency(
-    i : wp.int32, dim: wp.int32, 
+    i : wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32, 
 
     queryState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
     referenceState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
@@ -189,6 +190,9 @@ def computeVelocityDiffusionDeltaSPH_Func_Adjacency(
 
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
+        # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
+        if not useAdjacency and (o % lanes) != lane:
+            continue
         beginIndex = wp.int32(0)
         numIndices = wp.int32(0)
         if useAdjacency:    
@@ -203,6 +207,7 @@ def computeVelocityDiffusionDeltaSPH_Func_Adjacency(
             if beginIndex < 0:
                 continue
         
+        beginIndex, numIndices = laneSlice(beginIndex, numIndices, lane, lanes, useAdjacency)
         out += computeVelocityDiffusionDeltaSPH_Func_i(
             i, dim, 
             xi, hi, mi, rhoi,
@@ -254,7 +259,7 @@ def computeVelocityDiffusionDeltaSPH_Kernel(
         return
 
     outputValues[i] = computeVelocityDiffusionDeltaSPH_Func_Adjacency(
-        i, domainState.dim, 
+        i, domainState.dim, 0, 1, 
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,  #queryKinds, referenceKinds,
@@ -268,12 +273,50 @@ def computeVelocityDiffusionDeltaSPH_Kernel(
     )
 
 
+@wp.kernel
+def computeVelocityDiffusionDeltaSPH_KernelTiled(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+    
+    kernelProperties: kernelState,
+    # Do not change the parameters above
+    queryVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    inviscid: wp.bool, alpha: scalar_t, c_s: scalar_t, nu: scalar_t, dim: wp.int32,
+    approachOnly: wp.bool,
+
+    # The last parameter is always the output array and should not be changed
+    outputValues : wp.array(dtype = vector(length=Any, dtype=scalar_t)) # type: ignore
+):
+    # Multi-lane variant of computeVelocityDiffusionDeltaSPH_Kernel (warpSPHCore autograd/lanes.py):
+    # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
+
+    i, lane = wp.tid()
+    partial = computeVelocityDiffusionDeltaSPH_Func_Adjacency(
+        i, domainState.dim, lane, wp.block_dim(),
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+        queryVelocities, referenceVelocities,
+        inviscid, alpha, c_s, nu, dim,
+        approachOnly,
+        zero_like_warp(outputValues)
+    )
+    total = laneSum(partial)
+    if lane == 0:
+        outputValues[i] = total
+
+
 def _velocityDiffusionDtype(ctx, extras):
     return castTorchToWarpAsBuiltins(ctx.query.velocities).dtype
 
 
 _VELOCITY_DIFFUSION_DELTA_SPH = OperatorSpec(
     kernel=computeVelocityDiffusionDeltaSPH_Kernel,
+    tiledKernel=computeVelocityDiffusionDeltaSPH_KernelTiled,
     outputs=(OutputSpec(dtype=_velocityDiffusionDtype, shape=ShapeOf.QUERY),),
     extras=(
         ExtraSpec("queryVelocities", ExtraKind.TENSOR),

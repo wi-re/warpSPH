@@ -249,3 +249,4 @@ results/
 # scratchpad/: the diagnostic probe scripts ARE tracked (several are cited by
 # DELTASPH_VALIDATION_PLAN.md), their output directories are not.
 /scratchpad/*/
+benchmarks/marrone31/out/

@@ -33,7 +33,7 @@ from warp.types import vector, matrix
 from typing import Any, Optional, Tuple, Union
 
 import torch
-from torch.profiler import record_function
+from warpSPHCore.profiling import record_function
 from warpSPHCore import *
 
 __all__ = ['computeWallMomentWarp']
@@ -95,7 +95,7 @@ def computeWallMoment_Func_i(
 
 @wp.func
 def computeWallMoment_Func_Adjacency(
-    i : wp.int32, dim: wp.int32,
+    i : wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32,
 
     queryState: Any,
     referenceState: Any,
@@ -123,6 +123,9 @@ def computeWallMoment_Func_Adjacency(
 
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
+        # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
+        if not useAdjacency and (o % lanes) != lane:
+            continue
         beginIndex = wp.int32(0)
         numIndices = wp.int32(0)
         if useAdjacency:
@@ -137,6 +140,7 @@ def computeWallMoment_Func_Adjacency(
             if beginIndex < 0:
                 continue
 
+        beginIndex, numIndices = laneSlice(beginIndex, numIndices, lane, lanes, useAdjacency)
         out += computeWallMoment_Func_i(
             i, dim,
             xi, hi, mi, rhoi,
@@ -175,12 +179,41 @@ def computeWallMoment_Kernel(
         return
 
     outputValues[i] = computeWallMoment_Func_Adjacency(
-        i, domainState.dim,
+        i, domainState.dim, 0, 1,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
         zero_like_warp(outputValues)
     )
+
+
+@wp.kernel
+def computeWallMoment_KernelTiled(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+
+    kernelProperties: kernelState,
+    # The last parameter is always the output array and should not be changed
+    outputValues : wp.array(dtype = vector(length=Any, dtype=scalar_t)) # type: ignore
+):
+    # Multi-lane variant of computeWallMoment_Kernel (warpSPHCore autograd/lanes.py):
+    # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
+
+    i, lane = wp.tid()
+    partial = computeWallMoment_Func_Adjacency(
+        i, domainState.dim, lane, wp.block_dim(),
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+        zero_like_warp(outputValues)
+    )
+    total = laneSum(partial)
+    if lane == 0:
+        outputValues[i] = total
 
 
 def _wallMomentDtype(ctx, extras):
@@ -189,6 +222,7 @@ def _wallMomentDtype(ctx, extras):
 
 _WALL_MOMENT = OperatorSpec(
     kernel=computeWallMoment_Kernel,
+    tiledKernel=computeWallMoment_KernelTiled,
     outputs=(OutputSpec(dtype=_wallMomentDtype, shape=ShapeOf.QUERY),),
     extras=(),
 )

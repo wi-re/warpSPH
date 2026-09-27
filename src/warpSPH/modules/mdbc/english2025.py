@@ -60,14 +60,15 @@ zero, the same as before this field existed.
 from typing import Any, Optional, Union
 
 import torch
-from torch.profiler import record_function
-
+from warpSPHCore.profiling import record_function
+from warpSPHCore import compileGlue
 from warpSPHCore import *
 
 from ...configurations.simulationConfig import SimulationConfig
 from ..liu.wp_mat import computeLiuMatricesWarp
 from ..gravity.wrapper import computeGravity
 from ._util import stateHasBoundaryParticles
+from ...utils.syncFree import cachedKindIndex, ghostSourceIndex, ghostTargetIndex, scatterRows
 
 __all__ = ['computeMdbcDensityEnglish2025']
 
@@ -77,6 +78,98 @@ __all__ = ['computeMdbcDensityEnglish2025']
 # `if _CAPTURE is not None` check below is the only added cost, everywhere
 # else this module is used. Revert (`git checkout`) after use.
 _CAPTURE: Optional[list] = None
+
+
+
+@compileGlue
+def _boundaryDensity(M, Sq, nNbFluid, g_b, a_b, relPos, rho0: float, c0: float, oneSided: bool):
+    """The per-row english2025 boundary density from the ghost gathers:
+    Shepard `alpha` with its neighbour-count trust ramp, Eq. (10) pressure
+    extension, rest-density fallbacks. Pure elementwise torch (fused by
+    `compileGlue` when enabled). Returns (rho_b, hasAny, Mb, alpha, P_g, P_b)."""
+    hasAny = nNbFluid >= 1
+    Mb = M.clamp_min(0.0)
+    # Regularize the Shepard ratio by adding the SAME epsilon to both
+    # numerator and denominator, rather than flooring the denominator
+    # alone (as this used to). A single-neighbour ghost row's weight can
+    # be a genuinely tiny but internally-consistent kernel value (a
+    # particle sitting almost exactly on the kernel's cutoff radius,
+    # `r ~ 0.99999h` -- confirmed directly, `BOUNDARY_DENSITY_PLAN.md`
+    # §9.4/§9.6): `Sq = w*rho_j` and `Mb = w` share that SAME `w`, so in
+    # exact arithmetic `Sq/Mb = rho_j` regardless of how small `w` is --
+    # the weight cancels. Flooring only `Mb` (the old `MbSafe =
+    # Mb.clamp_min(1e-30)`) broke that cancellation: once `Mb` dropped
+    # below the floor, `alpha` became `(tiny Sq) / (arbitrary floor)`,
+    # not `rho_j` -- confirmed exactly (`Mb=9.6e-42` -> `alpha=9.6e-12`
+    # instead of ~1.0), which is what fed the catastrophic pressure swing
+    # that diverged the run. Adding the SAME `eps` to both preserves the
+    # cancellation at every scale instead: `Mb=0` (no neighbours) ->
+    # `alpha=rho0` exactly, matching the explicit fallback below; `Mb`
+    # comparable to or below `eps` (a vanishing/underflowing weight) ->
+    # `alpha` blends smoothly toward `rho0`, not a wrong near-zero value;
+    # `Mb >> eps` (a healthy stencil) -> `alpha ~= Sq/Mb`, unaffected.
+    # `eps = 1e-30` reuses the OLD (buggy) denominator-only floor's own
+    # threshold, applied symmetrically instead -- deliberately NOT a
+    # larger value like `1e-8`. A first attempt at `1e-8` fixed the
+    # crash but measurably worsened sloshingTank's later behaviour
+    # (earlier onset, more frequent large excursions) -- because `1e-8`
+    # sits ABOVE this case's typical *non-degenerate* single-neighbour
+    # scale (`Mb ~ 1e-20` at `nNbFluid=1`, confirmed empirically), it was
+    # silently overriding every ordinary N=1 row's raw Shepard value
+    # toward `rho0`, not just the genuinely-underflowed one -- a much
+    # bigger behaviour change than intended, discarding real information
+    # the OLD code (bug aside) actually used successfully. `1e-30` sits
+    # far below that normal N=1 scale (negligible perturbation, matches
+    # the old code's behaviour there almost exactly) while still
+    # dominating genuine underflow (`Mb ~ 1e-42`) enough to fall back to
+    # `rho0` instead of the wrong `9.6e-12`. `BOUNDARY_DENSITY_PLAN.md`
+    # §9.6/§9.7 has the full comparison.
+    _ALPHA_EPS = 1e-30
+    alpha = (Sq + _ALPHA_EPS * rho0) / (Mb + _ALPHA_EPS)
+
+    # -- Trust ramp: blend the 0th-order Shepard value `alpha` toward
+    # `rho0` as the fluid-neighbour count drops, instead of trusting it
+    # outright whenever `nNbFluid >= 1` (the `hasAny` gate below, kept
+    # only as the true-zero-neighbour hard fallback). `density2025.py`'s
+    # 'ramped' scheme already does exactly this to blend its 1st-order
+    # fit down to ITS OWN Shepard value (`_MDBC_NBR_FLOOR`/`_RAMP`); this
+    # scheme has no gradient block to blend away, so the same ramp is
+    # applied one level down, to `alpha` itself -- the quantity that
+    # `FREESLIP_DAMBREAK_FINDINGS.md` §6 measured collapsing to 0.525
+    # under a sparse/skewed impact-spray sample (`nNbFluid` a handful,
+    # not the well-supported ~15-30 of a quiescent wall row) while
+    # `P_b`/`rho_b` just carry that bad value through unchanged (no
+    # blend of their own downstream). A magnitude floor on the final
+    # `rho_b` (tried first, reverted here) caught the same rows but also
+    # any well-conditioned deep negative-pressure reading that happened
+    # to sit below the floor -- this ramp instead only discounts rows
+    # whose VALUE fit itself is under-supported, which is the actual
+    # failure condition, so it needs no per-case opt-in.
+    _ALPHA_NBR_FLOOR = 4.0
+    _ALPHA_NBR_RAMP = 1.0
+    wAlpha = torch.clamp(
+        (nNbFluid.to(alpha.dtype) - _ALPHA_NBR_FLOOR) / _ALPHA_NBR_RAMP,
+        0.0, 1.0)
+    alpha = wAlpha * alpha + (1.0 - wAlpha) * rho0
+
+    # -- Eq. (10), corrected sign (module docstring / plan §5.1):
+    # P_b = P_g + rho0 * dot(g - a_b, relPos). `a_b` is the boundary
+    # particle's own rigid-body acceleration -- zero for every static wall
+    # (see module docstring).
+    P_g = c0 ** 2 * (alpha - rho0)
+    hydro = rho0 * torch.einsum('nu,nu->n', g_b - a_b, relPos)
+    if oneSided:
+        # never tension from the hydrostatic extension (config docstring)
+        hydro = hydro.clamp_min(0.0)
+    P_b = P_g + hydro
+    rho_b = rho0 + P_b / c0 ** 2
+
+    # No-neighbour fallback: rest density, matching density2025.py /
+    # densityBand.py's own zero-neighbour behaviour.
+    rho_b = torch.where(hasAny, rho_b, torch.full_like(rho_b, rho0))
+    rho_b = torch.nan_to_num(rho_b, nan=rho0, posinf=rho0, neginf=rho0)
+
+    return rho_b, hasAny, Mb, alpha, P_g, P_b
 
 
 def computeMdbcDensityEnglish2025(currentState: Any, config: SimulationConfig, schemeConfig: Any,
@@ -92,13 +185,19 @@ def computeMdbcDensityEnglish2025(currentState: Any, config: SimulationConfig, s
     with record_function("[warpSPH] - (mdbc) - computeMdbcDensityEnglish2025"):
         rho0 = schemeConfig.fluid.restDensity
         c0 = schemeConfig.fluid.fixedSoundSpeed
+        # Every per-ghost quantity below is carried full length (one row per
+        # particle; only the ghost rows are meaningful) and scattered onto the
+        # boundary particles at the end, instead of being gathered through
+        # `x[kinds == 2]` -- identical row values, but no mask-induced host
+        # sync, so the step can be captured in a CUDA graph
+        # (`utils/syncFree.py`). With no ghost rows at all the scatter is a
+        # no-op and the densities come back unchanged.
         ghost = currentState.kinds == 2
-        if not bool(ghost.any()):
-            return currentState.densities
-        bIndices = currentState.ghostIndices[ghost]
+        bSource = ghostSourceIndex(currentState.kinds, currentState.ghostIndices)
+        bTarget = ghostTargetIndex(currentState.kinds, currentState.ghostIndices)
         # r_b - r_g, same convention as density2025.py's English Eq. (12) and
         # densityBand.py's Taylor shift.
-        relPos = -currentState.ghostOffsets[ghost]
+        relPos = -currentState.ghostOffsets
 
         # -- Value-only fit at the ghost: Band et al. 2018's decoupled
         # 0th-order (Shepard) term, `densityBand.py`'s `alpha` -- no gradient
@@ -119,8 +218,12 @@ def computeMdbcDensityEnglish2025(currentState: Any, config: SimulationConfig, s
         # Exact integer fluid-neighbour count, not a scale-sensitive
         # threshold on `M` itself -- `densityBand.py`'s Mb-precision fix
         # (BOUNDARY_DENSITY_PLAN.md §3 item 1), reused verbatim.
-        _, _, _, nNbFluid = computeLiuMatricesWarp(
-            queryPositions=currentState.positions[ghost],
+        # Queried at the ghost rows only (cached index, no per-step sync), as
+        # the original `positions[ghost]` query did, then spread back to full
+        # length (0 on non-ghost rows, which are never scattered anyway).
+        ghostRows = cachedKindIndex(currentState.kinds, 2, config)
+        _, _, _, nNbGhost = computeLiuMatricesWarp(
+            queryPositions=currentState.positions.index_select(0, ghostRows),
             referenceParticles=currentState, referenceQuantities=currentState.densities,
             operationProperties=OperationProperties(
                 kernel=config.kernel, supportMode=SupportScheme.Scatter,
@@ -128,96 +231,24 @@ def computeMdbcDensityEnglish2025(currentState: Any, config: SimulationConfig, s
             domain=config.domain,
             adjacency=adjacency.hashMap if isinstance(adjacency, AdjacencyList) else None)
 
-        hasAny = nNbFluid >= 1
-        Mb = M[ghost].clamp_min(0.0)
-        # Regularize the Shepard ratio by adding the SAME epsilon to both
-        # numerator and denominator, rather than flooring the denominator
-        # alone (as this used to). A single-neighbour ghost row's weight can
-        # be a genuinely tiny but internally-consistent kernel value (a
-        # particle sitting almost exactly on the kernel's cutoff radius,
-        # `r ~ 0.99999h` -- confirmed directly, `BOUNDARY_DENSITY_PLAN.md`
-        # §9.4/§9.6): `Sq = w*rho_j` and `Mb = w` share that SAME `w`, so in
-        # exact arithmetic `Sq/Mb = rho_j` regardless of how small `w` is --
-        # the weight cancels. Flooring only `Mb` (the old `MbSafe =
-        # Mb.clamp_min(1e-30)`) broke that cancellation: once `Mb` dropped
-        # below the floor, `alpha` became `(tiny Sq) / (arbitrary floor)`,
-        # not `rho_j` -- confirmed exactly (`Mb=9.6e-42` -> `alpha=9.6e-12`
-        # instead of ~1.0), which is what fed the catastrophic pressure swing
-        # that diverged the run. Adding the SAME `eps` to both preserves the
-        # cancellation at every scale instead: `Mb=0` (no neighbours) ->
-        # `alpha=rho0` exactly, matching the explicit fallback below; `Mb`
-        # comparable to or below `eps` (a vanishing/underflowing weight) ->
-        # `alpha` blends smoothly toward `rho0`, not a wrong near-zero value;
-        # `Mb >> eps` (a healthy stencil) -> `alpha ~= Sq/Mb`, unaffected.
-        # `eps = 1e-30` reuses the OLD (buggy) denominator-only floor's own
-        # threshold, applied symmetrically instead -- deliberately NOT a
-        # larger value like `1e-8`. A first attempt at `1e-8` fixed the
-        # crash but measurably worsened sloshingTank's later behaviour
-        # (earlier onset, more frequent large excursions) -- because `1e-8`
-        # sits ABOVE this case's typical *non-degenerate* single-neighbour
-        # scale (`Mb ~ 1e-20` at `nNbFluid=1`, confirmed empirically), it was
-        # silently overriding every ordinary N=1 row's raw Shepard value
-        # toward `rho0`, not just the genuinely-underflowed one -- a much
-        # bigger behaviour change than intended, discarding real information
-        # the OLD code (bug aside) actually used successfully. `1e-30` sits
-        # far below that normal N=1 scale (negligible perturbation, matches
-        # the old code's behaviour there almost exactly) while still
-        # dominating genuine underflow (`Mb ~ 1e-42`) enough to fall back to
-        # `rho0` instead of the wrong `9.6e-12`. `BOUNDARY_DENSITY_PLAN.md`
-        # §9.6/§9.7 has the full comparison.
-        _ALPHA_EPS = 1e-30
-        alpha = (Sq[ghost] + _ALPHA_EPS * rho0) / (Mb + _ALPHA_EPS)
-
-        # -- Trust ramp: blend the 0th-order Shepard value `alpha` toward
-        # `rho0` as the fluid-neighbour count drops, instead of trusting it
-        # outright whenever `nNbFluid >= 1` (the `hasAny` gate below, kept
-        # only as the true-zero-neighbour hard fallback). `density2025.py`'s
-        # 'ramped' scheme already does exactly this to blend its 1st-order
-        # fit down to ITS OWN Shepard value (`_MDBC_NBR_FLOOR`/`_RAMP`); this
-        # scheme has no gradient block to blend away, so the same ramp is
-        # applied one level down, to `alpha` itself -- the quantity that
-        # `FREESLIP_DAMBREAK_FINDINGS.md` §6 measured collapsing to 0.525
-        # under a sparse/skewed impact-spray sample (`nNbFluid` a handful,
-        # not the well-supported ~15-30 of a quiescent wall row) while
-        # `P_b`/`rho_b` just carry that bad value through unchanged (no
-        # blend of their own downstream). A magnitude floor on the final
-        # `rho_b` (tried first, reverted here) caught the same rows but also
-        # any well-conditioned deep negative-pressure reading that happened
-        # to sit below the floor -- this ramp instead only discounts rows
-        # whose VALUE fit itself is under-supported, which is the actual
-        # failure condition, so it needs no per-case opt-in.
-        _ALPHA_NBR_FLOOR = 4.0
-        _ALPHA_NBR_RAMP = 1.0
-        wAlpha = torch.clamp(
-            (nNbFluid.to(alpha.dtype) - _ALPHA_NBR_FLOOR) / _ALPHA_NBR_RAMP,
-            0.0, 1.0)
-        alpha = wAlpha * alpha + (1.0 - wAlpha) * rho0
-
-        # -- Eq. (10), corrected sign (module docstring / plan §5.1):
-        # P_b = P_g + rho0 * dot(g - a_b, relPos). `a_b` is the boundary
-        # particle's own rigid-body acceleration -- zero for every static wall
-        # (see module docstring).
+        nNbFluid = torch.zeros(ghost.shape[0], dtype=nNbGhost.dtype, device=nNbGhost.device) \
+            .index_copy(0, ghostRows, nNbGhost)
         gAll = computeGravity(currentState, config, schemeConfig, adjacency)
-        g_b = gAll[bIndices]
+        g_b = gAll[bSource]
         boundaryAccelerations = getattr(currentState, 'boundaryAccelerations', None)
         if boundaryAccelerations is not None:
-            a_b = boundaryAccelerations[bIndices]
+            a_b = boundaryAccelerations[bSource]
         else:
             a_b = torch.zeros_like(relPos)
-        P_g = c0 ** 2 * (alpha - rho0)
-        hydro = rho0 * torch.einsum('nu,nu->n', g_b - a_b, relPos)
-        if getattr(schemeConfig, 'mdbcOneSidedHydrostatic', False):
-            # never tension from the hydrostatic extension (config docstring)
-            hydro = hydro.clamp_min(0.0)
-        P_b = P_g + hydro
-        rho_b = rho0 + P_b / c0 ** 2
-
-        # No-neighbour fallback: rest density, matching density2025.py /
-        # densityBand.py's own zero-neighbour behaviour.
-        rho_b = torch.where(hasAny, rho_b, torch.full_like(rho_b, rho0))
-        rho_b = torch.nan_to_num(rho_b, nan=rho0, posinf=rho0, neginf=rho0)
+        rho_b, hasAny, Mb, alpha, P_g, P_b = _boundaryDensity(
+            M, Sq, nNbFluid, g_b, a_b, relPos, rho0, c0,
+            bool(getattr(schemeConfig, 'mdbcOneSidedHydrostatic', False)))
 
         if _CAPTURE is not None:
+            # debug capture: the historical ghost-row-only arrays (syncs are fine here)
+            bIndices = currentState.ghostIndices[ghost]
+            relPos, Mb, alpha, hasAny, nNbFluid, g_b, P_g, P_b, rho_b = (
+                x[ghost] for x in (relPos, Mb, alpha, hasAny, nNbFluid, g_b, P_g, P_b, rho_b))
             _CAPTURE.append(dict(
                 boundaryUID=(currentState.UIDs[bIndices].detach().cpu().numpy()
                              if currentState.UIDs is not None else None),
@@ -234,6 +265,8 @@ def computeMdbcDensityEnglish2025(currentState: Any, config: SimulationConfig, s
                 rho_b=rho_b.detach().cpu().numpy(),
             ))
 
-        merged = currentState.densities.clone()
-        merged[bIndices] = rho_b
-        return merged
+            merged = currentState.densities.clone()
+            merged[bIndices] = rho_b
+            return merged
+
+        return scatterRows(currentState.densities, bTarget, rho_b)

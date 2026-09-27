@@ -22,7 +22,9 @@ import warp as wp
 from warp.types import vector, matrix
 from typing import Any
 import torch
-from torch.profiler import profile, record_function, ProfilerActivity
+from ...utils.syncFree import deviceConstant
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
 
@@ -95,7 +97,7 @@ def computeDensityDiffusion(currentState: Any, config: SimulationConfig, schemeC
                 and schemeConfig.gravityConfig.active):
             direction = schemeConfig.gravityConfig.direction
             if not isinstance(direction, torch.Tensor):
-                direction = torch.tensor(direction, dtype=currentState.positions.dtype, device=currentState.positions.device)
+                direction = deviceConstant(direction, currentState.positions.dtype, currentState.positions.device)
             gravityVec = direction[:currentState.positions.shape[1]] * schemeConfig.gravityConfig.magnitude
 
         drhodt_diss = drhodt_scaling * computeScalarFieldDiffusion(

@@ -27,6 +27,8 @@ from warpSPHCore import sphKernelScale
 from ..regions import buildRegion, filterRegion, sampleDomainSDF, domainSDF
 from ..runner import RunContext, resolveEnum
 from ..utils import buildDomainDescription
+from ..utils.syncFree import cachedKindIndex, deviceConstant, quantilesFromSorted
+from warpSPHCore import compileGlue, markDynamic
 from ..geometry import getSDF, operatorDict, sampleSDF
 from .plotting import Field
 
@@ -785,6 +787,29 @@ def calibrateRestDensity(ctx: RunContext, system, *,
 calibrateRestDensityMasses = calibrateRestDensity
 
 
+#: `_fluidPairs`' cache: (adjacency.i, adjacency.j, i, j) of the last call.
+#: Module-level because `AdjacencyList` is slotted (nothing can be stashed on
+#: it); holding the keyed tensors keeps their identity unique.
+_FLUID_PAIRS_CACHE: List[Any] = [None]
+
+
+def _fluidPairs(adjacency, fluid):
+    """The distinct fluid-fluid (i, j) pairs of `adjacency`, in edge order
+    (exactly `i[keep], j[keep]` below). Cached per edge list: it only changes
+    on a Verlet rebuild (new tensors), and particle kinds are run-constant
+    (the assumption `utils/syncFree.py:cachedKindIndex` makes), so per step
+    this is a cache hit instead of a mask over the full edge list plus a
+    gather (and the host sync that entails)."""
+    cached = _FLUID_PAIRS_CACHE[0]
+    if cached is not None and cached[0] is adjacency.i and cached[1] is adjacency.j:
+        return cached[2], cached[3]
+    i, j = adjacency.i.long(), adjacency.j.long()
+    keep = (i != j) & fluid[i] & fluid[j]
+    i, j = i[keep], j[keep]
+    _FLUID_PAIRS_CACHE[0] = (adjacency.i, adjacency.j, i, j)
+    return i, j
+
+
 def particleDistributionMetrics(ctx: RunContext, state) -> Dict[str, float]:
     """Is the particle *arrangement* physical? -- the blind spot of every
     field-valued metric in this file.
@@ -820,15 +845,40 @@ def particleDistributionMetrics(ctx: RunContext, state) -> Dict[str, float]:
     Returns `{}` when no neighbour list is reachable (`system.adjacency` is set
     by the schemes), so this is safe to call from any case.
     """
+    dev = particleDistributionMetricsDevice(ctx, state)
+    if dev is None:
+        return {}
+    keys = list(dev)
+    return distributionMetricsFromHost(dict(zip(keys, torch.stack(
+        [dev[k].to(torch.float64).reshape(()) for k in keys]).cpu().tolist())))
+
+
+_DISTRIBUTION_KEYS = ('nnDistP01', 'nnDistMedian', 'pairedFraction', 'voidFraction',
+                      'neighbourCountCV', 'densityMedian')
+
+
+def particleDistributionMetricsDevice(ctx: RunContext, state) -> Optional[Dict[str, torch.Tensor]]:
+    """`particleDistributionMetrics` as 0-d device tensors, with no host sync
+    once the per-run fluid index and the per-adjacency fluid pairs are cached
+    -- capturable in a CUDA graph (the runner's graphed diagnostics). `None`
+    where the metrics do not apply; read it back with
+    `distributionMetricsFromHost`, which also drops the metrics (as the eager
+    path always did) when no fluid particle has a fluid neighbour.
+
+    The "finite nearest-neighbour distances only" filter is a NaN mask plus
+    `nanquantile` instead of a boolean gather: the same sorted finite values
+    and the same rank formula (q x (count - 1)), so bitwise the quantiles of
+    the gathered subset, and the fractions divide exact integer counts by the
+    same count."""
     adjacency = getattr(state, 'adjacency', None)
     particles = state.state
     if adjacency is None or not hasattr(adjacency, 'i'):
-        return {}
+        return None
+    fluidIndex = cachedKindIndex(particles.kinds, 0, ctx.config)
+    if fluidIndex.numel() == 0:
+        return None
     fluid = particles.kinds == 0
-    if int(fluid.sum()) == 0:
-        return {}
     pos = particles.positions
-    i, j = adjacency.i.long(), adjacency.j.long()
     # Fluid-FLUID pairs only. A wall is sampled as its own particle band that
     # can sit closer than dx/2 to the fluid it supports (a five-layer Akinci
     # band at a different effective spacing), so including fluid-boundary edges
@@ -836,15 +886,27 @@ def particleDistributionMetrics(ctx: RunContext, state) -> Dict[str, float]:
     # put `hydrostaticColumn` at 0.29 paired *at step 0*, before any physics,
     # while the wall-free `staticBlob` and `impact` read exactly 0.0. The
     # instability being measured is fluid particles collapsing onto each other.
-    keep = (i != j) & fluid[i] & fluid[j]
-    i, j = i[keep], j[keep]
+    i, j = _fluidPairs(adjacency, fluid)
     if i.numel() == 0:
-        return {}
-    delta = pos[i] - pos[j]
+        return None
     domain = getattr(ctx.config, 'domain', None)
+    span = per = None
     if domain is not None and getattr(domain, 'periodic', None) is not None:
-        span = (domain.max - domain.min).to(delta.dtype)
+        span = (domain.max - domain.min).to(pos.dtype)
         per = domain.periodic.to(pos.device)
+    q = deviceConstant([0.5, 0.01], torch.float32, pos.device)
+    vals = _distributionCore(pos, markDynamic(i), markDynamic(j), fluidIndex,
+                             particles.densities, span, per, q)
+    return dict(zip(_DISTRIBUTION_KEYS + ('_nnFinite',), vals.unbind(0)))
+
+
+@compileGlue
+def _distributionCore(pos, i, j, fluidIndex, densities, span, per, q):
+    """`particleDistributionMetricsDevice`'s arithmetic, from the fluid pairs:
+    a float64 vector of `_DISTRIBUTION_KEYS` plus the finite count. Pure
+    torch (`compileGlue`). `q` = [0.5, 0.01] on the device."""
+    delta = pos[i] - pos[j]
+    if span is not None:
         wrapped = delta - span * torch.round(delta / span)
         delta = torch.where(per.unsqueeze(0), wrapped, delta)
     dist = torch.linalg.norm(delta, dim=-1)
@@ -863,22 +925,39 @@ def particleDistributionMetrics(ctx: RunContext, state) -> Dict[str, float]:
     # firing at 0.83 of the true spacing -- common and harmless -- and reported
     # a spurious ~6% "pairing" on runs that are known good. Self-normalising by
     # the median makes the ratio mean what it says on any sampling.
-    nnF = nn[fluid]
-    nnF = nnF[torch.isfinite(nnF)]
-    if nnF.numel() == 0:
-        return {}
-    nnScale = torch.quantile(nnF.float(), 0.5).clamp_min(1e-30)
+    nnF = nn.index_select(0, fluidIndex)
+    finite = torch.isfinite(nnF)
+    nnF = torch.where(finite, nnF, torch.full_like(nnF, float('nan')))
+    nFinite = finite.sum()
+    # One sort serves all three quantiles: scaling by the positive median
+    # (and the float cast) keep a sorted array sorted, NaN last, so the
+    # scaled quantiles read the scaled sorted array (`quantilesFromSorted`,
+    # bitwise `nanquantile`'s).
+    nnSorted = torch.sort(nnF)[0]
+    nnScale = quantilesFromSorted(nnSorted.float(), q[:1], ignoreNan=True)[0].clamp_min(1e-30)
     nnF = nnF / nnScale
-    cF = counts[fluid]
-    rhoF = particles.densities[fluid].detach().float()
-    return {
-        'nnDistP01': torch.quantile(nnF.float(), 0.01).cpu().item(),
-        'nnDistMedian': torch.quantile(nnF.float(), 0.5).cpu().item(),
-        'pairedFraction': (nnF < 0.5).float().mean().cpu().item(),
-        'voidFraction': (nnF > 1.5).float().mean().cpu().item(),
-        'neighbourCountCV': (cF.std() / cF.mean().clamp_min(1e-9)).cpu().item(),
-        'densityMedian': torch.quantile(rhoF, 0.5).cpu().item(),
-    }
+    scaledQ = quantilesFromSorted((nnSorted / nnScale).float(), q, ignoreNan=True)
+    invFinite = 1.0 / nFinite.float()        # torch's mean: sum x (1 / count)
+    cF = counts.index_select(0, fluidIndex)
+    rhoF = densities.index_select(0, fluidIndex).detach().float()
+    rhoMedian = quantilesFromSorted(torch.sort(rhoF)[0], q[:1])[0]
+    return torch.stack([
+        scaledQ[1].double(),                                   # nnDistP01
+        scaledQ[0].double(),                                   # nnDistMedian
+        # NaN compares false, so only finite entries count
+        ((nnF < 0.5).float().sum() * invFinite).double(),      # pairedFraction
+        ((nnF > 1.5).float().sum() * invFinite).double(),      # voidFraction
+        (cF.std() / cF.mean().clamp_min(1e-9)).double(),       # neighbourCountCV
+        rhoMedian.double(),                                    # densityMedian
+        nFinite.double(),
+    ])
+
+
+def distributionMetricsFromHost(host: Dict[str, float]) -> Dict[str, float]:
+    """`particleDistributionMetricsDevice`'s host values -> the metrics."""
+    if not host or host.get('_nnFinite', 0) == 0:
+        return {}
+    return {k: host[k] for k in _DISTRIBUTION_KEYS}
 
 
 def weaklyCompressibleDiagnostics(ctx: RunContext, state) -> Dict[str, float]:

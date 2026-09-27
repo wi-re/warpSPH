@@ -20,7 +20,8 @@ import warp as wp
 from warp.types import vector, matrix
 from typing import Any
 import torch
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
 from warpSPHCore.kernels.eval_kernel import eval_k, eval_dkdq, eval_C_d
@@ -152,7 +153,7 @@ def computeDeltaShift_Func_i(
 
 @wp.func
 def computeDeltaShift_Func_Adjacency(
-    i : wp.int32, dim: wp.int32, 
+    i : wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32, 
 
     queryState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
     referenceState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
@@ -183,6 +184,9 @@ def computeDeltaShift_Func_Adjacency(
 
     out = type(outputValue)() * scalar_t(0.0)
     for o in range(numOffsets):
+        # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
+        if not useAdjacency and (o % lanes) != lane:
+            continue
         beginIndex = wp.int32(0)
         numIndices = wp.int32(0)
         if useAdjacency:    
@@ -197,6 +201,7 @@ def computeDeltaShift_Func_Adjacency(
             if beginIndex < 0:
                 continue
         
+        beginIndex, numIndices = laneSlice(beginIndex, numIndices, lane, lanes, useAdjacency)
         out += computeDeltaShift_Func_i(
             i, dim, 
             xi, hi, mi, rhoi,
@@ -247,7 +252,7 @@ def computeDeltaShift_Kernel(
         return
 
     outputValues[i] = computeDeltaShift_Func_Adjacency(
-        i, domainState.dim,
+        i, domainState.dim, 0, 1,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,  #queryKinds, referenceKinds,
@@ -259,12 +264,49 @@ def computeDeltaShift_Kernel(
         rho0, dx, volumeWeighted,
     )
 
+@wp.kernel
+def computeDeltaShift_KernelTiled(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+    
+    kernelProperties: kernelState,
+    # Do not change the parameters above
+
+    R: float, n: wp.int32, CFL: float, computeMach: wp.bool, c_max: float,
+    rho0: float, dx: float, volumeWeighted: wp.bool,
+
+    # The last parameter is always the output array and should not be changed
+    outputValues : wp.array(dtype = Any) # type: ignore
+):
+    # Multi-lane variant of computeDeltaShift_Kernel (warpSPHCore autograd/lanes.py):
+    # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
+
+    i, lane = wp.tid()
+    partial = computeDeltaShift_Func_Adjacency(
+        i, domainState.dim, lane, wp.block_dim(),
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+        zero_like_warp(outputValues),
+        R, n, CFL, computeMach, c_max,
+        rho0, dx, volumeWeighted,
+    )
+    total = laneSum(partial)
+    if lane == 0:
+        outputValues[i] = total
+
+
 def _deltaShiftDtype(ctx, extras):
     return castTorchToWarpAsBuiltins(ctx.query.positions).dtype
 
 
 _DELTA_SHIFT = OperatorSpec(
     kernel=computeDeltaShift_Kernel,
+    tiledKernel=computeDeltaShift_KernelTiled,
     outputs=(OutputSpec(dtype=_deltaShiftDtype, shape=ShapeOf.QUERY),),
     extras=(
         ExtraSpec("R", ExtraKind.SCALAR),

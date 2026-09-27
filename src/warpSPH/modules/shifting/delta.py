@@ -27,6 +27,18 @@ from warpSPH.sample.wp_deltaShift import computeDeltaShiftWarp
 __all__ = ['computeDeltaShift', 'computeDeltaShiftWarp']
 
     # for i in tqdm(range(shiftIters), leave = False):
+
+def _hostDx(config):
+    """`config.dx` as a Python float, read back once per config (a run constant)."""
+    dx = config.dx
+    if not isinstance(dx, torch.Tensor):
+        return dx
+    cached = getattr(config, '_hostDxValue', None)
+    if cached is None or cached[0] is not dx:
+        cached = (dx, dx.cpu().item())
+        config._hostDxValue = cached
+    return cached[1]
+
 def computeDeltaShift(currentState, config, schemeConfig, domain, adjacency, iters = -1):
     original_positions = currentState.positions.clone()
     original_densities = currentState.densities.clone()
@@ -59,17 +71,18 @@ def computeDeltaShift(currentState, config, schemeConfig, domain, adjacency, ite
         c0 = schemeConfig.fluid.fixedSoundSpeed if schemeConfig.fluid.fixedSoundSpeed is not None else 1.0
 
         velocity_magnitudes = torch.linalg.vector_norm(currentState.velocities, dim=-1)
-        finite_velocity_magnitudes = velocity_magnitudes[torch.isfinite(velocity_magnitudes)]
-        v_max = (
-            torch.max(finite_velocity_magnitudes)
-            if finite_velocity_magnitudes.numel() > 0
-            else torch.tensor(float('nan'), device=currentState.velocities.device)
-        )
+        # max over the finite magnitudes (NaN when there are none), without the
+        # data-dependent-size gather: same value, no host sync
+        finite = torch.isfinite(velocity_magnitudes)
+        v_max = torch.where(
+            finite.any(),
+            torch.where(finite, velocity_magnitudes, torch.full_like(velocity_magnitudes, float('-inf'))).max(),
+            torch.full_like(velocity_magnitudes[0], float('nan')))
         c_max = v_max / c0
         h_min = currentState.supports.min()
         # NaN (no finite velocities) compares False against 1e-6 just like the
         # `if` it replaces, so c_max is left as NaN in that case -- same as before.
-        c_max = torch.where(c_max < 1e-6, c_max.new_tensor(0.1), c_max)
+        c_max = torch.where(c_max < 1e-6, torch.full_like(c_max, 0.1), c_max)
         # print(f'Iteration {i}, max velocity: {v_max.item()}, min support: {h_min.item()}, c_max: {c_max.item()}')
 
 
@@ -87,8 +100,11 @@ def computeDeltaShift(currentState, config, schemeConfig, domain, adjacency, ite
             # operationMode = OperationDirection.AllToAll,
             adjacency = adjacency,
 
-            CFL = schemeConfig.shiftProperties.CFL, computeMach = schemeConfig.shiftProperties.computeMach, c_max = c_max.cpu().item(),
-            rho0 = 1.0, dx = config.dx if not isinstance(config.dx, torch.Tensor) else config.dx.cpu().item(),
+            # `c_max` only feeds the kernel's unused `shiftScaling` (the Mach
+            # scaling is applied below, on the device), so it is not read back
+            # to the host; `dx` is a run constant, read once per run
+            CFL = schemeConfig.shiftProperties.CFL, computeMach = schemeConfig.shiftProperties.computeMach, c_max = 0.0,
+            rho0 = 1.0, dx = _hostDx(config),
             # Sun's R = 0.2 (Eq. 7, Monaghan's tensile-control value) under
             # `sun2017Eq7Shift`; `computeDeltaShiftWarp`'s own historical
             # default is 0.25. `n = 4` agrees either way.
@@ -137,7 +153,6 @@ def computeDeltaShift(currentState, config, schemeConfig, domain, adjacency, ite
         # Note that the acoustic time step is dt = CFL * h / c0, so the scaling factor is equivalent to the delta^+ scaling factor for a fixed time conservative timestep
         # scalingMichel = - Ma * c0 * 2 * h * dt
 
-        dt_c = schemeConfig.shiftProperties.CFL * h.min().cpu().item() / c0# / kernelScale
 
         # print('-' * 80)
         # print(f'scalingDeltaPlus: {scalingDeltaPlus.mean().item()}, scalingMichel: {scalingMichel.mean().item()}, \n[CFL: {CFL}, Ma: {Ma.item()}, c0: {c0}, h: {h.mean().item()}, dt: {dt}], ratio: {scalingDeltaPlus.mean().item() / scalingMichel.mean().item()}')

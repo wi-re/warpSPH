@@ -13,7 +13,8 @@ import warp as wp
 from warp.types import vector, matrix
 from typing import Any
 import torch
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
 
@@ -132,7 +133,7 @@ def computeBarecascoSurfaceDetection_Func_i_first(
 
 @wp.func
 def computeBarecascoSurfaceDetection_Func_Adjacency_first(
-    i : wp.int32, dim: wp.int32, 
+    i : wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32, 
 
     queryState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
     referenceState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
@@ -158,6 +159,9 @@ def computeBarecascoSurfaceDetection_Func_Adjacency_first(
     
     out = zero_like_warp(queryState.positions[i])
     for o in range(numOffsets):
+        # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
+        if not useAdjacency and (o % lanes) != lane:
+            continue
         beginIndex = wp.int32(0)
         numIndices = wp.int32(0)
         if useAdjacency:    
@@ -172,6 +176,7 @@ def computeBarecascoSurfaceDetection_Func_Adjacency_first(
             if beginIndex < 0:
                 continue
         
+        beginIndex, numIndices = laneSlice(beginIndex, numIndices, lane, lanes, useAdjacency)
         out += computeBarecascoSurfaceDetection_Func_i_first(
             i, dim, 
             xi, hi, mi, rhoi,
@@ -289,7 +294,7 @@ def computeBarecascoSurfaceDetection_Func_i_second(
 
 @wp.func
 def computeBarecascoSurfaceDetection_Func_Adjacency_second(
-    i : wp.int32, dim: wp.int32, 
+    i : wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32, 
 
     queryState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
     referenceState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
@@ -318,6 +323,9 @@ def computeBarecascoSurfaceDetection_Func_Adjacency_second(
     
     out = zero_like_warp(queryState.supports[i])
     for o in range(numOffsets):
+        # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
+        if not useAdjacency and (o % lanes) != lane:
+            continue
         beginIndex = wp.int32(0)
         numIndices = wp.int32(0)
         if useAdjacency:    
@@ -332,6 +340,7 @@ def computeBarecascoSurfaceDetection_Func_Adjacency_second(
             if beginIndex < 0:
                 continue
         
+        beginIndex, numIndices = laneSlice(beginIndex, numIndices, lane, lanes, useAdjacency)
         out += computeBarecascoSurfaceDetection_Func_i_second(
             i, dim, 
             xi, hi, mi, rhoi,
@@ -377,7 +386,7 @@ def computeBarecascoSurfaceDetection_Kernel(
 
 
     coverVector = computeBarecascoSurfaceDetection_Func_Adjacency_first(
-        i, domainState.dim, 
+        i, domainState.dim, 0, 1, 
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,  #queryKinds, referenceKinds,
@@ -388,12 +397,54 @@ def computeBarecascoSurfaceDetection_Kernel(
     outputNormals[i] = normalizedCoverVector
 
     outputValues[i] = computeBarecascoSurfaceDetection_Func_Adjacency_second(
-        i, domainState.dim,
+        i, domainState.dim, 0, 1,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,   
         kernelProperties,  #queryKinds, referenceKinds,
         normalizedCoverVector, barecascoThreshold
     )
+
+
+@wp.kernel
+def computeBarecascoSurfaceDetection_KernelTiled(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+    
+    kernelProperties: kernelState,
+    # Do not change the parameters above
+    barecascoThreshold: scalar_t, # type: ignore
+
+    # The last parameter is always the output array and should not be changed
+    outputNormals : wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    outputValues: wp.array(dtype = scalar_t) # type: ignore
+):
+    # Multi-lane variant of computeBarecascoSurfaceDetection_Kernel (warpSPHCore autograd/lanes.py):
+    # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
+
+    i, lane = wp.tid()
+    coverPartial = computeBarecascoSurfaceDetection_Func_Adjacency_first(
+        i, domainState.dim, lane, wp.block_dim(),
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+    )
+    normalizedCoverVector = wp.normalize(laneSum(coverPartial))
+
+    valuePartial = computeBarecascoSurfaceDetection_Func_Adjacency_second(
+        i, domainState.dim, lane, wp.block_dim(),
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+        normalizedCoverVector, barecascoThreshold
+    )
+    value = laneSum(valuePartial)
+    if lane == 0:
+        outputNormals[i] = normalizedCoverVector
+        outputValues[i] = value
 
 
 def _barecascoNormalsDtype(ctx, extras):
@@ -406,6 +457,7 @@ def _barecascoValuesDtype(ctx, extras):
 
 _BARECASCO_SURFACE_DETECTION = OperatorSpec(
     kernel=computeBarecascoSurfaceDetection_Kernel,
+    tiledKernel=computeBarecascoSurfaceDetection_KernelTiled,
     outputs=(
         OutputSpec(dtype=_barecascoNormalsDtype, shape=ShapeOf.QUERY),
         OutputSpec(dtype=_barecascoValuesDtype, shape=ShapeOf.QUERY),

@@ -43,8 +43,7 @@ from .wp_mat import computeLiuMatricesWarp
 from warpSPHCore import *
 from typing import Any, Optional
 from ...configurations.simulationConfig import SimulationConfig
-from torch.profiler import record_function
-
+from warpSPHCore.profiling import record_function
 __all__ = ['interpolateLiuLiu', 'liuExtend', 'liuMirror', 'determinantThresholdFor']
 
 #: Per-kernel `|det(A_g)|` acceptance floor for the mDBC/wall-pressure MLS fit
@@ -79,7 +78,14 @@ def interpolateLiuLiu(
     direction: OperationDirection = OperationDirection.AllToAll,
     supportScale: float = 1.0,
     determinantThreshold: Optional[float] = None,
+    syncFree: bool = False,
 ):
+    """First-order MLS (Liu & Liu) interpolation of `referenceQuantities` at
+    `queryPositions`. `syncFree=True` inverts every row's moment matrix with
+    `torch.linalg.inv_ex` (no error check) and keeps the well-conditioned
+    rows by `where`, instead of a masked `pinv` -- no host sync, so it can be
+    captured in a CUDA graph; the same fit up to float rounding (the rows it
+    keeps are invertible by construction: `|det| >=` the threshold)."""
     if determinantThreshold is None:
         determinantThreshold = _DETERMINANT_THRESHOLDS.get(
             config.kernel, _DEFAULT_DETERMINANT_THRESHOLD)
@@ -107,8 +113,12 @@ def interpolateLiuLiu(
             torch.abs(determinant) >= determinantThreshold,
         )
 
-        A_g_inv = torch.zeros_like(A_g)
-        A_g_inv[wellConditioned] = torch.linalg.pinv(A_g[wellConditioned])
+        if syncFree:
+            A_g_inv = torch.where(wellConditioned[:, None, None],
+                                  torch.linalg.inv_ex(A_g)[0], torch.zeros_like(A_g))
+        else:
+            A_g_inv = torch.zeros_like(A_g)
+            A_g_inv[wellConditioned] = torch.linalg.pinv(A_g[wellConditioned])
 
         res = torch.matmul(A_g_inv, b.unsqueeze(2))[:,:,0]
 

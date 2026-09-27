@@ -313,9 +313,13 @@ def refreshFieldPlotter(ctx: RunContext, state, plotter, fields: Sequence[Field]
                         step: int = 0, dpi: int = 300) -> None:
     """Update an existing `fields` plotter in place -- no event-pump calls."""
     keys = _mosaicKeys(fields)
+    # redraw=False: the export below renders offscreen on its own, and a live
+    # window is repainted by the caller's `pumpEvents` -- redrawing here too
+    # drew every frame's scene a third time
     plotter.updateQuantities(
         {k: f.tensor(state) for k, f in zip(keys, fields)},
         newParticleState=state.state,
+        redraw=False,
     )
     # The notebooks never refreshed the title, so every frame after the
     # first showed t = 0 -- which makes the encoded video misleading about
@@ -340,14 +344,29 @@ def particlePlot(fields: Sequence[Field], figsize: Tuple[float, float] = (11, 5)
 
     def updatePlot(ctx: RunContext, state, plotter, step: int) -> None:
         refreshFieldPlotter(ctx, state, plotter, fields, step, dpi)
-        pumpEvents(plotter)
+        if getattr(ctx.spec, 'show', True):   # no live window (openWindow skipped it) -> nothing to repaint
+            pumpEvents(plotter)
 
     return setupPlot, updatePlot
 
 
 def _export(ctx: RunContext, plotter, step: int, dpi: int) -> None:
     if ctx.imagePath:
-        plotter.export(os.path.join(ctx.imagePath, f'frame_{step:07d}.png'), dpi=dpi)
+        plotter.export(os.path.join(ctx.imagePath, f'frame_{step:07d}.png'), dpi=dpi,
+                       **_fastPngOptions(plotter))
+
+
+def _fastPngOptions(plotter) -> dict:
+    """vispy frame-export options: the fastest zlib level (frames are ffmpeg
+    intermediates and PNG is lossless at every level, so this changes file
+    size, not a pixel -- PIL's default level 6 made the encode ~38 ms of a
+    ~83 ms frame), and `background=True`, which moves the encode + write to a
+    worker thread (warpSPHPlotting `asyncExport`; the runner drains it before
+    anything reads the frames). `SMALL_PROBLEM_PERFORMANCE.md`."""
+    backend = getattr(plotter, '_backend_instance', None)
+    if backend is not None and 'vispy' in type(backend).__module__.lower():
+        return {'compress_level': 1, 'background': True}
+    return {}
 
 
 @dataclass

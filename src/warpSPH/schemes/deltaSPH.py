@@ -46,8 +46,8 @@ from warpSPHCore import (SupportScheme, buildVerletList, OperationProperties,
 
 import torch
 from ..utils.timer import TimedBlock
-from torch.profiler import profile, record_function, ProfilerActivity
-
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
 __all__ = ['deltaSPH_step']
 
 
@@ -74,6 +74,55 @@ def deltaSPH_step(
             priorNeighborhood = adjacency,
             verbose = False)
         currentSystem.adjacency = adjacency
+
+    # Everything after the adjacency update is the right-hand side proper;
+    # with `schemeConfig.cudaGraph` it is captured once per Verlet-list
+    # generation and replayed (utils/cudaGraph.py) -- bitwise the same result,
+    # without the per-op CPU cost that dominates small problems.
+    if getattr(schemeConfig, 'cudaGraph', False) and _rhsIsGraphable(schemeConfig, stageIndex):
+        return _graphedRHS(schemeConfig)(currentSystem, dt, config, schemeConfig, verbose, stageIndex,
+                                         extraKey=stageIndex)
+    return _deltaSPH_rhs(currentSystem, dt, config, schemeConfig, verbose, stageIndex)
+
+
+def _rhsIsGraphable(schemeConfig, stageIndex) -> bool:
+    """Whether `_deltaSPH_rhs` is a pure function of the state here, i.e.
+    safe to capture: a graph bakes in every Python scalar it saw at capture,
+    so anything depending on `t`/`dt` (Dirichlet/forcing/update BC hooks,
+    the 'derivative' no-penetration shift's `/ config.dt`) must run eagerly,
+    as must frozen diffusion under a stage-indexed integrator: its later
+    stages read the tensors stage 0 left in `schemeConfig._frozenDiffusionCache`,
+    Python-side state a replay does not refresh. (`stageIndex is None`, e.g.
+    symplectic Euler, recomputes the diffusion every call and never reads it.)"""
+    if getattr(schemeConfig, 'mdbcNoPenShiftMode', 'derivative') == 'derivative':
+        return False
+    if getattr(schemeConfig, 'freezeDiffusionAcrossStages', False) and stageIndex is not None:
+        return False
+    for bc in getattr(schemeConfig, 'boundaryConditions', None) or []:
+        if bc.dirichletFunctions or bc.forcingFunctions or bc.updateFunctions:
+            return False
+    return True
+
+
+def _graphedRHS(schemeConfig):
+    g = getattr(schemeConfig, '_rhsGraph', None)
+    if g is None:
+        from ..utils.cudaGraph import GraphedStateFunction
+        g = GraphedStateFunction(_deltaSPH_rhs, 'deltaSPH right-hand side')
+        schemeConfig._rhsGraph = g
+    return g
+
+
+def _deltaSPH_rhs(
+    currentSystem: CompSPHSystem,
+    dt: float,
+    config: SimulationConfig,
+    schemeConfig: WeaklyCompressibleSPHConfig,
+    verbose = False,
+    stageIndex = None,
+):
+    currentState = currentSystem.state
+    adjacency = currentSystem.adjacency
 
     # 2. Compute density if density is none
     # with TimedBlock('compute density', use_cuda=True, device=config.device) as tb_density:

@@ -24,8 +24,9 @@ from typing import Optional, Union
 from .wp_psi0 import computePsi0Warp
 from .owenLUT import computeOwen, interpolateLUT
 
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
 
+from warpSPHCore.profiling import record_function
 __all__ = ['evaluateOptimalSupportOwen']
 
 #: Owen's psi lookup table, cached per ``(kernel, dim)``.

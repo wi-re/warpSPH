@@ -17,7 +17,8 @@ from ...systems.baseState import *
 from warpSPHCore import *
 from ...configurations import SimulationConfig
 from ...utils.support import volumeToSupport, nH_to_n_h
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
 from typing import Optional
 import torch
 

@@ -33,7 +33,9 @@ import warp as wp
 from warp.types import vector, matrix
 from typing import Any
 import torch
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
+from warpSPHCore import compileGlue, compileGlueEnabled
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
 
@@ -78,10 +80,63 @@ def _curvatureGate(normals: torch.Tensor, surfaceMask: torch.Tensor,
     i, j = adjacency.i, adjacency.j
     keep = surfaceMask[i] & surfaceMask[j]
     dots = (normals[i] * normals[j]).sum(dim=-1)
-    dots = torch.where(keep, dots, dots.new_tensor(float('inf')))
+    dots = torch.where(keep, dots, torch.full_like(dots, float('inf')))
     minDot = normals.new_full((normals.shape[0],), float('inf'))
     minDot.scatter_reduce_(0, i.to(torch.int64), dots, reduce='amin', include_self=False)
     return (minDot >= cosThreshold).to(normals.dtype)
+
+
+@compileGlue
+def _restrictSurfaceShift(update, n, inF, kappa):
+    """Sun et al. 2019 Eq. (20)-(21), the direction part: in the surface set
+    F a shift pointing into the surface keeps only its (kappa-gated)
+    tangential part; a shift pointing away from it, and every shift outside
+    F, is kept whole (anti-clustering). Pure torch (`compileGlue`)."""
+    outward = torch.einsum('ij,ij->i', update, n)   # n . delta-u*
+    tangential = update - outward.view(-1, 1) * n
+    # in F, shift points into the surface -> tangential (kappa-gated);
+    # in F, shift points away             -> full shift (anti-clustering);
+    # not in F                             -> full shift.
+    restrict = inF & (outward >= 0)
+    return torch.where(restrict.view(-1, 1), kappa * tangential, update)
+
+
+@compileGlue
+def _lambdaGateShift(update, gateEvals, inF, threshold: float, taper: float):
+    """Eq. (20) row 1: scale the shift in F by the lambda gate -- a hard zero
+    below `threshold` (taper == 0), else a smoothstep over
+    `[threshold, threshold + taper]`. Pure torch (`compileGlue`)."""
+    lMinGate = torch.min(torch.abs(gateEvals), dim=-1).values
+    if taper > 0.0:
+        x = ((lMinGate - threshold) / taper).clamp(0.0, 1.0)
+        wLambda = (x * x * (3.0 - 2.0 * x)).view(-1, 1)
+    else:
+        wLambda = (lMinGate >= threshold).to(update.dtype).view(-1, 1)
+    inFcol = inF.view(-1, 1)
+    return torch.where(inFcol, update * wLambda, update)
+
+
+@compileGlue
+def _capAndClampShift(update, velocities, kinds, maxShiftVelocityFraction: float, dt, bound):
+    """The shift limits: Sun et al. 2019 Eq. (14)'s magnitude cap at a
+    fraction of Umax * dt (Umax = max finite particle speed; skipped at
+    fraction 0), the per-component clamp at `bound`, and zero on every
+    non-fluid row. Branchless and gather-free -- no host sync; the same
+    values as the `velMag[isfinite]` / `if capLength > 0` form it replaced.
+    Pure torch (`compileGlue`)."""
+    if maxShiftVelocityFraction > 0.0:
+        velMag = torch.linalg.norm(velocities, dim=-1)
+        finiteV = torch.isfinite(velMag)
+        uMax = torch.where(
+            finiteV.any(),
+            torch.where(finiteV, velMag, torch.full_like(velMag, float('-inf'))).max(),
+            torch.zeros_like(velMag[0]))
+        capLength = maxShiftVelocityFraction * uMax * dt
+        mag = torch.linalg.norm(update, dim=-1, keepdim=True)
+        capped = update * (capLength / mag.clamp_min(1e-30)).clamp_(max=1.0)
+        update = torch.where(capLength > 0, capped, update)
+    update = torch.clamp(update, -bound, bound)
+    return torch.where((kinds != 0).unsqueeze(-1), torch.zeros_like(update), update)
 
 
 def solveShifting(
@@ -108,7 +163,9 @@ def solveShifting(
         maxShiftVelocityFraction = getattr(schemeConfig.shiftProperties, 'maxShiftVelocityFraction', 0.5)
 
         rho0 = schemeConfig.fluid.restDensity
-        spacing = torch.pow(systemState.masses / rho0, 1/systemState.positions.shape[1]).mean().cpu().item()
+        # kept on the device (no host read); the clamp bounds below are formed
+        # in float64 exactly as the host float arithmetic used to form them
+        spacing = torch.pow(systemState.masses / rho0, 1/systemState.positions.shape[1]).mean()
         projectQuantities = schemeConfig.shiftProperties.projectQuantities
 
         initialPositions = systemState.positions.clone()
@@ -247,18 +304,12 @@ def solveShifting(
                         # lambda). Unlike dot/mat this reads only fields that are
                         # also populated on the `reuseNormals` fast path.
                         inF = surfaceIndicator
-                        outward = torch.einsum('ij,ij->i', update, n)   # n . delta-u*
-                        tangential = update - outward.view(-1, 1) * n
                         if surfaceCurvatureAngle > 0.0:
                             cosT = math.cos(math.radians(surfaceCurvatureAngle))
                             kappa = _curvatureGate(n, inF, adjacency, cosT).view(-1, 1)
                         else:
                             kappa = update.new_ones((update.shape[0], 1))
-                        # in F, shift points into the surface -> tangential (kappa-gated);
-                        # in F, shift points away             -> full shift (anti-clustering);
-                        # not in F                             -> full shift.
-                        restrict = inF & (outward >= 0)
-                        update = torch.where(restrict.view(-1, 1), kappa * tangential, update)
+                        update = _restrictSurfaceShift(update, n, inF, kappa)
                         # lambda gate (Eq. 20 row 1): a hard zero below
                         # `surfaceLambdaThreshold` (taper == 0), else a smoothstep
                         # ramp over `[threshold, threshold + taper]` -- the hard
@@ -287,14 +338,9 @@ def solveShifting(
                             ),
                             domain=domain, adjacency=adjacency, returnEigVals=True,
                         )
-                        lMinGate = torch.min(torch.abs(gateEvals), dim=-1).values
-                        if surfaceLambdaTaper > 0.0:
-                            x = ((lMinGate - surfaceLambdaThreshold) / surfaceLambdaTaper).clamp(0.0, 1.0)
-                            wLambda = (x * x * (3.0 - 2.0 * x)).view(-1, 1)
-                        else:
-                            wLambda = (lMinGate >= surfaceLambdaThreshold).to(update.dtype).view(-1, 1)
-                        inFcol = inF.view(-1, 1)
-                        update = torch.where(inFcol, update * wLambda, update)
+                        update = _lambdaGateShift(update, gateEvals, inF,
+                                                  float(surfaceLambdaThreshold),
+                                                  float(surfaceLambdaTaper))
                     elif projectionScheme == ShiftingProjectionScheme.michel2022:
                         # Michel et al. 2022 (literature/michel2022) Eq. (48).
                         # `n` here plays no role -- the projection uses the
@@ -318,16 +364,14 @@ def solveShifting(
             # the flow, unlike the fixed per-component `threshold` clamp below,
             # and the thing that stops a locally exploding grad(C) from feeding
             # an oversized shift into `correctdrhodt`.
-            if maxShiftVelocityFraction > 0.0:
-                velMag = torch.linalg.norm(systemState.velocities, dim=-1)
-                velMag = velMag[torch.isfinite(velMag)]
-                uMax = velMag.max() if velMag.numel() > 0 else update.new_tensor(0.0)
-                capLength = maxShiftVelocityFraction * uMax * dt
-                if capLength > 0:
-                    mag = torch.linalg.norm(update, dim=-1, keepdim=True)
-                    update = update * (capLength / mag.clamp_min(1e-30)).clamp_(max=1.0)
-            update = torch.clamp(update, -shiftingThreshold * spacing, shiftingThreshold * spacing)
-            update[systemState.kinds != 0] = 0
+            bound = (shiftingThreshold * spacing.double()).to(update.dtype)
+            if compileGlueEnabled() and not isinstance(dt, torch.Tensor):
+                # one compiled version for the host-float dt of an eager step
+                # and the device dt of a captured one (a float is specialized
+                # on its value); float32 either way, as the scalar product was
+                dt = torch.tensor(dt, dtype=update.dtype, device=update.device)
+            update = _capAndClampShift(update, systemState.velocities, systemState.kinds,
+                                       float(maxShiftVelocityFraction), dt, bound)
 
             systemState.positions += update# * dt
                         

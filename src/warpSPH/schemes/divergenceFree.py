@@ -49,8 +49,8 @@ from warpSPHCore import SupportScheme, buildVerletList
 
 import torch
 from warpSPH.utils.timer import TimedBlock
-from torch.profiler import profile, record_function, ProfilerActivity
-
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
 from ..systems.incompressible import IncompressibleSystem, IncompressibleState, IncompressibleSystemUpdate
 
 import numpy as np

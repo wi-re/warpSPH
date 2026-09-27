@@ -64,8 +64,7 @@ on any other dimensionality rather than silently doing the wrong thing.
 from typing import Any, Optional, Union
 
 import torch
-from torch.profiler import record_function
-
+from warpSPHCore.profiling import record_function
 from warpSPHCore import *
 
 from ...configurations.simulationConfig import SimulationConfig

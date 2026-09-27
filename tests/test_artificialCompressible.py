@@ -881,3 +881,27 @@ def test_isolatedZeroPressureIsANoOpWithoutIsolatedRows(periodicBox):
     assert float(off.pressures.min()) < 0.0
     assert torch.equal(off.pressures, iso.pressures)
     assert torch.equal(off.velocities, iso.velocities)
+
+
+def test_convergenceMetricDeviceIsBitwiseHostMetric():
+    """The dual-time loop's device-side eps_v (read back only at checkpoints)
+    must be the exact number `convergenceMetric` computes on the host."""
+    import torch
+    from warpSPH.schemes import artificialCompressible as acmod
+    from warpSPH.configurations.artificialCompressible import ArtificialCompressibleSPHConfig
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    g = torch.Generator(device='cpu').manual_seed(3)
+    n = 257
+    fluid = (torch.rand(n, generator=g) > 0.3).to(device)
+    tildeV = (torch.randn(n, 2, generator=g) * 1e-4).to(device)
+    velocities = torch.randn(n, 2, generator=g).to(device)
+    schemeConfig = ArtificialCompressibleSPHConfig()
+    for uChar in (None, 0.5):
+        schemeConfig.acParams.uChar = uChar
+        host = acmod.convergenceMetric(tildeV, velocities, fluid, schemeConfig)
+        idx = fluid.nonzero().squeeze(1)
+        dev = float(acmod.convergenceMetricDevice(tildeV, velocities, idx, int(idx.numel()), schemeConfig))
+        assert dev == host, (uChar, dev, host)
+    zero = torch.zeros_like(tildeV)
+    idx = fluid.nonzero().squeeze(1)
+    assert float(acmod.convergenceMetricDevice(zero, velocities, idx, int(idx.numel()), schemeConfig)) == float('-inf')

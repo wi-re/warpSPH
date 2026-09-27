@@ -18,8 +18,9 @@ from ...systems.baseState import BaseState
 from ...configurations import SimulationConfig, CompressibleSPHConfig
 from typing import Any
 
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
 
+from warpSPHCore.profiling import record_function
 __all__ = ['enforceDirichlet', 'computeForcing', 'enforceUpdates']
 
 def enforceDirichlet(

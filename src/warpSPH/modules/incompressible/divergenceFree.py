@@ -73,7 +73,7 @@ from ..pressure.iisph import computePressureAccelIISPH
 from .drift import computePressureShiftIISPH
 from ...configurations import PressureSolverType, JacobiRelaxationMode, BoundaryOperatorTerms, resolveBoundaryOperatorTerms
 from .krylov import solvePressureKrylov
-from .convergence import evaluateResidual, sourceNorm
+from .convergence import ConvergenceCheckSchedule, evaluateResidual, residualStats, sourceNorm
 from .consistent import applyConsistentCoupling
 from ...configurations import BoundaryPressureMode
 
@@ -163,6 +163,17 @@ def _solveDivergenceFreeOptimal(
         criterion = dfSolver.convergenceCriterion
         bNorm = sourceNorm(sourceTerm, fluidMask, dfSolver.rtol)
         relTarget = None if bNorm is None else dfSolver.atol + dfSolver.rtol * bNorm
+        # Host syncs: every per-iteration quantity (omega_k, the gauge mean,
+        # the residual statistics, the pressure log) stays on the device and
+        # the convergence flag is only read back at `schedule`'s checkpoints;
+        # the histories are read once, after the loop. `fluidIndex` (one sync
+        # per solve) gathers exactly the rows/order `x[fluidMask]` did, so the
+        # arithmetic is bitwise unchanged.
+        fluidIndex = fluidMask.nonzero().squeeze(1)
+        schedule = ConvergenceCheckSchedule(schemeConfig, 'divergenceFreeOptimal',
+                                            getattr(dfSolver, 'convergenceCheckSchedule', 'every'),
+                                            minIters, maxIters, verbose)
+        statHistory, flagHistory, pressureHistory = [], [], []
         for i in range(maxIters):
                 # Zero the trial step at boundary rows *before* the matvec:
                 # `u` is the pressure field `op()` evaluates, so this both
@@ -185,36 +196,44 @@ def _solveDivergenceFreeOptimal(
                         supportScheme = SupportScheme.Scatter,
                         adjacency = adjacency,
                 )
-                num = float(torch.dot(residual[fluidMask], q[fluidMask]))
-                den = float(torch.dot(q[fluidMask], q[fluidMask]))
+                qF = q.index_select(0, fluidIndex)
+                num = torch.dot(residual.index_select(0, fluidIndex), qF).double()
+                den = torch.dot(qF, qF).double()
                 # exact 1-D minimizer of ||r - w*q||^2; clamp at 0 against
-                # fp noise (in exact arithmetic num >= 0 for this operator)
-                omega_k = max(0.0, num / den) if den > 0.0 else 0.0
+                # fp noise (in exact arithmetic num >= 0 for this operator).
+                # Formed in float64 on the device, as the host used to.
+                ratio = num / den
+                omega_k = torch.where((den > 0.0) & (ratio > 0.0), ratio, torch.zeros_like(ratio))
 
                 pressureA = pressureB.clone()
                 pressureB = pressureA + omega_k * u
-                pressureB = pressureB - pressureB[fluidMask].mean()  # Fix the pressure gauge without altering the RHS
+                pressureB = pressureB - pressureB.index_select(0, fluidIndex).mean()  # Fix the pressure gauge without altering the RHS
                 pressureB = torch.where(fluidMask, pressureB, boundaryPressure)
                 residual = residual - omega_k * q
                 if (i + 1) % 16 == 0:
                         residual = sourceTerm - op(pressureB)  # bound fp32 recurrence drift
 
-                error, rNorm = evaluateResidual(residual, fluidMask, criterion,
-                                                threshold, bNorm)
-                errors.append(error)
+                stat, rNormT = residualStats(residual, fluidIndex, criterion, threshold, bNorm is not None)
+                converged = stat < threshold
+                if relTarget is not None:
+                    converged = converged | (rNormT <= relTarget)
+                statHistory.append(stat)
+                flagHistory.append(converged)
+                pressureHistory.append(torch.stack([pressureB.min(), pressureB.max(), pressureB.mean()]))
 
-                pressures.append((pressureB.min().cpu().item(), pressureB.max().cpu().item(), pressureB.mean().cpu().item()))
-
-                if i >= minIters and (error < threshold
-                                      or (relTarget is not None and rNorm <= relTarget)):
+                if schedule.check(i) and bool(converged):
                     break
 
                 if verbose:
+                    error = float(stat)
+                    errors = [float(x) for x in statHistory]
+                    pressures.append(tuple(pressureHistory[-1].tolist()))
                     print(f"[DF] Iteration {i+1}/{maxIters} (optimal step, omega={omega_k:.6g}), residual min: {residual.min().cpu().item():.6g}, max: {residual.max().cpu().item():.6g}, mean: {residual.mean().cpu().item():.6g}, error: {error:.6g}, pressure min/max/mean: {pressures[-1]}")
                 if len(errors) > 1 and error > errors[-2]:
                     if verbose:
                         print(f"!!![DF] Warning: Error increased from {errors[-2]:.6g} to {error:.6g}.!!!")
 
+        errors, pressures = _readHistories(statHistory, flagHistory, pressureHistory, schedule)
         a_p = computePressureAccelIISPH(
                 state = particles,
                 pressureValues = pressureB,
@@ -227,6 +246,21 @@ def _solveDivergenceFreeOptimal(
             print(f'[DF] final Residual: {residual.mean().cpu().item():.6g}, min: {residual.min().cpu().item():.6g}, max: {residual.max().cpu().item():.6g}')
 
         return a_p, pressureB, errors, pressures
+
+
+def _readHistories(statHistory, flagHistory, pressureHistory, schedule):
+    """One device->host transfer for the whole solve's history: the
+    per-iteration statistic (`errors`), the (min, max, mean) pressure log, and
+    the convergence flags the next solve's check schedule is built from."""
+    if not statHistory:
+        return [], []
+    stats = torch.stack(statHistory).float()
+    flags = torch.stack(flagHistory).to(stats.dtype)
+    host = torch.cat([stats.view(-1, 1), flags.view(-1, 1), torch.stack(pressureHistory).to(stats.dtype)], dim=1).cpu()
+    errors = host[:, 0].tolist()
+    schedule.record([bool(f) for f in host[:, 1].tolist()])
+    pressures = [tuple(row) for row in host[:, 2:].tolist()]
+    return errors, pressures
 
 
 def _solveDivergenceFreeImpl(
@@ -343,6 +377,12 @@ def _solveDivergenceFreeImpl(
         relTarget = None if bNorm is None else dfSolver.atol + dfSolver.rtol * bNorm
         omega = schemeConfig.solverConfig.divergenceFreeSolver.relaxationFactor
         # print(f"Solving for divergence-free velocities with maxIters={maxIters}, threshold={threshold:.6g}, omega={omega:.6g}")
+        # Host syncs only at the schedule's checkpoints -- see the optimal-step loop.
+        fluidIndex = fluidMask.nonzero().squeeze(1)
+        schedule = ConvergenceCheckSchedule(schemeConfig, 'divergenceFreeFixed',
+                                            getattr(dfSolver, 'convergenceCheckSchedule', 'every'),
+                                            minIters, maxIters, verbose)
+        statHistory, flagHistory, pressureHistory = [], [], []
 
         for i in range(maxIters):
                 pressureA = pressureB.clone()
@@ -368,23 +408,26 @@ def _solveDivergenceFreeImpl(
 
                 residual = sourceTerm - dx_p
                 pressureB = pressureA + omega * residual / alphas
-                pressureB = pressureB - pressureB[fluidMask].mean()  # Fix the pressure gauge without altering the RHS
+                pressureB = pressureB - pressureB.index_select(0, fluidIndex).mean()  # Fix the pressure gauge without altering the RHS
                 pressureB = torch.where(fluidMask, pressureB, boundaryPressure)
 
 
                 # pressureB[particles.surfaceIndicators == 1] = 0.0  # Set pressures to zero for surface particles
-                error, rNorm = evaluateResidual(residual, fluidMask, criterion,
-                                                threshold, bNorm)
-                errors.append(error)
+                stat, rNormT = residualStats(residual, fluidIndex, criterion, threshold, bNorm is not None)
+                converged = stat < threshold
+                if relTarget is not None:
+                    converged = converged | (rNormT <= relTarget)
+                statHistory.append(stat)
+                flagHistory.append(converged)
+                pressureHistory.append(torch.stack([pressureB.min(), pressureB.max(), pressureB.mean()]))
 
-                pressures.append((pressureB.min().cpu().item(), pressureB.max().cpu().item(), pressureB.mean().cpu().item()))
-
-                if i >= minIters and (error < threshold
-                                      or (relTarget is not None and rNorm <= relTarget)):
-                #     print(f"Converged after {i+1} iterations with error: {error:.6g}")
+                if schedule.check(i) and bool(converged):
                     break
-                
+
                 if verbose:
+                    error = float(stat)
+                    errors = [float(x) for x in statHistory]
+                    pressures.append(tuple(pressureHistory[-1].tolist()))
                     print(f"[DF] Iteration {i+1}/{maxIters}, residual min: {residual.min().cpu().item():.6g}, max: {residual.max().cpu().item():.6g}, mean: {residual.mean().cpu().item():.6g}, error: {error:.6g}, pressure min/max/mean: {pressures[-1]}")
                 if len(errors) > 1 and error > errors[-2]:
                     if verbose:
@@ -398,6 +441,7 @@ def _solveDivergenceFreeImpl(
                 adjacency = adjacency,
         )
         a_p = torch.where(fluidMask.unsqueeze(-1), a_p, torch.zeros_like(a_p))
+        errors, pressures = _readHistories(statHistory, flagHistory, pressureHistory, schedule)
         # print(f"Final pressure acceleration: mean: {a_p.mean().cpu().item():.6g}, min: {a_p.min().cpu().item():.6g}, max: {a_p.max().cpu().item():.6g}")
 
         if verbose:

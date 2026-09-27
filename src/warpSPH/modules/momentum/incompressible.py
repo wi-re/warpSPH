@@ -12,8 +12,9 @@ from warpSPH.configurations import SimulationConfig
 from typing import Any, Optional, Union
 import torch
 
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
 
+from warpSPHCore.profiling import record_function
 __all__ = ['computeMomentumIncompressible']
 
 

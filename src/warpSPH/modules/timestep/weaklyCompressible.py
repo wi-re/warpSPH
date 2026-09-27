@@ -154,6 +154,12 @@ def setupWeaklyCompressibleTimestep(
     if verbose:
         print(f'Computed c0: {c0}, target c0: {schemeConfig.fluid.fixedSoundSpeed}, diff: {abs(c0 - schemeConfig.fluid.fixedSoundSpeed)}')
 
+    # `dx` may be a 0-d device tensor, which made `c0` one too -- and every RHS
+    # evaluation then read it back to the host (`float(c0)` / `scalar_t(c_s)`
+    # kernel arguments): a sync per call, and a CUDA-graph capture failure
+    # (SMALL_PROBLEM_PERFORMANCE.md). It is a run constant: store a float,
+    # as the Sun Eq. (2) branch above already does.
+    c0 = float(c0)
     schemeConfig.fluid.fixedSoundSpeed = c0
     # dt = computeTimestep(
     #     system = compressibleSystem,

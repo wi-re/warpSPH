@@ -51,7 +51,9 @@ import warp as wp
 from warp.types import vector, matrix
 from typing import Any
 import torch
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
+from warpSPHCore import compileGlue
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
 
@@ -68,10 +70,12 @@ from ...configurations.weaklyCompressible import WeaklyCompressibleSPHConfig
 
 from ..liu import interpolateLiuLiu
 from ._util import stateHasBoundaryParticles
+from ...utils.syncFree import deviceConstant, ghostSourceIndex, ghostTargetIndex, scatterRows
 
 
-def _shepardFluidVelocity(currentState: Any, config: SimulationConfig, adjacency: Optional[Union[AdjacencyList, CompactHashMap]]) -> torch.Tensor:
-    """Shepard-normalized fluid velocity gathered onto the ghost nodes.
+def _shepardFluidVelocity(currentState: Any, config: SimulationConfig, adjacency: Optional[Union[AdjacencyList, CompactHashMap]]):
+    """The fluid velocity gathered onto the ghost nodes and its Shepard sum,
+    `(sum_j u_j W_ij V_j, sum_j W_ij V_j)`; `_slipVelocity` normalizes.
 
     Rows other than `kinds == 2` come back zero: the gather runs
     `FluidToGhost`, so only ghost rows accumulate.
@@ -90,7 +94,7 @@ def _shepardFluidVelocity(currentState: Any, config: SimulationConfig, adjacency
         currentState, props, domain = config.domain, adjacency = adjacency,
         queryValues = torch.ones_like(currentState.densities),
     )
-    return qVel / (shepValue.view(-1,1) + 1e-7)
+    return qVel, shepValue
 
 
 def _ghostBodyVelocity(currentState: Any, schemeConfig: Any) -> torch.Tensor:
@@ -123,20 +127,36 @@ def _ghostBodyVelocity(currentState: Any, schemeConfig: Any) -> torch.Tensor:
                 owned[idx] = True
         bodyVelocity = torch.where(owned.view(-1, 1), currentState.velocities,
                                    bodyVelocity)
-    bodyVelocity[ghostMask] = bodyVelocity[currentState.ghostIndices[ghostMask]]
+    # bodyVelocity[ghostMask] = bodyVelocity[ghostIndices[ghostMask]], without
+    # the mask-induced host sync (utils/syncFree.py)
+    src = ghostSourceIndex(currentState.kinds, currentState.ghostIndices)
+    bodyVelocity = torch.where(ghostMask.view(-1, 1), bodyVelocity[src], bodyVelocity)
     return bodyVelocity
 
 
-def _wallNormals(currentState: Any) -> torch.Tensor:
-    r_ib = torch.linalg.norm(currentState.ghostOffsets, dim=-1)
-    return currentState.ghostOffsets / (r_ib.view(-1,1) + 1e-7)
+@compileGlue
+def _slipVelocity(qVelSum, shepValue, bodyVelocity, ghostOffsets, reflect: bool):
+    """The ghost velocity of the slip conditions, from the Shepard gather:
+    free slip (`reflect`) keeps the tangential part of the relative velocity
+    and reflects its normal part, no slip reverses the tangential part and
+    drops the normal part (see `freeSlip` / `noSlip`). Pure elementwise torch
+    (fused by `compileGlue` when enabled)."""
+    qVel = qVelSum / (shepValue.view(-1,1) + 1e-7)
+    r_ib = torch.linalg.norm(ghostOffsets, dim=-1)
+    n_b = ghostOffsets / (r_ib.view(-1,1) + 1e-7)
+    w = qVel - bodyVelocity
+    if reflect:
+        w_n = torch.einsum('nd, nd -> n', w, n_b).view(-1,1) * n_b
+        return bodyVelocity + (w - w_n) - w_n          # = u_body + w_t - w_n
+    w_t = w - torch.einsum('nd, nd -> n', w, n_b).view(-1,1) * n_b
+    return bodyVelocity - w_t
 
 
 def noSlip(currentState: Any, config: SimulationConfig, schemeConfig: WeaklyCompressibleSPHConfig, adjacency: Optional[Union[AdjacencyList, CompactHashMap]]) -> torch.Tensor:
     """
     Computes the no-slip boundary condition for ghost particles based on the velocities of fluid particles.
     """
-    qVel = _shepardFluidVelocity(currentState, config, adjacency)
+    qVelSum, shepValue = _shepardFluidVelocity(currentState, config, adjacency)
 
     # No-slip on the *relative* velocity: reverse the fluid's tangential slip
     # about the wall, then add the wall's own velocity back, so the normal
@@ -145,23 +165,17 @@ def noSlip(currentState: Any, config: SimulationConfig, schemeConfig: WeaklyComp
     # The fluid's normal component stays projected out rather than reflected --
     # a separate, measured deviation; see the module docstring.
     bodyVelocity = _ghostBodyVelocity(currentState, schemeConfig)
-    bIndices = currentState.ghostIndices[currentState.kinds == 2]
-    n_b = _wallNormals(currentState)
+    u_g = _slipVelocity(qVelSum, shepValue, bodyVelocity, currentState.ghostOffsets, False)
 
-    w = qVel - bodyVelocity
-    w_t = w - torch.einsum('nd, nd -> n', w, n_b).view(-1,1) * n_b
-    u_g = bodyVelocity - w_t
-
-    out = currentState.velocities.clone()
-    out[bIndices,:] = u_g[currentState.kinds == 2,:]
-
-    return out
+    # out[ghostIndices[ghost]] = u_g[ghost], sync-free (utils/syncFree.py)
+    return scatterRows(currentState.velocities,
+                       ghostTargetIndex(currentState.kinds, currentState.ghostIndices), u_g)
 
 def freeSlip(currentState: Any, config: SimulationConfig, schemeConfig: WeaklyCompressibleSPHConfig, adjacency: Optional[Union[AdjacencyList, CompactHashMap]]) -> torch.Tensor:
     """
     Computes the free-slip boundary condition for ghost particles based on the velocities of fluid particles.
     """
-    qVel = _shepardFluidVelocity(currentState, config, adjacency)
+    qVelSum, shepValue = _shepardFluidVelocity(currentState, config, adjacency)
 
     # Free slip, published form, on the *relative* velocity: keep the fluid's
     # tangential share and **reflect** its normal component, then add the
@@ -179,17 +193,11 @@ def freeSlip(currentState: Any, config: SimulationConfig, schemeConfig: WeaklyCo
     # tongue thinned to 2.8 dx and shed fliers 8 dx ahead of the front, which
     # slammed the far wall early and drove the P1 probe to 10x the reference.
     bodyVelocity = _ghostBodyVelocity(currentState, schemeConfig)
-    bIndices = currentState.ghostIndices[currentState.kinds == 2]
-    n_b = _wallNormals(currentState)
+    u_g = _slipVelocity(qVelSum, shepValue, bodyVelocity, currentState.ghostOffsets, True)
 
-    w = qVel - bodyVelocity
-    w_n = torch.einsum('nd, nd -> n', w, n_b).view(-1,1) * n_b
-    u_g = bodyVelocity + (w - w_n) - w_n          # = u_body + w_t - w_n
-
-    out = currentState.velocities.clone()
-    out[bIndices,:] = u_g[currentState.kinds == 2,:]
-
-    return out
+    # out[ghostIndices[ghost]] = u_g[ghost], sync-free (utils/syncFree.py)
+    return scatterRows(currentState.velocities,
+                       ghostTargetIndex(currentState.kinds, currentState.ghostIndices), u_g)
 
 def extendedVelocity(currentState: Any, config: SimulationConfig, schemeConfig: WeaklyCompressibleSPHConfig, adjacency: Optional[Union[AdjacencyList, CompactHashMap]]) -> torch.Tensor:
 
@@ -252,8 +260,6 @@ def computeBoundaryVelocities(currentState: Any, config: SimulationConfig, schem
         return currentState.velocities
     with record_function("[warpSPH] - (mdbc) - computeBoundaryVelocities"):
 
-        materials = currentState.materials[currentState.kinds == 1]
-        uniqueMaterials = torch.unique(materials)
 
 
         boundaryRegions = [region for region in config.regions if region.type == RegionType.Boundary]
@@ -262,10 +268,10 @@ def computeBoundaryVelocities(currentState: Any, config: SimulationConfig, schem
         boundaryMask = currentState.kinds == 1
 
         BCTypes = [region.kind for region in boundaryRegions]
-        BCTypesT = torch.tensor([bct.value for bct in BCTypes], device = currentState.velocities.device, dtype = torch.int64)
+        BCTypesT = deviceConstant([bct.value for bct in BCTypes], torch.int64, currentState.velocities.device)
 
-        boundaryMaterials = currentState.materials.clone()
-        boundaryMaterials[currentState.kinds != 1] = 0
+        boundaryMaterials = torch.where(currentState.kinds != 1,
+                                        torch.zeros_like(currentState.materials), currentState.materials)
         BCmask = BCTypesT[boundaryMaterials.long()]
         
         outputVelocities = currentState.velocities.clone()

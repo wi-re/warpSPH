@@ -102,6 +102,12 @@ class ArtificialCompressibilityParams:
     uChar: Optional[float] = field(default=None, metadata={'description': 'U_char in Eq. (48)'})
     maxPseudoIterations: int = field(default=200, metadata={'description': 'pseudo-time iteration cap'})
     minPseudoIterations: int = field(default=1, metadata={'description': 'pseudo-time iteration floor'})
+    #: When the dual-time loop reads eps_v back to the host (one sync each):
+    #: 'every' pseudo-iteration (historical), or 'adaptive' -- at 50/75/85 % of
+    #: the previous step's first-converged iteration count, then every other
+    #: iteration (`modules/incompressible/convergence.py`). A step can run up to
+    #: the gap to the next checkpoint past its first converged iteration.
+    convergenceCheckSchedule: str = field(default='adaptive', metadata={'description': "'every' or 'adaptive' eps_v readback"})
 
     #: `k2 = k2Factor * h * beta`, Eq. (24). 0.1 for consistency with delta-SPH
     #: practice; the measured stability ceiling is 0.2.
@@ -248,6 +254,7 @@ def _acParamsToDict(p: ArtificialCompressibilityParams) -> Dict[str, Any]:
         'epsilonV': p.epsilonV, 'epsilonS': p.epsilonS, 'uChar': p.uChar,
         'maxPseudoIterations': p.maxPseudoIterations,
         'minPseudoIterations': p.minPseudoIterations,
+        'convergenceCheckSchedule': p.convergenceCheckSchedule,
         'k2Factor': p.k2Factor, 'kappa2': p.kappa2, 'kappa4': p.kappa4,
         'jstUsePrintedMin': p.jstUsePrintedMin, 'k3': p.k3,
         'usePointImplicit': p.usePointImplicit,
@@ -276,6 +283,7 @@ def _dictToAcParams(d: Optional[Dict[str, Any]]) -> ArtificialCompressibilityPar
         uChar=None if d.get('uChar', defaults.uChar) is None else float(d['uChar']),
         maxPseudoIterations=int(d.get('maxPseudoIterations', defaults.maxPseudoIterations)),
         minPseudoIterations=int(d.get('minPseudoIterations', defaults.minPseudoIterations)),
+        convergenceCheckSchedule=str(d.get('convergenceCheckSchedule', defaults.convergenceCheckSchedule)),
         k2Factor=float(d.get('k2Factor', defaults.k2Factor)),
         kappa2=float(d.get('kappa2', defaults.kappa2)),
         kappa4=float(d.get('kappa4', defaults.kappa4)),

@@ -28,14 +28,46 @@ def installMdbcDensityToState(case):
     from warpSPH.modules.mdbc import computeMdbcDensity, computeMdbcDensityBand, computeMdbcDensityEnglish2025
     from warpSPH.enumTypes import isIncompressibleScheme
 
+    from warpSPH.modules.mdbc._util import stateHasBoundaryParticles
+
     prev = case.postStep
+    graphed = {'adjacency': None, 'fn': None, 'names': None, 'validated': False}
+
+    def _english2025(particles, ctx, adjacency):
+        """english2025 recompute; with `CaseSpec.cudaGraph` replayed from a
+        graph captured once per Verlet list (the function is sync-free),
+        bitwise the eager value -- the first capture is checked against it."""
+        if not getattr(ctx.spec, 'cudaGraph', False) or not particles.positions.is_cuda:
+            return computeMdbcDensityEnglish2025(particles, ctx.config, ctx.schemeConfig, adjacency)
+        if graphed['adjacency'] is not adjacency:
+            import copy
+            import torch
+            from warpSPH.utils.cudaGraph import GraphedTensorFunction
+            names = [n for n in ('positions', 'densities', 'kinds', 'ghostIndices', 'ghostOffsets',
+                                 'masses', 'supports', 'velocities', 'boundaryAccelerations')
+                     if isinstance(getattr(particles, n, None), torch.Tensor)]
+
+            def fn(*tensors, _names=names, _base=particles, _adj=adjacency):
+                view = copy.copy(_base)
+                for n, t in zip(_names, tensors):
+                    setattr(view, n, t)
+                return (computeMdbcDensityEnglish2025(view, ctx.config, ctx.schemeConfig, _adj),)
+            graphed.update(adjacency=adjacency, names=names,
+                           fn=GraphedTensorFunction(fn, 'mDBC post-step density hook',
+                                                    validate=not graphed['validated']))
+        g = graphed['fn']
+        out = g(*[getattr(particles, n) for n in graphed['names']])[0]
+        if g.disabled is None:
+            graphed['validated'] = True
+        return out
 
     def _hook(ctx, state, step):
         if prev is not None:
             prev(ctx, state, step)
         particles = getattr(state, 'state', state)
         kinds = getattr(particles, 'kinds', None)
-        if kinds is None or not bool((kinds == 1).any()):
+        # kinds are run-constant: the per-run cached check, not a sync per call
+        if kinds is None or not stateHasBoundaryParticles(particles, ctx.config):
             return
         try:
             if isIncompressibleScheme(ctx.scheme):
@@ -54,8 +86,7 @@ def installMdbcDensityToState(case):
             particles.densities = computeMdbcDensityBand(
                 particles, ctx.config, ctx.schemeConfig, adjacency)
         elif _scheme == 'english2025':
-            particles.densities = computeMdbcDensityEnglish2025(
-                particles, ctx.config, ctx.schemeConfig, adjacency)
+            particles.densities = _english2025(particles, ctx, adjacency)
         else:
             particles.densities = computeMdbcDensity(
                 particles, ctx.config, ctx.schemeConfig, adjacency)

@@ -146,7 +146,8 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
             wallBC: str = None, pressureForceTerm: str = None,
             densityDiffusionTerm: str = None, mdbcDensityScheme: str = None,
             pressureForceRenormalized: bool = False,
-            jitter: float = 0.0, seed: int = 1):
+            jitter: float = 0.0, seed: int = 1, cudaGraph: bool = True,
+            pipeline: bool = True, show: bool = True):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -212,6 +213,13 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
     kw = dict(
         scheme=scheme, L=TANK_L, nx=nx, tLimit=tLimit,
         quiet=True, store=False, progress=True, params=params,
+        # bitwise-identical CUDA-graph replay of the RHS (utils/cudaGraph.py);
+        # falls back to eager by itself wherever it does not apply
+        cudaGraph=cudaGraph,
+        # with the graph: step n's diagnostics + frame overlap step n+1
+        pipelineOutputs=pipeline,
+        # no live window -> frames render on a worker thread (runner.py:_RenderThread)
+        show=show,
     )
     if kernel:
         kw['kernel'] = kernel
@@ -866,6 +874,15 @@ def main():
                     help='seeded uniform IC perturbation of fluid positions, at most '
                          'this many dx per component (independent realisations)')
     ap.add_argument('--seed', type=int, default=1)
+    ap.add_argument('--cudaGraph', action=argparse.BooleanOptionalAction, default=True,
+                    help='replay the RHS from a CUDA graph (bitwise identical, ~2x faster '
+                         'at nx=70; benchmarks/marrone31/). --no-cudaGraph runs eagerly.')
+    ap.add_argument('--pipeline', action=argparse.BooleanOptionalAction, default=True,
+                    help="with the graph, compute step n's diagnostics and frame while step "
+                         'n+1 runs (same values). --no-pipeline: one thing at a time.')
+    ap.add_argument('--show', action=argparse.BooleanOptionalAction, default=True,
+                    help='live vispy window while running; --no-show renders the video '
+                         'frames on a worker thread instead (faster, same frames)')
     ap.add_argument('--report', action='store_true',
                     help='(re)build plots + REPORT.md from existing .npz runs')
     args = ap.parse_args()
@@ -879,7 +896,7 @@ def main():
             args.integrationScheme, args.noPenShift, args.wallBC,
             args.pressureForceTerm, args.densityDiffusionTerm,
             args.mdbcDensityScheme, args.pressureForceRenormalized,
-            args.jitter, args.seed)
+            args.jitter, args.seed, args.cudaGraph, args.pipeline, args.show)
 
 
 if __name__ == '__main__':

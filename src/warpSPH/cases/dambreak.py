@@ -48,7 +48,7 @@ it -- all measured, see `DFSPH_IMPROVEMENT_PLAN.md` §1.10 and Part 19, and
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import torch
 
@@ -62,10 +62,13 @@ from ..enumTypes import isArtificialCompressibleScheme, isIncompressibleScheme
 from ..initializers import initializeWeaklyCompressibleSimulation
 from ..modules import setupWeaklyCompressibleTimestep
 from ..modules.liu import interpolateLiuLiu
-from warpSPHCore import OperationDirection
+from warpSPHCore import AdjacencyList, OperationDirection
 from ..runner import Case, RunContext, caseMain, registerCase
 from .kolmogorovIncompressible import kolmogorovIncompressibleTimestep
-from .weaklyCompressible import particleDistributionMetrics, stepAccelerationDiagnostics
+from .weaklyCompressible import (distributionMetricsFromHost, particleDistributionMetricsDevice,
+                                 stepAccelerationDiagnostics)
+from ..utils.syncFree import cachedKindIndex, sortedQuantiles
+from ..utils.cudaGraph import _readHost, forkedStream
 from .plotting import (Field, buildFieldPlotter, openWindow, pumpEvents,
                        refreshFieldPlotter, _export)
 
@@ -459,29 +462,49 @@ _DISC_CHORD_WEIGHTS = tuple(w * max(0.0, 1.0 - x * x) ** 0.5
 _DISC_CHORD_WEIGHT_SUM = sum(_DISC_CHORD_WEIGHTS)
 
 
-def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
+def _readScalars(dev: Dict[str, torch.Tensor]) -> Dict[str, float]:
+    """Device scalars -> Python floats in a single device->host transfer.
+    float64 holds every float32 value and every count here exactly."""
+    if not dev:
+        return {}
+    keys = list(dev)
+    vals = torch.stack([dev[k].detach().to(torch.float64).reshape(()) for k in keys]).cpu().tolist()
+    return dict(zip(keys, vals))
+
+
+def _diagnosticsDevice(ctx: RunContext, state) -> Dict[str, torch.Tensor]:
+    """Every per-step scalar of `diagnostics` except the pressure probes, as
+    0-d device tensors and without a host sync (fluid rows via the per-run
+    cached index, the distribution metrics and step statistics through their
+    device variants) -- so the runner can replay it from a CUDA graph per
+    Verlet generation (`utils/cudaGraph.py:GraphedDiagnostics`). Keys
+    prefixed `dist.` / `step.` are those helpers' values."""
     particles = state.state
-    fluid = particles.kinds == 0
-    velocities = particles.velocities[fluid]
-    d = {
-        'maxVelocity': torch.linalg.norm(velocities, dim=-1).max().detach().cpu().item(),
-        'kineticEnergy': (0.5 * particles.masses[fluid]
-                          * (velocities ** 2).sum(dim=-1)).sum().detach().cpu().item(),
-        'maxDensity': particles.densities[fluid].max().detach().cpu().item(),
-        'minDensity': particles.densities[fluid].min().detach().cpu().item(),
+    fluidIndex = cachedKindIndex(particles.kinds, 0, ctx.config)
+    velocities = particles.velocities.index_select(0, fluidIndex)
+    rhoF = particles.densities.index_select(0, fluidIndex)
+    rhoFq = rhoF.detach().float()
+    dev = {
+        'maxVelocity': torch.linalg.norm(velocities, dim=-1).max(),
+        'kineticEnergy': (0.5 * particles.masses.index_select(0, fluidIndex)
+                          * (velocities ** 2).sum(dim=-1)).sum(),
+        'maxDensity': rhoF.max(),
+        'minDensity': rhoF.min(),
         # Spray-robust companions to `min`/`maxDensity` -- see
         # `weaklyCompressible.weaklyCompressibleDiagnostics`. `maxDensity` at a
         # violent impact tracks a single jet-tip particle whose peak *sharpens*
         # with resolution (a fragmenting-jet case like Marrone 2011 §3.4 is not
         # converged in that quantity even at H/dx = 234); `densityP99` is the
         # bulk-compressibility measure a convergence check should band.
-        'densityP05': torch.quantile(
-            particles.densities[fluid].detach().float(), 0.05).cpu().item(),
-        'densityP99': torch.quantile(
-            particles.densities[fluid].detach().float(), 0.99).cpu().item(),
+        # (both from one sort, bitwise `torch.quantile`'s)
+        **dict(zip(('densityP05', 'densityP99'), sortedQuantiles(rhoFq, (0.05, 0.99)))),
     }
-    d.update(particleDistributionMetrics(ctx, state))
-    d.update(stepAccelerationDiagnostics(state))
+    for k, v in (particleDistributionMetricsDevice(ctx, state) or {}).items():
+        dev['dist.' + k] = v
+    stepDiag = getattr(state, 'stepDiagnostics', None)
+    if hasattr(stepDiag, 'deviceValues'):
+        for k, v in stepDiag.deviceValues(fluidIndex).items():
+            dev['step.' + k] = v
     # Wall-penetration watch (DFSPH_FINDINGS.md 1.6): fluid particles pushed
     # more than half a spacing past the interior tank AABB. The `c637785`
     # rewrite dropped the mDBC no-penetration shift from `divergenceFree_step`; this is
@@ -489,14 +512,13 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     interior = ctx.scratch.get('interiorDomain')
     if interior is not None:
         dx = ctx.config.dx
-        pos = particles.positions[fluid]
+        pos = particles.positions.index_select(0, fluidIndex)
         lo = interior.min.to(pos)
         hi = interior.max.to(pos)
         past = torch.maximum(lo - pos, pos - hi)          # >0 == outside, per axis
         pen = (past > 0.5 * dx).any(dim=-1)
-        d['nPenetrating'] = int(pen.sum().detach().cpu().item())
-        d['maxPenetrationDx'] = float(
-            torch.clamp(past.max(), min=0.0).detach().cpu().item() / dx)
+        dev['nPenetrating'] = pen.sum()
+        dev['maxPenetrationDx'] = torch.clamp(past.max(), min=0.0)
 
         # Penetration into a solid obstacle / concave wall fillet: the AABB
         # watch above cannot see these (a solid island in the flow, or a fillet
@@ -507,33 +529,98 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
             with torch.no_grad():
                 sd = obSDF(pos)
             inside = sd < 0
-            d['nObstaclePen'] = int(inside.sum().detach().cpu().item())
-            d['maxObstaclePenDx'] = float(
-                torch.clamp(-sd.min(), min=0.0).detach().cpu().item() / dx)
+            dev['nObstaclePen'] = inside.sum()
+            dev['maxObstaclePenDx'] = torch.clamp(-sd.min(), min=0.0)
+    hashMap = _probeHashMap(ctx, state)
+    if hashMap is not None:
+        setup = _probeSetup(ctx, state)
+        for key, pts in setup.queries.items():
+            dev['probe.' + key] = _mlsPressureDevice(setup, particles, pts, hashMap)
+    return dev
 
-    # Pressure probes -- a first-order MLS (Liu-Liu) interpolation of the fluid
-    # pressure at fixed sensor points, emitted every step so the trajectory
-    # carries the P(t) signal each experimental sensor records. First order
-    # rather than a bare Shepard gather so the local fit carries the pressure
-    # gradient and needs no separate Adami hydrostatic correction at the
-    # one-sided wall support; points with too few / near-coplanar fluid
-    # neighbours fall back to a 0th-order Shepard gather, then to 0 (pre-arrival
-    # / thin run-up sheet), which `*Nnbr` makes visible.
-    #
-    #  - `pressureProbeHeights` (`ACSPH_PLAN.md` §4.5, Lobovsky et al. 2014):
-    #    sensors on the +x impact wall, given as heights above the tank bed in
-    #    the case length unit; optional φ-disc area integration.
-    #  - `surfacePressureProbes` (`DELTASPH_VALIDATION_PLAN.md` §5.2.2, Marrone
-    #    2011 §3.4): sensors anywhere on the solid surface -- the 45° edge, the
-    #    obstacle roof, the concave fillet arc -- none axis-aligned, so each is
-    #    `[x, y, nx, ny]` (centred-domain point + outward normal into the fluid)
-    #    and the query point is pushed `surfacePressureProbeInset` spacings along
-    #    that normal to sit in the fluid rather than exactly on the wall.
-    # Both are empty by default so no existing run changes.
-    canProbe = interior is not None and getattr(particles, 'pressures', None) is not None
+
+def _diagnosticsPending(ctx: RunContext, state):
+    """Start `_diagnosticsDevice` -- replayed from a CUDA graph when the
+    runner set one up (`ctx.scratch['graphedDiagnostics']`), else eagerly --
+    and return a thunk that reads its values back (one transfer). The GPU
+    work runs while the caller does the pressure probes' host work."""
+    graphed = ctx.scratch.get('graphedDiagnostics')
+    if graphed is not None:
+        return graphed.launch(ctx, state, _diagnosticsDevice)
+    dev = _diagnosticsDevice(ctx, state)
+    return lambda: _readHost(dev)
+
+
+def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
+    pending = _diagnosticsPending(ctx, state)
+    if _probeHashMap(ctx, state) is None:
+        # probes fitted here, on their own stream: their host reads need not
+        # wait for the GPU work just queued, which overlaps their host work
+        with forkedStream(ctx.scratch, 'probeStream', state.state.positions.device):
+            probes = _pressureProbes(ctx, state)
+        host = pending()
+    else:
+        # probes fitted in `_diagnosticsDevice`, read back with the rest
+        host = pending()
+        probes = _pressureProbes(ctx, state, {k[6:]: v for k, v in host.items()
+                                              if k.startswith('probe.')})
+    d = {k: host[k] for k in ('maxVelocity', 'kineticEnergy', 'maxDensity', 'minDensity',
+                              'densityP05', 'densityP99')}
+    d.update(distributionMetricsFromHost(
+        {k[5:]: v for k, v in host.items() if k.startswith('dist.')}))
+    stepDiag = getattr(state, 'stepDiagnostics', None)
+    if hasattr(stepDiag, 'fromHost'):
+        d.update(stepDiag.fromHost({k[5:]: v for k, v in host.items() if k.startswith('step.')}))
+    else:
+        d.update(stepAccelerationDiagnostics(state))
+    dx = ctx.config.dx
+    if 'nPenetrating' in host:
+        d['nPenetrating'] = int(host['nPenetrating'])
+        d['maxPenetrationDx'] = float(host['maxPenetrationDx'] / dx)
+    if 'nObstaclePen' in host:
+        d['nObstaclePen'] = int(host['nObstaclePen'])
+        d['maxObstaclePenDx'] = float(host['maxObstaclePenDx'] / dx)
+    d.update(probes)
+    return d
+
+
+def _probeSetup(ctx: RunContext, state):
+    """The run-constant side of the pressure probes, built once per run
+    (`ctx.scratch`): query points on the device, the non-periodic probe
+    config, the reference pressure. `None` when the case has no probes.
+
+    Pressure probes -- a first-order MLS (Liu-Liu) interpolation of the fluid
+    pressure at fixed sensor points, emitted every step so the trajectory
+    carries the P(t) signal each experimental sensor records. First order
+    rather than a bare Shepard gather so the local fit carries the pressure
+    gradient and needs no separate Adami hydrostatic correction at the
+    one-sided wall support; points with too few / near-coplanar fluid
+    neighbours fall back to a 0th-order Shepard gather, then to 0 (pre-arrival
+    / thin run-up sheet), which `*Nnbr` makes visible.
+
+    - `pressureProbeHeights` (`ACSPH_PLAN.md` §4.5, Lobovsky et al. 2014):
+    sensors on the +x impact wall, given as heights above the tank bed in
+    the case length unit; optional φ-disc area integration.
+    - `surfacePressureProbes` (`DELTASPH_VALIDATION_PLAN.md` §5.2.2, Marrone
+    2011 §3.4): sensors anywhere on the solid surface -- the 45° edge, the
+    obstacle roof, the concave fillet arc -- none axis-aligned, so each is
+    `[x, y, nx, ny]` (centred-domain point + outward normal into the fluid)
+    and the query point is pushed `surfacePressureProbeInset` spacings along
+    that normal to sit in the fluid rather than exactly on the wall.
+    Both are empty by default so no existing run changes.
+    """
+    particles = state.state
+    if getattr(particles, 'pressures', None) is None:
+        return None                     # e.g. the initial state, before any step
+    cached = ctx.scratch.get('_probeSetup', False)
+    if cached is not False:
+        return cached
+    interior = ctx.scratch.get('interiorDomain')
+    canProbe = interior is not None
     probeHeights = ctx.param('pressureProbeHeights')
     surfaceProbes = ctx.param('surfacePressureProbes')
     haveSurface = surfaceProbes is not None and len(surfaceProbes) > 0
+    setup = None
     if canProbe and (probeHeights or haveSurface):
         allPos = particles.positions
         # The probes sit ~1 kernel support from a domain edge; if the run is
@@ -549,41 +636,19 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
         # integration, superseded by `pressureProbeDiscRadius` for a true disc
         # integral; kept for cases that still want it. Default 1.0 is unchanged.
         supportScale = float(ctx.param('pressureProbeSupportScale') or 1.0)
-
-        def _mlsPressure(pts):
-            """(M,2) query points -> (P:(M,) cpu, nNeighbours:(M,) cpu,
-            wellConditioned:(M,) bool cpu, Shepard:(M,) cpu), the first-order MLS fluid-pressure
-            fit with the density2025.py / wallPressure.py fallback ladder: the
-            MLS fit where well-conditioned, else a 0th-order Shepard gather
-            (`b[:,0] / A_g[:,0,0]`), else 0. A query point can have plenty of
-            neighbours (double digits) and still fail the determinant check --
-            a thin sheet running along a wall is exactly this, near-coplanar
-            neighbours but many of them -- and `interpolateLiuLiu` hard-zeros
-            the first-order fit there by design; without the Shepard tier every
-            such point reads a flat 0 regardless of how much real neighbour
-            support it had. The Shepard tier is only a 0th-order average of the
-            (one-sided) neighbourhood, so it reads biased *low* against a real
-            pressure gradient -- `pSurf{k}WC` records which tier a probe used.
-            Clamped >= 0. The 4th return is the plain Shepard gather at every
-            point (no gradient term), also clamped >= 0."""
-            v, _g, nn, A_g, b, wc = interpolateLiuLiu(
-                pts, referenceParticles=particles,
-                referenceQuantities=particles.pressures,
-                config=probeConfig, neighbor_threshold=4,
-                direction=OperationDirection.FluidToFluid, supportScale=supportScale)
-            shepDen = A_g[:, 0, 0]
-            shepVal = torch.where(shepDen > 0, b[:, 0] / shepDen.clamp_min(1e-12),
-                                  torch.zeros_like(shepDen))
-            v = torch.where(wc, v, shepVal).clamp(min=0.0)
-            return (v.detach().cpu(), nn.detach().cpu(), wc.detach().cpu(),
-                    shepVal.clamp(min=0.0).detach().cpu())
-
         H = ctx.param('fillRatio') * ctx.spec.L
         g = ctx.param('gravityMagnitude')
-        pRef = ctx.schemeConfig.fluid.restDensity * g * H          # rho0 g H
-        t = float(state.t) if getattr(state, 't', None) is not None else 0.0
-        d['tStar'] = t * (g / H) ** 0.5
-
+        setup = SimpleNamespace(
+            probeConfig=probeConfig, supportScale=supportScale, H=H, g=g,
+            pRef=ctx.schemeConfig.fluid.restDensity * g * H,          # rho0 g H
+            dtype=allPos.dtype, queries={}, probeHeights=probeHeights,
+            nSurface=0,
+            # The Verlet list's hash map finds every fluid neighbour of a
+            # fixed query point for as long as the list is valid (a reference
+            # within h now was within verletScale*h at the build -- the same
+            # argument the mDBC ghost query relies on), so the probes can skip
+            # building their own; not for a widened gather or a periodic run.
+            verletHash=supportScale == 1.0 and not bool(dom.periodic.any()))
         if probeHeights:
             xWall = float(interior.max[0].item()) - float(ctx.param('pressureProbeInset'))
             yBed = float(interior.min[1].item())
@@ -593,63 +658,145 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
             # Gauss-Legendre chord quadrature above, instead of one point per
             # probe height. 0.0 (default): unchanged single-point behaviour.
             sOffsets = [discRadius * x for x in _GAUSS7_NODES] if discRadius > 0.0 else [0.0]
-            nP, nS = len(probeHeights), len(sOffsets)
-
-            def _discPressure(xQuery):
-                """Probe readings with every quadrature point at x = xQuery:
-                (MLS-with-fallback, Shepard, max neighbour count), each (nP,)."""
-                pts = torch.tensor(
-                    [[xQuery, yBed + float(z) + s] for z in probeHeights for s in sOffsets],
-                    device=allPos.device, dtype=allPos.dtype)
-                val, nnbr, _wc, shep = _mlsPressure(pts)
-                val, shep, nnbr = val.view(nP, nS), shep.view(nP, nS), nnbr.view(nP, nS)
-                if discRadius > 0.0:
-                    # Weight each quadrature sample by its disc chord factor,
-                    # excluding only genuinely dry samples (`nnbr <= 1`,
-                    # matching density2025.py's own Shepard-tier floor) and
-                    # renormalising over the rest -- a sample with real
-                    # neighbour support always contributes its (MLS-or-Shepard)
-                    # value rather than a hard 0.
-                    baseW = torch.tensor(_DISC_CHORD_WEIGHTS, dtype=val.dtype)
-                    w = baseW.unsqueeze(0) * (nnbr > 1).to(val.dtype)
-                    wSum = w.sum(dim=1)
-
-                    def avg(q):
-                        return torch.where(wSum > 0, (q * w).sum(dim=1) / wSum.clamp_min(1e-12),
-                                           torch.zeros_like(wSum))
-                    return avg(val), avg(shep), nnbr.amax(dim=1)
-                return val[:, 0], shep[:, 0], nnbr[:, 0]
-
-            valOut, shepOut, nnbrOut = _discPressure(xWall)
+            setup.discRadius, setup.nP, setup.nS = discRadius, len(probeHeights), len(sOffsets)
             # Non-extrapolating companions (scripts/probe_marrone31P1Field.py,
-            # 2026-09-26): the reading above evaluates a first-order MLS fit AT
-            # the wall, i.e. extrapolates the fitted gradient over the last
-            # ~dx of one-sided support. A disordered near-wall layer (delta-SPH
-            # without PST) gives a spurious gradient there -- Marrone 3.1 P1
-            # read 0.83 rho g H while the adjacent fluid averaged 0.48. Recorded
-            # alongside, not instead, so existing numbers stay comparable:
-            #   pProbe{k}In1  -- the same MLS disc 1 dx into the fluid;
-            #   pProbe{k}Shep -- the plain Shepard disc at the wall (no gradient
-            #                    term; biased low under a real gradient).
-            valIn1, _shepIn1, _nIn1 = _discPressure(xWall - float(ctx.config.dx))
-            for k in range(len(probeHeights)):
-                d[f'pProbe{k}'] = float(valOut[k])
-                d[f'pProbe{k}Star'] = float(valOut[k]) / pRef
-                d[f'pProbe{k}Nnbr'] = int(nnbrOut[k])
-                d[f'pProbe{k}In1Star'] = float(valIn1[k]) / pRef
-                d[f'pProbe{k}ShepStar'] = float(shepOut[k]) / pRef
-
+            # 2026-09-26): the reading at the wall evaluates a first-order MLS
+            # fit AT the wall, i.e. extrapolates the fitted gradient over the
+            # last ~dx of one-sided support. A disordered near-wall layer
+            # (delta-SPH without PST) gives a spurious gradient there --
+            # Marrone 3.1 P1 read 0.83 rho g H while the adjacent fluid averaged
+            # 0.48. Recorded alongside, not instead, so existing numbers stay
+            # comparable: the same disc 1 dx into the fluid is the second
+            # column of query points.
+            setup.queries['wall'] = torch.tensor(
+                [[xQuery, yBed + float(z) + s_]
+                 for xQuery in (xWall, xWall - float(ctx.config.dx))
+                 for z in probeHeights for s_ in sOffsets],
+                device=allPos.device, dtype=allPos.dtype)
         if haveSurface:
             arr = torch.as_tensor(surfaceProbes, dtype=allPos.dtype,
                                   device=allPos.device).view(-1, 4)
             nrm = arr[:, 2:4] / arr[:, 2:4].norm(dim=-1, keepdim=True).clamp_min(1e-12)
             inset = float(ctx.param('surfacePressureProbeInset') or 0.0) * float(ctx.config.dx)
-            val, nnbr, wc, _shep = _mlsPressure(arr[:, 0:2] + inset * nrm)
-            for k in range(arr.shape[0]):
-                d[f'pSurf{k}'] = float(val[k])
-                d[f'pSurf{k}Star'] = float(val[k]) / pRef
-                d[f'pSurf{k}Nnbr'] = int(nnbr[k])
-                d[f'pSurf{k}WC'] = int(bool(wc[k]))
+            setup.queries['surf'] = arr[:, 0:2] + inset * nrm
+            setup.nSurface = arr.shape[0]
+    ctx.scratch['_probeSetup'] = setup
+    return setup
+
+
+def _probeHashMap(ctx: RunContext, state):
+    """The Verlet hash map the probes may query instead of building their own
+    (see `_probeSetup`), or `None`."""
+    setup = _probeSetup(ctx, state)
+    adjacency = getattr(state, 'adjacency', None)
+    if setup is None or not setup.verletHash or not isinstance(adjacency, AdjacencyList):
+        return None
+    return getattr(adjacency, 'hashMap', None)
+
+
+def _mlsPressureDevice(setup, particles, pts, hashMap=None) -> torch.Tensor:
+    """(M,2) query points -> (4, M) device tensor [P, nNeighbours,
+    wellConditioned, Shepard]: the first-order MLS fluid-pressure fit with the
+    density2025.py / wallPressure.py fallback ladder: the MLS fit where
+    well-conditioned, else a 0th-order Shepard gather (`b[:,0] / A_g[:,0,0]`),
+    else 0. A query point can have plenty of neighbours (double digits) and
+    still fail the determinant check -- a thin sheet running along a wall is
+    exactly this, near-coplanar neighbours but many of them -- and
+    `interpolateLiuLiu` hard-zeros the first-order fit there by design;
+    without the Shepard tier every such point reads a flat 0 regardless of how
+    much real neighbour support it had. The Shepard tier is only a 0th-order
+    average of the (one-sided) neighbourhood, so it reads biased *low* against
+    a real pressure gradient -- `pSurf{k}WC` records which tier a probe used.
+    Clamped >= 0. The 4th row is the plain Shepard gather at every point (no
+    gradient term), also clamped >= 0.
+
+    With `hashMap` (the Verlet list's, `_probeHashMap`) the gather queries it
+    and the fit runs sync-free -- graph-capturable; the same fit up to float
+    rounding (candidate order, `inv_ex` for `pinv`). Without, a hash map is
+    built for the call, exactly as the probes always did."""
+    v, _g, nn, A_g, b, wc = interpolateLiuLiu(
+        pts, referenceParticles=particles,
+        referenceQuantities=particles.pressures,
+        config=setup.probeConfig, neighbor_threshold=4,
+        direction=OperationDirection.FluidToFluid, supportScale=setup.supportScale,
+        adjacency=hashMap, syncFree=hashMap is not None)
+    shepDen = A_g[:, 0, 0]
+    shepVal = torch.where(shepDen > 0, b[:, 0] / shepDen.clamp_min(1e-12),
+                          torch.zeros_like(shepDen))
+    v = torch.where(wc, v, shepVal).clamp(min=0.0)
+    # float32 holds the counts exactly
+    return torch.stack([v.detach(), nn.detach().to(v.dtype), wc.to(v.dtype),
+                        shepVal.clamp(min=0.0).detach()])
+
+
+def _pressureProbes(ctx: RunContext, state, mls: Optional[Dict[str, torch.Tensor]] = None
+                    ) -> Dict[str, float]:
+    """`diagnostics`' wall pressure probes (`tStar` and the `pProbe*` /
+    `pSurf*` columns); empty when the case has none. `mls`: the fits already
+    computed on the device (`_mlsPressureDevice`, host copies keyed like
+    `setup.queries`); any missing is computed here (one transfer each)."""
+    setup = _probeSetup(ctx, state)
+    d: Dict[str, float] = {}
+    if setup is None:
+        return d
+    particles = state.state
+
+    def _mlsPressure(key):
+        host = mls.get(key) if mls else None
+        if host is None:
+            host = _mlsPressureDevice(setup, particles, setup.queries[key]).cpu()
+        host = host.to(setup.dtype)
+        return host[0], host[1].to(torch.int32), host[2] > 0.5, host[3]
+
+    pRef = setup.pRef
+    t = float(state.t) if getattr(state, 't', None) is not None else 0.0
+    d['tStar'] = t * (setup.g / setup.H) ** 0.5
+
+    if setup.probeHeights:
+        nP, nS, discRadius = setup.nP, setup.nS, setup.discRadius
+
+        def _discColumn(val, shep, nnbr):
+            val, shep, nnbr = val.view(nP, nS), shep.view(nP, nS), nnbr.view(nP, nS)
+            if discRadius > 0.0:
+                # Weight each quadrature sample by its disc chord factor,
+                # excluding only genuinely dry samples (`nnbr <= 1`,
+                # matching density2025.py's own Shepard-tier floor) and
+                # renormalising over the rest -- a sample with real
+                # neighbour support always contributes its (MLS-or-Shepard)
+                # value rather than a hard 0.
+                baseW = torch.tensor(_DISC_CHORD_WEIGHTS, dtype=val.dtype)
+                w = baseW.unsqueeze(0) * (nnbr > 1).to(val.dtype)
+                wSum = w.sum(dim=1)
+
+                def avg(q):
+                    return torch.where(wSum > 0, (q * w).sum(dim=1) / wSum.clamp_min(1e-12),
+                                       torch.zeros_like(wSum))
+                return avg(val), avg(shep), nnbr.amax(dim=1)
+            return val[:, 0], shep[:, 0], nnbr[:, 0]
+
+        # Both columns (at the wall, 1 dx into the fluid) in one fit; every
+        # query point's fit is independent of the others.
+        valAll, nnbrAll, _wc, shepAll = _mlsPressure('wall')
+        m = nP * nS
+        valOut, shepOut, nnbrOut = _discColumn(valAll[:m], shepAll[:m], nnbrAll[:m])
+        valIn1, _shepIn1, _nIn1 = _discColumn(valAll[m:], shepAll[m:], nnbrAll[m:])
+        #   pProbe{k}In1  -- the same MLS disc 1 dx into the fluid;
+        #   pProbe{k}Shep -- the plain Shepard disc at the wall (no gradient
+        #                    term; biased low under a real gradient).
+        for k in range(nP):
+            d[f'pProbe{k}'] = float(valOut[k])
+            d[f'pProbe{k}Star'] = float(valOut[k]) / pRef
+            d[f'pProbe{k}Nnbr'] = int(nnbrOut[k])
+            d[f'pProbe{k}In1Star'] = float(valIn1[k]) / pRef
+            d[f'pProbe{k}ShepStar'] = float(shepOut[k]) / pRef
+
+    if setup.nSurface:
+        val, nnbr, wc, _shep = _mlsPressure('surf')
+        for k in range(setup.nSurface):
+            d[f'pSurf{k}'] = float(val[k])
+            d[f'pSurf{k}Star'] = float(val[k]) / pRef
+            d[f'pSurf{k}Nnbr'] = int(nnbr[k])
+            d[f'pSurf{k}WC'] = int(bool(wc[k]))
     return d
 
 
@@ -717,7 +864,8 @@ def setupPlot(ctx: RunContext, state):
 
 def updatePlot(ctx: RunContext, state, plotter, step: int) -> None:
     refreshFieldPlotter(ctx, state, plotter, dambreakFields(ctx), step=step)
-    pumpEvents(plotter)
+    if getattr(ctx.spec, 'show', True):   # no live window (openWindow skipped it) -> nothing to repaint
+        pumpEvents(plotter)
 
 
 def extraData(ctx: RunContext, state) -> Dict[str, Any]:

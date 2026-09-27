@@ -27,7 +27,7 @@ a numerical-safety measure -- see `wp_densityHVP.py`'s docstring
 
 from typing import Any, Optional, Tuple
 import torch
-from torch.profiler import record_function
+from warpSPHCore.profiling import record_function
 from warpSPHCore import ParticleState, ParticleTangentState, SupportScheme, OperationProperties, warpOperationJVP, warpOperationHVP
 from warpSPHCore.enumTypes import WarpOperation, OperationDirection
 

@@ -11,7 +11,9 @@ from warpSPHCore import *
 from ...systems.baseState import *
 from warpSPH.configurations import SimulationConfig
 
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
+
+from warpSPHCore.profiling import record_function
 from typing import Optional, Any
 import torch
 
