@@ -1,0 +1,26 @@
+# Marrone et al. 2011 Fig. 19 tank with the sharp-edged obstacle removed --
+# just the concave quarter-circle fillet (radius H) rounding the downstream
+# bottom corner. The dam-break surge runs the full 10 H and impacts the
+# smoothed corner directly, which turns it into a vertical wall run-up jet.
+# Companion to marrone34_sharp_edge.yaml; same scheme / scaling notes
+# (DELTASPH_VALIDATION_PLAN.md Sec. 5.2.2).
+#
+#   warpsph-run dambreak --config examples/sweeps/marrone34_rounded_corner.yaml
+caseName: 3-dambreak-marrone34-roundedcorner
+scheme: sun2017DeltaSPH
+nx: 256
+L: 8.0
+tLimit: 2.363            # t* ~ 7.4
+store: true
+storeMode: trajectory
+exportInterval: 0.005
+params:
+  W: 10.0
+  fillRatio: 0.3
+  fluidWidth: 0.3
+  gravityMagnitude: 9.81
+  obstacleActive: true
+  obstacleType: marroneRoundedCorner
+  referenceVelocity: 6.1076   # U_max = 1.95 sqrt(gH)
+  machTarget: 0.068905        # c0 = 28.3 sqrt(gH)
+  shifting: null

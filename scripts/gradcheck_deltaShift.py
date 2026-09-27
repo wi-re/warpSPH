@@ -18,6 +18,16 @@ integer-valued exponent (`n=4` here), which stays well away from `k=0`
 regular line case. Gradchecked against positions/supports/masses/densities
 -- clean.
 
+`_run_volume_weighted` covers the `volumeWeighted=True` addition
+(PST_ALE_PLAN.md Stage A): selects the plain apparent volume
+(`referenceVolumes[j]`, already computed in this kernel and previously
+discarded) as the per-neighbor weight instead of the mean-density term,
+matching Michel et al. 2022 Eq. (2)-(3)'s weighting exactly. Same
+accumulate-only shape, and `apparentVolume` is already the AD-safe path ~20
+other kernels in this codebase use (PST_ALE_PLAN.md Part 4.3), so no new risk
+-- included as a regression guard on the added branch, not because the shape
+changed.
+
     python scripts/gradcheck_deltaShift.py
 """
 
@@ -79,11 +89,43 @@ def _run() -> bool:
         return False
 
 
+def _run_volume_weighted() -> bool:
+    domain, positions, supports, masses, densities, adjacency, kinds, dx = _build_case()
+
+    def f(pos, sup, mass, dens):
+        p = ParticleState(positions=pos, supports=sup, masses=mass, densities=dens, kinds=kinds)
+        return computeDeltaShiftWarp(
+            queryParticles=p,
+            operationProperties=OperationProperties(kernel=KERNEL, supportMode=SupportScheme.Gather),
+            domain=domain,
+            CFL=0.4,
+            computeMach=False,
+            c_max=1.0,
+            rho0=1.0,
+            dx=dx,
+            R=0.2,
+            n=4,
+            volumeWeighted=True,
+            adjacency=adjacency,
+        )
+
+    print("\n=== computeDeltaShiftWarp [volumeWeighted=True]: torch.autograd.gradcheck ===")
+    inputs = (positions, supports, masses, densities)
+    try:
+        ok = torch.autograd.gradcheck(f, inputs, eps=1e-6, atol=1e-5)
+        print("PASSED" if ok else "FAILED (gradcheck returned False)")
+        return bool(ok)
+    except Exception as exc:  # noqa: BLE001 - deliberately broad, this is a canary script
+        print(f"FAILED: {type(exc).__name__}: {exc}")
+        return False
+
+
 def main():
     wp.init()
     torch.manual_seed(0)
 
     ok = _run()
+    ok &= _run_volume_weighted()
 
     print()
     if ok:

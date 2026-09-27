@@ -15,6 +15,10 @@ from .waveSystem import WaveSystemStatev3, WaveSystemUpdatev3, WaveSystemv3
 from .compSPH import CompSPHState, CompSPHSystem
 from .weaklyCompressible import WeaklyCompressibleState, WeaklyCompressibleSystem, WeaklyCompressibleSystemUpdate
 from .acousticCore import AcousticCoreState, AcousticCoreSystemUpdate, AcousticCoreSystem
+from .artificialCompressible import (ArtificialCompressibleState,
+                                     ArtificialCompressibleSystemUpdate,
+                                     ArtificialCompressibleSystem,
+                                     bdfCoefficients)
 
 __all__ = [
     'BaseParticleState', 'BaseSystemUpdate', 'BaseSystem',
@@ -23,4 +27,6 @@ __all__ = [
     'CompSPHState', 'CompSPHSystem',
     'WeaklyCompressibleState', 'WeaklyCompressibleSystem', 'WeaklyCompressibleSystemUpdate',
     'AcousticCoreState', 'AcousticCoreSystemUpdate', 'AcousticCoreSystem',
+    'ArtificialCompressibleState', 'ArtificialCompressibleSystemUpdate',
+    'ArtificialCompressibleSystem', 'bdfCoefficients',
 ]

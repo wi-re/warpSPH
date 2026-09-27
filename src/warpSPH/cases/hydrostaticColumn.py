@@ -119,9 +119,12 @@ from .plotting import Field, particlePlot
 from .randomFlow import BOUNDED_BAND
 from .weaklyCompressible import (WEAKLY_COMPRESSIBLE_DEFAULTS,
                                  WEAKLY_COMPRESSIBLE_PARAMS, boundaryRegion,
-                                 buildRegionSystem, configureWeaklyCompressible,
-                                 domainBoundarySdf, fluidRegion, shapeSdf,
+                                 buildRegionSystem, configureArtificialCompressible,
+                                 configureWeaklyCompressible,
+                                 domainBoundarySdf, filletedDomainBoundarySdf,
+                                 fluidRegion, shapeSdf,
                                  particleDistributionMetrics)
+from ..enumTypes import isArtificialCompressibleScheme
 
 __all__ = ['hydrostaticColumnCase']
 
@@ -142,6 +145,10 @@ def configureScheme(ctx: RunContext) -> None:
     # `randomFlow`'s bounded band exactly the way `randomFlow --bounded` does.
     if not ctx.param('band'):
         ctx.spec.params['band'] = BOUNDED_BAND
+
+    if isArtificialCompressibleScheme(ctx.scheme):
+        return _configureArtificialCompressible(ctx)
+
     configureWeaklyCompressible(ctx)
 
     schemeConfig = ctx.schemeConfig
@@ -164,9 +171,58 @@ def configureScheme(ctx: RunContext) -> None:
     schemeConfig.gravityConfig.active = True
     schemeConfig.gravityConfig.type = GravityType.Directional
     schemeConfig.gravityConfig.magnitude = ctx.param('gravityMagnitude')
-    schemeConfig.gravityConfig.origin = ctx.param('gravityDirection')
+    schemeConfig.gravityConfig.direction = ctx.param('gravityDirection')
     # The surface-detection bandwidth is measured in particle spacings.
     schemeConfig.bandwith = ctx.spec.L / ctx.param('bandWidth') / ctx.config.dx
+
+
+def _configureArtificialCompressible(ctx: RunContext) -> None:
+    """The ACSPH branch of `configureScheme`.
+
+    This is the paper's own Sec. 4.1.1 case and the first thing the scheme is
+    validated on (`ACSPH_PLAN.md` Part 7): a column at rest under gravity, whose
+    exact solution is `v = 0` with `p` linear in depth. It is the *operator*
+    discriminator -- AC-2L holds that linear gradient and AC-2 provably cannot
+    -- which is why the pressure-slope and pressure-residual diagnostics below
+    are the figures of merit and not just health checks.
+
+    Differences from the DFSPH branch, all structural rather than tuning:
+    ACSPH has no `diffusionParams` (its viscosity is `acParams.nu`), no XSPH
+    filter, and no equation of state. Shifting stays off until the Michel
+    et al. law lands (`ACSPH_PLAN.md` step 7) -- the existing delta+ shift is
+    Mach-scaled, and ACSPH has no Mach number.
+    """
+    configureArtificialCompressible(ctx)
+
+    schemeConfig = ctx.schemeConfig
+    schemeConfig.surfaceDetectionConfig.active = True
+    schemeConfig.gravityConfig.active = True
+    schemeConfig.gravityConfig.type = GravityType.Directional
+    schemeConfig.gravityConfig.magnitude = ctx.param('gravityMagnitude')
+    schemeConfig.gravityConfig.direction = ctx.param('gravityDirection')
+    schemeConfig.shiftProperties.active = False
+    schemeConfig.bandwith = ctx.spec.L / ctx.param('bandWidth') / ctx.config.dx
+    # Eq. (48)'s U_char. The paper never defines it per case (ACSPH_PLAN.md
+    # Sec. 5.5); for a column at rest the only velocity scale in the problem is
+    # sqrt(g H), the free-fall speed over the column depth.
+    if schemeConfig.acParams.uChar is None:
+        depth = ctx.param('fillRatio') * ctx.spec.L
+        schemeConfig.acParams.uChar = float(
+            (ctx.param('gravityMagnitude') * depth) ** 0.5)
+
+
+def columnTimestep(ctx: RunContext, state) -> float:
+    """Eq. (46) for ACSPH, the DFSPH advective/viscous CFL otherwise.
+
+    `kolmogorovIncompressibleTimestep` exists because the generic dispatcher
+    used to send everything non-weakly-compressible down the fully compressible
+    formula; ACSPH now has its own branch there, and it is Eq. (46) with the
+    BDF2 step-ratio clamp, which that DFSPH formula does not have.
+    """
+    if isArtificialCompressibleScheme(ctx.scheme):
+        from ..modules.timestep import computeTimestep
+        return computeTimestep(state, ctx.config, ctx.schemeConfig, dt=ctx.config.dt)
+    return kolmogorovIncompressibleTimestep(ctx, state)
 
 
 def buildSystem(ctx: RunContext):
@@ -176,8 +232,19 @@ def buildSystem(ctx: RunContext):
     # `nu > 0`, `DFSPH_FINDINGS.md` 1.14). Both go through
     # `computeBoundaryVelocities`; the schemes pick it up in step 2.
     wallBC = BCType[ctx.param('wallBC')]
+    # `cornerFilletRadius` (0 = off, the default -- plain sharp corners,
+    # unchanged behaviour): rounds the bottom-left/right corners the fluid
+    # column actually touches, in units of `dx`. See
+    # `filletedDomainBoundarySdf`'s own docstring for why -- the
+    # periodic-vs-walled A/B this option exists to follow up on.
+    filletRadiusDx = ctx.param('cornerFilletRadius')
+    if filletRadiusDx:
+        boundarySdf = filletedDomainBoundarySdf(
+            ctx, radius=float(filletRadiusDx) * ctx.config.dx, dx=ctx.config.dx)
+    else:
+        boundarySdf = domainBoundarySdf(ctx)
     regions = [fluidRegion(ctx, columnSdf(ctx)),
-               boundaryRegion(ctx, domainBoundarySdf(ctx), kind=wallBC)]
+               boundaryRegion(ctx, boundarySdf, kind=wallBC)]
     return buildRegionSystem(ctx, regions)
 
 
@@ -255,8 +322,17 @@ def initialConditions(ctx: RunContext, system) -> None:
     # pressure to zero mean every iteration, so it is initialised at that
     # shifted profile instead -- a raw start would open a fluid-vs-wall jump
     # of the mean's size. See the module docstring.
+    # `artificialCompressible` also wants the raw profile, and for a stronger
+    # reason than the two above: it has **no pressure gauge at all**. Its
+    # pressure is an absolute, integrated field -- the wall extrapolation
+    # (Eq. 61) and the `(p_i + p_j)` gradient both read it directly, and the
+    # free-surface condition is `p = 0` there. Seeding the mean-shifted profile
+    # puts the surface at `-mean(p) ~ -rho0 g H / 2`, which is not a gauge
+    # choice for this scheme but an error of half the column's pressure drop
+    # at exactly the place the scheme is most sensitive.
     if ctx.scheme in (IncompressibleSPHScheme.dfsphReference,
-                      IncompressibleSPHScheme.iisph):
+                      IncompressibleSPHScheme.iisph) or \
+            isArtificialCompressibleScheme(ctx.scheme):
         particles.pressures = p
     else:
         particles.pressures = p - p[fluid].mean()
@@ -366,7 +442,7 @@ hydrostaticColumnCase = registerCase(Case(
     setupPlot=setupPlot,
     updatePlot=updatePlot,
     extraData=extraData,
-    timestep=kolmogorovIncompressibleTimestep,
+    timestep=columnTimestep,
     defaults=dict(
         WEAKLY_COMPRESSIBLE_DEFAULTS,
         caseName='07-hydrostaticColumn',
@@ -418,6 +494,16 @@ hydrostaticColumnCase = registerCase(Case(
         bulkMargin=8.0,
         wallMargin=6.0,
         markerSize=8,
+        # ACSPH only: override `acParams.epsilonV`/`noPenetrationShift` via
+        # the shared `configureArtificialCompressible` helper. `None`/`False`
+        # leave the paper's defaults alone -- see that helper's docstring.
+        epsilonV=None,
+        noPenetrationShift=False,
+        # 0 (default, off) = plain sharp bottom corners, unchanged behaviour.
+        # > 0 rounds the bottom-left/right corners with a concave fillet of
+        # this radius in units of `dx` -- see `buildSystem` and
+        # `filletedDomainBoundarySdf`'s docstring.
+        cornerFilletRadius=0.0,
     ),
 ))
 

@@ -14,8 +14,8 @@ import torch
 from warpSPHCore import *
 from typing import Optional, Union
 from ...enumTypes import AdaptiveSupportScheme
-from torch.profiler import profile, record_function, ProfilerActivity
-
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
 __all__ = ['evaluateOptimalSupport']
 
 def evaluateOptimalSupport(

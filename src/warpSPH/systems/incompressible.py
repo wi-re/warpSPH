@@ -22,8 +22,8 @@ from ..rigidBody.update import updateBodyParticlesWCSPH
 
 from ..modules.shifting.delta import computeDeltaShift
 from ..modules.shifting.wrapper import solveShifting
-from torch.profiler import profile, record_function, ProfilerActivity
-
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
 __all__ = ['IncompressibleState', 'IncompressibleSystemUpdate', 'IncompressibleSystem',
            'DFSPHReferenceSystem']
 
@@ -49,6 +49,11 @@ class IncompressibleState(BaseState):
 
     ghostIndices : torch.Tensor = constant(tags=('ghostIndices',), default=None)
     ghostOffsets : torch.Tensor = constant(tags=('ghostOffsets',), default=None)
+
+    # See `WeaklyCompressibleState`'s identical field -- `rigidBody/update.py`
+    # rebuilds either state type via the same keyword set, so both must carry
+    # it (WCSPH_DEFAULT_CLOSEOUT_PLAN.md item D).
+    boundaryAccelerations : torch.Tensor = constant(tags=('boundaryAcceleration',), default=None)
 
 @dataclass
 class IncompressibleSystemUpdate:

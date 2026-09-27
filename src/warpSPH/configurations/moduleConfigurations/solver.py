@@ -42,9 +42,16 @@ class JacobiRelaxationMode(Enum):
     The update is ``p <- p + omega * D^-1 * r`` with ``D = diag(A)``. Because
     ``D^-1 A`` is similar to the symmetric ``|D|^-1/2 (-A) |D|^-1/2 >= 0``,
     ``fixed`` converges iff ``omega < 2/rho(D^-1 A)`` -- a state-dependent
-    stability window (measured ~0.355 on the TGV operator family, so the
-    historical omega=0.5 default diverges and 0.3 sits inside with ~15%
-    margin). ``optimal`` removes the window entirely: each step uses the
+    stability window (measured ~0.355 on the TGV operator family, where the
+    historical omega=0.5 default diverges; on a bounded wall subproblem the
+    window is tighter and resolution-dependent, ~0.29-0.34, margin shrinking
+    from ~13% at nx=32/64 to ~7% at nx=128 -- see ``divergenceFree.py``'s
+    module docstring and ``DFSPH_FINDINGS.md`` Part 61). Spending that margin
+    (lowering ``omega``) is not free, though: measured at 0.27, it tightens
+    density bounds slightly but makes peak ``maxVelocity`` worse by a margin
+    that grows with resolution (+6% at nx=32, +15-21% at nx=128) -- not a
+    clean win, so the shipped default stays ``omega = 0.3``. ``optimal``
+    removes the window entirely: each step uses the
     exact residual minimizer ``omega_k = (r . A D^-1 r)/||A D^-1 r||^2``,
     which costs the same single matvec as the fixed step and decreases the
     residual monotonically for any starting size. See
@@ -472,6 +479,7 @@ class RelaxedJacobiSolverConfig:
     atol: float = field(default=0.0, metadata={"description": "Absolute residual floor for the rtol test (0 = purely relative). Read by the Krylov solvers and by the relaxed-Jacobi loops' relative disjunct; distinct from tolerance, which is the absolute test on the configured convergenceCriterion's statistic."})
     restart: int = field(default=30, metadata={"description": "GMRES restart length (ignored by the other solvers)"})
     krylovFp64: bool = field(default=False, metadata={"description": "Run the Krylov recurrence in float64 while the SPH matvec stays float32 (opt-in; improves the residual by roughly an order of magnitude on this ill-conditioned operator at negligible extra cost)"})
+    convergenceCheckSchedule: str = field(default='adaptive', metadata={"description": "When the relaxed-Jacobi divergence-free loops read the convergence test back to the host (one device sync per read): 'every' -- after every iteration (the historical behaviour); 'adaptive' -- assume this solve needs about as many iterations as the previous one (P, the iteration at which it first met the test) and check only at ceil(0.50 P), ceil(0.75 P), ceil(0.85 P), then every other iteration. The first solve, and verbose runs, check every iteration. A solve may run past its first converged iteration by up to the gap to the next checkpoint (more converged, never less). See SMALL_PROBLEM_PERFORMANCE.md."})
     convergenceCriterion: JacobiConvergenceCriterion = field(default=JacobiConvergenceCriterion.meanAbsolute, metadata={"description": "Which residual statistic the relaxed-Jacobi loop compares against tolerance: flooredOneSided (mean(clamp(-r, min=-tolerance)) -- solveIncompressible's historical test, one-sided and floored so under-dense particles cannot cancel over-dense ones), oneSided (mean(-r) -- the published form, [BK] Alg. 3 and [I] 5.1, without the floor), or meanAbsolute (mean(|r|) -- both divergence-free loops' historical test, and the only one of the three that is a norm). The three have different scales, so tolerance has to be re-tuned alongside this. buildDefaultPSConfig/buildDefaultDFConfig carry the shipped values. Ignored by the Krylov paths, which have their own rtol/atol contract. See JacobiConvergenceCriterion's docstring and DFSPH_IMPROVEMENT_PLAN.md 1.7 and Part 15."})
     boundaryOperatorTerms: BoundaryOperatorTerms = field(default=BoundaryOperatorTerms.staticBoundary, metadata={"description": "Which pressure-operator terms a static (kind != 0) neighbour contributes to *in this solver*: full (boundary and ghost particles are treated exactly like fluid ones in both computeAlpha's sums and the divergence the solvers iterate) or staticBoundary (the published formulation -- a particle that never moves takes no reaction force, so it is dropped from computeAlpha's second sum AND from the divergence's neighbour-acceleration term). The two single-sided values diagonalOnly/operatorOnly are diagnostics. The two solvers are configured separately because the operator they build is the only thing they share; the setting was measured on both crossed (Part 14) and staticBoundary on BOTH is the default, because splitting it is 1.45x worse on the constant-density side alone and 16x worse on the divergence-free side alone. IncompressibleSolverConfig.boundaryOperatorTerms, if set, overrides both. A no-op on cases with no kind != 0 particles. See BoundaryOperatorTerms' docstring and DFSPH_IMPROVEMENT_PLAN.md Parts 9, 13 and 14."})
 
@@ -481,6 +489,24 @@ def buildDefaultPSConfig() -> RelaxedJacobiSolverConfig:
         minIterations=2,
         maxIterations=64,
         tolerance=5e-4,
+        # 0.3 was tuned against the TGV operator family (~15% margin below
+        # the stability window, `2/rho(D^-1 A)`). Part 61's `--mode spectrum`
+        # sweep found the margin is resolution-dependent on the staticBoundary
+        # operator's bounded-wall subproblem: ~13% at nx=32/64, only ~7% at
+        # nx=128 (`randomFlowIncompressible --bounded`, the only case this
+        # solve's own probe hook reaches -- gravity-active cases route through
+        # a different in-step fold, unmeasured here). **Tried lowering this to
+        # 0.27 to restore margin; measured, not adopted** -- it is not the
+        # free lunch "flat inside the window" implied (that claim was never
+        # actually exercised before Part 61: this solve had a separate,
+        # independently-fixed bug, see `incompressible.py`'s loop, that
+        # silently pinned it at 0.3 regardless of this field). With the bug
+        # fixed, a real A/B (nx=32 and 128, 50/200 steps) shows a genuine
+        # trade: density bounds tighten slightly (nx=128 maxDensity 1.080 ->
+        # 1.064, minDensity 0.981 -> 0.983) but peak `maxVelocity` gets worse
+        # by a margin that grows with resolution (+6% at nx=32, +15-21% at
+        # nx=128) -- not a clean win, so the default stays 0.3. See
+        # `DFSPH_FINDINGS.md` Part 61.
         relaxationFactor=0.3,
         # Both solvers run the published static-boundary operator (Part 14).
         # Stated explicitly here rather than left to the field default, since
@@ -496,6 +522,8 @@ def buildDefaultDFConfig() -> RelaxedJacobiSolverConfig:
         minIterations=2,
         maxIterations=32,
         tolerance=2.5e-3,
+        # See buildDefaultPSConfig's comment -- same operator family, same
+        # margin measurement, same "measured, not adopted" call (Part 61).
         relaxationFactor=0.3,
         boundaryOperatorTerms=BoundaryOperatorTerms.staticBoundary,
         # Both divergence-free loops' historical test (Part 15).

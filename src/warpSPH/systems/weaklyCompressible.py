@@ -5,15 +5,18 @@ integrated via `drhodt`, with free-surface fields (`surfaceIndicators`/
 (`ghostIndices`/`ghostOffsets`) that mDBC and `rigidBody/` read and write.
 `finalize` applies delta-SPH particle shifting, then integrates every rigid
 body's pose and reprojects its particles (`rigidBody.integrate`/
-`rigidBody.update`) each step. Its density update computes a Padé-pole-clamped
-`epsilon` (kept well clear of the Padé(1,1) approximant's pole at +-2) but no
-longer uses it -- the update itself switched to an unclamped exponential form,
-so `epsilon` is now dead.
+`rigidBody.update`) each step. Density is left to the generic RK-combined
+continuity update the integrator already assembled before calling this hook;
+`finalize` only restores the non-fluid (mDBC) band's density, which the
+integrator can't see (`DELTASPH_VALIDATION_PLAN.md` item C -- this used to be
+a single-evaluation exponential override instead).
 """
 
 from warpSPHIntegrators import *
 from dataclasses import dataclass
 import torch
+from warpSPHCore import compileGlue
+from collections.abc import Mapping
 from typing import Optional
 from warpSPHCore import *
 
@@ -22,7 +25,172 @@ from ..rigidBody.update import updateBodyParticlesWCSPH
 
 from ..modules.shifting.delta import computeDeltaShift
 from ..modules.shifting.wrapper import solveShifting
-from torch.profiler import profile, record_function, ProfilerActivity
+from ..modules.mdbc import computeMdbcNoPenShift
+from ..modules.gravity import computeGravity
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
+#: Restore the normal share of the step's gravity when the no-penetration
+#: correction fires against a wall that gravity pulls *away* from (a ceiling).
+#: **Off: implemented, unvalidated, left for a case that needs it.**
+#:
+#: `finalize` rebuilds the velocity from `vPre`, so a particle whose correction
+#: fires loses that step's gravity along the corrected component. For a floor
+#: that is required (otherwise it accumulates downward velocity and sinks
+#: through); for a ceiling it would make a particle hover, which is the rule
+#: `DELTASPH_VALIDATION_PLAN.md` 5.12 sets out: `g . n_hat < 0` keep
+#: discarding, `> 0` put the gravity back.
+#:
+#: The rule is real, but the hovering particle it was written for turns out
+#: **not** to be caused by it: on sloshingTank UID 4104 the correction is not
+#: firing at all (`nopen_n = 0.000` every step, `v_norm ~ 0`, so the approach
+#: gate is false and `vPre` is never used). It is pinned by a steady
+#: into-the-wall acceleration of 3-12x gravity from the wall-tension
+#: asymmetry instead -- see 5.13 open item 1. So this path has no known
+#: reproduction, and enabling it would be a behaviour change to `finalize`
+#: that nothing in the suite exercises. Turn it on together with a case where
+#: a particle genuinely *approaches* a ceiling.
+_RESTORE_GRAVITY_ON_CEILING_NOPEN = False
+
+
+_STAT_AXIS_NAMES = ('X', 'Y', 'Z')
+
+
+def _statBlock(prefix: str, x: torch.Tensor) -> dict:
+    """min/max/mean/p05/p95 of a 1D tensor, `{prefix}{Min,Max,Mean,P05,P95}`.
+
+    NaN-filled (not omitted) when `x` is empty, so a trajectory's columns stay
+    the same shape whether or not any particle triggered whatever `x` counts
+    this step (`np.savez`'s `row.get(k, nan)` pattern already expects this).
+    """
+    if x.numel() == 0:
+        nan = float('nan')
+        return {f'{prefix}Min': nan, f'{prefix}Max': nan, f'{prefix}Mean': nan,
+                f'{prefix}P05': nan, f'{prefix}P95': nan}
+    xf = x.detach().float()
+    q = torch.quantile(xf, torch.tensor([0.05, 0.95], device=xf.device, dtype=xf.dtype))
+    return {
+        f'{prefix}Min': xf.min().item(), f'{prefix}Max': xf.max().item(),
+        f'{prefix}Mean': xf.mean().item(),
+        f'{prefix}P05': q[0].item(), f'{prefix}P95': q[1].item(),
+    }
+
+
+_STAT_SUFFIXES = ('Min', 'Max', 'Mean', 'P05', 'P95')
+
+
+@compileGlue
+def _accelStatBlocks(accel: torch.Tensor, q: torch.Tensor) -> torch.Tensor:
+    """(blocks, 5) = [min, max, mean, p05, p95] of |a| and of each axis of
+    the fluid accelerations `accel`; `q` = [0.05, 0.95] on the device. One
+    sort per block, quantiles bitwise `torch.quantile`'s
+    (`utils/syncFree.py:quantilesFromSorted`). Pure torch (`compileGlue`)."""
+    from ..utils.syncFree import quantilesFromSorted
+    rows = []
+    for x in [torch.linalg.norm(accel, dim=-1)] + [accel[:, a] for a in range(accel.shape[-1])]:
+        xf = x.detach().float()
+        pq = quantilesFromSorted(torch.sort(xf)[0], q)
+        rows.append(torch.stack([xf.min(), xf.max(), xf.mean(), pq[0], pq[1]]))
+    return torch.stack(rows)
+
+
+class _LazyStepDiagnostics(Mapping):
+    """`finalize`'s step statistics, computed from the stashed raw tensors on
+    first access (see `finalize`).
+
+    Split for the runner's graphed diagnostics: `deviceValues` is the
+    sync-free part (every block over the fixed fluid subset, plus the no-pen
+    active count) as 0-d device tensors; `fromHost` turns its host values into
+    the mapping, computing the no-pen magnitude block -- the only part with a
+    data-dependent size -- eagerly, and only on steps where the correction
+    touched a particle. Values and key order are the eager ones exactly."""
+
+    def __init__(self, accelAll, fluidMask, nopenshiftDiag):
+        self.raw = (accelAll, fluidMask, nopenshiftDiag)
+        self._values = None
+
+    def deviceValues(self, fluidIndex: torch.Tensor) -> dict:
+        """`fluidIndex`: the fluid rows (ascending, as the mask selects them),
+        e.g. `utils.syncFree.cachedKindIndex(kinds, 0, config)`."""
+        accelAll, _fluidMask, nopenshiftDiag = self.raw
+        from ..utils.syncFree import deviceConstant
+        dev = {}
+        if fluidIndex.numel() > 0:
+            accel = accelAll.index_select(0, fluidIndex)
+            blocks = _accelStatBlocks(accel, deviceConstant([0.05, 0.95], torch.float32, accel.device))
+            names = ['accelMag'] + [f'accel{_STAT_AXIS_NAMES[a]}' for a in range(accel.shape[-1])]
+            for b, prefix in enumerate(names):
+                for c, suffix in enumerate(_STAT_SUFFIXES):
+                    dev[f'{prefix}{suffix}'] = blocks[b, c]
+        if nopenshiftDiag is not None:
+            dev['nopenshiftNActive'] = nopenshiftDiag[1].any(dim=-1).sum()
+        return dev
+
+    def fromHost(self, host: dict) -> dict:
+        """The mapping's values from `deviceValues`' (host) numbers."""
+        accelAll, fluidMask, nopenshiftDiag = self.raw
+        stepDiag = {}
+        blocks = ['accelMag'] + [f'accel{_STAT_AXIS_NAMES[a]}' for a in range(accelAll.shape[-1])]
+        for prefix in blocks:
+            if f'{prefix}Min' in host:
+                stepDiag.update({f'{prefix}{k}': host[f'{prefix}{k}']
+                                 for k in ('Min', 'Max', 'Mean', 'P05', 'P95')})
+            else:
+                stepDiag.update(_statBlock(prefix, accelAll[:0, 0]))
+        if nopenshiftDiag is not None:
+            nopenshift, active = nopenshiftDiag
+            nActive = int(host['nopenshiftNActive'])
+            stepDiag['nopenshiftNActive'] = nActive
+            if nActive > 0:
+                stepDiag.update(_statBlock(
+                    'nopenshiftMag', torch.linalg.norm(nopenshift[active.any(dim=-1)], dim=-1)))
+            else:
+                stepDiag.update(_statBlock('nopenshiftMag', nopenshift[:0, 0]))
+        return stepDiag
+
+    def _compute(self):
+        if self._values is None:
+            fluidIndex = self.raw[1].nonzero().squeeze(1)
+            dev = self.deviceValues(fluidIndex)
+            keys = list(dev)
+            vals = (torch.stack([dev[k].to(torch.float64).reshape(()) for k in keys]).cpu().tolist()
+                    if keys else [])
+            self._values = self.fromHost(dict(zip(keys, vals)))
+        return self._values
+
+    def __getitem__(self, key):
+        return self._compute()[key]
+
+    def __iter__(self):
+        return iter(self._compute())
+
+    def __len__(self):
+        return len(self._compute())
+
+
+def _meanBoundaryNormal(state, adjacency):
+    """Mean inward normal of each fluid particle's boundary neighbours, from
+    their ghost offsets (`n_j = -offset_j / |offset_j|`, the same normal the
+    no-penetration kernel reflects along).
+
+    Returns `None` when the neighbour pairs are not available (a hash-map
+    adjacency), in which case the caller leaves its behaviour unchanged rather
+    than guessing an orientation. The shift vector itself is *not* a usable
+    proxy: its `factor = -4 ratio + 3` turns negative at deep contact, so the
+    shift can point back into the wall (`scripts/probe_nopenShiftResponse.py`
+    measures the reversal past ~1.25 dx).
+    """
+    ii = getattr(adjacency, 'i', None)
+    jj = getattr(adjacency, 'j', None)
+    if ii is None or jj is None:
+        return None
+    sel = (state.kinds[ii] == 0) & (state.kinds[jj] == 1)
+    if not bool(sel.any()):
+        return None
+    off = state.ghostOffsets[jj[sel]]
+    nj = -off / off.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+    acc = torch.zeros_like(state.positions)
+    acc.index_add_(0, ii[sel], nj)
+    return torch.nn.functional.normalize(acc, dim=-1)
 
 __all__ = ['WeaklyCompressibleState', 'WeaklyCompressibleSystemUpdate', 'WeaklyCompressibleSystem']
 
@@ -48,6 +216,15 @@ class WeaklyCompressibleState(BaseState):
 
     ghostIndices : torch.Tensor = constant(tags=('ghostIndices',), default=None)
     ghostOffsets : torch.Tensor = constant(tags=('ghostOffsets',), default=None)
+
+    # Per-particle rigid-body acceleration at boundary/ghost rows (zero
+    # elsewhere), written by `rigidBody/update.py`'s `updateBodyParticlesWCSPH`
+    # every step. `None` until at least one rigid body has been updated once
+    # (readers must treat `None` as "zero everywhere", the same fallback this
+    # field replaces -- `modules/mdbc/english2025.py`'s `a_b` used to be
+    # hardcoded to zero because no such field existed at all;
+    # WCSPH_DEFAULT_CLOSEOUT_PLAN.md item D).
+    boundaryAccelerations : torch.Tensor = constant(tags=('boundaryAcceleration',), default=None)
 
 @dataclass
 class WeaklyCompressibleSystemUpdate:
@@ -209,16 +386,72 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
 
 
 
-        initialRho = initialState.state.densities
+        # `self.state.densities` already holds the RK-combined continuity update
+        # by this point -- `densities` is declared `integrated('drhodt', ...)`,
+        # so the generic driver's `apply_state_update` -> `apply_quantity_update`
+        # -> `update_component` pass (`finalizeSystem` runs it before calling
+        # this hook) has already summed `rho^n + sum_i(b_i * dt * drhodt_i)` over
+        # every RK stage, the same combination positions/velocities get. Leave
+        # it alone for fluid particles.
+        #
+        # Previously this was overwritten with a single-evaluation exponential
+        # map `rho^n * exp(dt * drhodt_lastStage / rho_lastStage)` -- exact only
+        # for a frozen rate (a symplectic/semi-implicit-Euler shape), not for a
+        # multi-stage RK where combining the stage rates *is* the method: it
+        # used just the *last* stage's rate from the *initial* density, so
+        # density was ~1st order while position/velocity were the integrator's
+        # full order, and the convex `exp` rectifies an oscillatory drhodt into
+        # a net density gain (DELTASPH_VALIDATION_PLAN.md item C / sloshingTank
+        # acoustic ringing). The commented-out Padé(1,1) form below it was
+        # equally a single-evaluation override and was already dead (`epsilon`
+        # computed, never read).
+        #
+        # Non-fluid (boundary/rigid) particles: `enforceUpdates` masks their
+        # `drhodt` to zero, so the generic pass leaves them at rho^n, not at the
+        # mDBC value `deltaSPH_step` computed mid-step. Restore that explicitly.
         midRho = returnValues[-1][1].densities
-        
-        drhodtMid = updateValues[-1].drhodt
-        epsilon = -dt * drhodtMid / midRho
-        epsilon = torch.clamp(epsilon, min=-1.5, max=1.5)  # Pade approximant has a pole at +-2, stay well clear of it
-        # self.state.densities = initialRho * (2 - epsilon) / (2+epsilon)
-        self.state.densities = initialRho * torch.exp(dt * drhodtMid / midRho)  # Use exponential update to avoid negative densities
-
         self.state.densities = torch.where(self.state.kinds != 0, midRho, self.state.densities)
+
+        # Same guarantee for position. `integrated('dxdt', ...)`
+        # (`warpSPHIntegrators/fields.py`) declares `fluid_only=True` on this
+        # field, but that flag is never actually consulted by any generic
+        # integration path -- it's dead metadata. `schemes/deltaSPH.py` masks
+        # `update.dxdt` to zero for `kinds != 0` (belt) after every stage, which
+        # covers the explicit/RK integrators, but `symplecticEuler`'s second
+        # position half-step (`semi_implicit_position_step`,
+        # `warpSPHIntegrators/verlet.py`) reads the *raw* current velocity
+        # directly (`x += dt/2 * v_current`), not the masked `dxdt` -- so a
+        # boundary particle carrying a nonzero BC-prescribed velocity (a moving
+        # wall's Dirichlet condition, e.g. `cases/lidDrivenCavity.py`) drifts by
+        # `velocity * dt/2` **every step**, unboundedly, even though that
+        # velocity exists only to drive the SPH force sums, never to move the
+        # wall (suspender). Measured: 370 lid-band ghost/boundary particles
+        # drifting linearly, 1.5 domain-widths by t=3 at `lidVelocity=1`,
+        # wrecking the lattice the pressure/density estimate at the lid
+        # interface depends on -- the actual cause of the corner-seeded,
+        # lid-line shear instability under `--integrationScheme
+        # symplecticEuler` this was traced from (not a genuine corner
+        # singularity, though `regularizeLid` still helps by shrinking the
+        # velocity, hence the drift rate, near the corners).
+        self.state.positions = torch.where(
+            (self.state.kinds != 0).unsqueeze(-1),
+            initialState.state.positions, self.state.positions)
+        # Defensive floor only -- catches an actual sign flip / NaN from a
+        # pathological step, not part of the routine update (normal weakly-
+        # compressible density stays within a few percent of rho0).
+        self.state.densities = torch.nan_to_num(
+            self.state.densities, nan=schemeConfig.fluid.restDensity,
+            posinf=schemeConfig.fluid.restDensity, neginf=schemeConfig.fluid.restDensity
+        ).clamp_min(0.05 * schemeConfig.fluid.restDensity)
+
+        # Lone-particle density reset (`schemeConfig.loneDensityReset`,
+        # MDBC_CONTACT_LINE_PLAN.md §12): detected on the last stage's state
+        # with the adjacency it was evaluated with (positions and pair list
+        # consistent), applied to the final density below.
+        loneMask = None
+        if getattr(schemeConfig, 'loneDensityReset', False):
+            from ..modules.surfaceDetection import detectNoFluidNeighbours
+            loneMask = (lastState.kinds == 0) & detectNoFluidNeighbours(lastState, config, self.adjacency)
 
         if schemeConfig.shiftProperties.active:
             if schemeConfig.shiftProperties.correctdrhodt:
@@ -227,9 +460,96 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
                 self.state.velocities += (dudt + duCross) * dt
             self.state.positions += dx
 
+        if loneMask is not None:
+            self.state.densities = torch.where(
+                loneMask, torch.full_like(self.state.densities, schemeConfig.fluid.restDensity),
+                self.state.densities)
+
+        # mDBC no-penetration correction, DualSPHysics placement: once per real
+        # step, here with the other post-integration corrections, rather than as
+        # a force re-evaluated at every RK sub-stage (`DELTASPH_VALIDATION_PLAN`
+        # 5.9). `JSphGpuSimple_ker.cu`'s `MDBC2_NoPen` blocks do exactly this --
+        # `v_new = v^n + nopenshift` **replacing** the integrated component, and
+        # the displacement recomputed from it -- so this is a velocity
+        # replacement, not another acceleration summed with pressure and
+        # gravity. Applied per component, only where the correction is non-zero,
+        # and only to fluid particles (the wall band's own motion comes from the
+        # BC machinery).
+        nopenshiftDiag = None    # (nopenshift, active) for the diagnostics block below
+        if getattr(schemeConfig, 'mdbcNoPenShiftMode', 'derivative') == 'finalize':
+            with record_function("[warpSPH] - [deltaSPH] - no-pen shift (finalize)"):
+                nopenshift = computeMdbcNoPenShift(
+                    self.state, config, schemeConfig, self.adjacency)
+                active = (nopenshift != 0) & (self.state.kinds == 0).unsqueeze(-1)
+                nopenshiftDiag = (nopenshift, active)
+                # Unconditional (was `if bool(active.any()):`): every write below
+                # is a torch.where on `active`, so with no active row the state
+                # comes out unchanged -- same values, no host sync.
+                if True:
+                    vPre = initialState.state.velocities
+                    xPre = initialState.state.positions
+                    # `vPre + nopenshift` rebuilds from the *start-of-step*
+                    # velocity, so every step the correction fires the particle
+                    # loses that step's gravity along the corrected component.
+                    # For a floor that is required -- otherwise it accumulates
+                    # downward velocity and sinks through -- but for a ceiling
+                    # it is what makes a particle hover: measured on
+                    # sloshingTank, UID 4104 sat at y = 0.50700 with vy ~ 0 for
+                    # the final 10,000 steps, healthy rho and zero fluid
+                    # neighbours (`DELTASPH_VALIDATION_PLAN.md` 5.12 / 5.13).
+                    #
+                    # The orientation decides it. With `n_hat` the mean inward
+                    # normal of the boundary neighbours: `g . n_hat < 0` means
+                    # gravity presses into the wall (fluid resting on a floor)
+                    # and the discard is correct; `> 0` means gravity pulls
+                    # away from the wall (a ceiling) and the step's gravity has
+                    # to be put back, or nothing ever makes the particle fall.
+                    # Restoring only the normal share, and only in that case,
+                    # leaves the floor path untouched.
+                    gravityRestore = torch.zeros_like(nopenshift)
+                    nHat = (_meanBoundaryNormal(self.state, self.adjacency)
+                            if _RESTORE_GRAVITY_ON_CEILING_NOPEN else None)
+                    if nHat is not None:
+                        g = computeGravity(self.state, config, schemeConfig,
+                                           self.adjacency)
+                        gProj = (g * nHat).sum(dim=-1, keepdim=True)
+                        gravityRestore = torch.where(
+                            gProj > 0, dt * gProj * nHat,
+                            torch.zeros_like(gravityRestore))
+                    vNew = torch.where(active, vPre + nopenshift + gravityRestore,
+                                       self.state.velocities)
+                    self.state.positions = torch.where(
+                        active, xPre + vNew * dt, self.state.positions)
+                    self.state.velocities = vNew
+
         for rigidBody in schemeConfig.rigidBodies:
             rigidBody = integrateRigidBody(rigidBody, 0, 0, dt)
             self.state = updateBodyParticlesWCSPH(self.state, rigidBody)
+
+        # Per-step diagnostics: the *net* fluid acceleration actually applied
+        # this step (magnitude + per axis), and -- only under
+        # `mdbcNoPenShiftMode == 'finalize'`, where `nopenshiftDiag` above was
+        # set regardless of whether any particle ended up `active` -- how many
+        # fluid particles the no-pen correction touched and by how much.
+        # Stashed on `self` (the same object every case's `diagnostics(ctx,
+        # state)` receives as `state`) rather than returned, so it rides every
+        # trajectory row for free (`cases/weaklyCompressible.py
+        # stepAccelerationDiagnostics`) without every case needing to know
+        # this system's internals. Added after the overnight batch
+        # (`DELTASPH_VALIDATION_PLAN.md`) made "was it nopenshift?" a
+        # recurring question across the lid-driven cavity, Marrone 3.1 and
+        # Marrone 3.4 investigations that otherwise needed a one-off probe
+        # script and a from-scratch re-run each time to answer.
+        # The per-step statistics (quantiles over the fluid rows and over the
+        # no-pen-active subset) need host syncs and data-dependent sizes, and
+        # nothing in the step reads them -- only the case diagnostics do. So
+        # the raw full-size tensors are kept and the same statistics are
+        # computed on first read (`_LazyStepDiagnostics`), outside any
+        # captured step graph. Values are unchanged (elementwise ops commute
+        # with the row gather).
+        fluidMask = self.state.kinds == 0
+        accelAll = (self.state.velocities - initialState.state.velocities) / dt
+        self.stepDiagnostics = _LazyStepDiagnostics(accelAll, fluidMask, nopenshiftDiag)
 
         # Information for artificial viscosity switches
         # self.state.divergence.copy_(lastState.divergence)

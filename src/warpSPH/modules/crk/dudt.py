@@ -12,7 +12,8 @@ import warp as wp
 from warp.types import vector, matrix
 from typing import Any
 import torch
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
 
@@ -243,7 +244,7 @@ def computeCrkSPHdudt_Func_i(
 
 @wp.func
 def computeCrkSPHdudt_Func_Adjacency(
-    i : wp.int32, dim: wp.int32, 
+    i : wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32, 
 
     queryState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
     referenceState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
@@ -287,6 +288,9 @@ def computeCrkSPHdudt_Func_Adjacency(
 
     out = zero_like_warp(dudt)
     for o in range(numOffsets):
+        # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
+        if not useAdjacency and (o % lanes) != lane:
+            continue
         beginIndex = wp.int32(0)
         numIndices = wp.int32(0)
         if useAdjacency:    
@@ -301,6 +305,7 @@ def computeCrkSPHdudt_Func_Adjacency(
             if beginIndex < 0:
                 continue
         
+        beginIndex, numIndices = laneSlice(beginIndex, numIndices, lane, lanes, useAdjacency)
         out += computeCrkSPHdudt_Func_i(
             i, dim, 
             xi, hi, mi, rhoi,
@@ -356,7 +361,7 @@ def computeCrkSPHdudt_Kernel(
         return
 
     out_dudt[i] = computeCrkSPHdudt_Func_Adjacency(
-        i, domainState.dim,
+        i, domainState.dim, 0, 1,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,  #queryKinds, referenceKinds,
@@ -372,12 +377,60 @@ def computeCrkSPHdudt_Kernel(
         out_dudt
     )
 
+@wp.kernel
+def computeCrkSPHdudt_KernelTiled(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+    
+    kernelProperties: kernelState,
+    # Do not change the parameters above
+    queryVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    queryEnergies: wp.array(dtype = scalar_t), referenceEnergies: wp.array(dtype = scalar_t), # type: ignore
+    individual_cs: wp.bool, queryCs: wp.array(dtype = scalar_t), referenceCs: wp.array(dtype = scalar_t), # type: ignore
+    viscositySwitch: wp.bool, queryAlphas: wp.array(dtype = scalar_t), referenceAlphas: wp.array(dtype = scalar_t), # type: ignore
+    explicitPressure: wp.bool, queryPressures: wp.array(dtype = scalar_t), referencePressures: wp.array(dtype = scalar_t), # type: ignore
+    viscosityParams: DiffusionParameters,
+    crkViscosityParams: CRKViscosity,
+
+    queryVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), referenceVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)),# type: ignore
+    # The last parameter is always the output array and should not be changed
+    out_dudt : wp.array(dtype = Any), # type: ignore
+):
+    # Multi-lane variant of computeCrkSPHdudt_Kernel (warpSPHCore autograd/lanes.py):
+    # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
+
+    i, lane = wp.tid()
+    partial = computeCrkSPHdudt_Func_Adjacency(
+        i, domainState.dim, lane, wp.block_dim(),
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+        queryVelocities, referenceVelocities,
+        queryEnergies, referenceEnergies,
+        individual_cs, queryCs, referenceCs,
+        viscositySwitch, queryAlphas, referenceAlphas,
+        explicitPressure, queryPressures, referencePressures,
+        viscosityParams,
+        crkViscosityParams,
+        queryVelocityTensor, referenceVelocityTensor,
+        out_dudt
+    )
+    total = laneSum(partial)
+    if lane == 0:
+        out_dudt[i] = total
+
+
 def _crkDudtDtype(ctx, extras):
     return castTorchToWarpAsBuiltins(ctx.query.densities).dtype
 
 
 _CRK_DUDT = OperatorSpec(
     kernel=computeCrkSPHdudt_Kernel,
+    tiledKernel=computeCrkSPHdudt_KernelTiled,
     outputs=(OutputSpec(dtype=_crkDudtDtype, shape=ShapeOf.QUERY),),
     extras=(
         ExtraSpec("queryVelocities", ExtraKind.TENSOR),

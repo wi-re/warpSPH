@@ -8,33 +8,52 @@ constant (unchanged), no-slip (mirrored fluid velocity), free-slip
 to ghost points via a Shepard-normalized SPH gather. No-ops (returns
 `currentState.velocities` unchanged) when there are no boundary particles.
 
-Two measured deviations from the published mDBC forms, neither fixed -- see
-`DFSPH_IMPROVEMENT_PLAN.md` Part 9's addendum and
-`scripts/probe_boundaryVelocityModes.py --mode verify`, which grades both
-conditions against the wall normal:
+Both slip conditions are written on the **relative** velocity
+`w = Shepard(u_fluid) - u_body` and add the wall's own velocity back
+(`_ghostBodyVelocity`), so the boundary particle's normal component tracks the
+wall rather than being pinned to zero:
 
-- **Both slip conditions project the normal component out rather than
-  reflecting it.** Decomposed against the wall normal, `noSlip` measures
-  (normal, tangential) = (0, -1) and `freeSlip` (0, +1), where the published
-  forms are (-1, -1) and (-1, +1). The tangential half is exactly right in
-  both; the boundary particle simply never opposes an approaching fluid
-  particle's normal velocity, so a wall contributes half the compression
-  signal it should to the SPH divergence. Running the reflecting form instead
-  was measured and is *worse* on the bounded DFSPH case, with or without
-  `mdbcNoPenetrationShift` -- so this is recorded, not "fixed" blind.
-- **`noSlip`'s `2 * u_wall` term is dead.** It reads `currentState.velocities`
-  at the *ghost* rows, and nothing writes a body velocity there except
-  `rigidBody/update.py`'s `BCType.constant` branch, so on a moving no-slip wall
-  it degenerates to a stationary one. `lidDrivenCavity` does not show it
-  because `enforceDirichlet` runs after this function and re-imposes the lid
-  velocity on the boundary rows.
+    noSlip    u_g = u_body - w_t             (normal component = u_body . n)
+    freeSlip  u_g = u_body + w_t - w_n       (published form: normal reflected)
+
+That matters for the continuity equation, not just for advection: a wall moving
+into the fluid has to enter `div(v)` with its own normal velocity, otherwise the
+density change the wall drives is missing while gravity's forcing is not, and
+the two diverge. diffSPH's delta-SPH does the same thing by a different route --
+it restores `boundaryBodyVelocities` before `computeMomentum`
+(`schemes/deltaSPH.py:169`) instead of folding the body velocity into the BC.
+
+Graded against the wall normal (`scripts/probe_boundaryVelocityModes.py --mode
+verify`) the decomposition (normal, tangential) is now `freeSlip` **(-1, +1)**,
+the published form, and `noSlip` **(0, -1)**.
+
+**`freeSlip` reflects the fluid's normal component as of
+`DELTASPH_VALIDATION_PLAN.md` 5.7.** It used to project it out (0, +1), so the
+wall never opposed an approaching fluid particle and contributed half the
+compression signal it should to the SPH divergence. Measured cost on Marrone
+3.1: with a non-reflecting, non-slipping bed the dam-break tongue thinned to
+2.8 dx and shed fliers 8 dx ahead of the front, which reached the far wall
+early and drove the P1 probe to ~10x the reference; the bed also went to
+*negative* pressure under the front (an attracting wall). Switching this case's
+wall to free slip restored the tongue to 10-14 dx and halved the flier lead.
+
+**`noSlip` still projects rather than reflects** ((0, -1) against the published
+(-1, -1)) -- deliberately, not overlooked. `DFSPH_IMPROVEMENT_PLAN.md` Part 9's
+addendum measured the reflecting form as *worse* on the bounded DFSPH case, with
+or without `mdbcNoPenetrationShift`. Revisit it with that case in hand, not
+blind.
+
+For a stationary wall (`u_body = 0`), `noSlip` is bit-for-bit what this module
+computed before; `freeSlip` is not, by design.
 """
 
 import warp as wp
 from warp.types import vector, matrix
 from typing import Any
 import torch
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
+from warpSPHCore import compileGlue
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
 
@@ -51,111 +70,134 @@ from ...configurations.weaklyCompressible import WeaklyCompressibleSPHConfig
 
 from ..liu import interpolateLiuLiu
 from ._util import stateHasBoundaryParticles
+from ...utils.syncFree import deviceConstant, ghostSourceIndex, ghostTargetIndex, scatterRows
+
+
+def _shepardFluidVelocity(currentState: Any, config: SimulationConfig, adjacency: Optional[Union[AdjacencyList, CompactHashMap]]):
+    """The fluid velocity gathered onto the ghost nodes and its Shepard sum,
+    `(sum_j u_j W_ij V_j, sum_j W_ij V_j)`; `_slipVelocity` normalizes.
+
+    Rows other than `kinds == 2` come back zero: the gather runs
+    `FluidToGhost`, so only ghost rows accumulate.
+    """
+    props = OperationProperties(
+        kernel = config.kernel,
+        operation = WarpOperation.Interpolate,
+        supportMode = SupportScheme.Gather,
+        operationMode = OperationDirection.FluidToGhost,
+    )
+    qVel = warpOperation(
+        currentState, props, domain = config.domain, adjacency = adjacency,
+        queryValues = currentState.velocities,
+    )
+    shepValue = warpOperation(
+        currentState, props, domain = config.domain, adjacency = adjacency,
+        queryValues = torch.ones_like(currentState.densities),
+    )
+    return qVel, shepValue
+
+
+def _ghostBodyVelocity(currentState: Any, schemeConfig: Any) -> torch.Tensor:
+    """The wall's own rigid-body velocity, broadcast onto its ghost nodes.
+
+    **Only particles owned by a `RigidBody` get a non-zero value; everything
+    else is zero.** That restriction is the whole subtlety. The BC arithmetic
+    runs on ghost rows, but a body velocity is written on the *boundary* rows
+    (`rigidBody/update.py`), so this has to map across via `ghostIndices` --
+    and it is tempting to just read `currentState.velocities` there. That is
+    wrong: for a wall with no rigid body those rows hold whatever the last
+    step's BC left behind, not a prescribed wall motion, so feeding it back in
+    as `u_body` makes the condition compound on its own output. Measured:
+    `scripts/probe_boundaryVelocityModes.py --mode verify` graded `freeSlip`'s
+    normal slope at **-3** instead of -1, because `u_g . n = 2(u_body . n) -
+    f . n` with `u_body . n` already equal to `-f . n` from the previous step.
+
+    This term was historically dead (it read the ghost rows, which are always
+    zero), which is why the compounding never showed up before it was fixed.
+    """
+    ghostMask = currentState.kinds == 2
+    bodyVelocity = torch.zeros_like(currentState.velocities)
+    bodies = getattr(schemeConfig, 'rigidBodies', None) or []
+    if bodies:
+        owned = torch.zeros(currentState.velocities.shape[0], dtype=torch.bool,
+                            device=currentState.velocities.device)
+        for body in bodies:
+            idx = getattr(body, 'particleIndices', None)
+            if idx is not None:
+                owned[idx] = True
+        bodyVelocity = torch.where(owned.view(-1, 1), currentState.velocities,
+                                   bodyVelocity)
+    # bodyVelocity[ghostMask] = bodyVelocity[ghostIndices[ghostMask]], without
+    # the mask-induced host sync (utils/syncFree.py)
+    src = ghostSourceIndex(currentState.kinds, currentState.ghostIndices)
+    bodyVelocity = torch.where(ghostMask.view(-1, 1), bodyVelocity[src], bodyVelocity)
+    return bodyVelocity
+
+
+@compileGlue
+def _slipVelocity(qVelSum, shepValue, bodyVelocity, ghostOffsets, reflect: bool):
+    """The ghost velocity of the slip conditions, from the Shepard gather:
+    free slip (`reflect`) keeps the tangential part of the relative velocity
+    and reflects its normal part, no slip reverses the tangential part and
+    drops the normal part (see `freeSlip` / `noSlip`). Pure elementwise torch
+    (fused by `compileGlue` when enabled)."""
+    qVel = qVelSum / (shepValue.view(-1,1) + 1e-7)
+    r_ib = torch.linalg.norm(ghostOffsets, dim=-1)
+    n_b = ghostOffsets / (r_ib.view(-1,1) + 1e-7)
+    w = qVel - bodyVelocity
+    if reflect:
+        w_n = torch.einsum('nd, nd -> n', w, n_b).view(-1,1) * n_b
+        return bodyVelocity + (w - w_n) - w_n          # = u_body + w_t - w_n
+    w_t = w - torch.einsum('nd, nd -> n', w, n_b).view(-1,1) * n_b
+    return bodyVelocity - w_t
 
 
 def noSlip(currentState: Any, config: SimulationConfig, schemeConfig: WeaklyCompressibleSPHConfig, adjacency: Optional[Union[AdjacencyList, CompactHashMap]]) -> torch.Tensor:
     """
     Computes the no-slip boundary condition for ghost particles based on the velocities of fluid particles.
     """
-    # Interpolate fluid velocities to ghost particles
-    qVel = warpOperation(
-        currentState,
-        OperationProperties(
-            kernel = config.kernel,
-            operation = WarpOperation.Interpolate,
-            supportMode = SupportScheme.Gather,
-            operationMode = OperationDirection.FluidToGhost
-        ),
-        domain = config.domain,
-        adjacency = adjacency,
-        queryValues = currentState.velocities,
-    )
-    
-    # Compute Shepard values for normalization
-    shepValue = warpOperation(
-        currentState,
-        OperationProperties(
-            kernel = config.kernel,
-            operation = WarpOperation.Interpolate,
-            supportMode = SupportScheme.Gather,
-            operationMode = OperationDirection.FluidToGhost
-        ),
-        domain = config.domain,
-        adjacency = adjacency,
-        queryValues = torch.ones_like(currentState.densities),
-    )
+    qVelSum, shepValue = _shepardFluidVelocity(currentState, config, adjacency)
 
-    # Normalize interpolated velocities
-    qVel = qVel / (shepValue.view(-1,1) + 1e-7)
+    # No-slip on the *relative* velocity: reverse the fluid's tangential slip
+    # about the wall, then add the wall's own velocity back, so the normal
+    # component is `u_body . n` rather than 0. At `u_body = 0` this is
+    # `-tangential(u_f)`, bit-for-bit what this function returned before.
+    # The fluid's normal component stays projected out rather than reflected --
+    # a separate, measured deviation; see the module docstring.
+    bodyVelocity = _ghostBodyVelocity(currentState, schemeConfig)
+    u_g = _slipVelocity(qVelSum, shepValue, bodyVelocity, currentState.ghostOffsets, False)
 
-    # The no-slip condition. Two caveats, both measured -- see this module's
-    # docstring: `bodyVelocity` is read at the *ghost* rows, where nothing
-    # writes a moving body's velocity, and the `projected_vels` step below
-    # drops the normal component instead of reflecting it, so what this
-    # actually returns is `-tangential(u_f)`.
-    bodyVelocity = currentState.velocities
-    bIndices = currentState.ghostIndices[currentState.kinds == 2]
-    u_g = 2 * bodyVelocity - qVel
-
-    r_ib = torch.linalg.norm(currentState.ghostOffsets, dim=-1)
-    n_b = currentState.ghostOffsets / (r_ib.view(-1,1) + 1e-7)
-    projected_vels = u_g - torch.einsum('nd, nd -> n', u_g, n_b).view(-1,1) * n_b
-
-    u_g[bIndices,:] = projected_vels[currentState.kinds == 2,:]
-
-    return u_g
+    # out[ghostIndices[ghost]] = u_g[ghost], sync-free (utils/syncFree.py)
+    return scatterRows(currentState.velocities,
+                       ghostTargetIndex(currentState.kinds, currentState.ghostIndices), u_g)
 
 def freeSlip(currentState: Any, config: SimulationConfig, schemeConfig: WeaklyCompressibleSPHConfig, adjacency: Optional[Union[AdjacencyList, CompactHashMap]]) -> torch.Tensor:
     """
     Computes the free-slip boundary condition for ghost particles based on the velocities of fluid particles.
     """
-    # Interpolate fluid velocities to ghost particles
-    qVel = warpOperation(
-        currentState,
-        OperationProperties(
-            kernel = config.kernel,
-            operation = WarpOperation.Interpolate,
-            supportMode = SupportScheme.Gather,
-            operationMode = OperationDirection.FluidToGhost
-        ),
-        domain = config.domain,
-        adjacency = adjacency,
-        queryValues = currentState.velocities,
-    )
-    
-    # Compute Shepard values for normalization
-    shepValue = warpOperation(
-        currentState,
-        OperationProperties(
-            kernel = config.kernel,
-            operation = WarpOperation.Interpolate,
-            supportMode = SupportScheme.Gather,
-            operationMode = OperationDirection.FluidToGhost
-        ),
-        domain = config.domain,
-        adjacency = adjacency,
-        queryValues = torch.ones_like(currentState.densities),
-    )
+    qVelSum, shepValue = _shepardFluidVelocity(currentState, config, adjacency)
 
-    # Normalize interpolated velocities
-    qVel = qVel / (shepValue.view(-1,1) + 1e-7)
+    # Free slip, published form, on the *relative* velocity: keep the fluid's
+    # tangential share and **reflect** its normal component, then add the
+    # wall's own velocity back.
+    #
+    #     u_g = u_body + w_t - w_n ,   w = Shepard(u_f) - u_body
+    #
+    # Decomposed against the wall normal that is (normal, tangential) =
+    # (-1, +1), which is what `scripts/probe_boundaryVelocityModes.py --mode
+    # verify` grades against. This used to *project* the normal component out
+    # (`u_g = u_body + w_t`, giving (0, +1)), so the wall never opposed an
+    # approaching fluid particle and contributed half the compression signal it
+    # should to the SPH divergence. Measured consequence on Marrone 3.1
+    # (`DELTASPH_VALIDATION_PLAN.md` 5.7): under a dragged bed the dam-break
+    # tongue thinned to 2.8 dx and shed fliers 8 dx ahead of the front, which
+    # slammed the far wall early and drove the P1 probe to 10x the reference.
+    bodyVelocity = _ghostBodyVelocity(currentState, schemeConfig)
+    u_g = _slipVelocity(qVelSum, shepValue, bodyVelocity, currentState.ghostOffsets, True)
 
-    # The free-slip condition. NOTE: the published form is
-    # `u_g = u_f - 2 * (u_f . n_b) * n_b` (reflect the normal component); what
-    # is computed below is `u_f - 1 * (u_f . n_b) * n_b` (project it out), so
-    # the boundary particle ends up with no normal velocity rather than the
-    # reversed one. Measured and left as is -- see this module's docstring.
-    bodyVelocity = currentState.velocities
-    bIndices = currentState.ghostIndices[currentState.kinds == 2]
-    
-    r_ib = torch.linalg.norm(currentState.ghostOffsets, dim=-1)
-    n_b = currentState.ghostOffsets / (r_ib.view(-1,1) + 1e-7)
-
-    projected_vels = qVel - torch.einsum('nd, nd -> n', qVel, n_b).view(-1,1) * n_b
-    projected_vels[bIndices,:] = projected_vels[currentState.kinds == 2,:]
-
-
-    return projected_vels
+    # out[ghostIndices[ghost]] = u_g[ghost], sync-free (utils/syncFree.py)
+    return scatterRows(currentState.velocities,
+                       ghostTargetIndex(currentState.kinds, currentState.ghostIndices), u_g)
 
 def extendedVelocity(currentState: Any, config: SimulationConfig, schemeConfig: WeaklyCompressibleSPHConfig, adjacency: Optional[Union[AdjacencyList, CompactHashMap]]) -> torch.Tensor:
 
@@ -169,16 +211,22 @@ def extendedVelocity(currentState: Any, config: SimulationConfig, schemeConfig: 
         neighbor_threshold = 4,
         direction = OperationDirection.FluidToGhost,
         supportScale = 1.0
-    ) for uv in uvs] # res[:,0], res[:,1:], neighCounts, A_g, b
+    ) for uv in uvs] # res[:,0], res[:,1:], neighCounts, A_g, b, wellConditioned
 
 
     ghostMask = currentState.kinds == 2
-    relPos = currentState.ghostOffsets[ghostMask]
+    # Negated to match every other `ghostOffsets[ghostMask]` consumer's
+    # convention (`relPos = r_b - r_g`, e.g. `mdbc/density2025.py`). This
+    # function used to omit the `-` and still land on the right answer only
+    # because the ghost row's sign was itself wrong (`rigidBody/update.py`'s
+    # bug); now that the root cause is fixed, the negation has to be applied
+    # here explicitly. See `BOUNDARY_DENSITY_PLAN.md` §9.1.
+    relPos = -currentState.ghostOffsets[ghostMask]
 
     velocities = [currentState.velocities.new_zeros(currentState.velocities.shape[0], device = currentState.velocities.device, dtype = currentState.velocities.dtype) for uv in extendedVelocities]
 
     for d in range(currentState.velocities.shape[1]):
-        u_interp, u_interp_grad, numNeighbors, A_g, b = extendedVelocities[d]
+        u_interp, u_interp_grad, numNeighbors, A_g, b, wellConditioned = extendedVelocities[d]
 
         shepardNominator = b[:,0]
         shepardDenominator = A_g[:,0,0]
@@ -188,9 +236,13 @@ def extendedVelocity(currentState: Any, config: SimulationConfig, schemeConfig: 
         vel = velocities[d]
         vel[bIndices] = torch.where(numNeighbors > 0, shepardDensity, vel[bIndices])
 
-        threshold = 9
-
-        vel[bIndices] = torch.where(numNeighbors > threshold, (u_interp - torch.einsum('nu, nu -> n',(-relPos), u_interp_grad)), vel[ghostMask])
+        # `wellConditioned` (interpolateLiuLiu's neighbour-count-AND-determinant
+        # gate, DELTASPH_VALIDATION_PLAN.md Part 3) replaces a bare
+        # `numNeighbors > 9`. Also fixed: the fallback branch read
+        # `vel[ghostMask]` (always zero -- ghost rows are never written here)
+        # instead of `vel[bIndices]`, which discarded the Shepard value just
+        # written above for every ill-conditioned/low-neighbour row.
+        vel[bIndices] = torch.where(wellConditioned, (u_interp - torch.einsum('nu, nu -> n',(-relPos), u_interp_grad)), vel[bIndices])
 
     extendedVelocities = torch.stack(velocities, dim = -1)
     return extendedVelocities
@@ -208,8 +260,6 @@ def computeBoundaryVelocities(currentState: Any, config: SimulationConfig, schem
         return currentState.velocities
     with record_function("[warpSPH] - (mdbc) - computeBoundaryVelocities"):
 
-        materials = currentState.materials[currentState.kinds == 1]
-        uniqueMaterials = torch.unique(materials)
 
 
         boundaryRegions = [region for region in config.regions if region.type == RegionType.Boundary]
@@ -218,10 +268,10 @@ def computeBoundaryVelocities(currentState: Any, config: SimulationConfig, schem
         boundaryMask = currentState.kinds == 1
 
         BCTypes = [region.kind for region in boundaryRegions]
-        BCTypesT = torch.tensor([bct.value for bct in BCTypes], device = currentState.velocities.device, dtype = torch.int64)
+        BCTypesT = deviceConstant([bct.value for bct in BCTypes], torch.int64, currentState.velocities.device)
 
-        boundaryMaterials = currentState.materials.clone()
-        boundaryMaterials[currentState.kinds != 1] = 0
+        boundaryMaterials = torch.where(currentState.kinds != 1,
+                                        torch.zeros_like(currentState.materials), currentState.materials)
         BCmask = BCTypesT[boundaryMaterials.long()]
         
         outputVelocities = currentState.velocities.clone()

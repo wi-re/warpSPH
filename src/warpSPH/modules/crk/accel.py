@@ -14,7 +14,8 @@ import warp as wp
 from warp.types import vector, matrix
 from typing import Any
 import torch
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
 
@@ -267,7 +268,7 @@ def computeCrkSPHAccel_Func_i(
 
 @wp.func
 def computeCrkSPHAccel_Func_Adjacency(
-    i : wp.int32, dim: wp.int32, 
+    i : wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32, 
 
     queryState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
     referenceState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
@@ -313,6 +314,9 @@ def computeCrkSPHAccel_Func_Adjacency(
 
     out = zero_like_warp(accel[i])
     for o in range(numOffsets):
+        # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
+        if not useAdjacency and (o % lanes) != lane:
+            continue
         beginIndex = wp.int32(0)
         numIndices = wp.int32(0)
         if useAdjacency:    
@@ -327,6 +331,7 @@ def computeCrkSPHAccel_Func_Adjacency(
             if beginIndex < 0:
                 continue
         
+        beginIndex, numIndices = laneSlice(beginIndex, numIndices, lane, lanes, useAdjacency)
         out += computeCrkSPHAccel_Func_i(
             i, dim, 
             xi, hi, mi, rhoi,
@@ -386,7 +391,7 @@ def computeCrkSPHAccel_Kernel(
         return
 
     accel[i] = computeCrkSPHAccel_Func_Adjacency(
-        i, domainState.dim,
+        i, domainState.dim, 0, 1,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,  #queryKinds, referenceKinds,
@@ -402,6 +407,55 @@ def computeCrkSPHAccel_Kernel(
         accel, pressureAccel_ij, viscosityAccel_ij
     )
 
+@wp.kernel
+def computeCrkSPHAccel_KernelTiled(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+    
+    kernelProperties: kernelState,
+    # Do not change the parameters above
+    queryVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    queryEnergies: wp.array(dtype = scalar_t), referenceEnergies: wp.array(dtype = scalar_t), # type: ignore
+    individual_cs: wp.bool, queryCs: wp.array(dtype = scalar_t), referenceCs: wp.array(dtype = scalar_t), # type: ignore
+    viscositySwitch: wp.bool, queryAlphas: wp.array(dtype = scalar_t), referenceAlphas: wp.array(dtype = scalar_t), # type: ignore
+    explicitPressure: wp.bool, queryPressures: wp.array(dtype = scalar_t), referencePressures: wp.array(dtype = scalar_t), # type: ignore
+    viscosityParams: DiffusionParameters,
+    crkViscosityParams: CRKViscosity,
+
+    queryVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), referenceVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)),# type: ignore
+    # The last parameter is always the output array and should not be changed
+    accel : wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    pressureAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    viscosityAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+):
+    # Multi-lane variant of computeCrkSPHAccel_Kernel (warpSPHCore autograd/lanes.py):
+    # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
+
+    i, lane = wp.tid()
+    partial = computeCrkSPHAccel_Func_Adjacency(
+        i, domainState.dim, lane, wp.block_dim(),
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+        queryVelocities, referenceVelocities,
+        queryEnergies, referenceEnergies,
+        individual_cs, queryCs, referenceCs,
+        viscositySwitch, queryAlphas, referenceAlphas,
+        explicitPressure, queryPressures, referencePressures,
+        viscosityParams,
+        crkViscosityParams,
+        queryVelocityTensor, referenceVelocityTensor,
+        accel, pressureAccel_ij, viscosityAccel_ij
+    )
+    total = laneSum(partial)
+    if lane == 0:
+        accel[i] = total
+
+
 def _crkAccelPairShape(ctx, extras):
     return ctx.adjacency.i.shape[0]
 
@@ -412,6 +466,7 @@ def _crkAccelDtype(ctx, extras):
 
 _CRK_ACCEL = OperatorSpec(
     kernel=computeCrkSPHAccel_Kernel,
+    tiledKernel=computeCrkSPHAccel_KernelTiled,
     outputs=(
         OutputSpec(dtype=_crkAccelDtype, shape=ShapeOf.QUERY),
         OutputSpec(dtype=_crkAccelDtype, shape=_crkAccelPairShape),

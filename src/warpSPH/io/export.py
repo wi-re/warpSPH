@@ -9,8 +9,9 @@ import numpy as np
 import torch
 
 from ..configurations import *
-from ..enumTypes import (CompressibleSPHScheme, WeaklyCompressibleSPHScheme,
-                         IncompressibleSPHScheme, WaveEquationScheme)
+from ..enumTypes import (ArtificialCompressibleSPHScheme, CompressibleSPHScheme,
+                         WeaklyCompressibleSPHScheme, IncompressibleSPHScheme,
+                         WaveEquationScheme)
 from ..utils import getCurrentTimestamp
 from .hdf5 import dumpAdjacency, dumpState, dumpStage, copy_dict_to_h5, _encode_callable
 
@@ -28,7 +29,8 @@ def schemeAttribute(scheme) -> str:
     """
     return scheme.name if isinstance(
         scheme, (CompressibleSPHScheme, WeaklyCompressibleSPHScheme,
-                 IncompressibleSPHScheme, WaveEquationScheme)) else scheme
+                 IncompressibleSPHScheme, ArtificialCompressibleSPHScheme,
+                 WaveEquationScheme)) else scheme
 
 
 def exportSimulationSystem(
@@ -92,6 +94,15 @@ def exportSimulationSystem(
             outFile.attrs[key] = 'list'
         elif isinstance(value, torch.Tensor):
             outFile.create_dataset(key, data=value.cpu().numpy())
+        elif value is None:
+            # An unset optional case parameter. `None` maps to numpy object
+            # dtype, which h5py rejects ("no native HDF5 equivalent"), and that
+            # aborted the *whole* state write -- so any case carrying an unset
+            # optional in `extraData` could not be checkpointed at all
+            # (`sloshingTank`'s `noPenShift`). Record the key as an explicit
+            # sentinel instead of dropping it, so a reader can tell "unset"
+            # apart from "absent".
+            outFile.attrs[key] = 'None'
         else:
             # print(f'Exporting extra data key {key} with value {value} of type {type(value)}')
             outFile.attrs[key] = value

@@ -44,6 +44,7 @@ class CaseSpec:
     L: float = 2.0
     n_h: float = 4.0
     calibrateNormalization: bool = False
+    densityCorrection: bool = False
     periodic: bool = True
 
     # --- scheme selection ---------------------------------------------------
@@ -68,10 +69,40 @@ class CaseSpec:
     # When set, overrides the tLimit-derived step count. Tests use this to run a
     # fixed, short trajectory without having to reason about the adaptive dt.
     nSteps: Optional[int] = None
+    #: Abort the run (`RunResult.diverged = True`) once the adaptive `dt`
+    #: has sat at `minDt` for this many consecutive steps. `None` (default):
+    #: no watchdog, unchanged behaviour. A healthy adaptive-`dt` run should
+    #: never need its floor for long -- pinning there usually means a single
+    #: outlier particle (e.g. an escaper past a wall) has driven the CFL
+    #: estimate to its minimum and simulated time has effectively frozen,
+    #: which otherwise burns wall-clock for the rest of `tLimit`/`nSteps`
+    #: without the run advancing. See `ACSPH_PLAN.md`'s dam-break stall.
+    stallDtSteps: Optional[int] = None
+    #: Sim-time progress watchdog: abort once the last `STALL_WINDOW_STEPS`
+    #: (1000) steps advanced simulated time by less than this fraction of
+    #: `tLimit`. `stallDtSteps` only fires when dt sits *exactly* at `minDt`;
+    #: ACSPH's [0.8, 1.2] step-ratio clamp lets dt hover just above it (one
+    #: probe ran 7 h frozen, FREESLIP_DAMBREAK_FINDINGS.md 9.6). Relative to
+    #: `tLimit`, so the same value means the same thing in every case: 1e-4
+    #: = "at this rate the run needs > 1e7 more steps". Needs `tLimit`.
+    stallProgress: Optional[float] = None
 
     # --- runtime ------------------------------------------------------------
     precision: str = 'float32'
     device: Optional[str] = None
+    #: Capture the scheme's right-hand side in a CUDA graph and replay it
+    #: (`utils/cudaGraph.py`) -- removes the per-op CPU cost that dominates
+    #: small problems; bitwise identical to eager (self-checked at every
+    #: capture, falling back to eager on any mismatch). Only the delta-SPH
+    #: family acts on it, and only in configurations whose RHS is a pure
+    #: function of the state (`schemes/deltaSPH.py:_rhsIsGraphable`); a no-op
+    #: elsewhere. The scheme config must not be changed after the first step.
+    cudaGraph: bool = False
+    #: With a whole-step graph: run step n's diagnostics and plot frame on a
+    #: side stream while step n+1 replays (`runner.py:_runPipelined`). Same
+    #: rows and frames; `stepTime_ms` becomes the per-step wall throughput.
+    #: Off restores the one-thing-at-a-time loop (A/B timing, debugging).
+    pipelineOutputs: bool = True
 
     # --- output -------------------------------------------------------------
     plot: bool = False
@@ -94,6 +125,11 @@ class CaseSpec:
     #: connection where the `jupyter_rfb` widget's comm channel to the
     #: browser does not come up, even though the kernel itself renders fine.
     plotBackendOptions: Optional[Dict[str, Any]] = None
+    #: Without a live window (`show=False`) and with the vispy backend, render
+    #: the frames on a worker thread through EGL, overlapping the steps that
+    #: follow (`runner.py:_RenderThread`); the same frames. Off: render on the
+    #: loop's thread.
+    asyncPlot: bool = True
     store: bool = False
     #: 'states' writes one HDF5 file per stored step (the examples' pattern);
     #: 'trajectory' writes a single growing trajectory.h5 (the datagen pattern).
@@ -102,6 +138,21 @@ class CaseSpec:
     #: Simulated-time export interval, used when storeMode == 'trajectory'.
     exportInterval: float = 0.002
     exportRoot: Optional[str] = None
+    #: Path to a `storeMode='states'` checkpoint (`.../trajectory/state_NNNN.h5`,
+    #: `initialState.h5`, or `finalState.h5`) to resume from, instead of
+    #: `case.initialConditions`' fresh t=0 state. The case/spec must still
+    #: describe the SAME configuration (nx, params, scheme, ...) the
+    #: checkpoint was written under -- this replaces the particle state and
+    #: simulated time only, not domain/config setup, so a mismatched spec
+    #: loads a state whose shapes/geometry don't match what the rest of the
+    #: run expects. `None`: a normal fresh-start run (default).
+    resumeFrom: Optional[str] = None
+    #: The checkpoint's own absolute step number (e.g. 64000 for
+    #: `state_64000.h5`) -- offsets every step number this run reports
+    #: (diagnostics' `step` column, `postStep`'s step arg, stored checkpoint
+    #: filenames) so they read as a continuation of the original run rather
+    #: than restarting from 0. Ignored when `resumeFrom` is unset.
+    resumeStepOffset: int = 0
     video: bool = False
     #: `None` means "when a terminal is watching". Redirected to a file, a tqdm
     #: bar writes a carriage-return smear that buries the report an unattended
@@ -188,6 +239,9 @@ _FIELD_HELP = {
     'n_h': 'neighbours per smoothing length; converted to targetNeighbors',
     'calibrateNormalization': 'scale the kernel by 1/L so a perfect lattice reads rho0 '
                               '(LATTICE_DENSITY_PLAN.md); off by default',
+    'densityCorrection': 'subtract eps m W(0,h) from the raw density (Dehnen & Aly '
+                         '2012 eq. 18/19, constants from warpSPHCore.util.densityCorrection); '
+                         'off by default',
     'periodic': 'wrap the domain at its edges',
     # -- operators --
     'kernel': 'SPH kernel function',
@@ -205,6 +259,11 @@ _FIELD_HELP = {
     'minDt': 'floor on the adaptive timestep',
     'maxDt': 'ceiling on the adaptive timestep',
     'nSteps': 'stop after this many steps instead of at tLimit',
+    'stallDtSteps': 'abort once dt has sat at minDt for this many consecutive '
+                    'steps (a stuck-dt watchdog); unset disables it',
+    'stallProgress': 'abort once the last 1000 steps advanced sim time by less '
+                     'than this fraction of tLimit (catches dt hovering just '
+                     'above minDt); unset disables it',
     # -- runtime --
     'precision': 'scalar precision; resolved before import, so pass it to '
                  'warpsph-run rather than to a case module',
@@ -221,6 +280,10 @@ _FIELD_HELP = {
     'exportInterval': 'simulated time between frames (storeMode=trajectory)',
     'exportRoot': "parent directory for run folders; unset uses "
                   "$WARPSPH_EXPORT_ROOT, else 'export'",
+    'resumeFrom': 'path to a storeMode=states checkpoint .h5 to resume from '
+                  '(replaces the state/time case.initialConditions would set)',
+    'resumeStepOffset': "the checkpoint's own absolute step number, so this "
+                        "run's step numbering continues from there",
     'video': 'encode the exported frames with ffmpeg; skipped if it is missing',
     'progress': 'show a progress bar; unset means "when a terminal is watching"',
     'verbose': 'print extra detail during setup',
@@ -279,12 +342,14 @@ def _addField(parser: argparse.ArgumentParser, name: str, default: Any, annotati
 
 
 def schemeNames() -> List[str]:
-    """Every solver name `--scheme` accepts, across the four scheme families."""
-    from ..enumTypes import (CompressibleSPHScheme, IncompressibleSPHScheme,
-                             WaveEquationScheme, WeaklyCompressibleSPHScheme)
+    """Every solver name `--scheme` accepts, across the five scheme families."""
+    from ..enumTypes import (ArtificialCompressibleSPHScheme, CompressibleSPHScheme,
+                             IncompressibleSPHScheme, WaveEquationScheme,
+                             WeaklyCompressibleSPHScheme)
     return [member.name
             for enumClass in (CompressibleSPHScheme, WeaklyCompressibleSPHScheme,
-                              IncompressibleSPHScheme, WaveEquationScheme)
+                              IncompressibleSPHScheme, ArtificialCompressibleSPHScheme,
+                              WaveEquationScheme)
             for member in enumClass]
 
 

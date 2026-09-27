@@ -14,7 +14,14 @@ __all__ = ['sampleParticles']
 
 
 def sampleParticles(config, schemeConfig, sdf, nx, filter = True, shortEdge = True):
-    particlesA = sampleRegularParticles(nx, config.domain, config.targetNeighbors, 0.0, 0, shortEdge = shortEdge)
+    # `config.dx` is the spacing the case asked for (`L / nx`); hand it to the
+    # sampler as authoritative so every axis realises ~that spacing, rather than
+    # the shortest domain axis's `span/nx` silently winning for a wide-shallow
+    # domain and leaving `config.dx` disagreeing with the lattice it feeds
+    # `dt` / `c_s` / the mDBC ghost offsets (DELTASPH_VALIDATION_PLAN 5.2.3).
+    dx = getattr(config, 'dx', None)
+    particlesA = sampleRegularParticles(nx, config.domain, config.targetNeighbors, 0.0, 0,
+                                        shortEdge = shortEdge, dx = float(dx) if dx is not None else None)
 
     mask = torch.ones_like(particlesA.masses, dtype = torch.bool)
     distances = particlesA.masses.new_ones(particlesA.masses.shape) * np.inf

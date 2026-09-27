@@ -80,13 +80,14 @@ from typing import Any, Dict, List
 
 import torch
 
-from ..enumTypes import isIncompressibleScheme
+from ..enumTypes import isArtificialCompressibleScheme, isIncompressibleScheme
 from ..runner import Case, RunContext, caseMain, registerCase
 from .kolmogorovIncompressible import kolmogorovIncompressibleTimestep
 from .plotting import Field, particlePlot
 from .weaklyCompressible import (WEAKLY_COMPRESSIBLE_DEFAULTS,
                                  WEAKLY_COMPRESSIBLE_PARAMS, buildRegionSystem,
-                                 centredShapeSdf, configureWeaklyCompressible, fluidRegion,
+                                 centredShapeSdf, configureArtificialCompressible,
+                                 configureWeaklyCompressible, fluidRegion,
                                  paramExtraData, setupTimestep, shapeArgs,
                                  weaklyCompressibleDiagnostics)
 
@@ -204,6 +205,8 @@ def _velocityField(velocity, spin: float):
 
 
 def configureScheme(ctx: RunContext) -> None:
+    if isArtificialCompressibleScheme(ctx.scheme):
+        return _configureArtificialCompressible(ctx)
     configureWeaklyCompressible(ctx)
     if not isIncompressibleScheme(ctx.scheme):
         return
@@ -217,6 +220,22 @@ def configureScheme(ctx: RunContext) -> None:
     schemeConfig.diffusionParams.inviscid = False
     schemeConfig.diffusionParams.viscidNu = ctx.param('nu')
     schemeConfig.bandwith = ctx.spec.L / ctx.param('bandWidth') / ctx.config.dx
+
+
+def _configureArtificialCompressible(ctx: RunContext) -> None:
+    """The ACSPH branch of `configureScheme` (`ACSPH_PLAN.md` §4.4/Part 7:
+    De Courcy's own "instantaneous KE drop, pressure smoothness" case). No
+    gravity, no walls -- `buildSystem` places free-surface fluid bodies only
+    -- so this is structurally as simple to wire as `rotatingSquarePatch`.
+    """
+    configureArtificialCompressible(ctx)
+
+    schemeConfig = ctx.schemeConfig
+    schemeConfig.shiftProperties.active = False
+    # Eq. (48)'s U_char (ACSPH_PLAN.md §5.5): the only velocity scale here is
+    # each body's own impact speed.
+    if schemeConfig.acParams.uChar is None:
+        schemeConfig.acParams.uChar = float(ctx.param('impactVelocity'))
 
 
 def buildSystem(ctx: RunContext):
@@ -274,7 +293,12 @@ def initialConditions(ctx: RunContext, system) -> None:
     coordinate, and `arrangement='ring'`, overlapping bounding boxes and
     off-centre placements all work without a special case.
     """
-    setupTimestep(ctx, system)
+    if isArtificialCompressibleScheme(ctx.scheme):
+        # No sound speed to back-solve a `dt` from; seed `targetDt` and let
+        # `impactTimestep`'s Eq. (46) branch take over from step 2 on.
+        ctx.config.dt = ctx.param('targetDt')
+    else:
+        setupTimestep(ctx, system)
 
     # The `comDrift` figure of merit is measured from the centre of mass the
     # mirrored placement actually produces (exactly zero up to one stray
@@ -287,8 +311,8 @@ def initialConditions(ctx: RunContext, system) -> None:
 
 
 def impactTimestep(ctx: RunContext, state) -> float:
-    """Bender & Koschier's advective CFL, but only under `--scheme
-    divergenceFree`.
+    """Bender & Koschier's advective CFL under `--scheme divergenceFree`,
+    Eq. (46) under ACSPH, the fixed acoustic `dt` otherwise.
 
     `deltaSPH`'s own dt is fixed once, at setup, by `setupTimestep` in
     `initialConditions` above -- nothing in the run loop revisits `config.dt`
@@ -296,8 +320,12 @@ def impactTimestep(ctx: RunContext, state) -> float:
     reproduces that path exactly. `divergenceFree` has no acoustic term and
     needs a real advective dt instead, which is
     `kolmogorovIncompressibleTimestep`'s formula, reused as-is the same way
-    `dambreakTimestep` reuses it.
+    `dambreakTimestep` reuses it. ACSPH has no sound speed either, and needs
+    its own Eq. (46) formula (`modules.timestep.computeTimestep`).
     """
+    if isArtificialCompressibleScheme(ctx.scheme):
+        from ..modules.timestep import computeTimestep
+        return computeTimestep(state, ctx.config, ctx.schemeConfig, dt=ctx.config.dt)
     if not isIncompressibleScheme(ctx.scheme):
         return ctx.config.dt
     return kolmogorovIncompressibleTimestep(ctx, state)

@@ -55,8 +55,27 @@ def parseArgs(argv):
     p.add_argument('--rollDataFile', type=str, default=None,
                    help='roll-history table (default: bundled lateral_water_1x.txt)')
     p.add_argument('--targetDt', type=float, default=None,
-                   help='WCSPH: acoustic dt target; c_s scales as ~1/targetDt '
-                        '(case default 2e-4 -> c_s ~16.6; diffSPH uses c_s=20)')
+                   help='WCSPH: the timestep itself when --soundSpeed is set '
+                        '(case default 1e-4, the diffSPH value); with '
+                        '--soundSpeed 0 it reverts to the legacy back-solve '
+                        'where c_s scales as ~1/targetDt')
+    p.add_argument('--soundSpeed', type=float, default=None,
+                   help='WCSPH: pin c_0 instead of back-solving it out of '
+                        'targetDt (case default 20, the diffSPH value). Pass 0 '
+                        'to restore the back-solve.')
+    p.add_argument('--integrationScheme', type=str, default=None,
+                   help='override the integrator (case default for wcsph: '
+                        'semiImplicitEuler; rungeKutta2/rungeKutta4 also valid)')
+    p.add_argument('--noPenShift', default=None,
+                   choices=('derivative', 'finalize', 'off'),
+                   help="mDBC no-penetration correction placement: 'derivative' "
+                        "(in dvdt, historical), 'finalize' (once per step, "
+                        "DualSPHysics-style velocity replacement) or 'off'. "
+                        "DELTASPH_VALIDATION_PLAN 5.9")
+    p.add_argument('--wallBC', type=str, default=None,
+                   choices=['freeSlip', 'noSlip', 'extended', 'zeros', 'constant'],
+                   help='wall boundary condition (case default freeSlip; '
+                        'diffSPH mirrors, i.e. noSlip, for its viscous term)')
     p.add_argument('--alpha', type=float, default=None,
                    help='WCSPH artificial-viscosity coefficient (case default 0.02)')
     p.add_argument('--no-shift', dest='shift', action='store_false', default=True,
@@ -77,14 +96,42 @@ def parseArgs(argv):
                    help='skip the sim; rebuild the figure from <scheme>_series.npz')
     p.add_argument('--plot', dest='plot', action='store_true', default=False,
                    help='open the live field window during the run')
+    p.add_argument('--storeInterval', type=int, default=None,
+                   help='steps between stored states (storeMode=states). Checkpoints '
+                        'are resumable, so a run that blows up can be reopened just '
+                        'before it rather than re-run per hypothesis.')
+    p.add_argument('--storeMode', type=str, default=None,
+                   choices=('states', 'trajectory'),
+                   help="'states' = one HDF5 per stored step; 'trajectory' = one "
+                        'growing file')
     p.add_argument('--store', dest='store', action='store_true', default=False,
                    help='write the HDF5 trajectory')
-    p.add_argument('--video', action='store_true', default=False,
+    p.add_argument('--video', action=argparse.BooleanOptionalAction, default=True,
                    help='render velocity/density frames every --plotInterval steps '
-                        'and encode <scheme>_field.{mp4,gif} (headless-safe)')
+                        'and encode <scheme>_field.{mp4,gif} (headless-safe); on by '
+                        'default so every run is observable -- pass --no-video to '
+                        'opt out')
     p.add_argument('--plotInterval', type=int, default=None,
                    help='steps between rendered frames (video); case default 50')
     p.add_argument('--out', type=str, default=OUTDIR, help='output directory')
+    p.add_argument('--mdbcDensityScheme', default=None, choices=('ramped', 'band', 'english2025'),
+                    help="override WeaklyCompressibleSPHConfig.mdbcDensityScheme "
+                         "(case default 'ramped'). Same override pattern and "
+                         "choices as scripts/probe_deltaSPHMarrone.py -- "
+                         "BOUNDARY_DENSITY_PLAN.md §5-6.")
+    p.add_argument('--densityDiffusionTerm', default=None,
+                    choices=('deltaSPH', 'denormalized', 'densityOnly', 'deltaOnly',
+                             'denormalizedOnly', 'deltaSPH_wrongSign',
+                             'moltenicolagrossi2009', 'fourtakas2019'),
+                    help="override DensityDiffusionScheme (case default "
+                         "'deltaSPH'). DELTASPH_VALIDATION_PLAN.md Part 8.16.")
+    p.add_argument('--pressureForceRenormalized', action='store_true',
+                    help="apply gradient renormalization to the pressure-force "
+                         "kernel gradient, gated on kernel-sum completeness "
+                         "(poup>0.95) and bulk classification -- DualSPHysics-"
+                         "style, per BOUNDARY_DENSITY_PLAN.md §10 / "
+                         "DELTASPH_VALIDATION_PLAN.md §5.23/§5.32/§5.38. Off "
+                         "by default (case default too).")
     return p.parse_args(argv)
 
 
@@ -109,13 +156,27 @@ def buildSpec(case, args):
         overrides['nx'] = args.nx
     if args.nSteps is not None:
         overrides['nSteps'] = args.nSteps
+    if args.storeInterval is not None:
+        overrides['storeInterval'] = args.storeInterval
+    if args.storeMode is not None:
+        overrides['storeMode'] = args.storeMode
     params = {}
     if args.rollDataFile is not None:
         params['rollDataFile'] = os.path.abspath(args.rollDataFile)
+    if args.integrationScheme is not None:
+        overrides['integrationScheme'] = args.integrationScheme
     if args.targetDt is not None:
         params['targetDt'] = args.targetDt
+    if args.soundSpeed is not None:
+        # 0 == "no explicit c_0", which is what setupTimestep reads as the
+        # legacy back-solve (None), so `--soundSpeed 0` is the escape hatch.
+        params['soundSpeed'] = args.soundSpeed if args.soundSpeed > 0 else None
     if args.alpha is not None:
         params['alpha'] = args.alpha
+    if args.wallBC is not None:
+        params['wallBC'] = args.wallBC
+    if args.noPenShift is not None:
+        params['noPenShift'] = args.noPenShift
     if args.scheme == 'wcsph':
         params['shifting'] = args.shift
         params['correctdrhodt'] = args.correctdrhodt
@@ -240,12 +301,20 @@ def main(argv=None):
     import numpy as np
     os.makedirs(args.out, exist_ok=True)
 
+    # File-naming tag: `args.scheme` plus any mDBC/DDT override, so an A/B run
+    # doesn't overwrite the plain scheme's own recorded output (same idea as
+    # scripts/probe_deltaSPHMarrone.py's `_mdbcRho-...`/`_ddt-...` suffixes).
+    tag = (args.scheme
+          + (f'_mdbcRho-{args.mdbcDensityScheme}' if args.mdbcDensityScheme else '')
+          + (f'_ddt-{args.densityDiffusionTerm}' if args.densityDiffusionTerm else '')
+          + ('_pforceGate' if args.pressureForceRenormalized else ''))
+
     if args.replot:
-        series = loadSeries(args.out, args.scheme)
+        series = loadSeries(args.out, tag)
         nx = args.nx or 0
-        band, noField, tEnd = makeFigure(args.scheme, nx, series, args.smoothSigma,
+        band, noField, tEnd = makeFigure(tag, nx, series, args.smoothSigma,
                                          args.tLimit, args.out)
-        print(f'replotted {args.out}/{args.scheme}_sensor_pressure.pdf  '
+        print(f'replotted {args.out}/{tag}_sensor_pressure.pdf  '
               f'(noPressureField={noField}, t_end={tEnd:.2f})')
         return 0
 
@@ -257,8 +326,30 @@ def main(argv=None):
     case = getCase('sloshingTank')
     spec = buildSpec(case, args)
 
+    if args.mdbcDensityScheme:
+        # Same override pattern as scripts/probe_deltaSPHMarrone.py --
+        # BOUNDARY_DENSITY_PLAN.md §5-6.
+        _prevCfg = case.configureScheme
+        def _cfgMdbc(ctx, _t=args.mdbcDensityScheme, _p=_prevCfg):
+            _p(ctx); ctx.schemeConfig.mdbcDensityScheme = _t
+        case.configureScheme = _cfgMdbc
+    if args.densityDiffusionTerm:
+        from warpSPH.enumTypes import DensityDiffusionScheme
+        _prevCfg2 = case.configureScheme
+        def _cfgDdt(ctx, _t=DensityDiffusionScheme[args.densityDiffusionTerm], _p=_prevCfg2):
+            _p(ctx); ctx.schemeConfig.diffusionParams.densityDiffusionTerm = _t
+        case.configureScheme = _cfgDdt
+    if args.pressureForceRenormalized:
+        _prevCfg3 = case.configureScheme
+        def _cfgPforce(ctx, _p=_prevCfg3):
+            _p(ctx); ctx.schemeConfig.pressureForceRenormalized = True
+        case.configureScheme = _cfgPforce
+
     print(f'== sloshingTank / {args.scheme} ==  nx={spec.nx}  tLimit={spec.tLimit}  '
-          f'scheme={spec.scheme}')
+          f'scheme={spec.scheme}'
+          + (f'  mdbcRho={args.mdbcDensityScheme}' if args.mdbcDensityScheme else '')
+          + (f'  ddt={args.densityDiffusionTerm}' if args.densityDiffusionTerm else '')
+          + ('  pforceGate=True' if args.pressureForceRenormalized else ''))
     t0 = time.perf_counter()
     result = run(case, spec)
     wall = time.perf_counter() - t0
@@ -273,10 +364,11 @@ def main(argv=None):
         minDensity=result.series('minDensity'),
         maxDensity=result.series('maxDensity'),
         sensorRho=result.series('sensorRho'),
+        maxVelocity=result.series('maxVelocity'),
         kineticEnergy=result.series('kineticEnergy'),
         nx=spec.nx, diverged=result.diverged, nSteps=result.nSteps, wallTime=wall,
     )
-    np.savez(os.path.join(args.out, f'{args.scheme}_series.npz'), **series)
+    np.savez(os.path.join(args.out, f'{tag}_series.npz'), **series)
 
     if result.videoPath and os.path.exists(result.videoPath):
         import shutil
@@ -284,11 +376,11 @@ def main(argv=None):
         for src, ext in ((result.videoPath, 'mp4'),
                          (os.path.join(vdir, 'out.gif'), 'gif')):
             if os.path.exists(src):
-                dst = os.path.join(args.out, f'{args.scheme}_field.{ext}')
+                dst = os.path.join(args.out, f'{tag}_field.{ext}')
                 shutil.copy(src, dst)
                 print(f'   video -> {dst}')
 
-    band, noField, tEnd = makeFigure(args.scheme, spec.nx, series, args.smoothSigma,
+    band, noField, tEnd = makeFigure(tag, spec.nx, series, args.smoothSigma,
                                      spec.tLimit, args.out)
 
     t, p = series['t'], series['sensorPressure']
@@ -302,7 +394,7 @@ def main(argv=None):
         print(f'   measured impact-peak band: {band[0]:.0f} .. {band[1]:.0f} Pa')
     print(f'   density range over run   : '
           f'[{np.nanmin(series["minDensity"]):.3f}, {np.nanmax(series["maxDensity"]):.3f}]')
-    print(f'   wrote {args.out}/{args.scheme}_sensor_pressure.pdf and _series.npz')
+    print(f'   wrote {args.out}/{tag}_sensor_pressure.pdf and _series.npz')
     return 1 if result.diverged else 0
 
 

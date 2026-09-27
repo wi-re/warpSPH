@@ -25,8 +25,7 @@ def broadcast(src: torch.Tensor, other: torch.Tensor, dim: int):
     src = src.expand(other.size())
     return src
 
-from torch.profiler import record_function
-
+from warpSPHCore.profiling import record_function
 # @torch.jit.script
 def scatter_sum(src: torch.Tensor, index: torch.Tensor, dim: int = -1,
                 out: Optional[torch.Tensor] = None,

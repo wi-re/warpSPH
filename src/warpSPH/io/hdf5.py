@@ -102,6 +102,13 @@ def loadState(stateGroup, device, SimulationState):
             stateDict[fieldName] = torch.from_numpy(fieldValue[:]).to(device).to(hdfDtypeToTorchDtype(fieldValue.dtype)) if fieldValue.shape else torch.tensor(fieldValue[()], device=device, dtype=hdfDtypeToTorchDtype(fieldValue.dtype))
         else:
             stateDict[fieldName] = fieldValue
+    # `UIDcounter` is a plain int, not a per-particle array, so the writer --
+    # which emits datasets -- never stores it, and rebuilding the dataclass
+    # then fails on the missing required argument. That made every
+    # `storeMode='states'` checkpoint unloadable. Derive it from the UIDs, the
+    # same reconstruction the trajectory importer already uses (`importIO.py`).
+    if 'UIDcounter' not in stateDict and 'UIDs' in stateDict:
+        stateDict['UIDcounter'] = int(stateDict['UIDs'].max().item()) + 1
     return SimulationState(**stateDict)
 
 def loadStage(stageGroup, device, SimulationState, SimulationUpdate):

@@ -19,11 +19,13 @@ from __future__ import annotations
 from typing import Dict
 
 from ..configurations.region import BCType
+from ..enumTypes import isArtificialCompressibleScheme
 from ..runner import Case, RunContext, caseMain, registerCase
 from .plotting import particlePlot
 from .weaklyCompressible import (OBSTACLE_PARAMS, VELOCITY_DENSITY_FIELDS,
                                  WEAKLY_COMPRESSIBLE_DEFAULTS, WEAKLY_COMPRESSIBLE_PARAMS,
                                  boundaryRegion, buildRegionSystem,
+                                 configureArtificialCompressible,
                                  configureWeaklyCompressible, domainFluidSdf, fluidRegion,
                                  meanFlowForcingBC, paramExtraData, paramShapeSdf,
                                  setupTimestep, weaklyCompressibleDiagnostics)
@@ -40,8 +42,25 @@ def buildSystem(ctx: RunContext):
     ])
 
 
+def configureScheme(ctx: RunContext) -> None:
+    # ACSPH has no `diffusionParams`, so the WCSPH configurer would crash on
+    # it -- same dispatch as `randomFlow`.
+    if isArtificialCompressibleScheme(ctx.scheme):
+        configureArtificialCompressible(ctx)
+    else:
+        configureWeaklyCompressible(ctx)
+
+
 def initialConditions(ctx: RunContext, system) -> None:
-    setupTimestep(ctx, system)
+    if isArtificialCompressibleScheme(ctx.scheme):
+        # No sound speed to back-solve a `dt` from: seed `targetDt` and let
+        # `movingObstacleTimestep`'s Eq. (46) branch take over. Eq. (48)'s
+        # `U_char` is the driven mean speed, the case's own velocity scale.
+        ctx.config.dt = ctx.param('targetDt')
+        if ctx.schemeConfig.acParams.uChar is None:
+            ctx.schemeConfig.acParams.uChar = float(abs(ctx.param('U_target')))
+    else:
+        setupTimestep(ctx, system)
 
     ctx.config.rigidBodies[0].angularVelocity = ctx.param('obstacleOmega')
     ctx.schemeConfig.rigidBodies = ctx.config.rigidBodies
@@ -53,6 +72,15 @@ def initialConditions(ctx: RunContext, system) -> None:
 setupPlot, updatePlot = particlePlot(VELOCITY_DENSITY_FIELDS)
 
 
+def movingObstacleTimestep(ctx: RunContext, state) -> float:
+    """De Courcy et al. 2024 Eq. (46) under ACSPH; the fixed `setupTimestep`
+    dt otherwise (unchanged delta-SPH behaviour, as in `randomFlowTimestep`)."""
+    if isArtificialCompressibleScheme(ctx.scheme):
+        from ..modules.timestep import computeTimestep
+        return computeTimestep(state, ctx.config, ctx.schemeConfig, dt=ctx.config.dt)
+    return ctx.config.dt
+
+
 def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     return weaklyCompressibleDiagnostics(ctx, state)
 
@@ -62,8 +90,9 @@ movingObstacleCase = registerCase(Case(
     scheme='deltaSPH',
     description='Flow past a spinning rigid obstacle (2D), weakly compressible deltaSPH.',
     buildSystem=buildSystem,
-    configureScheme=configureWeaklyCompressible,
+    configureScheme=configureScheme,
     initialConditions=initialConditions,
+    timestep=movingObstacleTimestep,
     diagnostics=diagnostics,
     setupPlot=setupPlot,
     updatePlot=updatePlot,
@@ -74,6 +103,15 @@ movingObstacleCase = registerCase(Case(
         nx=128,
         L=2.0,
         tLimit=10.0,
+        # `symplecticEuler` override, not the shared `WEAKLY_COMPRESSIBLE_
+        # DEFAULTS['integrationScheme']` ('rungeKutta2', still shared with
+        # several incompressible-scheme cases untested under symplecticEuler)
+        # -- WCSPH_DEFAULT_CLOSEOUT_PLAN.md item E. This is the case whose
+        # rotating rigid body's real (nonzero, centripetal) boundary
+        # acceleration was wired into `english2025.py`'s `a_b` this same
+        # session (item D) -- short sanity run confirmed no divergence with
+        # this integrator; not yet run at the case's own full 10s `tLimit`.
+        integrationScheme='symplecticEuler',
     ),
     params=dict(
         WEAKLY_COMPRESSIBLE_PARAMS,

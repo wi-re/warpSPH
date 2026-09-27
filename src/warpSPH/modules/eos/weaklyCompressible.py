@@ -11,7 +11,8 @@ hidden.
 """
 
 from ...enumTypes import *
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
 import torch
 
 __all__ = ['weaklyCompressibleEOS']

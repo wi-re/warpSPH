@@ -23,15 +23,19 @@ from ..configurations.moduleConfigurations.gravity import GravityType
 from ..configurations.region import BCType, RegionType
 from ..initializers import initializeWeaklyCompressibleSimulation
 from ..modules import setupWeaklyCompressibleTimestep
-from ..regions import buildRegion, filterRegion, sampleDomainSDF
+from warpSPHCore import sphKernelScale
+from ..regions import buildRegion, filterRegion, sampleDomainSDF, domainSDF
 from ..runner import RunContext, resolveEnum
 from ..utils import buildDomainDescription
+from ..utils.syncFree import cachedKindIndex, deviceConstant, quantilesFromSorted
+from warpSPHCore import compileGlue, markDynamic
 from ..geometry import getSDF, operatorDict, sampleSDF
 from .plotting import Field
 
 __all__ = [
     'WEAKLY_COMPRESSIBLE_DEFAULTS', 'WEAKLY_COMPRESSIBLE_PARAMS',
-    'configureWeaklyCompressible', 'domainFluidSdf', 'domainBoundarySdf', 'shapeSdf',
+    'configureWeaklyCompressible', 'configureArtificialCompressible',
+    'configureDomain', 'domainFluidSdf', 'domainBoundarySdf', 'shapeSdf',
     'SHAPE_PRESETS', 'shapeArgs', 'sdfBounds', 'centredShapeSdf',
     'OBSTACLE_PARAMS', 'paramShapeSdf',
     'buildRegionSystem', 'fluidRegion', 'boundaryRegion', 'meanFlowForcingBC',
@@ -103,8 +107,9 @@ VELOCITY_UID_FIELDS = [
 ]
 
 
-def configureWeaklyCompressible(ctx: RunContext) -> None:
-    """Domain, resolution and the scheme knobs the examples share.
+def configureDomain(ctx: RunContext) -> None:
+    """Domain and resolution. Scheme-independent, so both
+    `configureWeaklyCompressible` and `configureArtificialCompressible` call it.
 
     The simulated box is `band` particle layers wider than the *interior*
     domain on every side; the interior is what the walls are cut from, and it
@@ -121,6 +126,11 @@ def configureWeaklyCompressible(ctx: RunContext) -> None:
     ctx.config.dx = dx
     ctx.config.nx = ctx.spec.nx + band * 2
     ctx.scratch['interiorDomain'] = interior
+
+
+def configureWeaklyCompressible(ctx: RunContext) -> None:
+    """Domain, resolution and the scheme knobs the examples share."""
+    configureDomain(ctx)
 
     schemeConfig = ctx.schemeConfig
     schemeConfig.surfaceDetectionConfig.active = ctx.param('freeSurface')
@@ -142,6 +152,79 @@ def configureWeaklyCompressible(ctx: RunContext) -> None:
         schemeConfig.gravityConfig.active = False
 
 
+def configureArtificialCompressible(ctx: RunContext) -> None:
+    """`configureWeaklyCompressible` for the ACSPH config, which has a
+    different shape.
+
+    Same domain/resolution/gravity work -- that part is scheme-independent and
+    is shared verbatim via `configureDomain` -- but ACSPH has no
+    `diffusionParams` block (no equation of state, no density diffusion, no
+    artificial-viscosity `alpha`), so the viscosity lands in `acParams.nu`
+    instead. A case that supports both schemes branches on
+    `isArtificialCompressibleScheme(ctx.scheme)`.
+
+    `dt` is **not** set here. ACSPH's Eq. (46) timestep is advective, so a case
+    supplies `--dt` (or leaves `adaptiveDt` on and lets Eq. 46 run); there is no
+    `setupWeaklyCompressibleTimestep` equivalent, because the sound speed that
+    procedure back-solves for does not exist in this scheme.
+
+    The integrator **is** overridden here, to `forwardEuler`, and loudly. The
+    ACSPH step owns its whole real advance and returns an exact per-step delta;
+    any multi-stage integrator would run the dual-time solve once per stage and
+    blend the results (`schemes/artificialCompressible.py`). The step refuses
+    that outright, so without this override every dual-scheme case would need
+    `--integrationScheme forwardEuler` typed by hand and would otherwise fail at
+    the first step with a stack trace instead of running.
+    """
+    configureDomain(ctx)
+    _forceForwardEuler(ctx)
+
+    schemeConfig = ctx.schemeConfig
+    schemeConfig.surfaceDetectionConfig.active = ctx.param('freeSurface')
+    schemeConfig.acParams.nu = ctx.param('nu', schemeConfig.acParams.nu)
+
+    # `acParams.epsilonV`'s own docstring (`configurations/artificialCompressible.py`):
+    # `None` (default) leaves the paper's `-6.0` alone. This repo runs float32
+    # by default, where `-6.0` is measured to never converge (plateaus ~-5.8),
+    # so every step burns the full `maxPseudoIterations` budget -- pass
+    # `-5.0` for a >6x step-time cut with no measured behaviour change
+    # (`FREESLIP_DAMBREAK_FINDINGS.md`).
+    epsilonV = ctx.param('epsilonV')
+    if epsilonV is not None:
+        schemeConfig.acParams.epsilonV = float(epsilonV)
+
+    # `noPenetrationShift`: off by default repo-wide (not in the paper -- see
+    # the config field's own docstring). Available here as a case-agnostic
+    # opt-in for any case using this shared configurer.
+    if ctx.param('noPenetrationShift'):
+        schemeConfig.noPenetrationShift = True
+
+    if ctx.param('gravity', False):
+        schemeConfig.gravityConfig.active = True
+        schemeConfig.gravityConfig.type = resolveEnum(GravityType,
+                                                      ctx.param('gravityType'))
+        schemeConfig.gravityConfig.magnitude = ctx.param('gravityMagnitude')
+        schemeConfig.gravityConfig.origin = ctx.param('gravityDirection')
+    else:
+        schemeConfig.gravityConfig.active = False
+
+
+def _forceForwardEuler(ctx: RunContext) -> None:
+    from warpSPHIntegrators import getIntegrator
+    from warpSPHIntegrators.integration import IntegrationSchemeType
+
+    wanted = IntegrationSchemeType.forwardEuler
+    current = ctx.config.integrationScheme
+    if current is wanted or current is IntegrationSchemeType.explicitEuler:
+        return
+    name = getattr(current, 'name', current)
+    print(f"[warpSPH] artificialCompressible: overriding integrationScheme "
+          f"{name!r} -> 'forwardEuler'. The step returns an exact per-step delta, "
+          f"which only a single-evaluation integrator applies unchanged.")
+    ctx.config.integrationScheme = wanted
+    ctx.integrator = getIntegrator(wanted)
+
+
 # -- SDF helpers -------------------------------------------------------------
 # These are the three shapes the notebooks wrote inline, once each per file, as
 # multi-line lambdas over `getSDF`/`operatorDict`.
@@ -156,6 +239,86 @@ def domainBoundarySdf(ctx: RunContext) -> Callable:
     """Walls: everything outside the interior domain."""
     interior = ctx.scratch['interiorDomain']
     return lambda x: sampleDomainSDF(x, interior, invert=False)
+
+
+def filletedDomainBoundarySdf(ctx: RunContext, radius: float,
+                              corners: Sequence[str] = ('bottomLeft', 'bottomRight'),
+                              dx: Optional[float] = None) -> Callable:
+    """`domainBoundarySdf`, with one or more bottom corners of the interior
+    domain rounded off by a concave quarter-circle fillet of the given
+    `radius` -- the same construction `caseUtils.weaklyCompressible.
+    _marroneSharpEdgeSDF` uses for Marrone 2011 Fig. 19's downstream corner
+    (box-corner minus a disc, unioned with the plain wall SDF), generalised
+    to an arbitrary corner/radius instead of that case's fixed `H = W/10`
+    downstream-only geometry.
+
+    Motivation (`FREESLIP_DAMBREAK_FINDINGS.md`'s ACSPH dam-break stall): a
+    sharp interior tank corner gives the ghost-particle surface-normal solver
+    an ambiguous direction to resolve. A periodic-vs-walled A/B on
+    `hydrostaticColumn` (identical everything else, only whether real side
+    walls/corners exist) confirmed corners alone -- not a slow hydrostatic
+    soak -- destabilise ACSPH's pressure field almost immediately
+    (`pressureSlopeRatio` swinging -50..+74 within 30 steps walled, vs. a
+    clean ~1.0 periodic). This helper tests whether removing the corner's
+    normal ambiguity (a smooth concave arc instead of a point) fixes that.
+
+    `corners`: any of `'bottomLeft'`/`'bottomRight'` -- the only two a
+    bottom-anchored fluid column (`hydrostaticColumn`, `dambreak`) can touch.
+
+    `dx`, when given (recommended: `ctx.config.dx`), embeds the two
+    fillet-box edges that coincide with the plain wall/floor SDF `dx/2` past
+    the true wall/floor -- breaking the exact-zero-level seam between the two
+    SDFs, which `_marroneSharpEdgeSDF`'s own docstring found otherwise gives
+    the ghost-gradient solver a degenerate direction to resolve right at the
+    seam (`DELTASPH_VALIDATION_PLAN.md` 5.10).
+    """
+    interior = ctx.scratch['interiorDomain']
+    xlo = float(interior.min[0])
+    xhi = float(interior.max[0])
+    ylo = float(interior.min[1])
+    embed = 0.5 * float(dx) if dx else 0.0
+    r = float(radius)
+
+    boxfn = getSDF("box")["function"]
+    circfn = getSDF("circle")["function"]
+
+    def _cornerFilletFn(cornerX: float, side: str) -> Callable:
+        # `side` picks which way the fluid lies from the corner along x:
+        # 'bottomLeft' -> fluid at +x, wall at x=cornerX (=xlo); 'bottomRight'
+        # -> fluid at -x, wall at x=cornerX (=xhi). The box's two edges that
+        # coincide with an adjoining SDF (the wall at `cornerX`, the floor at
+        # `ylo`) get pushed `embed` past it; the two "true" fillet edges (the
+        # box's far corner, where the disc is centred) stay exact.
+        sx = 1.0 if side == 'bottomLeft' else -1.0
+        halfX = (r + embed) / 2.0
+        halfY = (r + embed) / 2.0
+        Cx = cornerX + sx * (r / 2.0 - embed / 2.0)
+        Cy = ylo + r / 2.0 - embed / 2.0
+        discC = (cornerX + sx * r, ylo + r)
+
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            dev, dt = x.device, x.dtype
+            t = lambda v: torch.tensor(v, device=dev, dtype=dt)
+            dBox = boxfn(x - t([Cx, Cy]), t([halfX, halfY]))
+            dOutDisc = -circfn(x - t(discC), t(r))
+            return torch.maximum(dBox, dOutDisc)
+        return fn
+
+    filletFns = []
+    if 'bottomLeft' in corners:
+        filletFns.append(_cornerFilletFn(xlo, 'bottomLeft'))
+    if 'bottomRight' in corners:
+        filletFns.append(_cornerFilletFn(xhi, 'bottomRight'))
+    if not filletFns:
+        raise ValueError(f'filletedDomainBoundarySdf: no recognised corners in {corners!r}')
+
+    def combined(x: torch.Tensor) -> torch.Tensor:
+        d = domainSDF(x, interior, invert=False)
+        for fn in filletFns:
+            d = torch.minimum(d, fn(x))
+        return d
+
+    return lambda x: sampleSDF(x, combined, invert=False)
 
 
 def shapeSdf(name: str, size=None, offset=None, invert: bool = False, *,
@@ -365,13 +528,54 @@ def meanFlowForcingBC(fluidSdf: Callable, target: float, tau: float) -> Boundary
 
 
 def setupTimestep(ctx: RunContext, system) -> None:
-    """Pick the sound speed and `dt` together, from `targetDt`.
+    """Pick the sound speed and `dt` together.
 
-    Weakly compressible SPH is free to choose its own stiffness, so rather than
-    a sound speed being given and dt following, the notebooks fix the timestep
-    they want and let the sound speed follow from the acoustic CFL. This is the
-    call that finally sets `config.dt` for the run.
+    Three routes:
+
+    * `soundSpeed` set -- **both** `c0` and `dt` are pinned to what the case
+      asked for (`soundSpeed`, `targetDt`), with no back-solve in either
+      direction. The one route that lets `c0` and `dt` be chosen independently,
+      which is how the diffSPH reference notebooks are written (`16_Sloshing
+      Tank`: `c_s = 20`, `dt = 1e-4`, where the acoustic CFL would have allowed
+      a larger step). `dt` is *not* clamped to the acoustic CFL here -- it is
+      reported against it instead, so an over-long step shows up as a warning
+      rather than being silently changed out from under an A/B.
+    * `machTarget` set (with `referenceVelocity` as `U_max`) -- **Sun et al.
+      2017 Eq. (2)**, `c0 = U_max / machTarget`, and `dt` follows from the
+      acoustic CFL. This is the physically-scaled route: the run stays at the
+      Mach number it was asked for at every resolution.
+    * neither set (the default, so every existing case is unchanged) --
+      the legacy back-solve: fix `targetDt` and invert `c0` out of the acoustic
+      CFL, which makes `c0 ~ 1/dx` and the Mach number a function of `nx`.
+
+    `dambreak` has carried the Eq. (2) route in its own `initialConditions`
+    since `DELTASPH_VALIDATION_PLAN.md` Part 6 step 2; this is the same wiring
+    in the shared block, so any case that declares the two params gets it.
     """
+    soundSpeed = ctx.param('soundSpeed', None)
+    if soundSpeed is not None:
+        c0 = float(soundSpeed)
+        dt = float(ctx.param('targetDt'))
+        ctx.schemeConfig.fluid.fixedSoundSpeed = c0
+        ctx.config.dt = dt
+        h = float(system.state.supports.min())
+        kernelScale = float(sphKernelScale(ctx.config.kernel.value, ctx.config.dim))
+        dtAcoustic = float(ctx.config.cflFactor) * h / (c0 * kernelScale)
+        if ctx.spec.verbose:
+            print(f'Fixed sound speed: c0 = {c0:.4g}, dt = {dt:.4g} '
+                  f'(acoustic-CFL dt = {dtAcoustic:.4g}, ratio {dt / dtAcoustic:.3g})')
+        if dt > dtAcoustic:
+            print(f'Warning: dt ({dt:.4g}) exceeds the acoustic-CFL step '
+                  f'({dtAcoustic:.4g}) at c0 = {c0:.4g}. Lower targetDt or c0.')
+        return
+
+    machTarget = ctx.param('machTarget', None)
+    if machTarget is not None:
+        ctx.schemeConfig.fluid.fixedSoundSpeed, ctx.config.dt = setupWeaklyCompressibleTimestep(
+            ctx.config, ctx.schemeConfig, system, ctx.param('targetDt'),
+            verbose=ctx.spec.verbose,
+            uMaxExpected=ctx.param('referenceVelocity'), machTarget=machTarget)
+        return
     ctx.schemeConfig.fluid.fixedSoundSpeed, ctx.config.dt = setupWeaklyCompressibleTimestep(
         ctx.config, ctx.schemeConfig, system, ctx.param('targetDt'),
         verbose=ctx.spec.verbose)
@@ -583,6 +787,29 @@ def calibrateRestDensity(ctx: RunContext, system, *,
 calibrateRestDensityMasses = calibrateRestDensity
 
 
+#: `_fluidPairs`' cache: (adjacency.i, adjacency.j, i, j) of the last call.
+#: Module-level because `AdjacencyList` is slotted (nothing can be stashed on
+#: it); holding the keyed tensors keeps their identity unique.
+_FLUID_PAIRS_CACHE: List[Any] = [None]
+
+
+def _fluidPairs(adjacency, fluid):
+    """The distinct fluid-fluid (i, j) pairs of `adjacency`, in edge order
+    (exactly `i[keep], j[keep]` below). Cached per edge list: it only changes
+    on a Verlet rebuild (new tensors), and particle kinds are run-constant
+    (the assumption `utils/syncFree.py:cachedKindIndex` makes), so per step
+    this is a cache hit instead of a mask over the full edge list plus a
+    gather (and the host sync that entails)."""
+    cached = _FLUID_PAIRS_CACHE[0]
+    if cached is not None and cached[0] is adjacency.i and cached[1] is adjacency.j:
+        return cached[2], cached[3]
+    i, j = adjacency.i.long(), adjacency.j.long()
+    keep = (i != j) & fluid[i] & fluid[j]
+    i, j = i[keep], j[keep]
+    _FLUID_PAIRS_CACHE[0] = (adjacency.i, adjacency.j, i, j)
+    return i, j
+
+
 def particleDistributionMetrics(ctx: RunContext, state) -> Dict[str, float]:
     """Is the particle *arrangement* physical? -- the blind spot of every
     field-valued metric in this file.
@@ -618,15 +845,40 @@ def particleDistributionMetrics(ctx: RunContext, state) -> Dict[str, float]:
     Returns `{}` when no neighbour list is reachable (`system.adjacency` is set
     by the schemes), so this is safe to call from any case.
     """
+    dev = particleDistributionMetricsDevice(ctx, state)
+    if dev is None:
+        return {}
+    keys = list(dev)
+    return distributionMetricsFromHost(dict(zip(keys, torch.stack(
+        [dev[k].to(torch.float64).reshape(()) for k in keys]).cpu().tolist())))
+
+
+_DISTRIBUTION_KEYS = ('nnDistP01', 'nnDistMedian', 'pairedFraction', 'voidFraction',
+                      'neighbourCountCV', 'densityMedian')
+
+
+def particleDistributionMetricsDevice(ctx: RunContext, state) -> Optional[Dict[str, torch.Tensor]]:
+    """`particleDistributionMetrics` as 0-d device tensors, with no host sync
+    once the per-run fluid index and the per-adjacency fluid pairs are cached
+    -- capturable in a CUDA graph (the runner's graphed diagnostics). `None`
+    where the metrics do not apply; read it back with
+    `distributionMetricsFromHost`, which also drops the metrics (as the eager
+    path always did) when no fluid particle has a fluid neighbour.
+
+    The "finite nearest-neighbour distances only" filter is a NaN mask plus
+    `nanquantile` instead of a boolean gather: the same sorted finite values
+    and the same rank formula (q x (count - 1)), so bitwise the quantiles of
+    the gathered subset, and the fractions divide exact integer counts by the
+    same count."""
     adjacency = getattr(state, 'adjacency', None)
     particles = state.state
     if adjacency is None or not hasattr(adjacency, 'i'):
-        return {}
+        return None
+    fluidIndex = cachedKindIndex(particles.kinds, 0, ctx.config)
+    if fluidIndex.numel() == 0:
+        return None
     fluid = particles.kinds == 0
-    if int(fluid.sum()) == 0:
-        return {}
     pos = particles.positions
-    i, j = adjacency.i.long(), adjacency.j.long()
     # Fluid-FLUID pairs only. A wall is sampled as its own particle band that
     # can sit closer than dx/2 to the fluid it supports (a five-layer Akinci
     # band at a different effective spacing), so including fluid-boundary edges
@@ -634,15 +886,27 @@ def particleDistributionMetrics(ctx: RunContext, state) -> Dict[str, float]:
     # put `hydrostaticColumn` at 0.29 paired *at step 0*, before any physics,
     # while the wall-free `staticBlob` and `impact` read exactly 0.0. The
     # instability being measured is fluid particles collapsing onto each other.
-    keep = (i != j) & fluid[i] & fluid[j]
-    i, j = i[keep], j[keep]
+    i, j = _fluidPairs(adjacency, fluid)
     if i.numel() == 0:
-        return {}
-    delta = pos[i] - pos[j]
+        return None
     domain = getattr(ctx.config, 'domain', None)
+    span = per = None
     if domain is not None and getattr(domain, 'periodic', None) is not None:
-        span = (domain.max - domain.min).to(delta.dtype)
+        span = (domain.max - domain.min).to(pos.dtype)
         per = domain.periodic.to(pos.device)
+    q = deviceConstant([0.5, 0.01], torch.float32, pos.device)
+    vals = _distributionCore(pos, markDynamic(i), markDynamic(j), fluidIndex,
+                             particles.densities, span, per, q)
+    return dict(zip(_DISTRIBUTION_KEYS + ('_nnFinite',), vals.unbind(0)))
+
+
+@compileGlue
+def _distributionCore(pos, i, j, fluidIndex, densities, span, per, q):
+    """`particleDistributionMetricsDevice`'s arithmetic, from the fluid pairs:
+    a float64 vector of `_DISTRIBUTION_KEYS` plus the finite count. Pure
+    torch (`compileGlue`). `q` = [0.5, 0.01] on the device."""
+    delta = pos[i] - pos[j]
+    if span is not None:
         wrapped = delta - span * torch.round(delta / span)
         delta = torch.where(per.unsqueeze(0), wrapped, delta)
     dist = torch.linalg.norm(delta, dim=-1)
@@ -661,22 +925,39 @@ def particleDistributionMetrics(ctx: RunContext, state) -> Dict[str, float]:
     # firing at 0.83 of the true spacing -- common and harmless -- and reported
     # a spurious ~6% "pairing" on runs that are known good. Self-normalising by
     # the median makes the ratio mean what it says on any sampling.
-    nnF = nn[fluid]
-    nnF = nnF[torch.isfinite(nnF)]
-    if nnF.numel() == 0:
-        return {}
-    nnScale = torch.quantile(nnF.float(), 0.5).clamp_min(1e-30)
+    nnF = nn.index_select(0, fluidIndex)
+    finite = torch.isfinite(nnF)
+    nnF = torch.where(finite, nnF, torch.full_like(nnF, float('nan')))
+    nFinite = finite.sum()
+    # One sort serves all three quantiles: scaling by the positive median
+    # (and the float cast) keep a sorted array sorted, NaN last, so the
+    # scaled quantiles read the scaled sorted array (`quantilesFromSorted`,
+    # bitwise `nanquantile`'s).
+    nnSorted = torch.sort(nnF)[0]
+    nnScale = quantilesFromSorted(nnSorted.float(), q[:1], ignoreNan=True)[0].clamp_min(1e-30)
     nnF = nnF / nnScale
-    cF = counts[fluid]
-    rhoF = particles.densities[fluid].detach().float()
-    return {
-        'nnDistP01': torch.quantile(nnF.float(), 0.01).cpu().item(),
-        'nnDistMedian': torch.quantile(nnF.float(), 0.5).cpu().item(),
-        'pairedFraction': (nnF < 0.5).float().mean().cpu().item(),
-        'voidFraction': (nnF > 1.5).float().mean().cpu().item(),
-        'neighbourCountCV': (cF.std() / cF.mean().clamp_min(1e-9)).cpu().item(),
-        'densityMedian': torch.quantile(rhoF, 0.5).cpu().item(),
-    }
+    scaledQ = quantilesFromSorted((nnSorted / nnScale).float(), q, ignoreNan=True)
+    invFinite = 1.0 / nFinite.float()        # torch's mean: sum x (1 / count)
+    cF = counts.index_select(0, fluidIndex)
+    rhoF = densities.index_select(0, fluidIndex).detach().float()
+    rhoMedian = quantilesFromSorted(torch.sort(rhoF)[0], q[:1])[0]
+    return torch.stack([
+        scaledQ[1].double(),                                   # nnDistP01
+        scaledQ[0].double(),                                   # nnDistMedian
+        # NaN compares false, so only finite entries count
+        ((nnF < 0.5).float().sum() * invFinite).double(),      # pairedFraction
+        ((nnF > 1.5).float().sum() * invFinite).double(),      # voidFraction
+        (cF.std() / cF.mean().clamp_min(1e-9)).double(),       # neighbourCountCV
+        rhoMedian.double(),                                    # densityMedian
+        nFinite.double(),
+    ])
+
+
+def distributionMetricsFromHost(host: Dict[str, float]) -> Dict[str, float]:
+    """`particleDistributionMetricsDevice`'s host values -> the metrics."""
+    if not host or host.get('_nnFinite', 0) == 0:
+        return {}
+    return {k: host[k] for k in _DISTRIBUTION_KEYS}
 
 
 def weaklyCompressibleDiagnostics(ctx: RunContext, state) -> Dict[str, float]:
@@ -710,7 +991,28 @@ def weaklyCompressibleDiagnostics(ctx: RunContext, state) -> Dict[str, float]:
         if densities.numel() else float('nan'),
     }
     out.update(particleDistributionMetrics(ctx, state))
+    out.update(stepAccelerationDiagnostics(state))
     return out
+
+
+def stepAccelerationDiagnostics(state) -> Dict[str, float]:
+    """Per-step fluid acceleration / mDBC no-pen shift stats, if
+    `WeaklyCompressibleSystem.finalize` stashed any on `state.stepDiagnostics`.
+
+    Added so tracing an outlier acceleration (a sudden-ejection report like
+    `DELTASPH_VALIDATION_PLAN.md`'s Marrone 3.1/3.4 overnight-batch findings)
+    does not require re-instrumenting a probe script and re-running the case
+    from scratch every time: the min/max/mean/p05/p95 of the *actual*
+    per-step fluid acceleration (`(v_after - v_before) / dt`, magnitude and
+    per axis) and, when `mdbcNoPenShiftMode == 'finalize'` (the default), how
+    many fluid particles the no-pen correction touched and by how much, ride
+    on every trajectory row already -- no guessing after the fact whether
+    `nopenshift` was the cause of a spike.
+
+    Returns `{}` when `finalize` populated nothing (e.g. a non-WC scheme, or
+    the case's own `diagnostics` runs before any step has happened).
+    """
+    return dict(getattr(state, 'stepDiagnostics', None) or {})
 
 
 def _convexHullArea(points: 'Any') -> float:
@@ -771,6 +1073,7 @@ def squarePatchAreaMetrics(ctx: RunContext, state) -> Dict[str, float]:
     positions = particles.positions[fluid]
     masses = particles.masses[fluid]
     densities = particles.densities[fluid]
+    velocities = particles.velocities[fluid]
 
     totalMass = masses.sum()
     centreOfMass = (masses.view(-1, 1) * positions).sum(dim=0) / totalMass
@@ -791,12 +1094,33 @@ def squarePatchAreaMetrics(ctx: RunContext, state) -> Dict[str, float]:
         indicators = indicators[fluid]
         surfaceFraction = (indicators == 1).sum().item() / max(indicators.shape[0], 1)
 
+    # Sun et al. 2019 §3.3 Eqs. (26)-(27): the conservation errors that
+    # discriminate the δ⁺-SPH variants on this case. Angular momentum is taken
+    # about the fixed domain centre r_A = (0,0) (the paper's choice, not the
+    # drifting CoM); in 2D the z-component is x·u_y − y·u_x. The PST feeds a
+    # known, non-negligible ε_M into the Sun 2017 flavour this repo implements
+    # (a few % over tω ~ 4) — that is the expected result, not a regression.
+    angMom = (masses * (positions[:, 0] * velocities[:, 1]
+                        - positions[:, 1] * velocities[:, 0])).sum()
+    linMom = (masses.view(-1, 1) * velocities).sum(dim=0)
+    kinEnergy = (0.5 * masses * (velocities ** 2).sum(dim=-1)).sum()
+    angMom0 = ctx.scratch.setdefault('squarePatchAngMom0', angMom.detach().cpu().item())
+    kinEnergy0 = ctx.scratch.setdefault('squarePatchKinEnergy0',
+                                        kinEnergy.detach().cpu().item())
+    epsM = (abs(angMom.detach().cpu().item() - angMom0) / abs(angMom0) * 100.0
+            if angMom0 else float('nan'))
+    epsE = (abs(kinEnergy.detach().cpu().item() - kinEnergy0) / abs(kinEnergy0) * 100.0
+            if kinEnergy0 else float('nan'))
+
     return {
         'sphVolume': (masses / densities).sum().detach().cpu().item(),
         'hullArea': _convexHullArea(positions.detach().cpu().numpy()),
         'rmsRadius': rmsRadius.detach().cpu().item(),
         'surfaceFraction': surfaceFraction,
         'cornerRetention': cornerExtent / cornerExtent0 if cornerExtent0 else float('nan'),
+        'epsAngularMomentum': epsM,
+        'epsKineticEnergy': epsE,
+        'linearMomentumMag': float(torch.linalg.norm(linMom).detach().cpu().item()),
     }
 
 

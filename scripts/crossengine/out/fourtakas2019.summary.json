@@ -1,0 +1,13 @@
+{
+  "scheme": "fourtakas2019",
+  "diverged": false,
+  "nSteps": 8001,
+  "maxVelocity_final": 2.273449420928955,
+  "maxVelocity_max": 10.486228942871094,
+  "kineticEnergy_final": 0.3268234133720398,
+  "kineticEnergy_max": 3.3507461547851562,
+  "minDensity_final": 0.9983224868774414,
+  "minDensity_min": 0.8971945643424988,
+  "maxDensity_final": 1.0066701173782349,
+  "maxDensity_max": 1.1480929851531982
+}

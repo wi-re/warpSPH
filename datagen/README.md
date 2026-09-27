@@ -79,6 +79,40 @@ was stored more finely than the dataset needs.
 python compressor.py --directory compressed --exportInterval 0.01
 ```
 
+### Marrone 2011 §3.4 — sharp-edged obstacle + rounded tank corner
+
+A dense source of violent free-surface / solid-boundary interaction — a jet
+ejected off a convex 45° edge, two re-entrant corners, and a smooth concave
+corner in one geometry (Marrone et al. 2011 Fig. 19). Two tracked configs under
+[`examples/sweeps/`](../examples/sweeps/):
+
+| config | geometry |
+|---|---|
+| `marrone34_sharp_edge.yaml` | tank 10 H × 8 H, column 3 H × 2.4 H upstream, sharp-edged floor obstacle (45° edge apex at x = 5 H, back face at 7 H) + a concave quarter-circle fillet (radius H) rounding the downstream bottom corner |
+| `marrone34_rounded_corner.yaml` | same tank, obstacle removed — just the fillet; the surge runs the full 10 H and impacts the smoothed corner directly |
+
+```bash
+warpsph-run dambreak --config examples/sweeps/marrone34_sharp_edge.yaml --video
+warpsph-run dambreak --config examples/sweeps/marrone34_sharp_edge.yaml --nx 512
+```
+
+- **Scheme: `sun2017DeltaSPH` (δ⁺-SPH) with particle shifting on** (Sun 2017
+  Eq. (7) magnitude) — validated to run this case stably (bulk ρ P99 ≤ 1.02 vs
+  ~1.14 for plain δ-SPH); set `params.shifting: false` for plain δ-SPH.
+- **Resolution: `nx` → H/dx = nx/8.** Ships `nx = 256` (H/dx = 32, Marrone's
+  coarsest, "almost converged"); raise `nx` for higher-fidelity samples.
+- **c₀ = 28.3 √(gH)** via `params.machTarget` / `referenceVelocity`; H = 1,
+  g = 9.81, so t\* = t √(g/H) = t / 0.319 s and `tLimit` ≈ t\* 7.4.
+- To batch either through `run_sweep.py`, expand the terse YAML to a full
+  `CaseSpec` first (`warpsph-run dambreak --config <f>.yaml --saveConfig
+  <f>.json`) — `run_sweep.py` loads a spec literally and does not merge the
+  case's own defaults.
+- Geometry: `warpSPH.caseUtils.weaklyCompressible._marroneSharpEdgeSDF`
+  (obstacle preset keys `marroneSharpEdge` / `marroneRoundedCorner`). The
+  δ-SPH validation story — stability, boundary penetration, convergence — is
+  `DELTASPH_VALIDATION_PLAN.md` §5.2.2 and
+  `scripts/probe_deltaSPHMarrone34.py`.
+
 ## Notebooks
 
 Exploratory, and older than the `examples/` ones — these are still on the

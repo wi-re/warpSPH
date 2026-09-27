@@ -195,7 +195,8 @@ import warp as wp
 from warp.types import vector, matrix
 from typing import Any
 import torch
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
 from ._util import stateHasBoundaryParticles
@@ -294,31 +295,48 @@ def computeMdbcNoPenShift_Func_i(
         tempCtr = zero_like_warp(outCtr)
         if w_ij > scalar_t(0.0):
             condition_a = r_ij < scalar_t(1.25) * dp_i
-            condition_b = wp.abs(normDist) < scalar_t(0.75) * norm_j and norm_j < scalar_t(1.75) * dp_i
+            # SIGNED, matching DualSPHysics `normdist < 0.75f*norm`. With
+            # `wp.abs()` here the test also rejects particles that have
+            # penetrated *deeper* than 0.75*norm past the first boundary row,
+            # so the anti-penetration correction switched off exactly where the
+            # penetration was worst -- measured as a hard cutoff at
+            # n = -1.17 dx by `scripts/probe_nopenShiftResponse.py`.
+            condition_b = normDist < scalar_t(0.75) * norm_j and norm_j < scalar_t(1.75) * dp_i
             condition_c = wp.dot(vel_i - vel_j, normal_j) < 0
 
             condition_ab = condition_a and condition_b
-            condition_abc = condition_ab and condition_c 
-            
-            for d in range(dim):
-                u_i = vel_i[d]
-                u_j = vel_j[d]
-                dv = u_i - u_j
-                norm = normal_j[d]
-                dr = x_ij[d]
-                
-                mask = condition_ab and (dr * normal_j[d] < scalar_t(0.75)) and (wp.abs(normal_j[d]) > scalar_t(0.001) * dp_i)
 
-                vfc = dv * norm
-                ratio = wp.clamp(wp.abs((dr / norm)), scalar_t(0.25), scalar_t(1.0))
-                factor = - scalar_t(4.0) * ratio + scalar_t(3.0)
+            # Reflect along the wall NORMAL as a vector, rather than
+            # decomposing per Cartesian component. `-factor * dv_d * n_d^2`
+            # (the per-component form, and DualSPHysics') is the right
+            # magnitude only when the normal IS an axis: measured on a tilted
+            # wall it gives `shift_d = 2 v_d n_d^2`, so at 45 deg each
+            # component receives exactly `|v_d|` -- which *cancels* the
+            # velocity instead of reversing it, and the particle is stopped
+            # dead rather than bounced. That is wrong for every non-axis-
+            # aligned wall: the Marrone 3.4 wedge face, and every domain corner
+            # where the ghost normals swing through 90 deg.
+            # `scripts/probe_nopenShiftCorner.py` / `...Response.py` grade this.
+            v_rel = vel_i - vel_j
+            vn = wp.dot(v_rel, normal_j)
 
-                nopenshiftTerm = -factor * dv * norm * norm
-                if mask and vfc < 0:
-                    tempOut[d] = nopenshiftTerm
+            # `ratio` is dimensionless now: how far inside the boundary-normal
+            # length the contact sits. The old `|dr / norm|` divided a LENGTH
+            # (metres) by a dimensionless unit-vector component, so it was
+            # ~5e-3 and always pinned to the 0.25 floor -- the distance ramp
+            # DualSPHysics intends was dead in both codes. With this form
+            # `factor` runs 1 (grazing contact, normal velocity absorbed) to 2
+            # (deep contact, full specular reflection).
+            ratio = wp.clamp(wp.abs(normDist) / (norm_j + scalar_t(1.0e-12)),
+                             scalar_t(0.25), scalar_t(1.0))
+            factor = - scalar_t(4.0) * ratio + scalar_t(3.0)
+
+            if condition_ab and vn < scalar_t(0.0):
+                tempOut = -factor * vn * normal_j
+                for d in range(dim):
                     tempCtr[d] = 1
 
-            out += tempOut 
+            out += tempOut
             outCounter += tempCtr
         
     return out, outCounter
@@ -326,7 +344,7 @@ from warpSPHCore import *
 
 @wp.func
 def computeMdbcNoPenShift_Func_Adjacency(
-    i : wp.int32, dim: wp.int32, 
+    i : wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32, 
 
     queryState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
     referenceState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
@@ -360,6 +378,12 @@ def computeMdbcNoPenShift_Func_Adjacency(
     outCounter = zero_like_warp(outCtr)
 
     for o in range(numOffsets):
+
+        # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
+
+        if not useAdjacency and (o % lanes) != lane:
+
+            continue
         beginIndex = wp.int32(0)
         numIndices = wp.int32(0)
         if useAdjacency:    
@@ -374,6 +398,7 @@ def computeMdbcNoPenShift_Func_Adjacency(
             if beginIndex < 0:
                 continue
         
+        beginIndex, numIndices = laneSlice(beginIndex, numIndices, lane, lanes, useAdjacency)
         ret_out, ret_ctr = computeMdbcNoPenShift_Func_i(
             i, dim, 
             xi, hi, mi, rhoi,
@@ -421,7 +446,7 @@ def computeMdbcNoPenShift_Kernel(
         return
 
     ret_out, ret_ctr = computeMdbcNoPenShift_Func_Adjacency(
-        i, domainState.dim, 
+        i, domainState.dim, 0, 1, 
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,  #queryKinds, referenceKinds,
@@ -438,6 +463,46 @@ def computeMdbcNoPenShift_Kernel(
     outputValues[i] = avg_out
     outputCounters[i] = ret_ctr
 
+@wp.kernel
+def computeMdbcNoPenShift_KernelTiled(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+    
+    kernelProperties: kernelState,
+    # Do not change the parameters above
+    queryVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    queryOffsets: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceOffsets: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    # The last parameter is always the output array and should not be changed
+    outputValues : wp.array(dtype = Any), # type: ignore
+    outputCounters : wp.array(dtype = Any) # type: ignore
+):
+    # Multi-lane variant of computeMdbcNoPenShift_Kernel (warpSPHCore autograd/lanes.py):
+    # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
+
+    i, lane = wp.tid()
+    ret_out, ret_ctr = computeMdbcNoPenShift_Func_Adjacency(
+        i, domainState.dim, lane, wp.block_dim(),
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+        queryVelocities, referenceVelocities,
+        queryOffsets, referenceOffsets,
+        outputCounters
+    )
+    sum_out = laneSum(ret_out)
+    sum_ctr = laneSum(ret_ctr)
+    avg_out = zero_like_warp(sum_out)
+    for d in range(domainState.dim):
+        avg_out[d] = sum_out[d] / (scalar_t(sum_ctr[d]) + scalar_t(1e-12))
+    if lane == 0:
+        outputValues[i] = avg_out
+        outputCounters[i] = sum_ctr
+
+
 def _mdbcShiftDtype(ctx, extras):
     return castTorchToWarpAsBuiltins(ctx.query.positions).dtype
 
@@ -448,6 +513,7 @@ def _mdbcCounterDtype(ctx, extras):
 
 _MDBC_NOPEN_SHIFT = OperatorSpec(
     kernel=computeMdbcNoPenShift_Kernel,
+    tiledKernel=computeMdbcNoPenShift_KernelTiled,
     outputs=(
         OutputSpec(dtype=_mdbcShiftDtype, shape=ShapeOf.QUERY),
         OutputSpec(dtype=_mdbcCounterDtype, shape=ShapeOf.QUERY),

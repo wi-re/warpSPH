@@ -16,13 +16,15 @@ from __future__ import annotations
 
 from typing import Dict
 
+from ..enumTypes import isArtificialCompressibleScheme
 from ..modules.noise.sampleDivergenceFree import sampleDivergenceFreeNoise
 from ..runner import Case, RunContext, caseMain, registerCase
 from .plotting import particlePlot
 from .weaklyCompressible import (OBSTACLE_PARAMS, VELOCITY_DENSITY_FIELDS,
                                  WEAKLY_COMPRESSIBLE_DEFAULTS,
                                  WEAKLY_COMPRESSIBLE_PARAMS, boundaryRegion,
-                                 buildRegionSystem, configureWeaklyCompressible,
+                                 buildRegionSystem, configureArtificialCompressible,
+                                 configureWeaklyCompressible,
                                  domainBoundarySdf, domainFluidSdf, fluidRegion,
                                  paramExtraData, paramShapeSdf, setupTimestep,
                                  weaklyCompressibleDiagnostics)
@@ -41,7 +43,13 @@ BOUNDED_BAND = 5
 def configureScheme(ctx: RunContext) -> None:
     if ctx.param('bounded') and not ctx.param('band'):
         ctx.spec.params['band'] = BOUNDED_BAND
-    configureWeaklyCompressible(ctx)
+    if isArtificialCompressibleScheme(ctx.scheme):
+        # ACSPH has no `diffusionParams` block, so the shared WCSPH
+        # configurator would crash on it; route to the ACSPH-specific one
+        # (same `configureDomain` domain/resolution work, ACSPH scheme knobs).
+        configureArtificialCompressible(ctx)
+    else:
+        configureWeaklyCompressible(ctx)
     # The surface-detection bandwidth is measured in particle spacings.
     ctx.schemeConfig.bandwith = ctx.spec.L / ctx.param('bandWidth') / ctx.config.dx
 
@@ -67,7 +75,40 @@ def noiseVelocities(ctx: RunContext, system):
 
 def initialConditions(ctx: RunContext, system) -> None:
     system.state.velocities[:] = noiseVelocities(ctx, system)
+    if isArtificialCompressibleScheme(ctx.scheme):
+        # No sound speed to back-solve a `dt` from; seed `targetDt` and let
+        # `randomFlowTimestep`'s Eq. (46) branch take over from step 1 on.
+        ctx.config.dt = ctx.param('targetDt')
+        # `U_char` in Eq. (48), which De Courcy et al. leave undefined per case
+        # (ACSPH_PLAN.md 5.5). This field has no closed-form velocity scale --
+        # it is band-limited noise -- so take it from the seeded field itself,
+        # which is the only honest characteristic speed available. Without it
+        # the metric falls back to the instantaneous `|v|_max`, which drifts
+        # with the flow and so makes a fixed `eps_v` target mean different
+        # things at different times.
+        if ctx.schemeConfig.acParams.uChar is None:
+            fluid = system.state.kinds == 0
+            if bool(fluid.any()):
+                ctx.schemeConfig.acParams.uChar = float(
+                    system.state.velocities[fluid].norm(dim=-1).max())
+        return
     setupTimestep(ctx, system)
+
+
+def randomFlowTimestep(ctx: RunContext, state) -> float:
+    """Per-step dt, dispatched by scheme.
+
+    * `artificialCompressible` -- De Courcy et al. 2024 Eq. (46)
+      (`modules.timestep.computeTimestep` -> ACSPH branch).
+    * everything else (the `deltaSPH` default) -- fixed `targetDt`, the
+      pre-existing behaviour: this case historically had no `timestep` hook,
+      so the runner left `config.dt` at whatever `setupTimestep` set.
+    """
+    if isArtificialCompressibleScheme(ctx.scheme):
+        from ..modules.timestep import computeTimestep
+        return computeTimestep(state, ctx.config, ctx.schemeConfig,
+                               dt=ctx.config.dt)
+    return ctx.config.dt
 
 
 setupPlot, updatePlot = particlePlot(VELOCITY_DENSITY_FIELDS)
@@ -88,6 +129,7 @@ randomFlowCase = registerCase(Case(
     setupPlot=setupPlot,
     updatePlot=updatePlot,
     extraData=paramExtraData,
+    timestep=randomFlowTimestep,
     defaults=dict(
         WEAKLY_COMPRESSIBLE_DEFAULTS,
         caseName='06-randomFlow',

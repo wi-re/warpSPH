@@ -1,18 +1,29 @@
 # Adding a paper
 
-Drop the PDF in `literature/` and ask for a sync. That is genuinely all the
-manual work there is — but the steps below are what a sync has to *do*, and
-they are written down because most of them exist to catch a specific mistake
-that has already happened here at least once.
+Drop the PDF in `literature/dump/` and ask for a sync. That is genuinely all
+the manual work there is — but the steps below are what a sync has to *do*,
+and they are written down because most of them exist to catch a specific
+mistake that has already happened here at least once.
+
+`dump/` is a landing zone, nothing more: `scripts/check_literature.py` only
+scans `literature/`'s top level (`os.listdir`, not a walk), so a file sitting
+in `dump/` — under whatever name it downloaded as — is invisible to the
+checker and produces no "problem" lines until a sync moves it. A sync's last
+step renames the file out of `dump/` into `literature/` proper as
+`<bibkey>_<slug>.pdf`; `dump/` should be empty between syncs, and a file left
+there across a session is exactly what a "what's still pending" check means to
+find.
 
 > **Never commit the PDF.** `.gitignore` covers `literature/*` (except `*.md`
-> and `*.bib`) and `*.pdf` repo-wide. The documents are third-party copyrighted
-> material; only the metadata is tracked. If `git status` ever shows a `.pdf`,
-> stop and fix the ignore rule rather than committing it.
+> and `*.bib`) and `*.pdf` repo-wide — `dump/` inherits this with no extra rule
+> needed, since it is itself a direct child of the ignored `literature/*`.
+> The documents are third-party copyrighted material; only the metadata is
+> tracked. If `git status` ever shows a `.pdf`, stop and fix the ignore rule
+> rather than committing it.
 
 ## The one-line version
 
-Copy the PDF in under any name, then:
+Copy the PDF into `literature/dump/` under any name, then:
 
 > Sync `literature/`: reconcile the PDFs against the manifest, verify the
 > BibTeX and the abstracts against the documents, and rename anything that does
@@ -83,6 +94,28 @@ Correcting them would quietly break the verbatim guarantee that makes
 Elsevier and IEEE mostly do not deposit abstracts, so those will come from the
 PDF. That is fine; it is the two-column reassembly that needs care, and the
 skill covers it.
+
+**When the text layer itself is corrupt**, declare the defect rather than
+quoting it or working around it. Some publisher PDFs interleave a floating
+glyph — a vector overline, a subscript — into the middle of a word, or drop a
+hyphen entirely, so the extraction reads `weaklycompressible`, or
+`obtained by modi given by a Particle Shifting fying the pure ...`. Quoting
+*that* puts gibberish in the file; quoting the sentence as it reads fails the
+checker for a reason that has nothing to do with accuracy. Add one line per
+defect to the block:
+
+```
+- **text-layer:** `weaklycompressible` -> `weakly compressible`
+- **text-layer:** `by modi given by a particle shifting fying the` -> `by modifying the`
+```
+
+Each asserts "the text layer says the left side where the document says the
+right side". The checker applies them to the extracted text before matching, so
+the verbatim check still runs at full strictness — against a transformation
+that is written down and reviewable. Keep each repair to the smallest span that
+fixes the artifact; the checker rejects any repair over
+`MAX_REPAIR_WORDS` words, so this cannot quietly become "and here is the
+abstract I wanted". `antuono2021` is the worked example.
 
 ### 5. Update all four files together
 

@@ -11,8 +11,7 @@ maps shape names to these already-batched-or-vmappable callables.
 import torch
 import numpy as np
 
-import warnings
-warnings.filterwarnings("ignore")
+
 def batchedSDF(fn, p, *args):
     return torch.vmap(fn, in_dims=(0, *([None] * len(args))), out_dims=0)(p, *args)
 
@@ -142,7 +141,12 @@ def sdHorseshoe(p, c, r, w):
     # p = torch.stack((torch.abs(p[0]), p[1]))
     p = torch.stack((torch.abs(p[0]), p[1]))
     l = torch.linalg.norm(p)
-    p = torch.matmul(torch.tensor([[-c[0], c[1]], [c[1], c[0]]], dtype = p.dtype, device = p.device), p.T).T
+    # `p` is a single (2,) point here (vmapped per point): M @ p directly. The
+    # former `(M @ p.T).T` was the same value but `.T` on a 1-D tensor is
+    # deprecated -- the only warning this module emitted, and the reason a
+    # blanket warnings.filterwarnings("ignore") used to sit at the top of
+    # this file (silencing every warning process-wide; removed).
+    p = torch.matmul(torch.tensor([[-c[0], c[1]], [c[1], c[0]]], dtype = p.dtype, device = p.device), p)
     p = torch.stack([torch.where((p[1] > 0.0) | (p[0] > 0.0), p[0], l * torch.sign(-c[0])),
                      torch.where(p[0] > 0.0, p[1], l)])
     p = torch.stack([p[0], torch.abs(p[1] - r)]) - w
@@ -279,5 +283,5 @@ functionDict = {
 }
 
 __all__ = [
-    'batchedSDF', 'functionDict', 'sdCircle', 'sdBox', 'sdRoundedBox', 'sdOrientedBox', 'sdSegment', 'sdRhombus', 'sdTrapezoid', 'sdParallelogram', 'sdEquilateralTriangle', 'sdTriangleIsosceles', 'sdTriangle', 'sdUnevenCapsule', 'sdPentagon', 'sdHexagon', 'sdOctogon', 'sdHexagram', 'sdStar5', 'sdStar', 'sdPie', 'sdCutDisk', 'sdArc', 'sdRing', 'sdHorseshoe', 'sdVesica', 'sdMoon', 'sdEgg', 'ndot'
+    'batchedSDF', 'functionDict', 'sdCircle', 'sdBox', 'sdRoundedBox', 'sdOrientedBox', 'sdSegment', 'sdRhombus', 'sdTrapezoid', 'sdParallelogram', 'sdEquilateralTriangle', 'sdTriangleIsosceles', 'sdTriangle', 'sdUnevenCapsule', 'sdPentagon', 'sdHexagon', 'sdOctogon', 'sdHexagram', 'sdStar5', 'sdStar', 'sdPie', 'sdCutDisk', 'sdArc', 'sdRing', 'sdHorseshoe', 'sdVesica', 'sdMoon', 'sdEgg', 'sdPolygon', 'ndot'
 ]

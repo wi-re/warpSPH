@@ -52,6 +52,7 @@ class SamplingScheme(Enum):
     glass = 3
     optimal = 4
     random = 5
+    densest = 6
 
 
 __all__ = ['ParticleState', 'ParticleSet', 'PointCloud', 'SamplingScheme']

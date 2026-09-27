@@ -15,10 +15,13 @@ __all__ = [
     'CompressibleSPHScheme',
     'WeaklyCompressibleSPHScheme',
     'IncompressibleSPHScheme',
+    'ArtificialCompressibleSPHScheme',
+    'PressureSmoothingScheme',
     'WaveEquationScheme',
     'EquationOfState',
     'DensityDiffusionScheme',
     'PressureForceScheme',
+    'isArtificialCompressibleScheme',
 ]
 
 # @torch.jit.script
@@ -45,6 +48,7 @@ class ViscositySwitch(Enum):
     MorrisMonaghan1997 = 4
     Rosswog2000 = 5
     NoneSwitch = 6
+    ReadHayfield2012 = 7
 
 
 # @torch.jit.script
@@ -55,7 +59,22 @@ class CompressibleSPHScheme(Enum):
 
 # @torch.jit.script
 class WeaklyCompressibleSPHScheme(Enum):
+    #: Generic delta-SPH/WCSPH: every `WeaklyCompressibleSPHConfig` knob at its
+    #: own documented default (`freezeDiffusionAcrossStages=False` among them).
+    #: Not tied to any one paper's exact prescription.
     deltaSPH = 0
+    #: Sun et al. 2017's own delta+-SPH prescription: identical physics/step
+    #: function to `deltaSPH` (`schemes/deltaSPH.py`, no new code), but
+    #: `Sun2017DeltaSPHConfig` defaults `freezeDiffusionAcrossStages=True` --
+    #: Sec. 2's RK4-with-frozen-diffusion pairing (Antuono/Jameson), confirmed
+    #: to fix a genuine violent-impact pressure artefact in
+    #: `DELTASPH_VALIDATION_PLAN.md` Part 5.1. A *named* scheme rather than a
+    #: change to `deltaSPH`'s own default, so selecting a specific paper's
+    #: prescription is an explicit choice (`--scheme sun2017`), not a silent
+    #: behaviour change for every existing `deltaSPH` case. Kernel/integrator
+    #: choice (Wendland C2, RK4) remain case-level settings either way --
+    #: `cases/dambreak.py` already defaults to both, independent of scheme.
+    sun2017DeltaSPH = 1
 
 # @torch.jit.script
 class IncompressibleSPHScheme(Enum):
@@ -118,6 +137,62 @@ class IncompressibleSPHScheme(Enum):
     band2018pb = 4
 
 # @torch.jit.script
+class ArtificialCompressibleSPHScheme(Enum):
+    """Artificial-compressibility SPH (De Courcy et al. 2024,
+    `literature/decourcy2024_*`; `ACSPH_PLAN.md`).
+
+    A third structurally-distinct incompressible baseline: where DFSPH iterates
+    a pressure-Poisson-like Jacobi solve on a velocity constraint, this
+    integrates a *differential* pressure equation `Dp/Dtau = -k1 rho div v +
+    k2 D^p` to steady state in a pseudo-time loop nested inside each real step,
+    with a BDF2 source carrying the real-time derivatives. It is a delta-SPH
+    code with the equation of state removed -- which is why so much of it is a
+    config flag away here (`ACSPH_PLAN.md` Part 3).
+
+    Its own family rather than a `WeaklyCompressibleSPHScheme` member: the
+    pressure is an *integrated* field and the density a constant, which is the
+    opposite of every weakly-compressible state in this package.
+    """
+    artificialCompressible = 0
+
+
+class PressureSmoothingScheme(Enum):
+    """The `D^p` pressure-smoothing operator of De Courcy et al. 2024
+    Eqs. (32)-(37) -- ACSPH's analogue of `DensityDiffusionScheme`, which is
+    also what implements it (`modules/deltaSPH/densityDiffusion.py`'s
+    `computeScalarFieldDiffusion`, with the pressure in place of the density).
+    """
+    #: AC-2, Eq. (32). Plain Molteni-Colagrossi Laplacian of pressure. A
+    #: **negative control**, not a candidate default: it cannot hold a
+    #: hydrostatic gradient and diffuses the free surface (paper Sec. 4.1.1).
+    #: == `DensityDiffusionScheme.densityOnly`.
+    laplacian = 0
+    #: AC-2L, Eqs. (33)-(34). Antuono-renormalised bi-Laplacian. **The paper's
+    #: working default** and the operator in every head-to-head against
+    #: delta-SPH. == `DensityDiffusionScheme.deltaSPH`.
+    renormalizedBiLaplacian = 1
+    #: AC-4, Eq. (35). Nested (bi-harmonic) Laplacian: a second pass over AC-2's
+    #: output, no renormalisation. Inherits AC-2's truncation error, weaker.
+    biharmonic = 2
+    #: AC-JST, Eqs. (36)-(37). Jameson-Schmidt-Turkel blend of AC-2L and AC-4,
+    #: switched on a pressure-oscillation sensor, AC-2L alone near the free
+    #: surface. Not pairwise-symmetric, therefore **not locally conservative**
+    #: (the paper says so; see ACSPH_PLAN.md Sec. 5.1 on its `eps_4` typo).
+    jst = 3
+
+
+# @torch.jit.script
+def isArtificialCompressibleScheme(scheme) -> bool:
+    """Is `scheme` any member of `ArtificialCompressibleSPHScheme`?
+
+    The counterpart of `isIncompressibleScheme`, and for the same reason: a
+    case that branches on "does this scheme solve for pressure rather than
+    evaluate an EOS" must ask about the family, not identity-test one member.
+    """
+    return isinstance(scheme, ArtificialCompressibleSPHScheme)
+
+
+# @torch.jit.script
 def isIncompressibleScheme(scheme) -> bool:
     """Is `scheme` any member of `IncompressibleSPHScheme`?
 
@@ -149,6 +224,42 @@ class DensityDiffusionScheme(Enum):
     densityOnly = 2
     deltaOnly = 3
     denormalizedOnly = 4
+    # A/B-only: the pre-`790a7c7` sign (`psi_ij = grad_ij - rho_ij`, the
+    # gradient term NOT negated), which DELTASPH_VALIDATION_PLAN.md Part 4
+    # found degenerates the Antuono bi-Laplacian to 2x the plain
+    # Molteni-Colagrossi Laplacian on a smooth field -- second-order instead
+    # of fourth, and actively diffusing the gradients the correct (`deltaSPH`)
+    # sign is designed to leave alone. Kept as a distinct member per Part 4's
+    # own instruction ("do not overload deltaSPH") for exactly this kind of
+    # controlled comparison; never select it as a default.
+    deltaSPH_wrongSign = 5
+    # Molteni & Colagrossi 2009 Eq. (15)-(16) (`literature/molteni2009_*.pdf`,
+    # DELTASPH_VALIDATION_PLAN.md Part 8.15/8.16): the origin DDT, predating
+    # Antuono's renormalized-gradient correction entirely -- no `gradRhoL`/
+    # covariance-matrix dependency at all. Its own psi is a *ratio* term,
+    # `2(v_i/v_j - 1) x_ij/(|x_ij|^2 + eps_h h^2)` with `v = 1/rho`
+    # (specific volume) and `eps_h = 0.01` -- NOT the density-difference form
+    # `densityOnly` already implements (which is the same family but a
+    # different, later restatement; see that member's own docstring
+    # reference and `wp_densityDelta.py`'s module docstring for the
+    # discrepancy this uncovered against both DualSPHysics' C++ (which uses
+    # `rho_i/rho_j`, the *reciprocal* ratio) and Fourtakas et al. 2019's own
+    # citation of this formula (a plain difference, matching `densityOnly`
+    # instead of this member).
+    moltenicolagrossi2009 = 6
+    # Fourtakas et al. 2019 Sec. 3.2 Eq. (15)-(19) (`literature/
+    # fourtakas2019_*.pdf`, DELTASPH_VALIDATION_PLAN.md Part 8.15/8.16):
+    # DualSPHysics' `DDT_DDT2`. Same density-difference structure as
+    # `densityOnly`, but with the *hydrostatic* background density
+    # difference subtracted out analytically (from gravity + the EOS)
+    # before diffusing, rather than via a renormalized SPH gradient
+    # estimate -- restores free-surface consistency the way `deltaSPH`'s
+    # gradient correction does, without ever computing `gradRhoL`. Adapted
+    # here to this codebase's isothermal EOS (the paper's own Tait-EOS
+    # correction collapses to the same linear profile `hydrostaticInit`
+    # already uses at gamma -> 1); needs `rho0`/`c0`/gravity, which none of
+    # the other schemes do.
+    fourtakas2019 = 7
 
 class PressureForceScheme(Enum):
     conservative = 0

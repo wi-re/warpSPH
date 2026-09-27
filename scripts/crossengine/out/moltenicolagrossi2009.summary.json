@@ -1,0 +1,13 @@
+{
+  "scheme": "moltenicolagrossi2009",
+  "diverged": false,
+  "nSteps": 8001,
+  "maxVelocity_final": 2.0353455543518066,
+  "maxVelocity_max": 10.997458457946777,
+  "kineticEnergy_final": 0.3410118818283081,
+  "kineticEnergy_max": 3.344285011291504,
+  "minDensity_final": 0.995241105556488,
+  "minDensity_min": 0.8339868187904358,
+  "maxDensity_final": 1.0048788785934448,
+  "maxDensity_max": 1.1932692527770996
+}

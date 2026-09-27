@@ -9,13 +9,22 @@ selected via `schemeConfig.diffusionParams.densityDiffusionTerm`
 (`DensityDiffusionScheme`) and forwarded to the underlying kernel; the caller
 (`schemes/deltaSPH.py`) is responsible for only supplying `gradRho`/`gradRhoL`
 when the selected scheme actually needs them.
+
+`computeScalarFieldDiffusion` is the same operator with neither the field nor
+the prefactor fixed: it returns the raw (unscaled) divergence for any scalar
+field, which is what ACSPH needs (ACSPH_PLAN.md Sec. 4.3 -- its pressure
+smoothing operators carry a `k2 = 0.1 h beta` prefactor, not delta-SPH's
+`delta h c_s`, and `beta` is a pseudo-time wave speed with no `c_s` behind it).
+`computeDensityDiffusion` is the delta-SPH specialisation of it.
 """
 
 import warp as wp
 from warp.types import vector, matrix
 from typing import Any
 import torch
-from torch.profiler import profile, record_function, ProfilerActivity
+from ...utils.syncFree import deviceConstant
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
 
@@ -27,25 +36,77 @@ from ...enumTypes import *
 
 from .wp_densityDelta import computeDensityDiffusionDeltaSPH
 
-__all__ = ['computeDensityDiffusion']
+__all__ = ['computeDensityDiffusion', 'computeScalarFieldDiffusion']
 
-def computeDensityDiffusion(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], gradRho: Optional[torch.Tensor], gradRhoL: Optional[torch.Tensor]) -> torch.Tensor:
-    with record_function("[warpSPH] - (deltaSPH) - computeDensityDiffusion"):
-        delta = schemeConfig.diffusionParams.densityDelta
-        xi = sphKernel_xi(config.kernel.value, config.dim)
-        drhodt_scaling = delta * currentState.supports / xi * schemeConfig.fluid.fixedSoundSpeed
-        drhodt_diss = drhodt_scaling * computeDensityDiffusionDeltaSPH(
+def computeScalarFieldDiffusion(currentState: Any, config: SimulationConfig, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], scheme: DensityDiffusionScheme, gradField: Optional[torch.Tensor] = None, gradFieldL: Optional[torch.Tensor] = None, field: Optional[torch.Tensor] = None, operationMode: OperationDirection = OperationDirection.AllToAll, rho0: Optional[float] = None, c0: Optional[float] = None, gravity: Optional[torch.Tensor] = None) -> torch.Tensor:
+    """The raw (unscaled) delta-SPH diffusion divergence for an arbitrary scalar
+    `field` and its gradients. `field=None` diffuses the state's density, i.e.
+    reproduces `computeDensityDiffusion` without its prefactor. No
+    `schemeConfig`: nothing here is scheme-specific, which is the point -- see
+    the module docstring.
+
+    `operationMode` defaults to `AllToAll` (unchanged for every caller besides
+    `computeDensityDiffusion`, e.g. ACSPH's pressure smoothing).
+
+    `rho0`/`c0`/`gravity` are only read by `DensityDiffusionScheme.
+    moltenicolagrossi2009`/`.fourtakas2019` -- every other scheme ignores
+    them, so callers that never select those two need not supply them."""
+    with record_function("[warpSPH] - (deltaSPH) - computeScalarFieldDiffusion"):
+        return computeDensityDiffusionDeltaSPH(
             currentState,
             operationProperties = OperationProperties(
                 kernel = config.kernel,
                 operation = WarpOperation.Divergence,
                 supportMode = SupportScheme.SuperSymmetric,
-                operationMode = OperationDirection.AllToAll,
+                operationMode = operationMode,
             ),
             domain = config.domain,
             adjacency = adjacency,
-            queryGradRho = gradRho,
-            queryGradRhoL = gradRhoL,
-            densityScheme = schemeConfig.diffusionParams.densityDiffusionTerm
+            queryGradRho = gradField,
+            queryGradRhoL = gradFieldL,
+            queryField = field,
+            densityScheme = scheme,
+            rho0 = rho0, c0 = c0, gravity = gravity,
+        )
+
+
+def computeDensityDiffusion(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], gradRho: Optional[torch.Tensor], gradRhoL: Optional[torch.Tensor]) -> torch.Tensor:
+    with record_function("[warpSPH] - (deltaSPH) - computeDensityDiffusion"):
+        delta = schemeConfig.diffusionParams.densityDelta
+        xi = float(sphKernel_xi(config.kernel.value, config.dim))
+        drhodt_scaling = delta * currentState.supports / xi * schemeConfig.fluid.fixedSoundSpeed
+        # Fluid-to-fluid only: a boundary neighbour's density is the mDBC
+        # extrapolation, a phase-lagged copy of the fluid's own field, not an
+        # independent measurement. Diffusing a fluid particle toward it is a
+        # delayed self-coupling that can sustain/pump near-wall oscillations
+        # instead of draining them (DELTASPH_VALIDATION_PLAN.md item C).
+        # DualSPHysics's DDT (all variants: DDT_DDT / DDT_DDT2 / DDT_DDT2Full,
+        # JSphCpu.cpp ~L925-939) excludes boundary neighbours from this same
+        # sum entirely. Only this outer pair-sum direction changes here --
+        # `gradRho`/`gradRhoL` (passed in, computed elsewhere) are untouched.
+        # `moltenicolagrossi2009`/`fourtakas2019`-only; every other scheme
+        # ignores rho0/c0/gravity, so this is cheap even when unused. Gated
+        # on `.active`, not just the scheme choice: `gravityConfig.magnitude`
+        # defaults to 9.81 even when gravity is off, so a case that never
+        # enables gravity (lidDrivenCavity, randomFlow) would otherwise still
+        # get a nonzero hydrostatic correction subtracted from a fluid with
+        # no actual gravitational stratification -- a spurious density
+        # source, not a no-op.
+        gravityVec = None
+        if (schemeConfig.diffusionParams.densityDiffusionTerm == DensityDiffusionScheme.fourtakas2019
+                and schemeConfig.gravityConfig.active):
+            direction = schemeConfig.gravityConfig.direction
+            if not isinstance(direction, torch.Tensor):
+                direction = deviceConstant(direction, currentState.positions.dtype, currentState.positions.device)
+            gravityVec = direction[:currentState.positions.shape[1]] * schemeConfig.gravityConfig.magnitude
+
+        drhodt_diss = drhodt_scaling * computeScalarFieldDiffusion(
+            currentState, config, adjacency,
+            schemeConfig.diffusionParams.densityDiffusionTerm,
+            gradField = gradRho, gradFieldL = gradRhoL,
+            operationMode = OperationDirection.FluidToFluid,
+            rho0 = schemeConfig.fluid.restDensity,
+            c0 = schemeConfig.fluid.fixedSoundSpeed,
+            gravity = gravityVec,
         )
         return drhodt_diss

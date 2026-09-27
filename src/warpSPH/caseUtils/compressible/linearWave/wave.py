@@ -14,7 +14,8 @@ from ....modules.timestep.compressible import computeTimestep
 
 # final import blocks that are generic
 import matplotlib.pyplot as plt
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
 import numpy as np
 
 # custom SPH libraries

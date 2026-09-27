@@ -1,19 +1,25 @@
 """Pressure-force operator supporting several pressure-symmetrization
 formulations selected via `enumTypes.PressureForceScheme`
 (`conservative`, `nonConservative`, an Antuono-style surface-aware blend,
-one-sided `i`/`j`, and `symmetric`). The Antuono formulation switches to the
-symmetric form whenever either pressure is non-negative or the query
-particle is flagged as a free-surface particle (`querySurfaceMask`), and
-falls back to the antisymmetric ("conservative") form only in the
-negative-pressure, non-surface case, to avoid the tensile instability.
-Output is the negated pressure-gradient term divided by density.
+one-sided `i`/`j`, and `symmetric`). The Antuono formulation is the Tensile
+Instability Control switch of Sun, Colagrossi, Marrone, Antuono & Zhang,
+*Multi-resolution Delta-plus-SPH with tensile instability control*, Comput.
+Phys. Commun. 224:63-80 (2018) (`sun2018`), Eq. (9): it switches to the
+symmetric form when the *query* particle's own pressure is non-negative, or
+the query particle is flagged as a free-surface particle (`querySurfaceMask`),
+and falls back to the antisymmetric ("conservative") form only when the query
+particle is both in tension and away from the free surface. The condition is
+on the query particle alone -- the reference particle's pressure does not
+participate in the switch, per the equation. Output is the negated
+pressure-gradient term divided by density.
 """
 
 import warp as wp
 from warp.types import vector, matrix
 from typing import Any
 import torch
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
 
@@ -100,8 +106,7 @@ def computePressureSurfaceAware_Func_i(
         elif pressureTerm == wp.static(wp.int32(PressureForceScheme.nonConservative.value)):
             p_ij = P_j + P_i
         elif pressureTerm == wp.static(wp.int32(PressureForceScheme.Antuono.value)):
-            sw = P_i >= 0.0 or P_j >= 0.0
-            sw = (sw) or (mask_i == 1) 
+            sw = P_i >= 0.0 or (mask_i == 1)
             p_ij = (P_j + P_i) if sw else (P_j - P_i)
         elif pressureTerm == wp.static(wp.int32(PressureForceScheme.i.value)):
             p_ij = P_i
@@ -119,7 +124,7 @@ def computePressureSurfaceAware_Func_i(
 
 @wp.func
 def computePressureSurfaceAware_Func_Adjacency(
-    i : wp.int32, dim: wp.int32, 
+    i : wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32, 
 
     queryState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
     referenceState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
@@ -154,6 +159,9 @@ def computePressureSurfaceAware_Func_Adjacency(
 
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
+        # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
+        if not useAdjacency and (o % lanes) != lane:
+            continue
         beginIndex = wp.int32(0)
         numIndices = wp.int32(0)
         if useAdjacency:    
@@ -168,6 +176,7 @@ def computePressureSurfaceAware_Func_Adjacency(
             if beginIndex < 0:
                 continue
         
+        beginIndex, numIndices = laneSlice(beginIndex, numIndices, lane, lanes, useAdjacency)
         out += computePressureSurfaceAware_Func_i(
             i, dim, 
             xi, hi, mi, rhoi,
@@ -218,7 +227,7 @@ def computePressureSurfaceAware_Kernel(
         return
 
     outputValues[i] = -computePressureSurfaceAware_Func_Adjacency(
-        i, domainState.dim, 
+        i, domainState.dim, 0, 1, 
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,  #queryKinds, referenceKinds,
@@ -231,12 +240,49 @@ def computePressureSurfaceAware_Kernel(
     ) / queryState.densities[i]
 
 
+@wp.kernel
+def computePressureSurfaceAware_KernelTiled(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+    
+    kernelProperties: kernelState,
+    # Do not change the parameters above
+    queryPressures: wp.array(dtype = scalar_t), referencePressures: wp.array(dtype = scalar_t), # type: ignore
+    querySurfaceMask: wp.array(dtype = wp.int32), referenceSurfaceMask: wp.array(dtype = wp.int32), # type: ignore
+    pressureTerm: wp.int32, # type: ignore
+    # The last parameter is always the output array and should not be changed
+    outputValues : wp.array(dtype = vector(length=Any, dtype=scalar_t)) # type: ignore
+):
+    # Multi-lane variant of computePressureSurfaceAware_Kernel (warpSPHCore autograd/lanes.py):
+    # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
+
+    i, lane = wp.tid()
+    partial = computePressureSurfaceAware_Func_Adjacency(
+        i, domainState.dim, lane, wp.block_dim(),
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+        queryPressures, referencePressures,
+        querySurfaceMask, referenceSurfaceMask,
+        pressureTerm,
+        zero_like_warp(outputValues)
+    )
+    total = laneSum(partial)
+    if lane == 0:
+        outputValues[i] = -total / queryState.densities[i]
+
+
 def _surfaceAwareDtype(ctx, extras):
     return castTorchToWarpAsBuiltins(ctx.query.positions).dtype
 
 
 _PRESSURE_SURFACE_AWARE = OperatorSpec(
     kernel=computePressureSurfaceAware_Kernel,
+    tiledKernel=computePressureSurfaceAware_KernelTiled,
     outputs=(OutputSpec(dtype=_surfaceAwareDtype, shape=ShapeOf.QUERY),),
     extras=(
         ExtraSpec("queryPressures", ExtraKind.TENSOR),

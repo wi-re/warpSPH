@@ -6,24 +6,96 @@ dot(psi_ij, gradW_ij)` as an unscaled divergence — the delta/c_s/h prefactor
 is applied by the caller (`densityDiffusion.py`).
 
 `densityScheme` (a `DensityDiffusionScheme` int) selects the flux:
-- `deltaSPH`: `psi_ij = (gradRhoL_i + gradRhoL_j) - 2*(rho_j-rho_i)*n_ij/r_ij`
+- `deltaSPH`: `psi_ij = -(gradRhoL_i + gradRhoL_j) - 2*(rho_j-rho_i)*n_ij/r_ij`
   — renormalized gradients combined with the density-difference term.
 - `denormalized`: the same combination but with the unrenormalized `gradRho`.
 - `densityOnly`: just `-2*(rho_j-rho_i)*n_ij/r_ij` (no gradient term).
-- `deltaOnly` / `denormalizedOnly`: just the renormalized/unrenormalized
-  gradient sum (no density-difference term).
+- `deltaOnly` / `denormalizedOnly`: just the (negated) renormalized/
+  unrenormalized gradient sum (no density-difference term).
+- `deltaSPH_wrongSign`: A/B-only, the pre-fix sign (see below) -- never a
+  default, kept for controlled comparison per Part 4's own instruction.
+- `moltenicolagrossi2009` / `fourtakas2019`: DualSPHysics' two actual DDT
+  schemes (`DDT_DDT` / `DDT_DDT2`), transcribed from their own source
+  papers (`literature/molteni2009_*.pdf`, `literature/fourtakas2019_*.pdf`)
+  rather than from DualSPHysics' C++ directly -- see each enum member's own
+  docstring for exactly where they diverge from the C++ and from each
+  other's citation of the same prior work. `DELTASPH_VALIDATION_PLAN.md`
+  Part 8.15/8.16.
+
+**On `moltenicolagrossi2009`/`fourtakas2019`'s three-way formula
+disagreement, found while implementing these** (not resolved here, just
+transcribed faithfully and flagged): Molteni & Colagrossi's own Eq. (16) is
+a *ratio* term, `psi_ij = 2(v_i/v_j - 1) x_ij/(r_ij^2+eps_h h^2)` with
+`v = 1/rho` (so `v_i/v_j = rho_j/rho_i`). DualSPHysics' `JSphCpu.cpp`
+(`DDT_DDT`) instead codes `(rho_i/rho_j - 1)` -- the *reciprocal* ratio,
+opposite sign to leading order for a small perturbation. Fourtakas et al.
+2019's own citation of "Molteni and Colagrossi [32]" (their Eq. (13))
+restates it as a plain *difference*, `2(rho_j-rho_i) x_ij/|x_ij|^2`, with
+no ratio and no `eps_h h^2` regularizer at all -- algebraically distinct
+from both. `moltenicolagrossi2009` here implements Molteni's own Eq. (16)
+literally (the ratio form, scaled by `rho0` to carry density units so it
+composes with this file's shared `delta*h/xi*c0` caller-side prefactor the
+same way the difference-based schemes do); `densityOnly` is the
+difference-based restatement Fourtakas' Eq. (13) and this codebase's own
+prior "plain Molteni-Colagrossi" claim actually match. `fourtakas2019`
+builds on the difference form (matching *his* Eq. (13)/(15)/(16), not
+Molteni's own Eq. (16)), consistent with the paper's own prose ("use the
+same formulation proposed by Molteni and Colagrossi... substituting the
+dynamic density with the total one").
+
+**On the relative sign of the two terms** (fixed 2026-09-05; it was `+grad -
+rho` before, i.e. the gradient term entered with the wrong sign). Marrone et
+al. 2011 Eq. (6) is `psi_ij = 2(rho_j - rho_i) r_ji/|r_ij|^2 - (<grad rho>^L_i
++ <grad rho>^L_j)` with `r_ji = r_j - r_i = -x_ij`, i.e. exactly `-rho_ij -
+grad_ij` in this function's variables. The defining property is that the two
+terms **cancel for a field that is linear in space**: with `f = a.x`,
+`grad_ij.gradW = 2 a.gradW` and `rho_ij.gradW = -2 a.gradW` identically, so
+`psi.gradW == 0` pair by pair. That is the whole point of the Antuono
+correction (Antuono et al. 2010/2012) -- it promotes the plain
+Molteni-Colagrossi Laplacian to a *bi*-Laplacian, which is what lets the
+diffusive term reach a free surface without eating the hydrostatic gradient.
+With the terms added instead of cancelled the operator degenerates to twice
+the uncorrected Laplacian on any smooth field: still diffusive, so nothing blew
+up, but second-order rather than fourth and actively diffusing exactly the
+gradients it is supposed to leave alone.
+`tests/test_deltaSPHDiffusion.py` pins both the linear (`~1e-13`) and the
+quadratic (a bi-Laplacian annihilates those too) cancellation.
 All branches guard the `x_ij` normalization and the density-difference
 term's `1/r_ij` with a `1e-14 * h_i` epsilon to avoid division by zero at
 zero separation. `computeDensityDiffusionDeltaSPH` is the public torch/warp
 bridge; `_Func_i`/`_Func_Adjacency`/`_Kernel` are its warp-side
 implementation and are not meant to be called directly.
+
+**The diffused field is not necessarily the density.** Pass
+`queryField`/`referenceField` (a scalar pair, both or neither) and the
+`(f_j - f_i)` difference term reads those instead of `rho_j - rho_i`; the
+`gradRho`/`gradRhoL` arguments are then that field's gradients. The volume
+weight `m_j/rho_j` is untouched -- it is a quadrature weight, not part of the
+diffused quantity. Nothing else in the operator is density-specific, so this
+turns the same kernel into a general renormalized scalar Laplacian:
+
+  - `densityOnly`     -> Molteni-Colagrossi, De Courcy et al. 2024 Eq. (32)
+                         ("AC-2"), the plain pressure Laplacian.
+  - `deltaSPH`        -> Antuono-corrected bi-Laplacian, De Courcy Eq. (33)
+                         ("AC-2L"), the paper's working default.
+
+On Eq. (33) specifically (ACSPH_PLAN.md Part 3): the paper writes the
+*projected* form, contracting `(grad p_i + grad p_j)` onto `x_ij/|x_ij|`
+before dotting with `gradW`, where this kernel uses the *unprojected* Marrone
+et al. 2011 form. The two are algebraically identical whenever
+`gradW_ij || x_ij` -- true for any isotropic kernel, since
+`((g_i+g_j).xhat)(xhat.gradW) = W'(r) (g_i+g_j).x_ij / r = (g_i+g_j).gradW`.
+They diverge only if `useGradientRenormalization` is on, which makes
+`L gradW` no longer parallel to `x_ij`; `scripts/probe_deltaSPHPsiProjection.py`
+measures both claims.
 """
 
 import warp as wp
 from warp.types import vector, matrix
 from typing import Any
 import torch
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
 
@@ -70,7 +142,13 @@ def computeDensityDiffusionDeltaSPH_Func_i(
     
     gradRho_i: vector(length=Any, dtype=scalar_t), referenceGradRho: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     gradRhoL_i: vector(length=Any, dtype=scalar_t), referenceGradRhoL: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    # The diffused scalar field. `useField == 0` reads the state's density (the
+    # delta-SPH case); otherwise these replace it -- see the module docstring.
+    useField: wp.int32, field_i: scalar_t, referenceField: wp.array(dtype = scalar_t), # type: ignore
     densityScheme: wp.int32,
+    # Only `moltenicolagrossi2009` (rho0) and `fourtakas2019` (all three)
+    # read these; every other branch ignores them.
+    rho0: scalar_t, c0: scalar_t, gravity_i: vector(length=Any, dtype=scalar_t), # type: ignore
     # Dummy value to allow allocation
     outputValue: Any, # type: ignore
 ):
@@ -106,31 +184,75 @@ def computeDensityDiffusionDeltaSPH_Func_i(
         r_ij = safe_sqrt(wp.dot(x_ij, x_ij))
         n_ij = x_ij / (r_ij + scalar_t(1.0e-14) * hi)
 
+        # The diffused scalar. Density unless a field pair was supplied; the
+        # volume weight above stays `m_j/rho_j` either way.
+        f_i = rhoi
+        f_j = rhoj
+        if useField != wp.int32(0):
+            f_i = field_i
+            f_j = referenceField[j]
+
 
         # grad_ij = zero_like_warp(gradw_ij)
         # rho_ij = scalar_t(0.0)
         psi_ij = zero_like_warp(gradw_ij)
         if densityScheme == wp.int32(DensityDiffusionScheme.deltaSPH.value):
             grad_ij = gradRhoL_i + referenceGradRhoL[j]
-            rho_ij = scalar_t(2.0) * (rhoj - rhoi) * n_ij / (r_ij + scalar_t(1.0e-14) * hi)
+            rho_ij = scalar_t(2.0) * (f_j - f_i) * n_ij / (r_ij + scalar_t(1.0e-14) * hi)
+            psi_ij = - grad_ij - rho_ij
+        elif densityScheme == wp.int32(DensityDiffusionScheme.deltaSPH_wrongSign.value):
+            # A/B only -- see the module docstring and Part 4 of
+            # DELTASPH_VALIDATION_PLAN.md. Same terms as `deltaSPH`, gradient
+            # term NOT negated: the two no longer cancel on a linear field.
+            grad_ij = gradRhoL_i + referenceGradRhoL[j]
+            rho_ij = scalar_t(2.0) * (f_j - f_i) * n_ij / (r_ij + scalar_t(1.0e-14) * hi)
             psi_ij = grad_ij - rho_ij
         elif densityScheme == wp.int32(DensityDiffusionScheme.denormalized.value):
             grad_ij = gradRho_i + referenceGradRho[j]
-            rho_ij = scalar_t(2.0) * (rhoj - rhoi) * n_ij / (r_ij + scalar_t(1.0e-14) * hi)
-            psi_ij = grad_ij - rho_ij
+            rho_ij = scalar_t(2.0) * (f_j - f_i) * n_ij / (r_ij + scalar_t(1.0e-14) * hi)
+            psi_ij = - grad_ij - rho_ij
         elif densityScheme == wp.int32(DensityDiffusionScheme.densityOnly.value):
             grad_ij = zero_like_warp(gradw_ij)
-            rho_ij = scalar_t(2.0) * (rhoj - rhoi) * n_ij / (r_ij + scalar_t(1.0e-14) * hi)
+            rho_ij = scalar_t(2.0) * (f_j - f_i) * n_ij / (r_ij + scalar_t(1.0e-14) * hi)
             psi_ij = - rho_ij
         elif densityScheme == wp.int32(DensityDiffusionScheme.deltaOnly.value):
             grad_ij = gradRhoL_i + referenceGradRhoL[j]
             rho_ij = zero_like_warp(gradw_ij)
-            psi_ij = grad_ij
+            psi_ij = - grad_ij
         elif densityScheme == wp.int32(DensityDiffusionScheme.denormalizedOnly.value):
             grad_ij = gradRho_i + referenceGradRho[j]
             rho_ij = zero_like_warp(gradw_ij)
-            psi_ij = grad_ij
-        
+            psi_ij = - grad_ij
+        elif densityScheme == wp.int32(DensityDiffusionScheme.moltenicolagrossi2009.value):
+            # Molteni & Colagrossi 2009 Eq. (16), literally: a RATIO term
+            # (v = 1/rho, specific volume), not a difference -- see the
+            # module docstring for how this differs from `densityOnly`,
+            # DualSPHysics' C++, and Fourtakas' own citation of it. `eps_h
+            # = 0.01` is the paper's own regularizer (Sec. 4, shared with
+            # its Eq. (14) artificial-viscosity term), a genuine physical
+            # smoothing scale -- distinct from this file's other branches'
+            # `1e-14*h` guard, which exists only to avoid a literal
+            # divide-by-zero. Scaled by `rho0` so psi carries density units
+            # and composes with the shared delta*h/xi*c0 prefactor the same
+            # way the difference-based schemes do.
+            epsH = scalar_t(0.01)
+            denom = r_ij * r_ij + epsH * hi * hi
+            ratio = f_j / f_i - scalar_t(1.0)
+            psi_ij = - scalar_t(2.0) * rho0 * ratio * x_ij / denom
+        elif densityScheme == wp.int32(DensityDiffusionScheme.fourtakas2019.value):
+            # Fourtakas et al. 2019 Eq. (15)-(19): the plain (Molteni-style)
+            # density DIFFERENCE, with the hydrostatic component subtracted
+            # out analytically before diffusing. `rho0*dot(gravity,x_ij)/c0^2`
+            # is the isothermal collapse of the paper's own Tait-EOS
+            # hydrostatic-density-difference correction (Eqs. 17-19 at
+            # gamma -> 1) -- see the module docstring for the derivation and
+            # its cross-check against this codebase's existing
+            # `hydrostaticInit`. Verified to cancel exactly (psi_ij == 0)
+            # when the density field is itself exactly hydrostatic.
+            rhoH_diff = - rho0 * wp.dot(gravity_i, x_ij) / (c0 * c0)
+            total_diff = (f_j - f_i) + rhoH_diff
+            psi_ij = - scalar_t(2.0) * total_diff * n_ij / (r_ij + scalar_t(1.0e-14) * hi)
+
         prod = wp.dot(psi_ij, gradw_ij)
 
 
@@ -143,7 +265,7 @@ def computeDensityDiffusionDeltaSPH_Func_i(
 
 @wp.func
 def computeDensityDiffusionDeltaSPH_Func_Adjacency(
-    i : wp.int32, dim: wp.int32, 
+    i : wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32, 
 
     queryState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
     referenceState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
@@ -159,7 +281,14 @@ def computeDensityDiffusionDeltaSPH_Func_Adjacency(
     
     queryGradRho: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceGradRho: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     queryGradRhoL: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceGradRhoL: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    useField: wp.int32, queryField: wp.array(dtype = scalar_t), referenceField: wp.array(dtype = scalar_t), # type: ignore
     densityScheme: wp.int32,
+    # Only `moltenicolagrossi2009`/`fourtakas2019` read these -- see
+    # `computeDensityDiffusionDeltaSPH_Func_i`. `queryGravity` is the same
+    # constant vector broadcast to every particle (Python side), not a real
+    # per-particle field -- reusing the existing per-particle TENSOR-extra
+    # plumbing rather than inventing a genuinely-constant kind.
+    rho0: scalar_t, c0: scalar_t, queryGravity: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
 
     outputValue : Any, # type: ignore
 ):
@@ -167,17 +296,24 @@ def computeDensityDiffusionDeltaSPH_Func_Adjacency(
     if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
         if not checkDirectionality_i(ki, kernelProperties.operationMode):
             return zero_like_warp(outputValue)
-        
+
     useGradientRenormalization, Li = getL_i(correctionData, i)
     useGradHTerms, omega_i = getGradH_i(correctionData, i)
     useVolume, Vi = getVolume_i(correctionData, i)
     useCRK, Ai, Bi, gradA_i, gradB_i = getCRK_i(correctionData, i)
-    
+
     gradRho_i = queryGradRho[i]
     gradRhoL_i = queryGradRhoL[i]
+    gravity_i = queryGravity[i]
+    field_i = scalar_t(0.0)
+    if useField != wp.int32(0):
+        field_i = queryField[i]
 
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
+        # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
+        if not useAdjacency and (o % lanes) != lane:
+            continue
         beginIndex = wp.int32(0)
         numIndices = wp.int32(0)
         if useAdjacency:    
@@ -192,6 +328,7 @@ def computeDensityDiffusionDeltaSPH_Func_Adjacency(
             if beginIndex < 0:
                 continue
         
+        beginIndex, numIndices = laneSlice(beginIndex, numIndices, lane, lanes, useAdjacency)
         out += computeDensityDiffusionDeltaSPH_Func_i(
             i, dim, 
             xi, hi, mi, rhoi,
@@ -207,8 +344,9 @@ def computeDensityDiffusionDeltaSPH_Func_Adjacency(
             useCRK, Ai, Bi, gradA_i, gradB_i,
             gradRho_i, referenceGradRho,
             gradRhoL_i, referenceGradRhoL,
+            useField, field_i, referenceField,
             densityScheme,
-
+            rho0, c0, gravity_i,
 
             outputValue,
 
@@ -231,29 +369,73 @@ def computeDensityDiffusionDeltaSPH_Kernel(
     # Do not change the parameters above
     queryGradRho: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceGradRho: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     queryGradRhoL: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceGradRhoL: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    useField: wp.int32, queryField: wp.array(dtype = scalar_t), referenceField: wp.array(dtype = scalar_t), # type: ignore
     densityScheme: wp.int32,
+    rho0: scalar_t, c0: scalar_t, queryGravity: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
 
     # The last parameter is always the output array and should not be changed
     outputValues : wp.array(dtype = scalar_t) # type: ignore
-):                                                                                    
+):
     i = wp.tid()
     numParticles = queryState.positions.shape[0]
     if i >= numParticles:
         return
 
     outputValues[i] = computeDensityDiffusionDeltaSPH_Func_Adjacency(
-        i, domainState.dim, 
+        i, domainState.dim, 0, 1,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
         # The parameters above are default parameters and shold not be changed
         queryGradRho, referenceGradRho,
         queryGradRhoL, referenceGradRhoL,
+        useField, queryField, referenceField,
         densityScheme,
-
+        rho0, c0, queryGravity,
 
         zero_like_warp(outputValues)
     )
+
+
+@wp.kernel
+def computeDensityDiffusionDeltaSPH_KernelTiled(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+
+    kernelProperties: kernelState,
+    # Do not change the parameters above
+    queryGradRho: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceGradRho: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    queryGradRhoL: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceGradRhoL: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    useField: wp.int32, queryField: wp.array(dtype = scalar_t), referenceField: wp.array(dtype = scalar_t), # type: ignore
+    densityScheme: wp.int32,
+    rho0: scalar_t, c0: scalar_t, queryGravity: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+
+    # The last parameter is always the output array and should not be changed
+    outputValues : wp.array(dtype = scalar_t) # type: ignore
+):
+    # Multi-lane variant of computeDensityDiffusionDeltaSPH_Kernel (warpSPHCore autograd/lanes.py):
+    # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
+
+    i, lane = wp.tid()
+    partial = computeDensityDiffusionDeltaSPH_Func_Adjacency(
+        i, domainState.dim, lane, wp.block_dim(),
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+        queryGradRho, referenceGradRho,
+        queryGradRhoL, referenceGradRhoL,
+        useField, queryField, referenceField,
+        densityScheme,
+        rho0, c0, queryGravity,
+        zero_like_warp(outputValues)
+    )
+    total = laneSum(partial)
+    if lane == 0:
+        outputValues[i] = total
 
 
 def _densityDiffusionDtype(ctx, extras):
@@ -262,13 +444,21 @@ def _densityDiffusionDtype(ctx, extras):
 
 _DENSITY_DIFFUSION_DELTA_SPH = OperatorSpec(
     kernel=computeDensityDiffusionDeltaSPH_Kernel,
+    tiledKernel=computeDensityDiffusionDeltaSPH_KernelTiled,
     outputs=(OutputSpec(dtype=_densityDiffusionDtype, shape=ShapeOf.QUERY),),
     extras=(
         ExtraSpec("queryGradRho", ExtraKind.TENSOR),
         ExtraSpec("referenceGradRho", ExtraKind.TENSOR),
         ExtraSpec("queryGradRhoL", ExtraKind.TENSOR),
         ExtraSpec("referenceGradRhoL", ExtraKind.TENSOR),
+        ExtraSpec("useField", ExtraKind.SCALAR),
+        ExtraSpec("queryField", ExtraKind.TENSOR),
+        ExtraSpec("referenceField", ExtraKind.TENSOR),
         ExtraSpec("densityScheme", ExtraKind.SCALAR),
+        # Only `moltenicolagrossi2009`/`fourtakas2019` read these.
+        ExtraSpec("rho0", ExtraKind.SCALAR),
+        ExtraSpec("c0", ExtraKind.SCALAR),
+        ExtraSpec("queryGravity", ExtraKind.TENSOR),
     ),
 )
 
@@ -282,6 +472,15 @@ def computeDensityDiffusionDeltaSPH(
 
     queryGradRho: Optional[torch.Tensor] = None, referenceGradRho: Optional[torch.Tensor] = None,
     queryGradRhoL: Optional[torch.Tensor] = None, referenceGradRhoL: Optional[torch.Tensor] = None,
+    queryField: Optional[torch.Tensor] = None, referenceField: Optional[torch.Tensor] = None,
+
+    # Only `moltenicolagrossi2009` (rho0) / `fourtakas2019` (all three) read
+    # these -- unused (and left at their harmless defaults) by every other
+    # scheme. `gravity` is the constant acceleration vector (e.g.
+    # `schemeConfig.gravityConfig.magnitude * .direction`), broadcast to
+    # every particle by this function, not supplied pre-broadcast.
+    rho0: Optional[float] = None, c0: Optional[float] = None,
+    gravity: Optional[torch.Tensor] = None,
 
     queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
     adjacency: Optional[Union[AdjacencyList, CompactHashMap]] = None, # if none a datastructure is created for EVERY operation!,
@@ -294,6 +493,13 @@ def computeDensityDiffusionDeltaSPH(
         referenceGradRho = queryGradRho
     if referenceGradRhoL is None:
         referenceGradRhoL = queryGradRhoL
+    if referenceField is None:
+        referenceField = queryField
+    if (queryField is None) != (referenceField is None):
+        raise ValueError(
+            "queryField and referenceField must be supplied together (or "
+            "neither, to diffuse the state's density)")
+    useField = queryField is not None
 
     with record_function("warpSPH[computeDensityDiffusion]"):
         with record_function("warpSPH[computeDensityDiffusion] - Preprocessing"):
@@ -317,6 +523,26 @@ def computeDensityDiffusionDeltaSPH(
             queryGradRhoL_ = queryGradRhoL if queryGradRhoL is not None else getCachedDummyTensor((outputSize, domain.dim), dtype=get_torch_precision(), device=device)
             referenceGradRho_ = referenceGradRho if referenceGradRho is not None else getCachedDummyTensor((outputSize, domain.dim), dtype=get_torch_precision(), device=device)
             referenceGradRhoL_ = referenceGradRhoL if referenceGradRhoL is not None else getCachedDummyTensor((outputSize, domain.dim), dtype=get_torch_precision(), device=device)
+            # `useField == 0` never indexes these, so a length-`outputSize`
+            # dummy is enough -- but it must still be a real array, since warp
+            # types the kernel argument regardless.
+            queryField_ = queryField if queryField is not None else getCachedDummyTensor((outputSize,), dtype=get_torch_precision(), device=device)
+            referenceField_ = referenceField if referenceField is not None else getCachedDummyTensor((referenceParticles.positions.shape[0],), dtype=get_torch_precision(), device=device)
+
+            # `moltenicolagrossi2009`/`fourtakas2019`-only inputs. `gravity`
+            # is one constant vector, broadcast here to a per-particle array
+            # to reuse the existing TENSOR-extra plumbing (see the kernel's
+            # own comment) -- every other scheme ignores it, so the zero
+            # dummy below is harmless when it is not supplied.
+            # `scalar_t(...)` (not a bare `float`): the kernel is generic and
+            # warp infers a Python float as float32, which mismatches the
+            # scalar_t build precision (the viscosity wrapper does the same).
+            rho0_ = scalar_t(float(rho0) if rho0 is not None else 1.0)
+            c0_ = scalar_t(float(c0) if c0 is not None else 1.0)
+            if gravity is not None:
+                queryGravity_ = gravity.to(dtype=get_torch_precision(), device=device).reshape(1, domain.dim).expand(outputSize, domain.dim).contiguous()
+            else:
+                queryGravity_ = getCachedDummyTensor((outputSize, domain.dim), dtype=get_torch_precision(), device=device)
 
         with record_function("warpSPH[computeDensityDiffusionDeltaSPH] - Kernel Execution"):
             ctx = SPHContext(
@@ -331,7 +557,10 @@ def computeDensityDiffusionDeltaSPH(
                 _DENSITY_DIFFUSION_DELTA_SPH, ctx,
                 queryGradRho=queryGradRho_, referenceGradRho=referenceGradRho_,
                 queryGradRhoL=queryGradRhoL_, referenceGradRhoL=referenceGradRhoL_,
+                useField=wp.int32(1 if useField else 0),
+                queryField=queryField_, referenceField=referenceField_,
                 densityScheme=wp.int32(densityScheme.value),
+                rho0=rho0_, c0=c0_, queryGravity=queryGravity_,
             )
 
 

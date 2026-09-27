@@ -16,14 +16,15 @@ import torch
 
 from ..modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
 from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
+from ..modules.density import computeDensities
 from ..modules.dissipation import computeConductivity, computeThermalDissipation, computeViscosity
 from ..modules.eos import idealGasEOS
 from ..modules.internalEnergy import computeDudtMonaghan
 from ..modules.momentum import computeMomentumConsistent
 from ..modules.pressure import computePressureForceSymmetric
+from ..modules.shockCapturing import computeViscositySwitchTerms, updateViscositySwitch
 from warpSPHCore import (
-    GradHState, OperationProperties, SupportScheme,
-    WarpOperation, buildVerletList, warpOperation,
+    GradHState, OperationProperties, SupportScheme, buildVerletList,
 )
 
 __all__ = ['compressibleSPH_Monaghan']
@@ -56,16 +57,9 @@ def compressibleSPH_Monaghan(
 
     numNeighbors = adjacency.numNeighbors
 
-    currentState.densities = warpOperation(
-        currentState,
-        OperationProperties(
-            kernel = config.kernel,
-            operation = WarpOperation.Density,
-            supportMode = config.supportMode,
-        ),
-        domain = config.domain,
-        adjacency = adjacency,
-    )
+    currentState.densities = computeDensities(
+        currentState, config, schemeConfig, adjacency,
+        supportMode = config.supportMode)
 
     enforceDirichlet(currentSystem, t, dt, config, schemeConfig)
     currentState.entropies, _, currentState.pressures, currentState.soundspeeds = idealGasEOS(
@@ -92,7 +86,15 @@ def compressibleSPH_Monaghan(
     else:
         gradHState = None
 
-    # from monaghanScheme import *
+    # Viscosity switch (Cullen-Dehnen / Hopkins / none). Computes the
+    # per-particle alphas from the current state; the wrapper is a no-op that
+    # passes the stored alphas through for the NoneSwitch baseline.
+    currentState.alphas, switchState = computeViscositySwitchTerms(
+        dt,
+        currentState,
+        config, schemeConfig,
+        SupportScheme.SuperSymmetric,
+        adjacency)
 
     dvdt = computePressureForceSymmetric(
         currentState,
@@ -132,6 +134,7 @@ def compressibleSPH_Monaghan(
         domain = config.domain,
         adjacency = adjacency,
         viscosityParams = diffusionParams,
+        queryAlphas = currentState.alphas,
     )
 
 
@@ -145,6 +148,7 @@ def compressibleSPH_Monaghan(
         domain = config.domain,
         adjacency = adjacency,
         conductivityParams = diffusionParams,
+        queryAlphas = currentState.alphas,
     )
 
 
@@ -158,9 +162,34 @@ def compressibleSPH_Monaghan(
         domain = config.domain,
         adjacency = adjacency,
         conductivityParams = diffusionParams,
+        queryAlphas = currentState.alphas,
     )
 
-    dEdt = currentState.masses * torch.einsum('ij,ij->i', currentState.velocities, (dvdt + dvdt_diss)) + currentState.masses * (dudt + dudt_diss)
+    # Advance the viscosity switch's stored alpha0 and store the velocity
+    # divergence for the next step's second-order-divergence finite
+    # difference. Mirrors the compSPH wiring; for the NoneSwitch baseline the
+    # wrapper is a no-op (alpha0 passes through unchanged). The hydrodynamic
+    # acceleration (pressure + viscosity, pre-forcing) is what the switch's
+    # second-order-divergence estimate needs.
+    currentState.alpha0s, switchState = updateViscositySwitch(
+        switchState,
+        dt, dvdt + dvdt_diss,
+        currentState,
+        config, schemeConfig,
+        SupportScheme.SuperSymmetric,
+        adjacency)
+    currentState.divergence = -drhodt / currentState.densities
+
+    # ReadHayfield2012 entropy-dissipation internal-energy rate (eqs. 33-35).
+    # Only the R&H switch populates `switchState.dudt_diss`; the Cullen-Dehnen,
+    # Hopkins and NoneSwitch baselines leave it `None` (or the switch state is
+    # itself `None`), so this collapses to zero for them.
+    if switchState is not None and getattr(switchState, 'dudt_diss', None) is not None:
+        dudt_entropy = switchState.dudt_diss
+    else:
+        dudt_entropy = torch.zeros_like(dudt)
+
+    dEdt = currentState.masses * torch.einsum('ij,ij->i', currentState.velocities, (dvdt + dvdt_diss)) + currentState.masses * (dudt + dudt_diss + dudt_entropy)
 
     forcing = computeForcing(currentSystem, dt, t, config, schemeConfig)
     dvdt += forcing / currentState.masses.view(-1,1)
@@ -169,7 +198,7 @@ def compressibleSPH_Monaghan(
     update = CompressibleSystemUpdate(
         dxdt = currentState.velocities,
         dvdt = dvdt + dvdt_diss,
-        dudt = dudt + dudt_diss + dudt_thermal,
+        dudt = dudt + dudt_diss + dudt_thermal + dudt_entropy,
         drhodt = drhodt,
         dEdt = dEdt,
     )

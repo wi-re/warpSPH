@@ -24,6 +24,8 @@ from ..modules.momentum import computeMomentumConsistent
 from ..modules.shockCapturing import computeViscositySwitchTerms
 from ..enumTypes import EnergyScheme
 
+import warnings
+
 from warpSPHCore import (
     GradientScheme, OperationProperties, SupportScheme,
     WarpOperation, buildVerletList, computeCRKFactors,
@@ -41,6 +43,51 @@ from ..modules.crk.accel import computeCrkSPHAccelWarp
 
 __all__ = ['crkSPH_step']
 
+# CRKSPH is formulated with the kernel-mean pair kernel
+# W_ij = [W_i(x_ij, h_i) + W_j(x_ij, h_j)] / 2 (Frontiere et al. 2017, Eq. 8);
+# the acceleration and dudt below hard-code SupportScheme.KernelMeanSymmetric
+# for that reason, but other parts of the step read `config.supportMode`.
+# With a non-symmetric mode the run silently stops conserving total energy
+# to round-off: Sod (1D, nx=200, RK2, Owen supports) drifts -7.3e-6 under
+# SupportScheme.Gather vs +2.5e-16 under KernelMeanSymmetric (CompSPH is
+# exact under both). Pinning the f_ij energy-balance term to
+# KernelMeanSymmetric does NOT remove the drift -- the other consumer on this
+# path is the Owen adaptive-support solve (optimalSupportOwen.py) -- so no
+# Gather-conserving variant exists here; making one is derivation work (the
+# paper's Eq. 60 keeps both a_ij and a_ji in general). Hence a warning, once
+# per process and support mode.
+_CRK_CONSERVATIVE_SUPPORT = SupportScheme.KernelMeanSymmetric
+_warnedSupportModes: set = set()
+
+
+class CRKSupportWarning(RuntimeWarning):
+    """CRKSPH run with a support mode it does not conserve energy under."""
+
+
+def _warnNonConservativeSupport(config: SimulationConfig) -> None:
+    mode = getattr(config, 'supportMode', None)
+    if mode is None or mode == _CRK_CONSERVATIVE_SUPPORT or mode in _warnedSupportModes:
+        return
+    _warnedSupportModes.add(mode)
+    # Force-show this category for this one call, so a blanket
+    # warnings.filterwarnings("ignore") anywhere in the process (one used to
+    # sit in geometry/sdfFunctionality/implicitFunctions.py) cannot hide it.
+    # The once-per-mode dedupe above keeps it quiet.
+    with warnings.catch_warnings():
+        warnings.simplefilter('always', CRKSupportWarning)
+        _emitSupportWarning(mode)
+
+
+def _emitSupportWarning(mode) -> None:
+    warnings.warn(
+        f'CRKSPH with supportMode={getattr(mode, "name", mode)}: CRKSPH is '
+        f'formulated with the kernel-mean pair kernel (Frontiere et al. 2017, '
+        f'Eq. 8, SupportScheme.KernelMeanSymmetric); with any other support '
+        f'mode total energy is not conserved to round-off (Sod nx=200: '
+        f'-7.3e-6 under Gather vs 2.5e-16 under KernelMeanSymmetric). Set '
+        f'supportMode=KernelMeanSymmetric unless the drift is intended.',
+        CRKSupportWarning, stacklevel=4)
+
 
 def crkSPH_step(
     system: CompSPHSystem,
@@ -50,6 +97,7 @@ def crkSPH_step(
     verbose = False,
 ):
 
+    _warnNonConservativeSupport(config)
     currentSystem = system#
     currentState = currentSystem.state
     t = currentSystem.t

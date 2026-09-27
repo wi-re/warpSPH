@@ -147,7 +147,7 @@ here rather than ported as-is.
 
 from typing import Any, Optional, Tuple
 import torch
-from torch.profiler import record_function
+from warpSPHCore.profiling import record_function
 from warpSPHCore import *
 
 from warpSPH.math import scatter_sum

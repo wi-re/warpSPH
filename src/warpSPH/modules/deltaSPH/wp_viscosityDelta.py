@@ -4,21 +4,28 @@ parameterizations.
 
 `inviscid=True` (the default) gives a Monaghan-style artificial-viscosity
 term with coefficient `alpha * c_s * h_i / kernelXi`; `inviscid=False` gives
-a physical-viscosity Laplacian term with coefficient `2*(dim+2) * nu`. **Not**
-a real Morris et al. 1997 laminar term despite the coefficient's shape: both
-branches are gated by the same "approach only" switch
-`mu_ij = dot(vel_ij, x_ij) / (|x_ij|^2 + eps*h_i^2)`, clamped to `<= 0` so the
-term only acts when neighbors are approaching (`mu_ij > 0` — receding — is
-zeroed); the contribution is `apparentVolume * mu_ij * factor * gradW_ij /
-mean(rho_i, rho_j)`. That clamp is an artificial-viscosity device (it is what
-makes the `inviscid=True` branch stable), and it normal-projects the
-`inviscid=False` branch too — a real Morris term needs the full `v_ij` vector
-with no such clamp, i.e. real tangential/shear stress, which this branch does
-not carry (DFSPH_IMPROVEMENT_PLAN.md "What's realistically open" item 1: the
-shear-carrying Morris term is a separate, not-yet-added option). A `1e-14 *
-h_i^2` epsilon guards the `mu_ij` denominator at zero separation. Contains a
-commented-out alternative symmetrization factor for the physical-viscosity
-branch, left disabled.
+a physical-viscosity Laplacian term with coefficient `2*(dim+2) * nu`. Both
+share the switch `mu_ij = dot(vel_ij, x_ij) / (|x_ij|^2 + eps*h_i^2)`, and the
+contribution is `apparentVolume * mu_ij * factor * gradW_ij /
+mean(rho_i, rho_j)`. A `1e-14 * h_i^2` epsilon guards the `mu_ij` denominator
+at zero separation. Contains a commented-out alternative symmetrization factor
+for the physical-viscosity branch, left disabled.
+
+`approachOnly` (default True, the historical behaviour) clamps `mu_ij <= 0` so
+the term acts only on *approaching* neighbours. That clamp is an
+artificial-viscosity device -- it is what makes the `inviscid=True` branch
+stable -- and applying it to `inviscid=False` too is what stops that branch
+from being a real physical viscosity: it halves the term and makes it
+one-sided. Pass `approachOnly=False` to lift it, which turns the
+`inviscid=False` branch into the Monaghan & Gingold (1983) velocity Laplacian
+proper, `nu K sum_j (v_ij . x_ij)/|x_ij|^2 gradW_ij V_j` with
+`K = 2(dim+2) = 8` in 2D and `10` in 3D -- De Courcy et al. 2024 Eq. (25)
+verbatim, which is why ACSPH passes it (ACSPH_PLAN.md Sec. 4.1). Note this is
+still the *normal-projected* form both papers use, not a shear-carrying
+Morris et al. 1997 term (DFSPH_IMPROVEMENT_PLAN.md "What's realistically open"
+item 1); and note the `/ mean(rho_i, rho_j)`, which Eq. (25) does not have --
+a caller wanting the literal form on a constant-density state compensates
+exactly by passing `nu * rho0`.
 `alphaToNu`/`nuToAlpha` convert between the two coefficients (`alpha` given
 `c_s`, `h`, `n=dim`, and vice versa) so a case can be configured in either
 unit system.
@@ -28,7 +35,8 @@ import warp as wp
 from warp.types import vector, matrix
 from typing import Any
 import torch
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
+from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
 
@@ -77,6 +85,7 @@ def computeVelocityDiffusionDeltaSPH_Func_i(
     referenceVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
 
     inviscid: wp.bool, alpha: scalar_t, c_s: scalar_t, nu: scalar_t, n: wp.int32,
+    approachOnly: wp.bool,
 
     # Dummy value to allow allocation
     outputValue: Any, # type: ignore
@@ -126,7 +135,7 @@ def computeVelocityDiffusionDeltaSPH_Func_i(
         vel_ij = vel_i - referenceVelocities[j]
 
         mu_ij = wp.dot(vel_ij, x_ij) / ((wp.dot(x_ij, x_ij)) + scalar_t(1.0e-14) * hi*hi)
-        if mu_ij > 0:
+        if approachOnly and mu_ij > 0:
             mu_ij = scalar_t(0.0)
 
 
@@ -147,7 +156,7 @@ def nuToAlpha(
 
 @wp.func
 def computeVelocityDiffusionDeltaSPH_Func_Adjacency(
-    i : wp.int32, dim: wp.int32, 
+    i : wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32, 
 
     queryState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
     referenceState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
@@ -163,6 +172,7 @@ def computeVelocityDiffusionDeltaSPH_Func_Adjacency(
     
     queryVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     inviscid: wp.bool, alpha: scalar_t, c_s: scalar_t, nu: scalar_t, n: wp.int32,
+    approachOnly: wp.bool,
     
     outputValue : Any, # type: ignore
 ):
@@ -180,6 +190,9 @@ def computeVelocityDiffusionDeltaSPH_Func_Adjacency(
 
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
+        # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
+        if not useAdjacency and (o % lanes) != lane:
+            continue
         beginIndex = wp.int32(0)
         numIndices = wp.int32(0)
         if useAdjacency:    
@@ -194,6 +207,7 @@ def computeVelocityDiffusionDeltaSPH_Func_Adjacency(
             if beginIndex < 0:
                 continue
         
+        beginIndex, numIndices = laneSlice(beginIndex, numIndices, lane, lanes, useAdjacency)
         out += computeVelocityDiffusionDeltaSPH_Func_i(
             i, dim, 
             xi, hi, mi, rhoi,
@@ -210,6 +224,7 @@ def computeVelocityDiffusionDeltaSPH_Func_Adjacency(
             
             v_i, referenceVelocities,
             inviscid, alpha, c_s, nu, n,
+            approachOnly,
 
 
             outputValue,
@@ -233,6 +248,7 @@ def computeVelocityDiffusionDeltaSPH_Kernel(
     # Do not change the parameters above
     queryVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     inviscid: wp.bool, alpha: scalar_t, c_s: scalar_t, nu: scalar_t, dim: wp.int32,
+    approachOnly: wp.bool,
 
     # The last parameter is always the output array and should not be changed
     outputValues : wp.array(dtype = vector(length=Any, dtype=scalar_t)) # type: ignore
@@ -243,17 +259,55 @@ def computeVelocityDiffusionDeltaSPH_Kernel(
         return
 
     outputValues[i] = computeVelocityDiffusionDeltaSPH_Func_Adjacency(
-        i, domainState.dim, 
+        i, domainState.dim, 0, 1, 
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,  #queryKinds, referenceKinds,
         # The parameters above are default parameters and shold not be changed
         queryVelocities, referenceVelocities,
         inviscid, alpha, c_s, nu, dim,
+        approachOnly,
 
 
         zero_like_warp(outputValues)
     )
+
+
+@wp.kernel
+def computeVelocityDiffusionDeltaSPH_KernelTiled(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+    
+    kernelProperties: kernelState,
+    # Do not change the parameters above
+    queryVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    inviscid: wp.bool, alpha: scalar_t, c_s: scalar_t, nu: scalar_t, dim: wp.int32,
+    approachOnly: wp.bool,
+
+    # The last parameter is always the output array and should not be changed
+    outputValues : wp.array(dtype = vector(length=Any, dtype=scalar_t)) # type: ignore
+):
+    # Multi-lane variant of computeVelocityDiffusionDeltaSPH_Kernel (warpSPHCore autograd/lanes.py):
+    # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
+
+    i, lane = wp.tid()
+    partial = computeVelocityDiffusionDeltaSPH_Func_Adjacency(
+        i, domainState.dim, lane, wp.block_dim(),
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+        queryVelocities, referenceVelocities,
+        inviscid, alpha, c_s, nu, dim,
+        approachOnly,
+        zero_like_warp(outputValues)
+    )
+    total = laneSum(partial)
+    if lane == 0:
+        outputValues[i] = total
 
 
 def _velocityDiffusionDtype(ctx, extras):
@@ -262,6 +316,7 @@ def _velocityDiffusionDtype(ctx, extras):
 
 _VELOCITY_DIFFUSION_DELTA_SPH = OperatorSpec(
     kernel=computeVelocityDiffusionDeltaSPH_Kernel,
+    tiledKernel=computeVelocityDiffusionDeltaSPH_KernelTiled,
     outputs=(OutputSpec(dtype=_velocityDiffusionDtype, shape=ShapeOf.QUERY),),
     extras=(
         ExtraSpec("queryVelocities", ExtraKind.TENSOR),
@@ -271,6 +326,7 @@ _VELOCITY_DIFFUSION_DELTA_SPH = OperatorSpec(
         ExtraSpec("c_s", ExtraKind.SCALAR),
         ExtraSpec("nu", ExtraKind.SCALAR),
         ExtraSpec("dim", ExtraKind.SCALAR),
+        ExtraSpec("approachOnly", ExtraKind.SCALAR),
     ),
 )
 
@@ -284,6 +340,7 @@ def computeVelocityDiffusionDeltaSPH(
     alpha: float = 0.01,
     c_s: float = 1.0,
     nu: float = 1e-3,
+    approachOnly: bool = True,
 
     queryVelocities: Optional[torch.Tensor] = None, referenceVelocities: Optional[torch.Tensor] = None,
 
@@ -326,7 +383,7 @@ def computeVelocityDiffusionDeltaSPH(
                 _VELOCITY_DIFFUSION_DELTA_SPH, ctx,
                 queryVelocities=queryVelocities, referenceVelocities=referenceVelocities,
                 inviscid=wp.bool(inviscid), alpha=scalar_t(alpha), c_s=scalar_t(c_s), nu=scalar_t(nu),
-                dim=wp.int32(domain.dim),
+                dim=wp.int32(domain.dim), approachOnly=wp.bool(approachOnly),
             )
 
 

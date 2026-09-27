@@ -40,6 +40,12 @@ def parseIncompressibleSPHScheme(schemeName):
             return scheme
     raise ValueError(f"Invalid incompressible SPH scheme name: {schemeName}. Valid options are: {[s.name for s in IncompressibleSPHScheme]}")
 
+def parseArtificialCompressibleSPHScheme(schemeName):
+    for scheme in ArtificialCompressibleSPHScheme:
+        if scheme.name.lower() == schemeName.lower():
+            return scheme
+    raise ValueError(f"Invalid artificial compressible SPH scheme name: {schemeName}. Valid options are: {[s.name for s in ArtificialCompressibleSPHScheme]}")
+
 def parseWeaklyCompressibleSPHScheme(schemeName):
     for scheme in WeaklyCompressibleSPHScheme:
         if scheme.name.lower() == schemeName.lower():
@@ -51,4 +57,5 @@ __all__ = [
     'parseKernelFunctions', 'parseIntegrationScheme', 'parseViscositySwitch',
     'parseAdaptiveSupportScheme', 'parseCompressibleSPHScheme',
     'parseIncompressibleSPHScheme', 'parseWeaklyCompressibleSPHScheme',
+    'parseArtificialCompressibleSPHScheme',
 ]

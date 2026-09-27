@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""torch.autograd.gradcheck against modules/incompressible/wp_alpha.py -- Tier 2 of
-docs/historic_plans/CLEANUP_PLAN.md's Phase 4.1 gradcheck rollout.
+"""torch.autograd.gradcheck against modules/incompressible/{wp_alpha,wp_wallMoment}.py
+-- Tier 2 of docs/historic_plans/CLEANUP_PLAN.md's Phase 4.1 gradcheck rollout.
 
 `computeAlphaWarp` computes the DFSPH pressure-solver diagonal coefficient
 `alpha_i = area_i/m_i * dot(sumA, sumA) + area_i * sumB`, where `sumA`/`sumB` are
@@ -44,6 +44,16 @@ if a `@wp.func` accumulates a value over a loop and then reduces it nonlinearly 
 returning, split it into two functions -- one that returns the raw accumulator, one
 (or the caller) that applies the nonlinear reduction to the returned value.
 
+`computeWallMomentWarp` (`wp_wallMoment.py`) is the kernel-weighted position
+moment behind Eq. (61)'s wall pressure, `sum_j V_j rho_j (x_i - x_j) W_ij`. It is
+a plain linear accumulation with no nonlinear reduction, so it is not in the
+bug family above -- but its adjoint runs through `computeDistanceVec` and
+`computeKernelCRK` with positions on *both* sides of the product (once in
+`x_ij`, once inside `W_ij`), which is the shape most likely to lose a term, so
+it is checked rather than assumed. Run with mixed kinds, since the operator is
+directional (`FluidToBoundary`) and the directionality mask is a `continue`
+inside the neighbour loop.
+
     python scripts/gradcheck_incompressible.py
 """
 
@@ -63,6 +73,7 @@ from warpSPHCore import OperationProperties, ParticleState
 from warpSPHCore.enumTypes import SupportScheme
 
 from warpSPH.modules.incompressible.wp_alpha import computeAlphaWarp
+from warpSPH.modules.incompressible.wp_wallMoment import computeWallMomentWarp
 
 DIM = 1
 N = 5
@@ -115,6 +126,35 @@ def _run(label: str, includeBoundaryReaction: bool = True, staticKinds: bool = F
         return False
 
 
+def _runWallMoment(label: str, direction) -> bool:
+    domain, positions, supports, masses, densities, adjacency, kinds, _ = _build_case()
+    kinds = kinds.clone()
+    kinds[1] = 1
+    kinds[3] = 1
+
+    def f(pos, sup, mass, dens):
+        p = ParticleState(positions=pos, supports=sup, masses=mass, densities=dens,
+                          kinds=kinds)
+        return computeWallMomentWarp(
+            queryParticles=p,
+            operationProperties=OperationProperties(
+                kernel=KERNEL, supportMode=SupportScheme.Gather,
+                operationMode=direction),
+            domain=domain,
+            adjacency=adjacency,
+        )
+
+    print(f"\n=== computeWallMomentWarp ({label}): torch.autograd.gradcheck ===")
+    inputs = (positions, supports, masses, densities.detach().clone().requires_grad_(True))
+    try:
+        ok = torch.autograd.gradcheck(f, inputs, eps=1e-6, atol=1e-5)
+        print("PASSED" if ok else "FAILED (gradcheck returned False)")
+        return bool(ok)
+    except Exception as exc:  # noqa: BLE001
+        print(f"FAILED: {type(exc).__name__}: {exc}")
+        return False
+
+
 def main():
     wp.init()
     torch.manual_seed(0)
@@ -122,6 +162,10 @@ def main():
     ok = _run("includeBoundaryReaction=True")
     ok &= _run("includeBoundaryReaction=False, mixed kinds",
                includeBoundaryReaction=False, staticKinds=True)
+    from warpSPHCore.enumTypes import OperationDirection
+    ok &= _runWallMoment("FluidToBoundary, mixed kinds",
+                         OperationDirection.FluidToBoundary)
+    ok &= _runWallMoment("AllToAll", OperationDirection.TrueAllToToAll)
 
     print()
     if ok:

@@ -9,7 +9,7 @@ diffusion, viscosity switch, boundary conditions, delta-SPH shifting,
 `dictToWeaklyCompressibleConfig` do serialize `regions` and `rigidBodies`.
 """
 
-__all__ = ['WeaklyCompressibleSPHConfig', 'weaklyCompressibleConfigToDict', 'dictToWeaklyCompressibleConfig']
+__all__ = ['WeaklyCompressibleSPHConfig', 'Sun2017DeltaSPHConfig', 'weaklyCompressibleConfigToDict', 'dictToWeaklyCompressibleConfig']
 
 # from ..system import CompressibleSystem, CompressibleSystemUpdate
 # from ..config import SimulationConfig
@@ -55,6 +55,39 @@ class WeaklyCompressibleSPHConfig:
 
     diffusionParams: WeaklyCompressibleDiffusionParams = field(default_factory=buildDefaultDiffusionParamsWeaklyCompressibleSPH, metadata={'description': 'Diffusion parameters for the weakly compressible SPH simulation'})
 
+    # Sun et al. 2017 Sec. 2 (Antuono/Jameson technique): the delta-SPH
+    # diffusive terms (density diffusion + artificial viscosity) are evaluated
+    # ONCE per real step, at the committed t^n state, and held fixed across
+    # every RK4 sub-stage rather than recomputed fresh at each stage's
+    # (intermediate, possibly wildly different during a violent event) state.
+    # False (default) leaves every existing case's behaviour unchanged --
+    # `schemes/deltaSPH.py` recomputes fresh every stage as it always has.
+    # `DELTASPH_VALIDATION_PLAN.md` Part 1 flagged this as a known deviation
+    # from Sun 2017; Part 5.1's Marrone dam-break investigation is the first
+    # case to actually exercise the flag. Only meaningful with a multi-stage
+    # RK integrator (`integrationScheme=rungeKutta4` etc.) -- a no-op under
+    # any single-evaluation scheme (forwardEuler/semiImplicitEuler), since
+    # there is only one stage to freeze against.
+    freezeDiffusionAcrossStages: bool = field(default=False, metadata={'description': "Freeze delta-SPH's diffusive terms across RK sub-stages (Sun et al. 2017 Sec. 2), re-evaluating once per real step instead of once per stage"})
+
+    #: Lone fluid particles (no fluid neighbour in the support; wall rows may
+    #: be present) get `rho = rho0` (p = 0) at the end of every step. A lone
+    #: particle's continuity and DDT sums have no fluid pair to relax against,
+    #: so it otherwise carries the density it had when it lost contact (or
+    #: books a wall separation as a deficit) and releases it as a kick on the
+    #: next contact (MDBC_CONTACT_LINE_PLAN.md §11-12). Physical reading: its
+    #: mass is unchanged, a low density means the parcel is smeared out, and
+    #: surface tension would pull it back into a compact blob at rest. Default
+    #: off; diagnostic until validated.
+    loneDensityReset: bool = field(default=False, metadata={'description': 'rho = rho0 on fluid rows with no fluid neighbour, every step'})
+    #: english2025 mDBC: extrapolate the hydrostatic increment ghost -> wall
+    #: one-sided, `P_b = P_g + max(0, rho0 (g - a_b) . relPos)` (SPHinXsys,
+    #: Zhang et al. 2023 Eq. 2.11): a wall below the fluid gets the column's
+    #: extra weight, a wall above it (a ceiling) gets nothing instead of
+    #: tension. The two-sided term assumes a continuous column between ghost
+    #: and wall, which a lone particle or thin film under a ceiling is not
+    #: (MDBC_CONTACT_LINE_PLAN.md §12). Default off; diagnostic until validated.
+    mdbcOneSidedHydrostatic: bool = field(default=False, metadata={'description': 'english2025: max(0, .) on the ghost-to-wall hydrostatic increment'})
     viscositySwitchParams: ViscositySwitchConfig = field(default_factory=ViscositySwitchConfig)
 
     schemeName: str = field(default='Compressible SPH', metadata={'description': 'Name of the compressible SPH scheme to use'})
@@ -65,6 +98,52 @@ class WeaklyCompressibleSPHConfig:
     dt_accelerationConstraint: bool = field(default=True, metadata={'description': 'Whether to apply acceleration constraint in timestep computation'})
     dt_acousticConstraint: bool = field(default=True, metadata={'description': 'Whether to apply acoustic constraint in timestep computation'})
     pressureForceTerm: PressureForceScheme = field(default=PressureForceScheme.Antuono, metadata={'description': 'Pressure force term to use'})
+    #: Apply the same kernel-gradient renormalization matrix `deltaSPH.py`
+    #: already computes for `gradRhoL` (`detectFreeSurface`'s per-particle
+    #: covariance fit) to the pressure-force gradient too, but only where a
+    #: per-particle kernel-completeness (Shepard-sum) gate says the local
+    #: neighbourhood is complete AND the particle is not flagged free-surface
+    #: -- everywhere else (including every free-surface particle) the raw,
+    #: unrenormalized gradient is used, unchanged from the `False` behaviour.
+    #: False (default) leaves every existing case unchanged.
+    #:
+    #: `DELTASPH_VALIDATION_PLAN.md` 5.14/5.15/5.17/5.19-5.22: the Antuono
+    #: (`sun2018` Eq. 9) pressure switch's symmetric branch is a real,
+    #: nonzero force at any truncated/disordered kernel support even for a
+    #: uniform pressure field, because the raw `Sum_j V_j grad_i W_ij` is
+    #: only ~0 for a complete, regular neighbourhood -- exactly what a
+    #: renormalized gradient is meant to restore. Neither PST, the DDT
+    #: renormalization, nor either dissipation term fixed it (5.20-5.22).
+    #: 5.23's first attempt applied the renormalization unconditionally and
+    #: made the peak 8.8x WORSE -- `Li` comes from a covariance fit that is
+    #: itself most ill-conditioned exactly in the sparse/disordered
+    #: neighbourhoods where the artifact lives, so an ungated renormalization
+    #: amplifies noise there rather than correcting it. 5.32 traced what
+    #: DualSPHysics' own production advanced-shifting extension does instead
+    #: -- gate on kernel-sum completeness (`poup1>0.95`) and bulk
+    #: classification, falling back to the raw gradient everywhere else --
+    #: and this flag now reproduces exactly that gate (`schemes/deltaSPH.py`
+    #: step 13), rather than applying `Li` unconditionally.
+    pressureForceRenormalized: bool = field(default=False, metadata={'description': 'Apply gradient renormalization to the pressure-force kernel gradient, gated on kernel-sum completeness and bulk classification (DualSPHysics-style)'})
+
+    #: Where (and whether) the mDBC no-penetration correction is applied.
+    #:
+    #: * ``'derivative'`` -- the historical placement: `deltaSPH_step` folds
+    #:   `nopenshift / config.dt` into `dvdt` alongside pressure/gravity/
+    #:   viscosity, so it is re-evaluated at every RK sub-stage and goes
+    #:   through the stage weighting.
+    #: * ``'finalize'`` -- DualSPHysics' placement: applied **once per step**
+    #:   in `WeaklyCompressibleSystem.finalize`, after the particle shift,
+    #:   as a post-integration *velocity replacement*
+    #:   (`v = v^n + nopenshift`, displacement recomputed from it) rather than
+    #:   a force. See `JSphGpuSimple_ker.cu`'s `MDBC2_NoPen` blocks.
+    #: * ``'off'`` -- not applied at all. DualSPHysics itself gates the term on
+    #:   `SlipMode >= SLIP_NoSlip` and makes it opt-in, i.e. it is **never**
+    #:   applied under free slip -- which is what Marrone 2011 Sec. 3
+    #:   specifies. diffSPH disables its equivalent outright (`/ dt * 0`).
+    #:
+    #: `DELTASPH_VALIDATION_PLAN.md` 5.9.
+    mdbcNoPenShiftMode: str = field(default='finalize', metadata={'description': "Where the mDBC no-penetration correction is applied: 'finalize' (default; once per step, DualSPHysics-style velocity replacement), 'derivative' (summed into dvdt, historical), or 'off'. 'derivative' can only *oppose* an into-wall velocity, never replace it, so a particle grazing a wall keeps its normal velocity indefinitely while the correction cancels the displacement; the continuity equation then integrates that phantom velocity into a density collapse. Root cause of the sloshingTank divergence at t = 4.57 s -- measured rho 0.995 -> 0.60 on one particle pinned at the ceiling, fixed by this default (DELTASPH_VALIDATION_PLAN.md 5.13(c))."})
 
     shiftProperties: ShiftProperties = field(default_factory=buildDefaultShiftProperties, metadata={'description': 'Properties for the delta-SPH shift'})
 
@@ -76,6 +155,73 @@ class WeaklyCompressibleSPHConfig:
     gravityConfig: gravityConfiguration = field(default_factory=buildDefaultGravityConfiguration, metadata={'description': 'Configuration for gravity module'})
 
     bandwith: float = field(default=10.0, metadata={'description': 'Bandwith for the divergence-free noise sampling module'})
+
+    #: Which mDBC wall-density extrapolation `schemes/deltaSPH.py` calls.
+    #: `'ramped'` (default): `density2025.py`'s `computeMdbcDensity` --
+    #: English et al. 2022 Eq. (12) ghost-node extrapolation, smoothly
+    #: ramped down to a 0th-order Shepard fallback on `numNeighbors`/
+    #: `|det(A_g)|`, clamped to `>= rho0` on the fallback share only.
+    #: `'band'`: `densityBand.py`'s `computeMdbcDensityBand` -- Band et al.
+    #: 2018-style fit directly at the boundary particle with a centroid-
+    #: decoupled, Tikhonov-damped gradient block, UNCLAMPED. Prototyped in
+    #: `scripts/probe_bandMlsPressureBoundary.py` against the "few particle
+    #: large sheet" open item (DELTASPH_VALIDATION_PLAN.md); validate against
+    #: the Marrone dam break before trusting it beyond that.
+    mdbcDensityScheme: str = field(default='english2025', metadata={'description': "mDBC wall-density extrapolation: 'english2025' (default since WCSPH_DEFAULT_CLOSEOUT_PLAN.md item E, english2025.py, Band's value fit + English 2025's analytic-hydrostatic extrapolation, BOUNDARY_DENSITY_PLAN.md §5 -- beats 'ramped'/'band' on every Marrone config tested, at multiple resolutions, with no known regression), 'ramped' (density2025.py's English et al. 2022 ghost-node extrapolation + smooth det/neighbour-count ramp, the previous default), or 'band' (densityBand.py, unclamped Band et al. 2018-style fit -- a research tool, not a default candidate: still the worst of the three on every Marrone metric even after its own Shepard-precision-hole fix)"})
+
+def _buildSun2017ShiftProperties() -> ShiftProperties:
+    """`buildDefaultShiftProperties()` with Sun et al. 2017 Eq. (7)'s own
+    constants -- the `+` of delta+-SPH at the intensity the paper specifies.
+
+    The shared default is 1/8 of Eq. (7) (measured:
+    `scripts/probe_deltaPlusShiftMagnitude.py`), which on Sun et al. 2019
+    Sec. 3.1's Taylor-Green benchmark leaves delta+-SPH sitting on top of
+    plain delta-SPH instead of improving on it -- `eps_V = 0.227 %` against
+    the delta-SPH leg's 0.206 %, where the paper's delta+ reaches 0.125 %
+    from the same 0.22 %. See `ShiftProperties.sun2017Eq7Shift`.
+    """
+    props = buildDefaultShiftProperties()
+    props.sun2017Eq7Shift = True
+    return props
+
+
+@dataclass
+class Sun2017DeltaSPHConfig(WeaklyCompressibleSPHConfig):
+    """Sun et al. 2017's own delta+-SPH prescription -- identical to
+    `WeaklyCompressibleSPHConfig` (same step function, `schemes/deltaSPH.py`;
+    no new physics) except for two field defaults:
+
+    * `freezeDiffusionAcrossStages` -> `True` (Sec. 2's
+      RK4-with-frozen-diffusion pairing, Antuono/Jameson technique);
+    * `shiftProperties.sun2017Eq7Shift` -> `True` (Eq. (7)'s own shift
+      constants -- `(2h)^2`, `2 m_j/(rho_i+rho_j)`, `R = 0.2`).
+
+    Selected via `WeaklyCompressibleSPHScheme.sun2017DeltaSPH` /
+    `--scheme sun2017DeltaSPH` (`schemes/builder.py`) -- a *named* scheme
+    rather than a changed default on the generic `deltaSPH` scheme, so opting
+    into this paper's exact prescription is explicit, not a silent behaviour
+    change for every existing `deltaSPH` case. `DELTASPH_VALIDATION_PLAN.md`
+    Part 5.1 confirmed the un-frozen RK4 combination produces a spurious,
+    extended (~1.4 t*) violent-impact pressure transient a single-stage
+    integrator (e.g. DualSPHysics' symplectic Euler) never exhibits, since it
+    has no cross-stage inconsistency to freeze against in the first place --
+    frozen diffusion is specifically an RK-multi-stage companion technique.
+
+    Kernel and integrator (Wendland C2, RK4) are case-level settings either
+    way, not part of this config -- `cases/dambreak.py` already defaults to
+    both regardless of which `WeaklyCompressibleSPHScheme` is selected.
+    """
+    freezeDiffusionAcrossStages: bool = field(
+        default=True,
+        metadata={'description': "Sun et al. 2017 Sec. 2: freeze delta-SPH's "
+                  "diffusive terms across RK sub-stages -- this preset's "
+                  "default (the base WeaklyCompressibleSPHConfig defaults False)"})
+    shiftProperties: ShiftProperties = field(
+        default_factory=_buildSun2017ShiftProperties,
+        metadata={'description': "Sun et al. 2017 Eq. (7)'s own shift constants "
+                  "(sun2017Eq7Shift=True) -- this preset's default; the shared "
+                  "buildDefaultShiftProperties() is 1/8 of Eq. (7)"})
+
 
 from typing import Dict, Any
 
@@ -104,6 +250,7 @@ def weaklyCompressibleConfigToDict(config: WeaklyCompressibleSPHConfig) -> Dict[
         'bandwith': config.bandwith,
 
         'pressureForceTerm': config.pressureForceTerm.name,
+        'pressureForceRenormalized': config.pressureForceRenormalized,
         'shiftProperties': {
             'iterations': config.shiftProperties.iterations,
             'CFL': config.shiftProperties.CFL,
@@ -129,6 +276,7 @@ def weaklyCompressibleConfigToDict(config: WeaklyCompressibleSPHConfig) -> Dict[
         'gravityConfig': gravityConfigurationToDict(config.gravityConfig),
         'regions': [region.toDict() for region in config.regions],
         'rigidBodies': [body.toDict() for body in config.rigidBodies],
+        'freezeDiffusionAcrossStages': config.freezeDiffusionAcrossStages,
     }
 
 def dictToWeaklyCompressibleConfig(configDict: Dict[str, Any]) -> WeaklyCompressibleSPHConfig:
@@ -153,6 +301,7 @@ def dictToWeaklyCompressibleConfig(configDict: Dict[str, Any]) -> WeaklyCompress
     config.dt_acousticConstraint = bool(configDict['dt_acousticConstraint'])
     # config.densityDiffusionTerm = DensityDiffusionScheme[configDict['densityDiffusionTerm']] if isinstance(configDict['densityDiffusionTerm'], str) else configDict['densityDiffusionTerm']
     config.pressureForceTerm = PressureForceScheme[configDict['pressureForceTerm']] if isinstance(configDict['pressureForceTerm'], str) else configDict['pressureForceTerm']
+    config.pressureForceRenormalized = bool(configDict.get('pressureForceRenormalized', False))
     config.bandwith = float(configDict.get('bandwith', 10.0))
     shiftPropsDict = configDict.get('shiftProperties', {})
     config.shiftProperties = ShiftProperties(
@@ -182,5 +331,6 @@ def dictToWeaklyCompressibleConfig(configDict: Dict[str, Any]) -> WeaklyCompress
     config.gravityConfig = dictToGravityConfiguration(configDict['gravityConfig']) if configDict.get('gravityConfig') is not None else buildDefaultGravityConfiguration()
     config.regions = [ParticleRegion.fromDict(regionDict) for regionDict in configDict.get('regions', [])]
     config.rigidBodies = [RigidBody.fromDict(bodyDict) for bodyDict in configDict.get('rigidBodies', [])]
+    config.freezeDiffusionAcrossStages = bool(configDict.get('freezeDiffusionAcrossStages', False))
 
     return config

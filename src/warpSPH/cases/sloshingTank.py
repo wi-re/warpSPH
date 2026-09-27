@@ -25,10 +25,13 @@ tabulated roll angle. This drops the non-inertial Euler and centrifugal terms
 
 Runs under two schemes
 ----------------------
-- ``deltaSPH`` (weakly compressible, the default): sound speed and ``dt`` are
-  fixed together from ``targetDt``; the sensor pressure is the nearest boundary
-  particle's density mapped through the Tait/linear EOS, scaled by
-  ``rho0Physical`` (the scheme runs at ``restDensity = 1``).
+- ``deltaSPH`` (weakly compressible, the default): ``c_0`` and ``dt`` are both
+  pinned (``soundSpeed = 20``, ``targetDt = 1e-4``), matching the diffSPH
+  reference notebook rather than back-solving ``c_0`` out of ``dt`` -- which
+  made ``c_0`` fall with resolution (11 at nx=225) and ran the impacts at
+  Ma ~ 0.75. The sensor pressure is the nearest boundary particle's density
+  mapped through the Tait/linear EOS, scaled by ``rho0Physical`` (the scheme
+  runs at ``restDensity = 1``).
 - ``divergenceFree`` (incompressible DFSPH): pass
   ``--scheme divergenceFree --integrationScheme semiImplicitEuler
   --kernel Wendland2 --cflFactor 0.2 --dt 1e-3`` (the ``run_sloshingTank.py``
@@ -50,7 +53,7 @@ import numpy as np
 import torch
 
 from ..configurations.moduleConfigurations.gravity import GravityType
-from ..configurations.moduleConfigurations.shifting import ShiftingProjectionScheme
+from ..configurations.moduleConfigurations.shifting import ShiftingProjectionScheme, ShiftingScheme
 from ..configurations.region import BCType
 from ..enumTypes import (WeaklyCompressibleSPHScheme,
                          isIncompressibleScheme)
@@ -62,6 +65,7 @@ from .plotting import Field, particlePlot
 from .weaklyCompressible import (boundaryRegion, buildRegionSystem, fluidRegion,
                                  setupTimestep, shapeSdf,
                                  particleDistributionMetrics,
+                                 stepAccelerationDiagnostics,
                                  calibrateRestDensity)
 
 __all__ = ['sloshingTankCase']
@@ -170,19 +174,41 @@ def configureScheme(ctx: RunContext) -> None:
             sc.diffusionParams.viscidNu = ctx.param('nu')
         if hasattr(sc.fluid, 'backgroundPressure'):
             sc.fluid.backgroundPressure = ctx.param('backgroundPressure', 0.0)
-        # The δ⁺-SPH particle shift near the free surface -- the reason this
-        # case survives the wall slam at all (docs/historic_plans/WCSPH_SHIFTING_PLAN.md). On by
-        # default now that `surfaceNormal` is the projection default; the knobs
-        # are for the shift A/B (`--shift-projection`, `--no-shift`).
+        # The particle shift near the free surface -- the reason this case
+        # survives the wall slam at all (docs/historic_plans/WCSPH_SHIFTING_PLAN.md). On by
+        # default; the knobs are for the shift A/B (`--shift-scheme`,
+        # `--shift-projection`, `--no-shift`).
+        #
+        # Default is `michel2022`/`michel2022`, not the shared
+        # `buildDefaultShiftProperties()` default (`deltaSPH`/`surfaceNormal`)
+        # -- **required**, not a preference. Commit 790a7c7 ("fix its psi
+        # sign") correctly fixed `deltaSPH`'s density-diffusion operator
+        # (it was accidentally 2x too strong, an over-diffusive bug that
+        # happened to add free numerical damping -- see that commit and
+        # `ACSPH_PLAN.md` decision 1). One confirmed side effect: this case's
+        # old default (`deltaSPH`/`surfaceNormal`) now diverges at `t=0.68`
+        # instead of surviving to `t=4.0` as `docs/historic_plans/
+        # WCSPH_SHIFTING_PLAN.md` documents -- reproduced directly by
+        # re-running the pre-fix commit unchanged (`PST_ALE_PLAN.md` §7.1).
+        # `michel2022`/`michel2022` (`PST_ALE_PLAN.md` Stage A) is the one
+        # configuration measured to still survive the full run post-fix
+        # (density held to [0.994, 1.011] over 20001 steps), so it is the
+        # default here now -- switching schemes is not "adding a feature",
+        # it is what makes this case's shipped default actually run.
         if hasattr(sc, 'shiftProperties'):
             sc.shiftProperties.active = ctx.param('shifting', True)
-            proj = ctx.param('shiftProjection', None)
-            if proj:
-                sc.shiftProperties.projectionScheme = ShiftingProjectionScheme[proj]
+            sc.shiftProperties.scheme = ShiftingScheme[ctx.param('shiftScheme', 'michel2022')]
+            sc.shiftProperties.projectionScheme = ShiftingProjectionScheme[ctx.param('shiftProjection', 'michel2022')]
             # Sun 2019 Eq. (9) continuity δu-terms -- the volume-consistency
             # fix for the free-surface de-densification (WCSPH_SHIFTING_PLAN
             # §2d). Off by default; opt in for the sloshing quantitative pass.
             sc.shiftProperties.correctdrhodt = ctx.param('correctdrhodt', False)
+
+    # mDBC no-penetration correction placement -- see
+    # `DELTASPH_VALIDATION_PLAN.md` 5.9. Unset leaves the config default.
+    noPen = ctx.param('noPenShift', None)
+    if noPen is not None and hasattr(sc, 'mdbcNoPenShiftMode'):
+        sc.mdbcNoPenShiftMode = noPen
 
     ctx.scratch['rollHistory'] = loadRollHistory(_rollFilePath(ctx))
 
@@ -297,6 +323,7 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
         'rollAngleDeg': math.degrees(ctx.scratch.get('rollAngle', 0.0)),
     }
     d.update(particleDistributionMetrics(ctx, state))
+    d.update(stepAccelerationDiagnostics(state))
 
     if ctx.scratch.get('sensorIndex') is None:
         ctx.scratch['sensorIndex'] = _locateSensor(ctx, particles)
@@ -352,8 +379,13 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
 SLOSHING_FIELDS = [
     Field('velocities', 'velocity magnitude', colorMap='viridis', mapping='L2Norm',
           boundary='Visualize'),
+    # `scaling='Symmetric'` is what makes `midPoint` take effect at all --
+    # `warpSPHPlotting.math.getBounds` only applies it on the Symmetric /
+    # SymmetricLog branch, so a diverging map left on the default `Linear`
+    # silently becomes a plain min-max stretch and "white" lands wherever the
+    # data minimum happens to be, not at rho0.
     Field('densities', 'density', colorMap='RdBu', colorMapKind='diverging',
-          flip=True, midPoint=1.0, boundary='Visualize'),
+          flip=True, midPoint=1.0, scaling='Symmetric', boundary='Visualize'),
 ]
 
 setupPlot, updatePlot = particlePlot(SLOSHING_FIELDS, figsize=(13, 5))
@@ -381,11 +413,46 @@ sloshingTankCase = registerCase(Case(
     defaults=dict(
         caseName='16-sloshingTank',
         dim=2,
-        nx=150,
+        # nx / targetDt / soundSpeed / integrationScheme below are the diffSPH
+        # `16_SloshingTank.ipynb` reference configuration -- the one that runs
+        # this case cleanly there. Matching the discretisation first is what
+        # makes any remaining difference attributable to the solver rather than
+        # to the setup (`DELTASPH_VALIDATION_PLAN.md` item 5).
+        nx=200,                          # diffSPH: nx=200 -> dx = 0.0045
         L=0.9,                           # tank internal width B
         n_h=4.0,
         kernel='Wendland4',
-        integrationScheme='rungeKutta2',
+        # RK2. `semiImplicitEuler` (enum 21, 1-stage) integrates density with a
+        # plain `explicit_step`, and for WCSPH the stiff oscillator is
+        # (rho, v), not (x, v) -- so the acoustic mode runs explicit Euler and
+        # grows by `sqrt(1 + (c k dt)^2)` every step. Diverges at t = 0.041 s
+        # *at rest*, at every discretisation tried (`DELTASPH_VALIDATION_PLAN.md`
+        # 5.3) -- still true, unrelated to the no-pen mechanism below.
+        #
+        # `symplecticEuler` (enum 13, 2-stage kick-drift-kick, the scheme
+        # DualSPHysics runs) was ALSO found to diverge here, at t = 0.727 s,
+        # and on Marrone 3.1 at t* = 1.295 with 473 penetrating particles
+        # against RK4's zero (5.9); prime suspect at the time was
+        # `deltaSPH_step`'s `nopenshift / dt` term, whose magnitude depends on
+        # the integrator's stage splitting under `mdbcNoPenShiftMode='derivative'`.
+        # **Superseded, 2026-09-12**: with `mdbcNoPenShiftMode='finalize'` and
+        # `'hybrid'` ghost placement now the defaults (5.13) -- which route the
+        # no-pen correction outside `deltaSPH_step` entirely, removing the
+        # suspected term -- `symplecticEuler` ran the *full* 7 s record clean
+        # (nx=225, `diverged=False`), and with a visibly better Sensor-1 match
+        # than RK2: raw peak 60.1 kPa vs. RK2's 233.7 kPa against the same
+        # 2.2-13.1 kPa measured band.
+        # **Promoted to the default, WCSPH_DEFAULT_CLOSEOUT_PLAN.md item E
+        # (2026-09-18)** -- the "single comparison run, not the full
+        # validation sweep" caveat above no longer applies: this session's own
+        # `english2025`+`fourtakas2019`+`symplecticEuler` combo ran clean
+        # across Marrone 3.1 (both configs, nx=35/70), Marrone 3.4 (both
+        # resolutions, nx=128/256, up to t*=15.66), and this case's own full 7s
+        # (aside from the separately-tracked, integrator-independent
+        # ceiling-hover mechanism -- see `OPEN_PROBLEMS.md`). The `nx=200`
+        # diffSPH-matched discretisation above is unaffected -- only the
+        # integrator choice moved.
+        integrationScheme='symplecticEuler',
         supportMode='KernelMeanSymmetric',
         gradientMode='Difference',
         laplacianMode='Brookshaw',
@@ -418,7 +485,12 @@ sloshingTankCase = registerCase(Case(
         # -- and the reference runs only look clean because their `nx` happens
         # to land well. With it, step-0 `|v|max` is 0.0098 at every `nx`.
         calibrateRestDensity='auto',
-        targetDt=2.0e-4,
+        # With `soundSpeed` set, `targetDt` *is* dt -- no back-solve either way
+        # (`caseUtils/weaklyCompressible.py:setupTimestep`). diffSPH's notebook
+        # fixes both independently at exactly these values; its own back-solved
+        # `c_s` is overwritten with the literal 20 two lines later.
+        targetDt=1.0e-4,
+        soundSpeed=20.0,
         # roll excitation
         rollDataFile='',                 # '' -> the bundled lateral_water_1x.txt
         rollStartTime=0.0,
@@ -435,6 +507,8 @@ sloshingTankCase = registerCase(Case(
         shifting=False,
         xsphScale=0.0,
         markerSize=4,
+        # mDBC no-penetration placement; None = the scheme config's default.
+        noPenShift=None,
     ),
 ))
 

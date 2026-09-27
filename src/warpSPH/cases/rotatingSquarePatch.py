@@ -20,19 +20,22 @@ sharper versions of the same one.
 
 from __future__ import annotations
 
+import math
 from typing import Dict
 
 import torch
 
 from warpSPHCore import sphKernelScale
 
+from ..enumTypes import isArtificialCompressibleScheme
 from ..modules import setupWeaklyCompressibleTimestep
 from ..runner import Case, RunContext, caseMain, registerCase
 from ..utils.support import volumeToSupport
 from .plotting import particlePlot
 from .weaklyCompressible import (VELOCITY_DENSITY_FIELDS, WEAKLY_COMPRESSIBLE_DEFAULTS,
                                  WEAKLY_COMPRESSIBLE_PARAMS, buildRegionSystem,
-                                 centredShapeSdf, configureWeaklyCompressible, fluidRegion,
+                                 centredShapeSdf, configureArtificialCompressible,
+                                 configureWeaklyCompressible, fluidRegion,
                                  paramExtraData, shapeArgs,
                                  squarePatchAreaMetrics, weaklyCompressibleDiagnostics)
 
@@ -69,6 +72,98 @@ def _setupTimestep(ctx: RunContext, system) -> None:
         ctx.config, ctx.schemeConfig, system, baseDt, verbose=ctx.spec.verbose)
 
 
+def _seedPoissonPressure(ctx: RunContext, system) -> None:
+    """Seed the t=0 pressure with the incompressible Poisson solution.
+
+    Sun et al. 2019 §3.3 (and Colagrossi & Landrini 2003, ref [27] there): the
+    square patch is *not* an equilibrium, and its physical pressure at t=0 is
+    the solution of
+
+        ∇²p = 2 ρ₀ ω²   inside the patch,      p = 0 on the free surface,
+
+    which is negative in the interior -- the "negative pressure core" the case
+    is about. Seeding only the rotating velocity (the default) leaves p to
+    develop from zero through an acoustic start-up transient that rings for
+    ~2 tω and drives a spurious first-period fragmentation of the arms.
+
+    For the ``box`` shape the solution is ``2 ρ₀ ω²`` times the Saint-Venant
+    torsion function of a square of half-side ``a`` (Prandtl stress function):
+
+        v(x,y) = ½(x²−a²)
+               + (16 a²/π³) Σ_{k≥0} (−1)ᵏ / [(2k+1)³ cosh((2k+1)π/2)]
+                            · cos((2k+1)πx/2a) · cosh((2k+1)πy/2a)
+
+    (v = 0 on the boundary, v(0,0) ≈ −0.295 a²). Other shapes have no closed
+    form and keep p = 0. The pressure is imposed through the density, since the
+    weakly-compressible EOS (isothermal here) recomputes p from ρ every step:
+    ρ = ρ₀ + p / c₀².
+    """
+    if ctx.param('shape') != 'box':
+        if ctx.spec.verbose:
+            print(f'poissonPressureInit: no closed-form solution for '
+                  f'shape={ctx.param("shape")!r}; leaving p=0')
+        return
+
+    st = system.state
+    fluid = st.kinds == 0
+    pos = st.positions[fluid]
+    x, y = pos[:, 0], pos[:, 1]
+    # Half-side from the cloud extent (robust to what `size` maps to), nudged
+    # out by a half spacing so the outermost particle ring sits at v≈0 rather
+    # than slightly negative.
+    a = 0.5 * float((x.max() - x.min()).item()
+                    + (y.max() - y.min()).item()) / 2.0 + 0.5 * ctx.config.dx
+
+    v = 0.5 * (x ** 2 - a ** 2)
+    for k in range(8):
+        n = 2 * k + 1
+        coeff = (16.0 * a ** 2 / math.pi ** 3) * ((-1.0) ** k
+                 / (n ** 3 * math.cosh(n * math.pi / 2.0)))
+        v = v + coeff * torch.cos(n * math.pi * x / (2.0 * a)) \
+                      * torch.cosh(n * math.pi * y / (2.0 * a))
+
+    omega = float(ctx.param('omega'))
+    rho0 = ctx.schemeConfig.fluid.restDensity
+    c0 = ctx.schemeConfig.fluid.fixedSoundSpeed
+    pressure = 2.0 * rho0 * omega ** 2 * v
+
+    st.densities[fluid] = rho0 + pressure / c0 ** 2
+    if getattr(st, 'pressures', None) is not None:
+        st.pressures[fluid] = pressure
+    if ctx.spec.verbose:
+        print(f'poissonPressureInit: a={a:.4f}, p(centre)≈{pressure.min().item():.3f}, '
+              f'ρ range [{st.densities[fluid].min().item():.5f}, '
+              f'{st.densities[fluid].max().item():.5f}]')
+
+
+def configureScheme(ctx: RunContext) -> None:
+    if isArtificialCompressibleScheme(ctx.scheme):
+        return _configureArtificialCompressible(ctx)
+    configureWeaklyCompressible(ctx)
+
+
+def _configureArtificialCompressible(ctx: RunContext) -> None:
+    """The ACSPH branch of `configureScheme` (`ACSPH_PLAN.md` §4.2/Part 7:
+    the paper's KE-decay/momentum-conservation case against BEM/LDFM
+    reference data, and -- since this is Michel's own §5.4 free-surface
+    validation case -- the first real (non-synthetic) test of Eq. (48)'s
+    convergence claim, complementing `PST_ALE_PLAN.md`'s bounded
+    Taylor-Green probe.
+
+    No gravity, no walls (`buildSystem` places fluid particles only), so
+    this is the simplest possible ACSPH case to wire: `configureArtificialCompressible`
+    handles domain/dt-integrator/surface-detection, and the only thing left
+    is Eq. (48)'s `U_char` (ACSPH_PLAN.md §5.5): the patch's own edge speed
+    under rigid rotation, `omega * size`.
+    """
+    configureArtificialCompressible(ctx)
+
+    schemeConfig = ctx.schemeConfig
+    schemeConfig.shiftProperties.active = False
+    if schemeConfig.acParams.uChar is None:
+        schemeConfig.acParams.uChar = float(ctx.param('omega') * ctx.param('size'))
+
+
 def buildSystem(ctx: RunContext):
     args = shapeArgs(ctx.param('shape'), ctx.param('size'), ctx.param('aspectRatio'))
     # Centred on the measured shape, not on the primitive's own origin, so the
@@ -83,7 +178,24 @@ def initialConditions(ctx: RunContext, system) -> None:
     positions = system.state.positions
     system.state.velocities[:, 0] = omega * positions[:, 1]
     system.state.velocities[:, 1] = -omega * positions[:, 0]
-    _setupTimestep(ctx, system)
+    if isArtificialCompressibleScheme(ctx.scheme):
+        # No sound speed to back-solve a `dt` from (`_setupTimestep` is
+        # WCSPH-only, tuned for a target Mach number); seed `targetDt` and
+        # let `squarePatchTimestep`'s Eq. (46) hook take over from step 2 on.
+        ctx.config.dt = ctx.param('targetDt')
+    else:
+        _setupTimestep(ctx, system)
+        if ctx.param('poissonPressureInit', False):
+            _seedPoissonPressure(ctx, system)
+
+
+def squarePatchTimestep(ctx: RunContext, state) -> float:
+    """Eq. (46) for ACSPH; the fixed Mach-tuned `dt` otherwise (unchanged
+    WCSPH behaviour -- this case has never had a per-step adaptive `dt`)."""
+    if isArtificialCompressibleScheme(ctx.scheme):
+        from ..modules.timestep import computeTimestep
+        return computeTimestep(state, ctx.config, ctx.schemeConfig, dt=ctx.config.dt)
+    return ctx.config.dt
 
 
 setupPlot, updatePlot = particlePlot(VELOCITY_DENSITY_FIELDS)
@@ -103,12 +215,13 @@ rotatingSquarePatchCase = registerCase(Case(
     scheme='deltaSPH',
     description='Rotating square patch of fluid (2D), weakly compressible or incompressible.',
     buildSystem=buildSystem,
-    configureScheme=configureWeaklyCompressible,
+    configureScheme=configureScheme,
     initialConditions=initialConditions,
     diagnostics=diagnostics,
     setupPlot=setupPlot,
     updatePlot=updatePlot,
     extraData=paramExtraData,
+    timestep=squarePatchTimestep,
     defaults=dict(
         WEAKLY_COMPRESSIBLE_DEFAULTS,
         caseName='03-rotatingSquarePatch',
@@ -128,6 +241,15 @@ rotatingSquarePatchCase = registerCase(Case(
         aspectRatio=1.0,
         rotation=0.0,
         omega=4.0,
+        # Seed t=0 pressure with the incompressible Poisson solution
+        # (Sun 2019 §3.3), `box` shape only (see `_seedPoissonPressure`).
+        # Was off by default; that left p to ring up from zero through the
+        # documented ~2 tω acoustic start-up transient, which at this case's
+        # `tLimit=1.0`/`omega=4.0` (tω=4) spans essentially the whole run and
+        # drives the observed early arm fragmentation. On by default now --
+        # `_seedPoissonPressure` no-ops (prints and leaves p=0) for any shape
+        # other than `box`, so non-box presets are unaffected.
+        poissonPressureInit=True,
         # Target Mach number: pick `dt`/`c0` so `Umax/c0 = mach` at every
         # resolution (see `_setupTimestep`). `None` falls back to the fixed
         # `targetDt`, whose Mach number climbs with `nx`. Sun et al. 2019 keep

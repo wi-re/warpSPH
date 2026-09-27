@@ -32,7 +32,7 @@ cannot remove (`DFSPH_IMPROVEMENT_PLAN.md` §1.1, §1.7). `rtol = 0` disables it
 See `DFSPH_IMPROVEMENT_PLAN.md` §1.7 and Part 15.
 """
 
-__all__ = ['evaluateResidual', 'sourceNorm']
+__all__ = ['evaluateResidual', 'sourceNorm', 'residualStats', 'ConvergenceCheckSchedule']
 
 from typing import Optional, Tuple
 
@@ -81,3 +81,78 @@ def evaluateResidual(residual: torch.Tensor, fluidMask: torch.Tensor,
         return float(both), float(both)
     both = torch.stack([stat, torch.mean(torch.abs(r))]).cpu()
     return float(both[0]), float(both[1])
+
+
+def residualStats(residual: torch.Tensor, fluidIndex: torch.Tensor,
+                  criterion: JacobiConvergenceCriterion, threshold: float,
+                  relative: bool) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    """`evaluateResidual` without the device->host read: ``(stat, rNorm)`` as
+    0-d device tensors (``rNorm`` is ``None`` when the relative test is off).
+    `fluidIndex` is ``fluidMask.nonzero()`` computed once per solve, so the
+    gather selects the same rows in the same order as ``residual[fluidMask]``
+    and the statistics are bitwise the ones `evaluateResidual` returns."""
+    r = residual.index_select(0, fluidIndex)
+    if criterion is JacobiConvergenceCriterion.flooredOneSided:
+        stat = torch.mean(torch.clamp(-r, min=-threshold))
+    elif criterion is JacobiConvergenceCriterion.oneSided:
+        stat = torch.mean(-r)
+    else:
+        stat = torch.mean(torch.abs(r))
+    if not relative:
+        return stat, None
+    if criterion is JacobiConvergenceCriterion.meanAbsolute:
+        return stat, stat
+    return stat, torch.mean(torch.abs(r))
+
+
+class ConvergenceCheckSchedule:
+    """At which iterations a relaxed-Jacobi loop reads its convergence test
+    back to the host (see `RelaxedJacobiSolverConfig.convergenceCheckSchedule`).
+
+    Each read is a device sync, and the loops used to read after every
+    iteration -- on `tgv` (divergenceFree, 16k particles) ~310 syncs per step.
+    'adaptive' assumes this solve needs about as many iterations `P` as the
+    previous one did to *first* meet the test, and checks at ceil(0.50 P),
+    ceil(0.75 P), ceil(0.85 P), then every other iteration. The previous count
+    is the first-converged iteration recovered from the device-side history,
+    not the (possibly overshot) iteration the loop stopped at, so overshoot
+    does not feed back into the next solve's schedule.
+
+    `key` names the solve (a step may run several differently-behaved solves);
+    the history lives on `store` (the scheme config) under
+    ``_jacobiIterationHistory``.
+    """
+
+    def __init__(self, store, key: str, mode: str, minIters: int, maxIters: int, verbose: bool = False):
+        self.store, self.key = store, key
+        self.minIters, self.maxIters = minIters, maxIters
+        history = getattr(store, '_jacobiIterationHistory', None)
+        if history is None:
+            history = {}
+            try:
+                setattr(store, '_jacobiIterationHistory', history)
+            except Exception:  # noqa: BLE001 -- a frozen/slotted config: no memory, check every iteration
+                pass
+        self.history = history
+        previous = history.get(key)
+        self.every = mode != 'adaptive' or verbose or previous is None
+        if not self.every:
+            import math
+            self.marks = sorted({max(1, math.ceil(f * previous)) for f in (0.50, 0.75, 0.85)})
+            self.dense = self.marks[-1]
+
+    def check(self, i: int) -> bool:
+        """Read the test back after iteration index ``i`` (``i + 1`` done)?"""
+        if i < self.minIters:
+            return False            # the loop may not stop here anyway
+        if self.every:
+            return True
+        n = i + 1
+        return n in self.marks or (n > self.dense and (n - self.dense) % 2 == 0)
+
+    def record(self, convergedFlags) -> None:
+        """Remember the first iteration (count) that met the test, from the
+        host copy of the per-iteration flags; `maxIters` if none did."""
+        first = next((k + 1 for k, c in enumerate(convergedFlags) if c and k >= self.minIters),
+                     self.maxIters)
+        self.history[self.key] = first

@@ -13,14 +13,14 @@ from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enfor
 from ..modules.compSPH.accel import computeCompSPHAccelWarp
 from ..modules.compSPH.dudt import computeCompSPHdudtWarp
 from ..modules.compSPH.balance import computeCompSPHBalanceTermWarp
+from ..modules.density import computeDensities
 from ..modules.eos import idealGasEOS
 from ..modules.momentum import computeMomentumConsistent
 from ..modules.shockCapturing import computeViscositySwitchTerms, updateViscositySwitch
 from ..enumTypes import EnergyScheme, ViscositySwitch
 
 from warpSPHCore import (
-    GradHState, OperationProperties, SupportScheme,
-    WarpOperation, buildVerletList, warpOperation,
+    GradHState, OperationProperties, SupportScheme, buildVerletList,
 )
 from ..systems.compSPH import CompSPHSystem, CompSPHState
 from ..configurations.compSPHConfig import CompSPHConfig
@@ -70,16 +70,10 @@ def compSPH_step(
         # adjacency.edgeOffsets = csr_neighrs.indptr.to(torch.int32)
         # # currentSystem.adjacency = adjacency
 
-    currentState.densities = warpOperation(
-        currentState,
-        OperationProperties(
-            kernel = config.kernel,
-            operation = WarpOperation.Density,
-            supportMode = SupportScheme.Gather, # cullen switch E.1 in the CRK paper uses gather for density estimation
-        ),
-        domain = config.domain,
-        adjacency = adjacency,
-    )
+    # gather (the default) -- cullen switch E.1 in the CRK paper uses gather
+    # for density estimation
+    currentState.densities = computeDensities(
+        currentState, config, schemeConfig, adjacency)
     # Computed here (rather than where it is otherwise used, further down)
     # because a state reconstructed with `divergence=None` (e.g. resumed from
     # a trajectory export, which doesn't persist divergence) needs it in the

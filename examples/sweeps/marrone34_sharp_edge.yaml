@@ -1,0 +1,32 @@
+# Marrone et al. 2011 Fig. 19 / Sec. 3.4 -- dam break against a sharp-edged
+# floor obstacle (45 deg edge, two re-entrant corners) with a concave
+# quarter-circle fillet (radius H) rounding the tank's downstream bottom
+# corner. A dense source of violent free-surface / solid-boundary interaction.
+#
+# delta+-SPH (sun2017DeltaSPH) with particle shifting -- the scheme validated
+# to run this case stably (DELTASPH_VALIDATION_PLAN.md Sec. 5.2.2; plain
+# delta-SPH is `params.shifting: false`). Geometry is fixed by Fig. 19 in units
+# of H = W/10, so W = 10 H and L = 8 H are required; H = 1, g = 9.81, so
+# t* = t sqrt(g/H) = t / 0.3193 s and H/dx = nx/8 (256 -> 32, Marrone's
+# coarsest resolution, "almost converged"; raise nx for finer samples).
+#
+#   warpsph-run dambreak --config examples/sweeps/marrone34_sharp_edge.yaml
+#   warpsph-run dambreak --config examples/sweeps/marrone34_sharp_edge.yaml --nx 512
+caseName: 3-dambreak-marrone34-sharpedge
+scheme: sun2017DeltaSPH
+nx: 256
+L: 8.0
+tLimit: 2.363            # t* ~ 7.4  (Marrone Fig. 20 runs to 7.32)
+store: true
+storeMode: trajectory
+exportInterval: 0.005
+params:
+  W: 10.0
+  fillRatio: 0.3         # water column 2.4 H tall of the 8 H tank
+  fluidWidth: 0.3        # water column 3 H wide of the 10 H tank
+  gravityMagnitude: 9.81
+  obstacleActive: true
+  obstacleType: marroneSharpEdge
+  referenceVelocity: 6.1076   # U_max = 1.95 sqrt(gH)
+  machTarget: 0.068905        # c0 = referenceVelocity / machTarget = 28.3 sqrt(gH)  (M ~ 0.085)
+  shifting: null              # keep sun2017DeltaSPH's PST (on, Sun 2017 Eq. 7 magnitude); false -> plain delta-SPH

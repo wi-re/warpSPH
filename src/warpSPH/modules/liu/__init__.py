@@ -3,6 +3,6 @@ field values (and their gradients) to query points that lack a full
 neighborhood, e.g. across a boundary.
 """
 
-from .interp import interpolateLiuLiu, liuExtend, liuMirror
+from .interp import interpolateLiuLiu, liuExtend, liuMirror, determinantThresholdFor
 
-__all__ = ['interpolateLiuLiu', 'liuExtend', 'liuMirror']
+__all__ = ['interpolateLiuLiu', 'liuExtend', 'liuMirror', 'determinantThresholdFor']

@@ -16,16 +16,21 @@ from .barecascoDetection import detectFreeSurfaceBarecasco
 from .maronneDetection import detectFreeSurfaceMaronne
 
 from .wrapper import detectFreeSurface
+from .isolated import detectIsolated, detectNoFluidNeighbours
+from .wp_nearestSurfaceNormal import computeNearestSurfaceNormalWarp
 
 __all__ = [
     'detectFreeSurfaceColorField',
     'detectFreeSurfaceColorFieldGradient',
     'computeColorField',
     'dilateSurface',
+    'detectIsolated',
+    'detectNoFluidNeighbours',
     'computeLambdaGrad',
     'computeNormalsLambdaGrad',
     'computeNormalsMaronne',
     'detectFreeSurfaceBarecasco',
     'detectFreeSurfaceMaronne',
     'detectFreeSurface',
+    'computeNearestSurfaceNormalWarp',
 ]

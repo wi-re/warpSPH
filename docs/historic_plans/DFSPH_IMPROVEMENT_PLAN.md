@@ -1,5 +1,12 @@
 # warpSPH — Incompressible (VD+PS / DFSPH) Improvement Plan
 
+**RETIRED 2026-09-19.** Moved to `docs/historic_plans/`, the existing
+convention for a finished plan (see `git log` on this file for how it got
+there) — the "Recommendation" below is the standing answer and nothing here
+is actively being worked. The one surviving open item (Morris viscosity, the
+ranked-queue's item 1) moved to `OPEN_PROBLEMS.md` item 7; the punch list
+version of this file's status, `DFSPH_TODO.md`, retired alongside it.
+
 Working document for the incompressible SPH path: `divergenceFree`
 (`schemes/divergenceFree.py`, renamed from `dfsph.py` in the pre-merge
 cleanup pass, 09-04), `dfsphReference` (troubleshooting artifact), `iisph`
@@ -73,20 +80,25 @@ session; don't assume they're still exactly as described without a re-run.)
 | `tgv`, `shearWave`, `staticBlob`, `randomFlowIncompressible` periodic, `kolmogorovIncompressible` (periodic / free space, no walls) | **pass**, clean. |
 | `randomFlowIncompressible --bounded` / `--obstacle` | **holds at every resolution** (Part 56, `_SHIFT_WALL_PRESSURE = 'shepard'`), but density sits ~7–8% high against the harness's strict 5% band — a real, resolution-independent property of the closure, not a bug (`DFSPH_FINDINGS.md` §1.18–§1.19). |
 | `hydrostaticColumn` | **holds** at its validated resolution (nx=64/128, 400 steps): `pressureSlopeRatio` ~1.0, `densityP05` ~0.94–1.0. A bounded undamped free-slip limit cycle remains in the top few rows (opt-in `XSPH_SCALE` decays it at a dissipation cost). Fails at smoke-profile nx=32/100 steps — that's a resolution artifact, not a real failure (Part 58). |
-| `dambreak`, `columnCollapse` | **hold** — walls do not leak (`nPenetrating` 0). `columnCollapse` develops post-impact particle pairing (0.3%→9% over 400 steps under `Wendland2`, its default) that is cosmetic, not structural (Part 58); substantially reduced (→6.3%) by `kernel='Wendland4'` at otherwise-identical settings, not yet promoted (Part 59) — open item below. |
+| `dambreak`, `columnCollapse` | **hold** — walls do not leak, up to the 400-step horizon these cases have been characterised at (`nPenetrating` 0; a 1200-step run finds one `nPenetrating` crossing under `Wendland2`, Part 60 — not re-characterised further). `columnCollapse` develops post-impact particle pairing (0.3%→9% over 400 steps under `Wendland2`, its default) that is cosmetic, not structural (Part 58); `kernel='Wendland4'` looked like a substantial reduction (→6.3%) at 400 steps but **does not hold at 3x the run length and does not transfer to `impact`** — decided against, closed (Part 59/60). |
 | `impact` | **pass** physically, but has a pre-existing pairing issue unrelated to any of this track's work. |
 | `squarePatch` | **runs** — stable rotation; corner density loss is a documented method limitation ([BK] §5), not a bug. |
 | `sloshingTank` | **holds** the full 7s SPHERIC TC10 run (nx=200); Sensor-1 in range. Fails at smoke-profile nx=60/150 steps — too short to build real pressure, not a real failure (Part 58). |
 
-**`band2018pb`, graded across the same table (Part 57/58):** holds
-`hydrostaticColumn`, `dambreak` (wall integrity), `randomFlowIncompressible`
+**`band2018pb`, graded across the same table (Part 57/58/62):** holds
+`hydrostaticColumn` (both nx=64/128 and, per Part 62, `hydrostaticColumn-64`'s
+full-resolution profile), `dambreak` (wall integrity), `randomFlowIncompressible`
 (all variants, tighter density than `divergenceFree`) — but with growing
 pairing/voids on the `randomFlow` variants, and `dambreak`'s free-surface
 voids/spray are worse than `divergenceFree`'s. `staticBlob` fails outright
-(Part 51 — no free-surface treatment in the method). `columnCollapse` at
-**smoke** profile shows *worse* pairing growth than `divergenceFree`
-(0.138 vs 0.033–0.066) — **not yet re-verified at full resolution**, open
-item below.
+(Part 51 — no free-surface treatment in the method). `columnCollapse` and
+`sloshingTank` both fail the harness's automated grade at full resolution too
+(Part 62 — not a resolution artifact), but on mechanisms already characterised
+elsewhere: `columnCollapse`'s pairing growth (0.026→0.084) converges to the
+same magnitude as `divergenceFree`'s own accepted, cosmetic post-impact
+clumping on this case (Part 58/59); `sloshingTank`'s voids (0.3%→3.0%, peak
+4.4%) are the same free-surface gap already seen on `dambreak`/`randomFlow`
+(Part 51 — no free-surface treatment in the method), not a new failure mode.
 
 ---
 
@@ -94,55 +106,46 @@ item below.
 
 Ordered roughly by how concrete/actionable each is, not by importance.
 
-1. **The shear-carrying Morris viscosity term.** `hydrostaticColumn`'s
-   `wallBC=noSlip` + `viscidNu` bounds the free-slip slosh but roughens the
-   surface, because the stock `viscidNu` term (`wp_viscosityDelta.py`) is
-   normal-projected — no tangential stress. Needs a real Morris et al. 1997
-   laminar term (full `v_ij` vector, no approach-only clamp) as a new
-   `DiffusionParameters`-wired option, gradcheck'd, with its own `deltaSPH`
-   regression pass. Well-specified, not started. (`DFSPH_FINDINGS.md` §1.14.)
-2. **`columnCollapse`'s post-impact particle pairing — partially triaged,
-   Part 59.** Wall integrity is exactly correct (`nPenetrating` stays 0
-   throughout); the clumping itself (`pairedFraction` 0.3%→9.0% after the
-   collapse impact, Part 58) is **substantially reduced by switching the
-   case's kernel from `'Wendland2'` to `'Wendland4'`** at otherwise-identical
-   settings (nx=64, 400 steps, `cflFactor 0.2`, `n_h = 4` unchanged): final
-   `pairedFraction` 0.099→0.063, peak 0.099→0.076, a real and widening trend
-   from the impact onward, not sampling noise — with density, KE, and wall
-   integrity all as good or better, and no measured cost (`DFSPH_FINDINGS.md`
-   §9 row 59). **Not (yet) proposed as the case default** — one case, one
-   resolution, one run each; open before that: does the gap keep widening or
-   plateau on a longer run; does it transfer to `impact` (the other pairing
-   case); and note it is not quite testing Dehnen & Aly 2012's own headline
-   claim (any Wendland kernel is pairing-*stable* at any `N_H`; the Wendland2-
-   vs-Wendland4 gap here is more likely a smoother-estimate-at-matched-`N_H`
-   effect than a stability difference — see the paper, now in `literature/`
-   as `dehnen2012`, promoted to the core set for exactly this question).
-3. **`band2018pb` on `hydrostaticColumn-64`/`columnCollapse`/`sloshingTank` at
-   full resolution — untested.** Part 58 re-verified `divergenceFree` on
-   these three (2 flipped to PASS, `columnCollapse` didn't) and `band2018pb`
-   on the `randomFlow`/`dambreak` trio, but never crossed the two: whether
-   `band2018pb`'s smoke-profile `columnCollapse` FAIL (pairing 0.138, worse
-   than `divergenceFree`'s) is a resolution artifact like `hydrostaticColumn`/
-   `sloshingTank` turned out to be, or a real regression, is unknown. One
-   `--scheme band2018pb --cases hydrostaticColumn-64 columnCollapse
-   sloshingTank --profile full --video` run would settle it.
-4. **The dam break's dissipation mechanism** (Ranked queue, formerly item 1).
+1. **MOVED to `OPEN_PROBLEMS.md` item 7 (2026-09-19 retirement).** The
+   shear-carrying Morris viscosity term — the one item from this ranked queue
+   that survived the track's retirement. Full mechanism, evidence, and next
+   step are there now, not duplicated here.
+2. **CLOSED (Part 62).** `band2018pb` on `hydrostaticColumn-64`/`columnCollapse`/
+   `sloshingTank` at full resolution. `hydrostaticColumn-64` flips to PASS,
+   same resolution-artifact story as `divergenceFree`'s. `columnCollapse` and
+   `sloshingTank` do **not** flip — both still fail the harness's automated
+   grade at full resolution — but neither is new information: `columnCollapse`'s
+   pairing growth (0.026→0.084) converges to the same magnitude as
+   `divergenceFree`'s own already-accepted, cosmetic post-impact clumping on
+   this case (Part 58/59), and `sloshingTank`'s failure (voids 0.3%→3.0%, peak
+   4.4%) is the same free-surface void gap already documented on
+   `dambreak`/`randomFlow` (Part 51 — no free-surface treatment in the
+   method), just showing up on a third case. See "Status" table above and
+   `DFSPH_FINDINGS.md` Part 62.
+3. **The dam break's dissipation mechanism** (Ranked queue, formerly item 1).
    Isolated to the incompressibility cycle (DF projection / Eq. 17 resample,
    net −8.5, 85% of the loss) but not explained: discretization error that
    vanishes as `nx` grows, or a structural cost of the constraint? Needs an
-   `nx` convergence study; independent of everything else, can run any time.
-5. **The mDBC hypothesis for `DensityEvolution.hybrid`.** `computeMdbcDensity`
-   runs on the carried (not re-summed) density under `hybrid`, which may be
-   why `hybrid` dies at 286 steps at a wall but not periodically. Cheap test:
-   re-sum for the extrapolation only.
-6. **`relaxationFactor = 0.3`'s stability margin is ~4% on a bounded state**,
-   not the ~15% its docstring quotes from the TGV family. Cheapest
-   robustness win available, independent of everything else.
-   `probe_boundaryOperatorTerms.py --mode spectrum`.
-7. **`shearWave` vs [C]'s Fig. 3/4** — blocked on literature access
+   `nx` convergence study — **blocked (Part 64): the probe this figure came
+   from (`probe_dambreakEnergyBudget.py`) targets `DIVERGENCE_SOLVER='vdps'`,
+   which is no longer the default (`'omni'` is) — it crashes (`KeyError:
+   'a_DF'`) against current code. Needs its capture points re-scoped to the
+   `'omni'` path's own force decomposition before a convergence sweep is
+   worth running**, not the "can run any time" it looked like.
+4. **CLOSED as moot (Part 63).** The mDBC hypothesis for `DensityEvolution.hybrid`
+   — `computeMdbcDensity` runs on the carried (not re-summed) density under
+   `hybrid`, possibly why it dies at 286 steps at a wall but not periodically.
+   Turns out untestable against current code: `DensityEvolution` is dead on the
+   production `divergenceFree`/`omniIncompressible` path (both call sites that
+   used to branch on it are now commented out, since the 09-02 `band2018pb`
+   rewrite, `71a8ae7`) and no other scheme reads it either — confirmed by code
+   reading and by `probe_densityEvolution.py` returning identical results
+   across all three settings. Reviving `DensityEvolution` needs re-wiring into
+   the current step function first, which is a design decision, not a bug fix.
+   `DFSPH_FINDINGS.md` Part 63.
+5. **`shearWave` vs [C]'s Fig. 3/4** — blocked on literature access
    (`literature/MANIFEST.md`), not actionable right now.
-8. **The `'mirror'` wall-pressure mode's rough edges** (Part 56, low
+6. **The `'mirror'` wall-pressure mode's rough edges** (Part 56, low
    priority since `'shepard'` is the shipped default and neither is needed):
    (a) `'mirror'` + `_CLOSED_DOMAIN_GAUGE='always'` destabilises, unexplained;
    (b) its Adami body-force correction term is unimplemented (needs a vector
@@ -223,12 +226,15 @@ to main cleanly.
   list below already flagged as regressed (a real ValueError this solver is
   supposed to raise, silently dropped by the rewrite) — restored it, which
   fixes `test_incompressibleKrylov.py::test_optimalStepRejectedForConstantDensitySolver`
-  (was failing consistently, now passes). **Left alone, on purpose:** the
-  loop hardcodes `omega = 0.3`, silently shadowing the
-  `relaxationFactor`-configured `omega` computed above it — clearly worth a
-  look, but changing which relaxation factor a numerical solve actually uses
-  is a behaviour change needing its own validation, not something to fold
-  into a dead-code cleanup.
+  (was failing consistently, now passes). **Left alone, on purpose, at the
+  time — since fixed (Part 61, 2026-09-19):** the loop hardcoded `omega =
+  0.3`, silently shadowing the `relaxationFactor`-configured `omega`
+  computed above it. Fixed once the validation this note asked for actually
+  happened: bit-identical at the unchanged default (0.3), full suite green.
+  `relaxationFactor` itself stays `0.3` — lowering it to buy back stability
+  margin was tried and found to be a real trade (tighter density, worse peak
+  velocity), not adopted. See `DFSPH_FINDINGS.md` Part 61 and this file's
+  now-closed "relaxationFactor" open item.
 - **`wp_viscosityDelta.py`'s docstring fixed** — no longer claims a
   "Morris-style Laplacian" for the `inviscid=False` branch; states plainly
   that the same approach-only clamp that stabilises the artificial-viscosity
@@ -379,6 +385,31 @@ just don't let anyone `git add -f` into them.
 - **Parts 35–38's `wp_dfsph_factor.py` `ki == 0` change** touches a
   `@wp.kernel` and was gradcheck'd at the time (Part 37) but not re-verified
   since.
+- **The `ghostOffsets` sign fix (`BOUNDARY_DENSITY_PLAN.md` §9, 2026-09-16)
+  does not touch `omniIncompressible`'s `'mls'` wall-pressure regression.**
+  `WCSPH_DEFAULT_CLOSEOUT_PLAN.md` item G re-checked whether that WCSPH-side
+  fix (a `RigidBody` init/step hook was silently overwriting a sign
+  convention at every ghost particle's own row) happened to also fix the
+  `WALL_PRESSURE_MODE='mls'` divergence this file documents above
+  (`omniIncompressible.py`'s own comment: "`'mls'` diverges
+  `randomFlowIncompressible --bounded` on step 1"). **It does not** — re-ran
+  `randomFlowIncompressibleCase(nx=96, bounded=True, scheme='omniIncompressible')`
+  with `WARPSPH_WALL_PRESSURE_MODE=mls` post-fix: `kineticEnergy` goes
+  0.32 -> 4.3e34 and `maxVelocity` -> 4.0e17 by step 40 (`result.diverged`
+  itself reads `False`, since these are large-but-finite float32 values, not
+  NaN/Inf — a report/scoring blind spot worth remembering when grading a run
+  by that flag alone). Expected, not a surprise: this scheme's own comment
+  already attributes the failure to `'mls'`'s linear term amplifying real
+  near-wall pressure structure in a sheared flow and pumping energy into the
+  Jacobi iteration -- an amplification/numerical-stability problem in the
+  iterative solver, not a wrong-sign value, so a sign-convention fix was
+  never mechanistically going to reach it. (A first pass mistakenly tested
+  `randomFlowIncompressibleCase`'s own default scheme, `divergenceFree`,
+  under `mls` instead -- that one DOES run clean for 400 steps, but it goes
+  through a structurally different closure, `modules/incompressible/
+  incompressible.py`'s `_SHIFT_WALL_PRESSURE`, not `omniIncompressible.py`'s
+  Jacobi-iterate closure -- a different code path than the one this
+  regression note is about, not evidence either way for it.)
 
 ---
 

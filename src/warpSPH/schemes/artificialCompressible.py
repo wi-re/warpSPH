@@ -1,0 +1,770 @@
+"""The artificial-compressibility SPH step (De Courcy et al. 2024; see
+`ACSPH_PLAN.md` for the full equation inventory and this file's roadmap).
+
+Each real step runs a **pseudo-time loop to steady state**, and the integrator
+outside it has nothing left to do. Rather than teach `warpSPHIntegrators` a
+`dualTime` scheme -- coupling a general library to one solver -- the step
+returns an **exact delta**:
+
+    dxdt = (x^{n+1} - x^n)/dt,  dvdt = (v^{n+1} - v^n)/dt,  dpdt = (p^{n+1} - p^n)/dt
+
+Forward Euler on an exact delta is the identity, so the runner reproduces the
+converged state byte for byte with no framework change. That contract only
+holds for a **one-stage, one-evaluation** integrator: under RK2 the solve would
+run twice per step and the results would be *blended*, which is wrong and not
+visibly wrong. `validateIntegrationScheme` therefore refuses anything else,
+loudly, at step entry -- `cases/dambreak.py` documents the same class of trap
+for `divergenceFree`/`semiImplicitEuler` and notes that nothing enforces it;
+here it is enforced.
+
+The loop (Eqs. 38-48)
+---------------------
+    for m in 0..maxPseudoIterations:
+        u0 = u                                  # frozen for the BDF source
+        D^p = pressureSmoothing(u0)             # frozen across RK stages
+        for s in 1..rkStages:
+            r  = spatial residual at u^{s-1}    # Eqs. 23, 25, 26
+            r* = (r - I_c (alpha_t u0 + beta_t u^n + gamma_t u^{n-1})) / alpha_PI
+            u^s = u0 + dtau sum_l a_{s,l} r*_l
+        u = u0 + dtau sum_l b_l r*_l
+        if eps_v(tilde v) < target: break
+    roll the BDF history
+
+`I_c = diag{0, 1, 1}` -- the continuity equation has no real-time derivative,
+which is exactly what makes `r* -> 0` enforce `div v = 0` *at* time level n+1.
+
+Three choices worth naming, all from `ACSPH_PLAN.md` Part 5:
+
+- **The RK sweep is the general explicit Butcher form**, taken from
+  `warpSPHIntegrators.getButcherTableau` ('midpoint' / 'SSPRK3' / 'RK4' are
+  Fig. 1 of the paper verbatim). Eq. (40) as printed is the Jameson low-storage
+  form, which can only represent a tableau whose `A` is sub-diagonal and whose
+  `b` is its last stage row -- true of the RK2 midpoint tableau, false of both
+  SSPRK3 and RK4 as Fig. 1 prints them. The general form reproduces Fig. 1
+  exactly and degenerates to Eq. (40) for RK2, which is the recommended
+  operating point anyway (Sec. 4.3: higher order buys no accuracy here, the
+  BDF2 sets it). Plan Sec. 5.2; **ask the authors which the CUDA code does.**
+- **`k2 D^p`, not `k2 h D^p`.** Eq. (30) prints the extra `h`; Eqs. (23), (51)
+  and (54) do not, and dimensional analysis says they are right. Plan Sec. 5.3.
+- **The diffusion is frozen across RK stages but re-evaluated every dual-time
+  iteration**, which is what the paper says ("the diffusive terms are evaluated
+  at each dual-time iteration and cannot be fixed without loss of stability").
+
+Still to land (see `ACSPH_PLAN.md` Part 8)
+------------------------------------------
+step 6 the Eq. (46) timestep and its growth clamp; step 7 the Michel et al.
+shifting and Eqs. (58)-(59); step 8 AC-4 and AC-JST; step 10 the `tilde v`
+advective corrections (Eqs. 27-31), internal shifting, `k3`. Each is gated by
+its config field and raises rather than silently no-opping.
+"""
+
+import copy
+from typing import Any, Optional
+
+import torch
+from ..modules.incompressible.convergence import ConvergenceCheckSchedule
+from warpSPHCore.profiling import record_function
+from warpSPHCore import (GradientScheme, OperationDirection, OperationProperties,
+                         SupportScheme, WarpOperation, buildVerletList,
+                         sphKernel_xi, warpOperation)
+from warpSPHIntegrators.butcher import getButcherTableau
+from warpSPHIntegrators.integration import IntegrationSchemeType
+
+from ..enumTypes import PressureForceScheme
+from ..configurations import ArtificialCompressibleSPHConfig, SimulationConfig
+from ..modules.artificialCompressible import computePressureSmoothing
+from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
+from ..modules.deltaSPH import computeVelocityDiffusion
+from ..modules.gravity import computeGravity
+from ..modules.incompressible.wallPressure import wallPressureExtrapolation
+from ..modules.mdbc import computeBoundaryVelocities, computeMdbcNoPenShift
+from ..modules.pressure import computePressureForceSurfaceAware
+from ..modules.surfaceDetection import detectFreeSurface, detectIsolated
+from ..systems.artificialCompressible import (ArtificialCompressibleSystem,
+                                              ArtificialCompressibleSystemUpdate)
+
+__all__ = ['artificialCompressible_step', 'validateIntegrationScheme',
+           'acParameters', 'convergenceMetric', 'convergenceMetricDevice', 'PHYSICS_IMPLEMENTED']
+
+PHYSICS_IMPLEMENTED = True
+
+#: The only integrators whose action on an exact delta is the identity.
+_EXACT_DELTA_INTEGRATORS = {IntegrationSchemeType.forwardEuler,
+                            IntegrationSchemeType.explicitEuler}
+
+#: `rkStages` -> the tableau name in `warpSPHIntegrators.getButcherTableau`.
+#: These three ARE Fig. 1 of the paper: explicit midpoint, SSPRK3 (Shu-Osher),
+#: classical RK4.
+_TABLEAUS = {2: 'midpoint', 3: 'SSPRK3', 4: 'RK4'}
+
+#: `CFL_tau` the paper pairs with each stage count (Sec. 3.1.3). Not enforced --
+#: `acParams.cflTau` is the knob -- but reported by `acParameters` so a
+#: mismatch is visible rather than silent.
+RECOMMENDED_CFL_TAU = {2: 0.5, 3: 1.0, 4: 1.5}
+
+
+def validateIntegrationScheme(config: SimulationConfig) -> None:
+    """Refuse any integrator that would evaluate the step more than once, or
+    scale its result. See this module's docstring for why.
+
+    Raised, not warned: a multi-stage integrator here does not fail visibly --
+    it runs the whole dual-time solve twice and blends two converged states,
+    producing a plausible-looking but wrong answer.
+    """
+    scheme = getattr(config, 'integrationScheme', None)
+    if scheme in _EXACT_DELTA_INTEGRATORS:
+        return
+    name = getattr(scheme, 'name', scheme)
+    raise ValueError(
+        f"artificialCompressible requires integrationScheme=forwardEuler, got "
+        f"{name!r}. The step returns an exact per-step delta (dx/dt = "
+        f"(x^{{n+1}} - x^n)/dt), which only a single-evaluation integrator "
+        f"applies unchanged; a multi-stage one would run the dual-time solve "
+        f"once per stage and blend the results. Set "
+        f"`config.integrationScheme = IntegrationSchemeType.forwardEuler` "
+        f"(CaseSpec: `--integrationScheme forwardEuler`).")
+
+
+def acParameters(currentState, config, schemeConfig, dt: float):
+    """`(dtau, beta, k1, k2, nu)` for this step, Eq. (24).
+
+        beta = CFL_tau h / dtau,   k1 = beta^2,   k2 = k2Factor h beta
+
+    `beta` is the pseudo-time wave speed. Finite volumes prescribe it and let
+    `dtau` vary locally; the paper inverts that -- `dtau = dt / dtOverDtau` is
+    spatially constant (so particle displacements stay smooth) and `beta` is
+    derived, per particle, from each particle's own `h`.
+
+    `h` here is the paper's *smoothing length*, `supports / xi` -- this repo
+    stores the kernel's support radius, and `modules/deltaSPH/densityDiffusion.py`
+    applies the same `/xi` to the `delta h c_s` prefactor `k2` is modelled on.
+
+    `nu` comes from `acParams.nu` unless `referenceSoundSpeedForViscosity` is
+    set, in which case it is the paper's `nu = alpha_nu h c0 / K` -- see the
+    config's docstring on why ACSPH still needs a reference `c0` for this and
+    for nothing else.
+    """
+    acParams = schemeConfig.acParams
+    xi = sphKernel_xi(config.kernel.value, config.dim)
+    h = currentState.supports / xi
+
+    dtau = dt / acParams.dtOverDtau
+    beta = acParams.cflTau * h / dtau
+    k1 = beta * beta
+    k2 = acParams.k2Factor * h * beta
+
+    K = 2 * (config.dim + 2)
+    if acParams.referenceSoundSpeedForViscosity is not None:
+        nu = acParams.alphaNu * h * acParams.referenceSoundSpeedForViscosity / K
+    else:
+        nu = torch.full_like(h, float(acParams.nu))
+    return dtau, beta, k1, k2, nu
+
+
+def convergenceMetric(tildeV: torch.Tensor, velocities: torch.Tensor,
+                      fluid: torch.Tensor, schemeConfig) -> float:
+    """`eps_v = log10( |tilde v|_2 / (N U_eps) )`, Eqs. (47)-(48), with
+
+        U_eps = max( min(|v|_max, U_char), eps_s )
+
+    Note the `1/N`, **not** `1/sqrt(N)`: this is not an RMS. A fixed `eps_v`
+    target is therefore a *stricter per-particle* tolerance at higher
+    resolution, by `-0.5 log10 N` -- about 0.6 of a decade across the paper's
+    own `L/dx = 200 -> 800` sweep. Reproduced verbatim because it is what their
+    numbers mean; recorded here because it is a real property of the metric,
+    not of the scheme (`ACSPH_PLAN.md` Sec. 1.6).
+    """
+    n = int(fluid.sum())
+    if n == 0:
+        return float('-inf')
+    acParams = schemeConfig.acParams
+    vMax = float(velocities[fluid].norm(dim=-1).max()) if n else 0.0
+    uChar = vMax if acParams.uChar is None else min(vMax, float(acParams.uChar))
+    uEps = max(uChar, float(acParams.epsilonS))
+    norm = float(tildeV[fluid].pow(2).sum().sqrt())
+    if norm <= 0.0:
+        return float('-inf')
+    return float(torch.log10(torch.tensor(norm / (n * uEps))))
+
+
+def convergenceMetricDevice(tildeV: torch.Tensor, velocities: torch.Tensor,
+                            fluidIndex: torch.Tensor, n: int, schemeConfig) -> torch.Tensor:
+    """`convergenceMetric` as a 0-d device tensor -- no host sync, so the
+    dual-time loop reads it only at its check schedule's checkpoints.
+
+    `fluidIndex` / `n` are the fluid rows and their count, computed once per
+    step. Bitwise the same number: the host version does its arithmetic in
+    Python doubles on float32-exact values and rounds the ratio to float32
+    before the `log10`; this does exactly that on the device."""
+    if n == 0:
+        return torch.full((), float('-inf'), device=tildeV.device, dtype=tildeV.dtype)
+    acParams = schemeConfig.acParams
+    vMax = velocities.index_select(0, fluidIndex).norm(dim=-1).max().double()
+    uChar = vMax if acParams.uChar is None else torch.clamp(vMax, max=float(acParams.uChar))
+    uEps = torch.clamp(uChar, min=float(acParams.epsilonS))
+    norm = tildeV.index_select(0, fluidIndex).pow(2).sum().sqrt().double()
+    ratio = (norm / (n * uEps)).to(tildeV.dtype)
+    # the host takes log10 on the CPU; the correctly rounded value (log10 in
+    # float64 of the float32 ratio, rounded once) is what that returns --
+    # CUDA's single-precision log10f can be one ulp off
+    eps = torch.log10(ratio.double()).to(tildeV.dtype)
+    return torch.where(norm <= 0.0, torch.full_like(eps, float('-inf')), eps)
+
+
+def _workingState(state, positions, velocities, pressures):
+    """A shallow view of `state` with the three evolving fields replaced. The
+    SPH operators read attributes off whatever they are handed, so this is all
+    an intermediate RK stage needs -- and it keeps the real state untouched
+    until the pseudo-time loop has converged."""
+    view = copy.copy(state)
+    view.positions = positions
+    view.velocities = velocities
+    view.pressures = pressures
+    return view
+
+
+def wallPressures(view, config, adjacency, bodyForce, clampNonNeg=False):
+    """`view.pressures` with the `kind == 1` rows filled by Eq. (61)/Adami
+    et al. 2012 Eq. 27, the Shepard interpolation of the fluid pressure plus the
+    hydrostatic correction `(g - a_w) . sum_f V_f rho_f (r_w - r_f) W_wf`.
+
+    **Not optional for this scheme.** Without the correction the wall reads the
+    depth-*average* of its fluid neighbours -- short by `rho0 g <y_f - y_w>`,
+    a fraction of `h` -- and a hydrostatic column cannot balance against it.
+    Without the extrapolation at all the wall reads `p = 0` (the non-fluid rows
+    are masked every step) and the column simply falls out of the box.
+
+    Recomputed at every residual evaluation, because it is a function of the
+    *current* fluid pressure: exactly the Robin closure
+    `modules/incompressible/wallPressure.py` was built for, applied per RK
+    stage here rather than per Jacobi iterate.
+
+    `clampNonNeg=False` by default, unlike the DFSPH call sites: ACSPH's
+    pressure is a solved field that legitimately goes negative, and clamping
+    the wall to `>= 0` would make it a one-sided constraint.
+    """
+    fluid = view.kinds == 0
+    return wallPressureExtrapolation(view, config, adjacency, view.pressures,
+                                     fluid, mode='shepard',
+                                     clampNonNeg=clampNonNeg, bodyForce=bodyForce)
+
+
+def _unilateralWallForce(view, config, schemeConfig, adjacency):
+    """Pressure force with the fluid-solid pair terms made unilateral
+    (`cavitationProjection = 'wall'`, Batty et al. 2007 Eq. 15 applied to the
+    solid contact only; its kinematic partner is `_unilateralWallDivergence`): `-sum_wall V_j (p_i^+ + p_w^+) gradW` in place of
+    `-sum_wall V_j (p_i + p_w) gradW`, every other term untouched -- the
+    pressure solve, the divergence, and the fluid-fluid pairs, whose tension is
+    what lets a droplet coalesce (MDBC_CONTACT_LINE_PLAN.md §9.2: projecting
+    p >= 0 on fluid rows made every droplet-surface contact elastic). The wall
+    can push but not pull; omniSPH's boundary force does the same
+    (`max(0, p_fluid)`, `max(0, p_boundary)`, fluidMechanics.cpp:464-465).
+
+    Exact by linearity of Eq. (25)'s `(p_i + p_j)` form, with `A(q)` the force
+    operator on a pressure field `q`:
+      F' = A(p) + A((p^+ - p) 1_wall) + (p_i^+ - p_i) A(1_wall)
+    where `A(1_wall)` at a fluid row is the coefficient of its own `p_i` over
+    its wall pairs."""
+    if schemeConfig.pressureForceTerm != PressureForceScheme.nonConservative:
+        raise ValueError("cavitationProjection='wall' needs the linear "
+                         "pressureForceTerm=nonConservative ((p_i + p_j), Eq. 25)")
+    p = view.pressures
+    wall = view.kinds == 1
+
+    def A(q):
+        qView = _workingState(view, view.positions, view.velocities, q)
+        return computePressureForceSurfaceAware(qView, config, schemeConfig, adjacency)
+
+    zero = torch.zeros_like(p)
+    dp = p.clamp_min(0.0) - p
+    return (A(p) + A(torch.where(wall, dp, zero))
+            + dp.unsqueeze(-1) * A(wall.to(p.dtype)))
+
+
+def _unilateralWallDivergence(view, config, adjacency, divV):
+    """`div v` with the fluid-solid pairs made unilateral: the kinematic half
+    of Batty et al. 2007's complementarity `0 <= p ⊥ (u - v_s).n >= 0`, the
+    partner of `_unilateralWallForce`. With only the force unilateral, a row
+    separating from a wall kept the positive divergence of its mirrored wall
+    pairs, which the wall could no longer act on, and the pseudo-time drove
+    its pressure without bound (Marrone 3.1 nx=24: -12 -> -1.8e6 in 0.02 s,
+    MDBC_CONTACT_LINE_PLAN.md §9.3).
+
+    The wall pairs' share of a row's divergence (Difference form,
+    `sum_j V_j (v_j - v_i).gradW`) is split out by linearity,
+      divWall_i = D(v 1_wall)_i - v_i . G_i,   G_i = sum_wall V_j gradW_ij,
+    and kept only while it compresses (`min(divWall, 0)`): a wall can resist
+    approach, never separation. Clamped per row, not per pair -- exact for a
+    row against one wall, an approximation in a corner with one wall
+    approaching and another receding."""
+    wall = view.kinds == 1
+
+    def op(operation, values):
+        return warpOperation(
+            view,
+            OperationProperties(kernel=config.kernel, operation=operation,
+                                supportMode=SupportScheme.SuperSymmetric,
+                                operationMode=OperationDirection.AllToAll,
+                                gradientMode=GradientScheme.Difference),
+            queryValues=values, domain=config.domain, adjacency=adjacency)
+
+    vWall = torch.where(wall.unsqueeze(-1), view.velocities, torch.zeros_like(view.velocities))
+    G = op(WarpOperation.Gradient, wall.to(view.velocities.dtype))
+    divWall = op(WarpOperation.Divergence, vWall) - (view.velocities * G).sum(-1)
+    return divV - divWall + divWall.clamp_max(0.0)
+
+
+def _wallAdjacent(view, config, adjacency):
+    """Boolean per row: True when at least one wall (`kind == 1`) row lies in
+    its kernel support -- the SPH analogue of Batty et al. 2007's "pressure
+    unknowns on solid boundaries" (`cavitationProjection = 'contact'`).
+
+    Exact, no threshold, the `detectIsolated` construction restricted to the
+    wall pairs: `sum_wall V_j (x_j - x_i) . gradW_ij` is a sum of same-signed
+    terms, one per wall neighbour, and exactly 0.0 with none. Split out by
+    linearity as `D(x 1_wall)_i - x_i . G_i` (`_unilateralWallDivergence`)."""
+    wall = view.kinds == 1
+
+    def op(operation, values):
+        return warpOperation(
+            view,
+            OperationProperties(kernel=config.kernel, operation=operation,
+                                supportMode=SupportScheme.SuperSymmetric,
+                                operationMode=OperationDirection.AllToAll,
+                                gradientMode=GradientScheme.Difference),
+            queryValues=values, domain=config.domain, adjacency=adjacency)
+
+    x = view.positions
+    xWall = torch.where(wall.unsqueeze(-1), x, torch.zeros_like(x))
+    G = op(WarpOperation.Gradient, wall.to(x.dtype))
+    trace = op(WarpOperation.Divergence, xWall) - (x * G).sum(-1)
+    return trace != 0.0
+
+
+def _spatialResidual(view, config, schemeConfig, adjacency, k1, k2, diffusion,
+                     bodyForce, nu, unilateralWall=False):
+    """`(r_p, r_v)`: the right-hand sides of Eqs. (23) and (25) at `view`.
+
+    Eq. (23):  Dp/Dtau = -k1 rho sum_j (v_j - v_i).gradW V_j + k2 D^p
+    Eq. (25):  Dv/Dtau + Dv/Dt = -(1/rho) sum_j (p_i+p_j) gradW V_j
+                                 + nu K sum_j (v_ij.x_ij)/|x_ij|^2 gradW V_j + f
+
+    `diffusion` is `D^p`, passed in rather than computed here: it is frozen
+    across the RK stages (Antuono/Jameson) and only re-evaluated once per
+    dual-time iteration. `view.pressures` is expected to already carry the
+    extrapolated wall values (`wallPressures`).
+    """
+    rho = view.densities
+
+    divV = warpOperation(
+        view,
+        OperationProperties(kernel=config.kernel, operation=WarpOperation.Divergence,
+                            supportMode=SupportScheme.SuperSymmetric,
+                            operationMode=OperationDirection.AllToAll,
+                            gradientMode=GradientScheme.Difference),
+        queryValues=view.velocities, domain=config.domain, adjacency=adjacency)
+    if unilateralWall:
+        divV = _unilateralWallDivergence(view, config, adjacency, divV)
+    rP = -k1 * rho * divV + k2 * diffusion
+
+    # `computePressureSurfaceAwareWarp` returns `-sum_j V_j p_ij gradW`, which
+    # is `rho * dv/dt`; Eq. (25) carries the explicit `1/rho_i`. delta-SPH
+    # omits that division because it runs at `restDensity = 1`, where it is a
+    # no-op; ACSPH does not assume that.
+    if unilateralWall:
+        rV = _unilateralWallForce(view, config, schemeConfig, adjacency) / rho.unsqueeze(-1)
+    else:
+        rV = computePressureForceSurfaceAware(view, config, schemeConfig, adjacency) / rho.unsqueeze(-1)
+
+    rV = rV + _viscosity(view, config, adjacency, nu)
+
+    return rP, rV + bodyForce
+
+
+class _ViscosityShim:
+    """Adapter presenting `computeVelocityDiffusion`'s expected
+    `schemeConfig.diffusionParams` / `.fluid` surface over ACSPH's config.
+    ACSPH has no `diffusionParams` block -- its viscosity is one number derived
+    from Eq. (25) -- so rather than bolt a delta-SPH block onto its config just
+    to satisfy an accessor, the accessor is satisfied here."""
+
+    class _Params:
+        def __init__(self, nu):
+            self.inviscid = False
+            self.inviscidAlpha = 0.0
+            self.viscidNu = nu
+
+    class _Fluid:
+        fixedSoundSpeed = 0.0
+
+    def __init__(self, nu):
+        self.diffusionParams = self._Params(nu)
+        self.fluid = self._Fluid()
+
+
+def _viscosity(view, config, adjacency, nu):
+    """Eq. (25)'s viscous term,
+    `nu K sum_j (v_ij . x_ij)/|x_ij|^2 gradW_ij V_j` with `K = 2(dim+2)`.
+
+    Two adaptations of `computeVelocityDiffusion`, both exact rather than
+    approximate:
+
+    - it divides by `mean(rho_i, rho_j)` where Eq. (25) does not. Density is
+      invariant here, so passing `nu * rho0` compensates exactly.
+    - `approachOnly=False` lifts the artificial-viscosity clamp, which is what
+      makes this the Monaghan-Gingold velocity Laplacian rather than a
+      one-sided half of it (see `wp_viscosityDelta.py`'s docstring).
+
+    `nu` is per-particle where the kernel takes a scalar; the kernel's `nu`
+    enters linearly, so scaling the output by `nu_i / nu_mean` afterwards is
+    exact for the `nu_i` factor. (`nu_j` does not appear -- Eq. 25 has a single
+    `nu`.) The rescale is skipped entirely when `nu` is uniform, which it is
+    unless it was derived from a varying `h`."""
+    rho0, nuScalar, nuVaries = _viscosityScalars(view.densities, nu)
+    out = computeVelocityDiffusion(view, config, _ViscosityShim(nuScalar * rho0),
+                                   adjacency, approachOnly=False)
+    if nuVaries:
+        out = out * (nu / nuScalar).unsqueeze(-1)
+    return out
+
+
+_VISCOSITY_SCALARS: dict = {}
+
+
+def _viscosityScalars(densities, nu):
+    """`(rho0, mean nu, nu non-uniform)` -- three host reads that used to run
+    on every RK stage of every pseudo-iteration (~1200 syncs per real step at
+    200 pseudo-iterations). `densities` and `nu` are the same tensor objects
+    for a whole real step (`_workingState` only swaps x/v/p), so the values are
+    cached against those objects -- held, so an id can never be recycled."""
+    c = _VISCOSITY_SCALARS
+    if c.get('densities') is densities and c.get('nu') is nu:
+        return c['values']
+    rho0 = float(densities[0]) if densities.numel() else 1.0
+    if isinstance(nu, torch.Tensor):
+        values = (rho0, float(nu.mean()), float(nu.std()) > 0.0)
+    else:
+        values = (rho0, float(nu), False)
+    c.update(densities=densities, nu=nu, values=values)
+    return values
+
+
+def artificialCompressible_step(
+    system: ArtificialCompressibleSystem,
+    dt: float,
+    config: SimulationConfig,
+    schemeConfig: ArtificialCompressibleSPHConfig,
+    verbose: bool = False,
+):
+    validateIntegrationScheme(config)
+    acParams = schemeConfig.acParams
+
+    if acParams.useTildeVAdvection:
+        raise NotImplementedError(
+            "acParams.useTildeVAdvection (Eqs. 27-31) is not implemented -- the "
+            "paper's own conclusion is to leave it off (Sec. 4.2). "
+            "ACSPH_PLAN.md step 10.")
+    if acParams.shiftInsidePseudoLoop:
+        raise NotImplementedError(
+            "acParams.shiftInsidePseudoLoop (Eq. 60) is not implemented; Sec. 4.2 "
+            "tested it and chose external shifting. ACSPH_PLAN.md step 10.")
+    if acParams.k3 != 0.0:
+        raise NotImplementedError(
+            "acParams.k3 (Eqs. 9/22) is not implemented -- the paper zeroes it. "
+            "ACSPH_PLAN.md step 10.")
+    if acParams.rkStages not in _TABLEAUS:
+        raise ValueError(f"acParams.rkStages must be one of {sorted(_TABLEAUS)}, "
+                         f"got {acParams.rkStages}")
+
+    currentSystem = system
+    currentState = currentSystem.state
+    adjacency = currentSystem.adjacency
+
+    # --- per-real-step setup ------------------------------------------------
+    with record_function("[warpSPH] - [acsph - 01] - compute adjacency"):
+        adjacency = buildVerletList(
+            currentState, config.domain, verletScale=config.verletScale,
+            supportMode=SupportScheme.SuperSymmetric,
+            priorNeighborhood=adjacency, verbose=False)
+        currentSystem.adjacency = adjacency
+
+    with record_function("[warpSPH] - [acsph - 02] - boundary velocities"):
+        currentState.velocities = computeBoundaryVelocities(
+            currentState, config, schemeConfig, adjacency)
+
+    with record_function("[warpSPH] - [acsph - 03] - enforce BCs"):
+        enforceDirichlet(currentSystem, currentSystem.t, config.dt, config, schemeConfig)
+
+    with record_function("[warpSPH] - [acsph - 04] - surface detection"):
+        # Frozen for the whole real step. The paper re-evaluates the *diffusion*
+        # every dual-time iteration but says nothing about re-detecting the
+        # surface; the surface set is a geometric property of a configuration
+        # that moves by `tilde v -> 0` during the loop, and re-running Marrone
+        # detection per iteration would dominate the cost.
+        fs, fsm, n, renormalizationState, lMin = detectFreeSurface(
+            currentState, config, schemeConfig, schemeConfig.surfaceDetectionConfig,
+            adjacency, returnNormals=True)
+        currentState.surfaceIndicators = (fsm > 0.5).to(torch.int32)
+        currentState.surfaceNormals = n
+        currentState.surfaceLambdas = lMin
+
+    dtau, beta, k1, k2, nu = acParameters(currentState, config, schemeConfig, dt)
+    alphaT, betaT, gammaT, bdfOrder = currentSystem.bdfCoefficients(dt)
+    tableau = getButcherTableau(_TABLEAUS[acParams.rkStages])
+    fluid = currentState.kinds == 0
+    fluidRows = fluid.unsqueeze(-1)
+
+    x0 = currentState.positions
+    v0 = currentState.velocities
+    p0 = currentState.pressures
+    xPrev = currentSystem.positionsPrev if currentSystem.positionsPrev is not None else x0
+    vPrev = currentSystem.velocitiesPrev if currentSystem.velocitiesPrev is not None else v0
+    xPrev2 = currentSystem.positionsPrev2 if currentSystem.positionsPrev2 is not None else xPrev
+    vPrev2 = currentSystem.velocitiesPrev2 if currentSystem.velocitiesPrev2 is not None else vPrev
+
+    with record_function("[warpSPH] - [acsph - 05] - forcing"):
+        # mDBC no-penetration, as an acceleration (`shift / dt`), exactly as
+        # `deltaSPH_step` applies it. **Off by default, and not the particle
+        # shift**: it is a wall safeguard. Eq. (62) enforces no-penetration
+        # through the *velocity mirror* alone, which `computeBoundaryVelocities`
+        # above already does, and the real shift is a `finalize`-step
+        # displacement (Eq. 58, outside the pseudo-time loop) that
+        # `ACSPH_PLAN.md` step 7 builds. Available because it shows what a
+        # walled case does with neither -- on `hydrostaticColumn`, fluid leaves
+        # through the bottom corners by step ~40 (measured in step 5b).
+        noPenShift = torch.zeros_like(currentState.velocities)
+        if schemeConfig.noPenetrationShift:
+            noPenShift = computeMdbcNoPenShift(currentState, config, schemeConfig,
+                                               adjacency) / dt
+
+        gravity = computeGravity(currentState, config, schemeConfig, adjacency)
+        # `computeForcing` returns a *force* (e.g. `meanFlowForcingBC`'s
+        # `m (U - <u>) / tau`); `deltaSPH_step` divides by mass the same way.
+        # Adding it raw scaled every ACSPH forcing by the particle mass.
+        forcing = computeForcing(currentSystem, config.dt, currentSystem.t, config,
+                                 schemeConfig) / currentState.masses.view(-1, 1)
+        bodyForce = gravity + noPenShift + forcing
+        # `(g - a_wall)` for Eq. (61). Static walls have `a_wall = 0`; no
+        # per-particle prescribed wall acceleration is tracked anywhere in this
+        # codebase yet (`modules/mdbc/velocity.py` documents the same gap for
+        # the velocity mirror), so a moving-wall ACSPH case would need one --
+        # `wallPressureExtrapolation` already accepts the `(N, dim)` form.
+        # `None` when there is no gravity: the correction is then identically
+        # zero and skipping it saves two gathers per RK stage.
+        wallBodyForce = gravity if bool(gravity.abs().any()) else None
+
+    # --- the dual-time loop -------------------------------------------------
+    # Unilateral contact (`acParams.cavitationProjection`, Batty et al. 2007
+    # Eq. 15): rows that may not carry tension because air can fill the gap
+    # they would open. 'vicinity' = every fluid AND wall row with a raw
+    # free-surface particle inside its kernel support -- the dilated set,
+    # which `dilateSurface` (AllToAll) already evaluates at the wall rows too.
+    # The raw set alone is not enough: a row pressed against a wall counts
+    # the wall as support and is not flagged, so it carries the tension
+    # (MDBC_CONTACT_LINE_PLAN.md step 1).
+    cavitation = acParams.cavitationProjection
+    contactRows = fluid | (currentState.kinds == 1)
+    if cavitation in ('off', 'wall'):
+        # 'wall' projects nothing: it changes only the fluid-solid pair terms
+        # of the pressure force and of the divergence
+        # (`_unilateralWallForce`, `_unilateralWallDivergence`)
+        cavMask = None
+    elif cavitation == 'vicinity':
+        # plus fully isolated rows: detection reads an empty support as bulk
+        # (lambda = 1), though it is all air -- `detectIsolated`'s docstring
+        cavMask = contactRows & ((fsm > 0.5) | detectIsolated(currentState, config, adjacency))
+    elif cavitation == 'contact':
+        # Batty et al. 2007 §4 as written: `p >= 0` on the unknowns at the
+        # solid boundary only -- every wall row and every fluid row with a
+        # wall in its support, submerged or not; divergence and force stay
+        # bilateral, the KKT fixed point of the projected pseudo-time supplies
+        # the kinematic half (MDBC_CONTACT_LINE_PLAN.md §10.3 A). Fluid rows
+        # away from walls keep their tension (coalescence, §9.2).
+        wallRows = currentState.kinds == 1
+        cavMask = wallRows | (fluid & _wallAdjacent(currentState, config, adjacency))
+    elif cavitation == 'fluid':
+        cavMask = contactRows
+    else:
+        raise ValueError(f"acParams.cavitationProjection must be 'off', 'wall', "
+                         f"'vicinity', 'contact' or 'fluid', got {cavitation!r}")
+
+    # Isolated rows: Dirichlet p = 0 (`acParams.isolatedZeroPressure`). The
+    # adjacency is fixed for the step, so a row isolated at the start stays
+    # isolated through every pseudo-iteration and its p acts on nothing this
+    # step; zeroing it only stops it carrying stored pressure into its next
+    # contact (MDBC_CONTACT_LINE_PLAN.md §11.1).
+    isoMask = (fluid & detectIsolated(currentState, config, adjacency)
+               if acParams.isolatedZeroPressure else None)
+
+    def project(pp):
+        if cavMask is not None:
+            pp = torch.where(cavMask, pp.clamp_min(0.0), pp)
+        if isoMask is not None:
+            pp = torch.where(isoMask, torch.zeros_like(pp), pp)
+        return pp
+
+    x, v, p = x0, v0, project(p0)
+    epsV = float('inf')
+    iterations = 0
+    # eps_v stays on the device and is read back only at the check schedule's
+    # checkpoints (`acParams.convergenceCheckSchedule`, convergence.py) --
+    # each read is a sync, and the loop runs up to maxPseudoIterations.
+    fluidIndex = fluid.nonzero().squeeze(1)
+    nFluid = int(fluidIndex.numel())
+    schedule = ConvergenceCheckSchedule(
+        schemeConfig, 'acsphDualTime', getattr(acParams, 'convergenceCheckSchedule', 'adaptive'),
+        max(0, acParams.minPseudoIterations - 1), acParams.maxPseudoIterations, verbose)
+    epsHistory = []
+    def pseudoIteration(x, v, p):
+        """One dual-time pseudo-iteration: (x, v, p) -> (x, v, p, eps_v).
+        Everything it closes over (dtau, BDF coefficients, k1/k2, nu,
+        adjacency, masks) is fixed for this real step."""
+        xStage0, vStage0, pStage0 = x, v, p
+
+        # The BDF source is evaluated at the FROZEN stage-0 value, not at
+        # the current stage (Eq. 41's `u^{n+1,m+1,0}`).
+        dxdtBdf = alphaT * xStage0 + betaT * xPrev + gammaT * xPrev2
+        dvdtBdf = alphaT * vStage0 + betaT * vPrev + gammaT * vPrev2
+
+        stage0 = _workingState(currentState, xStage0, vStage0, pStage0)
+        stage0.pressures = project(wallPressures(stage0, config, adjacency, wallBodyForce))
+        diffusion = computePressureSmoothing(
+            stage0, config, schemeConfig, adjacency, renormalizationState,
+            pressures=stage0.pressures)
+
+        kx, kv, kp = [], [], []
+        for s in range(acParams.rkStages):
+            xs, vs, ps = xStage0, vStage0, pStage0
+            for l in range(s):
+                a = float(tableau.a[s, l])
+                if a == 0.0:
+                    continue
+                xs = xs + dtau * a * kx[l]
+                vs = vs + dtau * a * kv[l]
+                ps = ps + dtau * a * kp[l]
+            ps = project(ps)
+
+            view = _workingState(currentState, xs, vs, ps)
+            view.pressures = project(wallPressures(view, config, adjacency, wallBodyForce))
+            # The wall velocity is a closure of the *current* fluid velocity
+            # (free-slip / no-slip mirror), exactly like the wall pressure
+            # above, so it is re-applied per stage. Without this the wall
+            # rows only carried the step-start mirror, then drifted with
+            # whatever the pseudo-time update did to them -- see the
+            # `nonFluidRows` freeze below.
+            view.velocities = computeBoundaryVelocities(view, config, schemeConfig,
+                                                        adjacency)
+            rP, rV = _spatialResidual(view, config, schemeConfig, adjacency,
+                                      k1, k2, diffusion, bodyForce, nu,
+                                      unilateralWall=cavitation == 'wall')
+            rX = vs
+
+            # alpha_PI = 1 + alpha_s dtau alpha_t (Eqs. 43-45), applied to
+            # all three rows for temporal consistency. `alpha_s` in Eq. (40)
+            # is the fraction of `dtau` at which stage `s`'s residual is
+            # applied; in Butcher terms that is the node of the stage it
+            # produces, i.e. `c[s+1]`, and 1 for the last (which feeds the
+            # `b` accumulation). For the RK2 midpoint tableau this is
+            # exactly Eq. (40)'s `alpha = {1/2, 1}`. For RK3/RK4 the mapping
+            # is ambiguous because Eq. (40) and Fig. 1 disagree there at all
+            # (ACSPH_PLAN.md Sec. 5.2) -- and it barely matters, since the
+            # paper reports `alpha_PI = 1` works fine here anyway
+            # (`usePointImplicit=False`).
+            alphaS = float(tableau.c[s + 1]) if s + 1 < acParams.rkStages else 1.0
+            alphaPI = 1.0 + alphaS * dtau * alphaT if acParams.usePointImplicit else 1.0
+
+            # I_c = diag{0, 1, 1}: the pressure row has no real-time
+            # derivative to subtract. That is what makes r* -> 0 enforce
+            # div v = 0 at time level n+1 rather than in pseudo-time.
+            #
+            # Only fluid rows are unknowns of the dual-time system. Wall and
+            # ghost rows are geometry plus closures (`wallPressures`,
+            # `computeBoundaryVelocities`), so their increments are zeroed:
+            # integrating them like fluid let the walls move and pick up
+            # O(|v_fluid|) velocities under gravity and pressure within one
+            # real step, which overrode the wall BC entirely (freeSlip and
+            # noSlip gave bit-identical runs) and drew the corner fluid
+            # particle diagonally through the wall (`hydrostaticColumn`,
+            # walled; FREESLIP_DAMBREAK_FINDINGS.md's ACSPH stall).
+            kp.append(torch.where(fluid, rP / alphaPI, torch.zeros_like(rP)))
+            kx.append(torch.where(fluidRows, (rX - dxdtBdf) / alphaPI, torch.zeros_like(rX)))
+            kv.append(torch.where(fluidRows, (rV - dvdtBdf) / alphaPI, torch.zeros_like(rV)))
+
+        x, v, p = xStage0, vStage0, pStage0
+        for l in range(acParams.rkStages):
+            b = float(tableau.b[l])
+            if b == 0.0:
+                continue
+            x = x + dtau * b * kx[l]
+            v = v + dtau * b * kv[l]
+            p = p + dtau * b * kp[l]
+        p = project(p)
+
+        # `tilde v = v - Dx/Dt` is simultaneously the position-row residual
+        # and the convergence metric (Eq. 26 / Sec. 1.6): it is zero exactly
+        # when the position row is satisfied at time level n+1.
+        tildeV = v - (alphaT * x + betaT * xPrev + gammaT * xPrev2)
+        epsT = convergenceMetricDevice(tildeV, v, fluidIndex, nFluid, schemeConfig)
+        return x, v, p, epsT
+
+    # With `schemeConfig.cudaGraph` (CaseSpec.cudaGraph), iterations 2.. are
+    # replayed from a graph captured once per real step: the body is
+    # sync-free and ~260 launches, and up to 200 of them run per step, so
+    # the step is otherwise launch-bound. The first capture of a run is
+    # checked bitwise against eager (utils/cudaGraph.py); a mismatch turns
+    # graphs off for the run.
+    graphed = None
+    if getattr(schemeConfig, 'cudaGraph', False) and x0.is_cuda \
+            and getattr(schemeConfig, '_acsphGraphDisabled', None) is None:
+        from ..utils.cudaGraph import GraphedTensorFunction
+        graphed = GraphedTensorFunction(
+            pseudoIteration, 'ACSPH dual-time pseudo-iteration',
+            validate=not getattr(schemeConfig, '_acsphGraphValidated', False))
+    with record_function("[warpSPH] - [acsph - 06] - dual-time loop"):
+        for m in range(acParams.maxPseudoIterations):
+            iterations = m + 1
+            if graphed is not None and m >= 1:
+                x, v, p, epsT = graphed(x, v, p)
+                if graphed.disabled is not None:
+                    schemeConfig._acsphGraphDisabled = graphed.disabled
+                    graphed = None
+                else:
+                    schemeConfig._acsphGraphValidated = True
+            else:
+                x, v, p, epsT = pseudoIteration(x, v, p)
+            epsHistory.append(epsT)
+            # `m + 1 >= minPseudoIterations` is `m >= minPseudoIterations - 1`
+            if schedule.check(m) and bool(epsT < acParams.epsilonV):
+                break
+    if epsHistory:
+        epsHost = torch.stack(epsHistory).cpu().tolist()
+        epsV = epsHost[-1]
+        schedule.record([e < acParams.epsilonV for e in epsHost])
+
+    if verbose:
+        print(f"[acsph] t={currentSystem.t:.6g} dt={dt:.4g} BDF{bdfOrder} "
+              f"{iterations} pseudo-iterations, eps_v={epsV:.3f} "
+              f"(target {acParams.epsilonV})")
+
+    # --- exact-delta hand-off ----------------------------------------------
+    with record_function("[warpSPH] - [acsph - 07] - build update"):
+        update = ArtificialCompressibleSystemUpdate(
+            dxdt=(x - x0) / dt,
+            dvdt=(v - v0) / dt,
+            dpdt=(p - p0) / dt,
+            passive=torch.zeros(p0.shape, device=p0.device, dtype=torch.bool),
+        )
+        update.pseudoIterations = iterations
+        update.epsilonV = epsV
+        update.bdfOrder = bdfOrder
+
+    with record_function("[warpSPH] - [acsph - 08] - enforce updates"):
+        enforceUpdates(update, currentSystem, config.dt, currentSystem.t, config,
+                       schemeConfig)
+        nonFluid = (currentState.kinds != 0).unsqueeze(-1)
+        update.dxdt = torch.where(nonFluid, torch.zeros_like(update.dxdt), update.dxdt)
+        update.dvdt = torch.where(nonFluid, torch.zeros_like(update.dvdt), update.dvdt)
+        update.dpdt = torch.where(nonFluid.squeeze(-1), torch.zeros_like(update.dpdt),
+                                  update.dpdt)
+
+    return update, adjacency, currentState

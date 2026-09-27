@@ -1,12 +1,22 @@
-"""Builds the initial particle state and `SimulationSystem` for the weakly
-compressible (and incompressible, via the shared `SimulationState` branch)
-solver from a list of sampled regions: concatenates each region's particles
-into a combined `WeaklyCompressibleState`/`IncompressibleState`, applies
-per-region `initialConditions`, adds boundary ghost particles, and builds any
-rigid bodies. `initializeSimulation` is the entry point re-exported (as
+"""Builds the initial particle state and `SimulationSystem` for the
+particle-region schemes -- weakly compressible, incompressible (DFSPH and
+friends), and artificial-compressibility -- from a list of sampled regions:
+concatenates each region's particles into a combined state, applies per-region
+`initialConditions`, adds boundary ghost particles, and builds any rigid
+bodies. `initializeSimulation` is the entry point re-exported (as
 `initializeWeaklyCompressibleSimulation`) by `initializers/__init__.py`;
 `initializeWeaklyCompressibleState` is an older, narrower variant not called
 from anywhere else in the package.
+
+`initializeState` used to carry one hand-written `if SimulationState is X`
+branch per state class -- two branches whose bodies were character-for-character
+identical -- and no `else`, so an unrecognised state class fell through to a
+`NameError` on an unbound local rather than saying what was wrong. The field
+names are the same across all three classes, so there is one construction now,
+parameterised by the class, with `_SUPPORTED_STATES` as the explicit list and a
+real error for anything else. The one genuine difference is ACSPH's
+`pressures`, which is an *integrated* field there and so cannot be `None`;
+`_defaultPressures` handles that.
 """
 
 import warnings
@@ -139,105 +149,84 @@ def getInitialValue(region, pos, quantity, default):
 
 from ..systems.incompressible import *
 
-def initializeState(regions, config, schemeConfig, SimulationState, verbose = True):    
-    rho0 = schemeConfig.fluid.restDensity if isinstance(schemeConfig, WeaklyCompressibleSPHConfig) or isinstance(schemeConfig, IncompressibleSPHConfig) else config.rho0
+#: Every state class `initializeState` knows how to build. They share a field
+#: layout by design (`systems/artificialCompressible.py` says so explicitly),
+#: which is what lets one construction serve all three.
+_SUPPORTED_STATES = (WeaklyCompressibleState, IncompressibleState,
+                     ArtificialCompressibleState)
+
+
+def _defaultPressures(SimulationState, region, positions):
+    """ACSPH integrates the pressure (`integrated('dpdt')`), so `None` is not a
+    legal value there the way it is for the schemes that get theirs from an
+    equation of state. Start it at zero -- the paper's cases all do."""
+    explicit = getInitialValue(region, positions, 'pressures', None)
+    if explicit is not None or SimulationState is not ArtificialCompressibleState:
+        return explicit
+    return torch.zeros_like(region.particles.masses)
+
+
+def initializeState(regions, config, schemeConfig, SimulationState, verbose = True):
+    if SimulationState not in _SUPPORTED_STATES:
+        raise ValueError(
+            f"initializeState does not know how to build {SimulationState.__name__}; "
+            f"supported: {[c.__name__ for c in _SUPPORTED_STATES]}. Add it to "
+            f"`_SUPPORTED_STATES` if it shares their field layout.")
+
+    rho0 = schemeConfig.fluid.restDensity if isinstance(
+        schemeConfig, (WeaklyCompressibleSPHConfig, IncompressibleSPHConfig,
+                       ArtificialCompressibleSPHConfig)) else config.rho0
     uidCounter = 0
 
     states = []
-    types = [RegionType.Fluid, RegionType.Boundary]
-    for ty in types:
+    for ty in (RegionType.Fluid, RegionType.Boundary):
         for ir, region in enumerate([r for r in regions if r.type == ty]):
             positions = region.particles.positions
-            
-            if SimulationState is WeaklyCompressibleState:
-                tempState = WeaklyCompressibleState(
-                    positions,
-                    supports = getInitialValue(region, positions, 'supports', region.particles.supports),
-                    masses = getInitialValue(region, positions, 'masses', region.particles.masses) * rho0,
-                    
-                    densities = getInitialValue(region, positions, 'densities', torch.ones_like(region.particles.masses) * rho0),
-                    velocities = getInitialValue(region, positions, 'velocities', torch.zeros_like(region.particles.positions)),
-                    
-                    pressures = getInitialValue(region, positions, 'pressures', None),
-                    soundspeeds = getInitialValue(region, positions, 'soundspeeds', None),
-                    
-                    kinds = torch.ones_like(region.particles.masses, dtype = torch.int32) * (0 if region.type == RegionType.Fluid else 1),
-                    materials = torch.ones_like(region.particles.masses, dtype = torch.int32) * ir,
-                    UIDs = torch.arange(uidCounter, uidCounter + positions.shape[0], device = positions.device, dtype = torch.int64),
-                    
-                    UIDcounter = uidCounter + positions.shape[0],
+            states.append(SimulationState(
+                positions,
+                supports = getInitialValue(region, positions, 'supports', region.particles.supports),
+                masses = getInitialValue(region, positions, 'masses', region.particles.masses) * rho0,
 
-                    ghostIndices = torch.ones_like(region.particles.masses, dtype = torch.int32) * (-1),
-                    ghostOffsets = region.particles.positions.clone()
-                )
-            elif SimulationState is IncompressibleState:
-                tempState = IncompressibleState(
-                    positions,
-                    supports = getInitialValue(region, positions, 'supports', region.particles.supports),
-                    masses = getInitialValue(region, positions, 'masses', region.particles.masses) * rho0,
-                    
-                    densities = getInitialValue(region, positions, 'densities', torch.ones_like(region.particles.masses) * rho0),
-                    velocities = getInitialValue(region, positions, 'velocities', torch.zeros_like(region.particles.positions)),
-                    
-                    pressures = getInitialValue(region, positions, 'pressures', None),
-                    soundspeeds = getInitialValue(region, positions, 'soundspeeds', None),
-                    
-                    kinds = torch.ones_like(region.particles.masses, dtype = torch.int32) * (0 if region.type == RegionType.Fluid else 1),
-                    materials = torch.ones_like(region.particles.masses, dtype = torch.int32) * ir,
-                    UIDs = torch.arange(uidCounter, uidCounter + positions.shape[0], device = positions.device, dtype = torch.int64),
-                    
-                    UIDcounter = uidCounter + positions.shape[0],
+                densities = getInitialValue(region, positions, 'densities', torch.ones_like(region.particles.masses) * rho0),
+                velocities = getInitialValue(region, positions, 'velocities', torch.zeros_like(region.particles.positions)),
 
-                    ghostIndices = torch.ones_like(region.particles.masses, dtype = torch.int32) * (-1),
-                    ghostOffsets = region.particles.positions.clone()
-                )
+                pressures = _defaultPressures(SimulationState, region, positions),
+                soundspeeds = getInitialValue(region, positions, 'soundspeeds', None),
 
+                kinds = torch.ones_like(region.particles.masses, dtype = torch.int32) * (0 if region.type == RegionType.Fluid else 1),
+                materials = torch.ones_like(region.particles.masses, dtype = torch.int32) * ir,
+                UIDs = torch.arange(uidCounter, uidCounter + positions.shape[0], device = positions.device, dtype = torch.int64),
+
+                UIDcounter = uidCounter + positions.shape[0],
+
+                ghostIndices = torch.ones_like(region.particles.masses, dtype = torch.int32) * (-1),
+                ghostOffsets = region.particles.positions.clone()
+            ))
             uidCounter += positions.shape[0]
-            states.append(tempState)
 
-    if SimulationState is WeaklyCompressibleState:
-        combinedState = WeaklyCompressibleState(
-            positions = torch.cat([s.positions for s in states], dim = 0),
-            supports = torch.cat([s.supports for s in states], dim = 0),
-            masses = torch.cat([s.masses for s in states], dim = 0),
-            
-            densities = torch.cat([s.densities for s in states], dim = 0),
-            velocities = torch.cat([s.velocities for s in states], dim = 0),
-            
-            pressures = None if states[0].pressures is None else torch.cat([s.pressures for s in states], dim = 0),
-            soundspeeds = None if states[0].soundspeeds is None else torch.cat([s.soundspeeds for s in states], dim = 0),
-            
-            kinds = torch.cat([s.kinds for s in states], dim = 0),
-            materials = torch.cat([s.materials for s in states], dim = 0),
-            UIDs = torch.cat([s.UIDs for s in states], dim = 0),
-            
-            UIDcounter = uidCounter,
-            ghostIndices = torch.cat([s.ghostIndices for s in states], dim = 0),
-            ghostOffsets = torch.cat([s.ghostOffsets for s in states], dim = 0)
-        )
-    elif SimulationState is IncompressibleState:
-        combinedState = IncompressibleState(
-            positions = torch.cat([s.positions for s in states], dim = 0),
-            supports = torch.cat([s.supports for s in states], dim = 0),
-            masses = torch.cat([s.masses for s in states], dim = 0),
-            
-            densities = torch.cat([s.densities for s in states], dim = 0),
-            velocities = torch.cat([s.velocities for s in states], dim = 0),
-            
-            pressures = None if states[0].pressures is None else torch.cat([s.pressures for s in states], dim = 0),
-            soundspeeds = None if states[0].soundspeeds is None else torch.cat([s.soundspeeds for s in states], dim = 0),
-            
-            kinds = torch.cat([s.kinds for s in states], dim = 0),
-            materials = torch.cat([s.materials for s in states], dim = 0),
-            UIDs = torch.cat([s.UIDs for s in states], dim = 0),
-            
-            UIDcounter = uidCounter,
-            ghostIndices = torch.cat([s.ghostIndices for s in states], dim = 0),
-            ghostOffsets = torch.cat([s.ghostOffsets for s in states], dim = 0)
-        )   
+    def joined(name):
+        first = getattr(states[0], name)
+        return None if first is None else torch.cat([getattr(s, name) for s in states], dim = 0)
 
-    return combinedState
+    return SimulationState(
+        positions = joined('positions'),
+        supports = joined('supports'),
+        masses = joined('masses'),
 
+        densities = joined('densities'),
+        velocities = joined('velocities'),
+
+        pressures = joined('pressures'),
+        soundspeeds = joined('soundspeeds'),
+
+        kinds = joined('kinds'),
+        materials = joined('materials'),
+        UIDs = joined('UIDs'),
+
+        UIDcounter = uidCounter,
+        ghostIndices = joined('ghostIndices'),
+        ghostOffsets = joined('ghostOffsets')
+    )
 
 
 def initializeSimulation(regions, config, schemeConfig, SimulationSystem, SimulationState, verbose = True):
