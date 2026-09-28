@@ -21,7 +21,7 @@ here too (a few lines each). When one is resolved, move its text to
 and leave a one-line stub under the same number, so references stay valid.
 Progress on this file is tracked by its single row in [PLANS.md](PLANS.md).
 
-**Current batch** (user, 2026-09-28; on branch `dev`):
+**Batch of 2026-09-28 — done** (on branch `dev`; outcomes in each item):
 1. §5 / §6.3 / §11 re-runs as a baseline, in the background;
 2. §7 Morris shear viscosity (opt-in; DFSPH `hydrostaticColumn` no-slip A/B
    against Part 39, δ-SPH unchanged when off);
@@ -98,6 +98,18 @@ The Antuono-mask flip-rate diagnostic (`DELTASPH_VALIDATION_PLAN.md`
 helps, rather than eyeballing more frame grids. **It is no longer in the
 code** (checked 2026-09-28: nothing in `src/` or `scripts/`) — it has to be
 rebuilt before step 1 can be judged.
+
+**Step 1 measured, 2026-09-28 — moot under the current defaults.** Rebuilt
+as `schemeConfig.surfaceMaskDiagnostics` (+ `freezeSurfaceMaskAcrossStages`
+for step 1 itself; `probe_deltaSPHMarrone.py --surfaceMaskDiagnostics /
+--freezeSurfaceMask`). Marrone 3.1 δ⁺ nx67, seed 1, to t* 7.7: the mask
+**does not change between symplectic Euler's two stages** (0.2 % of steps,
+max 3 rows, all before t* 1), but changes **step to step** in 45 % of steps
+(up to 38 rows, growing through the run). So freezing across stages cannot
+help — it was an RK4-era idea — and the chatter to attack is step to step:
+**step 2 (a continuous coverage blend) is the next lever.** The frozen-mask
+option stays available for RK integrators. Diagnostics do not perturb the
+physics (bitwise the graphed run).
 
 ## 2. `omniIncompressible`'s `'mls'` wall-pressure mode — genuine numerical
 instability, not a sign bug
