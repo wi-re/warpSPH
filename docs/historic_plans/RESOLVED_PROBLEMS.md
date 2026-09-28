@@ -35,7 +35,15 @@ by the OPEN §6.3 re-runs). `--no-asyncPlot` ran clean (40 steps, 5.8 s).
 **Fix:** `cases/plotting.py:particlePlot` marks hooks with a grid panel
 `usesWarp`; `runner.py:_setupPlot` keeps those on the loop thread. Pure-GL
 plots keep the render thread. `tests/test_runner.py::
-test_gridInterpolatedPlotsStayOffTheRenderThread`.
+test_gridInterpolatedPlotsStayOffTheRenderThread`. The headless loop-thread
+path still renders through EGL (the default vispy backend opened a black
+window).
+
+**Sibling, same day:** Marrone 3.1 δ-SPH crashed (exit 139) with "operation
+not permitted when stream is capturing": warpSPHPlotting's `filterState` did a
+boolean-mask index (a sync) on the render thread while the loop thread was
+capturing a CUDA graph. `utils/cudaGraph.py:CAPTURE_LOCK` is now held by every
+capture and by every render job (`0e15883`).
 
 ## OPEN_PROBLEMS §10 — Runner divergence detection misses bounded-NaN-free blowups — RESOLVED 2026-09-28
 

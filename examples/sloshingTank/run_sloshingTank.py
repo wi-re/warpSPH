@@ -125,6 +125,9 @@ def parseArgs(argv):
                              'moltenicolagrossi2009', 'fourtakas2019'),
                     help="override DensityDiffusionScheme (case default "
                          "'deltaSPH'). DELTASPH_VALIDATION_PLAN.md Part 8.16.")
+    p.add_argument('--noFlagIsolated', action='store_true',
+                   help="don't flag isolated rows as free surface (SurfaceDetectionConfig."
+                        'flagIsolated=False) -- A/B of OPEN_PROBLEMS §8')
     p.add_argument('--pressureForceRenormalized', action='store_true',
                     help="apply gradient renormalization to the pressure-force "
                          "kernel gradient, gated on kernel-sum completeness "
@@ -326,6 +329,11 @@ def main(argv=None):
     case = getCase('sloshingTank')
     spec = buildSpec(case, args)
 
+    if args.noFlagIsolated:
+        _prevCfgIso = case.configureScheme
+        def _cfgIso(ctx, _p=_prevCfgIso):
+            _p(ctx); ctx.schemeConfig.surfaceDetectionConfig.flagIsolated = False
+        case.configureScheme = _cfgIso
     if args.mdbcDensityScheme:
         # Same override pattern as scripts/probe_deltaSPHMarrone.py --
         # BOUNDARY_DENSITY_PLAN.md §5-6.

@@ -411,8 +411,18 @@ shared detector would touch shifting / the Antuono switch everywhere.
 case runs (Barecasco + lambda-gradient normals), ColorField and
 ColorFieldGrad miss it; Marrone's detection flags it (its lambda reads 1.0,
 but another criterion catches it). Fixed in the shared detector on branch
-`isolated-surface` (`SurfaceDetectionConfig.flagIsolated`, default on), not
-yet merged — it changes a default, so it waits for the baseline re-runs.
+`isolated-surface` (`SurfaceDetectionConfig.flagIsolated`, default on),
+merged into `dev` after the baseline re-runs. **Before/after (2026-09-28):**
+δ-SPH is **bitwise unchanged** — Marrone 3.1 δ⁺ nx67, three jittered
+realisations each with the flag on and off (`scripts/run_isolatedFlagAB.sh`),
+and sloshingTank to t = 7 — as expected, since an isolated row has no pair
+interactions. englishWedge / squarePatch / impact identical too; only DFSPH's
+staticBlob moved (surface min density 0.472 -> 0.454). So this is a
+classification fix (diagnostics, row-local consumers), not a dynamics one.
+(The same batch's sloshingTank Sensor 1 peak, 78 kPa vs 25 kPa in the
+2026-09-26 run, is therefore not the flag: code changes since then — the
+multi-lane kernels change summation order — plus a chaotic flow; seed 2 of
+the Marrone A/B shows the spread, P2 peak 91 and late |v|max 19.)
 **Decision (user, 2026-09-28):** worth fixing in the shared detector
 eventually, but low priority -- it is *not* why free surfaces blow up: that
 was investigated before and traced mainly to the density-diffusion choice

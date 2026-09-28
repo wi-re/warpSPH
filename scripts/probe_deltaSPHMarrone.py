@@ -147,7 +147,8 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
             densityDiffusionTerm: str = None, mdbcDensityScheme: str = None,
             pressureForceRenormalized: bool = False,
             jitter: float = 0.0, seed: int = 1, cudaGraph: bool = True,
-            pipeline: bool = True, show: bool = True, watch: dict = None):
+            pipeline: bool = True, show: bool = True, watch: dict = None,
+            flagIsolated: bool = True):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -184,7 +185,8 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
           + (f'_pft-{pressureForceTerm}' if pressureForceTerm else '')
           + (f'_ddt-{densityDiffusionTerm}' if densityDiffusionTerm else '')
           + (f'_mdbcRho-{mdbcDensityScheme}' if mdbcDensityScheme else '')
-          + (f'_j{seed}' if jitter > 0.0 else ''))
+          + (f'_j{seed}' if jitter > 0.0 else '')
+          + ('' if flagIsolated else '_noFlagIsolated'))
     runRoot = os.path.join(out, tag + '_run')
 
     # Marrone reports each signal area-integrated over a phi = 90 mm probe disc
@@ -278,6 +280,13 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
         def _cfg5(ctx, _p=_prevCfg5):
             _p(ctx); ctx.schemeConfig.pressureForceRenormalized = True
         dambreakCase.configureScheme = _cfg5
+
+    if not flagIsolated:
+        # A/B of the shared detector's isolated-row flag (OPEN_PROBLEMS §8)
+        _prevCfgIso = dambreakCase.configureScheme
+        def _cfgIso(ctx, _p=_prevCfgIso):
+            _p(ctx); ctx.schemeConfig.surfaceDetectionConfig.flagIsolated = False
+        dambreakCase.configureScheme = _cfgIso
 
     if jitter > 0.0:
         # independent realisations (MDBC_CONTACT_LINE_PLAN.md §12, same as
@@ -888,6 +897,9 @@ def main():
                          'frames on a worker thread instead (faster, same frames)')
     ap.add_argument('--report', action='store_true',
                     help='(re)build plots + REPORT.md from existing .npz runs')
+    ap.add_argument('--noFlagIsolated', action='store_true',
+                    help="don't flag isolated rows as free surface (SurfaceDetectionConfig."
+                         'flagIsolated=False) -- A/B of OPEN_PROBLEMS §8')
     from _runWatch import addWatchArguments, watchOverrides
     addWatchArguments(ap)
     args = ap.parse_args()
@@ -902,7 +914,7 @@ def main():
             args.pressureForceTerm, args.densityDiffusionTerm,
             args.mdbcDensityScheme, args.pressureForceRenormalized,
             args.jitter, args.seed, args.cudaGraph, args.pipeline, args.show,
-            watch=watchOverrides(args))
+            watch=watchOverrides(args), flagIsolated=not args.noFlagIsolated)
 
 
 if __name__ == '__main__':
