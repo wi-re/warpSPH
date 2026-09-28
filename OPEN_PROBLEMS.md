@@ -179,60 +179,14 @@ fully enclosed WCSPH box with no free-surface sink is expected behavior for
 this class of scheme, not a mystery to keep chasing — logged here so it
 isn't re-discovered as a surprise, but there is nothing queued to fix it.
 
-## 5. One older mDBC/sampling item, still open (the other resolved)
+## 5. englishWedge concave-corner residual — RESOLVED 2026-09-28
 
-- **`_gridSnapGhostOffsets`'s concave-corner ghost collapse**: ~40 boundary
-  particles at a concave corner (e.g. englishWedge's base corner) collapse
-  their ghost node onto one interior point, a degenerate near-coplanar
-  stencil no fit handles well. Not rechecked as of 2026-09-18 (deferred, see
-  `WCSPH_DEFAULT_CLOSEOUT_PLAN.md` item H).
-
-  **TODO:** re-run `englishWedge` dp=0.01 under the current default combo
-  (`english2025`+`fourtakas2019`+`symplecticEuler`) to check whether the
-  base-corner residual (RMSE 0.0431 last measured) has moved at all, before
-  deciding whether this still needs its own fix.
-
-  **Re-run 2026-09-28** (default combo, dp = 0.01, t = 4 s, video:
-  `scripts/out_looseEnds/baseline/englishWedge/`): stable, bulk / near-wall /
-  wedge-face bands pass, but the **base corners got worse — RMSE 0.0674 (max
-  0.096)**, against 0.0431 under the old defaults; the apex just fails too
-  (0.0312 vs 0.03). The frames show a weak spurious circulation along the
-  wedge faces (|v| up to 0.04 m/s) and a disturbed lattice around the apex.
-  So this still needs its own fix; which part of the default flip moved it
-  (english2025 / fourtakas2019 / symplecticEuler) is not isolated.
-
-  **Correction (2026-09-28):** 0.0431 was not the last good number. On
-  2026-09-12 (`DELTASPH_VALIDATION_PLAN.md` §5.13, hybrid ghost placement)
-  this case measured base corners **0.0178**, faces 0.012, apex 0.008 — so
-  today's 0.0674 / 0.0393 / 0.0312 is a 3-4x regression since then. Knob A/B
-  (revert one of today's defaults at a time to the 09-12 configuration —
-  `ramped` mDBC density, `deltaSPH` DDT, RK4, `constant` walls — then all
-  four): `scripts/run_wedgeKnobAB.sh`. dp = 0.01, t = 4 s, RMSE / rho g H:
-
-  | run | faces | apex | base corners | near wall/bed | settled KE |
-  |---|---|---|---|---|---|
-  | today's defaults | 0.039 | 0.031 | **0.067** | 0.057 | 7.9e-6 |
-  | `ramped` mDBC density | 0.043 | 0.031 | 0.078 | | |
-  | **`deltaSPH` DDT** | **0.014** | **0.013** | **0.020** | **0.016** | 3.0e-6 |
-  | RK4 | 0.037 | 0.037 | 0.054 | | |
-  | `constant` walls | 0.057 | 0.022 | 0.091 | | |
-  | all four reverted | 0.015 | 0.011 | 0.020 | 0.016 | 2.3e-5 |
-
-  **The DDT flip alone (`fourtakas2019`, default since 2026-09-18) explains
-  the regression** — at the wedge and in the whole near-wall band. Today's
-  code with the 09-12 configuration reproduces the 09-12 numbers. The DDT
-  already runs fluid-to-fluid only (the memory note saying otherwise is
-  stale). Leading hypothesis: Fourtakas diffuses toward an *analytic*
-  hydrostatic profile, and next to a wall — a one-sided, fluid-only stencil —
-  any departure of the real density from that profile becomes a net flux;
-  the δ-SPH term subtracts a renormalised local gradient instead and
-  vanishes for any locally linear field. Next (user suggestion): the same
-  runs x-periodic (`--semiPeriodic`, no side walls) to separate the wedge
-  from the wall/free-surface corners, where circulation shows even under
-  `deltaSPH`.
-
-(The H/Δx≈72-160 resolution hole that used to share this item was resolved
-2026-09-18: [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md).)
+Moved to [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md): the
+regression was a sign bug in the `fourtakas2019` hydrostatic correction
+(fixed `68a9a6d`). **Follow-up, open:** the default combo (english2025 +
+fourtakas2019 + symplecticEuler) was chosen on 2026-09-18 using the buggy
+term; its dam-break / sloshing validations need re-running with the fixed one
+(user's call).
 
 ## 6. Lattice-density kernel calibration — low-priority polish, not urgent
 

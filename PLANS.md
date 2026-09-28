@@ -26,9 +26,10 @@ and what matters most. Detail lives in the plan files; this file is the map.
 - The **Focus** line is the user's call. Claude may suggest, not set it.
 - Every plan file carries a one-line pointer back here under its title.
 
-**Focus** (user, 2026-09-28): `OPEN_PROBLEMS.md` §5 — the englishWedge
-concave-corner residual, worse under the current defaults. Work happens on
-branch `dev`, merged back into `main` periodically.
+**Focus:** *not set* — the englishWedge item (§5) is resolved: a sign bug in
+the default `fourtakas2019` DDT. Suggested next: re-validate the default combo
+with the fixed term (see the `OPEN_PROBLEMS.md` row). Work happens on branch
+`dev`, merged back into `main` periodically.
 
 ## Plans
 
@@ -42,7 +43,7 @@ Kind: **practical** = a current limitation of something people run today;
 | [ACSPH_PLAN.md](ACSPH_PLAN.md) | open, blocked on the contact line | practical | Scheme built and validated on the non-free-surface checks; dam break blocked by the contact-line plan. `impact` reference decided (Marrone, aspectRatio 0.5). Left: Lobovsky run, paper-scale tables, closed-box pressure growth (OPEN §9). §0.1 TODO list is out of date | 2026-09-28 | 2026-09-28 |
 | [CRKSPH_LIMITER_PLAN.md](CRKSPH_LIMITER_PLAN.md) | open | practical | Gresho spin-up located (non-central pressure forces), limiter constants in the wrong units; nothing changed in code yet. Next: P1 parameter-stability map (η_crit × η_fold) gated by the Sod ripple probe | 2026-09-26 | 2026-09-28 |
 | [SMALL_PROBLEM_PERFORMANCE.md](SMALL_PROBLEM_PERFORMANCE.md) | mostly done | practical | δ-SPH Marrone 702 → 109 s (6.5×), bitwise. Left (§5): graph `finalize` (~2.5–3 ms/step), ACSPH still ~187 ms/step, compiled glue needs a jittered batch before default-on | 2026-09-28 | 2026-09-28 |
-| [OPEN_PROBLEMS.md](OPEN_PROBLEMS.md) | open (batch done) | practical | 2026-09-28 batch done: §7 Morris (no-slip column at rest; DFSPH viscous-dt bug fixed; default-on is your call), §8 isolated rows (classification fix, bitwise no-op for δ-SPH), §5 englishWedge corners *worse* under new defaults (open), §6.3 re-runs clean, §1 step 1 moot (mask chatter is step-to-step → step 2 next). New: §13 `iisph` column (parked), §14 viscosity + free-slip flip. §10–§12 resolved | 2026-09-28 | 2026-09-28 |
+| [OPEN_PROBLEMS.md](OPEN_PROBLEMS.md) | open | practical | §5 resolved 2026-09-28: `fourtakas2019` (default DDT since 09-18) had its hydrostatic correction sign flipped — fixed, wedge back to 0.018. **Next: re-validate the default combo (Marrone 3.1/3.4, sloshingTank) with the fixed term.** Also open: §1 step 2 (continuous blend), §13 `iisph` (parked), §14 viscosity + free-slip flip; Morris default-on (your call) | 2026-09-28 | 2026-09-28 |
 | [PST_ALE_PLAN.md](PST_ALE_PLAN.md) | parked (user) | ambitious | Stage A (Michel PST) done and validated. Stages B′ δ-ALE-SPH → B Riemann/MUSCL → C Parshikov → D Vila on hold until the ACSPH validation is done | 2026-09-06 | 2026-09-28 |
 | [AV_PLAN.md](AV_PLAN.md) | not started | ambitious | M0–M8 all open. Its input (C&D 2010 + R&H 2012 on Monaghan, `phase6.md`) is done. First step: M0 baseline lock. Gates PESPH | 2026-09-19 | 2026-09-28 |
 | [PESPH_PLAN.md](PESPH_PLAN.md) | blocked on AV_PLAN M8 | ambitious | Not started; ~3 weeks estimated; the missing fourth scheme of the Frontiere comparison | 2026-09-19 | 2026-09-28 |
