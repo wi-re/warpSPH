@@ -207,7 +207,29 @@ isn't re-discovered as a surprise, but there is nothing queued to fix it.
   today's 0.0674 / 0.0393 / 0.0312 is a 3-4x regression since then. Knob A/B
   (revert one of today's defaults at a time to the 09-12 configuration —
   `ramped` mDBC density, `deltaSPH` DDT, RK4, `constant` walls — then all
-  four): `scripts/run_wedgeKnobAB.sh`, results below when in.
+  four): `scripts/run_wedgeKnobAB.sh`. dp = 0.01, t = 4 s, RMSE / rho g H:
+
+  | run | faces | apex | base corners | near wall/bed | settled KE |
+  |---|---|---|---|---|---|
+  | today's defaults | 0.039 | 0.031 | **0.067** | 0.057 | 7.9e-6 |
+  | `ramped` mDBC density | 0.043 | 0.031 | 0.078 | | |
+  | **`deltaSPH` DDT** | **0.014** | **0.013** | **0.020** | **0.016** | 3.0e-6 |
+  | RK4 | 0.037 | 0.037 | 0.054 | | |
+  | `constant` walls | 0.057 | 0.022 | 0.091 | | |
+  | all four reverted | 0.015 | 0.011 | 0.020 | 0.016 | 2.3e-5 |
+
+  **The DDT flip alone (`fourtakas2019`, default since 2026-09-18) explains
+  the regression** — at the wedge and in the whole near-wall band. Today's
+  code with the 09-12 configuration reproduces the 09-12 numbers. The DDT
+  already runs fluid-to-fluid only (the memory note saying otherwise is
+  stale). Leading hypothesis: Fourtakas diffuses toward an *analytic*
+  hydrostatic profile, and next to a wall — a one-sided, fluid-only stencil —
+  any departure of the real density from that profile becomes a net flux;
+  the δ-SPH term subtracts a renormalised local gradient instead and
+  vanishes for any locally linear field. Next (user suggestion): the same
+  runs x-periodic (`--semiPeriodic`, no side walls) to separate the wedge
+  from the wall/free-surface corners, where circulation shows even under
+  `deltaSPH`.
 
 (The H/Δx≈72-160 resolution hole that used to share this item was resolved
 2026-09-18: [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md).)

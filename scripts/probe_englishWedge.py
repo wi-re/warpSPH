@@ -68,7 +68,7 @@ DEFAULT_OUT = os.path.join(os.path.dirname(__file__), 'out_englishWedge')
 
 def _runOne(dp, wedge, tilt, tLimit, c0Ratio, out, video, plotInterval, scheme,
             mdbcDensityScheme=None, densityDiffusionTerm=None, integrationScheme=None,
-            wallBC=None, noPenShift=None, watch=None):
+            wallBC=None, noPenShift=None, watch=None, semiPeriodic=False):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -92,7 +92,8 @@ def _runOne(dp, wedge, tilt, tLimit, c0Ratio, out, video, plotInterval, scheme,
            + (f'_ddt-{densityDiffusionTerm}' if densityDiffusionTerm else '')
            + (f'_{integrationScheme}' if integrationScheme else '')
            + (f'_wall-{wallBC}' if wallBC else '')
-           + (f'_nopen-{noPenShift}' if noPenShift else ''))
+           + (f'_nopen-{noPenShift}' if noPenShift else '')
+           + ('_semiPeriodic' if semiPeriodic else ''))
     runRoot = os.path.join(out, tag + '_run')
 
     params = dict(
@@ -126,6 +127,10 @@ def _runOne(dp, wedge, tilt, tLimit, c0Ratio, out, video, plotInterval, scheme,
 
     if wallBC:
         params['wallBC'] = wallBC
+    if semiPeriodic:
+        # periodic in x: no side walls, so the wedge is isolated from the
+        # tank's wall/free-surface corners (user suggestion, OPEN_PROBLEMS §5)
+        params['semiPeriodic'] = True
     # one-knob A/Bs against the default combo (OPEN_PROBLEMS §5, 2026-09-28):
     # same override pattern as probe_deltaSPHMarrone.py
     _cfg0 = dambreakCase.configureScheme
@@ -469,6 +474,8 @@ def main(argv=None):
     ap.add_argument('--integrationScheme', default=None, help='e.g. rungeKutta4')
     ap.add_argument('--wallBC', default=None, choices=('constant', 'freeSlip', 'noSlip'))
     ap.add_argument('--noPenShift', default=None, choices=('derivative', 'finalize', 'off'))
+    ap.add_argument('--semiPeriodic', action='store_true',
+                    help='periodic in x (no side walls): isolates the wedge from the wall corners')
     from _runWatch import addWatchArguments, watchOverrides
     addWatchArguments(ap)
     args = ap.parse_args(argv)
@@ -479,7 +486,8 @@ def main(argv=None):
     _runOne(args.dp, args.wedge, args.tilt, args.tLimit, args.c0Ratio,
             args.out, args.video, args.plotInterval, args.scheme,
             args.mdbcDensityScheme, args.densityDiffusionTerm, args.integrationScheme,
-            args.wallBC, args.noPenShift, watch=watchOverrides(args))
+            args.wallBC, args.noPenShift, watch=watchOverrides(args),
+            semiPeriodic=args.semiPeriodic)
 
 
 if __name__ == '__main__':
