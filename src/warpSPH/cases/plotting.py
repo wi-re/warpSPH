@@ -347,6 +347,14 @@ def particlePlot(fields: Sequence[Field], figsize: Tuple[float, float] = (11, 5)
         if getattr(ctx.spec, 'show', True):   # no live window (openWindow skipped it) -> nothing to repaint
             pumpEvents(plotter)
 
+    # A grid-interpolated panel runs warp kernels (the SPH interpolation onto
+    # the grid) inside the plot hooks. Warp's current stream and module loads
+    # are per process, not per thread, so those kernels must not run on the
+    # runner's render thread alongside the step's own warp work -- that raced
+    # into CUDA "operation not supported on global/shared address space" or a
+    # hang (kelvinHelmholtz, rayleighTaylor, triplePoint; OPEN_PROBLEMS §12).
+    # `runner.py:_setupPlot` keeps such plots on the loop thread.
+    setupPlot.usesWarp = updatePlot.usesWarp = any(f.gridResolution for f in fields)
     return setupPlot, updatePlot
 
 

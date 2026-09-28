@@ -698,7 +698,12 @@ def _setupPlot(ctx: RunContext, case: Case, state):
     spec = ctx.spec
     backend = spec.plotBackend or ('vispy' if spec.dim == 2 else None)
     opts = dict(spec.plotBackendOptions or {})
-    if (spec.show or backend != 'vispy' or not spec.asyncPlot
+    # Plot hooks that launch warp kernels (grid-interpolated panels,
+    # `cases/plotting.py:particlePlot`) stay on the loop thread: warp's
+    # current stream and module loading are per process, so warp work on the
+    # render thread races the step's (OPEN_PROBLEMS §12).
+    usesWarp = getattr(case.updatePlot, 'usesWarp', False) or getattr(case.setupPlot, 'usesWarp', False)
+    if (spec.show or backend != 'vispy' or not spec.asyncPlot or usesWarp
             or opts.get('app_backend', 'egl') != 'egl'):
         return case.setupPlot(ctx, state)
     original = spec.plotBackendOptions

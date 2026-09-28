@@ -367,3 +367,12 @@ def test_explicitProgressWinsOverQuiet(capsys):
     assert 't=' in err
     _sod(nSteps=3, quiet=True)
     assert 't=' not in capsys.readouterr().err
+
+
+def test_gridInterpolatedPlotsStayOffTheRenderThread():
+    """A grid panel runs warp kernels in the plot hooks; the runner must not
+    hand those to its render thread (OPEN_PROBLEMS §12: they raced the step's
+    warp work into a CUDA error or a hang)."""
+    from warpSPH.cases.plotting import Field, particlePlot
+    assert particlePlot([Field('densities', 'rho', gridResolution=64)])[1].usesWarp
+    assert not particlePlot([Field('densities', 'rho')])[1].usesWarp
