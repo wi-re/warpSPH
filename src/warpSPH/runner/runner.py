@@ -703,8 +703,21 @@ def _setupPlot(ctx: RunContext, case: Case, state):
     # current stream and module loading are per process, so warp work on the
     # render thread races the step's (OPEN_PROBLEMS §12).
     usesWarp = getattr(case.updatePlot, 'usesWarp', False) or getattr(case.setupPlot, 'usesWarp', False)
-    if (spec.show or backend != 'vispy' or not spec.asyncPlot or usesWarp
-            or opts.get('app_backend', 'egl') != 'egl'):
+    headlessVispy = (not spec.show and backend == 'vispy'
+                     and opts.get('app_backend', 'egl') == 'egl')
+    if headlessVispy and usesWarp:
+        # still headless: render through EGL on this thread, not through the
+        # default app backend, which opens a real (black) window
+        original = spec.plotBackendOptions
+        spec.plotBackendOptions = dict(opts, app_backend='egl')
+        try:
+            return case.setupPlot(ctx, state)
+        except Exception as ex:  # noqa: BLE001 -- e.g. no EGL: default backend
+            spec.plotBackendOptions = original
+            warnings.warn(f'[warpSPH] EGL unavailable, plotting through the default backend '
+                          f'({type(ex).__name__}: {str(ex).splitlines()[0][:200]})')
+            return case.setupPlot(ctx, state)
+    if not headlessVispy or not spec.asyncPlot or usesWarp:
         return case.setupPlot(ctx, state)
     original = spec.plotBackendOptions
     spec.plotBackendOptions = dict(opts, app_backend='egl')
