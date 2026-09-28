@@ -247,9 +247,16 @@ def computeDensityDiffusionDeltaSPH_Func_i(
             # hydrostatic-density-difference correction (Eqs. 17-19 at
             # gamma -> 1) -- see the module docstring for the derivation and
             # its cross-check against this codebase's existing
-            # `hydrostaticInit`. Verified to cancel exactly (psi_ij == 0)
-            # when the density field is itself exactly hydrostatic.
-            rhoH_diff = - rho0 * wp.dot(gravity_i, x_ij) / (c0 * c0)
+            # `hydrostaticInit`. With x_ij = x_i - x_j and g the gravity
+            # vector, the hydrostatic difference is rho^H_j - rho^H_i =
+            # -rho0 (g . x_ij)/c0^2 (the deeper particle is denser), and it is
+            # SUBTRACTED. The sign here used to be flipped, which added it:
+            # zero in the bulk (the Laplacian of a linear field), but twice
+            # the plain-difference error on every truncated stencil -- walls,
+            # wedge, free surface (OPEN_PROBLEMS.md §5, 2026-09-28).
+            # `tests/test_fourtakasHydrostatic.py` checks psi_ij == 0 on an exact
+            # hydrostatic field, edge rows included.
+            rhoH_diff = rho0 * wp.dot(gravity_i, x_ij) / (c0 * c0)
             total_diff = (f_j - f_i) + rhoH_diff
             psi_ij = - scalar_t(2.0) * total_diff * n_ij / (r_ij + scalar_t(1.0e-14) * hi)
 
