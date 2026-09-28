@@ -4,6 +4,24 @@ Items that used to be in [OPEN_PROBLEMS.md](../../OPEN_PROBLEMS.md), moved here
 once resolved, with their original section number so older references still
 find them. Newest first. The original text is kept as it was when resolved.
 
+## OPEN_PROBLEMS §12 — Render thread + grid-interpolated plots crash or hang CRKSPH cases — RESOLVED 2026-09-28
+
+**What it was:** with `--plot` and no live window, the runner renders frames on
+a worker thread (`asyncPlot`, SMALL_PROBLEM_PERFORMANCE.md §9.4/§12.4).
+`kelvinHelmholtz`, `rayleighTaylor` and `triplePoint` crashed within 10 steps
+(exit 139, CUDA "operation not supported on global/shared address space",
+raised at the next event record) or hung; `yeeVortex` did not. All three have
+a `gridResolution=1024` density panel: the SPH interpolation onto that grid
+runs warp kernels inside the plot hooks, on the render thread, concurrently
+with the step's own warp work. Warp's current stream and module loading are
+per process, not per thread. Same failure on clean `main` (pre-existing; found
+by the OPEN §6.3 re-runs). `--no-asyncPlot` ran clean (40 steps, 5.8 s).
+
+**Fix:** `cases/plotting.py:particlePlot` marks hooks with a grid panel
+`usesWarp`; `runner.py:_setupPlot` keeps those on the loop thread. Pure-GL
+plots keep the render thread. `tests/test_runner.py::
+test_gridInterpolatedPlotsStayOffTheRenderThread`.
+
 ## OPEN_PROBLEMS §10 — Runner divergence detection misses bounded-NaN-free blowups — RESOLVED 2026-09-28
 
 **What it is:** `run()` reported `diverged=False` for delta-SPH toy runs that

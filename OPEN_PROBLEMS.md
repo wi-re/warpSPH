@@ -180,6 +180,15 @@ isn't re-discovered as a surprise, but there is nothing queued to fix it.
   base-corner residual (RMSE 0.0431 last measured) has moved at all, before
   deciding whether this still needs its own fix.
 
+  **Re-run 2026-09-28** (default combo, dp = 0.01, t = 4 s, video:
+  `scripts/out_looseEnds/baseline/englishWedge/`): stable, bulk / near-wall /
+  wedge-face bands pass, but the **base corners got worse — RMSE 0.0674 (max
+  0.096)**, against 0.0431 under the old defaults; the apex just fails too
+  (0.0312 vs 0.03). The frames show a weak spurious circulation along the
+  wedge faces (|v| up to 0.04 m/s) and a disturbed lattice around the apex.
+  So this still needs its own fix; which part of the default flip moved it
+  (english2025 / fourtakas2019 / symplecticEuler) is not isolated.
+
 (The H/Δx≈72-160 resolution hole that used to share this item was resolved
 2026-09-18: [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md).)
 
@@ -254,7 +263,18 @@ is the actual full-vector term, a new kernel, not a flag flip.
 `DiffusionParameters`-wired option alongside the existing `viscidNu` scalar
 term, gradcheck it, and re-run the `hydrostaticColumn` `wallBC=noSlip` A/B to
 confirm it reproduces Part 39's numbers (embMin held, KE damped) through the
-stock machinery instead of the since-removed bespoke path. `DFSPH_IMPROVEMENT_PLAN.md`'s
+stock machinery instead of the since-removed bespoke path.
+
+**2026-09-28 — implemented, A/B pending.** `diffusionParams.viscousTerm =
+ViscosityTerm.morris1997` (opt-in; default `monaghanGingold` unchanged),
+gradchecked, `tests/test_morrisViscosity.py`. **Correction to "carries no
+tangential/shear stress at all" above:** on a divergence-free shear wave
+`v = (sin ky, 0)` in the bulk, the projected term reproduces `nu lap(v)` too
+(4.8 % / 4.3 % error at n = 32 / 64, vs Morris 2.6 % / 1.8 %) — its
+`K = 2(d+2)` normalisation makes it a consistent Laplacian away from
+boundaries. So whatever Part 39's term did better has to come from the
+truncated supports at walls and the free surface, which is what the
+`hydrostaticColumn` A/B (`scripts/probe_morrisNoSlipColumn.py`) measures. `DFSPH_IMPROVEMENT_PLAN.md`'s
 ranked-queue item 1, `DFSPH_FINDINGS.md` §1.14 (both now retired to
 `docs/historic_plans/` — the incompressible/DFSPH track itself reached a
 stable, documented recommendation (`divergenceFree` default, `band2018pb` as
@@ -352,6 +372,12 @@ independent of this fix. Detection bug found on the way (all schemes): an
 isolated particle reads `lambda = 1` and is classified as bulk;
 `detectIsolated` is the exact fix, used by ACSPH's set only -- changing the
 shared detector would touch shifting / the Antuono switch everywhere.
+**2026-09-28:** checked per detector on an isolated row: the default every
+case runs (Barecasco + lambda-gradient normals), ColorField and
+ColorFieldGrad miss it; Marrone's detection flags it (its lambda reads 1.0,
+but another criterion catches it). Fixed in the shared detector on branch
+`isolated-surface` (`SurfaceDetectionConfig.flagIsolated`, default on), not
+yet merged — it changes a default, so it waits for the baseline re-runs.
 **Decision (user, 2026-09-28):** worth fixing in the shared detector
 eventually, but low priority -- it is *not* why free surfaces blow up: that
 was investigated before and traced mainly to the density-diffusion choice
@@ -398,4 +424,10 @@ the toys do not run at the Courant number the probe claims.
 
 **Next step:** make the toys' timestep hook return the pinned dt (or report
 the achieved Courant number) before relying on dt-sensitive toy results.
+
+## 12. Render thread + grid-interpolated plots crash or hang CRKSPH cases — RESOLVED 2026-09-28
+
+Moved to [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md)
+(found by the §6.3 re-runs; plot hooks that run warp kernels now stay on the
+loop thread).
 
