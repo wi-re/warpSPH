@@ -49,6 +49,8 @@ class SurfaceDetectionConfig:
 
     normalSource: NormalSource = field(default = NormalSource.ColorFieldGrad, metadata = {"help": "Source of normals to use for surface detection"})
 
+    flagIsolated: bool = field(default = True, metadata = {"help": "Also flag rows with nothing in their support (detectIsolated) as free surface; a lambda-based scheme reads them as bulk"})
+
 
 def buildDefaultSurfaceDetectionConfig() -> SurfaceDetectionConfig:
     return SurfaceDetectionConfig(

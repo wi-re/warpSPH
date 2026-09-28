@@ -270,6 +270,7 @@ def weaklyCompressibleConfigToDict(config: WeaklyCompressibleSPHConfig) -> Dict[
             'colorFieldGradThreshold': config.surfaceDetectionConfig.colorFieldGradThreshold,
             'barecascoThreshold': config.surfaceDetectionConfig.barecascoThreshold,
             'expansionIterations': config.surfaceDetectionConfig.expansionIterations,
+            'flagIsolated': config.surfaceDetectionConfig.flagIsolated,
             'scheme': config.surfaceDetectionConfig.scheme.name,
             'normalSource': config.surfaceDetectionConfig.normalSource.name,
         },
@@ -325,6 +326,7 @@ def dictToWeaklyCompressibleConfig(configDict: Dict[str, Any]) -> WeaklyCompress
             colorFieldGradThreshold=float(surfaceConfigDict.get('colorFieldGradThreshold', buildDefaultSurfaceDetectionConfig().colorFieldGradThreshold)),
             barecascoThreshold=float(surfaceConfigDict.get('barecascoThreshold', buildDefaultSurfaceDetectionConfig().barecascoThreshold)),
             expansionIterations=int(surfaceConfigDict.get('expansionIterations', buildDefaultSurfaceDetectionConfig().expansionIterations)),
+            flagIsolated=bool(surfaceConfigDict.get('flagIsolated', True)),
             scheme=SurfaceDetectionScheme[surfaceConfigDict.get('scheme', buildDefaultSurfaceDetectionConfig().scheme.name)] if isinstance(surfaceConfigDict.get('scheme', buildDefaultSurfaceDetectionConfig().scheme.name), str) else surfaceConfigDict.get('scheme', buildDefaultSurfaceDetectionConfig().scheme),
             normalSource=NormalSource[surfaceConfigDict.get('normalSource', buildDefaultSurfaceDetectionConfig().normalSource.name)] if isinstance(surfaceConfigDict.get('normalSource', buildDefaultSurfaceDetectionConfig().normalSource.name), str) else surfaceConfigDict.get('normalSource', buildDefaultSurfaceDetectionConfig().normalSource),
         )
