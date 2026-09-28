@@ -20,6 +20,7 @@ __all__ = [
     'WaveEquationScheme',
     'EquationOfState',
     'DensityDiffusionScheme',
+    'ViscosityTerm',
     'PressureForceScheme',
     'isArtificialCompressibleScheme',
 ]
@@ -260,6 +261,19 @@ class DensityDiffusionScheme(Enum):
     # already uses at gamma -> 1); needs `rho0`/`c0`/gravity, which none of
     # the other schemes do.
     fourtakas2019 = 7
+
+class ViscosityTerm(Enum):
+    # Which physical-viscosity term `inviscid=False` applies
+    # (`modules/deltaSPH/wp_viscosityDelta.py`).
+    # Monaghan & Gingold 1983 / De Courcy et al. 2024 Eq. (25):
+    # `K nu sum_j V_j (v_ij . x_ij)/|x_ij|^2 gradW_ij` -- normal-projected, so
+    # it damps approach/separation but applies no shear stress. The default.
+    monaghanGingold = 0
+    # Morris, Fox & Zhu 1997 Eq. (8): `sum_j m_j (mu_i + mu_j)/(rho_i rho_j)
+    # (x_ij . gradW_ij)/(|x_ij|^2 + eta^2) v_ij` with mu = rho nu -- the full
+    # relative-velocity vector, i.e. a real viscous (shear-carrying) Laplacian,
+    # which is what a no-slip wall needs (OPEN_PROBLEMS.md §7).
+    morris1997 = 1
 
 class PressureForceScheme(Enum):
     conservative = 0

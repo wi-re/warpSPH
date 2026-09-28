@@ -32,7 +32,10 @@ gradcheck_dissipation.py's Monaghan viscosity. Checked in all four
 `inviscid` x `approachOnly` combinations -- `approachOnly=False` removes that
 kink entirely (ACSPH needs the unclamped Monaghan-Gingold form, Eq. 25), which
 makes the branch *smoother*, so it is the clamped cases that were ever at risk;
-both are checked so a future edit to either side is covered.
+both are checked so a future edit to either side is covered. The Morris
+1997 branch (`morris=True`, `inviscid=False`) is checked too: it has its own
+density weighting (an if/else in the neighbour loop; a `continue` there
+broke the position adjoint).
 
     python scripts/gradcheck_deltaSPH.py
 """
@@ -107,7 +110,7 @@ def _run_density(label, densityScheme, withField=False) -> bool:
         return False
 
 
-def _run_velocity(label, inviscid, approachOnly=True) -> bool:
+def _run_velocity(label, inviscid, approachOnly=True, morris=False) -> bool:
     domain, positions, supports, masses, densities, adjacency, kinds = _build_case()
     velocities = torch.randn(N, DIM, dtype=DTYPE, device=DEVICE, requires_grad=True)
 
@@ -123,6 +126,7 @@ def _run_velocity(label, inviscid, approachOnly=True) -> bool:
             nu=5e-3,
             queryVelocities=vel,
             approachOnly=approachOnly,
+            morris=morris,
             adjacency=adjacency,
         )
 
@@ -150,6 +154,10 @@ def main():
         for approachOnly in (True, False):
             ok &= _run_velocity(f"inviscid={inviscid}, approachOnly={approachOnly}",
                                 inviscid, approachOnly)
+    # the Morris 1997 shear-carrying branch (OPEN_PROBLEMS.md §7): its own
+    # density weighting, and the (unused) approachOnly flag
+    for approachOnly in (True, False):
+        ok &= _run_velocity(f"morris, approachOnly={approachOnly}", False, approachOnly, morris=True)
 
     print()
     if ok:

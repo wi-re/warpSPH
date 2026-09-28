@@ -22,10 +22,16 @@ proper, `nu K sum_j (v_ij . x_ij)/|x_ij|^2 gradW_ij V_j` with
 `K = 2(dim+2) = 8` in 2D and `10` in 3D -- De Courcy et al. 2024 Eq. (25)
 verbatim, which is why ACSPH passes it (ACSPH_PLAN.md Sec. 4.1). Note this is
 still the *normal-projected* form both papers use, not a shear-carrying
-Morris et al. 1997 term (DFSPH_IMPROVEMENT_PLAN.md "What's realistically open"
-item 1); and note the `/ mean(rho_i, rho_j)`, which Eq. (25) does not have --
+term; and note the `/ mean(rho_i, rho_j)`, which Eq. (25) does not have --
 a caller wanting the literal form on a constant-density state compensates
 exactly by passing `nu * rho0`.
+`morris=True` (with `inviscid=False`) replaces that branch with the Morris,
+Fox & Zhu (1997) Eq. (8) viscous Laplacian, `sum_j m_j (mu_i + mu_j)/(rho_i
+rho_j) (x_ij . gradW_ij)/(|x_ij|^2 + eta^2) v_ij`, mu = rho nu: the full
+relative velocity, so it carries shear -- what a no-slip wall needs
+(OPEN_PROBLEMS.md §7). `approachOnly` does not apply to it; its density
+weighting is Morris' own, not the `/ mean(rho)` of the other branches.
+Selected by `diffusionParams.viscousTerm = ViscosityTerm.morris1997`.
 `alphaToNu`/`nuToAlpha` convert between the two coefficients (`alpha` given
 `c_s`, `h`, `n=dim`, and vice versa) so a case can be configured in either
 unit system.
@@ -85,7 +91,7 @@ def computeVelocityDiffusionDeltaSPH_Func_i(
     referenceVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
 
     inviscid: wp.bool, alpha: scalar_t, c_s: scalar_t, nu: scalar_t, n: wp.int32,
-    approachOnly: wp.bool,
+    approachOnly: wp.bool, morris: wp.bool,
 
     # Dummy value to allow allocation
     outputValue: Any, # type: ignore
@@ -138,8 +144,18 @@ def computeVelocityDiffusionDeltaSPH_Func_i(
         if approachOnly and mu_ij > 0:
             mu_ij = scalar_t(0.0)
 
-
-        out += apparentVolume * mu_ij * factor * gradw_ij / ( (rhoj + rhoi) / scalar_t(2.0)) # * hi
+        # One contribution, chosen by an if/else rather than a `continue`:
+        # a `continue` in this loop broke the position adjoint (gradcheck).
+        contrib = apparentVolume * mu_ij * factor * gradw_ij / ( (rhoj + rhoi) / scalar_t(2.0)) # * hi
+        if morris and not inviscid:
+            # Morris et al. 1997 Eq. (8) with mu = rho nu:
+            # m_j (mu_i + mu_j)/(rho_i rho_j) = V_j nu (rho_i + rho_j)/rho_i.
+            # x_ij . gradW_ij < 0, so the term pulls v_i towards v_j along the
+            # full relative velocity -- shear included. eta^2 = 0.0025 H^2 ~
+            # Morris' (0.1 h)^2 with the support H ~ 2h; no approach clamp.
+            morrisFactor = apparentVolume * nu * (rhoi + rhoj) / rhoi
+            contrib = morrisFactor * wp.dot(x_ij, gradw_ij) / (wp.dot(x_ij, x_ij) + scalar_t(0.0025) * hi * hi) * vel_ij
+        out += contrib
         
     return out
 
@@ -172,7 +188,7 @@ def computeVelocityDiffusionDeltaSPH_Func_Adjacency(
     
     queryVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     inviscid: wp.bool, alpha: scalar_t, c_s: scalar_t, nu: scalar_t, n: wp.int32,
-    approachOnly: wp.bool,
+    approachOnly: wp.bool, morris: wp.bool,
     
     outputValue : Any, # type: ignore
 ):
@@ -224,7 +240,7 @@ def computeVelocityDiffusionDeltaSPH_Func_Adjacency(
             
             v_i, referenceVelocities,
             inviscid, alpha, c_s, nu, n,
-            approachOnly,
+            approachOnly, morris,
 
 
             outputValue,
@@ -248,7 +264,7 @@ def computeVelocityDiffusionDeltaSPH_Kernel(
     # Do not change the parameters above
     queryVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     inviscid: wp.bool, alpha: scalar_t, c_s: scalar_t, nu: scalar_t, dim: wp.int32,
-    approachOnly: wp.bool,
+    approachOnly: wp.bool, morris: wp.bool,
 
     # The last parameter is always the output array and should not be changed
     outputValues : wp.array(dtype = vector(length=Any, dtype=scalar_t)) # type: ignore
@@ -266,7 +282,7 @@ def computeVelocityDiffusionDeltaSPH_Kernel(
         # The parameters above are default parameters and shold not be changed
         queryVelocities, referenceVelocities,
         inviscid, alpha, c_s, nu, dim,
-        approachOnly,
+        approachOnly, morris,
 
 
         zero_like_warp(outputValues)
@@ -286,7 +302,7 @@ def computeVelocityDiffusionDeltaSPH_KernelTiled(
     # Do not change the parameters above
     queryVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     inviscid: wp.bool, alpha: scalar_t, c_s: scalar_t, nu: scalar_t, dim: wp.int32,
-    approachOnly: wp.bool,
+    approachOnly: wp.bool, morris: wp.bool,
 
     # The last parameter is always the output array and should not be changed
     outputValues : wp.array(dtype = vector(length=Any, dtype=scalar_t)) # type: ignore
@@ -302,7 +318,7 @@ def computeVelocityDiffusionDeltaSPH_KernelTiled(
         kernelProperties,
         queryVelocities, referenceVelocities,
         inviscid, alpha, c_s, nu, dim,
-        approachOnly,
+        approachOnly, morris,
         zero_like_warp(outputValues)
     )
     total = laneSum(partial)
@@ -327,6 +343,7 @@ _VELOCITY_DIFFUSION_DELTA_SPH = OperatorSpec(
         ExtraSpec("nu", ExtraKind.SCALAR),
         ExtraSpec("dim", ExtraKind.SCALAR),
         ExtraSpec("approachOnly", ExtraKind.SCALAR),
+        ExtraSpec("morris", ExtraKind.SCALAR),
     ),
 )
 
@@ -341,6 +358,7 @@ def computeVelocityDiffusionDeltaSPH(
     c_s: float = 1.0,
     nu: float = 1e-3,
     approachOnly: bool = True,
+    morris: bool = False,
 
     queryVelocities: Optional[torch.Tensor] = None, referenceVelocities: Optional[torch.Tensor] = None,
 
@@ -384,6 +402,7 @@ def computeVelocityDiffusionDeltaSPH(
                 queryVelocities=queryVelocities, referenceVelocities=referenceVelocities,
                 inviscid=wp.bool(inviscid), alpha=scalar_t(alpha), c_s=scalar_t(c_s), nu=scalar_t(nu),
                 dim=wp.int32(domain.dim), approachOnly=wp.bool(approachOnly),
+                morris=wp.bool(morris),
             )
 
 
