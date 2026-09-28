@@ -66,7 +66,9 @@ C0_RATIO = 20.0
 DEFAULT_OUT = os.path.join(os.path.dirname(__file__), 'out_englishWedge')
 
 
-def _runOne(dp, wedge, tilt, tLimit, c0Ratio, out, video, plotInterval, scheme):
+def _runOne(dp, wedge, tilt, tLimit, c0Ratio, out, video, plotInterval, scheme,
+            mdbcDensityScheme=None, densityDiffusionTerm=None, integrationScheme=None,
+            wallBC=None, noPenShift=None, watch=None):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -85,7 +87,12 @@ def _runOne(dp, wedge, tilt, tLimit, c0Ratio, out, video, plotInterval, scheme):
 
     tag = (f'{scheme}_dp{dp:g}'
            + ('_wedge' if wedge else '_flat')
-           + (f'_tilt{tilt:g}' if tilt else ''))
+           + (f'_tilt{tilt:g}' if tilt else '')
+           + (f'_mdbcRho-{mdbcDensityScheme}' if mdbcDensityScheme else '')
+           + (f'_ddt-{densityDiffusionTerm}' if densityDiffusionTerm else '')
+           + (f'_{integrationScheme}' if integrationScheme else '')
+           + (f'_wall-{wallBC}' if wallBC else '')
+           + (f'_nopen-{noPenShift}' if noPenShift else ''))
     runRoot = os.path.join(out, tag + '_run')
 
     params = dict(
@@ -117,8 +124,28 @@ def _runOne(dp, wedge, tilt, tLimit, c0Ratio, out, video, plotInterval, scheme):
             maxExtent=WEDGE_MAX_EXTENT,
         )
 
+    if wallBC:
+        params['wallBC'] = wallBC
+    # one-knob A/Bs against the default combo (OPEN_PROBLEMS §5, 2026-09-28):
+    # same override pattern as probe_deltaSPHMarrone.py
+    _cfg0 = dambreakCase.configureScheme
+    def _cfg(ctx, _p=_cfg0):
+        _p(ctx)
+        sc = ctx.schemeConfig
+        if mdbcDensityScheme:
+            sc.mdbcDensityScheme = mdbcDensityScheme
+        if densityDiffusionTerm:
+            from warpSPH.enumTypes import DensityDiffusionScheme
+            sc.diffusionParams.densityDiffusionTerm = DensityDiffusionScheme[densityDiffusionTerm]
+        if noPenShift:
+            sc.mdbcNoPenShiftMode = noPenShift
+    dambreakCase.configureScheme = _cfg
+
     kw = dict(scheme=scheme, L=TANK_H, nx=nx, tLimit=tLimit,
               quiet=True, store=False, progress=True, params=params)
+    if integrationScheme:
+        kw['integrationScheme'] = integrationScheme
+    kw.update(watch or {})
     if video:
         # vispy (the runner's own 2D default), NOT matplotlib -- the mpl encode
         # path is ~50-80x slower and dominates wall time. See the plan's banner.
@@ -435,13 +462,24 @@ def main(argv=None):
     ap.add_argument('--plotInterval', type=int, default=40)
     ap.add_argument('--out', default=DEFAULT_OUT)
     ap.add_argument('--report', action='store_true')
+    # one-knob A/Bs against the default combo (OPEN_PROBLEMS §5)
+    ap.add_argument('--mdbcDensityScheme', default=None, choices=('ramped', 'band', 'english2025'))
+    ap.add_argument('--densityDiffusionTerm', default=None,
+                    help='DensityDiffusionScheme name, e.g. deltaSPH (the pre-2026-09-18 default)')
+    ap.add_argument('--integrationScheme', default=None, help='e.g. rungeKutta4')
+    ap.add_argument('--wallBC', default=None, choices=('constant', 'freeSlip', 'noSlip'))
+    ap.add_argument('--noPenShift', default=None, choices=('derivative', 'finalize', 'off'))
+    from _runWatch import addWatchArguments, watchOverrides
+    addWatchArguments(ap)
     args = ap.parse_args(argv)
 
     if args.report:
         _report(args.out)
         return
     _runOne(args.dp, args.wedge, args.tilt, args.tLimit, args.c0Ratio,
-            args.out, args.video, args.plotInterval, args.scheme)
+            args.out, args.video, args.plotInterval, args.scheme,
+            args.mdbcDensityScheme, args.densityDiffusionTerm, args.integrationScheme,
+            args.wallBC, args.noPenShift, watch=watchOverrides(args))
 
 
 if __name__ == '__main__':

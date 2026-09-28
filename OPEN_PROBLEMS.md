@@ -201,6 +201,14 @@ isn't re-discovered as a surprise, but there is nothing queued to fix it.
   So this still needs its own fix; which part of the default flip moved it
   (english2025 / fourtakas2019 / symplecticEuler) is not isolated.
 
+  **Correction (2026-09-28):** 0.0431 was not the last good number. On
+  2026-09-12 (`DELTASPH_VALIDATION_PLAN.md` §5.13, hybrid ghost placement)
+  this case measured base corners **0.0178**, faces 0.012, apex 0.008 — so
+  today's 0.0674 / 0.0393 / 0.0312 is a 3-4x regression since then. Knob A/B
+  (revert one of today's defaults at a time to the 09-12 configuration —
+  `ramped` mDBC density, `deltaSPH` DDT, RK4, `constant` walls — then all
+  four): `scripts/run_wedgeKnobAB.sh`, results below when in.
+
 (The H/Δx≈72-160 resolution hole that used to share this item was resolved
 2026-09-18: [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md).)
 

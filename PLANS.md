@@ -26,9 +26,9 @@ and what matters most. Detail lives in the plan files; this file is the map.
 - The **Focus** line is the user's call. Claude may suggest, not set it.
 - Every plan file carries a one-line pointer back here under its title.
 
-**Focus:** *not set* — the 2026-09-28 loose-ends batch is done (see the
-`OPEN_PROBLEMS.md` row). Work happens on branch `dev`, merged back into
-`main` periodically.
+**Focus** (user, 2026-09-28): `OPEN_PROBLEMS.md` §5 — the englishWedge
+concave-corner residual, worse under the current defaults. Work happens on
+branch `dev`, merged back into `main` periodically.
 
 ## Plans
 
