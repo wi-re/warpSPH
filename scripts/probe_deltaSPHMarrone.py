@@ -148,7 +148,7 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
             pressureForceRenormalized: bool = False,
             jitter: float = 0.0, seed: int = 1, cudaGraph: bool = True,
             pipeline: bool = True, show: bool = True, watch: dict = None,
-            flagIsolated: bool = True):
+            flagIsolated: bool = True, maskDiagnostics: bool = False, freezeMask: bool = False):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -186,7 +186,8 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
           + (f'_ddt-{densityDiffusionTerm}' if densityDiffusionTerm else '')
           + (f'_mdbcRho-{mdbcDensityScheme}' if mdbcDensityScheme else '')
           + (f'_j{seed}' if jitter > 0.0 else '')
-          + ('' if flagIsolated else '_noFlagIsolated'))
+          + ('' if flagIsolated else '_noFlagIsolated')
+          + ('_maskDiag' if maskDiagnostics else '') + ('_freezeMask' if freezeMask else ''))
     runRoot = os.path.join(out, tag + '_run')
 
     # Marrone reports each signal area-integrated over a phi = 90 mm probe disc
@@ -287,6 +288,23 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
         def _cfgIso(ctx, _p=_prevCfgIso):
             _p(ctx); ctx.schemeConfig.surfaceDetectionConfig.flagIsolated = False
         dambreakCase.configureScheme = _cfgIso
+    if maskDiagnostics or freezeMask:
+        # OPEN_PROBLEMS.md §1 step 1: the Antuono switch's surface mask --
+        # flip counts per step (within / between steps) as trajectory columns,
+        # and optionally the mask frozen across the step's stages. Both eager.
+        _prevCfg6 = dambreakCase.configureScheme
+        def _cfg6(ctx, _p=_prevCfg6):
+            _p(ctx)
+            ctx.schemeConfig.surfaceMaskDiagnostics = bool(maskDiagnostics)
+            ctx.schemeConfig.freezeSurfaceMaskAcrossStages = bool(freezeMask)
+        dambreakCase.configureScheme = _cfg6
+        if maskDiagnostics:
+            _diag = dambreakCase.diagnostics
+            def _maskDiag(ctx, state, _d=_diag):
+                row = dict(_d(ctx, state)) if _d is not None else {}
+                row.update(getattr(ctx.schemeConfig, '_surfaceMaskStats', None) or {})
+                return row
+            dambreakCase.diagnostics = _maskDiag
 
     if jitter > 0.0:
         # independent realisations (MDBC_CONTACT_LINE_PLAN.md §12, same as
@@ -310,7 +328,8 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
 
     rows = [x for x in r.trajectory if x.get('step', -2) >= -1]
     keys = ['step', 't', 'tStar', 'kineticEnergy', 'maxVelocity',
-            'minDensity', 'maxDensity', 'nPenetrating', 'maxPenetrationDx']
+            'minDensity', 'maxDensity', 'nPenetrating', 'maxPenetrationDx',
+            'maskSurface', 'maskFlipsIntraStep', 'maskFlipsStepToStep']
     for k in range(len(SENSORS)):
         keys += [f'pProbe{k}', f'pProbe{k}Star', f'pProbe{k}Nnbr',
                  f'pProbe{k}In1Star', f'pProbe{k}ShepStar']
@@ -900,6 +919,12 @@ def main():
     ap.add_argument('--noFlagIsolated', action='store_true',
                     help="don't flag isolated rows as free surface (SurfaceDetectionConfig."
                          'flagIsolated=False) -- A/B of OPEN_PROBLEMS §8')
+    ap.add_argument('--surfaceMaskDiagnostics', action='store_true',
+                    help='OPEN_PROBLEMS §1 step 1: count Antuono surface-mask flips per step '
+                         '(maskFlipsIntraStep / maskFlipsStepToStep columns); eager')
+    ap.add_argument('--freezeSurfaceMask', action='store_true',
+                    help="reuse the step's first-stage surface mask at its later stages "
+                         '(schemeConfig.freezeSurfaceMaskAcrossStages); eager')
     from _runWatch import addWatchArguments, watchOverrides
     addWatchArguments(ap)
     args = ap.parse_args()
@@ -914,7 +939,8 @@ def main():
             args.pressureForceTerm, args.densityDiffusionTerm,
             args.mdbcDensityScheme, args.pressureForceRenormalized,
             args.jitter, args.seed, args.cudaGraph, args.pipeline, args.show,
-            watch=watchOverrides(args), flagIsolated=not args.noFlagIsolated)
+            watch=watchOverrides(args), flagIsolated=not args.noFlagIsolated,
+            maskDiagnostics=args.surfaceMaskDiagnostics, freezeMask=args.freezeSurfaceMask)
 
 
 if __name__ == '__main__':

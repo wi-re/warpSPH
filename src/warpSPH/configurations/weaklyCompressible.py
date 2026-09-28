@@ -69,6 +69,8 @@ class WeaklyCompressibleSPHConfig:
     # any single-evaluation scheme (forwardEuler/semiImplicitEuler), since
     # there is only one stage to freeze against.
     freezeDiffusionAcrossStages: bool = field(default=False, metadata={'description': "Freeze delta-SPH's diffusive terms across RK sub-stages (Sun et al. 2017 Sec. 2), re-evaluating once per real step instead of once per stage"})
+    freezeSurfaceMaskAcrossStages: bool = field(default=False, metadata={'description': "Reuse the first stage's free-surface mask (the Antuono pressure switch's input) at the later stages of a step (OPEN_PROBLEMS.md §1 step 1)"})
+    surfaceMaskDiagnostics: bool = field(default=False, metadata={'description': "Count surface-mask flips per step (within a step, and step to step) into schemeConfig._surfaceMaskStats; eager only"})
 
     #: Lone fluid particles (no fluid neighbour in the support; wall rows may
     #: be present) get `rho = rho0` (p = 0) at the end of every step. A lone
@@ -278,6 +280,8 @@ def weaklyCompressibleConfigToDict(config: WeaklyCompressibleSPHConfig) -> Dict[
         'regions': [region.toDict() for region in config.regions],
         'rigidBodies': [body.toDict() for body in config.rigidBodies],
         'freezeDiffusionAcrossStages': config.freezeDiffusionAcrossStages,
+        'freezeSurfaceMaskAcrossStages': config.freezeSurfaceMaskAcrossStages,
+        'surfaceMaskDiagnostics': config.surfaceMaskDiagnostics,
     }
 
 def dictToWeaklyCompressibleConfig(configDict: Dict[str, Any]) -> WeaklyCompressibleSPHConfig:
@@ -334,5 +338,7 @@ def dictToWeaklyCompressibleConfig(configDict: Dict[str, Any]) -> WeaklyCompress
     config.regions = [ParticleRegion.fromDict(regionDict) for regionDict in configDict.get('regions', [])]
     config.rigidBodies = [RigidBody.fromDict(bodyDict) for bodyDict in configDict.get('rigidBodies', [])]
     config.freezeDiffusionAcrossStages = bool(configDict.get('freezeDiffusionAcrossStages', False))
+    config.freezeSurfaceMaskAcrossStages = bool(configDict.get('freezeSurfaceMaskAcrossStages', False))
+    config.surfaceMaskDiagnostics = bool(configDict.get('surfaceMaskDiagnostics', False))
 
     return config

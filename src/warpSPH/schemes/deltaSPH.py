@@ -98,10 +98,60 @@ def _rhsIsGraphable(schemeConfig, stageIndex) -> bool:
         return False
     if getattr(schemeConfig, 'freezeDiffusionAcrossStages', False) and stageIndex is not None:
         return False
+    # both keep Python-side per-step state (the stage-0 mask, flip counters)
+    if getattr(schemeConfig, 'freezeSurfaceMaskAcrossStages', False) or \
+            getattr(schemeConfig, 'surfaceMaskDiagnostics', False):
+        return False
     for bc in getattr(schemeConfig, 'boundaryConditions', None) or []:
         if bc.dirichletFunctions or bc.forcingFunctions or bc.updateFunctions:
             return False
     return True
+
+
+def _isFirstStage(currentState, dt, schemeConfig, stageIndex) -> bool:
+    """Whether this RHS call is the first stage of a real step. From
+    `stageIndex` where the integrator passes one (RungeKuttaB); otherwise
+    (symplectic Euler: k0 at t^n, k1 at t^n + dt/2, both called with the
+    stage `dt/2` and no index) from the time: a later stage sits exactly one
+    stage-`dt` after the step's first one."""
+    if stageIndex is not None:
+        return stageIndex == 0
+    t = float(currentState.t)
+    t0 = getattr(schemeConfig, '_surfaceMaskStepT', None)
+    if t0 is not None and abs(t - (t0 + float(dt))) <= 1e-9 * max(1.0, abs(t)):
+        return False
+    return True
+
+
+def _surfaceMaskAcrossStages(currentState, dt, schemeConfig, stageIndex) -> None:
+    """OPEN_PROBLEMS.md §1 step 1: the Antuono switch's surface mask,
+    measured (`surfaceMaskDiagnostics`) and optionally frozen across the
+    stages of a step (`freezeSurfaceMaskAcrossStages`). Eager only."""
+    freeze = getattr(schemeConfig, 'freezeSurfaceMaskAcrossStages', False)
+    diag = getattr(schemeConfig, 'surfaceMaskDiagnostics', False)
+    if not (freeze or diag):
+        return
+    mask = currentState.surfaceIndicators
+    if _isFirstStage(currentState, dt, schemeConfig, stageIndex):
+        stats = getattr(schemeConfig, '_surfaceMaskStats', None)
+        if diag:
+            prev = getattr(schemeConfig, '_surfaceMaskStepStart', None)
+            stats = {'maskSurface': int(mask.sum()), 'maskFlipsIntraStep': 0,
+                     'maskFlipsStepToStep': (int((prev != mask).sum())
+                                             if prev is not None and prev.shape == mask.shape else -1)}
+            schemeConfig._surfaceMaskStats = stats
+        schemeConfig._surfaceMaskStepStart = mask.clone()
+        schemeConfig._surfaceMaskStepT = float(currentState.t)
+        return
+    start = getattr(schemeConfig, '_surfaceMaskStepStart', None)
+    if start is None or start.shape != mask.shape:
+        return
+    if diag:
+        # rows whose classification this stage differs from the step's first
+        stats = schemeConfig._surfaceMaskStats
+        stats['maskFlipsIntraStep'] = max(stats['maskFlipsIntraStep'], int((start != mask).sum()))
+    if freeze:
+        currentState.surfaceIndicators = start.clone()
 
 
 def _graphedRHS(schemeConfig):
@@ -188,6 +238,7 @@ def _deltaSPH_rhs(
         currentState.surfaceIndicators = (fsm > 0.5).to(torch.int32)
         currentState.surfaceNormals = n
         currentState.surfaceLambdas = lMin
+        _surfaceMaskAcrossStages(currentState, dt, schemeConfig, stageIndex)
         # print(f'Surface particles: {currentState.surfaceIndicators.sum().item()} / {currentState.surfaceIndicators.shape[0]} ({100 * currentState.surfaceIndicators.sum().item() / currentState.surfaceIndicators.shape[0]:.2f}%)')
 
 
