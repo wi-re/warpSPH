@@ -707,6 +707,39 @@ def test_detectIsolatedFindsExactlyTheEmptySupports(runtime):
     assert not bool(iso[:-1].any())
 
 
+def test_sharedSurfaceDetectorFlagsIsolatedRows(runtime):
+    """`detectFreeSurface` (every scheme's detector) with the configuration the
+    cases run (Barecasco + lambda-gradient normals): the isolated row is not
+    flagged on its own (neither are ColorField / ColorFieldGrad; Marrone's
+    detection does flag it); with `flagIsolated` (the default) it is surface,
+    and nothing else changes (OPEN_PROBLEMS.md §8)."""
+    import dataclasses
+    from warpSPH.configurations.moduleConfigurations.surfaceDetection import (
+        NormalSource, SurfaceDetectionConfig, SurfaceDetectionScheme)
+    from warpSPH.modules.surfaceDetection import detectFreeSurface
+    device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+    system, config, schemeConfig = buildSystem(device, torch.float32)
+    st = system.state
+    far = torch.tensor([[3.0, 3.0]], device=device, dtype=st.positions.dtype)
+    n = st.positions.shape[0]
+    st.positions = torch.cat([st.positions, far])
+    for name in ('supports', 'masses', 'densities', 'pressures', 'kinds', 'materials'):
+        v = getattr(st, name)
+        setattr(st, name, torch.cat([v, v[:1]]))
+    st.velocities = torch.cat([st.velocities, torch.zeros_like(far)])
+    st.UIDs = torch.arange(n + 1, dtype=torch.int32, device=device)
+    st.UIDcounter = n + 1
+    surface = SurfaceDetectionConfig(active=True, scheme=SurfaceDetectionScheme.Barecasco,
+                                     normalSource=NormalSource.LambdaGrad, expansionIterations=0)
+    raw = {}
+    for flag in (False, True):
+        cfg = dataclasses.replace(surface, flagIsolated=flag)
+        raw[flag] = detectFreeSurface(st, config, schemeConfig, cfg, None, returnNormals=False)[0]
+    assert not bool(raw[False][-1] > 0.5)          # missed without the flag
+    assert bool(raw[True][-1] > 0.5)
+    assert torch.equal(raw[False][:-1] > 0.5, raw[True][:-1] > 0.5)
+
+
 # --- unilateral fluid-solid pair force ('wall', MDBC_CONTACT_LINE_PLAN.md §9) -
 
 def _walledLattice():

@@ -18,6 +18,7 @@ from .maronneNormals import computeNormalsMaronne
 
 from .barecascoDetection import detectFreeSurfaceBarecasco
 from .maronneDetection import detectFreeSurfaceMaronne
+from .isolated import detectIsolated
 
 import warp as wp
 from warp.types import vector, matrix
@@ -148,6 +149,15 @@ def detectFreeSurface(
 
         if surfaceConfig.normalSource == NormalSource.Native:
             normals = normals2
+        if getattr(surfaceConfig, 'flagIsolated', True):
+            # A row with nothing inside its support has no renormalization
+            # matrix; the lambda-based schemes fall back to the identity and
+            # read it as bulk (lambda = 1), although its support is all air
+            # (OPEN_PROBLEMS.md §8, `isolated.py`). Exact, no threshold. It has
+            # no pair interactions, so this corrects the classification (and
+            # row-local consumers) rather than the neighbour sums.
+            isolated = detectIsolated(currentState, config, adjacency)
+            fsm = (fsm | isolated) if fsm.dtype == torch.bool else torch.where(isolated, torch.ones_like(fsm), fsm)
         with record_function("[warpSPH] - (freesurface) - detectFreeSurface - dilation"):
             fs = fsm.clone().to(dtype = currentState.positions.dtype, device = currentState.positions.device)
             for i in range(surfaceConfig.expansionIterations):
