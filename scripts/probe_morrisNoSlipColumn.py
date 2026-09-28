@@ -2,7 +2,8 @@
 `hydrostaticColumn` a clean viscous no-slip wall?
 
 Re-grades the post-Part-41 table of `docs/historic_plans/DFSPH_FINDINGS.md`
-§1.14 (`iisph`, nx=128, 1200 steps, tail = last quarter), where `wallBC=noSlip`
+§1.14 (there: `iisph`, nx=128, 1200 steps, tail = last quarter; here by default
+`divergenceFree`, since `iisph` no longer holds the free-slip arm — OPEN §13), where `wallBC=noSlip`
 + `nu=0.01` through the normal-projected term bounded the slosh (KE 4x down)
 but roughened the surface (embMin 0.94 -> 0.60, |v|max 3.7), while Part 39's
 since-removed bespoke shear Laplacian held embMin 0.94-0.97. Arms:
@@ -44,7 +45,11 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--nx', type=int, default=128)
     ap.add_argument('--steps', type=int, default=1200)
-    ap.add_argument('--scheme', default='iisph')
+    # divergenceFree: the case default; `iisph` (the DFSPH_FINDINGS 1.14 table's
+    # scheme) no longer holds even the free-slip arm (OPEN_PROBLEMS.md §13)
+    ap.add_argument('--scheme', default='divergenceFree')
+    ap.add_argument('--integrationScheme', default=None,
+                    help="None = the case's own; the 1.14 table ran iisph with semiImplicitEuler")
     ap.add_argument('--arms', default=','.join(ARMS))
     ap.add_argument('--plotInterval', type=int, default=10)
     ap.add_argument('--video', action=argparse.BooleanOptionalAction, default=True)
@@ -63,7 +68,9 @@ def main():
     for arm in args.arms.split(','):
         params = dict(ARMS[arm])
         kw = dict(nx=args.nx, nSteps=args.steps, scheme=args.scheme, params=params,
-                  integrationScheme='semiImplicitEuler', quiet=True, progress=True, store=False)
+                  quiet=True, progress=True, store=False)
+        if args.integrationScheme:
+            kw['integrationScheme'] = args.integrationScheme
         if args.video:
             kw.update(plot=True, video=True, show=False, plotInterval=args.plotInterval,
                       exportRoot=os.path.join(args.out, arm))

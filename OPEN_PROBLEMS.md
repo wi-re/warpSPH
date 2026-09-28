@@ -220,6 +220,14 @@ Three loose ends, all optional:
    the same sampler and now get a slightly different (more correct) mass,
    but none are in `tests/test_physics.py`'s fixture set and none were
    re-run by hand.
+   **Done 2026-09-28** (`scripts/run_looseEndsBaseline.sh baseline`, video,
+   `scripts/out_looseEnds/baseline/`): all eight reach their tLimit, no
+   velocity alarm, total energy conserved to the printed digits in the
+   compressible ones (kidder is driven, RT's total excludes potential energy).
+   Frames match the stored references where comparable (squarePatch vs the
+   2026-09-18 gallery, kelvinHelmholtz, rayleighTaylor plumes at t≈3.8). The
+   first pass crashed three CRKSPH cases — not the sampler fix, the render
+   thread (§12, resolved). Item 3 closed; items 1 and 2 stay optional.
 
 ## 7. Missing shear-carrying laminar viscosity term (Morris et al. 1997) —
 no tangential stress at a no-slip wall
@@ -274,7 +282,34 @@ tangential/shear stress at all" above:** on a divergence-free shear wave
 `K = 2(d+2)` normalisation makes it a consistent Laplacian away from
 boundaries. So whatever Part 39's term did better has to come from the
 truncated supports at walls and the free surface, which is what the
-`hydrostaticColumn` A/B (`scripts/probe_morrisNoSlipColumn.py`) measures. `DFSPH_IMPROVEMENT_PLAN.md`'s
+`hydrostaticColumn` A/B (`scripts/probe_morrisNoSlipColumn.py`) measures.
+
+**A/B, 2026-09-28** (`scripts/probe_morrisNoSlipColumn.py`, `divergenceFree`
+— `iisph` no longer holds even the free-slip arm, §13). First pass: projected
++ no-slip was already clean on `divergenceFree` (embMin 0.956, slope 1.003 —
+Part 41's embMin 0.60 was `iisph`-specific); Morris + no-slip showed a
+near-wall band at |v| ~0.17 whose velocity **flipped sign every step** while
+the particles stayed put — an explicit-diffusion instability. Cause: the
+shared DFSPH timestep (`kolmogorovIncompressibleTimestep`) divided the viscous
+limit by `kernelScale` once instead of squared, allowing nu dt / hs^2 = 0.24
+(hs = smoothing length) instead of Morris' 0.125. Fixed; at the corrected
+limit Morris + no-slip settles the column to rest (|v|max <= 0.01, near-wall
+and bulk rows ~1e-4 by t = 0.2). The projected term tolerated the old limit
+because it couples more weakly. Final table (`scripts/out_morrisNoSlipColumn/SUMMARY.md`,
+`divergenceFree`, nx=128, 1200 steps, tail = last quarter, corrected dt):
+
+| arm | \|v\|max mean | KE mean | embMin | slope |
+|---|---|---|---|---|
+| free-slip, nu = 0 | 0.541 | 3.1e-4 | 0.889 | 0.966 |
+| no-slip, projected | 0.0127 | 1.5e-7 | 1.000 | 1.004 |
+| no-slip, Morris | 0.0055 | 4.3e-8 | 1.000 | 1.006 |
+| free-slip, Morris | 0.171 | 5.3e-5 | 0.982 | 1.006 — see §14 |
+
+**Verdict:** with a no-slip wall both terms now bring the column to rest;
+Morris damps ~3.5x harder (KE) with smaller peaks. The Part 39 gap is closed
+through the stock machinery. Morris stays opt-in (`viscousTerm`); whether to
+make it the default for viscous no-slip cases is a separate decision (user).
+**Resolved** except that decision — the free-slip + viscosity row is §14. `DFSPH_IMPROVEMENT_PLAN.md`'s
 ranked-queue item 1, `DFSPH_FINDINGS.md` §1.14 (both now retired to
 `docs/historic_plans/` — the incompressible/DFSPH track itself reached a
 stable, documented recommendation (`divergenceFree` default, `band2018pb` as
@@ -430,4 +465,39 @@ the achieved Courant number) before relying on dt-sensitive toy results.
 Moved to [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md)
 (found by the §6.3 re-runs; plot hooks that run warp kernels now stay on the
 loop thread).
+
+## 13. `hydrostaticColumn` under `iisph` blows up in its default free-slip configuration
+
+**What it is (2026-09-28, found by the §7 Morris A/B):** `iisph`, nx=128,
+`semiImplicitEuler`, `wallBC=freeSlip`, `nu=0` — the configuration
+`docs/historic_plans/DFSPH_FINDINGS.md` §1.14's post-Part-41 table graded as
+stable over 1200 steps (|v|max 1.94, embMin 0.94) — now runs away: |v|max 24
+by t = 0.147 (step 238), velocity alarm at step 433 (particle near the bottom
+wall), 1.25e6 by step 1200. Blocks the §7 A/B, whose other arms are judged
+against this one. Next: same arm on `main` (is it today's work?), then bisect
+back to 2026-09-04.
+
+**Narrowed the same day:** also on clean `main` (not today's work), and
+**`iisph` only** — the case default `divergenceFree` holds the same column
+(|v|max 0.3-0.7, embMin 0.95-0.98 over 1200 steps / 8 s). A single-run bisect
+is unreliable: before 2026-09-02 the case jittered its lattice with an
+unseeded RNG, so the same commit gave |v|max 1.5-4.2 over 300 steps; `71a8ae7`
+("tmp commit", 2026-09-02) commented that jitter out (still out today), which
+made runs deterministic. Re-enabling it on today's code helps (|v|max 6.6-21
+vs 39) but does not restore the old behaviour, so more than one change since
+2026-09-01 is involved (dt also halved: t = 0.31 vs 0.69 after 300 steps).
+**Parked** (`iisph` is the retired DFSPH track's reference variant); the §7 A/B
+runs on `divergenceFree` instead. To resume: bisect with ~3 jittered runs per
+commit; decide whether the `71a8ae7` jitter removal was meant to stay.
+
+## 14. DFSPH + physical viscosity + free-slip walls: the column's velocity alternates sign every step
+
+**What it is (2026-09-28, found by §7's A/B):** `hydrostaticColumn`,
+`divergenceFree`, `wallBC=freeSlip`, `nu=0.01`: the mean vertical velocity of
+the whole column flips sign every step (±0.015-0.019), with either viscosity
+term (projected or Morris); late on a near-wall horizontal band does the same.
+Not the viscous timestep limit — halving dt only shrinks it (±0.005-0.01).
+Absent with `nu = 0` (free slip) and with no-slip walls. Suspects: the
+free-slip boundary-velocity mirror (`computeBoundaryVelocities`) feeding the
+viscous term, against the divergence-free solve. Not investigated further.
 
