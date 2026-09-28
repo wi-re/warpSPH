@@ -449,16 +449,10 @@ walls): growth there would point at the solve, none at the wall closure.
 Moved to [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md) (velocity
 alarm + probe stall defaults; README "Watching a run").
 
-## 11. probe_contactLine delta-SPH toys: pinned dt is overridden
+## 11. probe_contactLine delta-SPH toys: pinned dt is overridden — RESOLVED 2026-09-28
 
-**What it is (minor, probe-level):** the probe sets `soundSpeed` and
-`targetDt = 0.3 dx / c0` for the WC toys, but the per-step adaptive
-`computeTimestep` hook overrides dt (the runs still step at ~5.9e-4,
-acoustic Courant ~0.8). Stable with `symplecticEuler`, so results stand, but
-the toys do not run at the Courant number the probe claims.
-
-**Next step:** make the toys' timestep hook return the pinned dt (or report
-the achieved Courant number) before relying on dt-sensitive toy results.
+Moved to [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md) (the
+toys' adaptive dt is capped at the pinned acoustic Courant 0.3).
 
 ## 12. Render thread + grid-interpolated plots crash or hang CRKSPH cases — RESOLVED 2026-09-28
 

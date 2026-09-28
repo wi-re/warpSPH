@@ -4,6 +4,21 @@ Items that used to be in [OPEN_PROBLEMS.md](../../OPEN_PROBLEMS.md), moved here
 once resolved, with their original section number so older references still
 find them. Newest first. The original text is kept as it was when resolved.
 
+## OPEN_PROBLEMS §11 — probe_contactLine delta-SPH toys: pinned dt is overridden — RESOLVED 2026-09-28
+
+**What it is (minor, probe-level):** the probe sets `soundSpeed` and
+`targetDt = 0.3 dx / c0` for the WC toys, but the per-step adaptive
+`computeTimestep` hook overrides dt (the runs still step at ~5.9e-4,
+acoustic Courant ~0.8). Stable with `symplecticEuler`, so results stand, but
+the toys do not run at the Courant number the probe claims.
+
+**Next step:** make the toys' timestep hook return the pinned dt (or report
+the achieved Courant number) before relying on dt-sensitive toy results.
+
+**Fix (2026-09-28, `c72e1ea`):** the toys' timestep hook returns
+`min(adaptive, targetDt)`. Checked: film toy, delta-SPH, nx=32 runs at
+dt = 2.117e-4 = 0.3 dx / c0 every step (was ~5.9e-4, Courant ~0.8).
+
 ## OPEN_PROBLEMS §12 — Render thread + grid-interpolated plots crash or hang CRKSPH cases — RESOLVED 2026-09-28
 
 **What it was:** with `--plot` and no live window, the runner renders frames on
