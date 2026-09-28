@@ -1,5 +1,7 @@
 # warpSPH — CRKSPH limiter & Gresho spin-up: observations and plan (CRKSPH_LIMITER_PLAN)
 
+> **Progress marker:** this plan's row in [PLANS.md](PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
+
 Observations from the warpSPHCore higher-order convergence harness
 (2026-09-26) that turned out to be frontend CRKSPH questions, and a plan to
 dig into the **parameter stability** of the CRKSPH viscosity limiter. Related

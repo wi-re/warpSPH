@@ -1,5 +1,7 @@
 # warpSPH — Artificial-Compressibility SPH (ACSPH) Implementation Plan
 
+> **Progress marker:** this plan's row in [PLANS.md](PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
+
 Target paper — `literature/decourcy2024_incompressible-delta-sph-artificial-compressibility.pdf`, bib key `decourcy2024`:
 
 > **Incompressible δ-SPH via artificial compressibility**
@@ -62,6 +64,11 @@ audit could not settle without a judgement call.
    §4.4 case is `H = 2L` ⇒ `r = π/4` ⇒ `aspectRatio = 0.25` in this
    parameterisation. Either run is defensible; the plan just has to say which
    reference it is claiming.
+
+   **Decided (user, 2026-09-28): the Marrone configuration
+   (`aspectRatio = 0.5`) is the reference** -- it is the widely used one, and
+   if the solver cannot handle it, something is wrong. De Courcy's `H = 2L`
+   (`aspectRatio = 0.25`) is a final-validation extra only, not a gate.
 5. **Commit the working tree.** It now holds both the 2026-09-20 entry's
    items 1 and 7 (which the plan already describes as landed —
    `rigidBody/update.py`, `wp_densityDelta.py`, the two periodic cases, two

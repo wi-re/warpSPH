@@ -1,5 +1,7 @@
 # warpSPH — Artificial-Dissipation Roadmap (AV_PLAN)
 
+> **Progress marker:** this plan's row in [PLANS.md](PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
+
 Modernising the compressible dissipation stack: from the one hard-wired
 Monaghan-plus-switch path that exists today to a **numerical-method laboratory**
 where shock detector, coefficient policy, velocity-pair policy and pair operator

@@ -1,5 +1,7 @@
 # Small-problem performance (Marrone 3.1 and similar) — findings and changes
 
+> **Progress marker:** this plan's row in [PLANS.md](PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
+
 2026-09-27. Branch `perf-small-problems` in **warpSPH** and **warpSPHCore**.
 RTX PRO 6000 Blackwell (188 SMs), warp 1.17, torch 2.13.
 
@@ -329,6 +331,20 @@ where a loop is launch/sync-bound -- ACSPH above.
   compares medians over the state and its +-1/2-ulp density perturbations.
 * `test_implicitShiftingComparison::test_threeWayShiftComparison` is
   run-to-run non-deterministic on the untouched original code (section 6).
+
+**Found later (2026-09-28): garbage collection during a capture.** A
+collection that lands inside a graph capture finalises leftover warp
+`Stream`s (`wp.stream_from_torch`), whose finaliser unregisters the stream --
+a CUDA call the capturing thread may not make. The capture fails (warp error
+901 / 710 in `wp_cuda_stream_unregister`), that call falls back to eager, and
+`test_renderThreadFramesMatchMainThread` failed in most full
+`test_runner`+`test_cudaGraph` sessions once a few more tests ran before it
+(0/5 at the previous HEAD, which ran fewer). Fix: `utils/cudaGraph.py:
+_captureGuard` keeps the collector off for every capture (0/10 failures
+since). A render-thread/capture lock was tried first and did not help.
+Also: the runner's progress row is now redrawn at most every 0.1 s -- a
+redraw per step cost ~0.8 ms on the ~5 ms Marrone step, which only surfaced
+once the probes' bar (`quiet=True, progress=True`) actually showed.
 
 ## 10. Third round (WCSPH): whole-step graph -- 9.7 -> 6.0 ms/step, bitwise
 

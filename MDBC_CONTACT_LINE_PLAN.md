@@ -1,5 +1,7 @@
 # mDBC contact-line suction — plan
 
+> **Progress marker:** this plan's row in [PLANS.md](PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
+
 Status: **step 1 done; fix implemented (opt-in) but NOT validated** — see §7,
 §8 and §9 (2026-09-24: the videos show every variant spraying high-speed
 fliers through the whole domain; the §7/§8 checks did not measure this). Tracks `OPEN_PROBLEMS.md` §8. Background and all

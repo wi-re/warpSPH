@@ -1,5 +1,7 @@
 # Open problems — known, hard, not part of routine closeout work
 
+> **Progress marker:** this plan's row in [PLANS.md](PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
+
 This file is a deliberate dumping ground for exactly one kind of item: something
 that has been traced to a real, understood mechanism, investigated seriously
 (often across multiple sessions), and is **not fixed and not a quick fix**. It
@@ -12,6 +14,22 @@ re-opening the investigation.
 **If you're picking one of these up:** read the cross-referenced memory entry
 and plan section first — each has a specific next-step already identified, not
 just a description of the symptom.
+
+**Lifecycle.** Short, self-contained problems without a plan of their own live
+here too (a few lines each). When one is resolved, move its text to
+[docs/historic_plans/RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md)
+and leave a one-line stub under the same number, so references stay valid.
+Progress on this file is tracked by its single row in [PLANS.md](PLANS.md).
+
+**Current batch** (user, 2026-09-28; on branch `dev`):
+1. §5 / §6.3 / §11 re-runs as a baseline, in the background;
+2. §7 Morris shear viscosity (opt-in; DFSPH `hydrostaticColumn` no-slip A/B
+   against Part 39, δ-SPH unchanged when off);
+3. §8's `detectIsolated` in the shared surface detector (changes a default:
+   shifting and the Antuono switch everywhere) — then repeat the step-1
+   re-runs plus Marrone 3.1 and sloshingTank as the before/after check;
+4. §1 step 1, frozen Antuono mask across RK sub-stages — dev work: the
+   flip-rate diagnostic has to be rebuilt first.
 
 ## 1. Corner-flyer / free-surface-pinning instability (the "flyers" and
 "ceiling-sticking" phenomena)
@@ -76,9 +94,10 @@ reached via its own instrumentation.
    "renormalize or don't." `DELTASPH_VALIDATION_PLAN.md` §10.4 item 2.
 
 The Antuono-mask flip-rate diagnostic (`DELTASPH_VALIDATION_PLAN.md`
-§5.18/§5.35) is already instrumented and is the right tool to quantify
-whether any of the above actually helps, rather than eyeballing more frame
-grids.
+§5.18/§5.35) is the right tool to quantify whether any of the above actually
+helps, rather than eyeballing more frame grids. **It is no longer in the
+code** (checked 2026-09-28: nothing in `src/` or `scripts/`) — it has to be
+rebuilt before step 1 can be judged.
 
 ## 2. `omniIncompressible`'s `'mls'` wall-pressure mode — genuine numerical
 instability, not a sign bug
@@ -161,17 +180,8 @@ isn't re-discovered as a surprise, but there is nothing queued to fix it.
   base-corner residual (RMSE 0.0431 last measured) has moved at all, before
   deciding whether this still needs its own fix.
 
-**RESOLVED, 2026-09-18** (moved out of this list): the **H/Δx≈72-160
-resolution hole** (`DELTASPH_VALIDATION_PLAN.md` item 4b) — every Marrone
-3.1 config used to blow up specifically at nx=120 (H/Δx=72), in t*≈5.5-6.3,
-"regardless of scheme." Rechecked under the new default combo
-(`english2025`+`fourtakas2019`+`symplecticEuler`) at the exact same
-resolution, run to t*≈7.68 (past the old failure window):
-`diverged=False`, maxVel peak 7.41 (moderate, decaying), density
-[0.982, 1.039] — no divergence. Not root-caused *why* (which of the
-combo's components fixed it, or whether it's a combination, wasn't
-isolated), but the practical symptom is gone. `WCSPH_DEFAULT_CLOSEOUT_PLAN.md`
-item H has the full result.
+(The H/Δx≈72-160 resolution hole that used to share this item was resolved
+2026-09-18: [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md).)
 
 ## 6. Lattice-density kernel calibration — low-priority polish, not urgent
 
@@ -341,8 +351,11 @@ field -- the `(p_i+p_j)` tensile instability under uniform tension,
 independent of this fix. Detection bug found on the way (all schemes): an
 isolated particle reads `lambda = 1` and is classified as bulk;
 `detectIsolated` is the exact fix, used by ACSPH's set only -- changing the
-shared detector would touch shifting / the Antuono switch everywhere
-(decision pending).
+shared detector would touch shifting / the Antuono switch everywhere.
+**Decision (user, 2026-09-28):** worth fixing in the shared detector
+eventually, but low priority -- it is *not* why free surfaces blow up: that
+was investigated before and traced mainly to the density-diffusion choice
+(`fourtakas2019` DDT is what helped), not to surface detection.
 
 See also: [[sph-symmetric-pressure-truncation-artifact]],
 [[antuono-pressure-switch-bug]], [[english2025-alpha-neighbour-ramp]].
@@ -370,19 +383,10 @@ symmetric sum near walls ([[sph-symmetric-pressure-truncation-artifact]])
 acting on a uniform level -- test with a uniform level in a periodic box (no
 walls): growth there would point at the solve, none at the wall closure.
 
-## 10. Runner divergence detection misses bounded-NaN-free blowups
+## 10. Runner divergence detection misses bounded-NaN-free blowups — RESOLVED 2026-09-28
 
-**What it is:** `run()` reported `diverged=False` for delta-SPH toy runs that
-had reached vmax 5e4 with rows at rho = 0 and pressures ~1e20
-(`scripts/out_contactLine/*_a0`, `*_u0`, 2026-09-24): the check only fires on
-non-finite values. `stallDtSteps` only fires on dt pinned exactly at minDt,
-and `stallProgress` (sim-time progress) only when time stops advancing -- an
-explosive but finite run passes all three.
-
-**Next step:** a relative velocity bound (e.g. vmax against the case's own
-`referenceVelocity` / sound speed -- a multiple of c0 is physically
-impossible in a WC run) or a kinetic-energy growth check, reported as
-diverged; decide whether it stops the run or only flags it.
+Moved to [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md) (velocity
+alarm + probe stall defaults; README "Watching a run").
 
 ## 11. probe_contactLine delta-SPH toys: pinned dt is overridden
 

@@ -1,5 +1,7 @@
 # FreeSlip dam-break comparison — findings (2026-09-21)
 
+> **Progress marker:** this plan's row in [PLANS.md](PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
+
 Marrone 3.1 (H=0.6 m, TANK_L=1.0 m, W=3.2196 m, column 1.2 m, G=9.81),
 nx=70 (H/dx=42), c0Ratio=40 (c0=97.04, M=0.049), after the 2026-09-21 wall-BC
 default flip (`72f938c`, `constant` → `freeSlip`). All outputs in

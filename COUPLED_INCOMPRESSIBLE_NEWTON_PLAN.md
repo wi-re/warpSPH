@@ -1,5 +1,7 @@
 # warpSPH — Automatic Newton-Krylov vs. IISPH for Incompressibility: Scoping
 
+> **Progress marker:** this plan's row in [PLANS.md](PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
+
 > ## Sequenced, not dropped (per the user, 09-04)
 >
 > This is still wanted — there is already downstream motivation (an implicit

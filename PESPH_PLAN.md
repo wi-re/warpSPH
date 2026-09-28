@@ -1,5 +1,7 @@
 # warpSPH — pressure-based SPH (PESPH) plan
 
+> **Progress marker:** this plan's row in [PLANS.md](PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
+
 ## Why this exists
 
 `schemes/` currently has three compressible schemes: `monaghan.py`, `compSPH.py` and

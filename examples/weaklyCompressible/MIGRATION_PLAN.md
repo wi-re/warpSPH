@@ -1,5 +1,7 @@
 # Weakly compressible examples: notebook-migration plan
 
+> **Progress marker:** this plan's row in [PLANS.md](../../PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
+
 **In progress.** Slots 01–12 are done (eleven notebooks, twelve files); 13 is
 open. The `.py` wrappers were already
 in the current style and all 10 case modules were already registered in
