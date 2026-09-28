@@ -346,7 +346,9 @@ def enumChoices() -> Dict[str, List[str]]:
 def _addField(parser: argparse.ArgumentParser, name: str, default: Any, annotation: Any, help: str):
     """Declare one flag, inferring its type from the dataclass default."""
     short = _SHORT_FLAGS.get(name)
-    if isinstance(default, bool):
+    # `Optional[bool]` (e.g. `progress`, None = "decide for me") is a boolean
+    # flag too; with the float fallback below `--progress` took a number.
+    if isinstance(default, bool) or (default is None and 'bool' in str(annotation)):
         # store_true would make `plot: true` in a config file un-overridable from
         # the CLI, so both polarities get a flag. BooleanOptionalAction keeps the
         # default at None -- which is what distinguishes "not passed" from

@@ -329,8 +329,12 @@ def buildCase(toy: str, dambreakLikeAC: bool, cav: str = 'off', nuOff=False, shi
     ])
     def timestep(ctx, state):
         if isWC(ctx):
+            # adaptive, but never above the pinned acoustic Courant 0.3 set in
+            # `initialConditions` -- the bare adaptive step ran the toys at
+            # ~0.8 while the probe claimed 0.3 (OPEN_PROBLEMS.md §11)
             from warpSPH.modules.timestep import computeTimestep
-            return computeTimestep(state, ctx.config, ctx.schemeConfig, dt=ctx.config.dt)
+            adaptive = computeTimestep(state, ctx.config, ctx.schemeConfig, dt=ctx.config.dt)
+            return min(adaptive, ctx.param('targetDt')) if ctx.param('targetDt') else adaptive
         return base.timestep(ctx, state)
 
     return base, dataclasses.replace(base, name=f'contactLine_{toy}', timestep=timestep,
