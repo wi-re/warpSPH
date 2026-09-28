@@ -50,6 +50,7 @@ import contextlib
 import copy
 import dataclasses
 import gc
+import threading
 import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -71,9 +72,18 @@ _OUTER_CAPTURE = [False]
 _CAPTURE_MODE = 'thread_local'
 
 
+#: Held for every capture here and by the runner's render thread for each
+#: frame (`runner.py:_RenderThread._job`): plot code syncs (boolean-mask
+#: indexing, host copies), which the capture forbids while it is open --
+#: Marrone 3.1 crashed with "operation not permitted when stream is capturing"
+#: in warpSPHPlotting's `filterState` (2026-09-28). Captures are rare (~1 per
+#: Verlet rebuild) and a frame is ~20-30 ms, so serialising them costs little.
+CAPTURE_LOCK = threading.RLock()
+
+
 @contextlib.contextmanager
 def _captureGuard():
-    """No garbage collection while a graph is captured.
+    """`CAPTURE_LOCK`, and no garbage collection while a graph is captured.
 
     A collection mid-capture finalises whatever dead objects earlier work
     left behind -- among them warp `Stream`s from `wp.stream_from_torch`,
@@ -85,13 +95,14 @@ def _captureGuard():
     test session ran a few more cases before it, and in none of 10 with this
     guard (2026-09-28). `torch.cuda.graph`
     collects on entry; this keeps the collector off until the capture ends."""
-    enabled = gc.isenabled()
-    gc.disable()
-    try:
-        yield
-    finally:
-        if enabled:
-            gc.enable()
+    with CAPTURE_LOCK:
+        enabled = gc.isenabled()
+        gc.disable()
+        try:
+            yield
+        finally:
+            if enabled:
+                gc.enable()
 
 
 def _tensorAttrs(obj) -> Dict[str, torch.Tensor]:

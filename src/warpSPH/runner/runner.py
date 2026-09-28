@@ -654,7 +654,10 @@ class _RenderThread:
     def _job(self, fn, args, ready):
         if self.stream is None:
             return fn(*args)
-        with torch.cuda.device(self.device), torch.cuda.stream(self.stream):
+        # never while the loop thread captures a graph: plot code syncs
+        # (mask indexing, host copies), which a capture forbids
+        from ..utils.cudaGraph import CAPTURE_LOCK
+        with CAPTURE_LOCK, torch.cuda.device(self.device), torch.cuda.stream(self.stream):
             if ready is not None:
                 self.stream.wait_event(ready)
             return fn(*args)
