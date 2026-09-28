@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import collections
 import itertools
+import math
 import os
 import sys
 import time
@@ -30,13 +31,13 @@ from ..enumTypes import (ArtificialCompressibleSPHScheme, CompressibleSPHScheme,
 from ..io.hdf5 import createOutFile
 from ..io.export import exportSimulationSystem, prepExport, writeFrame, writeInitialData
 from ..schemes import buildScheme
-from warpSPHIntegrators import get_tagged_attr
 from ..utils import buildDomainDescription
 from .case import Case, RunContext
 from .caseSpec import CaseSpec
 from .display import closeWindow, holdWindow
 from .media import encodeFrames
 from .report import describeRun, quietedWarp, reportRun
+from .velocityAlarm import VelocityAlarm, maxSpeed
 
 __all__ = ['RunResult', 'run', 'buildContext', 'resolveEnum']
 
@@ -55,6 +56,12 @@ class RunResult:
     videoPath: Optional[str] = None
     nSteps: int = 0
     diverged: bool = False
+    #: Why the run stopped early (a watchdog, the non-finite check, or an
+    #: `onVelocityAlarm` callback); `None` when it ran to the end.
+    stopReason: Optional[str] = None
+    #: Every raise / escalation / clear of the velocity alarm
+    #: (`runner/velocityAlarm.py`), in order; empty when it never fired.
+    velocityAlarms: List[Dict[str, Any]] = field(default_factory=list)
     #: Wall-clock seconds for the whole run, setup included.
     wallTime: float = 0.0
 
@@ -177,12 +184,21 @@ class _Timer:
         return False
 
 
-def run(case: Case, spec: Optional[CaseSpec] = None, **overrides) -> RunResult:
+def run(case: Case, spec: Optional[CaseSpec] = None, *, onVelocityAlarm=None,
+        **overrides) -> RunResult:
     """Run `case` under `spec`, returning the trajectory and final state.
 
     Keyword `overrides` are applied on top of `spec` (or on top of the case's
     own defaults when no spec is given), so a test can say
     ``run(tgvCase, nx=32, nSteps=20)``.
+
+    `onVelocityAlarm(ctx, state, event)` is called whenever the velocity alarm
+    (`spec.velocityAlarmFactor`, `runner/velocityAlarm.py`) is raised,
+    escalates or clears; `event` is a dict (`kind`, `step`, `t`, `vmax`,
+    `ratio`, `scale`, `dt`, and for a raise/escalation the fastest particle's
+    `index`/`uid`/`position`). Return `True` to stop the run -- anything else
+    lets it continue, e.g. after switching on closer monitoring
+    (`ctx.spec.plotInterval = 1`).
     """
     if spec is None:
         spec = CaseSpec(caseName=case.name, scheme=case.scheme, params=dict(case.params))
@@ -192,10 +208,10 @@ def run(case: Case, spec: Optional[CaseSpec] = None, **overrides) -> RunResult:
 
     startedAt = time.perf_counter()
     with quietedWarp(spec.quiet):
-        return _run(case, spec, startedAt)
+        return _run(case, spec, startedAt, onVelocityAlarm)
 
 
-def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
+def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> RunResult:
     ctx = buildContext(case, spec)
 
     if case.configureScheme is not None:
@@ -271,6 +287,11 @@ def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
     storeSteps = max(1, int(spec.exportInterval / dt)) if spec.storeMode == 'trajectory' \
         else max(1, spec.storeInterval)
 
+    # Resolved before the banner, which reports it; reads the t=0 state.
+    alarm = VelocityAlarm(ctx, runningState, callback=onVelocityAlarm,
+                          write=lambda message: print(message, flush=True))
+    ctx.scratch['velocityAlarmMonitor'] = alarm
+
     if not spec.quiet:
         describeRun(ctx, runningState, nSteps, timeLimited)
 
@@ -293,9 +314,17 @@ def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
     # `STALL_WINDOW_STEPS` steps.
     recentTimes = collections.deque(maxlen=STALL_WINDOW_STEPS + 1)
 
-    showProgress = spec.progress if spec.progress is not None else sys.stderr.isatty()
-    steps, progress = _stepIterator(nSteps, spec.tLimit, timeLimited,
-                                    showProgress and not spec.quiet)
+    # An explicit `progress=True` wins over `quiet`: the probes pass both, to
+    # drop the banner/report but keep the per-step rows streaming (CLAUDE.md
+    # run rule 2) -- `quiet` only switches off the *default* bar.
+    showProgress = spec.progress if spec.progress is not None else (
+        sys.stderr.isatty() and not spec.quiet)
+    steps, progress = _stepIterator(nSteps, spec.tLimit, timeLimited, showProgress)
+    # Everything the loop says mid-run (stop reasons, the velocity alarm) goes
+    # through `say`: with a bar up, a bare print lands on the end of the bar's
+    # unfinished line (and a log shows it buried in a progress row).
+    say = _writer(progress)
+    alarm.write = say
     # `spec.cudaGraph`: replay whole steps from a CUDA graph where the scheme
     # allows it (utils/cudaGraph.py `GraphedIntegratorStep`; bitwise the eager
     # step, self-checked, eager fallback on any Verlet rebuild). Not with
@@ -315,7 +344,7 @@ def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
         # and frame are computed (see `_runPipelined`); same values, same rows.
         runningState, stepResult = _runPipelined(
             ctx, case, spec, result, stepGraph, steps, progress, runningState, nSteps,
-            timeLimited, extraData, groups, storeSteps, recentTimes)
+            timeLimited, extraData, groups, storeSteps, recentTimes, alarm, say)
         steps = ()
 
     for i in steps:
@@ -375,30 +404,30 @@ def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
             else:
                 dtAtFloorStreak = 0
             if dtAtFloorStreak >= spec.stallDtSteps:
-                print(f'dt has been pinned at the minDt floor '
-                      f'({ctx.config.minDt:g}) for {dtAtFloorStreak} consecutive '
-                      f'steps as of step {absStep} (t={t:g}); stopping -- '
-                      f'simulated time is effectively frozen.')
+                say(f'dt has been pinned at the minDt floor '
+                    f'({ctx.config.minDt:g}) for {dtAtFloorStreak} consecutive '
+                    f'steps as of step {absStep} (t={t:g}); stopping -- '
+                    f'simulated time is effectively frozen.')
                 result.diverged = True
+                result.stopReason = 'stallDtSteps: dt pinned at minDt'
                 break
 
         if spec.stallProgress is not None and spec.tLimit:
             recentTimes.append(t)
             if len(recentTimes) == recentTimes.maxlen and \
                     recentTimes[-1] - recentTimes[0] < spec.stallProgress * spec.tLimit:
-                print(f'simulated time advanced {recentTimes[-1] - recentTimes[0]:.3g} '
-                      f'over the last {STALL_WINDOW_STEPS} steps as of step {absStep} '
-                      f'(t={t:g}), below stallProgress x tLimit = '
-                      f'{spec.stallProgress * spec.tLimit:.3g}; stopping -- '
-                      f'simulated time is effectively frozen.')
+                say(f'simulated time advanced {recentTimes[-1] - recentTimes[0]:.3g} '
+                    f'over the last {STALL_WINDOW_STEPS} steps as of step {absStep} '
+                    f'(t={t:g}), below stallProgress x tLimit = '
+                    f'{spec.stallProgress * spec.tLimit:.3g}; stopping -- '
+                    f'simulated time is effectively frozen.')
                 result.diverged = True
+                result.stopReason = 'stallProgress: simulated time frozen'
                 break
 
         if progress is not None:
-            if timeLimited:
-                progress.n = min(progress.total, int(t / spec.tLimit * progress.total))
-            progress.set_description(
-                _describeStep(i, None if timeLimited else nSteps, row, spec.tLimit))
+            _showStep(progress, i, None if timeLimited else nSteps, row, spec.tLimit,
+                      force=(timeLimited and t >= spec.tLimit) or (not timeLimited and i == nSteps - 1))
 
         if timeLimited and t >= spec.tLimit:
             _plotAndStore(ctx, case, spec, runningState, stepResult, absStep, extraData,
@@ -412,14 +441,22 @@ def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
         # scheme's velocity field happens to be named that, but the wave
         # scheme's is `v` (tagged `'velocity'` so it rides the same
         # position/velocity integrator machinery under a different name).
-        velocities = get_tagged_attr(runningState.state, tag='velocity')
-        # `isfinite` (not `isnan`): the dfsphReference late-time failure can
-        # collapse into a degenerate uniform-density state with inf velocities
-        # (DFSPH_IMPROVEMENT_PLAN.md Part 29) where no NaN ever appears and
-        # the run would otherwise report `diverged=False`.
-        if torch.any(~torch.isfinite(velocities)):
-            print(f'non-finite velocities detected at step {absStep}; stopping.')
+        # `max |v|` propagates NaN *and* inf, so this one host read is both
+        # the non-finite check and the velocity alarm's input. Inf matters:
+        # the dfsphReference late-time failure can collapse into a degenerate
+        # uniform-density state with inf velocities (DFSPH_IMPROVEMENT_PLAN.md
+        # Part 29) where no NaN ever appears.
+        vmax = _scalar(maxSpeed(runningState))
+        if not math.isfinite(vmax):
+            say(f'non-finite velocities detected at step {absStep}; stopping.')
             result.diverged = True
+            result.stopReason = 'non-finite velocities'
+            break
+        if alarm.check(ctx, runningState, vmax, absStep, t):
+            say(f'velocity alarm stops the run at step {absStep} (t={t:g}): '
+                f'{alarm.stopReason}.')
+            result.diverged = True
+            result.stopReason = alarm.stopReason
             break
 
     if progress is not None:
@@ -431,6 +468,8 @@ def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
 
     result.state = runningState
     result.nSteps = len(result.trajectory) - (1 if case.diagnostics is not None else 0)
+    result.velocityAlarms = list(alarm.events)
+    alarm.restore(ctx)
 
     if spec.store and spec.storeMode == 'states' and stepResult is not None:
         exportSimulationSystem(ctx.exportPath, 'finalState', ctx.scheme, runningState,
@@ -453,7 +492,7 @@ def _run(case: Case, spec: CaseSpec, startedAt: float) -> RunResult:
 
 
 def _runPipelined(ctx, case, spec, result, stepGraph, steps, progress, runningState, nSteps,
-                  timeLimited, extraData, groups, storeSteps, recentTimes):
+                  timeLimited, extraData, groups, storeSteps, recentTimes, alarm, say):
     """The step loop with the next step overlapped with this step's outputs.
 
     Per iteration, with step n just finished:
@@ -493,10 +532,8 @@ def _runPipelined(ctx, case, spec, result, stepGraph, steps, progress, runningSt
                 row.update(case.diagnostics(ctx, state))
             result.trajectory.append(row)
             if progress is not None:
-                if timeLimited:
-                    progress.n = min(progress.total, int(row['t'] / spec.tLimit * progress.total))
-                progress.set_description(
-                    _describeStep(i, None if timeLimited else nSteps, row, spec.tLimit))
+                _showStep(progress, i, None if timeLimited else nSteps, row, spec.tLimit,
+                          force=final)
             _plotAndStore(ctx, case, spec, state, stepRes, absStep, extraData,
                           groups, storeSteps, final=final)
         # the next step (default stream) may reuse memory the side stream
@@ -533,6 +570,7 @@ def _runPipelined(ctx, case, spec, result, stepGraph, steps, progress, runningSt
                     f'({ctx.config.minDt:g}) for {dtAtFloorStreak} consecutive '
                     f'steps as of step {absStep} (t={t:g}); stopping -- '
                     f'simulated time is effectively frozen.')
+                result.stopReason = 'stallDtSteps: dt pinned at minDt'
         if stop is None and spec.stallProgress is not None and spec.tLimit:
             recentTimes.append(t)
             if len(recentTimes) == recentTimes.maxlen and \
@@ -542,27 +580,35 @@ def _runPipelined(ctx, case, spec, result, stepGraph, steps, progress, runningSt
                     f'(t={t:g}), below stallProgress x tLimit = '
                     f'{spec.stallProgress * spec.tLimit:.3g}; stopping -- '
                     f'simulated time is effectively frozen.')
+                result.stopReason = 'stallProgress: simulated time frozen'
+        # one host read: the non-finite check (max propagates NaN/inf) and
+        # the velocity alarm's input
+        vmax = _scalar(maxSpeed(runningState))
+        nonFinite = not math.isfinite(vmax)
+        if stop is None and not nonFinite and alarm.check(ctx, runningState, vmax, absStep, t):
+            stop = (f'velocity alarm stops the run at step {absStep} (t={t:g}): '
+                    f'{alarm.stopReason}.')
+            result.stopReason = alarm.stopReason
         if stop is not None:
             # as the sequential loop: the row is recorded, no frame, then stop
             row = {'step': absStep, 't': t, 'stepTime_ms': stepMs}
             if case.diagnostics is not None:
                 row.update(case.diagnostics(ctx, runningState))
             result.trajectory.append(row)
-            print(stop)
+            say(stop)
             result.diverged = True
             break
 
         last = (timeLimited and t >= spec.tLimit) or (not timeLimited and i == nSteps - 1)
-        velocities = get_tagged_attr(runningState.state, tag='velocity')
-        nonFinite = bool(torch.any(~torch.isfinite(velocities)))
         if last or nonFinite:
             ready = torch.cuda.Event()
             ready.record(torch.cuda.current_stream(ctx.device))
             outputs(i, absStep, runningState, stepResult, stepMs, ready, final=last)
             if nonFinite and not (timeLimited and last):
                 # (the sequential loop stops at tLimit before this check)
-                print(f'non-finite velocities detected at step {absStep}; stopping.')
+                say(f'non-finite velocities detected at step {absStep}; stopping.')
                 result.diverged = True
+                result.stopReason = 'non-finite velocities'
             break
 
         # step n+1 goes onto the GPU first, then step n's outputs overlap it
@@ -737,6 +783,28 @@ def _plotAndStore(ctx: RunContext, case: Case, spec: CaseSpec, state, stepResult
                                    state, exportAdjacency=False,
                                    stages=stepResult.stages,
                                    exportStagesAdjacency=True, extraData=frameExtra)
+
+
+def _showStep(progress, i: int, nSteps: Optional[int], row: Dict[str, float],
+              tLimit: float, force: bool = False) -> None:
+    """Put this step's row on the bar -- at most every `progress.mininterval`
+    (0.1 s) unless `force`d (the last step). Formatting and redrawing it every
+    step cost ~0.8 ms/step on the ~5 ms Marrone step (2026-09-28 A/B); the
+    rows still stream ~10 times a second."""
+    now = time.monotonic()
+    if not force and now - getattr(progress, '_warpSPHShownAt', -math.inf) < progress.mininterval:
+        return
+    progress._warpSPHShownAt = now
+    if nSteps is None:  # time-limited: the bar is a 1000-tick scale over t
+        progress.n = min(progress.total, int(row['t'] / tLimit * progress.total))
+    progress.set_description(_describeStep(i, nSteps, row, tLimit))
+
+
+def _writer(progress):
+    """A flushed line to the terminal that does not collide with the bar."""
+    if progress is not None:
+        return lambda message: progress.write(message)
+    return lambda message: print(message, flush=True)
 
 
 def _stepIterator(nSteps: int, tLimit: float, timeLimited: bool, enabled: bool):

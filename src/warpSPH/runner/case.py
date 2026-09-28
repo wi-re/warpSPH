@@ -39,6 +39,12 @@ class RunContext:
 
     exportPath: Optional[str] = None
     imagePath: Optional[str] = None
+    #: The velocity this run is expected to stay near, for the runner's
+    #: velocity alarm (`runner/velocityAlarm.py`). A case sets it during setup
+    #: when it knows its own scale (`dambreak`: `U_max`); `None` lets the
+    #: runner estimate one. `velocityScaleSource` says where it came from.
+    velocityScale: Optional[float] = None
+    velocityScaleSource: Optional[str] = None
     # Free-form slot for a case to stash state between hooks (a plotter handle,
     # a reference solution, the initial energy) without globals.
     scratch: Dict[str, Any] = field(default_factory=dict)

@@ -147,7 +147,7 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
             densityDiffusionTerm: str = None, mdbcDensityScheme: str = None,
             pressureForceRenormalized: bool = False,
             jitter: float = 0.0, seed: int = 1, cudaGraph: bool = True,
-            pipeline: bool = True, show: bool = True):
+            pipeline: bool = True, show: bool = True, watch: dict = None):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -221,6 +221,9 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
         # no live window -> frames render on a worker thread (runner.py:_RenderThread)
         show=show,
     )
+    # velocity alarm + stall watchdog (`--velocityAlarm*`, `--stall*`;
+    # README "Watching a run")
+    kw.update(watch or {})
     if kernel:
         kw['kernel'] = kernel
     if integrationScheme:
@@ -885,6 +888,8 @@ def main():
                          'frames on a worker thread instead (faster, same frames)')
     ap.add_argument('--report', action='store_true',
                     help='(re)build plots + REPORT.md from existing .npz runs')
+    from _runWatch import addWatchArguments, watchOverrides
+    addWatchArguments(ap)
     args = ap.parse_args()
 
     if args.report:
@@ -896,7 +901,8 @@ def main():
             args.integrationScheme, args.noPenShift, args.wallBC,
             args.pressureForceTerm, args.densityDiffusionTerm,
             args.mdbcDensityScheme, args.pressureForceRenormalized,
-            args.jitter, args.seed, args.cudaGraph, args.pipeline, args.show)
+            args.jitter, args.seed, args.cudaGraph, args.pipeline, args.show,
+            watch=watchOverrides(args))
 
 
 if __name__ == '__main__':

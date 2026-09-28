@@ -249,6 +249,11 @@ def buildSystem(ctx: RunContext):
 
 
 def initialConditions(ctx: RunContext, system) -> None:
+    # The runner's velocity alarm: a column at rest has no velocity scale but
+    # the free-fall speed over its depth (the same sqrt(g H) as ACSPH's U_char).
+    ctx.velocityScale = float((ctx.param('gravityMagnitude') * ctx.param('fillRatio') * ctx.spec.L) ** 0.5)
+    ctx.velocityScaleSource = 'free-fall speed sqrt(g H)'
+
     # Jitter the fluid only -- see the module docstring for why the
     # constant-density pre-relaxation is not run on a free-surface state.
     particles = system.state

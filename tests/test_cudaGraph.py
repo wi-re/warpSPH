@@ -197,3 +197,25 @@ def test_renderThreadFramesMatchMainThread(tmp_path):
         rows = np.nonzero(diff.any(1))[0]
         # the title carries the run's start time (minute resolution)
         assert rows.size == 0 or rows.max() < 60, (a, b)
+
+
+@cuda
+def test_velocityAlarmOnThePipelinedLoop():
+    """The graphed, pipelined loop reads the same one `max |v|` for its
+    non-finite check and the velocity alarm: flag without stopping, stop when
+    the hook asks. The dam break declares its own scale (`referenceVelocity`)."""
+    seen = []
+    flagged = _marrone(24, 8, cudaGraph=True, velocityScale=1e-9,
+                       onVelocityAlarm=lambda ctx, state, event: seen.append(event))
+    assert flagged.ctx.scratch.get('stepGraph') is not None
+    assert not flagged.diverged and flagged.nSteps == 8
+    assert flagged.velocityAlarms and flagged.velocityAlarms[0]['kind'] == 'raised'
+    assert seen == flagged.velocityAlarms
+
+    stopped = _marrone(24, 8, cudaGraph=True, velocityScale=1e-9,
+                       onVelocityAlarm=lambda *args: True)
+    assert stopped.stopReason == 'onVelocityAlarm' and stopped.nSteps < 8
+
+    healthy = _marrone(24, 8, cudaGraph=True)
+    assert healthy.ctx.scratch['velocityAlarmMonitor'].source == 'referenceVelocity'
+    assert healthy.velocityAlarms == []

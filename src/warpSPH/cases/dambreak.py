@@ -352,6 +352,16 @@ def initialConditions(ctx: RunContext, system) -> None:
     args = ctx.scratch['args']
     simSetup = ctx.scratch['simSetup']
 
+    # The runner's velocity alarm (`runner/velocityAlarm.py`) flags |v| far
+    # above this: the same `U_max` the Eq. (2) sound speed uses below, for
+    # every scheme -- the flow starts from rest, so nothing generic applies.
+    uMax = ctx.param('referenceVelocity')
+    if uMax is None:
+        uMax = float((2.0 * ctx.param('gravityMagnitude') * ctx.param('fillRatio') * ctx.spec.L) ** 0.5)
+    ctx.velocityScale = float(uMax)
+    ctx.velocityScaleSource = ('referenceVelocity' if ctx.param('referenceVelocity') is not None
+                               else 'dam-break front speed sqrt(2 g H)')
+
     sampleNoise(system, ctx.config, ctx.schemeConfig, simSetup, args)
     setupFreestream(system, ctx.config, ctx.schemeConfig, simSetup, args)
     setupKolmogorov(system, ctx.config, ctx.schemeConfig, simSetup, args)

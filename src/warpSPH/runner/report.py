@@ -244,6 +244,10 @@ def describeRun(ctx, state, nSteps: int, timeLimited: bool) -> None:
         print(_row('duration', f'{nSteps:,} steps to t = '
                                f'{spec.tLimit if spec.nSteps is None else nSteps * dt:g}'))
 
+    alarm = ctx.scratch.get('velocityAlarmMonitor')
+    if alarm is not None:
+        print(_row('watch', f'velocity alarm: {alarm.describe()}'))
+
     _plannedOutput(ctx)
     print(_RULE, flush=True)
 
@@ -319,8 +323,13 @@ def reportRun(result, wallTime: float) -> None:
     print(_RULE)
 
     if result.diverged:
-        print(_row('warning', 'NaN velocities were detected; the run stopped early '
-                              'and the results below are not usable.'))
+        reason = getattr(result, 'stopReason', None) or 'non-finite velocities'
+        print(_row('warning', f'stopped early ({reason}); the results below are '
+                              f'not usable.'))
+    alarm = ctx.scratch.get('velocityAlarmMonitor')
+    summary = alarm.summary() if alarm is not None else None
+    if summary:
+        print(_row('warning', summary))
 
     finalT = trajectory[-1]['t'] if trajectory else 0.0
     print(_row('steps', f'{result.nSteps:,} | t = {finalT:.6g} | '

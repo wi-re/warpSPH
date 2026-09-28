@@ -268,3 +268,102 @@ def test_stallProgressStopsARunWhoseSimTimeIsFrozen(monkeypatch):
     healthy = run(getCase('sod'), nx=100, tLimit=5e-4, stallProgress=1e-6,
                   progress=False, plot=False, store=False, quiet=True)
     assert not healthy.diverged
+
+
+def _sod(**kw):
+    from warpSPH.cases import importAll
+    from warpSPH.runner import getCase, run
+    importAll()
+    return run(getCase('sod'), nx=100, **dict(dict(progress=False, plot=False, store=False,
+                                                   quiet=True), **kw))
+
+
+def test_velocityAlarmFlagsWithoutStopping(capsys):
+    """A |v| far above the expected velocity is reported -- on the command
+    line, in the result, to the hook -- but the run goes on (OPEN_PROBLEMS.md
+    §10). A scale of 1e-9 makes every step after the first an alarm."""
+    from warpSPH.runner.velocityAlarm import ALARM_TAG
+    seen = []
+    result = _sod(nSteps=10, velocityScale=1e-9,
+                  onVelocityAlarm=lambda ctx, state, event: seen.append(event))
+    assert not result.diverged and result.stopReason is None
+    assert result.nSteps == 10
+    assert result.velocityAlarms and result.velocityAlarms[0]['kind'] == 'raised'
+    assert 'index' in result.velocityAlarms[0] and result.velocityAlarms[0]['ratio'] > 100
+    assert seen == result.velocityAlarms
+    assert ALARM_TAG in capsys.readouterr().out
+
+
+def test_velocityAlarmCallbackCanStopTheRun():
+    result = _sod(nSteps=10, velocityScale=1e-9, onVelocityAlarm=lambda *args: True)
+    assert result.diverged and result.stopReason == 'onVelocityAlarm'
+    assert result.nSteps < 10
+
+
+def test_velocityAlarmDefaultScaleAndDisabling():
+    """Sod starts at rest: the scale falls back to the initial sound speed, and
+    a healthy run raises nothing. `velocityAlarmFactor=None` turns it off."""
+    healthy = _sod(nSteps=5)
+    monitor = healthy.ctx.scratch['velocityAlarmMonitor']
+    assert monitor.enabled and monitor.source == 'initial max sound speed'
+    assert healthy.velocityAlarms == []
+
+    off = _sod(nSteps=5, velocityScale=1e-9, velocityAlarmFactor=None)
+    assert not off.ctx.scratch['velocityAlarmMonitor'].enabled
+    assert off.velocityAlarms == []
+
+
+def test_velocityAlarmStopRatioIsAHardCeiling():
+    result = _sod(nSteps=10, velocityScale=1e-9, velocityAlarmStopRatio=1e6)
+    assert result.diverged and result.stopReason.startswith('velocityAlarmStopRatio')
+    assert result.velocityAlarms[-1]['kind'] == 'stop'
+    assert result.nSteps < 10
+
+
+def test_velocityAlarmPlotIntervalWhileActive():
+    """`velocityAlarmPlotInterval`: frames every N steps while the alarm is
+    active, the normal interval back when it clears and at the end."""
+    from types import SimpleNamespace
+    from warpSPH.runner.velocityAlarm import VelocityAlarm
+    base = _sod(nSteps=2)
+    spec = CaseSpec(plot=True, plotInterval=20, velocityScale=1.0, velocityAlarmPlotInterval=1)
+    ctx = SimpleNamespace(spec=spec, velocityScale=None, velocityScaleSource=None, scratch={},
+                          config=base.ctx.config, scheme=base.ctx.scheme)
+    lines = []
+    alarm = VelocityAlarm(ctx, base.state, write=lines.append)
+    assert not alarm.check(ctx, base.state, vmax=500.0, step=5, t=0.1)
+    assert spec.plotInterval == 1 and ctx.scratch['velocityAlarm']['kind'] == 'raised'
+    assert not alarm.check(ctx, base.state, vmax=0.5, step=6, t=0.2)
+    assert spec.plotInterval == 20 and ctx.scratch['velocityAlarm'] is None
+    alarm.check(ctx, base.state, vmax=500.0, step=7, t=0.3)
+    alarm.restore(ctx)
+    assert spec.plotInterval == 20
+    assert [e['kind'] for e in alarm.events] == ['raised', 'cleared', 'raised']
+
+
+def test_probeWatchFlags():
+    """`scripts/_runWatch.py`: the probes' flags map onto CaseSpec fields."""
+    import argparse
+    import os
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
+    from _runWatch import addWatchArguments, watchOverrides
+    ap = argparse.ArgumentParser()
+    addWatchArguments(ap)
+    kw = watchOverrides(ap.parse_args([]))
+    assert kw == dict(velocityAlarmFactor=100.0, velocityAlarmPlotInterval=1, stallProgress=1e-3)
+    kw = watchOverrides(ap.parse_args(['--velocityAlarmFactor', '0', '--stallProgress', '0',
+                                       '--velocityAlarmStopRatio', '1e4']))
+    assert kw['velocityAlarmFactor'] is None and kw['stallProgress'] is None
+    assert kw['velocityAlarmStopRatio'] == 1e4
+    assert set(kw) <= {f.name for f in dataclasses.fields(CaseSpec)}
+
+
+def test_explicitProgressWinsOverQuiet(capsys):
+    """The probes pass `quiet=True, progress=True`: no banner or report, but
+    the per-step rows must still stream (CLAUDE.md run rule 2)."""
+    _sod(nSteps=3, quiet=True, progress=True)
+    err = capsys.readouterr().err
+    assert 't=' in err
+    _sod(nSteps=3, quiet=True)
+    assert 't=' not in capsys.readouterr().err
