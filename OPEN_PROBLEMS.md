@@ -34,6 +34,9 @@ Progress on this file is tracked by its single row in [PLANS.md](PLANS.md).
 ## 1. Corner-flyer / free-surface-pinning instability (the "flyers" and
 "ceiling-sticking" phenomena)
 
+> **2026-09-29:** the δ⁺-SPH ceiling-sticking half is now worked in
+> [CEILING_STICKING_PLAN.md](CEILING_STICKING_PLAN.md) (Marrone 3.1, checkpoint forensics).
+
 **What it is:** isolated fluid fragments near a solid corner or free-surface
 edge — a few particles nearly disconnected from the bulk — undergo a
 self-sustained, non-physical pressure oscillation ("numerical surface
@@ -183,10 +186,49 @@ isn't re-discovered as a surprise, but there is nothing queued to fix it.
 
 Moved to [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md): the
 regression was a sign bug in the `fourtakas2019` hydrostatic correction
-(fixed `68a9a6d`). **Follow-up, open:** the default combo (english2025 +
-fourtakas2019 + symplecticEuler) was chosen on 2026-09-18 using the buggy
-term; its dam-break / sloshing validations need re-running with the fixed one
-(user's call).
+(fixed `68a9a6d`). **Follow-up, re-validation done 2026-09-29 (recommendation
+pending, decision is the user's):** the default combo (english2025 +
+fourtakas2019 + symplecticEuler) re-run with the fixed term against the
+`deltaSPH` DDT, everything else default (batch
+`scratchpad/run_overnight_batch_2026-09-28.sh`, tables in
+`scripts/out_overnight_2026-09-28/SUMMARY.md`, videos looked at):
+
+- **Marrone 3.1**: P1 plateau (0.46 delta+, 0.83-0.88 PST-off — the PST-off
+  value is the old on-wall-probe extrapolation, In1/Shepard read 0.62) and P2
+  peak (0.23-0.33) are **identical between the two DDTs and to the pre-fix
+  09-26 baseline**; the sign bug never moved them. Checks passed: delta+ nx67
+  x3 seeds fourtakas 27/27 vs deltaSPH 24/27 (fails are P2 "quiescent"
+  flags = a flier crossing the probe); nx134 8/9 vs 7/9; PST-off 8/9 vs 7/9.
+  Bulk density: PST-off [0.992, 1.007] vs [0.977, 1.023]. **One signal against
+  fourtakas:** delta+ nx67 max|v| 16.1 / 11.4 / 19.7 vs deltaSPH 10.3 / 10.1 /
+  10.2 (buggy baseline 10.9) and wider rho extremes ([0.81, 1.20] vs
+  [0.93, 1.08] worst seed); the fast ones are ceiling-pinned isolated
+  particles at t\*~5.3-5.7 (the §1 kick, rhoMin/rhoMax and vmax coincide in
+  time), present in both DDTs' frames. Opposite at nx134 (23.0 vs 30.1) and
+  PST-off (10.2 vs 21.4). n=3 seeds: not a separation.
+- **Marrone 3.4** nx256 (delta-SPH and delta+): all 6/6 PASS, both DDTs;
+  penetration 0.64-0.76 dx; fixed fourtakas indistinguishable from the buggy
+  baseline (vmax 40.9 vs 39.5, same rho extremes 0.63/1.8). Pointwise rho max
+  is higher with fourtakas (1.79 / 1.58 vs 1.40 / 1.33; P99 bulk band equal).
+- **sloshingTank** t=7: both DDTs survive; Gaussian-10 ms wall-sensor peaks
+  2.9 / 3.8 / 7.3 kPa (fourtakas, fixed) vs 3.9 / 4.8 / 5.3 (deltaSPH) vs
+  2.4 / 3.5 / 5.0 (buggy baseline), all inside the measured 2.2-13.1 kPa band;
+  rho extremes [0.82, 1.32] (fourtakas) vs [0.73, 1.50] (deltaSPH). Raw
+  sensor spikes 25-50 kPa in both (known).
+- **Gallery**: 33/34 ran; weakly-compressible examples healthy (impact,
+  LDC, open-flow, moving obstacle etc. look at least as good as the
+  2026-09-13 stored images, which pre-date the current defaults); the one
+  failure is compressible and unrelated, see §15.
+- **Verdict for the user:** no evidence to change the default; fixed
+  `fourtakas2019` is equal or slightly better on the Marrone/sloshing
+  checks and density band, with one mild counter-signal (nx67 delta+ kicks
+  in 2/3 seeds) that belongs to §1, not to the DDT. A 10-seed nx67 delta+
+  A/B would settle that counter-signal if wanted.
+  **2026-09-29: counter-signal explained** ([CEILING_STICKING_PLAN.md](CEILING_STICKING_PLAN.md) §3):
+  those kicks are symplecticEuler's explicit-midpoint (ρ, v) update
+  amplifying the wall-contact acoustic mode of a ceiling-pinned cluster;
+  with `timeCentredContinuity` the three seeds read max|v| 10.1 / 9.9 / 9.9
+  and ρ [0.96, 1.03], tighter than either DDT before.
 
 ## 6. Lattice-density kernel calibration — low-priority polish, not urgent
 
@@ -501,3 +543,85 @@ Absent with `nu = 0` (free slip) and with no-slip walls. Suspects: the
 free-slip boundary-velocity mirror (`computeBoundaryVelocities`) feeding the
 viscous term, against the divergence-free solve. Not investigated further.
 
+
+## 15. CRKSPH on a lattice shock: light-gas columns pile up at the contact, blow-up when a pair reaches r = 0
+
+**Status: parked as a note (2026-09-29, user: other issues first — see §1).**
+Fully replicable in ~10 s; nothing changed in code.
+
+**What it is.** `compressible/14-triplePoint/triplePoint_equalSpacing.py`
+(CRKSPH, nx 256, shipped preset, `dev` @ a28aeb1) is clean for 86 steps
+(max|v| 1.2, energy exact) and one step later |v| ~ 1e5, dt collapses, NaN
+in the hash-map build (gallery `F_gallery` rc=1). The same thing happens in
+the **Sod 2D slab under CRKSPH on the same-lattice sampling** once it runs
+past the shipped tLimit (0.15): a 4000-particle reproducer.
+
+**Replicate** (`scripts/probe_triplePointPileup.py`, prints dt / max|v| /
+extrema per step and the smallest nearest-neighbour spacing; dumps the last
+clean + blown snapshot to an npz and stops at the blow-up):
+
+```
+python scripts/probe_triplePointPileup.py --nnEvery 8                    # triple point, cfl 0.3: blows at step 88
+python scripts/probe_triplePointPileup.py --case sod2d --nnEvery 20      # Sod 2D, CRKSPH, --no-equalMass: blows at step 164
+python scripts/probe_triplePointPileup.py --case sod2d -- --equalMass    # control: clean to t = 0.6 (269 steps)
+python scripts/probe_triplePointPileup.py --case sod1d                   # control: clean to t = 0.6 (2157 steps)
+python scripts/probe_triplePointPileup.py --nnEvery 8 -- --cflFactor 0.05 --nSteps 600   # survives, same pile-up
+```
+Everything after `--` goes to the case CLI. The shipped-preset views:
+`examples/compressible/14-triplePoint/triplePoint_equalSpacing.py` and
+`scripts/out_sodCRKSPH_2026-09-29/run.sh` (Sod 1D / 2D equal-mass / 2D
+equal-spacing under CRKSPH at the shipped tLimit 0.15 — all three finish
+there: 539 / 67 / 67 steps, too short to reach the collapse; videos under
+`export/`, git-ignored).
+
+**Mechanism (measured).** The nearest-neighbour spacing on the light side of
+the contact starts shrinking around step 16 (triple point) and roughly halves
+every 8 steps; by step 87 there are 228 coincident pairs (456 particles), one
+pair per row, both particles *light* (m = 6.9e-5, same v, different u), at
+x = 1.3125 and its periodic mirror 12.6875. The blow-up is the step a pair
+reaches r = 0 (kernel gradient -> 0; the CRK-corrected gradient keeps a
+W(0)(grad A + A B) term). CRK terms are benign until then (cond(m2) <= 2.3,
+|B|h <= 2.9, no singular-matrix warning). Sod 2D shows the same thing:
+coincident light pairs (m = 2.5e-5) at the contact, x = +-0.7303, with the
+dense side (m = 1e-4) expanded behind it.
+
+**Where it forms / what drives it.** Always at the contact discontinuity, on
+the light side. The particle-spacing jump across the contact (in the
+compressed direction) is what the sampling controls: with the same lattice
+on both sides the dense-side gas is 4x (Sod) / 8x (triple point) heavier per
+particle, so its x-spacing at the contact ends up ~2.5x the light side's;
+with equal-mass sampling (light side coarser from the start) it is ~1.6x and
+the run is clean. Triple-point A/B on rho_II: 0.5 / 0.25 / 0.125 blow at step
+194 / 136 / 89 -- **the sampling ratio sets *when*, but even rho_II = 1.0
+(equal masses everywhere) still blows (step 208, pairs at the entropy
+contact x ~ 1.41)**, so the ratio is an amplifier, not the whole cause.
+
+**What it is not (A/B'd, 5-10 s each):** kernel or n_h (B7, Wendland4,
+QuinticSpline, n_h 2-5 all blow, at different steps); the CRK viscosity limiter
+(`enableCRKLimiter=0`, eta_crit 0 / 0.1 / 1 -- none cure it, eta_crit = 1 is
+earlier); the 09-26 gradB fix (reverted in a scratch core: same); CUDA graphs /
+pipelined outputs; `calibrateNormalization`.
+
+**Not a clean regression.** The 08-13 code (stored gallery image) and the
+08-31 / 09-04 core pairs develop the same pile-up as a hot cluster (rho 8,
+umax 10-16, h down to 0.014, c_s 5) that shrinks the adaptive dt to ~3e-4 and
+keeps pairs from touching; the 09-04 pair blew at t = 0.248 in one run and
+survived to t = 1.9 in a re-run. From 09-19 on it blows every time.
+
+**A smaller dt only hides it.** `--cflFactor 0.05` survives to t = 1.87 and
+its state through t = 0.29 matches cfl 0.3 (rho_max 3.37 vs 3.35, umax 3.07,
+h_min 0.050), but it carries the same pile-up (484 particles < 0.1 dx from a
+neighbour, min separation 0.009 dx vs 0). cfl 0.15 blows at step 168. The
+compressible dt is `cfl * h_min / (xi c_s)`: acoustic only -- no bulk/approach
+velocity, no separation term -- and h adapts to density, so it cannot see a
+column collapse.
+
+**Next, when picked up:** the pair force between the first two light columns
+at r -> 0 (CRK gradient at small separation) and the first-light-column
+acceleration (a_i ~ m_heavy (P_i/rho_i^2 + P_j/rho_j^2)); then test a
+mass-jump-smoothing remedy on the Sod 2D reproducer (cheap: 4000 particles).
+Interim for the example (user's call): leave failing, ship `--cflFactor 0.05`
+(runs but carries the pairs), or drop the variant (equal-mass is the case's
+shipped default and passes). No videos of the collapse itself (crash probes,
+~90-160 steps); the frames to compare are the equal-mass gallery output vs a
+cfl-0.05 run.
