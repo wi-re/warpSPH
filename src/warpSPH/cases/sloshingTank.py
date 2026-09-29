@@ -209,6 +209,10 @@ def configureScheme(ctx: RunContext) -> None:
     noPen = ctx.param('noPenShift', None)
     if noPen is not None and hasattr(sc, 'mdbcNoPenShiftMode'):
         sc.mdbcNoPenShiftMode = noPen
+    # density as a drift field under Verlet-family integrators
+    # (CEILING_STICKING_PLAN.md §3/§6); unset leaves the config default
+    if ctx.param('timeCentredContinuity', None) is not None and hasattr(sc, 'timeCentredContinuity'):
+        sc.timeCentredContinuity = bool(ctx.param('timeCentredContinuity'))
 
     ctx.scratch['rollHistory'] = loadRollHistory(_rollFilePath(ctx))
 
@@ -509,6 +513,8 @@ sloshingTankCase = registerCase(Case(
         markerSize=4,
         # mDBC no-penetration placement; None = the scheme config's default.
         noPenShift=None,
+        # density as a drift field (CEILING_STICKING_PLAN.md §3/§6); None = config default
+        timeCentredContinuity=None,
     ),
 ))
 

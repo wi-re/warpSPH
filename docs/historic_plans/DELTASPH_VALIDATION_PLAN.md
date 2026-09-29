@@ -2772,6 +2772,16 @@ Measured per-step amplification of that mode
 `symplecticEuler` and `rungeKutta2` coincide because both reduce to explicit
 midpoint on the linearised pair. Reproduce: `scratchpad/acoustic_amplification.py`.
 
+> **Correction (2026-09-29, `CEILING_STICKING_PLAN.md` §5):** the
+> "Padé(1,1)/`exp` map |A| = 1" column below was never computed (a hard-coded
+> print in `scratchpad/acoustic_amplification.py`) and is wrong: ε is the real
+> per-particle strain increment, not the pair's eigenvalue iωΔt, and linearised
+> the Padé map *is* the plain update. Measured on a periodic acoustic toy, the
+> Padé map grows at the same explicit-midpoint rate as the linear one. What
+> stabilises the pair is advancing ρ with the time-centred velocity
+> (`timeCentredContinuity`); the "benign" symplecticEuler growth is not benign
+> at a sparse wall contact.
+
 This also explains, retroactively, why the `exp` / Padé density override was
 load-bearing and why removing it (item C) was safe **only** under RK: the
 Padé(1,1) map `(2-eps)/(2+eps)` is the Cayley transform, which has modulus

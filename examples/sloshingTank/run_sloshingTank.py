@@ -67,11 +67,17 @@ def parseArgs(argv):
                    help='override the integrator (case default for wcsph: '
                         'semiImplicitEuler; rungeKutta2/rungeKutta4 also valid)')
     p.add_argument('--noPenShift', default=None,
-                   choices=('derivative', 'finalize', 'off'),
+                   choices=('derivative', 'finalize', 'impulse', 'off'),
                    help="mDBC no-penetration correction placement: 'derivative' "
                         "(in dvdt, historical), 'finalize' (once per step, "
-                        "DualSPHysics-style velocity replacement) or 'off'. "
+                        "DualSPHysics-style velocity replacement), 'impulse' "
+                        "(once per step, added to the integrated velocity; "
+                        "CEILING_STICKING_PLAN.md §7.1) or 'off'. "
                         "DELTASPH_VALIDATION_PLAN 5.9")
+    p.add_argument('--timeCentredContinuity', action=argparse.BooleanOptionalAction, default=None,
+                   help='density as a drift field under Verlet-family integrators '
+                        '(schemeConfig.timeCentredContinuity, default on since 2026-09-29; '
+                        'CEILING_STICKING_PLAN.md §3/§6). Unset = config default')
     p.add_argument('--wallBC', type=str, default=None,
                    choices=['freeSlip', 'noSlip', 'extended', 'zeros', 'constant'],
                    help='wall boundary condition (case default freeSlip; '
@@ -180,6 +186,8 @@ def buildSpec(case, args):
         params['wallBC'] = args.wallBC
     if args.noPenShift is not None:
         params['noPenShift'] = args.noPenShift
+    if args.timeCentredContinuity is not None:
+        params['timeCentredContinuity'] = args.timeCentredContinuity
     if args.scheme == 'wcsph':
         params['shifting'] = args.shift
         params['correctdrhodt'] = args.correctdrhodt

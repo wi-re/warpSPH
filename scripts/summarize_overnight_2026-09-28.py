@@ -30,20 +30,28 @@ def _ddt(name):
 
 
 def m31(base, out):
-    out += ['## Marrone 3.1 (P1 = pProbe0Star, P2 = pProbe1Star; Buchner: P1 plateau ~0.55, P2 peak ~0.28 at t* ~5.5)', '',
-            '| run | DDT | diverged | t* reached | max\\|v\\| | max\\|v\\| t*>5 | P1 plateau (3.2-4.8) | P1 peak | P2 peak | P2 peak t* | rho min/max |',
-            '|---|---|---|---|---|---|---|---|---|---|---|']
-    for f in sorted(glob.glob(os.path.join(base, 'm31', '*.npz'))):
-        d = np.load(f, allow_pickle=True)
-        name = os.path.basename(f)[:-4]
-        ts, v = d['tStar'], d['maxVelocity']
-        p1, p2 = d['pProbe0Star'], d['pProbe1Star']
-        late, plat = ts > 5.0, (ts > 3.2) & (ts < 4.8)
-        m = _meta(d)
-        i2 = int(np.nanargmax(p2)) if np.isfinite(p2).any() else 0
-        out.append(f"| {name} | {_ddt(name)} | {m.get('diverged', '?')} | {np.nanmax(ts):.2f} | {np.nanmax(v):.2f} | "
-                   f"{np.nanmax(v[late]) if late.any() else float('nan'):.2f} | {np.nanmean(p1[plat]) if plat.any() else float('nan'):.3f} | "
-                   f"{np.nanmax(p1):.3f} | {np.nanmax(p2):.3f} | {ts[i2]:.2f} | {np.nanmin(d['minDensity']):.3f}/{np.nanmax(d['maxDensity']):.3f} |")
+    """Score every run with the probe's own acceptance checks (same windows as
+    the REPORT.md files), for the overnight batch and the 2026-09-26 baseline
+    (baseline = the buggy fourtakas2019 term)."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
+    import probe_deltaSPHMarrone as P
+    out += ['## Marrone 3.1 (probe acceptance checks; Buchner: P1 plateau ~0.55, P2 peak ~0.28 at t* ~5.5)', '',
+            '| set | run | P1 plateau (3.6-7.5) | P1 first peak | P2 peak @ t* | P2 raw max | P2 post max | max\\|v\\| | rho 5-95 pct | rho extremes | checks | failed |',
+            '|---|---|---|---|---|---|---|---|---|---|---|---|']
+    here = os.path.dirname(os.path.abspath(base))
+    for tag, pat in (('overnight', os.path.join(base, 'm31', '*.npz')),
+                     ('baseline 09-26', os.path.join(here, 'out_baseline_2026-09-26', 'm31', '*.npz')),
+                     ('baseline seeds', os.path.join(here, 'out_baseline_2026-09-26', 'm31_seeds', '*.npz'))):
+        for f in sorted(glob.glob(pat)):
+            d = np.load(f, allow_pickle=True)
+            col = {k: d[k] for k in d.files if k != 'meta'}
+            checks, m = P._score(col)
+            v = col['maxVelocity']
+            fails = ', '.join(c[0] for c in checks if not c[1]) or '-'
+            out.append(f"| {tag} | {os.path.basename(f)[:-4]} | {m.get('p1_plateau', np.nan):.2f} | {m.get('p1_firstPeak', np.nan):.2f} | "
+                       f"{m.get('p2_peak', np.nan):.2f} @ {m.get('p2_tPeak', np.nan):.2f} | {m.get('p2_rawmax', np.nan):.1f} | {m.get('p2_postMax', np.nan):.2f} | "
+                       f"{np.nanmax(v):.1f} | [{m['rhoMin_p5']:.3f}, {m['rhoMax_p95']:.3f}] | [{m['rhoMin']:.2f}, {m['rhoMax']:.2f}] | "
+                       f"{len(checks) - sum(not c[1] for c in checks)}/{len(checks)} | {fails} |")
     out.append('')
 
 
@@ -67,7 +75,7 @@ def m34(base, out):
 def slosh(base, out):
     out += ['## sloshingTank t=7 (Sensor 1; measured impact-peak band 2.2-13.1 kPa)', '',
             '| DDT | per-0.5 s window max, wall sensor (kPa) from t=2 | fluid probe (kPa) | max\\|v\\| |', '|---|---|---|---|']
-    for f in sorted(glob.glob(os.path.join(base, 'sloshing_*', 'wcsph_series.npz'))):
+    for f in sorted(glob.glob(os.path.join(base, 'sloshing_*', '*_series.npz'))):
         d = np.load(f, allow_pickle=True)
         t = d['t']
 
@@ -77,6 +85,13 @@ def slosh(base, out):
             return ' '.join(f"{np.nanmax(np.abs(v[(tt >= a) & (tt < a + 0.5)])) / scale:.1f}" for a in np.arange(2.0, 7.0, 0.5))
         ddt = os.path.basename(os.path.dirname(f)).replace('sloshing_', '')
         out.append(f"| {ddt} | {win('sensorPressure')} | {win('sensorPressureProbe')} | {win('maxVelocity', 1.0)} |")
+        from scipy.ndimage import gaussian_filter1d   # the run script's own plot smoothing (sigma 10 ms)
+        ok = np.isfinite(t) & np.isfinite(d['sensorPressure'])
+        dt = float(np.median(np.diff(t[ok])))
+        grid = np.arange(t[ok][0], t[ok][-1], dt)
+        sm = gaussian_filter1d(np.interp(grid, t[ok], d['sensorPressure'][ok]), 0.010 / dt)
+        pk = [f"{sm[(grid >= a) & (grid < a + 1.0)].max() / 1e3:.1f}" for a in (2.0, 3.5, 5.0)]
+        out.append(f"|  ↳ {ddt}: Gaussian-10 ms-smoothed wall-sensor peaks, impacts 1/2/3 (kPa) | {' '.join(pk)} | | |")
     out.append('')
 
 

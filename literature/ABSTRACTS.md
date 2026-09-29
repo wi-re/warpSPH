@@ -940,7 +940,7 @@ The scheme of `ACSPH_PLAN.md` and its dependencies. Added 2026-09-05.
 - **authors:** Anatoly N. Parshikov and Stanislav A. Medin
 - **venue:** *Journal of Computational Physics* 180(1):358–382, 2002
 - **doi:** [10.1006/jcph.2002.7099](https://doi.org/10.1006/jcph.2002.7099)
-- **relevance:** The scheme `michel2022` Sec. 4.2.2 validates on, recovered from `vila1999` by cancelling the mass fluxes: Riemann-solved velocity and stress at the contact point in place of pair averages, which is what removes the need for artificial viscosity. `PST_ALE_PLAN.md` stage C — the cheap consumer of the Riemann subsystem, and the check that it is right in an SPH setting before `vila1999` adds mass fluxes on top.
+- **relevance:** The scheme `michel2022` Sec. 4.2.2 validates on, recovered from `vila1999` by cancelling the mass fluxes: Riemann-solved velocity and stress at the contact point in place of pair averages, which is what removes the need for artificial viscosity. `PST_ALE_PLAN.md` stage C — the cheap consumer of the Riemann subsystem, and the check that it is right in an SPH setting before `vila1999` adds mass fluxes on top. Also the origin of the Padé(1,1) continuity update ρⁿ⁺¹ = ρⁿ(2 − ε̇Δt)/(2 + ε̇Δt) (Appendix B, Eq. B.12; momentum by explicit Euler, B.11) that DualSPHysics' symplectic corrector uses (`dominguez2022` Eq. 34, which cites the 2000 *Int. J. Impact Eng.* paper by the same group, not held here). `CEILING_STICKING_PLAN.md` §5: linearised, the map is the plain update, so it does not stabilise the (ρ, v) acoustic mode; what does is the velocity the rate is evaluated with.
 - **abstract from:** PDF p.1
 
 > Smoothed particle hydrodynamics (SPH) is a modern effective technique of computer simulation in continuous media mechanics. SPH approximations are quite flexible and allow various constructions. In this paper, contact interaction between particles is introduced in SPH formulation. The concept is to insert in SPH approximations of a strength medium the velocity and stresses determined at the contact point by Riemann solution, instead of mean values between velocities and stresses of basic and surrounding particles. In this case, there is no need to use artificial viscosity. In a heat-conducting medium, the contact temperature is determined by the solution of a thermal discontinuity breakup and heat fluxes in particles are computed with the use of this temperature. The modified SPH approximations easily pass various standard tests and are easily realized in multidimensional codes. 
@@ -1585,6 +1585,18 @@ operator-splitting plan, added 2026-09-15.
 - **isbn:** 978-3-540-30663-4
 - **relevance:** Carries essentially all of SPLITTING_PLAN.md's theory -- II.4 (composition methods and the order theorem), II.5 (splitting, Strang, the Baker-Campbell-Hausdorff expansion), III.4 (backward error analysis for splitting), V.4.1 (symmetric projection, the mechanism behind §2.7.1's substep-local compatible-energy rewrite).
 - **abstract:** none (a book; no abstract to quote)
+
+### `leimkuhler2016`
+
+- **file:** `leimkuhler2016_geodesic-integration-solvent-solute-splitting.pdf`
+- **title:** Efficient molecular dynamics using geodesic integration and solvent–solute splitting
+- **authors:** Benedict Leimkuhler and Charles Matthews
+- **venue:** *Proceedings of the Royal Society A* 472(2189):20160138, 2016
+- **doi:** [10.1098/rspa.2016.0138](https://doi.org/10.1098/rspa.2016.0138)
+- **relevance:** The splitting/composition view of Verlet-type integrators (A = drift, B = kick, O = thermostat; the ordering of the exactly-solved sub-flows is what sets accuracy). For this codebase: position Verlet is A-B-A, and the continuity density is a configuration variable, so it belongs in the A (drift) flows, driven by the same velocity as the positions. DualSPHysics' corrector (`dominguez2022` Eqs. 33-34) instead drives it with a velocity-Verlet half-kick velocity, which makes its (ρ, v) update explicit midpoint (growth (ωΔt)⁴/8 per step) — `WeaklyCompressibleSPHConfig.timeCentredContinuity`, `CEILING_STICKING_PLAN.md` §5. Not the item DualSPHysics cites (that is the same authors' 2015 book, *Molecular Dynamics*, not held here).
+- **abstract from:** Crossref (publisher-deposited JATS abstract)
+
+> We present an approach to Langevin dynamics in the presence of holonomic constraints based on decomposition of the system into components representing geodesic flow, constrained impulse and constrained diffusion. We show that a particular ordering of the components results in an integrator that is an order of magnitude more accurate for configurational averages than existing alternatives. Moreover, by combining the geodesic integration method with a solvent–solute force splitting, we demonstrate that stepsizes of at least 8 fs can be used for solvated biomolecules with high sampling accuracy and without substantially altering diffusion rates, approximately increasing by a factor of two the efficiency of molecular dynamics sampling for such systems. The methods described in this article are easily implemented using the standard apparatus of modern simulation codes.
 
 ### `toro2009`
 

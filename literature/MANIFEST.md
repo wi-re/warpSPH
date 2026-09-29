@@ -57,7 +57,7 @@ and had to be identified from their front matter alone.
 
 ## What is here
 
-196 documents. The first 119 are the curated core — every row annotated for what
+197 documents. The first 119 are the curated core — every row annotated for what
 it unblocks, and every row abstracted in `ABSTRACTS.md` **except `roe1986`,
 `hairer2006` and `toro2009`**, which carry no abstract at all (Annual Reviews
 articles of that vintage print none for `roe1986`; the latter two are books,
@@ -136,6 +136,16 @@ and `rosswog2020entropy` arrived as
 arXiv copies of published MNRAS/ApJ papers -- the bib keys and venue fields
 follow the published records; `rosswog2020entropy` is suffixed to avoid a
 collision with `rosswog2020` (the MAGMA2 code paper).
+
+**1 paper was synced 2026-09-29** from `literature/dump/` for
+`CEILING_STICKING_PLAN.md` §5 (DualSPHysics' symplectic time stepping and its
+Padé density term): `leimkuhler2016`. The second arrival was a re-download of
+`parshikov2002`, already held (identical text layer), and was removed; its
+entry now also records the Padé continuity update (its Eq. B.12). Neither is
+the exact item `dominguez2022` cites for the scheme: that is Leimkuhler &
+Matthews' 2015 book *Molecular Dynamics* (ref. 36) and Parshikov, Medin,
+Loukashenko & Milekhin 2000, *Int. J. Impact Eng.* 24:779–796 (ref. 37); both
+are noted in the entries, neither is held.
 
 `venue` is the **published** venue, which for an author's-version or preprint
 copy is not always what that copy's own front page says. Full bibliographic
@@ -267,6 +277,7 @@ Background for `../warpSPHIntegrators/SPLITTING_PLAN.md`'s conservative/dissipat
 | — | `goldman1996` | `goldman1996_nth-order-operator-splitting.pdf` | SIAM Journal on Numerical Analysis 33(1):349-367, 1996 | The no-positive-coefficients theorem behind SPLITTING_PLAN.md §2.5's regime-gating of order-4+ composition against a dissipative operator. |
 | — | `blanes2008` | `blanes2008_splitting-and-composition-methods.pdf` | Boletín de la Sociedad Española de Matemática Aplicada 45, 2008 | Survey of splitting/composition methods; the general reference SPLITTING_PLAN.md leans on. |
 | — | `hairer2006` | `hairer2006_geometric-numerical-integration.pdf` | 2nd ed., Springer Series in Computational Mathematics 31 (Springer, 2006) | Carries essentially all of SPLITTING_PLAN.md's theory (II.4-5, III.4, V.4.1). No abstract (a book). |
+| — | `leimkuhler2016` | `leimkuhler2016_geodesic-integration-solvent-solute-splitting.pdf` | Proc. R. Soc. A 472(2189):20160138, 2016 | A-B-O splitting view of Verlet-type integrators: the continuity density belongs in the drift (A) flows, which DualSPHysics' corrector does not do. `CEILING_STICKING_PLAN.md` §5. |
 | — | `toro2009` | `toro2009_riemann-solvers-and-numerical-methods.pdf` | 3rd ed. (Springer, 2009) | The HLLC reference for the MFM/MFV direction in PESPH_PLAN.md §7. No abstract (a book). |
 
 **PESPH, CRKSPH, compSPH & meshless hydrodynamics (MFM)**

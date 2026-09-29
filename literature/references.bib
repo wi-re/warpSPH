@@ -618,7 +618,7 @@
   number  = {1},
   pages   = {358--382},
   doi     = {10.1006/jcph.2002.7099},
-  note    = {Riemann-solved velocity and stress at the contact point in place of pair averages, which removes the need for artificial viscosity. michel2022 Sec. 4.2.2 recovers it from vila1999 by cancelling the mass fluxes; PST_ALE_PLAN.md stage C, the cheap consumer of the Riemann subsystem.}
+  note    = {Riemann-solved velocity and stress at the contact point in place of pair averages, which removes the need for artificial viscosity. michel2022 Sec. 4.2.2 recovers it from vila1999 by cancelling the mass fluxes; PST_ALE_PLAN.md stage C, the cheap consumer of the Riemann subsystem. Also the source of the Pade(1,1) continuity update rho^{n+1} = rho^n (2 - eps dt)/(2 + eps dt), Appendix B Eq. (B.12), with explicit Euler for momentum (B.11). DualSPHysics' symplectic corrector uses the same map but cites Parshikov, Medin, Loukashenko & Milekhin 2000 (Int. J. Impact Eng. 24:779-796, dominguez2022 ref. 37, not held here). CEILING_STICKING_PLAN.md §5: the map is linearly identical to the plain update and does not stabilise the (rho, v) acoustic mode.}
 }
 
 @article{oger2016,
@@ -825,6 +825,18 @@
   address   = {Berlin Heidelberg},
   isbn      = {978-3-540-30663-4},
   note      = {Carries essentially all of SPLITTING_PLAN.md's theory -- II.4 (composition methods and the order theorem), II.5 (splitting, Strang, the Baker-Campbell-Hausdorff expansion), III.4 (backward error analysis for splitting), V.4.1 (symmetric projection, the mechanism behind §2.7.1's substep-local compatible-energy rewrite).}
+}
+
+@article{leimkuhler2016,
+  author  = {Leimkuhler, Benedict and Matthews, Charles},
+  title   = {Efficient molecular dynamics using geodesic integration and solvent--solute splitting},
+  journal = {Proceedings of the Royal Society A: Mathematical, Physical and Engineering Sciences},
+  year    = {2016},
+  volume  = {472},
+  number  = {2189},
+  pages   = {20160138},
+  doi     = {10.1098/rspa.2016.0138},
+  note    = {Splitting/composition integrators for (constrained) Langevin dynamics in the A (drift) / B (kick) / O (thermostat) notation; its point is that the ordering of exactly-solved sub-flows sets accuracy. Not the reference DualSPHysics cites for its symplectic scheme (dominguez2022 ref. 36 is the same authors' 2015 book, Molecular Dynamics, not held here). CEILING_STICKING_PLAN.md §5: position Verlet is A-B-A, and continuity density belongs in the A (drift) flows; DualSPHysics drives it with a velocity-Verlet half-kick velocity instead, which is what makes its (rho, v) update explicit midpoint.}
 }
 
 @book{toro2009,

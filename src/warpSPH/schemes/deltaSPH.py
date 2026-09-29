@@ -400,7 +400,10 @@ def _deltaSPH_rhs(
             dxdt = currentState.velocities.clone(),#+ dvdt_nopenshift  * dt,
             dvdt = dvdt_pressure + dvdt_forcing + dvdt_gravity + dvdt_diss+ dvdt_nopenshift,
             drhodt = drhodt + drhodt_diss,
-            passive = torch.zeros(currentState.densities.shape, device=currentState.densities.device, dtype=torch.bool)
+            passive = torch.zeros(currentState.densities.shape, device=currentState.densities.device, dtype=torch.bool),
+            # the velocity-linear part of drhodt, for the density as a drift field
+            # (warpSPHIntegrators/drift.py, CEILING_STICKING_PLAN.md §6)
+            drhodt_kin = drhodt,
         )
     # update.drhodt = update.drhodt
 
@@ -412,6 +415,7 @@ def _deltaSPH_rhs(
         update.dxdt = torch.where(nonFluidMask, torch.zeros_like(update.dxdt), update.dxdt)
         update.dvdt = torch.where(nonFluidMask, torch.zeros_like(update.dvdt), update.dvdt)
         update.drhodt = torch.where(nonFluidMask.squeeze(-1), torch.zeros_like(update.drhodt), update.drhodt)
+        update.drhodt_kin = torch.where(nonFluidMask.squeeze(-1), torch.zeros_like(update.drhodt_kin), update.drhodt_kin)
 
     # performanceDict = {
     #     'tb_adjacency': tb_adjacency,

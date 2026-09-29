@@ -26,6 +26,8 @@ from ..rigidBody.update import updateBodyParticlesWCSPH
 from ..modules.shifting.delta import computeDeltaShift
 from ..modules.shifting.wrapper import solveShifting
 from ..modules.mdbc import computeMdbcNoPenShift
+from ..modules.mdbc._util import stateHasBoundaryParticles
+import copy
 from ..modules.gravity import computeGravity
 from torch.profiler import profile, ProfilerActivity
 from warpSPHCore.profiling import record_function
@@ -201,7 +203,11 @@ class WeaklyCompressibleState(BaseState):
     velocities: torch.Tensor = integrated('dvdt', tags=('velocity',))
     supports : torch.Tensor = constant(tags=('particle_support',))
     masses : torch.Tensor = constant(tags=('particle_mass',))
-    densities : torch.Tensor = integrated('drhodt', tags=('density',))
+    # A drift field (warpSPHIntegrators/drift.py): the continuity rate's
+    # velocity-linear part (`-rho div v`, reported as `drhodt_kin`) is advanced
+    # with the drifts, like the positions, under the Verlet-family integrators when
+    # `schemeConfig.timeCentredContinuity` is on (CEILING_STICKING_PLAN.md §3, §6).
+    densities : torch.Tensor = integrated('drhodt', tags=('density',), drift_key='drhodt_kin')
 
     kinds : torch.Tensor = constant(tags=('particle_kind',))
     materials : torch.Tensor = constant(tags=('particle_material',))
@@ -232,6 +238,9 @@ class WeaklyCompressibleSystemUpdate:
     dvdt: torch.Tensor = tagged(tags=('velocity_derivative',))
     drhodt: torch.Tensor = tagged(tags=('density_derivative',))
     passive: Optional[torch.Tensor] = tagged(tags=('passive_derivative',), default=None)
+    #: the continuity part of `drhodt` (`-rho div v`, wall pairs included), the
+    #: density's velocity-linear rate; None from schemes that do not report it
+    drhodt_kin: Optional[torch.Tensor] = tagged(default=None)
 
 
 @dataclass
@@ -263,6 +272,29 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
         self.apply_quantity_update(update, spec, **kwargs)
         return self
     
+    def drift_fields_enabled(self, schemeConfig=None, **kwargs):
+        """Density as a drift field (warpSPHIntegrators/drift.py): on with
+        `schemeConfig.timeCentredContinuity` (CEILING_STICKING_PLAN.md §3, §6)."""
+        return bool(getattr(schemeConfig, 'timeCentredContinuity', False))
+
+    def drift_rates(self, velocities, aux=None, config=None, schemeConfig=None, **kwargs):
+        """The continuity rate `-rho div v` at this system's configuration with the
+        fluid moving at `velocities` (wall rows re-derived from them by the wall
+        BC, as the right-hand side does) -- the density's velocity-linear rate,
+        `drhodt_kin`. Evaluated on a shallow copy; `aux` is the stage's
+        `(adjacency, state)`, else this system's own adjacency."""
+        from ..modules.mdbc.velocity import computeBoundaryVelocities
+        from ..modules.momentum.inconsistent import computeMomentum
+        adjacency = aux[0] if aux else self.adjacency
+        state = copy.copy(self.state)
+        fluid = (state.kinds == 0).unsqueeze(-1)
+        state.velocities = torch.where(fluid, velocities, state.velocities)
+        if stateHasBoundaryParticles(state, config):
+            state.velocities = computeBoundaryVelocities(state, config, schemeConfig, adjacency)
+        rate = computeMomentum(state, config, schemeConfig, adjacency)
+        rate = torch.where(fluid.squeeze(-1), rate, torch.zeros_like(rate))
+        return WeaklyCompressibleSystemUpdate(dxdt=None, dvdt=None, drhodt=None, drhodt_kin=rate)
+
     def finalize(self, initialState, dt, returnValues, updateValues, weights = ..., *args, **kwargs):
         self.adjacency = returnValues[-1][0]  # Assuming the adjacency list is the last return value from the derivative function
         # Copy the last substeps values into the current state to ensure the final state is correct
@@ -475,8 +507,31 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
         # gravity. Applied per component, only where the correction is non-zero,
         # and only to fluid particles (the wall band's own motion comes from the
         # BC machinery).
+        #
+        # `'impulse'` (CEILING_STICKING_PLAN.md §7): the same correction as a
+        # contact impulse on the *integrated* velocity, `v^{n+1} = v + shift(v)`,
+        # with x and rho left as integrated (a configuration is continuous
+        # across an impulse). The replacement above rebuilds from `v^n`, so it
+        # discards the step's pressure/gravity impulse along the corrected
+        # component while rho keeps the compression the approach booked: every
+        # step it fires on a particle driving into a wall, the pressure work
+        # that should have braked it is created as energy. Measured on a lone
+        # ceiling rider (Marrone 3.1 seed 2, uid 80): that is the whole growth of
+        # its ringing, +0.2 ... +11 J/kg per cycle, released at 10 m/s. As an
+        # impulse the normal approach velocity becomes (1 - factor) v_n, a
+        # restitution e = 1 - factor, so |v_n| cannot grow for factor in [0, 2]
+        # (every row on the fluid side of a wall row).
         nopenshiftDiag = None    # (nopenshift, active) for the diagnostics block below
-        if getattr(schemeConfig, 'mdbcNoPenShiftMode', 'derivative') == 'finalize':
+        _noPenMode = getattr(schemeConfig, 'mdbcNoPenShiftMode', 'derivative')
+        if _noPenMode == 'impulse':
+            with record_function("[warpSPH] - [deltaSPH] - no-pen shift (impulse)"):
+                nopenshift = computeMdbcNoPenShift(
+                    self.state, config, schemeConfig, self.adjacency)
+                active = (nopenshift != 0) & (self.state.kinds == 0).unsqueeze(-1)
+                nopenshiftDiag = (nopenshift, active)
+                self.state.velocities = torch.where(
+                    active, self.state.velocities + nopenshift, self.state.velocities)
+        if _noPenMode == 'finalize':
             with record_function("[warpSPH] - [deltaSPH] - no-pen shift (finalize)"):
                 nopenshift = computeMdbcNoPenShift(
                     self.state, config, schemeConfig, self.adjacency)
@@ -528,7 +583,7 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
 
         # Per-step diagnostics: the *net* fluid acceleration actually applied
         # this step (magnitude + per axis), and -- only under
-        # `mdbcNoPenShiftMode == 'finalize'`, where `nopenshiftDiag` above was
+        # `mdbcNoPenShiftMode` 'finalize' or 'impulse', where `nopenshiftDiag` above was
         # set regardless of whether any particle ended up `active` -- how many
         # fluid particles the no-pen correction touched and by how much.
         # Stashed on `self` (the same object every case's `diagnostics(ctx,

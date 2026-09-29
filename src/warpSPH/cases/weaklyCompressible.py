@@ -1004,7 +1004,7 @@ def stepAccelerationDiagnostics(state) -> Dict[str, float]:
     does not require re-instrumenting a probe script and re-running the case
     from scratch every time: the min/max/mean/p05/p95 of the *actual*
     per-step fluid acceleration (`(v_after - v_before) / dt`, magnitude and
-    per axis) and, when `mdbcNoPenShiftMode == 'finalize'` (the default), how
+    per axis) and, when `mdbcNoPenShiftMode` is 'impulse' (the default) or 'finalize', how
     many fluid particles the no-pen correction touched and by how much, ride
     on every trajectory row already -- no guessing after the fact whether
     `nopenshift` was the cause of a spike.

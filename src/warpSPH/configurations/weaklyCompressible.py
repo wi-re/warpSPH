@@ -81,6 +81,7 @@ class WeaklyCompressibleSPHConfig:
     #: mass is unchanged, a low density means the parcel is smeared out, and
     #: surface tension would pull it back into a compact blob at rest. Default
     #: off; diagnostic until validated.
+    timeCentredContinuity: bool = field(default=True, metadata={'description': "Default on since 2026-09-29 (CEILING_STICKING_PLAN.md §7.2). Density as a drift field (warpSPHIntegrators/drift.py): under the Verlet-family integrators (symplecticEuler, velocityVerlet, leapFrog, semiImplicitEuler, pefrl, vefrl) the continuity rate -rho div v is advanced with the drifts, i.e. with the velocity the positions move with, instead of alongside the kicks. symplecticEuler then advances rho with (v^n + v^{n+1})/2 instead of the predictor velocity: the (rho, v) pair becomes Stormer-Verlet (|lambda| = 1 for omega dt < 2) instead of explicit midpoint (|lambda|^2 = 1 + (omega dt)^4/4, growth at any dt). RK integrators are unaffected. CEILING_STICKING_PLAN.md sections 3 and 6"})
     loneDensityReset: bool = field(default=False, metadata={'description': 'rho = rho0 on fluid rows with no fluid neighbour, every step'})
     #: english2025 mDBC: extrapolate the hydrostatic increment ghost -> wall
     #: one-sided, `P_b = P_g + max(0, rho0 (g - a_b) . relPos)` (SPHinXsys,
@@ -138,14 +139,20 @@ class WeaklyCompressibleSPHConfig:
     #:   in `WeaklyCompressibleSystem.finalize`, after the particle shift,
     #:   as a post-integration *velocity replacement*
     #:   (`v = v^n + nopenshift`, displacement recomputed from it) rather than
-    #:   a force. See `JSphGpuSimple_ker.cu`'s `MDBC2_NoPen` blocks.
+    #:   a force. See `JSphGpuSimple_ker.cu`'s `MDBC2_NoPen` blocks. Discards
+    #:   the step's pressure braking on the corrected component while rho keeps
+    #:   the compression: an energy source at wall contacts
+    #:   (`CEILING_STICKING_PLAN.md` §7.1).
+    #: * ``'impulse'`` (default) -- the same correction once per step, added to
+    #:   the *integrated* velocity as a restitution impulse (x and rho left as
+    #:   integrated); never adds kinetic energy (§7.1).
     #: * ``'off'`` -- not applied at all. DualSPHysics itself gates the term on
     #:   `SlipMode >= SLIP_NoSlip` and makes it opt-in, i.e. it is **never**
     #:   applied under free slip -- which is what Marrone 2011 Sec. 3
     #:   specifies. diffSPH disables its equivalent outright (`/ dt * 0`).
     #:
     #: `DELTASPH_VALIDATION_PLAN.md` 5.9.
-    mdbcNoPenShiftMode: str = field(default='finalize', metadata={'description': "Where the mDBC no-penetration correction is applied: 'finalize' (default; once per step, DualSPHysics-style velocity replacement), 'derivative' (summed into dvdt, historical), or 'off'. 'derivative' can only *oppose* an into-wall velocity, never replace it, so a particle grazing a wall keeps its normal velocity indefinitely while the correction cancels the displacement; the continuity equation then integrates that phantom velocity into a density collapse. Root cause of the sloshingTank divergence at t = 4.57 s -- measured rho 0.995 -> 0.60 on one particle pinned at the ceiling, fixed by this default (DELTASPH_VALIDATION_PLAN.md 5.13(c))."})
+    mdbcNoPenShiftMode: str = field(default='impulse', metadata={'description': "Where the mDBC no-penetration correction is applied: 'impulse' (default since 2026-09-29, CEILING_STICKING_PLAN.md §7.2; once per step, added to the integrated velocity as a contact impulse, x and rho left as integrated: restitution e = 1 - factor, never adds kinetic energy; the replacement discards the step's pressure impulse on the corrected component while rho keeps the compression, which pumps a lone wall rider's contact ringing -- CEILING_STICKING_PLAN.md §7), 'finalize' (the previous default, 2026-09-12 to 09-29; once per step, DualSPHysics-style velocity replacement v = v^n + shift), 'derivative' (summed into dvdt, historical), or 'off'. 'derivative' can only *oppose* an into-wall velocity, never replace it, so a particle grazing a wall keeps its normal velocity indefinitely while the correction cancels the displacement; the continuity equation then integrates that phantom velocity into a density collapse. Root cause of the sloshingTank divergence at t = 4.57 s -- measured rho 0.995 -> 0.60 on one particle pinned at the ceiling, fixed by the once-per-step placement ('finalize', and 'impulse' after it; DELTASPH_VALIDATION_PLAN.md 5.13(c))."})
 
     shiftProperties: ShiftProperties = field(default_factory=buildDefaultShiftProperties, metadata={'description': 'Properties for the delta-SPH shift'})
 
