@@ -11,7 +11,7 @@ particle pairs (`ux_ij > 0`) unless `thermalConductivity` is set.
 
 from warpSPHCore import *
 import warp as wp
-from ...configurations.moduleConfigurations.diffusionParameters import ViscosityTerms, DiffusionParameters
+from ...configurations.moduleConfigurations.diffusionParameters import ViscosityTerms, BetaMode, DiffusionParameters
 from .util import compute_mu_ij, compute_bars
 from warp.types import vector, matrix
 from typing import Any
@@ -71,9 +71,12 @@ def computePi_actual(
         C_q_ = viscosityParams.Cu_q
 
     C_l = scalar_t(1.0)/scalar_t(2.0) * (alpha_i + alpha_j) * C_l_
-    C_q = scalar_t(1.0)/scalar_t(2.0) * (alpha_i + alpha_j) * C_q_
-    if viscosityParams.scaleBeta:
-        C_q = C_q * C_l
+    if viscosityParams.betaMode == wp.static(BetaMode.Fixed.value):
+        C_q = C_q_              # beta independent of the switched alpha (PHANTOM / Garcia-Senz 2026 / Sphenix)
+    else:
+        C_q = scalar_t(1.0)/scalar_t(2.0) * (alpha_i + alpha_j) * C_q_   # Coupled: beta follows alpha
+        if viscosityParams.scaleBeta:
+            C_q = C_q * C_l     # legacy: beta = alpha_bar^2 C_l C_q
 
     x_ij = computeDistanceVec(x_i, x_j, domainState)
     r_ij = safe_sqrt(wp.dot(x_ij, x_ij))

@@ -183,7 +183,9 @@ def _viscosityDescriptions(schemeConfig) -> List[str]:
     switchName = _enumName(switch.scheme) if switch is not None else 'NoneSwitch'
     rows = [_joined(_viscosityTermName(params.viscosityTerm),
                     _joined(_number('C_l', params.C_l),
-                            _number('C_q', params.C_q), separator=', '),
+                            _number('C_q', params.C_q)
+                            + (' (beta fixed)' if getattr(params, 'betaMode', 0) == 1 else ''),
+                            separator=', '),
                     _number('K', params.K),
                     f'switch {"none" if switchName == "NoneSwitch" else switchName}')]
     if switch is not None and switchName != 'NoneSwitch':

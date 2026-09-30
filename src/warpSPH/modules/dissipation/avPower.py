@@ -31,7 +31,7 @@ from .wp_diffusion import computeViscosityWarp
 __all__ = ['computeAVPowerSplit']
 
 
-def _power(state, config, params, adjacency) -> float:
+def _power(state, config, params, adjacency, alphas=None) -> float:
     dvdt = computeViscosityWarp(
         state,
         operationProperties=OperationProperties(
@@ -39,7 +39,7 @@ def _power(state, config, params, adjacency) -> float:
         domain=config.domain,
         adjacency=adjacency,
         viscosityParams=params,
-        queryAlphas=state.alphas,
+        queryAlphas=state.alphas if alphas is None else alphas,
     )
     return float(-(state.masses * torch.einsum('ij,ij->i', state.velocities, dvdt)).sum())
 
