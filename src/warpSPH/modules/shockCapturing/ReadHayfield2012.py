@@ -230,7 +230,6 @@ def computeReadHayfieldTerms(
         R=None,
         Xi=None,
         v_sig=v_sig,
-        dvdt_diss=None,
         dudt_diss=dudt_diss,
     )
 
@@ -259,6 +258,5 @@ def computeReadHayfieldUpdate(
         R=None,
         Xi=None,
         v_sig=switchState.v_sig,
-        dvdt_diss=None,
         dudt_diss=switchState.dudt_diss,
     )

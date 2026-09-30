@@ -382,15 +382,11 @@ def crkSPH_step(
     #     gradHState = gradHState
     # )
 
-    # particles.alpha0s, switchState = updateViscositySwitch(particles, wrappedKernel, neighbors.get('noghost'), SupportScheme.Gather, config, dt, dvdt, switchState)
-
-    # currentState.alpha0s, switchState = updateViscositySwitch(
-    #     switchState,
-    #     dt, dvdt,
-    #     currentState, 
-    #     config, schemeConfig, 
-    #     SupportScheme.SuperSymmetric, 
-    #     adjacency)   
+    # NOTE (AV_PLAN S2): CRKSPH does NOT advance the viscosity switch's `alpha0s` -- the
+    # `updateViscositySwitch` call that used to sit here was commented out. `alphas` are
+    # recomputed above from the initial `alpha0s` every step, so Cullen-Dehnen / Read-Hayfield
+    # under CRKSPH have no decay memory (instant response, no relaxation). Restoring the
+    # call would change CRKSPH results; it was deleted rather than restored (user decision).
 
 
     # drhodt = computeMomentumConsistent(
