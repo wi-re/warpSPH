@@ -14,6 +14,7 @@ import torch
 from ..caseUtils import buildSod1D, plotSod, plotSod_, sodInitialState
 from ..enumTypes import AdaptiveSupportScheme, ViscositySwitch
 from ..runner import Case, RunContext, caseMain, registerCase, resolveEnum
+from .compressible import compressibleDiagnostics
 from .plotting import openWindow, pumpEvents
 
 __all__ = ['sodCase', 'states']
@@ -55,15 +56,7 @@ def buildSystem(ctx: RunContext):
 
 
 def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
-    """Kinetic/thermal/total energy -- total energy is the conserved quantity."""
-    particles = state.state
-    kinetic = 0.5 * (torch.linalg.norm(particles.velocities, dim=-1) ** 2 * particles.masses).sum()
-    thermal = (particles.internalEnergies * particles.masses).sum()
-    return {
-        'kineticEnergy': kinetic.detach().cpu().item(),
-        'thermalEnergy': thermal.detach().cpu().item(),
-        'totalEnergy': (kinetic + thermal).detach().cpu().item(),
-    }
+    return compressibleDiagnostics(ctx, state)
 
 
 def setupPlot(ctx: RunContext, state, scatter: bool = False):

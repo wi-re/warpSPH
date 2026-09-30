@@ -44,7 +44,7 @@ dissipation accounting and no reproducibility lock.
 
 | Phase | Milestone | State |
 |---|---|---|
-| 0 | M0 Baseline locked | ☐ not started |
+| 0 | M0 Baseline locked | ◐ started 2026-09-30 — `L1` metric done |
 | 1 | M1 Old physics, new architecture | ☐ not started |
 | 2 | M2 Entropy trigger validated | ☐ not started |
 | 3 | M3 Reconstruction engine works | ☐ not started |
@@ -54,6 +54,71 @@ dissipation accounting and no reproducibility lock.
 | 6 | M7 Detector-complete | ☐ not started |
 | 7 | 🏁 **M8 SPH-AV-FOUNDATION** — hard gate | ☐ not started |
 | 8+ | → [`PESPH_PLAN.md`](PESPH_PLAN.md) | blocked on M8 |
+
+## Start-up work order (added 2026-09-30)
+
+The phases below are the destination; this is the order the first weeks are
+worked in, decided after re-auditing Part 2 against the code and against
+`diffSPH/src/diffSPH/modules/switches/`. Tick boxes here and in the phase
+markers; keep notes dated.
+
+**Why this order.** Phase 1's bar is *bit-for-bit vs the M0 baseline*, so the
+baseline must exist before any refactor (the state-tag fix in particular may move
+numbers). The cheap audit fixes and the fixed-β policy come next because every
+paper port needs them. Stubs come last.
+
+**What diffSPH offers (checked 2026-09-30).** `modules/switches/` has ~40-line
+`Balsara1995`, `Colagrossi2004`, `MorrisMonaghan1997`, `Rosswog2000` (plus C&D and
+Cullen-Hopkins, which warpSPH already has). Balsara/Colagrossi return a
+*limiter in [0,1]*, not an α — a different contract from a switch. diffSPH's
+`Rosswog2000` is a Morris-Monaghan divergence-source switch with an `(2-α)` factor,
+**not** Rosswog 2020's entropy trigger. diffSPH has **no** Sphenix, Wadsley,
+entropy-trigger or García-Senz code: Phases 2/4/5B/6 come from the PDFs.
+
+### S1 — Baseline first (= M0)
+- [x] `L1` metric + unit test (2026-09-30)
+- [x] Regression bar green before any change: `run_tests.sh`, gradcheck, 35-case smoke sweep (2026-09-30)
+- [x] `compressibleDiagnostics`: entropy, angular momentum, `alphaMean/Max/ActiveFraction` (2026-09-30; `sod.py` had its own copy, now delegates)
+- [x] Π linear/quadratic AV power split: `modules/dissipation/avPower.py` `computeAVPowerSplit` (diagnostic path only; CRKSPH -> NaN). `switchState.dvdt_diss` left alone (R&H's own field) — decide populate/remove in S2
+- [x] neighbour-count mean/min/max: `avReportDiagnostics` in `cases/compressible.py` (opt-in with the power split; used by `av_report.py`)
+- [x] promote the three `.tmp/` probes to `scripts/` (`probe_sod1D.py`, `probe_sodND.py`, `probe_greshoControl.py`; copied as-is, output paths moved to `results/probes/`; they are the old overlay probes with no video — `av_report.py` is the M0 instrument)
+- [x] `scripts/av_report.py` (`--config baseline`, `--profile smoke|full`, `--repeat N` = lock check). **MVP: cases `sod`, `gresho` only.** Still to add: sedov, noh, yee, linearWave, KH, RT, sod2d/3d; StepTimer-based ms/step (current `wallMsPerStep` includes compile); shock width; `--compare`; `--maps`
+- [x] reproducibility lock verified twice for `sod` + `gresho` x 3 configs (2026-09-30). First pass FAILED for R&H/Gresho: entropy-dissipation term used `scatter_sum` (CUDA atomic add, run-to-run order) amplified by the alpha switch; fixed with `torch.segment_reduce` in `ReadHayfield2012.py`, re-run bit-identical
+- [x] report written: `docs/av/av_baseline_2026-09-30.md` (in the working tree, **not committed**)
+- [ ] extend the report to the rest of the M0 case list (sod2d/3d, sedov, noh, yee, linearWave, KH, RT) and re-lock
+- [ ] commit; `milestone/av-baseline`
+
+### S2 — Cheap audit fixes + fixed β (start of Phase 1), checked against the lock
+- [ ] delete dead `limitXi`; rename kernel-normalisation `xi` (§2.5)
+- [ ] `entropies`/`pressures` state tags fixed (closes PESPH_PLAN §2.1); check consumers first
+- [ ] decide `crkSPH.py` commented-out `updateViscositySwitch` call (restore or delete — **user decision**)
+- [ ] fixed-β `CoefficientPolicy` (+ `scaleBeta` read-through, dict round-trip, tests)
+- [ ] registry replaces both `elif` chains; missing members raise a named `NotImplementedError`
+- [ ] `NoneSwitch` bit-for-bit vs M0; C&D / R&H within 1e-6
+
+### S3 — Fill the stubs (after the registry)
+- [ ] standalone Balsara multiplier lifted out of R&H (Phase 4 needs it); retire `Balsara1995` stub
+- [ ] `MorrisMonaghan1997` switch, from diffSPH + the PDF (baseline only)
+- [ ] `Rosswog2000` divergence-source switch kept as-is under that name; the 2020 trigger is a *new* `Rosswog2020` member (Phase 2)
+- [ ] `Colagrossi2004` limiter (optional)
+
+### S4 — Side track: CRK `x_ij` sign discrepancy (§2.2)
+- [ ] decide whether `accel.py:153` (`+x_ij`) vs `dudt.py:136` (`-x_ij`) is a bug; if it moves CRKSPH, quantify and record — separate finding
+
+### Notes
+- 2026-09-30: **the compressible cases' default scheme is CompSPH, not Monaghan** (`C_q=2`, `Monaghan1992`); the
+  plan's host is Monaghan (`C_q=0`, `Price2012_98`), so `av_report.py` must pass `scheme='Monaghan'` explicitly. Sod
+  at 150 steps under C&D: Monaghan power all linear (0.031); CompSPH 0.036 = 0.028 lin + 0.008 quad; split residual 0 (additive).
+- 2026-09-30: M0 baseline finding: **Monaghan default `C_q=0` => quadratic AV energy is exactly 0 in every baseline run**
+  (the "non-zero on sod" marker holds only for CompSPH/CRKSPH hosts; verified CompSPH 0.028 lin + 0.008 quad).
+- 2026-09-30: `results/` is gitignored, so "report committed" means copying the final `report.md` into `docs/` (e.g. `docs/av/av_baseline.md`).
+- 2026-09-30: audit re-checked, no drift. Effort estimate for S2+S3 ≈ 3-4 days.
+- 2026-09-30 (user decision, from the CRKSPH clean-up): **any CRKSPH numbers in the M0 baseline are taken at the current
+  CRK constants** — limiter `(eta_crit, eta_fold) = (1/3, 0.2)` (known to be in the wrong units, CRKSPH_LIMITER_PLAN O2),
+  `C_l = C_q = 1`, viscosity regulariser `eps^2 = 1e-2` (post OPEN_PROBLEMS §15 fix, commit d3081d9) — and the report
+  should state that. The limiter and `C_l`/`C_q` are to be revisited together, later, when the higher-order / Riemann-MUSCL
+  work exercises limiters too; if their constants change, the CRKSPH part of the baseline moves (Monaghan / CompSPH hosts
+  do not use the CRK limiter). `C_l = 2` was tried (CRKSPH_LIMITER_PLAN note (b)) and not adopted.
 
 ## The host scheme
 
@@ -703,13 +768,13 @@ Record and freeze, from
 - No new metric is *gated* in this phase — they are recorded as the reference.
 
 ### Markers
-- [ ] `L1` lands and is unit-tested against a hand-computed case
-- [ ] `compressibleDiagnostics` extended; all 14 compressible cases still run
-- [ ] linear/quadratic AV split populated and non-zero on `sod`
-- [ ] three probes promoted out of `.tmp/`
-- [ ] `scripts/av_report.py --config baseline --profile full` produces
+- [x] `L1` lands and is unit-tested against a hand-computed case (2026-09-30, `tests/test_bench_metrics.py`)
+- [x] `compressibleDiagnostics` extended; 35-case smoke sweep + full test suite green after the change (2026-09-30)
+- [~] linear/quadratic AV split populated (non-zero on `sod` only for `C_q>0` hosts; Monaghan default is exactly 0 — see notes)
+- [x] three probes promoted out of `.tmp/`
+- [~] (sod + gresho only) `scripts/av_report.py --config baseline --profile full` produces
       `results/av_baseline_<stamp>/report.md`
-- [ ] reproducibility lock verified twice
+- [~] reproducibility lock verified twice (sod + gresho only)
 - [ ] report committed
 
 **M0 — Reproducible.** Git milestone `milestone/av-baseline`.

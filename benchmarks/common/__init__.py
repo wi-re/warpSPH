@@ -15,7 +15,7 @@ from .schemes import (
     getSchemes,
 )
 from .runner import RunRecord, RecordingSolver, buildWaveCase, runScheme
-from .metrics import relL2, effectiveOrder, loglogFit, fmt
+from .metrics import relL2, L1, effectiveOrder, loglogFit, fmt
 from . import report
 from . import scaling
 
@@ -25,6 +25,6 @@ __all__ = [
     'STABILITY_EXPLICIT_DEFAULT', 'STABILITY_IMPLICIT_DEFAULT',
     'getScheme', 'getSchemes',
     'RunRecord', 'RecordingSolver', 'buildWaveCase', 'runScheme',
-    'relL2', 'effectiveOrder', 'loglogFit', 'fmt',
+    'relL2', 'L1', 'effectiveOrder', 'loglogFit', 'fmt',
     'report', 'scaling',
 ]

@@ -48,7 +48,6 @@ from warpSPHCore import *
 from ...systems.compressibleMonaghan import CompressibleState
 from ...configurations import SimulationConfig
 from ...configurations.compressibleConfig import CompressibleSPHConfig
-from ...math.scatter import scatter_sum
 from typing import Optional, Union
 
 __all__ = ['computeReadHayfieldTerms', 'computeReadHayfieldUpdate']
@@ -210,7 +209,11 @@ def computeReadHayfieldTerms(
 
     rho_ratio = (rho_j / torch.clamp(rho_i, min=1e-14)) ** (gamma - 1.0)
     term = (m_j / rho_ij) * alpha_ij * v_sig_p * L_ij * (A_i - A_j) * rho_ratio * K_ij
-    A_dot_diss = scatter_sum(term, i, dim=0, dim_size=N)
+    # Row sum over the (i-sorted) adjacency. Deliberately NOT `scatter_sum`: that is a
+    # CUDA atomic add whose summation order changes run to run, and this term feeds the
+    # threshold-sensitive alpha switch, so two identical runs diverged (AV_PLAN M0 lock).
+    # `segment_reduce` sums each row in a fixed order.
+    A_dot_diss = torch.segment_reduce(term, 'sum', lengths=adjacency.numNeighbors.long())
 
     # convert the specific-entropy rate to an internal-energy rate
     dudt_diss = (particleState.densities ** (gamma - 1.0) / (gamma - 1.0)) * A_dot_diss
