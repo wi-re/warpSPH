@@ -107,7 +107,9 @@ Checked 2026-09-15. Substantially more than expected:
 | Scheme registration | ✅ ~10-line `SchemeBundle` (`schemes/builder.py:97`) + one `CompressibleSPHScheme` enum entry |
 | Validation cases | ✅ `caseUtils/compressible/`: sod, sedov, noh, kidder, gresho, yeeVortex, kelvinHelmholtz, rayleighTaylor, triplePoint, hydrostatic, blob — **Frontiere's own test battery** |
 
-### 2.1 Two state-field bugs found during the audit
+### 2.1 Two state-field bugs found during the audit — **FIXED 2026-09-30 (AV_PLAN S2 step 2)**
+
+> `entropies` is now tagged `'entropy'` and `pressures` `'pressure'` in both `systems/compressibleMonaghan.py` and `systems/compSPH.py`; nothing consumed the old tags. The text below is the original finding.
 
 `systems/compressibleMonaghan.py:36-39`:
 

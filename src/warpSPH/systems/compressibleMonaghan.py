@@ -35,8 +35,8 @@ class CompressibleState(BaseState):
 
     internalEnergies : torch.Tensor = integrated('dudt', tags=('internalEnergy',))
     totalEnergies : torch.Tensor = constant(tags=('energy',), default=None)
-    entropies : torch.Tensor = constant(tags=('soundSpeed',), default=None)
-    pressures : torch.Tensor = constant(tags=('damping',), default=None)
+    entropies : torch.Tensor = constant(tags=('entropy',), default=None)
+    pressures : torch.Tensor = constant(tags=('pressure',), default=None)
     soundspeeds : torch.Tensor = constant(tags=('soundSpeed',), default=None)
 
     divergence : torch.Tensor = constant(tags=('velocity_divergence',), default=None)

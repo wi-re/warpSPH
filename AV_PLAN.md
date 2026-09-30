@@ -99,7 +99,7 @@ strong-shock (Sedov/Noh) detector comparisons can be trusted, so it must be done
 
 ### S2 — Cheap audit fixes + fixed β (start of Phase 1)
 - [x] **1.** (done 2026-09-30, smoke baseline bit-identical, 30 pairs) deleted dead `limitXi`; renamed pi.py's local `xi` -> `kernelXi` with a comment (it is `sphKernel_xi` = packing ratio x kernel scale, not a support ratio). The serialised `correctXi` config field keeps its name (stored configs); its comment now says what it is
-- [ ] **2.** `entropies`/`pressures` state tags fixed (closes PESPH_PLAN §2.1) — *check the tag consumers first*; the only step that may move numbers: identical, or every change explained
+- [x] **2.** (done 2026-09-30; smoke baseline bit-identical, full test suite green) `entropies` -> `('entropy',)`, `pressures` -> `('pressure',)` in `systems/compressibleMonaghan.py` and `systems/compSPH.py`. Consumers checked first: nothing in warpSPHIntegrators / warpSPH / warpSPHCore / warpSPHPlotting reads the `damping` or `soundSpeed` tags (only `find_tagged_field` lookups exist, none for those names), so they were unused labels. **Closes PESPH_PLAN §2.1.** Same copy-paste `pressures ... ('damping',)` remains in `systems/incompressible.py` and `systems/weaklyCompressible.py` (out of this plan's scope, also unconsumed)
 - [ ] **3.** fixed-β `CoefficientPolicy` (+ `scaleBeta` read-through, dict round-trip, tests) — additive, defaults bit-identical
 - [ ] **4.** registry replaces both `elif` chains; missing members raise a named `NotImplementedError` — bit-identical
 - [ ] `NoneSwitch` bit-for-bit vs M0; C&D / R&H within 1e-6 (the S2 exit check)
