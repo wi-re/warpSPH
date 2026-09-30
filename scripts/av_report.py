@@ -522,6 +522,54 @@ def renderMarkdown(records: List[Dict[str, Any]], locks: Dict[str, Any], meta: D
     return sections
 
 
+#: Not physics: timing and bookkeeping never take part in a comparison.
+_COMPARE_SKIP = {'wallMsPerStep', 'stopReason'}
+
+
+def compareReports(a: Path, b: Path, tol: float) -> int:
+    """Per-scalar relative difference between two report runs, matched on
+    (config, case). `0` if every shared scalar agrees to `tol` (0 = bit-identical)
+    and the two runs cover the same (config, case) pairs, else `1`. This is the
+    instrument for AV_PLAN's "bit-for-bit vs M0" refactor checks."""
+    import json
+
+    def load(path: Path) -> Dict[tuple, Dict[str, Any]]:
+        path = Path(path)
+        path = path / 'results.json' if path.is_dir() else path
+        return {(r['config'], r['case']): r['metrics'] for r in json.loads(path.read_text())['records']}
+
+    A, B = load(a), load(b)
+    bad = 0
+    only = sorted(set(A) ^ set(B))
+    if only:
+        print(f'pairs present in only one report: {only}')
+        bad += 1
+    rows = []
+    for key in sorted(set(A) & set(B)):
+        ma, mb = A[key], B[key]
+        worst, where, nShared = 0.0, None, 0
+        for k in sorted(set(ma) & set(mb)):
+            va, vb = ma[k], mb[k]
+            if k in _COMPARE_SKIP or isinstance(va, bool) or not isinstance(va, (int, float)) \
+                    or not isinstance(vb, (int, float)):
+                continue
+            nShared += 1
+            if va == vb or (math.isnan(va) and math.isnan(vb)):
+                continue
+            rel = abs(va - vb) / max(abs(va), abs(vb), 1e-300)
+            if rel > worst:
+                worst, where = rel, k
+        missing = sorted((set(ma) ^ set(mb)) - _COMPARE_SKIP)
+        ok = worst <= tol and not missing
+        bad += 0 if ok else 1
+        rows.append([f'{key[0]}/{key[1]}', nShared, f'{worst:.2e}', where or '-',
+                     ','.join(missing) or '-', 'OK' if ok else 'DIFF'])
+    print(rep.mdTable(['pair', 'scalars', 'max rel diff', 'worst metric', 'keys in one only', 'state'], rows))
+    print(f'\n{"IDENTICAL" if not bad and tol == 0 else ("WITHIN TOL" if not bad else "DIFFERENT")}'
+          f' (tol {tol:g}): {len(rows)} pairs compared, {bad} differing')
+    return 1 if bad else 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument('--config', default='baseline', help='config or group name (see --list)')
@@ -532,7 +580,14 @@ def main() -> int:
     ap.add_argument('--noVideo', dest='video', action='store_false')
     ap.add_argument('--out', default=None)
     ap.add_argument('--list', action='store_true')
+    ap.add_argument('--compare', nargs=2, metavar=('A', 'B'),
+                    help='compare two report dirs / results.json (exit 1 if they differ)')
+    ap.add_argument('--tol', type=float, default=0.0,
+                    help='--compare tolerance on the relative difference (0 = bit-identical)')
     args = ap.parse_args()
+
+    if args.compare:
+        return compareReports(Path(args.compare[0]), Path(args.compare[1]), args.tol)
 
     if args.list:
         print('configs:', ', '.join(CONFIGS), '\ngroups: ',

@@ -87,17 +87,25 @@ entropy-trigger or García-Senz code: Phases 2/4/5B/6 come from the PDFs.
 - [x] report written: `docs/av/av_baseline_2026-09-30.md` (in the working tree, **not committed**)
 - [x] report extended to sod2d/3d, sedov (3D), noh, yee, linearWave, KH, RT; 10 cases x 3 configs, all 30 pairs bit-locked across two runs (2026-09-30) — see notes for what each case measures and its caveats
 - [x] `C_q = 2` reference family (`--config baselineQ`: sod, noh, sedov, gresho), 12 pairs bit-locked. Added because at `C_q = 0` Noh is degenerate (cold gas, c = 0 -> zero viscosity). Full report: `docs/av/av_baseline_2026-09-30.md`
-- [ ] tag `milestone/av-baseline` — **held**: the baseline is reproducible but two findings are open (OPEN_PROBLEMS §16 Monaghan energy gain on strong shocks; Noh/Sedov quality). Decide whether M0 is 'locked as-is' (document + tag) or waits for §16
+- [x] **Step 0a (done 2026-09-30, local tag at 0ed8c72, not pushed):** tag `milestone/av-baseline` as a locked, documented baseline, known findings included (user agreed 2026-09-30; §16 is deliberately *not* a precondition)
+- [x] **Step 0b (done 2026-09-30):** `av_report.py --compare A B [--tol T]` — per-scalar relative difference between two report runs; the instrument for every bit-for-bit check below
+- [ ] later, non-blocking: StepTimer ms/step with warmup, shock width (sod/noh), `--maps` detector maps
 
-### S2 — Cheap audit fixes + fixed β (start of Phase 1), checked against the lock
-- [ ] delete dead `limitXi`; rename kernel-normalisation `xi` (§2.5)
-- [ ] `entropies`/`pressures` state tags fixed (closes PESPH_PLAN §2.1); check consumers first
-- [ ] decide `crkSPH.py` commented-out `updateViscositySwitch` call (restore or delete — **user decision**)
-- [ ] fixed-β `CoefficientPolicy` (+ `scaleBeta` read-through, dict round-trip, tests)
-- [ ] registry replaces both `elif` chains; missing members raise a named `NotImplementedError`
-- [ ] `NoneSwitch` bit-for-bit vs M0; C&D / R&H within 1e-6
+### Agreed order after S1 (user, 2026-09-30) — each step checked with `--compare` against the M0 report
 
-### S3 — Fill the stubs (after the registry)
+Steps 1–5 are S2/S3 below in this order; S4 is independent (any time after step 0);
+**S5 (OPEN_PROBLEMS §16) comes after the last step, not before** — it blocks nothing in S2–S4 and only limits how far
+strong-shock (Sedov/Noh) detector comparisons can be trusted, so it must be done before Phase 2's Sedov/Noh validation rows.
+
+### S2 — Cheap audit fixes + fixed β (start of Phase 1)
+- [ ] **1.** delete dead `limitXi`; rename the kernel-normalisation `xi` (§2.5) — no-ops, bit-identical
+- [ ] **2.** `entropies`/`pressures` state tags fixed (closes PESPH_PLAN §2.1) — *check the tag consumers first*; the only step that may move numbers: identical, or every change explained
+- [ ] **3.** fixed-β `CoefficientPolicy` (+ `scaleBeta` read-through, dict round-trip, tests) — additive, defaults bit-identical
+- [ ] **4.** registry replaces both `elif` chains; missing members raise a named `NotImplementedError` — bit-identical
+- [ ] `NoneSwitch` bit-for-bit vs M0; C&D / R&H within 1e-6 (the S2 exit check)
+- [ ] decisions (user): `crkSPH.py`'s commented-out `updateViscositySwitch` call — default **delete with a note**; unused `switchState.dvdt_diss` — default **remove** (superseded by `avPower.py`). Pending the user's word.
+
+### S3 — Fill the stubs (step 5, after the registry)
 - [ ] standalone Balsara multiplier lifted out of R&H (Phase 4 needs it); retire `Balsara1995` stub
 - [ ] `MorrisMonaghan1997` switch, from diffSPH + the PDF (baseline only)
 - [ ] `Rosswog2000` divergence-source switch kept as-is under that name; the 2020 trigger is a *new* `Rosswog2020` member (Phase 2)
@@ -105,6 +113,9 @@ entropy-trigger or García-Senz code: Phases 2/4/5B/6 come from the PDFs.
 
 ### S4 — Side track: CRK `x_ij` sign discrepancy (§2.2)
 - [ ] decide whether `accel.py:153` (`+x_ij`) vs `dudt.py:136` (`-x_ij`) is a bug; if it moves CRKSPH, quantify and record — separate finding
+
+### S5 — OPEN_PROBLEMS §16: Monaghan energy gain on strong shocks (after S2–S4)
+- [ ] first checks listed in §16: A/B `adaptiveSupportScheme`/`adaptiveSupportCorrections`; two-particle `dudt` vs `dvdt` consistency; does the scheme's own `dEdt` sum to zero
 
 ### Notes
 - 2026-09-30: **the compressible cases' default scheme is CompSPH, not Monaghan** (`C_q=2`, `Monaghan1992`); the
