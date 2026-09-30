@@ -48,7 +48,7 @@ from benchmarks.common import report as rep                       # noqa: E402
 from benchmarks.common.metrics import L1, fmt                      # noqa: E402
 
 #: `tests/test_physics.py:_ENERGY_DRIFT` -- the existing per-scheme budget (Group E).
-ENERGY_DRIFT = {'CompSPH': 1e-5, 'CRKSPH': 1e-4, 'Monaghan': 5e-3}
+ENERGY_DRIFT = {'CompSPH': 1e-5, 'CRKSPH': 1e-4, 'Monaghan': 1e-4}
 LOCK_TOL = 1e-6
 
 

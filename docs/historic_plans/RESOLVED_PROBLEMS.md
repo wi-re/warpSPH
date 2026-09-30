@@ -4,6 +4,58 @@ Items that used to be in [OPEN_PROBLEMS.md](../../OPEN_PROBLEMS.md), moved here
 once resolved, with their original section number so older references still
 find them. Newest first. The original text is kept as it was when resolved.
 
+## OPEN_PROBLEMS §16 — Monaghan host did not conserve total energy on a strong shock — RESOLVED 2026-09-30
+
+Found 2026-09-30 by the AV_PLAN M0 report (`scripts/av_report.py`, `sedov`). Not investigated yet.
+
+`scheme='Monaghan'`, Sedov, `E(t) = sum m (u + v^2/2)` (E0 = 1): **1D nx 400: 1.0 -> 2.33**
+(NoneSwitch); **3D nx 24: 1.0 -> 1.23** (NoneSwitch) / 1.25 (Cullen-Dehnen); 3D nx 40 (full profile): +47 %.
+`scheme='CompSPH'` on the same case holds **1.0 exactly**. On Sod and Gresho the Monaghan drift is
+0.2-0.7 % (already over the `tests/test_physics.py` 5e-3 budget on some), so the defect grows with shock
+strength / dynamic range (Sedov's cold background has `u ~ 1e-25`).
+
+**Not time integration:** 1D nx 400 with `cflFactor` 0.3 / 0.15 / 0.075 gives E_final 2.3273 / 2.3151 /
+2.3113 -- a 4x smaller dt moves it by 0.7 %. It is a formulation-level inconsistency between the
+pressure force and `dudt`, or the density update, of `schemes/monaghan.py` (Owen adaptive supports,
+`KernelMeanSymmetric` force vs `Gather` density, `computeDudtMonaghan` vs `computePressureForceSymmetric`).
+
+**Why it matters for AV_PLAN:** Monaghan is the plan's AV laboratory host and Group E gates on energy
+drift; every detector comparison on a strong shock (Sedov, Noh) would be confounded by an energy source.
+First checks: A/B `adaptiveSupportScheme` (Owen vs none) and `adaptiveSupportCorrections`; compare the
+`dudt` and `dvdt` pair terms for a symmetric two-particle test; check whether `dEdt` (the scheme's own
+energy-rate output) sums to zero.
+
+**Update 2026-09-30 (M0 baseline, `docs/av/av_baseline_2026-09-30.md`):** not caused by the missing
+quadratic AV — `C_q = 2` makes Sedov worse (3D nx 40: +68 % vs +47 %) and **Noh (1D) also gains energy,
++42-65 % at `C_q = 2`**. So it is a general strong-shock property of the Monaghan host, not Sedov
+specific. (At `C_q = 0` Noh is degenerate: cold gas, `c = 0`, zero viscosity, no interaction at all.)
+CompSPH is exact on Sedov (1.000).
+
+**Resolution (2026-09-30, AV_PLAN S5).** `scripts/probe_monaghanEnergy.py` evaluates each piece of
+`schemes/monaghan.py`'s RHS on a mid-run state and reports the net energy it injects,
+`E_dot = sum m (v . dvdt + dudt)`, which must vanish pair by pair. On Sedov (3D nx 24, 120 steps):
+
+| piece | kinetic | heat | net |
+|---|---|---|---|
+| pressure force + work | +0.861 | -0.861 | -1e-7 (conserves) |
+| **viscous force + heating** | **-0.5525** | **+1.1050** | **+0.5525** |
+| conductivity | 0 | +3e-8 | ~0 |
+
+The heating was **exactly 2x** the kinetic energy the viscous force removes, so each dissipation event
+*added* one dissipation's worth of energy. It matches the baseline numbers directly: the integrated AV
+energy (`avEnergyLinear`) equalled the energy drift on Sedov (0.467 vs 0.468) and on Sod (0.0107 vs
+0.0115 absolute), and `C_q = 2` made it worse because it dissipates more. The kernel
+(`computeThermalDissipation_Func_i`) accumulated `-V_j Pi u^2 lap W` without the 1/2 of Monaghan
+(1992)'s `du_i/dt = 1/2 sum m_j Pi_ij v_ij . gradW_ij` (each pair's dissipation is shared between the two
+particles). The heating kernel is used only by the Monaghan host, which is why CompSPH and CRKSPH
+conserved exactly. Fix: the factor 1/2; the viscous force (and so the dynamics the coefficients `C_l`,
+`C_q` define) is unchanged. After the fix every piece conserves to round-off (Sedov 1.0000 -> 0.9995 by
+step 120, where it had been 1.133; Noh and Sod likewise) and the full suite and gradchecks pass.
+Regression test: `tests/test_monaghanEnergy.py` (fails by 6-7 % of the energy scale without the fix).
+**Consequence:** every Monaghan-host compressible result before this date carried the spurious heating --
+the `tests/test_physics.py` Monaghan energy-drift budget of 5e-3 was sized to it. The AV baseline was
+regenerated (AV_PLAN M0c).
+
 ## OPEN_PROBLEMS §5 — englishWedge concave-corner residual (and the fourtakas2019 sign bug) — RESOLVED 2026-09-28
 
 - **`_gridSnapGhostOffsets`'s concave-corner ghost collapse**: ~40 boundary

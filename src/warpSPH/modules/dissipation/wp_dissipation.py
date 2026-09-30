@@ -126,7 +126,11 @@ def computeThermalDissipation_Func_i(
         
         fac = scalar_t(1.0) / (r_ij + scalar_t(1.0e-14) * hi)
 
-        out += - apparentVolume * pi * iPow(ux_ij, 2) * laplacian_ij #* fac
+        # Viscous heating du_i/dt = 1/2 sum_j m_j Pi_ij v_ij . gradW_ij (Monaghan 1992): the 1/2 is what makes the
+        # heat equal the kinetic energy the viscous force removes (each pair's dissipation is split between the
+        # two particles). Without it the heating is exactly 2x the loss, so the scheme gains one full dissipation's
+        # worth of total energy (OPEN_PROBLEMS section 16; found with scripts/probe_monaghanEnergy.py).
+        out += - scalar_t(0.5) * apparentVolume * pi * iPow(ux_ij, 2) * laplacian_ij #* fac
         
     return out
 
