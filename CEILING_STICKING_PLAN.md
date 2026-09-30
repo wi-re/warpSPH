@@ -582,3 +582,274 @@ probe, gone in every new run).
    vertical walls (M3.1 P2 late re-wetting with pressure, sloshing corner jet
    7.7 m/s). Next: forensics on one run-up tip (as §7.1: per-step budget of the
    film-tip rows under finalize vs impulse) before any default decision.
+
+## 8. The sticking: a unilateral wall contact, switched as a whole (2026-09-29)
+
+> **Code parked (2026-09-30): §8-§9 are not in `dev`.** `unilateralWallContact` (+ refinements),
+> `densityReinit`, `modules/mdbc/wallContact.py`, `tests/test_unilateralWallContact.py`, the `--fliers` /
+> `--unilateralWallContact` / `--schemeOpt` probe options and the forensics scripts live on branch
+> **`parked/ceiling-uniwall`** (user: the δ-SPH and other models are to stay free of these fragments).
+> The text below describes that branch.
+
+User: take on the ceiling sticking (§4 item 2) after the defaults flip.
+
+**Design, from the equations and §7.1 / MDBC_CONTACT_LINE_PLAN §10.** The wall
+enters a fluid row through three pair sums: the pressure force
+`-(1/ρ_i) Σ_wall V_j (P_i + P_j) ∇W`, the continuity `-ρ_i Σ_wall V_j (v_j - v_i)·∇W`
+(mirrored v_j) and the artificial viscosity. Batty 2007, Chentanez & Müller
+2011 and Inglis 2017 all switch a contact **as a whole**: bilateral (in
+momentum *and* continuity) or air (in neither), by the **sign of the contact
+pressure**, never by the velocity sign (the Foster-Fedkiw rule of §9.4). The
+failed δ-SPH attempts each switched half: §7.5 clamped only the pressure (the
+continuity kept booking separation as expansion: stored deficits, ρ 0.21);
+§8.3/§9 dropped only the receding continuity (a receding row with P > 0 keeps
+being pushed but never unloads — by §7.1's analysis an energy source, which
+fits "fliers launched off every wall").
+
+Here, per fluid row i (no kernel change; the wall-pair parts by linearity, as
+the §3/§7 forensics):
+- `F_w,i = -(1/ρ_i) Σ_wall V_j (P_i + P_j) ∇W`, `G_i = Σ_wall V_j ∇W` (points
+  into the wall);
+- **open** iff i is air-reachable (surface or isolated row) **and**
+  `F_w,i · G_i > 0` (the wall's net traction on i is tensile);
+- open ⇒ subtract the wall-pair pressure force, continuity and artificial
+  viscosity of row i (the wall is air for it); the mask is stored on the
+  stage state so the drift path (§6) removes the same continuity pair.
+
+What it cannot do by construction: open a floor at rest (traction
+compressive), touch a sealed box (no surface rows), book a separation as
+expansion (the continuity pair goes with the force). noPen (impulse) stays:
+it is already unilateral. Option `schemeConfig.unilateralWallContact`, default
+off.
+
+Checks (exact answers): the `drop` toy (a block under a ceiling with air at
+both contact lines: free fall, baseline fallRatio 0.67), the rider toy (a lone
+particle under a ceiling: free fall from rest normal velocity), `column` (at
+rest: unchanged), `sealed` (unchanged, bitwise); then Marrone 3.1 seeds 1-3
+(ceiling riders, flier count, frames) and sloshingTank.
+
+### 8.1 Implementation and toys (2026-09-29)
+
+`modules/mdbc/wallContact.py` (`wallContactOpen`, `wallPairContinuity`,
+`wallPairViscosity`), applied in `_deltaSPH_rhs` after the pressure force;
+the mask is a declared state field (`WeaklyCompressibleState.wallContactOpen`)
+because a graphed right-hand side only hands dataclass fields back on replay
+(first version as an ad-hoc attribute: the drift path never saw it after the
+capture step, so the continuity pair stayed in the density — the rider fell
+freely but expanded to ρ 0.45). `finalize` carries the mask to the next step.
+
+Air-reachability had to be **topological**, not per row: with "surface rows
+only" the `drop` block released only at its two contact lines (fallRatio
+0.884, the wall still carrying 30-60 % g through the interior top rows). In a
+single-phase model the gap a separating row leaves is p = 0 air whenever it
+connects to the atmosphere, i.e. the whole tensile contact patch with a free
+surface edge opens; the patch grows from surface rows (and the previous
+step's open rows) by one kernel support per evaluation, faster than sound.
+
+| toy (exact answer) | off | on |
+|---|---|---|
+| `drop` nx32 t 0.3 (free fall ≈ 0.97; §8.5 'both' 0.984) | 0.669 | **0.981**, falls as one block, p ≈ 0 |
+| rider toy (free fall s = 3.538 dx at 0.1 s, E conserved) | sticks | s = 3.538 / 3.539 (vx 0 / 7), P ≡ 0, \|ΔE\| ≤ 7e-5 |
+| `column` (unchanged) | fall 0.0018, slope −12.46 | 0.0017, −12.66 |
+| `sealed` (unchanged) | — | identical |
+
+### 8.2 Marrone 3.1 (seed 1 first): the riders go, but the run-up peels off the vertical wall
+
+`scratchpad/uniwall_m31.sh` (δ⁺ nx67, current defaults, `--fliers`: free
+fliers / wall-sparse / ceiling rows per step). Seed 1, off → on: ceiling rows
+(t\\* > 3.5) mean **22.6 → 0.07**, wall-sparse 2.32 → 0, free fliers 0 → 0,
+max|v| 9.6 → 7.9; **checks 9/9 → 7/9**: P2 reads **1.8-2.7 ρgH at t\\* 3.3-3.9**
+(Buchner: quiescent before 3.6), P2 late wet. Frames (t\\* 3.0-4.2): the
+run-up sheet no longer climbs the right wall to the ceiling — it peels off the
+vertical wall, curls back and falls onto itself (that impact is the P2 reading).
+A thin sheet rising along a straight vertical wall has no physical reason to
+separate. Hypothesis (being measured): the thin sheet carries the spurious
+free-surface truncation tension of OPEN_PROBLEMS §1 in its own P_i; the
+bilateral wall balanced it, the traction criterion reads it as the wall
+pulling and opens the contact, and the sheet's fluid-fluid tension then pulls it
+off the wall. If so the traction *sign* cannot tell real from spurious tension.
+
+All three seeds (`scripts/out_ceiling/m31_uniwall/`), off → on:
+
+| seed | checks | P1 / P2 peak | max\|v\| (t\\*) | ρ extremes | ceiling rows t\\*>3.5 mean | wall-sparse | free fliers (births, vmax) |
+|---|---|---|---|---|---|---|---|
+| 1 | 9/9 → 7/9 | 0.46/0.27 → 0.44/0.20 | 9.6 (5.50) → 7.9 (4.21) | [0.99,1.03] → [0.93,1.05] | 22.6 → 0.07 | 2.32 → 0 | 0 → 0 |
+| 2 | 9/9 → 8/9 | 0.46/0.23 → 0.47/0.27 | 9.3 (5.50) → 7.5 (2.45) | [0.99,1.02] → [0.97,1.07] | 25.4 → 0.19 | 1.85 → 0 | 0 → 5 births, ≤ 5.8 m/s |
+| 3 | 9/9 → 6/9 | 0.46/0.25 → 0.45/0.19 | 9.5 (5.50) → 8.4 (4.66) | [0.98,1.02] → [0.97,1.03] | 21.8 → 0.04 | 3.32 → 0 | 0 → 0 |
+
+Failed checks with the option: P2 quiescent before impact (seeds 1, 3), P2
+back to quiescent (all three), P2 raw spike (seed 3). The sticking is gone in
+every seed; the run-up / P2 regression is systematic. Not shippable as is.
+
+### 8.3 Forensics: what the traction criterion actually reads (2026-09-30)
+
+User: the uniwall run looks hacky (sheets separate from vertical walls, particles
+bounce off the ceiling before close contact). Measured with
+`scratchpad/uniwall_diag.py` (Marrone 3.1 δ⁺ nx67 seed 1, uniwall on, eager; every
+10th RHS call, log `scripts/out_ceiling/uniwall_diag/run.log`, buckets = 4000
+calls, not time-aligned): every open row's traction `T = F_w·G` split into the
+row's **own-pressure** part (`P_i · ΣV∇W`) and the **wall-ghost** part
+(`Σ V P_j ∇W`), by wall orientation from `G`.
+
+- **~85-95 % of open rows have `P_i < 0`** (vertical: 78-88 %, floor: 94-100 %,
+  ceiling: 83-89 %); the own-pressure part exceeds the ghost part in 60-90 %;
+  "tension from the wall alone" (`P_i ≥ 0`, ghost pulls) is only 5-20 %.
+  The criterion is reading the row's own free-surface tension (§1's truncation
+  artefact), not the wall pulling.
+- **Floor contacts open** — thousands of row-samples over the run-up / spread
+  phase, 55-100 % of them surface rows with `<P_i>` ≈ −0.4…−3. A film on a
+  floor has gravity pressing it *into* the wall; it must never open. Vertical
+  walls open as well (up to ~900 samples in the early run-up).
+- Opening removes the whole wall-pair (`P_i + P_j`) sum, and with it the wall
+  half of the row's `P_i ΣV∇W` consistency cancellation: the row becomes a
+  truncated free-surface row that keeps `P_i · ΣV∇W_fluid`, the §1 spurious
+  force. That is the mechanism behind the peel-off.
+
+Consequence: the traction *sign* is not a contact criterion in WCSPH, since the
+EOS lets every surface row carry tension the bilateral wall used to balance.
+Batty / Chentanez / Inglis assume `p ≥ 0` at contacts (incompressible), where
+this cannot arise. Candidate refinements (not tried): (a) test only the tension
+the *wall* imposes (own pressure clamped at its air value 0: `P_i → max(P_i, 0)`
+in `F_w`, `G` unchanged); (b) gate by the body force: a contact can only be in
+genuine tension where the effective body acceleration `g − a_wall` has a
+component pulling the fluid away from the wall (`n_in · g_eff > 0`), which is
+the ceiling and nothing else; (c) park the option (opt-in, default off).
+
+### 8.4 The two refinements, and what the fliers really are (2026-09-30)
+
+Implemented (opt-in, default off; `wallContact.py`, tests in `tests/test_unilateralWallContact.py`, 5 pass):
+`unilateralWallAirOwnPressure` (a: traction with `max(P_i, 0)`) and `unilateralWallBodyForceGate` (b: a row may
+open only where the body force pulls it off the wall by more than along it, `g·n_in > |g_t|`, i.e. wall normal
+within 45° of g; the first version, sign of `g·n_in` only, opened rows at random on a wall parallel to g because
+`G·g` was rounding noise, caught by the unit test). Toys (drop nx32, column, sealed; a / b / both): drop free fall
+0.981 in all, column and sealed identical to plain uniwall.
+
+Marrone 3.1 δ⁺ nx67, seeds 1-2 (seed 3 not run: batch stopped by the user), baseline `off` = 9/9, riders 22.6 / 25.4,
+`m31_uniwall2/`:
+
+| | seed 1 checks | riders | fliers (births, vmax) | ρ range | seed 2 checks | riders | fliers |
+|---|---|---|---|---|---|---|---|
+| uniwall | 7/9 | 0.07 | 0 | [0.93, 1.05] | 8/9 | 0.19 | 3 (5, 5.8) |
+| + (a) | 7/9 | 0.11 | 0 | [0.97, 1.06] | 8/9 | 0.20 | 0 |
+| + (b) | **9/9** | 3.7 | **6 (30, 7.7)** | [0.96, 1.08] | 8/9 | 2.0 | 3 (8, 6.8) |
+| + (a) + (b) | **9/9** | 2.0 | 6 (17, 6.8) | [0.96, 1.08] | **9/9** | 2.2 | 3 (12, 7.0) |
+
+(b) fixes what §8.2 found (the run-up climbs the wall again, checks back) and releases most riders, **but the released
+rows become lone particles and the run has fliers, a high density band and a particle stuck in the top-right
+corner.** Videos: frames show small clumps leaving the ceiling at the run-up jet speed (6.7-7.7 m/s vs 6.8) and
+splashing back into the free surface.
+
+**Forensics of the fliers** (`scratchpad/flier_forensics.py`: every step, every flier's x, v, ρ, P, nF, nW;
+`scripts/out_ceiling/flier_forensics/`; `scratchpad/flier_restitution.py`). Seed 1, (b):
+- **Lone-particle impacts are nearly elastic and violent.** 16 free→contact→free events, 6 fliers: KE after/before
+  mean **0.68**, range 0.09-1.13, **7 of 16 in 0.9-1.13** (one gains 13 %); a contact lasts 10-15 ms (~100 steps) and the
+  single particle's pressure peaks at **150-760** (25-130 ρgH; ρ c v_n water-hammer scale with c = 97 m/s). Example
+  (uid 80, t 1.159): v (−5.4, −2.9) → (−4.0, +3.9), ρ 1.036, P 337: the normal velocity is *reversed with restitution
+  1.36*. Cause: a lone row is a compressible ball, stiffness c², with no cohesion and (inviscid, AV α = 0.01, approach
+  pairs only) no dissipation; contact is half a period of its own compression mode. A real droplet merges with the pool.
+- **Fliers' pair collisions** are also elastic (uid 323, t 1.695: 3 ms, P 148, vy ratio 1.01). Not isolated more
+  than that; the "violent interaction" is the same compressible contact, at the same c²-scale pressures.
+- **The corner particle is a clump of three** (uids 644, 725, 1131): they drift together from 1.3 dx to **0.01 dx** apart
+  over 0.8 s (each P ≈ −0.8, nF = 2, nW = 35, v → 0). Negative pressures make the symmetric pair force attractive
+  (tensile clumping) and the pair force vanishes at r → 0, so nothing separates them. Held there because the gate stays
+  closed in a concave corner: `G` sums both walls and points diagonally, `g·n_in ≈ |g_t|` (likely, not measured).
+- Collision dissipation test: `inviscidAlpha` 0.01 → 0.1 (gate, seed 1): **zero fliers, zero riders, ρ [0.995, 1.013]**,
+  but the whole flow is damped (max|v| 7.7 → 4.6) and P2 run-up peak fails (8/9); α = 0.5: 6/9, max|v| 2.9. A blunt
+  instrument, not usable on the reference case.
+
+Reading: releasing a stuck row is the easy half. The released row is a sub-support fragment, which this model
+represents as an elastic compressible ball, and the same population is in OPEN_PROBLEMS §1 / MDBC_CONTACT_LINE §12
+(`loneDensityReset`: fliers up 4/4). The sticking was masking it. Untried: an AV coefficient that rises on
+compression (Morris & Monaghan 1997 switch, already in the repo, `viscositySwitchParams`), and a per-wall-neighbour
+gate for corners.
+
+## 9. EXPERIMENT: density re-initialisation (2026-09-30)
+
+User, on the alternatives to a Batty-style switch (MDBC_CONTACT_LINE_PLAN §8.1: the
+CG methods never stick because the constraint is unilateral *and* their density is
+re-derived from positions): try it, **only as an experiment** — the point of the
+WCSPH density is that it is never a function of the current configuration, a
+purely integrated quantity (memory, temporal-average incompressibility; a solver
+not given ρ is truly ill-conditioned, which is worth investigating). A
+summation-density floor breaks that, so it is opt-in and never a default
+(PLANS.md decisions log).
+
+Implemented: `schemeConfig.densityReinit` (default off), `systems/weaklyCompressible.py`
+`finalize`: Rezavand et al. 2022 Eq. 2.8 (as transcribed in MDBC_CONTACT_LINE_PLAN §8.2;
+the paper itself is not in `literature/`, not re-checked),
+`ρ ← ρ_sum + max(0, ρ − ρ_sum) ρ₀/ρ` on fluid rows, `ρ_sum` = `computeDensities` on
+the last stage's configuration and adjacency (as `loneDensityReset`). To first order a
+deviation `ε = ρ − ρ₀` of a truncated-support row is damped by `ρ_sum/ρ` (a lone
+row → ρ₀, i.e. §12's reset), a row below its geometric density is lifted to it.
+Probe: `probe_deltaSPHMarrone.py --schemeOpt densityReinit [--schemeOpt mdbcOneSidedHydrostatic]`.
+
+Marrone 3.1 δ⁺ nx67, current defaults, seeds 1-3, t\* to 7.68, video on
+(`scripts/out_ceiling/m31_reinit/`, `scratchpad/reinit_m31.sh`, `scratchpad/reinit_summary.py`).
+Baseline = the `off` runs of §8 (`m31_uniwall/`), same settings. Ceiling = fluid rows
+within the ceiling band at t\* > 3.5 (mean / max):
+
+| seed | | checks | ρ range | max\|v\| (late, t\*>3.5) | ceiling rows | wall-sparse | free fliers (births) |
+|---|---|---|---|---|---|---|
+| 1 | off | 9/9 | [0.989, 1.027] | 9.6 (9.6, t\* 5.5) | 22.6 / 37 | 2.32 | 0 |
+| | reinit | 9/9 | [0.988, 1.012] | 7.0 (5.0) | **29.4** / 44 | 1.36 | 0 |
+| | + one-sided hydro | 9/9 | [0.988, 1.012] | 7.0 (5.8) | 16.7 / 44 | 1.36 | 0 |
+| 2 | off | 9/9 | [0.988, 1.024] | 9.3 | 25.4 / 39 | 1.85 | 0 |
+| | reinit | 8/9 (P2 back to quiescent) | [0.988, 1.011] | 7.0 | **29.4** / 42 | 1.69 | 0 |
+| | + one-sided hydro | 8/9 (same) | [0.988, 1.011] | 7.0 | 20.9 / 39 | 2.00 | 2 (2, ≤ 4.4 m/s) |
+| 3 | off | 9/9 | [0.981, 1.024] | 9.5 | 21.8 / 33 | 3.32 | 0 |
+| | reinit | 9/9 | [0.988, 1.011] | 7.0 | **35.0** / 50 | 5.55 | 1 (1, 3.0 m/s) |
+| | + one-sided hydro | 9/9 | [0.988, 1.011] | 7.0 | 22.8 / 47 | 2.37 | 0 |
+
+(7.0 is the same early event, t\* 2.46, in every run; seed 1's late maximum is the
+number in brackets; seeds 2-3 late maxima are below 7.0.)
+
+Reading:
+- **It does not release the ceiling riders** — it slightly *increases* them
+  (22-25 → 29-35). The sticking is therefore not mainly the continuity-booked
+  density deficit (the plan's "half each" split overstated that half, or the
+  other half is not just the hydrostatic term): with ρ floored at the geometric
+  density the riders stay held by the wall pressure + fluid neighbours.
+  One-sided hydrostatic on top: 29→17, 29→21, 35→23, i.e. back to about the
+  baseline (≈ −25 % … 0 vs off), not a fix.
+- **What it does do**: the ρ band tightens on both ends (upper 1.024-1.027 → 1.011-1.012)
+  and the late fast ejection disappears in all three seeds (late max\|v\| 9.3-9.6 →
+  ≤ 5-6). Checks: seeds 1 and 3 unchanged (9/9); **seed 2 drops to 8/9** ('P2 back to
+  quiescent', which the baseline passes on that seed; it also fails with uniwall on it, and
+  seeds 4-6 fail it 1/3 in *both* noPen modes, §7.2 — probably late-flow spread, but not
+  shown here). So it acts on the §1/§7 kick population, which the integrator fixes had
+  already reduced, and not
+  on the sticking.
+- **Not looked at**: the videos (recorded next to the npz files) were not inspected
+  for this table; one realisation per variant; sloshingTank not run.
+Conclusion: as an experiment it is informative (rules out the continuity deficit as
+the main sticking mechanism, but is a cheap density-band / late-kick suppressor),
+not a fix. The remaining candidates for the sticking are §8.3 (a) / (b)
+(traction criterion without the fluid's own tension; body-force gating).
+
+### 8.5 Decision: uniwall parked (user, 2026-09-30)
+
+Every step of §8 needed a further criterion to repair the previous one: traction sign → (a) own-pressure clamp →
+(b) gravity / wall-orientation gate (itself fixed once for sign noise, then a 45° split) → a per-neighbour corner
+gate → collision damping for what it releases. That is a chain of case-shaped switches, not a physical fix, and it
+will not generalise: the gate assumes a static wall and a fixed gravity (a wall moving downwards changes
+`g_eff = g − a_wall` and with it which contacts may release; a gate written on `g` alone is wrong for it), and every
+new geometry (corner, curved wall) needs another patch. The released rows are also the real defect: sub-support
+fragments behave as elastic compressible balls (§8.4), a model property that a contact switch cannot fix.
+
+State: `unilateralWallContact`, `unilateralWallAirOwnPressure`, `unilateralWallBodyForceGate` stay in the tree
+(uncommitted at this point), opt-in, default off, tests pass; not to be extended. The sticking itself is unchanged and
+open (cosmetic: 22-25 ceiling rows, no dynamics); a fix has to come from the model (cohesion / a treatment of
+sub-support fragments, or the incompressible route), not from another gate.
+
+### 8.6 Literature pointers on the elastic-fragment observation (2026-09-30)
+
+No paper found that describes or quantifies the restitution of a lone SPH particle. Nearest (local `literature/`, excerpts
+read, not full papers): Schechter & Bridson 2012 (basic SPH: "unnatural clusters instead of spray"; isolated particles
+treated as ballistic; disallowing negative pressure at under-resolved boundaries, citing Batty 2007 / Chentanez & Müller
+2011), Akinci 2013 (cohesion + curvature forces; SPH error creates isolated particles), Michel 2022 (isolated particles'
+mass / volume deviate in ALE schemes), Dehnen & Aly 2012 (Wendland kernels avoid the pairing instability although the
+kernel derivative vanishes at the origin; so the corner clump of §8.4 is tension-driven, not a zero-gradient effect);
+outside `literature/`, abstract-level only: Ihmsen et al. 2012 (spray as a non-interacting diffuse class),
+Losasso et al. 2008. User's scoping (2026-09-30): surface tension is out of scope (research work); Schechter's ballistic
+isolated particles ≈ DualSPHysics' exclusion of out-of-range fluid; Michel's ALE handling of isolated particles goes with
+the δ-ALE-SPH derivation already on the list.
