@@ -88,6 +88,9 @@ CONFIGS: Dict[str, AVConfig] = {c.name: c for c in (
     AVConfig('colagrossi2004', switch='Colagrossi2004'),
     AVConfig('morrisMonaghan1997', switch='MorrisMonaghan1997', switchParams=dict(alpha_min=0.1, alpha_max=2.0)),
     AVConfig('rosswog2000', switch='Rosswog2000', switchParams=dict(alpha_min=0.1, alpha_max=2.0)),
+    # CRKSPH host (AV_PLAN S4): its viscosity is the CRK limiter operator, not the pair operator
+    AVConfig('crkNone', scheme='CRKSPH', switch='NoneSwitch'),
+    AVConfig('crkCullenDehnen2010', scheme='CRKSPH', switch='CullenDehnen2010'),
     AVConfig('noneQ', switch='NoneSwitch', diffusion=dict(C_q=2.0)),
     AVConfig('cullenDehnen2010Q', switch='CullenDehnen2010', diffusion=dict(C_q=2.0)),
     AVConfig('readHayfield2012Q', switch='ReadHayfield2012', switchParams=_RH, diffusion=dict(C_q=2.0)),
@@ -97,6 +100,7 @@ CONFIGS: Dict[str, AVConfig] = {c.name: c for c in (
 GROUPS: Dict[str, List[str]] = {
     'baseline': ['none', 'cullenDehnen2010', 'readHayfield2012'],
     'baselineQ': ['noneQ', 'cullenDehnen2010Q', 'readHayfield2012Q'],
+    'crk': ['crkNone', 'crkCullenDehnen2010'],
     'switchesS3': ['balsara1995', 'colagrossi2004', 'morrisMonaghan1997', 'rosswog2000'],
 }
 
