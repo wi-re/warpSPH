@@ -114,10 +114,19 @@ strong-shock (Sedov/Noh) detector comparisons can be trusted, so it must be done
 - [x] reference numbers: `--config switchesS3` on sod + gresho, bit-locked (`results/av_S3_switches/`). Findings: Balsara == Colagrossi **exactly** on 1D Sod (curl and trace-free shear are both 0 in 1D) and both ~ NoneSwitch there; MM97 Sod peak alpha 0.51 vs the paper's Eq. (19) no-decay ceiling `alpha_inf + ln(v1/v2)` ~ 0.67 for this Sod shock; on Gresho all four keep the vortex (peak 0.74-0.84, L1 0.07-0.08, <1.1 % L lost)
 
 ### S4 — Side track: CRK `x_ij` sign discrepancy (§2.2)
-- [ ] decide whether `accel.py:153` (`+x_ij`) vs `dudt.py:136` (`-x_ij`) is a bug; if it moves CRKSPH, quantify and record — separate finding
+- [x] **Analysis by reading (2026-09-30), experiment pending.** `computeDistanceVec(x, y) = x - y`, so `x_ij = x_i - x_j` in both files. Linear extrapolation of each particle's velocity to the pair midpoint gives `v^_i = v_i - (1/2) phi J_i x_ij` and `v^_j = v_j + (1/2) phi J_j x_ij` — exactly garciasenz2026 Eqs. (11)-(12). `accel.py:152-156` does this (`+x_ij` on the j side, `v_dot_j = v_j + v_corr_j`). **`dudt.py:135-138` uses `matmul(gradV_j, -x_ij)` with the same `v_dot_j = v_j + v_corr_j`, i.e. `v_j - (1/2) phi J_j x_ij`: the j-side reconstruction in the energy equation has the opposite sign to the momentum equation's.** Also: `dudt.py` passes `cs_i, cs_i` to the first `computePi_actual` and `cs_j, cs_j` to the second, where `accel.py` passes `cs_i, cs_j` to both. If these are bugs they break the heating-vs-kinetic-loss consistency of the CRK viscosity whenever `phi > 0`.
+- [ ] experiment: CRKSPH (scheme override, NoneSwitch + C&D) on sod / gresho / sedov / noh with (a) the code as is, (b) `dudt.py` j-sign fixed, (c) `cs` arguments fixed; compare total-energy drift, L1, peak metrics. Only change the code if it moves things in the right direction; record the delta either way (plan §Phase 3 rule: a CRK change is a separate finding, quantified, not silently absorbed). Waiting for the GPU (M0b re-run in progress)
 
 ### S5 — OPEN_PROBLEMS §16: Monaghan energy gain on strong shocks (after S2–S4)
 - [ ] first checks listed in §16: A/B `adaptiveSupportScheme`/`adaptiveSupportCorrections`; two-particle `dudt` vs `dvdt` consistency; does the scheme's own `dEdt` sum to zero
+
+### M0b — harness correction (2026-09-30)
+`AVConfig.switchParams` now applies `alpha_min/alpha_max` to EVERY case; in the first M0 they were case params that only
+`sod`/`sodND` read, so Read-Hayfield ran in its designed 0.2-1.0 range on the Sod family only. `none`, C&D and all Sod numbers are
+unchanged (bit-identical); R&H changes on the smooth cases (Gresho L1 0.071 -> 0.101: its alpha floor keeps dissipating; KH amplitude
+0.112 -> 0.068). New reference: `results/av_M0b_*`, smoke ref `results/av_smoke_ref_M0b/`, doc `docs/av/av_baseline_2026-09-30.md`
+(regenerated; includes the four S3 switches). The `milestone/av-baseline` tag stays at the first M0 commit. `av_report.py --merge`
+combines report dirs (later overrides earlier per config/case).
 
 ### How each S2/S3 step is checked (cheap form)
 `results/av_smoke_ref_M0/` is the smoke-profile baseline from the tree at the M0 tag; after a step run

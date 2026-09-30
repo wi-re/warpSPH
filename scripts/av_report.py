@@ -61,6 +61,11 @@ class AVConfig:
     scheme: str = 'Monaghan'
     switch: str = 'NoneSwitch'
     params: Dict[str, Any] = field(default_factory=dict)
+    #: `ViscositySwitchConfig` fields (alpha_min, alpha_max, ...) set on the scheme config after
+    #: the case configures it, so they apply to EVERY case. (As case `params` they only reached
+    #: `sod`/`sodND`: `configureCompressible` ignores them, so through the first M0 baseline
+    #: Read-Hayfield ran in its designed 0.2-1.0 alpha range on Sod only.)
+    switchParams: Dict[str, Any] = field(default_factory=dict)
     #: `DiffusionParameters` fields overridden on the scheme config after the case
     #: configures it (e.g. `{'C_q': 2.0}`); these are scheme, not case, parameters.
     diffusion: Dict[str, Any] = field(default_factory=dict)
@@ -68,12 +73,12 @@ class AVConfig:
 
 #: R&H 2012 is designed with a narrower, higher-baseline alpha range
 #: (`probe_cullen_sod.py`, `tests/test_shockCapturing.py`).
-_RH = dict(alpha_min=0.2, alpha_max=1.0)
+_RH = dict(alpha_min=0.2, alpha_max=1.0)          # applied through `switchParams`
 
 CONFIGS: Dict[str, AVConfig] = {c.name: c for c in (
     AVConfig('none', switch='NoneSwitch'),
     AVConfig('cullenDehnen2010', switch='CullenDehnen2010'),
-    AVConfig('readHayfield2012', switch='ReadHayfield2012', params=_RH),
+    AVConfig('readHayfield2012', switch='ReadHayfield2012', switchParams=_RH),
     # C_q = 2 columns: the Monaghan default C_q = 0 has no quadratic term, so v_sig = C_l c
     # is zero in cold gas (Noh, Sedov's background) and nothing dissipates there.
     # AV_PLAN S3 switches (Monaghan host, C_q = 0): Balsara/Colagrossi are instantaneous
@@ -81,11 +86,11 @@ CONFIGS: Dict[str, AVConfig] = {c.name: c for c in (
     # alpha_inf = 0.1, C_1 = 0.2 and alpha_max = 2.
     AVConfig('balsara1995', switch='Balsara1995'),
     AVConfig('colagrossi2004', switch='Colagrossi2004'),
-    AVConfig('morrisMonaghan1997', switch='MorrisMonaghan1997', params=dict(alpha_min=0.1, alpha_max=2.0)),
-    AVConfig('rosswog2000', switch='Rosswog2000', params=dict(alpha_min=0.1, alpha_max=2.0)),
+    AVConfig('morrisMonaghan1997', switch='MorrisMonaghan1997', switchParams=dict(alpha_min=0.1, alpha_max=2.0)),
+    AVConfig('rosswog2000', switch='Rosswog2000', switchParams=dict(alpha_min=0.1, alpha_max=2.0)),
     AVConfig('noneQ', switch='NoneSwitch', diffusion=dict(C_q=2.0)),
     AVConfig('cullenDehnen2010Q', switch='CullenDehnen2010', diffusion=dict(C_q=2.0)),
-    AVConfig('readHayfield2012Q', switch='ReadHayfield2012', params=_RH, diffusion=dict(C_q=2.0)),
+    AVConfig('readHayfield2012Q', switch='ReadHayfield2012', switchParams=_RH, diffusion=dict(C_q=2.0)),
 )}
 
 #: Named groups, so `--config baseline` runs the three M0 columns.
@@ -130,11 +135,13 @@ def _execute(spec: RunSpec, cfg: AVConfig, outDir: Path, tag: str, video: bool,
 
     def configureScheme(ctx):
         configure(ctx)
+        for name, value in cfg.switchParams.items():
+            setattr(ctx.schemeConfig.viscositySwitchParams, name, value)
         for name, value in cfg.diffusion.items():
             setattr(ctx.schemeConfig.diffusionParams, name, value)
 
     case = dataclasses.replace(spec.case, diagnostics=diagnostics,
-                               configureScheme=configureScheme if cfg.diffusion else configure)
+                               configureScheme=configureScheme if (cfg.diffusion or cfg.switchParams) else configure)
     kw = dict(spec.kwargs)
     kw.setdefault('scheme', cfg.scheme)
     params = dict(spec.params, viscositySwitch=cfg.switch, **cfg.params)
@@ -578,6 +585,35 @@ def compareReports(a: Path, b: Path, tol: float) -> int:
     return 1 if bad else 0
 
 
+def mergeReports(dirs: List[Path], out: Path) -> int:
+    """Combine report directories into one: records are matched on (config, case) and a
+    later directory replaces an earlier one; `locks.json` files are merged the same way.
+    Writes `results.json` + `report.md` into `out` (meta = the last directory's)."""
+    import json
+    records: Dict[tuple, Dict[str, Any]] = {}
+    locks: Dict[str, Any] = {}
+    meta: Dict[str, Any] = {}
+    for d in dirs:
+        d = Path(d)
+        payload = json.loads((d / 'results.json').read_text())
+        meta = dict(payload['meta'], mergedFrom=[str(x) for x in dirs])
+        for r in payload['records']:
+            records[(r['config'], r['case'])] = r
+        if (d / 'locks.json').exists():
+            locks.update(json.loads((d / 'locks.json').read_text()))
+    out.mkdir(parents=True, exist_ok=True)
+    recs = list(records.values())
+    # drop lock entries for pairs that no longer exist
+    locks = {k: v for k, v in locks.items() if tuple(k.split('/')) in records}
+    rep.writeResults(out, 'av', meta, recs)
+    profile = meta.get('profile', 'full')
+    rep.writeSummary(out, f'AV report ({profile}, merged)', renderMarkdown(recs, locks, meta, profile))
+    (out / 'summary.md').rename(out / 'report.md')
+    (out / 'locks.json').write_text(json.dumps(locks, indent=2))
+    print(f'[av_report] merged {len(dirs)} reports, {len(recs)} pairs -> {out}/report.md')
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument('--config', default='baseline', help='config or group name (see --list)')
@@ -590,9 +626,14 @@ def main() -> int:
     ap.add_argument('--list', action='store_true')
     ap.add_argument('--compare', nargs=2, metavar=('A', 'B'),
                     help='compare two report dirs / results.json (exit 1 if they differ)')
+    ap.add_argument('--merge', nargs='+', metavar='DIR',
+                    help='merge report dirs (later overrides earlier per config/case) into --out')
     ap.add_argument('--tol', type=float, default=0.0,
                     help='--compare tolerance on the relative difference (0 = bit-identical)')
     args = ap.parse_args()
+
+    if args.merge:
+        return mergeReports([Path(d) for d in args.merge], rep.outDirFor('av', args.out))
 
     if args.compare:
         return compareReports(Path(args.compare[0]), Path(args.compare[1]), args.tol)
