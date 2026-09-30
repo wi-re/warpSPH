@@ -208,8 +208,12 @@ def computeCrkSPHAccel_Func_i(
         eta_j = x_ij / smooth_j
 
         vij_dot = v_dot_i - v_dot_j
-        mu_ij = (wp.dot(vij_dot, eta_i)) / (wp.dot(eta_i, eta_i) + scalar_t(1.0e-7) * smooth_i * smooth_i)
-        mu_ji = (wp.dot(vij_dot, eta_j)) / (wp.dot(eta_j, eta_j) + scalar_t(1.0e-7) * smooth_j * smooth_j)
+        # Frontiere et al. 2017 Eq. (69): mu = min(0, v_hat . eta / (eta . eta + eps^2)), eta = x_ij / h (dimensionless),
+        # eps^2 = 1e-2 (their standard parameter set). The regulariser must be dimensionless like eta . eta: the old
+        # `1e-7 * h^2` (~1e-11) left mu ~ v / |eta| unbounded as a pair closes, so a near-coincident approaching pair
+        # (r ~ 1e-3 dx) got a pair acceleration ~ 1e4-1e5 and blew the run up in one step (OPEN_PROBLEMS §15).
+        mu_ij = (wp.dot(vij_dot, eta_i)) / (wp.dot(eta_i, eta_i) + scalar_t(1.0e-2))
+        mu_ji = (wp.dot(vij_dot, eta_j)) / (wp.dot(eta_j, eta_j) + scalar_t(1.0e-2))
 
         mu_ij = wp.min(scalar_t(0.0), mu_ij)
         mu_ji = wp.min(scalar_t(0.0), mu_ji)
