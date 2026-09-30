@@ -1392,3 +1392,12 @@ If any entry here is added or corrected in `literature/ABSTRACTS.md`, run
 `python scripts/check_literature.py` — it verifies each abstract verbatim against
 its PDF. Use the `paper-lookup` skill for bibliographic fields; do not fill
 volume/page/year from memory.
+
+## Input from OPEN_PROBLEMS §15 (2026-09-30)
+
+- CRK viscosity switch regulariser fixed to Frontiere Eq. (69)'s `eps^2 = 1e-2` in eta^2 units (was `1e-7 h^2` added to a
+  dimensionless eta.eta, i.e. no regularisation; near-coincident approaching pairs blew up, see OPEN §15). M0's baseline
+  lock should start from this state, not from before it.
+- Open for the AV work: `C_l, C_q` are kernel-dependent in the paper (Table D.1: B7 2.0/1.0, Wendland 0.5/0.25, because
+  mu scales with h); `buildDefaultDiffusionParamsCRKSPH` uses 1/1 for every kernel (check `smooth = H/xi` vs the paper's h
+  first). The compressible dt has no approach/viscous term.

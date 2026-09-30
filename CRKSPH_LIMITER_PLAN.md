@@ -244,3 +244,10 @@ Acceptance before changing any default:
       the check that would have caught the spin-up.
 - [ ] CRK energy conservation with symmetric support (exists implicitly;
       make explicit next to `test_crkSupportWarning.py`).
+
+## Note 2026-09-30 (OPEN_PROBLEMS §15)
+
+The viscosity switch's regulariser was fixed to the paper's `eps^2 = 1e-2` (eta^2 units). Effect on the sweep's 13 cases is
+small (Sod -0.1 %, Sedov 0 %, Noh -1.7 %, Kidder -2.7 %, KH rebound -34 %); **Gresho worsened 12-15 %** (L1 v 2.87e-2 ->
+3.30e-2, KE(3) +7.3 % -> +8.2 %), consistent with the knife-edge of O4. Baselines for P1 should be re-taken on this code.
+The `C_l, C_q` units question (paper Table D.1) is the same class as O2.

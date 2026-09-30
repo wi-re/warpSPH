@@ -544,10 +544,53 @@ free-slip boundary-velocity mirror (`computeBoundaryVelocities`) feeding the
 viscous term, against the divergence-free solve. Not investigated further.
 
 
-## 15. CRKSPH on a lattice shock: light-gas columns pile up at the contact, blow-up when a pair reaches r = 0
+## 15. CRKSPH on a lattice shock: light-gas columns pile up at the contact, blow-up when a pair reaches r = 0 — blow-up RESOLVED 2026-09-30
 
-**Status: parked as a note (2026-09-29, user: other issues first — see §1).**
-Fully replicable in ~10 s; nothing changed in code.
+**Status: blow-up RESOLVED 2026-09-30 (cause found, fixed, regression test); a benign residual and follow-ups
+below.** The mechanism sections further down were written before the cause was known; the "what it is not" list
+there stays valid (kernel, `n_h`, limiter constants, gradB, CUDA graphs were all innocent).
+
+**Cause (2026-09-30).** The blow-up is the CRK **artificial viscosity** on a near-coincident approaching pair,
+not the pressure force. `modules/crk/accel.py` / `dudt.py` regularised the switch as
+`mu = v_hat . eta / (eta . eta + 1e-7 h^2)` with `eta = x/h` **dimensionless**: the regulariser was ~1e-11, so
+`mu ~ v/|eta|` was unbounded as a pair closed and `Q = rho (-C_l c mu + C_q mu^2)` gave a pair acceleration
+~1e4-6e4 in one right-hand-side evaluation (trapped: the second stage of step 163, pair at r = 0.0026 dx,
+|a_visc| = 6.2e4 vs |a_pressure| = 0.12; then u -> -5e5). Frontiere et al. 2017 Eq. (69) has
+`eps^2 = 1e-2` in eta^2 units (their standard parameter set). Fix: exactly that (`scalar_t(1.0e-2)`), so the
+viscosity vanishes smoothly as `eta -> 0`.
+
+**Result.** Sod 2D same-lattice: blow-up at step 164 -> clean to t = 0.6 (268 steps, total energy 0.35385
+exact); the shipped `triplePoint_equalSpacing.py`: blow-up at step 88 -> t = 10.0 in 4700 steps, energy exact
+(48.203), vortex roll-up as in the paper's Fig. 25 (videos in `scripts/out_crk2d/examples/export/`); a regression
+test (`tests/test_crkCoincidentPair.py`) fails on the old code (non-finite state) and passes now; gradcheck
+(`scripts/gradcheck_crk.py`) and `tests/test_physics.py` etc. pass (110). A/B of the change over the 13
+compressible cases of the limiter-plan harness (old vs new, `scripts/out_crk2d/sweep/`): Sod L1 rho -0.1 %,
+Sedov 0.0 %, Noh -1.7 %, Kidder -2.7 %, linear wave -3.6 %, Yee -0.9 %, hydrostatic max|v| +0.5 %, KH rebound
+-34 %, RT +0.7 %, nothing diverges; the one worse number is Gresho (+12-15 % velocity error, KE spin-up
++7.3 % -> +8.2 %), a case CRKSPH_LIMITER_PLAN O4 shows is a knife-edge (2 % threshold shift = 7x spin-up).
+
+**Tested and refuted on the way.** (a) The sampling ratio is not the cause (it only decides when). (b) Frontiere
+Eq. (76)'s multi-material mass rule for the density (`m_ij = m_i` across materials; our kernel always uses `m_j`,
+`warpSPHCore/crk/crk_density.py`; the core has no material tag) was built by linearity and tried: it makes Sod 2D
+blow up *earlier* (step 83), and the user reports it degraded the hydrostatic 2D box, so it stays out. (c) The
+equal-spacing hydrostatic box (static mass jump at uniform pressure) is essentially perfect under CRKSPH
+(max|v| 1e-5 over t = 3), so the density treatment across a jump is not the problem; the mass-jump trouble is
+dynamic, at start-up.
+
+**Residual (not a blow-up).** With a sharp same-lattice mass step the first light column is kicked forward within
+four steps (0.56 m/s), the light columns then settle into an irregular spacing, and one pair of columns per
+interface merges (coincident from t ~ 0.18 and stays, 20 pairs per interface, min spacing 0.0004 dx); equal-mass
+sampling never does this (min spacing 0.6 dx). It does not hurt accuracy by the L1 measure (Sod 2D same-lattice
+1.4e-2 vs equal-mass 1.9e-2 at t = 0.25, exact Riemann). The paper's Sod / triple point are equal-mass (Sod 3D:
+"to maintain mass matching"), so this is an initial-condition property of our extra same-lattice preset.
+
+**Follow-ups for the AV / limiter work.** (1) `C_l, C_q`: Frontiere Table D.1 makes them kernel-dependent
+(mu scales with h): 7th-order B-spline, our default, `C_l = 2.0, C_q = 1.0`, Wendland `0.5 / 0.25`; our
+`buildDefaultDiffusionParamsCRKSPH` uses 1 / 1 for every kernel (unverified whether `smooth = H/xi` equals the
+paper's h for B7, CRKSPH_LIMITER_PLAN O2 is the same units question for the limiter). (2) The compressible dt is
+acoustic only (`cfl h_min / (xi c_s)`), no approach/viscous term, so it cannot see a column closing (a smaller cfl
+only hid the pile-up). (3) Gresho spin-up (+7-8 % KE) and the limiter knife-edge are unchanged
+(CRKSPH_LIMITER_PLAN P1).
 
 **What it is.** `compressible/14-triplePoint/triplePoint_equalSpacing.py`
 (CRKSPH, nx 256, shipped preset, `dev` @ a28aeb1) is clean for 86 steps
