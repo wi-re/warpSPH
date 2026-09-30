@@ -98,7 +98,7 @@ Steps 1–5 are S2/S3 below in this order; S4 is independent (any time after ste
 strong-shock (Sedov/Noh) detector comparisons can be trusted, so it must be done before Phase 2's Sedov/Noh validation rows.
 
 ### S2 — Cheap audit fixes + fixed β (start of Phase 1)
-- [ ] **1.** delete dead `limitXi`; rename the kernel-normalisation `xi` (§2.5) — no-ops, bit-identical
+- [x] **1.** (done 2026-09-30, smoke baseline bit-identical, 30 pairs) deleted dead `limitXi`; renamed pi.py's local `xi` -> `kernelXi` with a comment (it is `sphKernel_xi` = packing ratio x kernel scale, not a support ratio). The serialised `correctXi` config field keeps its name (stored configs); its comment now says what it is
 - [ ] **2.** `entropies`/`pressures` state tags fixed (closes PESPH_PLAN §2.1) — *check the tag consumers first*; the only step that may move numbers: identical, or every change explained
 - [ ] **3.** fixed-β `CoefficientPolicy` (+ `scaleBeta` read-through, dict round-trip, tests) — additive, defaults bit-identical
 - [ ] **4.** registry replaces both `elif` chains; missing members raise a named `NotImplementedError` — bit-identical
@@ -116,6 +116,12 @@ strong-shock (Sedov/Noh) detector comparisons can be trusted, so it must be done
 
 ### S5 — OPEN_PROBLEMS §16: Monaghan energy gain on strong shocks (after S2–S4)
 - [ ] first checks listed in §16: A/B `adaptiveSupportScheme`/`adaptiveSupportCorrections`; two-particle `dudt` vs `dvdt` consistency; does the scheme's own `dEdt` sum to zero
+
+### How each S2/S3 step is checked (cheap form)
+`results/av_smoke_ref_M0/` is the smoke-profile baseline from the tree at the M0 tag; after a step run
+`scripts/av_report.py --config baseline --profile smoke --out <dir>` then `--compare results/av_smoke_ref_M0 <dir>`
+(~6 min, 30 pairs, must be IDENTICAL unless the step is expected to move numbers). The full-profile lock is re-run
+once at the end of S2.
 
 ### Notes
 - 2026-09-30: **the compressible cases' default scheme is CompSPH, not Monaghan** (`C_q=2`, `Monaghan1992`); the

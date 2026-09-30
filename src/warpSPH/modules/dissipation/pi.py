@@ -57,9 +57,12 @@ def computePi_actual(
     h_bar = scalar_t(1.0)/scalar_t(2.0) * (h_i + h_j)
 
 
-    xi = sphKernel_xi(kernel_int, domainState.dim) 
+    # The kernel-dependent length factor `sphKernel_xi` (packing ratio x kernel scale) -- NOT
+    # Cullen & Dehnen's limiter Xi (`shockCapturing/CullenDehnen2010.py`) nor Wadsley's xi
+    # (AV_PLAN Eq. 28).
+    kernelXi = sphKernel_xi(kernel_int, domainState.dim)
     if not viscosityParams.correctXi:
-        xi = scalar_t(1.0)
+        kernelXi = scalar_t(1.0)
 
     C_l_ = viscosityParams.C_l
     C_q_ = viscosityParams.C_q
@@ -82,7 +85,7 @@ def computePi_actual(
     if thermalConductivity:
         viscosityTerm = viscosityParams.thermalConductivityTerm
 
-    mu_ij, scalingFactor = compute_mu_ij(ux_ij, r_ij, h_bar, viscosityTerm, xi)
+    mu_ij, scalingFactor = compute_mu_ij(ux_ij, r_ij, h_bar, viscosityTerm, kernelXi)
 
     # if viscosityParams.monaghanSwitch and ux_ij > 0:
     #     mu_ij = scalar_t(0.0)
@@ -113,8 +116,8 @@ def computePi_actual(
         # mu_a = 1/8 alpha_a h_a c_a rho_a
         # Pi_ab = - 16 mu_a mu_b / (rho_a rho_b (mu_a + mu_b)) mu_ij
         f = scalar_t(1.0)/(scalar_t(2.0)*(scalar_t(domainState.dim)+scalar_t(2.0))) # Based on estimations based on Monaghan 2005, not given for 1D
-        mu_i = f * alpha_i * C_l * h_i * c_i * rho_i / xi
-        mu_j = f * alpha_j * C_l * h_j * c_j * rho_j / xi
+        mu_i = f * alpha_i * C_l * h_i * c_i * rho_i / kernelXi
+        mu_j = f * alpha_j * C_l * h_j * c_j * rho_j / kernelXi
         # scalar_t(19.8) based on Cleary and Ha 2002
         v_sig = scalar_t(19.8) * mu_i * mu_j / (rho_i * rho_j * (mu_i + mu_j)) / (r_ij + scalar_t(1e-14) * h)
         K = scalar_t(1.0)

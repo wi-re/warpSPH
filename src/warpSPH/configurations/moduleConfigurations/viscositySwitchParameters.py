@@ -2,10 +2,10 @@
 (alpha bounds, beta parameters, divergence scheme), embedded as
 `.viscositySwitchParams` on `CompressibleSPHConfig`/`CompSPHConfig`/
 `CRKSPHConfig`/`WeaklyCompressibleSPHConfig`/`IncompressibleSPHConfig` and read
-by `modules/shockCapturing/CullenDehnen2010.py`. Note: `limitXi` is declared
-twice below (default `False` at the top, default `True` further down) --
-dataclass field redefinition means only the second (`True`, "limit the xi
-parameter in the Cullen-Dehnen switch") is actually live; the first is dead.
+by `modules/shockCapturing/CullenDehnen2010.py`. `limitXi` is C&D's limiter
+Xi, unrelated to the kernel length factor `DiffusionParameters.correctXi` /
+`sphKernel_xi`. (It used to be declared twice -- a dead `False` default and the live
+`True` one; only the live one is kept.)
 """
 
 __all__ = ['ViscositySwitchConfig', 'viscositySwitchConfigToDict', 'dictToViscositySwitchConfig']
@@ -23,7 +23,6 @@ from enum import Enum
 @dataclass
 class ViscositySwitchConfig:
     scheme: ViscositySwitch = field(default=ViscositySwitch.NoneSwitch, metadata={'description': 'Viscosity switch to use'})
-    limitXi: bool = field(default=False, metadata={'description': 'Whether to limit the viscosity switch based on the xi parameter'})
     correctVelocityGradient: bool = field(default=False, metadata={'description': 'Whether to apply the correction matrix to the velocity gradient in the viscosity switch computation'})
     divergenceScheme: Optional[str] = field(default='naive', metadata={'description': 'Scheme to compute the divergence for the viscosity switch. Options are "naive" for the standard SPH divergence and "cullen"'})
 

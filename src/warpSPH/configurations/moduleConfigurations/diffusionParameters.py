@@ -47,7 +47,7 @@ class DiffusionParameters:
     thermalConductivityTerm: wp.int32 = field(default=ViscosityTerms.Price2012_98.value) # Thermal conductivity formulation to use, e.g. Monaghan1997 thermal conductivity term, Cleary1998 thermal conductivity term etc.
     scaleBeta: wp.bool = field(default=False) # If true then the quadratic viscosity term is scaled by the linear viscosity term, as suggested in some papers to reduce excessive viscosity in certain scenarios. This is only relevant for formulations that use a quadratic term, such as Monaghan1992 and Monaghan1997.
     monaghanSwitch: wp.bool = field(default=True) # Whether to apply the Monaghan switch that turns off viscosity for diverging particles, i.e. particles that are moving away from each other. This is a common technique to reduce excessive viscosity in expanding flows and is used in many formulations such as Monaghan1992 and Monaghan1997.
-    correctXi: wp.bool = field(default=True) # Whether to apply the xi correction factor to the viscosity term. This is a correction factor that can be applied to account for errors in the estimation of the velocity divergence and is discussed in some papers such as "Correcting SPH for accurate viscous forces" by Adami et al. 2013.
+    correctXi: wp.bool = field(default=True) # Divide the viscosity by the kernel-dependent length factor `sphKernel_xi` (packing ratio x kernel scale) so the coefficients are comparable across kernels. Unrelated to Cullen & Dehnen's limiter Xi (`ViscositySwitchConfig.limitXi`). The name is kept because it is serialised in stored configs.
 
     
 def buildDefaultDiffusionParamsCompressibleSPH():
