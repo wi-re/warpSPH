@@ -21,6 +21,10 @@ from .switchState import ViscositySwitchState
 from .CullenDehnen2010 import computeCullenTerms, computeCullenUpdate
 from .CullenHopkins import computeHopkinsTerms, computeHopkinsUpdate
 from .ReadHayfield2012 import computeReadHayfieldTerms, computeReadHayfieldUpdate
+from .Balsara1995 import computeBalsaraTerms, computeBalsaraUpdate
+from .Colagrossi2004 import computeColagrossiTerms, computeColagrossiUpdate
+from .MorrisMonaghan1997 import computeMorrisMonaghanTerms, computeMorrisMonaghanUpdate
+from .Rosswog2000 import computeRosswog2000Terms, computeRosswog2000Update
 
 __all__ = ['computeViscositySwitchTerms', 'updateViscositySwitch', 'SWITCHES', 'PLANNED',
            'registerViscositySwitch']
@@ -45,15 +49,15 @@ SWITCHES = {
     ViscositySwitch.CullenDehnen2010: (computeCullenTerms, computeCullenUpdate),
     ViscositySwitch.CullenHopkins: (computeHopkinsTerms, computeHopkinsUpdate),
     ViscositySwitch.ReadHayfield2012: (computeReadHayfieldTerms, computeReadHayfieldUpdate),
+    ViscositySwitch.Balsara1995: (computeBalsaraTerms, computeBalsaraUpdate),
+    ViscositySwitch.Colagrossi2004: (computeColagrossiTerms, computeColagrossiUpdate),
+    ViscositySwitch.MorrisMonaghan1997: (computeMorrisMonaghanTerms, computeMorrisMonaghanUpdate),
+    ViscositySwitch.Rosswog2000: (computeRosswog2000Terms, computeRosswog2000Update),
 }
 
-#: Enum members with no implementation yet -> where AV_PLAN.md provides them.
-PLANNED = {
-    ViscositySwitch.Balsara1995: 'AV_PLAN S3: the standalone Balsara multiplier (a limiter in [0,1], not an alpha)',
-    ViscositySwitch.Colagrossi2004: 'AV_PLAN S3 (optional): the Colagrossi shear limiter',
-    ViscositySwitch.MorrisMonaghan1997: 'AV_PLAN S3: the Morris & Monaghan (1997) switch',
-    ViscositySwitch.Rosswog2000: 'AV_PLAN S3: the divergence-source switch (the 2020 entropy trigger is a separate, new Rosswog2020 member, Phase 2)',
-}
+#: Enum members with no implementation yet -> where AV_PLAN.md provides them (empty since
+#: AV_PLAN S3; Rosswog (2020) will arrive as a new enum member in Phase 2).
+PLANNED: dict = {}
 
 
 def registerViscositySwitch(scheme: ViscositySwitch, termsFn, updateFn) -> None:

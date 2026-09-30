@@ -28,10 +28,11 @@ def test_registered_and_planned_are_disjoint_and_cover_the_enum():
 
 def test_register_moves_a_planned_member_into_the_registry():
     scheme = ViscositySwitch.Colagrossi2004
-    saved = PLANNED[scheme]
+    saved = SWITCHES.pop(scheme)
+    PLANNED[scheme] = 'AV_PLAN test placeholder'
     try:
-        registerViscositySwitch(scheme, lambda *a: None, lambda *a: None)
+        registerViscositySwitch(scheme, *saved)
         assert scheme in SWITCHES and scheme not in PLANNED
     finally:
-        SWITCHES.pop(scheme, None)
-        PLANNED[scheme] = saved
+        SWITCHES[scheme] = saved
+        PLANNED.pop(scheme, None)

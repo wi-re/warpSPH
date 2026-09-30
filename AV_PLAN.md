@@ -105,11 +105,13 @@ strong-shock (Sedov/Noh) detector comparisons can be trusted, so it must be done
 - [x] **S2 exit check passed (2026-09-30):** smoke baseline, full-profile `C_q = 0` baseline (10 cases x 3 configs, 30 pairs) and full `C_q = 2` family (12 pairs) all IDENTICAL (tol 0, i.e. bit-for-bit, stronger than the planned 1e-6 for C&D/R&H) vs the M0 reports; full test suite + all gradchecks green
 - [x] decisions (user, 2026-09-30 "sounds good" to the stated defaults): deleted `crkSPH.py`'s commented-out `updateViscositySwitch` block, leaving a note; removed the unused `switchState.dvdt_diss` field (`avPower.py` supersedes it; only R&H's two constructor calls passed `None`). **Consequence worth knowing:** CRKSPH never advances `alpha0s`, so C&D / R&H under CRKSPH recompute alpha from the initial `alpha0s` each step — no decay memory. Restoring the call would change CRKSPH results; not done.
 
-### S3 — Fill the stubs (step 5, after the registry)
-- [ ] standalone Balsara multiplier lifted out of R&H (Phase 4 needs it); retire `Balsara1995` stub
-- [ ] `MorrisMonaghan1997` switch, from diffSPH + the PDF (baseline only)
-- [ ] `Rosswog2000` divergence-source switch kept as-is under that name; the 2020 trigger is a *new* `Rosswog2020` member (Phase 2)
-- [ ] `Colagrossi2004` limiter (optional)
+### S3 — Fill the stubs (step 5, after the registry) — DONE 2026-09-30
+- [x] standalone Balsara factor `balsaraFactor` (`modules/shockCapturing/Balsara1995.py`), used by Read-Hayfield (bit-identical vs M0 smoke baseline) and as the `Balsara1995` switch (alpha = B, instantaneous); `Balsara1995` stub retired
+- [x] `MorrisMonaghan1997` switch — checked against the PDF (Eqs. 5, 6, 13: `tau = h/(C_1 c)`, `C_1 = 0.2`, `S = max(-div, 0)`, `alpha_inf = 0.1`). **diffSPH's `tau = h c / l` is dimensionally wrong; not copied.** Decay taken implicitly (`switchRelaxation.relaxAlpha`, stable for any dt/tau, unit-tested at dt/tau 0.1..100); `h -> smoothing length` with CullenDehnen2010's `1/sphKernel_xi`. New tunable `morris_C1` (default 0.2, dict round-trip with `.get`)
+- [x] `Rosswog2000` divergence-source switch, **transcribed from diffSPH only — the paper is not in `literature/`, so it is unchecked against the source** (source `max(-div,0)(alpha_max - alpha)`, MM97 time scale). The 2020 entropy trigger is still to come as a new `Rosswog2020` member (Phase 2)
+- [x] `Colagrossi2004` limiter (trace-free shear norm); regularised with `eps c / h` (`balsara_const`), not diffSPH's dimensionally wrong `1e-14 h`
+- [x] `PLANNED` is now empty; `SWITCHES` has all 8 enum members; `tests/test_dissipationSwitches.py` (relaxation stability/steady state/exponential limit, Balsara limits, per-switch wiring on Sod and Gresho); full suite + gradchecks green. No warp kernels were added (all torch-level), so no new gradcheck.
+- [x] reference numbers: `--config switchesS3` on sod + gresho, bit-locked (`results/av_S3_switches/`). Findings: Balsara == Colagrossi **exactly** on 1D Sod (curl and trace-free shear are both 0 in 1D) and both ~ NoneSwitch there; MM97 Sod peak alpha 0.51 vs the paper's Eq. (19) no-decay ceiling `alpha_inf + ln(v1/v2)` ~ 0.67 for this Sod shock; on Gresho all four keep the vortex (peak 0.74-0.84, L1 0.07-0.08, <1.1 % L lost)
 
 ### S4 — Side track: CRK `x_ij` sign discrepancy (§2.2)
 - [ ] decide whether `accel.py:153` (`+x_ij`) vs `dudt.py:136` (`-x_ij`) is a bug; if it moves CRKSPH, quantify and record — separate finding

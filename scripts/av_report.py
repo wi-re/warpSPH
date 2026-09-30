@@ -76,6 +76,13 @@ CONFIGS: Dict[str, AVConfig] = {c.name: c for c in (
     AVConfig('readHayfield2012', switch='ReadHayfield2012', params=_RH),
     # C_q = 2 columns: the Monaghan default C_q = 0 has no quadratic term, so v_sig = C_l c
     # is zero in cold gas (Noh, Sedov's background) and nothing dissipates there.
+    # AV_PLAN S3 switches (Monaghan host, C_q = 0): Balsara/Colagrossi are instantaneous
+    # limiters (alpha = factor); MM97 / Rosswog2000 are source-and-decay with the paper's
+    # alpha_inf = 0.1, C_1 = 0.2 and alpha_max = 2.
+    AVConfig('balsara1995', switch='Balsara1995'),
+    AVConfig('colagrossi2004', switch='Colagrossi2004'),
+    AVConfig('morrisMonaghan1997', switch='MorrisMonaghan1997', params=dict(alpha_min=0.1, alpha_max=2.0)),
+    AVConfig('rosswog2000', switch='Rosswog2000', params=dict(alpha_min=0.1, alpha_max=2.0)),
     AVConfig('noneQ', switch='NoneSwitch', diffusion=dict(C_q=2.0)),
     AVConfig('cullenDehnen2010Q', switch='CullenDehnen2010', diffusion=dict(C_q=2.0)),
     AVConfig('readHayfield2012Q', switch='ReadHayfield2012', params=_RH, diffusion=dict(C_q=2.0)),
@@ -85,6 +92,7 @@ CONFIGS: Dict[str, AVConfig] = {c.name: c for c in (
 GROUPS: Dict[str, List[str]] = {
     'baseline': ['none', 'cullenDehnen2010', 'readHayfield2012'],
     'baselineQ': ['noneQ', 'cullenDehnen2010Q', 'readHayfield2012Q'],
+    'switchesS3': ['balsara1995', 'colagrossi2004', 'morrisMonaghan1997', 'rosswog2000'],
 }
 
 

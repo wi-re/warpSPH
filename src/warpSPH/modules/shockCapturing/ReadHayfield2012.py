@@ -43,6 +43,7 @@ import torch
 import numpy as np
 
 from .common import *
+from .Balsara1995 import balsaraFactor
 from .switchState import *
 from warpSPHCore import *
 from ...systems.compressibleMonaghan import CompressibleState
@@ -159,7 +160,7 @@ def computeReadHayfieldTerms(
     alpha_loc = torch.where(div < 0, h2_gdiv / denom, torch.zeros_like(div))
 
     # --- Balsara limiter (eq. 32) ------------------------------------------ #
-    f_balsara = div.abs() / (div.abs() + curl_mag + balsara_const * c / h + 1e-14)
+    f_balsara = balsaraFactor(div, curl_mag, c, h, balsara_const)
     alpha_loc = (alpha_loc * f_balsara).clamp(min=alpha_min, max=alpha_max)
 
     # --- pairwise signal velocity for the relaxation (eqs. 24-25) ---------- #

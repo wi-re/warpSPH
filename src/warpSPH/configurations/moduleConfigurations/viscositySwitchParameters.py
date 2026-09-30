@@ -35,7 +35,8 @@ class ViscositySwitchConfig:
     limitXi: bool = field(default=True, metadata={'description': 'Whether to limit the xi parameter in the Cullen-Dehnen switch'})
 
     ns: float = field(default=0.05, metadata={'description': "Noise parameter for the ReadHayfield2012 switch (eq. 21 denominator)"})
-    balsara_const: float = field(default=1.0e-4, metadata={'description': "Balsara limiter constant for the ReadHayfield2012 switch (eq. 32)"})
+    balsara_const: float = field(default=1.0e-4, metadata={'description': "Balsara limiter constant `eps` in `|div| / (|div| + |curl| + eps c / h)` (ReadHayfield2012 eq. 32; also the Balsara1995 and Colagrossi2004 switches)"})
+    morris_C1: float = field(default=0.2, metadata={'description': "Decay-rate constant C_1 of the source-and-decay switches (tau = h / (C_1 c)): MorrisMonaghan1997 Eq. 6 (paper range 0.1-0.2) and Rosswog2000"})
 
 
 
@@ -51,7 +52,8 @@ def viscositySwitchConfigToDict(viscositySwitchConfig: ViscositySwitchConfig) ->
         'beta_d': viscositySwitchConfig.beta_d,
         'beta_xi': viscositySwitchConfig.beta_xi,
         'ns': viscositySwitchConfig.ns,
-        'balsara_const': viscositySwitchConfig.balsara_const
+        'balsara_const': viscositySwitchConfig.balsara_const,
+        'morris_C1': viscositySwitchConfig.morris_C1,
     }
 
 def dictToViscositySwitchConfig(viscositySwitchConfigDict: Dict[str, Any]) -> ViscositySwitchConfig:
@@ -67,5 +69,6 @@ def dictToViscositySwitchConfig(viscositySwitchConfigDict: Dict[str, Any]) -> Vi
     viscositySwitchConfig.beta_xi = viscositySwitchConfigDict['beta_xi']
     viscositySwitchConfig.ns = viscositySwitchConfigDict.get('ns', 0.05)
     viscositySwitchConfig.balsara_const = viscositySwitchConfigDict.get('balsara_const', 1.0e-4)
+    viscositySwitchConfig.morris_C1 = viscositySwitchConfigDict.get('morris_C1', 0.2)
 
     return viscositySwitchConfig
