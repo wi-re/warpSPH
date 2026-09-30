@@ -118,8 +118,15 @@ strong-shock (Sedov/Noh) detector comparisons can be trusted, so it must be done
 - [x] **Experiment done (2026-09-30)**, CRKSPH host, `NoneSwitch` and C&D, sod / gresho / sedov / noh / yee, three variants of `dudt.py`: (a) as is, (b) the j-side sign fixed (`matmul(gradV_j, x_ij)`), (c) = (b) + symmetric `cs_i, cs_j` arguments. Reports: `results/av_S4_{a,b,c}/` (no video: scalar A/B; nothing adopted). **Result: essentially no effect.** Sod, Sedov, Noh and Yee agree to ~1e-4 relative across all three variants; CRKSPH total-energy drift is already <= 4e-6 in every case and variant (Sedov/Noh: 0, i.e. CRKSPH conserves exactly where the Monaghan host gains 20-68 %, OPEN_PROBLEMS §16). Only **Gresho** moves, and (b) moves it the right way: angular-momentum loss 6.6e-4 -> 1.6e-4 (NoneSwitch) and 1.1e-3 -> -1.3e-4 (C&D); `L1(v_phi)` 0.0413 -> 0.0404 / 0.0435 -> 0.0390; peak speed 1.067 -> 1.055 / 1.065 -> 1.045. (c) on top of (b) changes nothing distinguishable (angular momentum -3e-5 / 2e-4, L1 0.0405 / 0.0404, peak 1.049 / 1.070): **no evidence for or against the `cs` asymmetry**, which may be deliberate alongside the `useJ` flag.
 - [ ] **decision (user): adopt (b)?** It is a one-token sign fix that matches Eqs. (11)-(12) and accel.py, reduces CRK Gresho angular-momentum loss 4x (NoneSwitch) and changes nothing else measurable; the cost is that it changes CRKSPH results (slightly) and would want a video-backed Gresho check before landing. Recommend: adopt (b), leave `cs` as is. **Not applied; CRK source is unchanged.**
 
-### S5 — OPEN_PROBLEMS §16: Monaghan energy gain on strong shocks (after S2–S4)
-- [ ] first checks listed in §16: A/B `adaptiveSupportScheme`/`adaptiveSupportCorrections`; two-particle `dudt` vs `dvdt` consistency; does the scheme's own `dEdt` sum to zero
+### S5 — OPEN_PROBLEMS §16: Monaghan energy gain on strong shocks — DONE 2026-09-30
+- [x] root cause found with `scripts/probe_monaghanEnergy.py` (net energy injected per RHS piece): the viscous heating kernel lacked the 1/2, heat = exactly 2x the kinetic loss; fixed, `tests/test_monaghanEnergy.py` (fails by 6-7 % without it), Monaghan budget 5e-3 -> 1e-4, baseline regenerated (M0c). Full write-up: `docs/historic_plans/RESOLVED_PROBLEMS.md`. Follow-up: OPEN_PROBLEMS §17 (R&H entropy dissipation)
+
+### M0c — scheme correction (2026-09-30): the reference is now `results/av_M0c_*`
+OPEN_PROBLEMS §16 (Monaghan viscous heating lacked the 1/2) changed every Monaghan-host compressible number, so the baseline was regenerated:
+`results/av_M0c_baseline`, `_baselineQ`, `_s3`, smoke ref `results/av_smoke_ref_M0c/`, doc `docs/av/av_baseline_2026-09-30.md`. 50 pairs, all bit-locked.
+Consequences for the plan: `none`/C&D now conserve energy to round-off; **Noh at `C_q = 2` passes the +-3 % gate** (`none` -0.08 %, C&D +0.06 %), so the
+"Noh needs Phase 5A" reading is withdrawn (the `C_q = 0` default still cannot run cold-gas shocks: `c = 0` -> no viscosity); **Read-Hayfield does not conserve
+energy (OPEN_PROBLEMS §17)** — a blocker for using it as the R&H reference in strong-shock rows until understood. The Monaghan energy budget is now 1e-4.
 
 ### M0b — harness correction (2026-09-30)
 `AVConfig.switchParams` now applies `alpha_min/alpha_max` to EVERY case; in the first M0 they were case params that only

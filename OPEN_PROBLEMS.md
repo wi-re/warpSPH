@@ -675,3 +675,21 @@ Moved to [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md). Cause
 viscous heating (`modules/dissipation/wp_dissipation.py`) lacked the 1/2 of
 `du_i/dt = 1/2 sum m_j Pi_ij v_ij . gradW_ij`, so it was exactly twice the kinetic energy the
 viscous force removes. Fixed; regression test `tests/test_monaghanEnergy.py`.
+
+## 17. Read-Hayfield 2012's entropy-dissipation term does not conserve total energy
+
+Found 2026-09-30 by the AV_PLAN M0c baseline, right after §16's heating fix made the `none` and
+Cullen-Dehnen columns conserve to round-off. Not investigated yet.
+
+Monaghan host, `ReadHayfield2012` (alpha 0.2-1.0), total-energy drift `|E - E0| / E0`, vs 0.0000 for
+`none` / Cullen-Dehnen on the same runs: Sod 1D 1.8e-3, Sod 2D 6.3e-3, Sod 3D 1.5e-2, Sedov 3D 1.3e-2
+(`C_q = 2`: 2.8e-2), KH 1.6e-3, RT 1.2e-3, and **Noh at `C_q = 2`: +23 %** (its post-shock density is
+-16 % vs +-0.1 % for `none` / C&D). Gresho and Yee: 0. The only term R&H adds to the energy equation
+is `dudt_diss` (`ReadHayfield2012.py`, eqs. 33-35, the SPHS "entropy dissipation"); it is computed per
+particle from `(A_i - A_j)` with `rho_j / rho_i` and `rho_ij` prefactors that are not symmetric in
+`(i, j)`, so its energy sum `sum_i m_i dudt_i` need not vanish. Whether that is a transcription error
+or (as in the original SPHS) a non-conservative design is the first question -- check the paper's
+statement on energy conservation before changing anything.
+
+First check: `scripts/probe_monaghanEnergy.py` with `--switch ReadHayfield2012` (extend `pieces()` with
+the `dudt_entropy` term; the net `sum m dudt_diss` over a mid-run state is the number).
