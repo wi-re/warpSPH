@@ -668,3 +668,30 @@ Interim for the example (user's call): leave failing, ship `--cflFactor 0.05`
 shipped default and passes). No videos of the collapse itself (crash probes,
 ~90-160 steps); the frames to compare are the equal-mass gallery output vs a
 cfl-0.05 run.
+
+## 16. Monaghan host does not conserve total energy on a strong shock (Sedov)
+
+Found 2026-09-30 by the AV_PLAN M0 report (`scripts/av_report.py`, `sedov`). Not investigated yet.
+
+`scheme='Monaghan'`, Sedov, `E(t) = sum m (u + v^2/2)` (E0 = 1): **1D nx 400: 1.0 -> 2.33**
+(NoneSwitch); **3D nx 24: 1.0 -> 1.23** (NoneSwitch) / 1.25 (Cullen-Dehnen); 3D nx 40 (full profile): +47 %.
+`scheme='CompSPH'` on the same case holds **1.0 exactly**. On Sod and Gresho the Monaghan drift is
+0.2-0.7 % (already over the `tests/test_physics.py` 5e-3 budget on some), so the defect grows with shock
+strength / dynamic range (Sedov's cold background has `u ~ 1e-25`).
+
+**Not time integration:** 1D nx 400 with `cflFactor` 0.3 / 0.15 / 0.075 gives E_final 2.3273 / 2.3151 /
+2.3113 -- a 4x smaller dt moves it by 0.7 %. It is a formulation-level inconsistency between the
+pressure force and `dudt`, or the density update, of `schemes/monaghan.py` (Owen adaptive supports,
+`KernelMeanSymmetric` force vs `Gather` density, `computeDudtMonaghan` vs `computePressureForceSymmetric`).
+
+**Why it matters for AV_PLAN:** Monaghan is the plan's AV laboratory host and Group E gates on energy
+drift; every detector comparison on a strong shock (Sedov, Noh) would be confounded by an energy source.
+First checks: A/B `adaptiveSupportScheme` (Owen vs none) and `adaptiveSupportCorrections`; compare the
+`dudt` and `dvdt` pair terms for a symmetric two-particle test; check whether `dEdt` (the scheme's own
+energy-rate output) sums to zero.
+
+**Update 2026-09-30 (M0 baseline, `docs/av/av_baseline_2026-09-30.md`):** not caused by the missing
+quadratic AV — `C_q = 2` makes Sedov worse (3D nx 40: +68 % vs +47 %) and **Noh (1D) also gains energy,
++42-65 % at `C_q = 2`**. So it is a general strong-shock property of the Monaghan host, not Sedov
+specific. (At `C_q = 0` Noh is degenerate: cold gas, `c = 0`, zero viscosity, no interaction at all.)
+CompSPH is exact on Sedov (1.000).

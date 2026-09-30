@@ -61,6 +61,9 @@ class AVConfig:
     scheme: str = 'Monaghan'
     switch: str = 'NoneSwitch'
     params: Dict[str, Any] = field(default_factory=dict)
+    #: `DiffusionParameters` fields overridden on the scheme config after the case
+    #: configures it (e.g. `{'C_q': 2.0}`); these are scheme, not case, parameters.
+    diffusion: Dict[str, Any] = field(default_factory=dict)
 
 
 #: R&H 2012 is designed with a narrower, higher-baseline alpha range
@@ -71,11 +74,17 @@ CONFIGS: Dict[str, AVConfig] = {c.name: c for c in (
     AVConfig('none', switch='NoneSwitch'),
     AVConfig('cullenDehnen2010', switch='CullenDehnen2010'),
     AVConfig('readHayfield2012', switch='ReadHayfield2012', params=_RH),
+    # C_q = 2 columns: the Monaghan default C_q = 0 has no quadratic term, so v_sig = C_l c
+    # is zero in cold gas (Noh, Sedov's background) and nothing dissipates there.
+    AVConfig('noneQ', switch='NoneSwitch', diffusion=dict(C_q=2.0)),
+    AVConfig('cullenDehnen2010Q', switch='CullenDehnen2010', diffusion=dict(C_q=2.0)),
+    AVConfig('readHayfield2012Q', switch='ReadHayfield2012', params=_RH, diffusion=dict(C_q=2.0)),
 )}
 
 #: Named groups, so `--config baseline` runs the three M0 columns.
 GROUPS: Dict[str, List[str]] = {
     'baseline': ['none', 'cullenDehnen2010', 'readHayfield2012'],
+    'baselineQ': ['noneQ', 'cullenDehnen2010Q', 'readHayfield2012Q'],
 }
 
 
@@ -90,7 +99,7 @@ class RunSpec:
 
 
 def _execute(spec: RunSpec, cfg: AVConfig, outDir: Path, tag: str, video: bool,
-             avStride: int) -> Any:
+             avStride: int, extra: Optional[Callable] = None) -> Any:
     """Run one case under `cfg`; returns the `RunResult`, with the AV extras
     (`avReportDiagnostics`) recorded every `avStride` steps."""
     import dataclasses
@@ -104,10 +113,20 @@ def _execute(spec: RunSpec, cfg: AVConfig, outDir: Path, tag: str, video: bool,
         row = base(ctx, state)
         if counter[0] % avStride == 0:
             row.update(avReportDiagnostics(ctx, state))
+        if extra is not None:
+            row.update(extra(ctx, state))
         counter[0] += 1
         return row
 
-    case = dataclasses.replace(spec.case, diagnostics=diagnostics)
+    configure = spec.case.configureScheme
+
+    def configureScheme(ctx):
+        configure(ctx)
+        for name, value in cfg.diffusion.items():
+            setattr(ctx.schemeConfig.diffusionParams, name, value)
+
+    case = dataclasses.replace(spec.case, diagnostics=diagnostics,
+                               configureScheme=configureScheme if cfg.diffusion else configure)
     kw = dict(spec.kwargs)
     kw.setdefault('scheme', cfg.scheme)
     params = dict(spec.params, viscositySwitch=cfg.switch, **cfg.params)
@@ -125,7 +144,8 @@ def _trap(t: np.ndarray, y: np.ndarray) -> float:
 def _common(res, cfg: AVConfig) -> Dict[str, Any]:
     """Metrics every case reports: Group B (alpha, AV energy), E (drift), F (cost)."""
     traj = res.trajectory
-    out: Dict[str, Any] = {'diverged': bool(res.diverged), 'nSteps': int(res.nSteps),
+    out: Dict[str, Any] = {'diverged': bool(res.diverged), 'stopReason': res.stopReason,
+                           'nSteps': int(res.nSteps),
                            'tFinal': float(res.state.t)}
     E = np.array([r['totalEnergy'] for r in traj])
     out['energyDrift'] = float(abs(E[-1] - E[0]) / abs(E[0]))
@@ -158,8 +178,7 @@ GAMMA = 5 / 3
 def _sodSpec(profile: str) -> RunSpec:
     from warpSPH.cases.sod import sodCase
     nx, nSteps = (100, 60) if profile == 'smoke' else (400, 400)
-    return RunSpec(sodCase, dict(nx=nx, nSteps=nSteps),
-                   dict(right_rho=0.125, right_pressure=0.1))
+    return RunSpec(sodCase, dict(nx=nx, nSteps=nSteps), dict(_DA_SOD))
 
 
 def _sodMetrics(res, cfg: AVConfig) -> Dict[str, Any]:
@@ -233,11 +252,197 @@ class CaseDef:
     spec: Callable[[str], RunSpec]
     metrics: Callable[[Any, AVConfig], Dict[str, Any]]
     avStride: Callable[[str], int] = lambda profile: 1
+    extra: Optional[Callable] = None        # per-step diagnostics beyond the common set
+
+
+#: Every AV baseline run with the D&A Sod initial condition (the probes' and
+#: `tests/test_shockCapturing.py`'s), not the sodND default `0.25 / 0.1795`.
+_DA_SOD = dict(right_rho=0.125, right_pressure=0.1)
+
+
+def _sodNDSpec(name: str):
+    def spec(profile: str) -> RunSpec:
+        from warpSPH.cases.sodND import sod2dCase, sod3dCase
+        case = sod2dCase if name == 'sod2d' else sod3dCase
+        small = dict(sod2d=(64, 40), sod3d=(28, 30))[name]
+        kw = dict(nx=small[0], nSteps=small[1]) if profile == 'smoke' else (
+            dict(nx=20) if name == 'sod3d' else {})
+        # the D&A light state (rho 0.125) has larger supports than sodND's default
+        # 0.25 one, so the periodic slab must be wider than its default 20 spacings
+        return RunSpec(case, kw, dict(_DA_SOD, transverseSpacings=26))
+    return spec
+
+
+def _sedovSpec(profile: str) -> RunSpec:
+    from warpSPH.cases.sedov import sedovCase
+    kw = dict(dim=3, nx=14, nSteps=30) if profile == 'smoke' else dict(dim=3, nx=40)
+    return RunSpec(sedovCase, kw)
+
+
+def _sedovMetrics(res, cfg: AVConfig) -> Dict[str, Any]:
+    out = _common(res, cfg)
+    ctx = res.ctx
+    st = res.state.state
+    t = float(res.state.t)
+    pos = st.positions.detach().cpu().numpy()
+    rho = st.densities.detach().cpu().numpy()
+    rho0 = float(ctx.param('rho0'))
+    (vs, r2, v2, rho2, P2), _ = ctx.scratch['solution'].shockState(t), None
+    r = np.linalg.norm(pos, axis=1)
+    k = int(np.argmax(rho))
+    out['peakRhoRatio'] = float(rho[k] / rho0)
+    out['peakRhoExact'] = float(rho2 / rho0)
+    out['peakOvershoots'] = bool(rho[k] / rho0 > rho2 / rho0)
+    out['shockRadiusErr'] = float((r[k] - r2) / r2)
+    out['E0Recovery'] = float(res.trajectory[0]['totalEnergy'] / float(ctx.param('E0')) - 1.0)
+    return out
+
+
+def _nohSpec(profile: str) -> RunSpec:
+    from warpSPH.cases.noh import nohCase
+    return RunSpec(nohCase, dict(nx=80, nSteps=100) if profile == 'smoke' else {})
+
+
+def _nohMetrics(res, cfg: AVConfig) -> Dict[str, Any]:
+    from warpSPH.cases.noh import shockState
+    out = _common(res, cfg)
+    ctx = res.ctx
+    st = res.state.state
+    t = float(res.state.t)
+    x = np.abs(st.positions[:, 0].detach().cpu().numpy())
+    rho = st.densities.detach().cpu().numpy()
+    vs = float(ctx.param('v_s'))
+    rhoS, _ = shockState(ctx)
+    m = (x > 0.2 * vs * t) & (x < 0.8 * vs * t)          # away from the wall-heating core and the front
+    out['postShockRhoErr'] = float(rho[m].mean() / rhoS - 1.0) if m.any() else float('nan')
+    out['postShockRhoExact'] = float(rhoS)
+    return out
+
+
+def _yeeSpec(profile: str) -> RunSpec:
+    from warpSPH.cases.yeeVortex import yeeVortexCase
+    return RunSpec(yeeVortexCase, dict(nSteps=30) if profile == 'smoke' else dict(tLimit=4.0))
+
+
+def _yeeMetrics(res, cfg: AVConfig) -> Dict[str, Any]:
+    out = _common(res, cfg)
+    p = res.ctx.spec.params
+    beta, xc, yc = float(p['beta']), float(p['xc']), float(p['yc'])
+    st = res.state.state
+    pos = st.positions.detach().cpu().numpy() - np.array([xc, yc])
+    vel = st.velocities.detach().cpu().numpy()
+    r = np.linalg.norm(pos, axis=1)
+    exact = beta / (2 * np.pi) * np.exp((1 - r ** 2) / 2) * r      # |v|, stationary vortex
+    m = r <= 3.0                                                     # inside the buffer rings
+    out['L1_speed'] = L1(torch.tensor(np.linalg.norm(vel, axis=1)), torch.tensor(exact), torch.tensor(m))
+    out['peakSpeedRatio'] = float(np.linalg.norm(vel, axis=1)[m].max() / (beta / (2 * np.pi)))
+    out['angularMomentumLoss'] = float(1.0 - res.trajectory[-1]['angularMomentum']
+                                       / res.trajectory[0]['angularMomentum'])
+    return out
+
+
+def _waveSpec(profile: str) -> RunSpec:
+    from warpSPH.cases.linearWave import linearWaveCase
+    # A = 1e-4, not the case's 1e-6: at 1e-6 in float32 the velocity noise is ~7x the
+    # signal. tLimit = 1/4 crossing is the standing wave's maximum (a full crossing, the
+    # case default, has an analytic velocity of zero).
+    params = dict(A=1e-4)
+    return RunSpec(linearWaveCase, dict(nx=100, nSteps=100) if profile == 'smoke'
+                   else dict(tLimit=0.25), params)
+
+
+def _waveMetrics(res, cfg: AVConfig) -> Dict[str, Any]:
+    """Compare against the analytic standing wave. An initial pressure sine
+    `dP = A sin(kx)` at rest splits into two travelling waves, i.e.
+    `v(x, t) = -(A / (rho0 c_s)) cos(kx) sin(k c_s t)`; `waveVelocityErr` is the
+    projected-coefficient error in units of `A / (rho0 c_s)`, `waveResidualRms` the
+    rms of what is *not* that mode (the noise floor -- A = 1e-6 in float32 is small)."""
+    out = _common(res, cfg)
+    p = res.ctx.spec.params
+    k = 2 * np.pi / float(p['lamda'])
+    c, A, rho0 = float(p['c_s']), float(p['A']), float(p['rho0'])
+    t = float(res.state.t)
+    st = res.state.state
+    x = st.positions[:, 0].detach().cpu().numpy()
+    v = st.velocities[:, 0].detach().cpu().numpy()
+    unit = A / (rho0 * c)
+    coef = 2.0 / len(x) * (v * np.cos(k * x)).sum()
+    out['waveVelocityErr'] = float(abs(coef - (-unit * np.sin(k * c * t))) / unit)
+    out['waveVelocityCoefficient'] = float(coef / unit)
+    out['waveExactCoefficient'] = float(-np.sin(k * c * t))
+    out['waveResidualRms'] = float(np.sqrt(np.mean((v - coef * np.cos(k * x)) ** 2)) / unit)
+    return out
+
+
+def _khMode(ctx, state) -> Dict[str, float]:
+    """McNally et al. (2012) Eq. (6)-(8) transverse-velocity mode amplitude."""
+    st = state.state
+    k = float(ctx.param('freq')) * np.pi
+    x, y = st.positions[:, 0], st.positions[:, 1]
+    vy = st.velocities[:, 1]
+    yy = torch.where(y < 0.5, y, 1.0 - y)
+    d = torch.exp(-k * (yy - 0.25).abs())
+    s = (vy * torch.sin(k * x) * d).sum()
+    c = (vy * torch.cos(k * x) * d).sum()
+    return {'khAmplitude': (2.0 * torch.sqrt(s * s + c * c) / d.sum()).item()}
+
+
+def _khSpec(profile: str) -> RunSpec:
+    from warpSPH.cases.kelvinHelmholtz import kelvinHelmholtzCase
+    if profile == 'smoke':
+        return RunSpec(kelvinHelmholtzCase, dict(nx=48, nSteps=30))
+    return RunSpec(kelvinHelmholtzCase, dict(nx=128, tLimit=1.5))
+
+
+def _khMetrics(res, cfg: AVConfig) -> Dict[str, Any]:
+    out = _common(res, cfg)
+    amp = res.series('khAmplitude')
+    t = res.series('t')
+    out['khAmplitude0'] = float(amp[0])
+    out['khAmplitudeFinal'] = float(amp[-1])
+    out['khAmplitudeMax'] = float(amp.max())
+    i = int(np.argmin(np.abs(t - 1.5)))
+    out['khAmplitudeAt1p5'] = float(amp[i]) if abs(t[i] - 1.5) < 0.05 else float('nan')
+    out['khReference1p5'] = 14.79e-2          # McNally et al. (2012)
+    return out
+
+
+def _rtSpec(profile: str) -> RunSpec:
+    from warpSPH.cases.rayleighTaylor import rayleighTaylorCase
+    if profile == 'smoke':
+        return RunSpec(rayleighTaylorCase, dict(nx=32, nSteps=30))
+    return RunSpec(rayleighTaylorCase, dict(nx=64, tLimit=4.0))
+
+
+def _rtMetrics(res, cfg: AVConfig) -> Dict[str, Any]:
+    """Interface tips (reported, no reference): the lowest heavy-fluid and highest
+    light-fluid particle, split at the mean of the two initial densities."""
+    out = _common(res, cfg)
+    p = res.ctx.spec.params
+    mid = 0.5 * (float(p['rho_low']) + float(p['rho_high']))
+    st = res.state.state
+    fluid = (st.kinds == 0).detach().cpu().numpy()
+    y = st.positions[:, 1].detach().cpu().numpy()
+    rho = st.densities.detach().cpu().numpy()
+    heavy, light = fluid & (rho > mid), fluid & (rho <= mid)
+    out['heavyMinY'] = float(y[heavy].min()) if heavy.any() else float('nan')
+    out['lightMaxY'] = float(y[light].max()) if light.any() else float('nan')
+    out['mixingWidth'] = out['lightMaxY'] - out['heavyMinY']
+    out['maxVelocity'] = float(res.series('maxVelocity').max())
+    return out
 
 
 CASES: Dict[str, CaseDef] = {c.name: c for c in (
     CaseDef('sod', _sodSpec, _sodMetrics),
+    CaseDef('sod2d', _sodNDSpec('sod2d'), _sodMetrics),
+    CaseDef('sod3d', _sodNDSpec('sod3d'), _sodMetrics, lambda p: 1 if p == 'smoke' else 5),
+    CaseDef('sedov', _sedovSpec, _sedovMetrics, lambda p: 1 if p == 'smoke' else 10),
+    CaseDef('noh', _nohSpec, _nohMetrics),
     CaseDef('gresho', _greshoSpec, _greshoMetrics, lambda p: 1 if p == 'smoke' else 5),
+    CaseDef('yee', _yeeSpec, _yeeMetrics, lambda p: 1 if p == 'smoke' else 10),
+    CaseDef('linearWave', _waveSpec, _waveMetrics, lambda p: 1 if p == 'smoke' else 10),
+    CaseDef('kelvinHelmholtz', _khSpec, _khMetrics, lambda p: 1 if p == 'smoke' else 5, _khMode),
+    CaseDef('rayleighTaylor', _rtSpec, _rtMetrics, lambda p: 1 if p == 'smoke' else 5),
 )}
 
 
@@ -247,7 +452,7 @@ def runOne(cfg: AVConfig, case: CaseDef, profile: str, outDir: Path, video: bool
            tag: str) -> Dict[str, Any]:
     spec = case.spec(profile)
     started = time.perf_counter()
-    res = _execute(spec, cfg, outDir, tag, video, case.avStride(profile))
+    res = _execute(spec, cfg, outDir, tag, video, case.avStride(profile), case.extra)
     metrics = case.metrics(res, cfg)
     metrics['videoPath'] = res.videoPath
     return dict(config=cfg.name, case=case.name, profile=profile, scheme=cfg.scheme,
@@ -276,9 +481,16 @@ def lockCheck(reps: List[Dict[str, Any]]) -> Dict[str, Any]:
     return dict(maxRelDiff=worst, worstMetric=where, locked=worst < LOCK_TOL)
 
 
+_SOD_COLS = ['L1_vx', 'contactSpikeP', 'contactSpikeA', 'R3_rho_err', 'R4_rho_err', 'R4_P_err']
 COLUMNS = {
-    'sod': ['L1_vx', 'contactSpikeP', 'contactSpikeA', 'R3_rho_err', 'R4_rho_err', 'R4_P_err'],
+    'sod': _SOD_COLS, 'sod2d': _SOD_COLS, 'sod3d': _SOD_COLS,
     'gresho': ['L1_vphi', 'peakSpeed', 'angularMomentumLoss'],
+    'sedov': ['peakRhoRatio', 'peakRhoExact', 'peakOvershoots', 'shockRadiusErr', 'E0Recovery'],
+    'noh': ['postShockRhoErr', 'postShockRhoExact'],
+    'yee': ['L1_speed', 'peakSpeedRatio', 'angularMomentumLoss'],
+    'linearWave': ['waveVelocityErr', 'waveVelocityCoefficient', 'waveExactCoefficient', 'waveResidualRms'],
+    'kelvinHelmholtz': ['khAmplitude0', 'khAmplitudeAt1p5', 'khAmplitudeMax', 'khReference1p5'],
+    'rayleighTaylor': ['heavyMinY', 'lightMaxY', 'mixingWidth', 'maxVelocity'],
 }
 COMMON_COLUMNS = ['alphaMean', 'alphaMax', 'alphaActiveFraction', 'avEnergyLinear',
                   'avEnergyQuadratic', 'entropyGain', 'energyDrift', 'neighboursMean',

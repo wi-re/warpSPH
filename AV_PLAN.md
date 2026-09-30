@@ -85,8 +85,9 @@ entropy-trigger or García-Senz code: Phases 2/4/5B/6 come from the PDFs.
 - [x] `scripts/av_report.py` (`--config baseline`, `--profile smoke|full`, `--repeat N` = lock check). **MVP: cases `sod`, `gresho` only.** Still to add: sedov, noh, yee, linearWave, KH, RT, sod2d/3d; StepTimer-based ms/step (current `wallMsPerStep` includes compile); shock width; `--compare`; `--maps`
 - [x] reproducibility lock verified twice for `sod` + `gresho` x 3 configs (2026-09-30). First pass FAILED for R&H/Gresho: entropy-dissipation term used `scatter_sum` (CUDA atomic add, run-to-run order) amplified by the alpha switch; fixed with `torch.segment_reduce` in `ReadHayfield2012.py`, re-run bit-identical
 - [x] report written: `docs/av/av_baseline_2026-09-30.md` (in the working tree, **not committed**)
-- [ ] extend the report to the rest of the M0 case list (sod2d/3d, sedov, noh, yee, linearWave, KH, RT) and re-lock
-- [ ] commit; `milestone/av-baseline`
+- [x] report extended to sod2d/3d, sedov (3D), noh, yee, linearWave, KH, RT; 10 cases x 3 configs, all 30 pairs bit-locked across two runs (2026-09-30) — see notes for what each case measures and its caveats
+- [x] `C_q = 2` reference family (`--config baselineQ`: sod, noh, sedov, gresho), 12 pairs bit-locked. Added because at `C_q = 0` Noh is degenerate (cold gas, c = 0 -> zero viscosity). Full report: `docs/av/av_baseline_2026-09-30.md`
+- [ ] tag `milestone/av-baseline` — **held**: the baseline is reproducible but two findings are open (OPEN_PROBLEMS §16 Monaghan energy gain on strong shocks; Noh/Sedov quality). Decide whether M0 is 'locked as-is' (document + tag) or waits for §16
 
 ### S2 — Cheap audit fixes + fixed β (start of Phase 1), checked against the lock
 - [ ] delete dead `limitXi`; rename kernel-normalisation `xi` (§2.5)
@@ -111,6 +112,15 @@ entropy-trigger or García-Senz code: Phases 2/4/5B/6 come from the PDFs.
   at 150 steps under C&D: Monaghan power all linear (0.031); CompSPH 0.036 = 0.028 lin + 0.008 quad; split residual 0 (additive).
 - 2026-09-30: M0 baseline finding: **Monaghan default `C_q=0` => quadratic AV energy is exactly 0 in every baseline run**
   (the "non-zero on sod" marker holds only for CompSPH/CRKSPH hosts; verified CompSPH 0.028 lin + 0.008 quad).
+- 2026-09-30 **M0 findings from the full baseline** (see `docs/av/av_baseline_2026-09-30.md`): (1) `C_q = 0` => Noh degenerate (zero viscosity in cold gas); (2) with `C_q = 2` Noh post-shock rho still -23..-31 %; (3) Monaghan gains energy on Sedov/Noh independent of C_q (OPEN_PROBLEMS §16) — confounds every strong-shock detector comparison on this host; (4) Gresho/Sod detector differences are clean and reproducible.
+- 2026-09-30 **new cases in `av_report.py` — what they measure / caveats**
+  - `sod2d/3d`: same window and metrics as `sod`, D&A IC (the sodND default `0.25/0.1795` is not used), `transverseSpacings=26` (D&A's light state needs a wider periodic slab than the default 20). 3D is slow (~4 s/step, 583 neighbours) and run at nx=20 (15 steps): **too coarse to be a quality number** (R4 rho err 22 %); a resolution/perf follow-up.
+  - `sedov` (3D nx=40): peak rho/rho0 vs 4, peak-radius vs exact `r2`, E0 recovery. **Monaghan does not conserve energy here: see OPEN_PROBLEMS §16** (1D 1.0 -> 2.33; CompSPH exact). Every Sedov/Noh number from this host is confounded by it until §16 is understood.
+  - `noh` (1D): post-shock rho over `|x| in [0.2, 0.8] v_s t` vs `rho0((g+1)/(g-1))` = 4. NoneSwitch on the Monaghan host gives ~2.0 (-50 %), far outside the plan's +-3 % gate: consistent with **no quadratic viscosity** (`C_q = 0`) failing on a strong shock -> a Phase 5A data point, not a bug report yet.
+  - `yee`: stationary vortex, L1 of |v| for r<=3 vs analytic, peak-speed ratio, angular-momentum loss (t=4).
+  - `linearWave`: run at **A = 1e-4, t = 1/4 crossing** (case default A=1e-6 is 7x noise in float32; t=1 crossing has zero analytic velocity). Compares the cos(kx) velocity coefficient to `-(A/rho0 c) sin(k c t)`.
+  - `kelvinHelmholtz` (nx 128, t=1.5): McNally (2012) transverse-velocity mode amplitude; NoneSwitch gives 2.0e-2 at t=1.5 — the same scale as garciasenz2026 Table 3 KH1 (AV alone, 2.87e-2), against McNally 14.79e-2.
+  - `rayleighTaylor` (nx 64, t=4): interface tips + max velocity, reported only.
 - 2026-09-30: `results/` is gitignored, so "report committed" means copying the final `report.md` into `docs/` (e.g. `docs/av/av_baseline.md`).
 - 2026-09-30: audit re-checked, no drift. Effort estimate for S2+S3 ≈ 3-4 days.
 - 2026-09-30 (user decision, from the CRKSPH clean-up): **any CRKSPH numbers in the M0 baseline are taken at the current
@@ -772,9 +782,9 @@ Record and freeze, from
 - [x] `compressibleDiagnostics` extended; 35-case smoke sweep + full test suite green after the change (2026-09-30)
 - [~] linear/quadratic AV split populated (non-zero on `sod` only for `C_q>0` hosts; Monaghan default is exactly 0 — see notes)
 - [x] three probes promoted out of `.tmp/`
-- [~] (sod + gresho only) `scripts/av_report.py --config baseline --profile full` produces
+- [x] `scripts/av_report.py --config baseline --profile full` produces
       `results/av_baseline_<stamp>/report.md`
-- [~] reproducibility lock verified twice (sod + gresho only)
+- [x] reproducibility lock verified twice (10 cases x 3 configs + C_q=2 family)
 - [ ] report committed
 
 **M0 — Reproducible.** Git milestone `milestone/av-baseline`.
