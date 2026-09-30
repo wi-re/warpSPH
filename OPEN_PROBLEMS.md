@@ -584,7 +584,7 @@ sampling never does this (min spacing 0.6 dx). It does not hurt accuracy by the 
 1.4e-2 vs equal-mass 1.9e-2 at t = 0.25, exact Riemann). The paper's Sod / triple point are equal-mass (Sod 3D:
 "to maintain mass matching"), so this is an initial-condition property of our extra same-lattice preset.
 
-**Follow-ups for the AV / limiter work.** (1) `C_l, C_q`: Frontiere Table D.1 makes them kernel-dependent
+**Follow-ups for the AV / limiter work.** (1) [2026-09-30: `C_l` = 2 tried on Gresho / Sod, worse on Gresho (+8 % -> +11.5 % KE at nx 64, +12.6 % -> +21.9 % at nx 96), 70 % less Sod ringing; kept at 1, to be revisited with the limiter, CRKSPH_LIMITER_PLAN note (b)] `C_l, C_q`: Frontiere Table D.1 makes them kernel-dependent
 (mu scales with h): 7th-order B-spline, our default, `C_l = 2.0, C_q = 1.0`, Wendland `0.5 / 0.25`; our
 `buildDefaultDiffusionParamsCRKSPH` uses 1 / 1 for every kernel (unverified whether `smooth = H/xi` equals the
 paper's h for B7, CRKSPH_LIMITER_PLAN O2 is the same units question for the limiter). (2) The compressible dt is

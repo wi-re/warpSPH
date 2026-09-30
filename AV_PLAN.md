@@ -1401,3 +1401,5 @@ volume/page/year from memory.
 - Open for the AV work: `C_l, C_q` are kernel-dependent in the paper (Table D.1: B7 2.0/1.0, Wendland 0.5/0.25, because
   mu scales with h); `buildDefaultDiffusionParamsCRKSPH` uses 1/1 for every kernel (check `smooth = H/xi` vs the paper's h
   first). The compressible dt has no approach/viscous term.
+
+- `C_l` = 2 (paper, B7) measured 2026-09-30 (CRKSPH_LIMITER_PLAN note (b)): Sod ringing -70 % but Gresho spin-up +8 % -> +11.5 % (nx 64), +12.6 % -> +21.9 % (nx 96); user: keep 1, revisit together with the limiter.

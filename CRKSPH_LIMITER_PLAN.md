@@ -251,3 +251,29 @@ The viscosity switch's regulariser was fixed to the paper's `eps^2 = 1e-2` (eta^
 small (Sod -0.1 %, Sedov 0 %, Noh -1.7 %, Kidder -2.7 %, KH rebound -34 %); **Gresho worsened 12-15 %** (L1 v 2.87e-2 ->
 3.30e-2, KE(3) +7.3 % -> +8.2 %), consistent with the knife-edge of O4. Baselines for P1 should be re-taken on this code.
 The `C_l, C_q` units question (paper Table D.1) is the same class as O2.
+
+## Note 2026-09-30 (b): `C_l` = 2 (Frontiere Table D.1, B7) on Gresho and Sod — user asked "just to see"
+
+`scratchpad/crk_cl_sweep.py` (harness metrics, float64, current limiter constants, `C_q` = 1, no video: metric A/B),
+`scripts/out_crk2d/cl/`. **`C_l` = 2 is worse on Gresho and gets worse with resolution; it is much better on Sod's ringing.**
+
+| Gresho | (C_l, C_q) | KE(3) | ke_rebound | L1 v |
+|---|---|---|---|---|
+| nx 64 | (0, 0) | +274 % | 2.75 | 0.713 |
+| nx 64 | (0, 1) | +7.3 % | 0.074 | 0.0499 |
+| nx 64 | (0.5, 1) | +5.5 % | 0.073 | **0.0309** |
+| nx 64 | (1, 1) ours | +8.2 % | 0.120 | 0.0330 |
+| nx 64 | (2, 1) paper | +11.5 % | 0.193 | 0.0363 |
+| nx 96 | (1, 1) ours | +12.6 % | 0.146 | 0.0372 |
+| nx 96 | (2, 1) paper | **+21.9 %** | 0.262 | 0.0517 (+39 %) |
+
+Sod nx 800, C_l 1 -> 2: plateau u std 8.2e-3 -> 2.5e-3 (-70 %), max deviation 3.2e-2 -> 9.5e-3, density TV excess
+0.077 -> 0.045 (-42 %), tail overshoot -12 %; but L1 rho +9 % (2.95e-3 -> 3.21e-3), entropy error +27 %, shock width
+8 -> 12 points.
+
+Reading: some viscosity is essential (none: KE x3.7), the Gresho optimum is near `C_l` ~ 0.5, and above it the linear
+term *adds* spin-up (total energy is conserved, so it is pressure work on a vortex the viscous force has reshaped),
+growing with nx. Shock cases want the paper's value, smooth vortical flow does not; in the paper the limiter
+(`eta_crit`, `eta_fold`, Van Leer) is what switches the viscosity off in smooth flow, and ours is in the wrong units (O2),
+so `C_l` cannot be judged on its own. **Decision (user, 2026-09-30): keep `C_l` = 1; revisit `C_l`/`C_q` together with the
+limiter, later, in the higher-order / AV / Riemann-MUSCL work that will stress the limiter code as well.**
