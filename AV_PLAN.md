@@ -178,7 +178,7 @@ once at the end of S2.
   should state that. The limiter and `C_l`/`C_q` are to be revisited together, later, when the higher-order / Riemann-MUSCL
   work exercises limiters too; if their constants change, the CRKSPH part of the baseline moves (Monaghan / CompSPH hosts
   do not use the CRK limiter). `C_l = 2` was tried (CRKSPH_LIMITER_PLAN note (b)) and not adopted.
-- 2026-10-01 (user, CRKSPH_LIMITER_PLAN note (f)): the CRK limiter default is now `(eta_crit, eta_fold) = (1/n_h, 0.2/n_h)` = (0.25, 0.05) at n_h = 4 (derived from n_h per step). **The CRK rows of the M0 baseline (`results/av_M0d_*`, `docs/av/`) were taken at the old (1/3, 0.2) and no longer match the default**; `C_l` stays 1. Re-take the CRK rows before using them as a reference; Monaghan / CompSPH rows are unaffected.
+- 2026-10-01 (user, CRKSPH_LIMITER_PLAN note (f)): the CRK limiter default is now `(eta_crit, eta_fold) = (1/n_h, 0.2/n_h)` = (0.25, 0.05) at n_h = 4 (derived from n_h per step). **The CRK rows of the M0 baseline (`results/av_M0d_*`, `docs/av/`) were taken at the old (1/3, 0.2) and no longer match the default**; `C_l` stays 1. **Re-taken 2026-10-01: the CRK reference is now `results/av_M0f_crk`** (`crkNone`, `crkCullenDehnen2010` x sod, sod2d, sedov, noh, gresho, yee, linearWave, kelvinHelmholtz, rayleighTaylor; 18 pairs, video on for all but 3D sedov / noh -- OPEN_PROBLEMS §18; not bit-lock-repeated: CRK runs are deterministic since the same day). Moves vs the old-constant S4 numbers: Gresho L1(v_phi) 0.040 -> 0.033, peak 1.055 -> 1.012, Yee L1 -16 %, Sod contactSpikeA halved, Noh post-shock rho error halved; Sedov and the rest of Sod unchanged (<1 %). Monaghan / CompSPH rows are unaffected (M0e).
 
 ## The host scheme
 

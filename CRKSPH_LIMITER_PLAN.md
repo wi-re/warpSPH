@@ -463,3 +463,11 @@ its resolution dependence is the part the paper's single-resolution, peak-only t
 
 **What is left open (parked, not blocking):** a formulation that removes the tangential pressure work (e.g. a central/symmetrised pair force that keeps the linear reproduction -- pure research; the projected-central
 variant of O1 collapsed the vortex), the local-spacing / softer-threshold limiter variants, glass / jittered ICs, Noh and the 2D shock cases at the new default, and re-taking the AV_PLAN CRK baseline at the new constants.
+
+## Note 2026-10-01 (h): follow-ups run -- Noh + 2D shock cases at the new default, CRK baseline re-taken
+
+**Old (1/3, 0.2) vs new (1/n_h, 0.2/n_h) = (0.25, 0.05)** (`scripts/crk_limiter_p1.py`, `results/crk_closeout/`, metric A/B no video; the new-default runs of the two cases av_report does not cover have video in `results/crk_closeout_videos/`):
+all stable, energy at round-off. Noh L1 rho 0.1042 -> 0.1073 (+3 %); Yee core L1 v 2.88e-3 -> 2.72e-3 (-6 %); Kelvin-Helmholtz KE loss -5.7 -> -5.5 %; shearing Noh KE loss -18.2 -> -19.4 %; Rayleigh-Taylor
+(KE x21, dE/E 1.9e-4), triple point, Sod 2D, Woodward-Colella, hydrostatic (max |v| 6e-7) unchanged. Final frames of triple point and shearing Noh: symmetric roll-ups / stripes, no fliers (triple point keeps its known slight ripple along the lower contact, OPEN_PROBLEMS §15).
+
+**AV_PLAN CRK baseline re-taken** as `results/av_M0f_crk` (18 pairs; AV_PLAN updated). 3D Sedov and Noh ran without video: with video the CRK 3D Sedov leaks GPU memory per drawn frame and OOMs on the shared GPU -- logged as OPEN_PROBLEMS §18.

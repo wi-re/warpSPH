@@ -395,6 +395,16 @@ acoustic only (`cfl h_min / (xi c_s)`), no approach/viscous term, so it cannot s
 only hid the pile-up). (3) [2026-10-01: Gresho spin-up traced to an intrinsic, slowly converging pressure pump; the limiter default is now (1/n_h, 0.2/n_h); CRKSPH_LIMITER_PLAN notes (c)-(g)].
 
 
+## 18. Video runs leak GPU memory in proportion to the per-pair state (CRKSPH 3D Sedov OOMs at nx 40)
+
+Found 2026-10-01 re-taking the CRK AV baseline (`scripts/av_report.py --config crk --profile full`): `crkNone / sedov` (3D, nx 40, video on, velocity alarm drawing every step) went 8.5 -> 21.5 GB
+allocated over 110 steps and hit CUDA OOM (the GPU is shared with other processes; ~28 GB free). Not the solver: the same run **without video** holds a flat 3.2 GB (nx 40; 1.4 GB at nx 30) over 160 steps. With
+`plot=True, video=True, velocityAlarmPlotInterval=1` at nx 30 allocated memory grows ~56 MB per step (1.4 -> 6.7 GB in 120 steps), i.e. about one 15M-entry float array per drawn frame.
+Suspect: `_RenderThread.submitFrame` (`runner/runner.py`) snapshots the state with `utils/cudaGraph._cloneState`, which clones **every** tensor attribute -- including the pair-sized `ap_ij` / `av_ij` / `f_ij` a CRK state carries (tens of
+millions of entries in 3D) -- and something keeps the snapshots alive after the frame is drawn (the queue is capped at 2 pending, so a retained reference, not the queue, is the leak). Two independent fixes: clone only particle-sized tensors that
+the plot hook reads, and find what retains the snapshot. Workaround: `--noVideo` for large 3D CRK runs (scalar metrics are unaffected). Not investigated beyond the measurement above (`scratchpad/sedmem.py` pattern: diagnostics hook printing
+`torch.cuda.memory_allocated()`).
+
 ## Resolved (details in [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md); numbers kept so references stay valid)
 
 - **§5** englishWedge concave-corner residual -- sign bug in the `fourtakas2019` hydrostatic correction, fixed `68a9a6d`; 2026-09-29 re-validation: keep the default combo.
