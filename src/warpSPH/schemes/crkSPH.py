@@ -40,6 +40,7 @@ from ..systems.compressibleMonaghan import CompressibleSystemUpdate
 from ..modules.shockCapturing.CullenHopkins import computeHopkinsTerms, computeHopkinsUpdate
 
 from ..modules.crk.accel import computeCrkSPHAccelWarp
+from ..configurations.crkSPH import resolveCRKLimiter
 
 __all__ = ['crkSPH_step']
 
@@ -98,6 +99,7 @@ def crkSPH_step(
 ):
 
     _warnNonConservativeSupport(config)
+    crkViscosityParams = resolveCRKLimiter(schemeConfig.crkViscosityParams, config.n_h)
     currentSystem = system#
     currentState = currentSystem.state
     t = currentSystem.t
@@ -325,7 +327,7 @@ def crkSPH_step(
         ),
         domain = config.domain,
         conductivityParams= schemeConfig.diffusionParams,
-        crkViscosityParams = schemeConfig.crkViscosityParams,
+        crkViscosityParams = crkViscosityParams,
         queryVelocityTensor= velocityGradient,
         queryEnergies = currentState.internalEnergies,
         queryVelocities= currentState.velocities,
@@ -347,7 +349,7 @@ def crkSPH_step(
          ),
         domain = config.domain,
         conductivityParams= schemeConfig.diffusionParams,
-        crkViscosityParams = schemeConfig.crkViscosityParams,
+        crkViscosityParams = crkViscosityParams,
         queryVelocityTensor= velocityGradient,
 
         queryEnergies = currentState.internalEnergies,

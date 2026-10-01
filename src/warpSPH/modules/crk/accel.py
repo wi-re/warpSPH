@@ -244,7 +244,10 @@ def computeCrkSPHAccel_Func_i(
         # Vj = referenceVolumes[j]
         # Vi = mi/rhoi
         # Vj = mj/rhoj
-        pressureTerm_ij = -(P_i + P_j) * gradw_ij * Vi * Vj / mi
+        pairWeight = Vi * Vj
+        if crkViscosityParams.meanVolumeWeights:
+            pairWeight = scalar_t(0.25) * (Vi + Vj) * (Vi + Vj)
+        pressureTerm_ij = -(P_i + P_j) * gradw_ij * pairWeight / mi
         # pressureTerms_i = -P_i * gradw_i * Vi * Vj / mi
         # pressureTerms_j = -P_j * gradw_j * Vi * Vj / mi
 
@@ -257,7 +260,7 @@ def computeCrkSPHAccel_Func_i(
         # Q_i = pi_i * rho_bar / rhoj * rhoi
         # Q_j = pi_j * rho_bar
 
-        viscosityTerm_ij = -(Q_i + Q_j) * Vj * mu_ij * gradw_ij * Vi / mi# *0.0
+        viscosityTerm_ij = -(Q_i + Q_j) * mu_ij * gradw_ij * pairWeight / mi
         # viscosityTerms_i = - Q_i * Vj * mu_ij * gradw_i * Vi / mi
         # viscosityTerms_j = - Q_j * Vj * mu_ij * gradw_j * Vi / mi
         # viscosityTerm_ij = (viscosityTerms_i + viscosityTerms_j)

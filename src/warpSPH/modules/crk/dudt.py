@@ -237,8 +237,11 @@ def computeCrkSPHdudt_Func_i(
         # Q_i = pi_i * rho_bar / rhoj * rhoi
         # Q_j = pi_j * rho_bar
 
-        pTerm = Pj * dot * Vi * Vj / mi
-        vTerm = scalar_t(1.0/2.0) * (Q_i + Q_j) * mu_ij * dot * Vi * Vj / mi
+        pairWeight = Vi * Vj
+        if crkViscosityParams.meanVolumeWeights:
+            pairWeight = scalar_t(0.25) * (Vi + Vj) * (Vi + Vj)
+        pTerm = Pj * dot * pairWeight / mi
+        vTerm = scalar_t(1.0/2.0) * (Q_i + Q_j) * mu_ij * dot * pairWeight / mi
 
         # apparentVolume = mj/rhoj
         # pTerm = - apparentVolume * pressureTerm_i * rhoj * dot
