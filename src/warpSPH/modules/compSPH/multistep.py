@@ -19,7 +19,7 @@ from warpSPHCore import *
 
 from typing import Any, List, Optional
 import numpy as np
-from ...math.scatter import scatter_sum
+from ...math.scatter import segment_sum
 
 
 from typing import Tuple
@@ -66,7 +66,8 @@ def compSPH_deltaU_multistep(
         else:
             term = k * f_ij * torch.einsum('ij, ij -> i', v_ji, ap_ij + av_ij)
             
-        deltaU += scatter_sum(term, i, dim = 0, dim_size = initialState.positions.shape[0])
+        # row sums in a fixed order (scatter_sum's atomics made CRKSPH non-reproducible)
+        deltaU += segment_sum(term, stepAdjacency.numNeighbors)
     # verbosePrint(verbose, '[DeltaU] Done')
     return deltaU
 

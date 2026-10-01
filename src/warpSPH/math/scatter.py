@@ -7,7 +7,7 @@ per-particle tensors (e.g. `modules/compSPH/multistep.py`'s energy update).
 import torch
 from typing import Optional, Union
 
-__all__ = ['scatter_sum', 'broadcast']
+__all__ = ['scatter_sum', 'segment_sum', 'broadcast']
 
 # ------ Beginning of scatter functionality ------ #
 # Scatter summation functionality based on pytorch geometric scatter functionality
@@ -45,3 +45,17 @@ def scatter_sum(src: torch.Tensor, index: torch.Tensor, dim: int = -1,
         else:
             return out.scatter_add_(dim, index, src)
 # ------ End of scatter functionality ------ #
+
+def segment_sum(src: torch.Tensor, numNeighbors: torch.Tensor) -> torch.Tensor:
+    """Row sums of per-pair values over a row-sorted (CSR) adjacency list.
+
+    Run-to-run deterministic replacement for `scatter_sum(src, adjacency.i, ...)`:
+    `scatter_add_` uses CUDA atomics, so the float summation order (and the
+    last bits of the result) changes between runs. `torch.segment_reduce` sums
+    each row in a fixed order. Requires `src` ordered by row, with
+    `numNeighbors[r]` consecutive entries for row r (the `AdjacencyList`
+    contract: `i` is sorted and `numNeighbors` is its run-length encoding).
+    Unlike `scatter_sum` this needs no `dim_size` and does no host sync.
+    """
+    with record_function("segment_sum"):
+        return torch.segment_reduce(src, 'sum', lengths=numNeighbors, axis=0, unsafe=True)
