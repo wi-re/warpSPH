@@ -41,10 +41,10 @@ Kind: **practical** = a current limitation of something people run today;
 |---|---|---|---|---|---|
 | [MDBC_CONTACT_LINE_PLAN.md](MDBC_CONTACT_LINE_PLAN.md) | **active**, stuck | practical | ACSPH unusable at wall/free-surface contacts at nx≥70 (fails at step 1211, t\*≈2.8; confirmed 2026-09-28). Every fix tried so far fails. Next (ACSPH): Batty per-contact normal velocity `(u−v_s)·n`. Next (δ-SPH `loneDensityReset`): flier mechanism (§13.1 item 1), gate question (§13.1 item 2, user decides) | 2026-09-26 | 2026-09-28 |
 | [ACSPH_PLAN.md](ACSPH_PLAN.md) | open, blocked on the contact line | practical | Scheme built and validated on the non-free-surface checks; dam break blocked by the contact-line plan. `impact` reference decided (Marrone, aspectRatio 0.5). Left: Lobovsky run, paper-scale tables, closed-box pressure growth (OPEN §9). §0.1 TODO list is out of date | 2026-09-28 | 2026-09-28 |
-| [CRKSPH_LIMITER_PLAN.md](CRKSPH_LIMITER_PLAN.md) | open | practical | Gresho spin-up located (non-central pressure forces), limiter constants in the wrong units; nothing changed in code yet. Next: P1 parameter-stability map (η_crit × η_fold) gated by the Sod ripple probe | 2026-09-26 | 2026-09-28 |
+| [CRKSPH_LIMITER_PLAN.md](CRKSPH_LIMITER_PLAN.md) | mostly done | practical | Closed out 2026-10-01: CRK nondeterminism fixed; limiter default now (1/n_h, 0.2/n_h) (user-decided); Gresho spin-up traced to a slowly converging pressure pump the viscosity cancels (intrinsic, no fix: cusps, pair weights, support consistency all ruled out); regression guards added. Parked: local-spacing / softer limiter, glass ICs, Noh + 2D shocks at the new default, AV_PLAN CRK baseline re-take. All uncommitted on dev | 2026-10-01 | 2026-10-01 |
 | [SMALL_PROBLEM_PERFORMANCE.md](SMALL_PROBLEM_PERFORMANCE.md) | mostly done | practical | δ-SPH Marrone 702 → 109 s (6.5×), bitwise. Left (§5): graph `finalize` (~2.5–3 ms/step), ACSPH still ~187 ms/step, compiled glue needs a jittered batch before default-on | 2026-09-28 | 2026-09-28 |
 | [CEILING_STICKING_PLAN.md](CEILING_STICKING_PLAN.md) | **parked 2026-09-30** (kicks fixed + default; sticking open, cosmetic) | practical | **Done:** the ceiling *kicks* were the time integrator (explicit-midpoint growth on the stiff wall-contact mode); `timeCentredContinuity` (ρ as a drift field) + noPen `impulse` fixed them and are defaults (dev c55a209; §3-§7). **Parked (user):** the *sticking* (bilateral wall: english2025 hydrostatic tension + continuity-booked tension). Unilateral wall contact and its gates (§8), and density re-init (§9, experiment) were tried, do not generalise, and their code lives on branch `parked/ceiling-uniwall`. **Finding (§8.4):** a released row is a sub-support fragment, which this model treats as an elastic compressible ball (impact KE ratio 0.68, single-particle P 150-760); that is a model question (cohesion out of scope, isolated-particle mass/volume with the δ-ALE derivation), not a contact switch. | 2026-09-30 | — |
-| [OPEN_PROBLEMS.md](OPEN_PROBLEMS.md) | open | practical | Nine open items: §1 flyers / free-surface pinning (next: freeze the Antuono mask across RK sub-stages), §2 `'mls'` wall pressure, §3 `'band'` mDBC, §4 LDC density ramp (expected behaviour, nothing queued), §8 contact-line suction (own plan), §9 ACSPH closed-box level growth, §13 `iisph` free-slip column, §14 DFSPH viscous free-slip alternation, §15 CRKSPH residual + `C_l`/`C_q`/dt follow-ups. Resolved: §5, §6, §7, §10–§12, §16–§18 (RESOLVED_PROBLEMS.md). **Your decisions pending:** keep the `fourtakas2019` default (recommendation: keep); Morris viscosity default-on; merge `dev`→`main` | 2026-10-01 | 2026-10-01 |
+| [OPEN_PROBLEMS.md](OPEN_PROBLEMS.md) | open | practical | Nine open items: §1 flyers / free-surface pinning (next: freeze the Antuono mask across RK sub-stages), §2 `'mls'` wall pressure, §3 `'band'` mDBC, §4 LDC density ramp (expected behaviour, nothing queued), §8 contact-line suction (own plan), §9 ACSPH closed-box level growth, §13 `iisph` free-slip column (re-checked 2026-10-01: still blows up at step 433, deterministic), §14 DFSPH viscous free-slip alternation (re-checked 2026-10-01: projected term still flips every step, Morris term ~50x smaller), §15 CRKSPH residual + `C_l`/`C_q`/dt follow-ups. Resolved: §5, §6, §7, §10–§12, §16–§18 (RESOLVED_PROBLEMS.md). **Your decisions pending:** keep the `fourtakas2019` default (recommendation: keep); Morris viscosity default-on; merge `dev`→`main` | 2026-10-01 | 2026-10-01 |
 | [PST_ALE_PLAN.md](PST_ALE_PLAN.md) | parked (user) | ambitious | Stage A (Michel PST) done and validated. Stages B′ δ-ALE-SPH → B Riemann/MUSCL → C Parshikov → D Vila on hold until the ACSPH validation is done | 2026-09-06 | 2026-09-28 |
 | [AV_PLAN.md](AV_PLAN.md) | S1–S5 done | ambitious | Reference baseline **M0e** (`docs/av/`, bit-locked). Done 2026-10-01: S4 CRK sign adopted (no measurable effect); R&H energy bug and its pair loops (minimum image, warp kernels) fixed; Rosswog 2000 switch checked against its paper. **Next:** Phase 2 (Rosswog 2020 trigger), then Phase 3 reconstruction. **Also open:** Phase 1 leftovers (`VelocityPairPolicy`); CRKSPH Gresho is not run-to-run reproducible (cause unknown). Gates PESPH | 2026-10-01 | 2026-10-01 |
 | [PESPH_PLAN.md](PESPH_PLAN.md) | blocked on AV_PLAN M8 | ambitious | Not started; ~3 weeks estimated; the missing fourth scheme of the Frontiere comparison | 2026-09-19 | 2026-09-28 |
@@ -114,16 +114,13 @@ digitisation, closed-box level growth (OPEN §9). Doc hygiene: §0.1 items 1,
 2 and 5 are done or superseded; §9.2's table still calls the t\*≈6 run the
 headline.
 
-### CRKSPH_LIMITER_PLAN.md — open
-From the warpSPHCore higher-order harness: CRKSPH's Gresho vortex gains
-kinetic energy (non-central pair pressure forces), and the limiter constants
-(1/3, 0.2) are in units of H where the paper's are in Δx — the derived
-values trade one case against another (14-case sweep), with knife-edge
-sensitivity at the nearest-neighbour spacing. Plan: P1 stability map over
-(η_crit, η_fold) with seeds and glass ICs, P2 local-spacing / softer limiter
-variants, P3 spin-up source, P4 acceptance before changing defaults, P5
-regression guards. Rule: no viscosity switch; every change also checked on
-Sod against the paper's Fig. 4.
+### CRKSPH_LIMITER_PLAN.md — mostly done
+Closed out 2026-10-01. CRKSPH runs were not reproducible (atomic scatter in the compatible-energy sum): fixed, bit-identical now. The limiter
+constants (1/3, 0.2) were in units of H where the paper's / Spheral's are in particle spacings: the default is now derived per step as
+(1/n_h, 0.2/n_h) (user-decided). The Gresho vortex's KE spin-up is a slowly converging (~nx^-0.4) tangential pressure pump that the viscosity
+cancels to a few percent, so the net grows with resolution (-9 % / +2 % / +8 % at nx 48 / 64 / 96): ruled out the cusps, Spheral's pair weights
+and the support consistency, so it is intrinsic to CRKSPH as formulated; no limiter constant removes it across resolution (P1 map: a smooth viscosity knob).
+Regression guards added. Parked: local-spacing / softer-threshold limiter, glass ICs, Noh + 2D shocks at the new default, re-take of the AV_PLAN CRK baseline.
 
 ### SMALL_PROBLEM_PERFORMANCE.md — mostly done
 Multi-lane neighbour kernels, whole-step CUDA graphs, pipelined outputs,

@@ -330,6 +330,22 @@ vs 39) but does not restore the old behaviour, so more than one change since
 runs on `divergenceFree` instead. To resume: bisect with ~3 jittered runs per
 commit; decide whether the `71a8ae7` jitter removal was meant to stay.
 
+**Re-checked 2026-10-01 (dev `991e4fa`): still broken, identical to the 09-28
+record.** Same arm (`iisph`, nx 128, `semiImplicitEuler`, `freeSlip`, `nu = 0`,
+1200 steps): velocity alarm at **step 433** (t = 0.160, |v|max 239, particle
+636 at x = [0.54, -0.69], i.e. the bottom wall), dt collapses to 1e-8, t stalls
+at 0.1616, |v|max 1.25e6 at step 1200, embedded density 0.17. Deterministic
+(same step as before). The `divergenceFree` control on the same arm is fine
+(|v|max 2.06, embMin 0.89, t = 7.96, no alarm). Nothing merged since 09-28
+touches the incompressible schemes (the 09-29 `timeCentredContinuity` /
+noPen-`impulse` defaults are weakly-compressible-only), so no change was
+expected. One untested lead from the ceiling-sticking work: the blow-up starts
+on a wall-contact particle under an explicit/semi-implicit integrator, the same
+signature as the explicit-midpoint wall-contact mode `CEILING_STICKING_PLAN.md`
+§3-§6 found for WCSPH; whether IISPH's pressure solve has an analogous
+integrator-side issue is not known. Videos/script:
+`scratchpad/hydroRecheck/`, `probe_hydroRecheck.py` (session scratchpad).
+
 ## 14. DFSPH + physical viscosity + free-slip walls: the column's velocity alternates sign every step
 
 **What it is (2026-09-28, found by §7's A/B):** `hydrostaticColumn`,
@@ -340,6 +356,23 @@ Not the viscous timestep limit — halving dt only shrinks it (±0.005-0.01).
 Absent with `nu = 0` (free slip) and with no-slip walls. Suspects: the
 free-slip boundary-velocity mirror (`computeBoundaryVelocities`) feeding the
 viscous term, against the divergence-free solve. Not investigated further.
+
+**Re-checked 2026-10-01 (dev `991e4fa`): half still there, half not.**
+`divergenceFree`, nx 128, 1200 steps, `freeSlip`, `nu = 0.01`:
+- projected term (`monaghanGingold`): mean vertical velocity flips sign **every
+  step** (flip fraction 1.0), amplitude 0.022 — reproduced. The column is
+  otherwise very quiet (|v|max 0.07, embMin 0.99).
+- **Morris 1997 term: amplitude 4e-4, ~50x smaller** (|v|max 0.17, embMin 0.98),
+  the same as the no-slip Morris control (4e-4). So "with either viscosity
+  term" no longer holds: the alternation is tied to the *projected* viscous
+  term (a bulk Laplacian, §7), not to the free-slip mirror feeding any viscous
+  term. That narrows the suspect list away from `computeBoundaryVelocities`.
+- Caveat: the `nu = 0` control (|mean vy| up to 0.05, flip fraction 0.77) is not
+  "absent" by this crude metric — its real slosh swamps it, so the original
+  "absent with `nu = 0`" needs a detrended alternation measure (e.g.
+  |v_k - (v_{k-1} + v_{k+1})/2| of the mean) to confirm; not yet done.
+Impact is small while Morris is the opt-in alternative and the column stays
+bounded. Videos in `scratchpad/hydroRecheck/` (session scratchpad).
 
 ## 15. CRKSPH on a lattice shock — blow-up RESOLVED 2026-09-30; residual and follow-ups open
 
@@ -359,8 +392,7 @@ sampling never does this (min spacing 0.6 dx). It does not hurt accuracy by the 
 `buildDefaultDiffusionParamsCRKSPH` uses 1 / 1 for every kernel (unverified whether `smooth = H/xi` equals the
 paper's h for B7, CRKSPH_LIMITER_PLAN O2 is the same units question for the limiter). (2) The compressible dt is
 acoustic only (`cfl h_min / (xi c_s)`), no approach/viscous term, so it cannot see a column closing (a smaller cfl
-only hid the pile-up). (3) Gresho spin-up (+7-8 % KE) and the limiter knife-edge are unchanged
-(CRKSPH_LIMITER_PLAN P1).
+only hid the pile-up). (3) [2026-10-01: Gresho spin-up traced to an intrinsic, slowly converging pressure pump; the limiter default is now (1/n_h, 0.2/n_h); CRKSPH_LIMITER_PLAN notes (c)-(g)].
 
 
 ## Resolved (details in [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md); numbers kept so references stay valid)
