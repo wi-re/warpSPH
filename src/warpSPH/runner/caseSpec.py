@@ -258,7 +258,7 @@ _FIELD_HELP = {
     'L': 'domain edge length',
     'n_h': 'neighbours per smoothing length; converted to targetNeighbors',
     'calibrateNormalization': 'scale the kernel by 1/L so a perfect lattice reads rho0 '
-                              '(LATTICE_DENSITY_PLAN.md); off by default',
+                              '(summation density only; LATTICE_DENSITY_PLAN.md); off by default',
     'densityCorrection': 'subtract eps m W(0,h) from the raw density (Dehnen & Aly '
                          '2012 eq. 18/19, constants from warpSPHCore.util.densityCorrection); '
                          'off by default',
