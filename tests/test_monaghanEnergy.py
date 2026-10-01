@@ -42,3 +42,18 @@ def test_each_rhs_piece_injects_no_net_energy(Cq):
     # the viscous piece must actually be doing something, or the test proves nothing
     dvdt, dudt = out['viscous force + heating']
     assert abs((m * dudt).sum().item()) > 1e-3
+
+
+def test_read_hayfield_entropy_dissipation_conserves_energy():
+    """OPEN_PROBLEMS §17: R&H (2012) Eq. (33) is `A_i - A_j (rho_j/rho_i)^(gamma-1)`, which makes the
+    pair energy transfer `m_i rho_i^(g-1) dA_i + m_j rho_j^(g-1) dA_j` exactly antisymmetric. The code had
+    the density ratio multiplying the whole difference, so the pair did not cancel across a density step."""
+    res = run(sodCase, scheme='Monaghan', nx=100, nSteps=120, progress=False, quiet=True,
+              params=dict(viscositySwitch='ReadHayfield2012', right_rho=0.125, right_pressure=0.1,
+                          alpha_min=0.2, alpha_max=1.0))
+    st, out = pieces(res.state, res.ctx.config, res.ctx.schemeConfig, 'ReadHayfield2012')
+    dudt = out['R&H entropy dissipation'][1]
+    m = st.masses
+    scale = (m * dudt).abs().sum().item()
+    assert scale > 1e-6, 'the entropy dissipation never engaged, so the test proves nothing'
+    assert abs((m * dudt).sum().item()) / scale < 1e-5

@@ -2,7 +2,7 @@
 """OPEN_PROBLEMS §16 probe: which term of the Monaghan RHS breaks total-energy conservation?
 
 Runs a case for a few steps, then evaluates the RHS pieces of `schemes/monaghan.py` on the
-resulting state and reports, for each, the *net energy rate it injects*
+resulting state (`--switch ReadHayfield2012` adds the SPHS entropy-dissipation source) and reports, for each, the *net energy rate it injects*
 
     E_dot = sum_i m_i ( v_i . dvdt_i + dudt_i )
 
@@ -40,7 +40,7 @@ CASES = {
 }
 
 
-def pieces(system, config, schemeConfig):
+def pieces(system, config, schemeConfig, switch='NoneSwitch'):
     st = system.state
     st.entropies, _, st.pressures, st.soundspeeds = idealGasEOS(
         A=None, u=st.internalEnergies, P=None, rho=st.densities, gamma=schemeConfig.gamma)
@@ -59,6 +59,11 @@ def pieces(system, config, schemeConfig):
         computeThermalDissipation(st, conductivityParams=dp, **kw))
     out['conductivity'] = (torch.zeros_like(st.velocities),
                            computeConductivity(st, conductivityParams=dp, **kw))
+    if switch == 'ReadHayfield2012':
+        # OPEN_PROBLEMS §17: the SPHS entropy-dissipation source (eqs. 33-35); heat only
+        from warpSPH.modules.shockCapturing.ReadHayfield2012 import computeReadHayfieldTerms
+        _, sw = computeReadHayfieldTerms(0.0, st, config, schemeConfig, SupportScheme.KernelMeanSymmetric, adj)
+        out['R&H entropy dissipation'] = (torch.zeros_like(st.velocities), sw.dudt_diss)
     return st, out
 
 
@@ -83,7 +88,7 @@ def main() -> int:
     case = dataclasses.replace(case, configureScheme=configure)
     res = run(case, scheme='Monaghan', nSteps=args.nSteps, progress=False, quiet=True,
               params=dict(viscositySwitch=args.switch), **kw)
-    st, out = pieces(res.state, res.ctx.config, res.ctx.schemeConfig)
+    st, out = pieces(res.state, res.ctx.config, res.ctx.schemeConfig, args.switch)
     m, v = st.masses, st.velocities
     E = res.series('totalEnergy')
     print(f'{args.case}: {args.nSteps} steps, t={float(res.state.t):.4f}, N={len(m)}, '
