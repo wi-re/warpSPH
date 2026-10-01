@@ -133,7 +133,9 @@ def computeCrkSPHdudt_Func_i(
             phi_ij = scalar_t(1.0)
         phi_ij = wp.max(wp.min(phi_ij, scalar_t(1.0)), scalar_t(0.0)) # Ensure phi is between 0 and 1
         v_corr_i = phi_ij / scalar_t(2.0) * matmul(gradV_i, x_ij)
-        v_corr_j = phi_ij / scalar_t(2.0) * matmul(gradV_j, -x_ij)
+        # x_ij = x_i - x_j on both sides; the j-side midpoint extrapolation is
+        # v_j + phi/2 J_j x_ij (garciasenz2026 Eq. 12), same as accel.py
+        v_corr_j = phi_ij / scalar_t(2.0) * matmul(gradV_j, x_ij)
 
         v_dot_i = vel_i - v_corr_i
         v_dot_j = vel_j + v_corr_j
