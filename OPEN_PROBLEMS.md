@@ -21,16 +21,6 @@ here too (a few lines each). When one is resolved, move its text to
 and leave a one-line stub under the same number, so references stay valid.
 Progress on this file is tracked by its single row in [PLANS.md](PLANS.md).
 
-**Batch of 2026-09-28 — done** (on branch `dev`; outcomes in each item):
-1. §5 / §6.3 / §11 re-runs as a baseline, in the background;
-2. §7 Morris shear viscosity (opt-in; DFSPH `hydrostaticColumn` no-slip A/B
-   against Part 39, δ-SPH unchanged when off);
-3. §8's `detectIsolated` in the shared surface detector (changes a default:
-   shifting and the Antuono switch everywhere) — then repeat the step-1
-   re-runs plus Marrone 3.1 and sloshingTank as the before/after check;
-4. §1 step 1, frozen Antuono mask across RK sub-stages — dev work: the
-   flip-rate diagnostic has to be rebuilt first.
-
 ## 1. Corner-flyer / free-surface-pinning instability (the "flyers" and
 "ceiling-sticking" phenomena)
 
@@ -182,182 +172,6 @@ fully enclosed WCSPH box with no free-surface sink is expected behavior for
 this class of scheme, not a mystery to keep chasing — logged here so it
 isn't re-discovered as a surprise, but there is nothing queued to fix it.
 
-## 5. englishWedge concave-corner residual — RESOLVED 2026-09-28
-
-Moved to [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md): the
-regression was a sign bug in the `fourtakas2019` hydrostatic correction
-(fixed `68a9a6d`). **Follow-up, re-validation done 2026-09-29 (recommendation
-pending, decision is the user's):** the default combo (english2025 +
-fourtakas2019 + symplecticEuler) re-run with the fixed term against the
-`deltaSPH` DDT, everything else default (batch
-`scratchpad/run_overnight_batch_2026-09-28.sh`, tables in
-`scripts/out_overnight_2026-09-28/SUMMARY.md`, videos looked at):
-
-- **Marrone 3.1**: P1 plateau (0.46 delta+, 0.83-0.88 PST-off — the PST-off
-  value is the old on-wall-probe extrapolation, In1/Shepard read 0.62) and P2
-  peak (0.23-0.33) are **identical between the two DDTs and to the pre-fix
-  09-26 baseline**; the sign bug never moved them. Checks passed: delta+ nx67
-  x3 seeds fourtakas 27/27 vs deltaSPH 24/27 (fails are P2 "quiescent"
-  flags = a flier crossing the probe); nx134 8/9 vs 7/9; PST-off 8/9 vs 7/9.
-  Bulk density: PST-off [0.992, 1.007] vs [0.977, 1.023]. **One signal against
-  fourtakas:** delta+ nx67 max|v| 16.1 / 11.4 / 19.7 vs deltaSPH 10.3 / 10.1 /
-  10.2 (buggy baseline 10.9) and wider rho extremes ([0.81, 1.20] vs
-  [0.93, 1.08] worst seed); the fast ones are ceiling-pinned isolated
-  particles at t\*~5.3-5.7 (the §1 kick, rhoMin/rhoMax and vmax coincide in
-  time), present in both DDTs' frames. Opposite at nx134 (23.0 vs 30.1) and
-  PST-off (10.2 vs 21.4). n=3 seeds: not a separation.
-- **Marrone 3.4** nx256 (delta-SPH and delta+): all 6/6 PASS, both DDTs;
-  penetration 0.64-0.76 dx; fixed fourtakas indistinguishable from the buggy
-  baseline (vmax 40.9 vs 39.5, same rho extremes 0.63/1.8). Pointwise rho max
-  is higher with fourtakas (1.79 / 1.58 vs 1.40 / 1.33; P99 bulk band equal).
-- **sloshingTank** t=7: both DDTs survive; Gaussian-10 ms wall-sensor peaks
-  2.9 / 3.8 / 7.3 kPa (fourtakas, fixed) vs 3.9 / 4.8 / 5.3 (deltaSPH) vs
-  2.4 / 3.5 / 5.0 (buggy baseline), all inside the measured 2.2-13.1 kPa band;
-  rho extremes [0.82, 1.32] (fourtakas) vs [0.73, 1.50] (deltaSPH). Raw
-  sensor spikes 25-50 kPa in both (known).
-- **Gallery**: 33/34 ran; weakly-compressible examples healthy (impact,
-  LDC, open-flow, moving obstacle etc. look at least as good as the
-  2026-09-13 stored images, which pre-date the current defaults); the one
-  failure is compressible and unrelated, see §15.
-- **Verdict for the user:** no evidence to change the default; fixed
-  `fourtakas2019` is equal or slightly better on the Marrone/sloshing
-  checks and density band, with one mild counter-signal (nx67 delta+ kicks
-  in 2/3 seeds) that belongs to §1, not to the DDT. A 10-seed nx67 delta+
-  A/B would settle that counter-signal if wanted.
-  **2026-09-29: counter-signal explained** ([CEILING_STICKING_PLAN.md](CEILING_STICKING_PLAN.md) §3):
-  those kicks are symplecticEuler's explicit-midpoint (ρ, v) update
-  amplifying the wall-contact acoustic mode of a ceiling-pinned cluster;
-  with `timeCentredContinuity` the three seeds read max|v| 10.1 / 9.9 / 9.9
-  and ρ [0.96, 1.03], tighter than either DDT before.
-
-## 6. Lattice-density kernel calibration — low-priority polish, not urgent
-
-`retired_plans/LATTICE_DENSITY_PLAN.md`'s core design (correct the kernel
-normalization for a finite-support lattice, `calibrateNormalization`) landed
-and is verified. Its original migration plan (a mass-vs-kernel split, then
-flip the default) turned out to be **moot**: the real bug was a mass/cell
-mismatch at the sampler, fixed directly at the source
-(`sample/regular.py:62`), which is why `calibrateRestDensityMasses` was
-retired in favor of `calibrateRestDensity`. With mass fixed at the sampler,
-the residual the kernel term still corrects is tiny (≤0.04% on
-sloshingTank) — **this is genuinely a "do if you've got time to burn" item,
-not something worth going back into the core operator machinery for.**
-Three loose ends, all optional:
-
-1. No test exercises `calibrateRestDensity`'s `onResidual='raise'` path —
-   nothing deliberately corrupts an IC (mismatched mass, an overlapping
-   region) to confirm it actually raises.
-2. Whether wiring the remaining ~131 `OperationProperties(...)` call sites
-   (gradient/divergence/laplacian/curl/interpolate) is worth it at all, now
-   that the number it would remove is this small. If the answer is ever
-   yes, build the `propsFromConfig` helper the plan's §3.9 already flags
-   rather than editing them by hand.
-3. The sampler mass fix itself is unverified outside the cases actually run
-   that session — `kelvinHelmholtz`, `rayleighTaylor`, `kidder`,
-   `yeeVortex`, `triplePoint`, `staticBlob`, `impact`, `squarePatch` all use
-   the same sampler and now get a slightly different (more correct) mass,
-   but none are in `tests/test_physics.py`'s fixture set and none were
-   re-run by hand.
-   **Done 2026-09-28** (`scripts/run_looseEndsBaseline.sh baseline`, video,
-   `scripts/out_looseEnds/baseline/`): all eight reach their tLimit, no
-   velocity alarm, total energy conserved to the printed digits in the
-   compressible ones (kidder is driven, RT's total excludes potential energy).
-   Frames match the stored references where comparable (squarePatch vs the
-   2026-09-18 gallery, kelvinHelmholtz, rayleighTaylor plumes at t≈3.8). The
-   first pass crashed three CRKSPH cases — not the sampler fix, the render
-   thread (§12, resolved). Item 3 closed; items 1 and 2 stay optional.
-
-## 7. Missing shear-carrying laminar viscosity term (Morris et al. 1997) —
-no tangential stress at a no-slip wall
-
-**What it is:** the stock velocity-diffusion term
-(`computeVelocityDiffusion`'s `inviscid=False` branch, `wp_viscosityDelta.py`)
-is `mu_ij * gradW` with `mu_ij = (v_ij . x_ij)/|x_ij|^2` — a scalar built by
-contracting the relative velocity along the separation vector `x_ij`, not the
-full `v_ij` vector. That makes it a normal-projected diffusion: it damps the
-approach/separation component of relative velocity but carries no
-tangential/shear stress at all. A real Morris et al. (1997) laminar viscosity
-term needs the full vector Laplacian, which neither `viscidNu` nor
-`viscosityParams` currently has.
-
-**Why it matters:** `hydrostaticColumn`'s free-slip side walls leave a
-bounded, undamped limit-cycle slosh (documented as non-fatal — DFSPH_FINDINGS.md
-§1.12/§1.20). Switching to `wallBC=noSlip` + `viscidNu` through the existing
-(normal-projected) term does bound the slosh KE (~4x down) and hold the
-hydrostatic gradient, but roughens the free surface
-(`embeddedMinDensity` 0.94 -> 0.60, `|v|max` spikes to ~3.7-4.1) — a no-slip
-mirror through a normal-only diffusion term adds noisy *normal* wall damping
-with no tangential component, not the physically-correct shear stress a real
-no-slip wall should apply. A hand-rolled full-vector Brookshaw Laplacian
-(DFSPH_FINDINGS.md Part 39, since removed in the Part 41 cleanup) *did* hold
-the surface (embMin 0.94-0.97) while damping the slosh at the same time,
-confirming the mechanism — the module layer just doesn't have it as a real,
-supported option today.
-
-**Why it's not a quick fix:** it needs a new kernel term (the full `v_ij`
-vector, not the scalar `mu_ij` reduction), wired as a `DiffusionParameters`
-option, gradcheck'd (it touches a `@wp.kernel`), and given its own `deltaSPH`
-regression pass so it doesn't silently change WCSPH's diffusion behaviour
-too. Half of the groundwork already landed (2026-09-05, `ACSPH_PLAN.md` step
-5 — `computeVelocityDiffusion(approachOnly=False)` lifts the approach-only
-clamp, turning the `inviscid=False` branch into the Monaghan & Gingold
-(1983) Laplacian, De Courcy et al. 2024 Eq. (25), gradchecked in all four
-`inviscid` x `approachOnly` combinations, default unchanged) — what remains
-is the actual full-vector term, a new kernel, not a flag flip.
-
-**Concrete next step:** implement the full `v_ij` Morris Laplacian as a new
-`DiffusionParameters`-wired option alongside the existing `viscidNu` scalar
-term, gradcheck it, and re-run the `hydrostaticColumn` `wallBC=noSlip` A/B to
-confirm it reproduces Part 39's numbers (embMin held, KE damped) through the
-stock machinery instead of the since-removed bespoke path.
-
-**2026-09-28 — implemented, A/B pending.** `diffusionParams.viscousTerm =
-ViscosityTerm.morris1997` (opt-in; default `monaghanGingold` unchanged),
-gradchecked, `tests/test_morrisViscosity.py`. **Correction to "carries no
-tangential/shear stress at all" above:** on a divergence-free shear wave
-`v = (sin ky, 0)` in the bulk, the projected term reproduces `nu lap(v)` too
-(4.8 % / 4.3 % error at n = 32 / 64, vs Morris 2.6 % / 1.8 %) — its
-`K = 2(d+2)` normalisation makes it a consistent Laplacian away from
-boundaries. So whatever Part 39's term did better has to come from the
-truncated supports at walls and the free surface, which is what the
-`hydrostaticColumn` A/B (`scripts/probe_morrisNoSlipColumn.py`) measures.
-
-**A/B, 2026-09-28** (`scripts/probe_morrisNoSlipColumn.py`, `divergenceFree`
-— `iisph` no longer holds even the free-slip arm, §13). First pass: projected
-+ no-slip was already clean on `divergenceFree` (embMin 0.956, slope 1.003 —
-Part 41's embMin 0.60 was `iisph`-specific); Morris + no-slip showed a
-near-wall band at |v| ~0.17 whose velocity **flipped sign every step** while
-the particles stayed put — an explicit-diffusion instability. Cause: the
-shared DFSPH timestep (`kolmogorovIncompressibleTimestep`) divided the viscous
-limit by `kernelScale` once instead of squared, allowing nu dt / hs^2 = 0.24
-(hs = smoothing length) instead of Morris' 0.125. Fixed; at the corrected
-limit Morris + no-slip settles the column to rest (|v|max <= 0.01, near-wall
-and bulk rows ~1e-4 by t = 0.2). The projected term tolerated the old limit
-because it couples more weakly. Final table (`scripts/out_morrisNoSlipColumn/SUMMARY.md`,
-`divergenceFree`, nx=128, 1200 steps, tail = last quarter, corrected dt):
-
-| arm | \|v\|max mean | KE mean | embMin | slope |
-|---|---|---|---|---|
-| free-slip, nu = 0 | 0.541 | 3.1e-4 | 0.889 | 0.966 |
-| no-slip, projected | 0.0127 | 1.5e-7 | 1.000 | 1.004 |
-| no-slip, Morris | 0.0055 | 4.3e-8 | 1.000 | 1.006 |
-| free-slip, Morris | 0.171 | 5.3e-5 | 0.982 | 1.006 — see §14 |
-
-**Verdict:** with a no-slip wall both terms now bring the column to rest;
-Morris damps ~3.5x harder (KE) with smaller peaks. The Part 39 gap is closed
-through the stock machinery. Morris stays opt-in (`viscousTerm`); whether to
-make it the default for viscous no-slip cases is a separate decision (user).
-**Resolved** except that decision — the free-slip + viscosity row is §14. `DFSPH_IMPROVEMENT_PLAN.md`'s
-ranked-queue item 1, `DFSPH_FINDINGS.md` §1.14 (both now retired to
-`docs/historic_plans/` — the incompressible/DFSPH track itself reached a
-stable, documented recommendation (`divergenceFree` default, `band2018pb` as
-a deliberate trade-off) and this is the one item that survived it).
-
-See also: [[boundary-density-plan]], [[wcsph-deltasph-scheme-concerns]],
-[[sph-symmetric-pressure-truncation-artifact]],
-[[marrone31-truncation-artifact-vs-pst]], [[antuono-pressure-switch-bug]],
-[[incompressible-plan-sequencing]].
-
 ## 8. mDBC wall suction at wall/free-surface contact lines — both schemes
 
 **What it is:** a thinly-supported *free-surface* particle next to a solid
@@ -492,22 +306,6 @@ symmetric sum near walls ([[sph-symmetric-pressure-truncation-artifact]])
 acting on a uniform level -- test with a uniform level in a periodic box (no
 walls): growth there would point at the solve, none at the wall closure.
 
-## 10. Runner divergence detection misses bounded-NaN-free blowups — RESOLVED 2026-09-28
-
-Moved to [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md) (velocity
-alarm + probe stall defaults; README "Watching a run").
-
-## 11. probe_contactLine delta-SPH toys: pinned dt is overridden — RESOLVED 2026-09-28
-
-Moved to [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md) (the
-toys' adaptive dt is capped at the pinned acoustic Courant 0.3).
-
-## 12. Render thread + grid-interpolated plots crash or hang CRKSPH cases — RESOLVED 2026-09-28
-
-Moved to [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md)
-(found by the §6.3 re-runs; plot hooks that run warp kernels now stay on the
-loop thread).
-
 ## 13. `hydrostaticColumn` under `iisph` blows up in its default free-slip configuration
 
 **What it is (2026-09-28, found by the §7 Morris A/B):** `iisph`, nx=128,
@@ -543,39 +341,11 @@ Absent with `nu = 0` (free slip) and with no-slip walls. Suspects: the
 free-slip boundary-velocity mirror (`computeBoundaryVelocities`) feeding the
 viscous term, against the divergence-free solve. Not investigated further.
 
+## 15. CRKSPH on a lattice shock — blow-up RESOLVED 2026-09-30; residual and follow-ups open
 
-## 15. CRKSPH on a lattice shock: light-gas columns pile up at the contact, blow-up when a pair reaches r = 0 — blow-up RESOLVED 2026-09-30
-
-**Status: blow-up RESOLVED 2026-09-30 (cause found, fixed, regression test); a benign residual and follow-ups
-below.** The mechanism sections further down were written before the cause was known; the "what it is not" list
-there stays valid (kernel, `n_h`, limiter constants, gradB, CUDA graphs were all innocent).
-
-**Cause (2026-09-30).** The blow-up is the CRK **artificial viscosity** on a near-coincident approaching pair,
-not the pressure force. `modules/crk/accel.py` / `dudt.py` regularised the switch as
-`mu = v_hat . eta / (eta . eta + 1e-7 h^2)` with `eta = x/h` **dimensionless**: the regulariser was ~1e-11, so
-`mu ~ v/|eta|` was unbounded as a pair closed and `Q = rho (-C_l c mu + C_q mu^2)` gave a pair acceleration
-~1e4-6e4 in one right-hand-side evaluation (trapped: the second stage of step 163, pair at r = 0.0026 dx,
-|a_visc| = 6.2e4 vs |a_pressure| = 0.12; then u -> -5e5). Frontiere et al. 2017 Eq. (69) has
-`eps^2 = 1e-2` in eta^2 units (their standard parameter set). Fix: exactly that (`scalar_t(1.0e-2)`), so the
-viscosity vanishes smoothly as `eta -> 0`.
-
-**Result.** Sod 2D same-lattice: blow-up at step 164 -> clean to t = 0.6 (268 steps, total energy 0.35385
-exact); the shipped `triplePoint_equalSpacing.py`: blow-up at step 88 -> t = 10.0 in 4700 steps, energy exact
-(48.203), vortex roll-up as in the paper's Fig. 25 (videos in `scripts/out_crk2d/examples/export/`); a regression
-test (`tests/test_crkCoincidentPair.py`) fails on the old code (non-finite state) and passes now; gradcheck
-(`scripts/gradcheck_crk.py`) and `tests/test_physics.py` etc. pass (110). A/B of the change over the 13
-compressible cases of the limiter-plan harness (old vs new, `scripts/out_crk2d/sweep/`): Sod L1 rho -0.1 %,
-Sedov 0.0 %, Noh -1.7 %, Kidder -2.7 %, linear wave -3.6 %, Yee -0.9 %, hydrostatic max|v| +0.5 %, KH rebound
--34 %, RT +0.7 %, nothing diverges; the one worse number is Gresho (+12-15 % velocity error, KE spin-up
-+7.3 % -> +8.2 %), a case CRKSPH_LIMITER_PLAN O4 shows is a knife-edge (2 % threshold shift = 7x spin-up).
-
-**Tested and refuted on the way.** (a) The sampling ratio is not the cause (it only decides when). (b) Frontiere
-Eq. (76)'s multi-material mass rule for the density (`m_ij = m_i` across materials; our kernel always uses `m_j`,
-`warpSPHCore/crk/crk_density.py`; the core has no material tag) was built by linearity and tried: it makes Sod 2D
-blow up *earlier* (step 83), and the user reports it degraded the hydrostatic 2D box, so it stays out. (c) The
-equal-spacing hydrostatic box (static mass jump at uniform pressure) is essentially perfect under CRKSPH
-(max|v| 1e-5 over t = 3), so the density treatment across a jump is not the problem; the mass-jump trouble is
-dynamic, at start-up.
+The blow-up (a CRK artificial-viscosity regulariser `1e-7 h^2` added to a dimensionless `eta.eta`, unbounded `mu` on a
+near-coincident approaching pair) is fixed and moved to [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md)
+with its mechanism, A/B and reproduction. What stays open:
 
 **Residual (not a blow-up).** With a sharp same-lattice mass step the first light column is kicked forward within
 four steps (0.56 m/s), the light columns then settle into an irregular spacing, and one pair of columns per
@@ -592,104 +362,20 @@ acoustic only (`cfl h_min / (xi c_s)`), no approach/viscous term, so it cannot s
 only hid the pile-up). (3) Gresho spin-up (+7-8 % KE) and the limiter knife-edge are unchanged
 (CRKSPH_LIMITER_PLAN P1).
 
-**What it is.** `compressible/14-triplePoint/triplePoint_equalSpacing.py`
-(CRKSPH, nx 256, shipped preset, `dev` @ a28aeb1) is clean for 86 steps
-(max|v| 1.2, energy exact) and one step later |v| ~ 1e5, dt collapses, NaN
-in the hash-map build (gallery `F_gallery` rc=1). The same thing happens in
-the **Sod 2D slab under CRKSPH on the same-lattice sampling** once it runs
-past the shipped tLimit (0.15): a 4000-particle reproducer.
 
-**Replicate** (`scripts/probe_triplePointPileup.py`, prints dt / max|v| /
-extrema per step and the smallest nearest-neighbour spacing; dumps the last
-clean + blown snapshot to an npz and stops at the blow-up):
+## Resolved (details in [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md); numbers kept so references stay valid)
 
-```
-python scripts/probe_triplePointPileup.py --nnEvery 8                    # triple point, cfl 0.3: blows at step 88
-python scripts/probe_triplePointPileup.py --case sod2d --nnEvery 20      # Sod 2D, CRKSPH, --no-equalMass: blows at step 164
-python scripts/probe_triplePointPileup.py --case sod2d -- --equalMass    # control: clean to t = 0.6 (269 steps)
-python scripts/probe_triplePointPileup.py --case sod1d                   # control: clean to t = 0.6 (2157 steps)
-python scripts/probe_triplePointPileup.py --nnEvery 8 -- --cflFactor 0.05 --nSteps 600   # survives, same pile-up
-```
-Everything after `--` goes to the case CLI. The shipped-preset views:
-`examples/compressible/14-triplePoint/triplePoint_equalSpacing.py` and
-`scripts/out_sodCRKSPH_2026-09-29/run.sh` (Sod 1D / 2D equal-mass / 2D
-equal-spacing under CRKSPH at the shipped tLimit 0.15 — all three finish
-there: 539 / 67 / 67 steps, too short to reach the collapse; videos under
-`export/`, git-ignored).
+- **§5** englishWedge concave-corner residual -- sign bug in the `fourtakas2019` hydrostatic correction, fixed `68a9a6d`; 2026-09-29 re-validation: keep the default combo.
+- **§6** lattice-density kernel calibration -- `onResidual='raise'` path now tested (`tests/test_restDensityCalibration.py`); wiring the normalisation into every operator is deliberately not done (not worth it), documented on `SimulationConfig.calibrateNormalization`.
+- **§7** missing shear-carrying laminar viscosity -- Morris (1997) term implemented, opt-in (`viscousTerm = morris1997`). Whether to make it the default for viscous no-slip cases is the user's call.
+- **§10** runner divergence detection -- velocity alarm + probe stall defaults.
+- **§11** `probe_contactLine` delta-SPH toys' pinned dt -- adaptive dt capped at the pinned acoustic Courant 0.3.
+- **§12** render thread + grid-interpolated plots crashing CRKSPH cases -- plot hooks that run warp kernels stay on the loop thread.
+- **§16** Monaghan viscous heating lacked the 1/2 -- fixed, `tests/test_monaghanEnergy.py`.
+- **§17** Read-Hayfield entropy dissipation did not conserve energy -- Eq. (33) transcription error, fixed; pair loops moved to warp kernels (`wp_readHayfield.py`).
+- **§18** Monaghan Sedov energy drift 5e-4 -- RK2 time-integration error, expected behaviour, converges at second order in dt.
 
-**Mechanism (measured).** The nearest-neighbour spacing on the light side of
-the contact starts shrinking around step 16 (triple point) and roughly halves
-every 8 steps; by step 87 there are 228 coincident pairs (456 particles), one
-pair per row, both particles *light* (m = 6.9e-5, same v, different u), at
-x = 1.3125 and its periodic mirror 12.6875. The blow-up is the step a pair
-reaches r = 0 (kernel gradient -> 0; the CRK-corrected gradient keeps a
-W(0)(grad A + A B) term). CRK terms are benign until then (cond(m2) <= 2.3,
-|B|h <= 2.9, no singular-matrix warning). Sod 2D shows the same thing:
-coincident light pairs (m = 2.5e-5) at the contact, x = +-0.7303, with the
-dense side (m = 1e-4) expanded behind it.
-
-**Where it forms / what drives it.** Always at the contact discontinuity, on
-the light side. The particle-spacing jump across the contact (in the
-compressed direction) is what the sampling controls: with the same lattice
-on both sides the dense-side gas is 4x (Sod) / 8x (triple point) heavier per
-particle, so its x-spacing at the contact ends up ~2.5x the light side's;
-with equal-mass sampling (light side coarser from the start) it is ~1.6x and
-the run is clean. Triple-point A/B on rho_II: 0.5 / 0.25 / 0.125 blow at step
-194 / 136 / 89 -- **the sampling ratio sets *when*, but even rho_II = 1.0
-(equal masses everywhere) still blows (step 208, pairs at the entropy
-contact x ~ 1.41)**, so the ratio is an amplifier, not the whole cause.
-
-**What it is not (A/B'd, 5-10 s each):** kernel or n_h (B7, Wendland4,
-QuinticSpline, n_h 2-5 all blow, at different steps); the CRK viscosity limiter
-(`enableCRKLimiter=0`, eta_crit 0 / 0.1 / 1 -- none cure it, eta_crit = 1 is
-earlier); the 09-26 gradB fix (reverted in a scratch core: same); CUDA graphs /
-pipelined outputs; `calibrateNormalization`.
-
-**Not a clean regression.** The 08-13 code (stored gallery image) and the
-08-31 / 09-04 core pairs develop the same pile-up as a hot cluster (rho 8,
-umax 10-16, h down to 0.014, c_s 5) that shrinks the adaptive dt to ~3e-4 and
-keeps pairs from touching; the 09-04 pair blew at t = 0.248 in one run and
-survived to t = 1.9 in a re-run. From 09-19 on it blows every time.
-
-**A smaller dt only hides it.** `--cflFactor 0.05` survives to t = 1.87 and
-its state through t = 0.29 matches cfl 0.3 (rho_max 3.37 vs 3.35, umax 3.07,
-h_min 0.050), but it carries the same pile-up (484 particles < 0.1 dx from a
-neighbour, min separation 0.009 dx vs 0). cfl 0.15 blows at step 168. The
-compressible dt is `cfl * h_min / (xi c_s)`: acoustic only -- no bulk/approach
-velocity, no separation term -- and h adapts to density, so it cannot see a
-column collapse.
-
-**Next, when picked up:** the pair force between the first two light columns
-at r -> 0 (CRK gradient at small separation) and the first-light-column
-acceleration (a_i ~ m_heavy (P_i/rho_i^2 + P_j/rho_j^2)); then test a
-mass-jump-smoothing remedy on the Sod 2D reproducer (cheap: 4000 particles).
-Interim for the example (user's call): leave failing, ship `--cflFactor 0.05`
-(runs but carries the pairs), or drop the variant (equal-mass is the case's
-shipped default and passes). No videos of the collapse itself (crash probes,
-~90-160 steps); the frames to compare are the equal-mass gallery output vs a
-cfl-0.05 run.
-
-## 16. Monaghan host does not conserve total energy on a strong shock (Sedov) — RESOLVED 2026-09-30
-
-Moved to [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md). Cause: the Monaghan
-viscous heating (`modules/dissipation/wp_dissipation.py`) lacked the 1/2 of
-`du_i/dt = 1/2 sum m_j Pi_ij v_ij . gradW_ij`, so it was exactly twice the kinetic energy the
-viscous force removes. Fixed; regression test `tests/test_monaghanEnergy.py`.
-
-## 17. Read-Hayfield 2012's entropy-dissipation term does not conserve total energy
-
-Found 2026-09-30 by the AV_PLAN M0c baseline, right after §16's heating fix made the `none` and
-Cullen-Dehnen columns conserve to round-off. Not investigated yet.
-
-Monaghan host, `ReadHayfield2012` (alpha 0.2-1.0), total-energy drift `|E - E0| / E0`, vs 0.0000 for
-`none` / Cullen-Dehnen on the same runs: Sod 1D 1.8e-3, Sod 2D 6.3e-3, Sod 3D 1.5e-2, Sedov 3D 1.3e-2
-(`C_q = 2`: 2.8e-2), KH 1.6e-3, RT 1.2e-3, and **Noh at `C_q = 2`: +23 %** (its post-shock density is
--16 % vs +-0.1 % for `none` / C&D). Gresho and Yee: 0. The only term R&H adds to the energy equation
-is `dudt_diss` (`ReadHayfield2012.py`, eqs. 33-35, the SPHS "entropy dissipation"); it is computed per
-particle from `(A_i - A_j)` with `rho_j / rho_i` and `rho_ij` prefactors that are not symmetric in
-`(i, j)`, so its energy sum `sum_i m_i dudt_i` need not vanish. Whether that is a transcription error
-or (as in the original SPHS) a non-conservative design is the first question -- check the paper's
-statement on energy conservation before changing anything.
-
-First check: `scripts/probe_monaghanEnergy.py` with `--switch ReadHayfield2012` (extend `pieces()` with
-the `dudt_entropy` term; the net `sum m dudt_diss` over a mid-run state is the number).
+See also: [[boundary-density-plan]], [[wcsph-deltasph-scheme-concerns]],
+[[sph-symmetric-pressure-truncation-artifact]],
+[[marrone31-truncation-artifact-vs-pst]], [[antuono-pressure-switch-bug]],
+[[incompressible-plan-sequencing]].

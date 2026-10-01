@@ -1,3 +1,15 @@
+> **Superseded record (moved to `docs/historic_plans/` 2026-10-01).** Work log of Phase 6 (sessions 1-5, 2026-09-19); the summary is `phase6.md`.
+> The compressible dissipation work continues in [`AV_PLAN.md`](../../AV_PLAN.md); its reference numbers are the AV baseline
+> (`docs/av/av_baseline_2026-09-30.md`, now **M0e**).
+>
+> **Read-Hayfield numbers below are out of date.** Two bugs were found after this log was written, both fixed 2026-10-01 (see
+> [`RESOLVED_PROBLEMS.md`](RESOLVED_PROBLEMS.md) §17): the entropy dissipation (Eq. 33) had its density ratio outside the bracket, which
+> gained energy, and its pair loops took raw `x_i - x_j` differences (no minimum image on periodic domains) with a hand-copied kernel
+> derivative; they now run in warp kernels (`modules/shockCapturing/wp_readHayfield.py`). The conclusion that R&H suppresses the contact
+> overshoot still holds; the Sod/Sedov/Noh figures here are not the current ones. The Monaghan viscous heating was also corrected since
+> (OPEN_PROBLEMS §16: it lacked the factor 1/2), which moves every Monaghan-host energy number here. The "branch not pushed" remarks are obsolete (`acsph-plan` was merged into
+> `main` on 2026-09-27).
+
 # Phase 6 Log — compressible shock-capturing frontend (C&D switch on Monaghan + R&H 2012 SPHS)
 
 Newest entries at the BOTTOM. This is the resumability log — re-read it at the top of

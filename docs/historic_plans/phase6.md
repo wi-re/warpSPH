@@ -1,3 +1,15 @@
+> **Superseded record (moved to `docs/historic_plans/` 2026-10-01).** This file records Phase 6 (Cullen-Dehnen 2010 + Read-Hayfield 2012 on the Monaghan scheme), completed 2026-09-19. Its task brief, `phase6_shock_capturing_prompt.md`, is not in the repository.
+> The compressible dissipation work continues in [`AV_PLAN.md`](../../AV_PLAN.md); its reference numbers are the AV baseline
+> (`docs/av/av_baseline_2026-09-30.md`, now **M0e**).
+>
+> **Read-Hayfield numbers below are out of date.** Two bugs were found after this log was written, both fixed 2026-10-01 (see
+> [`RESOLVED_PROBLEMS.md`](RESOLVED_PROBLEMS.md) §17): the entropy dissipation (Eq. 33) had its density ratio outside the bracket, which
+> gained energy, and its pair loops took raw `x_i - x_j` differences (no minimum image on periodic domains) with a hand-copied kernel
+> derivative; they now run in warp kernels (`modules/shockCapturing/wp_readHayfield.py`). The conclusion that R&H suppresses the contact
+> overshoot still holds; the Sod/Sedov/Noh figures here are not the current ones. The Monaghan viscous heating was also corrected since
+> (OPEN_PROBLEMS §16: it lacked the factor 1/2), which moves every Monaghan-host energy number here. The "branch not pushed" remarks are obsolete (`acsph-plan` was merged into
+> `main` on 2026-09-27).
+
 
 ## Phase 6 — frontend build-out in `warpSPH` (C&D 2010 + R&H 2012)
 
@@ -62,4 +74,4 @@ suppresses the contact-discontinuity thermal-energy/entropy overshoot vs
 NoneSwitch on every metric; all three switches reproduce the exact
 head/foot/contact/shock within SPH smearing. Commits: `dcd0423` (C&D +
 tests), `652ed28` (R&H + wiring), `3cf40f5`/`128d82b` (log). Full record in
-`phase6_shock_capturing_log.md`. Branch not yet pushed.
+`phase6_shock_capturing_log.md`. (Branch not pushed at the time; merged into `main` 2026-09-27.)

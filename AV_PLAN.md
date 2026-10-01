@@ -28,25 +28,26 @@ Full reading checklist in [Part 5](#part-5--literature).
 
 # Status board — read this first
 
-**Nothing in this plan is started.** What exists is its *input*: the work logged
-in [`phase6.md`](phase6.md) / [`phase6_shock_capturing_log.md`](phase6_shock_capturing_log.md),
-complete 2026-09-19, which wired Cullen & Dehnen (2010) into
-[`schemes/monaghan.py`](src/warpSPH/schemes/monaghan.py), resolved the App. B
-sign question (`D(∇·v)/Dt = ∇·(dv/dt) − tr(V²)`, minus), added
-[`ReadHayfield2012.py`](src/warpSPH/modules/shockCapturing/ReadHayfield2012.py)
-with its entropy-dissipation term, and validated Sod 1D/2D/3D plus the Gresho
-control. Commits `dcd0423`, `652ed28`, `3cf40f5`, `128d82b`, branch `acsph-plan`,
-not pushed.
+**Phase 0 and the start of Phase 1 are done (2026-09-30); updated 2026-10-01.** The plan's *input* is the work
+logged in [`phase6.md`](docs/historic_plans/phase6.md) / [`phase6_shock_capturing_log.md`](docs/historic_plans/phase6_shock_capturing_log.md)
+(Cullen & Dehnen 2010 and Read & Hayfield 2012 on [`schemes/monaghan.py`](src/warpSPH/schemes/monaghan.py),
+validated on Sod and Gresho). On top of it, per the start-up order below:
 
-That is the **Phase 0 baseline**: C&D and R&H on Monaghan, validated
-qualitatively and with the contact-spike metric, but with no report, no L1, no
-dissipation accounting and no reproducibility lock.
+- **S1 / M0** baseline instrument (`scripts/av_report.py`, 10 cases, `--compare`, bit-lock check) and the
+  reference **M0c** (`results/av_M0c_*`, `docs/av/av_baseline_2026-09-30.md`, 50 pairs bit-locked);
+- **S2** audit fixes + fixed-beta (`BetaMode`) + the switch registry; **S3** all 8 `ViscositySwitch` members
+  implemented (Balsara, Colagrossi, Morris-Monaghan, Rosswog2000; the last now checked against its paper, 2026-10-01);
+- **S5** the Monaghan viscous-heating factor 1/2 (OPEN_PROBLEMS §16);
+- **S4** CRK `dudt.py` j-side sign: applied 2026-10-01 (see S4 below);
+- **OPEN_PROBLEMS §17** (Read-Hayfield energy) resolved 2026-10-01: a transcription error in Eq. (33); baseline regenerated as **M0d**, then **M0e** after the R&H pair loops moved to warp kernels (see below).
+
+Not yet started: Phase 2 (Rosswog 2020 entropy trigger) onward, i.e. the table rows marked `☐`.
 
 | Phase | Milestone | State |
 |---|---|---|
-| 0 | M0 Baseline locked | ◐ started 2026-09-30 — `L1` metric done |
-| 1 | M1 Old physics, new architecture | ☐ not started |
-| 2 | M2 Entropy trigger validated | ☐ not started |
+| 0 | M0 Baseline locked | ✅ M0c (2026-09-30), tag `milestone/av-baseline` at the first M0; the report copy in `docs/av/` is uncommitted |
+| 1 | M1 Old physics, new architecture | ◐ S2/S3 done (registry, `BetaMode`, tag fixes, stubs filled); `VelocityPairPolicy` and `computePi_actual` taking the pair velocity are still to do |
+| 2 | M2 Entropy trigger validated | ☐ not started (next) |
 | 3 | M3 Reconstruction engine works | ☐ not started |
 | 4 | M4 Smooth-flow dissipation characterised | ☐ not started |
 | 5A | M5 Quadratic dissipation understood | ☐ not started |
@@ -108,7 +109,7 @@ strong-shock (Sedov/Noh) detector comparisons can be trusted, so it must be done
 ### S3 — Fill the stubs (step 5, after the registry) — DONE 2026-09-30
 - [x] standalone Balsara factor `balsaraFactor` (`modules/shockCapturing/Balsara1995.py`), used by Read-Hayfield (bit-identical vs M0 smoke baseline) and as the `Balsara1995` switch (alpha = B, instantaneous); `Balsara1995` stub retired
 - [x] `MorrisMonaghan1997` switch — checked against the PDF (Eqs. 5, 6, 13: `tau = h/(C_1 c)`, `C_1 = 0.2`, `S = max(-div, 0)`, `alpha_inf = 0.1`). **diffSPH's `tau = h c / l` is dimensionally wrong; not copied.** Decay taken implicitly (`switchRelaxation.relaxAlpha`, stable for any dt/tau, unit-tested at dt/tau 0.1..100); `h -> smoothing length` with CullenDehnen2010's `1/sphKernel_xi`. New tunable `morris_C1` (default 0.2, dict round-trip with `.get`)
-- [x] `Rosswog2000` divergence-source switch, **transcribed from diffSPH only — the paper is not in `literature/`, so it is unchecked against the source** (source `max(-div,0)(alpha_max - alpha)`, MM97 time scale). The 2020 entropy trigger is still to come as a new `Rosswog2020` member (Phase 2)
+- [x] `Rosswog2000` divergence-source switch, transcribed from diffSPH and **checked against the paper 2026-10-01** (`rosswog2000`, Appendix A, Eqs. A.5-A.6: source `max(-div,0)(alpha_max - alpha)`, `tau = h/(eps c)`, eps 0.2 = `morris_C1`; matches; the paper's constants are alpha_max 1.5, alpha_min 0.05; beta = 2 alpha and the Balsara factor in mu are pair-operator matters, not in the switch). Steady-state test against the paper's ODE added. The 2020 entropy trigger is still to come as a new `Rosswog2020` member (Phase 2)
 - [x] `Colagrossi2004` limiter (trace-free shear norm); regularised with `eps c / h` (`balsara_const`), not diffSPH's dimensionally wrong `1e-14 h`
 - [x] `PLANNED` is now empty; `SWITCHES` has all 8 enum members; `tests/test_dissipationSwitches.py` (relaxation stability/steady state/exponential limit, Balsara limits, per-switch wiring on Sod and Gresho); full suite + gradchecks green. No warp kernels were added (all torch-level), so no new gradcheck.
 - [x] reference numbers: `--config switchesS3` on sod + gresho, bit-locked (`results/av_S3_switches/`). Findings: Balsara == Colagrossi **exactly** on 1D Sod (curl and trace-free shear are both 0 in 1D) and both ~ NoneSwitch there; MM97 Sod peak alpha 0.51 vs the paper's Eq. (19) no-decay ceiling `alpha_inf + ln(v1/v2)` ~ 0.67 for this Sod shock; on Gresho all four keep the vortex (peak 0.74-0.84, L1 0.07-0.08, <1.1 % L lost)
@@ -116,10 +117,22 @@ strong-shock (Sedov/Noh) detector comparisons can be trusted, so it must be done
 ### S4 — Side track: CRK `x_ij` sign discrepancy (§2.2)
 - [x] **Analysis by reading (2026-09-30), experiment pending.** `computeDistanceVec(x, y) = x - y`, so `x_ij = x_i - x_j` in both files. Linear extrapolation of each particle's velocity to the pair midpoint gives `v^_i = v_i - (1/2) phi J_i x_ij` and `v^_j = v_j + (1/2) phi J_j x_ij` — exactly garciasenz2026 Eqs. (11)-(12). `accel.py:152-156` does this (`+x_ij` on the j side, `v_dot_j = v_j + v_corr_j`). **`dudt.py:135-138` uses `matmul(gradV_j, -x_ij)` with the same `v_dot_j = v_j + v_corr_j`, i.e. `v_j - (1/2) phi J_j x_ij`: the j-side reconstruction in the energy equation has the opposite sign to the momentum equation's.** Also: `dudt.py` passes `cs_i, cs_i` to the first `computePi_actual` and `cs_j, cs_j` to the second, where `accel.py` passes `cs_i, cs_j` to both. If these are bugs they break the heating-vs-kinetic-loss consistency of the CRK viscosity whenever `phi > 0`.
 - [x] **Experiment done (2026-09-30)**, CRKSPH host, `NoneSwitch` and C&D, sod / gresho / sedov / noh / yee, three variants of `dudt.py`: (a) as is, (b) the j-side sign fixed (`matmul(gradV_j, x_ij)`), (c) = (b) + symmetric `cs_i, cs_j` arguments. Reports: `results/av_S4_{a,b,c}/` (no video: scalar A/B; nothing adopted). **Result: essentially no effect.** Sod, Sedov, Noh and Yee agree to ~1e-4 relative across all three variants; CRKSPH total-energy drift is already <= 4e-6 in every case and variant (Sedov/Noh: 0, i.e. CRKSPH conserves exactly where the Monaghan host gains 20-68 %, OPEN_PROBLEMS §16). Only **Gresho** moves, and (b) moves it the right way: angular-momentum loss 6.6e-4 -> 1.6e-4 (NoneSwitch) and 1.1e-3 -> -1.3e-4 (C&D); `L1(v_phi)` 0.0413 -> 0.0404 / 0.0435 -> 0.0390; peak speed 1.067 -> 1.055 / 1.065 -> 1.045. (c) on top of (b) changes nothing distinguishable (angular momentum -3e-5 / 2e-4, L1 0.0405 / 0.0404, peak 1.049 / 1.070): **no evidence for or against the `cs` asymmetry**, which may be deliberate alongside the `useJ` flag.
-- [ ] **decision (user): adopt (b)?** It is a one-token sign fix that matches Eqs. (11)-(12) and accel.py, reduces CRK Gresho angular-momentum loss 4x (NoneSwitch) and changes nothing else measurable; the cost is that it changes CRKSPH results (slightly) and would want a video-backed Gresho check before landing. Recommend: adopt (b), leave `cs` as is. **Not applied; CRK source is unchanged.**
+- [x] **Adopted 2026-10-01 (user: "make the s4 change").** `dudt.py` now uses `matmul(gradV_j, x_ij)` (a comment gives the Eq. (12) reasoning); `cs` arguments left as they were. **Correction to the experiment above:** its Gresho numbers were single runs, and **CRKSPH Gresho is not run-to-run reproducible** (unlike the Monaghan/CompSPH hosts, which are bit-locked). A 5-vs-5 repeat of the same code (`results/av_S4_ab.log`): old sign L1(v_phi) 0.0401 +- 0.0017, peak 1.053 +- 0.011, angular-momentum loss 3.2e-4 +- 3.3e-4; fixed sign 0.0414 +- 0.0021, 1.059 +- 0.009, 1.9e-4 +- 3.3e-4. **The 4x angular-momentum gain was noise; the fix has no measurable effect on Gresho.** It is kept because it matches Eqs. (11)-(12) and `accel.py`, not because it measurably helps. Video-backed run: `results/av_S4_adopted/runs/`. New small open item: find the CRK nondeterminism (probably an atomic scatter; the R&H lock failure in S1 had the same cause) -- it means no CRK number in this plan resolves differences below ~1e-3 in angular momentum or ~5 % in L1(v_phi) without repeats.
 
 ### S5 — OPEN_PROBLEMS §16: Monaghan energy gain on strong shocks — DONE 2026-09-30
 - [x] root cause found with `scripts/probe_monaghanEnergy.py` (net energy injected per RHS piece): the viscous heating kernel lacked the 1/2, heat = exactly 2x the kinetic loss; fixed, `tests/test_monaghanEnergy.py` (fails by 6-7 % without it), Monaghan budget 5e-3 -> 1e-4, baseline regenerated (M0c). Full write-up: `docs/historic_plans/RESOLVED_PROBLEMS.md`. Follow-up: OPEN_PROBLEMS §17 (R&H entropy dissipation)
+
+### M0e — device port (2026-10-01): the reference is now `results/av_M0e_baseline`, `_baselineQ`, smoke `results/av_smoke_ref_M0e/`
+The Read-Hayfield pair loops moved from host torch code (raw `x_i - x_j`, no minimum image; a hand-copied kernel derivative with a silent Wendland2 fallback) to warp kernels
+(`wp_readHayfield.py`, gradchecked in `scripts/gradcheck_shockCapturing.py`, periodic-shift invariance in `tests/test_readHayfieldDevice.py`). Only the R&H columns moved, slightly
+(KH mode amplitude 0.0665 -> 0.0722 is the largest); `none`/C&D and the S3 family are unchanged. Lock: 14 R&H pairs re-run, bit-identical. Details in `docs/av/av_baseline_2026-09-30.md`.
+
+### M0d — scheme correction (2026-10-01): the Read-Hayfield columns were `results/av_M0d_*` (superseded by M0e)
+OPEN_PROBLEMS §17 resolved: R&H Eq. (33) has the density ratio inside the bracket (`A_i - A_j (rho_j/rho_i)^(g-1)`), the code had it multiplying
+the difference; `K_ij` is now pair-symmetric. Only the R&H columns changed (`none`/C&D bit-identical to M0c). R&H energy drift is now 1e-7..6e-4
+(was up to 1.5e-2), **Noh at `C_q = 2`: +23 % -> 1.7e-6, post-shock density -16 % -> -0.11 %**; the "R&H is a blocker for strong-shock rows"
+remark under M0c is withdrawn. New reference: `results/av_M0d_baseline`, `_baselineQ` (merges of M0c with the new R&H runs), smoke ref `results/av_smoke_ref_M0d/`;
+the S3 family (`results/av_M0c_s3`) is unaffected. Lock: R&H re-run, 14 pairs bit-identical.
 
 ### M0c — scheme correction (2026-09-30): the reference is now `results/av_M0c_*`
 OPEN_PROBLEMS §16 (Monaghan viscous heating lacked the 1/2) changed every Monaghan-host compressible number, so the baseline was regenerated:
@@ -1465,6 +1478,7 @@ All present in `literature/`. Track reading state here, not in a separate file.
 | Chen & Nixon 2025 | `chen2025_minimizing-numerical-viscosity-discs.pdf` | ☐ | ☑ §1.3 | n/a | ☐ P5A |
 | Borrow et al. 2022, Sphenix | `borrow2022_sphenix.pdf` | ☐ | ☑ §1.4 | ☐ P5B | ☐ |
 | Wadsley et al. 2017, Gasoline2 | `wadsley2017_gasoline2-modern-sph-code.pdf` | ☐ | ☑ §1.5 | ☐ P6 | ☐ |
+| Rosswog et al. 2000 (App. A) | `rosswog2000_merging-neutron-stars-asymmetric.pdf` | ☑ App. A | ☑ | ☑ `Rosswog2000` switch | ☑ S3 (sod, gresho) |
 | Cullen & Dehnen 2010 | `cullen2010_inviscid-sph.pdf` | ☑ | ☑ | ☑ | ☑ phase6 |
 | Read & Hayfield 2012, SPHS | `read2012_sphs-higher-order-dissipation-switch.pdf` | ☑ | ☑ | ☑ | ☑ phase6 |
 | Frontiere et al. 2017, CRKSPH | `frontiere2017_crksph.pdf` | ☐ | ☐ | ☑ (CRK-internal, §2.2) | ☐ |

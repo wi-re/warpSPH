@@ -44,9 +44,9 @@ Kind: **practical** = a current limitation of something people run today;
 | [CRKSPH_LIMITER_PLAN.md](CRKSPH_LIMITER_PLAN.md) | open | practical | Gresho spin-up located (non-central pressure forces), limiter constants in the wrong units; nothing changed in code yet. Next: P1 parameter-stability map (η_crit × η_fold) gated by the Sod ripple probe | 2026-09-26 | 2026-09-28 |
 | [SMALL_PROBLEM_PERFORMANCE.md](SMALL_PROBLEM_PERFORMANCE.md) | mostly done | practical | δ-SPH Marrone 702 → 109 s (6.5×), bitwise. Left (§5): graph `finalize` (~2.5–3 ms/step), ACSPH still ~187 ms/step, compiled glue needs a jittered batch before default-on | 2026-09-28 | 2026-09-28 |
 | [CEILING_STICKING_PLAN.md](CEILING_STICKING_PLAN.md) | **parked 2026-09-30** (kicks fixed + default; sticking open, cosmetic) | practical | **Done:** the ceiling *kicks* were the time integrator (explicit-midpoint growth on the stiff wall-contact mode); `timeCentredContinuity` (ρ as a drift field) + noPen `impulse` fixed them and are defaults (dev c55a209; §3-§7). **Parked (user):** the *sticking* (bilateral wall: english2025 hydrostatic tension + continuity-booked tension). Unilateral wall contact and its gates (§8), and density re-init (§9, experiment) were tried, do not generalise, and their code lives on branch `parked/ceiling-uniwall`. **Finding (§8.4):** a released row is a sub-support fragment, which this model treats as an elastic compressible ball (impact KE ratio 0.68, single-particle P 150-760); that is a model question (cohesion out of scope, isolated-particle mass/volume with the δ-ALE derivation), not a contact switch. | 2026-09-30 | — |
-| [OPEN_PROBLEMS.md](OPEN_PROBLEMS.md) | open | practical | §5 resolved 2026-09-28 (`fourtakas2019` sign bug). **Re-validation of the default combo done 2026-09-29** (§5 follow-up has the numbers): fixed `fourtakas2019` ≥ `deltaSPH` on Marrone 3.1/3.4 checks, density band, sloshing; one mild counter-signal (nx67 δ⁺ ceiling kicks 2/3 seeds, §1) — **recommendation: keep the default; your decision.** **§15 CRKSPH lattice-shock blow-up RESOLVED 2026-09-30 (user resumed it):** cause = the CRK viscosity's regulariser (`1e-7 h^2` added to a dimensionless eta.eta; paper: eps^2 = 1e-2), unbounded mu on a near-coincident approaching pair; fixed, regression test, 13-case A/B (Gresho +12 % is the only worse number, a knife-edge case); shipped equal-spacing triple point now runs to t = 10, Sod 2D same-lattice to t = 0.6. Residual: column pairing at a same-lattice mass step (accuracy unaffected); follow-ups for AV/limiter work: `C_l`/`C_q` vs paper Table D.1 (B7: 2.0/1.0, ours 1/1) — tried `C_l` = 2: Sod ringing -70 % but Gresho spin-up worse (+22 % KE at nx 96), kept 1 (user), revisit with the limiter; acoustic-only dt. **§16 RESOLVED 2026-09-30 (AV_PLAN S5): the Monaghan viscous heating lacked the 1/2 (heat = 2x the kinetic loss); fixed, regression test, baseline regenerated as M0c. New §17 (2026-09-30): Read-Hayfield's entropy-dissipation term does not conserve energy (Noh `C_q = 2` +23 %, Sedov 1-3 %); uninvestigated.** Also open: §1 step 2 (continuous blend), §13 `iisph` (parked), §14 viscosity + free-slip flip; Morris default-on (your call); merge `dev`→`main` (your call) | 2026-09-30 | 2026-09-29 |
+| [OPEN_PROBLEMS.md](OPEN_PROBLEMS.md) | open | practical | Nine open items: §1 flyers / free-surface pinning (next: freeze the Antuono mask across RK sub-stages), §2 `'mls'` wall pressure, §3 `'band'` mDBC, §4 LDC density ramp (expected behaviour, nothing queued), §8 contact-line suction (own plan), §9 ACSPH closed-box level growth, §13 `iisph` free-slip column, §14 DFSPH viscous free-slip alternation, §15 CRKSPH residual + `C_l`/`C_q`/dt follow-ups. Resolved: §5, §6, §7, §10–§12, §16–§18 (RESOLVED_PROBLEMS.md). **Your decisions pending:** keep the `fourtakas2019` default (recommendation: keep); Morris viscosity default-on; merge `dev`→`main` | 2026-10-01 | 2026-10-01 |
 | [PST_ALE_PLAN.md](PST_ALE_PLAN.md) | parked (user) | ambitious | Stage A (Michel PST) done and validated. Stages B′ δ-ALE-SPH → B Riemann/MUSCL → C Parshikov → D Vila on hold until the ACSPH validation is done | 2026-09-06 | 2026-09-28 |
-| [AV_PLAN.md](AV_PLAN.md) | S1–S5 done | ambitious | 2026-09-30: M0 tagged; S2 (limitXi/xi, state tags, `BetaMode`, registry), S3 (Balsara, Colagrossi, Morris-Monaghan, Rosswog2000) and S5 done; **S5 found and fixed a real bug: the Monaghan viscous heating lacked the 1/2 (energy gain = one dissipation; OPEN_PROBLEMS §16 resolved)** → baseline regenerated as **M0c** (50 pairs, bit-locked, `docs/av/av_baseline_2026-09-30.md`); Noh at `C_q = 2` now passes its gate. **Open:** S4 decision (adopt the CRK `dudt.py` j-sign fix? small, Gresho angular momentum 4x better), new §17 (Read-Hayfield's entropy term gains energy, Noh +23 %), Phase 2 (Rosswog 2020 trigger) is the next plan phase, then Phase 3 reconstruction. Gates PESPH | 2026-09-30 | 2026-09-30 |
+| [AV_PLAN.md](AV_PLAN.md) | S1–S5 done | ambitious | Reference baseline **M0e** (`docs/av/`, bit-locked). Done 2026-10-01: S4 CRK sign adopted (no measurable effect); R&H energy bug and its pair loops (minimum image, warp kernels) fixed; Rosswog 2000 switch checked against its paper. **Next:** Phase 2 (Rosswog 2020 trigger), then Phase 3 reconstruction. **Also open:** Phase 1 leftovers (`VelocityPairPolicy`); CRKSPH Gresho is not run-to-run reproducible (cause unknown). Gates PESPH | 2026-10-01 | 2026-10-01 |
 | [PESPH_PLAN.md](PESPH_PLAN.md) | blocked on AV_PLAN M8 | ambitious | Not started; ~3 weeks estimated; the missing fourth scheme of the Frontiere comparison | 2026-09-19 | 2026-09-28 |
 | [COUPLED_INCOMPRESSIBLE_NEWTON_PLAN.md](COUPLED_INCOMPRESSIBLE_NEWTON_PLAN.md) | waiting on decisions | ambitious | Scoping only. Unblocked since DFSPH was retired (2026-09-19); needs answers to its open questions 2 and 3. Its banner still calls DFSPH the current priority | 2026-09-04 | 2026-09-28 |
 | [FREESLIP_DAMBREAK_FINDINGS.md](FREESLIP_DAMBREAK_FINDINGS.md) | findings, superseded | reference | ACSPH stall root causes (§9) feed the contact-line plan; the §7 "open decisions" are superseded by §9 | 2026-09-23 | 2026-09-28 |
@@ -54,7 +54,7 @@ Kind: **practical** = a current limitation of something people run today;
 
 ### Finished (reference only)
 
-- [phase6.md](phase6.md) + [phase6_shock_capturing_log.md](phase6_shock_capturing_log.md) —
+- [phase6.md](docs/historic_plans/phase6.md) + [phase6_shock_capturing_log.md](docs/historic_plans/phase6_shock_capturing_log.md) —
   C&D 2010 + R&H 2012 wired into Monaghan, Sod 1D/2D/3D + Gresho validated. Done 2026-09-19.
 - [examples/sloshingTank/PLAN.md](examples/sloshingTank/PLAN.md) — SPHERIC TC10 port; done.
 - [examples/compressible/01-sod/BACKPROP_PLAN.md](examples/compressible/01-sod/BACKPROP_PLAN.md) — done 2026-08-12.
@@ -65,7 +65,7 @@ Kind: **practical** = a current limitation of something people run today;
 ## Priorities
 
 Ordered by how much it matters now: is the feature unusable, what does fixing
-it gain, and at what effort. Last ranked 2026-09-28.
+it gain, and at what effort. Last ranked 2026-09-28; resolved rows removed 2026-10-01.
 
 | # | Item | Home | Unusable now? | Gain / effort | Kind |
 |---|---|---|---|---|---|
@@ -73,13 +73,10 @@ it gain, and at what effort. Last ranked 2026-09-28.
 | 2 | Isolated-fragment kicks / corner fliers in δ-SPH | OPEN §1 (no plan) | No — runs finish, but late kicks (maxV up to 28 m/s) and sensor spikes | Medium gain; **cheapest step never tried**: freeze the Antuono bulk/surface mask across RK sub-stages | practical |
 | 3 | ACSPH pressure level grows exponentially in a closed box | OPEN §9 (ACSPH) | Yes for ACSPH in sealed/filled containers | Medium; the discriminating test (uniform level, periodic box) is cheap and unrun | practical |
 | 4 | CRKSPH Gresho spin-up; limiter constants in wrong units | CRKSPH_LIMITER_PLAN | No — but silent energy injection in vortical flows | Medium; moderate (P1 is mostly a sweep) | practical |
-| 5 | Missing Morris shear viscosity (no tangential stress at no-slip walls) | OPEN §7 (no plan) | Partly — viscous wall-bounded flows are incomplete | Good ratio: new kernel + gradcheck + `hydrostaticColumn` A/B | practical |
-| 6 | ACSPH validation leftovers (Lobovsky, paper-scale tables) | ACSPH_PLAN | No | Low–medium; Lobovsky will hit #1 first | practical |
-| 7 | Remaining performance (ACSPH ~187 ms/step; `finalize` eager) | SMALL_PROBLEM_PERFORMANCE §5 | No — but ACSPH's step cost slows every attempt at #1 and #3 | Medium | practical |
-| 8 | Cheap rechecks: englishWedge concave corner (OPEN §5), 8 cases never re-run after the sampler mass fix (OPEN §6.3), probe toys' pinned dt (OPEN §11) | OPEN_PROBLEMS | No | Very cheap | housekeeping |
-| 9 | `'mls'` wall pressure (OPEN §2), `'band'` mDBC (OPEN §3), LDC density ramp (OPEN §4) | OPEN_PROBLEMS | No — non-default modes / expected behaviour | Nothing queued | accepted |
+| 5 | ACSPH validation leftovers (Lobovsky, paper-scale tables) | ACSPH_PLAN | No | Low–medium; Lobovsky will hit #1 first | practical |
+| 6 | Remaining performance (ACSPH ~187 ms/step; `finalize` eager) | SMALL_PROBLEM_PERFORMANCE §5 | No — but ACSPH's step cost slows every attempt at #1 and #3 | Medium | practical |
+| 7 | `'mls'` wall pressure (OPEN §2), `'band'` mDBC (OPEN §3), LDC density ramp (OPEN §4) | OPEN_PROBLEMS | No — non-default modes / expected behaviour | Nothing queued | accepted |
 | — | Surface detection: isolated particle reads λ=1 (`detectIsolated` only in ACSPH) | OPEN §8 | No | Nice to fix, **not** the cause of surface blowups (that was the DDT choice; `fourtakas2019` helped) — user, 2026-09-28. In the current batch | practical (low) |
-| ✓ | Runner missed finite blowups | RESOLVED_PROBLEMS.md (was OPEN §10) | — | **Done 2026-09-28**: velocity alarm + probe stall defaults (README "Watching a run") | — |
 
 Suggested order: #2 step 1 (cheap, improves the default scheme) → #3's
 periodic-box test (narrows #1 cheaply) → #1's next ACSPH idea, with #7's ACSPH
@@ -144,7 +141,7 @@ The ALE route is δ-ALE-SPH (antuono2021, primitive variables, no Riemann
 solver) before Riemann/MUSCL → Parshikov → Vila. On hold until the ACSPH
 validation cases are done.
 
-### AV_PLAN.md — not started
+### AV_PLAN.md — S1–S5 done (see its status board)
 Turns the dissipation stack into swappable detector / coefficient /
 velocity-pair / operator parts; phases M0 (baseline lock) → M8 (AV
 bake-off), covering Rosswog 2020, García-Senz & Cabezón 2026, Chen & Nixon
@@ -173,6 +170,8 @@ isolation of the contact-line failure. Feeds the contact-line plan.
 
 ## Decisions log
 
+- 2026-10-01 — AV_PLAN: adopt the S4 CRK `dudt.py` sign fix; work OPEN_PROBLEMS §17; pull in the Rosswog 2000 paper and check that switch against it; move the Read-Hayfield pair loops to warp kernels (minimum image, core kernel functions) (user).
+- 2026-10-01 — OPEN_PROBLEMS §18 (Monaghan Sedov energy drift) closed as expected behaviour: RK2 time-integration error that converges with dt; no CFL advice needed (user).
 - 2026-09-30 — AV_PLAN order: tag M0 as-is → `av_report --compare` → S2 (limitXi/xi,
   state tags, fixed β, registry) → S3 stubs, S4 CRK sign any time → OPEN_PROBLEMS §16
   *last*, before Phase 2's Sedov/Noh rows (user).
@@ -203,5 +202,3 @@ isolation of the contact-line failure. Feeds the contact-line plan.
 
 - `ACSPH_PLAN.md` §0.1 and §9.2 still treat the t\*≈6 divergence as the headline.
 - `COUPLED_INCOMPRESSIBLE_NEWTON_PLAN.md`'s banner calls DFSPH the current priority (retired 2026-09-19).
-- `AV_PLAN.md` / `phase6.md` say the `acsph-plan` branch is not pushed (merged into `main` 2026-09-27).
-- `OPEN_PROBLEMS.md` §6 points to `retired_plans/` (it is `docs/historic_plans/`).

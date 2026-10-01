@@ -8,7 +8,7 @@ tube under the switch and bounds the contact-overshoot metric.
 
 Deliberately small (coarse resolution, few steps) -- the point is to catch a
 wrong equation form or a disconnected term, not to re-derive the validation
-numbers (those live in `phase6_shock_capturing_log.md` and the overlay PNGs).
+numbers (those live in `docs/historic_plans/phase6_shock_capturing_log.md` and the overlay PNGs).
 
 Sod geometry note: `buildSod1D` lays out a mirror-symmetric two-interface tube
 (dense state |x| <= L/4, light state the outer quarters, interfaces at x=+/-L/4),
