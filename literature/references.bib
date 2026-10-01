@@ -1389,6 +1389,16 @@
   note    = {Entropy-growth-rate trigger: dissipation is added only to "troubled particles" (entropy non-conserving between two steps) and decays to a floor otherwise (MAGMA2). A third trigger family alongside C&D's compression-based and R&H's entropy-conductivity switches -- candidate for the next ViscositySwitch. Copy here is arXiv:1912.01095v2; the published ApJ abstract is a lightly revised version and stores its one formula as an image, so the abstract is quoted from the PDF. Key suffixed to avoid a collision with rosswog2020 (the MAGMA2 code paper).}
 }
 
+@article{rosswog2000,
+  author  = {Rosswog, S. and Davies, M. B. and Thielemann, F.-K. and Piran, T.},
+  title   = {Merging neutron stars: asymmetric systems},
+  journal = {Astronomy \& Astrophysics},
+  year    = {2000},
+  volume  = {360},
+  pages   = {171--184},
+  note    = {Appendix A is the "hybrid" artificial-viscosity scheme this codebase's Rosswog2000 ViscositySwitch implements: Morris-Monaghan source-and-decay alpha (A.5) with the source limited by alpha_max (A.6), tau = h/(epsilon c), beta = 2 alpha, plus a Balsara factor inside mu (A.1-A.2). Tested on a 1D shock tube, a differentially rotating star (viscous time scales) and a viscosity-driven binary inspiral. The paper itself is a 3D neutron-star merger study. No journal DOI exists for this 2000 A&A article (ADS bibcode 2000A\&A...360..171R); preprint arXiv:astro-ph/0005550, whose abstract differs from the published one, so the abstract is quoted from the PDF.}
+}
+
 @article{garciasenz2026,
   author  = {Garc{\'i}a-Senz, Domingo and Cabez{\'o}n, Rub{\'e}n M.},
   title   = {Are heuristic switches necessary to control dissipation in modern smoothed particle hydrodynamics?},

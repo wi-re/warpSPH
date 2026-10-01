@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import pytest
 import torch
+from types import SimpleNamespace
 
 from warpSPH.modules.shockCapturing.Balsara1995 import balsaraFactor
 from warpSPH.modules.shockCapturing.switchRelaxation import relaxAlpha
+from warpSPHCore import sphKernel_xi
+from warpSPHCore import KernelFunctions
+from warpSPH.modules.shockCapturing.MorrisMonaghan1997 import relaxedAlpha
 from warpSPH.runner import run
 
 _SOD = dict(right_rho=0.125, right_pressure=0.1)
@@ -68,6 +72,26 @@ def _sod(switch, nSteps=200, **params):
     return run(__import__('warpSPH.cases.sod', fromlist=['sodCase']).sodCase, scheme='Monaghan',
                nx=100, nSteps=nSteps, progress=False, quiet=True,
                params=dict(_SOD, viscositySwitch=switch, **params))
+
+
+def test_rosswog2000_steady_state_matches_the_paper_ode():
+    """Rosswog et al. (2000) Eqs. (A.5)-(A.6): for a constant compression rate D = -div v the ODE
+    d alpha / dt = -(alpha - a_min) / tau + D (a_max - alpha) has the fixed point
+    (a_min / tau + D a_max) / (1 / tau + D), with tau = h / (eps c)."""
+    aMin, aMax, eps, h, c, D = 0.05, 1.5, 0.2, 0.01, 2.0, 30.0
+    cfg = SimpleNamespace(viscositySwitchParams=SimpleNamespace(alpha_min=aMin, alpha_max=aMax, morris_C1=eps))
+    sim = SimpleNamespace(kernel=KernelFunctions.Wendland2)
+    f_kern = 1.0 / sphKernel_xi(sim.kernel.value, 2)
+    state = SimpleNamespace(positions=torch.zeros(1, 2), supports=torch.tensor([h / f_kern]),
+                            soundspeeds=torch.tensor([c]), alpha0s=torch.tensor([aMin]))
+    tau = h / (eps * c)
+    for _ in range(4000):
+        a = relaxedAlpha(state, torch.tensor([-D]), tau / 20, sim, cfg,
+                         sourceScale=(aMax - state.alpha0s).clamp(min=0))
+        state.alpha0s = a
+    expected = (aMin / tau + D * aMax) / (1.0 / tau + D)
+    assert a.item() == pytest.approx(expected, rel=1e-3)
+    assert aMin < a.item() < aMax
 
 
 @pytest.mark.parametrize('switch', ['MorrisMonaghan1997', 'Rosswog2000'])

@@ -2150,7 +2150,7 @@ Broad-survey and DualSPHysics-project reference papers, synced 2026-09-17.
 
 ## Compressible dissipation & shock capture (Phase 6 frontend)
 
-The compressible shock-capturing frontend (`phase6.md`) and the next-viscosity-switch question it raises, synced 2026-09-19.
+The compressible shock-capturing frontend (`docs/historic_plans/phase6.md`) and the next-viscosity-switch question it raises, synced 2026-09-19.
 
 ### `sigalotti2006`
 
@@ -2264,3 +2264,14 @@ The compressible shock-capturing frontend (`phase6.md`) and the next-viscosity-s
 
 > Godunov-type particle hydrodynamics (GPH) is described. GPH inherits many good features from smoothed particle hydrodynamics (SPH), but it uses a Riemann solver to obtain the hydrodynamic acceleration and the rate of change of the internal energy of each particle. The grid-free nature of GPH converts a multidimensional problem into a locally one-dimensional problem, so that one only has to solve a one-dimensional Riemann problem, even in a globally three-dimensional situation. By virtue of the Riemann solver, it is unnecessary to introduce artificial viscosity in GPH. We have derived four different versions of GPH, and have performed a von Neumann stability analysis to understand the nature of GPH. GPH is stable for all wavelengths, while SPH is unstable for certain wavelengths. We have also performed eight tests in order to evaluate the performance of GPH. The results show that GPH can describe shock waves without artificial viscosity and prevents particle penetration. Furthermore, GPH shows better performance than SPH in a test involving velocity shear. GPH is easily implemented from SPH by simple replacement of the artificial viscosity with a Riemann solver, and appears to have some useful advantages over standard SPH.
 
+### `rosswog2000`
+
+- **file:** `rosswog2000_merging-neutron-stars-asymmetric.pdf`
+- **title:** Merging neutron stars: asymmetric systems
+- **authors:** S. Rosswog, M. B. Davies, F.-K. Thielemann and T. Piran
+- **venue:** *Astronomy & Astrophysics* 360:171-184, 2000
+- **doi:** none (a 2000 A&A article; ADS bibcode 2000A&A...360..171R, preprint arXiv:astro-ph/0005550)
+- **relevance:** The paper behind `ViscositySwitch.Rosswog2000`. Only its Appendix A matters here: a hybrid AV with a Morris-Monaghan source-and-decay alpha (source `max(-div v (alpha_max - alpha), 0)`, `tau = h/(epsilon c)`, `epsilon = 0.2`, `alpha_max = 1.5`, `alpha_min = 0.05`), beta = 2 alpha, and a Balsara factor inside mu. The main text is a neutron-star merger study. Not the 2020 entropy trigger (`rosswog2020entropy`).
+- **abstract from:** PDF p.1 (the arXiv abstract is a different, shorter text)
+
+> We present the results of 3D, Newtonian hydrodynamic calculations of the last stages of the inspiral and the final coalescence of neutron star binary systems. Our focus is on slightly asymmetric systems, where the asymmetry stems from either different masses (1.3 and 1.4 M⊙) or spins of both components. Almost immediately after contact a fast rotating, very massive central object forms. All calculations exhibit baryonic masses above 2.3 M⊙, thus based on our calculations it is not possible to decide on the fate of the central core of the merged configuration. It might collapse immediately to a black hole, but also the creation of a supermassive neutron star with ∼ 2.8 M⊙ cannot firmly be excluded. Depending on the asymmetry of the system the central object receives a kick of several hundred kilometers per second. Different spins of both components do not jeopardize the formation of (to within numerical resolution) baryon free funnels above the poles of the central objects. In the case of different masses the less massive components get disrupted and engulf the more massive companions that stay rather unaffected by the collision. The amount of ejected material is in a similar range as for symmetric systems and could contribute substantially to the enrichment of the Galaxy with heavy r-process elements. Test calculations indicate that the amount of ejected material is basically determined by the high density behaviour of the nuclear equation of state.

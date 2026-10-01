@@ -57,7 +57,7 @@ and had to be identified from their front matter alone.
 
 ## What is here
 
-197 documents. The first 119 are the curated core — every row annotated for what
+198 documents. The first 120 are the curated core — every row annotated for what
 it unblocks, and every row abstracted in `ABSTRACTS.md` **except `roe1986`,
 `hairer2006` and `toro2009`**, which carry no abstract at all (Annual Reviews
 articles of that vintage print none for `roe1986`; the latter two are books,
@@ -123,7 +123,7 @@ taken from the published reference list (Dehnen & Aly 2012 cites it as MNRAS,
 405, 1513); `references.bib`'s `note` field records this.
 
 **9 papers were synced 2026-09-19** from `literature/dump/` for the
-compressible shock-capturing frontend (`phase6.md`) and its open
+compressible shock-capturing frontend (`docs/historic_plans/phase6.md`) and its open
 next-viscosity-switch question: the Sigalotti adaptive-kernel-estimation
 shock-capturing pair (`sigalotti2006`, `sigalotti2008`), a production astro
 code's gradient-based shock detection (`wadsley2017`), an entropy-growth-rate
@@ -136,6 +136,12 @@ and `rosswog2020entropy` arrived as
 arXiv copies of published MNRAS/ApJ papers -- the bib keys and venue fields
 follow the published records; `rosswog2020entropy` is suffixed to avoid a
 collision with `rosswog2020` (the MAGMA2 code paper).
+
+**1 paper was synced 2026-10-01** from `literature/dump/` for `AV_PLAN.md`'s
+`Rosswog2000` switch, which had been transcribed from diffSPH alone:
+`rosswog2000` (Rosswog, Davies, Thielemann & Piran, A&A 360, 171; the viscosity
+scheme is its Appendix A). A 2000 A&A article has no journal DOI, so the entry
+carries none (arXiv:astro-ph/0005550 is noted instead).
 
 **1 paper was synced 2026-09-29** from `literature/dump/` for
 `CEILING_STICKING_PLAN.md` §5 (DualSPHysics' symplectic time stepping and its
@@ -351,7 +357,7 @@ Broad-survey and DualSPHysics-project reference papers, added 2026-09-17.
 
 **Compressible dissipation & shock capture (Phase 6 frontend)**
 
-The compressible shock-capturing frontend (`phase6.md`) and the
+The compressible shock-capturing frontend (`docs/historic_plans/phase6.md`) and the
 next-viscosity-switch question it raises, added 2026-09-19.
 
 | plan | bib key | file | venue | what it is |
@@ -360,6 +366,7 @@ next-viscosity-switch question it raises, added 2026-09-19.
 | — | `sigalotti2008` | `sigalotti2008_adaptive-kernel-tensile-instability.pdf` | Comput. Math. Appl. 55(1) 2008 | The stability analysis behind ADKE: linear perturbation shows the tensile instability is removed, so the kernel sharpening does not reintroduce clumping. |
 | — | `wadsley2017` | `wadsley2017_gasoline2-modern-sph-code.pdf` | MNRAS 471(2) 2017 | Gasoline2's Gradient-Based shock detection: keeps the artificial viscosity out of non-shocking compressive flows. A production code's tested switch design, comparable to `CullenDehnen2010`/`ReadHayfield2012`. |
 | — | `rosswog2020entropy` | `rosswog2020entropy_entropy-based-dissipation-trigger.pdf` | ApJ 898(1) 2020 | Entropy-growth-rate trigger: dissipation only on "troubled particles" (MAGMA2). A third trigger family alongside C&D's compression-based and R&H's entropy-conductivity switches -- candidate for the next `ViscositySwitch`. |
+| — | `rosswog2000` | `rosswog2000_merging-neutron-stars-asymmetric.pdf` | A&A 360 2000 | Appendix A is the Rosswog2000 viscosity switch: alpha source `max(-div v (alpha_max - alpha), 0)`, decay on `tau = h/(epsilon c)`, beta = 2 alpha, Balsara factor inside mu. The source paper for `ViscositySwitch.Rosswog2000`; checked against it 2026-10-01. |
 | — | `garciasenz2026` | `garciasenz2026_heuristic-switches-sph-dissipation.pdf` | A&A 708:A205 2026 | Argues the heuristic switches can be dropped: remove the local bulk linear motion, modulate with the Balsara correction. Lower spurious dissipation than the reference switch. |
 | — | `chen2025` | `chen2025_minimizing-numerical-viscosity-discs.pdf` | MNRAS 540(3) 2025 | Phantom disc runs: default beta_SPH too high; proposes a switched beta_SPH = k * alpha_SPH. The linear/quadratic coefficient pairing in this codebase's Monaghan viscosity. |
 | — | `monaghan2012` | `monaghan2012_sph-diverse-applications-review.pdf` | Annu. Rev. Fluid Mech. 44 2012 | Monaghan's incompressible-SPH applications review. Background for the frontend design space; the Monaghan viscosity lineage `computeViscosity` implements. |
