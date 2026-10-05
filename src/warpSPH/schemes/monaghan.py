@@ -16,6 +16,7 @@ import torch
 
 from ..modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
 from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
+from ..modules.compressibleWall import applyCompressibleWall, zeroWallUpdate
 from ..modules.density import computeDensities
 from ..modules.dissipation import computeConductivity, computeThermalDissipation, computeViscosity
 from ..modules.eos import idealGasEOS
@@ -60,6 +61,12 @@ def compressibleSPH_Monaghan(
     currentState.densities = computeDensities(
         currentState, config, schemeConfig, adjacency,
         supportMode = config.supportMode)
+    if applyCompressibleWall(currentState, config, adjacency, gamma=schemeConfig.gamma):
+        # the wall masses just changed, so the fluid density sum has to be redone
+        currentState.densities = computeDensities(
+            currentState, config, schemeConfig, adjacency,
+            supportMode = config.supportMode)
+        applyCompressibleWall(currentState, config, adjacency, gamma=schemeConfig.gamma)
 
     enforceDirichlet(currentSystem, t, dt, config, schemeConfig)
     currentState.entropies, _, currentState.pressures, currentState.soundspeeds = idealGasEOS(
@@ -203,5 +210,6 @@ def compressibleSPH_Monaghan(
         dEdt = dEdt,
     )
     enforceUpdates(update, currentSystem, dt, t, config, schemeConfig)
+    zeroWallUpdate(update, currentState)
 
     return update, adjacency, currentState

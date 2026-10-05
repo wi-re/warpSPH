@@ -29,6 +29,9 @@ CASE_MODULES = (
     'kelvinHelmholtz',
     'rayleighTaylor',
     'triplePoint',
+    # compressible with solid walls -- examples/compressibleWalls/
+    'closedBox',
+    'shockReflection',
     # weakly compressible -- examples/weaklyCompressible/*.ipynb
     'impact',
     'rotatingSquarePatch',
