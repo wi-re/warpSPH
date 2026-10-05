@@ -78,6 +78,52 @@ which stays pure fluid dynamics). Numbered ladder, one case per file:
 
 Minimum set: 1, 2, 3, 5. Run one at a time with video and progress output.
 
+## Reference: how the WCSPH path moves walls (surveyed 2026-10-05)
+
+Rigid bodies (`rigidBody/`, `systems/weaklyCompressible.py`); cases
+`movingObstacle` (spin), `drivenSquare` (oscillation); `lidDrivenCavity` is the
+other route (a Dirichlet function on the wall velocity, not a body).
+
+- Wall motion is prescribed, never integrated from forces: `finalize` calls
+  `integrateRigidBody` (explicit Euler on pose with `linearVelocity`/
+  `angularVelocity`; `dudt = dwdt = 0` at every call site) then
+  `updateBodyParticlesWCSPH`, which rewrites wall and ghost positions from the
+  new pose, writes the rigid-body velocity into the wall rows' `velocities`
+  (for every BC type), and writes `boundaryAccelerations` (centripetal term
+  only). A case with a time law re-sets the velocity in `postStep`
+  (`drivenSquare`): a one-shot assignment would translate at constant speed.
+- Wall rows have zero `dxdt/dvdt/drhodt` in the update; the pose update in
+  `finalize` is the only thing that moves them. Non-fluid positions are
+  restored from the initial state every step before that (a nonzero BC
+  velocity on a wall row otherwise drifts it under `symplecticEuler`: the
+  half-step position update reads the raw velocity, `DELTASPH_VALIDATION_PLAN.md`
+  §9.2, lid cavity drifted 1.5 domain widths by t=3).
+- The wall's own velocity has to enter the pair terms, not just advect the
+  wall: mDBC slip conditions are written on the relative velocity
+  `w = Shepard(u_f) - u_body` (`u_g = u_body + w_t - w_n` free slip,
+  `u_body - w_t` no slip), so continuity sees the wall's normal motion
+  (`modules/mdbc/velocity.py`; validation plan 5.2, 5.7). `u_body` must come
+  from the rigid body, not from the wall row's stored velocity, or the BC
+  compounds on its own output (normal slope -3 instead of -1; validation plan,
+  "u_body must come from a rigid body", near line 3070).
+- Order per step: adjacency, fluid density, mDBC wall density, wall velocity
+  BC, EOS, forces; wall pose advanced last in `finalize`, so every stage of a
+  step sees the wall at its start-of-step pose and velocity (the wall is
+  frozen across RK stages, and the velocity is the one for the step start).
+- A wall that starts at its peak speed shocks the fluid (`drivenSquare`:
+  density -7%/+6% versus -0.3%/+1.8% for the spinning body); it starts from
+  rest instead.
+- Open there: constant-omega only (no tangential/linear acceleration terms);
+  the wall is not coupled to the fluid force.
+
+Implications for the compressible wall: the piston needs (1) prescribed wall
+row motion with the wall velocity as the `target` in `applyCompressibleWall`
+(already a parameter, and the approach speed uses it), (2) wall rows kept out
+of the integrated update and restored/advanced in the system's `finalize`, (3)
+the velocity at the step start used for every stage, (4) a start from rest or
+a ramp, (5) `wallVolumes` re-checked once the wall moves (a moving wall
+changes the fluid's local spacing but not the wall row spacing).
+
 ## Cautions
 
 - u must stay consistent with rho so wall pressure is not spuriously high.
@@ -128,8 +174,47 @@ Minimum set: 1, 2, 3, 5. Run one at a time with video and progress output.
     the same (plateau within 0.2%, 0 escaped; 2 rows past the surface at Mach 3).
     Mach 5 is not a valid test at this length: the left wall's rarefaction
     reaches the reflected front first.
-  - Still open: the last fluid row at the wall reads ~17% low in p
-    (coarse wall lattice against compressed gas); no no-penetration backstop
-    (not needed at Mach <= 3 here).
+  - Near-wall deficit, dissected 2026-10-05 (`scripts/probe_wallPressureDeficit.py`,
+    `.tmp/probe_wallRefinement.py`): the last fluid row reads -17% in p / -16% in
+    rho, decaying to 0 over a ~7-row boundary layer. Cause: the wall sits on the
+    *initial* fluid lattice (spacing dx) while state 3 is compressed 6x (spacing
+    dx/6), so the last row's kernel (width h ~ 0.66 dx) under-samples the wall
+    side of the density sum -- only 1 wall particle sits in the kernel at the
+    default resolution. Refining the wall to spacing dx/ref is best (p -11%) when
+    ref matches the compression ratio (dx_w = dx/6); coarser under-samples and
+    finer makes the support solve shrink the last row's h (0.0064 -> 0.0027),
+    which degrades it. A ~11% floor remains (the dummy wall is a uniform lattice,
+    not the exact mirror of the local fluid). Confined to the last ~6 spacings;
+    the plateau diagnostic already excludes that band, so the bulk solution is
+    unaffected. General fix = ghost/exact-mirror wall (a uniform wall cannot stay
+    matched to a compressing fluid). No no-penetration backstop (not needed at
+    Mach <= 3 here).
   Next: piston (case 2, moving wall; needs prescribed wall row motion), then
   CompSPH and CRKSPH.
+- 2026-10-05: residual near-wall deficit dissected further (`.tmp/probe_owen_psi.py`):
+  the previous entry attributed it to wall under-sampling, but the dominant term
+  is a *frozen over-large h* on the 1-2 outermost fluid rows. Owen's psi fill
+  (wp_psi0.py) IS scale-invariant once a kernel is well-sampled, so the LUT
+  returns n_h=4.00 (= nhTarget) for *every* row and the relaxation
+  `h_new=(1-a+a*s)*h` runs with s=1 -> a no-op; h can grow (under-sampled) but
+  never shrink (one-way ratchet). The outermost row's h froze at 0.00640 (~1.8x
+  its neighbour) *despite identical m/rho*. Owen *does* count the wall
+  (psi_H with wall = live = 12.778 vs fluid-only 10.595) -- not a wall-counting
+  bug. Fix: global spacing clamp in the adaptive-support dispatch
+  (`_clampSupportsToVolume` in modules/adaptiveSupport/optimalSupport.py):
+  `h = min(h, n_h_target*(m/rho)^(1/d))` for fluid rows, applied to the h every
+  scheme's `evaluateOptimalSupport` returns (Monaghan + CRKSPH). No-resampling
+  (corrects a derived quantity on existing rows). Validated 2026-10-05:
+  - shockReflection (Mach 2, t=0.45): outermost-row pressure deficit -15.3% ->
+    -8.8%, density -13.7% -> -9.3%; wall stays fixed (innermost row 0.9225);
+    small 0.145dx transient penetration. Residual ~9% is the sparse wall (1
+    layer at dx/2) under-filling the boundary kernel -- separate, harder issue
+    (the ghost/exact-mirror wall from the prior entry).
+  - sedov 1D (nx 800, t=0.5556, full goal time): peak shock rho unchanged
+    (4.0093 clamp vs 4.0080 no-clamp) so the 4.0-vs-6.0 is pre-existing (hat
+    init / SPH smearing), not a clamp artifact; h grows naturally (0.232 in the
+    rarefaction); over-grown h capped (max h/spacing 5.14 -> 4.01); run healthy
+    (diverged=False, 0 alarms, total energy conserved at 1.0).
+  Cleanup: removed the unused `applyMirrorDensityCorrection` (and its `_b7`/
+  `_b7Cdim` helpers) from compressibleWall -- the static mirror correction
+  over-corrected (+37%) and was never the right mechanism.
