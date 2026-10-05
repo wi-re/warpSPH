@@ -16,7 +16,7 @@ import torch
 
 from ..modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
 from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
-from ..modules.compressibleWall import applyCompressibleWall, zeroWallUpdate
+from ..modules.compressibleWall import beginCompressibleWall
 from ..modules.density import computeDensities
 from ..modules.dissipation import computeConductivity, computeThermalDissipation, computeViscosity
 from ..modules.eos import idealGasEOS
@@ -41,6 +41,7 @@ def compressibleSPH_Monaghan(
     currentSystem = system#.initializeNewState()
     currentState = currentSystem.state
     t = currentSystem.t
+    wall = beginCompressibleWall(currentState, config)
 
     rho_optimal, h_optimal, currentSystem.adjacency, *_ = evaluateOptimalSupport(currentState, config, schemeConfig, SupportScheme.Gather, currentSystem.adjacency)
     currentState.supports = h_optimal
@@ -61,12 +62,13 @@ def compressibleSPH_Monaghan(
     currentState.densities = computeDensities(
         currentState, config, schemeConfig, adjacency,
         supportMode = config.supportMode)
-    if applyCompressibleWall(currentState, config, adjacency, gamma=schemeConfig.gamma):
+    if wall is not None:
+        wall.apply(currentState, config, schemeConfig, adjacency)
         # the wall masses just changed, so the fluid density sum has to be redone
         currentState.densities = computeDensities(
             currentState, config, schemeConfig, adjacency,
             supportMode = config.supportMode)
-        applyCompressibleWall(currentState, config, adjacency, gamma=schemeConfig.gamma)
+        wall.apply(currentState, config, schemeConfig, adjacency)
 
     enforceDirichlet(currentSystem, t, dt, config, schemeConfig)
     currentState.entropies, _, currentState.pressures, currentState.soundspeeds = idealGasEOS(
@@ -210,6 +212,7 @@ def compressibleSPH_Monaghan(
         dEdt = dEdt,
     )
     enforceUpdates(update, currentSystem, dt, t, config, schemeConfig)
-    zeroWallUpdate(update, currentState)
+    if wall is not None:
+        wall.finishUpdate(update)
 
     return update, adjacency, currentState

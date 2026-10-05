@@ -39,9 +39,15 @@ def main():
     ap.add_argument('--K', type=int, default=14, help='number of near-wall fluid rows to dissect')
     ap.add_argument('--nx', type=int, default=400)
     ap.add_argument('--mach', type=float, default=2.0)
+    ap.add_argument('--scheme', default='Monaghan')
+    ap.add_argument('--supportMode', default=None, help="unset: Gather, KernelMeanSymmetric for CRKSPH")
+    ap.add_argument('--exportRoot', default='results/compressibleWalls/probes')
     a = ap.parse_args()
+    supportMode = a.supportMode or ('KernelMeanSymmetric' if a.scheme == 'CRKSPH' else 'Gather')
 
-    res = run(shockReflectionCase, quiet=True, progress=False, plot=False, store=False,
+    res = run(shockReflectionCase, quiet=True, progress=True, plot=True, video=True,
+              exportRoot=a.exportRoot, velocityAlarmPlotInterval=1, stallProgress=1e-3,
+              scheme=a.scheme, supportMode=supportMode,
               tLimit=a.t, nx=a.nx, params=dict(mach=a.mach))
     if res.diverged:
         print(f'diverged: {res.stopReason}')
@@ -60,7 +66,7 @@ def main():
     h = s.supports[fluid][order].cpu()
 
     t = float(sys_.t)
-    print(f't={t:.4f}  nx={a.nx}  M={a.mach}  wallSpacing dx={dx:.5f}')
+    print(f'{a.scheme}  t={t:.4f}  nx={a.nx}  M={a.mach}  wallSpacing dx={dx:.5f}')
     print(f'  state3: rho3={e["rho3"]:.4f}  p3={e["p3"]:.4f}   (state2 rho2={e["rho2"]:.4f} p2={e["p2"]:.4f})')
     print()
     hdr = f'{"dW":>3} {"x":>8} {"rho":>8} {"p":>8} {"h":>8} {"h/dx":>6} {"dx_c/dx":>8} {"p/p3-1":>8} {"rho/rho3-1":>10}'

@@ -31,6 +31,7 @@ CASE_MODULES = (
     'triplePoint',
     # compressible with solid walls -- examples/compressibleWalls/
     'closedBox',
+    'piston',
     'shockReflection',
     # weakly compressible -- examples/weaklyCompressible/*.ipynb
     'impact',

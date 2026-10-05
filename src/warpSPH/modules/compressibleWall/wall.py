@@ -1,108 +1,181 @@
+from typing import Optional
+
 import torch
 
 from warpSPHCore import (OperationDirection, OperationProperties, SupportScheme,
                          WarpOperation, warpOperation)
 
 from ..mdbc._util import stateHasBoundaryParticles
+from ...utils.support import nH_to_n_h
 
-__all__ = ['applyCompressibleWall', 'zeroWallUpdate']
+__all__ = ['CompressibleWall', 'beginCompressibleWall', 'wallRiemannState']
 
 _EPS = 1e-12
 
 
 def _wallVolumes(currentState, config) -> torch.Tensor:
-    """`m / rho` of every row at the first call (the initial state), cached on `config`."""
+    """`m / rho` of every row at the first call (the initial state), cached on `config`.
+
+    Re-derived when the row count changes (a new run reusing the config)."""
     volumes = getattr(config, '_wallVolumes', None)
-    if volumes is None:
+    if volumes is None or volumes.shape != currentState.masses.shape:
         volumes = currentState.masses / currentState.densities
         config._wallVolumes = volumes
     return volumes
 
 
-def applyCompressibleWall(currentState, config, adjacency, gamma=None, wallVelocity=None) -> bool:
-    """Overwrite the wall rows' density, internal energy and velocity in place.
+def wallRiemannState(rho, p, approach, gamma):
+    """Star state (rho*, p*) of the Riemann problem between a gas (rho, p) moving
+    at `approach` towards a wall and its mirror image: the gas the wall stops.
 
-    The wall state is the Shepard gather of the fluid rows, then (given `gamma`)
-    the state behind the shock that stops the fluid's approach speed `u_n`
-    against the wall: with the gathered state (rho, p) it satisfies
-    `u_n = (p* - p) sqrt(2 / ((g+1) rho) / (p* + (g-1)/(g+1) p))`, and `u_n = 0`
-    leaves the gathered state unchanged. The wall normal is the direction from
-    the fluid centroid to the wall row, so no geometry is needed; the centroid
-    gather ignores periodic wrapping. Wall rows also get the fluid's smoothing
-    length and a mass `rho_wall * V` (V fixed at the first call), so the caller
-    must redo the fluid density sum after this and apply it again. Returns
-    whether there were wall rows. `wallVelocity` is a (dim,) tensor or sequence,
-    zero by default (fixed wall).
+    The star velocity is the wall's, so the one-sided wave function satisfies
+    `f(p*) = approach`. `approach > 0` is a shock,
+    `f = (p* - p) sqrt(A / (p* + B))`, A = 2 / ((g+1) rho), B = (g-1)/(g+1) p,
+    solved in closed form; `approach < 0` a rarefaction,
+    `p* = p (1 + (g-1)/2 approach / c)^(2g/(g-1))`, isentropic, floored at
+    vacuum; `approach = 0` returns (rho, p)."""
+    g = gamma
+    rhoSafe, pSafe = rho.clamp_min(_EPS), p.clamp_min(_EPS)
+
+    un = approach.clamp_min(0.0)
+    a = 2.0 / ((g + 1.0) * rhoSafe)
+    b = (g - 1.0) / (g + 1.0) * p
+    un2 = un * un
+    jump = (un2 + torch.sqrt(un2 * un2 + 4.0 * a * un2 * (p + b))) / (2.0 * a)
+    pShock = p + jump
+    rhoShock = rho * ((g + 1.0) * pShock + (g - 1.0) * pSafe) / ((g - 1.0) * pShock + (g + 1.0) * pSafe)
+
+    c = torch.sqrt(g * pSafe / rhoSafe)
+    base = (1.0 + 0.5 * (g - 1.0) * approach.clamp_max(0.0) / c).clamp_min(0.0)
+    ratio = base ** (2.0 * g / (g - 1.0))
+    pFan = p * ratio
+    rhoFan = rho * ratio ** (1.0 / g)
+
+    shock = approach >= 0.0
+    return torch.where(shock, rhoShock, rhoFan), torch.where(shock, pShock, pFan)
+
+
+class CompressibleWall:
+    """One right-hand-side evaluation's view of the wall rows (`kinds == 1`).
+
+    Made by `beginCompressibleWall` at the start of the evaluation, before
+    anything overwrites the wall rows: it keeps their stored velocity as the
+    prescribed wall velocity (`target`). Wall rows are never accelerated
+    (`finishUpdate` zeroes their `dvdt`), so the stored velocity stays the one
+    the case gave them, and their positions advance with it: a fixed wall has
+    zero velocity, a piston its speed.
+
+    `apply` overwrites the wall rows' density, internal energy, mass, support
+    and velocity; the caller redoes the fluid density sum after it (the wall
+    masses changed) and applies it once more.
     """
-    if not stateHasBoundaryParticles(currentState, config):
-        return False
-    wall = currentState.kinds == 1
-    volumes = _wallVolumes(currentState, config)
-    props = OperationProperties(
-        kernel=config.kernel,
-        operation=WarpOperation.Interpolate,
-        supportMode=SupportScheme.Gather,
-        operationMode=OperationDirection.FluidToBoundary,
-    )
 
-    def gather(values):
-        return warpOperation(currentState, props, domain=config.domain,
-                             adjacency=adjacency, queryValues=values)
+    def __init__(self, currentState, config):
+        self.wall = currentState.kinds == 1
+        self.solid = currentState.kinds != 0
+        self.target = currentState.velocities.clone()
+        self.volumes = _wallVolumes(currentState, config)
 
-    v = currentState.velocities
-    if wallVelocity is None:
-        target = torch.zeros_like(v)
-    else:
-        target = torch.as_tensor(wallVelocity, dtype=v.dtype, device=v.device).expand_as(v)
+    def apply(self, currentState, config, schemeConfig, adjacency, latticeSupport: bool = False) -> None:
+        """The wall state is the Shepard gather of the fluid rows; with
+        `schemeConfig.wallRiemannState` it is then replaced by the star state of
+        the mirrored Riemann problem for the fluid's approach speed `u_n` against
+        the wall (`wallRiemannState`). The wall normal is the direction from the
+        fluid centroid to the wall row, so no geometry is needed (the centroid
+        gather ignores periodic wrapping). Wall rows take the fluid's smoothing
+        length and a mass `rho_wall * V` (V fixed at the first call), so the
+        fluid's density sum sees a wall as compressed as the gas it holds.
 
-    shepard = gather(torch.ones_like(currentState.densities))
-    ok = wall & (shepard > _EPS)
-    safe = torch.where(ok, shepard, torch.ones_like(shepard))
-    rho = gather(currentState.densities) / safe
-    u = gather(currentState.internalEnergies) / safe
+        Wall velocity (`schemeConfig.wallSlip`): 'freeSlip' keeps the prescribed
+        normal component and takes the fluid's tangential one, so the pair terms
+        see no tangential shear against the wall; 'noSlip' is the prescribed
+        velocity. Identical in 1D."""
+        wall = self.wall
+        gamma = schemeConfig.gamma
+        props = OperationProperties(
+            kernel=config.kernel,
+            operation=WarpOperation.Interpolate,
+            supportMode=SupportScheme.Gather,
+            operationMode=OperationDirection.FluidToBoundary,
+        )
 
-    if gamma is not None:
-        p = (gamma - 1.0) * rho * u
+        def gather(values):
+            return warpOperation(currentState, props, domain=config.domain,
+                                 adjacency=adjacency, queryValues=values)
+
+        shepard = gather(torch.ones_like(currentState.densities))
+        ok = wall & (shepard > _EPS)
+        safe = torch.where(ok, shepard, torch.ones_like(shepard))
+        rho = gather(currentState.densities) / safe
+        u = gather(currentState.internalEnergies) / safe
+        vFluid = gather(currentState.velocities) / safe.unsqueeze(-1)
+
         centroid = gather(currentState.positions) / safe.unsqueeze(-1)
         normal = currentState.positions - centroid
         normal = normal / normal.norm(dim=-1, keepdim=True).clamp_min(_EPS)
-        approach = ((gather(v) / safe.unsqueeze(-1) - target) * normal).sum(-1).clamp_min(0.0)
-        a = 2.0 / ((gamma + 1.0) * rho.clamp_min(_EPS))
-        b = (gamma - 1.0) / (gamma + 1.0) * p
-        un2 = approach * approach
-        jump = (un2 + torch.sqrt(un2 * un2 + 4.0 * a * un2 * (p + b))) / (2.0 * a)
-        pStar = p + jump
-        pSafe = p.clamp_min(_EPS)
-        rho = rho * ((gamma + 1.0) * pStar + (gamma - 1.0) * pSafe) / ((gamma - 1.0) * pStar + (gamma + 1.0) * pSafe)
-        u = pStar / ((gamma - 1.0) * rho.clamp_min(_EPS))
+        relative = vFluid - self.target
+        approach = (relative * normal).sum(-1)
 
-    currentState.densities = torch.where(ok, rho, currentState.densities)
-    currentState.internalEnergies = torch.where(ok, u, currentState.internalEnergies)
+        if getattr(schemeConfig, 'wallRiemannState', True):
+            p = (gamma - 1.0) * rho * u
+            rho, pStar = wallRiemannState(rho, p, approach, gamma)
+            u = pStar / ((gamma - 1.0) * rho.clamp_min(_EPS))
 
-    # wall mass follows the wall density at a fixed volume, so the fluid's density
-    # sum sees a wall as compressed as the gas it holds (a fixed mass reads as rest density)
-    currentState.masses = torch.where(ok, rho * volumes, currentState.masses)
+        currentState.densities = torch.where(ok, rho, currentState.densities)
+        currentState.internalEnergies = torch.where(ok, u, currentState.internalEnergies)
 
-    # wall rows take the fluid's smoothing length: the support solve gives the
-    # outer ones a huge h (no fluid to count), which then reaches far into the fluid
-    h = currentState.supports
-    hFluid = gather(h) / safe
-    hDefault = h[currentState.kinds == 0].median()
-    currentState.supports = torch.where(wall, torch.where(ok, hFluid, hDefault), h)
+        # wall mass follows the wall density at a fixed volume, so the fluid's density
+        # sum sees a wall as compressed as the gas it holds (a fixed mass reads as rest density)
+        currentState.masses = torch.where(ok, rho * self.volumes, currentState.masses)
 
-    currentState.velocities = torch.where(wall.unsqueeze(-1), target, v)
-    return True
+        # wall rows take the fluid's smoothing length (the support solve gives the
+        # outer ones a huge h -- no fluid to count -- which reaches far into the fluid).
+        # `latticeSupport`: never less than their own lattice's. CRK needs it: a wall
+        # row with h below its spacing under-samples its own neighbourhood, its moment
+        # matrix goes singular and the run blows up at the first shock impact. It costs
+        # the summation-density schemes their near-wall rows (Monaghan's outermost row
+        # -9% -> -32% in p), so they leave it off. Rows no fluid reaches keep the
+        # support solve's h, so they stay out of the fluid's reach.
+        h = currentState.supports
+        hWall = gather(h) / safe
+        if latticeSupport:
+            dim = currentState.positions.shape[-1]
+            hWall = torch.maximum(hWall, nH_to_n_h(config.targetNeighbors, dim) * self.volumes ** (1.0 / dim))
+        currentState.supports = torch.where(ok, hWall, h)
+
+        velocity = self.target
+        if getattr(schemeConfig, 'wallSlip', 'freeSlip') == 'freeSlip':
+            tangential = relative - approach.unsqueeze(-1) * normal
+            velocity = torch.where(ok.unsqueeze(-1), self.target + tangential, self.target)
+        currentState.velocities = torch.where(wall.unsqueeze(-1), velocity, currentState.velocities)
+
+    def balanceFractions(self, f_ij, adjacency, currentState):
+        """Compatible-energy split for pairs with a wall row: the whole pair work
+        goes to the fluid row. The wall's share would otherwise be lost (its state
+        is overwritten every evaluation), so a fixed wall would pump energy; with
+        it the fluid gains exactly the wall's power `F . v_wall`."""
+        if f_ij is None:
+            return f_ij
+        i, j = adjacency.i.long(), adjacency.j.long()
+        toWall = (currentState.kinds[i] == 0) & self.solid[j]
+        return torch.where(toWall, torch.ones_like(f_ij), f_ij)
+
+    def finishUpdate(self, update) -> None:
+        """Wall rows move with their prescribed velocity and are never accelerated
+        or heated: `dxdt = target`, every other rate zero."""
+        column = self.solid.unsqueeze(-1)
+        if getattr(update, 'dxdt', None) is not None:
+            update.dxdt = torch.where(column, self.target, update.dxdt)
+        if getattr(update, 'dvdt', None) is not None:
+            update.dvdt = torch.where(column, torch.zeros_like(update.dvdt), update.dvdt)
+        for name in ('dudt', 'dEdt', 'drhodt'):
+            field = getattr(update, name, None)
+            if field is not None:
+                setattr(update, name, torch.where(self.solid, torch.zeros_like(field), field))
 
 
-def zeroWallUpdate(update, currentState) -> None:
-    """Zero every rate of the non-fluid rows: the wall moves only by prescription."""
-    solid = currentState.kinds != 0
-    column = solid.unsqueeze(-1)
-    for name in ('dxdt', 'dvdt'):
-        field = getattr(update, name, None)
-        if field is not None:
-            setattr(update, name, torch.where(column, torch.zeros_like(field), field))
-    for name in ('dudt', 'dEdt', 'drhodt'):
-        field = getattr(update, name, None)
-        if field is not None:
-            setattr(update, name, torch.where(solid, torch.zeros_like(field), field))
+def beginCompressibleWall(currentState, config) -> Optional[CompressibleWall]:
+    """A `CompressibleWall` for this evaluation, or None when there are no wall rows."""
+    if not stateHasBoundaryParticles(currentState, config):
+        return None
+    return CompressibleWall(currentState, config)

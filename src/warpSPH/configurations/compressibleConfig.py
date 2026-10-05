@@ -50,6 +50,10 @@ class CompressibleSPHConfig:
 
     boundaryConditions: List[BoundaryCondition] = field(default_factory=list, metadata={'description': 'List of boundary conditions to apply in the simulation'})
 
+    # Solid walls (`kinds == 1` rows, modules/compressibleWall, COMPRESSIBLE_WALLS_PLAN.md)
+    wallSlip: str = field(default='freeSlip', metadata={'description': "Wall-row velocity seen by the pair terms: 'freeSlip' (prescribed normal, fluid tangential) or 'noSlip' (prescribed)"})
+    wallRiemannState: bool = field(default=True, metadata={'description': 'Wall state = star state of the mirrored Riemann problem (shock on approach, rarefaction on recession) instead of the plain Shepard gather'})
+
 from typing import Dict, Any
 
 
@@ -65,7 +69,9 @@ def compressibleConfigToDict(config: CompressibleSPHConfig) -> Dict[str, Any]:
         'diffusionParams': diffusionParamsToDict(config.diffusionParams),
         'viscositySwitchParams': viscositySwitchConfigToDict(config.viscositySwitchParams),
         'schemeName': config.schemeName,
-        'boundaryConditions': [boundaryConditionToDict(bc) for bc in config.boundaryConditions]
+        'boundaryConditions': [boundaryConditionToDict(bc) for bc in config.boundaryConditions],
+        'wallSlip': config.wallSlip,
+        'wallRiemannState': config.wallRiemannState,
     }
 
 def dictToCompressibleConfig(configDict: Dict[str, Any]) -> CompressibleSPHConfig:
@@ -81,5 +87,7 @@ def dictToCompressibleConfig(configDict: Dict[str, Any]) -> CompressibleSPHConfi
     config.viscositySwitchParams = dictToViscositySwitchConfig(configDict['viscositySwitchParams'])
     config.schemeName = configDict['schemeName']
     config.boundaryConditions = [dictToBoundaryCondition(bcDict) for bcDict in configDict['boundaryConditions']]
+    config.wallSlip = configDict.get('wallSlip', config.wallSlip)
+    config.wallRiemannState = configDict.get('wallRiemannState', config.wallRiemannState)
     
     return config

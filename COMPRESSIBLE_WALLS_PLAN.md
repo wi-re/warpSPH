@@ -218,3 +218,56 @@ changes the fluid's local spacing but not the wall row spacing).
   Cleanup: removed the unused `applyMirrorDensityCorrection` (and its `_b7`/
   `_b7Cdim` helpers) from compressibleWall -- the static mirror correction
   over-corrected (+37%) and was never the right mechanism.
+- 2026-10-06 (overnight session, user away): module pass, moving walls, CompSPH
+  and CRKSPH.
+  - **API**: `modules/compressibleWall` is now a per-evaluation object,
+    `wall = beginCompressibleWall(state, config)` (None without wall rows),
+    `wall.apply(...)` (twice, around the density redo), `wall.finishUpdate(update)`,
+    and for the compatible-energy schemes `wall.balanceFractions(f_ij, ...)`.
+  - **Moving walls**: a wall row's *stored* velocity is its prescribed velocity.
+    `beginCompressibleWall` captures it before anything overwrites the row (RK
+    stage states are clones, `butcher.py:62`, so the step's own state keeps it);
+    `finishUpdate` sets `dxdt = prescribed`, `dvdt = 0`, so walls advect with it.
+    Bug this exposed: `buildWalledSystem` gave wall rows the nearest *fluid*
+    velocity, so shockReflection's left wall started at `u2` -- harmless while the
+    wall velocity was hard-coded to 0, a piston once it is not (fluid energy
+    17.67 -> 20.99). Walls now get `wallVelocity=(left, right)`, default 0.
+  - **Wall state, two-sided**: `wallRiemannState` is the star state of the
+    mirrored Riemann problem -- the existing shock branch on approach, plus an
+    isentropic rarefaction branch on recession (`u_n < 0`; was the Shepard state).
+  - **Free slip** (`CompressibleSPHConfig.wallSlip`, default 'freeSlip'): wall
+    rows show the pair terms the prescribed normal velocity plus the fluid's
+    tangential one (no AV shear against a wall); 'noSlip' = prescribed. No
+    effect in 1D. `wallRiemannState` (default True) switches the Riemann state.
+  - **Compatible energy (CompSPH, CRKSPH)**: the pair work is split `f_ij`/`f_ji`
+    and the wall's share was lost (its state is overwritten every evaluation).
+    `balanceFractions` sets `f_ij = 1` on fluid->wall pairs: the fluid gets all
+    of it, so a fixed wall does no work and a moving one exactly `F . v_wall`.
+    `CompSPHSystem.finalize` now carries the wall masses (as Monaghan's does) and
+    keeps the wall rows' u out of the compatible increment.
+  - **CRKSPH**: `computeCRKFactors` is redone after the wall update (CRK density
+    is `sum m_j V_j W^R / sum V_j^2 W^R`, so the wall mass `rho_w V` carries
+    over). First run blew up at the shock's impact (t=0.31, negative u on the
+    outermost row): wall rows with the compressed fluid's h (below their own
+    spacing) have singular moment matrices. Fix: `apply(..., latticeSupport=True)`
+    floors the wall h at `n_h (V)^(1/d)`; CRK only -- it costs Monaghan's
+    outermost row -0.9% -> -32% in p, CompSPH -15% -> -34% in rho.
+  - **Near-wall deficit, cause found** (supersedes the "sparse uniform wall /
+    needs an exact-mirror wall" reading above): wall rows no fluid reached were
+    given the fluid's *median* h, which reached back into the compressed fluid
+    with a stale state. Rows no fluid reaches now keep the support solve's h.
+    Monaghan outermost row at t=0.45: -8.8% -> **-0.9%** in p (rho -9.3% -> -2.2%);
+    A/B: restoring the median fallback gives -8.8% again. CompSPH outermost row
+    +13% p / -15% rho, CRKSPH +8% / -19%; second row in within 2-7% for all.
+  - **Results**, shockReflection (Mach 2, nx 400, t=0.5), plateau p / peak p /
+    penetrating / energy: Monaghan 0.9998 / 1.036 / 2 / 17.667 flat; CompSPH
+    0.9998 / 1.12 / 1 / 17.667 exact; CRKSPH 0.9997 / 1.22 / 0 / exact.
+    closedBox stays at rest under all three (|v| ~ 3e-6, float32).
+  - **Case 2 `piston`** (`cases/piston.py`, `examples/compressibleWalls/02-piston.py`):
+    left wall moving at `pistonSpeed` from t=0 into gas at rest; exact face state
+    (RH for a push, isentropic for a withdrawal, which needs empty cells behind
+    the piston: `buildWalledSystem(gaps=...)`), and `energyRatio` = fluid energy
+    gain / piston work `p_face u_p t`. u_p = +1 / -1, t=0.6, plateau p ratio /
+    energyRatio: Monaghan 1.0000 / 0.9989, 1.0011 / 0.9944; CompSPH 1.0000 /
+    1.0003, 0.9996 / 0.9993; CRKSPH 1.0000 / 1.0003, 0.9991 / 1.0052. No
+    penetration, fronts within 2 spacings. Frames checked.

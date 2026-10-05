@@ -88,7 +88,7 @@ class CompressibleSystem(BaseIntegrationSystem):
         # General attributes
         self.state.supports.copy_(lastState.supports)
         self.state.densities.copy_(lastState.densities)
-        # wall rows carry a density-dependent mass set by applyCompressibleWall each
+        # wall rows carry a density-dependent mass set by modules/compressibleWall each
         # substep; masses is tagged constant so the integrator would otherwise drop
         # it back to the initial value and the wall would read as rest density
         self.state.masses.copy_(lastState.masses)

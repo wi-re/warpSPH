@@ -15,6 +15,7 @@ before that branch instead.
 
 from ..modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
 from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
+from ..modules.compressibleWall import beginCompressibleWall
 from ..modules.compSPH.accel import computeCompSPHAccelWarp
 from ..modules.compSPH.dudt import computeCompSPHdudtWarp
 from ..modules.compSPH.balance import computeCompSPHBalanceTermWarp
@@ -103,6 +104,7 @@ def crkSPH_step(
     currentSystem = system#
     currentState = currentSystem.state
     t = currentSystem.t
+    wall = beginCompressibleWall(currentState, config)
 
     IE = currentState.internalEnergies * currentState.masses
     KE = 0.5 * currentState.masses * torch.einsum('ij,ij->i', currentState.velocities, currentState.velocities)
@@ -135,6 +137,12 @@ def crkSPH_step(
     currentSystem.adjacency = adjacency
 
     apparentVolume, currentState.densities, crkState = computeCRKFactors(currentState, config.domain, config.kernel, adjacency = adjacency)
+    if wall is not None:
+        # wall rows enter the CRK moment sums like fluid rows; their support and
+        # mass change here, so the factors (and the fluid density) are redone
+        wall.apply(currentState, config, schemeConfig, adjacency, latticeSupport=True)
+        apparentVolume, currentState.densities, crkState = computeCRKFactors(currentState, config.domain, config.kernel, adjacency = adjacency)
+        wall.apply(currentState, config, schemeConfig, adjacency, latticeSupport=True)
 
     # currentState.densities = warpOperation(
     #     currentState,
@@ -414,7 +422,9 @@ def crkSPH_step(
     )
 
     enforceUpdates(update, currentSystem, dt, t, config, schemeConfig)
-    
+    if wall is not None:
+        wall.finishUpdate(update)
+
     v_halfstep = currentState.velocities + 0.5 * dt * update.dvdt
 
     currentState.f_ij = computeCompSPHBalanceTermWarp(
@@ -438,6 +448,7 @@ def crkSPH_step(
         adjacency = adjacency,
         gradHState = gradHState
     )
-
+    if wall is not None:
+        currentState.f_ij = wall.balanceFractions(currentState.f_ij, adjacency, currentState)
 
     return update, adjacency, currentState

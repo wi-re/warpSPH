@@ -127,6 +127,13 @@ class CompSPHSystem(BaseIntegrationSystem):
             )
             self.state.internalEnergies = initialState.state.internalEnergies + delta_u * dt
 
+        # solid wall rows (modules/compressibleWall): the state of the last stage, not an
+        # integrated one -- their pair work went to the fluid (f_ij = 1), and their mass
+        # is density-dependent while masses is tagged constant
+        solid = self.state.kinds != 0
+        self.state.internalEnergies = torch.where(solid, lastState.internalEnergies, self.state.internalEnergies)
+        self.state.masses.copy_(lastState.masses)
+
         self.state.supports.copy_(lastState.supports)
         self.state.densities.copy_(lastState.densities)
 
