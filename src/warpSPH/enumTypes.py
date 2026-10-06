@@ -50,6 +50,10 @@ class ViscositySwitch(Enum):
     Rosswog2000 = 5
     NoneSwitch = 6
     ReadHayfield2012 = 7
+    #: Rosswog (2020) entropy-based trigger (ApJ 898, 60): alpha from the step-to-step
+    #: entropy change, set at step boundaries (`modules/shockCapturing/Rosswog2020.py`).
+    #: Not `Rosswog2000`, the divergence-source switch of Rosswog et al. (2000).
+    Rosswog2020 = 8
 
 
 # @torch.jit.script

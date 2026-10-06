@@ -25,9 +25,10 @@ from .Balsara1995 import computeBalsaraTerms, computeBalsaraUpdate
 from .Colagrossi2004 import computeColagrossiTerms, computeColagrossiUpdate
 from .MorrisMonaghan1997 import computeMorrisMonaghanTerms, computeMorrisMonaghanUpdate
 from .Rosswog2000 import computeRosswog2000Terms, computeRosswog2000Update
+from .Rosswog2020 import computeRosswog2020Terms, computeRosswog2020Update, advanceRosswog2020
 
 __all__ = ['computeViscositySwitchTerms', 'updateViscositySwitch', 'SWITCHES', 'PLANNED',
-           'registerViscositySwitch']
+           'STEP_HOOKS', 'registerViscositySwitch', 'advanceViscositySwitchStep']
 
 
 def _noneTerms(dt, particleState, simulationConfig, schemeConfig, supportScheme=None, adjacency=None):
@@ -53,10 +54,19 @@ SWITCHES = {
     ViscositySwitch.Colagrossi2004: (computeColagrossiTerms, computeColagrossiUpdate),
     ViscositySwitch.MorrisMonaghan1997: (computeMorrisMonaghanTerms, computeMorrisMonaghanUpdate),
     ViscositySwitch.Rosswog2000: (computeRosswog2000Terms, computeRosswog2000Update),
+    ViscositySwitch.Rosswog2020: (computeRosswog2020Terms, computeRosswog2020Update),
+}
+
+#: Switches that update at step boundaries rather than per RHS stage:
+#: ``scheme -> hook(state, stage0State, t, schemeConfig)``, called from the compressible
+#: systems' ``finalize`` (``advanceViscositySwitchStep``) on the step's final state, with the
+#: RHS state of the step's first stage (the one evaluated at ``t = t^n``).
+STEP_HOOKS = {
+    ViscositySwitch.Rosswog2020: advanceRosswog2020,
 }
 
 #: Enum members with no implementation yet -> where AV_PLAN.md provides them (empty since
-#: AV_PLAN S3; Rosswog (2020) will arrive as a new enum member in Phase 2).
+#: AV_PLAN S3).
 PLANNED: dict = {}
 
 
@@ -98,3 +108,11 @@ def updateViscositySwitch(
     _, updateFn = _resolve(schemeConfig.viscositySwitchParams.scheme)
     return updateFn(switchState, dt, dvdt, particleState, simulationConfig, schemeConfig,
                     supportScheme, adjacency)
+
+
+def advanceViscositySwitchStep(system, initialSystem, returnValues, schemeConfig) -> None:
+    """Step-boundary switch update (``STEP_HOOKS``); a no-op for every per-stage switch."""
+    params = getattr(schemeConfig, 'viscositySwitchParams', None)
+    hook = STEP_HOOKS.get(params.scheme) if params is not None else None
+    if hook is not None:
+        hook(system.state, returnValues[0][1], float(initialSystem.t), schemeConfig)

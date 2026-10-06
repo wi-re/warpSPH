@@ -456,6 +456,12 @@ compressible walls: without it the shockReflection outermost row is -10% in p ag
 pair) vs -0.9% with it. Options: keep the clamp and re-baseline the test (the margin is 6% of a 3% overshoot), or
 find why the clamp shifts the contact. Your call.
 
+**Wider than the one test (2026-10-06, AV_PLAN Phase 2):** the clamp moves *every* compressible number in the AV
+baseline. The smoke profile at HEAD vs the M0e reference (`results/av_smoke_ref_M0e`): 30/30 pairs differ, including
+`none` (Sod contact P spike up to 90 % relative, Sedov E0 recovery, Noh post-shock rho 11 %). So the M0e baseline in
+AV_PLAN no longer describes the code. If the clamp stays, AV_PLAN needs a re-taken baseline (M0g); a fresh
+none / C&D reference at HEAD is being taken for Phase 2 (`results/av_M2_ref_*`).
+
 
 ## Resolved (details in [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md); numbers kept so references stay valid)
 

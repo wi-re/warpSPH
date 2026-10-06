@@ -88,6 +88,11 @@ CONFIGS: Dict[str, AVConfig] = {c.name: c for c in (
     AVConfig('colagrossi2004', switch='Colagrossi2004'),
     AVConfig('morrisMonaghan1997', switch='MorrisMonaghan1997', switchParams=dict(alpha_min=0.1, alpha_max=2.0)),
     AVConfig('rosswog2000', switch='Rosswog2000', switchParams=dict(alpha_min=0.1, alpha_max=2.0)),
+    # AV_PLAN Phase 2: Rosswog (2020) entropy trigger at the paper's alpha_0 = 0, alpha_max = 1
+    # (eps_0 1e-4, eps_1 5e-2, decay 30 tau are the config defaults); the Q column for Sedov/Noh
+    AVConfig('rosswog2020', switch='Rosswog2020', switchParams=dict(alpha_min=0.0, alpha_max=1.0)),
+    AVConfig('rosswog2020Q', switch='Rosswog2020', switchParams=dict(alpha_min=0.0, alpha_max=1.0),
+             diffusion=dict(C_q=2.0)),
     # CRKSPH host (AV_PLAN S4): its viscosity is the CRK limiter operator, not the pair operator
     AVConfig('crkNone', scheme='CRKSPH', switch='NoneSwitch'),
     AVConfig('crkCullenDehnen2010', scheme='CRKSPH', switch='CullenDehnen2010'),
@@ -102,6 +107,7 @@ GROUPS: Dict[str, List[str]] = {
     'baselineQ': ['noneQ', 'cullenDehnen2010Q', 'readHayfield2012Q'],
     'crk': ['crkNone', 'crkCullenDehnen2010'],
     'switchesS3': ['balsara1995', 'colagrossi2004', 'morrisMonaghan1997', 'rosswog2000'],
+    'phase2': ['rosswog2020', 'rosswog2020Q'],
 }
 
 

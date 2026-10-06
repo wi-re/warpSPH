@@ -41,13 +41,13 @@ validated on Sod and Gresho). On top of it, per the start-up order below:
 - **S4** CRK `dudt.py` j-side sign: applied 2026-10-01 (see S4 below);
 - **OPEN_PROBLEMS §17** (Read-Hayfield energy) resolved 2026-10-01: a transcription error in Eq. (33); baseline regenerated as **M0d**, then **M0e** after the R&H pair loops moved to warp kernels (see below).
 
-Not yet started: Phase 2 (Rosswog 2020 entropy trigger) onward, i.e. the table rows marked `☐`.
+Phase 2 (Rosswog 2020 entropy trigger) built and validated 2026-10-06 — passes shocks, sweeps and smooth flow, **fails Kelvin-Helmholtz** (`docs/av/av_phase2_rosswog2020_2026-10-06.md`); Phase 3 onward not started (rows marked `☐`).
 
 | Phase | Milestone | State |
 |---|---|---|
 | 0 | M0 Baseline locked | ✅ M0c (2026-09-30), tag `milestone/av-baseline` at the first M0; the report copy in `docs/av/` is uncommitted |
 | 1 | M1 Old physics, new architecture | ◐ S2/S3 done (registry, `BetaMode`, tag fixes, stubs filled); `VelocityPairPolicy` and `computePi_actual` taking the pair velocity are still to do |
-| 2 | M2 Entropy trigger validated | ☐ not started (next) |
+| 2 | M2 Entropy trigger validated | ◐ built 2026-10-06; validated except KH (fails) and marginal Sod 2D/3D, Gresho nx 100 — `docs/av/av_phase2_rosswog2020_2026-10-06.md` |
 | 3 | M3 Reconstruction engine works | ☐ not started |
 | 4 | M4 Smooth-flow dissipation characterised | ☐ not started |
 | 5A | M5 Quadratic dissipation understood | ☐ not started |
@@ -179,6 +179,12 @@ once at the end of S2.
   work exercises limiters too; if their constants change, the CRKSPH part of the baseline moves (Monaghan / CompSPH hosts
   do not use the CRK limiter). `C_l = 2` was tried (CRKSPH_LIMITER_PLAN note (b)) and not adopted.
 - 2026-10-01 (user, CRKSPH_LIMITER_PLAN note (f)): the CRK limiter default is now `(eta_crit, eta_fold) = (1/n_h, 0.2/n_h)` = (0.25, 0.05) at n_h = 4 (derived from n_h per step). **The CRK rows of the M0 baseline (`results/av_M0d_*`, `docs/av/`) were taken at the old (1/3, 0.2) and no longer match the default**; `C_l` stays 1. **Re-taken 2026-10-01: the CRK reference is now `results/av_M0f_crk`** (`crkNone`, `crkCullenDehnen2010` x sod, sod2d, sedov, noh, gresho, yee, linearWave, kelvinHelmholtz, rayleighTaylor; 18 pairs, video on for all but 3D sedov / noh -- OPEN_PROBLEMS §18; not bit-lock-repeated: CRK runs are deterministic since the same day). Moves vs the old-constant S4 numbers: Gresho L1(v_phi) 0.040 -> 0.033, peak 1.055 -> 1.012, Yee L1 -16 %, Sod contactSpikeA halved, Noh post-shock rho error halved; Sedov and the rest of Sod unchanged (<1 %). Monaghan / CompSPH rows are unaffected (M0e).
+
+- 2026-10-06 **the M0e baseline is stale since 013a22f** (compressible-walls work: adaptive h clamped to
+  `n_h (m/rho)^(1/d)` on fluid rows, OPEN_PROBLEMS §20). Smoke at HEAD vs `results/av_smoke_ref_M0e`: 30/30 pairs
+  differ, `none` included. Phase 2 is therefore compared against a fresh none / C&D reference taken at HEAD
+  (`results/av_M2_ref_{none,cd,noneQ,cdQ}`), not against M0e. Whether the clamp stays (and M0e is formally
+  replaced by an M0g) is the §20 decision.
 
 ## The host scheme
 
@@ -932,6 +938,31 @@ Seven touch points. Specifics:
 - `α_min`/`α_max` already exist on `ViscositySwitchConfig`; add `l0`, `l1`,
   `decayTau` (default 30.0), with dict round-trip.
 
+**As built (2026-10-06).** Departures from the list above, with reasons:
+
+- **New member `ViscositySwitch.Rosswog2020 = 8`, no rename.** S3 implemented `Rosswog2000` as the
+  real Rosswog et al. (2000) divergence-source switch, so it is no longer a stub to replace.
+- **Where the trigger runs.** The integrator clones `constant` fields into every stage, so no stage
+  can see another's values, and the step-boundary entropy `s^n = s(u^n, rho(x^n))` exists only in the
+  RHS state of stage 0 (later stages run on predictor states). The trigger therefore runs once per
+  step in the systems' `finalize` (`wrapper.advanceViscositySwitchStep` -> `STEP_HOOKS` ->
+  `advanceRosswog2020`), from `returnValues[0]`'s entropies, `h`, `c`. The stage-level terms function
+  only passes the stored alpha through, so alpha is constant over a step's stages. **Consequence: a
+  one-step lag** -- alpha^n (from s^n, s^{n-1}) is used from step n+1, where the paper uses it in
+  step n. Wired into both `CompressibleSystem` (Monaghan) and `CompSPHSystem` (CompSPH, CRKSPH).
+- State: `entropiesPrev`, `entropiesPrevTime` (Eq. 16's `Delta t = t^n - t^{n-1}` is taken from them,
+  so it is right under adaptive dt) and `entropyRates` (epsdot of the last step, for the §0.3 map)
+  on `CompressibleState` and `CompSPHState`. Set in `finalize`, not copied from a stage.
+- Config: `entropy_eps0 = 1e-4`, `entropy_eps1 = 5e-2` (the thresholds themselves rather than their
+  logs; Eq. 20's x does not depend on the log base), `entropy_decay = 30`; `alpha_0` is `alpha_min`.
+- `h = support / 2`: the paper's kernels reach out to 2h (its footnote 2), and its thresholds were
+  calibrated with that h. (The other switches use `support / sphKernel_xi`.)
+- First step: records s^0 and sets alpha to `alpha_0` (case ICs start every switch at alpha = 1, which
+  with a 30 tau decay would dissipate for a large part of a Sod run). The step-0 RHS still runs at the IC's alpha.
+- Decay integrated exactly (`alpha_0 + (alpha - alpha_0) exp(-dt/(30 tau))`), then `max` with alpha_des.
+- No warp kernel (all torch, outside the RHS), so no gradcheck extension; the trigger is not on the AD
+  path at all (it runs in `finalize` on detached entropies).
+
 ### Unit tests — `tests/test_rosswogTrigger.py`
 - `S(0) == 0`, `S(1) == 1`, `S'(0) == S'(1) == 0` (quintic smoothstep), monotone
   increasing on `[0,1]`.
@@ -969,19 +1000,31 @@ makes sharp:**
   `τ_a/Δt` *precisely so this holds*, so it is a direct test of the transcription.
 
 ### Markers
-- [ ] `Rosswog2020` replaces the stub; old spelling still parses
-- [ ] `entropiesPrev` on the state **and** copied in `finalize`
-- [ ] step-boundary unit test passes before the physics is tuned
-- [ ] all `S(x)` / threshold / dimensionless unit tests pass
-- [ ] gradcheck green
-- [ ] Sod 1D/2D/3D table above
-- [ ] Sedov approaches 4 from below
-- [ ] Gresho `alphaMean < 0.05`
-- [ ] resolution sweep: `alphaMean` non-increasing
-- [ ] timestep sweep: α within 10%
-- [ ] detector map (§0.3) rendered vs C&D on Sedov — rosswog2020entropy Fig. 4 is
-      exactly this comparison
-- [ ] report row added
+- [x] `Rosswog2020` registered as a new member (2026-10-06; `Rosswog2000` is a real switch since S3, nothing to rename)
+- [x] `entropiesPrev` on the state, set at the step boundary in `finalize` (2026-10-06)
+- [x] step-boundary unit test passes before the physics is tuned (`test_step_boundary_reads_stage0_only`)
+- [x] all `S(x)` / threshold / dimensionless / decay unit tests pass, plus Sod wiring on Monaghan and CompSPH (`tests/test_rosswogTrigger.py`, 2026-10-06)
+- [x] gradcheck: n/a (no warp kernel; the trigger runs in `finalize`, off the AD path)
+- [~] Sod 1D/2D/3D table above (2026-10-06): 1D passes; 2D/3D P spike marginally above none (+1.4 % / +0.4 %)
+- [x] Sedov approaches 4 from below (2.69 / 2.12 at C_q 0 / 2, sharper than C&D's 2.21 / 1.84)
+- [~] Gresho `alphaMean < 0.05`: 0.0506 at nx 100 (marginal), 0.029 at nx 200; L1 0.086 vs C&D 0.081
+- [x] resolution sweep: `alphaMean` non-increasing (Gresho nx 50/100/200: 0.077/0.051/0.029)
+- [x] timestep sweep: α within 10% (Sod cfl 0.3 vs 0.15: 5.8 %)
+- [x] detector map (§0.3) rendered vs C&D on Sedov (`scripts/probe_rosswogSedovMap.py`, `docs/av/av_phase2_sedov_alpha_map.png`): alpha ~ 1 everywhere, cold-gas saturation ahead of the shock
+- [ ] **Kelvin-Helmholtz: A(1.5) 0.020 vs C&D 0.080 -- FAILS** (trigger fires on the shear layer; see results)
+- [x] report row added: `docs/av/av_phase2_rosswog2020_2026-10-06.md`, configs `rosswog2020`, `rosswog2020Q` (group `phase2`)
+
+### Results (2026-10-06)
+Full write-up and tables: [`docs/av/av_phase2_rosswog2020_2026-10-06.md`](docs/av/av_phase2_rosswog2020_2026-10-06.md).
+Compared against a fresh none / C&D reference at HEAD (M0e is stale, see Notes). Passes Sod 1D, Sedov (sharper than C&D),
+Noh (C_q 2), both sweeps, linear wave / Yee (better than C&D). **Fails Kelvin-Helmholtz** (A(1.5) = fixed-alpha-1 value,
+4x below C&D): the trigger fires on the density-contrast shear layer, most likely standard SPH's contact entropy noise,
+which MAGMA2's reconstruction suppresses. Marginal: Sod 2D/3D P spike vs none, Gresho alphaMean 0.0506 at nx 100.
+Cold gas (Sedov's u = 0 background) saturates the trigger at alpha = 1 (tau = h/c infinite).
+**Open (user decides how to proceed):** (a) confirm the KH mechanism with an epsdot map of the shear layer;
+(b) re-test after Phase 3 (velocity reconstruction), which is the paper's setting -- the plan's order already puts it next;
+(c) the paper's own remark that non-reconstructed SPH may need other `eps_0`/`eps_1` -- only with a derivation, not a
+KH-tuned threshold. M2 stays open on the KH row.
 
 **M2 — Entropy-aware.** Git milestone `milestone/rosswog-trigger`.
 

@@ -38,6 +38,10 @@ class ViscositySwitchConfig:
     balsara_const: float = field(default=1.0e-4, metadata={'description': "Balsara limiter constant `eps` in `|div| / (|div| + |curl| + eps c / h)` (ReadHayfield2012 eq. 32; also the Balsara1995 and Colagrossi2004 switches)"})
     morris_C1: float = field(default=0.2, metadata={'description': "Decay-rate constant C_1 of the source-and-decay switches (tau = h / (C_1 c)): MorrisMonaghan1997 Eq. 6 (paper range 0.1-0.2) and Rosswog2000"})
 
+    entropy_eps0: float = field(default=1.0e-4, metadata={'description': "Rosswog2020: entropy rate below which alpha_des = 0 (the paper's l_0 = log(1e-4))"})
+    entropy_eps1: float = field(default=5.0e-2, metadata={'description': "Rosswog2020: entropy rate at and above which alpha_des = alpha_max (l_1 = log(5e-2))"})
+    entropy_decay: float = field(default=30.0, metadata={'description': "Rosswog2020: alpha decay time in units of tau = h / c (Eq. 17)"})
+
 
 
 def viscositySwitchConfigToDict(viscositySwitchConfig: ViscositySwitchConfig) -> Dict[str, Any]:
@@ -54,6 +58,9 @@ def viscositySwitchConfigToDict(viscositySwitchConfig: ViscositySwitchConfig) ->
         'ns': viscositySwitchConfig.ns,
         'balsara_const': viscositySwitchConfig.balsara_const,
         'morris_C1': viscositySwitchConfig.morris_C1,
+        'entropy_eps0': viscositySwitchConfig.entropy_eps0,
+        'entropy_eps1': viscositySwitchConfig.entropy_eps1,
+        'entropy_decay': viscositySwitchConfig.entropy_decay,
     }
 
 def dictToViscositySwitchConfig(viscositySwitchConfigDict: Dict[str, Any]) -> ViscositySwitchConfig:
@@ -70,5 +77,8 @@ def dictToViscositySwitchConfig(viscositySwitchConfigDict: Dict[str, Any]) -> Vi
     viscositySwitchConfig.ns = viscositySwitchConfigDict.get('ns', 0.05)
     viscositySwitchConfig.balsara_const = viscositySwitchConfigDict.get('balsara_const', 1.0e-4)
     viscositySwitchConfig.morris_C1 = viscositySwitchConfigDict.get('morris_C1', 0.2)
+    viscositySwitchConfig.entropy_eps0 = viscositySwitchConfigDict.get('entropy_eps0', 1.0e-4)
+    viscositySwitchConfig.entropy_eps1 = viscositySwitchConfigDict.get('entropy_eps1', 5.0e-2)
+    viscositySwitchConfig.entropy_decay = viscositySwitchConfigDict.get('entropy_decay', 30.0)
 
     return viscositySwitchConfig

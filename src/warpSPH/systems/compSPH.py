@@ -43,6 +43,11 @@ class CompSPHState(BaseState):
     divergence : torch.Tensor = constant(tags=('velocity_divergence',), default=None)
     alpha0s: torch.Tensor = constant(tags=('alpha0',), default=None)
     alphas: torch.Tensor = constant(tags=('alpha',), default=None)
+    # step-boundary switches (Rosswog2020): entropy s^{n-1} and its time, and the last
+    # step's entropy rate (Eq. 16); set by the system's finalize, None for the others
+    entropiesPrev: torch.Tensor = constant(tags=('entropy_previous',), default=None)
+    entropiesPrevTime: float = constant(tags=('entropy_previous_time',), default=None)
+    entropyRates: torch.Tensor = constant(tags=('entropy_rate',), default=None)
 
     ap_ij: torch.Tensor = constant(tags=('pairwise_acceleration',), default=None)
     av_ij: torch.Tensor = constant(tags=('pairwise_acceleration',), default=None)
@@ -151,6 +156,8 @@ class CompSPHSystem(BaseIntegrationSystem):
         self.state.divergence.copy_(lastState.divergence)
         self.state.alpha0s.copy_(lastState.alpha0s)
         self.state.alphas.copy_(lastState.alphas)
+        from ..modules.shockCapturing.wrapper import advanceViscositySwitchStep  # (circular at import time)
+        advanceViscositySwitchStep(self, initialState, returnValues, schemeConfig)
 
         updateValues[-1].dudt = (self.state.internalEnergies - initialState.state.internalEnergies) /dt
 

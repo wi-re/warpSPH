@@ -42,6 +42,11 @@ class CompressibleState(BaseState):
     divergence : torch.Tensor = constant(tags=('velocity_divergence',), default=None)
     alpha0s: torch.Tensor = constant(tags=('alpha0',), default=None)
     alphas: torch.Tensor = constant(tags=('alpha',), default=None)
+    # step-boundary switches (Rosswog2020): entropy s^{n-1} and its time, and the last
+    # step's entropy rate (Eq. 16); set by the system's finalize, None for the others
+    entropiesPrev: torch.Tensor = constant(tags=('entropy_previous',), default=None)
+    entropiesPrevTime: float = constant(tags=('entropy_previous_time',), default=None)
+    entropyRates: torch.Tensor = constant(tags=('entropy_rate',), default=None)
 
     # unit wall normals (fluid -> wall) of the solid rows, zero on fluid rows; None
     # when the case gives no geometry (modules/compressibleWall then estimates them)
@@ -107,6 +112,9 @@ class CompressibleSystem(BaseIntegrationSystem):
         self.state.divergence.copy_(lastState.divergence)
         self.state.alpha0s.copy_(lastState.alpha0s)
         self.state.alphas.copy_(lastState.alphas)
+        from ..modules.shockCapturing.wrapper import advanceViscositySwitchStep  # (circular at import time)
+        advanceViscositySwitchStep(self, initialState, returnValues,
+                                   kwargs.get('schemeConfig', args[1] if len(args) > 1 else None))
 
         return super().finalize(initialState, dt, returnValues, updateValues, weights, *args, **kwargs)
     
