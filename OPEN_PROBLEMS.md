@@ -459,8 +459,9 @@ support solve (`modules/adaptiveSupport/optimalSupportOwen.py`) that `supportVol
    contact -- which is why the clamp halved Sod's contact pressure spike (none 0.060 -> 0.026) and raised the Sedov 3D peak
    (2.53 -> 2.75).
 2. **2D offset:** Owen's well-sampled equilibrium is h = 1.02 n_h (m/rho)^(1/d) on ~100 % of rows (Gresho, KH), so a clamp
-   at the plain volume bound shrinks every row by ~2 % after the density sum -- the density then belongs to a larger h
-   than the kernels and grad-h terms use. Inviscid linear wave error 6x, Gresho angular-momentum loss +30-85 %, KH growth
+   at the plain volume bound caps every row -- in effect h = h(rho) everywhere. (Correction 2026-10-06: the schemes re-sum
+   rho at the final h, so it is not a rho-h mismatch; the cause of the offset was a table bug, fixed in SUPPORT_SOLVER_PLAN,
+   and h = h(rho) itself is what costs shear flows there.) Inviscid linear wave error 6x, Gresho angular-momentum loss +30-85 %, KH growth
    -18 % (C&D) with the clamp on.
 The principled fix is in the solve (let h shrink, e.g. a two-sided relaxation or a Newton step on the h-rho constraint),
 not a clamp; with that, `supportVolumeClamp` could go. **Being worked: [SUPPORT_SOLVER_PLAN.md](SUPPORT_SOLVER_PLAN.md) (2026-10-06).**

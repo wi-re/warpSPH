@@ -82,10 +82,10 @@ class SimulationConfig:
     #: Upper-bound fluid rows' h at `n_h (m/rho)^(1/d)` after every adaptive-support solve
     #: (`modules/adaptiveSupport/optimalSupport.py`, 013a22f; added for the compressible walls'
     #: frozen outer rows): 'always', 'walls' (only when the state has wall rows) or 'off'.
-    #: Default 'walls' (user, 2026-10-06, OPEN_PROBLEMS §20): in 2D the bound sits ~2 % below
-    #: Owen's equilibrium h, so 'always' shrinks h on every fluid row after the density sum and
-    #: degrades smooth flow (inviscid linear wave error 6x, Gresho angular-momentum loss +30-85 %);
-    #: pure-fluid runs are then bit-identical to before 013a22f.
+    #: Default 'walls' (user, 2026-10-06, OPEN_PROBLEMS §20): with the old Owen table the bound sat
+    #: ~2 % below Owen's 2D h, so 'always' capped every fluid row -- in effect h = h(rho) -- which
+    #: degraded smooth / shear flow (Gresho angular-momentum loss +30-85 %, C&D KH growth -18 %).
+    #: (The schemes re-sum rho at the final h, so this is the h definition, not a rho-h mismatch.)
     supportVolumeClamp: str = 'walls'
     #: Scale the kernel by `1 / L(kernel, n_h, dim)` so a defect-free lattice measures `rho0` exactly
     #: (`L` is the lattice-quadrature offset of the kernel sum: `int W dV = 1` does not make

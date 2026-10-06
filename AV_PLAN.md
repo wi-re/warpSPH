@@ -192,6 +192,11 @@ once at the end of S2.
   `results/av_M2_ref_*` columns are the clamp-on comparison, kept for the record; Phase 2's numbers at the default are
   `results/av_noclamp_rosswog2020{,Q}`. `av_report.py --supportVolumeClamp` selects the mode for any run.
 
+- 2026-10-06 (evening) **the reference is now M0g** (`results/av_M0g_{baseline,baselineQ,s3,phase2}`, smoke
+  `results/av_smoke_ref_M0g`; CRK `results/av_M0g_crk_all` once re-run): SUPPORT_SOLVER_PLAN fixed Owen's psi_H table
+  (`owenTable='lattice'`, h was 2 % / 0.9 % too large on 2D / 3D lattices). vs M0e every headline metric moves <= 3.5 %, 1D
+  at round-off; Phase 2 verdicts unchanged (KH 0.011, Gresho alphaMean 0.049).
+
 ## The host scheme
 
 **Monaghan is the AV laboratory; CompSPH is the conservative cross-check.**

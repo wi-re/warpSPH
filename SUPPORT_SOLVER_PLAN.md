@@ -26,7 +26,8 @@ regions2D, compressibleWalls, ...).
 - **Monaghan** (`optimalSupportMonaghan.py`): Newton on `h = volumeToSupport(m / rho(h))` with `dF/dh` from the Omega term.
   Present, not used by any case at runtime.
 - **The clamp** (013a22f, `supportVolumeClamp`, wall-only since beb381a): after the solve, `h <= n_h (m/rho)^(1/d)` on fluid
-  rows, *without* re-summing rho -- so a clamped row's density belongs to a larger h than the kernels then use.
+  rows. (All three schemes re-sum rho at the final h afterwards -- `computeDensities` / `computeCRKFactors` -- so rho and h stay
+  consistent; an earlier note here said otherwise and was wrong.)
 
 ## Known facts (OPEN_PROBLEMS §20/§21, COMPRESSIBLE_WALLS_PLAN 2026-10-05)
 
@@ -166,5 +167,8 @@ Paper defaults: Newton for the Monaghan host (Price 2012), Owen ideal-H for Comp
   contact spike Newton removes (C&D 0.134 vs 0.029).
 - **Opt-in, kept:** `adaptiveSupportScheme='Monaghan'` (Newton) for shock-dominated runs; `pressureFormulation='perSide'`
   (exactly conservative, Lagrangian with Omega) -- not for flows with density contrasts at shear layers.
-- **Walls:** Owen still freezes the outer wall row; the wall-only clamp stays. Open: the clamp leaves rho summed at the
-  unclamped h (inconsistent) -- re-summing rho after the clamp is the obvious consistency fix to try on the wall cases.
+- **Walls:** Owen still freezes the outer wall row; the wall-only clamp stays (rho is re-summed at the clamped h by the
+  schemes, so there is no rho-h inconsistency to fix -- corrected 2026-10-06).
+- **Open candidate:** with the fixed table the bulk h equals the volume bound, so `supportVolumeClamp='always'` would now act
+  only where Owen exceeds h(rho) -- min(Owen, h(rho)): the dense side of shocks / contacts, surfaces, wall rows. Whether that
+  keeps Newton's shock gain without its KH cost is a direct test (queued).

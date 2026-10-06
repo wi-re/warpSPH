@@ -585,7 +585,9 @@ none / C&D reference at HEAD is being taken for Phase 2 (`results/av_M2_ref_*`).
   (inviscid linear wave error 0.00053 -> 0.0033, Gresho L1 +11-14 % and angular-momentum loss +31-85 %, C&D KH amplitude
   -18 %; with alpha fixed at 1 Gresho / KH move <= 2 %);
 - why (`scripts/probe_supportClampBinding.py`): in 2D the clamp binds on ~100 % of rows by ~2 % (Owen's equilibrium sits
-  above the volume bound), in 1D only on ratcheted rows (31 %, up to 1.32x) -- OPEN_PROBLEMS §21;
+  above the volume bound -- a table bug, fixed in SUPPORT_SOLVER_PLAN), i.e. it turned h into h(rho) everywhere; in 1D only on
+  over-grown rows (31 %, up to 1.32x) -- OPEN_PROBLEMS §21. (Rho is re-summed at the final h by every scheme, so this was
+  the h definition at work, not a rho-h mismatch.)
 - shockReflection near-wall rows: 'walls' identical to 'always' (outermost -0.9 % in p), 'off' -10.2 %.
 User rule (2026-10-06): if the clamp degrades fluid behaviour it is off for pure-fluid cases. Default is now 'walls'; the
 R&H test passes again; the AV baseline M0e describes the code again.
