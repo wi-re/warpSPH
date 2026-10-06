@@ -118,18 +118,21 @@ def circleSDF(x: torch.Tensor, centre, radius: float) -> torch.Tensor:
     return torch.linalg.norm(x - c, dim=-1) - radius
 
 
-def walledDomainBounds(ctx: RunContext, lo, hi):
+def walledDomainBounds(ctx: RunContext, lo, hi, extendHi=None):
     """The run's domain for a walled box [lo, hi]: the box padded by the wall layers
-    plus one cell. Call from `configureScheme`; sets `ctx.config.domain` min/max."""
+    plus one cell (and reaching `extendHi`, per axis, if given: room for solid rows
+    kept beyond the box). Call from `configureScheme`; sets `ctx.config.domain`."""
     dx = (hi[0] - lo[0]) / ctx.spec.nx
     pad = (ctx.param('wallLayers') + 1) * dx
+    top = hi if extendHi is None else [max(a, b) for a, b in zip(hi, extendHi)]
     domain = ctx.config.domain
     domain.min = torch.tensor([v - pad for v in lo], dtype=domain.min.dtype, device=domain.min.device)
-    domain.max = torch.tensor([v + pad for v in hi], dtype=domain.max.dtype, device=domain.max.device)
+    domain.max = torch.tensor([v + pad for v in top], dtype=domain.max.dtype, device=domain.max.device)
     return dx
 
 
-def buildWalledBox(ctx: RunContext, lo, hi, stateAt, solidSDF=None, wallVelocity=None):
+def buildWalledBox(ctx: RunContext, lo, hi, stateAt, solidSDF=None, wallVelocity=None,
+                   extendHi=None, keepSolid=None):
     """A cell-centred lattice over the box [lo, hi] (any dim; `nx` cells along x,
     the same spacing on the other axes) and `wallLayers` cells beyond it.
 
@@ -141,13 +144,19 @@ def buildWalledBox(ctx: RunContext, lo, hi, stateAt, solidSDF=None, wallVelocity
     `stateAt(x) -> (rho, p, v)` gives every row's state (x: (N, d), v: (N, d));
     walls take rho and p from it at their own position, and their velocity from
     `wallVelocity(x) -> (N, d)` (zero by default): the velocity they move with for
-    the whole run."""
+    the whole run.
+
+    A body that moves *into* the box needs rows that start outside it:
+    `keepSolid(x) -> bool` keeps those lattice points too (as walls, whatever
+    their depth), on a lattice reaching `extendHi`; their normals come from
+    the body alone (`-grad solidSDF`), since the box's walls are not theirs."""
     config, schemeConfig = ctx.config, ctx.schemeConfig
     dim, nw = len(lo), ctx.param('wallLayers')
     dx = (hi[0] - lo[0]) / ctx.spec.nx
     axes = []
+    top = hi if extendHi is None else [max(a, b) for a, b in zip(hi, extendHi)]
     for k in range(dim):
-        n = int(round((hi[k] - lo[k]) / dx))
+        n = int(round((top[k] - lo[k]) / dx))
         axes.append((torch.arange(-nw, n + nw, device=config.device, dtype=config.dtype) + 0.5) * dx + lo[k])
     x = torch.stack(torch.meshgrid(*axes, indexing='ij'), dim=-1).reshape(-1, dim)
     def fluidSDF(y):
@@ -155,14 +164,22 @@ def buildWalledBox(ctx: RunContext, lo, hi, stateAt, solidSDF=None, wallVelocity
         return d if solidSDF is None else torch.maximum(d, -solidSDF(y))
 
     d = fluidSDF(x)
-    keep = d < nw * dx
-    x, d = x[keep], d[keep]
-    wall = d > 0
+    kept = keepSolid(x) if keepSolid is not None else torch.zeros_like(d, dtype=torch.bool)
+    keep = (d < nw * dx) | kept
+    x, d, kept = x[keep], d[keep], kept[keep]
+    wall = (d > 0) | kept
     kinds = wall.to(torch.int32)
     # wall normals (fluid -> wall) from the geometry: the SDF's central-difference gradient
+    # (of the body alone for the kept body rows)
     eps = 1e-3 * dx
-    grad = torch.stack([(fluidSDF(x + eps * e) - fluidSDF(x - eps * e)) / (2 * eps)
-                        for e in torch.eye(dim, device=x.device, dtype=x.dtype)], dim=-1)
+
+    def gradient(f):
+        return torch.stack([(f(x + eps * e) - f(x - eps * e)) / (2 * eps)
+                            for e in torch.eye(dim, device=x.device, dtype=x.dtype)], dim=-1)
+
+    grad = gradient(fluidSDF)
+    if keepSolid is not None:
+        grad = torch.where(kept.unsqueeze(-1), -gradient(solidSDF), grad)
     normals = grad / grad.norm(dim=-1, keepdim=True).clamp_min(1e-12)
     normals = torch.where(wall.unsqueeze(-1) & (grad.norm(dim=-1, keepdim=True) > 0.5), normals,
                           torch.zeros_like(normals))

@@ -405,6 +405,48 @@ millions of entries in 3D) -- and something keeps the snapshots alive after the 
 the plot hook reads, and find what retains the snapshot. Workaround: `--noVideo` for large 3D CRK runs (scalar metrics are unaffected). Not investigated beyond the measurement above (`scratchpad/sedmem.py` pattern: diagnostics hook printing
 `torch.cuda.memory_allocated()`).
 
+## 19. Compressible walls: a lattice wall gives way under strong compression at a curved wall's stagnation point
+
+Found 2026-10-06 (COMPRESSIBLE_WALLS_PLAN.md, log of that date). `shockCylinder` (Mach 2 shock driven by a piston,
+cylinder R = 15 dx, Monaghan): right through the first impact and the relaxation (stagnation pressure 0.80 p3, then
+1.17x the steady value by t = 0.37) and the arrival of the second shock (the bow shock reflected off the piston, p* =
+2.4 p3 at t = 0.40, which is the exact reflected value). Then the stagnation region compresses without bound (22 p3 by
+t = 0.445) and fluid drives 9 spacings into the cylinder. `scripts/probe_cylinderFront.py`: at ~10x compression the
+fluid spacing is ~0.3 of the wall lattice's, and fluid rows sit just *inside* the surface ((r - R) ~ -0.1 dx) exactly
+half-way between wall rows, in coincident pairs -- the lattice wall's pressure field is bumpy at its own spacing and
+the compressed fluid falls into the valleys. Ruled out: the exact mirror symmetry (an off-axis cylinder fails the
+same), the wall rows' own kernel (`wallLatticeSupport on` fails the same; the fluid's own small kernel still sees the
+valleys), the wall state (geometric normals, correct p*). Flat 2D walls hold under the same loading (channel without
+the cylinder: max penetration 0.017 dx to t = 1); the 1D walls hold to 6x compression (shockReflection plateau 0.01%).
+`bowShock` (Mach 3) likely shows the same mechanism, slower: standoff reaches Billig's by t ~ 0.3 then drifts to 1.15x
+with ~18 rows inside the cylinder. CRKSPH on `shockCylinder` diverged at t = 0.16 (a run that predates the builder's
+initial-h fix; not re-checked).
+
+Principled routes (none tried): wall rows whose spacing follows the fluid's -- mirror ghosts rebuilt each step
+(Spheral's reflecting nodes; planar exact, curved via the local tangent plane), or a mirror-point state (each wall row
+takes the fluid state interpolated at its image `x - 2 d n`; fixes the deep-row states but not the gaps); or a
+boundary-integral wall (semi-analytic, Ferrand et al. 2013), which has no gaps by construction. Cheaper and in the
+same spirit: let a fluid-wall pair see the wall only through the wall's own (lattice) smoothing scale -- the wall is
+discretised at its lattice spacing, so its pressure field should be smooth at that scale, not at the compressed
+fluid's; that is a per-pair kernel choice inside the warp pair kernels (today one global `SupportScheme`). A finer
+wall lattice only moves the threshold.
+
+Tried 2026-10-06 (reverted): the per-pair route for Monaghan's pressure force only (fluid-fluid kernel-mean, fluid<-wall
+`Scatter` with the lattice-floored wall h). Fewer rows end up inside the cylinder (32 vs 235 at t = 0.47) but the
+stagnation pressure runs away at the same time (271 p3): the gap-filling is a symptom, not the whole cause. CompSPH and
+CRKSPH get the first impact right (peak 1.04 / 0.95 p3, Monaghan 0.80) but were only run to t = 0.38.
+
+
+## 20. `test_sod1d_readHayfieldSuppressesContactOvershoot` fails since the adaptive-support clamp (013a22f)
+
+Found 2026-10-06. Passes at d0f4774, fails from 013a22f on (`_clampSupportsToVolume` in
+`modules/adaptiveSupport/optimalSupport.py`, `h <= n_h (m/rho)^(1/d)` on fluid rows): R&H's contact entropy overshoot
+3.43% vs NoneSwitch 3.24% (the pressure overshoot criterion still passes). The clamp is still needed by the
+compressible walls: without it the shockReflection outermost row is -10% in p again (frozen 1.8x h, a coincident
+pair) vs -0.9% with it. Options: keep the clamp and re-baseline the test (the margin is 6% of a 3% overshoot), or
+find why the clamp shifts the contact. Your call.
+
+
 ## Resolved (details in [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md); numbers kept so references stay valid)
 
 - **§5** englishWedge concave-corner residual -- sign bug in the `fourtakas2019` hydrostatic correction, fixed `68a9a6d`; 2026-09-29 re-validation: keep the default combo.

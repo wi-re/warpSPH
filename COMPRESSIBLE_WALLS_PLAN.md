@@ -360,3 +360,37 @@ changes the fluid's local spacing but not the wall row spacing).
     - New knobs: `CompressibleSPHConfig.wallLatticeSupport` (None = scheme
       default), case params `wallLatticeSupport` ('auto'/'on'/'off') and
       `wallSlip`; 2D case params are scalars (`centreX/Y`, `startX/Y`).
+    - *After the builder fix* (all reruns): bowShock Monaghan unchanged (standoff
+      0.99 Billig at t~0.27 -> 1.14 at 0.6, pitot 0.96 -> 0.91); shockCylinder
+      Monaghan fails at the same time. So the initial-h bug was not behind either.
+    - *CompSPH / CRKSPH in 2D*: bowShock standoff / pitot at t=0.6: CompSPH 1.09 /
+      0.98, CRKSPH **1.006 / 0.95** (Monaghan 1.14 / 0.91); 12 / 30 rows inside the
+      cylinder. shockCylinder to t=0.38 (before the §19 window): peak stagnation
+      p / p3 CompSPH 1.04, CRKSPH 0.95 (exact: 1.0 at impact; Monaghan 0.80),
+      penetration 0.24 / 1.0 dx.
+    - *Sedov 2D, CRKSPH vs mirror* (after the NaN guard): L1 density / pressure /
+      speed 12% / 19% / 16%, peaks low (rho 10.3 vs 12.4), energy exact, 0
+      penetrating -- worse than Monaghan's 5/4/6%; CRK's lattice-h floor on the
+      wall rows is the obvious suspect (not checked).
+    - *Experiment, §19*: fluid<-wall pressure force through the wall's own kernel
+      (`Scatter`, lattice-floored wall h; fluid-fluid unchanged), Monaghan
+      shockCylinder: fewer rows end up inside the cylinder (32 vs 235) but the
+      stagnation pressure still runs away at the same time (271 p3 by t=0.47).
+      The gap-filling is a symptom; the runaway compression at the stagnation
+      point is not caused by it alone. Reverted (not kept as an option).
+    - *forwardStep, Monaghan, classic resolution (80 per unit), t=4*: 6733
+      steps, 5.5 min. The step block now reaches past the tunnel's end by its
+      whole travel (`buildWalledBox(keepSolid=..., extendHi=...)`: body rows kept
+      outside the box, normals from the body alone), so no vacuum opens behind
+      it (before: gas fell into the room behind the block's back end, went
+      through the floor there and inflated h -- 450 ms/step). Max penetration
+      into the step 0.41 dx (transient), at most 1 row out of the tunnel, bow
+      standoff at y=0.5 0.159. Frames (window in the step frame, matplotlib)
+      show the Woodward-Colella structure at t=4: bow shock, Mach stem with the
+      triple point near (0.65, 0.8), reflected shock on the step top at x~1.35.
+    - *Test regression, not from this session*: `test_shockCapturing::
+      test_sod1d_readHayfieldSuppressesContactOvershoot` fails since 013a22f
+      (passes at d0f4774): R&H contact entropy overshoot 3.43% vs NoneSwitch
+      3.24%. The support clamp is the change; it is still needed for the walls
+      (without it the outermost row is -10% in p again, with a frozen 1.8x h and
+      a coincident pair). OPEN_PROBLEMS §20, your call.
