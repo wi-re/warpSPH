@@ -70,6 +70,8 @@ class AVConfig:
     #: `DiffusionParameters` fields overridden on the scheme config after the case
     #: configures it (e.g. `{'C_q': 2.0}`); these are scheme, not case, parameters.
     diffusion: Dict[str, Any] = field(default_factory=dict)
+    #: scheme-config fields set after the case configures it, e.g. `{'owenTable': 'lattice'}`
+    schemeFields: Dict[str, Any] = field(default_factory=dict)
     #: `SimulationConfig` fields set before the case builds its state (so the IC sees them too),
     #: e.g. `{'supportVolumeClamp': 'off'}` (OPEN_PROBLEMS §20); `--supportVolumeClamp` sets it for every config.
     simulation: Dict[str, Any] = field(default_factory=dict)
@@ -155,9 +157,11 @@ def _execute(spec: RunSpec, cfg: AVConfig, outDir: Path, tag: str, video: bool,
             setattr(ctx.schemeConfig.diffusionParams, name, value)
         for name, value in cfg.simulation.items():
             setattr(ctx.config, name, value)
+        for name, value in cfg.schemeFields.items():
+            setattr(ctx.schemeConfig, name, value)
 
     case = dataclasses.replace(spec.case, diagnostics=diagnostics,
-                               configureScheme=configureScheme if (cfg.diffusion or cfg.switchParams or cfg.simulation) else configure)
+                               configureScheme=configureScheme if (cfg.diffusion or cfg.switchParams or cfg.simulation or cfg.schemeFields) else configure)
     kw = dict(spec.kwargs)
     kw.setdefault('scheme', cfg.scheme)
     params = dict(spec.params, viscositySwitch=cfg.switch, **cfg.params)
@@ -630,6 +634,19 @@ def mergeReports(dirs: List[Path], out: Path) -> int:
     return 0
 
 
+def _parseKV(pairs: List[str]) -> Dict[str, Any]:
+    """`KEY=VALUE` -> dict, VALUE as a Python literal when it is one (True, 0.5), else the string."""
+    import ast
+    out = {}
+    for kv in pairs:
+        k, v = kv.split('=', 1)
+        try:
+            out[k] = ast.literal_eval(v)
+        except (ValueError, SyntaxError):
+            out[k] = v
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument('--config', default='baseline', help='config or group name (see --list)')
@@ -644,6 +661,10 @@ def main() -> int:
                     help='compare two report dirs / results.json (exit 1 if they differ)')
     ap.add_argument('--merge', nargs='+', metavar='DIR',
                     help='merge report dirs (later overrides earlier per config/case) into --out')
+    ap.add_argument('--caseParam', nargs='*', default=[], metavar='KEY=VALUE',
+                    help="case params for every config, e.g. adaptiveSupportScheme=Monaghan (SUPPORT_SOLVER_PLAN)")
+    ap.add_argument('--schemeParam', nargs='*', default=[], metavar='KEY=VALUE',
+                    help="scheme-config fields for every config, e.g. owenTable=lattice (SUPPORT_SOLVER_PLAN)")
     ap.add_argument('--supportVolumeClamp', choices=('always', 'walls', 'off'), default=None,
                     help="set SimulationConfig.supportVolumeClamp for every config (OPEN_PROBLEMS §20)")
     ap.add_argument('--tol', type=float, default=0.0,
@@ -666,7 +687,8 @@ def main() -> int:
     video = (args.profile == 'full') if args.video is None else args.video
     outDir = rep.outDirFor('av', args.out)
     meta = rep.environmentMeta(extra=dict(profile=args.profile, config=args.config, repeat=args.repeat,
-                                          video=video, supportVolumeClamp=args.supportVolumeClamp))
+                                          video=video, supportVolumeClamp=args.supportVolumeClamp,
+                                          caseParam=args.caseParam, schemeParam=args.schemeParam))
     print(f'[av_report] {names} x {[c.name for c in cases]}  profile={args.profile} '
           f'repeat={args.repeat} video={video}\n[av_report] -> {outDir}', flush=True)
 
@@ -678,6 +700,10 @@ def main() -> int:
             for i in range(args.repeat):
                 print(f'[av_report] {name} / {case.name}  (run {i + 1}/{args.repeat})', flush=True)
                 cfg = CONFIGS[name]
+                if args.caseParam:
+                    cfg = dataclasses.replace(cfg, params=dict(cfg.params, **_parseKV(args.caseParam)))
+                if args.schemeParam:
+                    cfg = dataclasses.replace(cfg, schemeFields=dict(cfg.schemeFields, **_parseKV(args.schemeParam)))
                 if args.supportVolumeClamp is not None:
                     cfg = dataclasses.replace(cfg, simulation=dict(cfg.simulation, supportVolumeClamp=args.supportVolumeClamp))
                 reps.append(runOne(cfg, case, args.profile, outDir,

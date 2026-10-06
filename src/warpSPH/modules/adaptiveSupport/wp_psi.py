@@ -28,8 +28,8 @@ def computePsi(
     n_out: wp.array(dtype=scalar_t, ndim=1), # type: ignore
     psi: wp.array(dtype=scalar_t, ndim=1), # type: ignore
     psiH: wp.array(dtype=scalar_t, ndim=1), # type: ignore
-    N_H: wp.array(dtype=scalar_t, ndim=1) # type: ignore
-    
+    N_H: wp.array(dtype=scalar_t, ndim=1), # type: ignore
+    psiHLattice: wp.array(dtype=scalar_t, ndim=1) # type: ignore
 ):
     i = wp.tid()
     if i >= nLUT:
@@ -110,6 +110,9 @@ def computePsi(
     psi[i] = psi_0
     psiH[i] = psiH_0
     N_H[i] = vH / v
+    # the same statistic the runtime measures (`wp_psi0.py`: sum_j h^(d+1) |grad W_ij|), summed over the lattice
+    # itself rather than the shell approximation above, which is exact only in 1D (SUPPORT_SOLVER_PLAN step 1a)
+    psiHLattice[i] = (wp.abs(gradSum) * iPow(h, dim + 1)) ** (scalar_t(1.0) / scalar_t(dim))
 
 
     
@@ -121,7 +124,8 @@ def generatePSILut_warp(
     kernel: KernelFunctions,
     n_min: float,
     n_max: float,
-    nLut: int
+    nLut: int,
+    table: str = 'shell',
 ):
     device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
     # torch_t = get_torch_precision()
@@ -131,6 +135,7 @@ def generatePSILut_warp(
     psis = torch.zeros((nLut,3), dtype=torch_t, device=device)
     psiHs = torch.zeros((nLut,3), dtype=torch_t, device=device)
     N_Hs = torch.zeros((nLut,3), dtype=torch_t, device=device)
+    psiHLats = torch.zeros((nLut,3), dtype=torch_t, device=device)
 
     for d in range(1, 4):
         # print(f'Generating LUT for dim {d}...')
@@ -138,6 +143,7 @@ def generatePSILut_warp(
         psi_wp = wp.zeros(nLut, dtype=scalar_t)
         psiH_wp = wp.zeros(nLut, dtype=scalar_t)
         N_H_wp = wp.zeros(nLut, dtype=scalar_t)
+        psiHLat_wp = wp.zeros(nLut, dtype=scalar_t)
 
         wp.launch(
             computePsi,
@@ -151,10 +157,12 @@ def generatePSILut_warp(
                 n_out_wp,
                 psi_wp,
                 psiH_wp,
-                N_H_wp
+                N_H_wp,
+                psiHLat_wp
             ]
         )
         psis[:, d-1] = wp.to_torch(psi_wp).clone().to(device)
         psiHs[:, d-1] = wp.to_torch(psiH_wp).clone().to(device)
         N_Hs[:, d-1] = wp.to_torch(N_H_wp).clone().to(device)
-    return wp.to_torch(n_out_wp).clone().to(device), psis, psiHs, N_Hs
+        psiHLats[:, d-1] = wp.to_torch(psiHLat_wp).clone().to(device)
+    return wp.to_torch(n_out_wp).clone().to(device), psis, (psiHLats if table == 'lattice' else psiHs), N_Hs

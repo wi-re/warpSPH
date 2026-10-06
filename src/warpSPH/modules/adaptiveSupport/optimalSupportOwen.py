@@ -76,11 +76,12 @@ def evaluateOptimalSupportOwen(
         # Note `kernel`, not `kernel_`: the table is built from whichever kernel
         # this call resolved to, so a caller that leaves `kernel_` at None gets
         # a table for `config.kernel` rather than one built from None.
-        key = (kernel, config.domain.dim)
+        table = getattr(compConfig, 'owenTable', 'shell')
+        key = (kernel, config.domain.dim, table)
         PsiLUT_fn = PsiLUTs.get(key)
         if PsiLUT_fn is None:
             PsiLUT_fn = PsiLUTs[key] = computeOwen(
-                kernel, dim = config.domain.dim, nMin = 2.0, nMax = 6.0, nLUT = 2**12)
+                kernel, dim = config.domain.dim, nMin = 2.0, nMax = 6.0, nLUT = 2**12, table = table)
         # particles, domain, kernel, targetNeighbors, PsiLUT_fn, nIter = 16, neighborhood = None, verbose = False,eps = 1e-3, neighborhoodAlgorithm = 'compact'):
         hs = [particles.supports]
         # print(particles)

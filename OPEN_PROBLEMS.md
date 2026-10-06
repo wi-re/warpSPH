@@ -463,7 +463,7 @@ support solve (`modules/adaptiveSupport/optimalSupportOwen.py`) that `supportVol
    than the kernels and grad-h terms use. Inviscid linear wave error 6x, Gresho angular-momentum loss +30-85 %, KH growth
    -18 % (C&D) with the clamp on.
 The principled fix is in the solve (let h shrink, e.g. a two-sided relaxation or a Newton step on the h-rho constraint),
-not a clamp; with that, `supportVolumeClamp` could go. Nothing queued -- your call when.
+not a clamp; with that, `supportVolumeClamp` could go. **Being worked: [SUPPORT_SOLVER_PLAN.md](SUPPORT_SOLVER_PLAN.md) (2026-10-06).**
 
 ## Resolved (details in [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md); numbers kept so references stay valid)
 

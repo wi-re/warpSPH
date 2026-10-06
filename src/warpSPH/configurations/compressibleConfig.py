@@ -41,6 +41,7 @@ class CompressibleSPHConfig:
     adaptiveSupportIterations: int = field(default=1, metadata={'description': 'Number of iterations for adaptive support scheme'})
     adaptiveSupportThreshold: float = field(default=1e-3, metadata={'description': 'Threshold for adaptive support scheme'})
     adaptiveSupportCorrections: bool = field(default=True, metadata={'description': 'Whether to apply corrections in the adaptive support scheme (grad-H terms)'})
+    owenTable: str = field(default='shell', metadata={'description': "Owen psi_H lookup table: 'shell' (continuum shell approximation, exact only in 1D; h 2 % / 0.9 % too large on a 2D / 3D lattice) or 'lattice' (the lattice sum the runtime measures) -- SUPPORT_SOLVER_PLAN step 1a"})
 
 
     diffusionParams: DiffusionParameters = field(default_factory=buildDefaultDiffusionParamsCompressibleSPH)
@@ -67,6 +68,7 @@ def compressibleConfigToDict(config: CompressibleSPHConfig) -> Dict[str, Any]:
         'adaptiveSupportIterations': config.adaptiveSupportIterations,
         'adaptiveSupportThreshold': config.adaptiveSupportThreshold,
         'adaptiveSupportCorrections': config.adaptiveSupportCorrections,
+        'owenTable': config.owenTable,
         'diffusionParams': diffusionParamsToDict(config.diffusionParams),
         'viscositySwitchParams': viscositySwitchConfigToDict(config.viscositySwitchParams),
         'schemeName': config.schemeName,
@@ -85,6 +87,7 @@ def dictToCompressibleConfig(configDict: Dict[str, Any]) -> CompressibleSPHConfi
     config.adaptiveSupportIterations = configDict['adaptiveSupportIterations']
     config.adaptiveSupportThreshold = configDict['adaptiveSupportThreshold']
     config.adaptiveSupportCorrections = configDict['adaptiveSupportCorrections']
+    config.owenTable = configDict.get('owenTable', config.owenTable)
     config.diffusionParams = dictToDiffusionParams(configDict['diffusionParams'])
     config.viscositySwitchParams = dictToViscositySwitchConfig(configDict['viscositySwitchParams'])
     config.schemeName = configDict['schemeName']
