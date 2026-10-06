@@ -592,3 +592,27 @@ none / C&D reference at HEAD is being taken for Phase 2 (`results/av_M2_ref_*`).
 User rule (2026-10-06): if the clamp degrades fluid behaviour it is off for pure-fluid cases. Default is now 'walls'; the
 R&H test passes again; the AV baseline M0e describes the code again.
 
+## OPEN_PROBLEMS §21 — Owen adaptive support: frozen / over-grown h, 2D offset — RESOLVED 2026-10-06
+
+Found 2026-10-06 while resolving §20 (`scripts/probe_supportClampBinding.py`, clamp off). Two properties of the Owen
+support solve (`modules/adaptiveSupport/optimalSupportOwen.py`) that `supportVolumeClamp` papers over:
+1. **One-way ratchet** (COMPRESSIBLE_WALLS_PLAN 2026-10-05): the relaxation grows h while a kernel is under-sampled but
+   never shrinks a well-sampled one, so h freezes over-large after a transient. Wall outer rows: 1.8-2x (shockReflection
+   -10 % in p without the clamp). Pure fluid, 1D Sod at t 0.056: 31 % of rows above the bound, up to 1.32x at the shock /
+   contact -- which is why the clamp halved Sod's contact pressure spike (none 0.060 -> 0.026) and raised the Sedov 3D peak
+   (2.53 -> 2.75).
+2. **2D offset:** Owen's well-sampled equilibrium is h = 1.02 n_h (m/rho)^(1/d) on ~100 % of rows (Gresho, KH), so a clamp
+   at the plain volume bound caps every row -- in effect h = h(rho) everywhere. (Correction 2026-10-06: the schemes re-sum
+   rho at the final h, so it is not a rho-h mismatch; the cause of the offset was a table bug, fixed in SUPPORT_SOLVER_PLAN,
+   and h = h(rho) itself is what costs shear flows there.) Inviscid linear wave error 6x, Gresho angular-momentum loss +30-85 %, KH growth
+   -18 % (C&D) with the clamp on.
+The principled fix is in the solve (let h shrink, e.g. a two-sided relaxation or a Newton step on the h-rho constraint),
+not a clamp; with that, `supportVolumeClamp` could go. **Being worked: [SUPPORT_SOLVER_PLAN.md](SUPPORT_SOLVER_PLAN.md) (2026-10-06).**
+
+**Resolution (2026-10-06, docs/historic_plans/SUPPORT_SOLVER_PLAN.md).** No ratchet on a lattice (h returns from 0.5x / 2x). The 2D / 3D
+offset (h 2 % / 0.9 % too large) was `wp_psi.py`'s psi_H table: a continuum shell approximation, exact only in 1D, while the lattice
+sum it also computed went unused; `owenTable='lattice'` (default) fixes it, new AV reference M0g (moves <= 6 %). Owen's
+over-growth on the dense side of a density jump (+12 % vs h(rho)) is a property of neighbour-count h (Price 2012 §2.3), kept
+(user): tying h to rho everywhere (Newton, per-side grad-h, or the clamp everywhere) improves shocks but costs shear/contact
+flows. The wall-only clamp stays for the walls' outer row.
+

@@ -1,6 +1,6 @@
 # Adaptive support solver (SUPPORT_SOLVER_PLAN)
 
-> **Progress marker:** this plan's row in [PLANS.md](PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
+> **Finished 2026-10-06** -- listed under *Finished* in [PLANS.md](../../PLANS.md). Outcome at the end of this file.
 
 Started 2026-10-06 (user: "everything else depends on the support and changing it could potentially invalidate
 everything that comes after"). Home of OPEN_PROBLEMS §21. Goal: one support solve whose h is well defined everywhere
@@ -192,3 +192,18 @@ Paper defaults: Newton for the Monaghan host (Price 2012), Owen ideal-H for Comp
   at the KH interface, which is where the cost comes from; separating "shock" from "contact" would need a detector, i.e. a
   case-dependent switch -- not done. **Decision needed: keep `'walls'` (pure Owen for pure fluid; best shear / contact) or
   make `'always'` the default (better shocks, smooth-shear cost above).**
+
+## Closed (2026-10-06)
+
+**Evidence kept in the repo:** [`docs/support_solver/`](../support_solver/README.md) -- summary figure, full metric tables for every
+variant, KH / Sod / Gresho / wall final frames, the density-step toy plot, and how to rerun each column.
+
+**Decision (user):** keep `supportVolumeClamp='walls'`. Final state of the support solve:
+- Owen with the lattice table (`owenTable='lattice'`, default) for all three hosts; exact on lattices in 1D/2D/3D. Reference M0g.
+- The volume clamp applies only when the state has wall rows (Owen freezes the outer wall row without it).
+- Opt-in, documented, tested: `adaptiveSupportScheme='Monaghan'` (Newton h = h(rho): best shocks, worse shear),
+  `pressureFormulation='perSide'` (Price 2012 Eqs. 43-45, exactly conservative; collapses KH with h = h(rho)),
+  `supportVolumeClamp='always'` (min(Owen, h(rho)): better shock contacts, mild shear cost).
+- Known, accepted property of Owen's neighbour-count h: it over-grows on the dense side of a density jump (+12 % vs h(rho)),
+  which costs Sod's contact spike under C&D (0.134 vs 0.039 with the clamp everywhere). Contact accuracy in standard SPH is
+  the pressure-entropy question (PESPH_PLAN), not the support solve's.

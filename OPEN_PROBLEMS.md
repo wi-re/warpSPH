@@ -449,22 +449,7 @@ above. Not done: a flat wall facing the same second shock (a channel end wall in
 
 ## 20. (resolved 2026-10-06 -- the support clamp is now wall-only; see RESOLVED_PROBLEMS.md)
 
-## 21. Owen adaptive support: one-way h ratchet, and its equilibrium sits ~2 % above the volume bound in 2D
-
-Found 2026-10-06 while resolving §20 (`scripts/probe_supportClampBinding.py`, clamp off). Two properties of the Owen
-support solve (`modules/adaptiveSupport/optimalSupportOwen.py`) that `supportVolumeClamp` papers over:
-1. **One-way ratchet** (COMPRESSIBLE_WALLS_PLAN 2026-10-05): the relaxation grows h while a kernel is under-sampled but
-   never shrinks a well-sampled one, so h freezes over-large after a transient. Wall outer rows: 1.8-2x (shockReflection
-   -10 % in p without the clamp). Pure fluid, 1D Sod at t 0.056: 31 % of rows above the bound, up to 1.32x at the shock /
-   contact -- which is why the clamp halved Sod's contact pressure spike (none 0.060 -> 0.026) and raised the Sedov 3D peak
-   (2.53 -> 2.75).
-2. **2D offset:** Owen's well-sampled equilibrium is h = 1.02 n_h (m/rho)^(1/d) on ~100 % of rows (Gresho, KH), so a clamp
-   at the plain volume bound caps every row -- in effect h = h(rho) everywhere. (Correction 2026-10-06: the schemes re-sum
-   rho at the final h, so it is not a rho-h mismatch; the cause of the offset was a table bug, fixed in SUPPORT_SOLVER_PLAN,
-   and h = h(rho) itself is what costs shear flows there.) Inviscid linear wave error 6x, Gresho angular-momentum loss +30-85 %, KH growth
-   -18 % (C&D) with the clamp on.
-The principled fix is in the solve (let h shrink, e.g. a two-sided relaxation or a Newton step on the h-rho constraint),
-not a clamp; with that, `supportVolumeClamp` could go. **Being worked: [SUPPORT_SOLVER_PLAN.md](SUPPORT_SOLVER_PLAN.md) (2026-10-06).**
+## 21. (resolved 2026-10-06 -- Owen table fixed; support solver plan closed; see RESOLVED_PROBLEMS.md)
 
 ## Resolved (details in [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md); numbers kept so references stay valid)
 
@@ -477,6 +462,7 @@ not a clamp; with that, `supportVolumeClamp` could go. **Being worked: [SUPPORT_
 - **§16** Monaghan viscous heating lacked the 1/2 -- fixed, `tests/test_monaghanEnergy.py`.
 - **§17** Read-Hayfield entropy dissipation did not conserve energy -- Eq. (33) transcription error, fixed; pair loops moved to warp kernels (`wp_readHayfield.py`).
 - **§18** Monaghan Sedov energy drift 5e-4 -- RK2 time-integration error, expected behaviour, converges at second order in dt.
+- **§21** Owen adaptive support (frozen / over-grown h, 2D offset) -- the 2D/3D offset was a psi_H table bug (fixed, default); over-growth on the dense side of density jumps is accepted as a property of neighbour-count h; the wall-only clamp stays (docs/historic_plans/SUPPORT_SOLVER_PLAN.md).
 - **§20** R&H Sod test failing since the support clamp 013a22f -- the clamp degrades smooth pure-fluid flow; now `supportVolumeClamp='walls'` by default (user, 2026-10-06): pure-fluid runs bit-identical to before 013a22f, walls keep the fix. Root cause open as §21.
 
 See also: [[boundary-density-plan]], [[wcsph-deltasph-scheme-concerns]],
