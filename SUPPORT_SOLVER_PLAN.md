@@ -172,3 +172,23 @@ Paper defaults: Newton for the Monaghan host (Price 2012), Owen ideal-H for Comp
 - **Open candidate:** with the fixed table the bulk h equals the volume bound, so `supportVolumeClamp='always'` would now act
   only where Owen exceeds h(rho) -- min(Owen, h(rho)): the dense side of shocks / contacts, surfaces, wall rows. Whether that
   keeps Newton's shock gain without its KH cost is a direct test (queued).
+- 2026-10-06 **M0g complete:** CRK `results/av_M0g_crk_all` (merge of `av_M0g_crk` + `av_M0g_crk_sedov`; 3D Sedov needed the GPU
+  freed). vs M0f <= 6 % (Gresho L1 +5.9 %, Yee -6.2 %, KH +4.4 %, Sod 2D -2 %, 3D Sedov peak 2.09 -> 2.12, energy exact), 1D
+  unchanged, nothing diverged.
+- 2026-10-06 **min(Owen, h(rho)) measured** (`supportVolumeClamp='always'` with the fixed table, `results/support_solver/av_minclamp_*`):
+  with the table fixed the bulk h equals the bound, so the clamp now acts only where Owen over-grows (dense side of shocks /
+  contacts, interfaces). vs M0g (Owen, wall-only clamp):
+
+  | | alpha = 1 | C&D | C&D, C_q = 2 |
+  |---|---|---|---|
+  | Sod contact P spike | 0.060 -> **0.026** | 0.134 -> **0.039** | 0.082 -> 0.045 |
+  | Sod L1(v_x) | -8 % | -13 % | -6 % |
+  | linear-wave error | +12 % | 0.0085 -> **0.0037** | -- |
+  | Sedov peak | 2.54 -> 2.75 | 2.17 -> 2.20 | 1.83 -> 1.84 |
+  | Gresho L1 / ang.-mom. loss | +1 % / +3 % | **+9 % / +5 %** | +8 % / +29 % |
+  | KH A(1.5) | 0.021 -> 0.024 | **0.100 -> 0.087** | -- |
+
+  Most of Newton's shock gain (Newton: Gresho +13 % / +44 %, KH -36 %) at about a third of its shear-flow cost. It still caps h
+  at the KH interface, which is where the cost comes from; separating "shock" from "contact" would need a detector, i.e. a
+  case-dependent switch -- not done. **Decision needed: keep `'walls'` (pure Owen for pure fluid; best shear / contact) or
+  make `'always'` the default (better shocks, smooth-shear cost above).**
