@@ -57,7 +57,7 @@ and had to be identified from their front matter alone.
 
 ## What is here
 
-198 documents. The first 120 are the curated core — every row annotated for what
+199 documents. The first 120 are the curated core — every row annotated for what
 it unblocks, and every row abstracted in `ABSTRACTS.md` **except `roe1986`,
 `hairer2006` and `toro2009`**, which carry no abstract at all (Annual Reviews
 articles of that vintage print none for `roe1986`; the latter two are books,
@@ -259,6 +259,7 @@ this plan too.
 | — | `winchenbach2024integrals` | `winchenbach2024integrals_analytic-boundary-integrals-2d.pdf` | SPHERIC 2024 | Analytic boundary integrals over triangle meshes, with barycentric boundary quantities. |
 | — | `winchenbach2025analytic` | `winchenbach2025analytic_analytic-boundary-handling-2d.pdf` | J. Comput. Phys. 555 2026 | Closed-form boundary integrals for compact polynomials over triangles, via Chebyshev polynomials and 2F1. |
 | — | `winchenbach2025diffsph` | `winchenbach2025diffsph_differentiable-sph.pdf` | J. Comput. Phys. 555 2026 | The differentiable PyTorch SPH framework this codebase's schemes are ported from. |
+| — | `nogina2026` | `nogina2026_tube-maps-tubular-coordinates.pdf` | SIGGRAPH Conf. Papers '26 | Constant-time boundary *density* of a curved solid from a second-order tubular-coordinate (curvature) expansion about the closest point; the method the curvatureBoundaries repo's tier 3 generalises (pressure operators, first moments) and checks against exact edge integrals. Main-text sign of K in J(s) disagrees with its Eq. 16 there. |
 
 **Machine learning on SPH**
 

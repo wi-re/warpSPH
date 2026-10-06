@@ -1,7 +1,7 @@
 """Video-backed CRKSPH runs of the cases `av_report.py` does not cover (triple point, shearing Noh), at the default limiter
 (CRKSPH_LIMITER_PLAN close-out: Noh + 2D shock cases at the new (1/n_h, 0.2/n_h) default). One at a time, progress streamed.
 
-    scripts/probe_crkShockVideos.py [--out results/crk_closeout_videos]
+    scripts/probe_crkShockVideos.py [--out results/crk_closeout_videos] [--cases triplePoint] [--nx 256] [--tLimit 7]
 """
 import argparse
 import sys
@@ -18,9 +18,12 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--out', default='results/crk_closeout_videos')
     ap.add_argument('--cases', nargs='+', default=list(CASES))
+    ap.add_argument('--nx', type=int, default=None, help='override the per-case resolution')
+    ap.add_argument('--tLimit', type=float, default=None, help='override the per-case end time')
     a = ap.parse_args()
     for name in a.cases:
         case, kw = CASES[name]
+        kw = {**kw, **{k: v for k, v in (('nx', a.nx), ('tLimit', a.tLimit)) if v is not None}}
         res = run(case, scheme='CRKSPH', plot=True, video=True, exportRoot=str(Path(a.out) / name), progress=True,
                   stallProgress=1e-3, velocityAlarmPlotInterval=1, **kw)
         E = res.series('totalEnergy')

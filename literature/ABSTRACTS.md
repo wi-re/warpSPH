@@ -1270,6 +1270,30 @@ The scheme of `ACSPH_PLAN.md` and its dependencies. Added 2026-09-05.
 > building a strong foundation for addressing several grand challenges in SPH
 > and beyond.
 
+### `nogina2026`
+
+- **file:** `nogina2026_tube-maps-tubular-coordinates.pdf`
+- **title:** Tube Maps: Fast SPH Boundary Handling with Tubular Coordinates
+- **authors:** Daria Nogina and Silvia Sellán
+- **venue:** SIGGRAPH Conference Papers '26 (Special Interest Group on Computer Graphics and Interactive Techniques Conference Conference Papers), July 19-23, 2026, Los Angeles, pp. 1-11
+- **doi:** [10.1145/3799902.3811118](https://doi.org/10.1145/3799902.3811118)
+- **relevance:** Second-order curvature expansion of the smoothed boundary density integral in tubular coordinates; the density-only counterpart of the curvature-aware tier-3 closed forms in curvatureBoundaries.
+- **abstract from:** the PDF front matter (the DOI record carries no abstract)
+
+> Smoothed Particle Hydrodynamics (SPH) simulations rely on accurately
+> and efficiently modeling fluid-solid interactions. However, particle-based
+> coupling strategies introduce non-deterministic discretization errors, and
+> implicit methods achieve high accuracy at the cost of expensive numerical
+> integration. We introduce Tube Maps, a drop-in replacement for SPH boundary
+> density computation that achieves accuracy comparable to implicit methods
+> while dramatically reducing their computational cost. Our key observation
+> is that the boundary density integral is fully determined by the local surface
+> geometry near a fluid particle's closest point. By expressing this geometry
+> in tubular coordinates, we reduce the original three-dimensional integral to
+> a one-dimensional closed-form expression that can be evaluated in constant
+> time. We thus eliminate numerical quadrature and reduce boundary handling costs by one to three orders of magnitude, enabling fast and accurate
+> SPH simulations with time-varying curved solids.
+
 ### `winchenbach2025diffsph`
 
 - **file:** `winchenbach2025diffsph_differentiable-sph.pdf`
