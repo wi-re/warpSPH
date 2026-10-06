@@ -66,7 +66,7 @@ def interpolateLUT(LUT, dim, which = 'n_h', n_h = None, psi = None, psiH = None,
         return linearInterpolateLUT(LN_H, n_h, Ln_h)
 
 class computeOwen:
-    def __init__(self, kernel: KernelFunctions, dim: int, nLUT =511, nMin = 1.0, nMax = 5.0, table: str = 'shell'):
+    def __init__(self, kernel: KernelFunctions, dim: int, nLUT =511, nMin = 1.0, nMax = 5.0, table: str = 'lattice'):
         self.kernel = kernel
         n_h, psi, psiH, N_H = generatePSILut_warp(kernel, n_min = nMin, n_max = nMax, nLut = nLUT, table = table)
         LUTorch = [n_h, [psi[:,dim-1]], [psiH[:,dim-1]], [N_H[:,dim-1]]]

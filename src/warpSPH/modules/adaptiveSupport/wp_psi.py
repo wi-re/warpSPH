@@ -125,7 +125,7 @@ def generatePSILut_warp(
     n_min: float,
     n_max: float,
     nLut: int,
-    table: str = 'shell',
+    table: str = 'lattice',
 ):
     device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
     # torch_t = get_torch_precision()

@@ -121,3 +121,50 @@ regions2D, compressibleWalls, ...).
 | C. Newton + correct grad-h (Price 2012 Eq. 44) | B plus per-side kernels with Omega in warpSPHCore's symmetric gradient and the energy equation | not built; the textbook-consistent form; whether it recovers C&D's smooth flow is the open question |
 
 Paper defaults: Newton for the Monaghan host (Price 2012), Owen ideal-H for CompSPH / CRKSPH (Owen 2014, Frontiere 2017).
+
+**Decision (user, 2026-10-06):** A now (`owenTable='lattice'` default), then build C and compare before choosing the Monaghan default.
+- 2026-10-06 **option A applied:** `owenTable='lattice'` is the default (configs stored without the field load as 'shell').
+  Smoke vs M0e: 24/30 pairs moved -- all 2D/3D cases; 1D linearWave / Noh bit-identical, 1D Sod moved only at round-off
+  (every physics metric equal to 4 digits; the Verlet neighbour count -0.5 %: ~1e-7 h changes flip lattice-aligned pairs
+  across the Verlet cut). New reference M0g running: `results/av_M0g_{baseline,baselineQ,crk,s3,phase2}`.
+- 2026-10-06 **option C built:** `modules/pressure/wp_perSidePressure.py` (`computePerSidePressureWarp`): one neighbour pass
+  giving a_i = -sum_j m_j [f_i grad W_ij(h_i) + f_j grad W_ij(h_j)] and du_i/dt = f_i sum_j m_j v_ij . grad W_ij(h_i),
+  f = P/(Omega rho^2), Omega optional. Selected by `CompressibleSPHConfig.pressureFormulation='perSide'` in the Monaghan
+  scheme (default 'meanKernel', unchanged). `tests/test_perSidePressure.py` (8 pass): momentum and energy conserved to
+  round-off in 1D/2D/3D with and without Omega for random h / m / rho / P / v; equals the mean-kernel force at equal h.
+  Noted on the way: the default path's du/dt (`-(P_i/rho_i) sum_j (m_j/rho_j) v_ji . grad W`) is not the exact energy
+  conjugate of its m_j (P_i/rho_i^2 + P_j/rho_j^2) force (volume m_j/rho_j vs m_j/rho_i), which is part of why the
+  existing grad-h path drifts. Running: AV suite with C (Newton + perSide + Omega) and with Newton + perSide, no Omega.
+- 2026-10-06 **M0g taken** (default `owenTable='lattice'`): `results/av_M0g_{baseline,baselineQ,s3,phase2}`, smoke ref
+  `results/av_smoke_ref_M0g`. vs M0e every headline metric moves <= 3.5 % (Sod 2D/3D and Yee L1 -2..-3.5 %, Sedov peak +0.5 %,
+  KH / Gresho +-2 %), 1D at round-off, nothing diverged; Phase 2 verdicts unchanged (KH 0.011, Gresho alphaMean 0.049).
+  Tests: 119 pass. CRK group aborted on 3D Sedov (OOM: other GPU tenants); re-run queued (`av_M0g_crk`, `_crk_sedov`).
+- 2026-10-06 **option C measured** (`results/support_solver/av_C_*`, `av_Cnoomega_cullenDehnen2010`), C&D host:
+
+  | | Owen, fixed table (M0g) | Newton | C: Newton + perSide + Omega | Newton + perSide, no Omega |
+  |---|---|---|---|---|
+  | Sod contact P spike | 0.134 | **0.029** | 0.059 | 0.044 |
+  | Sod L1(v_x) | 0.0052 | 0.0045 | 0.0066 | **0.0044** |
+  | Sedov peak rho (exact 4) | 2.17 | 2.23 | 2.23 | **2.29** |
+  | Gresho L1(v_phi) | **0.073** | 0.082 | 0.083 | 0.081 |
+  | KH A(1.5) (McNally 0.148) | **0.100** | 0.064 | 0.015 | 0.0096 |
+  | RT mixing width | 0.38 | 0.37 | 0.25 | 0.32 |
+  | Sedov energy drift | 5.3e-4 | 5.4e-4 | 5.3e-4 | 5.3e-4 |
+
+  The per-side form fixes the energy problem of the old grad-h path (Sedov 5e-2 -> 5.3e-4) -- the formulation is right --
+  but it collapses Kelvin-Helmholtz (frames: dense-phase particles break off into the light phase, the interface diffuses by
+  particle mixing instead of rolling up). Without Omega it is worse still (0.0096): the per-side kernels, i.e. h jumping by
+  sqrt(2) across a 2:1 contact when h follows the density, drive it, not Omega. Same with fixed alpha = 1 (C: KH 0.020, Sod
+  L1 0.0041, linear wave 0.027). **No variant that ties h to the density keeps the contact/shear behaviour**; Owen's
+  neighbour-count h, smooth across a contact, does. The contact problem itself is standard SPH's (Price 2008 conductivity,
+  pressure-entropy SPH -> PESPH_PLAN), not something the support solve should paper over.
+
+## Outcome / recommendation (2026-10-06)
+
+- **Default: Owen with the fixed table (A), all three hosts** -- best on shear / contact flows, now exact on lattices; M0g is
+  the reference. Its cost: the dense side of a shock / contact over-grows h (+12 % vs h(rho), toy 1b), which is the Sod
+  contact spike Newton removes (C&D 0.134 vs 0.029).
+- **Opt-in, kept:** `adaptiveSupportScheme='Monaghan'` (Newton) for shock-dominated runs; `pressureFormulation='perSide'`
+  (exactly conservative, Lagrangian with Omega) -- not for flows with density contrasts at shear layers.
+- **Walls:** Owen still freezes the outer wall row; the wall-only clamp stays. Open: the clamp leaves rho summed at the
+  unclamped h (inconsistent) -- re-summing rho after the clamp is the obvious consistency fix to try on the wall cases.

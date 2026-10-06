@@ -22,7 +22,7 @@ from ..modules.dissipation import computeConductivity, computeThermalDissipation
 from ..modules.eos import idealGasEOS
 from ..modules.internalEnergy import computeDudtMonaghan
 from ..modules.momentum import computeMomentumConsistent
-from ..modules.pressure import computePressureForceSymmetric
+from ..modules.pressure import computePressureForceSymmetric, computePerSidePressureWarp
 from ..modules.shockCapturing import computeViscositySwitchTerms, updateViscositySwitch
 from warpSPHCore import (
     GradHState, OperationProperties, SupportScheme, buildVerletList,
@@ -105,23 +105,31 @@ def compressibleSPH_Monaghan(
         SupportScheme.SuperSymmetric,
         adjacency)
 
-    dvdt = computePressureForceSymmetric(
-        currentState,
-        config,
-        supportScheme = SupportScheme.KernelMeanSymmetric,
-        adjacency = adjacency,
-        gradH = gradHState
-    )
+    if getattr(schemeConfig, 'pressureFormulation', 'meanKernel') == 'perSide':
+        # Price 2012 Eqs. 43-45: each side's own h, the conjugate pdV work; Omega only with grad-h on
+        dvdt, dudt = computePerSidePressureWarp(
+            currentState,
+            OperationProperties(kernel = config.kernel, supportMode = SupportScheme.KernelMeanSymmetric),
+            domain = config.domain,
+            adjacency = adjacency,
+            queryOmegas = gradHState.queryOmegas if gradHState is not None else None,
+        )
+    else:
+        dvdt = computePressureForceSymmetric(
+            currentState,
+            config,
+            supportScheme = SupportScheme.KernelMeanSymmetric,
+            adjacency = adjacency,
+            gradH = gradHState
+        )
 
-    # currentState.velocities = torch.sin(currentState.positions[:,0]* np.pi).unsqueeze(-1)
-
-    dudt = computeDudtMonaghan(
-        currentState,
-        config,
-        supportScheme = SupportScheme.KernelMeanSymmetric,
-        adjacency = adjacency,
-        gradH = gradHState
-    )
+        dudt = computeDudtMonaghan(
+            currentState,
+            config,
+            supportScheme = SupportScheme.KernelMeanSymmetric,
+            adjacency = adjacency,
+            gradH = gradHState
+        )
 
     drhodt = computeMomentumConsistent(
         currentState,

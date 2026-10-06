@@ -41,7 +41,8 @@ class CompressibleSPHConfig:
     adaptiveSupportIterations: int = field(default=1, metadata={'description': 'Number of iterations for adaptive support scheme'})
     adaptiveSupportThreshold: float = field(default=1e-3, metadata={'description': 'Threshold for adaptive support scheme'})
     adaptiveSupportCorrections: bool = field(default=True, metadata={'description': 'Whether to apply corrections in the adaptive support scheme (grad-H terms)'})
-    owenTable: str = field(default='shell', metadata={'description': "Owen psi_H lookup table: 'shell' (continuum shell approximation, exact only in 1D; h 2 % / 0.9 % too large on a 2D / 3D lattice) or 'lattice' (the lattice sum the runtime measures) -- SUPPORT_SOLVER_PLAN step 1a"})
+    pressureFormulation: str = field(default='meanKernel', metadata={'description': "Monaghan scheme pressure force + pdV work: 'meanKernel' (symmetric gradient with the mean kernel (grad W(h_i) + grad W(h_j))/2, du/dt from a velocity divergence) or 'perSide' (Price 2012 Eqs. 43-45: each side with its own h, the conjugate du/dt; with Omega when adaptiveSupportCorrections) -- SUPPORT_SOLVER_PLAN option C"})
+    owenTable: str = field(default='lattice', metadata={'description': "Owen psi_H lookup table: 'lattice' (default since 2026-10-06: the lattice sum the runtime measures, exact on lattices in 1D/2D/3D) or 'shell' (the old continuum shell approximation, exact only in 1D; h 2 % / 0.9 % too large on a 2D / 3D lattice) -- SUPPORT_SOLVER_PLAN step 1a"})
 
 
     diffusionParams: DiffusionParameters = field(default_factory=buildDefaultDiffusionParamsCompressibleSPH)
@@ -69,6 +70,7 @@ def compressibleConfigToDict(config: CompressibleSPHConfig) -> Dict[str, Any]:
         'adaptiveSupportThreshold': config.adaptiveSupportThreshold,
         'adaptiveSupportCorrections': config.adaptiveSupportCorrections,
         'owenTable': config.owenTable,
+        'pressureFormulation': config.pressureFormulation,
         'diffusionParams': diffusionParamsToDict(config.diffusionParams),
         'viscositySwitchParams': viscositySwitchConfigToDict(config.viscositySwitchParams),
         'schemeName': config.schemeName,
@@ -87,7 +89,8 @@ def dictToCompressibleConfig(configDict: Dict[str, Any]) -> CompressibleSPHConfi
     config.adaptiveSupportIterations = configDict['adaptiveSupportIterations']
     config.adaptiveSupportThreshold = configDict['adaptiveSupportThreshold']
     config.adaptiveSupportCorrections = configDict['adaptiveSupportCorrections']
-    config.owenTable = configDict.get('owenTable', config.owenTable)
+    config.owenTable = configDict.get('owenTable', 'shell')  # stored configs from before the field ran the shell table
+    config.pressureFormulation = configDict.get('pressureFormulation', 'meanKernel')
     config.diffusionParams = dictToDiffusionParams(configDict['diffusionParams'])
     config.viscositySwitchParams = dictToViscositySwitchConfig(configDict['viscositySwitchParams'])
     config.schemeName = configDict['schemeName']

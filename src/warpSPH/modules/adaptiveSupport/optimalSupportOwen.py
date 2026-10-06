@@ -76,7 +76,7 @@ def evaluateOptimalSupportOwen(
         # Note `kernel`, not `kernel_`: the table is built from whichever kernel
         # this call resolved to, so a caller that leaves `kernel_` at None gets
         # a table for `config.kernel` rather than one built from None.
-        table = getattr(compConfig, 'owenTable', 'shell')
+        table = getattr(compConfig, 'owenTable', 'lattice')
         key = (kernel, config.domain.dim, table)
         PsiLUT_fn = PsiLUTs.get(key)
         if PsiLUT_fn is None:
