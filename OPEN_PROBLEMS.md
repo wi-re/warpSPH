@@ -439,9 +439,12 @@ runs away from t ~ 0.45, NaN at 0.497; CRKSPH NaN at 0.433). Monaghan at **twice
 same onset (19 p3 at t = 0.439 vs 22 p3 at 0.446 at nx 200), NaN at 0.483. So: scheme-independent and
 resolution-independent, triggered by the second shock's arrival at the stagnation point -- the lattice-gap picture
 alone does not explain a resolution-independent onset; the wall state at a compressed, curved stagnation point (the
-Riemann p* on a gathered state that already contains the wall-compressed fluid) is the next suspect. Discriminating
-runs not done: `wallRiemannState` off, and a flat wall facing the same second shock (a channel end wall instead of
-the cylinder).
+Riemann p* on a gathered state that already contains the wall-compressed fluid) looked like the next suspect, but
+with `wallRiemannState` off (plain Shepard wall state) the onset is the same (11 p3 at t = 0.444, penetration 9.5 dx
+at t = 0.5, milder pressure peak). So neither the wall state, the wall kernel scale, the scheme nor the resolution
+sets it; what is left is the stagnation-point flow itself against a lattice wall (particles jamming where the flow
+should divide), which a per-row wall state cannot relieve -- pointing at the mirror-ghost / boundary-integral routes
+above. Not done: a flat wall facing the same second shock (a channel end wall instead of the cylinder).
 
 
 ## 20. `test_sod1d_readHayfieldSuppressesContactOvershoot` fails since the adaptive-support clamp (013a22f)

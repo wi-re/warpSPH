@@ -400,3 +400,5 @@ changes the fluid's local spacing but not the wall row spacing).
       Scheme- and resolution-independent, triggered by the second shock's
       arrival. Next discriminating runs: `wallRiemannState` off; a flat wall
       facing the same second shock.
+    - `wallRiemannState` off (new case param `--no-wallRiemannState`): same
+      onset (11 p3 at t=0.444), penetration 9.5 dx -- not the wall state either.

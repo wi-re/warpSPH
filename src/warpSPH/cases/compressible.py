@@ -70,6 +70,8 @@ def configureCompressible(ctx: RunContext) -> None:
     params = ctx.spec.params
     if 'wallSlip' in params:
         schemeConfig.wallSlip = params['wallSlip']
+    if 'wallRiemannState' in params:
+        schemeConfig.wallRiemannState = params['wallRiemannState']
     if 'wallLatticeSupport' in params:
         schemeConfig.wallLatticeSupport = {'auto': None, 'on': True, 'off': False}[params['wallLatticeSupport']]
 

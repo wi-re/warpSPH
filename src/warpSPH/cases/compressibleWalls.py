@@ -21,8 +21,10 @@ __all__ = ['WALL_PARAMS', 'buildWalledSystem', 'fluidEdges', 'nearWallRows', 'fl
            'boxSDF', 'circleSDF', 'walledDomainBounds', 'buildWalledBox']
 
 #: `wallLatticeSupport`: 'auto' (the scheme's default), 'on' or 'off'; `wallSlip`:
-#: 'freeSlip' or 'noSlip' -- see `CompressibleSPHConfig` and modules/compressibleWall
-WALL_PARAMS = dict(wallLayers=16, wallProbeLayers=3, wallLatticeSupport='auto', wallSlip='freeSlip')
+#: 'freeSlip' or 'noSlip'; `wallRiemannState`: the star state on approach/recession
+#: (else the plain Shepard state) -- see `CompressibleSPHConfig` and modules/compressibleWall
+WALL_PARAMS = dict(wallLayers=16, wallProbeLayers=3, wallLatticeSupport='auto', wallSlip='freeSlip',
+                   wallRiemannState=True)
 
 
 def buildWalledSystem(ctx: RunContext, stateAt: Callable[[torch.Tensor], Tuple[torch.Tensor, ...]],
