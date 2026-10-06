@@ -394,3 +394,9 @@ changes the fluid's local spacing but not the wall row spacing).
       3.24%. The support clamp is the change; it is still needed for the walls
       (without it the outermost row is -10% in p again, with a frozen 1.8x h and
       a coincident pair). OPEN_PROBLEMS §20, your call.
+    - *§19 data points*: CompSPH and CRKSPH full shockCylinder runs fail in the
+      same window as Monaghan (CompSPH NaN at t=0.497, CRKSPH at 0.433); Monaghan
+      at nx 400 has the same onset (19 p3 at t=0.439 vs 22 p3 at 0.446 at nx 200).
+      Scheme- and resolution-independent, triggered by the second shock's
+      arrival. Next discriminating runs: `wallRiemannState` off; a flat wall
+      facing the same second shock.

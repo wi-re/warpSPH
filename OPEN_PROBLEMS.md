@@ -434,7 +434,14 @@ wall lattice only moves the threshold.
 Tried 2026-10-06 (reverted): the per-pair route for Monaghan's pressure force only (fluid-fluid kernel-mean, fluid<-wall
 `Scatter` with the lattice-floored wall h). Fewer rows end up inside the cylinder (32 vs 235 at t = 0.47) but the
 stagnation pressure runs away at the same time (271 p3): the gap-filling is a symptom, not the whole cause. CompSPH and
-CRKSPH get the first impact right (peak 1.04 / 0.95 p3, Monaghan 0.80) but were only run to t = 0.38.
+CRKSPH get the first impact right (peak 1.04 / 0.95 p3, Monaghan 0.80) and then **fail in the same window** (CompSPH
+runs away from t ~ 0.45, NaN at 0.497; CRKSPH NaN at 0.433). Monaghan at **twice the resolution** (nx 400) has the
+same onset (19 p3 at t = 0.439 vs 22 p3 at 0.446 at nx 200), NaN at 0.483. So: scheme-independent and
+resolution-independent, triggered by the second shock's arrival at the stagnation point -- the lattice-gap picture
+alone does not explain a resolution-independent onset; the wall state at a compressed, curved stagnation point (the
+Riemann p* on a gathered state that already contains the wall-compressed fluid) is the next suspect. Discriminating
+runs not done: `wallRiemannState` off, and a flat wall facing the same second shock (a channel end wall instead of
+the cylinder).
 
 
 ## 20. `test_sod1d_readHayfieldSuppressesContactOvershoot` fails since the adaptive-support clamp (013a22f)
