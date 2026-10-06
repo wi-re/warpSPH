@@ -563,3 +563,30 @@ sampler mass/cell mismatch that made it look necessary was fixed at the source (
 
 Third item (the sampler mass fix on the other compressible cases) is in the entry above ("§6 item 3").
 
+## OPEN_PROBLEMS §20 — R&H Sod contact test fails since the adaptive-support clamp (013a22f) — RESOLVED 2026-10-06
+
+Found 2026-10-06. Passes at d0f4774, fails from 013a22f on (`_clampSupportsToVolume` in
+`modules/adaptiveSupport/optimalSupport.py`, `h <= n_h (m/rho)^(1/d)` on fluid rows): R&H's contact entropy overshoot
+3.43% vs NoneSwitch 3.24% (the pressure overshoot criterion still passes). The clamp is still needed by the
+compressible walls: without it the shockReflection outermost row is -10% in p again (frozen 1.8x h, a coincident
+pair) vs -0.9% with it. Options: keep the clamp and re-baseline the test (the margin is 6% of a 3% overshoot), or
+find why the clamp shifts the contact. Your call.
+
+**Wider than the one test (2026-10-06, AV_PLAN Phase 2):** the clamp moves *every* compressible number in the AV
+baseline. The smoke profile at HEAD vs the M0e reference (`results/av_smoke_ref_M0e`): 30/30 pairs differ, including
+`none` (Sod contact P spike up to 90 % relative, Sedov E0 recovery, Noh post-shock rho 11 %). So the M0e baseline in
+AV_PLAN no longer describes the code. If the clamp stays, AV_PLAN needs a re-taken baseline (M0g); a fresh
+none / C&D reference at HEAD is being taken for Phase 2 (`results/av_M2_ref_*`).
+
+**Resolution (2026-10-06).** Measured with a new `SimulationConfig.supportVolumeClamp` ('always' / 'walls' / 'off'):
+- clamp off at HEAD is bit-identical to the pre-clamp M0e baseline (smoke 30/30, full 28/28 pairs for none / C&D / Q), so
+  the clamp is the only change to pure-fluid runs since M0e;
+- clamp on vs off: shocks better (Sod contact P spike -46..-71 %, Sedov 3D peak none 2.53 -> 2.75), smooth flow worse
+  (inviscid linear wave error 0.00053 -> 0.0033, Gresho L1 +11-14 % and angular-momentum loss +31-85 %, C&D KH amplitude
+  -18 %; with alpha fixed at 1 Gresho / KH move <= 2 %);
+- why (`scripts/probe_supportClampBinding.py`): in 2D the clamp binds on ~100 % of rows by ~2 % (Owen's equilibrium sits
+  above the volume bound), in 1D only on ratcheted rows (31 %, up to 1.32x) -- OPEN_PROBLEMS §21;
+- shockReflection near-wall rows: 'walls' identical to 'always' (outermost -0.9 % in p), 'off' -10.2 %.
+User rule (2026-10-06): if the clamp degrades fluid behaviour it is off for pure-fluid cases. Default is now 'walls'; the
+R&H test passes again; the AV baseline M0e describes the code again.
+

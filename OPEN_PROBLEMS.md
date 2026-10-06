@@ -447,21 +447,23 @@ should divide), which a per-row wall state cannot relieve -- pointing at the mir
 above. Not done: a flat wall facing the same second shock (a channel end wall instead of the cylinder).
 
 
-## 20. `test_sod1d_readHayfieldSuppressesContactOvershoot` fails since the adaptive-support clamp (013a22f)
+## 20. (resolved 2026-10-06 -- the support clamp is now wall-only; see RESOLVED_PROBLEMS.md)
 
-Found 2026-10-06. Passes at d0f4774, fails from 013a22f on (`_clampSupportsToVolume` in
-`modules/adaptiveSupport/optimalSupport.py`, `h <= n_h (m/rho)^(1/d)` on fluid rows): R&H's contact entropy overshoot
-3.43% vs NoneSwitch 3.24% (the pressure overshoot criterion still passes). The clamp is still needed by the
-compressible walls: without it the shockReflection outermost row is -10% in p again (frozen 1.8x h, a coincident
-pair) vs -0.9% with it. Options: keep the clamp and re-baseline the test (the margin is 6% of a 3% overshoot), or
-find why the clamp shifts the contact. Your call.
+## 21. Owen adaptive support: one-way h ratchet, and its equilibrium sits ~2 % above the volume bound in 2D
 
-**Wider than the one test (2026-10-06, AV_PLAN Phase 2):** the clamp moves *every* compressible number in the AV
-baseline. The smoke profile at HEAD vs the M0e reference (`results/av_smoke_ref_M0e`): 30/30 pairs differ, including
-`none` (Sod contact P spike up to 90 % relative, Sedov E0 recovery, Noh post-shock rho 11 %). So the M0e baseline in
-AV_PLAN no longer describes the code. If the clamp stays, AV_PLAN needs a re-taken baseline (M0g); a fresh
-none / C&D reference at HEAD is being taken for Phase 2 (`results/av_M2_ref_*`).
-
+Found 2026-10-06 while resolving §20 (`scripts/probe_supportClampBinding.py`, clamp off). Two properties of the Owen
+support solve (`modules/adaptiveSupport/optimalSupportOwen.py`) that `supportVolumeClamp` papers over:
+1. **One-way ratchet** (COMPRESSIBLE_WALLS_PLAN 2026-10-05): the relaxation grows h while a kernel is under-sampled but
+   never shrinks a well-sampled one, so h freezes over-large after a transient. Wall outer rows: 1.8-2x (shockReflection
+   -10 % in p without the clamp). Pure fluid, 1D Sod at t 0.056: 31 % of rows above the bound, up to 1.32x at the shock /
+   contact -- which is why the clamp halved Sod's contact pressure spike (none 0.060 -> 0.026) and raised the Sedov 3D peak
+   (2.53 -> 2.75).
+2. **2D offset:** Owen's well-sampled equilibrium is h = 1.02 n_h (m/rho)^(1/d) on ~100 % of rows (Gresho, KH), so a clamp
+   at the plain volume bound shrinks every row by ~2 % after the density sum -- the density then belongs to a larger h
+   than the kernels and grad-h terms use. Inviscid linear wave error 6x, Gresho angular-momentum loss +30-85 %, KH growth
+   -18 % (C&D) with the clamp on.
+The principled fix is in the solve (let h shrink, e.g. a two-sided relaxation or a Newton step on the h-rho constraint),
+not a clamp; with that, `supportVolumeClamp` could go. Nothing queued -- your call when.
 
 ## Resolved (details in [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md); numbers kept so references stay valid)
 
@@ -474,6 +476,7 @@ none / C&D reference at HEAD is being taken for Phase 2 (`results/av_M2_ref_*`).
 - **§16** Monaghan viscous heating lacked the 1/2 -- fixed, `tests/test_monaghanEnergy.py`.
 - **§17** Read-Hayfield entropy dissipation did not conserve energy -- Eq. (33) transcription error, fixed; pair loops moved to warp kernels (`wp_readHayfield.py`).
 - **§18** Monaghan Sedov energy drift 5e-4 -- RK2 time-integration error, expected behaviour, converges at second order in dt.
+- **§20** R&H Sod test failing since the support clamp 013a22f -- the clamp degrades smooth pure-fluid flow; now `supportVolumeClamp='walls'` by default (user, 2026-10-06): pure-fluid runs bit-identical to before 013a22f, walls keep the fix. Root cause open as §21.
 
 See also: [[boundary-density-plan]], [[wcsph-deltasph-scheme-concerns]],
 [[sph-symmetric-pressure-truncation-artifact]],

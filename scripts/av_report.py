@@ -25,6 +25,7 @@ records: the M0 reproducibility lock is `max relative difference < 1e-6`.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import math
 import sys
 import time
@@ -69,6 +70,9 @@ class AVConfig:
     #: `DiffusionParameters` fields overridden on the scheme config after the case
     #: configures it (e.g. `{'C_q': 2.0}`); these are scheme, not case, parameters.
     diffusion: Dict[str, Any] = field(default_factory=dict)
+    #: `SimulationConfig` fields set before the case builds its state (so the IC sees them too),
+    #: e.g. `{'supportVolumeClamp': 'off'}` (OPEN_PROBLEMS §20); `--supportVolumeClamp` sets it for every config.
+    simulation: Dict[str, Any] = field(default_factory=dict)
 
 
 #: R&H 2012 is designed with a narrower, higher-baseline alpha range
@@ -149,9 +153,11 @@ def _execute(spec: RunSpec, cfg: AVConfig, outDir: Path, tag: str, video: bool,
             setattr(ctx.schemeConfig.viscositySwitchParams, name, value)
         for name, value in cfg.diffusion.items():
             setattr(ctx.schemeConfig.diffusionParams, name, value)
+        for name, value in cfg.simulation.items():
+            setattr(ctx.config, name, value)
 
     case = dataclasses.replace(spec.case, diagnostics=diagnostics,
-                               configureScheme=configureScheme if (cfg.diffusion or cfg.switchParams) else configure)
+                               configureScheme=configureScheme if (cfg.diffusion or cfg.switchParams or cfg.simulation) else configure)
     kw = dict(spec.kwargs)
     kw.setdefault('scheme', cfg.scheme)
     params = dict(spec.params, viscositySwitch=cfg.switch, **cfg.params)
@@ -638,6 +644,8 @@ def main() -> int:
                     help='compare two report dirs / results.json (exit 1 if they differ)')
     ap.add_argument('--merge', nargs='+', metavar='DIR',
                     help='merge report dirs (later overrides earlier per config/case) into --out')
+    ap.add_argument('--supportVolumeClamp', choices=('always', 'walls', 'off'), default=None,
+                    help="set SimulationConfig.supportVolumeClamp for every config (OPEN_PROBLEMS §20)")
     ap.add_argument('--tol', type=float, default=0.0,
                     help='--compare tolerance on the relative difference (0 = bit-identical)')
     args = ap.parse_args()
@@ -658,7 +666,7 @@ def main() -> int:
     video = (args.profile == 'full') if args.video is None else args.video
     outDir = rep.outDirFor('av', args.out)
     meta = rep.environmentMeta(extra=dict(profile=args.profile, config=args.config, repeat=args.repeat,
-                                          video=video))
+                                          video=video, supportVolumeClamp=args.supportVolumeClamp))
     print(f'[av_report] {names} x {[c.name for c in cases]}  profile={args.profile} '
           f'repeat={args.repeat} video={video}\n[av_report] -> {outDir}', flush=True)
 
@@ -669,7 +677,10 @@ def main() -> int:
             reps = []
             for i in range(args.repeat):
                 print(f'[av_report] {name} / {case.name}  (run {i + 1}/{args.repeat})', flush=True)
-                reps.append(runOne(CONFIGS[name], case, args.profile, outDir,
+                cfg = CONFIGS[name]
+                if args.supportVolumeClamp is not None:
+                    cfg = dataclasses.replace(cfg, simulation=dict(cfg.simulation, supportVolumeClamp=args.supportVolumeClamp))
+                reps.append(runOne(cfg, case, args.profile, outDir,
                                    video and i == 0, f'{name}_{case.name}'))
             records.append(reps[0])
             if args.repeat > 1:

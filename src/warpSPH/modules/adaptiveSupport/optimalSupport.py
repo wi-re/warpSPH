@@ -39,6 +39,19 @@ def _clampSupportsToVolume(state, h, densities, config):
     return torch.where(fluid, torch.minimum(h, bound), h)
 
 
+def _clampEnabled(state, config) -> bool:
+    mode = getattr(config, 'supportVolumeClamp', 'walls')
+    if mode == 'always':
+        return True
+    if mode == 'off':
+        return False
+    if mode == 'walls':
+        # read from this state, not `stateHasBoundaryParticles`' per-config cache: case builders
+        # solve the supports before the wall rows are appended
+        return bool((state.kinds != 0).any())
+    raise ValueError(f"supportVolumeClamp must be 'always', 'walls' or 'off', got {mode!r}")
+
+
 def evaluateOptimalSupport(
         particleState: BaseState,
         config: SimulationConfig,
@@ -73,5 +86,6 @@ def evaluateOptimalSupport(
             raise ValueError(f"Unsupported adaptive support scheme: {compParams.adaptiveSupportScheme}")
 
         densities, h, adjacency, *rest = result
-        h = _clampSupportsToVolume(particleState, h, densities, config)
+        if _clampEnabled(particleState, config):
+            h = _clampSupportsToVolume(particleState, h, densities, config)
         return (densities, h, adjacency) + tuple(rest)

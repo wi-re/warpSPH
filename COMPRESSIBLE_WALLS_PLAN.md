@@ -232,6 +232,9 @@ changes the fluid's local spacing but not the wall row spacing).
   Cleanup: removed the unused `applyMirrorDensityCorrection` (and its `_b7`/
   `_b7Cdim` helpers) from compressibleWall -- the static mirror correction
   over-corrected (+37%) and was never the right mechanism.
+  **2026-10-06 (later): the clamp is now wall-only** (`SimulationConfig.supportVolumeClamp='walls'` default, user): it
+  degraded smooth pure-fluid flow (OPEN_PROBLEMS §20, resolved). shockReflection near-wall rows are identical under
+  'walls' and 'always' (outermost -0.9 % in p; 'off' -10.2 %). The clamp's root cause (Owen ratchet) is OPEN_PROBLEMS §21.
 - 2026-10-06 (overnight session, user away): module pass, moving walls, CompSPH
   and CRKSPH.
   - **API**: `modules/compressibleWall` is now a per-evaluation object,

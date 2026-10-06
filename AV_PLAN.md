@@ -47,7 +47,7 @@ Phase 2 (Rosswog 2020 entropy trigger) built and validated 2026-10-06 — passes
 |---|---|---|
 | 0 | M0 Baseline locked | ✅ M0c (2026-09-30), tag `milestone/av-baseline` at the first M0; the report copy in `docs/av/` is uncommitted |
 | 1 | M1 Old physics, new architecture | ◐ S2/S3 done (registry, `BetaMode`, tag fixes, stubs filled); `VelocityPairPolicy` and `computePi_actual` taking the pair velocity are still to do |
-| 2 | M2 Entropy trigger validated | ◐ built 2026-10-06; validated except KH (fails) and marginal Sod 2D/3D, Gresho nx 100 — `docs/av/av_phase2_rosswog2020_2026-10-06.md` |
+| 2 | M2 Entropy trigger validated | ◐ built 2026-10-06; validated except KH (fails) and marginal Sod 2D/3D — `docs/av/av_phase2_rosswog2020_2026-10-06.md` |
 | 3 | M3 Reconstruction engine works | ☐ not started |
 | 4 | M4 Smooth-flow dissipation characterised | ☐ not started |
 | 5A | M5 Quadratic dissipation understood | ☐ not started |
@@ -185,6 +185,12 @@ once at the end of S2.
   differ, `none` included. Phase 2 is therefore compared against a fresh none / C&D reference taken at HEAD
   (`results/av_M2_ref_{none,cd,noneQ,cdQ}`), not against M0e. Whether the clamp stays (and M0e is formally
   replaced by an M0g) is the §20 decision.
+- 2026-10-06 (later) **M0e is valid again.** OPEN_PROBLEMS §20 resolved: the clamp degrades smooth pure-fluid flow (inviscid
+  linear wave error 6x, Gresho angular-momentum loss +30-85 %) while helping shock contacts, so it is now wall-only
+  (`SimulationConfig.supportVolumeClamp='walls'`, user rule: a boundary fix that degrades fluid behaviour is off for pure
+  fluid). Pure-fluid runs at the new default are bit-identical to M0e (smoke 30/30; full 28/28 with the clamp off). The
+  `results/av_M2_ref_*` columns are the clamp-on comparison, kept for the record; Phase 2's numbers at the default are
+  `results/av_noclamp_rosswog2020{,Q}`. `av_report.py --supportVolumeClamp` selects the mode for any run.
 
 ## The host scheme
 
@@ -1005,22 +1011,23 @@ makes sharp:**
 - [x] step-boundary unit test passes before the physics is tuned (`test_step_boundary_reads_stage0_only`)
 - [x] all `S(x)` / threshold / dimensionless / decay unit tests pass, plus Sod wiring on Monaghan and CompSPH (`tests/test_rosswogTrigger.py`, 2026-10-06)
 - [x] gradcheck: n/a (no warp kernel; the trigger runs in `finalize`, off the AD path)
-- [~] Sod 1D/2D/3D table above (2026-10-06): 1D passes; 2D/3D P spike marginally above none (+1.4 % / +0.4 %)
-- [x] Sedov approaches 4 from below (2.69 / 2.12 at C_q 0 / 2, sharper than C&D's 2.21 / 1.84)
-- [~] Gresho `alphaMean < 0.05`: 0.0506 at nx 100 (marginal), 0.029 at nx 200; L1 0.086 vs C&D 0.081
-- [x] resolution sweep: `alphaMean` non-increasing (Gresho nx 50/100/200: 0.077/0.051/0.029)
-- [x] timestep sweep: α within 10% (Sod cfl 0.3 vs 0.15: 5.8 %)
+- [~] Sod 1D/2D/3D table above (2026-10-06): 1D passes; 2D/3D P spike marginally above none (+1.8 % / +0.3 %)
+- [x] Sedov approaches 4 from below (2.53 / 2.09 at C_q 0 / 2, sharper than C&D's 2.15 / 1.83)
+- [x] Gresho `alphaMean < 0.05`: 0.047 at nx 100 (L1 0.077 vs C&D 0.073)
+- [x] resolution sweep: `alphaMean` non-increasing (Gresho nx 50/100/200: 0.074/0.047/0.029)
+- [x] timestep sweep: α within 10% (Sod cfl 0.3 vs 0.15: 6.0 %)
 - [x] detector map (§0.3) rendered vs C&D on Sedov (`scripts/probe_rosswogSedovMap.py`, `docs/av/av_phase2_sedov_alpha_map.png`): alpha ~ 1 everywhere, cold-gas saturation ahead of the shock
-- [ ] **Kelvin-Helmholtz: A(1.5) 0.020 vs C&D 0.080 -- FAILS** (trigger fires on the shear layer; see results)
+- [ ] **Kelvin-Helmholtz: A(1.5) 0.012 vs C&D 0.098 -- FAILS** (trigger fires on the shear layer; see results)
 - [x] report row added: `docs/av/av_phase2_rosswog2020_2026-10-06.md`, configs `rosswog2020`, `rosswog2020Q` (group `phase2`)
 
 ### Results (2026-10-06)
-Full write-up and tables: [`docs/av/av_phase2_rosswog2020_2026-10-06.md`](docs/av/av_phase2_rosswog2020_2026-10-06.md).
-Compared against a fresh none / C&D reference at HEAD (M0e is stale, see Notes). Passes Sod 1D, Sedov (sharper than C&D),
-Noh (C_q 2), both sweeps, linear wave / Yee (better than C&D). **Fails Kelvin-Helmholtz** (A(1.5) = fixed-alpha-1 value,
-4x below C&D): the trigger fires on the density-contrast shear layer, most likely standard SPH's contact entropy noise,
-which MAGMA2's reconstruction suppresses. Marginal: Sod 2D/3D P spike vs none, Gresho alphaMean 0.0506 at nx 100.
-Cold gas (Sedov's u = 0 background) saturates the trigger at alpha = 1 (tau = h/c infinite).
+Full write-up and tables: [`docs/av/av_phase2_rosswog2020_2026-10-06.md`](docs/av/av_phase2_rosswog2020_2026-10-06.md),
+at the default `supportVolumeClamp='walls'` against M0e (valid again, see Notes). Passes Sod 1D, Sedov (2.53 vs C&D 2.15),
+Noh (C_q 2), Gresho alphaMean (0.047), both sweeps (dt 6.0 %; Gresho 0.074/0.047/0.029), linear wave / Yee (better than
+C&D). **Fails Kelvin-Helmholtz** (A(1.5) 0.012 vs C&D 0.098, below even fixed alpha = 1): the trigger fires on the
+density-contrast shear layer, most likely standard SPH's contact entropy noise, which MAGMA2's reconstruction suppresses.
+Marginal: Sod 2D/3D P spike vs none (+1.8 % / +0.3 %), Gresho L1 6 % above C&D. Cold gas (Sedov's u = 0 background)
+saturates the trigger at alpha = 1 (tau = h/c infinite).
 **Open (user decides how to proceed):** (a) confirm the KH mechanism with an epsdot map of the shear layer;
 (b) re-test after Phase 3 (velocity reconstruction), which is the paper's setting -- the plan's order already puts it next;
 (c) the paper's own remark that non-reconstructed SPH may need other `eps_0`/`eps_1` -- only with a derivation, not a

@@ -42,10 +42,21 @@ def main():
     ap.add_argument('--scheme', default='Monaghan')
     ap.add_argument('--supportMode', default=None, help="unset: Gather, KernelMeanSymmetric for CRKSPH")
     ap.add_argument('--exportRoot', default='results/compressibleWalls/probes')
+    ap.add_argument('--supportVolumeClamp', choices=('always', 'walls', 'off'), default=None,
+                    help='SimulationConfig.supportVolumeClamp (OPEN_PROBLEMS §20); unset: the default')
     a = ap.parse_args()
+    case = shockReflectionCase
+    if a.supportVolumeClamp is not None:
+        import dataclasses
+        configure = case.configureScheme
+
+        def configureScheme(ctx):
+            configure(ctx)
+            ctx.config.supportVolumeClamp = a.supportVolumeClamp
+        case = dataclasses.replace(case, configureScheme=configureScheme)
     supportMode = a.supportMode or ('KernelMeanSymmetric' if a.scheme == 'CRKSPH' else 'Gather')
 
-    res = run(shockReflectionCase, quiet=True, progress=True, plot=True, video=True,
+    res = run(case, quiet=True, progress=True, plot=True, video=True,
               exportRoot=a.exportRoot, velocityAlarmPlotInterval=1, stallProgress=1e-3,
               scheme=a.scheme, supportMode=supportMode,
               tLimit=a.t, nx=a.nx, params=dict(mach=a.mach))
