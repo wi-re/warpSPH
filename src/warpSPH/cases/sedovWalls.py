@@ -64,6 +64,11 @@ def _appendWalls(state, nx: int, nw: int, dim: int):
             setattr(state, name, torch.cat([value, value[template:template + 1].expand(m, *value.shape[1:])]))
     state.positions = torch.cat([state.positions[:n], walls])
     state.kinds = torch.cat([state.kinds[:n], torch.ones(m, dtype=state.kinds.dtype, device=state.kinds.device)])
+    # wall normals: the gradient of the box SDF (axis-aligned on a face, diagonal past a corner)
+    q = walls.abs() - 1.0
+    outside = q.clamp_min(0.0) * torch.sign(walls)
+    normals = outside / outside.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+    state.wallNormals = torch.cat([torch.zeros(n, dim, dtype=walls.dtype, device=walls.device), normals])
     state.UIDs = torch.arange(n + m, dtype=state.UIDs.dtype, device=state.UIDs.device)
     state.UIDcounter = n + m
     return state
@@ -92,8 +97,8 @@ def buildSystem(ctx: RunContext):
 
 
 SEDOV_WALL_FIELDS = [
-    Field('densities', 'Density', colorMap='viridis', gridResolution=512),
-    Field('pressures', 'Pressure', colorMap='inferno', gridResolution=512),
+    Field('densities', 'Density', colorMap='viridis', gridResolution=512, boundary='Hide'),
+    Field('pressures', 'Pressure', colorMap='inferno', gridResolution=512, boundary='Hide'),
 ]
 _fieldSetup, _fieldUpdate = particlePlot(SEDOV_WALL_FIELDS, figsize=(11, 5))
 

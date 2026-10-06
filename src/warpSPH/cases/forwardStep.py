@@ -58,7 +58,9 @@ def configureScheme(ctx: RunContext) -> None:
 
 
 def _stepSDF(ctx: RunContext, x: torch.Tensor) -> torch.Tensor:
-    return boxSDF(x, (_faceStart(ctx), -_FAR), (_FAR, ctx.param('stepHeight')))
+    # finite in x (it ends at the tunnel's end): once it moves, the gas fills the room
+    # behind it, and the rows at its back end need that face's normal, not the top's
+    return boxSDF(x, (_faceStart(ctx), -_FAR), (_box(ctx)[1][0], ctx.param('stepHeight')))
 
 
 def buildSystem(ctx: RunContext):
@@ -88,15 +90,20 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     line = fluid & ((y - ctx.param('probeY')).abs() < dx) & (x < face)
     shocked = line & (s.densities > ctx.param('shockDensity'))
     out['standoff'] = (face - x[shocked].min()).item() if shocked.any() else float('nan')
-    inStep = fluid & (x > face + 0.5 * dx) & (x < face + 2.4) & (y < ctx.param('stepHeight'))
+    # depth into the step block (from its top or its face) and past the floor or ceiling, in spacings
+    h0 = ctx.param('stepHeight')
+    inStep = fluid & (x > face) & (x < face + 2.4) & (y < h0)
+    depth = torch.minimum(x - face, h0 - y)
     lo, hi = _box(ctx)
-    out['penetrating'] = (inStep | (fluid & ((y < lo[1]) | (y > hi[1])))).sum().item()
+    out['inStep'] = inStep.sum().item()
+    out['stepDepth'] = (depth[inStep].max() / dx).item() if inStep.any() else 0.0
+    out['outsideTunnel'] = (fluid & ((y < lo[1]) | (y > hi[1]))).sum().item()
     out['maxVelocity'] = torch.linalg.norm(s.velocities[fluid], dim=-1).max().item()
     return out
 
 
 FORWARD_STEP_FIELDS = [
-    Field('densities', 'Density', colorMap='viridis', gridResolution=1024),
+    Field('densities', 'Density', colorMap='viridis', gridResolution=1024, boundary='Hide'),
 ]
 setupPlot, updatePlot = particlePlot(FORWARD_STEP_FIELDS, figsize=(16, 3))
 

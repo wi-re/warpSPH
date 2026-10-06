@@ -20,7 +20,9 @@ from warpSPHCore import SupportScheme
 __all__ = ['WALL_PARAMS', 'buildWalledSystem', 'fluidEdges', 'nearWallRows', 'fluidEnergies',
            'boxSDF', 'circleSDF', 'walledDomainBounds', 'buildWalledBox']
 
-WALL_PARAMS = dict(wallLayers=16, wallProbeLayers=3)
+#: `wallLatticeSupport`: 'auto' (the scheme's default), 'on' or 'off'; `wallSlip`:
+#: 'freeSlip' or 'noSlip' -- see `CompressibleSPHConfig` and modules/compressibleWall
+WALL_PARAMS = dict(wallLayers=16, wallProbeLayers=3, wallLatticeSupport='auto', wallSlip='freeSlip')
 
 
 def buildWalledSystem(ctx: RunContext, stateAt: Callable[[torch.Tensor], Tuple[torch.Tensor, ...]],
@@ -47,6 +49,9 @@ def buildWalledSystem(ctx: RunContext, stateAt: Callable[[torch.Tensor], Tuple[t
     v = v.clone()
     v[:nw] = wallVelocity[0]
     v[nx - nw:] = wallVelocity[1]
+    normals = torch.zeros(nx, 1, device=config.device, dtype=config.dtype)
+    normals[:nw] = -1.0
+    normals[nx - nw:] = 1.0
 
     pos = x.unsqueeze(-1)
     A, u, P, c = idealGasEOS(A=None, u=None, P=p, rho=rho, gamma=schemeConfig.gamma)
@@ -61,6 +66,7 @@ def buildWalledSystem(ctx: RunContext, stateAt: Callable[[torch.Tensor], Tuple[t
         internalEnergies=u, totalEnergies=(u + 0.5 * v ** 2) * masses,
         entropies=A, pressures=P, soundspeeds=c,
         alphas=ones.clone(), alpha0s=ones.clone(), divergence=torch.zeros_like(x),
+        wallNormals=normals,
     )
 
     adapt = CompressibleSPHConfig(adaptiveSupportIterations=16, adaptiveSupportThreshold=1e-3,
@@ -144,13 +150,22 @@ def buildWalledBox(ctx: RunContext, lo, hi, stateAt, solidSDF=None, wallVelocity
         n = int(round((hi[k] - lo[k]) / dx))
         axes.append((torch.arange(-nw, n + nw, device=config.device, dtype=config.dtype) + 0.5) * dx + lo[k])
     x = torch.stack(torch.meshgrid(*axes, indexing='ij'), dim=-1).reshape(-1, dim)
-    d = boxSDF(x, lo, hi)
-    if solidSDF is not None:
-        d = torch.maximum(d, -solidSDF(x))
+    def fluidSDF(y):
+        d = boxSDF(y, lo, hi)
+        return d if solidSDF is None else torch.maximum(d, -solidSDF(y))
+
+    d = fluidSDF(x)
     keep = d < nw * dx
     x, d = x[keep], d[keep]
     wall = d > 0
     kinds = wall.to(torch.int32)
+    # wall normals (fluid -> wall) from the geometry: the SDF's central-difference gradient
+    eps = 1e-3 * dx
+    grad = torch.stack([(fluidSDF(x + eps * e) - fluidSDF(x - eps * e)) / (2 * eps)
+                        for e in torch.eye(dim, device=x.device, dtype=x.dtype)], dim=-1)
+    normals = grad / grad.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+    normals = torch.where(wall.unsqueeze(-1) & (grad.norm(dim=-1, keepdim=True) > 0.5), normals,
+                          torch.zeros_like(normals))
 
     rho, p, v = stateAt(x)
     v = v.clone()
@@ -164,13 +179,14 @@ def buildWalledBox(ctx: RunContext, lo, hi, stateAt, solidSDF=None, wallVelocity
     masses = rho * dx ** dim
     state = ctx.SimulationState(
         positions=x, velocities=v,
-        supports=ones * volumeToSupport(dx, config.targetNeighbors, dim),
+        supports=ones * volumeToSupport(dx ** dim, config.targetNeighbors, dim),
         masses=masses, densities=rho.clone(),
         kinds=kinds, materials=torch.zeros_like(kinds),
         UIDs=torch.arange(n, device=config.device, dtype=torch.int32), UIDcounter=n,
         internalEnergies=u, totalEnergies=(u + 0.5 * (v ** 2).sum(-1)) * masses,
         entropies=A, pressures=P, soundspeeds=c,
         alphas=ones.clone(), alpha0s=ones.clone(), divergence=torch.zeros(n, device=config.device, dtype=config.dtype),
+        wallNormals=normals,
     )
     adapt = CompressibleSPHConfig(adaptiveSupportIterations=16, adaptiveSupportThreshold=1e-3,
                                   adaptiveSupportScheme=AdaptiveSupportScheme.NoScheme)

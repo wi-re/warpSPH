@@ -53,6 +53,7 @@ class CompressibleSPHConfig:
     # Solid walls (`kinds == 1` rows, modules/compressibleWall, COMPRESSIBLE_WALLS_PLAN.md)
     wallSlip: str = field(default='freeSlip', metadata={'description': "Wall-row velocity seen by the pair terms: 'freeSlip' (prescribed normal, fluid tangential) or 'noSlip' (prescribed)"})
     wallRiemannState: bool = field(default=True, metadata={'description': 'Wall state = star state of the mirrored Riemann problem (shock on approach, rarefaction on recession) instead of the plain Shepard gather'})
+    wallLatticeSupport: Optional[bool] = field(default=None, metadata={'description': "Floor the wall rows' h at their own lattice spacing's (None: the scheme's default -- on for CRKSPH, whose moment matrices need it, off otherwise)"})
 
 from typing import Dict, Any
 
@@ -72,6 +73,7 @@ def compressibleConfigToDict(config: CompressibleSPHConfig) -> Dict[str, Any]:
         'boundaryConditions': [boundaryConditionToDict(bc) for bc in config.boundaryConditions],
         'wallSlip': config.wallSlip,
         'wallRiemannState': config.wallRiemannState,
+        'wallLatticeSupport': config.wallLatticeSupport,
     }
 
 def dictToCompressibleConfig(configDict: Dict[str, Any]) -> CompressibleSPHConfig:
@@ -89,5 +91,6 @@ def dictToCompressibleConfig(configDict: Dict[str, Any]) -> CompressibleSPHConfi
     config.boundaryConditions = [dictToBoundaryCondition(bcDict) for bcDict in configDict['boundaryConditions']]
     config.wallSlip = configDict.get('wallSlip', config.wallSlip)
     config.wallRiemannState = configDict.get('wallRiemannState', config.wallRiemannState)
+    config.wallLatticeSupport = configDict.get('wallLatticeSupport', config.wallLatticeSupport)
     
     return config

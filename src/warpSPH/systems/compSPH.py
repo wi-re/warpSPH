@@ -48,6 +48,10 @@ class CompSPHState(BaseState):
     av_ij: torch.Tensor = constant(tags=('pairwise_acceleration',), default=None)
     f_ij: torch.Tensor = constant(tags=('pairwise_energy_partition',), default=None)
 
+    # unit wall normals (fluid -> wall) of the solid rows, zero on fluid rows; None
+    # when the case gives no geometry (modules/compressibleWall then estimates them)
+    wallNormals: torch.Tensor = constant(tags=('wall_normal',), default=None)
+
 
 # from .compressibleMonaghan import CompressibleSystemUpdate
 # from ..configurations.compSPHConfig import CompSPHConfig

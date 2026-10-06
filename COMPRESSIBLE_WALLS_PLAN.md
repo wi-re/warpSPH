@@ -313,3 +313,50 @@ changes the fluid's local spacing but not the wall row spacing).
     Confirmed on the CRKSPH rerun (`scripts/probe_sedovWallRows.py`): fluid u
     dips to -0.0014 mid-run; with the guard the run finishes (t=1.47), energy
     exact, 0 penetrating, corner wall rows p 2.9 next to corner fluid 3.1.
+  - **2D cases** (`buildWalledBox`; Monaghan unless noted). Findings in order:
+    - *Builder bug*: `volumeToSupport` takes a volume and got `dx` (not `dx^d`),
+      so every 2D row started at h = 0.447 (36 spacings) and the first dt was
+      ~8x too large (the support solve repaired h on step 1, dt was already
+      taken). It made the impulsive Mach 3 forward step NaN in 4 steps; fixed.
+      The 2D results below that predate the fix are marked.
+    - *Piston/floor seam leak* (shockCylinder, pre-fix): the corner fluid row
+      was squeezed into the seam between the piston's bottom row (moving) and
+      the floor's top row (fixed), then got behind the piston and expanded into
+      the vacated region at |v| ~ 25 (`scripts/probe_pistonLeak.py`). Cause: the
+      floor rows next to the piston had a *diagonal* centroid normal (the fluid
+      fills only part of their neighbourhood), read the fluid streaming away
+      along it as a rarefaction (rho 2.0, p 2.1 vs 4-6 around) and sucked the
+      corner row in. Fix: **geometric wall normals** -- a `wallNormals` constant
+      field on both compressible states (zero on fluid rows), written by the
+      builders from the fluid region's SDF gradient (rigid with the rows, so
+      right for translating walls); the module falls back to the centroid where
+      none is given. No leak afterwards. Also: the piston is only the left
+      wall's rows within the channel's height (the corner blocks belong to the
+      fixed top and bottom walls).
+    - *Flat 2D walls hold*: the same channel without a cylinder (shock reflects
+      off the right wall at t=0.68, the reflection meets the piston): no
+      penetration (max 0.017 dx), |v| bounded, energy follows the piston work
+      (9.67 -> 16.32 at t=1).
+    - *Curved wall, stagnation point -- OPEN (OPEN_PROBLEMS §19)*: shockCylinder
+      is right through the first impact (stagnation pressure 0.80 p3 after
+      impact, relaxing to 1.17x the steady value by t=0.37; penetration < 0.3
+      dx), and the second shock (the bow shock reflected off the piston,
+      arriving t~0.40, p* 2.4 p3 -- physical) is right too; then the stagnation
+      region compresses without bound (22 p3 by t=0.445, penetration 9 dx).
+      `scripts/probe_cylinderFront.py`: once the fluid is compressed ~10x its
+      spacing is ~0.3 of the wall lattice's, and fluid rows sit *inside* the
+      surface ((r-R) ~ -0.1 dx) exactly half-way between wall rows, as
+      coincident pairs: the lattice wall's pressure field is bumpy at its own
+      spacing and the compressed fluid falls into the valleys. Not the exact
+      mirror symmetry (off-axis cylinder fails the same), not wall porosity in
+      the wall's own kernel (the lattice h floor, `wallLatticeSupport on`, fails
+      the same: the fluid's own small kernel still sees the valleys).
+    - bowShock (pre-builder-fix run): bow shock clean, pitot pressure within
+      1-2% of Rayleigh up to t~0.3; standoff reaches Billig (ratio 0.94-1.0) by
+      t~0.3, then drifts to 1.15 with the pitot falling to 0.91 by t=0.6 and
+      ~18 fluid rows inside the cylinder -- likely the same valley mechanism,
+      slower. Deep cylinder rows reach p ~ 160 (gathering far fluid with a wide
+      h at approach ~U): visible in the plots until the walls were hidden.
+    - New knobs: `CompressibleSPHConfig.wallLatticeSupport` (None = scheme
+      default), case params `wallLatticeSupport` ('auto'/'on'/'off') and
+      `wallSlip`; 2D case params are scalars (`centreX/Y`, `startX/Y`).

@@ -49,7 +49,7 @@ def bowShockStates(ctx: RunContext) -> Dict[str, float]:
 
 
 def _centre(ctx: RunContext, t: float):
-    cx, cy = ctx.param('start')
+    cx, cy = ctx.param('startX'), ctx.param('startY')
     return cx + bowShockStates(ctx)['U'] * t, cy
 
 
@@ -61,7 +61,7 @@ def configureScheme(ctx: RunContext) -> None:
 def buildSystem(ctx: RunContext):
     e = bowShockStates(ctx)
     rho0, p0 = ctx.param('rho0'), ctx.param('p0')
-    start, R = ctx.param('start'), ctx.param('radius')
+    start, R = (ctx.param('startX'), ctx.param('startY')), ctx.param('radius')
     lo, hi = _box(ctx)
 
     def stateAt(x):
@@ -99,8 +99,8 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
 
 
 BOW_SHOCK_FIELDS = [
-    Field('densities', 'Density', colorMap='viridis', gridResolution=768),
-    Field('pressures', 'Pressure', colorMap='inferno', gridResolution=768),
+    Field('densities', 'Density', colorMap='viridis', gridResolution=768, boundary='Hide'),
+    Field('pressures', 'Pressure', colorMap='inferno', gridResolution=768, boundary='Hide'),
 ]
 setupPlot, updatePlot = particlePlot(BOW_SHOCK_FIELDS, figsize=(12, 4))
 
@@ -137,7 +137,8 @@ bowShockCase = registerCase(Case(
         p0=1.0,
         mach=3.0,
         height=1.2,
-        start=(0.3, 0.0),
+        startX=0.3,
+        startY=0.0,
         radius=0.1,
         probeRadius=2.5,
         **WALL_PARAMS,

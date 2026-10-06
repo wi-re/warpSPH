@@ -2,7 +2,7 @@
 
 COMPRESSIBLE_WALLS_PLAN.md case 6: the curved wall. A Mach-`mach` shock runs
 right through gas at rest (`rho0`, `p0`) towards a cylinder of radius
-`radius` at `centre`. Behind the shock the gas is the Rankine-Hugoniot state 2
+`radius` at (`centreX`, `centreY`). Behind the shock the gas is the Rankine-Hugoniot state 2
 moving at `u2`, kept that way by the left wall moving at `u2` (a piston), so no
 rarefaction follows the shock. The channel's other walls are fixed.
 
@@ -49,6 +49,10 @@ def cylinderStates(ctx: RunContext) -> Dict[str, float]:
     return e
 
 
+def _centre(ctx: RunContext):
+    return ctx.param('centreX'), ctx.param('centreY')
+
+
 def configureScheme(ctx: RunContext) -> None:
     walledDomainBounds(ctx, *_box(ctx))
     configureCompressible(ctx)
@@ -68,11 +72,14 @@ def buildSystem(ctx: RunContext):
 
     def wallVelocity(x):
         v = torch.zeros_like(x)
-        v[:, 0] = torch.where(x[:, 0] < lo[0], e['u2'], 0.0).to(x.dtype)   # the left wall is the piston
+        # the left wall within the channel's height is the piston; the corner rows
+        # beyond it belong to the fixed top and bottom walls
+        piston = (x[:, 0] < lo[0]) & (x[:, 1] >= lo[1]) & (x[:, 1] <= hi[1])
+        v[:, 0] = torch.where(piston, e['u2'], 0.0).to(x.dtype)
         return v
 
     return buildWalledBox(ctx, lo, hi, stateAt,
-                          solidSDF=lambda x: circleSDF(x, ctx.param('centre'), ctx.param('radius')),
+                          solidSDF=lambda x: circleSDF(x, _centre(ctx), ctx.param('radius')),
                           wallVelocity=wallVelocity)
 
 
@@ -81,24 +88,32 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     fluid = s.kinds == 0
     out = compressibleDiagnostics(ctx, state)
     dx = ctx.config.dx
-    cx, cy = ctx.param('centre')
+    cx, cy = _centre(ctx)
     lead = torch.tensor([cx - ctx.param('radius'), cy], dtype=s.positions.dtype, device=s.positions.device)
     near = fluid & (torch.linalg.norm(s.positions - lead, dim=-1) < ctx.param('probeRadius') * dx)
     nan = torch.full((), float('nan'), dtype=s.pressures.dtype, device=s.pressures.device)
     out['stagnationPressureRatio'] = (s.pressures[near].median() / e['p3']).item() if near.any() else nan.item()
     out['stagnationOverSteady'] = (s.pressures[near].median() / e['stagnation']).item() if near.any() else nan.item()
-    inside = circleSDF(s.positions, ctx.param('centre'), ctx.param('radius')) < 0
+    inside = circleSDF(s.positions, _centre(ctx), ctx.param('radius')) < 0
     lo, hi = _box(ctx)
     x = s.positions
     outsideBox = (x[:, 1] < lo[1]) | (x[:, 1] > hi[1]) | (x[:, 0] > hi[0])
-    out['penetrating'] = (fluid & (inside | outsideBox)).sum().item()
-    out['maxVelocity'] = torch.linalg.norm(s.velocities[fluid], dim=-1).max().item()
+    out['inCylinder'] = (fluid & inside).sum().item()
+    out['outsideBox'] = (fluid & outsideBox).sum().item()
+    # deepest fluid row into the cylinder or past the channel walls, in spacings
+    sdf = torch.maximum(-circleSDF(x, _centre(ctx), ctx.param('radius')),
+                        torch.maximum(x[:, 1] - hi[1], lo[1] - x[:, 1]))
+    out['penetrationDepth'] = (sdf[fluid].max().clamp_min(0.0) / dx).item()
+    speed = torch.where(fluid, torch.linalg.norm(s.velocities, dim=-1), torch.zeros_like(s.densities))
+    fastest = int(torch.argmax(speed))
+    out['maxVelocity'] = speed[fastest].item()
+    out['fastestX'], out['fastestY'] = x[fastest, 0].item(), x[fastest, 1].item()
     return out
 
 
 SHOCK_CYLINDER_FIELDS = [
-    Field('densities', 'Density', colorMap='viridis', gridResolution=768),
-    Field('pressures', 'Pressure', colorMap='inferno', gridResolution=768),
+    Field('densities', 'Density', colorMap='viridis', gridResolution=768, boundary='Hide'),
+    Field('pressures', 'Pressure', colorMap='inferno', gridResolution=768, boundary='Hide'),
 ]
 setupPlot, updatePlot = particlePlot(SHOCK_CYLINDER_FIELDS, figsize=(12, 4))
 
@@ -135,7 +150,8 @@ shockCylinderCase = registerCase(Case(
         mach=2.0,
         shockStart=0.4,
         height=1.0,
-        centre=(0.8, 0.0),
+        centreX=0.8,
+        centreY=0.0,
         radius=0.15,
         probeRadius=2.5,
         **WALL_PARAMS,

@@ -66,6 +66,12 @@ def configureCompressible(ctx: RunContext) -> None:
     schemeConfig.adaptiveSupportScheme = resolveEnum(
         AdaptiveSupportScheme, ctx.param('adaptiveSupportScheme'))
     schemeConfig.adaptiveSupportCorrections = ctx.param('adaptiveSupportCorrections')
+    # solid-wall knobs, for the cases that have walls (cases/compressibleWalls.py WALL_PARAMS)
+    params = ctx.spec.params
+    if 'wallSlip' in params:
+        schemeConfig.wallSlip = params['wallSlip']
+    if 'wallLatticeSupport' in params:
+        schemeConfig.wallLatticeSupport = {'auto': None, 'on': True, 'off': False}[params['wallLatticeSupport']]
 
 
 #: A particle counts as "active" for the AV report when its switched alpha

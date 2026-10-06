@@ -43,6 +43,10 @@ class CompressibleState(BaseState):
     alpha0s: torch.Tensor = constant(tags=('alpha0',), default=None)
     alphas: torch.Tensor = constant(tags=('alpha',), default=None)
 
+    # unit wall normals (fluid -> wall) of the solid rows, zero on fluid rows; None
+    # when the case gives no geometry (modules/compressibleWall then estimates them)
+    wallNormals: torch.Tensor = constant(tags=('wall_normal',), default=None)
+
 @dataclass
 class CompressibleSystemUpdate:
     dxdt: torch.Tensor = tagged(tags=('position_derivative',))

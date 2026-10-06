@@ -80,12 +80,14 @@ class CompressibleWall:
         self.volumes = _wallVolumes(currentState, config)
 
     def apply(self, currentState, config, schemeConfig, adjacency, latticeSupport: bool = False) -> None:
+        # `latticeSupport` is the scheme's default; `schemeConfig.wallLatticeSupport` overrides it
         """The wall state is the Shepard gather of the fluid rows; with
         `schemeConfig.wallRiemannState` it is then replaced by the star state of
         the mirrored Riemann problem for the fluid's approach speed `u_n` against
-        the wall (`wallRiemannState`). The wall normal is the direction from the
-        fluid centroid to the wall row, so no geometry is needed (the centroid
-        gather ignores periodic wrapping). Wall rows take the fluid's smoothing
+        the wall (`wallRiemannState`). The wall normal is the state's
+        `wallNormals` where the case gave one, else the direction from the fluid
+        centroid to the wall row (no geometry needed, but diagonal wherever walls
+        meet; the centroid gather ignores periodic wrapping). Wall rows take the fluid's smoothing
         length and a mass `rho_wall * V` (V fixed at the first call), so the
         fluid's density sum sees a wall as compressed as the gas it holds.
 
@@ -116,6 +118,15 @@ class CompressibleWall:
         centroid = gather(currentState.positions) / safe.unsqueeze(-1)
         normal = currentState.positions - centroid
         normal = normal / normal.norm(dim=-1, keepdim=True).clamp_min(_EPS)
+        given = getattr(currentState, 'wallNormals', None)
+        if given is not None:
+            # the case's geometry: where a wall meets another wall (a corner, a piston
+            # sliding along a floor) the fluid fills only part of a wall row's
+            # neighbourhood and the centroid direction is diagonal -- a floor row next
+            # to a piston then reads the fluid streaming away as a rarefaction and
+            # sucks it into the seam
+            known = given.norm(dim=-1, keepdim=True) > 0.5
+            normal = torch.where(known, given, normal)
         relative = vFluid - self.target
         approach = (relative * normal).sum(-1)
 
@@ -141,6 +152,9 @@ class CompressibleWall:
         # support solve's h, so they stay out of the fluid's reach.
         h = currentState.supports
         hWall = gather(h) / safe
+        configured = getattr(schemeConfig, 'wallLatticeSupport', None)
+        if configured is not None:
+            latticeSupport = configured
         if latticeSupport:
             dim = currentState.positions.shape[-1]
             hWall = torch.maximum(hWall, nH_to_n_h(config.targetNeighbors, dim) * self.volumes ** (1.0 / dim))
