@@ -67,16 +67,30 @@ Adiabatic wall: `dudt = 0`; non-fluid `dxdt/dvdt/drhodt` already zeroed by the
 ## Examples
 
 Live in `examples/compressibleWalls/` (separate from `examples/compressible/`,
-which stays pure fluid dynamics). Numbered ladder, one case per file:
+which stays pure fluid dynamics). Numbered ladder, one case per file; every
+case runs under `--scheme Monaghan|CompSPH|CRKSPH` (CRKSPH with
+`--supportMode KernelMeanSymmetric`):
 
-1. `01-closedBox`: quiescent gas at rest, plus hydrostatic column (unit test).
-2. `02-piston`: moving wall, exact piston solution.
-3. `03-shockReflection`: Mach-M shock off a wall, Rankine-Hugoniot reflected state.
-4. `04-woodwardColellaWalls`: blast wave between two walls (1D).
-5. `05-forwardStep`: Mach 3 step (2D corner/grazing wall).
-6. `06-shockCylinder`, `07-cylinderBowShock`: curved wall, standoff distance.
+1. `01-closedBox` (`cases/closedBox.py`): quiescent gas at rest.
+2. `02-piston` (`cases/piston.py`): moving wall, exact push (shock) and
+   withdraw (rarefaction) solutions, piston-work energy balance.
+3. `03-shockReflection` (`cases/shockReflection.py`): Mach-M shock off a wall,
+   Rankine-Hugoniot reflected state.
+4. `04-woodwardColellaWalls` (`cases/woodwardColellaWalls.py`): the blast waves
+   between two walls (1D); the periodic mirror-symmetric `woodwardColella` is
+   its exact reference (`scripts/compare_wallMirror.py`).
+5. `05-forwardStep` (`cases/forwardStep.py`): Mach 3 step, run in the gas frame
+   (the step moves, no inflow/outflow needed).
+6. `06-shockCylinder` (`cases/shockCylinder.py`): piston-driven Mach-2 shock on
+   a fixed cylinder; stagnation pressure p3 at impact, then the steady value.
+7. `07-bowShock` (`cases/bowShock.py`): cylinder at Mach 3 through gas at rest;
+   standoff vs Billig, pitot pressure.
+- `sedovWalls` (`cases/sedovWalls.py`): Sedov in a walled box (1/2/3D); the
+  periodic `sedov` on [-1, 1]^d is its exact reference.
 
-Minimum set: 1, 2, 3, 5. Run one at a time with video and progress output.
+2D cases share `buildWalledBox` (`cases/compressibleWalls.py`): a cell-centred
+lattice, fluid = box minus a solid SDF, walls = the solid within `wallLayers`
+spacings of the fluid, wall velocity a function of position.
 
 ## Reference: how the WCSPH path moves walls (surveyed 2026-10-05)
 
@@ -271,3 +285,31 @@ changes the fluid's local spacing but not the wall row spacing).
     energyRatio: Monaghan 1.0000 / 0.9989, 1.0011 / 0.9944; CompSPH 1.0000 /
     1.0003, 0.9996 / 0.9993; CRKSPH 1.0000 / 1.0003, 0.9991 / 1.0052. No
     penetration, fronts within 2 spacings. Frames checked.
+  - **Step 5, mirror references** (`scripts/compare_wallMirror.py`): a periodic
+    run whose initial state is mirror-symmetric about the wall planes is a run
+    with exactly reflecting walls, so `woodwardColella` (periodic [-1, 1]) is the
+    reference for case 4 `woodwardColellaWalls`, and `sedov` (periodic
+    [-1, 1]^d) for `sedovWalls` (gas in [-1, 1]^d, walls outside; built on the
+    reference's own lattice plus appended wall rows). Fields binned onto a grid
+    (cell means), L1 relative to the reference's mean magnitude:
+    - Woodward-Colella, 500 per tube, t=0.038: CRKSPH density / pressure / speed
+      L1 0.9% / 0.6% / 0.95%, peaks rho 6.473 vs 6.472, p 410.3 vs 410.5, energy
+      exact (275.2 = half the reference's 550.4), 0 penetrating. Monaghan 1.1% /
+      1.6% / 2.9%, peaks within 0.1%, but fluid energy +1.7% (275.2 -> 279.9):
+      the Monaghan wall is not energy-balanced (no compatible split there).
+    - Sedov 2D, nx 101, until the free shock would reach r = 1.4 (t=1.47, after
+      the wall reflections): Monaghan L1 5.1% / 4.2% / 6.1%, peaks low (p 0.82 vs
+      1.22, rho 7.7 vs 8.6), energy -0.4%; CompSPH 9.6% / 8.9% / 21%, energy
+      exact, min fluid u 0.08. CRKSPH: NaN at t=1.016 (energy exact until the
+      step before, no alarm) -- see next item.
+    - The WC runs are slow for a physical reason, not a wall one: dt ~ 1e-6 is
+      set by the blast region's compressed edge (min h 4e-4 at the p=1000/0.1
+      contact, a fluid row) under the global min(h)/max(c) CFL.
+    - Note: `WOODWARD_REGIONS` uses p = 0.1 in the middle region; Woodward &
+      Colella (1984) use 0.01. Not changed (both runs share it); flagged here.
+  - **Wall Riemann state NaN guard**: Sedov's ambient pressure is exactly 0, so a
+    round-off-negative u gives `p + b < 0` and the shock branch took sqrt of a
+    negative. The gathered p is now clamped at 0 and the radicand at 0.
+    Confirmed on the CRKSPH rerun (`scripts/probe_sedovWallRows.py`): fluid u
+    dips to -0.0014 mid-run; with the guard the run finishes (t=1.47), energy
+    exact, 0 penetrating, corner wall rows p 2.9 next to corner fluid 3.1.

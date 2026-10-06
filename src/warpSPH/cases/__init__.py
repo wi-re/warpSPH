@@ -33,6 +33,11 @@ CASE_MODULES = (
     'closedBox',
     'piston',
     'shockReflection',
+    'woodwardColellaWalls',
+    'sedovWalls',
+    'shockCylinder',
+    'bowShock',
+    'forwardStep',
     # weakly compressible -- examples/weaklyCompressible/*.ipynb
     'impact',
     'rotatingSquarePatch',

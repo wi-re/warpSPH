@@ -35,13 +35,16 @@ def wallRiemannState(rho, p, approach, gamma):
     `p* = p (1 + (g-1)/2 approach / c)^(2g/(g-1))`, isentropic, floored at
     vacuum; `approach = 0` returns (rho, p)."""
     g = gamma
+    # a gas at zero pressure (Sedov's ambient) reads slightly negative after round-off;
+    # the wall must not turn that into a NaN (sqrt of a negative in the shock branch)
+    p = p.clamp_min(0.0)
     rhoSafe, pSafe = rho.clamp_min(_EPS), p.clamp_min(_EPS)
 
     un = approach.clamp_min(0.0)
     a = 2.0 / ((g + 1.0) * rhoSafe)
     b = (g - 1.0) / (g + 1.0) * p
     un2 = un * un
-    jump = (un2 + torch.sqrt(un2 * un2 + 4.0 * a * un2 * (p + b))) / (2.0 * a)
+    jump = (un2 + torch.sqrt((un2 * un2 + 4.0 * a * un2 * (p + b)).clamp_min(0.0))) / (2.0 * a)
     pShock = p + jump
     rhoShock = rho * ((g + 1.0) * pShock + (g - 1.0) * pSafe) / ((g - 1.0) * pShock + (g + 1.0) * pSafe)
 

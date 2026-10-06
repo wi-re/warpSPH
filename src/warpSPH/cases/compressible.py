@@ -76,7 +76,8 @@ ALPHA_ACTIVE_THRESHOLD = 0.1
 def compressibleDiagnostics(ctx: RunContext, state) -> Dict[str, float]:
     """Energies, entropy, angular momentum and the switch's alpha statistics.
 
-    Total energy is the conserved one. The AV_PLAN Part 0 additions (all read
+    Total energy is the conserved one; every sum is over the fluid rows only
+    (solid wall rows, `kinds != 0`, are excluded). The AV_PLAN Part 0 additions (all read
     from the state, so every compressible case and scheme picks them up):
 
     * `entropy` -- `sum m_i s_i` with `s = P / rho^gamma`, `P = (gamma-1) rho u`.
@@ -90,7 +91,11 @@ def compressibleDiagnostics(ctx: RunContext, state) -> Dict[str, float]:
       the pair operator actually uses; `NaN` when the scheme has none.
     """
     particles = state.state
-    mass = particles.masses
+    # solid wall rows (`kinds != 0`, modules/compressibleWall) hold no energy of the
+    # gas: their state is re-derived from the fluid every evaluation
+    kinds = getattr(particles, 'kinds', None)
+    fluid = (kinds == 0) if kinds is not None else torch.ones_like(particles.masses, dtype=torch.bool)
+    mass = torch.where(fluid, particles.masses, torch.zeros_like(particles.masses))
     kinetic = 0.5 * (torch.linalg.norm(particles.velocities, dim=-1) ** 2 * mass).sum()
     thermal = (particles.internalEnergies * mass).sum()
 

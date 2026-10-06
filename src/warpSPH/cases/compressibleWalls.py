@@ -17,7 +17,8 @@ from ..runner import RunContext
 from ..utils.support import volumeToSupport
 from warpSPHCore import SupportScheme
 
-__all__ = ['WALL_PARAMS', 'buildWalledSystem', 'fluidEdges', 'nearWallRows', 'fluidEnergies']
+__all__ = ['WALL_PARAMS', 'buildWalledSystem', 'fluidEdges', 'nearWallRows', 'fluidEnergies',
+           'boxSDF', 'circleSDF', 'walledDomainBounds', 'buildWalledBox']
 
 WALL_PARAMS = dict(wallLayers=16, wallProbeLayers=3)
 
@@ -94,3 +95,89 @@ def fluidEnergies(s):
     kinetic = 0.5 * (m * (v ** 2).sum(-1)).sum()
     thermal = (m * s.internalEnergies[fluid]).sum()
     return dict(kineticEnergy=kinetic, thermalEnergy=thermal, totalEnergy=kinetic + thermal)
+
+
+def boxSDF(x: torch.Tensor, lo, hi) -> torch.Tensor:
+    """Signed distance to the box [lo, hi] (negative inside), x: (N, d)."""
+    lo = torch.as_tensor(lo, dtype=x.dtype, device=x.device)
+    hi = torch.as_tensor(hi, dtype=x.dtype, device=x.device)
+    q = torch.maximum(lo - x, x - hi)
+    outside = torch.linalg.norm(q.clamp_min(0.0), dim=-1)
+    inside = q.max(dim=-1).values.clamp_max(0.0)
+    return outside + inside
+
+
+def circleSDF(x: torch.Tensor, centre, radius: float) -> torch.Tensor:
+    c = torch.as_tensor(centre, dtype=x.dtype, device=x.device)
+    return torch.linalg.norm(x - c, dim=-1) - radius
+
+
+def walledDomainBounds(ctx: RunContext, lo, hi):
+    """The run's domain for a walled box [lo, hi]: the box padded by the wall layers
+    plus one cell. Call from `configureScheme`; sets `ctx.config.domain` min/max."""
+    dx = (hi[0] - lo[0]) / ctx.spec.nx
+    pad = (ctx.param('wallLayers') + 1) * dx
+    domain = ctx.config.domain
+    domain.min = torch.tensor([v - pad for v in lo], dtype=domain.min.dtype, device=domain.min.device)
+    domain.max = torch.tensor([v + pad for v in hi], dtype=domain.max.dtype, device=domain.max.device)
+    return dx
+
+
+def buildWalledBox(ctx: RunContext, lo, hi, stateAt, solidSDF=None, wallVelocity=None):
+    """A cell-centred lattice over the box [lo, hi] (any dim; `nx` cells along x,
+    the same spacing on the other axes) and `wallLayers` cells beyond it.
+
+    Rows inside the box and outside `solidSDF(x) < 0` are fluid; rows outside the
+    fluid region but within `wallLayers` spacings of it are walls (`kinds == 1`);
+    the rest are dropped (a solid body's interior beyond the wall depth). The
+    fluid region's signed distance is `max(box, -solid)`.
+
+    `stateAt(x) -> (rho, p, v)` gives every row's state (x: (N, d), v: (N, d));
+    walls take rho and p from it at their own position, and their velocity from
+    `wallVelocity(x) -> (N, d)` (zero by default): the velocity they move with for
+    the whole run."""
+    config, schemeConfig = ctx.config, ctx.schemeConfig
+    dim, nw = len(lo), ctx.param('wallLayers')
+    dx = (hi[0] - lo[0]) / ctx.spec.nx
+    axes = []
+    for k in range(dim):
+        n = int(round((hi[k] - lo[k]) / dx))
+        axes.append((torch.arange(-nw, n + nw, device=config.device, dtype=config.dtype) + 0.5) * dx + lo[k])
+    x = torch.stack(torch.meshgrid(*axes, indexing='ij'), dim=-1).reshape(-1, dim)
+    d = boxSDF(x, lo, hi)
+    if solidSDF is not None:
+        d = torch.maximum(d, -solidSDF(x))
+    keep = d < nw * dx
+    x, d = x[keep], d[keep]
+    wall = d > 0
+    kinds = wall.to(torch.int32)
+
+    rho, p, v = stateAt(x)
+    v = v.clone()
+    if wallVelocity is not None:
+        v[wall] = wallVelocity(x[wall]).to(v.dtype)
+    else:
+        v[wall] = 0.0
+    n = x.shape[0]
+    A, u, P, c = idealGasEOS(A=None, u=None, P=p, rho=rho, gamma=schemeConfig.gamma)
+    ones = torch.ones(n, device=config.device, dtype=config.dtype)
+    masses = rho * dx ** dim
+    state = ctx.SimulationState(
+        positions=x, velocities=v,
+        supports=ones * volumeToSupport(dx, config.targetNeighbors, dim),
+        masses=masses, densities=rho.clone(),
+        kinds=kinds, materials=torch.zeros_like(kinds),
+        UIDs=torch.arange(n, device=config.device, dtype=torch.int32), UIDcounter=n,
+        internalEnergies=u, totalEnergies=(u + 0.5 * (v ** 2).sum(-1)) * masses,
+        entropies=A, pressures=P, soundspeeds=c,
+        alphas=ones.clone(), alpha0s=ones.clone(), divergence=torch.zeros(n, device=config.device, dtype=config.dtype),
+    )
+    adapt = CompressibleSPHConfig(adaptiveSupportIterations=16, adaptiveSupportThreshold=1e-3,
+                                  adaptiveSupportScheme=AdaptiveSupportScheme.NoScheme)
+    rhoOpt, h, *_ = evaluateOptimalSupport(state, config, supportScheme=SupportScheme.Gather, compParams=adapt)
+    state.supports, state.densities = h, rhoOpt
+
+    system = ctx.SimulationSystem(state=state, adjacency=None, domain=config.domain)
+    config.dx = dx
+    config.dt = computeTimestep(system, config, schemeConfig, dt=config.dt)
+    return system
