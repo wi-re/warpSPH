@@ -33,6 +33,11 @@ def main():
                     help='control: v1 = v2 = 0 and no seed perturbation (w0 = 0): density contact only')
     ap.add_argument('--smooth', action='store_true',
                     help='smooth density ramp across the interface (Frontiere 2017 Eq. 100), case param smoothDensity=1')
+    ap.add_argument('--switch', default='Rosswog2020', choices=('Rosswog2020', 'CullenDehnen2010', 'NoneSwitch'),
+                    help='viscosity switch (Rosswog at the AV report alpha range 0..1; the others at their defaults)')
+    ap.add_argument('--stride', type=int, default=25, help='record the amplitude every N steps')
+    ap.add_argument('--scheme', default='Monaghan', choices=('Monaghan', 'CompSPH', 'CRKSPH'),
+                    help='compressible scheme (default Monaghan, the AV laboratory host)')
     ap.add_argument('--band', type=float, default=0.05)
     ap.add_argument('--out', default='results/av_M2_khmap')
     a = ap.parse_args()
@@ -43,9 +48,24 @@ def main():
     todo = sorted(a.times)
     snaps = []
 
+    series = []        # (t, McNally mode amplitude, mean alpha), every `stride` steps
+
+    def amplitude(ctx, st):
+        kk = float(ctx.param('freq')) * np.pi
+        xx, yy_, vy_ = st.positions[:, 0], st.positions[:, 1], st.velocities[:, 1]
+        yy_ = torch.where(yy_ < 0.5, yy_, 1.0 - yy_)
+        dd = torch.exp(-kk * (yy_ - 0.25).abs())     # McNally et al. (2012) mode amplitude, as av_report
+        return (2.0 * torch.sqrt((vy_ * torch.sin(kk * xx) * dd).sum() ** 2
+                                 + (vy_ * torch.cos(kk * xx) * dd).sum() ** 2) / dd.sum()).item()
+
+    counter = [0]
+
     def diagnostics(ctx, state):
         row = base.diagnostics(ctx, state)
         t = float(state.t)
+        if counter[0] % a.stride == 0:
+            series.append((t, amplitude(ctx, state.state), float(state.state.alphas.mean())))
+        counter[0] += 1
         if todo and t >= todo[0]:
             todo.pop(0)
             st = state.state
@@ -73,12 +93,13 @@ def main():
     def configureScheme(ctx):
         configure(ctx)
         sp = ctx.schemeConfig.viscositySwitchParams
-        sp.alpha_min, sp.alpha_max = 0.0, 1.0       # the AV report's rosswog2020 column
+        if a.switch == 'Rosswog2020':
+            sp.alpha_min, sp.alpha_max = 0.0, 1.0       # the AV report's rosswog2020 column
 
     case = dataclasses.replace(base, diagnostics=diagnostics, configureScheme=configureScheme)
-    res = run(case, scheme='Monaghan', nx=a.nx, tLimit=a.tLimit, plot=True, video=True,
+    res = run(case, scheme=a.scheme, nx=a.nx, tLimit=a.tLimit, plot=True, video=True,
               exportRoot=str(out / 'runs'), progress=True, stallProgress=1e-3,
-              velocityAlarmPlotInterval=1, params=dict(viscositySwitch='Rosswog2020', **(dict(v1=0.0, v2=0.0, w0=0.0) if a.noShear else {}),
+              velocityAlarmPlotInterval=1, params=dict(viscositySwitch=a.switch, **(dict(v1=0.0, v2=0.0, w0=0.0) if a.noShear else {}),
                           **(dict(smoothDensity=1) if a.smooth else {})))
     if todo:     # last requested time past the final step
         print(f'[khmap] note: times never reached: {todo}', flush=True)
@@ -91,25 +112,33 @@ def main():
               f'outside {hot[~layer].mean():.3f} | alpha mean in layer {sn["alpha"][layer].mean():.3f}, '
               f'outside {sn["alpha"][~layer].mean():.3f} | epsdot median in layer {np.median(sn["epsdot"][layer]):.2e}, '
               f'outside {np.median(sn["epsdot"][~layer]):.2e} | A {sn["amplitude"]:.4f}', flush=True)
-    np.savez(out / 'kh_map.npz', **{f'{i}_{k}': v for i, sn in enumerate(snaps) for k, v in sn.items()})
+    np.savez(out / 'kh_map.npz', series=np.array(series), **{f'{i}_{k}': v for i, sn in enumerate(snaps) for k, v in sn.items()})
+    ser = np.array(series)
+    iA = int(np.argmin(np.abs(ser[:, 0] - 1.5)))
+    print(f'[khmap] SERIES {a.scheme}/{a.switch}{"/smooth" if a.smooth else "/sharp"}: A(t~1.5 = {ser[iA, 0]:.3f}) {ser[iA, 1]:.4f}  A max {ser[:, 1].max():.4f} at t {ser[ser[:, 1].argmax(), 0]:.3f}  '
+          f'A(final t {ser[-1, 0]:.3f}) {ser[-1, 1]:.4f}  alpha mean (final) {ser[-1, 2]:.4f}', flush=True)
 
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     from matplotlib.colors import LogNorm
     n = len(snaps)
-    fig, ax = plt.subplots(3, n, figsize=(4.2 * n, 11), squeeze=False)
+    hasEps = any(np.any(sn['epsdot'] > 0) for sn in snaps)
+    nRows = 3 if hasEps else 2
+    fig, ax = plt.subplots(nRows, n, figsize=(4.2 * n, 3.7 * nRows), squeeze=False)
     for i, sn in enumerate(snaps):
         p = sn['pos'].copy()
         p[:, 0] = np.mod(p[:, 0], 1.0)      # periodic box: particles drift by v t
         panels = [(np.maximum(sn['epsdot'], 1e-8), 'epsdot (Eq. 16)', dict(norm=LogNorm(1e-6, 1.0), cmap='magma')),
                   (sn['alpha'], 'alpha', dict(vmin=0, vmax=1, cmap='viridis')),
                   (sn['rho'], 'density', dict(vmin=0.9, vmax=2.1, cmap='RdBu_r'))]
+        if not hasEps:
+            panels = panels[1:]
         for j, (c, name, kw) in enumerate(panels):
             im = ax[j, i].scatter(p[:, 0], p[:, 1], c=c, s=2, **kw)
             ax[j, i].set(aspect='equal', title=f'{name}, t = {sn["t"]:.2f}', xlim=(0, 1), ylim=(0, 1))
             fig.colorbar(im, ax=ax[j, i], shrink=0.7)
-    fig.suptitle(f'Rosswog (2020) trigger on Kelvin-Helmholtz{" (NO SHEAR control)" if a.noShear else ""}{" (smooth density IC)" if a.smooth else ""}, Monaghan, nx {a.nx}')
+    fig.suptitle(f'Rosswog (2020) trigger on Kelvin-Helmholtz{" (NO SHEAR control)" if a.noShear else ""}{" (smooth density IC)" if a.smooth else ""}, {a.scheme}, {a.switch}, nx {a.nx}')
     fig.tight_layout()
     fig.savefig(out / 'kh_map.png', dpi=110)
     print(f'[khmap] wrote {out / "kh_map.png"}', flush=True)

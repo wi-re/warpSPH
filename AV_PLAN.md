@@ -28,7 +28,7 @@ Full reading checklist in [Part 5](#part-5--literature).
 
 # Status board — read this first
 
-**Phase 0 and the start of Phase 1 are done (2026-09-30); updated 2026-10-01.** The plan's *input* is the work
+**Status 2026-10-07: Phases 0 and 1 are done (tag `milestone/dissipation-abstraction`), Phase 2 is built and its KH failure is explained (resolution + sharp-IC contact transient); Phase 3 is next -- see the handoff below the table.** The plan's *input* is the work
 logged in [`phase6.md`](docs/historic_plans/phase6.md) / [`phase6_shock_capturing_log.md`](docs/historic_plans/phase6_shock_capturing_log.md)
 (Cullen & Dehnen 2010 and Read & Hayfield 2012 on [`schemes/monaghan.py`](src/warpSPH/schemes/monaghan.py),
 validated on Sod and Gresho). On top of it, per the start-up order below:
@@ -41,20 +41,40 @@ validated on Sod and Gresho). On top of it, per the start-up order below:
 - **S4** CRK `dudt.py` j-side sign: applied 2026-10-01 (see S4 below);
 - **OPEN_PROBLEMS §17** (Read-Hayfield energy) resolved 2026-10-01: a transcription error in Eq. (33); baseline regenerated as **M0d**, then **M0e** after the R&H pair loops moved to warp kernels (see below).
 
-Phase 2 (Rosswog 2020 entropy trigger) built and validated 2026-10-06 — passes shocks, sweeps and smooth flow, **fails Kelvin-Helmholtz** (`docs/av/av_phase2_rosswog2020_2026-10-06.md`); Phase 3 onward not started (rows marked `☐`).
+Phase 2 (Rosswog 2020 entropy trigger) built and validated 2026-10-06 — passes shocks, sweeps and smooth flow; its Kelvin-Helmholtz failure (`docs/av/av_phase2_rosswog2020_2026-10-06.md`) was traced on 2026-10-07 to the sharp-IC contact transient plus resolution (nx 256: A(1.5) 0.131 vs C&D 0.137, [`docs/av/kh256_2026-10-07/`](docs/av/kh256_2026-10-07/README.md)). Phase 1 (2026-10-07) added the pair-velocity argument, the `pi` package, a Pi audit against the papers and the CRK switch fix (items 1-4 under Phase 1 below). Phase 3 onward not started (rows marked `☐`).
 
 | Phase | Milestone | State |
 |---|---|---|
-| 0 | M0 Baseline locked | ✅ M0c (2026-09-30), tag `milestone/av-baseline` at the first M0; the report copy in `docs/av/` is uncommitted |
-| 1 | M1 Old physics, new architecture | ✅ 2026-10-07: registry, `BetaMode`, tag fixes, stubs filled, `rawPairVelocity` + `computePi_pair`; smoke bit-identical to M0g, tests + gradcheck green. Tag `milestone/dissipation-abstraction` not yet created |
-| 2 | M2 Entropy trigger validated | ◐ built 2026-10-06; validated except KH (fails) and marginal Sod 2D/3D — `docs/av/av_phase2_rosswog2020_2026-10-06.md` |
-| 3 | M3 Reconstruction engine works | ☐ not started |
+| 0 | M0 Baseline locked | ✅ M0c (2026-09-30), tag `milestone/av-baseline` at the first M0; reference now M0g (Monaghan/CompSPH hosts) and `av_crk3_*` (CRK), see the handoff |
+| 1 | M1 Old physics, new architecture | ✅ 2026-10-07: registry, `BetaMode`, tag fixes, stubs filled, `rawPairVelocity` + `computePi_pair`; smoke bit-identical to M0g, tests + gradcheck green. Tag `milestone/dissipation-abstraction` (4e662a1, local) |
+| 2 | M2 Entropy trigger validated | ◐ built 2026-10-06; KH explained and near-closed at nx 256 (0.131 vs C&D 0.137: gate `>= C&D` missed by 4.6 %, smooth IC); marginal Sod 2D/3D P spike (+1.8 % / +0.3 %) — `docs/av/av_phase2_rosswog2020_2026-10-06.md` |
+| 3 | M3 Reconstruction engine works | ☐ **next** — handoff below |
 | 4 | M4 Smooth-flow dissipation characterised | ☐ not started |
 | 5A | M5 Quadratic dissipation understood | ☐ not started |
 | 5B | M6 Cheap modern switch characterised | ☐ not started |
 | 6 | M7 Detector-complete | ☐ not started |
 | 7 | 🏁 **M8 SPH-AV-FOUNDATION** — hard gate | ☐ not started |
 | 8+ | → [`PESPH_PLAN.md`](PESPH_PLAN.md) | blocked on M8 |
+
+### Handoff: starting Phase 3 (2026-10-07)
+
+**Where the code stands.** `dev` at the commit after `4e662a1` (tag `milestone/dissipation-abstraction`), working tree clean, full `pytest tests` and the dissipation / compSPH / CRK gradchecks green.
+- The pair velocity is an argument: `computePi_term(term, ..., u_ij, ...)` / `computePi_pair` (formulation from the params); `computePi_actual(v_i, v_j)` is the thin `rawPairVelocity` wrapper. The Monaghan, CompSPH and conductivity kernels still call `computePi_actual`.
+- CRKSPH reconstructs inline: `modules/crk/accel.py` and `dudt.py` compute `phi_ij` (`crkLimiter`, `computeVanLeer` from `modules/crk/limiter.py`), form `v_dot_i = v_i - phi/2 J_i x_ij`, `v_dot_j = v_j + phi/2 J_j x_ij` (the S4 sign question is settled: Eqs. 11-12) and hand `v_dot_i - v_dot_j` to `computeFrontiereQ`. That inline block exists twice (accel and dudt): Phase 3's extraction removes the duplication.
+- `modules/reconstruction/` holds only `rawPairVelocity`. There is **no** `velocityPairPolicy` config field yet: add it with its first consumer (`DiffusionParameters` field, enum, dict round trip with `.get`, runner banner line, like `betaMode`).
+
+**Suggested order.** (1) move `limiterVL` / `computeVanLeer` / `crkLimiter` to `modules/reconstruction/limiters.py` verbatim (AD guards and their comments, §2.6), re-exported from `modules/crk`; (2) `LinearReconstruction` / `LimitedReconstruction` as wp.funcs returning the pair velocity difference; (3) route CRK `accel` / `dudt` through them; (4) add the `velocityPairPolicy` field; (5) give the Monaghan viscosity kernels (`wp_diffusion.py`) the policy -- they have no per-particle velocity gradient yet, so this needs the `computeShearTensor` pass (Phase 3 Build, below). Tests as listed in the Phase 3 section (linear-field annihilation, limiter behaviour, pairwise conservation 1e-12, gradcheck script).
+
+**References to compare against.**
+| host | reference | how |
+|---|---|---|
+| Monaghan, CompSPH default | smoke `results/av_smoke_ref_M0g`, full `results/av_M0g_*` | `scripts/av_report.py --config baseline --profile smoke` then `--compare`; with the `Raw` policy it must stay IDENTICAL (tol 0) |
+| CRKSPH | `results/av_crk3_{crkNone,crkCullenDehnen2010}` (Sod, Gresho, KH, full); smoke `results/av_crk2_*` | the old `av_M0f_crk` C&D column is superseded (it was fixed alpha = 1) |
+| KH, the best Phase 3/4 target | `docs/av/kh256_2026-10-07/` (nx 256, t = 3, ~10 min a run) | Monaghan + C&D / Rosswog peak 0.21 and decay to 0.105; default CRK peaks 0.23-0.24 and holds 0.17-0.19: reconstruction should close that gap |
+
+**Gotchas learned.** (i) Float32 contraction: with a live switch (alpha != 1), moving arithmetic across `wp.func` boundaries changes FMA fusion at 1 ulp, so only alpha = 1 paths and the Monaghan-host smoke are bit-identical across refactors. (ii) CRK Gresho at t = 3 amplifies a 1e-13 perturbation to ~1e-3 even in float64: do not read a CRK Gresho L1 change below ~5 % as signal; Sod / KH agree to ~1e-3. (iii) `git worktree add <scratch> HEAD` plus `PYTHONPATH=<wt>/src` is the clean before/after tool. (iv) Chain GPU runs one at a time, video on; `--out` paths for `av_report` need the `results/` prefix.
+
+**Small open items (none blocks Phase 3).** `Monaghan1997b` / `Dukowicz` have no source on disk; `Monaghan1992`'s `1e-14 h` regulariser leaves a latent `r -> 0` singularity (CompSPH's default; CRK's `Frontiere2017` has the paper's `eps^2 = 1e-2`); the legacy `scaleBeta` flag (double alpha) is for Phase 5A; the Phase 2 KH gate at the sharp IC / nx 256 was not run for the Monaghan switches; Sedov's cold-gas background saturates the Rosswog trigger; CompSPH with a live switch is not covered by a stored baseline.
 
 ## Start-up work order (added 2026-09-30)
 
@@ -178,7 +198,7 @@ once at the end of S2.
   should state that. The limiter and `C_l`/`C_q` are to be revisited together, later, when the higher-order / Riemann-MUSCL
   work exercises limiters too; if their constants change, the CRKSPH part of the baseline moves (Monaghan / CompSPH hosts
   do not use the CRK limiter). `C_l = 2` was tried (CRKSPH_LIMITER_PLAN note (b)) and not adopted.
-- 2026-10-01 (user, CRKSPH_LIMITER_PLAN note (f)): the CRK limiter default is now `(eta_crit, eta_fold) = (1/n_h, 0.2/n_h)` = (0.25, 0.05) at n_h = 4 (derived from n_h per step). **The CRK rows of the M0 baseline (`results/av_M0d_*`, `docs/av/`) were taken at the old (1/3, 0.2) and no longer match the default**; `C_l` stays 1. **Re-taken 2026-10-01: the CRK reference is now `results/av_M0f_crk`** (`crkNone`, `crkCullenDehnen2010` x sod, sod2d, sedov, noh, gresho, yee, linearWave, kelvinHelmholtz, rayleighTaylor; 18 pairs, video on for all but 3D sedov / noh -- OPEN_PROBLEMS §18; not bit-lock-repeated: CRK runs are deterministic since the same day). Moves vs the old-constant S4 numbers: Gresho L1(v_phi) 0.040 -> 0.033, peak 1.055 -> 1.012, Yee L1 -16 %, Sod contactSpikeA halved, Noh post-shock rho error halved; Sedov and the rest of Sod unchanged (<1 %). Monaghan / CompSPH rows are unaffected (M0e).
+- 2026-10-01 (user, CRKSPH_LIMITER_PLAN note (f)): the CRK limiter default is now `(eta_crit, eta_fold) = (1/n_h, 0.2/n_h)` = (0.25, 0.05) at n_h = 4 (derived from n_h per step). **The CRK rows of the M0 baseline (`results/av_M0d_*`, `docs/av/`) were taken at the old (1/3, 0.2) and no longer match the default**; `C_l` stays 1. **Re-taken 2026-10-01: the CRK reference is now `results/av_M0f_crk`** (`crkNone`, `crkCullenDehnen2010` x sod, sod2d, sedov, noh, gresho, yee, linearWave, kelvinHelmholtz, rayleighTaylor; 18 pairs, video on for all but 3D sedov / noh -- OPEN_PROBLEMS §18; not bit-lock-repeated: CRK runs are deterministic since the same day). Moves vs the old-constant S4 numbers: Gresho L1(v_phi) 0.040 -> 0.033, peak 1.055 -> 1.012, Yee L1 -16 %, Sod contactSpikeA halved, Noh post-shock rho error halved; Sedov and the rest of Sod unchanged (<1 %). Monaghan / CompSPH rows are unaffected (M0e). **Superseded 2026-10-07:** the `crkCullenDehnen2010` column of `results/av_M0f_crk` (and the S4 numbers) is a fixed-alpha = 1 run (CRK viscosity switch bug, Phase 1 clean-up items 2-3); the CRK reference is now `results/av_crk3_*`. `crkNone` is unchanged.
 
 - 2026-10-06 **the M0e baseline is stale since 013a22f** (compressible-walls work: adaptive h clamped to
   `n_h (m/rho)^(1/d)` on fluid rows, OPEN_PROBLEMS §20). Smoke at HEAD vs `results/av_smoke_ref_M0e`: 30/30 pairs
@@ -978,7 +998,7 @@ CompSPH default (no switch) final states bit-identical to HEAD on Sod and Gresho
 differently now that each formulation is its own function, so e.g. CompSPH + C&D differs from the pre-refactor code at float32 round-off (2e-6 relative at 60 steps, 5e-5 at 300 steps on Sod); no stored baseline
 contains CompSPH with a switch.
 
-**Still outstanding for M1:** the git tag `milestone/dissipation-abstraction` (not created; your call), and CRKSPH's own viscosity still ignores `betaMode` (S2 step 3 note).
+**M1 closed 2026-10-07:** tag `milestone/dissipation-abstraction` created (4e662a1, local); CRKSPH's viscosity now honours the switched alpha and `betaMode` (clean-up item 2). Nothing outstanding for M1.
 
 **M1 — Modular.** Git milestone `milestone/dissipation-abstraction`.
 
@@ -1084,7 +1104,7 @@ makes sharp:**
 - [x] resolution sweep: `alphaMean` non-increasing (Gresho nx 50/100/200: 0.074/0.047/0.029)
 - [x] timestep sweep: α within 10% (Sod cfl 0.3 vs 0.15: 6.0 %)
 - [x] detector map (§0.3) rendered vs C&D on Sedov (`scripts/probe_rosswogSedovMap.py`, `docs/av/av_phase2_sedov_alpha_map.png`): alpha ~ 1 everywhere, cold-gas saturation ahead of the shock
-- [ ] **Kelvin-Helmholtz: A(1.5) 0.012 vs C&D 0.098 -- FAILS** (trigger fires on the shear layer; see results)
+- [~] **Kelvin-Helmholtz: A(1.5) 0.012 vs C&D 0.098 at nx 128, sharp IC -- fails.** Explained 2026-10-07: the trigger fires on the sharp-IC density *contact* (no-shear control identical), and residual noise is the resolution floor. Smooth IC (`smoothDensity`) 0.037 at nx 128; **nx 256 smooth IC: 0.131 vs C&D 0.137** (gate `>= C&D` missed by 4.6 %), `docs/av/kh256_2026-10-07/`
 - [x] report row added: `docs/av/av_phase2_rosswog2020_2026-10-06.md`, configs `rosswog2020`, `rosswog2020Q` (group `phase2`)
 
 ### Results (2026-10-06)
@@ -1127,6 +1147,10 @@ KH A(1.5), nx 128, Monaghan (McNally reference 0.148):
 
   At nx 256 the trigger is off in the laminar layer (alpha 0.001) and the early amplitude is highest, so growth is no longer suppressed. **Not yet measured: A(1.5) at nx 256 against C&D at nx 256**
   (~40 min each on this host) -- that pair is the decisive Phase 2 KH number for the smooth IC.
+- **nx 256, out to t = 3 (2026-10-07; evidence [`docs/av/kh256_2026-10-07/`](docs/av/kh256_2026-10-07/README.md), driver `scripts/probe_rosswogKHMap.py`, plot `scripts/plot_kh256_series.py`):**
+  Rosswog A(1.5) **0.131** (nx 128: 0.037), C&D 0.137, fixed alpha = 1 only 0.037 (never develops the instability), McNally 0.148; Rosswog peaks at 0.209 (t = 2.11) like C&D (0.212). Rosswog's alpha falls to ~1e-4 in the
+  laminar layer and rises on the roll-up filaments only. **The KH failure was resolution plus the sharp-IC contact transient, not the trigger**; strictly the gate is still missed by 4.6 % (smooth IC, nx 256; the
+  sharp IC at nx 256 was not run). **Default CRKSPH (alpha = 1) is better still**: 0.131 sharp / 0.145 smooth IC at t = 1.5 (98 % of McNally), peak 0.23-0.24, 0.17-0.19 still at t = 3 versus ~0.105 for the Monaghan runs.
 - The sharp-IC column stays the plan's gate (it is the M0 reference); whether the AV report's KH case should switch to the smooth IC (re-taking every KH column) is the user's decision.
 **Open (user decides how to proceed):** (a) ~~confirm the KH mechanism with an epsdot map~~ done above: the contact, not the shear; smoothing the IC removes about half of it (3x amplitude), the rest is unexplained;
 (b) re-test after Phase 3 (velocity reconstruction), which is the paper's setting -- the plan's order already puts it next;
