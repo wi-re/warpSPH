@@ -32,6 +32,7 @@ class ViscosityTerms(Enum):
     Price2008 = 9
     Wadsley2008 = 10
     DeltaSPH = 11
+    Frontiere2017 = 12   # CRKSPH's one-sided Q_i: Monaghan (1992) mu, own h, rho, c, alpha, eps^2 = 1e-2 (Frontiere et al. 2017)
 
 class BetaMode(Enum):
     """How the quadratic coefficient `beta` (`C_q`) responds to the switched alpha.

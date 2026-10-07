@@ -46,7 +46,7 @@ Phase 2 (Rosswog 2020 entropy trigger) built and validated 2026-10-06 — passes
 | Phase | Milestone | State |
 |---|---|---|
 | 0 | M0 Baseline locked | ✅ M0c (2026-09-30), tag `milestone/av-baseline` at the first M0; the report copy in `docs/av/` is uncommitted |
-| 1 | M1 Old physics, new architecture | ◐ S2/S3 done (registry, `BetaMode`, tag fixes, stubs filled); `VelocityPairPolicy` and `computePi_actual` taking the pair velocity are still to do |
+| 1 | M1 Old physics, new architecture | ✅ 2026-10-07: registry, `BetaMode`, tag fixes, stubs filled, `rawPairVelocity` + `computePi_pair`; smoke bit-identical to M0g, tests + gradcheck green. Tag `milestone/dissipation-abstraction` not yet created |
 | 2 | M2 Entropy trigger validated | ◐ built 2026-10-06; validated except KH (fails) and marginal Sod 2D/3D — `docs/av/av_phase2_rosswog2020_2026-10-06.md` |
 | 3 | M3 Reconstruction engine works | ☐ not started |
 | 4 | M4 Smooth-flow dissipation characterised | ☐ not started |
@@ -909,14 +909,76 @@ ShockDetector ──▶ CoefficientPolicy ──▶ VelocityPairPolicy ──▶
   touch point 4's `.get(…, default)` protects).
 
 ### Markers
-- [ ] registry replaces both `elif` chains
-- [ ] `CoefficientPolicy` with all three variants; **fixed β now expressible**
-- [ ] `VelocityPairPolicy` with `RawVelocity` proven to be an identity
-- [ ] `computePi_actual` takes the pair velocity as an argument
-- [ ] §2.5 hazards cleared; PESPH_PLAN §2.1 cross-referenced as closed
-- [ ] `NoneSwitch` bit-for-bit vs M0
-- [ ] C&D and R&H within `1e-6` vs M0 on every report metric
-- [ ] gradchecks green
+- [x] registry replaces both `elif` chains (S2 step 4, 2026-09-30)
+- [x] `CoefficientPolicy` with all three variants; **fixed β now expressible** (S2 step 3, as `BetaMode` + switch; 2026-09-30)
+- [x] `VelocityPairPolicy` with `RawVelocity` proven to be an identity (2026-10-07: `modules/reconstruction/pairVelocity.py` `rawPairVelocity`, `tests/test_velocityPairPolicy.py`, bitwise)
+- [x] `computePi_actual` takes the pair velocity as an argument (2026-10-07: new `computePi_pair(..., u_ij, ...)`; `computePi_actual` is the thin `RawVelocity` wrapper, so no call site changed)
+- [x] §2.5 hazards cleared; PESPH_PLAN §2.1 cross-referenced as closed (S2 steps 1-2)
+- [x] `NoneSwitch` bit-for-bit vs M0 (S2 exit check; re-checked 2026-10-07 against M0g)
+- [x] C&D and R&H within `1e-6` vs M0 on every report metric (bit-identical, tol 0: S2 exit check; 2026-10-07 smoke 30/30 vs `results/av_smoke_ref_M0g`)
+- [x] gradchecks green (`gradcheck_dissipation` 2026-10-07; full `pytest tests` green)
+
+**As built (2026-10-07).** The policy is not a config field yet: with only `Raw` it would be a setting nothing reads. Phase 3 adds the `velocityPairPolicy`
+field on `DiffusionParameters` (dict round-trip with `.get`, like `betaMode`) together with the first consumer. Today the CRK call sites still pass already-reconstructed
+`v_i`, `v_j` into `computePi_actual`; Phase 3 moves them onto `computePi_pair` with the policy supplying `u_ij`.
+### Phase 1 clean-up pass (2026-10-07, user: "fix crksph, sweep the Pi equations")
+
+**1. Pi formulations vs the papers** -- `tests/test_piFormulations.py` evaluates every `ViscosityTerms` member on random approaching pairs (unequal h, c, rho, alpha)
+and compares the pair coefficient with an independent NumPy transcription of the paper's equation (Monaghan 2005 Eqs. 8.3-8.12, Price 2012 Eqs. 98/101/103, Marrone 2011 Eq. 5,
+Wadsley 2017 Eqs. 17-18, Price 2008 conductivity). Result of the sweep:
+
+| Formulation | Source | Before | After |
+|---|---|---|---|
+| `Monaghan1992` (CompSPH default) | Price 98 / Monaghan 8.10 | correct (one-sided c_i, c_j by design; averaged over the two `useJ` calls) | unchanged |
+| `Price2012_98` (Monaghan-scheme default) | Price 101+103 | correct, but **mislabelled**: it is the signal-velocity form (alpha = C_l, beta/2 = C_q), not Eq. (98) (that is `Monaghan1992`) | unchanged, comment fixed |
+| `Price2012`, `Monaghan1997a` | Price 103, Monaghan 8.11-8.12 (K = 1/2) | correct | unchanged |
+| `Price2008` (conductivity) | Price 2008 `sqrt(|dP|/rho_bar)` | correct | unchanged |
+| `MonaghanGingold1983` | Monaghan 8.3-8.4 | **wrong**: no 1/r (units off by a length) and **alpha (`C_l`, the switch) ignored** | fixed |
+| `Cleary1998` | Monaghan 8.8-8.9 | **wrong**: extra 1/rho from `K/rho`; alpha applied twice (`alpha_i * C_l` with `C_l` already the pair mean) | fixed |
+| `DeltaSPH` | Marrone 2011 Eq. (5) | **wrong**: scaling factor `h/xi` lacks the 1/r (same defect as MG1983) | fixed |
+| `Default` | "Monaghan1992 with all bars" | same missing 1/r | fixed |
+| `Wadsley2008` | Wadsley 2017 Eqs. 17-18 | **wrong**: `v_sig = C_l |w|`, no c_bar term (a quadratic term only) | now Eqs. (17)-(18) |
+| `Monaghan1997b`, `Dukowicz` | Monaghan 1997 (4.7)/(4.8) | not on disk, **not verified** | unchanged |
+
+None of the five wrong branches is selected by a shipped scheme (the schemes use `Price2012_98` and `Monaghan1992`), so no number in any baseline moved; this
+is checked by the smoke bit-compare below. `C_q` means different things per family (beta for the mu-form `Monaghan1992` / `Default` / `Wadsley2008`; beta/2 for the
+signal-velocity forms), as documented in `pi.py`. The coefficient policy now lives in one `switchedCoefficients` function shared by `computePi_pair` and CRKSPH.
+
+**2. CRKSPH and the coefficient policy.** CRK's viscosity (momentum `accel.py` and energy `dudt.py`) is the Frontiere Eq. (69) one-sided `Q_i`, built from raw `C_l`, `C_q`:
+it ignored the switched alpha and `BetaMode` completely (the `computePi_actual` results next to it were dead code), so **the viscosity switch had no effect on CRKSPH**
+and `crkCullenDehnen2010` matched `crkNone`. Fixed 2026-10-07: `Q_i` / `Q_j` take their own particle's switched alpha and `BetaMode` through the shared
+`switchedCoefficients`. `crkNone` is bit-identical before/after this fix alone (alpha = 1; smoke 4/4, `results/av_crk_{before,after}_*`). On its own it changed `crkCullenDehnen2010` only slightly,
+because of item 3.
+
+**3. CRK `alpha0s` is never advanced (found 2026-10-07, corrects the S2 note).** The S2 note said C&D / R&H under CRKSPH respond "instantly, with no decay memory". They do not: `alpha0s`
+starts at 1 and `computeCullenTerms` returns it decayed by ONE step; with the `updateViscositySwitch` call deleted (S2) the stored value never changes, so
+alpha is stuck at `1 - dt/tau (1 - alpha_loc)` ~ 0.97-0.98 everywhere (full-profile `results/av_crkswitch_*`: C&D alphaMean 0.97 (Gresho) / 0.98 (KH) / 0.98 (Sod), KH A(1.5) 0.0904 vs `crkNone` 0.0903).
+Under CRKSPH, C&D / R&H were therefore effectively fixed alpha = 1; every `crkCullenDehnen2010` number in M0f (and the S4 numbers) is a fixed-alpha run.
+**Fixed 2026-10-07 (reverses the S2 deletion): `schemes/crkSPH.py` calls `updateViscositySwitch` again**, as the Monaghan scheme does. Result (full profile, video on, no alarms; evidence and
+frames in [`docs/av/crk_switch_2026-10-07/`](docs/av/crk_switch_2026-10-07/README.md)):
+
+| full profile | crkNone (alpha = 1) | crkCullenDehnen2010 (live switch) |
+|---|---|---|
+| Sod L1(v_x); alphaMean / Max | 0.00669; 1 / 1 | 0.00840; 0.073 / 0.81 |
+| Gresho L1(v_phi); peak speed | 0.0366; 1.016 | 0.0276; 1.067 |
+| Gresho alphaMean / Max | 1 / 1 | 0.027 / 0.14 |
+| KH A(1.5) (reference 0.148); alphaMean / Max | 0.0901; 1 / 1 | **0.1232**; 0.047 / 0.73 |
+
+C&D now does what it is for: alpha ~ 0.03-0.07 over smooth flow (Gresho L1 -25 %), KH grows 37 % more than at fixed alpha = 1. Sod is slightly worse than fixed alpha (L1 +26 %, contact spike
+P +5 %), the usual price of a lower floor. The Gresho peak speed above 1 is CRK's intrinsic spin-up (CRKSPH_LIMITER_PLAN), damped less now. **The CRK baseline columns (`results/av_M0f_crk`,
+`crkCullenDehnen2010`) are superseded by `results/av_crk3_*`**; `crkNone` is unchanged (re-run agrees: Sod 8e-4, KH 2e-3 relative; Gresho 5 % in L1: that is the case's sensitivity, not formula drift -- in float64 a 1e-13 relative perturbation of the CFL factor moves the new code's own Gresho final state
+by 2e-3 (v) / 4e-4 (x), the same size as the old-vs-new gap of 1.3e-3 / 3.6e-4, so CRK Gresho at t = 3 amplifies any perturbation by ~1e10; this bounds formula drift at that floor, it does not show 1e-10 agreement,
+which is why the Eq. (69) reference test in `tests/test_piFormulations.py` exists). Regression test: `tests/test_crkSwitch.py`.
+
+**4. `pi` is now a package** (`modules/dissipation/pi/`: `coefficients.py`, `pair.py`, `terms.py`, `dispatch.py`, `oneSided.py`). The three parallel `elif` chains of the old `pi.py`
+(`v_sig`, `compute_mu_ij`, `compute_bars`) are one function per formulation over a `PairData` struct, with `pick` replacing `compute_bars` (the bars are formed once, inside `buildPair`).
+New `ViscosityTerms.Frontiere2017` (CRK's one-sided `Q`, `h` own smoothing length, `eps^2 = 1e-2`, `min(0, .)`) with `computeFrontiereQ` as its CRK entry point;
+the duplicated `Q` blocks in `crk/accel.py` and `crk/dudt.py` are gone. Checked: `tests/test_piFormulations.py` (paper references, now incl. Frontiere Eq. 69), Monaghan-host smoke 30/30 bit-identical to M0g,
+CompSPH default (no switch) final states bit-identical to HEAD on Sod and Gresho, gradchecks. **One honest caveat:** with a *live* switch (alpha != 1) the compiler fuses `C_l c - C_q mu`
+differently now that each formulation is its own function, so e.g. CompSPH + C&D differs from the pre-refactor code at float32 round-off (2e-6 relative at 60 steps, 5e-5 at 300 steps on Sod); no stored baseline
+contains CompSPH with a switch.
+
+**Still outstanding for M1:** the git tag `milestone/dissipation-abstraction` (not created; your call), and CRKSPH's own viscosity still ignores `betaMode` (S2 step 3 note).
 
 **M1 — Modular.** Git milestone `milestone/dissipation-abstraction`.
 
@@ -1033,7 +1095,40 @@ C&D). **Fails Kelvin-Helmholtz** (A(1.5) 0.012 vs C&D 0.098, below even fixed al
 density-contrast shear layer, most likely standard SPH's contact entropy noise, which MAGMA2's reconstruction suppresses.
 Marginal: Sod 2D/3D P spike vs none (+1.8 % / +0.3 %), Gresho L1 6 % above C&D. Cold gas (Sedov's u = 0 background)
 saturates the trigger at alpha = 1 (tau = h/c infinite).
-**Open (user decides how to proceed):** (a) confirm the KH mechanism with an epsdot map of the shear layer;
+**KH mechanism checked (2026-10-07, `scripts/probe_rosswogKHMap.py`, maps `docs/av/av_phase2_kh_map.png`, control `docs/av/av_phase2_kh_map_noshear.png`):**
+the trigger fires on the **density contact, not the shear**. At t = 0.05, before any billow, epsdot ~ 0.1-1 and alpha ~ 1 along both rho 1:2
+interfaces (92 % of particles within |y - 0.25|, |y - 0.75| < 0.05 have epsdot > eps_0, vs 29 % elsewhere; layer-mean alpha 0.56 vs 0.03 outside).
+The **no-shear control** (v1 = v2 = 0, no seed) gives the same numbers (100 % / 0.56 at t = 0.05; layer alpha 0.19 vs 0.18 at t = 0.5), so shear plays no part.
+The layer relaxes (alpha 0.56 -> 0.38 -> 0.18 at t = 0.05 / 0.2 / 0.5) but stays hot. Likely cause (not yet proved): the sharp IC's summation density is
+smoothed over the interface while u is set from the sharp profile, so s = P/rho^gamma is wrong there at t = 0 and drifts as the contact relaxes.
+Outside the layers 15-48 % of particles also sit above eps_0 (lattice-line stripes in the map; the low-resolution floor of finding 2). The t = 1.5 snapshot was missed (last step ended just short).
+**Smooth-density IC test (2026-10-07, user's suggestion; Frontiere 2017 Eq. 100 / Robertson 2010: density ramps over `delta = 0.025` like `v_x`).**
+New opt-in case param `smoothDensity` (`cases/kelvinHelmholtz.py`, `sampleKHH(..., smoothDensity=False)`; default 0 = the sharp step, so M0 and every stored KH config are unchanged -- the
+smoothed assignments were dead commented-out code before). Maps: `docs/av/av_phase2_kh_map_smooth.png`; reports `docs/av/av_phase2_kh_smooth_{baseline,rosswog}_report.md`.
+KH A(1.5), nx 128, Monaghan (McNally reference 0.148):
+
+| IC | none (alpha = 1) | Cullen-Dehnen | Read-Hayfield | Rosswog 2020 (C_q 0) | Rosswog 2020 (C_q 2) |
+|---|---|---|---|---|---|
+| sharp (M0e) | 0.0204 | 0.0984 | n/a here | 0.0123 | n/a here |
+| **smooth** | 0.0184 | 0.1064 | 0.0713 | **0.0372** | 0.0318 |
+
+- The trigger map confirms the transient was a large part of the failure: at t = 0.05 layer-mean alpha 0.56 -> **0.23** (outside the layers 0.03 -> 0.001), and the layer is nearly
+  quiet by t = 0.5 (alpha 0.045, 28 % of layer particles above eps_0, vs 72 % on the sharp IC). Rosswog's A(1.5) improves **3x** (0.012 -> 0.037) and now beats fixed alpha = 1; C&D barely moves (0.098 -> 0.106).
+- **It does not close the gate**: A(1.5) is still 0.037 vs C&D 0.106 (the gate is `>= C&D`), and 25 % of the way to the reference. At t = 1.49 the roll-up has only just started, alpha
+  in the layer is 0.3-0.8 and mottled, epsdot 0.01-0.1 across a still-laminar layer, alphaMax 0.82 vs C&D 0.55, alphaMean 0.084 vs 0.061. So a residual entropy noise on the interface remains -- the contact error of
+  summation density (finding 1) rather than only the IC transient. Not yet understood past that; no threshold tuning (rule: derive, don't tune).
+- **Resolution check (2026-10-07, smooth IC, `probe_rosswogKHMap.py --smooth --nx N`; maps `docs/av/av_phase2_kh_map_smooth{,_nx64,_nx256}.png`):** the residual interface noise is the resolution floor, not an intrinsic defect.
+
+  | nx | layer-median epsdot (t ~ 0.5) | layer-mean alpha (t ~ 0.5) | A(0.49) | A(1.49) |
+  |---|---|---|---|---|
+  | 64 | 8.0e-4 | 0.393 | 0.0070 | 0.0136 |
+  | 128 | 4.9e-5 | 0.047 | 0.0094 | 0.0373 |
+  | 256 | 1.5e-5 (= the floor outside the layer) | 0.001 | 0.0120 | not run (t <= 0.5) |
+
+  At nx 256 the trigger is off in the laminar layer (alpha 0.001) and the early amplitude is highest, so growth is no longer suppressed. **Not yet measured: A(1.5) at nx 256 against C&D at nx 256**
+  (~40 min each on this host) -- that pair is the decisive Phase 2 KH number for the smooth IC.
+- The sharp-IC column stays the plan's gate (it is the M0 reference); whether the AV report's KH case should switch to the smooth IC (re-taking every KH column) is the user's decision.
+**Open (user decides how to proceed):** (a) ~~confirm the KH mechanism with an epsdot map~~ done above: the contact, not the shear; smoothing the IC removes about half of it (3x amplitude), the rest is unexplained;
 (b) re-test after Phase 3 (velocity reconstruction), which is the paper's setting -- the plan's order already puts it next;
 (c) the paper's own remark that non-reconstructed SPH may need other `eps_0`/`eps_1` -- only with a derivation, not a
 KH-tuned threshold. M2 stays open on the KH row.

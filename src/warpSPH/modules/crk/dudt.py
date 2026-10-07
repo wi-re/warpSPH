@@ -17,7 +17,7 @@ from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
 
-from ..dissipation import DiffusionParameters, computePi_actual
+from ..dissipation import DiffusionParameters, computeFrontiereQ
 from ...configurations.crkSPH import CRKViscosity
 
 from .limiter import computeVanLeer, crkLimiter
@@ -140,33 +140,6 @@ def computeCrkSPHdudt_Func_i(
         v_dot_i = vel_i - v_corr_i
         v_dot_j = vel_j + v_corr_j
 
-        pi_i = computePi_actual(
-            xi, xj, 
-            hi, hj,
-            mi, mj,
-            rhoi, rhoj,
-            True, P_i, P_j,
-            v_dot_i, v_dot_j,
-            domainState,
-            kernelProperties.kernelFunction,
-            cs_i, cs_i,
-            alpha_i, referenceAlphas[j] if viscositySwitch else scalar_t(1.0),
-            viscosityParams, 
-            False, False)
-        pi_j = computePi_actual(
-            xi, xj, 
-            hi, hj,
-            mi, mj,
-            rhoi, rhoj,
-            True, P_i, P_j,
-            v_dot_i, v_dot_j,
-            domainState,
-            kernelProperties.kernelFunction,
-            cs_j, cs_j,
-            alpha_i, referenceAlphas[j] if viscositySwitch else scalar_t(1.0),
-            viscosityParams, 
-            True, False)
-        
         gradw_i = computeKernelGradientCRK(
             xi, xj, 
             hj, hj, # forces scatter
@@ -186,28 +159,15 @@ def computeCrkSPHdudt_Func_i(
         if useGradientRenormalization:
             gradw_j = matmul(Li, gradw_j)
 
-        smooth_i = hi / sphKernelScale(kernelProperties.kernelFunction, dim)
-        smooth_j = hj / sphKernelScale(kernelProperties.kernelFunction, dim)
-
-        eta_i = x_ij / smooth_i
-        eta_j = x_ij / smooth_j
-
+        # Frontiere et al. (2017) Eq. (69) one-sided viscous pressures Q_i, Q_j of the reconstructed pair velocity;
+        # the formula (mu with the particle's own h, eps^2 = 1e-2, min(0, .), switched alpha / BetaMode) lives once in the
+        # `Frontiere2017` term of `modules/dissipation/pi/terms.py`
+        alpha_j = access_optional(referenceAlphas, j, viscositySwitch, scalar_t(1.0))
         vij_dot = v_dot_i - v_dot_j
-        # Frontiere et al. 2017 Eq. (69): mu = min(0, v_hat . eta / (eta . eta + eps^2)), eta = x_ij / h (dimensionless),
-        # eps^2 = 1e-2 (their standard parameter set). The regulariser must be dimensionless like eta . eta: the old
-        # `1e-7 * h^2` (~1e-11) left mu ~ v / |eta| unbounded as a pair closes, so a near-coincident approaching pair
-        # (r ~ 1e-3 dx) got a pair acceleration ~ 1e4-1e5 and blew the run up in one step (OPEN_PROBLEMS §15).
-        mu_ij = (wp.dot(vij_dot, eta_i)) / (wp.dot(eta_i, eta_i) + scalar_t(1.0e-2))
-        mu_ji = (wp.dot(vij_dot, eta_j)) / (wp.dot(eta_j, eta_j) + scalar_t(1.0e-2))
-
-        mu_ij = wp.min(scalar_t(0.0), mu_ij)
-        mu_ji = wp.min(scalar_t(0.0), mu_ji)
-
-        Cl = viscosityParams.C_l
-        Cq = viscosityParams.C_q        
-    
-        Q_i = rhoi * (-Cl * cs_i * mu_ij + Cq * mu_ij * mu_ij)
-        Q_j = rhoj * (-Cl * cs_j * mu_ji + Cq * mu_ji * mu_ji)
+        Q_i = computeFrontiereQ(xi, xj, hi, hj, rhoi, rhoj, vij_dot, domainState, kernelProperties.kernelFunction,
+                                cs_i, cs_j, alpha_i, alpha_j, viscosityParams, False)
+        Q_j = computeFrontiereQ(xi, xj, hi, hj, rhoi, rhoj, vij_dot, domainState, kernelProperties.kernelFunction,
+                                cs_i, cs_j, alpha_i, alpha_j, viscosityParams, True)
 
         # gradw_ij = 0.5*(gradw_i - gradw_j) mirrors accel.py's 0.5*(gradw_i + (-gradw_j))
         # same deltagrad as the force — required for energy-momentum consistency

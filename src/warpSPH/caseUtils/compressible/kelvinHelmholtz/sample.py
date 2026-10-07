@@ -5,8 +5,8 @@ streamwise velocity switch between `rho1`/`v1` (outer bands, `y<1/4` or
 `y>3/4`) and `rho2`/`v2` (inner band), smoothed across each interface with an
 `exp(.../delta)` ramp, plus a symmetric single-mode transverse velocity
 perturbation (`vy`) confined near `y=1/4` and `y=3/4` by Gaussians of width
-`sigma`. The commented-out smoothed-density assignments (`rho[regionN] = ...`)
-are dead code; density is actually set as a sharp step. Pressure is uniform
+`sigma`. Density is a sharp step by default; `smoothDensity=True` applies the
+same ramp (Frontiere et al. 2017, Eq. 100). Pressure is uniform
 at 2.5.
 """
 
@@ -29,7 +29,8 @@ def vy(ri, sigma, freq, w0  ):
                  torch.exp(-((ri[:, 1] - 0.75)**2 * thpt))))*torch.abs(0.5 - ri[:, 1])
 
 
-def sampleKHH(rho1, rho2, v1, v2, delta, sigma, freq, w0, nx, config, schemeConfig, SimulationState, SimulationSystem):
+def sampleKHH(rho1, rho2, v1, v2, delta, sigma, freq, w0, nx, config, schemeConfig, SimulationState, SimulationSystem,
+              smoothDensity=False):
     compressibleSystem = setupBasicCompressibleInitialState(nx, config, schemeConfig, SimulationState, SimulationSystem)
 
     v_y = vy(compressibleSystem.state.positions, sigma, freq, w0)
@@ -46,10 +47,17 @@ def sampleKHH(rho1, rho2, v1, v2, delta, sigma, freq, w0, nx, config, schemeConf
 
     rho = torch.zeros_like(compressibleSystem.state.densities)
 
-    rho[region1] = rho1# - rhom * torch.exp((particles.positions[region1, 1] - 1/4) / delta)
-    rho[region2] = rho2# + rhom * torch.exp((1/4 - particles.positions[region2, 1]) / delta)
-    rho[region3] = rho2# + rhom * torch.exp((particles.positions[region3, 1] - 3/4) / delta)
-    rho[region4] = rho1# - rhom * torch.exp((3/4 - particles.positions[region4, 1]) / delta)
+    rho[region1] = rho1
+    rho[region2] = rho2
+    rho[region3] = rho2
+    rho[region4] = rho1
+    if smoothDensity:
+        # Robertson et al. (2010) / Frontiere et al. (2017) Eq. (100): the same exp ramp as v_x, so the
+        # contact is smooth over `delta` instead of a sharp step (the default stays sharp: M0 baseline)
+        rho[region1] = rho1 - rhom * torch.exp((positions[region1, 1] - 1/4) / delta)
+        rho[region2] = rho2 + rhom * torch.exp((1/4 - positions[region2, 1]) / delta)
+        rho[region3] = rho2 + rhom * torch.exp((positions[region3, 1] - 3/4) / delta)
+        rho[region4] = rho1 - rhom * torch.exp((3/4 - positions[region4, 1]) / delta)
 
     # print(f'rho1 = {rho1}, rho2 = {rho2}, rhom = {rhom}')
     # print(f'rho min = {rho.min()}, rho max = {rho.max()}, mean = {rho.mean()}')

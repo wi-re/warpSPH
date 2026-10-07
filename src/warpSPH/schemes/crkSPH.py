@@ -22,7 +22,7 @@ from ..modules.compSPH.balance import computeCompSPHBalanceTermWarp
 from ..modules.crk import computeCrkSPHdudtWarp
 from ..modules.eos import idealGasEOS
 from ..modules.momentum import computeMomentumConsistent
-from ..modules.shockCapturing import computeViscositySwitchTerms
+from ..modules.shockCapturing import computeViscositySwitchTerms, updateViscositySwitch
 from ..enumTypes import EnergyScheme
 
 import warnings
@@ -392,12 +392,16 @@ def crkSPH_step(
     #     gradHState = gradHState
     # )
 
-    # NOTE (AV_PLAN S2): CRKSPH does NOT advance the viscosity switch's `alpha0s` -- the
-    # `updateViscositySwitch` call that used to sit here was commented out. `alphas` are
-    # recomputed above from the initial `alpha0s` every step, so Cullen-Dehnen / Read-Hayfield
-    # under CRKSPH have no decay memory (instant response, no relaxation). Restoring the
-    # call would change CRKSPH results; it was deleted rather than restored (user decision).
-
+    # Advance the viscosity switch's stored alpha0 (mirrors the Monaghan / compSPH wiring). AV_PLAN S2 had this call
+    # deleted; but `computeCullenTerms` only decays the stored alpha0 by ONE step, so without writing it back it stays at its
+    # initial 1 and alpha sticks at ~0.97-0.98 -- C&D / R&H under CRKSPH were fixed-alpha runs (AV_PLAN Phase 1 clean-up, item 3).
+    currentState.alpha0s, switchState = updateViscositySwitch(
+        switchState,
+        dt, dvdt,
+        currentState,
+        config, schemeConfig,
+        SupportScheme.SuperSymmetric,
+        adjacency)
 
     # drhodt = computeMomentumConsistent(
     #     currentState,
