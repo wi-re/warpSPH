@@ -30,6 +30,7 @@ import torch
 from ..systems.compressibleMonaghan import CompressibleSystemUpdate
 
 from ..modules.shockCapturing.CullenHopkins import computeHopkinsTerms, computeHopkinsUpdate
+from ..modules.reconstruction import requireRawPairVelocity
 
 lut = None
 
@@ -45,6 +46,7 @@ def compSPH_step(
     # dsphConfig = None,
 ):        
     global lut
+    requireRawPairVelocity(schemeConfig.diffusionParams, 'CompSPH')
     currentSystem = system#
     currentState = currentSystem.state
     # currentSystem.adjacency = None

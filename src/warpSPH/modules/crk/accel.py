@@ -5,7 +5,7 @@ volume-weighted pressure force plus a Riemann-like pseudo-viscosity `Q_i,
 Q_j` built from velocity-gradient-reconstructed pair velocities
 (`v_dot_i`/`v_dot_j`), optionally slope-limited via the van Leer
 (`enableVanLeerLimiter`) and eta-based (`enableCRKLimiter`) limiters from
-`limiter.py` (each individually forceable on/off via
+`modules/reconstruction` (each individually forceable on/off via
 `crkViscosityParams.forceVanLeerOn/Off`). Also returns the per-pair
 pressure/viscosity contributions consumed elsewhere for diagnostics.
 """
@@ -22,7 +22,7 @@ from warpSPHCore import *
 from ...configurations.crkSPH import CRKViscosity
 from ..dissipation import DiffusionParameters, computeFrontiereQ
 
-from .limiter import computeVanLeer, crkLimiter
+from ..reconstruction import limitedPairPhi, linearPairVelocity
 
 __all__ = ['computeCrkSPHAccelWarp']
 
@@ -106,54 +106,20 @@ def computeCrkSPHAccel_Func_i(
 
         gradV_j = referenceVelocityTensor[j]
 
-        phi_ij = scalar_t(0.0)
-        # we then have the eta terms that depends on the 'r'_ij terms which are not the distances!
-        # vx_ij = (del_b v_i^a x_ij^a x_ij^b) / (del_b v_j^a x_ij^a x_ij^b)
-        # torch.where(eta_ij < eta_crit, torch.exp(- ((eta_ij - eta_crit)/eta_fold)**2), torch.ones_like(eta_ij))
-        factor = scalar_t(1.0)
-        
-        if crkViscosityParams.enableCRKLimiter:
-            factor = crkLimiter(
-                x_ij,
-                hi,
-                hj,
-                kernelProperties.kernelFunction,
-                dim,
-                crkViscosityParams.eta_crit,
-                crkViscosityParams.eta_fold
-            )
-
-        if crkViscosityParams.enableVanLeerLimiter:
-            phi_ij = computeVanLeer(
-                x_ij,
-                vel_i,
-                vel_j,
-                gradV_i,
-                gradV_j
-            ) * factor
-
+        # CRKSPH's limited midpoint reconstruction (`modules/reconstruction`, AV_PLAN Phase 3): phi_ij from the van Leer
+        # limiter times the close-pair taper, unless forced off (raw velocities) or on (unlimited linear). With
+        # x_ij = x_i - x_j: v_dot_i = v_i - phi/2 J_i x_ij, v_dot_j = v_j + phi/2 J_j x_ij (garciasenz2026 Eqs. 11-12)
+        phi_ij = limitedPairPhi(
+            x_ij, hi, hj, vel_i, vel_j, gradV_i, gradV_j,
+            kernelProperties.kernelFunction, dim,
+            crkViscosityParams.enableVanLeerLimiter, crkViscosityParams.enableCRKLimiter,
+            crkViscosityParams.eta_crit, crkViscosityParams.eta_fold)
         if crkViscosityParams.forceVanLeerOff:
             phi_ij = scalar_t(0.0)
         if crkViscosityParams.forceVanLeerOn:
             phi_ij = scalar_t(1.0)
-
         phi_ij = wp.max(wp.min(phi_ij, scalar_t(1.0)), scalar_t(0.0)) # Ensure phi is between 0 and 1
-
-        # the term in crk is 
-        # v_hat_ij = v_i - v_j - phi_ij/2 * (gradV_i + gradV_j) * x_ij
-        # we utilize the more common form of v_ij = v_j - v_i
-        # so the correction termw ith flipped signs becomes
-        # v_hat_ij = v_j - v_i + phi_ij/2 * (gradV_i + gradV_j) * x_ij
-        # commuting the correction term to each velocity gives
-        # v_hat_ij = (v_j + phi_ij/2 * gradV_j * x_ij) - (v_i - phi_ij/2 * gradV_i * x_ij)
-        # or
-        # v_dot_i = v_i - phi_ij/2 * gradV_i * x_ij
-        # v_dot_j = v_j + phi_ij/2 * gradV_j * x_ij
-        v_corr_i = phi_ij / scalar_t(2.0) * matmul(gradV_i, x_ij)
-        v_corr_j = phi_ij / scalar_t(2.0) * matmul(gradV_j, x_ij)
-
-        v_dot_i = vel_i - v_corr_i
-        v_dot_j = vel_j + v_corr_j
+        vij_dot = linearPairVelocity(vel_i, vel_j, gradV_i, gradV_j, x_ij, phi_ij)
 
         gradw_i = computeKernelGradientCRK(
             xi, xj, 
@@ -178,7 +144,6 @@ def computeCrkSPHAccel_Func_i(
         # the formula (mu with the particle's own h, eps^2 = 1e-2, min(0, .), switched alpha / BetaMode) lives once in the
         # `Frontiere2017` term of `modules/dissipation/pi/terms.py`
         alpha_j = access_optional(referenceAlphas, j, viscositySwitch, scalar_t(1.0))
-        vij_dot = v_dot_i - v_dot_j
         Q_i = computeFrontiereQ(xi, xj, hi, hj, rhoi, rhoj, vij_dot, domainState, kernelProperties.kernelFunction,
                                 cs_i, cs_j, alpha_i, alpha_j, viscosityParams, False)
         Q_j = computeFrontiereQ(xi, xj, hi, hj, rhoi, rhoj, vij_dot, domainState, kernelProperties.kernelFunction,
@@ -193,8 +158,6 @@ def computeCrkSPHAccel_Func_i(
         # omegaj = referenceOmegas[j] if useGradHTerms else scalar_t(1.0)
         # pressureTerm_j = Pj / (rhoj*rhoj) / omegaj
         
-        u_ij = v_dot_j - v_dot_i
-        mu_ij = wp.dot(u_ij, x_ij) / (r_ij + scalar_t(1.0e-14) * hi)
         mu_ij = scalar_t(1.0)
         # mu_ij = ux_ij #/ (r_ij + scalar_t(1.0e-14) * hi)
 

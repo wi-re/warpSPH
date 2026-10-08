@@ -20,7 +20,7 @@ from warpSPHCore import *
 from ..dissipation import DiffusionParameters, computeFrontiereQ
 from ...configurations.crkSPH import CRKViscosity
 
-from .limiter import computeVanLeer, crkLimiter
+from ..reconstruction import limitedPairPhi, linearPairVelocity
 
 __all__ = ['computeCrkSPHdudtWarp']
 
@@ -102,43 +102,20 @@ def computeCrkSPHdudt_Func_i(
         x_ij = computeDistanceVec(xi, xj, domainState)
         r_ij = safe_sqrt(wp.dot(x_ij, x_ij))
 
-        phi_ij = scalar_t(0.0)
-        # we then have the eta terms that depends on the 'r'_ij terms which are not the distances!
-        # vx_ij = (del_b v_i^a x_ij^a x_ij^b) / (del_b v_j^a x_ij^a x_ij^b)
-        factor = scalar_t(1.0)
-        
-        if crkViscosityParams.enableCRKLimiter:
-            factor = crkLimiter(
-                x_ij,
-                hi,
-                hj,
-                kernelProperties.kernelFunction,
-                dim,
-                crkViscosityParams.eta_crit,
-                crkViscosityParams.eta_fold
-            )
-
-        if crkViscosityParams.enableVanLeerLimiter:
-            phi_ij = computeVanLeer(
-                x_ij,
-                vel_i,
-                vel_j,
-                gradV_i,
-                gradV_j
-            ) * factor
-
+        # CRKSPH's limited midpoint reconstruction (`modules/reconstruction`, AV_PLAN Phase 3): phi_ij from the van Leer
+        # limiter times the close-pair taper, unless forced off (raw velocities) or on (unlimited linear). With
+        # x_ij = x_i - x_j: v_dot_i = v_i - phi/2 J_i x_ij, v_dot_j = v_j + phi/2 J_j x_ij (garciasenz2026 Eqs. 11-12)
+        phi_ij = limitedPairPhi(
+            x_ij, hi, hj, vel_i, vel_j, gradV_i, gradV_j,
+            kernelProperties.kernelFunction, dim,
+            crkViscosityParams.enableVanLeerLimiter, crkViscosityParams.enableCRKLimiter,
+            crkViscosityParams.eta_crit, crkViscosityParams.eta_fold)
         if crkViscosityParams.forceVanLeerOff:
             phi_ij = scalar_t(0.0)
         if crkViscosityParams.forceVanLeerOn:
             phi_ij = scalar_t(1.0)
         phi_ij = wp.max(wp.min(phi_ij, scalar_t(1.0)), scalar_t(0.0)) # Ensure phi is between 0 and 1
-        v_corr_i = phi_ij / scalar_t(2.0) * matmul(gradV_i, x_ij)
-        # x_ij = x_i - x_j on both sides; the j-side midpoint extrapolation is
-        # v_j + phi/2 J_j x_ij (garciasenz2026 Eq. 12), same as accel.py
-        v_corr_j = phi_ij / scalar_t(2.0) * matmul(gradV_j, x_ij)
-
-        v_dot_i = vel_i - v_corr_i
-        v_dot_j = vel_j + v_corr_j
+        vij_dot = linearPairVelocity(vel_i, vel_j, gradV_i, gradV_j, x_ij, phi_ij)
 
         gradw_i = computeKernelGradientCRK(
             xi, xj, 
@@ -163,7 +140,6 @@ def computeCrkSPHdudt_Func_i(
         # the formula (mu with the particle's own h, eps^2 = 1e-2, min(0, .), switched alpha / BetaMode) lives once in the
         # `Frontiere2017` term of `modules/dissipation/pi/terms.py`
         alpha_j = access_optional(referenceAlphas, j, viscositySwitch, scalar_t(1.0))
-        vij_dot = v_dot_i - v_dot_j
         Q_i = computeFrontiereQ(xi, xj, hi, hj, rhoi, rhoj, vij_dot, domainState, kernelProperties.kernelFunction,
                                 cs_i, cs_j, alpha_i, alpha_j, viscosityParams, False)
         Q_j = computeFrontiereQ(xi, xj, hi, hj, rhoi, rhoj, vij_dot, domainState, kernelProperties.kernelFunction,
@@ -176,9 +152,6 @@ def computeCrkSPHdudt_Func_i(
         # omegaj = referenceOmegas[j] if useGradHTerms else scalar_t(1.0)
         # pressureTerm_j = Pj / (rhoj*rhoj) / omegaj
         
-        u_ij = v_dot_j - v_dot_i
-        ux_ij = wp.dot(u_ij, x_ij) / (r_ij + scalar_t(1.0e-14) * hi)
-        mu_ij = ux_ij #/ (r_ij + scalar_t(1.0e-14) * hi)
         mu_ij = scalar_t(1.0)
 
         # note that the term here should be multiplied with rho_i if it was a gradient operation

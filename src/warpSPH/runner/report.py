@@ -194,6 +194,13 @@ def _viscosityDescriptions(schemeConfig) -> List[str]:
         rows.append(_joined(f'alpha in [{_scalarValue(switch.alpha_min):g}, '
                             f'{_scalarValue(switch.alpha_max):g}]',
                             f'divergence {switch.divergenceScheme}'))
+    policy = getattr(params, 'velocityPairPolicy', 0)
+    if policy != 0:
+        # AV_PLAN Phase 3: the viscosity sees a reconstructed pair velocity
+        from ..configurations.moduleConfigurations.diffusionParameters import VelocityPairPolicy
+        rows.append(f'pair velocity {VelocityPairPolicy(policy).name} (midpoint reconstruction'
+                    + ('' if getattr(params, 'correctReconstructionGradient', True) else ', uncorrected gradient')
+                    + ')')
     rows.append(_joined(f'conductivity '
                         f'{_viscosityTermName(params.thermalConductivityTerm)}',
                         _joined(_number('Cu_l', params.Cu_l),

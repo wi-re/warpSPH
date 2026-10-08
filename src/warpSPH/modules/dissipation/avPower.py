@@ -26,12 +26,13 @@ from warpSPHCore import OperationProperties, SupportScheme
 from ...configurations import CRKSPHConfig
 from ...configurations.moduleConfigurations.diffusionParameters import (
     dictToDiffusionParams, diffusionParamsToDict)
+from ..reconstruction import reconstructionInputs
 from .wp_diffusion import computeViscosityWarp
 
 __all__ = ['computeAVPowerSplit']
 
 
-def _power(state, config, params, adjacency, alphas=None) -> float:
+def _power(state, config, params, adjacency, alphas=None, velocityTensor=None, balsara=None) -> float:
     dvdt = computeViscosityWarp(
         state,
         operationProperties=OperationProperties(
@@ -40,6 +41,8 @@ def _power(state, config, params, adjacency, alphas=None) -> float:
         adjacency=adjacency,
         viscosityParams=params,
         queryAlphas=state.alphas if alphas is None else alphas,
+        queryVelocityTensor=velocityTensor,
+        queryBalsara=balsara,
     )
     return float(-(state.masses * torch.einsum('ij,ij->i', state.velocities, dvdt)).sum())
 
@@ -54,12 +57,15 @@ def computeAVPowerSplit(system, config, schemeConfig) -> Dict[str, float]:
         return dict(avPowerTotal=nan, avPowerLinear=nan, avPowerQuadratic=nan,
                     avPowerSplitResidual=nan)
     state = system.state
-    base = diffusionParamsToDict(schemeConfig.diffusionParams)
+    # the pair velocity (raw or reconstructed, AV_PLAN Phases 3-4) as the scheme evaluates it
+    params, velocityTensor, balsara = reconstructionInputs(state, config, schemeConfig.diffusionParams, system.adjacency)
+    base = diffusionParamsToDict(params)
     out = {}
     for name, overrides in (('avPowerTotal', {}),
                             ('avPowerLinear', {'C_q': 0.0}),
                             ('avPowerQuadratic', {'C_l': 0.0})):
         params = dictToDiffusionParams({**base, **overrides})
-        out[name] = _power(state, config, params, system.adjacency)
+        out[name] = _power(state, config, params, system.adjacency, velocityTensor=velocityTensor, balsara=balsara)
     out['avPowerSplitResidual'] = out['avPowerTotal'] - out['avPowerLinear'] - out['avPowerQuadratic']
     return out
+

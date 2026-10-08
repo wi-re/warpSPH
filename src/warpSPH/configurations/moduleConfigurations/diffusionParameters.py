@@ -10,7 +10,7 @@ for the base compressible scheme's defaults here, but 1 or 2 for CompSPH/CRKSPH)
 the CompSPH/CRKSPH variants live in their own config files.
 """
 
-__all__ = ['ViscosityTerms', 'BetaMode', 'DiffusionParameters', 'buildDefaultDiffusionParamsCompressibleSPH', 'diffusionParamsToDict', 'dictToDiffusionParams']
+__all__ = ['ViscosityTerms', 'BetaMode', 'VelocityPairPolicy', 'DiffusionParameters', 'resolveReconstructionLimiter', 'buildDefaultDiffusionParamsCompressibleSPH', 'diffusionParamsToDict', 'dictToDiffusionParams']
 
 from typing import Dict, Any
 from warpSPHCore import *
@@ -55,6 +55,27 @@ class BetaMode(Enum):
     Fixed = 1
 
 
+class VelocityPairPolicy(Enum):
+    """Which pair velocity difference `u_ij` the artificial viscosity sees (AV_PLAN Phase 3, `modules/reconstruction`).
+
+    * `Raw` (default, the historical behaviour): `u_ij = v_i - v_j`.
+    * `Linear`: both velocities extrapolated to the pair midpoint with the velocity Jacobian,
+      `v'_i = v_i - 1/2 J_i x_ij`, `v'_j = v_j + 1/2 J_j x_ij` (Garcia-Senz & Cabezon 2026 Eqs. 11-12 with phi = 1).
+      Annihilates any linear velocity field; unlimited, so not for shocks.
+    * `Limited`: the same with the van Leer-like limiter `phi_ij` and the close-pair taper `kappa_ij`
+      (Frontiere et al. 2017 Eqs. 51-53, Garcia-Senz & Cabezon 2026 Eqs. 13-17) -- CRKSPH's own reconstruction.
+    * `BalsaraLimited`: `Limited` with `phi_ij` further scaled by `1 - Bbar_ij^p` (Garcia-Senz & Cabezon 2026
+      Eqs. 18-19, `p = reconstructionBalsaraPower`): less reconstruction -- more dissipation -- where the flow is
+      compressive (B -> 1), full reconstruction in shear (B -> 0). Their recommended AVSLRB2 is p = 2.
+
+    Only the viscous force and its heating use it; the conductivity keeps the raw velocity.
+    """
+    Raw = 0
+    Linear = 1
+    Limited = 2
+    BalsaraLimited = 3
+
+
 @wp.struct
 class DiffusionParameters:
     c_s: scalar_t = field(default=scalar_t(1.0)) # Speed of sound, used in some formulations to compute the signal velocity
@@ -71,6 +92,12 @@ class DiffusionParameters:
     scaleBeta: wp.bool = field(default=False) # LEGACY, `Coupled` mode only: historically `beta = alpha_bar^2 * C_l * C_q` (a second alpha factor -- the comment here used to describe only the first half). Matches no paper; kept so stored configs reproduce.  # If true then the quadratic viscosity term is scaled by the linear viscosity term, as suggested in some papers to reduce excessive viscosity in certain scenarios. This is only relevant for formulations that use a quadratic term, such as Monaghan1992 and Monaghan1997.
     monaghanSwitch: wp.bool = field(default=True) # Whether to apply the Monaghan switch that turns off viscosity for diverging particles, i.e. particles that are moving away from each other. This is a common technique to reduce excessive viscosity in expanding flows and is used in many formulations such as Monaghan1992 and Monaghan1997.
     correctXi: wp.bool = field(default=True) # Divide the viscosity by the kernel-dependent length factor `sphKernel_xi` (packing ratio x kernel scale) so the coefficients are comparable across kernels. Unrelated to Cullen & Dehnen's limiter Xi (`ViscositySwitchConfig.limitXi`). The name is kept because it is serialised in stored configs.
+    velocityPairPolicy: wp.int32 = field(default=VelocityPairPolicy.Raw.value) # `VelocityPairPolicy`: the pair velocity the viscosity sees (Raw, Linear, Limited, BalsaraLimited)
+    reconstructionEtaCrit: scalar_t = field(default=scalar_t(-1.0)) # `Limited` / `BalsaraLimited` close-pair taper eta_crit in units of r/H (H = support radius); <= 0: 1/n_h, resolved per step like CRKSPH's (`resolveReconstructionLimiter`)
+    reconstructionEtaFold: scalar_t = field(default=scalar_t(-1.0)) # `Limited` taper width eta_fold, r/H units; <= 0: 0.2/n_h
+    correctReconstructionGradient: wp.bool = field(default=True) # host-side: reconstruct with the M^-1-corrected velocity Jacobian (exact for linear fields) instead of the plain SPH gradient
+    reconstructionBalsaraPower: scalar_t = field(default=scalar_t(2.0)) # `BalsaraLimited`: p in phi_ij (1 - Bbar_ij^p) (Garcia-Senz & Cabezon 2026 Eqs. 18-19)
+    balsaraPairLimiter: wp.bool = field(default=False) # multiply the viscous Pi by Bbar_ij = (B_i + B_j)/2 (Balsara 1995 as a pair limiter, Garcia-Senz & Cabezon 2026 Eq. 7; with `C_q` coupled it is Sphenix's alpha_ij = alpha_bar Bbar, Borrow et al. 2022 Eq. 19)
 
     
 def buildDefaultDiffusionParamsCompressibleSPH():
@@ -106,7 +133,15 @@ def diffusionParamsToDict(diffusionParams: DiffusionParameters) -> Dict[str, Any
         'scaleBeta': diffusionParams.scaleBeta,
         'betaMode': BetaMode(diffusionParams.betaMode).name,
         'monaghanSwitch': diffusionParams.monaghanSwitch,
-        'correctXi': diffusionParams.correctXi
+        'correctXi': diffusionParams.correctXi,
+        'velocityPairPolicy': VelocityPairPolicy(diffusionParams.velocityPairPolicy).name,
+        # plain Python scalars: a scalar_t default reads back as a numpy float32, which json cannot write (the
+        # export path dumps this dict)
+        'reconstructionEtaCrit': float(diffusionParams.reconstructionEtaCrit),
+        'reconstructionEtaFold': float(diffusionParams.reconstructionEtaFold),
+        'correctReconstructionGradient': bool(diffusionParams.correctReconstructionGradient),
+        'reconstructionBalsaraPower': float(diffusionParams.reconstructionBalsaraPower),
+        'balsaraPairLimiter': bool(diffusionParams.balsaraPairLimiter),
     }
 
 def dictToDiffusionParams(diffusionParamsDict: Dict[str, Any]) -> DiffusionParameters:
@@ -126,5 +161,29 @@ def dictToDiffusionParams(diffusionParamsDict: Dict[str, Any]) -> DiffusionParam
     diffusionParams.betaMode = (BetaMode[mode] if isinstance(mode, str) else BetaMode(mode)).value
     diffusionParams.monaghanSwitch = diffusionParamsDict['monaghanSwitch']
     diffusionParams.correctXi = diffusionParamsDict['correctXi']
-    
+    # absent in configs stored before Phase 3 -> the raw pair velocity
+    policy = diffusionParamsDict.get('velocityPairPolicy', VelocityPairPolicy.Raw.name)
+    diffusionParams.velocityPairPolicy = (VelocityPairPolicy[policy] if isinstance(policy, str) else VelocityPairPolicy(policy)).value
+    diffusionParams.reconstructionEtaCrit = diffusionParamsDict.get('reconstructionEtaCrit', -1.0)
+    diffusionParams.reconstructionEtaFold = diffusionParamsDict.get('reconstructionEtaFold', -1.0)
+    diffusionParams.correctReconstructionGradient = diffusionParamsDict.get('correctReconstructionGradient', True)
+    diffusionParams.reconstructionBalsaraPower = diffusionParamsDict.get('reconstructionBalsaraPower', 2.0)
+    diffusionParams.balsaraPairLimiter = diffusionParamsDict.get('balsaraPairLimiter', False)
+
     return diffusionParams
+
+
+def resolveReconstructionLimiter(diffusionParams: DiffusionParameters, n_h) -> DiffusionParameters:
+    """`diffusionParams` with a non-positive `reconstructionEtaCrit` / `reconstructionEtaFold` replaced by the
+    n_h-derived value (1/n_h, 0.2/n_h -- CRKSPH's `resolveCRKLimiter`). Returns `diffusionParams` itself when
+    the policy is not a limited one or both values are explicit."""
+    if diffusionParams.velocityPairPolicy not in (VelocityPairPolicy.Limited.value, VelocityPairPolicy.BalsaraLimited.value):
+        return diffusionParams
+    if diffusionParams.reconstructionEtaCrit > 0 and diffusionParams.reconstructionEtaFold > 0:
+        return diffusionParams
+    out = dictToDiffusionParams(diffusionParamsToDict(diffusionParams))
+    if out.reconstructionEtaCrit <= 0:
+        out.reconstructionEtaCrit = 1.0 / float(n_h)
+    if out.reconstructionEtaFold <= 0:
+        out.reconstructionEtaFold = 0.2 / float(n_h)
+    return out

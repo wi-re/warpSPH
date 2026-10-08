@@ -4,11 +4,14 @@ pytest imports ``conftest.py`` before collecting test modules, which is the only
 place precision can still be chosen -- see :mod:`warpSPHBootstrap`.
 """
 
+import os
+
 import pytest
 
 from warpSPHBootstrap import bootstrap
 
-RUNTIME = bootstrap(precision='float32')
+# float32 unless the environment asks otherwise (tests/test_reconstruction.py reruns itself in float64 this way)
+RUNTIME = bootstrap(precision=os.environ.get('warpSPHCore_PRECISION', 'float32'))
 
 
 @pytest.fixture(scope='session')

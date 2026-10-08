@@ -42,6 +42,7 @@ from ..modules.shockCapturing.CullenHopkins import computeHopkinsTerms, computeH
 
 from ..modules.crk.accel import computeCrkSPHAccelWarp
 from ..configurations.crkSPH import resolveCRKLimiter
+from ..modules.reconstruction import requireRawPairVelocity
 
 __all__ = ['crkSPH_step']
 
@@ -100,6 +101,7 @@ def crkSPH_step(
 ):
 
     _warnNonConservativeSupport(config)
+    requireRawPairVelocity(schemeConfig.diffusionParams, 'CRKSPH')
     crkViscosityParams = resolveCRKLimiter(schemeConfig.crkViscosityParams, config.n_h)
     currentSystem = system#
     currentState = currentSystem.state

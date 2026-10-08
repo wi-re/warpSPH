@@ -1,8 +1,23 @@
-"""Pair-velocity policies for the pairwise dissipation operator (AV_PLAN Phase 1 / 3): which velocity
-difference `u_ij` the artificial-viscosity term sees. `rawPairVelocity` is the historical behaviour;
-the limited-linear reconstruction (Frontiere 2017, Garcia-Senz & Cabezon 2026 Eqs. 11-19) lands here
-in Phase 3, extracted from `modules/crk`."""
+"""Pair-velocity policies for the pairwise dissipation operator (AV_PLAN Phases 1 / 3): which velocity
+difference `u_ij` the artificial-viscosity term sees.
 
-from .pairVelocity import rawPairVelocity
+* `pairVelocity.py` -- `rawPairVelocity` (the historical behaviour), `linearPairVelocity` (the midpoint
+  extrapolation, Garcia-Senz & Cabezon 2026 Eqs. 11-12), `limitedPairPhi` and the policy dispatch
+  `reconstructPairVelocity`;
+* `limiters.py`     -- the van Leer-like limiter and the close-pair taper, moved here from `modules/crk`;
+* `gradient.py`     -- `computeVelocityJacobian`, the (optionally M^-1-corrected) velocity Jacobian, and the
+  Balsara factor from it (`balsaraFromJacobian`);
+* `diagnostics.py`  -- `computePairPhiMean`, the per-particle mean reconstruction factor (the detector map).
 
-__all__ = ['rawPairVelocity']
+CRKSPH (`modules/crk`) reconstructs through these with its own CRK-corrected gradient; the Monaghan host
+through `DiffusionParameters.velocityPairPolicy`."""
+
+from .pairVelocity import rawPairVelocity, linearPairVelocity, limitedPairPhi, reconstructPairVelocity
+from .limiters import limiterVL, computeVanLeer, crkLimiter
+from .gradient import (computeVelocityJacobian, velocityTensorArguments, needsJacobian, needsBalsara,
+                       balsaraFromJacobian, reconstructionInputs, requireRawPairVelocity)
+from .diagnostics import computePairPhiMean
+
+__all__ = ['rawPairVelocity', 'linearPairVelocity', 'limitedPairPhi', 'reconstructPairVelocity',
+           'limiterVL', 'computeVanLeer', 'crkLimiter', 'computeVelocityJacobian', 'velocityTensorArguments', 'needsJacobian', 'needsBalsara', 'balsaraFromJacobian',
+           'reconstructionInputs', 'requireRawPairVelocity', 'computePairPhiMean']

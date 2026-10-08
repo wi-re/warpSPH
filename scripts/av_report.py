@@ -105,6 +105,9 @@ CONFIGS: Dict[str, AVConfig] = {c.name: c for c in (
     AVConfig('noneQ', switch='NoneSwitch', diffusion=dict(C_q=2.0)),
     AVConfig('cullenDehnen2010Q', switch='CullenDehnen2010', diffusion=dict(C_q=2.0)),
     AVConfig('readHayfield2012Q', switch='ReadHayfield2012', switchParams=_RH, diffusion=dict(C_q=2.0)),
+    # AV_PLAN Phase 3: the reconstructed pair velocity on the M0 `none` column (alpha = 1, C_q = 0)
+    AVConfig('noneLinear', switch='NoneSwitch', diffusion=dict(velocityPairPolicy=1)),
+    AVConfig('noneLimited', switch='NoneSwitch', diffusion=dict(velocityPairPolicy=2)),
 )}
 
 #: Named groups, so `--config baseline` runs the three M0 columns.
@@ -114,6 +117,7 @@ GROUPS: Dict[str, List[str]] = {
     'crk': ['crkNone', 'crkCullenDehnen2010'],
     'switchesS3': ['balsara1995', 'colagrossi2004', 'morrisMonaghan1997', 'rosswog2000'],
     'phase2': ['rosswog2020', 'rosswog2020Q'],
+    'phase3': ['noneLinear', 'noneLimited'],
 }
 
 

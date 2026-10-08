@@ -32,6 +32,7 @@ from warpSPH.modules.dissipation import (computeConductivity, computeThermalDiss
 from warpSPH.modules.eos import idealGasEOS                           # noqa: E402
 from warpSPH.modules.internalEnergy import computeDudtMonaghan       # noqa: E402
 from warpSPH.modules.pressure import computePressureForceSymmetric   # noqa: E402
+from warpSPH.modules.reconstruction import reconstructionInputs     # noqa: E402
 
 CASES = {
     'sedov': ('warpSPH.cases.sedov', 'sedovCase', dict(dim=3, nx=24)),
@@ -48,6 +49,9 @@ def pieces(system, config, schemeConfig, switch='NoneSwitch'):
     prop = OperationProperties(kernel=config.kernel, supportMode=SupportScheme.KernelMeanSymmetric)
     dp = schemeConfig.diffusionParams
     kw = dict(operationProperties=prop, domain=config.domain, adjacency=adj, queryAlphas=st.alphas)
+    # a reconstructing pair-velocity policy / Balsara variant (AV_PLAN Phases 3-4): what the scheme passes
+    dp, J, B = reconstructionInputs(st, config, dp, adj)
+    vkw = dict(kw, queryVelocityTensor=J, queryBalsara=B)
     out = {}
     out['pressure force + work'] = (
         computePressureForceSymmetric(st, config, supportScheme=SupportScheme.KernelMeanSymmetric,
@@ -55,8 +59,8 @@ def pieces(system, config, schemeConfig, switch='NoneSwitch'):
         computeDudtMonaghan(st, config, supportScheme=SupportScheme.KernelMeanSymmetric,
                             adjacency=adj, gradH=None))
     out['viscous force + heating'] = (
-        computeViscosity(st, viscosityParams=dp, **kw),
-        computeThermalDissipation(st, conductivityParams=dp, **kw))
+        computeViscosity(st, viscosityParams=dp, **vkw),
+        computeThermalDissipation(st, conductivityParams=dp, **vkw))
     out['conductivity'] = (torch.zeros_like(st.velocities),
                            computeConductivity(st, conductivityParams=dp, **kw))
     if switch == 'ReadHayfield2012':
