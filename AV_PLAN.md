@@ -48,13 +48,58 @@ Phase 2 (Rosswog 2020 entropy trigger) built and validated 2026-10-06 — passes
 | 0 | M0 Baseline locked | ✅ M0c (2026-09-30), tag `milestone/av-baseline` at the first M0; reference now M0g (Monaghan/CompSPH hosts) and `av_crk3_*` (CRK), see the handoff |
 | 1 | M1 Old physics, new architecture | ✅ 2026-10-07: registry, `BetaMode`, tag fixes, stubs filled, `rawPairVelocity` + `computePi_pair`; smoke bit-identical to M0g, tests + gradcheck green. Tag `milestone/dissipation-abstraction` (4e662a1, local) |
 | 2 | M2 Entropy trigger validated | ◐ built 2026-10-06; KH explained and near-closed at nx 256 (0.131 vs C&D 0.137: gate `>= C&D` missed by 4.6 %, smooth IC); marginal Sod 2D/3D P spike (+1.8 % / +0.3 %) — `docs/av/av_phase2_rosswog2020_2026-10-06.md` |
-| 3 | M3 Reconstruction engine works | ☐ **next** — handoff below |
-| 4 | M4 Smooth-flow dissipation characterised | ☐ not started |
-| 5A | M5 Quadratic dissipation understood | ☐ not started |
-| 5B | M6 Cheap modern switch characterised | ☐ not started |
-| 6 | M7 Detector-complete | ☐ not started |
-| 7 | 🏁 **M8 SPH-AV-FOUNDATION** — hard gate | ☐ not started |
+| 3 | M3 Reconstruction engine works | ◐ built 2026-10-07; unit tests (float64 annihilation, 1e-12 conservation), gradcheck green; CRK/Monaghan regression = round-off (Build notes); runs in the overnight sweep |
+| 4 | M4 Smooth-flow dissipation characterised | ◐ built 2026-10-07 (Table 1 rows 1-6 as configs `gs*`); validation = sweep |
+| 5A | M5 Quadratic dissipation understood | ◐ built 2026-10-07 (shear box, Chen & Nixon ratio, `cn*` matrix); validation = sweep; `C_q = 0` decision after it |
+| 5B | M6 Cheap modern switch characterised | ◐ built 2026-10-07 (`Sphenix2022`, `sphenix` config); validation + timing = sweep |
+| 6 | M7 Detector-complete | ◐ built 2026-10-07 (`Wadsley2017`, h re-derived: prefactor 0.5); validation + maps = sweep |
+| 7 | 🏁 **M8 SPH-AV-FOUNDATION** — hard gate | ☐ the sweep's verdict.md carries the Part 0 table; selection is the user's |
 | 8+ | → [`PESPH_PLAN.md`](PESPH_PLAN.md) | blocked on M8 |
+
+### Working order from Phase 3 on: build first, sweep once (user, 2026-10-07)
+
+Phases 3-6 are implemented back to back. Each phase is gated only by its **cheap checks**, run right away:
+unit tests, its gradcheck script, the bit-identical smoke `--compare` wherever the change is meant to be a
+refactor, and a short no-divergence run of the new configs. The **expensive validation** of every phase (the
+Validation tables: KH nx 256, full-profile Sod/Sedov/Gresho ladders, Table 1 rows, the 5A beta matrix,
+Sphenix timing, Wadsley detector maps) goes into **one overnight sweep** (`scripts/av_sweep_overnight.py`, built
+alongside), whose matrix is a superset of Phase 7's. Markers that need sweep results stay unticked until the
+sweep has been read; each phase's build markers are ticked as they land. Decisions the sweep has to inform
+(Phase 5A's `C_q = 0` default, Phase 7's default) wait for it.
+
+### Overnight sweep results (2026-10-08) — read before deciding anything
+
+`results/av_sweep_2026-10-07_17-30/` (all runs with video; evidence copied to [`docs/av/sweep_2026-10-08/`](docs/av/sweep_2026-10-08/verdict.md)):
+**41 pass / 21 fail / 0 missing**; no run diverged except the cfl x 4 robustness configs (by design). Plus the KH nx 256
+table (INFO). The FAILs, sorted by what they mean:
+
+- **Not resolvable at this resolution (not a disagreement).** Phase 4 Sedov overshoot (AVSLR / AVSWSLR must exceed
+  rho/rho0 = 4): every variant peaks at ~2.1-2.3 at 3D nx 40. Needs a much finer Sedov to test the paper's claim.
+- **Real findings, Phase 4 (García-Senz).** KH ladder AV < AVSW < SLR reproduced (0.019 / 0.082 / 0.092-0.131), but
+  only AVSWSLR reaches 1.4x AVSW; Gresho: SLR halves plain AV's error (0.21 -> 0.09) but does not beat the switch
+  alone (0.079), AVSWSLR is best (0.058); **headline AV-energy reduction 2.1x, not >= 10x**; RT tie (0.379 vs 0.388).
+  KH nx 256 (smooth IC, t = 3): AVSLR(B2) 0.138-0.139 at t = 1.5, = C&D, below CRK's 0.145; nothing on the
+  Monaghan host keeps CRK's post-saturation amplitude (~0.12 vs 0.19).
+- **Real findings, Phase 5B/6 (Sphenix / Wadsley shocks).** Sod L1(v_x) 2-3x C&D's (Sphenix 0.0137, Wadsley 0.0092,
+  C&D 0.0052) with low shock alpha (0.65 / 0.42 vs 0.95); Sedov shock radius error larger (-4.1 % / -2.3 % vs
+  -1.1 %); Wadsley KH / RT at nx 128 below C&D (0.081 vs 0.100; RT 0.317 vs 0.383). **Suspect first:** the
+  step-boundary update (one-step alpha lag) these two share, and Wadsley's derived prefactor 0.5 -- check with the
+  alpha maps and the Sod videos before tuning anything. Sphenix Gresho L1 0.090 vs C&D 0.073 (alpha lower, 0.016).
+- **Phase 5B cost:** Sphenix 11 % cheaper per step than C&D (target 15 %); Wadsley the most expensive (+34 %).
+  cfl x 4: Sphenix *and* C&D both diverge on Sod and Gresho, both survive Sedov and Noh -- no robustness advantage
+  from the implicit decay at cfl 1.2.
+- **Phase 5A mostly confirms Chen & Nixon.** Coupled beta cuts quadratic AV energy ~10x (Gresho), shear box
+  quadratic fraction 41-78 % -> 5 %, shocks unchanged for Rosswog; C&D Sod contact spike +15 % coupled. The
+  shearing-Noh front metric reads 0.27-0.35 vs exact 0.20 -- **the metric is not trusted yet** (check frames).
+- **The positives.** Wadsley's central claim reproduced: cylindrical Noh pre-shock alpha 4e-8 vs C&D 0.72, post-shock
+  density -1.3 % vs -6.5 % (its `alphaActiveFraction` 0.39 vs 0.78 misses the "< 1/2" bar narrowly). **Rosswog +
+  limited reconstruction is the best KH combination**: nx 256 A(1.5) 0.151 (> McNally 0.148, > CRK 0.145), peak 0.224.
+  Phase 3: everything clean; CRK 3D Sedov nx 40 with video now completes (OPEN_PROBLEMS §18 fix confirmed).
+
+**Decisions for the user:** (1) Phase 5A `C_q = 0` default (the data says coupled beta is cheap in shocks and
+removes smooth-flow quadratic dissipation; C_q = 0 leaves Noh 50 % off); (2) whether to chase the Sphenix / Wadsley
+shock under-dissipation before Phase 7; (3) Phase 7 default -- the candidates on this evidence are Rosswog + limited
+reconstruction (KH) and C&D-Q (shocks); (4) commits (all of Phases 3-6 is uncommitted on `dev`).
 
 ### Handoff: starting Phase 3 (2026-10-07)
 
@@ -444,8 +489,12 @@ which this repo does **not** have (see §2.4).
 
 Their operator (the Wadsley 2017 form, and what SPHYNX/SPH-EXA use):
 
+> **Corrected 2026-10-07 (Phase 4, checked against the PDF):** the sign of the quadratic term was transcribed wrong
+> here. The paper's Eq. (6) is `(−ᾱ c̄ ω + β ω²)/ρ̄` — Monaghan (1992) with the unscaled `ω = v·r̂` and pair means —
+> which is the repo's `Price2012_98` term exactly (`v_sig = C_l c̄ − C_q ω`), so no new `ViscosityTerms` member.
+
 ```
-Π_ab = { −(ᾱ_ab c̄_ab ω_ab + β ω_ab²)/ρ̄_ab   for ω_ab < 0 ; 0 otherwise }   (6)
+Π_ab = { (−ᾱ_ab c̄_ab ω_ab + β ω_ab²)/ρ̄_ab   for ω_ab < 0 ; 0 otherwise }   (6)
 ω_ab = v_ab · r̂_ab                                                          (2)
 v_sig,ab = c_a + c_b − γ ω_ab ,   γ = 3                                     (3)
 ```
@@ -566,7 +615,7 @@ B_i    = |∇·v_i| / (|∇·v_i| + |∇×v_i| + 1e−4 c_i/h_i)                
 Shock indicator and the update:
 
 ```
-S_i = { −h_i² max(∇̇·v_i, 0)   for ∇·v_i ≤ 0 ; 0 for ∇·v_i > 0 }             (21)
+S_i = { h_i² max(−∇̇·v_i, 0)   for ∇·v_i ≤ 0 ; 0 for ∇·v_i > 0 }             (21)
 ∇̇·v_i(t+Δt) = (∇·v_i(t+Δt) − ∇·v_i(t)) / Δt                                 (22)
 α_V,loc,i = α_V,max · S_i / (c_i² + S_i),   α_V,max = 2.0                    (23)
 α_V,i ← { α_V,loc,i                              if α_V,i < α_V,loc,i
@@ -574,7 +623,10 @@ S_i = { −h_i² max(∇̇·v_i, 0)   for ∇·v_i ≤ 0 ; 0 for ∇·v_i > 0 } 
 τ_V,i = γ_K ℓ_V h_i / c_i ,  ℓ_V = 0.05,  γ_K = kernel gamma
 ```
 
-Two things to carry into the port:
+Two things to carry into the port (plus a transcription note, 2026-10-07: the PDF typesets Eq. 21 as
+`−h² max(∇̇·v, 0)`, which would make `S ≤ 0`; the text and Eq. 23 need `S ≥ 0`, i.e. the minus inside the max — SWIFT's
+form, used above. `γ_K` is Dehnen & Aly's cut-off/smoothing-length ratio, which *is* `sphKernelScale`; with `h` the
+cut-off as stored here, `τ = γ_K ℓ h/c = ℓ H/c` and Eq. 21's `h² = (H/sphKernelScale)²`):
 
 - **(24) is implicit**, which is why the paper can say the decay is *stable
   regardless of timestep* and `α_V` is strictly positive with a default
@@ -643,6 +695,13 @@ Stated behaviour of `ξ`, which gives the unit tests directly: `0` in expansion,
 `≈ 1/16` in intermediate, noisy, *and uniformly compressing* regions, `1` in
 shocks.
 
+> **Resolved 2026-10-07 (Phase 6, §6.2):** C&D's `h` is the support itself (their footnote 2: `W = 0` for
+> `r > h`), as stored here; Gasoline2's is half the support ("half the distance to the furthest neighbour"). So
+> `H = h_CD = 2 h_G2` for every kernel, *not* via `sphKernelScale`, and in this repo's units Eq. (26) is
+> `A = 0.5 H² ξ max(−Ḋ, 0)`, `τ = H/(0.4 c)`, `W_R = 1 − (r/H)⁴`. Eq. (24)'s `3/2`, `1/3` are 3D: blindness to
+> `V = −kI` needs `1/d`, `D = ∇·v` in a planar shock needs `d/(d−1)`; the code uses `d/(d−1)[dv/dn + max(−∇·v,0)/d]`
+> (the paper's form in 3D). See `modules/shockCapturing/Wadsley2017.py`.
+>
 > **The factor 2 in Eq. (26) does not transfer.** The paper says it was needed
 > because of "the different `h` definition in CD". This repo stores `h` as the
 > **cut-off radius**, not the smoothing scale — the exact `h`/`H` hazard
@@ -1221,15 +1280,52 @@ The sketch's "important progression test", made numeric:
   No quality claim yet; that is Phase 4.
 
 ### Markers
-- [ ] `modules/reconstruction/` exists with three policies
-- [ ] limiters moved with AD guards intact
-- [ ] `x_ij` sign discrepancy resolved against Eqs. (11)–(12), outcome recorded
-- [ ] linear-field annihilation test passes at both tolerances
-- [ ] limiter unit tests pass
-- [ ] **pairwise conservation test passes at `1e-12`**
-- [ ] gradcheck script added and green
+- [x] `modules/reconstruction/` exists with three policies (2026-10-07: Raw / Linear / Limited, + BalsaraLimited for Phase 4)
+- [x] limiters moved with AD guards intact (`git mv` to `reconstruction/limiters.py`, `crk/limiter.py` re-exports)
+- [x] `x_ij` sign discrepancy resolved against Eqs. (11)–(12), outcome recorded (settled at S4; one shared `linearPairVelocity` now; CRK passes `J^T`, harmless, see Phase 3 notes)
+- [x] linear-field annihilation test passes at both tolerances (float64: 1e-5 / 1e-2; needed a volume-consistent `M`, OPEN_PROBLEMS §22)
+- [x] limiter unit tests pass
+- [x] **pairwise conservation test passes at `1e-12`** (float64: momentum <= 1.5e-15, energy <= 5e-14, all policies, Sod + Gresho)
+- [x] gradcheck script added and green (`scripts/gradcheck_reconstruction.py`, incl. Balsara variants)
 - [ ] CRKSPH regression within budget (or the delta is quantified and explained)
 - [ ] Monaghan + reconstruction runs clean
+
+### Build notes (2026-10-07; validation runs are in the overnight sweep)
+
+- **Layout.** `modules/reconstruction/`: `pairVelocity.py` (`rawPairVelocity`, `linearPairVelocity` = Eqs. 11-12,
+  `limitedPairPhi`, the dispatch `reconstructPairVelocity`), `limiters.py` (moved verbatim with `git mv`;
+  `crk/limiter.py` re-exports), `gradient.py` (`computeVelocityJacobian`, `balsaraFromJacobian`,
+  `reconstructionInputs` -- the one place the scheme and the diagnostics get params / J / B from),
+  `diagnostics.py` (`computePairPhiMean`). CRK `accel` / `dudt` call `limitedPairPhi` + `linearPairVelocity`
+  (the duplicated block is gone). `DiffusionParameters.velocityPairPolicy` (+ `reconstructionEtaCrit/Fold` <= 0 ->
+  1/n_h, 0.2/n_h, `correctReconstructionGradient`), dict round trip with `.get`, banner line. CompSPH and CRKSPH
+  raise if a policy is set (`requireRawPairVelocity`): only the Monaghan kernels implement it.
+- **Energy.** With `u'` in the force (`Pi(u') (u'.x/r) grad W`) the heating must be `Pi(u') (u'.x/r)(v.x/r)` --
+  one factor reconstructed, one raw (as CRK's dudt and Garcia-Senz do); `ux^2` would not conserve. Float64:
+  momentum <= 1.5e-15, energy <= 5e-14 relative, every policy, Sod and Gresho (`tests/test_reconstruction.py`).
+  Heating is no longer positive-definite pair by pair (Garcia-Senz §1 discusses the same property of SLR).
+- **The Jacobian (two findings).** `warpOperation`'s vector gradient is already `J` (`Vs[c,g] = dv_c/dx_g`,
+  checked on `v = (y,0)`); for `v = Ax`, `Vs = A M`, so the exact correction is `Vs M^-1` -- and `computeM` sums
+  `m_j` where the gradient sums `m_j/rho_j`, so `M ~ rho I`. Both break the C&D opt-in corrected path
+  (`divergenceScheme='cullen'` + `correctVelocityGradient`, off by default): **OPEN_PROBLEMS §22, fixed later
+  2026-10-07** (`computeM` volume-weighted, `Vs M^-1`; the reconstruction's Jacobian bit-identical across the fix).
+  Float64 `J` error 8e-16, annihilation residual 1.8e-15. CRKSPH passes `J^T` to its reconstruction
+  (`schemes/crkSPH.py` `.mT`); only `x^T J x` and `u.x` enter there, both transpose-invariant, so CRK is unaffected
+  (kept, to not move CRK).
+- **Regression vs M0g (Monaghan smoke, Raw policy): not bit-identical, round-off.** 24/30 pairs identical; the
+  rest: `avEnergyLinear` 2-9e-9 (none / C&D), R&H `sod2d` `alphaMax` 2.2e-7, `sod3d` `contactSpikeP` 2.9e-6.
+  HEAD reproduces M0g exactly on those six (so it is this change), and in **float64 the R&H before/after
+  difference is 7.7e-12**: FMA contraction moving with code across `wp.func` boundaries (gotcha (i)), no math
+  change. CRK smoke before/after (float32): energy drift unchanged within one ulp (all <= 2.8e-5, budget 1e-4);
+  sod-family derived errors (`entropyGain`, `R4_*`) 2-9e-6, Gresho/Yee angular-momentum metrics up to 3.6e-3
+  (chaotic amplification, gotcha (ii)); **float64 CRK before/after: <= 3e-11** on every Sod / Noh / Sedov metric, the one
+  outlier (crkCD Sedov `energyDrift`, 3.6 % relative) is 3.1e-15 vs 3.0e-15 absolute -- the extraction does not move
+  CRKSPH beyond round-off (the plan's 1e-6 bar holds in float64; float32 derived error metrics move at 1e-6-1e-5).
+- **Float64 C&D / MM97 crashed on the host** (`1 / sphKernel_xi(...)` is `int / wp.float64`, then `Tensor * wp.float64`;
+  no overloads) -- fixed 2026-10-07 (`float(type(xi)(1.0) / xi)`; in float32 the host call already returns a Python
+  float, so nothing changes there), found by the float64 regression check. Pre-existing: no float64 C&D run was possible.
+- `tests/conftest.py` now honours `warpSPHCore_PRECISION` (default float32 unchanged) so a test can rerun itself in
+  float64 (`test_reconstruction.py::test_float64`).
 
 **M3 — Reconstruction-ready.** Git milestone `milestone/velocity-reconstruction`.
 
@@ -1282,10 +1378,10 @@ particle distribution: `P₀ = −A tanh((x−x_c)/δ) + B`, `δ = 0.01`, `x_c =
 L1 values against the paper's figures rather than against each other.
 
 ### Markers
-- [ ] Eq. (6) operator available with fixed `β = 2`
-- [ ] standalone Balsara `B_a`; `Balsara1995` stub retired
-- [ ] `BalsaraModulatedReconstruction` with configurable `p`
-- [ ] Table 1 rows 1-6 all runnable from a config name
+- [x] Eq. (6) operator available with fixed `β = 2` (it is `Price2012_98` + `BetaMode.Fixed`, `C_q = 2`)
+- [x] standalone Balsara `B_a`; `Balsara1995` stub retired (S3 did both; `balsaraFromJacobian` + `balsaraPairLimiter` for the pair)
+- [x] `BalsaraModulatedReconstruction` with configurable `p` (`VelocityPairPolicy.BalsaraLimited`, `reconstructionBalsaraPower`)
+- [x] Table 1 rows 1-6 all runnable from a config name (`av_report --config phase4`: gsAV ... gsAVSLRB2)
 - [ ] Sod: AVSLRB2 `L1 ≤` AVSW
 - [ ] **Sedov: S3/S4 overshoot reproduced, S6 does not**
 - [ ] Gresho: strict ordering reproduced
@@ -1339,9 +1435,9 @@ Also record what the M0 default actually is: `C_q = 0` in
 must resolve one way or the other.
 
 ### Markers
-- [ ] `scaleBeta` semantics documented; no behaviour change
-- [ ] `135βh/(62παH)` ratio reported
-- [ ] periodic shear box case added and registered in `CASE_MODULES`
+- [x] `scaleBeta` semantics documented; no behaviour change (field comment + `BetaMode` docstring, Phase 1)
+- [x] `135βh/(62παH)` ratio reported (`avPower.computeChenNixonRatio`, report column `chenNixonRatioMedian`)
+- [x] periodic shear box case added and registered in `CASE_MODULES` (`cases/shearBox.py`, av_report case `shearBox`)
 - [ ] shock metrics within 5% under coupling
 - [ ] Gresho angular-momentum loss and quadratic AV energy both reduced
 - [ ] shear-box mechanism isolated
@@ -1403,9 +1499,9 @@ path. If the measured saving is materially below it, that is a finding about thi
 implementation's bottleneck, not a failure of the port — record which.
 
 ### Markers
-- [ ] `Sphenix2022.py`; enum, registry, config, dict round-trip
-- [ ] Eq. (24) implemented implicitly; stability unit test at `Δt/τ = 100`
-- [ ] Balsara in the pair coefficient, not the indicator
+- [x] `Sphenix2022.py`; enum, registry, config, dict round-trip (step-boundary hook like Rosswog2020)
+- [x] Eq. (24) implemented implicitly; stability unit test at `Δt/τ = 100` (`tests/test_sphenix.py`)
+- [x] Balsara in the pair coefficient, not the indicator (`balsaraPairLimiter`)
 - [ ] gradcheck green
 - [ ] shock metrics within 5% of C&D
 - [ ] Gresho `L1(v_φ) ≤` C&D
@@ -1414,6 +1510,13 @@ implementation's bottleneck, not a failure of the port — record which.
 - [ ] `cflFactor × 4` stability demonstrated
 - [ ] detector map vs C&D
 - [ ] report rows added
+
+**Build notes (2026-10-07).** `modules/shockCapturing/Sphenix2022.py`: step-boundary hook (like `Rosswog2020`), `div v`
+from the stage-0 `divergence`, `h = H / sphKernelScale`, `tau = ell_V H / c`; operator = `Price2012` term, `C_l = 1`,
+`C_q = 3` coupled, `balsaraPairLimiter` (config `sphenix`, plain gradient for B). Smoke pre-flight caught a 0/0 in
+Eq. (23) for cold gas (`c = 0`: Sedov's ambient medium, Noh) -- guarded, unit test added. In cold gas the formula
+itself sends alpha to alpha_max for any `S > 0` and never decays it (`tau ~ 1/c`); the same holds for Wadsley
+(`v_sig -> 0`). Expect that in the Sedov / Noh alpha maps; it is the papers' formulas, not a port error.
 
 **M6 — Performance-aware.** Git milestone `milestone/sphenix-av`.
 
@@ -1497,9 +1600,9 @@ particle id · position · α · ∇·v · d(∇·v)/dt · detector scalar
 > aesthetic.
 
 ### Markers
-- [ ] **`h`-convention re-derivation done and documented (§6.2) — before tuning**
-- [ ] `Wadsley2017.py`; enum, registry, config, `D_prev` state + `finalize` copy
-- [ ] `T` keeps the trace; `W_R,ij` is the polynomial weight, not the kernel
+- [x] **`h`-convention re-derivation done and documented (§6.2) — before tuning** (`H = h_CD = 2 h_G2`, prefactor 0.5; module docstring)
+- [x] `Wadsley2017.py`; enum, registry, config, `D_prev` state (set by the step-boundary hook, which persists it like `entropiesPrev`)
+- [x] `T` keeps the trace; `W_R,ij` is the polynomial weight, not the kernel
 - [ ] gradcheck green
 - [ ] **uniform-compression test separates Wadsley from C&D**
 - [ ] rotation / shear / sound-wave / step tests pass

@@ -123,6 +123,14 @@ CONFIGS: Dict[str, AVConfig] = {c.name: c for c in (
     # with pair means is the `Wadsley2008` term, 10)
     AVConfig('wadsley2017', switch='Wadsley2017', switchParams=dict(alpha_min=0.0, alpha_max=2.0),
              diffusion=dict(viscosityTerm=10, C_q=2.0, betaMode=1)),
+    # AV_PLAN Phase 7 cross terms (rows 10-12): a detector with the limited reconstruction, beta = 2 fixed (row 12:
+    # coupled, beta = 2 alpha)
+    AVConfig('rosswogLimited', switch='Rosswog2020', switchParams=dict(alpha_min=0.0, alpha_max=1.0),
+             diffusion=dict(C_q=2.0, betaMode=1, velocityPairPolicy=2)),
+    AVConfig('wadsleyLimited', switch='Wadsley2017', switchParams=dict(alpha_min=0.0, alpha_max=2.0),
+             diffusion=dict(viscosityTerm=10, C_q=2.0, betaMode=1, velocityPairPolicy=2)),
+    AVConfig('rosswogLimitedCoupled', switch='Rosswog2020', switchParams=dict(alpha_min=0.0, alpha_max=1.0),
+             diffusion=dict(C_q=2.0, betaMode=0, velocityPairPolicy=2)),
     # AV_PLAN Phase 5B robustness: cflFactor x 4 (0.3 -> 1.2)
     AVConfig('sphenixCfl4', switch='Sphenix2022', switchParams=dict(alpha_min=0.0, alpha_max=2.0),
              diffusion=dict(viscosityTerm=8, C_l=1.0, C_q=3.0, betaMode=0, balsaraPairLimiter=True,
@@ -153,6 +161,7 @@ GROUPS: Dict[str, List[str]] = {
     'phase4': ['gsAV', 'gsAVSW', 'gsAVSLR', 'gsAVSWSLR', 'gsAVSLRB', 'gsAVSLRB2'],
     'phase5b': ['sphenix', 'cullenDehnen2010'],
     'phase6': ['wadsley2017', 'cullenDehnen2010'],
+    'phase7cross': ['rosswogLimited', 'wadsleyLimited', 'rosswogLimitedCoupled'],
     'cfl4': ['sphenixCfl4', 'cullenDehnen2010Cfl4'],
     'phase5a': ['cnCDFixed2', 'cnCDFixed0p2', 'cnCDCoupled2', 'cnRosswogFixed2', 'cnRosswogFixed0p2', 'cnRosswogCoupled2'],
 }
@@ -607,11 +616,21 @@ DEFAULT_CASES = ['sod', 'sod2d', 'sod3d', 'sedov', 'noh', 'gresho', 'yee', 'line
 # --------------------------------------------------------------------------- driver
 
 def runOne(cfg: AVConfig, case: CaseDef, profile: str, outDir: Path, video: bool,
-           tag: str) -> Dict[str, Any]:
+           tag: str, runParams: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     spec = case.spec(profile)
+    if runParams:
+        spec = dataclasses.replace(spec, kwargs=dict(spec.kwargs, **runParams))
     started = time.perf_counter()
     res = _execute(spec, cfg, outDir, tag, video, case.avStride(profile), case.extra)
-    metrics = case.metrics(res, cfg)
+    try:
+        metrics = case.metrics(res, cfg)
+    except Exception as exc:          # noqa: BLE001
+        # a diverged run (e.g. the cfl x 4 robustness configs) can leave a state the case metrics cannot read
+        # (empty selections, NaN positions): record the divergence instead of losing the rest of the job
+        if not res.diverged:
+            raise
+        metrics = dict(diverged=True, stopReason=res.stopReason, nSteps=int(res.nSteps), tFinal=float(res.state.t),
+                       metricsError=f'{type(exc).__name__}: {exc}')
     metrics['videoPath'] = res.videoPath
     return dict(config=cfg.name, case=case.name, profile=profile, scheme=cfg.scheme,
                 switch=cfg.switch, seconds=time.perf_counter() - started, metrics=metrics)
@@ -669,8 +688,9 @@ def renderMarkdown(records: List[Dict[str, Any]], locks: Dict[str, Any], meta: D
             flag = ' **DIVERGED**' if m.get('diverged') else ''
             rows.append([r['config'] + flag] + [fmt(m.get(c), '.4g') for c in cols])
         sections.append((f'{case} ({profile})', rep.mdTable(['config'] + cols, rows), []))
+        # a diverged run recorded without its metrics (`runOne`) has no drift to check
         budgets = [(r['config'], r['metrics']['energyDrift'], r['metrics']['energyDriftBudget'])
-                   for r in records if r['case'] == case]
+                   for r in records if r['case'] == case and 'energyDrift' in r['metrics']]
         over = [f'{c} ({d:.2e} > {b:.0e})' for c, d, b in budgets if d > b]
         sections.append((f'{case}: energy-drift budget (Group E)',
                          'all within budget' if not over else 'OVER: ' + ', '.join(over), []))
@@ -794,6 +814,8 @@ def main() -> int:
                     help="case params for every config, e.g. adaptiveSupportScheme=Monaghan (SUPPORT_SOLVER_PLAN)")
     ap.add_argument('--schemeParam', nargs='*', default=[], metavar='KEY=VALUE',
                     help="scheme-config fields for every config, e.g. owenTable=lattice (SUPPORT_SOLVER_PLAN)")
+    ap.add_argument('--runParam', nargs='*', default=[], metavar='KEY=VALUE',
+                    help="run() keyword overrides for every case, e.g. nx=256 tLimit=3.0 (AV_PLAN sweep: KH at nx 256)")
     ap.add_argument('--supportVolumeClamp', choices=('always', 'walls', 'off'), default=None,
                     help="set SimulationConfig.supportVolumeClamp for every config (OPEN_PROBLEMS §20)")
     ap.add_argument('--tol', type=float, default=0.0,
@@ -817,7 +839,8 @@ def main() -> int:
     outDir = rep.outDirFor('av', args.out)
     meta = rep.environmentMeta(extra=dict(profile=args.profile, config=args.config, repeat=args.repeat,
                                           video=video, supportVolumeClamp=args.supportVolumeClamp,
-                                          caseParam=args.caseParam, schemeParam=args.schemeParam))
+                                          caseParam=args.caseParam, schemeParam=args.schemeParam,
+                                          runParam=args.runParam))
     print(f'[av_report] {names} x {[c.name for c in cases]}  profile={args.profile} '
           f'repeat={args.repeat} video={video}\n[av_report] -> {outDir}', flush=True)
 
@@ -836,7 +859,7 @@ def main() -> int:
                 if args.supportVolumeClamp is not None:
                     cfg = dataclasses.replace(cfg, simulation=dict(cfg.simulation, supportVolumeClamp=args.supportVolumeClamp))
                 reps.append(runOne(cfg, case, args.profile, outDir,
-                                   video and i == 0, f'{name}_{case.name}'))
+                                   video and i == 0, f'{name}_{case.name}', _parseKV(args.runParam)))
             records.append(reps[0])
             if args.repeat > 1:
                 locks[f'{name}/{case.name}'] = lockCheck(reps)
