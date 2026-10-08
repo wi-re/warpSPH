@@ -108,6 +108,18 @@ CONFIGS: Dict[str, AVConfig] = {c.name: c for c in (
     # AV_PLAN Phase 3: the reconstructed pair velocity on the M0 `none` column (alpha = 1, C_q = 0)
     AVConfig('noneLinear', switch='NoneSwitch', diffusion=dict(velocityPairPolicy=1)),
     AVConfig('noneLimited', switch='NoneSwitch', diffusion=dict(velocityPairPolicy=2)),
+    # AV_PLAN Phase 4: Garcia-Senz & Cabezon (2026) Table 1 rows 1-6. Their operator Eq. (6) is the `Price2012_98`
+    # term (v_sig = alpha c_bar - beta w, pair means) with beta = 2 fixed; their switch is Read & Hayfield's at
+    # alpha in [0.05, 1]. Rows 5/6: Balsara-modulated reconstruction, p = 1 / 2.
+    *(AVConfig(f'gs{name}', switch=switch, switchParams=dict(alpha_min=0.05, alpha_max=1.0) if switch != 'NoneSwitch' else {},
+               diffusion=dict(C_q=2.0, betaMode=1, velocityPairPolicy=policy, reconstructionBalsaraPower=p))
+      for name, switch, policy, p in (
+          ('AV', 'NoneSwitch', 0, 2.0),
+          ('AVSW', 'ReadHayfield2012', 0, 2.0),
+          ('AVSLR', 'NoneSwitch', 2, 2.0),
+          ('AVSWSLR', 'ReadHayfield2012', 2, 2.0),
+          ('AVSLRB', 'NoneSwitch', 3, 1.0),
+          ('AVSLRB2', 'NoneSwitch', 3, 2.0))),
 )}
 
 #: Named groups, so `--config baseline` runs the three M0 columns.
@@ -118,6 +130,7 @@ GROUPS: Dict[str, List[str]] = {
     'switchesS3': ['balsara1995', 'colagrossi2004', 'morrisMonaghan1997', 'rosswog2000'],
     'phase2': ['rosswog2020', 'rosswog2020Q'],
     'phase3': ['noneLinear', 'noneLimited'],
+    'phase4': ['gsAV', 'gsAVSW', 'gsAVSLR', 'gsAVSWSLR', 'gsAVSLRB', 'gsAVSLRB2'],
 }
 
 
