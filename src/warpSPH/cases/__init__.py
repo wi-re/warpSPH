@@ -26,6 +26,7 @@ CASE_MODULES = (
     'greshoVortex',
     'yeeVortex',
     'shearingNoh',
+    'shearBox',
     'kelvinHelmholtz',
     'rayleighTaylor',
     'triplePoint',

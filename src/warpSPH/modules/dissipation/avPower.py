@@ -17,6 +17,7 @@ path and only costs anything when called.
 
 from __future__ import annotations
 
+import math
 from typing import Dict
 
 import torch
@@ -29,7 +30,7 @@ from ...configurations.moduleConfigurations.diffusionParameters import (
 from ..reconstruction import reconstructionInputs
 from .wp_diffusion import computeViscosityWarp
 
-__all__ = ['computeAVPowerSplit']
+__all__ = ['computeAVPowerSplit', 'computeChenNixonRatio']
 
 
 def _power(state, config, params, adjacency, alphas=None, velocityTensor=None, balsara=None) -> float:
@@ -69,3 +70,34 @@ def computeAVPowerSplit(system, config, schemeConfig) -> Dict[str, float]:
     out['avPowerSplitResidual'] = out['avPowerTotal'] - out['avPowerLinear'] - out['avPowerQuadratic']
     return out
 
+
+def computeChenNixonRatio(system, config, schemeConfig) -> Dict[str, float]:
+    """Chen & Nixon (2025) Eq. (6): the quadratic-to-linear AV ratio `135 beta h / (62 pi alpha H)` per particle,
+    with `h` the smoothing length (`support / sphKernelScale`), `alpha`, `beta` the switched coefficients as the
+    pair operator forms them (`BetaMode`) and -- there being no disc -- `H` the local density gradient length
+    `rho / |grad rho|` (AV_PLAN Phase 5A). Reported as the median and the 90th percentile over particles with a
+    nonzero gradient; above 1 the quadratic term dominates. NaN for CRKSPH (its own operator)."""
+    from warpSPHCore import GradientScheme, WarpOperation, sphKernelScale, warpOperation
+    from ...configurations.moduleConfigurations.diffusionParameters import BetaMode
+    nan = float('nan')
+    if isinstance(schemeConfig, CRKSPHConfig):
+        return dict(chenNixonRatioMedian=nan, chenNixonRatioP90=nan)
+    st = system.state
+    params = schemeConfig.diffusionParams
+    gradRho = warpOperation(
+        st, OperationProperties(kernel=config.kernel, operation=WarpOperation.Gradient,
+                                supportMode=SupportScheme.SuperSymmetric, gradientMode=GradientScheme.Difference),
+        domain=config.domain, adjacency=system.adjacency, queryValues=st.densities)
+    alpha_ = st.alphas if getattr(st, 'alphas', None) is not None else torch.ones_like(st.densities)
+    alpha = alpha_ * float(params.C_l)
+    if params.betaMode == BetaMode.Fixed.value:
+        beta = torch.full_like(alpha, float(params.C_q))
+    else:
+        beta = alpha_ * float(params.C_q) * (float(params.C_l) * alpha_ if params.scaleBeta else 1.0)
+    h = st.supports / float(sphKernelScale(config.kernel.value, config.dim))
+    g = gradRho.norm(dim=-1)
+    sel = (g > 0) & (alpha > 0)
+    if not bool(sel.any()):
+        return dict(chenNixonRatioMedian=nan, chenNixonRatioP90=nan)
+    ratio = (135.0 * beta * h * g / (62.0 * math.pi * alpha * st.densities))[sel]
+    return dict(chenNixonRatioMedian=float(ratio.median()), chenNixonRatioP90=float(torch.quantile(ratio.double(), 0.9)))

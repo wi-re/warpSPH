@@ -145,8 +145,9 @@ def avReportDiagnostics(ctx: RunContext, state) -> Dict[str, float]:
     adjacency the last RHS evaluation left on the system (Group F). Kept out of
     `compressibleDiagnostics` because the power split costs three extra
     neighbour loops."""
-    from ..modules.dissipation import computeAVPowerSplit
+    from ..modules.dissipation.avPower import computeAVPowerSplit, computeChenNixonRatio
     out = computeAVPowerSplit(state, ctx.config, ctx.schemeConfig)
+    out.update(computeChenNixonRatio(state, ctx.config, ctx.schemeConfig))
     n = getattr(state.adjacency, 'numNeighbors', None)
     if n is not None:
         n = n.detach().double()

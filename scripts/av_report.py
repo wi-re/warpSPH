@@ -108,6 +108,11 @@ CONFIGS: Dict[str, AVConfig] = {c.name: c for c in (
     # AV_PLAN Phase 3: the reconstructed pair velocity on the M0 `none` column (alpha = 1, C_q = 0)
     AVConfig('noneLinear', switch='NoneSwitch', diffusion=dict(velocityPairPolicy=1)),
     AVConfig('noneLimited', switch='NoneSwitch', diffusion=dict(velocityPairPolicy=2)),
+    # AV_PLAN Phase 5A (Chen & Nixon 2025): beta in {fixed 2, fixed 0.2, coupled 2 alpha} x {C&D, Rosswog 2020}
+    *(AVConfig(f'cn{det}{tag}', switch=switch, switchParams=sp, diffusion=dict(C_q=cq, betaMode=mode))
+      for det, switch, sp in (('CD', 'CullenDehnen2010', {}),
+                              ('Rosswog', 'Rosswog2020', dict(alpha_min=0.0, alpha_max=1.0)))
+      for tag, cq, mode in (('Fixed2', 2.0, 1), ('Fixed0p2', 0.2, 1), ('Coupled2', 2.0, 0))),
     # AV_PLAN Phase 4: Garcia-Senz & Cabezon (2026) Table 1 rows 1-6. Their operator Eq. (6) is the `Price2012_98`
     # term (v_sig = alpha c_bar - beta w, pair means) with beta = 2 fixed; their switch is Read & Hayfield's at
     # alpha in [0.05, 1]. Rows 5/6: Balsara-modulated reconstruction, p = 1 / 2.
@@ -131,6 +136,7 @@ GROUPS: Dict[str, List[str]] = {
     'phase2': ['rosswog2020', 'rosswog2020Q'],
     'phase3': ['noneLinear', 'noneLimited'],
     'phase4': ['gsAV', 'gsAVSW', 'gsAVSLR', 'gsAVSWSLR', 'gsAVSLRB', 'gsAVSLRB2'],
+    'phase5a': ['cnCDFixed2', 'cnCDFixed0p2', 'cnCDCoupled2', 'cnRosswogFixed2', 'cnRosswogFixed0p2', 'cnRosswogCoupled2'],
 }
 
 
@@ -211,6 +217,11 @@ def _common(res, cfg: AVConfig) -> Dict[str, Any]:
         t = np.array([r['t'] for r in rows])
         for k in ('Total', 'Linear', 'Quadratic'):
             out[f'avEnergy{k}'] = _trap(t, np.array([r[f'avPower{k}'] for r in rows]))
+    # Chen & Nixon (2025) Eq. (6) quadratic/linear ratio (AV_PLAN Phase 5A): time means of the per-step median / p90
+    cn = [r for r in traj if 'chenNixonRatioMedian' in r and math.isfinite(r['chenNixonRatioMedian'])]
+    if cn:
+        out['chenNixonRatioMedian'] = float(np.mean([r['chenNixonRatioMedian'] for r in cn]))
+        out['chenNixonRatioP90'] = float(np.mean([r['chenNixonRatioP90'] for r in cn]))
     nb = [r for r in traj if 'neighboursMean' in r]
     if nb:
         out['neighboursMean'] = float(np.mean([r['neighboursMean'] for r in nb]))
@@ -275,6 +286,47 @@ def _greshoSpec(profile: str) -> RunSpec:
     if profile == 'smoke':
         return RunSpec(greshoVortexCase, dict(nx=32, nSteps=40))
     return RunSpec(greshoVortexCase, dict(nx=100, tLimit=3.0))
+
+
+def _shearingNohSpec(profile: str) -> RunSpec:
+    from warpSPH.cases.shearingNoh import shearingNohCase
+    if profile == 'smoke':
+        return RunSpec(shearingNohCase, dict(nx=50, nSteps=40))
+    return RunSpec(shearingNohCase, dict(nx=100, tLimit=0.6))
+
+
+def _shearingNohMetrics(res, cfg: AVConfig) -> Dict[str, Any]:
+    """AV_PLAN Phase 5A: the planar Noh front under a transverse shear. For gamma = 5/3 the exact front is at
+    |x| = t/3 behind a 4x density jump (pre-shock rho = 1, planar); the front is the 95th percentile of |x| over the
+    particles past the midpoint density 2.5."""
+    out = _common(res, cfg)
+    st = res.state.state
+    t = float(res.state.t)
+    x = np.abs(st.positions[:, 0].detach().cpu().numpy())
+    rho = st.densities.detach().cpu().numpy()
+    shocked = rho > 2.5
+    out['shockFront'] = float(np.percentile(x[shocked], 95)) if shocked.any() else float('nan')
+    out['shockFrontExact'] = t / 3.0
+    out['shockFrontErr'] = out['shockFront'] / out['shockFrontExact'] - 1.0 if t > 0 else float('nan')
+    return out
+
+
+def _shearBoxSpec(profile: str) -> RunSpec:
+    from warpSPH.cases.shearBox import shearBoxCase
+    if profile == 'smoke':
+        return RunSpec(shearBoxCase, dict(nx=32, nSteps=40))
+    return RunSpec(shearBoxCase, dict(nx=64, tLimit=2.0))
+
+
+def _shearBoxMetrics(res, cfg: AVConfig) -> Dict[str, Any]:
+    """AV_PLAN Phase 5A: how much of the steady shear mode survives, and how the AV energy splits."""
+    out = _common(res, cfg)
+    amp = res.series('modeAmplitude')
+    out['modeAmplitudeFinal'] = float(amp[-1])
+    q, total = out.get('avEnergyQuadratic'), out.get('avEnergyTotal')
+    if q is not None and total:
+        out['avQuadraticFraction'] = float(q / total)
+    return out
 
 
 def _greshoExact(r: np.ndarray) -> np.ndarray:
@@ -495,7 +547,14 @@ CASES: Dict[str, CaseDef] = {c.name: c for c in (
     CaseDef('linearWave', _waveSpec, _waveMetrics, lambda p: 1 if p == 'smoke' else 10),
     CaseDef('kelvinHelmholtz', _khSpec, _khMetrics, lambda p: 1 if p == 'smoke' else 5, _khMode),
     CaseDef('rayleighTaylor', _rtSpec, _rtMetrics, lambda p: 1 if p == 'smoke' else 5),
+    # AV_PLAN Phase 5A; not in the default case list (--cases shearBox), so older --compare runs stay comparable
+    CaseDef('shearBox', _shearBoxSpec, _shearBoxMetrics, lambda p: 1 if p == 'smoke' else 5),
+    CaseDef('shearingNoh', _shearingNohSpec, _shearingNohMetrics, lambda p: 1 if p == 'smoke' else 5),
 )}
+
+#: Cases a run without `--cases` covers (the M0 ten).
+DEFAULT_CASES = ['sod', 'sod2d', 'sod3d', 'sedov', 'noh', 'gresho', 'yee', 'linearWave', 'kelvinHelmholtz',
+                 'rayleighTaylor']
 
 
 # --------------------------------------------------------------------------- driver
@@ -543,9 +602,11 @@ COLUMNS = {
     'linearWave': ['waveVelocityErr', 'waveVelocityCoefficient', 'waveExactCoefficient', 'waveResidualRms'],
     'kelvinHelmholtz': ['khAmplitude0', 'khAmplitudeAt1p5', 'khAmplitudeMax', 'khReference1p5'],
     'rayleighTaylor': ['heavyMinY', 'lightMaxY', 'mixingWidth', 'maxVelocity'],
+    'shearBox': ['modeAmplitudeFinal', 'avQuadraticFraction'],
+    'shearingNoh': ['shockFront', 'shockFrontExact', 'shockFrontErr'],
 }
 COMMON_COLUMNS = ['alphaMean', 'alphaMax', 'alphaActiveFraction', 'avEnergyLinear',
-                  'avEnergyQuadratic', 'entropyGain', 'energyDrift', 'neighboursMean',
+                  'avEnergyQuadratic', 'chenNixonRatioMedian', 'entropyGain', 'energyDrift', 'neighboursMean',
                   'wallMsPerStep']
 
 
@@ -611,11 +672,14 @@ def compareReports(a: Path, b: Path, tol: float) -> int:
             rel = abs(va - vb) / max(abs(va), abs(vb), 1e-300)
             if rel > worst:
                 worst, where = rel, k
-        missing = sorted((set(ma) ^ set(mb)) - _COMPARE_SKIP)
+        # a metric the reference (A) has and B lost fails; one B added (a later report's new row, e.g. the Phase 5A
+        # Chen & Nixon ratio against an M0 reference) is listed but does not
+        missing = sorted((set(ma) - set(mb)) - _COMPARE_SKIP)
+        added = sorted((set(mb) - set(ma)) - _COMPARE_SKIP)
         ok = worst <= tol and not missing
         bad += 0 if ok else 1
         rows.append([f'{key[0]}/{key[1]}', nShared, f'{worst:.2e}', where or '-',
-                     ','.join(missing) or '-', 'OK' if ok else 'DIFF'])
+                     ','.join(missing + [f'+{k}' for k in added]) or '-', 'OK' if ok else 'DIFF'])
     print(rep.mdTable(['pair', 'scalars', 'max rel diff', 'worst metric', 'keys in one only', 'state'], rows))
     print(f'\n{"IDENTICAL" if not bad and tol == 0 else ("WITHIN TOL" if not bad else "DIFFERENT")}'
           f' (tol {tol:g}): {len(rows)} pairs compared, {bad} differing')
@@ -700,7 +764,7 @@ def main() -> int:
         return 0
 
     names = GROUPS.get(args.config, [args.config])
-    cases = [CASES[c] for c in (args.cases or CASES)]
+    cases = [CASES[c] for c in (args.cases or DEFAULT_CASES)]
     video = (args.profile == 'full') if args.video is None else args.video
     outDir = rep.outDirFor('av', args.out)
     meta = rep.environmentMeta(extra=dict(profile=args.profile, config=args.config, repeat=args.repeat,
