@@ -184,7 +184,25 @@ CONFIGS: Dict[str, AVConfig] = {c.name: c for c in (
     # velocity + (rho, P)
     AVConfig('gsphO1', scheme='GSPH', switch=None, diffusion=dict(velocityPairPolicy=0, riemannReconstruction=False)),
     AVConfig('gsphO2v', scheme='GSPH', switch=None, diffusion=dict(velocityPairPolicy=2, riemannReconstruction=False)),
-    AVConfig('gsphO2', scheme='GSPH', switch=None),
+    AVConfig('gsphO2', scheme='GSPH', switch=None, diffusion=dict(stateLimiter=0)),   # PairRatio: the layer-2 default before 2026-10-08
+    # time-centred energy rate (Inutsuka 2002 Eq. 67), the simplified scheme at second order and the Inutsuka scheme
+    AVConfig('gsphO2T', scheme='GSPH', switch=None, diffusion=dict(timeCentredEnergy=True, stateLimiter=0)),
+    # layer 3: Inutsuka (2002), Murante's reference settings (cubic V, harmonic-mean limiter, states at s*); `T` time-centred energy, `S` shock switch C = 3
+    AVConfig('inutsuka', scheme='InutsukaGSPH', switch=None),
+    AVConfig('inutsukaT', scheme='InutsukaGSPH', switch=None, diffusion=dict(timeCentredEnergy=True, shockSwitchC=0.0)),
+    # `inutsuka` is the scheme default since 2026-10-08 (harmonic limiter + shock switch C = 3); `N` = no switch (the first L3 chain's `inutsuka`), `S` = the same as the default
+    AVConfig('inutsukaN', scheme='InutsukaGSPH', switch=None, diffusion=dict(shockSwitchC=0.0)),
+    AVConfig('inutsukaS', scheme='InutsukaGSPH', switch=None, diffusion=dict(shockSwitchC=3.0)),
+    AVConfig('inutsukaO1', scheme='InutsukaGSPH', switch=None, diffusion=dict(velocityPairPolicy=0, shockSwitchC=0.0)),
+    # the Gaussian's h = eta x the local spacing: eta 0.75 / 1.0 (Inutsuka 2002 Eq. 81) / 1.33 (~ support / 3); with the shock switch (C = 3)
+    AVConfig('inutsukaE75', scheme='InutsukaGSPH', switch=None, diffusion=dict(gaussianEta=0.75, shockSwitchC=0.0)),
+    AVConfig('inutsukaE75S', scheme='InutsukaGSPH', switch=None, diffusion=dict(gaussianEta=0.75, shockSwitchC=3.0)),
+    AVConfig('inutsukaMS', scheme='InutsukaGSPH', switch=None, diffusion=dict(stateLimiter=2, shockSwitchC=3.0)),
+    AVConfig('inutsukaM', scheme='InutsukaGSPH', switch=None, diffusion=dict(stateLimiter=2, shockSwitchC=0.0)),
+    # L1b: the papers' 1D state limiters (StateLimiter): Murante harmonic mean (1), van Leer monotonised slope (2), Inutsuka sign rule (3); `S` adds the
+    # first-order shock switch with C = 3 (Inutsuka Eq. 75)
+    *(AVConfig(f'gsphO2{tag}', scheme='GSPH', switch=None, diffusion=dict(stateLimiter=lim, shockSwitchC=c))
+      for tag, lim, c in (('H', 1, 0.0), ('M', 2, 0.0), ('I', 3, 0.0), ('HS', 1, 3.0), ('IS', 3, 3.0))),
     # AV_PLAN Phase 4: Garcia-Senz & Cabezon (2026) Table 1 rows 1-6. Their operator Eq. (6) is the `Price2012_98`
     # term (v_sig = alpha c_bar - beta w, pair means) with beta = 2 fixed; their switch is Read & Hayfield's at
     # alpha in [0.05, 1]. Rows 5/6: Balsara-modulated reconstruction, p = 1 / 2.
@@ -217,6 +235,11 @@ BAKEOFF_ROWS = [
     (13, 'sphenix', 'Sphenix 2022', 'raw (Balsara pair limiter)', 'coupled (paper)'),
 ]
 
+#: GODUNOV_SPH_PLAN rows (`av_sweep_overnight.py --godunov`): the simplified Godunov SPH at first / second order with each state limiter, the time-centred
+#: energy, and Inutsuka's (2002) form with its variants. Every one is an AV-free scheme run on the same cases as the AV rows.
+GODUNOV_ROWS = ['gsphO1', 'gsphO2v', 'gsphO2', 'gsphO2H', 'gsphO2M', 'gsphO2I', 'gsphO2HS', 'gsphO2T',
+                'inutsukaO1', 'inutsuka', 'inutsukaM', 'inutsukaN', 'inutsukaT']
+
 #: Named groups, so `--config baseline` runs the three M0 columns.
 GROUPS: Dict[str, List[str]] = {
     'baseline': ['none', 'cullenDehnen2010', 'readHayfield2012'],
@@ -235,6 +258,10 @@ GROUPS: Dict[str, List[str]] = {
     'phase7b': ['riemann', 'riemannAcoustic', 'riemannTSRS', 'riemannHLLC', 'riemannLimited', 'riemannLimitedB2', 'riemannAcousticLimited'],
     'godunovL1': ['riemannLimited', 'riemannMusclLimited', 'riemann', 'riemannMuscl', 'riemannLimitedB2', 'riemannMusclLimitedB2'],
     'gsph': ['gsphO1', 'gsphO2v', 'gsphO2'],
+    'godunov': GODUNOV_ROWS,
+    'godunovL3': ['gsphO2H', 'inutsuka', 'inutsukaM', 'inutsukaN', 'inutsukaO1'],
+    'godunovL3b': ['inutsuka', 'inutsukaS', 'inutsukaE75', 'inutsukaE75S', 'inutsukaMS'],
+    'gsphLimiters': ['gsphO2', 'gsphO2H', 'gsphO2M', 'gsphO2I', 'gsphO2HS', 'gsphO2IS'],
     'phase5a': ['cnCDFixed2', 'cnCDFixed0p2', 'cnCDCoupled2', 'cnRosswogFixed2', 'cnRosswogFixed0p2', 'cnRosswogCoupled2'],
 }
 

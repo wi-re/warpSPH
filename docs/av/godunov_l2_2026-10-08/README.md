@@ -42,3 +42,10 @@ velocity + reconstructed `(rho, P)` (layer 1). AV rows from the Phases 3-6 sweep
 `tests/test_gsph.py` (10, also float64): momentum and total-energy conservation to 2e-4 (float32) / 1e-10 (float64) for the acoustic, adaptive and HLLC solvers at first and
 second order; rest state and the standard-SPH identity above; Sod 1D finite, opening, energy within 1e-3. `scripts/gradcheck_godunov.py`: 6/6 (three solvers x two
 orders, the Jacobian and the `(rho, P)` gradients as inputs).
+
+## Kelvin-Helmholtz (added later the same day; `report_kh_gsphO1_O2v_O2.md`)
+
+nx 128 sharp IC to t = 1.5 (the AV rows' setup; reference amplitude 0.148): first order **0.0084** (the instability does not grow: first-order states are far too
+diffusive, as Murante et al. 2011 found), second-order velocity only 0.0846, second order with `(rho, P)` 0.0895. The AV rows reach 0.098 (limited, no switch) and
+0.116 (the default); raw-velocity AV 0.019. The simplified (Cha & Whitworth) form is therefore competitive with limited AV on KH but below the best, as expected for a
+form that keeps SPH's density-gradient inconsistency (`docs/av/godunov_densityJump/`).

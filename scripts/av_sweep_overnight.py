@@ -90,6 +90,22 @@ def _bakeoffJobs():
     return jobs
 
 
+#: GODUNOV_SPH_PLAN (`--godunov`): every row of `av_report.GODUNOV_ROWS` on the ten cases plus the cylindrical Noh, and KH at nx 256 on the smooth-density IC for the
+#: schemes that follow instabilities. The AV rows they are compared with are the bake-off's.
+GODUNOV_CASES = ALL10 + ['noh2d']
+
+
+def _godunovJobs():
+    sys.path.insert(0, str(REPO / 'scripts'))
+    import av_report as A
+    jobs = [dict(name=f'g_{cfg}', config=cfg, cases=GODUNOV_CASES, minutes=20) for cfg in A.GODUNOV_ROWS]
+    jobs += [dict(name=f'g_kh256_{c}', config=c, cases=['kelvinHelmholtz'],
+                  extra=['--runParam', 'nx=256', 'tLimit=3.0', '--caseParam', 'smoothDensity=1'],
+                  smokeExtra=['--caseParam', 'smoothDensity=1'], minutes=25)
+             for c in ('gsphO2', 'gsphO2H', 'inutsuka')]
+    return jobs
+
+
 #: The detector maps (AV_PLAN §6.5): every detector, same IC, same end time.
 MAP_CONFIGS = ['cullenDehnen2010', 'readHayfield2012', 'rosswog2020', 'sphenix', 'wadsley2017', 'gsAVSLRB2',
                'rosswogLimitedCoupled']
@@ -256,10 +272,11 @@ def main() -> int:
     ap.add_argument('--only', nargs='*', default=None, help='job names (plus maps, timing)')
     ap.add_argument('--timeoutFactor', type=float, default=3.0, help='a job is killed after factor x its estimate')
     ap.add_argument('--bakeoff', action='store_true', help='the AV_PLAN Phase 7 bake-off instead of the Phases 3-6 sweep')
+    ap.add_argument('--godunov', action='store_true', help='the GODUNOV_SPH_PLAN rows (av_report GODUNOV_ROWS) instead of the Phases 3-6 sweep')
     args = ap.parse_args()
 
-    jobs = _bakeoffJobs() if args.bakeoff else JOBS
-    names = [j['name'] for j in jobs] + ['maps', 'timing']
+    jobs = _godunovJobs() if args.godunov else (_bakeoffJobs() if args.bakeoff else JOBS)
+    names = [j['name'] for j in jobs] + ([] if args.godunov else ['maps', 'timing'])
     selected = args.only or names
     total = sum(j['minutes'] for j in jobs if j['name'] in selected) + (20 if 'maps' in selected else 0) \
         + (10 if 'timing' in selected else 0)
@@ -271,7 +288,7 @@ def main() -> int:
         return 0
 
     stamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M')
-    kind = 'av_bakeoff' if args.bakeoff else 'av_sweep'
+    kind = 'av_godunov' if args.godunov else ('av_bakeoff' if args.bakeoff else 'av_sweep')
     out = Path(args.out) if args.out else REPO / 'results' / f'{kind}_{"smoke_" if args.smoke else ""}{stamp}'
     out.mkdir(parents=True, exist_ok=True)
     _log(f'{len(selected)} jobs, ~{total / 60:.1f} h at the full profile -> {out}')
@@ -293,7 +310,12 @@ def main() -> int:
             statusFile.write_text(json.dumps(status, indent=2))
     status['finished'] = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M')
     statusFile.write_text(json.dumps(status, indent=2))
-    if args.bakeoff:
+    if args.godunov:
+        # one merged table of every row (av_report --merge), no AV verdict: these schemes have no switch to rank
+        dirs = [j['dir'] for j in status['jobs'] if Path(j['dir']).exists()]
+        rc = subprocess.call([PY, str(REPO / 'scripts' / 'av_report.py'), '--merge', *dirs, '--out', str(out / 'merged')], cwd=REPO) if dirs else 1
+        _log(f'done; merged table rc={rc}: {out / "merged" / "report.md"}')
+    elif args.bakeoff:
         rc = subprocess.call([PY, str(REPO / 'scripts' / 'av_bakeoff_report.py'), str(out)], cwd=REPO)
         _log(f'done; bake-off report rc={rc}: {out / "report.md"}')
     else:

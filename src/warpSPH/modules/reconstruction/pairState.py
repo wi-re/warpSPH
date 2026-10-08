@@ -17,8 +17,9 @@ import warp as wp
 from warp.types import vector, matrix
 from typing import Any
 from .limiters import limiterPsi, crkLimiter
+from ...configurations.moduleConfigurations.diffusionParameters import StateLimiter
 
-__all__ = ['reconstructPairScalar', 'reconstructPairRiemannStates', 'pairRiemannStates']
+__all__ = ['reconstructPairScalar', 'reconstructPairRiemannStates', 'pairRiemannStates', 'limitedIncrement', 'reconstructPairIncrements', 'reconstructPair1D']
 
 
 @wp.func
@@ -80,3 +81,47 @@ def pairRiemannStates(
         return scalar_t(-1.0), scalar_t(-1.0), scalar_t(-1.0), scalar_t(-1.0)
     return reconstructPairRiemannStates(rho_i, rho_j, P_i, P_j, G_i, referenceStateGradients[j], x_ij, h_i, h_j, kernel_int, dim,
                                         eta_crit, eta_fold, limiterType)
+
+
+@wp.func
+def limitedIncrement(stateLimiter: wp.int32, D: scalar_t, delta: scalar_t):
+    """The limited change of a field over the pair separation, from the finite difference `D = Q_i - Q_j` and one particle's projected SPH gradient
+    `delta = g . x_ij` (see `StateLimiter`; the `PairRatio` limiter is `reconstructPairScalar`'s, not this one: it returns `delta` unlimited).
+    The two van Leer limiters return 0 when `D` and `delta` disagree in sign (each division is behind that guard, AV_PLAN §2.6); `InutsukaSign` keeps
+    `delta` unlimited here and zeroes the pair in `reconstructPairIncrements` when the two particles' increments disagree with each other."""
+    out = delta
+    if stateLimiter != wp.static(StateLimiter.PairRatio.value) and stateLimiter != wp.static(StateLimiter.InutsukaSign.value):
+        out = scalar_t(0.0)
+        if D * delta > scalar_t(0.0):
+            if stateLimiter == wp.static(StateLimiter.VanLeerHarmonic.value):
+                out = scalar_t(2.0) * D * delta / (D + delta)
+            elif stateLimiter == wp.static(StateLimiter.VanLeerMonotonized.value):
+                mag = wp.min(wp.min(scalar_t(2.0) * wp.abs(D), scalar_t(0.5) * wp.abs(D + delta)), scalar_t(2.0) * wp.abs(delta))
+                out = wp.where(delta > scalar_t(0.0), mag, -mag)
+    return out
+
+
+@wp.func
+def reconstructPairIncrements(stateLimiter: wp.int32, Q_i: scalar_t, Q_j: scalar_t, delta_i: scalar_t, delta_j: scalar_t, sStarOverS: scalar_t = scalar_t(0.0)):
+    """`reconstructPair1D` from the two particles' projected increments `delta = g . x_ij` (what a vector field, whose projection is `n . J x_ij`, passes).
+    The states are evaluated at the interface `s*` (`sStarOverS = s* / s_ij`, 0 = the midpoint): `Q_R = Q_i - delta_i (1/2 - s*/s)`, `Q_L = Q_j + delta_j (1/2 + s*/s)`."""
+    D = Q_i - Q_j
+    di = limitedIncrement(stateLimiter, D, delta_i)
+    dj = limitedIncrement(stateLimiter, D, delta_j)
+    if stateLimiter == wp.static(StateLimiter.InutsukaSign.value):
+        if di * dj < scalar_t(0.0):
+            di = scalar_t(0.0)
+            dj = scalar_t(0.0)
+    return Q_i - (scalar_t(0.5) - sStarOverS) * di, Q_j + (scalar_t(0.5) + sStarOverS) * dj
+
+
+@wp.func
+def reconstructPair1D(
+    stateLimiter: wp.int32,
+    Q_i: scalar_t, Q_j: scalar_t,
+    g_i: vector(dtype = scalar_t, length=Any), g_j: vector(dtype = scalar_t, length=Any), # type: ignore
+    x_ij: vector(dtype = scalar_t, length=Any), # type: ignore
+):
+    """`(Q_R, Q_L)`: the states of the right (i) and left (j) side of the pair Riemann problem, `Q_R = Q_i - Delta_i / 2`, `Q_L = Q_j + Delta_j / 2`
+    with the `limitedIncrement`s. For `InutsukaSign` the two increments are zeroed together when their signs disagree (Eq. 74)."""
+    return reconstructPairIncrements(stateLimiter, Q_i, Q_j, wp.dot(g_i, x_ij), wp.dot(g_j, x_ij))

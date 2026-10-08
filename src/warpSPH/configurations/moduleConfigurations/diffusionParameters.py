@@ -10,7 +10,7 @@ for the base compressible scheme's defaults here, but 1 or 2 for CompSPH/CRKSPH)
 the CompSPH/CRKSPH variants live in their own config files.
 """
 
-__all__ = ['ViscosityTerms', 'BetaMode', 'VelocityPairPolicy', 'LimiterType', 'RiemannSolver', 'DiffusionParameters', 'resolveReconstructionLimiter', 'buildDefaultDiffusionParamsCompressibleSPH', 'diffusionParamsToDict', 'dictToDiffusionParams']
+__all__ = ['ViscosityTerms', 'BetaMode', 'VelocityPairPolicy', 'LimiterType', 'StateLimiter', 'RiemannSolver', 'DiffusionParameters', 'resolveReconstructionLimiter', 'buildDefaultDiffusionParamsCompressibleSPH', 'diffusionParamsToDict', 'dictToDiffusionParams']
 
 from typing import Dict, Any
 from warpSPHCore import *
@@ -95,6 +95,25 @@ class RiemannSolver(Enum):
     HLLC = 5
 
 
+class StateLimiter(Enum):
+    """How the Godunov SPH scheme limits the second-order states of its pair Riemann problem (GODUNOV_SPH_PLAN L1b; `reconstruction/pairState.py`,
+    `limitedIncrement`). Along the pair axis `s` (from j to i), with `D = Q_i - Q_j` the finite difference and `Delta_i = g_i . x_ij`,
+    `Delta_j = g_j . x_ij` the SPH gradients projected on the pair (the change of Q over the pair separation), the states are
+    `Q_R = Q_i - Delta_i^lim / 2` and `Q_L = Q_j + Delta_j^lim / 2`.
+
+    * `PairRatio`: the AV_PLAN Phase 3 limiter (`LimiterType`) of the ratio of the two particles' gradients, times the close-pair taper, with the states
+      then clamped between the particle values. What the first Godunov results used; the AV term's reconstruction.
+    * `VanLeerHarmonic`: Murante et al. (2011) Eqs. (18)-(23), van Leer's harmonic mean of the finite difference and the projected gradient:
+      `Delta^lim = 2 D Delta / (D + Delta)` if `D Delta > 0` else 0. Murante's reference limiter (better than Inutsuka's on KH).
+    * `VanLeerMonotonized`: Iwasaki & Inutsuka (2011) App. C / van Leer (1979): `sgn min(2|D|, |(D + Delta)/2|, 2|Delta|)` if `D Delta > 0` else 0.
+    * `InutsukaSign`: Inutsuka (2002) Eq. (74): the unlimited projected gradients, but both zero where the two disagree in sign.
+    """
+    PairRatio = 0
+    VanLeerHarmonic = 1
+    VanLeerMonotonized = 2
+    InutsukaSign = 3
+
+
 class LimiterType(Enum):
     """The slope limiter of the pair-velocity reconstruction (AV_PLAN Phase 7b.2, `modules/reconstruction/limiters.py`).
 
@@ -138,6 +157,12 @@ class DiffusionParameters:
     monaghanSwitch: wp.bool = field(default=True) # Whether to apply the Monaghan switch that turns off viscosity for diverging particles, i.e. particles that are moving away from each other. This is a common technique to reduce excessive viscosity in expanding flows and is used in many formulations such as Monaghan1992 and Monaghan1997.
     correctXi: wp.bool = field(default=True) # Divide the viscosity by the kernel-dependent length factor `sphKernel_xi` (packing ratio x kernel scale) so the coefficients are comparable across kernels. Unrelated to Cullen & Dehnen's limiter Xi (`ViscositySwitchConfig.limitXi`). The name is kept because it is serialised in stored configs.
     riemannSolver: wp.int32 = field(default=RiemannSolver.Adaptive.value) # `RiemannSolver` used by `ViscosityTerms.RiemannDissipation`
+    gaussianEta: scalar_t = field(default=scalar_t(1.0)) # Inutsuka scheme: the Gaussian's smoothing length is `eta (m / rho)^(1/d)`, the local particle spacing times eta (Inutsuka 2002 Eq. 81 with C_smooth = 1: ~6 neighbours inside 3h in 1D, ~100 in 3D). A Gaussian wider than the spacing has its gradient still rising at the neighbours: the pairing instability
+    cubicVolume: wp.bool = field(default=True) # Inutsuka scheme: cubic Hermite interpolant of the specific volume 1/rho along the pair axis (else linear)
+    interfaceClamp: wp.bool = field(default=False) # Inutsuka scheme: keep the interface `s*` between the two particles, |s*| <= s_ij / 2
+    timeCentredEnergy: wp.bool = field(default=False) # Godunov schemes: the energy rate uses the time-centred velocity `v_i + a_i dt/2` of Inutsuka (2002) Eq. (67) / Puri Eq. (36) (a second pass over the neighbours for `a_i`)
+    stateLimiter: wp.int32 = field(default=StateLimiter.PairRatio.value) # `StateLimiter`: the limiter of the Godunov scheme's second-order states
+    shockSwitchC: scalar_t = field(default=scalar_t(0.0)) # Godunov scheme: first-order states for a pair with `C (v_j - v_i) . n > min(c_i, c_j)` (Inutsuka 2002 Eq. 75, C = 3); 0 = off
     riemannReconstruction: wp.bool = field(default=False) # `RiemannDissipation`: left / right states of rho and P are the limited midpoint extrapolations (GODUNOV_SPH_PLAN layer 1; needs the (rho, P) gradients, `reconstruction.computeStateGradients`), not the particle values
     limiterType: wp.int32 = field(default=LimiterType.VanLeerFrontiere.value) # `LimiterType`: the slope limiter of a `Limited` / `BalsaraLimited` pair velocity (VanLeerFrontiere = CRKSPH's own)
     velocityPairPolicy: wp.int32 = field(default=VelocityPairPolicy.Raw.value) # `VelocityPairPolicy`: the pair velocity the viscosity sees (Raw, Linear, Limited, BalsaraLimited)
@@ -172,6 +197,9 @@ def buildDefaultDiffusionParamsCompressibleSPH():
     diffusionParams.correctXi = True
     diffusionParams.betaMode = BetaMode.Coupled.value
     diffusionParams.velocityPairPolicy = VelocityPairPolicy.Limited.value
+    # the Godunov-scheme knobs (a wp.struct is zero-initialised: the `field(default=...)`s do not apply to an instance)
+    diffusionParams.gaussianEta = 1.0
+    diffusionParams.cubicVolume = True
 
     return diffusionParams
 
@@ -196,6 +224,12 @@ def diffusionParamsToDict(diffusionParams: DiffusionParameters) -> Dict[str, Any
         'limiterType': LimiterType(diffusionParams.limiterType).name,
         'riemannSolver': RiemannSolver(diffusionParams.riemannSolver).name,
         'riemannReconstruction': bool(diffusionParams.riemannReconstruction),
+        'stateLimiter': StateLimiter(diffusionParams.stateLimiter).name,
+        'timeCentredEnergy': bool(diffusionParams.timeCentredEnergy),
+        'gaussianEta': float(diffusionParams.gaussianEta),
+        'cubicVolume': bool(diffusionParams.cubicVolume),
+        'interfaceClamp': bool(diffusionParams.interfaceClamp),
+        'shockSwitchC': float(diffusionParams.shockSwitchC),
         # plain Python scalars: a scalar_t default reads back as a numpy float32, which json cannot write (the
         # export path dumps this dict)
         'reconstructionEtaCrit': float(diffusionParams.reconstructionEtaCrit),
@@ -231,6 +265,13 @@ def dictToDiffusionParams(diffusionParamsDict: Dict[str, Any]) -> DiffusionParam
     solver = diffusionParamsDict.get('riemannSolver', RiemannSolver.Adaptive.name)
     diffusionParams.riemannSolver = (RiemannSolver[solver] if isinstance(solver, str) else RiemannSolver(solver)).value
     diffusionParams.riemannReconstruction = diffusionParamsDict.get('riemannReconstruction', False)
+    diffusionParams.timeCentredEnergy = diffusionParamsDict.get('timeCentredEnergy', False)
+    diffusionParams.gaussianEta = diffusionParamsDict.get('gaussianEta', 1.0)
+    diffusionParams.cubicVolume = diffusionParamsDict.get('cubicVolume', True)
+    diffusionParams.interfaceClamp = diffusionParamsDict.get('interfaceClamp', False)
+    sl = diffusionParamsDict.get('stateLimiter', StateLimiter.PairRatio.name)
+    diffusionParams.stateLimiter = (StateLimiter[sl] if isinstance(sl, str) else StateLimiter(sl)).value
+    diffusionParams.shockSwitchC = diffusionParamsDict.get('shockSwitchC', 0.0)
     diffusionParams.reconstructionEtaCrit = diffusionParamsDict.get('reconstructionEtaCrit', -1.0)
     diffusionParams.reconstructionEtaFold = diffusionParamsDict.get('reconstructionEtaFold', -1.0)
     diffusionParams.correctReconstructionGradient = diffusionParamsDict.get('correctReconstructionGradient', True)

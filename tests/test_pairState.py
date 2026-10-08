@@ -25,8 +25,8 @@ from warp.types import vector
 
 from warpSPHCore import SupportScheme, buildVerletList, scalar_t
 
-from warpSPH.configurations.moduleConfigurations.diffusionParameters import LimiterType
-from warpSPH.modules.reconstruction import computeStateGradients, reconstructPairScalar
+from warpSPH.configurations.moduleConfigurations.diffusionParameters import LimiterType, StateLimiter
+from warpSPH.modules.reconstruction import computeStateGradients, reconstructPair1D, reconstructPairScalar
 from warpSPH.runner import run
 
 REPO = Path(__file__).resolve().parents[1]
@@ -92,6 +92,67 @@ def test_boundedAndSymmetric(limiter):
     assert np.all(a >= lo - TOL) and np.all(a <= hi + TOL) and np.all(b >= lo - TOL) and np.all(b <= hi + TOL)
     # swapping i <-> j (and x_ij -> -x_ij) swaps the two states
     a2, b2 = recon(limiter, s_j, s_i, g_j, g_i, -x)
+    np.testing.assert_allclose(a2, b, atol=TOL * 10)
+    np.testing.assert_allclose(b2, a, atol=TOL * 10)
+
+
+@wp.kernel
+def _oneDKernel(limiter: wp.int32, s_i: wp.array(dtype=scalar_t), s_j: wp.array(dtype=scalar_t),
+                g_i: wp.array(dtype=vec2), g_j: wp.array(dtype=vec2), x_ij: wp.array(dtype=vec2),
+                out_i: wp.array(dtype=scalar_t), out_j: wp.array(dtype=scalar_t)):
+    k = wp.tid()
+    a, b = reconstructPair1D(limiter, s_i[k], s_j[k], g_i[k], g_j[k], x_ij[k])
+    out_i[k] = a
+    out_j[k] = b
+
+
+def recon1d(limiter, s_i, s_j, g_i, g_j, x_ij):
+    n = len(s_i)
+    arr = lambda a: wp.array(np.asarray(a, dtype=NP), dtype=scalar_t if np.ndim(a) == 1 else vec2)
+    oi, oj = wp.zeros(n, dtype=scalar_t), wp.zeros(n, dtype=scalar_t)
+    wp.launch(_oneDKernel, dim=n, inputs=[limiter.value, arr(s_i), arr(s_j), arr(g_i), arr(g_j), arr(x_ij)], outputs=[oi, oj])
+    return oi.numpy().astype(np.float64), oj.numpy().astype(np.float64)
+
+
+GODUNOV_LIMITERS = [StateLimiter.VanLeerHarmonic, StateLimiter.VanLeerMonotonized, StateLimiter.InutsukaSign]
+
+
+@pytest.mark.parametrize('limiter', GODUNOV_LIMITERS)
+def test_1dLimitersAreExactForALinearField(limiter):
+    rng = np.random.default_rng(2)
+    n = 200
+    g = rng.normal(size=(n, 2))
+    x_ij = rng.normal(size=(n, 2)) * 0.05
+    s0 = rng.uniform(1.0, 2.0, size=n)
+    s_i = s0 + 0.5 * (g * x_ij).sum(1)
+    s_j = s0 - 0.5 * (g * x_ij).sum(1)
+    a, b = recon1d(limiter, s_i, s_j, g, g, x_ij)
+    np.testing.assert_allclose(a, s0, atol=TOL * 10)
+    np.testing.assert_allclose(b, s0, atol=TOL * 10)
+
+
+@pytest.mark.parametrize('limiter', GODUNOV_LIMITERS)
+def test_1dLimitersStepExtremumAndBounds(limiter):
+    """A step (zero gradients) and an extremum (gradients disagreeing with the difference) give the particle values; the states always lie between
+    the two particle values for the van Leer limiters (Murante, Iwasaki), and are symmetric under i <-> j."""
+    x = np.array([[0.1, 0.0]] * 3)
+    g_i = np.array([[0.0, 0.0], [-1.0, 0.0], [1.0, 0.0]])
+    g_j = np.array([[0.0, 0.0], [-1.0, 0.0], [-1.0, 0.0]])
+    s_i, s_j = np.array([1.0, 1.0, 1.0]), np.array([2.0, 2.0, 2.0])      # D = -1 along +x: a gradient of +1 disagrees in sign
+    a, b = recon1d(limiter, s_i, s_j, g_i, g_j, x)
+    np.testing.assert_allclose(a[:1], s_i[:1], atol=TOL)
+    np.testing.assert_allclose(b[:1], s_j[:1], atol=TOL)
+    np.testing.assert_allclose(a[2:], s_i[2:], atol=TOL)                 # the gradient of i disagrees with D: zero slope (and Inutsuka: both)
+    rng = np.random.default_rng(4)
+    n = 400
+    s_i, s_j = rng.uniform(0.1, 3.0, n), rng.uniform(0.1, 3.0, n)
+    g_i, g_j = rng.normal(size=(n, 2)) * 5, rng.normal(size=(n, 2)) * 5
+    xx = rng.normal(size=(n, 2)) * 0.1
+    a, b = recon1d(limiter, s_i, s_j, g_i, g_j, xx)
+    if limiter != StateLimiter.InutsukaSign:
+        lo, hi = np.minimum(s_i, s_j), np.maximum(s_i, s_j)
+        assert np.all(a >= lo - TOL) and np.all(a <= hi + TOL) and np.all(b >= lo - TOL) and np.all(b <= hi + TOL)
+    a2, b2 = recon1d(limiter, s_j, s_i, g_j, g_i, -xx)
     np.testing.assert_allclose(a2, b, atol=TOL * 10)
     np.testing.assert_allclose(b2, a, atol=TOL * 10)
 

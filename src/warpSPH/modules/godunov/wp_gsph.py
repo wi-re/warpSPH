@@ -29,11 +29,61 @@ from typing import Any, Optional, Union
 import torch
 from warpSPHCore.profiling import record_function
 from warpSPHCore import *
-from ...configurations.moduleConfigurations.diffusionParameters import DiffusionParameters, VelocityPairPolicy
-from ..reconstruction import limitedPairPhi, pairRiemannStates
+from ...configurations.moduleConfigurations.diffusionParameters import DiffusionParameters, StateLimiter, VelocityPairPolicy
+from ..reconstruction import limitedPairPhi, pairRiemannStates, reconstructPairIncrements, reconstructPair1D
 from ..riemann import riemannStarState
 
 __all__ = ['computeGodunovWarp']
+
+
+@wp.func
+def godunovStates(
+    params: DiffusionParameters, order: wp.int32,
+    x_ij: vector(dtype=scalar_t, length=Any), n: vector(dtype=scalar_t, length=Any),  # type: ignore
+    hi: scalar_t, hj: scalar_t,
+    vel_i: vector(length=Any, dtype=scalar_t), vel_j: vector(length=Any, dtype=scalar_t),  # type: ignore
+    rhoi: scalar_t, rhoj: scalar_t, P_i: scalar_t, P_j: scalar_t,
+    J_i: matrix(shape=(Any, Any), dtype=scalar_t), referenceVelocityTensor: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)),  # type: ignore
+    G_i: matrix(shape=(Any, Any), dtype=scalar_t), referenceStateGradients: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)),  # type: ignore
+    j: wp.int32, kernel_int: wp.int32, dim: wp.int32, gamma: scalar_t,
+):
+    """`(u_R, u_L, rho_R, rho_L, P_R, P_L)`: the states of the pair's Riemann problem along `n` (right = i, left = j). First order: the particles' own
+    values. Second order: extrapolated to the pair midpoint -- `StateLimiter.PairRatio`: the AV_PLAN Phase 3 limiter of the velocity Jacobian ratio and
+    the layer-1 `(rho, P)` reconstruction; the others: the 1D limiters of Murante / Iwasaki / Inutsuka on the normal velocity (projected Jacobian)
+    and, with `riemannReconstruction`, `rho` and `P` (projected gradients), then the optional first-order shock switch (Inutsuka Eq. 75)."""
+    uI = wp.dot(vel_i, n)
+    uJ = wp.dot(vel_j, n)
+    if order < 2:
+        return uI, uJ, rhoi, rhoj, P_i, P_j
+    J_j = referenceVelocityTensor[j]
+    if params.stateLimiter == wp.static(StateLimiter.PairRatio.value):
+        phi = limitedPairPhi(
+            x_ij, hi, hj, vel_i, vel_j, J_i, J_j, kernel_int, dim,
+            True, True, params.reconstructionEtaCrit, params.reconstructionEtaFold, params.limiterType)
+        phi = wp.max(wp.min(phi, scalar_t(1.0)), scalar_t(0.0))
+        vR = vel_i - scalar_t(0.5) * phi * matmul(J_i, x_ij)
+        vL = vel_j + scalar_t(0.5) * phi * matmul(J_j, x_ij)
+        rR, rL, pR_, pL_ = pairRiemannStates(
+            params.riemannReconstruction, rhoi, rhoj, P_i, P_j, G_i, referenceStateGradients, j, x_ij, hi, hj,
+            kernel_int, dim, params.reconstructionEtaCrit, params.reconstructionEtaFold, params.limiterType)
+        use = rR >= scalar_t(0.0)
+        return wp.dot(vR, n), wp.dot(vL, n), wp.where(use, rR, rhoi), wp.where(use, rL, rhoj), wp.where(use, pR_, P_i), wp.where(use, pL_, P_j)
+    uR, uL = reconstructPairIncrements(params.stateLimiter, uI, uJ, wp.dot(n, matmul(J_i, x_ij)), wp.dot(n, matmul(J_j, x_ij)))
+    rhoR = rhoi
+    rhoL = rhoj
+    PR = P_i
+    PL = P_j
+    if params.riemannReconstruction:
+        G_j = referenceStateGradients[j]
+        rhoR, rhoL = reconstructPair1D(params.stateLimiter, rhoi, rhoj, G_i[0], G_j[0], x_ij)
+        PR, PL = reconstructPair1D(params.stateLimiter, P_i, P_j, G_i[1], G_j[1], x_ij)
+    # first-order states in compressive pairs (a shock surface): C (v_j - v_i) . n > min(c_i, c_j)
+    if params.shockSwitchC > scalar_t(0.0):
+        ci = wp.sqrt(gamma * P_i / rhoi)
+        cj = wp.sqrt(gamma * P_j / rhoj)
+        if params.shockSwitchC * (uJ - uI) > wp.min(ci, cj):
+            return uI, uJ, rhoi, rhoj, P_i, P_j
+    return uR, uL, rhoR, rhoL, PR, PL
 
 
 @wp.func
@@ -51,6 +101,7 @@ def godunov_Func_i(
     J_i: matrix(shape=(Any, Any), dtype=scalar_t), referenceVelocityTensor: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)),  # type: ignore
     G_i: matrix(shape=(Any, Any), dtype=scalar_t), referenceStateGradients: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)),  # type: ignore
     params: DiffusionParameters, gamma: scalar_t, order: wp.int32,
+    vEnergy_i: vector(length=Any, dtype=scalar_t),  # type: ignore
     accelValue: Any, workValue: scalar_t,
 ):
     acc = zero_like_warp(accelValue)
@@ -71,38 +122,16 @@ def godunov_Func_i(
         n = x_ij / (r + scalar_t(1.0e-14) * hi)
 
         # left state j, right state i along n: particle values (first order) or midpoint extrapolations (second order)
-        vR = vel_i
-        vL = vel_j
-        rhoR = rhoi
-        rhoL = rhoj
-        PR = P_i
-        PL = P_j
-        if order >= 2:
-            phi = limitedPairPhi(
-                x_ij, hi, hj, vel_i, vel_j, J_i, referenceVelocityTensor[j], kernelProperties.kernelFunction, dim,
-                True, True, params.reconstructionEtaCrit, params.reconstructionEtaFold, params.limiterType)
-            phi = wp.max(wp.min(phi, scalar_t(1.0)), scalar_t(0.0))
-            vR = vel_i - scalar_t(0.5) * phi * matmul(J_i, x_ij)
-            vL = vel_j + scalar_t(0.5) * phi * matmul(referenceVelocityTensor[j], x_ij)
-            rR, rL, pR_, pL_ = pairRiemannStates(
-                params.riemannReconstruction,
-                rhoi, rhoj, P_i, P_j, G_i, referenceStateGradients, j, x_ij, hi, hj,
-                kernelProperties.kernelFunction, dim,
-                params.reconstructionEtaCrit, params.reconstructionEtaFold, params.limiterType)
-            use = rR >= scalar_t(0.0)
-            rhoR = wp.where(use, rR, rhoi)
-            rhoL = wp.where(use, rL, rhoj)
-            PR = wp.where(use, pR_, P_i)
-            PL = wp.where(use, pL_, P_j)
-        uR = wp.dot(vR, n)
-        uL = wp.dot(vL, n)
+        uR, uL, rhoR, rhoL, PR, PL = godunovStates(
+            params, order, x_ij, n, hi, hj, vel_i, vel_j, rhoi, rhoj, P_i, P_j, J_i, referenceVelocityTensor,
+            G_i, referenceStateGradients, j, kernelProperties.kernelFunction, dim, gamma)
         pStar, uStar = riemannStarState(params.riemannSolver, rhoL, uL, PL, rhoR, uR, PR, gamma)
 
         gradWi = sphKernelGradient(xi, xj, hi, hi, kernelProperties, domainState)
         gradWj = sphKernelGradient(xi, xj, hj, hj, kernelProperties, domainState)
         F = gradWi / (rhoi * rhoi) + gradWj / (rhoj * rhoj)
         acc -= mj * pStar * F
-        work -= mj * pStar * (uStar - wp.dot(vel_i, n)) * wp.dot(n, F)
+        work -= mj * pStar * (uStar - wp.dot(vEnergy_i, n)) * wp.dot(n, F)
     return acc, work
 
 
@@ -117,6 +146,7 @@ def godunov_Func_Adjacency(
     queryPressures: wp.array(dtype=scalar_t), referencePressures: wp.array(dtype=scalar_t),  # type: ignore
     queryVelocityTensor: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)), referenceVelocityTensor: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)),  # type: ignore
     queryStateGradients: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)), referenceStateGradients: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)),  # type: ignore
+    queryAccelerations: wp.array(dtype=vector(length=Any, dtype=scalar_t)), halfDt: scalar_t,  # type: ignore
     params: DiffusionParameters, gamma: scalar_t, order: wp.int32,
     accelValue: Any,
 ):
@@ -126,6 +156,10 @@ def godunov_Func_Adjacency(
     if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
         if not checkDirectionality_i(ki, kernelProperties.operationMode):
             return acc, work
+    # the velocity of the energy equation: the particle's own, or the time-centred one (Inutsuka 2002 Eq. 67)
+    vEnergy_i = queryVelocities[i]
+    if params.timeCentredEnergy and halfDt > scalar_t(0.0):
+        vEnergy_i = queryVelocities[i] + halfDt * queryAccelerations[i]
     J_i = queryVelocityTensor[0]
     G_i = queryStateGradients[0]
     if order >= 2:
@@ -153,7 +187,7 @@ def godunov_Func_Adjacency(
             queryVelocities[i], referenceVelocities,
             queryPressures[i], referencePressures,
             J_i, referenceVelocityTensor, G_i, referenceStateGradients,
-            params, gamma, order,
+            params, gamma, order, vEnergy_i,
             accelValue, scalar_t(0.0),
         )
         acc += a_o
@@ -172,6 +206,7 @@ def computeGodunov_Kernel(
     queryPressures: wp.array(dtype=scalar_t), referencePressures: wp.array(dtype=scalar_t),  # type: ignore
     queryVelocityTensor: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)), referenceVelocityTensor: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)),  # type: ignore
     queryStateGradients: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)), referenceStateGradients: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)),  # type: ignore
+    queryAccelerations: wp.array(dtype=vector(length=Any, dtype=scalar_t)), halfDt: scalar_t,  # type: ignore
     params: DiffusionParameters, gamma: scalar_t, order: wp.int32,
     # outputs
     accel: wp.array(dtype=vector(length=Any, dtype=scalar_t)),  # type: ignore
@@ -186,6 +221,7 @@ def computeGodunov_Kernel(
         kernelProperties,
         queryVelocities, referenceVelocities, queryPressures, referencePressures,
         queryVelocityTensor, referenceVelocityTensor, queryStateGradients, referenceStateGradients,
+        queryAccelerations, halfDt,
         params, gamma, order,
         accel[i],
     )
@@ -214,6 +250,8 @@ _GODUNOV = OperatorSpec(
         ExtraSpec("referenceVelocityTensor", ExtraKind.TENSOR),
         ExtraSpec("queryStateGradients", ExtraKind.TENSOR),
         ExtraSpec("referenceStateGradients", ExtraKind.TENSOR),
+        ExtraSpec("queryAccelerations", ExtraKind.TENSOR),
+        ExtraSpec("halfDt", ExtraKind.SCALAR),
         ExtraSpec("params", ExtraKind.SCALAR),
         ExtraSpec("gamma", ExtraKind.SCALAR),
         ExtraSpec("order", ExtraKind.SCALAR),
@@ -234,8 +272,11 @@ def computeGodunovWarp(
     queryVelocities: Optional[torch.Tensor] = None,
     queryPressures: Optional[torch.Tensor] = None,
     referenceParticles: Optional[ParticleState] = None,
+    queryAccelerations: Optional[torch.Tensor] = None,
+    halfDt: float = 0.0,
 ):
-    """`(a_i, du_i/dt)` of the simplified Godunov SPH pair. `order` 1: the particles' own states; 2: extrapolated to the pair midpoint with
+    """`(a_i, du_i/dt)` of the simplified Godunov SPH pair. With `params.timeCentredEnergy` the energy rate uses `v_i + halfDt * queryAccelerations`
+    (the accelerations of a first call; Inutsuka 2002 Eq. 67). `order` 1: the particles' own states; 2: extrapolated to the pair midpoint with
     the velocity Jacobian `queryVelocityTensor` (required) and, if `params.riemannReconstruction`, the `(rho, P)` gradients
     `queryStateGradients` (required then). `params` supplies `riemannSolver`, `limiterType` and the taper constants (resolved, see
     `resolveReconstructionLimiter`)."""
@@ -250,6 +291,12 @@ def computeGodunovWarp(
             raise ValueError('order 2 needs the velocity Jacobian (queryVelocityTensor, see reconstruction.computeVelocityJacobian)')
         if params.riemannReconstruction and queryStateGradients is None:
             raise ValueError('riemannReconstruction needs the (rho, P) gradients (queryStateGradients, see reconstruction.computeStateGradients)')
+    # the time-centred energy rate is evaluated in a second pass, with the accelerations of the first (halfDt = 0: the particle's own velocity)
+    centred = bool(params.timeCentredEnergy) and halfDt > 0.0
+    if centred and queryAccelerations is None:
+        raise ValueError('a time-centred energy rate (halfDt > 0) needs the accelerations of a first pass (queryAccelerations)')
+    dummyA = getCachedDummyTensor((1, dim), dtype=queryParticles.positions.dtype, device=queryParticles.positions.device)
+    accs = queryAccelerations if centred else dummyA
     J = queryVelocityTensor if order >= 2 else dummyJ
     G = queryStateGradients if (order >= 2 and params.riemannReconstruction) else dummyG
     with record_function("warpSPH[computeGodunov]"):
@@ -264,5 +311,6 @@ def computeGodunovWarp(
             queryPressures=P, referencePressures=P,
             queryVelocityTensor=J, referenceVelocityTensor=J,
             queryStateGradients=G, referenceStateGradients=G,
+            queryAccelerations=accs, halfDt=scalar_t(halfDt),
             params=params, gamma=scalar_t(gamma), order=order,
         )

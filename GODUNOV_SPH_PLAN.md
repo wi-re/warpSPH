@@ -96,14 +96,20 @@ accuracy tests (Puri §5.1-5.3).
 ## Steps
 
 - [x] **L1** reconstruction of `rho`, `P` to the pair midpoint (`computeStateGradients`, `pairState.py`); A/B in the AV term: null result (`docs/av/godunov_l1_2026-10-08/`)
-- [ ] **L1b** switch the state reconstruction to the papers' limiters (Murante harmonic-mean of the projected gradient and the finite difference; Iwasaki / van Leer 1979 monotonised
-      slope) as `LimiterType`-style choices: the current `reconstructPairScalar` limits by the ratio of the two particles' gradients, which does not bound the state by the
-      neighbour difference (hence the clamp) and is not what GSPH uses
+- [x] **L1b** (2026-10-08, uncommitted) `StateLimiter`: `PairRatio` (old), `VanLeerHarmonic` (Murante Eq. 23), `VanLeerMonotonized` (Iwasaki App. C), `InutsukaSign` (Eq. 74) + first-order shock switch (Eq. 75, C = 3);
+      `docs/av/godunov_l1b_2026-10-08/`. The papers' limiters beat the ratio limiter on Gresho / KH / Sedov, slightly worse on Sod 1D / Noh; the shock switch fixes Noh and the Sedov radius. Default still `PairRatio` (user's call)
 - [x] **L2** simplified GSPH (2026-10-08, uncommitted): `modules/godunov`, `schemes/gsph.py`, `GSPHConfig`, `CompressibleSPHScheme.GSPH`; tests (conservation, standard-SPH identity at constant `P`, Sod) and
       gradcheck; Sod 1D/2D, Noh, Gresho, Sedov vs the AV rows: `docs/av/godunov_l2_2026-10-08/`. Pressure blip removed (6x), best 1D velocity error, second order essential; weaker on Gresho
       and the Sedov radius, 25x the AV energy drift on Sod 1D (time-centring omitted). Still to do for L2: the Cha 2010 density-jump force profile as a measured baseline (expected = standard SPH), KH.
-- [ ] **L3** Inutsuka 2002: Gaussian-kernel `V_ij^2`, `s*`, symmetrised density, `h_i / h_j` halves, neighbour-count `h`, limiter + shock switch; the density-jump test must now pass (a = 0);
-      KH (2:1 and the Wengen), blob, Noh; solver and limiter ablations as Murante's Table 1
+- [x] **L2 follow-ups** (2026-10-08, uncommitted): density-jump force baseline (`docs/av/godunov_densityJump/`: simplified GSPH = standard SPH, as predicted), KH (`docs/av/godunov_l2_2026-10-08/`: first order does not grow, second order 0.089 -> 0.104-0.106 with the papers' limiters),
+      time-centred energy (D, `timeCentredEnergy`): **negative result**, 30x the energy drift, off by default
+- [x] **L3** Inutsuka 2002 built and validated (2026-10-08, uncommitted): `InutsukaGSPH` (`schemes/gsphInutsuka.py`, `modules/godunov/wp_inutsuka.py`), Gaussian density, cubic `V_ij^2` / `s*` (verified against 1D quadrature), symmetric
+      pair operators (conservation tests), 4 gradchecks, tests `test_inutsuka*`, `test_densityJump`; evidence `docs/av/godunov_l3_2026-10-08/`. Gaussian width `h_G = eta (m/rho)^(1/d)`: eta <= 1 stable, wider pairs on cold shocks
+      (Noh / Sedov diverge); eta = 1 default. Good on Gresho (0.076-0.091 vs 0.109) and Sod velocity (0.0030) with no AV, KH 0.098-0.102, but (a) the Fig. 1 density-jump force is **not** removed at the stable width and (b) energy is not conserved at
+      strong shocks (Noh 7.5e-3, Sedov 4.5e-2) unless the first-order shock switch is on (2.5e-5, 6.6e-4)
+- [x] **decision (user, 2026-10-08):** `InutsukaGSPH` defaults to the first-order shock switch (C = 3); `GSPHConfig` state limiter default `VanLeerHarmonic` (was `PairRatio`); applied in `configurations/gsph.py`
+- [ ] open: blob test, Wengen KH, solver ablation (Murante Table 1) on the Inutsuka scheme; the density-jump consistency vs pairing trade-off (Inutsuka's own remedy for the pairing: Eq. 81 plus a smaller width, which kills the gain)
+- [x] godunov rows runnable in the larger sweep: `scripts/av_sweep_overnight.py --godunov` (13 AV-free rows over 11 cases, 3 KH at nx 256; ~5.6 h), `av_report` groups `godunov`, `gsphLimiters`, `godunovL3`
 - [ ] bake-off rows into the AV table (same metrics)
 
 ## Status log
@@ -121,3 +127,7 @@ accuracy tests (Puri §5.1-5.3).
 - 2026-10-08 (night): layer 2 built and validated (`docs/av/godunov_l2_2026-10-08/`): works without AV on all five cases; pressure blip at the contact 6x smaller than any AV row, Sod 1D velocity error the
   best of any row, entropy spike 4x larger; second-order states (and the layer-1 `(rho, P)` reconstruction, unlike in the AV term) essential; Gresho 0.13 vs 0.06-0.09, Sedov radius -0.048 vs -0.015..-0.023.
   The simplified form equals the standard SPH force at constant pressure (tested), so L3 is what the density-gradient inconsistency needs. Next: the density-jump measurement + KH for L2, L1b limiters, then L3.
+- 2026-10-08 (late night): L1b, density-jump baseline, KH for L2, time-centred energy (negative), L3 Inutsuka built, stability-probed and validated (`docs/av/godunov_l3_2026-10-08/`, `docs/av/godunov_densityJump/`).
+  Stability is a Gaussian-width question (eta <= 1; cubic `V`); the shock switch is what makes energy conserve at strong shocks. The headline consistency gain of the convolution form (Fig. 1) does not show at the stable width.
+  Tests and gradchecks pass; the full suite and the bake-off smoke pre-flight are run once at the end of the day.
+- 2026-10-08 (end of day, after L3): full pytest suite green (1 skip); bake-off smoke pre-flight re-run (`results/av_bakeoff_smoke_afterL3`): 17 jobs rc 0, all 15 row/compSPH/KH256 dirs bit-identical (tol 0) to the pre-7b pre-flight; the tree is whole for the bake-off. Uncommitted.

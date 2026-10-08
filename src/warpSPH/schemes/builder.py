@@ -16,11 +16,11 @@ from ..systems import (
     WeaklyCompressibleSystem, WaveSystemStatev3, WaveSystemUpdatev3, WaveSystemv3,
 )
 from ..configurations import (
-    CRKSPHConfig, CompSPHConfig, CompressibleSPHConfig, GSPHConfig,
+    CRKSPHConfig, CompSPHConfig, CompressibleSPHConfig, GSPHConfig, InutsukaGSPHConfig,
     IncompressibleSPHConfig, WeaklyCompressibleSPHConfig, Sun2017DeltaSPHConfig,
     WaveEquationConfig,
     compSPHConfigToDict, compressibleConfigToDict, crkSPHConfigToDict,
-    dictToCRKSPHConfig, dictToCompSPHConfig, dictToCompressibleConfig, dictToGSPHConfig, gsphConfigToDict,
+    dictToCRKSPHConfig, dictToCompSPHConfig, dictToCompressibleConfig, dictToGSPHConfig, dictToInutsukaGSPHConfig, gsphConfigToDict,
     dictToIncompressibleSPHConfig, dictToWeaklyCompressibleConfig,
     dictToWaveEquationConfig, incompressibleConfigToDict,
     waveEquationConfigToDict, weaklyCompressibleConfigToDict,
@@ -30,6 +30,7 @@ from .deltaSPH import deltaSPH_step
 from .crkSPH import crkSPH_step
 from .monaghan import compressibleSPH_Monaghan
 from .gsph import compressibleSPH_GSPH
+from .gsphInutsuka import compressibleSPH_InutsukaGSPH
 from .waveEquation import f_wave_equation
 from ..enumTypes import (
     ArtificialCompressibleSPHScheme, CompressibleSPHScheme,
@@ -104,6 +105,18 @@ def _gsph() -> SchemeBundle:
         stepFunction=compressibleSPH_GSPH,
         exportFunction=gsphConfigToDict,
         importFunction=dictToGSPHConfig,
+    )
+
+
+def _inutsukaGSPH() -> SchemeBundle:
+    return SchemeBundle(
+        SimulationSystem=CompressibleSystem,
+        SimulationState=CompressibleState,
+        SimulationConfig=InutsukaGSPHConfig,
+        SimulationUpdate=CompressibleSystemUpdate,
+        stepFunction=compressibleSPH_InutsukaGSPH,
+        exportFunction=gsphConfigToDict,
+        importFunction=dictToInutsukaGSPHConfig,
     )
 
 
@@ -302,6 +315,7 @@ _SCHEMES = {
     CompressibleSPHScheme.CompSPH: _compSPH,
     CompressibleSPHScheme.CRKSPH: _crkSPH,
     CompressibleSPHScheme.GSPH: _gsph,
+    CompressibleSPHScheme.InutsukaGSPH: _inutsukaGSPH,
     WeaklyCompressibleSPHScheme.deltaSPH: _deltaSPH,
     WeaklyCompressibleSPHScheme.sun2017DeltaSPH: _sun2017DeltaSPH,
     IncompressibleSPHScheme.divergenceFree: _divergenceFree,

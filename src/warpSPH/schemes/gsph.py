@@ -80,6 +80,13 @@ def compressibleSPH_GSPH(
         params = params, gamma = float(schemeConfig.gamma), order = order,
         adjacency = adjacency,
         queryVelocityTensor = J, queryStateGradients = G)
+    if params.timeCentredEnergy:
+        # Inutsuka (2002) Eq. 67: the energy rate at the time-centred velocity v_i + a_i dt/2, which needs the accelerations of a first pass
+        _, dudt = computeGodunovWarp(
+            currentState,
+            OperationProperties(kernel = config.kernel, supportMode = SupportScheme.KernelMeanSymmetric),
+            domain = config.domain, params = params, gamma = float(schemeConfig.gamma), order = order, adjacency = adjacency,
+            queryVelocityTensor = J, queryStateGradients = G, queryAccelerations = dvdt, halfDt = 0.5 * dt)
 
     drhodt = computeMomentumConsistent(
         currentState, config, schemeConfig = schemeConfig, adjacency = adjacency, gradH = gradHState)

@@ -70,6 +70,8 @@ class CompressibleSPHScheme(Enum):
     CRKSPH = 2
     #: Godunov SPH (GODUNOV_SPH_PLAN): the pair forces come from the Riemann problem between each pair, no artificial viscosity
     GSPH = 3
+    #: Godunov SPH of Inutsuka (2002): the kernel-convolution form with a Gaussian kernel (GODUNOV_SPH_PLAN layer 3)
+    InutsukaGSPH = 4
 
 # @torch.jit.script
 class WeaklyCompressibleSPHScheme(Enum):

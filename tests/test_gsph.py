@@ -134,3 +134,13 @@ def test_float64():
     proc = subprocess.run([sys.executable, '-m', 'pytest', '-q', '-x', '-p', 'no:cacheprovider', '-k', 'not float64', __file__],
                           cwd=REPO, env=env, capture_output=True, text=True, timeout=1800)
     assert proc.returncode == 0, proc.stdout[-4000:] + proc.stderr[-2000:]
+
+
+def test_schemeDefaultsAreTheDecidedOnes():
+    """User decision 2026-10-08: harmonic state limiter for the Godunov SPH schemes, first-order shock switch (C = 3) for Inutsuka's."""
+    from warpSPH.configurations import InutsukaGSPHConfig, GSPHConfig
+    from warpSPH.configurations.moduleConfigurations.diffusionParameters import StateLimiter
+    g, i = GSPHConfig().diffusionParams, InutsukaGSPHConfig().diffusionParams
+    assert g.stateLimiter == StateLimiter.VanLeerHarmonic.value and float(g.shockSwitchC) == 0.0
+    assert i.stateLimiter == StateLimiter.VanLeerHarmonic.value and float(i.shockSwitchC) == 3.0
+    assert float(i.gaussianEta) == 1.0 and bool(i.cubicVolume)

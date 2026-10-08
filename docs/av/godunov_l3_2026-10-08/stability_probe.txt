@@ -1,0 +1,14 @@
+variant                                     noh                  sedov
+eta 0.75                 postShockRhoErr=0.001215      peakRhoRatio=3.06
+eta 1.0                  postShockRhoErr=0.00183     peakRhoRatio=2.873
+[warpSPH] VELOCITY ALARM raised at step 2292 (t=0.252231): |v|max 2070 = 2.07e+03 x expected 1 (initial |v|max) at particle 199 (uid 199) x=[0.9695], dt 0.00011. The run continues -- check the dynamics; if simulated time stops advancing, stop it (or set stallProgress).
+[warpSPH] VELOCITY ALARM escalated at step 2297 (t=0.252781): |v|max 3.201e+08 = 3.2e+08 x expected 1 (initial |v|max) at particle 95 (uid 95) x=[302.4], dt 0.00011. The run continues -- check the dynamics; if simulated time stops advancing, stop it (or set stallProgress).
+non-finite velocities detected at step 2298; stopping.
+[warpSPH] VELOCITY ALARM raised at step 105 (t=0.0482571): |v|max 1.114e+06 = 3.73e+04 x expected 29.9 (initial max sound speed) at particle 34334 (uid 34334) x=[-0.2151, 5.445e-06, -0.2151], dt 0.000455. The run continues -- check the dynamics; if simulated time stops advancing, stop it (or set stallProgress).
+[warpSPH] VELOCITY ALARM escalated at step 106 (t=0.0487123): |v|max 4.375e+08 = 1.46e+07 x expected 29.9 (initial max sound speed) at particle 34292 (uid 34292) x=[433.1, -230.8, 70.11], dt 0.000455. The run continues -- check the dynamics; if simulated time stops advancing, stop it (or set stallProgress).
+non-finite velocities detected at step 107; stopping.
+eta 1.33                         DIVERGED @2299          DIVERGED @108
+eta 1.0 + shock switch   postShockRhoErr=0.0003073     peakRhoRatio=2.099
+non-finite velocities detected at step 1922; stopping.
+eta 1.0 linear V                 DIVERGED @1923     peakRhoRatio=2.671
+eta 0.75 linear V        postShockRhoErr=0.0007671     peakRhoRatio=3.029
