@@ -47,6 +47,9 @@ class CompressibleState(BaseState):
     entropiesPrev: torch.Tensor = constant(tags=('entropy_previous',), default=None)
     entropiesPrevTime: float = constant(tags=('entropy_previous_time',), default=None)
     entropyRates: torch.Tensor = constant(tags=('entropy_rate',), default=None)
+    # Sphenix2022 (step-boundary): div v at the previous step boundary and its time (Eq. 22)
+    divergencePrevStep: torch.Tensor = constant(tags=('velocity_divergence_previous',), default=None)
+    divergencePrevStepTime: float = constant(tags=('velocity_divergence_previous_time',), default=None)
 
     # unit wall normals (fluid -> wall) of the solid rows, zero on fluid rows; None
     # when the case gives no geometry (modules/compressibleWall then estimates them)
@@ -114,7 +117,8 @@ class CompressibleSystem(BaseIntegrationSystem):
         self.state.alphas.copy_(lastState.alphas)
         from ..modules.shockCapturing.wrapper import advanceViscositySwitchStep  # (circular at import time)
         advanceViscositySwitchStep(self, initialState, returnValues,
-                                   kwargs.get('schemeConfig', args[1] if len(args) > 1 else None))
+                                   kwargs.get('schemeConfig', args[1] if len(args) > 1 else None),
+                                   kwargs.get('config', args[0] if len(args) > 0 else None))
 
         return super().finalize(initialState, dt, returnValues, updateValues, weights, *args, **kwargs)
     

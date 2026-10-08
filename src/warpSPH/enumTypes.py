@@ -54,6 +54,10 @@ class ViscositySwitch(Enum):
     #: entropy change, set at step boundaries (`modules/shockCapturing/Rosswog2020.py`).
     #: Not `Rosswog2000`, the divergence-source switch of Rosswog et al. (2000).
     Rosswog2020 = 8
+    #: Sphenix (Borrow et al. 2022, MNRAS 511, 2367) Eqs. (21)-(24): alpha from the step-to-step change of div v,
+    #: implicit decay, set at step boundaries; the Balsara factor goes into the pair coefficient (Eq. 19), via
+    #: `DiffusionParameters.balsaraPairLimiter` (`modules/shockCapturing/Sphenix2022.py`).
+    Sphenix2022 = 9
 
 
 # @torch.jit.script

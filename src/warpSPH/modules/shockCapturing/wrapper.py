@@ -26,6 +26,7 @@ from .Colagrossi2004 import computeColagrossiTerms, computeColagrossiUpdate
 from .MorrisMonaghan1997 import computeMorrisMonaghanTerms, computeMorrisMonaghanUpdate
 from .Rosswog2000 import computeRosswog2000Terms, computeRosswog2000Update
 from .Rosswog2020 import computeRosswog2020Terms, computeRosswog2020Update, advanceRosswog2020
+from .Sphenix2022 import computeSphenix2022Terms, computeSphenix2022Update, advanceSphenix2022
 
 __all__ = ['computeViscositySwitchTerms', 'updateViscositySwitch', 'SWITCHES', 'PLANNED',
            'STEP_HOOKS', 'registerViscositySwitch', 'advanceViscositySwitchStep']
@@ -55,14 +56,16 @@ SWITCHES = {
     ViscositySwitch.MorrisMonaghan1997: (computeMorrisMonaghanTerms, computeMorrisMonaghanUpdate),
     ViscositySwitch.Rosswog2000: (computeRosswog2000Terms, computeRosswog2000Update),
     ViscositySwitch.Rosswog2020: (computeRosswog2020Terms, computeRosswog2020Update),
+    ViscositySwitch.Sphenix2022: (computeSphenix2022Terms, computeSphenix2022Update),
 }
 
 #: Switches that update at step boundaries rather than per RHS stage:
-#: ``scheme -> hook(state, stage0State, t, schemeConfig)``, called from the compressible
+#: ``scheme -> hook(state, stage0State, t, schemeConfig, simulationConfig)``, called from the compressible
 #: systems' ``finalize`` (``advanceViscositySwitchStep``) on the step's final state, with the
 #: RHS state of the step's first stage (the one evaluated at ``t = t^n``).
 STEP_HOOKS = {
     ViscositySwitch.Rosswog2020: advanceRosswog2020,
+    ViscositySwitch.Sphenix2022: advanceSphenix2022,
 }
 
 #: Enum members with no implementation yet -> where AV_PLAN.md provides them (empty since
@@ -110,9 +113,9 @@ def updateViscositySwitch(
                     supportScheme, adjacency)
 
 
-def advanceViscositySwitchStep(system, initialSystem, returnValues, schemeConfig) -> None:
+def advanceViscositySwitchStep(system, initialSystem, returnValues, schemeConfig, simulationConfig=None) -> None:
     """Step-boundary switch update (``STEP_HOOKS``); a no-op for every per-stage switch."""
     params = getattr(schemeConfig, 'viscositySwitchParams', None)
     hook = STEP_HOOKS.get(params.scheme) if params is not None else None
     if hook is not None:
-        hook(system.state, returnValues[0][1], float(initialSystem.t), schemeConfig)
+        hook(system.state, returnValues[0][1], float(initialSystem.t), schemeConfig, simulationConfig)

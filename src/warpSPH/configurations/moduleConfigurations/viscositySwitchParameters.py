@@ -41,6 +41,7 @@ class ViscositySwitchConfig:
     entropy_eps0: float = field(default=1.0e-4, metadata={'description': "Rosswog2020: entropy rate below which alpha_des = 0 (the paper's l_0 = log(1e-4))"})
     entropy_eps1: float = field(default=5.0e-2, metadata={'description': "Rosswog2020: entropy rate at and above which alpha_des = alpha_max (l_1 = log(5e-2))"})
     entropy_decay: float = field(default=30.0, metadata={'description': "Rosswog2020: alpha decay time in units of tau = h / c (Eq. 17)"})
+    sphenix_ell: float = field(default=0.05, metadata={'description': "Sphenix2022: alpha decay length ell_V; tau = gamma_K ell_V h / c = ell_V H / c with H the support radius stored here (Borrow et al. 2022 Eq. 24)"})
 
 
 
@@ -61,6 +62,7 @@ def viscositySwitchConfigToDict(viscositySwitchConfig: ViscositySwitchConfig) ->
         'entropy_eps0': viscositySwitchConfig.entropy_eps0,
         'entropy_eps1': viscositySwitchConfig.entropy_eps1,
         'entropy_decay': viscositySwitchConfig.entropy_decay,
+        'sphenix_ell': viscositySwitchConfig.sphenix_ell,
     }
 
 def dictToViscositySwitchConfig(viscositySwitchConfigDict: Dict[str, Any]) -> ViscositySwitchConfig:
@@ -80,5 +82,6 @@ def dictToViscositySwitchConfig(viscositySwitchConfigDict: Dict[str, Any]) -> Vi
     viscositySwitchConfig.entropy_eps0 = viscositySwitchConfigDict.get('entropy_eps0', 1.0e-4)
     viscositySwitchConfig.entropy_eps1 = viscositySwitchConfigDict.get('entropy_eps1', 5.0e-2)
     viscositySwitchConfig.entropy_decay = viscositySwitchConfigDict.get('entropy_decay', 30.0)
+    viscositySwitchConfig.sphenix_ell = viscositySwitchConfigDict.get('sphenix_ell', 0.05)
 
     return viscositySwitchConfig

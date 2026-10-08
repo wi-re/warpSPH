@@ -113,6 +113,17 @@ CONFIGS: Dict[str, AVConfig] = {c.name: c for c in (
       for det, switch, sp in (('CD', 'CullenDehnen2010', {}),
                               ('Rosswog', 'Rosswog2020', dict(alpha_min=0.0, alpha_max=1.0)))
       for tag, cq, mode in (('Fixed2', 2.0, 1), ('Fixed0p2', 0.2, 1), ('Coupled2', 2.0, 0))),
+    # AV_PLAN Phase 5B: Sphenix (Borrow et al. 2022). Operator Eqs. (15)-(17), v_sig = c_i + c_j - 3 mu with the
+    # whole term scaled by alpha_ij: the `Price2012` term (8) with C_l = 1, C_q = 3 coupled; Eq. (19)'s Balsara in the
+    # pair coefficient; the plain (uncorrected) gradient for B, so no correction-matrix pass is added
+    AVConfig('sphenix', switch='Sphenix2022', switchParams=dict(alpha_min=0.0, alpha_max=2.0),
+             diffusion=dict(viscosityTerm=8, C_l=1.0, C_q=3.0, betaMode=0, balsaraPairLimiter=True,
+                            correctReconstructionGradient=False)),
+    # AV_PLAN Phase 5B robustness: cflFactor x 4 (0.3 -> 1.2)
+    AVConfig('sphenixCfl4', switch='Sphenix2022', switchParams=dict(alpha_min=0.0, alpha_max=2.0),
+             diffusion=dict(viscosityTerm=8, C_l=1.0, C_q=3.0, betaMode=0, balsaraPairLimiter=True,
+                            correctReconstructionGradient=False), simulation=dict(cflFactor=1.2)),
+    AVConfig('cullenDehnen2010Cfl4', switch='CullenDehnen2010', simulation=dict(cflFactor=1.2)),
     # AV_PLAN Phase 4: Garcia-Senz & Cabezon (2026) Table 1 rows 1-6. Their operator Eq. (6) is the `Price2012_98`
     # term (v_sig = alpha c_bar - beta w, pair means) with beta = 2 fixed; their switch is Read & Hayfield's at
     # alpha in [0.05, 1]. Rows 5/6: Balsara-modulated reconstruction, p = 1 / 2.
@@ -136,6 +147,8 @@ GROUPS: Dict[str, List[str]] = {
     'phase2': ['rosswog2020', 'rosswog2020Q'],
     'phase3': ['noneLinear', 'noneLimited'],
     'phase4': ['gsAV', 'gsAVSW', 'gsAVSLR', 'gsAVSWSLR', 'gsAVSLRB', 'gsAVSLRB2'],
+    'phase5b': ['sphenix', 'cullenDehnen2010'],
+    'cfl4': ['sphenixCfl4', 'cullenDehnen2010Cfl4'],
     'phase5a': ['cnCDFixed2', 'cnCDFixed0p2', 'cnCDCoupled2', 'cnRosswogFixed2', 'cnRosswogFixed0p2', 'cnRosswogCoupled2'],
 }
 

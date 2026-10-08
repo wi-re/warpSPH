@@ -69,7 +69,7 @@ def _tau(state) -> torch.Tensor:
     return 0.5 * state.supports / state.soundspeeds.clamp(min=torch.finfo(state.supports.dtype).tiny)
 
 
-def advanceRosswog2020(state, stage0State, t: float, schemeConfig) -> None:
+def advanceRosswog2020(state, stage0State, t: float, schemeConfig, simulationConfig=None) -> None:
     """Step-boundary update, in place on the step's final `state`: `stage0State` is the RHS state
     of the step's first stage, whose `entropies` are s^n at time `t = t^n`."""
     cfg = schemeConfig.viscositySwitchParams
