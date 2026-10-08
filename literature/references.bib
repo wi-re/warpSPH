@@ -1469,6 +1469,53 @@
   note    = {Godunov-type particle hydrodynamics (GPH): a Riemann solver replaces artificial viscosity entirely, so there are no viscosity parameters or switches to tune. Von Neumann analysis: GPH is stable for all wavelengths, where standard SPH is unstable for some; eight tests show shock capture without artificial viscosity and prevention of particle penetration. "Easily implemented from SPH by simple replacement of the artificial viscosity with a Riemann solver" -- the structural move the Riemann-solver branch of the compressible frontend would make. No abstract in the Crossref record; abstract quoted from the PDF.}
 }
 
+@article{cha2010,
+  author  = {Cha, Seung-Hoon and Inutsuka, Shu-Ichiro and Nayakshin, Sergei},
+  title   = {Kelvin-Helmholtz instabilities with Godunov smoothed particle hydrodynamics},
+  journal = {Monthly Notices of the Royal Astronomical Society},
+  year    = {2010},
+  volume  = {403},
+  number  = {3},
+  pages   = {1165--1174},
+  doi     = {10.1111/j.1365-2966.2010.16200.x},
+  note    = {Godunov SPH on the Kelvin-Helmholtz instability across a high density contrast and on the blob test, where standard SPH shows no instability; traces that to an unphysical force at a density gradient (a consistency defect of the standard momentum equation) that the convolution-derived GSPH equation largely avoids. No abstract in the Crossref record; abstract quoted from the PDF.}
+}
+
+@article{murante2011,
+  author  = {Murante, G. and Borgani, S. and Brunino, R. and Cha, S.-H.},
+  title   = {Hydrodynamic simulations with the Godunov smoothed particle hydrodynamics},
+  journal = {Monthly Notices of the Royal Astronomical Society},
+  year    = {2011},
+  volume  = {417},
+  number  = {1},
+  pages   = {136--153},
+  doi     = {10.1111/j.1365-2966.2011.19021.x},
+  note    = {GSPH implemented in GADGET-3: the derivation from the kernel convolution, then Sod, Kelvin-Helmholtz and blob tests, and the effect of the neighbour number, the accuracy of the interface location, the order of reconstruction and the limiter. No abstract in the Crossref record; abstract quoted from the PDF.}
+}
+
+@article{iwasaki2011,
+  author  = {Iwasaki, Kazunari and Inutsuka, Shu-ichiro},
+  title   = {Smoothed particle magnetohydrodynamics with a Riemann solver and the method of characteristics},
+  journal = {Monthly Notices of the Royal Astronomical Society},
+  year    = {2011},
+  volume  = {418},
+  number  = {3},
+  pages   = {1668--1688},
+  doi     = {10.1111/j.1365-2966.2011.19588.x},
+  note    = {Godunov SPH for MHD: a non-linear Riemann problem with magnetic pressure for the compressive waves and the method of characteristics for Alfven waves, tested against a finite-volume code with an approximate Riemann solver. The hydrodynamic limit is Inutsuka's GSPH. No abstract in the Crossref record; abstract quoted from the PDF.}
+}
+
+@article{puri2014,
+  author  = {Puri, Kunal and Ramachandran, Prabhu},
+  title   = {Approximate Riemann solvers for the Godunov {SPH} ({GSPH})},
+  journal = {Journal of Computational Physics},
+  year    = {2014},
+  volume  = {270},
+  pages   = {432--458},
+  doi     = {10.1016/j.jcp.2014.03.055},
+  note    = {Non-iterative approximate Riemann solvers (Roe-type, HLLC and others) for GSPH, the equivalence between GSPH's dissipation and signal-velocity artificial viscosity under a class of solvers, and an explanation of GSPH's wall heating. No abstract in the Crossref record; abstract quoted from the PDF.}
+}
+
 % --- Extended set (one step removed; bibliographic records only, added 2026-08-29) ---
 %
 % Background and related work reached from the core set. Verified against DOI

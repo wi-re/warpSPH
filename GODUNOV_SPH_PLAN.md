@@ -16,35 +16,94 @@ step from one to the other, in three layers, each a usable result on its own:
 3. **Inutsuka (2002) proper**: the kernel-convolution force with the effective `V_ij^2` and `s*`, the time-centred second-order Riemann
    states, the shock-surface first-order switch.
 
-## Papers
+## Papers (all on disk since 2026-10-08; `literature/`)
 
-On disk (`literature/`), read for this plan 2026-10-08: `inutsuka2002` (Eqs. 51-57, 63-65 `V_ij^2` and `s*_ij` for linear / cubic `1/rho`;
-66-67 the update with Riemann `P*`, `v*`; 68 the time-centred MUSCL states; 70-75 velocity projection and the two stability switches,
-`Cshock = 3`; 79-85 variable `h`), `cha2003` (Eqs. 9-16: four GPH cases; 17-23 van Leer's iterative solver; 24-27 the isothermal solver;
-28-30 the linearisation, `P* = C1 Pa + (1 - C1) Pb`: Case 1 reduces to SPH for `C1 = 1/2`), `toro2009`, `vanleer1979`, `hopkins2013`,
-`hopkins2015`, `parshikov2002`, `vila1999`. That covers every equation of layers 1-3.
+`inutsuka2002` (the scheme), `cha2003` (the simplified variants), `murante2011` (the reference implementation and the sensitivity study),
+`iwasaki2011` (Inutsuka's group's second-order recipe, MHD), `puri2014` (approximate solvers, AV equivalence, wall heating), `cha2010`
+(why standard SPH fails at a density gradient), plus `toro2009`, `vanleer1979`, `hopkins2013/2015`, `parshikov2002`, `vila1999`.
+All four of the 2026-10-08 arrivals are verbatim-checked in `ABSTRACTS.md`. Not on disk and cited as inputs: van Leer 1997 (the iterative
+solver of `cha2003`), Sirotkin & Yoh 2013 (SPH with LLF / HLL fluxes, a different route), Dukowicz 1985, Rider 2000 (wall heating).
 
-Not on disk (`literature/TO_ACQUIRE.md`, Godunov-SPH section, Crossref-verified): Murante et al. 2011, Iwasaki & Inutsuka 2011,
-Puri & Ramachandran 2014, Cha, Inutsuka & Nayakshin 2010. These settle choices the 2002/2003 papers leave open (limiter variables,
-kernel gradient in place of the Gaussian convolution, the time-centred step, solver comparison); until they are read, those choices
-are made from the 2002 paper's own prescription and recorded as such here.
+### What the papers settle
+
+**Two schemes are called "GSPH", and they are not equivalent.**
+
+| | Inutsuka 2002 (the real one) | Cha & Whitworth 2003 / Iwasaki Eq. (24) / Puri Eq. (15) ("simplified") |
+|---|---|---|
+| momentum | `a_i = -2 sum_j m_j p*_ij [V_ij^2(h_i) dW(x_ij, sqrt2 h_i) + V_ij^2(h_j) dW(x_ij, sqrt2 h_j)]` | `a_i = -sum_j m_j p*_ij [dW(h_i)/rho_i^2 + dW(h_j)/rho_j^2]` |
+| energy | `du_i/dt = -2 sum_j m_j p*_ij (v*_ij - xdot*_i) . [same bracket]` | `du_i/dt = -sum_j m_j p*_ij (v*_ij - xdot*_i) . [same bracket as its momentum]` |
+| kernel | Gaussian only (the integrals `int W(x-x_i) W(x-x_j) / rho^2 dx` close), neighbours within `sqrt2 * 3h` | any kernel |
+| origin | convolve the equations with the kernel, integrate by parts (Eq. 23, 43) | replace `P_i`, `P_j` by `p*` in SPH |
+| density-gradient consistency | exact: `a_i = 0` for constant `P` whatever `rho` (Inutsuka Eq. 23) | **lost**: for constant `P` it is *identically the standard SPH force*, so it keeps the spurious repulsion of Cha 2010 Fig. 1 |
+| KH / blob (Murante 2011) | follows both | "exceedingly diffusive", wrong instabilities |
+
+So the simplified form is a useful cheap baseline (it is Phase 7b's term with the whole pressure sum replaced, and Puri / Iwasaki show it matches
+finite-volume codes on 1D / 2D shocks) but **it cannot be the end point**: the consistency Cha 2010 diagnoses needs the convolution form.
+The plan's layer 2 is therefore the simplified form, as a baseline and a stepping stone, and layer 3 the real scheme.
+
+**Details of the real scheme** (Inutsuka 2002 §3, Murante 2011 §3 and Appendix A):
+- `s` axis along `x_i - x_j`, origin at the midpoint, `s_ij = |x_i - x_j|`; specific volume `V = 1/rho` interpolated along `s`:
+  linear (`V = C s + D`, `C = (V_i - V_j)/s_ij`, `D = (V_i + V_j)/2`, `V_ij^2 = h^2 C^2 / 4 + D^2`, Inutsuka Eq. 52) or cubic spline (Eq. 60-65, which also uses
+  the projected gradients `e . grad V` at both particles; **the cubic is the reference** (Murante), falling back to linear when the end gradients disagree in sign).
+- Interface position `s*_ij = h^2 C D / (2 V_ij^2)` (linear, Eq. 57) / Eq. (65) (cubic); the Riemann problem is solved there with `p*`, `u*`.
+- Variable `h`: `h_i` for the half of the integral containing `x_i`, `h_j` for the other (Eq. 79); the sums run over neighbours within `sqrt2 h_i` or
+  `sqrt2 h_j`. Murante fixes `N_neigh` (Gaussian truncated at `3h`: 100 in 1D / 3D tests up to 442 for KH; fewer neighbours degrade KH).
+- Density: **symmetrised** `rho_i = sum_{|x_j - x_i| < max(h_i,h_j)} m_j [W(x_ji, sqrt2 h_i) + W(x_ij, sqrt2 h_j)]/2` (Murante Eq. 15), an even function
+  of the pair, removing the SPH density asymmetry (Cha 2010).
+- States of the Riemann problem: **second-order**: `Q_R = Q_i - (1/2) DeltaQ_i`, `Q_L = Q_j + (1/2) DeltaQ_j` with the limited slope along `s`
+  (`DeltaQ_i = limited(Q_i - Q_j, gradQ_i . n s_ij)`); Inutsuka evolves them by `C Delta t / 2` (the domain of dependence, Eq. 68; Iwasaki the same).
+  Limiters: Inutsuka 2002 zero both slopes when the velocity gradients disagree in sign (Eq. 74) and drop to first order in a shock
+  (`C_shock (v_j - v_i).n > min(c_i, c_j)`, `C_shock = 3`, Eq. 75); **Murante's reference** is van Leer's harmonic mean of the projected gradient and the
+  finite difference, `2 Q1 Q2/(Q1 + Q2)` if `Q1 Q2 > 0` else 0 (Eq. 18-23), which beats Inutsuka's limiter on KH; Iwasaki's is van Leer 1979's monotonised
+  slope, `min(2|Q_i - Q_j|, |Dbar|, 2|DeltaQ_i|) sgn`, `Dbar = ((Q_i - Q_j) + DeltaQ_i)/2`, zero if the signs disagree (App. C). The gradient is the
+  plain difference gradient `n . sum_k (m_k/rho_k)(Q_k - Q_i) grad W` (what `computeStateGradients` computes). **First-order states are
+  dramatically worse on KH and blob** (Murante), so the layer-1 reconstruction matters here.
+- Energy: `v*` is the Riemann velocity along `n` plus the mean of the tangential parts, which drops out against the kernel gradient (Inutsuka Eq. 70-73);
+  `xdot*_i = v_i + a_i Delta t / 2` (time-centred, needed for exact discrete energy conservation). Puri Eq. 36: the `Delta t / 2` term is a
+  higher-order dissipation `-(Delta t/2) a_i^2`.
+- Solvers: exact iterative (van Leer 1997) in the papers; **Puri 2014 finds Roe, Dukowicz and HLLC suitable replacements, LLF and HLLE too diffusive (they fail Noh
+  with negative densities)**. Our `modules/riemann` has Acoustic / PVRS / TRRS / TSRS / Adaptive / HLLC. Puri's Lagrangian HLLC uses `S_l = min(v_l - c_l, -c_lr)`,
+  `S_r = max(v_r + c_r, c_lr)` with Roe-averaged `c_lr`; ours uses Toro's PVRS-based wave speeds, which put Sod's contact speed at 0.61 against the exact 0.93
+  (`docs/av/riemann_7b_2026-10-08/`): worth trying Puri's speeds.
+
+**GSPH dissipation is signal-velocity artificial viscosity** (Puri §4): under a "centred + diffusive" solver, `p*_ab = pbar - (1/2) rhobar cbar (u_a - u_b)`,
+the momentum dissipation is Monaghan's `alpha v_sig (v_ab . rhat) grad W` with `alpha_GSPH = rhobar^2 Vbar^2` and `v_sig = cbar`, **with no approach-only
+switch** (the GSPH viscosity acts for receding pairs too) and no `beta` term (compensated by the larger `alpha` at density jumps). This is exactly what
+AV_PLAN Phase 7b measured (Acoustic with equal states = Monaghan 1997a with alpha = 1); `monaghanSwitch = False` is the GSPH behaviour of that term.
+Consequences Puri draws and the plan inherits: GSPH has a non-zero viscosity (which kills SPH's pressure blip) and therefore larger dissipation-induced
+heating (Sjogreen); **wall heating at the origin of Noh persists for every solver** (the entropy error is made in the shock reflection and then advected;
+the remedy in the literature is artificial thermal conduction; we saw the same dip, `docs/av/riemann_7b_2026-10-08/frames/`); a **pairing / clumping
+instability for unequal-mass particles** appears in the 2D Riemann problem.
+
+**Tests the papers define** (and the codebase has most of the cases): Sod (Murante, Cha 2003); the **pressure-equilibrium density-jump force test** of Cha 2010
+Fig. 1 (acceleration must vanish: the single most discriminating test between the two schemes, new); KH with density contrast 2:1 and the Wengen KH (Murante,
+Cha 2010; `kelvinHelmholtz` exists); the blob test (new); Noh 2D (Puri); Woodward-Colella blast wave and Sjogreen (Puri); the acoustic-wave diffusion and 1D/2D
+accuracy tests (Puri §5.1-5.3).
 
 ## Design notes
 
-- Pair geometry as in Inutsuka §3.1: the `s` axis along `x_ij`, 1D Riemann problem on the normal, tangential velocity passive.
-- Inutsuka's integral formulas need a Gaussian kernel (`W(x - x_i) W(x - x_j)` integrates to `W(x_i - x_j, sqrt(2) h)`); the repo has
-  `KernelFunctions.Gaussian`. Layer 3 either uses it, or the ordinary kernel gradient as the later codes do (decide when the missing papers are read).
-- The existing Phase 7b objects carry over: `riemannStarState` / `hllcFlux`, `LimiterType` (the limiter family), the velocity
-  reconstruction, `RiemannSolver`.
-- Not variational and not separable (Riemann `p*` depends on `v`): outside the geometric-integration work (PESPH_PLAN §7.4).
+- Pair geometry as in Inutsuka §3.1: `n = x_ij / r` (j to i), 1D Riemann problem on `n`, left state j, right state i, tangential velocity passive.
+  The 7b convention (left j, right i) is the paper's (`u_r = v_a . rhat_ab`, `u_l = v_b . rhat_ab`, Puri Eq. 12).
+- Layer 2 needs the whole pair loop `(dvdt, dudt)` in one kernel (both use `p*_ij`, `u*_ij`): a new `modules/godunov/` next to `modules/riemann`, a scheme
+  entry beside `schemes/monaghan.py` reusing its state, EOS, time-step and switch plumbing, no viscosity switch and no AV (`viscosityTerm` unused).
+- Integrator: the papers use a time-centred `xdot*_i = v_i + a_i Delta t/2` and `C Delta t/2` state evolution, both with an explicit `Delta t`. The repo's
+  integrators call `f(state) -> update`; the first cut uses the instantaneous `v_i` and un-evolved states (RK2 supplies the temporal order), and measures
+  total-energy drift against the papers' conservation claim before deciding whether a `Delta t`-aware variant is needed.
+- Momentum is conserved because `p*_ij` is symmetric under `i <-> j` (our solvers are mirror-symmetric, `tests/test_riemann.py`) and `grad_i W_ij = -grad_j W_ji`.
+- Layer 3 uses `KernelFunctions.Gaussian` (it exists, `h = 2 sigma`, 16-sigma truncation: check its support / `sqrt2 h` bookkeeping against the papers' `W = (pi h^2)^{-d/2} exp(-x^2/h^2)`).
+- Not variational and not separable (`p*` depends on `v`): outside the geometric-integration work (PESPH_PLAN §7.4).
 
 ## Steps
 
-- [x] **L1.1** scalar gradients of `rho`, `P` (`reconstruction.computeStateGradients`, difference gradient x `M^-1`; exact for linear fields)
-- [x] **L1.2** `reconstructPairScalar` / `reconstructPairRiemannStates`: limited midpoint extrapolation, same limiter + taper as the velocity, clamped between the particle values
-- [x] **L1.3** the Phase 7b Riemann term takes the reconstructed `(rho, P)` (`DiffusionParameters.riemannReconstruction`, default off); tests, gradcheck; A/B vs first order: null result (`docs/av/godunov_l1_2026-10-08/`)
-- [ ] **L2** first-order GPH momentum + energy, `schemes/` entry, Sod 1D/2D, Noh, Sedov, Gresho, KH; no AV
-- [ ] **L3** Inutsuka 2002 proper
+- [x] **L1** reconstruction of `rho`, `P` to the pair midpoint (`computeStateGradients`, `pairState.py`); A/B in the AV term: null result (`docs/av/godunov_l1_2026-10-08/`)
+- [ ] **L1b** switch the state reconstruction to the papers' limiters (Murante harmonic-mean of the projected gradient and the finite difference; Iwasaki / van Leer 1979 monotonised
+      slope) as `LimiterType`-style choices: the current `reconstructPairScalar` limits by the ratio of the two particles' gradients, which does not bound the state by the
+      neighbour difference (hence the clamp) and is not what GSPH uses
+- [x] **L2** simplified GSPH (2026-10-08, uncommitted): `modules/godunov`, `schemes/gsph.py`, `GSPHConfig`, `CompressibleSPHScheme.GSPH`; tests (conservation, standard-SPH identity at constant `P`, Sod) and
+      gradcheck; Sod 1D/2D, Noh, Gresho, Sedov vs the AV rows: `docs/av/godunov_l2_2026-10-08/`. Pressure blip removed (6x), best 1D velocity error, second order essential; weaker on Gresho
+      and the Sedov radius, 25x the AV energy drift on Sod 1D (time-centring omitted). Still to do for L2: the Cha 2010 density-jump force profile as a measured baseline (expected = standard SPH), KH.
+- [ ] **L3** Inutsuka 2002: Gaussian-kernel `V_ij^2`, `s*`, symmetrised density, `h_i / h_j` halves, neighbour-count `h`, limiter + shock switch; the density-jump test must now pass (a = 0);
+      KH (2:1 and the Wengen), blob, Noh; solver and limiter ablations as Murante's Table 1
 - [ ] bake-off rows into the AV table (same metrics)
 
 ## Status log
@@ -55,3 +114,10 @@ are made from the 2002 paper's own prescription and recorded as such here.
   Next: L2, first-order GPH (Cha & Whitworth Cases 1-3): `p*` replaces `P_i`, `P_j` in the SPH force; open design point: with the whole pressure
   term replaced, the reconstructed states carry the pressure gradient, so the layer-1 limiter now matters for accuracy, not only robustness.
 - 2026-10-08 (end of day): bake-off smoke pre-flight re-run after layer 1 (`results/av_bakeoff_smoke_afterL1`): all jobs rc 0, every row bit-identical (tol 0) to the pre-7b pre-flight; the tree is whole for the bake-off.
+- 2026-10-08 (evening): the four papers are on disk and read (`literature/` synced, abstracts verbatim). Plan rewritten around two findings: (1) the simplified
+  Cha & Whitworth / Puri Eq. 15 / Iwasaki Eq. 24 form reduces to the standard SPH force at constant pressure, so it keeps the density-gradient inconsistency Cha 2010
+  diagnoses and Murante finds it too diffusive for KH / blob: layer 2 is a baseline, layer 3 (Inutsuka's convolution form, Gaussian kernel, `V_ij^2`) the scheme; (2) Puri
+  proves GSPH dissipation = signal-velocity AV with `v_sig = c` and no approach switch, the formal statement of Phase 7b's result. New step L1b (the papers' limiters).
+- 2026-10-08 (night): layer 2 built and validated (`docs/av/godunov_l2_2026-10-08/`): works without AV on all five cases; pressure blip at the contact 6x smaller than any AV row, Sod 1D velocity error the
+  best of any row, entropy spike 4x larger; second-order states (and the layer-1 `(rho, P)` reconstruction, unlike in the AV term) essential; Gresho 0.13 vs 0.06-0.09, Sedov radius -0.048 vs -0.015..-0.023.
+  The simplified form equals the standard SPH force at constant pressure (tested), so L3 is what the density-gradient inconsistency needs. Next: the density-jump measurement + KH for L2, L1b limiters, then L3.

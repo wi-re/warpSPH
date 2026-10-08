@@ -24,7 +24,7 @@ import torch
 
 from warpSPHCore import OperationProperties, SupportScheme
 
-from ...configurations import CRKSPHConfig
+from ...configurations import CRKSPHConfig, GSPHConfig
 from ...configurations.moduleConfigurations.diffusionParameters import (
     dictToDiffusionParams, diffusionParamsToDict)
 from ..reconstruction import reconstructionInputs, stateGradientInputs
@@ -52,6 +52,10 @@ def _power(state, config, params, adjacency, alphas=None, velocityTensor=None, b
 def computeAVPowerSplit(system, config, schemeConfig) -> Dict[str, float]:
     """`avPowerTotal/Linear/Quadratic` for `system`'s current state (Monaghan/CompSPH
     pair operator; CRKSPH's viscosity lives elsewhere and is not covered)."""
+    if isinstance(schemeConfig, GSPHConfig):
+        # Godunov SPH has no artificial viscosity: the dissipation is the Riemann solution, not a pair operator
+        nan = float('nan')
+        return dict(avPowerTotal=nan, avPowerLinear=nan, avPowerQuadratic=nan, avPowerSplitResidual=nan)
     if isinstance(schemeConfig, CRKSPHConfig):
         # CRKSPH's viscosity is its own reconstructed operator (modules/crk); this
         # function would evaluate a hypothetical pair operator, not what ran.
@@ -82,7 +86,7 @@ def computeChenNixonRatio(system, config, schemeConfig) -> Dict[str, float]:
     from warpSPHCore import GradientScheme, WarpOperation, sphKernelScale, warpOperation
     from ...configurations.moduleConfigurations.diffusionParameters import BetaMode
     nan = float('nan')
-    if isinstance(schemeConfig, CRKSPHConfig):
+    if isinstance(schemeConfig, (CRKSPHConfig, GSPHConfig)):
         return dict(chenNixonRatioMedian=nan, chenNixonRatioP90=nan)
     st = system.state
     params = schemeConfig.diffusionParams

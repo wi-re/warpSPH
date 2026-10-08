@@ -180,6 +180,11 @@ CONFIGS: Dict[str, AVConfig] = {c.name: c for c in (
     *(AVConfig(f'riemannMuscl{name}', switch='NoneSwitch', diffusion=dict(viscosityTerm=13, riemannSolver=4, riemannReconstruction=True,
                                                                          velocityPairPolicy=policy, reconstructionBalsaraPower=2.0))
       for name, policy in (('', 0), ('Limited', 2), ('LimitedB2', 3))),
+    # GODUNOV_SPH_PLAN layer 2: simplified Godunov SPH (no AV, no switch): first-order states, second-order velocity only, second-order
+    # velocity + (rho, P)
+    AVConfig('gsphO1', scheme='GSPH', switch=None, diffusion=dict(velocityPairPolicy=0, riemannReconstruction=False)),
+    AVConfig('gsphO2v', scheme='GSPH', switch=None, diffusion=dict(velocityPairPolicy=2, riemannReconstruction=False)),
+    AVConfig('gsphO2', scheme='GSPH', switch=None),
     # AV_PLAN Phase 4: Garcia-Senz & Cabezon (2026) Table 1 rows 1-6. Their operator Eq. (6) is the `Price2012_98`
     # term (v_sig = alpha c_bar - beta w, pair means) with beta = 2 fixed; their switch is Read & Hayfield's at
     # alpha in [0.05, 1]. Rows 5/6: Balsara-modulated reconstruction, p = 1 / 2.
@@ -229,6 +234,7 @@ GROUPS: Dict[str, List[str]] = {
     'bakeoff': [r[1] for r in BAKEOFF_ROWS],
     'phase7b': ['riemann', 'riemannAcoustic', 'riemannTSRS', 'riemannHLLC', 'riemannLimited', 'riemannLimitedB2', 'riemannAcousticLimited'],
     'godunovL1': ['riemannLimited', 'riemannMusclLimited', 'riemann', 'riemannMuscl', 'riemannLimitedB2', 'riemannMusclLimitedB2'],
+    'gsph': ['gsphO1', 'gsphO2v', 'gsphO2'],
     'phase5a': ['cnCDFixed2', 'cnCDFixed0p2', 'cnCDCoupled2', 'cnRosswogFixed2', 'cnRosswogFixed0p2', 'cnRosswogCoupled2'],
 }
 

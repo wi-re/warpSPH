@@ -57,7 +57,7 @@ and had to be identified from their front matter alone.
 
 ## What is here
 
-199 documents. The first 120 are the curated core — every row annotated for what
+203 documents. The first 124 are the curated core — every row annotated for what
 it unblocks, and every row abstracted in `ABSTRACTS.md` **except `roe1986`,
 `hairer2006` and `toro2009`**, which carry no abstract at all (Annual Reviews
 articles of that vintage print none for `roe1986`; the latter two are books,
@@ -373,6 +373,10 @@ next-viscosity-switch question it raises, added 2026-09-19.
 | — | `monaghan2012` | `monaghan2012_sph-diverse-applications-review.pdf` | Annu. Rev. Fluid Mech. 44 2012 | Monaghan's incompressible-SPH applications review. Background for the frontend design space; the Monaghan viscosity lineage `computeViscosity` implements. |
 | — | `inutsuka2002` | `inutsuka2002_sph-riemann-solver-reformulation.pdf` | J. Comput. Phys. 179(1) 2002 | Riemann-solver reformulation of SPH: pair forces come from solving the Riemann problem, strict conservation form, accurate strong shocks. The Riemann-solver branch of the frontend, complementary to the switch machinery. |
 | — | `cha2003` | `cha2003_godunov-particle-hydrodynamics.pdf` | MNRAS 340(1) 2003 | Godunov-type particle hydrodynamics (GPH): a Riemann solver replaces artificial viscosity entirely; von Neumann-stable at all wavelengths, captures shocks without it. The structural move the Riemann-solver branch would make. |
+| — | `cha2010` | `cha2010_kelvin-helmholtz-godunov-sph.pdf` | MNRAS 403(3) 2010 | GSPH on Kelvin-Helmholtz across a density contrast and on the blob test, plus the consistency argument for why standard SPH fails there: the target tests for GODUNOV_SPH_PLAN. |
+| — | `murante2011` | `murante2011_godunov-sph-hydrodynamic-simulations.pdf` | MNRAS 417(1) 2011 | GSPH in GADGET-3: derivation, Sod / KH / blob, and the implementation choices the 2002 paper leaves open (interface location, reconstruction order, limiter, neighbour number). Implementation reference for GODUNOV_SPH_PLAN layers 2-3. |
+| — | `iwasaki2011` | `iwasaki2011_smoothed-particle-mhd-riemann-solver.pdf` | MNRAS 418(3) 2011 | Inutsuka's group's own GSPH implementation with MHD (Riemann problem + method of characteristics); the hydrodynamic limit is the second-order GSPH recipe for GODUNOV_SPH_PLAN layer 3. |
+| — | `puri2014` | `puri2014_approximate-riemann-solvers-gsph.pdf` | J. Comput. Phys. 270 2014 | Non-iterative Riemann solvers (Roe-type, HLLC, ...) for GSPH, the equivalence of GSPH dissipation with signal-velocity AV (the link to AV_PLAN Phase 7b's Riemann term) and the wall-heating explanation. |
 
 ## Extended set
 

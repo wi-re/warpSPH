@@ -68,6 +68,8 @@ class CompressibleSPHScheme(Enum):
     Monaghan = 0
     CompSPH = 1
     CRKSPH = 2
+    #: Godunov SPH (GODUNOV_SPH_PLAN): the pair forces come from the Riemann problem between each pair, no artificial viscosity
+    GSPH = 3
 
 # @torch.jit.script
 class WeaklyCompressibleSPHScheme(Enum):

@@ -16,11 +16,11 @@ from ..systems import (
     WeaklyCompressibleSystem, WaveSystemStatev3, WaveSystemUpdatev3, WaveSystemv3,
 )
 from ..configurations import (
-    CRKSPHConfig, CompSPHConfig, CompressibleSPHConfig,
+    CRKSPHConfig, CompSPHConfig, CompressibleSPHConfig, GSPHConfig,
     IncompressibleSPHConfig, WeaklyCompressibleSPHConfig, Sun2017DeltaSPHConfig,
     WaveEquationConfig,
     compSPHConfigToDict, compressibleConfigToDict, crkSPHConfigToDict,
-    dictToCRKSPHConfig, dictToCompSPHConfig, dictToCompressibleConfig,
+    dictToCRKSPHConfig, dictToCompSPHConfig, dictToCompressibleConfig, dictToGSPHConfig, gsphConfigToDict,
     dictToIncompressibleSPHConfig, dictToWeaklyCompressibleConfig,
     dictToWaveEquationConfig, incompressibleConfigToDict,
     waveEquationConfigToDict, weaklyCompressibleConfigToDict,
@@ -29,6 +29,7 @@ from .compSPH import compSPH_step
 from .deltaSPH import deltaSPH_step
 from .crkSPH import crkSPH_step
 from .monaghan import compressibleSPH_Monaghan
+from .gsph import compressibleSPH_GSPH
 from .waveEquation import f_wave_equation
 from ..enumTypes import (
     ArtificialCompressibleSPHScheme, CompressibleSPHScheme,
@@ -91,6 +92,18 @@ def _monaghan() -> SchemeBundle:
         stepFunction=compressibleSPH_Monaghan,
         exportFunction=compressibleConfigToDict,
         importFunction=dictToCompressibleConfig,
+    )
+
+
+def _gsph() -> SchemeBundle:
+    return SchemeBundle(
+        SimulationSystem=CompressibleSystem,
+        SimulationState=CompressibleState,
+        SimulationConfig=GSPHConfig,
+        SimulationUpdate=CompressibleSystemUpdate,
+        stepFunction=compressibleSPH_GSPH,
+        exportFunction=gsphConfigToDict,
+        importFunction=dictToGSPHConfig,
     )
 
 
@@ -288,6 +301,7 @@ _SCHEMES = {
     CompressibleSPHScheme.Monaghan: _monaghan,
     CompressibleSPHScheme.CompSPH: _compSPH,
     CompressibleSPHScheme.CRKSPH: _crkSPH,
+    CompressibleSPHScheme.GSPH: _gsph,
     WeaklyCompressibleSPHScheme.deltaSPH: _deltaSPH,
     WeaklyCompressibleSPHScheme.sun2017DeltaSPH: _sun2017DeltaSPH,
     IncompressibleSPHScheme.divergenceFree: _divergenceFree,

@@ -18,6 +18,7 @@ from .acousticCoreConfig import AcousticCoreConfig, acousticCoreConfigToDict, di
 from .compressibleConfig import CompressibleSPHConfig, compressibleConfigToDict, dictToCompressibleConfig
 from .compSPHConfig import CompSPHConfig, compSPHConfigToDict, dictToCompSPHConfig
 from .crkSPH import CRKViscosity, CRKSPHConfig, crkSPHConfigToDict, dictToCRKSPHConfig
+from .gsph import GSPHConfig, gsphConfigToDict, dictToGSPHConfig
 from .moduleConfigurations.boundaryConditions import *
 from .weaklyCompressible import WeaklyCompressibleSPHConfig, Sun2017DeltaSPHConfig, weaklyCompressibleConfigToDict, dictToWeaklyCompressibleConfig
 from .region import RegionType, ParticleRegion
@@ -51,6 +52,9 @@ __all__ = [
     'CompSPHConfig',
     'CRKViscosity',
     'CRKSPHConfig',
+    'GSPHConfig',
+    'gsphConfigToDict',
+    'dictToGSPHConfig',
     'BoundaryConditionType',
     'VectorProjectionType',
     'BoundaryCondition',
