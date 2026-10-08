@@ -27,6 +27,7 @@ from .MorrisMonaghan1997 import computeMorrisMonaghanTerms, computeMorrisMonagha
 from .Rosswog2000 import computeRosswog2000Terms, computeRosswog2000Update
 from .Rosswog2020 import computeRosswog2020Terms, computeRosswog2020Update, advanceRosswog2020
 from .Sphenix2022 import computeSphenix2022Terms, computeSphenix2022Update, advanceSphenix2022
+from .Wadsley2017 import computeWadsley2017Terms, computeWadsley2017Update, advanceWadsley2017
 
 __all__ = ['computeViscositySwitchTerms', 'updateViscositySwitch', 'SWITCHES', 'PLANNED',
            'STEP_HOOKS', 'registerViscositySwitch', 'advanceViscositySwitchStep']
@@ -57,6 +58,7 @@ SWITCHES = {
     ViscositySwitch.Rosswog2000: (computeRosswog2000Terms, computeRosswog2000Update),
     ViscositySwitch.Rosswog2020: (computeRosswog2020Terms, computeRosswog2020Update),
     ViscositySwitch.Sphenix2022: (computeSphenix2022Terms, computeSphenix2022Update),
+    ViscositySwitch.Wadsley2017: (computeWadsley2017Terms, computeWadsley2017Update),
 }
 
 #: Switches that update at step boundaries rather than per RHS stage:
@@ -66,6 +68,7 @@ SWITCHES = {
 STEP_HOOKS = {
     ViscositySwitch.Rosswog2020: advanceRosswog2020,
     ViscositySwitch.Sphenix2022: advanceSphenix2022,
+    ViscositySwitch.Wadsley2017: advanceWadsley2017,
 }
 
 #: Enum members with no implementation yet -> where AV_PLAN.md provides them (empty since

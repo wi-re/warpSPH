@@ -42,6 +42,8 @@ class ViscositySwitchConfig:
     entropy_eps1: float = field(default=5.0e-2, metadata={'description': "Rosswog2020: entropy rate at and above which alpha_des = alpha_max (l_1 = log(5e-2))"})
     entropy_decay: float = field(default=30.0, metadata={'description': "Rosswog2020: alpha decay time in units of tau = h / c (Eq. 17)"})
     sphenix_ell: float = field(default=0.05, metadata={'description': "Sphenix2022: alpha decay length ell_V; tau = gamma_K ell_V h / c = ell_V H / c with H the support radius stored here (Borrow et al. 2022 Eq. 24)"})
+    wadsley_tau: float = field(default=0.2, metadata={'description': "Wadsley2017: alpha decay tau = h / (wadsley_tau c) (Eq. 27, 0.2 in the paper; h the smoothing length)"})
+    wadsley_prefactor: float = field(default=-1.0, metadata={'description': "Wadsley2017: the prefactor of A_i = prefactor h^2 xi max(-dD/dt, 0) (Eq. 26's 2, re-derived for this repo's h convention in Wadsley2017.py); <= 0 uses the derived value"})
 
 
 
@@ -63,6 +65,8 @@ def viscositySwitchConfigToDict(viscositySwitchConfig: ViscositySwitchConfig) ->
         'entropy_eps1': viscositySwitchConfig.entropy_eps1,
         'entropy_decay': viscositySwitchConfig.entropy_decay,
         'sphenix_ell': viscositySwitchConfig.sphenix_ell,
+        'wadsley_tau': viscositySwitchConfig.wadsley_tau,
+        'wadsley_prefactor': viscositySwitchConfig.wadsley_prefactor,
     }
 
 def dictToViscositySwitchConfig(viscositySwitchConfigDict: Dict[str, Any]) -> ViscositySwitchConfig:
@@ -83,5 +87,7 @@ def dictToViscositySwitchConfig(viscositySwitchConfigDict: Dict[str, Any]) -> Vi
     viscositySwitchConfig.entropy_eps1 = viscositySwitchConfigDict.get('entropy_eps1', 5.0e-2)
     viscositySwitchConfig.entropy_decay = viscositySwitchConfigDict.get('entropy_decay', 30.0)
     viscositySwitchConfig.sphenix_ell = viscositySwitchConfigDict.get('sphenix_ell', 0.05)
+    viscositySwitchConfig.wadsley_tau = viscositySwitchConfigDict.get('wadsley_tau', 0.2)
+    viscositySwitchConfig.wadsley_prefactor = viscositySwitchConfigDict.get('wadsley_prefactor', -1.0)
 
     return viscositySwitchConfig

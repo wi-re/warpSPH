@@ -58,6 +58,9 @@ class ViscositySwitch(Enum):
     #: implicit decay, set at step boundaries; the Balsara factor goes into the pair coefficient (Eq. 19), via
     #: `DiffusionParameters.balsaraPairLimiter` (`modules/shockCapturing/Sphenix2022.py`).
     Sphenix2022 = 9
+    #: Wadsley, Keller & Quinn (2017, Gasoline2, MNRAS 471, 2357) Eqs. (21)-(29): the velocity gradient along the
+    #: pressure gradient, blind to uniform compression (`modules/shockCapturing/Wadsley2017.py`).
+    Wadsley2017 = 10
 
 
 # @torch.jit.script

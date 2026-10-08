@@ -119,6 +119,10 @@ CONFIGS: Dict[str, AVConfig] = {c.name: c for c in (
     AVConfig('sphenix', switch='Sphenix2022', switchParams=dict(alpha_min=0.0, alpha_max=2.0),
              diffusion=dict(viscosityTerm=8, C_l=1.0, C_q=3.0, betaMode=0, balsaraPairLimiter=True,
                             correctReconstructionGradient=False)),
+    # AV_PLAN Phase 6: Wadsley et al. (2017) Gasoline2 detector, alpha in [0, 2], beta = 2 fixed (their Eq. 17-18 operator
+    # with pair means is the `Wadsley2008` term, 10)
+    AVConfig('wadsley2017', switch='Wadsley2017', switchParams=dict(alpha_min=0.0, alpha_max=2.0),
+             diffusion=dict(viscosityTerm=10, C_q=2.0, betaMode=1)),
     # AV_PLAN Phase 5B robustness: cflFactor x 4 (0.3 -> 1.2)
     AVConfig('sphenixCfl4', switch='Sphenix2022', switchParams=dict(alpha_min=0.0, alpha_max=2.0),
              diffusion=dict(viscosityTerm=8, C_l=1.0, C_q=3.0, betaMode=0, balsaraPairLimiter=True,
@@ -148,6 +152,7 @@ GROUPS: Dict[str, List[str]] = {
     'phase3': ['noneLinear', 'noneLimited'],
     'phase4': ['gsAV', 'gsAVSW', 'gsAVSLR', 'gsAVSWSLR', 'gsAVSLRB', 'gsAVSLRB2'],
     'phase5b': ['sphenix', 'cullenDehnen2010'],
+    'phase6': ['wadsley2017', 'cullenDehnen2010'],
     'cfl4': ['sphenixCfl4', 'cullenDehnen2010Cfl4'],
     'phase5a': ['cnCDFixed2', 'cnCDFixed0p2', 'cnCDCoupled2', 'cnRosswogFixed2', 'cnRosswogFixed0p2', 'cnRosswogCoupled2'],
 }
@@ -321,6 +326,34 @@ def _shearingNohMetrics(res, cfg: AVConfig) -> Dict[str, Any]:
     out['shockFront'] = float(np.percentile(x[shocked], 95)) if shocked.any() else float('nan')
     out['shockFrontExact'] = t / 3.0
     out['shockFrontErr'] = out['shockFront'] / out['shockFrontExact'] - 1.0 if t > 0 else float('nan')
+    return out
+
+
+def _noh2dSpec(profile: str) -> RunSpec:
+    from warpSPH.cases.noh import nohCase
+    if profile == 'smoke':
+        return RunSpec(nohCase, dict(dim=2, nx=50, nSteps=40))
+    return RunSpec(nohCase, dict(dim=2, nx=100, tLimit=0.6))
+
+
+def _noh2dMetrics(res, cfg: AVConfig) -> Dict[str, Any]:
+    """AV_PLAN Phase 6: the cylindrical Noh implosion. Ahead of the shock the gas converges (div v = -1/r) without
+    any radial velocity gradient: a divergence-based detector fires there, Wadsley's D (n radial, dv/dn = 0) must
+    not. `preShockAlphaMean` is the mean alpha over 1.3 r_s < r < 0.35 (inside the box's periodic seam effects)."""
+    from warpSPH.cases.noh import shockState
+    out = _common(res, cfg)
+    st = res.state.state
+    t = float(res.state.t)
+    vs = float(res.ctx.param('v_s'))
+    r = st.positions.norm(dim=-1).detach().cpu().numpy()
+    rho = st.densities.detach().cpu().numpy()
+    alpha = st.alphas.detach().cpu().numpy() if getattr(st, 'alphas', None) is not None else np.ones_like(r)
+    pre = (r > 1.3 * vs * t) & (r < 0.35)
+    out['preShockAlphaMean'] = float(alpha[pre].mean()) if pre.any() else float('nan')
+    rhoS, _ = shockState(res.ctx)
+    post = r < 0.8 * vs * t
+    out['postShockRhoErr'] = float(rho[post & (r > 0.2 * vs * t)].mean() / rhoS - 1.0) if post.any() else float('nan')
+    out['postShockRhoExact'] = float(rhoS)
     return out
 
 
@@ -563,6 +596,7 @@ CASES: Dict[str, CaseDef] = {c.name: c for c in (
     # AV_PLAN Phase 5A; not in the default case list (--cases shearBox), so older --compare runs stay comparable
     CaseDef('shearBox', _shearBoxSpec, _shearBoxMetrics, lambda p: 1 if p == 'smoke' else 5),
     CaseDef('shearingNoh', _shearingNohSpec, _shearingNohMetrics, lambda p: 1 if p == 'smoke' else 5),
+    CaseDef('noh2d', _noh2dSpec, _noh2dMetrics, lambda p: 1 if p == 'smoke' else 5),
 )}
 
 #: Cases a run without `--cases` covers (the M0 ten).
@@ -617,6 +651,7 @@ COLUMNS = {
     'rayleighTaylor': ['heavyMinY', 'lightMaxY', 'mixingWidth', 'maxVelocity'],
     'shearBox': ['modeAmplitudeFinal', 'avQuadraticFraction'],
     'shearingNoh': ['shockFront', 'shockFrontExact', 'shockFrontErr'],
+    'noh2d': ['preShockAlphaMean', 'postShockRhoErr', 'postShockRhoExact'],
 }
 COMMON_COLUMNS = ['alphaMean', 'alphaMax', 'alphaActiveFraction', 'avEnergyLinear',
                   'avEnergyQuadratic', 'chenNixonRatioMedian', 'entropyGain', 'energyDrift', 'neighboursMean',

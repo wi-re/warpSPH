@@ -50,6 +50,12 @@ class CompressibleState(BaseState):
     # Sphenix2022 (step-boundary): div v at the previous step boundary and its time (Eq. 22)
     divergencePrevStep: torch.Tensor = constant(tags=('velocity_divergence_previous',), default=None)
     divergencePrevStepTime: float = constant(tags=('velocity_divergence_previous_time',), default=None)
+    # Wadsley2017: the stage's detector values (Eqs. 24, 28, v_sig) and D at the previous step boundary (dD/dt)
+    wadsleyD: torch.Tensor = constant(tags=('wadsley_D',), default=None)
+    wadsleyXi: torch.Tensor = constant(tags=('wadsley_xi',), default=None)
+    wadsleyVsig: torch.Tensor = constant(tags=('wadsley_vsig',), default=None)
+    wadsleyDPrev: torch.Tensor = constant(tags=('wadsley_D_previous',), default=None)
+    wadsleyDPrevTime: float = constant(tags=('wadsley_D_previous_time',), default=None)
 
     # unit wall normals (fluid -> wall) of the solid rows, zero on fluid rows; None
     # when the case gives no geometry (modules/compressibleWall then estimates them)
