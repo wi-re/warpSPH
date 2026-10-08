@@ -12,9 +12,9 @@ OPEN_PROBLEMS §22 was fixed). CRKSPH has its own CRK-corrected gradient and doe
 from warpSPHCore import *
 import torch
 from typing import Optional, Union
-from ...configurations.moduleConfigurations.diffusionParameters import VelocityPairPolicy
+from ...configurations.moduleConfigurations.diffusionParameters import VelocityPairPolicy, ViscosityTerms
 
-__all__ = ['computeVelocityJacobian', 'velocityTensorArguments', 'needsJacobian', 'needsBalsara', 'balsaraFromJacobian',
+__all__ = ['stateGradientInputs', 'computeStateGradients', 'needsStateGradients', 'stateGradientArguments', 'computeVelocityJacobian', 'velocityTensorArguments', 'needsJacobian', 'needsBalsara', 'balsaraFromJacobian',
            'reconstructionInputs', 'requireRawPairVelocity']
 
 
@@ -44,6 +44,46 @@ def computeVelocityJacobian(
         M = computeM(particleState, simulationConfig, None, supportMode, adjacency)
         Vs = torch.einsum('ijk, ikl -> ijl', Vs, torch.linalg.pinv(M))
     return Vs.contiguous()
+
+
+def computeStateGradients(
+        particleState,
+        simulationConfig,
+        supportScheme: Optional[SupportScheme] = None,
+        adjacency: Optional[Union[AdjacencyList, CompactHashMap]] = None,
+        corrected: bool = True):
+    """The `(n, 2, dim)` tensor of the density gradient (`[:, 0]`) and the pressure gradient (`[:, 1]`), `g . dx` the change of the
+    field along `dx`: `reconstruction.reconstructPairRiemannStates` extrapolates the Riemann problem's left / right states with
+    it (GODUNOV_SPH_PLAN layer 1). Same estimator as the velocity Jacobian: the difference gradient, optionally times `M^-1`
+    (exact for a linear field on any particle distribution)."""
+    from ..shockCapturing.common import computeM   # the switch package imports the schemes' state types
+    supportMode = supportScheme if supportScheme is not None else simulationConfig.supportMode
+    props = OperationProperties(kernel=simulationConfig.kernel, operation=WarpOperation.Gradient,
+                                supportMode=supportMode, gradientMode=GradientScheme.Difference)
+    grads = [warpOperation(particleState, props, domain=simulationConfig.domain, adjacency=adjacency, queryValues=values)
+             for values in (particleState.densities, particleState.pressures)]
+    G = torch.stack(grads, dim=1)
+    if corrected:
+        M = computeM(particleState, simulationConfig, None, supportMode, adjacency)
+        G = torch.einsum('ipj, ijk -> ipk', G, torch.linalg.pinv(M))
+    return G.contiguous()
+
+
+def needsStateGradients(diffusionParams) -> bool:
+    """Whether the viscosity kernels read the (rho, P) gradients: the Riemann dissipation with reconstructed states."""
+    return bool(diffusionParams.riemannReconstruction) and diffusionParams.viscosityTerm == ViscosityTerms.RiemannDissipation.value
+
+
+def stateGradientArguments(diffusionParams, queryStateGradients, referenceStateGradients, positions):
+    """The `(rho, P)` gradient arrays a viscosity kernel is launched with: the given ones when it reads them (an error if
+    missing), a cached placeholder otherwise."""
+    dim = positions.shape[1]
+    if needsStateGradients(diffusionParams):
+        if queryStateGradients is None:
+            raise ValueError('riemannReconstruction needs the (rho, P) gradients (queryStateGradients, see computeStateGradients)')
+        return queryStateGradients, (referenceStateGradients if referenceStateGradients is not None else queryStateGradients)
+    dummy = getCachedDummyTensor((1, 2, dim), dtype=positions.dtype, device=positions.device)
+    return dummy, dummy
 
 
 def needsJacobian(diffusionParams) -> bool:
@@ -115,6 +155,20 @@ def reconstructionInputs(particleState, simulationConfig, diffusionParams, adjac
     if needsBalsara(params):
         B = balsaraFromJacobian(J, particleState.soundspeeds, particleState.supports)
     return params, (J if needsJacobian(params) else None), B
+
+
+def stateGradientInputs(particleState, simulationConfig, diffusionParams, adjacency,
+                        supportScheme: SupportScheme = SupportScheme.SuperSymmetric):
+    """`(params, G)` for the Riemann dissipation's reconstructed states: the params with the n_h-derived taper constants resolved
+    and the `(n, 2, dim)` (rho, P) gradients, or `(diffusionParams, None)` when not read. Called after `reconstructionInputs`
+    (resolving twice is a no-op)."""
+    from ...configurations.moduleConfigurations.diffusionParameters import resolveReconstructionLimiter
+    if not needsStateGradients(diffusionParams):
+        return diffusionParams, None
+    params = resolveReconstructionLimiter(diffusionParams, simulationConfig.n_h)
+    G = computeStateGradients(particleState, simulationConfig, supportScheme, adjacency,
+                              corrected=params.correctReconstructionGradient)
+    return params, G
 
 
 def requireRawPairVelocity(diffusionParams, scheme: str) -> None:

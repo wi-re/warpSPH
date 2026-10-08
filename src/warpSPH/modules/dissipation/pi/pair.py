@@ -45,6 +45,12 @@ class PairData:
     kernelXi: scalar_t
     # support radius / smoothing length (`sphKernelScale`): the smoothing length of a particle is `h / kernelScale`
     kernelScale: scalar_t
+    # density and pressure of the two particles reconstructed to the pair midpoint (`Riemann` term, GODUNOV_SPH_PLAN); negative = not
+    # reconstructed (the particle's own value)
+    rhoRec_i: scalar_t
+    rhoRec_j: scalar_t
+    PRec_i: scalar_t
+    PRec_j: scalar_t
     # which side of the pair a one-sided formulation evaluates
     useJ: wp.bool
 
@@ -75,8 +81,14 @@ def buildPair(
     viscosityParams: DiffusionParameters,
     useJ: wp.bool,
     thermalConductivity: wp.bool,
+    rhoRec_i: scalar_t = scalar_t(-1.0), rhoRec_j: scalar_t = scalar_t(-1.0),
+    PRec_i: scalar_t = scalar_t(-1.0), PRec_j: scalar_t = scalar_t(-1.0),
 ):
     pair = PairData()
+    pair.rhoRec_i = rhoRec_i
+    pair.rhoRec_j = rhoRec_j
+    pair.PRec_i = PRec_i
+    pair.PRec_j = PRec_j
     pair.rho_i = rho_i
     pair.rho_j = rho_j
     pair.rho_bar = scalar_t(1.0)/scalar_t(2.0) * (rho_i + rho_j)

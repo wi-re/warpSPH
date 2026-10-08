@@ -14,10 +14,12 @@ through `DiffusionParameters.velocityPairPolicy`."""
 
 from .pairVelocity import rawPairVelocity, linearPairVelocity, limitedPairPhi, reconstructPairVelocity
 from .limiters import limiterVL, limiterPsi, computeVanLeer, crkLimiter
-from .gradient import (computeVelocityJacobian, velocityTensorArguments, needsJacobian, needsBalsara,
+from .pairState import reconstructPairScalar, reconstructPairRiemannStates, pairRiemannStates
+from .gradient import (stateGradientInputs, computeStateGradients, needsStateGradients, stateGradientArguments, computeVelocityJacobian, velocityTensorArguments, needsJacobian, needsBalsara,
                        balsaraFromJacobian, reconstructionInputs, requireRawPairVelocity)
 from .diagnostics import computePairPhiMean
 
 __all__ = ['rawPairVelocity', 'linearPairVelocity', 'limitedPairPhi', 'reconstructPairVelocity',
-           'limiterVL', 'limiterPsi', 'computeVanLeer', 'crkLimiter', 'computeVelocityJacobian', 'velocityTensorArguments', 'needsJacobian', 'needsBalsara', 'balsaraFromJacobian',
-           'reconstructionInputs', 'requireRawPairVelocity', 'computePairPhiMean']
+           'limiterVL', 'limiterPsi', 'computeVanLeer', 'reconstructPairScalar', 'reconstructPairRiemannStates', 'pairRiemannStates', 'crkLimiter', 'computeVelocityJacobian', 'velocityTensorArguments', 'needsJacobian', 'needsBalsara', 'balsaraFromJacobian',
+           'reconstructionInputs', 'requireRawPairVelocity', 'computePairPhiMean',
+           'computeStateGradients', 'needsStateGradients', 'stateGradientArguments', 'stateGradientInputs']

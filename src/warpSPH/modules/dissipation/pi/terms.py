@@ -208,8 +208,16 @@ def riemannDissipation(pair: PairData, viscosityParams: DiffusionParameters):
         P_i = pair.rho_i * pair.c_i * pair.c_i / gamma
         P_j = pair.rho_j * pair.c_j * pair.c_j / gamma
     w = pair.ux / (pair.r + scalar_t(1e-14) * pair.h_bar)
-    pStar, uStar = riemannStarState(viscosityParams.riemannSolver, pair.rho_j, scalar_t(0.0), P_j, pair.rho_i, w, P_i, gamma)
-    pRest, uRest = riemannStarState(viscosityParams.riemannSolver, pair.rho_j, scalar_t(0.0), P_j, pair.rho_i, scalar_t(0.0), P_i, gamma)
+    # the states of the Riemann problem: the particle values, or (`riemannReconstruction`) their limited extrapolations to
+    # the pair midpoint; the conservative `1/rho^2` weights below always use the particles' own densities
+    # (a select, not a reassignment inside a branch: the latter loses the adjoint of the un-reconstructed values)
+    reconstructed = pair.rhoRec_i >= scalar_t(0.0)
+    rhoL = wp.where(reconstructed, pair.rhoRec_j, pair.rho_j)
+    rhoR = wp.where(reconstructed, pair.rhoRec_i, pair.rho_i)
+    PL = wp.where(reconstructed, pair.PRec_j, P_j)
+    PR = wp.where(reconstructed, pair.PRec_i, P_i)
+    pStar, uStar = riemannStarState(viscosityParams.riemannSolver, rhoL, scalar_t(0.0), PL, rhoR, w, PR, gamma)
+    pRest, uRest = riemannStarState(viscosityParams.riemannSolver, rhoL, scalar_t(0.0), PL, rhoR, scalar_t(0.0), PR, gamma)
     dp = pStar - pRest
     inv = scalar_t(1.0) / (pair.rho_i * pair.rho_i) + scalar_t(1.0) / (pair.rho_j * pair.rho_j)
     return pair.C_l * pair.rho_j * inv * dp / (wp.abs(w) + scalar_t(1.0e-12) * pair.c_bar + scalar_t(1.0e-20))

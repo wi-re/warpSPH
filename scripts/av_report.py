@@ -176,6 +176,10 @@ CONFIGS: Dict[str, AVConfig] = {c.name: c for c in (
       for name, solver, policy in (
           ('Acoustic', 0, 0), ('TSRS', 3, 0), ('', 4, 0), ('HLLC', 5, 0),
           ('Limited', 4, 2), ('LimitedB2', 4, 3), ('AcousticLimited', 0, 2))),
+    # GODUNOV_SPH_PLAN layer 1: the Riemann dissipation with the left / right (rho, P) extrapolated to the pair midpoint
+    *(AVConfig(f'riemannMuscl{name}', switch='NoneSwitch', diffusion=dict(viscosityTerm=13, riemannSolver=4, riemannReconstruction=True,
+                                                                         velocityPairPolicy=policy, reconstructionBalsaraPower=2.0))
+      for name, policy in (('', 0), ('Limited', 2), ('LimitedB2', 3))),
     # AV_PLAN Phase 4: Garcia-Senz & Cabezon (2026) Table 1 rows 1-6. Their operator Eq. (6) is the `Price2012_98`
     # term (v_sig = alpha c_bar - beta w, pair means) with beta = 2 fixed; their switch is Read & Hayfield's at
     # alpha in [0.05, 1]. Rows 5/6: Balsara-modulated reconstruction, p = 1 / 2.
@@ -224,6 +228,7 @@ GROUPS: Dict[str, List[str]] = {
     'compSPH': ['compNone', 'compCD', 'compRosswog', 'compWadsley'],
     'bakeoff': [r[1] for r in BAKEOFF_ROWS],
     'phase7b': ['riemann', 'riemannAcoustic', 'riemannTSRS', 'riemannHLLC', 'riemannLimited', 'riemannLimitedB2', 'riemannAcousticLimited'],
+    'godunovL1': ['riemannLimited', 'riemannMusclLimited', 'riemann', 'riemannMuscl', 'riemannLimitedB2', 'riemannMusclLimitedB2'],
     'phase5a': ['cnCDFixed2', 'cnCDFixed0p2', 'cnCDCoupled2', 'cnRosswogFixed2', 'cnRosswogFixed0p2', 'cnRosswogCoupled2'],
 }
 

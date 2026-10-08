@@ -62,7 +62,7 @@ def _build_case():
     return domain, positions, supports, masses, densities, adjacency, kinds, velocities, internalEnergies, pressures, soundspeeds, alphas
 
 
-def _run(label, warp_fn, needs_energies, term=None, solver=None) -> bool:
+def _run(label, warp_fn, needs_energies, term=None, solver=None, recon=False) -> bool:
     domain, positions, supports, masses, densities, adjacency, kinds, velocities, internalEnergies, pressures, soundspeeds, alphas = _build_case()
     diffusionParams = buildDefaultDiffusionParamsCompressibleSPH()
     # the raw pair velocity (the Monaghan default is the limited reconstruction since 2026-10-08; that path is
@@ -72,8 +72,17 @@ def _run(label, warp_fn, needs_energies, term=None, solver=None) -> bool:
         diffusionParams.viscosityTerm = term.value
     if solver is not None:
         diffusionParams.riemannSolver = solver.value
+    if recon:
+        diffusionParams.riemannReconstruction = True
+        diffusionParams.reconstructionEtaCrit = 0.25
+        diffusionParams.reconstructionEtaFold = 0.2
+    if recon:
+        # the line case is mirror-symmetric, so rho_1 == rho_3 and rho_0 == rho_4: the reconstructed state is clamped between the two
+        # particle values (a kink at s_i == s_j, where the central difference averages the two subgradients). Break the symmetry.
+        densities = (densities.detach() * (1.0 + 0.2 * torch.rand(N, dtype=DTYPE, device=DEVICE))).requires_grad_(True)
+    stateGradients = (torch.randn(N, 2, DIM, dtype=DTYPE, device=DEVICE) * 0.3).requires_grad_(True) if recon else None
 
-    def f(pos, sup, mass, dens, vel, u, press, cs, alpha):
+    def f(pos, sup, mass, dens, vel, u, press, cs, alpha, *extra):
         state = make_compressible_state(pos, sup, mass, dens, vel, u, pressures=press, soundspeeds=cs, alphas=alpha, kinds=kinds)
         kwargs = dict(
             queryParticles=state,
@@ -81,6 +90,8 @@ def _run(label, warp_fn, needs_energies, term=None, solver=None) -> bool:
             domain=domain,
             adjacency=adjacency,
         )
+        if recon:
+            kwargs["queryStateGradients"] = extra[0]
         if needs_energies:
             kwargs["conductivityParams"] = diffusionParams
         else:
@@ -89,6 +100,8 @@ def _run(label, warp_fn, needs_energies, term=None, solver=None) -> bool:
 
     print(f"\n=== {label}: torch.autograd.gradcheck ===")
     inputs = (positions, supports, masses, densities, velocities, internalEnergies, pressures, soundspeeds, alphas)
+    if recon:
+        inputs = inputs + (stateGradients,)
     try:
         ok = torch.autograd.gradcheck(f, inputs, eps=1e-6, atol=1e-5)
         print("PASSED" if ok else "FAILED (gradcheck returned False)")
@@ -112,6 +125,11 @@ def main():
         tag = f" [Riemann/{solver.name}]"
         ok &= _run("computeViscosityWarp" + tag, computeViscosityWarp, needs_energies=False, term=ViscosityTerms.RiemannDissipation, solver=solver)
         ok &= _run("computeThermalDissipationWarp" + tag, computeThermalDissipationWarp, needs_energies=True, term=ViscosityTerms.RiemannDissipation, solver=solver)
+    # GODUNOV_SPH_PLAN layer 1: the same with the reconstructed (rho, P) states, the gradients being inputs too
+    for solver in (RiemannSolver.Acoustic, RiemannSolver.Adaptive, RiemannSolver.HLLC):
+        tag = f" [Riemann/{solver.name} + reconstructed states]"
+        ok &= _run("computeViscosityWarp" + tag, computeViscosityWarp, needs_energies=False, term=ViscosityTerms.RiemannDissipation, solver=solver, recon=True)
+        ok &= _run("computeThermalDissipationWarp" + tag, computeThermalDissipationWarp, needs_energies=True, term=ViscosityTerms.RiemannDissipation, solver=solver, recon=True)
 
     print()
     if ok:

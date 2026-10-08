@@ -23,7 +23,7 @@ from ..modules.eos import idealGasEOS
 from ..modules.internalEnergy import computeDudtMonaghan
 from ..modules.momentum import computeMomentumConsistent
 from ..modules.pressure import computePressureForceSymmetric, computePerSidePressureWarp
-from ..modules.reconstruction import reconstructionInputs
+from ..modules.reconstruction import reconstructionInputs, stateGradientInputs
 from ..modules.shockCapturing import computeViscositySwitchTerms, updateViscositySwitch
 from warpSPHCore import (
     GradHState, OperationProperties, SupportScheme, buildVerletList,
@@ -145,6 +145,8 @@ def compressibleSPH_Monaghan(
     # The pair velocity the viscosity sees (AV_PLAN Phases 3-4): the raw path needs nothing more; a reconstructing
     # policy needs the velocity Jacobian and the n_h-derived limiter constants, the Balsara variants the factor B
     diffusionParams, velocityTensor, balsara = reconstructionInputs(currentState, config, diffusionParams, adjacency)
+    # the Riemann dissipation's reconstructed (rho, P) states (GODUNOV_SPH_PLAN layer 1), when asked for
+    diffusionParams, stateGradients = stateGradientInputs(currentState, config, diffusionParams, adjacency)
     dvdt_diss = computeViscosity(
         currentState,
         # queryVelocities=currentState.velocities,
@@ -158,6 +160,7 @@ def compressibleSPH_Monaghan(
         queryAlphas = currentState.alphas,
         queryVelocityTensor = velocityTensor,
         queryBalsara = balsara,
+        queryStateGradients = stateGradients,
     )
 
 
@@ -188,6 +191,7 @@ def compressibleSPH_Monaghan(
         queryAlphas = currentState.alphas,
         queryVelocityTensor = velocityTensor,
         queryBalsara = balsara,
+        queryStateGradients = stateGradients,
     )
 
     # Advance the viscosity switch's stored alpha0 and store the velocity

@@ -1874,14 +1874,14 @@ Run with the existing `--bakeoff` job list plus the new rows, merged table in `r
 - **Stage 2 re-scoped (not built).** In this formulation Pi is `p*(w) - p*(0)`, so the reconstructed `rho`, `P` only enter through the
   impedance and the quadratic term: reconstructing them is a second-order effect and the velocity reconstruction (already there) carries
   the dissipation. The version that needs reconstructed pressures is Godunov-SPH proper (`p*` replaces the whole symmetric pressure sum,
-  Inutsuka 2002 / Cha & Whitworth 2003): a different scheme, not an AV row. Decision for the user: leave as is, or build it as its own
-  step.
+  Inutsuka 2002 / Cha & Whitworth 2003): a different scheme, not an AV row. **Decided (user, 2026-10-08): build the reconstruction
+  (the old stage 2) as the lead-up to Godunov SPH; tracked in [`GODUNOV_SPH_PLAN.md`](GODUNOV_SPH_PLAN.md) (layer 1).**
 
 ### Markers
 - [x] `modules/riemann` solvers + `tests/test_riemann.py` + gradcheck
 - [x] `LimiterType` enum plumbed (CRK and Monaghan paths), default bit-identical, tests + gradcheck
 - [x] first-stage Riemann Pi term registered, Sod 1D vs exact (L1 on par with the best Phase 4 row)
-- [~] scalar gradients + MUSCL states (second stage): re-scoped, see the 2026-10-08 note (low value for the Pi form; full Godunov-SPH is a separate scheme) -- user decides
+- [~] scalar gradients + MUSCL states (second stage): moved to `GODUNOV_SPH_PLAN.md` layer 1 (user, 2026-10-08)
 - [ ] addendum bake-off rows (`riemann*` configs exist; run after the main bake-off) + prose
 - [x] on `dev` (applied in place, uncommitted; worktree retired)
 

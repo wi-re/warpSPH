@@ -138,6 +138,7 @@ class DiffusionParameters:
     monaghanSwitch: wp.bool = field(default=True) # Whether to apply the Monaghan switch that turns off viscosity for diverging particles, i.e. particles that are moving away from each other. This is a common technique to reduce excessive viscosity in expanding flows and is used in many formulations such as Monaghan1992 and Monaghan1997.
     correctXi: wp.bool = field(default=True) # Divide the viscosity by the kernel-dependent length factor `sphKernel_xi` (packing ratio x kernel scale) so the coefficients are comparable across kernels. Unrelated to Cullen & Dehnen's limiter Xi (`ViscositySwitchConfig.limitXi`). The name is kept because it is serialised in stored configs.
     riemannSolver: wp.int32 = field(default=RiemannSolver.Adaptive.value) # `RiemannSolver` used by `ViscosityTerms.RiemannDissipation`
+    riemannReconstruction: wp.bool = field(default=False) # `RiemannDissipation`: left / right states of rho and P are the limited midpoint extrapolations (GODUNOV_SPH_PLAN layer 1; needs the (rho, P) gradients, `reconstruction.computeStateGradients`), not the particle values
     limiterType: wp.int32 = field(default=LimiterType.VanLeerFrontiere.value) # `LimiterType`: the slope limiter of a `Limited` / `BalsaraLimited` pair velocity (VanLeerFrontiere = CRKSPH's own)
     velocityPairPolicy: wp.int32 = field(default=VelocityPairPolicy.Raw.value) # `VelocityPairPolicy`: the pair velocity the viscosity sees (Raw, Linear, Limited, BalsaraLimited)
     reconstructionEtaCrit: scalar_t = field(default=scalar_t(-1.0)) # `Limited` / `BalsaraLimited` close-pair taper eta_crit in units of r/H (H = support radius); <= 0: 1/n_h, resolved per step like CRKSPH's (`resolveReconstructionLimiter`)
@@ -194,6 +195,7 @@ def diffusionParamsToDict(diffusionParams: DiffusionParameters) -> Dict[str, Any
         'velocityPairPolicy': VelocityPairPolicy(diffusionParams.velocityPairPolicy).name,
         'limiterType': LimiterType(diffusionParams.limiterType).name,
         'riemannSolver': RiemannSolver(diffusionParams.riemannSolver).name,
+        'riemannReconstruction': bool(diffusionParams.riemannReconstruction),
         # plain Python scalars: a scalar_t default reads back as a numpy float32, which json cannot write (the
         # export path dumps this dict)
         'reconstructionEtaCrit': float(diffusionParams.reconstructionEtaCrit),
@@ -228,6 +230,7 @@ def dictToDiffusionParams(diffusionParamsDict: Dict[str, Any]) -> DiffusionParam
     diffusionParams.limiterType = (LimiterType[limiter] if isinstance(limiter, str) else LimiterType(limiter)).value
     solver = diffusionParamsDict.get('riemannSolver', RiemannSolver.Adaptive.name)
     diffusionParams.riemannSolver = (RiemannSolver[solver] if isinstance(solver, str) else RiemannSolver(solver)).value
+    diffusionParams.riemannReconstruction = diffusionParamsDict.get('riemannReconstruction', False)
     diffusionParams.reconstructionEtaCrit = diffusionParamsDict.get('reconstructionEtaCrit', -1.0)
     diffusionParams.reconstructionEtaFold = diffusionParamsDict.get('reconstructionEtaFold', -1.0)
     diffusionParams.correctReconstructionGradient = diffusionParamsDict.get('correctReconstructionGradient', True)
@@ -241,7 +244,8 @@ def resolveReconstructionLimiter(diffusionParams: DiffusionParameters, n_h) -> D
     """`diffusionParams` with a non-positive `reconstructionEtaCrit` / `reconstructionEtaFold` replaced by the
     n_h-derived value (1/n_h, 0.2/n_h -- CRKSPH's `resolveCRKLimiter`). Returns `diffusionParams` itself when
     the policy is not a limited one or both values are explicit."""
-    if diffusionParams.velocityPairPolicy not in (VelocityPairPolicy.Limited.value, VelocityPairPolicy.BalsaraLimited.value):
+    if (diffusionParams.velocityPairPolicy not in (VelocityPairPolicy.Limited.value, VelocityPairPolicy.BalsaraLimited.value)
+            and not diffusionParams.riemannReconstruction):
         return diffusionParams
     if diffusionParams.reconstructionEtaCrit > 0 and diffusionParams.reconstructionEtaFold > 0:
         return diffusionParams

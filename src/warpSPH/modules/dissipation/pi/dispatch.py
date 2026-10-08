@@ -32,10 +32,13 @@ def computePi_term(
     viscosityParams: DiffusionParameters,
     useJ : wp.bool = False,                 # evaluate a one-sided formulation on particle j's values instead of i's
     thermalConductivity : wp.bool = False,  # the conductivity coefficients (`Cu_l`, `Cu_q`); no Monaghan switch
+    rhoRec_i: scalar_t = scalar_t(-1.0), rhoRec_j: scalar_t = scalar_t(-1.0), # density / pressure at the pair midpoint (`Riemann` term); negative: not reconstructed
+    PRec_i: scalar_t = scalar_t(-1.0), PRec_j: scalar_t = scalar_t(-1.0),
 ):
     pair = buildPair(
         x_i, x_j, h_i, h_j, rho_i, rho_j, explicitPressure, P_i, P_j, u_ij,
-        domainState, kernel_int, c_i, c_j, alpha_i, alpha_j, viscosityParams, useJ, thermalConductivity)
+        domainState, kernel_int, c_i, c_j, alpha_i, alpha_j, viscosityParams, useJ, thermalConductivity,
+        rhoRec_i, rhoRec_j, PRec_i, PRec_j)
 
     val = evaluateTerm(viscosityTerm, pair, viscosityParams)
 
@@ -63,6 +66,8 @@ def computePi_pair(
     viscosityParams: DiffusionParameters,
     useJ : wp.bool = False,
     thermalConductivity : wp.bool = False,
+    rhoRec_i: scalar_t = scalar_t(-1.0), rhoRec_j: scalar_t = scalar_t(-1.0),
+    PRec_i: scalar_t = scalar_t(-1.0), PRec_j: scalar_t = scalar_t(-1.0),
 ):
     """`computePi_term` for the formulation selected in `viscosityParams` (`viscosityTerm`, or `thermalConductivityTerm`)."""
     viscosityTerm = viscosityParams.viscosityTerm
@@ -71,7 +76,7 @@ def computePi_pair(
     return computePi_term(
         viscosityTerm, x_i, x_j, h_i, h_j, m_i, m_j, rho_i, rho_j,
         explicitPressure, P_i, P_j, u_ij, domainState, kernel_int, c_i, c_j, alpha_i, alpha_j,
-        viscosityParams, useJ, thermalConductivity)
+        viscosityParams, useJ, thermalConductivity, rhoRec_i, rhoRec_j, PRec_i, PRec_j)
 
 
 @wp.func
