@@ -33,7 +33,7 @@ def _pairPhiKernel(
     h: wp.array(dtype=scalar_t), grad: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)),  # type: ignore
     B: wp.array(dtype=scalar_t),
     domainState: domainData, policy: wp.int32, kernel_int: wp.int32,
-    eta_crit: scalar_t, eta_fold: scalar_t, balsaraPower: scalar_t,
+    eta_crit: scalar_t, eta_fold: scalar_t, balsaraPower: scalar_t, limiterType: wp.int32,
     out: wp.array(dtype=scalar_t),
 ):
     k = wp.tid()
@@ -43,7 +43,7 @@ def _pairPhiKernel(
     phi = scalar_t(1.0)
     if policy != wp.static(VelocityPairPolicy.Linear.value):
         phi = limitedPairPhi(x_ij, h[i], h[j], v[i], v[j], grad[i], grad[j], kernel_int, domainState.dim,
-                             True, True, eta_crit, eta_fold)
+                             True, True, eta_crit, eta_fold, limiterType)
         phi = wp.max(wp.min(phi, scalar_t(1.0)), scalar_t(0.0))
     if policy == wp.static(VelocityPairPolicy.BalsaraLimited.value):
         B_bar = scalar_t(0.5) * (B[i] + B[j])
@@ -69,7 +69,7 @@ def computePairPhiMean(system, simulationConfig, diffusionParams) -> torch.Tenso
         castTorchToWarpAsBuiltins(st.positions), castTorchToWarpAsBuiltins(st.velocities),
         castTorchToWarp(st.supports), castTorchToWarpAsBuiltins(grad.contiguous()), castTorchToWarp(B.contiguous()),
         buildDomainState(simulationConfig.domain), int(params.velocityPairPolicy), simulationConfig.kernel.value,
-        float(params.reconstructionEtaCrit), float(params.reconstructionEtaFold), float(params.reconstructionBalsaraPower),
+        float(params.reconstructionEtaCrit), float(params.reconstructionEtaFold), float(params.reconstructionBalsaraPower), int(params.limiterType),
         phi])
     phi = wp.to_torch(phi)
     notSelf = (adj.i != adj.j).to(phi.dtype)

@@ -18,6 +18,7 @@ from ....configurations.moduleConfigurations.diffusionParameters import Viscosit
 from ....configurations.moduleConfigurations.diffusionParameters import DiffusionParameters
 from .coefficients import switchedCoefficients
 from .pair import PairData, pick
+from ...riemann.solvers import riemannStarState
 
 __all__ = ['evaluateTerm']
 
@@ -176,6 +177,44 @@ def frontiere2017(pair: PairData, viscosityParams: DiffusionParameters):
     return val
 
 
+# the adiabatic index used when the caller gives no pressures (`explicitPressure` False): P = rho c^2 / gamma
+_GAMMA_NO_PRESSURE = 5.0 / 3.0
+
+
+@wp.func
+def riemannDissipation(pair: PairData, viscosityParams: DiffusionParameters):
+    """AV_PLAN Phase 7b: the dissipative part of the pair's Godunov pressure. Left state j, right state i along the
+    normal n = x_ij / r (pointing from j to i), with the (possibly reconstructed) pair velocity along n,
+    `w = u_ij . n`, as the velocity jump (`uL = 0`, `uR = w`; the solvers are Galilean invariant). The Godunov-SPH
+    momentum equation replaces `P_i/rho_i^2 + P_j/rho_j^2` by `p* (1/rho_i^2 + 1/rho_j^2)`; the part of that which exists
+    because of the velocity jump,
+
+        Pi_ij = (p*(w) - p*(0)) (1/rho_i^2 + 1/rho_j^2),
+
+    is the pairwise viscous term: symmetric in i <-> j (momentum conserved, the usual Pi heating applies), zero for a
+    pair at relative rest whatever the pressures (the conservative pressure gradient stays the symmetric SPH one) and
+    zero for equal pressures and densities, positive for an approaching pair and negative for a receding one
+    (`monaghanSwitch` removes the latter). For `Acoustic` with equal states it is `c |w| / rho`, Monaghan (1997)'s
+    linear viscosity with alpha = 1; the shock solvers add the quadratic term. The pair-mean switched alpha scales it
+    (1 without a switch). The adiabatic index is `rho c^2 / P` of the two particles (the ideal gas', exactly), or
+    5/3 without explicit pressures. Returned in `Pi`'s convention (`rho_j Pi / |w|`, see `_val`)."""
+    P_i = pair.P_i
+    P_j = pair.P_j
+    gamma = scalar_t(_GAMMA_NO_PRESSURE)
+    if pair.explicitPressure:
+        gamma = (pair.rho_i * pair.c_i * pair.c_i + pair.rho_j * pair.c_j * pair.c_j) / (P_i + P_j + scalar_t(1.0e-30))
+        gamma = wp.min(wp.max(gamma, scalar_t(1.0001)), scalar_t(3.0))
+    else:
+        P_i = pair.rho_i * pair.c_i * pair.c_i / gamma
+        P_j = pair.rho_j * pair.c_j * pair.c_j / gamma
+    w = pair.ux / (pair.r + scalar_t(1e-14) * pair.h_bar)
+    pStar, uStar = riemannStarState(viscosityParams.riemannSolver, pair.rho_j, scalar_t(0.0), P_j, pair.rho_i, w, P_i, gamma)
+    pRest, uRest = riemannStarState(viscosityParams.riemannSolver, pair.rho_j, scalar_t(0.0), P_j, pair.rho_i, scalar_t(0.0), P_i, gamma)
+    dp = pStar - pRest
+    inv = scalar_t(1.0) / (pair.rho_i * pair.rho_i) + scalar_t(1.0) / (pair.rho_j * pair.rho_j)
+    return pair.C_l * pair.rho_j * inv * dp / (wp.abs(w) + scalar_t(1.0e-12) * pair.c_bar + scalar_t(1.0e-20))
+
+
 @wp.func
 def evaluateTerm(viscosityTerm: wp.int32, pair: PairData, viscosityParams: DiffusionParameters):
     """`val` of the selected formulation (before the Monaghan switch); 0 for an unknown member."""
@@ -206,4 +245,6 @@ def evaluateTerm(viscosityTerm: wp.int32, pair: PairData, viscosityParams: Diffu
         val = defaultTerm(pair)
     elif viscosityTerm == wp.static(ViscosityTerms.Frontiere2017.value):
         val = frontiere2017(pair, viscosityParams)
+    elif viscosityTerm == wp.static(ViscosityTerms.RiemannDissipation.value):
+        val = riemannDissipation(pair, viscosityParams)
     return val

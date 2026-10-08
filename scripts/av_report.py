@@ -168,6 +168,14 @@ CONFIGS: Dict[str, AVConfig] = {c.name: c for c in (
       for n, sw, sp in (('None', 'NoneSwitch', {}), ('CD', 'CullenDehnen2010', {}),
                         ('Rosswog', 'Rosswog2020', dict(alpha_min=0.0, alpha_max=1.0)),
                         ('Wadsley', 'Wadsley2017', dict(alpha_min=0.0, alpha_max=2.0)))),
+    # AV_PLAN Phase 7b: Riemann dissipation (`ViscosityTerms.RiemannDissipation`, 13): no switch (alpha = 1, intrinsically
+    # limited), C_q unused. Solvers (RiemannSolver): Acoustic 0, TSRS 3, Adaptive 4, HLLC 5. Pair velocity raw / limited (2) /
+    # limited + Balsara p = 2 (3)
+    *(AVConfig(f'riemann{name}', switch='NoneSwitch', diffusion=dict(viscosityTerm=13, riemannSolver=solver, velocityPairPolicy=policy,
+                                                                    reconstructionBalsaraPower=2.0))
+      for name, solver, policy in (
+          ('Acoustic', 0, 0), ('TSRS', 3, 0), ('', 4, 0), ('HLLC', 5, 0),
+          ('Limited', 4, 2), ('LimitedB2', 4, 3), ('AcousticLimited', 0, 2))),
     # AV_PLAN Phase 4: Garcia-Senz & Cabezon (2026) Table 1 rows 1-6. Their operator Eq. (6) is the `Price2012_98`
     # term (v_sig = alpha c_bar - beta w, pair means) with beta = 2 fixed; their switch is Read & Hayfield's at
     # alpha in [0.05, 1]. Rows 5/6: Balsara-modulated reconstruction, p = 1 / 2.
@@ -215,6 +223,7 @@ GROUPS: Dict[str, List[str]] = {
     'cfl4': ['sphenixCfl4', 'cullenDehnen2010Cfl4'],
     'compSPH': ['compNone', 'compCD', 'compRosswog', 'compWadsley'],
     'bakeoff': [r[1] for r in BAKEOFF_ROWS],
+    'phase7b': ['riemann', 'riemannAcoustic', 'riemannTSRS', 'riemannHLLC', 'riemannLimited', 'riemannLimitedB2', 'riemannAcousticLimited'],
     'phase5a': ['cnCDFixed2', 'cnCDFixed0p2', 'cnCDCoupled2', 'cnRosswogFixed2', 'cnRosswogFixed0p2', 'cnRosswogCoupled2'],
 }
 

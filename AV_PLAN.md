@@ -54,6 +54,7 @@ Phase 2 (Rosswog 2020 entropy trigger) built and validated 2026-10-06 — passes
 | 5B | M6 Cheap modern switch characterised | ◐ swept 2026-10-08 at the paper's ell_V 0.05; default now ell_V 5 (decided); Gresho > C&D; speed-up 10-11 %, shortfall = the Balsara curl loop (16 % without it); left: R1 (from the bake-off) |
 | 6 | M7 Detector-complete | ✅ swept 2026-10-08: uniform-compression claim reproduced, Gresho passes, five-detector maps rendered; Sod / Sedov shocks off by the kept prefactor 0.5 (decided trade-off); shear / sound tests pass; open finding: fires in uniform-pressure shear (Phase 6 note) |
 | 7 | 🏁 **M8 SPH-AV-FOUNDATION** — hard gate | ◐ default selected (2026-10-08) and in the README; the bake-off run (`scripts/av_sweep_overnight.py --bakeoff`, ~6 h, smoke pre-flight clean) is the user's to start; then the report prose and the tag close the plan. PESPH continues in its own plan |
+| 7b | Riemann dissipation as an alternative AV (user, 2026-10-08) | ◐ 7b.1 solvers, 7b.2 `LimiterType`, 7b.3 first-stage Riemann Π term built, tested and validated, now on `dev` (uncommitted; bake-off smoke bit-identical, full suite green); left: addendum bake-off rows after the main run; stage 2 (MUSCL scalar states) re-scoped, user decides; see Phase 7b |
 | 8+ | → [`PESPH_PLAN.md`](PESPH_PLAN.md) | blocked on M8 |
 
 ### Still to do before M8 (2026-10-08)
@@ -1784,6 +1785,105 @@ not enter the production path without doing so.
 - [ ] tagged `vX.Y-av-foundation`
 
 **🏁 M8 — SPH foundation complete.**
+
+---
+
+## Phase 7b — Riemann dissipation as an alternative AV · **M8b** (opened 2026-10-08, user)
+
+**Why here.** Phases 3-6 left a reconstruction layer (gradient → limiter → left/right states) that is the first
+half of a Godunov pair flux. Phase 7b adds the second half, a Riemann solver, and uses it the cheapest possible way:
+as one more `ViscosityTerms` formulation, so it enters the bake-off table as rows and not as a new scheme. It is
+also the unit-tested solver MFM/MFV (PESPH_PLAN §7) would need, so it is built to return the star state *and* the
+face flux. Not a gate: M8 closes on the bake-off as it stands; 7b reports into the same table as an **addendum run**
+(`--bakeoff` machinery, same matrix, extra rows), per the "new AV ideas report into the same table" rule above.
+
+**Isolation (history).** The bake-off launches every case as a subprocess against this checkout's `src/`, so the work was first
+built on branch `av-7b` in a worktree; on the user's call (2026-10-08, the tree must be whole before the run) it was moved onto
+`dev` after the checks below. Defaults must stay **bit-identical** (smoke vs M0g) at every step.
+
+### 7b.1 — `modules/riemann` (new, like `modules/reconstruction`)
+- `solvers.py`: branch-free `wp.func`s for the ideal-gas 1D Riemann problem on the pair normal, `(rho, un, p)_L,R` plus
+  `gamma` → `(p*, u*)`, and an HLLC `(rho, u, p)` face flux. Solvers behind a `RiemannSolver` enum: `Acoustic`
+  (linearised, Godunov-SPH / Monaghan 1997), `PVRS` and `TRRS`/`TSRS` (Toro ch. 9 primitive-variable / two-rarefaction
+  / two-shock), `HLLC` (Toro ch. 10, Davis or Einfeldt wave speeds). No iterations in kernels; the exact iterative
+  solver stays the Python reference (`caseUtils/compressible/sod/sodSolution.py`).
+- Tests (`tests/test_riemann.py`): the five Toro tests against the exact solver (p*, u* within the approximate
+  solver's known error), symmetry `R(L,R) = -R(R,L)` (antisymmetric flux), vacuum / near-vacuum guards, float64 exact
+  consistency (`L = R` gives `p* = p`, `u* = u`). `scripts/gradcheck_riemann.py` in the 25-module gradcheck set (adjoints
+  must not divide before the guard, AV_PLAN §2.6).
+
+### 7b.2 — Limiter family in `modules/reconstruction/limiters.py`
+- `LimiterType` enum (Frontiere/`VanLeerSymmetric` = today's `4r/(1+r)^2`, the default, bit-identical; `Minmod`,
+  `VanLeer` (textbook `2r/(1+r)`), `VanAlbada`, `MC`, `Superbee`, `Ospre`). `r = min(ri, rj)` is always <= 1 (`rj = 1/ri`),
+  so each limiter is one function `psi(r)` on [0, 1], capped at 1 (phi multiplies a single midpoint extrapolation).
+- Plumbing: `limiterType` int field on `CRKViscosity` and `DiffusionParameters` (dict round trip, old keys read back as
+  the default; `enableVanLeerLimiter` / `forceVanLeer*` keep meaning "limiter on/off"); `limitedPairPhi` gets the type;
+  call sites: `crk/accel.py`, `crk/dudt.py`, `reconstruction/pairVelocity.py`, `reconstruction/diagnostics.py`.
+- Tests: each `psi` against its closed form, `psi(1) = 1`, `psi(0) = 0`, monotone, `psi <= 1`, `psi(r) / r` symmetry;
+  gradcheck at and next to the kinks (minmod / MC / superbee); default-type run bitwise equal to M0g smoke.
+
+### 7b.3 — Riemann dissipation term
+- First stage (no scalar gradients): new `ViscosityTerms.Riemann*` entry in `dissipation/pi`: states are the particle
+  values `(rho, P)` with the (optionally reconstructed, Phase 3) pair velocity along `x_ij`; `Pi_ij` is the effective
+  pairwise term `2 p*_ij`-equivalent so momentum and heating stay antisymmetric / conservative like the other Pi
+  formulations. No alpha switch (intrinsically limited); Balsara pair limiter is the shear control.
+- Second stage: limited gradients of rho and P (`reconstruction/gradient.py` has only the velocity Jacobian) and
+  MUSCL states at the pair midpoint with the 7b.2 limiter family (Godunov-SPH proper: Inutsuka 2002, Cha & Whitworth
+  2003); the limiter and `C_l`/`C_q` are tuned together here (the open note in Phase 3's limiter paragraph).
+- Validation: Sod 1D / 2D / 3D vs the exact solution (L1, Group A), Sedov, Noh, Gresho, KH (Group B-D), energy and
+  momentum conservation (Group E), cost per step (Group F), all against the same thresholds as the other rows.
+
+### 7b.4 — Bake-off addendum
+Rows: Riemann (first order) raw; Riemann + limited velocity; Riemann + Balsara `p=2`; second stage if it lands.
+Run with the existing `--bakeoff` job list plus the new rows, merged table in `results/av_foundation_7b/`.
+
+### Build notes (2026-10-08, branch `av-7b`, uncommitted)
+
+- **7b.1 done.** `modules/riemann/solvers.py`: `riemannStarState` (Acoustic, PVRS, TRRS, TSRS, Adaptive, HLLC) and `hllcFlux`;
+  `RiemannSolver` lives beside the other dissipation enums in `diffusionParameters.py`. `tests/test_riemann.py` (37, also in
+  float64) against a Newton exact solver on Toro's five problems; `scripts/gradcheck_riemann.py` 7/7. Findings that shaped the
+  tests: the weak-wave solvers are second order in the wave strength (Sod, a pressure ratio of 10: acoustic -37 %, PVRS +81 % on
+  p*; TRRS +1.2 %, TSRS +4 %, HLLC -8 %); on two equal colliding streams at |u| = a the acoustic family is 25 % low and TSRS 8.5 % low
+  (the quadratic term the acoustic family lacks); HLLC with Toro's PVRS wave speeds puts Sod's momentum flux 22 % off the exact
+  Godunov flux (mass 2 %, energy 3 %).
+- **7b.2 done.** `LimiterType` (VanLeerFrontiere = default, Minmod, VanLeer, VanAlbada, MC, Superbee, Ospre) in
+  `limiters.py::limiterPsi`; `limiterType` field on `DiffusionParameters` and `CRKViscosity` (dict round trip; old configs read
+  back the default); plumbed through `computeVanLeer`, `limitedPairPhi`, `reconstructPairVelocity` and the five call sites.
+  Default bit-identical: smoke `--compare` tol 0 on `phase3` and `crk` (20/20 pairs each), 68 CRK / reconstruction / dissipation
+  tests and the three gradcheck scripts green. Observation: Frontiere's limiter `4r/(1+r)^2` has slope 4 at the origin, above
+  the `psi <= 2r` bound of Sweby's TVD region that minmod / van Leer / MC / superbee respect; whether that matters for a pair
+  extrapolation (`r` is a ratio of the two particles' gradients, not of successive differences) is not established.
+  `r = min(r_i, r_j) <= 1` always, so only [0, 1] is ever evaluated.
+- **7b.3 first stage done.** `ViscosityTerms.RiemannDissipation` (13): `Pi_ij = (p*(w) - p*(0)) (1/rho_i^2 + 1/rho_j^2)` with
+  left state j, right state i, `w` the (reconstructed) pair velocity along `x_ij/r`; pair-symmetric (conservative, the usual
+  heating applies), zero at relative rest, positive for compression, scaled by the pair-mean switched alpha. Acoustic with
+  equal states is exactly Monaghan 1997a with alpha = 1 (`tests/test_piFormulations.py`); gamma is `rho c^2 / P` of the pair.
+  `gradcheck_dissipation.py` covers every solver (viscous force and heating). `av_report` configs `riemann*` (group `phase7b`).
+  **Sod 1D (nx default, full profile, video, `results/av7b_sod`):** L1(v_x) 0.00369 (gsAV 0.00369), P contact spike 0.069 (gsAV
+  0.076), A spike 0.029 (0.037), energy drift 4e-6; the four solvers differ by < 4 % on every Sod metric (the Sod shock is weak
+  enough that the quadratic term barely matters); raw vs limited velocity as for the other terms (limited: spike 0.063, but
+  R4 pressure error -2.4e-3). Caveat: `avEnergyLinear/Quadratic` books all of a Riemann term as linear (it splits by `C_l`/`C_q`).
+- **Moved onto `dev` 2026-10-08 (user: "the bake-off won't run on a half-working tree").** Applied in place (the `av-7b` worktree
+  and branch are gone), uncommitted. Checks on `dev`: the full test suite (no failures), and the bake-off's own smoke pre-flight
+  re-run (`--bakeoff --smoke`, all 18 jobs rc 0) is **bit-identical (tol 0) to the pre-7b pre-flight on every row, compSPH, kh256 and
+  the maps** (`results/av_bakeoff_smoke_after7b`). Note the pre-flight rewrites `results/av_foundation/report.md`; the real run does too.
+- **Validation (full profile, video, `docs/av/riemann_7b_2026-10-08/`):** Sod 2D, Noh, Gresho, Sedov for `riemann`, `riemannLimited`,
+  `riemannLimitedB2`. On par with the Phase 4 rows everywhere; best on Sod 2D L1 (0.0155 vs gsAV 0.0201), Gresho is fixed by the limited
+  velocity (0.210 -> 0.091) as for every term, Sedov shock radius slightly worse (-0.020 / -0.023 vs -0.015). A step-0 NaN on cold gas
+  (Noh, Sedov) was a 0/0 in the term, fixed. No fliers or velocity alarms in the frames.
+- **Stage 2 re-scoped (not built).** In this formulation Pi is `p*(w) - p*(0)`, so the reconstructed `rho`, `P` only enter through the
+  impedance and the quadratic term: reconstructing them is a second-order effect and the velocity reconstruction (already there) carries
+  the dissipation. The version that needs reconstructed pressures is Godunov-SPH proper (`p*` replaces the whole symmetric pressure sum,
+  Inutsuka 2002 / Cha & Whitworth 2003): a different scheme, not an AV row. Decision for the user: leave as is, or build it as its own
+  step.
+
+### Markers
+- [x] `modules/riemann` solvers + `tests/test_riemann.py` + gradcheck
+- [x] `LimiterType` enum plumbed (CRK and Monaghan paths), default bit-identical, tests + gradcheck
+- [x] first-stage Riemann Pi term registered, Sod 1D vs exact (L1 on par with the best Phase 4 row)
+- [~] scalar gradients + MUSCL states (second stage): re-scoped, see the 2026-10-08 note (low value for the Pi form; full Godunov-SPH is a separate scheme) -- user decides
+- [ ] addendum bake-off rows (`riemann*` configs exist; run after the main bake-off) + prose
+- [x] on `dev` (applied in place, uncommitted; worktree retired)
 
 ---
 

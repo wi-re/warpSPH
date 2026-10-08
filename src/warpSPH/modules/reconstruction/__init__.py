@@ -13,11 +13,11 @@ CRKSPH (`modules/crk`) reconstructs through these with its own CRK-corrected gra
 through `DiffusionParameters.velocityPairPolicy`."""
 
 from .pairVelocity import rawPairVelocity, linearPairVelocity, limitedPairPhi, reconstructPairVelocity
-from .limiters import limiterVL, computeVanLeer, crkLimiter
+from .limiters import limiterVL, limiterPsi, computeVanLeer, crkLimiter
 from .gradient import (computeVelocityJacobian, velocityTensorArguments, needsJacobian, needsBalsara,
                        balsaraFromJacobian, reconstructionInputs, requireRawPairVelocity)
 from .diagnostics import computePairPhiMean
 
 __all__ = ['rawPairVelocity', 'linearPairVelocity', 'limitedPairPhi', 'reconstructPairVelocity',
-           'limiterVL', 'computeVanLeer', 'crkLimiter', 'computeVelocityJacobian', 'velocityTensorArguments', 'needsJacobian', 'needsBalsara', 'balsaraFromJacobian',
+           'limiterVL', 'limiterPsi', 'computeVanLeer', 'crkLimiter', 'computeVelocityJacobian', 'velocityTensorArguments', 'needsJacobian', 'needsBalsara', 'balsaraFromJacobian',
            'reconstructionInputs', 'requireRawPairVelocity', 'computePairPhiMean']

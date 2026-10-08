@@ -106,7 +106,7 @@ def computeThermalDissipation_Func_i(
                 viscosityParams.velocityPairPolicy, vel_i, vel_j, J_i, referenceVelocityTensor[j], x_ij, hi, hj,
                 kernelProperties.kernelFunction, dim,
                 viscosityParams.reconstructionEtaCrit, viscosityParams.reconstructionEtaFold,
-                B_i, B_j, viscosityParams.reconstructionBalsaraPower)
+                B_i, B_j, viscosityParams.reconstructionBalsaraPower, viscosityParams.limiterType)
 
         pi = computePi_pair(
             xi, xj, 

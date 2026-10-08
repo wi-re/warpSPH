@@ -57,6 +57,7 @@ def limitedPairPhi(
     kernel_int: wp.int32, dim: wp.int32,
     vanLeer: wp.bool, closePairTaper: wp.bool,
     eta_crit: scalar_t, eta_fold: scalar_t,
+    limiterType: wp.int32 = 0,                  # a `LimiterType` value; 0 = VanLeerFrontiere
 ):
     """phi_ij in [0, 1]: the van Leer-like limiter of the two Jacobians' quadratic forms along x_ij (Eq. 13/17),
     times the close-pair Gaussian taper (Eq. 14). Without `vanLeer` phi is 0 (no reconstruction): that is
@@ -66,7 +67,7 @@ def limitedPairPhi(
     if closePairTaper:
         factor = crkLimiter(x_ij, h_i, h_j, kernel_int, dim, eta_crit, eta_fold)
     if vanLeer:
-        phi = computeVanLeer(x_ij, v_i, v_j, J_i, J_j) * factor
+        phi = computeVanLeer(x_ij, v_i, v_j, J_i, J_j, limiterType) * factor
     return phi
 
 
@@ -80,6 +81,7 @@ def reconstructPairVelocity(
     kernel_int: wp.int32, dim: wp.int32,
     eta_crit: scalar_t, eta_fold: scalar_t,
     B_i: scalar_t, B_j: scalar_t, balsaraPower: scalar_t,
+    limiterType: wp.int32 = 0,                  # a `LimiterType` value; 0 = VanLeerFrontiere
 ):
     """u_ij for a `VelocityPairPolicy`. Callers on the `Raw` path should not even read the Jacobians (they may be a
     one-element placeholder) -- branch on the policy and call `rawPairVelocity` instead. `B_i`, `B_j` (the Balsara
@@ -88,7 +90,7 @@ def reconstructPairVelocity(
         return rawPairVelocity(v_i, v_j)
     phi = scalar_t(1.0)
     if policy != wp.static(VelocityPairPolicy.Linear.value):
-        phi = limitedPairPhi(x_ij, h_i, h_j, v_i, v_j, J_i, J_j, kernel_int, dim, True, True, eta_crit, eta_fold)
+        phi = limitedPairPhi(x_ij, h_i, h_j, v_i, v_j, J_i, J_j, kernel_int, dim, True, True, eta_crit, eta_fold, limiterType)
         phi = wp.max(wp.min(phi, scalar_t(1.0)), scalar_t(0.0))
     if policy == wp.static(VelocityPairPolicy.BalsaraLimited.value):
         # Garcia-Senz & Cabezon (2026) Eqs. (18)-(19): reconstruct less where the flow is compressive

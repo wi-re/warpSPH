@@ -109,7 +109,7 @@ def computeCrkSPHdudt_Func_i(
             x_ij, hi, hj, vel_i, vel_j, gradV_i, gradV_j,
             kernelProperties.kernelFunction, dim,
             crkViscosityParams.enableVanLeerLimiter, crkViscosityParams.enableCRKLimiter,
-            crkViscosityParams.eta_crit, crkViscosityParams.eta_fold)
+            crkViscosityParams.eta_crit, crkViscosityParams.eta_fold, crkViscosityParams.limiterType)
         if crkViscosityParams.forceVanLeerOff:
             phi_ij = scalar_t(0.0)
         if crkViscosityParams.forceVanLeerOn:

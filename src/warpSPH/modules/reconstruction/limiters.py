@@ -19,8 +19,9 @@ from torch.profiler import profile, ProfilerActivity
 from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
+from ...configurations.moduleConfigurations.diffusionParameters import LimiterType
 
-__all__ = ['limiterVL', 'computeVanLeer', 'crkLimiter']
+__all__ = ['limiterVL', 'limiterPsi', 'computeVanLeer', 'crkLimiter']
 
 @wp.func
 def limiterVL(x: scalar_t):
@@ -31,6 +32,32 @@ def limiterVL(x: scalar_t):
     return x * vL*vL
 
     # return torch.where(x > scalar_t(0.0), x * vL**scalar_t(2.0), scalar_t(0.0))
+
+@wp.func
+def limiterPsi(limiterType: wp.int32, x: scalar_t):
+    """The limiter value phi(x) in [0, 1] for a `LimiterType`; `phi(x) = phi(1 / x)`, `phi = 0` for `x <= 0`, `phi(1) = 1`.
+    `VanLeerFrontiere` is `limiterVL` itself (the default path is bit-identical to before the family existed); the others
+    are the textbook TVD functions of `r = min(x, 1 / x)` capped at 1 (see `LimiterType`)."""
+    if limiterType == wp.static(LimiterType.VanLeerFrontiere.value):
+        return limiterVL(x)
+    if x <= scalar_t(0.0):
+        return scalar_t(0.0)
+    r = wp.min(x, scalar_t(1.0) / x)
+    psi = scalar_t(0.0)
+    if limiterType == wp.static(LimiterType.Minmod.value):
+        psi = r
+    elif limiterType == wp.static(LimiterType.VanLeer.value):
+        psi = scalar_t(2.0) * r / (scalar_t(1.0) + r)
+    elif limiterType == wp.static(LimiterType.VanAlbada.value):
+        psi = r * (scalar_t(1.0) + r) / (scalar_t(1.0) + r * r)
+    elif limiterType == wp.static(LimiterType.MC.value):
+        psi = wp.min(scalar_t(2.0) * r, scalar_t(0.5) * (scalar_t(1.0) + r))
+    elif limiterType == wp.static(LimiterType.Superbee.value):
+        psi = wp.min(scalar_t(2.0) * r, scalar_t(1.0))
+    else:
+        psi = scalar_t(1.5) * r * (scalar_t(1.0) + r) / (scalar_t(1.0) + r + r * r)   # Ospre
+    return wp.min(psi, scalar_t(1.0))
+
 
 @wp.func
 def sgn(x: scalar_t):
@@ -45,7 +72,8 @@ def computeVanLeer(
     vel_i : vector(length=Any, dtype=scalar_t),  # type: ignore
     vel_j : vector(length=Any, dtype=scalar_t),  # type: ignore
     DvDxi : matrix(shape=(Any, Any), dtype=scalar_t),  # type: ignore
-    DvDxj : matrix(shape=(Any, Any), dtype=scalar_t)   # type: ignore
+    DvDxj : matrix(shape=(Any, Any), dtype=scalar_t),  # type: ignore
+    limiterType : wp.int32 = 0                         # a `LimiterType` value; 0 = VanLeerFrontiere
 ):
     xij = scalar_t(0.5) * (xij_)
     # velocity difference variant
@@ -113,7 +141,7 @@ def computeVanLeer(
 
     rij = wp.min(ri, rj)
 
-    phi = limiterVL(rij)
+    phi = limiterPsi(limiterType, rij)
     return phi
 
 

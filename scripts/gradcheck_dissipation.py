@@ -38,7 +38,7 @@ from _gradcheck_common import DEVICE, DTYPE, KERNEL, build_adjacency, compute_de
 from warpSPHCore import OperationProperties
 from warpSPHCore.enumTypes import SupportScheme
 
-from warpSPH.configurations.moduleConfigurations.diffusionParameters import VelocityPairPolicy, buildDefaultDiffusionParamsCompressibleSPH
+from warpSPH.configurations.moduleConfigurations.diffusionParameters import RiemannSolver, VelocityPairPolicy, ViscosityTerms, buildDefaultDiffusionParamsCompressibleSPH
 from warpSPH.modules.dissipation.wp_conductivity import computeConductivityWarp
 from warpSPH.modules.dissipation.wp_diffusion import computeViscosityWarp
 from warpSPH.modules.dissipation.wp_dissipation import computeThermalDissipationWarp
@@ -62,12 +62,16 @@ def _build_case():
     return domain, positions, supports, masses, densities, adjacency, kinds, velocities, internalEnergies, pressures, soundspeeds, alphas
 
 
-def _run(label, warp_fn, needs_energies) -> bool:
+def _run(label, warp_fn, needs_energies, term=None, solver=None) -> bool:
     domain, positions, supports, masses, densities, adjacency, kinds, velocities, internalEnergies, pressures, soundspeeds, alphas = _build_case()
     diffusionParams = buildDefaultDiffusionParamsCompressibleSPH()
     # the raw pair velocity (the Monaghan default is the limited reconstruction since 2026-10-08; that path is
     # gradcheck_reconstruction.py's)
     diffusionParams.velocityPairPolicy = VelocityPairPolicy.Raw.value
+    if term is not None:
+        diffusionParams.viscosityTerm = term.value
+    if solver is not None:
+        diffusionParams.riemannSolver = solver.value
 
     def f(pos, sup, mass, dens, vel, u, press, cs, alpha):
         state = make_compressible_state(pos, sup, mass, dens, vel, u, pressures=press, soundspeeds=cs, alphas=alpha, kinds=kinds)
@@ -102,6 +106,12 @@ def main():
     ok &= _run("computeViscosityWarp", computeViscosityWarp, needs_energies=False)
     ok &= _run("computeConductivityWarp", computeConductivityWarp, needs_energies=True)
     ok &= _run("computeThermalDissipationWarp", computeThermalDissipationWarp, needs_energies=True)
+
+    # AV_PLAN Phase 7b: the Riemann dissipation term (viscous force and its heating), every solver
+    for solver in RiemannSolver:
+        tag = f" [Riemann/{solver.name}]"
+        ok &= _run("computeViscosityWarp" + tag, computeViscosityWarp, needs_energies=False, term=ViscosityTerms.RiemannDissipation, solver=solver)
+        ok &= _run("computeThermalDissipationWarp" + tag, computeThermalDissipationWarp, needs_energies=True, term=ViscosityTerms.RiemannDissipation, solver=solver)
 
     print()
     if ok:

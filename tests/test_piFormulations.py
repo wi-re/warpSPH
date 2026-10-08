@@ -32,7 +32,7 @@ from warpSPHCore.dataTypes.domain_t import domainData
 from warpSPHCore.util import castTorchToWarp, castTorchToWarpAsBuiltins
 
 from warpSPH.configurations.moduleConfigurations.diffusionParameters import (
-    BetaMode, DiffusionParameters, ViscosityTerms, buildDefaultDiffusionParamsCompressibleSPH)
+    BetaMode, DiffusionParameters, RiemannSolver, ViscosityTerms, buildDefaultDiffusionParamsCompressibleSPH)
 from warpSPH.modules.dissipation.pi import computeFrontiereQ, computePi_actual
 
 DIM = 2
@@ -65,7 +65,8 @@ class Pairs:
     """Random approaching pairs and the code's `pi` for a formulation (both `useJ` values)."""
 
     def __init__(self, term: ViscosityTerms, thermal: bool = False, n: int = 256, seed: int = 0,
-                 approaching: bool = True, cl: float = C_L, cq: float = C_Q, betaMode: BetaMode = BetaMode.Coupled):
+                 approaching: bool = True, cl: float = C_L, cq: float = C_Q, betaMode: BetaMode = BetaMode.Coupled,
+                 riemannSolver=None):
         wp.init()
         dtype = torch.float64 if scalar_t is wp.float64 else torch.float32
         dev = 'cuda' if wp.get_cuda_device_count() else 'cpu'
@@ -92,6 +93,8 @@ class Pairs:
         params.thermalConductivityTerm = term.value
         params.C_l, params.C_q, params.Cu_l, params.Cu_q = cl, cq, cl, cq
         params.betaMode = betaMode.value
+        if riemannSolver is not None:
+            params.riemannSolver = riemannSolver.value
         params.correctXi = False
         params.monaghanSwitch = True
         domain = DomainDescription(min=torch.full((DIM,), -10.0, dtype=dtype, device=dev),
@@ -136,6 +139,46 @@ class Pairs:
 
 def _close(a, b, rtol=2e-4):
     np.testing.assert_allclose(a, b, rtol=rtol, atol=1e-7)
+
+
+def _riemannExpected(p, solver):
+    """-Pi of the Riemann dissipation from the closed forms (AV_PLAN Phase 7b), NumPy, for the solvers with one:
+    Pi = alpha_bar C_l (p*(w) - p*(0)) (1/rho_i^2 + 1/rho_j^2) with left state j at rest, right state i at +w."""
+    a = p.a
+    gamma = np.clip((a['rhoi'] * a['ci'] ** 2 + a['rhoj'] * a['cj'] ** 2) / (a['pi'] + a['pj']), 1.0001, 3.0)
+    aI, aJ = np.sqrt(gamma * a['pi'] / a['rhoi']), np.sqrt(gamma * a['pj'] / a['rhoj'])
+    ZI, ZJ = a['rhoi'] * aI, a['rhoj'] * aJ
+    if solver == RiemannSolver.Acoustic:
+        dp = ZI * ZJ * np.abs(p.w) / (ZI + ZJ)
+    elif solver == RiemannSolver.PVRS:
+        dp = 0.25 * (a['rhoi'] + a['rhoj']) * (aI + aJ) * np.abs(p.w) / 2.0
+    return p.al * dp * (1 / a['rhoi'] ** 2 + 1 / a['rhoj'] ** 2)
+
+
+@pytest.mark.parametrize('solver', [RiemannSolver.Acoustic, RiemannSolver.PVRS])
+def test_riemannDissipation_linear_solvers_vs_closed_form(solver):
+    """Acoustic: dp* = Z_i Z_j |w| / (Z_i + Z_j) (impedances Z = rho a); PVRS: dp* = rho_bar a_bar |w| / 2. In both
+    -Pi = -dp* (1/rho_i^2 + 1/rho_j^2), times the pair-mean switched alpha."""
+    p = Pairs(ViscosityTerms.RiemannDissipation, riemannSolver=solver)
+    _close(p.codeI, -_riemannExpected(p, solver), rtol=5e-4)
+
+
+@pytest.mark.parametrize('solver', list(RiemannSolver))
+def test_riemannDissipation_positive_for_compression_negative_for_expansion(solver):
+    comp = Pairs(ViscosityTerms.RiemannDissipation, riemannSolver=solver)
+    assert (-comp.codeI > 0).all()                                   # Pi > 0 for approaching pairs
+    exp = Pairs(ViscosityTerms.RiemannDissipation, riemannSolver=solver, approaching=False)
+    # the Monaghan switch (on in `Pairs`) removes the receding branch
+    np.testing.assert_array_equal(exp.piI, 0.0)
+
+
+def test_riemannDissipation_shock_solvers_exceed_the_linear_one():
+    """TSRS / Adaptive carry the quadratic (shock) term, so for the same compressing pair they exceed the acoustic Pi."""
+    lin = Pairs(ViscosityTerms.RiemannDissipation, riemannSolver=RiemannSolver.Acoustic, seed=3)
+    for solver in (RiemannSolver.TSRS, RiemannSolver.Adaptive):
+        q = Pairs(ViscosityTerms.RiemannDissipation, riemannSolver=solver, seed=3)
+        assert (np.abs(q.codeI) > 0).all()
+        assert np.median(np.abs(q.codeI) / np.abs(lin.codeI)) > 0.9
 
 
 def test_monaghan1992_vs_price2012_eq98_and_monaghan2005_8_10():

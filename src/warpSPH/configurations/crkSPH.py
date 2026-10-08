@@ -38,6 +38,8 @@ class CRKViscosity:
 
     enableCRKLimiter: bool = field(default = True)
     enableVanLeerLimiter: bool = field(default = True)
+    # `LimiterType`: which slope limiter `enableVanLeerLimiter` switches on (VanLeerFrontiere = 0, the one CRKSPH has always used)
+    limiterType: wp.int32 = field(default = 0)
 
     forceVanLeerOff: bool = field(default = False)
     forceVanLeerOn: bool = field(default = False)
@@ -52,7 +54,7 @@ def resolveCRKLimiter(params, n_h):
     if params.eta_crit > 0 and params.eta_fold > 0:
         return params
     out = CRKViscosity()
-    for name in ('enableCRKLimiter', 'enableVanLeerLimiter', 'forceVanLeerOff', 'forceVanLeerOn', 'meanVolumeWeights'):
+    for name in ('enableCRKLimiter', 'enableVanLeerLimiter', 'limiterType', 'forceVanLeerOff', 'forceVanLeerOn', 'meanVolumeWeights'):
         setattr(out, name, getattr(params, name))
     out.eta_crit = float(params.eta_crit) if params.eta_crit > 0 else 1.0 / float(n_h)
     out.eta_fold = float(params.eta_fold) if params.eta_fold > 0 else 0.2 / float(n_h)
@@ -64,6 +66,7 @@ def buildDefaultCRKViscosityParams():
     crkViscosityParams.eta_crit = -1.0
     crkViscosityParams.enableCRKLimiter = True
     crkViscosityParams.enableVanLeerLimiter = True
+    crkViscosityParams.limiterType = LimiterType.VanLeerFrontiere.value
     crkViscosityParams.forceVanLeerOff = False
     crkViscosityParams.forceVanLeerOn = False
     crkViscosityParams.meanVolumeWeights = False
@@ -71,7 +74,7 @@ def buildDefaultCRKViscosityParams():
     return crkViscosityParams
 
 
-from .moduleConfigurations.diffusionParameters import DiffusionParameters, ViscosityTerms
+from .moduleConfigurations.diffusionParameters import DiffusionParameters, ViscosityTerms, LimiterType
 # from ..system import CompressibleSystem, CompressibleSystemUpdate
 # from ..config import SimulationConfig
 import torch
@@ -127,6 +130,7 @@ def crkSPHConfigToDict(config: CRKSPHConfig) -> Dict[str, Any]:
             'eta_crit': config.crkViscosityParams.eta_crit,
             'enableCRKLimiter': config.crkViscosityParams.enableCRKLimiter,
             'enableVanLeerLimiter': config.crkViscosityParams.enableVanLeerLimiter,
+            'limiterType': LimiterType(config.crkViscosityParams.limiterType).name,
             'forceVanLeerOff': config.crkViscosityParams.forceVanLeerOff,
             'forceVanLeerOn': config.crkViscosityParams.forceVanLeerOn,
             'meanVolumeWeights': config.crkViscosityParams.meanVolumeWeights
@@ -145,6 +149,8 @@ def dictToCRKSPHConfig(configDict: Dict[str, Any]) -> CRKSPHConfig:
     crkSPHConfig.crkViscosityParams.eta_crit = crkViscosityParamsDict['eta_crit']
     crkSPHConfig.crkViscosityParams.enableCRKLimiter = crkViscosityParamsDict['enableCRKLimiter']
     crkSPHConfig.crkViscosityParams.enableVanLeerLimiter = crkViscosityParamsDict['enableVanLeerLimiter']
+    limiter = crkViscosityParamsDict.get('limiterType', LimiterType.VanLeerFrontiere.name)   # absent before Phase 7b
+    crkSPHConfig.crkViscosityParams.limiterType = (LimiterType[limiter] if isinstance(limiter, str) else LimiterType(limiter)).value
     crkSPHConfig.crkViscosityParams.forceVanLeerOff = crkViscosityParamsDict['forceVanLeerOff']
     crkSPHConfig.crkViscosityParams.forceVanLeerOn = crkViscosityParamsDict['forceVanLeerOn']
     crkSPHConfig.crkViscosityParams.meanVolumeWeights = crkViscosityParamsDict.get('meanVolumeWeights', False)
