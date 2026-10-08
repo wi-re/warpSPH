@@ -64,6 +64,13 @@ def test_rotation_is_invisible():
     assert D.abs().max() < 1e-4 * K
 
 
+def test_pure_shear_is_invisible():
+    """v = (k y, 0): dv/dn = n V n = 0 for n along the pressure gradient (x), so D = 0. Holds only while n is set by a
+    real pressure gradient: in uniform pressure n = grad P / |grad P| is the direction of the noise (AV_PLAN Phase 6)."""
+    D, R, xi, _ = _detect(lambda x: torch.stack([K * x[:, 1], torch.zeros_like(x[:, 0])], 1))
+    assert D.abs().max() < 1e-3 * K
+
+
 def test_D_dimension_general():
     """Eq. (24) generalised: blind to V = -k I and equal to div v for a planar compression, in 2D and 3D (in 3D it
     is the paper's 3/2 [dv/dn + 1/3 max(-div, 0)])."""
@@ -83,17 +90,33 @@ def test_h_convention_prefactor():
     assert WADSLEY_PREFACTOR == pytest.approx(2 * 0.5 ** 2)
 
 
-def test_sod_runs_and_switch_engages():
-    from warpSPH.cases.sod import sodCase
-
-    def configure(ctx, _orig=sodCase.configureScheme):
+def _wadsleyCase(case):
+    """`case` with the `wadsley2017` av_report operator: Wadsley2008 pair term, beta = 2 fixed, alpha in [0, 2]."""
+    def configure(ctx, _orig=case.configureScheme):
         _orig(ctx)
         dp = ctx.schemeConfig.diffusionParams
         dp.viscosityTerm, dp.C_q, dp.betaMode = 10, 2.0, 1
         sw = ctx.schemeConfig.viscositySwitchParams
         sw.alpha_min, sw.alpha_max = 0.0, 2.0
+    return dataclasses.replace(case, configureScheme=configure)
 
-    res = run(dataclasses.replace(sodCase, configureScheme=configure), scheme='Monaghan', nx=200, nSteps=150,
+
+def test_sound_wave_keeps_alpha_at_floor():
+    """A linear sound wave compresses (D = dv_x/dx != 0), but alpha_loc ~ A (k h)^2 is tiny: alpha stays near 0
+    (the av_report linearWave run reads alphaMean 1.7e-5)."""
+    from warpSPH.cases.linearWave import linearWaveCase
+    res = run(_wadsleyCase(linearWaveCase), scheme='Monaghan', nx=100, nSteps=300, progress=False, quiet=True,
+              params=dict(viscositySwitch='Wadsley2017', A=1e-4))
+    assert not res.diverged
+    alpha = res.state.state.alphas
+    assert torch.isfinite(alpha).all()
+    assert alpha.max() < 1e-3, f'alpha rose in a linear wave (max {alpha.max().item():.3g})'
+
+
+def test_sod_runs_and_switch_engages():
+    from warpSPH.cases.sod import sodCase
+
+    res = run(_wadsleyCase(sodCase), scheme='Monaghan', nx=200, nSteps=150,
               progress=False, quiet=True,
               params=dict(viscositySwitch='Wadsley2017', right_rho=0.125, right_pressure=0.1))
     assert not res.diverged

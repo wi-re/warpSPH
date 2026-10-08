@@ -184,11 +184,16 @@ def _drawMaps(mapDir: Path, frame: str) -> None:
     files = [(n, mapDir / f'{frame}_{n}.npz') for n in MAP_CONFIGS if (mapDir / f'{frame}_{n}.npz').exists()]
     if not files:
         return
-    fig, axes = plt.subplots(2, len(files), figsize=(3.2 * len(files), 6.4), squeeze=False)
+    # rows: alpha, div v, and (AV_PLAN Phase 4) the reconstruction limiter phi -- the per-particle mean of the pair
+    # phi_ab, 0 = raw velocities (full AV), 1 = fully reconstructed -- for the configs that reconstruct
+    rows = [('alpha', 'magma', 2.0), ('divergence', 'RdBu_r', None)]
+    if any(np.load(path, allow_pickle=True)['phi'].dtype != object for _, path in files):
+        rows.append(('phi', 'viridis', 1.0))
+    fig, axes = plt.subplots(len(rows), len(files), figsize=(3.2 * len(files), 3.2 * len(rows)), squeeze=False)
     for k, (name, path) in enumerate(files):
         d = np.load(path, allow_pickle=True)
         x = d['positions']
-        for row, (key, cmap, vmax) in enumerate((('alpha', 'magma', 2.0), ('divergence', 'RdBu_r', None))):
+        for row, (key, cmap, vmax) in enumerate(rows):
             v = d[key]
             ax = axes[row, k]
             if v.ndim == 0 or v.dtype == object:

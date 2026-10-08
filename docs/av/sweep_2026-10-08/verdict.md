@@ -1,6 +1,6 @@
 # AV_PLAN sweep verdict -- av_sweep_2026-10-07_17-30
 
-41 pass, 21 fail, 0 missing, 29 info. A FAIL is a finding to read against the phase text, not automatically a bug.
+41 pass, 21 fail, 0 missing, 25 info. A FAIL is a finding to read against the phase text, not automatically a bug.
 
 ## Jobs
 
@@ -32,25 +32,21 @@
 | check | status | detail |
 |---|---|---|
 | crkNone/sod energy drift <= 1e-4 | PASS | 3.829e-06 |
-| crkNone/sod Group A vs stored reference (plan: 1e-6) | INFO | max rel 0.0003635 (float32 round-off from code motion: see Phase 3 notes) |
+| crkNone/sod Group A vs stored reference (plan: 1e-6) | INFO | max rel 0.0002019 (float32 round-off from code motion; CRK Gresho / KH amplify it, see Phase 3 notes) |
 | crkNone/sedov energy drift <= 1e-4 | PASS | 5.96e-08 |
-| crkNone/sedov Group A vs stored reference (plan: 1e-6) | INFO | max rel 3.767e-06 (float32 round-off from code motion: see Phase 3 notes) |
+| crkNone/sedov Group A vs stored reference (plan: 1e-6) | INFO | max rel 3.767e-06 (float32 round-off from code motion; CRK Gresho / KH amplify it, see Phase 3 notes) |
 | crkNone/sod2d energy drift <= 1e-4 | PASS | 8.058e-06 |
-| crkNone/sod2d Group A vs stored reference (plan: 1e-6) | INFO | max rel 0.0007093 (float32 round-off from code motion: see Phase 3 notes) |
+| crkNone/sod2d Group A vs stored reference (plan: 1e-6) | INFO | max rel 0.0007093 (float32 round-off from code motion; CRK Gresho / KH amplify it, see Phase 3 notes) |
 | crkNone/sod3d energy drift <= 1e-4 | PASS | 2.505e-05 |
-| crkNone/sod3d Group A vs stored reference (plan: 1e-6) | INFO | max rel 2.208e-07 (float32 round-off from code motion: see Phase 3 notes) |
+| crkNone/sod3d Group A vs stored reference (plan: 1e-6) | INFO | max rel 2.208e-07 (float32 round-off from code motion; CRK Gresho / KH amplify it, see Phase 3 notes) |
 | crkNone/noh energy drift <= 1e-4 | PASS | 2.623e-06 |
-| crkNone/noh Group A vs stored reference (plan: 1e-6) | INFO | max rel 0.0008877 (float32 round-off from code motion: see Phase 3 notes) |
+| crkNone/noh Group A vs stored reference (plan: 1e-6) | INFO | max rel 0.0008877 (float32 round-off from code motion; CRK Gresho / KH amplify it, see Phase 3 notes) |
 | crkCullenDehnen2010/sod energy drift <= 1e-4 | PASS | 3.829e-06 |
-| crkCullenDehnen2010/sod Group A vs stored reference (plan: 1e-6) | INFO | max rel 0.6384 (float32 round-off from code motion: see Phase 3 notes) |
+| crkCullenDehnen2010/sod Group A vs stored reference (plan: 1e-6) | INFO | max rel 0.0001959 (float32 round-off from code motion; CRK Gresho / KH amplify it, see Phase 3 notes) |
 | crkCullenDehnen2010/sedov energy drift <= 1e-4 | PASS | 5.96e-08 |
-| crkCullenDehnen2010/sedov Group A vs stored reference (plan: 1e-6) | INFO | max rel 0.3255 (float32 round-off from code motion: see Phase 3 notes) |
 | crkCullenDehnen2010/sod2d energy drift <= 1e-4 | PASS | 8.058e-06 |
-| crkCullenDehnen2010/sod2d Group A vs stored reference (plan: 1e-6) | INFO | max rel 112.7 (float32 round-off from code motion: see Phase 3 notes) |
 | crkCullenDehnen2010/sod3d energy drift <= 1e-4 | PASS | 2.48e-05 |
-| crkCullenDehnen2010/sod3d Group A vs stored reference (plan: 1e-6) | INFO | max rel 0.03258 (float32 round-off from code motion: see Phase 3 notes) |
 | crkCullenDehnen2010/noh energy drift <= 1e-4 | PASS | 5.364e-07 |
-| crkCullenDehnen2010/noh Group A vs stored reference (plan: 1e-6) | INFO | max rel 0.2317 (float32 round-off from code motion: see Phase 3 notes) |
 | Monaghan + noneLinear runs sod clean | PASS | ok |
 | Monaghan + noneLinear runs gresho clean | PASS | ok |
 | Monaghan + noneLinear runs sedov clean | PASS | ok |
@@ -404,5 +400,5 @@
 
 ## Detector maps (AV_PLAN §6.5)
 
-![sedov2d_detectors](sedov2d_detectors.png)
-![sod2d_detectors](sod2d_detectors.png)
+![sedov2d_detectors](maps/sedov2d_detectors.png)
+![sod2d_detectors](maps/sod2d_detectors.png)

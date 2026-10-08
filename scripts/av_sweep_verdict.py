@@ -19,8 +19,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 REPO = Path(__file__).resolve().parents[1]
-REFERENCES = ['results/av_M0g_baseline', 'results/av_M0g_baselineQ', 'results/av_M0g_phase2', 'results/av_M0g_crk_all',
-              'results/av_crk3_crkNone', 'results/av_crk3_crkCullenDehnen2010']
+REFERENCES = ['results/av_crk3_crkNone', 'results/av_crk3_crkCullenDehnen2010', 'results/av_M0g_baseline',
+              'results/av_M0g_baselineQ', 'results/av_M0g_phase2', 'results/av_M0g_crk_all']
+#: (reference dir, config) pairs that predate a physics change and must not serve as a reference: M0g's CRK + C&D
+#: ran before the 2026-10-07 CRK switch fix (the switch was a no-op, alpha ~ 1 everywhere).
+STALE_REFERENCES = {('results/av_M0g_crk_all', 'crkCullenDehnen2010')}
 GROUP_A = {
     'sod': ['L1_vx', 'contactSpikeP', 'R3_rho_err', 'R4_rho_err', 'R4_P_err'],
     'sod2d': ['L1_vx', 'R3_rho_err', 'R4_rho_err', 'R4_P_err'],
@@ -45,7 +48,8 @@ class Records:
             p = REPO / d / 'results.json'
             if p.exists():
                 for r in json.loads(p.read_text())['records']:
-                    self.ref.setdefault((r['config'], r['case']), r['metrics'])
+                    if (d, r['config']) not in STALE_REFERENCES:
+                        self.ref.setdefault((r['config'], r['case']), r['metrics'])
 
     def get(self, config: str, case: str, metric: str, allowRef: bool = True) -> Optional[float]:
         m = self.sweep.get((config, case))
@@ -117,7 +121,7 @@ def phase3(R: Records) -> List[Check]:
                         if isinstance(new.get(k), (int, float)) and isinstance(ref.get(k), (int, float))]
                 worst = max(rels) if rels else None
                 out.append((P, f'{cfg}/{case} Group A vs stored reference (plan: 1e-6)', 'INFO',
-                            f'max rel {_fmt(worst)} (float32 round-off from code motion: see Phase 3 notes)'))
+                            f'max rel {_fmt(worst)} (float32 round-off from code motion; CRK Gresho / KH amplify it, see Phase 3 notes)'))
     for cfg in ('noneLinear', 'noneLimited'):
         for case in ('sod', 'gresho', 'sedov', 'noh', 'kelvinHelmholtz'):
             d = R.diverged(cfg, case)
