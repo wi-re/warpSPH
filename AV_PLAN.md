@@ -53,7 +53,7 @@ Phase 2 (Rosswog 2020 entropy trigger) built and validated 2026-10-06 — passes
 | 5A | M5 Quadratic dissipation understood | ◐ built 2026-10-07 (shear box, Chen & Nixon ratio, `cn*` matrix); validation = sweep; `C_q = 0` decision after it |
 | 5B | M6 Cheap modern switch characterised | ◐ built 2026-10-07 (`Sphenix2022`, `sphenix` config); validation + timing = sweep |
 | 6 | M7 Detector-complete | ◐ built 2026-10-07 (`Wadsley2017`, h re-derived: prefactor 0.5); validation + maps = sweep |
-| 7 | 🏁 **M8 SPH-AV-FOUNDATION** — hard gate | ☐ the sweep's verdict.md carries the Part 0 table; selection is the user's |
+| 7 | 🏁 **M8 SPH-AV-FOUNDATION** — hard gate | ◐ default selected (2026-10-08) and in the README; the bake-off run (`scripts/av_sweep_overnight.py --bakeoff`, ~6 h, smoke pre-flight clean) is the user's to start; then the report prose and the tag close the plan. PESPH continues in its own plan |
 | 8+ | → [`PESPH_PLAN.md`](PESPH_PLAN.md) | blocked on M8 |
 
 ### Working order from Phase 3 on: build first, sweep once (user, 2026-10-07)

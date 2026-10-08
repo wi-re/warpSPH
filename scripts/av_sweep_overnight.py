@@ -69,8 +69,30 @@ JOBS: List[Dict[str, Any]] = [
     dict(name='phase2New', config='rosswog2020', cases=['shearBox', 'shearingNoh'], minutes=5),
 ]
 
+#: AV_PLAN Phase 7 bake-off (`--bakeoff`): every matrix row (av_report BAKEOFF_ROWS) on the ten cases plus the
+#: shear box and the cylindrical Noh, one job per row; the CompSPH cross-check of the shortlist; KH at nx 256 for
+#: the rows that changed after the 2026-10-07 sweep (the default, Sphenix ell_V 5).
+BAKEOFF_CASES = ALL10 + ['shearBox', 'noh2d']
+
+
+def _bakeoffJobs():
+    sys.path.insert(0, str(REPO / 'scripts'))
+    import av_report as A
+    jobs = [dict(name=f'row{row:02d}_{cfg}', config=cfg, cases=BAKEOFF_CASES,
+                 minutes=22 if 'Limited' in cfg or 'SLR' in cfg else 15)
+            for row, cfg, *_ in A.BAKEOFF_ROWS]
+    jobs.append(dict(name='compSPH', config='compSPH',
+                     cases=['sod', 'sod2d', 'sedov', 'noh', 'gresho', 'kelvinHelmholtz', 'noh2d'], minutes=40))
+    jobs += [dict(name=f'kh256_{c}', config=c, cases=['kelvinHelmholtz'],
+                  extra=['--runParam', 'nx=256', 'tLimit=3.0', '--caseParam', 'smoothDensity=1'],
+                  smokeExtra=['--caseParam', 'smoothDensity=1'], minutes=25)
+             for c in ('rosswogLimitedCoupled', 'sphenix')]
+    return jobs
+
+
 #: The detector maps (AV_PLAN §6.5): every detector, same IC, same end time.
-MAP_CONFIGS = ['cullenDehnen2010', 'readHayfield2012', 'rosswog2020', 'sphenix', 'wadsley2017', 'gsAVSLRB2']
+MAP_CONFIGS = ['cullenDehnen2010', 'readHayfield2012', 'rosswog2020', 'sphenix', 'wadsley2017', 'gsAVSLRB2',
+               'rosswogLimitedCoupled']
 
 
 def _log(msg: str) -> None:
@@ -197,7 +219,7 @@ def runTiming(out: Path, smoke: bool) -> Dict[str, Any]:
 
     nx, nWarm, nTimed = (32, 5, 20) if smoke else (128, 30, 300)
     rows = {}
-    for name in ('none', 'cullenDehnen2010', 'sphenix', 'wadsley2017', 'rosswog2020', 'gsAVSLRB2'):
+    for name in ('none', 'cullenDehnen2010', 'sphenix', 'wadsley2017', 'rosswog2020', 'gsAVSLRB2', 'rosswogLimitedCoupled'):
         cfg = A.CONFIGS[name]
 
         def configure(ctx, _orig=greshoVortexCase.configureScheme, _cfg=cfg):
@@ -228,26 +250,29 @@ def main() -> int:
     ap.add_argument('--dry', action='store_true')
     ap.add_argument('--only', nargs='*', default=None, help='job names (plus maps, timing)')
     ap.add_argument('--timeoutFactor', type=float, default=3.0, help='a job is killed after factor x its estimate')
+    ap.add_argument('--bakeoff', action='store_true', help='the AV_PLAN Phase 7 bake-off instead of the Phases 3-6 sweep')
     args = ap.parse_args()
 
-    names = [j['name'] for j in JOBS] + ['maps', 'timing']
+    jobs = _bakeoffJobs() if args.bakeoff else JOBS
+    names = [j['name'] for j in jobs] + ['maps', 'timing']
     selected = args.only or names
-    total = sum(j['minutes'] for j in JOBS if j['name'] in selected) + (20 if 'maps' in selected else 0) \
+    total = sum(j['minutes'] for j in jobs if j['name'] in selected) + (20 if 'maps' in selected else 0) \
         + (10 if 'timing' in selected else 0)
     if args.dry:
-        for j in JOBS:
+        for j in jobs:
             if j['name'] in selected:
                 print(f'{j["name"]:22s} {j["config"]:22s} {len(j["cases"]):2d} cases  ~{j["minutes"]:3d} min')
         print(f'total ~{total / 60:.1f} h (full profile)')
         return 0
 
     stamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M')
-    out = Path(args.out) if args.out else REPO / 'results' / f'av_sweep_{"smoke_" if args.smoke else ""}{stamp}'
+    kind = 'av_bakeoff' if args.bakeoff else 'av_sweep'
+    out = Path(args.out) if args.out else REPO / 'results' / f'{kind}_{"smoke_" if args.smoke else ""}{stamp}'
     out.mkdir(parents=True, exist_ok=True)
     _log(f'{len(selected)} jobs, ~{total / 60:.1f} h at the full profile -> {out}')
     status = dict(started=stamp, smoke=args.smoke, jobs=[])
     statusFile = out / 'status.json'
-    for job in JOBS:
+    for job in jobs:
         if job['name'] not in selected:
             continue
         status['jobs'].append(runJob(job, out, args.smoke, job['minutes'] * args.timeoutFactor
@@ -263,8 +288,12 @@ def main() -> int:
             statusFile.write_text(json.dumps(status, indent=2))
     status['finished'] = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M')
     statusFile.write_text(json.dumps(status, indent=2))
-    rc = subprocess.call([PY, str(REPO / 'scripts' / 'av_sweep_verdict.py'), str(out)], cwd=REPO)
-    _log(f'done; verdict rc={rc}: {out / "verdict.md"}')
+    if args.bakeoff:
+        rc = subprocess.call([PY, str(REPO / 'scripts' / 'av_bakeoff_report.py'), str(out)], cwd=REPO)
+        _log(f'done; bake-off report rc={rc}: {out / "report.md"}')
+    else:
+        rc = subprocess.call([PY, str(REPO / 'scripts' / 'av_sweep_verdict.py'), str(out)], cwd=REPO)
+        _log(f'done; verdict rc={rc}: {out / "verdict.md"}')
     print('AV_SWEEP_DONE', flush=True)
     return 0
 

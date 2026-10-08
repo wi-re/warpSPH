@@ -155,6 +155,19 @@ CONFIGS: Dict[str, AVConfig] = {c.name: c for c in (
              diffusion=dict(viscosityTerm=8, C_l=1.0, C_q=3.0, betaMode=0, balsaraPairLimiter=True,
                             correctReconstructionGradient=False), simulation=dict(cflFactor=1.2)),
     AVConfig('cullenDehnen2010Cfl4', switch='CullenDehnen2010', simulation=dict(cflFactor=1.2)),
+    # AV_PLAN Phase 7 bake-off rows not covered above: the baseline detectors at beta = 2 fixed, Sphenix with a fixed
+    # beta (row 6; row 13 is its paper form, coupled), and the CompSPH cross-check of the shortlist (switch only: the
+    # reconstruction exists on the Monaghan host alone)
+    AVConfig('boCD', switch='CullenDehnen2010', diffusion=dict(C_q=2.0, betaMode=1)),
+    AVConfig('boCH', switch='CullenHopkins', diffusion=dict(C_q=2.0, betaMode=1)),
+    AVConfig('boRH', switch='ReadHayfield2012', switchParams=_RH, diffusion=dict(C_q=2.0, betaMode=1)),
+    AVConfig('sphenixFixed3', switch='Sphenix2022', switchParams=dict(alpha_min=0.0, alpha_max=2.0),
+             diffusion=dict(viscosityTerm=8, C_l=1.0, C_q=3.0, betaMode=1, balsaraPairLimiter=True,
+                            correctReconstructionGradient=False)),
+    *(AVConfig(f'comp{n}', scheme='CompSPH', switch=sw, switchParams=sp)
+      for n, sw, sp in (('None', 'NoneSwitch', {}), ('CD', 'CullenDehnen2010', {}),
+                        ('Rosswog', 'Rosswog2020', dict(alpha_min=0.0, alpha_max=1.0)),
+                        ('Wadsley', 'Wadsley2017', dict(alpha_min=0.0, alpha_max=2.0)))),
     # AV_PLAN Phase 4: Garcia-Senz & Cabezon (2026) Table 1 rows 1-6. Their operator Eq. (6) is the `Price2012_98`
     # term (v_sig = alpha c_bar - beta w, pair means) with beta = 2 fixed; their switch is Read & Hayfield's at
     # alpha in [0.05, 1]. Rows 5/6: Balsara-modulated reconstruction, p = 1 / 2.
@@ -169,6 +182,24 @@ CONFIGS: Dict[str, AVConfig] = {c.name: c for c in (
           ('AVSLRB2', 'NoneSwitch', 3, 2.0))),
 )}
 
+#: AV_PLAN Phase 7 bake-off matrix: (row, config, detector, pair velocity, beta). Row 12 is the Monaghan default
+#: since 2026-10-08 (`default` is bit-identical to it).
+BAKEOFF_ROWS = [
+    (1, 'gsAV', 'none (alpha = 1)', 'raw', 'fixed 2'),
+    (2, 'boCD', 'Cullen-Dehnen 2010', 'raw', 'fixed 2'),
+    (3, 'boCH', 'Cullen-Hopkins', 'raw', 'fixed 2'),
+    (4, 'boRH', 'Read-Hayfield 2012', 'raw', 'fixed 2'),
+    (5, 'cnRosswogFixed2', 'Rosswog 2020', 'raw', 'fixed 2'),
+    (6, 'sphenixFixed3', 'Sphenix 2022', 'raw (Balsara pair limiter)', 'fixed 3'),
+    (7, 'wadsley2017', 'Wadsley 2017', 'raw', 'fixed 2'),
+    (8, 'gsAVSLR', 'none (alpha = 1)', 'limited', 'fixed 2'),
+    (9, 'gsAVSLRB2', 'none (alpha = 1)', 'limited + Balsara p = 2', 'fixed 2'),
+    (10, 'rosswogLimited', 'Rosswog 2020', 'limited', 'fixed 2'),
+    (11, 'wadsleyLimited', 'Wadsley 2017', 'limited', 'fixed 2'),
+    (12, 'rosswogLimitedCoupled', 'Rosswog 2020 (the default)', 'limited', '2 alpha'),
+    (13, 'sphenix', 'Sphenix 2022', 'raw (Balsara pair limiter)', 'coupled (paper)'),
+]
+
 #: Named groups, so `--config baseline` runs the three M0 columns.
 GROUPS: Dict[str, List[str]] = {
     'baseline': ['none', 'cullenDehnen2010', 'readHayfield2012'],
@@ -182,6 +213,8 @@ GROUPS: Dict[str, List[str]] = {
     'phase6': ['wadsley2017', 'cullenDehnen2010'],
     'phase7cross': ['rosswogLimited', 'wadsleyLimited', 'rosswogLimitedCoupled'],
     'cfl4': ['sphenixCfl4', 'cullenDehnen2010Cfl4'],
+    'compSPH': ['compNone', 'compCD', 'compRosswog', 'compWadsley'],
+    'bakeoff': [r[1] for r in BAKEOFF_ROWS],
     'phase5a': ['cnCDFixed2', 'cnCDFixed0p2', 'cnCDCoupled2', 'cnRosswogFixed2', 'cnRosswogFixed0p2', 'cnRosswogCoupled2'],
 }
 
