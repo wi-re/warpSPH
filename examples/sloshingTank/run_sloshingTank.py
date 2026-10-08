@@ -6,6 +6,7 @@ Sensor-1 pressure history against the measured record.
     python examples/sloshingTank/run_sloshingTank.py --scheme dfsph --tLimit 7
 
 `--scheme wcsph`  -> weakly compressible `deltaSPH`.
+`--scheme acsph`  -> artificial-compressibility SPH (`artificialCompressible`).
 `--scheme dfsph`  -> incompressible `divergenceFree`, with the integrator /
                      kernel / CFL preset that scheme needs.
 
@@ -32,6 +33,9 @@ OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'output')
 #: Extra spec fields each scheme needs. `wcsph` keeps the case defaults.
 SCHEME_PRESETS = {
     'wcsph': dict(scheme='deltaSPH'),
+    # De Courcy et al. 2024; the case's `configureScheme` supplies the PST,
+    # viscosity and forwardEuler integrator (ACSPH_PLAN.md).
+    'acsph': dict(scheme='artificialCompressible', integrationScheme='forwardEuler'),
     'dfsph': dict(
         scheme='divergenceFree',
         integrationScheme='semiImplicitEuler',
@@ -156,6 +160,9 @@ def buildSpec(case, args):
         plot=args.plot or args.video, store=args.store,
         video=args.video, show=False,
         progress=True,
+        # frozen-run watchdogs (CLAUDE.md): the alarm draws every step while
+        # active, and a run that stops advancing sim time ends itself
+        velocityAlarmPlotInterval=1, stallProgress=1e-3,
     )
     if args.video and args.plotInterval is None:
         overrides['plotInterval'] = 50

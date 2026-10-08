@@ -56,7 +56,7 @@ from ..configurations.moduleConfigurations.gravity import GravityType
 from ..configurations.moduleConfigurations.shifting import ShiftingProjectionScheme, ShiftingScheme
 from ..configurations.region import BCType
 from ..enumTypes import (WeaklyCompressibleSPHScheme,
-                         isIncompressibleScheme)
+                         isArtificialCompressibleScheme, isIncompressibleScheme)
 from ..runner import Case, RunContext, caseMain, registerCase
 from ..utils import buildDomainDescription
 from ..regions import sampleDomainSDF
@@ -166,6 +166,8 @@ def configureScheme(ctx: RunContext) -> None:
             sc.shiftProperties.active = ctx.param('shifting', False)
         if hasattr(sc, 'xsphFilterScale'):
             sc.xsphFilterScale = ctx.param('xsphScale', 0.0)
+    elif isArtificialCompressibleScheme(ctx.scheme):
+        _configureArtificialCompressible(ctx)
     else:                                # deltaSPH -- weakly compressible
         sc.diffusionParams.inviscid = ctx.param('inviscid')
         sc.diffusionParams.inviscidAlpha = ctx.param(
@@ -217,6 +219,38 @@ def configureScheme(ctx: RunContext) -> None:
     ctx.scratch['rollHistory'] = loadRollHistory(_rollFilePath(ctx))
 
 
+def _configureArtificialCompressible(ctx: RunContext) -> None:
+    """ACSPH (De Courcy et al. 2024) on this tank: the dam-break settings
+    (`dambreak._configureArtificialCompressibleExtra`) with this case's own
+    length scales -- Michel PST, `eps_v = -5` (float32), `alpha_nu = 0.01` with
+    `c0 = 50 sqrt(g h)` fixing nu, `U_char = sqrt(g h)` and the single-evaluation
+    integrator the step requires. `h` is the still-water depth."""
+    sc = ctx.schemeConfig
+    sc.shiftProperties.active = bool(ctx.param('shifting', True))
+    sc.shiftProperties.scheme = ShiftingScheme.michel2022
+    sc.shiftProperties.projectionScheme = ShiftingProjectionScheme.michel2022
+    sc.acParams.epsilonV = float(ctx.param('epsilonV', -5.0))
+    sc.acParams.cavitationProjection = ctx.param('acCavitationProjection', 'off')
+    sc.acParams.isolatedZeroPressure = bool(ctx.param('acIsolatedZeroPressure', False))
+    depth = ctx.param('fillDepth')
+    g = ctx.param('gravityMagnitude')
+    sc.acParams.alphaNu = float(ctx.param('acAlphaNu', 0.01))
+    sc.acParams.referenceSoundSpeedForViscosity = float(50.0 * (g * depth) ** 0.5)
+    if sc.acParams.uChar is None:
+        sc.acParams.uChar = float((g * depth) ** 0.5)
+
+    from warpSPHIntegrators import getIntegrator
+    from warpSPHIntegrators.integration import IntegrationSchemeType
+    wanted = IntegrationSchemeType.forwardEuler
+    current = ctx.config.integrationScheme
+    if current is not wanted and current is not IntegrationSchemeType.explicitEuler:
+        print(f"[warpSPH] artificialCompressible: overriding integrationScheme "
+              f"{getattr(current, 'name', current)!r} -> 'forwardEuler' (the step "
+              f"returns an exact per-step delta).")
+        ctx.config.integrationScheme = wanted
+        ctx.integrator = getIntegrator(wanted)
+
+
 def buildSystem(ctx: RunContext):
     interior = ctx.scratch['interiorDomain']
     halfW = 0.5 * ctx.spec.L
@@ -261,6 +295,10 @@ def initialConditions(ctx: RunContext, system) -> None:
     if isIncompressibleScheme(ctx.scheme):
         if ctx.config.dt is None:
             ctx.config.dt = ctx.spec.dt if ctx.spec.dt is not None else 1e-3
+    elif isArtificialCompressibleScheme(ctx.scheme):
+        # no sound speed to back-solve dt from: seed `targetDt`, Eq. (46)
+        # (`sloshingTimestep`) takes over from step 2
+        ctx.config.dt = ctx.param('targetDt')
     else:
         setupTimestep(ctx, system)       # fixes fluid.fixedSoundSpeed and config.dt
 
@@ -276,6 +314,9 @@ def postStep(ctx: RunContext, state, step: int) -> None:
 def sloshingTimestep(ctx: RunContext, state) -> float:
     if isIncompressibleScheme(ctx.scheme):
         return kolmogorovIncompressibleTimestep(ctx, state)
+    if isArtificialCompressibleScheme(ctx.scheme):
+        from ..modules.timestep import computeTimestep
+        return computeTimestep(state, ctx.config, ctx.schemeConfig, dt=ctx.config.dt)
     return ctx.config.dt
 
 
@@ -364,6 +405,15 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
         # `sensorPressure` column stays comparable across schemes.
         if pCD is not None and bool(particles.kinds[idx] != 0):
             d['sensorPressureWall'] = float(pCD[idx]) * rho0Phys
+    elif isArtificialCompressibleScheme(ctx.scheme):
+        # ACSPH integrates `pressures` (fluid rows) and fills the wall rows
+        # with its Eq. (61) closure, so the wall sensor row carries a pressure
+        # of its own -- reported as an extra series next to the fluid probe,
+        # as for `band2018pb`.
+        pAC = particles.pressures
+        probe = _probePressure(ctx, particles, pAC * rho0Phys)
+        d['sensorPressure'] = probe if probe is not None else 0.0
+        d['sensorPressureWall'] = float(pAC[idx]) * rho0Phys
     else:
         cs = float(ctx.schemeConfig.fluid.fixedSoundSpeed)
         scale = rho0Phys * cs * cs

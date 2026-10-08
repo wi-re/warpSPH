@@ -1074,3 +1074,34 @@ Next: find the flier mechanism before the Marrone gates.
    crest fragments as numerical fliers at this resolution. This is a gate
    change, so the user decides it; it should not be adjusted to make the reset pass.
 3. Only then run Marrone 3.1/3.4 delta-SPH (flier count + frames).
+
+## 14. ACSPH on sloshingTank, defaults (2026-10-07)
+
+First ACSPH run of the SPHERIC TC10 tank: `sloshingTank.configureScheme` had no
+ACSPH branch (it crashed on `diffusionParams`), so one was added
+(`_configureArtificialCompressible`: the dam-break settings -- Michel PST,
+`alpha_nu` 0.01 with c0 = 50 sqrt(g h), `eps_v` -5, `U_char` = sqrt(g h),
+forwardEuler) plus the Eq. (46) timestep and sensor diagnostics; runner
+`examples/sloshingTank/run_sloshingTank.py --scheme acsph`. All contact
+switches off (`cavitationProjection='off'`, `isolatedZeroPressure` False).
+
+nx = 100, t = 0-7 s, 167 ms/step (`examples/sloshingTank/output/acsph_nx100_7s/`,
+frames in `export/16-sloshingTank-acsph_2026-10-07_14-51-05`):
+
+* clean to t = 3.5 (no alarm); 1st impact (t = 2.38) 5 kPa smoothed, inside the
+  measured 2.2-13.1 kPa band (measured trace ~2.5 kPa), one raw spike 20.9 kPa;
+* the particle order degrades the whole way: pairedFraction 0 -> 9 %, nnDistP01
+  1.0 -> 0.15 dx by t = 4.9;
+* **blows up at t = 4.9173 (step 8775, non-finite).** Wave running up the right
+  wall; uid 958 is already at x = 0.508 (tank wall at 0.45, wall band to 0.495)
+  when the velocity alarm first fires (|v| 98 m/s at step 8761), dt collapses
+  7.7e-5 -> 1.4e-5 and |v| goes 2 -> 1e6 in ~15 steps. The sensor reads 0 for
+  most of the record (no fluid near it) and the wall row carries no stored p
+  (`sensorPressureWall` = 0).
+
+So ACSPH is still failing on the free-surface/wall contact (here at a flat
+tank wall run-up, nx = 100, 4.9 s) -- same family as §1-§13. Not yet looked
+into: which term launches uid 958 (no forensics run; `probe_contactLine.py
+--toy sloshing` does not work with ACSPH without the same case branch, now
+present). Next: rerun with `--cav contact --isoZero` (the §11.2 best config)
+to see whether it passes t = 4.92.
