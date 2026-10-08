@@ -108,6 +108,57 @@ removes smooth-flow quadratic dissipation; C_q = 0 leaves Noh 50 % off); (2) whe
 shock under-dissipation before Phase 7; (3) Phase 7 default -- the candidates on this evidence are Rosswog + limited
 reconstruction (KH) and C&D-Q (shocks); (4) commits (all of Phases 3-6 is uncommitted on `dev`).
 
+### Investigation: Sphenix / Wadsley shock under-dissipation (opened 2026-10-08, user)
+
+Symptom (sweep): Sod L1(v_x) Sphenix 0.0137, Wadsley 0.0092 vs C&D 0.0052; the final frames show a noisy post-shock
+plateau (v_x scatter 0.75-0.97, thermal energy / pressure noise) where C&D is flat; shock alpha 0.65 / 0.42 vs 0.95.
+Suspects, cheapest first: (1) decay speed -- Sphenix's tau = 0.05 H / c vs C&D's ~10 H / v_sig, so alpha collapses
+within a step or two behind the front; (2) Wadsley's derived prefactor 0.5; (3) the one-step alpha lag of the
+step-boundary update. Probe: `scripts/probe_shockUnderdissipation.py` (Sod L1, post-shock plateau noise, alpha at
+the shock; video). Results below as they come.
+
+**Sod, 2026-10-08** (`results/probe_under/`; plateau noise = std of v_x over the post-shock plateau, relative):
+
+| variant | L1(v_x) | plateau noise | alpha at shock |
+|---|---|---|---|
+| C&D (reference) | 0.0052 | 1.4 % | 0.95 |
+| Sphenix as published (ell_V = 0.05) | 0.0137 | 7.7 % | 0.61 |
+| Sphenix ell_V = 0.25 / 1 / 5 | 0.0109 / 0.0083 / **0.0050** | 5.8 / 3.5 / **1.1 %** | ~0.6 |
+| Wadsley as derived (prefactor 0.5) | 0.0092 | 4.5 % | 0.42 |
+| Wadsley prefactor 2 (the paper's literal number) | 0.0051 | 1.1 % | 1.08 |
+| Wadsley 4x slower decay (wadsley_tau 0.05) | 0.0070 | 2.6 % | 0.42 |
+| Wadsley prefactor 2 + slower decay | **0.0041** | **0.3 %** | 1.08 |
+
+**Not porting bugs.** The rendered PDF confirms Sphenix's `tau_V = gamma_K ell_V h / c`, ell_V = 0.05, as implemented
+(and that Eq. 21 is printed with the sign typo we corrected). Sphenix as published decays alpha within ~0.05 support
+radii of sound travel, so the post-shock plateau keeps no damping; with a decay time comparable to C&D's (ell_V ~ 5)
+it beats C&D on Sod at the *same* shock alpha. Wadsley's derived 0.5 reproduces Gasoline2's actual source strength
+in this repo's h units, which is half of C&D's; the paper's literal 2 matches C&D. The one-step lag is not needed
+to explain any of it. Both remedies are constant changes away from the papers, so they need checking on smooth
+flow and other shocks before anyone adopts them (next: Sedov, Gresho, KH, cylindrical Noh).
+
+**Across cases, 2026-10-08** (full profile, video; "published" = the sweep's numbers):
+
+| variant | Sod L1 | Sedov radius err | Gresho L1(v_phi) | KH A(1.5), nx 128 | Noh 2D pre-shock alpha / post-shock rho err |
+|---|---|---|---|---|---|
+| C&D (reference) | 0.0052 | -1.1 % | 0.073 | 0.100 | 0.72 / -6.5 % |
+| Sphenix published (ell_V 0.05) | 0.0137 | -4.1 % | 0.090 | 0.105 | -- |
+| Sphenix ell_V 1 | 0.0083 | -1.4 % | 0.080 | 0.118 | -- |
+| **Sphenix ell_V 5** | **0.0050** | **-0.3 %** | **0.077** | **0.121** | -- |
+| Wadsley derived (prefactor 0.5) | 0.0092 | -2.3 % | **0.067** | 0.081 | 4e-8 / **-1.3 %** |
+| Wadsley prefactor 2 | 0.0051 | -1.9 % | 0.075 | 0.095 | 1e-8 / -4.4 % |
+| Wadsley prefactor 2 + slower decay | 0.0041 | -1.9 % | 0.082 | 0.099 | 1e-8 / -4.9 % |
+| *default: Rosswog + limited + coupled* | *0.0043* | *-1.5 %* | *0.060* | *--* | -- |
+
+**Readings.** Sphenix: a longer decay (ell_V 5, i.e. tau = 5 H / c, comparable to C&D's) is better on *every* case
+here -- no trade-off found; the only cost is a lower, broader Sedov peak (1.85 vs 2.51 at an unresolved nx 40).
+Wadsley: the paper's literal prefactor 2 fixes Sod and helps KH / Sedov but costs Gresho (0.067 -> 0.075) and the
+cylindrical Noh post-shock density (-1.3 % -> -4.4 %); its uniform-compression blindness survives (pre-shock alpha
+1e-8); a slower decay on top only costs more Gresho. A genuine trade-off, not a bug. The repo default (Rosswog +
+limited reconstruction) does not ring at the Sod shock (alpha 1.0 there, L1 0.0043). **For the user:** adopt
+Sphenix ell_V = 5 as this repo's Sphenix default (documented deviation from the paper's 0.05)? Keep Wadsley at the
+derived 0.5 (paper-faithful, best Gresho / Noh) or take 2 (C&D-like shocks)?
+
 ### Handoff: starting Phase 3 (2026-10-07)
 
 **Where the code stands.** `dev` at the commit after `4e662a1` (tag `milestone/dissipation-abstraction`), working tree clean, full `pytest tests` and the dissipation / compSPH / CRK gradchecks green.
