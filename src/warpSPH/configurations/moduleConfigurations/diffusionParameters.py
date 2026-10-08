@@ -101,10 +101,18 @@ class DiffusionParameters:
 
     
 def buildDefaultDiffusionParamsCompressibleSPH():
+    """The Monaghan host's default (`CompressibleSPHConfig`; CompSPH / CRKSPH / WC have their own builders).
+
+    Since 2026-10-08 (user, after the AV_PLAN Phases 3-6 sweep): `C_q = 2` with the coupled `BetaMode` (beta =
+    2 alpha, Chen & Nixon 2025: the quadratic term is there in shocks -- with `C_q = 0` cold-gas shocks get no
+    viscosity, Noh's post-shock density was 50 % off -- and switches off with the linear one in smooth flow) and
+    the limited reconstruction of the pair velocity (`VelocityPairPolicy.Limited`), with the Rosswog (2020) switch
+    as the scheme's default (`buildDefaultViscositySwitchConfigCompressibleSPH`). Before: `C_q = 0`, raw pair
+    velocity, no switch -- `scripts/av_report.py` pins that for its M0-era columns."""
     diffusionParams = DiffusionParameters()
     diffusionParams.c_s = 1
     diffusionParams.C_l = 1
-    diffusionParams.C_q = 0
+    diffusionParams.C_q = 2
     diffusionParams.Cu_l = 1
     diffusionParams.Cu_q = 0
     diffusionParams.K = 1.0
@@ -114,7 +122,9 @@ def buildDefaultDiffusionParamsCompressibleSPH():
     diffusionParams.scaleBeta = False
     diffusionParams.monaghanSwitch = True
     diffusionParams.correctXi = True
-    
+    diffusionParams.betaMode = BetaMode.Coupled.value
+    diffusionParams.velocityPairPolicy = VelocityPairPolicy.Limited.value
+
     return diffusionParams
 
 

@@ -83,6 +83,7 @@ from warpSPHCore import *
 from dataclasses import dataclass, field
 
 from .compressibleConfig import CompressibleSPHConfig, compressibleConfigToDict, dictToCompressibleConfig
+from .moduleConfigurations.viscositySwitchParameters import ViscositySwitchConfig
 
 def buildDefaultDiffusionParamsCRKSPH():
     diffusionParams = DiffusionParameters()
@@ -107,6 +108,8 @@ class CRKSPHConfig(CompressibleSPHConfig):
     energyScheme: EnergyScheme = field(default=EnergyScheme.CRK, metadata={'description': 'Energy scheme for the simulation'})
 
     diffusionParams: DiffusionParameters = field(default_factory=buildDefaultDiffusionParamsCRKSPH)
+    # no switch by default (the Monaghan host's Rosswog default is not this scheme's)
+    viscositySwitchParams: ViscositySwitchConfig = field(default_factory=ViscositySwitchConfig)
     crkViscosityParams: CRKViscosity = field(default_factory=buildDefaultCRKViscosityParams)
     schemeName: str = field(default='CRKSPH', metadata={'description': 'Name of the CRK SPH scheme to use'})
     

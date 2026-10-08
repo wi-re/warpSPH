@@ -38,7 +38,7 @@ from _gradcheck_common import DEVICE, DTYPE, KERNEL, build_adjacency, compute_de
 from warpSPHCore import OperationProperties
 from warpSPHCore.enumTypes import SupportScheme
 
-from warpSPH.configurations.moduleConfigurations.diffusionParameters import buildDefaultDiffusionParamsCompressibleSPH
+from warpSPH.configurations.moduleConfigurations.diffusionParameters import VelocityPairPolicy, buildDefaultDiffusionParamsCompressibleSPH
 from warpSPH.modules.dissipation.wp_conductivity import computeConductivityWarp
 from warpSPH.modules.dissipation.wp_diffusion import computeViscosityWarp
 from warpSPH.modules.dissipation.wp_dissipation import computeThermalDissipationWarp
@@ -65,6 +65,9 @@ def _build_case():
 def _run(label, warp_fn, needs_energies) -> bool:
     domain, positions, supports, masses, densities, adjacency, kinds, velocities, internalEnergies, pressures, soundspeeds, alphas = _build_case()
     diffusionParams = buildDefaultDiffusionParamsCompressibleSPH()
+    # the raw pair velocity (the Monaghan default is the limited reconstruction since 2026-10-08; that path is
+    # gradcheck_reconstruction.py's)
+    diffusionParams.velocityPairPolicy = VelocityPairPolicy.Raw.value
 
     def f(pos, sup, mass, dens, vel, u, press, cs, alpha):
         state = make_compressible_state(pos, sup, mass, dens, vel, u, pressures=press, soundspeeds=cs, alphas=alpha, kinds=kinds)

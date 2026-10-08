@@ -130,7 +130,7 @@ def runMaps(out: Path, smoke: bool) -> Dict[str, Any]:
                 _orig(ctx)
                 for k, v in _cfg.switchParams.items():
                     setattr(ctx.schemeConfig.viscositySwitchParams, k, v)
-                for k, v in _cfg.diffusion.items():
+                for k, v in A.effectiveDiffusion(_cfg).items():
                     setattr(ctx.schemeConfig.diffusionParams, k, v)
 
             _log(f'maps: {frame} / {name}')
@@ -143,7 +143,7 @@ def runMaps(out: Path, smoke: bool) -> Dict[str, Any]:
             scalar = {'rosswog2020': getattr(st, 'entropyRates', None),
                       'wadsley2017': getattr(res.state.state, 'wadsleyD', None)}.get(name)
             phi = None
-            if cfg.diffusion.get('velocityPairPolicy', 0):
+            if A.effectiveDiffusion(cfg).get('velocityPairPolicy', 0):
                 from warpSPH.modules.reconstruction import computePairPhiMean
                 phi = computePairPhiMean(res.state, res.ctx.config, res.ctx.schemeConfig.diffusionParams)
             np.savez(mapDir / f'{frame}_{name}.npz', t=float(res.state.t), uid=cpu(st.UIDs), positions=cpu(st.positions),
@@ -204,7 +204,7 @@ def runTiming(out: Path, smoke: bool) -> Dict[str, Any]:
             _orig(ctx)
             for k, v in _cfg.switchParams.items():
                 setattr(ctx.schemeConfig.viscositySwitchParams, k, v)
-            for k, v in _cfg.diffusion.items():
+            for k, v in A.effectiveDiffusion(_cfg).items():
                 setattr(ctx.schemeConfig.diffusionParams, k, v)
 
         case = dataclasses.replace(greshoVortexCase, configureScheme=configure)

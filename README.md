@@ -547,6 +547,15 @@ converted to `targetNeighbors`), `periodic`.
 `Scatter`, `MeanSymmetric`, `KernelMeanSymmetric`, `SuperSymmetric`,
 `PartialSymmetric`), `gradientMode`, `laplacianMode`, `samplingScheme`.
 
+**The reference dissipation configuration** (AV_PLAN, 2026-10-08) of the Monaghan host
+(`scheme='Monaghan'`) is its default: the Rosswog (2020) entropy trigger at alpha in [0, 1], the
+`Price2012_98` operator with `C_q = 2` coupled to alpha (beta = 2 alpha, Chen & Nixon 2025), and the
+limited midpoint reconstruction of the pair velocity (Frontiere et al. 2017 / García-Senz & Cabezón 2026).
+*This is the reference SPH dissipation configuration against which future hydrodynamic operators are
+compared.* A case that names a `viscositySwitch` gets that switch with its own defaults; CompSPH and
+CRKSPH keep their own operators (no switch by default). Evidence:
+[docs/av/sweep_2026-10-08/](docs/av/sweep_2026-10-08/verdict.md), AV_PLAN's status board.
+
 **Time integration** — `integrationScheme` selects from 26 schemes in
 `warpSPHIntegrators` (`forwardEuler`, `rungeKutta2/3/4`, `leapFrog`,
 `velocityVerlet`, `symplecticEuler`, `sspRK3`, `dormandPrince`, …), with
@@ -556,7 +565,10 @@ compressible ones from a target timestep and the sound speed together.
 
 **Compressible scheme options**, on the scheme config rather than the global one:
 `ViscositySwitch` (`Balsara1995`, `Colagrossi2004`, `CullenDehnen2010`,
-`CullenHopkins`, `MorrisMonaghan1997`, `Rosswog2000`, `NoneSwitch`),
+`CullenHopkins`, `MorrisMonaghan1997`, `Rosswog2000`, `Rosswog2020`, `Sphenix2022`,
+`Wadsley2017`, `ReadHayfield2012`, `NoneSwitch`), the pair-velocity reconstruction
+(`DiffusionParameters.velocityPairPolicy`: `Raw`, `Linear`, `Limited`, `BalsaraLimited`) and the
+quadratic-coefficient policy (`betaMode`: `Coupled`, `Fixed`),
 `AdaptiveSupportScheme` (`NoScheme`, `Monaghan`, `Owen`), and `EnergyScheme`
 (`equalWork`, `PdV`, `diminishing`, `monotonic`, `hybrid`, `CRK`).
 

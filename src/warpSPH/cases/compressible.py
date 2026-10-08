@@ -16,6 +16,7 @@ from typing import Any, Dict
 
 import torch
 
+from ..configurations.moduleConfigurations.viscositySwitchParameters import ViscositySwitchConfig
 from ..enumTypes import AdaptiveSupportScheme, ViscositySwitch
 from ..modules.timestep.compressible import computeTimestep
 from ..runner import RunContext, resolveEnum
@@ -49,11 +50,23 @@ COMPRESSIBLE_DEFAULTS = dict(
 COMPRESSIBLE_PARAMS = dict(
     gamma=5 / 3,
     rho0=1.0,
-    viscositySwitch='NoneSwitch',
+    # None: the scheme's own default (Monaghan: Rosswog 2020 + limited reconstruction since 2026-10-08; CompSPH /
+    # CRKSPH: none). A named switch gets a plain `ViscositySwitchConfig`, as it always did.
+    viscositySwitch=None,
     adaptiveSupportScheme='Owen',
     adaptiveSupportCorrections=False,
     markerSize=2,
 )
+
+
+def applyViscositySwitchParam(ctx: RunContext) -> None:
+    """The case parameter `viscositySwitch`: None keeps the scheme's own default switch config (Monaghan: Rosswog
+    2020 at alpha in [0, 1] since 2026-10-08; CompSPH / CRKSPH: none); a named switch gets a fresh
+    `ViscositySwitchConfig` (its own default alpha range), exactly as before the Monaghan default changed."""
+    if ctx.param('viscositySwitch') is not None:
+        ctx.schemeConfig.viscositySwitchParams = ViscositySwitchConfig()
+        ctx.schemeConfig.viscositySwitchParams.scheme = resolveEnum(
+            ViscositySwitch, ctx.param('viscositySwitch'))
 
 
 def configureCompressible(ctx: RunContext) -> None:
@@ -61,8 +74,7 @@ def configureCompressible(ctx: RunContext) -> None:
     schemeConfig = ctx.schemeConfig
     schemeConfig.gamma = ctx.param('gamma')
     schemeConfig.rho0 = ctx.param('rho0')
-    schemeConfig.viscositySwitchParams.scheme = resolveEnum(
-        ViscositySwitch, ctx.param('viscositySwitch'))
+    applyViscositySwitchParam(ctx)
     schemeConfig.adaptiveSupportScheme = resolveEnum(
         AdaptiveSupportScheme, ctx.param('adaptiveSupportScheme'))
     schemeConfig.adaptiveSupportCorrections = ctx.param('adaptiveSupportCorrections')

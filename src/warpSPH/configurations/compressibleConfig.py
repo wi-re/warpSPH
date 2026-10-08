@@ -30,6 +30,18 @@ from .moduleConfigurations.viscositySwitchParameters import ViscositySwitchConfi
 from .moduleConfigurations.boundaryConditions import BoundaryCondition, BoundaryConditionType, boundaryConditionToDict, dictToBoundaryCondition
 from typing import List
 
+def buildDefaultViscositySwitchConfigCompressibleSPH() -> ViscositySwitchConfig:
+    """The Monaghan host's default switch (2026-10-08, user): Rosswog (2020)'s entropy trigger at the paper's
+    alpha_0 = 0, alpha_max = 1 -- with the limited reconstruction the best Kelvin-Helmholtz growth of the AV_PLAN
+    sweep (nx 256: A(1.5) 0.151, above CRKSPH's 0.145). A case that names a switch gets a plain
+    `ViscositySwitchConfig` for it, as before (`cases/compressible.configureCompressible`)."""
+    config = ViscositySwitchConfig()
+    config.scheme = ViscositySwitch.Rosswog2020
+    config.alpha_min = 0.0
+    config.alpha_max = 1.0
+    return config
+
+
 @dataclass
 class CompressibleSPHConfig:
     gamma: float = field(default=1.4, metadata={'description': 'Adiabatic index'})
@@ -46,7 +58,7 @@ class CompressibleSPHConfig:
 
 
     diffusionParams: DiffusionParameters = field(default_factory=buildDefaultDiffusionParamsCompressibleSPH)
-    viscositySwitchParams: ViscositySwitchConfig = field(default_factory=ViscositySwitchConfig)
+    viscositySwitchParams: ViscositySwitchConfig = field(default_factory=buildDefaultViscositySwitchConfigCompressibleSPH)
 
     schemeName: str = field(default='Compressible SPH', metadata={'description': 'Name of the compressible SPH scheme to use'})
 

@@ -96,7 +96,14 @@ table (INFO). The FAILs, sorted by what they mean:
   limited reconstruction is the best KH combination**: nx 256 A(1.5) 0.151 (> McNally 0.148, > CRK 0.145), peak 0.224.
   Phase 3: everything clean; CRK 3D Sedov nx 40 with video now completes (OPEN_PROBLEMS §18 fix confirmed).
 
-**Decisions for the user:** (1) Phase 5A `C_q = 0` default (the data says coupled beta is cheap in shocks and
+**Decided 2026-10-08 (user):** the Monaghan default is now Rosswog (2020) at alpha in [0, 1] + `C_q = 2` coupled +
+the limited reconstruction (`av_report --config default`, bit-identical to `rosswogLimitedCoupled`; the M0-era
+configs pin the old defaults and stay bit-identical); README states it as the reference configuration. Phases 3-6
+committed one per phase. Next: the Sphenix / Wadsley shock under-dissipation. Under the new default operator the
+unswitched Sod contact spike is 6 % and R&H's 10 % -- R&H's contact-suppression claim holds only on the old
+`C_q = 0` raw operator (`tests/test_shockCapturing.py` pins that operator).
+
+*Original list:* (1) Phase 5A `C_q = 0` default (the data says coupled beta is cheap in shocks and
 removes smooth-flow quadratic dissipation; C_q = 0 leaves Noh 50 % off); (2) whether to chase the Sphenix / Wadsley
 shock under-dissipation before Phase 7; (3) Phase 7 default -- the candidates on this evidence are Rosswog + limited
 reconstruction (KH) and C&D-Q (shocks); (4) commits (all of Phases 3-6 is uncommitted on `dev`).
@@ -1441,7 +1448,7 @@ must resolve one way or the other.
 - [ ] shock metrics within 5% under coupling
 - [ ] Gresho angular-momentum loss and quadratic AV energy both reduced
 - [ ] shear-box mechanism isolated
-- [ ] **`C_q = 0` default resolved** — deliberate or an oversight, decided and recorded
+- [x] **`C_q = 0` default resolved** — decided 2026-10-08 (user): `C_q = 2` coupled (beta = 2 alpha) for the Monaghan host
 - [ ] report rows added
 - [ ] documented as *not* reproducing chen2025's disc result, with the reason
 
@@ -1680,8 +1687,8 @@ not enter the production path without doing so.
 - [ ] every matrix row runs from a named config
 - [ ] Part 0 table filled for all rows
 - [ ] per-row prose written
-- [ ] default selected, with the reason recorded
-- [ ] README states the reference configuration
+- [x] default selected, with the reason recorded (2026-10-08, user: Rosswog 2020 + limited reconstruction + coupled beta; KH best, shocks within the C&D-Q band)
+- [x] README states the reference configuration
 - [ ] tagged `vX.Y-av-foundation`
 
 **🏁 M8 — SPH foundation complete.**

@@ -31,8 +31,10 @@ def test_configs_stored_before_the_mode_existed_load_as_coupled():
 
 def _quadraticPower(system, ctx, mode, alphaScale):
     """Quadratic-only AV dissipation power (C_l = 0) with alpha scaled by `alphaScale`."""
+    # the raw pair velocity: this checks the beta policy of the pair operator, not the reconstruction (the Monaghan
+    # default is the limited reconstruction since 2026-10-08, which `_power` would need the Jacobian for)
     params = dictToDiffusionParams({**diffusionParamsToDict(ctx.schemeConfig.diffusionParams),
-                                    'C_l': 0.0, 'C_q': 2.0, 'betaMode': mode.name})
+                                    'C_l': 0.0, 'C_q': 2.0, 'betaMode': mode.name, 'velocityPairPolicy': 'Raw'})
     alphas = torch.full_like(system.state.alphas, alphaScale)
     return _power(system.state, ctx.config, params, system.adjacency, alphas)
 

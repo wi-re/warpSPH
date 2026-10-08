@@ -60,7 +60,8 @@ class AVConfig:
     """A named dissipation setup: the host scheme and the switch, plus any case params."""
     name: str
     scheme: str = 'Monaghan'
-    switch: str = 'NoneSwitch'
+    #: None: the scheme's own default switch (Monaghan: Rosswog 2020 since 2026-10-08)
+    switch: Optional[str] = 'NoneSwitch'
     params: Dict[str, Any] = field(default_factory=dict)
     #: `ViscositySwitchConfig` fields (alpha_min, alpha_max, ...) set on the scheme config after
     #: the case configures it, so they apply to EVERY case. (As case `params` they only reached
@@ -75,6 +76,21 @@ class AVConfig:
     #: `SimulationConfig` fields set before the case builds its state (so the IC sees them too),
     #: e.g. `{'supportVolumeClamp': 'off'}` (OPEN_PROBLEMS §20); `--supportVolumeClamp` sets it for every config.
     simulation: Dict[str, Any] = field(default_factory=dict)
+    #: Monaghan host: run on the pre-2026-10-08 defaults (`C_q = 0`, raw pair velocity, `LEGACY_MONAGHAN`) unless
+    #: `diffusion` says otherwise -- every config written before the default changed means those, and the stored
+    #: M0 references were taken with them. False: the scheme's current defaults (config `default`).
+    legacyDefaults: bool = True
+
+
+#: The Monaghan host's DiffusionParameters defaults before 2026-10-08 (now C_q = 2 coupled + Limited).
+LEGACY_MONAGHAN = dict(C_q=0.0, velocityPairPolicy=0)
+
+
+def effectiveDiffusion(cfg: 'AVConfig') -> Dict[str, Any]:
+    """The DiffusionParameters overrides a config runs with (`legacyDefaults` applied)."""
+    if cfg.scheme == 'Monaghan' and cfg.legacyDefaults:
+        return {**LEGACY_MONAGHAN, **cfg.diffusion}
+    return dict(cfg.diffusion)
 
 
 #: R&H 2012 is designed with a narrower, higher-baseline alpha range
@@ -82,6 +98,9 @@ class AVConfig:
 _RH = dict(alpha_min=0.2, alpha_max=1.0)          # applied through `switchParams`
 
 CONFIGS: Dict[str, AVConfig] = {c.name: c for c in (
+    # the Monaghan host's current defaults, whatever they are (2026-10-08: Rosswog 2020, alpha in [0, 1], C_q = 2
+    # coupled, limited reconstruction -- user decision after the AV_PLAN sweep)
+    AVConfig('default', switch=None, legacyDefaults=False),
     AVConfig('none', switch='NoneSwitch'),
     AVConfig('cullenDehnen2010', switch='CullenDehnen2010'),
     AVConfig('readHayfield2012', switch='ReadHayfield2012', switchParams=_RH),
@@ -198,12 +217,13 @@ def _execute(spec: RunSpec, cfg: AVConfig, outDir: Path, tag: str, video: bool,
         return row
 
     configure = spec.case.configureScheme
+    diffusion = effectiveDiffusion(cfg)
 
     def configureScheme(ctx):
         configure(ctx)
         for name, value in cfg.switchParams.items():
             setattr(ctx.schemeConfig.viscositySwitchParams, name, value)
-        for name, value in cfg.diffusion.items():
+        for name, value in diffusion.items():
             setattr(ctx.schemeConfig.diffusionParams, name, value)
         for name, value in cfg.simulation.items():
             setattr(ctx.config, name, value)
@@ -211,7 +231,7 @@ def _execute(spec: RunSpec, cfg: AVConfig, outDir: Path, tag: str, video: bool,
             setattr(ctx.schemeConfig, name, value)
 
     case = dataclasses.replace(spec.case, diagnostics=diagnostics,
-                               configureScheme=configureScheme if (cfg.diffusion or cfg.switchParams or cfg.simulation or cfg.schemeFields) else configure)
+                               configureScheme=configureScheme if (diffusion or cfg.switchParams or cfg.simulation or cfg.schemeFields) else configure)
     kw = dict(spec.kwargs)
     kw.setdefault('scheme', cfg.scheme)
     params = dict(spec.params, viscositySwitch=cfg.switch, **cfg.params)

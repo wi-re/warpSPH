@@ -14,7 +14,7 @@ import torch
 from ..caseUtils import buildSod1D, plotSod, plotSod_, sodInitialState
 from ..enumTypes import AdaptiveSupportScheme, ViscositySwitch
 from ..runner import Case, RunContext, caseMain, registerCase, resolveEnum
-from .compressible import compressibleDiagnostics
+from .compressible import applyViscositySwitchParam, compressibleDiagnostics
 from .plotting import openWindow, pumpEvents
 
 __all__ = ['sodCase', 'states']
@@ -32,8 +32,7 @@ def configureScheme(ctx: RunContext) -> None:
     left, _ = states(ctx)
     ctx.schemeConfig.gamma = ctx.param('gamma')
     ctx.schemeConfig.rho0 = left.rho
-    ctx.schemeConfig.viscositySwitchParams.scheme = resolveEnum(
-        ViscositySwitch, ctx.param('viscositySwitch'))
+    applyViscositySwitchParam(ctx)
     ctx.schemeConfig.viscositySwitchParams.alpha_min = ctx.param(
         'alpha_min', ctx.schemeConfig.viscositySwitchParams.alpha_min)
     ctx.schemeConfig.viscositySwitchParams.alpha_max = ctx.param(
@@ -134,7 +133,7 @@ sodCase = registerCase(Case(
         right_rho=0.25,
         right_pressure=0.1795,
         right_velocity=0.0,
-        viscositySwitch='NoneSwitch',
+        viscositySwitch=None,      # the scheme's default (cases/compressible.py COMPRESSIBLE_PARAMS)
         adaptiveSupportScheme='Owen',
         adaptiveSupportCorrections=False,
     ),
