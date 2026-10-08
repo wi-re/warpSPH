@@ -1,4 +1,4 @@
-"""Warp kernel computing the CRKSPH gradient-correction matrix M = sum_j m_j (x_ij (x) grad W_ij).
+"""Warp kernel computing the CRKSPH gradient-correction matrix M = sum_j V_j (x_ij (x) grad W_ij), V_j = m_j / rho_j.
 
 ``computeMWarp`` is the torch-facing entry point (dispatched through
 ``launchOperator``/``launch_kernel`` like the other ``wp_*.py`` modules); the
@@ -7,7 +7,7 @@ over each particle's neighbor list, honoring gradient renormalization, grad-h,
 volume, and CRK correction flags from ``correctionData`` when enabled. The
 caller (``common.computeM``) negates this kernel's raw output and typically
 inverts the result (``torch.linalg.pinv``) to get the actual correction
-matrix ``M_inv``.
+matrix ``M_inv``, applied on the gradient index: ``V M_inv`` (OPEN_PROBLEMS §22).
 """
 
 import warp as wp
@@ -95,7 +95,9 @@ def computeM_Func_i(
         tensorProd = wp.outer(x_ij, gradw_ij)
 
 
-        out += mj * tensorProd #* apparentVolume # CHECK THIS, does it really use the term without densities? 
+        # the volume m_j / rho_j, as in the difference gradient it corrects: with m_j alone M ~ rho I and the
+        # corrected gradient came out as grad v / rho (OPEN_PROBLEMS §22)
+        out += apparentVolume * tensorProd
         
     return out
 

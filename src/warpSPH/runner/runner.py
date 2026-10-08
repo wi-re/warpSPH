@@ -778,6 +778,36 @@ def _teardownPlot(ctx: RunContext) -> None:
     closeWindow(handle)
 
 
+#: `collectFrameGarbage`: run a cycle collection once allocated GPU memory exceeds the post-collection baseline by
+#: this factor (and by at least `_FRAME_GC_MIN_BYTES`). OPEN_PROBLEMS §18.
+_FRAME_GC_GROWTH = 1.5
+_FRAME_GC_MIN_BYTES = 256 * 2**20
+
+
+def collectFrameGarbage(ctx: RunContext) -> None:
+    """Free the step states a plotted run strands in reference cycles (OPEN_PROBLEMS §18).
+
+    Step / stage states end up in reference cycles, which only Python's cycle collector frees. Without plotting it
+    runs often enough; with plotting, matplotlib's mathtext parser leaves ~10^5 cyclic objects per frame (pyparsing
+    exceptions holding traceback frames), the collector's full passes get rarer, and the stranded states -- with
+    CRKSPH's pair-sized `ap_ij` / `av_ij` -- pile up: a CRK 3D Sedov at nx 16 reached 2.9 GB in 60 frames (flat
+    255 MB without video, and flat 255 MB with video plus a collection per frame); at nx 40 it ran out of memory.
+    The allocator's counter is host-side (no sync), so the check is free; a collection runs only once the
+    allocated memory has grown by `_FRAME_GC_GROWTH` over its post-collection baseline."""
+    if not torch.cuda.is_available():
+        return
+    allocated = torch.cuda.memory_allocated()
+    baseline = ctx.scratch.get('_frameGcBaseline')
+    if baseline is None:
+        ctx.scratch['_frameGcBaseline'] = allocated
+        return
+    if allocated > max(_FRAME_GC_GROWTH * baseline, baseline + _FRAME_GC_MIN_BYTES):
+        import gc
+        gc.collect()
+        ctx.scratch['_frameGcBaseline'] = torch.cuda.memory_allocated()
+        ctx.scratch['_frameGcCollections'] = ctx.scratch.get('_frameGcCollections', 0) + 1
+
+
 def _plotAndStore(ctx: RunContext, case: Case, spec: CaseSpec, state, stepResult,
                   i: int, extraData: Dict[str, Any], groups, storeSteps: int,
                   final: bool) -> None:
@@ -789,6 +819,7 @@ def _plotAndStore(ctx: RunContext, case: Case, spec: CaseSpec, state, stepResult
             renderer.submitFrame(case.updatePlot, ctx, state, ctx.scratch.get('plot'), i)
         else:
             case.updatePlot(ctx, state, ctx.scratch.get('plot'), i)
+        collectFrameGarbage(ctx)
 
     if spec.store and (i % storeSteps == 0 or final):
         frameExtra = dict(extraData,

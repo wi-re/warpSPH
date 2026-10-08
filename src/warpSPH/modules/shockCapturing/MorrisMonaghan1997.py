@@ -37,7 +37,8 @@ def relaxedAlpha(particleState: CompressibleState, div: torch.Tensor, dt: float,
     """One step of the source-and-decay equation; `sourceScale` (e.g. `alpha_max - alpha`)
     multiplies the source (Rosswog et al. 2000 uses it)."""
     cfg = schemeConfig.viscositySwitchParams
-    f_kern = 1 / sphKernel_xi(simulationConfig.kernel.value, particleState.positions.shape[1])
+    xi_kern = sphKernel_xi(simulationConfig.kernel.value, particleState.positions.shape[1])
+    f_kern = float(type(xi_kern)(1.0) / xi_kern)  # float64 build: xi is a wp.float64 (no int / wp.float64, no Tensor * wp.float64)
     tau = particleState.supports * f_kern / (cfg.morris_C1 * particleState.soundspeeds + 1e-14)
     source = (-div).clamp(min=0)
     if sourceScale is not None:

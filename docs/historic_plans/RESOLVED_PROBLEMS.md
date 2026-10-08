@@ -4,6 +4,35 @@ Items that used to be in [OPEN_PROBLEMS.md](../../OPEN_PROBLEMS.md), moved here
 once resolved, with their original section number so older references still
 find them. Newest first. The original text is kept as it was when resolved.
 
+## OPEN_PROBLEMS §22 — corrected velocity gradient: wrong side and mass-weighted M — RESOLVED 2026-10-07
+
+`modules/shockCapturing/common.py` corrects the difference gradient as `M^-1 @ Vs`. `warpOperation`'s vector
+gradient is `Vs[c, g] = dv_c/dx_g`, and for `v = A x`, `Vs = A M`, so the exact correction is `Vs @ M^-1`; the
+code's `M^-1 A M` keeps the trace (the divergence is right) but not the shear or rotation parts. Measured on a
+30 %-jittered 32^2 lattice, `v = A x` (float32, interior particles): uncorrected error 0.15, `M^-1 Vs` **0.24**
+(worse than no correction), `Vs M^-1` 5e-5. On a regular lattice `M ~ I` and it does not matter.
+**Second, larger half:** `computeMWarp` sums `m_j x_ij (x) grad W` (its own comment: "CHECK THIS, does it really
+use the term without densities?") while the gradient sums `(m_j/rho_j) v_ij (x) grad W`, so `M ~ rho I`, not `I`
+(Sod 2D: mean `M_00` 0.998 at rho 0.999, 0.252 at rho 0.251), and the corrected gradient is `grad v / rho`.
+Measured: `divergenceScheme='cullen'` + `correctVelocityGradient=True` on Sod 2D with `v = (x, 0)` gives a median
+divergence 1.000 at rho ~ 1 and **4.000 at rho = 0.25**. Gresho (rho = 1) hides it.
+**Scope:** both flags are off by default (`divergenceScheme='naive'`, `correctVelocityGradient=False`), so the C&D
+default and every stored baseline are unaffected; any run that turned them on was wrong where rho != 1.
+`modules/reconstruction/gradient.py` builds its own volume-consistent `M` and corrects on the right side.
+**Not fixed:** two small changes (the `rho_j` in `computeMWarp`, the side in `computeShearTensor`), but they change
+what the opt-in path computes and `computeM` is also used elsewhere; waits for the user (and would ride with the
+AV_PLAN overnight sweep). Related, harmless: CRKSPH passes `J^T`
+(`schemes/crkSPH.py` `.mT`) to its reconstruction; only `x^T J x` and `u_ij . x_ij` enter there, which are
+transpose-invariant, so CRK is unaffected (AV_PLAN Phase 3 notes).
+
+**Resolution (2026-10-07, user: "fix it while the sweep runs").** `wp_computeM.py` sums `V_j = m_j / rho_j` (the
+weight it already computed and ignored); `computeShearTensor` corrects as `Vs M^-1`; `reconstruction/gradient.py`
+dropped its masses-to-volumes workaround (its Jacobian is bit-identical before / after on a Sod 2D state, so the AV
+sweep running at the time saw no change). `tests/test_correctedGradient.py`: corrected divergence 1.000 at rho 1 and
+rho 0.25 (was 1.000 / 4.000), trace / shear / rotation exact to 1e-4 on a 30 %-jittered lattice; both fail on the
+old code. Gradchecks green. Affected only the opt-in paths (`divergenceScheme='cullen'`, `correctVelocityGradient`
+in C&D and Cullen-Hopkins); default C&D never computes the shear (`S = None`). No stored baseline used them.
+
 ## OPEN_PROBLEMS §16 — Monaghan host did not conserve total energy on a strong shock — RESOLVED 2026-09-30
 
 Found 2026-09-30 by the AV_PLAN M0 report (`scripts/av_report.py`, `sedov`). Not investigated yet.

@@ -5,11 +5,9 @@ convention `linearPairVelocity` uses -- which is the layout `warpOperation`'s ve
 (`Vs[c, g] = dv_c/dx_g`, checked on `v = (y, 0)`). The difference gradient is optionally corrected by `M^-1`
 (`shockCapturing.common.computeM`), which makes it exact for a linear field on any particle distribution -- the
 premise of the linear-field annihilation test (AV_PLAN Phase 3). For `v = A x`, `Vs = A M`, so the correction acts
-on the gradient index, `J = Vs M^-1`; `M^-1 Vs` (what `computeShearTensor` does) is `M^-1 A M`, which keeps the
-trace but not the shear (OPEN_PROBLEMS §22). CRKSPH has its own CRK-corrected gradient and does not use this.
+on the gradient index, `J = Vs M^-1` (`M^-1 Vs` = `M^-1 A M` keeps only the trace; `computeShearTensor` did that until
+OPEN_PROBLEMS §22 was fixed). CRKSPH has its own CRK-corrected gradient and does not use this.
 """
-
-import copy
 
 from warpSPHCore import *
 import torch
@@ -41,12 +39,9 @@ def computeVelocityJacobian(
         queryValues = particleState.velocities
     )
     if corrected:
-        # computeM sums m_j x_ij (x) grad W; with the volumes standing in for the masses it is the
-        # sum_j V_j x_ji (x) grad W the gradient is built from, so Vs M^-1 is exact for a linear field (it is
-        # ~rho I otherwise, OPEN_PROBLEMS §22)
-        volumeState = copy.copy(particleState)
-        volumeState.masses = particleState.masses / particleState.densities
-        M = computeM(volumeState, simulationConfig, None, supportMode, adjacency)
+        # M = sum_j V_j x_ji (x) grad W, the sum the difference gradient is built from, so Vs M^-1 is exact for a
+        # linear field
+        M = computeM(particleState, simulationConfig, None, supportMode, adjacency)
         Vs = torch.einsum('ijk, ikl -> ijl', Vs, torch.linalg.pinv(M))
     return Vs.contiguous()
 

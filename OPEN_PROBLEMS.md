@@ -397,6 +397,22 @@ only hid the pile-up). (3) [2026-10-01: Gresho spin-up traced to an intrinsic, s
 
 ## 18. Video runs leak GPU memory in proportion to the per-pair state (CRKSPH 3D Sedov OOMs at nx 40)
 
+**Mitigated 2026-10-07 (mechanism found; one follow-up open).** Not a leak and not the render-thread snapshots: a
+3D run plots through matplotlib on the main thread, with no snapshots at all. Step / stage states (with CRK's
+pair-sized `ap_ij` / `av_ij`) end up in **reference cycles**, which only Python's cycle collector frees. Without
+plotting it frees them in time. With plotting, matplotlib's mathtext parser leaves ~10^5 cyclic objects per frame
+(pyparsing exceptions holding traceback frames), the full collections get rarer, and the stranded states pile up.
+Measured (CRK 3D Sedov nx 16, `scratchpad/memprobe.py` pattern): video 620 -> 2920 MB allocated in 60 steps
+(sawtooth); no video flat 255 MB; video + `gc.collect()` per frame flat 255 MB; `gc.DEBUG_SAVEALL` showed 630 CUDA
+tensors / 1.77 GB (`CompSPHState.ap_ij` / `av_ij`) in cyclic garbage after 14 frames. **Fix:**
+`runner.collectFrameGarbage`, after every plotted frame: a collection only once allocated memory exceeds 1.5x
+its post-collection baseline (+256 MB minimum); the allocator counter is host-side, so it costs nothing otherwise.
+The same run then stays at 255-620 MB over 120 frames (a collection every ~20-30 frames). **Open (low priority):**
+*which* reference closes the cycle around a stage state (a `DEBUG_SAVEALL` back-trace came up empty once; the
+membership is timing-dependent). Breaking that cycle would make the guard unnecessary. **Confirmed at full scale
+2026-10-08:** the AV sweep's `crkNone` / `crkCullenDehnen2010` 3D Sedov at nx 40 with video ran all 883 steps (before: OOM
+near step 110). The text below is the original report.
+
 Found 2026-10-01 re-taking the CRK AV baseline (`scripts/av_report.py --config crk --profile full`): `crkNone / sedov` (3D, nx 40, video on, velocity alarm drawing every step) went 8.5 -> 21.5 GB
 allocated over 110 steps and hit CUDA OOM (the GPU is shared with other processes; ~28 GB free). Not the solver: the same run **without video** holds a flat 3.2 GB (nx 40; 1.4 GB at nx 30) over 160 steps. With
 `plot=True, video=True, velocityAlarmPlotInterval=1` at nx 30 allocated memory grows ~56 MB per step (1.4 -> 6.7 GB in 120 steps), i.e. about one 15M-entry float array per drawn frame.
@@ -450,6 +466,8 @@ above. Not done: a flat wall facing the same second shock (a channel end wall in
 ## 20. (resolved 2026-10-06 -- the support clamp is now wall-only; see RESOLVED_PROBLEMS.md)
 
 ## 21. (resolved 2026-10-06 -- Owen table fixed; support solver plan closed; see RESOLVED_PROBLEMS.md)
+
+## 22. (resolved 2026-10-07 -- corrected velocity gradient: volume-weighted M, correction on the gradient index; see RESOLVED_PROBLEMS.md)
 
 ## Resolved (details in [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md); numbers kept so references stay valid)
 
