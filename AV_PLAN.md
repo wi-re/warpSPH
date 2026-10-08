@@ -155,9 +155,9 @@ here -- no trade-off found; the only cost is a lower, broader Sedov peak (1.85 v
 Wadsley: the paper's literal prefactor 2 fixes Sod and helps KH / Sedov but costs Gresho (0.067 -> 0.075) and the
 cylindrical Noh post-shock density (-1.3 % -> -4.4 %); its uniform-compression blindness survives (pre-shock alpha
 1e-8); a slower decay on top only costs more Gresho. A genuine trade-off, not a bug. The repo default (Rosswog +
-limited reconstruction) does not ring at the Sod shock (alpha 1.0 there, L1 0.0043). **For the user:** adopt
-Sphenix ell_V = 5 as this repo's Sphenix default (documented deviation from the paper's 0.05)? Keep Wadsley at the
-derived 0.5 (paper-faithful, best Gresho / Noh) or take 2 (C&D-like shocks)?
+limited reconstruction) does not ring at the Sod shock (alpha 1.0 there, L1 0.0043). **Decided 2026-10-08 (user):**
+Sphenix `sphenix_ell` defaults to 5 (documented deviation from the paper's 0.05; `sphenix_ell = 0.05` restores the
+paper's scheme); Wadsley stays at the derived prefactor 0.5. Investigation closed.
 
 ### Handoff: starting Phase 3 (2026-10-07)
 

@@ -12,6 +12,12 @@ inside the max -- SWIFT's implementation. **Eq. (24) is implicit** -- the decay 
 never undershoots zero (the paper's point, and AV_PLAN 5B's stability test); it is implemented as written, not as an
 explicit relaxation.
 
+**The decay constant is not the paper's.** Borrow et al. use ell_V = 0.05 (checked on the rendered PDF). In this
+code that lets alpha collapse within ~0.05 support radii of sound travel behind a shock, and the post-shock plateau
+rings (Sod L1 0.0137 vs C&D's 0.0052). `ViscositySwitchConfig.sphenix_ell` defaults to 5 (tau = 5 H / c, comparable
+to C&D's decay), which was better on every case tested -- Sod 0.0050, Sedov radius -0.3 %, Gresho 0.077, KH 0.121
+(AV_PLAN status board, 2026-10-08, user decision). Set `sphenix_ell = 0.05` for the paper's scheme.
+
 **The h convention.** Sphenix's `h` is the smoothing length and `gamma_K` the kernel's cut-off-to-smoothing-length
 ratio (Dehnen & Aly 2012). This repo stores the cut-off `H = gamma_K h`, and `sphKernelScale` *is* Dehnen & Aly's
 gamma (cubic 3D 1.825742, quartic 3D 2.018932 -- the paper's own example --, Wendland C2 3D 1.936492). So
