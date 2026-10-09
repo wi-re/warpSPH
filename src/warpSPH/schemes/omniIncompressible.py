@@ -466,7 +466,7 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *, checkS
             bm = source[fluid].mean()
             sn = source[fluid].norm().clamp_min(1e-30)
             fracUniform = 1.0 - float((source[fluid] - bm).norm() / sn)
-            project = (CD_SOURCE_PROJECT == 'always'
+            project = (CD_SOURCE_PROJECT == 'always' or bool(getattr(schemeConfig, 'closedDomain', False))      # `closedDomain`: no free surface (DFSPH2D closedDomain): the mean of the source is in the null space of the operator
                        or fracUniform > CD_PROJECT_THRESHOLD)
             if project:
                 source = source - torch.where(fluid, bm.expand_as(source),

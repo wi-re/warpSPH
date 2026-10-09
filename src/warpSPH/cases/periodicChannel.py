@@ -62,6 +62,12 @@ def configureScheme(ctx: RunContext) -> None:
     ctx.config.dx = dx
     ctx.config.nx = ctx.spec.nx
 
+    configureFlow(ctx, dx, shear)
+
+
+def configureFlow(ctx: RunContext, dx: float, shear: bool = False) -> None:
+    """The scheme knobs the periodic validation cases share (`periodicChannel`, `stokesArray`): no gravity, the viscosity (the alpha artificial one or the physical Morris one with the no-slip moment closure),
+    the uniform body force and its wall pressure condition, the periodic wall images, the stage 2 options of the incompressible loops."""
     sc = ctx.schemeConfig
     sc.surfaceDetectionConfig.active = False
     sc.gravityConfig.active = False
@@ -99,6 +105,8 @@ def configureScheme(ctx: RunContext) -> None:
         sc.freeSurface = False
         ctx.scratch['morrisCal'] = cal
     sc.analyticPeriodicWalls = not shear
+    sc.wallPressureViscous = bool(ctx.param('wallPressureViscous', False))
+    sc.pressureConsistent = bool(ctx.param('pressureConsistent', False))          # delta+: the force of a uniform pressure removed (the cut lattice on a curved wall)
     sc.bodyForce = (ctx.param('fShear') if shear else ctx.param('f'), 0.0)
     sc.bodyForceAtWall = ctx.param('bodyForceAtWall')
     if not shear:
@@ -108,6 +116,8 @@ def configureScheme(ctx: RunContext) -> None:
         sc.shiftProperties.active = ctx.param('shifting')
         sc.shiftProperties.scheme = ShiftingScheme[ctx.param('shiftScheme')]
         sc.shiftProperties.projectionScheme = ShiftingProjectionScheme[ctx.param('shiftProjection')]
+
+
 
 
 def buildSystem(ctx: RunContext):

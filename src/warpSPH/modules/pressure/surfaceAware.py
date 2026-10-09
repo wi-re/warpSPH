@@ -56,6 +56,19 @@ def computePressureForceSurfaceAware(currentState: Any, config: SimulationConfig
         wall = resolveWall(currentState, config, schemeConfig, adjacency, wall)
         if wall is not None:
             from ..analyticBoundary import wallPressureAcceleration
-            dvdt = dvdt + wallPressureAcceleration(wall, currentState.pressures, antuonoSwitch(currentState.pressures, currentState.surfaceIndicators), currentState.densities,
-                                                   wallMass=wall.wm, h=wall.support)
+            sw = antuonoSwitch(currentState.pressures, currentState.surfaceIndicators)
+            dvdt = dvdt + wallPressureAcceleration(wall, currentState.pressures, sw, currentState.densities, wallMass=wall.wm, h=wall.support)
+            if getattr(schemeConfig, 'pressureConsistent', False):
+                # the boundaries repo's `pressureConsistent`: the force a UNIFORM pressure would exert (the fluid pairs with the Antuono switch s, the wall with its clamp) is the static wall-consistency residual
+                # S_i = sum_j V_j grad W_ij + G_i times (1 + s) P_i: spurious where the layout does not fill to the wall (a cut lattice on a curved wall). Removing it leaves the difference form,
+                # exact for a uniform pressure of any sign and level; the wall then acts through its hydrostatic part only. Not at a free surface (the truncation there is physical).
+                from ..analyticBoundary.wallTerms import F64
+                apparent = currentState.masses / currentState.densities
+                Sf = warpOperation(currentState, OperationProperties(kernel=config.kernel, operation=WarpOperation.Gradient, gradientMode=GradientScheme.Naive, supportMode=SupportScheme.Gather),
+                                   queryValues=apparent * currentState.densities / currentState.masses, domain=config.domain, adjacency=adjacency)
+                interior = (currentState.surfaceIndicators == 0).to(F64)[:, None]
+                P = currentState.pressures.to(F64)
+                G = wall.G.sum(0).to(F64)
+                rho = currentState.densities.to(F64)[:, None]
+                dvdt = dvdt + (interior * (((1.0 + sw.to(F64)) * P)[:, None] * Sf.to(F64) + (P.clamp(min=0) + sw.to(F64) * P)[:, None] * G) / rho).to(dvdt.dtype)
         return dvdt

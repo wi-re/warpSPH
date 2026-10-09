@@ -378,12 +378,29 @@ def _deltaSPH_rhs(
             currentState, config, schemeConfig, adjacency,
             renormalizationState=pressureRenormalizationState, wall=wall)      # wall: the wall's pressure force, same Antuono switch as the fluid pairs
 
+    accVP = None
+    if wall is not None and getattr(schemeConfig, 'wallPressureViscous', False):
+        # the wall pressure condition with the viscous term (the boundaries repo's `wallPressureViscous`): at a no-slip wall the momentum balance gives grad p = rho (g + f - a_wall) + rho nu lap u, so the ghost
+        # pressure extends with the hydrostatic gradient (already in A) PLUS the particle's own viscous acceleration (fluid pairs + wall term): matters where the pressure is viscous-dominated (flow past a curved wall at low Re)
+        from warpSPHBoundaries.scene import WallOutput
+        a1v = (schemeConfig.fluid.restDensity * dvdt_diss.double())[None].expand(wall.G.shape[0], -1, -1).contiguous()
+        Av = wall.wm * wall.agg.evaluate((WallOutput('A', 0, 'a1g1'),), a1=a1v)['A']
+        accVP = -Av / currentState.densities.double()[None, :, None]                      # [B, N, 2]
+        dvdt_pressure = dvdt_pressure + accVP.sum(0).to(dvdt_pressure.dtype)
     if wall is not None and (getattr(schemeConfig, 'analyticWallLoads', False) or any(rb.dynamic for rb in provider.rigidBodies)):
         # the load of the fluid on every analytic body (pressure, wall viscous): the reaction to the wall terms, booked on the RigidBody for diagnostics and for the free bodies
         with record_function("[warpSPH] - [deltaSPH - 13b] - analytic wall loads"):
             hWall, wm = wall.support, wall.wm
             switch = antuonoSwitch(currentState.pressures, currentState.surfaceIndicators)
-            accP = wallPressureAcceleration(wall, currentState.pressures, switch, currentState.densities, wallMass=wm, h=hWall, perBody=True)
+            if getattr(schemeConfig, 'pressureConsistent', False):
+                # the load must not depend on the pressure level: only the deviation from the mean pressure of the fluid exerts a net force (`pressureConsistent`: the wall's symmetric term 2 (P - mean P) G + A)
+                fl = currentState.kinds == 0
+                Pload = currentState.pressures - currentState.pressures[fl].mean()
+                accP = (-(2.0 * Pload.double()[None, :, None] * wall.G.double() + wall.A.double()) / currentState.densities.double()[None, :, None]).to(wall.dtype)
+            else:
+                accP = wallPressureAcceleration(wall, currentState.pressures, switch, currentState.densities, wallMass=wm, h=hWall, perBody=True)
+            if accVP is not None:
+                accP = accP + accVP.to(accP.dtype)
             if getattr(schemeConfig, 'wallViscosityClosure', 'mirror') == 'noslipMoment':
                 # the no-slip moment closure's per-body term (its balance needs the fluid-only Morris acceleration of the particles)
                 from ..modules.analyticBoundary.wallViscosity import wallNoSlipAcceleration

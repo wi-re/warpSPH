@@ -53,6 +53,8 @@ CASE_MODULES = (
     'sloshingTank',
     'channelFlow',
     'periodicChannel',
+    'stokesArray',
+    'taylorCouette',
     # incompressible -- examples/incompressible/*.ipynb
     'tgv',
     'kolmogorovIncompressible',
