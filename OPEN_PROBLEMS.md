@@ -469,6 +469,17 @@ above. Not done: a flat wall facing the same second shock (a channel end wall in
 
 ## 22. (resolved 2026-10-07 -- corrected velocity gradient: volume-weighted M, correction on the gradient index; see RESOLVED_PROBLEMS.md)
 
+## 23. CompSPH + Rosswog (2020) switch: Sedov blows up at t = 0.056 (found 2026-10-09)
+
+AV bake-off CompSPH cross-check (`results/av_bakeoff_2026-10-09/compSPH.log`, config `compRosswog`, case `sedov`):
+|v|max 3.6e5 x the initial sound speed at step 122 (t = 0.056; the alarming particle sits at x = (8e-10, 8e-9, 5.55)), non-finite
+velocities at step 123, `thermalEnergy` already negative (-1.2e10) at step 123, alphaMean 0.45. The same case with
+`compNone`, `compCD` and `compWadsley` completes (shock radius error -4.9 % / -4.1 % / -3.7 %); the Monaghan
+`rosswog2020` rows (fixed beta 2, limited, coupled) complete (-1.3 .. -1.5 %). Not yet known whether it is the switch's
+cold-gas branch (a zero-sound-speed ambient medium in the trigger; compare the Sphenix 0/0 guard in AV_PLAN's Phase 5B build notes), CompSPH's own
+viscosity form, or the point-source initial condition. Not investigated; the bake-off needs no fix for it (a
+cross-check row). Evidence: `docs/av/bakeoff_2026-10-09/report.md` (CompSPH section, `compRosswog` sedov `nan`).
+
 ## Resolved (details in [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md); numbers kept so references stay valid)
 
 - **§5** englishWedge concave-corner residual -- sign bug in the `fourtakas2019` hydrostatic correction, fixed `68a9a6d`; 2026-09-29 re-validation: keep the default combo.

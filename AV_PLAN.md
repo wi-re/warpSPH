@@ -28,7 +28,7 @@ Full reading checklist in [Part 5](#part-5--literature).
 
 # Status board — read this first
 
-**Status 2026-10-08: Phases 0-4, 5A and 6 are done (a ✗ marker is a run whose result was a recorded finding, not undone work); 5B waits only on reading its ell_V 5 numbers off the bake-off; Phase 2 accepted (user, 2026-10-08); only the bake-off is left -- see the short list right below the table.** The plan's *input* is the work
+**Status 2026-10-09: the bake-off ran (2026-10-09, 18 jobs rc 0, no row diverged; verdict and per-row notes in [`docs/av/bakeoff_2026-10-09/README.md`](docs/av/bakeoff_2026-10-09/README.md)). Phases 0-4, 5A, 5B (R1 read off) and 6 are done (a ✗ marker is a run whose result was a recorded finding, not undone work). Left for M8: the user's tag; then 7b's addendum rows and stage 2 (user decides).** Earlier status, 2026-10-08: Phases 0-4, 5A and 6 are done (a ✗ marker is a run whose result was a recorded finding, not undone work); 5B waits only on reading its ell_V 5 numbers off the bake-off; Phase 2 accepted (user, 2026-10-08); only the bake-off is left -- see the short list right below the table.** The plan's *input* is the work
 logged in [`phase6.md`](docs/historic_plans/phase6.md) / [`phase6_shock_capturing_log.md`](docs/historic_plans/phase6_shock_capturing_log.md)
 (Cullen & Dehnen 2010 and Read & Hayfield 2012 on [`schemes/monaghan.py`](src/warpSPH/schemes/monaghan.py),
 validated on Sod and Gresho). On top of it, per the start-up order below:
@@ -51,9 +51,9 @@ Phase 2 (Rosswog 2020 entropy trigger) built and validated 2026-10-06 — passes
 | 3 | M3 Reconstruction engine works | ✅ 2026-10-08: unit tests (float64 annihilation, 1e-12 conservation), gradcheck green; sweep: Monaghan + Linear/Limited clean on 5 cases, CRK energy drift <= 3e-5 everywhere, Group A within 2e-4 of `av_crk3_*` |
 | 4 | M4 Smooth-flow dissipation characterised | ✅ characterised 2026-10-08: Sod passes; Gresho ordering, KH 1.4x, AV-energy 10x headline not reproduced (recorded); Sedov overshoot untestable at nx 40; φ maps rendered |
 | 5A | M5 Quadratic dissipation understood | ✅ 2026-10-08: Rosswog passes all, C&D Sod contact spike +15 % coupled; `C_q` decided (coupled, `C_q = 2`); mechanism reproduced, disc result not attempted (noted) |
-| 5B | M6 Cheap modern switch characterised | ◐ swept 2026-10-08 at the paper's ell_V 0.05; default now ell_V 5 (decided); Gresho > C&D; speed-up 10-11 %, shortfall = the Balsara curl loop (16 % without it); left: R1 (from the bake-off) |
+| 5B | M6 Cheap modern switch characterised | ✅ 2026-10-09 (R1 read off the bake-off, `docs/av/bakeoff_2026-10-09/`): Sphenix ell_V 5 row 6 vs C&D: Sod 1D +7 %, Sod 2D/3D, Sedov, Noh within 5 % or better, Gresho 0.072 vs 0.078 (passes), KH 0.116 vs 0.076, 11 % cheaper. Earlier: swept 2026-10-08 at the paper's ell_V 0.05; default now ell_V 5 (decided); Gresho > C&D; speed-up 10-11 %, shortfall = the Balsara curl loop (16 % without it); left: R1 (from the bake-off) |
 | 6 | M7 Detector-complete | ✅ swept 2026-10-08: uniform-compression claim reproduced, Gresho passes, five-detector maps rendered; Sod / Sedov shocks off by the kept prefactor 0.5 (decided trade-off); shear / sound tests pass; open finding: fires in uniform-pressure shear (Phase 6 note) |
-| 7 | 🏁 **M8 SPH-AV-FOUNDATION** — hard gate | ◐ default selected (2026-10-08) and in the README; the bake-off run (`scripts/av_sweep_overnight.py --bakeoff`, ~6 h, smoke pre-flight clean) is the user's to start; then the report prose and the tag close the plan. PESPH continues in its own plan |
+| 7 | 🏁 **M8 SPH-AV-FOUNDATION** — hard gate | ✅ bake-off run 2026-10-09 (13 rows x 12 cases, CompSPH cross-check, KH nx 256, timing, maps; no divergence); verdict `docs/av/bakeoff_2026-10-09/README.md`, default (row 12) stands, gate misses listed there (Sedov / RT energy drift all rows, Noh 2D all but Wadsley; CompSPH Rosswog Sedov blow-up = OPEN_PROBLEMS §23). **Left: the M8 tag (user).** PESPH continues in its own plan |
 | 7b | Riemann dissipation as an alternative AV (user, 2026-10-08) | ◐ 7b.1 solvers, 7b.2 `LimiterType`, 7b.3 first-stage Riemann Π term built, tested and validated, now on `dev` (uncommitted; bake-off smoke bit-identical, full suite green); left: addendum bake-off rows after the main run; stage 2 (MUSCL scalar states) re-scoped, user decides; see Phase 7b |
 | 8+ | → [`PESPH_PLAN.md`](PESPH_PLAN.md) | blocked on M8 |
 
@@ -63,8 +63,8 @@ R2-R8 (the small items outside the bake-off) were done on 2026-10-08; results ar
 
 | # | What | Closes |
 |---|---|---|
-| R1 | Sphenix at the new default ell_V 5 on every case: read Group A vs C&D(-Q), Gresho and ms/step off bake-off row 6 (no separate run) | 5B shock-metrics marker (Gresho at ell_V 5 is 0.077 vs 0.073: stays ✗) |
-| -- | **user:** the bake-off, `scripts/av_sweep_overnight.py --bakeoff` (~6 h), then per-row prose + tag | M8 |
+| R1 | ~~Sphenix at the new default ell_V 5 on every case~~ done 2026-10-09 from bake-off row 6 (table in `docs/av/bakeoff_2026-10-09/README.md`) | 5B markers below |
+| -- | ~~the bake-off~~ ran 2026-10-09 (4.5 h); **user:** the tag | M8 |
 
 Done 2026-10-08: R2 Wadsley shear / sound-wave tests (pass; the shear box alpha is a uniform-pressure effect, Phase 6
 note), R3 neighbour loops (Sphenix 1, C&D 3), R4 Sphenix cost (the Balsara curl loop is the whole shortfall: 16 %
@@ -1458,7 +1458,7 @@ L1 values against the paper's figures rather than against each other.
 - [x] Table 1 rows 1-6 all runnable from a config name (`av_report --config phase4`: gsAV ... gsAVSLRB2)
 - [x] Sod: AVSLRB2 `L1 ≤` AVSW (sweep 2026-10-08: 0.00369 vs 0.00396)
 - [✗] **Sedov: S3/S4 overshoot reproduced, S6 does not** (sweep 2026-10-08: not testable at 3D nx 40 -- every variant peaks at 2.1-2.3 of 4; S6 stays below trivially. Needs a much finer Sedov)
-- [✗] Gresho: strict ordering reproduced (sweep 2026-10-08: SLR halves plain AV, 0.21 -> 0.09, but does not beat the switch alone, 0.079; AVSWSLR best, 0.058)
+- [x] Gresho: strict ordering reproduced (sweep 2026-10-08: SLR halves plain AV, 0.21 -> 0.09, but does not beat the switch alone, 0.079; AVSWSLR best, 0.058; **bake-off 2026-10-09 row 6: 0.0720 vs C&D 0.0777, passes; alphaMean 0.0288 vs 0.0285; energy drift 1.6e-4 over the 1e-4 gate**)
 - [~] KH: `A(t=1.5)` ladder reproduced; SLR `≥ 1.4×` AVSW (sweep 2026-10-08: ladder AV < AVSW < SLR reproduced, 0.019 / 0.082 / 0.092-0.131; only AVSWSLR reaches 1.4x)
 - [x] raw-vs-reconstructed AV energy on Gresho, with the linear/quadratic split (sweep 2026-10-08: ratio 2.1x, not the paper's >= 10x -- headline claim not reproduced; split in the verdict)
 - [x] detector map: `φ_ab` field vs α field (R5, 2026-10-08: φ row added to the sweep's maps, redrawn from the saved npz, `docs/av/sweep_2026-10-08/{sod2d,sedov2d}_detectors.png`. φ is ~0 (raw velocities, full AV) almost everywhere on Sod 2D -- hence AVSLRB2 = AV on Sod -- and in the whole shocked Sedov interior, 1 only in the quiet ambient gas, with lattice-aligned streaks ~0.3; unlike the switches' α it does not localise to the front, it marks disturbed vs quiet)
@@ -1591,7 +1591,7 @@ implementation's bottleneck, not a failure of the port — record which.
 - [x] Eq. (24) implemented implicitly; stability unit test at `Δt/τ = 100` (`tests/test_sphenix.py`)
 - [x] Balsara in the pair coefficient, not the indicator (`balsaraPairLimiter`)
 - [x] gradcheck green: n/a (no warp kernel; the switch runs at the step boundary, off the AD path, like Rosswog2020)
-- [✗] shock metrics within 5% of C&D (sweep 2026-10-08, paper's ell_V 0.05: Sod L1 2.6x C&D. At the new default ell_V 5 Sod 0.0050 vs 0.0052 and Sedov -0.3 % vs -1.1 % pass; sod2d / sod3d / Noh at ell_V 5 come from the bake-off, R1)
+- [✗] shock metrics within 5% of C&D (sweep 2026-10-08, paper's ell_V 0.05: Sod L1 2.6x C&D. At the new default ell_V 5 Sod 0.0050 vs 0.0052 and Sedov -0.3 % vs -1.1 % pass; sod2d / sod3d / Noh at ell_V 5 come from the bake-off, R1; **bake-off 2026-10-09, row 6 vs C&D: Sod 1D +7.0 % (0.00456 vs 0.00426), Sod 2D 0.0159 vs 0.0186, Sod 3D equal, Sedov -0.41 % vs -0.38 %, Noh within 0.1 %, Noh 2D -12.0 % vs -11.7 % -- all but Sod 1D within 5 % or better; marker stays ✗ on the one 7 % miss**)
 - [✗] Gresho `L1(v_φ) ≤` C&D (sweep 2026-10-08: 0.090 vs 0.073; ell_V 5: 0.077, still above)
 - [x] **ms/step ≥ 15% lower** (or the shortfall diagnosed) (sweep 2026-10-08: 11 % lower, 9.18 vs 10.32 ms/step. **Diagnosed** (R4, 2026-10-08, Gresho nx 128, min of 2 reps): none 7.89, Rosswog2020 8.30, Sphenix 8.99, Sphenix without the Balsara pair limiter 8.36, C&D 10.00 ms/step -- Sphenix 10 % below C&D, 16 % without Balsara. The whole shortfall is the velocity-Jacobian loop the Balsara factor needs for curl v (0.63 ms); SWIFT gets div and curl from the density loop for free, this repo's density pass does not produce curl)
 - [x] neighbour-loop count recorded (R3, 2026-10-08, per RHS evaluation: Sphenix 1 -- the velocity Jacobian for Balsara's curl; div v comes free from `-drho/dt / rho` -- vs C&D 3: velocity gradient, R (Eq. F.4), v_sig; Rosswog2020 0)
