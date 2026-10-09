@@ -340,6 +340,7 @@ def buildSystem(ctx: RunContext):
     if getattr(ctx.scheme, 'name', ctx.scheme) in ('omniIncompressible', 'divergenceFree'):
         ctx.schemeConfig.xsphCoefficient = ctx.param('xsphCoefficient')
         ctx.schemeConfig.projection, ctx.schemeConfig.projectionTol, ctx.schemeConfig.densitySolve = ctx.param('projection'), ctx.param('projectionTol'), ctx.param('densitySolve')
+        ctx.schemeConfig.shifting, ctx.schemeConfig.shiftA = ctx.param('particleShift'), ctx.param('shiftA')
         ctx.schemeConfig.boundaryFriction = ctx.param('boundaryFriction')
     elif ctx.param('xsphCoefficient') or ctx.param('boundaryFriction') or ctx.schemeConfig.analyticWallPressure == 'mls':
         raise ValueError("analyticWallPressure='mls', boundaryFriction and xsphCoefficient are omniIncompressible / divergenceFree options")
@@ -1028,6 +1029,8 @@ dambreakCase = registerCase(Case(
         boundaryFriction=0.0,
         # incompressible analytic walls: the divergence stage as 'jacobi' (omniSPH, default) or the converged 'compact' projection (modules/incompressible/compactProjection.py); densitySolve=False leaves the projection the only pressure solve
         projection='jacobi',
+        particleShift='none',
+        shiftA=0.5,
         projectionTol=1e-8,
         densitySolve=True,
         targetDt=0.0005,

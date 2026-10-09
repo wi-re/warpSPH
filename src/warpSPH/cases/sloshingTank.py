@@ -165,6 +165,7 @@ def configureScheme(ctx: RunContext) -> None:
     if getattr(ctx.scheme, 'name', ctx.scheme) in ('omniIncompressible', 'divergenceFree'):
         sc.xsphCoefficient = ctx.param('xsphCoefficient')
         sc.projection, sc.projectionTol, sc.densitySolve = ctx.param('projection'), ctx.param('projectionTol'), ctx.param('densitySolve')
+        sc.shifting, sc.shiftA = ctx.param('particleShift'), ctx.param('shiftA')
         sc.boundaryFriction = ctx.param('boundaryFriction')
     sc.surfaceDetectionConfig.active = True
     sc.gravityConfig.active = True
@@ -582,6 +583,9 @@ sloshingTankCase = registerCase(Case(
         boundaryFriction=0.0,
         # incompressible analytic walls: the divergence stage as 'jacobi' (omniSPH, default) or the converged 'compact' projection (modules/incompressible/compactProjection.py); densitySolve=False leaves the projection the only pressure solve
         projection='jacobi',
+        # DFSPH2D Fickian particle shift of the incompressible analytic-wall schemes (modules/shifting/fickian.py): particleShift 'none' | 'fixed' | 'fickian', shiftA
+        particleShift='none',
+        shiftA=0.5,
         projectionTol=1e-8,
         densitySolve=True,
         gravityMagnitude=9.81,

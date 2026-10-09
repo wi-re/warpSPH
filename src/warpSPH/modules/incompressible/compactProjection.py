@@ -21,10 +21,33 @@ import torch
 
 from warpSPHCore import KernelFunctions
 
-__all__ = ['MORRIS_ETA2', 'morrisCalibration', 'compactWeights', 'CompactCG', 'solveCompactProjection']
+__all__ = ['MORRIS_ETA2', 'CLOSED_PRESET', 'morrisCalibration', 'compactWeights', 'CompactCG', 'solveCompactProjection', 'resolveClosedPreset']
 
 F64 = torch.float64
 MORRIS_ETA2 = 0.0025               # eta^2 / h^2 of the Morris pair weight (`modules/deltaSPH/wp_viscosityDelta.py`)
+
+
+#: DFSPH2D `CLOSED_PRESET`: the converged-projection setup for closed / periodic flows without a free surface (Stokes arrays, TGV, channel, Couette ~ 1.00 against 1.2-1.45 for the density-solve path).
+#: Fields still at their library default take these values (`resolveClosedPreset`); explicit values win.
+CLOSED_PRESET = dict(projection='compact', densitySolve=False, shifting='fixed', shiftA=0.5, divergenceGauge='min')
+_LIBRARY_DEFAULTS = dict(projection='jacobi', densitySolve=True, shifting='none', shiftA=0.5, divergenceGauge='none')
+
+
+def resolveClosedPreset(schemeConfig: Any, config: Any) -> None:
+    """`schemeConfig.closedPreset` (default False: opt-in here, unlike DFSPH2D's `None` = on iff the domain is fully periodic, so the shipped incompressible cases keep their behaviour): True applies `CLOSED_PRESET`
+    to every field still at its library default, once per scheme config; `'auto'` is DFSPH2D's rule (on iff every dimension of the domain is periodic). A walled closed domain needs `True`."""
+    flag = getattr(schemeConfig, 'closedPreset', False)
+    if getattr(schemeConfig, '_closedPresetResolved', False) or flag is False or flag is None:
+        return
+    if flag == 'auto':
+        per = getattr(config.domain, 'periodic', None)
+        flag = per is not None and bool(torch.as_tensor(per).all())
+    schemeConfig._closedPresetResolved = True
+    if not flag:
+        return
+    for k, v in CLOSED_PRESET.items():
+        if getattr(schemeConfig, k, _LIBRARY_DEFAULTS[k]) == _LIBRARY_DEFAULTS[k]:
+            setattr(schemeConfig, k, v)
 
 
 def _dwendland2(r, h):

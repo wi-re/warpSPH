@@ -140,3 +140,46 @@ def test_boundary_particles_refuse_the_compact_projection():
         plot=False, store=False, progress=False, video=False, show=False, quiet=True)
     with pytest.raises(NotImplementedError, match='analytic walls'):
         run(case, spec)
+
+
+# ---- A2 / A3: the closed-domain preset and the Fickian shift ---------------------------------------------------------------------------------------------------------------
+
+def test_closed_preset_fills_only_the_fields_left_at_their_library_default():
+    from types import SimpleNamespace
+    from warpSPH.modules.incompressible.compactProjection import CLOSED_PRESET, resolveClosedPreset
+    sc = SimpleNamespace(closedPreset=True, shifting='fickian')                              # an explicit shift survives, everything else takes the preset
+    resolveClosedPreset(sc, SimpleNamespace(domain=SimpleNamespace(periodic=None)))
+    assert sc.projection == 'compact' and sc.densitySolve is False and sc.divergenceGauge == 'min' and sc.shifting == 'fickian'
+    off = SimpleNamespace()
+    resolveClosedPreset(off, SimpleNamespace(domain=SimpleNamespace(periodic=None)))          # opt-in: absent means off
+    assert not hasattr(off, 'projection')
+    auto = SimpleNamespace(closedPreset='auto')
+    resolveClosedPreset(auto, SimpleNamespace(domain=SimpleNamespace(periodic=torch.tensor([True, True]))))
+    assert all(getattr(auto, k) == v for k, v in CLOSED_PRESET.items())
+    walled = SimpleNamespace(closedPreset='auto')
+    resolveClosedPreset(walled, SimpleNamespace(domain=SimpleNamespace(periodic=torch.tensor([True, False]))))
+    assert not hasattr(walled, 'projection')
+
+
+@cuda
+def test_fickian_shift_is_a_cap_bounded_position_move_that_vanishes_in_a_regular_bulk():
+    from warpSPH.modules.analyticBoundary import resolveWall
+    from warpSPH.modules.shifting.fickian import computeFickianShift
+    r = tank(nSteps=1)
+    st, ctx = r.state.state, r.ctx
+    sc, cfg, adj = ctx.schemeConfig, ctx.config, r.state.adjacency
+    fluid = st.kinds == 0
+    wall = resolveWall(st, cfg, sc, adj)
+    sc.shifting, sc.shiftA, sc.freeSurface = 'fixed', 2.0, True
+    dx = float(cfg.dx)
+    dxs = computeFickianShift(st, cfg, sc, adj, fluid=fluid, rho0=sc.fluid.restDensity, dt=1e-3, wall=wall)
+    assert float(dxs.norm(dim=1).max()) <= 0.25 * dx * (1 + 1e-5)                              # the cap
+    pos = st.positions.cpu().numpy()
+    bulk = torch.as_tensor((pos[:, 1] > pos[:, 1].min() + 3 * dx) & (pos[:, 1] < pos[:, 1].max() - 3 * dx) & (np.abs(pos[:, 0]) < np.abs(pos[:, 0]).max() - 4 * dx), device=dxs.device)
+    assert int(bulk.sum()) > 100
+    assert float(dxs[bulk].norm(dim=1).max()) < 0.02 * dx                                       # a calibrated lattice has nothing to shift in the bulk
+    sc.shifting = 'none'
+    assert float(computeFickianShift(st, cfg, sc, adj, fluid=fluid, rho0=sc.fluid.restDensity, dt=1e-3, wall=wall).abs().max()) == 0.0
+    sc.shifting = 'bogus'
+    with pytest.raises(ValueError):
+        computeFickianShift(st, cfg, sc, adj, fluid=fluid, rho0=sc.fluid.restDensity, dt=1e-3, wall=wall)

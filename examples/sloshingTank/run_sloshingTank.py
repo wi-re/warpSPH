@@ -102,6 +102,7 @@ def parseArgs(argv):
     p.add_argument('--analyticWallPressure', choices=('hydrostatic', 'normal', 'mls'), default=None,
                    help="analytic walls only: wall pressure condition (case default hydrostatic; 'mls': omniIncompressible, the gradient fitted to the fluid's pressure iterate)")
     p.add_argument('--projection', choices=('jacobi', 'compact'), default=None, help="omniIncompressible / divergenceFree, analytic walls: the divergence stage, omniSPH's relaxed Jacobi (default) or the converged compact CG projection")
+    p.add_argument('--particleShift', choices=('none', 'fixed', 'fickian'), default=None, help='omniIncompressible / divergenceFree, analytic walls: the DFSPH2D Fickian particle shift (fixed D = shiftA h_s^2, or Lind D = shiftA h_s |v| dt)')
     p.add_argument('--noDensitySolve', action='store_true', help='omniIncompressible / divergenceFree: skip the constant-density solve (the projection is the only pressure solve)')
     p.add_argument('--xsph', type=float, default=None, help='omniIncompressible / divergenceFree: XSPH velocity smoothing coefficient (DFSPH2D: 1e-4; case default 0)')
     p.add_argument('--boundaryFriction', type=float, default=None, help='omniIncompressible / divergenceFree, analytic walls: boundary friction coefficient (DFSPH2D: 5e-3; case default 0)')
@@ -228,6 +229,8 @@ def buildSpec(case, args):
         params['xsphCoefficient'] = args.xsph
     if args.projection is not None:
         params['projection'] = args.projection
+    if args.particleShift is not None:
+        params['particleShift'] = args.particleShift
     if args.noDensitySolve:
         params['densitySolve'] = False
     if args.boundaryFriction is not None:

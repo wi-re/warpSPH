@@ -621,6 +621,8 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
     fcol = fluid.unsqueeze(-1)
     rho0 = schemeConfig.fluid.restDensity
 
+    from ..modules.incompressible.compactProjection import resolveClosedPreset
+    resolveClosedPreset(schemeConfig, config)
     solver = schemeConfig.solverConfig
     divCfg = solver.divergenceFreeSolver   # omniSPH dfsph.divergenceEta
     denCfg = solver.pressureSolver          # omniSPH dfsph.densityEta
@@ -687,8 +689,16 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
         fcol, accel, torch.zeros_like(accel))
     # if DAMPING != 0.0:
         # st.velocities = st.velocities * (1.0 - DAMPING)
+    shiftNow = None
+    if getattr(schemeConfig, 'shifting', 'none') != 'none':
+        # DFSPH2D `shifting='fixed' / 'fickian'`: a position move after the advection, the concentration gradient at the pre-move positions (the pair list still describes them)
+        from ..modules.shifting.fickian import computeFickianShift
+        shiftNow = computeFickianShift(st, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0, dt=dt,
+                                       velocities=st.velocities, wall=resolveWall(st, config, schemeConfig, adjacency))
     st.positions = st.positions + dt * torch.where(
         fcol, st.velocities, torch.zeros_like(st.velocities))
+    if shiftNow is not None:
+        st.positions = st.positions + shiftNow
 
     # omniSPH: fluidPriorPressure = fluidPressure1 (the density solve's field).
     st.pressures = pRho

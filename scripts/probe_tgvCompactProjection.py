@@ -20,6 +20,11 @@ VARIANTS = {
     'jacobi_nods': dict(projection='jacobi', densitySolve=False),
     'compact': dict(projection='compact', densitySolve=True),
     'compact_nods': dict(projection='compact', densitySolve=False, divergenceGauge='min'),
+    'nods_noshift': dict(projection='compact', densitySolve=False, divergenceGauge='min', shifting='none'),
+    'nods_fixed': dict(projection='compact', densitySolve=False, divergenceGauge='min', shifting='fixed'),
+    'nods_fickian': dict(projection='compact', densitySolve=False, divergenceGauge='min', shifting='fickian'),
+    'preset_fickian': dict(closedPreset=True, shifting='fickian'),
+    'preset': dict(closedPreset=True),                                                  # DFSPH2D CLOSED_PRESET: compact, no density solve, fixed shift A 0.5, min gauge
 }
 
 

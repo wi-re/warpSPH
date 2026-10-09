@@ -215,6 +215,8 @@ class IncompressibleSystem(BaseIntegrationSystem):
         if _psShift == 'auto':
             _psShift = (schemeConfig is not None
                         and not schemeConfig.gravityConfig.active)
+        if _psShift and schemeConfig is not None and getattr(schemeConfig, 'shifting', 'none') != 'none':
+            _psShift = False        # the Fickian shift of the step (`modules/shifting/fickian.py`) replaces the VD+PS shift
         if _psShift and config is not None and schemeConfig is not None:
             with record_function("[warpSPH] - [dfsph] - VD+PS particle shift"):
                 self.adjacency = buildVerletList(

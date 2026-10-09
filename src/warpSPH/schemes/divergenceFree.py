@@ -161,6 +161,8 @@ def divergenceFree_step(
     currentSystem = system#
     currentState = currentSystem.state
     adjacency = currentSystem.adjacency
+    from warpSPH.modules.incompressible.compactProjection import resolveClosedPreset
+    resolveClosedPreset(schemeConfig, config)
 
     # 1. Compute adjacency
     # with TimedBlock('compute adjacency', use_cuda=True, device=config.device) as tb_adjacency:
@@ -490,11 +492,20 @@ def divergenceFree_step(
         from warpSPH.modules.xsph import computeXSPH
         dvdt_xsph = dvdt_xsph + computeXSPH(currentState, config, schemeConfig, adjacency) / dt
 
+    # DFSPH2D `shifting='fixed' / 'fickian'` (modules/shifting/fickian.py): a position move, folded into `dxdt`; replaces the VD+PS shift of `IncompressibleSystem.finalize` (switched off there)
+    dxShift = torch.zeros_like(currentState.velocities)
+    if getattr(schemeConfig, 'shifting', 'none') != 'none':
+        from warpSPH.modules.shifting.fickian import computeFickianShift
+        from warpSPH.modules.analyticBoundary import resolveWall
+        dxShift = computeFickianShift(currentState, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0, dt=dt,
+                                      velocities=currentState.velocities + dt * (dvdt + dvdt_diss + dvdt_pressure + dvdt_inStep),
+                                      wall=resolveWall(currentState, config, schemeConfig, adjacency))
+
     # 16. build update
     # with TimedBlock('build update', use_cuda=True, device=config.device) as tb_update:
     with record_function("[warpSPH] - [deltaSPH - 16] - build update"):
         update = WeaklyCompressibleSystemUpdate(
-            dxdt = currentState.velocities.clone(),# + dt * dvdt_incomp,
+            dxdt = currentState.velocities.clone() + dxShift / dt,# + dt * dvdt_incomp,
             dvdt = (dvdt + dvdt_diss + dvdt_pressure + dvdt_inStep + dvdt_xsph),
                     # + (dvdt_inStep if dvdt_inStep is not None else 0.0)),
             drhodt = torch.zeros_like(currentState.densities),# + drhodt_diss,
