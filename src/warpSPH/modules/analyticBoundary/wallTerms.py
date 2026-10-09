@@ -52,7 +52,9 @@ class WallState:
 def resolveWall(state, config, schemeConfig, adjacency, wall=None):
     """The wall of a module's wall term: `wall` when the caller passes it, else the aggregates of the scheme's boundary provider at these positions (shared through
     the `evaluateWall` cache), else `None` (boundary particles, or no wall). The one convention of every module that takes a `wall` argument: `wall=None` never means
-    "skip the wall" on a scene that has analytic bodies."""
+    "skip the wall" on a scene that has analytic bodies; `wall=False` does (an explicit "no wall": a solve that leaves the wall out, `omniIncompressible`'s divergence solve)."""
+    if wall is False:
+        return None
     if wall is not None:
         return wall
     provider = getattr(schemeConfig, 'boundaryProvider', None)

@@ -421,14 +421,18 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *, checkS
         # density, the alpha and the pressure acceleration below); None with boundary particles
         wall = resolveWall(state, config, schemeConfig, adjacency)
         if mode == 'divergence' and not getattr(schemeConfig, 'analyticWallInDivergence', False):
-            # omniSPH's divergence solve ignores the wall (and the boundaries repo's DFSPH2D follows it for static walls, `boundaryInDivergence`); the density solve carries it
-            wall = None
+            # omniSPH's divergence solve ignores the wall (and the boundaries repo's DFSPH2D follows it for static walls, `boundaryInDivergence`); the density solve carries it.
+            # `False`, not `None`: the modules that resolve the wall themselves (`computeAlpha`) read `None` as "take the scheme's wall", and the diagonal must not carry
+            # a wall the operator does not (a first-row alpha 3x too small: Jacobi unstable at n_h = 4, OPEN_PROBLEMS 31)
+            wall = False
         # omniSPH folds -dt**2 into fluidAlpha; computeAlpha returns the
         # negated IISPH a_ii bracket, so `alpha <= 0` as omniSPH's is.
         alpha = dt * dt * computeAlpha(
             state, config, schemeConfig, adjacency,
             apparentVolumes=apparent, includeBoundaryReaction=False, wall=wall)
         alphaBad = alpha.abs() < ALPHA_FLOOR
+        if wall is False:
+            wall = None                    # the operators below take `None` as "no wall" (they never resolve one themselves)
 
         divEnter = _divergence(state, config, adjacency, vEnter, wall, bodyVelocity=True)
         if mode == 'density':
