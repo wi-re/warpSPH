@@ -783,7 +783,7 @@ def calibrateRestDensity(ctx: RunContext, system, *,
               f'(sampler) x latticeFactor {split["latticeFactor"]:.6f} at '
               f'n_h={split["n_h"]:.4f} (kernel)')
     if (getattr(ctx.schemeConfig, 'boundaryProvider', None) is not None
-            and ctx.param('calibrateWallMass', 'auto') in (True, 'auto')):
+            and ctx.param('calibrateWallMass', False) is True):
         calibrateAnalyticWallMass(ctx, system, verbose=verbose)
     return reference
 
@@ -797,8 +797,9 @@ def calibrateAnalyticWallMass(ctx: RunContext, system, *, window: float = 0.1, m
     whatever the wall's exact position in the lattice, and the continuum differs from a lattice half-space by a few percent at that distance (`sloshingTank` nx = 100:
     1.021 on the first row). The pressure solve reads that as a compression to relieve in the first step, with a pressure ~60 times the hydrostatic one. Least squares
     over the near-wall particles `wm = sum_i w_i (rho0 - rhoFluid_i) / sum_i w_i^2` (`w_i = int W dA`); the particles that enter are those whose support is complete to
-    within `window` of `rho0` with the wall (not a free surface: the density deficit there is physical), and `w_i > minWall`. The weakly compressible delta+ scheme integrates
-    its density and does not need it (`calibrateWallMass` = False). Returns the factor.
+    within `window` of `rho0` with the wall (not a free surface: the density deficit there is physical), and `w_i > minWall`. **Off by default (`calibrateWallMass` param, opt-in): a wall mass other than 1 breaks the partition of unity of fluid + wall (`sum_j V_j grad W_ij + G` = 0.09 at mass 1,
+    2.2 at 0.941, against |G| = 37), which the pressure solve's diagonal and the hydrostatic balance rely on; the density offset has to be removed by the wall's position
+    (a calibrated lattice), not its mass (OPEN_PROBLEMS 31).** Returns the factor.
     """
     from ..modules import computeDensities
     from ..modules.analyticBoundary import resolveWall
