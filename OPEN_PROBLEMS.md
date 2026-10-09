@@ -480,6 +480,41 @@ cold-gas branch (a zero-sound-speed ambient medium in the trigger; compare the S
 viscosity form, or the point-source initial condition. Not investigated; the bake-off needs no fix for it (a
 cross-check row). Evidence: `docs/av/bakeoff_2026-10-09/report.md` (CompSPH section, `compRosswog` sedov `nan`).
 
+## 24. Shifting curvature gate (`_curvatureGate`) takes the minimum over the raw Verlet list (found 2026-10-09)
+
+Sun et al. 2019 Eq. (21) gates a surface particle by the minimum of `n_i . n_j` over its neighbours *within the support*. `modules/shifting/wrapper.py::_curvatureGate` reduces over
+`adjacency.i / .j`, the raw Verlet list (pairs up to `verletScale` x support), so it gates more than the equation says. Measured in the analytic-boundary comparison (curvature gate on:
+a few free-surface particles differ from a reference that gates inside the support; the difference is bounded by the largest shift of the gated particles). Fix: restrict the pairs to
+`r <= support` before the reduction (a distance mask on `i, j`). Not changed: it alters the default shifting of every case.
+
+## 25. `computeDeltaShiftWarp`: the tensile reference value is W(dx / kernelScale), not W(dx) (found 2026-10-09)
+
+`modules/shifting/delta.py` evaluates `W_0` at `q = dx_ / hij` with `dx_ = (m / rho0)^(1/dim) / kernelScale`: the kernel at dx / kernelScale rather than at the particle spacing dx of Sun's law
+(`[1 + R (W_ij / W(dx))^n]`). For Wendland C2 at h = 4 dx this is 3.7 % of the tensile term (the factor enters as `W_0^-4`). The analytic-wall shifting follows warpSPH's convention so the fluid and wall parts of the sum
+are consistent. Decide whether this is intended.
+
+## 26. Implicit shifting with boundary particles diverges: `computeImplicitShift` sums the mDBC ghost nodes into grad C (found 2026-10-09)
+
+Dam break, `shiftScheme='implicit'`, boundary particles: the fastest particle reaches ~900 at 0.3 s; the same case with analytic walls is stable (it follows the analytic δ⁺ run to 1.1 %). The Michel and δ⁺ sums exclude the
+ghost nodes (kind 2) through the operation mode; the implicit solve's grad C sum is the suspect (traced during the analytic-boundary work, mechanism not re-verified when this entry was written). Next step: run the
+particle-wall implicit case with the ghost kind excluded from the grad C sum and compare.
+
+## 27. Particle rigid bodies are not CUDA-graph capturable (found 2026-10-09)
+
+`getTransformationMatrix` builds tensors from device scalars (`torch.tensor([[tensor, ...]])`) and `updateBodyParticlesWCSPH` indexes with boolean masks: both read the host, so a whole-step graph with particle
+rigid bodies (moving walls, obstacles) cannot be captured. Analytic bodies are graphable (static ones; see ANALYTIC_BOUNDARIES_PLAN). Fix: device-side transformation matrix, index_select instead of boolean masks.
+
+## 28. A failed CUDA-graph capture of the implicit shifting poisons the CUDA context (found 2026-10-09)
+
+The implicit shifting solves with host-synchronising Krylov solvers; a capture of the step fails and leaves the context in an error state ("operation not supported on global/shared address space"); the eager fallback then
+crashes. `_rhsIsGraphable` now refuses implicit / dynamic shifting up front (analytic-boundary change set), but any other host-synchronising module reached under capture has the same failure mode. A
+capture-failure path that resets or avoids the poisoned context is open.
+
+## 29. The graph's validation / re-capture executes the step more than once on a cloned state, but rigid-body tensors are shared (found 2026-10-09)
+
+A moving rigid body is advanced extra times by the graph's validation and re-capture runs (the state is cloned, the body tensors are not). Only static bodies are graphed for that reason
+(`schemes/deltaSPH.py::_rhsIsGraphable`). Fix: clone the rigid-body tensors with the state during validation.
+
 ## Resolved (details in [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md); numbers kept so references stay valid)
 
 - **§5** englishWedge concave-corner residual -- sign bug in the `fourtakas2019` hydrostatic correction, fixed `68a9a6d`; 2026-09-29 re-validation: keep the default combo.

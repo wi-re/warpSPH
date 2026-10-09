@@ -380,6 +380,9 @@ notebooks stay for exploration; the scripts are what you run unattended.
 | `dambreak` | [12-dambreak.py](examples/weaklyCompressible/12-dambreak.py) | dam break with optional obstacle |
 | `openFlow` | [13-open-flow.py](examples/weaklyCompressible/13-open-flow.py) | open channel flow past an obstacle |
 
+**Analytic walls (optional).** With the optional package `warpSPHBoundaries` installed (`pip install -e "warpSPH/[boundaries]"`), `dambreak --wallRepresentation analytic` replaces the tank's wall particles by exact
+kernel integrals over the solid (obstacles, mixed scenes, Michel / implicit shifting, free bodies and the whole-step graph included); see [ANALYTIC_BOUNDARIES_PLAN.md](ANALYTIC_BOUNDARIES_PLAN.md).
+
 ### Incompressible (DFSPH)
 
 | case | script | notes |

@@ -48,6 +48,9 @@ notebooks = [
     "ipympl",
     "ipywidgets",
 ]
+boundaries = [
+    "warpSPHBoundaries>=0.1",
+]
 dev = [
     "pytest",
     "build",
