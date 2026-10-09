@@ -88,3 +88,28 @@ def test_the_channel_obeys_the_momentum_balance():
     dudt = (u[hi] - u[lo]) / (t[hi] - t[lo])
     assert (F[lo:hi] / M[lo:hi]).mean() + dudt == pytest.approx(f, rel=0.05)
     assert u[hi] > 0.0
+
+
+@pytest.mark.parametrize('scheme', ['omniIncompressible', 'divergenceFree'])
+def test_the_incompressible_channel_obeys_the_momentum_balance(scheme):
+    """the incompressible loops on the plates (calibrated lattice, Morris viscosity with the no-slip moment closure): `F_plates / M + d(mean u) / dt = f`, loads = pressure + the closure's viscous term."""
+    importAll()
+    case = getCase('periodicChannel')
+    f = 0.05
+    spec = CaseSpec(caseName='ch', scheme=scheme, params={**case.params, 'f': f, 'wallViscosityClosure': 'noslipMoment'}).merged(**case.defaults).merged(
+        scheme=scheme, kernel='Wendland2', integrationScheme='semiImplicitEuler', supportMode='SuperSymmetric', dt=2e-3, adaptiveDt=False, nx=32, nSteps=500,
+        plot=False, store=False, progress=False, video=False, show=False, quiet=True)
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        r = run(case, spec)
+    t = np.asarray(r.series('t'))
+    u = np.asarray(r.series('meanVelocity'))
+    F = np.asarray(r.series('plateLoad'))
+    M = np.asarray(r.series('fluidMass'))
+    lo, hi = len(t) // 2, len(t) - 1
+    assert (F[lo:hi] / M[lo:hi]).mean() + (u[hi] - u[lo]) / (t[hi] - t[lo]) == pytest.approx(f, rel=0.05)
+    assert 0.0 < u[hi] < 0.8 * f * float(t[hi])                       # the walls hold it back (a free fluid reaches f t)
+    assert float(np.nanmax(r.series('maxVelocity'))) < 0.5
+    cal = r.ctx.scratch['latticeCalibration']
+    assert cal['V'] > 0 and r.ctx.schemeConfig.analyticWallMass == cal['mu']

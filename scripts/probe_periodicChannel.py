@@ -27,6 +27,13 @@ def main():
     ap.add_argument('--W', type=float, default=0.5)
     ap.add_argument('--time', type=float, default=12.0)
     ap.add_argument('--wall', default='noSlip')
+    ap.add_argument('--scheme', default='deltaSPH', choices=('deltaSPH', 'omniIncompressible', 'divergenceFree'))
+    ap.add_argument('--nuPhysical', type=float, default=None, help='incompressible schemes: the realised viscosity (default 0.0185 = the alpha-form value of the delta+ runs)')
+    ap.add_argument('--projection', default='jacobi', choices=('jacobi', 'compact'))
+    ap.add_argument('--noDensitySolve', action='store_true')
+    ap.add_argument('--particleShift', default='none')
+    ap.add_argument('--closedPreset', action='store_true')
+    ap.add_argument('--dt', type=float, default=2e-3)
     ap.add_argument('--visc', default='alpha', choices=('alpha', 'morris'))
     ap.add_argument('--closure', default='mirror', choices=('mirror', 'noslipMoment'))
     ap.add_argument('--no-complement', dest='complement', action='store_false', default=True)
@@ -45,8 +52,11 @@ def main():
     case = getCase('periodicChannel')
 
     def go(params, tLimit, video):
-        spec = CaseSpec(caseName='periodicChannel', scheme='deltaSPH', params={**case.params, 'alpha': a.alpha, 'W': a.W, 'f': a.f, 'wallBC': a.wall, 'shifting': a.shift, 'fluidViscosity': a.visc, 'wallViscosityClosure': a.closure, 'complementMoments': a.complement, **params}).merged(**case.defaults).merged(
-            nx=a.n, tLimit=tLimit, plot=video, video=video, show=False, store=False, progress=True, quiet=True, plotInterval=100, velocityAlarmPlotInterval=1, stallProgress=1e-3,
+        spec = CaseSpec(caseName='periodicChannel', scheme=a.scheme, params={**case.params, 'alpha': a.alpha, 'W': a.W, 'f': a.f, 'wallBC': a.wall, 'shifting': a.shift, 'fluidViscosity': a.visc, 'wallViscosityClosure': a.closure, 'complementMoments': a.complement,
+                                                      'projection': a.projection, 'densitySolve': not a.noDensitySolve, 'particleShift': a.particleShift, 'closedPreset': a.closedPreset,
+                                                      **({'nuPhysical': a.nuPhysical} if a.nuPhysical else {}), **params}).merged(**case.defaults).merged(
+            **({'kernel': 'Wendland2', 'integrationScheme': 'semiImplicitEuler', 'supportMode': 'SuperSymmetric', 'dt': a.dt, 'adaptiveDt': False} if a.scheme != 'deltaSPH' else {}),
+            scheme=a.scheme, nx=a.n, tLimit=tLimit, plot=video, video=video, show=False, store=False, progress=True, quiet=True, plotInterval=100, velocityAlarmPlotInterval=1, stallProgress=1e-3,
             **({'exportRoot': a.out} if (a.out and video) else {}))
         return run(case, spec)
 

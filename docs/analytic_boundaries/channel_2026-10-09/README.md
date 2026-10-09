@@ -14,3 +14,16 @@ Ported: `modules/analyticBoundary/wallMoments.py` (the curved-wall tables of the
 * **Exactness** (`tests/test_wallViscosity.py`): for a wall-quadratic profile and a uniform density, fluid + wall = `nu_p L` to < 1e-4 on the first rows with complement moments (the geometric tables miss it by ~10 %, the oracle's negative control; with the summation density, which varies by 1 % at a wall, the first row is off by 3 %: the contract is for uniform density); the tables equal a brute-force solid integral to 2 %.
 * **Plane Poiseuille, Morris + noslipMoment + complement, n = 32** (`scripts/probe_periodicChannel.py --visc morris --closure noslipMoment`, 6 s, Michel shifting): profile amplitude over the parabola of the measured shear viscosity (`nu_shear` = 0.02740, ratio 0.9895 to the nominal) **0.978** against the oracle's **0.979** (n = 32; 0.993 at n = 64); over the nominal long-wave viscosity 0.968; plate load (pressure + viscous) / body force **0.9983** (oracle 1.000 / 0.999). Frames: `periodic_channel_morris_noslipMoment_t1.5_t6.png` (regular lattice, parabolic profile, density within 0.99 - 1.01).
 * The alpha-form + mirror wall of the first run (amplitude 0.902 at n = 48) is now the "before": the closure removes the half-spacing no-slip offset the mirror has.
+
+## E3 in the incompressible loops, and the `periodicChannel` gate for them
+
+`periodicChannel` runs `omniIncompressible`, `divergenceFree` (and the others) too: physical Morris viscosity `nuPhysical` (the realised long-wave value; the operator carries `nu / cal`), `omniViscosity` (the omni loop's explicit viscous term with the wall closure, loads booked), the calibrated lattice for the plates (`calibrateChannel`: particle mass `rho0 V'`, wall mass `mu`, the plate faces moved by `d_wall - dx / 2`), `--projection`, `--closedPreset`, `--particleShift` as in stage 2. Plane Poiseuille at n = 48, 12 s, dt = 2e-3, `noslipMoment` + complement moments, no video (`incompressible_channel_runs.log`; profile amplitude over the parabola of the shear viscosity measured in the same lattice, plate load / body force):
+
+| scheme / divergence stage | amplitude | load / force | oracle (`DFSPH2D`, n = 48) |
+|---|---|---|---|
+| omniIncompressible, Jacobi | **0.9957** | 0.9997 | 0.9968 / 0.9993 (omni-style) |
+| omniIncompressible, compact projection | 0.9937 | 0.9997 | |
+| omniIncompressible, closed preset (compact, no density solve, fixed shift) | 0.9961 | 0.9998 | 0.9926 / 0.9990 (compact closed preset) |
+| divergenceFree | 1.0000 | 0.9997 | |
+
+All within 0.5 % of the oracle's numbers; the ten-bin profiles are the parabola to the third digit. Test `test_the_incompressible_channel_obeys_the_momentum_balance` (both loops, 5 % over the second half of a 1 s run).

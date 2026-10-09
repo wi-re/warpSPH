@@ -21,6 +21,7 @@ import torch
 from ..caseUtils.weaklyCompressible import analyticTankBody  # noqa: F401  (kept next to the tank helper: the plates are built the same way)
 from ..configurations.region import BCType
 from ..enumTypes import *  # noqa: F401,F403
+from ..enumTypes import isIncompressibleScheme
 from ..runner import Case, RunContext, caseMain, registerCase
 from ..utils import buildDomainDescription
 from .plotting import particlePlot
@@ -32,10 +33,14 @@ __all__ = ['periodicChannelCase']
 XI = {'Wendland2': 2.8213846683502197, 'Wendland4': 3.56734561920166}      # warpSPHCore sphKernel_xi(kernel, 2D)
 
 
-def _plateBody(yCenter: float, bodyId: int):
+def _plateBody(yCenter: float, bodyId: int, offset: float = 0.0):
+    """A plate of the channel: a box 1.6 long (spanning the periodic box) and 0.3 thick. `offset`: the wall plane moved away from the fluid by this much (the calibrated lattice), by shrinking the box
+    from the fluid side so that the body centre (which the integrated state owns) stays put."""
     from warpSPHBoundaries.scene import Body
     from warpSPHBoundaries.scene.scene import BoxRep
-    return Body(bodyId=bodyId, center=(0.5, yCenter), reps=[BoxRep((-0.8, -0.15), (0.8, 0.15))])
+    lower = yCenter < 0.25
+    lo, hi = ((-0.15, 0.15 - offset) if lower else (-0.15 + offset, 0.15))
+    return Body(bodyId=bodyId, center=(0.5, yCenter), reps=[BoxRep((-0.8, lo), (0.8, hi))])
 
 
 def configureScheme(ctx: RunContext) -> None:
@@ -75,6 +80,24 @@ def configureScheme(ctx: RunContext) -> None:
         sc.morrisCalibration = None
         sc.complementMoments = ctx.param('complementMoments')
         ctx.scratch['morrisCal'] = cal
+    inc = isIncompressibleScheme(ctx.scheme)
+    if inc:
+        # the incompressible loops (omniIncompressible, divergenceFree, ...): the viscosity is the physical Morris one (`nuPhysical`, the realised long-wave value), the loop's own explicit term
+        from ..enumTypes import ViscosityTerm
+        from ..modules.incompressible.compactProjection import morrisCalibration
+        h = float(ctx.spec.n_h) * dx
+        cal = morrisCalibration(h, dx, dx * dx)
+        sc.diffusionParams.inviscid = False
+        sc.diffusionParams.viscousTerm = ViscosityTerm.morris1997
+        sc.diffusionParams.viscidNu = ctx.param('nuPhysical') / cal
+        sc.morrisCalibration = None
+        sc.complementMoments = ctx.param('complementMoments')
+        sc.omniViscosity = True
+        sc.projection, sc.projectionTol, sc.densitySolve = ctx.param('projection'), ctx.param('projectionTol'), ctx.param('densitySolve')
+        sc.shifting, sc.shiftA = ctx.param('particleShift'), ctx.param('shiftA')
+        sc.closedPreset = ctx.param('closedPreset')
+        sc.freeSurface = False
+        ctx.scratch['morrisCal'] = cal
     sc.analyticPeriodicWalls = not shear
     sc.bodyForce = (ctx.param('fShear') if shear else ctx.param('f'), 0.0)
     sc.bodyForceAtWall = ctx.param('bodyForceAtWall')
@@ -100,6 +123,34 @@ def buildSystem(ctx: RunContext):
     return buildRegionSystem(ctx, regions)
 
 
+def calibrateChannel(ctx: RunContext, system) -> None:
+    """The calibrated lattice of the incompressible loops for the channel (`boundary/calibration.py` for the tank): particle mass `rho0 V'`, wall mass `mu`, the plates moved so that the first rows sit at the distance
+    that gives them the bulk density (`latticeCalibration`, flat wall, Wendland C2); the plates are rebuilt with the new box extents and the provider with them."""
+    from ..boundary import buildBoundaryProvider
+    from ..modules.analyticBoundary import latticeCalibration
+    sc = ctx.schemeConfig
+    st = system.state
+    fluid = st.kinds == 0
+    dx = ctx.config.dx
+    h = float(st.supports[fluid].max())
+    cal = latticeCalibration(dx, dx, h, ctx.config.kernel)
+    st.masses = torch.where(fluid, torch.full_like(st.masses, sc.fluid.restDensity * cal['V']), st.masses)
+    sc.analyticWallMass = cal['mu']
+    off = cal['dwallY'] - 0.5 * dx                              # the first row is at dx / 2 from the plate plane: the plane moves outward by the difference
+    W = ctx.scratch['W']
+    old = sc.boundaryProvider
+    regions = [r for r in ctx.config.regions if getattr(r, 'representation', None) is not None]
+    for i, (rb, region, yc) in enumerate(zip(old.rigidBodies, regions, (-0.15, W + 0.15))):
+        body = _plateBody(yc, i, off)
+        body.bodyId = rb.representation.bodyId
+        region.representation = body
+        rb.representation = body
+    newProvider = buildBoundaryProvider(ctx.config.regions, st.positions.device, domain=ctx.config.domain, support=float(st.supports.max()))
+    newProvider.rigidBodies = old.rigidBodies
+    sc.boundaryProvider = newProvider
+    ctx.scratch['latticeCalibration'] = cal
+
+
 def initialConditions(ctx: RunContext, system) -> None:
     st = system.state
     st.velocities[:] = 0.0
@@ -107,6 +158,18 @@ def initialConditions(ctx: RunContext, system) -> None:
         W = ctx.scratch['W']
         fluid = st.kinds == 0
         st.velocities[fluid, 0] = ctx.param('u0') * torch.sin(2.0 * math.pi * st.positions[fluid, 1] / W)
+    if isIncompressibleScheme(ctx.scheme):
+        ctx.scratch['nuNominal'] = ctx.param('nuPhysical')
+        if ctx.param('shearWave'):
+            from ..modules.analyticBoundary import latticeCalibration
+            fl = st.kinds == 0
+            cal = latticeCalibration(ctx.config.dx, ctx.config.dx, float(st.supports[fl].max()), ctx.config.kernel)
+            st.masses = torch.where(fl, torch.full_like(st.masses, ctx.schemeConfig.fluid.restDensity * cal['V']), st.masses)           # a fluid-only lattice: the bulk density is exactly rho0
+        elif ctx.param('calibratedLattice'):
+            calibrateChannel(ctx, system)
+        if ctx.config.dt is None:
+            ctx.config.dt = ctx.spec.dt if ctx.spec.dt is not None else 2e-3
+        return
     ctx.scratch['nuNominal'] = ctx.param('alpha') * ctx.param('soundSpeed') * float(ctx.spec.n_h) * ctx.config.dx / (8.0 * XI[ctx.spec.kernel])
     setupTimestep(ctx, system)
 
@@ -114,7 +177,12 @@ def initialConditions(ctx: RunContext, system) -> None:
 def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     st = state.state
     f = st.kinds == 0
-    out = weaklyCompressibleDiagnostics(ctx, state)
+    if isIncompressibleScheme(ctx.scheme):
+        v = st.velocities[f]
+        out = {'maxVelocity': float(torch.linalg.norm(v, dim=-1).max()), 'kineticEnergy': float(0.5 * (st.masses[f] * (v ** 2).sum(-1)).sum()),
+               'minDensity': float(st.densities[f].min()), 'maxDensity': float(st.densities[f].max())}
+    else:
+        out = weaklyCompressibleDiagnostics(ctx, state)
     W = ctx.scratch['W']
     y, u = st.positions[f, 1].double(), st.velocities[f, 0].double()
     if ctx.param('shearWave'):
@@ -178,6 +246,15 @@ periodicChannelCase = registerCase(Case(
         fShear=0.0,                  # the body force of the plate-free box (a uniform force on a periodic fluid: the mean velocity grows as f t)
         u0=0.05,
         nuReference=None,
+        # the incompressible loops (--scheme omniIncompressible | divergenceFree): physical Morris viscosity, calibrated lattice, the projection / shift options of the stage 2 schemes
+        nuPhysical=0.0185,
+        calibratedLattice=True,
+        projection='jacobi',
+        projectionTol=1e-8,
+        densitySolve=True,
+        particleShift='none',
+        shiftA=0.5,
+        closedPreset=False,
         shifting=True,
         shiftScheme='michel2022',
         shiftProjection='michel2022',
