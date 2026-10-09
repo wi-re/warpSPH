@@ -34,7 +34,7 @@ from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enfor
 from ..modules.deltaSPH import computeDensityDiffusion, computeVelocityDiffusion
 from ..modules.density import computeDensities, computeGradRho, computeGradRhoL
 from ..modules.eos import weaklyCompressibleEOS
-from ..modules.gravity import computeGravity
+from ..modules.gravity import computeGravity, computeBodyForce, bodyForceVector
 from ..modules.mdbc import computeBoundaryVelocities, computeMdbcDensity, computeMdbcDensityBand, computeMdbcDensityEnglish2025, computeMdbcNoPenShift
 from ..modules.momentum import computeMomentum
 from ..modules.pressure import computePressureForceSurfaceAware, antuonoSwitch
@@ -401,6 +401,8 @@ def _deltaSPH_rhs(
     with record_function("[warpSPH] - [deltaSPH - 15] - compute gravity"):
         gravity = computeGravity(currentState, config, schemeConfig, adjacency)
         dvdt_gravity = gravity
+        if bodyForceVector(schemeConfig) is not None:
+            dvdt_gravity = gravity + computeBodyForce(currentState, schemeConfig)          # the channel driver: momentum only, not in the density diffusion's hydrostatic term
 
     # Revert boundary velocity
     # with TimedBlock('compute mDBC no-pen shift', use_cuda=True, device=config.device) as tb_nopenshift:

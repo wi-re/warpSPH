@@ -52,6 +52,7 @@ CASE_MODULES = (
     'dambreak',
     'sloshingTank',
     'channelFlow',
+    'periodicChannel',
     # incompressible -- examples/incompressible/*.ipynb
     'tgv',
     'kolmogorovIncompressible',

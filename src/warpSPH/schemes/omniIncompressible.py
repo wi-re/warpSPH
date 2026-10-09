@@ -93,7 +93,7 @@ from ..configurations import BoundaryPressureMode
 from ..modules.boundaryConditions import (computeForcing, enforceDirichlet,
                                           enforceUpdates)
 from ..modules.density import computeDensities
-from ..modules.gravity import computeGravity
+from ..modules.gravity import computeGravity, computeBodyForce
 from ..modules.incompressible.consistent import applyConsistentCoupling
 from ..modules.incompressible.wallPressure import wallPressureExtrapolation
 from ..modules.analyticBoundary import resolveWall, wallDensity
@@ -692,6 +692,7 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
     # --- 2. external forces -> a  (omniSPH externalForces: gravity only) ---
     enforceDirichlet(system, system.t, dt, config, schemeConfig)
     accel = computeGravity(st, config, schemeConfig, adjacency)
+    accel = accel + computeBodyForce(st, schemeConfig)
     forcing = computeForcing(system, dt, system.t, config, schemeConfig)
     accel = accel + forcing / st.masses.view(-1, 1)
     accel = torch.where(fcol, accel, torch.zeros_like(accel))

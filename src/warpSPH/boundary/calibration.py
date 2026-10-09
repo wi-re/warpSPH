@@ -54,7 +54,7 @@ def calibrateAnalyticLattice(ctx, system, interior, touch=1.5, verbose=False):
     body.bodyId = old.representation.bodyId
     tankRegion.representation = body
     old.representation = body
-    newProvider = buildBoundaryProvider(ctx.config.regions, st.positions.device)
+    newProvider = buildBoundaryProvider(ctx.config.regions, st.positions.device, domain=ctx.config.domain if getattr(sc, 'analyticPeriodicWalls', False) else None, support=float(st.supports.max()))
     newProvider.rigidBodies = provider.rigidBodies
     sc.boundaryProvider = newProvider
     cal['offsets'] = offsets

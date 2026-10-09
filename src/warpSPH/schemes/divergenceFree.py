@@ -36,7 +36,7 @@ from warpSPH.systems import CompSPHSystem, WeaklyCompressibleSystemUpdate
 from warpSPH.modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
 from warpSPH.modules.deltaSPH import computeVelocityDiffusion
 from warpSPH.modules.density import computeDensities
-from warpSPH.modules.gravity import computeGravity
+from warpSPH.modules.gravity import computeGravity, computeBodyForce
 from warpSPH.modules.incompressible import solveDivergenceFree, solveIncompressible
 from warpSPH.modules.mdbc import (
     computeBoundaryVelocities, computeMdbcDensity, computeMdbcNoPenShift,
@@ -285,6 +285,7 @@ def divergenceFree_step(
             gravity = gravity * (_amp * np.sin(2.0 * np.pi * currentSystem.t / _per))
         gravity[currentState.kinds != 0] = 0.0
         dvdt += gravity
+        dvdt += computeBodyForce(currentState, schemeConfig)
 
     # mDBC no-penetration velocity shift (FINDINGS 1.6 / 2; `NOPEN_SHIFT`).
     # The `c637785` rewrite commented this out, leaving the pressure projection

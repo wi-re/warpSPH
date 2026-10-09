@@ -4,5 +4,6 @@ on `schemeConfig.gravityConfig`.
 """
 
 from .wrapper import computeGravity
+from .bodyForce import computeBodyForce, bodyForceVector
 
-__all__ = ['computeGravity']
+__all__ = ['computeGravity', 'computeBodyForce', 'bodyForceVector']

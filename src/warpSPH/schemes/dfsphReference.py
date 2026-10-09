@@ -162,7 +162,7 @@ from ..modules.boundaryConditions import (computeForcing, enforceDirichlet,
                                           enforceUpdates)
 from ..modules.deltaSPH import computeVelocityDiffusion
 from ..modules.density import computeDensities
-from ..modules.gravity import computeGravity
+from ..modules.gravity import computeGravity, computeBodyForce
 from ..modules.incompressible.consistent import applyConsistentCoupling
 from ..modules.incompressible.wallPressure import wallPressureExtrapolation
 from ..modules.incompressible.wp_dfsph_factor import computeDFSPHFactor
@@ -657,6 +657,7 @@ def dfsphReference_step(system: Any, dt: float, config: Any, schemeConfig: Any,
     # step, so the constant-density / divergence sources see it too.
     st.velocities = computeBoundaryVelocities(st, config, schemeConfig, adjacency)
     a_nonp = computeGravity(st, config, schemeConfig, adjacency)
+    a_nonp = a_nonp + computeBodyForce(st, schemeConfig)
     a_nonp = a_nonp + computeVelocityDiffusion(st, config, schemeConfig, adjacency)
     if XSPH_FLUID_EPSILON != 0.0 or XSPH_BOUNDARY_EPSILON != 0.0:
         # Part 32: the reference's XSPH velocity filter (module flag note) --

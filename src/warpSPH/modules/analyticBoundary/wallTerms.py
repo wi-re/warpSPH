@@ -115,6 +115,10 @@ def _evaluateWall(provider, state, config, schemeConfig, gravity):
     kin = provider.scene.kinematics(x)
     g = torch.as_tensor(gravity).to(F64)
     g = g.reshape(-1, 2)[0] if g.dim() > 1 else g
+    from ..gravity import bodyForceVector
+    f = bodyForceVector(schemeConfig)
+    if f is not None and getattr(schemeConfig, 'bodyForceAtWall', True):
+        g = g + torch.tensor(f[:2], dtype=g.dtype, device=g.device)            # dp/dn = rho (g + f - a_w) . n: a uniform body force acts on the fluid at a wall like gravity (not hydrostatic in the density diffusion)
     a1 = schemeConfig.fluid.restDensity * (g[None, None, :] - kin.acceleration)
     lam, G = wm * agg.out['lam'], wm * agg.out['G']
     if getattr(schemeConfig, 'analyticWallPressure', 'hydrostatic') == 'normal':

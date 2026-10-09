@@ -263,7 +263,7 @@ def initializeSimulation(regions, config, schemeConfig, SimulationSystem, Simula
         particleState = updateBodyParticlesWCSPH(particleState, rigidBody)
     config.rigidBodies = rigidBodies
     from ..boundary import buildBoundaryProvider
-    provider = buildBoundaryProvider(regions, particleState.positions.device)
+    provider = buildBoundaryProvider(regions, particleState.positions.device, domain=config.domain if getattr(schemeConfig, 'analyticPeriodicWalls', False) else None, support=float(particleState.supports.max()))
     if provider is not None and not isinstance(schemeConfig, (WeaklyCompressibleSPHConfig, IncompressibleSPHConfig)):
         # any other scheme would run with no wall at all (ANALYTIC_BOUNDARIES_PORT_SURVEY.md); the scheme itself is checked in `cases.weaklyCompressible.buildRegionSystem`
         raise NotImplementedError(f"analytic boundaries (a region with a `representation`) are hooked into the delta+ and omniIncompressible schemes only, not {type(schemeConfig).__name__}")
