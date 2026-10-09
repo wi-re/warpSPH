@@ -154,7 +154,7 @@ from typing import Any
 
 import torch
 
-from warpSPHCore import (OperationProperties, SupportScheme, WarpOperation,
+from warpSPHCore import (GradientScheme, OperationProperties, SupportScheme, WarpOperation,
                          buildVerletList, warpOperation)
 
 from ..configurations import BoundaryPressureMode
@@ -268,7 +268,7 @@ def _rebuildAdjacency(state: Any, system: Any, config: Any):
     return adjacency
 
 
-def _factor(state: Any, config: Any, schemeConfig: Any, adjacency: Any) -> torch.Tensor:
+def _factor(state: Any, config: Any, schemeConfig: Any, adjacency: Any, wall: Any = None) -> torch.Tensor:
     """DFSPH factor `alpha_i`, SPlisHSPlasH `computeDFSPHFactor` form: the
     sum-of-squares term runs over fluid neighbours only (a static boundary
     particle takes no reaction) and the boundary enters only the vector-sum
@@ -277,28 +277,48 @@ def _factor(state: Any, config: Any, schemeConfig: Any, adjacency: Any) -> torch
     `sum_grad_p_k`; it is negated here so the value is <= 0 -- the sign both
     `divergenceFree.py` solvers iterate against -- and floored away from zero to
     bound the division. Runs inside `applyConsistentCoupling`, so boundary rows
-    carry their Akinci apparent volume in `state.masses`."""
+    carry their Akinci apparent volume in `state.masses`.
+
+    `wall` (analytic walls, `modules/analyticBoundary`): the wall adds its gradient `G` to the vector sum only, `sum_grad_p_k += 2 S . G + |G|^2` with `S` the fluid's `sum_j V_j grad W_ij`
+    (the same correction as `computeAlpha(wall=)`, in this factor's sign and without the `1 / rho`)."""
     apparentArea = state.masses / state.densities
     diag = computeDFSPHFactor(state, config, schemeConfig, adjacency,
                               apparentVolumes=apparentArea)
+    if wall is not None:
+        from ..modules.analyticBoundary import wallAlphaCorrection
+        gradSum = warpOperation(
+            state, OperationProperties(kernel=config.kernel, operation=WarpOperation.Gradient, gradientMode=GradientScheme.Naive, supportMode=SupportScheme.Gather),
+            queryValues=apparentArea * state.densities / state.masses, domain=config.domain, adjacency=adjacency)
+        diag = diag - wallAlphaCorrection(wall, gradSum, torch.ones_like(state.densities))        # wallAlphaCorrection is the negative IISPH-diagonal term: -(2 S.G + |G|^2) / rho
     return torch.clamp(-diag, max=-1e-8)
 
 
 def _drhodt(state: Any, config: Any, schemeConfig: Any, adjacency: Any,
-            advectionVelocities: torch.Tensor) -> torch.Tensor:
+            advectionVelocities: torch.Tensor, wall: Any = None, bodyVelocity: bool = False) -> torch.Tensor:
     """`Drho/Dt` from the same scatter-divergence operator both `divergenceFree`
     solvers form their source from (`computeMomentumIncompressible`, `-rho0 div
     v`) -- so this reference inherits that operator rather than adding a second
-    convention."""
-    return computeMomentumIncompressible(
+    convention. `wall` (analytic walls): the wall's flux `-rho0 sum_b (f_b - f) . G_b`
+    (`wallDivergence`), the body velocity `f_b` with `bodyVelocity` (a velocity field), 0 for an
+    acceleration (a static wall takes no reaction)."""
+    out = computeMomentumIncompressible(
         currentState=state, config=config, schemeConfig=schemeConfig,
         adjacency=adjacency, advectionVelocities=advectionVelocities)
+    if wall is not None:
+        from ..modules.analyticBoundary import wallDivergence
+        out = out - schemeConfig.fluid.restDensity * wallDivergence(wall, advectionVelocities, bodyVelocity=bodyVelocity)
+    return out
 
 
-def _pressureAccel(state, config, adjacency, p, fluidMask):
+def _pressureAccel(state, config, adjacency, p, fluidMask, wall=None, rho0=1.0):
     a_p = computePressureAccelIISPH(
         state=state, pressureValues=p, config=config,
         supportScheme=SupportScheme.Scatter, adjacency=adjacency)
+    if wall is not None:
+        # analytic walls: omniSPH's symmetric wall form (mirrored `p_b = p_i^+`, hydrostatic offset, `p_b >= 0`), the boundaries repo's `DFSPH2D._boundary_accel`; it carries the weight the
+        # `akinciBoundaryVolumeScale = 2` of this scheme gives its wall particles (the symmetric form's `p / rho^2 + p / rho0^2` is 2 p at rho = rho0)
+        from ..modules.analyticBoundary import wallPressureAccelerationOmni
+        a_p = a_p + wallPressureAccelerationOmni(wall, p, state.densities, rho0, wallMass=wall.wm, h=wall.support)
     # Zero `a_p` for every non-fluid row `i` (`kind == 1` boundary AND `kind ==
     # 2` ghost): a static particle takes no reaction (`staticBoundary` /
     # `operatorMovesBoundary=False`), and ghosts are not real particles at all.
@@ -424,7 +444,9 @@ def _jacobiSolve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
     maxIters = solverCfg.maxIterations
     tol = solverCfg.tolerance
     # |diag|: opDt * |computeDFSPHFactor|  (_factor returns <= 0).
-    invDiag = 1.0 / (opDt * (-_factor(state, config, schemeConfig, adjacency)))
+    from ..modules.analyticBoundary import resolveWall
+    wall = resolveWall(state, config, schemeConfig, adjacency)
+    invDiag = 1.0 / (opDt * (-_factor(state, config, schemeConfig, adjacency, wall)))
 
     # Fixed source, computed once from vEnter (the linear form), in
     # SPlisHSPlasH's sign convention. Two operator facts fix the signs:
@@ -436,7 +458,7 @@ def _jacobiSolve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
     #       divergence, so their sources/aij_pj read (div_std = div):
     #   density:    s = 1 - rho/rho0 + h div(v)  = 1 - rho/rho0 - dt*_drhodt(v)/rho0
     #   divergence: s = +div(v)                  = -_drhodt(v)/rho0
-    drhodtEnter = _drhodt(state, config, schemeConfig, adjacency, vEnter)
+    drhodtEnter = _drhodt(state, config, schemeConfig, adjacency, vEnter, wall, bodyVelocity=True)
     if mode == 'density':
         source = 1.0 - state.densities / rho0 - dt * drhodtEnter / rho0
     else:
@@ -454,6 +476,11 @@ def _jacobiSolve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
     # the solve.
     guardThreshold = 7 if config.domain.dim == 2 else 20
     nNeighbours = countNeighbors(state, config, schemeConfig, adjacency)
+    if wall is not None:
+        # an analytic wall is not a particle: it counts as the neighbours it replaces, its completeness `lambda` times the bulk neighbour count (a boundary-particle wall row has them in `countNeighbors`)
+        bulk = fluidMask & (state.densities > 0.99 * rho0)
+        nBulk = nNeighbours[bulk].float().median() if bool(bulk.any()) else nNeighbours[fluidMask].float().median()
+        nNeighbours = nNeighbours + (wall.lam.sum(0) * nBulk).to(nNeighbours.dtype)
     deficient = fluidMask & (nNeighbours < guardThreshold)
     # Part 30 (step 3): the free-surface gauge rows (the dilated
     # detectFreeSurface mask, divergence solve only). They are held at
@@ -493,13 +520,13 @@ def _jacobiSolve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
         pIn = wallPressureExtrapolation(
             state, config, adjacency, p, fluidMask, mode=wallPressure) \
             if wallPressure else p
-        a_p = _pressureAccel(state, config, adjacency, pIn, fluidMask)
+        a_p = _pressureAccel(state, config, adjacency, pIn, fluidMask, wall, rho0)
         # SPlisHSPlasH's `aij_pj = delta_{a_p} = -div_std(a_p)`, scaled by
         # opDt (h^2 CD / h DF) to match their `aij_pj *= h^2` / `*= h`.
         # `_drhodt(a_p) = -rho0 div_std(a_p)`, so `aij_pj = +_drhodt(a_p)/rho0 * opDt`.
         # (The OLD `-_drhodt(...)` was the sign-flipped operator, which is what
         # made the naive `p -=` update the diverging iteration.)
-        ap = _drhodt(state, config, schemeConfig, adjacency, a_p) / rho0 * opDt
+        ap = _drhodt(state, config, schemeConfig, adjacency, a_p, wall) / rho0 * opDt
         resid = source - ap
         # SPlisHSPlasH's `factor = 1/(sum_grad_p_k * h^k) > 0` (sum_grad_p_k is
         # a sum of squared kernel-gradient norms), and both solves iterate
@@ -534,7 +561,7 @@ def _jacobiSolve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
     pIn = wallPressureExtrapolation(
         state, config, adjacency, p, fluidMask, mode=wallPressure) \
         if wallPressure else p
-    a_p = _pressureAccel(state, config, adjacency, pIn, fluidMask)
+    a_p = _pressureAccel(state, config, adjacency, pIn, fluidMask, wall, rho0)
     return a_p, p, it + 1, err
 
 
@@ -581,6 +608,23 @@ def dfsphReference_step(system: Any, dt: float, config: Any, schemeConfig: Any,
     # --- 1. neighbourhood + summation density (boundary included) ------------
     adjacency = _rebuildAdjacency(st, system, config)
     st.densities = computeDensities(st, config, schemeConfig, adjacency)
+
+    provider = getattr(schemeConfig, 'boundaryProvider', None)
+    if provider is not None:
+        # analytic walls are static here: the divergence solve runs on the advected positions with the bodies still at the pose of the start of the step
+        if any(bool((rb.linearVelocity != 0).any()) or bool(rb.angularVelocity != 0) or getattr(rb, 'dynamic', False) for rb in provider.rigidBodies):
+            raise NotImplementedError('dfsphReference / iisph on analytic walls are written for static bodies (moving and free bodies: omniIncompressible, divergenceFree)')
+    fricPerBody = None
+    if getattr(schemeConfig, 'boundaryFriction', 0.0):
+        from ..modules.xsph import computeBoundaryFriction
+        if getattr(schemeConfig, 'analyticWallLoads', False):
+            fricPerBody = computeBoundaryFriction(st, config, schemeConfig, adjacency, perBody=True)
+            st.velocities = st.velocities + fricPerBody.sum(0)
+        else:
+            st.velocities = st.velocities + computeBoundaryFriction(st, config, schemeConfig, adjacency)
+    if getattr(schemeConfig, 'xsphCoefficient', 0.0) or getattr(schemeConfig, 'xsphBoundaryCoefficient', 0.0):
+        from ..modules.xsph import computeXSPH
+        st.velocities = st.velocities + computeXSPH(st, config, schemeConfig, adjacency)
 
     if st.pressures is None:
         st.pressures = torch.zeros_like(st.densities)
@@ -684,6 +728,11 @@ def dfsphReference_step(system: Any, dt: float, config: Any, schemeConfig: Any,
                 wallPressure=(WALL_PRESSURE_MODE if WALL_PRESSURE_ON_DIVERGENCE
                               else None))
         st.velocities = vEnterDf + dt * a_p_df
+
+    if provider is not None:
+        from .omniIncompressible import _bookWallLoads
+        _bookWallLoads(st, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0, pDiv=kappaV, pRho=kappa, frictionPerBody=fricPerBody, dt=dt,
+                       densityApplied=True, divergenceHasWall=not skipDivergence)
 
     # --- 7. carry kappa / kappa^v for the next step's warm start --------
     if DAMPED_WARM_START:

@@ -46,6 +46,9 @@ SCHEME_PRESETS = {
         dt=1.0e-3,
         maxDt=2.0e-3,
     ),
+    # the SPlisHSPlasH-style reference (two solves) and plain IISPH on analytic walls (troubleshooting schemes of DFSPH_IMPROVEMENT_PLAN.md, hooked up in stage 2 C)
+    'dfsphref': dict(scheme='dfsphReference', integrationScheme='semiImplicitEuler', kernel='Wendland2', supportMode='SuperSymmetric', cflFactor=0.2, dt=1.0e-3, maxDt=2.0e-3),
+    'iisph': dict(scheme='iisph', integrationScheme='semiImplicitEuler', kernel='Wendland2', supportMode='SuperSymmetric', cflFactor=0.2, dt=1.0e-3, maxDt=2.0e-3),
     'dfsph': dict(
         scheme='divergenceFree',
         integrationScheme='semiImplicitEuler',

@@ -615,7 +615,7 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *, checkS
 
 
 def _bookWallLoads(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *, fluid: Any, rho0: float, pDiv: Any, pRho: Any,
-                   frictionPerBody: Any = None, dt: float = 1.0, densityApplied: Any = None) -> None:
+                   frictionPerBody: Any = None, dt: float = 1.0, densityApplied: Any = None, divergenceHasWall: Any = None) -> None:
     """The load of the fluid on every analytic body, booked on its `RigidBody.load` ([2, B, 3] = (pressure, friction) x body x (Fx, Fy, torque about the body centre), `wallLoads`), when
     `schemeConfig.analyticWallLoads` is set: the reaction to the wall accelerations the solves applied (the divergence stage's only where it carries the wall: the compact projection, or
     `analyticWallInDivergence`; the density stage's unless `densitySolve` is off, when its pressure is the divergence one) and to the boundary-friction impulse `dv / dt`. The no-penetration
@@ -635,7 +635,9 @@ def _bookWallLoads(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *
     def part(p, clamp=True):
         return wallPressureAccelerationOmni(wall, p, state.densities, rho0, wallMass=wall.wm, h=wall.support, perBody=True,
                                             gradient=None if fit is None else fit.gradient(p), clampPressure=clamp).to(torch.float64)
-    if compact or getattr(schemeConfig, 'analyticWallInDivergence', False):
+    if divergenceHasWall is None:
+        divergenceHasWall = compact or getattr(schemeConfig, 'analyticWallInDivergence', False)
+    if divergenceHasWall:
         acc = acc + part(pDiv, clamp=not compact)
     if densityApplied is None:
         densityApplied = getattr(schemeConfig, 'densitySolve', True)

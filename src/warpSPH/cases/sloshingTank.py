@@ -156,13 +156,13 @@ def configureScheme(ctx: RunContext) -> None:
     if ctx.param('wallRepresentation') == 'analytic':
         # the tank is one analytic warpSPHBoundaries body (ANALYTIC_BOUNDARIES_PLAN.md): deltaSPH and omniIncompressible, static walls
         # (the roll is carried by the rotated gravity, the walls never move in this frame)
-        if getattr(ctx.scheme, 'name', ctx.scheme) not in ('deltaSPH', 'omniIncompressible', 'divergenceFree'):
-            raise ValueError("sloshingTank wallRepresentation='analytic' is hooked into deltaSPH, omniIncompressible and divergenceFree only "
+        if getattr(ctx.scheme, 'name', ctx.scheme) not in ('deltaSPH', 'omniIncompressible', 'divergenceFree', 'dfsphReference', 'iisph'):
+            raise ValueError("sloshingTank wallRepresentation='analytic' is hooked into deltaSPH, omniIncompressible, divergenceFree, dfsphReference and iisph only "
                              "(ANALYTIC_BOUNDARIES_PORT_SURVEY.md)")
         sc.analyticWallPressure = ctx.param('analyticWallPressure')
-        if getattr(ctx.scheme, 'name', ctx.scheme) not in ('omniIncompressible', 'divergenceFree') and (sc.analyticWallPressure == 'mls' or ctx.param('boundaryFriction') or ctx.param('xsphCoefficient')):
+        if getattr(ctx.scheme, 'name', ctx.scheme) not in ('omniIncompressible', 'divergenceFree', 'dfsphReference', 'iisph') and (sc.analyticWallPressure == 'mls' or ctx.param('boundaryFriction') or ctx.param('xsphCoefficient')):
             raise ValueError("analyticWallPressure='mls', boundaryFriction and xsphCoefficient are omniIncompressible / divergenceFree options")
-    if getattr(ctx.scheme, 'name', ctx.scheme) in ('omniIncompressible', 'divergenceFree'):
+    if getattr(ctx.scheme, 'name', ctx.scheme) in ('omniIncompressible', 'divergenceFree', 'dfsphReference', 'iisph'):
         sc.xsphCoefficient = ctx.param('xsphCoefficient')
         sc.projection, sc.projectionTol, sc.densitySolve = ctx.param('projection'), ctx.param('projectionTol'), ctx.param('densitySolve')
         sc.shifting, sc.shiftA = ctx.param('particleShift'), ctx.param('shiftA')

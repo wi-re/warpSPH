@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.join(REPO, 'scripts'))
 from warpSPHBootstrap import bootstrap  # noqa: E402
 
 OMNI = os.path.expanduser('~/dev/curvatureBoundaries/.tmp/omni/cmp_dam.npz')
-SCHEMES = {'omni': 'omniIncompressible', 'dfsph': 'divergenceFree'}
+SCHEMES = {'omni': 'omniIncompressible', 'dfsph': 'divergenceFree', 'dfsphref': 'dfsphReference', 'iisph': 'iisph'}
 
 
 def main():
@@ -73,7 +73,7 @@ def main():
     d = np.load(OMNI)['omni']
     floor = 0.1 - 0.0089
     print('compiled omniSPH (front / mean height above its wall plane / max|v|):')
-    for t in (0.2, 0.4, 0.6, 0.8, 1.0):
+    for t in (0.2, 0.4, 0.6):
         if t > a.tLimit + 1e-9:
             break
         i = min(np.searchsorted(d[:, 0], t - 1e-12), len(d) - 1)

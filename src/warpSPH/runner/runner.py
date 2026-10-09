@@ -71,9 +71,9 @@ class RunResult:
 
 
 #: the schemes whose step consumes the analytic boundary provider (a scheme leaves the refusal when it is ported)
-ANALYTIC_WALL_SCHEMES = frozenset({'deltaSPH', 'omniIncompressible', 'divergenceFree'})
+ANALYTIC_WALL_SCHEMES = frozenset({'deltaSPH', 'omniIncompressible', 'divergenceFree', 'dfsphReference', 'iisph'})
 #: ... of which not yet usable
-EXPERIMENTAL_ANALYTIC_WALL_SCHEMES = frozenset({'omniIncompressible', 'divergenceFree'})
+EXPERIMENTAL_ANALYTIC_WALL_SCHEMES = frozenset({'omniIncompressible', 'divergenceFree', 'dfsphReference', 'iisph'})
 
 
 def resolveEnum(enumClass, value):
