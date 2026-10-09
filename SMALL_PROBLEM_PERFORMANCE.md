@@ -588,3 +588,9 @@ Host syncs per step: 59 -> 9.
 
 Headline now: Marrone 3.1 nx 67 full run **702 s -> 108.7 s (6.5x)**, exact
 (bitwise simulation; probe columns at rounding), 101 s with compiled glue.
+
+## Open, filed 2026-10-09 (user observation, not yet measured)
+
+GPU utilisation of the standard cases at these scales averages only about 40 % (user, from nvitop during the sloshing A/B). Reference points from that A/B (nx = 200, `symplecticEuler`, ~50k particles incl. walls, whole-step graph where available): δ⁺ with particle walls 70 001 steps in 1 200 s = 17 ms/step; the analytic-wall run is slower per step. To look into later: where the idle share is (kernel-launch gaps between graphs, host syncs in diagnostics / video frames / the roll-gravity `postStep`, un-graphed `finalize`, the analytic path's per-step host work), measured with a profile of one full step, before changing anything.
+
+First measurement (2026-10-09 10:55, GPU otherwise idle, sloshingTank `--scheme dfsph` nx 200, `divergenceFree`): `nvidia-smi` utilisation 22-29 % over 8 s, the python process at ~105 % CPU (one core pegged), 12.5 ms/step. A pegged host thread with a mostly idle GPU means the step is host-bound (launch overhead / host syncs, e.g. the solver's convergence reads per iteration), not kernel-bound. Not yet profiled further. Note for timing comparisons: a parallel GPU job (the user's) inflated the analytic-wall δ⁺ run's wall time (2590 s vs 1201 s particle walls) in the same A/B, so those two wall times are not comparable.

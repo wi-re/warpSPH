@@ -62,3 +62,7 @@ tests of warpSPHBoundaries (`tests/warpsph/`, run with this tree on `PYTHONPATH`
 
 Incompressible / ACSPH consumers (hook table in warpSPHBoundaries' audit); moving bodies in a graph; 3D; the wall Hessian integral for `exactHessian`; wall particles of the `ParticleBoundary` provider as a
 cross-representation convergence test inside warpSPH.
+
+**Direction (user, 2026-10-09):** the analytic-boundary support moves into the front end's solver schemes, aligned with all capabilities there (δ⁺ first, then DFSPH / ACSPH / ...), and the solver code in warpSPHBoundaries (`DeltaSPH2D`, `DFSPH2D`) is retired afterwards. For δ⁺ that waits on the boundaries repo's δ⁺ giving usable results: its validation is internal and was not run on full cases such as sloshing. First full-run check: `sloshingTank --wallRepresentation analytic` (δ⁺, Wendland C2, Sensor 1 = fluid probe) against the particle-wall run, 7 s, `examples/sloshingTank/output/analytic_ab_2026-10-09`.
+
+Survey of what the boundaries repo's solvers do, term by term against warpSPH's modules, and the proposed module-level shape: [ANALYTIC_BOUNDARIES_PORT_SURVEY.md](ANALYTIC_BOUNDARIES_PORT_SURVEY.md).

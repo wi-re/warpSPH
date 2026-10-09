@@ -515,6 +515,10 @@ capture-failure path that resets or avoids the poisoned context is open.
 A moving rigid body is advanced extra times by the graph's validation and re-capture runs (the state is cloned, the body tensors are not). Only static bodies are graphed for that reason
 (`schemes/deltaSPH.py::_rhsIsGraphable`). Fix: clone the rigid-body tensors with the state during validation.
 
+## 30. `test_threeWayShiftComparison_allRelaxTowardUniformDensity` fails inside a full-suite run, passes alone (found earlier, filed 2026-10-09)
+
+`tests/test_implicitShiftingComparison.py`: the automatic and hand-built implicit shifting land at relative density-std 0.0145 vs 0.0083 after the outer loop (limit `0.1 x` the initial 0.0257, i.e. 0.0026 apart allowed, 0.0063 observed). Passes alone, on the working tree and on the tree before the 2026-10-09 wall-module changes (2 runs each); fails in full-suite order (seen 2026-10-09 with the wall-module slice; the upstreaming notes record one earlier failure of the same kind). User: it was flaky before, never investigated. Suspects, not checked: state shared across tests (module-level caches, the global torch precision / seed, a CUDA-graph or Verlet-list cache keyed on tensor addresses), or float32 atomics in the implicit solve (the same test family differs 1e-5 between identical runs, see `tests/test_analyticGraph.py`).
+
 ## Resolved (details in [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md); numbers kept so references stay valid)
 
 - **§5** englishWedge concave-corner residual -- sign bug in the `fourtakas2019` hydrostatic correction, fixed `68a9a6d`; 2026-09-29 re-validation: keep the default combo.
