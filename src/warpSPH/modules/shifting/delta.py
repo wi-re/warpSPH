@@ -159,6 +159,14 @@ def computeDeltaShift(currentState, config, schemeConfig, domain, adjacency, ite
         # print(f'dt_c: {dt_c}, dt: {dt}, ratio: {dt_c / dt}')
 
 
+        provider = getattr(schemeConfig, 'boundaryProvider', None)
+        if provider is not None:
+            # analytic walls: the wall's share of the same raw sum (modules/analyticBoundary/shifting.py)
+            from ..analyticBoundary import evaluateWall, wallShiftRaw
+            from ..gravity import computeGravity
+            wall = evaluateWall(provider, currentState, config, schemeConfig, computeGravity(currentState, config, schemeConfig, adjacency))
+            shift = shift + wallShiftRaw(wall, currentState, config, schemeConfig, R = 0.2 if eq7 else 0.25).to(shift.dtype)
+
         shift = shift * scalingDeltaPlus.unsqueeze(-1)
 
         # print(f'Iteration {i}, shift magnitude: {shift.norm(dim=1).mean().item()}, max: {shift.norm(dim=1).max().item()} [dx: {config.dx.item()}/dt: {config.dt}/mean support: {currentState.supports.mean().item()}]')
