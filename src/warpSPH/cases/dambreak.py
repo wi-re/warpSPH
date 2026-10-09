@@ -997,6 +997,8 @@ dambreakCase = registerCase(Case(
         # 'particles' (default): boundary particles + ghost nodes (mDBC). 'analytic': the tank walls are a
         # warpSPHBoundaries body (exact boundary integrals, no wall particles); plain tank only.
         wallRepresentation='particles',
+        # analytic walls: the wall plane moved outward by this fraction of dx (the calibrated lattice of the incompressible schemes, OPEN_PROBLEMS 31)
+        analyticWallOffset=0.0,
         # with wallRepresentation='analytic' and an obstacle: 'analytic' (the obstacle is an analytic body too) or 'particles' (a mixed scene: the obstacle stays boundary particles)
         obstacleRepresentation='analytic',
         # obstacleDynamic: the analytic obstacle is a free body driven by the fluid's load and gravity, of density obstacleDensity

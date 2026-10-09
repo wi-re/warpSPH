@@ -873,7 +873,7 @@ def buildRegions(config, schemeConfig, simSetup, args, domain, interiorDomain, o
     representation = None
     obstacleRegion = []
     if getattr(args, 'wallRepresentation', 'particles') == 'analytic':
-        representation = analyticTankBody(interiorDomain)
+        representation = analyticTankBody(interiorDomain, offset = float(getattr(args, 'analyticWallOffset', 0.0)) * float(simSetup.dx))
         if getattr(args, 'obstacleActive', False):
             # the tank and the obstacle are two analytic bodies, two (unsampled) boundary regions; the fluid is clipped against both SDFs as usual
             tank_sdf = lambda x: sampleSDF(x, lambda y: domainSDF(y, interiorDomain, invert = False), invert = False)
