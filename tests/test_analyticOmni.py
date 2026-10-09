@@ -3,8 +3,6 @@
 * the diagonal of the discrete operator `A p = -dt^2 div(a_p(p))` (wall terms in `_divergence` and `_pressureAccel`) equals the `alpha` the Jacobi iteration divides by
   (`computeAlpha(wall=)`, the wall's gradient added to the vector sum), on the first wall row and in the bulk: a unit pressure on one particle, the diagonal entry of the
   response;
-* the wall mass calibration (`calibrateAnalyticWallMass`, opt-in `calibrateWallMass=True`): it changes the factor away from 1, and with it the zeroth-order consistency of fluid + wall
-  (`sum_j V_j grad W_ij + G`) that the diagonal test above relies on: the reason it is off by default (OPEN_PROBLEMS 31).
 """
 import numpy as np
 import pytest
@@ -23,7 +21,7 @@ def tank(params=None):
     importAll()
     case = getCase('sloshingTank')
     spec = CaseSpec(caseName='omni', scheme='omniIncompressible', params={**case.params, 'wallRepresentation': 'analytic', **(params or {})}).merged(**case.defaults).merged(
-        scheme='omniIncompressible', integrationScheme='semiImplicitEuler', kernel='Wendland2', supportMode='SuperSymmetric', cflFactor=0.2, dt=1e-3, maxDt=2e-3, nx=100, nSteps=1,
+        scheme='omniIncompressible', integrationScheme='semiImplicitEuler', kernel='Wendland2', supportMode='SuperSymmetric', cflFactor=0.2, dt=1e-3, maxDt=2e-3, nx=100, n_h=2.57, nSteps=1,
         plot=False, store=False, progress=False, video=False, show=False, quiet=True)
     with pytest.warns(UserWarning, match='EXPERIMENTAL'):
         return run(case, spec)
@@ -54,10 +52,5 @@ def test_operator_diagonal_is_alpha():
         e = torch.zeros_like(st.densities)
         e[i] = 1.0
         d = float((Ap(e) - base)[i])
-        assert d / float(alpha[i]) == pytest.approx(1.0, abs=0.03), (y, d, float(alpha[i]))
-
-
-def test_wall_mass_calibration_is_opt_in_and_moves_the_factor():
-    assert getattr(tank().ctx.schemeConfig, 'analyticWallMass', 1.0) == 1.0
-    wm = tank(params={'calibrateWallMass': True}).ctx.schemeConfig.analyticWallMass
-    assert 0.8 < wm < 0.99, wm
+        tol = 0.07 if y < dx else 0.01             # the first row: omniSPH's `alpha` has |A + G|^2 where the operator has (A + 2G).(A + G) (the mirrored wall pressure), 5 % at the calibrated lattice
+        assert d / float(alpha[i]) == pytest.approx(1.0, abs=tol), (y, d, float(alpha[i]))

@@ -381,6 +381,14 @@ def initialConditions(ctx: RunContext, system) -> None:
     ctx.velocityScaleSource = ('referenceVelocity' if ctx.param('referenceVelocity') is not None
                                else 'dam-break front speed sqrt(2 g H)')
 
+    latticeCal = ctx.param('calibratedLattice')
+    if latticeCal == 'auto':
+        latticeCal = ctx.param('wallRepresentation') == 'analytic' and isIncompressibleScheme(ctx.scheme)
+    if latticeCal:
+        # analytic tank under an incompressible scheme: particle mass, wall mass and wall planes of the rest lattice (boundary/calibration.py, OPEN_PROBLEMS 31)
+        from ..boundary.calibration import calibrateAnalyticLattice
+        calibrateAnalyticLattice(ctx, system, ctx.scratch['interiorDomain'], verbose=ctx.spec.verbose)
+
     sampleNoise(system, ctx.config, ctx.schemeConfig, simSetup, args)
     setupFreestream(system, ctx.config, ctx.schemeConfig, simSetup, args)
     setupKolmogorov(system, ctx.config, ctx.schemeConfig, simSetup, args)
@@ -999,6 +1007,8 @@ dambreakCase = registerCase(Case(
         wallRepresentation='particles',
         # analytic walls: the wall plane moved outward by this fraction of dx (the calibrated lattice of the incompressible schemes, OPEN_PROBLEMS 31)
         analyticWallOffset=0.0,
+        # analytic walls under an incompressible scheme: the calibrated lattice (particle mass, wall mass, wall planes; OPEN_PROBLEMS 31); 'auto' = on there, True / False force it
+        calibratedLattice='auto',
         # with wallRepresentation='analytic' and an obstacle: 'analytic' (the obstacle is an analytic body too) or 'particles' (a mixed scene: the obstacle stays boundary particles)
         obstacleRepresentation='analytic',
         # obstacleDynamic: the analytic obstacle is a free body driven by the fluid's load and gravity, of density obstacleDensity

@@ -299,6 +299,14 @@ def initialConditions(ctx: RunContext, system) -> None:
             raise ValueError(
                 f'calibrateRestDensity must be True/False/"auto", got {calibrate!r}')
         calibrate = isIncompressibleScheme(ctx.scheme)
+    # analytic walls under an incompressible scheme: the calibrated lattice (particle mass, wall mass, wall plane; boundary/calibration.py) replaces the rest-density calibration
+    latticeCal = ctx.param('calibratedLattice')
+    if latticeCal == 'auto':
+        latticeCal = ctx.param('wallRepresentation') == 'analytic' and isIncompressibleScheme(ctx.scheme)
+    if latticeCal:
+        from ..boundary.calibration import calibrateAnalyticLattice
+        calibrateAnalyticLattice(ctx, system, ctx.scratch['interiorDomain'], verbose=ctx.spec.verbose)
+        calibrate = False
     if calibrate:
         calibrateRestDensity(ctx, system, verbose=ctx.spec.verbose)
 
@@ -557,6 +565,8 @@ sloshingTankCase = registerCase(Case(
         wallBC='freeSlip',
         # 'particles' (boundary particles + mDBC ghost nodes) or 'analytic' (warpSPHBoundaries tank body, deltaSPH only)
         wallRepresentation='particles',
+        # analytic walls under an incompressible scheme: the calibrated lattice (OPEN_PROBLEMS 31); 'auto' = on there, True / False force it
+        calibratedLattice='auto',
         # analytic walls: the wall plane moved outward by this fraction of dx (the calibrated lattice of the incompressible schemes, OPEN_PROBLEMS 31)
         analyticWallOffset=0.0,
         # analytic walls only: 'hydrostatic' or 'normal' (see dambreak)

@@ -101,6 +101,7 @@ def parseArgs(argv):
                         "warpSPHBoundaries body (wcsph only); Sensor 1 is then the fluid probe")
     p.add_argument('--analyticWallPressure', choices=('hydrostatic', 'normal'), default=None,
                    help='analytic walls only: wall pressure condition (case default hydrostatic)')
+    p.add_argument('--nh', type=float, default=None, help='neighbours per support radius n_h (case default 4; omniSPH: 2.57)')
     p.add_argument('--kernel', type=str, default=None,
                    help="kernel override (case default Wendland4; analytic walls need Wendland2 "
                         "for their shifting term and default to it)")
@@ -197,6 +198,8 @@ def buildSpec(case, args):
     params = {}
     if args.rollDataFile is not None:
         params['rollDataFile'] = os.path.abspath(args.rollDataFile)
+    if args.nh is not None:
+        overrides['n_h'] = args.nh
     if args.kernel is not None:
         overrides['kernel'] = args.kernel
     elif args.wallRepresentation == 'analytic':

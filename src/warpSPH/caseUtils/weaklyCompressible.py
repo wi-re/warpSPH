@@ -804,8 +804,10 @@ def analyticTankBody(interiorDomain, offset=0.0):
     the solid is everything outside it."""
     from warpSPHBoundaries.scene import Body
     from warpSPHBoundaries.scene.scene import BoxRep
-    lo = [float(v) - offset for v in interiorDomain.min]
-    hi = [float(v) + offset for v in interiorDomain.max]
+    loOff, hiOff = offset if isinstance(offset, tuple) else (offset, offset)             # a scalar for all walls, or (lo offsets [2], hi offsets [2]): the calibrated lattice moves each wall
+    loOff, hiOff = np.broadcast_to(np.asarray(loOff, dtype=float), (2,)), np.broadcast_to(np.asarray(hiOff, dtype=float), (2,))
+    lo = [float(v) - float(o) for v, o in zip(interiorDomain.min, loOff)]
+    hi = [float(v) + float(o) for v, o in zip(interiorDomain.max, hiOff)]
     return Body(bodyId = 0, reps = [BoxRep(tuple(lo), tuple(hi), solid = 'outside')])
 
 
