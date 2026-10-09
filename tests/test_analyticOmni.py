@@ -43,7 +43,7 @@ def test_operator_diagonal_is_alpha():
     alpha = dt * dt * computeAlpha(st, cfg, sc, adj, apparentVolumes=st.masses / st.densities, includeBoundaryReaction=False, wall=wall)
 
     def Ap(p):
-        a_p = O._pressureAccel(st, cfg, adj, p, fluid, wall)
+        a_p = O._pressureAccel(st, cfg, adj, p, fluid, wall, sc.fluid.restDensity)
         return torch.where(fluid, -dt * dt * O._divergence(st, cfg, adj, a_p, wall), torch.zeros_like(p))
 
     pos = st.positions.cpu().numpy()

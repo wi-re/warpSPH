@@ -358,7 +358,7 @@ def _xsphFilter(state: Any, config: Any, adjacency: Any,
 
 
 def _pressureAccel(state: Any, config: Any, adjacency: Any,
-                   p: torch.Tensor, fluidMask: torch.Tensor, wall: Any = None) -> torch.Tensor:
+                   p: torch.Tensor, fluidMask: torch.Tensor, wall: Any = None, rho0: float = 1.0) -> torch.Tensor:
     """omniSPH `computeAcceleration`: the symmetric SPH pressure gradient
     `-sum_j m_j (p_i/rho_i^2 + p_j/rho_j^2) gradW`, as an acceleration. Zeroed
     on non-fluid rows -- a static particle takes no reaction
@@ -367,11 +367,10 @@ def _pressureAccel(state: Any, config: Any, adjacency: Any,
         state=state, pressureValues=p, config=config,
         supportScheme=SupportScheme.Scatter, adjacency=adjacency)
     if wall is not None:
-        # analytic walls: the mirrored pressure `p_b = p_i^+` plus the hydrostatic wall pressure, clamped at 0 (omniSPH's triangle boundary term, DFSPH2D's `_boundary_accel`):
-        # the symmetric form with the switch fixed at +1 and the pressure's positive part
-        from ..modules.analyticBoundary import wallPressureAcceleration
-        pPlus = p.clamp(min=0)
-        a_p = a_p + wallPressureAcceleration(wall, pPlus, torch.ones_like(pPlus), state.densities, wallMass=wall.wm, h=wall.support)
+        # analytic walls: the mirrored pressure `p_b = p_i^+` plus the hydrostatic wall pressure, clamped at 0, in omniSPH's own symmetric form (its triangle boundary term, the boundaries
+        # repo's `DFSPH2D._boundary_accel`, equal to ~1e-6); `rho0` is the rest density of the mirror and of the hydrostatic offset
+        from ..modules.analyticBoundary import wallPressureAccelerationOmni
+        a_p = a_p + wallPressureAccelerationOmni(wall, p, state.densities, rho0, wallMass=wall.wm, h=wall.support)
     return torch.where(fluidMask.unsqueeze(-1), a_p, torch.zeros_like(a_p))
 
 
@@ -496,7 +495,7 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *, checkS
             pin = wallPressureExtrapolation(
                 state, config, adjacency, pt, fluid, mode=wallP,
                 clampNonNeg=clampWall) if wallP else pt
-            return _pressureAccel(state, config, adjacency, pin, fluid, wall)
+            return _pressureAccel(state, config, adjacency, pin, fluid, wall, rho0)
 
         def applyA(pt, a_p):
             """`A_shift p = -dt**2 div(a_p(p)) - shift*p`, masked to fluid

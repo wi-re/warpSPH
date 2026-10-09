@@ -27,7 +27,7 @@ from warpSPHCore import KernelFunctions
 from ...boundary.provider import bindBodies
 from ...configurations.region import BCType
 
-__all__ = ['WallState', 'evaluateWall', 'resolveWall', 'wallDensity', 'wallDivergence', 'wallAlphaCorrection', 'wallContinuity', 'wallPressureAcceleration', 'wallViscousAcceleration', 'viscousPrefactor', 'wallLoads']
+__all__ = ['WallState', 'evaluateWall', 'resolveWall', 'wallDensity', 'wallDivergence', 'wallAlphaCorrection', 'wallPressureAccelerationOmni', 'wallContinuity', 'wallPressureAcceleration', 'wallViscousAcceleration', 'viscousPrefactor', 'wallLoads']
 
 F64 = torch.float64
 FAMILY = {KernelFunctions.Wendland2: 'w2', KernelFunctions.Wendland4: 'w4'}
@@ -176,6 +176,23 @@ def wallPressureAcceleration(wall, P, switch, rho, wallMass=1.0, h=1.0, clamp=Tr
         A = A - ((1.0 - theta) * q)[:, :, None] * G
     wallTerm = (pp + s64 * P64)[None, :, None] * G + A
     acc = -wallTerm / rho64[None, :, None]
+    return acc.to(wall.dtype) if perBody else acc.sum(0).to(wall.dtype)
+
+
+def wallPressureAccelerationOmni(wall, P, rho, rho0, wallMass=1.0, h=1.0, perBody=False):
+    """The pressure force of the wall in omniSPH's symmetric form (the fluid pairs `-sum_j V_j (p_i / rho_i^2 + p_j / rho_j^2) grad W_ij`, the wall a mirror: `p_b = p_i^+`, `rho_b = rho0`):
+    `a = - sum_b [ (p^+ / rho_i^2 + p^+ / rho0^2) G_b + A_eff,b ]`, with the hydrostatic offset `A_b = int (a1 . y) grad W dA`, `a1 = rho_i (g - a_w)` (so `A_i = rho_i / rho0` times the
+    `WallState`'s, evaluated at `rho0`) clamped so the wall pressure `p_i + q` stays >= 0 as in `wallPressureAcceleration`. Differs from the delta+ form (`-[(p^+ + s p) G + A] / rho_i`) by the
+    density factors, which matter on under-dense wall rows. `DFSPH2D._boundary_accel` of the boundaries repo is the oracle (equal to ~1e-6)."""
+    P64, rho64 = P.to(F64), rho.to(F64)
+    pp = P64.clamp(min=0)
+    G = wall.G
+    A = wall.A * (rho64 / float(rho0))[None, :, None]
+    eps = 1e-5 * wallMass / h
+    q = (A * G).sum(2) / (G * G).sum(2).clamp(min=eps * eps)
+    theta = torch.where(q < 0, (pp[None] / (-q).clamp(min=1e-300)).clamp(0.0, 1.0), torch.ones_like(q))
+    A = A - ((1.0 - theta) * q)[:, :, None] * G
+    acc = -((pp / rho64 ** 2 + pp / float(rho0) ** 2)[None, :, None] * G + A)
     return acc.to(wall.dtype) if perBody else acc.sum(0).to(wall.dtype)
 
 

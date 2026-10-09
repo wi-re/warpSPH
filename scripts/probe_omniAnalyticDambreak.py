@@ -44,7 +44,7 @@ def main():
     ap.add_argument('--nh', type=float, default=2.57)
     ap.add_argument('--particles', action='store_true', help='also the boundary-particle run')
     ap.add_argument('--video', action='store_true')
-    ap.add_argument('--wallMass', type=float, default=1.0)
+    ap.add_argument('--massScale', type=float, default=0.9715, help="particle mass factor: omniSPH's V = pi r^2 is 0.9715 of the lattice cell (rest density of the lattice ~0.98, the density solve inactive); 1 = rho0 dx^2")
     a = ap.parse_args()
 
     bootstrap(precision='float32')
@@ -53,6 +53,13 @@ def main():
     from warpSPH.runner.caseSpec import CaseSpec
     importAll()
     case = getCase('dambreak')
+    _ic = case.initialConditions
+
+    def _ic2(ctx, system):
+        if _ic is not None:
+            _ic(ctx, system)
+        system.state.masses = system.state.masses * a.massScale
+    case.initialConditions = _ic2
     L, W = 0.9, 1.5
     dx = L / a.nx
     ref = omniRows(a.times)
