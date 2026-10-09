@@ -13,6 +13,7 @@ __all__ = [
     'AdaptiveSupportScheme',
     'ViscositySwitch',
     'CompressibleSPHScheme',
+    'PESPHVariant',
     'WeaklyCompressibleSPHScheme',
     'IncompressibleSPHScheme',
     'ArtificialCompressibleSPHScheme',
@@ -39,6 +40,9 @@ class AdaptiveSupportScheme(Enum):
     NoScheme = 0
     Monaghan = 1
     Owen = 2
+    #: Number-density driven h (Hopkins 2015 App. F2, PESPH_PLAN Phase 2): Newton on `h = eta n^(-1/d)` with
+    #: `n_i = sum_j W_ij`, the Monaghan iteration with unit weights; the constraint PESPH's grad-h terms differentiate
+    NumberDensity = 3
 
 # @torch.jit.script
 class ViscositySwitch(Enum):
@@ -72,6 +76,17 @@ class CompressibleSPHScheme(Enum):
     GSPH = 3
     #: Godunov SPH of Inutsuka (2002): the kernel-convolution form with a Gaussian kernel (GODUNOV_SPH_PLAN layer 3)
     InutsukaGSPH = 4
+    #: Pressure-based SPH (PESPH_PLAN): `P_bar_i` by kernel summation instead of `rho_i`; variant in `PESPHVariant`.
+    #: Enum member only so far (Phase 0): `buildScheme` raises until the scheme is assembled (Phase 4)
+    PESPH = 5
+
+
+class PESPHVariant(Enum):
+    #: Frontiere et al. (2017) App. G / Hopkins F2: evolves the specific total energy, `P_bar_i = (gamma-1) sum_j m_j u_j W_ij`
+    PressureEnergy = 0
+    #: Hopkins (2013): evolves the entropic function `A`, `P_bar_i = (sum_j m_j A_j^(1/gamma) W_ij)^gamma`;
+    #: velocity-independent force, the variational one
+    PressureEntropy = 1
 
 # @torch.jit.script
 class WeaklyCompressibleSPHScheme(Enum):

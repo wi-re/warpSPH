@@ -78,6 +78,15 @@ def evaluateOptimalSupport(
                 supportScheme = supportScheme,
                 adjacency = adjacency
             )
+        elif compParams.adaptiveSupportScheme == AdaptiveSupportScheme.NumberDensity:
+            result = evaluateOptimalSupportMonaghan(
+                particleState = particleState,
+                config = config,
+                compParams = compParams,
+                supportScheme = supportScheme,
+                adjacency = adjacency,
+                numberDensity = True
+            )
         elif compParams.adaptiveSupportScheme == AdaptiveSupportScheme.NoScheme:
 
             # print('Adaptive support scheme set to NoneSupport, skipping optimal support evaluation')

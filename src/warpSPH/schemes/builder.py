@@ -341,6 +341,8 @@ def buildScheme(
                       WaveEquationScheme]
 ) -> SchemeBundle:
     """Resolve a scheme name or enum member to its :class:`SchemeBundle`."""
+    if schemeName is CompressibleSPHScheme.PESPH or (isinstance(schemeName, str) and schemeName.lower() == 'pesph'):
+        raise NotImplementedError('PESPH is registered as an enum member only; the scheme is assembled in PESPH_PLAN Phase 4')
     if isinstance(schemeName, str):
         member = _ALIASES.get(schemeName.lower())
     else:
