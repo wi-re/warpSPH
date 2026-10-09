@@ -10,7 +10,7 @@ integrate/update pair every step to move rigid obstacles such as
 `cases/movingObstacle.py`'s spinning hexagon.
 """
 
-from .build import buildRigidBody
+from .build import buildRigidBody, buildAnalyticRigidBody
 from .ghostParticles import addBoundaryGhostParticles
 from .integrate import integrateRigidBody
 from .transformation import getTransformationMatrix
@@ -18,6 +18,7 @@ from .update import updateBodyParticlesWCSPH
 
 __all__ = [
     'buildRigidBody',
+    'buildAnalyticRigidBody',
     'addBoundaryGhostParticles',
     'integrateRigidBody',
     'getTransformationMatrix',

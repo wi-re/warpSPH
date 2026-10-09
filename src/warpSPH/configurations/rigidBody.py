@@ -65,6 +65,11 @@ class RigidBody:
     sdf: callable
     bodyID: int = 0  
     kind: BCType = BCType.constant
+    # Analytic representation of the body (a `warpSPHBoundaries` Body, or anything with the same
+    # `center` / `angle` / `massProperties(rho)` surface): None for a body made of boundary particles (the
+    # mDBC path, unchanged); set for a body whose boundary integrals come from a boundary provider
+    # (`rigidBody.build.buildAnalyticRigidBody`: the particle / ghost arrays are then empty).
+    representation: object = None
 
     def toDict(self) -> dict:
         # These fields are tensors as constructed, but a caller driving a body
