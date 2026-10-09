@@ -37,7 +37,7 @@ the hydrostatic wall-pressure term by its normal part only (as the boundary part
 
 3D; `BCType.extended`; the `exactHessian` implicit operator with walls (needs the wall Hessian integral); obstacle presets other than circle, box and equilateral triangle
 (an ellipse, `aspectRatio != 1`); the right-hand-side graph and the whole-step graph for moving or dynamic bodies, implicit / dynamic shifting and mixed scenes; the incompressible
-and ACSPH consumers (not hooked). Each is a separate next step, not a precondition.
+and ACSPH consumers (not hooked). Each is a separate next step, not a precondition. *(Until 2026-10-09 the last item was refused in the text only: the incompressible and ACSPH schemes ran with analytic walls and no wall at all. `initializeSimulation` now raises `NotImplementedError` for every scheme but the weakly compressible δ⁺, `tests/test_analyticRefusal.py`; a scheme leaves the list when it is ported.)*
 
 ## Verified (A/B against the boundary-particle path, `dambreak`)
 
