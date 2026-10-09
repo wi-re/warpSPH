@@ -332,7 +332,8 @@ def computeAlphaWarp(
     # return warp_result
 
 
-def computeAlpha(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], apparentVolumes: torch.Tensor, includeBoundaryReaction: bool = True) -> torch.Tensor:
+def computeAlpha(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], apparentVolumes: torch.Tensor, includeBoundaryReaction: bool = True, wall: Optional[Any] = None) -> torch.Tensor:
+    """`wall`: the analytic boundary's `WallState`; `None`: resolved from `schemeConfig.boundaryProvider`, boundary particles when there is none (`wallAlphaCorrection`)."""
     with record_function("[warpSPH] - computeDensities"):
         dt = config.dt
         alpha = computeAlphaWarp(
@@ -348,5 +349,17 @@ def computeAlpha(currentState: Any, config: SimulationConfig, schemeConfig: Any,
             queryApparentAreas=apparentVolumes,
             # includeBoundaryReaction=includeBoundaryReaction,
         )
-        # return alpha
-        return - alpha
+        alpha = -alpha
+        from ..analyticBoundary import resolveWall, wallAlphaCorrection
+        wall = resolveWall(currentState, config, schemeConfig, adjacency, wall)
+        if wall is not None:
+            # analytic walls: the wall adds its gradient `G` to the vector sum `sum_j A_j grad W_ij` of the first term (A_j the apparent volumes), a static wall has no second-sum part
+            gradSum = warpOperation(
+                currentState,
+                OperationProperties(kernel = config.kernel, operation = WarpOperation.Gradient, gradientMode = GradientScheme.Naive, supportMode = SupportScheme.Gather),
+                queryValues = apparentVolumes * currentState.densities / currentState.masses,
+                domain = config.domain,
+                adjacency = adjacency,
+            )
+            alpha = alpha + wallAlphaCorrection(wall, gradSum, currentState.densities)
+        return alpha

@@ -31,7 +31,7 @@ from ...enumTypes import *
 __all__ = ['computeDensities']
 
 
-def computeDensities(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], supportMode: Optional[SupportScheme] = None) -> torch.Tensor:
+def computeDensities(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], supportMode: Optional[SupportScheme] = None, wall: Optional[Any] = None) -> torch.Tensor:
     with record_function("[warpSPH] - computeDensities"):
         densities = warpOperation(
             currentState,
@@ -52,6 +52,11 @@ def computeDensities(currentState: Any, config: SimulationConfig, schemeConfig: 
             domain = config.domain,
             adjacency = adjacency,
         )
+        # analytic walls: the wall's share of the sum (the boundary particles' `sum_k V_k W_ik`), `wall=None` resolves the scheme's provider
+        from ..analyticBoundary import resolveWall, wallDensity
+        wall = resolveWall(currentState, config, schemeConfig, adjacency, wall)
+        if wall is not None:
+            densities = densities + wallDensity(wall)
         # The D&A (2012) eq. 18/19 self-term correction: a per-particle
         # remap of the finished raw estimate (eps depends on N_H, which
         # depends on the raw density), applied after the operator, so the

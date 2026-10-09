@@ -36,6 +36,16 @@ SCHEME_PRESETS = {
     # De Courcy et al. 2024; the case's `configureScheme` supplies the PST,
     # viscosity and forwardEuler integrator (ACSPH_PLAN.md).
     'acsph': dict(scheme='artificialCompressible', integrationScheme='forwardEuler'),
+    # omniSPH's incompressible loop (`omniIncompressible`), the one that supports analytic walls; the integrator / kernel / CFL of the dfsph preset
+    'omni': dict(
+        scheme='omniIncompressible',
+        integrationScheme='semiImplicitEuler',
+        kernel='Wendland2',
+        supportMode='SuperSymmetric',
+        cflFactor=0.2,
+        dt=1.0e-3,
+        maxDt=2.0e-3,
+    ),
     'dfsph': dict(
         scheme='divergenceFree',
         integrationScheme='semiImplicitEuler',

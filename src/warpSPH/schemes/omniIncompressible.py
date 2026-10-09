@@ -96,6 +96,7 @@ from ..modules.density import computeDensities
 from ..modules.gravity import computeGravity
 from ..modules.incompressible.consistent import applyConsistentCoupling
 from ..modules.incompressible.wallPressure import wallPressureExtrapolation
+from ..modules.analyticBoundary import resolveWall, wallDensity
 from ..modules.incompressible.wp_alpha import computeAlpha
 from ..modules.pressure.iisph import computePressureAccelIISPH
 from ..modules.shifting.bicgstab import bicgstabSolve
@@ -298,14 +299,19 @@ def _rebuildAdjacency(state: Any, system: Any, config: Any):
 
 
 def _divergence(state: Any, config: Any, adjacency: Any,
-                field: torch.Tensor) -> torch.Tensor:
+                field: torch.Tensor, wall: Any = None, bodyVelocity: bool = False) -> torch.Tensor:
     """Scatter / difference-form SPH divergence -- the operator
     `computeMomentumIncompressible` wraps (`WarpOperation.Divergence`,
     `GradientScheme.Difference`, `SupportScheme.Scatter`), without its
     `-rho0` factor. `sum_j (m_j/rho_j) (field_j - field_i) . gradW_ij`; for a
     `div = +1` field it returns `+1` in the bulk. omniSPH's per-particle sum
-    `sum_j V_j (X_i - X_j) . gradW` is the negative of this."""
-    return warpOperation(
+    `sum_j V_j (X_i - X_j) . gradW` is the negative of this.
+
+    `wall` (analytic walls, `modules/analyticBoundary`): the wall's share
+    `sum_b (f_b - f_i) . G_b`, `f_b` the body velocity with `bodyVelocity` (a
+    velocity field), else 0 (the pressure acceleration: a static wall takes no
+    reaction, as the boundary particles' zeroed rows)."""
+    div = warpOperation(
         state,
         OperationProperties(
             kernel=config.kernel,
@@ -318,6 +324,10 @@ def _divergence(state: Any, config: Any, adjacency: Any,
         adjacency=adjacency,
         consistentDivergence=False,
     )
+    if wall is not None:
+        from ..modules.analyticBoundary import wallDivergence
+        div = div + wallDivergence(wall, field, bodyVelocity=bodyVelocity)
+    return div
 
 
 def _xsphFilter(state: Any, config: Any, adjacency: Any,
@@ -348,7 +358,7 @@ def _xsphFilter(state: Any, config: Any, adjacency: Any,
 
 
 def _pressureAccel(state: Any, config: Any, adjacency: Any,
-                   p: torch.Tensor, fluidMask: torch.Tensor) -> torch.Tensor:
+                   p: torch.Tensor, fluidMask: torch.Tensor, wall: Any = None) -> torch.Tensor:
     """omniSPH `computeAcceleration`: the symmetric SPH pressure gradient
     `-sum_j m_j (p_i/rho_i^2 + p_j/rho_j^2) gradW`, as an acceleration. Zeroed
     on non-fluid rows -- a static particle takes no reaction
@@ -356,6 +366,12 @@ def _pressureAccel(state: Any, config: Any, adjacency: Any,
     a_p = computePressureAccelIISPH(
         state=state, pressureValues=p, config=config,
         supportScheme=SupportScheme.Scatter, adjacency=adjacency)
+    if wall is not None:
+        # analytic walls: the mirrored pressure `p_b = p_i^+` plus the hydrostatic wall pressure, clamped at 0 (omniSPH's triangle boundary term, DFSPH2D's `_boundary_accel`):
+        # the symmetric form with the switch fixed at +1 and the pressure's positive part
+        from ..modules.analyticBoundary import wallPressureAcceleration
+        pPlus = p.clamp(min=0)
+        a_p = a_p + wallPressureAcceleration(wall, pPlus, torch.ones_like(pPlus), state.densities, wallMass=wall.wm, h=wall.support)
     return torch.where(fluidMask.unsqueeze(-1), a_p, torch.zeros_like(a_p))
 
 
@@ -402,14 +418,17 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *, checkS
     with applyConsistentCoupling(state, config, schemeConfig, adjacency,
                                  BoundaryPressureMode.consistent):
         apparent = state.masses / state.densities
+        # analytic walls (`modules/analyticBoundary`): the wall's integrals at the fluid particles, one evaluation per position set (the cache is shared with the
+        # density, the alpha and the pressure acceleration below); None with boundary particles
+        wall = resolveWall(state, config, schemeConfig, adjacency)
         # omniSPH folds -dt**2 into fluidAlpha; computeAlpha returns the
         # negated IISPH a_ii bracket, so `alpha <= 0` as omniSPH's is.
         alpha = dt * dt * computeAlpha(
             state, config, schemeConfig, adjacency,
-            apparentVolumes=apparent, includeBoundaryReaction=False)
+            apparentVolumes=apparent, includeBoundaryReaction=False, wall=wall)
         alphaBad = alpha.abs() < ALPHA_FLOOR
 
-        divEnter = _divergence(state, config, adjacency, vEnter)
+        divEnter = _divergence(state, config, adjacency, vEnter, wall, bodyVelocity=True)
         if mode == 'density':
             densityError = 1.0 - state.densities / rho0
             if surfaceSource == 'clamp':
@@ -432,6 +451,8 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *, checkS
                     state, props, domain=config.domain,
                     referenceValues=torch.ones_like(densityError),
                     adjacency=adjacency)
+                if wall is not None:
+                    weight = weight + wallDensity(wall)
                 rhoShep = state.densities / weight.clamp_min(1e-6)
                 densityError = 1.0 - rhoShep / rho0
             elif surfaceSource != 'full':
@@ -468,18 +489,19 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *, checkS
         alphaEff = alpha - shift
         invAlpha = OMEGA / alphaEff
 
-        wallP = WALL_PRESSURE_MODE if mode == 'density' else None
+        # the boundary particles' per-iterate wall pressure extrapolation has no analytic counterpart: the wall's pressure is the mirrored `p_i^+` plus the hydrostatic term
+        wallP = WALL_PRESSURE_MODE if (mode == 'density' and wall is None) else None
 
         def accel(pt, clampWall=True):
             pin = wallPressureExtrapolation(
                 state, config, adjacency, pt, fluid, mode=wallP,
                 clampNonNeg=clampWall) if wallP else pt
-            return _pressureAccel(state, config, adjacency, pin, fluid)
+            return _pressureAccel(state, config, adjacency, pin, fluid, wall)
 
         def applyA(pt, a_p):
             """`A_shift p = -dt**2 div(a_p(p)) - shift*p`, masked to fluid
             (`shift >= 0`, so `- shift*p` deepens the negative diagonal)."""
-            aP = -dt * dt * _divergence(state, config, adjacency, a_p)
+            aP = -dt * dt * _divergence(state, config, adjacency, a_p, wall)
             if shift:
                 aP = aP - shift * pt
             return torch.where(fluid, aP, torch.zeros_like(aP))

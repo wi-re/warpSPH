@@ -92,6 +92,8 @@ The boundaries repo's own finding: `dfsph` free-surface behaviour carries a ~10 
 
 **A trap found on the way:** the first version of `computeMomentum(wall=None)` resolved the wall while `drift_rates` still added the wall flux itself: a double count (dam break differed at 10 m/s level). The fingerprint caught it. Any caller that adds a wall term next to a module that now adds it is a double count: when moving a term into a module, move *every* caller's private copy at the same time (grep the module's callers).
 
+**Slice 4a (omniIncompressible, EXPERIMENTAL, 2026-10-09, not working yet):** the wall terms of the omni loop are in (density, alpha, divergence / source, pressure acceleration, Shepard surface source), the scheme is on `runner.ANALYTIC_WALL_SCHEMES` and flagged experimental; hydrostatic tank at rest: unstable at the first rows. Findings and the plan (term-by-term against `DFSPH2D`, calibrated lattice) are OPEN_PROBLEMS 31.
+
 **Next slices:** (3) the no-penetration impulse and the loads (`analyticNoPenShift`, `wallLoads`) behind the same convention; (4) the incompressible track, `omniIncompressible` first: per-iterate wall pressure, wall flux in the divergence source, wall in the diagonal `alpha`, wall density, against `DFSPH2D`; (5) `divergenceFree`.
 
 ## 7. Decisions (owner, 2026-10-09)

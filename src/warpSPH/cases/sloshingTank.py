@@ -154,11 +154,11 @@ def configureScheme(ctx: RunContext) -> None:
 
     sc = ctx.schemeConfig
     if ctx.param('wallRepresentation') == 'analytic':
-        # the tank is one analytic warpSPHBoundaries body (ANALYTIC_BOUNDARIES_PLAN.md): deltaSPH only, static walls
+        # the tank is one analytic warpSPHBoundaries body (ANALYTIC_BOUNDARIES_PLAN.md): deltaSPH and omniIncompressible, static walls
         # (the roll is carried by the rotated gravity, the walls never move in this frame)
-        if isIncompressibleScheme(ctx.scheme) or isArtificialCompressibleScheme(ctx.scheme):
-            raise ValueError("sloshingTank wallRepresentation='analytic' is hooked into deltaSPH only "
-                             "(ANALYTIC_BOUNDARIES_PLAN.md: the incompressible and ACSPH consumers are not)")
+        if getattr(ctx.scheme, 'name', ctx.scheme) not in ('deltaSPH', 'omniIncompressible'):
+            raise ValueError("sloshingTank wallRepresentation='analytic' is hooked into deltaSPH and omniIncompressible only "
+                             "(ANALYTIC_BOUNDARIES_PORT_SURVEY.md)")
         sc.analyticWallPressure = ctx.param('analyticWallPressure')
     sc.surfaceDetectionConfig.active = True
     sc.gravityConfig.active = True
@@ -381,13 +381,16 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     d.update(stepAccelerationDiagnostics(state))
 
     if ctx.param('wallRepresentation') == 'analytic':
-        # no wall particle to read: Sensor 1 is the Gaussian-smoothed Tait pressure of the fluid within `probeRadius`
-        # of the sensor position (the same `sensorPressureProbe` the particle walls record next to the wall reading)
-        cs = float(ctx.schemeConfig.fluid.fixedSoundSpeed)
-        scale = rho0Phys * cs * cs
-        probe = _probePressure(
-            ctx, particles,
-            scale / _TAIT_GAMMA * ((particles.densities / rho0) ** _TAIT_GAMMA - 1.0))
+        # no wall particle to read: Sensor 1 is the Gaussian-smoothed pressure of the fluid within `probeRadius`
+        # of the sensor position (the same `sensorPressureProbe` the particle walls record next to the wall reading):
+        # the carried solver pressure of an incompressible scheme, else the Tait pressure of the density
+        if isIncompressibleScheme(ctx.scheme):
+            quantity = (particles.pressures if particles.pressures is not None else torch.zeros_like(particles.densities)) * rho0Phys
+        else:
+            cs = float(ctx.schemeConfig.fluid.fixedSoundSpeed)
+            scale = rho0Phys * cs * cs
+            quantity = scale / _TAIT_GAMMA * ((particles.densities / rho0) ** _TAIT_GAMMA - 1.0)
+        probe = _probePressure(ctx, particles, quantity)
         d['sensorPressure'] = probe if probe is not None else 0.0
         if probe is not None:
             d['sensorPressureProbe'] = probe

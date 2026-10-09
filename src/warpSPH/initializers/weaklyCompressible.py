@@ -264,9 +264,9 @@ def initializeSimulation(regions, config, schemeConfig, SimulationSystem, Simula
     config.rigidBodies = rigidBodies
     from ..boundary import buildBoundaryProvider
     provider = buildBoundaryProvider(regions, particleState.positions.device)
-    if provider is not None and not isinstance(schemeConfig, WeaklyCompressibleSPHConfig):
-        # only the weakly compressible delta+ scheme consumes the provider (ANALYTIC_BOUNDARIES_PORT_SURVEY.md); any other scheme would run with no wall at all
-        raise NotImplementedError(f"analytic boundaries (a region with a `representation`) are hooked into the weakly compressible delta+ scheme only, not {type(schemeConfig).__name__}")
+    if provider is not None and not isinstance(schemeConfig, (WeaklyCompressibleSPHConfig, IncompressibleSPHConfig)):
+        # any other scheme would run with no wall at all (ANALYTIC_BOUNDARIES_PORT_SURVEY.md); the scheme itself is checked in `cases.weaklyCompressible.buildRegionSystem`
+        raise NotImplementedError(f"analytic boundaries (a region with a `representation`) are hooked into the delta+ and omniIncompressible schemes only, not {type(schemeConfig).__name__}")
     schemeConfig.boundaryProvider = provider
     if provider is not None:
         provider.rigidBodies = [rb for rb in rigidBodies if getattr(rb, 'representation', None) is not None]

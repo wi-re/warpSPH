@@ -27,7 +27,7 @@ from warpSPHCore import KernelFunctions
 from ...boundary.provider import bindBodies
 from ...configurations.region import BCType
 
-__all__ = ['WallState', 'evaluateWall', 'resolveWall', 'wallContinuity', 'wallPressureAcceleration', 'wallViscousAcceleration', 'viscousPrefactor', 'wallLoads']
+__all__ = ['WallState', 'evaluateWall', 'resolveWall', 'wallDensity', 'wallDivergence', 'wallAlphaCorrection', 'wallContinuity', 'wallPressureAcceleration', 'wallViscousAcceleration', 'viscousPrefactor', 'wallLoads']
 
 F64 = torch.float64
 FAMILY = {KernelFunctions.Wendland2: 'w2', KernelFunctions.Wendland4: 'w4'}
@@ -127,6 +127,30 @@ def _evaluateWall(provider, state, config, schemeConfig, gravity):
 
 def _wallVelocity(wall, bi):
     return torch.zeros_like(wall.kin.velocity[bi]) if wall.pinned[bi] else wall.kin.velocity[bi]
+
+
+def wallDensity(wall):
+    """The wall's share of the summation density, `wm * int W dA` summed over the bodies (the boundary particles' `sum_k V_k W_ik`)."""
+    return wall.lam.sum(0).to(wall.dtype)
+
+
+def wallDivergence(wall, field, bodyVelocity=False):
+    """The wall's share of the difference-form SPH divergence `sum_j V_j (f_j - f_i) . grad W_ij`: `sum_b (f_b - f_i) . G_b`, `G_b = wm int grad W dA`. `f_b` is the body's velocity at
+    the particle with `bodyVelocity` (a velocity field: the wall moves with its body, zero for a body pinned to zero velocity), else 0 (a field the wall rows do not carry, the
+    pressure acceleration: a static wall takes no reaction)."""
+    f = field.to(F64)
+    out = -(f * wall.G.sum(0)).sum(1)
+    if bodyVelocity:
+        for bi in range(wall.G.shape[0]):
+            out = out + (_wallVelocity(wall, bi) * wall.G[bi]).sum(1)
+    return out.to(wall.dtype)
+
+
+def wallAlphaCorrection(wall, gradSum, rho):
+    """The wall in the IISPH diagonal `alpha_i = -[ |sum_j V_j grad W_ij|^2 / rho_i + V_i sum_j (V_j^2 / m_j) |grad W_ij|^2 ]` (`modules/incompressible/wp_alpha.py`): the wall adds `G = sum_b G_b`
+    to the vector sum only (a static wall takes no reaction, so the second sum has no wall part), `-(2 gradSum . G + |G|^2) / rho_i`, with `gradSum` the fluid's `sum_j V_j grad W_ij`."""
+    G = wall.G.sum(0)
+    return (-(2.0 * (gradSum.to(F64) * G).sum(1) + (G * G).sum(1)) / rho.to(F64)).to(wall.dtype)
 
 
 def wallContinuity(wall, rho, v):

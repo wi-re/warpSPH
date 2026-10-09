@@ -70,6 +70,12 @@ class RunResult:
         return np.array([row[key] for row in self.trajectory if key in row])
 
 
+#: the schemes whose step consumes the analytic boundary provider (a scheme leaves the refusal when it is ported)
+ANALYTIC_WALL_SCHEMES = frozenset({'deltaSPH', 'omniIncompressible'})
+#: ... of which not yet usable
+EXPERIMENTAL_ANALYTIC_WALL_SCHEMES = frozenset({'omniIncompressible'})
+
+
 def resolveEnum(enumClass, value):
     """Case-insensitive name lookup, passing through values already resolved."""
     if value is None or isinstance(value, enumClass):
@@ -220,6 +226,14 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
         ctx.schemeConfig.cudaGraph = True
 
     system = case.buildSystem(ctx)
+    if getattr(ctx.schemeConfig, 'boundaryProvider', None) is not None:
+        schemeName = getattr(ctx.scheme, 'name', ctx.scheme)
+        if schemeName not in ANALYTIC_WALL_SCHEMES:
+            # a scheme that does not consume the boundary provider would run with no wall at all (ANALYTIC_BOUNDARIES_PORT_SURVEY.md)
+            raise NotImplementedError(f"analytic boundaries (a region with a `representation`) are hooked into the schemes {sorted(ANALYTIC_WALL_SCHEMES)} only, not {schemeName!r}")
+        if schemeName in EXPERIMENTAL_ANALYTIC_WALL_SCHEMES:
+            import warnings
+            warnings.warn(f"analytic walls in {schemeName!r} are EXPERIMENTAL: the wall terms are in, the pressure solve is unstable at the first rows (OPEN_PROBLEMS 31)", stacklevel=2)
     if case.initialConditions is not None:
         case.initialConditions(ctx, system)
 

@@ -12,11 +12,11 @@ from warpSPH.runner.caseSpec import CaseSpec  # noqa: E402
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA')
 
 
-@pytest.mark.parametrize('scheme', ['divergenceFree', 'omniIncompressible', 'artificialCompressible'])
+@pytest.mark.parametrize('scheme', ['divergenceFree', 'dfsphReference', 'iisph', 'artificialCompressible'])
 def test_other_schemes_refuse_analytic_walls(scheme):
     importAll()
     case = getCase('dambreak')
     spec = CaseSpec(caseName='refusal', scheme=scheme, params={**case.params, 'wallRepresentation': 'analytic'}).merged(**case.defaults).merged(
         scheme=scheme, nx=24, nSteps=2, plot=False, store=False, progress=False, video=False, show=False, quiet=True)
-    with pytest.raises(NotImplementedError, match='weakly compressible delta'):
+    with pytest.raises(NotImplementedError, match='analytic boundaries'):
         run(case, spec)
