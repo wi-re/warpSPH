@@ -45,6 +45,8 @@ class WallState:
     pinned: List[bool]          # per body: the wall velocity is pinned to zero (BCType.zeros)
     mirror: List[bool]          # per body: antisymmetric mirror (no-slip) instead of free slip
     dtype: Any
+    support: float = 0.0        # the (constant) kernel support the aggregates were evaluated for
+    wm: float = 1.0             # the wall mass density factor
 
 
 def _policies(provider):
@@ -58,8 +60,29 @@ def _policies(provider):
     return pinned, mirror
 
 
+def _token(v):
+    if isinstance(v, torch.Tensor):
+        return (id(v), v._version)
+    return v
+
+
 def evaluateWall(provider, state, config, schemeConfig, gravity):
-    """The wall aggregates at the fluid particles of `state` (one provider call per stage). `gravity`: [N, 2] or [2], uniform."""
+    """The wall aggregates at the fluid particles of `state`. `gravity`: [N, 2] or [2], uniform. The last evaluation is kept
+    while the positions (storage and version) and every body's integrated state are unchanged, so the right-hand side, the
+    surface detector and the shifting share one provider call per position set."""
+    from warpSPHBoundaries.scene import WallOutput
+    x0 = state.positions
+    key = (id(provider), x0.data_ptr(), x0._version, tuple(x0.shape),
+           tuple((_token(rb.centerOfMass), _token(rb.orientation), _token(rb.linearVelocity), _token(rb.angularVelocity)) for rb in provider.rigidBodies))
+    hit = getattr(provider, '_wallCache', None)
+    if hit is not None and hit[0] == key:
+        return hit[1]
+    wall = _evaluateWall(provider, state, config, schemeConfig, gravity)
+    provider._wallCache = (key, wall)
+    return wall
+
+
+def _evaluateWall(provider, state, config, schemeConfig, gravity):
     from warpSPHBoundaries.scene import WallOutput
     bindBodies(provider, provider.rigidBodies)
     pinned, mirror = _policies(provider)
@@ -75,7 +98,7 @@ def evaluateWall(provider, state, config, schemeConfig, gravity):
     lam, G = wm * agg.out['lam'], wm * agg.out['G']
     A = wm * agg.evaluate((WallOutput('A', 0, 'a1g1'),), a1=a1)['A']
     near = (lam.sum(0) > 1e-9).to(F64)
-    return WallState(agg, kin, lam, G, A, near, pinned, mirror, state.positions.dtype)
+    return WallState(agg, kin, lam, G, A, near, pinned, mirror, state.positions.dtype, support, wm)
 
 
 def _wallVelocity(wall, bi):

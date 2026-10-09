@@ -5,6 +5,7 @@ particles. This package owns the boundary-condition physics that turns them into
 contributes to each stage (wall continuity at stage 12, wall viscosity at 11, the pressure force of stage 13,
 and, in the later patches, the detector, the shifting and the no-penetration impulse).
 """
+from .detector import detectFreeSurfaceAnalytic, sym2LamPinv
 from .wallTerms import (WallState, evaluateWall, wallContinuity, wallPressureAcceleration, wallViscousAcceleration, viscousPrefactor)
 
-__all__ = ['WallState', 'evaluateWall', 'wallContinuity', 'wallPressureAcceleration', 'wallViscousAcceleration', 'viscousPrefactor']
+__all__ = ['detectFreeSurfaceAnalytic', 'sym2LamPinv', 'WallState', 'evaluateWall', 'wallContinuity', 'wallPressureAcceleration', 'wallViscousAcceleration', 'viscousPrefactor']

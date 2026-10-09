@@ -16,6 +16,7 @@ from .delta import computeDeltaShiftWarp
 from .implicitShifting import computeImplicitShift, computeDynamicImplicitShift
 from .michel import computeMichelShift
 from .wp_michelUChar import computeUCharWarp
+from .wp_deltaShiftRaw import computeDeltaShiftRawWarp
 from .wrapper import solveShifting
 
 __all__ = [
@@ -24,5 +25,6 @@ __all__ = [
     'computeDynamicImplicitShift',
     'computeMichelShift',
     'computeUCharWarp',
+    'computeDeltaShiftRawWarp',
     'solveShifting'
 ]

@@ -107,6 +107,11 @@ def detectFreeSurface(
             normals = torch.zeros_like(currentState.positions)
             return (fsm, fsm, None, None) if not returnNormals else (fsm, fsm, normals, None, None)
 
+        if getattr(schemeConfig, 'boundaryProvider', None) is not None:
+            # analytic walls: the wall continuum is added to the detector's partial sums before the decisions (modules/analyticBoundary/detector.py)
+            from ..analyticBoundary.detector import detectFreeSurfaceAnalytic
+            return detectFreeSurfaceAnalytic(currentState, config, schemeConfig, surfaceConfig, adjacency, returnNormals = returnNormals)
+
         normals, renormalizationState_, lambdas = computeNormals(
             currentState,
             config, schemeConfig, surfaceConfig,
