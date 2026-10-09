@@ -5,7 +5,8 @@ package depends on warpSPHCore only and never imports warpSPH):
 
     bodies                                        the rigid bodies (pose, velocity, acceleration), bound to the integrated state
     aggregate(ps, support, kernel, laplacian, ...)  the wall integrals at the particles `ps`: `.out` (lam, G, Cov, cover, lap, tens),
-                                                  `.evaluate(...)` for the hydrostatic term A(a1), `.cone_area(axis, halfAngle)`
+                                                  `.evaluate(...)` for the hydrostatic term A(a1), `.cone_area(axis, halfAngle)`,
+                                                  `.dir_extreme(vecs)` ([B, N]: the largest |cos| between a vector and a direction to a wall point in support: Michel's U_char)
     signed_distance(x, body, supportMax, want_body) (d, n, hit[, body index]) with d > 0 in the fluid
 
 `buildBoundaryProvider` makes one from the analytic regions of a scene; `bindBodies` writes the integrated

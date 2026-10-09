@@ -105,6 +105,15 @@ def computeMichelShift(currentState, config, schemeConfig, domain, adjacency, be
             adjacency=adjacency,
         )
 
+        provider = getattr(schemeConfig, 'boundaryProvider', None)
+        if provider is not None:
+            # analytic walls: the wall continuum's share of the same two ingredients (modules/analyticBoundary/shifting.py)
+            from ..analyticBoundary import evaluateWall, wallShiftRaw, wallUChar
+            from ..gravity import computeGravity
+            wall = evaluateWall(provider, currentState, config, schemeConfig, computeGravity(currentState, config, schemeConfig, adjacency))
+            gradCtilde = gradCtilde + wallShiftRaw(wall, currentState, config, schemeConfig, R=0.2, volumeWeighted=True).to(gradCtilde.dtype)
+            U_char = torch.maximum(U_char, wallUChar(wall, currentState).to(U_char.dtype))
+
         R_i = currentState.supports
         achievedDx_i = torch.pow(currentState.masses / rho0, 1.0 / dim)
         capLen = 0.5 * (R_i / achievedDx_i)

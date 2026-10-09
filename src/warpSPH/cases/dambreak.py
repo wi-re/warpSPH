@@ -192,6 +192,12 @@ def configureScheme(ctx: RunContext) -> None:
     shiftingParam = ctx.param('shifting', None)
     if shiftingParam is not None and hasattr(schemeConfig, 'shiftProperties'):
         schemeConfig.shiftProperties.active = bool(shiftingParam)
+    # `shiftScheme` / `shiftProjection`: the shifting law and its free-surface projection by enum name (`michel2022` / `michel2022` is the
+    # sloshing tank's pair); None leaves the scheme's own.
+    for param, field, enum in (('shiftScheme', 'scheme', ShiftingScheme), ('shiftProjection', 'projectionScheme', ShiftingProjectionScheme)):
+        name = ctx.param(param, None)
+        if name is not None and hasattr(schemeConfig, 'shiftProperties'):
+            setattr(schemeConfig.shiftProperties, field, enum[name])
 
     # Physical viscosity. `dambreak` has always run inviscid on the delta-SPH
     # path (the `# inviscid here` note in `dambreakTimestep`) -- Marrone 2011
@@ -1046,6 +1052,8 @@ dambreakCase = registerCase(Case(
         # configuration and this plan's own acceptance gate; see
         # `configureScheme` and `DELTASPH_VALIDATION_PLAN.md` Sec. 5.1.1.
         shifting=None,
+        shiftScheme=None,
+        shiftProjection=None,
         # Start the fluid on the weakly-compressible hydrostatic density profile
         # rather than a uniform rho0 -- see `initialConditions`. Off by default
         # (a collapsing dam-break column does not want it); a still-water case

@@ -26,8 +26,8 @@ def spec_of(case, rep, **kw):
     return CaseSpec(caseName=case.name, scheme=case.scheme, params=params).merged(**case.defaults).merged(nx=48, **kw)
 
 
-def final(case, rep, nSteps):
-    res = run(case, spec_of(case, rep, nSteps=nSteps, plot=False, store=False, progress=False, video=False, show=False, quiet=True))
+def final(case, rep, nSteps, params=None):
+    res = run(case, spec_of(case, rep, nSteps=nSteps, params=params or {}, plot=False, store=False, progress=False, video=False, show=False, quiet=True))
     s = res.state.state
     f = s.kinds == 0
     v, rho = s.velocities[f].double(), s.densities[f].double()
@@ -44,6 +44,30 @@ def test_analytic_tank_reproduces_the_particle_tank(nSteps):
     assert abs(a['ke'] / p['ke'] - 1.0) < 0.08, (a['ke'], p['ke'])
     assert abs(a['rmax'] - p['rmax']) < 0.01 and abs(a['rmin'] - p['rmin']) < 0.01
     assert a['row'].series('nPenetrating').max() == 0
+
+
+def check(a, p, vtol=0.05, ketol=0.08, rtol=0.01):
+    assert a['n'] == p['n']
+    assert abs(a['vmax'] / p['vmax'] - 1.0) < vtol, (a['vmax'], p['vmax'])
+    assert abs(a['ke'] / p['ke'] - 1.0) < ketol, (a['ke'], p['ke'])
+    assert abs(a['rmax'] - p['rmax']) < rtol and abs(a['rmin'] - p['rmin']) < rtol
+    assert a['row'].series('nPenetrating').max() == 0
+
+
+def test_analytic_tank_reproduces_the_particle_tank_with_michel_shifting():
+    """Michel 2022 (grad C-tilde and U_char with the wall continuum) in place of delta+ against the same case with boundary particles: measured 1.9 % in the fastest particle and 4.8 % in the kinetic energy at 0.3 s."""
+    importAll()
+    case = getCase('dambreak')
+    shift = dict(shiftScheme='michel2022', shiftProjection='michel2022')
+    check(final(case, 'analytic', 600, shift), final(case, 'particles', 600, shift))
+
+
+def test_analytic_tank_with_implicit_shifting_follows_the_analytic_delta_plus_run():
+    """Implicit shifting (grad C with the wall continuum) against the analytic delta+ run (measured 1.1 % in the fastest particle, 0.04 % in the kinetic energy at 0.3 s). Not against the boundary-particle
+    path: there `computeImplicitShift` sums the mDBC ghost nodes into grad C (they are not wall mass) and the run diverges (fastest particle ~900 at 0.3 s)."""
+    importAll()
+    case = getCase('dambreak')
+    check(final(case, 'analytic', 600, dict(shiftScheme='implicit', shiftProjection='surfaceNormal')), final(case, 'analytic', 600), vtol=0.03, ketol=0.02)
 
 
 def test_normal_wall_pressure_leaves_free_fall_alone():

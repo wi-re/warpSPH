@@ -6,8 +6,8 @@ contributes to each stage (wall continuity at stage 12, wall viscosity at 11, th
 and, in the later patches, the detector, the shifting and the no-penetration impulse).
 """
 from .noPenetration import analyticNoPenShift
-from .shifting import wallShiftRaw, kernelAtSpacing
+from .shifting import wallShiftRaw, kernelAtSpacing, wallUChar, wallConcentrationGradient
 from .detector import detectFreeSurfaceAnalytic, sym2LamPinv
 from .wallTerms import (WallState, evaluateWall, wallContinuity, wallPressureAcceleration, wallViscousAcceleration, viscousPrefactor)
 
-__all__ = ['analyticNoPenShift', 'wallShiftRaw', 'kernelAtSpacing', 'detectFreeSurfaceAnalytic', 'sym2LamPinv', 'WallState', 'evaluateWall', 'wallContinuity', 'wallPressureAcceleration', 'wallViscousAcceleration', 'viscousPrefactor']
+__all__ = ['analyticNoPenShift', 'wallShiftRaw', 'kernelAtSpacing', 'wallUChar', 'wallConcentrationGradient', 'detectFreeSurfaceAnalytic', 'sym2LamPinv', 'WallState', 'evaluateWall', 'wallContinuity', 'wallPressureAcceleration', 'wallViscousAcceleration', 'viscousPrefactor']
