@@ -351,9 +351,20 @@ def buildSystem(ctx: RunContext):
             ctx.config, ctx.schemeConfig, ctx.spec.L, ctx.param('W'),
             interior=ctx.scratch['interiorDomain'])
 
-    return initializeWeaklyCompressibleSimulation(
+    system = initializeWeaklyCompressibleSimulation(
         ctx.schemeConfig.regions, ctx.config, ctx.schemeConfig,
         ctx.SimulationSystem, ctx.SimulationState, verbose=ctx.spec.verbose)
+    if ctx.param('obstacleDynamic'):
+        # a free obstacle (analytic walls only): the fluid's load drives it, mass and inertia of the solid at `obstacleDensity` (the analytic body is made at the fluid's rest density)
+        provider = getattr(ctx.schemeConfig, 'boundaryProvider', None)
+        if provider is None or len(provider.rigidBodies) < 2 or not ctx.param('obstacleActive'):
+            raise ValueError("obstacleDynamic needs wallRepresentation='analytic', obstacleRepresentation='analytic' and an obstacle")
+        ratio = float(ctx.param('obstacleDensity')) / float(ctx.schemeConfig.fluid.restDensity)
+        for rb in provider.rigidBodies[1:]:
+            rb.dynamic = True
+            rb.mass = rb.mass * ratio
+            rb.inertia = rb.inertia * ratio
+    return system
 
 
 def initialConditions(ctx: RunContext, system) -> None:
@@ -988,6 +999,9 @@ dambreakCase = registerCase(Case(
         wallRepresentation='particles',
         # with wallRepresentation='analytic' and an obstacle: 'analytic' (the obstacle is an analytic body too) or 'particles' (a mixed scene: the obstacle stays boundary particles)
         obstacleRepresentation='analytic',
+        # obstacleDynamic: the analytic obstacle is a free body driven by the fluid's load and gravity, of density obstacleDensity
+        obstacleDynamic=False,
+        obstacleDensity=0.5,
         # analytic walls only: 'hydrostatic' (the wall pressure gradient rho (g - a_w) in all directions: exact for a fluid in hydrostatic balance) or
         # 'normal' (only dp/dn = rho (g - a_w) . n, as the boundary particles' ghost extrapolation: no tangential force on a fluid in free fall)
         analyticWallPressure='hydrostatic',

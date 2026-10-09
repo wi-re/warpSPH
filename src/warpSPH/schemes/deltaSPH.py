@@ -51,7 +51,7 @@ from warpSPHCore.profiling import record_function
 __all__ = ['deltaSPH_step']
 
 
-from ..modules.analyticBoundary import evaluateWall, viscousPrefactor, wallContinuity, wallPressureAcceleration, wallViscousAcceleration
+from ..modules.analyticBoundary import evaluateWall, viscousPrefactor, wallContinuity, wallLoads, wallPressureAcceleration, wallViscousAcceleration
 
 
 def deltaSPH_step(
@@ -371,6 +371,17 @@ def _deltaSPH_rhs(
             hWall = float(schemeConfig._analyticSupport) if getattr(schemeConfig, '_analyticSupport', None) else float(currentState.supports.max())
             dvdt_pressure = dvdt_pressure + wallPressureAcceleration(wall, currentState.pressures, switch, currentState.densities,
                                                                      wallMass=float(getattr(schemeConfig, 'analyticWallMass', 1.0)), h=hWall)
+
+    if wall is not None and (getattr(schemeConfig, 'analyticWallLoads', False) or any(rb.dynamic for rb in provider.rigidBodies)):
+        # the load of the fluid on every analytic body (pressure, wall viscous): the reaction to the wall terms, booked on the RigidBody for diagnostics and for the free bodies
+        with record_function("[warpSPH] - [deltaSPH - 13b] - analytic wall loads"):
+            hWall = float(schemeConfig._analyticSupport) if getattr(schemeConfig, '_analyticSupport', None) else float(currentState.supports.max())
+            wm = float(getattr(schemeConfig, 'analyticWallMass', 1.0))
+            accP = wallPressureAcceleration(wall, currentState.pressures, switch, currentState.densities, wallMass=wm, h=hWall, perBody=True)
+            accV = wallViscousAcceleration(wall, currentState.densities, currentState.velocities, viscousPrefactor(schemeConfig, config, hWall), hWall, wallMass=wm, kernel=config.kernel, perBody=True)
+            loads = wallLoads(accP, accV, currentState.positions, currentState.masses, torch.stack([rb.centerOfMass.to(torch.float64).reshape(2) for rb in provider.rigidBodies]))
+            for bi, rb in enumerate(provider.rigidBodies):
+                rb.load = loads[:, bi, :].clone()
 
     # 14. Apply forcing
     # with TimedBlock('compute forcing', use_cuda=True, device=config.device) as tb_forcing:

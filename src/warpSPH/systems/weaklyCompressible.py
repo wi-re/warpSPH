@@ -598,8 +598,19 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
                     self.state.velocities = vNew
 
         for rigidBody in schemeConfig.rigidBodies:
-            rigidBody = integrateRigidBody(rigidBody, 0, 0, dt)
-            self.state = updateBodyParticlesWCSPH(self.state, rigidBody)
+            dudt, dwdt = 0, 0
+            if getattr(rigidBody, 'dynamic', False):
+                # a free analytic body: the fluid's load (booked by the scheme's right-hand side) and gravity drive it (acceleration of the centre of mass and of the rotation)
+                if rigidBody.load is None:
+                    raise RuntimeError('a dynamic rigid body needs the loads of the scheme\'s right-hand side (analytic boundaries only)')
+                g = computeGravity(self.state, config, schemeConfig, self.adjacency)
+                g = (g.reshape(-1, g.shape[-1])[0] if g.dim() > 1 else g).to(rigidBody.centerOfMass.dtype)
+                load = rigidBody.load.sum(0).to(rigidBody.centerOfMass.dtype)
+                dudt = load[:2] / rigidBody.mass + g
+                dwdt = load[2] / rigidBody.inertia
+            rigidBody = integrateRigidBody(rigidBody, dudt, dwdt, dt)
+            if getattr(rigidBody, 'representation', None) is None:                 # an analytic body has no particles to move (and the update reads host values, which a graph capture forbids)
+                self.state = updateBodyParticlesWCSPH(self.state, rigidBody)
 
         # Per-step diagnostics: the *net* fluid acceleration actually applied
         # this step (magnitude + per axis), and -- only under

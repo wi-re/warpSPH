@@ -68,3 +68,24 @@ def test_mixed_scene_analytic_tank_with_a_particle_obstacle_runs():
     assert abs(mixed['ke'] / ref['ke'] - 1.0) < 0.08, (mixed['ke'], ref['ke'])
     assert mixed['rmin'] > 0.95 and mixed['rmax'] < 1.06
     assert mixed['row'].series('nPenetrating').max() == 0
+
+
+@pytest.mark.parametrize('density', [0.5, 2.0])
+def test_free_obstacle_is_driven_by_the_fluid_load(density):
+    """A free cylinder (radius 0.25) in a still pool: the fluid's pressure load and gravity accelerate it. Initial acceleration of a cylinder of density rho_b in a fluid of density rho: g (rho - rho_b) /
+    (rho + rho_b) for the ideal fluid with the cylinder's added mass (= its displaced mass): 3.27 up for 0.5, 3.27 down for 2. Compared at 0.1 s through the mean acceleration v / t (the pressure ramps up
+    in the first few acoustic times and the walls are 4-5 radii away: 15 % stated in float64 (measured 8 % low), 25 % in float32 (measured 22 % low)); the booked load must also close the balance m a = F + m g exactly (the integrator uses it)."""
+    importAll()
+    case = getCase('dambreak')
+    par = dict(obstacleActive=True, obstacleType='circleMiddle', maxExtent=0.5, offsetX=0.0, obstacleDynamic=True, obstacleDensity=density, fluidWidth=1.0, hydrostaticInit=True, shifting=False)
+    res = run(case, spec_of(case, 'analytic', nSteps=200, params=par, plot=False, store=False, progress=False, video=False, show=False, quiet=True))
+    rb = res.ctx.schemeConfig.boundaryProvider.rigidBodies[1]
+    t = float(res.series('t')[-1])
+    a_mean = float(rb.linearVelocity[1]) / t
+    ideal = 9.81 * (1.0 - density) / (1.0 + density)
+    f32 = res.state.state.positions.dtype == torch.float32
+    tol = 0.25 if f32 else 0.15                  # the acceleration is the small difference F / m - g of two large numbers (13 and 9.81): the 3 % lower load of float32 (1.243 against 1.281) is 15 % of it
+    assert abs(a_mean - ideal) < tol * abs(ideal), (a_mean, ideal)
+    assert abs(float(rb.linearVelocity[0])) < 1e-4 * abs(float(rb.linearVelocity[1])) and abs(float(rb.angularVelocity)) < 1e-6          # the symmetric flow pushes straight up / down (float32 atomics break the symmetry at 1e-5)
+    a_last = float(rb.load.sum(0)[1]) / float(rb.mass) - 9.81
+    assert a_last * ideal > 0 and abs(a_last - ideal) < (0.3 if f32 else 0.2) * abs(ideal), (a_last, ideal)

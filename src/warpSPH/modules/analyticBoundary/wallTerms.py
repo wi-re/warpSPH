@@ -27,7 +27,7 @@ from warpSPHCore import KernelFunctions
 from ...boundary.provider import bindBodies
 from ...configurations.region import BCType
 
-__all__ = ['WallState', 'evaluateWall', 'wallContinuity', 'wallPressureAcceleration', 'wallViscousAcceleration', 'viscousPrefactor']
+__all__ = ['WallState', 'evaluateWall', 'wallContinuity', 'wallPressureAcceleration', 'wallViscousAcceleration', 'viscousPrefactor', 'wallLoads']
 
 F64 = torch.float64
 FAMILY = {KernelFunctions.Wendland2: 'w2', KernelFunctions.Wendland4: 'w4'}
@@ -127,8 +127,8 @@ def wallContinuity(wall, rho, v):
     return out.to(wall.dtype)
 
 
-def wallPressureAcceleration(wall, P, switch, rho, wallMass=1.0, h=1.0, clamp=True):
-    """The pressure force of the wall: a = - sum_b [(p^+ + s p) G_b + A_eff,b] / rho. `switch`: the Antuono switch s (+1 / -1) per particle."""
+def wallPressureAcceleration(wall, P, switch, rho, wallMass=1.0, h=1.0, clamp=True, perBody=False):
+    """The pressure force of the wall: a = - sum_b [(p^+ + s p) G_b + A_eff,b] / rho. `switch`: the Antuono switch s (+1 / -1) per particle. `perBody`: the [B, N, 2] terms of the bodies instead of their sum."""
     P64, s64, rho64 = P.to(F64), switch.to(F64), rho.to(F64)
     pp = P64.clamp(min=0)
     A, G = wall.A, wall.G
@@ -138,10 +138,11 @@ def wallPressureAcceleration(wall, P, switch, rho, wallMass=1.0, h=1.0, clamp=Tr
         theta = torch.where(q < 0, (pp[None] / (-q).clamp(min=1e-300)).clamp(0.0, 1.0), torch.ones_like(q))
         A = A - ((1.0 - theta) * q)[:, :, None] * G
     wallTerm = (pp + s64 * P64)[None, :, None] * G + A
-    return (-wallTerm / rho64[None, :, None]).sum(0).to(wall.dtype)
+    acc = -wallTerm / rho64[None, :, None]
+    return acc.to(wall.dtype) if perBody else acc.sum(0).to(wall.dtype)
 
 
-def wallViscousAcceleration(wall, rho, v, fac, h, wallMass=1.0, kernel=KernelFunctions.Wendland2):
+def wallViscousAcceleration(wall, rho, v, fac, h, wallMass=1.0, kernel=KernelFunctions.Wendland2, perBody=False):
     """The wall term of the velocity diffusion of stage 11 through the exact wall Laplacian: free slip ('laplacian':
     the normal relative velocity along the wall normal) or the antisymmetric mirror ('noslipMirror'). `fac` is the
     prefactor of the pair term, alpha c_s h / xi for the artificial viscosity and 2 (dim + 2) nu = 8 nu for the
@@ -150,17 +151,20 @@ def wallViscousAcceleration(wall, rho, v, fac, h, wallMass=1.0, kernel=KernelFun
     rho64, v64 = rho.to(F64), v.to(F64)
     dl_all = lap_factor(h, FAMILY[kernel]) * wall.agg.out['lap']
     out = torch.zeros_like(v64)
+    parts = []
     for bi in range(wall.G.shape[0]):
         gm = wall.G[bi].norm(dim=1)
         nb = wall.G[bi] / gm.clamp(min=1e-300)[:, None]
         vrel = v64 - _wallVelocity(wall, bi)
         dl = dl_all[bi]
         if wall.mirror[bi]:
-            out = out + (-2.0 * (fac / 8.0) * wallMass / rho64 * dl * wall.near)[:, None] * vrel
+            part = (-2.0 * (fac / 8.0) * wallMass / rho64 * dl * wall.near)[:, None] * vrel
         else:
             un = (vrel * nb).sum(1)
-            out = out + (-2.0 * (fac / 8.0) * wallMass * un / rho64 * dl * wall.near)[:, None] * nb
-    return out.to(wall.dtype)
+            part = (-2.0 * (fac / 8.0) * wallMass * un / rho64 * dl * wall.near)[:, None] * nb
+        out = out + part
+        parts.append(part)
+    return torch.stack(parts).to(wall.dtype) if perBody else out.to(wall.dtype)
 
 
 def viscousPrefactor(schemeConfig, config, h):
@@ -174,3 +178,17 @@ def viscousPrefactor(schemeConfig, config, h):
     if dp.inviscid:
         return float(dp.inviscidAlpha) * float(schemeConfig.fluid.fixedSoundSpeed) * float(h) / XI[config.kernel]
     return 8.0 * float(dp.viscidNu)
+
+
+def wallLoads(accP, accV, x, m, centers):
+    """The load of the fluid on every analytic body from the per-body particle accelerations of the wall terms, accP / accV [B, N, 2] (pressure, viscous): the reaction is -m a, acting at the fluid particle
+    (the reference solver's lever, `DeltaSPH2D._load`; the fluid angular momentum balance, so the torque is conserved between the walls). Returns float64 [2, B, 3] = (term) x (body) x (Fx, Fy, torque z
+    about `centers` [B, 2]); 2D force per unit depth. The no-penetration impulse (a velocity correction inside the step) is not booked."""
+    x64, m64, c64 = x.to(F64), m.to(F64), centers.to(F64)
+    out = []
+    for acc in (accP, accV):
+        F = -m64[None, :, None] * acc.to(F64)
+        r = x64[None] - c64[:, None, :]
+        tau = (r[..., 0] * F[..., 1] - r[..., 1] * F[..., 0]).sum(1)
+        out.append(torch.cat([F.sum(1), tau[:, None]], 1))
+    return torch.stack(out)

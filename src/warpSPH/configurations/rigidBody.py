@@ -70,6 +70,12 @@ class RigidBody:
     # mDBC path, unchanged); set for a body whose boundary integrals come from a boundary provider
     # (`rigidBody.build.buildAnalyticRigidBody`: the particle / ghost arrays are then empty).
     representation: object = None
+    # Free body (analytic bodies only): the fluid's load on the body drives its motion (`systems/weaklyCompressible.py` passes dudt = F / mass + g and dwdt = tau / inertia to
+    # `integrateRigidBody`); False = the prescribed motion every body has had so far.
+    dynamic: bool = False
+    # The last booked load of the fluid on the body, [2, 3] = (pressure, wall viscous) x (Fx, Fy, torque z about the centre of mass), float64, written by the scheme's right-hand side
+    # (`schemeConfig.analyticWallLoads` or `dynamic`). 2D force per unit depth. Not serialised.
+    load: object = None
 
     def toDict(self) -> dict:
         # These fields are tensors as constructed, but a caller driving a body
