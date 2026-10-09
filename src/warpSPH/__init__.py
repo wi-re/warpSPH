@@ -8,7 +8,7 @@ re-exporting every subpackage's own `__all__` (`math`, `configurations`,
 enum types and case-setup helpers named individually below.
 """
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 # from .casefile import argparse_defaults_from_casefile, build_configs_from_casefile, load_casefile
 # from .shape_generation import populateSourceObstacleGridsStructured, sampleShapeStructured
