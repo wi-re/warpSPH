@@ -338,7 +338,7 @@ def _xsphFilter(state: Any, config: Any, adjacency: Any,
 
 
 def _pressureAccel(state: Any, config: Any, adjacency: Any,
-                   p: torch.Tensor, fluidMask: torch.Tensor, wall: Any = None, rho0: float = 1.0, mlsFit: Any = None) -> torch.Tensor:
+                   p: torch.Tensor, fluidMask: torch.Tensor, wall: Any = None, rho0: float = 1.0, mlsFit: Any = None, clampPressure: bool = True) -> torch.Tensor:
     """omniSPH `computeAcceleration`: the symmetric SPH pressure gradient
     `-sum_j m_j (p_i/rho_i^2 + p_j/rho_j^2) gradW`, as an acceleration. Zeroed
     on non-fluid rows -- a static particle takes no reaction
@@ -352,7 +352,7 @@ def _pressureAccel(state: Any, config: Any, adjacency: Any,
         from ..modules.analyticBoundary import wallPressureAccelerationOmni
         # `mlsFit` (analyticWallPressure = 'mls'): the wall pressure extrapolated linearly from the fluid's current pressure iterate instead of the hydrostatic one
         a_p = a_p + wallPressureAccelerationOmni(wall, p, state.densities, rho0, wallMass=wall.wm, h=wall.support,
-                                                 gradient=None if mlsFit is None else mlsFit.gradient(p))
+                                                 gradient=None if mlsFit is None else mlsFit.gradient(p), clampPressure=clampPressure)
     return torch.where(fluidMask.unsqueeze(-1), a_p, torch.zeros_like(a_p))
 
 
@@ -396,6 +396,16 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *, checkS
     (omniSPH: `pressure = residual = 0`). Convergence:
     `mean_fluid(max(Ap - s, -1e-3)) <= tol` after at least `minIters`.
     """
+    if mode == 'divergence' and getattr(schemeConfig, 'projection', 'jacobi') == 'compact':
+        # the divergence stage as the compact approximate projection (`modules/incompressible/compactProjection.py`, DFSPH2D `projection='compact'`): converged CG instead of 3 relaxed Jacobi sweeps
+        from ..modules.incompressible.compactProjection import CompactCG, solveCompactProjection
+        wall = resolveWall(state, config, schemeConfig, adjacency)
+        if wall is None and bool((state.kinds != 0).any()):
+            raise NotImplementedError("projection='compact' is written for analytic walls (the compact Laplacian has no boundary-particle terms)")
+        solver = getattr(schemeConfig, '_compactCG', None)
+        if solver is None:
+            solver = schemeConfig._compactCG = CompactCG(warmStart=bool(getattr(schemeConfig, 'projectionWarmStart', True)))
+        return solveCompactProjection(state, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0, vEnter=vEnter, dt=dt, wall=wall, solver=solver)
     with applyConsistentCoupling(state, config, schemeConfig, adjacency,
                                  BoundaryPressureMode.consistent):
         apparent = state.masses / state.densities
@@ -642,7 +652,7 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
 
     # --- 3. divergenceSolve() -- exactly 3 iterations, zero warm start ----
     vEnter = st.velocities + dt * accel
-    a_p_div, _, nDiv, errDiv = _solve(
+    a_p_div, pDiv, nDiv, errDiv = _solve(
         st, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0,
         vEnter=vEnter, warmStart=torch.zeros_like(st.densities), dt=dt,
         mode='divergence', minIters=DIVERGENCE_ITERATIONS,
@@ -652,12 +662,16 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
 
     # --- 4. densitySolve() -- min 3 / max 256, warm start 0.5 * p_prior ---
     vEnter = st.velocities + dt * accel
-    a_p_rho, pRho, nRho, errRho = _solve(
-        st, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0,
-        vEnter=vEnter, warmStart=0.5 * pPrior, dt=dt, mode='density',
-        minIters=DENSITY_MIN_ITERATIONS, maxIters=DENSITY_MAX_ITERATIONS,
-        tol=denCfg.tolerance,
-        checkSchedule=getattr(denCfg, 'convergenceCheckSchedule', 'every'))
+    if getattr(schemeConfig, 'densitySolve', True):
+        a_p_rho, pRho, nRho, errRho = _solve(
+            st, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0,
+            vEnter=vEnter, warmStart=0.5 * pPrior, dt=dt, mode='density',
+            minIters=DENSITY_MIN_ITERATIONS, maxIters=DENSITY_MAX_ITERATIONS,
+            tol=denCfg.tolerance,
+            checkSchedule=getattr(denCfg, 'convergenceCheckSchedule', 'every'))
+    else:
+        # DFSPH2D densitySolve=False: the divergence-free projection is the only pressure solve (closed domains, where the density correction is position-correction noise); its pressure is the carried one
+        a_p_rho, pRho, nRho, errRho = torch.zeros_like(accel), pDiv, 0, 0.0
     accel = accel + a_p_rho
 
     # --- 5. XSPH velocity filter (omniSPH XSPH + BXSPH, post-solve) --------

@@ -183,7 +183,7 @@ def wallPressureAcceleration(wall, P, switch, rho, wallMass=1.0, h=1.0, clamp=Tr
     return acc.to(wall.dtype) if perBody else acc.sum(0).to(wall.dtype)
 
 
-def wallPressureAccelerationOmni(wall, P, rho, rho0, wallMass=1.0, h=1.0, perBody=False, gradient=None):
+def wallPressureAccelerationOmni(wall, P, rho, rho0, wallMass=1.0, h=1.0, perBody=False, gradient=None, clampPressure=True):
     """The pressure force of the wall in omniSPH's symmetric form (the fluid pairs `-sum_j V_j (p_i / rho_i^2 + p_j / rho_j^2) grad W_ij`, the wall a mirror: `p_b = p_i^+`, `rho_b = rho0`):
     `a = - sum_b [ (p^+ / rho_i^2 + p^+ / rho0^2) G_b + A_eff,b ]`, with the hydrostatic offset `A_b = int (a1 . y) grad W dA`, `a1 = rho_i (g - a_w)` (so `A_i = rho_i / rho0` times the
     `WallState`'s, evaluated at `rho0`) clamped so the wall pressure `p_i + q` stays >= 0 as in `wallPressureAcceleration`. Differs from the delta+ form (`-[(p^+ + s p) G + A] / rho_i`) by the
@@ -192,7 +192,7 @@ def wallPressureAccelerationOmni(wall, P, rho, rho0, wallMass=1.0, h=1.0, perBod
     `gradient`: [N, 2], the MLS pressure gradient `a1` (`wallPressureMLS.MLSPressureFit.gradient`) in place of the hydrostatic one, `A_b = wm a1_d C_dj` with the provider's first moment tensor
     `C_dj = int y_d d_j W`, unclamped (DFSPH2D `wallPressure='linear'`: the extrapolated wall pressure is the fluid's own, there is no hydrostatic offset to bound)."""
     P64, rho64 = P.to(F64), rho.to(F64)
-    pp = P64.clamp(min=0)
+    pp = P64.clamp(min=0) if clampPressure else P64             # `clampPressure=False`: the signed pressure of a divergence-solve pressure (DFSPH2D `clamp=False`)
     G = wall.G
     if gradient is not None:
         A = wall.wm * torch.einsum('nd,bndj->bnj', gradient.to(F64), wall.agg.out['Cov'].to(F64))

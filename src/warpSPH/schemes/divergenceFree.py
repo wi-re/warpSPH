@@ -347,6 +347,8 @@ def divergenceFree_step(
         dvdt_inStep = a_p_rho if _instepCD else torch.zeros_like(a_p_rho)
     elif DIVERGENCE_SOLVER == 'omni':
         if SOLVE_ORDER == 'cd_then_div':
+            if not getattr(schemeConfig, 'densitySolve', True):
+                raise NotImplementedError("densitySolve=False is written for SOLVE_ORDER 'div_then_cd'")
             a_p_rho, pRho, nRho, errRho = _omniPass(
                 'density', 0.0, 0.5 * _zeros, 3, 256, 1e-3, SURFACE_SOURCE)
             dvdt_inStep = a_p_rho if _instepCD else torch.zeros_like(a_p_rho)
@@ -357,8 +359,11 @@ def divergenceFree_step(
             a_p_div, pDiv, nDiv, errDiv = _omniPass(
                 'divergence', 0.0, _zeros, 2, 32, 1e-2)
             dvdt_pressure = a_p_div
-            a_p_rho, pRho, nRho, errRho = _omniPass(
-                'density', dvdt_pressure, 0.5 * _zeros, 3, 256, 1e-3, SURFACE_SOURCE)
+            if getattr(schemeConfig, 'densitySolve', True):
+                a_p_rho, pRho, nRho, errRho = _omniPass(
+                    'density', dvdt_pressure, 0.5 * _zeros, 3, 256, 1e-3, SURFACE_SOURCE)
+            else:               # DFSPH2D densitySolve=False: the divergence-free projection is the only pressure solve, its pressure the carried one
+                a_p_rho, pRho, nRho, errRho = torch.zeros_like(dvdt_pressure), pDiv, 0, 0.0
             dvdt_inStep = a_p_rho if _instepCD else torch.zeros_like(a_p_rho)
     else:
         raise ValueError(f'Unknown DIVERGENCE_SOLVER: {DIVERGENCE_SOLVER!r}')

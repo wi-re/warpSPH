@@ -164,6 +164,7 @@ def configureScheme(ctx: RunContext) -> None:
             raise ValueError("analyticWallPressure='mls', boundaryFriction and xsphCoefficient are omniIncompressible / divergenceFree options")
     if getattr(ctx.scheme, 'name', ctx.scheme) in ('omniIncompressible', 'divergenceFree'):
         sc.xsphCoefficient = ctx.param('xsphCoefficient')
+        sc.projection, sc.projectionTol, sc.densitySolve = ctx.param('projection'), ctx.param('projectionTol'), ctx.param('densitySolve')
         sc.boundaryFriction = ctx.param('boundaryFriction')
     sc.surfaceDetectionConfig.active = True
     sc.gravityConfig.active = True
@@ -579,6 +580,10 @@ sloshingTankCase = registerCase(Case(
         # omniIncompressible velocity filters (modules/xsph): the XSPH coefficient (DFSPH2D 1e-4) and the analytic walls' boundary friction (DFSPH2D 5e-3); 0 = off
         xsphCoefficient=0.0,
         boundaryFriction=0.0,
+        # incompressible analytic walls: the divergence stage as 'jacobi' (omniSPH, default) or the converged 'compact' projection (modules/incompressible/compactProjection.py); densitySolve=False leaves the projection the only pressure solve
+        projection='jacobi',
+        projectionTol=1e-8,
+        densitySolve=True,
         gravityMagnitude=9.81,
         rho0Physical=1000.0,
         # Normalise the particle mass so the at-rest sampling measures `rho0`.

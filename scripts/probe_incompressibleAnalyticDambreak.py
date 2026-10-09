@@ -30,6 +30,8 @@ def main():
     ap.add_argument('--xsph', type=float, default=0.0)
     ap.add_argument('--boundaryFriction', type=float, default=0.0)
     ap.add_argument('--wallPressure', default='hydrostatic')
+    ap.add_argument('--projection', choices=('jacobi', 'compact'), default='jacobi')
+    ap.add_argument('--noDensitySolve', action='store_true')
     ap.add_argument('--out', default=None)
     ap.add_argument('--no-video', dest='video', action='store_false', default=True)
     a = ap.parse_args()
@@ -60,7 +62,7 @@ def main():
             print('   t={:.2f}: front {:.3f}  mean height {:.3f}  max|v| {:.2f}  rho [{:.3f}, {:.3f}]'.format(*rows[-1]), flush=True)
     case.postStep = _ps2
     params = {**case.params, 'wallRepresentation': a.walls, 'W': W, 'fluidWidth': 23 * dx / W, 'fillRatio': 91 * dx / L, 'wallBC': 'freeSlip',
-              'xsphCoefficient': a.xsph, 'boundaryFriction': a.boundaryFriction, 'analyticWallPressure': a.wallPressure}
+              'xsphCoefficient': a.xsph, 'boundaryFriction': a.boundaryFriction, 'analyticWallPressure': a.wallPressure, 'projection': a.projection, 'densitySolve': not a.noDensitySolve}
     scheme = SCHEMES[a.scheme]
     spec = CaseSpec(caseName=f'dam-{a.scheme}-{a.walls}', scheme=scheme, params=params).merged(**case.defaults).merged(
         scheme=scheme, L=L, nx=a.nx, n_h=a.nh, integrationScheme='semiImplicitEuler', kernel='Wendland2', supportMode='SuperSymmetric', cflFactor=1.0, dt=1e-3, minDt=1e-4, maxDt=1e-3,

@@ -339,6 +339,7 @@ def buildSystem(ctx: RunContext):
     ctx.schemeConfig.analyticWallPressure = ctx.param('analyticWallPressure')
     if getattr(ctx.scheme, 'name', ctx.scheme) in ('omniIncompressible', 'divergenceFree'):
         ctx.schemeConfig.xsphCoefficient = ctx.param('xsphCoefficient')
+        ctx.schemeConfig.projection, ctx.schemeConfig.projectionTol, ctx.schemeConfig.densitySolve = ctx.param('projection'), ctx.param('projectionTol'), ctx.param('densitySolve')
         ctx.schemeConfig.boundaryFriction = ctx.param('boundaryFriction')
     elif ctx.param('xsphCoefficient') or ctx.param('boundaryFriction') or ctx.schemeConfig.analyticWallPressure == 'mls':
         raise ValueError("analyticWallPressure='mls', boundaryFriction and xsphCoefficient are omniIncompressible / divergenceFree options")
@@ -1025,6 +1026,10 @@ dambreakCase = registerCase(Case(
         # omniIncompressible velocity filters (modules/xsph): XSPH coefficient and the analytic walls' boundary friction; 0 = off
         xsphCoefficient=0.0,
         boundaryFriction=0.0,
+        # incompressible analytic walls: the divergence stage as 'jacobi' (omniSPH, default) or the converged 'compact' projection (modules/incompressible/compactProjection.py); densitySolve=False leaves the projection the only pressure solve
+        projection='jacobi',
+        projectionTol=1e-8,
+        densitySolve=True,
         targetDt=0.0005,
         # Downstream-wall pressure sensors (`ACSPH_PLAN.md` §4.5): heights above
         # the tank bed, in the case's length unit. Empty -> no probing. See
