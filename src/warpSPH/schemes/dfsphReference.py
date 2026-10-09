@@ -731,9 +731,11 @@ def dfsphReference_step(system: Any, dt: float, config: Any, schemeConfig: Any,
         st.velocities = vEnterDf + dt * a_p_df
 
     if provider is not None:
-        from .omniIncompressible import _bookWallLoads
+        from .omniIncompressible import _bookWallLoads, _wallViscousPerBody
+        from ..modules.analyticBoundary import resolveWall
         _bookWallLoads(st, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0, pDiv=kappaV, pRho=kappa, frictionPerBody=fricPerBody, dt=dt,
-                       densityApplied=True, divergenceHasWall=not skipDivergence)
+                       densityApplied=True, divergenceHasWall=not skipDivergence,
+                       viscousPerBody=_wallViscousPerBody(st, config, schemeConfig, adjacency, resolveWall(st, config, schemeConfig, adjacency)) if getattr(schemeConfig, 'analyticWallLoads', False) and not schemeConfig.diffusionParams.inviscid else None)
 
     # --- 7. carry kappa / kappa^v for the next step's warm start --------
     if DAMPED_WARM_START:

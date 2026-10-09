@@ -384,7 +384,13 @@ def _deltaSPH_rhs(
             hWall, wm = wall.support, wall.wm
             switch = antuonoSwitch(currentState.pressures, currentState.surfaceIndicators)
             accP = wallPressureAcceleration(wall, currentState.pressures, switch, currentState.densities, wallMass=wm, h=hWall, perBody=True)
-            accV = wallViscousAcceleration(wall, currentState.densities, currentState.velocities, viscousPrefactor(schemeConfig, config, hWall), hWall, wallMass=wm, kernel=config.kernel, perBody=True)
+            if getattr(schemeConfig, 'wallViscosityClosure', 'mirror') == 'noslipMoment':
+                # the no-slip moment closure's per-body term (its balance needs the fluid-only Morris acceleration of the particles)
+                from ..modules.analyticBoundary.wallViscosity import wallNoSlipAcceleration
+                viscf = computeVelocityDiffusion(currentState, config, schemeConfig, adjacency, wall=False)
+                accV = wallNoSlipAcceleration(currentState, config, schemeConfig, adjacency, wall, viscf, perBody=True)
+            else:
+                accV = wallViscousAcceleration(wall, currentState.densities, currentState.velocities, viscousPrefactor(schemeConfig, config, hWall), hWall, wallMass=wm, kernel=config.kernel, perBody=True)
             loads = wallLoads(accP, accV, currentState.positions, currentState.masses, torch.stack([rb.centerOfMass.to(torch.float64).reshape(2) for rb in provider.rigidBodies]))
             for bi, rb in enumerate(provider.rigidBodies):
                 rb.load = loads[:, bi, :].clone()

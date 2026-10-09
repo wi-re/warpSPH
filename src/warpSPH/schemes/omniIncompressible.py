@@ -615,7 +615,7 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *, checkS
 
 
 def _bookWallLoads(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *, fluid: Any, rho0: float, pDiv: Any, pRho: Any,
-                   frictionPerBody: Any = None, dt: float = 1.0, densityApplied: Any = None, divergenceHasWall: Any = None) -> None:
+                   frictionPerBody: Any = None, dt: float = 1.0, densityApplied: Any = None, divergenceHasWall: Any = None, viscousPerBody: Any = None) -> None:
     """The load of the fluid on every analytic body, booked on its `RigidBody.load` ([2, B, 3] = (pressure, friction) x body x (Fx, Fy, torque about the body centre), `wallLoads`), when
     `schemeConfig.analyticWallLoads` is set: the reaction to the wall accelerations the solves applied (the divergence stage's only where it carries the wall: the compact projection, or
     `analyticWallInDivergence`; the density stage's unless `densitySolve` is off, when its pressure is the divergence one) and to the boundary-friction impulse `dv / dt`. The no-penetration
@@ -645,9 +645,25 @@ def _bookWallLoads(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *
         acc = acc + part(pRho)
     centers = torch.stack([rb.centerOfMass.to(torch.float64).reshape(2) for rb in provider.rigidBodies])
     fric = torch.zeros_like(acc) if frictionPerBody is None else frictionPerBody.to(torch.float64) / dt
+    if viscousPerBody is not None:
+        fric = fric + viscousPerBody.to(torch.float64)                                  # the wall's viscous acceleration (no-slip closure or exact wall Laplacian), booked with the friction
     loads = wallLoads(acc, fric, state.positions, state.masses, centers)
     for bi, rb in enumerate(provider.rigidBodies):
         rb.load = loads[:, bi, :].clone()
+
+
+def _wallViscousPerBody(state: Any, config: Any, schemeConfig: Any, adjacency: Any, wall: Any):
+    """The wall's viscous acceleration per body [B, N, 2] of the physical viscosity (`schemeConfig.omniViscosity`): the no-slip moment closure (needs the fluid-only Morris acceleration) or the
+    exact wall Laplacian of the delta+ forms; None without a wall."""
+    if wall is None:
+        return None
+    from ..modules.deltaSPH import computeVelocityDiffusion
+    from ..modules.analyticBoundary import viscousPrefactor, wallViscousAcceleration
+    if getattr(schemeConfig, 'wallViscosityClosure', 'mirror') == 'noslipMoment':
+        from ..modules.analyticBoundary.wallViscosity import wallNoSlipAcceleration
+        viscf = computeVelocityDiffusion(state, config, schemeConfig, adjacency, wall=False)
+        return wallNoSlipAcceleration(state, config, schemeConfig, adjacency, wall, viscf, perBody=True)
+    return wallViscousAcceleration(wall, state.densities, state.velocities, viscousPrefactor(schemeConfig, config, wall.support), wall.support, wallMass=wall.wm, kernel=config.kernel, perBody=True)
 
 
 def omniIncompressible_step(system: Any, dt: float, config: Any,
@@ -693,6 +709,12 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
     enforceDirichlet(system, system.t, dt, config, schemeConfig)
     accel = computeGravity(st, config, schemeConfig, adjacency)
     accel = accel + computeBodyForce(st, schemeConfig)
+    viscousAcc = None
+    if getattr(schemeConfig, 'omniViscosity', False):
+        # the physical viscosity of DFSPH2D (`viscosity`): the Morris / alpha diffusion with its wall term (`computeVelocityDiffusion(wall=)`), explicit, with the step limit of the incompressible time step
+        from ..modules.deltaSPH import computeVelocityDiffusion
+        viscousAcc = computeVelocityDiffusion(st, config, schemeConfig, adjacency)
+        accel = accel + torch.where((st.kinds == 0).unsqueeze(-1), viscousAcc, torch.zeros_like(viscousAcc))
     forcing = computeForcing(system, dt, system.t, config, schemeConfig)
     accel = accel + forcing / st.masses.view(-1, 1)
     accel = torch.where(fcol, accel, torch.zeros_like(accel))
@@ -720,7 +742,8 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
         # DFSPH2D densitySolve=False: the divergence-free projection is the only pressure solve (closed domains, where the density correction is position-correction noise); its pressure is the carried one
         a_p_rho, pRho, nRho, errRho = torch.zeros_like(accel), pDiv, 0, 0.0
     accel = accel + a_p_rho
-    _bookWallLoads(st, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0, pDiv=pDiv, pRho=pRho, frictionPerBody=fricPerBody, dt=dt)
+    _bookWallLoads(st, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0, pDiv=pDiv, pRho=pRho, frictionPerBody=fricPerBody, dt=dt,
+                   viscousPerBody=_wallViscousPerBody(st, config, schemeConfig, adjacency, resolveWall(st, config, schemeConfig, adjacency)) if (viscousAcc is not None and getattr(schemeConfig, 'analyticWallLoads', False)) else None)
 
     # --- 5. XSPH velocity filter (omniSPH XSPH + BXSPH, post-solve) --------
     # omniSPH filters the start-of-step velocity (the solves only touched

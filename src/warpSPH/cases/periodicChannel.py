@@ -42,11 +42,11 @@ def configureScheme(ctx: RunContext) -> None:
     Lx = ctx.spec.L
     dx = Lx / ctx.spec.nx
     W = ctx.param('W')
-    ny = int(round(W / dx))
+    shear = ctx.param('shearWave')
+    ny = ctx.spec.nx if shear else int(round(W / dx))          # the shear-wave box is square (wavelength 1: the long-wave viscosity, the finite-k correction of the symbol is (k dx)^2 small)
     ctx.scratch['W'] = ny * dx                                  # the lattice height: the channel is a whole number of rows
     h = ctx.spec.n_h * dx
     pad = 2.0 * h
-    shear = ctx.param('shearWave')
     # the sampler puts lattice nodes on the non-periodic axes and cell centres on the periodic ones: the half-spacing shift of the lower bound puts the first rows at dx / 2 from the plates, as the boundaries repo's lattice
     ymin, ymax = (0.0, ny * dx) if shear else (-pad - 0.5 * dx, ny * dx + pad + 0.5 * dx)
     domain = buildDomainDescription(Lx, ctx.spec.dim, True, ctx.device, ctx.dtype)
@@ -62,6 +62,19 @@ def configureScheme(ctx: RunContext) -> None:
     sc.gravityConfig.active = False
     sc.diffusionParams.inviscid = True
     sc.diffusionParams.inviscidAlpha = ctx.param('alpha')
+    sc.wallViscosityClosure = ctx.param('wallViscosityClosure')
+    if ctx.param('fluidViscosity') == 'morris':
+        # Morris et al. 1997 viscous operator (carries shear: what a no-slip wall closure needs), nu such that the REALISED long-wave viscosity is the alpha one: nu_used = nominal / cal
+        from ..enumTypes import ViscosityTerm
+        from ..modules.incompressible.compactProjection import morrisCalibration
+        h = float(ctx.spec.n_h) * dx
+        cal = morrisCalibration(h, dx, dx * dx)
+        sc.diffusionParams.inviscid = False
+        sc.diffusionParams.viscousTerm = ViscosityTerm.morris1997
+        sc.diffusionParams.viscidNu = ctx.param('alpha') * ctx.param('soundSpeed') * h / (8.0 * XI[ctx.spec.kernel]) / cal
+        sc.morrisCalibration = None
+        sc.complementMoments = ctx.param('complementMoments')
+        ctx.scratch['morrisCal'] = cal
     sc.analyticPeriodicWalls = not shear
     sc.bodyForce = (ctx.param('fShear') if shear else ctx.param('f'), 0.0)
     sc.bodyForceAtWall = ctx.param('bodyForceAtWall')
@@ -157,6 +170,9 @@ periodicChannelCase = registerCase(Case(
         W=0.5,
         f=0.05,
         wallBC='noSlip',
+        fluidViscosity='alpha',           # 'alpha' (the artificial viscosity, delta+'s default) | 'morris' (Morris 1997, the shear-carrying operator the no-slip closure is built for)
+        wallViscosityClosure='mirror',    # 'mirror' (the exact wall Laplacian with the antisymmetric mirror) | 'noslipMoment' (the moment closure, Morris only)
+        complementMoments=True,
         bodyForceAtWall=True,
         shearWave=False,
         fShear=0.0,                  # the body force of the plate-free box (a uniform force on a periodic fluid: the mean velocity grows as f t)

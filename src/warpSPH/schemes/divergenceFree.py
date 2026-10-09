@@ -493,8 +493,10 @@ def divergenceFree_step(
         from warpSPH.modules.xsph import computeXSPH
         dvdt_xsph = dvdt_xsph + computeXSPH(currentState, config, schemeConfig, adjacency) / dt
 
-    from warpSPH.schemes.omniIncompressible import _bookWallLoads
+    from warpSPH.schemes.omniIncompressible import _bookWallLoads, _wallViscousPerBody
+    from warpSPH.modules.analyticBoundary import resolveWall as _resolveWall
     _bookWallLoads(currentState, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0, pDiv=_pDiv, pRho=_pRho,
+                   viscousPerBody=_wallViscousPerBody(currentState, config, schemeConfig, adjacency, _resolveWall(currentState, config, schemeConfig, adjacency)) if getattr(schemeConfig, 'analyticWallLoads', False) and not schemeConfig.diffusionParams.inviscid else None,
                    densityApplied=bool(_instepCD) and bool(getattr(schemeConfig, 'densitySolve', True)))
 
     # DFSPH2D `shifting='fixed' / 'fickian'` (modules/shifting/fickian.py): a position move, folded into `dxdt`; replaces the VD+PS shift of `IncompressibleSystem.finalize` (switched off there)

@@ -59,6 +59,13 @@ def computeVelocityDiffusion(currentState: Any, config: SimulationConfig, scheme
         )
         from ..analyticBoundary import resolveWall
         wall = resolveWall(currentState, config, schemeConfig, adjacency, wall)
+        if wall is not None and getattr(schemeConfig, 'wallViscosityClosure', 'mirror') == 'noslipMoment':
+            # the no-slip wall closure of the Morris viscosity (modules/analyticBoundary/wallViscosity.py): the wall moments balance the particle's own fluid sum
+            dp = schemeConfig.diffusionParams
+            if dp.inviscid or getattr(dp, 'viscousTerm', ViscosityTerm.monaghanGingold) != ViscosityTerm.morris1997:
+                raise NotImplementedError("wallViscosityClosure='noslipMoment' is written for the Morris viscosity (inviscid=False, viscousTerm=morris1997)")
+            from ..analyticBoundary.wallViscosity import wallNoSlipAcceleration
+            return dvdt_diss + wallNoSlipAcceleration(currentState, config, schemeConfig, adjacency, wall, dvdt_diss)
         if wall is not None:
             from ..analyticBoundary import viscousPrefactor, wallViscousAcceleration
             dvdt_diss = dvdt_diss + wallViscousAcceleration(wall, currentState.densities, currentState.velocities, viscousPrefactor(schemeConfig, config, wall.support), wall.support,
