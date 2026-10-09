@@ -975,6 +975,9 @@ dambreakCase = registerCase(Case(
         # Pass `'constant'` to reproduce a pre-flip number, or `'noSlip'` for
         # Marrone Sec. 3.4.2's viscous half, which genuinely wants it.
         wallBC='freeSlip',
+        # 'particles' (default): boundary particles + ghost nodes (mDBC). 'analytic': the tank walls are a
+        # warpSPHBoundaries body (exact boundary integrals, no wall particles); plain tank only.
+        wallRepresentation='particles',
         targetDt=0.0005,
         # Downstream-wall pressure sensors (`ACSPH_PLAN.md` §4.5): heights above
         # the tank bed, in the case's length unit. Empty -> no probing. See

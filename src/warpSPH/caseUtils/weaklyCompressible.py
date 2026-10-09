@@ -797,6 +797,16 @@ def alignInteriorDomainToLattice(domain, interiorDomain, dx, periodic=None):
     return interiorDomain
 
 
+def analyticTankBody(interiorDomain):
+    """The walls of a rectangular tank as one analytic `warpSPHBoundaries` Body: the inner faces are the box
+    [min, max] of `interiorDomain`, the solid is everything outside it."""
+    from warpSPHBoundaries.scene import Body
+    from warpSPHBoundaries.scene.scene import BoxRep
+    lo = [float(v) for v in interiorDomain.min]
+    hi = [float(v) for v in interiorDomain.max]
+    return Body(bodyId = 0, reps = [BoxRep(tuple(lo), tuple(hi), solid = 'outside')])
+
+
 def buildRegions(config, schemeConfig, simSetup, args, domain, interiorDomain, obstacle):
     regions, _, domain_sdf, _ = build_sdfs(config, schemeConfig, args.band, args, domain, interiorDomain, obstacle)
 
@@ -833,8 +843,16 @@ def buildRegions(config, schemeConfig, simSetup, args, domain, interiorDomain, o
     wallBC = getattr(args, 'wallBC', None) or 'freeSlip'
     if isinstance(wallBC, str):
         wallBC = BCType[wallBC]
+    # `wallRepresentation='analytic'`: the tank walls are a boundary-provider body (warpSPHBoundaries) instead of boundary
+    # particles. The region keeps `domain_sdf` (the fluid is clipped against it as usual) but is not sampled; an obstacle
+    # is not supported in this mode (its sdf is merged into `domain_sdf` above).
+    representation = None
+    if getattr(args, 'wallRepresentation', 'particles') == 'analytic':
+        if getattr(args, 'obstacleActive', False):
+            raise NotImplementedError("wallRepresentation='analytic' is for the plain tank (no obstacle yet)")
+        representation = analyticTankBody(interiorDomain)
     regions = [
-        buildRegion(config, schemeConfig, domain_sdf, RegionType.Boundary, initialConditions={}, kind=wallBC),
+        buildRegion(config, schemeConfig, domain_sdf, RegionType.Boundary, initialConditions={}, kind=wallBC, representation=representation),
         buildRegion(config, schemeConfig, box_sdf, RegionType.Fluid, initialConditions={}),
     ]
 

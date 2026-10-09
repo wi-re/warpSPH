@@ -250,6 +250,14 @@ def initializeSimulation(regions, config, schemeConfig, SimulationSystem, Simula
         if(rigidBody is not None):
             rigidBodies.append(rigidBody)
 
+    # Analytic boundaries: no particles, so no material id appears above; their RigidBody comes from the
+    # representation. Appended in region order after the particle bodies (a mixed scene keeps both kinds).
+    restDensity = schemeConfig.fluid.restDensity if hasattr(schemeConfig, 'fluid') else config.rho0
+    boundaryRegions = [r for r in regions if r.type == RegionType.Boundary]
+    for bodyId, region in enumerate(boundaryRegions):
+        if getattr(region, 'representation', None) is not None:
+            rigidBodies.append(buildAnalyticRigidBody(region, bodyId, particleState, restDensity = restDensity))
+
     # rigidBodies[0].angularVelocity = np.pi / 2
     for rigidBody in rigidBodies:
         particleState = updateBodyParticlesWCSPH(particleState, rigidBody)

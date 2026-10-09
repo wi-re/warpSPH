@@ -559,6 +559,9 @@ def addBoundaryGhostParticles(regions, particleState : Any):
 
     for region in regions:
         # print(f"Processing region {region} of type {region.type}")
+        if region.type == RegionType.Boundary and getattr(region, 'representation', None) is not None:
+            boundaryMaterial += 1                      # an analytic boundary has no particles and no ghost layer; its material id is still taken
+            continue
         if region.type == RegionType.Boundary:
             particleIndices = torch.arange(particleState.positions.shape[0], device = device, dtype = torch.int64)
             relevantParticles = torch.logical_and(particleState.kinds == 1, particleState.materials == boundaryMaterial)
