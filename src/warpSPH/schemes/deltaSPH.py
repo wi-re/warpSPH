@@ -99,6 +99,9 @@ def _rhsIsGraphable(schemeConfig, stageIndex) -> bool:
     symplectic Euler, recomputes the diffusion every call and never reads it.)"""
     if getattr(schemeConfig, 'mdbcNoPenShiftMode', 'derivative') == 'derivative':
         return False
+    # analytic walls: the wall aggregates are cached in Python and the support is a host float (modules/analyticBoundary); not capturable yet
+    if getattr(schemeConfig, 'boundaryProvider', None) is not None:
+        return False
     if getattr(schemeConfig, 'freezeDiffusionAcrossStages', False) and stageIndex is not None:
         return False
     # both keep Python-side per-step state (the stage-0 mask, flip counters)

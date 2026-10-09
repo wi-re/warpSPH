@@ -329,6 +329,8 @@ def buildSystem(ctx: RunContext):
                                             obstacle)
     ctx.schemeConfig.boundaryConditions = []
     ctx.scratch['obstacle'] = obstacle
+    # analytic walls (wallRepresentation='analytic'): which wall pressure condition (modules/analyticBoundary/wallTerms.py)
+    ctx.schemeConfig.analyticWallPressure = ctx.param('analyticWallPressure')
 
     # Stash the obstacle's own SDF (negative inside the solid) so `diagnostics`
     # can measure fluid penetration into the obstacle -- the interior-AABB
@@ -978,6 +980,9 @@ dambreakCase = registerCase(Case(
         # 'particles' (default): boundary particles + ghost nodes (mDBC). 'analytic': the tank walls are a
         # warpSPHBoundaries body (exact boundary integrals, no wall particles); plain tank only.
         wallRepresentation='particles',
+        # analytic walls only: 'hydrostatic' (the wall pressure gradient rho (g - a_w) in all directions: exact for a fluid in hydrostatic balance) or
+        # 'normal' (only dp/dn = rho (g - a_w) . n, as the boundary particles' ghost extrapolation: no tangential force on a fluid in free fall)
+        analyticWallPressure='hydrostatic',
         targetDt=0.0005,
         # Downstream-wall pressure sensors (`ACSPH_PLAN.md` §4.5): heights above
         # the tank bed, in the case's length unit. Empty -> no probing. See

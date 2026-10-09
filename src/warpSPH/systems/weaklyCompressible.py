@@ -292,8 +292,30 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
         if stateHasBoundaryParticles(state, config):
             state.velocities = computeBoundaryVelocities(state, config, schemeConfig, adjacency)
         rate = computeMomentum(state, config, schemeConfig, adjacency)
+        provider = getattr(schemeConfig, 'boundaryProvider', None)
+        if provider is not None:
+            # analytic walls: the wall flux of the continuity equation for the velocities of this evaluation (the right-hand side adds the
+            # same term for the stage velocity; the time-centred correction must see it for the mean velocity, or the density at a wall
+            # is advanced without the wall's compression)
+            from ..modules.analyticBoundary import evaluateWall, wallContinuity
+            from ..modules.gravity import computeGravity
+            wall = evaluateWall(provider, state, config, schemeConfig, computeGravity(state, config, schemeConfig, adjacency))
+            rate = rate + wallContinuity(wall, state.densities, state.velocities)
         rate = torch.where(fluid.squeeze(-1), rate, torch.zeros_like(rate))
         return WeaklyCompressibleSystemUpdate(dxdt=None, dvdt=None, drhodt=None, drhodt_kin=rate)
+
+    def _noPenShift(self, config, schemeConfig):
+        """the no-penetration correction of this state: the boundary particles' (`computeMdbcNoPenShift`) plus, with a boundary
+        provider (analytic walls), the walls' (`modules/analyticBoundary/noPenetration.py`)."""
+        provider = getattr(schemeConfig, 'boundaryProvider', None)
+        shift = None
+        if provider is None or stateHasBoundaryParticles(self.state, config):
+            shift = computeMdbcNoPenShift(self.state, config, schemeConfig, self.adjacency)
+        if provider is not None:
+            from ..modules.analyticBoundary import analyticNoPenShift
+            analytic = analyticNoPenShift(provider, self.state, config, schemeConfig, float(config.dx))
+            shift = analytic if shift is None else shift + analytic
+        return shift
 
     def finalize(self, initialState, dt, returnValues, updateValues, weights = ..., *args, **kwargs):
         self.adjacency = returnValues[-1][0]  # Assuming the adjacency list is the last return value from the derivative function
@@ -525,16 +547,14 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
         _noPenMode = getattr(schemeConfig, 'mdbcNoPenShiftMode', 'derivative')
         if _noPenMode == 'impulse':
             with record_function("[warpSPH] - [deltaSPH] - no-pen shift (impulse)"):
-                nopenshift = computeMdbcNoPenShift(
-                    self.state, config, schemeConfig, self.adjacency)
+                nopenshift = self._noPenShift(config, schemeConfig)
                 active = (nopenshift != 0) & (self.state.kinds == 0).unsqueeze(-1)
                 nopenshiftDiag = (nopenshift, active)
                 self.state.velocities = torch.where(
                     active, self.state.velocities + nopenshift, self.state.velocities)
         if _noPenMode == 'finalize':
             with record_function("[warpSPH] - [deltaSPH] - no-pen shift (finalize)"):
-                nopenshift = computeMdbcNoPenShift(
-                    self.state, config, schemeConfig, self.adjacency)
+                nopenshift = self._noPenShift(config, schemeConfig)
                 active = (nopenshift != 0) & (self.state.kinds == 0).unsqueeze(-1)
                 nopenshiftDiag = (nopenshift, active)
                 # Unconditional (was `if bool(active.any()):`): every write below

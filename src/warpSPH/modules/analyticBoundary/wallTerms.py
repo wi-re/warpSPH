@@ -66,19 +66,24 @@ def _token(v):
     return v
 
 
+def _wallPinned(provider):
+    """per analytic body: the wall velocity is pinned to zero (BCType.zeros)."""
+    return _policies(provider)[0]
+
+
 def evaluateWall(provider, state, config, schemeConfig, gravity):
     """The wall aggregates at the fluid particles of `state`. `gravity`: [N, 2] or [2], uniform. The last evaluation is kept
     while the positions (storage and version) and every body's integrated state are unchanged, so the right-hand side, the
     surface detector and the shifting share one provider call per position set."""
     from warpSPHBoundaries.scene import WallOutput
     x0 = state.positions
-    key = (id(provider), x0.data_ptr(), x0._version, tuple(x0.shape),
+    key = (id(provider), x0._version, tuple(x0.shape),
            tuple((_token(rb.centerOfMass), _token(rb.orientation), _token(rb.linearVelocity), _token(rb.angularVelocity)) for rb in provider.rigidBodies))
     hit = getattr(provider, '_wallCache', None)
-    if hit is not None and hit[0] == key:
-        return hit[1]
+    if hit is not None and hit[0] == key and hit[1] is x0:          # the cached entry keeps x0 alive: an address cannot be reused by another tensor while it is cached
+        return hit[2]
     wall = _evaluateWall(provider, state, config, schemeConfig, gravity)
-    provider._wallCache = (key, wall)
+    provider._wallCache = (key, x0, wall)
     return wall
 
 
@@ -96,6 +101,12 @@ def _evaluateWall(provider, state, config, schemeConfig, gravity):
     g = g.reshape(-1, 2)[0] if g.dim() > 1 else g
     a1 = schemeConfig.fluid.restDensity * (g[None, None, :] - kin.acceleration)
     lam, G = wm * agg.out['lam'], wm * agg.out['G']
+    if getattr(schemeConfig, 'analyticWallPressure', 'hydrostatic') == 'normal':
+        # the wall pressure condition on the NORMAL only (dp/dn = rho (g - a_w) . n, the boundary-particle flavour's ghost extrapolation): no tangential
+        # pressure gradient is imposed on the fluid next to the wall, so a fluid that is not in hydrostatic balance (the free fall of a dam break
+        # from a uniform density) feels no tangential force
+        nb = G / G.norm(dim=2, keepdim=True).clamp(min=1e-300)
+        a1 = (a1 * nb).sum(-1, keepdim=True) * nb
     A = wm * agg.evaluate((WallOutput('A', 0, 'a1g1'),), a1=a1)['A']
     near = (lam.sum(0) > 1e-9).to(F64)
     return WallState(agg, kin, lam, G, A, near, pinned, mirror, state.positions.dtype, support, wm)
