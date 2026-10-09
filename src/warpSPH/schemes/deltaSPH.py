@@ -51,6 +51,9 @@ from warpSPHCore.profiling import record_function
 __all__ = ['deltaSPH_step']
 
 
+from ..modules.analyticBoundary import evaluateWall, viscousPrefactor, wallContinuity, wallPressureAcceleration, wallViscousAcceleration
+
+
 def deltaSPH_step(
     system: CompSPHSystem,
     dt: float,
@@ -226,6 +229,15 @@ def _deltaSPH_rhs(
     # with TimedBlock('compute EOS', use_cuda=True, device=config.device) as tb_eos:
     with record_function("[warpSPH] - [deltaSPH - 05] - compute EOS"):
         currentState.pressures = weaklyCompressibleEOS(currentState, schemeConfig)
+
+    # Analytic boundaries (a boundary provider, no wall particles): the kernel integrals over the solid at the fluid
+    # particles, once per right-hand-side evaluation; `modules/analyticBoundary` turns them into the wall terms of
+    # the stages below. None without analytic bodies: the particle path above is then untouched.
+    provider = getattr(schemeConfig, 'boundaryProvider', None)
+    wall = None
+    if provider is not None:
+        with record_function("[warpSPH] - [deltaSPH - 05b] - analytic wall aggregates"):
+            wall = evaluateWall(provider, currentState, config, schemeConfig, computeGravity(currentState, config, schemeConfig, adjacency))
     # 6. Skipped boundary velocity computation since no boundaries are present
     # with TimedBlock('compute boundary velocities', use_cuda=True, device=config.device) as tb_boundary_velocities:
 
@@ -285,6 +297,11 @@ def _deltaSPH_rhs(
         with record_function("[warpSPH] - [deltaSPH - 11] - compute dvdt_diss"):
             dvdt_diss = computeVelocityDiffusion(currentState, config, schemeConfig, adjacency,
                                                  approachOnly=False)
+            if wall is not None:                  # the wall's share of the velocity diffusion, inside the (possibly frozen) tuple
+                hWall = float(schemeConfig._analyticSupport) if getattr(schemeConfig, '_analyticSupport', None) else float(currentState.supports.max())
+                dvdt_diss = dvdt_diss + wallViscousAcceleration(wall, currentState.densities, currentState.velocities,
+                                                                viscousPrefactor(schemeConfig, config, hWall), hWall,
+                                                                wallMass=float(getattr(schemeConfig, 'analyticWallMass', 1.0)), kernel=config.kernel)
 
         if freezeDiffusion:
             schemeConfig._frozenDiffusionCache = (drhodt_diss, dvdt_diss)
@@ -293,6 +310,8 @@ def _deltaSPH_rhs(
     # with TimedBlock('compute drhodt', use_cuda=True, device=config.device) as tb_drhodt:
     with record_function("[warpSPH] - [deltaSPH - 12] - compute drhodt"):
         drhodt = computeMomentum(currentState, config, schemeConfig, adjacency)
+        if wall is not None:                      # free-slip mirror of the wall in the continuity equation
+            drhodt = drhodt + wallContinuity(wall, currentState.densities, currentState.velocities)
 
     # 13. Compute dvdt from pressure
     # with TimedBlock('compute dvdt', use_cuda=True, device=config.device) as tb_dvdt:
@@ -343,6 +362,12 @@ def _deltaSPH_rhs(
         dvdt_pressure = computePressureForceSurfaceAware(
             currentState, config, schemeConfig, adjacency,
             renormalizationState=pressureRenormalizationState)
+        if wall is not None:                      # the wall's pressure force: Antuono switch as in the fluid pair kernel (P >= 0 or surface)
+            switch = torch.where((currentState.pressures >= 0) | (currentState.surfaceIndicators == 1),
+                                 torch.ones_like(currentState.pressures), -torch.ones_like(currentState.pressures))
+            hWall = float(schemeConfig._analyticSupport) if getattr(schemeConfig, '_analyticSupport', None) else float(currentState.supports.max())
+            dvdt_pressure = dvdt_pressure + wallPressureAcceleration(wall, currentState.pressures, switch, currentState.densities,
+                                                                     wallMass=float(getattr(schemeConfig, 'analyticWallMass', 1.0)), h=hWall)
 
     # 14. Apply forcing
     # with TimedBlock('compute forcing', use_cuda=True, device=config.device) as tb_forcing:

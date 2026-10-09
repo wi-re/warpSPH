@@ -158,6 +158,8 @@ class WeaklyCompressibleSPHConfig:
 
     regions: List[ParticleRegion] = field(default_factory=list, metadata={'description': 'List of particle regions in the simulation'})
     rigidBodies: List[RigidBody] = field(default_factory=list, metadata={'description': 'List of rigid bodies in the simulation'})
+    # Boundary provider of the analytic boundary regions (`boundary/provider.py`), built by the initializer; None without any. Not serialized.
+    boundaryProvider: object = field(default=None, repr=False, compare=False, metadata={'description': 'Analytic boundary provider (warpSPHBoundaries), None for particle boundaries'})
 
     surfaceDetectionConfig: SurfaceDetectionConfig = field(default_factory=buildDefaultSurfaceDetectionConfig, metadata={'description': 'Configuration for surface detection module'})
 

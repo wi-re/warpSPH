@@ -262,6 +262,12 @@ def initializeSimulation(regions, config, schemeConfig, SimulationSystem, Simula
     for rigidBody in rigidBodies:
         particleState = updateBodyParticlesWCSPH(particleState, rigidBody)
     config.rigidBodies = rigidBodies
+    from ..boundary import buildBoundaryProvider
+    provider = buildBoundaryProvider(regions, particleState.positions.device)
+    schemeConfig.boundaryProvider = provider
+    if provider is not None:
+        provider.rigidBodies = [rb for rb in rigidBodies if getattr(rb, 'representation', None) is not None]
+        schemeConfig.rigidBodies = rigidBodies          # the system's finalize integrates the analytic bodies like the particle ones
     config.regions = regions
     
     compressibleSystem = SimulationSystem(
