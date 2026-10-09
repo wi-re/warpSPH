@@ -263,6 +263,7 @@ def computeImplicitShift(
     adjacency: AdjacencyList,
     iters: int = -1,
     fallback_override: Optional[ShiftingImplicitFallback] = None,
+    wall: Optional[Any] = None,
 ):
     """Solves for the equilibrium implicit-shifting position delta in a
     single BiCGStab solve (`iters` is accepted, matching
@@ -288,15 +289,14 @@ def computeImplicitShift(
         Hw_all, B, x0 = _buildSystem(
             currentState, config, schemeConfig, domain, adjacency, i_all, j_all, J, H, rho0, dim, numParticles,
         )
-        provider = getattr(schemeConfig, 'boundaryProvider', None)
-        if provider is not None:
+        from ..analyticBoundary import resolveWall
+        wall = resolveWall(currentState, config, schemeConfig, adjacency, wall)
+        if wall is not None:
             # analytic walls: the wall continuum's share of grad C (modules/analyticBoundary/shifting.py). The wall particles are fixed, so the default legacyPairwise matrix
             # (self-pair diagonal, off-diagonal blocks of the fluid pairs) is unchanged; exactHessian's diagonal would need the wall's Hessian integral
             if operator == ShiftingImplicitOperator.exactHessian:
                 raise NotImplementedError('implicit shifting with analytic walls: the exactHessian operator needs the wall Hessian integral (use legacyPairwise)')
-            from ..analyticBoundary import evaluateWall, wallConcentrationGradient
-            from ..gravity import computeGravity
-            wall = evaluateWall(provider, currentState, config, schemeConfig, computeGravity(currentState, config, schemeConfig, adjacency))
+            from ..analyticBoundary import wallConcentrationGradient
             B = B + wallConcentrationGradient(wall, currentState, schemeConfig).to(dtype).flatten()
         diagBlock, i, j, Hw = _buildDiagBlock(operator, i_all, j_all, Hw_all, numParticles, dim, device, dtype)
 

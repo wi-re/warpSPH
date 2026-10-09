@@ -27,7 +27,7 @@ from warpSPHCore import KernelFunctions
 from ...boundary.provider import bindBodies
 from ...configurations.region import BCType
 
-__all__ = ['WallState', 'evaluateWall', 'wallContinuity', 'wallPressureAcceleration', 'wallViscousAcceleration', 'viscousPrefactor', 'wallLoads']
+__all__ = ['WallState', 'evaluateWall', 'resolveWall', 'wallContinuity', 'wallPressureAcceleration', 'wallViscousAcceleration', 'viscousPrefactor', 'wallLoads']
 
 F64 = torch.float64
 FAMILY = {KernelFunctions.Wendland2: 'w2', KernelFunctions.Wendland4: 'w4'}
@@ -47,6 +47,19 @@ class WallState:
     dtype: Any
     support: float = 0.0        # the (constant) kernel support the aggregates were evaluated for
     wm: float = 1.0             # the wall mass density factor
+
+
+def resolveWall(state, config, schemeConfig, adjacency, wall=None):
+    """The wall of a module's wall term: `wall` when the caller passes it, else the aggregates of the scheme's boundary provider at these positions (shared through
+    the `evaluateWall` cache), else `None` (boundary particles, or no wall). The one convention of every module that takes a `wall` argument: `wall=None` never means
+    "skip the wall" on a scene that has analytic bodies."""
+    if wall is not None:
+        return wall
+    provider = getattr(schemeConfig, 'boundaryProvider', None)
+    if provider is None:
+        return None
+    from ..gravity import computeGravity
+    return evaluateWall(provider, state, config, schemeConfig, computeGravity(state, config, schemeConfig, adjacency))
 
 
 def _policies(provider):

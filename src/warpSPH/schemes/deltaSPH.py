@@ -37,7 +37,7 @@ from ..modules.eos import weaklyCompressibleEOS
 from ..modules.gravity import computeGravity
 from ..modules.mdbc import computeBoundaryVelocities, computeMdbcDensity, computeMdbcDensityBand, computeMdbcDensityEnglish2025, computeMdbcNoPenShift
 from ..modules.momentum import computeMomentum
-from ..modules.pressure import computePressureForceSurfaceAware
+from ..modules.pressure import computePressureForceSurfaceAware, antuonoSwitch
 from ..modules.surfaceDetection import detectFreeSurface
 from ..modules.util import countNeighbors
 from ..enumTypes import DensityDiffusionScheme
@@ -51,7 +51,7 @@ from warpSPHCore.profiling import record_function
 __all__ = ['deltaSPH_step']
 
 
-from ..modules.analyticBoundary import evaluateWall, viscousPrefactor, wallContinuity, wallLoads, wallPressureAcceleration, wallViscousAcceleration
+from ..modules.analyticBoundary import evaluateWall, viscousPrefactor, wallLoads, wallPressureAcceleration, wallViscousAcceleration
 
 
 def deltaSPH_step(
@@ -316,12 +316,7 @@ def _deltaSPH_rhs(
         # free-surface impact grows. See `DELTASPH_VALIDATION_PLAN.md` Part 1.
         with record_function("[warpSPH] - [deltaSPH - 11] - compute dvdt_diss"):
             dvdt_diss = computeVelocityDiffusion(currentState, config, schemeConfig, adjacency,
-                                                 approachOnly=False)
-            if wall is not None:                  # the wall's share of the velocity diffusion, inside the (possibly frozen) tuple
-                hWall = float(schemeConfig._analyticSupport) if getattr(schemeConfig, '_analyticSupport', None) else float(currentState.supports.max())
-                dvdt_diss = dvdt_diss + wallViscousAcceleration(wall, currentState.densities, currentState.velocities,
-                                                                viscousPrefactor(schemeConfig, config, hWall), hWall,
-                                                                wallMass=float(getattr(schemeConfig, 'analyticWallMass', 1.0)), kernel=config.kernel)
+                                                 approachOnly=False, wall=wall)      # the wall's share is inside the (possibly frozen) tuple
 
         if freezeDiffusion:
             schemeConfig._frozenDiffusionCache = (drhodt_diss, dvdt_diss)
@@ -329,9 +324,7 @@ def _deltaSPH_rhs(
     # 12. Compute drhodt
     # with TimedBlock('compute drhodt', use_cuda=True, device=config.device) as tb_drhodt:
     with record_function("[warpSPH] - [deltaSPH - 12] - compute drhodt"):
-        drhodt = computeMomentum(currentState, config, schemeConfig, adjacency)
-        if wall is not None:                      # free-slip mirror of the wall in the continuity equation
-            drhodt = drhodt + wallContinuity(wall, currentState.densities, currentState.velocities)
+        drhodt = computeMomentum(currentState, config, schemeConfig, adjacency, wall=wall)      # wall: free-slip mirror in the continuity equation
 
     # 13. Compute dvdt from pressure
     # with TimedBlock('compute dvdt', use_cuda=True, device=config.device) as tb_dvdt:
@@ -381,19 +374,13 @@ def _deltaSPH_rhs(
             pressureRenormalizationState = RenormalizationState(renormalizationMatrices=gatedMatrices)
         dvdt_pressure = computePressureForceSurfaceAware(
             currentState, config, schemeConfig, adjacency,
-            renormalizationState=pressureRenormalizationState)
-        if wall is not None:                      # the wall's pressure force: Antuono switch as in the fluid pair kernel (P >= 0 or surface)
-            switch = torch.where((currentState.pressures >= 0) | (currentState.surfaceIndicators == 1),
-                                 torch.ones_like(currentState.pressures), -torch.ones_like(currentState.pressures))
-            hWall = float(schemeConfig._analyticSupport) if getattr(schemeConfig, '_analyticSupport', None) else float(currentState.supports.max())
-            dvdt_pressure = dvdt_pressure + wallPressureAcceleration(wall, currentState.pressures, switch, currentState.densities,
-                                                                     wallMass=float(getattr(schemeConfig, 'analyticWallMass', 1.0)), h=hWall)
+            renormalizationState=pressureRenormalizationState, wall=wall)      # wall: the wall's pressure force, same Antuono switch as the fluid pairs
 
     if wall is not None and (getattr(schemeConfig, 'analyticWallLoads', False) or any(rb.dynamic for rb in provider.rigidBodies)):
         # the load of the fluid on every analytic body (pressure, wall viscous): the reaction to the wall terms, booked on the RigidBody for diagnostics and for the free bodies
         with record_function("[warpSPH] - [deltaSPH - 13b] - analytic wall loads"):
-            hWall = float(schemeConfig._analyticSupport) if getattr(schemeConfig, '_analyticSupport', None) else float(currentState.supports.max())
-            wm = float(getattr(schemeConfig, 'analyticWallMass', 1.0))
+            hWall, wm = wall.support, wall.wm
+            switch = antuonoSwitch(currentState.pressures, currentState.surfaceIndicators)
             accP = wallPressureAcceleration(wall, currentState.pressures, switch, currentState.densities, wallMass=wm, h=hWall, perBody=True)
             accV = wallViscousAcceleration(wall, currentState.densities, currentState.velocities, viscousPrefactor(schemeConfig, config, hWall), hWall, wallMass=wm, kernel=config.kernel, perBody=True)
             loads = wallLoads(accP, accV, currentState.positions, currentState.masses, torch.stack([rb.centerOfMass.to(torch.float64).reshape(2) for rb in provider.rigidBodies]))

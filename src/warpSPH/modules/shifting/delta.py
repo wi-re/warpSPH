@@ -39,7 +39,7 @@ def _hostDx(config):
         config._hostDxValue = cached
     return cached[1]
 
-def computeDeltaShift(currentState, config, schemeConfig, domain, adjacency, iters = -1):
+def computeDeltaShift(currentState, config, schemeConfig, domain, adjacency, iters = -1, wall = None):
     original_positions = currentState.positions.clone()
     original_densities = currentState.densities.clone()
     for i in range(schemeConfig.shiftProperties.iterations if iters == -1 else iters):
@@ -159,13 +159,12 @@ def computeDeltaShift(currentState, config, schemeConfig, domain, adjacency, ite
         # print(f'dt_c: {dt_c}, dt: {dt}, ratio: {dt_c / dt}')
 
 
-        provider = getattr(schemeConfig, 'boundaryProvider', None)
-        if provider is not None:
+        from ..analyticBoundary import resolveWall
+        wallNow = resolveWall(currentState, config, schemeConfig, adjacency, wall if i == 0 else None)       # a passed wall is valid for the input positions only
+        if wallNow is not None:
             # analytic walls: the wall's share of the same raw sum (modules/analyticBoundary/shifting.py)
-            from ..analyticBoundary import evaluateWall, wallShiftRaw
-            from ..gravity import computeGravity
-            wall = evaluateWall(provider, currentState, config, schemeConfig, computeGravity(currentState, config, schemeConfig, adjacency))
-            shift = shift + wallShiftRaw(wall, currentState, config, schemeConfig, R = 0.2 if eq7 else 0.25).to(shift.dtype)
+            from ..analyticBoundary import wallShiftRaw
+            shift = shift + wallShiftRaw(wallNow, currentState, config, schemeConfig, R = 0.2 if eq7 else 0.25).to(shift.dtype)
 
         shift = shift * scalingDeltaPlus.unsqueeze(-1)
 

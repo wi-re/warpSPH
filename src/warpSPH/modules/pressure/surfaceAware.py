@@ -21,9 +21,16 @@ from warpSPH.configurations.simulationConfig import SimulationConfig
 from ...enumTypes import *
 from .wp_surfaceAware import computePressureSurfaceAwareWarp
 
-__all__ = ['computePressureForceSurfaceAware']
+__all__ = ['computePressureForceSurfaceAware', 'antuonoSwitch']
 
-def computePressureForceSurfaceAware(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], renormalizationState: Optional[Any] = None) -> torch.Tensor:
+
+def antuonoSwitch(pressures: torch.Tensor, surfaceIndicators: torch.Tensor) -> torch.Tensor:
+    """The Antuono switch s of the pressure force (`p_i + s p_j` form): +1 where the pressure is non-negative or the particle is a free-surface particle, -1 elsewhere."""
+    return torch.where((pressures >= 0) | (surfaceIndicators == 1), torch.ones_like(pressures), -torch.ones_like(pressures))
+
+def computePressureForceSurfaceAware(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], renormalizationState: Optional[Any] = None, wall: Optional[Any] = None) -> torch.Tensor:
+    """`wall`: the analytic boundary's `WallState` (`modules/analyticBoundary`) adds the wall's pressure force with the same Antuono switch as the fluid pairs;
+    `None`: resolved from `schemeConfig.boundaryProvider` (`resolveWall`), no wall term for boundary particles."""
     with record_function("[warpSPH] - computePressureForceSurfaceAware"):
         dvdt = computePressureSurfaceAwareWarp(
             currentState,
@@ -45,4 +52,10 @@ def computePressureForceSurfaceAware(currentState: Any, config: SimulationConfig
             # `pressureForceRenormalized` docstring.
             renormalizationState = renormalizationState,
         )
+        from ..analyticBoundary import resolveWall
+        wall = resolveWall(currentState, config, schemeConfig, adjacency, wall)
+        if wall is not None:
+            from ..analyticBoundary import wallPressureAcceleration
+            dvdt = dvdt + wallPressureAcceleration(wall, currentState.pressures, antuonoSwitch(currentState.pressures, currentState.surfaceIndicators), currentState.densities,
+                                                   wallMass=wall.wm, h=wall.support)
         return dvdt

@@ -62,6 +62,7 @@ from ..utils import buildDomainDescription
 from ..regions import sampleDomainSDF
 from .kolmogorovIncompressible import kolmogorovIncompressibleTimestep
 from .plotting import Field, particlePlot
+from ..caseUtils.weaklyCompressible import analyticTankBody
 from .weaklyCompressible import (boundaryRegion, buildRegionSystem, fluidRegion,
                                  setupTimestep, shapeSdf,
                                  particleDistributionMetrics,
@@ -152,6 +153,13 @@ def configureScheme(ctx: RunContext) -> None:
     ctx.scratch['interiorDomain'] = interior
 
     sc = ctx.schemeConfig
+    if ctx.param('wallRepresentation') == 'analytic':
+        # the tank is one analytic warpSPHBoundaries body (ANALYTIC_BOUNDARIES_PLAN.md): deltaSPH only, static walls
+        # (the roll is carried by the rotated gravity, the walls never move in this frame)
+        if isIncompressibleScheme(ctx.scheme) or isArtificialCompressibleScheme(ctx.scheme):
+            raise ValueError("sloshingTank wallRepresentation='analytic' is hooked into deltaSPH only "
+                             "(ANALYTIC_BOUNDARIES_PLAN.md: the incompressible and ACSPH consumers are not)")
+        sc.analyticWallPressure = ctx.param('analyticWallPressure')
     sc.surfaceDetectionConfig.active = True
     sc.gravityConfig.active = True
     sc.gravityConfig.type = GravityType.Directional
@@ -259,9 +267,11 @@ def buildSystem(ctx: RunContext):
     fluidSdf = shapeSdf('box', args=[[halfW, 0.5 * fill]], offset=[0.0, 0.5 * fill])
     wallSdf = lambda x: sampleDomainSDF(x, interior, invert=False)
 
+    # an analytic wall keeps its sdf (the fluid is clipped against it) but is not sampled into particles
+    representation = analyticTankBody(interior) if ctx.param('wallRepresentation') == 'analytic' else None
     regions = [
         fluidRegion(ctx, fluidSdf),
-        boundaryRegion(ctx, wallSdf, kind=BCType[ctx.param('wallBC')]),
+        boundaryRegion(ctx, wallSdf, kind=BCType[ctx.param('wallBC')], representation=representation),
     ]
     return buildRegionSystem(ctx, regions)
 
@@ -369,6 +379,19 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     }
     d.update(particleDistributionMetrics(ctx, state))
     d.update(stepAccelerationDiagnostics(state))
+
+    if ctx.param('wallRepresentation') == 'analytic':
+        # no wall particle to read: Sensor 1 is the Gaussian-smoothed Tait pressure of the fluid within `probeRadius`
+        # of the sensor position (the same `sensorPressureProbe` the particle walls record next to the wall reading)
+        cs = float(ctx.schemeConfig.fluid.fixedSoundSpeed)
+        scale = rho0Phys * cs * cs
+        probe = _probePressure(
+            ctx, particles,
+            scale / _TAIT_GAMMA * ((particles.densities / rho0) ** _TAIT_GAMMA - 1.0))
+        d['sensorPressure'] = probe if probe is not None else 0.0
+        if probe is not None:
+            d['sensorPressureProbe'] = probe
+        return d
 
     if ctx.scratch.get('sensorIndex') is None:
         ctx.scratch['sensorIndex'] = _locateSensor(ctx, particles)
@@ -529,6 +552,10 @@ sloshingTankCase = registerCase(Case(
         band=5,
         bandWidth=16.0,
         wallBC='freeSlip',
+        # 'particles' (boundary particles + mDBC ghost nodes) or 'analytic' (warpSPHBoundaries tank body, deltaSPH only)
+        wallRepresentation='particles',
+        # analytic walls only: 'hydrostatic' or 'normal' (see dambreak)
+        analyticWallPressure='hydrostatic',
         gravityMagnitude=9.81,
         rho0Physical=1000.0,
         # Normalise the particle mass so the at-rest sampling measures `rho0`.

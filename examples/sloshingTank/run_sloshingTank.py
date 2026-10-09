@@ -86,6 +86,14 @@ def parseArgs(argv):
                    choices=['freeSlip', 'noSlip', 'extended', 'zeros', 'constant'],
                    help='wall boundary condition (case default freeSlip; '
                         'diffSPH mirrors, i.e. noSlip, for its viscous term)')
+    p.add_argument('--wallRepresentation', choices=('particles', 'analytic'), default=None,
+                   help="tank walls as boundary particles (default) or as an analytic "
+                        "warpSPHBoundaries body (wcsph only); Sensor 1 is then the fluid probe")
+    p.add_argument('--analyticWallPressure', choices=('hydrostatic', 'normal'), default=None,
+                   help='analytic walls only: wall pressure condition (case default hydrostatic)')
+    p.add_argument('--kernel', type=str, default=None,
+                   help="kernel override (case default Wendland4; analytic walls need Wendland2 "
+                        "for their shifting term and default to it)")
     p.add_argument('--alpha', type=float, default=None,
                    help='WCSPH artificial-viscosity coefficient (case default 0.02)')
     p.add_argument('--no-shift', dest='shift', action='store_false', default=True,
@@ -179,6 +187,10 @@ def buildSpec(case, args):
     params = {}
     if args.rollDataFile is not None:
         params['rollDataFile'] = os.path.abspath(args.rollDataFile)
+    if args.kernel is not None:
+        overrides['kernel'] = args.kernel
+    elif args.wallRepresentation == 'analytic':
+        overrides['kernel'] = 'Wendland2'
     if args.integrationScheme is not None:
         overrides['integrationScheme'] = args.integrationScheme
     if args.targetDt is not None:
@@ -191,6 +203,10 @@ def buildSpec(case, args):
         params['alpha'] = args.alpha
     if args.wallBC is not None:
         params['wallBC'] = args.wallBC
+    if args.wallRepresentation is not None:
+        params['wallRepresentation'] = args.wallRepresentation
+    if args.analyticWallPressure is not None:
+        params['analyticWallPressure'] = args.analyticWallPressure
     if args.noPenShift is not None:
         params['noPenShift'] = args.noPenShift
     if args.timeCentredContinuity is not None:
@@ -323,6 +339,8 @@ def main(argv=None):
     # doesn't overwrite the plain scheme's own recorded output (same idea as
     # scripts/probe_deltaSPHMarrone.py's `_mdbcRho-...`/`_ddt-...` suffixes).
     tag = (args.scheme
+          + ('_analytic' if args.wallRepresentation == 'analytic' else '')
+          + (f'_{args.kernel}' if args.kernel else '')
           + (f'_mdbcRho-{args.mdbcDensityScheme}' if args.mdbcDensityScheme else '')
           + (f'_ddt-{args.densityDiffusionTerm}' if args.densityDiffusionTerm else '')
           + ('_pforceGate' if args.pressureForceRenormalized else ''))

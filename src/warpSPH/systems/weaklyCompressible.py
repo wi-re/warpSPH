@@ -291,16 +291,10 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
         state.velocities = torch.where(fluid, velocities, state.velocities)
         if stateHasBoundaryParticles(state, config):
             state.velocities = computeBoundaryVelocities(state, config, schemeConfig, adjacency)
+        # analytic walls: `computeMomentum` adds the wall flux of the continuity equation for the velocities of this evaluation (the right-hand side adds the
+        # same term for the stage velocity; the time-centred correction must see it for the mean velocity, or the density at a wall is advanced without
+        # the wall's compression)
         rate = computeMomentum(state, config, schemeConfig, adjacency)
-        provider = getattr(schemeConfig, 'boundaryProvider', None)
-        if provider is not None:
-            # analytic walls: the wall flux of the continuity equation for the velocities of this evaluation (the right-hand side adds the
-            # same term for the stage velocity; the time-centred correction must see it for the mean velocity, or the density at a wall
-            # is advanced without the wall's compression)
-            from ..modules.analyticBoundary import evaluateWall, wallContinuity
-            from ..modules.gravity import computeGravity
-            wall = evaluateWall(provider, state, config, schemeConfig, computeGravity(state, config, schemeConfig, adjacency))
-            rate = rate + wallContinuity(wall, state.densities, state.velocities)
         rate = torch.where(fluid.squeeze(-1), rate, torch.zeros_like(rate))
         return WeaklyCompressibleSystemUpdate(dxdt=None, dvdt=None, drhodt=None, drhodt_kin=rate)
 
