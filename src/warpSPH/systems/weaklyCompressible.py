@@ -25,6 +25,7 @@ from ..rigidBody.update import updateBodyParticlesWCSPH
 
 from ..modules.shifting.delta import computeDeltaShift
 from ..modules.shifting.wrapper import solveShifting
+from ..modules.boundaryConditions.pinned import pinnedKeepWeight, applyPinnedVelocity
 from ..modules.mdbc import computeMdbcNoPenShift
 from ..modules.mdbc._util import stateHasBoundaryParticles
 import copy
@@ -369,6 +370,9 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
                     dt = dt,
                 )
                 # print(f"Applied shifting update with max shift magnitude: {dx.norm(dim=1).max().item()}")
+                keep = pinnedKeepWeight(self.state, config, schemeConfig)        # a pinned band is not shifted
+                if keep is not None:
+                    dx = dx * keep
 
                 du = dx / dt
                 rho = self.state.densities
@@ -640,5 +644,6 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
 
         # print(f'Surface particles: {self.state.surfaceIndicators.sum().item()} / {self.state.surfaceIndicators.shape[0]} ({100 * self.state.surfaceIndicators.sum().item() / self.state.surfaceIndicators.shape[0]:.2f}%)')
 
+        applyPinnedVelocity(self.state, kwargs.get('config', None), kwargs.get('schemeConfig', None))
         return super().finalize(initialState, dt, returnValues, updateValues, weights, *args, **kwargs)
     

@@ -22,6 +22,7 @@ from ..rigidBody.update import updateBodyParticlesWCSPH
 
 from ..modules.shifting.delta import computeDeltaShift
 from ..modules.shifting.wrapper import solveShifting
+from ..modules.boundaryConditions.pinned import pinnedKeepWeight, applyPinnedVelocity
 from torch.profiler import profile, ProfilerActivity
 from warpSPHCore.profiling import record_function
 __all__ = ['IncompressibleState', 'IncompressibleSystemUpdate', 'IncompressibleSystem',
@@ -282,6 +283,10 @@ class IncompressibleSystem(BaseIntegrationSystem):
                                  ).to(dx.dtype).unsqueeze(-1)
                         dx = dx * w
                         proj_vel = proj_vel * w
+                keep = pinnedKeepWeight(self.state, config, schemeConfig)        # a pinned band is not shifted
+                if keep is not None:
+                    dx = dx * keep
+                    proj_vel = proj_vel * keep
                 if _PS_POSITION_SHIFT:
                     if _PS_SHIFT_AS_VELOCITY:
                         self.state.velocities = torch.where(
@@ -540,6 +545,7 @@ class IncompressibleSystem(BaseIntegrationSystem):
         # self.state.alpha0s.copy_(lastState.alpha0s)
         # self.state.alphas.copy_(lastState.alphas)
 
+        applyPinnedVelocity(self.state, kwargs.get('config', None), kwargs.get('schemeConfig', None))
         return super().finalize(initialState, dt, returnValues, updateValues, weights, *args, **kwargs)
 
 
@@ -601,6 +607,7 @@ class DFSPHReferenceSystem(IncompressibleSystem):
                 rigidBody = integrateRigidBody(rigidBody, 0, 0, dt)
                 self.state = updateBodyParticlesWCSPH(self.state, rigidBody)
 
+        applyPinnedVelocity(self.state, kwargs.get('config', None), kwargs.get('schemeConfig', None))
         # Skip IncompressibleSystem.finalize entirely -- go straight to the
         # integrator base's no-op hook.
         return BaseIntegrationSystem.finalize(

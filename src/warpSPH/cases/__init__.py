@@ -55,6 +55,7 @@ CASE_MODULES = (
     'periodicChannel',
     'stokesArray',
     'taylorCouette',
+    'cylinderWake',
     # incompressible -- examples/incompressible/*.ipynb
     'tgv',
     'kolmogorovIncompressible',
