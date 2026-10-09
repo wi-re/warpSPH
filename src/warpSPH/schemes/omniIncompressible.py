@@ -420,6 +420,9 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *, checkS
         # analytic walls (`modules/analyticBoundary`): the wall's integrals at the fluid particles, one evaluation per position set (the cache is shared with the
         # density, the alpha and the pressure acceleration below); None with boundary particles
         wall = resolveWall(state, config, schemeConfig, adjacency)
+        if mode == 'divergence' and not getattr(schemeConfig, 'analyticWallInDivergence', False):
+            # omniSPH's divergence solve ignores the wall (and the boundaries repo's DFSPH2D follows it for static walls, `boundaryInDivergence`); the density solve carries it
+            wall = None
         # omniSPH folds -dt**2 into fluidAlpha; computeAlpha returns the
         # negated IISPH a_ii bracket, so `alpha <= 0` as omniSPH's is.
         alpha = dt * dt * computeAlpha(
