@@ -1,5 +1,7 @@
 # omniIncompressible dam break, analytic walls vs boundary particles vs compiled omniSPH — 2026-10-09
 
+> **RETRACTED CONCLUSION (same day, owner's review of the frames): the analytic run is NOT physical.** At t = 0.31 the fluid is a hollow arch (thin vertical chains of particles around an empty interior), not a slumping column. The scalar columns below (front, mean height, max |v|) agree to 1.2-1.7x and still hide it; the sentences further down that call the run stable, close to omniSPH or physical are wrong and are kept only as the record of what was claimed. Nothing here validates the analytic omniIncompressible. Check the frames before the numbers.
+
 `scripts/probe_omniAnalyticDambreak.py --particles --offsets 0.5 0.05` (nx = 100, n_h = 2.57 = omniSPH's h = sqrt(20 V / pi), 2093 particles = omniSPH's 23 x 91 lattice, free slip, `semiImplicitEuler`, dt <= 1e-3).
 The reference is the compiled omniSPH of the boundaries repo (`~/dev/curvatureBoundaries/.tmp/omni/cmp_dam.npz`, particle centres on the block edges, **walls one spacing outside the block**); the
 boundaries repo's own `DFSPH2D` (hydrostatic wall closure) is in the same file and agrees with it within 1 % (front) / 0.4 % (mean height). Columns: front displacement [m] / mean height above the
