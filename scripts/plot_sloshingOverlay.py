@@ -53,9 +53,13 @@ def main():
     axW = [fig.add_subplot(gs[1, i]) for i in range(3)]
     axKE = fig.add_subplot(gs[2, :])
 
+    # the measured record smoothed the same way as the runs (a sharp raw peak and a 10 ms-smoothed one are not comparable: compare like with like)
+    gm, sm_ = smooth(expT, expP, a.smoothSigma)
     for ax in [axFull] + axW:
-        ax.plot(expT, expP, color='0.45', lw=1.0, ls='--', label='measured (Sensor 1)')
+        ax.plot(expT, expP, color='0.7', lw=0.8, ls='--', label='measured (Sensor 1, raw)')
+        ax.plot(gm, sm_, color='0.25', lw=1.5, ls='--', label=f'measured, same {a.smoothSigma * 1e3:.0f} ms smoothing')
     peaks = []
+    peaks.append(('measured, smoothed', [(float(sm_[(gm >= lo) & (gm < hi)].max()), float(gm[(gm >= lo) & (gm < hi)][sm_[(gm >= lo) & (gm < hi)].argmax()])) for lo, hi in WINDOWS]))
     for (label, d), c in zip(runs, COLORS):
         t, p = d['t'], d[a.field]
         g, s = smooth(t, p, a.smoothSigma)
@@ -73,7 +77,7 @@ def main():
     axFull.set_xlim(0, 7)
     axFull.set_ylabel('Sensor 1 pressure [Pa]')
     axFull.set_title(f'SPHERIC TC10 sloshing, nx = 200: Sensor 1 ({a.smoothSigma * 1e3:.0f} ms Gaussian smoothing) against the measurement')
-    axFull.legend(loc='upper left', fontsize=9, frameon=False, ncol=4)
+    axFull.legend(loc='upper left', fontsize=9, frameon=False, ncol=3)
     for ax, (lo, hi) in zip(axW, WINDOWS):
         ax.set_xlim(lo, hi)
         ax.set_ylim(-1000, 7500)

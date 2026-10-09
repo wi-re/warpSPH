@@ -15,3 +15,5 @@ calibrated lattice automatically, `calibratedLattice='auto'`; Sensor 1 = Gaussia
 * Frames (`frames_omni_analytic_...png`, the analytic run at the impacts): wave run-up with a jet and spray at the right wall (2.35 s), a broken wave over the tank (2.6), a high run-up (4.05) and its bore (4.3), the return wave at the left wall (5.65),
   run-up again (6.5): a compact body, smooth surface, spray as small clusters, no hollow arches or stuck particles.
 * Not a single-factor comparison: scheme (omni vs delta+), n_h (2.57 vs 4), kernel (C2 for both analytic runs), sensor definition (probe vs wall particle for the particle run). n_h = 4 with the omni analytic walls is unstable (OPEN_PROBLEMS 31, being investigated).
+
+> **Superseded (2026-10-09, later):** these two runs were made before the divergence-solve fix (commit 91c9da8: the diagonal carried a wall the operator left out) and compared smoothed simulated peaks with the raw measured ones; the corrected runs and the like-with-like comparison are in `../omni_sloshing_fixed_2026-10-09/`.

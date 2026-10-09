@@ -18,3 +18,6 @@ Raw output (videos, series, logs) stays in `examples/sloshingTank/output/analyti
 * The comparison is not a single-factor A/B: kernel (C4 vs C2, forced by the wall shifting term), wall treatment, and Sensor 1 (nearest wall particle vs Gaussian fluid probe within 2 cm) all differ. The analytic run shows short probe spikes between impacts (t ≈ 3.0, 4.7, 6.4 s); the frame at t = 3.03 has isolated near-wall particles (not checked further).
 * DFSPH: first impact late and low, later impacts a train of spikes; the frame shows a sparse, stretched layer with density holes. The known free-surface de-densification of `divergenceFree` at nx = 200 (DFSPH_IMPROVEMENT_PLAN Part 23).
 * Frames: `frame_particles_t3.03.png`, `frame_analytic_t3.03.png` (same instant, the wave overturn of the second cycle), `frame_dfsph_t4.87.png`.
+
+> **Correction (2026-10-09, later): comparison with the measurement.** The peaks quoted here and in the messages of the day compared 10 ms-smoothed *simulated* peaks with the *raw* measured peaks (3.7 / 3.9 / 2.7 kPa). The measured record smoothed the same way peaks at 1.80 / 2.32 / 1.17 kPa
+> (t = 2.390, 4.066, 5.697 s), so the delta+ analytic run is +153 % / +117 % / +313 % and 39-74 ms early, not "25-60 ms early with larger peaks" against the raw record. See `../omni_sloshing_fixed_2026-10-09/README.md` for the like-with-like table.
