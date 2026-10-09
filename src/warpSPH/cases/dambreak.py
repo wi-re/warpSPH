@@ -986,6 +986,8 @@ dambreakCase = registerCase(Case(
         # 'particles' (default): boundary particles + ghost nodes (mDBC). 'analytic': the tank walls are a
         # warpSPHBoundaries body (exact boundary integrals, no wall particles); plain tank only.
         wallRepresentation='particles',
+        # with wallRepresentation='analytic' and an obstacle: 'analytic' (the obstacle is an analytic body too) or 'particles' (a mixed scene: the obstacle stays boundary particles)
+        obstacleRepresentation='analytic',
         # analytic walls only: 'hydrostatic' (the wall pressure gradient rho (g - a_w) in all directions: exact for a fluid in hydrostatic balance) or
         # 'normal' (only dp/dn = rho (g - a_w) . n, as the boundary particles' ghost extrapolation: no tangential force on a fluid in free fall)
         analyticWallPressure='hydrostatic',
