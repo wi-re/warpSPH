@@ -1,4 +1,4 @@
-"""Analytic walls are hooked into the weakly compressible delta+ scheme only: every other scheme must refuse them loudly (before the guard they ran with no wall at
+"""Analytic walls are hooked into delta+, omniIncompressible and divergenceFree only: every other scheme must refuse them loudly (before the guard they ran with no wall at
 all, the fluid simply fell through the open box)."""
 import pytest
 import torch
@@ -12,7 +12,7 @@ from warpSPH.runner.caseSpec import CaseSpec  # noqa: E402
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA')
 
 
-@pytest.mark.parametrize('scheme', ['divergenceFree', 'dfsphReference', 'iisph', 'artificialCompressible'])
+@pytest.mark.parametrize('scheme', ['dfsphReference', 'iisph', 'artificialCompressible'])
 def test_other_schemes_refuse_analytic_walls(scheme):
     importAll()
     case = getCase('dambreak')

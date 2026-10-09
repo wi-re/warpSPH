@@ -118,7 +118,7 @@ def test_boundary_friction_is_tangential_and_local():
 
 
 def test_delta_plus_refuses_the_mls_wall_pressure():
-    with pytest.raises(ValueError, match='omniIncompressible options'):
+    with pytest.raises(ValueError, match='omniIncompressible / divergenceFree options'):
         importAll()
         case = getCase('sloshingTank')
         spec = CaseSpec(caseName='x', scheme='deltaSPH', params={**case.params, 'wallRepresentation': 'analytic', 'analyticWallPressure': 'mls'}).merged(**case.defaults).merged(

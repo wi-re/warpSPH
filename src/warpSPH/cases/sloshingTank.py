@@ -156,13 +156,13 @@ def configureScheme(ctx: RunContext) -> None:
     if ctx.param('wallRepresentation') == 'analytic':
         # the tank is one analytic warpSPHBoundaries body (ANALYTIC_BOUNDARIES_PLAN.md): deltaSPH and omniIncompressible, static walls
         # (the roll is carried by the rotated gravity, the walls never move in this frame)
-        if getattr(ctx.scheme, 'name', ctx.scheme) not in ('deltaSPH', 'omniIncompressible'):
-            raise ValueError("sloshingTank wallRepresentation='analytic' is hooked into deltaSPH and omniIncompressible only "
+        if getattr(ctx.scheme, 'name', ctx.scheme) not in ('deltaSPH', 'omniIncompressible', 'divergenceFree'):
+            raise ValueError("sloshingTank wallRepresentation='analytic' is hooked into deltaSPH, omniIncompressible and divergenceFree only "
                              "(ANALYTIC_BOUNDARIES_PORT_SURVEY.md)")
         sc.analyticWallPressure = ctx.param('analyticWallPressure')
-        if getattr(ctx.scheme, 'name', ctx.scheme) != 'omniIncompressible' and (sc.analyticWallPressure == 'mls' or ctx.param('boundaryFriction') or ctx.param('xsphCoefficient')):
-            raise ValueError("analyticWallPressure='mls', boundaryFriction and xsphCoefficient are omniIncompressible options")
-    if getattr(ctx.scheme, 'name', ctx.scheme) == 'omniIncompressible':
+        if getattr(ctx.scheme, 'name', ctx.scheme) not in ('omniIncompressible', 'divergenceFree') and (sc.analyticWallPressure == 'mls' or ctx.param('boundaryFriction') or ctx.param('xsphCoefficient')):
+            raise ValueError("analyticWallPressure='mls', boundaryFriction and xsphCoefficient are omniIncompressible / divergenceFree options")
+    if getattr(ctx.scheme, 'name', ctx.scheme) in ('omniIncompressible', 'divergenceFree'):
         sc.xsphCoefficient = ctx.param('xsphCoefficient')
         sc.boundaryFriction = ctx.param('boundaryFriction')
     sc.surfaceDetectionConfig.active = True

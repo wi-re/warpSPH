@@ -337,11 +337,11 @@ def buildSystem(ctx: RunContext):
     ctx.scratch['obstacle'] = obstacle
     # analytic walls (wallRepresentation='analytic'): which wall pressure condition (modules/analyticBoundary/wallTerms.py)
     ctx.schemeConfig.analyticWallPressure = ctx.param('analyticWallPressure')
-    if getattr(ctx.scheme, 'name', ctx.scheme) == 'omniIncompressible':
+    if getattr(ctx.scheme, 'name', ctx.scheme) in ('omniIncompressible', 'divergenceFree'):
         ctx.schemeConfig.xsphCoefficient = ctx.param('xsphCoefficient')
         ctx.schemeConfig.boundaryFriction = ctx.param('boundaryFriction')
     elif ctx.param('xsphCoefficient') or ctx.param('boundaryFriction') or ctx.schemeConfig.analyticWallPressure == 'mls':
-        raise ValueError("analyticWallPressure='mls', boundaryFriction and xsphCoefficient are omniIncompressible options")
+        raise ValueError("analyticWallPressure='mls', boundaryFriction and xsphCoefficient are omniIncompressible / divergenceFree options")
 
     # Stash the obstacle's own SDF (negative inside the solid) so `diagnostics`
     # can measure fluid penetration into the obstacle -- the interior-AABB

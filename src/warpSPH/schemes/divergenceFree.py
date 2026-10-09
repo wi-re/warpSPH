@@ -41,6 +41,7 @@ from warpSPH.modules.incompressible import solveDivergenceFree, solveIncompressi
 from warpSPH.modules.mdbc import (
     computeBoundaryVelocities, computeMdbcDensity, computeMdbcNoPenShift,
 )
+from warpSPH.modules.mdbc._util import stateHasBoundaryParticles
 from warpSPH.configurations import BoundaryPressureMode, ShiftApplication, DensityEvolution, resolveDensityEvolution
 from warpSPH.modules.momentum import computeMomentum
 from warpSPH.modules.momentum.incompressible import computeMomentumIncompressible
@@ -187,6 +188,11 @@ def divergenceFree_step(
         currentState.densities = computeDensities(currentState, config, schemeConfig, adjacency)
         currentState.densities[currentState.kinds==2] = 1.0 # reset boundary densities to 1.0
 
+    # boundary friction of the analytic walls (omniIncompressible: the velocity filter at the start of the step, on the wall evaluation the density just made)
+    if getattr(schemeConfig, 'boundaryFriction', 0.0):
+        from warpSPH.modules.xsph import computeBoundaryFriction
+        currentState.velocities = currentState.velocities + computeBoundaryFriction(currentState, config, schemeConfig, adjacency)
+
     if verbose:
         print(f'step {currentSystem.t:.6g}: density stats: mean={currentState.densities.mean().item():.6g}, min={currentState.densities.min().item():.6g}, max={currentState.densities.max().item():.6g}')
 
@@ -287,8 +293,17 @@ def divergenceFree_step(
         _noPenOn = (schemeConfig.solverConfig.mdbcNoPenetrationShift
                     if NOPEN_SHIFT == 'config' else NOPEN_SHIFT)
         if _noPenOn:
-            nopenshift = computeMdbcNoPenShift(currentState, config, schemeConfig, adjacency)
-            nopenshift[currentState.kinds != 0] = 0.0
+            # boundary particles' correction (their ghost nodes) plus, with a boundary provider (analytic walls), the walls' (`modules/analyticBoundary/noPenetration.py`)
+            _provider = getattr(schemeConfig, 'boundaryProvider', None)
+            if _provider is None or stateHasBoundaryParticles(currentState, config):
+                nopenshift = computeMdbcNoPenShift(currentState, config, schemeConfig, adjacency)
+                nopenshift[currentState.kinds != 0] = 0.0
+            else:
+                nopenshift = torch.zeros_like(currentState.velocities)
+            if _provider is not None:
+                from warpSPH.modules.analyticBoundary import analyticNoPenShift
+                _analytic = analyticNoPenShift(_provider, currentState, config, schemeConfig, getattr(schemeConfig, '_analyticDx', None) or float(config.dx))
+                nopenshift = nopenshift + torch.where((currentState.kinds != 0).unsqueeze(-1), torch.zeros_like(_analytic), _analytic)
             dvdt = dvdt + nopenshift / dt
 
     # First we project the velocity field to be divergence free using the DFSph solver
@@ -466,6 +481,9 @@ def divergenceFree_step(
         dvdt_xsph = xsphScale * _xsphFilter(
             currentState, config, adjacency, currentState.kinds == 0) / dt
         dvdt_xsph[currentState.kinds != 0] = 0.0
+    if getattr(schemeConfig, 'xsphCoefficient', 0.0) or getattr(schemeConfig, 'xsphBoundaryCoefficient', 0.0):
+        from warpSPH.modules.xsph import computeXSPH
+        dvdt_xsph = dvdt_xsph + computeXSPH(currentState, config, schemeConfig, adjacency) / dt
 
     # 16. build update
     # with TimedBlock('build update', use_cuda=True, device=config.device) as tb_update:

@@ -32,12 +32,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--dp', type=float, default=0.02)
     ap.add_argument('--tLimit', type=float, default=4.0)
+    ap.add_argument('--scheme', choices=('omni', 'dfsph'), default='omni')
     ap.add_argument('--wedge', action=argparse.BooleanOptionalAction, default=True)
     ap.add_argument('--rep', nargs='+', default=['analytic'], choices=('analytic', 'particles'))
     ap.add_argument('--nh', type=float, default=2.57)
     ap.add_argument('--video', action='store_true')
     ap.add_argument('--massScale', type=float, default=1.0, help='extra factor on the particle mass (particle walls: 0.9715 = omniSPH V = pi r^2)')
     a = ap.parse_args()
+    SCHEME = {'omni': 'omniIncompressible', 'dfsph': 'divergenceFree'}[a.scheme]
 
     bootstrap(precision='float32')
     from warpSPH.cases import importAll
@@ -64,8 +66,8 @@ def main():
         print(f'-- {rep} walls, wedge {a.wedge}, dp {dx:.4f}, n_h {a.nh}')
         for T in times:
             last = T == times[-1]
-            spec = CaseSpec(caseName=f'omniWedge-{rep}', scheme='omniIncompressible', params=params).merged(**case.defaults).merged(
-                scheme='omniIncompressible', L=TANK_H, nx=nx, n_h=a.nh, integrationScheme='semiImplicitEuler', kernel='Wendland2', supportMode='SuperSymmetric', cflFactor=1.0,
+            spec = CaseSpec(caseName=f'omniWedge-{rep}', scheme=SCHEME, params=params).merged(**case.defaults).merged(
+                scheme=SCHEME, L=TANK_H, nx=nx, n_h=a.nh, integrationScheme='semiImplicitEuler', kernel='Wendland2', supportMode='SuperSymmetric', cflFactor=1.0,
                 dt=2e-3, minDt=1e-4, maxDt=2e-3, tLimit=T, adaptiveDt=True, plot=a.video and last, video=a.video and last, show=False, store=False, progress=a.video and last, quiet=True,
                 plotInterval=50, velocityAlarmPlotInterval=1, stallProgress=1e-3)
             res = run(case, spec)

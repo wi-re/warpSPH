@@ -559,3 +559,5 @@ See also: [[boundary-density-plan]], [[wcsph-deltasph-scheme-concerns]],
 [[sph-symmetric-pressure-truncation-artifact]],
 [[marrone31-truncation-artifact-vs-pst]], [[antuono-pressure-switch-bug]],
 [[incompressible-plan-sequencing]].
+
+**Extras and `divergenceFree` (2026-10-09, later; `docs/analytic_boundaries/divfree_analytic_2026-10-09/README.md`).** MLS wall pressure (`analyticWallPressure='mls'`), `modules/xsph` (XSPH, boundary friction) ported against `DFSPH2D` term by term; the MLS closure is the noisier one (also in `DFSPH2D`: 4x the KE of the hydrostatic closure on a still column), so hydrostatic stays default. `divergenceFree` runs on analytic walls (still tank, dam break to omniSPH within 2 %, wedge, 7 s sloshing: peaks 2251 / 2660 / 3287 Pa at n_h 2.57, the third +181 %, 15-40 ms early; no spike train as with particle walls). Owner's note: the Jacobi relaxation limit is a known limitation of DFSPH-style Jacobi solvers and the early arrival improves with resolution; the third-impact overshoot and the n_h scaling of the peaks stay open here.

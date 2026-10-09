@@ -101,8 +101,8 @@ def parseArgs(argv):
                         "warpSPHBoundaries body (wcsph only); Sensor 1 is then the fluid probe")
     p.add_argument('--analyticWallPressure', choices=('hydrostatic', 'normal', 'mls'), default=None,
                    help="analytic walls only: wall pressure condition (case default hydrostatic; 'mls': omniIncompressible, the gradient fitted to the fluid's pressure iterate)")
-    p.add_argument('--xsph', type=float, default=None, help='omniIncompressible: XSPH velocity smoothing coefficient (DFSPH2D: 1e-4; case default 0)')
-    p.add_argument('--boundaryFriction', type=float, default=None, help='omniIncompressible, analytic walls: boundary friction coefficient (DFSPH2D: 5e-3; case default 0)')
+    p.add_argument('--xsph', type=float, default=None, help='omniIncompressible / divergenceFree: XSPH velocity smoothing coefficient (DFSPH2D: 1e-4; case default 0)')
+    p.add_argument('--boundaryFriction', type=float, default=None, help='omniIncompressible / divergenceFree, analytic walls: boundary friction coefficient (DFSPH2D: 5e-3; case default 0)')
     p.add_argument('--nh', type=float, default=None, help='neighbours per support radius n_h (case default 4; omniSPH: 2.57)')
     p.add_argument('--kernel', type=str, default=None,
                    help="kernel override (case default Wendland4; analytic walls need Wendland2 "
