@@ -268,7 +268,7 @@ def buildSystem(ctx: RunContext):
     wallSdf = lambda x: sampleDomainSDF(x, interior, invert=False)
 
     # an analytic wall keeps its sdf (the fluid is clipped against it) but is not sampled into particles
-    representation = analyticTankBody(interior) if ctx.param('wallRepresentation') == 'analytic' else None
+    representation = analyticTankBody(interior, offset=ctx.param('analyticWallOffset') * ctx.spec.L / ctx.spec.nx) if ctx.param('wallRepresentation') == 'analytic' else None
     regions = [
         fluidRegion(ctx, fluidSdf),
         boundaryRegion(ctx, wallSdf, kind=BCType[ctx.param('wallBC')], representation=representation),
@@ -557,6 +557,8 @@ sloshingTankCase = registerCase(Case(
         wallBC='freeSlip',
         # 'particles' (boundary particles + mDBC ghost nodes) or 'analytic' (warpSPHBoundaries tank body, deltaSPH only)
         wallRepresentation='particles',
+        # analytic walls: the wall plane moved outward by this fraction of dx (the calibrated lattice of the incompressible schemes, OPEN_PROBLEMS 31)
+        analyticWallOffset=0.0,
         # analytic walls only: 'hydrostatic' or 'normal' (see dambreak)
         analyticWallPressure='hydrostatic',
         gravityMagnitude=9.81,

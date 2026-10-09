@@ -797,13 +797,15 @@ def alignInteriorDomainToLattice(domain, interiorDomain, dx, periodic=None):
     return interiorDomain
 
 
-def analyticTankBody(interiorDomain):
+def analyticTankBody(interiorDomain, offset=0.0):
     """The walls of a rectangular tank as one analytic `warpSPHBoundaries` Body: the inner faces are the box
-    [min, max] of `interiorDomain`, the solid is everything outside it."""
+    [min, max] of `interiorDomain` moved outward by `offset` (a calibrated lattice: the wall continuum is the integral of the kernel over the solid, the fluid a lattice
+    sum, and the two differ by the midpoint-rule error of a lattice at four cells per support; moving the wall plane by a fraction of dx removes it, OPEN_PROBLEMS 31),
+    the solid is everything outside it."""
     from warpSPHBoundaries.scene import Body
     from warpSPHBoundaries.scene.scene import BoxRep
-    lo = [float(v) for v in interiorDomain.min]
-    hi = [float(v) for v in interiorDomain.max]
+    lo = [float(v) - offset for v in interiorDomain.min]
+    hi = [float(v) + offset for v in interiorDomain.max]
     return Body(bodyId = 0, reps = [BoxRep(tuple(lo), tuple(hi), solid = 'outside')])
 
 
