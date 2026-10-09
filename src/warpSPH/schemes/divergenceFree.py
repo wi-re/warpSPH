@@ -492,6 +492,10 @@ def divergenceFree_step(
         from warpSPH.modules.xsph import computeXSPH
         dvdt_xsph = dvdt_xsph + computeXSPH(currentState, config, schemeConfig, adjacency) / dt
 
+    from warpSPH.schemes.omniIncompressible import _bookWallLoads
+    _bookWallLoads(currentState, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0, pDiv=_pDiv, pRho=_pRho,
+                   densityApplied=bool(_instepCD) and bool(getattr(schemeConfig, 'densitySolve', True)))
+
     # DFSPH2D `shifting='fixed' / 'fickian'` (modules/shifting/fickian.py): a position move, folded into `dxdt`; replaces the VD+PS shift of `IncompressibleSystem.finalize` (switched off there)
     dxShift = torch.zeros_like(currentState.velocities)
     if getattr(schemeConfig, 'shifting', 'none') != 'none':

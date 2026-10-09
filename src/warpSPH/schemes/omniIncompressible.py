@@ -614,6 +614,40 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *, checkS
     return a_p, p, it + 1, err
 
 
+def _bookWallLoads(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *, fluid: Any, rho0: float, pDiv: Any, pRho: Any,
+                   frictionPerBody: Any = None, dt: float = 1.0, densityApplied: Any = None) -> None:
+    """The load of the fluid on every analytic body, booked on its `RigidBody.load` ([2, B, 3] = (pressure, friction) x body x (Fx, Fy, torque about the body centre), `wallLoads`), when
+    `schemeConfig.analyticWallLoads` is set: the reaction to the wall accelerations the solves applied (the divergence stage's only where it carries the wall: the compact projection, or
+    `analyticWallInDivergence`; the density stage's unless `densitySolve` is off, when its pressure is the divergence one) and to the boundary-friction impulse `dv / dt`. The no-penetration
+    impulse and the XSPH filter are not booked (`DFSPH2D`'s `forcePressure` / `forceFriction` are the oracle)."""
+    if not getattr(schemeConfig, 'analyticWallLoads', False):
+        return
+    provider = getattr(schemeConfig, 'boundaryProvider', None)
+    wall = resolveWall(state, config, schemeConfig, adjacency)
+    if provider is None or wall is None:
+        return
+    from ..modules.analyticBoundary import wallPressureAccelerationOmni, wallLoads, buildMLSPressureFit
+    acc = torch.zeros((wall.G.shape[0],) + tuple(state.velocities.shape), dtype=torch.float64, device=state.velocities.device)
+    compact = getattr(schemeConfig, 'projection', 'jacobi') == 'compact'
+    mls = getattr(schemeConfig, 'analyticWallPressure', 'hydrostatic') == 'mls'
+    fit = buildMLSPressureFit(state, config, adjacency, fluid, rho0) if mls else None
+
+    def part(p, clamp=True):
+        return wallPressureAccelerationOmni(wall, p, state.densities, rho0, wallMass=wall.wm, h=wall.support, perBody=True,
+                                            gradient=None if fit is None else fit.gradient(p), clampPressure=clamp).to(torch.float64)
+    if compact or getattr(schemeConfig, 'analyticWallInDivergence', False):
+        acc = acc + part(pDiv, clamp=not compact)
+    if densityApplied is None:
+        densityApplied = getattr(schemeConfig, 'densitySolve', True)
+    if densityApplied:
+        acc = acc + part(pRho)
+    centers = torch.stack([rb.centerOfMass.to(torch.float64).reshape(2) for rb in provider.rigidBodies])
+    fric = torch.zeros_like(acc) if frictionPerBody is None else frictionPerBody.to(torch.float64) / dt
+    loads = wallLoads(acc, fric, state.positions, state.masses, centers)
+    for bi, rb in enumerate(provider.rigidBodies):
+        rb.load = loads[:, bi, :].clone()
+
+
 def omniIncompressible_step(system: Any, dt: float, config: Any,
                             schemeConfig: Any, verbose: bool = False):
     st = system.state
@@ -623,6 +657,9 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
 
     from ..modules.incompressible.compactProjection import resolveClosedPreset
     resolveClosedPreset(schemeConfig, config)
+    provider = getattr(schemeConfig, 'boundaryProvider', None)
+    if provider is not None and any(getattr(rb, 'dynamic', False) for rb in provider.rigidBodies):
+        raise NotImplementedError('free (dynamic) analytic bodies are driven by the delta+ scheme only: the incompressible loops book the load but do not integrate the body from it')
     solver = schemeConfig.solverConfig
     divCfg = solver.divergenceFreeSolver   # omniSPH dfsph.divergenceEta
     denCfg = solver.pressureSolver          # omniSPH dfsph.densityEta
@@ -637,9 +674,14 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
 
     # boundary friction of the analytic walls (DFSPH2D applies it at the end of the step, on the new positions and poses: the start of the next step is the same state, and the wall evaluation is
     # the one the density just made)
+    fricPerBody = None
     if getattr(schemeConfig, 'boundaryFriction', 0.0):
         from ..modules.xsph import computeBoundaryFriction
-        st.velocities = st.velocities + computeBoundaryFriction(st, config, schemeConfig, adjacency)
+        if getattr(schemeConfig, 'analyticWallLoads', False):
+            fricPerBody = computeBoundaryFriction(st, config, schemeConfig, adjacency, perBody=True)
+            st.velocities = st.velocities + fricPerBody.sum(0)
+        else:
+            st.velocities = st.velocities + computeBoundaryFriction(st, config, schemeConfig, adjacency)
 
     if st.pressures is None:
         st.pressures = torch.zeros_like(st.densities)
@@ -675,6 +717,7 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
         # DFSPH2D densitySolve=False: the divergence-free projection is the only pressure solve (closed domains, where the density correction is position-correction noise); its pressure is the carried one
         a_p_rho, pRho, nRho, errRho = torch.zeros_like(accel), pDiv, 0, 0.0
     accel = accel + a_p_rho
+    _bookWallLoads(st, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0, pDiv=pDiv, pRho=pRho, frictionPerBody=fricPerBody, dt=dt)
 
     # --- 5. XSPH velocity filter (omniSPH XSPH + BXSPH, post-solve) --------
     # omniSPH filters the start-of-step velocity (the solves only touched

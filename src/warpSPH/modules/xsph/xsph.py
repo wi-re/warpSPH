@@ -42,14 +42,14 @@ def computeXSPH(state: Any, config: Any, schemeConfig: Any, adjacency: Any,
 
 
 def computeBoundaryFriction(state: Any, config: Any, schemeConfig: Any, adjacency: Any,
-                            coefficient: Optional[float] = None, wall: Optional[Any] = None) -> torch.Tensor:
+                            coefficient: Optional[float] = None, wall: Optional[Any] = None, perBody: bool = False) -> torch.Tensor:
     """The boundary-friction velocity increment of the analytic walls (`DFSPH2D`'s `boundaryFriction`), per body `b`:
 
         dv = - min(c lambda_b, 1) * T_b (v - v_wall,b),      T_b = I - n_b (x) n_b,   n_b = -G_b / |G_b|
 
     the tangential velocity relative to the wall continuum drag; `lambda_b = wm int W dA` (`WallState.lam`) the completeness of the wall at the particle, so the drag fades as the particle leaves the
     wall's support and saturates at 1 (the whole relative tangential velocity removed) in contact. `v_wall,b = int v_b W dA / int W dA = v_b(x) + omega J m1 / lambda` for a moving body (`m1 = int y W`,
-    the provider's first moment). `coefficient` defaults to `schemeConfig.boundaryFriction` (0: off, zeros returned without touching the wall). Evaluate at the positions and the body poses the
+    the provider's first moment). `coefficient` defaults to `schemeConfig.boundaryFriction` (0: off, zeros returned without touching the wall); `perBody` returns the increment of every body, [B, N, 2]. Evaluate at the positions and the body poses the
     friction acts at (the start of a step is the end of the last: `wall=None` resolves the scheme's provider there, shared with the rest of the step).
 
     No wall (boundary particles, or `wall=False`) returns zeros: their drag is `computeXSPH`'s `boundaryCoefficient`."""
@@ -60,6 +60,7 @@ def computeBoundaryFriction(state: Any, config: Any, schemeConfig: Any, adjacenc
     wall = resolveWall(state, config, schemeConfig, adjacency, wall)
     if wall is None:
         return zeros
+    parts = []
     from warpSPHBoundaries.scene import WallOutput
     v = state.velocities.to(F64)
     out = torch.zeros_like(v)
@@ -80,6 +81,10 @@ def computeBoundaryFriction(state: Any, config: Any, schemeConfig: Any, adjacenc
         vr = v - vw
         tang = vr - (vr * n).sum(1, keepdim=True) * n
         fac = (c * lam).clamp(max=1.0)
-        out = out + torch.where((nrm[:, 0] > 0)[:, None], -fac[:, None] * tang, torch.zeros_like(tang))
+        part = torch.where((nrm[:, 0] > 0)[:, None], -fac[:, None] * tang, torch.zeros_like(tang))
+        parts.append(part)
+        out = out + part
     fluid = (state.kinds == 0).unsqueeze(-1)
+    if perBody:                                                       # [B, N, 2], for the load of every body
+        return torch.where(fluid.unsqueeze(0), torch.stack(parts).to(state.velocities.dtype), torch.zeros_like(torch.stack(parts)).to(state.velocities.dtype))
     return torch.where(fluid, out.to(state.velocities.dtype), zeros)
