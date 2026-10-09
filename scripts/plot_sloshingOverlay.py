@@ -23,18 +23,30 @@ WINDOWS = ((2.2, 2.9), (3.9, 4.6), (5.4, 6.1))                 # the three impac
 
 
 def smooth(t, p, sigma, dt=1e-3):
+    """Gaussian smoothing on a 1 ms grid, NaN-aware: a record with gaps (the fluid probe is undefined with fewer than three particles near it) is averaged over its valid samples only
+    (kernel-weighted mean; the gaps stay NaN where less than 20 % of the kernel weight is valid) instead of interpolated across, which would stretch a single edge spike over the gap."""
     grid = np.arange(0.0, float(np.nanmax(t)), dt)
     ok = np.isfinite(p)
     y = np.interp(grid, t[ok], p[ok])
+    valid = np.zeros_like(grid)
+    idx = np.clip(np.searchsorted(grid, t[ok]), 0, len(grid) - 1)
+    # a grid point is valid when a sample lies within half a grid step of it, or (dense records) when the record has no gap there
+    gapStep = np.diff(t[ok])
+    nearest = np.abs(grid - t[ok][np.clip(np.searchsorted(t[ok], grid), 0, ok.sum() - 1)])
+    prev = np.abs(grid - t[ok][np.clip(np.searchsorted(t[ok], grid) - 1, 0, ok.sum() - 1)])
+    valid = (np.minimum(nearest, prev) <= max(2.0 * dt, 1.5 * float(np.median(gapStep)))).astype(float)
     n = int(4 * sigma / dt)
     k = np.exp(-0.5 * (np.arange(-n, n + 1) * dt / sigma) ** 2)
     k /= k.sum()
-    return grid, np.convolve(np.pad(y, n, mode='edge'), k, mode='valid')
+    num = np.convolve(np.pad(y * valid, n, mode='edge'), k, mode='valid')
+    den = np.convolve(np.pad(valid, n, mode='edge'), k, mode='valid')
+    out = np.where(den > 0.2, num / np.maximum(den, 1e-12), np.nan)
+    return grid, out
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('runs', nargs='+', help='"label=path/to/series.npz"')
+    ap.add_argument('runs', nargs='+', help='"label=path/to/series.npz[::pressureKey]"')
     ap.add_argument('--out', required=True)
     ap.add_argument('--smoothSigma', type=float, default=0.01)
     ap.add_argument('--field', default='sensorPressure', help='series key of the pressure (every step)')
@@ -45,7 +57,10 @@ def main():
     runs = []
     for spec in a.runs:
         label, path = spec.split('=', 1)
-        runs.append((label, np.load(path)))
+        field = a.field
+        if '::' in path:                                             # "label=path.npz::field": a series with its own pressure key (the boundaries repo's `sensorPressureProbe`)
+            path, field = path.split('::', 1)
+        runs.append((label, np.load(path), field))
 
     fig = plt.figure(figsize=(12, 9.5), constrained_layout=True)
     gs = fig.add_gridspec(3, 3, height_ratios=[1.3, 1.0, 0.8])
@@ -59,9 +74,9 @@ def main():
         ax.plot(expT, expP, color='0.7', lw=0.8, ls='--', label='measured (Sensor 1, raw)')
         ax.plot(gm, sm_, color='0.25', lw=1.5, ls='--', label=f'measured, same {a.smoothSigma * 1e3:.0f} ms smoothing')
     peaks = []
-    peaks.append(('measured, smoothed', [(float(sm_[(gm >= lo) & (gm < hi)].max()), float(gm[(gm >= lo) & (gm < hi)][sm_[(gm >= lo) & (gm < hi)].argmax()])) for lo, hi in WINDOWS]))
-    for (label, d), c in zip(runs, COLORS):
-        t, p = d['t'], d[a.field]
+    peaks.append(('measured, smoothed', [(float(np.nanmax(sm_[(gm >= lo) & (gm < hi)])), float(gm[(gm >= lo) & (gm < hi)][np.nanargmax(sm_[(gm >= lo) & (gm < hi)])])) for lo, hi in WINDOWS]))
+    for (label, d, field), c in zip(runs, COLORS):
+        t, p = d['t'], d[field]
         g, s = smooth(t, p, a.smoothSigma)
         axFull.plot(g, s, color=c, lw=1.5, label=label)
         for ax in axW:
@@ -70,7 +85,7 @@ def main():
         row = []
         for lo, hi in WINDOWS:
             m = (g >= lo) & (g < hi)
-            row.append((float(s[m].max()), float(g[m][s[m].argmax()])))
+            row.append((float(np.nanmax(s[m])), float(g[m][np.nanargmax(s[m])])))
         peaks.append((label, row))
 
     axFull.set_ylim(-1000, 7500)
