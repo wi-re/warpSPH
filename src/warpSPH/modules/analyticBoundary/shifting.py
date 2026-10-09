@@ -43,7 +43,8 @@ def wallShiftRaw(wall, state, config, schemeConfig, R, volumeWeighted=False):
     from warpSPHBoundaries.scene.tensile import tensile_factor
     rho0 = schemeConfig.fluid.restDensity
     H, wm = wall.support, wall.wm
-    w0 = kernelAtSpacing(config.kernel, H, float(state.masses.mean()), rho0)
+    mass = getattr(schemeConfig, '_analyticMass', None) or float(state.masses.mean())          # the host constant fixed at initialisation: no device-to-host read inside a graph capture
+    w0 = kernelAtSpacing(config.kernel, H, mass, rho0)
     tens = wm * R / w0 ** 4 * tensile_factor(H, FAMILY[config.kernel]) * wall.agg.out['tens'].sum(0) * wall.near[:, None]
     pref = (1.0 if volumeWeighted else 0.25) * rho0 / state.densities.to(F64)
     return pref[:, None] * (wall.G.sum(0) + tens)

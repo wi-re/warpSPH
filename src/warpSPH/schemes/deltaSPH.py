@@ -99,8 +99,25 @@ def _rhsIsGraphable(schemeConfig, stageIndex) -> bool:
     symplectic Euler, recomputes the diffusion every call and never reads it.)"""
     if getattr(schemeConfig, 'mdbcNoPenShiftMode', 'derivative') == 'derivative':
         return False
-    # analytic walls: the wall aggregates are cached in Python and the support is a host float (modules/analyticBoundary); not capturable yet
+    # analytic walls: capturable when the support is the host constant fixed at initialisation (no device-to-host read inside the capture)
     if getattr(schemeConfig, 'boundaryProvider', None) is not None:
+        if not getattr(schemeConfig, '_analyticSupport', None):
+            return False
+        # a mixed scene's particle bodies are moved by `updateBodyParticlesWCSPH` (host reads), not capturable
+        bodies = getattr(schemeConfig, 'rigidBodies', None) or []
+        if any(getattr(rb, 'representation', None) is None for rb in bodies):
+            return False
+        # a moving analytic body (prescribed or driven by the fluid) is advanced in place by every execution of the step, and the graph's validation executes it more than once: only static bodies
+        # (evaluated once, at the first call)
+        static = getattr(schemeConfig, '_analyticBodiesStatic', None)
+        if static is None:
+            static = not any(rb.dynamic or float(rb.angularVelocity) != 0.0 or float(rb.linearVelocity.abs().max()) != 0.0 for rb in bodies)
+            schemeConfig._analyticBodiesStatic = static
+        if not static:
+            return False
+    # the implicit shifting solves its linear system with host-synchronising Krylov solvers: a capture of the step fails and leaves the CUDA context in an error state
+    sp = getattr(schemeConfig, 'shiftProperties', None)
+    if sp is not None and sp.active and getattr(sp.scheme, 'name', None) in ('implicit', 'dynamic'):
         return False
     if getattr(schemeConfig, 'freezeDiffusionAcrossStages', False) and stageIndex is not None:
         return False

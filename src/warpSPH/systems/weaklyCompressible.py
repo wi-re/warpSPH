@@ -313,7 +313,7 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
             shift = computeMdbcNoPenShift(self.state, config, schemeConfig, self.adjacency)
         if provider is not None:
             from ..modules.analyticBoundary import analyticNoPenShift
-            analytic = analyticNoPenShift(provider, self.state, config, schemeConfig, float(config.dx))
+            analytic = analyticNoPenShift(provider, self.state, config, schemeConfig, getattr(schemeConfig, '_analyticDx', None) or float(config.dx))
             shift = analytic if shift is None else shift + analytic
         return shift
 
