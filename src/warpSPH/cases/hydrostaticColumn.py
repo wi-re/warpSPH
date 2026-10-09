@@ -111,7 +111,7 @@ import torch
 
 from ..configurations.moduleConfigurations.gravity import GravityType
 from ..configurations.region import BCType
-from ..enumTypes import IncompressibleSPHScheme
+from ..enumTypes import IncompressibleSPHScheme, ViscosityTerm
 from ..modules import shuffleParticles
 from ..runner import Case, RunContext, caseMain, registerCase
 from .kolmogorovIncompressible import kolmogorovIncompressibleTimestep
@@ -159,6 +159,9 @@ def configureScheme(ctx: RunContext) -> None:
     # physical viscosity instead.
     schemeConfig.diffusionParams.inviscid = False
     schemeConfig.diffusionParams.viscidNu = ctx.param('nu')
+    # which physical-viscosity term (`ViscosityTerm` name): the historical
+    # normal-projected `monaghanGingold`, or `morris1997` (OPEN_PROBLEMS.md §7)
+    schemeConfig.diffusionParams.viscousTerm = ViscosityTerm[ctx.param('viscousTerm', 'monaghanGingold')]
     schemeConfig.shiftProperties.active = ctx.param('shifting', False)
     # Post-solve fluid XSPH velocity smoother in `divergenceFree_step`, in units of
     # omniSPH's own `XSPH_FLUID = 0.05` (DFSPH_FINDINGS.md 1.16). The residual
@@ -249,6 +252,11 @@ def buildSystem(ctx: RunContext):
 
 
 def initialConditions(ctx: RunContext, system) -> None:
+    # The runner's velocity alarm: a column at rest has no velocity scale but
+    # the free-fall speed over its depth (the same sqrt(g H) as ACSPH's U_char).
+    ctx.velocityScale = float((ctx.param('gravityMagnitude') * ctx.param('fillRatio') * ctx.spec.L) ** 0.5)
+    ctx.velocityScaleSource = 'free-fall speed sqrt(g H)'
+
     # Jitter the fluid only -- see the module docstring for why the
     # constant-density pre-relaxation is not run on a free-surface state.
     particles = system.state
@@ -482,6 +490,10 @@ hydrostaticColumnCase = registerCase(Case(
         # historical) or `noSlip` (a viscous no-slip wall once `nu > 0` --
         # decays the free-slip bulk slosh, `DFSPH_FINDINGS.md` 1.14).
         wallBC='freeSlip',
+        # Physical-viscosity term (`ViscosityTerm` name) for the `nu` above:
+        # `monaghanGingold` (default, normal-projected) or `morris1997`
+        # (shear-carrying, OPEN_PROBLEMS.md §7).
+        viscousTerm='monaghanGingold',
         # Post-solve fluid XSPH scale for `divergenceFree` (`DFSPH_FINDINGS.md`
         # 1.16), units of `XSPH_FLUID = 0.05`. 0 = the graded default; ~1.0
         # decays the free-surface residual limit cycle.

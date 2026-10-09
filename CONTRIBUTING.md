@@ -21,6 +21,9 @@ pip install -e "warpSPH/[dev]"
 
 A CUDA device is required for anything beyond imports.
 
+Optionally, for the analytic boundary tests and `--wallRepresentation analytic`, install `warpSPHBoundaries` as well (`git clone https://github.com/wi-re/warpSPHBoundaries`,
+`pip install -e warpSPHBoundaries/`). The `tests/test_analytic*.py` files skip without it, and `check_imports.py` only verifies its imports when it is installed.
+
 ## Notebooks: set up nbstripout first
 
 **Do this before committing any notebook.** `.gitattributes` declares a

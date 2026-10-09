@@ -8,7 +8,7 @@ tube under the switch and bounds the contact-overshoot metric.
 
 Deliberately small (coarse resolution, few steps) -- the point is to catch a
 wrong equation form or a disconnected term, not to re-derive the validation
-numbers (those live in `phase6_shock_capturing_log.md` and the overlay PNGs).
+numbers (those live in `docs/historic_plans/phase6_shock_capturing_log.md` and the overlay PNGs).
 
 Sod geometry note: `buildSod1D` lays out a mirror-symmetric two-interface tube
 (dense state |x| <= L/4, light state the outer quarters, interfaces at x=+/-L/4),
@@ -179,12 +179,22 @@ def _sod_contact_spike(switch, nx=200, nSteps=300, extra=None):
     from warpSPH.cases.sod import sodCase
     from warpSPH.caseUtils.compressible.sod.sodSolution import solve
 
+    import dataclasses
     params = dict(right_rho=0.125, right_pressure=0.1, viscositySwitch=switch)
     if extra:
         params.update(extra)
+
+    def configure(ctx, _orig=sodCase.configureScheme):
+        # the operator these switch tests were written against (the Monaghan default before 2026-10-08: no
+        # quadratic term, raw pair velocity). Under the current default (C_q = 2 coupled + limited reconstruction)
+        # the unswitched contact spike is already 6 %, below R&H's 10 % -- the R&H claim is about the old operator.
+        _orig(ctx)
+        ctx.schemeConfig.diffusionParams.C_q = 0.0
+        ctx.schemeConfig.diffusionParams.velocityPairPolicy = 0
+
     res = _quiet(lambda: run(
-        sodCase, progress=False, quiet=True, scheme='Monaghan', nx=nx, nSteps=nSteps,
-        params=params))
+        dataclasses.replace(sodCase, configureScheme=configure), progress=False, quiet=True, scheme='Monaghan',
+        nx=nx, nSteps=nSteps, params=params))
     st = res.state.state
     t = float(res.state.t)
     x = st.positions[:, 0].detach().cpu().numpy()

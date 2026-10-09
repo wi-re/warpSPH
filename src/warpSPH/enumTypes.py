@@ -13,6 +13,7 @@ __all__ = [
     'AdaptiveSupportScheme',
     'ViscositySwitch',
     'CompressibleSPHScheme',
+    'PESPHVariant',
     'WeaklyCompressibleSPHScheme',
     'IncompressibleSPHScheme',
     'ArtificialCompressibleSPHScheme',
@@ -20,6 +21,7 @@ __all__ = [
     'WaveEquationScheme',
     'EquationOfState',
     'DensityDiffusionScheme',
+    'ViscosityTerm',
     'PressureForceScheme',
     'isArtificialCompressibleScheme',
 ]
@@ -38,6 +40,9 @@ class AdaptiveSupportScheme(Enum):
     NoScheme = 0
     Monaghan = 1
     Owen = 2
+    #: Number-density driven h (Hopkins 2015 App. F2, PESPH_PLAN Phase 2): Newton on `h = eta n^(-1/d)` with
+    #: `n_i = sum_j W_ij`, the Monaghan iteration with unit weights; the constraint PESPH's grad-h terms differentiate
+    NumberDensity = 3
 
 # @torch.jit.script
 class ViscositySwitch(Enum):
@@ -49,6 +54,17 @@ class ViscositySwitch(Enum):
     Rosswog2000 = 5
     NoneSwitch = 6
     ReadHayfield2012 = 7
+    #: Rosswog (2020) entropy-based trigger (ApJ 898, 60): alpha from the step-to-step
+    #: entropy change, set at step boundaries (`modules/shockCapturing/Rosswog2020.py`).
+    #: Not `Rosswog2000`, the divergence-source switch of Rosswog et al. (2000).
+    Rosswog2020 = 8
+    #: Sphenix (Borrow et al. 2022, MNRAS 511, 2367) Eqs. (21)-(24): alpha from the step-to-step change of div v,
+    #: implicit decay, set at step boundaries; the Balsara factor goes into the pair coefficient (Eq. 19), via
+    #: `DiffusionParameters.balsaraPairLimiter` (`modules/shockCapturing/Sphenix2022.py`).
+    Sphenix2022 = 9
+    #: Wadsley, Keller & Quinn (2017, Gasoline2, MNRAS 471, 2357) Eqs. (21)-(29): the velocity gradient along the
+    #: pressure gradient, blind to uniform compression (`modules/shockCapturing/Wadsley2017.py`).
+    Wadsley2017 = 10
 
 
 # @torch.jit.script
@@ -56,6 +72,21 @@ class CompressibleSPHScheme(Enum):
     Monaghan = 0
     CompSPH = 1
     CRKSPH = 2
+    #: Godunov SPH (GODUNOV_SPH_PLAN): the pair forces come from the Riemann problem between each pair, no artificial viscosity
+    GSPH = 3
+    #: Godunov SPH of Inutsuka (2002): the kernel-convolution form with a Gaussian kernel (GODUNOV_SPH_PLAN layer 3)
+    InutsukaGSPH = 4
+    #: Pressure-based SPH (PESPH_PLAN): `P_bar_i` by kernel summation instead of `rho_i`; variant in `PESPHVariant`.
+    #: Enum member only so far (Phase 0): `buildScheme` raises until the scheme is assembled (Phase 4)
+    PESPH = 5
+
+
+class PESPHVariant(Enum):
+    #: Frontiere et al. (2017) App. G / Hopkins F2: evolves the specific total energy, `P_bar_i = (gamma-1) sum_j m_j u_j W_ij`
+    PressureEnergy = 0
+    #: Hopkins (2013): evolves the entropic function `A`, `P_bar_i = (sum_j m_j A_j^(1/gamma) W_ij)^gamma`;
+    #: velocity-independent force, the variational one
+    PressureEntropy = 1
 
 # @torch.jit.script
 class WeaklyCompressibleSPHScheme(Enum):
@@ -260,6 +291,19 @@ class DensityDiffusionScheme(Enum):
     # already uses at gamma -> 1); needs `rho0`/`c0`/gravity, which none of
     # the other schemes do.
     fourtakas2019 = 7
+
+class ViscosityTerm(Enum):
+    # Which physical-viscosity term `inviscid=False` applies
+    # (`modules/deltaSPH/wp_viscosityDelta.py`).
+    # Monaghan & Gingold 1983 / De Courcy et al. 2024 Eq. (25):
+    # `K nu sum_j V_j (v_ij . x_ij)/|x_ij|^2 gradW_ij` -- normal-projected, so
+    # it damps approach/separation but applies no shear stress. The default.
+    monaghanGingold = 0
+    # Morris, Fox & Zhu 1997 Eq. (8): `sum_j m_j (mu_i + mu_j)/(rho_i rho_j)
+    # (x_ij . gradW_ij)/(|x_ij|^2 + eta^2) v_ij` with mu = rho nu -- the full
+    # relative-velocity vector, i.e. a real viscous (shear-carrying) Laplacian,
+    # which is what a no-slip wall needs (OPEN_PROBLEMS.md §7).
+    morris1997 = 1
 
 class PressureForceScheme(Enum):
     conservative = 0

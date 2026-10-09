@@ -1,5 +1,6 @@
 """SPH momentum-viscosity acceleration: builds the artificial-viscosity
-Pi_ij term via `dissipation.pi.computePi_actual` (`thermalConductivity=False`)
+Pi_ij term via `dissipation.pi.computePi_pair` (`thermalConductivity=False`) on the pair velocity of
+`viscosityParams.velocityPairPolicy` (raw, or reconstructed -- `modules/reconstruction`)
 and combines it with the kernel gradient to form the per-particle viscous
 acceleration contribution, using the same query/reference neighbor loop and
 gradient-renormalization/CRK/grad-h correction pattern as the other
@@ -15,8 +16,9 @@ from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
 
-from .pi import computePi_actual
-from ...configurations.moduleConfigurations.diffusionParameters import DiffusionParameters
+from .pi import computePi_pair
+from ..reconstruction import rawPairVelocity, reconstructPairVelocity, pairRiemannStates, velocityTensorArguments, stateGradientArguments
+from ...configurations.moduleConfigurations.diffusionParameters import DiffusionParameters, VelocityPairPolicy
 
 __all__ = ['computeViscosityWarp']
 
@@ -62,6 +64,12 @@ def computeViscosity_Func_i(
     viscositySwitch: wp.bool, alpha_i: scalar_t, referenceAlphas: wp.array(dtype = scalar_t), # type: ignore
     explicitPressure: wp.bool, P_i: scalar_t, referencePressures: wp.array(dtype = scalar_t), # type: ignore
     viscosityParams: DiffusionParameters,
+    # velocity Jacobians for a reconstructing `velocityPairPolicy` and the Balsara factors for `BalsaraLimited` /
+    # `balsaraPairLimiter` (one-element placeholders when not read)
+    J_i: matrix(shape=(Any, Any), dtype=scalar_t), referenceVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), # type: ignore
+    B_i: scalar_t, referenceBalsara: wp.array(dtype = scalar_t), # type: ignore
+    # the (rho, P) gradients, a (2, dim) matrix per particle, for `riemannReconstruction` (one-element placeholder otherwise)
+    G_i: matrix(shape=(Any, Any), dtype=scalar_t), referenceStateGradients: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), # type: ignore
 
     # Dummy value to allow allocation
     outputValue: Any, # type: ignore
@@ -85,19 +93,42 @@ def computeViscosity_Func_i(
 
         apparentVolume = access_optional(referenceVolumes,j, useVolume, mj / rhoj)
 
-        pi = computePi_actual(
+        x_ij = computeDistanceVec(xi, xj, domainState)
+        r_ij = safe_sqrt(wp.dot(x_ij, x_ij))
+        # the pair velocity the viscosity sees (AV_PLAN Phase 3): raw, or reconstructed to the pair midpoint; both
+        # the Pi term and the mu factor below take it
+        B_j = scalar_t(0.0)
+        if viscosityParams.velocityPairPolicy == wp.static(VelocityPairPolicy.BalsaraLimited.value) or viscosityParams.balsaraPairLimiter:
+            B_j = referenceBalsara[j]
+        u_ij = rawPairVelocity(vel_i, vel_j)
+        if viscosityParams.velocityPairPolicy != wp.static(VelocityPairPolicy.Raw.value):
+            u_ij = reconstructPairVelocity(
+                viscosityParams.velocityPairPolicy, vel_i, vel_j, J_i, referenceVelocityTensor[j], x_ij, hi, hj,
+                kernelProperties.kernelFunction, dim,
+                viscosityParams.reconstructionEtaCrit, viscosityParams.reconstructionEtaFold,
+                B_i, B_j, viscosityParams.reconstructionBalsaraPower, viscosityParams.limiterType)
+
+        # GODUNOV_SPH_PLAN layer 1: the left / right density and pressure of the Riemann dissipation term, extrapolated to the
+        # pair midpoint with the limited gradients (negative = not reconstructed)
+        rhoRec_i, rhoRec_j, PRec_i, PRec_j = pairRiemannStates(
+            viscosityParams.riemannReconstruction,
+            rhoi, rhoj, P_i, access_optional(referencePressures, j, explicitPressure, scalar_t(0.0)),
+            G_i, referenceStateGradients, j, x_ij, hi, hj, kernelProperties.kernelFunction, dim,
+            viscosityParams.reconstructionEtaCrit, viscosityParams.reconstructionEtaFold, viscosityParams.limiterType)
+
+        pi = computePi_pair(
             xi, xj, 
             hi, hj,
             mi, mj,
             rhoi, rhoj,
             explicitPressure, P_i, access_optional(referencePressures, j, explicitPressure, scalar_t(0.0)),
-            vel_i, vel_j,
+            u_ij,
             domainState,
             kernelProperties.kernelFunction,
             cs_i, access_optional(referenceCs, j, individual_cs, viscosityParams.c_s),
             alpha_i, access_optional(referenceAlphas, j, viscositySwitch, scalar_t(1.0)),
             viscosityParams, 
-            False)
+            False, False, rhoRec_i, rhoRec_j, PRec_i, PRec_j)
         
         gradw_ij = computeKernelGradientCRK(
             xi, xj, 
@@ -107,11 +138,11 @@ def computeViscosity_Func_i(
         )
         if useGradientRenormalization:
             gradw_ij = matmul(Li, gradw_ij)
+        # Balsara (1995) as a pair limiter (Garcia-Senz & Cabezon 2026 Eq. 7; Sphenix's alpha_ij = alpha_bar Bbar)
+        if viscosityParams.balsaraPairLimiter:
+            pi = pi * scalar_t(0.5) * (B_i + B_j)
 
         
-        x_ij = computeDistanceVec(xi, xj, domainState)
-        r_ij = safe_sqrt(wp.dot(x_ij, x_ij))
-        u_ij = vel_i - vel_j
         ux_ij = wp.dot(u_ij, x_ij)
         mu_ij = ux_ij /(r_ij + scalar_t(1.0e-14) * hi)
 
@@ -142,6 +173,9 @@ def computeViscosity_Func_Adjacency(
     viscositySwitch: wp.bool, queryAlphas: wp.array(dtype = scalar_t), referenceAlphas: wp.array(dtype = scalar_t), # type: ignore
     explicitPressure: wp.bool, queryPressures: wp.array(dtype = scalar_t), referencePressures: wp.array(dtype = scalar_t), # type: ignore
     viscosityParams: DiffusionParameters,
+    queryVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), referenceVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), # type: ignore
+    queryBalsara: wp.array(dtype = scalar_t), referenceBalsara: wp.array(dtype = scalar_t), # type: ignore
+    queryStateGradients: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), referenceStateGradients: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), # type: ignore
     outputValue : Any, # type: ignore
 ):
     xi, hi, mi, rhoi, ki = getParticle(queryState, i)
@@ -158,6 +192,15 @@ def computeViscosity_Func_Adjacency(
     cs_i = access_optional(queryCs, i, individual_cs, viscosityParams.c_s)
     alpha_i = access_optional(queryAlphas, i, viscositySwitch, scalar_t(1.0))
     P_i = access_optional(queryPressures, i, explicitPressure, scalar_t(0.0))
+    J_i = queryVelocityTensor[0]
+    if viscosityParams.velocityPairPolicy != wp.static(VelocityPairPolicy.Raw.value):
+        J_i = queryVelocityTensor[i]
+    B_i = queryBalsara[0]
+    if viscosityParams.velocityPairPolicy == wp.static(VelocityPairPolicy.BalsaraLimited.value) or viscosityParams.balsaraPairLimiter:
+        B_i = queryBalsara[i]
+    G_i = queryStateGradients[0]
+    if viscosityParams.riemannReconstruction:
+        G_i = queryStateGradients[i]
 
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
@@ -193,7 +236,9 @@ def computeViscosity_Func_Adjacency(
             viscositySwitch, alpha_i, referenceAlphas,
             explicitPressure, P_i, referencePressures,
             viscosityParams,
-
+            J_i, referenceVelocityTensor,
+            B_i, referenceBalsara,
+            G_i, referenceStateGradients,
 
             outputValue,
 
@@ -219,6 +264,9 @@ def computeViscosity_Kernel(
     viscositySwitch: wp.bool, queryAlphas: wp.array(dtype = scalar_t), referenceAlphas: wp.array(dtype = scalar_t), # type: ignore
     explicitPressure: wp.bool, queryPressures: wp.array(dtype = scalar_t), referencePressures: wp.array(dtype = scalar_t), # type: ignore
     viscosityParams: DiffusionParameters,
+    queryVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), referenceVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), # type: ignore
+    queryBalsara: wp.array(dtype = scalar_t), referenceBalsara: wp.array(dtype = scalar_t), # type: ignore
+    queryStateGradients: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), referenceStateGradients: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), # type: ignore
     # The last parameter is always the output array and should not be changed
     outputValues : wp.array(dtype = vector(length=Any, dtype=scalar_t)) # type: ignore
 ):                                                                                    
@@ -238,6 +286,9 @@ def computeViscosity_Kernel(
         viscositySwitch, queryAlphas, referenceAlphas,
         explicitPressure, queryPressures, referencePressures,
         viscosityParams,
+        queryVelocityTensor, referenceVelocityTensor,
+        queryBalsara, referenceBalsara,
+        queryStateGradients, referenceStateGradients,
 
 
         zero_like_warp(outputValues)
@@ -263,6 +314,12 @@ _VISCOSITY = OperatorSpec(
         ExtraSpec("queryPressures", ExtraKind.TENSOR),
         ExtraSpec("referencePressures", ExtraKind.TENSOR),
         ExtraSpec("viscosityParams", ExtraKind.SCALAR),
+        ExtraSpec("queryVelocityTensor", ExtraKind.TENSOR),
+        ExtraSpec("referenceVelocityTensor", ExtraKind.TENSOR),
+        ExtraSpec("queryBalsara", ExtraKind.TENSOR),
+        ExtraSpec("referenceBalsara", ExtraKind.TENSOR),
+        ExtraSpec("queryStateGradients", ExtraKind.TENSOR),
+        ExtraSpec("referenceStateGradients", ExtraKind.TENSOR),
     ),
 )
 
@@ -284,7 +341,12 @@ def computeViscosityWarp(
     crkState: Optional[CRKState] = None,
     gradHState: Optional[Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor], GradHState]] = None,
     renormalizationState: Optional[Union[torch.Tensor,RenormalizationState]] = None,
+    queryVelocityTensor: Optional[torch.Tensor] = None, referenceVelocityTensor: Optional[torch.Tensor] = None,
+    queryBalsara: Optional[torch.Tensor] = None, referenceBalsara: Optional[torch.Tensor] = None,
+    queryStateGradients: Optional[torch.Tensor] = None, referenceStateGradients: Optional[torch.Tensor] = None,
 ):
+    """`queryVelocityTensor` / `referenceVelocityTensor`: the velocity Jacobians (`J @ dx` = velocity change,
+    `reconstruction.computeVelocityJacobian`), required when `viscosityParams.velocityPairPolicy` is not Raw."""
     if referenceVelocities is None:
         referenceVelocities = queryVelocities
     if referenceCs is None:
@@ -333,6 +395,11 @@ def computeViscosityWarp(
 
             if queryVelocities_ is None:
                 raise ValueError("Velocities must be provided either through queryVelocities or as a property of queryParticles.")
+            queryVelocityTensor_, referenceVelocityTensor_, queryBalsara_, referenceBalsara_ = velocityTensorArguments(
+                viscosityParams, queryVelocityTensor, referenceVelocityTensor, queryParticles.positions,
+                queryBalsara, referenceBalsara)
+            queryStateGradients_, referenceStateGradients_ = stateGradientArguments(
+                viscosityParams, queryStateGradients, referenceStateGradients, queryParticles.positions)
 
         with record_function("warpSPH[computeViscosity] - Kernel Execution"):
             ctx = SPHContext(
@@ -350,6 +417,9 @@ def computeViscosityWarp(
                 viscositySwitch=viscositySwitch, queryAlphas=queryAlphas_, referenceAlphas=referenceAlphas_,
                 explicitPressure=explicitPressure, queryPressures=queryPressures_, referencePressures=referencePressures_,
                 viscosityParams=viscosityParams,
+                queryVelocityTensor=queryVelocityTensor_, referenceVelocityTensor=referenceVelocityTensor_,
+                queryBalsara=queryBalsara_, referenceBalsara=referenceBalsara_,
+                queryStateGradients=queryStateGradients_, referenceStateGradients=referenceStateGradients_,
             )
 
         # with record_function("warpSPH[CRKVolume] - Kernel Execution"):

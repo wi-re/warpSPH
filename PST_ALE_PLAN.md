@@ -1,5 +1,7 @@
 # warpSPH — Particle Shifting and the ALE Formalism: analysis and plan
 
+> **Progress marker:** this plan's row in [PLANS.md](PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
+
 Target paper — `literature/michel2022_particle-shifting-techniques.pdf`, bib key
 `michel2022`:
 

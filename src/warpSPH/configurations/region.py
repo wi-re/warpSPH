@@ -92,6 +92,10 @@ class ParticleRegion:
 
     initialConditions: dict = None
     kind: BCType = BCType.constant
+    # Analytic boundary (a `warpSPHBoundaries` Body): the region keeps its `sdf` (so `filterRegion` clips the fluid
+    # against it as against any boundary) but is not sampled into boundary particles; `particles` is empty and
+    # `rigidBody.buildAnalyticRigidBody` makes its RigidBody. None: a particle boundary (unchanged).
+    representation: object = None
 
     def toDict(self):
         return {

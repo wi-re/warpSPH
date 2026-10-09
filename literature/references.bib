@@ -479,6 +479,18 @@
   note    = {Preprint (arXiv:2507.21684) was titled "diffSPH: Differentiable Smoothed Particle Hydrodynamics for Adjoint Optimization and Machine Learning"; published title changed.}
 }
 
+@inproceedings{nogina2026,
+  author    = {Nogina, Daria and Sell{\'a}n, Silvia},
+  title     = {Tube Maps: Fast {SPH} Boundary Handling with Tubular Coordinates},
+  booktitle = {Special Interest Group on Computer Graphics and Interactive Techniques Conference Conference Papers (SIGGRAPH Conference Papers '26)},
+  year      = {2026},
+  pages     = {1--11},
+  publisher = {ACM},
+  address   = {Los Angeles, CA, USA},
+  doi       = {10.1145/3799902.3811118},
+  note      = {Density-only: second-order curvature expansion of the Koschier-Bender smoothed boundary density integral in tubular coordinates around the closest point (constant time, no pressure operator). DOI record carries no volume/issue/article number and no abstract; fields from the DOI record, abstract from the PDF front matter. Copy held is the published ACM version (CC BY-NC-ND 4.0), 11 pages, 176 MB.}
+}
+
 
 % --- Machine learning on SPH ---------------------------------------------------
 
@@ -618,7 +630,7 @@
   number  = {1},
   pages   = {358--382},
   doi     = {10.1006/jcph.2002.7099},
-  note    = {Riemann-solved velocity and stress at the contact point in place of pair averages, which removes the need for artificial viscosity. michel2022 Sec. 4.2.2 recovers it from vila1999 by cancelling the mass fluxes; PST_ALE_PLAN.md stage C, the cheap consumer of the Riemann subsystem.}
+  note    = {Riemann-solved velocity and stress at the contact point in place of pair averages, which removes the need for artificial viscosity. michel2022 Sec. 4.2.2 recovers it from vila1999 by cancelling the mass fluxes; PST_ALE_PLAN.md stage C, the cheap consumer of the Riemann subsystem. Also the source of the Pade(1,1) continuity update rho^{n+1} = rho^n (2 - eps dt)/(2 + eps dt), Appendix B Eq. (B.12), with explicit Euler for momentum (B.11). DualSPHysics' symplectic corrector uses the same map but cites Parshikov, Medin, Loukashenko & Milekhin 2000 (Int. J. Impact Eng. 24:779-796, dominguez2022 ref. 37, not held here). CEILING_STICKING_PLAN.md §5: the map is linearly identical to the plain update and does not stabilise the (rho, v) acoustic mode.}
 }
 
 @article{oger2016,
@@ -825,6 +837,18 @@
   address   = {Berlin Heidelberg},
   isbn      = {978-3-540-30663-4},
   note      = {Carries essentially all of SPLITTING_PLAN.md's theory -- II.4 (composition methods and the order theorem), II.5 (splitting, Strang, the Baker-Campbell-Hausdorff expansion), III.4 (backward error analysis for splitting), V.4.1 (symmetric projection, the mechanism behind §2.7.1's substep-local compatible-energy rewrite).}
+}
+
+@article{leimkuhler2016,
+  author  = {Leimkuhler, Benedict and Matthews, Charles},
+  title   = {Efficient molecular dynamics using geodesic integration and solvent--solute splitting},
+  journal = {Proceedings of the Royal Society A: Mathematical, Physical and Engineering Sciences},
+  year    = {2016},
+  volume  = {472},
+  number  = {2189},
+  pages   = {20160138},
+  doi     = {10.1098/rspa.2016.0138},
+  note    = {Splitting/composition integrators for (constrained) Langevin dynamics in the A (drift) / B (kick) / O (thermostat) notation; its point is that the ordering of exactly-solved sub-flows sets accuracy. Not the reference DualSPHysics cites for its symplectic scheme (dominguez2022 ref. 36 is the same authors' 2015 book, Molecular Dynamics, not held here). CEILING_STICKING_PLAN.md §5: position Verlet is A-B-A, and continuity density belongs in the A (drift) flows; DualSPHysics drives it with a velocity-Verlet half-kick velocity instead, which is what makes its (rho, v) update explicit midpoint.}
 }
 
 @book{toro2009,
@@ -1377,6 +1401,16 @@
   note    = {Entropy-growth-rate trigger: dissipation is added only to "troubled particles" (entropy non-conserving between two steps) and decays to a floor otherwise (MAGMA2). A third trigger family alongside C&D's compression-based and R&H's entropy-conductivity switches -- candidate for the next ViscositySwitch. Copy here is arXiv:1912.01095v2; the published ApJ abstract is a lightly revised version and stores its one formula as an image, so the abstract is quoted from the PDF. Key suffixed to avoid a collision with rosswog2020 (the MAGMA2 code paper).}
 }
 
+@article{rosswog2000,
+  author  = {Rosswog, S. and Davies, M. B. and Thielemann, F.-K. and Piran, T.},
+  title   = {Merging neutron stars: asymmetric systems},
+  journal = {Astronomy \& Astrophysics},
+  year    = {2000},
+  volume  = {360},
+  pages   = {171--184},
+  note    = {Appendix A is the "hybrid" artificial-viscosity scheme this codebase's Rosswog2000 ViscositySwitch implements: Morris-Monaghan source-and-decay alpha (A.5) with the source limited by alpha_max (A.6), tau = h/(epsilon c), beta = 2 alpha, plus a Balsara factor inside mu (A.1-A.2). Tested on a 1D shock tube, a differentially rotating star (viscous time scales) and a viscosity-driven binary inspiral. The paper itself is a 3D neutron-star merger study. No journal DOI exists for this 2000 A&A article (ADS bibcode 2000A\&A...360..171R); preprint arXiv:astro-ph/0005550, whose abstract differs from the published one, so the abstract is quoted from the PDF.}
+}
+
 @article{garciasenz2026,
   author  = {Garc{\'i}a-Senz, Domingo and Cabez{\'o}n, Rub{\'e}n M.},
   title   = {Are heuristic switches necessary to control dissipation in modern smoothed particle hydrodynamics?},
@@ -1433,6 +1467,53 @@
   pages   = {73--90},
   doi     = {10.1046/j.1365-8711.2003.06266.x},
   note    = {Godunov-type particle hydrodynamics (GPH): a Riemann solver replaces artificial viscosity entirely, so there are no viscosity parameters or switches to tune. Von Neumann analysis: GPH is stable for all wavelengths, where standard SPH is unstable for some; eight tests show shock capture without artificial viscosity and prevention of particle penetration. "Easily implemented from SPH by simple replacement of the artificial viscosity with a Riemann solver" -- the structural move the Riemann-solver branch of the compressible frontend would make. No abstract in the Crossref record; abstract quoted from the PDF.}
+}
+
+@article{cha2010,
+  author  = {Cha, Seung-Hoon and Inutsuka, Shu-Ichiro and Nayakshin, Sergei},
+  title   = {Kelvin-Helmholtz instabilities with Godunov smoothed particle hydrodynamics},
+  journal = {Monthly Notices of the Royal Astronomical Society},
+  year    = {2010},
+  volume  = {403},
+  number  = {3},
+  pages   = {1165--1174},
+  doi     = {10.1111/j.1365-2966.2010.16200.x},
+  note    = {Godunov SPH on the Kelvin-Helmholtz instability across a high density contrast and on the blob test, where standard SPH shows no instability; traces that to an unphysical force at a density gradient (a consistency defect of the standard momentum equation) that the convolution-derived GSPH equation largely avoids. No abstract in the Crossref record; abstract quoted from the PDF.}
+}
+
+@article{murante2011,
+  author  = {Murante, G. and Borgani, S. and Brunino, R. and Cha, S.-H.},
+  title   = {Hydrodynamic simulations with the Godunov smoothed particle hydrodynamics},
+  journal = {Monthly Notices of the Royal Astronomical Society},
+  year    = {2011},
+  volume  = {417},
+  number  = {1},
+  pages   = {136--153},
+  doi     = {10.1111/j.1365-2966.2011.19021.x},
+  note    = {GSPH implemented in GADGET-3: the derivation from the kernel convolution, then Sod, Kelvin-Helmholtz and blob tests, and the effect of the neighbour number, the accuracy of the interface location, the order of reconstruction and the limiter. No abstract in the Crossref record; abstract quoted from the PDF.}
+}
+
+@article{iwasaki2011,
+  author  = {Iwasaki, Kazunari and Inutsuka, Shu-ichiro},
+  title   = {Smoothed particle magnetohydrodynamics with a Riemann solver and the method of characteristics},
+  journal = {Monthly Notices of the Royal Astronomical Society},
+  year    = {2011},
+  volume  = {418},
+  number  = {3},
+  pages   = {1668--1688},
+  doi     = {10.1111/j.1365-2966.2011.19588.x},
+  note    = {Godunov SPH for MHD: a non-linear Riemann problem with magnetic pressure for the compressive waves and the method of characteristics for Alfven waves, tested against a finite-volume code with an approximate Riemann solver. The hydrodynamic limit is Inutsuka's GSPH. No abstract in the Crossref record; abstract quoted from the PDF.}
+}
+
+@article{puri2014,
+  author  = {Puri, Kunal and Ramachandran, Prabhu},
+  title   = {Approximate Riemann solvers for the Godunov {SPH} ({GSPH})},
+  journal = {Journal of Computational Physics},
+  year    = {2014},
+  volume  = {270},
+  pages   = {432--458},
+  doi     = {10.1016/j.jcp.2014.03.055},
+  note    = {Non-iterative approximate Riemann solvers (Roe-type, HLLC and others) for GSPH, the equivalence between GSPH's dissipation and signal-velocity artificial viscosity under a class of solvers, and an explanation of GSPH's wall heating. No abstract in the Crossref record; abstract quoted from the PDF.}
 }
 
 % --- Extended set (one step removed; bibliographic records only, added 2026-08-29) ---

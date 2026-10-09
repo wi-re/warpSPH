@@ -6,6 +6,7 @@ Sensor-1 pressure history against the measured record.
     python examples/sloshingTank/run_sloshingTank.py --scheme dfsph --tLimit 7
 
 `--scheme wcsph`  -> weakly compressible `deltaSPH`.
+`--scheme acsph`  -> artificial-compressibility SPH (`artificialCompressible`).
 `--scheme dfsph`  -> incompressible `divergenceFree`, with the integrator /
                      kernel / CFL preset that scheme needs.
 
@@ -32,6 +33,9 @@ OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'output')
 #: Extra spec fields each scheme needs. `wcsph` keeps the case defaults.
 SCHEME_PRESETS = {
     'wcsph': dict(scheme='deltaSPH'),
+    # De Courcy et al. 2024; the case's `configureScheme` supplies the PST,
+    # viscosity and forwardEuler integrator (ACSPH_PLAN.md).
+    'acsph': dict(scheme='artificialCompressible', integrationScheme='forwardEuler'),
     'dfsph': dict(
         scheme='divergenceFree',
         integrationScheme='semiImplicitEuler',
@@ -67,11 +71,17 @@ def parseArgs(argv):
                    help='override the integrator (case default for wcsph: '
                         'semiImplicitEuler; rungeKutta2/rungeKutta4 also valid)')
     p.add_argument('--noPenShift', default=None,
-                   choices=('derivative', 'finalize', 'off'),
+                   choices=('derivative', 'finalize', 'impulse', 'off'),
                    help="mDBC no-penetration correction placement: 'derivative' "
                         "(in dvdt, historical), 'finalize' (once per step, "
-                        "DualSPHysics-style velocity replacement) or 'off'. "
+                        "DualSPHysics-style velocity replacement), 'impulse' "
+                        "(once per step, added to the integrated velocity; "
+                        "CEILING_STICKING_PLAN.md §7.1) or 'off'. "
                         "DELTASPH_VALIDATION_PLAN 5.9")
+    p.add_argument('--timeCentredContinuity', action=argparse.BooleanOptionalAction, default=None,
+                   help='density as a drift field under Verlet-family integrators '
+                        '(schemeConfig.timeCentredContinuity, default on since 2026-09-29; '
+                        'CEILING_STICKING_PLAN.md §3/§6). Unset = config default')
     p.add_argument('--wallBC', type=str, default=None,
                    choices=['freeSlip', 'noSlip', 'extended', 'zeros', 'constant'],
                    help='wall boundary condition (case default freeSlip; '
@@ -125,6 +135,9 @@ def parseArgs(argv):
                              'moltenicolagrossi2009', 'fourtakas2019'),
                     help="override DensityDiffusionScheme (case default "
                          "'deltaSPH'). DELTASPH_VALIDATION_PLAN.md Part 8.16.")
+    p.add_argument('--noFlagIsolated', action='store_true',
+                   help="don't flag isolated rows as free surface (SurfaceDetectionConfig."
+                        'flagIsolated=False) -- A/B of OPEN_PROBLEMS §8')
     p.add_argument('--pressureForceRenormalized', action='store_true',
                     help="apply gradient renormalization to the pressure-force "
                          "kernel gradient, gated on kernel-sum completeness "
@@ -147,6 +160,9 @@ def buildSpec(case, args):
         plot=args.plot or args.video, store=args.store,
         video=args.video, show=False,
         progress=True,
+        # frozen-run watchdogs (CLAUDE.md): the alarm draws every step while
+        # active, and a run that stops advancing sim time ends itself
+        velocityAlarmPlotInterval=1, stallProgress=1e-3,
     )
     if args.video and args.plotInterval is None:
         overrides['plotInterval'] = 50
@@ -177,6 +193,8 @@ def buildSpec(case, args):
         params['wallBC'] = args.wallBC
     if args.noPenShift is not None:
         params['noPenShift'] = args.noPenShift
+    if args.timeCentredContinuity is not None:
+        params['timeCentredContinuity'] = args.timeCentredContinuity
     if args.scheme == 'wcsph':
         params['shifting'] = args.shift
         params['correctdrhodt'] = args.correctdrhodt
@@ -326,6 +344,11 @@ def main(argv=None):
     case = getCase('sloshingTank')
     spec = buildSpec(case, args)
 
+    if args.noFlagIsolated:
+        _prevCfgIso = case.configureScheme
+        def _cfgIso(ctx, _p=_prevCfgIso):
+            _p(ctx); ctx.schemeConfig.surfaceDetectionConfig.flagIsolated = False
+        case.configureScheme = _cfgIso
     if args.mdbcDensityScheme:
         # Same override pattern as scripts/probe_deltaSPHMarrone.py --
         # BOUNDARY_DENSITY_PLAN.md §5-6.

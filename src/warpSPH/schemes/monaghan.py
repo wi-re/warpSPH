@@ -16,12 +16,14 @@ import torch
 
 from ..modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
 from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
+from ..modules.compressibleWall import beginCompressibleWall
 from ..modules.density import computeDensities
 from ..modules.dissipation import computeConductivity, computeThermalDissipation, computeViscosity
 from ..modules.eos import idealGasEOS
 from ..modules.internalEnergy import computeDudtMonaghan
 from ..modules.momentum import computeMomentumConsistent
-from ..modules.pressure import computePressureForceSymmetric
+from ..modules.pressure import computePressureForceSymmetric, computePerSidePressureWarp
+from ..modules.reconstruction import reconstructionInputs, stateGradientInputs
 from ..modules.shockCapturing import computeViscositySwitchTerms, updateViscositySwitch
 from warpSPHCore import (
     GradHState, OperationProperties, SupportScheme, buildVerletList,
@@ -40,6 +42,7 @@ def compressibleSPH_Monaghan(
     currentSystem = system#.initializeNewState()
     currentState = currentSystem.state
     t = currentSystem.t
+    wall = beginCompressibleWall(currentState, config)
 
     rho_optimal, h_optimal, currentSystem.adjacency, *_ = evaluateOptimalSupport(currentState, config, schemeConfig, SupportScheme.Gather, currentSystem.adjacency)
     currentState.supports = h_optimal
@@ -60,6 +63,13 @@ def compressibleSPH_Monaghan(
     currentState.densities = computeDensities(
         currentState, config, schemeConfig, adjacency,
         supportMode = config.supportMode)
+    if wall is not None:
+        wall.apply(currentState, config, schemeConfig, adjacency)
+        # the wall masses just changed, so the fluid density sum has to be redone
+        currentState.densities = computeDensities(
+            currentState, config, schemeConfig, adjacency,
+            supportMode = config.supportMode)
+        wall.apply(currentState, config, schemeConfig, adjacency)
 
     enforceDirichlet(currentSystem, t, dt, config, schemeConfig)
     currentState.entropies, _, currentState.pressures, currentState.soundspeeds = idealGasEOS(
@@ -96,23 +106,31 @@ def compressibleSPH_Monaghan(
         SupportScheme.SuperSymmetric,
         adjacency)
 
-    dvdt = computePressureForceSymmetric(
-        currentState,
-        config,
-        supportScheme = SupportScheme.KernelMeanSymmetric,
-        adjacency = adjacency,
-        gradH = gradHState
-    )
+    if getattr(schemeConfig, 'pressureFormulation', 'meanKernel') == 'perSide':
+        # Price 2012 Eqs. 43-45: each side's own h, the conjugate pdV work; Omega only with grad-h on
+        dvdt, dudt = computePerSidePressureWarp(
+            currentState,
+            OperationProperties(kernel = config.kernel, supportMode = SupportScheme.KernelMeanSymmetric),
+            domain = config.domain,
+            adjacency = adjacency,
+            queryOmegas = gradHState.queryOmegas if gradHState is not None else None,
+        )
+    else:
+        dvdt = computePressureForceSymmetric(
+            currentState,
+            config,
+            supportScheme = SupportScheme.KernelMeanSymmetric,
+            adjacency = adjacency,
+            gradH = gradHState
+        )
 
-    # currentState.velocities = torch.sin(currentState.positions[:,0]* np.pi).unsqueeze(-1)
-
-    dudt = computeDudtMonaghan(
-        currentState,
-        config,
-        supportScheme = SupportScheme.KernelMeanSymmetric,
-        adjacency = adjacency,
-        gradH = gradHState
-    )
+        dudt = computeDudtMonaghan(
+            currentState,
+            config,
+            supportScheme = SupportScheme.KernelMeanSymmetric,
+            adjacency = adjacency,
+            gradH = gradHState
+        )
 
     drhodt = computeMomentumConsistent(
         currentState,
@@ -124,6 +142,11 @@ def compressibleSPH_Monaghan(
 
 
     diffusionParams = schemeConfig.diffusionParams
+    # The pair velocity the viscosity sees (AV_PLAN Phases 3-4): the raw path needs nothing more; a reconstructing
+    # policy needs the velocity Jacobian and the n_h-derived limiter constants, the Balsara variants the factor B
+    diffusionParams, velocityTensor, balsara = reconstructionInputs(currentState, config, diffusionParams, adjacency)
+    # the Riemann dissipation's reconstructed (rho, P) states (GODUNOV_SPH_PLAN layer 1), when asked for
+    diffusionParams, stateGradients = stateGradientInputs(currentState, config, diffusionParams, adjacency)
     dvdt_diss = computeViscosity(
         currentState,
         # queryVelocities=currentState.velocities,
@@ -135,6 +158,9 @@ def compressibleSPH_Monaghan(
         adjacency = adjacency,
         viscosityParams = diffusionParams,
         queryAlphas = currentState.alphas,
+        queryVelocityTensor = velocityTensor,
+        queryBalsara = balsara,
+        queryStateGradients = stateGradients,
     )
 
 
@@ -163,6 +189,9 @@ def compressibleSPH_Monaghan(
         adjacency = adjacency,
         conductivityParams = diffusionParams,
         queryAlphas = currentState.alphas,
+        queryVelocityTensor = velocityTensor,
+        queryBalsara = balsara,
+        queryStateGradients = stateGradients,
     )
 
     # Advance the viscosity switch's stored alpha0 and store the velocity
@@ -203,5 +232,7 @@ def compressibleSPH_Monaghan(
         dEdt = dEdt,
     )
     enforceUpdates(update, currentSystem, dt, t, config, schemeConfig)
+    if wall is not None:
+        wall.finishUpdate(update)
 
     return update, adjacency, currentState

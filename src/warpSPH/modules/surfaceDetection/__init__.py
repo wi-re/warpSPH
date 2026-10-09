@@ -18,6 +18,8 @@ from .maronneDetection import detectFreeSurfaceMaronne
 from .wrapper import detectFreeSurface
 from .isolated import detectIsolated, detectNoFluidNeighbours
 from .wp_nearestSurfaceNormal import computeNearestSurfaceNormalWarp
+from .wp_barecascoCover import computeBarecascoCoverWarp
+from .wp_barecascoCone import computeBarecascoConeCountWarp
 
 __all__ = [
     'detectFreeSurfaceColorField',
@@ -33,4 +35,6 @@ __all__ = [
     'detectFreeSurfaceMaronne',
     'detectFreeSurface',
     'computeNearestSurfaceNormalWarp',
+    'computeBarecascoCoverWarp',
+    'computeBarecascoConeCountWarp',
 ]

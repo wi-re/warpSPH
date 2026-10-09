@@ -8,6 +8,13 @@ h - computeH(rho, m, targetNeighbors, dim)`` and ``dF_dh`` comes from
 previous value; iteration stops early once the relative change in ``h`` drops
 below ``compParams.adaptiveSupportThreshold``, or after
 ``adaptiveSupportIterations``.
+
+``numberDensity=True`` runs the same iteration with every particle mass set to 1, so
+``rho`` is the number density ``n_i = sum_j W_ij`` and the constraint is ``h = eta n^(-1/d)``
+(Hopkins 2015, App. F2): the one PESPH's grad-h terms (Frontiere 2017 Eqs. G.7-G.9)
+differentiate. For equal masses it is the mass-density solve exactly; for unequal masses it
+does not depend on the masses at all. It returns ``rho_i = m_i n_i`` as the density, and the
+list of per-iteration number densities in place of the density history.
 """
 
 from ...configurations.compressibleConfig import CompressibleSPHConfig
@@ -40,7 +47,17 @@ def evaluateOptimalSupportMonaghan(
         compParams: CompressibleSPHConfig,
         supportScheme: SupportScheme = SupportScheme.Scatter,
         adjacency: Optional[AdjacencyList] = None,
+        numberDensity: bool = False,
 ):
+    if numberDensity:
+        realMasses = particleState.masses
+        particleState.masses = torch.ones_like(realMasses)
+        try:
+            n, h, adjacency, ns, supports = evaluateOptimalSupportMonaghan(
+                particleState, config, compParams, supportScheme, adjacency)
+        finally:
+            particleState.masses = realMasses
+        return realMasses * n, h, adjacency, ns, supports
     with record_function("[warpSPH] - evaluateOptimalSupport - Monaghan"):
         rhos = [particleState.densities]
         supports = [particleState.supports]

@@ -37,7 +37,7 @@ def buildSystem(ctx: RunContext):
         ctx.param('rho1'), ctx.param('rho2'), ctx.param('v1'), ctx.param('v2'),
         ctx.param('delta'), ctx.param('sigma'), ctx.param('freq'), ctx.param('w0'),
         ctx.spec.nx, ctx.config, ctx.schemeConfig,
-        ctx.SimulationState, ctx.SimulationSystem)
+        ctx.SimulationState, ctx.SimulationSystem, smoothDensity=bool(ctx.param('smoothDensity')))
 
 
 #: The two panels, exported so a notebook can pass them to
@@ -87,6 +87,7 @@ kelvinHelmholtzCase = registerCase(Case(
         freq=4.0,
         w0=0.1,
         sigma=0.05 / math.sqrt(2.0),
+        smoothDensity=0,     # 1: Frontiere 2017 Eq. (100) density ramp across the interface
     ),
 ))
 

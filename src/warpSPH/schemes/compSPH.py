@@ -10,6 +10,7 @@ persist it).
 
 from ..modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
 from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
+from ..modules.compressibleWall import beginCompressibleWall
 from ..modules.compSPH.accel import computeCompSPHAccelWarp
 from ..modules.compSPH.dudt import computeCompSPHdudtWarp
 from ..modules.compSPH.balance import computeCompSPHBalanceTermWarp
@@ -29,6 +30,7 @@ import torch
 from ..systems.compressibleMonaghan import CompressibleSystemUpdate
 
 from ..modules.shockCapturing.CullenHopkins import computeHopkinsTerms, computeHopkinsUpdate
+from ..modules.reconstruction import requireRawPairVelocity
 
 lut = None
 
@@ -44,11 +46,13 @@ def compSPH_step(
     # dsphConfig = None,
 ):        
     global lut
+    requireRawPairVelocity(schemeConfig.diffusionParams, 'CompSPH')
     currentSystem = system#
     currentState = currentSystem.state
     # currentSystem.adjacency = None
 
     t = currentSystem.t
+    wall = beginCompressibleWall(currentState, config)
     rho_optimal, h_optimal, currentSystem.adjacency, *_ = evaluateOptimalSupport(currentState, config, schemeConfig, SupportScheme.Gather, currentSystem.adjacency)
     currentState.supports = h_optimal
     currentState.densities = rho_optimal
@@ -74,6 +78,12 @@ def compSPH_step(
     # for density estimation
     currentState.densities = computeDensities(
         currentState, config, schemeConfig, adjacency)
+    if wall is not None:
+        wall.apply(currentState, config, schemeConfig, adjacency)
+        # the wall masses just changed, so the fluid density sum has to be redone
+        currentState.densities = computeDensities(
+            currentState, config, schemeConfig, adjacency)
+        wall.apply(currentState, config, schemeConfig, adjacency)
     # Computed here (rather than where it is otherwise used, further down)
     # because a state reconstructed with `divergence=None` (e.g. resumed from
     # a trajectory export, which doesn't persist divergence) needs it in the
@@ -203,6 +213,8 @@ def compSPH_step(
 
     # with TimedBlock('enforce updates', use_cuda=True, device=device):
     enforceUpdates(update, currentSystem, dt, t, config, schemeConfig)
+    if wall is not None:
+        wall.finishUpdate(update)
 
     v_halfstep = currentState.velocities + 0.5 * dt * update.dvdt
 
@@ -227,5 +239,7 @@ def compSPH_step(
         adjacency = adjacency,
         gradHState = gradHState
     )
+    if wall is not None:
+        currentState.f_ij = wall.balanceFractions(currentState.f_ij, adjacency, currentState)
 
     return update, adjacency, currentState

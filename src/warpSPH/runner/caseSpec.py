@@ -86,6 +86,24 @@ class CaseSpec:
     #: `tLimit`, so the same value means the same thing in every case: 1e-4
     #: = "at this rate the run needs > 1e7 more steps". Needs `tLimit`.
     stallProgress: Optional[float] = None
+    #: Velocity alarm (`runner/velocityAlarm.py`): flag -- not stop -- the run
+    #: when `max |v|` exceeds this multiple of the expected velocity, with a
+    #: `[warpSPH] VELOCITY ALARM` line (again at every further 10x, and when it
+    #: clears) and the `onVelocityAlarm` hook of `run()`. A finite runaway
+    #: otherwise goes unreported (`OPEN_PROBLEMS.md` §10). `None` or `0`
+    #: disables it. README "Watching a run" has the whole picture.
+    velocityAlarmFactor: Optional[float] = 100.0
+    #: The expected velocity for the alarm. `None`: the case's own
+    #: (`RunContext.velocityScale`), else an estimate from the initial state.
+    velocityScale: Optional[float] = None
+    #: While the velocity alarm is active, draw a frame every this many steps
+    #: (needs `plot=True`; the normal `plotInterval` returns when it clears),
+    #: so the video shows the runaway step by step. `None`: frames unchanged.
+    velocityAlarmPlotInterval: Optional[int] = None
+    #: Stop the run (`RunResult.stopReason`) once `max |v|` passes this
+    #: multiple of the expected velocity -- a hard ceiling above the alarm's
+    #: flag-only threshold. `None` (default): the alarm never stops a run.
+    velocityAlarmStopRatio: Optional[float] = None
 
     # --- runtime ------------------------------------------------------------
     precision: str = 'float32'
@@ -161,7 +179,9 @@ class CaseSpec:
     verbose: bool = False
     #: Suppress the setup banner, the progress bar and the completion report.
     #: Everything a run says about itself goes through these three, so this is
-    #: the one switch that makes a run silent.
+    #: the one switch that makes a run silent -- except that an explicit
+    #: `progress=True` keeps the bar (the probes' "no banner, rows streaming").
+    #: Warnings such as the velocity alarm are always printed.
     quiet: bool = False
 
     # --- case-specific knobs ------------------------------------------------
@@ -238,7 +258,7 @@ _FIELD_HELP = {
     'L': 'domain edge length',
     'n_h': 'neighbours per smoothing length; converted to targetNeighbors',
     'calibrateNormalization': 'scale the kernel by 1/L so a perfect lattice reads rho0 '
-                              '(LATTICE_DENSITY_PLAN.md); off by default',
+                              '(summation density only; LATTICE_DENSITY_PLAN.md); off by default',
     'densityCorrection': 'subtract eps m W(0,h) from the raw density (Dehnen & Aly '
                          '2012 eq. 18/19, constants from warpSPHCore.util.densityCorrection); '
                          'off by default',
@@ -264,6 +284,14 @@ _FIELD_HELP = {
     'stallProgress': 'abort once the last 1000 steps advanced sim time by less '
                      'than this fraction of tLimit (catches dt hovering just '
                      'above minDt); unset disables it',
+    'velocityAlarmFactor': 'warn (the run continues) when max |v| exceeds this multiple '
+                           'of the expected velocity; 0 disables it',
+    'velocityScale': "expected velocity for the alarm; unset uses the case's own, "
+                     'else an estimate from the initial state',
+    'velocityAlarmPlotInterval': 'while the velocity alarm is active, draw a frame every '
+                                 'this many steps (needs --plot); unset leaves frames alone',
+    'velocityAlarmStopRatio': 'stop the run once max |v| exceeds this multiple of the '
+                              'expected velocity; unset: the alarm never stops a run',
     # -- runtime --
     'precision': 'scalar precision; resolved before import, so pass it to '
                  'warpsph-run rather than to a case module',
@@ -287,7 +315,7 @@ _FIELD_HELP = {
     'video': 'encode the exported frames with ffmpeg; skipped if it is missing',
     'progress': 'show a progress bar; unset means "when a terminal is watching"',
     'verbose': 'print extra detail during setup',
-    'quiet': 'suppress the banner, the progress bar and the completion report',
+    'quiet': 'suppress the banner, the progress bar (unless --progress) and the completion report',
 }
 
 def enumChoices() -> Dict[str, List[str]]:
@@ -318,7 +346,9 @@ def enumChoices() -> Dict[str, List[str]]:
 def _addField(parser: argparse.ArgumentParser, name: str, default: Any, annotation: Any, help: str):
     """Declare one flag, inferring its type from the dataclass default."""
     short = _SHORT_FLAGS.get(name)
-    if isinstance(default, bool):
+    # `Optional[bool]` (e.g. `progress`, None = "decide for me") is a boolean
+    # flag too; with the float fallback below `--progress` took a number.
+    if isinstance(default, bool) or (default is None and 'bool' in str(annotation)):
         # store_true would make `plot: true` in a config file un-overridable from
         # the CLI, so both polarities get a flag. BooleanOptionalAction keeps the
         # default at None -- which is what distinguishes "not passed" from

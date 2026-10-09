@@ -57,7 +57,7 @@ and had to be identified from their front matter alone.
 
 ## What is here
 
-196 documents. The first 119 are the curated core — every row annotated for what
+203 documents. The first 124 are the curated core — every row annotated for what
 it unblocks, and every row abstracted in `ABSTRACTS.md` **except `roe1986`,
 `hairer2006` and `toro2009`**, which carry no abstract at all (Annual Reviews
 articles of that vintage print none for `roe1986`; the latter two are books,
@@ -123,7 +123,7 @@ taken from the published reference list (Dehnen & Aly 2012 cites it as MNRAS,
 405, 1513); `references.bib`'s `note` field records this.
 
 **9 papers were synced 2026-09-19** from `literature/dump/` for the
-compressible shock-capturing frontend (`phase6.md`) and its open
+compressible shock-capturing frontend (`docs/historic_plans/phase6.md`) and its open
 next-viscosity-switch question: the Sigalotti adaptive-kernel-estimation
 shock-capturing pair (`sigalotti2006`, `sigalotti2008`), a production astro
 code's gradient-based shock detection (`wadsley2017`), an entropy-growth-rate
@@ -136,6 +136,22 @@ and `rosswog2020entropy` arrived as
 arXiv copies of published MNRAS/ApJ papers -- the bib keys and venue fields
 follow the published records; `rosswog2020entropy` is suffixed to avoid a
 collision with `rosswog2020` (the MAGMA2 code paper).
+
+**1 paper was synced 2026-10-01** from `literature/dump/` for `AV_PLAN.md`'s
+`Rosswog2000` switch, which had been transcribed from diffSPH alone:
+`rosswog2000` (Rosswog, Davies, Thielemann & Piran, A&A 360, 171; the viscosity
+scheme is its Appendix A). A 2000 A&A article has no journal DOI, so the entry
+carries none (arXiv:astro-ph/0005550 is noted instead).
+
+**1 paper was synced 2026-09-29** from `literature/dump/` for
+`CEILING_STICKING_PLAN.md` §5 (DualSPHysics' symplectic time stepping and its
+Padé density term): `leimkuhler2016`. The second arrival was a re-download of
+`parshikov2002`, already held (identical text layer), and was removed; its
+entry now also records the Padé continuity update (its Eq. B.12). Neither is
+the exact item `dominguez2022` cites for the scheme: that is Leimkuhler &
+Matthews' 2015 book *Molecular Dynamics* (ref. 36) and Parshikov, Medin,
+Loukashenko & Milekhin 2000, *Int. J. Impact Eng.* 24:779–796 (ref. 37); both
+are noted in the entries, neither is held.
 
 `venue` is the **published** venue, which for an author's-version or preprint
 copy is not always what that copy's own front page says. Full bibliographic
@@ -243,6 +259,7 @@ this plan too.
 | — | `winchenbach2024integrals` | `winchenbach2024integrals_analytic-boundary-integrals-2d.pdf` | SPHERIC 2024 | Analytic boundary integrals over triangle meshes, with barycentric boundary quantities. |
 | — | `winchenbach2025analytic` | `winchenbach2025analytic_analytic-boundary-handling-2d.pdf` | J. Comput. Phys. 555 2026 | Closed-form boundary integrals for compact polynomials over triangles, via Chebyshev polynomials and 2F1. |
 | — | `winchenbach2025diffsph` | `winchenbach2025diffsph_differentiable-sph.pdf` | J. Comput. Phys. 555 2026 | The differentiable PyTorch SPH framework this codebase's schemes are ported from. |
+| — | `nogina2026` | `nogina2026_tube-maps-tubular-coordinates.pdf` | SIGGRAPH Conf. Papers '26 | Constant-time boundary *density* of a curved solid from a second-order tubular-coordinate (curvature) expansion about the closest point; the method the curvatureBoundaries repo's tier 3 generalises (pressure operators, first moments) and checks against exact edge integrals. Main-text sign of K in J(s) disagrees with its Eq. 16 there. |
 
 **Machine learning on SPH**
 
@@ -267,6 +284,7 @@ Background for `../warpSPHIntegrators/SPLITTING_PLAN.md`'s conservative/dissipat
 | — | `goldman1996` | `goldman1996_nth-order-operator-splitting.pdf` | SIAM Journal on Numerical Analysis 33(1):349-367, 1996 | The no-positive-coefficients theorem behind SPLITTING_PLAN.md §2.5's regime-gating of order-4+ composition against a dissipative operator. |
 | — | `blanes2008` | `blanes2008_splitting-and-composition-methods.pdf` | Boletín de la Sociedad Española de Matemática Aplicada 45, 2008 | Survey of splitting/composition methods; the general reference SPLITTING_PLAN.md leans on. |
 | — | `hairer2006` | `hairer2006_geometric-numerical-integration.pdf` | 2nd ed., Springer Series in Computational Mathematics 31 (Springer, 2006) | Carries essentially all of SPLITTING_PLAN.md's theory (II.4-5, III.4, V.4.1). No abstract (a book). |
+| — | `leimkuhler2016` | `leimkuhler2016_geodesic-integration-solvent-solute-splitting.pdf` | Proc. R. Soc. A 472(2189):20160138, 2016 | A-B-O splitting view of Verlet-type integrators: the continuity density belongs in the drift (A) flows, which DualSPHysics' corrector does not do. `CEILING_STICKING_PLAN.md` §5. |
 | — | `toro2009` | `toro2009_riemann-solvers-and-numerical-methods.pdf` | 3rd ed. (Springer, 2009) | The HLLC reference for the MFM/MFV direction in PESPH_PLAN.md §7. No abstract (a book). |
 
 **PESPH, CRKSPH, compSPH & meshless hydrodynamics (MFM)**
@@ -340,7 +358,7 @@ Broad-survey and DualSPHysics-project reference papers, added 2026-09-17.
 
 **Compressible dissipation & shock capture (Phase 6 frontend)**
 
-The compressible shock-capturing frontend (`phase6.md`) and the
+The compressible shock-capturing frontend (`docs/historic_plans/phase6.md`) and the
 next-viscosity-switch question it raises, added 2026-09-19.
 
 | plan | bib key | file | venue | what it is |
@@ -349,11 +367,16 @@ next-viscosity-switch question it raises, added 2026-09-19.
 | — | `sigalotti2008` | `sigalotti2008_adaptive-kernel-tensile-instability.pdf` | Comput. Math. Appl. 55(1) 2008 | The stability analysis behind ADKE: linear perturbation shows the tensile instability is removed, so the kernel sharpening does not reintroduce clumping. |
 | — | `wadsley2017` | `wadsley2017_gasoline2-modern-sph-code.pdf` | MNRAS 471(2) 2017 | Gasoline2's Gradient-Based shock detection: keeps the artificial viscosity out of non-shocking compressive flows. A production code's tested switch design, comparable to `CullenDehnen2010`/`ReadHayfield2012`. |
 | — | `rosswog2020entropy` | `rosswog2020entropy_entropy-based-dissipation-trigger.pdf` | ApJ 898(1) 2020 | Entropy-growth-rate trigger: dissipation only on "troubled particles" (MAGMA2). A third trigger family alongside C&D's compression-based and R&H's entropy-conductivity switches -- candidate for the next `ViscositySwitch`. |
+| — | `rosswog2000` | `rosswog2000_merging-neutron-stars-asymmetric.pdf` | A&A 360 2000 | Appendix A is the Rosswog2000 viscosity switch: alpha source `max(-div v (alpha_max - alpha), 0)`, decay on `tau = h/(epsilon c)`, beta = 2 alpha, Balsara factor inside mu. The source paper for `ViscositySwitch.Rosswog2000`; checked against it 2026-10-01. |
 | — | `garciasenz2026` | `garciasenz2026_heuristic-switches-sph-dissipation.pdf` | A&A 708:A205 2026 | Argues the heuristic switches can be dropped: remove the local bulk linear motion, modulate with the Balsara correction. Lower spurious dissipation than the reference switch. |
 | — | `chen2025` | `chen2025_minimizing-numerical-viscosity-discs.pdf` | MNRAS 540(3) 2025 | Phantom disc runs: default beta_SPH too high; proposes a switched beta_SPH = k * alpha_SPH. The linear/quadratic coefficient pairing in this codebase's Monaghan viscosity. |
 | — | `monaghan2012` | `monaghan2012_sph-diverse-applications-review.pdf` | Annu. Rev. Fluid Mech. 44 2012 | Monaghan's incompressible-SPH applications review. Background for the frontend design space; the Monaghan viscosity lineage `computeViscosity` implements. |
 | — | `inutsuka2002` | `inutsuka2002_sph-riemann-solver-reformulation.pdf` | J. Comput. Phys. 179(1) 2002 | Riemann-solver reformulation of SPH: pair forces come from solving the Riemann problem, strict conservation form, accurate strong shocks. The Riemann-solver branch of the frontend, complementary to the switch machinery. |
 | — | `cha2003` | `cha2003_godunov-particle-hydrodynamics.pdf` | MNRAS 340(1) 2003 | Godunov-type particle hydrodynamics (GPH): a Riemann solver replaces artificial viscosity entirely; von Neumann-stable at all wavelengths, captures shocks without it. The structural move the Riemann-solver branch would make. |
+| — | `cha2010` | `cha2010_kelvin-helmholtz-godunov-sph.pdf` | MNRAS 403(3) 2010 | GSPH on Kelvin-Helmholtz across a density contrast and on the blob test, plus the consistency argument for why standard SPH fails there: the target tests for GODUNOV_SPH_PLAN. |
+| — | `murante2011` | `murante2011_godunov-sph-hydrodynamic-simulations.pdf` | MNRAS 417(1) 2011 | GSPH in GADGET-3: derivation, Sod / KH / blob, and the implementation choices the 2002 paper leaves open (interface location, reconstruction order, limiter, neighbour number). Implementation reference for GODUNOV_SPH_PLAN layers 2-3. |
+| — | `iwasaki2011` | `iwasaki2011_smoothed-particle-mhd-riemann-solver.pdf` | MNRAS 418(3) 2011 | Inutsuka's group's own GSPH implementation with MHD (Riemann problem + method of characteristics); the hydrodynamic limit is the second-order GSPH recipe for GODUNOV_SPH_PLAN layer 3. |
+| — | `puri2014` | `puri2014_approximate-riemann-solvers-gsph.pdf` | J. Comput. Phys. 270 2014 | Non-iterative Riemann solvers (Roe-type, HLLC, ...) for GSPH, the equivalence of GSPH dissipation with signal-velocity AV (the link to AV_PLAN Phase 7b's Riemann term) and the wall-heating explanation. |
 
 ## Extended set
 

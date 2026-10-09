@@ -713,8 +713,10 @@ def calibrateRestDensity(ctx: RunContext, system, *,
     **The residual check.** With `massRatio` fixed at the sampler, ANY
     deviation of it from 1 -- for a plain regular, unjittered lattice -- is no
     longer expected sampling noise; it means something corrupted the initial
-    state (overlapping regions, an SDF that clipped the lattice unevenly, an
-    unwanted per-particle mass override elsewhere). `onResidual` controls what
+    state (a bulk mass/cell mismatch such as an uneven SDF clip or a global mass
+    override). The check reads the *median* fluid mass and the achieved lattice
+    spacing, so it sees a bulk error and not a minority of particles with their
+    own mass (those leave the median untouched). `onResidual` controls what
     happens when `|massRatio - 1| > tolerance` (default `1e-3`, three orders
     above the ~1e-6 float32 noise measured across `nx` in [30, 333], four
     below the old bug): `'raise'` (default) stops the run with the offending
@@ -1004,7 +1006,7 @@ def stepAccelerationDiagnostics(state) -> Dict[str, float]:
     does not require re-instrumenting a probe script and re-running the case
     from scratch every time: the min/max/mean/p05/p95 of the *actual*
     per-step fluid acceleration (`(v_after - v_before) / dt`, magnitude and
-    per axis) and, when `mdbcNoPenShiftMode == 'finalize'` (the default), how
+    per axis) and, when `mdbcNoPenShiftMode` is 'impulse' (the default) or 'finalize', how
     many fluid particles the no-pen correction touched and by how much, ride
     on every trajectory row already -- no guessing after the fact whether
     `nopenshift` was the cause of a spike.

@@ -15,13 +15,14 @@ before that branch instead.
 
 from ..modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
 from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
+from ..modules.compressibleWall import beginCompressibleWall
 from ..modules.compSPH.accel import computeCompSPHAccelWarp
 from ..modules.compSPH.dudt import computeCompSPHdudtWarp
 from ..modules.compSPH.balance import computeCompSPHBalanceTermWarp
 from ..modules.crk import computeCrkSPHdudtWarp
 from ..modules.eos import idealGasEOS
 from ..modules.momentum import computeMomentumConsistent
-from ..modules.shockCapturing import computeViscositySwitchTerms
+from ..modules.shockCapturing import computeViscositySwitchTerms, updateViscositySwitch
 from ..enumTypes import EnergyScheme
 
 import warnings
@@ -40,6 +41,8 @@ from ..systems.compressibleMonaghan import CompressibleSystemUpdate
 from ..modules.shockCapturing.CullenHopkins import computeHopkinsTerms, computeHopkinsUpdate
 
 from ..modules.crk.accel import computeCrkSPHAccelWarp
+from ..configurations.crkSPH import resolveCRKLimiter
+from ..modules.reconstruction import requireRawPairVelocity
 
 __all__ = ['crkSPH_step']
 
@@ -98,9 +101,12 @@ def crkSPH_step(
 ):
 
     _warnNonConservativeSupport(config)
+    requireRawPairVelocity(schemeConfig.diffusionParams, 'CRKSPH')
+    crkViscosityParams = resolveCRKLimiter(schemeConfig.crkViscosityParams, config.n_h)
     currentSystem = system#
     currentState = currentSystem.state
     t = currentSystem.t
+    wall = beginCompressibleWall(currentState, config)
 
     IE = currentState.internalEnergies * currentState.masses
     KE = 0.5 * currentState.masses * torch.einsum('ij,ij->i', currentState.velocities, currentState.velocities)
@@ -133,6 +139,12 @@ def crkSPH_step(
     currentSystem.adjacency = adjacency
 
     apparentVolume, currentState.densities, crkState = computeCRKFactors(currentState, config.domain, config.kernel, adjacency = adjacency)
+    if wall is not None:
+        # wall rows enter the CRK moment sums like fluid rows; their support and
+        # mass change here, so the factors (and the fluid density) are redone
+        wall.apply(currentState, config, schemeConfig, adjacency, latticeSupport=True)
+        apparentVolume, currentState.densities, crkState = computeCRKFactors(currentState, config.domain, config.kernel, adjacency = adjacency)
+        wall.apply(currentState, config, schemeConfig, adjacency, latticeSupport=True)
 
     # currentState.densities = warpOperation(
     #     currentState,
@@ -325,7 +337,7 @@ def crkSPH_step(
         ),
         domain = config.domain,
         conductivityParams= schemeConfig.diffusionParams,
-        crkViscosityParams = schemeConfig.crkViscosityParams,
+        crkViscosityParams = crkViscosityParams,
         queryVelocityTensor= velocityGradient,
         queryEnergies = currentState.internalEnergies,
         queryVelocities= currentState.velocities,
@@ -347,7 +359,7 @@ def crkSPH_step(
          ),
         domain = config.domain,
         conductivityParams= schemeConfig.diffusionParams,
-        crkViscosityParams = schemeConfig.crkViscosityParams,
+        crkViscosityParams = crkViscosityParams,
         queryVelocityTensor= velocityGradient,
 
         queryEnergies = currentState.internalEnergies,
@@ -382,16 +394,16 @@ def crkSPH_step(
     #     gradHState = gradHState
     # )
 
-    # particles.alpha0s, switchState = updateViscositySwitch(particles, wrappedKernel, neighbors.get('noghost'), SupportScheme.Gather, config, dt, dvdt, switchState)
-
-    # currentState.alpha0s, switchState = updateViscositySwitch(
-    #     switchState,
-    #     dt, dvdt,
-    #     currentState, 
-    #     config, schemeConfig, 
-    #     SupportScheme.SuperSymmetric, 
-    #     adjacency)   
-
+    # Advance the viscosity switch's stored alpha0 (mirrors the Monaghan / compSPH wiring). AV_PLAN S2 had this call
+    # deleted; but `computeCullenTerms` only decays the stored alpha0 by ONE step, so without writing it back it stays at its
+    # initial 1 and alpha sticks at ~0.97-0.98 -- C&D / R&H under CRKSPH were fixed-alpha runs (AV_PLAN Phase 1 clean-up, item 3).
+    currentState.alpha0s, switchState = updateViscositySwitch(
+        switchState,
+        dt, dvdt,
+        currentState,
+        config, schemeConfig,
+        SupportScheme.SuperSymmetric,
+        adjacency)
 
     # drhodt = computeMomentumConsistent(
     #     currentState,
@@ -416,7 +428,9 @@ def crkSPH_step(
     )
 
     enforceUpdates(update, currentSystem, dt, t, config, schemeConfig)
-    
+    if wall is not None:
+        wall.finishUpdate(update)
+
     v_halfstep = currentState.velocities + 0.5 * dt * update.dvdt
 
     currentState.f_ij = computeCompSPHBalanceTermWarp(
@@ -440,6 +454,7 @@ def crkSPH_step(
         adjacency = adjacency,
         gradHState = gradHState
     )
-
+    if wall is not None:
+        currentState.f_ij = wall.balanceFractions(currentState.f_ij, adjacency, currentState)
 
     return update, adjacency, currentState

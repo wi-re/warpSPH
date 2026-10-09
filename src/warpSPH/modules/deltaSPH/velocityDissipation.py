@@ -48,5 +48,10 @@ def computeVelocityDiffusion(currentState: Any, config: SimulationConfig, scheme
             alpha = schemeConfig.diffusionParams.inviscidAlpha,
             nu = schemeConfig.diffusionParams.viscidNu,
             approachOnly = approachOnly,
+            # opt-in shear-carrying Morris 1997 term (`ViscosityTerm`), only
+            # on the physical-viscosity branch; the default leaves every
+            # scheme on the projected form it had
+            morris = (getattr(schemeConfig.diffusionParams, 'viscousTerm', ViscosityTerm.monaghanGingold)
+                      == ViscosityTerm.morris1997),
         )
         return dvdt_diss

@@ -161,7 +161,8 @@ def _params(scheme, cornerOnly=False, shifting='off', Re=None):
 def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme,
             cornerOnly=False, shifting='off', Re=None, plotBackend=None,
             integrationScheme=None, noPenShift=None, wallBC=None,
-            densityDiffusionTerm=None, mdbcDensityScheme=None):
+            densityDiffusionTerm=None, mdbcDensityScheme=None,
+            timeCentredContinuity=None):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -185,7 +186,9 @@ def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme,
            + (f'_nopen-{noPenShift}' if noPenShift else '')
            + (f'_wall-{wallBC}' if wallBC else '')
            + (f'_ddt-{densityDiffusionTerm}' if densityDiffusionTerm else '')
-           + (f'_mdbcRho-{mdbcDensityScheme}' if mdbcDensityScheme else ''))
+           + (f'_mdbcRho-{mdbcDensityScheme}' if mdbcDensityScheme else '')
+           + ('_tcc' if timeCentredContinuity else '')
+           + ('_notcc' if timeCentredContinuity is False else ''))
     runRoot = os.path.join(out, tag + '_run')
 
     params = _params(scheme, cornerOnly=cornerOnly, shifting=shifting, Re=Re)
@@ -208,6 +211,13 @@ def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme,
 
     print(f'[{tag}] H/dx={H / (TANK_L / nx):.1f}  c0={c0Ratio:g}sqrt(gH)  '
           f'-> t={tLimit:.3f}s (t*={tStar:g}) ...', flush=True)
+    if timeCentredContinuity is not None:
+        # CEILING_STICKING_PLAN.md §3/§6: density as a drift field (explicit
+        # on/off; None leaves the config default)
+        _prevCfgTcc = dambreakCase.configureScheme
+        def _cfgTcc(ctx, _p=_prevCfgTcc, _v=bool(timeCentredContinuity)):
+            _p(ctx); ctx.schemeConfig.timeCentredContinuity = _v
+        dambreakCase.configureScheme = _cfgTcc
     if noPenShift:
         _prevCfg = dambreakCase.configureScheme
         def _cfg(ctx, _m=noPenShift, _p=_prevCfg):
@@ -258,6 +268,10 @@ def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme,
         tStarLimit=float(tStar), tReached=tReached, tStarReached=tReached / SQRT_H_G,
         H=H, G=G, TANK_L=TANK_L, TANK_W=TANK_W, COL_W=COL_W, COL_H=COL_H,
         surfProbeNames=list(_SURF_NAMES),
+        # effective noPen placement / density drift field (defaults flipped
+        # 2026-09-29, CEILING_STICKING_PLAN.md §7.2), read off the resolved config
+        noPenShiftMode=str(getattr(r.ctx.schemeConfig, 'mdbcNoPenShiftMode', '?')),
+        timeCentredContinuity=bool(getattr(r.ctx.schemeConfig, 'timeCentredContinuity', False)),
         shiftActive=bool(getattr(r.ctx.schemeConfig.shiftProperties, 'active', False)),
         sun2017Eq7Shift=bool(getattr(r.ctx.schemeConfig.shiftProperties, 'sun2017Eq7Shift', False)),
         shiftingArg=str(shifting), cornerOnly=bool(cornerOnly),
@@ -493,6 +507,27 @@ _PROBE_REGION = {
 }
 
 
+
+def _variantTag(npzPath, meta=None):
+    """Legend suffix for the run variants the physics label cannot see: the
+    noPen placement, the density drift field and the jitter seed. Read off the
+    run's meta when it records them (runs from 2026-09-29 on); older runs from
+    the file name (`_nopen-<mode>`, `_tcc`, `_j<seed>`), where a missing
+    `_nopen-` meant the then-default 'finalize' and a missing `_tcc` no drift."""
+    import re
+    meta = meta or {}
+    b = os.path.basename(npzPath)
+    m = re.search(r'_nopen-([a-z]+)', b)
+    mode = meta.get('noPenShiftMode') or (m.group(1) if m else 'finalize')
+    tcc = meta['timeCentredContinuity'] if 'timeCentredContinuity' in meta else ('_tcc' in b)
+    parts = [f"noPen {mode}"]
+    if tcc:
+        parts.append('drift ρ')
+    j = re.search(r'_j(\d+)', b)
+    if j:
+        parts.append(f'seed {j.group(1)}')
+    return '  [' + ', '.join(parts) + ']'
+
 def _traceFigure(out):
     """A clean 3x3 of the nine surface pressure traces P/(rho g H) vs t*, one
     line per run, across every `*.npz` in `out`. Wagner's P1 ~ 36.7 rho g H is
@@ -510,6 +545,7 @@ def _traceFigure(out):
         lab = _runLabel(meta)
         if lab is None:
             continue
+        lab += _variantTag(npz, meta)
         cols = {k[2:]: d[k] for k in d.files if k.startswith('s_')}
         runs.append((meta, cols, lab))
     if not runs:
@@ -706,8 +742,8 @@ def main(argv=None):
     ap.add_argument('--traceFigure', action='store_true',
                     help='just the clean 3x3 of the P1-P9 surface pressure traces')
     ap.add_argument('--noPenShift', default=None,
-                    choices=('derivative', 'finalize', 'off'),
-                    help="mDBC no-penetration correction placement: 'derivative' (in dvdt, historical), 'finalize' (once per step, DualSPHysics-style velocity replacement) or 'off'. DualSPHysics gates this term on SlipMode>=NoSlip, i.e. never applies it under free slip -- which is what Marrone 2011 Sec. 3 specifies. DELTASPH_VALIDATION_PLAN 5.9.")
+                    choices=('derivative', 'finalize', 'impulse', 'off'),
+                    help="mDBC no-penetration correction placement: 'derivative' (in dvdt, historical), 'finalize' (once per step, DualSPHysics-style velocity replacement), 'impulse' (once per step, added to the integrated velocity; CEILING_STICKING_PLAN.md §7.1) or 'off'. DualSPHysics gates this term on SlipMode>=NoSlip, i.e. never applies it under free slip -- which is what Marrone 2011 Sec. 3 specifies. DELTASPH_VALIDATION_PLAN 5.9.")
     ap.add_argument('--wallBC', default=None,
                     choices=('constant', 'freeSlip', 'noSlip', 'extended', 'zeros'),
                     help="tank wall boundary condition. Default (case-level) is 'freeSlip', which is what Marrone 2011 Sec. 3 specifies. 'constant' is the pre-2026-09-21 default and is NOT free slip -- it leaves the wall at v=0 while the AllToAll artificial viscosity drags against it, i.e. an effective no-slip bed; pass it to reproduce a pre-flip number. DELTASPH_VALIDATION_PLAN 5.7.")
@@ -729,6 +765,10 @@ def main(argv=None):
                          "'english2025' = english2025.py (Band's value fit + "
                          "English 2025's analytic-hydrostatic extrapolation). "
                          "BOUNDARY_DENSITY_PLAN.md §5.")
+    ap.add_argument('--timeCentredContinuity', action=argparse.BooleanOptionalAction, default=None,
+                    help="density as a drift field under Verlet-family integrators "
+                         "(schemeConfig.timeCentredContinuity, default on since 2026-09-29; "
+                         "CEILING_STICKING_PLAN.md §3/§6). Unset = config default")
     args = ap.parse_args(argv)
 
     if args.traceFigure:
@@ -740,7 +780,8 @@ def main(argv=None):
     _runOne(args.nx, args.c0Ratio, args.tStar, args.out, args.video,
             args.plotInterval, args.scheme, args.cornerOnly, args.shifting, args.Re,
             args.plotBackend, args.integrationScheme, args.noPenShift, args.wallBC,
-            args.densityDiffusionTerm, args.mdbcDensityScheme)
+            args.densityDiffusionTerm, args.mdbcDensityScheme,
+            timeCentredContinuity=args.timeCentredContinuity)
 
 
 if __name__ == '__main__':

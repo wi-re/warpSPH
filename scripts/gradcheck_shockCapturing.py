@@ -123,6 +123,8 @@ from warpSPHCore.enumTypes import SupportScheme
 
 from warpSPH.modules.shockCapturing.wp_computeM import computeMWarp
 from warpSPH.modules.shockCapturing.wp_vsig import computeVsigWarp
+from warpSPH.modules.shockCapturing.wp_readHayfield import (computeReadHayfieldEntropyDissipationWarp,
+                                                            computeReadHayfieldVmaxWarp)
 
 DIM = 1
 N = 5
@@ -270,6 +272,100 @@ def _run_grid_consistency() -> bool:
         return False
 
 
+def _rh_case(n=4):
+    """Tie-free 1D case with well-separated velocities, shared by the two Read-Hayfield checks."""
+    domain = make_domain(dim=DIM)
+    positions = torch.tensor([[-0.5], [-0.1], [0.25], [0.55]][:n], dtype=DTYPE, device=DEVICE, requires_grad=True)
+    supports = torch.full((n,), 1.5, dtype=DTYPE, device=DEVICE, requires_grad=True)
+    masses = torch.full((n,), 1.0, dtype=DTYPE, device=DEVICE, requires_grad=True)
+    velocities = torch.tensor([[2.5], [0.4], [-0.8], [-1.9]][:n], dtype=DTYPE, device=DEVICE, requires_grad=True)
+    cs = torch.tensor([1.0, 1.3, 0.9, 1.1][:n], dtype=DTYPE, device=DEVICE, requires_grad=True)
+    pressures = torch.tensor([1.0, 0.6, 1.4, 0.8][:n], dtype=DTYPE, device=DEVICE, requires_grad=True)
+    entropies = torch.tensor([1.0, 0.7, 1.2, 0.9][:n], dtype=DTYPE, device=DEVICE, requires_grad=True)
+    alphas = torch.tensor([0.5, 0.8, 0.3, 0.6][:n], dtype=DTYPE, device=DEVICE, requires_grad=True)
+    adjacency, kinds = build_adjacency(positions, supports, masses, domain, mode=SupportScheme.Gather)
+    densities = compute_densities(positions, supports, masses, kinds, domain, adjacency, mode=SupportScheme.Gather)
+    return domain, positions, supports, masses, velocities, cs, pressures, entropies, alphas, adjacency, kinds, densities
+
+
+def _run_rh_vmax() -> bool:
+    domain, positions, supports, masses, velocities, cs, _, _, _, adjacency, kinds, densities = _rh_case()
+
+    def f(pos, sup, mass, dens, vel, c):
+        p = ParticleState(positions=pos, supports=sup, masses=mass, densities=dens, kinds=kinds)
+        return computeReadHayfieldVmaxWarp(
+            p, OperationProperties(kernel=KERNEL, supportMode=SupportScheme.Gather), domain,
+            queryVelocities=vel, queryCs=c, adjacency=adjacency)
+
+    print("\n=== computeReadHayfieldVmaxWarp: torch.autograd.gradcheck ===")
+    try:
+        ok = torch.autograd.gradcheck(f, (positions, supports, masses, densities, velocities, cs), eps=1e-6, atol=1e-5)
+        print("PASSED" if ok else "FAILED (gradcheck returned False)")
+        return bool(ok)
+    except Exception as exc:  # noqa: BLE001
+        print(f"FAILED: {type(exc).__name__}: {exc}")
+        return False
+
+
+def _run_rh_entropy() -> bool:
+    domain, positions, supports, masses, velocities, cs, pressures, entropies, alphas, adjacency, kinds, densities = _rh_case()
+
+    def f(pos, sup, mass, dens, vel, c, P, A, alpha):
+        p = ParticleState(positions=pos, supports=sup, masses=mass, densities=dens, kinds=kinds)
+        return computeReadHayfieldEntropyDissipationWarp(
+            p, OperationProperties(kernel=KERNEL, supportMode=SupportScheme.Gather), domain, 5.0 / 3.0,
+            queryAlphas=alpha, queryVelocities=vel, queryCs=c, queryPressures=P, queryEntropies=A,
+            adjacency=adjacency)
+
+    print("\n=== computeReadHayfieldEntropyDissipationWarp: torch.autograd.gradcheck ===")
+    try:
+        ok = torch.autograd.gradcheck(
+            f, (positions, supports, masses, densities, velocities, cs, pressures, entropies, alphas),
+            eps=1e-6, atol=1e-5)
+        print("PASSED" if ok else "FAILED (gradcheck returned False)")
+        return bool(ok)
+    except Exception as exc:  # noqa: BLE001
+        print(f"FAILED: {type(exc).__name__}: {exc}")
+        return False
+
+
+def _run_rh_grid_consistency() -> bool:
+    """AdjacencyList vs grid traversal forward values for both Read-Hayfield kernels (2D, random)."""
+    DIM2, N2 = 2, 6
+    domain = make_domain(dim=DIM2)
+    torch.manual_seed(1)
+    positions = torch.randn(N2, DIM2, dtype=DTYPE, device=DEVICE) * 0.5
+    supports = torch.full((N2,), 1.2, dtype=DTYPE, device=DEVICE)
+    masses = torch.full((N2,), 1.0, dtype=DTYPE, device=DEVICE)
+    velocities = torch.randn(N2, DIM2, dtype=DTYPE, device=DEVICE) * 2.0
+    cs = 1.0 + torch.rand(N2, dtype=DTYPE, device=DEVICE)
+    P = 1.0 + torch.rand(N2, dtype=DTYPE, device=DEVICE)
+    A = 1.0 + torch.rand(N2, dtype=DTYPE, device=DEVICE)
+    alpha = torch.rand(N2, dtype=DTYPE, device=DEVICE)
+    adjacency_list, kinds = build_adjacency(positions, supports, masses, domain, mode=SupportScheme.Gather)
+    grid, _ = build_grid_adjacency(positions, supports, masses, domain, mode=SupportScheme.Gather)
+    densities = compute_densities(positions, supports, masses, kinds, domain, adjacency_list, mode=SupportScheme.Gather).detach()
+    op = OperationProperties(kernel=KERNEL, supportMode=SupportScheme.Gather)
+
+    def run(adj):
+        p = ParticleState(positions=positions, supports=supports, masses=masses, densities=densities, kinds=kinds)
+        return (computeReadHayfieldVmaxWarp(p, op, domain, queryVelocities=velocities, queryCs=cs, adjacency=adj),
+                computeReadHayfieldEntropyDissipationWarp(
+                    p, op, domain, 5.0 / 3.0, queryAlphas=alpha, queryVelocities=velocities, queryCs=cs,
+                    queryPressures=P, queryEntropies=A, adjacency=adj))
+
+    print("\n=== Read-Hayfield kernels: AdjacencyList vs. grid traversal forward-value consistency ===")
+    try:
+        (va, ea), (vg, eg) = run(adjacency_list), run(grid)
+        d = max((va - vg).abs().max().item(), (ea - eg).abs().max().item())
+        ok = d < 1e-9
+        print(("PASSED" if ok else "FAILED") + f" (max abs diff: {d})")
+        return ok
+    except Exception as exc:  # noqa: BLE001
+        print(f"FAILED: {type(exc).__name__}: {exc}")
+        return False
+
+
 def main():
     wp.init()
     torch.manual_seed(0)
@@ -279,6 +375,9 @@ def main():
     ok &= _run_vsig()
     ok &= _run_vsig_no_individual_cs()
     ok &= _run_grid_consistency()
+    ok &= _run_rh_vmax()
+    ok &= _run_rh_entropy()
+    ok &= _run_rh_grid_consistency()
 
     print()
     if ok:

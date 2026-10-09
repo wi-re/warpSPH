@@ -940,7 +940,7 @@ The scheme of `ACSPH_PLAN.md` and its dependencies. Added 2026-09-05.
 - **authors:** Anatoly N. Parshikov and Stanislav A. Medin
 - **venue:** *Journal of Computational Physics* 180(1):358–382, 2002
 - **doi:** [10.1006/jcph.2002.7099](https://doi.org/10.1006/jcph.2002.7099)
-- **relevance:** The scheme `michel2022` Sec. 4.2.2 validates on, recovered from `vila1999` by cancelling the mass fluxes: Riemann-solved velocity and stress at the contact point in place of pair averages, which is what removes the need for artificial viscosity. `PST_ALE_PLAN.md` stage C — the cheap consumer of the Riemann subsystem, and the check that it is right in an SPH setting before `vila1999` adds mass fluxes on top.
+- **relevance:** The scheme `michel2022` Sec. 4.2.2 validates on, recovered from `vila1999` by cancelling the mass fluxes: Riemann-solved velocity and stress at the contact point in place of pair averages, which is what removes the need for artificial viscosity. `PST_ALE_PLAN.md` stage C — the cheap consumer of the Riemann subsystem, and the check that it is right in an SPH setting before `vila1999` adds mass fluxes on top. Also the origin of the Padé(1,1) continuity update ρⁿ⁺¹ = ρⁿ(2 − ε̇Δt)/(2 + ε̇Δt) (Appendix B, Eq. B.12; momentum by explicit Euler, B.11) that DualSPHysics' symplectic corrector uses (`dominguez2022` Eq. 34, which cites the 2000 *Int. J. Impact Eng.* paper by the same group, not held here). `CEILING_STICKING_PLAN.md` §5: linearised, the map is the plain update, so it does not stabilise the (ρ, v) acoustic mode; what does is the velocity the rate is evaluated with.
 - **abstract from:** PDF p.1
 
 > Smoothed particle hydrodynamics (SPH) is a modern effective technique of computer simulation in continuous media mechanics. SPH approximations are quite flexible and allow various constructions. In this paper, contact interaction between particles is introduced in SPH formulation. The concept is to insert in SPH approximations of a strength medium the velocity and stresses determined at the contact point by Riemann solution, instead of mean values between velocities and stresses of basic and surrounding particles. In this case, there is no need to use artificial viscosity. In a heat-conducting medium, the contact temperature is determined by the solution of a thermal discontinuity breakup and heat fluxes in particles are computed with the use of this temperature. The modified SPH approximations easily pass various standard tests and are easily realized in multidimensional codes. 
@@ -1270,6 +1270,30 @@ The scheme of `ACSPH_PLAN.md` and its dependencies. Added 2026-09-05.
 > building a strong foundation for addressing several grand challenges in SPH
 > and beyond.
 
+### `nogina2026`
+
+- **file:** `nogina2026_tube-maps-tubular-coordinates.pdf`
+- **title:** Tube Maps: Fast SPH Boundary Handling with Tubular Coordinates
+- **authors:** Daria Nogina and Silvia Sellán
+- **venue:** SIGGRAPH Conference Papers '26 (Special Interest Group on Computer Graphics and Interactive Techniques Conference Conference Papers), July 19-23, 2026, Los Angeles, pp. 1-11
+- **doi:** [10.1145/3799902.3811118](https://doi.org/10.1145/3799902.3811118)
+- **relevance:** Second-order curvature expansion of the smoothed boundary density integral in tubular coordinates; the density-only counterpart of the curvature-aware tier-3 closed forms in curvatureBoundaries.
+- **abstract from:** the PDF front matter (the DOI record carries no abstract)
+
+> Smoothed Particle Hydrodynamics (SPH) simulations rely on accurately
+> and efficiently modeling fluid-solid interactions. However, particle-based
+> coupling strategies introduce non-deterministic discretization errors, and
+> implicit methods achieve high accuracy at the cost of expensive numerical
+> integration. We introduce Tube Maps, a drop-in replacement for SPH boundary
+> density computation that achieves accuracy comparable to implicit methods
+> while dramatically reducing their computational cost. Our key observation
+> is that the boundary density integral is fully determined by the local surface
+> geometry near a fluid particle's closest point. By expressing this geometry
+> in tubular coordinates, we reduce the original three-dimensional integral to
+> a one-dimensional closed-form expression that can be evaluated in constant
+> time. We thus eliminate numerical quadrature and reduce boundary handling costs by one to three orders of magnitude, enabling fast and accurate
+> SPH simulations with time-varying curved solids.
+
 ### `winchenbach2025diffsph`
 
 - **file:** `winchenbach2025diffsph_differentiable-sph.pdf`
@@ -1585,6 +1609,18 @@ operator-splitting plan, added 2026-09-15.
 - **isbn:** 978-3-540-30663-4
 - **relevance:** Carries essentially all of SPLITTING_PLAN.md's theory -- II.4 (composition methods and the order theorem), II.5 (splitting, Strang, the Baker-Campbell-Hausdorff expansion), III.4 (backward error analysis for splitting), V.4.1 (symmetric projection, the mechanism behind §2.7.1's substep-local compatible-energy rewrite).
 - **abstract:** none (a book; no abstract to quote)
+
+### `leimkuhler2016`
+
+- **file:** `leimkuhler2016_geodesic-integration-solvent-solute-splitting.pdf`
+- **title:** Efficient molecular dynamics using geodesic integration and solvent–solute splitting
+- **authors:** Benedict Leimkuhler and Charles Matthews
+- **venue:** *Proceedings of the Royal Society A* 472(2189):20160138, 2016
+- **doi:** [10.1098/rspa.2016.0138](https://doi.org/10.1098/rspa.2016.0138)
+- **relevance:** The splitting/composition view of Verlet-type integrators (A = drift, B = kick, O = thermostat; the ordering of the exactly-solved sub-flows is what sets accuracy). For this codebase: position Verlet is A-B-A, and the continuity density is a configuration variable, so it belongs in the A (drift) flows, driven by the same velocity as the positions. DualSPHysics' corrector (`dominguez2022` Eqs. 33-34) instead drives it with a velocity-Verlet half-kick velocity, which makes its (ρ, v) update explicit midpoint (growth (ωΔt)⁴/8 per step) — `WeaklyCompressibleSPHConfig.timeCentredContinuity`, `CEILING_STICKING_PLAN.md` §5. Not the item DualSPHysics cites (that is the same authors' 2015 book, *Molecular Dynamics*, not held here).
+- **abstract from:** Crossref (publisher-deposited JATS abstract)
+
+> We present an approach to Langevin dynamics in the presence of holonomic constraints based on decomposition of the system into components representing geodesic flow, constrained impulse and constrained diffusion. We show that a particular ordering of the components results in an integrator that is an order of magnitude more accurate for configurational averages than existing alternatives. Moreover, by combining the geodesic integration method with a solvent–solute force splitting, we demonstrate that stepsizes of at least 8 fs can be used for solvated biomolecules with high sampling accuracy and without substantially altering diffusion rates, approximately increasing by a factor of two the efficiency of molecular dynamics sampling for such systems. The methods described in this article are easily implemented using the standard apparatus of modern simulation codes.
 
 ### `toro2009`
 
@@ -2138,7 +2174,7 @@ Broad-survey and DualSPHysics-project reference papers, synced 2026-09-17.
 
 ## Compressible dissipation & shock capture (Phase 6 frontend)
 
-The compressible shock-capturing frontend (`phase6.md`) and the next-viscosity-switch question it raises, synced 2026-09-19.
+The compressible shock-capturing frontend (`docs/historic_plans/phase6.md`) and the next-viscosity-switch question it raises, synced 2026-09-19.
 
 ### `sigalotti2006`
 
@@ -2252,3 +2288,62 @@ The compressible shock-capturing frontend (`phase6.md`) and the next-viscosity-s
 
 > Godunov-type particle hydrodynamics (GPH) is described. GPH inherits many good features from smoothed particle hydrodynamics (SPH), but it uses a Riemann solver to obtain the hydrodynamic acceleration and the rate of change of the internal energy of each particle. The grid-free nature of GPH converts a multidimensional problem into a locally one-dimensional problem, so that one only has to solve a one-dimensional Riemann problem, even in a globally three-dimensional situation. By virtue of the Riemann solver, it is unnecessary to introduce artificial viscosity in GPH. We have derived four different versions of GPH, and have performed a von Neumann stability analysis to understand the nature of GPH. GPH is stable for all wavelengths, while SPH is unstable for certain wavelengths. We have also performed eight tests in order to evaluate the performance of GPH. The results show that GPH can describe shock waves without artificial viscosity and prevents particle penetration. Furthermore, GPH shows better performance than SPH in a test involving velocity shear. GPH is easily implemented from SPH by simple replacement of the artificial viscosity with a Riemann solver, and appears to have some useful advantages over standard SPH.
 
+### `cha2010`
+
+- **file:** `cha2010_kelvin-helmholtz-godunov-sph.pdf`
+- **title:** Kelvin-Helmholtz instabilities with Godunov smoothed particle hydrodynamics
+- **authors:** Seung-Hoon Cha, Shu-Ichiro Inutsuka and Sergei Nayakshin
+- **venue:** *Monthly Notices of the Royal Astronomical Society* 403(3):1165-1174, 2010
+- **doi:** [10.1111/j.1365-2966.2010.16200.x](https://doi.org/10.1111/j.1365-2966.2010.16200.x)
+- **relevance:** GSPH on Kelvin-Helmholtz across a high density contrast and on the blob test, where standard SPH shows no instability, with the consistency argument for why (an unphysical force at a density gradient in the standard momentum equation). The target tests for the Godunov-SPH plan; also the explanation of the density-gradient defect that the compressible hosts here share.
+- **abstract from:** PDF p.1 (the Crossref record carries no abstract for this DOI)
+
+> Numerical simulations for the non-linear development of Kelvin–Helmholtz instability in two different density layers have been performed with the particle-based method (Godunov SPH) developed by Inutsuka. The Godunov SPH can describe the Kelvin–Helmholtz instability even with a high-density contrast, while the standard SPH shows the absence of the instability across a density gradient. The interaction of a dense blob with a hot ambient medium has been performed also. The Godunov SPH describes the formation and evolution of the fingers due to the combinations of Rayleigh–Taylor, Richtmyer–Meshkov and Kelvin–Helmholtz instabilities. The blob test result coincides well with the results of the grid-based codes. An inaccurate handling of a density gradient in the standard SPH has been pointed out as the direct reason of the absence of the instabilities. An unphysical force happens at the density gradient even in a pressure equilibrium, and repulses particles from the initial density discontinuity. Therefore, the initial perturbation damps, and a gap form at the discontinuity. The unphysical force has been studied in terms of the consistency of a numerical scheme. Contrary to the standard SPH, the momentum equation of the Godunov SPH does not use the particle approximation, and has been derived from the kernel convolution or a new Lagrangian function. The new Lagrangian function used in the Godunov SPH is more analogous to the real Lagrangian function for continuum. The momentum equation of the Godunov SPH has much better linear consistency, so the unphysical force is greatly reduced compared to the standard SPH in a high density contrast.
+
+### `murante2011`
+
+- **file:** `murante2011_godunov-sph-hydrodynamic-simulations.pdf`
+- **title:** Hydrodynamic simulations with the Godunov smoothed particle hydrodynamics
+- **authors:** G. Murante, S. Borgani, R. Brunino and S.-H. Cha
+- **venue:** *Monthly Notices of the Royal Astronomical Society* 417(1):136-153, 2011
+- **doi:** [10.1111/j.1365-2966.2011.19021.x](https://doi.org/10.1111/j.1365-2966.2011.19021.x)
+- **relevance:** GSPH in a production code (GADGET-3): reviews the convolution derivation, then tests the choices Inutsuka 2002 leaves open (neighbour number, accuracy of locating the interface between two particles, order of the reconstruction, limiter). The implementation reference for layers 2-3 of the Godunov-SPH plan.
+- **abstract from:** PDF p.1 (the Crossref record carries no abstract for this DOI)
+
+> We present results based on an implementation of the Godunov smoothed particle hydrodynamics (GSPH), originally developed by Inutsuka, in the GADGET-3 hydrodynamic code. We first review the derivation of the GSPH discretization of the equations of moment and energy conservation, starting from the convolution of these equations with the interpolating kernel. The two most important aspects of the numerical implementation of these equations are (a) the appearance of fluid velocity and pressure obtained from the solution of the Riemann problem between each pair of particles, and (b) the absence of an artificial viscosity term. We carry out three different controlled hydrodynamical three-dimensional tests, namely the Sod shock tube, the development of Kelvin–Helmholtz instabilities in a shear-flow test and the ‘blob’ test describing the evolution of a cold cloud moving against a hot wind. The results of our tests confirm and extend in a number of aspects those recently obtained by Cha, Inutsuka & Nayakshin: (i) GSPH provides a much improved description of contact discontinuities, with respect to smoothed particle hydrodynamics (SPH), thus avoiding the appearance of spurious pressure forces; (ii) GSPH is able to follow the development of gas-dynamical instabilities, such as the Kevin–Helmholtz and the Rayleigh–Taylor ones; (iii) as a result, GSPH describes the development of curl structures in the shear-flow test and the dissolution of the cold cloud in the ‘blob’ test. Besides comparing the results of GSPH with those from standard SPH implementations, we also discuss in detail the effect on the performances of GSPH of changing different aspects of its implementation: choice of the number of neighbours, accuracy of the interpolation procedure to locate the interface between two fluid elements (particles) for the solution of the Riemann Problem, order of the reconstruction for the assignment of variables at the interface, choice of the limiter to prevent oscillations of interpolated quantities in the solution of the Riemann Problem. The results of our tests demonstrate that GSPH is in fact a highly promising hydrodynamic scheme, also to be coupled to an N-body solver, for astrophysical and cosmological applications.
+
+### `iwasaki2011`
+
+- **file:** `iwasaki2011_smoothed-particle-mhd-riemann-solver.pdf`
+- **title:** Smoothed particle magnetohydrodynamics with a Riemann solver and the method of characteristics
+- **authors:** Kazunari Iwasaki and Shu-ichiro Inutsuka
+- **venue:** *Monthly Notices of the Royal Astronomical Society* 418(3):1668-1688, 2011
+- **doi:** [10.1111/j.1365-2966.2011.19588.x](https://doi.org/10.1111/j.1365-2966.2011.19588.x)
+- **relevance:** Inutsuka's group's own Godunov-SPH implementation, with MHD: a non-linear Riemann problem with magnetic pressure for the compressive waves, the method of characteristics for Alfven waves. Its hydrodynamic limit is the second-order GSPH recipe (states at the pair interface, time centring) the Godunov-SPH plan needs for layer 3; the MHD part is out of scope.
+- **abstract from:** PDF p.1 (the Crossref record carries no abstract for this DOI)
+
+> In this paper, we develop a new method for magnetohydrodynamics (MHD) using smoothed particle hydrodynamics (SPH). To describe MHD shocks accurately, the Godunov method is applied to SPH instead of artificial dissipation terms. In the interaction between particles, we solve a non-linear Riemann problem with magnetic pressure for compressive waves and apply the method of characteristics for Alfvén waves. An extensive series of MHD test calculations is performed. In all test calculations, we compare the results of our SPH code with those of a finite-volume method with an approximate Riemann solver, and confirm excellent agreement.
+
+### `puri2014`
+
+- **file:** `puri2014_approximate-riemann-solvers-gsph.pdf`
+- **title:** Approximate Riemann solvers for the Godunov SPH (GSPH)
+- **authors:** Kunal Puri and Prabhu Ramachandran
+- **venue:** *Journal of Computational Physics* 270:432-458, 2014
+- **doi:** [10.1016/j.jcp.2014.03.055](https://doi.org/10.1016/j.jcp.2014.03.055)
+- **relevance:** Non-iterative approximate Riemann solvers (Roe-type, HLLC, others) for GSPH, and the equivalence between GSPH's dissipative terms and signal-velocity artificial viscosity under a class of those solvers -- the formal link to AV_PLAN Phase 7b's Riemann dissipation term -- plus an explanation and cures for GSPH's wall heating. Also the comparison of solvers for the Godunov-SPH plan.
+- **abstract from:** PDF p.1 (the Crossref record carries no abstract for this DOI)
+
+> The Godunov Smoothed Particle Hydrodynamics (GSPH) method is coupled with non-iterative, approximate Riemann solvers for solutions to the compressible Euler equations. The use of approximate solvers avoids the expensive solution of the non-linear Riemann problem for every interacting particle pair, as required by GSPH. In addition, we establish an equivalence between the dissipative terms of GSPH and the signal based SPH artificial viscosity, under the restriction of a class of approximate Riemann solvers. This equivalence is used to explain the anomalous “wall heating” experienced by GSPH and we provide some suggestions to overcome it. Numerical tests in one and two dimensions are used to validate the proposed Riemann solvers. A general SPH pairing instability is observed for two-dimensional problems when using unequal mass particles. In general, Ducowicz Roe’s and HLLC approximate Riemann solvers are found to be suitable replacements for the iterative Riemann solver in the original GSPH scheme.
+
+### `rosswog2000`
+
+- **file:** `rosswog2000_merging-neutron-stars-asymmetric.pdf`
+- **title:** Merging neutron stars: asymmetric systems
+- **authors:** S. Rosswog, M. B. Davies, F.-K. Thielemann and T. Piran
+- **venue:** *Astronomy & Astrophysics* 360:171-184, 2000
+- **doi:** none (a 2000 A&A article; ADS bibcode 2000A&A...360..171R, preprint arXiv:astro-ph/0005550)
+- **relevance:** The paper behind `ViscositySwitch.Rosswog2000`. Only its Appendix A matters here: a hybrid AV with a Morris-Monaghan source-and-decay alpha (source `max(-div v (alpha_max - alpha), 0)`, `tau = h/(epsilon c)`, `epsilon = 0.2`, `alpha_max = 1.5`, `alpha_min = 0.05`), beta = 2 alpha, and a Balsara factor inside mu. The main text is a neutron-star merger study. Not the 2020 entropy trigger (`rosswog2020entropy`).
+- **abstract from:** PDF p.1 (the arXiv abstract is a different, shorter text)
+
+> We present the results of 3D, Newtonian hydrodynamic calculations of the last stages of the inspiral and the final coalescence of neutron star binary systems. Our focus is on slightly asymmetric systems, where the asymmetry stems from either different masses (1.3 and 1.4 M⊙) or spins of both components. Almost immediately after contact a fast rotating, very massive central object forms. All calculations exhibit baryonic masses above 2.3 M⊙, thus based on our calculations it is not possible to decide on the fate of the central core of the merged configuration. It might collapse immediately to a black hole, but also the creation of a supermassive neutron star with ∼ 2.8 M⊙ cannot firmly be excluded. Depending on the asymmetry of the system the central object receives a kick of several hundred kilometers per second. Different spins of both components do not jeopardize the formation of (to within numerical resolution) baryon free funnels above the poles of the central objects. In the case of different masses the less massive components get disrupted and engulf the more massive companions that stay rather unaffected by the collision. The amount of ejected material is in a similar range as for symmetric systems and could contribute substantially to the enrichment of the Galaxy with heavy r-process elements. Test calculations indicate that the amount of ejected material is basically determined by the high density behaviour of the nuclear equation of state.

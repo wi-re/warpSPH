@@ -43,6 +43,8 @@ SRC = REPO / "src"
 # the warpSPHCore_config shim the notebooks import. Anything else is
 # third-party and not this script's problem.
 FIRST_PARTY_PREFIX = "warpSPH"
+# optional first-party packages: their imports are verified only when the package is installed (`pip install -e "warpSPH/[boundaries]"`)
+OPTIONAL_PACKAGES = {"warpSPHBoundaries"}
 
 SKIP_DIRS = {"__pycache__", ".git", ".ipynb_checkpoints", "build", "dist", ".venv", "venv"}
 
@@ -188,6 +190,7 @@ def static_pass(verbose: bool) -> list[Failure]:
         return module_cache[module]
 
     checked = 0
+    skippedOptional = 0
     for path in files:
         rel = path.relative_to(REPO)
         source = notebook_source(path) if path.suffix == ".ipynb" else path.read_text(
@@ -213,6 +216,9 @@ def static_pass(verbose: bool) -> list[Failure]:
                 spec = None
                 if verbose:
                     print(f"            find_spec raised: {exc}")
+            if spec is None and module.split(".")[0] in OPTIONAL_PACKAGES:
+                skippedOptional += 1
+                continue
             if spec is None:
                 failures.append(
                     Failure(f"{rel}:{lineno}", f"no module named {module!r}", "module not found")
@@ -236,6 +242,8 @@ def static_pass(verbose: bool) -> list[Failure]:
                     Failure(f"{rel}:{lineno}", f"cannot import {symbol!r} from {module}", "symbol missing")
                 )
     print(f"[static]  checked {checked} first-party imports")
+    if skippedOptional:
+        print(f"[static]  skipped {skippedOptional} imports of optional packages that are not installed ({', '.join(sorted(OPTIONAL_PACKAGES))})")
     return failures
 
 

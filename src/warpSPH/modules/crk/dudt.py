@@ -17,10 +17,10 @@ from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
 
-from ..dissipation import DiffusionParameters, computePi_actual
+from ..dissipation import DiffusionParameters, computeFrontiereQ
 from ...configurations.crkSPH import CRKViscosity
 
-from .limiter import computeVanLeer, crkLimiter
+from ..reconstruction import limitedPairPhi, linearPairVelocity
 
 __all__ = ['computeCrkSPHdudtWarp']
 
@@ -102,69 +102,21 @@ def computeCrkSPHdudt_Func_i(
         x_ij = computeDistanceVec(xi, xj, domainState)
         r_ij = safe_sqrt(wp.dot(x_ij, x_ij))
 
-        phi_ij = scalar_t(0.0)
-        # we then have the eta terms that depends on the 'r'_ij terms which are not the distances!
-        # vx_ij = (del_b v_i^a x_ij^a x_ij^b) / (del_b v_j^a x_ij^a x_ij^b)
-        factor = scalar_t(1.0)
-        
-        if crkViscosityParams.enableCRKLimiter:
-            factor = crkLimiter(
-                x_ij,
-                hi,
-                hj,
-                kernelProperties.kernelFunction,
-                dim,
-                crkViscosityParams.eta_crit,
-                crkViscosityParams.eta_fold
-            )
-
-        if crkViscosityParams.enableVanLeerLimiter:
-            phi_ij = computeVanLeer(
-                x_ij,
-                vel_i,
-                vel_j,
-                gradV_i,
-                gradV_j
-            ) * factor
-
+        # CRKSPH's limited midpoint reconstruction (`modules/reconstruction`, AV_PLAN Phase 3): phi_ij from the van Leer
+        # limiter times the close-pair taper, unless forced off (raw velocities) or on (unlimited linear). With
+        # x_ij = x_i - x_j: v_dot_i = v_i - phi/2 J_i x_ij, v_dot_j = v_j + phi/2 J_j x_ij (garciasenz2026 Eqs. 11-12)
+        phi_ij = limitedPairPhi(
+            x_ij, hi, hj, vel_i, vel_j, gradV_i, gradV_j,
+            kernelProperties.kernelFunction, dim,
+            crkViscosityParams.enableVanLeerLimiter, crkViscosityParams.enableCRKLimiter,
+            crkViscosityParams.eta_crit, crkViscosityParams.eta_fold, crkViscosityParams.limiterType)
         if crkViscosityParams.forceVanLeerOff:
             phi_ij = scalar_t(0.0)
         if crkViscosityParams.forceVanLeerOn:
             phi_ij = scalar_t(1.0)
         phi_ij = wp.max(wp.min(phi_ij, scalar_t(1.0)), scalar_t(0.0)) # Ensure phi is between 0 and 1
-        v_corr_i = phi_ij / scalar_t(2.0) * matmul(gradV_i, x_ij)
-        v_corr_j = phi_ij / scalar_t(2.0) * matmul(gradV_j, -x_ij)
+        vij_dot = linearPairVelocity(vel_i, vel_j, gradV_i, gradV_j, x_ij, phi_ij)
 
-        v_dot_i = vel_i - v_corr_i
-        v_dot_j = vel_j + v_corr_j
-
-        pi_i = computePi_actual(
-            xi, xj, 
-            hi, hj,
-            mi, mj,
-            rhoi, rhoj,
-            True, P_i, P_j,
-            v_dot_i, v_dot_j,
-            domainState,
-            kernelProperties.kernelFunction,
-            cs_i, cs_i,
-            alpha_i, referenceAlphas[j] if viscositySwitch else scalar_t(1.0),
-            viscosityParams, 
-            False, False)
-        pi_j = computePi_actual(
-            xi, xj, 
-            hi, hj,
-            mi, mj,
-            rhoi, rhoj,
-            True, P_i, P_j,
-            v_dot_i, v_dot_j,
-            domainState,
-            kernelProperties.kernelFunction,
-            cs_j, cs_j,
-            alpha_i, referenceAlphas[j] if viscositySwitch else scalar_t(1.0),
-            viscosityParams, 
-            True, False)
-        
         gradw_i = computeKernelGradientCRK(
             xi, xj, 
             hj, hj, # forces scatter
@@ -184,24 +136,14 @@ def computeCrkSPHdudt_Func_i(
         if useGradientRenormalization:
             gradw_j = matmul(Li, gradw_j)
 
-        smooth_i = hi / sphKernelScale(kernelProperties.kernelFunction, dim)
-        smooth_j = hj / sphKernelScale(kernelProperties.kernelFunction, dim)
-
-        eta_i = x_ij / smooth_i
-        eta_j = x_ij / smooth_j
-
-        vij_dot = v_dot_i - v_dot_j
-        mu_ij = (wp.dot(vij_dot, eta_i)) / (wp.dot(eta_i, eta_i) + scalar_t(1.0e-7) * smooth_i * smooth_i)
-        mu_ji = (wp.dot(vij_dot, eta_j)) / (wp.dot(eta_j, eta_j) + scalar_t(1.0e-7) * smooth_j * smooth_j)
-
-        mu_ij = wp.min(scalar_t(0.0), mu_ij)
-        mu_ji = wp.min(scalar_t(0.0), mu_ji)
-
-        Cl = viscosityParams.C_l
-        Cq = viscosityParams.C_q        
-    
-        Q_i = rhoi * (-Cl * cs_i * mu_ij + Cq * mu_ij * mu_ij)
-        Q_j = rhoj * (-Cl * cs_j * mu_ji + Cq * mu_ji * mu_ji)
+        # Frontiere et al. (2017) Eq. (69) one-sided viscous pressures Q_i, Q_j of the reconstructed pair velocity;
+        # the formula (mu with the particle's own h, eps^2 = 1e-2, min(0, .), switched alpha / BetaMode) lives once in the
+        # `Frontiere2017` term of `modules/dissipation/pi/terms.py`
+        alpha_j = access_optional(referenceAlphas, j, viscositySwitch, scalar_t(1.0))
+        Q_i = computeFrontiereQ(xi, xj, hi, hj, rhoi, rhoj, vij_dot, domainState, kernelProperties.kernelFunction,
+                                cs_i, cs_j, alpha_i, alpha_j, viscosityParams, False)
+        Q_j = computeFrontiereQ(xi, xj, hi, hj, rhoi, rhoj, vij_dot, domainState, kernelProperties.kernelFunction,
+                                cs_i, cs_j, alpha_i, alpha_j, viscosityParams, True)
 
         # gradw_ij = 0.5*(gradw_i - gradw_j) mirrors accel.py's 0.5*(gradw_i + (-gradw_j))
         # same deltagrad as the force — required for energy-momentum consistency
@@ -210,9 +152,6 @@ def computeCrkSPHdudt_Func_i(
         # omegaj = referenceOmegas[j] if useGradHTerms else scalar_t(1.0)
         # pressureTerm_j = Pj / (rhoj*rhoj) / omegaj
         
-        u_ij = v_dot_j - v_dot_i
-        ux_ij = wp.dot(u_ij, x_ij) / (r_ij + scalar_t(1.0e-14) * hi)
-        mu_ij = ux_ij #/ (r_ij + scalar_t(1.0e-14) * hi)
         mu_ij = scalar_t(1.0)
 
         # note that the term here should be multiplied with rho_i if it was a gradient operation
@@ -231,8 +170,11 @@ def computeCrkSPHdudt_Func_i(
         # Q_i = pi_i * rho_bar / rhoj * rhoi
         # Q_j = pi_j * rho_bar
 
-        pTerm = Pj * dot * Vi * Vj / mi
-        vTerm = scalar_t(1.0/2.0) * (Q_i + Q_j) * mu_ij * dot * Vi * Vj / mi
+        pairWeight = Vi * Vj
+        if crkViscosityParams.meanVolumeWeights:
+            pairWeight = scalar_t(0.25) * (Vi + Vj) * (Vi + Vj)
+        pTerm = Pj * dot * pairWeight / mi
+        vTerm = scalar_t(1.0/2.0) * (Q_i + Q_j) * mu_ij * dot * pairWeight / mi
 
         # apparentVolume = mj/rhoj
         # pTerm = - apparentVolume * pressureTerm_i * rhoj * dot

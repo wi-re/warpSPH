@@ -147,7 +147,9 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
             densityDiffusionTerm: str = None, mdbcDensityScheme: str = None,
             pressureForceRenormalized: bool = False,
             jitter: float = 0.0, seed: int = 1, cudaGraph: bool = True,
-            pipeline: bool = True, show: bool = True):
+            pipeline: bool = True, show: bool = True, watch: dict = None,
+            flagIsolated: bool = True, maskDiagnostics: bool = False, freezeMask: bool = False,
+            timeCentredContinuity: bool = None):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
@@ -184,7 +186,11 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
           + (f'_pft-{pressureForceTerm}' if pressureForceTerm else '')
           + (f'_ddt-{densityDiffusionTerm}' if densityDiffusionTerm else '')
           + (f'_mdbcRho-{mdbcDensityScheme}' if mdbcDensityScheme else '')
-          + (f'_j{seed}' if jitter > 0.0 else ''))
+          + (f'_j{seed}' if jitter > 0.0 else '')
+          + ('' if flagIsolated else '_noFlagIsolated')
+          + ('_maskDiag' if maskDiagnostics else '') + ('_freezeMask' if freezeMask else '')
+          + ('_tcc' if timeCentredContinuity else '')
+          + ('_notcc' if timeCentredContinuity is False else ''))
     runRoot = os.path.join(out, tag + '_run')
 
     # Marrone reports each signal area-integrated over a phi = 90 mm probe disc
@@ -221,6 +227,9 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
         # no live window -> frames render on a worker thread (runner.py:_RenderThread)
         show=show,
     )
+    # velocity alarm + stall watchdog (`--velocityAlarm*`, `--stall*`;
+    # README "Watching a run")
+    kw.update(watch or {})
     if kernel:
         kw['kernel'] = kernel
     if integrationScheme:
@@ -270,11 +279,43 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
         def _cfg4(ctx, _t=mdbcDensityScheme, _p=_prevCfg4):
             _p(ctx); ctx.schemeConfig.mdbcDensityScheme = _t
         dambreakCase.configureScheme = _cfg4
+    if timeCentredContinuity is not None:
+        # CEILING_STICKING_PLAN.md §3: continuity advanced with the positions'
+        # time-centred velocity under symplecticEuler (explicit on/off; None
+        # leaves the config default)
+        _prevCfgTcc = dambreakCase.configureScheme
+        def _cfgTcc(ctx, _p=_prevCfgTcc, _v=bool(timeCentredContinuity)):
+            _p(ctx); ctx.schemeConfig.timeCentredContinuity = _v
+        dambreakCase.configureScheme = _cfgTcc
     if pressureForceRenormalized:
         _prevCfg5 = dambreakCase.configureScheme
         def _cfg5(ctx, _p=_prevCfg5):
             _p(ctx); ctx.schemeConfig.pressureForceRenormalized = True
         dambreakCase.configureScheme = _cfg5
+
+    if not flagIsolated:
+        # A/B of the shared detector's isolated-row flag (OPEN_PROBLEMS §8)
+        _prevCfgIso = dambreakCase.configureScheme
+        def _cfgIso(ctx, _p=_prevCfgIso):
+            _p(ctx); ctx.schemeConfig.surfaceDetectionConfig.flagIsolated = False
+        dambreakCase.configureScheme = _cfgIso
+    if maskDiagnostics or freezeMask:
+        # OPEN_PROBLEMS.md §1 step 1: the Antuono switch's surface mask --
+        # flip counts per step (within / between steps) as trajectory columns,
+        # and optionally the mask frozen across the step's stages. Both eager.
+        _prevCfg6 = dambreakCase.configureScheme
+        def _cfg6(ctx, _p=_prevCfg6):
+            _p(ctx)
+            ctx.schemeConfig.surfaceMaskDiagnostics = bool(maskDiagnostics)
+            ctx.schemeConfig.freezeSurfaceMaskAcrossStages = bool(freezeMask)
+        dambreakCase.configureScheme = _cfg6
+        if maskDiagnostics:
+            _diag = dambreakCase.diagnostics
+            def _maskDiag(ctx, state, _d=_diag):
+                row = dict(_d(ctx, state)) if _d is not None else {}
+                row.update(getattr(ctx.schemeConfig, '_surfaceMaskStats', None) or {})
+                return row
+            dambreakCase.diagnostics = _maskDiag
 
     if jitter > 0.0:
         # independent realisations (MDBC_CONTACT_LINE_PLAN.md §12, same as
@@ -298,7 +339,8 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
 
     rows = [x for x in r.trajectory if x.get('step', -2) >= -1]
     keys = ['step', 't', 'tStar', 'kineticEnergy', 'maxVelocity',
-            'minDensity', 'maxDensity', 'nPenetrating', 'maxPenetrationDx']
+            'minDensity', 'maxDensity', 'nPenetrating', 'maxPenetrationDx',
+            'maskSurface', 'maskFlipsIntraStep', 'maskFlipsStepToStep']
     for k in range(len(SENSORS)):
         keys += [f'pProbe{k}', f'pProbe{k}Star', f'pProbe{k}Nnbr',
                  f'pProbe{k}In1Star', f'pProbe{k}ShepStar']
@@ -321,6 +363,10 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
         # Read back off the resolved config, not off the CLI flag -- the whole
         # reason Sec. 5.1.1 exists is that what this case *actually* ran was not
         # what its spec table said it ran.
+        # effective noPen placement / density drift field (defaults flipped
+        # 2026-09-29, CEILING_STICKING_PLAN.md §7.2), read off the resolved config
+        noPenShiftMode=str(getattr(r.ctx.schemeConfig, 'mdbcNoPenShiftMode', '?')),
+        timeCentredContinuity=bool(getattr(r.ctx.schemeConfig, 'timeCentredContinuity', False)),
         shiftActive=bool(getattr(r.ctx.schemeConfig.shiftProperties, 'active', False)),
         shiftScheme=str(getattr(r.ctx.schemeConfig.shiftProperties, 'scheme', '?')),
         sun2017Eq7Shift=bool(getattr(r.ctx.schemeConfig.shiftProperties,
@@ -523,6 +569,27 @@ def _score(col):
     return checks, m
 
 
+
+def _variantTag(npzPath, meta=None):
+    """Legend suffix for the run variants the physics label cannot see: the
+    noPen placement, the density drift field and the jitter seed. Read off the
+    run's meta when it records them (runs from 2026-09-29 on); older runs from
+    the file name (`_nopen-<mode>`, `_tcc`, `_j<seed>`), where a missing
+    `_nopen-` meant the then-default 'finalize' and a missing `_tcc` no drift."""
+    import re
+    meta = meta or {}
+    b = os.path.basename(npzPath)
+    m = re.search(r'_nopen-([a-z]+)', b)
+    mode = meta.get('noPenShiftMode') or (m.group(1) if m else 'finalize')
+    tcc = meta['timeCentredContinuity'] if 'timeCentredContinuity' in meta else ('_tcc' in b)
+    parts = [f"noPen {mode}"]
+    if tcc:
+        parts.append('drift ρ')
+    j = re.search(r'_j(\d+)', b)
+    if j:
+        parts.append(f'seed {j.group(1)}')
+    return '  [' + ', '.join(parts) + ']'
+
 def _report(out: str):
     import numpy as np
     import matplotlib
@@ -533,6 +600,7 @@ def _report(out: str):
     for npz in sorted(glob.glob(os.path.join(out, '*.npz'))):
         d = np.load(npz, allow_pickle=True)
         meta = json.loads(str(d['meta']))
+        meta['_variant'] = _variantTag(npz, meta)
         runs.append((meta, {k: d[k] for k in d.files if k != 'meta'}))
     if not runs:
         print(f'no .npz runs under {out}', file=sys.stderr)
@@ -570,7 +638,8 @@ def _report(out: str):
         else:
             pst = 'δ⁺ ⅛·Eq.(7)'
         return (f"{pst}, {'frozen' if frozen else 'un-frozen'} diff.  "
-                f"H/Δx={meta['HdxRatio']:.0f}  c₀/√(gH)={meta['c0Ratio']:g}")
+                f"H/Δx={meta['HdxRatio']:.0f}  c₀/√(gH)={meta['c0Ratio']:g}"
+                + meta.get('_variant', ''))
 
     palette = ['#0353a4', '#c1121f', '#2a9d8f', '#e76f51', '#6a4c93', '#8d99ae']
     colours = {runLabel(m): palette[i % len(palette)]
@@ -614,7 +683,18 @@ def _report(out: str):
                for psm in [_trace(col, k)[2]] if psm.size]
         top += [p[1] for p in BUCHNER[s]]
         if top:
-            ax.set_ylim(min(0.0, float(np.nanmin(top))), float(np.nanmax(top)) * 1.35)
+            # ...and cap at the acceptance gate for a spike (P1 first peak /
+            # P2 raw overshoot): one run's smoothed trace far past it (a kicked
+            # particle sitting on the probe) would otherwise flatten the rest;
+            # it is named in the panel instead.
+            cap = ACCEPT['p1_first_peak_max'] if k == 0 else ACCEPT['p2_overshoot_max']
+            hi = min(float(np.nanmax(top)) * 1.35, cap)
+            ax.set_ylim(min(0.0, float(np.nanmin(top))), hi)
+            off = [f"{runLabel(_meta).split('[')[-1].rstrip(']') if '[' in runLabel(_meta) else runLabel(_meta)}: {np.nanmax(psm):.1f}"
+                   for _meta, col in runs for psm in [_trace(col, k)[2]] if psm.size and np.nanmax(psm) > hi]
+            if off:
+                ax.text(0.99, 0.97, 'off scale (smoothed max): ' + '; '.join(off), transform=ax.transAxes,
+                        ha='right', va='top', fontsize=7, color='#9b2226')
     axes[1].set_xlabel('t*  =  t √(g/H)')
     axes[1].set_xlim(2, max(8.0, max(np.nanmax(c['tStar']) for _, c in runs)))
     fig.suptitle('Marrone et al. 2011 §3.1 — dam break against a vertical wall\n'
@@ -823,8 +903,8 @@ def main():
                          "explicitly and is unstable for WCSPH "
                          "(DELTASPH_VALIDATION_PLAN.md 5.3).")
     ap.add_argument('--noPenShift', default=None,
-                    choices=('derivative', 'finalize', 'off'),
-                    help="mDBC no-penetration correction placement: 'derivative' (in dvdt, historical), 'finalize' (once per step, DualSPHysics-style velocity replacement) or 'off'. DualSPHysics gates this term on SlipMode>=NoSlip, i.e. never applies it under free slip -- which is what Marrone 2011 Sec. 3 specifies. DELTASPH_VALIDATION_PLAN 5.9.")
+                    choices=('derivative', 'finalize', 'impulse', 'off'),
+                    help="mDBC no-penetration correction placement: 'derivative' (in dvdt, historical), 'finalize' (once per step, DualSPHysics-style velocity replacement), 'impulse' (once per step, added to the integrated velocity; CEILING_STICKING_PLAN.md §7) or 'off'. DualSPHysics gates this term on SlipMode>=NoSlip, i.e. never applies it under free slip -- which is what Marrone 2011 Sec. 3 specifies. DELTASPH_VALIDATION_PLAN 5.9.")
     ap.add_argument('--wallBC', default=None,
                     choices=('constant', 'freeSlip', 'noSlip', 'extended', 'zeros'),
                     help="tank wall boundary condition. Default (case-level) is 'freeSlip', which is what Marrone 2011 Sec. 3 specifies. 'constant' is the pre-2026-09-21 default and is NOT free slip -- it leaves the wall at v=0 while the AllToAll artificial viscosity drags against it, i.e. an effective no-slip bed; pass it to reproduce a pre-flip number. DELTASPH_VALIDATION_PLAN 5.7.")
@@ -885,6 +965,21 @@ def main():
                          'frames on a worker thread instead (faster, same frames)')
     ap.add_argument('--report', action='store_true',
                     help='(re)build plots + REPORT.md from existing .npz runs')
+    ap.add_argument('--noFlagIsolated', action='store_true',
+                    help="don't flag isolated rows as free surface (SurfaceDetectionConfig."
+                         'flagIsolated=False) -- A/B of OPEN_PROBLEMS §8')
+    ap.add_argument('--surfaceMaskDiagnostics', action='store_true',
+                    help='OPEN_PROBLEMS §1 step 1: count Antuono surface-mask flips per step '
+                         '(maskFlipsIntraStep / maskFlipsStepToStep columns); eager')
+    ap.add_argument('--timeCentredContinuity', action=argparse.BooleanOptionalAction, default=None,
+                    help='density as a drift field (schemeConfig.timeCentredContinuity, default on '
+                         'since 2026-09-29; CEILING_STICKING_PLAN.md §3/§6). Unset = config default; '
+                         '--no-timeCentredContinuity for the old kick-attached density')
+    ap.add_argument('--freezeSurfaceMask', action='store_true',
+                    help="reuse the step's first-stage surface mask at its later stages "
+                         '(schemeConfig.freezeSurfaceMaskAcrossStages); eager')
+    from _runWatch import addWatchArguments, watchOverrides
+    addWatchArguments(ap)
     args = ap.parse_args()
 
     if args.report:
@@ -896,7 +991,10 @@ def main():
             args.integrationScheme, args.noPenShift, args.wallBC,
             args.pressureForceTerm, args.densityDiffusionTerm,
             args.mdbcDensityScheme, args.pressureForceRenormalized,
-            args.jitter, args.seed, args.cudaGraph, args.pipeline, args.show)
+            args.jitter, args.seed, args.cudaGraph, args.pipeline, args.show,
+            watch=watchOverrides(args), flagIsolated=not args.noFlagIsolated,
+            maskDiagnostics=args.surfaceMaskDiagnostics, freezeMask=args.freezeSurfaceMask,
+            timeCentredContinuity=args.timeCentredContinuity)
 
 
 if __name__ == '__main__':

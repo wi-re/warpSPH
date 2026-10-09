@@ -31,7 +31,8 @@ and the visualisation in [`warpSPHPlotting`](https://github.com/wi-re/warpSPHPlo
 
 - [Install](#install)
 - [Quick start](#quick-start)
-- [Running cases](#running-cases) — the CLI, config files, output, plots, reports
+- [Running cases](#running-cases) — the CLI, config files, output, plots, reports,
+  [watching a run](#watching-a-run) (velocity alarm, stall watchdogs)
 - [The cases](#the-cases) — what ships, and which example each came from
 - [Writing a case](#writing-a-case)
 - [From Python and notebooks](#from-python-and-notebooks)
@@ -39,6 +40,7 @@ and the visualisation in [`warpSPHPlotting`](https://github.com/wi-re/warpSPHPlo
 - [Package layout](#package-layout)
 - [Tests](#tests)
 - [Contributing](CONTRIBUTING.md) — dev setup, nbstripout, what to run before committing
+- [Plans](PLANS.md) — which plan is active, priorities, per-plan progress markers
 - [Gallery](#gallery)
 - [Precision, and other things that bite](#precision-and-other-things-that-bite)
 
@@ -257,7 +259,83 @@ exits non-zero**, so a shell script can tell.
 `--quiet` / `-q` suppresses banner, report and progress bar (and warp's
 per-module load logging). The progress bar is on only when a terminal is
 watching — redirected to a file it would bury the report under carriage returns
-— and `--progress` forces it back on.
+— and `--progress` forces it back on, also under `--quiet` (no banner, rows
+still streaming: what the probe scripts use). The row is redrawn at most ~10
+times a second; mid-run messages (stop reasons, the velocity alarm) are
+written above the bar on a line of their own.
+
+### Watching a run
+
+A run that goes wrong without going non-finite used to look healthy: one
+runaway particle at 1e5 m/s pins the global CFL `dt` at its floor, simulated
+time stops advancing, and the run reports `diverged=False` after hours. Two
+kinds of guard exist, and they do different things:
+
+| Guard | Fields / flags | Does |
+|---|---|---|
+| **Velocity alarm** (`runner/velocityAlarm.py`) | `velocityAlarmFactor` (default **100**), `velocityScale` | **Flags, never stops** (unless asked, below): when `max \|v\|` exceeds the factor × the expected velocity it prints a `[warpSPH] VELOCITY ALARM raised …` line naming the fastest particle (index, uid, position) and `dt`; again at every further 10×; and `… cleared` when it drops below half the threshold. On by default everywhere. |
+| — reaction: closer frames | `velocityAlarmPlotInterval` | While the alarm is active, draw a frame every N steps (needs `--plot`), so the video shows the runaway step by step; the normal `plotInterval` returns when it clears. |
+| — reaction: hard ceiling | `velocityAlarmStopRatio` | Stop once `max \|v\|` passes this multiple of the expected velocity. Unset by default. |
+| **Stall watchdogs** | `stallProgress` (fraction of `tLimit` per 1000 steps), `stallDtSteps` (steps with `dt` at `minDt`) | **Stop** a run whose simulated time has frozen. Off by default in `CaseSpec`. |
+
+The **expected velocity** is, in order: `--velocityScale`; the case's own
+(`ctx.velocityScale`, set in its setup hooks — `dambreak`: `referenceVelocity`
+or `sqrt(2 g H)`; `hydrostaticColumn`: `sqrt(g H)`); else the largest of the
+initial `max |v|`, a compressible scheme's initial sound speed, a weakly
+compressible scheme's `c0 / 10`, ACSPH's `uChar`. The banner's `watch` row says
+which one it used, or that the alarm is off (an incompressible run started
+from rest in a case that declares nothing). A case that knows its scale should
+set `ctx.velocityScale` / `ctx.velocityScaleSource` in `initialConditions`.
+
+The check reuses the one `max |v|` read the runner already does for its
+non-finite check, so it adds no GPU sync per step and changes no result.
+
+**From the command line** — every field above is a `warpsph-run` flag, and a
+`--config` key:
+
+```bash
+warpsph-run dambreak --scheme artificialCompressible --plot --video \
+    --velocityAlarmPlotInterval 1 --stallProgress 1e-3
+```
+
+**From a probe script** — `scripts/_runWatch.py` adds the same flags with
+probe defaults (alarm at 100×, frames every step while active,
+`stallProgress 1e-3`); `probe_deltaSPHMarrone.py` and `probe_contactLine.py`
+use it:
+
+```python
+from _runWatch import addWatchArguments, watchOverrides   # scripts/ is on sys.path
+addWatchArguments(ap)             # after the script's own flags
+args = ap.parse_args()
+...
+r = run(case, **kw, **watchOverrides(args))
+```
+
+**From Python** — anything more than the two built-in reactions goes in a
+callback, called on every raise, escalation, clear and stop:
+
+```python
+def onAlarm(ctx, state, event):
+    # event: kind ('raised'|'escalated'|'cleared'|'stop'), step, t, vmax, ratio,
+    #        scale, dt, and for a raise/escalation the fastest particle's
+    #        index, uid, particleKind, position
+    if event['kind'] == 'raised':
+        runaways.append((event['t'], event.get('uid'), event.get('position')))
+    return event['ratio'] > 1e5             # True stops the run
+
+r = run(case, velocityAlarmPlotInterval=1, onVelocityAlarm=onAlarm)
+r.velocityAlarms   # every event, in order
+r.stopReason       # why it stopped early (watchdog, non-finite, alarm), else None
+```
+
+Hooks can also read the active event from `ctx.scratch['velocityAlarm']`
+(`None` when quiet). **Watching a log from outside** (a second terminal, a
+Claude Code `Monitor`): grep for the fixed prefix, together with the stop
+lines and the failure signatures:
+
+```bash
+tail -f run.log | grep -E --line-buffered "VELOCITY ALARM|stopping|stops the run|non-finite|Traceback"
+```
 
 ---
 
@@ -301,6 +379,9 @@ notebooks stay for exploration; the scripts are what you run unattended.
 | `drivenSquare` | [11-driven-square.py](examples/weaklyCompressible/11-driven-square.py) | driven channel flow past a cylinder |
 | `dambreak` | [12-dambreak.py](examples/weaklyCompressible/12-dambreak.py) | dam break with optional obstacle |
 | `openFlow` | [13-open-flow.py](examples/weaklyCompressible/13-open-flow.py) | open channel flow past an obstacle |
+
+**Analytic walls (optional).** With the optional package `warpSPHBoundaries` installed (`pip install -e "warpSPH/[boundaries]"`), `dambreak --wallRepresentation analytic` replaces the tank's wall particles by exact
+kernel integrals over the solid (obstacles, mixed scenes, Michel / implicit shifting, free bodies and the whole-step graph included); see [ANALYTIC_BOUNDARIES_PLAN.md](ANALYTIC_BOUNDARIES_PLAN.md).
 
 ### Incompressible (DFSPH)
 
@@ -469,6 +550,15 @@ converted to `targetNeighbors`), `periodic`.
 `Scatter`, `MeanSymmetric`, `KernelMeanSymmetric`, `SuperSymmetric`,
 `PartialSymmetric`), `gradientMode`, `laplacianMode`, `samplingScheme`.
 
+**The reference dissipation configuration** (AV_PLAN, 2026-10-08) of the Monaghan host
+(`scheme='Monaghan'`) is its default: the Rosswog (2020) entropy trigger at alpha in [0, 1], the
+`Price2012_98` operator with `C_q = 2` coupled to alpha (beta = 2 alpha, Chen & Nixon 2025), and the
+limited midpoint reconstruction of the pair velocity (Frontiere et al. 2017 / García-Senz & Cabezón 2026).
+*This is the reference SPH dissipation configuration against which future hydrodynamic operators are
+compared.* A case that names a `viscositySwitch` gets that switch with its own defaults; CompSPH and
+CRKSPH keep their own operators (no switch by default). Evidence:
+[docs/av/sweep_2026-10-08/](docs/av/sweep_2026-10-08/verdict.md), AV_PLAN's status board.
+
 **Time integration** — `integrationScheme` selects from 26 schemes in
 `warpSPHIntegrators` (`forwardEuler`, `rungeKutta2/3/4`, `leapFrog`,
 `velocityVerlet`, `symplecticEuler`, `sspRK3`, `dormandPrince`, …), with
@@ -478,7 +568,10 @@ compressible ones from a target timestep and the sound speed together.
 
 **Compressible scheme options**, on the scheme config rather than the global one:
 `ViscositySwitch` (`Balsara1995`, `Colagrossi2004`, `CullenDehnen2010`,
-`CullenHopkins`, `MorrisMonaghan1997`, `Rosswog2000`, `NoneSwitch`),
+`CullenHopkins`, `MorrisMonaghan1997`, `Rosswog2000`, `Rosswog2020`, `Sphenix2022`,
+`Wadsley2017`, `ReadHayfield2012`, `NoneSwitch`), the pair-velocity reconstruction
+(`DiffusionParameters.velocityPairPolicy`: `Raw`, `Linear`, `Limited`, `BalsaraLimited`) and the
+quadratic-coefficient policy (`betaMode`: `Coupled`, `Fixed`),
 `AdaptiveSupportScheme` (`NoScheme`, `Monaghan`, `Owen`), and `EnergyScheme`
 (`equalWork`, `PdV`, `diminishing`, `monotonic`, `hybrid`, `CRK`).
 

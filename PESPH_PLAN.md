@@ -1,5 +1,7 @@
 # warpSPH — pressure-based SPH (PESPH) plan
 
+> **Progress marker:** this plan's row in [PLANS.md](PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
+
 ## Why this exists
 
 `schemes/` currently has three compressible schemes: `monaghan.py`, `compSPH.py` and
@@ -105,7 +107,9 @@ Checked 2026-09-15. Substantially more than expected:
 | Scheme registration | ✅ ~10-line `SchemeBundle` (`schemes/builder.py:97`) + one `CompressibleSPHScheme` enum entry |
 | Validation cases | ✅ `caseUtils/compressible/`: sod, sedov, noh, kidder, gresho, yeeVortex, kelvinHelmholtz, rayleighTaylor, triplePoint, hydrostatic, blob — **Frontiere's own test battery** |
 
-### 2.1 Two state-field bugs found during the audit
+### 2.1 Two state-field bugs found during the audit — **FIXED 2026-09-30 (AV_PLAN S2 step 2)**
+
+> `entropies` is now tagged `'entropy'` and `pressures` `'pressure'` in both `systems/compressibleMonaghan.py` and `systems/compSPH.py`; nothing consumed the old tags. The text below is the original finding.
 
 `systems/compressibleMonaghan.py:36-39`:
 
@@ -265,12 +269,15 @@ this plan.
 
 ## 5. Implementation phases
 
-### Phase 0 — groundwork (~1 day)
+### Phase 0 — groundwork (~1 day) — **DONE 2026-10-09**
 
-- Wire `modules/eos/gas.py` into `eos/__init__.py`; it already has every `A ↔ (u,P,c_s)`
-  conversion PESPH-A needs and is currently unreachable.
-- Fix the `entropies` / `pressures` tags (§2.1).
-- Add `CompressibleSPHScheme.PESPH` and the `PESPHVariant` enum.
+- ~~Wire `modules/eos/gas.py` into `eos/__init__.py`.~~ **Not needed (2026-10-09 finding):** `gas.py` is a dead duplicate;
+  the live `idealGasEOS(A, u, P, rho, gamma)` (`modules/eos/idealGas.py`, used by every case builder) already converts
+  `A ↔ (u, P, c_s)` in every direction. Round trip tested (`tests/test_numberDensitySupport.py`, float64, 1e-12).
+  `gas.py` left in place; deleting it is the user's call.
+- Fix the `entropies` / `pressures` tags (§2.1) — done 2026-09-30 (AV_PLAN S2).
+- `CompressibleSPHScheme.PESPH = 5` and `PESPHVariant.{PressureEnergy, PressureEntropy}` added; `buildScheme` raises
+  `NotImplementedError` for PESPH until Phase 4.
 
 **Gate.** Existing schemes unchanged; full suite green. `idealGas(..., EOSSource.specificEntropy)`
 round-trips `A → (u,P,c_s) → A` to roundoff.
@@ -286,7 +293,15 @@ EOS pressure to kernel-normalization accuracy; the two variants agree on a state
 
 ### Phase 2 — grad-h and the number-density h-solve (~3-4 days, **the risk item**)
 
-- Number-density-driven `evaluateOptimalSupport` variant.
+- [x] Number-density-driven `evaluateOptimalSupport` variant — **done 2026-10-09**: `AdaptiveSupportScheme.NumberDensity`
+  = the Monaghan Newton iteration with every mass set to 1, so `rho` is `n_i = Σ_j W_ij` and the constraint is
+  `h = η n^(-1/d)`; the existing `computeOmegaWarp` is then exactly the Newton derivative (quadratic convergence
+  observed, residual 1e-2 → 2e-4 → 0 in three iterations on a jittered 2D lattice). Equal masses reproduce the
+  mass-density solve to 1e-4; unequal masses leave `h` and `n` untouched (h differs from the mass solve by up to
+  33 % on masses spread 1-4x). Returns `rho_i = m_i n_i` and the per-iteration `n_i`. Finding: **Owen's solver was
+  already mass-independent** (its statistic is a kernel sum without masses) but its fixed point is a lattice-calibrated
+  gradient statistic, not `n h^d = const`, so it would not be consistent with G.8/G.9; hence the Newton route.
+  Gather mode (`n_i = Σ W(r_ij, h_i)`, as G.2/G.3) is what the PESPH scheme will request.
 - `∂n_i/∂h_i` (G.8) and `∂P̄_i/∂h_i` (G.9) in a `computeOmega`-shaped kernel.
 - Assemble `f_ij` (G.7) — under its new non-colliding name (§1.3).
 
@@ -525,7 +540,7 @@ audit row that assumes a validated C&D switch.
 
 ## Status
 
-**Not started.** Plan written 2026-09-15 from Frontiere et al. (2017) Appendix G and
+**Phase 0 and Phase 2's number-density solve done 2026-10-09** (user: the AV gate is minor; MFM/GIZMO parity is the longer-term goal and is tracked elsewhere; MHD is only a thought, not planned). Next: Phase 1 (`P̄_i` by summation), then `∂n/∂h`, `∂P̄/∂h` and `f_ij`. Plan originally written 2026-09-15 from Frontiere et al. (2017) Appendix G and
 Hopkins (2015) Appendix F2, cross-checked against the existing `compSPH`/`crkSPH`
 implementations. The §2 audit and the §2.1 tag bugs are verified against the code as of
 this date; the §5 estimates are not yet tested against any implementation work.

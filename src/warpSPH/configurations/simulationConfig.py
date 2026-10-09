@@ -79,11 +79,26 @@ class SimulationConfig:
     #: Derived from `n_h` and `dim` by `buildSimulationConfig`; the literal
     #: default here assumes dim=2 and exists only for a bare `SimulationConfig()`.
     targetNeighbors: int = field(default_factory=lambda: n_h_to_nH(4, 2))
-    #: Scale every kernel value and derivative by `1 / L(kernel, n_h, dim)` so a
-    #: defect-free lattice measures `rho0` exactly. Off by default: it changes
-    #: the operators, and the mass-side calibration
-    #: (`cases/weaklyCompressible.calibrateRestDensityMasses`) currently absorbs
-    #: the same offset. Meaningful only at uniform resolution.
+    #: Upper-bound fluid rows' h at `n_h (m/rho)^(1/d)` after every adaptive-support solve
+    #: (`modules/adaptiveSupport/optimalSupport.py`, 013a22f; added for the compressible walls'
+    #: frozen outer rows): 'always', 'walls' (only when the state has wall rows) or 'off'.
+    #: Default 'walls' (user, 2026-10-06, OPEN_PROBLEMS §20): with the old Owen table the bound sat
+    #: ~2 % below Owen's 2D h, so 'always' capped every fluid row -- in effect h = h(rho) -- which
+    #: degraded smooth / shear flow (Gresho angular-momentum loss +30-85 %, C&D KH growth -18 %).
+    #: (The schemes re-sum rho at the final h, so this is the h definition, not a rho-h mismatch.)
+    supportVolumeClamp: str = 'walls'
+    #: Scale the kernel by `1 / L(kernel, n_h, dim)` so a defect-free lattice measures `rho0` exactly
+    #: (`L` is the lattice-quadrature offset of the kernel sum: `int W dV = 1` does not make
+    #: `sum_j m_j W_ij = rho0`). Off by default; meaningful only at uniform resolution.
+    #:
+    #: **Applied to the summation density only** (`modules/density/density.py`). The gradient,
+    #: divergence, Laplacian, curl and interpolation operators (~130 `OperationProperties(...)` call
+    #: sites) keep the unscaled kernel. From a theoretical SPH point of view the same offset
+    #: touches every kernel sum, and a consistent correction would scale all of them (via a
+    #: `propsFromConfig` helper instead of editing each site). That is deliberately not done: once the
+    #: sampler's mass fix landed (`sample/regular.py`) the remaining offset is tiny (<= 0.04 % on
+    #: sloshingTank), so the change to the core operators is not worth its churn and risk. Decision
+    #: 2026-10-01 (user); background in `docs/historic_plans/LATTICE_DENSITY_PLAN.md`.
     calibrateNormalization: bool = False
     #: The D&A (2012) eq. 18/19 density self-term correction (subtract
     #: `eps m W(0, h)` from the finished raw estimate). A sibling of

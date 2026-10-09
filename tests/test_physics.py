@@ -276,12 +276,15 @@ def test_sodNDRejectsASlabNarrowerThanItsKernel():
 # --- the three compressible solvers, as comparison runs ----------------------
 
 #: Total-energy drift each solver is allowed over 20 steps. CompSPH is
-#: energy-conserving by construction and measures exactly 0; CRKSPH is
-#: conservative to round-off. Monaghan is *not* an energy-conserving
-#: discretisation -- its artificial viscosity and conductivity are dissipative
-#: by design -- so it gets a loose bound that still catches a solver that has
-#: stopped integrating anything.
-_ENERGY_DRIFT = {'CompSPH': 1e-5, 'CRKSPH': 1e-4, 'Monaghan': 5e-3}
+#: energy-conserving by construction and measures exactly 0; CRKSPH and Monaghan
+#: are conservative to time-integration round-off (~1e-6 here). Artificial
+#: viscosity and conductivity *convert* kinetic into thermal energy -- they do
+#: not change the total -- so none of the three gets slack for them. (Monaghan
+#: used to be budgeted 5e-3 on the belief that dissipation makes it
+#: non-conservative; that slack hid a factor-2 error in its viscous heating,
+#: OPEN_PROBLEMS section 16, resolved 2026-09-30. The per-piece guard is
+#: `tests/test_monaghanEnergy.py`.)
+_ENERGY_DRIFT = {'CompSPH': 1e-5, 'CRKSPH': 1e-4, 'Monaghan': 1e-4}
 
 
 @pytest.fixture(scope='module', params=sorted(_ENERGY_DRIFT))

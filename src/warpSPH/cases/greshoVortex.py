@@ -22,7 +22,8 @@ __all__ = ['greshoVortexCase', 'GRESHO_FIELDS']
 
 def buildSystem(ctx: RunContext):
     return sampleGreshoVortex(ctx.spec.nx, ctx.config, ctx.schemeConfig,
-                              ctx.SimulationState, ctx.SimulationSystem)
+                              ctx.SimulationState, ctx.SimulationSystem,
+                              cuspWidth=ctx.param('cuspWidth'))
 
 
 #: The two panels, exported so a notebook can pass them to
@@ -59,7 +60,8 @@ greshoVortexCase = registerCase(Case(
         plotInterval=1,
         storeInterval=500,
     ),
-    params=dict(COMPRESSIBLE_PARAMS, markerSize=4),
+    # cuspWidth > 0: smoothed-cusp variant (see `greshoProfile`); 0 = the standard profile
+    params=dict(COMPRESSIBLE_PARAMS, markerSize=4, cuspWidth=0.0),
 ))
 
 

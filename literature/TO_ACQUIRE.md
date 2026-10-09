@@ -139,3 +139,19 @@ Not needed to build anything; useful when writing up results against the field.
    risk item.
 4. **Owen 2014** — needed to touch `compSPH`/`crkSPH` safely.
 5. **Rosswog 2020 (MAGMA2)** — the §7.5 upgrade that pays off under either direction.
+
+---
+
+## Godunov-SPH set (added 2026-10-08, for `GODUNOV_SPH_PLAN.md`)
+
+`inutsuka2002`, `cha2003`, `toro2009`, `vanleer1979`, `hopkins2013/2015` are on disk and carry the equations. These four are the
+ones that settle the *implementation choices* the 2002/2003 papers leave open (which variables get a limiter, kernel gradient
+vs Gaussian convolution, the time-centred second-order step, comparison of solvers). DOIs and volume/pages below were checked
+against Crossref on 2026-10-08.
+
+| Paper | Citation | DOI | Filename |
+|---|---|---|---|
+| **Murante et al. 2011** — *Hydrodynamic simulations with the Godunov smoothed particle hydrodynamics* | MNRAS 417, 136-153 (2011) | `10.1111/j.1365-2966.2011.19021.x` ✔ | `murante2011_godunov-sph.pdf` |
+| **Iwasaki & Inutsuka 2011** — *Smoothed particle magnetohydrodynamics with a Riemann solver and the method of characteristics* | MNRAS 418, 1668-1688 (2011) | `10.1111/j.1365-2966.2011.19588.x` ✔ | `iwasaki2011_smoothed-particle-mhd-riemann-solver.pdf` |
+| **Puri & Ramachandran 2014** — *Approximate Riemann solvers for the Godunov SPH (GSPH)* | J. Comput. Phys. 270, 432-458 (2014) | `10.1016/j.jcp.2014.03.055` ✔ | `puri2014_approximate-riemann-solvers-gsph.pdf` |
+| **Cha, Inutsuka & Nayakshin 2010** — *Kelvin-Helmholtz instabilities with Godunov smoothed particle hydrodynamics* | MNRAS 403, 1165-1174 (2010) | `10.1111/j.1365-2966.2010.16200.x` ✔ | `cha2010_kelvin-helmholtz-godunov-sph.pdf` |

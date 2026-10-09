@@ -192,6 +192,12 @@ def configureScheme(ctx: RunContext) -> None:
     shiftingParam = ctx.param('shifting', None)
     if shiftingParam is not None and hasattr(schemeConfig, 'shiftProperties'):
         schemeConfig.shiftProperties.active = bool(shiftingParam)
+    # `shiftScheme` / `shiftProjection`: the shifting law and its free-surface projection by enum name (`michel2022` / `michel2022` is the
+    # sloshing tank's pair); None leaves the scheme's own.
+    for param, field, enum in (('shiftScheme', 'scheme', ShiftingScheme), ('shiftProjection', 'projectionScheme', ShiftingProjectionScheme)):
+        name = ctx.param(param, None)
+        if name is not None and hasattr(schemeConfig, 'shiftProperties'):
+            setattr(schemeConfig.shiftProperties, field, enum[name])
 
     # Physical viscosity. `dambreak` has always run inviscid on the delta-SPH
     # path (the `# inviscid here` note in `dambreakTimestep`) -- Marrone 2011
@@ -329,6 +335,8 @@ def buildSystem(ctx: RunContext):
                                             obstacle)
     ctx.schemeConfig.boundaryConditions = []
     ctx.scratch['obstacle'] = obstacle
+    # analytic walls (wallRepresentation='analytic'): which wall pressure condition (modules/analyticBoundary/wallTerms.py)
+    ctx.schemeConfig.analyticWallPressure = ctx.param('analyticWallPressure')
 
     # Stash the obstacle's own SDF (negative inside the solid) so `diagnostics`
     # can measure fluid penetration into the obstacle -- the interior-AABB
@@ -343,14 +351,35 @@ def buildSystem(ctx: RunContext):
             ctx.config, ctx.schemeConfig, ctx.spec.L, ctx.param('W'),
             interior=ctx.scratch['interiorDomain'])
 
-    return initializeWeaklyCompressibleSimulation(
+    system = initializeWeaklyCompressibleSimulation(
         ctx.schemeConfig.regions, ctx.config, ctx.schemeConfig,
         ctx.SimulationSystem, ctx.SimulationState, verbose=ctx.spec.verbose)
+    if ctx.param('obstacleDynamic'):
+        # a free obstacle (analytic walls only): the fluid's load drives it, mass and inertia of the solid at `obstacleDensity` (the analytic body is made at the fluid's rest density)
+        provider = getattr(ctx.schemeConfig, 'boundaryProvider', None)
+        if provider is None or len(provider.rigidBodies) < 2 or not ctx.param('obstacleActive'):
+            raise ValueError("obstacleDynamic needs wallRepresentation='analytic', obstacleRepresentation='analytic' and an obstacle")
+        ratio = float(ctx.param('obstacleDensity')) / float(ctx.schemeConfig.fluid.restDensity)
+        for rb in provider.rigidBodies[1:]:
+            rb.dynamic = True
+            rb.mass = rb.mass * ratio
+            rb.inertia = rb.inertia * ratio
+    return system
 
 
 def initialConditions(ctx: RunContext, system) -> None:
     args = ctx.scratch['args']
     simSetup = ctx.scratch['simSetup']
+
+    # The runner's velocity alarm (`runner/velocityAlarm.py`) flags |v| far
+    # above this: the same `U_max` the Eq. (2) sound speed uses below, for
+    # every scheme -- the flow starts from rest, so nothing generic applies.
+    uMax = ctx.param('referenceVelocity')
+    if uMax is None:
+        uMax = float((2.0 * ctx.param('gravityMagnitude') * ctx.param('fillRatio') * ctx.spec.L) ** 0.5)
+    ctx.velocityScale = float(uMax)
+    ctx.velocityScaleSource = ('referenceVelocity' if ctx.param('referenceVelocity') is not None
+                               else 'dam-break front speed sqrt(2 g H)')
 
     sampleNoise(system, ctx.config, ctx.schemeConfig, simSetup, args)
     setupFreestream(system, ctx.config, ctx.schemeConfig, simSetup, args)
@@ -965,6 +994,17 @@ dambreakCase = registerCase(Case(
         # Pass `'constant'` to reproduce a pre-flip number, or `'noSlip'` for
         # Marrone Sec. 3.4.2's viscous half, which genuinely wants it.
         wallBC='freeSlip',
+        # 'particles' (default): boundary particles + ghost nodes (mDBC). 'analytic': the tank walls are a
+        # warpSPHBoundaries body (exact boundary integrals, no wall particles); plain tank only.
+        wallRepresentation='particles',
+        # with wallRepresentation='analytic' and an obstacle: 'analytic' (the obstacle is an analytic body too) or 'particles' (a mixed scene: the obstacle stays boundary particles)
+        obstacleRepresentation='analytic',
+        # obstacleDynamic: the analytic obstacle is a free body driven by the fluid's load and gravity, of density obstacleDensity
+        obstacleDynamic=False,
+        obstacleDensity=0.5,
+        # analytic walls only: 'hydrostatic' (the wall pressure gradient rho (g - a_w) in all directions: exact for a fluid in hydrostatic balance) or
+        # 'normal' (only dp/dn = rho (g - a_w) . n, as the boundary particles' ghost extrapolation: no tangential force on a fluid in free fall)
+        analyticWallPressure='hydrostatic',
         targetDt=0.0005,
         # Downstream-wall pressure sensors (`ACSPH_PLAN.md` §4.5): heights above
         # the tank bed, in the case's length unit. Empty -> no probing. See
@@ -1028,6 +1068,8 @@ dambreakCase = registerCase(Case(
         # configuration and this plan's own acceptance gate; see
         # `configureScheme` and `DELTASPH_VALIDATION_PLAN.md` Sec. 5.1.1.
         shifting=None,
+        shiftScheme=None,
+        shiftProjection=None,
         # Start the fluid on the weakly-compressible hydrostatic density profile
         # rather than a uniform rho0 -- see `initialConditions`. Off by default
         # (a collapsing dam-break column does not want it); a still-water case

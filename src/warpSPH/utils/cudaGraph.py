@@ -49,6 +49,8 @@ from __future__ import annotations
 import contextlib
 import copy
 import dataclasses
+import gc
+import threading
 import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -68,6 +70,39 @@ _OUTER_CAPTURE = [False]
 #: while the loop thread captures (under 'global' its copy failed and
 #: invalidated the capture). Work on the capturing stream is unaffected.
 _CAPTURE_MODE = 'thread_local'
+
+
+#: Held for every capture here and by the runner's render thread for each
+#: frame (`runner.py:_RenderThread._job`): plot code syncs (boolean-mask
+#: indexing, host copies), which the capture forbids while it is open --
+#: Marrone 3.1 crashed with "operation not permitted when stream is capturing"
+#: in warpSPHPlotting's `filterState` (2026-09-28). Captures are rare (~1 per
+#: Verlet rebuild) and a frame is ~20-30 ms, so serialising them costs little.
+CAPTURE_LOCK = threading.RLock()
+
+
+@contextlib.contextmanager
+def _captureGuard():
+    """`CAPTURE_LOCK`, and no garbage collection while a graph is captured.
+
+    A collection mid-capture finalises whatever dead objects earlier work
+    left behind -- among them warp `Stream`s from `wp.stream_from_torch`,
+    whose finaliser unregisters the stream: a CUDA call the capturing thread
+    may not make, so the capture fails (warp error 710/901 in
+    `wp_cuda_stream_unregister` / `wp_cuda_launch_kernel`). Whether that
+    happens depended on how much garbage the process had accumulated --
+    `test_renderThreadFramesMatchMainThread` failed in most runs once the
+    test session ran a few more cases before it, and in none of 10 with this
+    guard (2026-09-28). `torch.cuda.graph`
+    collects on entry; this keeps the collector off until the capture ends."""
+    with CAPTURE_LOCK:
+        enabled = gc.isenabled()
+        gc.disable()
+        try:
+            yield
+        finally:
+            if enabled:
+                gc.enable()
 
 
 def _tensorAttrs(obj) -> Dict[str, torch.Tensor]:
@@ -210,7 +245,8 @@ class GraphedStateFunction:
             staticSys = _cloneState(system)
             staticIn = _tensorAttrs(staticSys.state)
             graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graph, stream=stream, capture_error_mode=_CAPTURE_MODE), \
+            with _captureGuard(), \
+                    torch.cuda.graph(graph, stream=stream, capture_error_mode=_CAPTURE_MODE), \
                     wp.ScopedStream(wstream, sync_enter=False, sync_exit=False):
                 update, _, _ = self.fn(staticSys, *args, **kwargs)
             torch.cuda.synchronize()
@@ -314,7 +350,8 @@ class GraphedTensorFunction:
             torch.cuda.synchronize()
             self.staticIn = [t.clone() for t in inputs]
             graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graph, stream=stream, capture_error_mode=_CAPTURE_MODE), \
+            with _captureGuard(), \
+                    torch.cuda.graph(graph, stream=stream, capture_error_mode=_CAPTURE_MODE), \
                     wp.ScopedStream(wstream, sync_enter=False, sync_exit=False):
                 out = self.fn(*self.staticIn)
             torch.cuda.synchronize()
@@ -601,7 +638,7 @@ class GraphedIntegratorStep:
             torch.cuda.synchronize()
             config.dt = staticDt
             _OUTER_CAPTURE[0] = True
-            with deferHostTime(), deferVerletChecks() as flags, \
+            with _captureGuard(), deferHostTime(), deferVerletChecks() as flags, \
                     torch.cuda.graph(graph, stream=stream, capture_error_mode=_CAPTURE_MODE), \
                     wp.ScopedStream(wstream, sync_enter=False, sync_exit=False):
                 result = self._eager(staticSys, staticDt, config, schemeConfig, False)

@@ -36,17 +36,35 @@ class CompSPHState(BaseState):
 
     internalEnergies : torch.Tensor = integrated('dudt', tags=('internalEnergy',))
     totalEnergies : torch.Tensor = constant(tags=('energy',), default=None)
-    entropies : torch.Tensor = constant(tags=('soundSpeed',), default=None)
-    pressures : torch.Tensor = constant(tags=('damping',), default=None)
+    entropies : torch.Tensor = constant(tags=('entropy',), default=None)
+    pressures : torch.Tensor = constant(tags=('pressure',), default=None)
     soundspeeds : torch.Tensor = constant(tags=('soundSpeed',), default=None)
 
     divergence : torch.Tensor = constant(tags=('velocity_divergence',), default=None)
     alpha0s: torch.Tensor = constant(tags=('alpha0',), default=None)
     alphas: torch.Tensor = constant(tags=('alpha',), default=None)
+    # step-boundary switches (Rosswog2020): entropy s^{n-1} and its time, and the last
+    # step's entropy rate (Eq. 16); set by the system's finalize, None for the others
+    entropiesPrev: torch.Tensor = constant(tags=('entropy_previous',), default=None)
+    entropiesPrevTime: float = constant(tags=('entropy_previous_time',), default=None)
+    entropyRates: torch.Tensor = constant(tags=('entropy_rate',), default=None)
+    # Sphenix2022 (step-boundary): div v at the previous step boundary and its time (Eq. 22)
+    divergencePrevStep: torch.Tensor = constant(tags=('velocity_divergence_previous',), default=None)
+    divergencePrevStepTime: float = constant(tags=('velocity_divergence_previous_time',), default=None)
+    # Wadsley2017: the stage's detector values (Eqs. 24, 28, v_sig) and D at the previous step boundary (dD/dt)
+    wadsleyD: torch.Tensor = constant(tags=('wadsley_D',), default=None)
+    wadsleyXi: torch.Tensor = constant(tags=('wadsley_xi',), default=None)
+    wadsleyVsig: torch.Tensor = constant(tags=('wadsley_vsig',), default=None)
+    wadsleyDPrev: torch.Tensor = constant(tags=('wadsley_D_previous',), default=None)
+    wadsleyDPrevTime: float = constant(tags=('wadsley_D_previous_time',), default=None)
 
     ap_ij: torch.Tensor = constant(tags=('pairwise_acceleration',), default=None)
     av_ij: torch.Tensor = constant(tags=('pairwise_acceleration',), default=None)
     f_ij: torch.Tensor = constant(tags=('pairwise_energy_partition',), default=None)
+
+    # unit wall normals (fluid -> wall) of the solid rows, zero on fluid rows; None
+    # when the case gives no geometry (modules/compressibleWall then estimates them)
+    wallNormals: torch.Tensor = constant(tags=('wall_normal',), default=None)
 
 
 # from .compressibleMonaghan import CompressibleSystemUpdate
@@ -127,6 +145,13 @@ class CompSPHSystem(BaseIntegrationSystem):
             )
             self.state.internalEnergies = initialState.state.internalEnergies + delta_u * dt
 
+        # solid wall rows (modules/compressibleWall): the state of the last stage, not an
+        # integrated one -- their pair work went to the fluid (f_ij = 1), and their mass
+        # is density-dependent while masses is tagged constant
+        solid = self.state.kinds != 0
+        self.state.internalEnergies = torch.where(solid, lastState.internalEnergies, self.state.internalEnergies)
+        self.state.masses.copy_(lastState.masses)
+
         self.state.supports.copy_(lastState.supports)
         self.state.densities.copy_(lastState.densities)
 
@@ -140,6 +165,8 @@ class CompSPHSystem(BaseIntegrationSystem):
         self.state.divergence.copy_(lastState.divergence)
         self.state.alpha0s.copy_(lastState.alpha0s)
         self.state.alphas.copy_(lastState.alphas)
+        from ..modules.shockCapturing.wrapper import advanceViscositySwitchStep  # (circular at import time)
+        advanceViscositySwitchStep(self, initialState, returnValues, schemeConfig, config)
 
         updateValues[-1].dudt = (self.state.internalEnergies - initialState.state.internalEnergies) /dt
 

@@ -1,5 +1,7 @@
 # Open problems — known, hard, not part of routine closeout work
 
+> **Progress marker:** this plan's row in [PLANS.md](PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
+
 This file is a deliberate dumping ground for exactly one kind of item: something
 that has been traced to a real, understood mechanism, investigated seriously
 (often across multiple sessions), and is **not fixed and not a quick fix**. It
@@ -13,8 +15,17 @@ re-opening the investigation.
 and plan section first — each has a specific next-step already identified, not
 just a description of the symptom.
 
+**Lifecycle.** Short, self-contained problems without a plan of their own live
+here too (a few lines each). When one is resolved, move its text to
+[docs/historic_plans/RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md)
+and leave a one-line stub under the same number, so references stay valid.
+Progress on this file is tracked by its single row in [PLANS.md](PLANS.md).
+
 ## 1. Corner-flyer / free-surface-pinning instability (the "flyers" and
 "ceiling-sticking" phenomena)
+
+> **2026-09-29:** the δ⁺-SPH ceiling-sticking half is now worked in
+> [CEILING_STICKING_PLAN.md](CEILING_STICKING_PLAN.md) (Marrone 3.1, checkpoint forensics).
 
 **What it is:** isolated fluid fragments near a solid corner or free-surface
 edge — a few particles nearly disconnected from the bulk — undergo a
@@ -76,9 +87,22 @@ reached via its own instrumentation.
    "renormalize or don't." `DELTASPH_VALIDATION_PLAN.md` §10.4 item 2.
 
 The Antuono-mask flip-rate diagnostic (`DELTASPH_VALIDATION_PLAN.md`
-§5.18/§5.35) is already instrumented and is the right tool to quantify
-whether any of the above actually helps, rather than eyeballing more frame
-grids.
+§5.18/§5.35) is the right tool to quantify whether any of the above actually
+helps, rather than eyeballing more frame grids. **It is no longer in the
+code** (checked 2026-09-28: nothing in `src/` or `scripts/`) — it has to be
+rebuilt before step 1 can be judged.
+
+**Step 1 measured, 2026-09-28 — moot under the current defaults.** Rebuilt
+as `schemeConfig.surfaceMaskDiagnostics` (+ `freezeSurfaceMaskAcrossStages`
+for step 1 itself; `probe_deltaSPHMarrone.py --surfaceMaskDiagnostics /
+--freezeSurfaceMask`). Marrone 3.1 δ⁺ nx67, seed 1, to t* 7.7: the mask
+**does not change between symplectic Euler's two stages** (0.2 % of steps,
+max 3 rows, all before t* 1), but changes **step to step** in 45 % of steps
+(up to 38 rows, growing through the run). So freezing across stages cannot
+help — it was an RK4-era idea — and the chatter to attack is step to step:
+**step 2 (a continuous coverage blend) is the next lever.** The frozen-mask
+option stays available for RK integrators. Diagnostics do not perturb the
+physics (bitwise the graphed run).
 
 ## 2. `omniIncompressible`'s `'mls'` wall-pressure mode — genuine numerical
 instability, not a sign bug
@@ -147,113 +171,6 @@ the qualitative video comparison already available.)
 fully enclosed WCSPH box with no free-surface sink is expected behavior for
 this class of scheme, not a mystery to keep chasing — logged here so it
 isn't re-discovered as a surprise, but there is nothing queued to fix it.
-
-## 5. One older mDBC/sampling item, still open (the other resolved)
-
-- **`_gridSnapGhostOffsets`'s concave-corner ghost collapse**: ~40 boundary
-  particles at a concave corner (e.g. englishWedge's base corner) collapse
-  their ghost node onto one interior point, a degenerate near-coplanar
-  stencil no fit handles well. Not rechecked as of 2026-09-18 (deferred, see
-  `WCSPH_DEFAULT_CLOSEOUT_PLAN.md` item H).
-
-  **TODO:** re-run `englishWedge` dp=0.01 under the current default combo
-  (`english2025`+`fourtakas2019`+`symplecticEuler`) to check whether the
-  base-corner residual (RMSE 0.0431 last measured) has moved at all, before
-  deciding whether this still needs its own fix.
-
-**RESOLVED, 2026-09-18** (moved out of this list): the **H/Δx≈72-160
-resolution hole** (`DELTASPH_VALIDATION_PLAN.md` item 4b) — every Marrone
-3.1 config used to blow up specifically at nx=120 (H/Δx=72), in t*≈5.5-6.3,
-"regardless of scheme." Rechecked under the new default combo
-(`english2025`+`fourtakas2019`+`symplecticEuler`) at the exact same
-resolution, run to t*≈7.68 (past the old failure window):
-`diverged=False`, maxVel peak 7.41 (moderate, decaying), density
-[0.982, 1.039] — no divergence. Not root-caused *why* (which of the
-combo's components fixed it, or whether it's a combination, wasn't
-isolated), but the practical symptom is gone. `WCSPH_DEFAULT_CLOSEOUT_PLAN.md`
-item H has the full result.
-
-## 6. Lattice-density kernel calibration — low-priority polish, not urgent
-
-`retired_plans/LATTICE_DENSITY_PLAN.md`'s core design (correct the kernel
-normalization for a finite-support lattice, `calibrateNormalization`) landed
-and is verified. Its original migration plan (a mass-vs-kernel split, then
-flip the default) turned out to be **moot**: the real bug was a mass/cell
-mismatch at the sampler, fixed directly at the source
-(`sample/regular.py:62`), which is why `calibrateRestDensityMasses` was
-retired in favor of `calibrateRestDensity`. With mass fixed at the sampler,
-the residual the kernel term still corrects is tiny (≤0.04% on
-sloshingTank) — **this is genuinely a "do if you've got time to burn" item,
-not something worth going back into the core operator machinery for.**
-Three loose ends, all optional:
-
-1. No test exercises `calibrateRestDensity`'s `onResidual='raise'` path —
-   nothing deliberately corrupts an IC (mismatched mass, an overlapping
-   region) to confirm it actually raises.
-2. Whether wiring the remaining ~131 `OperationProperties(...)` call sites
-   (gradient/divergence/laplacian/curl/interpolate) is worth it at all, now
-   that the number it would remove is this small. If the answer is ever
-   yes, build the `propsFromConfig` helper the plan's §3.9 already flags
-   rather than editing them by hand.
-3. The sampler mass fix itself is unverified outside the cases actually run
-   that session — `kelvinHelmholtz`, `rayleighTaylor`, `kidder`,
-   `yeeVortex`, `triplePoint`, `staticBlob`, `impact`, `squarePatch` all use
-   the same sampler and now get a slightly different (more correct) mass,
-   but none are in `tests/test_physics.py`'s fixture set and none were
-   re-run by hand.
-
-## 7. Missing shear-carrying laminar viscosity term (Morris et al. 1997) —
-no tangential stress at a no-slip wall
-
-**What it is:** the stock velocity-diffusion term
-(`computeVelocityDiffusion`'s `inviscid=False` branch, `wp_viscosityDelta.py`)
-is `mu_ij * gradW` with `mu_ij = (v_ij . x_ij)/|x_ij|^2` — a scalar built by
-contracting the relative velocity along the separation vector `x_ij`, not the
-full `v_ij` vector. That makes it a normal-projected diffusion: it damps the
-approach/separation component of relative velocity but carries no
-tangential/shear stress at all. A real Morris et al. (1997) laminar viscosity
-term needs the full vector Laplacian, which neither `viscidNu` nor
-`viscosityParams` currently has.
-
-**Why it matters:** `hydrostaticColumn`'s free-slip side walls leave a
-bounded, undamped limit-cycle slosh (documented as non-fatal — DFSPH_FINDINGS.md
-§1.12/§1.20). Switching to `wallBC=noSlip` + `viscidNu` through the existing
-(normal-projected) term does bound the slosh KE (~4x down) and hold the
-hydrostatic gradient, but roughens the free surface
-(`embeddedMinDensity` 0.94 -> 0.60, `|v|max` spikes to ~3.7-4.1) — a no-slip
-mirror through a normal-only diffusion term adds noisy *normal* wall damping
-with no tangential component, not the physically-correct shear stress a real
-no-slip wall should apply. A hand-rolled full-vector Brookshaw Laplacian
-(DFSPH_FINDINGS.md Part 39, since removed in the Part 41 cleanup) *did* hold
-the surface (embMin 0.94-0.97) while damping the slosh at the same time,
-confirming the mechanism — the module layer just doesn't have it as a real,
-supported option today.
-
-**Why it's not a quick fix:** it needs a new kernel term (the full `v_ij`
-vector, not the scalar `mu_ij` reduction), wired as a `DiffusionParameters`
-option, gradcheck'd (it touches a `@wp.kernel`), and given its own `deltaSPH`
-regression pass so it doesn't silently change WCSPH's diffusion behaviour
-too. Half of the groundwork already landed (2026-09-05, `ACSPH_PLAN.md` step
-5 — `computeVelocityDiffusion(approachOnly=False)` lifts the approach-only
-clamp, turning the `inviscid=False` branch into the Monaghan & Gingold
-(1983) Laplacian, De Courcy et al. 2024 Eq. (25), gradchecked in all four
-`inviscid` x `approachOnly` combinations, default unchanged) — what remains
-is the actual full-vector term, a new kernel, not a flag flip.
-
-**Concrete next step:** implement the full `v_ij` Morris Laplacian as a new
-`DiffusionParameters`-wired option alongside the existing `viscidNu` scalar
-term, gradcheck it, and re-run the `hydrostaticColumn` `wallBC=noSlip` A/B to
-confirm it reproduces Part 39's numbers (embMin held, KE damped) through the
-stock machinery instead of the since-removed bespoke path. `DFSPH_IMPROVEMENT_PLAN.md`'s
-ranked-queue item 1, `DFSPH_FINDINGS.md` §1.14 (both now retired to
-`docs/historic_plans/` — the incompressible/DFSPH track itself reached a
-stable, documented recommendation (`divergenceFree` default, `band2018pb` as
-a deliberate trade-off) and this is the one item that survived it).
-
-See also: [[boundary-density-plan]], [[wcsph-deltasph-scheme-concerns]],
-[[sph-symmetric-pressure-truncation-artifact]],
-[[marrone31-truncation-artifact-vs-pst]], [[antuono-pressure-switch-bug]],
-[[incompressible-plan-sequencing]].
 
 ## 8. mDBC wall suction at wall/free-surface contact lines — both schemes
 
@@ -341,8 +258,27 @@ field -- the `(p_i+p_j)` tensile instability under uniform tension,
 independent of this fix. Detection bug found on the way (all schemes): an
 isolated particle reads `lambda = 1` and is classified as bulk;
 `detectIsolated` is the exact fix, used by ACSPH's set only -- changing the
-shared detector would touch shifting / the Antuono switch everywhere
-(decision pending).
+shared detector would touch shifting / the Antuono switch everywhere.
+**2026-09-28:** checked per detector on an isolated row: the default every
+case runs (Barecasco + lambda-gradient normals), ColorField and
+ColorFieldGrad miss it; Marrone's detection flags it (its lambda reads 1.0,
+but another criterion catches it). Fixed in the shared detector on branch
+`isolated-surface` (`SurfaceDetectionConfig.flagIsolated`, default on),
+merged into `dev` after the baseline re-runs. **Before/after (2026-09-28):**
+δ-SPH is **bitwise unchanged** — Marrone 3.1 δ⁺ nx67, three jittered
+realisations each with the flag on and off (`scripts/run_isolatedFlagAB.sh`),
+and sloshingTank to t = 7 — as expected, since an isolated row has no pair
+interactions. englishWedge / squarePatch / impact identical too; only DFSPH's
+staticBlob moved (surface min density 0.472 -> 0.454). So this is a
+classification fix (diagnostics, row-local consumers), not a dynamics one.
+(The same batch's sloshingTank Sensor 1 peak, 78 kPa vs 25 kPa in the
+2026-09-26 run, is therefore not the flag: code changes since then — the
+multi-lane kernels change summation order — plus a chaotic flow; seed 2 of
+the Marrone A/B shows the spread, P2 peak 91 and late |v|max 19.)
+**Decision (user, 2026-09-28):** worth fixing in the shared detector
+eventually, but low priority -- it is *not* why free surfaces blow up: that
+was investigated before and traced mainly to the density-diffusion choice
+(`fourtakas2019` DDT is what helped), not to surface detection.
 
 See also: [[sph-symmetric-pressure-truncation-artifact]],
 [[antuono-pressure-switch-bug]], [[english2025-alpha-neighbour-ramp]].
@@ -370,28 +306,230 @@ symmetric sum near walls ([[sph-symmetric-pressure-truncation-artifact]])
 acting on a uniform level -- test with a uniform level in a periodic box (no
 walls): growth there would point at the solve, none at the wall closure.
 
-## 10. Runner divergence detection misses bounded-NaN-free blowups
+## 13. `hydrostaticColumn` under `iisph` blows up in its default free-slip configuration
 
-**What it is:** `run()` reported `diverged=False` for delta-SPH toy runs that
-had reached vmax 5e4 with rows at rho = 0 and pressures ~1e20
-(`scripts/out_contactLine/*_a0`, `*_u0`, 2026-09-24): the check only fires on
-non-finite values. `stallDtSteps` only fires on dt pinned exactly at minDt,
-and `stallProgress` (sim-time progress) only when time stops advancing -- an
-explosive but finite run passes all three.
+**What it is (2026-09-28, found by the §7 Morris A/B):** `iisph`, nx=128,
+`semiImplicitEuler`, `wallBC=freeSlip`, `nu=0` — the configuration
+`docs/historic_plans/DFSPH_FINDINGS.md` §1.14's post-Part-41 table graded as
+stable over 1200 steps (|v|max 1.94, embMin 0.94) — now runs away: |v|max 24
+by t = 0.147 (step 238), velocity alarm at step 433 (particle near the bottom
+wall), 1.25e6 by step 1200. Blocks the §7 A/B, whose other arms are judged
+against this one. Next: same arm on `main` (is it today's work?), then bisect
+back to 2026-09-04.
 
-**Next step:** a relative velocity bound (e.g. vmax against the case's own
-`referenceVelocity` / sound speed -- a multiple of c0 is physically
-impossible in a WC run) or a kinetic-energy growth check, reported as
-diverged; decide whether it stops the run or only flags it.
+**Narrowed the same day:** also on clean `main` (not today's work), and
+**`iisph` only** — the case default `divergenceFree` holds the same column
+(|v|max 0.3-0.7, embMin 0.95-0.98 over 1200 steps / 8 s). A single-run bisect
+is unreliable: before 2026-09-02 the case jittered its lattice with an
+unseeded RNG, so the same commit gave |v|max 1.5-4.2 over 300 steps; `71a8ae7`
+("tmp commit", 2026-09-02) commented that jitter out (still out today), which
+made runs deterministic. Re-enabling it on today's code helps (|v|max 6.6-21
+vs 39) but does not restore the old behaviour, so more than one change since
+2026-09-01 is involved (dt also halved: t = 0.31 vs 0.69 after 300 steps).
+**Parked** (`iisph` is the retired DFSPH track's reference variant); the §7 A/B
+runs on `divergenceFree` instead. To resume: bisect with ~3 jittered runs per
+commit; decide whether the `71a8ae7` jitter removal was meant to stay.
 
-## 11. probe_contactLine delta-SPH toys: pinned dt is overridden
+**Re-checked 2026-10-01 (dev `991e4fa`): still broken, identical to the 09-28
+record.** Same arm (`iisph`, nx 128, `semiImplicitEuler`, `freeSlip`, `nu = 0`,
+1200 steps): velocity alarm at **step 433** (t = 0.160, |v|max 239, particle
+636 at x = [0.54, -0.69], i.e. the bottom wall), dt collapses to 1e-8, t stalls
+at 0.1616, |v|max 1.25e6 at step 1200, embedded density 0.17. Deterministic
+(same step as before). The `divergenceFree` control on the same arm is fine
+(|v|max 2.06, embMin 0.89, t = 7.96, no alarm). Nothing merged since 09-28
+touches the incompressible schemes (the 09-29 `timeCentredContinuity` /
+noPen-`impulse` defaults are weakly-compressible-only), so no change was
+expected. One untested lead from the ceiling-sticking work: the blow-up starts
+on a wall-contact particle under an explicit/semi-implicit integrator, the same
+signature as the explicit-midpoint wall-contact mode `CEILING_STICKING_PLAN.md`
+§3-§6 found for WCSPH; whether IISPH's pressure solve has an analogous
+integrator-side issue is not known. Videos/script:
+`scratchpad/hydroRecheck/`, `probe_hydroRecheck.py` (session scratchpad).
 
-**What it is (minor, probe-level):** the probe sets `soundSpeed` and
-`targetDt = 0.3 dx / c0` for the WC toys, but the per-step adaptive
-`computeTimestep` hook overrides dt (the runs still step at ~5.9e-4,
-acoustic Courant ~0.8). Stable with `symplecticEuler`, so results stand, but
-the toys do not run at the Courant number the probe claims.
+## 14. DFSPH + physical viscosity + free-slip walls: the column's velocity alternates sign every step
 
-**Next step:** make the toys' timestep hook return the pinned dt (or report
-the achieved Courant number) before relying on dt-sensitive toy results.
+**What it is (2026-09-28, found by §7's A/B):** `hydrostaticColumn`,
+`divergenceFree`, `wallBC=freeSlip`, `nu=0.01`: the mean vertical velocity of
+the whole column flips sign every step (±0.015-0.019), with either viscosity
+term (projected or Morris); late on a near-wall horizontal band does the same.
+Not the viscous timestep limit — halving dt only shrinks it (±0.005-0.01).
+Absent with `nu = 0` (free slip) and with no-slip walls. Suspects: the
+free-slip boundary-velocity mirror (`computeBoundaryVelocities`) feeding the
+viscous term, against the divergence-free solve. Not investigated further.
 
+**Re-checked 2026-10-01 (dev `991e4fa`): half still there, half not.**
+`divergenceFree`, nx 128, 1200 steps, `freeSlip`, `nu = 0.01`:
+- projected term (`monaghanGingold`): mean vertical velocity flips sign **every
+  step** (flip fraction 1.0), amplitude 0.022 — reproduced. The column is
+  otherwise very quiet (|v|max 0.07, embMin 0.99).
+- **Morris 1997 term: amplitude 4e-4, ~50x smaller** (|v|max 0.17, embMin 0.98),
+  the same as the no-slip Morris control (4e-4). So "with either viscosity
+  term" no longer holds: the alternation is tied to the *projected* viscous
+  term (a bulk Laplacian, §7), not to the free-slip mirror feeding any viscous
+  term. That narrows the suspect list away from `computeBoundaryVelocities`.
+- Caveat: the `nu = 0` control (|mean vy| up to 0.05, flip fraction 0.77) is not
+  "absent" by this crude metric — its real slosh swamps it, so the original
+  "absent with `nu = 0`" needs a detrended alternation measure (e.g.
+  |v_k - (v_{k-1} + v_{k+1})/2| of the mean) to confirm; not yet done.
+Impact is small while Morris is the opt-in alternative and the column stays
+bounded. Videos in `scratchpad/hydroRecheck/` (session scratchpad).
+
+## 15. CRKSPH on a lattice shock — blow-up RESOLVED 2026-09-30; residual and follow-ups open
+
+The blow-up (a CRK artificial-viscosity regulariser `1e-7 h^2` added to a dimensionless `eta.eta`, unbounded `mu` on a
+near-coincident approaching pair) is fixed and moved to [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md)
+with its mechanism, A/B and reproduction. What stays open:
+
+**Residual (not a blow-up).** With a sharp same-lattice mass step the first light column is kicked forward within
+four steps (0.56 m/s), the light columns then settle into an irregular spacing, and one pair of columns per
+interface merges (coincident from t ~ 0.18 and stays, 20 pairs per interface, min spacing 0.0004 dx); equal-mass
+sampling never does this (min spacing 0.6 dx). It does not hurt accuracy by the L1 measure (Sod 2D same-lattice
+1.4e-2 vs equal-mass 1.9e-2 at t = 0.25, exact Riemann). The paper's Sod / triple point are equal-mass (Sod 3D:
+"to maintain mass matching"), so this is an initial-condition property of our extra same-lattice preset.
+
+**Follow-ups for the AV / limiter work.** (1) [2026-09-30: `C_l` = 2 tried on Gresho / Sod, worse on Gresho (+8 % -> +11.5 % KE at nx 64, +12.6 % -> +21.9 % at nx 96), 70 % less Sod ringing; kept at 1, to be revisited with the limiter, CRKSPH_LIMITER_PLAN note (b)] `C_l, C_q`: Frontiere Table D.1 makes them kernel-dependent
+(mu scales with h): 7th-order B-spline, our default, `C_l = 2.0, C_q = 1.0`, Wendland `0.5 / 0.25`; our
+`buildDefaultDiffusionParamsCRKSPH` uses 1 / 1 for every kernel (unverified whether `smooth = H/xi` equals the
+paper's h for B7, CRKSPH_LIMITER_PLAN O2 is the same units question for the limiter). (2) The compressible dt is
+acoustic only (`cfl h_min / (xi c_s)`), no approach/viscous term, so it cannot see a column closing (a smaller cfl
+only hid the pile-up). (3) [2026-10-01: Gresho spin-up traced to an intrinsic, slowly converging pressure pump; the limiter default is now (1/n_h, 0.2/n_h); CRKSPH_LIMITER_PLAN notes (c)-(g)].
+
+
+## 18. Video runs leak GPU memory in proportion to the per-pair state (CRKSPH 3D Sedov OOMs at nx 40)
+
+**Mitigated 2026-10-07 (mechanism found; one follow-up open).** Not a leak and not the render-thread snapshots: a
+3D run plots through matplotlib on the main thread, with no snapshots at all. Step / stage states (with CRK's
+pair-sized `ap_ij` / `av_ij`) end up in **reference cycles**, which only Python's cycle collector frees. Without
+plotting it frees them in time. With plotting, matplotlib's mathtext parser leaves ~10^5 cyclic objects per frame
+(pyparsing exceptions holding traceback frames), the full collections get rarer, and the stranded states pile up.
+Measured (CRK 3D Sedov nx 16, `scratchpad/memprobe.py` pattern): video 620 -> 2920 MB allocated in 60 steps
+(sawtooth); no video flat 255 MB; video + `gc.collect()` per frame flat 255 MB; `gc.DEBUG_SAVEALL` showed 630 CUDA
+tensors / 1.77 GB (`CompSPHState.ap_ij` / `av_ij`) in cyclic garbage after 14 frames. **Fix:**
+`runner.collectFrameGarbage`, after every plotted frame: a collection only once allocated memory exceeds 1.5x
+its post-collection baseline (+256 MB minimum); the allocator counter is host-side, so it costs nothing otherwise.
+The same run then stays at 255-620 MB over 120 frames (a collection every ~20-30 frames). **Open (low priority):**
+*which* reference closes the cycle around a stage state (a `DEBUG_SAVEALL` back-trace came up empty once; the
+membership is timing-dependent). Breaking that cycle would make the guard unnecessary. **Confirmed at full scale
+2026-10-08:** the AV sweep's `crkNone` / `crkCullenDehnen2010` 3D Sedov at nx 40 with video ran all 883 steps (before: OOM
+near step 110). The text below is the original report.
+
+Found 2026-10-01 re-taking the CRK AV baseline (`scripts/av_report.py --config crk --profile full`): `crkNone / sedov` (3D, nx 40, video on, velocity alarm drawing every step) went 8.5 -> 21.5 GB
+allocated over 110 steps and hit CUDA OOM (the GPU is shared with other processes; ~28 GB free). Not the solver: the same run **without video** holds a flat 3.2 GB (nx 40; 1.4 GB at nx 30) over 160 steps. With
+`plot=True, video=True, velocityAlarmPlotInterval=1` at nx 30 allocated memory grows ~56 MB per step (1.4 -> 6.7 GB in 120 steps), i.e. about one 15M-entry float array per drawn frame.
+Suspect: `_RenderThread.submitFrame` (`runner/runner.py`) snapshots the state with `utils/cudaGraph._cloneState`, which clones **every** tensor attribute -- including the pair-sized `ap_ij` / `av_ij` / `f_ij` a CRK state carries (tens of
+millions of entries in 3D) -- and something keeps the snapshots alive after the frame is drawn (the queue is capped at 2 pending, so a retained reference, not the queue, is the leak). Two independent fixes: clone only particle-sized tensors that
+the plot hook reads, and find what retains the snapshot. Workaround: `--noVideo` for large 3D CRK runs (scalar metrics are unaffected). Not investigated beyond the measurement above (`scratchpad/sedmem.py` pattern: diagnostics hook printing
+`torch.cuda.memory_allocated()`).
+
+## 19. Compressible walls: a lattice wall gives way under strong compression at a curved wall's stagnation point
+
+Found 2026-10-06 (COMPRESSIBLE_WALLS_PLAN.md, log of that date). `shockCylinder` (Mach 2 shock driven by a piston,
+cylinder R = 15 dx, Monaghan): right through the first impact and the relaxation (stagnation pressure 0.80 p3, then
+1.17x the steady value by t = 0.37) and the arrival of the second shock (the bow shock reflected off the piston, p* =
+2.4 p3 at t = 0.40, which is the exact reflected value). Then the stagnation region compresses without bound (22 p3 by
+t = 0.445) and fluid drives 9 spacings into the cylinder. `scripts/probe_cylinderFront.py`: at ~10x compression the
+fluid spacing is ~0.3 of the wall lattice's, and fluid rows sit just *inside* the surface ((r - R) ~ -0.1 dx) exactly
+half-way between wall rows, in coincident pairs -- the lattice wall's pressure field is bumpy at its own spacing and
+the compressed fluid falls into the valleys. Ruled out: the exact mirror symmetry (an off-axis cylinder fails the
+same), the wall rows' own kernel (`wallLatticeSupport on` fails the same; the fluid's own small kernel still sees the
+valleys), the wall state (geometric normals, correct p*). Flat 2D walls hold under the same loading (channel without
+the cylinder: max penetration 0.017 dx to t = 1); the 1D walls hold to 6x compression (shockReflection plateau 0.01%).
+`bowShock` (Mach 3) likely shows the same mechanism, slower: standoff reaches Billig's by t ~ 0.3 then drifts to 1.15x
+with ~18 rows inside the cylinder. CRKSPH on `shockCylinder` diverged at t = 0.16 (a run that predates the builder's
+initial-h fix; not re-checked).
+
+Principled routes (none tried): wall rows whose spacing follows the fluid's -- mirror ghosts rebuilt each step
+(Spheral's reflecting nodes; planar exact, curved via the local tangent plane), or a mirror-point state (each wall row
+takes the fluid state interpolated at its image `x - 2 d n`; fixes the deep-row states but not the gaps); or a
+boundary-integral wall (semi-analytic, Ferrand et al. 2013), which has no gaps by construction. Cheaper and in the
+same spirit: let a fluid-wall pair see the wall only through the wall's own (lattice) smoothing scale -- the wall is
+discretised at its lattice spacing, so its pressure field should be smooth at that scale, not at the compressed
+fluid's; that is a per-pair kernel choice inside the warp pair kernels (today one global `SupportScheme`). A finer
+wall lattice only moves the threshold.
+
+Tried 2026-10-06 (reverted): the per-pair route for Monaghan's pressure force only (fluid-fluid kernel-mean, fluid<-wall
+`Scatter` with the lattice-floored wall h). Fewer rows end up inside the cylinder (32 vs 235 at t = 0.47) but the
+stagnation pressure runs away at the same time (271 p3): the gap-filling is a symptom, not the whole cause. CompSPH and
+CRKSPH get the first impact right (peak 1.04 / 0.95 p3, Monaghan 0.80) and then **fail in the same window** (CompSPH
+runs away from t ~ 0.45, NaN at 0.497; CRKSPH NaN at 0.433). Monaghan at **twice the resolution** (nx 400) has the
+same onset (19 p3 at t = 0.439 vs 22 p3 at 0.446 at nx 200), NaN at 0.483. So: scheme-independent and
+resolution-independent, triggered by the second shock's arrival at the stagnation point -- the lattice-gap picture
+alone does not explain a resolution-independent onset; the wall state at a compressed, curved stagnation point (the
+Riemann p* on a gathered state that already contains the wall-compressed fluid) looked like the next suspect, but
+with `wallRiemannState` off (plain Shepard wall state) the onset is the same (11 p3 at t = 0.444, penetration 9.5 dx
+at t = 0.5, milder pressure peak). So neither the wall state, the wall kernel scale, the scheme nor the resolution
+sets it; what is left is the stagnation-point flow itself against a lattice wall (particles jamming where the flow
+should divide), which a per-row wall state cannot relieve -- pointing at the mirror-ghost / boundary-integral routes
+above. Not done: a flat wall facing the same second shock (a channel end wall instead of the cylinder).
+
+
+## 20. (resolved 2026-10-06 -- the support clamp is now wall-only; see RESOLVED_PROBLEMS.md)
+
+## 21. (resolved 2026-10-06 -- Owen table fixed; support solver plan closed; see RESOLVED_PROBLEMS.md)
+
+## 22. (resolved 2026-10-07 -- corrected velocity gradient: volume-weighted M, correction on the gradient index; see RESOLVED_PROBLEMS.md)
+
+## 23. CompSPH + Rosswog (2020) switch: Sedov blows up at t = 0.056 (found 2026-10-09)
+
+AV bake-off CompSPH cross-check (`results/av_bakeoff_2026-10-09/compSPH.log`, config `compRosswog`, case `sedov`):
+|v|max 3.6e5 x the initial sound speed at step 122 (t = 0.056; the alarming particle sits at x = (8e-10, 8e-9, 5.55)), non-finite
+velocities at step 123, `thermalEnergy` already negative (-1.2e10) at step 123, alphaMean 0.45. The same case with
+`compNone`, `compCD` and `compWadsley` completes (shock radius error -4.9 % / -4.1 % / -3.7 %); the Monaghan
+`rosswog2020` rows (fixed beta 2, limited, coupled) complete (-1.3 .. -1.5 %). Not yet known whether it is the switch's
+cold-gas branch (a zero-sound-speed ambient medium in the trigger; compare the Sphenix 0/0 guard in AV_PLAN's Phase 5B build notes), CompSPH's own
+viscosity form, or the point-source initial condition. Not investigated; the bake-off needs no fix for it (a
+cross-check row). Evidence: `docs/av/bakeoff_2026-10-09/report.md` (CompSPH section, `compRosswog` sedov `nan`).
+
+## 24. Shifting curvature gate (`_curvatureGate`) takes the minimum over the raw Verlet list (found 2026-10-09)
+
+Sun et al. 2019 Eq. (21) gates a surface particle by the minimum of `n_i . n_j` over its neighbours *within the support*. `modules/shifting/wrapper.py::_curvatureGate` reduces over
+`adjacency.i / .j`, the raw Verlet list (pairs up to `verletScale` x support), so it gates more than the equation says. Measured in the analytic-boundary comparison (curvature gate on:
+a few free-surface particles differ from a reference that gates inside the support; the difference is bounded by the largest shift of the gated particles). Fix: restrict the pairs to
+`r <= support` before the reduction (a distance mask on `i, j`). Not changed: it alters the default shifting of every case.
+
+## 25. `computeDeltaShiftWarp`: the tensile reference value is W(dx / kernelScale), not W(dx) (found 2026-10-09)
+
+`modules/shifting/delta.py` evaluates `W_0` at `q = dx_ / hij` with `dx_ = (m / rho0)^(1/dim) / kernelScale`: the kernel at dx / kernelScale rather than at the particle spacing dx of Sun's law
+(`[1 + R (W_ij / W(dx))^n]`). For Wendland C2 at h = 4 dx this is 3.7 % of the tensile term (the factor enters as `W_0^-4`). The analytic-wall shifting follows warpSPH's convention so the fluid and wall parts of the sum
+are consistent. Decide whether this is intended.
+
+## 26. Implicit shifting with boundary particles diverges: `computeImplicitShift` sums the mDBC ghost nodes into grad C (found 2026-10-09)
+
+Dam break, `shiftScheme='implicit'`, boundary particles: the fastest particle reaches ~900 at 0.3 s; the same case with analytic walls is stable (it follows the analytic δ⁺ run to 1.1 %). The Michel and δ⁺ sums exclude the
+ghost nodes (kind 2) through the operation mode; the implicit solve's grad C sum is the suspect (traced during the analytic-boundary work, mechanism not re-verified when this entry was written). Next step: run the
+particle-wall implicit case with the ghost kind excluded from the grad C sum and compare.
+
+## 27. Particle rigid bodies are not CUDA-graph capturable (found 2026-10-09)
+
+`getTransformationMatrix` builds tensors from device scalars (`torch.tensor([[tensor, ...]])`) and `updateBodyParticlesWCSPH` indexes with boolean masks: both read the host, so a whole-step graph with particle
+rigid bodies (moving walls, obstacles) cannot be captured. Analytic bodies are graphable (static ones; see ANALYTIC_BOUNDARIES_PLAN). Fix: device-side transformation matrix, index_select instead of boolean masks.
+
+## 28. A failed CUDA-graph capture of the implicit shifting poisons the CUDA context (found 2026-10-09)
+
+The implicit shifting solves with host-synchronising Krylov solvers; a capture of the step fails and leaves the context in an error state ("operation not supported on global/shared address space"); the eager fallback then
+crashes. `_rhsIsGraphable` now refuses implicit / dynamic shifting up front (analytic-boundary change set), but any other host-synchronising module reached under capture has the same failure mode. A
+capture-failure path that resets or avoids the poisoned context is open.
+
+## 29. The graph's validation / re-capture executes the step more than once on a cloned state, but rigid-body tensors are shared (found 2026-10-09)
+
+A moving rigid body is advanced extra times by the graph's validation and re-capture runs (the state is cloned, the body tensors are not). Only static bodies are graphed for that reason
+(`schemes/deltaSPH.py::_rhsIsGraphable`). Fix: clone the rigid-body tensors with the state during validation.
+
+## Resolved (details in [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md); numbers kept so references stay valid)
+
+- **§5** englishWedge concave-corner residual -- sign bug in the `fourtakas2019` hydrostatic correction, fixed `68a9a6d`; 2026-09-29 re-validation: keep the default combo.
+- **§6** lattice-density kernel calibration -- `onResidual='raise'` path now tested (`tests/test_restDensityCalibration.py`); wiring the normalisation into every operator is deliberately not done (not worth it), documented on `SimulationConfig.calibrateNormalization`.
+- **§7** missing shear-carrying laminar viscosity -- Morris (1997) term implemented, opt-in (`viscousTerm = morris1997`). Whether to make it the default for viscous no-slip cases is the user's call.
+- **§10** runner divergence detection -- velocity alarm + probe stall defaults.
+- **§11** `probe_contactLine` delta-SPH toys' pinned dt -- adaptive dt capped at the pinned acoustic Courant 0.3.
+- **§12** render thread + grid-interpolated plots crashing CRKSPH cases -- plot hooks that run warp kernels stay on the loop thread.
+- **§16** Monaghan viscous heating lacked the 1/2 -- fixed, `tests/test_monaghanEnergy.py`.
+- **§17** Read-Hayfield entropy dissipation did not conserve energy -- Eq. (33) transcription error, fixed; pair loops moved to warp kernels (`wp_readHayfield.py`).
+- **§18** Monaghan Sedov energy drift 5e-4 -- RK2 time-integration error, expected behaviour, converges at second order in dt.
+- **§21** Owen adaptive support (frozen / over-grown h, 2D offset) -- the 2D/3D offset was a psi_H table bug (fixed, default); over-growth on the dense side of density jumps is accepted as a property of neighbour-count h; the wall-only clamp stays (docs/historic_plans/SUPPORT_SOLVER_PLAN.md).
+- **§20** R&H Sod test failing since the support clamp 013a22f -- the clamp degrades smooth pure-fluid flow; now `supportVolumeClamp='walls'` by default (user, 2026-10-06): pure-fluid runs bit-identical to before 013a22f, walls keep the fix. Root cause open as §21.
+
+See also: [[boundary-density-plan]], [[wcsph-deltasph-scheme-concerns]],
+[[sph-symmetric-pressure-truncation-artifact]],
+[[marrone31-truncation-artifact-vs-pst]], [[antuono-pressure-switch-bug]],
+[[incompressible-plan-sequencing]].

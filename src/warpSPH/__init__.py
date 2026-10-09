@@ -8,7 +8,7 @@ re-exporting every subpackage's own `__all__` (`math`, `configurations`,
 enum types and case-setup helpers named individually below.
 """
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 # from .casefile import argparse_defaults_from_casefile, build_configs_from_casefile, load_casefile
 # from .shape_generation import populateSourceObstacleGridsStructured, sampleShapeStructured
@@ -24,7 +24,7 @@ from .systems import *
 from .schemes import *
 from .modules import *
 from .utils import *
-from .enumTypes import EnergyScheme, AdaptiveSupportScheme, ViscositySwitch, CompressibleSPHScheme, WeaklyCompressibleSPHScheme, DensityDiffusionScheme, PressureForceScheme, IncompressibleSPHScheme, ArtificialCompressibleSPHScheme, PressureSmoothingScheme
+from .enumTypes import EnergyScheme, AdaptiveSupportScheme, ViscositySwitch, CompressibleSPHScheme, PESPHVariant, WeaklyCompressibleSPHScheme, DensityDiffusionScheme, PressureForceScheme, IncompressibleSPHScheme, ArtificialCompressibleSPHScheme, PressureSmoothingScheme
 from .sample import *
 
 __all__.extend(configurations.__all__)
@@ -38,7 +38,7 @@ __all__.extend(sample.__all__)
 from .geometry import *
 __all__.extend(geometry.__all__)
 
-__all__.extend(['EnergyScheme', 'AdaptiveSupportScheme', 'ViscositySwitch', 'CompressibleSPHScheme', 'WeaklyCompressibleSPHScheme', 'DensityDiffusionScheme', 'PressureForceScheme', 'IncompressibleSPHScheme', 'ArtificialCompressibleSPHScheme', 'PressureSmoothingScheme'])
+__all__.extend(['EnergyScheme', 'AdaptiveSupportScheme', 'ViscositySwitch', 'CompressibleSPHScheme', 'PESPHVariant', 'WeaklyCompressibleSPHScheme', 'DensityDiffusionScheme', 'PressureForceScheme', 'IncompressibleSPHScheme', 'ArtificialCompressibleSPHScheme', 'PressureSmoothingScheme'])
 
 
 from .io.parsers import parseKernelFunctions, parseIntegrationScheme, parseViscositySwitch, parseCompressibleSPHScheme, parseAdaptiveSupportScheme

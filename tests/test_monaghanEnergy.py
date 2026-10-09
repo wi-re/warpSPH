@@ -1,0 +1,59 @@
+"""The Monaghan host's RHS must conserve total energy piece by piece (OPEN_PROBLEMS §16, resolved
+2026-09-30): the viscous heating used to lack the 1/2 of `du_i/dt = 1/2 sum m_j Pi_ij v_ij . gradW_ij`,
+so it was exactly twice the kinetic energy the viscous force removes and the scheme gained one full
+dissipation's worth of energy (Sedov 1.0 -> 2.33 in 1D)."""
+
+from __future__ import annotations
+
+import dataclasses
+import sys
+from pathlib import Path
+
+import pytest
+import torch
+
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / 'scripts'))
+
+from probe_monaghanEnergy import pieces   # noqa: E402
+from warpSPH.cases.sod import sodCase      # noqa: E402
+from warpSPH.runner import run             # noqa: E402
+
+
+@pytest.mark.parametrize('Cq', [0.0, 2.0])
+def test_each_rhs_piece_injects_no_net_energy(Cq):
+    def configure(ctx, _orig=sodCase.configureScheme):
+        _orig(ctx)
+        ctx.schemeConfig.diffusionParams.C_q = Cq
+
+    res = run(dataclasses.replace(sodCase, configureScheme=configure), scheme='Monaghan', nx=100, nSteps=120,
+              progress=False, quiet=True,
+              params=dict(viscositySwitch='NoneSwitch', right_rho=0.125, right_pressure=0.1))
+    st, out = pieces(res.state, res.ctx.config, res.ctx.schemeConfig)
+    m, v = st.masses, st.velocities
+    # one physical scale for every piece (a piece with no kinetic part, e.g. the conductivity, would
+    # otherwise be normalised by its own round-off)
+    dvdtP, _ = out['pressure force + work']
+    scale = (m * torch.einsum('ij,ij->i', v, dvdtP)).abs().sum().item()
+    for name, (dvdt, dudt) in out.items():
+        kinetic = (m * torch.einsum('ij,ij->i', v, dvdt)).sum().item()
+        heat = (m * dudt).sum().item()
+        assert abs(kinetic + heat) / scale < 1e-5, f'{name}: kinetic {kinetic:+.4e} heat {heat:+.4e}'
+    # the viscous piece must actually be doing something, or the test proves nothing
+    dvdt, dudt = out['viscous force + heating']
+    assert abs((m * dudt).sum().item()) > 1e-3
+
+
+def test_read_hayfield_entropy_dissipation_conserves_energy():
+    """OPEN_PROBLEMS §17: R&H (2012) Eq. (33) is `A_i - A_j (rho_j/rho_i)^(gamma-1)`, which makes the
+    pair energy transfer `m_i rho_i^(g-1) dA_i + m_j rho_j^(g-1) dA_j` exactly antisymmetric. The code had
+    the density ratio multiplying the whole difference, so the pair did not cancel across a density step."""
+    res = run(sodCase, scheme='Monaghan', nx=100, nSteps=120, progress=False, quiet=True,
+              params=dict(viscositySwitch='ReadHayfield2012', right_rho=0.125, right_pressure=0.1,
+                          alpha_min=0.2, alpha_max=1.0))
+    st, out = pieces(res.state, res.ctx.config, res.ctx.schemeConfig, 'ReadHayfield2012')
+    dudt = out['R&H entropy dissipation'][1]
+    m = st.masses
+    scale = (m * dudt).abs().sum().item()
+    assert scale > 1e-6, 'the entropy dissipation never engaged, so the test proves nothing'
+    assert abs((m * dudt).sum().item()) / scale < 1e-5

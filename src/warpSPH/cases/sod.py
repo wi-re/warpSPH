@@ -14,6 +14,7 @@ import torch
 from ..caseUtils import buildSod1D, plotSod, plotSod_, sodInitialState
 from ..enumTypes import AdaptiveSupportScheme, ViscositySwitch
 from ..runner import Case, RunContext, caseMain, registerCase, resolveEnum
+from .compressible import applyViscositySwitchParam, compressibleDiagnostics
 from .plotting import openWindow, pumpEvents
 
 __all__ = ['sodCase', 'states']
@@ -31,8 +32,7 @@ def configureScheme(ctx: RunContext) -> None:
     left, _ = states(ctx)
     ctx.schemeConfig.gamma = ctx.param('gamma')
     ctx.schemeConfig.rho0 = left.rho
-    ctx.schemeConfig.viscositySwitchParams.scheme = resolveEnum(
-        ViscositySwitch, ctx.param('viscositySwitch'))
+    applyViscositySwitchParam(ctx)
     ctx.schemeConfig.viscositySwitchParams.alpha_min = ctx.param(
         'alpha_min', ctx.schemeConfig.viscositySwitchParams.alpha_min)
     ctx.schemeConfig.viscositySwitchParams.alpha_max = ctx.param(
@@ -55,15 +55,7 @@ def buildSystem(ctx: RunContext):
 
 
 def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
-    """Kinetic/thermal/total energy -- total energy is the conserved quantity."""
-    particles = state.state
-    kinetic = 0.5 * (torch.linalg.norm(particles.velocities, dim=-1) ** 2 * particles.masses).sum()
-    thermal = (particles.internalEnergies * particles.masses).sum()
-    return {
-        'kineticEnergy': kinetic.detach().cpu().item(),
-        'thermalEnergy': thermal.detach().cpu().item(),
-        'totalEnergy': (kinetic + thermal).detach().cpu().item(),
-    }
+    return compressibleDiagnostics(ctx, state)
 
 
 def setupPlot(ctx: RunContext, state, scatter: bool = False):
@@ -141,7 +133,7 @@ sodCase = registerCase(Case(
         right_rho=0.25,
         right_pressure=0.1795,
         right_velocity=0.0,
-        viscositySwitch='NoneSwitch',
+        viscositySwitch=None,      # the scheme's default (cases/compressible.py COMPRESSIBLE_PARAMS)
         adaptiveSupportScheme='Owen',
         adaptiveSupportCorrections=False,
     ),

@@ -88,7 +88,9 @@ def computeShearTensor(
     # Vs = scatter_sum(dyadicProduct, i, dim = 0, dim_size = particles_a.positions.shape[0])
     if schemeConfig.viscositySwitchParams.correctVelocityGradient:
         if correctionMatrix is not None:
-            Vs = torch.einsum('ijk, ikl -> ijl', correctionMatrix, Vs)
+            # Vs[c, g] = dv_c/dx_g and, for v = A x, Vs = A M: the correction acts on the gradient index, Vs M^-1
+            # (M^-1 Vs = M^-1 A M kept the trace but not the shear / rotation, OPEN_PROBLEMS §22)
+            Vs = torch.einsum('ijk, ikl -> ijl', Vs, correctionMatrix)
     trace = torch.einsum('...ii', Vs)
     
     traces = torch.eye(Vs.shape[1], device=Vs.device) * trace.view(-1, 1, 1) / Vs.shape[1]

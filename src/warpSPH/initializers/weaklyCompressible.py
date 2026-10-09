@@ -250,10 +250,27 @@ def initializeSimulation(regions, config, schemeConfig, SimulationSystem, Simula
         if(rigidBody is not None):
             rigidBodies.append(rigidBody)
 
+    # Analytic boundaries: no particles, so no material id appears above; their RigidBody comes from the
+    # representation. Appended in region order after the particle bodies (a mixed scene keeps both kinds).
+    restDensity = schemeConfig.fluid.restDensity if hasattr(schemeConfig, 'fluid') else config.rho0
+    boundaryRegions = [r for r in regions if r.type == RegionType.Boundary]
+    for bodyId, region in enumerate(boundaryRegions):
+        if getattr(region, 'representation', None) is not None:
+            rigidBodies.append(buildAnalyticRigidBody(region, bodyId, particleState, restDensity = restDensity))
+
     # rigidBodies[0].angularVelocity = np.pi / 2
     for rigidBody in rigidBodies:
         particleState = updateBodyParticlesWCSPH(particleState, rigidBody)
     config.rigidBodies = rigidBodies
+    from ..boundary import buildBoundaryProvider
+    provider = buildBoundaryProvider(regions, particleState.positions.device)
+    schemeConfig.boundaryProvider = provider
+    if provider is not None:
+        provider.rigidBodies = [rb for rb in rigidBodies if getattr(rb, 'representation', None) is not None]
+        schemeConfig.rigidBodies = rigidBodies          # the system's finalize integrates the analytic bodies like the particle ones
+        schemeConfig._analyticMass = float(particleState.masses[particleState.kinds == 0].mean())          # the fluid's particle mass (the tensile reference value of the shifting)
+        schemeConfig._analyticDx = float(config.dx)                                       # host constant (the no-penetration law), see _analyticSupport
+        schemeConfig._analyticSupport = float(particleState.supports.max())          # the (constant) support of the wall integrals: a host float fixed here, so the right-hand side needs no device-to-host read
     config.regions = regions
     
     compressibleSystem = SimulationSystem(

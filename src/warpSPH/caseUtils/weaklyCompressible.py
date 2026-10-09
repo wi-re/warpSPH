@@ -797,6 +797,38 @@ def alignInteriorDomainToLattice(domain, interiorDomain, dx, periodic=None):
     return interiorDomain
 
 
+def analyticTankBody(interiorDomain):
+    """The walls of a rectangular tank as one analytic `warpSPHBoundaries` Body: the inner faces are the box
+    [min, max] of `interiorDomain`, the solid is everything outside it."""
+    from warpSPHBoundaries.scene import Body
+    from warpSPHBoundaries.scene.scene import BoxRep
+    lo = [float(v) for v in interiorDomain.min]
+    hi = [float(v) for v in interiorDomain.max]
+    return Body(bodyId = 0, reps = [BoxRep(tuple(lo), tuple(hi), solid = 'outside')])
+
+
+def analyticObstacleBody(obstacle, bodyId=1):
+    """The obstacle of `buildPresetObstacles` / `buildObstacleSDF` as an analytic `warpSPHBoundaries` Body (a solid island: the fluid is outside it). The SDF sees a point through
+    x -> S R(aoa) (x - t) with S = diag(1, 1 / aspectRatio), so the shape in its own frame is compressed by the aspect ratio in y (the SDF divides the y coordinate by scale / aspectRatio) and the body is posed at t with angle -aoa. Circle, box and
+    equilateral triangle (side 2 r, base at y = -r / sqrt(3), apex at 2 r / sqrt(3)); the other presets have no analytic counterpart here."""
+    import math
+    from warpSPHBoundaries.scene import Body
+    from warpSPHBoundaries.scene.implicitBodies import DiskBody
+    from warpSPHBoundaries.scene.scene import BoxRep, ImplicitRep, SurfaceRep
+    kind, r, a = obstacle['obstacleType'], float(obstacle['maxExtent']), float(obstacle['aspectRatio'])
+    pose = dict(center = (float(obstacle['offsetX']), float(obstacle['offsetY'])), angle = -math.radians(float(obstacle['aoa'])))
+    if kind == 'circle':
+        if a != 1.0:
+            raise NotImplementedError('analytic obstacle: an ellipse (aspectRatio != 1)')
+        return Body(bodyId = bodyId, reps = [ImplicitRep(DiskBody(center = (0.0, 0.0), radius = r))], **pose)
+    if kind == 'box':
+        return Body(bodyId = bodyId, reps = [BoxRep((-r, -r / a), (r, r / a), solid = 'inside')], **pose)
+    if kind == 'equilateralTriangle':
+        k = math.sqrt(3.0)
+        return Body(bodyId = bodyId, reps = [SurfaceRep.polygon([(-r, -r / k / a), (r, -r / k / a), (0.0, 2.0 * r / k / a)])], **pose)
+    raise NotImplementedError(f"analytic obstacle: {kind!r} (circle, box and equilateralTriangle are served)")
+
+
 def buildRegions(config, schemeConfig, simSetup, args, domain, interiorDomain, obstacle):
     regions, _, domain_sdf, _ = build_sdfs(config, schemeConfig, args.band, args, domain, interiorDomain, obstacle)
 
@@ -833,8 +865,26 @@ def buildRegions(config, schemeConfig, simSetup, args, domain, interiorDomain, o
     wallBC = getattr(args, 'wallBC', None) or 'freeSlip'
     if isinstance(wallBC, str):
         wallBC = BCType[wallBC]
+    # `wallRepresentation='analytic'`: the tank walls are a boundary-provider body (warpSPHBoundaries) instead of boundary
+    # particles. The region keeps `domain_sdf` (the fluid is clipped against it as usual) but is not sampled; an obstacle
+    # is not supported in this mode (its sdf is merged into `domain_sdf` above).
+    representation = None
+    obstacleRegion = []
+    if getattr(args, 'wallRepresentation', 'particles') == 'analytic':
+        representation = analyticTankBody(interiorDomain)
+        if getattr(args, 'obstacleActive', False):
+            # the tank and the obstacle are two analytic bodies, two (unsampled) boundary regions; the fluid is clipped against both SDFs as usual
+            tank_sdf = lambda x: sampleSDF(x, lambda y: domainSDF(y, interiorDomain, invert = False), invert = False)
+            obstacle_sdf = buildObstacleSDF(obstacle['obstacleType'], obstacle['offsetX'], obstacle['offsetY'], obstacle['maxExtent'], obstacle['aspectRatio'], obstacle['aoa'],
+                                            config, schemeConfig, args.L, args.W, interior = interiorDomain)
+            domain_sdf = tank_sdf
+            # obstacleRepresentation='particles': a MIXED scene, the tank analytic and the obstacle sampled by boundary particles (mDBC), each with its own wall treatment
+            mixed = getattr(args, 'obstacleRepresentation', 'analytic') == 'particles'
+            obstacleRegion = [buildRegion(config, schemeConfig, lambda x: sampleSDF(x, obstacle_sdf, invert = False), RegionType.Boundary, initialConditions = {}, kind = wallBC,
+                                          representation = None if mixed else analyticObstacleBody(obstacle))]
     regions = [
-        buildRegion(config, schemeConfig, domain_sdf, RegionType.Boundary, initialConditions={}, kind=wallBC),
+        buildRegion(config, schemeConfig, domain_sdf, RegionType.Boundary, initialConditions={}, kind=wallBC, representation=representation),
+        *obstacleRegion,
         buildRegion(config, schemeConfig, box_sdf, RegionType.Fluid, initialConditions={}),
     ]
 

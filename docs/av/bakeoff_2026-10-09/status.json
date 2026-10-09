@@ -1,0 +1,143 @@
+{
+  "started": "2026-10-09_00-00",
+  "smoke": false,
+  "jobs": [
+    {
+      "name": "row01_gsAV",
+      "returncode": 0,
+      "minutes": 12.757710520426432,
+      "log": "results/av_bakeoff_2026-10-09/row01_gsAV.log",
+      "dir": "results/av_bakeoff_2026-10-09/row01_gsAV"
+    },
+    {
+      "name": "row02_boCD",
+      "returncode": 0,
+      "minutes": 13.704779477914174,
+      "log": "results/av_bakeoff_2026-10-09/row02_boCD.log",
+      "dir": "results/av_bakeoff_2026-10-09/row02_boCD"
+    },
+    {
+      "name": "row03_boCH",
+      "returncode": 0,
+      "minutes": 15.465822033087413,
+      "log": "results/av_bakeoff_2026-10-09/row03_boCH.log",
+      "dir": "results/av_bakeoff_2026-10-09/row03_boCH"
+    },
+    {
+      "name": "row04_boRH",
+      "returncode": 0,
+      "minutes": 14.373901263872783,
+      "log": "results/av_bakeoff_2026-10-09/row04_boRH.log",
+      "dir": "results/av_bakeoff_2026-10-09/row04_boRH"
+    },
+    {
+      "name": "row05_cnRosswogFixed2",
+      "returncode": 0,
+      "minutes": 12.991506930192312,
+      "log": "results/av_bakeoff_2026-10-09/row05_cnRosswogFixed2.log",
+      "dir": "results/av_bakeoff_2026-10-09/row05_cnRosswogFixed2"
+    },
+    {
+      "name": "row06_sphenixFixed3",
+      "returncode": 0,
+      "minutes": 13.429369111855825,
+      "log": "results/av_bakeoff_2026-10-09/row06_sphenixFixed3.log",
+      "dir": "results/av_bakeoff_2026-10-09/row06_sphenixFixed3"
+    },
+    {
+      "name": "row07_wadsley2017",
+      "returncode": 0,
+      "minutes": 15.591314709186554,
+      "log": "results/av_bakeoff_2026-10-09/row07_wadsley2017.log",
+      "dir": "results/av_bakeoff_2026-10-09/row07_wadsley2017"
+    },
+    {
+      "name": "row08_gsAVSLR",
+      "returncode": 0,
+      "minutes": 13.37383450269699,
+      "log": "results/av_bakeoff_2026-10-09/row08_gsAVSLR.log",
+      "dir": "results/av_bakeoff_2026-10-09/row08_gsAVSLR"
+    },
+    {
+      "name": "row09_gsAVSLRB2",
+      "returncode": 0,
+      "minutes": 13.514608200391134,
+      "log": "results/av_bakeoff_2026-10-09/row09_gsAVSLRB2.log",
+      "dir": "results/av_bakeoff_2026-10-09/row09_gsAVSLRB2"
+    },
+    {
+      "name": "row10_rosswogLimited",
+      "returncode": 0,
+      "minutes": 13.518990834554037,
+      "log": "results/av_bakeoff_2026-10-09/row10_rosswogLimited.log",
+      "dir": "results/av_bakeoff_2026-10-09/row10_rosswogLimited"
+    },
+    {
+      "name": "row11_wadsleyLimited",
+      "returncode": 0,
+      "minutes": 16.24751099348068,
+      "log": "results/av_bakeoff_2026-10-09/row11_wadsleyLimited.log",
+      "dir": "results/av_bakeoff_2026-10-09/row11_wadsleyLimited"
+    },
+    {
+      "name": "row12_rosswogLimitedCoupled",
+      "returncode": 0,
+      "minutes": 13.572312327226003,
+      "log": "results/av_bakeoff_2026-10-09/row12_rosswogLimitedCoupled.log",
+      "dir": "results/av_bakeoff_2026-10-09/row12_rosswogLimitedCoupled"
+    },
+    {
+      "name": "row13_sphenix",
+      "returncode": 0,
+      "minutes": 13.416611874103546,
+      "log": "results/av_bakeoff_2026-10-09/row13_sphenix.log",
+      "dir": "results/av_bakeoff_2026-10-09/row13_sphenix"
+    },
+    {
+      "name": "compSPH",
+      "returncode": 0,
+      "minutes": 54.814720102151234,
+      "log": "results/av_bakeoff_2026-10-09/compSPH.log",
+      "dir": "results/av_bakeoff_2026-10-09/compSPH"
+    },
+    {
+      "name": "kh256_rosswogLimitedCoupled",
+      "returncode": 0,
+      "minutes": 9.625421909491221,
+      "log": "results/av_bakeoff_2026-10-09/kh256_rosswogLimitedCoupled.log",
+      "dir": "results/av_bakeoff_2026-10-09/kh256_rosswogLimitedCoupled"
+    },
+    {
+      "name": "kh256_sphenix",
+      "returncode": 0,
+      "minutes": 9.66528017918269,
+      "log": "results/av_bakeoff_2026-10-09/kh256_sphenix.log",
+      "dir": "results/av_bakeoff_2026-10-09/kh256_sphenix"
+    },
+    {
+      "name": "maps",
+      "returncode": 0,
+      "files": [
+        "sod2d_cullenDehnen2010",
+        "sod2d_readHayfield2012",
+        "sod2d_rosswog2020",
+        "sod2d_sphenix",
+        "sod2d_wadsley2017",
+        "sod2d_gsAVSLRB2",
+        "sod2d_rosswogLimitedCoupled",
+        "sedov2d_cullenDehnen2010",
+        "sedov2d_readHayfield2012",
+        "sedov2d_rosswog2020",
+        "sedov2d_sphenix",
+        "sedov2d_wadsley2017",
+        "sedov2d_gsAVSLRB2",
+        "sedov2d_rosswogLimitedCoupled"
+      ]
+    },
+    {
+      "name": "timing",
+      "returncode": 0
+    }
+  ],
+  "finished": "2026-10-09_04-27"
+}

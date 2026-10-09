@@ -145,7 +145,12 @@ def kolmogorovIncompressibleTimestep(ctx: RunContext, state) -> float:
     dt_adv = ctx.config.cflFactor * ctx.config.dx / max(vMax, 1e-3)
     # The viscous limit stays in `h`: it is a diffusion condition over the
     # smoothing length, not an advection condition over the particle spacing.
-    dt_visc = 0.125 * h ** 2 / kernelScale / nu if nu > 0 else float('inf')
+    # Morris et al. 1997: `dt <= 0.125 hs^2 / nu` with `hs` the smoothing
+    # length, `hs = h / kernelScale` for the support radius `h` -- so the
+    # scale enters squared. Dividing by it once allowed nu dt / hs^2 = 0.24,
+    # and under a no-slip wall with the Morris term that ran as a step-to-step
+    # sign-flipping velocity (OPEN_PROBLEMS.md §7, 2026-09-28).
+    dt_visc = 0.125 * (h / kernelScale) ** 2 / nu if nu > 0 else float('inf')
     return float(min(max(min(dt_adv, dt_visc), ctx.config.minDt), ctx.config.maxDt))
 
 

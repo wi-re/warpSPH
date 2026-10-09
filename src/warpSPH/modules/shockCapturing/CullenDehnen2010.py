@@ -259,7 +259,8 @@ def computeCullenTerms(
     alpha_max = switchConfig.alpha_max
     # alpha_max = getSetConfig(config, 'diffusionSwitch', 'alpha_max', 2)# from CRKSPH
     # The 1/xi is based on Hopkins' ATHENA paper after eq. F17
-    f_kern      = 1/sphKernel_xi(simulationConfig.kernel.value, particleState.positions.shape[1])
+    xi_kern     = sphKernel_xi(simulationConfig.kernel.value, particleState.positions.shape[1])
+    f_kern      = float(type(xi_kern)(1.0) / xi_kern)  # not `1 / xi`: under the float64 build xi is a wp.float64 (no int / wp.float64, no Tensor * wp.float64)
     # f_kern      = 1/Kernel_xi(kernel, particles.positions.shape[1])# wrappedKernel.xi(domain.dim)
     
     # Eq. 13 in Cullen and Dehnen 2010

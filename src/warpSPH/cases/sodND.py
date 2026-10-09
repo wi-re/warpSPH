@@ -98,7 +98,7 @@ def _sodNDCase(name: str, dim: int, nx: int, description: str) -> Case:
             right_rho=0.25,
             right_pressure=0.1795,
             right_velocity=0.0,
-            viscositySwitch='NoneSwitch',
+            viscositySwitch=None,      # the scheme's default (cases/compressible.py COMPRESSIBLE_PARAMS)
             adaptiveSupportScheme='Owen',
             adaptiveSupportCorrections=False,
         ),

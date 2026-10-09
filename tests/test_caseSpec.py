@@ -53,6 +53,16 @@ def test_booleansAreOverridableInBothDirections(tmp_path):
     assert spec.adaptiveDt is True  # and an untouched flag is left alone
 
 
+def test_optionalBooleansAreBooleanFlags():
+    """`progress: Optional[bool] = None` gets `--progress/--no-progress`, not a
+    float-typed flag (it used to reject `--progress`)."""
+    from warpSPH.runner.caseSpec import buildArgumentParser, specFromArgs
+    parser = buildArgumentParser()
+    assert specFromArgs(parser.parse_args(['--progress'])).progress is True
+    assert specFromArgs(parser.parse_args(['--no-progress'])).progress is False
+    assert specFromArgs(parser.parse_args([])).progress is None
+
+
 def test_mergedKeepsExistingParams():
     spec = CaseSpec(params={'a': 1, 'b': 2}).merged(nx=16, params={'b': 3})
     assert spec.nx == 16

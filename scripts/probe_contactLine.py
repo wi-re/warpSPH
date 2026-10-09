@@ -329,8 +329,12 @@ def buildCase(toy: str, dambreakLikeAC: bool, cav: str = 'off', nuOff=False, shi
     ])
     def timestep(ctx, state):
         if isWC(ctx):
+            # adaptive, but never above the pinned acoustic Courant 0.3 set in
+            # `initialConditions` -- the bare adaptive step ran the toys at
+            # ~0.8 while the probe claimed 0.3 (OPEN_PROBLEMS.md §11)
             from warpSPH.modules.timestep import computeTimestep
-            return computeTimestep(state, ctx.config, ctx.schemeConfig, dt=ctx.config.dt)
+            adaptive = computeTimestep(state, ctx.config, ctx.schemeConfig, dt=ctx.config.dt)
+            return min(adaptive, ctx.param('targetDt')) if ctx.param('targetDt') else adaptive
         return base.timestep(ctx, state)
 
     return base, dataclasses.replace(base, name=f'contactLine_{toy}', timestep=timestep,
@@ -626,6 +630,8 @@ def runMarrone(args):
         kw.update(resumeFrom=args.resume)
     if args.video:
         kw.update(plot=True, video=True, plotInterval=args.plotInterval, exportRoot=runRoot)
+    from _runWatch import watchOverrides
+    kw.update(watchOverrides(args))
     print(f'[{tag}] tLimit {args.tLimit}', flush=True)
     t0 = time.perf_counter()
     status = 'ok'
@@ -682,6 +688,10 @@ def main():
                     help='uniform initial toy pressure (closed-box gauge-drift control)')
     ap.add_argument('--tag', default='')
     ap.add_argument('--out', default=DEFAULT_OUT)
+    # velocity alarm (+ stall flags; this probe keeps its own sim-time watchdog,
+    # `--stallSimTime`, so the runner's stallProgress defaults off here)
+    from _runWatch import addWatchArguments
+    addWatchArguments(ap, stallProgress=0)
     args = ap.parse_args()
 
     sys.path.insert(0, os.path.dirname(HERE))
@@ -714,6 +724,8 @@ def main():
     if args.video:
         kw.update(plot=True, video=True, plotInterval=args.plotInterval,
                   exportRoot=runRoot)
+    from _runWatch import watchOverrides
+    kw.update(watchOverrides(args))
     print(f'[{tag}] {params}', flush=True)
     r = run(case, **kw)
     with open(os.path.join(runRoot, 'record.json'), 'w') as f:

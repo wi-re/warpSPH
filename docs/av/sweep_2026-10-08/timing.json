@@ -1,0 +1,32 @@
+{
+  "none": {
+    "msPerStep": 8.256139547253648,
+    "nSteps": 300,
+    "nx": 128
+  },
+  "cullenDehnen2010": {
+    "msPerStep": 10.31743762238572,
+    "nSteps": 300,
+    "nx": 128
+  },
+  "sphenix": {
+    "msPerStep": 9.177278613982102,
+    "nSteps": 300,
+    "nx": 128
+  },
+  "wadsley2017": {
+    "msPerStep": 13.818303753311435,
+    "nSteps": 300,
+    "nx": 128
+  },
+  "rosswog2020": {
+    "msPerStep": 8.388478583656251,
+    "nSteps": 300,
+    "nx": 128
+  },
+  "gsAVSLRB2": {
+    "msPerStep": 9.2745805097123,
+    "nSteps": 300,
+    "nx": 128
+  }
+}

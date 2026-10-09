@@ -34,6 +34,25 @@ def relL2(a: torch.Tensor, b: torch.Tensor) -> float:
     return float(torch.linalg.norm(a - b) / den)
 
 
+def L1(a: torch.Tensor, b: torch.Tensor, mask: Optional[torch.Tensor] = None) -> float:
+    """Mean absolute difference `mean(|a - b|)` over the masked sample set.
+
+    García-Senz & Cabezón (2026) Eq. (20), `L1 = (1/N_S) sum_{i in S} |p_i^SPH -
+    p_i^ref|` -- deliberately NOT normalised, so every number quoted from that
+    paper is comparable. Same convention as `relL2`: `b` is the reference,
+    `nan` for a non-finite sample (diverged run), and `nan` for an empty mask
+    (there is no sample set to average over).
+    """
+    a = a.detach().double()
+    b = b.detach().double()
+    if mask is not None:
+        mask = mask.detach().bool()
+        a, b = a[mask], b[mask]
+    if a.numel() == 0 or not (torch.isfinite(a).all() and torch.isfinite(b).all()):
+        return float('nan')
+    return float((a - b).abs().mean())
+
+
 def effectiveOrder(errCoarse: float, errFine: float, ratio: float = 2.0) -> Optional[float]:
     """Measured convergence order between two errors at dt and dt/ratio.
 

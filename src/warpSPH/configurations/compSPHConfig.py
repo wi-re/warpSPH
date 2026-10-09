@@ -21,6 +21,7 @@ from warpSPHCore import *
 from dataclasses import dataclass, field
 
 from .compressibleConfig import CompressibleSPHConfig, compressibleConfigToDict, dictToCompressibleConfig
+from .moduleConfigurations.viscositySwitchParameters import ViscositySwitchConfig
 
 def buildDefaultDiffusionParamsCompSPH():
     diffusionParams = DiffusionParameters()
@@ -45,6 +46,8 @@ class CompSPHConfig(CompressibleSPHConfig):
     energyScheme: EnergyScheme = field(default=EnergyScheme.CRK, metadata={'description': 'Energy scheme for the simulation'})
 
     diffusionParams: DiffusionParameters = field(default_factory=buildDefaultDiffusionParamsCompSPH)
+    # no switch by default (the Monaghan host's Rosswog default is not this scheme's)
+    viscositySwitchParams: ViscositySwitchConfig = field(default_factory=ViscositySwitchConfig)
 
     schemeName: str = field(default='CompSPH', metadata={'description': 'Name of the compressible SPH scheme to use'})
 

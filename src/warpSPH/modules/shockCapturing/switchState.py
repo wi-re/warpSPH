@@ -25,7 +25,6 @@ class ViscositySwitchState:
     R:       Optional[torch.Tensor]  # R term from Cullen and Dehnen 2010
     Xi:      Optional[torch.Tensor]  # Limiter Term, unnamed in CRKSPH
     v_sig:   Optional[torch.Tensor]  # Signal Velocity Term
-    dvdt_diss: Optional[torch.Tensor] = None  # Viscous momentum rate (ReadHayfield2012 eqs. 29-30)
     dudt_diss: Optional[torch.Tensor] = None  # Entropy-dissipation internal-energy rate (ReadHayfield2012 eqs. 33-35)
 
 

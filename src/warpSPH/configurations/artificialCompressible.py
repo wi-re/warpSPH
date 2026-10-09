@@ -345,6 +345,7 @@ def artificialCompressibleConfigToDict(config: ArtificialCompressibleSPHConfig) 
             'colorFieldGradThreshold': config.surfaceDetectionConfig.colorFieldGradThreshold,
             'barecascoThreshold': config.surfaceDetectionConfig.barecascoThreshold,
             'expansionIterations': config.surfaceDetectionConfig.expansionIterations,
+            'flagIsolated': config.surfaceDetectionConfig.flagIsolated,
             'scheme': config.surfaceDetectionConfig.scheme.name,
             'normalSource': config.surfaceDetectionConfig.normalSource.name,
         },
@@ -407,6 +408,7 @@ def dictToArtificialCompressibleConfig(configDict: Dict[str, Any]) -> Artificial
             colorFieldGradThreshold=float(surfaceConfigDict.get('colorFieldGradThreshold', defaults.colorFieldGradThreshold)),
             barecascoThreshold=float(surfaceConfigDict.get('barecascoThreshold', defaults.barecascoThreshold)),
             expansionIterations=int(surfaceConfigDict.get('expansionIterations', defaults.expansionIterations)),
+            flagIsolated=bool(surfaceConfigDict.get('flagIsolated', True)),
             scheme=SurfaceDetectionScheme[surfaceConfigDict['scheme']] if isinstance(surfaceConfigDict.get('scheme'), str) else surfaceConfigDict.get('scheme', defaults.scheme),
             normalSource=NormalSource[surfaceConfigDict['normalSource']] if isinstance(surfaceConfigDict.get('normalSource'), str) else surfaceConfigDict.get('normalSource', defaults.normalSource),
         )

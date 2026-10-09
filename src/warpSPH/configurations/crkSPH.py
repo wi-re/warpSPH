@@ -28,28 +28,53 @@ from dataclasses import dataclass, field
 
 @wp.struct
 class CRKViscosity:
-    eta_fold: scalar_t = field(default = scalar_t(0.2))
-    eta_crit: scalar_t = field(default = scalar_t(0.3333333))
+    # Limiter constants in units of r/H (H = support radius). A value <= 0 means "derive from n_h" and is
+    # resolved per step by `resolveCRKLimiter`: eta_crit = 1/n_h, eta_fold = 0.2/n_h, i.e. one and 0.2 nominal
+    # particle spacings (Frontiere et al. 2017 Eqs. 51-53 with (eta_crit, eta_fold) = (1/n_h, 0.2) in units of the
+    # smoothing scale; Spheral: etaCritFrac/nPerh, etaFoldFrac/nPerh). CRKSPH_LIMITER_PLAN O2. Set an explicit
+    # positive value to override.
+    eta_fold: scalar_t = field(default = scalar_t(-1.0))
+    eta_crit: scalar_t = field(default = scalar_t(-1.0))
 
     enableCRKLimiter: bool = field(default = True)
     enableVanLeerLimiter: bool = field(default = True)
+    # `LimiterType`: which slope limiter `enableVanLeerLimiter` switches on (VanLeerFrontiere = 0, the one CRKSPH has always used)
+    limiterType: wp.int32 = field(default = 0)
 
     forceVanLeerOff: bool = field(default = False)
     forceVanLeerOn: bool = field(default = False)
 
+    # Pair weight of the CRK force / energy terms: False = V_i V_j (Frontiere 2017 Eq. 38), True = ((V_i + V_j)/2)^2 (Spheral's w_ij^2,
+    # CRKSPH_LIMITER_PLAN note (f)). Both are symmetric in i <-> j, so both conserve.
+    meanVolumeWeights: bool = field(default = False)
+
+def resolveCRKLimiter(params, n_h):
+    """`params` with any non-positive `eta_crit` / `eta_fold` replaced by the n_h-derived value
+    (1/n_h, 0.2/n_h). Returns `params` itself when both are explicit."""
+    if params.eta_crit > 0 and params.eta_fold > 0:
+        return params
+    out = CRKViscosity()
+    for name in ('enableCRKLimiter', 'enableVanLeerLimiter', 'limiterType', 'forceVanLeerOff', 'forceVanLeerOn', 'meanVolumeWeights'):
+        setattr(out, name, getattr(params, name))
+    out.eta_crit = float(params.eta_crit) if params.eta_crit > 0 else 1.0 / float(n_h)
+    out.eta_fold = float(params.eta_fold) if params.eta_fold > 0 else 0.2 / float(n_h)
+    return out
+
 def buildDefaultCRKViscosityParams():
     crkViscosityParams = CRKViscosity()
-    crkViscosityParams.eta_fold = 0.2
-    crkViscosityParams.eta_crit = 0.3333333
+    crkViscosityParams.eta_fold = -1.0   # derived from n_h, see CRKViscosity
+    crkViscosityParams.eta_crit = -1.0
     crkViscosityParams.enableCRKLimiter = True
     crkViscosityParams.enableVanLeerLimiter = True
+    crkViscosityParams.limiterType = LimiterType.VanLeerFrontiere.value
     crkViscosityParams.forceVanLeerOff = False
     crkViscosityParams.forceVanLeerOn = False
+    crkViscosityParams.meanVolumeWeights = False
     
     return crkViscosityParams
 
 
-from .moduleConfigurations.diffusionParameters import DiffusionParameters, ViscosityTerms
+from .moduleConfigurations.diffusionParameters import DiffusionParameters, ViscosityTerms, LimiterType
 # from ..system import CompressibleSystem, CompressibleSystemUpdate
 # from ..config import SimulationConfig
 import torch
@@ -61,6 +86,7 @@ from warpSPHCore import *
 from dataclasses import dataclass, field
 
 from .compressibleConfig import CompressibleSPHConfig, compressibleConfigToDict, dictToCompressibleConfig
+from .moduleConfigurations.viscositySwitchParameters import ViscositySwitchConfig
 
 def buildDefaultDiffusionParamsCRKSPH():
     diffusionParams = DiffusionParameters()
@@ -85,6 +111,8 @@ class CRKSPHConfig(CompressibleSPHConfig):
     energyScheme: EnergyScheme = field(default=EnergyScheme.CRK, metadata={'description': 'Energy scheme for the simulation'})
 
     diffusionParams: DiffusionParameters = field(default_factory=buildDefaultDiffusionParamsCRKSPH)
+    # no switch by default (the Monaghan host's Rosswog default is not this scheme's)
+    viscositySwitchParams: ViscositySwitchConfig = field(default_factory=ViscositySwitchConfig)
     crkViscosityParams: CRKViscosity = field(default_factory=buildDefaultCRKViscosityParams)
     schemeName: str = field(default='CRKSPH', metadata={'description': 'Name of the CRK SPH scheme to use'})
     
@@ -102,8 +130,10 @@ def crkSPHConfigToDict(config: CRKSPHConfig) -> Dict[str, Any]:
             'eta_crit': config.crkViscosityParams.eta_crit,
             'enableCRKLimiter': config.crkViscosityParams.enableCRKLimiter,
             'enableVanLeerLimiter': config.crkViscosityParams.enableVanLeerLimiter,
+            'limiterType': LimiterType(config.crkViscosityParams.limiterType).name,
             'forceVanLeerOff': config.crkViscosityParams.forceVanLeerOff,
-            'forceVanLeerOn': config.crkViscosityParams.forceVanLeerOn
+            'forceVanLeerOn': config.crkViscosityParams.forceVanLeerOn,
+            'meanVolumeWeights': config.crkViscosityParams.meanVolumeWeights
         }
     })
     return baseDict
@@ -119,7 +149,10 @@ def dictToCRKSPHConfig(configDict: Dict[str, Any]) -> CRKSPHConfig:
     crkSPHConfig.crkViscosityParams.eta_crit = crkViscosityParamsDict['eta_crit']
     crkSPHConfig.crkViscosityParams.enableCRKLimiter = crkViscosityParamsDict['enableCRKLimiter']
     crkSPHConfig.crkViscosityParams.enableVanLeerLimiter = crkViscosityParamsDict['enableVanLeerLimiter']
+    limiter = crkViscosityParamsDict.get('limiterType', LimiterType.VanLeerFrontiere.name)   # absent before Phase 7b
+    crkSPHConfig.crkViscosityParams.limiterType = (LimiterType[limiter] if isinstance(limiter, str) else LimiterType(limiter)).value
     crkSPHConfig.crkViscosityParams.forceVanLeerOff = crkViscosityParamsDict['forceVanLeerOff']
     crkSPHConfig.crkViscosityParams.forceVanLeerOn = crkViscosityParamsDict['forceVanLeerOn']
+    crkSPHConfig.crkViscosityParams.meanVolumeWeights = crkViscosityParamsDict.get('meanVolumeWeights', False)
     
     return crkSPHConfig
