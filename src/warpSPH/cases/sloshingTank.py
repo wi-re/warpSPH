@@ -160,6 +160,11 @@ def configureScheme(ctx: RunContext) -> None:
             raise ValueError("sloshingTank wallRepresentation='analytic' is hooked into deltaSPH and omniIncompressible only "
                              "(ANALYTIC_BOUNDARIES_PORT_SURVEY.md)")
         sc.analyticWallPressure = ctx.param('analyticWallPressure')
+        if getattr(ctx.scheme, 'name', ctx.scheme) != 'omniIncompressible' and (sc.analyticWallPressure == 'mls' or ctx.param('boundaryFriction') or ctx.param('xsphCoefficient')):
+            raise ValueError("analyticWallPressure='mls', boundaryFriction and xsphCoefficient are omniIncompressible options")
+    if getattr(ctx.scheme, 'name', ctx.scheme) == 'omniIncompressible':
+        sc.xsphCoefficient = ctx.param('xsphCoefficient')
+        sc.boundaryFriction = ctx.param('boundaryFriction')
     sc.surfaceDetectionConfig.active = True
     sc.gravityConfig.active = True
     sc.gravityConfig.type = GravityType.Directional
@@ -569,8 +574,11 @@ sloshingTankCase = registerCase(Case(
         calibratedLattice='auto',
         # analytic walls: the wall plane moved outward by this fraction of dx (the calibrated lattice of the incompressible schemes, OPEN_PROBLEMS 31)
         analyticWallOffset=0.0,
-        # analytic walls only: 'hydrostatic' or 'normal' (see dambreak)
+        # analytic walls only: 'hydrostatic', 'normal' (see dambreak) or 'mls' (omniIncompressible: the wall pressure gradient fitted to the fluid's pressure iterate)
         analyticWallPressure='hydrostatic',
+        # omniIncompressible velocity filters (modules/xsph): the XSPH coefficient (DFSPH2D 1e-4) and the analytic walls' boundary friction (DFSPH2D 5e-3); 0 = off
+        xsphCoefficient=0.0,
+        boundaryFriction=0.0,
         gravityMagnitude=9.81,
         rho0Physical=1000.0,
         # Normalise the particle mass so the at-rest sampling measures `rho0`.

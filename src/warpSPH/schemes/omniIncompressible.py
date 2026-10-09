@@ -332,33 +332,13 @@ def _divergence(state: Any, config: Any, adjacency: Any,
 
 def _xsphFilter(state: Any, config: Any, adjacency: Any,
                 fluidMask: torch.Tensor) -> torch.Tensor:
-    """omniSPH's XSPH velocity filter (`SPHSimulation::XSPH` + `BXSPH`), as the
-    per-fluid-row velocity increment `sum_j c_j V_j W_ij (v_j - v_i)`.
-
-    `WarpOperation.Interpolate` computes `sum_j (m_j/rho_j) g_j W_ij` over all
-    non-ghost neighbours, so folding the per-kind coefficient `c` into the
-    reference values collapses the two omniSPH sums (fluid XSPH + wall drag)
-    into `interp(c v) - v_i interp(c)`. The static wall enters with `v_j = 0`
-    and `c_j = XSPH_BOUNDARY`, so its contribution `-c_k V_k W_ik v_i` is a
-    drag; the output is masked back to the fluid rows (the wall takes no
-    reaction, like the rest of this scheme)."""
-    c = torch.where(fluidMask,
-                    torch.full_like(state.densities, XSPH_FLUID),
-                    torch.full_like(state.densities, XSPH_BOUNDARY))
-    props = OperationProperties(
-        kernel=config.kernel, operation=WarpOperation.Interpolate,
-        supportMode=SupportScheme.SuperSymmetric)
-    cv = warpOperation(state, props, domain=config.domain,
-                       referenceValues=state.velocities * c.unsqueeze(-1),
-                       adjacency=adjacency)
-    cc = warpOperation(state, props, domain=config.domain,
-                       referenceValues=c, adjacency=adjacency)
-    dv = cv - state.velocities * cc.unsqueeze(-1)
-    return torch.where(fluidMask.unsqueeze(-1), dv, torch.zeros_like(dv))
+    """omniSPH's XSPH velocity filter at the module constants `XSPH_FLUID` / `XSPH_BOUNDARY` (`divergenceFree`'s `xsphFilterScale` scales it); the filter itself is `modules/xsph`."""
+    from ..modules.xsph import computeXSPH
+    return computeXSPH(state, config, None, adjacency, fluidCoefficient=XSPH_FLUID, boundaryCoefficient=XSPH_BOUNDARY)
 
 
 def _pressureAccel(state: Any, config: Any, adjacency: Any,
-                   p: torch.Tensor, fluidMask: torch.Tensor, wall: Any = None, rho0: float = 1.0) -> torch.Tensor:
+                   p: torch.Tensor, fluidMask: torch.Tensor, wall: Any = None, rho0: float = 1.0, mlsFit: Any = None) -> torch.Tensor:
     """omniSPH `computeAcceleration`: the symmetric SPH pressure gradient
     `-sum_j m_j (p_i/rho_i^2 + p_j/rho_j^2) gradW`, as an acceleration. Zeroed
     on non-fluid rows -- a static particle takes no reaction
@@ -370,7 +350,9 @@ def _pressureAccel(state: Any, config: Any, adjacency: Any,
         # analytic walls: the mirrored pressure `p_b = p_i^+` plus the hydrostatic wall pressure, clamped at 0, in omniSPH's own symmetric form (its triangle boundary term, the boundaries
         # repo's `DFSPH2D._boundary_accel`, equal to ~1e-6); `rho0` is the rest density of the mirror and of the hydrostatic offset
         from ..modules.analyticBoundary import wallPressureAccelerationOmni
-        a_p = a_p + wallPressureAccelerationOmni(wall, p, state.densities, rho0, wallMass=wall.wm, h=wall.support)
+        # `mlsFit` (analyticWallPressure = 'mls'): the wall pressure extrapolated linearly from the fluid's current pressure iterate instead of the hydrostatic one
+        a_p = a_p + wallPressureAccelerationOmni(wall, p, state.densities, rho0, wallMass=wall.wm, h=wall.support,
+                                                 gradient=None if mlsFit is None else mlsFit.gradient(p))
     return torch.where(fluidMask.unsqueeze(-1), a_p, torch.zeros_like(a_p))
 
 
@@ -498,11 +480,17 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *, checkS
         # the boundary particles' per-iterate wall pressure extrapolation has no analytic counterpart: the wall's pressure is the mirrored `p_i^+` plus the hydrostatic term
         wallP = WALL_PRESSURE_MODE if (mode == 'density' and wall is None) else None
 
+        # analyticWallPressure = 'mls' (DFSPH2D wallPressure='linear'): the wall's pressure gradient fitted to the fluid's current pressure every iterate (the fit's geometry once per solve)
+        mlsFit = None
+        if wall is not None and getattr(schemeConfig, 'analyticWallPressure', 'hydrostatic') == 'mls':
+            from ..modules.analyticBoundary import buildMLSPressureFit
+            mlsFit = buildMLSPressureFit(state, config, adjacency, fluid, rho0)
+
         def accel(pt, clampWall=True):
             pin = wallPressureExtrapolation(
                 state, config, adjacency, pt, fluid, mode=wallP,
                 clampNonNeg=clampWall) if wallP else pt
-            return _pressureAccel(state, config, adjacency, pin, fluid, wall, rho0)
+            return _pressureAccel(state, config, adjacency, pin, fluid, wall, rho0, mlsFit)
 
         def applyA(pt, a_p):
             """`A_shift p = -dt**2 div(a_p(p)) - shift*p`, masked to fluid
@@ -635,6 +623,12 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
     adjacency = _rebuildAdjacency(st, system, config)
     st.densities = computeDensities(st, config, schemeConfig, adjacency)
 
+    # boundary friction of the analytic walls (DFSPH2D applies it at the end of the step, on the new positions and poses: the start of the next step is the same state, and the wall evaluation is
+    # the one the density just made)
+    if getattr(schemeConfig, 'boundaryFriction', 0.0):
+        from ..modules.xsph import computeBoundaryFriction
+        st.velocities = st.velocities + computeBoundaryFriction(st, config, schemeConfig, adjacency)
+
     if st.pressures is None:
         st.pressures = torch.zeros_like(st.densities)
     pPrior = st.pressures.clone()          # omniSPH fluidPriorPressure
@@ -669,8 +663,10 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
     # --- 5. XSPH velocity filter (omniSPH XSPH + BXSPH, post-solve) --------
     # omniSPH filters the start-of-step velocity (the solves only touched
     # `accel`), so this and the pressure impulse `dt*accel` add independently.
-    # if XSPH_FLUID != 0.0 or XSPH_BOUNDARY != 0.0:
-        # st.velocities = st.velocities + _xsphFilter(st, config, adjacency, fluid)
+    # (`schemeConfig.xsphCoefficient`, `xsphBoundaryCoefficient`: both 0 = the faithful no-dissipation loop; DFSPH2D's default is 1e-4)
+    if getattr(schemeConfig, 'xsphCoefficient', 0.0) or getattr(schemeConfig, 'xsphBoundaryCoefficient', 0.0):
+        from ..modules.xsph import computeXSPH
+        st.velocities = st.velocities + computeXSPH(st, config, schemeConfig, adjacency)
 
     # --- 6. integrate (omniSPH Integrate: single semi-implicit Euler) -----
     st.velocities = st.velocities + dt * torch.where(

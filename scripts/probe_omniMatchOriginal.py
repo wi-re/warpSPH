@@ -1,6 +1,6 @@
 """Match the boundaries repo's original analytic dam-break result (F_surf_r5, DFSPH2D with exact edge integrals on the calibrated lattice) with warpSPH's analytic omniIncompressible, per particle over time (2026-10-09).
 The setup: omniSPH's lattice (23 x 91 centres on the block edges), `lattice_calibration` (particle mass V', wall mass mu, wall plane 0.55 dx from the first row), h = sqrt(20) r, hydrostatic wall closure, the
-wall NOT in the divergence solve (omniSPH and DFSPH2D for static walls). Arguments: end time, mode (calib | omni = pi r^2, walls one spacing out). Writes a snapshot npz in the format of the boundaries repo's dfsph_video.render.
+wall NOT in the divergence solve (omniSPH and DFSPH2D for static walls). Arguments: end time, mode (calib | omni = pi r^2, walls one spacing out), xsph coefficient (0), boundary friction (0), wall pressure (hydrostatic | mls). Writes a snapshot npz in the format of the boundaries repo's dfsph_video.render.
 """
 import sys, math, numpy as np, torch
 sys.path.insert(0, '/home/lu26029/dev/warpSPH/scripts')
@@ -15,6 +15,7 @@ from warpSPHBoundaries.sim.dfsph2d import lattice_calibration
 R='/home/lu26029/dev/curvatureBoundaries/.tmp/omni/runs'
 ref=np.load(R+'/F_surf_r5.npz'); omni=np.load(R+'/omni_r5.npz')
 T=float(sys.argv[1]) if len(sys.argv)>1 else 0.4
+XS=float(sys.argv[3]) if len(sys.argv)>3 else 0.0; BF=float(sys.argv[4]) if len(sys.argv)>4 else 0.0; WP=sys.argv[5] if len(sys.argv)>5 else 'hydrostatic'
 mode=sys.argv[2] if len(sys.argv)>2 else 'calib'      # calib: the boundaries repo's calibrated lattice (F_surf_r5) | omni: omniSPH conventions (pi r^2, wall one spacing)
 xo=ref['x'][0].astype(np.float64); h=float(ref['h']); lo_ref=ref['lo']; hi_ref=ref['hi']
 dxo=0.2/22; dyo=0.8/90
@@ -43,7 +44,7 @@ def _ps2(ctx,state,step):
     if _ps is not None: _ps(ctx,state,step)
     rec['t'].append(float(state.t)); rec['x'].append(state.state.positions.cpu().double().numpy()-ctx.scratch['effLo']+lo); rec['v'].append(state.state.velocities.cpu().double().numpy())
 case.initialConditions=_ic2; case.postStep=_ps2
-params={**case.params,'wallRepresentation':'analytic','analyticWallOffset':off,'W':Wc,'fluidWidth':23*dx/Wc,'fillRatio':91*dx/Lc,'wallBC':'freeSlip'}
+params={**case.params,'wallRepresentation':'analytic','analyticWallOffset':off,'W':Wc,'fluidWidth':23*dx/Wc,'fillRatio':91*dx/Lc,'wallBC':'freeSlip','calibratedLattice':False,'xsphCoefficient':XS,'boundaryFriction':BF,'analyticWallPressure':WP}
 spec=CaseSpec(caseName='o',scheme='omniIncompressible',params=params).merged(**case.defaults).merged(scheme='omniIncompressible',L=Lc,nx=100,n_h=2.57,integrationScheme='semiImplicitEuler',kernel='Wendland2',supportMode='SuperSymmetric',cflFactor=1.0,dt=1e-3,minDt=1e-4,maxDt=1e-3,tLimit=T,adaptiveDt=True,plot=False,store=False,progress=False,video=False,show=False,quiet=True)
 r=run(case,spec)
 print('warpSPH steps',len(rec['t']),'t_end',rec['t'][-1],'N',rec['x'][0].shape[0])

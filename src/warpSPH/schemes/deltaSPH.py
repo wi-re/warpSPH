@@ -256,6 +256,8 @@ def _deltaSPH_rhs(
     provider = getattr(schemeConfig, 'boundaryProvider', None)
     wall = None
     if provider is not None:
+        if getattr(schemeConfig, 'analyticWallPressure', 'hydrostatic') == 'mls':
+            raise NotImplementedError("analyticWallPressure='mls' is an omniIncompressible option (the delta+ wall pressure is hydrostatic or normal)")
         with record_function("[warpSPH] - [deltaSPH - 05b] - analytic wall aggregates"):
             wall = evaluateWall(provider, currentState, config, schemeConfig, computeGravity(currentState, config, schemeConfig, adjacency))
     # 6. Skipped boundary velocity computation since no boundaries are present

@@ -1,4 +1,6 @@
-"""Term-by-term comparison of the analytic-wall omniIncompressible terms with the boundaries repo's DFSPH2D (the oracle) on the identical dam-break lattice: density, alpha, both source terms, the wall gradient,
+"""MLS wall pressure (wallPressure='linear') of the omni analytic walls against DFSPH2D, term by term on the identical lattice, for a non-trivial pressure field. Derived from the probe below.
+
+Term-by-term comparison of the analytic-wall omniIncompressible terms with the boundaries repo's DFSPH2D (the oracle) on the identical dam-break lattice: density, alpha, both source terms, the wall gradient,
 the fluid and wall pressure accelerations (all equal to <= 1e-5 relative in float32 vs float64, 2026-10-09). Needs warpSPHBoundaries with its sim layer; arguments: wall offset in dx (0.5).
 """
 import sys, numpy as np, torch
@@ -32,7 +34,7 @@ print('wall box',lo,hi)
 # DFSPH2D with identical inputs
 dev='cuda:0'
 sc2=domain_scene('surface',lo,hi,float(h0.max()),dev)
-dcfg=DFSPHConfig(gravity=(0.0,-9.81),maxDt=1e-3,minDt=1e-4,boundaryInDivergence=True,wallPressure='hydrostatic',xsph=0.0,boundaryFriction=0.0,wallMass=1.0,recordForces=False,fluidPairs='cells',graphIterations=False)
+dcfg=DFSPHConfig(gravity=(0.0,-9.81),maxDt=1e-3,minDt=1e-4,boundaryInDivergence=True,wallPressure='linear',xsph=0.0,boundaryFriction=0.0,wallMass=1.0,recordForces=False,fluidPairs='cells',graphIterations=False)
 sim=DFSPH2D(x0,np.zeros_like(x0),m0,h0,sc2,dcfg,dev)
 sim.dt=1e-3
 sim._prepare(); rho_d=(sim._sum(sim.V[sim.pj]*sim.W)+sim.lam).cpu().double().numpy()
@@ -40,40 +42,29 @@ d=rho_w-rho_d
 print('density  warpSPH vs DFSPH2D: max|diff| %.2e  rms %.2e   (warpSPH rho min/max %.4f/%.4f, DFSPH2D %.4f/%.4f)'%(np.abs(d).max(),np.sqrt((d**2).mean()),rho_w.min(),rho_w.max(),rho_d.min(),rho_d.max()))
 
 import warpSPH.modules.analyticBoundary as AB
-from warpSPH.modules.incompressible.wp_alpha import computeAlpha
 dt=1e-3
 sim=DFSPH2D(x0,np.zeros_like(x0),m0,h0,sc2,dcfg,dev); sim.dt=dt
 sim._bdiv=True; sim._clampWallDiv=True
 sim._prepare(); sim.rho=sim._sum(sim.V[sim.pj]*sim.W)+sim.lam
-Vt=sim.V/sim.rho
-g=torch.tensor([0.0,-9.81],dtype=torch.float64,device=dev)
-vp=dt*g.expand(len(x0),2).clone()
-# ---- warpSPH side
 cfg.dt=dt; fluid=st.kinds==0
 st.densities=computeDensities(st,cfg,sc,adj)
 wall=AB.resolveWall(st,cfg,sc,adj)
-def cmp(name,a,b,rel=True):
+cp=lambda t: t.detach().cpu().double().numpy()
+def cmp(name,a,b):
     a=np.asarray(a,float).reshape(len(x0),-1); b=np.asarray(b,float).reshape(len(x0),-1)
     d=np.abs(a-b); sc_=np.sqrt((b**2).mean())
     i=np.unravel_index(np.argmax(d),d.shape)[0]
-    print(f'{name:34s} max|d| {d.max():.3e}  rms|d| {np.sqrt((d**2).mean()):.3e}  rms(ref) {sc_:.3e}  rel.rms {np.sqrt((d**2).mean())/max(sc_,1e-300):.3e}  worst i={i} y={x0[i,1]:+.3f}')
-cp=lambda t: t.detach().cpu().double().numpy()
-alpha_w=dt*dt*computeAlpha(st,cfg,sc,adj,apparentVolumes=st.masses/st.densities,includeBoundaryReaction=False,wall=wall)
-cmp('alpha (density & divergence)',cp(alpha_w),cp(sim._alpha(dt,Vt,True)))
-div=O._divergence(st,cfg,adj,torch.as_tensor(vp,dtype=st.densities.dtype,device=st.densities.device),wall,bodyVelocity=True)
-cmp('source, divergence solve',cp(dt*div),cp(sim._source(dt,Vt,vp,False,True)))
-cmp('source, density solve',cp((1-st.densities)+dt*div),cp(sim._source(dt,Vt,vp,True,True)))
-H=float(x0[:,1].max())+0.5*dx; p_t=torch.tensor(9.81*(H-x0[:,1]),dtype=torch.float64,device=dev)
-a_d=sim._boundary_accel(p_t,True)+sim._fluid_accel(p_t)
-a_w=O._pressureAccel(st,cfg,adj,p_t.to(st.densities.dtype),fluid,wall,sc.fluid.restDensity)
-cmp('pressure accel, hydrostatic p (total)',cp(a_w),cp(a_d))
-a_fl_w=O._pressureAccel(st,cfg,adj,p_t.to(st.densities.dtype),fluid,None)
-cmp('  fluid part',cp(a_fl_w),cp(sim._fluid_accel(p_t)))
-from warpSPH.modules.analyticBoundary import wallPressureAcceleration
-pp=p_t.clamp(min=0).to(st.densities.dtype)
-a_wall_w=AB.wallPressureAccelerationOmni(wall,pp,st.densities,sc.fluid.restDensity,wallMass=wall.wm,h=wall.support)
-cmp('  wall part',cp(a_wall_w),cp(sim._boundary_accel(p_t,True)))
-# wall part with p = 0 (the hydrostatic offset alone)
-z=torch.zeros_like(pp)
-cmp('  wall part at p = 0 (hydrostatic A)',cp(AB.wallPressureAccelerationOmni(wall,z,st.densities,sc.fluid.restDensity,wallMass=wall.wm,h=wall.support)),cp(sim._boundary_accel(torch.zeros_like(p_t),True)))
-cmp('wall G (sum over bodies)',cp(wall.G.sum(0)),cp(sim.gk))
+    print(f'{name:40s} max|d| {d.max():.3e}  rms|d| {np.sqrt((d**2).mean()):.3e}  rms(ref) {sc_:.3e}  rel.rms {np.sqrt((d**2).mean())/max(sc_,1e-300):.3e}  worst i={i} x={x0[i,0]:+.3f} y={x0[i,1]:+.3f}')
+H=float(x0[:,1].max())+0.5*dx
+rng=np.random.default_rng(0)
+for label,noise in (('hydrostatic p',0.0),('hydrostatic + 1 % noise',0.01),('hydrostatic + 10 % noise',0.1)):
+    ph=9.81*(H-x0[:,1])
+    p_np=ph*(1.0+noise*rng.standard_normal(len(x0)))
+    p_t=torch.tensor(p_np,dtype=torch.float64,device=dev).clamp(min=0)
+    pw=p_t.to(st.densities.dtype)
+    fit=AB.buildMLSPressureFit(st,cfg,adj,fluid,sc.fluid.restDensity)
+    a1_w=cp(fit.gradient(pw)); a1_d=cp(torch.einsum("nij,nj->ni",sim.Minv,sim._sum(( (p_t[sim.pj]-p_t[sim.pi])[:,None]*sim.wy))))
+    print(label)
+    cmp('  MLS gradient a1',a1_w,a1_d)
+    a_wall_w=AB.wallPressureAccelerationOmni(wall,pw,st.densities,sc.fluid.restDensity,wallMass=wall.wm,h=wall.support,gradient=fit.gradient(pw))
+    cmp('  wall part (MLS)',cp(a_wall_w),cp(sim._boundary_accel(p_t,True)))

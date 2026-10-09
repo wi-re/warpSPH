@@ -47,6 +47,7 @@ class WallState:
     dtype: Any
     support: float = 0.0        # the (constant) kernel support the aggregates were evaluated for
     wm: float = 1.0             # the wall mass density factor
+    omega: Any = None           # [B] angular velocity of every body (the rigid wall velocity of a rotating body: friction), or None
 
 
 def resolveWall(state, config, schemeConfig, adjacency, wall=None):
@@ -124,7 +125,8 @@ def _evaluateWall(provider, state, config, schemeConfig, gravity):
         a1 = (a1 * nb).sum(-1, keepdim=True) * nb
     A = wm * agg.evaluate((WallOutput('A', 0, 'a1g1'),), a1=a1)['A']
     near = (lam.sum(0) > 1e-9).to(F64)
-    return WallState(agg, kin, lam, G, A, near, pinned, mirror, state.positions.dtype, support, wm)
+    omega = torch.stack([torch.as_tensor(b.angularVelocity).to(F64) for b in provider.scene.bodies])
+    return WallState(agg, kin, lam, G, A, near, pinned, mirror, state.positions.dtype, support, wm, omega)
 
 
 def _wallVelocity(wall, bi):
@@ -181,19 +183,25 @@ def wallPressureAcceleration(wall, P, switch, rho, wallMass=1.0, h=1.0, clamp=Tr
     return acc.to(wall.dtype) if perBody else acc.sum(0).to(wall.dtype)
 
 
-def wallPressureAccelerationOmni(wall, P, rho, rho0, wallMass=1.0, h=1.0, perBody=False):
+def wallPressureAccelerationOmni(wall, P, rho, rho0, wallMass=1.0, h=1.0, perBody=False, gradient=None):
     """The pressure force of the wall in omniSPH's symmetric form (the fluid pairs `-sum_j V_j (p_i / rho_i^2 + p_j / rho_j^2) grad W_ij`, the wall a mirror: `p_b = p_i^+`, `rho_b = rho0`):
     `a = - sum_b [ (p^+ / rho_i^2 + p^+ / rho0^2) G_b + A_eff,b ]`, with the hydrostatic offset `A_b = int (a1 . y) grad W dA`, `a1 = rho_i (g - a_w)` (so `A_i = rho_i / rho0` times the
     `WallState`'s, evaluated at `rho0`) clamped so the wall pressure `p_i + q` stays >= 0 as in `wallPressureAcceleration`. Differs from the delta+ form (`-[(p^+ + s p) G + A] / rho_i`) by the
-    density factors, which matter on under-dense wall rows. `DFSPH2D._boundary_accel` of the boundaries repo is the oracle (equal to ~1e-6)."""
+    density factors, which matter on under-dense wall rows. `DFSPH2D._boundary_accel` of the boundaries repo is the oracle (equal to ~1e-6).
+
+    `gradient`: [N, 2], the MLS pressure gradient `a1` (`wallPressureMLS.MLSPressureFit.gradient`) in place of the hydrostatic one, `A_b = wm a1_d C_dj` with the provider's first moment tensor
+    `C_dj = int y_d d_j W`, unclamped (DFSPH2D `wallPressure='linear'`: the extrapolated wall pressure is the fluid's own, there is no hydrostatic offset to bound)."""
     P64, rho64 = P.to(F64), rho.to(F64)
     pp = P64.clamp(min=0)
     G = wall.G
-    A = wall.A * (rho64 / float(rho0))[None, :, None]
-    eps = 1e-5 * wallMass / h
-    q = (A * G).sum(2) / (G * G).sum(2).clamp(min=eps * eps)
-    theta = torch.where(q < 0, (pp[None] / (-q).clamp(min=1e-300)).clamp(0.0, 1.0), torch.ones_like(q))
-    A = A - ((1.0 - theta) * q)[:, :, None] * G
+    if gradient is not None:
+        A = wall.wm * torch.einsum('nd,bndj->bnj', gradient.to(F64), wall.agg.out['Cov'].to(F64))
+    else:
+        A = wall.A * (rho64 / float(rho0))[None, :, None]
+        eps = 1e-5 * wallMass / h
+        q = (A * G).sum(2) / (G * G).sum(2).clamp(min=eps * eps)
+        theta = torch.where(q < 0, (pp[None] / (-q).clamp(min=1e-300)).clamp(0.0, 1.0), torch.ones_like(q))
+        A = A - ((1.0 - theta) * q)[:, :, None] * G
     acc = -((pp / rho64 ** 2 + pp / float(rho0) ** 2)[None, :, None] * G + A)
     return acc.to(wall.dtype) if perBody else acc.sum(0).to(wall.dtype)
 
