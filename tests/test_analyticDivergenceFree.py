@@ -137,3 +137,59 @@ def test_a_free_body_is_refused_by_the_incompressible_loops():
         ctx.schemeConfig.boundaryProvider.rigidBodies[0].dynamic = True
     with pytest.raises(NotImplementedError, match='dynamic'):
         _tankWith('omniIncompressible', setup, 2)
+
+
+# ---- stage 2 B: the VD+PS particle shift of IncompressibleSystem.finalize on analytic walls ------------------------------------------------------------------------
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA')
+def test_velocity_gradient_convention_of_the_shift_projection_and_its_wall_term():
+    """`gradVel[n, i, j] = d_j v_i` (the finalize projection contracts it with the shift: `(dx . grad) v`): a stretch v_x = s x gives `gradVel[0, 0] = s` in the bulk; the wall term `sum_b (u_b - v) (x) G_b`
+    completes it at the wall (at a wall-contact particle the fluid sum alone is one-sided and wrong, with the wall term the shear is recovered)."""
+    from warpSPHCore import OperationProperties, WarpOperation, OperationDirection, GradientScheme, SupportScheme, warpOperation
+    from warpSPH.modules.analyticBoundary import resolveWall
+    res = tank(nSteps=1)
+    st, ctx = res.state.state, res.ctx
+    sc, cfg, adj = ctx.schemeConfig, ctx.config, res.state.adjacency
+    s = 0.7
+    v = torch.zeros_like(st.velocities)
+    v[:, 0] = s * st.positions[:, 0]
+    g = warpOperation(st, operationProperties=OperationProperties(operation=WarpOperation.Gradient, kernel=cfg.kernel, supportMode=SupportScheme.Gather, operationMode=OperationDirection.AllToAll,
+                                                                 gradientMode=GradientScheme.Difference), queryValues=v, domain=cfg.domain, adjacency=adj)
+    pos = st.positions.cpu().numpy()
+    dx = float(cfg.dx)
+    bulk = torch.as_tensor((pos[:, 1] > pos[:, 1].min() + 3 * dx) & (pos[:, 1] < pos[:, 1].max() - 3 * dx) & (np.abs(pos[:, 0]) < np.abs(pos[:, 0]).max() - 4 * dx), device=v.device)
+    assert int(bulk.sum()) > 100
+    assert float(g[bulk, 0, 0].mean()) == pytest.approx(s, rel=0.05)
+    assert abs(float(g[bulk, 0, 1].mean())) < 0.05 * s
+    # the free-slip wall term of `finalize`: only the wall-normal part of the velocity jump, so a velocity tangential to the wall (v_y = s x at the side walls) adds nothing, a normal one adds (u_b - v)_n n (x) G
+    wall = resolveWall(st, cfg, sc, adj)
+    G = wall.G.sum(0).double()
+    side = torch.as_tensor(np.abs(pos[:, 0]) > np.abs(pos[:, 0]).max() - 0.6 * dx, device=v.device) & torch.as_tensor(pos[:, 1] > pos[:, 1].min() + 2 * dx, device=v.device) & torch.as_tensor(pos[:, 1] < pos[:, 1].max() - 2 * dx, device=v.device)
+    assert int(side.sum()) >= 4
+    vt = torch.zeros_like(v).double()
+    vt[:, 1] = s * st.positions[:, 0].double()
+    jump = ((-vt * G).sum(1, keepdim=True) / (G * G).sum(1, keepdim=True).clamp(min=1e-300)) * G
+    assert float(jump[side].abs().max()) < 1e-3 * float((vt[side].abs().max() * G[side].norm(dim=1).max()))
+    vn = torch.zeros_like(v).double()
+    vn[:, 0] = 0.3
+    jumpN = ((-vn * G).sum(1, keepdim=True) / (G * G).sum(1, keepdim=True).clamp(min=1e-300)) * G
+    assert float(jumpN[side][:, 0].abs().mean()) == pytest.approx(0.3, rel=0.05)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA')
+def test_vdps_shift_runs_on_analytic_walls_without_gravity():
+    """a gravity-free analytic tank with a smooth swirl: `divergenceFree` runs the VD+PS shift of `finalize` through the wall-aware solve (it used to be wall-blind), the fluid stays inside the walls and
+    its density stays near 1."""
+    def setup(ctx):
+        pass
+    res = _tankWith('divergenceFree', setup, 120, params={'gravityMagnitude': 0.0})
+    st = res.state.state
+    f = st.kinds == 0
+    assert not res.diverged
+    d = st.densities[f]
+    assert float(d.max()) < 1.03
+    interior = res.ctx.scratch['interiorDomain']
+    x = st.positions[f]
+    assert float(x[:, 0].min()) > float(interior.min[0]) - 0.6 * float(res.ctx.config.dx)
+    assert float(x[:, 1].min()) > float(interior.min[1]) - 0.6 * float(res.ctx.config.dx)
+    assert float(x[:, 0].max()) < float(interior.max[0]) + 0.6 * float(res.ctx.config.dx)

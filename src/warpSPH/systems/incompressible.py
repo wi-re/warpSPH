@@ -217,6 +217,7 @@ class IncompressibleSystem(BaseIntegrationSystem):
                         and not schemeConfig.gravityConfig.active)
         if _psShift and schemeConfig is not None and getattr(schemeConfig, 'shifting', 'none') != 'none':
             _psShift = False        # the Fickian shift of the step (`modules/shifting/fickian.py`) replaces the VD+PS shift
+        _analyticWalls = schemeConfig is not None and getattr(schemeConfig, 'boundaryProvider', None) is not None
         if _psShift and config is not None and schemeConfig is not None:
             with record_function("[warpSPH] - [dfsph] - VD+PS particle shift"):
                 self.adjacency = buildVerletList(
@@ -230,6 +231,13 @@ class IncompressibleSystem(BaseIntegrationSystem):
                         systemState=self.state, config=config,
                         schemeConfig=schemeConfig, adjacency=self.adjacency, dt=dt)
                     dvdt_incomp = dx_ps / (dt * dt)
+                elif _analyticWalls:
+                    # analytic walls: the same constant-density iteration as `solveIncompressible`, through the wall-aware solve of `omniIncompressible` (density, alpha, source and pressure force carry
+                    # the wall), from the velocity the step ended with (dvdt = 0)
+                    from ..schemes.omniIncompressible import _solve
+                    dvdt_incomp, _p_ps, _e_ps, _ = _solve(
+                        self.state, config, schemeConfig, self.adjacency, fluid=self.state.kinds == 0, rho0=schemeConfig.fluid.restDensity,
+                        vEnter=self.state.velocities, warmStart=torch.zeros_like(self.state.densities), dt=dt, mode='density', minIters=3, maxIters=256, tol=1e-3)
                 else:
                     dvdt_incomp, _p_ps, _e_ps, _ps_ps = solveIncompressible(
                         particles=self.state, config=config, schemeConfig=schemeConfig,
@@ -245,6 +253,19 @@ class IncompressibleSystem(BaseIntegrationSystem):
                         gradientMode=GradientScheme.Difference),
                     queryValues=self.state.velocities,
                     domain=config.domain, adjacency=self.adjacency)
+                if _analyticWalls:
+                    # the wall's share of the velocity gradient, sum_b (u_b - v) (x) G_b (the free-slip wall: only the normal part of the jump)
+                    from ..modules.analyticBoundary import resolveWall
+                    wall = resolveWall(self.state, config, schemeConfig, self.adjacency)
+                    if wall is not None:
+                        v64 = self.state.velocities.to(torch.float64)
+                        for bi in range(wall.G.shape[0]):
+                            ub = torch.zeros_like(v64) if wall.pinned[bi] else wall.kin.velocity[bi].to(torch.float64)
+                            G = wall.G[bi].to(torch.float64)
+                            jump = ub - v64
+                            if not wall.mirror[bi]:           # free slip: only the wall-normal part of the velocity jump, (jump . G) G / |G|^2 (the tangential velocity is mirrored, no jump)
+                                jump = ((jump * G).sum(1, keepdim=True) / (G * G).sum(1, keepdim=True).clamp(min=1e-300)) * G
+                            gradVel = gradVel + torch.einsum('ni,nj->nij', jump, G).to(gradVel.dtype)
                 dx = dt * dt * dvdt_incomp
                 proj_vel = torch.einsum('nij, nj -> ni', gradVel, dx)
                 fluidCol = (self.state.kinds == 0).unsqueeze(-1)
