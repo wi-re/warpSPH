@@ -1,0 +1,49 @@
+# Raw result lines for the stage 3 follow-up runs (2026-10-11): the outer-torque oracle number,
+# the omni square array longer run, and the divergenceFree disk support (n_h) attribution. The full
+# time series of the two disk runs: dfsph_balance_hist.clean.txt (n_h = 4.0) and disk_nh2505.clean.txt (n_h = 2.505).
+# Units: rho0 = 1, mass = volume, nu = the discretisation's shear-wave viscosity.
+
+
+=== oracle_tc_outer (DFSPH2D on the warpSPH taylorCouette cut lattice, N = 1384, H = 2.505 dx, closed preset, t = 25)
+# the morris cal 0.9431 sensitivity run (the auto-cal run of the 2026-10-10 session gave inner 0.9732 / outer 0.8867 / profile 0.9990, balance rms 8.6e-20)
+N=1384  r in [0.2190, 0.4879]  support 0.0522  wall mass 0.9866  morris cal 0.9431  nu 0.01826
+ran 12501 steps to t=25.00 in 147s
+RESULT profile amplitude / exact = 0.9974
+RESULT torque inner / exact = 0.9717   (history mean over last 300 steps: -0.01062 vs exact -0.01093)
+RESULT torque outer / (-exact) = 0.8809   (+0.00963 vs +0.01093)
+RESULT outer / inner = 0.9066   (exact 1.0)
+RESULT momentum balance rms (last 300) = 9.248e-20
+# warpSPH omni, same lattice (tc_omni_nh2.505_cut, 2026-10-10): profile 0.9994, inner 0.9733, outer 0.8878
+
+
+=== square_long_t60 (omniIncompressible square array a = 1/3, n = 48, N = 2048, t = 60)
+SHEAR n=48 nu_shear 0.01841 (nominal 0.01850)
+RESULT omniIncompressible square n=48 N=2048 c=0.1111 nu_shear=0.01841 t=60.0 diverged=False
+RESULT K = 25.536  K_ref = 25.910  ratio = 0.9856   (history of K / K_ref at t/4, t/2, t: 0.986 0.989 0.985)
+RESULT load / body force on the fluid = 1.0000   U = 0.05666
+# steady: not falling (the 2026-10-10 t = 20 value was 0.9863, read as "still falling"). The oracle square (2026-10-10) is 0.6 % smaller
+# (side 0.331174, c = 0.109676 vs 1/3 = 0.1111; N = 2048 both): K/K_ref 0.9920, F/balance 1.0012.
+
+
+=== dfsph_balance_hist (divergenceFree disk R = 0.2, n = 48, N = 2020, n_h = 4.0 = the case default, t = 60)
+# the support of the 2026-10-10 validation run (the probe never set n_h, so it took the case default 4.0, not the oracle's 2.505)
+SHEAR n=48 nu_shear 0.01841
+RESULT divergenceFree disk n=48 N=2020 nu=0.01841 t=60.0 K_ref=26.490 diverged=False
+# balance 0.979-0.999 (mean ~0.985), K/K_ref 0.975-1.000 (mean ~0.989), small persistent oscillation, period ~10-15
+tail: U=0.05374  balance=0.9867  K/K_ref=0.9892
+(full table: dfsph_balance_hist.clean.txt)
+
+
+=== disk_nh2505 (divergenceFree disk R = 0.2, n = 48, N = 2020, n_h = 2.505 = the oracle's support, nu re-calibrated on that lattice, t = 60)
+SHEAR n=48 nu_shear 0.01826
+RESULT divergenceFree disk n=48 N=2020 nu=0.01826 t=60.0 K_ref=26.490 diverged=False
+# balance 0.85-1.06 (mean ~0.885 over t = 20..60), K/K_ref 0.90-1.15 (mean ~0.95), LARGE persistent oscillation, period ~10-15, not settling
+# (the tail line below catches an oscillation peak: it is not the mean)
+tail: U=0.04956  balance=0.9799  K/K_ref=1.0607
+(full table: disk_nh2505.clean.txt)
+# oracle DFSPH2D, same support n_h = 2.505 (2026-10-10): K/K_ref 1.0034, F/balance 0.9986 (smooth, settled)
+
+
+=== wake_Re100_res20 (delta+ cylinder wake, Re = 100, D/dx = 20, t = 150) - RUNNING (see the 2026-10-11 follow-up commit)
+# comparison: warpSPH res = 10 C_L amp 0.4264 / C_D 1.5278; oracle res = 10 0.3755 / 1.5278; oracle res = 20 0.333.
+# question: does D/dx = 20 move the warpSPH lift amplitude toward the oracle's 0.333 (a resolution effect) or leave it high (a scheme effect) ?
