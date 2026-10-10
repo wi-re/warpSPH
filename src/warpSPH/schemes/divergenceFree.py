@@ -49,6 +49,7 @@ from warpSPH.modules.surfaceDetection import detectFreeSurface
 from warpSPHCore import SupportScheme, buildVerletList
 
 import torch
+from ..modules.boundaryConditions.pinned import pinnedKeepWeight
 from warpSPH.utils.timer import TimedBlock
 from torch.profiler import profile, ProfilerActivity
 from warpSPHCore.profiling import record_function
@@ -524,6 +525,9 @@ def divergenceFree_step(
     # with TimedBlock('enforce updates', use_cuda=True, device=config.device) as tb_enforce:
     with record_function("[warpSPH] - [deltaSPH - 17] - enforce updates"):
         enforceUpdates(update, currentSystem, config.dt, currentSystem.t, config, schemeConfig)
+        keepBand = pinnedKeepWeight(currentSystem.state, config, schemeConfig)            # a pinned band: no acceleration inside
+        if keepBand is not None and getattr(update, 'dvdt', None) is not None:
+            update.dvdt = update.dvdt * keepBand
         nonFluidMask = (currentState.kinds != 0).unsqueeze(-1)
         update.dxdt = torch.where(nonFluidMask, torch.zeros_like(update.dxdt), update.dxdt)
         update.dvdt = torch.where(nonFluidMask, torch.zeros_like(update.dvdt), update.dvdt)

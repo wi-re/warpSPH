@@ -69,10 +69,24 @@ def morrisCalibration(h: float, dx: float, V: float, eta2: float = MORRIS_ETA2) 
     return float(-np.sum(V * dw * r / (r * r + eta2 * h * h) * y * y))
 
 
+_ANY_PERIODIC: dict = {}
+
+
+def _anyPeriodic(domain: Any) -> bool:
+    """Whether any dimension of `domain` is periodic: a host bool, read from the device once per value of the flags (a sync per call otherwise: 4 per step). `DomainDescription` is slotted: the cache lives here, keyed on the flags tensor."""
+    per = domain.periodic
+    hit = _ANY_PERIODIC.get(id(per))
+    version = getattr(per, '_version', 0)
+    if hit is None or hit[0] is not per or hit[1] != version:
+        hit = (per, version, bool(torch.as_tensor(per).any()))
+        _ANY_PERIODIC[id(per)] = hit
+    return hit[2]
+
+
 def minimumImage(d: torch.Tensor, domain: Any) -> torch.Tensor:
     """The pair separations `d` through the periodic dimensions of `domain` (nearest image), unchanged without periodicity."""
     per = getattr(domain, 'periodic', None)
-    if per is None or not bool(torch.as_tensor(per).any()):
+    if per is None or not _anyPeriodic(domain):
         return d
     length = (domain.max - domain.min).to(d.dtype)
     flags = torch.as_tensor(per, device=d.device).to(d.dtype)

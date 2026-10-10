@@ -46,6 +46,7 @@ only routing such a configuration here (``schemes/deltaSPH.py``).
 
 from __future__ import annotations
 
+import os
 import contextlib
 import copy
 import dataclasses
@@ -251,6 +252,9 @@ class GraphedStateFunction:
                 update, _, _ = self.fn(staticSys, *args, **kwargs)
             torch.cuda.synchronize()
         except Exception as e:  # noqa: BLE001 -- any capture failure -> eager
+            if os.environ.get('WARPSPH_CUDAGRAPH_TRACE'):                                      # the first failing call of a capture (the reason string keeps only the last line)
+                import traceback
+                traceback.print_exc()
             torch.cuda.synchronize()
             self._disable(f'capture failed ({type(e).__name__}: {str(e).splitlines()[0][:200]})')
             return None
@@ -356,6 +360,9 @@ class GraphedTensorFunction:
                 out = self.fn(*self.staticIn)
             torch.cuda.synchronize()
         except Exception as e:  # noqa: BLE001 -- any capture failure -> eager
+            if os.environ.get('WARPSPH_CUDAGRAPH_TRACE'):                                      # the first failing call of a capture (the reason string keeps only the last line)
+                import traceback
+                traceback.print_exc()
             torch.cuda.synchronize()
             self._disable(f'capture failed ({type(e).__name__}: {str(e).splitlines()[0][:200]})')
             return False
@@ -647,6 +654,9 @@ class GraphedIntegratorStep:
                 nChecks = len(flags)
             torch.cuda.synchronize()
         except Exception as ex:  # noqa: BLE001 -- any capture failure -> eager
+            if os.environ.get('WARPSPH_CUDAGRAPH_TRACE'):                                      # the first failing call of a capture (the reason string keeps only the last line)
+                import traceback
+                traceback.print_exc()
             torch.cuda.synchronize()
             self._disable(f'capture failed ({type(ex).__name__}: {str(ex).splitlines()[0][:200]})')
             return False

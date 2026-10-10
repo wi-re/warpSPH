@@ -7,6 +7,8 @@ from typing import Any
 
 import torch
 
+from ...utils.syncFree import deviceConstant
+
 __all__ = ['computeBodyForce', 'bodyForceVector']
 
 
@@ -25,5 +27,5 @@ def computeBodyForce(currentState: Any, schemeConfig: Any) -> torch.Tensor:
     f = bodyForceVector(schemeConfig)
     if f is None:
         return out
-    vec = torch.tensor(f[:out.shape[1]], dtype=out.dtype, device=out.device)
+    vec = deviceConstant(f[:out.shape[1]], out.dtype, out.device)
     return torch.where((currentState.kinds == 0).unsqueeze(-1), vec.expand_as(out), out)

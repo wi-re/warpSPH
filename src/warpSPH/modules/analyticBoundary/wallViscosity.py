@@ -12,9 +12,11 @@ below 0.97) they are blended into the geometric tables. A rigid rotation of the 
 import math
 from typing import Any, Optional
 
+import os
+
 import torch
 
-from ..incompressible.compactProjection import MORRIS_ETA2, _dwendland2, minimumImage, morrisCalibration
+from ..incompressible.compactProjection import MORRIS_ETA2, _dwendland2, _anyPeriodic, minimumImage, morrisCalibration
 from .wallMoments import CurvedWallMoments
 
 __all__ = ['complementSums', 'closureAcceleration', 'wallNoSlipAcceleration']
@@ -22,23 +24,21 @@ __all__ = ['complementSums', 'closureAcceleration', 'wallNoSlipAcceleration']
 F64 = torch.float64
 
 
-def complementSums(state: Any, config: Any, adjacency: Any, fluid: torch.Tensor, n: torch.Tensor, d: torch.Tensor, rho: torch.Tensor, H: float):
-    """The discrete fluid moments of the Morris weight in the frame (n_i, d_i) of each particle's wall (fixed particle frame, `y = x_j - x_i`, `s~ = y . n + d`, `mu_j = V_j (rho_i + rho_j) / (2 rho_i)`,
-    `K = W'(r) r / (r^2 + eta^2 h^2)`): `S0 = sum mu K`, `S1 = sum mu K s~`, `S2 = sum mu K s~^2`, `SM = sum mu K y`, over the fluid pairs of the Verlet list inside the support."""
-    x = state.positions.to(F64)
-    i, j = adjacency.i.long(), adjacency.j.long()
-    keep = (i != j) & fluid[i] & fluid[j]
-    i, j = i[keep], j[keep]
-    y = -minimumImage(x[i] - x[j], config.domain)
+def _complementSumsCore(x, masses, rho, fluid, i, j, n, d, H: float, length, flags):
+    """`complementSums` on explicit tensors (no state / adjacency / domain objects: compilable): `length`, `flags` the periodic box lengths and flags (None: no periodic dimension)."""
+    # no boolean-mask gathers (a host sync each, and not capturable in a CUDA graph): the fluid pairs inside the support are selected by a 0 / 1 weight over the whole pair list
+    dlt = x[i] - x[j]
+    if length is not None:
+        dlt = dlt - flags * length * torch.round(dlt / length)
+    y = -dlt
     r = y.norm(dim=1)
-    inside = r < H
-    i, j, y, r = i[inside], j[inside], y[inside], r[inside]
+    sel = ((i != j) & fluid[i] & fluid[j] & (r < H)).to(F64)
     K = _dwendland2(r, H) * r / (r * r + MORRIS_ETA2 * H * H)
-    V = state.masses.to(F64) / rho                                       # the apparent volumes m / rho of the units rest density 1 (mass = volume)
+    V = masses / rho                                                     # the apparent volumes m / rho of the units rest density 1 (mass = volume)
     mu = V[j] * (rho[i] + rho[j]) / (2.0 * rho[i])
     st = (y * n[i]).sum(1) + d[i]
-    w = mu * K
-    N = len(x)
+    w = sel * mu * K
+    N = x.shape[0]
     z = torch.zeros(N, dtype=F64, device=x.device)
     S0 = z.index_add(0, i, w)
     S1 = z.index_add(0, i, w * st)
@@ -47,12 +47,48 @@ def complementSums(state: Any, config: Any, adjacency: Any, fluid: torch.Tensor,
     return S0, S1, S2, SM
 
 
+def _compiled(name, fn, schemeConfig):
+    """`fn`, or its `torch.compile`d form with `WARPSPH_COMPILE_WALLS=1` / `schemeConfig.compileWalls` (see `_closure`)."""
+    if not (os.environ.get('WARPSPH_COMPILE_WALLS') == '1' or getattr(schemeConfig, 'compileWalls', False)):
+        return fn
+    c = _COMPILED.get(name)
+    if c is None:
+        c = _COMPILED[name] = torch.compile(fn, dynamic=False)
+    return c
+
+
+def complementSums(state: Any, config: Any, adjacency: Any, fluid: torch.Tensor, n: torch.Tensor, d: torch.Tensor, rho: torch.Tensor, H: float, schemeConfig: Any = None):
+    """The discrete fluid moments of the Morris weight in the frame (n_i, d_i) of each particle's wall (fixed particle frame, `y = x_j - x_i`, `s~ = y . n + d`, `mu_j = V_j (rho_i + rho_j) / (2 rho_i)`,
+    `K = W'(r) r / (r^2 + eta^2 h^2)`): `S0 = sum mu K`, `S1 = sum mu K s~`, `S2 = sum mu K s~^2`, `SM = sum mu K y`, over the fluid pairs of the Verlet list inside the support."""
+    domain = config.domain
+    length = flags = None
+    if getattr(domain, 'periodic', None) is not None and _anyPeriodic(domain):
+        length = (domain.max - domain.min).to(F64)
+        flags = torch.as_tensor(domain.periodic, device=length.device).to(F64)
+    return _compiled('complementSums', _complementSumsCore, schemeConfig)(
+        state.positions.to(F64), state.masses.to(F64), rho, fluid, adjacency.i.long(), adjacency.j.long(), n, d, float(H), length, flags)
+
+
 def curvature(scene, bi, x, n, t, H, dx):
     """`kappa = div n` of the signed distance at the particles (tangential derivative of the wall normal, central difference over half a spacing): 1 / r for a convex circle, -1 / r concave, 0 on a plane."""
     eps = 0.5 * dx
     npl = scene.signed_distance(x + eps * t, body=bi, supportMax=H)[1]
     nmi = scene.signed_distance(x - eps * t, body=bi, supportMax=H)[1]
     return ((npl - nmi) * t).sum(1) / (2.0 * eps)
+
+
+def _bodyGeometry(scene, x, H: float, dx: float):
+    """Distance, normal, hit flag and curvature of every body at the particles, stacked: ([B, N], [B, N, 2], [B, N], [B, N]). One signed-distance evaluation per body plus the two of its curvature (the wall term used to
+    evaluate the first twice); one function so it compiles (`WARPSPH_COMPILE_WALLS`)."""
+    ds, ns, hs, ks = [], [], [], []
+    for bi in range(len(scene.bodies)):
+        dsd, nsd, hit = scene.signed_distance(x, body=bi, supportMax=H)
+        t = torch.stack([-nsd[:, 1], nsd[:, 0]], 1)
+        ds.append(dsd)
+        ns.append(nsd)
+        hs.append(hit)
+        ks.append(curvature(scene, bi, x, nsd, t, H, dx))
+    return torch.stack(ds), torch.stack(ns), torch.stack(hs), torch.stack(ks)
 
 
 def closureAcceleration(tables, x, w, n, d, kap, viscf, rho, nuUsed, cal, wallMass, omega, sums=None, coverage=None, ownMask=None):
@@ -109,6 +145,20 @@ def closureAcceleration(tables, x, w, n, d, kap, viscf, rho, nuUsed, cal, wallMa
     return Av[:, 0:1] * n + Av[:, 1:2] * t
 
 
+_COMPILED = {}
+
+
+def _closure(schemeConfig):
+    """`closureAcceleration`, or its `torch.compile`d form with `WARPSPH_COMPILE_WALLS=1` / `schemeConfig.compileWalls`: the closure is ~1700 small elementwise torch ops per step (a launch each: the step is CPU-bound without a CUDA graph and
+    GPU-latency-bound with one), which the compiler fuses into a handful of kernels. Not bitwise equal to the eager form (a fused expression rounds differently): opt-in."""
+    if not (os.environ.get('WARPSPH_COMPILE_WALLS') == '1' or getattr(schemeConfig, 'compileWalls', False)):
+        return closureAcceleration
+    fn = _COMPILED.get('closure')
+    if fn is None:
+        fn = _COMPILED['closure'] = torch.compile(closureAcceleration, dynamic=False, fullgraph=bool(os.environ.get('WARPSPH_COMPILE_FULLGRAPH')))
+    return fn
+
+
 def _tables(schemeConfig, H, device):
     cache = schemeConfig.__dict__.setdefault('_wallMomentTables', {})
     key = (float(H), 'morris')
@@ -134,31 +184,33 @@ def wallNoSlipAcceleration(state: Any, config: Any, schemeConfig: Any, adjacency
     nu = float(schemeConfig.diffusionParams.viscidNu)
     cal = getattr(schemeConfig, 'morrisCalibration', None)
     if cal is None:
-        cal = morrisCalibration(H, dx, float(state.masses.double()[fluid].mean()))
+        key = (H, dx)                                                                          # the lattice sum of the actual spacing: a host constant, read from the device once (a sync per call otherwise)
+        cache = schemeConfig.__dict__.setdefault('_morrisCalCache', {})
+        if key not in cache:
+            cache[key] = morrisCalibration(H, dx, float(state.masses.double()[fluid].mean()))
+        cal = cache[key]
     complement = getattr(schemeConfig, 'complementMoments', True)
     if getattr(schemeConfig, 'cornerWedgeTables', False):
         raise NotImplementedError('cornerWedgeTables (the oracle marks it experimental) is not ported')
     tables = _tables(schemeConfig, H, dev)
     nb = len(scene.bodies)
     sums = coverage = own = None
+    dall, nall, hall, kall = _compiled('geometry', _bodyGeometry, schemeConfig)(scene, x, H, dx)
     if complement:
         from ...modules.density import computeDensities
         coverage = computeDensities(state, config, schemeConfig, adjacency).to(F64)                     # sum V W + mu lambda: the partition of unity
-        dall = torch.stack([scene.signed_distance(x, body=k, supportMax=H)[0] for k in range(nb)])
         nearest = dall.argmin(0)
     out = torch.zeros_like(v)
     parts = []
     for bi in range(nb):
-        dsd, nsd, hit = scene.signed_distance(x, body=bi, supportMax=H)
+        dsd, nsd, hit, kap = dall[bi], nall[bi], hall[bi], kall[bi]
         dd = dsd.clamp(min=0.25 * dx)
         on = (hit & (dsd < H) & fluid)[:, None]
-        t = torch.stack([-nsd[:, 1], nsd[:, 0]], 1)
-        kap = curvature(scene, bi, x, nsd, t, H, dx)
         if complement:
-            sums = complementSums(state, config, adjacency, fluid, nsd, dd, rho, H)
+            sums = complementSums(state, config, adjacency, fluid, nsd, dd, rho, H, schemeConfig)
             own = (nearest == bi) & (dall[bi] < H)
-        term = closureAcceleration(tables, x, v - _wallVelocity(wall, bi).to(F64), nsd, dd, kap, viscf.to(F64), rho, nu, cal, wall.wm, wall.omega[bi] if wall.omega is not None else 0.0,
-                                   sums=sums, coverage=coverage, ownMask=own)
+        term = _closure(schemeConfig)(tables, x, v - _wallVelocity(wall, bi).to(F64), nsd, dd, kap, viscf.to(F64), rho, nu, cal, wall.wm, wall.omega[bi] if wall.omega is not None else 0.0,
+                                      sums=sums, coverage=coverage, ownMask=own)
         term = torch.where(on, term, torch.zeros_like(term))
         out = out + term
         parts.append(term)

@@ -78,7 +78,11 @@ def main():
     ap.add_argument('--closedPreset', action='store_true')
     ap.add_argument('--out', default=None)
     ap.add_argument('--no-video', dest='video', action='store_false', default=True)
+    ap.add_argument('--no-cudaGraph', dest='cudaGraph', action='store_false', default=True, help='delta+: run the step eagerly instead of replaying it from a CUDA graph (bitwise the same, ~4x slower)')
+    ap.add_argument('--no-compile', dest='compileWalls', action='store_false', default=True, help='do not torch.compile the no-slip wall closure (WARPSPH_COMPILE_WALLS; ~1.6x faster, not bitwise)')
     a = ap.parse_args()
+    if a.compileWalls:
+        os.environ.setdefault('WARPSPH_COMPILE_WALLS', '1')
     bootstrap(precision='float32')
     warnings.simplefilter('ignore')
     from warpSPH.cases import importAll
@@ -92,7 +96,7 @@ def main():
               'targetDt': a.cfl * 4.0 / a.res / (a.c0 + 1.0)}
     common = dict(kernel='Wendland2', **({'integrationScheme': 'semiImplicitEuler', 'supportMode': 'SuperSymmetric', 'dt': a.dt, 'adaptiveDt': False} if inc else {}))
     spec = CaseSpec(caseName='cylinderWake', scheme=a.scheme, params=params).merged(**case.defaults).merged(
-        scheme=a.scheme, nx=int(round(a.Lx * a.res)), L=a.Lx, tLimit=a.time, plot=a.video, video=a.video, show=False, store=False, progress=True, quiet=True, plotInterval=400,
+        cudaGraph=(a.cudaGraph and a.scheme == 'deltaSPH'), scheme=a.scheme, nx=int(round(a.Lx * a.res)), L=a.Lx, tLimit=a.time, plot=a.video, video=a.video, show=False, store=False, progress=True, quiet=True, plotInterval=400,
         velocityAlarmPlotInterval=1, stallProgress=1e-3, **common, **({'exportRoot': a.out} if (a.out and a.video) else {}))
     r = run(case, spec)
     cd, cl = np.asarray(r.series('dragCoefficient')), np.asarray(r.series('liftCoefficient'))

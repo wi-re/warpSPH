@@ -83,6 +83,7 @@ import os
 from typing import Any
 
 import torch
+from ..modules.boundaryConditions.pinned import pinnedKeepWeight
 from ..modules.incompressible.convergence import ConvergenceCheckSchedule
 
 from warpSPHCore import (GradientScheme, OperationDirection, OperationProperties,
@@ -786,4 +787,7 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
         drhodt=torch.zeros_like(st.densities),
         passive=torch.zeros_like(st.densities, dtype=torch.bool))
     enforceUpdates(update, system, dt, system.t, config, schemeConfig)
+    keepBand = pinnedKeepWeight(st, config, schemeConfig)            # a pinned band: no acceleration inside
+    if keepBand is not None and getattr(update, 'dvdt', None) is not None:
+        update.dvdt = update.dvdt * keepBand
     return update, adjacency, st, ([], [errDiv, errRho])

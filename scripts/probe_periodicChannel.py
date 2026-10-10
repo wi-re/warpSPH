@@ -42,7 +42,11 @@ def main():
     ap.add_argument('--no-shift', dest='shift', action='store_false', default=True)
     ap.add_argument('--out', default=None)
     ap.add_argument('--no-video', dest='video', action='store_false', default=True)
+    ap.add_argument('--no-cudaGraph', dest='cudaGraph', action='store_false', default=True, help='delta+: run the step eagerly instead of replaying it from a CUDA graph (bitwise the same, ~4x slower)')
+    ap.add_argument('--no-compile', dest='compileWalls', action='store_false', default=True, help='do not torch.compile the no-slip wall closure (WARPSPH_COMPILE_WALLS; ~1.6x faster, not bitwise)')
     a = ap.parse_args()
+    if a.compileWalls:
+        os.environ.setdefault('WARPSPH_COMPILE_WALLS', '1')
     bootstrap(precision='float32')
     warnings.simplefilter('ignore')
     from warpSPH.cases import importAll
@@ -56,7 +60,7 @@ def main():
                                                       'projection': a.projection, 'densitySolve': not a.noDensitySolve, 'particleShift': a.particleShift, 'closedPreset': a.closedPreset,
                                                       **({'nuPhysical': a.nuPhysical} if a.nuPhysical else {}), **params}).merged(**case.defaults).merged(
             **({'kernel': 'Wendland2', 'integrationScheme': 'semiImplicitEuler', 'supportMode': 'SuperSymmetric', 'dt': a.dt, 'adaptiveDt': False} if a.scheme != 'deltaSPH' else {}),
-            scheme=a.scheme, nx=a.n, tLimit=tLimit, plot=video, video=video, show=False, store=False, progress=True, quiet=True, plotInterval=100, velocityAlarmPlotInterval=1, stallProgress=1e-3,
+            cudaGraph=(a.cudaGraph and a.scheme == 'deltaSPH'), scheme=a.scheme, nx=a.n, tLimit=tLimit, plot=video, video=video, show=False, store=False, progress=True, quiet=True, plotInterval=100, velocityAlarmPlotInterval=1, stallProgress=1e-3,
             **({'exportRoot': a.out} if (a.out and video) else {}))
         return run(case, spec)
 

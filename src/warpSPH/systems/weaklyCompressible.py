@@ -596,6 +596,9 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
                     self.state.velocities = vNew
 
         for rigidBody in schemeConfig.rigidBodies:
+            if (getattr(schemeConfig, 'analyticSpinAxisymmetric', False) and not getattr(rigidBody, 'dynamic', False)
+                    and getattr(rigidBody, 'representation', None) is not None):
+                continue                                          # a prescribed spin of an axisymmetric analytic body: the pose never matters (the oracle resets `angle = 0` every step), so it is not advanced: every step sees the same state, as a graph replay needs
             dudt, dwdt = 0, 0
             if getattr(rigidBody, 'dynamic', False):
                 # a free analytic body: the fluid's load (booked by the scheme's right-hand side) and gravity drive it (acceleration of the centre of mass and of the rotation)

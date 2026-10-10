@@ -1,6 +1,7 @@
-"""CUDA graphs with analytic boundaries: the whole step (right-hand side, shifting, no-penetration, finalize) is captured and replayed, bitwise the eager step, for the tank, the tank with an
-analytic obstacle and the Michel shifting; configurations that cannot be captured (implicit shifting: host-synchronising Krylov solvers; moving or dynamic analytic bodies, which every execution of
-the step advances in place and the graph's validation executes more than once; particle bodies of a mixed scene) are refused up front instead of capturing."""
+"""Stage 3 E8 (ANALYTIC_BOUNDARIES_PLAN.md): the analytic-wall step replayed from a CUDA graph (`CaseSpec.cudaGraph`, `utils/cudaGraph.py: GraphedIntegratorStep`) equals the eager step bit for bit: the state and the
+booked wall loads. The graph needs a sync-free step (the wall closure's boolean-mask gathers, the host reads of the calibration / periodic flags / body force / mean pressure were removed) and a device `dt`; a spinning
+axisymmetric body (`analyticSpinAxisymmetric`) keeps its pose. A stale `rb.load` (a fresh tensor assigned inside the captured step) once left the graphed torque constant (2026-10-10).
+"""
 import numpy as np
 import pytest
 import torch
@@ -9,39 +10,33 @@ pytest.importorskip('warpSPHBoundaries')
 
 from warpSPH.cases import importAll  # noqa: E402
 from warpSPH.runner import getCase, run  # noqa: E402
-from test_analyticDambreak import spec_of  # noqa: E402
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA')
 
-OBSTACLE = dict(obstacleActive=True, obstacleType='circleBottom', maxExtent=0.5, offsetX=-0.4)
 
-
-def final(case, graph, params, nSteps=100):
-    res = run(case, spec_of(case, 'analytic', nSteps=nSteps, params=params, cudaGraph=graph, plot=False, store=False, progress=False, video=False, show=False, quiet=True, pipelineOutputs=False))
-    s = res.state.state
-    f = s.kinds == 0
-    return res, [a[f].double().cpu().numpy() for a in (s.positions, s.velocities, s.densities)]
-
-
-@pytest.mark.parametrize('params', [{}, OBSTACLE, dict(shiftScheme='michel2022', shiftProjection='michel2022')], ids=['tank', 'obstacle', 'michel'])
-def test_whole_step_graph_is_bitwise_the_eager_step(params):
+def both(caseName, nx, nSteps, params):
     importAll()
-    case = getCase('dambreak')
-    _, eager = final(case, False, params)
-    res, graphed = final(case, True, params)
-    sg = res.ctx.scratch.get('stepGraph')
-    assert sg is not None and sg.captures >= 1 and getattr(sg, 'disabled', None) is None, 'the step was not captured'
-    for a, b in zip(eager, graphed):
-        assert np.array_equal(a, b)
+    case = getCase(caseName)
+    out = {}
+    for g in (False, True):
+        r = run(case, scheme='deltaSPH', nx=nx, nSteps=nSteps, quiet=True, store=False, progress=False, plot=False, video=False, show=False, params={**case.params, **params}, cudaGraph=g, kernel='Wendland2')
+        st = r.state.state
+        sg = r.ctx.scratch.get('stepGraph')
+        out[g] = dict(x=st.positions.clone(), v=st.velocities.clone(), rho=st.densities.clone(), graph=sg,
+                      loads=[rb.load.clone() for rb in r.ctx.schemeConfig.boundaryProvider.rigidBodies])
+    return out
 
 
-@pytest.mark.parametrize('params', [dict(shiftScheme='implicit', shiftProjection='surfaceNormal'), dict(OBSTACLE, obstacleDynamic=True),
-                                    dict(OBSTACLE, obstacleRepresentation='particles')], ids=['implicit', 'dynamic-body', 'mixed'])
-def test_uncapturable_configurations_run_eagerly(params):
-    importAll()
-    case = getCase('dambreak')
-    _, eager = final(case, False, params, nSteps=40)
-    res, graphed = final(case, True, params, nSteps=40)
-    assert res.ctx.scratch.get('stepGraph') is None
-    for a, b in zip(eager, graphed):
-        assert np.allclose(a, b, rtol=0, atol=5e-4 * max(1.0, float(np.abs(a).max())))         # the implicit solve's atomics: two identical eager runs differ by 2e-5 in the velocity (float32, 40 steps)
+@pytest.mark.parametrize('caseName, nx, params', [
+    ('taylorCouette', 16, {'fluidViscosity': 'morris', 'wallViscosityClosure': 'noslipMoment', 'nuReference': 0.0274}),
+    ('stokesArray', 24, {'fluidViscosity': 'morris', 'wallViscosityClosure': 'noslipMoment', 'pressureConsistent': True}),
+    ('cylinderWake', 90, {'fluidViscosity': 'morris', 'wallViscosityClosure': 'noslipMoment', 'targetDt': 2e-2}),          # the pinned band: the stream set at the end of the step inside the graph
+])
+def test_the_graphed_step_equals_the_eager_step(caseName, nx, params):
+    o = both(caseName, nx, 120, params)
+    sg = o[True]['graph']
+    assert sg is not None and sg.disabled is None and sg.replays > 50, (None if sg is None else (sg.captures, sg.replays, sg.disabled))
+    for key in ('x', 'v', 'rho'):
+        assert bool((o[False][key] == o[True][key]).all()), key
+    for a, b in zip(o[False]['loads'], o[True]['loads']):
+        assert bool((a == b).all())

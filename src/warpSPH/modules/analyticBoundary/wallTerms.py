@@ -22,6 +22,8 @@ from typing import Any, List
 
 import torch
 
+from ...utils.syncFree import deviceConstant
+
 from warpSPHCore import KernelFunctions
 
 from ...boundary.provider import bindBodies
@@ -118,7 +120,7 @@ def _evaluateWall(provider, state, config, schemeConfig, gravity):
     from ..gravity import bodyForceVector
     f = bodyForceVector(schemeConfig)
     if f is not None and getattr(schemeConfig, 'bodyForceAtWall', True):
-        g = g + torch.tensor(f[:2], dtype=g.dtype, device=g.device)            # dp/dn = rho (g + f - a_w) . n: a uniform body force acts on the fluid at a wall like gravity (not hydrostatic in the density diffusion)
+        g = g + deviceConstant(f[:2], g.dtype, g.device)            # dp/dn = rho (g + f - a_w) . n: a uniform body force acts on the fluid at a wall like gravity (not hydrostatic in the density diffusion)
     a1 = schemeConfig.fluid.restDensity * (g[None, None, :] - kin.acceleration)
     lam, G = wm * agg.out['lam'], wm * agg.out['G']
     if getattr(schemeConfig, 'analyticWallPressure', 'hydrostatic') == 'normal':

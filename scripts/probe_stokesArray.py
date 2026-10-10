@@ -42,7 +42,11 @@ def main():
     ap.add_argument('--no-shift', dest='shift', action='store_false', default=True)
     ap.add_argument('--out', default=None)
     ap.add_argument('--no-video', dest='video', action='store_false', default=True)
+    ap.add_argument('--no-cudaGraph', dest='cudaGraph', action='store_false', default=True, help='delta+: run the step eagerly instead of replaying it from a CUDA graph (bitwise the same, ~4x slower)')
+    ap.add_argument('--no-compile', dest='compileWalls', action='store_false', default=True, help='do not torch.compile the no-slip wall closure (WARPSPH_COMPILE_WALLS; ~1.6x faster, not bitwise)')
     a = ap.parse_args()
+    if a.compileWalls:
+        os.environ.setdefault('WARPSPH_COMPILE_WALLS', '1')
     bootstrap(precision='float32')
     warnings.simplefilter('ignore')
     from warpSPH.cases import importAll
@@ -56,7 +60,7 @@ def main():
         case = getCase(caseName)
         spec = CaseSpec(caseName=caseName, scheme=a.scheme, params={**case.params, 'wallViscosityClosure': a.closure, 'fluidViscosity': a.visc, 'projection': a.projection, 'densitySolve': not a.noDensitySolve,
                                                               'particleShift': a.particleShift, 'closedPreset': a.closedPreset, 'shifting': a.shift, 'pressureConsistent': a.pressureConsistent, 'wallPressureViscous': a.wallPressureViscous, **params}).merged(**case.defaults).merged(
-            scheme=a.scheme, nx=a.n, tLimit=tLimit, plot=video, video=video, show=False, store=False, progress=True, quiet=True, plotInterval=200, velocityAlarmPlotInterval=1, stallProgress=1e-3, **common,
+            cudaGraph=(a.cudaGraph and a.scheme == 'deltaSPH'), scheme=a.scheme, nx=a.n, tLimit=tLimit, plot=video, video=video, show=False, store=False, progress=True, quiet=True, plotInterval=200, velocityAlarmPlotInterval=1, stallProgress=1e-3, **common,
             **({'exportRoot': a.out} if (a.out and video) else {}))
         return run(case, spec)
 

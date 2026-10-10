@@ -31,6 +31,7 @@ removed (tracked separately in docs/historic_plans/CLEANUP_PLAN.md).
 from ..configurations import SimulationConfig, WeaklyCompressibleSPHConfig
 from ..systems import CompSPHSystem, WeaklyCompressibleSystemUpdate
 from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
+from ..modules.boundaryConditions.pinned import pinnedKeepWeight
 from ..modules.deltaSPH import computeDensityDiffusion, computeVelocityDiffusion
 from ..modules.density import computeDensities, computeGradRho, computeGradRhoL
 from ..modules.eos import weaklyCompressibleEOS
@@ -111,7 +112,8 @@ def _rhsIsGraphable(schemeConfig, stageIndex) -> bool:
         # (evaluated once, at the first call)
         static = getattr(schemeConfig, '_analyticBodiesStatic', None)
         if static is None:
-            static = not any(rb.dynamic or float(rb.angularVelocity) != 0.0 or float(rb.linearVelocity.abs().max()) != 0.0 for rb in bodies)
+            # a prescribed spin of AXISYMMETRIC bodies about their own centres (`schemeConfig.analyticSpinAxisymmetric`, e.g. the inner cylinder of Taylor-Couette) changes no wall term between steps: its pose is irrelevant, only its angular velocity enters
+            static = not any(rb.dynamic or (float(rb.angularVelocity) != 0.0 and not getattr(schemeConfig, 'analyticSpinAxisymmetric', False)) or float(rb.linearVelocity.abs().max()) != 0.0 for rb in bodies)
             schemeConfig._analyticBodiesStatic = static
         if not static:
             return False
@@ -395,7 +397,7 @@ def _deltaSPH_rhs(
             if getattr(schemeConfig, 'pressureConsistent', False):
                 # the load must not depend on the pressure level: only the deviation from the mean pressure of the fluid exerts a net force (`pressureConsistent`: the wall's symmetric term 2 (P - mean P) G + A)
                 fl = currentState.kinds == 0
-                Pload = currentState.pressures - currentState.pressures[fl].mean()
+                Pload = currentState.pressures - (currentState.pressures * fl).sum() / fl.sum()                     # the mean over the fluid rows, without a boolean-mask gather (a host sync)
                 accP = (-(2.0 * Pload.double()[None, :, None] * wall.G.double() + wall.A.double()) / currentState.densities.double()[None, :, None]).to(wall.dtype)
             else:
                 accP = wallPressureAcceleration(wall, currentState.pressures, switch, currentState.densities, wallMass=wm, h=hWall, perBody=True)
@@ -410,7 +412,11 @@ def _deltaSPH_rhs(
                 accV = wallViscousAcceleration(wall, currentState.densities, currentState.velocities, viscousPrefactor(schemeConfig, config, hWall), hWall, wallMass=wm, kernel=config.kernel, perBody=True)
             loads = wallLoads(accP, accV, currentState.positions, currentState.masses, torch.stack([rb.centerOfMass.to(torch.float64).reshape(2) for rb in provider.rigidBodies]))
             for bi, rb in enumerate(provider.rigidBodies):
-                rb.load = loads[:, bi, :].clone()
+                cur = getattr(rb, 'load', None)
+                if cur is not None and cur.shape == loads[:, bi, :].shape and cur.dtype == loads.dtype and cur.device == loads.device:
+                    cur.copy_(loads[:, bi, :])                       # in place: a CUDA-graph replay updates this tensor, a fresh one would be left at the state of the capture
+                else:
+                    rb.load = loads[:, bi, :].clone()
 
     # 14. Apply forcing
     # with TimedBlock('compute forcing', use_cuda=True, device=config.device) as tb_forcing:
@@ -481,6 +487,9 @@ def _deltaSPH_rhs(
     # with TimedBlock('enforce updates', use_cuda=True, device=config.device) as tb_enforce:
     with record_function("[warpSPH] - [deltaSPH - 17] - enforce updates"):
         enforceUpdates(update, currentSystem, config.dt, currentSystem.t, config, schemeConfig)
+        keepBand = pinnedKeepWeight(currentState, config, schemeConfig)           # a pinned band: no acceleration inside (mask-free, capturable)
+        if keepBand is not None:
+            update.dvdt = update.dvdt * keepBand
         nonFluidMask = (currentState.kinds != 0).unsqueeze(-1)
         update.dxdt = torch.where(nonFluidMask, torch.zeros_like(update.dxdt), update.dxdt)
         update.dvdt = torch.where(nonFluidMask, torch.zeros_like(update.dvdt), update.dvdt)

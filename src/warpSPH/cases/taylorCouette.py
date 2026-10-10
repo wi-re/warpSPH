@@ -83,6 +83,7 @@ def initialConditions(ctx: RunContext, system) -> None:
     st.velocities[:] = 0.0
     inner = sc.boundaryProvider.rigidBodies[0]
     inner.angularVelocity = torch.tensor(float(ctx.param('omega')), dtype=inner.angularVelocity.dtype, device=inner.angularVelocity.device)      # prescribed constant rotation
+    sc.analyticSpinAxisymmetric = True                              # a disk spinning about its own centre: its pose never matters, so the step can be replayed from a CUDA graph
     if isIncompressibleScheme(ctx.scheme):
         from ..modules.analyticBoundary import latticeCalibration
         fl = st.kinds == 0

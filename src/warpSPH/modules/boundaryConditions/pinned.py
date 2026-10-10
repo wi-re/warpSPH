@@ -1,7 +1,7 @@
 """A prescribed-velocity band of *fluid* particles: the wrapping frame of a periodic flow past a body (the boundaries repo's `Pinned`, `sim/pinned.py`).
 
 The band is a union of slabs `|min_image(x_axis - centre)| < halfWidth` in the periodic box (a slab at the seam wraps around it).  Inside it the velocity is the free stream: the particles stay fluid
-(density, pressure and mass enter every sum, they are advected with the stream, nothing is created or removed), but the momentum equation is replaced by the prescription -- the acceleration is zeroed (`enforceUpdates`),
+(density, pressure and mass enter every sum, they are advected with the stream, nothing is created or removed), but the momentum equation is replaced by the prescription -- the acceleration is zeroed (`pinnedKeepWeight` in the scheme's update),
 the position shift is switched off (`pinnedKeepWeight`) and the velocity is set to the stream at the end of every step (`applyPinnedVelocity`, all three applied by the systems' `finalize`; the Dirichlet
 function only changes a stage's copy of the state, which the integrator does not carry over).
 
@@ -12,6 +12,7 @@ from typing import Any, Optional, Tuple
 
 import torch
 
+from ...utils.syncFree import deviceConstant
 from ...configurations.moduleConfigurations.boundaryConditions import BoundaryCondition, BoundaryConditionType
 
 __all__ = ['PinnedBand', 'pinnedBandBC', 'pinnedKeepWeight', 'applyPinnedVelocity']
@@ -49,18 +50,9 @@ class PinnedBandSdf:
 
 
 def pinnedBandBC(band: PinnedBand) -> BoundaryCondition:
-    """The band as a boundary condition: velocity := stream and acceleration := 0 on the fluid particles inside."""
-    stream = band.velocity
-
-    def velocity(state, config, schemeConfig, positions, d, n, t, dt):
-        u = torch.tensor(stream[:state.velocities.shape[1]], dtype=state.velocities.dtype, device=state.velocities.device)
-        return torch.where((state.kinds == 0).unsqueeze(-1), u.expand_as(state.velocities), state.velocities)
-
-    def acceleration(state, config, schemeConfig, positions, d, n, t, dt):
-        return torch.zeros_like(state.velocities)
-
-    return BoundaryCondition(type=BoundaryConditionType.dynamic, sdf=PinnedBandSdf(band),
-                             dirichletFunctions={'velocities': velocity}, updateFunctions={'dvdt': acceleration})
+    """The band as a boundary condition: only its SDF (the membership), no Dirichlet / update hooks -- the pinning is applied by the schemes and systems as mask-free multiplies (`pinnedKeepWeight`: acceleration and shift
+    zeroed inside, `applyPinnedVelocity`: the stream at the end of the step), which is what lets a CUDA graph replay the step (a BC hook bakes `t`, `dt` and assigns through a boolean mask)."""
+    return BoundaryCondition(type=BoundaryConditionType.dynamic, sdf=PinnedBandSdf(band))
 
 
 def pinnedKeepWeight(state: Any, config: Any, schemeConfig: Any) -> Optional[torch.Tensor]:
@@ -89,5 +81,5 @@ def applyPinnedVelocity(state: Any, config: Any, schemeConfig: Any) -> None:
     v = state.velocities
     for band in bands:
         m = (band.inside(x) & fluid).unsqueeze(-1)
-        u = torch.tensor(band.velocity[:v.shape[1]], dtype=v.dtype, device=v.device)
+        u = deviceConstant(band.velocity[:v.shape[1]], v.dtype, v.device)                  # cached: a host-to-device copy per call is a sync and cannot be captured
         v.copy_(torch.where(m, u.expand_as(v), v))
