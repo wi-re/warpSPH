@@ -57,7 +57,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 
-__all__ = ['GraphedStateFunction', 'GraphedTensorFunction', 'GraphedIntegratorStep']
+__all__ = ['GraphedStateFunction', 'GraphedTensorFunction', 'GraphedIntegratorStep', 'applyWallLoadSnapshot']
 
 #: True while a whole integrator step is being captured: the nested per-RHS
 #: graphs then run their function eagerly, so it is recorded into the outer graph.
@@ -537,6 +537,13 @@ class GraphedDiagnostics:
         self.captures += 1
 
 
+def applyWallLoadSnapshot(stepResult) -> None:
+    """Give the analytic bodies the wall loads of the step `stepResult` (a replayed step carries them as clones; the graph itself rewrites the bodies' own tensors at every replay): call before the step's diagnostics when
+    a later step has been launched already (the pipelined loop)."""
+    for rb, snap in getattr(stepResult, 'wallLoadSnapshot', None) or ():
+        rb.load = snap
+
+
 class GraphedIntegratorStep:
     """Replay a whole integrator step (every RHS evaluation, the state updates
     and `finalize`) from one CUDA graph -- the runner-level extension of
@@ -584,8 +591,12 @@ class GraphedIntegratorStep:
         warnings.warn(f'[warpSPH] CUDA graph for {self.name} disabled, running eagerly: {reason}', stacklevel=3)
 
     def _eager(self, state, dt, config, schemeConfig, verbose):
-        return self.integratorFn(state=state, f=self.stepFunction, dt=dt, config=config,
-                                 verbose=verbose, schemeConfig=schemeConfig)
+        res = self.integratorFn(state=state, f=self.stepFunction, dt=dt, config=config,
+                                verbose=verbose, schemeConfig=schemeConfig)
+        if not _OUTER_CAPTURE[0]:
+            # the loads this step booked (in place into the bodies' tensors, which the NEXT step's capture / validation / replay rewrites before a pipelined loop reads them)
+            object.__setattr__(res, 'wallLoadSnapshot', [(rb, t.clone()) for rb, t in self._loadTensors(schemeConfig)])
+        return res
 
     @staticmethod
     def _key(state):
@@ -620,6 +631,14 @@ class GraphedIntegratorStep:
         pending = torch.stack([e['flag'].to(dt.dtype), (state.t + dt).reshape(())])
         return {'entry': e, 'state': state, 'dt': dt, 'config': config,
                 'schemeConfig': schemeConfig, 'pending': pending}
+
+    @staticmethod
+    def _loadTensors(schemeConfig):
+        """The wall-load tensors of the analytic bodies (`RigidBody.load`), which the captured step updates IN PLACE (the graph writes to these addresses)."""
+        provider = getattr(schemeConfig, 'boundaryProvider', None)
+        if provider is None:
+            return []
+        return [(rb, rb.load) for rb in provider.rigidBodies if getattr(rb, 'load', None) is not None]
 
     def finish(self, handle):
         """Complete a step started by `launch` and return its IntegrationResult."""
@@ -672,6 +691,7 @@ class GraphedIntegratorStep:
                            names=list(staticIn), staticIn=[staticIn[n] for n in staticIn],
                            staticDt=staticDt, final=final, lastUpdate=lastUpdate, flag=flag,
                            nChecks=nChecks)
+        self._entry['loads'] = self._loadTensors(schemeConfig)
         self.lastCaptureChecks = nChecks
         self.captures += 1
         self.captureSeconds += time.perf_counter() - t0
@@ -702,7 +722,10 @@ class GraphedIntegratorStep:
         if upd is not None and dataclasses.is_dataclass(upd):
             fields = {f.name: self._cloneTree(getattr(upd, f.name)) for f in dataclasses.fields(upd)}
             upd = type(upd)(**fields)
-        return IntegrationResult(state=out, stages=[StageResult(aux=None, update=upd)])
+        res = IntegrationResult(state=out, stages=[StageResult(aux=None, update=upd)])
+        # the wall loads of this step, cloned right behind its replay (stream order: before the next replay rewrites the graph's tensors); the pipelined loop gives them back to the bodies just before this step's outputs
+        object.__setattr__(res, 'wallLoadSnapshot', [(rb, static.clone()) for rb, static in e.get('loads', ())])          # IntegrationResult is frozen
+        return res
 
     def _finishReplay(self, e, state, dt, config, schemeConfig, pending):
         host = pending.cpu().tolist()

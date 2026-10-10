@@ -1,0 +1,126 @@
+## log_chain10.txt
+=== tc_delta32_nopc
+SHEAR n=32 nu_shear 0.02740
+RESULT deltaSPH n=32 N=592 nu_shear=0.02740 t=25.0 diverged=False
+RESULT profile amplitude / exact = 0.9943   by radial bin (inner -> outer): [0.995, 0.994, 0.994, 0.994, 0.994, 0.994, 0.996, 0.998]
+RESULT torque inner / exact = 0.9356   outer / (-exact) = 0.7620
+=== tc_delta32_pc
+SHEAR n=32 nu_shear 0.02740
+RESULT deltaSPH n=32 N=592 nu_shear=0.02740 t=25.0 diverged=False
+RESULT profile amplitude / exact = 0.9944   by radial bin (inner -> outer): [0.995, 0.994, 0.994, 0.994, 0.994, 0.994, 0.996, 0.998]
+RESULT torque inner / exact = 0.9355   outer / (-exact) = 0.7620
+=== stokes_delta_disk_pc_t40
+## log_chain2.txt
+=== tc_omni_preset
+SHEAR n=48 nu_shear 0.01841
+RESULT omniIncompressible n=48 N=1496 nu_shear=0.01841 t=25.0 diverged=False
+RESULT profile amplitude / exact = 0.9998   by radial bin (inner -> outer): [1.0, 1.0, 1.0, 0.999, 0.999, 0.998, 0.997, 0.992]
+RESULT torque inner / exact = 1.0289   outer / (-exact) = 0.9529
+=== dfsph_disk_preset
+SHEAR n=48 nu_shear 0.01841 (nominal 0.01850)
+RESULT divergenceFree disk n=48 N=2020 c=0.1257 nu_shear=0.01841 t=20.0 diverged=False
+RESULT K = 26.253  K_ref = 26.490  ratio = 0.9910   (history of K / K_ref at t/4, t/2, t: 1.048 1.003 0.995)
+RESULT load / body force on the fluid = 0.9817   U = 0.05337
+=== wake_disk_Re40
+RESULT deltaSPH disk Re=40 D/dx=10 N=44920 t=150.0 blockage=0.083 diverged=False
+RESULT C_D=1.7104  C_L rms=0.0225 amp=0.0524  St=0.8494  L_w/D=2.135
+RESULT unconfined literature: CD 1.5-1.55  Lw 2.2-2.35
+=== wake_disk_Re100
+RESULT deltaSPH disk Re=100 D/dx=10 N=44920 t=150.0 blockage=0.083 diverged=False
+RESULT C_D=1.5202  C_L rms=0.2472 amp=0.4264  St=0.1705  L_w/D=1.613
+RESULT unconfined literature: CD 1.33-1.35  CLamp 0.32-0.34  St 0.164-0.166
+=== wake_disk_Re20
+RESULT deltaSPH disk Re=20 D/dx=10 N=44920 t=150.0 blockage=0.083 diverged=False
+RESULT C_D=2.1532  C_L rms=0.0154 amp=0.0359  St=1.4958  L_w/D=0.921
+RESULT unconfined literature: CD 2-2.09  Lw 0.91-0.94
+=== tc_delta_32
+SHEAR n=32 nu_shear 0.02740
+RESULT deltaSPH n=32 N=664 nu_shear=0.02740 t=25.0 diverged=False
+RESULT profile amplitude / exact = 0.9985   by radial bin (inner -> outer): [0.999, 0.998, 0.998, 0.999, 0.999, 0.999, 0.999, 1.0]
+RESULT torque inner / exact = 1.0408   outer / (-exact) = 0.9296
+=== chain2 done
+## log_chain3.txt
+=== tc_omni_compact
+SHEAR n=48 nu_shear 0.01841
+RESULT omniIncompressible n=48 N=1496 nu_shear=0.01841 t=25.0 diverged=False
+RESULT profile amplitude / exact = 0.9998   by radial bin (inner -> outer): [1.0, 1.0, 1.0, 0.999, 0.999, 0.998, 0.997, 0.992]
+RESULT torque inner / exact = 1.0289   outer / (-exact) = 0.9529
+=== oracle_dfsph_couette
+=== chain3 done
+## log_chain4.txt
+=== oracle_wake_Re100
+final (disk, Re 100, D/dx 10): C_D=1.5278  C_L rms=0.2160 amp=0.3755  St=0.1717  L_w/D=1.878  (639s, 23718 steps)
+=== oracle_wake_Re40
+final (disk, Re 40, D/dx 10): C_D=1.7225  C_L rms=0.0179 amp=0.0418  St=0.1329  L_w/D=2.138  (590s, 23718 steps)
+=== chain4 done
+## log_chain5.txt
+=== oracle_delta_tc32
+profile fit u = A' r + B' / r: A' = -0.1903 (exact -0.1905), B' = 0.04759 (exact 0.04762); torque of the fitted profile -0.01095; u at the inner wall from the fit 0.1999 (wall 0.2000), at the outer +0.0001
+profile amplitude / exact = 0.9999; by radial bin (inner -> outer): [1.0, 0.999, 1.0, 1.0, 1.001, 1.001, 1.002, 1.006]
+torque on the inner cylinder -0.01033  exact -0.01095  ratio 0.9428;  torque on the outer +0.00839 (about its centre; = -inner +0.01033: ratio 0.8122)
+=== chain5 done
+## log_chain6.txt
+=== tc_omni_nh2.505
+SHEAR n=48 nu_shear 0.01826
+RESULT omniIncompressible n=48 N=1568 nu_shear=0.01826 t=25.0 diverged=False
+RESULT profile amplitude / exact = 0.9967   by radial bin (inner -> outer): [0.996, 0.996, 0.996, 0.997, 0.998, 0.999, 1.003, 1.023]
+RESULT torque inner / exact = 1.0390   outer / (-exact) = 1.0025
+=== chain6 done
+## log_chain7.txt
+=== tc_omni_nh2.505_cut
+SHEAR n=48 nu_shear 0.01826
+RESULT omniIncompressible n=48 N=1384 nu_shear=0.01826 t=25.0 diverged=False
+RESULT profile amplitude / exact = 0.9994   by radial bin (inner -> outer): [1.0, 1.0, 0.999, 0.999, 0.998, 0.998, 0.998, 0.997]
+RESULT torque inner / exact = 0.9733   outer / (-exact) = 0.8878
+=== tc_omni_nh4_cut
+SHEAR n=48 nu_shear 0.01841
+RESULT omniIncompressible n=48 N=1400 nu_shear=0.01841 t=25.0 diverged=False
+RESULT profile amplitude / exact = 1.0000   by radial bin (inner -> outer): [1.001, 1.0, 1.0, 0.999, 0.999, 0.997, 0.995, 0.988]
+RESULT torque inner / exact = 0.9975   outer / (-exact) = 0.8983
+=== tc_delta32_cut
+## log_chain9.txt
+=== tc_delta32_cut_nopc
+SHEAR n=32 nu_shear 0.02740
+## oracle stokes delta (noslipMoment, same lattice) chain13
+=== oracle_stokes_delta_disk_noslipMoment
+disk N=1988 c=0.1257 nu_eff=0.01837 (alpha c0 H / 8 xi = 0.01846)  K_ref=26.490
+t=   1.32 U=0.02051 F=0.01301 (balance 0.02589, 0.5025) K=34.525 Fy=+1.6e-10  4s
+t=   2.64 U=0.03271 F=0.01818 (balance 0.02589, 0.7023) K=30.249 Fy=+1.7e-10  7s
+t=   3.95 U=0.04027 F=0.02105 (balance 0.02589, 0.8133) K=28.452 Fy=+3.4e-10  11s
+t=   5.27 U=0.04500 F=0.02287 (balance 0.02589, 0.8834) K=27.658 Fy=+2.5e-09  15s
+t=   6.59 U=0.04798 F=0.02401 (balance 0.02589, 0.9275) K=27.236 Fy=-6.0e-09  20s
+t=   7.91 U=0.04985 F=0.02466 (balance 0.02589, 0.9527) K=26.927 Fy=+1.8e-08  24s
+t=   9.22 U=0.05102 F=0.02509 (balance 0.02589, 0.9693) K=26.769 Fy=-1.7e-07  28s
+t=  10.54 U=0.05176 F=0.02534 (balance 0.02589, 0.9789) K=26.648 Fy=+3.9e-07  33s
+t=  11.86 U=0.05222 F=0.02553 (balance 0.02589, 0.9861) K=26.606 Fy=+1.2e-06  37s
+t=  13.18 U=0.05250 F=0.02563 (balance 0.02589, 0.9900) K=26.567 Fy=+9.4e-07  41s
+t=  14.49 U=0.05269 F=0.02571 (balance 0.02589, 0.9933) K=26.560 Fy=-2.3e-07  46s
+t=  15.81 U=0.05281 F=0.02574 (balance 0.02589, 0.9945) K=26.533 Fy=-4.8e-06  50s
+t=  17.13 U=0.05289 F=0.02575 (balance 0.02589, 0.9948) K=26.502 Fy=+4.0e-06  55s
+t=  18.45 U=0.05295 F=0.02578 (balance 0.02589, 0.9958) K=26.495 Fy=+9.4e-06  59s
+t=  19.76 U=0.05300 F=0.02578 (balance 0.02589, 0.9958) K=26.471 Fy=-3.7e-06  63s
+t=  21.08 U=0.05303 F=0.02579 (balance 0.02589, 0.9962) K=26.467 Fy=+2.2e-06  68s
+t=  22.40 U=0.05305 F=0.02579 (balance 0.02589, 0.9964) K=26.462 Fy=+1.0e-06  72s
+t=  23.72 U=0.05307 F=0.02580 (balance 0.02589, 0.9966) K=26.457 Fy=-2.5e-06  76s
+t=  25.03 U=0.05310 F=0.02582 (balance 0.02589, 0.9974) K=26.462 Fy=-4.9e-06  81s
+t=  26.35 U=0.05312 F=0.02582 (balance 0.02589, 0.9974) K=26.456 Fy=-1.1e-06  85s
+t=  27.67 U=0.05312 F=0.02582 (balance 0.02589, 0.9974) K=26.457 Fy=+1.0e-05  90s
+t=  28.99 U=0.05314 F=0.02581 (balance 0.02589, 0.9971) K=26.438 Fy=+5.0e-06  94s
+t=  30.31 U=0.05315 F=0.02583 (balance 0.02589, 0.9980) K=26.457 Fy=+1.7e-05  98s
+t=  31.62 U=0.05315 F=0.02584 (balance 0.02589, 0.9983) K=26.460 Fy=+9.4e-07  103s
+t=  32.94 U=0.05316 F=0.02583 (balance 0.02589, 0.9978) K=26.445 Fy=-1.6e-06  107s
+t=  34.26 U=0.05317 F=0.02582 (balance 0.02589, 0.9976) K=26.432 Fy=+2.5e-06  112s
+t=  35.58 U=0.05319 F=0.02583 (balance 0.02589, 0.9978) K=26.430 Fy=+6.5e-06  116s
+t=  36.89 U=0.05320 F=0.02584 (balance 0.02589, 0.9984) K=26.438 Fy=+2.8e-06  120s
+t=  38.21 U=0.05321 F=0.02585 (balance 0.02589, 0.9985) K=26.441 Fy=+3.5e-06  125s
+t=  39.53 U=0.05321 F=0.02584 (balance 0.02589, 0.9984) K=26.436 Fy=+4.0e-06  129s
+final: F/balance=0.9985  K=26.439  K_ref=26.490  ratio=0.9981
+=== chain13 done
+## series40 (this port, cut lattice, t=40; F/fM U K/Kref over time)
+t= 10  F/fM 0.9834  U 0.05131  K/Kref 1.0189  rho [0.9999,1.0003]
+t= 15  F/fM 1.0011  U 0.05264  K/Kref 1.0111  rho [0.9999,1.0003]
+t= 20  F/fM 1.0012  U 0.05287  K/Kref 1.0068  rho [1.0000,1.0004]
+t= 25  F/fM 0.9984  U 0.05291  K/Kref 1.0032  rho [1.0000,1.0004]
+t= 30  F/fM 0.9985  U 0.05292  K/Kref 1.0031  rho [1.0001,1.0004]
+t= 35  F/fM 0.9988  U 0.05293  K/Kref 1.0032  rho [1.0001,1.0005]
+t= 40  F/fM 0.9983  U 0.05292  K/Kref 1.0029  rho [1.0001,1.0005]

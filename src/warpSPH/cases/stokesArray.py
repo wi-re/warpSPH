@@ -42,11 +42,22 @@ def _body(ctx: RunContext):
     return Body(bodyId=0, center=(0.5, 0.5), reps=[ImplicitRep(DiskBody(center=(0.0, 0.0), radius=ctx.param('R')))])
 
 
+def wallCut(ctx: RunContext) -> float:
+    """The distance from the body wall inside which the lattice is cut (the first particles sit beyond it), `wallCut` x dx, as the oracle's scripts: delta+ cuts the disk at half a spacing
+    (`periodic_cylinder_array.py`: `r >= R + dx / 2`), the square at its faces (the lattice half-lines: 0), and the incompressible loops keep the whole lattice (0). Set `wallCut` to override."""
+    c = ctx.param('wallCut')
+    dx = ctx.spec.L / ctx.spec.nx
+    if c is not None:
+        return float(c) * dx
+    return 0.5 * dx if (ctx.scheme.name == 'deltaSPH' and ctx.param('shape') != 'square') else 0.0
+
+
 def _bodySdf(ctx: RunContext):
+    cut = wallCut(ctx)
     if ctx.param('shape') == 'square':
         a = ctx.param('a')
-        return shapeSdf('box', args=[[0.5 * a, 0.5 * a]], offset=[0.5, 0.5])
-    return shapeSdf('circle', size=ctx.param('R'), offset=[0.5, 0.5])
+        return shapeSdf('box', args=[[0.5 * a + cut, 0.5 * a + cut]], offset=[0.5, 0.5])
+    return shapeSdf('circle', size=ctx.param('R') + cut, offset=[0.5, 0.5])
 
 
 def configureScheme(ctx: RunContext) -> None:
@@ -163,6 +174,7 @@ stokesArrayCase = registerCase(Case(
         nuReference=None,
         nuPhysical=0.0185,
         calibratedLattice=False,
+        wallCut=None,
         projection='jacobi',
         projectionTol=1e-8,
         densitySolve=True,

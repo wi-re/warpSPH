@@ -541,6 +541,8 @@ def _runPipelined(ctx, case, spec, result, stepGraph, steps, progress, runningSt
 
     def outputs(i, absStep, state, stepRes, stepMs, ready, final):
         """Diagnostics row + progress + frame for one finished step."""
+        from ..utils.cudaGraph import applyWallLoadSnapshot
+        applyWallLoadSnapshot(stepRes)                     # this step's wall loads (a later replay has been launched: the bodies' own tensors may already hold the next step's)
         with torch.cuda.stream(side), wp.ScopedStream(wside, sync_enter=False, sync_exit=False):
             if ready is not None:
                 side.wait_event(ready)
@@ -609,6 +611,8 @@ def _runPipelined(ctx, case, spec, result, stepGraph, steps, progress, runningSt
         if stop is not None:
             # as the sequential loop: the row is recorded, no frame, then stop
             row = {'step': absStep, 't': t, 'stepTime_ms': stepMs}
+            from ..utils.cudaGraph import applyWallLoadSnapshot
+            applyWallLoadSnapshot(stepResult)
             if case.diagnostics is not None:
                 row.update(case.diagnostics(ctx, runningState))
             result.trajectory.append(row)
