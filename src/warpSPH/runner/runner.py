@@ -348,8 +348,8 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
     if spec.cudaGraph and not spec.store and _stepGraphable(ctx):
         from ..utils.cudaGraph import GraphedDiagnostics, GraphedIntegratorStep
         stepGraph = GraphedIntegratorStep(ctx.integrator.function, ctx.stepFunction)
-        if not isinstance(ctx.config.dt, torch.Tensor) and ctx.config.dt is not None and ctx.device != 'cpu':
-            # a case with a fixed host-float step (`soundSpeed` + `targetDt`, the analytic-wall cases): the replay reads dt from the device, as the adaptive cases already do
+        if case.timestep is None and not isinstance(ctx.config.dt, torch.Tensor) and ctx.config.dt is not None and ctx.device != 'cpu':
+            # a case with a FIXED host-float step (`soundSpeed` + `targetDt`, the analytic-wall cases; no `timestep` hook): the replay reads dt from the device, as the adaptive cases already do (theirs becomes a tensor from the hook, the first step stays as eager)
             ctx.config.dt = torch.tensor(float(ctx.config.dt), dtype=ctx.dtype, device=ctx.device)
         ctx.scratch['stepGraph'] = stepGraph
         # cases whose diagnostics have a sync-free device part replay it too

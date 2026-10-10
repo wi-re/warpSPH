@@ -31,10 +31,11 @@ def test_the_array_cell_holds_the_body_and_the_lattice_around_it():
     r = array()
     st = r.state.state
     f = st.kinds == 0
-    c = np.pi * 0.2 ** 2
+    cut = 0.5 / 32                                                  # delta+: the lattice is cut half a spacing from the disk (`wallCut`, the oracle's rule)
+    c = np.pi * (0.2 + cut) ** 2
     assert int(f.sum()) == pytest.approx(32 * 32 * (1 - c), rel=0.02)
     d = (st.positions[f] - 0.5).norm(dim=1) - 0.2
-    assert float(d.min()) > -1e-3                                   # no fluid particle inside the cylinder
+    assert float(d.min()) > cut - 1e-3                              # no fluid particle inside the cylinder or in the cut band
     assert r.ctx.schemeConfig.boundaryProvider.scene.periodic is not None
 
 
