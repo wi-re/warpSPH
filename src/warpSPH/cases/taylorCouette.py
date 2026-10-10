@@ -38,7 +38,7 @@ def configureScheme(ctx: RunContext) -> None:
     dx = ctx.spec.L / ctx.spec.nx
     h = ctx.spec.n_h * dx
     r2 = ctx.param('r2')
-    lim = r2 + 2.0 * h
+    lim = 0.5 * dx * (2 * math.ceil((r2 + 2.0 * h) / dx) + 1)       # an odd number of spacings across the domain (an even number of lattice nodes: nodes at half-integer multiples of dx, as the oracle): the regular sampler lays its lattice over the domain extent, so this gives exactly dx, cell-centred on the axis
     domain = buildDomainDescription(2.0 * lim, ctx.spec.dim, False, ctx.device, ctx.dtype)
     domain.min = torch.tensor([-lim, -lim], device=ctx.device, dtype=ctx.dtype)
     domain.max = torch.tensor([lim, lim], device=ctx.device, dtype=ctx.dtype)
@@ -52,13 +52,27 @@ def configureScheme(ctx: RunContext) -> None:
     ctx.schemeConfig.analyticPeriodicWalls = False
 
 
+def wallCut(ctx: RunContext) -> float:
+    """The distance from each wall inside which the square lattice is cut (the first row sits beyond it), `wallCut` x dx; `None` takes the oracle's rule of the scheme: the incompressible loops the calibrated first-row
+    distance of the flat wall less 0.01 dx (`DFSPH2D`'s `run_couette`), delta+ half a spacing (`taylor_couette.py`); 0 keeps the whole lattice (particles down to the wall)."""
+    dx = ctx.spec.L / ctx.spec.nx
+    c = ctx.param('wallCut')
+    if c is not None:
+        return float(c) * dx
+    if isIncompressibleScheme(ctx.scheme):
+        from ..modules.analyticBoundary import latticeCalibration
+        return latticeCalibration(dx, dx, float(ctx.spec.n_h) * dx)['dwallY'] - 0.01 * dx
+    return 0.5 * dx
+
+
 def buildSystem(ctx: RunContext):
     r1, r2 = ctx.param('r1'), ctx.param('r2')
     inner, outer = _bodies(ctx)
     kind = BCType[ctx.param('wallBC')]
+    cut = wallCut(ctx)
     regions = [fluidRegion(ctx, shapeSdf('box', args=[[r2, r2]], offset=[0.0, 0.0])),
-               boundaryRegion(ctx, shapeSdf('circle', size=r1, offset=[0.0, 0.0]), kind=kind, representation=inner),
-               boundaryRegion(ctx, shapeSdf('circle', size=r2, offset=[0.0, 0.0], invert=True), kind=kind, representation=outer)]
+               boundaryRegion(ctx, shapeSdf('circle', size=r1 + cut, offset=[0.0, 0.0]), kind=kind, representation=inner),
+               boundaryRegion(ctx, shapeSdf('circle', size=r2 - cut, offset=[0.0, 0.0], invert=True), kind=kind, representation=outer)]
     return buildRegionSystem(ctx, regions)
 
 
@@ -158,6 +172,7 @@ taylorCouetteCase = registerCase(Case(
         nuReference=None,
         nuPhysical=0.0185,
         calibratedLattice=False,
+        wallCut=None,
         projection='jacobi',
         projectionTol=1e-8,
         densitySolve=True,

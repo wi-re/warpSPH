@@ -21,6 +21,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--scheme', default='omniIncompressible', choices=('deltaSPH', 'omniIncompressible', 'divergenceFree'))
     ap.add_argument('--n', type=int, default=48)
+    ap.add_argument('--nh', type=float, default=4.0, help='support radius in dx (the oracle DFSPH2D runs Taylor-Couette at 1 / PACKING = 2.505)')
     ap.add_argument('--time', type=float, default=25.0)
     ap.add_argument('--dt', type=float, default=2e-3)
     ap.add_argument('--projection', default='jacobi', choices=('jacobi', 'compact'))
@@ -44,7 +45,7 @@ def main():
         case = getCase(caseName)
         spec = CaseSpec(caseName=caseName, scheme=a.scheme, params={**case.params, 'wallViscosityClosure': 'noslipMoment', 'fluidViscosity': 'morris', 'projection': a.projection, 'densitySolve': not a.noDensitySolve,
                                                               'particleShift': a.particleShift, 'closedPreset': a.closedPreset, 'pressureConsistent': a.pressureConsistent, **params}).merged(**case.defaults).merged(
-            scheme=a.scheme, nx=a.n, tLimit=tLimit, plot=video, video=video, show=False, store=False, progress=True, quiet=True, plotInterval=200, velocityAlarmPlotInterval=1, stallProgress=1e-3, **common,
+            scheme=a.scheme, nx=a.n, n_h=a.nh, tLimit=tLimit, plot=video, video=video, show=False, store=False, progress=True, quiet=True, plotInterval=200, velocityAlarmPlotInterval=1, stallProgress=1e-3, **common,
             **({'exportRoot': a.out} if (a.out and video) else {}))
         return run(case, spec)
 
