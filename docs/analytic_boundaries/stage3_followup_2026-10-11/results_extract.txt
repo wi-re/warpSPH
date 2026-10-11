@@ -5,7 +5,9 @@
 
 
 === oracle_tc_outer (DFSPH2D on the warpSPH taylorCouette cut lattice, N = 1384, H = 2.505 dx, closed preset, t = 25)
-# the morris cal 0.9431 sensitivity run (the auto-cal run of the 2026-10-10 session gave inner 0.9732 / outer 0.8867 / profile 0.9990, balance rms 8.6e-20)
+# auto-cal run (the oracle's default long-wave lattice sum, the fair comparison to the port's own calibration), full lines in oracle_tc_outer_auto.clean.txt:
+#   profile 0.9993, inner 0.9732, outer 0.8872, outer/inner 0.9116, balance rms 8.4e-20
+# morris cal 0.9431 sensitivity run (the port's own calibration value, as a check):
 N=1384  r in [0.2190, 0.4879]  support 0.0522  wall mass 0.9866  morris cal 0.9431  nu 0.01826
 ran 12501 steps to t=25.00 in 147s
 RESULT profile amplitude / exact = 0.9974

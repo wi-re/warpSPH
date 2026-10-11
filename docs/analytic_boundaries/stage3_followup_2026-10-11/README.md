@@ -9,10 +9,10 @@ The 2026-10-10 validation never stored the oracle's **outer** wall torque. Runni
 | | profile / exact | inner torque / exact | outer torque / exact |
 |---|---|---|---|
 | warpSPH omni, closed preset (2026-10-10) | 0.9994 | 0.9733 | 0.8878 |
-| oracle `DFSPH2D`, same lattice, auto cal | 0.9990 | 0.9732 | **0.8867** |
+| oracle `DFSPH2D`, same lattice, auto cal | 0.9993 | 0.9732 | **0.8872** |
 | oracle `DFSPH2D`, same lattice, morris cal 0.9431 | 0.9974 | 0.9717 | 0.8809 |
 
-The ~0.89 outer-torque deficit is **a lattice / closure artifact the oracle shares** (0.8867 / 0.8809 vs the port's 0.8878, within 0.1 %), not a port bug — the curved no-slip closure is not exactly torque-conserving on the cut lattice, exactly as the δ⁺ outer torque is 0.762 against the oracle's 0.766. The inner torque and the profile match to < 0.1 %.
+The ~0.89 outer-torque deficit is **a lattice / closure artifact the oracle shares** (0.8872 / 0.8809 vs the port's 0.8878, within 0.1 % and 0.2 % respectively), not a port bug — the curved no-slip closure is not exactly torque-conserving on the cut lattice, exactly as the δ⁺ outer torque is 0.762 against the oracle's 0.766. The inner torque and the profile match to < 0.1 %.
 
 ## 2. The omni square array at t = 60 — steady, not falling
 

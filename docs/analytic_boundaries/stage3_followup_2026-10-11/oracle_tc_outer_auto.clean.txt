@@ -1,0 +1,6 @@
+N=1384  r in [0.2190, 0.4879]  support 0.0522  wall mass 0.9866  morris cal (warpSPH 0.9431 / used auto)  nu 0.01826
+RESULT profile amplitude / exact = 0.9993
+RESULT torque inner / exact = 0.9732   (history mean over last 300 steps: -0.01063 vs exact -0.01093)
+RESULT torque outer / (-exact) = 0.8872   (+0.00969 vs +0.01093)
+RESULT outer / inner = 0.9116   (exact 1.0)
+RESULT momentum balance rms (last 300) = 8.426e-20
