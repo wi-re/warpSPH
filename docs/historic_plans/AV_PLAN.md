@@ -1,12 +1,12 @@
 # warpSPH — Artificial-Dissipation Roadmap (AV_PLAN)
 
-> **Progress marker:** this plan's row in [PLANS.md](PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
+> **Archived 2026-10-11.** Consolidated into [COMPRESSIBLE_SPH_PLAN.md](../../COMPRESSIBLE_SPH_PLAN.md); this file is kept for its evidence and build logs. Links and `PLANS.md` rows were updated, the text was not.
 
 Modernising the compressible dissipation stack: from the one hard-wired
 Monaghan-plus-switch path that exists today to a **numerical-method laboratory**
 where shock detector, coefficient policy, velocity-pair policy and pair operator
 are independently replaceable — and then handing that substrate to
-[`PESPH_PLAN.md`](PESPH_PLAN.md) and, eventually, to Godunov-SPH.
+[`PESPH_PLAN.md`](../../PESPH_PLAN.md) and, eventually, to Godunov-SPH.
 
 Target papers, all local in `literature/` (bib keys as in `ABSTRACTS.md`):
 
@@ -28,9 +28,9 @@ Full reading checklist in [Part 5](#part-5--literature).
 
 # Status board — read this first
 
-**Status 2026-10-09: the bake-off ran (2026-10-09, 18 jobs rc 0, no row diverged; verdict and per-row notes in [`docs/av/bakeoff_2026-10-09/README.md`](docs/av/bakeoff_2026-10-09/README.md)). Phases 0-4, 5A, 5B (R1 read off) and 6 are done (a ✗ marker is a run whose result was a recorded finding, not undone work). Left for M8: the user's tag; then 7b's addendum rows and stage 2 (user decides).** Earlier status, 2026-10-08: Phases 0-4, 5A and 6 are done (a ✗ marker is a run whose result was a recorded finding, not undone work); 5B waits only on reading its ell_V 5 numbers off the bake-off; Phase 2 accepted (user, 2026-10-08); only the bake-off is left -- see the short list right below the table.** The plan's *input* is the work
-logged in [`phase6.md`](docs/historic_plans/phase6.md) / [`phase6_shock_capturing_log.md`](docs/historic_plans/phase6_shock_capturing_log.md)
-(Cullen & Dehnen 2010 and Read & Hayfield 2012 on [`schemes/monaghan.py`](src/warpSPH/schemes/monaghan.py),
+**Status 2026-10-09: the bake-off ran (2026-10-09, 18 jobs rc 0, no row diverged; verdict and per-row notes in [`docs/av/bakeoff_2026-10-09/README.md`](../../docs/av/bakeoff_2026-10-09/README.md)). Phases 0-4, 5A, 5B (R1 read off) and 6 are done (a ✗ marker is a run whose result was a recorded finding, not undone work). Left for M8: the user's tag; then 7b's addendum rows and stage 2 (user decides).** Earlier status, 2026-10-08: Phases 0-4, 5A and 6 are done (a ✗ marker is a run whose result was a recorded finding, not undone work); 5B waits only on reading its ell_V 5 numbers off the bake-off; Phase 2 accepted (user, 2026-10-08); only the bake-off is left -- see the short list right below the table.** The plan's *input* is the work
+logged in [`phase6.md`](../../docs/historic_plans/phase6.md) / [`phase6_shock_capturing_log.md`](../../docs/historic_plans/phase6_shock_capturing_log.md)
+(Cullen & Dehnen 2010 and Read & Hayfield 2012 on [`schemes/monaghan.py`](../../src/warpSPH/schemes/monaghan.py),
 validated on Sod and Gresho). On top of it, per the start-up order below:
 
 - **S1 / M0** baseline instrument (`scripts/av_report.py`, 10 cases, `--compare`, bit-lock check) and the
@@ -41,7 +41,7 @@ validated on Sod and Gresho). On top of it, per the start-up order below:
 - **S4** CRK `dudt.py` j-side sign: applied 2026-10-01 (see S4 below);
 - **OPEN_PROBLEMS §17** (Read-Hayfield energy) resolved 2026-10-01: a transcription error in Eq. (33); baseline regenerated as **M0d**, then **M0e** after the R&H pair loops moved to warp kernels (see below).
 
-Phase 2 (Rosswog 2020 entropy trigger) built and validated 2026-10-06 — passes shocks, sweeps and smooth flow; its Kelvin-Helmholtz failure (`docs/av/av_phase2_rosswog2020_2026-10-06.md`) was traced on 2026-10-07 to the sharp-IC contact transient plus resolution (nx 256: A(1.5) 0.131 vs C&D 0.137, [`docs/av/kh256_2026-10-07/`](docs/av/kh256_2026-10-07/README.md)). Phase 1 (2026-10-07) added the pair-velocity argument, the `pi` package, a Pi audit against the papers and the CRK switch fix (items 1-4 under Phase 1 below). Phases 3-6 were built 2026-10-07 and validated by the overnight sweep (2026-10-08, [`docs/av/sweep_2026-10-08/verdict.md`](docs/av/sweep_2026-10-08/verdict.md)); the markers were reconciled with it on 2026-10-08.
+Phase 2 (Rosswog 2020 entropy trigger) built and validated 2026-10-06 — passes shocks, sweeps and smooth flow; its Kelvin-Helmholtz failure (`docs/av/av_phase2_rosswog2020_2026-10-06.md`) was traced on 2026-10-07 to the sharp-IC contact transient plus resolution (nx 256: A(1.5) 0.131 vs C&D 0.137, [`docs/av/kh256_2026-10-07/`](../../docs/av/kh256_2026-10-07/README.md)). Phase 1 (2026-10-07) added the pair-velocity argument, the `pi` package, a Pi audit against the papers and the CRK switch fix (items 1-4 under Phase 1 below). Phases 3-6 were built 2026-10-07 and validated by the overnight sweep (2026-10-08, [`docs/av/sweep_2026-10-08/verdict.md`](../../docs/av/sweep_2026-10-08/verdict.md)); the markers were reconciled with it on 2026-10-08.
 
 | Phase | Milestone | State |
 |---|---|---|
@@ -55,7 +55,7 @@ Phase 2 (Rosswog 2020 entropy trigger) built and validated 2026-10-06 — passes
 | 6 | M7 Detector-complete | ✅ swept 2026-10-08: uniform-compression claim reproduced, Gresho passes, five-detector maps rendered; Sod / Sedov shocks off by the kept prefactor 0.5 (decided trade-off); shear / sound tests pass; open finding: fires in uniform-pressure shear (Phase 6 note) |
 | 7 | 🏁 **M8 SPH-AV-FOUNDATION** — hard gate | ✅ bake-off run 2026-10-09 (13 rows x 12 cases, CompSPH cross-check, KH nx 256, timing, maps; no divergence); verdict `docs/av/bakeoff_2026-10-09/README.md`, default (row 12) stands, gate misses listed there (Sedov / RT energy drift all rows, Noh 2D all but Wadsley; CompSPH Rosswog Sedov blow-up = OPEN_PROBLEMS §23). **Left: the M8 tag (user).** PESPH continues in its own plan |
 | 7b | Riemann dissipation as an alternative AV (user, 2026-10-08) | ◐ 7b.1 solvers, 7b.2 `LimiterType`, 7b.3 first-stage Riemann Π term built, tested and validated, now on `dev` (uncommitted; bake-off smoke bit-identical, full suite green); left: addendum bake-off rows after the main run; stage 2 (MUSCL scalar states) re-scoped, user decides; see Phase 7b |
-| 8+ | → [`PESPH_PLAN.md`](PESPH_PLAN.md) | blocked on M8 |
+| 8+ | → [`PESPH_PLAN.md`](../../PESPH_PLAN.md) | blocked on M8 |
 
 ### Still to do before M8 (2026-10-08)
 
@@ -85,7 +85,7 @@ sweep has been read; each phase's build markers are ticked as they land. Decisio
 
 ### Overnight sweep results (2026-10-08) — read before deciding anything
 
-`results/av_sweep_2026-10-07_17-30/` (all runs with video; evidence copied to [`docs/av/sweep_2026-10-08/`](docs/av/sweep_2026-10-08/verdict.md)):
+`results/av_sweep_2026-10-07_17-30/` (all runs with video; evidence copied to [`docs/av/sweep_2026-10-08/`](../../docs/av/sweep_2026-10-08/verdict.md)):
 **41 pass / 21 fail / 0 missing**; no run diverged except the cfl x 4 robustness configs (by design). Plus the KH nx 256
 table (INFO). The FAILs, sorted by what they mean:
 
@@ -340,12 +340,12 @@ once at the end of S2.
 
 **Monaghan is the AV laboratory; CompSPH is the conservative cross-check.**
 
-[`schemes/monaghan.py`](src/warpSPH/schemes/monaghan.py) is the plain pairwise
+[`schemes/monaghan.py`](../../src/warpSPH/schemes/monaghan.py) is the plain pairwise
 operator — a detector change there is not confounded by anything else, and it is
 where Phase 6 already validated. **CRKSPH is deliberately excluded as the primary
 host**: it bakes slope-limited reconstruction into
-[`modules/crk/accel.py`](src/warpSPH/modules/crk/accel.py) /
-[`dudt.py`](src/warpSPH/modules/crk/dudt.py), which is precisely the variable
+[`modules/crk/accel.py`](../../src/warpSPH/modules/crk/accel.py) /
+[`dudt.py`](../../src/warpSPH/modules/crk/dudt.py), which is precisely the variable
 Phase 4 is trying to isolate, and its compatible energy update is not an ODE
 right-hand side (see PESPH_PLAN §4.2). CRKSPH appears in the bake-off as a
 *reference point*, not as a detector host.
@@ -385,7 +385,7 @@ a parallel one:
   `_peakMemoryMB`, `tensorFootprintMB` for group F.
 - Output: `results/av_<stamp>/{results.json, report.md, plots/}`.
 
-CLI shape, mirroring [`scripts/validate_scheme.py`](scripts/validate_scheme.py):
+CLI shape, mirroring [`scripts/validate_scheme.py`](../../scripts/validate_scheme.py):
 
 ```bash
 scripts/av_report.py --config baseline            # named config from a registry
@@ -406,12 +406,12 @@ code to add.
 
 | Metric | Case | Source | Gate |
 |---|---|---|---|
-| `L1(v_x)`, García-Senz Eq. (20), window `x ∈ [0.05, 0.868]` | `sod`, `sod2d`, `sod3d` | exact Riemann in [`sodSolution.py`](src/warpSPH/caseUtils/compressible/sod/sodSolution.py) `solve()` | per-phase, comparative |
-| contact `P`-spike, `A`-spike | `sod` 1D | `_sod_contact_spike` in [`tests/test_shockCapturing.py`](tests/test_shockCapturing.py) | `abs(P_spike) < 0.5`, `abs(A_spike) < 0.5` — already asserted |
+| `L1(v_x)`, García-Senz Eq. (20), window `x ∈ [0.05, 0.868]` | `sod`, `sod2d`, `sod3d` | exact Riemann in [`sodSolution.py`](../../src/warpSPH/caseUtils/compressible/sod/sodSolution.py) `solve()` | per-phase, comparative |
+| contact `P`-spike, `A`-spike | `sod` 1D | `_sod_contact_spike` in [`tests/test_shockCapturing.py`](../../tests/test_shockCapturing.py) | `abs(P_spike) < 0.5`, `abs(A_spike) < 0.5` — already asserted |
 | region means vs exact (R3-R5) | `sod` 1D | phase6 log baseline: R3 ρ `+0.7%`, R4 ρ `−3.1%`, R4 P `+1%` | within ±5 pp of the Phase-0 number |
 | shock width in units of `h` | `sod`, `noh` | new | reported, monotone under refinement |
-| peak `ρ/ρ₀` vs `(γ+1)/(γ−1) = 4` | `sedov` 3D | new; `SedovSolution` already in [`sedovSolution.py`](src/warpSPH/caseUtils/compressible/sedov/sedovSolution.py) | **must approach 4 from below — overshoot is a failure** (garciasenz2026 Fig. 2) |
-| post-shock `ρ_s = ρ₀((γ+1)/(γ−1))^dim` | `noh` | closed form already in [`cases/noh.py`](src/warpSPH/cases/noh.py) `shockState` | within ±3% |
+| peak `ρ/ρ₀` vs `(γ+1)/(γ−1) = 4` | `sedov` 3D | new; `SedovSolution` already in [`sedovSolution.py`](../../src/warpSPH/caseUtils/compressible/sedov/sedovSolution.py) | **must approach 4 from below — overshoot is a failure** (garciasenz2026 Fig. 2) |
+| post-shock `ρ_s = ρ₀((γ+1)/(γ−1))^dim` | `noh` | closed form already in [`cases/noh.py`](../../src/warpSPH/cases/noh.py) `shockState` | within ±3% |
 
 **`L1` does not exist in this repo.** Only `relL2` at
 [`metrics.py:20`](benchmarks/common/metrics.py#L20). Phase 0 adds it beside
@@ -431,12 +431,12 @@ number quoted from that paper is this one.
 |---|---|---|
 | integrated AV energy, **split linear (`C_l`) / quadratic (`C_q`)** | new; requires the operator to return the two contributions separately | reported |
 | `mean α`, `peak α`, `fraction(α > 0.1)` | new in `compressibleDiagnostics` | per-phase |
-| AV dissipation *power* `dE_AV/dt` | `switchState.dvdt_diss` is **declared and never populated** ([`switchState.py:28`](src/warpSPH/modules/shockCapturing/switchState.py#L28)) | reported |
+| AV dissipation *power* `dE_AV/dt` | `switchState.dvdt_diss` is **declared and never populated** ([`switchState.py:28`](../../src/warpSPH/modules/shockCapturing/switchState.py#L28)) | reported |
 
 The linear/quadratic split is the one genuinely new piece of plumbing here.
-[`pi.py`](src/warpSPH/modules/dissipation/pi.py) computes a single `v_sig` per
+[`pi.py`](../../src/warpSPH/modules/dissipation/pi.py) computes a single `v_sig` per
 formulation that already mixes `C_l·c` and `C_q·μ_ij` (e.g.
-[`pi.py:125`](src/warpSPH/modules/dissipation/pi.py#L125)), so the split is
+[`pi.py:125`](../../src/warpSPH/modules/dissipation/pi.py#L125)), so the split is
 obtained by evaluating `Π` twice — once with `C_q = 0`, once with `C_l = 0` — in
 the diagnostic path only, never in the hot path.
 
@@ -444,9 +444,9 @@ the diagnostic path only, never in the hot path.
 
 | Metric | Case | Source | Gate |
 |---|---|---|---|
-| `L1(v_φ)` over `r ∈ [0, 0.5]` vs the analytic `v_φ` | `gresho` ([`greshoVortex.py`](src/warpSPH/cases/greshoVortex.py)) | garciasenz2026 Eq. (22) | comparative, §4.4 |
+| `L1(v_φ)` over `r ∈ [0, 0.5]` vs the analytic `v_φ` | `gresho` ([`greshoVortex.py`](../../src/warpSPH/cases/greshoVortex.py)) | garciasenz2026 Eq. (22) | comparative, §4.4 |
 | peak-speed persistence ratio | `gresho` | promote `.tmp/probe_gresho_control.py` → `scripts/probe_greshoControl.py` | ≥ Phase-0 baseline |
-| angular-momentum loss | `gresho`, `yee` | new; **port `_conservationMetrics`** from [`oscillatingDroplet.py:196`](src/warpSPH/cases/oscillatingDroplet.py#L196) — the only angular-momentum accounting in the repo, currently WC-only | reported |
+| angular-momentum loss | `gresho`, `yee` | new; **port `_conservationMetrics`** from [`oscillatingDroplet.py:196`](../../src/warpSPH/cases/oscillatingDroplet.py#L196) — the only angular-momentum accounting in the repo, currently WC-only | reported |
 | amplitude decay over N periods | `linearWave`, `yee` | new | ≤ Phase-0 baseline |
 
 ### Group D — instability growth
@@ -460,9 +460,9 @@ the diagnostic path only, never in the hot path.
 
 | Metric | Gate |
 |---|---|
-| total-energy drift | the existing per-scheme budget, quoted verbatim from [`tests/test_physics.py:284`](tests/test_physics.py#L284): `_ENERGY_DRIFT = {'CompSPH': 1e-5, 'CRKSPH': 1e-4, 'Monaghan': 5e-3}` |
-| Sod slab quiet-region density spread | `spread < 0.02` ([`test_physics.py:154`](tests/test_physics.py#L154)) |
-| Sedov `E0` recovery at `t=0` | `pytest.approx(spec.param('E0'), rel=1e-3)` ([`test_physics.py:658`](tests/test_physics.py#L658)) |
+| total-energy drift | the existing per-scheme budget, quoted verbatim from [`tests/test_physics.py:284`](../../tests/test_physics.py#L284): `_ENERGY_DRIFT = {'CompSPH': 1e-5, 'CRKSPH': 1e-4, 'Monaghan': 5e-3}` |
+| Sod slab quiet-region density spread | `spread < 0.02` ([`test_physics.py:154`](../../tests/test_physics.py#L154)) |
+| Sedov `E0` recovery at `t=0` | `pytest.approx(spec.param('E0'), rel=1e-3)` ([`test_physics.py:658`](../../tests/test_physics.py#L658)) |
 | angular-momentum drift | reported (new) |
 
 ### Group F — performance
@@ -478,7 +478,7 @@ the diagnostic path only, never in the hot path.
 The original roadmap sketch (superseded by this document) buried this in Phase 6. It belongs here, because Phases 2, 4, 5B and
 6 each produce one and they are only useful side by side.
 
-Per-particle dump, via [`io/export.py`](src/warpSPH/io/export.py)'s `writeFrame`
+Per-particle dump, via [`io/export.py`](../../src/warpSPH/io/export.py)'s `writeFrame`
 with an extra field group (no new IO format):
 
 ```
@@ -714,9 +714,9 @@ cut-off as stored here, `τ = γ_K ℓ h/c = ℓ H/c` and Eq. 21's `h² = (H/sph
 inversion, no shear tensor and no second-order `V`.** Only `∇·v`, its finite
 difference, `∇×v` and the sound speed. Against the repo's C&D path that removes
 the `computeMWarp` neighbour loop
-([`wp_computeM.py:208`](src/warpSPH/modules/shockCapturing/wp_computeM.py#L208))
+([`wp_computeM.py:208`](../../src/warpSPH/modules/shockCapturing/wp_computeM.py#L208))
 and the `computeShearTensor` gradient pass
-([`common.py:53`](src/warpSPH/modules/shockCapturing/common.py#L53)). That is
+([`common.py:53`](../../src/warpSPH/modules/shockCapturing/common.py#L53)). That is
 measurable, and §5B.4 gates on it.
 
 ## 1.5 Wadsley, Keller & Quinn (2017) — Gasoline2 detector · `wadsley2017`
@@ -760,7 +760,7 @@ Two structural points:
   strong shock (where the tensor is dominated by one eigenvalue) and blinds it
   to isotropic compression. In this repo, `T` is
   `Shear + (trace/dim)·I` from
-  [`common.py:92-99`](src/warpSPH/modules/shockCapturing/common.py#L92) —
+  [`common.py:92-99`](../../src/warpSPH/modules/shockCapturing/common.py#L92) —
   one line, not a new kernel.
 - **`W_R,ij` is deliberately not the SPH kernel**, because the kernel weights
   too few central particles and makes `R` noisy.
@@ -780,7 +780,7 @@ shocks.
 > because of "the different `h` definition in CD". This repo stores `h` as the
 > **cut-off radius**, not the smoothing scale — the exact `h`/`H` hazard
 > documented at
-> [`limiter.py:135-147`](src/warpSPH/modules/crk/limiter.py#L135). Re-derive the
+> [`limiter.py:135-147`](../../src/warpSPH/modules/crk/limiter.py#L135). Re-derive the
 > constant against this repo's convention; do not copy it. See §6.2.
 
 ---
@@ -794,17 +794,17 @@ look, and two are larger.
 
 | Ingredient | Status |
 |---|---|
-| `ViscositySwitch` enum | ✅ 8 members, [`enumTypes.py:43`](src/warpSPH/enumTypes.py#L43) — but **4 of 8 are stubs that raise** (§2.3) |
-| Dispatch | ✅ [`wrapper.py`](src/warpSPH/modules/shockCapturing/wrapper.py) — `if`/`elif` chains in *two* functions |
-| C&D 2010 | ✅ [`CullenDehnen2010.py`](src/warpSPH/modules/shockCapturing/CullenDehnen2010.py), validated Phase 6, sign resolved |
-| Cullen-Hopkins | ✅ [`CullenHopkins.py`](src/warpSPH/modules/shockCapturing/CullenHopkins.py) |
-| R&H 2012 SPHS + entropy dissipation | ✅ [`ReadHayfield2012.py`](src/warpSPH/modules/shockCapturing/ReadHayfield2012.py) |
-| Balsara limiter | ⚠️ implemented, but *inside* R&H ([`ReadHayfield2012.py:163`](src/warpSPH/modules/shockCapturing/ReadHayfield2012.py#L163)); `ViscositySwitch.Balsara1995` is a stub |
-| 12 pairwise AV formulations | ✅ `ViscosityTerms` + [`pi.py`](src/warpSPH/modules/dissipation/pi.py) `computePi_actual` |
-| Velocity-gradient tensor | ✅ `computeShearTensor` ([`common.py:53`](src/warpSPH/modules/shockCapturing/common.py#L53)) returns trace / trace-free Shear / Rotation |
-| Correction matrix `M = Σ m_j x_ij ⊗ ∇W_ij` | ✅ [`wp_computeM.py:208`](src/warpSPH/modules/shockCapturing/wp_computeM.py#L208) |
+| `ViscositySwitch` enum | ✅ 8 members, [`enumTypes.py:43`](../../src/warpSPH/enumTypes.py#L43) — but **4 of 8 are stubs that raise** (§2.3) |
+| Dispatch | ✅ [`wrapper.py`](../../src/warpSPH/modules/shockCapturing/wrapper.py) — `if`/`elif` chains in *two* functions |
+| C&D 2010 | ✅ [`CullenDehnen2010.py`](../../src/warpSPH/modules/shockCapturing/CullenDehnen2010.py), validated Phase 6, sign resolved |
+| Cullen-Hopkins | ✅ [`CullenHopkins.py`](../../src/warpSPH/modules/shockCapturing/CullenHopkins.py) |
+| R&H 2012 SPHS + entropy dissipation | ✅ [`ReadHayfield2012.py`](../../src/warpSPH/modules/shockCapturing/ReadHayfield2012.py) |
+| Balsara limiter | ⚠️ implemented, but *inside* R&H ([`ReadHayfield2012.py:163`](../../src/warpSPH/modules/shockCapturing/ReadHayfield2012.py#L163)); `ViscositySwitch.Balsara1995` is a stub |
+| 12 pairwise AV formulations | ✅ `ViscosityTerms` + [`pi.py`](../../src/warpSPH/modules/dissipation/pi.py) `computePi_actual` |
+| Velocity-gradient tensor | ✅ `computeShearTensor` ([`common.py:53`](../../src/warpSPH/modules/shockCapturing/common.py#L53)) returns trace / trace-free Shear / Rotation |
+| Correction matrix `M = Σ m_j x_ij ⊗ ∇W_ij` | ✅ [`wp_computeM.py:208`](../../src/warpSPH/modules/shockCapturing/wp_computeM.py#L208) |
 | Slope limiter + midpoint reconstruction | ⚠️ exists, **CRK-internal** — see §2.2 |
-| Entropy `A` as state + EOS both ways | ✅ `CompressibleState.entropies`, [`eos/idealGas.py`](src/warpSPH/modules/eos/idealGas.py) |
+| Entropy `A` as state + EOS both ways | ✅ `CompressibleState.entropies`, [`eos/idealGas.py`](../../src/warpSPH/modules/eos/idealGas.py) |
 | Exact Riemann / Sedov / Noh solutions | ✅ all three, but used **only as plot overlays** |
 | `L1` error norm | ❌ nothing; only `relL2` ([`metrics.py:20`](benchmarks/common/metrics.py#L20)) |
 | Entropy(t), angular momentum(t), α statistics, AV dissipation | ❌ none on any compressible case |
@@ -814,14 +814,14 @@ look, and two are larger.
 ## 2.2 Finding: the reconstruction engine already exists, CRK-internal
 
 This is the largest single scope reduction in the plan. Compare
-[`modules/crk/limiter.py`](src/warpSPH/modules/crk/limiter.py) against
+[`modules/crk/limiter.py`](../../src/warpSPH/modules/crk/limiter.py) against
 garciasenz2026 §2.3:
 
 | Paper | Repo | Match |
 |---|---|---|
-| `φ_ab` van-Leer form (13) + `F_ab` (17) | `computeVanLeer` ([`limiter.py:41`](src/warpSPH/modules/crk/limiter.py#L41)), `limiterVL` ([`:24`](src/warpSPH/modules/crk/limiter.py#L24)) | exact |
-| `κ_ab` (14), `q_ab` (15), `q_crit` (16), `q_fold = 0.2` | `crkLimiter` ([`limiter.py:119`](src/warpSPH/modules/crk/limiter.py#L119)), `eta_crit`/`eta_fold` in `CRKViscosity` ([`crkSPH.py:30`](src/warpSPH/configurations/crkSPH.py#L30), defaults `0.3333`/`0.2`) | exact |
-| SLR (11)–(12) | `v_corr_i = phi_ij/2 * matmul(gradV_i, x_ij)` ([`dudt.py:134`](src/warpSPH/modules/crk/dudt.py#L134), [`accel.py:151`](src/warpSPH/modules/crk/accel.py#L151)) | exact |
+| `φ_ab` van-Leer form (13) + `F_ab` (17) | `computeVanLeer` ([`limiter.py:41`](../../src/warpSPH/modules/crk/limiter.py#L41)), `limiterVL` ([`:24`](../../src/warpSPH/modules/crk/limiter.py#L24)) | exact |
+| `κ_ab` (14), `q_ab` (15), `q_crit` (16), `q_fold = 0.2` | `crkLimiter` ([`limiter.py:119`](../../src/warpSPH/modules/crk/limiter.py#L119)), `eta_crit`/`eta_fold` in `CRKViscosity` ([`crkSPH.py:30`](../../src/warpSPH/configurations/crkSPH.py#L30), defaults `0.3333`/`0.2`) | exact |
+| SLR (11)–(12) | `v_corr_i = phi_ij/2 * matmul(gradV_i, x_ij)` ([`dudt.py:134`](../../src/warpSPH/modules/crk/dudt.py#L134), [`accel.py:151`](../../src/warpSPH/modules/crk/accel.py#L151)) | exact |
 
 Both cite Frontiere et al. (2017) as the source, so this is the same algorithm
 arriving twice. **Phase 3 is an extraction, not a build.** What is genuinely
@@ -830,18 +830,18 @@ Balsara modulation of `φ` (Eqs. 18-19), and (c) there is no test that the
 reconstruction actually annihilates a linear field.
 
 One real discrepancy to resolve during the extraction:
-[`accel.py:152`](src/warpSPH/modules/crk/accel.py#L152) uses
-`matmul(gradV_j, x_ij)` while [`dudt.py:135`](src/warpSPH/modules/crk/dudt.py#L135)
+[`accel.py:152`](../../src/warpSPH/modules/crk/accel.py#L152) uses
+`matmul(gradV_j, x_ij)` while [`dudt.py:135`](../../src/warpSPH/modules/crk/dudt.py#L135)
 uses `matmul(gradV_j, -x_ij)`. Eqs. (11)–(12) use the same `x^T_ab` on both sides
 with opposite signs on the term, so the two call sites cannot both be right.
 
 ## 2.3 Finding: four enum members are stubs that raise
 
-[`wrapper.py:44`](src/warpSPH/modules/shockCapturing/wrapper.py#L44) —
+[`wrapper.py:44`](../../src/warpSPH/modules/shockCapturing/wrapper.py#L44) —
 `Balsara1995`, `Colagrossi2004`, `MorrisMonaghan1997` and `Rosswog2000` are
 `ViscositySwitch` members with no implementation; selecting one raises
 `ValueError`. They are reachable from the CLI, because
-[`io/parsers.py:19`](src/warpSPH/io/parsers.py#L19) `parseViscositySwitch`
+[`io/parsers.py:19`](../../src/warpSPH/io/parsers.py#L19) `parseViscositySwitch`
 matches on the member *name*.
 
 Phase 2 replaces `Rosswog2000` — and **renames it `Rosswog2020`**, since the
@@ -849,7 +849,7 @@ target is the 2020 entropy-trigger paper, not Rosswog et al. (2000).
 
 ## 2.4 Finding: there is no constant-β mode
 
-[`pi.py:70-73`](src/warpSPH/modules/dissipation/pi.py#L70):
+[`pi.py:70-73`](../../src/warpSPH/modules/dissipation/pi.py#L70):
 
 ```python
 C_l = scalar_t(1.0)/scalar_t(2.0) * (alpha_i + alpha_j) * C_l_
@@ -882,11 +882,11 @@ Consequences, both of which move work out of Phase 5A and into Phase 1:
 
 | Hazard | Where | Fix |
 |---|---|---|
-| `correctXi` / `sphKernel_xi` is a **kernel-normalisation** ξ, unrelated to C&D's Ξ limiter | [`pi.py:60`](src/warpSPH/modules/dissipation/pi.py#L60) vs [`CullenDehnen2010.py:142`](src/warpSPH/modules/shockCapturing/CullenDehnen2010.py#L142) | rename one; Wadsley Eq. (28) introduces a *third* ξ |
-| `limitXi` declared **twice**; the first (`False`) is dead | [`viscositySwitchParameters.py`](src/warpSPH/configurations/moduleConfigurations/viscositySwitchParameters.py) — flagged in its own docstring | delete the dead one |
-| `entropies` and `soundspeeds` carry the **same tag**; `pressures` is tagged `'damping'` | [`compressibleMonaghan.py:37-40`](src/warpSPH/systems/compressibleMonaghan.py#L37) | fix; **this closes PESPH_PLAN §2.1** |
+| `correctXi` / `sphKernel_xi` is a **kernel-normalisation** ξ, unrelated to C&D's Ξ limiter | [`pi.py:60`](../../src/warpSPH/modules/dissipation/pi.py#L60) vs [`CullenDehnen2010.py:142`](../../src/warpSPH/modules/shockCapturing/CullenDehnen2010.py#L142) | rename one; Wadsley Eq. (28) introduces a *third* ξ |
+| `limitXi` declared **twice**; the first (`False`) is dead | [`viscositySwitchParameters.py`](../../src/warpSPH/configurations/moduleConfigurations/viscositySwitchParameters.py) — flagged in its own docstring | delete the dead one |
+| `entropies` and `soundspeeds` carry the **same tag**; `pressures` is tagged `'damping'` | [`compressibleMonaghan.py:37-40`](../../src/warpSPH/systems/compressibleMonaghan.py#L37) | fix; **this closes PESPH_PLAN §2.1** |
 | `crkSPH.py`'s `updateViscositySwitch` call is **commented out**, so `alpha0` never advances under CRKSPH | `schemes/crkSPH.py` ~line 339 | decide: restore or delete with a note |
-| `switchState.dvdt_diss` declared, never populated | [`switchState.py:28`](src/warpSPH/modules/shockCapturing/switchState.py#L28) | populate (Group B) or remove |
+| `switchState.dvdt_diss` declared, never populated | [`switchState.py:28`](../../src/warpSPH/modules/shockCapturing/switchState.py#L28) | populate (Group B) or remove |
 | Compressible probes live in untracked `.tmp/` | `.tmp/probe_cullen_sod.py`, `probe_sod_nd.py`, `probe_gresho_control.py` | promote to `scripts/` (Phase 0) |
 
 ## 2.6 The AD constraint on every new kernel
@@ -897,14 +897,14 @@ in this plan:
 
 - **Loop-carried `wp.max` silently zeroes adjoints.** warp-lang 1.15.0's
   reverse-mode AD drops the adjoint of a max reassigned inside a neighbour loop.
-  [`wp_vsig.py`](src/warpSPH/modules/shockCapturing/wp_vsig.py) solves it with an
+  [`wp_vsig.py`](../../src/warpSPH/modules/shockCapturing/wp_vsig.py) solves it with an
   argmax pass plus a single re-evaluation — **read that docstring before writing
   any new max-over-neighbours term.** Rosswog Eq. (22) and Wadsley's `v_sig` both
   need it.
 - **Un-guarded divisions must return early, not be NaN-patched afterwards.**
   Reverse AD differentiates the expression that was evaluated, not the value it
   was overwritten with. See the long note at
-  [`limiter.py:88-104`](src/warpSPH/modules/crk/limiter.py#L88). Every limiter
+  [`limiter.py:88-104`](../../src/warpSPH/modules/crk/limiter.py#L88). Every limiter
   ratio in this plan (`F_ab`, `R_i`, `D/|T|`, `S/(c²+S)`) is one of these.
 
 `tests/test_gradcheck_scripts.py` globs `scripts/gradcheck_*.py`, so a new script
@@ -921,23 +921,23 @@ done when every marker box is ticked and its Part 0 rows are filled in the repor
 
 Referenced by Phases 2, 5B and 6 rather than repeated in each.
 
-1. `ViscositySwitch` member — [`enumTypes.py:43`](src/warpSPH/enumTypes.py#L43).
+1. `ViscositySwitch` member — [`enumTypes.py:43`](../../src/warpSPH/enumTypes.py#L43).
    Give it a docstring comment naming the paper; `DensityDiffusionScheme`
-   ([`enumTypes.py:221`](src/warpSPH/enumTypes.py#L221)) is the house style and
+   ([`enumTypes.py:221`](../../src/warpSPH/enumTypes.py#L221)) is the house style and
    `ViscositySwitch` currently has none of it.
 2. `modules/shockCapturing/<Name>.py` implementing
    `compute<X>Terms(dt, particleState, simulationConfig, schemeConfig, supportScheme, adjacency) -> (alphas, ViscositySwitchState)`
    and `compute<X>Update(switchState, dt, dvdt, …) -> (alpha0s, ViscositySwitchState)`.
    A pass-through update is acceptable (C&D and R&H both do it).
 3. Register in **both** dispatch functions in
-   [`wrapper.py`](src/warpSPH/modules/shockCapturing/wrapper.py) — after Phase 1
+   [`wrapper.py`](../../src/warpSPH/modules/shockCapturing/wrapper.py) — after Phase 1
    this is one registry entry instead of two `elif` branches.
 4. New tunables → `ViscositySwitchConfig`, **and** both
    `viscositySwitchConfigToDict` and `dictToViscositySwitchConfig`, the latter
    using `.get(…, default)` so old HDF5/YAML still loads (that is what `ns` and
    `balsara_const` do).
 5. New per-particle state → a field on `CompressibleState`
-   ([`compressibleMonaghan.py:37`](src/warpSPH/systems/compressibleMonaghan.py#L37))
+   ([`compressibleMonaghan.py:37`](../../src/warpSPH/systems/compressibleMonaghan.py#L37))
    **and** a copy in `CompressibleSystem.finalize` (`:93-101`). Omitting the copy
    silently resets it every substep. Same for `CompSPHState`.
 6. New update-rate output → extend `ViscositySwitchState` and consume it in the
@@ -956,10 +956,10 @@ Know exactly what the code does today, in numbers, and be able to reproduce them
 - `L1` in [`benchmarks/common/metrics.py`](benchmarks/common/metrics.py), beside
   `relL2`. García-Senz Eq. (20), mean absolute, masked.
 - Extend `compressibleDiagnostics`
-  ([`cases/compressible.py:71`](src/warpSPH/cases/compressible.py#L71)) with:
+  ([`cases/compressible.py:71`](../../src/warpSPH/cases/compressible.py#L71)) with:
   `entropy` (Σ m_i s_i, `s = P/ρ^γ`), `angularMomentum` (port
   `_conservationMetrics` from
-  [`oscillatingDroplet.py:196`](src/warpSPH/cases/oscillatingDroplet.py#L196)),
+  [`oscillatingDroplet.py:196`](../../src/warpSPH/cases/oscillatingDroplet.py#L196)),
   `alphaMean`, `alphaMax`, `alphaActiveFraction` (`α > 0.1`), `avPowerLinear`,
   `avPowerQuadratic`. All 14 compressible cases pick these up automatically.
 - Populate `switchState.dvdt_diss`; add the twice-evaluated `Π` split (Group B).
@@ -971,7 +971,7 @@ Know exactly what the code does today, in numbers, and be able to reproduce them
 
 ### Reference configuration
 Record and freeze, from
-[`cases/compressible.py`](src/warpSPH/cases/compressible.py): kernel `B7`,
+[`cases/compressible.py`](../../src/warpSPH/cases/compressible.py): kernel `B7`,
 `integrationScheme='rungeKutta2'`, `supportMode='KernelMeanSymmetric'`,
 `n_h=4.0`, `cflFactor=0.3`, `adaptiveDt=True`, `gamma=5/3`,
 `adaptiveSupportScheme='Owen'`; diffusion
@@ -1023,7 +1023,7 @@ ShockDetector ──▶ CoefficientPolicy ──▶ VelocityPairPolicy ──▶
 
 ### Build
 - **Registry instead of dispatch.** Replace both `if`/`elif` chains in
-  [`wrapper.py`](src/warpSPH/modules/shockCapturing/wrapper.py) with a
+  [`wrapper.py`](../../src/warpSPH/modules/shockCapturing/wrapper.py) with a
   `dict[ViscositySwitch, (termsFn, updateFn)]`. Adding a detector becomes one
   entry, not two branches that can diverge.
 - **`CoefficientPolicy`** — new. `Fixed(α, β)` · `SwitchedAlphaFixedBeta(β)` ·
@@ -1036,9 +1036,9 @@ ShockDetector ──▶ CoefficientPolicy ──▶ VelocityPairPolicy ──▶
   `computePi_actual`. Phase 1 ships only `RawVelocity`, which must be a literal
   no-op. Phase 3 fills in the rest.
 - **`DissipationOperator`** — the existing `ViscosityTerms` dispatch in
-  [`pi.py`](src/warpSPH/modules/dissipation/pi.py), given the pair velocity as an
+  [`pi.py`](../../src/warpSPH/modules/dissipation/pi.py), given the pair velocity as an
   argument rather than reading `v_i - v_j` internally
-  ([`pi.py:78`](src/warpSPH/modules/dissipation/pi.py#L78)).
+  ([`pi.py:78`](../../src/warpSPH/modules/dissipation/pi.py#L78)).
 - **Clear every hazard in §2.5**, including the `entropies`/`pressures` state
   tags (closes PESPH_PLAN §2.1) and a decision on `crkSPH.py`'s commented-out
   update call.
@@ -1108,7 +1108,7 @@ starts at 1 and `computeCullenTerms` returns it decayed by ONE step; with the `u
 alpha is stuck at `1 - dt/tau (1 - alpha_loc)` ~ 0.97-0.98 everywhere (full-profile `results/av_crkswitch_*`: C&D alphaMean 0.97 (Gresho) / 0.98 (KH) / 0.98 (Sod), KH A(1.5) 0.0904 vs `crkNone` 0.0903).
 Under CRKSPH, C&D / R&H were therefore effectively fixed alpha = 1; every `crkCullenDehnen2010` number in M0f (and the S4 numbers) is a fixed-alpha run.
 **Fixed 2026-10-07 (reverses the S2 deletion): `schemes/crkSPH.py` calls `updateViscositySwitch` again**, as the Monaghan scheme does. Result (full profile, video on, no alarms; evidence and
-frames in [`docs/av/crk_switch_2026-10-07/`](docs/av/crk_switch_2026-10-07/README.md)):
+frames in [`docs/av/crk_switch_2026-10-07/`](../../docs/av/crk_switch_2026-10-07/README.md)):
 
 | full profile | crkNone (alpha = 1) | crkCullenDehnen2010 (live switch) |
 |---|---|---|
@@ -1151,7 +1151,7 @@ Seven touch points. Specifics:
 
 - Rename `ViscositySwitch.Rosswog2000` → `Rosswog2020` (§2.3), keeping the enum
   value so stored configs still resolve; add a name alias in
-  [`parsers.py`](src/warpSPH/io/parsers.py) for the old spelling.
+  [`parsers.py`](../../src/warpSPH/io/parsers.py) for the old spelling.
 - `modules/shockCapturing/Rosswog2020.py`.
 - **`entropiesPrev` on `CompressibleState`, copied in
   `CompressibleSystem.finalize`.** Touch point 5, and the single most likely bug
@@ -1211,7 +1211,7 @@ Host scheme Monaghan. Compared against C&D and NoneSwitch at the M0 baseline.
 | `sod` 1D | `L1(v_x) ≤` the C&D value at M0 | garciasenz2026 Eq. (20) |
 | `sod` 2D/3D | contact spike ≤ NoneSwitch on both `P` and `A` | the R&H acceptance pattern |
 | `sedov` 3D | peak `ρ/ρ₀` approaches 4 **from below**, never overshoots | garciasenz2026 Fig. 2; rosswog2020entropy Fig. 3 shows the trigger matching exact |
-| `noh` 1D | post-shock `ρ_s` within ±3% of `ρ₀((γ+1)/(γ−1))^dim` | [`cases/noh.py`](src/warpSPH/cases/noh.py) |
+| `noh` 1D | post-shock `ρ_s` within ±3% of `ρ₀((γ+1)/(γ−1))^dim` | [`cases/noh.py`](../../src/warpSPH/cases/noh.py) |
 | `gresho` | `alphaMean < 0.05` **and** `L1(v_φ) ≤` C&D's | the paper's own smooth-flow number is `α ~ 0.01`; `0.05` is the gate |
 | `kelvinHelmholtz` | `A(t)` ≥ the C&D value | "only a very moderate (and desired) switch-on in instability tests" |
 
@@ -1241,7 +1241,7 @@ makes sharp:**
 - [x] report row added: `docs/av/av_phase2_rosswog2020_2026-10-06.md`, configs `rosswog2020`, `rosswog2020Q` (group `phase2`)
 
 ### Results (2026-10-06)
-Full write-up and tables: [`docs/av/av_phase2_rosswog2020_2026-10-06.md`](docs/av/av_phase2_rosswog2020_2026-10-06.md),
+Full write-up and tables: [`docs/av/av_phase2_rosswog2020_2026-10-06.md`](../../docs/av/av_phase2_rosswog2020_2026-10-06.md),
 at the default `supportVolumeClamp='walls'` against M0e (valid again, see Notes). Passes Sod 1D, Sedov (2.53 vs C&D 2.15),
 Noh (C_q 2), Gresho alphaMean (0.047), both sweeps (dt 6.0 %; Gresho 0.074/0.047/0.029), linear wave / Yee (better than
 C&D). **Fails Kelvin-Helmholtz** (A(1.5) 0.012 vs C&D 0.098, below even fixed alpha = 1): the trigger fires on the
@@ -1280,7 +1280,7 @@ KH A(1.5), nx 128, Monaghan (McNally reference 0.148):
 
   At nx 256 the trigger is off in the laminar layer (alpha 0.001) and the early amplitude is highest, so growth is no longer suppressed. **Not yet measured: A(1.5) at nx 256 against C&D at nx 256**
   (~40 min each on this host) -- that pair is the decisive Phase 2 KH number for the smooth IC.
-- **nx 256, out to t = 3 (2026-10-07; evidence [`docs/av/kh256_2026-10-07/`](docs/av/kh256_2026-10-07/README.md), driver `scripts/probe_rosswogKHMap.py`, plot `scripts/plot_kh256_series.py`):**
+- **nx 256, out to t = 3 (2026-10-07; evidence [`docs/av/kh256_2026-10-07/`](../../docs/av/kh256_2026-10-07/README.md), driver `scripts/probe_rosswogKHMap.py`, plot `scripts/plot_kh256_series.py`):**
   Rosswog A(1.5) **0.131** (nx 128: 0.037), C&D 0.137, fixed alpha = 1 only 0.037 (never develops the instability), McNally 0.148; Rosswog peaks at 0.209 (t = 2.11) like C&D (0.212). Rosswog's alpha falls to ~1e-4 in the
   laminar layer and rises on the roll-up filaments only. **The KH failure was resolution plus the sharp-IC contact transient, not the trigger**; strictly the gate is still missed by 4.6 % (smooth IC, nx 256; the
   sharp IC at nx 256 was not run). **Default CRKSPH (alpha = 1) is better still**: 0.131 sharp / 0.145 smooth IC at t = 1.5 (98 % of McNally), peak 0.23-0.24, 0.17-0.19 still at t = 3 versus ~0.105 for the Monaghan runs.
@@ -1309,22 +1309,22 @@ KH-tuned threshold. M2 stays open on the KH row.
   implementations: `RawVelocity` (from Phase 1) · `LinearReconstruction` ·
   `LimitedReconstruction`.
 - Move `limiterVL`, `computeVanLeer`, `crkLimiter` out of
-  [`modules/crk/limiter.py`](src/warpSPH/modules/crk/limiter.py) into
+  [`modules/crk/limiter.py`](../../src/warpSPH/modules/crk/limiter.py) into
   `modules/reconstruction/limiters.py`, preserving the AD guards and their
   explanatory comments verbatim (§2.6).
-- Re-express [`modules/crk/accel.py`](src/warpSPH/modules/crk/accel.py) and
-  [`dudt.py`](src/warpSPH/modules/crk/dudt.py) through the new module — and
+- Re-express [`modules/crk/accel.py`](../../src/warpSPH/modules/crk/accel.py) and
+  [`dudt.py`](../../src/warpSPH/modules/crk/dudt.py) through the new module — and
   **resolve the `x_ij` / `-x_ij` sign discrepancy** between those two call sites
   (§2.2) against Eqs. (11)–(12).
 - Velocity gradient: reuse `computeShearTensor`
-  ([`common.py:53`](src/warpSPH/modules/shockCapturing/common.py#L53)). It takes
+  ([`common.py:53`](../../src/warpSPH/modules/shockCapturing/common.py#L53)). It takes
   the correction matrix as its first argument — pass the `M_inv` that
   `computeDivergence` already builds via `torch.linalg.pinv`
-  ([`common.py:129`](src/warpSPH/modules/shockCapturing/common.py#L129)), or
+  ([`common.py:129`](../../src/warpSPH/modules/shockCapturing/common.py#L129)), or
   `None` for the uncorrected gradient.
 - **Optional, deferred:** García-Senz 2012 IAD gradients (rosswog2020entropy
   Eqs. 4–6). The `Σ (m_j/ρ_j) x_ij ⊗ x_ij W` tensor IAD needs is close to what
-  [`wp_computeM.py`](src/warpSPH/modules/shockCapturing/wp_computeM.py) already
+  [`wp_computeM.py`](../../src/warpSPH/modules/shockCapturing/wp_computeM.py) already
   builds, so this is a new consumer of an existing kernel, not a new kernel.
   Not on M3's critical path.
 
@@ -1417,10 +1417,10 @@ Balsara-modulated Eqs. (18)–(19) with `p = 2`.
 
 ### Build
 - `ViscosityTerms` entry for Eq. (6) if none of the existing 12 matches it
-  exactly — check `Wadsley2008` ([`pi.py:169`](src/warpSPH/modules/dissipation/pi.py#L169))
+  exactly — check `Wadsley2008` ([`pi.py:169`](../../src/warpSPH/modules/dissipation/pi.py#L169))
   first, which is close.
 - Standalone Balsara `B_a` as a `CoefficientPolicy` modulation — it exists today
-  only *inside* R&H ([`ReadHayfield2012.py:163`](src/warpSPH/modules/shockCapturing/ReadHayfield2012.py#L163));
+  only *inside* R&H ([`ReadHayfield2012.py:163`](../../src/warpSPH/modules/shockCapturing/ReadHayfield2012.py#L163));
   lift it out and retire the `Balsara1995` enum stub (§2.3).
 - `BalsaraModulatedReconstruction` (Eqs. 18-19) as a fourth
   `VelocityPairPolicy`, `p` configurable.
@@ -1625,7 +1625,7 @@ shock, where divergence-based detectors cannot?**
   the same gradient primitive `computeShearTensor` uses.
 - `dv/dn = Σ n_α V_αβ n_β` from the existing `Vs` tensor.
 - **`T_αβ` keeps the trace**: `T = Shear + (trace/dim)·I` from
-  [`common.py:92-99`](src/warpSPH/modules/shockCapturing/common.py#L92). One
+  [`common.py:92-99`](../../src/warpSPH/modules/shockCapturing/common.py#L92). One
   line. Do **not** reuse C&D's trace-free `S` — §1.5.
 - `W_R,ij = (1 − (r_ij/2h_i)⁴)` is a plain polynomial weight, not an SPH kernel;
   the paper is explicit that using the kernel makes `R` noisy.
@@ -1639,7 +1639,7 @@ shock, where divergence-based detectors cannot?**
 
 Eq. (26)'s factor 2 exists because Gasoline2's `h` differs from C&D's. This repo
 stores `h` as the **cut-off radius**, a third convention (see the long comment at
-[`limiter.py:135-147`](src/warpSPH/modules/crk/limiter.py#L135)). Before any
+[`limiter.py:135-147`](../../src/warpSPH/modules/crk/limiter.py#L135)). Before any
 tuning:
 
 - [x] write down `h_repo / h_CD` and `h_repo / h_Gasoline2` for kernel `B7` and
@@ -1889,7 +1889,7 @@ Run with the existing `--bakeoff` job list plus the new rows, merged table in `r
 
 # Part 4 — Phase 8 and beyond
 
-## Phase 8 — Pressure-Entropy SPH → [`PESPH_PLAN.md`](PESPH_PLAN.md)
+## Phase 8 — Pressure-Entropy SPH → [`PESPH_PLAN.md`](../../PESPH_PLAN.md)
 
 **This plan does not restate the PESPH work.** It has its own 525-line design
 document covering both variants (PESPH-E, pressure-energy, Frontiere App. G /

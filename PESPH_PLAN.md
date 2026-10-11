@@ -2,6 +2,10 @@
 
 > **Progress marker:** this plan's row in [PLANS.md](PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
 
+> **Part of [COMPRESSIBLE_SPH_PLAN.md](COMPRESSIBLE_SPH_PLAN.md) (2026-10-11), Track D.** That plan consolidated the AV, CRKSPH-limiter,
+> Godunov and MFM/MFV plans (the first three are in `docs/historic_plans/`); this file stays the PESPH design and keeps its own
+> row in PLANS.md. §7 (the MFM outlook) is now Track E there; the text below stays as the rationale.
+
 ## Why this exists
 
 `schemes/` currently has three compressible schemes: `monaghan.py`, `compSPH.py` and
@@ -389,6 +393,12 @@ little.
 
 ## 7. Outlook: MFM, and the move from "an SPH code" to a meshless solver
 
+> **Status 2026-10-11: no longer an outlook.** The MFM / MFV backend exists in warpSPHCore (`warpSPHCore.mfm`, torch reference
+> plus warp kernels, GIZMO-parity Riemann chain) and its migration into the frontend is planned in
+> [COMPRESSIBLE_SPH_PLAN.md](COMPRESSIBLE_SPH_PLAN.md) Track E. This section is kept as the rationale. Out of date: the §7.3 table
+> row "Riemann solver ❌" (the frontend has `modules/riemann`, from AV_PLAN Phase 7b, and the core has its own HLLC chain), and the
+> "not a commitment" framing in the Status section.
+
 This is an **orthogonal axis** to everything above and to `SPLITTING_PLAN.md`: those are
 about the *timestepper* and the *thermodynamic discretization*; this is about the
 **spatial discretization substrate**. Recorded here as a direction rather than a plan,
@@ -518,7 +528,11 @@ which direction is chosen next. `modules/crk/` already has the matrix machinery
 
 ## Relationship to `AV_PLAN.md`
 
-[`AV_PLAN.md`](AV_PLAN.md) is the artificial-dissipation roadmap, and this plan is
+> **2026-10-11:** `AV_PLAN.md` is archived at [`docs/historic_plans/AV_PLAN.md`](docs/historic_plans/AV_PLAN.md); its open items live
+> in [COMPRESSIBLE_SPH_PLAN.md](COMPRESSIBLE_SPH_PLAN.md) Track A. The bake-off ran 2026-10-09 and the default AV configuration
+> is decided (Rosswog 2020 + limited reconstruction + coupled β); the M8 *gate* below was waived as minor on 2026-10-09 (user).
+
+[`AV_PLAN.md`](docs/historic_plans/AV_PLAN.md) is the artificial-dissipation roadmap, and this plan is
 its Phase 8. Three concrete couplings:
 
 - **This plan is gated on AV_PLAN's M8** (the AV bake-off). The point of the gate

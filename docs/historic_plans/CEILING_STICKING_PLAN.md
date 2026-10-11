@@ -1,6 +1,6 @@
 # Ceiling sticking in δ⁺-SPH — plan
 
-> **Progress marker:** this plan's row in [PLANS.md](PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
+> **Archived 2026-10-11.** Consolidated into [WALL_CONTACT_PLAN.md](../../WALL_CONTACT_PLAN.md); kept for its evidence and logs. Links and `PLANS.md` rows were updated, the text was not.
 
 Scope (user, 2026-09-29): the ceiling-sticking particles and the particles
 that leave the ceiling at unnatural speed, on **Marrone 3.1** only, with

@@ -87,9 +87,7 @@ in at first `warpSPHCore` import — see the docstring in
 
 A `Case` is a name, a scheme, and a set of hooks over a `RunContext`; only
 `buildSystem` is required. See [Writing a case](README.md#writing-a-case) for
-the hook set, and [PORTING_EXAMPLES.md](PORTING_EXAMPLES.md) for the procedure
-and the things that bite when porting an existing example or taking a case up
-to 2D/3D.
+the hook set.
 
 Register the module name in `CASE_MODULES`
 ([`src/warpSPH/cases/__init__.py`](src/warpSPH/cases/__init__.py)) and it

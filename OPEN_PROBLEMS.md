@@ -25,7 +25,7 @@ Progress on this file is tracked by its single row in [PLANS.md](PLANS.md).
 "ceiling-sticking" phenomena)
 
 > **2026-09-29:** the δ⁺-SPH ceiling-sticking half is now worked in
-> [CEILING_STICKING_PLAN.md](CEILING_STICKING_PLAN.md) (Marrone 3.1, checkpoint forensics).
+> [WALL_CONTACT_PLAN.md](WALL_CONTACT_PLAN.md) (archived: [CEILING_STICKING_PLAN.md](docs/historic_plans/CEILING_STICKING_PLAN.md)) (Marrone 3.1, checkpoint forensics).
 
 **What it is:** isolated fluid fragments near a solid corner or free-surface
 edge — a few particles nearly disconnected from the bulk — undergo a
@@ -540,6 +540,29 @@ What fails (hydrostatic tank at rest, zero roll, nx = 100, `--nSteps 60`, partic
 **Sloshing 7 s with the corrected omni (2026-10-09, `docs/analytic_boundaries/omni_sloshing_fixed_2026-10-09/`).** Analytic walls, nx 200, smoothed peaks against the measurement smoothed the same way (1.80 / 2.32 / 1.17 kPa): n_h 2.57: 1.90 / 2.22 / 3.08 kPa (+5 %, -4 %, +163 %), 10-52 ms early; n_h 4: 2.88 / 4.07 / 4.57 (n_h 4 is stable now); delta+ analytic: 4.55 / 5.04 / 4.84. All finish, frames physical. The peak scales with the support (n_h 4 = 1.5-1.8x n_h 2.57), the third impact overshoots in every run, all runs are early. The earlier statements of the day compared against the raw measured peaks (corrected in the READMEs).
 
 Next (not done): the boundaries repo's `DFSPH2D` is the oracle (`~/dev/curvatureBoundaries/src/warpSPHBoundaries/sim/dfsph2d.py`): same lattice in both, compare `alpha`, the source, the wall acceleration and the iterates term by term; it works on this tank with its *calibrated lattice* (`lattice_calibration`: wall mass and the wall distance chosen together so rows 0 and 1 measure `rho0`, `box_lattice` places the fluid at that distance), which this port does not have: the fluid sits at `dx / 2` from the wall and only the wall mass is fitted.
+
+## 32. Analytic boundaries: what the close-out left open (filed 2026-10-11, from ANALYTIC_BOUNDARIES_PLAN)
+
+The plan ([docs/historic_plans/ANALYTIC_BOUNDARIES_PLAN.md](docs/historic_plans/ANALYTIC_BOUNDARIES_PLAN.md)) is closed; these are its leftovers, none blocking. Evidence: `docs/analytic_boundaries/`.
+
+* **`divergenceFree` Stokes disk oscillates** (balance / K std ~0.1 around a mean within ~4 % of the reference, at the oracle's n_h = 2.505), where the faithful `omniIncompressible` port is smooth (std 0.001). An inherent `divergenceFree` artifact: not the no-pen shift, not XSPH (`stage3_followup_2026-10-11/disk_ab_divfree.clean.txt`).
+* **`iisph` / `dfsphReference` unreliable on a free surface** with or without analytic walls (still-tank peak velocity several times boundary particles'; `dfsphReference` NaN at n_h = 4); they keep the EXPERIMENTAL warning. `iisph` refuses moving bodies.
+* **Sloshing** third-impact overshoot, early arrival and the n_h scaling of the peaks, and the omni Jacobi relaxation limit: accepted known DFSPH-style limitations (owner), see §31.
+* **Closed cut-lattice Jacobi density solve** (closed Taylor-Couette outer torque ~0.89 on the cut lattice, shared with the oracle): a lattice/closure artifact.
+* **Not ported:** ACSPH on analytic walls, the corner rig (oracle K/K_ref 0.968) and plain Couette between plates (never run), `cornerWedgeTables`, the alpha-weight tables, `exactHessian` with walls, 3D, body-fitted packing (`settle` / `pack`).
+* **Undecided:** whether Morris viscosity + `complementMoments` becomes the default pairing for analytic walls (opt-in today).
+* **Boundaries repo:** version 0.1.5 is on its `main`, no PyPI release made; its `dist/` is stale; empty `sim/`-type directories with `__pycache__` remain locally.
+
+## 33. Performance leftovers (filed 2026-10-11, from SMALL_PROBLEM_PERFORMANCE)
+
+The plan ([docs/historic_plans/SMALL_PROBLEM_PERFORMANCE.md](docs/historic_plans/SMALL_PROBLEM_PERFORMANCE.md)) is retired: Marrone 3.1 nx 67 went 702 s -> 108.7 s (6.5x, bitwise) and performance is now checked on every run (CLAUDE.md). None of these blocks anything; they are measured candidates, in the plan's order (§5, §9, §10-§12):
+
+- **GPU utilisation only ~40 % on average at these scales** (user, 2026-10-09, nvitop during the sloshing A/B). First measurement: `sloshingTank --scheme dfsph` nx 200, `divergenceFree`, 12.5 ms/step, `nvidia-smi` 22-29 %, one host core pegged: host-bound (launch overhead and host syncs, e.g. the solver's per-iteration convergence reads), not kernel-bound. Not profiled further. Reference: δ⁺ with particle walls, nx 200, ~50k particles, 70 001 steps in 1 200 s = 17 ms/step; the analytic-wall run is slower per step (its 2590 s wall time was inflated by a parallel GPU job, so the two are not comparable). Profile one full step before changing anything.
+- **`finalize` (δ shifting + noPen shift), ~2.5-3 ms/step, eager.** Next: carry `dt` as a device scalar, hoist the Verlet check out of the shift loop, then graph it like the RHS.
+- **ACSPH still ~187 ms/step** (was 2065), ~60x δ-SPH per step: the pseudo-time loop's convergence reads. It limits how fast the contact-line work (WALL_CONTACT_PLAN) can move.
+- **Compiled glue** (`WARPSPHCORE_COMPILE_GLUE=1`, opt-in, not bitwise, 108.7 -> 101.4 s) needs a jittered batch before it can be default-on.
+- **Verlet rebuild** (~15 ms every ~17 steps, eager with syncs), the **Sphenix / pressure-probe** transfers (one stacked device-to-host copy per step), the **video frame** cost (~3 ms/step at `plotInterval=20`; render once per frame, or pipe raw frames to ffmpeg).
+- **Compressible schemes** (CRKSPH 12.6 ms/step at gresho nx 128, no whole-step graph; MFM / MFV would not be graph-capturable with the current closure solve): COMPRESSIBLE_SPH_PLAN X5 / E4.
 
 ## Resolved (details in [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md); numbers kept so references stay valid)
 

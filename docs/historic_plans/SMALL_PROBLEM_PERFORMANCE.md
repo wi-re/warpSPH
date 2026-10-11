@@ -1,6 +1,6 @@
 # Small-problem performance (Marrone 3.1 and similar) — findings and changes
 
-> **Progress marker:** this plan's row in [PLANS.md](PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
+> **Archived 2026-10-11.** Performance is now a standing practice (CLAUDE.md, "Running simulations" item 5), not a plan; the open leftovers are OPEN_PROBLEMS.md §33. Kept for the measurements and the design of the graph / lane / pipelining changes.
 
 2026-09-27. Branch `perf-small-problems` in **warpSPH** and **warpSPHCore**.
 RTX PRO 6000 Blackwell (188 SMs), warp 1.17, torch 2.13.

@@ -1,16 +1,15 @@
 # warpSPH — Lessons Learned (cleanup sweep, 2026-08)
 
 Reusable, still-relevant lessons from the pre-AD cleanup sweep tracked in
-`docs/historic_plans/CLEANUP_PLAN.md`. That file is a status tracker now; this file is the "why" and
+`historic_plans/CLEANUP_PLAN.md`. That file is a status tracker now; this file is the "why" and
 "watch out for" that's worth keeping around. Not a chronological log — if something
 here is superseded by a later fix, it's been removed rather than marked stale.
 
 For the AD/gradcheck bug-class catalog specifically (nine bug classes, with fix
 recipes, found rolling gradcheck out across 25 kernel files), see
-**`.claude/skills/gradcheck/SKILL.md`** — not duplicated here. For the procedure
-of porting an example onto the `Case`/runner style, and for taking a case to
-2D/3D, see **`PORTING_EXAMPLES.md`** — this file keeps the general lessons, that
-one keeps the recipe.
+**`../.claude/skills/gradcheck/SKILL.md`** — not duplicated here. (The procedure for porting an example onto the
+`Case`/runner style, `PORTING_EXAMPLES.md`, was removed 2026-10-11 as no longer
+needed; the last version is `git show 0739275:PORTING_EXAMPLES.md`.)
 
 ## AD-readiness / autograd bridge
 
@@ -162,7 +161,7 @@ dimension, computed or cached once, by code that only ever saw one.
   across this sweep (1.12.0 → a local 1.17.0.dev3 dev checkout → 1.15.0 from PyPI)
   while `pyproject.toml` deliberately pinned nothing, waiting for the 1.17 stable
   release that fixes the same-array-ternary/`Interpolate` adjoint bug at the
-  source (see `docs/historic_plans/CLEANUP_PLAN.md`). A script that passed last session could fail
+  source (see `historic_plans/CLEANUP_PLAN.md`). A script that passed last session could fail
   this one with zero code changes on either side — check `python -c "import warp;
   print(warp.__version__)"` against what a script last passed under before assuming
   a new failure is a real code regression. **Resolved 09-04**: 1.17.0 shipped,

@@ -1,5 +1,5 @@
 > **Superseded record (moved to `docs/historic_plans/` 2026-10-01).** This file records Phase 6 (Cullen-Dehnen 2010 + Read-Hayfield 2012 on the Monaghan scheme), completed 2026-09-19. Its task brief, `phase6_shock_capturing_prompt.md`, is not in the repository.
-> The compressible dissipation work continues in [`AV_PLAN.md`](../../AV_PLAN.md); its reference numbers are the AV baseline
+> The compressible dissipation work continues in [`AV_PLAN.md`](AV_PLAN.md); its reference numbers are the AV baseline
 > (`docs/av/av_baseline_2026-09-30.md`, now **M0e**).
 >
 > **Read-Hayfield numbers below are out of date.** Two bugs were found after this log was written, both fixed 2026-10-01 (see

@@ -1,5 +1,7 @@
 # Compressible examples: notebook-migration status
 
+> `PORTING_EXAMPLES.md`, referenced below, was removed 2026-10-11 (no longer needed); last version: `git show 0739275:PORTING_EXAMPLES.md`.
+
 **Done.** All 13 compressible examples (14 cases, since `06-sedov` and
 `14-triplePoint` each cover multiple variants in one directory) are in the
 current style. This file is kept as a record of what that style is and how

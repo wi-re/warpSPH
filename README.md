@@ -381,7 +381,7 @@ notebooks stay for exploration; the scripts are what you run unattended.
 | `openFlow` | [13-open-flow.py](examples/weaklyCompressible/13-open-flow.py) | open channel flow past an obstacle |
 
 **Analytic walls (optional).** With the optional package `warpSPHBoundaries` installed (`pip install -e "warpSPH/[boundaries]"`), `dambreak --wallRepresentation analytic` replaces the tank's wall particles by exact
-kernel integrals over the solid (obstacles, mixed scenes, Michel / implicit shifting, free bodies and the whole-step graph included); see [ANALYTIC_BOUNDARIES_PLAN.md](ANALYTIC_BOUNDARIES_PLAN.md).
+kernel integrals over the solid (obstacles, mixed scenes, Michel / implicit shifting, free bodies and the whole-step graph included); see [docs/historic_plans/ANALYTIC_BOUNDARIES_PLAN.md](docs/historic_plans/ANALYTIC_BOUNDARIES_PLAN.md).
 Besides δ⁺ the analytic walls are hooked into `omniIncompressible`, `divergenceFree`, `iisph` and `dfsphReference` (`iisph` and `dfsphReference` are flagged EXPERIMENTAL, a `UserWarning` at run time: the schemes themselves are unreliable on a free surface; `omniIncompressible` and `divergenceFree` are validated and unflagged); ACSPH is not hooked and refuses. The solvers of the boundaries repo
 this was validated against (`DeltaSPH2D`, `DFSPH2D`) were retired into warpSPH on 2026-10-11 and are kept at that repo's git tag `oracle-solvers-2026-10-11` ([record](docs/analytic_boundaries/retirement_2026-10-11/README.md)).
 
@@ -445,10 +445,6 @@ landed since.
 
 A `Case` is a name, a scheme, and a set of hooks over a `RunContext`. Only
 `buildSystem` is required.
-
-Porting an *existing* example onto this, or taking a case up to 2D/3D, has a
-procedure and a set of things that bite:
-[PORTING_EXAMPLES.md](PORTING_EXAMPLES.md).
 
 ```python
 from warpSPH.runner import Case, RunContext, caseMain, registerCase

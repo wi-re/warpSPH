@@ -55,9 +55,17 @@ These apply to **every** run, including throwaway inline probes that call
    each other down. Chain them (`a; b; c`) in one tracked background task —
    no detached `( ... &)` children. Use `setsid nohup` only when a run must
    survive a session restart, and say so.
+5. **Look at performance.** Report wall time and ms/step with every run (the
+   progress rows and the completion report give both) and compare with the last
+   figure for the same case; reference: Marrone 3.1 nx 67 to t\* 7.68, video on,
+   defaults, 108.7 s (5.6 ms/step), `docs/historic_plans/SMALL_PROBLEM_PERFORMANCE.md` §1.
+   A step that falls out of the CUDA graph, adds a host sync (`.item()`, a
+   convergence read) or slows by more than run-to-run noise is a regression to
+   say so about; `benchmarks/marrone31/bench_step.py` splits a step into
+   integrator / hook / diagnostics with GPU-busy time, launches and syncs.
 
 Details and history: the `export-video-on-validation-runs` and
-`run-simulations-sequentially` memories; `FREESLIP_DAMBREAK_FINDINGS.md` §9.6.
+`run-simulations-sequentially` memories; `docs/historic_plans/FREESLIP_DAMBREAK_FINDINGS.md` §9.6.
 
 ## Before re-investigating a hard WCSPH/ACSPH/mDBC issue
 

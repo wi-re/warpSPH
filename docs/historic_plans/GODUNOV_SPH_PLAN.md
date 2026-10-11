@@ -1,6 +1,6 @@
 # warpSPH — Godunov SPH plan (opened 2026-10-08, user)
 
-> **Progress marker:** this plan's row in [PLANS.md](PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
+> **Archived 2026-10-11.** Consolidated into [COMPRESSIBLE_SPH_PLAN.md](../../COMPRESSIBLE_SPH_PLAN.md); this file is kept for its evidence and build logs. Links and `PLANS.md` rows were updated, the text was not.
 
 ## Why
 

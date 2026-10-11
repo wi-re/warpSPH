@@ -1,5 +1,7 @@
 # Weakly compressible examples: notebook-migration plan
 
+> `PORTING_EXAMPLES.md`, referenced below, was removed 2026-10-11 (no longer needed); last version: `git show 0739275:PORTING_EXAMPLES.md`.
+
 > **Progress marker:** this plan's row in [PLANS.md](../../PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
 
 **In progress.** Slots 01–12 are done (eleven notebooks, twelve files); 13 is
