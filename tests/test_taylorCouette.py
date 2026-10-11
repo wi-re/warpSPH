@@ -1,4 +1,4 @@
-"""Stage 3 E6 (ANALYTIC_BOUNDARIES_PLAN.md): the `taylorCouette` lattice. The regular sampler lays its lattice over the domain extent, so the case sets the extent to a whole (odd) number of spacings: the lattice
+"""Stage 3 E6 (docs/historic_plans/ANALYTIC_BOUNDARIES_PLAN.md): the `taylorCouette` lattice. The regular sampler lays its lattice over the domain extent, so the case sets the extent to a whole (odd) number of spacings: the lattice
 is at exactly dx, cell-centred on the axis (as the oracle's `run_couette`), and the wall cut (`wallCut`, the oracle's rule of the scheme by default) removes the particles next to the walls. A lattice at 1 / 48.8
 instead of 1 / 48 left the calibrated particle mass wrong by 3 % in density and the inner torque 5 % off the oracle's run on the same lattice (2026-10-10).
 """

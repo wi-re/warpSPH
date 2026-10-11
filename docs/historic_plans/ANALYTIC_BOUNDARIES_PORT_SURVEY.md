@@ -1,6 +1,6 @@
 # Analytic boundaries — survey of the boundaries repo's solvers, for moving them into warpSPH's modules
 
-> Part of [ANALYTIC_BOUNDARIES_PLAN.md](ANALYTIC_BOUNDARIES_PLAN.md) (direction of 2026-10-09: the solver code in `warpSPHBoundaries` is retired once its schemes live in warpSPH). Row in [PLANS.md](PLANS.md).
+> Part of [ANALYTIC_BOUNDARIES_PLAN.md](ANALYTIC_BOUNDARIES_PLAN.md) (direction of 2026-10-09: the solver code in `warpSPHBoundaries` is retired once its schemes live in warpSPH). Row in [PLANS.md](../../PLANS.md).
 > Survey date 2026-10-09. Source: `~/dev/curvatureBoundaries` (package `warpSPHBoundaries`, `src/warpSPHBoundaries/sim/`), read-only at the time. **Since 2026-10-11 `sim/` exists only at that repo's git tag `oracle-solvers-2026-10-11`** (retired, E7: `docs/analytic_boundaries/retirement_2026-10-11/README.md`); the paths below refer to the tag. Sections 1-6b are the pre-port survey and stay as written.
 
 **Read in full:** `DeltaSPH2D.rhs` (`sim/deltasph2d.py:372-596`), `DFSPHConfig` and `DFSPH2D.step`, `DeltaSPHConfig`, the porting notes and upstreaming plan, the warpSPH side (`modules/analyticBoundary/`, `schemes/deltaSPH.py` hooks, `boundary/provider.py`).

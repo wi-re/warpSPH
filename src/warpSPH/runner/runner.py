@@ -229,7 +229,7 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
     if getattr(ctx.schemeConfig, 'boundaryProvider', None) is not None:
         schemeName = getattr(ctx.scheme, 'name', ctx.scheme)
         if schemeName not in ANALYTIC_WALL_SCHEMES:
-            # a scheme that does not consume the boundary provider would run with no wall at all (ANALYTIC_BOUNDARIES_PORT_SURVEY.md)
+            # a scheme that does not consume the boundary provider would run with no wall at all (docs/historic_plans/ANALYTIC_BOUNDARIES_PORT_SURVEY.md)
             raise NotImplementedError(f"analytic boundaries (a region with a `representation`) are hooked into the schemes {sorted(ANALYTIC_WALL_SCHEMES)} only, not {schemeName!r}")
         if schemeName in EXPERIMENTAL_ANALYTIC_WALL_SCHEMES:
             import warnings

@@ -1,6 +1,6 @@
 # Sloshing tank (SPHERIC TC10) 7 s, nx = 200: δ⁺ particle walls, δ⁺ analytic walls, DFSPH — 2026-10-09
 
-Evidence for [ANALYTIC_BOUNDARIES_PLAN.md](../../../ANALYTIC_BOUNDARIES_PLAN.md) / [ANALYTIC_BOUNDARIES_PORT_SURVEY.md](../../../ANALYTIC_BOUNDARIES_PORT_SURVEY.md): the first full-length run of the warpSPH-hosted analytic δ⁺ (the gate for retiring the boundaries repo's `DeltaSPH2D`).
+Evidence for [ANALYTIC_BOUNDARIES_PLAN.md](../../historic_plans/ANALYTIC_BOUNDARIES_PLAN.md) / [ANALYTIC_BOUNDARIES_PORT_SURVEY.md](../../historic_plans/ANALYTIC_BOUNDARIES_PORT_SURVEY.md): the first full-length run of the warpSPH-hosted analytic δ⁺ (the gate for retiring the boundaries repo's `DeltaSPH2D`).
 Commit base 4b01541 plus the uncommitted `--wallRepresentation analytic` for `sloshingTank`; run with `examples/sloshingTank/run_sloshingTank.py --scheme {wcsph, wcsph --wallRepresentation analytic, dfsph} --tLimit 7`.
 Raw output (videos, series, logs) stays in `examples/sloshingTank/output/analytic_ab_2026-10-09/` (gitignored); the overlay is `scripts/plot_sloshingOverlay.py`.
 

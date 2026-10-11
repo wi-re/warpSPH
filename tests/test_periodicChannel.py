@@ -1,4 +1,4 @@
-"""Stage 3 E1 / E2 (ANALYTIC_BOUNDARIES_PLAN.md): the periodic wall images of the analytic provider and the uniform body force, on the `periodicChannel` case (plane Poiseuille between two analytic plates that
+"""Stage 3 E1 / E2 (docs/historic_plans/ANALYTIC_BOUNDARIES_PLAN.md): the periodic wall images of the analytic provider and the uniform body force, on the `periodicChannel` case (plane Poiseuille between two analytic plates that
 span the periodic box). The Poiseuille profile itself is `scripts/probe_periodicChannel.py` (12 s, too long for a test).
 """
 import numpy as np

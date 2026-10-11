@@ -1,6 +1,6 @@
 # The gate for retiring `DeltaSPH2D`: warpSPH δ⁺ on analytic walls against the boundaries repo's stored 7 s sloshing — 2026-10-09
 
-Stage 2 item D of [ANALYTIC_BOUNDARIES_PLAN.md](../../../ANALYTIC_BOUNDARIES_PLAN.md). Data: `~/dev/curvatureBoundaries/results/deltasph/slosh_B_nx200_series.npz` (`DeltaSPH2D`, analytic walls, SPHERIC TC10, nx = 200, Wendland C4, Sun-2017 shifting, no-penetration impulse, dt = 1e-4, 70 001 steps, 5439 s, Gaussian probe within 2 cm,
+Stage 2 item D of [ANALYTIC_BOUNDARIES_PLAN.md](../../historic_plans/ANALYTIC_BOUNDARIES_PLAN.md). Data: `~/dev/curvatureBoundaries/results/deltasph/slosh_B_nx200_series.npz` (`DeltaSPH2D`, analytic walls, SPHERIC TC10, nx = 200, Wendland C4, Sun-2017 shifting, no-penetration impulse, dt = 1e-4, 70 001 steps, 5439 s, Gaussian probe within 2 cm,
 sampled every 10 steps, undefined (NaN) for 43 % of the record) against the 7 s runs of the day: warpSPH δ⁺ on analytic walls (C2, Michel shifting, `analytic_ab_2026-10-09`) and on boundary particles (C4, Michel). All through `scripts/compare_deltaSloshing.py`
 (`comparison.md`), the pressures with the same 10 ms Gaussian smoothing as the measurement, now NaN-aware (a kernel-weighted mean over the valid samples, gaps stay empty; the earlier interpolation across the gaps stretched
 single edge samples of the stored record into the gaps, 32 kPa instead of 12 kPa). Figure: `sloshing_overlay.png`.

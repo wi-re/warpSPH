@@ -1,4 +1,4 @@
-"""Stage 3 E8 (ANALYTIC_BOUNDARIES_PLAN.md): the analytic-wall step replayed from a CUDA graph (`CaseSpec.cudaGraph`, `utils/cudaGraph.py: GraphedIntegratorStep`) equals the eager step bit for bit: the state and the
+"""Stage 3 E8 (docs/historic_plans/ANALYTIC_BOUNDARIES_PLAN.md): the analytic-wall step replayed from a CUDA graph (`CaseSpec.cudaGraph`, `utils/cudaGraph.py: GraphedIntegratorStep`) equals the eager step bit for bit: the state and the
 booked wall loads. The graph needs a sync-free step (the wall closure's boolean-mask gathers, the host reads of the calibration / periodic flags / body force / mean pressure were removed) and a device `dt`; a spinning
 axisymmetric body (`analyticSpinAxisymmetric`) keeps its pose. A stale `rb.load` (a fresh tensor assigned inside the captured step) once left the graphed torque constant (2026-10-10).
 """

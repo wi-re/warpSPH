@@ -1,4 +1,4 @@
-"""Stage 3 E5 (ANALYTIC_BOUNDARIES_PLAN.md): the pinned band (`modules/boundaryConditions/pinned.py`), a prescribed-velocity region of fluid particles in a periodic box; the oracle's `test_pinned_frame.py`.
+"""Stage 3 E5 (docs/historic_plans/ANALYTIC_BOUNDARIES_PLAN.md): the pinned band (`modules/boundaryConditions/pinned.py`), a prescribed-velocity region of fluid particles in a periodic box; the oracle's `test_pinned_frame.py`.
 
 (a) a uniform stream in a wall-free periodic box with a band is stationary (velocity exactly the stream, density 1, the raw positions advance by u t through the seam, nothing created or removed);
 (b) fluid at rest with the band at a stream: the band holds the stream exactly, the rest is carried along, everything stays finite;

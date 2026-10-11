@@ -1,6 +1,6 @@
 # Compact CG projection (stage 2, A1) — 2026-10-09
 
-Evidence for [ANALYTIC_BOUNDARIES_PLAN.md](../../../ANALYTIC_BOUNDARIES_PLAN.md) "Stage 2", item A1. Code: `modules/incompressible/compactProjection.py` (the compact Morris / Brookshaw Laplacian, the CG, `solveCompactProjection`),
+Evidence for [ANALYTIC_BOUNDARIES_PLAN.md](../../historic_plans/ANALYTIC_BOUNDARIES_PLAN.md) "Stage 2", item A1. Code: `modules/incompressible/compactProjection.py` (the compact Morris / Brookshaw Laplacian, the CG, `solveCompactProjection`),
 `wallPressureAccelerationOmni(clampPressure=)`, the switch `schemeConfig.projection = 'jacobi' (default) | 'compact'` and `densitySolve` in `omniIncompressible._solve` / the step and in `divergenceFree`'s step; case params
 `projection`, `projectionTol`, `densitySolve` (`sloshingTank`, `dambreak`), CLI `--projection compact --noDensitySolve`. Tests `tests/test_compactProjection.py`. Port of `warpSPHBoundaries/sim/projection.py` + `DFSPH2D._solve_compact`
 (robin wall, symmetric gradient, free-surface Dirichlet, closed-domain mean removal, gauges, wall-flux factor).

@@ -1,6 +1,6 @@
 # Retiring the boundaries repo's solvers (E7) — 2026-10-11
 
-Stage 3 item E7 of [ANALYTIC_BOUNDARIES_PLAN.md](../../../ANALYTIC_BOUNDARIES_PLAN.md), executed on the owner's go. The reference solvers `DeltaSPH2D` and `DFSPH2D` (the `sim/` sub-package of
+Stage 3 item E7 of [ANALYTIC_BOUNDARIES_PLAN.md](../../historic_plans/ANALYTIC_BOUNDARIES_PLAN.md), executed on the owner's go. The reference solvers `DeltaSPH2D` and `DFSPH2D` (the `sim/` sub-package of
 `~/dev/curvatureBoundaries`, package `warpSPHBoundaries`) are gone from that repo; warpSPH hosts every scheme they carried and the validation cases that exercised them.
 
 ## What was done

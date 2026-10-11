@@ -1,4 +1,4 @@
-"""Count the torch ops (device launches) of ONE eager step per source function, innermost warpSPH frame and its caller chain's top module (stage 3 E8, ANALYTIC_BOUNDARIES_PLAN.md).
+"""Count the torch ops (device launches) of ONE eager step per source function, innermost warpSPH frame and its caller chain's top module (stage 3 E8, docs/historic_plans/ANALYTIC_BOUNDARIES_PLAN.md).
 
     python benchmarks/analyticWalls/count_ops.py --case taylorCouette --scheme deltaSPH --nx 32 [--set k=v ...]
 

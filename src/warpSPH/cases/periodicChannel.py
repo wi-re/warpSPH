@@ -1,5 +1,5 @@
 """Plane Poiseuille flow between two analytic plates, periodic in x, driven by a body force (rung 3 of the boundaries repo's validation ladder, the gate of the channel-flow group,
-ANALYTIC_BOUNDARIES_PLAN.md stage 3).
+docs/historic_plans/ANALYTIC_BOUNDARIES_PLAN.md stage 3).
 
     box [0, 1] x [0, W], the plates are two `BoxRep` bodies that span the periodic box (a wall that is itself periodic: `schemeConfig.analyticPeriodicWalls`),
     `schemeConfig.bodyForce = (f, 0)` the pressure-gradient driver (momentum only, also in the wall pressure condition)

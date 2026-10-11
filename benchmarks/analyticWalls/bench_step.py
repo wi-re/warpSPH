@@ -1,4 +1,4 @@
-"""Step-cost benchmark for the analytic-wall cases (stage 3 E8, ANALYTIC_BOUNDARIES_PLAN.md): `taylorCouette`, `stokesArray`, `periodicChannel`, `cylinderWake`, ... on delta+ / omniIncompressible / divergenceFree.
+"""Step-cost benchmark for the analytic-wall cases (stage 3 E8, docs/historic_plans/ANALYTIC_BOUNDARIES_PLAN.md): `taylorCouette`, `stokesArray`, `periodicChannel`, `cylinderWake`, ... on delta+ / omniIncompressible / divergenceFree.
 
 One process per configuration, one at a time (GPU runs are launch-bound and slow each other down). Per configuration, after `--warmup` steps:
 
