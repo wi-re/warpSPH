@@ -24,6 +24,11 @@ class MeshlessConfig:
     cfl: float = field(default=0.2, metadata={"description": 'CFL factor for the per-particle signal timestep 2 C h / v_sig'})
     schemeName: str = field(default='Meshless SPH (MFM/MFV)', metadata={'description': 'Name of the scheme'})
 
+    # temporal integration (D4: the step owns the whole time step, so the
+    # integrator must be single-evaluation -- see `schemes/meshless.py`). The
+    # per-mode default comes from the D4 measurement (COMPRESSIBLE_SPH_PLAN).
+    temporalScheme: str = field(default='auto', metadata={"description": "the temporal scheme the step performs: 'auto' (per-mode default from the D4 measurement: MFM -> 'ssprk', MFV -> 'hancock'), 'hancock' (the core driver's single-stage MUSCL-Hancock + Euler; the G1 port-fidelity setting), 'ssprk' (two-stage SSPRK, rates evaluated at dt = 0), or 'kdk' (kick-drift-kick, rates at dt = 0)"})
+
     # geometry / closure solve (warpSPHCore.mfm.MeshlessWarp.build)
     closure: str = field(default='project', metadata={"description": "closure: 'project' (the graph-Laplacian CG projection) or 'none'"})
     closurePower: float = field(default=1.0, metadata={'description': 'closure power'})
@@ -66,6 +71,7 @@ def meshlessConfigToDict(config: MeshlessConfig) -> Dict[str, Any]:
         'nngb': config.nngb,
         'cfl': config.cfl,
         'schemeName': config.schemeName,
+        'temporalScheme': config.temporalScheme,
         'closure': config.closure,
         'closurePower': config.closurePower,
         'cgTol': config.cgTol,
@@ -94,6 +100,7 @@ def dictToMeshlessConfig(configDict: Dict[str, Any]) -> MeshlessConfig:
     config.nngb = configDict.get('nngb', config.nngb)
     config.cfl = configDict.get('cfl', config.cfl)
     config.schemeName = configDict.get('schemeName', config.schemeName)
+    config.temporalScheme = configDict.get('temporalScheme', config.temporalScheme)
     config.closure = configDict.get('closure', config.closure)
     config.closurePower = configDict.get('closurePower', config.closurePower)
     config.cgTol = configDict.get('cgTol', config.cgTol)

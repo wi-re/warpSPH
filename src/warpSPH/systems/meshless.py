@@ -68,8 +68,10 @@ class MeshlessSystem(BaseIntegrationSystem):
         return MeshlessSystem(state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain)
 
     def apply_position_update(self, update, spec: PositionUpdateSpec, **kwargs):
-        # forward drift with dxdt = v (the velocity derived from Q in the step); no velocity
-        # kick term here -- the conserved momentum lives in Q, not in a separate field
+        # applies the step's exact net drift delta (pos += dt * dxdt, wrapping): the step
+        # (`schemes/meshless.py`, D4) owns the temporal scheme, so dxdt is its time-centred /
+        # drift velocity, not a raw start-of-step velocity. No velocity kick term here -- the
+        # conserved momentum lives in Q, not in a separate field
         return update_position(self, update, spec, 'position', 'position_derivative')
 
     def apply_quantity_update(self, update, spec: ComponentUpdateSpec, **kwargs):
