@@ -57,8 +57,7 @@ def test_applied_to_the_analytic_dam_break():
     spec = CaseSpec(caseName='cal', scheme='omniIncompressible', params={**case.params, 'wallRepresentation': 'analytic'}).merged(**case.defaults).merged(
         scheme='omniIncompressible', nx=60, n_h=2.57, nSteps=1, integrationScheme='semiImplicitEuler', kernel='Wendland2', supportMode='SuperSymmetric', cflFactor=1.0, dt=1e-3, maxDt=1e-3,
         plot=False, store=False, progress=False, video=False, show=False, quiet=True)
-    with pytest.warns(UserWarning, match='EXPERIMENTAL'):
-        res = run(case, spec)
+    res = run(case, spec)
     sc = res.ctx.schemeConfig
     cal = latticeCalibration(0.9 * 0 + res.ctx.config.dx, res.ctx.config.dx, float(res.state.state.supports.max()))
     assert sc.analyticWallMass == pytest.approx(cal['mu'], rel=2e-3)             # the wall mass is the lattice's (the lattice spacings of the sample are within a percent of dx)

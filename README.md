@@ -382,7 +382,7 @@ notebooks stay for exploration; the scripts are what you run unattended.
 
 **Analytic walls (optional).** With the optional package `warpSPHBoundaries` installed (`pip install -e "warpSPH/[boundaries]"`), `dambreak --wallRepresentation analytic` replaces the tank's wall particles by exact
 kernel integrals over the solid (obstacles, mixed scenes, Michel / implicit shifting, free bodies and the whole-step graph included); see [ANALYTIC_BOUNDARIES_PLAN.md](ANALYTIC_BOUNDARIES_PLAN.md).
-Besides δ⁺ the analytic walls are hooked into `omniIncompressible`, `divergenceFree`, `iisph` and `dfsphReference` (flagged EXPERIMENTAL: a `UserWarning` at run time); ACSPH is not hooked and refuses. The solvers of the boundaries repo
+Besides δ⁺ the analytic walls are hooked into `omniIncompressible`, `divergenceFree`, `iisph` and `dfsphReference` (`iisph` and `dfsphReference` are flagged EXPERIMENTAL, a `UserWarning` at run time: the schemes themselves are unreliable on a free surface; `omniIncompressible` and `divergenceFree` are validated and unflagged); ACSPH is not hooked and refuses. The solvers of the boundaries repo
 this was validated against (`DeltaSPH2D`, `DFSPH2D`) were retired into warpSPH on 2026-10-11 and are kept at that repo's git tag `oracle-solvers-2026-10-11` ([record](docs/analytic_boundaries/retirement_2026-10-11/README.md)).
 
 The viscous, low-Reynolds group has its own cases and options (evidence: [docs/analytic_boundaries/](docs/analytic_boundaries/)):

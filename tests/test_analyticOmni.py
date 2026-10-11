@@ -1,4 +1,4 @@
-"""The analytic-wall terms of `omniIncompressible` (EXPERIMENTAL, OPEN_PROBLEMS 31): the pieces that are verified.
+"""The analytic-wall terms of `omniIncompressible` (OPEN_PROBLEMS 31): the pieces that are verified.
 
 * the diagonal of the discrete operator `A p = -dt^2 div(a_p(p))` (wall terms in `_divergence` and `_pressureAccel`) equals the `alpha` the Jacobi iteration divides by
   (`computeAlpha(wall=)`, the wall's gradient added to the vector sum), on the first wall row and in the bulk: a unit pressure on one particle, the diagonal entry of the
@@ -23,8 +23,7 @@ def tank(params=None):
     spec = CaseSpec(caseName='omni', scheme='omniIncompressible', params={**case.params, 'wallRepresentation': 'analytic', **(params or {})}).merged(**case.defaults).merged(
         scheme='omniIncompressible', integrationScheme='semiImplicitEuler', kernel='Wendland2', supportMode='SuperSymmetric', cflFactor=0.2, dt=1e-3, maxDt=2e-3, nx=100, n_h=2.57, nSteps=1,
         plot=False, store=False, progress=False, video=False, show=False, quiet=True)
-    with pytest.warns(UserWarning, match='EXPERIMENTAL'):
-        return run(case, spec)
+    return run(case, spec)
 
 
 def test_operator_diagonal_is_alpha():
@@ -89,6 +88,5 @@ def test_hydrostatic_tank_stays_quiet_at_either_support(nh):
     spec = CaseSpec(caseName='hydro', scheme='omniIncompressible', params={**case.params, 'wallRepresentation': 'analytic', 'rollDataFile': roll, 'rollStartTime': 100.0}).merged(**case.defaults).merged(
         scheme='omniIncompressible', integrationScheme='semiImplicitEuler', kernel='Wendland2', supportMode='SuperSymmetric', cflFactor=0.2, dt=1e-3, maxDt=2e-3, nx=100, n_h=nh, nSteps=60,
         plot=False, store=False, progress=False, video=False, show=False, quiet=True)
-    with pytest.warns(UserWarning, match='EXPERIMENTAL'):
-        res = run(case, spec)
+    res = run(case, spec)
     assert float(np.nanmax(res.series('maxVelocity'))) < 0.5

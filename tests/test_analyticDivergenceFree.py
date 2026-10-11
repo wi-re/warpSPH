@@ -1,4 +1,4 @@
-"""`divergenceFree` (DFSPH) on analytic walls (EXPERIMENTAL, OPEN_PROBLEMS 31): the wall terms of its step (density, free-surface detector, velocity diffusion, the omni pressure solves, the analytic no-penetration shift,
+"""`divergenceFree` (DFSPH) on analytic walls (OPEN_PROBLEMS 31): the wall terms of its step (density, free-surface detector, velocity diffusion, the omni pressure solves, the analytic no-penetration shift,
 the XSPH / friction filters) come together on a still tank and a short dam break.
 """
 import os
@@ -24,8 +24,7 @@ def tank(params=None, nSteps=60, nh=2.57):
     spec = CaseSpec(caseName='dfsph', scheme='divergenceFree', params={**case.params, 'wallRepresentation': 'analytic', 'rollDataFile': ROLL, 'rollStartTime': 100.0, **(params or {})}).merged(**case.defaults).merged(
         scheme='divergenceFree', integrationScheme='semiImplicitEuler', kernel='Wendland2', supportMode='SuperSymmetric', cflFactor=0.2, dt=1e-3, maxDt=2e-3, nx=100, n_h=nh, nSteps=nSteps,
         plot=False, store=False, progress=False, video=False, show=False, quiet=True)
-    with pytest.warns(UserWarning, match='EXPERIMENTAL'):
-        return run(case, spec)
+    return run(case, spec)
 
 
 @pytest.mark.parametrize('nh', [2.57, 4.0])
@@ -73,8 +72,7 @@ def _tankWith(scheme, setup, nSteps, params=None, nh=2.57):
         scheme=scheme, integrationScheme='semiImplicitEuler', kernel='Wendland2', supportMode='SuperSymmetric', cflFactor=0.2, dt=1e-3, maxDt=2e-3, nx=100, n_h=nh, nSteps=nSteps,
         plot=False, store=False, progress=False, video=False, show=False, quiet=True)
     try:
-        with pytest.warns(UserWarning, match='EXPERIMENTAL'):
-            return run(case, spec)
+        return run(case, spec)
     finally:
         case.initialConditions = ic
 
@@ -120,8 +118,7 @@ def test_the_booked_pressure_load_of_a_still_tank_averages_to_the_weight_of_the_
         scheme=scheme, integrationScheme='semiImplicitEuler', kernel='Wendland2', supportMode='SuperSymmetric', cflFactor=0.2, dt=1e-3, maxDt=2e-3, nx=100, n_h=2.57, nSteps=100,
         plot=False, store=False, progress=False, video=False, show=False, quiet=True)
     try:
-        with pytest.warns(UserWarning, match='EXPERIMENTAL'):
-            res = run(case, spec)
+        res = run(case, spec)
     finally:
         case.initialConditions, case.postStep = ic, ps
     st = res.state.state

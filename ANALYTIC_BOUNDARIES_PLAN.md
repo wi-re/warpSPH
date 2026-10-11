@@ -4,7 +4,7 @@
 
 ## Status 2026-10-11: the boundaries repo's solvers are retired; what is left
 
-**E7 executed 2026-10-11** (owner's go): `sim/` and its tests / scripts / notebooks / solver docs are removed from `~/dev/curvatureBoundaries` (branch `retire-solvers`, tag `oracle-solvers-2026-10-11` keeps the oracle; its remaining suite is 882 passed). The oracle's reference series moved to `docs/analytic_boundaries/oracle_data/`, its validation records to `oracle_docs/`, the oracle probes are frozen against the tag (`scripts/_oracle.py`). What was kept, what each test group became, the decisions: [docs/analytic_boundaries/retirement_2026-10-11/README.md](docs/analytic_boundaries/retirement_2026-10-11/README.md). Local only: nothing is pushed or merged in either repo.
+**E7 executed 2026-10-11** (owner's go): `sim/` and its tests / scripts / notebooks / solver docs are removed from `~/dev/curvatureBoundaries` (branch `retire-solvers`, tag `oracle-solvers-2026-10-11` keeps the oracle; its remaining suite is 882 passed). The oracle's reference series moved to `docs/analytic_boundaries/oracle_data/`, its validation records to `oracle_docs/`, the oracle probes are frozen against the tag (`scripts/_oracle.py`). What was kept, what each test group became, the decisions: [docs/analytic_boundaries/retirement_2026-10-11/README.md](docs/analytic_boundaries/retirement_2026-10-11/README.md). 2026-10-11 later: the boundaries repo is merged to its `main`, tagged and bumped to 0.1.5; `omniIncompressible` / `divergenceFree` lose the EXPERIMENTAL flag (`iisph` / `dfsphReference` keep it).
 
 ## Status 2026-10-10 and what is left to close this plan
 

@@ -47,8 +47,8 @@ The boundaries repo's 39 solver test files were the solver's own regression suit
 ## Decisions taken on the way (owner may reverse any)
 
 * **Oracle kept as a tag, not as stored term tables** (the checklist's preferred option: nothing lost, cheapest). The probes are frozen against it.
-* **EXPERIMENTAL flags left as they are** (`runner.EXPERIMENTAL_ANALYTIC_WALL_SCHEMES`: omni, divergenceFree, dfsphReference, iisph). Removing the oracle does not change the open items the flag names (the Jacobi relaxation limit, the sloshing third-impact overshoot / early arrival, the `divergenceFree` disk oscillation); lifting it is a separate owner decision.
-* **Not pushed:** the tag and the `retire-solvers` branch exist only locally in `~/dev/curvatureBoundaries`; `main` there still has the solvers.
+* **EXPERIMENTAL flags (owner, later the same day: "if they work they should be untagged"):** `omniIncompressible` and `divergenceFree` are unflagged (validated on the still tank, dam break, wedge, 7 s sloshing and the channel group; the open items are known scheme limitations: the Jacobi relaxation limit, the third-impact overshoot / early arrival, the `divergenceFree` disk oscillation). `iisph` and `dfsphReference` keep the flag: their wall terms are in, but the schemes are unreliable on a free surface with or without analytic walls (`dfsphReference` goes NaN on the n_h = 4 still tank).
+* **Pushed (owner, later the same day):** the tag, and `retire-solvers` merged into the boundaries repo's `main`, version 0.1.5 (no PyPI release made).
 
 ## Leftovers to know about
 

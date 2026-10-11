@@ -28,8 +28,7 @@ def tank(params=None, nSteps=1, nh=2.57):
     spec = CaseSpec(caseName='omni', scheme='omniIncompressible', params={**case.params, 'wallRepresentation': 'analytic', 'rollDataFile': ROLL, 'rollStartTime': 100.0, **(params or {})}).merged(**case.defaults).merged(
         scheme='omniIncompressible', integrationScheme='semiImplicitEuler', kernel='Wendland2', supportMode='SuperSymmetric', cflFactor=0.2, dt=1e-3, maxDt=2e-3, nx=100, n_h=nh, nSteps=nSteps,
         plot=False, store=False, progress=False, video=False, show=False, quiet=True)
-    with pytest.warns(UserWarning, match='EXPERIMENTAL'):
-        return run(case, spec)
+    return run(case, spec)
 
 
 def test_mls_fit_gradient_is_exact_for_a_linear_field():

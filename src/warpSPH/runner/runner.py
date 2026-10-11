@@ -72,8 +72,8 @@ class RunResult:
 
 #: the schemes whose step consumes the analytic boundary provider (a scheme leaves the refusal when it is ported)
 ANALYTIC_WALL_SCHEMES = frozenset({'deltaSPH', 'omniIncompressible', 'divergenceFree', 'dfsphReference', 'iisph'})
-#: ... of which not yet usable
-EXPERIMENTAL_ANALYTIC_WALL_SCHEMES = frozenset({'omniIncompressible', 'divergenceFree', 'dfsphReference', 'iisph'})
+#: ... of which the scheme itself is not yet reliable on a free surface (with analytic walls or with boundary particles alike): `omniIncompressible` and `divergenceFree` were unflagged 2026-10-11
+EXPERIMENTAL_ANALYTIC_WALL_SCHEMES = frozenset({'dfsphReference', 'iisph'})
 
 
 def resolveEnum(enumClass, value):
@@ -233,7 +233,7 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
             raise NotImplementedError(f"analytic boundaries (a region with a `representation`) are hooked into the schemes {sorted(ANALYTIC_WALL_SCHEMES)} only, not {schemeName!r}")
         if schemeName in EXPERIMENTAL_ANALYTIC_WALL_SCHEMES:
             import warnings
-            warnings.warn(f"analytic walls in {schemeName!r} are EXPERIMENTAL: the wall terms are in and the hydrostatic, dam-break, wedge and sloshing runs are quiet, but the Jacobi relaxation limit, the free-surface density-solve instability and the sloshing impact overshoot are open (OPEN_PROBLEMS 31)", stacklevel=2)
+            warnings.warn(f"{schemeName!r} on analytic walls is EXPERIMENTAL: the wall terms are in and match the omni loop where the formulas coincide, but the scheme itself is unreliable on a free surface with impacts (still-tank peak velocity several times that of boundary particles; dfsphReference can go NaN), with analytic walls or without (docs/analytic_boundaries/compact_projection_2026-10-09, section C)", stacklevel=2)
     if case.initialConditions is not None:
         case.initialConditions(ctx, system)
 
