@@ -24,10 +24,12 @@ __all__ = ['greshoVortexCase', 'GRESHO_FIELDS']
 def buildSystem(ctx: RunContext):
     if isinstance(ctx.schemeConfig, MeshlessConfig):
         return sampleGreshoVortexMeshless(ctx.spec.nx, ctx.config, ctx.schemeConfig,
-                                          cuspWidth=ctx.param('cuspWidth'))
+                                          cuspWidth=ctx.param('cuspWidth'),
+                                          jitter=ctx.param('jitter', 0.0))
     return sampleGreshoVortex(ctx.spec.nx, ctx.config, ctx.schemeConfig,
                               ctx.SimulationState, ctx.SimulationSystem,
-                              cuspWidth=ctx.param('cuspWidth'))
+                              cuspWidth=ctx.param('cuspWidth'),
+                              jitter=ctx.param('jitter', 0.0))
 
 
 #: The two panels, exported so a notebook can pass them to
@@ -65,7 +67,7 @@ greshoVortexCase = registerCase(Case(
         storeInterval=500,
     ),
     # cuspWidth > 0: smoothed-cusp variant (see `greshoProfile`); 0 = the standard profile
-    params=dict(COMPRESSIBLE_PARAMS, markerSize=4, cuspWidth=0.0),
+    params=dict(COMPRESSIBLE_PARAMS, markerSize=4, cuspWidth=0.0, jitter=0.0),
 ))
 
 

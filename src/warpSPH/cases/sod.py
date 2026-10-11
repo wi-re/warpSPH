@@ -61,7 +61,8 @@ def buildSystem(ctx: RunContext):
             ctx.param('samplingRatio'),
             left, right,
             ctx.param('gamma'), ctx.config,
-            ctx.schemeConfig)
+            ctx.schemeConfig,
+            jitter=ctx.param('jitter', 0.0))
     return buildSod1D(
         ctx.SimulationSystem, ctx.SimulationState,
         ctx.param('samplingRatio'),
@@ -69,6 +70,7 @@ def buildSystem(ctx: RunContext):
         ctx.param('gamma'), ctx.config,
         ctx.param('smoothIC'),
         adaptiveSupportScheme=ctx.schemeConfig.adaptiveSupportScheme,
+        jitter=ctx.param('jitter', 0.0),
     )
 
 
@@ -154,6 +156,7 @@ sodCase = registerCase(Case(
         viscositySwitch=None,      # the scheme's default (cases/compressible.py COMPRESSIBLE_PARAMS)
         adaptiveSupportScheme='Owen',
         adaptiveSupportCorrections=False,
+        jitter=0.0,          # X4: IC displacement as a fraction of the lattice spacing (0 = the exact lattice)
     ),
 ))
 

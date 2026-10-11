@@ -78,8 +78,8 @@ def greshoProfile(r, cuspWidth=0.0):
     return vphi, P
 
 
-def sampleGreshoVortex(nx, config, schemeConfig, SimulationState, SimulationSystem, cuspWidth=0.0):
-    compressibleSystem = setupBasicCompressibleInitialState(nx, config, schemeConfig, SimulationState, SimulationSystem)
+def sampleGreshoVortex(nx, config, schemeConfig, SimulationState, SimulationSystem, cuspWidth=0.0, jitter=0.0):
+    compressibleSystem = setupBasicCompressibleInitialState(nx, config, schemeConfig, SimulationState, SimulationSystem, jitter=jitter)
     
 
     positions = compressibleSystem.state.positions
@@ -106,7 +106,7 @@ def sampleGreshoVortex(nx, config, schemeConfig, SimulationState, SimulationSyst
     return compressibleSystem
 
 
-def sampleGreshoVortexMeshless(nx, config, schemeConfig, cuspWidth=0.0):
+def sampleGreshoVortexMeshless(nx, config, schemeConfig, cuspWidth=0.0, jitter=0.0):
     """The meshless (MFM / MFV) form of `sampleGreshoVortex` (E2): the same
     relaxed lattice the compressible path uses (positions / masses / supports),
     but the state is the conserved Q (the G1 pattern, `caseUtils/meshless.py`)
@@ -116,7 +116,7 @@ def sampleGreshoVortexMeshless(nx, config, schemeConfig, cuspWidth=0.0):
 
     # the lattice the compressible Gresho uses (the base state is otherwise discarded)
     base = setupBasicCompressibleInitialState(
-        nx, config, schemeConfig, CompressibleState, CompressibleSystem)
+        nx, config, schemeConfig, CompressibleState, CompressibleSystem, jitter=jitter)
     st = base.state
     r = torch.linalg.norm(st.positions, dim=-1)
     vphi, Pinitial = greshoProfile(r, cuspWidth)

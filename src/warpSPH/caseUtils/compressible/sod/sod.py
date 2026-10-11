@@ -43,13 +43,14 @@ def buildSod1D(
     config: SimulationConfig,
     smoothIC: bool = False,
     adaptiveSupportScheme: AdaptiveSupportScheme = AdaptiveSupportScheme.Monaghan,
+    jitter: float = 0.0,
 ):
-    
-    nx = config.nx 
+
+    nx = config.nx
     actualRatio = nx / (nx // samplingRatio)
 
-    particles_l = sampleRegularParticles(nx, buildDomainDescription(1, config.dim, periodic = True, device = config.device, dtype = config.dtype), config.targetNeighbors, jitter = 0.0)
-    particles_r = sampleRegularParticles(nx // samplingRatio, buildDomainDescription(1, config.dim, periodic = True, device = config.device, dtype = config.dtype), config.targetNeighbors, jitter = 0.0)
+    particles_l = sampleRegularParticles(nx, buildDomainDescription(1, config.dim, periodic = True, device = config.device, dtype = config.dtype), config.targetNeighbors, jitter = jitter)
+    particles_r = sampleRegularParticles(nx // samplingRatio, buildDomainDescription(1, config.dim, periodic = True, device = config.device, dtype = config.dtype), config.targetNeighbors, jitter = jitter)
 
     particles_r = particles_r._replace(masses = torch.ones_like(particles_r.masses) * particles_l.masses.min())
     pos_r = particles_r.positions
@@ -259,6 +260,7 @@ def buildSod1DMeshless(
     gamma: float,
     config: SimulationConfig,
     schemeConfig,
+    jitter: float = 0.0,
 ):
     """The meshless (MFM / MFV) form of `buildSod1D` (COMPRESSIBLE_SPH_PLAN E2):
     the same double-Sod lattice, but the state is the conserved Q (the G1
@@ -270,8 +272,8 @@ def buildSod1DMeshless(
     nx = config.nx
     actualRatio = nx / (nx // samplingRatio)
 
-    particles_l = sampleRegularParticles(nx, buildDomainDescription(1, config.dim, periodic = True, device = config.device, dtype = config.dtype), config.targetNeighbors, jitter = 0.0)
-    particles_r = sampleRegularParticles(nx // samplingRatio, buildDomainDescription(1, config.dim, periodic = True, device = config.device, dtype = config.dtype), config.targetNeighbors, jitter = 0.0)
+    particles_l = sampleRegularParticles(nx, buildDomainDescription(1, config.dim, periodic = True, device = config.device, dtype = config.dtype), config.targetNeighbors, jitter = jitter)
+    particles_r = sampleRegularParticles(nx // samplingRatio, buildDomainDescription(1, config.dim, periodic = True, device = config.device, dtype = config.dtype), config.targetNeighbors, jitter = jitter)
     particles_r = particles_r._replace(masses = torch.ones_like(particles_r.masses) * particles_l.masses.min())
     pos_r = particles_r.positions
     pos_r[pos_r[:, 0] < 0, 0] -= 0.5

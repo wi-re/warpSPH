@@ -41,13 +41,15 @@ def buildSystem(ctx: RunContext):
             ctx.param('rho1'), ctx.param('rho2'), ctx.param('v1'), ctx.param('v2'),
             ctx.param('delta'), ctx.param('sigma'), ctx.param('freq'), ctx.param('w0'),
             ctx.spec.nx, ctx.config, ctx.schemeConfig,
-            CompressibleState, CompressibleSystem, smoothDensity=bool(ctx.param('smoothDensity')))
+            CompressibleState, CompressibleSystem, smoothDensity=bool(ctx.param('smoothDensity')),
+            jitter=ctx.param('jitter', 0.0))
         return toMeshlessSystem(comp, ctx.config, ctx.schemeConfig)
     return sampleKHH(
         ctx.param('rho1'), ctx.param('rho2'), ctx.param('v1'), ctx.param('v2'),
         ctx.param('delta'), ctx.param('sigma'), ctx.param('freq'), ctx.param('w0'),
         ctx.spec.nx, ctx.config, ctx.schemeConfig,
-        ctx.SimulationState, ctx.SimulationSystem, smoothDensity=bool(ctx.param('smoothDensity')))
+        ctx.SimulationState, ctx.SimulationSystem, smoothDensity=bool(ctx.param('smoothDensity')),
+        jitter=ctx.param('jitter', 0.0))
 
 
 #: The two panels, exported so a notebook can pass them to
@@ -98,6 +100,7 @@ kelvinHelmholtzCase = registerCase(Case(
         w0=0.1,
         sigma=0.05 / math.sqrt(2.0),
         smoothDensity=0,     # 1: Frontiere 2017 Eq. (100) density ramp across the interface
+        jitter=0.0,          # X4: IC displacement as a fraction of the lattice spacing (0 = the exact lattice)
     ),
 ))
 

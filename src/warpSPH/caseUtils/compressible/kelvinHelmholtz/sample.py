@@ -30,8 +30,8 @@ def vy(ri, sigma, freq, w0  ):
 
 
 def sampleKHH(rho1, rho2, v1, v2, delta, sigma, freq, w0, nx, config, schemeConfig, SimulationState, SimulationSystem,
-              smoothDensity=False):
-    compressibleSystem = setupBasicCompressibleInitialState(nx, config, schemeConfig, SimulationState, SimulationSystem)
+              smoothDensity=False, jitter=0.0):
+    compressibleSystem = setupBasicCompressibleInitialState(nx, config, schemeConfig, SimulationState, SimulationSystem, jitter=jitter)
 
     v_y = vy(compressibleSystem.state.positions, sigma, freq, w0)
     Pinitial = torch.ones_like(compressibleSystem.state.densities) * 2.5
