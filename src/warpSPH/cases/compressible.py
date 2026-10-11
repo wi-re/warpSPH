@@ -17,6 +17,7 @@ from typing import Any, Dict
 import torch
 
 from ..configurations.moduleConfigurations.viscositySwitchParameters import ViscositySwitchConfig
+from ..configurations.meshless import MeshlessConfig
 from ..enumTypes import AdaptiveSupportScheme, ViscositySwitch
 from ..modules.timestep.compressible import computeTimestep
 from ..runner import RunContext, resolveEnum
@@ -71,6 +72,16 @@ def applyViscositySwitchParam(ctx: RunContext) -> None:
 
 def configureCompressible(ctx: RunContext) -> None:
     """Stamp the shared scheme settings onto `ctx.schemeConfig`."""
+    # The meshless (MFM / MFV) schemes carry only gamma / nngb from the case
+    # (no viscosity switch, no adaptive-support knobs) -- E2.
+    if isinstance(ctx.schemeConfig, MeshlessConfig):
+        ctx.schemeConfig.gamma = ctx.param('gamma')
+        # nngb is the case's neighbour count (n_h converted), not n_h: the step's support
+        # map h = (nngb V / C)^(1/nu) is stable only when nngb matches the lattice the IC
+        # sampled (that h is the map's fixed point) -- n_h under-connects 2D / 3D graphs
+        # and the supports collapse (E2 Gresho: the dt ran away to minDt).
+        ctx.schemeConfig.nngb = ctx.config.targetNeighbors
+        return
     schemeConfig = ctx.schemeConfig
     schemeConfig.gamma = ctx.param('gamma')
     schemeConfig.rho0 = ctx.param('rho0')

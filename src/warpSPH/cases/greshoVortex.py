@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from typing import Dict
 
-from ..caseUtils import sampleGreshoVortex
+from ..caseUtils import sampleGreshoVortex, sampleGreshoVortexMeshless
+from ..configurations.meshless import MeshlessConfig
 from ..runner import Case, RunContext, caseMain, registerCase
 from .compressible import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            compressibleDiagnostics, configureCompressible,
@@ -21,6 +22,9 @@ __all__ = ['greshoVortexCase', 'GRESHO_FIELDS']
 
 
 def buildSystem(ctx: RunContext):
+    if isinstance(ctx.schemeConfig, MeshlessConfig):
+        return sampleGreshoVortexMeshless(ctx.spec.nx, ctx.config, ctx.schemeConfig,
+                                          cuspWidth=ctx.param('cuspWidth'))
     return sampleGreshoVortex(ctx.spec.nx, ctx.config, ctx.schemeConfig,
                               ctx.SimulationState, ctx.SimulationSystem,
                               cuspWidth=ctx.param('cuspWidth'))

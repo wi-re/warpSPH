@@ -34,7 +34,11 @@ def configureScheme(ctx: RunContext) -> None:
     # (no viscosity switch, no adaptive-support knobs) -- E2.
     if isinstance(ctx.schemeConfig, MeshlessConfig):
         ctx.schemeConfig.gamma = ctx.param('gamma')
-        ctx.schemeConfig.nngb = ctx.spec.n_h
+        # nngb is the case's neighbour count (n_h converted), not n_h: the step's support
+        # map h = (nngb V / C)^(1/nu) is stable only when nngb matches the lattice the IC
+        # sampled (that h is the map's fixed point) -- n_h under-connects 2D / 3D graphs
+        # and the supports collapse (E2 Gresho: the dt ran away to minDt).
+        ctx.schemeConfig.nngb = ctx.config.targetNeighbors
         return
     left, _ = states(ctx)
     ctx.schemeConfig.gamma = ctx.param('gamma')
