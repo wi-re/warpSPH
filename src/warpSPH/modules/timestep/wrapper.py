@@ -32,9 +32,8 @@ import warp as wp
 from .compressible import computeTimestep as computeTimestepCompressible
 from .artificialCompressible import computeTimestep as computeTimestepArtificialCompressible
 from .weaklyCompressible import computeTimestep as computeTimestepWeaklyCompressible
-from .meshless import computeTimestep as computeTimestepMeshless
 
-__all__ = ['computeTimestep']
+__all__ = ['computeTimestep', 'defaultTimestep']
 
 
 def computeTimestep(
@@ -57,6 +56,9 @@ def computeTimestep(
             systemUpdate = systemUpdate
         )
     if isinstance(system, MeshlessSystem):
+        # Imported here: `.meshless` pulls in the `warpSPHCore.mfm` backend,
+        # which a compressible / ACSPH / weakly-compressible dt never needs.
+        from .meshless import computeTimestep as computeTimestepMeshless
         return computeTimestepMeshless(
             system=system, config=config, compParams=compParams, dt=dt)
     else:
@@ -66,3 +68,12 @@ def computeTimestep(
             compParams = compParams,
             dt = dt,
         )
+
+
+def defaultTimestep(ctx, state):
+    """The runner's default `timestep` hook: the dispatcher's dt on the current
+    state (the core signal dt for a meshless system, the acoustic CFL for the
+    rest), so a run re-picks its step every step without the case spelling the
+    hook out (COMPRESSIBLE_SPH_PLAN E2: the meshless schemes must track the
+    signal speed, and their cases otherwise run at the setup dt for life)."""
+    return computeTimestep(state, ctx.config, ctx.schemeConfig, dt=ctx.config.dt)

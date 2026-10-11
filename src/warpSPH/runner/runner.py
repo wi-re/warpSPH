@@ -17,7 +17,7 @@ import os
 import sys
 import time
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
@@ -30,6 +30,7 @@ from ..enumTypes import (ArtificialCompressibleSPHScheme, CompressibleSPHScheme,
                          WeaklyCompressibleSPHScheme)
 from ..io.hdf5 import createOutFile
 from ..io.export import exportSimulationSystem, prepExport, writeFrame, writeInitialData
+from ..modules.timestep import defaultTimestep
 from ..schemes import buildScheme
 from ..utils import buildDomainDescription
 from .case import Case, RunContext
@@ -119,6 +120,18 @@ def buildContext(case: Case, spec: CaseSpec) -> RunContext:
 
     domain = buildDomainDescription(spec.L, spec.dim, spec.periodic, device, dtype)
 
+    scheme = _resolveScheme(spec.scheme or case.scheme)
+    # The meshless step owns the whole time step (D4) and hands the integrator the
+    # exact per-step delta, so it must run under a single-evaluation integrator;
+    # the case's multi-stage default (rungeKutta2) would run the step once per
+    # stage and blend. The step refuses any other integrator itself
+    # (`meshlessStep.validateIntegrationScheme`); set the right one up front so
+    # the banner reports what actually runs.
+    integrationSchemeName = spec.integrationScheme
+    if scheme in (CompressibleSPHScheme.MFM, CompressibleSPHScheme.MFV) and \
+            integrationSchemeName not in ('forwardEuler', 'explicitEuler'):
+        integrationSchemeName = 'forwardEuler'
+
     config, integrator = buildConfig(
         domain=domain,
         dim=spec.dim,
@@ -129,7 +142,7 @@ def buildContext(case: Case, spec: CaseSpec) -> RunContext:
         supportMode=resolveEnum(SupportScheme, spec.supportMode),
         gradientMode=resolveEnum(GradientScheme, spec.gradientMode),
         laplacianMode=resolveEnum(LaplacianScheme, spec.laplacianMode),
-        integrationScheme=resolveEnum(IntegrationSchemeType, spec.integrationScheme),
+        integrationScheme=resolveEnum(IntegrationSchemeType, integrationSchemeName),
         samplingScheme=resolveEnum(SamplingScheme, spec.samplingScheme),
         verletScale=spec.verletScale,
         device=device,
@@ -143,7 +156,6 @@ def buildContext(case: Case, spec: CaseSpec) -> RunContext:
         dx=spec.L / spec.nx,
     )
 
-    scheme = _resolveScheme(spec.scheme or case.scheme)
     bundle = buildScheme(scheme)
 
     return RunContext(
@@ -226,6 +238,12 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
         ctx.schemeConfig.cudaGraph = True
 
     system = case.buildSystem(ctx)
+    if case.timestep is None and ctx.scheme in (CompressibleSPHScheme.MFM, CompressibleSPHScheme.MFV):
+        # The meshless schemes re-pick the core signal dt every step
+        # (`modules/timestep/meshless.py`); a case without a `timestep` hook
+        # (fixed dt after setup is the compressible convention) would otherwise
+        # run at the setup dt for its whole life.
+        case = replace(case, timestep=defaultTimestep)
     if getattr(ctx.schemeConfig, 'boundaryProvider', None) is not None:
         schemeName = getattr(ctx.scheme, 'name', ctx.scheme)
         if schemeName not in ANALYTIC_WALL_SCHEMES:

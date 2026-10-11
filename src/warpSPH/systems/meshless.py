@@ -70,9 +70,20 @@ class MeshlessSystem(BaseIntegrationSystem):
     def apply_position_update(self, update, spec: PositionUpdateSpec, **kwargs):
         # applies the step's exact net drift delta (pos += dt * dxdt, wrapping): the step
         # (`schemes/meshless.py`, D4) owns the temporal scheme, so dxdt is its time-centred /
-        # drift velocity, not a raw start-of-step velocity. No velocity kick term here -- the
-        # conserved momentum lives in Q, not in a separate field
-        return update_position(self, update, spec, 'position', 'position_derivative')
+        # drift velocity, not a raw start-of-step velocity. 'velocity' fills the integrator's
+        # kick-tag slot only: the kick terms (current_velocity_dt / update_velocity_dt) are
+        # None for the single-evaluation integrators the step admits, so it is never read --
+        # the conserved momentum lives in Q, not in a separate field
+        update_position(self, update, spec, 'position', 'position_derivative', 'velocity')
+        # wrap into the domain (periodic axes): the drift can cross a periodic edge, and the
+        # core driver wraps at every move
+        if self.domain is not None:
+            self.state.positions = torch.where(
+                self.domain.periodic,
+                self.domain.min + torch.remainder(self.state.positions - self.domain.min,
+                                                  self.domain.max - self.domain.min),
+                self.state.positions)
+        return self
 
     def apply_quantity_update(self, update, spec: ComponentUpdateSpec, **kwargs):
         # advance the conserved vector: Q += dt * dQdt

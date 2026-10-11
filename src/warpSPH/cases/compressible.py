@@ -139,7 +139,7 @@ def compressibleDiagnostics(ctx: RunContext, state) -> Dict[str, float]:
         'entropy': entropy,
         'angularMomentum': angular,
     }
-    alphas = particles.alphas
+    alphas = getattr(particles, 'alphas', None)
     if alphas is not None:
         out['alphaMean'] = alphas.mean()
         out['alphaMax'] = alphas.max()

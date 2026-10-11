@@ -11,7 +11,8 @@ from typing import Any, Dict
 
 import torch
 
-from ..caseUtils import buildSod1D, plotSod, plotSod_, sodInitialState
+from ..caseUtils import buildSod1D, buildSod1DMeshless, plotSod, plotSod_, sodInitialState
+from ..configurations.meshless import MeshlessConfig
 from ..enumTypes import AdaptiveSupportScheme, ViscositySwitch
 from ..runner import Case, RunContext, caseMain, registerCase, resolveEnum
 from .compressible import applyViscositySwitchParam, compressibleDiagnostics
@@ -29,6 +30,12 @@ def states(ctx: RunContext):
 
 
 def configureScheme(ctx: RunContext) -> None:
+    # The meshless (MFM / MFV) scheme carries only gamma / nngb from the case
+    # (no viscosity switch, no adaptive-support knobs) -- E2.
+    if isinstance(ctx.schemeConfig, MeshlessConfig):
+        ctx.schemeConfig.gamma = ctx.param('gamma')
+        ctx.schemeConfig.nngb = ctx.spec.n_h
+        return
     left, _ = states(ctx)
     ctx.schemeConfig.gamma = ctx.param('gamma')
     ctx.schemeConfig.rho0 = left.rho
@@ -44,6 +51,13 @@ def configureScheme(ctx: RunContext) -> None:
 
 def buildSystem(ctx: RunContext):
     left, right = states(ctx)
+    if isinstance(ctx.schemeConfig, MeshlessConfig):
+        return buildSod1DMeshless(
+            ctx.SimulationSystem,
+            ctx.param('samplingRatio'),
+            left, right,
+            ctx.param('gamma'), ctx.config,
+            ctx.schemeConfig)
     return buildSod1D(
         ctx.SimulationSystem, ctx.SimulationState,
         ctx.param('samplingRatio'),

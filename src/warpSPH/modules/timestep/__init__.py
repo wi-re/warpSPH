@@ -8,10 +8,11 @@ additionally back-solves the weakly-compressible EOS sound speed from a
 target dt/dx/neighbor-count.
 """
 
-from .wrapper import computeTimestep
+from .wrapper import computeTimestep, defaultTimestep
 from .weaklyCompressible import setupWeaklyCompressibleTimestep
 
 __all__ = [
     "computeTimestep",
+    "defaultTimestep",
     "setupWeaklyCompressibleTimestep"
 ]
