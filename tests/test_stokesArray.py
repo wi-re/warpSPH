@@ -39,6 +39,19 @@ def test_the_array_cell_holds_the_body_and_the_lattice_around_it():
     assert r.ctx.schemeConfig.boundaryProvider.scene.periodic is not None
 
 
+def test_the_disk_is_lattice_matched_to_its_oracle_per_scheme():
+    # the incompressible loops' oracle (DFSPH2D) runs at H = 2.505 dx, the WC delta+ oracle
+    # (DeltaSPH2D) at H = 4.0 dx: the case retargets the support per scheme so a default run
+    # (n_h left at the case default) is lattice-matched to its own oracle
+    def supp(r):
+        st = r.state.state
+        f = st.kinds == 0
+        return float(st.supports[f].max()) / r.ctx.config.dx
+
+    assert supp(array('omniIncompressible', {'wallViscosityClosure': 'noslipMoment', 'closedPreset': True})) == pytest.approx(2.505, rel=0.02)
+    assert supp(array()) == pytest.approx(4.0, rel=0.02)
+
+
 @pytest.mark.parametrize('consistent', [False, True])
 def test_pressure_consistent_removes_the_force_of_a_uniform_pressure(consistent):
     from warpSPH.modules.pressure import computePressureForceSurfaceAware

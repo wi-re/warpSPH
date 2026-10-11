@@ -17,7 +17,7 @@ import torch
 from ..configurations.region import BCType
 from ..enumTypes import isIncompressibleScheme
 from ..runner import Case, RunContext, caseMain, registerCase
-from ..utils import buildDomainDescription
+from ..utils import buildDomainDescription, n_h_to_nH
 from .periodicChannel import XI, configureFlow
 from .plotting import particlePlot
 from .weaklyCompressible import (VELOCITY_DENSITY_FIELDS, WEAKLY_COMPRESSIBLE_DEFAULTS, WEAKLY_COMPRESSIBLE_PARAMS, boundaryRegion,
@@ -72,6 +72,15 @@ def configureScheme(ctx: RunContext) -> None:
     ctx.scratch['W'] = ctx.spec.L
     configureFlow(ctx, dx, shear=False)
     ctx.schemeConfig.analyticPeriodicWalls = True
+    # Lattice-match each scheme to its own oracle by default: the incompressible loops'
+    # oracle (DFSPH2D) runs at H = 2.505 dx, while the WC delta+ oracle (DeltaSPH2D,
+    # periodic_cylinder_array.py) runs at H = 4.0 dx (the case default). Retarget the
+    # support for the incompressible loops while n_h is still the case default; an explicit
+    # n_h (any other value) is respected. buildConfig has already read spec.n_h, so the
+    # support is re-derived here from targetNeighbors (the neighbour search reads it).
+    if isIncompressibleScheme(ctx.scheme) and ctx.spec.n_h == 4.0:
+        ctx.spec.n_h = 2.505
+        ctx.config.targetNeighbors = n_h_to_nH(2.505, ctx.spec.dim)
 
 
 def buildSystem(ctx: RunContext):
