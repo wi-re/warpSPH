@@ -12,17 +12,19 @@ from typing import Callable, Union
 
 from ..systems import (
     CompSPHState, CompSPHSystem, CompressibleState,
-    CompressibleSystem, CompressibleSystemUpdate, WeaklyCompressibleState,
+    CompressibleSystem, CompressibleSystemUpdate, MeshlessState,
+    MeshlessSystem, MeshlessSystemUpdate, WeaklyCompressibleState,
     WeaklyCompressibleSystem, WaveSystemStatev3, WaveSystemUpdatev3, WaveSystemv3,
 )
 from ..configurations import (
     CRKSPHConfig, CompSPHConfig, CompressibleSPHConfig, GSPHConfig, InutsukaGSPHConfig,
-    IncompressibleSPHConfig, WeaklyCompressibleSPHConfig, Sun2017DeltaSPHConfig,
+    IncompressibleSPHConfig, MFMConfig, MFVConfig, MeshlessConfig,
+    WeaklyCompressibleSPHConfig, Sun2017DeltaSPHConfig,
     WaveEquationConfig,
     compSPHConfigToDict, compressibleConfigToDict, crkSPHConfigToDict,
     dictToCRKSPHConfig, dictToCompSPHConfig, dictToCompressibleConfig, dictToGSPHConfig, dictToInutsukaGSPHConfig, gsphConfigToDict,
-    dictToIncompressibleSPHConfig, dictToWeaklyCompressibleConfig,
-    dictToWaveEquationConfig, incompressibleConfigToDict,
+    dictToIncompressibleSPHConfig, dictToMeshlessConfig, dictToWeaklyCompressibleConfig,
+    dictToWaveEquationConfig, incompressibleConfigToDict, meshlessConfigToDict,
     waveEquationConfigToDict, weaklyCompressibleConfigToDict,
 )
 from .compSPH import compSPH_step
@@ -31,6 +33,7 @@ from .crkSPH import crkSPH_step
 from .monaghan import compressibleSPH_Monaghan
 from .gsph import compressibleSPH_GSPH
 from .gsphInutsuka import compressibleSPH_InutsukaGSPH
+from .meshless import meshlessStep
 from .waveEquation import f_wave_equation
 from ..enumTypes import (
     ArtificialCompressibleSPHScheme, CompressibleSPHScheme,
@@ -117,6 +120,30 @@ def _inutsukaGSPH() -> SchemeBundle:
         stepFunction=compressibleSPH_InutsukaGSPH,
         exportFunction=gsphConfigToDict,
         importFunction=dictToInutsukaGSPHConfig,
+    )
+
+
+def _mfm() -> SchemeBundle:
+    return SchemeBundle(
+        SimulationSystem=MeshlessSystem,
+        SimulationState=MeshlessState,
+        SimulationConfig=MFMConfig,
+        SimulationUpdate=MeshlessSystemUpdate,
+        stepFunction=meshlessStep,
+        exportFunction=meshlessConfigToDict,
+        importFunction=dictToMeshlessConfig,
+    )
+
+
+def _mfv() -> SchemeBundle:
+    return SchemeBundle(
+        SimulationSystem=MeshlessSystem,
+        SimulationState=MeshlessState,
+        SimulationConfig=MFVConfig,
+        SimulationUpdate=MeshlessSystemUpdate,
+        stepFunction=meshlessStep,
+        exportFunction=meshlessConfigToDict,
+        importFunction=dictToMeshlessConfig,
     )
 
 
@@ -316,6 +343,8 @@ _SCHEMES = {
     CompressibleSPHScheme.CRKSPH: _crkSPH,
     CompressibleSPHScheme.GSPH: _gsph,
     CompressibleSPHScheme.InutsukaGSPH: _inutsukaGSPH,
+    CompressibleSPHScheme.MFM: _mfm,
+    CompressibleSPHScheme.MFV: _mfv,
     WeaklyCompressibleSPHScheme.deltaSPH: _deltaSPH,
     WeaklyCompressibleSPHScheme.sun2017DeltaSPH: _sun2017DeltaSPH,
     IncompressibleSPHScheme.divergenceFree: _divergenceFree,

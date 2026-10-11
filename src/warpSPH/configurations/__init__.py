@@ -16,6 +16,7 @@ from .waveEquationConfig import CaseConfig as WaveCaseConfig
 from .waveEquationConfig import WaveEquationConfig, waveEquationConfigToDict, dictToWaveEquationConfig
 from .acousticCoreConfig import AcousticCoreConfig, acousticCoreConfigToDict, dictToAcousticCoreConfig
 from .compressibleConfig import CompressibleSPHConfig, compressibleConfigToDict, dictToCompressibleConfig
+from .meshless import MeshlessConfig, MFMConfig, MFVConfig, meshlessConfigToDict, dictToMeshlessConfig
 from .compSPHConfig import CompSPHConfig, compSPHConfigToDict, dictToCompSPHConfig
 from .crkSPH import CRKViscosity, CRKSPHConfig, crkSPHConfigToDict, dictToCRKSPHConfig
 from .gsph import GSPHConfig, InutsukaGSPHConfig, gsphConfigToDict, dictToGSPHConfig, dictToInutsukaGSPHConfig
@@ -49,6 +50,7 @@ __all__ = [
     'acousticCoreConfigToDict',
     'dictToAcousticCoreConfig',
     'CompressibleSPHConfig',
+    'MeshlessConfig', 'MFMConfig', 'MFVConfig', 'meshlessConfigToDict', 'dictToMeshlessConfig',
     'CompSPHConfig',
     'CRKViscosity',
     'CRKSPHConfig',

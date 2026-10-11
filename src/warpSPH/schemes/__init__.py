@@ -16,7 +16,8 @@ from .compSPH import compSPH_step
 from .crkSPH import crkSPH_step
 from .divergenceFree import divergenceFree_step
 from .waveEquation import f_wave_equation
+from .meshless import meshlessStep
 
 from .builder import buildScheme, CompressibleSPHScheme
 
-__all__ = ['f_wave_equation', 'compressibleSPH_Monaghan', 'compressibleSPH_GSPH', 'compressibleSPH_InutsukaGSPH', 'compSPH_step', 'crkSPH_step', 'buildScheme', 'CompressibleSPHScheme', 'divergenceFree_step']
+__all__ = ['f_wave_equation', 'compressibleSPH_Monaghan', 'compressibleSPH_GSPH', 'compressibleSPH_InutsukaGSPH', 'compSPH_step', 'crkSPH_step', 'buildScheme', 'CompressibleSPHScheme', 'divergenceFree_step', 'meshlessStep']

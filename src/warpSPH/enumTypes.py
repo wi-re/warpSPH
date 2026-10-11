@@ -79,6 +79,11 @@ class CompressibleSPHScheme(Enum):
     #: Pressure-based SPH (PESPH_PLAN): `P_bar_i` by kernel summation instead of `rho_i`; variant in `PESPHVariant`.
     #: Enum member only so far (Phase 0): `buildScheme` raises until the scheme is assembled (Phase 4)
     PESPH = 5
+    #: Meshless finite-mass / finite-volume SPH (Hopkins 2015; COMPRESSIBLE_SPH_PLAN E1).
+    #: MFM: the conserved face fluxes, mass is conserved (dm = 0). MFV: the same fluxes plus
+    #: the GIZMO mass-flux limiter, which redistributes mass across faces (dm != 0).
+    MFM = 6
+    MFV = 7
 
 
 class PESPHVariant(Enum):
