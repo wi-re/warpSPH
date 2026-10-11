@@ -46,6 +46,7 @@ from warpSPHCore import DomainDescription
 from warpSPHCore.enumTypes import KernelFunctions
 from warpSPHCore.mfm import MeshlessWarp, primitives, conserved
 
+from warpSPHIntegrators.integration import IntegrationSchemeType
 from warpSPH.systems.meshless import MeshlessState, MeshlessSystem
 from warpSPH.configurations.meshless import MeshlessConfig
 from warpSPH.configurations.simulationConfig import SimulationConfig
@@ -88,7 +89,11 @@ def make_context(n, nngb, device, mode, order):
     system = MeshlessSystem(state=state, domain=dom)
     config = SimulationConfig(device=device, dtype=torch.float64, domain=dom, dim=1,
                               kernel=KernelFunctions.Wendland2)
-    schemeConfig = MeshlessConfig(mode=mode, order=order, nngb=nngb, cfl=CFL, gamma=G)
+    # the step owns its full time step (D4), so it must run under a single-evaluation
+    # integrator; and G1 is the port-fidelity gate, so pin the core driver's temporal scheme
+    config.integrationScheme = IntegrationSchemeType.forwardEuler
+    schemeConfig = MeshlessConfig(mode=mode, order=order, nngb=nngb, cfl=CFL, gamma=G,
+                                  temporalScheme='hancock')
     return system, config, schemeConfig, dom, Q
 
 
@@ -141,16 +146,20 @@ def run(n, mode, order, nngb, tend, device):
 
 
 def check_step_function(n, mode, order, nngb, device):
-    """Confirm meshlessStep returns the same rates / drift as the direct backend calls."""
+    """Confirm meshlessStep (the hancock exact-delta step) returns the same rates / drift as
+    the direct backend calls (bitwise, same geometry): dQdt == rates, dxdt == the midpoint
+    drift 0.5 * (v + v_n)."""
     system, config, schemeConfig, dom, _ = make_context(n, nngb, device, mode, order)
     state = system.state
     g = build_geom(state, dom, config, schemeConfig)
     r, v, p = primitives(state.Q, g.volume, G)
     dt = float(g.timestep(r, v, p, G, CFL).min())
     rates = g.rates(r, v, p, G, dt=dt, mode=mode, order=order)
+    Qn = state.Q + dt * rates
+    vel_n = Qn[:, 1:-1] / Qn[:, 0:1]
     update, _adj, _cs = meshlessStep(system, dt, config, schemeConfig)
     dq_ok = bool(torch.allclose(update.dQdt, rates, rtol=0, atol=0))
-    dx_ok = bool(torch.allclose(update.dxdt, v, rtol=0, atol=0))
+    dx_ok = bool(torch.allclose(update.dxdt, 0.5 * (v + vel_n), rtol=0, atol=0))
     return dq_ok, dx_ok
 
 
