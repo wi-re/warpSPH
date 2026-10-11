@@ -44,6 +44,11 @@ tail: U=0.04956  balance=0.9799  K/K_ref=1.0607
 # oracle DFSPH2D, same support n_h = 2.505 (2026-10-10): K/K_ref 1.0034, F/balance 0.9986 (smooth, settled)
 
 
-=== wake_Re100_res20 (delta+ cylinder wake, Re = 100, D/dx = 20, t = 150) - RUNNING (see the 2026-10-11 follow-up commit)
-# comparison: warpSPH res = 10 C_L amp 0.4264 / C_D 1.5278; oracle res = 10 0.3755 / 1.5278; oracle res = 20 0.333.
-# question: does D/dx = 20 move the warpSPH lift amplitude toward the oracle's 0.333 (a resolution effect) or leave it high (a scheme effect) ?
+=== wake_Re100_res20 (delta+ cylinder wake, Re = 100, D/dx = 20, t = 150) - DONE: a resolution effect
+RESULT deltaSPH disk Re=100 D/dx=20 N=179684 t=150.0 blockage=0.083 diverged=False
+RESULT C_D=1.4252  C_L rms=0.1654 amp=0.3198  St=0.1739  L_w/D=1.785
+RESULT unconfined literature: CD 1.33-1.35  CLamp 0.32-0.34  St 0.164-0.166
+# comparison: warpSPH res = 10 C_L amp 0.426 / C_D 1.520; oracle res = 10 0.3755 / 1.5278; oracle res = 20 0.333.
+# answer: D/dx = 20 drops the warpSPH lift amplitude 0.426 -> 0.3198 (a resolution effect, not a scheme effect),
+# converging to the oracle's res = 20 (0.333) and the literature (0.32-0.34); C_D 1.520 -> 1.4252 toward 1.33-1.35.
+# raw lines: wake_Re100_res20.clean.txt

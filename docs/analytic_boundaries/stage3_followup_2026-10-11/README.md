@@ -37,6 +37,16 @@ The 2026-10-10 comparison (port K/K_ref 0.991 / balance 0.982 vs the oracle's 1.
 
 At the **same support** the port's `divergenceFree` is clearly below the oracle (balance 0.885 vs 0.9986, K ~0.95 vs 1.0034) with a persistent oscillation the oracle does not have: the deficit is a **scheme effect** (the port's `divergenceFree` vs `DFSPH2D`), not a support mismatch. Two things to note: (a) the port is actually *better* at n_h = 4.0 than at the oracle's 2.505 — a support-dependent issue in the port's `divergenceFree` worth a separate look; (b) the oscillation is persistent (it does not damp from t = 10 to 60), so a longer run will not settle it.
 
-## 4. The wake Re 100 lift-amplitude resolution check — running
+## 4. The wake Re 100 lift-amplitude resolution check — done: a resolution effect
 
-`probe_cylinderWake.py --Re 100 --res 20 --time 150` (D/dx = 20, delta+, the graph + compiled closure on) is running to attribute the Re 100 lift-amplitude gap (warpSPH res = 10 0.4264 vs oracle 0.3755; the oracle's own res = 10 → 20 trend is 0.376 → 0.333). Result in the follow-up commit.
+`probe_cylinderWake.py --Re 100 --res 20 --time 150` (D/dx = 20, delta+, the graph + compiled closure on, N = 179684, t = 150):
+
+| Re 100 | C_D | C_L amplitude | St | L_w / D |
+|---|---|---|---|---|
+| warpSPH res = 10 (2026-10-10) | 1.520 | 0.426 | 0.1705 | (unsteady) |
+| **warpSPH res = 20 (this)** | **1.4252** | **0.3198** | **0.1739** | **1.785** |
+| oracle res = 10 (2026-10-10) | 1.5278 | 0.3755 | 0.1717 | 1.878 |
+| oracle res = 20 | – | 0.333 | – | – |
+| unconfined literature | 1.33–1.35 | 0.32–0.34 | 0.164–0.166 | 2.2–2.35 |
+
+The Re 100 lift-amplitude gap was a **resolution effect**: at D/dx = 20 the warpSPH C_L amplitude drops from 0.426 (res = 10) to **0.3198**, converging to the oracle's own res = 20 (0.333) and the low end of the unconfined literature (0.32–0.34); the res = 10 value was under-resolved. C_D also drops (1.520 → 1.4252) toward the literature (1.33–1.35), and St = 0.1739 is close to the literature (0.164–0.166), slightly high. The +13 % res = 10 lift gap is closed — it was the lattice, not the scheme. Raw lines: `wake_Re100_res20.clean.txt`.
