@@ -213,6 +213,25 @@ def test_bannerDescribesTheFluidEachSolverActuallyUses():
     assert 'alpha 0.01' in _viscosityDescriptions(weaklyCompressible)[0]
 
 
+def test_bannerDescribesTheMeshlessScheme():
+    """MFM / MFV pin the mode in the scheme name (the `scheme` row); the
+    `meshless` row carries the knobs no other row shows -- and the temporal
+    scheme is the *resolved* one, so `auto` reads as the D4 per-mode default
+    that actually runs (MFM -> ssprk, MFV -> hancock)."""
+    from warpSPH.configurations.compSPHConfig import CompSPHConfig
+    from warpSPH.configurations.meshless import MFMConfig, MFVConfig
+    from warpSPH.runner.report import _meshlessDescription
+
+    assert _meshlessDescription(MFMConfig()) == \
+        'MUSCL order 2 | N_ngb 7 | temporal ssprk | closure project (auto)'
+    assert 'temporal hancock' in _meshlessDescription(MFVConfig())
+    pinned = MFMConfig()
+    pinned.temporalScheme = 'kdk'
+    assert 'temporal kdk' in _meshlessDescription(pinned)
+    # the row is meshless-only: no other family has these knobs
+    assert _meshlessDescription(CompSPHConfig()) is None
+
+
 def test_reportNamesDivergenceLoudly():
     """A diverged run must not read like a successful one."""
     from warpSPH.cases import importAll

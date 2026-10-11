@@ -209,6 +209,28 @@ def _viscosityDescriptions(schemeConfig) -> List[str]:
     return rows
 
 
+def _meshlessDescription(schemeConfig) -> Optional[str]:
+    """The meshless (MFM / MFV) scheme's own knobs, which no other row shows.
+
+    The mode is the scheme name itself (MFM / MFV), so it is not repeated. What
+    would otherwise be invisible in the banner is the MUSCL order, the neighbour
+    count the supports are re-derived from (N_ngb -- the generic `support` mode
+    the integrator row prints is not what this scheme reads), the *resolved*
+    temporal scheme (so `auto` reads as the D4 per-mode default that actually
+    runs, not the flag value), and the closure solve.
+    """
+    from ..configurations.meshless import MeshlessConfig
+    if not isinstance(schemeConfig, MeshlessConfig):
+        return None
+    # Imported only for a meshless run: it pulls in the `warpSPHCore.mfm` backend, which
+    # a Monaghan / delta-SPH banner has no reason to load.
+    from ..schemes.meshless import resolve_temporal_scheme
+    return _joined(f'MUSCL order {schemeConfig.order}',
+                   f'N_ngb {schemeConfig.nngb:g}',
+                   f'temporal {resolve_temporal_scheme(schemeConfig)}',
+                   f'closure {schemeConfig.closure} ({schemeConfig.closureSolver})')
+
+
 def describeRun(ctx, state, nSteps: int, timeLimited: bool) -> None:
     """The pre-run banner. Called once `dt` and the step count are final."""
     spec = ctx.spec
@@ -240,6 +262,9 @@ def describeRun(ctx, state, nSteps: int, timeLimited: bool) -> None:
     fluid = _fluidDescription(ctx.schemeConfig)
     if fluid:
         print(_row('fluid', fluid))
+    meshless = _meshlessDescription(ctx.schemeConfig)
+    if meshless:
+        print(_row('meshless', meshless))
     for index, viscosity in enumerate(_viscosityDescriptions(ctx.schemeConfig)):
         print(_row('viscosity' if index == 0 else '', viscosity))
 
