@@ -25,17 +25,19 @@ The 2026-10-10 t = 20 value (K/K_ref 0.9863) was read as "still falling." Runnin
 
 It is **steady** (0.986 at t = 20 and t = 60, the momentum balance exactly 1.0): the ~1.4 % K deficit is real, not a transient. Caveat: the oracle's square is **0.6 % smaller** (side 0.331174, c = 0.109676 vs 1/3; N = 2048 both), so the K comparison is muddied by the size mismatch — the oracle's own K/K_ref is 0.9920 and its balance 1.0012. The physics check (the momentum balance) matches; the K gap is mostly the 0.6 % size difference, not the scheme.
 
-## 3. The divergenceFree disk deficit is a scheme effect, not the support
+## 3. The divergenceFree disk: a persistent oscillation, not a steady deficit (re-cut 2026-10-11)
 
-The 2026-10-10 comparison (port K/K_ref 0.991 / balance 0.982 vs the oracle's 1.0034 / 0.9986) was **confounded by the support**: the port's disk probe never set `n_h`, so it ran at the case default **4.0 dx**, while the oracle uses **2.505 dx** (`dx / PACKING`). Running the port's `divergenceFree` disk at the oracle's support (n_h = 2.505, nu re-calibrated on that lattice):
+The 2026-10-10 comparison (port K/K_ref 0.991 / balance 0.982 vs the oracle's 1.0034 / 0.9986) was **confounded by the support**: the port's disk probe never set `n_h`, so it ran at the case default **4.0 dx**, while the oracle uses **2.505 dx** (`dx / PACKING`). Re-running at the oracle's support (n_h = 2.505, nu re-calibrated) and then **A/B-ing the scheme's module constants** (`.tmp/disk_ab.py`; `disk_ab_divfree.clean.txt`) re-cut the finding:
 
-| setup, support | balance (t = 20..60) | K / K_ref (t = 20..60) | behaviour |
-|---|---|---|---|
-| warpSPH divergenceFree, **n_h = 4.0** (2026-10-10 support) | ~0.985 (0.979–0.999) | ~0.989 (0.975–1.000) | small persistent oscillation, period ~10–15 |
-| warpSPH divergenceFree, **n_h = 2.505** (the oracle's) | **~0.885** (0.85–1.06) | **~0.95** (0.90–1.15) | large persistent oscillation, not settling |
-| oracle `DFSPH2D`, n_h = 2.505 (2026-10-10) | 0.9986 | 1.0034 | smooth, settled |
+| setup (n_h = 2.505, compact CG projection, densitySolve off) | balance mean (t ≥ 20) | balance std | K/K_ref mean | K std | behaviour |
+|---|---|---|---|---|---|
+| warpSPH `divergenceFree`, no-pen shift on (the default) | 0.977 | 0.095 | 1.040 | 0.102 | persistent oscillation |
+| warpSPH `divergenceFree`, no-pen shift **off** | 1.002 | 0.128 | 1.059 | 0.139 | oscillation **worse** |
+| warpSPH `divergenceFree`, XSPH smoother **on** | 0.995 | 0.132 | 1.039 | 0.139 | oscillation persists |
+| warpSPH **`omniIncompressible`** (the faithful `DFSPH2D` port) | 1.000 | 0.001 | 1.019 | 0.001 | **smooth, settled** |
+| oracle `DFSPH2D` (2026-10-10) | 0.9986 | ~0 | 1.0034 | ~0 | smooth, settled |
 
-At the **same support** the port's `divergenceFree` is clearly below the oracle (balance 0.885 vs 0.9986, K ~0.95 vs 1.0034) with a persistent oscillation the oracle does not have: the deficit is a **scheme effect** (the port's `divergenceFree` vs `DFSPH2D`), not a support mismatch. Two things to note: (a) the port is actually *better* at n_h = 4.0 than at the oracle's 2.505 — a support-dependent issue in the port's `divergenceFree` worth a separate look; (b) the oscillation is persistent (it does not damp from t = 10 to 60), so a longer run will not settle it.
+Three corrections to the 2026-10-10 read: (1) the "0.885 / 0.95" was the **oscillation trough, not the mean** — the `divergenceFree` disk's means are balance 0.977–1.002, K/K_ref 1.04–1.06, within ~2–6 % of the Sangani–Acrivos reference, not 0.885/0.95; (2) the real difference is a **persistent low-frequency oscillation** (std ~0.1 in balance / K) that the oracle and the faithful port lack; (3) it is **not a port bug** — the faithful port of `DFSPH2D` (`omniIncompressible`, verified term-by-term in stage 2) is smooth (std 0.001) and matches the oracle, so the port *can* reproduce the clean behaviour and the oscillation is specific to the `divergenceFree` scheme. It is **not the no-penetration shift** (off makes it worse; the shift only adds a small steady drag, balance mean 0.977 vs 1.002) nor the XSPH smoother (on: std 0.132). So the `divergenceFree` disk carries an **inherent dynamical artifact** of that scheme — not a porting error and not a deliberate modification.
 
 ## 4. The wake Re 100 lift-amplitude resolution check — done: a resolution effect
 

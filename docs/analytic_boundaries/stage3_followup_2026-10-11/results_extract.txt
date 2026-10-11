@@ -44,6 +44,11 @@ RESULT divergenceFree disk n=48 N=2020 nu=0.01826 t=60.0 K_ref=26.490 diverged=F
 tail: U=0.04956  balance=0.9799  K/K_ref=1.0607
 (full table: disk_nh2505.clean.txt)
 # oracle DFSPH2D, same support n_h = 2.505 (2026-10-10): K/K_ref 1.0034, F/balance 0.9986 (smooth, settled)
+# RE-CUT 2026-10-11 (disk_ab_divfree.clean.txt): the "mean ~0.885 / ~0.95" was the oscillation TROUGH, not the mean --
+# the means are balance 0.977 (no-pen on) / 1.002 (no-pen off), K/K_ref 1.04 / 1.06. A/B of the scheme constants:
+# no-pen shift off makes the oscillation WORSE (std 0.095 -> 0.128), XSPH on does not damp it (std 0.132), and the
+# faithful DFSPH2D port (omniIncompressible) is SMOOTH (std 0.001, balance 1.000, K 1.019). So it is an inherent
+# divergenceFree oscillation, not a port bug and not a deliberate mod.
 
 
 === wake_Re100_res20 (delta+ cylinder wake, Re = 100, D/dx = 20, t = 150) - DONE: a resolution effect

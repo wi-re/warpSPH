@@ -1,0 +1,48 @@
+# divergenceFree Stokes-disk re-cut (2026-10-11): A/B the scheme's module constants to attribute the
+# 2026-10-10 "0.885 / 0.95 deficit" to a specific term. Lattice-matched to the oracle (n_h = 2.505 dx, closed
+# preset -> compact CG projection, densitySolve = False). The std over t >= 20 is the oscillation amplitude
+# (the oracle and the faithful port are smooth, std ~ 0).
+#
+# Runs: .tmp/disk_ab.py (monkeypatches warpSPH.schemes.divergenceFree module constants: DIVERGENCE_SOLVER,
+# NOPEN_SHIFT, XSPH_SCALE, INSTEP_CD, SOLVE_ORDER). The `omni_ctrl` row is the port's omniIncompressible
+# scheme (the stage-2 verified term-by-term port of DFSPH2D) as the smooth control -- it does not use the
+# divergenceFree constants. nu re-calibrated on the lattice per run (the xsph_on run's XSPH shifts the
+# shear-wave calibration to 0.02057, expected).
+
+# === A/B RESULT lines (balance = load / body force on the fluid, K/K_ref against the Sangani-Acrivos reference) ===
+A/B base:      solver=omni nopen=config xsph=0.0 instep=auto order=div_then_cd   # divergenceFree, no-pen shift ON (the default)
+RESULT base balance mean(t>=20)=0.9773 std=0.0953 | K/K_ref mean=1.0395 std=0.1019 | tail balance=0.9796 tail K=1.0598
+A/B nopen_off: solver=omni nopen=False xsph=0.0 instep=auto order=div_then_cd     # no-penetration shift off
+RESULT nopen_off balance mean(t>=20)=1.0023 std=0.1282 | K/K_ref mean=1.0587 std=0.1387 | tail balance=0.9943 tail K=1.0780
+A/B omni_ctrl: omniIncompressible (the faithful DFSPH2D port) -- the smooth control
+RESULT omni_ctrl balance mean(t>=20)=1.0000 std=0.0014 | K/K_ref mean=1.0191 std=0.0015 | tail balance=0.9983 tail K=1.0168
+A/B xsph_on:   solver=omni nopen=config xsph=1.0 instep=auto order=div_then_cd     # XSPH velocity smoother on
+RESULT xsph_on balance mean(t>=20)=0.9945 std=0.1324 | K/K_ref mean=1.0393 std=0.1394 | tail balance=1.0109 tail K=1.0870
+# oracle DFSPH2D, n_h = 2.505 (2026-10-10): K/K_ref 1.0034, F/balance 0.9986 (smooth, settled)
+
+# === base (divergenceFree, no-pen ON) time series: t  U  balance  K/K_ref (the persistent oscillation) ===
+ 20.0  0.05116  0.8933  0.9366
+ 25.0  0.05069  0.9105  0.9635
+ 30.0  0.05097  0.8823  0.9285
+ 35.0  0.05139  0.8820  0.9205
+ 40.0  0.05100  0.8847  0.9304
+ 45.0  0.05019  0.8704  0.9303
+ 50.0  0.04944  0.8864  0.9616
+ 55.0  0.05011  0.9033  0.9670
+
+# === omni_ctrl (omniIncompressible, the faithful port) time series: t  U  balance  K/K_ref (smooth) ===
+ 30.0  0.05264  1.0022  1.0213
+ 40.0  0.05268  1.0018  1.0201
+ 50.0  0.05262  0.9990  1.0184
+ 57.5  0.05266  1.0001  1.0188
+
+# === verdict ===
+# 1. The 2026-10-10 "0.885 / 0.95 deficit" was the oscillation trough, not the mean: the divergenceFree disk's
+#    means are balance 0.977 (no-pen on) / 1.002 (no-pen off), K/K_ref 1.04 / 1.06 -- within ~2-6 % of the reference.
+# 2. The real difference is a persistent low-frequency oscillation (std ~ 0.1 in balance / K) the oracle and the
+#    faithful port lack.
+# 3. NOT a port bug: the faithful DFSPH2D port (omniIncompressible) is smooth (std 0.001) and matches the oracle --
+#    the port reproduces the oracle's clean behaviour; the oscillation is specific to the divergenceFree scheme.
+# 4. NOT the no-penetration shift: off makes it worse (std 0.095 -> 0.128); it only adds a small steady drag
+#    (balance mean 0.977 vs 1.002). NOT the XSPH smoother either (on: std 0.132).
+# 5. So it is an inherent divergenceFree dynamical artifact, not a port bug and not a deliberate mod.
