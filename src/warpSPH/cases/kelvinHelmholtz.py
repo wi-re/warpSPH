@@ -14,6 +14,7 @@ from typing import Dict
 import torch
 
 from ..caseUtils import sampleKHH
+from ..configurations.meshless import MeshlessConfig
 from ..runner import Case, RunContext, caseMain, registerCase
 from .compressible import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            compressibleDiagnostics, configureCompressible,
@@ -33,6 +34,15 @@ def configureScheme(ctx: RunContext) -> None:
 
 
 def buildSystem(ctx: RunContext):
+    if isinstance(ctx.schemeConfig, MeshlessConfig):
+        from ..caseUtils.meshless import toMeshlessSystem
+        from ..systems.compressibleMonaghan import CompressibleState, CompressibleSystem
+        comp = sampleKHH(
+            ctx.param('rho1'), ctx.param('rho2'), ctx.param('v1'), ctx.param('v2'),
+            ctx.param('delta'), ctx.param('sigma'), ctx.param('freq'), ctx.param('w0'),
+            ctx.spec.nx, ctx.config, ctx.schemeConfig,
+            CompressibleState, CompressibleSystem, smoothDensity=bool(ctx.param('smoothDensity')))
+        return toMeshlessSystem(comp, ctx.config, ctx.schemeConfig)
     return sampleKHH(
         ctx.param('rho1'), ctx.param('rho2'), ctx.param('v1'), ctx.param('v2'),
         ctx.param('delta'), ctx.param('sigma'), ctx.param('freq'), ctx.param('w0'),

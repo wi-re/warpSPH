@@ -21,6 +21,7 @@ from ..modules.eos import idealGasEOS
 from ..modules.timestep.compressible import computeTimestep
 from ..runner import Case, RunContext, caseMain, registerCase
 from ..sample.compressible import setupBasicCompressibleInitialState
+from ..configurations.meshless import MeshlessConfig
 from .compressible import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            compressibleDiagnostics, configureCompressible,
                            paramExtraData)
@@ -39,8 +40,14 @@ def _mode(positions, L):
 
 
 def buildSystem(ctx: RunContext):
-    system = setupBasicCompressibleInitialState(ctx.spec.nx, ctx.config, ctx.schemeConfig,
-                                                ctx.SimulationState, ctx.SimulationSystem)
+    if isinstance(ctx.schemeConfig, MeshlessConfig):
+        from ..caseUtils.meshless import toMeshlessSystem
+        from ..systems.compressibleMonaghan import CompressibleState, CompressibleSystem
+        system = setupBasicCompressibleInitialState(ctx.spec.nx, ctx.config, ctx.schemeConfig,
+                                                    CompressibleState, CompressibleSystem)
+    else:
+        system = setupBasicCompressibleInitialState(ctx.spec.nx, ctx.config, ctx.schemeConfig,
+                                                    ctx.SimulationState, ctx.SimulationSystem)
     st = system.state
     L = _boxLength(ctx)
     v = torch.zeros_like(st.positions)
@@ -52,6 +59,8 @@ def buildSystem(ctx: RunContext):
     st.internalEnergies = u_
     st.pressures = P_
     st.soundspeeds = c_s
+    if isinstance(ctx.schemeConfig, MeshlessConfig):
+        return toMeshlessSystem(system, ctx.config, ctx.schemeConfig)
     ctx.config.dt = computeTimestep(system, ctx.config, ctx.schemeConfig)
     return system
 

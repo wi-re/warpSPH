@@ -23,7 +23,8 @@ from __future__ import annotations
 import functools
 
 from ..caseUtils import buildSodND
-from ..runner import Case, RunContext, caseMain, registerCase
+from ..configurations.meshless import MeshlessConfig
+from ..runner import Case, RunContext, caseMain, registerCase, resolveEnum
 from .compressible import paramExtraData
 from .sod import configureScheme, diagnostics, setupPlot, states, updatePlot
 
@@ -32,6 +33,22 @@ __all__ = ['sod2dCase', 'sod3dCase']
 
 def buildSystem(ctx: RunContext):
     left, right = states(ctx)
+    if isinstance(ctx.schemeConfig, MeshlessConfig):
+        # the meshless scheme config carries no adaptive-support knob, so this
+        # branch reads it from the case param
+        from ..caseUtils.meshless import toMeshlessSystem
+        from ..enumTypes import AdaptiveSupportScheme
+        from ..systems.compressibleMonaghan import CompressibleState, CompressibleSystem
+        comp = buildSodND(
+            CompressibleSystem, CompressibleState,
+            left, right,
+            ctx.param('gamma'), ctx.config,
+            transverseSpacings=ctx.param('transverseSpacings'),
+            equalMass=ctx.param('equalMass'),
+            adaptiveSupportScheme=resolveEnum(AdaptiveSupportScheme, ctx.param('adaptiveSupportScheme')),
+            verbose=not ctx.spec.quiet,
+        )
+        return toMeshlessSystem(comp, ctx.config, ctx.schemeConfig)
     return buildSodND(
         ctx.SimulationSystem, ctx.SimulationState,
         left, right,

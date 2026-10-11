@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Dict
 
 from ..caseUtils import sampleShearingNoh
+from ..configurations.meshless import MeshlessConfig
 from ..runner import Case, RunContext, caseMain, registerCase
 from .compressible import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            compressibleDiagnostics, configureCompressible,
@@ -21,6 +22,12 @@ __all__ = ['shearingNohCase', 'SHEARING_NOH_FIELDS']
 
 
 def buildSystem(ctx: RunContext):
+    if isinstance(ctx.schemeConfig, MeshlessConfig):
+        from ..caseUtils.meshless import toMeshlessSystem
+        from ..systems.compressibleMonaghan import CompressibleState, CompressibleSystem
+        comp = sampleShearingNoh(ctx.param('vs'), ctx.spec.nx, ctx.config, ctx.schemeConfig,
+                                 dict(ctx.spec.params), CompressibleState, CompressibleSystem)
+        return toMeshlessSystem(comp, ctx.config, ctx.schemeConfig)
     return sampleShearingNoh(ctx.param('vs'), ctx.spec.nx, ctx.config, ctx.schemeConfig,
                              dict(ctx.spec.params), ctx.SimulationState, ctx.SimulationSystem)
 

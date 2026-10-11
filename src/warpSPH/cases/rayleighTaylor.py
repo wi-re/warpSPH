@@ -14,6 +14,7 @@ import numpy as np
 import torch
 
 from ..caseUtils import sampleRayleighTaylor
+from ..configurations.meshless import MeshlessConfig
 from ..runner import Case, RunContext, caseMain, registerCase
 from .compressible import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            compressibleDiagnostics, configureCompressible,
@@ -38,6 +39,14 @@ def configureScheme(ctx: RunContext) -> None:
 
 
 def buildSystem(ctx: RunContext):
+    if isinstance(ctx.schemeConfig, MeshlessConfig):
+        # The core MFM / MFV step is periodic-only and carries no forcing term:
+        # this case needs the gravity BC and the Dirichlet buffer bands, so it
+        # is deferred for the meshless schemes (COMPRESSIBLE_SPH_PLAN E2).
+        raise NotImplementedError(
+            'rayleighTaylor under MFM / MFV is deferred: the case needs the '
+            'gravity forcing and the Dirichlet buffer bands, which the periodic '
+            'core step does not carry (COMPRESSIBLE_SPH_PLAN E2)')
     return sampleRayleighTaylor(
         ctx.param('rho_low'), ctx.param('rho_high'), ctx.param('delta'),
         ctx.param('g'), ctx.spec.L, ctx.spec.L / ctx.spec.nx, ctx.param('aspect'),

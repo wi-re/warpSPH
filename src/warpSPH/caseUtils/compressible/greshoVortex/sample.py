@@ -111,10 +111,8 @@ def sampleGreshoVortexMeshless(nx, config, schemeConfig, cuspWidth=0.0):
     relaxed lattice the compressible path uses (positions / masses / supports),
     but the state is the conserved Q (the G1 pattern, `caseUtils/meshless.py`)
     and the dt is the core signal timestep (`modules/timestep/meshless.py`)."""
-    from warpSPH.modules.timestep import computeTimestep
     from ....systems.compressibleMonaghan import CompressibleState, CompressibleSystem
-    from ....systems.meshless import MeshlessSystem
-    from ...meshless import buildMeshlessState
+    from ...meshless import toMeshlessSystem
 
     # the lattice the compressible Gresho uses (the base state is otherwise discarded)
     base = setupBasicCompressibleInitialState(
@@ -128,11 +126,6 @@ def sampleGreshoVortexMeshless(nx, config, schemeConfig, cuspWidth=0.0):
     vinitial[:, 0] = -vphi * st.positions[:, 1] / r
     vinitial[:, 1] = vphi * st.positions[:, 0] / r
 
-    state = buildMeshlessState(
-        st.positions, st.supports, st.masses,
-        st.densities, vinitial, Pinitial,
-        float(schemeConfig.gamma),
-        st.kinds, st.materials, st.UIDs)
-    system = MeshlessSystem(state=state, domain=config.domain)
-    config.dt = computeTimestep(system, config, schemeConfig, dt=None)
-    return system
+    st.velocities = vinitial
+    st.pressures = Pinitial
+    return toMeshlessSystem(base, config, schemeConfig)

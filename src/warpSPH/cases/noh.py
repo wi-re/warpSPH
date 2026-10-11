@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Dict
 
 from ..caseUtils import sampleNoh1D
+from ..configurations.meshless import MeshlessConfig
 from ..runner import Case, RunContext, caseMain, registerCase
 from .compressible import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            compressibleDiagnostics, configureCompressible,
@@ -27,6 +28,12 @@ def shockState(ctx: RunContext):
 
 
 def buildSystem(ctx: RunContext):
+    if isinstance(ctx.schemeConfig, MeshlessConfig):
+        from ..caseUtils.meshless import toMeshlessSystem
+        from ..systems.compressibleMonaghan import CompressibleState, CompressibleSystem
+        comp = sampleNoh1D(ctx.spec.nx, ctx.config, ctx.schemeConfig,
+                           CompressibleState, CompressibleSystem)
+        return toMeshlessSystem(comp, ctx.config, ctx.schemeConfig)
     return sampleNoh1D(ctx.spec.nx, ctx.config, ctx.schemeConfig,
                        ctx.SimulationState, ctx.SimulationSystem)
 

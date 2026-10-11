@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Dict, List
 
 from ..caseUtils import SedovSolution, beta, buildSedov, radius
+from ..configurations.meshless import MeshlessConfig
 from ..runner import Case, RunContext, caseMain, registerCase
 from .compressible import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            compressibleDiagnostics, configureCompressible,
@@ -46,9 +47,7 @@ def buildSystem(ctx: RunContext):
     solution = sedovSolution(ctx)
     ctx.scratch['solution'] = solution
     ctx.spec = ctx.spec.merged(tLimit=goalTime(ctx, solution))
-
-    return buildSedov(
-        ctx.SimulationSystem, ctx.SimulationState,
+    kwargs = dict(
         config=ctx.config,
         nx=ctx.spec.nx, dim=ctx.spec.dim, domainExtent=ctx.spec.L,
         periodicDomain=ctx.spec.periodic,
@@ -57,6 +56,12 @@ def buildSystem(ctx: RunContext):
         gamma=ctx.param('gamma'), kernel=ctx.config.kernel,
         targetNeighbors=ctx.config.targetNeighbors,
         dtype=ctx.config.dtype, device=ctx.config.device)
+    if isinstance(ctx.schemeConfig, MeshlessConfig):
+        from ..caseUtils.meshless import toMeshlessSystem
+        from ..systems.compressibleMonaghan import CompressibleState, CompressibleSystem
+        comp = buildSedov(CompressibleSystem, CompressibleState, **kwargs)
+        return toMeshlessSystem(comp, ctx.config, ctx.schemeConfig)
+    return buildSedov(ctx.SimulationSystem, ctx.SimulationState, **kwargs)
 
 
 # -- plotting ----------------------------------------------------------------

@@ -19,7 +19,7 @@ from warpSPHCore.mfm import conserved
 
 from ..systems.meshless import MeshlessState
 
-__all__ = ['buildMeshlessState']
+__all__ = ['buildMeshlessState', 'toMeshlessSystem']
 
 
 def buildMeshlessState(positions, supports, masses, densities, velocities, pressures,
@@ -55,3 +55,27 @@ def buildMeshlessState(positions, supports, masses, densities, velocities, press
     state.soundspeeds = torch.sqrt(gamma * pressures / densities.clamp_min(1e-30))
     state.entropies = pressures / densities.clamp_min(1e-30) ** gamma
     return state
+
+
+def toMeshlessSystem(compSystem, config, schemeConfig):
+    """The shared E2 case path: a built compressible system to the meshless form.
+
+    Each battery case's meshless branch runs the case's own sampler unchanged
+    with CompressibleState / CompressibleSystem (the scheme's own state types
+    would not carry the IC fields the sampler assembles), then hands the result
+    here: the conserved Q from the IC's (m, rho, v, P) (`buildMeshlessState`),
+    the `MeshlessSystem` on the case's domain, and `config.dt` from the
+    dispatcher (the core signal timestep, `modules/timestep/meshless.py`).
+    """
+    from ..modules.timestep import computeTimestep
+    from ..systems.meshless import MeshlessSystem
+
+    st = compSystem.state
+    state = buildMeshlessState(
+        st.positions, st.supports, st.masses,
+        st.densities, st.velocities, st.pressures,
+        float(schemeConfig.gamma),
+        st.kinds, st.materials, st.UIDs)
+    system = MeshlessSystem(state=state, domain=config.domain)
+    config.dt = computeTimestep(system, config, schemeConfig, dt=None)
+    return system

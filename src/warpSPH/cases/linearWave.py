@@ -12,6 +12,7 @@ import os
 from typing import Dict
 
 from ..caseUtils import plotState, sampleLinearWave
+from ..configurations.meshless import MeshlessConfig
 from ..enumTypes import AdaptiveSupportScheme
 from ..runner import Case, RunContext, caseMain, registerCase, resolveEnum
 from .compressible import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
@@ -23,6 +24,22 @@ __all__ = ['linearWaveCase']
 
 
 def buildSystem(ctx: RunContext):
+    if isinstance(ctx.schemeConfig, MeshlessConfig):
+        # the sampler stamps `adaptiveSupportScheme` on the config it is given,
+        # which the meshless scheme config does not carry
+        from ..caseUtils.meshless import toMeshlessSystem
+        from ..configurations import CompressibleSPHConfig
+        from ..systems.compressibleMonaghan import CompressibleState, CompressibleSystem
+        compConfig = CompressibleSPHConfig(
+            gamma=ctx.param('gamma'),
+            adaptiveSupportScheme=resolveEnum(AdaptiveSupportScheme, ctx.param('adaptiveSupportScheme')))
+        comp = sampleLinearWave(
+            ctx.spec.nx, ctx.config, compConfig, CompressibleState, CompressibleSystem,
+            ctx.param('A'), ctx.param('lamda'), ctx.param('c_s'),
+            ctx.param('rho0'), ctx.param('gamma'),
+            nIters=ctx.param('nIters'),
+            supportScheme=resolveEnum(AdaptiveSupportScheme, ctx.param('adaptiveSupportScheme')))
+        return toMeshlessSystem(comp, ctx.config, ctx.schemeConfig)
     return sampleLinearWave(
         ctx.spec.nx, ctx.config, ctx.schemeConfig, ctx.SimulationState, ctx.SimulationSystem,
         ctx.param('A'), ctx.param('lamda'), ctx.param('c_s'),

@@ -23,6 +23,7 @@ from typing import Dict
 import torch
 
 from ..caseUtils import sampleTriplePointEqualMass, sampleTriplePointEqualResolution
+from ..configurations.meshless import MeshlessConfig
 from ..runner import Case, RunContext, caseMain, registerCase
 from .compressible import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            compressibleDiagnostics, compressibleTimestep,
@@ -49,16 +50,30 @@ def buildSystem(ctx: RunContext):
         splitX=ctx.param('splitX'), splitY=ctx.param('splitY'),
         config=ctx.config, schemeConfig=ctx.schemeConfig,
         extraData=dict(ctx.spec.params),
-        SimulationState=ctx.SimulationState, SimulationSystem=ctx.SimulationSystem,
         **states,
     )
+    if isinstance(ctx.schemeConfig, MeshlessConfig):
+        from ..caseUtils.meshless import toMeshlessSystem
+        from ..configurations import CompressibleSPHConfig
+        from ..systems.compressibleMonaghan import CompressibleState, CompressibleSystem
+        # the region sampler reads `schemeConfig.rho0` / `gamma`, which the
+        # meshless scheme config does not carry
+        compConfig = CompressibleSPHConfig(gamma=ctx.param('gamma'), rho0=ctx.param('rho0'))
+        m = dict(common, schemeConfig=compConfig,
+                 SimulationState=CompressibleState, SimulationSystem=CompressibleSystem)
+    else:
+        m = dict(common, SimulationState=ctx.SimulationState, SimulationSystem=ctx.SimulationSystem)
     if ctx.param('equalMass'):
         # sqrt(8) is the density ratio between regions I/III and region II, so
         # sampling region II that much coarser equalises the particle masses.
         ratio = math.sqrt(8)
         nxs = [ctx.spec.nx * ratio, ctx.spec.nx, ctx.spec.nx * ratio, ctx.spec.nx * ratio]
-        return sampleTriplePointEqualMass(nxs=nxs, **common)
-    return sampleTriplePointEqualResolution(nx=ctx.spec.nx, **common)
+        system = sampleTriplePointEqualMass(nxs=nxs, **m)
+    else:
+        system = sampleTriplePointEqualResolution(nx=ctx.spec.nx, **m)
+    if isinstance(ctx.schemeConfig, MeshlessConfig):
+        return toMeshlessSystem(system, ctx.config, ctx.schemeConfig)
+    return system
 
 
 #: The one panel, exported so a notebook can pass it to
