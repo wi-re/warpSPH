@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """Incompressible dam break (0.2 x 0.8 m column in a 1.5 x 0.9 m tank, the boundaries repo's omniSPH comparison) with analytic walls on the calibrated lattice (`calibratedLattice='auto'`), for
-`omniIncompressible` and `divergenceFree`, with boundary particles for reference, against the stored compiled omniSPH series (`~/dev/curvatureBoundaries/.tmp/omni/cmp_dam.npz`).
+`omniIncompressible` and `divergenceFree`, with boundary particles for reference, against the stored compiled omniSPH series (`docs/analytic_boundaries/oracle_data/cmp_dam.npz`).
 
     python scripts/probe_incompressibleAnalyticDambreak.py --scheme dfsph --walls analytic [--tLimit 1.0] [--nh 2.57] [--xsph 1e-4 --boundaryFriction 5e-3] [--out DIR]
 
@@ -16,7 +16,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, 'scripts'))
 from warpSPHBootstrap import bootstrap  # noqa: E402
 
-OMNI = os.path.expanduser('~/dev/curvatureBoundaries/.tmp/omni/cmp_dam.npz')
+OMNI = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'docs', 'analytic_boundaries', 'oracle_data', 'cmp_dam.npz')
 SCHEMES = {'omni': 'omniIncompressible', 'dfsph': 'divergenceFree', 'dfsphref': 'dfsphReference', 'iisph': 'iisph'}
 
 

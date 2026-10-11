@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from plot_sloshingOverlay import ROLL, WINDOWS, smooth  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DELTA = os.path.expanduser('~/dev/curvatureBoundaries/results/deltasph/slosh_B_nx200_series.npz')
+DELTA = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'docs', 'analytic_boundaries', 'oracle_data', 'slosh_B_nx200_series.npz')
 A = os.path.join(REPO, 'examples', 'sloshingTank', 'output', 'analytic_ab_2026-10-09')
 RUNS = [
     ('DeltaSPH2D, analytic walls (C4, Sun shift)', DELTA, 'sensorPressureProbe'),

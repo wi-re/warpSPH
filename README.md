@@ -382,6 +382,20 @@ notebooks stay for exploration; the scripts are what you run unattended.
 
 **Analytic walls (optional).** With the optional package `warpSPHBoundaries` installed (`pip install -e "warpSPH/[boundaries]"`), `dambreak --wallRepresentation analytic` replaces the tank's wall particles by exact
 kernel integrals over the solid (obstacles, mixed scenes, Michel / implicit shifting, free bodies and the whole-step graph included); see [ANALYTIC_BOUNDARIES_PLAN.md](ANALYTIC_BOUNDARIES_PLAN.md).
+Besides δ⁺ the analytic walls are hooked into `omniIncompressible`, `divergenceFree`, `iisph` and `dfsphReference` (flagged EXPERIMENTAL: a `UserWarning` at run time); ACSPH is not hooked and refuses. The solvers of the boundaries repo
+this was validated against (`DeltaSPH2D`, `DFSPH2D`) were retired into warpSPH on 2026-10-11 and are kept at that repo's git tag `oracle-solvers-2026-10-11` ([record](docs/analytic_boundaries/retirement_2026-10-11/README.md)).
+
+The viscous, low-Reynolds group has its own cases and options (evidence: [docs/analytic_boundaries/](docs/analytic_boundaries/)):
+
+| case / option | what it does |
+|---|---|
+| `periodicChannel`, `stokesArray`, `taylorCouette`, `cylinderWake` | plane Poiseuille / Couette, a periodic array of disks or squares (Stokes drag `K`), Taylor-Couette torque, the cylinder wake at Re 20-100; each has a `scripts/probe_<case>.py` that runs it with video |
+| `schemeConfig.bodyForce = (fx, fy)` | uniform acceleration in the momentum equation only (not in the DDT hydrostatic term, no-penetration or the shift reference); `bodyForceAtWall` (default on) also puts it in the wall pressure condition `dp/dn = rho (g + f - a_w) . n` |
+| `schemeConfig.analyticPeriodicWalls` | the wall integrals take the nearest periodic image of the body, so a wall may span a periodic box (set by the periodic cases) |
+| `fluidViscosity='morris'`, `complementMoments`, `wallViscosityClosure='noslipMoment'` | the Morris physical viscosity with the no-slip wall closure (moment tables of the solid); `pressureConsistent` removes the force a uniform pressure exerts through the lattice-vs-wall residual, `wallPressureViscous` adds the viscous term to the wall pressure condition |
+| `modules.boundaryConditions.PinnedBand` / `pinnedBandBC` | a band of fluid particles held at the stream velocity (free stream of the wake): acceleration zeroed, velocity reset after the step, no shift inside (`cylinderWake`) |
+| case parameter `wallCut` | the distance from a body wall inside which the case's lattice is cut (`stokesArray`, `taylorCouette`); `None` takes the rule of the scheme (δ⁺: half a spacing; incompressible loops: the calibrated first-row distance). Compare against a reference only on the identical lattice |
+| graph options | the δ⁺ analytic-wall step is replayed from a CUDA graph (`--cudaGraph`; a spinning axisymmetric body needs `schemeConfig.analyticSpinAxisymmetric`); `WARPSPH_COMPILE_WALLS=1` (or `schemeConfig.compileWalls`) `torch.compile`s the no-slip closure. The omni / `divergenceFree` loops are not graphed (sync-heavy) |
 
 ### Incompressible (DFSPH)
 

@@ -11,6 +11,7 @@ importAll()
 from warpSPH.runner import getCase, run
 from warpSPH.runner.caseSpec import CaseSpec
 import warpSPH.schemes.omniIncompressible as O
+import _oracle  # exits with the checkout instructions when the retired solver layer is absent
 from warpSPHBoundaries.sim.dfsph2d import lattice_calibration
 R='/home/lu26029/dev/curvatureBoundaries/.tmp/omni/runs'
 ref=np.load(R+'/F_surf_r5.npz'); omni=np.load(R+'/omni_r5.npz')

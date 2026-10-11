@@ -13,6 +13,7 @@ from warpSPH.runner import getCase, run, buildContext
 from warpSPH.runner.caseSpec import CaseSpec
 from warpSPH.modules.density.density import computeDensities
 import warpSPH.schemes.omniIncompressible as O
+import _oracle  # exits with the checkout instructions when the retired solver layer is absent
 from warpSPHBoundaries.sim.dfsph2d import DFSPH2D, DFSPHConfig, domain_scene
 off=float(sys.argv[1]) if len(sys.argv)>1 else 0.5
 nSteps=int(sys.argv[2]) if len(sys.argv)>2 else 1

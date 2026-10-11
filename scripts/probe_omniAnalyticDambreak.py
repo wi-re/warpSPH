@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """omniIncompressible dam break (0.2 x 0.8 m column in a 1.5 x 0.9 m tank, the boundaries repo's omniSPH comparison) with boundary particles and with analytic walls,
-against the stored omniSPH series (`~/dev/curvatureBoundaries/.tmp/omni/cmp_dam.npz`: compiled omniSPH, 2093 particles, walls one spacing outside the block).
+against the stored omniSPH series (`docs/analytic_boundaries/oracle_data/cmp_dam.npz`: compiled omniSPH, 2093 particles, walls one spacing outside the block).
 
     python scripts/probe_omniAnalyticDambreak.py [--times 0.1 0.2 0.3 0.4 0.5 0.6] [--offsets 0.5 0.05] [--nx 100] [--video]
 
@@ -19,7 +19,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, 'scripts'))
 from warpSPHBootstrap import bootstrap  # noqa: E402
 
-OMNI = os.path.expanduser('~/dev/curvatureBoundaries/.tmp/omni/cmp_dam.npz')
+OMNI = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'docs', 'analytic_boundaries', 'oracle_data', 'cmp_dam.npz')
 
 
 def omniRows(times):

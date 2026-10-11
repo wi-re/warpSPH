@@ -40,6 +40,7 @@ def main():
     import warpSPH.schemes.omniIncompressible as O
     from warpSPHBoundaries.scene.implicitBodies import DiskBody
     from warpSPHBoundaries.scene.scene import Body, DiskArrayRep, ImplicitRep, Scene
+    import _oracle  # exits with the checkout instructions when the retired solver layer is absent
     from warpSPHBoundaries.sim.dfsph2d import DFSPH2D, DFSPHConfig
 
     case = getCase('taylorCouette')

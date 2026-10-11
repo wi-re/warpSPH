@@ -9,8 +9,9 @@ from warpSPH.cases import importAll
 importAll()
 from warpSPH.runner import getCase, run
 from warpSPH.runner.caseSpec import CaseSpec
+import _oracle  # exits with the checkout instructions when the retired solver layer is absent
 from warpSPHBoundaries.sim.dfsph2d import DFSPH2D, DFSPHConfig, domain_scene
-d=np.load('/home/lu26029/dev/curvatureBoundaries/.tmp/omni/cmp_dam.npz')
+d=np.load('/home/lu26029/dev/warpSPH/docs/analytic_boundaries/oracle_data/cmp_dam.npz')
 # omniSPH lattice: centres on the block edges
 nxo,nyo=23,91; spx=0.2/22; spy=0.8/90
 X,Y=np.meshgrid(0.1+spx*np.arange(nxo),0.1+spy*np.arange(nyo),indexing='ij'); xo=np.stack([X.ravel(),Y.ravel()],1)

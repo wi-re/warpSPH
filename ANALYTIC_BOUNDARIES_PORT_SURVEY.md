@@ -1,7 +1,7 @@
 # Analytic boundaries — survey of the boundaries repo's solvers, for moving them into warpSPH's modules
 
 > Part of [ANALYTIC_BOUNDARIES_PLAN.md](ANALYTIC_BOUNDARIES_PLAN.md) (direction of 2026-10-09: the solver code in `warpSPHBoundaries` is retired once its schemes live in warpSPH). Row in [PLANS.md](PLANS.md).
-> Survey date 2026-10-09. Source: `~/dev/curvatureBoundaries` (package `warpSPHBoundaries`, `src/warpSPHBoundaries/sim/`). Read-only; nothing here is changed yet.
+> Survey date 2026-10-09. Source: `~/dev/curvatureBoundaries` (package `warpSPHBoundaries`, `src/warpSPHBoundaries/sim/`), read-only at the time. **Since 2026-10-11 `sim/` exists only at that repo's git tag `oracle-solvers-2026-10-11`** (retired, E7: `docs/analytic_boundaries/retirement_2026-10-11/README.md`); the paths below refer to the tag. Sections 1-6b are the pre-port survey and stay as written.
 
 **Read in full:** `DeltaSPH2D.rhs` (`sim/deltasph2d.py:372-596`), `DFSPHConfig` and `DFSPH2D.step`, `DeltaSPHConfig`, the porting notes and upstreaming plan, the warpSPH side (`modules/analyticBoundary/`, `schemes/deltaSPH.py` hooks, `boundary/provider.py`).
 **Only skimmed (names and docstrings):** `DeltaSPH2D.shift` / `no_penetration` / `_project` / `settle`, `DFSPH2D._solve*` / `_solve_compact`, `wallmoments.py`, `wallclosure.py`, `projection.py`, `graphstep.py`. Anything below about those is marked *(unverified)*.
@@ -92,7 +92,7 @@ The boundaries repo's own finding: `dfsph` free-surface behaviour carries a ~10 
 
 **A trap found on the way:** the first version of `computeMomentum(wall=None)` resolved the wall while `drift_rates` still added the wall flux itself: a double count (dam break differed at 10 m/s level). The fingerprint caught it. Any caller that adds a wall term next to a module that now adds it is a double count: when moving a term into a module, move *every* caller's private copy at the same time (grep the module's callers).
 
-## 6c. Port status at the end of 2026-10-09
+## 6c. Port status at the end of 2026-10-09 (rows updated 2026-10-11 for stage 3 and the retirement)
 
 | piece of the boundaries repo's solvers | in warpSPH | state |
 |---|---|---|
@@ -104,9 +104,9 @@ The boundaries repo's own finding: `dfsph` free-surface behaviour carries a ~10 
 | ACSPH on analytic walls | - | not hooked (refused; experimental scheme, for another time) |
 | `DFSPH2D` extras: wall `linear` (MLS) closure, `boundaryFriction`, XSPH | `wallPressureMLS.py` (`analyticWallPressure='mls'`), `modules/xsph/` (`computeXSPH` = XSPH, `computeBoundaryFriction`) for omni and divergenceFree | **done**, each against `DFSPH2D` term by term (3e-5, 2e-5, XSPH 1.8 % by the weight form); MLS is the noisier closure (also in `DFSPH2D`), hydrostatic stays default; all off by default |
 | `DFSPH2D` extras of stage 2: compact CG projection (robin wall), Fickian shifting, free-surface Dirichlet, closed-domain preset / gauge, moving bodies, loads | `modules/incompressible/compactProjection.py`, `modules/shifting/fickian.py`, `_bookWallLoads` | **done 2026-10-09** (`docs/analytic_boundaries/compact_projection_2026-10-09`); the oracle's mirror wall / difference gradients (an unfinished free-surface branch there) and `bodyForce` (channel group) are not ported |
-| `DeltaSPH2D` extras: no-slip wall viscosity family, `pressureConsistent`, `wallPressureViscous`, Morris + wall, periodic images, `pinned`, `bodyForce`, momentum / torque bookkeeping | - | **deferred** by decision (channel-flow group, after the free-surface cases) |
+| `DeltaSPH2D` extras: no-slip wall viscosity family, `pressureConsistent`, `wallPressureViscous`, Morris + wall, periodic images, `pinned`, `bodyForce`, momentum / torque bookkeeping | `modules/analyticBoundary/{wallViscosity,wallMoments}.py`, `modules/gravity/bodyForce.py`, `modules/boundaryConditions/pinned.py`, cases `periodicChannel` / `stokesArray` / `taylorCouette` / `cylinderWake` | **done 2026-10-09/10 (stage 3, E1-E6)**; the alpha-weight tables and `cornerWedgeTables` are not ported |
 | `settle` / `pack` (body-fitted packing) | - | **excluded** by decision |
-| retiring the boundaries repo's solver code | - | **gate met 2026-10-09** (delta+ 7 s sloshing against `DeltaSPH2D`'s stored series and the omni loop against `DFSPH2D`: `docs/analytic_boundaries/delta_sloshing_gate_2026-10-09`), checklist written, **not executed: the owner decides** (the channel group, still ported nowhere, keeps `wallclosure` / `wallmoments`) |
+| retiring the boundaries repo's solver code | - | **done 2026-10-11** (gate met 2026-10-09, `docs/analytic_boundaries/delta_sloshing_gate_2026-10-09`; channel group ported in stage 3; `docs/analytic_boundaries/retirement_2026-10-11`): `sim/` removed from the boundaries repo, kept at its tag `oracle-solvers-2026-10-11` |
 
 Open problems tied to the port (OPEN_PROBLEMS 31): the omni Jacobi stability limit that tightens with the support (omega 0.3 default; 0.5 diverges at n_h 4); the density-solve instability at free surfaces when the rest lattice measures >= rho0 (avoided by the calibrated mass); the third sloshing impact overshoot (+163 %) and the 10-55 ms early arrival in every run; the sloshing peak scaling with n_h.
 Tests: `tests/test_analyticLattice.py`, `test_analyticOmni.py`, `test_analyticRefusal.py` (+ the earlier `test_analytic*`), `scripts/check_imports.py`, a bitwise fingerprint of four short runs (not a repo test) for the delta+ path.
