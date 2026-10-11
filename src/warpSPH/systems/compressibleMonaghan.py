@@ -34,7 +34,7 @@ class CompressibleState(BaseState):
     UIDcounter : int = constant(tags=('particle_UIDcounter',))
 
     internalEnergies : torch.Tensor = integrated('dudt', tags=('internalEnergy',))
-    totalEnergies : torch.Tensor = constant(tags=('energy',), default=None)
+    totalEnergies : torch.Tensor = integrated('dEdt', tags=('energy',), default=None)
     entropies : torch.Tensor = constant(tags=('entropy',), default=None)
     pressures : torch.Tensor = constant(tags=('pressure',), default=None)
     soundspeeds : torch.Tensor = constant(tags=('soundSpeed',), default=None)
@@ -87,7 +87,7 @@ class CompressibleSystem(BaseIntegrationSystem):
         return update_component(self, update, spec, 'velocity', 'velocity_derivative')
     def apply_quantity_update(self, update, spec: ComponentUpdateSpec, **kwargs):
         updatedsystem = update_component(self, update, spec, 'internalEnergy', 'internalEnergy_derivative')
-        # updatedsystem = update_component(updatedsystem, update, spec, 'totalEnergy', 'totalEnergy_derivative')
+        updatedsystem = update_component(updatedsystem, update, spec, 'energy', 'totalEnergy_derivative')
         # updatedsystem = update_component(updatedsystem, update, spec, 'density', 'density_derivative')
         return updatedsystem
 
@@ -111,8 +111,7 @@ class CompressibleSystem(BaseIntegrationSystem):
         # it back to the initial value and the wall would read as rest density
         self.state.masses.copy_(lastState.masses)
 
-        # Compressible system specific attributes (internal eneryg is integrated)
-        self.state.totalEnergies.copy_(lastState.totalEnergies)
+        # Compressible system specific attributes (internal and total energy are integrated, not copied)
         self.state.entropies.copy_(lastState.entropies)
         self.state.pressures.copy_(lastState.pressures)
         self.state.soundspeeds.copy_(lastState.soundspeeds)

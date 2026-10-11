@@ -140,7 +140,8 @@ def sampleLinearWave(
     simulationState.pressures = P_
     simulationState.soundspeeds = c_
     simulationState.entropies = A_
-    simulationState.totalEnergies = u_ + torch.linalg.norm(v_, dim = -1)**2/2 
+    # total (not specific) energy: `totalEnergies` is integrated with the total rate `dEdt` (X3)
+    simulationState.totalEnergies = (u_ + torch.linalg.norm(v_, dim = -1)**2/2) * simulationState.masses 
 
     simulationState.velocities = v_
 
