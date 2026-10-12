@@ -223,7 +223,7 @@ def test_bannerDescribesTheMeshlessScheme():
     from warpSPH.runner.report import _meshlessDescription
 
     assert _meshlessDescription(MFMConfig()) == \
-        'MUSCL order 2 | N_ngb 7 | temporal ssprk | closure project (auto)'
+        'MUSCL order 2 | N_ngb 7 | temporal ssprk | closure none (auto)'
     assert 'temporal hancock' in _meshlessDescription(MFVConfig())
     pinned = MFMConfig()
     pinned.temporalScheme = 'kdk'

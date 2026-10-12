@@ -107,7 +107,7 @@ def make_context(n, nngb, device, mode, order, kernel, jitter, seed):
     # the step owns its full time step (D4), so it must run under a single-evaluation
     # integrator; and G1 is the port-fidelity gate, so pin the core driver's temporal scheme
     config.integrationScheme = IntegrationSchemeType.forwardEuler
-    schemeConfig = MeshlessConfig(mode=mode, order=order, nngb=nngb, cfl=CFL, gamma=G,
+    schemeConfig = MeshlessConfig(closure='project', cflLength='support', mode=mode, order=order, nngb=nngb, cfl=CFL, gamma=G,
                                   temporalScheme='hancock')
     system = MeshlessSystem(state=state, domain=dom)
     return system, config, schemeConfig, dom, box, centre

@@ -235,15 +235,23 @@ def writeInitialData(
 
     uniqueParticles = True
 
+    def _hostValue(value):
+        # a case may stash a device tensor in its extra data (tgv-wc: a sound speed); h5py cannot take one
+        return value.detach().cpu().numpy() if isinstance(value, torch.Tensor) else value
+
     for key, value in extraData.items():
+        if value is None:
+            continue   # an unset case param (sod: viscositySwitch=None); HDF5 has no None attribute
         if not isinstance(value, dict):
-            outFile.attrs[key] = value
+            outFile.attrs[key] = _hostValue(value)
         else:
             for subkey, subvalue in value.items():
+                if subvalue is None:
+                    continue
                 if isinstance(subvalue, (list, np.ndarray)):
                     outFile.attrs[f'{key}_{subkey}'] = np.array(subvalue)
                 else:
-                    outFile.attrs[f'{key}_{subkey}'] = subvalue
+                    outFile.attrs[f'{key}_{subkey}'] = _hostValue(subvalue)
 
     outFile.attrs['uniqueParticles'] = uniqueParticles
     outFile.attrs['exportInterval'] = args.exportInterval
@@ -272,11 +280,12 @@ def writeInitialData(
         cGroup.create_dataset('particleBoundaryDistances', data=rigidBody.particleBoundaryDistances.cpu().numpy())
         cGroup.create_dataset('particleBoundaryNormals', data=rigidBody.particleBoundaryNormals.cpu().numpy())
 
-        cGroup.create_dataset('particlePositions', data=rigidBody.ghostParticlePositions.cpu().numpy())
-        cGroup.create_dataset('particleIndices', data=rigidBody.ghostParticleIndices.cpu().numpy())
-        cGroup.create_dataset('particleUIDs', data=rigidBody.ghostParticleUIDs.cpu().numpy())
-        cGroup.create_dataset('particleBoundaryDistances', data=rigidBody.ghostParticleBoundaryDistances.cpu().numpy())
-        cGroup.create_dataset('particleBoundaryNormals', data=rigidBody.ghostParticleBoundaryNormals.cpu().numpy())
+        # the ghost datasets reused the body's names, so any rigid body with ghosts failed with "name already exists"
+        cGroup.create_dataset('ghostParticlePositions', data=rigidBody.ghostParticlePositions.cpu().numpy())
+        cGroup.create_dataset('ghostParticleIndices', data=rigidBody.ghostParticleIndices.cpu().numpy())
+        cGroup.create_dataset('ghostParticleUIDs', data=rigidBody.ghostParticleUIDs.cpu().numpy())
+        cGroup.create_dataset('ghostParticleBoundaryDistances', data=rigidBody.ghostParticleBoundaryDistances.cpu().numpy())
+        cGroup.create_dataset('ghostParticleBoundaryNormals', data=rigidBody.ghostParticleBoundaryNormals.cpu().numpy())
 
         cGroup.attrs['bodyID'] = rigidBody.bodyID
         cGroup.attrs['kind'] = rigidBody.kind.value

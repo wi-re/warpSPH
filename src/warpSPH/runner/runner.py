@@ -894,7 +894,12 @@ def _showStep(progress, i: int, nSteps: Optional[int], row: Dict[str, float],
 def _writer(progress):
     """A flushed line to the terminal that does not collide with the bar."""
     if progress is not None:
-        return lambda message: progress.write(message)
+        def write(message):
+            # tqdm.write goes to Python's block-buffered stdout: behind a
+            # pipe (`| stdbuf -oL tr`) the line would only appear at exit.
+            progress.write(message)
+            sys.stdout.flush()
+        return write
     return lambda message: print(message, flush=True)
 
 

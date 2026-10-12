@@ -41,7 +41,7 @@ def make_frontend(st0, dom, kernel, device, mode, order, nngb, cfl, scheme):
     config = SimulationConfig(device=device, dtype=torch.float64, domain=dom,
                               dim=1, kernel=kernel)
     config.integrationScheme = IntegrationSchemeType.forwardEuler
-    schemeConfig = MeshlessConfig(mode=mode, order=order, nngb=nngb, cfl=cfl,
+    schemeConfig = MeshlessConfig(mode=mode, order=order, nngb=nngb, cfl=cfl, cflLength='support', closure='project',
                                   gamma=d4.G, temporalScheme=scheme)
     return system, config, schemeConfig
 

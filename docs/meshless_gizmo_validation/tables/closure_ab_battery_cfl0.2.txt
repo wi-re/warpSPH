@@ -1,0 +1,52 @@
+sod MFM project | t_end=0.1208 steps=39 msPerStep=55.48 finite=True drift=0 keRatio=nan vmaxRatio=nan diverged=False stop=None L1rho=0.007593
+sod MFM none | t_end=0.1227 steps=42 msPerStep=6.512 finite=True drift=0 keRatio=nan vmaxRatio=nan diverged=False stop=None L1rho=0.008348
+sod MFV project | t_end=0.1208 steps=39 msPerStep=23.06 finite=True drift=0 keRatio=nan vmaxRatio=nan diverged=False stop=None L1rho=0.007681
+sod MFV none | t_end=0.1212 steps=44 msPerStep=3.922 finite=True drift=0 keRatio=nan vmaxRatio=nan diverged=False stop=None L1rho=0.01052
+noh MFM project | t_end=0.05368 steps=7 msPerStep=25.69 finite=True drift=0 keRatio=0.9422 vmaxRatio=nan diverged=False stop=None
+noh MFM none | t_end=0.05096 steps=6 msPerStep=7.449 finite=True drift=5.96e-08 keRatio=0.9225 vmaxRatio=nan diverged=False stop=None
+noh MFV project | t_end=0.05145 steps=7 msPerStep=12.18 finite=True drift=0 keRatio=0.9443 vmaxRatio=nan diverged=False stop=None
+noh MFV none | t_end=0.05475 steps=7 msPerStep=4.429 finite=True drift=0 keRatio=0.9206 vmaxRatio=nan diverged=False stop=None
+shearingNoh MFM project | t_end=0.1027 steps=11 msPerStep=51.87 finite=True drift=1.413e-07 keRatio=0.9908 vmaxRatio=nan diverged=False stop=None
+shearingNoh MFM none | t_end=0.1057 steps=11 msPerStep=7.513 finite=True drift=7.064e-08 keRatio=0.9866 vmaxRatio=nan diverged=False stop=None
+shearingNoh MFV project | t_end=0.1056 steps=12 msPerStep=8.946 finite=True drift=7.064e-08 keRatio=0.9909 vmaxRatio=nan diverged=False stop=None
+shearingNoh MFV none | t_end=0.104 steps=11 msPerStep=4.73 finite=True drift=7.064e-08 keRatio=0.9859 vmaxRatio=nan diverged=False stop=None
+sedov MFM project | t_end=0.4863 steps=83 msPerStep=57.58 finite=True drift=5.96e-08 keRatio=nan vmaxRatio=nan diverged=False stop=None
+sedov MFM none | t_end=0.481 steps=59 msPerStep=11.92 finite=True drift=5.96e-08 keRatio=nan vmaxRatio=nan diverged=False stop=None
+sedov MFV project | t_end=0.4816 steps=234 msPerStep=25.85 finite=True drift=5.96e-08 keRatio=nan vmaxRatio=nan diverged=False stop=None
+sedov MFV none | t_end=0.4821 steps=55 msPerStep=5.441 finite=True drift=5.96e-08 keRatio=nan vmaxRatio=nan diverged=False stop=None
+sod2d MFM project | t_end=0.1549 steps=16 msPerStep=25.03 finite=True drift=0 keRatio=nan vmaxRatio=nan diverged=False stop=None
+sod2d MFM none | t_end=0.1513 steps=16 msPerStep=7.642 finite=True drift=0 keRatio=nan vmaxRatio=nan diverged=False stop=None
+sod2d MFV project | t_end=0.1549 steps=16 msPerStep=13.82 finite=True drift=1.078e-07 keRatio=nan vmaxRatio=nan diverged=False stop=None
+sod2d MFV none | t_end=0.1588 steps=17 msPerStep=4.775 finite=True drift=0 keRatio=nan vmaxRatio=nan diverged=False stop=None
+linearWave MFM project | t_end=1.007 steps=139 msPerStep=63.81 finite=True drift=1.987e-07 keRatio=3.001 vmaxRatio=nan diverged=False stop=None L1rho_over_A=2.608
+linearWave MFM none | t_end=1.007 steps=139 msPerStep=6.806 finite=True drift=1.987e-07 keRatio=3.001 vmaxRatio=nan diverged=False stop=None L1rho_over_A=2.608
+linearWave MFV project | t_end=1.007 steps=139 msPerStep=4.294 finite=True drift=6.624e-08 keRatio=2.884 vmaxRatio=nan diverged=False stop=None L1rho_over_A=7.062
+linearWave MFV none | t_end=1.007 steps=139 msPerStep=4.033 finite=True drift=6.624e-08 keRatio=2.884 vmaxRatio=nan diverged=False stop=None L1rho_over_A=7.062
+kh64 MFM project | t_end=1.001 steps=174 msPerStep=14.33 finite=True drift=0 keRatio=0.9644 vmaxRatio=1.034 diverged=False stop=None
+kh64 MFM none | t_end=1.001 steps=174 msPerStep=6.781 finite=True drift=0 keRatio=0.9654 vmaxRatio=1.032 diverged=False stop=None
+kh64 MFV project | t_end=1.001 steps=173 msPerStep=7.931 finite=True drift=0 keRatio=0.9643 vmaxRatio=1.036 diverged=False stop=None
+kh64 MFV none | t_end=1.003 steps=173 msPerStep=3.979 finite=True drift=0 keRatio=0.9655 vmaxRatio=1.063 diverged=False stop=None
+triplePoint MFM project | t_end=0.2 steps=20 msPerStep=25.37 finite=True drift=0 keRatio=nan vmaxRatio=nan diverged=False stop=None
+triplePoint MFM none | t_end=0.2 steps=20 msPerStep=11.32 finite=True drift=0 keRatio=nan vmaxRatio=nan diverged=False stop=None
+triplePoint MFV project | t_end=0.2 steps=20 msPerStep=15.24 finite=True drift=8.35e-08 keRatio=nan vmaxRatio=nan diverged=False stop=None
+triplePoint MFV none | t_end=0.2 steps=20 msPerStep=7.13 finite=True drift=8.35e-08 keRatio=nan vmaxRatio=nan diverged=False stop=None
+shearBox MFM project | t_end=1.002 steps=107 msPerStep=13.12 finite=True drift=7.629e-08 keRatio=0.9981 vmaxRatio=nan diverged=False stop=None
+shearBox MFM none | t_end=1.002 steps=107 msPerStep=6.792 finite=True drift=0 keRatio=0.9981 vmaxRatio=nan diverged=False stop=None
+shearBox MFV project | t_end=1.002 steps=107 msPerStep=7.127 finite=True drift=7.629e-08 keRatio=0.9981 vmaxRatio=nan diverged=False stop=None
+shearBox MFV none | t_end=1.002 steps=107 msPerStep=4.028 finite=True drift=7.629e-08 keRatio=0.9981 vmaxRatio=nan diverged=False stop=None
+yee MFM project | t_end=2.01 steps=201 msPerStep=30.91 finite=True drift=7.544e-08 keRatio=0.8645 vmaxRatio=nan diverged=False stop=None
+yee MFM none | t_end=2.01 steps=201 msPerStep=7 finite=True drift=0 keRatio=2.944 vmaxRatio=nan diverged=False stop=None
+yee MFV project | t_end=2.01 steps=201 msPerStep=10.75 finite=True drift=0 keRatio=0.8308 vmaxRatio=nan diverged=False stop=None
+yee MFV none | t_end=2.01 steps=201 msPerStep=4.133 finite=True drift=0 keRatio=2.841 vmaxRatio=nan diverged=False stop=None
+gresho48 MFM project | t_end=3.002 steps=652 msPerStep=14.1 finite=True drift=1.107e-07 keRatio=0.6851 vmaxRatio=nan diverged=False stop=None L1v=0.06577
+gresho48 MFM none | t_end=3.004 steps=584 msPerStep=6.762 finite=True drift=1.107e-07 keRatio=0.6891 vmaxRatio=nan diverged=False stop=None L1v=0.06861
+gresho48 MFV project | t_end=3.002 steps=709 msPerStep=8.207 finite=True drift=0 keRatio=0.825 vmaxRatio=nan diverged=False stop=None L1v=0.05337
+gresho48 MFV none | t_end=3.001 steps=602 msPerStep=4 finite=True drift=0 keRatio=0.7234 vmaxRatio=nan diverged=False stop=None L1v=0.1266
+gresho64 MFM project | t_end=3 steps=864 msPerStep=14.66 finite=True drift=1.107e-07 keRatio=0.7775 vmaxRatio=nan diverged=False stop=None L1v=0.04162
+gresho64 MFM none | t_end=3.003 steps=774 msPerStep=6.942 finite=True drift=1.107e-07 keRatio=0.7815 vmaxRatio=nan diverged=False stop=None L1v=0.04896
+gresho64 MFV project | t_end=3.003 steps=931 msPerStep=8.46 finite=True drift=1.107e-07 keRatio=0.9316 vmaxRatio=nan diverged=False stop=None L1v=0.03386
+gresho64 MFV none | t_end=3.002 steps=806 msPerStep=4.106 finite=True drift=1.107e-07 keRatio=0.8071 vmaxRatio=nan diverged=False stop=None L1v=0.1312
+gresho96 MFM project | t_end=3.002 steps=1299 msPerStep=15.56 finite=True drift=0 keRatio=0.8649 vmaxRatio=nan diverged=False stop=None L1v=0.03046
+gresho96 MFM none | t_end=3.002 steps=1149 msPerStep=6.843 finite=True drift=0 keRatio=0.8614 vmaxRatio=nan diverged=False stop=None L1v=0.03143
+gresho96 MFV project | t_end=3.002 steps=1409 msPerStep=9.228 finite=True drift=1.107e-07 keRatio=0.984 vmaxRatio=nan diverged=False stop=None L1v=0.02464
+gresho96 MFV none | t_end=3.002 steps=1221 msPerStep=4.012 finite=True drift=0 keRatio=0.9065 vmaxRatio=nan diverged=False stop=None L1v=0.1178

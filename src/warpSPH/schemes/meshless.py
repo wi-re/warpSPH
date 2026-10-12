@@ -36,7 +36,7 @@ from ..systems.meshless import MeshlessSystem, MeshlessSystemUpdate
 from warpSPHCore.mfm import MeshlessWarp, primitives
 
 __all__ = ['meshlessStep', 'supports_from_volume', 'resolve_temporal_scheme',
-           'validateIntegrationScheme']
+           'validateIntegrationScheme', 'stashGeometry']
 
 #: unit-ball volumes per dimension: the h = (N_ngb V / C_nu)^(1/nu) normalisation
 BALL = {1: 2.0, 2: math.pi, 3: 4.0 * math.pi / 3.0}
@@ -80,6 +80,40 @@ def validateIntegrationScheme(config: SimulationConfig) -> None:
         f'config.integrationScheme to IntegrationSchemeType.forwardEuler.')
 
 
+#: the timestep's geometry (`modules/timestep/meshless.computeTimestep`, built with closure 'none' at the
+#: start-of-step positions / supports), handed to the step that follows so the step's first build does not
+#: repeat the radius search, moments and inversions: the step only adds the closure solve
+#: (`MeshlessWarp.close`). One slot, consumed by the next step; a mismatch (other positions, supports,
+#: domain, kernel or condition limits) falls back to a fresh build.
+_pendingGeometry = None
+
+
+def stashGeometry(positions, supports, domain, kernel, schemeConfig, geometry):
+    """Offer `geometry` (built at `positions` / `supports`) to the next `meshlessStep`."""
+    global _pendingGeometry
+    _pendingGeometry = (positions, positions._version, supports, supports._version, domain, kernel,
+                        schemeConfig.condMax, schemeConfig.faceCondMax, geometry)
+
+
+def _takeGeometry(positions, supports, domain, kernel, schemeConfig):
+    global _pendingGeometry
+    pending, _pendingGeometry = _pendingGeometry, None
+    if pending is None:
+        return None
+    pos, posVersion, sup, supVersion, dom, ker, condMax, faceCondMax, geometry = pending
+    if dom is not domain or ker != kernel or condMax != schemeConfig.condMax or \
+            faceCondMax != schemeConfig.faceCondMax:
+        return None
+    if pos is positions and sup is supports and pos._version == posVersion and sup._version == supVersion:
+        return geometry
+    if pos.shape != positions.shape or sup.shape != supports.shape:
+        return None
+    # another tensor object (e.g. the integrator's copy of the state): compare the values
+    if bool(torch.equal(pos, positions)) and bool(torch.equal(sup, supports)):
+        return geometry
+    return None
+
+
 def wrap(pos, domain):
     """Wrap positions into the domain (periodic axes only)."""
     L = domain.max - domain.min
@@ -117,7 +151,8 @@ def meshlessStep(
             cg_iters=schemeConfig.cgIters, lam0=lam0, guards=True,
             face_cond_max=schemeConfig.faceCondMax, centred_weights=True, area_cap=False,
             closure_solver=schemeConfig.closureSolver,
-            mg_min_particles=schemeConfig.mgMinParticles, mg_max_coarse=schemeConfig.mgMaxCoarse)
+            mg_min_particles=schemeConfig.mgMinParticles, mg_max_coarse=schemeConfig.mgMaxCoarse,
+            closure_cap=schemeConfig.closureCap)
 
     def rates_at(g, Q):
         rho_g, vel_g, P_g = primitives(Q, g.volume, gamma)
@@ -126,11 +161,20 @@ def meshlessStep(
             beta_min=schemeConfig.betaMin, beta_max=schemeConfig.betaMax,
             cond_crit=schemeConfig.condCrit, psi1=schemeConfig.psi1, psi2=schemeConfig.psi2,
             timeCentredFrame=schemeConfig.timeCentredFrame, retry=schemeConfig.retry,
-            massFluxLimit=schemeConfig.massFluxLimit)
+            massFluxLimit=schemeConfig.massFluxLimit, faceGuard=schemeConfig.faceGuard)
 
     # 1. the start-of-step geometry: build (or rebuild) the graph, warm-starting the closure
-    #    solve from the previous step's lam
-    geom = build(currentState.positions, currentState.supports, currentState.lam)
+    #    solve from the previous step's lam. The timestep's geometry at the same positions /
+    #    supports is reused when it is there (only the closure solve is added).
+    geom = _takeGeometry(currentState.positions, currentState.supports, domain, config.kernel, schemeConfig)
+    if geom is None:
+        geom = build(currentState.positions, currentState.supports, currentState.lam)
+    elif schemeConfig.closure == 'project':
+        geom.close(closure_power=schemeConfig.closurePower, cg_tol=schemeConfig.cgTol,
+                   cg_iters=schemeConfig.cgIters, lam0=currentState.lam,
+                   closure_solver=schemeConfig.closureSolver,
+                   mg_min_particles=schemeConfig.mgMinParticles, mg_max_coarse=schemeConfig.mgMaxCoarse,
+                   closure_cap=schemeConfig.closureCap)
 
     # 2. the primitives from the conserved Q and the geometric volume
     rho, vel, P = primitives(currentState.Q, geom.volume, gamma)
@@ -159,13 +203,35 @@ def meshlessStep(
         # positions. dQdt is exactly the rate, so the integrator's Q += dt*dQdt is that Euler
         # update, and dxdt is the time-centred velocity, so pos += dt*dxdt is the midpoint
         # drift.
-        dQdt = geom.rates(
-            rho, vel, P, gamma, dt=dt, mode=schemeConfig.mode, order=schemeConfig.order,
-            beta_min=schemeConfig.betaMin, beta_max=schemeConfig.betaMax,
-            cond_crit=schemeConfig.condCrit, psi1=schemeConfig.psi1, psi2=schemeConfig.psi2,
-            timeCentredFrame=schemeConfig.timeCentredFrame, retry=schemeConfig.retry,
-            massFluxLimit=schemeConfig.massFluxLimit)
-        Qn = Q + dt * dQdt
+        def hancockRates(massFluxLimit):
+            return geom.rates(
+                rho, vel, P, gamma, dt=dt, mode=schemeConfig.mode, order=schemeConfig.order,
+                beta_min=schemeConfig.betaMin, beta_max=schemeConfig.betaMax,
+                cond_crit=schemeConfig.condCrit, psi1=schemeConfig.psi1, psi2=schemeConfig.psi2,
+                timeCentredFrame=schemeConfig.timeCentredFrame, retry=schemeConfig.retry,
+                massFluxLimit=massFluxLimit, faceGuard=schemeConfig.faceGuard)
+
+        if schemeConfig.mfvUpdate == 'primitive' and schemeConfig.mode.upper() == 'MFV':
+            # GIZMO's update (hydro_toplevel.cc, kicks.cc): the velocity and the internal energy are
+            # kicked from the *full* (uncapped) fluxes; only the mass sees the per-pair 10 % cap,
+            # floored at -0.99 m. The momentum / energy flux are independent of the mass cap, so the
+            # capped and the full rates differ only in column 0.
+            full = hancockRates(0.0)
+            capped = hancockRates(schemeConfig.massFluxLimit)
+            m = Q[:, 0:1]
+            Fm, Fp, Fe = full[:, 0:1], full[:, 1:-1], full[:, -1:]
+            dm = torch.maximum(dt * capped[:, 0:1], -0.99 * m)
+            mNew = m + dm
+            a = (Fp - vel * Fm) / m
+            dUdt = (Fe - (vel * Fp).sum(-1, keepdim=True) + 0.5 * (vel * vel).sum(-1, keepdim=True) * Fm
+                    - u[:, None] * Fm) / m
+            vNew = vel + dt * a * (m / mNew)
+            uNew = torch.maximum(u[:, None] + dt * dUdt, 0.5 * u[:, None])
+            Qn = torch.cat([mNew, mNew * vNew, mNew * (uNew + 0.5 * (vNew * vNew).sum(-1, keepdim=True))], dim=-1)
+            dQdt = (Qn - Q) / dt
+        else:
+            dQdt = hancockRates(schemeConfig.massFluxLimit)
+            Qn = Q + dt * dQdt
         vel_n = Qn[:, 1:-1] / Qn[:, 0:1]
         dxdt = 0.5 * (vel + vel_n)
         finalLam = geom.lam
