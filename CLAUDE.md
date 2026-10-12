@@ -38,7 +38,14 @@ These apply to **every** run, including throwaway inline probes that call
    diagnostics via a flushed print or a `case.diagnostics` hook. Never write a
    probe that only prints a summary after `run()` returns. `stallDtSteps` only
    catches dt pinned *exactly* at `minDt`; check that simulated time is
-   advancing from the log.
+   advancing from the log. A long run with no output or tracking until it
+   finishes is the same disease as piping its output to tail -- and a monitor
+   tailing a silent log is the same symptom: with no new lines you cannot
+   tell a run stalled at a 1e-27 timestep from one progressing normally.
+   The cost of *some* tracking, even a rudimentary step number / t / dt, is
+   marginal against the cost of waiting hours on a run that is a halting
+   problem. For long runs, always pass an explicit `progress=True` (it
+   survives `quiet=True`) or at least a periodic flushed step/t/dt line.
 3. **Watch it, and let it stop itself when frozen.** The runner's velocity
    alarm is on by default: a `[warpSPH] VELOCITY ALARM` line when `max |v|`
    passes 100x the expected velocity (it flags, never stops). Probes built on
