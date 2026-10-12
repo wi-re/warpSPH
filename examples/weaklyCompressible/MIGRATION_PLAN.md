@@ -53,7 +53,7 @@ against the expanded parameter set**, in the style of the (now `dambreak`)
 `datagen/weaklyCompressible/generator.py` parameterisation, where the geometry,
 the forcing and the perturbations are all flags rather than edits.
 
-The shared machinery for that lives in `cases/weaklyCompressible.py`:
+The shared machinery for that lives in `cases/common/weaklyCompressible.py`:
 
 | helper | what it gives a case |
 |---|---|
@@ -120,7 +120,7 @@ none of them could set it, which made `--inviscid` runs unsteerable.
 One shape, not two. Every case in this family is 2D and plots particle fields,
 so all the notebooks are `particlePlot`-shaped and follow
 `../compressible/08-hydrostatic.ipynb` cell for cell: `buildFieldPlotter` /
-`refreshFieldPlotter` from `cases/plotting.py` called directly (they are
+`refreshFieldPlotter` from `cases/common/plotting.py` called directly (they are
 `setupPlot`/`updatePlot` minus `openWindow`/`pumpEvents`, which do not
 live-update in a Jupyter cell here), with the case's own `Field` list passed in.
 No `profilePlot` case in this family.
@@ -144,7 +144,7 @@ cell:
 3. **`markerSize` is a case param** and varies (4 or 8); pass it through rather
    than hardcoding, `buildFieldPlotter` already reads `ctx.param('markerSize', 2)`.
 
-`VELOCITY_DENSITY_FIELDS` (`cases/weaklyCompressible.py`) is this family's
+`VELOCITY_DENSITY_FIELDS` (`cases/common/weaklyCompressible.py`) is this family's
 equivalent of the compressible cases' per-case `*_FIELDS` lists and 8 of the 10
 cases use it; `impact` has its own `IMPACT_FIELDS` (same two panels, `flare`
 rather than `RdBu`), exported for the notebook to import rather than re-derive.
@@ -217,7 +217,7 @@ Done, in that shape:
 Two things surfaced while looking at the result, both fixed:
 
 - **Boundary particles were invisible.** `PlottingOptions.boundaryVisualization`
-  defaults to `Hide`, and nothing in `cases/plotting.py` set it — so the
+  defaults to `Hide`, and nothing in `cases/common/plotting.py` set it — so the
   lid-driven cavity plotted as a square of fluid with no walls, and the moving
   obstacle's spinning body did not appear at all. `Field` now carries
   `boundary='Passive'` (grey crosses, excluded from the colour normalisation)
@@ -332,7 +332,7 @@ freestream). None of that is a driven square.
 Per-user direction: a driven square is a square that **oscillates back and
 forth**, in a domain sized with real margin around the swing (at least 2:1,
 domain-width-to-sweep). Redesigned as its own case,
-`warpSPH.cases.drivenSquare`, sharing `movingObstacle`'s machinery
+`warpSPH.cases.wallBounded.drivenSquare`, sharing `movingObstacle`'s machinery
 (`buildRegionSystem`/`fluidRegion`/`boundaryRegion(kind=constant)`) but driving
 `RigidBody.linearVelocity` instead of `.angularVelocity` — a mechanism that
 already existed (`rigidBody/integrate.py` integrates both every step) but
@@ -386,7 +386,7 @@ reachable but not the default, per direction: a real, separate experiment, not
 what the name asks for.
 
 `meanFlowForcingBC` moved out of `movingObstacle.py` into
-`cases/weaklyCompressible.py` in the same pass, now that two cases share it
+`cases/common/weaklyCompressible.py` in the same pass, now that two cases share it
 verbatim -- `movingObstacle.py` shrank by the width of the closure it used to
 carry, no behaviour change (confirmed: `run_sweep.py --cases movingObstacle`
 still passes).

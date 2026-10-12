@@ -1,4 +1,4 @@
-"""Gresho-Chan rotating vortex initial state, used by `warpSPH.cases.greshoVortex`.
+"""Gresho-Chan rotating vortex initial state, used by `warpSPH.cases.compressible.greshoVortex`.
 
 Samples a regular lattice and imposes the piecewise-analytic radial pressure
 and angular-velocity profile of the vortex (three annuli, balanced so the

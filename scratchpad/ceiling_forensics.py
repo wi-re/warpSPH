@@ -53,7 +53,7 @@ import warpSPH.schemes.deltaSPH as S
 from warpSPH.enumTypes import PressureForceScheme
 import warpSPH.modules.mdbc.english2025 as E
 from warpSPH.modules.pressure.wp_surfaceAware import computePressureSurfaceAwareWarp
-from warpSPH.cases.dambreak import dambreakCase
+from warpSPH.cases.freeSurface.dambreak import dambreakCase
 import probe_deltaSPHMarrone as P
 
 os.makedirs(args.out, exist_ok=True)

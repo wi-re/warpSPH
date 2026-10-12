@@ -1,5 +1,5 @@
 """The analytic self-similar Sedov-Taylor blast-wave solution, used by
-`cases/sedov.py` both to derive the run's stopping time (`goalTime`, via
+`cases/compressible/sedov.py` both to derive the run's stopping time (`goalTime`, via
 `SedovSolution.shockState`) and to draw the reference shock front/state on the
 profile plots. `radius`/`beta` are the closed-form beta-fit estimate of the
 shock radius the case overlays alongside the full solve for comparison; `nu`

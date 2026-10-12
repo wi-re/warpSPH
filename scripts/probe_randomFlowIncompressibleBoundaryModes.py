@@ -29,8 +29,8 @@ import time
 from warpSPHBootstrap import bootstrap
 bootstrap(precision='float32')
 
-from warpSPH.cases.randomFlow import randomFlowCase
-from warpSPH.cases.randomFlowIncompressible import randomFlowIncompressibleCase
+from warpSPH.cases.periodic.randomFlow import randomFlowCase
+from warpSPH.cases.periodic.randomFlowIncompressible import randomFlowIncompressibleCase
 from warpSPH.runner import run
 
 BOUNDARY_MODES = ['plain', 'mdbcDensity']

@@ -474,7 +474,7 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
         # `warpSPHIntegrators/verlet.py`) reads the *raw* current velocity
         # directly (`x += dt/2 * v_current`), not the masked `dxdt` -- so a
         # boundary particle carrying a nonzero BC-prescribed velocity (a moving
-        # wall's Dirichlet condition, e.g. `cases/lidDrivenCavity.py`) drifts by
+        # wall's Dirichlet condition, e.g. `cases/wallBounded/lidDrivenCavity.py`) drifts by
         # `velocity * dt/2` **every step**, unboundedly, even though that
         # velocity exists only to drive the SPH force sums, never to move the
         # wall (suspender). Measured: 370 lid-band ghost/boundary particles
@@ -620,7 +620,7 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
         # fluid particles the no-pen correction touched and by how much.
         # Stashed on `self` (the same object every case's `diagnostics(ctx,
         # state)` receives as `state`) rather than returned, so it rides every
-        # trajectory row for free (`cases/weaklyCompressible.py
+        # trajectory row for free (`cases/common/weaklyCompressible.py
         # stepAccelerationDiagnostics`) without every case needing to know
         # this system's internals. Added after the overnight batch
         # (`DELTASPH_VALIDATION_PLAN.md`) made "was it nopenshift?" a

@@ -1,4 +1,4 @@
-"""Samples the initial state for `cases/sedov.py`'s Sedov-Taylor blast wave:
+"""Samples the initial state for `cases/compressible/sedov.py`'s Sedov-Taylor blast wave:
 a uniform (`rho0`) regular lattice at rest with zero pressure, relaxed to
 optimal supports/densities via `evaluateOptimalSupport`, then given a point
 energy deposit `E0` at the origin under one of three `initialization`

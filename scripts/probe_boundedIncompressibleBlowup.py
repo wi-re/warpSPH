@@ -83,7 +83,7 @@ import torch
 import importlib
 _caseMod = importlib.import_module(f'warpSPH.cases.{args.case}')
 case = getattr(_caseMod, f'{args.case}Case')
-from warpSPH.cases.weaklyCompressible import domainBoundarySdf
+from warpSPH.cases.common.weaklyCompressible import domainBoundarySdf
 from warpSPH.runner.runner import buildContext
 from warpSPH.runner.caseSpec import CaseSpec
 

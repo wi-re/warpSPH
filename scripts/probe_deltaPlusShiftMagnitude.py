@@ -49,7 +49,7 @@ def main(argv=None):
     bootstrap(precision='float32')
     import torch
     from warpSPHCore import sphKernelScale
-    from warpSPH.cases.tgvWeaklyCompressible import tgvWeaklyCompressibleCase
+    from warpSPH.cases.periodic.tgvWeaklyCompressible import tgvWeaklyCompressibleCase
     from warpSPH.modules.shifting.delta import computeDeltaShift
     from warpSPH.runner import run
     from warpSPH.sample.wp_deltaShift import computeDeltaShiftWarp

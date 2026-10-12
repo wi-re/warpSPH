@@ -1,4 +1,4 @@
-"""Equal-mass sampler for `cases/triplePoint.py`'s three-region setup:
+"""Equal-mass sampler for `cases/compressible/triplePoint.py`'s three-region setup:
 `sampleRegionSystem` (from `warpSPHCore`) lays out the ``nxs``-per-region
 lattices at `splitX`/`splitY`, then this function overwrites each particle's
 density/pressure by re-deriving the three region masks and deriving the EOS
@@ -6,7 +6,7 @@ state from the given pressures via `idealGasEOS`.
 
 The region masks here are hardcoded to ``x <= 1``/``x >= 13``/``|y| >= 1.5``
 rather than built from the `splitX`/`splitY` arguments -- values that match
-`cases/triplePoint.py`'s defaults (``splitX=1.0``, ``splitY=1.5``, 14-wide
+`cases/compressible/triplePoint.py`'s defaults (``splitX=1.0``, ``splitY=1.5``, 14-wide
 domain) exactly, but would silently disagree with `sampleRegionSystem`'s own
 region layout if a caller passed different split values.
 """

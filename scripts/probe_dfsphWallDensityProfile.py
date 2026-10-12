@@ -30,9 +30,9 @@ bootstrap(precision='float32')
 
 import torch
 
-from warpSPH.cases.randomFlow import randomFlowCase
-from warpSPH.cases.randomFlowIncompressible import randomFlowIncompressibleCase
-from warpSPH.cases.weaklyCompressible import domainBoundarySdf
+from warpSPH.cases.periodic.randomFlow import randomFlowCase
+from warpSPH.cases.periodic.randomFlowIncompressible import randomFlowIncompressibleCase
+from warpSPH.cases.common.weaklyCompressible import domainBoundarySdf
 from warpSPH.runner.runner import buildContext
 from warpSPH.runner.caseSpec import CaseSpec
 

@@ -451,7 +451,7 @@ class GraphedDiagnostics:
     """Replay a case's per-step diagnostics from a CUDA graph.
 
     ``deviceFn(ctx, state) -> {name: device tensor}`` must be sync-free
-    once its caches are warm (e.g. `cases/dambreak.py:_diagnosticsDevice`);
+    once its caches are warm (e.g. `cases/freeSurface/dambreak.py:_diagnosticsDevice`);
     `__call__` returns the values on the host, in one transfer. The inputs
     are the tensors of the particle state and of the step statistics
     (`stepDiagnostics.raw`); the neighbour list is baked in, so there is one

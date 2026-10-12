@@ -1,4 +1,4 @@
-"""Equal-resolution sampler for `cases/triplePoint.py`'s three-region setup:
+"""Equal-resolution sampler for `cases/compressible/triplePoint.py`'s three-region setup:
 one uniform lattice from `setupBasicCompressibleInitialState`, with each
 particle's density/pressure set from `splitX`/`splitY`-derived region masks
 (unlike `equalMass.py`, these masks do use the passed-in `splitX`/`splitY`)

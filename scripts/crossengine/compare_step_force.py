@@ -56,7 +56,7 @@ print('density: min', dens_np.min(), 'mean', dens_np.mean(), 'max', dens_np.max(
 # as before, just to get ctx.config / ctx.schemeConfig / ctx.config.domain and
 # dt -- cheap (nSteps=0), no need to re-derive these by hand.
 # ---------------------------------------------------------------------------
-from warpSPH.cases.dambreak import dambreakCase
+from warpSPH.cases.freeSurface.dambreak import dambreakCase
 from warpSPH.runner import caseMain
 
 args = [

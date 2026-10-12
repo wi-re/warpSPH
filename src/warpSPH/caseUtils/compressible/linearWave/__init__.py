@@ -1,4 +1,4 @@
-"""Linear acoustic wave helpers, used by `warpSPH.cases.linearWave`."""
+"""Linear acoustic wave helpers, used by `warpSPH.cases.compressible.linearWave`."""
 
 from .wave import plotState, sampleLinearWave
 

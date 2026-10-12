@@ -4,8 +4,8 @@ sys.path.insert(0, '.')
 from warpSPHBootstrap import bootstrap
 bootstrap(precision='float32')
 import torch
-from warpSPH.cases.triplePoint import triplePointCase
-from warpSPH.cases.compressible import compressibleDiagnostics
+from warpSPH.cases.compressible.triplePoint import triplePointCase
+from warpSPH.cases.compressible.common import compressibleDiagnostics
 from warpSPH.runner import caseMain
 
 import warpSPHCore.crk.crk_wrapper as _cw

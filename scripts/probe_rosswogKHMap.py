@@ -44,7 +44,7 @@ def main():
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    from warpSPH.cases.kelvinHelmholtz import kelvinHelmholtzCase as base
+    from warpSPH.cases.compressible.kelvinHelmholtz import kelvinHelmholtzCase as base
     todo = sorted(a.times)
     snaps = []
 

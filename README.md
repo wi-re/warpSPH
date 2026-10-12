@@ -118,7 +118,7 @@ well as by a command line.
 
 ```bash
 warpsph-run <case> [flags]                  # the console script
-python -m warpSPH.cases.sod [flags]         # the same case, as a module
+python -m warpSPH.cases.compressible.sod [flags]         # the same case, as a module
 python examples/compressible/01-sod/sod_1d.py [flags]
 ```
 
@@ -421,7 +421,7 @@ in this repo's history — see `docs/historic_plans/WAVE_EQUATION_PLAN.md` for h
 | piece | where |
 |---|---|
 | the scheme | [`schemes/waveEquation.py`](src/warpSPH/schemes/waveEquation.py) |
-| the case | [`cases/waveEquation.py`](src/warpSPH/cases/waveEquation.py) |
+| the case | [`cases/demos/waveEquation.py`](src/warpSPH/cases/demos/waveEquation.py) |
 | state and system | [`systems/waveSystem.py`](src/warpSPH/systems/waveSystem.py) |
 | configuration | [`configurations/waveEquationConfig.py`](src/warpSPH/configurations/waveEquationConfig.py) |
 | case generation | [`caseUtils/waveEquation/`](src/warpSPH/caseUtils/waveEquation/) |
@@ -477,9 +477,10 @@ if __name__ == '__main__':
     caseMain(myCase)
 ```
 
-Add the module name to `CASE_MODULES` in
-[`warpSPH/cases/__init__.py`](src/warpSPH/cases/__init__.py) and it is reachable
-as `warpsph-run myCase`.
+Put the module in its family subpackage (`src/warpSPH/cases/<family>/`, e.g.
+`freeSurface`, `compressible`; see the package docstring), add `'<family>.<module>'`
+to `CASE_MODULES` in [`warpSPH/cases/__init__.py`](src/warpSPH/cases/__init__.py)
+and it is reachable as `warpsph-run myCase`.
 
 The full hook set, in call order:
 
@@ -499,8 +500,8 @@ The full hook set, in call order:
 analytic solution — and the loop reads it back.
 
 Most of a case is already written: `warpSPH.cases.compressible` and
-`warpSPH.cases.weaklyCompressible` carry the setup each family shares, and
-`warpSPH.cases.plotting` turns a list of fields into a `setupPlot`/`updatePlot`
+`warpSPH.cases.common.weaklyCompressible` carry the setup each family shares, and
+`warpSPH.cases.common.plotting` turns a list of fields into a `setupPlot`/`updatePlot`
 pair.
 
 ---
@@ -512,7 +513,7 @@ from warpSPHBootstrap import bootstrap
 bootstrap(precision='float32')          # must precede any warpSPH import
 
 from warpSPH.runner import run
-from warpSPH.cases.tgv import tgvCase
+from warpSPH.cases.periodic.tgv import tgvCase
 
 result = run(tgvCase, nx=64, nSteps=200, quiet=True)
 result.series('kineticEnergy')          # one diagnostic across the run

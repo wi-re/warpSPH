@@ -109,7 +109,7 @@ class WeaklyCompressibleSPHScheme(Enum):
     #: prescription is an explicit choice (`--scheme sun2017`), not a silent
     #: behaviour change for every existing `deltaSPH` case. Kernel/integrator
     #: choice (Wendland C2, RK4) remain case-level settings either way --
-    #: `cases/dambreak.py` already defaults to both, independent of scheme.
+    #: `cases/freeSurface/dambreak.py` already defaults to both, independent of scheme.
     sun2017DeltaSPH = 1
 
 # @torch.jit.script

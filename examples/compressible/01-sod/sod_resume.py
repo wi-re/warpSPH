@@ -22,7 +22,7 @@ import torch
 from tqdm.autonotebook import tqdm
 from warpSPHIntegrators.integration import getIntegrator
 
-from warpSPH.cases.sod import sodCase
+from warpSPH.cases.compressible.sod import sodCase
 from warpSPH.io import importConfigs, latestExportPath, loadTrajectory, loadTrajectoryFrame, writeFrame
 from warpSPH.runner import CaseSpec, RunContext, encodeFrames
 

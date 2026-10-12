@@ -2,7 +2,7 @@
 -- `IncompressibleSPHScheme.divergenceFree`, solver `schemes/divergenceFree.py::divergenceFree_step`
 -- at nx=64.
 
-This is the failing baseline documented in `cases/hydrostaticColumn.py` /
+This is the failing baseline documented in `cases/boundaries/hydrostaticColumn.py` /
 DFSPH_FINDINGS.md Part 23: the quiescent wall-bounded free-surface column
 should stay at rest (`v = 0`, `p(y) = rho0 g (y_surf - y)`), but the DF
 projection cannot balance a uniform body force and the constant-density

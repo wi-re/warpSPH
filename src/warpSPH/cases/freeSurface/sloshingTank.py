@@ -1,0 +1,632 @@
+"""Laterally-excited sloshing tank -- SPHERIC Test Case 10 (2D free surface).
+
+A shallow layer of water (depth ``h = 0.093 m``) in a rigid rectangular tank
+(``0.900 x 0.508 m``) that is **rolled** harmonically about the centre of its
+floor (amplitude ~+-4 deg, period ~1.7 s, near the first sloshing mode). The
+figure of merit is the pressure history at wall **Sensor 1**, on the left wall
+at the still-water line ``(-0.45, 0.093)``; the measured signal and the
+prescribed motion are in ``examples/sloshingTank/SPHERIC_TestCase10/``.
+
+Ported from diffSPH's ``examples/weaklyCompressible/16_SloshingTank.ipynb``. See
+``examples/sloshingTank/PLAN.md`` for the full write-up.
+
+Tank-fixed frame
+----------------
+Rather than move the walls, the run is solved in the frame that rolls with the
+tank and **gravity is rotated** by the roll angle each step::
+
+    g_dir(t) = R(-theta(t)) . (0, -1) = (-sin theta, -cos theta)
+
+``modules/gravity/directional.py`` re-reads ``gravityConfig.direction`` every
+step, so the ``postStep`` hook below just rewrites it from a spline of the
+tabulated roll angle. This drops the non-inertial Euler and centrifugal terms
+(small at this amplitude/period, and dropped by the diffSPH reference too); an
+``inertialForces`` extension can add them later.
+
+Runs under two schemes
+----------------------
+- ``deltaSPH`` (weakly compressible, the default): ``c_0`` and ``dt`` are both
+  pinned (``soundSpeed = 20``, ``targetDt = 1e-4``), matching the diffSPH
+  reference notebook rather than back-solving ``c_0`` out of ``dt`` -- which
+  made ``c_0`` fall with resolution (11 at nx=225) and ran the impacts at
+  Ma ~ 0.75. The sensor pressure is the nearest boundary particle's density
+  mapped through the Tait/linear EOS, scaled by ``rho0Physical`` (the scheme
+  runs at ``restDensity = 1``).
+- ``divergenceFree`` (incompressible DFSPH): pass
+  ``--scheme divergenceFree --integrationScheme semiImplicitEuler
+  --kernel Wendland2 --cflFactor 0.2 --dt 1e-3`` (the ``run_sloshingTank.py``
+  ``--scheme dfsph`` preset does this). The sensor pressure is the solver's
+  carried ``pressures`` at the sensor particle, scaled by ``rho0Physical``.
+  Note ``divergenceFree`` is known to struggle with quiescent
+  free-surface-under-gravity states (``DFSPH_IMPROVEMENT_PLAN.md`` Part 23,
+  ``hydrostaticColumn``) -- a divergence or heavy over-dissipation here is a
+  result to report, not necessarily a wiring bug.
+"""
+
+from __future__ import annotations
+
+import math
+import os
+from typing import Any, Dict
+
+import numpy as np
+import torch
+
+from ...configurations.moduleConfigurations.gravity import GravityType
+from ...configurations.moduleConfigurations.shifting import ShiftingProjectionScheme, ShiftingScheme
+from ...configurations.region import BCType
+from ...enumTypes import (WeaklyCompressibleSPHScheme,
+                         isArtificialCompressibleScheme, isIncompressibleScheme)
+from ...runner import Case, RunContext, caseMain, registerCase
+from ...utils import buildDomainDescription
+from ...regions import sampleDomainSDF
+from ..periodic.kolmogorovIncompressible import kolmogorovIncompressibleTimestep
+from ..common.plotting import Field, particlePlot
+from ...caseUtils.weaklyCompressible import analyticTankBody
+from ..common.weaklyCompressible import (boundaryRegion, buildRegionSystem, fluidRegion,
+                                 setupTimestep, shapeSdf,
+                                 particleDistributionMetrics,
+                                 stepAccelerationDiagnostics,
+                                 calibrateRestDensity)
+
+__all__ = ['sloshingTankCase']
+
+#: ``.../examples/sloshingTank/SPHERIC_TestCase10`` -- three parents up from
+#: ``src/warpSPH/cases/`` is the repo root.
+_SPHERIC_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))))),
+    'examples', 'sloshingTank', 'SPHERIC_TestCase10')
+_DEFAULT_ROLL_FILE = os.path.join(_SPHERIC_DIR, 'data_files', 'lateral_water_1x.txt')
+
+_TAIT_GAMMA = 7.0
+
+
+# -- roll history -----------------------------------------------------------
+
+def loadRollHistory(path: str) -> Dict[str, np.ndarray]:
+    """Read the SPHERIC roll table -> ``{t, theta(rad), pressure(mbar)}``.
+
+    Columns (tab separated): ``Time[s]  Pressure[mbar]
+    Position_smooth_splines[deg]  Velocity[deg/s]  Acceleration[deg/s2]
+    Position_original[deg]``.
+    """
+    raw = np.genfromtxt(path, delimiter='\t', skip_header=1)
+    return {
+        't': raw[:, 0].astype(np.float64),
+        'pressureMbar': raw[:, 1].astype(np.float64),
+        'theta': np.radians(raw[:, 2].astype(np.float64)),
+        'omega': np.radians(raw[:, 3].astype(np.float64)),
+    }
+
+
+def _rollFilePath(ctx: RunContext) -> str:
+    path = ctx.param('rollDataFile') or _DEFAULT_ROLL_FILE
+    if not os.path.isabs(path):
+        path = os.path.join(os.getcwd(), path)
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f'sloshingTank: roll-history file not found: {path!r}. Pass '
+            f'--rollDataFile or check examples/sloshingTank/SPHERIC_TestCase10/.')
+    return path
+
+
+def _rollAngle(ctx: RunContext, t: float) -> float:
+    roll = ctx.scratch['rollHistory']
+    return float(np.interp(t + ctx.param('rollStartTime'), roll['t'], roll['theta']))
+
+
+def _applyRollGravity(ctx: RunContext, t: float) -> None:
+    """Rotate the (down) gravity vector into the tank frame at time ``t``."""
+    theta = _rollAngle(ctx, t)
+    ctx.schemeConfig.gravityConfig.direction = torch.tensor(
+        [-math.sin(theta), -math.cos(theta)], device=ctx.device, dtype=ctx.dtype)
+    ctx.scratch['rollAngle'] = theta
+
+
+# -- geometry -------------------------------------------------------------------
+
+def configureScheme(ctx: RunContext) -> None:
+    L = ctx.spec.L                       # tank internal width B
+    dx = L / ctx.spec.nx
+    band = ctx.param('band')
+    halfW = 0.5 * L
+    tankH = ctx.param('tankHeight')
+
+    # Periodic wrapper, widened by `band` particle layers; the walls are cut
+    # from the interior rectangle, which is asymmetric in y (floor at 0).
+    span = max(L, tankH) + 4.0 * band * dx
+    domain = buildDomainDescription(span, ctx.spec.dim, True, ctx.device, ctx.dtype)
+    domain.min = torch.tensor([-halfW - band * dx, -band * dx],
+                              device=ctx.device, dtype=ctx.dtype)
+    domain.max = torch.tensor([halfW + band * dx, tankH + band * dx],
+                              device=ctx.device, dtype=ctx.dtype)
+    domain.periodic[:] = True
+
+    interior = buildDomainDescription(L, ctx.spec.dim, False, ctx.device, ctx.dtype)
+    interior.min = torch.tensor([-halfW, 0.0], device=ctx.device, dtype=ctx.dtype)
+    interior.max = torch.tensor([halfW, tankH], device=ctx.device, dtype=ctx.dtype)
+
+    ctx.config.domain = domain
+    ctx.config.dx = dx
+    ctx.config.nx = ctx.spec.nx + 2 * band
+    ctx.scratch['interiorDomain'] = interior
+
+    sc = ctx.schemeConfig
+    if ctx.param('wallRepresentation') == 'analytic':
+        # the tank is one analytic warpSPHBoundaries body (docs/historic_plans/ANALYTIC_BOUNDARIES_PLAN.md): deltaSPH and omniIncompressible, static walls
+        # (the roll is carried by the rotated gravity, the walls never move in this frame)
+        if getattr(ctx.scheme, 'name', ctx.scheme) not in ('deltaSPH', 'omniIncompressible', 'divergenceFree', 'dfsphReference', 'iisph'):
+            raise ValueError("sloshingTank wallRepresentation='analytic' is hooked into deltaSPH, omniIncompressible, divergenceFree, dfsphReference and iisph only "
+                             "(docs/historic_plans/ANALYTIC_BOUNDARIES_PORT_SURVEY.md)")
+        sc.analyticWallPressure = ctx.param('analyticWallPressure')
+        if getattr(ctx.scheme, 'name', ctx.scheme) not in ('omniIncompressible', 'divergenceFree', 'dfsphReference', 'iisph') and (sc.analyticWallPressure == 'mls' or ctx.param('boundaryFriction') or ctx.param('xsphCoefficient')):
+            raise ValueError("analyticWallPressure='mls', boundaryFriction and xsphCoefficient are omniIncompressible / divergenceFree options")
+    if getattr(ctx.scheme, 'name', ctx.scheme) in ('omniIncompressible', 'divergenceFree', 'dfsphReference', 'iisph'):
+        sc.xsphCoefficient = ctx.param('xsphCoefficient')
+        sc.projection, sc.projectionTol, sc.densitySolve = ctx.param('projection'), ctx.param('projectionTol'), ctx.param('densitySolve')
+        sc.shifting, sc.shiftA = ctx.param('particleShift'), ctx.param('shiftA')
+        sc.boundaryFriction = ctx.param('boundaryFriction')
+    sc.surfaceDetectionConfig.active = True
+    sc.gravityConfig.active = True
+    sc.gravityConfig.type = GravityType.Directional
+    sc.gravityConfig.magnitude = ctx.param('gravityMagnitude')
+    sc.gravityConfig.direction = [0.0, -1.0]
+    sc.bandwith = L / ctx.param('bandWidth') / dx
+
+    if isIncompressibleScheme(ctx.scheme):
+        sc.diffusionParams.inviscid = False
+        sc.diffusionParams.viscidNu = ctx.param('nu')
+        if hasattr(sc, 'shiftProperties'):
+            sc.shiftProperties.active = ctx.param('shifting', False)
+        if hasattr(sc, 'xsphFilterScale'):
+            sc.xsphFilterScale = ctx.param('xsphScale', 0.0)
+    elif isArtificialCompressibleScheme(ctx.scheme):
+        _configureArtificialCompressible(ctx)
+    else:                                # deltaSPH -- weakly compressible
+        sc.diffusionParams.inviscid = ctx.param('inviscid')
+        sc.diffusionParams.inviscidAlpha = ctx.param(
+            'alpha', sc.diffusionParams.inviscidAlpha)
+        if not ctx.param('inviscid'):
+            sc.diffusionParams.viscidNu = ctx.param('nu')
+        if hasattr(sc.fluid, 'backgroundPressure'):
+            sc.fluid.backgroundPressure = ctx.param('backgroundPressure', 0.0)
+        # The particle shift near the free surface -- the reason this case
+        # survives the wall slam at all (docs/historic_plans/WCSPH_SHIFTING_PLAN.md). On by
+        # default; the knobs are for the shift A/B (`--shift-scheme`,
+        # `--shift-projection`, `--no-shift`).
+        #
+        # Default is `michel2022`/`michel2022`, not the shared
+        # `buildDefaultShiftProperties()` default (`deltaSPH`/`surfaceNormal`)
+        # -- **required**, not a preference. Commit 790a7c7 ("fix its psi
+        # sign") correctly fixed `deltaSPH`'s density-diffusion operator
+        # (it was accidentally 2x too strong, an over-diffusive bug that
+        # happened to add free numerical damping -- see that commit and
+        # `ACSPH_PLAN.md` decision 1). One confirmed side effect: this case's
+        # old default (`deltaSPH`/`surfaceNormal`) now diverges at `t=0.68`
+        # instead of surviving to `t=4.0` as `docs/historic_plans/
+        # WCSPH_SHIFTING_PLAN.md` documents -- reproduced directly by
+        # re-running the pre-fix commit unchanged (`PST_ALE_PLAN.md` §7.1).
+        # `michel2022`/`michel2022` (`PST_ALE_PLAN.md` Stage A) is the one
+        # configuration measured to still survive the full run post-fix
+        # (density held to [0.994, 1.011] over 20001 steps), so it is the
+        # default here now -- switching schemes is not "adding a feature",
+        # it is what makes this case's shipped default actually run.
+        if hasattr(sc, 'shiftProperties'):
+            sc.shiftProperties.active = ctx.param('shifting', True)
+            sc.shiftProperties.scheme = ShiftingScheme[ctx.param('shiftScheme', 'michel2022')]
+            sc.shiftProperties.projectionScheme = ShiftingProjectionScheme[ctx.param('shiftProjection', 'michel2022')]
+            # Sun 2019 Eq. (9) continuity δu-terms -- the volume-consistency
+            # fix for the free-surface de-densification (WCSPH_SHIFTING_PLAN
+            # §2d). Off by default; opt in for the sloshing quantitative pass.
+            sc.shiftProperties.correctdrhodt = ctx.param('correctdrhodt', False)
+
+    # mDBC no-penetration correction placement -- see
+    # `DELTASPH_VALIDATION_PLAN.md` 5.9. Unset leaves the config default.
+    noPen = ctx.param('noPenShift', None)
+    if noPen is not None and hasattr(sc, 'mdbcNoPenShiftMode'):
+        sc.mdbcNoPenShiftMode = noPen
+    # density as a drift field under Verlet-family integrators
+    # (CEILING_STICKING_PLAN.md §3/§6); unset leaves the config default
+    if ctx.param('timeCentredContinuity', None) is not None and hasattr(sc, 'timeCentredContinuity'):
+        sc.timeCentredContinuity = bool(ctx.param('timeCentredContinuity'))
+
+    ctx.scratch['rollHistory'] = loadRollHistory(_rollFilePath(ctx))
+
+
+def _configureArtificialCompressible(ctx: RunContext) -> None:
+    """ACSPH (De Courcy et al. 2024) on this tank: the dam-break settings
+    (`dambreak._configureArtificialCompressibleExtra`) with this case's own
+    length scales -- Michel PST, `eps_v = -5` (float32), `alpha_nu = 0.01` with
+    `c0 = 50 sqrt(g h)` fixing nu, `U_char = sqrt(g h)` and the single-evaluation
+    integrator the step requires. `h` is the still-water depth."""
+    sc = ctx.schemeConfig
+    sc.shiftProperties.active = bool(ctx.param('shifting', True))
+    sc.shiftProperties.scheme = ShiftingScheme.michel2022
+    sc.shiftProperties.projectionScheme = ShiftingProjectionScheme.michel2022
+    sc.acParams.epsilonV = float(ctx.param('epsilonV', -5.0))
+    sc.acParams.cavitationProjection = ctx.param('acCavitationProjection', 'off')
+    sc.acParams.isolatedZeroPressure = bool(ctx.param('acIsolatedZeroPressure', False))
+    depth = ctx.param('fillDepth')
+    g = ctx.param('gravityMagnitude')
+    sc.acParams.alphaNu = float(ctx.param('acAlphaNu', 0.01))
+    sc.acParams.referenceSoundSpeedForViscosity = float(50.0 * (g * depth) ** 0.5)
+    if sc.acParams.uChar is None:
+        sc.acParams.uChar = float((g * depth) ** 0.5)
+
+    from warpSPHIntegrators import getIntegrator
+    from warpSPHIntegrators.integration import IntegrationSchemeType
+    wanted = IntegrationSchemeType.forwardEuler
+    current = ctx.config.integrationScheme
+    if current is not wanted and current is not IntegrationSchemeType.explicitEuler:
+        print(f"[warpSPH] artificialCompressible: overriding integrationScheme "
+              f"{getattr(current, 'name', current)!r} -> 'forwardEuler' (the step "
+              f"returns an exact per-step delta).")
+        ctx.config.integrationScheme = wanted
+        ctx.integrator = getIntegrator(wanted)
+
+
+def buildSystem(ctx: RunContext):
+    interior = ctx.scratch['interiorDomain']
+    halfW = 0.5 * ctx.spec.L
+    fill = ctx.param('fillDepth')
+
+    fluidSdf = shapeSdf('box', args=[[halfW, 0.5 * fill]], offset=[0.0, 0.5 * fill])
+    wallSdf = lambda x: sampleDomainSDF(x, interior, invert=False)
+
+    # an analytic wall keeps its sdf (the fluid is clipped against it) but is not sampled into particles
+    representation = analyticTankBody(interior, offset=ctx.param('analyticWallOffset') * ctx.spec.L / ctx.spec.nx) if ctx.param('wallRepresentation') == 'analytic' else None
+    regions = [
+        fluidRegion(ctx, fluidSdf),
+        boundaryRegion(ctx, wallSdf, kind=BCType[ctx.param('wallBC')], representation=representation),
+    ]
+    return buildRegionSystem(ctx, regions)
+
+
+def initialConditions(ctx: RunContext, system) -> None:
+    particles = system.state
+    particles.velocities[:] = 0.0
+    if getattr(particles, 'pressures', None) is not None:
+        particles.pressures[:] = 0.0
+
+    # The sampled tank does not measure `rho0` at rest, and by how much depends
+    # on `nx` (1.0016 at nx=200, 1.0153 at nx=100). The solver reads that as
+    # compression and kicks the fluid on step 0 -- at nx=100 hard enough to
+    # delaminate the layer within ~0.07 s. See `calibrateRestDensity`.
+    # `'auto'` = only the incompressible path needs it. `deltaSPH` evolves
+    # density through the continuity equation from `rho = rho0` and never forms
+    # a summation density, so it never sees the offset (measured: its step-0
+    # density is 1.000000 at every `nx`) -- which is why the WCSPH SPHERIC
+    # validation was always clean. Calibrating there is a no-op that still
+    # perturbs the fluid mass by ~1.5 % and moves the sensor peak ~1.6 %, so
+    # auto leaves it off. `True`/`False` force it either way.
+    calibrate = ctx.param('calibrateRestDensity', 'auto')
+    if isinstance(calibrate, str):
+        if calibrate != 'auto':
+            raise ValueError(
+                f'calibrateRestDensity must be True/False/"auto", got {calibrate!r}')
+        calibrate = isIncompressibleScheme(ctx.scheme)
+    # analytic walls under an incompressible scheme: the calibrated lattice (particle mass, wall mass, wall plane; boundary/calibration.py) replaces the rest-density calibration
+    latticeCal = ctx.param('calibratedLattice')
+    if latticeCal == 'auto':
+        latticeCal = ctx.param('wallRepresentation') == 'analytic' and isIncompressibleScheme(ctx.scheme)
+    if latticeCal:
+        from ...boundary.calibration import calibrateAnalyticLattice
+        calibrateAnalyticLattice(ctx, system, ctx.scratch['interiorDomain'], verbose=ctx.spec.verbose)
+        calibrate = False
+    if calibrate:
+        calibrateRestDensity(ctx, system, verbose=ctx.spec.verbose)
+
+    if isIncompressibleScheme(ctx.scheme):
+        if ctx.config.dt is None:
+            ctx.config.dt = ctx.spec.dt if ctx.spec.dt is not None else 1e-3
+    elif isArtificialCompressibleScheme(ctx.scheme):
+        # no sound speed to back-solve dt from: seed `targetDt`, Eq. (46)
+        # (`sloshingTimestep`) takes over from step 2
+        ctx.config.dt = ctx.param('targetDt')
+    else:
+        setupTimestep(ctx, system)       # fixes fluid.fixedSoundSpeed and config.dt
+
+    ctx.scratch['sensorIndex'] = None
+    _applyRollGravity(ctx, 0.0)
+
+
+def postStep(ctx: RunContext, state, step: int) -> None:
+    t = state.t.item() if torch.is_tensor(state.t) else float(state.t)
+    _applyRollGravity(ctx, t)
+
+
+def sloshingTimestep(ctx: RunContext, state) -> float:
+    if isIncompressibleScheme(ctx.scheme):
+        return kolmogorovIncompressibleTimestep(ctx, state)
+    if isArtificialCompressibleScheme(ctx.scheme):
+        from ...modules.timestep import computeTimestep
+        return computeTimestep(state, ctx.config, ctx.schemeConfig, dt=ctx.config.dt)
+    return ctx.config.dt
+
+
+# -- sensor / diagnostics -----------------------------------------------------
+
+def _locateSensor(ctx: RunContext, particles) -> int:
+    sensor = torch.as_tensor(ctx.param('sensorPos'), device=particles.positions.device,
+                             dtype=particles.positions.dtype)
+    boundary = particles.kinds == 1
+    allIdx = torch.arange(particles.positions.shape[0], device=particles.positions.device)
+    bIdx = allIdx[boundary]
+    dist = torch.linalg.norm(particles.positions[boundary] - sensor, dim=-1)
+    idx = int(bIdx[torch.argmin(dist)].item())
+    ctx.scratch['sensorActualPos'] = particles.positions[idx].detach().cpu().tolist()
+    ctx.scratch['sensorGap'] = float(dist.min().item())
+    return idx
+
+
+def _probePressure(ctx: RunContext, particles, quantity: torch.Tensor):
+    """Gaussian Shepard smoothing of ``quantity`` over fluid particles within
+    ``probeRadius`` of the sensor -- a spray-robust cross-check on the
+    single-particle reading."""
+    sensor = torch.as_tensor(ctx.param('sensorPos'), device=particles.positions.device,
+                             dtype=particles.positions.dtype)
+    fluid = particles.kinds == 0
+    r = torch.linalg.norm(particles.positions[fluid] - sensor, dim=-1)
+    radius = ctx.param('probeRadius', 3.0 * ctx.config.dx)
+    near = r < radius
+    if int(near.sum()) < 3:
+        return None
+    w = torch.exp(-(r[near] / (0.5 * radius)) ** 2)
+    return float((w * quantity[fluid][near]).sum() / w.sum())
+
+
+def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
+    particles = state.state
+    fluid = particles.kinds == 0
+    vel = particles.velocities[fluid]
+    rho = particles.densities[fluid]
+    rho0Phys = ctx.param('rho0Physical')
+    rho0 = ctx.schemeConfig.fluid.restDensity
+
+    d = {
+        'maxVelocity': torch.linalg.norm(vel, dim=-1).max().item(),
+        'kineticEnergy': (0.5 * particles.masses[fluid] * (vel ** 2).sum(-1)).sum().item(),
+        'maxDensity': rho.max().item(),
+        'minDensity': rho.min().item(),
+        'densityP05': torch.quantile(rho.detach().float(), 0.05).cpu().item(),
+        'rollAngleDeg': math.degrees(ctx.scratch.get('rollAngle', 0.0)),
+    }
+    d.update(particleDistributionMetrics(ctx, state))
+    d.update(stepAccelerationDiagnostics(state))
+
+    if ctx.param('wallRepresentation') == 'analytic':
+        # no wall particle to read: Sensor 1 is the Gaussian-smoothed pressure of the fluid within `probeRadius`
+        # of the sensor position (the same `sensorPressureProbe` the particle walls record next to the wall reading):
+        # the carried solver pressure of an incompressible scheme, else the Tait pressure of the density
+        if isIncompressibleScheme(ctx.scheme):
+            quantity = (particles.pressures if particles.pressures is not None else torch.zeros_like(particles.densities)) * rho0Phys
+        else:
+            cs = float(ctx.schemeConfig.fluid.fixedSoundSpeed)
+            scale = rho0Phys * cs * cs
+            quantity = scale / _TAIT_GAMMA * ((particles.densities / rho0) ** _TAIT_GAMMA - 1.0)
+        probe = _probePressure(ctx, particles, quantity)
+        d['sensorPressure'] = probe if probe is not None else 0.0
+        if probe is not None:
+            d['sensorPressureProbe'] = probe
+        return d
+
+    if ctx.scratch.get('sensorIndex') is None:
+        ctx.scratch['sensorIndex'] = _locateSensor(ctx, particles)
+    idx = ctx.scratch['sensorIndex']
+
+    sensorRho = float(particles.densities[idx])
+    ratio = sensorRho / rho0
+    d['sensorRho'] = sensorRho
+    d['sensorDensityRatio'] = ratio
+
+    if isIncompressibleScheme(ctx.scheme):
+        # DFSPH now persists both projection pressures (schemes/divergenceFree.py):
+        #   pressures   -> constant-density / particle-shift solve pressure
+        #   soundspeeds -> divergence-free projection pressure
+        # Both are populated on fluid rows only, so the wall sensor particle
+        # reads 0 -- take the sensor value from a fluid-particle probe instead.
+        pCD = getattr(particles, 'pressures', None)
+        pDF = getattr(particles, 'soundspeeds', None)
+        probe = _probePressure(ctx, particles, pCD * rho0Phys) if pCD is not None else None
+        probeDF = _probePressure(ctx, particles, pDF * rho0Phys) if pDF is not None else None
+        if probe is not None:
+            d['sensorPressureCD'] = probe
+        if probeDF is not None:
+            d['sensorPressureDF'] = probeDF
+        d['sensorPressure'] = probe if probe is not None else 0.0
+
+        # `band2018pb` solves the pressure AT the boundary sample (that is the
+        # whole point of the extended PPE -- and the paper's own Sec. 3.3 tank
+        # scenario is exactly this: "Pressure Boundaries enable the analysis of
+        # computed pressure values at the boundary"). Where the wall row
+        # carries a solved pressure, report it directly as well: it is the
+        # quantity Sensor 1 physically measures, with no fluid-probe smoothing
+        # in between. Kept as an extra series rather than a replacement so the
+        # `sensorPressure` column stays comparable across schemes.
+        if pCD is not None and bool(particles.kinds[idx] != 0):
+            d['sensorPressureWall'] = float(pCD[idx]) * rho0Phys
+    elif isArtificialCompressibleScheme(ctx.scheme):
+        # ACSPH integrates `pressures` (fluid rows) and fills the wall rows
+        # with its Eq. (61) closure, so the wall sensor row carries a pressure
+        # of its own -- reported as an extra series next to the fluid probe,
+        # as for `band2018pb`.
+        pAC = particles.pressures
+        probe = _probePressure(ctx, particles, pAC * rho0Phys)
+        d['sensorPressure'] = probe if probe is not None else 0.0
+        d['sensorPressureWall'] = float(pAC[idx]) * rho0Phys
+    else:
+        cs = float(ctx.schemeConfig.fluid.fixedSoundSpeed)
+        scale = rho0Phys * cs * cs
+        d['sensorPressureLinear'] = scale * (ratio - 1.0)
+        d['sensorPressureTait'] = scale / _TAIT_GAMMA * (ratio ** _TAIT_GAMMA - 1.0)
+        d['sensorPressure'] = d['sensorPressureTait']
+        probe = _probePressure(
+            ctx, particles,
+            scale / _TAIT_GAMMA * ((particles.densities / rho0) ** _TAIT_GAMMA - 1.0))
+    if probe is not None:
+        d['sensorPressureProbe'] = probe
+    return d
+
+
+#: The two panels the run plots. Exported so the notebook can feed them
+#: straight to `buildFieldPlotter` (the live-updating path in Jupyter).
+SLOSHING_FIELDS = [
+    Field('velocities', 'velocity magnitude', colorMap='viridis', mapping='L2Norm',
+          boundary='Visualize'),
+    # `scaling='Symmetric'` is what makes `midPoint` take effect at all --
+    # `warpSPHPlotting.math.getBounds` only applies it on the Symmetric /
+    # SymmetricLog branch, so a diverging map left on the default `Linear`
+    # silently becomes a plain min-max stretch and "white" lands wherever the
+    # data minimum happens to be, not at rho0.
+    Field('densities', 'density', colorMap='RdBu', colorMapKind='diverging',
+          flip=True, midPoint=1.0, scaling='Symmetric', boundary='Visualize'),
+]
+
+setupPlot, updatePlot = particlePlot(SLOSHING_FIELDS, figsize=(13, 5))
+
+
+def extraData(ctx: RunContext, state) -> Dict[str, Any]:
+    return {k: v for k, v in ctx.spec.params.items()
+            if not isinstance(v, (list, dict))}
+
+
+sloshingTankCase = registerCase(Case(
+    name='sloshingTank',
+    scheme='deltaSPH',
+    description='Laterally-excited sloshing tank, SPHERIC Test Case 10 (2D free '
+                'surface); gravity rolled in the tank frame, wall Sensor 1 pressure.',
+    buildSystem=buildSystem,
+    configureScheme=configureScheme,
+    initialConditions=initialConditions,
+    postStep=postStep,
+    timestep=sloshingTimestep,
+    diagnostics=diagnostics,
+    setupPlot=setupPlot,
+    updatePlot=updatePlot,
+    extraData=extraData,
+    defaults=dict(
+        caseName='16-sloshingTank',
+        dim=2,
+        # nx / targetDt / soundSpeed / integrationScheme below are the diffSPH
+        # `16_SloshingTank.ipynb` reference configuration -- the one that runs
+        # this case cleanly there. Matching the discretisation first is what
+        # makes any remaining difference attributable to the solver rather than
+        # to the setup (`DELTASPH_VALIDATION_PLAN.md` item 5).
+        nx=200,                          # diffSPH: nx=200 -> dx = 0.0045
+        L=0.9,                           # tank internal width B
+        n_h=4.0,
+        kernel='Wendland4',
+        # RK2. `semiImplicitEuler` (enum 21, 1-stage) integrates density with a
+        # plain `explicit_step`, and for WCSPH the stiff oscillator is
+        # (rho, v), not (x, v) -- so the acoustic mode runs explicit Euler and
+        # grows by `sqrt(1 + (c k dt)^2)` every step. Diverges at t = 0.041 s
+        # *at rest*, at every discretisation tried (`DELTASPH_VALIDATION_PLAN.md`
+        # 5.3) -- still true, unrelated to the no-pen mechanism below.
+        #
+        # `symplecticEuler` (enum 13, 2-stage kick-drift-kick, the scheme
+        # DualSPHysics runs) was ALSO found to diverge here, at t = 0.727 s,
+        # and on Marrone 3.1 at t* = 1.295 with 473 penetrating particles
+        # against RK4's zero (5.9); prime suspect at the time was
+        # `deltaSPH_step`'s `nopenshift / dt` term, whose magnitude depends on
+        # the integrator's stage splitting under `mdbcNoPenShiftMode='derivative'`.
+        # **Superseded, 2026-09-12**: with `mdbcNoPenShiftMode='finalize'` and
+        # `'hybrid'` ghost placement now the defaults (5.13) -- which route the
+        # no-pen correction outside `deltaSPH_step` entirely, removing the
+        # suspected term -- `symplecticEuler` ran the *full* 7 s record clean
+        # (nx=225, `diverged=False`), and with a visibly better Sensor-1 match
+        # than RK2: raw peak 60.1 kPa vs. RK2's 233.7 kPa against the same
+        # 2.2-13.1 kPa measured band.
+        # **Promoted to the default, WCSPH_DEFAULT_CLOSEOUT_PLAN.md item E
+        # (2026-09-18)** -- the "single comparison run, not the full
+        # validation sweep" caveat above no longer applies: this session's own
+        # `english2025`+`fourtakas2019`+`symplecticEuler` combo ran clean
+        # across Marrone 3.1 (both configs, nx=35/70), Marrone 3.4 (both
+        # resolutions, nx=128/256, up to t*=15.66), and this case's own full 7s
+        # (aside from the separately-tracked, integrator-independent
+        # ceiling-hover mechanism -- see `OPEN_PROBLEMS.md`). The `nx=200`
+        # diffSPH-matched discretisation above is unaffected -- only the
+        # integrator choice moved.
+        integrationScheme='symplecticEuler',
+        supportMode='KernelMeanSymmetric',
+        gradientMode='Difference',
+        laplacianMode='Brookshaw',
+        samplingScheme='regular',
+        periodic=True,
+        tLimit=7.0,
+        dt=None,
+        adaptiveDt=True,
+        cflFactor=0.3,
+        minDt=1e-8,
+        maxDt=2e-3,
+        storeMode='trajectory',
+        exportInterval=0.01,
+        plotInterval=50,
+        storeInterval=500,
+    ),
+    params=dict(
+        tankHeight=0.508,
+        fillDepth=0.093,
+        band=5,
+        bandWidth=16.0,
+        wallBC='freeSlip',
+        # 'particles' (boundary particles + mDBC ghost nodes) or 'analytic' (warpSPHBoundaries tank body, deltaSPH only)
+        wallRepresentation='particles',
+        # analytic walls under an incompressible scheme: the calibrated lattice (OPEN_PROBLEMS 31); 'auto' = on there, True / False force it
+        calibratedLattice='auto',
+        # analytic walls: the wall plane moved outward by this fraction of dx (the calibrated lattice of the incompressible schemes, OPEN_PROBLEMS 31)
+        analyticWallOffset=0.0,
+        # analytic walls only: 'hydrostatic', 'normal' (see dambreak) or 'mls' (omniIncompressible: the wall pressure gradient fitted to the fluid's pressure iterate)
+        analyticWallPressure='hydrostatic',
+        # omniIncompressible velocity filters (modules/xsph): the XSPH coefficient (DFSPH2D 1e-4) and the analytic walls' boundary friction (DFSPH2D 5e-3); 0 = off
+        xsphCoefficient=0.0,
+        boundaryFriction=0.0,
+        # incompressible analytic walls: the divergence stage as 'jacobi' (omniSPH, default) or the converged 'compact' projection (modules/incompressible/compactProjection.py); densitySolve=False leaves the projection the only pressure solve
+        projection='jacobi',
+        # DFSPH2D Fickian particle shift of the incompressible analytic-wall schemes (modules/shifting/fickian.py): particleShift 'none' | 'fixed' | 'fickian', shiftA
+        particleShift='none',
+        shiftA=0.5,
+        projectionTol=1e-8,
+        densitySolve=True,
+        gravityMagnitude=9.81,
+        rho0Physical=1000.0,
+        # Normalise the particle mass so the at-rest sampling measures `rho0`.
+        # `'auto'` = on for incompressible schemes only (see
+        # `initialConditions`); `True`/`False` force it. Without it this case's startup impulse is an
+        # nx-dependent lottery under `divergenceFree` -- step-0 `|v|max` 0.06 at
+        # nx=200 but 1.74 at nx=100, which delaminates the layer within ~0.07 s
+        # -- and the reference runs only look clean because their `nx` happens
+        # to land well. With it, step-0 `|v|max` is 0.0098 at every `nx`.
+        calibrateRestDensity='auto',
+        # With `soundSpeed` set, `targetDt` *is* dt -- no back-solve either way
+        # (`caseUtils/weaklyCompressible.py:setupTimestep`). diffSPH's notebook
+        # fixes both independently at exactly these values; its own back-solved
+        # `c_s` is overwritten with the literal 20 two lines later.
+        targetDt=1.0e-4,
+        soundSpeed=20.0,
+        # roll excitation
+        rollDataFile='',                 # '' -> the bundled lateral_water_1x.txt
+        rollStartTime=0.0,
+        # sensor 1: left wall at the still-water line
+        sensorPos=[-0.45, 0.093],
+        probeRadius=0.02,
+        # dissipation
+        inviscid=True,
+        alpha=0.02,
+        nu=1.0e-6,
+        # WCSPH: uniform background pressure added to the EOS (0 = off)
+        backgroundPressure=0.0,
+        # divergenceFree only
+        shifting=False,
+        xsphScale=0.0,
+        markerSize=4,
+        # mDBC no-penetration placement; None = the scheme config's default.
+        noPenShift=None,
+        # density as a drift field (CEILING_STICKING_PLAN.md §3/§6); None = config default
+        timeCentredContinuity=None,
+    ),
+))
+
+
+if __name__ == '__main__':
+    caseMain(sloshingTankCase)

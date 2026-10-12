@@ -2,7 +2,7 @@
 """05 taylor green vortex -- thin wrapper around the shared runner.
 
 The notebook this came from is `05-taylor-green-vortex.ipynb`; the case itself is
-`warpSPH.cases.tgvWeaklyCompressible`, and everything generic (config, step loop, export,
+`warpSPH.cases.periodic.tgvWeaklyCompressible`, and everything generic (config, step loop, export,
 plotting, ffmpeg) is `warpSPH.runner`. Equivalent invocations::
 
     python examples/weaklyCompressible/05-taylor-green-vortex.py
@@ -15,7 +15,7 @@ from warpSPHBootstrap import bootstrap
 
 bootstrap(precision='float32')
 
-from warpSPH.cases.tgvWeaklyCompressible import tgvWeaklyCompressibleCase    # noqa: E402
+from warpSPH.cases.periodic.tgvWeaklyCompressible import tgvWeaklyCompressibleCase    # noqa: E402
 from warpSPH.runner import caseMain                # noqa: E402
 
 #: What this example fixes relative to the case defaults; still overridable,

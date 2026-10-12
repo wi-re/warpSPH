@@ -1,4 +1,4 @@
-"""Yee isentropic vortex initial state, used by `warpSPH.cases.yeeVortex`.
+"""Yee isentropic vortex initial state, used by `warpSPH.cases.compressible.yeeVortex`.
 
 Samples particles on concentric shells (`sampleShellv2`, `nr` rings) rather
 than a lattice, imposes the Yee vortex's Gaussian velocity/temperature

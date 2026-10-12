@@ -20,16 +20,16 @@ iterations per step, not Newton/GMRES)?
 
 This exact combination -- Kolmogorov forcing driven through the
 `divergenceFree` scheme -- has never been run in this codebase before
-(`cases/kolmogorov.py` is hardcoded to `scheme='deltaSPH'`; the only existing
-`divergenceFree` case is `cases/tgv.py`, unforced). Per JFNK_PLAN.md's own
-convention, this script deliberately does NOT edit `cases/kolmogorov.py` or
-`cases/tgv.py` (both existing, tested, registered production code) -- it
+(`cases/periodic/kolmogorov.py` is hardcoded to `scheme='deltaSPH'`; the only existing
+`divergenceFree` case is `cases/periodic/tgv.py`, unforced). Per JFNK_PLAN.md's own
+convention, this script deliberately does NOT edit `cases/periodic/kolmogorov.py` or
+`cases/periodic/tgv.py` (both existing, tested, registered production code) -- it
 reuses the pieces those two cases are already built from directly:
 `sample.weaklyCompressible.setupBasicWeaklyCompressibleInitialState` (the same
-sampling `cases/tgv.py`'s own `buildSystem` calls, for the very same
+sampling `cases/periodic/tgv.py`'s own `buildSystem` calls, for the very same
 `scheme='divergenceFree'`), the Kolmogorov `v_x = xi*sin(k*pi*y)` forcing
 closure (re-derived here rather than imported -- it is a nested closure
-inside `cases/kolmogorov.py`'s own `initialConditions`, not a standalone
+inside `cases/periodic/kolmogorov.py`'s own `initialConditions`, not a standalone
 function; the Perlin-noise symmetry-breaking term is dropped, matching
 JFNK_PLAN.md Phase E1's own precedent that a small position jitter is enough
 to seed the instability), and the `BoundaryCondition`/`boundaryConditions`
@@ -68,7 +68,7 @@ from warpSPH.sample.weaklyCompressible import setupBasicWeaklyCompressibleInitia
 from warpSPH.schemes import buildScheme
 from warpSPH.utils import buildDomainDescription
 
-# `cases/kolmogorov.py`'s own defaults, reused verbatim so this probe targets
+# `cases/periodic/kolmogorov.py`'s own defaults, reused verbatim so this probe targets
 # the same operating point as `JFNK_PLAN.md`'s E1.6/E1.7 compressible probes.
 K_DEFAULT = 4.0
 ALPHA_REFERENCE = 0.01
@@ -113,7 +113,7 @@ def buildKolmogorovIncompressibleSystem(nx, xi, k, nu, jitter, L=L_DEFAULT,
         nx, config, schemeConfig, bundle.SimulationState, bundle.SimulationSystem)
 
     # Normalise mass so the sampled density lands on rho0=1, matching
-    # `cases/tgv.py`'s own `buildSystem` for this same scheme.
+    # `cases/periodic/tgv.py`'s own `buildSystem` for this same scheme.
     densities = computeDensities(system.state, config, schemeConfig, None)
     system.state.masses = system.state.masses / densities.mean() * 1.0
 
@@ -139,7 +139,7 @@ def buildKolmogorovIncompressibleSystem(nx, xi, k, nu, jitter, L=L_DEFAULT,
 
     def fullDomainSdf(x):
         # The whole periodic domain is "inside" the fluid region -- no
-        # obstacle, no walls, matching `cases/kolmogorov.py`'s own
+        # obstacle, no walls, matching `cases/periodic/kolmogorov.py`'s own
         # `domainFluidSdf` on a case with no boundary region.
         return -torch.ones(x.shape[0], device=x.device, dtype=x.dtype), torch.zeros_like(x)
 

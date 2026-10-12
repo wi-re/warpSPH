@@ -25,7 +25,7 @@ import sys
 
 import numpy as np
 
-from warpSPH.cases.columnCollapse import columnCollapseCase
+from warpSPH.cases.freeSurface.columnCollapse import columnCollapseCase
 from warpSPH.runner import run
 
 OUT = os.path.join(os.path.dirname(__file__), "videos_dfsph_columnCollapse")

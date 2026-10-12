@@ -35,9 +35,9 @@ from warpSPH.modules.pressure import computePressureForceSymmetric   # noqa: E40
 from warpSPH.modules.reconstruction import reconstructionInputs     # noqa: E402
 
 CASES = {
-    'sedov': ('warpSPH.cases.sedov', 'sedovCase', dict(dim=3, nx=24)),
-    'noh': ('warpSPH.cases.noh', 'nohCase', dict()),
-    'sod': ('warpSPH.cases.sod', 'sodCase', dict(nx=100)),
+    'sedov': ('warpSPH.cases.compressible.sedov', 'sedovCase', dict(dim=3, nx=24)),
+    'noh': ('warpSPH.cases.compressible.noh', 'nohCase', dict()),
+    'sod': ('warpSPH.cases.compressible.sod', 'sodCase', dict(nx=100)),
 }
 
 

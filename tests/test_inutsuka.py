@@ -35,7 +35,7 @@ _H = [None]      # the Gaussian h of the last `_setup`
 
 
 def _state():
-    from warpSPH.cases.greshoVortex import greshoVortexCase
+    from warpSPH.cases.compressible.greshoVortex import greshoVortexCase
     res = run(greshoVortexCase, scheme='Monaghan', nx=24, nSteps=1, progress=False, quiet=True)
     return res.state, res.ctx.config
 
@@ -135,7 +135,7 @@ def _energy(st):
 
 
 def test_sod1dRunsAndConserves():
-    from warpSPH.cases.sod import sodCase
+    from warpSPH.cases.compressible.sod import sodCase
     e0 = _energy(run(sodCase, scheme='InutsukaGSPH', nSteps=1, progress=False, quiet=True).state.state)
     st = run(sodCase, scheme='InutsukaGSPH', nSteps=120, progress=False, quiet=True).state.state
     assert torch.isfinite(st.densities).all() and torch.isfinite(st.velocities).all() and torch.isfinite(st.internalEnergies).all()

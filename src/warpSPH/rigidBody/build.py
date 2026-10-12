@@ -5,7 +5,7 @@ relative to that center of mass. Called once per rigid body during
 initialization (`initializers/weaklyCompressible.py`) to seed each body before
 its pose is integrated; `angularVelocity`/`linearVelocity` always start at
 zero here regardless of any velocity the particles were sampled with -- a case
-sets the prescribed rate afterward (e.g. `cases/movingObstacle.py`).
+sets the prescribed rate afterward (e.g. `cases/wallBounded/movingObstacle.py`).
 """
 
 import torch

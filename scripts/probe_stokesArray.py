@@ -76,7 +76,7 @@ def main():
     f = st.kinds == 0
     c = float(r.ctx.scratch['solidFraction'])
     if a.shape == 'disk':
-        from warpSPH.cases.stokesArray import sanganiAcrivos
+        from warpSPH.cases.boundaries.stokesArray import sanganiAcrivos
         Kref = (1.0 - c) * sanganiAcrivos(c)
     else:
         Kref = 25.91

@@ -34,8 +34,10 @@ def worker(a):
     import warpSPH.cases  # noqa: F401
     from warpSPH.runner import run
     from warpSPH.runner.case import getCase
-    for mod in ('tgv', 'tgvWeaklyCompressible', 'greshoVortex', 'kelvinHelmholtz', 'sedov', 'sod',
-                'dambreak', 'noh', 'yeeVortex', 'triplePoint'):
+    for mod in ('periodic.tgv', 'periodic.tgvWeaklyCompressible', 'compressible.greshoVortex',
+                'compressible.kelvinHelmholtz', 'compressible.sedov', 'compressible.sod',
+                'freeSurface.dambreak', 'compressible.noh', 'compressible.yeeVortex',
+                'compressible.triplePoint'):
         try:
             importlib.import_module(f'warpSPH.cases.{mod}')
         except Exception:  # noqa: BLE001

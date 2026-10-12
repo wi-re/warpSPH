@@ -69,7 +69,7 @@ def test_shock_indicator_sign():
 
 def test_sod_runs_and_switch_engages():
     """A short Sod run under the Sphenix config: alpha leaves zero at the shock, stays finite, and the run is clean."""
-    from warpSPH.cases.sod import sodCase
+    from warpSPH.cases.compressible.sod import sodCase
     from warpSPH.runner import run
 
     def configure(ctx, _orig=sodCase.configureScheme):

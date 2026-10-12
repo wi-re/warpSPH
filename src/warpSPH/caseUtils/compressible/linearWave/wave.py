@@ -1,4 +1,4 @@
-"""Linear acoustic wave initial state and reference plot, used by `warpSPH.cases.linearWave`.
+"""Linear acoustic wave initial state and reference plot, used by `warpSPH.cases.compressible.linearWave`.
 
 `sampleLinearWave` samples a regular 1D lattice with a sinusoidal pressure
 perturbation of amplitude `A` and wavelength `lamda` on top of rest density

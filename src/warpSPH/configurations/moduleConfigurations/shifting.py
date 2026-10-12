@@ -271,7 +271,7 @@ def buildDefaultShiftProperties() -> ShiftProperties:
         # side effect: `surfaceNormal` no longer clears sloshingTank's NaN --
         # it now diverges at t=0.68 instead of surviving to t=4.0
         # (reproduced directly against the pre-fix commit,
-        # `PST_ALE_PLAN.md` §7.1). `cases/sloshingTank.py` no longer
+        # `PST_ALE_PLAN.md` §7.1). `cases/freeSurface/sloshingTank.py` no longer
         # defaults to this scheme/projection pair for that reason -- it uses
         # `ShiftingScheme.michel2022`/`ShiftingProjectionScheme.michel2022`
         # instead, the one configuration measured to still survive the full

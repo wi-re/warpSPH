@@ -219,7 +219,7 @@ class Sun2017DeltaSPHConfig(WeaklyCompressibleSPHConfig):
     frozen diffusion is specifically an RK-multi-stage companion technique.
 
     Kernel and integrator (Wendland C2, RK4) are case-level settings either
-    way, not part of this config -- `cases/dambreak.py` already defaults to
+    way, not part of this config -- `cases/freeSurface/dambreak.py` already defaults to
     both regardless of which `WeaklyCompressibleSPHScheme` is selected.
     """
     freezeDiffusionAcrossStages: bool = field(

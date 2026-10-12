@@ -68,8 +68,8 @@ def main():
         common['tLimit'] = a.tLimit
 
     if a.case == 'woodwardColella':
-        from warpSPH.cases.woodwardColella import woodwardColellaCase
-        from warpSPH.cases.woodwardColellaWalls import woodwardColellaWallsCase
+        from warpSPH.cases.compressible.woodwardColella import woodwardColellaCase
+        from warpSPH.cases.compressibleWalls.woodwardColellaWalls import woodwardColellaWallsCase
         n = a.nx or 1000
         nw = woodwardColellaWallsCase.params['wallLayers']
         ref = run(woodwardColellaCase, nx=2 * n, L=2.0, **common)
@@ -79,8 +79,8 @@ def main():
         wx, wf = fields(wal.state, wal.state.state.kinds == 0, 0.5)
         lo, hi, bins = 0.0, 1.0, a.bins or n // 4
     else:
-        from warpSPH.cases.sedov import sedovCase
-        from warpSPH.cases.sedovWalls import sedovWallsCase
+        from warpSPH.cases.compressible.sedov import sedovCase
+        from warpSPH.cases.compressibleWalls.sedovWalls import sedovWallsCase
         n = a.nx or 101
         params = dict(goalRadius=a.goalRadius)
         ref = run(sedovCase, dim=a.dim, nx=n, L=2.0, periodic=True, params=params, **common)

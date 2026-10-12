@@ -237,8 +237,8 @@ def makeDiagnostics(baseDiagnostics, toy, record):
 
 def buildCase(toy: str, dambreakLikeAC: bool, cav: str = 'off', nuOff=False, shiftOff=False, ddt=None):
     import torch
-    from warpSPH.cases.hydrostaticColumn import hydrostaticColumnCase as base
-    from warpSPH.cases.plotting import Field, particlePlot
+    from warpSPH.cases.boundaries.hydrostaticColumn import hydrostaticColumnCase as base
+    from warpSPH.cases.common.plotting import Field, particlePlot
     from warpSPH.configurations.moduleConfigurations.shifting import ShiftingProjectionScheme, ShiftingScheme
 
     def configureScheme(ctx):
@@ -288,7 +288,7 @@ def buildCase(toy: str, dambreakLikeAC: bool, cav: str = 'off', nuOff=False, shi
         if isWC(ctx):
             # weakly compressible: Sun et al. 2017 Eq. (2), Ma = 0.1 on the
             # free-fall speed over the box height; dt from the acoustic CFL
-            from warpSPH.cases.weaklyCompressible import setupTimestep
+            from warpSPH.cases.common.weaklyCompressible import setupTimestep
             g = ctx.param('gravityMagnitude')
             # c0 at Ma 0.1, but dt pinned at an acoustic Courant number
             # c0 dt / dx = 0.3: the machTarget route's CFL gave 0.84 here, and
@@ -305,14 +305,14 @@ def buildCase(toy: str, dambreakLikeAC: bool, cav: str = 'off', nuOff=False, shi
         system.state.pressures = torch.full_like(system.state.pressures, P0_OFFSET)
 
     def buildSystem(ctx):
-        from warpSPH.cases.hydrostaticColumn import columnSdf
-        from warpSPH.cases.weaklyCompressible import (boundaryRegion, buildRegionSystem,
+        from warpSPH.cases.boundaries.hydrostaticColumn import columnSdf
+        from warpSPH.cases.common.weaklyCompressible import (boundaryRegion, buildRegionSystem,
                                                       domainBoundarySdf, fluidRegion, shapeSdf)
         from warpSPH.configurations.region import BCType
         if not ctx.param('blockWidth'):
             return base.buildSystem(ctx)
         if not ctx.param('band'):
-            from warpSPH.cases.randomFlow import BOUNDED_BAND
+            from warpSPH.cases.periodic.randomFlow import BOUNDED_BAND
             ctx.spec.params['band'] = BOUNDED_BAND
         L = ctx.spec.L
         halfH = 0.5 * ctx.param('fillRatio') * L
@@ -546,8 +546,8 @@ def runMarrone(args):
     import torch
     sys.path.insert(0, HERE)
     import probe_deltaSPHMarrone as M
-    from warpSPH.cases.dambreak import dambreakCase
-    from warpSPH.cases.sloshingTank import sloshingTankCase
+    from warpSPH.cases.freeSurface.dambreak import dambreakCase
+    from warpSPH.cases.freeSurface.sloshingTank import sloshingTankCase
     from warpSPH.runner import run
     sloshing = args.toy == 'sloshing'
     baseCase = sloshingTankCase if sloshing else dambreakCase

@@ -17,7 +17,7 @@ import numpy as np
 import torch
 
 import warpSPH.schemes.builder as B
-from warpSPH.cases.greshoVortex import greshoVortexCase
+from warpSPH.cases.compressible.greshoVortex import greshoVortexCase
 from warpSPH.math.scatter import segment_sum
 from warpSPH.runner import run
 

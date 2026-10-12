@@ -282,7 +282,7 @@ def _execute(spec: RunSpec, cfg: AVConfig, outDir: Path, tag: str, video: bool,
     (`avReportDiagnostics`) recorded every `avStride` steps."""
     import dataclasses
     from warpSPH.runner import run
-    from warpSPH.cases.compressible import avReportDiagnostics
+    from warpSPH.cases.compressible.common import avReportDiagnostics
 
     base = spec.case.diagnostics
     counter = [0]
@@ -366,7 +366,7 @@ GAMMA = 5 / 3
 
 
 def _sodSpec(profile: str) -> RunSpec:
-    from warpSPH.cases.sod import sodCase
+    from warpSPH.cases.compressible.sod import sodCase
     nx, nSteps = (100, 60) if profile == 'smoke' else (400, 400)
     return RunSpec(sodCase, dict(nx=nx, nSteps=nSteps), dict(_DA_SOD))
 
@@ -409,14 +409,14 @@ def _sodMetrics(res, cfg: AVConfig) -> Dict[str, Any]:
 # --------------------------------------------------------------------------- Gresho (2D)
 
 def _greshoSpec(profile: str) -> RunSpec:
-    from warpSPH.cases.greshoVortex import greshoVortexCase
+    from warpSPH.cases.compressible.greshoVortex import greshoVortexCase
     if profile == 'smoke':
         return RunSpec(greshoVortexCase, dict(nx=32, nSteps=40))
     return RunSpec(greshoVortexCase, dict(nx=100, tLimit=3.0))
 
 
 def _shearingNohSpec(profile: str) -> RunSpec:
-    from warpSPH.cases.shearingNoh import shearingNohCase
+    from warpSPH.cases.compressible.shearingNoh import shearingNohCase
     if profile == 'smoke':
         return RunSpec(shearingNohCase, dict(nx=50, nSteps=40))
     return RunSpec(shearingNohCase, dict(nx=100, tLimit=0.6))
@@ -439,7 +439,7 @@ def _shearingNohMetrics(res, cfg: AVConfig) -> Dict[str, Any]:
 
 
 def _noh2dSpec(profile: str) -> RunSpec:
-    from warpSPH.cases.noh import nohCase
+    from warpSPH.cases.compressible.noh import nohCase
     if profile == 'smoke':
         return RunSpec(nohCase, dict(dim=2, nx=50, nSteps=40))
     return RunSpec(nohCase, dict(dim=2, nx=100, tLimit=0.6))
@@ -449,7 +449,7 @@ def _noh2dMetrics(res, cfg: AVConfig) -> Dict[str, Any]:
     """AV_PLAN Phase 6: the cylindrical Noh implosion. Ahead of the shock the gas converges (div v = -1/r) without
     any radial velocity gradient: a divergence-based detector fires there, Wadsley's D (n radial, dv/dn = 0) must
     not. `preShockAlphaMean` is the mean alpha over 1.3 r_s < r < 0.35 (inside the box's periodic seam effects)."""
-    from warpSPH.cases.noh import shockState
+    from warpSPH.cases.compressible.noh import shockState
     out = _common(res, cfg)
     st = res.state.state
     t = float(res.state.t)
@@ -467,7 +467,7 @@ def _noh2dMetrics(res, cfg: AVConfig) -> Dict[str, Any]:
 
 
 def _shearBoxSpec(profile: str) -> RunSpec:
-    from warpSPH.cases.shearBox import shearBoxCase
+    from warpSPH.cases.compressible.shearBox import shearBoxCase
     if profile == 'smoke':
         return RunSpec(shearBoxCase, dict(nx=32, nSteps=40))
     return RunSpec(shearBoxCase, dict(nx=64, tLimit=2.0))
@@ -521,7 +521,7 @@ _DA_SOD = dict(right_rho=0.125, right_pressure=0.1)
 
 def _sodNDSpec(name: str):
     def spec(profile: str) -> RunSpec:
-        from warpSPH.cases.sodND import sod2dCase, sod3dCase
+        from warpSPH.cases.compressible.sodND import sod2dCase, sod3dCase
         case = sod2dCase if name == 'sod2d' else sod3dCase
         small = dict(sod2d=(64, 40), sod3d=(28, 30))[name]
         kw = dict(nx=small[0], nSteps=small[1]) if profile == 'smoke' else (
@@ -533,7 +533,7 @@ def _sodNDSpec(name: str):
 
 
 def _sedovSpec(profile: str) -> RunSpec:
-    from warpSPH.cases.sedov import sedovCase
+    from warpSPH.cases.compressible.sedov import sedovCase
     kw = dict(dim=3, nx=14, nSteps=30) if profile == 'smoke' else dict(dim=3, nx=40)
     return RunSpec(sedovCase, kw)
 
@@ -558,12 +558,12 @@ def _sedovMetrics(res, cfg: AVConfig) -> Dict[str, Any]:
 
 
 def _nohSpec(profile: str) -> RunSpec:
-    from warpSPH.cases.noh import nohCase
+    from warpSPH.cases.compressible.noh import nohCase
     return RunSpec(nohCase, dict(nx=80, nSteps=100) if profile == 'smoke' else {})
 
 
 def _nohMetrics(res, cfg: AVConfig) -> Dict[str, Any]:
-    from warpSPH.cases.noh import shockState
+    from warpSPH.cases.compressible.noh import shockState
     out = _common(res, cfg)
     ctx = res.ctx
     st = res.state.state
@@ -579,7 +579,7 @@ def _nohMetrics(res, cfg: AVConfig) -> Dict[str, Any]:
 
 
 def _yeeSpec(profile: str) -> RunSpec:
-    from warpSPH.cases.yeeVortex import yeeVortexCase
+    from warpSPH.cases.compressible.yeeVortex import yeeVortexCase
     return RunSpec(yeeVortexCase, dict(nSteps=30) if profile == 'smoke' else dict(tLimit=4.0))
 
 
@@ -601,7 +601,7 @@ def _yeeMetrics(res, cfg: AVConfig) -> Dict[str, Any]:
 
 
 def _waveSpec(profile: str) -> RunSpec:
-    from warpSPH.cases.linearWave import linearWaveCase
+    from warpSPH.cases.compressible.linearWave import linearWaveCase
     # A = 1e-4, not the case's 1e-6: at 1e-6 in float32 the velocity noise is ~7x the
     # signal. tLimit = 1/4 crossing is the standing wave's maximum (a full crossing, the
     # case default, has an analytic velocity of zero).
@@ -647,7 +647,7 @@ def _khMode(ctx, state) -> Dict[str, float]:
 
 
 def _khSpec(profile: str) -> RunSpec:
-    from warpSPH.cases.kelvinHelmholtz import kelvinHelmholtzCase
+    from warpSPH.cases.compressible.kelvinHelmholtz import kelvinHelmholtzCase
     if profile == 'smoke':
         return RunSpec(kelvinHelmholtzCase, dict(nx=48, nSteps=30))
     return RunSpec(kelvinHelmholtzCase, dict(nx=128, tLimit=1.5))
@@ -667,7 +667,7 @@ def _khMetrics(res, cfg: AVConfig) -> Dict[str, Any]:
 
 
 def _rtSpec(profile: str) -> RunSpec:
-    from warpSPH.cases.rayleighTaylor import rayleighTaylorCase
+    from warpSPH.cases.compressible.rayleighTaylor import rayleighTaylorCase
     if profile == 'smoke':
         return RunSpec(rayleighTaylorCase, dict(nx=32, nSteps=30))
     return RunSpec(rayleighTaylorCase, dict(nx=64, tLimit=4.0))

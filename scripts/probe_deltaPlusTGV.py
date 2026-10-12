@@ -214,7 +214,7 @@ def _runOne(nx: int, Re: float, tLimit: float, out: str, scheme: str,
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
-    from warpSPH.cases.tgvWeaklyCompressible import (
+    from warpSPH.cases.periodic.tgvWeaklyCompressible import (
         analyticCentrePressure, tgvWeaklyCompressibleCase, viscosityScales)
     from warpSPH.runner import run
 

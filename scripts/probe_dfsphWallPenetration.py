@@ -53,16 +53,16 @@ def _grade(r):
 
 def _load(case):
     if case == "columnCollapse":
-        from warpSPH.cases.columnCollapse import columnCollapseCase as c
+        from warpSPH.cases.freeSurface.columnCollapse import columnCollapseCase as c
         return c, dict(nx=64, tLimit=2.0), {}
     if case == "dambreak":
-        from warpSPH.cases.dambreak import dambreakCase as c
+        from warpSPH.cases.freeSurface.dambreak import dambreakCase as c
         return c, dict(nx=64, scheme="divergenceFree", tLimit=1.5), {}
     if case == "hydrostaticColumn":
-        from warpSPH.cases.hydrostaticColumn import hydrostaticColumnCase as c
+        from warpSPH.cases.boundaries.hydrostaticColumn import hydrostaticColumnCase as c
         return c, dict(nx=64, tLimit=1.5), {}
     if case == "randomFlowBounded":
-        from warpSPH.cases.randomFlowIncompressible import randomFlowIncompressibleCase as c
+        from warpSPH.cases.periodic.randomFlowIncompressible import randomFlowIncompressibleCase as c
         return c, dict(nx=64, tLimit=1.5), dict(bounded=True)
     raise SystemExit(f"unknown case {case!r}")
 

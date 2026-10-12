@@ -58,7 +58,7 @@ from warpSPHCore import (SupportScheme, OperationProperties, WarpOperation,
                          OperationDirection, GradientScheme, warpOperation)
 from warpSPH.modules.pressure.iisph import computePressureAccelIISPH
 from warpSPH.modules.incompressible.drift import computePressureShiftIISPH
-from warpSPH.cases.weaklyCompressible import domainBoundarySdf
+from warpSPH.cases.common.weaklyCompressible import domainBoundarySdf
 
 import warpSPH.systems.incompressible as sysmod
 

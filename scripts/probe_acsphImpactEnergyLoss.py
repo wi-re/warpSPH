@@ -78,7 +78,7 @@ bootstrap(precision='float32')
 
 import numpy as np
 
-from warpSPH.cases.impact import impactCase as case
+from warpSPH.cases.freeSurface.impact import impactCase as case
 from warpSPH.runner import run
 
 

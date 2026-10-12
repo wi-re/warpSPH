@@ -8,8 +8,8 @@ import warnings
 
 import pytest
 
-from warpSPH.cases.sloshingTank import sloshingTankCase
-from warpSPH.cases.weaklyCompressible import calibrateRestDensity
+from warpSPH.cases.freeSurface.sloshingTank import sloshingTankCase
+from warpSPH.cases.common.weaklyCompressible import calibrateRestDensity
 from warpSPH.runner import run
 
 

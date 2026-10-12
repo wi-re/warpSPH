@@ -16,7 +16,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / 'scripts'))
 
 from probe_monaghanEnergy import pieces   # noqa: E402
-from warpSPH.cases.sod import sodCase      # noqa: E402
+from warpSPH.cases.compressible.sod import sodCase      # noqa: E402
 from warpSPH.runner import run             # noqa: E402
 
 

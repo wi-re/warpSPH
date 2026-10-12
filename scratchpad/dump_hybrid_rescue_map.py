@@ -17,7 +17,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 import probe_deltaSPHMarrone34 as m34
-from warpSPH.cases.dambreak import dambreakCase
+from warpSPH.cases.freeSurface.dambreak import dambreakCase
 from warpSPH.runner import run
 from warpSPH.rigidBody.ghostParticles import (_gridSnapGhostOffsets,
                                               _latticeGhostOffsets)

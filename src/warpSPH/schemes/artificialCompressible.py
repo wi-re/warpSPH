@@ -13,7 +13,7 @@ converged state byte for byte with no framework change. That contract only
 holds for a **one-stage, one-evaluation** integrator: under RK2 the solve would
 run twice per step and the results would be *blended*, which is wrong and not
 visibly wrong. `validateIntegrationScheme` therefore refuses anything else,
-loudly, at step entry -- `cases/dambreak.py` documents the same class of trap
+loudly, at step entry -- `cases/freeSurface/dambreak.py` documents the same class of trap
 for `divergenceFree`/`semiImplicitEuler` and notes that nothing enforces it;
 here it is enforced.
 

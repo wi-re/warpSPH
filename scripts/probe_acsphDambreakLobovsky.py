@@ -81,7 +81,7 @@ def _runOne(scheme: str, nx: int, tLimit: float, out: str, video: bool,
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
-    from warpSPH.cases.dambreak import dambreakCase
+    from warpSPH.cases.freeSurface.dambreak import dambreakCase
     from warpSPH.runner import run
 
     os.makedirs(out, exist_ok=True)

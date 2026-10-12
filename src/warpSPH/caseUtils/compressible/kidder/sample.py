@@ -1,4 +1,4 @@
-"""Kidder 1D initial state, used by `warpSPH.cases.kidder`.
+"""Kidder 1D initial state, used by `warpSPH.cases.compressible.kidder`.
 
 Samples a regular 1D lattice on `[r_inner, r_outer]` (periodic domain sized
 `1.1 * r_outer`), evaluates `KidderIsentropicCapsuleAnalyticSolution` at

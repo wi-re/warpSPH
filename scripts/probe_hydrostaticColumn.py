@@ -35,7 +35,7 @@ from warpSPH.modules.pressure.iisph import computePressureAccelIISPH
 from warpSPH.schemes import divergenceFree as dfsph_mod
 from warpSPH.systems import incompressible as sysmod
 from warpSPH.configurations import ShiftPressureGauge
-from warpSPH.cases.hydrostaticColumn import hydrostaticColumnCase as case
+from warpSPH.cases.boundaries.hydrostaticColumn import hydrostaticColumnCase as case
 from warpSPH.runner import caseMain
 
 args = argparse.ArgumentParser()

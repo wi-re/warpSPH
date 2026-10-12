@@ -36,7 +36,7 @@ import numpy as np
 import torch
 from warpSPH.cases import importAll
 importAll()
-from warpSPH.cases.tgvWeaklyCompressible import tgvWeaklyCompressibleCase as case
+from warpSPH.cases.periodic.tgvWeaklyCompressible import tgvWeaklyCompressibleCase as case
 from warpSPH.runner import run
 from warpSPH.enumTypes import PressureForceScheme
 

@@ -14,7 +14,7 @@ onto warpSPH's `Case`/`runner` framework.
 
 ## STATUS (2026-09-03)
 
-**Tooling: done and verified.** `warpSPH.cases.sloshingTank` (registered),
+**Tooling: done and verified.** `warpSPH.cases.freeSurface.sloshingTank` (registered),
 `run_sloshingTank.py` (`--scheme wcsph|dfsph`, `--replot`, `--video`,
 `--targetDt`/`--alpha`), `16-sloshing-tank.ipynb`. Geometry, sensor, roll
 excitation and wave timing all check out against the measured record.
@@ -94,14 +94,14 @@ a per-step `BoundaryCondition` forcing function.
 
 ## 2. Deliverables
 
-1. `src/warpSPH/cases/sloshingTank.py` — a registered `Case`:
+1. `src/warpSPH/cases/freeSurface/sloshingTank.py` — a registered `Case`:
    - `configureScheme`: rectangular 0.9×0.508 interior domain inside a periodic
      wrapper widened by `band` layers; free-surface detection on; directional
      gravity on; scheme-aware dissipation (`deltaSPH`: artificial viscosity
      `alpha`; `divergenceFree`: physical `nu`, optional shift/XSPH).
    - `buildSystem`: fluid = box `x∈[−0.45,0.45], y∈[0,h]`; boundary = interior
      complement (`sampleDomainSDF`). Reuses `fluidRegion`/`boundaryRegion`/
-     `buildRegionSystem` from `cases/weaklyCompressible.py`.
+     `buildRegionSystem` from `cases/common/weaklyCompressible.py`.
    - `initialConditions`: `v = 0`; for `deltaSPH`, pick `c_s` + `dt` from
      `targetDt` via `setupTimestep`; stamp the t=0 gravity direction.
    - `postStep`: interpolate θ(t) from the roll table, rewrite the gravity
@@ -158,7 +158,7 @@ DFSPH: kernel Wendland2, semiImplicitEuler, SuperSymmetric, cflFactor 0.2, dt 1e
 ## 4. Execution order
 
 1. `PLAN.md` (this file). ✅
-2. Write `cases/sloshingTank.py`; register it.
+2. Write `cases/freeSurface/sloshingTank.py`; register it.
 3. Smoke test: `python -m warpSPHRun sloshingTank --nSteps 20 --no-plot --no-store`
    (WCSPH) and `... --scheme divergenceFree --integrationScheme semiImplicitEuler
    --kernel Wendland2 --cflFactor 0.2 --dt 1e-3 --nSteps 20` (DFSPH). Fix wiring

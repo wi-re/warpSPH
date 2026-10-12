@@ -23,7 +23,7 @@ from types import SimpleNamespace
 
 import torch
 
-from warpSPH.cases.tgv import tgvCase
+from warpSPH.cases.periodic.tgv import tgvCase
 from warpSPH.runner import buildContext, CaseSpec
 from warpSPH.configurations import (
     IncompressibleSPHConfig, PressureSolverType, JacobiRelaxationMode,

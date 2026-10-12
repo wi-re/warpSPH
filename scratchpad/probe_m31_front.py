@@ -17,7 +17,7 @@ import numpy as np, torch
 from warpSPHBootstrap import bootstrap
 bootstrap(precision='float32')
 from warpSPH.cases import importAll; importAll()
-from warpSPH.cases.dambreak import dambreakCase
+from warpSPH.cases.freeSurface.dambreak import dambreakCase
 from warpSPH.runner import run
 
 WALL_BC = sys.argv[1] if len(sys.argv) > 1 else 'constant'

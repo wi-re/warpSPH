@@ -60,7 +60,7 @@ class SimulationConfig:
     kernel: KernelFunctions = field(default=KernelFunctions.Wendland2, metadata={'description': 'Kernel function to use'})
     
     integrationScheme: IntegrationSchemeType = field(default=IntegrationSchemeType.rungeKutta4, metadata={'description': 'Integration scheme for time stepping'})
-    cflFactor: float = field(default=0.3, metadata={'description': 'CFL factor for time step calculation. NOTE: what it multiplies is scheme-dependent. The compressible/weakly-compressible timesteps apply it to the support radius h; the incompressible (DFSPH) cases apply it to the particle *diameter* dx, which is the form Bender & Koschier state their dt <= 0.4 d/|v_max| in, so their constant can be written in the config directly (see cases/kolmogorovIncompressible.py and DFSPH_IMPROVEMENT_PLAN.md Part 12). With n_h = 4 the two conventions differ by 4x for the same number.'})
+    cflFactor: float = field(default=0.3, metadata={'description': 'CFL factor for time step calculation. NOTE: what it multiplies is scheme-dependent. The compressible/weakly-compressible timesteps apply it to the support radius h; the incompressible (DFSPH) cases apply it to the particle *diameter* dx, which is the form Bender & Koschier state their dt <= 0.4 d/|v_max| in, so their constant can be written in the config directly (see cases/periodic/kolmogorovIncompressible.py and DFSPH_IMPROVEMENT_PLAN.md Part 12). With n_h = 4 the two conventions differ by 4x for the same number.'})
     dt: Optional[float] = None
     minDt: Optional[float] = field(default=1e-6, metadata={'description': 'Minimum time step for adaptive time stepping'})
     maxDt: Optional[float] = field(default=1e-2, metadata={'description': 'Maximum time step for adaptive time stepping'})

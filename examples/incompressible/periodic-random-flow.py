@@ -2,7 +2,7 @@
 """Periodic random flow -- thin wrapper around the shared runner.
 
 The notebook this came from is `periodic-random-flow.ipynb`; the case itself is
-`warpSPH.cases.randomFlow`, and everything generic (config, step loop, export,
+`warpSPH.cases.periodic.randomFlow`, and everything generic (config, step loop, export,
 plotting, ffmpeg) is `warpSPH.runner`. Equivalent invocations::
 
     python examples/incompressible/periodic-random-flow.py --scheme divergenceFree --L 6.283185307179586
@@ -15,7 +15,7 @@ from warpSPHBootstrap import bootstrap
 
 bootstrap(precision='float32')
 
-from warpSPH.cases.randomFlow import randomFlowCase    # noqa: E402
+from warpSPH.cases.periodic.randomFlow import randomFlowCase    # noqa: E402
 from warpSPH.runner import caseMain                # noqa: E402
 
 #: What this example fixes relative to the case defaults; still overridable,

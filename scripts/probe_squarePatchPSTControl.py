@@ -59,7 +59,7 @@ def main(argv=None):
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
-    from warpSPH.cases.rotatingSquarePatch import rotatingSquarePatchCase as case
+    from warpSPH.cases.freeSurface.rotatingSquarePatch import rotatingSquarePatchCase as case
     from warpSPH.runner import run
 
     os.makedirs(args.out, exist_ok=True)

@@ -17,7 +17,7 @@ def caseMain(case: Case, argv: Optional[List[str]] = None) -> RunResult:
 
     Note that ``--precision`` can only take effect when the process was
     bootstrapped before ``warpSPH`` was imported -- see :mod:`warpSPHBootstrap`.
-    Running a case module directly (``python -m warpSPH.cases.sod``) imports
+    Running a case module directly (``python -m warpSPH.cases.compressible.sod``) imports
     ``warpSPH`` first, so use ``python -m warpSPHRun sod`` or set
     ``warpSPHCore_PRECISION`` when a non-default precision is wanted.
     """

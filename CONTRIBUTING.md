@@ -89,9 +89,12 @@ A `Case` is a name, a scheme, and a set of hooks over a `RunContext`; only
 `buildSystem` is required. See [Writing a case](README.md#writing-a-case) for
 the hook set.
 
-Register the module name in `CASE_MODULES`
-([`src/warpSPH/cases/__init__.py`](src/warpSPH/cases/__init__.py)) and it
-becomes reachable as `warpsph-run <name>`.
+Put the module in the family subpackage it belongs to under
+[`src/warpSPH/cases/`](src/warpSPH/cases/) (`compressible`, `compressibleWalls`,
+`freeSurface`, `periodic`, `wallBounded`, `boundaries`, `demos`; helpers shared
+across families go in `common`), register it in `CASE_MODULES`
+([`src/warpSPH/cases/__init__.py`](src/warpSPH/cases/__init__.py)) as
+`'<family>.<module>'`, and it becomes reachable as `warpsph-run <name>`.
 
 ## Regenerating example media
 

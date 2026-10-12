@@ -1,7 +1,7 @@
 """Probe (`DFSPH_IMPROVEMENT_PLAN.md` Part 16, 2026-08-29): the shear-wave case,
 and the `ShiftApplication` question it was ported to settle.
 
-`cases/shearWave.py` is Cornelis et al.'s reference case: a transverse
+`cases/periodic/shearWave.py` is Cornelis et al.'s reference case: a transverse
 sinusoidal shear wave on a periodic box, whose exact solution is
 `u_x = u0 sin(k_w y) exp(-nu k_w^2 t)` with a **constant pressure**. Every
 pressure the solver produces is therefore an artifact, and at the default
@@ -57,7 +57,7 @@ import math
 
 from warpSPH.runner.cli import caseMain
 from warpSPH.configurations import ShiftApplication
-from warpSPH.cases.shearWave import shearWaveCase as case
+from warpSPH.cases.periodic.shearWave import shearWaveCase as case
 
 
 def run(nx, tLimit, extra=(), configure=None):

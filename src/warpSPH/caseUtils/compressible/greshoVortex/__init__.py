@@ -1,4 +1,4 @@
-"""Gresho-Chan vortex IC builder, used by `warpSPH.cases.greshoVortex`."""
+"""Gresho-Chan vortex IC builder, used by `warpSPH.cases.compressible.greshoVortex`."""
 
 from .sample import sampleGreshoVortex, greshoProfile, sampleGreshoVortexMeshless
 

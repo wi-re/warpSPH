@@ -26,7 +26,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from warpSPH.runner import run
-from warpSPH.cases.sod import sodCase
+from warpSPH.cases.compressible.sod import sodCase
 from warpSPH.caseUtils.compressible.sod.sodSolution import solve
 
 L = 2.0

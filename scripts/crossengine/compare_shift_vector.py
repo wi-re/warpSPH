@@ -43,7 +43,7 @@ mass_np = mass_all[fluidMask]
 supp_np = supp_all[fluidMask]
 print(f'loaded {FRAME} @ t={t_frame:.4f}, {n} fluid particles')
 
-from warpSPH.cases.dambreak import dambreakCase
+from warpSPH.cases.freeSurface.dambreak import dambreakCase
 from warpSPH.runner import caseMain
 
 args = [

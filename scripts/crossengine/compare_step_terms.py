@@ -29,7 +29,7 @@ import torch
 TRAJ = '/home/lu26029/dev/warpSPH/export/dambreak-diffsphMatch_2026-09-14_08-26-40/trajectory.h5'
 FRAMES = ['frame_00200', 'frame_01000', 'frame_02000']  # t ~ 0.1, 0.5, 1.0
 
-from warpSPH.cases.dambreak import dambreakCase
+from warpSPH.cases.freeSurface.dambreak import dambreakCase
 from warpSPH.runner import caseMain
 
 args = [

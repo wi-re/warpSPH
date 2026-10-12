@@ -59,7 +59,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument('--dx', type=float, default=0.01)
 ap.add_argument('--c0', type=float, default=40.0)
 ap.add_argument('--supportRatio', type=float, default=4.0,
-                help='support/dx; 4.0 matches cases/dambreak.py n_h (production)')
+                help='support/dx; 4.0 matches cases/freeSurface/dambreak.py n_h (production)')
 ap.add_argument('--layers', type=int, default=5)
 ap.add_argument('--rhoFluid', type=float, default=1.03,
                 help='density at the cluster centroid (rho0=1)')

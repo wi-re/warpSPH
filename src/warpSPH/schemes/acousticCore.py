@@ -26,7 +26,7 @@ one step, exactly as `f_wave_equation` does.
 `JFNK_PLAN.md` Phase E1 adds one optional term on top of the Phase B core:
 a Kolmogorov-flow body acceleration (`schemeConfig.forcingAmplitude != 0`),
 folded directly into `dv/dt`. Pointwise in `positions` (wrapped periodic via
-`getPeriodicPositions`, matching `cases/kolmogorov.py`'s own convention), so
+`getPeriodicPositions`, matching `cases/periodic/kolmogorov.py`'s own convention), so
 it costs no new `warpSPHCore` operator and differentiates through plain
 torch autograd -- same "no new derivation needed" shape as the EOS term.
 

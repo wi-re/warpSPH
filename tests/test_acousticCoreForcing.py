@@ -22,7 +22,7 @@ registry default) both diverge by step 5-6, `JFNKSolver` by step ~13,
 consistent across repeated runs (unlike Phase B's Picard(2) comparison,
 this timing is *not* GPU-reduction-order-flaky, confirmed by 3 repeats
 landing on the exact same step each time). This is a genuinely different
-answer from Phase B's, and it is the expected one: real `cases/kolmogorov.py`
+answer from Phase B's, and it is the expected one: real `cases/periodic/kolmogorov.py`
 both seeds symmetry-breaking noise deliberately (to trigger transition on
 purpose) and relies on δ-SPH's artificial/physical viscosity to keep the
 resulting turbulent cascade numerically bounded -- dissipation here is

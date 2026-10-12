@@ -1,4 +1,4 @@
-"""Hydrostatic-equilibrium initial state, used by `warpSPH.cases.hydrostatic`.
+"""Hydrostatic-equilibrium initial state, used by `warpSPH.cases.compressible.hydrostatic`.
 
 Samples a regular lattice, assigns `rho_high` to a dense square in the domain
 center (`|x|, |y| < L/4`) and `rho_low` elsewhere, then re-derives an optimal

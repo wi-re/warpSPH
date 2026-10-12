@@ -53,7 +53,7 @@ def updateBodyParticlesWCSPH(particleState, rigidBody: RigidBody):
     # r_rel) = -omega^2 * r_rel` (the tangential/`dwdt` term and the linear
     # `dudt` term are both identically zero given the above). Previously this
     # was implicitly zero everywhere (`modules/mdbc/english2025.py`'s `a_b`
-    # had nothing to read) -- for `cases/movingObstacle.py`'s constant-omega
+    # had nothing to read) -- for `cases/wallBounded/movingObstacle.py`'s constant-omega
     # rotation this was a real, uncharacterized omission, not a validated
     # zero. If a future case ever drives `dudt`/`dwdt` nonzero, this needs a
     # tangential term (`dwdt`-cross-`relativePositions`) and a `dudt` term

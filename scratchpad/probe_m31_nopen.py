@@ -24,7 +24,7 @@ if not nopen:
     sch.computeMdbcNoPenShift = lambda state, *a, **k: torch.zeros_like(state.positions)
 
 from warpSPH.cases import importAll; importAll()
-from warpSPH.cases.dambreak import dambreakCase
+from warpSPH.cases.freeSurface.dambreak import dambreakCase
 from warpSPH.runner import run
 
 H, TANK_L, G = 0.6, 1.0, 9.81

@@ -71,24 +71,24 @@ which stays pure fluid dynamics). Numbered ladder, one case per file; every
 case runs under `--scheme Monaghan|CompSPH|CRKSPH` (CRKSPH with
 `--supportMode KernelMeanSymmetric`):
 
-1. `01-closedBox` (`cases/closedBox.py`): quiescent gas at rest.
-2. `02-piston` (`cases/piston.py`): moving wall, exact push (shock) and
+1. `01-closedBox` (`cases/compressibleWalls/closedBox.py`): quiescent gas at rest.
+2. `02-piston` (`cases/compressibleWalls/piston.py`): moving wall, exact push (shock) and
    withdraw (rarefaction) solutions, piston-work energy balance.
-3. `03-shockReflection` (`cases/shockReflection.py`): Mach-M shock off a wall,
+3. `03-shockReflection` (`cases/compressibleWalls/shockReflection.py`): Mach-M shock off a wall,
    Rankine-Hugoniot reflected state.
-4. `04-woodwardColellaWalls` (`cases/woodwardColellaWalls.py`): the blast waves
+4. `04-woodwardColellaWalls` (`cases/compressibleWalls/woodwardColellaWalls.py`): the blast waves
    between two walls (1D); the periodic mirror-symmetric `woodwardColella` is
    its exact reference (`scripts/compare_wallMirror.py`).
-5. `05-forwardStep` (`cases/forwardStep.py`): Mach 3 step, run in the gas frame
+5. `05-forwardStep` (`cases/compressibleWalls/forwardStep.py`): Mach 3 step, run in the gas frame
    (the step moves, no inflow/outflow needed).
-6. `06-shockCylinder` (`cases/shockCylinder.py`): piston-driven Mach-2 shock on
+6. `06-shockCylinder` (`cases/compressibleWalls/shockCylinder.py`): piston-driven Mach-2 shock on
    a fixed cylinder; stagnation pressure p3 at impact, then the steady value.
-7. `07-bowShock` (`cases/bowShock.py`): cylinder at Mach 3 through gas at rest;
+7. `07-bowShock` (`cases/compressibleWalls/bowShock.py`): cylinder at Mach 3 through gas at rest;
    standoff vs Billig, pitot pressure.
-- `sedovWalls` (`cases/sedovWalls.py`): Sedov in a walled box (1/2/3D); the
+- `sedovWalls` (`cases/compressibleWalls/sedovWalls.py`): Sedov in a walled box (1/2/3D); the
   periodic `sedov` on [-1, 1]^d is its exact reference.
 
-2D cases share `buildWalledBox` (`cases/compressibleWalls.py`): a cell-centred
+2D cases share `buildWalledBox` (`cases/compressibleWalls/common.py`): a cell-centred
 lattice, fluid = box minus a solid SDF, walls = the solid within `wallLayers`
 spacings of the fluid, wall velocity a function of position.
 
@@ -152,13 +152,13 @@ changes the fluid's local spacing but not the wall row spacing).
   of rho, u from fluid rows onto `kinds == 1` rows via `FluidToBoundary`,
   prescribed wall velocity, zeroed wall update) hooked into
   `schemes/monaghan.py` after the density sum. Case `closedBox`
-  (`cases/closedBox.py`, `examples/compressibleWalls/01-closedBox.py`, 1D, 8
+  (`cases/compressibleWalls/closedBox.py`, `examples/compressibleWalls/01-closedBox.py`, 1D, 8
   wall layers per side): 1000 steps to t=0.5 in float32, fluid max|v| 3e-6,
   pressure error 7e-6, wall pressure error 3e-6, energy flat; no alarms.
   Only a no-harm baseline (uniform state, so Shepard is exact). Next: case 3
   (shock reflection) and 2 (piston), which discriminate; then CompSPH, CRKSPH.
-- 2026-10-05: case 3 `shockReflection` (`cases/shockReflection.py`, shared
-  helpers in `cases/compressibleWalls.py`; Mach 2, gamma 1.4, nx 400, exact
+- 2026-10-05: case 3 `shockReflection` (`cases/compressibleWalls/shockReflection.py`, shared
+  helpers in `cases/compressibleWalls/common.py`; Mach 2, gamma 1.4, nx 400, exact
   RH states and reflected-front speed). Findings, Monaghan, t=0.45, B7:
   - Shepard-only wall: reflected shock forms but peak p is 0.93 of exact,
     front 0.16 off, and fluid tunnels through the wall layer (30 rows past
@@ -280,7 +280,7 @@ changes the fluid's local spacing but not the wall row spacing).
     penetrating / energy: Monaghan 0.9998 / 1.036 / 2 / 17.667 flat; CompSPH
     0.9998 / 1.12 / 1 / 17.667 exact; CRKSPH 0.9997 / 1.22 / 0 / exact.
     closedBox stays at rest under all three (|v| ~ 3e-6, float32).
-  - **Case 2 `piston`** (`cases/piston.py`, `examples/compressibleWalls/02-piston.py`):
+  - **Case 2 `piston`** (`cases/compressibleWalls/piston.py`, `examples/compressibleWalls/02-piston.py`):
     left wall moving at `pistonSpeed` from t=0 into gas at rest; exact face state
     (RH for a push, isentropic for a withdrawal, which needs empty cells behind
     the piston: `buildWalledSystem(gaps=...)`), and `energyRatio` = fluid energy

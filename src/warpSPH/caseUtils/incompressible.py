@@ -7,7 +7,7 @@ is *lowest* (`DFSPH_IMPROVEMENT_PLAN.md` §1.1), so a run started on one spends
 its first steps resolving lattice noise rather than the physics under test.
 Jittering and then pressure-relaxing removes that transient.
 
-Extracted verbatim from `cases/tgv.py`, which had the only copy, when
+Extracted verbatim from `cases/periodic/tgv.py`, which had the only copy, when
 `shearWave` turned out to need exactly the same thing. `tgv`'s numbers are
 asserted by `tests/test_physics.py` and are unchanged by the move.
 """

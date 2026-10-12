@@ -9,7 +9,7 @@ feeds has none of those code paths either; see the scheme module's docstring
 for why.
 
 `forcingAmplitude`/`forcingWavenumber` (`JFNK_PLAN.md` Phase E1) add the one
-piece of `cases/kolmogorov.py`'s physics this core can express with zero new
+piece of `cases/periodic/kolmogorov.py`'s physics this core can express with zero new
 machinery: a steady sinusoidal body acceleration, `dv_x/dt += forcingAmplitude
 * sin(forcingWavenumber * pi * y)`. `forcingAmplitude=0.0` (the default)
 recovers Phase B's unforced core exactly -- opt-in, like `JFNKSolver` itself.
@@ -76,7 +76,7 @@ class AcousticCoreConfig:
     soundSpeed: float = field(default=10.0)
 
     #: Kolmogorov-flow body acceleration (`JFNK_PLAN.md` Phase E1), zero
-    #: (off) by default. `forcingWavenumber=4` matches `cases/kolmogorov.py`'s
+    #: (off) by default. `forcingWavenumber=4` matches `cases/periodic/kolmogorov.py`'s
     #: own default `k`.
     forcingAmplitude: float = field(default=0.0)
     forcingWavenumber: float = field(default=4.0)

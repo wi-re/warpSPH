@@ -74,11 +74,11 @@ from warpSPHCore import (OperationDirection, OperationProperties, SupportScheme,
                          WarpOperation, warpOperation)
 from warpSPH.configurations import BoundaryOperatorTerms
 from warpSPH.configurations.moduleConfigurations.boundaryConditions import BCType
-from warpSPH.cases.weaklyCompressible import domainBoundarySdf
+from warpSPH.cases.common.weaklyCompressible import domainBoundarySdf
 import warpSPH.modules.mdbc.velocity as velmod
 import warpSPH.schemes.divergenceFree as dfsphmod
 import warpSPH.systems.incompressible as sysmod
-import warpSPH.cases.randomFlow as rfmod
+import warpSPH.cases.periodic.randomFlow as rfmod
 
 mod = importlib.import_module(f'warpSPH.cases.{args.case}')
 case = getattr(mod, f'{args.case}Case')

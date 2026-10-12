@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Sedov-Taylor blast wave (2D) -- thin wrapper around the shared runner.
 
-The same case as `sedov_1d.py`, one dimension up: `warpSPH.cases.sedov`'s
+The same case as `sedov_1d.py`, one dimension up: `warpSPH.cases.compressible.sedov`'s
 sampler and stopping rule are dimension-generic, so this only pins `--dim 2`
 and the resolution the old `07-Sedov_Taylor_Blastwave_2D.ipynb` used.
 Equivalent invocations::
@@ -20,7 +20,7 @@ from warpSPHBootstrap import bootstrap
 
 bootstrap(precision='float32')
 
-from warpSPH.cases.sedov import sedovCase       # noqa: E402
+from warpSPH.cases.compressible.sedov import sedovCase       # noqa: E402
 from warpSPH.runner import caseMain             # noqa: E402
 
 #: As in `sedov_1d.py`: an example is meant to be watched, so plotting is on --

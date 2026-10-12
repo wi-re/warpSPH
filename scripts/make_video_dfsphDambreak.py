@@ -19,7 +19,7 @@ import sys
 
 import numpy as np
 
-from warpSPH.cases.dambreak import dambreakCase
+from warpSPH.cases.freeSurface.dambreak import dambreakCase
 from warpSPH.runner import run
 
 OUT = os.path.join(os.path.dirname(__file__), "videos_dfsph_dambreak")

@@ -40,7 +40,7 @@ if cliArgs.nSteps is not None:
 # 1. Build the matching diffSPH config/domain ONCE, from a throwaway nSteps=0
 #    warpSPH IC (cheap) -- reused by the wrapper on every call.
 # ---------------------------------------------------------------------------
-from warpSPH.cases.dambreak import dambreakCase
+from warpSPH.cases.freeSurface.dambreak import dambreakCase
 from warpSPH.runner import caseMain
 
 _probe = caseMain(dambreakCase, MATCHED_ARGS[:MATCHED_ARGS.index('--wallBC') + 2] +

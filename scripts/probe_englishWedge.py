@@ -72,7 +72,7 @@ def _runOne(dp, wedge, tilt, tLimit, c0Ratio, out, video, plotInterval, scheme,
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
-    from warpSPH.cases.dambreak import dambreakCase
+    from warpSPH.cases.freeSurface.dambreak import dambreakCase
     from warpSPH.runner import run
     from _mdbcDensityHook import installMdbcDensityToState
 

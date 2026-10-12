@@ -134,7 +134,7 @@ class Experiment:
     #: (`staticBlob`, `impact`) the answer is no, and the case says so itself:
     #: "The surface *deficit* `minDensity` ~ 0.5 is sampling geometry, not a
     #: defect -- half a surface particle's support is empty -- so only the
-    #: upper bound is a health check" (`cases/staticBlob.py`). These blobs have
+    #: upper bound is a health check" (`cases/periodic/staticBlob.py`). These blobs have
     #: a large surface-to-volume ratio, so even the 5th percentile is dominated
     #: by legitimate surface deficit (`impact` measures p05 ~ 0.29 on a run
     #: whose KE ratio is 0.98 and whose `maxDensity` is 1.032). Clumping --

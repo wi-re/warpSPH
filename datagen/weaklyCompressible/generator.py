@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Dam-break data generator -- the runner, plus this directory's archival step.
 
-The simulation itself is `warpSPH.cases.dambreak`; what stays here is the bit
+The simulation itself is `warpSPH.cases.freeSurface.dambreak`; what stays here is the bit
 that is specific to generating a dataset: stamping the run directory with a
 timestamp and the obstacle description, and collecting the trajectory, video and
 end frames into `compressed/`.
@@ -20,7 +20,7 @@ bootstrap(precision='float32')
 
 from utils import archive                                   # noqa: E402
 
-from warpSPH.cases.dambreak import dambreakCase             # noqa: E402
+from warpSPH.cases.freeSurface.dambreak import dambreakCase             # noqa: E402
 from warpSPH.runner import buildArgumentParser, run, specFromArgs  # noqa: E402
 from warpSPH.utils import getCurrentTimestamp               # noqa: E402
 

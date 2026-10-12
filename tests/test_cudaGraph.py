@@ -45,7 +45,7 @@ def test_deviceConstantIsCached():
 
 
 def _marrone(nx, nSteps, cudaGraph, **kw):
-    from warpSPH.cases.dambreak import dambreakCase
+    from warpSPH.cases.freeSurface.dambreak import dambreakCase
     from warpSPH.runner import run
     H, L = 0.6, 1.0
     params = dict(W=5.366 * H, fillRatio=H / L, fluidWidth=2.0 * H / (5.366 * H),

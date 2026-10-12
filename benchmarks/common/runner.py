@@ -30,7 +30,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 
-from warpSPH.cases.waveEquation import waveEquationCase
+from warpSPH.cases.demos.waveEquation import waveEquationCase
 
 from .schemes import MULTISTEP_SCHEMES, SchemeSpec
 
@@ -222,7 +222,7 @@ def buildWaveCase(nx: int, device: Optional[str] = None,
     # stays cheap and -- more importantly -- happens only *after* the calling
     # script has run `warpSPHBootstrap.bootstrap`, which is the only point at
     # which precision can still be chosen.
-    from warpSPH.cases.waveEquation import waveEquationCase
+    from warpSPH.cases.demos.waveEquation import waveEquationCase
     from warpSPH.runner import CaseSpec
     from warpSPH.runner.runner import buildContext
 

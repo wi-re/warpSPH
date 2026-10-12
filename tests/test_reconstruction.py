@@ -74,7 +74,7 @@ from warpSPHCore import computeDistanceVec   # noqa: E402  (the kernels above re
 
 
 def _greshoState(nx=32):
-    from warpSPH.cases.greshoVortex import greshoVortexCase
+    from warpSPH.cases.compressible.greshoVortex import greshoVortexCase
     res = run(greshoVortexCase, scheme='Monaghan', nx=nx, nSteps=1, progress=False, quiet=True)
     return res.state, res.ctx.config
 
@@ -211,10 +211,10 @@ def test_close_pair_taper():
 def _conservation(policy: str, caseName: str):
     from probe_monaghanEnergy import pieces
     if caseName == 'sod':
-        from warpSPH.cases.sod import sodCase as case
+        from warpSPH.cases.compressible.sod import sodCase as case
         kw = dict(nx=100, nSteps=120, params=dict(viscositySwitch='NoneSwitch', right_rho=0.125, right_pressure=0.1))
     else:
-        from warpSPH.cases.greshoVortex import greshoVortexCase as case
+        from warpSPH.cases.compressible.greshoVortex import greshoVortexCase as case
         kw = dict(nx=32, nSteps=20, params=dict(viscositySwitch='NoneSwitch'))
 
     def configure(ctx, _orig=case.configureScheme):

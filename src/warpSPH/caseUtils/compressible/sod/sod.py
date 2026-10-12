@@ -1,4 +1,4 @@
-"""1D Sod shock tube sampling for `cases/sod.py`: the left/right Riemann
+"""1D Sod shock tube sampling for `cases/compressible/sod.py`: the left/right Riemann
 state container (`sodInitialState`) and `buildSod1D`, which lays out two
 independently-sampled periodic lattices (dense left half, coarser right half
 by `samplingRatio`) and derives the EOS state from the given pressures via

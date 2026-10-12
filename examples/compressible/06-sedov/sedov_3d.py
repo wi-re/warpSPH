@@ -2,7 +2,7 @@
 """Sedov-Taylor blast wave (3D) -- thin wrapper around the shared runner.
 
 `sedov_2d.py` one dimension further. There was no 3D Sedov notebook before
-this directory -- `warpSPH.cases.sedov`'s sampler, stopping rule and plotting
+this directory -- `warpSPH.cases.compressible.sedov`'s sampler, stopping rule and plotting
 were already dimension-generic, so getting a 3D run only needed the `hat`
 initialization fix (see `sedov_1d.py`'s docstring) and this wrapper.
 Equivalent invocations::
@@ -20,7 +20,7 @@ from warpSPHBootstrap import bootstrap
 
 bootstrap(precision='float32')
 
-from warpSPH.cases.sedov import sedovCase       # noqa: E402
+from warpSPH.cases.compressible.sedov import sedovCase       # noqa: E402
 from warpSPH.runner import caseMain             # noqa: E402
 
 PRESET = ['--plot', '--video', '--dim', '3', '--nx', '32',

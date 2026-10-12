@@ -41,7 +41,7 @@ file.
   inside a Jupyter cell in this environment.
 - **`particlePlot`** (2D field view, vispy via `visualizeWithFallback`):
   `08-hydrostatic.ipynb` through `13-rayleigh-taylor.ipynb`,
-  `14-triplePoint/`. `08` is the pilot: `cases/plotting.py` gained
+  `14-triplePoint/`. `08` is the pilot: `cases/common/plotting.py` gained
   `buildFieldPlotter`/`refreshFieldPlotter`, the window/event-loop-free core
   of `particlePlot`'s `setupPlot`/`updatePlot` (mirroring `profilePlot`'s
   `draw`). Each case exports its own `Field` list (`HYDROSTATIC_FIELDS`,

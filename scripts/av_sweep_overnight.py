@@ -150,8 +150,8 @@ def runMaps(out: Path, smoke: bool) -> Dict[str, Any]:
     sys.path.insert(0, str(REPO / 'scripts'))
     import av_report as A
     from warpSPH.runner import run
-    from warpSPH.cases.sodND import sod2dCase
-    from warpSPH.cases.sedov import sedovCase
+    from warpSPH.cases.compressible.sodND import sod2dCase
+    from warpSPH.cases.compressible.sedov import sedovCase
 
     mapDir = out / 'maps'
     mapDir.mkdir(parents=True, exist_ok=True)
@@ -236,7 +236,7 @@ def runTiming(out: Path, smoke: bool) -> Dict[str, Any]:
     sys.path.insert(0, str(REPO / 'scripts'))
     import av_report as A
     from warpSPH.runner import run
-    from warpSPH.cases.greshoVortex import greshoVortexCase
+    from warpSPH.cases.compressible.greshoVortex import greshoVortexCase
 
     nx, nWarm, nTimed = (32, 5, 20) if smoke else (128, 30, 300)
     rows = {}

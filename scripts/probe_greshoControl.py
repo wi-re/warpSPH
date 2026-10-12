@@ -18,7 +18,7 @@ import numpy as np
 import torch
 
 from warpSPH.runner import run
-from warpSPH.cases.greshoVortex import greshoVortexCase
+from warpSPH.cases.compressible.greshoVortex import greshoVortexCase
 
 
 def _quiet(fn):

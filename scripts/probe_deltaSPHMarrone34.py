@@ -166,7 +166,7 @@ def _runOne(nx, c0Ratio, tStar, out, video, plotInterval, scheme,
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
-    from warpSPH.cases.dambreak import dambreakCase
+    from warpSPH.cases.freeSurface.dambreak import dambreakCase
     from warpSPH.runner import run
     from _mdbcDensityHook import installMdbcDensityToState
 
@@ -396,7 +396,7 @@ def _initdump(nx, out, cornerOnly=False):
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    from warpSPH.cases.dambreak import dambreakCase
+    from warpSPH.cases.freeSurface.dambreak import dambreakCase
     from warpSPH.runner import run
     from warpSPH.caseUtils.weaklyCompressible import buildObstacleSDF
 

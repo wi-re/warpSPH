@@ -1,4 +1,4 @@
-"""Kidder isentropic-capsule analytic solution, used by `warpSPH.cases.kidder`.
+"""Kidder isentropic-capsule analytic solution, used by `warpSPH.cases.compressible.kidder`.
 
 Direct port of the SPHERAL reference solution: `KidderIsentropicCapsuleAnalyticSolution`
 gives the density/velocity/pressure/energy profile of an isentropic shell

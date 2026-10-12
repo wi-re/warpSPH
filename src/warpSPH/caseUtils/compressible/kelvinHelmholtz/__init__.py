@@ -1,4 +1,4 @@
-"""Kelvin-Helmholtz IC builder, used by `warpSPH.cases.kelvinHelmholtz`."""
+"""Kelvin-Helmholtz IC builder, used by `warpSPH.cases.compressible.kelvinHelmholtz`."""
 
 from .sample import *
 

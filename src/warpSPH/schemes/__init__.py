@@ -5,7 +5,7 @@ signature `(system, dt, config, schemeConfig, verbose) -> update, adjacency,
 `SchemeBundle` (state/config/update classes plus this step function); nothing
 here should be called by name without going through it. `waveEquation.py`
 (`f_wave_equation`) is the exception among the fluid schemes: a non-fluid
-demo scheme (see `cases/waveEquation.py` for its registered `Case`), but it
+demo scheme (see `cases/demos/waveEquation.py` for its registered `Case`), but it
 follows the same `SchemeBundle`/`buildScheme` contract as the rest.
 """
 

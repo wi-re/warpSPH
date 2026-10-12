@@ -12,7 +12,7 @@ integrators; neither is a position or a velocity. That reuse is the point --
 the wave system rides the same integrator machinery as the fluid schemes.
 
 Not a fluid scheme; see :mod:`warpSPH.schemes.waveEquation` for the step
-function and :mod:`warpSPH.cases.waveEquation` for the registered `Case`.
+function and :mod:`warpSPH.cases.demos.waveEquation` for the registered `Case`.
 """
 
 import torch

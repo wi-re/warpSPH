@@ -47,7 +47,7 @@ def main():
     bootstrap(precision='float32')
     import torch
     import probe_deltaSPHMarrone as M
-    from warpSPH.cases.dambreak import dambreakCase
+    from warpSPH.cases.freeSurface.dambreak import dambreakCase
     from warpSPH.modules.liu import interpolateLiuLiu
     from warpSPHCore import OperationDirection
 

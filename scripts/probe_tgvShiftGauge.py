@@ -35,7 +35,7 @@ bootstrap(precision='float32')
 
 import numpy as np
 
-from warpSPH.cases.tgv import tgvCase, analyticDecayRate
+from warpSPH.cases.periodic.tgv import tgvCase, analyticDecayRate
 from warpSPH.runner import run
 from warpSPH.configurations import ShiftPressureGauge
 

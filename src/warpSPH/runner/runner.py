@@ -371,7 +371,7 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
             ctx.config.dt = torch.tensor(float(ctx.config.dt), dtype=ctx.dtype, device=ctx.device)
         ctx.scratch['stepGraph'] = stepGraph
         # cases whose diagnostics have a sync-free device part replay it too
-        # (`cases/dambreak.py:_diagnosticsHost`); ignored by every other case
+        # (`cases/freeSurface/dambreak.py:_diagnosticsHost`); ignored by every other case
         ctx.scratch['graphedDiagnostics'] = GraphedDiagnostics()
 
     if stepGraph is not None and spec.pipelineOutputs:
@@ -741,7 +741,7 @@ def _setupPlot(ctx: RunContext, case: Case, state):
     backend = spec.plotBackend or ('vispy' if spec.dim == 2 else None)
     opts = dict(spec.plotBackendOptions or {})
     # Plot hooks that launch warp kernels (grid-interpolated panels,
-    # `cases/plotting.py:particlePlot`) stay on the loop thread: warp's
+    # `cases/common/plotting.py:particlePlot`) stay on the loop thread: warp's
     # current stream and module loading are per process, so warp work on the
     # render thread races the step's (OPEN_PROBLEMS §12).
     usesWarp = getattr(case.updatePlot, 'usesWarp', False) or getattr(case.setupPlot, 'usesWarp', False)
@@ -789,7 +789,7 @@ def _stepGraphable(ctx) -> bool:
 
 def _drainFrameWrites() -> None:
     """Wait for frames the vispy backend is still encoding on its writer
-    threads (`cases/plotting.py:_fastPngOptions`), so every PNG is complete
+    threads (`cases/common/plotting.py:_fastPngOptions`), so every PNG is complete
     before the video encode -- or the caller -- reads it."""
     try:
         from warpSPHPlotting import waitForExports

@@ -110,7 +110,7 @@ print(" the sampled bulk sits ~5% below rho0, so absolute agreement with the")
 print(" analytic profile is poor; the useful signal is which of +/-ghostOffset")
 print(" the stored value TRACKS.)")
 
-from warpSPH.cases.hydrostaticColumn import hydrostaticColumnCase as case
+from warpSPH.cases.boundaries.hydrostaticColumn import hydrostaticColumnCase as case
 from warpSPH.runner import run
 
 r = run(case, scheme='deltaSPH', nx=args.nx, nSteps=args.steps,

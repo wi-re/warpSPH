@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from warpSPH.cases.greshoVortex import greshoVortexCase
+from warpSPH.cases.compressible.greshoVortex import greshoVortexCase
 from warpSPH.caseUtils.compressible.greshoVortex import greshoProfile
 from warpSPH.runner import run
 

@@ -6,7 +6,7 @@ on: batches of parameter-varied simulations, each archived as a single
 trajectory file plus preview media.
 
 Only the weakly compressible family has a generator so far
-(`weaklyCompressible/`, built on `warpSPH.cases.dambreak`).
+(`weaklyCompressible/`, built on `warpSPH.cases.freeSurface.dambreak`).
 
 ## The pipeline
 
@@ -22,7 +22,7 @@ compressor.py       optional: downsample a trajectory to a coarser interval
 
 ### `generator.py`
 
-The simulation itself is `warpSPH.cases.dambreak` — what lives here is only the
+The simulation itself is `warpSPH.cases.freeSurface.dambreak` — what lives here is only the
 dataset-specific part: stamping the run directory with a timestamp and the
 obstacle description, then collecting the results into `compressed/`.
 

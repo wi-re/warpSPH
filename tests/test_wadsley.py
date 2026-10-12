@@ -20,7 +20,7 @@ K = 0.7
 
 
 def _state():
-    from warpSPH.cases.greshoVortex import greshoVortexCase
+    from warpSPH.cases.compressible.greshoVortex import greshoVortexCase
     res = run(greshoVortexCase, scheme='Monaghan', nx=40, nSteps=1, progress=False, quiet=True)
     st = res.state.state
     # a pressure gradient along x: n = x-hat wherever the detector looks
@@ -104,7 +104,7 @@ def _wadsleyCase(case):
 def test_sound_wave_keeps_alpha_at_floor():
     """A linear sound wave compresses (D = dv_x/dx != 0), but alpha_loc ~ A (k h)^2 is tiny: alpha stays near 0
     (the av_report linearWave run reads alphaMean 1.7e-5)."""
-    from warpSPH.cases.linearWave import linearWaveCase
+    from warpSPH.cases.compressible.linearWave import linearWaveCase
     res = run(_wadsleyCase(linearWaveCase), scheme='Monaghan', nx=100, nSteps=300, progress=False, quiet=True,
               params=dict(viscositySwitch='Wadsley2017', A=1e-4))
     assert not res.diverged
@@ -114,7 +114,7 @@ def test_sound_wave_keeps_alpha_at_floor():
 
 
 def test_sod_runs_and_switch_engages():
-    from warpSPH.cases.sod import sodCase
+    from warpSPH.cases.compressible.sod import sodCase
 
     res = run(_wadsleyCase(sodCase), scheme='Monaghan', nx=200, nSteps=150,
               progress=False, quiet=True,

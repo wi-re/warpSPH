@@ -761,7 +761,7 @@ second-order operator back to the intended fourth-order one, and this
 violent-impact case needed that accidental extra damping to survive under
 `surfaceNormal`'s free-surface treatment.
 
-**Fix applied**: `cases/sloshingTank.py`'s `deltaSPH` branch no longer
+**Fix applied**: `cases/freeSurface/sloshingTank.py`'s `deltaSPH` branch no longer
 inherits the shared `buildDefaultShiftProperties()` scheme/projection pair
 (`deltaSPH`/`surfaceNormal`) — it now sets
 `ShiftingScheme.michel2022`/`ShiftingProjectionScheme.michel2022` explicitly
@@ -926,7 +926,7 @@ run to confirm the exact-zero endpoint.
    commit in an isolated worktree: `790a7c7`, a correct and independently
    verified fix, removed accidental extra diffusion this case's stability
    depended on — see `ACSPH_PLAN.md` decision 1), and the fix is applied:
-   `cases/sloshingTank.py`'s `deltaSPH` branch now defaults to
+   `cases/freeSurface/sloshingTank.py`'s `deltaSPH` branch now defaults to
    `michel2022`/`michel2022` rather than the shared default, confirmed
    end-to-end through the case's real entry point. **Michel §5.4's own
    free-surface convergence rate is now done too**

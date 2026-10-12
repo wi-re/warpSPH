@@ -118,7 +118,7 @@ class ShiftPressureGauge(Enum):
     Both of this library's callers use `solveIncompressible` as an *implicit
     particle-shifting* solve, not a momentum pressure solve
     (`systems/incompressible.py`'s `finalize`, which feeds its output straight
-    into a position shift `dx = dt**2 * a_p`; and `cases/tgv.py`'s lattice
+    into a position shift `dx = dt**2 * a_p`; and `cases/periodic/tgv.py`'s lattice
     relaxation). Its "pressure" is therefore a shifting potential, and its
     operator has the same (near-)constant null space every pure-Neumann PPE
     has -- but unlike `solveDivergenceFree`, whose source term (a divergence)

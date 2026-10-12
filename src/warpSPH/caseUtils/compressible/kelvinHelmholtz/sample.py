@@ -1,4 +1,4 @@
-"""Kelvin-Helmholtz instability initial state, used by `warpSPH.cases.kelvinHelmholtz`.
+"""Kelvin-Helmholtz instability initial state, used by `warpSPH.cases.compressible.kelvinHelmholtz`.
 
 Builds the classic four-layer shear-layer setup on the unit square: density and
 streamwise velocity switch between `rho1`/`v1` (outer bands, `y<1/4` or

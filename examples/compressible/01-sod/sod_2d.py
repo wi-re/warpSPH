@@ -9,7 +9,7 @@ See `warpSPH.caseUtils.compressible.sod.sodND` for how the counts are picked,
 and `sod_3d.py` for the same case one dimension up. Equivalent invocations::
 
     python examples/compressible/01-sod/sod_2d.py --plot --store
-    python -m warpSPH.cases.sodND --plot --store
+    python -m warpSPH.cases.compressible.sodND --plot --store
     warpsph-run sod2d --plot --store          # also honours --precision
 
 Pass `--no-equalMass` to sample both states on the same lattice instead, which
@@ -27,7 +27,7 @@ from warpSPHBootstrap import bootstrap
 
 bootstrap(precision='float32')
 
-from warpSPH.cases.sodND import sod2dCase        # noqa: E402
+from warpSPH.cases.compressible.sodND import sod2dCase        # noqa: E402
 from warpSPH.runner import caseMain              # noqa: E402
 
 #: As in `sod_1d.py`: an example is meant to be watched, so plotting is on --

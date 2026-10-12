@@ -7,7 +7,7 @@ right-hand-side evaluation gave that pair an acceleration ~ 1e4-1e5 (Sod 2D on t
 """
 import torch
 
-from warpSPH.cases.sodND import sod2dCase
+from warpSPH.cases.compressible.sodND import sod2dCase
 from warpSPH.runner import run
 
 

@@ -89,7 +89,7 @@ from warpSPH.configurations import BoundaryOperatorTerms
 from warpSPH.modules.incompressible.wp_alpha import computeAlpha
 from warpSPH.modules.incompressible.drift import computePressureShiftIISPH
 from warpSPH.modules.pressure.iisph import computePressureAccelIISPH
-from warpSPH.cases.weaklyCompressible import domainBoundarySdf
+from warpSPH.cases.common.weaklyCompressible import domainBoundarySdf
 
 import warpSPH.systems.incompressible as sysmod
 

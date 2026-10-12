@@ -88,7 +88,7 @@ bootstrap(precision='float32')
 import torch
 
 from warpSPH.runner.cli import caseMain
-from warpSPH.cases.dambreak import dambreakCase as case
+from warpSPH.cases.freeSurface.dambreak import dambreakCase as case
 
 import warpSPH.schemes.divergenceFree as dfsph_mod
 import warpSPH.systems.incompressible as sysmod

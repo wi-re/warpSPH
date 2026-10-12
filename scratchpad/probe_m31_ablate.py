@@ -36,7 +36,7 @@ if clampMode == 'blanket':
     sch.computeMdbcDensity = clamped
 
 from warpSPH.cases import importAll; importAll()
-from warpSPH.cases.dambreak import dambreakCase
+from warpSPH.cases.freeSurface.dambreak import dambreakCase
 from warpSPH.runner import run
 
 H, TANK_L, G = 0.6, 1.0, 9.81

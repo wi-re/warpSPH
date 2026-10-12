@@ -22,7 +22,7 @@ Reference setup (Sun et al. 2017 Sec. 4.2,
 - Central conservative force `f = -B^2 r`; **inviscid** fluid; the drop starts
   circular with radius `R` and velocity `u = A0 x`, `v = -A0 y`.
 - `A0 / B = 1`, `A0 = 1`, so the oscillation period is `T ~ 4.827 / A0` -- the
-  `DROPLET_PERIOD` already encoded in `cases/oscillatingDroplet.py`.
+  `DROPLET_PERIOD` already encoded in `cases/freeSurface/oscillatingDroplet.py`.
 - `c0 = 15 A0 R`, i.e. Mach 1/15 against the straining field's edge speed.
 - Artificial viscosity `alpha = 0.01` (Eq. 1).  Sun's Fig. 13 comparison
   against Antuono et al.'s delta-SPH sets `alpha = 0` instead; `--alpha 0`
@@ -147,7 +147,7 @@ def _runOne(Rdx: int, periods: float, out: str, scheme: str, alpha: float,
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
-    from warpSPH.cases.oscillatingDroplet import oscillatingDropletCase
+    from warpSPH.cases.freeSurface.oscillatingDroplet import oscillatingDropletCase
     from warpSPH.runner import run
 
     os.makedirs(out, exist_ok=True)
@@ -209,7 +209,7 @@ _ANALYTIC_CACHE = {}
 
 def _analytic(ts):
     """`(a, b, KE)` of the exact elliptical-drop solution at times `ts`."""
-    from warpSPH.cases.oscillatingDroplet import analyticSolution
+    from warpSPH.cases.freeSurface.oscillatingDroplet import analyticSolution
     key = (int(ts.size), float(ts[0]), float(ts[-1]))
     if key not in _ANALYTIC_CACHE:
         _ANALYTIC_CACHE[key] = analyticSolution(ts, A=A0, B=B, R=R, rho0=RHO0)

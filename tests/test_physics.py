@@ -25,43 +25,43 @@ def _run(case, **overrides):
 
 @pytest.fixture(scope='module')
 def sodResult():
-    from warpSPH.cases.sod import sodCase
+    from warpSPH.cases.compressible.sod import sodCase
     return _run(sodCase, nx=200)
 
 
 @pytest.fixture(scope='module')
 def tgvResult():
-    from warpSPH.cases.tgv import tgvCase
+    from warpSPH.cases.periodic.tgv import tgvCase
     return _run(tgvCase, nx=32)
 
 
 @pytest.fixture(scope='module')
 def shearWaveResult():
-    from warpSPH.cases.shearWave import shearWaveCase
+    from warpSPH.cases.periodic.shearWave import shearWaveCase
     return _run(shearWaveCase, nx=32)
 
 
 @pytest.fixture(scope='module')
 def dambreakResult():
-    from warpSPH.cases.dambreak import dambreakCase
+    from warpSPH.cases.freeSurface.dambreak import dambreakCase
     return _run(dambreakCase, nx=48)
 
 
 @pytest.fixture(scope='module')
 def kolmogorovIncompressibleResult():
-    from warpSPH.cases.kolmogorovIncompressible import kolmogorovIncompressibleCase
+    from warpSPH.cases.periodic.kolmogorovIncompressible import kolmogorovIncompressibleCase
     return _run(kolmogorovIncompressibleCase, nx=32)
 
 
 @pytest.fixture(scope='module')
 def randomFlowPeriodicResult():
-    from warpSPH.cases.randomFlowIncompressible import randomFlowIncompressibleCase
+    from warpSPH.cases.periodic.randomFlowIncompressible import randomFlowIncompressibleCase
     return _run(randomFlowIncompressibleCase, nx=48)
 
 
 @pytest.fixture(scope='module')
 def columnCollapseResult():
-    from warpSPH.cases.columnCollapse import columnCollapseCase
+    from warpSPH.cases.freeSurface.columnCollapse import columnCollapseCase
     # Needs to run past the collapse impact (t ~ 0.4 at nx=32) for the wall
     # penetration watch to mean anything -- longer than the suite's usual 20,
     # so this bypasses `_run`'s fixed step count.
@@ -71,7 +71,7 @@ def columnCollapseResult():
 
 @pytest.fixture(scope='module')
 def randomFlowBoundedResult():
-    from warpSPH.cases.randomFlowIncompressible import randomFlowIncompressibleCase
+    from warpSPH.cases.periodic.randomFlowIncompressible import randomFlowIncompressibleCase
     # Historically detonated under the post-c637785 scheme -- at nx=96, t ~
     # 0.18 (~step 23 at this case's adaptive dt), past the suite's usual
     # STEPS=20 (t ~ 0.17), which is why Part 54's sampler-bug fix briefly
@@ -202,7 +202,7 @@ def test_sodNDKeepsTheLightStateOutOfTheDenseBlock():
     import torch
 
     from warpSPH.caseUtils import buildSodND, sodInitialState
-    from warpSPH.cases.sod import sodCase
+    from warpSPH.cases.compressible.sod import sodCase
     from warpSPH.runner import CaseSpec, buildContext
 
     def build(nx, dim):
@@ -298,7 +298,7 @@ def compressibleSchemeResult(request):
     only way to reach it was `--scheme Monaghan`, which no test did. Any solver
     reachable from the command line is now exercised here.
     """
-    from warpSPH.cases.sod import sodCase
+    from warpSPH.cases.compressible.sod import sodCase
     return request.param, _run(sodCase, nx=200, scheme=request.param)
 
 
@@ -330,7 +330,7 @@ def test_everyCompressibleSolverKeepsEnergyDriftInBounds(compressibleSchemeResul
 def test_theSolverIsSelectedByTheSchemeFlag():
     """`--scheme` has to reach `buildScheme`, or a comparison run would
     silently compare a scheme against itself."""
-    from warpSPH.cases.sod import sodCase
+    from warpSPH.cases.compressible.sod import sodCase
     from warpSPH.runner import buildContext
     from warpSPH.runner.caseSpec import CaseSpec
 
@@ -363,7 +363,7 @@ def test_tgvKineticEnergyDecaysAtRoughlyTheAnalyticRate(tgvResult):
     disconnected (rate -> 0) or mis-scaled, without pretending the ~0.55 factor
     is an error to be driven out.
     """
-    from warpSPH.cases.tgv import analyticDecayRate
+    from warpSPH.cases.periodic.tgv import analyticDecayRate
 
     kinetic = tgvResult.series('kineticEnergy')
     time = tgvResult.series('t')
@@ -391,7 +391,7 @@ def test_shearWaveHoldsItsAmplitude(shearWaveResult):
     identically -- `(u . grad) u = u_x d_x u_x e_x = 0` since `u_x` depends only
     on `y` -- so the exact solution is stationary and its pressure is constant.
     Any loss of amplitude is therefore numerical dissipation and nothing else,
-    which is the property the case exists to measure (`cases/shearWave.py`).
+    which is the property the case exists to measure (`cases/periodic/shearWave.py`).
 
     The band is loose because this is 20 steps at nx=32: the point is to catch
     the amplitude *collapsing* or *growing*, i.e. the pressure solve feeding
@@ -499,7 +499,7 @@ def test_columnCollapseWallHoldsOnImpact(columnCollapseResult):
 
 @pytest.fixture(scope='module')
 def bandColumnResult():
-    from warpSPH.cases.hydrostaticColumn import hydrostaticColumnCase
+    from warpSPH.cases.boundaries.hydrostaticColumn import hydrostaticColumnCase
     # Long enough for the hydrostatic gradient to build and for the nx=128
     # spray failure (see test_band2018pbColumnStaysQuiescent) to have shown up.
     with contextlib.redirect_stdout(io.StringIO()):
@@ -510,7 +510,7 @@ def bandColumnResult():
 
 @pytest.fixture(scope='module')
 def bandBoundedResult():
-    from warpSPH.cases.randomFlowIncompressible import randomFlowIncompressibleCase
+    from warpSPH.cases.periodic.randomFlowIncompressible import randomFlowIncompressibleCase
     with contextlib.redirect_stdout(io.StringIO()):
         return run(randomFlowIncompressibleCase, nx=64, nSteps=120,
                    scheme='band2018pb', params=dict(bounded=True),
@@ -542,7 +542,7 @@ def test_band2018pbColumnStaysQuiescent(bandColumnResult):
 
 @pytest.fixture(scope='module')
 def acsphColumnResult():
-    from warpSPH.cases.hydrostaticColumn import hydrostaticColumnCase
+    from warpSPH.cases.boundaries.hydrostaticColumn import hydrostaticColumnCase
     # The configuration `ACSPH_PLAN.md` step 5b measured to hold the corners
     # (`‖v‖` ~ 0.75 at 200 steps): Michel PST plus the mDBC no-penetration
     # safeguard. Without the safeguard the fluid leaks out of the bottom
@@ -675,7 +675,7 @@ _SEDOV = {'sedov1d': dict(dim=1, nx=51), 'sedov2d': dict(dim=2, nx=21), 'sedov3d
 
 @pytest.fixture(scope='module', params=sorted(_SEDOV))
 def sedovResult(request):
-    from warpSPH.cases.sedov import sedovCase
+    from warpSPH.cases.compressible.sedov import sedovCase
     return request.param, _run(sedovCase, **_SEDOV[request.param])
 
 
@@ -716,7 +716,7 @@ def test_sedovInitialConditionConservesE0(initialization, dim, nx):
     unity next to so few neighbours. All three initializations must still
     conserve E0 exactly at t=0, regardless of dimension.
     """
-    from warpSPH.cases.sedov import sedovCase
+    from warpSPH.cases.compressible.sedov import sedovCase
     from warpSPH.runner import CaseSpec, buildContext
 
     spec = CaseSpec(caseName=sedovCase.name, scheme=sedovCase.scheme,
@@ -735,7 +735,7 @@ def test_sedovInitialConditionConservesE0(initialization, dim, nx):
 def test_sedovHatSpreadsTheSpikeOverMoreThanOneParticle():
     """The point of the fix: `'hat'` must not still be a single-particle
     delta the way `'singular'` deliberately is."""
-    from warpSPH.cases.sedov import sedovCase
+    from warpSPH.cases.compressible.sedov import sedovCase
     from warpSPH.runner import CaseSpec, buildContext
 
     def nonzeroParticles(initialization):
@@ -772,7 +772,7 @@ def test_uniformLatticeDensityMatchesBuiltDensity(dim, nx):
     """
     import torch
 
-    from warpSPH.cases.sedov import sedovCase
+    from warpSPH.cases.compressible.sedov import sedovCase
     from warpSPH.runner import CaseSpec, buildContext
     from warpSPH.sample import sampleRegularParticles
     from warpSPHCore import (OperationProperties, WarpOperation, SupportScheme,
@@ -820,7 +820,7 @@ def test_uniformLatticeDensityMatchesBuiltDensity(dim, nx):
 _WAVE = {'wave1d': dict(dim=1, nx=128), 'wave2d': dict(dim=2, nx=32), 'wave3d': dict(dim=3, nx=20)}
 
 #: How much the discrete wave energy (kinetic + gradient-based potential, see
-#: `cases/waveEquation.py`'s `diagnostics`) is allowed to grow over the run
+#: `cases/demos/waveEquation.py`'s `diagnostics`) is allowed to grow over the run
 #: relative to its initial value. Unlike the compressible schemes above, this
 #: one is not energy-conserving by construction -- the border damping is
 #: explicitly dissipative -- and the initial condition (a compactly-supported
@@ -836,7 +836,7 @@ _WAVE_ENERGY_DRIFT = 25.0
 
 @pytest.fixture(scope='module', params=sorted(_WAVE))
 def waveResult(request):
-    from warpSPH.cases.waveEquation import waveEquationCase
+    from warpSPH.cases.demos.waveEquation import waveEquationCase
     return request.param, _run(waveEquationCase, **_WAVE[request.param])
 
 

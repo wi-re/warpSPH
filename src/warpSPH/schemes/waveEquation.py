@@ -20,7 +20,7 @@ integration and forward-mode AD are not wired up here; see
 `docs/historic_plans/WAVE_EQUATION_PLAN.md` for that follow-up.
 
 See :mod:`warpSPH.systems.waveSystem` for the state it integrates,
-:mod:`warpSPH.cases.waveEquation` for the registered `Case`, and the README
+:mod:`warpSPH.cases.demos.waveEquation` for the registered `Case`, and the README
 section "The wave system" for how the pieces fit together.
 """
 

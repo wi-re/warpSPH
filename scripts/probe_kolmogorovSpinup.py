@@ -1,6 +1,6 @@
 """Probe (per conversation, 2026-08-25): does the rudimentary acoustic core
 (`JFNK_PLAN.md` Phase E1.5) develop genuine 2D Kolmogorov turbulence at
-*realistic* operating parameters -- `cases/kolmogorov.py`'s own `xi=1.0`
+*realistic* operating parameters -- `cases/periodic/kolmogorov.py`'s own `xi=1.0`
 (forcingAmplitude), `k=4` (forcingWavenumber), `alpha=0.01`
 (artificial-viscosity floor) -- rather than the small, toy-scale sweep
 `test_acousticCoreDissipation.py` used? That sweep found a viscous stability
@@ -38,7 +38,7 @@ from warpSPH.modules.deltaSPH import alphaToNu
 from warpSPHIntegrators import get_reference_state, getIntegrator
 from warpSPHCore import SupportScheme, buildVerletList
 
-# cases/kolmogorov.py's own defaults (xi, k, alpha) -- WEAKLY_COMPRESSIBLE_PARAMS/
+# cases/periodic/kolmogorov.py's own defaults (xi, k, alpha) -- WEAKLY_COMPRESSIBLE_PARAMS/
 # kolmogorovCase.params -- reused verbatim by default so this probe targets
 # the real operating point, not an arbitrary one. `xi`/`dtFactor` are
 # CLI-overridable (see `--xi`/`--dt-factor`) for the Ma-scaling follow-up

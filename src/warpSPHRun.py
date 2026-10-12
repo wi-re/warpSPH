@@ -1,7 +1,7 @@
 """CLI entry point: ``warpsph-run <case> [options]``.
 
 Lives at top level, alongside :mod:`warpSPHBootstrap`, so that it can bootstrap
-the precision *before* importing ``warpSPH``. ``python -m warpSPH.cases.sod``
+the precision *before* importing ``warpSPH``. ``python -m warpSPH.cases.compressible.sod``
 works too, but by then ``warpSPHCore`` is already imported and ``--precision``
 can no longer take effect.
 """

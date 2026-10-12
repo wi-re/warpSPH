@@ -84,7 +84,7 @@ def header(cols):
 
 
 if 'tgv' in args.cases:
-    from warpSPH.cases.tgv import tgvCase, analyticDecayRate
+    from warpSPH.cases.periodic.tgv import tgvCase, analyticDecayRate
 
     print(f"\n=== tgv nx={args.nx} nSteps={args.tgvSteps} -- artificial viscosity ===")
     print("`decay/analytic` 1.0 would be the analytic rate; `tests/test_physics.py` "
@@ -113,7 +113,7 @@ if 'tgv' in args.cases:
               f"{maxRho:9.5f} {minRho:9.5f} {r.wallTime:7.1f}", flush=True)
 
 if 'bounded' in args.cases:
-    from warpSPH.cases.randomFlowIncompressible import randomFlowIncompressibleCase as boundedCase
+    from warpSPH.cases.periodic.randomFlowIncompressible import randomFlowIncompressibleCase as boundedCase
 
     print(f"\n=== randomFlowIncompressible --bounded nx={args.nx} "
           f"nSteps={args.boundedSteps}, published CFL, Part 14 defaults ===")
@@ -139,7 +139,7 @@ if 'bounded' in args.cases:
               f"{tr[-1].get('t', float('nan')):8.4f} {r.wallTime:7.1f}", flush=True)
 
 if 'shear' in args.cases:
-    from warpSPH.cases.shearWave import shearWaveCase
+    from warpSPH.cases.periodic.shearWave import shearWaveCase
 
     print(f"\n=== shearWave nx={args.nx} t={args.shearT} nu=0 -- "
           f"dissipation and volume error, separated ===")

@@ -13,7 +13,7 @@ import torch
 
 from warpSPH.math.scatter import scatter_sum, segment_sum
 from warpSPH.runner import run
-from warpSPH.cases.greshoVortex import greshoVortexCase
+from warpSPH.cases.compressible.greshoVortex import greshoVortexCase
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason='needs a GPU')

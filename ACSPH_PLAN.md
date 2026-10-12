@@ -73,7 +73,7 @@ audit could not settle without a judgement call.
    items 1 and 7 (which the plan already describes as landed —
    `rigidBody/update.py`, `wp_densityDelta.py`, the two periodic cases, two
    test files) and this audit's own changes (the `wallBC` flip in
-   `cases/dambreak.py` + `caseUtils/weaklyCompressible.py`, the three probe
+   `cases/freeSurface/dambreak.py` + `caseUtils/weaklyCompressible.py`, the three probe
    docstrings, `uChar` on the two periodic cases, this plan and
    `DELTASPH_VALIDATION_PLAN.md` §5.7). Worth splitting into two commits.
 
@@ -109,7 +109,7 @@ audit could not settle without a judgement call.
 ### Model / config changes
 
 - **`dambreak`'s `wallBC` default flipped `'constant'` → `'freeSlip'`**
-  (`cases/dambreak.py`, `caseUtils/weaklyCompressible.py::buildRegions`, which
+  (`cases/freeSurface/dambreak.py`, `caseUtils/weaklyCompressible.py::buildRegions`, which
   `dambreak` is the only caller of). Every reference this family is graded
   against specifies free slip — De Courcy §4.5 explicitly, Marrone 2011 §3
   (3.1 and 3.4.1), Lobovský 2014 / Buchner 2002 — and `'constant'` is not it:
@@ -272,7 +272,7 @@ against the commit *before* the psi-sign fix in an isolated `git worktree`,
 and got the documented pre-fix numbers back almost exactly
 (`noShift` diverges at `t=2.76`, `surfaceNormal` survives to `t=4.0`). See
 decision 1's update below for why that fix is correct and should not be
-reverted. **Fix applied**: `cases/sloshingTank.py`'s `deltaSPH` branch now
+reverted. **Fix applied**: `cases/freeSurface/sloshingTank.py`'s `deltaSPH` branch now
 defaults to `ShiftingScheme.michel2022`/`ShiftingProjectionScheme.michel2022`
 instead of the shared default, confirmed end-to-end through the case's own
 real entry point (`run(sloshingTankCase, params={'shifting': True}, nx=60,
@@ -605,7 +605,7 @@ the §4.4 closeout.** Six things landed:
    understood: more diffusion generically looks "better behaved" on a
    short-window A/B even though it is quantitatively wrong and, on this
    specific violent-impact case, was load-bearing for stability over the
-   full run.) **Fix**: `cases/sloshingTank.py` no longer relies on the
+   full run.) **Fix**: `cases/freeSurface/sloshingTank.py` no longer relies on the
    shared shift default for this case — see `PST_ALE_PLAN.md` §7.1 for the
    applied fix and its end-to-end confirmation.
    → **Full validation-case sweep also done** (2026-09-05, Part 9.1): every
@@ -1741,7 +1741,7 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
    *Wiring.* `initializers/weaklyCompressible.py::initializeState` now builds
    any of the three state classes from one construction (it had a
    character-identical `if`-branch per class and no `else`, so an unknown class
-   fell through to a `NameError`); `cases/weaklyCompressible.py` gains
+   fell through to a `NameError`); `cases/common/weaklyCompressible.py` gains
    `configureDomain` + `configureArtificialCompressible`, which also **forces
    `forwardEuler`** (loudly) since the exact-delta contract requires it;
    `hydrostaticColumn` branches on `isArtificialCompressibleScheme` and takes
@@ -1759,7 +1759,7 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
    that decomposition with a real kernel taking `x_ij` from
    `computeDistanceVec`, so the moment is minimum-image correct by construction.
    The case is back on the shared `periodic=True` default
-   ([hydrostaticColumn.py:441](src/warpSPH/cases/hydrostaticColumn.py#L441)) and
+   ([hydrostaticColumn.py:441](src/warpSPH/cases/boundaries/hydrostaticColumn.py#L441)) and
    needs no guard, no restriction and no case-level workaround.
 
    *Measured — the scheme is right.* With `p` seeded analytically and `v = 0`

@@ -40,7 +40,7 @@ def _quadraticPower(system, ctx, mode, alphaScale):
 
 
 def test_fixed_beta_ignores_alpha_and_coupled_follows_it():
-    from warpSPH.cases.sod import sodCase
+    from warpSPH.cases.compressible.sod import sodCase
     res = run(sodCase, scheme='Monaghan', nx=60, nSteps=40, progress=False, quiet=True,
               params=dict(viscositySwitch='NoneSwitch', right_rho=0.125, right_pressure=0.1))
     ctx, system = res.ctx, res.state

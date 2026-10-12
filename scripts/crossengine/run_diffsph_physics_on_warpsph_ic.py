@@ -37,7 +37,7 @@ import torch
 # 1. Build warpSPH's diffSPH-matched dambreak IC (nSteps=0 -> just the IC),
 #    full particle complement (fluid + boundary + ghost).
 # ---------------------------------------------------------------------------
-from warpSPH.cases.dambreak import dambreakCase
+from warpSPH.cases.freeSurface.dambreak import dambreakCase
 from warpSPH.runner import caseMain
 
 args = [

@@ -14,8 +14,8 @@ import copy
 import pytest
 import torch
 
-from warpSPH.cases.greshoVortex import greshoVortexCase
-from warpSPH.cases.sod import sodCase
+from warpSPH.cases.compressible.greshoVortex import greshoVortexCase
+from warpSPH.cases.compressible.sod import sodCase
 from warpSPH.modules.shockCapturing.ReadHayfield2012 import computeReadHayfieldTerms
 from warpSPH.runner import run
 from warpSPHCore import SupportScheme

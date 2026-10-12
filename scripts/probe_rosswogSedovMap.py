@@ -27,7 +27,7 @@ CONFIGS = {
 
 
 def _case(switchParams):
-    from warpSPH.cases.sedov import sedovCase
+    from warpSPH.cases.compressible.sedov import sedovCase
     configure = sedovCase.configureScheme
 
     def configureScheme(ctx):

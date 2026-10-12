@@ -21,7 +21,7 @@ from warpSPHBootstrap import bootstrap
 
 bootstrap(precision='float32')
 
-from warpSPH.cases.impact import impactCase    # noqa: E402
+from warpSPH.cases.freeSurface.impact import impactCase    # noqa: E402
 from warpSPH.runner import caseMain            # noqa: E402
 
 #: What this example fixes relative to the case defaults; still overridable,
