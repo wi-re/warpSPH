@@ -75,6 +75,10 @@ These apply to **every** run, including throwaway inline probes that call
    Marrone nx 70 to t = 2.45 goes 1475 s -> 333 s (OPEN_PROBLEMS §33). Also watch
    `pseudoIterations`: a step at the 200 cap every step is a non-converging
    dual-time loop, not a slow one.
+   **Find host syncs and torch-op storms with the call audit:** `WARPSPHCORE_AUDIT=1 python scripts/...`
+   (off by default; every existing `record_function` section then reports torch ops, warp launches,
+   host syncs with their Python call site, per call and per step, and a worst-steps table at exit;
+   `warpSPHCore/callAudit.py`). Use a short run: the dispatch hook slows it ~3x, only the counts matter.
 
 Details and history: the `export-video-on-validation-runs` and
 `run-simulations-sequentially` memories; `docs/historic_plans/FREESLIP_DAMBREAK_FINDINGS.md` §9.6.

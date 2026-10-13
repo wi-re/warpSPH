@@ -71,6 +71,16 @@ which was not running at the time; graph on, forensics off, video off): Marrone 
 convergence issue, not the utilisation cause); aligned sloshing nx 100 31.7 ms/step (other session, t = 2.23). The per-iteration body is still the
 same ~260 torch launches: phases 2-4 are the actual speed-up.
 
+## 3b. Where the host time goes (call audit, 2026-10-13)
+
+`WARPSPHCORE_AUDIT=1` (new, `warpSPHCore/callAudit.py`, rides on `record_function`) on Marrone 3.1 nx 70, graph on, 68 steps: about **22 host
+syncs per step**, each a pipeline drain: ~8 dual-time convergence checks (`dualTime.py` `solve`), 3 `viscosityScalars` host reads
+(`residual.py`; cached per tensor object, so once per step), 2 in `wallBounceSetup` (`bool(ghost.any())`, an `int(sum)` for the one-time message),
+1 `torch.cuda.synchronize` in the per-step graph capture, ~2.6 each in the Verlet validity check and in shifting, ~5 in the timestep
+(`computeTimestep`, `asTensor`), 1 diagnostics read. The dual-time section issues ~1150 torch ops per step even with graphs on
+(the eager first iteration and the capture). These are phase 3's target list: device-resident scalars (viscosity, bounce setup), a persistent
+graph, a device-side stop test, and then the shared pieces (Verlet validity, shifting, timestep).
+
 ## 4. Risks / open questions
 
 * `wp.capture_while` with torch tensors and torch ops inside the body (conditional nodes need CUDA >= 12.4; driver here is 13.3 /

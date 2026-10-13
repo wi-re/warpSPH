@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 import torch
+from warpSPHCore import callAudit
 
 from ..configurations import buildConfig
 from ..enumTypes import (ArtificialCompressibleSPHScheme, CompressibleSPHScheme,
@@ -419,6 +420,7 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
         # reads as a continuation, not a restart from 0. Purely-internal loop
         # arithmetic (progress-bar total, `i == nSteps - 1`) stays on `i`.
         absStep = i + spec.resumeStepOffset
+        callAudit.markStep()    # no-op unless the call audit is on (warpSPHCore/callAudit.py)
 
         if case.postStep is not None:
             case.postStep(ctx, runningState, absStep)
@@ -593,6 +595,7 @@ def _runPipelined(ctx, case, spec, result, stepGraph, steps, progress, runningSt
         runningState = stepResult.state
         ctx.scratch['lastStageUpdate'] = stepResult.stages[-1].update if stepResult.stages else None
         absStep = i + spec.resumeStepOffset
+        callAudit.markStep()    # no-op unless the call audit is on (warpSPHCore/callAudit.py)
 
         if case.postStep is not None:
             case.postStep(ctx, runningState, absStep)
