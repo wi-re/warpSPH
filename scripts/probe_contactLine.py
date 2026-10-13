@@ -640,8 +640,7 @@ def runMarrone(args):
             kw['scheme'] = args.scheme
         if args.nx:
             kw['nx'] = args.nx
-    if args.cudaGraph:
-        kw.update(cudaGraph=True)
+    kw.update(cudaGraph=bool(args.cudaGraph))     # explicit: the cases default it on, --no-cudaGraph must win
     if args.store:
         kw.update(storeMode='states', storeInterval=args.storeInterval, exportRoot=runRoot)
     if args.resume:

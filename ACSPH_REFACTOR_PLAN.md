@@ -42,19 +42,30 @@ inline calls in `_deltaSPH_rhs`). Part of the inline ACSPH code (wall bounce, ta
 * Then wire ACSPH into the whole-step graph (pre-loop setup and `finalize` shifting are the remaining eager parts).
 * Same treatment for the delta-SPH scheme afterwards (phase 5), no behaviour change.
 
-## 3. Phases (each ends bitwise-checked and committed; GPU runs one at a time, utilisation reported with every run)
+## 3. Phases (REORDERED 2026-10-13, user: optimise the eager code first, worry about graph capture afterwards)
+
+Graph capture hides the cost it should be measured against (a replay issues no ops, a per-step capture adds work) and demands
+a sync-free, fixed-shape step, which is the same work as removing the syncs. So: **all development and measurement is eager
+(`--no-cudaGraph`, `audit_case.py --no-cudaGraph`); graphs are a bolt-on at the end** (case defaults stay `cudaGraph=True`
+meanwhile so ordinary runs stay fast). Each phase ends bitwise-checked, audited and committed; GPU jobs one at a time.
 
 | # | Phase | Check |
 |---|---|---|
-| 0 | Baseline: one profiled slot (Marrone nx 70 t <= 0.45, sloshing nx 100 t <= 1): ms/step, launches, syncs, GPU util, with the current code, graph on/off | numbers recorded here |
-| 1 | Extract, no behaviour change: `pseudoIteration`, residual, wall closure, bounce, taper, flags move to modules as plain functions with explicit arguments | `tests/test_artificialCompressible.py` unchanged and green; Marrone / sloshing short runs bitwise identical |
-| 2 | Fused warp kernels for the stage combine, projection, bounce, convergence metric | per-kernel tests vs the torch reference; gradcheck script if a kernel is differentiable; bitwise or <= 1 ulp (state the tolerance) |
-| 3 | Device-side stop test + `capture_while`; per-step scalars as device inputs; one graph per Verlet generation | stops at the first converged iteration (the old schedule overshoots up to the next checkpoint, so the reference for the comparison is eager with a check every iteration) |
-| 4 | Extend to the whole step (`_stepGraphable` for ACSPH) | a step is one graph launch; utilisation and ms/step vs phase 0 |
-| 5 | Same extraction in `schemes/deltaSPH.py` | its tests + Marrone 3.1 reference timing (108.7 s, CLAUDE.md rule 5) unchanged |
+| 0 | Eager baseline (below) | numbers recorded |
+| 1 | **Done.** Extract into modules, no behaviour change | 64 tests, bitwise vs previous commit |
+| 2 | Remove host syncs from the step (device-resident scalars: viscosity, bounce setup, parameters/BDF, forcing, solver setup, timestep hook, Verlet validity, shifting; one batched stop-test read) | audit `sync/step` per section; bitwise |
+| 3 | Collapse the torch-op storms: fused warp kernels for the RK stage combine + fluid mask, projection, wall bounce (pair kernel, no scatter_reduce), convergence metric, surface-flag/taper arithmetic | audit `ops/step`, `launch/step`; per-kernel tests vs the torch reference; gradcheck script if differentiable; bitwise or tolerance stated |
+| 4 | Per-step setup (contact masks, bounce setup, parameters, solver construction) as one or two kernels / cached per Verlet generation | audit |
+| 5 | Only then graphs: persistent graph per Verlet generation, device-side stop test (`capture_while`), whole-step graph | utilisation >= 80 %, ms/step vs the eager phase-4 number |
+| 6 | Same extraction + cleanup in `schemes/deltaSPH.py` | its tests + Marrone 3.1 reference timing (108.7 s) |
 
-Acceptance for the plan: Marrone 3.1 nx 70 and sloshing nx 100 at >= 80 % GPU utilisation with video off, ms/step well below the
-phase-0 numbers, and every phase's results bitwise (or tolerance-stated) against the previous.
+Acceptance: Marrone 3.1 nx 70 and sloshing nx 100 with graphs OFF at high GPU utilisation and low `sync/step`, then graphs ON as a bonus.
+
+**Phase 0, eager baseline (2026-10-13, graph off, forensics off, video off, idle GPU):** Marrone 3.1 nx 70, t <= 0.3 (183 steps):
+**127.5 ms/step, GPU 23 %** (graphed: ~42 ms/step). Audit (`dambreak`, nx 70, 50 steps after 10 warm-up; `scripts/out_callAudit/acsph_eager_baseline.txt`):
+**21,058 torch ops, 907 warp launches, 25.7 syncs per integrator step** (dual-time loop 20,413 ops / 886 launches / 10.1 syncs at ~42 pseudo-iterations per step,
+i.e. ~483 ops and 21 launches per iteration; contact masks + bounce setup 5.0 syncs; Verlet 2.8; stop test 6.1; timestep hook 9.2; step
+timer, speed read, diagnostics ~1-1.6 each). Coverage 100 % of ops / launches, 99.9 % of syncs.
 
 ## 3a. Status
 
