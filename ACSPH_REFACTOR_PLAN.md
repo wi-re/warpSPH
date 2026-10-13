@@ -110,6 +110,35 @@ graph, a device-side stop test, and then the shared pieces (Verlet validity, shi
 * Inlets / outlets (changing particle count) are not supported here; out of scope.
 * **The core change has its own plan: `~/dev/warpSPHCore/ADJACENCY_CAPACITY_PLAN.md`** (sync sites, design, consumer inventory, steps). The consumer-side guard (`0 <= i < n` before using a raw pair) is independent of it and a no-op on today's adjacency, so it can land here at any time.
 
+## 3d. CompSPH / CRKSPH as the proving ground (2026-10-13, user) -- lessons to bring back
+
+The user redirected the work: get the same cleanup working on CompSPH / CRKSPH first (they have the same stage structure and are
+cheaper to audit), then apply what holds to ACSPH. Full account with evidence: **`docs/compsph_step/README.md`** (commits, audit tables,
+the scripts that produced every number, bugs found). Per-step on `sod2d` CompSPH: 975 ops / 22 launches / 24 syncs -> 443 / 21.6 / 3.7.
+Lessons that carry over to the ACSPH phases above:
+
+* **Stage systems are copies of the step's INITIAL state**: anything a stage learns (the pair list it rebuilt, a flag) must be carried
+  explicitly (`PairWork`, `startFromLatest`); otherwise stage 1 repeats stage 0's work on stale input.
+* **Tableau weights decide what must be stored across stages**: `RungeKuttaB` now passes `stageWeights` to the system's `initialize`
+  (opt-in) and supports one optional second pass (`rerunRequest`); midpoint (`b = [0, 1]`) stores nothing across stages, Heun / SSPRK3 /
+  RK4 do. A step whose `finalize` cannot complete from what the stages stored asks for the step again, the second pass uses what the
+  first found out. ACSPH's pseudo-time loop is the same shape (BDF2 history is the "pair work").
+* **Decide list rebuilds at step END, read one flag per step**: per-stage device flags (`verletStaleFlag`), the buffer usage `verletUsage`,
+  ONE host read in `finalize`; rebuild then if `usage + 1.25 x (learned per-step usage) >= 1`; a failing in-step flag -> conservative second
+  pass. A fixed margin was wrong for some tableau (scan in the README): learn it.
+* **Fused / fixed-shape pieces first, graphs after** (the user's order held): the validity check was 38 % of all ops as 44 torch ops
+  (now 2 warp launches); the hash-map build is 108 ops / 0 syncs with fixed shapes (`HashMapSlots`) and graph-replayable; rebuilds are
+  eager and outside any graph (user decision), writing into the padded buffers when `inPlace` is on.
+* **Responsibilities explicit in the step, not hidden in a helper**: the wall support clamp is its own module called after the list; the
+  support solve returns supports (and optionally density) and does not own the adjacency (`supportSolveOnGrid`).
+* **Hidden-failure checklist for refactors that rename or reorder**: `hasattr`/`getattr` with string names, identity-keyed caches, code paths
+  no test covers (wall cases, `NoScheme`): both regressions of this day were found by a smoke run over all registered cases
+  (`docs/compsph_step/evidence/scripts/smokeCompressible.py`) and by bisecting commits against a baseline worktree.
+
+ACSPH items that this changes: phase 2 (host syncs) can reuse the step-end single-read pattern for the dual-time stop test; phase 5's
+persistent graph can rely on `CapacityPolicy.inPlace` + the flags above; the `iterate` loop's per-iteration validity is not needed once
+the list is decided at step end.
+
 ## 4. Risks / open questions
 
 * `wp.capture_while` with torch tensors and torch ops inside the body (conditional nodes need CUDA >= 12.4; driver here is 13.3 /

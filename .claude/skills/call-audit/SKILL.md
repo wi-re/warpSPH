@@ -25,6 +25,7 @@ python scripts/audit_case.py <case> [--scheme S] [--nx N] [--steps 60] [--warmup
 python scripts/audit_case.py dambreak --scheme artificialCompressible --nx 70
 python scripts/audit_case.py sloshingTank --scheme artificialCompressible --nx 100 --set acBounceRamp=0.5
 python scripts/audit_case.py hydrostaticColumn --scheme deltaSPH --nx 64
+python scripts/audit_case.py sod2d --scheme CompSPH --steps 40 --warmup 10 --scheme-set supportSolveOnGrid=True   # --scheme-set KEY=VALUE sets a scheme-config attribute
 ```
 
 It prints the report and writes it to `scripts/out_callAudit/<case>_<scheme>_<time>.txt`.

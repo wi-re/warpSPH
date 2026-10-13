@@ -1,0 +1,151 @@
+section (tree, inclusive unless "self")                                   calls  ops/call  self ops launch/call sync/call self sync sync/step
+[runner] case diagnostics                                                    31      54.0      54.0         0.0      8.00      8.00      8.27
+[runner] integrator step                                                     30     443.4     110.4        21.6      3.73      2.13      3.73
+  [warpSPH] - [compSPH finalize - 00] list flags                             30      11.3      11.3         3.0      1.00      1.00      1.00
+  [warpSPH] - [compSPH finalize - 02] list for the next step                  9      69.0       0.0         2.0      2.00      0.00      0.60
+    [warpSPH] - buildVerletList                                               9      69.0       0.0         2.0      2.00      0.00      0.60
+      [Verlet] SupportScheme.SuperSymmetric                                   9      69.0       0.0         2.0      2.00      0.00      0.60
+        [Verlet] Forced rebuild                                               9      69.0       6.0         2.0      2.00      0.00      0.60
+          warpNeighborSearch - radiusSearchCompactHashMap                     9      63.0      48.0         2.0      2.00      1.00      0.60
+            neighborSearch - allocate neighbors                               9      12.0      12.0         0.0      1.00      1.00      0.30
+            neighborSearch - count neighbors                                  9       2.0       2.0         1.0      0.00      0.00      0.00
+            neighborSearch - collect neighbors                                9       1.0       1.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [compSPH - 02] adjacency                                       60       5.0       5.0         3.0      0.00      0.00      0.00
+  [warpSPH] - [compSPH - 01] wall + optimal support                          60      60.0       2.0         1.0      0.00      0.00      0.00
+    [warpSPH] - evaluateOptimalSupport                                       60      58.0       0.0         1.0      0.00      0.00      0.00
+      [warpSPH] - evaluateOptimalSupport - Owen                              60      58.0      51.0         1.0      0.00      0.00      0.00
+        warpSPH[computePsi0]                                                 60       7.0       0.0         1.0      0.00      0.00      0.00
+          warpWrapper2 [WW2]                                                360       4.8       3.2         1.0      0.00      0.00      0.00
+            SAWF.forward - launch                                           360       1.5       0.0         1.0      0.00      0.00      0.00
+              launch_kernel - allocate_output                               540       1.0       1.0         0.0      0.00      0.00      0.00
+  [warpSPH] - [compSPH - 08] switch update, divergence, dE/dt                60      25.0      15.0         1.0      0.00      0.00      0.00
+    warpSPH - computeMomentumConsistent                                      60      10.0       5.0         1.0      0.00      0.00      0.00
+      warpSPH[Divergence]                                                    60       5.0       0.0         1.0      0.00      0.00      0.00
+        warpSPH[Divergence] - Kernel Execution                               60       5.0       2.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [compSPH - 06] pressure / viscosity acceleration               60      13.0       0.0         1.0      0.00      0.00      0.00
+    warpSPH[computeCompSPHAccel]                                             60      13.0       0.0         1.0      0.00      0.00      0.00
+      warpSPH[computeCompSPHAccel] - Kernel Execution                        60      13.0       4.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [compSPH - 10] energy-partition f_ij                           60      13.0       3.0         1.0      0.00      0.00      0.00
+    warpSPH[computeCompSPHBalanceTerm]                                       60      10.0       0.0         1.0      0.00      0.00      0.00
+      warpSPH[computeCompSPHBalanceTerm] - Kernel Execution                  60      10.0       4.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [compSPH - 03] density (+ wall closure)                        60       4.5       0.0         1.0      0.00      0.00      0.00
+    [warpSPH] - computeDensities                                             60       4.5       2.0         1.0      0.00      0.00      0.00
+      warpSPH[Density]                                                       60       2.5       0.0         1.0      0.00      0.00      0.00
+        warpSPH[Density] - Kernel Execution                                  60       2.5       0.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [compSPH - 07] dudt                                            60       1.0       0.0         1.0      0.00      0.00      0.00
+    warpSPH[computeCompSPHdudt]                                              60       1.0       0.0         1.0      0.00      0.00      0.00
+      warpSPH[computeCompSPHdudt] - Kernel Execution                         60       1.0       0.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [compSPH finalize - 01] compatible energy                      30      24.0       0.0         0.0      0.00      0.00      0.00
+    [warpSPH] - [compSPH pairWork] close step                                30      24.0      23.0         0.0      0.00      0.00      0.00
+      segment_sum                                                            30       1.0       1.0         0.0      0.00      0.00      0.00
+  [warpSPH] - [compSPH - 05] EOS + viscosity-switch terms                    60       9.0       0.0         0.0      0.00      0.00      0.00
+    EOS[IdealGas]                                                            60       9.0       9.0         0.0      0.00      0.00      0.00
+  [warpSPH] - [compSPH - 09] forcing + update                                60       6.0       5.0         0.0      0.00      0.00      0.00
+    [warpSPH] - computeForcing                                               60       1.0       1.0         0.0      0.00      0.00      0.00
+  [warpSPH] - [compSPH - 11] pair work -> running sum                        60       2.0       0.0         0.0      0.00      0.00      0.00
+    [warpSPH] - [compSPH pairWork] accumulate stage                          30       4.0       4.0         0.0      0.00      0.00      0.00
+[runner] max speed read (non-finite check, velocity alarm)                   31       5.0       5.0         0.0      1.00      1.00      1.03
+[runner] step timer (cuda synchronize)                                       30       0.0       0.0         0.0      1.00      1.00      1.00
+coverage: 100.0 % of 15133 ops, 100.0 % of 648 launches, 99.8 % of 422 syncs inside a section (30 marked steps)
+  OUTSIDE any section: ops 1, launches 0, syncs 1
+    sync sites  : report.py:370 reportRun x1
+    top ops     : _local_scalar_dense x1
+
+call audit: 3224 section entries over 30 marked step(s)
+section                                          calls  ops/call     self launch/call sync/call sync/step replays
+[runner] case diagnostics                           31      54.0     54.0         0.0      8.00      8.27       0
+[runner] integrator step                            30     443.4    110.4        21.6      3.73      3.73      69
+[warpSPH] - [compSPH finalize - 00] list flags      30      11.3     11.3         3.0      1.00      1.00       0
+[runner] max speed read (non-finite check, vel      31       5.0      5.0         0.0      1.00      1.03       0
+[runner] step timer (cuda synchronize)              30       0.0      0.0         0.0      1.00      1.00       0
+warpWrapper2 [WW2]                                 360       4.8      3.2         1.0      0.00      0.00       0
+[warpSPH] - [compSPH finalize - 02] list for t       9      69.0      0.0         2.0      2.00      0.60       9
+[warpSPH] - buildVerletList                          9      69.0      0.0         2.0      2.00      0.60       9
+[Verlet] SupportScheme.SuperSymmetric                9      69.0      0.0         2.0      2.00      0.60       9
+[Verlet] Forced rebuild                              9      69.0      6.0         2.0      2.00      0.60       9
+warpNeighborSearch - radiusSearchCompactHashMa       9      63.0     48.0         2.0      2.00      0.60       0
+SAWF.forward - launch                              360       1.5      0.0         1.0      0.00      0.00       0
+[warpSPH] - [compSPH - 02] adjacency                60       5.0      5.0         3.0      0.00      0.00       0
+neighborSearch - allocate neighbors                  9      12.0     12.0         0.0      1.00      0.30       0
+[warpSPH] - [compSPH - 01] wall + optimal supp      60      60.0      2.0         1.0      0.00      0.00      60
+[warpSPH] - evaluateOptimalSupport                  60      58.0      0.0         1.0      0.00      0.00       0
+[warpSPH] - evaluateOptimalSupport - Owen           60      58.0     51.0         1.0      0.00      0.00       0
+[warpSPH] - [compSPH - 08] switch update, dive      60      25.0     15.0         1.0      0.00      0.00       0
+[warpSPH] - [compSPH - 06] pressure / viscosit      60      13.0      0.0         1.0      0.00      0.00       0
+warpSPH[computeCompSPHAccel]                        60      13.0      0.0         1.0      0.00      0.00       0
+warpSPH[computeCompSPHAccel] - Kernel Executio      60      13.0      4.0         1.0      0.00      0.00       0
+[warpSPH] - [compSPH - 10] energy-partition f_      60      13.0      3.0         1.0      0.00      0.00       0
+warpSPH - computeMomentumConsistent                 60      10.0      5.0         1.0      0.00      0.00       0
+warpSPH[computeCompSPHBalanceTerm]                  60      10.0      0.0         1.0      0.00      0.00       0
+warpSPH[computeCompSPHBalanceTerm] - Kernel Ex      60      10.0      4.0         1.0      0.00      0.00       0
+  [runner] case diagnostics
+    top ops     : mul x9.0, _to_copy x9.0, detach x8.0, _local_scalar_dense x8.0, sum x4.0, select x4.0
+    sync sites  : common.py:161 compressibleDiagnostics x248
+  [runner] integrator step
+    top ops     : mul x56.9, clone x55.6, detach x39.0, add x27.2, view x27.0, zeros x21.2
+    top kernels : _validityReduce x6.0, _validityDecide x3.0, computePsi0_KernelTiled x2.0, computeSPHDensity_KernelTiled x2.0, computeCompSPHAccel_Kernel x2.0
+    sync sites  : util.py:299 hostTime x60, compSPH.py:169 finalize x30, search.py:42 radiusSearchOnCompactHashMap x9, search.py:95 radiusSearchOnCompactHashMap x9, supportGrid.py:89 growIfOutgrown x4
+  [warpSPH] - [compSPH finalize - 00] list flags
+    top ops     : _to_copy x3.3, empty x2.0, full x1.0, unbind x1.0, view x1.0, add x1.0
+    top kernels : _validityReduce x2.0, _validityDecide x1.0
+    sync sites  : compSPH.py:169 finalize x30
+  [runner] max speed read (non-finite check, velocity alarm)
+    top ops     : linalg_vector_norm x1.0, max x1.0, detach x1.0, _to_copy x1.0, _local_scalar_dense x1.0
+    sync sites  : runner.py:179 _scalar x31
+  [runner] step timer (cuda synchronize)
+    sync sites  : runner.py:201 __exit__ [torch.cuda.synchronize] x30
+  warpWrapper2 [WW2]
+    top ops     : detach x3.2, zeros x1.5
+    top kernels : computePsi0_KernelTiled x0.2, computeSPHDensity_KernelTiled x0.2, computeCompSPHAccel_Kernel x0.2, computeCompSPHdudt_Kernel x0.2, computeSPHDivergenceTensor_KernelTiled x0.2
+  [warpSPH] - [compSPH finalize - 02] list for the next step
+    top ops     : select x16.0, sub x8.0, transpose x4.0, remainder x4.0, add x4.0, unsqueeze x4.0
+    top kernels : radiusSearchCountNeighborsCompactHashMap x1.0, radiusSearchCollectCompactHashMap x1.0
+    sync sites  : search.py:42 radiusSearchOnCompactHashMap x9, search.py:95 radiusSearchOnCompactHashMap x9
+  [warpSPH] - buildVerletList
+    top ops     : select x16.0, sub x8.0, transpose x4.0, remainder x4.0, add x4.0, unsqueeze x4.0
+    top kernels : radiusSearchCountNeighborsCompactHashMap x1.0, radiusSearchCollectCompactHashMap x1.0
+    sync sites  : search.py:42 radiusSearchOnCompactHashMap x9, search.py:95 radiusSearchOnCompactHashMap x9
+(outside any section)                                  ops 1, launches 0, syncs 1
+    sync sites  : report.py:370 reportRun x1
+
+worst 8 of the last 30 marked steps (by syncs, then ops):
+  step 5: up to 493 ops / 8 syncs in one section
+      [runner] case diagnostics                          ops     54  launches     0  syncs    8
+      [runner] integrator step                           ops    493  launches    23  syncs    6
+      [warpSPH] - [compSPH finalize - 02] list for the n ops     69  launches     2  syncs    2
+      [warpSPH] - buildVerletList                        ops     69  launches     2  syncs    2
+  step 2: up to 490 ops / 8 syncs in one section
+      [runner] case diagnostics                          ops     54  launches     0  syncs    8
+      [runner] integrator step                           ops    490  launches    23  syncs    5
+      [warpSPH] - [compSPH finalize - 02] list for the n ops     69  launches     2  syncs    2
+      [warpSPH] - buildVerletList                        ops     69  launches     2  syncs    2
+  step 8: up to 490 ops / 8 syncs in one section
+      [runner] case diagnostics                          ops     54  launches     0  syncs    8
+      [runner] integrator step                           ops    490  launches    23  syncs    5
+      [warpSPH] - [compSPH finalize - 02] list for the n ops     69  launches     2  syncs    2
+      [warpSPH] - buildVerletList                        ops     69  launches     2  syncs    2
+  step 11: up to 490 ops / 8 syncs in one section
+      [runner] case diagnostics                          ops     54  launches     0  syncs    8
+      [runner] integrator step                           ops    490  launches    23  syncs    5
+      [warpSPH] - [compSPH finalize - 02] list for the n ops     69  launches     2  syncs    2
+      [warpSPH] - buildVerletList                        ops     69  launches     2  syncs    2
+  step 14: up to 490 ops / 8 syncs in one section
+      [runner] case diagnostics                          ops     54  launches     0  syncs    8
+      [runner] integrator step                           ops    490  launches    23  syncs    5
+      [warpSPH] - [compSPH finalize - 02] list for the n ops     69  launches     2  syncs    2
+      [warpSPH] - buildVerletList                        ops     69  launches     2  syncs    2
+  step 17: up to 490 ops / 8 syncs in one section
+      [runner] case diagnostics                          ops     54  launches     0  syncs    8
+      [runner] integrator step                           ops    490  launches    23  syncs    5
+      [warpSPH] - [compSPH finalize - 02] list for the n ops     69  launches     2  syncs    2
+      [warpSPH] - buildVerletList                        ops     69  launches     2  syncs    2
+  step 20: up to 490 ops / 8 syncs in one section
+      [runner] case diagnostics                          ops     54  launches     0  syncs    8
+      [runner] integrator step                           ops    490  launches    23  syncs    5
+      [warpSPH] - [compSPH finalize - 02] list for the n ops     69  launches     2  syncs    2
+      [warpSPH] - buildVerletList                        ops     69  launches     2  syncs    2
+  step 23: up to 490 ops / 8 syncs in one section
+      [runner] case diagnostics                          ops     54  launches     0  syncs    8
+      [runner] integrator step                           ops    490  launches    23  syncs    5
+      [warpSPH] - [compSPH finalize - 02] list for the n ops     69  launches     2  syncs    2
+      [warpSPH] - buildVerletList                        ops     69  launches     2  syncs    2
