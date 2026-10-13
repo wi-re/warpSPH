@@ -164,11 +164,11 @@ def test_variableStepBdf2DifferentiatesAQuadraticExactly(dtPrev):
 def test_aMultiStageIntegratorIsRefused(built):
     """The exact-delta contract only holds for a single-evaluation integrator;
     anything else would run the dual-time solve once per stage and blend the
-    results. Refused at step entry, not warned about."""
+    results. Refused when the run is set up (`validate`, called by the runner), not warned about."""
     system, config, schemeConfig = built
     config.integrationScheme = IntegrationSchemeType.rungeKutta4
     with pytest.raises(ValueError, match='forwardEuler'):
-        acmod.artificialCompressible_step(system, 1e-3, config, schemeConfig)
+        schemeConfig.validate(config)
 
 
 def test_forwardEulerIsAccepted(built):
@@ -460,7 +460,7 @@ def test_theUnimplementedOptionsRaiseRatherThanNoOp(periodicBox, field, value):
     setattr(schemeConfig.acParams, field, value)
     try:
         with pytest.raises(NotImplementedError, match='ACSPH_PLAN'):
-            acmod.artificialCompressible_step(system, config.dt, config, schemeConfig)
+            schemeConfig.validate(config)
     finally:
         setattr(schemeConfig.acParams, field, original)
 
@@ -1134,7 +1134,7 @@ def test_bounceTargetsAreNoOpsWithoutWallsAndAreValidated(periodicBox):
             assert torch.allclose(off.velocities, on.velocities, atol=1e-5, rtol=1e-4), target
         schemeConfig.acParams.wallBounceTarget = 'nonsense'
         with pytest.raises(ValueError):
-            runOneStep(system, config, schemeConfig, 20)
+            schemeConfig.validate(config)
     finally:
         schemeConfig.acParams.wallBounceBack = False
         schemeConfig.acParams.wallBounceTarget = 'position'

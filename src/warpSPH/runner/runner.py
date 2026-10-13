@@ -234,6 +234,10 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
 
     if case.configureScheme is not None:
         case.configureScheme(ctx)
+    # once per run, after the case has had its say: a scheme config that can check itself does
+    # (ACSPH: unimplemented options, and the exact-delta integrator contract)
+    if hasattr(ctx.schemeConfig, 'validate'):
+        ctx.schemeConfig.validate(ctx.config)
     if spec.cudaGraph:
         ctx.schemeConfig.cudaGraph = True
 
