@@ -158,7 +158,9 @@ def compressibleDiagnostics(ctx: RunContext, state) -> Dict[str, float]:
     else:
         nan = torch.full((), float('nan'), dtype=mass.dtype, device=mass.device)
         out.update(alphaMean=nan, alphaMax=nan, alphaActiveFraction=nan)
-    return {k: v.detach().cpu().item() for k, v in out.items()}
+    # one transfer for all of them (eight `.item()` reads were eight syncs per step)
+    values = torch.stack([v.detach().reshape(()).to(mass.dtype) for v in out.values()]).cpu().tolist()
+    return dict(zip(out, values))
 
 
 def avReportDiagnostics(ctx: RunContext, state) -> Dict[str, float]:

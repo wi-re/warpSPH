@@ -122,7 +122,8 @@ class ArtificialCompressibleSystem(BaseIntegrationSystem):
 
     def initializeNewState(self, *args, verbose=False, **kwargs):
         state = get_reference_state(self)
-        verbosePrint(verbose, f'Initializing new state [t={self.t}]')
+        if verbose:   # self.t may be a device tensor: format it only when printing
+            print(f'Initializing new state [t={self.t}]')
         # The history is carried by reference, deliberately: it is frozen input
         # to the step, not per-stage state, and cloning it at every integrator
         # stage would be pure waste. `rollHistory` is the only writer.

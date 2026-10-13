@@ -113,7 +113,8 @@ class CompSPHSystem(BaseIntegrationSystem):
 
     def initializeNewState(self, *args, verbose=False, **kwargs):
         state = get_reference_state(self)
-        verbosePrint(verbose, f'Initializing new state [t={self.t}]')
+        if verbose:   # self.t may be a device tensor: format it only when printing
+            print(f'Initializing new state [t={self.t}]')
         return CompSPHSystem(state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain,
                              pairWork=self.pairWork, supportGrid=self.supportGrid, listGrid=self.listGrid)
     

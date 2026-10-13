@@ -25,6 +25,7 @@ import numpy as np
 import torch
 from warpSPHCore import callAudit
 from warpSPHCore.profiling import record_function
+from warpSPHIntegrators.util import deferHostTime
 
 from ..configurations import buildConfig
 from ..enumTypes import (ArtificialCompressibleSPHScheme, CompressibleSPHScheme,
@@ -177,6 +178,16 @@ def buildContext(case: Case, spec: CaseSpec) -> RunContext:
 
 def _scalar(value) -> float:
     return value.detach().cpu().item() if isinstance(value, torch.Tensor) else float(value)
+
+
+def _scalars(*values) -> List[float]:
+    """Several scalars (device tensors or host numbers) with ONE host transfer; each value is
+    exactly what `_scalar` returns (a float32 widened to float64 is exact)."""
+    tensors = [v for v in values if isinstance(v, torch.Tensor)]
+    if len(tensors) <= 1:
+        return [_scalar(v) for v in values]
+    host = iter(torch.stack([v.detach().reshape(()).double() for v in tensors]).cpu().tolist())
+    return [next(host) if isinstance(v, torch.Tensor) else float(v) for v in values]
 
 
 class _Timer:
@@ -396,16 +407,20 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
                     stepResult = stepGraph(runningState, ctx.config.dt, ctx.config, ctx.schemeConfig,
                                            verbose=spec.verbose)
                 else:
-                    stepResult = ctx.integrator.function(
-                        state=runningState,
-                        f=ctx.stepFunction,
-                        dt=ctx.config.dt,
-                        config=ctx.config,
-                        # Forwarded to the step function *and* to `system.finalize`, so
-                        # this is what makes --verbose reach the scheme's own reporting.
-                        verbose=spec.verbose,
-                        schemeConfig=ctx.schemeConfig,
-                    )
+                    # A device dt would make the integrator read every stage time
+                    # back (`float(t + c dt)`, a sync each); the runner reads the
+                    # step time once below anyway, so the stage times stay tensors.
+                    with deferHostTime():
+                        stepResult = ctx.integrator.function(
+                            state=runningState,
+                            f=ctx.stepFunction,
+                            dt=ctx.config.dt,
+                            config=ctx.config,
+                            # Forwarded to the step function *and* to `system.finalize`, so
+                            # this is what makes --verbose reach the scheme's own reporting.
+                            verbose=spec.verbose,
+                            schemeConfig=ctx.schemeConfig,
+                        )
         runningState = stepResult.state
         # Scheme-specific extra step data that doesn't fit the state (e.g.
         # ACSPH's `update.pseudoIterations`/`.epsilonV`, set ad hoc on the
@@ -432,8 +447,9 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
             with record_function("[runner] case timestep hook"):
                 ctx.config.dt = case.timestep(ctx, runningState)
 
-        with record_function("[runner] read time"):
-            t = _scalar(runningState.t)
+        # the step time and max |v| (non-finite check, velocity alarm) in one host transfer
+        with record_function("[runner] read time + max speed (non-finite check, velocity alarm)"):
+            t, vmax = _scalars(runningState.t, maxSpeed(runningState))
         row = {'step': absStep, 't': t, 'stepTime_ms': timer.elapsed_ms}
         if case.diagnostics is not None:
             with record_function("[runner] case diagnostics"):
@@ -499,8 +515,6 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
         # the dfsphReference late-time failure can collapse into a degenerate
         # uniform-density state with inf velocities (DFSPH_IMPROVEMENT_PLAN.md
         # Part 29) where no NaN ever appears.
-        with record_function("[runner] max speed read (non-finite check, velocity alarm)"):
-            vmax = _scalar(maxSpeed(runningState))
         if not math.isfinite(vmax):
             say(f'non-finite velocities detected at step {absStep}; stopping.')
             result.diverged = True

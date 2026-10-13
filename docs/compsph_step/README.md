@@ -24,16 +24,26 @@ back to ACSPH"). Per integrator step on `sod2d` CompSPH:
 | closing summation density dropped for the in-step caller (`..._noFinalDensity`) | 487 | 19.2 | 5.4 |
 | support solve on the fixed-shape grid, explicit check per stage (`..._gridSolve`) | 466 | 18.9 | 5.5 |
 | + deferred list check, one host read per step (`..._gridDeferred2`) | 446 | 21.8 | 3.9 |
-| + step-end rebuild decision learns the buffer usage (`..._gridAdaptive`, **current**) | 443 | 21.6 | **3.7** |
+| + step-end rebuild decision learns the buffer usage (`..._gridAdaptive`) | 443 | 21.6 | 3.7 |
+| + host syncs of the runner loop removed (`hostTime.txt`, **current**; integrator step only: 441 ops, 1.73 syncs) | 441 | 21.6 | **1.73** in the step, **4.8** in the whole loop (16.1 before) |
 
 Wall time is NOT better in the grid mode at this size: 300 steps take 2.62 s (grid, deferred) against 2.52 s (list) at N = 2,500.
 The step is launch-bound; the grid mode adds two graph replays and a few small ops per stage. The saving is in syncs and in what
 a whole-step graph can later contain, not in eager time. `supportSolveOnGrid` is therefore **off by default**.
 
-Remaining sync sources per step (current table): 1.0 step-end list flags, 0.6 rebuilds (9 per 30 steps, 2 syncs each),
-2.13 integrator self (`hostTime` = the `float(t + dt)` reads, 2 per step, plus the grid-radius flag every 8 steps), and outside the
-step the runner's own 8.3 (case diagnostics) + 1.0 (max-speed read) + 1.0 (step timer). The integrator's own state copies
-and stage combines are 110 ops per step (25 % of all ops), in no compSPH section.
+Host-sync pass (2026-10-13, `evidence/audits/hostTime.txt`, bitwise identical to the previous commit on sod2d CompSPH and CRKSPH, ACSPH dambreak eager and graph:
+`evidence/scripts/hashCase.py`):
+
+* The eager runner call runs under `deferHostTime()` (the mechanism the whole-step graph already used): the integrator no longer reads
+  `float(t + c dt)` back per stage (2 syncs per step); the runner reads the step time once anyway.
+* **Every system's `initializeNewState` formatted `f'... [t={self.t}]'` before `verbosePrint` looked at `verbose`** -- once `t` is a device
+  tensor that is a sync per call (3 per step for a 2-stage step), silently, even with `verbose` off. Now `if verbose:` in all nine systems.
+* `compressibleDiagnostics`: eight `.item()` reads became one stacked transfer (8.3 -> 1 per step).
+* The step time and `max |v|` are read in one transfer (`_scalars`) instead of two.
+
+Remaining syncs per step, whole loop 4.8: 1.0 step-end list flags, 0.6 rebuilds (edge-total read), 0.13 grid-radius flag (every 8 steps), 1.0 case
+diagnostics, 1.0 time + max speed, 1.0 step timer (a measurement, `cuda synchronize` for the CUDA events). The integrator's own state copies and
+stage combines are ~108 ops per step (25 % of all ops), in no compSPH section.
 
 ## 1. Commits (trail)
 
@@ -141,9 +151,8 @@ round-off grows over 40 steps because the neighbour order differs).
 
 ## 5. Open items and the plan from here (user, 2026-10-13)
 
-1. **The remaining syncs** (3.7 per step): `hostTime` (the integrator's `float(t + dt)` reads, 2 per step, in `warpSPHIntegrators/util.py:299`),
-   the grid-radius flag every 8 steps, the rebuilds' edge-total read (1 per rebuild), the step-end flag read (1). Outside the step: the case
-   diagnostics (8.3 per step), the max-speed read, the step timer.
+1. **The remaining syncs**: DONE for `hostTime`, the diagnostics and the time / max-speed read (see 2.x above; 4.8 per step in the whole loop). What is left
+   is structural: the step-end flag read (1), the rebuilds' edge-total read (0.6), the grid-radius flag (0.13), the diagnostics read (1), the timer (1).
 2. **The integrator's 110 self ops per step** (state copies, stage combines: `mul`, `clone`, `detach`, `view`, `add`, `zeros`).
 3. **Towards the full step graph with reused adjacency tensors**: `CapacityPolicy.inPlace` exists in the core but nothing in the frontend turns it
    on; it needs (a) a frontend switch, (b) every holder of an old list audited (the compSPH per-stage retention is gone with X6; the

@@ -126,7 +126,8 @@ class IncompressibleSystem(BaseIntegrationSystem):
     t: float = 0.0
     def initializeNewState(self, *args, verbose=False, **kwargs):
         state = get_reference_state(self)
-        verbosePrint(verbose, f'Initializing new state [t={self.t}]')
+        if verbose:   # self.t may be a device tensor: format it only when printing
+            print(f'Initializing new state [t={self.t}]')
         return IncompressibleSystem(state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain)
 
     def apply_position_update(self, update, spec: PositionUpdateSpec, **kwargs):
@@ -565,7 +566,8 @@ class DFSPHReferenceSystem(IncompressibleSystem):
 
     def initializeNewState(self, *args, verbose=False, **kwargs):
         state = get_reference_state(self)
-        verbosePrint(verbose, f'Initializing new state [t={self.t}]')
+        if verbose:   # self.t may be a device tensor: format it only when printing
+            print(f'Initializing new state [t={self.t}]')
         return DFSPHReferenceSystem(state=state.initializeNewState(),
                                     adjacency=self.adjacency, t=self.t,
                                     domain=self.domain)
