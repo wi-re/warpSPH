@@ -213,7 +213,8 @@ class CompSPHSystem(BaseIntegrationSystem):
                 rebuilt = SimpleNamespace(positions=self.state.positions, supports=self.state.supports)
                 self.adjacency = buildVerletList(
                     rebuilt, config.domain, verletScale=config.verletScale, supportMode=SupportScheme.SuperSymmetric,
-                    priorNeighborhood=None, gridFactory=pairListGridFactory(self.listGrid, rebuilt, config))
+                    priorNeighborhood=self.adjacency, forceRebuild=True,         # the step-end flag already said stale
+                    gridFactory=pairListGridFactory(self.listGrid, rebuilt, config))
 
         updateValues[-1].dudt = (self.state.internalEnergies - initialState.state.internalEnergies) /dt
 
