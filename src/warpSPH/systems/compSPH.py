@@ -82,6 +82,7 @@ class CompSPHState(BaseState):
 #     drhodt: torch.Tensor = tagged(tags=('density_derivative',))
 
 from ..modules.compSPH.pairWork import PairWork, beginPairWork, energyIncrement
+from ..modules.compSPH.supportGrid import SupportGrid, growIfOutgrown
 
 
 @dataclass
@@ -92,11 +93,15 @@ class CompSPHSystem(BaseIntegrationSystem):
     t: float = 0.0
     #: the step's running compatible-energy sum, shared (by reference) by the stage systems of one step
     pairWork: Optional[PairWork] = None
+    #: the fixed-shape grid the support solve runs on (one per run; replaced when the supports outgrow its radius)
+    supportGrid: Optional[SupportGrid] = None
     #: set by `finalize` when the step has to be run again (the pair list changed between stages)
     rerunRequest: Optional[torch.Tensor] = None
 
     def initialize(self, dt, *args, stageWeights=None, rerun=None, **kwargs):
         self.pairWork = beginPairWork(stageWeights, rerun)
+        if self.supportGrid is None:
+            self.supportGrid = SupportGrid()
         self.rerunRequest = None
         return super().initialize(dt, *args, **kwargs)
 
@@ -104,7 +109,7 @@ class CompSPHSystem(BaseIntegrationSystem):
         state = get_reference_state(self)
         verbosePrint(verbose, f'Initializing new state [t={self.t}]')
         return CompSPHSystem(state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain,
-                             pairWork=self.pairWork)
+                             pairWork=self.pairWork, supportGrid=self.supportGrid)
     
     def apply_position_update(self, update, spec: PositionUpdateSpec, **kwargs):
         return update_position(self, update, spec, 'position', 'position_derivative', 'velocity', 'velocity_derivative')
@@ -153,6 +158,8 @@ class CompSPHSystem(BaseIntegrationSystem):
                 self.rerunRequest = rerun
                 return self
             self.state.internalEnergies = initialState.state.internalEnergies + delta_u * dt
+        if self.supportGrid is not None:
+            growIfOutgrown(self.supportGrid)
 
         # solid wall rows (modules/compressibleWall): the state of the last stage, not an
         # integrated one -- their pair work went to the fluid (f_ij = 1), and their mass

@@ -10,7 +10,7 @@ persist it).
 
 from ..modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
 from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
-from ..modules.compressibleWall import beginCompressibleWall
+from ..modules.compressibleWall import beginCompressibleWall, clampSupportsToVolume
 from ..modules.compSPH.accel import computeCompSPHAccelWarp
 from ..modules.compSPH.dudt import computeCompSPHdudtWarp
 from ..modules.compSPH.balance import computeCompSPHBalanceTermWarp
@@ -25,6 +25,8 @@ from warpSPHCore import (
     GradHState, OperationProperties, SupportScheme, buildVerletList,
 )
 from ..modules.compSPH.pairWork import accumulateStage, startStage, stageRebuildSlack
+from ..modules.compSPH.supportGrid import ensureSupportGrid, refreshSupportGrid, noteOutgrown
+from ..enumTypes import AdaptiveSupportScheme
 from ..systems.compSPH import CompSPHSystem, CompSPHState
 from ..configurations.compSPHConfig import CompSPHConfig
 from ..configurations.simulationConfig import SimulationConfig
@@ -55,20 +57,38 @@ def compSPH_step(
     # currentSystem.adjacency = None
 
     t = currentSystem.t
+    onGrid = schemeConfig.adaptiveSupportScheme == AdaptiveSupportScheme.Owen and getattr(schemeConfig, 'supportSolveOnGrid', False)
+    rebuildSlack = stageRebuildSlack(currentSystem, stageIndex)
     with record_function("[warpSPH] - [compSPH - 01] wall + optimal support"):
         wall = beginCompressibleWall(currentState, config)
         startStage(currentSystem, currentState, config, stageIndex)
-        rho_optimal, h_optimal, currentSystem.adjacency, *_ = evaluateOptimalSupport(
-            currentState, config, schemeConfig, SupportScheme.Gather, currentSystem.adjacency,
-            validateOnce=True, rebuildSlack=stageRebuildSlack(currentSystem, stageIndex), computeDensity=False)
+        if onGrid:
+            # the solve runs on a fixed-shape grid (graph-replayed build, no host read) and looks at no neighbour list
+            holder = ensureSupportGrid(currentSystem.supportGrid, currentState, config)
+            info = {}
+            rho_optimal, h_optimal, *_ = evaluateOptimalSupport(
+                currentState, config, schemeConfig, SupportScheme.Gather, None, computeDensity=False,
+                grid=refreshSupportGrid(holder, currentState), gridRadius=holder.radius, info=info)
+            noteOutgrown(holder, info)
+        else:
+            rho_optimal, h_optimal, currentSystem.adjacency, *_ = evaluateOptimalSupport(
+                currentState, config, schemeConfig, SupportScheme.Gather, currentSystem.adjacency,
+                validateOnce=True, rebuildSlack=rebuildSlack, computeDensity=False)
         currentState.supports = h_optimal
         currentState.densities = rho_optimal
 
     with record_function("[warpSPH] - [compSPH - 02] adjacency"):
-        verletScale = config.verletScale
-
-        # the solver validated this list against the particles and every support it used, and rebuilt it if needed
-        adjacency = currentSystem.adjacency
+        if onGrid:
+            # the one explicit validity check and (re)build of the pair list, for the positions and the new supports
+            adjacency = buildVerletList(
+                currentState, config.domain, verletScale = config.verletScale, supportMode = SupportScheme.SuperSymmetric,
+                priorNeighborhood = currentSystem.adjacency, verbose = False, rebuildSlack = rebuildSlack)
+            currentSystem.adjacency = adjacency
+        else:
+            # the solver validated this list against the particles and every support it used, and rebuilt it if needed
+            adjacency = currentSystem.adjacency
+        # only reduces h, so the list stays valid; wall cases only (modules/compressibleWall/supportClamp.py)
+        currentState.supports = clampSupportsToVolume(currentState, config, adjacency, wall)
 
     # with TimedBlock('compute csr', use_cuda=True, device=device):
         # csr_neighrs = coo_to_csr(neighbors.get('noghost')[0])

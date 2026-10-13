@@ -98,3 +98,24 @@ def test_aListSizedForOtherParticlesIsNotUsedUnvalidated():
     that list (it ran out of bounds when the per-iteration check was replaced by one check afterwards)."""
     result = run(getCase('sedovWalls'), quiet=True, progress=False, nSteps=4)
     assert result.nSteps == 4 and not result.diverged
+
+
+@pytest.mark.parametrize('caseName', ['sod', 'sod2d'])
+def test_gridSolveGivesTheListSolveResult(caseName):
+    """`supportSolveOnGrid`: the Owen solve runs on a fixed-shape grid and no list is looked at inside it; the step's own
+    list check afterwards. Same supports / energies / densities to round-off."""
+    import dataclasses
+    base = getCase(caseName)
+    inner = base.configureScheme
+
+    def finals(onGrid):
+        def configure(ctx, *a, **k):
+            out = inner(ctx, *a, **k) if inner else None
+            ctx.schemeConfig.supportSolveOnGrid = onGrid
+            return out
+        r = run(dataclasses.replace(base, configureScheme=configure), quiet=True, progress=False, nSteps=40, scheme='CompSPH')
+        s = r.state.state
+        return [x.double() for x in (s.supports, s.internalEnergies, s.densities, s.velocities)]
+
+    for a, b in zip(finals(False), finals(True)):
+        assert float((a - b).abs().max() / a.abs().max().clamp_min(1e-30)) < 1e-4

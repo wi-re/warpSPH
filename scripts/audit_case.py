@@ -29,6 +29,8 @@ ap.add_argument('--nx', type=int, default=None)
 ap.add_argument('--steps', type=int, default=60, help='steps to run in total (default 60)')
 ap.add_argument('--warmup', type=int, default=10, help='leading steps discarded from the counts (default 10)')
 ap.add_argument('--set', dest='sets', action='append', default=[], metavar='KEY=VALUE')
+ap.add_argument('--scheme-set', dest='schemeSets', action='append', default=[], metavar='KEY=VALUE',
+                help='set an attribute of the scheme config after the case configured it (e.g. supportSolveOnGrid=True)')
 ap.add_argument('--cudaGraph', action=argparse.BooleanOptionalAction, default=None,
                 help="override the case's cudaGraph default")
 ap.add_argument('--no-torch-ops', dest='torchOps', action='store_false',
@@ -55,6 +57,23 @@ for item in args.sets:
     except (ValueError, SyntaxError):
         kw[key] = raw
 case = getCase(args.case)
+if args.schemeSets:
+    import dataclasses
+    schemeKw = {}
+    for item in args.schemeSets:
+        key, _, raw = item.partition('=')
+        try:
+            schemeKw[key] = ast.literal_eval(raw)
+        except (ValueError, SyntaxError):
+            schemeKw[key] = raw
+    innerConfigure = case.configureScheme
+
+    def _configure(ctx, *a, **k):
+        out = innerConfigure(ctx, *a, **k) if innerConfigure else None
+        for key, value in schemeKw.items():
+            setattr(ctx.schemeConfig, key, value)
+        return out
+    case = dataclasses.replace(case, configureScheme=_configure)
 specFields = {k: v for k, v in dict(scheme=args.scheme, nx=args.nx, cudaGraph=args.cudaGraph).items() if v is not None}
 
 callAudit.enable(torchOps=args.torchOps, warmupSteps=args.warmup)

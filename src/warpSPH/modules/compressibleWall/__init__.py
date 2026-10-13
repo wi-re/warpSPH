@@ -8,6 +8,8 @@ gives their pressure. They move only with the velocity the case gave them.
 Use from a scheme's right-hand side:
 
     wall = beginCompressibleWall(state, config)      # None without wall rows
+    ... support solve, neighbour list ...
+    state.supports = clampSupportsToVolume(state, config, adjacency, wall)     # supportClamp.py
     ... density ...
     if wall is not None:
         wall.apply(state, config, schemeConfig, adjacency)
@@ -18,5 +20,6 @@ Use from a scheme's right-hand side:
 """
 
 from .wall import CompressibleWall, beginCompressibleWall, wallRiemannState
+from .supportClamp import clampSupportsToVolume
 
-__all__ = ['CompressibleWall', 'beginCompressibleWall', 'wallRiemannState']
+__all__ = ['CompressibleWall', 'beginCompressibleWall', 'wallRiemannState', 'clampSupportsToVolume']

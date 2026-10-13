@@ -50,6 +50,7 @@ class CompressibleSPHConfig:
     rho0: float = field(default=1.0, metadata={'description': 'Reference density'})
 
     adaptiveSupportScheme: AdaptiveSupportScheme = field(default=AdaptiveSupportScheme.Monaghan, metadata={'description': 'Adaptive support scheme to use'})
+    supportSolveOnGrid: bool = field(default=False, metadata={'description': 'Owen support solve on a fixed-shape grid (no neighbour list in the solve; the step validates / builds its list afterwards) instead of on the Verlet list'})
     adaptiveSupportIterations: int = field(default=1, metadata={'description': 'Number of iterations for adaptive support scheme'})
     adaptiveSupportThreshold: float = field(default=1e-3, metadata={'description': 'Threshold for adaptive support scheme'})
     adaptiveSupportCorrections: bool = field(default=True, metadata={'description': 'Whether to apply corrections in the adaptive support scheme (grad-H terms)'})
@@ -78,6 +79,7 @@ def compressibleConfigToDict(config: CompressibleSPHConfig) -> Dict[str, Any]:
         'backgroundPressure': config.backgroundPressure,
         'rho0': config.rho0,
         'adaptiveSupportScheme': config.adaptiveSupportScheme.name,
+        'supportSolveOnGrid': config.supportSolveOnGrid,
         'adaptiveSupportIterations': config.adaptiveSupportIterations,
         'adaptiveSupportThreshold': config.adaptiveSupportThreshold,
         'adaptiveSupportCorrections': config.adaptiveSupportCorrections,
@@ -98,6 +100,7 @@ def dictToCompressibleConfig(configDict: Dict[str, Any]) -> CompressibleSPHConfi
     config.backgroundPressure = configDict['backgroundPressure']
     config.rho0 = configDict['rho0']
     config.adaptiveSupportScheme = AdaptiveSupportScheme[configDict['adaptiveSupportScheme']] if isinstance(configDict['adaptiveSupportScheme'], str) else configDict['adaptiveSupportScheme']
+    config.supportSolveOnGrid = configDict.get('supportSolveOnGrid', False)
     config.adaptiveSupportIterations = configDict['adaptiveSupportIterations']
     config.adaptiveSupportThreshold = configDict['adaptiveSupportThreshold']
     config.adaptiveSupportCorrections = configDict['adaptiveSupportCorrections']

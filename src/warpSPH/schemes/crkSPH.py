@@ -15,7 +15,7 @@ before that branch instead.
 
 from ..modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
 from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
-from ..modules.compressibleWall import beginCompressibleWall
+from ..modules.compressibleWall import beginCompressibleWall, clampSupportsToVolume
 from ..modules.compSPH.accel import computeCompSPHAccelWarp
 from ..modules.compSPH.dudt import computeCompSPHdudtWarp
 from ..modules.compSPH.balance import computeCompSPHBalanceTermWarp
@@ -139,6 +139,8 @@ def crkSPH_step(
 
     # the solver validated this list against the particles and every support it used, and rebuilt it if needed
     adjacency = currentSystem.adjacency
+    # only reduces h, so the list stays valid; wall cases only (modules/compressibleWall/supportClamp.py)
+    currentState.supports = clampSupportsToVolume(currentState, config, adjacency, wall)
 
     apparentVolume, currentState.densities, crkState = computeCRKFactors(currentState, config.domain, config.kernel, adjacency = adjacency)
     if wall is not None:

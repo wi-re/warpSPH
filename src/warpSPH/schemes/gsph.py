@@ -11,7 +11,7 @@ from ..configurations.moduleConfigurations.diffusionParameters import VelocityPa
 from ..systems import CompressibleSystem, CompressibleSystemUpdate
 from ..modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
 from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
-from ..modules.compressibleWall import beginCompressibleWall
+from ..modules.compressibleWall import beginCompressibleWall, clampSupportsToVolume
 from ..modules.density import computeDensities
 from ..modules.eos import idealGasEOS
 from ..modules.godunov import computeGodunovWarp
@@ -42,6 +42,8 @@ def compressibleSPH_GSPH(
     adjacency = buildVerletList(
         currentState, config.domain, verletScale = config.verletScale, supportMode = SupportScheme.SuperSymmetric,
         priorNeighborhood = currentSystem.adjacency, verbose = False)
+    # only reduces h, so the list stays valid; wall cases only (modules/compressibleWall/supportClamp.py)
+    currentState.supports = clampSupportsToVolume(currentState, config, adjacency, wall)
 
     currentState.densities = computeDensities(currentState, config, schemeConfig, adjacency, supportMode = config.supportMode)
     if wall is not None:
