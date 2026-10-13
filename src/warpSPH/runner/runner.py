@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import torch
 from warpSPHCore import callAudit
+from warpSPHCore.profiling import record_function
 
 from ..configurations import buildConfig
 from ..enumTypes import (ArtificialCompressibleSPHScheme, CompressibleSPHScheme,
@@ -196,7 +197,8 @@ class _Timer:
     def __exit__(self, *exc):
         if self.cuda:
             self._end.record()
-            torch.cuda.synchronize()
+            with record_function("[runner] step timer (cuda synchronize)"):
+                torch.cuda.synchronize()
             self.elapsed_ms = self._begin.elapsed_time(self._end)
         else:
             self.elapsed_ms = (time.perf_counter() - self._begin) * 1000.0
@@ -389,20 +391,21 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
 
     for i in steps:
         with _Timer(ctx.device) as timer:
-            if stepGraph is not None:
-                stepResult = stepGraph(runningState, ctx.config.dt, ctx.config, ctx.schemeConfig,
-                                       verbose=spec.verbose)
-            else:
-                stepResult = ctx.integrator.function(
-                    state=runningState,
-                    f=ctx.stepFunction,
-                    dt=ctx.config.dt,
-                    config=ctx.config,
-                    # Forwarded to the step function *and* to `system.finalize`, so
-                    # this is what makes --verbose reach the scheme's own reporting.
-                    verbose=spec.verbose,
-                    schemeConfig=ctx.schemeConfig,
-                )
+            with record_function("[runner] integrator step"):
+                if stepGraph is not None:
+                    stepResult = stepGraph(runningState, ctx.config.dt, ctx.config, ctx.schemeConfig,
+                                           verbose=spec.verbose)
+                else:
+                    stepResult = ctx.integrator.function(
+                        state=runningState,
+                        f=ctx.stepFunction,
+                        dt=ctx.config.dt,
+                        config=ctx.config,
+                        # Forwarded to the step function *and* to `system.finalize`, so
+                        # this is what makes --verbose reach the scheme's own reporting.
+                        verbose=spec.verbose,
+                        schemeConfig=ctx.schemeConfig,
+                    )
         runningState = stepResult.state
         # Scheme-specific extra step data that doesn't fit the state (e.g.
         # ACSPH's `update.pseudoIterations`/`.epsilonV`, set ad hoc on the
@@ -423,14 +426,18 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
         callAudit.markStep()    # no-op unless the call audit is on (warpSPHCore/callAudit.py)
 
         if case.postStep is not None:
-            case.postStep(ctx, runningState, absStep)
+            with record_function("[runner] case postStep hook"):
+                case.postStep(ctx, runningState, absStep)
         if case.timestep is not None:
-            ctx.config.dt = case.timestep(ctx, runningState)
+            with record_function("[runner] case timestep hook"):
+                ctx.config.dt = case.timestep(ctx, runningState)
 
-        t = _scalar(runningState.t)
+        with record_function("[runner] read time"):
+            t = _scalar(runningState.t)
         row = {'step': absStep, 't': t, 'stepTime_ms': timer.elapsed_ms}
         if case.diagnostics is not None:
-            row.update(case.diagnostics(ctx, runningState))
+            with record_function("[runner] case diagnostics"):
+                row.update(case.diagnostics(ctx, runningState))
         result.trajectory.append(row)
 
         # `stallDtSteps` watchdog: a healthy adaptive-dt run should never sit
@@ -440,7 +447,9 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
         # step burns wall-clock without progress, so stop rather than run out
         # the clock to tLimit/nSteps at the floor.
         if spec.stallDtSteps is not None and ctx.config.minDt is not None:
-            if _scalar(ctx.config.dt) <= ctx.config.minDt * 1.0001:
+            with record_function("[runner] stall watchdog dt read"):
+                dtAtFloor = _scalar(ctx.config.dt) <= ctx.config.minDt * 1.0001
+            if dtAtFloor:
                 dtAtFloorStreak += 1
             else:
                 dtAtFloorStreak = 0
@@ -467,16 +476,19 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
                 break
 
         if progress is not None:
-            _showStep(progress, i, None if timeLimited else nSteps, row, spec.tLimit,
-                      force=(timeLimited and t >= spec.tLimit) or (not timeLimited and i == nSteps - 1))
+            with record_function("[runner] progress bar"):
+                _showStep(progress, i, None if timeLimited else nSteps, row, spec.tLimit,
+                          force=(timeLimited and t >= spec.tLimit) or (not timeLimited and i == nSteps - 1))
 
         if timeLimited and t >= spec.tLimit:
-            _plotAndStore(ctx, case, spec, runningState, stepResult, absStep, extraData,
-                          groups, storeSteps, final=True)
+            with record_function("[runner] plot and store"):
+                _plotAndStore(ctx, case, spec, runningState, stepResult, absStep, extraData,
+                              groups, storeSteps, final=True)
             break
 
-        _plotAndStore(ctx, case, spec, runningState, stepResult, absStep, extraData,
-                      groups, storeSteps, final=(not timeLimited and i == nSteps - 1))
+        with record_function("[runner] plot and store"):
+            _plotAndStore(ctx, case, spec, runningState, stepResult, absStep, extraData,
+                          groups, storeSteps, final=(not timeLimited and i == nSteps - 1))
 
         # Read by tag rather than the `velocities` field name: every fluid
         # scheme's velocity field happens to be named that, but the wave
@@ -487,13 +499,16 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
         # the dfsphReference late-time failure can collapse into a degenerate
         # uniform-density state with inf velocities (DFSPH_IMPROVEMENT_PLAN.md
         # Part 29) where no NaN ever appears.
-        vmax = _scalar(maxSpeed(runningState))
+        with record_function("[runner] max speed read (non-finite check, velocity alarm)"):
+            vmax = _scalar(maxSpeed(runningState))
         if not math.isfinite(vmax):
             say(f'non-finite velocities detected at step {absStep}; stopping.')
             result.diverged = True
             result.stopReason = 'non-finite velocities'
             break
-        if alarm.check(ctx, runningState, vmax, absStep, t):
+        with record_function("[runner] velocity alarm check"):
+            alarmStops = alarm.check(ctx, runningState, vmax, absStep, t)
+        if alarmStops:
             say(f'velocity alarm stops the run at step {absStep} (t={t:g}): '
                 f'{alarm.stopReason}.')
             result.diverged = True

@@ -99,20 +99,25 @@ def artificialCompressible_step(
     with record_function("[warpSPH] - [acsph - 04] - surface detection"):
         surface = detectSurface(state, config, schemeConfig, adjacency)
 
-    dtau, beta, k1, k2, nu = acParameters(state, config, schemeConfig, dt)
-    alphaT, betaT, gammaT, bdfOrder = system.bdfCoefficients(dt)
+    with record_function("[warpSPH] - [acsph - 05] - step parameters and BDF coefficients"):
+        dtau, beta, k1, k2, nu = acParameters(state, config, schemeConfig, dt)
+        alphaT, betaT, gammaT, bdfOrder = system.bdfCoefficients(dt)
 
-    with record_function("[warpSPH] - [acsph - 05] - forcing"):
+    with record_function("[warpSPH] - [acsph - 06] - forcing"):
         bodyForce, wallBodyForce = bodyForces(system, dt, config, schemeConfig, adjacency)
 
-    solver = DualTimeSolver(
-        state, config, schemeConfig, adjacency, dtau=dtau, k1=k1, k2=k2, nu=nu,
-        bdf=(alphaT, betaT, gammaT), history=bdfHistory(system, state),
-        bodyForce=bodyForce, wallBodyForce=wallBodyForce, surface=surface,
-        contact=contactMasks(state, config, schemeConfig, adjacency, surface),
-        bounce=makeWallBounce(state, adjacency, config, schemeConfig.acParams))
+    with record_function("[warpSPH] - [acsph - 07] - contact masks and wall bounce setup"):
+        contact = contactMasks(state, config, schemeConfig, adjacency, surface)
+        bounce = makeWallBounce(state, adjacency, config, schemeConfig.acParams)
 
-    with record_function("[warpSPH] - [acsph - 06] - dual-time loop"):
+    with record_function("[warpSPH] - [acsph - 08] - dual-time solver setup"):
+        solver = DualTimeSolver(
+            state, config, schemeConfig, adjacency, dtau=dtau, k1=k1, k2=k2, nu=nu,
+            bdf=(alphaT, betaT, gammaT), history=bdfHistory(system, state),
+            bodyForce=bodyForce, wallBodyForce=wallBodyForce, surface=surface,
+            contact=contact, bounce=bounce)
+
+    with record_function("[warpSPH] - [acsph - 09] - dual-time loop"):
         result = solver.solve(state.positions, state.velocities, state.pressures, verbose)
 
     if verbose:
@@ -120,10 +125,10 @@ def artificialCompressible_step(
               f"{result.iterations} pseudo-iterations, eps_v={result.epsilonV:.3f} "
               f"(target {schemeConfig.acParams.epsilonV})")
 
-    with record_function("[warpSPH] - [acsph - 07] - build update"):
+    with record_function("[warpSPH] - [acsph - 10] - build update"):
         update = exactDeltaUpdate(result, state, dt, bdfOrder)
 
-    with record_function("[warpSPH] - [acsph - 08] - enforce updates"):
+    with record_function("[warpSPH] - [acsph - 11] - enforce updates"):
         enforceUpdates(update, system, config.dt, system.t, config, schemeConfig)
         zeroNonFluidRows(update, state)
 

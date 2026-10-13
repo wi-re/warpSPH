@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 import torch
+from warpSPHCore.profiling import record_function
 from warpSPHIntegrators.butcher import getButcherTableau
 
 from ...systems.artificialCompressible import ArtificialCompressibleSystemUpdate
@@ -137,34 +138,39 @@ class DualTimeSolver:
         """One dual-time pseudo-iteration: `(x, v, p) -> (x, v, p, eps_v)`."""
         acParams, dtau = self.acParams, self.dtau
         # the BDF source is evaluated at the FROZEN stage-0 value (Eq. 41's `u^{n+1,m+1,0}`)
-        dxdtBdf, dvdtBdf = self._bdfSource(x, v)
-        stage0 = workingState(self.state, x, v, p)
-        flags = self._surfaceAt(stage0)
-        stage0.pressures = self.contact.project(self._wallPressure(stage0, flags))
-        diffusion = computePressureSmoothing(stage0, self.config, self.schemeConfig, self.adjacency,
-                                             flags.renormalization, pressures=stage0.pressures)
+        with record_function("[dualTime] stage-0 closures (BDF source, surface, wall pressure, diffusion)"):
+            dxdtBdf, dvdtBdf = self._bdfSource(x, v)
+            stage0 = workingState(self.state, x, v, p)
+            flags = self._surfaceAt(stage0)
+            stage0.pressures = self.contact.project(self._wallPressure(stage0, flags))
+            diffusion = computePressureSmoothing(stage0, self.config, self.schemeConfig, self.adjacency,
+                                                 flags.renormalization, pressures=stage0.pressures)
 
         kx, kv, kp = [], [], []
         for s in range(acParams.rkStages):
-            dx_, dv_, dp_ = self._stageSlopes(s, x, v, p, (kx, kv, kp), diffusion, flags, dxdtBdf, dvdtBdf)
+            with record_function("[dualTime] RK stage slopes (residual)"):
+                dx_, dv_, dp_ = self._stageSlopes(s, x, v, p, (kx, kv, kp), diffusion, flags, dxdtBdf, dvdtBdf)
             kx.append(dx_), kv.append(dv_), kp.append(dp_)
 
-        xN, vN, pN = x, v, p
-        for l in range(acParams.rkStages):
-            b = float(self.tableau.b[l])
-            if b == 0.0:
-                continue
-            xN = xN + dtau * b * kx[l]
-            vN = vN + dtau * b * kv[l]
-            pN = pN + dtau * b * kp[l]
-        pN = self.contact.project(pN)
-        if self.bounce is not None and acParams.wallBounceTarget == 'both':
-            vN = self.bounce(xN, vN)
+        with record_function("[dualTime] RK accumulation and projection"):
+            xN, vN, pN = x, v, p
+            for l in range(acParams.rkStages):
+                b = float(self.tableau.b[l])
+                if b == 0.0:
+                    continue
+                xN = xN + dtau * b * kx[l]
+                vN = vN + dtau * b * kv[l]
+                pN = pN + dtau * b * kp[l]
+            pN = self.contact.project(pN)
+            if self.bounce is not None and acParams.wallBounceTarget == 'both':
+                vN = self.bounce(xN, vN)
 
-        # `tilde v = v - Dx/Dt`: zero exactly when the position row holds at level n+1
-        vPos = self._bounced(xN, vN)
-        tildeV = vPos - (self.alphaT * xN + self.betaT * self.xPrev + self.gammaT * self.xPrev2)
-        return xN, vN, pN, convergenceMetricDevice(tildeV, vN, self.fluidIndex, self.nFluid, self.schemeConfig)
+        with record_function("[dualTime] convergence metric (device)"):
+            # `tilde v = v - Dx/Dt`: zero exactly when the position row holds at level n+1
+            vPos = self._bounced(xN, vN)
+            tildeV = vPos - (self.alphaT * xN + self.betaT * self.xPrev + self.gammaT * self.xPrev2)
+            epsT = convergenceMetricDevice(tildeV, vN, self.fluidIndex, self.nFluid, self.schemeConfig)
+        return xN, vN, pN, epsT
 
     # -- the loop ---------------------------------------------------------------
 
@@ -185,18 +191,22 @@ class DualTimeSolver:
         for m in range(acParams.maxPseudoIterations):
             iterations = m + 1
             if graphed is not None and m >= 1:
-                x, v, p, epsT = graphed(x, v, p)
+                with record_function("[dualTime] graphed iteration (capture on the first, then replay)"):
+                    x, v, p, epsT = graphed(x, v, p)
                 if graphed.disabled is not None:
                     schemeConfig._acsphGraphDisabled = graphed.disabled
                     graphed = None
                 else:
                     schemeConfig._acsphGraphValidated = True
             else:
-                x, v, p, epsT = self.iterate(x, v, p)
+                with record_function("[dualTime] eager iteration"):
+                    x, v, p, epsT = self.iterate(x, v, p)
             epsHistory.append(epsT)
-            if schedule.check(m) and bool(epsT < acParams.epsilonV):
-                break
-        epsHost = torch.stack(epsHistory).cpu().tolist()
+            with record_function("[dualTime] stop test (host read at schedule checkpoints)"):
+                if schedule.check(m) and bool(epsT < acParams.epsilonV):
+                    break
+        with record_function("[dualTime] eps history read (host)"):
+            epsHost = torch.stack(epsHistory).cpu().tolist()
         schedule.record([e < acParams.epsilonV for e in epsHost])
         return DualTimeResult(x, v, p, iterations, epsHost[-1])
 
