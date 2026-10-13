@@ -79,6 +79,7 @@ These apply to **every** run, including throwaway inline probes that call
    (off by default; every existing `record_function` section then reports torch ops, warp launches,
    host syncs with their Python call site, per call and per step, and a worst-steps table at exit;
    `warpSPHCore/callAudit.py`). Use a short run: the dispatch hook slows it ~3x, only the counts matter.
+   For any case: `python scripts/audit_case.py <case> --scheme S --nx N` (the `call-audit` skill).
 
 Details and history: the `export-video-on-validation-runs` and
 `run-simulations-sequentially` memories; `docs/historic_plans/FREESLIP_DAMBREAK_FINDINGS.md` §9.6.
