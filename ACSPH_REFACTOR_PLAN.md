@@ -56,6 +56,22 @@ inline calls in `_deltaSPH_rhs`). Part of the inline ACSPH code (wall bounce, ta
 Acceptance for the plan: Marrone 3.1 nx 70 and sloshing nx 100 at >= 80 % GPU utilisation with video off, ms/step well below the
 phase-0 numbers, and every phase's results bitwise (or tolerance-stated) against the previous.
 
+## 3a. Status
+
+**Phase 1 done (2026-10-13).** `schemes/artificialCompressible.py` 906 -> 133 lines (59 of them the module docstring): the step is
+calls into `modules/artificialCompressible/` and nothing else. New modules: `parameters.py` (acParameters, convergence metric,
+the two validators, tableaus), `surfaceFlags.py` (`SurfaceFlags`, `detectSurface`, taper), `wallClosure.py` (Eq. 61 wall pressure,
+unilateral variants, `WallBounce`/`makeWallBounce`, `ContactMasks`/`contactMasks`), `residual.py` (the spatial residual and viscosity),
+`forcing.py` (`bodyForces`), `workingState.py`, `dualTime.py` (`DualTimeSolver.iterate/solve`, `exactDeltaUpdate`, `zeroNonFluidRows`,
+`bdfHistory`). The same code moved, only renamed (underscores dropped) and split; no arithmetic changed. Checked: 64 tests green
+(`tests/test_artificialCompressible.py` now imports from the modules), and Marrone 3.1 nx 70 to t = 0.3 against the previous commit in
+a worktree: same 183 steps, identical per-step `maxVelocity` / `kineticEnergy` rows (66 compared), 42.3 vs 42.2 ms/step. `probe_contactLine.py`'s
+`--wallMode` monkeypatches now target `dualTime` / `residual`. **Phase 0 baseline** (GPU idle apart from the other user's llama-server,
+which was not running at the time; graph on, forensics off, video off): Marrone nx 70 early window **42 ms/step**; sloshing nx 100 first 3 s
+**88.6 ms/step**, GPU 70 % by `nvidia-smi`, 200-iteration cap hit for the first 0.5 s at rest and 90 / 72 mean iterations in t 0.5-1.5 (separate
+convergence issue, not the utilisation cause); aligned sloshing nx 100 31.7 ms/step (other session, t = 2.23). The per-iteration body is still the
+same ~260 torch launches: phases 2-4 are the actual speed-up.
+
 ## 4. Risks / open questions
 
 * `wp.capture_while` with torch tensors and torch ops inside the body (conditional nodes need CUDA >= 12.4; driver here is 13.3 /

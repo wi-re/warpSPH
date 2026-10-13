@@ -63,7 +63,7 @@ def pressureSplit(system, ctx):
     import torch
     from warpSPH.modules.gravity import computeGravity
     from warpSPH.modules.pressure import computePressureForceSurfaceAware
-    from warpSPH.schemes.artificialCompressible import _workingState, wallPressures
+    from warpSPH.modules.artificialCompressible import workingState as _workingState, wallPressures
     from warpSPH.modules.incompressible.wallPressure import _shepardValue
 
     state = system.state
@@ -123,14 +123,17 @@ def withWcSwitches(case, args):
 def patchWallMode(mode):
     """Swap `artificialCompressible.wallPressures` (looked up by module global
     inside the step) for an A/B variant. Probe-only; nothing in src changes."""
-    import warpSPH.schemes.artificialCompressible as ac
+    import warpSPH.modules.artificialCompressible.dualTime as ac       # holds the per-stage wall closures
+    import warpSPH.modules.artificialCompressible.residual as res     # holds the viscosity
+    from warpSPH.modules.artificialCompressible import workingState as ws
+    import warpSPH.schemes.artificialCompressible as sch              # the step's own boundary-velocity call
     orig = ac.wallPressures
     if mode == 'eq61':
         return
     if mode == 'noHydro':
-        ac.wallPressures = lambda view, config, adj, bf, clampNonNeg=False: orig(view, config, adj, None)
+        ac.wallPressures = lambda view, config, adj, bf, clampNonNeg=False, **kw: orig(view, config, adj, None, **kw)
     elif mode == 'blanketClamp':
-        ac.wallPressures = lambda view, config, adj, bf, clampNonNeg=False: orig(view, config, adj, bf, clampNonNeg=True)
+        ac.wallPressures = lambda view, config, adj, bf, clampNonNeg=False, **kw: orig(view, config, adj, bf, clampNonNeg=True, **kw)
     elif mode == 'dtsph':
         # Dual-time SPH (Ramachandran, Muta & Ramakrishna; gitlab.com/pypr/dtsph,
         # dtsph.py): SetPressureSolid = Adami Eq. 27 incl. the hydrostatic term,
@@ -140,8 +143,8 @@ def patchWallMode(mode):
         # enters SolidWallNoSlipBC, and their dam break runs nu = 0). Static
         # walls only.
         import torch
-        ac.wallPressures = lambda view, config, adj, bf, clampNonNeg=False: orig(view, config, adj, bf, clampNonNeg=True)
-        ac.computeBoundaryVelocities = lambda view, config, sc, adj: torch.where(
+        ac.wallPressures = lambda view, config, adj, bf, clampNonNeg=False, **kw: orig(view, config, adj, bf, clampNonNeg=True, **kw)
+        ac.computeBoundaryVelocities = sch.computeBoundaryVelocities = lambda view, config, sc, adj: torch.where(
             (view.kinds == 1).unsqueeze(-1), torch.zeros_like(view.velocities), view.velocities)
     elif mode == 'dtsphDiv':
         # 'dtsph' with the static wall velocity in the pressure (continuity)
@@ -150,8 +153,8 @@ def patchWallMode(mode):
         # velocity everywhere adds to ACSPH's viscous term (Marrone 3.1 is
         # free-slip; 'dtsph' slowed the whole surge).
         import torch
-        ac.wallPressures = lambda view, config, adj, bf, clampNonNeg=False: orig(view, config, adj, bf, clampNonNeg=True)
-        origBV, origVisc = ac.computeBoundaryVelocities, ac._viscosity
+        ac.wallPressures = lambda view, config, adj, bf, clampNonNeg=False, **kw: orig(view, config, adj, bf, clampNonNeg=True, **kw)
+        origBV, origVisc = ac.computeBoundaryVelocities, res.viscosity
         last = {}
 
         def staticWalls(view, config, sc, adj):
@@ -160,11 +163,11 @@ def patchWallMode(mode):
                                torch.zeros_like(view.velocities), view.velocities)
 
         def mirroredViscosity(view, config, adj, nu):
-            v = ac._workingState(view, view.positions, view.velocities, view.pressures)
+            v = ws(view, view.positions, view.velocities, view.pressures)
             v.velocities = origBV(v, config, last['sc'], adj)
             return origVisc(v, config, adj, nu)
-        ac.computeBoundaryVelocities = staticWalls
-        ac._viscosity = mirroredViscosity
+        ac.computeBoundaryVelocities = sch.computeBoundaryVelocities = staticWalls
+        res.viscosity = mirroredViscosity
 
 
 def makeDiagnostics(baseDiagnostics, toy, record):
@@ -448,7 +451,7 @@ class FlierTracker:
 
     def _traceTracked(self, st, config, adjacency, uid, fluid, nF, nW, t):
         import torch
-        from warpSPH.schemes.artificialCompressible import _wallAdjacent
+        from warpSPH.modules.artificialCompressible import wallAdjacent as _wallAdjacent
         rows = torch.nonzero(fluid & torch.isin(uid, torch.tensor(sorted(self.tracked), device=uid.device))).squeeze(-1)
         if rows.numel() == 0:
             return

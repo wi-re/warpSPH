@@ -19,6 +19,10 @@ from warpSPHIntegrators import getIntegrator
 from warpSPHIntegrators.integration import IntegrationSchemeType
 
 import warpSPH.schemes.artificialCompressible as acmod
+import warpSPH.modules.artificialCompressible as acm
+from warpSPHCore import (GradientScheme, OperationDirection, OperationProperties, SupportScheme,
+                         WarpOperation, warpOperation)
+from warpSPH.modules.pressure import computePressureForceSurfaceAware
 from warpSPH.configurations import (ArtificialCompressibleSPHConfig,
                                     artificialCompressibleConfigToDict,
                                     dictToArtificialCompressibleConfig)
@@ -390,7 +394,7 @@ def test_acParametersFollowEquation24(periodicBox):
     from warpSPHCore import sphKernel_xi
     system, config, schemeConfig = periodicBox
     dt = 1e-3
-    dtau, beta, k1, k2, nu = acmod.acParameters(system.state, config, schemeConfig, dt)
+    dtau, beta, k1, k2, nu = acm.acParameters(system.state, config, schemeConfig, dt)
 
     assert dtau == pytest.approx(dt / schemeConfig.acParams.dtOverDtau)
     h = system.state.supports / sphKernel_xi(config.kernel.value, config.dim)
@@ -416,7 +420,7 @@ def test_theConvergenceMetricUsesOneOverNNotOneOverSqrtN(periodicBox):
         tildeV = torch.full((n, 2), 1e-3, device=device)
         velocities = torch.zeros((n, 2), device=device)
         fluid = torch.ones(n, dtype=torch.bool, device=device)
-        return acmod.convergenceMetric(tildeV, velocities, fluid, schemeConfig)
+        return acm.convergenceMetric(tildeV, velocities, fluid, schemeConfig)
 
     import math
     drift = epsFor(2000) - epsFor(1000)
@@ -434,9 +438,9 @@ def test_uCharCapsTheNormalisation(periodicBox):
     fluid = torch.ones(100, dtype=torch.bool, device=device)
 
     schemeConfig.acParams.uChar = None
-    uncapped = acmod.convergenceMetric(tildeV, fast, fluid, schemeConfig)
+    uncapped = acm.convergenceMetric(tildeV, fast, fluid, schemeConfig)
     schemeConfig.acParams.uChar = 1.0
-    capped = acmod.convergenceMetric(tildeV, fast, fluid, schemeConfig)
+    capped = acm.convergenceMetric(tildeV, fast, fluid, schemeConfig)
     assert capped > uncapped, 'a smaller U_eps must give a LARGER (worse) eps_v'
 
 
@@ -753,10 +757,10 @@ def _walledLattice():
 
 
 def _force(st, config, schemeConfig, p, unilateral):
-    view = acmod._workingState(st, st.positions, st.velocities, p)
+    view = acm.workingState(st, st.positions, st.velocities, p)
     if unilateral:
-        return acmod._unilateralWallForce(view, config, schemeConfig, None)
-    return acmod.computePressureForceSurfaceAware(view, config, schemeConfig, None)
+        return acm.unilateralWallForce(view, config, schemeConfig, None)
+    return computePressureForceSurfaceAware(view, config, schemeConfig, None)
 
 
 def test_unilateralWallForceIsExactWithoutTension(runtime):
@@ -804,12 +808,12 @@ def test_wallModeIsANoOpWithoutWalls(periodicBox):
 
 
 def _divergence(st, config, v):
-    view = acmod._workingState(st, st.positions, v, st.pressures)
-    return acmod.warpOperation(
-        view, acmod.OperationProperties(kernel=config.kernel, operation=acmod.WarpOperation.Divergence,
-                                        supportMode=acmod.SupportScheme.SuperSymmetric,
-                                        operationMode=acmod.OperationDirection.AllToAll,
-                                        gradientMode=acmod.GradientScheme.Difference),
+    view = acm.workingState(st, st.positions, v, st.pressures)
+    return warpOperation(
+        view, OperationProperties(kernel=config.kernel, operation=WarpOperation.Divergence,
+                                        supportMode=SupportScheme.SuperSymmetric,
+                                        operationMode=OperationDirection.AllToAll,
+                                        gradientMode=GradientScheme.Difference),
         queryValues=v, domain=config.domain, adjacency=None)
 
 
@@ -823,8 +827,8 @@ def test_theWallSplitOfTheDivergenceIsExact(runtime):
     v = torch.zeros_like(st.positions)
     v[fluid, 1] = 0.3 + 0.1 * torch.sin(7.0 * st.positions[fluid, 0])
     div = _divergence(st, config, v)
-    uni = acmod._unilateralWallDivergence(
-        acmod._workingState(st, st.positions, v, st.pressures), config, None, div)
+    uni = acm.unilateralWallDivergence(
+        acm.workingState(st, st.positions, v, st.pressures), config, None, div)
     # rows next to the floor: fluid moving up = away from the wall = separating,
     # so the wall share is positive and must be dropped entirely
     H = float(st.supports.max())
@@ -843,8 +847,8 @@ def test_anApproachingWallStillCompresses(runtime):
     v = torch.zeros_like(st.positions)
     v[fluid, 1] = -0.3
     div = _divergence(st, config, v)
-    uni = acmod._unilateralWallDivergence(
-        acmod._workingState(st, st.positions, v, st.pressures), config, None, div)
+    uni = acm.unilateralWallDivergence(
+        acm.workingState(st, st.positions, v, st.pressures), config, None, div)
     assert float(div[fluid].min()) < 0.0
     assert torch.allclose(uni[fluid], div[fluid], atol=1e-6)
 
@@ -858,8 +862,8 @@ def test_aSeparatingRowHasNoWallDivergence(runtime):
     v = torch.zeros_like(st.positions)
     v[fluid, 1] = 0.3
     div = _divergence(st, config, v)
-    uni = acmod._unilateralWallDivergence(
-        acmod._workingState(st, st.positions, v, st.pressures), config, None, div)
+    uni = acm.unilateralWallDivergence(
+        acm.workingState(st, st.positions, v, st.pressures), config, None, div)
     H = float(st.supports.max())
     near = fluid & (st.positions[:, 1] < 3.0 / N_PER_SIDE + 0.9 * H)
     assert float(div[near].abs().max()) > 1e-3
@@ -874,7 +878,7 @@ def test_wallAdjacentIsExactlyTheRowsWithAWallInSupport(runtime):
     wall row (gradW = 0 there, the lattice puts some on the edge) are a float
     tie either way and are excluded."""
     st, config, _, wall = _walledLattice()
-    adj = acmod._wallAdjacent(st, config, None)
+    adj = acm.wallAdjacent(st, config, None)
     d = torch.cdist(st.positions, st.positions[wall])
     H = st.supports.unsqueeze(-1)
     ref = (d < H).any(-1)
@@ -931,13 +935,13 @@ def test_convergenceMetricDeviceIsBitwiseHostMetric():
     schemeConfig = ArtificialCompressibleSPHConfig()
     for uChar in (None, 0.5):
         schemeConfig.acParams.uChar = uChar
-        host = acmod.convergenceMetric(tildeV, velocities, fluid, schemeConfig)
+        host = acm.convergenceMetric(tildeV, velocities, fluid, schemeConfig)
         idx = fluid.nonzero().squeeze(1)
-        dev = float(acmod.convergenceMetricDevice(tildeV, velocities, idx, int(idx.numel()), schemeConfig))
+        dev = float(acm.convergenceMetricDevice(tildeV, velocities, idx, int(idx.numel()), schemeConfig))
         assert dev == host, (uChar, dev, host)
     zero = torch.zeros_like(tildeV)
     idx = fluid.nonzero().squeeze(1)
-    assert float(acmod.convergenceMetricDevice(zero, velocities, idx, int(idx.numel()), schemeConfig)) == float('-inf')
+    assert float(acm.convergenceMetricDevice(zero, velocities, idx, int(idx.numel()), schemeConfig)) == float('-inf')
 
 
 # --- the authors' edge-conditioned wall-pressure attenuation (D1) -----------
@@ -1012,7 +1016,7 @@ def test_edgeRelaxRoundTripsAndExcludesCavitation():
 
 def test_diffusionTaperIsAC2RampBetweenTheTwoLambdas():
     lam = torch.tensor([0.0, 0.1, 0.25, 0.4, 0.7, 1.0])
-    t = acmod.diffusionTaper(lam, 0.1, 0.4)
+    t = acm.diffusionTaper(lam, 0.1, 0.4)
     assert torch.allclose(t[[0, 1]], torch.zeros(2))
     assert torch.allclose(t[[3, 4, 5]], torch.ones(3))
     assert 0.0 < float(t[2]) < 1.0
@@ -1061,7 +1065,7 @@ def test_wallBounceReversesOnlyTheNormalComponentOfAnApproachingNearWallRow(runt
     n = torch.tensor([[0.0, 1.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]])    # wall normal points +y
     v = torch.tensor([[0.0, 0.0], [1.0, -2.0], [1.0, -2.0], [1.0, 3.0]])
     pi, pj = torch.tensor([1, 2, 3]), torch.tensor([0, 0, 0])
-    out = acmod.wallBounce(pos, v, pi, pj, n, 1.0, 0.25)
+    out = acm.wallBounce(pos, v, pi, pj, n, 1.0, 0.25)
     # row 1: 0.1 above the wall -> bounce; tangential kept, normal flipped
     assert torch.allclose(out[1], torch.tensor([1.0, 2.0]))
     # row 2: far away (beyond 1.155 dx)
@@ -1081,8 +1085,8 @@ def test_wallBounceRampIsContinuousInTheWallDistance(runtime):
     n = torch.zeros_like(pos); n[0] = torch.tensor([0.0, 1.0])
     v = torch.zeros_like(pos); v[1:] = torch.tensor([1.0, -2.0])
     pi, pj = torch.arange(1, pos.shape[0]), torch.zeros(pos.shape[0] - 1, dtype=torch.long)
-    hard = acmod.wallBounce(pos, v, pi, pj, n, 1.0, 0.25)[1:, 1]
-    soft = acmod.wallBounce(pos, v, pi, pj, n, 1.0, 0.25, ramp=0.5)[1:, 1]
+    hard = acm.wallBounce(pos, v, pi, pj, n, 1.0, 0.25)[1:, 1]
+    soft = acm.wallBounce(pos, v, pi, pj, n, 1.0, 0.25, ramp=0.5)[1:, 1]
     assert float(hard.max() - hard.min()) == pytest.approx(4.0)            # the jump: +2 -> -2
     assert float(soft[0]) == pytest.approx(2.0)                            # touching: full reversal
     assert float(soft[d >= 0.25].max()) == pytest.approx(-2.0)             # at / beyond distance: untouched
@@ -1090,7 +1094,7 @@ def test_wallBounceRampIsContinuousInTheWallDistance(runtime):
     assert float((soft[1:] - soft[:-1]).abs().max()) < 0.4                 # no jump
     assert bool((soft[1:] <= soft[:-1] + 1e-6).all())                      # monotone
     leaving = v.clone(); leaving[1:] = torch.tensor([1.0, 3.0])
-    assert torch.equal(acmod.wallBounce(pos, leaving, pi, pj, n, 1.0, 0.25, ramp=0.5), leaving)
+    assert torch.equal(acm.wallBounce(pos, leaving, pi, pj, n, 1.0, 0.25, ramp=0.5), leaving)
 
 
 def test_wallBounceSetupIsEmptyWithoutGhostsAndTheStepIsUnchanged(runtime):
@@ -1098,10 +1102,10 @@ def test_wallBounceSetupIsEmptyWithoutGhostsAndTheStepIsUnchanged(runtime):
     from warpSPHCore import buildVerletList, SupportScheme
     adj = buildVerletList(st, config.domain, verletScale=config.verletScale,
                           supportMode=SupportScheme.SuperSymmetric, priorNeighborhood=None, verbose=False)
-    pi, pj, nW = acmod.wallBounceSetup(st, adj)
+    pi, pj, nW = acm.wallBounceSetup(st, adj)
     assert pi.numel() > 0 and float(nW.abs().max()) == 0.0
     v = torch.randn_like(st.velocities)
-    assert torch.equal(acmod.wallBounce(st.positions, v, pi, pj, nW, 1.0, 0.25), v)
+    assert torch.equal(acm.wallBounce(st.positions, v, pi, pj, nW, 1.0, 0.25), v)
 
 
 def test_redetectAndBounceAreNoOpsInAPeriodicBox(periodicBox):
