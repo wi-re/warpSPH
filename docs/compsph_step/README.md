@@ -4,7 +4,7 @@ Written for the person (or the next session) who continues this work: what was d
 bugs it found along the way, and what is open. Everything below is committed; commit hashes are given per item.
 Evidence files are in `evidence/` (call-audit tables, the scripts that produced the numbers). Re-run an audit with
 
-    python scripts/audit_case.py sod2d --scheme CompSPH --steps 40 --warmup 10 [--scheme-set supportSolveOnGrid=True]
+    python scripts/audit_case.py sod2d --scheme CompSPH --steps 40 --warmup 10 [--scheme-set stepMode='graph']
 
 All numbers are `sod2d` (2,500 particles, 2D, B7, RK2) unless a table says otherwise, 30 marked steps after 10 warm-up,
 CUDA, float32. "ops" = aten calls, "launches" = warp launches, "syncs" = host reads; a CUDA-graph replay hides the ops it
@@ -126,8 +126,9 @@ round-off grows over 40 steps because the neighbour order differs).
 
 ### 2.6 The whole CompSPH step from one CUDA graph (core a0b75bd, bd103d0; frontend 4edc3e1, fb9e4e8)
 
-Opt-in: `run(..., cudaGraph=True)` on a CompSPH case with `supportSolveOnGrid=True` (`runner._compSPHGraphable`: no wall rows, no switch with a
-step-boundary host time; it also turns on `inPlaceAdjacency`). `GraphedIntegratorStep` is the machinery the ACSPH / delta-SPH steps already
+Opt-in through ONE switch, `CompSPHConfig.stepMode = 'graph'` (2.7; the case spec's `cudaGraph` flag is not used for CompSPH). The mode turns
+on the grid solve, `inPlaceAdjacency` and the graph together, and refuses (eager + warning) with wall rows, a viscosity switch with a
+step-boundary host time, stored trajectories or no CUDA (`modules/compSPH/stepMode.py`). `GraphedIntegratorStep` is the machinery the ACSPH / delta-SPH steps already
 used; what CompSPH needed:
 
 1. **Fixed shapes.** The per-edge arrays (`ap_ij`, `av_ij`, `f_ij`) and the X6 pair sums use the PADDED capacity (`paddedI/paddedJ`, the `-1` tail
@@ -162,6 +163,29 @@ Two things that bit on the way, both from state the capture cannot see: **(a)** 
 left in `holder.pending` read freed memory after the Python references were dropped (alternating 0/1 'support grid outgrown' -> the grid was
 regrown every other step; fixed: a recorded step clears the pending lists first and only reads flags it computes itself); **(b)** sizing a grid reads
 a device value, so the pre-capture hook `prepareCapture` makes it before the recording starts.
+
+### 2.7 One switch: `stepMode` = eager | graph | auto (2026-10-13, user)
+
+The graph is only worth it while the host is the bottleneck. `sod2d` / `sod` / `sod3d`, CompSPH, ms per step averaged over steps 100-1100 (same
+GPU, RTX PRO 6000 Blackwell; list = default eager list solve):
+
+| dim | N | list | graph |
+|---|---|---|---|
+| 1D | 625 / 10k / 40k / 160k / 640k | 4.9 / 5.0 / 4.9 / 5.1 / 8.6 | 0.8 / 1.3 / 2.0 / 5.2 / 18.3 |
+| 2D | 2.5k / 5k / 7.5k / 10k / 15k | 5.3 / 5.4 / 5.6 / 5.8 / 6.0 | 4.0 / 5.1 / 5.9 / 6.4 / 8.0 |
+| 3D | 3.0k / 4.5k / 6k / 8k / 10k | 14.8 / 18.1 / 19.8 / 21.7 / 21.9 | 22.9 / 33.8 / 39.0 / 47.0 / 29.1* |
+
+(*short window.) The first 300 steps of the 2D case are faster than the later ones (steps 100-1100 include the developed shock): at N = 2.5k the
+graph is 2.2x the list over the first 300 steps and 1.3x over 100-1100. The grid solve is the cost: it visits a 3^dim cell stencil per
+iteration where the list solve walks a precomputed neighbour list, so the graph's saving (host overhead, constant per step) is overtaken as soon as
+the kernels dominate, and in 3D (27 cells, more neighbours) the step never gets there. Rebuilds and redo steps cost O(N) each but happen at a
+rate set by particle motion, not by N, so they do not move the crossover.
+
+Therefore a single switch, `stepMode`: `'eager'` (default; no deferred flags, no grid, no in-place buffers), `'graph'` (all of them together),
+`'auto'` (graph below `GRAPH_MAX_PARTICLES[(scheme, dim)]`: CompSPH 1D 100k, 2D 5k, 3D never; override `stepModeMaxParticles`). The
+crossovers are for this GPU and these cases; they are first estimates. Only CompSPH has a graph mode; CRKSPH and the others are always eager.
+The grid-eager combination (`supportSolveOnGrid=True` with `stepMode='eager'`) stays available as a diagnostic and as the bitwise reference of
+the graph tests; it is slower than both.
 
 ## 3. Bugs found on the way (each with its test)
 
@@ -208,7 +232,7 @@ a device value, so the pre-capture hook `prepareCapture` makes it before the rec
    fluid-pair cache is gone), (c) kernels inside the graph reading the PADDED arrays with the `-1` guard, never `livePairs()`/`numEdges`, (d) the
    rebuild eager between replays (decided: not graphed), the validity/usage flags as the loop condition or the step-end read, (e) the
    second-pass machinery as the exact fallback. ADJACENCY_CAPACITY_PLAN.md (warpSPHCore) has the two-case graph contract.
-4. Wire `supportSolveOnGrid` and the deferred check into `crkSPH_step` (only CompSPH has it); decide its default after the graph work.
+4. Wire the grid mode and its deferred check into `crkSPH_step` (only CompSPH has it) behind the same `stepMode`; its threshold table entry follows from a measurement.
 5. Carry the lessons back to ACSPH (ACSPH_REFACTOR_PLAN): stage systems copy the initial state, rebuild decisions at step end, tableau weights
    decide what is stored across stages, deferred device flags + one read per step.
 6. Never observed in a real run: a NATURAL conservative second pass (only forced by tests) and a natural energy second pass.

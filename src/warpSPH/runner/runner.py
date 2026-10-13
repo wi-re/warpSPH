@@ -383,7 +383,13 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
     # step does not reconstruct.
     deferStageTimes = ctx.scheme in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH)
     stepGraph = None
-    if spec.cudaGraph and not spec.store and _stepGraphable(ctx, runningState):
+    graphWanted = spec.cudaGraph
+    if ctx.scheme == CompressibleSPHScheme.CompSPH:
+        # CompSPH has its own switch, `stepMode`, instead of the spec's flag
+        from ..modules.compSPH.stepMode import resolveStepMode
+        ctx.scratch['compSPHStepMode'] = resolveStepMode(ctx, runningState, spec)
+        graphWanted = ctx.scratch['compSPHStepMode'] == 'graph'
+    if graphWanted and not spec.store and _stepGraphable(ctx, runningState):
         from ..utils.cudaGraph import GraphedDiagnostics, GraphedIntegratorStep
         stepGraph = GraphedIntegratorStep(ctx.integrator.function, ctx.stepFunction)
         if case.timestep is None and not isinstance(ctx.config.dt, torch.Tensor) and ctx.config.dt is not None and ctx.device != 'cpu':
@@ -820,34 +826,14 @@ def _stepGraphable(ctx, runningState=None) -> bool:
     """Whole-step graphs are wired for the weakly-compressible delta-SPH family
     (its RHS, integrator path and `finalize` were made sync-free; see
     `schemes/deltaSPH.py:_rhsIsGraphable` for the per-configuration rules) and
-    for CompSPH in its grid mode (`_compSPHGraphable`)."""
+    for CompSPH in its `stepMode='graph'` (`modules/compSPH/stepMode.py`)."""
     from ..enumTypes import CompressibleSPHScheme, WeaklyCompressibleSPHScheme
     if ctx.scheme == CompressibleSPHScheme.CompSPH:
-        return _compSPHGraphable(ctx, runningState)
+        return ctx.scratch.get('compSPHStepMode') == 'graph'        # `stepMode`, resolved before the loop
     if not isinstance(ctx.scheme, WeaklyCompressibleSPHScheme):
         return False
     from ..schemes.deltaSPH import _rhsIsGraphable
     return _rhsIsGraphable(ctx.schemeConfig, None)
-
-
-def _compSPHGraphable(ctx, runningState) -> bool:
-    """CompSPH replays whole steps when its pair list is checked by deferred device flags (`supportSolveOnGrid`, one host
-    read per replay), the rebuild can keep its buffers, and nothing in the step depends on a host number that changes:
-    no solid wall rows (their pair arrays are sized to the live edge count), no switch with a step-boundary host time.
-    Turns the in-place rebuild on."""
-    from ..modules.compSPH.supportGrid import solvesOnGrid
-    from ..modules.compressibleWall.wall import beginCompressibleWall
-    from ..modules.shockCapturing.wrapper import STEP_HOOKS
-    schemeConfig = ctx.schemeConfig
-    if not solvesOnGrid(schemeConfig):
-        return False
-    switch = getattr(schemeConfig, 'viscositySwitchParams', None)
-    if switch is not None and STEP_HOOKS.get(switch.scheme) is not None:
-        return False
-    if runningState is None or beginCompressibleWall(runningState.state, ctx.config) is not None:
-        return False
-    schemeConfig.inPlaceAdjacency = True
-    return True
 
 
 def _drainFrameWrites() -> None:

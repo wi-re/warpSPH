@@ -24,7 +24,10 @@ def _sod2dOnGrid(steps, graph):
 
     def configure(ctx, *a, **k):
         out = inner(ctx, *a, **k) if inner else None
-        ctx.schemeConfig.supportSolveOnGrid = True
+        if graph:
+            ctx.schemeConfig.stepMode = 'graph'
+        else:
+            ctx.schemeConfig.supportSolveOnGrid = True      # the eager step on the same grid solve: the bitwise reference
         return out
     graphs = []
     original = cudaGraph.GraphedIntegratorStep.__init__
@@ -35,7 +38,7 @@ def _sod2dOnGrid(steps, graph):
     cudaGraph.GraphedIntegratorStep.__init__ = remember
     try:
         result = run(dataclasses.replace(base, configureScheme=configure), quiet=True, progress=False, nSteps=steps,
-                     scheme='CompSPH', cudaGraph=graph)
+                     scheme='CompSPH')
     finally:
         cudaGraph.GraphedIntegratorStep.__init__ = original
     return result, graphs
@@ -89,3 +92,55 @@ def test_pairListGridFindsTheSymmetricPairs(periodic):
     assert torch.equal(gridded.numNeighbors, plain.numNeighbors)
     pairs = lambda adj: sorted(zip(*(t.tolist() for t in adj.livePairs())))
     assert pairs(gridded) == pairs(plain)
+
+
+def _stepModeRun(caseName, mode, steps=3, **schemeSet):
+    base = getCase(caseName)
+    inner = base.configureScheme
+
+    def configure(ctx, *a, **k):
+        out = inner(ctx, *a, **k) if inner else None
+        ctx.schemeConfig.stepMode = mode
+        for key, value in schemeSet.items():
+            setattr(ctx.schemeConfig, key, value)
+        return out
+    graphs = []
+    original = cudaGraph.GraphedIntegratorStep.__init__
+
+    def remember(self, *a, **k):
+        original(self, *a, **k)
+        graphs.append(self)
+    cudaGraph.GraphedIntegratorStep.__init__ = remember
+    try:
+        result = run(dataclasses.replace(base, configureScheme=configure), quiet=True, progress=False, nSteps=steps,
+                     scheme='CompSPH')
+    finally:
+        cudaGraph.GraphedIntegratorStep.__init__ = original
+    return result, graphs
+
+
+@needsCuda
+@pytest.mark.parametrize('mode, caseName, expectGraph', [
+    ('eager', 'sod2d', False),
+    ('graph', 'sod2d', True),
+    ('auto', 'sod2d', True),           # 2,500 particles: below the 2D limit
+    ('auto', 'sod3d', False),          # the 3D limit is 0: never
+])
+def test_stepModePicksTheStepRoute(mode, caseName, expectGraph):
+    result, graphs = _stepModeRun(caseName, mode, steps=4)
+    assert bool(graphs) == expectGraph
+    assert result.nSteps == 4
+
+
+@needsCuda
+def test_autoFollowsTheParticleCountLimit():
+    _, below = _stepModeRun('sod2d', 'auto', stepModeMaxParticles=10_000)
+    _, above = _stepModeRun('sod2d', 'auto', stepModeMaxParticles=1_000)
+    assert below and not above
+
+
+@needsCuda
+def test_graphRequestThatCannotBeHonouredRunsEagerlyWithAWarning():
+    with pytest.warns(UserWarning, match="stepMode='graph' runs eagerly"):
+        result, graphs = _stepModeRun('sedovWalls', 'graph', steps=3)
+    assert not graphs and result.nSteps == 3
