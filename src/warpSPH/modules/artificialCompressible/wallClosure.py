@@ -2,6 +2,7 @@
 (Batty et al. 2007) contact variants, the wall-adjacency test and the authors'
 position-row wall bounce-back (docs/acsph/DYNGPUSPH_COMPARISON.md D5)."""
 
+from dataclasses import dataclass
 from typing import Optional
 
 import torch
@@ -199,17 +200,24 @@ def wallBounce(positions, velocities, pi, pj, nW, dx, distance, ramp=0.0):
 
 
 
+@dataclass(frozen=True)
 class WallBounce:
-    """The step's wall bounce-back (D5): the fluid-wall pair set and wall normals
-    fixed for the real step, applied to a velocity field with `bounce(x, v)`."""
+    """The step's wall bounce-back (D5): the fluid-wall pair set and wall normals, fixed for
+    the real step. Apply with `bounceVelocities`."""
+    pi: torch.Tensor
+    pj: torch.Tensor
+    normals: torch.Tensor
+    dx: float
+    distance: float
+    ramp: float
 
-    def __init__(self, pi, pj, normals, dx, distance, ramp):
-        self.pi, self.pj, self.normals = pi, pj, normals
-        self.dx, self.distance, self.ramp = dx, distance, ramp
 
-    def __call__(self, positions, velocities):
-        return wallBounce(positions, velocities, self.pi, self.pj, self.normals,
-                          self.dx, self.distance, self.ramp)
+def bounceVelocities(bounce: Optional[WallBounce], positions, velocities):
+    """`velocities` with the wall bounce applied (unchanged when the bounce is off, i.e. None)."""
+    if bounce is None:
+        return velocities
+    return wallBounce(positions, velocities, bounce.pi, bounce.pj, bounce.normals,
+                      bounce.dx, bounce.distance, bounce.ramp)
 
 
 _warnedNoWallNormals = False
@@ -235,19 +243,21 @@ def makeWallBounce(state, adjacency, config, acParams) -> Optional[WallBounce]:
                       acParams.wallBounceRamp)
 
 
+@dataclass(frozen=True)
 class ContactMasks:
     """Unilateral-contact projections of the pressure (`cavitationProjection`,
-    `isolatedZeroPressure`): rows that may not carry tension, rows set to zero."""
+    `isolatedZeroPressure`): rows that may not carry tension, rows set to zero (None = off).
+    Apply with `projectPressure`."""
+    cavity: Optional[torch.Tensor]
+    isolated: Optional[torch.Tensor]
 
-    def __init__(self, cavity, isolated):
-        self.cavity, self.isolated = cavity, isolated
 
-    def project(self, p):
-        if self.cavity is not None:
-            p = torch.where(self.cavity, p.clamp_min(0.0), p)
-        if self.isolated is not None:
-            p = torch.where(self.isolated, torch.zeros_like(p), p)
-        return p
+def projectPressure(contact: ContactMasks, p):
+    if contact.cavity is not None:
+        p = torch.where(contact.cavity, p.clamp_min(0.0), p)
+    if contact.isolated is not None:
+        p = torch.where(contact.isolated, torch.zeros_like(p), p)
+    return p
 
 
 def contactMasks(state, config, schemeConfig, adjacency, surface) -> ContactMasks:

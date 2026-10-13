@@ -63,8 +63,8 @@ from warpSPHCore.profiling import record_function
 
 from ..configurations import ArtificialCompressibleSPHConfig, SimulationConfig
 from ..modules.artificialCompressible import (
-    DualTimeSolver, acParameters, bdfHistory, bodyForces, contactMasks, detectSurface,
-    exactDeltaUpdate, makeWallBounce, zeroNonFluidRows)
+    acParameters, bdfHistory, bodyForces, contactMasks, detectSurface, exactDeltaUpdate,
+    makeDualTimeProblem, makeWallBounce, solveDualTime, zeroNonFluidRows)
 from ..modules.boundaryConditions import enforceDirichlet, enforceUpdates
 from ..modules.mdbc import computeBoundaryVelocities
 from ..systems.artificialCompressible import ArtificialCompressibleSystem
@@ -110,15 +110,15 @@ def artificialCompressible_step(
         contact = contactMasks(state, config, schemeConfig, adjacency, surface)
         bounce = makeWallBounce(state, adjacency, config, schemeConfig.acParams)
 
-    with record_function("[warpSPH] - [acsph - 08] - dual-time solver setup"):
-        solver = DualTimeSolver(
+    with record_function("[warpSPH] - [acsph - 08] - dual-time problem setup"):
+        problem = makeDualTimeProblem(
             state, config, schemeConfig, adjacency, dtau=dtau, k1=k1, k2=k2, nu=nu,
             bdf=(alphaT, betaT, gammaT), history=bdfHistory(system, state),
             bodyForce=bodyForce, wallBodyForce=wallBodyForce, surface=surface,
             contact=contact, bounce=bounce)
 
     with record_function("[warpSPH] - [acsph - 09] - dual-time loop"):
-        result = solver.solve(state.positions, state.velocities, state.pressures, verbose)
+        result = solveDualTime(problem, state.positions, state.velocities, state.pressures, verbose)
 
     if verbose:
         print(f"[acsph] t={system.t:.6g} dt={dt:.4g} BDF{bdfOrder} "
