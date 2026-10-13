@@ -598,6 +598,13 @@ def runMarrone(args):
     case = dataclasses.replace(baseCase, diagnostics=diagnostics)
     tag = (f'{args.toy}_{args.scheme}_nx{args.nx}_cav{args.cav}'
            + ('_iso0' if args.isoZero else '')
+           + (f'_edge{args.edgeRelax}' if args.edgeRelax != 'off' else '')
+           + ('_noalign' if args.noAlign else '')
+           + ('_taper' if args.taper else '')
+           + ('_redet' if args.redetect else '') + ('_bounce' if args.bounce else '')
+           + (f'_bt{args.bounceTarget}' if args.bounceTarget != 'position' else '')
+           + ('_hardbounce' if args.bounceRamp == 0 else (f'_ramp{args.bounceRamp:g}' if args.bounceRamp != 0.5 else ''))
+           + ('_authors' if args.authors else '') + (f'_no-{args.authorsOff.replace(",", "-")}' if args.authorsOff else '')
            + ('_lone0' if args.loneReset else '')
            + ('_hyd1' if args.oneSidedHydro else '')
            + (f'_j{args.seed}' if args.jitter > 0.0 else '')
@@ -610,6 +617,8 @@ def runMarrone(args):
                   pressureProbeInset=0.0, pressureProbeDiscRadius=M.PROBE_DISC_RADIUS,
                   referenceVelocity=M.U_MAX, machTarget=1.95 / 40.0,
                   acCavitationProjection=args.cav, acIsolatedZeroPressure=args.isoZero,
+                  acWallEdgeRelax=args.edgeRelax, acDiffusionTaper=args.taper or not args.noAlign, acLowCostAlign=not args.noAlign,
+                  acRedetect=args.redetect, acBounceBack=args.bounce or not args.noAlign, acBounceTarget=args.bounceTarget, acBounceRamp=args.bounceRamp, acAuthors=args.authors, acAuthorsOff=args.authorsOff,
                   epsilonV=-5.0)
     if args.scheme != 'artificialCompressible' and args.cav != 'off':
         raise SystemExit('--cav is ACSPH-only: the delta-SPH variants were tried '
@@ -620,10 +629,16 @@ def runMarrone(args):
         # the case's own defaults (diffSPH TC10 reproduction); only the
         # contact treatment and the run length change
         kw = dict(tLimit=args.tLimit, quiet=False, progress=True, store=args.store)
+        # the ACSPH contact settings the case reads with `ctx.param` (only the ones that differ from the config defaults matter)
+        kw['params'] = dict(acLowCostAlign=not args.noAlign, acCavitationProjection=args.cav, acIsolatedZeroPressure=args.isoZero,
+                            acDiffusionTaper=args.taper or not args.noAlign, acBounceBack=args.bounce or not args.noAlign,
+                            acBounceTarget=args.bounceTarget, acBounceRamp=args.bounceRamp)
         if args.scheme != 'default':
             kw['scheme'] = args.scheme
         if args.nx:
             kw['nx'] = args.nx
+    if args.cudaGraph:
+        kw.update(cudaGraph=True)
     if args.store:
         kw.update(storeMode='states', storeInterval=args.storeInterval, exportRoot=runRoot)
     if args.resume:
@@ -636,7 +651,10 @@ def runMarrone(args):
     t0 = time.perf_counter()
     status = 'ok'
     try:
-        r = run(case, **kw)
+        if args.profile:
+            r = profiledRun(run, case, kw, runRoot)
+        else:
+            r = run(case, **kw)
         status = f'diverged={r.diverged} steps={r.nSteps}'
     except Stalled as e:
         status = f'STALLED: {e}'
@@ -648,6 +666,55 @@ def runMarrone(args):
         json.dump(fliers.trace, f)
     last = record[-1] if record else {}
     print(f'[{tag}] {status}  t={last.get("t", 0):.4f} t*={last.get("tStar", 0):.3f}', flush=True)
+
+
+def profiledRun(run, case, kw, runRoot):
+    """`run(case, **kw)` under the torch profiler; prints, per step, the CPU time of
+    every `[warpSPH] - [acsph - NN]` section, the device kernel launches, the
+    cudaStreamSynchronize / cudaMemcpy calls and the GPU-busy time. Use a short
+    `--tLimit` (the trace holds every launch)."""
+    import collections
+    import torch
+    from torch.profiler import ProfilerActivity, profile
+    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+        r = run(case, **kw)
+        torch.cuda.synchronize()
+    n = max(1, r.nSteps)
+    evs = list(prof.events())
+    sections = [(e.time_range.start, e.time_range.end, e.name) for e in evs if '[acsph - ' in e.name or e.name.startswith('[warpSPH]')]
+    sections.sort()
+    def sectionOf(t):
+        best = None
+        for s0, s1, nm in sections:
+            if s0 <= t <= s1 and (best is None or s1 - s0 < best[0]):
+                best = (s1 - s0, nm)
+        return best[1] if best else '(outside any section)'
+    cpu = collections.defaultdict(float)
+    for s0, s1, nm in sections:
+        cpu[nm] += s1 - s0
+    api = collections.Counter()
+    where = collections.defaultdict(collections.Counter)
+    gpuBusy = 0.0
+    for e in evs:
+        if e.device_type == torch.autograd.DeviceType.CUDA:
+            gpuBusy += e.device_time_total
+            continue
+        nm = e.name
+        if nm in ('cudaLaunchKernel', 'cuLaunchKernel', 'cudaGraphLaunch', 'cuGraphLaunch', 'cudaStreamSynchronize',
+                  'cudaDeviceSynchronize', 'cudaMemcpyAsync', 'cudaMemcpy', 'cudaMemsetAsync', 'cudaEventSynchronize') \
+                or nm.startswith('cudaMemcpy'):
+            api[nm] += 1
+            if 'ynchronize' in nm or nm.startswith('cudaMemcpy'):
+                where[nm][sectionOf(e.time_range.start)] += 1
+    print(f'[profile] {n} steps, GPU-busy {gpuBusy / n / 1e3:.2f} ms/step; CUDA runtime calls per step:', flush=True)
+    for nm, c in api.most_common():
+        print(f'[profile]   {c / n:8.1f}  {nm}', flush=True)
+    for nm in where:
+        for sec, c in where[nm].most_common(6):
+            print(f'[profile]   {nm}: {c / n:7.1f}/step in {sec}', flush=True)
+    for nm, us in sorted(cpu.items(), key=lambda kv: -kv[1])[:14]:
+        print(f'[profile]   {us / n / 1e3:8.2f} ms/step (section wall)  {nm}', flush=True)
+    return r
 
 
 def main():
@@ -672,6 +739,24 @@ def main():
     ap.add_argument('--cav', default='off', choices=['off', 'wall', 'vicinity', 'contact', 'fluid'])
     ap.add_argument('--isoZero', action='store_true',
                     help='ACSPH acParams.isolatedZeroPressure (p = 0 on empty supports, §11.1)')
+    ap.add_argument('--edgeRelax', default='off', choices=['off', 'zero', 'lambda'],
+                    help="ACSPH acParams.wallPressureEdgeRelax: the authors' wall-pressure attenuation beside an edge particle (DYNGPUSPH_COMPARISON D1)")
+    ap.add_argument('--taper', action='store_true',
+                    help='ACSPH acParams.diffusionLambdaTaper: C2 ramp of lambda on k2 D^p (DYNGPUSPH_COMPARISON D3)')
+    ap.add_argument('--redetect', action='store_true', help='ACSPH D2: re-detect the surface every dual-time iteration')
+    ap.add_argument('--bounce', action='store_true', help='ACSPH D5: position-row wall bounce-back')
+    ap.add_argument('--bounceRamp', type=float, default=0.5, help='ACSPH D5: fade the bounce out smoothly over this fraction of its distance (default 0.5, the dambreak case default; 0 = the authors\' hard switch)')
+    ap.add_argument('--bounceTarget', default='position', choices=['position', 'stage', 'both'], help='ACSPH D5: what the bounce reflects')
+    ap.add_argument('--profile', action='store_true', help='run under the torch profiler and print per-step launches/syncs/section CPU time (marrone31/sloshing only)')
+    ap.add_argument('--cudaGraph', action=argparse.BooleanOptionalAction, default=True,
+                    help='CaseSpec.cudaGraph (default ON, --no-cudaGraph for eager): replay the ACSPH pseudo-iteration '
+                         '(and the delta-SPH RHS) from a CUDA graph; bitwise, self-checked. ACSPH Marrone nx 70 to t=2.45: '
+                         '1475 s eager -> 333 s, identical diagnostics')
+    ap.add_argument('--noAlign', action='store_true',
+                    help="ACSPH: switch the cheap authors'-code alignments (now default: D3, D5, dt/dtau 2, CFL_t 0.4, D10, D12) OFF -- the pre-2026-10-13 baseline")
+    ap.add_argument('--authors', action='store_true',
+                    help="ACSPH: ALL authors'-code alignments, adding the costly D1/D2/D9 to the default cheap set (D1 lambda, D2, D3, D5, RK3/0.75, dt/dtau 2, CFL_t 0.4, U_char 0.1 c0, no accel constraint)")
+    ap.add_argument('--authorsOff', default='', help='with --authors, comma list to leave off: d1,d2,d3,d5,rk,dt,accel,uchar')
     ap.add_argument('--loneReset', action='store_true',
                     help='delta-SPH schemeConfig.loneDensityReset: rho = rho0 on rows with no fluid neighbour (§12)')
     ap.add_argument('--oneSidedHydro', action='store_true',

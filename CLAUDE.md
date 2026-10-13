@@ -70,6 +70,11 @@ These apply to **every** run, including throwaway inline probes that call
    convergence read) or slows by more than run-to-run noise is a regression to
    say so about; `benchmarks/marrone31/bench_step.py` splits a step into
    integrator / hook / diagnostics with GPU-busy time, launches and syncs.
+   **ACSPH:** `CaseSpec.cudaGraph` defaults to `False`; a direct `run()` call of an
+   ACSPH case must pass `cudaGraph=True` (the probes and the `dambreak` case default it on): bitwise, and
+   Marrone nx 70 to t = 2.45 goes 1475 s -> 333 s (OPEN_PROBLEMS §33). Also watch
+   `pseudoIterations`: a step at the 200 cap every step is a non-converging
+   dual-time loop, not a slow one.
 
 Details and history: the `export-video-on-validation-runs` and
 `run-simulations-sequentially` memories; `docs/historic_plans/FREESLIP_DAMBREAK_FINDINGS.md` §9.6.

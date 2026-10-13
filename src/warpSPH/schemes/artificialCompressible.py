@@ -88,6 +88,8 @@ __all__ = ['artificialCompressible_step', 'validateIntegrationScheme',
 
 PHYSICS_IMPLEMENTED = True
 
+_warnedNoWallNormals = False
+
 #: The only integrators whose action on an exact delta is the identity.
 _EXACT_DELTA_INTEGRATORS = {IntegrationSchemeType.forwardEuler,
                             IntegrationSchemeType.explicitEuler}
@@ -223,7 +225,8 @@ def _workingState(state, positions, velocities, pressures):
     return view
 
 
-def wallPressures(view, config, adjacency, bodyForce, clampNonNeg=False):
+def wallPressures(view, config, adjacency, bodyForce, clampNonNeg=False,
+                  edgeRelax='off', edgeFlags=None, lambdas=None):
     """`view.pressures` with the `kind == 1` rows filled by Eq. (61)/Adami
     et al. 2012 Eq. 27, the Shepard interpolation of the fluid pressure plus the
     hydrostatic correction `(g - a_w) . sum_f V_f rho_f (r_w - r_f) W_wf`.
@@ -242,11 +245,19 @@ def wallPressures(view, config, adjacency, bodyForce, clampNonNeg=False):
     `clampNonNeg=False` by default, unlike the DFSPH call sites: ACSPH's
     pressure is a solved field that legitimately goes negative, and clamping
     the wall to `>= 0` would make it a one-sided constraint.
+
+    `edgeRelax` ('zero' | 'lambda', `acParams.wallPressureEdgeRelax`): the
+    authors' narrower alternative -- a NEGATIVE wall pressure is attenuated only
+    where a raw free-surface fluid row (`edgeFlags`) is in the wall row's
+    support (`wallPressure._edgeRelaxFactor`, `docs/acsph/DYNGPUSPH_COMPARISON.md`
+    D1).
     """
     fluid = view.kinds == 0
     return wallPressureExtrapolation(view, config, adjacency, view.pressures,
                                      fluid, mode='shepard',
-                                     clampNonNeg=clampNonNeg, bodyForce=bodyForce)
+                                     clampNonNeg=clampNonNeg, bodyForce=bodyForce,
+                                     edgeRelax=edgeRelax, edgeFlags=edgeFlags,
+                                     lambdas=lambdas)
 
 
 def _unilateralWallForce(view, config, schemeConfig, adjacency):
@@ -341,8 +352,72 @@ def _wallAdjacent(view, config, adjacency):
     return trace != 0.0
 
 
+def wallBounceSetup(state, adjacency):
+    """Per-step constants for the position-row bounce-back: the fluid-wall
+    candidate pairs `(pi, pj)` of the step's adjacency and an inward unit normal
+    per wall row.
+
+    The normal of wall row `b` is the mean direction of its mDBC ghost offsets,
+    flipped if needed to point at its fluid neighbours (dynGPUSPH flips its
+    kernel-gradient normal the same way, `noSlipHashD`). Rows with no ghost get
+    a zero normal and never bounce."""
+    kinds = state.kinds
+    i, j = adjacency.i.long(), adjacency.j.long()
+    m = (kinds[i] == 0) & (kinds[j] == 1)
+    pi, pj = i[m], j[m]
+    nW = torch.zeros_like(state.positions)
+    ghost = kinds == 2
+    if getattr(state, 'ghostIndices', None) is not None and bool(ghost.any()):
+        off = state.ghostOffsets[ghost]
+        unit = off / (off.norm(dim=-1, keepdim=True) + 1e-12)
+        nW.index_add_(0, state.ghostIndices[ghost].long(), unit)
+        nW = torch.nn.functional.normalize(nW, dim=-1)
+        side = ((state.positions[pi] - state.positions[pj]) * nW[pj]).sum(-1)
+        score = torch.zeros(nW.shape[0], dtype=side.dtype, device=side.device).index_add_(0, pj, side)
+        nW = torch.where((score < 0).unsqueeze(-1), -nW, nW)
+    return pi, pj, nW
+
+
+def wallBounce(positions, velocities, pi, pj, nW, dx, distance, ramp=0.0):
+    """`velocities` with, for every fluid row within `distance * dx` of a wall
+    row (its nearest wall by normal distance, among wall rows within 1.155 dx)
+    and moving into that wall (`v . n < 0`), the normal component reversed.
+    Pure tensor ops on fixed-shape per-step constants: graph-capturable.
+
+    `ramp = 0` is the authors' hard switch (a jump at `distance`). `ramp in (0, 1]`
+    makes the reversal continuous in the distance: full below `(1 - ramp) *
+    distance`, a C2 quintic fall to nothing at `distance`. The jump makes a row
+    that rests at the threshold flip between bounced and not bounced from one
+    pseudo-iteration to the next, so its `tilde v` never converges."""
+    n = positions.shape[0]
+    d = ((positions[pi] - positions[pj]) * nW[pj]).sum(-1)
+    near = (positions[pi] - positions[pj]).norm(dim=-1) < 1.155 * dx
+    ad = torch.where(near, d.abs(), torch.full_like(d, float('inf')))
+    best = torch.full((n,), float('inf'), dtype=d.dtype, device=d.device).scatter_reduce(
+        0, pi, ad, 'amin', include_self=True)
+    isBest = near & (ad <= best[pi])
+    nRow = torch.zeros_like(positions).index_add_(0, pi, nW[pj] * isBest.unsqueeze(-1).to(d.dtype))
+    nRow = torch.nn.functional.normalize(nRow, dim=-1)
+    vn = (velocities * nRow).sum(-1, keepdim=True)
+    if ramp <= 0.0:
+        hit = ((best < distance * dx) & (vn.squeeze(-1) < 0.0)).unsqueeze(-1)
+        return torch.where(hit, velocities - 2.0 * vn * nRow, velocities)
+    d0 = (1.0 - ramp) * distance * dx
+    s = ((best - d0) / (distance * dx - d0)).clamp(0.0, 1.0)
+    weight = (1.0 - s ** 3 * (10.0 - 15.0 * s + 6.0 * s * s)).unsqueeze(-1)    # 1 -> 0, C2
+    return velocities - 2.0 * weight * vn.clamp(max=0.0) * nRow
+
+
+def diffusionTaper(lam, lambdaZero=0.1, lambdaOne=0.4):
+    """`C2_interp(lambda, F0, F1)` of the authors' `common_functions_cuda.cuh`:
+    with `q = clamp((lambda - F1)/(F0 - F1), 0, 1)`, `(1 - q)^4 (4q + 1)` -- 1 at
+    `lambda >= F1`, 0 at `lambda <= F0`, C2 in between."""
+    q = ((lam - lambdaOne) / (lambdaZero - lambdaOne)).clamp(0.0, 1.0)
+    return (1.0 - q) ** 4 * (4.0 * q + 1.0)
+
+
 def _spatialResidual(view, config, schemeConfig, adjacency, k1, k2, diffusion,
-                     bodyForce, nu, unilateralWall=False):
+                     bodyForce, nu, unilateralWall=False, taper=None):
     """`(r_p, r_v)`: the right-hand sides of Eqs. (23) and (25) at `view`.
 
     Eq. (23):  Dp/Dtau = -k1 rho sum_j (v_j - v_i).gradW V_j + k2 D^p
@@ -365,6 +440,8 @@ def _spatialResidual(view, config, schemeConfig, adjacency, k1, k2, diffusion,
         queryValues=view.velocities, domain=config.domain, adjacency=adjacency)
     if unilateralWall:
         divV = _unilateralWallDivergence(view, config, adjacency, divV)
+    if taper is not None:
+        diffusion = diffusion * taper
     rP = -k1 * rho * divV + k2 * diffusion
 
     # `computePressureSurfaceAwareWarp` returns `-sum_j V_j p_ij gradW`, which
@@ -505,6 +582,9 @@ def artificialCompressible_step(
             currentState, config, schemeConfig, schemeConfig.surfaceDetectionConfig,
             adjacency, returnNormals=True)
         currentState.surfaceIndicators = (fsm > 0.5).to(torch.int32)
+        rawEdge = fs > 0.5   # undilated: the authors' `is_surf == 1`
+        if lMin is None:     # surface detection inactive: nothing is an edge row
+            lMin = torch.ones_like(currentState.densities)
         currentState.surfaceNormals = n
         currentState.surfaceLambdas = lMin
 
@@ -596,6 +676,50 @@ def artificialCompressible_step(
     isoMask = (fluid & detectIsolated(currentState, config, adjacency)
                if acParams.isolatedZeroPressure else None)
 
+    def taperOf(lam):
+        return (diffusionTaper(lam, acParams.diffusionTaperLambdaZero,
+                               acParams.diffusionTaperLambdaOne).to(currentState.densities.dtype)
+                if acParams.diffusionLambdaTaper else None)
+
+    # frozen for the real step unless `redetectSurfacePerIteration`
+    taper = taperOf(lMin)
+    bounce = None
+    if acParams.wallBounceTarget not in ('position', 'stage', 'both'):
+        raise ValueError(f"acParams.wallBounceTarget must be 'position', 'stage' or 'both', got {acParams.wallBounceTarget!r}")
+    if acParams.wallBounceBack:
+        bounce = wallBounceSetup(currentState, adjacency) + (float(config.dx),)
+        global _warnedNoWallNormals
+        if not _warnedNoWallNormals:   # one host read per run, not per step
+            _warnedNoWallNormals = True
+            nWithNormal = int((bounce[2].abs().sum(-1) > 0).sum())
+            print(f"[warpSPH] acsph: wallBounceBack active, {nWithNormal} wall rows carry a normal, "
+                  f"{int(bounce[0].numel())} fluid-wall candidate pairs", flush=True)
+            if nWithNormal == 0:
+                print("[warpSPH] acsph: WARNING wallBounceBack found no wall normals (needs mDBC ghost "
+                      "points); it will do nothing", flush=True)
+
+    def surfaceFlags(stage):
+        """`(rawEdge, lMin, taper, renormalizationState)` for one iteration:
+        the frozen per-step values, or a fresh detection at `stage`'s positions
+        (D2)."""
+        if not acParams.redetectSurfacePerIteration:
+            return rawEdge, lMin, taper, renormalizationState
+        fs_, fsm_, n_, L_, lam_ = detectFreeSurface(
+            stage, config, schemeConfig, schemeConfig.surfaceDetectionConfig,
+            adjacency, returnNormals=True)
+        if lam_ is None:
+            lam_ = torch.ones_like(stage.densities)
+        return fs_ > 0.5, lam_, taperOf(lam_), L_
+
+    edgeRelax = acParams.wallPressureEdgeRelax
+    if edgeRelax != 'off' and acParams.cavitationProjection != 'off':
+        raise ValueError("wallPressureEdgeRelax is an alternative to cavitationProjection; "
+                         "set one of them")
+
+    def wallP(view_, flags):
+        return wallPressures(view_, config, adjacency, wallBodyForce,
+                             edgeRelax=edgeRelax, edgeFlags=flags[0], lambdas=flags[1])
+
     def project(pp):
         if cavMask is not None:
             pp = torch.where(cavMask, pp.clamp_min(0.0), pp)
@@ -627,9 +751,10 @@ def artificialCompressible_step(
         dvdtBdf = alphaT * vStage0 + betaT * vPrev + gammaT * vPrev2
 
         stage0 = _workingState(currentState, xStage0, vStage0, pStage0)
-        stage0.pressures = project(wallPressures(stage0, config, adjacency, wallBodyForce))
+        flags = surfaceFlags(stage0)
+        stage0.pressures = project(wallP(stage0, flags))
         diffusion = computePressureSmoothing(
-            stage0, config, schemeConfig, adjacency, renormalizationState,
+            stage0, config, schemeConfig, adjacency, flags[3],
             pressures=stage0.pressures)
 
         kx, kv, kp = [], [], []
@@ -644,8 +769,16 @@ def artificialCompressible_step(
                 ps = ps + dtau * a * kp[l]
             ps = project(ps)
 
-            view = _workingState(currentState, xs, vs, ps)
-            view.pressures = project(wallPressures(view, config, adjacency, wallBodyForce))
+            # D5: the velocity the position row sees; for target 'stage'/'both' it is
+            # also the velocity this stage's residual reads (the authors' kernel
+            # would do that if its `vel[i] - veli;` were an assignment)
+            vsB = vs if bounce is None else wallBounce(xs, vs, *bounce[:3], bounce[3], acParams.wallBounceDistance, acParams.wallBounceRamp)
+            if acParams.wallBounceTarget == 'position':
+                vsRes = vs
+            else:
+                vsRes = vsB
+            view = _workingState(currentState, xs, vsRes, ps)
+            view.pressures = project(wallP(view, flags))
             # The wall velocity is a closure of the *current* fluid velocity
             # (free-slip / no-slip mirror), exactly like the wall pressure
             # above, so it is re-applied per stage. Without this the wall
@@ -656,8 +789,8 @@ def artificialCompressible_step(
                                                         adjacency)
             rP, rV = _spatialResidual(view, config, schemeConfig, adjacency,
                                       k1, k2, diffusion, bodyForce, nu,
-                                      unilateralWall=cavitation == 'wall')
-            rX = vs
+                                      unilateralWall=cavitation == 'wall', taper=flags[2])
+            rX = vsB
 
             # alpha_PI = 1 + alpha_s dtau alpha_t (Eqs. 43-45), applied to
             # all three rows for temporal consistency. `alpha_s` in Eq. (40)
@@ -699,11 +832,14 @@ def artificialCompressible_step(
             v = v + dtau * b * kv[l]
             p = p + dtau * b * kp[l]
         p = project(p)
+        if bounce is not None and acParams.wallBounceTarget == 'both':
+            v = wallBounce(x, v, *bounce[:3], bounce[3], acParams.wallBounceDistance, acParams.wallBounceRamp)
 
         # `tilde v = v - Dx/Dt` is simultaneously the position-row residual
         # and the convergence metric (Eq. 26 / Sec. 1.6): it is zero exactly
         # when the position row is satisfied at time level n+1.
-        tildeV = v - (alphaT * x + betaT * xPrev + gammaT * xPrev2)
+        vPos = v if bounce is None else wallBounce(x, v, *bounce[:3], bounce[3], acParams.wallBounceDistance, acParams.wallBounceRamp)
+        tildeV = vPos - (alphaT * x + betaT * xPrev + gammaT * xPrev2)
         epsT = convergenceMetricDevice(tildeV, v, fluidIndex, nFluid, schemeConfig)
         return x, v, p, epsT
 

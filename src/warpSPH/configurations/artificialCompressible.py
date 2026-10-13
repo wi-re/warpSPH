@@ -152,6 +152,57 @@ class ArtificialCompressibilityParams:
     #: elastic energy (MDBC_CONTACT_LINE_PLAN.md §11.1). A droplet with
     #: nothing in its support is surrounded by air. Default off (the paper).
     isolatedZeroPressure: bool = field(default=False, metadata={'description': 'p = 0 on rows with an empty support'})
+    #: Edge-conditioned attenuation of a NEGATIVE wall-row pressure, the authors'
+    #: own wall/free-surface device (dynGPUSPH `noSlipCell3`, `docs/acsph/
+    #: DYNGPUSPH_COMPARISON.md` D1): a wall row with a raw free-surface (edge)
+    #: fluid particle in its support has `p_w < 0` replaced by
+    #:   'zero'   -> 0                                   (the May-2023 snapshot)
+    #:   'lambda' -> p_w * sum_f max(0, 2(lambda_f - 1/2)) W V / sum_f W V
+    #:               (the Dec-2023 `FSI_devel` tip; ~0 beside sparse fluid, ~1
+    #:               beside bulk fluid)
+    #: Wall rows only, negative pressure only, only beside a real edge particle --
+    #: narrower than every `cavitationProjection` set. 'off' = the paper.
+    wallPressureEdgeRelax: str = field(default='off', metadata={'description': "'off' | 'zero' | 'lambda': attenuate p_wall < 0 beside an edge fluid particle (authors' code)"})
+    #: Scale the pressure-smoothing term row by row with a Wendland-C2 ramp of the
+    #: renormalisation eigenvalue lambda: `k2 D^p * C2(lambda; 0.1, 0.4)`, which
+    #: is 1 for lambda >= 0.4 and 0 for lambda <= 0.1 (dynGPUSPH `FSI_devel`,
+    #: `ResP = -beta^2 rho roc + Laplacian * C2_interp(lambdaA, 0.1, 0.4)`;
+    #: docs/acsph/DYNGPUSPH_COMPARISON.md D3). Switches the diffusion off on
+    #: poorly supported rows (thin film, isolated fragment). Default ON since
+    #: 2026-10-13 (free: one multiply); the paper has none.
+    diffusionLambdaTaper: bool = field(default=True, metadata={'description': "taper k2 D^p by a C2 ramp of lambda (0.1 -> 0.4), authors' code"})
+    #: ramp end points (lambda at which the diffusion is 0, and 1)
+    diffusionTaperLambdaZero: float = field(default=0.1, metadata={'description': 'lambda at which the taper reaches 0'})
+    diffusionTaperLambdaOne: float = field(default=0.4, metadata={'description': 'lambda at which the taper reaches 1'})
+    #: Recompute the free-surface set, lambda, normals and renormalisation matrix
+    #: at the start of EVERY dual-time iteration, from that iteration's positions
+    #: (dynGPUSPH `ResidualHash3`, `RKsubit == 0`: `deltaHash4D` + `detectSurfaceHashD`;
+    #: docs/acsph/DYNGPUSPH_COMPARISON.md D2). Off = frozen once per real step.
+    #: Feeds `wallPressureEdgeRelax`, `diffusionLambdaTaper` and the pressure
+    #: smoothing's renormalisation; the `cavitationProjection` masks stay frozen.
+    redetectSurfacePerIteration: bool = field(default=False, metadata={'description': 'refresh surface flags/lambda every dual-time iteration (authors)'})
+    #: Bounce the pseudo-time particle velocity at walls: a fluid row within
+    #: `wallBounceDistance * dx` of a wall particle with `v . n < 0` has its
+    #: normal component reversed in the POSITION-row residual only
+    #: (dynGPUSPH `Get_PT_derivs2_bounce_back`; D5). `v` itself is untouched.
+    #: Default ON (target 'position', the only stable variant: DYNGPUSPH_COMPARISON.md
+    #: D5 -- necessary and sufficient for Marrone 3.1 nx 70) since 2026-10-13.
+    #: Needs mDBC ghost points for the wall normals; without them it is a no-op.
+    wallBounceBack: bool = field(default=True, metadata={'description': 'position-row wall bounce-back (authors)'})
+    wallBounceDistance: float = field(default=0.25, metadata={'description': 'bounce-back trigger distance in units of dx'})
+    #: 0 = the authors' hard switch at `wallBounceDistance` (default; 0.5 is the
+    #: recommended opt-in, pending the user's call). In (0, 1]: the reversal
+    #: is continuous in the wall distance (full below `(1 - ramp) * distance`, a C2
+    #: fall to zero at `distance`). The hard switch makes ceiling riders resting at
+    #: the threshold chatter, so the dual-time loop never converges (200 iterations
+    #: a step through the ceiling-impact phase of Marrone 3.1; docs/acsph/).
+    wallBounceRamp: float = field(default=0.0, metadata={'description': 'fraction of wallBounceDistance over which the bounce fades out smoothly (0 = hard switch)'})
+    #: What the bounce reflects. 'position' = the position-row velocity only (what
+    #: the authors' kernel actually does: its `vel[i] - veli;` is a no-op typo);
+    #: 'stage' = also the stage velocity the residual reads (the literal fix of that
+    #: typo: `vel` there is `RK_vel[iRK]`); 'both' = also the stored v after each
+    #: iteration. See docs/acsph/DYNGPUSPH_COMPARISON.md D5.
+    wallBounceTarget: str = field(default='position', metadata={'description': "'position' | 'stage' | 'both'"})
     #: The BDF correction of Eq. (59) that keeps the real-time derivative
     #: Lagrangian across the shift. Cheap; Sec. 4.2 found it makes little
     #: difference either way.
@@ -261,6 +312,15 @@ def _acParamsToDict(p: ArtificialCompressibilityParams) -> Dict[str, Any]:
         'useTildeVAdvection': p.useTildeVAdvection,
         'shiftInsidePseudoLoop': p.shiftInsidePseudoLoop,
         'cavitationProjection': p.cavitationProjection,
+        'wallPressureEdgeRelax': p.wallPressureEdgeRelax,
+        'diffusionLambdaTaper': p.diffusionLambdaTaper,
+        'redetectSurfacePerIteration': p.redetectSurfacePerIteration,
+        'wallBounceBack': p.wallBounceBack,
+        'wallBounceDistance': p.wallBounceDistance,
+        'wallBounceRamp': p.wallBounceRamp,
+        'wallBounceTarget': p.wallBounceTarget,
+        'diffusionTaperLambdaZero': p.diffusionTaperLambdaZero,
+        'diffusionTaperLambdaOne': p.diffusionTaperLambdaOne,
         'bdfShiftCorrection': p.bdfShiftCorrection,
         'referenceSoundSpeedForViscosity': p.referenceSoundSpeedForViscosity,
         'alphaNu': p.alphaNu, 'nu': p.nu,
@@ -293,6 +353,15 @@ def _dictToAcParams(d: Optional[Dict[str, Any]]) -> ArtificialCompressibilityPar
         useTildeVAdvection=bool(d.get('useTildeVAdvection', defaults.useTildeVAdvection)),
         shiftInsidePseudoLoop=bool(d.get('shiftInsidePseudoLoop', defaults.shiftInsidePseudoLoop)),
         cavitationProjection=str(d.get('cavitationProjection', defaults.cavitationProjection)),
+        wallPressureEdgeRelax=str(d.get('wallPressureEdgeRelax', defaults.wallPressureEdgeRelax)),
+        diffusionLambdaTaper=bool(d.get('diffusionLambdaTaper', defaults.diffusionLambdaTaper)),
+        redetectSurfacePerIteration=bool(d.get('redetectSurfacePerIteration', defaults.redetectSurfacePerIteration)),
+        wallBounceBack=bool(d.get('wallBounceBack', defaults.wallBounceBack)),
+        wallBounceDistance=float(d.get('wallBounceDistance', defaults.wallBounceDistance)),
+        wallBounceRamp=float(d.get('wallBounceRamp', defaults.wallBounceRamp)),
+        wallBounceTarget=str(d.get('wallBounceTarget', defaults.wallBounceTarget)),
+        diffusionTaperLambdaZero=float(d.get('diffusionTaperLambdaZero', defaults.diffusionTaperLambdaZero)),
+        diffusionTaperLambdaOne=float(d.get('diffusionTaperLambdaOne', defaults.diffusionTaperLambdaOne)),
         bdfShiftCorrection=bool(d.get('bdfShiftCorrection', defaults.bdfShiftCorrection)),
         referenceSoundSpeedForViscosity=(
             None if d.get('referenceSoundSpeedForViscosity', defaults.referenceSoundSpeedForViscosity) is None

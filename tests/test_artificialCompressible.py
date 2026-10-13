@@ -938,3 +938,199 @@ def test_convergenceMetricDeviceIsBitwiseHostMetric():
     zero = torch.zeros_like(tildeV)
     idx = fluid.nonzero().squeeze(1)
     assert float(acmod.convergenceMetricDevice(zero, velocities, idx, int(idx.numel()), schemeConfig)) == float('-inf')
+
+
+# --- the authors' edge-conditioned wall-pressure attenuation (D1) -----------
+
+def _edgeRelaxed(mode, edge, lam, p):
+    from warpSPH.modules.incompressible.wallPressure import wallPressureExtrapolation
+    st, config, _, wall = _walledLattice()
+    return st, wall, wallPressureExtrapolation(
+        st, config, None, p, ~wall, mode='shepard', clampNonNeg=False,
+        edgeRelax=mode, edgeFlags=edge, lambdas=lam)
+
+
+def test_edgeRelaxOnlyTouchesNegativeWallRowsBesideAnEdge(runtime):
+    """'zero' zeroes a negative wall pressure iff a flagged fluid row is in the
+    wall row's support; everything else (positive wall pressure, wall rows far
+    from the flag, fluid rows) is bit-identical to 'off'."""
+    st, config, _, wall = _walledLattice()
+    p = -torch.ones(st.positions.shape[0], device=st.positions.device)
+    lam = torch.ones_like(p)
+    edge = torch.zeros_like(p, dtype=torch.bool)
+    fluidIdx = (~wall).nonzero().squeeze(1)
+    hit = fluidIdx[0]                       # lowest fluid row, beside the wall
+    edge[hit] = True
+    _, _, off = _edgeRelaxed('off', edge, lam, p)
+    _, _, zero = _edgeRelaxed('zero', edge, lam, p)
+    near = wall & ((st.positions - st.positions[hit]).norm(dim=-1) < st.supports)
+    assert bool(near.any())
+    assert bool((off[wall] < 0).all())
+    assert bool((zero[near] == 0).all())
+    assert torch.equal(zero[~near], off[~near])
+    # positive pressure is never attenuated
+    _, _, offP = _edgeRelaxed('off', edge, lam, -p)
+    _, _, zeroP = _edgeRelaxed('zero', edge, lam, -p)
+    assert torch.equal(offP, zeroP)
+
+
+def test_edgeRelaxLambdaInterpolatesBetweenZeroAndOff(runtime):
+    st, config, _, wall = _walledLattice()
+    p = -torch.ones(st.positions.shape[0], device=st.positions.device)
+    edge = torch.zeros_like(p, dtype=torch.bool)
+    edge[(~wall).nonzero().squeeze(1)[0]] = True
+    _, _, off = _edgeRelaxed('off', edge, torch.ones_like(p), p)
+    _, _, sparse = _edgeRelaxed('lambda', edge, torch.full_like(p, 0.3), p)
+    # lambda >= 1 beside the edge row leaves the wall pressure nearly untouched;
+    # lambda <= 1/2 everywhere zeroes it entirely
+    nearEdge = (sparse != off) & wall
+    assert bool(nearEdge.any())
+    assert bool((sparse[nearEdge] == 0).all())
+
+
+def test_edgeRelaxIsANoOpWithoutWalls(periodicBox):
+    system, config, schemeConfig = periodicBox
+    try:
+        schemeConfig.acParams.wallPressureEdgeRelax = 'off'
+        off = runOneStep(system, config, schemeConfig, 20).state
+        schemeConfig.acParams.wallPressureEdgeRelax = 'lambda'
+        rel = runOneStep(system, config, schemeConfig, 20).state
+    finally:
+        schemeConfig.acParams.wallPressureEdgeRelax = 'off'
+    assert torch.equal(off.pressures, rel.pressures)
+    assert torch.equal(off.velocities, rel.velocities)
+
+
+def test_edgeRelaxRoundTripsAndExcludesCavitation():
+    config = ArtificialCompressibleSPHConfig()
+    config.acParams.wallPressureEdgeRelax = 'lambda'
+    back = dictToArtificialCompressibleConfig(artificialCompressibleConfigToDict(config))
+    assert back.acParams.wallPressureEdgeRelax == 'lambda'
+
+
+# --- the authors' lambda taper on the pressure diffusion (D3) ----------------
+
+def test_diffusionTaperIsAC2RampBetweenTheTwoLambdas():
+    lam = torch.tensor([0.0, 0.1, 0.25, 0.4, 0.7, 1.0])
+    t = acmod.diffusionTaper(lam, 0.1, 0.4)
+    assert torch.allclose(t[[0, 1]], torch.zeros(2))
+    assert torch.allclose(t[[3, 4, 5]], torch.ones(3))
+    assert 0.0 < float(t[2]) < 1.0
+    assert bool((t[1:4].diff() >= 0).all())
+    # authors' formula at the midpoint: q = 0.5 -> (0.5)^4 * 3
+    assert float(t[2]) == pytest.approx(0.5 ** 4 * 3.0, rel=1e-5)
+
+
+def test_diffusionTaperIsANoOpWhereEveryRowIsWellSupported(periodicBox):
+    """Periodic box: lambda ~ 1 everywhere, so the taper is 1 and the step is
+    bit-identical."""
+    system, config, schemeConfig = periodicBox
+    try:
+        schemeConfig.acParams.diffusionLambdaTaper = False
+        off = runOneStep(system, config, schemeConfig, 20).state
+        schemeConfig.acParams.diffusionLambdaTaper = True
+        on = runOneStep(system, config, schemeConfig, 20).state
+    finally:
+        schemeConfig.acParams.diffusionLambdaTaper = False
+    assert torch.allclose(off.pressures, on.pressures, atol=1e-6, rtol=1e-5)
+
+
+def test_diffusionTaperRoundTrips():
+    config = ArtificialCompressibleSPHConfig()
+    config.acParams.diffusionLambdaTaper = True
+    config.acParams.diffusionTaperLambdaOne = 0.5
+    back = dictToArtificialCompressibleConfig(artificialCompressibleConfigToDict(config))
+    assert back.acParams.diffusionLambdaTaper is True
+    assert back.acParams.diffusionTaperLambdaOne == pytest.approx(0.5)
+
+
+def test_authorsCheapAlignmentsAreTheDefault():
+    """2026-10-13 (user): the cheap authors'-code alignments are on by default --
+    D3 taper, D5 wall bounce-back with the stable 'position' target -- and the
+    costly ones (D1, D2) stay off."""
+    ap = ArtificialCompressibleSPHConfig().acParams
+    assert ap.diffusionLambdaTaper is True
+    assert ap.wallBounceBack is True and ap.wallBounceTarget == 'position' and ap.wallBounceRamp == 0.0
+    assert ap.wallPressureEdgeRelax == 'off' and ap.redetectSurfacePerIteration is False
+
+
+# --- per-iteration re-detection (D2) and wall bounce-back (D5) ---------------
+
+def test_wallBounceReversesOnlyTheNormalComponentOfAnApproachingNearWallRow(runtime):
+    pos = torch.tensor([[0.0, 0.0], [0.1, 0.1], [0.5, 0.5], [0.1, 0.0]])  # wall, near, far, near-but-leaving
+    n = torch.tensor([[0.0, 1.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]])    # wall normal points +y
+    v = torch.tensor([[0.0, 0.0], [1.0, -2.0], [1.0, -2.0], [1.0, 3.0]])
+    pi, pj = torch.tensor([1, 2, 3]), torch.tensor([0, 0, 0])
+    out = acmod.wallBounce(pos, v, pi, pj, n, 1.0, 0.25)
+    # row 1: 0.1 above the wall -> bounce; tangential kept, normal flipped
+    assert torch.allclose(out[1], torch.tensor([1.0, 2.0]))
+    # row 2: far away (beyond 1.155 dx)
+    assert torch.equal(out[2], v[2])
+    # row 3: close but moving away from the wall
+    assert torch.equal(out[3], v[3])
+    # not a fluid-wall pair member
+    assert torch.equal(out[0], v[0])
+
+
+def test_wallBounceRampIsContinuousInTheWallDistance(runtime):
+    """ramp = 0 jumps at `distance`; ramp > 0 fades the reversal out smoothly: full
+    below (1 - ramp) * distance, nothing at `distance`, monotone in between,
+    never touching a leaving row."""
+    d = torch.linspace(0.0, 0.3, 61)
+    pos = torch.cat([torch.zeros(1, 2), torch.stack([torch.zeros_like(d), d], dim=1)])
+    n = torch.zeros_like(pos); n[0] = torch.tensor([0.0, 1.0])
+    v = torch.zeros_like(pos); v[1:] = torch.tensor([1.0, -2.0])
+    pi, pj = torch.arange(1, pos.shape[0]), torch.zeros(pos.shape[0] - 1, dtype=torch.long)
+    hard = acmod.wallBounce(pos, v, pi, pj, n, 1.0, 0.25)[1:, 1]
+    soft = acmod.wallBounce(pos, v, pi, pj, n, 1.0, 0.25, ramp=0.5)[1:, 1]
+    assert float(hard.max() - hard.min()) == pytest.approx(4.0)            # the jump: +2 -> -2
+    assert float(soft[0]) == pytest.approx(2.0)                            # touching: full reversal
+    assert float(soft[d >= 0.25].max()) == pytest.approx(-2.0)             # at / beyond distance: untouched
+    assert float(soft[d <= 0.125].min()) == pytest.approx(2.0)             # inside (1 - ramp) * distance: full
+    assert float((soft[1:] - soft[:-1]).abs().max()) < 0.4                 # no jump
+    assert bool((soft[1:] <= soft[:-1] + 1e-6).all())                      # monotone
+    leaving = v.clone(); leaving[1:] = torch.tensor([1.0, 3.0])
+    assert torch.equal(acmod.wallBounce(pos, leaving, pi, pj, n, 1.0, 0.25, ramp=0.5), leaving)
+
+
+def test_wallBounceSetupIsEmptyWithoutGhostsAndTheStepIsUnchanged(runtime):
+    st, config, schemeConfig, wall = _walledLattice()
+    from warpSPHCore import buildVerletList, SupportScheme
+    adj = buildVerletList(st, config.domain, verletScale=config.verletScale,
+                          supportMode=SupportScheme.SuperSymmetric, priorNeighborhood=None, verbose=False)
+    pi, pj, nW = acmod.wallBounceSetup(st, adj)
+    assert pi.numel() > 0 and float(nW.abs().max()) == 0.0
+    v = torch.randn_like(st.velocities)
+    assert torch.equal(acmod.wallBounce(st.positions, v, pi, pj, nW, 1.0, 0.25), v)
+
+
+def test_redetectAndBounceAreNoOpsInAPeriodicBox(periodicBox):
+    system, config, schemeConfig = periodicBox
+    try:
+        off = runOneStep(system, config, schemeConfig, 20).state
+        schemeConfig.acParams.redetectSurfacePerIteration = True
+        schemeConfig.acParams.wallBounceBack = True
+        on = runOneStep(system, config, schemeConfig, 20).state
+    finally:
+        schemeConfig.acParams.redetectSurfacePerIteration = False
+        schemeConfig.acParams.wallBounceBack = False
+    assert torch.allclose(off.pressures, on.pressures, atol=1e-5, rtol=1e-4)
+    assert torch.allclose(off.velocities, on.velocities, atol=1e-5, rtol=1e-4)
+
+
+def test_bounceTargetsAreNoOpsWithoutWallsAndAreValidated(periodicBox):
+    system, config, schemeConfig = periodicBox
+    try:
+        off = runOneStep(system, config, schemeConfig, 20).state
+        schemeConfig.acParams.wallBounceBack = True
+        for target in ('position', 'stage', 'both'):
+            schemeConfig.acParams.wallBounceTarget = target
+            on = runOneStep(system, config, schemeConfig, 20).state
+            assert torch.allclose(off.pressures, on.pressures, atol=1e-5, rtol=1e-4), target
+            assert torch.allclose(off.velocities, on.velocities, atol=1e-5, rtol=1e-4), target
+        schemeConfig.acParams.wallBounceTarget = 'nonsense'
+        with pytest.raises(ValueError):
+            runOneStep(system, config, schemeConfig, 20)
+    finally:
+        schemeConfig.acParams.wallBounceBack = False
+        schemeConfig.acParams.wallBounceTarget = 'position'

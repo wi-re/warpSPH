@@ -247,12 +247,27 @@ def _configureArtificialCompressible(ctx: RunContext) -> None:
     sc.acParams.epsilonV = float(ctx.param('epsilonV', -5.0))
     sc.acParams.cavitationProjection = ctx.param('acCavitationProjection', 'off')
     sc.acParams.isolatedZeroPressure = bool(ctx.param('acIsolatedZeroPressure', False))
+    sc.acParams.wallPressureEdgeRelax = str(ctx.param('acWallEdgeRelax', 'off'))
+    sc.acParams.diffusionLambdaTaper = bool(ctx.param('acDiffusionTaper', True))
+    # D5 wall bounce-back (config default on) with the smooth ramp (0.5; 0 = the authors' hard switch): the hard
+    # switch chatters on resting wall-contact rows and the dual-time loop then sits at its iteration cap
+    # (DYNGPUSPH_COMPARISON.md, "Launch overhead"). User, 2026-10-13: speedup fixes on for this case too.
+    sc.acParams.wallBounceBack = bool(ctx.param('acBounceBack', True))
+    sc.acParams.wallBounceTarget = str(ctx.param('acBounceTarget', 'position'))
+    sc.acParams.wallBounceRamp = float(ctx.param('acBounceRamp', 0.5))
     depth = ctx.param('fillDepth')
     g = ctx.param('gravityMagnitude')
     sc.acParams.alphaNu = float(ctx.param('acAlphaNu', 0.01))
     sc.acParams.referenceSoundSpeedForViscosity = float(50.0 * (g * depth) ** 0.5)
     if sc.acParams.uChar is None:
         sc.acParams.uChar = float((g * depth) ** 0.5)
+    # The cheap authors'-code alignments `dambreak` applies behind `acLowCostAlign` (D10 U_char = 0.1 c0,
+    # D12 no acceleration constraint, dt/dtau 2 and CFL_t 0.4 of the paper's Sec. 4.5): they cut the step count
+    # and the pseudo-iterations per step (~30 here at dt/dtau 5). `acLowCostAlign=False` restores the old settings.
+    if ctx.param('acLowCostAlign', True):
+        sc.acParams.dtOverDtau, sc.acParams.cflT = 2.0, 0.4
+        sc.acParams.uChar = 0.1 * sc.acParams.referenceSoundSpeedForViscosity
+        sc.dt_accelerationConstraint = False
 
     from warpSPHIntegrators import getIntegrator
     from warpSPHIntegrators.integration import IntegrationSchemeType
@@ -507,6 +522,8 @@ sloshingTankCase = registerCase(Case(
     extraData=extraData,
     defaults=dict(
         caseName='16-sloshingTank',
+        # CUDA-graph replay of the ACSPH dual-time loop / delta-SPH RHS (bitwise, self-checked): ON (user, 2026-10-13)
+        cudaGraph=True,
         dim=2,
         # nx / targetDt / soundSpeed / integrationScheme below are the diffSPH
         # `16_SloshingTank.ipynb` reference configuration -- the one that runs

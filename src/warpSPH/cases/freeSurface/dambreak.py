@@ -277,6 +277,12 @@ def _configureArtificialCompressibleExtra(ctx: RunContext) -> None:
     # `acAlphaNu=None` keeps the directly-set physical `acParams.nu`.
     schemeConfig.acParams.cavitationProjection = ctx.param('acCavitationProjection', 'off')
     schemeConfig.acParams.isolatedZeroPressure = bool(ctx.param('acIsolatedZeroPressure', False))
+    schemeConfig.acParams.wallPressureEdgeRelax = str(ctx.param('acWallEdgeRelax', 'off'))
+    schemeConfig.acParams.diffusionLambdaTaper = bool(ctx.param('acDiffusionTaper', True))
+    schemeConfig.acParams.redetectSurfacePerIteration = bool(ctx.param('acRedetect', False))
+    schemeConfig.acParams.wallBounceBack = bool(ctx.param('acBounceBack', True))
+    schemeConfig.acParams.wallBounceTarget = str(ctx.param('acBounceTarget', 'position'))
+    schemeConfig.acParams.wallBounceRamp = float(ctx.param('acBounceRamp', 0.5))
 
     alphaNu = ctx.param('acAlphaNu')
     if alphaNu is not None:
@@ -293,6 +299,42 @@ def _configureArtificialCompressibleExtra(ctx: RunContext) -> None:
         depth = ctx.param('fillRatio') * ctx.spec.L
         schemeConfig.acParams.uChar = float(
             (ctx.param('gravityMagnitude') * depth) ** 0.5)
+
+    # Authors'-code alignments (docs/acsph/DYNGPUSPH_COMPARISON.md,
+    # CANDIDATE_CHANGES_OVERVIEW.md). `acLowCostAlign` (default ON since 2026-10-13)
+    # = the ones that cost nothing or cut cost: D3 taper, D5 bounce-back (position
+    # target), dt/dtau 2 + CFL_t 0.4 (paper Sec. 4.5), D10 U_char = 0.1 c0, D12 no
+    # acceleration constraint. `acAuthors` adds the costly ones: D1 edge relax
+    # (+5-10 %), D2 per-iteration detection (+18-26 %), D9 RK3 / CFL_tau 0.75.
+    # `acAuthorsOff` (comma list: d1 d2 d3 d5 rk dt accel uchar) leaves pieces out.
+    ap = schemeConfig.acParams
+    off = set(str(ctx.param('acAuthorsOff') or '').split(','))
+    align = set()
+    if ctx.param('acLowCostAlign'):
+        align |= {'d3', 'd5', 'dt', 'uchar', 'accel'}
+    if ctx.param('acAuthors'):
+        align |= {'d1', 'd2', 'd3', 'd5', 'rk', 'dt', 'uchar', 'accel'}
+    align -= off
+    if 'd3' in off:
+        ap.diffusionLambdaTaper = False
+    if 'd5' in off:
+        ap.wallBounceBack = False
+    if 'd1' in align:
+        ap.wallPressureEdgeRelax = 'lambda'        # D1, the Dec-2023 tip form
+    if 'd3' in align:
+        ap.diffusionLambdaTaper = True             # D3
+    if 'd2' in align:
+        ap.redetectSurfacePerIteration = True      # D2
+    if 'd5' in align:
+        ap.wallBounceBack = True                   # D5
+    if 'rk' in align:
+        ap.rkStages, ap.cflTau = 3, 0.75           # D9
+    if 'dt' in align:
+        ap.dtOverDtau, ap.cflT = 2.0, 0.4          # paper Sec. 4.5
+    if 'uchar' in align and ap.referenceSoundSpeedForViscosity is not None:
+        ap.uChar = 0.1 * ap.referenceSoundSpeedForViscosity   # D10
+    if 'accel' in align:
+        schemeConfig.dt_accelerationConstraint = False        # D12
 
     # The ACSPH step owns its whole real-time advance and returns an exact
     # per-step delta (`schemes/artificialCompressible.py`); any multi-stage
@@ -946,6 +988,9 @@ dambreakCase = registerCase(Case(
     timestep=dambreakTimestep,
     defaults=dict(
         caseName='3-dambreak',
+        # CUDA-graph replay (bitwise, self-checked, eager fallback): ON for this case (user,
+        # 2026-10-13); ACSPH Marrone nx 70 to t = 2.45 went 1475 s -> 333 s with it
+        cudaGraph=True,
         dim=2,
         nx=128,
         L=2.0,
@@ -1151,6 +1196,35 @@ dambreakCase = registerCase(Case(
         # ACSPH only: `acParams.isolatedZeroPressure` -- p = 0 on rows with an
         # empty support (MDBC_CONTACT_LINE_PLAN.md §11.1). Off is the paper.
         acIsolatedZeroPressure=False,
+        # ACSPH only: `acParams.wallPressureEdgeRelax` -- the authors' attenuation
+        # of a negative wall pressure beside an edge particle ('zero' | 'lambda').
+        # docs/acsph/DYNGPUSPH_COMPARISON.md D1. 'off' is the paper.
+        acWallEdgeRelax='off',
+        # ACSPH only: `acParams.diffusionLambdaTaper` -- C2 ramp of lambda on k2 D^p
+        # (DYNGPUSPH_COMPARISON D3). On (free), not in the paper.
+        acDiffusionTaper=True,
+        # ACSPH only: per-iteration surface re-detection (D2, off: +18-26 % per step,
+        # not needed) and position-row wall bounce-back (D5, ON: necessary and
+        # sufficient for Marrone 3.1 nx 70); DYNGPUSPH_COMPARISON.md.
+        acRedetect=False,
+        acBounceBack=True,
+        # ACSPH only: what the bounce reflects: 'position' | 'stage' | 'both' (D5)
+        acBounceTarget='position',
+        # ACSPH only: fade the D5 bounce out smoothly over this fraction of its distance
+        # (0 = the authors' hard switch). ON for this case (user, 2026-10-13): the hard switch
+        # chatters on resting ceiling riders, the dual-time loop then sits at the 200-iteration
+        # cap through the impact (DYNGPUSPH_COMPARISON.md, "Launch overhead"). Marrone nx 70:
+        # same survival, 0 fliers, 175 s instead of 333 s.
+        acBounceRamp=0.5,
+        # ACSPH only: every authors'-code alignment at once (D1 lambda, D2, D3, D5
+        # and the config-only D9 RK3 / CFL_tau 0.75, D10 U_char = 0.1 c0, D12 no
+        # acceleration constraint, dt/dtau 2, CFL_t 0.4). Not the paper's defaults.
+        acAuthors=False,
+        # ACSPH only: the cheap authors'-code alignments (D3, D5, dt/dtau 2, CFL_t
+        # 0.4, D10, D12); False restores the old defaults (use with acAuthorsOff).
+        acLowCostAlign=True,
+        # comma list of pieces to leave OFF under `acAuthors`: d1 d2 d3 d5 rk dt accel uchar
+        acAuthorsOff='',
         # The column is `fluidWidth * W` wide by `fillRatio * L` tall, in the
         # bottom-left corner of a `W x L` tank. These two give 0.667 x 1.333 in
         # the 4 x 2 tank: the canonical Koshizuka & Oka proportions, a column
