@@ -4,8 +4,9 @@ compressible formulation, `schemes/compSPH.py` and, sharing this state,
 with internal energy as the integrated quantity plus EOS outputs
 (pressure/soundspeed/entropy/total energy), the CullenDehnen2010
 shock-detector state (`divergence`, `alpha0s`/`alphas`), and the pairwise
-accel/energy-partition arrays (`ap_ij`/`av_ij`/`f_ij`) `compSPH_deltaU_multistep`
-consumes to keep energy exchange compatible between neighbors. There is no
+accel/energy-partition arrays (`ap_ij`/`av_ij`/`f_ij`), which a stage hands to
+`modules/compSPH/pairWork` (cleared from the stage state afterwards) to keep energy exchange
+compatible between neighbors. There is no
 `CompSPHSystemUpdate` here -- callers build a `compressibleMonaghan.
 CompressibleSystemUpdate` instead (its commented-out draft below is dead).
 `CompSPHSystem.finalize` only runs the multistep energy correction when
@@ -17,6 +18,7 @@ from dataclasses import dataclass
 import torch
 from typing import Optional
 from warpSPHCore import *
+from warpSPHCore.profiling import record_function
 
 __all__ = ['CompSPHState', 'CompSPHSystem']
 
@@ -79,7 +81,7 @@ class CompSPHState(BaseState):
 #     dEdt: torch.Tensor = tagged(tags=('totalEnergy_derivative',))
 #     drhodt: torch.Tensor = tagged(tags=('density_derivative',))
 
-from ..modules.compSPH.multistep import compSPH_deltaU_multistep
+from ..modules.compSPH.pairWork import PairWork, beginPairWork, energyIncrement
 
 
 @dataclass
@@ -88,10 +90,21 @@ class CompSPHSystem(BaseIntegrationSystem):
     adjacency: Optional[AdjacencyList] = None
     domain: Optional[DomainDescription] = None
     t: float = 0.0
+    #: the step's running compatible-energy sum, shared (by reference) by the stage systems of one step
+    pairWork: Optional[PairWork] = None
+    #: set by `finalize` when the step has to be run again (the pair list changed between stages)
+    rerunRequest: Optional[torch.Tensor] = None
+
+    def initialize(self, dt, *args, stageWeights=None, rerun=None, **kwargs):
+        self.pairWork = beginPairWork(stageWeights, rerun)
+        self.rerunRequest = None
+        return super().initialize(dt, *args, **kwargs)
+
     def initializeNewState(self, *args, verbose=False, **kwargs):
         state = get_reference_state(self)
         verbosePrint(verbose, f'Initializing new state [t={self.t}]')
-        return CompSPHSystem(state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain)
+        return CompSPHSystem(state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain,
+                             pairWork=self.pairWork)
     
     def apply_position_update(self, update, spec: PositionUpdateSpec, **kwargs):
         return update_position(self, update, spec, 'position', 'position_derivative', 'velocity', 'velocity_derivative')
@@ -133,16 +146,12 @@ class CompSPHSystem(BaseIntegrationSystem):
 
         
         if schemeConfig.compatibleEnergy:
-            delta_u = compSPH_deltaU_multistep(
-                dt,
-                initialState.state,
-                returnValues,
-                updateValues,
-                weights,
-                config,
-                schemeConfig,
-                # verbose = verbose
-            )
+            with record_function("[warpSPH] - [compSPH finalize - 01] compatible energy"):
+                delta_u, rerun = energyIncrement(self.pairWork, initialState.state, updateValues, weights, dt)
+            if rerun is not None:
+                # the pair list changed between stages: the integrator repeats the step with this half-step velocity
+                self.rerunRequest = rerun
+                return self
             self.state.internalEnergies = initialState.state.internalEnergies + delta_u * dt
 
         # solid wall rows (modules/compressibleWall): the state of the last stage, not an
