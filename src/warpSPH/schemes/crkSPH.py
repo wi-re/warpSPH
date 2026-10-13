@@ -41,7 +41,7 @@ from ..systems.compressibleMonaghan import CompressibleSystemUpdate
 from ..modules.shockCapturing.CullenHopkins import computeHopkinsTerms, computeHopkinsUpdate
 
 from warpSPHCore.profiling import record_function
-from ..modules.compSPH.pairWork import accumulateStage
+from ..modules.compSPH.pairWork import accumulateStage, startStage
 from ..modules.crk.accel import computeCrkSPHAccelWarp
 from ..configurations.crkSPH import resolveCRKLimiter
 from ..modules.reconstruction import requireRawPairVelocity
@@ -110,6 +110,7 @@ def crkSPH_step(
     currentState = currentSystem.state
     t = currentSystem.t
     wall = beginCompressibleWall(currentState, config)
+    startStage(currentSystem, currentState, config, stageIndex)
 
     IE = currentState.internalEnergies * currentState.masses
     KE = 0.5 * currentState.masses * torch.einsum('ij,ij->i', currentState.velocities, currentState.velocities)
@@ -460,6 +461,8 @@ def crkSPH_step(
     if wall is not None:
         currentState.f_ij = wall.balanceFractions(currentState.f_ij, adjacency, currentState)
 
+    if currentSystem.pairWork is not None:
+        currentSystem.pairWork.latest = adjacency
     if schemeConfig.compatibleEnergy and currentSystem.pairWork is not None:
         with record_function("[warpSPH] - [crkSPH - 11] pair work -> running sum"):
             accumulateStage(currentSystem.pairWork, stageIndex, adjacency, currentState, schemeConfig.energyScheme)

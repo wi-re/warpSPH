@@ -56,3 +56,25 @@ def test_noPerStagePairArraysAreRetained(scheme):
     result, _ = _run(scheme, steps=3)
     st = result.state.state
     assert st.ap_ij is None and st.av_ij is None and st.f_ij is None
+
+
+@pytest.mark.parametrize('scheme', ['CompSPH', 'CRKSPH'])
+def test_multiStageTableauDoesNotNeedASecondPass(scheme):
+    """Heun carries two weighted stages: the pair list must not change between them (stage 0 rebuilds early
+    when half the Verlet buffer is used, `pairWork.startStage`), so no step is repeated."""
+    seconds = [0]
+    original = pairWork.energyIncrement
+
+    def counting(pw, *args, **kwargs):
+        out = original(pw, *args, **kwargs)
+        seconds[0] += int(out[1] is not None and pw.halfVelocity is None)
+        return out
+
+    import warpSPH.systems.compSPH as systems
+    mp = pytest.MonkeyPatch()
+    mp.setattr(systems, 'energyIncrement', counting)
+    try:
+        run(getCase('sod2d'), quiet=True, progress=False, nSteps=60, scheme=scheme, integrationScheme='heunsMethod')
+    finally:
+        mp.undo()
+    assert seconds[0] == 0

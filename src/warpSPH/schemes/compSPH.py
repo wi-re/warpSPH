@@ -24,7 +24,7 @@ from warpSPHCore.profiling import record_function
 from warpSPHCore import (
     GradHState, OperationProperties, SupportScheme, buildVerletList,
 )
-from ..modules.compSPH.pairWork import accumulateStage
+from ..modules.compSPH.pairWork import accumulateStage, startStage
 from ..systems.compSPH import CompSPHSystem, CompSPHState
 from ..configurations.compSPHConfig import CompSPHConfig
 from ..configurations.simulationConfig import SimulationConfig
@@ -57,6 +57,7 @@ def compSPH_step(
     t = currentSystem.t
     with record_function("[warpSPH] - [compSPH - 01] wall + optimal support"):
         wall = beginCompressibleWall(currentState, config)
+        startStage(currentSystem, currentState, config, stageIndex)
         rho_optimal, h_optimal, currentSystem.adjacency, *_ = evaluateOptimalSupport(currentState, config, schemeConfig, SupportScheme.Gather, currentSystem.adjacency)
         currentState.supports = h_optimal
         currentState.densities = rho_optimal
@@ -255,6 +256,8 @@ def compSPH_step(
         if wall is not None:
             currentState.f_ij = wall.balanceFractions(currentState.f_ij, adjacency, currentState)
 
+    if currentSystem.pairWork is not None:
+        currentSystem.pairWork.latest = adjacency
     if schemeConfig.compatibleEnergy and currentSystem.pairWork is not None:
         with record_function("[warpSPH] - [compSPH - 11] pair work -> running sum"):
             accumulateStage(currentSystem.pairWork, stageIndex, adjacency, currentState, schemeConfig.energyScheme)

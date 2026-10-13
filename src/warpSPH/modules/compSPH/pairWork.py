@@ -29,7 +29,7 @@ from ...enumTypes import EnergyScheme
 from ...math.scatter import segment_sum
 from warpSPHCore.profiling import record_function
 
-__all__ = ['PairWork', 'beginPairWork', 'accumulateStage', 'energyIncrement']
+__all__ = ['PairWork', 'beginPairWork', 'startFromLatest', 'startStage', 'weightedStages', 'accumulateStage', 'energyIncrement']
 
 
 @dataclass
@@ -45,10 +45,47 @@ class PairWork:
     consistent: bool = True
     #: second pass: the running per-particle increment
     deltaU: Optional[torch.Tensor] = None
+    #: the pair list the previous stage of this step ended on: the next stage starts from it (every stage system
+    #: is copied from the step's initial state, which still has the list of the previous step)
+    latest: Any = None
 
 
 def beginPairWork(stageWeights, rerun) -> PairWork:
     return PairWork(weights=None if stageWeights is None else tuple(stageWeights), halfVelocity=rerun)
+
+
+def weightedStages(pairWork: Optional[PairWork]) -> int:
+    return 0 if pairWork is None or pairWork.weights is None else sum(1 for k in pairWork.weights if k != 0)
+
+
+def startFromLatest(system) -> None:
+    """Stage start: continue from the pair list the previous stage of this step ended on.
+
+    Without it a rebuild at stage 0 would be repeated at stage 1 (whose system is copied from the step's initial
+    state, still holding the previous step's list), and the two stages would end on different lists."""
+    work = system.pairWork
+    if work is not None and work.latest is not None:
+        system.adjacency = work.latest
+
+
+#: fraction of the Verlet buffer that may be used at the first stage before the list is rebuilt there
+#: (see `startStage`): the later stages of the step then have the other half to move in
+STAGE_ZERO_REBUILD_SLACK = 0.5
+
+
+def startStage(system, state, config, stageIndex) -> None:
+    """Stage start: continue from the previous stage's pair list and, at stage 0 of a tableau with more than one
+    weighted stage, rebuild early if half the Verlet buffer is already used.
+
+    The running sum only exists on one pair list. A rebuild at stage 1 would cost a whole second pass over the
+    step; rebuilding a little early at stage 0 costs one rebuild and makes the mid-step case rare. (A tableau
+    with a single weighted stage, midpoint, never carries anything across stages and does not need it.)"""
+    startFromLatest(system)
+    if stageIndex == 0 and weightedStages(system.pairWork) > 1 and system.adjacency is not None:
+        from warpSPHCore import SupportScheme, buildVerletList
+        system.adjacency = buildVerletList(
+            state, config.domain, verletScale=config.verletScale, supportMode=SupportScheme.SuperSymmetric,
+            priorNeighborhood=system.adjacency, rebuildSlack=STAGE_ZERO_REBUILD_SLACK)
 
 
 def _pairVector(state, energyScheme) -> torch.Tensor:
