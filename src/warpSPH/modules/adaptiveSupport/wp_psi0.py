@@ -309,32 +309,23 @@ def computePsi0_KernelTiled(
     # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
 
     i, lane = wp.tid()
-    if useAdjacency:
-        # raw sums reduced across lanes, THEN the roots (see computePsi0_Func_i)
-        psi0, psi0h = computePsi0_Func_Adjacency_raw(
-            i, domainState.dim, lane, wp.block_dim(),
-            queryState, referenceState, correctionData, domainState,
-            useAdjacency, adjacencyState, gridState, 1,
-            kernelProperties,
-        )
-        s_psi0 = laneSum(psi0)
-        s_psi0h = laneSum(psi0h)
-        if lane == 0:
-            output_psi0[i] = s_psi0**(scalar_t(1.0)/scalar_t(domainState.dim))
-            output_psi0_H[i] = s_psi0h**(scalar_t(1.0)/scalar_t(domainState.dim))
-    else:
-        # grid traversal takes the roots per cell (historical semantics), which
-        # does not decompose over lanes: lane 0 runs the full sum (the branch is
-        # uniform across the block, so no tile op diverges)
-        if lane == 0:
-            psi0, psi0h = computePsi0_Func_Adjacency(
-                i, domainState.dim, 0, 1,
-                queryState, referenceState, correctionData, domainState,
-                useAdjacency, adjacencyState, gridState, gridState.numOffsets,
-                kernelProperties,
-            )
-            output_psi0[i] = psi0
-            output_psi0_H[i] = psi0h
+    # lists AND grids use the lane-parallel raw sums (a grid traversal gives whole cells to the lanes round-robin);
+    # the roots are taken once, on the lane sum, after it. (The grid branch used to run on lane 0 alone and took the
+    # root per cell -- not the sum's root; see computePsi0_Func_Adjacency.)
+    numOffsets = wp.int32(1)
+    if not useAdjacency:
+        numOffsets = gridState.numOffsets
+    psi0, psi0h = computePsi0_Func_Adjacency_raw(
+        i, domainState.dim, lane, wp.block_dim(),
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, numOffsets,
+        kernelProperties,
+    )
+    s_psi0 = laneSum(psi0)
+    s_psi0h = laneSum(psi0h)
+    if lane == 0:
+        output_psi0[i] = s_psi0**(scalar_t(1.0)/scalar_t(domainState.dim))
+        output_psi0_H[i] = s_psi0h**(scalar_t(1.0)/scalar_t(domainState.dim))
 
 
 def _psi0Dtype(ctx, extras):
