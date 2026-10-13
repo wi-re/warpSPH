@@ -92,6 +92,23 @@ syncs per step**, each a pipeline drain: ~8 dual-time convergence checks (`dualT
 (the eager first iteration and the capture). These are phase 3's target list: device-resident scalars (viscosity, bounce setup), a persistent
 graph, a device-side stop test, and then the shared pieces (Verlet validity, shifting, timestep).
 
+## 3c. Adjacency capacity and raw pair lists (design notes, user decisions 2026-10-13)
+
+* **Capacity-padded adjacency** (prerequisite for the phase-5 persistent graph; opt-in `capacity` on the Verlet build in
+  warpSPHCore, default off): allocate the edge arrays ~10 % over the real count, rebuild in place while the count fits, reallocate
+  only on overflow (a device flag, read at the Verlet validity check that already syncs) or when the real count falls below
+  ~50 % of the capacity. This also removes the per-rebuild `torch.sum(edge_count).cpu().item()` allocate sync
+  (`radiusSearch/compactHash/search.py`). Per-particle CSR kernels (`edgeOffsets`/`numNeighbors`) never touch the tail.
+* **Padding convention: `i = j = -1`, no dummy particle.** A dummy row would leak an internal convention (a dead particle with no physics)
+  into exported traces. Consumers of raw `i`/`j` check `0 <= i < n` before use (careful: a torch gather with `-1` silently wraps to the last
+  element, so mask before indexing). The count is never taken from `adjacency.i.numel()`.
+* **`adjacency.i` is the velocity-Verlet list, not the active pairs**: it is a superset, so consumers of raw pairs must already test
+  actual interaction (`dist < h`) or Verlet membership. Nothing may treat its length as a pair count.
+* **Raw `i`/`j` interactions are a development convenience, to be avoided in new code** (the dense `i` tensor itself is a candidate
+  for removal later; per-particle CSR kernels are the target). Known raw users to retire: `wallBounceSetup` / `makeWallBounce`
+  (the fluid-wall pair filter, phases 3-4: make it a CSR wall-neighbour kernel).
+* Inlets / outlets (changing particle count) are not supported here; out of scope.
+
 ## 4. Risks / open questions
 
 * `wp.capture_while` with torch tensors and torch ops inside the body (conditional nodes need CUDA >= 12.4; driver here is 13.3 /
