@@ -309,7 +309,7 @@ def _balanceTermDtype(ctx, extras):
 
 
 def _balancePairShape(ctx, extras):
-    return ctx.adjacency.livePairs()[0].shape[0]   # per-edge outputs have the real edge count, not the padded capacity
+    return ctx.adjacency.paddedI.shape[0]   # per-edge outputs have the PADDED capacity (a fixed shape for a graph); the kernels fill the first numEdges
 
 
 def _balanceNumThreads(ctx, extras):
