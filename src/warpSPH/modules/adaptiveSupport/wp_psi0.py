@@ -178,58 +178,14 @@ def computePsi0_Func_Adjacency(
 
     kernelProperties: kernelState, 
 ):
-    xi, hi, mi, rhoi, ki = getParticle(queryState, i)
-    if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
-        if not checkDirectionality_i(ki, kernelProperties.operationMode):
-            return scalar_t(0.0), scalar_t(0.0)
-        
-    useGradientRenormalization, Li = getL_i(correctionData, i)
-    useGradHTerms, omega_i = getGradH_i(correctionData, i)
-    useVolume, Vi = getVolume_i(correctionData, i)
-    useCRK, Ai, Bi, gradA_i, gradB_i = getCRK_i(correctionData, i)
-
-    out_psi0 = zero_like_warp(queryState.densities) # type: ignore
-    out_psi0h = zero_like_warp(queryState.densities)
-    for o in range(numOffsets):
-        # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
-        if not useAdjacency and (o % lanes) != lane:
-            continue
-        beginIndex = wp.int32(0)
-        numIndices = wp.int32(0)
-        if useAdjacency:    
-            beginIndex = adjacencyState.neighborOffsets[i]
-            numIndices = adjacencyState.numNeighbors[i]
-        else:
-            beginIndex, numIndices = checkOffset(
-                i, queryState.positions, gridState.numCells, gridState.D, 
-                o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
-                domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
-            )
-            if beginIndex < 0:
-                continue
-        
-        beginIndex, numIndices = laneSlice(beginIndex, numIndices, lane, lanes, useAdjacency)
-        # the RAW sums: the dim-th root is not additive, so it is taken once after the loop over the cells
-        # (a grid traversal calls this once per cell; the root of each partial sum, summed, was 1.6-1.9x too big)
-        psi0_, psi0h_ = computePsi0_Func_i_raw(
-            i, dim, 
-            xi, hi, mi, rhoi,
-            referenceState, domainState,
-            kernelProperties,
-
-            beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
-            ki, referenceState.kinds,
-
-            useGradientRenormalization, Li,
-            useGradHTerms, omega_i, correctionData.referenceOmegas,
-            useVolume, Vi , correctionData.referenceVolumes,
-            useCRK, Ai, Bi, gradA_i, gradB_i,
-
-            # Omega function parameters
-        )
-        out_psi0 += psi0_
-        out_psi0h += psi0h_
-    return out_psi0**(scalar_t(1.0)/scalar_t(dim)), out_psi0h**(scalar_t(1.0)/scalar_t(dim))
+    # The loop over the cells (a grid traversal) lives in `_raw`; the dim-th root of the finished sum is taken HERE,
+    # after that function has returned. Warp cannot differentiate a non-linear step applied to a value that was
+    # accumulated in a dynamic loop of the same function, and the root is not additive across cells anyway (a root
+    # per cell, summed, was 1.6-1.9x too big on a grid traversal) -- the function boundary is what keeps both right.
+    psi0, psi0h = computePsi0_Func_Adjacency_raw(
+        i, dim, lane, lanes, queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, numOffsets, kernelProperties)
+    return psi0**(scalar_t(1.0)/scalar_t(dim)), psi0h**(scalar_t(1.0)/scalar_t(dim))
 
 
 
