@@ -187,6 +187,25 @@ crossovers are for this GPU and these cases; they are first estimates. Only Comp
 The grid-eager combination (`supportSolveOnGrid=True` with `stepMode='eager'`) stays available as a diagnostic and as the bitwise reference of
 the graph tests; it is slower than both.
 
+### 2.8 Eager-path savings in the comp path and what the graph mode still costs (2026-10-13)
+
+* **Multi-lane kernels for CompSPH** (`computeCompSPHAccel`, `dudt`, `BalanceTerm` got `_KernelTiled` variants, ported from the CRK ones: lane-sliced
+  neighbour ranges + `laneSum`; `WARPSPHCORE_NEIGHBOR_LANES=1` restores the old kernels). They ran one thread per particle: in 3D at N = 6k the accel
+  kernel took 5.4 ms per launch (~8 ns per pair, 2 % occupancy). Eager list mode, ms per step: `sod3d` N = 6k **25.3 -> 7.6**, N = 8k 27.1 -> 9.5;
+  `sod2d` 2.5k 5.5 -> 5.0, 15k 6.3 -> 5.8; `sod` unchanged (launch bound). Results equal to round-off (sum order).
+* **Graph mode refuses Dirichlet boundary conditions**: `rayleighTaylor` / `kidder` / `yee` evaluate boolean-mask indexing in the BC (host-sized). Worse, a
+  capture that fails at the CUDA level (not a Python exception) leaves the next eager step non-finite -- not understood, only avoided; a forced Python
+  failure inside a capture recovers cleanly (`captfail3`). Treat 'capture failed' as untrusted until that is understood.
+* **Support-grid headroom 1.5 -> 1.15** (`supportGrid.RADIUS_HEADROOM`): sod2d graph N = 2.5k 1.9 -> 1.3 ms, N = 10k 5.1 -> 3.1 ms; the number of regrows
+  (recaptures) on sod2d, gresho, KH, noh, sedov, triplePoint did not change in a way that matters (sedov 6 -> 7 at 1.1). 3D is unaffected by the headroom.
+* **3D graph mode is dominated by `computePsi0` on the grid**: 12 of 17.8 ms at N = 3k (5.7 ms per call vs ~0.2 ms on the list). Not the headroom (tried 1.1-1.5,
+  no change); the cell stencil / the kernel's traversal is the suspect. Open.
+* Sweep (`graph` request vs the grid-eager run, 40 steps): gresho, hydrostatic, KH, linearWave, noh, shearBox, shearingNoh, triplePoint, woodwardColella
+  bitwise equal; sedov equal to 6e-12 in positions (last-bit rounding) with 5 captures; bowShock, closedBox, forwardStep, piston, shockCylinder,
+  shockReflection (walls), kidder (Dirichlet) run eagerly with a warning.
+* The crossover table in 2.7 was measured before these changes, on one GPU: the 2D graph limit has moved up (graph still ahead at 10k with the new kernels)
+  and the numbers are hardware specific. Treat `GRAPH_MAX_PARTICLES` as a rough, conservative default, not a result.
+
 ## 3. Bugs found on the way (each with its test)
 
 1. **Psi0 on a grid / no adjacency was 1.6-1.9x the list value** (`wp_psi0.py`): `computePsi0_Func_Adjacency` took the dim-th root of each

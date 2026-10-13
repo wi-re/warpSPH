@@ -256,6 +256,9 @@ class GraphedStateFunction:
                 import traceback
                 traceback.print_exc()
             torch.cuda.synchronize()
+            aborted = getattr(state, 'captureAborted', None)
+            if aborted is not None:
+                aborted()                   # drop what the recorded step left on shared objects (its tensors are gone now)
             self._disable(f'capture failed ({type(e).__name__}: {str(e).splitlines()[0][:200]})')
             return None
 

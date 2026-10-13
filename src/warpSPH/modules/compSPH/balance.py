@@ -182,7 +182,7 @@ def computeCompSPHBalanceTerm_Func_i(
 
 @wp.func
 def computeCompSPHBalanceTerm_Func_Adjacency(
-    i : wp.int32, dim: wp.int32, 
+    i : wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32,
 
     queryState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
     referenceState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
@@ -221,6 +221,9 @@ def computeCompSPHBalanceTerm_Func_Adjacency(
     P_i = queryPressures[i]
 
     for o in range(numOffsets):
+        # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
+        if not useAdjacency and (o % lanes) != lane:
+            continue
         beginIndex = wp.int32(0)
         numIndices = wp.int32(0)
         if useAdjacency:    
@@ -235,6 +238,7 @@ def computeCompSPHBalanceTerm_Func_Adjacency(
             if beginIndex < 0:
                 continue
         
+        beginIndex, numIndices = laneSlice(beginIndex, numIndices, lane, lanes, useAdjacency)
         computeCompSPHBalanceTerm_Func_i(
             i, dim, 
             xi, hi, mi, rhoi,
@@ -287,7 +291,47 @@ def computeCompSPHBalanceTerm_Kernel(
         return
 
     computeCompSPHBalanceTerm_Func_Adjacency(
-        i, domainState.dim,
+        i, domainState.dim, 0, 1,
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,  #queryKinds, referenceKinds,
+        # The parameters above are default parameters and shold not be changed
+        queryVelocities, referenceVelocities,
+        queryEnergies, referenceEnergies,
+        queryPressures, referencePressures,
+        pressureAccel_ij, viscosityAccel_ij,
+        energyScheme_int, dt[0], gamma[0],
+        f_ij
+    )
+
+
+@wp.kernel
+def computeCompSPHBalanceTerm_KernelTiled(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+    
+    kernelProperties: kernelState,
+    # Do not change the parameters above
+    queryVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    queryEnergies: wp.array(dtype = scalar_t), referenceEnergies: wp.array(dtype = scalar_t), # type: ignore
+    queryPressures: wp.array(dtype = scalar_t), referencePressures: wp.array(dtype = scalar_t), # type: ignore
+
+    pressureAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    viscosityAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    energyScheme_int: wp.int32, dt: wp.array(dtype = scalar_t), gamma: wp.array(dtype = scalar_t), # type: ignore
+
+    # The last parameter is always the output array and should not be changed
+    f_ij : wp.array(dtype = Any), # type: ignore
+):
+    # Multi-lane variant of computeCompSPHBalanceTerm_Kernel (warpSPHCore autograd/lanes.py):
+    # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
+    i, lane = wp.tid()
+    computeCompSPHBalanceTerm_Func_Adjacency(
+        i, domainState.dim, lane, wp.block_dim(),
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,  #queryKinds, referenceKinds,
@@ -318,6 +362,7 @@ def _balanceNumThreads(ctx, extras):
 
 _COMPSPH_BALANCE_TERM = OperatorSpec(
     kernel=computeCompSPHBalanceTerm_Kernel,
+    tiledKernel=computeCompSPHBalanceTerm_KernelTiled,
     outputs=(OutputSpec(dtype=_balanceTermDtype, shape=_balancePairShape),),
     numThreads=_balanceNumThreads,
     extras=(

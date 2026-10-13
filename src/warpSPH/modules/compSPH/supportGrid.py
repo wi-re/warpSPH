@@ -25,7 +25,7 @@ CHECK_EVERY = 8
 
 #: radius headroom over the largest support when a grid is made: the supports may grow by this factor before the
 #: solve's limit binds and a larger grid is made
-RADIUS_HEADROOM = 1.5
+RADIUS_HEADROOM = 1.15
 
 
 def solvesOnGrid(schemeConfig) -> bool:

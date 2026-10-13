@@ -9,7 +9,7 @@
 * ``'auto'``: ``'graph'`` below a particle count that depends on the scheme and the dimension (`GRAPH_MAX_PARTICLES`), else ``'eager'``.
 
 A ``'graph'`` request that cannot be honoured (no CUDA, stored trajectories, solid wall rows, a viscosity switch with a step-boundary
-host time) runs ``'eager'``, with a warning for an explicit request.
+host time, Dirichlet boundary conditions) runs ``'eager'``, with a warning for an explicit request.
 """
 
 import warnings
@@ -21,7 +21,8 @@ __all__ = ['GRAPH_MAX_PARTICLES', 'STEP_MODES', 'resolveStepMode']
 
 STEP_MODES = ('eager', 'graph', 'auto')
 
-#: 'auto' replays the step from a graph below this many particles. First estimates from `sod` / `sod2d` / `sod3d` on one GPU (RTX PRO 6000
+#: 'auto' replays the step from a graph below this many particles. ROUGH, CONSERVATIVE defaults, hardware dependent (the 2D limit has since moved up with the
+#: multi-lane kernels; docs/compsph_step/README.md 2.8): not a result. First estimates from `sod` / `sod2d` / `sod3d` on one GPU (RTX PRO 6000
 #: Blackwell, steps 100-1100, `docs/compsph_step/README.md` 2.7): the crossover is where the step stops being limited by the host.
 #: 1D: tie at 160k; 2D: tie at 5-7k; 3D: the graph step is slower at every size measured (>= 3k) because the grid solve visits
 #: 3^3 cells, so 'auto' never picks it. A slower GPU or a bigger host overhead moves them; `CompSPHConfig.stepModeMaxParticles` overrides.
@@ -43,6 +44,9 @@ def _blocker(ctx, runningState, spec) -> Optional[str]:
     switch = getattr(ctx.schemeConfig, 'viscositySwitchParams', None)
     if switch is not None and STEP_HOOKS.get(switch.scheme) is not None:
         return 'the viscosity switch advances with a host step time'
+    for bc in getattr(ctx.schemeConfig, 'boundaryConditions', None) or []:
+        if getattr(bc, 'dirichletFunctions', None):
+            return 'Dirichlet boundary conditions select rows with host-sized masks'
     if beginCompressibleWall(runningState.state, ctx.config) is not None:
         return 'solid wall rows (their pair arrays follow the live edge count)'
     return None

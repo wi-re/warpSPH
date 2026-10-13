@@ -150,6 +150,12 @@ class CompSPHSystem(BaseIntegrationSystem):
         self.apply_quantity_update(update, spec, **kwargs)
         return self
     
+    def captureAborted(self):
+        """A recording that failed leaves the flags its stages noted in the holders; their memory belongs to the graph that is gone."""
+        for holder in (self.supportGrid, self.listGrid):
+            if holder is not None:
+                holder.pending = []
+
     def prepareCapture(self, config):
         """Make the support grid the capture will read (sizing it reads the supports: not possible while recording)."""
         if self.supportGrid is not None:

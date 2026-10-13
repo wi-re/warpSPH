@@ -172,7 +172,7 @@ def computeCompSPHAccel_Func_i(
 
 @wp.func
 def computeCompSPHAccel_Func_Adjacency(
-    i : wp.int32, dim: wp.int32, 
+    i : wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32,
 
     queryState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
     referenceState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
@@ -214,6 +214,9 @@ def computeCompSPHAccel_Func_Adjacency(
 
     out = zero_like_warp(accel[i])
     for o in range(numOffsets):
+        # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
+        if not useAdjacency and (o % lanes) != lane:
+            continue
         beginIndex = wp.int32(0)
         numIndices = wp.int32(0)
         if useAdjacency:    
@@ -228,6 +231,7 @@ def computeCompSPHAccel_Func_Adjacency(
             if beginIndex < 0:
                 continue
         
+        beginIndex, numIndices = laneSlice(beginIndex, numIndices, lane, lanes, useAdjacency)
         out += computeCompSPHAccel_Func_i(
             i, dim, 
             xi, hi, mi, rhoi,
@@ -282,7 +286,7 @@ def computeCompSPHAccel_Kernel(
         return
 
     accel[i] = computeCompSPHAccel_Func_Adjacency(
-        i, domainState.dim, 
+        i, domainState.dim, 0, 1, 
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,  #queryKinds, referenceKinds,
@@ -296,6 +300,50 @@ def computeCompSPHAccel_Kernel(
         accel, pressureAccel_ij, viscosityAccel_ij
     )
 
+
+@wp.kernel
+def computeCompSPHAccel_KernelTiled(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+    
+    kernelProperties: kernelState,
+    # Do not change the parameters above
+    queryVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    queryEnergies: wp.array(dtype = scalar_t), referenceEnergies: wp.array(dtype = scalar_t), # type: ignore
+    individual_cs: wp.bool, queryCs: wp.array(dtype = scalar_t), referenceCs: wp.array(dtype = scalar_t), # type: ignore
+    viscositySwitch: wp.bool, queryAlphas: wp.array(dtype = scalar_t), referenceAlphas: wp.array(dtype = scalar_t), # type: ignore
+    explicitPressure: wp.bool, queryPressures: wp.array(dtype = scalar_t), referencePressures: wp.array(dtype = scalar_t), # type: ignore
+    viscosityParams: DiffusionParameters,
+    # The last parameter is always the output array and should not be changed
+    accel : wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    pressureAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    viscosityAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+):
+    # Multi-lane variant of computeCompSPHAccel_Kernel (warpSPHCore autograd/lanes.py):
+    # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
+    i, lane = wp.tid()
+    partial = computeCompSPHAccel_Func_Adjacency(
+        i, domainState.dim, lane, wp.block_dim(), 
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,  #queryKinds, referenceKinds,
+        # The parameters above are default parameters and shold not be changed
+        queryVelocities, referenceVelocities,
+        queryEnergies, referenceEnergies,
+        individual_cs, queryCs, referenceCs,
+        viscositySwitch, queryAlphas, referenceAlphas,
+        explicitPressure, queryPressures, referencePressures,
+        viscosityParams,
+        accel, pressureAccel_ij, viscosityAccel_ij
+    )
+    total = laneSum(partial)
+    if lane == 0:
+        accel[i] = total
+
 def _compSPHAccelPairShape(ctx, extras):
     return ctx.adjacency.paddedI.shape[0]   # per-edge outputs have the PADDED capacity (a fixed shape for a graph); the kernels fill the first numEdges
 
@@ -306,6 +354,7 @@ def _compSPHAccelDtype(ctx, extras):
 
 _COMPSPH_ACCEL = OperatorSpec(
     kernel=computeCompSPHAccel_Kernel,
+    tiledKernel=computeCompSPHAccel_KernelTiled,
     outputs=(
         OutputSpec(dtype=_compSPHAccelDtype, shape=ShapeOf.QUERY),
         OutputSpec(dtype=_compSPHAccelDtype, shape=_compSPHAccelPairShape),
