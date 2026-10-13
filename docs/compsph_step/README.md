@@ -25,7 +25,8 @@ back to ACSPH"). Per integrator step on `sod2d` CompSPH:
 | support solve on the fixed-shape grid, explicit check per stage (`..._gridSolve`) | 466 | 18.9 | 5.5 |
 | + deferred list check, one host read per step (`..._gridDeferred2`) | 446 | 21.8 | 3.9 |
 | + step-end rebuild decision learns the buffer usage (`..._gridAdaptive`) | 443 | 21.6 | 3.7 |
-| + host syncs of the runner loop removed (`hostTime.txt`, **current**; integrator step only: 441 ops, 1.73 syncs) | 441 | 21.6 | **1.73** in the step, **4.8** in the whole loop (16.1 before) |
+| + host syncs of the runner loop removed (`hostTime.txt`; integrator step only: 441 ops, 1.73 syncs) | 441 | 21.6 | **1.73** in the step, **4.8** in the whole loop (16.1 before) |
+| + the whole step replayed from one CUDA graph (`stepGraph.txt`, **current**, `--cudaGraph`) | 22 launches / step recorded, the step's own ops are inside the graph | | 3.35 in the whole loop: the replay's one read (1), the rebuilds (0.55 x 2), diagnostics (1), time + max speed (1) |
 
 Wall time is NOT better in the grid mode at this size: 300 steps take 2.62 s (grid, deferred) against 2.52 s (list) at N = 2,500.
 The step is launch-bound; the grid mode adds two graph replays and a few small ops per stage. The saving is in syncs and in what
@@ -53,6 +54,8 @@ out-of-bounds fix / c5fefb8 wall clamp module + grid solve / 700f8cf deferred ch
 warpSPHCore (`dev`): d733192 padded adjacency / d2cd60b `inPlace` / 09b34f0 `rebuildSlack` / 07403b5 fused validity kernel /
 3ea04fc fixed-shape hash map (slots) / f853f97 `verletStaleFlag`, `gridFactory` / 958ec05 `forceRebuild` / 8a67521 `verletUsage`
 (+ plan commits: c266663, 67e27d7, c28a378, 3a12423, b249e02, f24ce3b).
+warpSPH, later the same day: 9b1d312 host-sync pass / 4edc3e1 padded per-edge arrays / fb9e4e8 the CompSPH step graph (+ the Gather-grid fix).
+warpSPHCore, later: a0b75bd `GraphedBuild` inline under a capture, `WARPSPHCORE_AUDIT_OPSITES` / bd103d0 in-place rebuild writes the reference snapshot too.
 warpSPHIntegrators (`main`): b9cbacb `RungeKuttaB` stage weights + second pass / c5daded `update_position` no truth test of a tensor dt.
 NOTE: the integrators repo has other uncommitted work that is not part of this (new tableaus, docs); only the two hunks above were committed.
 
@@ -121,6 +124,45 @@ passes. Zero second passes for RK2, Heun, SSPRK3, RK4 (`evidence/scripts/slackSc
 h, u, rho agree to 8 digits on `sod2d`, `sod`, `sod3d`; `tests/test_compSPHPairWork.py::test_gridSolveGivesTheListSolveResult` (1e-3,
 round-off grows over 40 steps because the neighbour order differs).
 
+### 2.6 The whole CompSPH step from one CUDA graph (core a0b75bd, bd103d0; frontend 4edc3e1, fb9e4e8)
+
+Opt-in: `run(..., cudaGraph=True)` on a CompSPH case with `supportSolveOnGrid=True` (`runner._compSPHGraphable`: no wall rows, no switch with a
+step-boundary host time; it also turns on `inPlaceAdjacency`). `GraphedIntegratorStep` is the machinery the ACSPH / delta-SPH steps already
+used; what CompSPH needed:
+
+1. **Fixed shapes.** The per-edge arrays (`ap_ij`, `av_ij`, `f_ij`) and the X6 pair sums use the PADDED capacity (`paddedI/paddedJ`, the `-1` tail
+   is never read: `segment_sum` takes the first `numNeighbors` entries of each row), not `livePairs()`. Bitwise identical to before.
+2. **The grid build is recorded inline** inside an outer capture (`GraphedBuild.replay`: a graph cannot replay inside a capture).
+3. **No host read inside the step.** `finalize` registers a `StepDecision` (`utils/stepDecisions.py`) instead of `.tolist()`: the device values
+   (in-step flags, list-grid-too-small flags, a support-grid limit was binding, buffer usage). The wrapper reads them with the step time in
+   ONE transfer per replay and then (a) `redo`: a flag says a stage ran on a pair list that was too short: the replay is discarded and the step
+   runs eagerly from the untouched input (the second-pass machinery), (b) `apply`: learns the usage, enlarges the support grid if the limit was
+   binding, and REBUILDS THE PAIR LIST for the next step eagerly (rebuild stays outside the graph, as decided).
+4. **In-place rebuild.** `inPlaceAdjacency` (frontend switch, set by the runner) makes the rebuild write the old list's buffers; the core now also writes
+   the list's reference snapshot (`queryPositions` ... `referenceSupports`, what the validity check compares against) in place, because a captured
+   check reads them at fixed addresses (`test_capturedValidityFollowsAnInPlaceRebuild`). The capture is keyed on the ADDRESSES and shapes of the
+   list's arrays (and the grids' identities), not on the list object: a rebuild that keeps its capacity does not recapture; one that outgrows it does.
+5. **The first replay is compared with an eager step** (as before), now from a COPY of the list (the eager step may rebuild in place) with the
+   host-side learned state saved and restored (`StepDecision.hostState`).
+
+Evidence: `sod2d` CompSPH, 300 steps, ~75 in-place rebuilds, 2 captures, 299 replays, 0 fallbacks, final state bitwise equal to the eager grid run
+(`tests/test_compSPHGraph.py`, also with the rebuild margin removed so replays are discarded and redone eagerly: still bitwise equal). ACSPH
+`dambreak` and delta-SPH graph runs unchanged against the previous commit (`evidence/scripts/hashCase.py`).
+
+| `sod2d` CompSPH, ms per step (200 steps) | list solve (default) | grid, eager | grid, graph |
+|---|---|---|---|
+| N = 2,500 | 2.70 | 2.91 | **1.22** |
+| N = 5,000 | 2.64 | 3.12 | 2.20 |
+| N = 7,500 | 3.17 | 3.49 | 3.01 |
+
+The saving is the host overhead (small N); with N the kernels dominate and the graph no longer matters. The loop around the step (diagnostics,
+time + max-speed read, the replay's own read) is still 3 syncs per step.
+
+Two things that bit on the way, both from state the capture cannot see: **(a)** a captured reduction over flag tensors that earlier EAGER steps had
+left in `holder.pending` read freed memory after the Python references were dropped (alternating 0/1 'support grid outgrown' -> the grid was
+regrown every other step; fixed: a recorded step clears the pending lists first and only reads flags it computes itself); **(b)** sizing a grid reads
+a device value, so the pre-capture hook `prepareCapture` makes it before the recording starts.
+
 ## 3. Bugs found on the way (each with its test)
 
 1. **Psi0 on a grid / no adjacency was 1.6-1.9x the list value** (`wp_psi0.py`): `computePsi0_Func_Adjacency` took the dim-th root of each
@@ -135,7 +177,14 @@ round-off grows over 40 steps because the neighbour order differs).
 4. **sedovWalls out-of-bounds** (illegal memory access) after the same change: wall rows are appended after the setup built its list, the
    skipped per-iteration check was what rebuilt a list of another size. Found by bisecting commits; fixed (`_listFits`), smoke test added.
    All 17 CompSPH/CRKSPH cases run 6 steps (`evidence/scripts/smokeCompressible.py`). Lesson: nothing in the suite covered a wall case.
-5. `tests/test_implicitShiftingComparison.py` is flaky on the pre-change code too (2 of 3 runs fail on the base worktree); not caused here.
+5. **The pair list built through the fixed-shape grid was searched as a Gather list** (found 2026-10-13 while comparing graph and eager steps:
+   the rebuilt list had 246,724 edges, a from-scratch build 255,618, 3.6 % more). The grid holder made its slots in `Gather` mode for the support solve
+   and the pair-list factory reused that mode; the search takes its mode from the grid, so pairs only the NEIGHBOUR's larger support reaches were
+   missing from the row of the smaller one. The pairs sit at the edge of the support (kernel ~ 0), which is why the grid-vs-list comparison
+   passed at 1e-3 and hash checks were accepted as 'round-off'. Fixed (`ensureSupportGrid(mode=SuperSymmetric)` for the list grid);
+   `tests/test_compSPHGraph.py::test_pairListGridFindsTheSymmetricPairs` fails without it. Every earlier grid-mode number in this document that
+   depended on list contents (rebuild counts, the loose 1e-3 tolerance) predates the fix; the rebuild-count scan was not repeated.
+6. `tests/test_implicitShiftingComparison.py` is flaky on the pre-change code too (2 of 3 runs fail on the base worktree); not caused here.
 
 ## 4. Measurements that decided things
 
@@ -154,7 +203,7 @@ round-off grows over 40 steps because the neighbour order differs).
 1. **The remaining syncs**: DONE for `hostTime`, the diagnostics and the time / max-speed read (see 2.x above; 4.8 per step in the whole loop). What is left
    is structural: the step-end flag read (1), the rebuilds' edge-total read (0.6), the grid-radius flag (0.13), the diagnostics read (1), the timer (1).
 2. **The integrator's 110 self ops per step** (state copies, stage combines: `mul`, `clone`, `detach`, `view`, `add`, `zeros`).
-3. **Towards the full step graph with reused adjacency tensors**: `CapacityPolicy.inPlace` exists in the core but nothing in the frontend turns it
+3. **Full step graph**: DONE for CompSPH in grid mode (2.6). The original list of requirements follows for reference: `CapacityPolicy.inPlace` exists in the core but nothing in the frontend turns it
    on; it needs (a) a frontend switch, (b) every holder of an old list audited (the compSPH per-stage retention is gone with X6; the
    fluid-pair cache is gone), (c) kernels inside the graph reading the PADDED arrays with the `-1` guard, never `livePairs()`/`numEdges`, (d) the
    rebuild eager between replays (decided: not graphed), the validity/usage flags as the loop condition or the step-end read, (e) the
