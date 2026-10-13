@@ -123,7 +123,7 @@ def crkSPH_step(
 
     rho_optimal, h_optimal, currentSystem.adjacency, *_ = evaluateOptimalSupport(
         currentState, config, schemeConfig, SupportScheme.Gather, currentSystem.adjacency,
-        validateOnce=True, rebuildSlack=stageRebuildSlack(currentSystem, stageIndex))
+        validateOnce=True, rebuildSlack=stageRebuildSlack(currentSystem, stageIndex), computeDensity=False)
     currentState.supports = h_optimal
     currentState.densities = rho_optimal
 

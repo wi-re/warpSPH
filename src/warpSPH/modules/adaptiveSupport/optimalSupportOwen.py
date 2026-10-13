@@ -63,6 +63,16 @@ def computeNewSupport(target, n_h, h):
     # h_i_new = s * h
     return h_i_new
 
+def _listFits(adjacency, particles) -> bool:
+    """A list the solver may run on without validating it first: built for as many particles as there are now.
+    (`buildVerletList` rebuilds on a changed particle count; a solve that skips the per-iteration check must not
+    run a kernel on a list sized for other particles -- walls appended after the setup's list, for instance.)"""
+    if adjacency is None or getattr(adjacency, 'queryPositions', None) is None or getattr(adjacency, 'referencePositions', None) is None:
+        return False
+    n = particles.positions.shape[0]
+    return adjacency.queryPositions.shape[0] == n and adjacency.referencePositions.shape[0] == n and adjacency.numNeighbors.shape[0] == n
+
+
 def evaluateOptimalSupportOwen(
         particles: CompressibleState,
         config: SimulationConfig,
@@ -73,6 +83,7 @@ def evaluateOptimalSupportOwen(
         verbose = False,
         validateOnce: bool = False,
         rebuildSlack: float = 0.0,
+        computeDensity: bool = True,
         ):
     """`validateOnce=False` (default): the neighbour list is validated, and rebuilt if needed, at the start of
     every iteration. `validateOnce=True`: the iterations run on the incoming list without a check (the particles do
@@ -80,6 +91,7 @@ def evaluateOptimalSupportOwen(
     used (and the particle motion); if that finds the list too short the list is rebuilt and the iterations are
     run again from the incoming supports. The returned list then covers every iterate and the final supports, so
     the caller needs no check of its own. `rebuildSlack` rebuilds that final check early (see `buildVerletList`).
+    `computeDensity=False` skips the closing summation density and returns the particles' own densities instead.
     Also: the early stop on the support change is evaluated on the device (a finished iteration freezes `h`)
     instead of a host read per iteration."""
     with record_function("[warpSPH] - evaluateOptimalSupport - Owen"):
@@ -121,7 +133,7 @@ def evaluateOptimalSupportOwen(
             if verbose:
                 print('----------------------------------')
                 print(f'Iteration {i}, target: {nhTarget}')
-            if not validateOnce or adjacency is None:
+            if not validateOnce or not _listFits(adjacency, particles):
                 adjacency = buildVerletList(particles, domain = config.domain, verletScale = verletScale, supportMode = SupportScheme.SuperSymmetric, priorNeighborhood=adjacency, verbose=False)
 
             
@@ -189,6 +201,9 @@ def evaluateOptimalSupportOwen(
                     hs = [suppliedSupports]
                     psis = []
 
+        if not computeDensity:
+            # the caller recomputes its density (in its own sense) right after: hand back the one the particles have
+            return particles.densities, hs[-1], adjacency, psis, hs
         densities = warpOperation(
             particles,
             OperationProperties(

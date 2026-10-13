@@ -91,3 +91,10 @@ def test_everySupportSchemeLeavesAValidNeighbourList(scheme, supportScheme):
     assert result.nSteps == 60 and not result.diverged
     e0, e1 = result.trajectory[0]['totalEnergy'], result.trajectory[-1]['totalEnergy']
     assert abs(e1 - e0) / abs(e0) < 1e-4
+
+
+def test_aListSizedForOtherParticlesIsNotUsedUnvalidated():
+    """A wall case appends its wall rows after the setup built its list: the support solver must not run a kernel on
+    that list (it ran out of bounds when the per-iteration check was replaced by one check afterwards)."""
+    result = run(getCase('sedovWalls'), quiet=True, progress=False, nSteps=4)
+    assert result.nSteps == 4 and not result.diverged

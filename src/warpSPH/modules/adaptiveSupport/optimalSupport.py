@@ -62,9 +62,12 @@ def evaluateOptimalSupport(
         adjacency: Optional[AdjacencyList] = None,
         validateOnce: bool = False,
         rebuildSlack: float = 0.0,
+        computeDensity: bool = True,
 ):
     """`validateOnce` / `rebuildSlack`: the Owen solver validates the neighbour list once per solve instead of once
-    per iteration (see `evaluateOptimalSupportOwen`); the other support schemes ignore them."""
+    per iteration (see `evaluateOptimalSupportOwen`); the other support schemes ignore them. `computeDensity=False`
+    (Owen only) skips the closing summation density: the returned densities, and the ones the volume clamp uses, are
+    then the particles' current ones -- for a caller that computes its own density next."""
     with record_function("[warpSPH] - evaluateOptimalSupport"):
         if compParams.adaptiveSupportScheme == AdaptiveSupportScheme.Owen:
             result = evaluateOptimalSupportOwen(
@@ -77,6 +80,7 @@ def evaluateOptimalSupport(
                 verbose = False,
                 validateOnce = validateOnce,
                 rebuildSlack = rebuildSlack,
+                computeDensity = computeDensity,
             )
         elif compParams.adaptiveSupportScheme == AdaptiveSupportScheme.Monaghan:
             result = evaluateOptimalSupportMonaghan(
