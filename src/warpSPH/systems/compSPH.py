@@ -19,7 +19,7 @@ import torch
 from typing import Optional
 from warpSPHCore import *
 from warpSPHCore.profiling import record_function
-from warpSPHCore import verletStaleFlag, buildVerletList, SupportScheme
+from warpSPHCore import verletUsage, buildVerletList, SupportScheme
 from types import SimpleNamespace
 
 __all__ = ['CompSPHState', 'CompSPHSystem']
@@ -84,7 +84,7 @@ class CompSPHState(BaseState):
 #     drhodt: torch.Tensor = tagged(tags=('density_derivative',))
 
 from ..modules.compSPH.pairWork import PairWork, RerunRequest, beginPairWork, energyIncrement, STAGE_ZERO_REBUILD_SLACK
-from ..modules.compSPH.supportGrid import SupportGrid, growIfOutgrown, solvesOnGrid, pairListGridFactory, takeListGridFlags
+from ..modules.compSPH.supportGrid import SupportGrid, growIfOutgrown, solvesOnGrid, pairListGridFactory, takeListGridFlags, rebuildNeeded
 
 
 @dataclass
@@ -163,17 +163,16 @@ class CompSPHSystem(BaseIntegrationSystem):
         rebuildForNextStep = False
         if solvesOnGrid(schemeConfig) and self.pairWork is not None:
             with record_function("[warpSPH] - [compSPH finalize - 00] list flags"):
-                nextFlag = verletStaleFlag(self.state.positions, lastState.supports, self.adjacency, config.domain,
-                                           config.verletScale, rebuildSlack=STAGE_ZERO_REBUILD_SLACK)
-                inStep = list(self.pairWork.flags or [])
-                listGridTooSmall = takeListGridFlags(self.listGrid)       # the list this step ran on came from a too-small grid
-                values = torch.stack(inStep + listGridTooSmall + [nextFlag]).tolist()
+                usage = verletUsage(self.state.positions, lastState.supports, self.adjacency, config.domain, config.verletScale)
+                inStep = [f.to(usage.dtype) for f in (self.pairWork.flags or [])]
+                listGridTooSmall = [f.to(usage.dtype) for f in takeListGridFlags(self.listGrid)]   # the list came from a too-small grid
+                values = torch.stack(inStep + listGridTooSmall + [usage]).tolist()
             if any(values[:-1]):
                 if any(values[len(inStep):-1]):
                     self.listGrid.minRadius = 2.0 * self.listGrid.radius        # make a larger grid; rebuild from scratch
                 self.rerunRequest = RerunRequest(halfVelocity=None, conservative=True, rebuildList=any(values[len(inStep):-1]))
                 return self
-            rebuildForNextStep = bool(values[-1])
+            rebuildForNextStep = rebuildNeeded(self.listGrid, values[-1])
         if schemeConfig.compatibleEnergy:
             with record_function("[warpSPH] - [compSPH finalize - 01] compatible energy"):
                 delta_u, rerun = energyIncrement(self.pairWork, initialState.state, updateValues, weights, dt)

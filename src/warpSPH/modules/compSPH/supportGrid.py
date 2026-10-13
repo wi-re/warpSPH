@@ -16,7 +16,7 @@ from warpSPHCore import SupportScheme
 from warpSPHCore.radiusSearch.compactHash import GraphedBuild, makeHashMapSlots
 
 __all__ = ['solvesOnGrid', 'SupportGrid', 'ensureSupportGrid', 'refreshSupportGrid', 'noteOutgrown', 'growIfOutgrown',
-           'pairListGridFactory', 'takeListGridFlags']
+           'pairListGridFactory', 'takeListGridFlags', 'rebuildNeeded']
 
 #: the flags are read every this many steps; a binding limit for a few steps only clips h to the radius
 #: (1.5x the largest support when the grid was made), it does not invalidate anything
@@ -45,6 +45,9 @@ class SupportGrid:
     #: device flags 'the solve's limit to the radius was binding', read every `CHECK_EVERY` steps (not per stage)
     pending: Optional[List[torch.Tensor]] = None
     age: int = 0
+    #: the pair list's Verlet-buffer usage at the last step end, and the usage a step adds (host floats, estimated)
+    lastUsage: float = 0.0
+    perStep: float = 0.3
 
 
 def ensureSupportGrid(holder: SupportGrid, state, config, scale: float = 1.0) -> SupportGrid:
@@ -111,3 +114,23 @@ def takeListGridFlags(holder: SupportGrid) -> List[torch.Tensor]:
     """The 'the pair-list grid was too small for the supports' device flags noted since the last call (cleared)."""
     flags, holder.pending = (holder.pending or []), []
     return flags
+
+
+#: a step is allowed to use this multiple of the usage the previous steps showed (and of the first, assumed, 0.3)
+#: before the list is rebuilt for it; a stage that still runs out is caught by its device flag (a second pass)
+USAGE_GUARD = 1.25
+MIN_STEP_USAGE = 0.02
+
+
+def rebuildNeeded(holder: SupportGrid, usage: float, rebuilt: bool = False) -> bool:
+    """Step end: `usage` is the fraction of the Verlet buffer the list has used (read with the step's other flags).
+    Learns how much one step adds and says whether the NEXT step would run the list out, i.e. whether to rebuild it now.
+    `holder` is the list grid's holder, which keeps the host-side estimate."""
+    step = usage - holder.lastUsage
+    if step > 0:
+        holder.perStep = max(MIN_STEP_USAGE, 0.5 * holder.perStep + 0.5 * step)
+    holder.lastUsage = usage
+    need = usage + USAGE_GUARD * holder.perStep >= 1.0
+    if need:
+        holder.lastUsage = 0.0          # the fresh list starts unused
+    return need
