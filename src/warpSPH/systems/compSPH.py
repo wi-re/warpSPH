@@ -19,6 +19,8 @@ import torch
 from typing import Optional
 from warpSPHCore import *
 from warpSPHCore.profiling import record_function
+from warpSPHCore import verletStaleFlag, buildVerletList, SupportScheme
+from types import SimpleNamespace
 
 __all__ = ['CompSPHState', 'CompSPHSystem']
 
@@ -81,8 +83,8 @@ class CompSPHState(BaseState):
 #     dEdt: torch.Tensor = tagged(tags=('totalEnergy_derivative',))
 #     drhodt: torch.Tensor = tagged(tags=('density_derivative',))
 
-from ..modules.compSPH.pairWork import PairWork, beginPairWork, energyIncrement
-from ..modules.compSPH.supportGrid import SupportGrid, growIfOutgrown
+from ..modules.compSPH.pairWork import PairWork, RerunRequest, beginPairWork, energyIncrement, STAGE_ZERO_REBUILD_SLACK
+from ..modules.compSPH.supportGrid import SupportGrid, growIfOutgrown, solvesOnGrid, pairListGridFactory, takeListGridFlags
 
 
 @dataclass
@@ -95,6 +97,8 @@ class CompSPHSystem(BaseIntegrationSystem):
     pairWork: Optional[PairWork] = None
     #: the fixed-shape grid the support solve runs on (one per run; replaced when the supports outgrow its radius)
     supportGrid: Optional[SupportGrid] = None
+    #: the grid the pair-list rebuilds search (fixed-shape, graph-replayed; one per run)
+    listGrid: Optional[SupportGrid] = None
     #: set by `finalize` when the step has to be run again (the pair list changed between stages)
     rerunRequest: Optional[torch.Tensor] = None
 
@@ -102,6 +106,8 @@ class CompSPHSystem(BaseIntegrationSystem):
         self.pairWork = beginPairWork(stageWeights, rerun)
         if self.supportGrid is None:
             self.supportGrid = SupportGrid()
+        if self.listGrid is None:
+            self.listGrid = SupportGrid()
         self.rerunRequest = None
         return super().initialize(dt, *args, **kwargs)
 
@@ -109,7 +115,7 @@ class CompSPHSystem(BaseIntegrationSystem):
         state = get_reference_state(self)
         verbosePrint(verbose, f'Initializing new state [t={self.t}]')
         return CompSPHSystem(state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain,
-                             pairWork=self.pairWork, supportGrid=self.supportGrid)
+                             pairWork=self.pairWork, supportGrid=self.supportGrid, listGrid=self.listGrid)
     
     def apply_position_update(self, update, spec: PositionUpdateSpec, **kwargs):
         return update_position(self, update, spec, 'position', 'position_derivative', 'velocity', 'velocity_derivative')
@@ -150,6 +156,24 @@ class CompSPHSystem(BaseIntegrationSystem):
         #         print(f'\ttype(item): {type(item)}')
 
         
+        # Grid mode: ONE host read per step. The in-step flags (was the list long enough for every stage?) and the
+        # step-end flag (is it still long enough, with half the Verlet buffer to spare, for the NEXT step's stages?)
+        # come back together; a failing in-step flag repeats the step with the list validated at every stage, a failing
+        # step-end flag rebuilds the list now, so the next step starts on a list that needs no check.
+        rebuildForNextStep = False
+        if solvesOnGrid(schemeConfig) and self.pairWork is not None:
+            with record_function("[warpSPH] - [compSPH finalize - 00] list flags"):
+                nextFlag = verletStaleFlag(self.state.positions, lastState.supports, self.adjacency, config.domain,
+                                           config.verletScale, rebuildSlack=STAGE_ZERO_REBUILD_SLACK)
+                inStep = list(self.pairWork.flags or [])
+                listGridTooSmall = takeListGridFlags(self.listGrid)       # the list this step ran on came from a too-small grid
+                values = torch.stack(inStep + listGridTooSmall + [nextFlag]).tolist()
+            if any(values[:-1]):
+                if any(values[len(inStep):-1]):
+                    self.listGrid.minRadius = 2.0 * self.listGrid.radius        # make a larger grid; rebuild from scratch
+                self.rerunRequest = RerunRequest(halfVelocity=None, conservative=True, rebuildList=any(values[len(inStep):-1]))
+                return self
+            rebuildForNextStep = bool(values[-1])
         if schemeConfig.compatibleEnergy:
             with record_function("[warpSPH] - [compSPH finalize - 01] compatible energy"):
                 delta_u, rerun = energyIncrement(self.pairWork, initialState.state, updateValues, weights, dt)
@@ -183,6 +207,13 @@ class CompSPHSystem(BaseIntegrationSystem):
         self.state.alphas.copy_(lastState.alphas)
         from ..modules.shockCapturing.wrapper import advanceViscositySwitchStep  # (circular at import time)
         advanceViscositySwitchStep(self, initialState, returnValues, schemeConfig, config)
+
+        if rebuildForNextStep:
+            with record_function("[warpSPH] - [compSPH finalize - 02] list for the next step"):
+                rebuilt = SimpleNamespace(positions=self.state.positions, supports=self.state.supports)
+                self.adjacency = buildVerletList(
+                    rebuilt, config.domain, verletScale=config.verletScale, supportMode=SupportScheme.SuperSymmetric,
+                    priorNeighborhood=None, gridFactory=pairListGridFactory(self.listGrid, rebuilt, config))
 
         updateValues[-1].dudt = (self.state.internalEnergies - initialState.state.internalEnergies) /dt
 

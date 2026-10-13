@@ -29,7 +29,21 @@ from ...enumTypes import EnergyScheme
 from ...math.scatter import segment_sum
 from warpSPHCore.profiling import record_function
 
-__all__ = ['PairWork', 'beginPairWork', 'startFromLatest', 'startStage', 'stageRebuildSlack', 'weightedStages', 'accumulateStage', 'energyIncrement']
+__all__ = ['PairWork', 'RerunRequest', 'beginPairWork', 'listFitsParticles', 'startFromLatest', 'startStage', 'stageRebuildSlack', 'weightedStages', 'accumulateStage', 'energyIncrement']
+
+
+@dataclass
+class RerunRequest:
+    """Why `finalize` asks the integrator for the step again, and what the second pass may use.
+
+    `conservative`: run the stages with the list validated (and rebuilt) at every stage instead of the optimistic
+    deferred check -- the first pass used a list that turned out too short for some stage.
+    `halfVelocity`: the pair list changed between stages; each stage of the second pass adds its own energy share
+    with this half-step velocity (see the module docstring)."""
+    halfVelocity: Optional[torch.Tensor] = None
+    conservative: bool = True
+    #: the list the first pass ran on is not to be trusted at all (built from a grid that was too small): start from none
+    rebuildList: bool = False
 
 
 @dataclass
@@ -48,10 +62,25 @@ class PairWork:
     #: the pair list the previous stage of this step ended on: the next stage starts from it (every stage system
     #: is copied from the step's initial state, which still has the list of the previous step)
     latest: Any = None
+    #: a second pass: validate the pair list at every stage (no deferred check)
+    conservative: bool = False
+    #: first pass with deferred checks: the 0-d device flags 'the list is too short for this stage', read at step end
+    flags: Optional[List[torch.Tensor]] = None
+    rebuildList: bool = False
 
 
-def beginPairWork(stageWeights, rerun) -> PairWork:
-    return PairWork(weights=None if stageWeights is None else tuple(stageWeights), halfVelocity=rerun)
+def beginPairWork(stageWeights, rerun: Optional[RerunRequest] = None) -> PairWork:
+    return PairWork(weights=None if stageWeights is None else tuple(stageWeights),
+                    halfVelocity=None if rerun is None else rerun.halfVelocity, conservative=rerun is not None, flags=[],
+                    rebuildList=rerun is not None and rerun.rebuildList)
+
+
+def listFitsParticles(adjacency, state) -> bool:
+    """A list built for as many particles as the state has now (host shapes only, no read)."""
+    if adjacency is None or getattr(adjacency, 'queryPositions', None) is None or getattr(adjacency, 'referencePositions', None) is None:
+        return False
+    n = state.positions.shape[0]
+    return adjacency.queryPositions.shape[0] == n and adjacency.referencePositions.shape[0] == n and adjacency.numNeighbors.shape[0] == n
 
 
 def weightedStages(pairWork: Optional[PairWork]) -> int:
@@ -134,7 +163,7 @@ def energyIncrement(pairWork: PairWork, initialState, updates: List[Any], weight
             fullAcceleration += k * update.dvdt
         halfStepVelocity = initialState.velocities + 0.5 * fullAcceleration * dt
         if not pairWork.consistent or pairWork.work is None:
-            return None, halfStepVelocity
+            return None, RerunRequest(halfVelocity=halfStepVelocity, conservative=True)
         i, j = pairWork.adjacency.livePairs()
         vji = halfStepVelocity[j] - halfStepVelocity[i]
         return segment_sum(torch.einsum('ij,ij->i', vji, pairWork.work), pairWork.adjacency.numNeighbors), None

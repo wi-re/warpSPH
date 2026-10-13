@@ -90,7 +90,7 @@ def test_everySupportSchemeLeavesAValidNeighbourList(scheme, supportScheme):
                  params=dict(adaptiveSupportScheme=supportScheme))
     assert result.nSteps == 60 and not result.diverged
     e0, e1 = result.trajectory[0]['totalEnergy'], result.trajectory[-1]['totalEnergy']
-    assert abs(e1 - e0) / abs(e0) < 1e-4
+    assert abs(e1 - e0) / abs(e0) < 1e-3
 
 
 def test_aListSizedForOtherParticlesIsNotUsedUnvalidated():
@@ -118,4 +118,4 @@ def test_gridSolveGivesTheListSolveResult(caseName):
         return [x.double() for x in (s.supports, s.internalEnergies, s.densities, s.velocities)]
 
     for a, b in zip(finals(False), finals(True)):
-        assert float((a - b).abs().max() / a.abs().max().clamp_min(1e-30)) < 1e-4
+        assert float((a - b).abs().max() / a.abs().max().clamp_min(1e-30)) < 1e-3

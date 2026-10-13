@@ -21,11 +21,13 @@ from ..modules.shockCapturing import computeViscositySwitchTerms, updateViscosit
 from ..enumTypes import EnergyScheme, ViscositySwitch
 
 from warpSPHCore.profiling import record_function
+from warpSPHCore import verletStaleFlag
 from warpSPHCore import (
     GradHState, OperationProperties, SupportScheme, buildVerletList,
 )
 from ..modules.compSPH.pairWork import accumulateStage, startStage, stageRebuildSlack
-from ..modules.compSPH.supportGrid import ensureSupportGrid, refreshSupportGrid, noteOutgrown
+from ..modules.compSPH.supportGrid import ensureSupportGrid, refreshSupportGrid, noteOutgrown, solvesOnGrid, pairListGridFactory
+from ..modules.compSPH.pairWork import listFitsParticles
 from ..enumTypes import AdaptiveSupportScheme
 from ..systems.compSPH import CompSPHSystem, CompSPHState
 from ..configurations.compSPHConfig import CompSPHConfig
@@ -57,7 +59,7 @@ def compSPH_step(
     # currentSystem.adjacency = None
 
     t = currentSystem.t
-    onGrid = schemeConfig.adaptiveSupportScheme == AdaptiveSupportScheme.Owen and getattr(schemeConfig, 'supportSolveOnGrid', False)
+    onGrid = solvesOnGrid(schemeConfig)
     rebuildSlack = stageRebuildSlack(currentSystem, stageIndex)
     with record_function("[warpSPH] - [compSPH - 01] wall + optimal support"):
         wall = beginCompressibleWall(currentState, config)
@@ -78,11 +80,21 @@ def compSPH_step(
         currentState.densities = rho_optimal
 
     with record_function("[warpSPH] - [compSPH - 02] adjacency"):
-        if onGrid:
-            # the one explicit validity check and (re)build of the pair list, for the positions and the new supports
+        pairWork = currentSystem.pairWork
+        if onGrid and pairWork is not None and not pairWork.conservative and listFitsParticles(currentSystem.adjacency, currentState):
+            # optimistic stage: no host read. The list was validated (with slack) for the positions this step starts from
+            # when the previous step ended; whether it is also long enough for THIS stage's positions and new supports is a
+            # device flag, read once at the end of the step (finalize) -- a failing flag repeats the step conservatively
+            adjacency = currentSystem.adjacency
+            pairWork.flags.append(verletStaleFlag(currentState.positions, currentState.supports, adjacency, config.domain,
+                                                  config.verletScale))
+        elif onGrid:
+            # the explicit validity check and (re)build of the pair list, for the positions and the new supports
             adjacency = buildVerletList(
                 currentState, config.domain, verletScale = config.verletScale, supportMode = SupportScheme.SuperSymmetric,
-                priorNeighborhood = currentSystem.adjacency, verbose = False, rebuildSlack = rebuildSlack)
+                priorNeighborhood = None if (pairWork is not None and pairWork.rebuildList) else currentSystem.adjacency,
+                verbose = False, rebuildSlack = rebuildSlack,
+                gridFactory = pairListGridFactory(currentSystem.listGrid, currentState, config))
             currentSystem.adjacency = adjacency
         else:
             # the solver validated this list against the particles and every support it used, and rebuilt it if needed

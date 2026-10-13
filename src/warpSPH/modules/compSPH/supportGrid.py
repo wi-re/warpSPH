@@ -15,7 +15,8 @@ import torch
 from warpSPHCore import SupportScheme
 from warpSPHCore.radiusSearch.compactHash import GraphedBuild, makeHashMapSlots
 
-__all__ = ['SupportGrid', 'ensureSupportGrid', 'refreshSupportGrid', 'noteOutgrown', 'growIfOutgrown']
+__all__ = ['solvesOnGrid', 'SupportGrid', 'ensureSupportGrid', 'refreshSupportGrid', 'noteOutgrown', 'growIfOutgrown',
+           'pairListGridFactory', 'takeListGridFlags']
 
 #: the flags are read every this many steps; a binding limit for a few steps only clips h to the radius
 #: (1.5x the largest support when the grid was made), it does not invalidate anything
@@ -24,6 +25,12 @@ CHECK_EVERY = 8
 #: radius headroom over the largest support when a grid is made: the supports may grow by this factor before the
 #: solve's limit binds and a larger grid is made
 RADIUS_HEADROOM = 1.5
+
+
+def solvesOnGrid(schemeConfig) -> bool:
+    """The Owen support solve runs on the fixed-shape grid (and the step's pair list is checked by deferred flags)."""
+    from ...enumTypes import AdaptiveSupportScheme
+    return schemeConfig.adaptiveSupportScheme == AdaptiveSupportScheme.Owen and getattr(schemeConfig, 'supportSolveOnGrid', False)
 
 
 @dataclass
@@ -40,24 +47,24 @@ class SupportGrid:
     age: int = 0
 
 
-def ensureSupportGrid(holder: SupportGrid, state, config) -> SupportGrid:
+def ensureSupportGrid(holder: SupportGrid, state, config, scale: float = 1.0) -> SupportGrid:
     """`holder` itself, with a grid in it that fits this state (one host read of the largest support when it has to
     make one)."""
     n = state.positions.shape[0]
     if holder.build is not None and holder.particles == n and holder.radius >= holder.minRadius:
         return holder
-    radius = max(RADIUS_HEADROOM * float(state.supports.max()), holder.minRadius)
+    radius = max(RADIUS_HEADROOM * scale * float(state.supports.max()), holder.minRadius)
     slots = makeHashMapSlots(n, config.domain, radius, device=state.positions.device, dtype=state.positions.dtype,
                              mode=SupportScheme.Gather, hashMapLength=n + 1)
     holder.build, holder.radius, holder.particles = GraphedBuild(slots), radius, n
     return holder
 
 
-def refreshSupportGrid(grid: SupportGrid, state):
+def refreshSupportGrid(grid: SupportGrid, state, scale: float = 1.0):
     """The grid for the state's current positions and supports: copy into the static slots, replay the build."""
     slots = grid.build.slots
     slots.positions.copy_(state.positions)
-    slots.supports.copy_(state.supports)
+    slots.supports.copy_(state.supports if scale == 1.0 else state.supports * scale)
     return grid.build.replay()
 
 
@@ -80,3 +87,27 @@ def growIfOutgrown(holder: SupportGrid) -> None:
     holder.pending, holder.age = [], 0
     if binding:
         holder.minRadius = RADIUS_HEADROOM * holder.radius
+
+
+def pairListGridFactory(holder: SupportGrid, state, config):
+    """A callable giving the grid a pair-list rebuild searches (`buildVerletList(gridFactory=...)`): built for the
+    Verlet-scaled supports, `holder`'s own grid (one more per run), the graph-replayed fixed-shape build instead of the
+    eager hash-map build (4 host syncs, ~160 ops). The grid is made for a radius with headroom over the scaled largest
+    support; whether that still held for the supports it was built from is a device flag, kept in `holder.pending`
+    and read with the step's other end-of-step flags (`takeListGridFlags`)."""
+    scale = config.verletScale
+
+    def make():
+        ensureSupportGrid(holder, state, config, scale=scale)
+        grid = refreshSupportGrid(holder, state, scale=scale)
+        if holder.pending is None:
+            holder.pending = []
+        holder.pending.append(~holder.build.slots.fits)
+        return grid
+    return make
+
+
+def takeListGridFlags(holder: SupportGrid) -> List[torch.Tensor]:
+    """The 'the pair-list grid was too small for the supports' device flags noted since the last call (cleared)."""
+    flags, holder.pending = (holder.pending or []), []
+    return flags
