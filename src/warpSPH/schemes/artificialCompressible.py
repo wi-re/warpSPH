@@ -12,7 +12,7 @@ Forward Euler on an exact delta is the identity, so the runner reproduces the
 converged state byte for byte with no framework change. That contract only
 holds for a **one-stage, one-evaluation** integrator: under RK2 the solve would
 run twice per step and the results would be *blended*, which is wrong and not
-visibly wrong. `validateIntegrationScheme` therefore refuses anything else,
+visibly wrong. `ArtificialCompressibleSPHConfig.validate` therefore refuses anything else,
 loudly, at step entry -- `cases/freeSurface/dambreak.py` documents the same class of trap
 for `divergenceFree`/`semiImplicitEuler` and notes that nothing enforces it;
 here it is enforced.
@@ -64,13 +64,12 @@ from warpSPHCore.profiling import record_function
 from ..configurations import ArtificialCompressibleSPHConfig, SimulationConfig
 from ..modules.artificialCompressible import (
     DualTimeSolver, acParameters, bdfHistory, bodyForces, contactMasks, detectSurface,
-    exactDeltaUpdate, makeWallBounce, validateAcParams, validateIntegrationScheme,
-    zeroNonFluidRows)
+    exactDeltaUpdate, makeWallBounce, zeroNonFluidRows)
 from ..modules.boundaryConditions import enforceDirichlet, enforceUpdates
 from ..modules.mdbc import computeBoundaryVelocities
 from ..systems.artificialCompressible import ArtificialCompressibleSystem
 
-__all__ = ['artificialCompressible_step', 'validateIntegrationScheme', 'PHYSICS_IMPLEMENTED']
+__all__ = ['artificialCompressible_step', 'PHYSICS_IMPLEMENTED']
 
 PHYSICS_IMPLEMENTED = True
 
@@ -82,8 +81,7 @@ def artificialCompressible_step(
     schemeConfig: ArtificialCompressibleSPHConfig,
     verbose: bool = False,
 ):
-    validateIntegrationScheme(config)
-    validateAcParams(schemeConfig.acParams)
+    schemeConfig.validate(config)
     state = system.state
 
     with record_function("[warpSPH] - [acsph - 01] - compute adjacency"):

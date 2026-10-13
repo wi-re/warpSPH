@@ -49,6 +49,20 @@ from .region import ParticleRegion
 from .rigidBody import RigidBody
 
 
+#: `rkStages` -> the tableau name in `warpSPHIntegrators.getButcherTableau`. These three ARE
+#: Fig. 1 of the paper: explicit midpoint, SSPRK3 (Shu-Osher), classical RK4.
+RK_TABLEAUS = {2: 'midpoint', 3: 'SSPRK3', 4: 'RK4'}
+
+#: `CFL_tau` the paper pairs with each stage count (Sec. 3.1.3). Not enforced --
+#: `acParams.cflTau` is the knob -- but recorded so a mismatch is visible.
+RECOMMENDED_CFL_TAU = {2: 0.5, 3: 1.0, 4: 1.5}
+
+#: The only integrators whose action on an exact delta is the identity: the step returns
+#: `(u^{n+1} - u^n)/dt`, and a multi-stage integrator would run the dual-time solve once per
+#: stage and blend two converged states -- plausible-looking and wrong.
+EXACT_DELTA_INTEGRATORS = ('forwardEuler', 'explicitEuler')
+
+
 @dataclass
 class ArtificialCompressibilityParams:
     """Every constant the paper fixes for the dual-time solve. Defaults are the
@@ -218,6 +232,35 @@ class ArtificialCompressibilityParams:
     #: is `None`. Exactly one of the two fixes `nu`.
     nu: float = field(default=1e-6, metadata={'description': 'kinematic viscosity (used when referenceSoundSpeedForViscosity is None)'})
 
+    @property
+    def butcherTableauName(self) -> str:
+        return RK_TABLEAUS[self.rkStages]
+
+    def validate(self) -> None:
+        """Refuse options that are declared but not implemented, and inconsistent
+        combinations (each is gated by its config field and raises rather than silently
+        no-opping)."""
+        if self.useTildeVAdvection:
+            raise NotImplementedError(
+                "acParams.useTildeVAdvection (Eqs. 27-31) is not implemented -- the "
+                "paper's own conclusion is to leave it off (Sec. 4.2). ACSPH_PLAN.md step 10.")
+        if self.shiftInsidePseudoLoop:
+            raise NotImplementedError(
+                "acParams.shiftInsidePseudoLoop (Eq. 60) is not implemented; Sec. 4.2 "
+                "tested it and chose external shifting. ACSPH_PLAN.md step 10.")
+        if self.k3 != 0.0:
+            raise NotImplementedError(
+                "acParams.k3 (Eqs. 9/22) is not implemented -- the paper zeroes it. "
+                "ACSPH_PLAN.md step 10.")
+        if self.rkStages not in RK_TABLEAUS:
+            raise ValueError(f"acParams.rkStages must be one of {sorted(RK_TABLEAUS)}, got {self.rkStages}")
+        if self.wallBounceTarget not in ('position', 'stage', 'both'):
+            raise ValueError(f"acParams.wallBounceTarget must be 'position', 'stage' or 'both', "
+                             f"got {self.wallBounceTarget!r}")
+        if self.wallPressureEdgeRelax != 'off' and self.cavitationProjection != 'off':
+            raise ValueError("wallPressureEdgeRelax is an alternative to cavitationProjection; "
+                             "set one of them")
+
 
 def buildDefaultArtificialCompressibilityParams() -> ArtificialCompressibilityParams:
     return ArtificialCompressibilityParams()
@@ -295,6 +338,23 @@ class ArtificialCompressibleSPHConfig:
     gravityConfig: gravityConfiguration = field(default_factory=buildDefaultGravityConfiguration, metadata={'description': 'Configuration for gravity module'})
 
     bandwith: float = field(default=10.0, metadata={'description': 'Bandwith for the divergence-free noise sampling module'})
+
+    def validate(self, simulationConfig) -> None:
+        """Check this scheme configuration against the run's `SimulationConfig`. Raised,
+        not warned: a multi-stage integrator does not fail visibly (see
+        `EXACT_DELTA_INTEGRATORS`)."""
+        self.acParams.validate()
+        scheme = getattr(simulationConfig, 'integrationScheme', None)
+        name = getattr(scheme, 'name', scheme)
+        if name not in EXACT_DELTA_INTEGRATORS:
+            raise ValueError(
+                f"artificialCompressible requires integrationScheme=forwardEuler, got "
+                f"{name!r}. The step returns an exact per-step delta (dx/dt = "
+                f"(x^{{n+1}} - x^n)/dt), which only a single-evaluation integrator "
+                f"applies unchanged; a multi-stage one would run the dual-time solve "
+                f"once per stage and blend the results. Set "
+                f"`config.integrationScheme = IntegrationSchemeType.forwardEuler` "
+                f"(CaseSpec: `--integrationScheme forwardEuler`).")
 
 
 def _acParamsToDict(p: ArtificialCompressibilityParams) -> Dict[str, Any]:

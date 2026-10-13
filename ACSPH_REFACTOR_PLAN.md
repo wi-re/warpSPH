@@ -59,10 +59,9 @@ phase-0 numbers, and every phase's results bitwise (or tolerance-stated) against
 ## 3a. Status
 
 **Phase 1 done (2026-10-13).** `schemes/artificialCompressible.py` 906 -> 133 lines (59 of them the module docstring): the step is
-calls into `modules/artificialCompressible/` and nothing else. New modules: `parameters.py` (acParameters, convergence metric,
-the two validators, tableaus), `surfaceFlags.py` (`SurfaceFlags`, `detectSurface`, taper), `wallClosure.py` (Eq. 61 wall pressure,
+calls into `modules/artificialCompressible/` and nothing else. New modules: `parameters.py` (acParameters, convergence metric), `surfaceFlags.py` (`SurfaceFlags`, `detectSurface`, taper), `wallClosure.py` (Eq. 61 wall pressure,
 unilateral variants, `WallBounce`/`makeWallBounce`, `ContactMasks`/`contactMasks`), `residual.py` (the spatial residual and viscosity),
-`forcing.py` (`bodyForces`), `workingState.py`, `dualTime.py` (`DualTimeSolver.iterate/solve`, `exactDeltaUpdate`, `zeroNonFluidRows`,
+`forcing.py` (`bodyForces`); configuration facts and checks live in `configurations/artificialCompressible.py` (`RK_TABLEAUS`, `RECOMMENDED_CFL_TAU`, `EXACT_DELTA_INTEGRATORS`, `ArtificialCompressibilityParams.validate()`, `ArtificialCompressibleSPHConfig.validate(simulationConfig)`; the step makes one guard call) -- user's rule, 2026-10-13: configuration and its validity checks go in the configurations, not in a module folder called from the step, `workingState.py`, `dualTime.py` (`DualTimeSolver.iterate/solve`, `exactDeltaUpdate`, `zeroNonFluidRows`,
 `bdfHistory`). The same code moved, only renamed (underscores dropped) and split; no arithmetic changed. Checked: 64 tests green
 (`tests/test_artificialCompressible.py` now imports from the modules), and Marrone 3.1 nx 70 to t = 0.3 against the previous commit in
 a worktree: same 183 steps, identical per-step `maxVelocity` / `kineticEnergy` rows (66 compared), 42.3 vs 42.2 ms/step. `probe_contactLine.py`'s

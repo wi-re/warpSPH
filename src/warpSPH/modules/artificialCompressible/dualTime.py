@@ -30,7 +30,7 @@ from warpSPHIntegrators.butcher import getButcherTableau
 from ...systems.artificialCompressible import ArtificialCompressibleSystemUpdate
 from ..incompressible.convergence import ConvergenceCheckSchedule
 from ..mdbc import computeBoundaryVelocities
-from .parameters import TABLEAUS, convergenceMetricDevice
+from .parameters import convergenceMetricDevice
 from .pressureSmoothing import computePressureSmoothing
 from .residual import spatialResidual
 from .surfaceFlags import SurfaceFlags, detectSurface
@@ -62,7 +62,7 @@ class DualTimeSolver:
         self.xPrev, self.xPrev2, self.vPrev, self.vPrev2 = history
         self.bodyForce, self.wallBodyForce = bodyForce, wallBodyForce
         self.surface, self.contact, self.bounce = surface, contact, bounce
-        self.tableau = getButcherTableau(TABLEAUS[self.acParams.rkStages])
+        self.tableau = getButcherTableau(self.acParams.butcherTableauName)
         self.fluid = state.kinds == 0
         self.fluidRows = self.fluid.unsqueeze(-1)
         self.fluidIndex = self.fluid.nonzero().squeeze(1)

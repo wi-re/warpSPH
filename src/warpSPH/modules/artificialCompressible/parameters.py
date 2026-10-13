@@ -3,67 +3,6 @@
 
 import torch
 from warpSPHCore import sphKernel_xi
-from warpSPHIntegrators.integration import IntegrationSchemeType
-
-
-#: `rkStages` -> the tableau name in `warpSPHIntegrators.getButcherTableau`.
-#: These three ARE Fig. 1 of the paper: explicit midpoint, SSPRK3 (Shu-Osher),
-#: classical RK4.
-TABLEAUS = {2: 'midpoint', 3: 'SSPRK3', 4: 'RK4'}
-
-#: `CFL_tau` the paper pairs with each stage count (Sec. 3.1.3). Not enforced --
-#: `acParams.cflTau` is the knob -- but reported so a mismatch is visible.
-RECOMMENDED_CFL_TAU = {2: 0.5, 3: 1.0, 4: 1.5}
-
-#: The only integrators whose action on an exact delta is the identity.
-EXACT_DELTA_INTEGRATORS = {IntegrationSchemeType.forwardEuler,
-                           IntegrationSchemeType.explicitEuler}
-
-
-def validateIntegrationScheme(config) -> None:
-    """Refuse any integrator that would evaluate the step more than once, or
-    scale its result: the step returns an exact per-step delta, and a
-    multi-stage integrator would run the dual-time solve once per stage and
-    blend two converged states -- plausible-looking and wrong."""
-    scheme = getattr(config, 'integrationScheme', None)
-    if scheme in EXACT_DELTA_INTEGRATORS:
-        return
-    name = getattr(scheme, 'name', scheme)
-    raise ValueError(
-        f"artificialCompressible requires integrationScheme=forwardEuler, got "
-        f"{name!r}. The step returns an exact per-step delta (dx/dt = "
-        f"(x^{{n+1}} - x^n)/dt), which only a single-evaluation integrator "
-        f"applies unchanged; a multi-stage one would run the dual-time solve "
-        f"once per stage and blend the results. Set "
-        f"`config.integrationScheme = IntegrationSchemeType.forwardEuler` "
-        f"(CaseSpec: `--integrationScheme forwardEuler`).")
-
-
-def validateAcParams(acParams) -> None:
-    """Refuse options that are declared but not implemented, and inconsistent
-    combinations, loudly at step entry instead of silently no-opping."""
-    if acParams.useTildeVAdvection:
-        raise NotImplementedError(
-            "acParams.useTildeVAdvection (Eqs. 27-31) is not implemented -- the "
-            "paper's own conclusion is to leave it off (Sec. 4.2). "
-            "ACSPH_PLAN.md step 10.")
-    if acParams.shiftInsidePseudoLoop:
-        raise NotImplementedError(
-            "acParams.shiftInsidePseudoLoop (Eq. 60) is not implemented; Sec. 4.2 "
-            "tested it and chose external shifting. ACSPH_PLAN.md step 10.")
-    if acParams.k3 != 0.0:
-        raise NotImplementedError(
-            "acParams.k3 (Eqs. 9/22) is not implemented -- the paper zeroes it. "
-            "ACSPH_PLAN.md step 10.")
-    if acParams.rkStages not in TABLEAUS:
-        raise ValueError(f"acParams.rkStages must be one of {sorted(TABLEAUS)}, "
-                         f"got {acParams.rkStages}")
-    if acParams.wallBounceTarget not in ('position', 'stage', 'both'):
-        raise ValueError(f"acParams.wallBounceTarget must be 'position', 'stage' or 'both', "
-                         f"got {acParams.wallBounceTarget!r}")
-    if acParams.wallPressureEdgeRelax != 'off' and acParams.cavitationProjection != 'off':
-        raise ValueError("wallPressureEdgeRelax is an alternative to cavitationProjection; "
-                         "set one of them")
 
 
 def acParameters(currentState, config, schemeConfig, dt: float):

@@ -173,7 +173,7 @@ def test_aMultiStageIntegratorIsRefused(built):
 
 def test_forwardEulerIsAccepted(built):
     system, config, schemeConfig = built
-    acmod.validateIntegrationScheme(config)  # does not raise
+    schemeConfig.validate(config)  # does not raise
 
 
 # --- the step itself -------------------------------------------------------
