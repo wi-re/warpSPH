@@ -780,7 +780,8 @@ class GraphedIntegratorStep:
             # teach the host-side state (usage estimates, grid sizes) a second time
             restores = [d.hostState() for d in e['decisions'] if d.hostState is not None]
             probe = _cloneState(state)
-            probe.adjacency = _cloneAdjacency(state.adjacency)
+            if e['decisions']:
+                probe.adjacency = _cloneAdjacency(state.adjacency)      # (only where a decision can rebuild it in place)
             eager = self._eager(probe, dt, config, schemeConfig, False)
             for restore in restores:
                 restore()

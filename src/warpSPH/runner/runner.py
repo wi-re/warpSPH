@@ -11,6 +11,7 @@ module is that code, parameterised by a :class:`~warpSPH.runner.case.Case`.
 from __future__ import annotations
 
 import collections
+import contextlib
 import itertools
 import math
 import os
@@ -380,6 +381,7 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
     # step, self-checked, eager fallback on any Verlet rebuild). Not with
     # trajectory/state storing, which reads the per-stage data a replayed
     # step does not reconstruct.
+    deferStageTimes = ctx.scheme in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH)
     stepGraph = None
     if spec.cudaGraph and not spec.store and _stepGraphable(ctx, runningState):
         from ..utils.cudaGraph import GraphedDiagnostics, GraphedIntegratorStep
@@ -410,7 +412,9 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
                     # A device dt would make the integrator read every stage time
                     # back (`float(t + c dt)`, a sync each); the runner reads the
                     # step time once below anyway, so the stage times stay tensors.
-                    with deferHostTime():
+                    # Only for the schemes whose step was checked not to need a host
+                    # time (the delta-SPH right-hand-side graph does).
+                    with (deferHostTime() if deferStageTimes else contextlib.nullcontext()):
                         stepResult = ctx.integrator.function(
                             state=runningState,
                             f=ctx.stepFunction,
