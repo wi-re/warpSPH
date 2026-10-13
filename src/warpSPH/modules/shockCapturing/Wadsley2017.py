@@ -108,7 +108,7 @@ def wadsleyDetector(particleState, simulationConfig, adjacency, gamma: float):
     ratio = torch.where(Tnorm > 0, D / Tnorm.clamp(min=torch.finfo(D.dtype).tiny), torch.zeros_like(D))
 
     # Eq. (29): polynomial-weighted mean of D/|T| over the neighbours within i's support
-    i, j = adjacency.i.to(torch.int64), adjacency.j.to(torch.int64)
+    i, j = (t.to(torch.int64) for t in adjacency.livePairs())
     dx = _minimumImage(st.positions[i] - st.positions[j], simulationConfig.domain)
     q = dx.norm(dim=-1) / st.supports[i]
     w = torch.where(q < 1, 1.0 - q ** 4, torch.zeros_like(q)) * st.masses[j]

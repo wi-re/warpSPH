@@ -66,7 +66,7 @@ def complementSums(state: Any, config: Any, adjacency: Any, fluid: torch.Tensor,
         length = (domain.max - domain.min).to(F64)
         flags = torch.as_tensor(domain.periodic, device=length.device).to(F64)
     return _compiled('complementSums', _complementSumsCore, schemeConfig)(
-        state.positions.to(F64), state.masses.to(F64), rho, fluid, adjacency.i.long(), adjacency.j.long(), n, d, float(H), length, flags)
+        state.positions.to(F64), state.masses.to(F64), rho, fluid, *(t.long() for t in adjacency.livePairs()), n, d, float(H), length, flags)
 
 
 def curvature(scene, bi, x, n, t, H, dx):

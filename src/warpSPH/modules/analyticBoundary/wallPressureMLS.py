@@ -47,7 +47,7 @@ def buildMLSPressureFit(state: Any, config: Any, adjacency: Any, fluid: torch.Te
     of the analytic walls are for the Wendland family; the pair kernel is written out here rather than launched through Warp, once per solve)."""
     if config.kernel != KernelFunctions.Wendland2:
         raise NotImplementedError('the MLS wall pressure is written for the Wendland C2 kernel')
-    i, j = adjacency.i.long(), adjacency.j.long()
+    i, j = (t.long() for t in adjacency.livePairs())
     keep = (i != j) & fluid[i] & fluid[j]
     i, j = i[keep], j[keep]
     x = state.positions.to(F64)

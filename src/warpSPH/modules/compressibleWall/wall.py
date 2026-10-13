@@ -173,7 +173,7 @@ class CompressibleWall:
         it the fluid gains exactly the wall's power `F . v_wall`."""
         if f_ij is None:
             return f_ij
-        i, j = adjacency.i.long(), adjacency.j.long()
+        i, j = (t.long() for t in adjacency.livePairs())
         toWall = (currentState.kinds[i] == 0) & self.solid[j]
         return torch.where(toWall, torch.ones_like(f_ij), f_ij)
 

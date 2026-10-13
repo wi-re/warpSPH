@@ -1,7 +1,7 @@
 """Warp kernels for the pairwise parts of Read & Hayfield (2012), SPHS: the relaxation signal
 velocity and the entropy dissipation.
 
-Both loops were once written in torch on the host from `adjacency.i/j` with raw position
+Both loops were once written in torch on the host from `adjacency.livePairs()` with raw position
 differences `x_i - x_j` (no minimum image on a periodic domain, so a pair across the boundary had
 |x_ij| ~ the domain size: wrong direction, wrong `K_ij` cut-off) and a hand-copied B7 / Wendland2
 `dW/dr` that silently fell back to Wendland2 for any other kernel. Here they run on the device and

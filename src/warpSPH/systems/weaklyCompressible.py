@@ -182,10 +182,9 @@ def _meanBoundaryNormal(state, adjacency):
     shift can point back into the wall (`scripts/probe_nopenShiftResponse.py`
     measures the reversal past ~1.25 dx).
     """
-    ii = getattr(adjacency, 'i', None)
-    jj = getattr(adjacency, 'j', None)
-    if ii is None or jj is None:
+    if not hasattr(adjacency, 'livePairs'):
         return None
+    ii, jj = adjacency.livePairs()
     sel = (state.kinds[ii] == 0) & (state.kinds[jj] == 1)
     if not bool(sel.any()):
         return None

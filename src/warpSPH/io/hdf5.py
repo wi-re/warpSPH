@@ -13,8 +13,9 @@ from warpSPHIntegrators.specs import StageResult
 
 
 def dumpAdjacency(adjacency, adjacencyGroup):
-    adjacencyGroup.create_dataset('i', data=adjacency.i.cpu().numpy())
-    adjacencyGroup.create_dataset('j', data=adjacency.j.cpu().numpy())
+    liveI, liveJ = adjacency.livePairs()   # the real entries only: the capacity padding is not part of the data
+    adjacencyGroup.create_dataset('i', data=liveI.cpu().numpy())
+    adjacencyGroup.create_dataset('j', data=liveJ.cpu().numpy())
     adjacencyGroup.create_dataset('numNeighbors', data=adjacency.numNeighbors.cpu().numpy())
     adjacencyGroup.create_dataset('edgeOffsets', data=adjacency.edgeOffsets.cpu().numpy())
 
@@ -92,7 +93,8 @@ def loadAdjacency(adjacencyGroup, device):
     numRows = adjacencyGroup.attrs['numRows']
     numCols = adjacencyGroup.attrs['numCols']
 
-    return AdjacencyList(i, j, numNeighbors, edgeOffsets, numRows, numCols, queryPositions, referencePositions, querySupports, referenceSupports)
+    return AdjacencyList(i, j, numNeighbors, edgeOffsets, numRows, numCols, queryPositions, referencePositions, querySupports, referenceSupports,
+                         numEdges=int(i.shape[0]))
 
 def loadState(stateGroup, device, SimulationState):
     stateDict = {}

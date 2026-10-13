@@ -297,7 +297,7 @@ def computeCompSPHAccel_Kernel(
     )
 
 def _compSPHAccelPairShape(ctx, extras):
-    return ctx.adjacency.i.shape[0]
+    return ctx.adjacency.livePairs()[0].shape[0]   # per-edge outputs have the real edge count, not the padded capacity
 
 
 def _compSPHAccelDtype(ctx, extras):

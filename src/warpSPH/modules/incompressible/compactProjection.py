@@ -198,7 +198,7 @@ def solveCompactProjection(state: Any, config: Any, schemeConfig: Any, adjacency
         surface = (rho < float(cfg('surfaceRho', 0.85))) & fluid
     if D is None and surface is None:                                   # closed domain (no wall, no free surface): the constant is the null space, the mean of the right-hand side is removed
         rhs = torch.where(fluid, rhs - rhs[fluid].mean(), torch.zeros_like(rhs))
-    i, j = adjacency.i.long(), adjacency.j.long()
+    i, j = (t.long() for t in adjacency.livePairs())
     keep = (i != j) & fluid[i] & fluid[j]
     i, j = i[keep], j[keep]
     cal = cfg('morrisCalibration', None)

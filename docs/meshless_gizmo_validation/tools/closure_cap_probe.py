@@ -44,7 +44,7 @@ for name in ['kh256_state_step001000_periodic.pt', 'kh256_state_step003000_perio
         torch.cuda.synchronize(); dt_ms = 1e3 * (time.perf_counter() - t0)
         lam = gw.lam
         adj = gw.adjacency
-        i = adj.i.to(torch.int32); j = adj.j.to(torch.int32)
+        i = adj.livePairs()[0].to(torch.int32); j = adj.livePairs()[1].to(torch.int32)
         keep = i < j
         i, j = i[keep].contiguous(), j[keep].contiguous()
         d = pos[j] - pos[i]

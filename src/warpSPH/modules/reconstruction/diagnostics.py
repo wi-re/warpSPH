@@ -62,19 +62,20 @@ def computePairPhiMean(system, simulationConfig, diffusionParams) -> torch.Tenso
     if B is None:
         B = torch.zeros_like(st.supports)
     dev = str(st.positions.device)
-    nPairs = adj.i.shape[0]
+    adjI, adjJ = adj.livePairs()
+    nPairs = adjI.shape[0]
     phi = wp.zeros(nPairs, dtype=scalar_t, device=dev)
     wp.launch(_pairPhiKernel, dim=nPairs, device=dev, inputs=[
-        castTorchToWarp(adj.i.to(torch.int64)), castTorchToWarp(adj.j.to(torch.int64)),
+        castTorchToWarp(adjI.to(torch.int64)), castTorchToWarp(adjJ.to(torch.int64)),
         castTorchToWarpAsBuiltins(st.positions), castTorchToWarpAsBuiltins(st.velocities),
         castTorchToWarp(st.supports), castTorchToWarpAsBuiltins(grad.contiguous()), castTorchToWarp(B.contiguous()),
         buildDomainState(simulationConfig.domain), int(params.velocityPairPolicy), simulationConfig.kernel.value,
         float(params.reconstructionEtaCrit), float(params.reconstructionEtaFold), float(params.reconstructionBalsaraPower), int(params.limiterType),
         phi])
     phi = wp.to_torch(phi)
-    notSelf = (adj.i != adj.j).to(phi.dtype)
+    notSelf = (adjI != adjJ).to(phi.dtype)
     # deterministic per-row sums (no atomics): the Verlet list is row-sorted
-    rows = adj.i.to(torch.int64)
+    rows = adjI.to(torch.int64)
     counts = torch.bincount(rows, minlength=n)
     sums = torch.segment_reduce(phi * notSelf, 'sum', lengths=counts)
     nb = torch.segment_reduce(notSelf, 'sum', lengths=counts)

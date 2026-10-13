@@ -81,12 +81,12 @@ def _greshoState(nx=32):
 
 def _pairVelocities(state, adj, config, grad, policy, eta_crit=0.25, eta_fold=0.05, B=None, balsaraPower=2.0):
     dev = state.positions.device
-    n = adj.i.shape[0]
+    n = adj.livePairs()[0].shape[0]
     out = wp.zeros(n, dtype=vec2, device=str(dev))
     if B is None:
         B = torch.zeros_like(state.supports)
     wp.launch(_pairVelocityKernel, dim=n, device=str(dev), inputs=[
-        castTorchToWarp(adj.i.to(torch.int64)), castTorchToWarp(adj.j.to(torch.int64)),
+        castTorchToWarp(adj.livePairs()[0].to(torch.int64)), castTorchToWarp(adj.livePairs()[1].to(torch.int64)),
         castTorchToWarpAsBuiltins(state.positions), castTorchToWarpAsBuiltins(state.velocities),
         castTorchToWarp(state.supports), castTorchToWarpAsBuiltins(grad.contiguous()),
         buildDomainState(config.domain), policy.value, config.kernel.value, eta_crit, eta_fold,
@@ -120,10 +120,10 @@ def test_linear_field_annihilation(jitter):
     assert torch.allclose(grad[inner], A_.expand(int(inner.sum()), 2, 2), atol=1e-12 if FLOAT64 else 1e-5), \
         'J @ dx is not dv (or the M correction is not volume-consistent, OPEN_PROBLEMS §22)'
 
-    pairs = inner[adj.i] & inner[adj.j] & (adj.i != adj.j)
+    pairs = inner[adj.livePairs()[0]] & inner[adj.livePairs()[1]] & (adj.livePairs()[0] != adj.livePairs()[1])
     assert int(pairs.sum()) > 1000
     scale = torch.linalg.matrix_norm(A_, ord=2) * h.max()
-    raw = (st.velocities[adj.i] - st.velocities[adj.j])[pairs]
+    raw = (st.velocities[adj.livePairs()[0]] - st.velocities[adj.livePairs()[1]])[pairs]
     assert raw.norm(dim=1).max() / scale > 0.1, 'the raw pair velocity should not vanish, or the test proves nothing'
     tol = (1e-5 if jitter == 0 else 1e-2) if FLOAT64 else 1e-4
     # Limited: phi = 1 in a linear field, but the close-pair taper (eta_crit = 1/n_h is one lattice spacing) would

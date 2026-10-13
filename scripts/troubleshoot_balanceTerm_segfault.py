@@ -38,7 +38,7 @@ particle case. Ruled out so far, each with its own isolated test:
     -> if/else rewrite already applied to those two): clean, correct output.
   * The full wp.static() 6-branch dispatch, same isolation: clean.
   * ap_ij/av_ij edge-count shape -- verified by direct inspection of the
-    adjacency CSR structure (numNeighbors.sum() == len(adjacency.j), every
+    adjacency CSR structure (numNeighbors.sum() == len(adjacency.livePairs()[1]), every
     beginIndex+numIndices-1 in bounds).
   * Domain size (oversized vs. snug-fit), dim (1 vs. 2), warp-lang version
     (crashes identically under pinned 1.12.0 and dev 1.17.0.dev3), and
@@ -152,7 +152,7 @@ def build_case(dim: int, n: int, adjacency_kind: str):
         adjacency = radiusSearchCompactHashMap(particles, domain, mode=SupportScheme.Gather)
         support_mode = SupportScheme.Gather
 
-    print(f"case: dim={dim} n={n} numEdges={adjacency.i.shape[0]} adjacency={adjacency_kind}", flush=True)
+    print(f"case: dim={dim} n={n} numEdges={adjacency.livePairs()[0].shape[0]} adjacency={adjacency_kind}", flush=True)
 
     densities = warpOperation(
         particles,
@@ -164,7 +164,7 @@ def build_case(dim: int, n: int, adjacency_kind: str):
 
     particles.pressures = densities ** 1.4
 
-    numEdges = adjacency.i.shape[0]
+    numEdges = adjacency.livePairs()[0].shape[0]
     ap_ij = torch.zeros((numEdges, dim), dtype=DTYPE, device=DEVICE)
     av_ij = torch.ones((numEdges, dim), dtype=DTYPE, device=DEVICE)
     velocities = torch.randn((n, dim), dtype=DTYPE, device=DEVICE)

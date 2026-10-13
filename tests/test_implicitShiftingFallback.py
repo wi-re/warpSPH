@@ -151,7 +151,7 @@ def _productionSystem(state, config, domain, schemeConfig):
     adjacency = buildVerletList(state, domain, config.verletScale, SupportScheme.SuperSymmetric, None)
     state.densities = computeDensities(state, config, schemeConfig, adjacency)
     _K, J, H = computeShiftingPairTerms(state, domain, config.kernel, adjacency)
-    i_all, j_all = adjacency.i, adjacency.j
+    i_all, j_all = adjacency.livePairs()[0], adjacency.livePairs()[1]
     Hw_all, B, x0 = _buildSystem(state, config, schemeConfig, domain, adjacency,
                                  i_all, j_all, J, H, rho0, dim, numParticles)
     diagBlock, i, j, Hw = _buildDiagBlock(schemeConfig.shiftProperties.implicitOperator,

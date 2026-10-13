@@ -284,7 +284,7 @@ def computeImplicitShift(
         operator = schemeConfig.shiftProperties.implicitOperator
 
         _K, J, H = computeShiftingPairTerms(currentState, domain, config.kernel, adjacency)
-        i_all, j_all = adjacency.i, adjacency.j
+        i_all, j_all = adjacency.livePairs()
 
         Hw_all, B, x0 = _buildSystem(
             currentState, config, schemeConfig, domain, adjacency, i_all, j_all, J, H, rho0, dim, numParticles,

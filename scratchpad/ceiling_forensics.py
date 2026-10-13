@@ -173,7 +173,7 @@ def hook_pf(state, config, schemeConfig, adjacency, renormalizationState=None):
     P_i = state.pressures
     aSelfW = P_i.view(-1, 1) * aW1
     # neighbour counts (fluid / wall) from the adjacency
-    ii, jj = adjacency.i, adjacency.j
+    ii, jj = adjacency.livePairs()[0], adjacency.livePairs()[1]
     fl_i = (k[ii] == 0)
     nF = torch.zeros_like(P_i).index_add_(0, ii[fl_i & (k[jj] == 0) & (ii != jj)], torch.ones_like(ii[fl_i & (k[jj] == 0) & (ii != jj)], dtype=P_i.dtype))
     nW = torch.zeros_like(P_i).index_add_(0, ii[fl_i & (k[jj] == 1)], torch.ones_like(ii[fl_i & (k[jj] == 1)], dtype=P_i.dtype))

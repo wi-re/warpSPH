@@ -86,8 +86,8 @@ def test_densityPositionHVP_matches_implicitShiftings_ownHessianMatvec():
     # --- Hand-built reference: implicitShifting.py's own H, assembled by ---
     # --- its own _multiplyLaplacianBlock matvec. ---------------------------
     _K, _J, H = computeShiftingPairTerms(state, domain, config.kernel, adjacency)
-    pairMask = adjacency.i != adjacency.j  # implicitShifting.py drops self-pairs before assembly
-    i, j, Hm = adjacency.i[pairMask], adjacency.j[pairMask], H[pairMask]
+    pairMask = adjacency.livePairs()[0] != adjacency.livePairs()[1]  # implicitShifting.py drops self-pairs before assembly
+    i, j, Hm = adjacency.livePairs()[0][pairMask], adjacency.livePairs()[1][pairMask], H[pairMask]
     omega = state.masses / rho0
     Hw = Hm * omega[j, None, None]
     diagBlock = scatter_sum(Hw, i, dim=0, dim_size=n)

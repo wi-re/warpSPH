@@ -153,7 +153,7 @@ def wallBounceSetup(state, adjacency):
     kernel-gradient normal the same way, `noSlipHashD`). Rows with no ghost get
     a zero normal and never bounce."""
     kinds = state.kinds
-    i, j = adjacency.i.long(), adjacency.j.long()
+    i, j = (t.long() for t in adjacency.livePairs())
     m = (kinds[i] == 0) & (kinds[j] == 1)
     pi, pj = i[m], j[m]
     nW = torch.zeros_like(state.positions)

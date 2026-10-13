@@ -153,7 +153,7 @@ if args.mode == 'surface':
             adj = buildVerletList(st, r.ctx.config.domain, verletScale=1.0,
                                   supportMode=SupportScheme.SuperSymmetric,
                                   priorNeighborhood=None, verbose=False)
-            i, j = adj.i, adj.j
+            i, j = adj.livePairs()[0], adj.livePairs()[1]
             pair = fluid[i] & fluid[j]
             counts = torch.zeros(pos.shape[0], device=pos.device)
             counts.index_add_(0, i[pair],

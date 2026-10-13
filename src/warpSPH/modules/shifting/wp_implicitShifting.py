@@ -81,18 +81,19 @@ def computeShiftingPairTerms(
 ):
     """Per-pair kernel value `K`, gradient `J` and Hessian `H` (shapes
     `[numPairs]`, `[numPairs, dim]`, `[numPairs, dim, dim]`) for every
-    `(i, j) = (adjacency.i, adjacency.j)` pair, evaluated with gather support
+    `(i, j) = adjacency.livePairs()` pair, evaluated with gather support
     (`h = h_i`), matching diffSPH's `implicitShifting.evalKernel` convention.
     """
     dim = domain.dim
-    numPairs = adjacency.i.shape[0]
+    liveI, liveJ = adjacency.livePairs()
+    numPairs = liveI.shape[0]
 
     queryState = _buildParticleSoA(state, dim)
     domainState = _buildDomainState(domain)
     kernelProperties = _buildKernelState(kernel)
 
-    edgeI = castTorchToWarp(adjacency.i)
-    edgeJ = castTorchToWarp(adjacency.j)
+    edgeI = castTorchToWarp(liveI)
+    edgeJ = castTorchToWarp(liveJ)
 
     K_t, K_w = allocateTorchWarp(numPairs, scalar_t, edgeI.device)
     J_t, J_w = allocateTorchWarp(numPairs, vector(length=dim, dtype=scalar_t), edgeI.device)

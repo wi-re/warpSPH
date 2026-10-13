@@ -77,7 +77,7 @@ def _curvatureGate(normals: torch.Tensor, surfaceMask: torch.Tensor,
     `cosThreshold = cos(angle)`; a *larger* min dot product means a flatter
     neighbourhood, so the gate is `min_j (n_i . n_j) >= cosThreshold`.
     """
-    i, j = adjacency.i, adjacency.j
+    i, j = adjacency.livePairs()
     keep = surfaceMask[i] & surfaceMask[j]
     dots = (normals[i] * normals[j]).sum(dim=-1)
     dots = torch.where(keep, dots, torch.full_like(dots, float('inf')))

@@ -307,7 +307,7 @@ def _balanceTermDtype(ctx, extras):
 
 
 def _balancePairShape(ctx, extras):
-    return ctx.adjacency.i.shape[0]
+    return ctx.adjacency.livePairs()[0].shape[0]   # per-edge outputs have the real edge count, not the padded capacity
 
 
 def _balanceNumThreads(ctx, extras):

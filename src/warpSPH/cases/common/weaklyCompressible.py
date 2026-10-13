@@ -789,29 +789,6 @@ def calibrateRestDensity(ctx: RunContext, system, *,
 calibrateRestDensityMasses = calibrateRestDensity
 
 
-#: `_fluidPairs`' cache: (adjacency.i, adjacency.j, i, j) of the last call.
-#: Module-level because `AdjacencyList` is slotted (nothing can be stashed on
-#: it); holding the keyed tensors keeps their identity unique.
-_FLUID_PAIRS_CACHE: List[Any] = [None]
-
-
-def _fluidPairs(adjacency, fluid):
-    """The distinct fluid-fluid (i, j) pairs of `adjacency`, in edge order
-    (exactly `i[keep], j[keep]` below). Cached per edge list: it only changes
-    on a Verlet rebuild (new tensors), and particle kinds are run-constant
-    (the assumption `utils/syncFree.py:cachedKindIndex` makes), so per step
-    this is a cache hit instead of a mask over the full edge list plus a
-    gather (and the host sync that entails)."""
-    cached = _FLUID_PAIRS_CACHE[0]
-    if cached is not None and cached[0] is adjacency.i and cached[1] is adjacency.j:
-        return cached[2], cached[3]
-    i, j = adjacency.i.long(), adjacency.j.long()
-    keep = (i != j) & fluid[i] & fluid[j]
-    i, j = i[keep], j[keep]
-    _FLUID_PAIRS_CACHE[0] = (adjacency.i, adjacency.j, i, j)
-    return i, j
-
-
 def particleDistributionMetrics(ctx: RunContext, state) -> Dict[str, float]:
     """Is the particle *arrangement* physical? -- the blind spot of every
     field-valued metric in this file.
@@ -861,8 +838,8 @@ _DISTRIBUTION_KEYS = ('nnDistP01', 'nnDistMedian', 'pairedFraction', 'voidFracti
 
 def particleDistributionMetricsDevice(ctx: RunContext, state) -> Optional[Dict[str, torch.Tensor]]:
     """`particleDistributionMetrics` as 0-d device tensors, with no host sync
-    once the per-run fluid index and the per-adjacency fluid pairs are cached
-    -- capturable in a CUDA graph (the runner's graphed diagnostics). `None`
+    once the per-run fluid index is cached (the pairs are masked on the device
+    from the padded edge arrays, nothing is cached per edge list) -- capturable in a CUDA graph (the runner's graphed diagnostics). `None`
     where the metrics do not apply; read it back with
     `distributionMetricsFromHost`, which also drops the metrics (as the eager
     path always did) when no fluid particle has a fluid neighbour.
@@ -874,7 +851,7 @@ def particleDistributionMetricsDevice(ctx: RunContext, state) -> Optional[Dict[s
     same count."""
     adjacency = getattr(state, 'adjacency', None)
     particles = state.state
-    if adjacency is None or not hasattr(adjacency, 'i'):
+    if adjacency is None or not hasattr(adjacency, 'paddedI'):
         return None
     fluidIndex = cachedKindIndex(particles.kinds, 0, ctx.config)
     if fluidIndex.numel() == 0:
@@ -888,36 +865,45 @@ def particleDistributionMetricsDevice(ctx: RunContext, state) -> Optional[Dict[s
     # put `hydrostaticColumn` at 0.29 paired *at step 0*, before any physics,
     # while the wall-free `staticBlob` and `impact` read exactly 0.0. The
     # instability being measured is fluid particles collapsing onto each other.
-    i, j = _fluidPairs(adjacency, fluid)
-    if i.numel() == 0:
-        return None
+    # The padded pair arrays go straight in: `_distributionCore` masks the -1 padding, self pairs and non-fluid
+    # pairs on the device (fixed shapes, no boolean gather, no sync, no cache keyed on the edge list).
+    i, j = adjacency.paddedI, adjacency.paddedJ
     domain = getattr(ctx.config, 'domain', None)
     span = per = None
     if domain is not None and getattr(domain, 'periodic', None) is not None:
         span = (domain.max - domain.min).to(pos.dtype)
         per = domain.periodic.to(pos.device)
     q = deviceConstant([0.5, 0.01], torch.float32, pos.device)
-    vals = _distributionCore(pos, markDynamic(i), markDynamic(j), fluidIndex,
+    vals = _distributionCore(pos, markDynamic(i), markDynamic(j), fluid, fluidIndex,
                              particles.densities, span, per, q)
     return dict(zip(_DISTRIBUTION_KEYS + ('_nnFinite',), vals.unbind(0)))
 
 
 @compileGlue
-def _distributionCore(pos, i, j, fluidIndex, densities, span, per, q):
-    """`particleDistributionMetricsDevice`'s arithmetic, from the fluid pairs:
-    a float64 vector of `_DISTRIBUTION_KEYS` plus the finite count. Pure
-    torch (`compileGlue`). `q` = [0.5, 0.01] on the device."""
+def _distributionCore(pos, iPad, jPad, fluid, fluidIndex, densities, span, per, q):
+    """`particleDistributionMetricsDevice`'s arithmetic, from the padded pair
+    arrays: a float64 vector of `_DISTRIBUTION_KEYS` plus the finite count.
+    Pure torch (`compileGlue`). `q` = [0.5, 0.01] on the device.
+
+    Only distinct fluid-fluid pairs count; the others (the -1 capacity
+    padding, self pairs, fluid-wall pairs) get an infinite distance and a zero
+    count, which leaves the minimum and the (integer-valued) counts exactly as
+    the gathered fluid pairs gave."""
+    i = iPad.clamp_min(0)                  # -1 padding: a safe index, masked out below
+    j = jPad.clamp_min(0)
+    valid = (iPad >= 0) & (jPad >= 0) & (iPad != jPad) & fluid[i] & fluid[j]
     delta = pos[i] - pos[j]
     if span is not None:
         wrapped = delta - span * torch.round(delta / span)
         delta = torch.where(per.unsqueeze(0), wrapped, delta)
     dist = torch.linalg.norm(delta, dim=-1)
+    dist = torch.where(valid, dist, torch.full_like(dist, float('inf')))
 
     n = pos.shape[0]
     nn = torch.full((n,), float('inf'), device=pos.device, dtype=dist.dtype)
     nn.scatter_reduce_(0, i, dist, reduce='amin', include_self=True)
     counts = torch.zeros(n, device=pos.device, dtype=dist.dtype)
-    counts.scatter_add_(0, i, torch.ones_like(dist))
+    counts.scatter_add_(0, i, valid.to(dist.dtype))
 
     # Normalise by the MEDIAN nearest-neighbour distance, not `config.dx`.
     # The samplers do not lay particles down at `config.dx`: measured on

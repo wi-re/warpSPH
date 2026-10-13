@@ -141,7 +141,7 @@ def run_dudt_gradcheck() -> bool:
 
 def run_balance_gradcheck(scheme: EnergyScheme) -> bool:
     domain, positions, supports, masses, densities, adjacency, kinds, velocities, internalEnergies, pressures, soundspeeds, alphas = _build_case()
-    numEdges = adjacency.i.shape[0]
+    numEdges = adjacency.livePairs()[0].shape[0]
     ap_ij = torch.randn(numEdges, DIM, dtype=DTYPE, device=DEVICE, requires_grad=True)
     av_ij = torch.randn(numEdges, DIM, dtype=DTYPE, device=DEVICE, requires_grad=True)
 
@@ -173,7 +173,7 @@ def run_balance_gradcheck(scheme: EnergyScheme) -> bool:
 def run_balance_gamma_gradcheck(scheme: EnergyScheme) -> bool:
     """Gradcheck balance's `gamma` itself, as a differentiable tensor argument."""
     domain, positions, supports, masses, densities, adjacency, kinds, velocities, internalEnergies, pressures, soundspeeds, alphas = _build_case()
-    numEdges = adjacency.i.shape[0]
+    numEdges = adjacency.livePairs()[0].shape[0]
     ap_ij = torch.randn(numEdges, DIM, dtype=DTYPE, device=DEVICE)
     av_ij = torch.randn(numEdges, DIM, dtype=DTYPE, device=DEVICE)
     gamma = torch.tensor(1.4, dtype=DTYPE, device=DEVICE, requires_grad=True)

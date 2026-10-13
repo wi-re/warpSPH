@@ -633,10 +633,10 @@ tests/                     pytest suite
 scripts/run_tests.sh          # or plain `pytest`
 ```
 
-89 tests, about two minutes once the warp kernel cache is warm; a CUDA device
-is required. Most of that is the 15 `gradcheck_*.py` scripts, which each run in
-their own subprocess -- deselecting `tests/test_gradcheck_scripts.py` brings
-the rest in under 30 seconds. The script just wraps pytest, silencing the
+89 test files, about 20 minutes (measured 2026-10-13: ~19 min wall, warm warp kernel cache);
+a CUDA device is required. A good part of that is the `gradcheck_*.py` scripts, which each
+run in their own subprocess (some start a nested `pytest`, which is why a second `pytest`
+process shows up in `ps` -- it is not a second run). Use `-x` and `-k` for a quick check. The script just wraps pytest, silencing the
 third-party warnings that otherwise bury the result; it forwards any extra
 arguments (`scripts/run_tests.sh -k sod -v`). They assert *properties* rather
 than golden numbers — total-energy conservation for Sod, Taylor-Green decay

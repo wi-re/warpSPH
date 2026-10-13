@@ -60,5 +60,5 @@ def test_a_raw_position_difference_would_have_failed_this():
     case, kw = _CASES['sod1d']
     res = run(case, scheme='Monaghan', progress=False, quiet=True, **kw)
     st, adj, config = res.state.state, res.state.adjacency, res.ctx.config
-    raw = (st.positions[adj.i] - st.positions[adj.j]).norm(dim=-1)
+    raw = (st.positions[adj.livePairs()[0]] - st.positions[adj.livePairs()[1]]).norm(dim=-1)
     assert (raw > 2.0 * st.supports.max()).any(), 'no pair straddles the periodic boundary in this state'

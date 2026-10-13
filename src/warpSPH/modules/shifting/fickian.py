@@ -38,7 +38,7 @@ def computeFickianShift(state: Any, config: Any, schemeConfig: Any, adjacency: A
     x = state.positions.to(F64)
     h = state.supports.to(F64)
     V = state.masses.to(F64) / float(rho0)
-    i, j = adjacency.i.long(), adjacency.j.long()
+    i, j = (t.long() for t in adjacency.livePairs())
     keep = (i != j) & fluid[i] & fluid[j]
     i, j = i[keep], j[keep]
     d = minimumImage(x[i] - x[j], config.domain)

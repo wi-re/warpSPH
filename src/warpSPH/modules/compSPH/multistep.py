@@ -48,8 +48,7 @@ def compSPH_deltaU_multistep(
     # verbosePrint(verbose, '[DeltaU] Computing DeltaU')
     for ii, (stepAdjacency, stepState) in enumerate(returnValues):
         # verbosePrint(verbose, f'[DeltaU]\tStep {ii:2d}/{len(particleStates):2d}\tk = {butcherTerms[ii]:.2f}')
-        i = stepAdjacency.i
-        j = stepAdjacency.j
+        i, j = stepAdjacency.livePairs()
 
         v_i = halfStepVelocity[i]
         v_j = halfStepVelocity[j]
