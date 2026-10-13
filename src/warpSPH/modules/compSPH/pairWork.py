@@ -29,7 +29,7 @@ from ...enumTypes import EnergyScheme
 from ...math.scatter import segment_sum
 from warpSPHCore.profiling import record_function
 
-__all__ = ['PairWork', 'beginPairWork', 'startFromLatest', 'startStage', 'weightedStages', 'accumulateStage', 'energyIncrement']
+__all__ = ['PairWork', 'beginPairWork', 'startFromLatest', 'startStage', 'stageRebuildSlack', 'weightedStages', 'accumulateStage', 'energyIncrement']
 
 
 @dataclass
@@ -73,6 +73,12 @@ def startFromLatest(system) -> None:
 STAGE_ZERO_REBUILD_SLACK = 0.5
 
 
+def stageRebuildSlack(system, stageIndex) -> float:
+    """The `rebuildSlack` for the neighbour-list check of this stage: early rebuild at stage 0 of a tableau with
+    more than one weighted stage (see `startStage`), none otherwise."""
+    return STAGE_ZERO_REBUILD_SLACK if stageIndex == 0 and weightedStages(system.pairWork) > 1 else 0.0
+
+
 def startStage(system, state, config, stageIndex) -> None:
     """Stage start: continue from the previous stage's pair list and, at stage 0 of a tableau with more than one
     weighted stage, rebuild early if half the Verlet buffer is already used.
@@ -81,11 +87,6 @@ def startStage(system, state, config, stageIndex) -> None:
     step; rebuilding a little early at stage 0 costs one rebuild and makes the mid-step case rare. (A tableau
     with a single weighted stage, midpoint, never carries anything across stages and does not need it.)"""
     startFromLatest(system)
-    if stageIndex == 0 and weightedStages(system.pairWork) > 1 and system.adjacency is not None:
-        from warpSPHCore import SupportScheme, buildVerletList
-        system.adjacency = buildVerletList(
-            state, config.domain, verletScale=config.verletScale, supportMode=SupportScheme.SuperSymmetric,
-            priorNeighborhood=system.adjacency, rebuildSlack=STAGE_ZERO_REBUILD_SLACK)
 
 
 def _pairVector(state, energyScheme) -> torch.Tensor:

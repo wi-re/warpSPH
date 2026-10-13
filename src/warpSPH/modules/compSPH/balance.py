@@ -301,6 +301,8 @@ def computeCompSPHBalanceTerm_Kernel(
     )
 
 from ...enumTypes import EnergyScheme
+from ...utils.syncFree import deviceConstant
+from warpSPHCore.type_config import get_torch_precision
 
 def _balanceTermDtype(ctx, extras):
     return castTorchToWarpAsBuiltins(ctx.query.densities).dtype
@@ -415,7 +417,7 @@ def computeCompSPHBalanceTermWarp(
                 queryPressures=queryPressures_, referencePressures=referencePressures_,
                 pairWisePressureAccel=pairWise_pressureAccel, pairWiseViscosityAccel=pairWise_viscosityAccel,
                 energyScheme=wp.int32(energyScheme.value), dt=asScalarArg(dt, device=device),
-                gamma=asScalarArg(gamma, device=device),
+                gamma=asScalarArg(gamma if isinstance(gamma, torch.Tensor) else deviceConstant([float(gamma)], get_torch_precision(), device), device=device),
             )
 
 

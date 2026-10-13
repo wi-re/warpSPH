@@ -24,7 +24,7 @@ from warpSPHCore.profiling import record_function
 from warpSPHCore import (
     GradHState, OperationProperties, SupportScheme, buildVerletList,
 )
-from ..modules.compSPH.pairWork import accumulateStage, startStage
+from ..modules.compSPH.pairWork import accumulateStage, startStage, stageRebuildSlack
 from ..systems.compSPH import CompSPHSystem, CompSPHState
 from ..configurations.compSPHConfig import CompSPHConfig
 from ..configurations.simulationConfig import SimulationConfig
@@ -58,19 +58,17 @@ def compSPH_step(
     with record_function("[warpSPH] - [compSPH - 01] wall + optimal support"):
         wall = beginCompressibleWall(currentState, config)
         startStage(currentSystem, currentState, config, stageIndex)
-        rho_optimal, h_optimal, currentSystem.adjacency, *_ = evaluateOptimalSupport(currentState, config, schemeConfig, SupportScheme.Gather, currentSystem.adjacency)
+        rho_optimal, h_optimal, currentSystem.adjacency, *_ = evaluateOptimalSupport(
+            currentState, config, schemeConfig, SupportScheme.Gather, currentSystem.adjacency,
+            validateOnce=True, rebuildSlack=stageRebuildSlack(currentSystem, stageIndex))
         currentState.supports = h_optimal
         currentState.densities = rho_optimal
 
     with record_function("[warpSPH] - [compSPH - 02] adjacency"):
         verletScale = config.verletScale
 
-        adjacency = buildVerletList(
-            currentState, 
-            config.domain, verletScale = verletScale, supportMode = SupportScheme.SuperSymmetric,
-            priorNeighborhood = currentSystem.adjacency,    # reused while the Verlet margin holds (not rebuilt every stage)
-            verbose = False)
-        currentSystem.adjacency = adjacency
+        # the solver validated this list against the particles and every support it used, and rebuilt it if needed
+        adjacency = currentSystem.adjacency
 
     # with TimedBlock('compute csr', use_cuda=True, device=device):
         # csr_neighrs = coo_to_csr(neighbors.get('noghost')[0])

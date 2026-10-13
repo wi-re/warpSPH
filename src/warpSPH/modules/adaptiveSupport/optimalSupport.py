@@ -20,7 +20,7 @@ from warpSPHCore.profiling import record_function
 __all__ = ['evaluateOptimalSupport']
 
 
-def _clampSupportsToVolume(state, h, densities, config):
+def _clampSupportsToVolume(state, h, densities, config, onlyIfWalls=False):
     """Upper-bound each fluid row's h at the target spacing ``n_h_target * (m/rho)^(1/d)``.
 
     The adaptive-support relaxations are one-way ratchets: they grow h while a
@@ -36,6 +36,8 @@ def _clampSupportsToVolume(state, h, densities, config):
     volume = state.masses / densities.clamp_min(1e-12)
     bound = n_h_target * volume ** (1.0 / dim)
     fluid = state.kinds == 0
+    if onlyIfWalls:
+        fluid = fluid & (state.kinds != 0).any()          # device-side: no host read of "is there a wall row?"
     return torch.where(fluid, torch.minimum(h, bound), h)
 
 
@@ -58,7 +60,11 @@ def evaluateOptimalSupport(
         compParams: CompressibleSPHConfig,
         supportScheme: SupportScheme = SupportScheme.Scatter,
         adjacency: Optional[AdjacencyList] = None,
+        validateOnce: bool = False,
+        rebuildSlack: float = 0.0,
 ):
+    """`validateOnce` / `rebuildSlack`: the Owen solver validates the neighbour list once per solve instead of once
+    per iteration (see `evaluateOptimalSupportOwen`); the other support schemes ignore them."""
     with record_function("[warpSPH] - evaluateOptimalSupport"):
         if compParams.adaptiveSupportScheme == AdaptiveSupportScheme.Owen:
             result = evaluateOptimalSupportOwen(
@@ -68,7 +74,9 @@ def evaluateOptimalSupport(
                 kernel_ = config.kernel,
                 adjacency = adjacency,
                 supportScheme = supportScheme,
-                verbose = False
+                verbose = False,
+                validateOnce = validateOnce,
+                rebuildSlack = rebuildSlack,
             )
         elif compParams.adaptiveSupportScheme == AdaptiveSupportScheme.Monaghan:
             result = evaluateOptimalSupportMonaghan(
@@ -95,6 +103,9 @@ def evaluateOptimalSupport(
             raise ValueError(f"Unsupported adaptive support scheme: {compParams.adaptiveSupportScheme}")
 
         densities, h, adjacency, *rest = result
-        if _clampEnabled(particleState, config):
+        if validateOnce and getattr(config, 'supportVolumeClamp', 'walls') == 'walls':
+            # 'walls' mode without the host read of "are there wall rows?": the clamp applies where a wall exists
+            h = _clampSupportsToVolume(particleState, h, densities, config, onlyIfWalls=True)
+        elif _clampEnabled(particleState, config):
             h = _clampSupportsToVolume(particleState, h, densities, config)
         return (densities, h, adjacency) + tuple(rest)

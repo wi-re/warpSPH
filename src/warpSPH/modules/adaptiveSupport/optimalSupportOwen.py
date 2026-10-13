@@ -18,6 +18,7 @@ from ...systems import CompressibleState
 from ...configurations import SimulationConfig, CompressibleSPHConfig
 import numpy as np
 import torch
+from types import SimpleNamespace
 from warpSPHCore import *
 from typing import Optional, Union
 
@@ -69,8 +70,18 @@ def evaluateOptimalSupportOwen(
         kernel_: Optional[KernelFunctions] = None,
         adjacency: Optional[Union[AdjacencyList, CompactHashMap]] = None,
         supportScheme: Optional[SupportScheme] = None,
-        verbose = False
+        verbose = False,
+        validateOnce: bool = False,
+        rebuildSlack: float = 0.0,
         ):
+    """`validateOnce=False` (default): the neighbour list is validated, and rebuilt if needed, at the start of
+    every iteration. `validateOnce=True`: the iterations run on the incoming list without a check (the particles do
+    not move, only `h` changes) and the list is validated ONCE afterwards against the largest support any iteration
+    used (and the particle motion); if that finds the list too short the list is rebuilt and the iterations are
+    run again from the incoming supports. The returned list then covers every iterate and the final supports, so
+    the caller needs no check of its own. `rebuildSlack` rebuilds that final check early (see `buildVerletList`).
+    Also: the early stop on the support change is evaluated on the device (a finished iteration freezes `h`)
+    instead of a host read per iteration."""
     with record_function("[warpSPH] - evaluateOptimalSupport - Owen"):
         kernel = kernel_ if kernel_ is not None else config.kernel
         # Note `kernel`, not `kernel_`: the table is built from whichever kernel
@@ -101,11 +112,17 @@ def evaluateOptimalSupportOwen(
         adaptiveHThreshold = compConfig.adaptiveSupportThreshold
         # verbose = False
         
-        for i in range(nIter):
+        suppliedSupports = particles.supports
+        peakSupports = particles.supports
+        converged = None                       # device flag: an iteration changed h by less than the threshold
+        attempt = 0
+        i = 0
+        while i < nIter:
             if verbose:
                 print('----------------------------------')
                 print(f'Iteration {i}, target: {nhTarget}')
-            adjacency = buildVerletList(particles, domain = config.domain, verletScale = verletScale, supportMode = SupportScheme.SuperSymmetric, priorNeighborhood=adjacency, verbose=False)
+            if not validateOnce or adjacency is None:
+                adjacency = buildVerletList(particles, domain = config.domain, verletScale = verletScale, supportMode = SupportScheme.SuperSymmetric, priorNeighborhood=adjacency, verbose=False)
 
             
             # psi_0, psi_0_H = computePsi_0(particles, kernel_, neighbors.get('noghost'), supportScheme, config)
@@ -132,6 +149,12 @@ def evaluateOptimalSupportOwen(
             hMax = h.max()
             
             h_ratio = h / particles.supports
+            if validateOnce:
+                # a converged iteration freezes h (what the early `break` did), without reading the flag on the host
+                if converged is not None:
+                    h = torch.where(converged, particles.supports, h)
+                    h_ratio = torch.where(converged, torch.ones_like(h_ratio), h_ratio)
+                peakSupports = torch.maximum(peakSupports, h)
             
             if verbose: 
                 print(f'Support: {h.min()} | {h.max()} | {h.mean()}')
@@ -141,11 +164,30 @@ def evaluateOptimalSupportOwen(
 
             hs.append(h)
 
-            if (h_ratio - 1).abs().max() < adaptiveHThreshold:
+            if validateOnce:
+                done = (h_ratio - 1).abs().max() < adaptiveHThreshold
+                converged = done if converged is None else (converged | done)
+            elif (h_ratio - 1).abs().max() < adaptiveHThreshold:
                 if verbose: 
                     print('Stopping Early')
                 # print('Stopping Early')
                 break
+            i += 1
+            if validateOnce and i == nIter and attempt == 0:
+                # one validation for the whole solve: the particles with the largest support any iteration used
+                checked = buildVerletList(SimpleNamespace(positions=particles.positions, supports=peakSupports), domain = config.domain, verletScale = verletScale,
+                                          supportMode = SupportScheme.SuperSymmetric, priorNeighborhood=adjacency,
+                                          verbose=False, rebuildSlack=rebuildSlack)
+                if checked is not adjacency:
+                    # the list was too short for some iterate: use the new one and solve again from the supplied supports
+                    adjacency = checked
+                    attempt = 1
+                    i = 0
+                    particles.supports = suppliedSupports
+                    peakSupports = suppliedSupports
+                    converged = None
+                    hs = [suppliedSupports]
+                    psis = []
 
         densities = warpOperation(
             particles,

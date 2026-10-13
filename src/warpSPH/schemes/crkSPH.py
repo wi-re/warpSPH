@@ -41,7 +41,7 @@ from ..systems.compressibleMonaghan import CompressibleSystemUpdate
 from ..modules.shockCapturing.CullenHopkins import computeHopkinsTerms, computeHopkinsUpdate
 
 from warpSPHCore.profiling import record_function
-from ..modules.compSPH.pairWork import accumulateStage, startStage
+from ..modules.compSPH.pairWork import accumulateStage, startStage, stageRebuildSlack
 from ..modules.crk.accel import computeCrkSPHAccelWarp
 from ..configurations.crkSPH import resolveCRKLimiter
 from ..modules.reconstruction import requireRawPairVelocity
@@ -121,7 +121,9 @@ def crkSPH_step(
     # print(f'\tmin/max/mean IE: {IE.min().item()}/{IE.max().item()}/{IE.mean().item()}')
     # print(f'\tmin/max/mean KE: {KE.min().item()}/{KE.max().item()}/{KE.mean().item()}')
 
-    rho_optimal, h_optimal, currentSystem.adjacency, *_ = evaluateOptimalSupport(currentState, config, schemeConfig, SupportScheme.Gather, currentSystem.adjacency)
+    rho_optimal, h_optimal, currentSystem.adjacency, *_ = evaluateOptimalSupport(
+        currentState, config, schemeConfig, SupportScheme.Gather, currentSystem.adjacency,
+        validateOnce=True, rebuildSlack=stageRebuildSlack(currentSystem, stageIndex))
     currentState.supports = h_optimal
     currentState.densities = rho_optimal
 
@@ -135,12 +137,8 @@ def crkSPH_step(
 
     verletScale = config.verletScale
 
-    adjacency = buildVerletList(
-        currentState, 
-        config.domain, verletScale = verletScale, supportMode = SupportScheme.SuperSymmetric,
-        priorNeighborhood = currentSystem.adjacency,
-        verbose = False)
-    currentSystem.adjacency = adjacency
+    # the solver validated this list against the particles and every support it used, and rebuilt it if needed
+    adjacency = currentSystem.adjacency
 
     apparentVolume, currentState.densities, crkState = computeCRKFactors(currentState, config.domain, config.kernel, adjacency = adjacency)
     if wall is not None:
