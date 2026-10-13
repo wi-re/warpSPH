@@ -98,6 +98,12 @@ def evaluateOptimalSupport(
         elif compParams.adaptiveSupportScheme == AdaptiveSupportScheme.NoScheme:
 
             # print('Adaptive support scheme set to NoneSupport, skipping optimal support evaluation')
+            if validateOnce:
+                # the contract of `validateOnce`: the returned list is valid for the returned supports and the current
+                # positions, whichever scheme produced the supports (here: the ones the particles already have)
+                adjacency = buildVerletList(particleState, domain=config.domain, verletScale=config.verletScale,
+                                            supportMode=SupportScheme.SuperSymmetric, priorNeighborhood=adjacency,
+                                            verbose=False, rebuildSlack=rebuildSlack)
             return particleState.densities, particleState.supports, adjacency, None, None
         else:
             raise ValueError(f"Unsupported adaptive support scheme: {compParams.adaptiveSupportScheme}")

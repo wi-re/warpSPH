@@ -78,3 +78,16 @@ def test_multiStageTableauDoesNotNeedASecondPass(scheme):
     finally:
         mp.undo()
     assert seconds[0] == 0
+
+
+@pytest.mark.parametrize('supportScheme', ['NoScheme', 'Monaghan', 'Owen'])
+@pytest.mark.parametrize('scheme', ['CompSPH', 'CRKSPH'])
+def test_everySupportSchemeLeavesAValidNeighbourList(scheme, supportScheme):
+    """The scheme relies on `evaluateOptimalSupport(validateOnce=True)` returning a list that is valid for the
+    returned supports and the current positions, whichever support scheme made them (NoScheme used to hand back
+    whatever list it was given: a stale one, or none at the first stage)."""
+    result = run(getCase('sod2d'), quiet=True, progress=False, nSteps=60, scheme=scheme,
+                 params=dict(adaptiveSupportScheme=supportScheme))
+    assert result.nSteps == 60 and not result.diverged
+    e0, e1 = result.trajectory[0]['totalEnergy'], result.trajectory[-1]['totalEnergy']
+    assert abs(e1 - e0) / abs(e0) < 1e-4
