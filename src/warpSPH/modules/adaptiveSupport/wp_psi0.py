@@ -209,7 +209,9 @@ def computePsi0_Func_Adjacency(
                 continue
         
         beginIndex, numIndices = laneSlice(beginIndex, numIndices, lane, lanes, useAdjacency)
-        psi0_, psi0h_ = computePsi0_Func_i(
+        # the RAW sums: the dim-th root is not additive, so it is taken once after the loop over the cells
+        # (a grid traversal calls this once per cell; the root of each partial sum, summed, was 1.6-1.9x too big)
+        psi0_, psi0h_ = computePsi0_Func_i_raw(
             i, dim, 
             xi, hi, mi, rhoi,
             referenceState, domainState,
@@ -227,7 +229,7 @@ def computePsi0_Func_Adjacency(
         )
         out_psi0 += psi0_
         out_psi0h += psi0h_
-    return out_psi0, out_psi0h
+    return out_psi0**(scalar_t(1.0)/scalar_t(dim)), out_psi0h**(scalar_t(1.0)/scalar_t(dim))
 
 
 
