@@ -108,6 +108,7 @@ graph, a device-side stop test, and then the shared pieces (Verlet validity, shi
   for removal later; per-particle CSR kernels are the target). Known raw users to retire: `wallBounceSetup` / `makeWallBounce`
   (the fluid-wall pair filter, phases 3-4: make it a CSR wall-neighbour kernel).
 * Inlets / outlets (changing particle count) are not supported here; out of scope.
+* **The core change has its own plan: `~/dev/warpSPHCore/ADJACENCY_CAPACITY_PLAN.md`** (sync sites, design, consumer inventory, steps). The consumer-side guard (`0 <= i < n` before using a raw pair) is independent of it and a no-op on today's adjacency, so it can land here at any time.
 
 ## 4. Risks / open questions
 
