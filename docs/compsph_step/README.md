@@ -257,3 +257,19 @@ the graph tests; it is slower than both.
 6. Never observed in a real run: a NATURAL conservative second pass (only forced by tests) and a natural energy second pass.
 7. Tuning constants are first guesses from one case: `USAGE_GUARD = 1.25`, grid radius headroom 1.5 (solver grid) , `CHECK_EVERY = 8`.
 8. Core 'raw-pair' consumers still use `livePairs()` (eager only); retiring `adjacency.i` is the longer-term goal.
+
+### Open items added 2026-10-13 (evening) -- pick up here
+
+9. **3D graph mode is 2.5-4x slower than eager** even at N = 3k: `computePsi0` on the grid is 12 of 17.8 ms (5.7 ms per call vs 0.2 on the list). Not the
+   headroom. Suspects: the 3^3 cell stencil, per-candidate table lookups before the distance test, lane imbalance (27 cells over 32 lanes). Profile with
+   `evidence/scripts/` style torch.profiler (see 2.8); a radius-2 stencil with half-size cells in `buildFixed` is the structural option.
+10. **A capture that fails at the CUDA level leaves the next eager step non-finite** (`rayleighTaylor` with a forced graph request before the Dirichlet
+    blocker): state is finite right after, a Python exception inside a capture recovers cleanly, a dry run without capture is fine. Not understood.
+    `GraphedIntegratorStep` should either be proven to recover or stop trusting 'capture failed -> eager' for the CompSPH route.
+11. **Re-measure the `auto` thresholds** (`stepMode.GRAPH_MAX_PARTICLES`) per GPU: measured once, before the multi-lane kernels and headroom 1.15, which moved the
+    2D crossover up (graph still ahead at 10k). User: hardware dependent, rough defaults only; a calibration helper is the long-term answer.
+12. **Re-run the rebuild-count scan** (`slackScan.py`, `countGrid.py`) after the Gather-grid fix; `USAGE_GUARD`, headroom 1.15, `CHECK_EVERY` are still single-case guesses.
+13. **Full frontend suite** was last run before the multi-lane kernels / headroom / Dirichlet blocker (passed before them; the targeted tests + 17-case smoke pass after).
+14. **Eager-path leftovers**: the integrator's 51 clones per step (14 `constant` fields x 3 state copies; a 'shared' field behaviour, CompSPH state only, user: not other
+    schemes yet), the X6 `einsum` -> bmm/gemv (3 per step), CRKSPH has no graph mode and no grid solve (needs the same `stepMode` wiring), then ACSPH phase 2.
+15. Wall cases and Dirichlet-BC cases run eagerly under `stepMode='graph'` (pair arrays sized to the live edge count / host-sized masks): making them graphable is open.
