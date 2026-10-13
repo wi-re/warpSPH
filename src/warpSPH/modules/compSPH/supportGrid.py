@@ -12,10 +12,11 @@ from typing import Any, List, Optional
 
 import torch
 
-from warpSPHCore import SupportScheme
+from warpSPHCore import CapacityPolicy, SupportScheme
+from warpSPHCore.dataTypes.adjacency_t import DEFAULT_CAPACITY
 from warpSPHCore.radiusSearch.compactHash import GraphedBuild, makeHashMapSlots
 
-__all__ = ['solvesOnGrid', 'SupportGrid', 'ensureSupportGrid', 'refreshSupportGrid', 'noteOutgrown', 'growIfOutgrown',
+__all__ = ['solvesOnGrid', 'pairListCapacity', 'SupportGrid', 'ensureSupportGrid', 'refreshSupportGrid', 'noteOutgrown', 'growIfOutgrown',
            'pairListGridFactory', 'takeListGridFlags', 'rebuildNeeded']
 
 #: the flags are read every this many steps; a binding limit for a few steps only clips h to the radius
@@ -31,6 +32,11 @@ def solvesOnGrid(schemeConfig) -> bool:
     """The Owen support solve runs on the fixed-shape grid (and the step's pair list is checked by deferred flags)."""
     from ...enumTypes import AdaptiveSupportScheme
     return schemeConfig.adaptiveSupportScheme == AdaptiveSupportScheme.Owen and getattr(schemeConfig, 'supportSolveOnGrid', False)
+
+
+def pairListCapacity(schemeConfig):
+    """The capacity policy of the step's pair-list rebuilds: in place (same buffers) when the whole step is graphed."""
+    return CapacityPolicy(inPlace=True) if getattr(schemeConfig, 'inPlaceAdjacency', False) else DEFAULT_CAPACITY
 
 
 @dataclass
@@ -50,15 +56,17 @@ class SupportGrid:
     perStep: float = 0.3
 
 
-def ensureSupportGrid(holder: SupportGrid, state, config, scale: float = 1.0) -> SupportGrid:
+def ensureSupportGrid(holder: SupportGrid, state, config, scale: float = 1.0,
+                      mode: SupportScheme = SupportScheme.Gather) -> SupportGrid:
     """`holder` itself, with a grid in it that fits this state (one host read of the largest support when it has to
-    make one)."""
+    make one). `mode` is the support mode of the searches the grid serves: the search takes it from the grid (the
+    support solve gathers; the pair list is SuperSymmetric)."""
     n = state.positions.shape[0]
     if holder.build is not None and holder.particles == n and holder.radius >= holder.minRadius:
         return holder
     radius = max(RADIUS_HEADROOM * scale * float(state.supports.max()), holder.minRadius)
     slots = makeHashMapSlots(n, config.domain, radius, device=state.positions.device, dtype=state.positions.dtype,
-                             mode=SupportScheme.Gather, hashMapLength=n + 1)
+                             mode=mode, hashMapLength=n + 1)
     holder.build, holder.radius, holder.particles = GraphedBuild(slots), radius, n
     return holder
 
@@ -101,7 +109,7 @@ def pairListGridFactory(holder: SupportGrid, state, config):
     scale = config.verletScale
 
     def make():
-        ensureSupportGrid(holder, state, config, scale=scale)
+        ensureSupportGrid(holder, state, config, scale=scale, mode=SupportScheme.SuperSymmetric)
         grid = refreshSupportGrid(holder, state, scale=scale)
         if holder.pending is None:
             holder.pending = []

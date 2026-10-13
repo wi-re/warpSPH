@@ -84,7 +84,9 @@ class CompSPHState(BaseState):
 #     drhodt: torch.Tensor = tagged(tags=('density_derivative',))
 
 from ..modules.compSPH.pairWork import PairWork, RerunRequest, beginPairWork, energyIncrement, STAGE_ZERO_REBUILD_SLACK
-from ..modules.compSPH.supportGrid import SupportGrid, growIfOutgrown, solvesOnGrid, pairListGridFactory, takeListGridFlags, rebuildNeeded
+from ..modules.compSPH.supportGrid import (RADIUS_HEADROOM, SupportGrid, ensureSupportGrid, growIfOutgrown, pairListCapacity, pairListGridFactory,
+                                           rebuildNeeded, solvesOnGrid, takeListGridFlags)
+from ..utils.stepDecisions import StepDecision, recordingStepDecisions
 
 
 @dataclass
@@ -109,6 +111,10 @@ class CompSPHSystem(BaseIntegrationSystem):
         if self.listGrid is None:
             self.listGrid = SupportGrid()
         self.rerunRequest = None
+        if recordingStepDecisions() is not None:
+            # a captured step reads only flags it computes itself: the ones left by earlier eager steps are not graph
+            # outputs (their memory is free once these references are gone)
+            self.supportGrid.pending, self.listGrid.pending = [], []
         return super().initialize(dt, *args, **kwargs)
 
     def initializeNewState(self, *args, verbose=False, **kwargs):
@@ -144,6 +150,51 @@ class CompSPHSystem(BaseIntegrationSystem):
         self.apply_quantity_update(update, spec, **kwargs)
         return self
     
+    def prepareCapture(self, config):
+        """Make the support grid the capture will read (sizing it reads the supports: not possible while recording)."""
+        if self.supportGrid is not None:
+            ensureSupportGrid(self.supportGrid, self.state, config)
+
+    def graphKey(self):
+        """What else a captured step is bound to: the grids whose static buffers it reads (a new grid is a recapture, as is a
+        pending request for a larger support grid, which the capture makes)."""
+        support, pairs = self.supportGrid, self.listGrid
+        return (id(support.build) if support else None, id(pairs.build) if pairs else None,
+                bool(support and support.radius < support.minRadius))
+
+    def _replayDecision(self, values, nInStep, nGrid, config, schemeConfig) -> StepDecision:
+        """What a graphed step does with the numbers `finalize` would have read (see `utils/stepDecisions.py`): the values
+        are [in-step flags..., list-grid-too-small flags..., a support-grid limit was binding, buffer usage]."""
+        listGrid, supportGrid = self.listGrid, self.supportGrid
+
+        def redo(host):
+            return any(host[:nInStep + nGrid])        # a stage ran on a pair list that was too short (or came from a too-small grid)
+
+        def apply(host, system):
+            if host[-2]:
+                supportGrid.minRadius = RADIUS_HEADROOM * supportGrid.radius        # the next capture makes the larger grid
+            if rebuildNeeded(listGrid, host[-1]):
+                rebuilt = SimpleNamespace(positions=system.state.positions, supports=system.state.supports)
+                for attempt in range(2):
+                    system.adjacency = buildVerletList(
+                        rebuilt, config.domain, verletScale=config.verletScale, supportMode=SupportScheme.SuperSymmetric,
+                        priorNeighborhood=system.adjacency, forceRebuild=True, capacity=pairListCapacity(schemeConfig),
+                        gridFactory=pairListGridFactory(listGrid, rebuilt, config))
+                    tooSmall = takeListGridFlags(listGrid)          # nothing replays the next step's finalize to read these
+                    if not tooSmall or not bool(torch.stack(tooSmall).any()):
+                        break
+                    listGrid.minRadius = 2.0 * listGrid.radius
+
+        def hostState():
+            saved = [(h, dict(vars(h))) for h in (listGrid, supportGrid)]
+
+            def restore():
+                for holder, attrs in saved:
+                    vars(holder).update(attrs)
+            return restore
+
+        return StepDecision(values=values, redo=redo, apply=apply, hostState=hostState)
+
     def finalize(self, initialState, dt, returnValues, updateValues, weights, config, schemeConfig, *args, **kwargs):
         self.adjacency = returnValues[-1][0]  # Assuming the adjacency list is the last return value from the derivative function
         # Copy the last substeps values into the current state to ensure the final state is correct
@@ -162,18 +213,30 @@ class CompSPHSystem(BaseIntegrationSystem):
         # come back together; a failing in-step flag repeats the step with the list validated at every stage, a failing
         # step-end flag rebuilds the list now, so the next step starts on a list that needs no check.
         rebuildForNextStep = False
+        recording = recordingStepDecisions()
         if solvesOnGrid(schemeConfig) and self.pairWork is not None:
             with record_function("[warpSPH] - [compSPH finalize - 00] list flags"):
                 usage = verletUsage(self.state.positions, lastState.supports, self.adjacency, config.domain, config.verletScale)
                 inStep = [f.to(usage.dtype) for f in (self.pairWork.flags or [])]
                 listGridTooSmall = [f.to(usage.dtype) for f in takeListGridFlags(self.listGrid)]   # the list came from a too-small grid
-                values = torch.stack(inStep + listGridTooSmall + [usage]).tolist()
-            if any(values[:-1]):
-                if any(values[len(inStep):-1]):
-                    self.listGrid.minRadius = 2.0 * self.listGrid.radius        # make a larger grid; rebuild from scratch
-                self.rerunRequest = RerunRequest(halfVelocity=None, conservative=True, rebuildList=any(values[len(inStep):-1]))
-                return self
-            rebuildForNextStep = rebuildNeeded(self.listGrid, values[-1])
+                if recording is not None:
+                    # the step is being recorded into a CUDA graph: nothing is read here. The same numbers are read ONCE after
+                    # each replay, together with the step time (utils/stepDecisions.py), and acted on there
+                    outgrown = self.supportGrid.pending or []
+                    self.supportGrid.pending, self.supportGrid.age = [], 0
+                    anyOutgrown = torch.stack([f.to(usage.dtype) for f in outgrown]).max() if outgrown else torch.zeros_like(usage)
+                    recording.append(self._replayDecision(torch.stack(inStep + listGridTooSmall + [anyOutgrown, usage]),
+                                                          len(inStep), len(listGridTooSmall), config, schemeConfig))
+                    values = None
+                else:
+                    values = torch.stack(inStep + listGridTooSmall + [usage]).tolist()
+            if values is not None:
+                if any(values[:-1]):
+                    if any(values[len(inStep):-1]):
+                        self.listGrid.minRadius = 2.0 * self.listGrid.radius        # make a larger grid; rebuild from scratch
+                    self.rerunRequest = RerunRequest(halfVelocity=None, conservative=True, rebuildList=any(values[len(inStep):-1]))
+                    return self
+                rebuildForNextStep = rebuildNeeded(self.listGrid, values[-1])
         if schemeConfig.compatibleEnergy:
             with record_function("[warpSPH] - [compSPH finalize - 01] compatible energy"):
                 delta_u, rerun = energyIncrement(self.pairWork, initialState.state, updateValues, weights, dt)
@@ -182,7 +245,7 @@ class CompSPHSystem(BaseIntegrationSystem):
                 self.rerunRequest = rerun
                 return self
             self.state.internalEnergies = initialState.state.internalEnergies + delta_u * dt
-        if self.supportGrid is not None:
+        if self.supportGrid is not None and recording is None:
             growIfOutgrown(self.supportGrid)
 
         # solid wall rows (modules/compressibleWall): the state of the last stage, not an
@@ -214,6 +277,7 @@ class CompSPHSystem(BaseIntegrationSystem):
                 self.adjacency = buildVerletList(
                     rebuilt, config.domain, verletScale=config.verletScale, supportMode=SupportScheme.SuperSymmetric,
                     priorNeighborhood=self.adjacency, forceRebuild=True,         # the step-end flag already said stale
+                    capacity=pairListCapacity(schemeConfig),
                     gridFactory=pairListGridFactory(self.listGrid, rebuilt, config))
 
         updateValues[-1].dudt = (self.state.internalEnergies - initialState.state.internalEnergies) /dt

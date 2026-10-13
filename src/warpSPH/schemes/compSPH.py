@@ -26,7 +26,7 @@ from warpSPHCore import (
     GradHState, OperationProperties, SupportScheme, buildVerletList,
 )
 from ..modules.compSPH.pairWork import accumulateStage, startStage, stageRebuildSlack
-from ..modules.compSPH.supportGrid import ensureSupportGrid, refreshSupportGrid, noteOutgrown, solvesOnGrid, pairListGridFactory
+from ..modules.compSPH.supportGrid import ensureSupportGrid, refreshSupportGrid, noteOutgrown, solvesOnGrid, pairListGridFactory, pairListCapacity
 from ..modules.compSPH.pairWork import listFitsParticles
 from ..enumTypes import AdaptiveSupportScheme
 from ..systems.compSPH import CompSPHSystem, CompSPHState
@@ -93,7 +93,7 @@ def compSPH_step(
             adjacency = buildVerletList(
                 currentState, config.domain, verletScale = config.verletScale, supportMode = SupportScheme.SuperSymmetric,
                 priorNeighborhood = None if (pairWork is not None and pairWork.rebuildList) else currentSystem.adjacency,
-                verbose = False, rebuildSlack = rebuildSlack,
+                verbose = False, rebuildSlack = rebuildSlack, capacity = pairListCapacity(schemeConfig),
                 gridFactory = pairListGridFactory(currentSystem.listGrid, currentState, config))
             currentSystem.adjacency = adjacency
         else:

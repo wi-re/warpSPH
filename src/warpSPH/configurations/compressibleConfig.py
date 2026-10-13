@@ -51,6 +51,7 @@ class CompressibleSPHConfig:
 
     adaptiveSupportScheme: AdaptiveSupportScheme = field(default=AdaptiveSupportScheme.Monaghan, metadata={'description': 'Adaptive support scheme to use'})
     supportSolveOnGrid: bool = field(default=False, metadata={'description': 'Owen support solve on a fixed-shape grid (no neighbour list in the solve; the step validates / builds its list afterwards) instead of on the Verlet list'})
+    inPlaceAdjacency: bool = field(default=False, metadata={'description': 'a pair-list rebuild that keeps its capacity overwrites the buffers of the list it replaces (a captured CUDA graph reads them at fixed addresses); set by the runner when the whole step is graphed. Nothing may keep an old list'})
     adaptiveSupportIterations: int = field(default=1, metadata={'description': 'Number of iterations for adaptive support scheme'})
     adaptiveSupportThreshold: float = field(default=1e-3, metadata={'description': 'Threshold for adaptive support scheme'})
     adaptiveSupportCorrections: bool = field(default=True, metadata={'description': 'Whether to apply corrections in the adaptive support scheme (grad-H terms)'})
@@ -80,6 +81,7 @@ def compressibleConfigToDict(config: CompressibleSPHConfig) -> Dict[str, Any]:
         'rho0': config.rho0,
         'adaptiveSupportScheme': config.adaptiveSupportScheme.name,
         'supportSolveOnGrid': config.supportSolveOnGrid,
+        'inPlaceAdjacency': config.inPlaceAdjacency,
         'adaptiveSupportIterations': config.adaptiveSupportIterations,
         'adaptiveSupportThreshold': config.adaptiveSupportThreshold,
         'adaptiveSupportCorrections': config.adaptiveSupportCorrections,
@@ -101,6 +103,7 @@ def dictToCompressibleConfig(configDict: Dict[str, Any]) -> CompressibleSPHConfi
     config.rho0 = configDict['rho0']
     config.adaptiveSupportScheme = AdaptiveSupportScheme[configDict['adaptiveSupportScheme']] if isinstance(configDict['adaptiveSupportScheme'], str) else configDict['adaptiveSupportScheme']
     config.supportSolveOnGrid = configDict.get('supportSolveOnGrid', False)
+    config.inPlaceAdjacency = configDict.get('inPlaceAdjacency', False)
     config.adaptiveSupportIterations = configDict['adaptiveSupportIterations']
     config.adaptiveSupportThreshold = configDict['adaptiveSupportThreshold']
     config.adaptiveSupportCorrections = configDict['adaptiveSupportCorrections']

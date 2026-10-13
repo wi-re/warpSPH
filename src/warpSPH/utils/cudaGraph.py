@@ -544,6 +544,31 @@ def applyWallLoadSnapshot(stepResult) -> None:
         rb.load = snap
 
 
+def _adjacencyKey(adjacency):
+    """What a captured step is bound to in a pair list: the ADDRESSES and shapes of the arrays its kernels read (a rebuild that
+    keeps the capacity in place (`CapacityPolicy.inPlace`) is the same key; a new allocation is a recapture)."""
+    if adjacency is None:
+        return None
+    names = ('paddedI', 'paddedJ', 'numNeighbors', 'edgeOffsets', 'queryPositions', 'referencePositions', 'querySupports',
+             'referenceSupports')
+    return tuple((getattr(adjacency, n).data_ptr(), tuple(getattr(adjacency, n).shape)) if getattr(adjacency, n, None) is not None
+                 else None for n in names)
+
+
+def _cloneAdjacency(adjacency):
+    """A list with its own copies of every array (the eager validation step must not rebuild the buffers a graph reads)."""
+    if adjacency is None:
+        return None
+    clone = copy.copy(adjacency)
+    for n in ('paddedI', 'paddedJ', 'numNeighbors', 'edgeOffsets', 'queryPositions', 'referencePositions', 'querySupports',
+              'referenceSupports'):
+        v = getattr(adjacency, n, None)
+        if v is not None:
+            setattr(clone, n, v.clone())
+    clone.hashMap = None
+    return clone
+
+
 class GraphedIntegratorStep:
     """Replay a whole integrator step (every RHS evaluation, the state updates
     and `finalize`) from one CUDA graph -- the runner-level extension of
@@ -600,8 +625,9 @@ class GraphedIntegratorStep:
 
     @staticmethod
     def _key(state):
-        return (id(state.adjacency),) + tuple((n, tuple(t.shape), t.dtype)
-                                              for n, t in _tensorAttrs(state.state).items())
+        extra = getattr(state, 'graphKey', None)
+        return (_adjacencyKey(state.adjacency), extra() if extra is not None else None) + tuple(
+            (n, tuple(t.shape), t.dtype) for n, t in _tensorAttrs(state.state).items())
 
     def __call__(self, state, dt, config, schemeConfig, verbose=False):
         return self.finish(self.launch(state, dt, config, schemeConfig, verbose))
@@ -616,9 +642,12 @@ class GraphedIntegratorStep:
             self._warm = True
             return {'result': self._eager(state, dt, config, schemeConfig, verbose)}
         e = self._entry
-        if e is None or e['adjacency'] is not state.adjacency or e['key'] != self._key(state):
+        if e is None or e['key'] != self._key(state):
             # new Verlet generation (or first step): capture now
             self._entry = None
+            prepare = getattr(state, 'prepareCapture', None)
+            if prepare is not None:
+                prepare(config)             # host work a capture cannot do (sizing a grid from a device value)
             if not self._capture(state, dt, config, schemeConfig):
                 return {'result': self._eager(state, dt, config, schemeConfig, verbose)}
             e = self._entry
@@ -628,7 +657,8 @@ class GraphedIntegratorStep:
         self.replays += 1
         # the integrator's own time expression, float32: float(t + dt); and
         # the OR of the deferred Verlet checks -- read together in `finish`
-        pending = torch.stack([e['flag'].to(dt.dtype), (state.t + dt).reshape(())])
+        pending = torch.cat([torch.stack([e['flag'].to(dt.dtype), (state.t + dt).reshape(())])]
+                            + [d.values.to(dt.dtype).reshape(-1) for d in e['decisions']])
         return {'entry': e, 'state': state, 'dt': dt, 'config': config,
                 'schemeConfig': schemeConfig, 'pending': pending}
 
@@ -652,6 +682,7 @@ class GraphedIntegratorStep:
         import warp as wp
         from warpSPHCore import deferVerletChecks
         from warpSPHIntegrators.util import deferHostTime
+        from .stepDecisions import collectStepDecisions
         t0 = time.perf_counter()
         staticSys = _cloneState(state)
         staticIn = _tensorAttrs(staticSys.state)
@@ -664,7 +695,7 @@ class GraphedIntegratorStep:
             torch.cuda.synchronize()
             config.dt = staticDt
             _OUTER_CAPTURE[0] = True
-            with _captureGuard(), deferHostTime(), deferVerletChecks() as flags, \
+            with _captureGuard(), deferHostTime(), deferVerletChecks() as flags, collectStepDecisions() as decisions, \
                     torch.cuda.graph(graph, stream=stream, capture_error_mode=_CAPTURE_MODE), \
                     wp.ScopedStream(wstream, sync_enter=False, sync_exit=False):
                 result = self._eager(staticSys, staticDt, config, schemeConfig, False)
@@ -683,11 +714,11 @@ class GraphedIntegratorStep:
             _OUTER_CAPTURE[0] = False
             config.dt = prevDt
         final = result.state
-        if final.adjacency is not state.adjacency:
+        if _adjacencyKey(final.adjacency) != _adjacencyKey(state.adjacency):
             self._disable('the captured step replaced the adjacency object')
             return False
         lastUpdate = result.stages[-1].update if result.stages else None
-        self._entry = dict(adjacency=state.adjacency, key=self._key(state), graph=graph,
+        self._entry = dict(adjacency=state.adjacency, key=self._key(state), graph=graph, decisions=list(decisions),
                            names=list(staticIn), staticIn=[staticIn[n] for n in staticIn],
                            staticDt=staticDt, final=final, lastUpdate=lastUpdate, flag=flag,
                            nChecks=nChecks)
@@ -733,14 +764,32 @@ class GraphedIntegratorStep:
             # a Verlet check fired inside the step: redo it eagerly (rebuild)
             self.fallbacks += 1
             return self._eager(state, dt, config, schemeConfig, False)
+        slices, at = [], 2
+        for d in e['decisions']:
+            n = d.values.numel()
+            slices.append(host[at:at + n])
+            at += n
+        if any(d.redo(h) for d, h in zip(e['decisions'], slices)):
+            # a deferred check says a stage ran on a pair list an eager step would have refreshed: the eager step does
+            self.fallbacks += 1
+            return self._eager(state, dt, config, schemeConfig, False)
         result = self._materialize(e, state, host[1])
         if not self._validated:
             self._validated = True
-            eager = self._eager(_cloneState(state), dt, config, schemeConfig, False)
+            # the eager step starts from copies of the state AND of the list (it may rebuild it in place), and must not
+            # teach the host-side state (usage estimates, grid sizes) a second time
+            restores = [d.hostState() for d in e['decisions'] if d.hostState is not None]
+            probe = _cloneState(state)
+            probe.adjacency = _cloneAdjacency(state.adjacency)
+            eager = self._eager(probe, dt, config, schemeConfig, False)
+            for restore in restores:
+                restore()
             bad = self._compare(eager, result)
             if bad:
                 self._disable('graph replay differs from the eager step in ' + ', '.join(bad[:8]))
                 return eager
+        for d, h in zip(e['decisions'], slices):
+            d.apply(h, result.state)
         return result
 
     @staticmethod
