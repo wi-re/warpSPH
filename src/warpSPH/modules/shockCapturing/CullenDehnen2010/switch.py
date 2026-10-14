@@ -25,13 +25,14 @@ identity ``div(Dv/Dt) = D(div v)/Dt + tr(V^2)`` (expand
 ``tr(A + V^2)`` had the wrong (plus) sign and was removed.
 """
 
-from .common import *
-from .switchState import *
+from ..common import *
+from ..switchState import *
 
 from warpSPHCore import *
-from ...systems.compressibleMonaghan import CompressibleState
-from ...configurations import SimulationConfig
-from ...configurations.compressibleConfig import CompressibleSPHConfig
+from ....linalg import pinvSymmetric
+from ....systems.compressibleMonaghan import CompressibleState
+from ....configurations import SimulationConfig
+from ....configurations.compressibleConfig import CompressibleSPHConfig
 from typing import Optional, Union
 import torch
 
@@ -167,7 +168,7 @@ def computeXi(
     return (nominator**2) / (denominatorLeft**2 + trace + 1e-14 * particleState.supports)
     
 
-from .wp_vsig import computeVsigWarp
+from ..wp_vsig import computeVsigWarp
 
 def compute_vsig(
         particleState: CompressibleState,
@@ -210,7 +211,7 @@ def computeCullenTerms(
     if correctVelocityGradient:
     # verbosePrint(verbose, '[Cullen]\t\tComputing M')
         M = computeM(particleState, simulationConfig, schemeConfig, SupportScheme.Gather, adjacency) # E.6 in CRKSPH
-        M_inv = torch.linalg.pinv(M)        
+        M_inv = pinvSymmetric(M)
     else:
         M = None
         M_inv = None

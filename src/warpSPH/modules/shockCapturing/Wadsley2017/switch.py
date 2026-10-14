@@ -37,7 +37,7 @@ d = 3; in 1D every compression is planar and `D = div v` (no blindness to have).
 computeVelocityJacobian`, exact for any linear field -- Gasoline2's Eq. (6) is exact for isotropic contraction only);
 `grad P` the difference gradient of P (only its direction enters; exact zero for uniform P, where `n = 0` and
 `dv/dn = 0`); `v_sig` the Cullen-Dehnen signal speed (`wp_vsig`). The R sum runs over the Verlet list with the
-plain polynomial weight, deterministic (`segment_reduce`, no atomics).
+plain polynomial weight, deterministic (one thread sums its CSR row in order, `Wadsley2017/kernels.py`; no atomics).
 
 **Step boundaries.** `dD/dt` is a previous-step finite difference, so like `Rosswog2020` / `Sphenix2022` alpha is
 set once per step in the system's `finalize` (`advanceWadsley2017`) from the stage-0 detector values the stage
@@ -52,13 +52,13 @@ from typing import Optional, Union
 import torch
 
 from warpSPHCore import *
-from ...configurations import SimulationConfig
-from ...configurations.compressibleConfig import CompressibleSPHConfig
-from ...systems.compressibleMonaghan import CompressibleState
-from .switchState import ViscositySwitchState
+from ....configurations import SimulationConfig
+from ....configurations.compressibleConfig import CompressibleSPHConfig
+from ....systems.compressibleMonaghan import CompressibleState
+from ..switchState import ViscositySwitchState
 
 __all__ = ['computeWadsley2017Terms', 'computeWadsley2017Update', 'advanceWadsley2017',
-           'wadsleyD', 'wadsleyXi', 'wadsleyLocalAlpha', 'wadsleyDetector', 'WADSLEY_PREFACTOR']
+           'wadsleyD', 'wadsleyXi', 'wadsleyLocalAlpha', 'wadsleyDetector', 'wadsleyDetectorReference', 'WADSLEY_PREFACTOR']
 
 #: Eq. (26)'s prefactor in this repo's h (= support) units: 2 (h_G2 / H)^2 = 2 / 4 (see the module docstring).
 WADSLEY_PREFACTOR = 0.5
@@ -91,9 +91,10 @@ def _minimumImage(dx: torch.Tensor, domain) -> torch.Tensor:
     return torch.where(periodic, wrapped, dx)
 
 
-def wadsleyDetector(particleState, simulationConfig, adjacency, gamma: float):
-    """`(D, |T|, R, n)` for the current state (Eqs. 21-24, 29)."""
-    from ..reconstruction import computeVelocityJacobian
+def wadsleyDetectorReference(particleState, simulationConfig, adjacency, gamma: float):
+    """The torch-op detector (`torch.linalg.pinv`, `bincount`, `segment_reduce`: four host syncs per call): the reference
+    `wadsleyDetector` is tested against and micro-benchmarked next to."""
+    from ...reconstruction import computeVelocityJacobian
     st = particleState
     V = computeVelocityJacobian(st, simulationConfig, SupportScheme.SuperSymmetric, adjacency, corrected=True)
     gradP = warpOperation(
@@ -117,6 +118,24 @@ def wadsleyDetector(particleState, simulationConfig, adjacency, gamma: float):
     den = torch.segment_reduce(w, 'sum', lengths=counts)
     R = torch.where(den > 0, num / den.clamp(min=torch.finfo(den.dtype).tiny), torch.zeros_like(den))
     return D, Tnorm, R.clamp(-1.0, 1.0), n
+
+
+def wadsleyDetector(particleState, simulationConfig, adjacency, gamma: float):
+    """`(D, |T|, R, n)` for the current state (Eqs. 21-24, 29): the same numbers as `wadsleyDetectorReference`, from the
+    warp kernels of `kernels.py` (no host read; the velocity Jacobian and the pressure gradient are their own launches)."""
+    from ...reconstruction import computeVelocityJacobian
+    from .kernels import wadsleyNeighbourMean, wadsleyPoint
+    st = particleState
+    V = computeVelocityJacobian(st, simulationConfig, SupportScheme.SuperSymmetric, adjacency, corrected=True)
+    gradP = warpOperation(
+        st, OperationProperties(kernel=simulationConfig.kernel, operation=WarpOperation.Gradient,
+                                supportMode=SupportScheme.Gather, gradientMode=GradientScheme.Difference),
+        domain=simulationConfig.domain, adjacency=adjacency, queryValues=st.pressures)
+    if V.requires_grad or gradP.requires_grad:
+        return wadsleyDetectorReference(particleState, simulationConfig, adjacency, gamma)      # (the kernels are forward only)
+    D, Tnorm, ratio, n = wadsleyPoint(V, gradP)
+    R = wadsleyNeighbourMean(st, ratio, adjacency, simulationConfig.domain)
+    return D, Tnorm, R, n
 
 
 def advanceWadsley2017(state, stage0State, t: float, schemeConfig, simulationConfig=None) -> None:
@@ -155,7 +174,7 @@ def computeWadsley2017Terms(
         adjacency: Optional[Union[AdjacencyList, CompactHashMap]] = None):
     """Per stage: evaluate the detector (D, xi, v_sig) on this stage's state and store it for the step-boundary
     update; alpha itself is passed through unchanged (set in `advanceWadsley2017`)."""
-    from .CullenDehnen2010 import compute_vsig
+    from ..CullenDehnen2010 import compute_vsig
     D, Tnorm, R, _ = wadsleyDetector(particleState, simulationConfig, adjacency, schemeConfig.gamma)
     particleState.wadsleyD = D.detach()
     particleState.wadsleyXi = wadsleyXi(R).detach()

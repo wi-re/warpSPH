@@ -20,12 +20,12 @@ from __future__ import annotations
 from typing import Optional, Union
 
 from warpSPHCore import *
-from ...configurations import SimulationConfig
-from ...configurations.compressibleConfig import CompressibleSPHConfig
-from ...systems.compressibleMonaghan import CompressibleState
-from .common import *
-from .MorrisMonaghan1997 import relaxedAlpha
-from .switchState import ViscositySwitchState
+from ....configurations import SimulationConfig
+from ....configurations.compressibleConfig import CompressibleSPHConfig
+from ....systems.compressibleMonaghan import CompressibleState
+from ..common import *
+from ..MorrisMonaghan1997 import relaxedAlpha
+from ..switchState import ViscositySwitchState
 
 __all__ = ['computeRosswog2000Terms', 'computeRosswog2000Update']
 

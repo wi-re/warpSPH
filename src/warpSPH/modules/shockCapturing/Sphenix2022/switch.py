@@ -43,10 +43,10 @@ from typing import Optional, Union
 import torch
 
 from warpSPHCore import *
-from ...configurations import SimulationConfig
-from ...configurations.compressibleConfig import CompressibleSPHConfig
-from ...systems.compressibleMonaghan import CompressibleState
-from .switchState import ViscositySwitchState
+from ....configurations import SimulationConfig
+from ....configurations.compressibleConfig import CompressibleSPHConfig
+from ....systems.compressibleMonaghan import CompressibleState
+from ..switchState import ViscositySwitchState
 
 __all__ = ['computeSphenix2022Terms', 'computeSphenix2022Update', 'advanceSphenix2022',
            'sphenixShockIndicator', 'sphenixLocalAlpha', 'sphenixAlphaUpdate']

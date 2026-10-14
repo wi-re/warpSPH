@@ -123,7 +123,7 @@ from warpSPHCore.enumTypes import SupportScheme
 
 from warpSPH.modules.shockCapturing.wp_computeM import computeMWarp
 from warpSPH.modules.shockCapturing.wp_vsig import computeVsigWarp
-from warpSPH.modules.shockCapturing.wp_readHayfield import (computeReadHayfieldEntropyDissipationWarp,
+from warpSPH.modules.shockCapturing.ReadHayfield2012.kernels import (computeReadHayfieldEntropyDissipationWarp,
                                                             computeReadHayfieldVmaxWarp)
 
 DIM = 1

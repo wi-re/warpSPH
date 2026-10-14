@@ -13,6 +13,7 @@ from warpSPHCore import *
 import torch
 from typing import Optional, Union
 from ...configurations.moduleConfigurations.diffusionParameters import VelocityPairPolicy, ViscosityTerms
+from ...linalg import applyPinv
 
 __all__ = ['stateGradientInputs', 'computeStateGradients', 'needsStateGradients', 'stateGradientArguments', 'computeVelocityJacobian', 'velocityTensorArguments', 'needsJacobian', 'needsBalsara', 'balsaraFromJacobian',
            'reconstructionInputs', 'requireRawPairVelocity']
@@ -42,7 +43,7 @@ def computeVelocityJacobian(
         # M = sum_j V_j x_ji (x) grad W, the sum the difference gradient is built from, so Vs M^-1 is exact for a
         # linear field
         M = computeM(particleState, simulationConfig, None, supportMode, adjacency)
-        Vs = torch.einsum('ijk, ikl -> ijl', Vs, torch.linalg.pinv(M))
+        Vs = applyPinv(Vs, M)             # V @ pinv(M): one launch, no host sync (torch.linalg.pinv reads the host)
     return Vs.contiguous()
 
 
@@ -65,7 +66,7 @@ def computeStateGradients(
     G = torch.stack(grads, dim=1)
     if corrected:
         M = computeM(particleState, simulationConfig, None, supportMode, adjacency)
-        G = torch.einsum('ipj, ijk -> ipk', G, torch.linalg.pinv(M))
+        G = applyPinv(G, M)
     return G.contiguous()
 
 

@@ -566,6 +566,33 @@ The plan ([docs/historic_plans/SMALL_PROBLEM_PERFORMANCE.md](docs/historic_plans
 - **Verlet rebuild** (~15 ms every ~17 steps, eager with syncs), the **Sphenix / pressure-probe** transfers (one stacked device-to-host copy per step), the **video frame** cost (~3 ms/step at `plotInterval=20`; render once per frame, or pipe raw frames to ffmpeg).
 - **Compressible schemes** (CRKSPH 12.6 ms/step at gresho nx 128, no whole-step graph; MFM / MFV would not be graph-capturable with the current closure solve): COMPRESSIBLE_SPH_PLAN X5 / E4.
 
+## 34. Viscosity switch cost: Wadsley's 16 syncs per step, latency-bound detector kernels, torch-op relaxations (found 2026-10-14, micro-benchmark)
+
+`scripts/microbench_switches.py` (skill `module-microbench`, evidence `docs/microbench/switches_sod2d_CompSPH_2026-10-14.txt`): per-call and per-step (2 RK
+stages) ops / warp launches / host syncs / host, wall and GPU time of every switch's terms, update and step hook, on `sod2d` CompSPH at N = 2.5k-10k.
+Counts do not depend on N; times are for that GPU. What stands out (a switch is off by default for CompSPH, so none of this touches the default step):
+
+* **Wadsley2017 terms: 8 host syncs per call = 16 per step -- FIXED 2026-10-14.** Sites were `Wadsley2017.py` `torch.bincount` + two `torch.segment_reduce(lengths=)` (the R neighbour average, Eq. 29) and
+  `torch.linalg.pinv(M)` in `computeVelocityJacobian(corrected=True)`. Now `modules/shockCapturing/Wadsley2017/kernels.py`: a symmetric 1-3D pseudo-inverse (Jacobi on the zero-padded 3x3, torch's `dim * eps` rtol; the core's
+  `pinv2x2` is a different policy -- identity below 4 neighbours, rcond 1e-6 -- and its 3x3 is unfinished, so it was not reused), a fused `V @ pinv(M)` launch, a per-particle kernel for n / D / |T| / D/|T| and a per-CSR-row kernel for R
+  (deterministic, no atomics). Terms per call 127 ops / 8 syncs / 1.98 ms host -> 51 ops / 0 syncs / 0.96 ms; per step 283 ops, 16 syncs, 4.1 ms -> 131 ops, 0 syncs, 2.0 ms. The detector under `torch.cuda.set_sync_debug_mode('error')`
+  passes; against the torch reference (`wadsleyDetectorReference`) a 60-step Wadsley run agrees to 1.7e-5 relative or better (float32). `computeVelocityJacobian` (gsph, Inutsuka, Wadsley) no longer syncs either; the torch path is kept
+  for inputs that require grad. Tests: `tests/test_wadsleyKernels.py`; evidence `docs/microbench/wadsley_*`.
+* **What is left in the Wadsley detector (2026-10-14, after the port; `docs/microbench/wadsley_detector_before_after_2026-10-14.txt`): 22 ops, 6 launches, 0 syncs, 0.69 ms host per call.** Two findings on the way:
+  (a) `warpSPHCore` `operations.py` and `coreOperations/wp_gradient.py` (also `crk/crk_wrapper.py`, `pinv/wp_pinv1x1.py`, unused there) imported `torch.profiler.record_function` AFTER the gated one, so every `warpOperation` /
+  gradient call ran torch's C++ RecordFunction enter/exit (8 pairs = 16 ops per detector call, and a real host cost) although the gating (`WARPSPHCORE_PROFILING`) exists to avoid exactly that, and the call audit counted them as
+  ops: every earlier ops/call figure of a section that calls `warpOperation` was inflated by 4 per call. Fixed in the core (4 import lines, uncommitted there). (b) Three per-call conversion copies (int32 row arrays to int64,
+  bool periodic to int32) removed by taking the list's own dtypes in the kernel. What is left is the operator framework, not torch ops: a cProfile of 200 calls puts ~70 % of the host time in `launchOperator` (3 launches: two
+  gradient operations and `computeM`) = autograd `Function.apply` + `stateAwareWarpFunction.forward` + `launch_kernel`, ~58 warp-array view lookups per call (`getCachedWarpArray` / `acquireView` / `from_torch`, 15 %), and
+  `kernel.add_overload` / `get_signature` re-run on every launch of a generic (`Any`-typed) kernel (6 %); the new kernels are ~19 %. Candidate core items: a no-tape fast path in `launchOperator` that skips `Function.apply`
+  when no input requires grad, an overload cache for generic kernels, and views cached per tensor. Left: the remaining ops are output allocations (5 `empty`, 3 `zeros`), 8 `view`s, 4 `detach`, and computeM's `neg`.
+* **Host bound, not GPU bound, for every per-stage switch**: wall = host enqueue (sync-free, so the queue just fills). CullenHopkins costs 3.4 ms of host per step (282 ops: its *update* is 73 torch ops + 3 launches per stage),
+  CullenDehnen 1.9 ms, ReadHayfield 2.5 ms, against ~6 ms for the whole eager sod2d step. Colagrossi / MorrisMonaghan / Rosswog2000 are 1 launch + ~25-48 ops. Rosswog2020 and Sphenix2022 are the cheap design
+  (terms 0 ops, the step hook ~33 ops, 0 launches, 0 syncs).
+* **Detector kernels whose GPU time does not scale with N** (Balsara terms 487 -> 522 us for 4x the particles, ReadHayfield 1.1 ms flat, CullenDehnen 392 -> 479 us) while Colagrossi / MM / Rosswog2000 scale (57 -> 118 us):
+  these look latency bound (a long serial per-thread loop / low occupancy), the signature the multi-lane CompSPH kernels fixed (README docs/compsph_step 2.8). Not checked: whether they use the tiled `laneSum` path.
+* Open: fold the Hopkins update's relaxation into one warp kernel; look at the Balsara / ReadHayfield / CullenDehnen kernels' lanes. Only the counts at N = 2.5k-10k were taken; re-take at 100k before judging the kernels.
+
 ## Resolved (details in [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md); numbers kept so references stay valid)
 
 - **§5** englishWedge concave-corner residual -- sign bug in the `fourtakas2019` hydrostatic correction, fixed `68a9a6d`; 2026-09-29 re-validation: keep the default combo.

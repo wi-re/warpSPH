@@ -34,7 +34,7 @@ scheme is the entropy-dissipation internal-energy rate returned here as
 ``switchState.dudt_diss``.
 
 The two pair loops (the relaxation signal velocity and the entropy dissipation) run in warp kernels
-(``wp_readHayfield.py``) with the core minimum-image distance and kernel-gradient functions; an earlier
+(``ReadHayfield2012/kernels.py``) with the core minimum-image distance and kernel-gradient functions; an earlier
 host (torch) version took raw ``x_i - x_j`` differences, wrong across a periodic boundary, and carried
 its own B7 / Wendland2 ``dW/dr`` that silently fell back to Wendland2 for other kernels.
 
@@ -46,14 +46,14 @@ density-dependent (adiabatic) part -- already present in the Monaghan ``dudt``
 
 import torch
 
-from .common import *
-from .Balsara1995 import balsaraFactor
-from .wp_readHayfield import computeReadHayfieldVmaxWarp, computeReadHayfieldEntropyDissipationWarp
-from .switchState import *
+from ..common import *
+from ..Balsara1995 import balsaraFactor
+from .kernels import computeReadHayfieldVmaxWarp, computeReadHayfieldEntropyDissipationWarp
+from ..switchState import *
 from warpSPHCore import *
-from ...systems.compressibleMonaghan import CompressibleState
-from ...configurations import SimulationConfig
-from ...configurations.compressibleConfig import CompressibleSPHConfig
+from ....systems.compressibleMonaghan import CompressibleState
+from ....configurations import SimulationConfig
+from ....configurations.compressibleConfig import CompressibleSPHConfig
 from typing import Optional, Union
 
 __all__ = ['computeReadHayfieldTerms', 'computeReadHayfieldUpdate']

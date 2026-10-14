@@ -11,14 +11,15 @@ CRKSPH and Hopkins papers' offset terms in the alpha-target denominator is
 called out in an inline comment; this file follows the Hopkins form.
 """
 
-from .common import *
-from .switchState import *
+from ..common import *
+from ..switchState import *
 
 from warpSPHCore import *
-from .CullenDehnen2010 import *
-from ...systems.compressibleMonaghan import CompressibleState
-from ...configurations import SimulationConfig
-from ...configurations.compressibleConfig import CompressibleSPHConfig
+from ....linalg import pinvSymmetric
+from ..CullenDehnen2010 import *
+from ....systems.compressibleMonaghan import CompressibleState
+from ....configurations import SimulationConfig
+from ....configurations.compressibleConfig import CompressibleSPHConfig
 from typing import Optional, Union
 import torch
 
@@ -45,7 +46,7 @@ def computeHopkinsTerms(
     if correctVelocityGradient:
     # verbosePrint(verbose, '[Cullen]\t\tComputing M')
         M = computeM(particleState, simulationConfig, schemeConfig, SupportScheme.Gather, adjacency) # E.6 in CRKSPH
-        M_inv = torch.linalg.pinv(M)        
+        M_inv = pinvSymmetric(M)
     else:
         M = None
         M_inv = None
