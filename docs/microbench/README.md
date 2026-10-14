@@ -15,3 +15,6 @@
 * `audit_crkSPH_sod2d_{before,after}_2026-10-14.txt` -- the CRKSPH step (`audit_case.py sod2d --scheme CRKSPH`) before and after its cleanup: integrator 904 -> 504 ops
   and 9.2 -> 3.2 syncs per step (the CRK correction terms were ~290 torch ops and 3 host reads per stage in `computeCRKTermsWarp`, now one warp kernel
   `modules/crk/terms.py`; the torch version stays for the forward-mode tangent path), wall 9.4 -> 7.6 ms/step. The remaining syncs are the Verlet validity check and rebuilds.
+* `audit_{GSPH,InutsukaGSPH}_sod2d_{before,after}_2026-10-14.txt` -- the two Godunov steps before and after their cleanup (shared support solve, one validity check per
+  stage, stage times deferred): GSPH integrator syncs 10.4 -> 4.2 per step, 7.05 -> 6.15 ms/step; Inutsuka 12.2 -> 8.2 syncs, wall unchanged (it still builds a second,
+  larger-scale list per stage for the Gaussian reach and reads that reach on the host: 2 validity checks + 1 reach read per stage + rebuilds).

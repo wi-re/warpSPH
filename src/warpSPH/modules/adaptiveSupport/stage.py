@@ -10,7 +10,7 @@ depends on how the step runs:
 * grid mode (`onGrid`, CompSPH's graph step): the solve runs on the system's fixed-shape support grid (a graph-replayed build, no host
   read) and looks at no list at all; the pair list is then built or checked by `utils.pairList.stagePairList`.
 
-The densities the solve returns are the particles' current ones (`computeDensity=False`): every caller sums its own density next.
+By default the densities the solve returns are the particles' current ones (`computeDensity=False`): most callers sum their own density next.
 """
 
 from warpSPHCore import SupportScheme, buildVerletList
@@ -21,21 +21,23 @@ from .optimalSupport import evaluateOptimalSupport
 __all__ = ['solveStageSupport']
 
 
-def solveStageSupport(system, state, config, schemeConfig, *, onGrid: bool = False, rebuildSlack: float = 0.0) -> None:
-    """Solve for the stage's supports; sets `state.supports` / `state.densities` (and, in list mode, `system.adjacency`)."""
+def solveStageSupport(system, state, config, schemeConfig, *, onGrid: bool = False, rebuildSlack: float = 0.0,
+                      computeDensity: bool = False) -> None:
+    """Solve for the stage's supports; sets `state.supports` / `state.densities` (and, in list mode, `system.adjacency`).
+    `computeDensity=True` also returns the closing summation density (for a step that builds on it, e.g. Inutsuka's Gaussian h)."""
     if onGrid:
         from ..compSPH.supportGrid import ensureSupportGrid, noteOutgrown, refreshSupportGrid       # (the grid belongs to the CompSPH step; not needed in list mode)
         holder = ensureSupportGrid(system.supportGrid, state, config)
         info = {}
         rho, h, *_ = evaluateOptimalSupport(
-            state, config, schemeConfig, SupportScheme.Gather, None, computeDensity=False,
+            state, config, schemeConfig, SupportScheme.Gather, None, computeDensity=computeDensity,
             grid=refreshSupportGrid(holder, state), gridRadius=holder.radius, info=info)
         noteOutgrown(holder, info)
         state.supports, state.densities = h, rho
         return
     rho, h, system.adjacency, *_ = evaluateOptimalSupport(
         state, config, schemeConfig, SupportScheme.Gather, system.adjacency,
-        validateOnce=True, rebuildSlack=rebuildSlack, computeDensity=False)
+        validateOnce=True, rebuildSlack=rebuildSlack, computeDensity=computeDensity)
     state.supports, state.densities = h, rho
     if schemeConfig.adaptiveSupportScheme in (AdaptiveSupportScheme.Monaghan, AdaptiveSupportScheme.NumberDensity):
         # those solvers ignore `validateOnce`: validate the list here, for the supports they returned
