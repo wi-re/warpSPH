@@ -1,4 +1,4 @@
-"""One switch for how a CompSPH step runs: `CompSPHConfig.stepMode`.
+"""One switch for how a CompSPH / CRKSPH step runs: `CompSPHConfig.stepMode`.
 
 * ``'eager'`` (default): the support solve and the pair list work on the Verlet list, every check is read when it is made. Fewest
   moving parts, and the fastest once the step is limited by the GPU (large N, 3D).
@@ -30,6 +30,11 @@ GRAPH_MAX_PARTICLES: Dict[Tuple[CompressibleSPHScheme, int], int] = {
     (CompressibleSPHScheme.CompSPH, 1): 100_000,
     (CompressibleSPHScheme.CompSPH, 2): 5_000,
     (CompressibleSPHScheme.CompSPH, 3): 0,
+    # CRKSPH (docs/compsph_step/README.md 2.9, sod / sod2d / sod3d, steps 40-340): 1D tie near 125k; 2D graph 13 % ahead at 20k, 8 % behind at 30k
+    # (crossover ~25k); 3D slower with the graph at 10k, as for CompSPH. Rounded down.
+    (CompressibleSPHScheme.CRKSPH, 1): 100_000,
+    (CompressibleSPHScheme.CRKSPH, 2): 20_000,
+    (CompressibleSPHScheme.CRKSPH, 3): 0,
 }
 
 
@@ -55,7 +60,7 @@ def _blocker(ctx, runningState, spec) -> Optional[str]:
 def resolveStepMode(ctx, runningState, spec) -> str:
     """``'eager'`` or ``'graph'`` for this run (see the module doc); in graph mode the switches it needs are turned on."""
     schemeConfig = ctx.schemeConfig
-    if ctx.scheme != CompressibleSPHScheme.CompSPH:
+    if ctx.scheme not in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH):
         return 'eager'
     requested = getattr(schemeConfig, 'stepMode', 'eager')
     if requested not in STEP_MODES:

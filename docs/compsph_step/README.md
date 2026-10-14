@@ -183,7 +183,7 @@ rate set by particle motion, not by N, so they do not move the crossover.
 
 Therefore a single switch, `stepMode`: `'eager'` (default; no deferred flags, no grid, no in-place buffers), `'graph'` (all of them together),
 `'auto'` (graph below `GRAPH_MAX_PARTICLES[(scheme, dim)]`: CompSPH 1D 100k, 2D 5k, 3D never; override `stepModeMaxParticles`). The
-crossovers are for this GPU and these cases; they are first estimates. Only CompSPH has a graph mode; CRKSPH and the others are always eager.
+crossovers are for this GPU and these cases; they are first estimates. CompSPH and CRKSPH have a graph mode (2.9); the others are always eager.
 The grid-eager combination (`supportSolveOnGrid=True` with `stepMode='eager'`) stays available as a diagnostic and as the bitwise reference of
 the graph tests; it is slower than both.
 
@@ -205,6 +205,28 @@ the graph tests; it is slower than both.
   shockReflection (walls), kidder (Dirichlet) run eagerly with a warning.
 * The crossover table in 2.7 was measured before these changes, on one GPU: the 2D graph limit has moved up (graph still ahead at 10k with the new kernels)
   and the numbers are hardware specific. Treat `GRAPH_MAX_PARTICLES` as a rough, conservative default, not a result.
+
+### 2.9 CRKSPH on the same route (2026-10-14, user)
+
+CRKSPH shares CompSPH's system class, config base and `finalize`, so the graph route needed three small things: `crkSPH_step` honours the grid mode
+(`solvesOnGrid` -> `solveStageSupport(onGrid=...)` + `utils.pairList.stagePairList`, the same helpers `compSPH_step` uses), `resolveStepMode` and the runner accept
+`CompressibleSPHScheme.CRKSPH`, and `GRAPH_MAX_PARTICLES` got CRK entries. Nothing else: the CRK correction terms are one warp kernel since the CRK cleanup
+(`modules/crk/terms.py`), and the CRK operators already allocated their per-edge outputs at the padded capacity.
+
+* **Equivalence:** `sod2d` 120 steps, `gresho` 60, `sod` 80: the graphed run is bitwise equal to the eager step on the same grid solve (2 captures, 119 replays,
+  0 fallbacks on sod2d); with the rebuild margin removed (steps discarded and redone eagerly) still bitwise (`tests/test_crkGraph.py`). With the per-stage viscosity switches
+  (None, CullenHopkins, CullenDehnen, Balsara, ReadHayfield) bitwise as well; the step-boundary ones (Sphenix, Wadsley, Rosswog2020) and walls / Dirichlet BCs run eagerly with
+  the warning, as for CompSPH.
+* **Speed** (`sod` / `sod2d` / `sod3d`, ms per step, steps 40-340, this GPU):
+
+| dim | N | eager | graph |
+|---|---|---|---|
+| 1D | 1.25k / 12.5k / 125k | 7.0 / 6.9 / 7.0 | 1.5 / 2.1 / 6.8 |
+| 2D | 2.5k / 5k / 10k / 20k / 30k / 40k | 7.5 / 7.7 / 8.0 / 8.5 / 9.2 / 10.7 | 2.8 / 3.7 / 5.0 / 7.4 / 10.0 / 12.6 |
+| 3D | 10k | 19.0 | 29.2 |
+
+  So `auto` takes the graph for CRKSPH below 100k (1D) and 20k (2D) particles and never in 3D (rounded down from the 2D crossover at ~25k; rough defaults, hardware dependent).
+  Audit of the graphed step (`docs/microbench/audit_crkSPH_sod2d_graph_2026-10-14.txt`).
 
 ## 3. Bugs found on the way (each with its test)
 
@@ -251,7 +273,7 @@ the graph tests; it is slower than both.
    fluid-pair cache is gone), (c) kernels inside the graph reading the PADDED arrays with the `-1` guard, never `livePairs()`/`numEdges`, (d) the
    rebuild eager between replays (decided: not graphed), the validity/usage flags as the loop condition or the step-end read, (e) the
    second-pass machinery as the exact fallback. ADJACENCY_CAPACITY_PLAN.md (warpSPHCore) has the two-case graph contract.
-4. Wire the grid mode and its deferred check into `crkSPH_step` (only CompSPH has it) behind the same `stepMode`; its threshold table entry follows from a measurement.
+4. Wire the grid mode and its deferred check into `crkSPH_step` behind the same `stepMode`: DONE 2026-10-14 (section 2.9).
 5. Carry the lessons back to ACSPH (ACSPH_REFACTOR_PLAN): stage systems copy the initial state, rebuild decisions at step end, tableau weights
    decide what is stored across stages, deferred device flags + one read per step.
 6. Never observed in a real run: a NATURAL conservative second pass (only forced by tests) and a natural energy second pass.

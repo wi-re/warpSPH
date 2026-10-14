@@ -385,8 +385,8 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
                                       CompressibleSPHScheme.GSPH, CompressibleSPHScheme.InutsukaGSPH)
     stepGraph = None
     graphWanted = spec.cudaGraph
-    if ctx.scheme == CompressibleSPHScheme.CompSPH:
-        # CompSPH has its own switch, `stepMode`, instead of the spec's flag
+    if ctx.scheme in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH):
+        # CompSPH / CRKSPH have their own switch, `stepMode`, instead of the spec's flag
         from ..modules.compSPH.stepMode import resolveStepMode
         ctx.scratch['compSPHStepMode'] = resolveStepMode(ctx, runningState, spec)
         graphWanted = ctx.scratch['compSPHStepMode'] == 'graph'
@@ -827,9 +827,9 @@ def _stepGraphable(ctx, runningState=None) -> bool:
     """Whole-step graphs are wired for the weakly-compressible delta-SPH family
     (its RHS, integrator path and `finalize` were made sync-free; see
     `schemes/weaklyCompressible/deltaSPH.py:_rhsIsGraphable` for the per-configuration rules) and
-    for CompSPH in its `stepMode='graph'` (`modules/compSPH/stepMode.py`)."""
+    for CompSPH / CRKSPH in their `stepMode='graph'` (`modules/compSPH/stepMode.py`)."""
     from ..enumTypes import CompressibleSPHScheme, WeaklyCompressibleSPHScheme
-    if ctx.scheme == CompressibleSPHScheme.CompSPH:
+    if ctx.scheme in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH):
         return ctx.scratch.get('compSPHStepMode') == 'graph'        # `stepMode`, resolved before the loop
     if not isinstance(ctx.scheme, WeaklyCompressibleSPHScheme):
         return False
