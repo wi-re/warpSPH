@@ -156,6 +156,7 @@ from ...configurations.moduleConfigurations.shifting import ShiftingImplicitInit
 
 from .wp_implicitShifting import computeShiftingPairTerms
 from .preconditioner import buildScalarJacobiPrecond, buildBlockJacobiPrecond
+from ...configurations.compute import resolveKrylovCheckEvery
 from .solverDriver import solveImplicitSystem
 from .delta import computeDeltaShift
 
@@ -338,6 +339,7 @@ def computeImplicitShift(
             precond=precond,
             threshold=threshold,
             dim=dim,
+            checkEvery=resolveKrylovCheckEvery(config),
         )
         fallback = (fallback_override if fallback_override is not None
                     else schemeConfig.shiftProperties.implicitFallback)

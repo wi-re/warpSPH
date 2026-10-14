@@ -9,7 +9,7 @@ docstrings for why), and are used by `io/{dataset,importIO,export}.py`.
 """
 
 __all__ = ['SimulationConfig', 'buildConfig', 'configurationToDict', 'dictToConfig',
-           'DensityCorrection']
+           'DensityCorrection', 'ComputeConfig']
 
 import torch
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 
 # from waves.utils.domain import buildDomainDescription
 from ..geometry import SamplingScheme
+from .compute import ComputeConfig
 
 @dataclass
 class DensityCorrection:
@@ -105,6 +106,8 @@ class SimulationConfig:
     #: `calibrateNormalization` -- a different correction; see
     #: `DensityCorrection`'s docstring. Off by default.
     densityCorrection: DensityCorrection = field(default_factory=DensityCorrection)
+    #: how the run uses the machine (eager / CUDA graph / auto by size, how often iterative solvers read the host): `ComputeConfig`.
+    compute: ComputeConfig = field(default_factory=ComputeConfig)
     supportMode: SupportScheme = field(default=SupportScheme.SuperSymmetric, metadata={'description': 'Support scheme for neighbor search'})
     
     
@@ -133,6 +136,7 @@ def buildConfig(
     n_h: Optional[float] = None,
     calibrateNormalization: Optional[bool] = None,
     densityCorrection: Optional[Union[bool, DensityCorrection]] = None,
+    compute: Optional[Union[ComputeConfig, Dict[str, Any]]] = None,
     supportMode: Optional[SupportScheme] = None,
     gradientMode: Optional[GradientScheme] = None,
     laplacianMode: Optional[LaplacianScheme] = None,
@@ -170,6 +174,10 @@ def buildConfig(
     elif isinstance(densityCorrection, bool):
         # Bool shorthand: on/off with the warpSPHCore-shipped constants.
         densityCorrection = DensityCorrection(enabled=densityCorrection)
+    if compute is None:
+        compute = ComputeConfig()
+    elif isinstance(compute, dict):
+        compute = ComputeConfig(**compute)
     if supportMode is None:
         supportMode = SupportScheme.SuperSymmetric
     if gradientMode is None:
@@ -205,6 +213,7 @@ def buildConfig(
         n_h=n_h,
         calibrateNormalization=calibrateNormalization,
         densityCorrection=densityCorrection,
+        compute=compute,
         supportMode=supportMode,
         gradientMode=gradientMode,
         laplacianMode=laplacianMode,
@@ -302,17 +311,17 @@ def _decodeValue(annotation: Any, value: Any, device, dtype) -> Any:
                 periodic=torch.tensor(_atLeast1D(value['periodic']), device=device, dtype=torch.bool),
                 dim=int(value['dim']),
             )
-        if annotation is DensityCorrection:
-            # Keys absent from a dict written before the field existed fall
+        if _isDataclass(annotation):
+            # A nested config dataclass (DensityCorrection, ComputeConfig). Keys absent from a dict written before the field existed fall
             # back to the dataclass defaults (like every other field here).
-            hints = typing.get_type_hints(DensityCorrection)
+            hints = typing.get_type_hints(annotation)
             nested = {}
-            for f in _dataclassFields(DensityCorrection):
+            for f in _dataclassFields(annotation):
                 if f.name not in value:
                     continue
                 nested[f.name] = _decodeValue(
                     hints.get(f.name, f.type), value[f.name], device, dtype)
-            return DensityCorrection(**nested)
+            return annotation(**nested)
         if annotation is bool:
             return bool(value)
     # Normalize numpy scalars that come back out of HDF5 without changing width.

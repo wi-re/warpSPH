@@ -121,7 +121,7 @@ class ArtificialCompressibilityParams:
     #: the previous step's first-converged iteration count, then every other
     #: iteration (`modules/incompressible/convergence.py`). A step can run up to
     #: the gap to the next checkpoint past its first converged iteration.
-    convergenceCheckSchedule: str = field(default='adaptive', metadata={'description': "'every' or 'adaptive' eps_v readback"})
+    convergenceCheckSchedule: str = field(default='auto', metadata={'description': "'every' or 'adaptive' eps_v readback; 'auto' takes SimulationConfig.compute.iterationChecks"})
 
     #: `k2 = k2Factor * h * beta`, Eq. (24). 0.1 for consistency with delta-SPH
     #: practice; the measured stability ceiling is 0.2.

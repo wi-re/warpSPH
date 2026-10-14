@@ -108,19 +108,24 @@ class CaseSpec:
     # --- runtime ------------------------------------------------------------
     precision: str = 'float32'
     device: Optional[str] = None
-    #: Capture the scheme's right-hand side in a CUDA graph and replay it
-    #: (`utils/cudaGraph.py`) -- removes the per-op CPU cost that dominates
-    #: small problems; bitwise identical to eager (self-checked at every
-    #: capture, falling back to eager on any mismatch). Only the delta-SPH
-    #: family acts on it, and only in configurations whose RHS is a pure
-    #: function of the state (`schemes/weaklyCompressible/deltaSPH.py:_rhsIsGraphable`); a no-op
-    #: elsewhere. The scheme config must not be changed after the first step.
-    cudaGraph: bool = False
+    #: How the run uses the machine (`configurations/compute.py`, `SimulationConfig.compute`): `execution` 'eager' / 'graph' / 'auto' (CUDA-graph
+    #: replay below a particle count that depends on the scheme and the dimension -- removes the per-op CPU cost that dominates small problems; bitwise
+    #: identical to eager, self-checked at every capture, falling back to eager on any mismatch), `graphMaxParticles` (the 'auto' limit; None = the
+    #: table), `iterationChecks` ('every' / 'adaptive': when relaxed-Jacobi style loops read their convergence test back) and `krylovCheckEvery`.
+    #: None = the `ComputeConfig` default. A scheme config's own `stepMode` and the legacy `cudaGraph` flag below take precedence.
+    execution: Optional[str] = None
+    graphMaxParticles: Optional[int] = None
+    iterationChecks: Optional[str] = None
+    krylovCheckEvery: Optional[int] = None
+    #: Legacy spelling of `execution`: True is 'graph', False is 'eager', None defers to `execution`. Only the schemes with a graph route act on it
+    #: (the delta-SPH family, ACSPH's dual-time iteration, CompSPH / CRKSPH through their `stepMode`); a no-op elsewhere. The scheme config must not
+    #: be changed after the first step.
+    cudaGraph: Optional[bool] = None
     #: With a whole-step graph: run step n's diagnostics and plot frame on a
     #: side stream while step n+1 replays (`runner.py:_runPipelined`). Same
     #: rows and frames; `stepTime_ms` becomes the per-step wall throughput.
-    #: Off restores the one-thing-at-a-time loop (A/B timing, debugging).
-    pipelineOutputs: bool = True
+    #: Off restores the one-thing-at-a-time loop (A/B timing, debugging). None = `ComputeConfig.pipelineOutputs` (on).
+    pipelineOutputs: Optional[bool] = None
 
     # --- output -------------------------------------------------------------
     plot: bool = False
@@ -296,6 +301,12 @@ _FIELD_HELP = {
     'precision': 'scalar precision; resolved before import, so pass it to '
                  'warpsph-run rather than to a case module',
     'device': "torch device; unset picks cuda:0 when one is available",
+    'execution': "eager, graph (CUDA-graph replay where the scheme supports it) or auto (graph below a per-scheme particle count); unset: eager",
+    'graphMaxParticles': "execution=auto: graph below this many particles; unset uses the per-scheme table",
+    'iterationChecks': "relaxed-Jacobi loops read their convergence test back every iteration ('every') or at learned checkpoints ('adaptive', default)",
+    'krylovCheckEvery': 'Krylov solvers read their still-running flag every this many iterations; unset: 8',
+    'cudaGraph': 'legacy spelling of --execution graph / eager',
+    'pipelineOutputs': 'with a whole-step graph, compute step n\'s diagnostics while step n+1 replays (default on)',
     # -- output --
     'plot': 'draw frames while the run proceeds',
     'plotInterval': 'steps between drawn frames',

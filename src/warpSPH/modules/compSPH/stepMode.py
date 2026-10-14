@@ -15,28 +15,13 @@ host time, Dirichlet boundary conditions) runs ``'eager'``, with a warning for a
 import warnings
 from typing import Dict, Optional, Tuple
 
+from ...configurations.compute import EXECUTION_MODES, GRAPH_MAX_PARTICLES, graphParticleLimit, requestedExecution, resolveExecution
 from ...enumTypes import CompressibleSPHScheme
 
 __all__ = ['GRAPH_MAX_PARTICLES', 'STEP_MODES', 'resolveStepMode']
 
-STEP_MODES = ('eager', 'graph', 'auto')
-
-#: 'auto' replays the step from a graph below this many particles. ROUGH, CONSERVATIVE defaults, hardware dependent (the 2D limit has since moved up with the
-#: multi-lane kernels; docs/compsph_step/README.md 2.8): not a result. First estimates from `sod` / `sod2d` / `sod3d` on one GPU (RTX PRO 6000
-#: Blackwell, steps 100-1100, `docs/compsph_step/README.md` 2.7): the crossover is where the step stops being limited by the host.
-#: 1D: tie at 160k; 2D: tie at 5-7k; 3D: the graph step is slower at every size measured (>= 3k) because the grid solve visits
-#: 3^3 cells, so 'auto' never picks it. A slower GPU or a bigger host overhead moves them; `CompSPHConfig.stepModeMaxParticles` overrides.
-GRAPH_MAX_PARTICLES: Dict[Tuple[CompressibleSPHScheme, int], int] = {
-    (CompressibleSPHScheme.CompSPH, 1): 100_000,
-    (CompressibleSPHScheme.CompSPH, 2): 5_000,
-    (CompressibleSPHScheme.CompSPH, 3): 0,
-    # CRKSPH (docs/compsph_step/README.md 2.9, sod / sod2d / sod3d, steps 40-340): 1D tie near 125k; 2D graph 13 % ahead at 20k, 8 % behind at 30k
-    # (crossover ~25k); 3D slower with the graph at 10k, as for CompSPH. Rounded down.
-    (CompressibleSPHScheme.CRKSPH, 1): 100_000,
-    (CompressibleSPHScheme.CRKSPH, 2): 20_000,
-    (CompressibleSPHScheme.CRKSPH, 3): 0,
-}
-
+STEP_MODES = EXECUTION_MODES
+# The 'auto' particle limits (`GRAPH_MAX_PARTICLES`) now live with the rest of the compute settings in `configurations/compute.py`.
 
 def _blocker(ctx, runningState, spec) -> Optional[str]:
     """Why this run cannot replay the step from a graph, or None."""
@@ -62,18 +47,10 @@ def resolveStepMode(ctx, runningState, spec) -> str:
     schemeConfig = ctx.schemeConfig
     if ctx.scheme not in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH):
         return 'eager'
-    requested = getattr(schemeConfig, 'stepMode', 'eager')
-    if requested not in STEP_MODES:
-        raise ValueError(f"stepMode must be one of {STEP_MODES}, not {requested!r}")
-    if requested == 'eager':
+    requested = requestedExecution(ctx.config, schemeConfig, spec)         # the scheme's stepMode, else the spec's cudaGraph, else config.compute.execution
+    n, dim = runningState.state.positions.shape
+    if resolveExecution(ctx.config, ctx.scheme, schemeConfig, spec, n, dim) == 'eager':
         return 'eager'
-    if requested == 'auto':
-        n, dim = runningState.state.positions.shape
-        limit = getattr(schemeConfig, 'stepModeMaxParticles', None)
-        if limit is None:
-            limit = GRAPH_MAX_PARTICLES.get((ctx.scheme, dim), 0)
-        if n >= limit:
-            return 'eager'
     reason = _blocker(ctx, runningState, spec)
     if reason is not None:
         if requested == 'graph':

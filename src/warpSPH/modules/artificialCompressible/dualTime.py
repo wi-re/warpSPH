@@ -29,6 +29,7 @@ from warpSPHCore.profiling import record_function
 from warpSPHIntegrators.butcher import getButcherTableau
 
 from ...systems.artificialCompressible import ArtificialCompressibleSystemUpdate
+from ...configurations.compute import resolveCheckSchedule
 from ..incompressible.convergence import ConvergenceCheckSchedule
 from ..mdbc import computeBoundaryVelocities
 from .parameters import convergenceMetricDevice
@@ -232,7 +233,7 @@ def solveDualTime(problem: DualTimeProblem, x0, v0, p0, verbose=False) -> DualTi
     acParams = schemeConfig.acParams
     x, v, p = x0, v0, projectPressure(problem.contact, p0)
     schedule = ConvergenceCheckSchedule(
-        schemeConfig, 'acsphDualTime', getattr(acParams, 'convergenceCheckSchedule', 'adaptive'),
+        schemeConfig, 'acsphDualTime', resolveCheckSchedule(acParams, problem.config),
         max(0, acParams.minPseudoIterations - 1), acParams.maxPseudoIterations, verbose)
     graphed = graphedIteration(problem)
     epsHistory = []

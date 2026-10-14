@@ -36,6 +36,7 @@ from ..shifting.cg import cgSolve
 from ..shifting.bicg import bicgSolve
 from ..shifting.minres import minresSolve
 from ...configurations import PressureSolverType, BoundaryOperatorTerms, resolveBoundaryOperatorTerms
+from ...configurations.compute import resolveKrylovCheckEvery
 
 __all__ = [
     'buildIISPHMatvec',
@@ -158,6 +159,7 @@ def solvePressureKrylov(
     atol = solverCfg.atol
     maxiter = solverCfg.maxIterations
     restart = solverCfg.restart
+    checkEvery = resolveKrylovCheckEvery(config)          # `SimulationConfig.compute.krylovCheckEvery`: host reads of the still-running flag (CG / BiCG / BiCGStab)
 
     # kind==1 (boundary) and kind==2 (ghost) particles are not pressure unknowns (see
     # `BoundaryPressureMode`'s docstring): the operator is wrapped so every matvec
@@ -217,7 +219,7 @@ def solvePressureKrylov(
     if solverType == PressureSolverType.bicgStab:
         x, status, conv = bicgstabSolve(matvec, b, x0, tol=atol, rtol=rtol,
                                         maxiter=maxiter, precond=precond, dim=1,
-                                        verbose=verbose)
+                                        verbose=verbose, checkEvery=checkEvery)
     elif solverType == PressureSolverType.gmres:
         x, status, conv = gmresSolve(matvec, b, x0, tol=atol, rtol=rtol,
                                      maxiter=maxiter, precond=precond, dim=1,
@@ -236,7 +238,7 @@ def solvePressureKrylov(
             b = -b
         x, status, conv = cgSolve(matvec, b, x0, tol=atol, rtol=rtol,
                                   maxiter=maxiter, precond=precond, dim=1,
-                                  verbose=verbose)
+                                  verbose=verbose, checkEvery=checkEvery)
     elif solverType == PressureSolverType.bicg:
         _rawMatvecT = buildIISPHMatvecT(particles, config, schemeConfig, adjacency, dt_scale,
                                         boundaryTerms=boundaryTerms)
@@ -260,7 +262,7 @@ def solvePressureKrylov(
             b = -b
         x, status, conv = bicgSolve(matvec, matvecT, b, x0, tol=atol, rtol=rtol,
                                     maxiter=maxiter, precond=precond, dim=1,
-                                    verbose=verbose)
+                                    verbose=verbose, checkEvery=checkEvery)
     elif solverType == PressureSolverType.minres:
         # MINRES needs symmetry, not positive definiteness: no sign flip, and
         # the flat 1/D diagonal is passed as-is -- minresSolve turns it into

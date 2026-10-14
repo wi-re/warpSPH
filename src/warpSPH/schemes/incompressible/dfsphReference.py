@@ -158,6 +158,7 @@ from warpSPHCore import (GradientScheme, OperationProperties, SupportScheme, War
                          buildVerletList, warpOperation)
 
 from ...configurations import BoundaryPressureMode
+from ...configurations.compute import resolveCheckSchedule
 from ...modules.boundaryConditions import (computeForcing, enforceDirichlet,
                                           enforceUpdates)
 from ...modules.deltaSPH import computeVelocityDiffusion
@@ -523,7 +524,7 @@ def _jacobiSolve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
     hasFluid = bool(fluidMask.any())
     fluidIndex = fluidMask.nonzero().squeeze(1)
     schedule = ConvergenceCheckSchedule(schemeConfig, f'dfsphReference.{mode}',
-                                        getattr(solverCfg, 'convergenceCheckSchedule', 'adaptive'),
+                                        resolveCheckSchedule(solverCfg, config),
                                         max(0, minIters - 1), maxIters)       # `it + 1 >= minIters` is `it >= minIters - 1`
 
     def step(p, it):

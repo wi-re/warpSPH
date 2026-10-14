@@ -51,7 +51,7 @@ class CompressibleSPHConfig:
 
     adaptiveSupportScheme: AdaptiveSupportScheme = field(default=AdaptiveSupportScheme.Monaghan, metadata={'description': 'Adaptive support scheme to use'})
     supportSolveOnGrid: bool = field(default=False, metadata={'description': 'Owen support solve on a fixed-shape grid (no neighbour list in the solve; the step validates / builds its list afterwards) instead of on the Verlet list'})
-    stepMode: str = field(default='eager', metadata={'description': "CompSPH: how a step runs. 'eager' (default), 'graph' (the whole step replayed from one CUDA graph: grid support solve, deferred pair-list checks, in-place rebuilds; faster at small N, slower at large N and in 3D) or 'auto' (graph below a particle count that depends on the dimension) -- modules/compSPH/stepMode.py"})
+    stepMode: Optional[str] = field(default=None, metadata={'description': "CompSPH / CRKSPH: how a step runs, overriding SimulationConfig.compute.execution (None = inherit it). 'eager', 'graph' (the whole step replayed from one CUDA graph: grid support solve, deferred pair-list checks, in-place rebuilds; faster at small N, slower at large N and in 3D) or 'auto' (graph below a particle count that depends on the dimension) -- modules/compSPH/stepMode.py"})
     stepModeMaxParticles: Optional[int] = field(default=None, metadata={'description': "stepMode='auto': graph below this many particles (None = the table in modules/compSPH/stepMode.py)"})
     inPlaceAdjacency: bool = field(default=False, metadata={'description': 'a pair-list rebuild that keeps its capacity overwrites the buffers of the list it replaces (a captured CUDA graph reads them at fixed addresses); set by the runner when the whole step is graphed. Nothing may keep an old list'})
     adaptiveSupportIterations: int = field(default=1, metadata={'description': 'Number of iterations for adaptive support scheme'})
@@ -108,7 +108,7 @@ def dictToCompressibleConfig(configDict: Dict[str, Any]) -> CompressibleSPHConfi
     config.adaptiveSupportScheme = AdaptiveSupportScheme[configDict['adaptiveSupportScheme']] if isinstance(configDict['adaptiveSupportScheme'], str) else configDict['adaptiveSupportScheme']
     config.supportSolveOnGrid = configDict.get('supportSolveOnGrid', False)
     config.inPlaceAdjacency = configDict.get('inPlaceAdjacency', False)
-    config.stepMode = configDict.get('stepMode', 'eager')
+    config.stepMode = configDict.get('stepMode', None)
     config.stepModeMaxParticles = configDict.get('stepModeMaxParticles', None)
     config.adaptiveSupportIterations = configDict['adaptiveSupportIterations']
     config.adaptiveSupportThreshold = configDict['adaptiveSupportThreshold']

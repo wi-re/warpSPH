@@ -32,6 +32,7 @@ from ..pressure.iisph import computePressureAccelIISPH
 from .drift import computePressureShiftIISPH
 from ...configurations import JacobiRelaxationMode, PressureSolverType
 from .krylov import solvePressureKrylov
+from ...configurations.compute import resolveCheckSchedule
 from warpSPHCore.linalg import runStationary
 from .consistent import applyConsistentCoupling
 from .convergence import ConvergenceCheckSchedule
@@ -278,7 +279,7 @@ def _solveIncompressibleImpl(
         # four-reads-per-iteration loop's iterate bitwise).
         fluidIndex = _fluidRows.nonzero().squeeze(1) if closedDomainGauge else None
         schedule = ConvergenceCheckSchedule(schemeConfig, 'incompressibleConstantDensity',
-                                            getattr(schemeConfig.solverConfig.pressureSolver, 'convergenceCheckSchedule', 'every'),
+                                            resolveCheckSchedule(schemeConfig.solverConfig.pressureSolver, config),
                                             minIters, maxIters, verbose)
         last = {}
 

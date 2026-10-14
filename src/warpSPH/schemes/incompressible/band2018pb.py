@@ -40,6 +40,7 @@ from warpSPHCore.linalg import runStationary
 
 from ...modules.boundaryConditions import (computeForcing, enforceDirichlet,
                                           enforceUpdates)
+from ...configurations.compute import resolveCheckSchedule
 from ...modules.density import computeDensities
 from ...modules.incompressible.convergence import ConvergenceCheckSchedule
 from ...modules.gravity import computeGravity
@@ -206,7 +207,7 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
         rowsIndex = rows.nonzero().squeeze(1)
         tol = _tol(schemeConfig)
         schedule = ConvergenceCheckSchedule(schemeConfig, 'band2018pb',
-                                            getattr(schemeConfig.solverConfig.pressureSolver, 'convergenceCheckSchedule', 'adaptive'),
+                                            resolveCheckSchedule(schemeConfig.solverConfig.pressureSolver, config),
                                             DENSITY_MIN_ITERATIONS - 1, DENSITY_MAX_ITERATIONS)      # `it + 1 >= min` is `it >= min - 1`
 
         def step(p, it):

@@ -52,6 +52,8 @@ imported by their full path so patching a module name patches the step), `module
   was imported over it, 2 spurious ops and a C++ RecordFunction per section).
 * Step modes: `CompSPHConfig.stepMode` eager | graph | auto for CompSPH and CRKSPH (`modules/compSPH/stepMode.py`, `GRAPH_MAX_PARTICLES`); delta-SPH / ACSPH use `cudaGraph` on the case.
 
+* **`SimulationConfig.compute`** (`configurations/compute.py`, `docs/compute/README.md`): `execution` eager / graph / auto (per-scheme particle limits, measured), the Jacobi check schedule and the Krylov check interval in one place; `stepMode`, `CaseSpec.cudaGraph` and a solver's `convergenceCheckSchedule` stay as overrides.
+
 ## 4. Bugs found on the way (all fixed, tests added)
 
 * A CUDA-invalidated capture left torch on the capture's side stream -> later eager steps raced and went non-finite (`utils/cudaGraph._captureGuard`, ca80611; README docs/compsph_step 5.10). The `captureAborted` hook sat in the wrong class.

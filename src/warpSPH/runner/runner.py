@@ -148,6 +148,8 @@ def buildContext(case: Case, spec: CaseSpec) -> RunContext:
         laplacianMode=resolveEnum(LaplacianScheme, spec.laplacianMode),
         integrationScheme=resolveEnum(IntegrationSchemeType, integrationSchemeName),
         samplingScheme=resolveEnum(SamplingScheme, spec.samplingScheme),
+        compute={k: v for k, v in dict(execution=spec.execution, graphMaxParticles=spec.graphMaxParticles, iterationChecks=spec.iterationChecks,
+                                      krylovCheckEvery=spec.krylovCheckEvery, pipelineOutputs=spec.pipelineOutputs).items() if v is not None},
         verletScale=spec.verletScale,
         device=device,
         dtype=dtype,
@@ -253,10 +255,15 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
     # (ACSPH: unimplemented options, and the exact-delta integrator contract)
     if hasattr(ctx.schemeConfig, 'validate'):
         ctx.schemeConfig.validate(ctx.config)
-    if spec.cudaGraph:
-        ctx.schemeConfig.cudaGraph = True
 
     system = case.buildSystem(ctx)
+    # How the run executes (`configurations/compute.py`): the scheme's `stepMode`, the spec's `cudaGraph` / `execution` or `config.compute`, and for
+    # 'auto' the particle count. The scheme-level graph routes (delta-SPH's right-hand side, ACSPH's dual-time iteration) key on `schemeConfig.cudaGraph`.
+    from ..configurations import resolveExecution
+    _positions = system.state.positions
+    ctx.scratch['execution'] = resolveExecution(ctx.config, ctx.scheme, ctx.schemeConfig, ctx.spec, _positions.shape[0], _positions.shape[1])
+    if ctx.scratch['execution'] == 'graph' and ctx.scheme not in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH):
+        ctx.schemeConfig.cudaGraph = True
     if case.timestep is None and ctx.scheme in (CompressibleSPHScheme.MFM, CompressibleSPHScheme.MFV):
         # The meshless schemes re-pick the core signal dt every step
         # (`modules/timestep/meshless.py`); a case without a `timestep` hook
@@ -385,7 +392,7 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
                                       CompressibleSPHScheme.GSPH, CompressibleSPHScheme.InutsukaGSPH,
                                       WeaklyCompressibleSPHScheme.deltaSPH, WeaklyCompressibleSPHScheme.sun2017DeltaSPH)
     stepGraph = None
-    graphWanted = spec.cudaGraph
+    graphWanted = ctx.scratch['execution'] == 'graph'
     if ctx.scheme in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH):
         # CompSPH / CRKSPH have their own switch, `stepMode`, instead of the spec's flag
         from ..modules.compSPH.stepMode import resolveStepMode
@@ -402,7 +409,7 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
         # (`cases/freeSurface/dambreak.py:_diagnosticsHost`); ignored by every other case
         ctx.scratch['graphedDiagnostics'] = GraphedDiagnostics()
 
-    if stepGraph is not None and spec.pipelineOutputs:
+    if stepGraph is not None and ctx.config.compute.pipelineOutputs:
         # Pipelined loop: step n+1 runs on the GPU while step n's diagnostics
         # and frame are computed (see `_runPipelined`); same values, same rows.
         runningState, stepResult = _runPipelined(

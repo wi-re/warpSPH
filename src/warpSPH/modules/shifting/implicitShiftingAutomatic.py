@@ -34,6 +34,7 @@ from warpSPHCore.enumTypes import WarpOperation, OperationDirection
 from warpSPH.configurations.simulationConfig import SimulationConfig
 from ...configurations.moduleConfigurations.shifting import ShiftingImplicitInitializer, ShiftingImplicitSolver, ShiftingImplicitFallback, ShiftingImplicitPreconditioner
 
+from ...configurations.compute import resolveKrylovCheckEvery
 from .solverDriver import solveImplicitSystem
 from .delta import computeDeltaShift
 from .preconditioner import buildScalarJacobiPrecond, buildBlockJacobiPrecond
@@ -157,6 +158,7 @@ def computeImplicitShiftAutomatic(
             precond=precond,
             threshold=threshold,
             dim=dim,
+            checkEvery=resolveKrylovCheckEvery(config),
         )
         fallback = (fallback_override if fallback_override is not None
                     else schemeConfig.shiftProperties.implicitFallback)

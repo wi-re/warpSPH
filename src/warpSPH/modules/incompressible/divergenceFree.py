@@ -73,6 +73,7 @@ from ..pressure.iisph import computePressureAccelIISPH
 from .drift import computePressureShiftIISPH
 from ...configurations import PressureSolverType, JacobiRelaxationMode, BoundaryOperatorTerms, resolveBoundaryOperatorTerms
 from .krylov import solvePressureKrylov
+from ...configurations.compute import resolveCheckSchedule
 from warpSPHCore.linalg import runStationary
 from .convergence import ConvergenceCheckSchedule, evaluateResidual, residualStats, sourceNorm
 from .consistent import applyConsistentCoupling
@@ -168,7 +169,7 @@ def _solveDivergenceFreeOptimal(
         # arithmetic is bitwise unchanged.
         fluidIndex = fluidMask.nonzero().squeeze(1)
         schedule = ConvergenceCheckSchedule(schemeConfig, 'divergenceFreeOptimal',
-                                            getattr(dfSolver, 'convergenceCheckSchedule', 'every'),
+                                            resolveCheckSchedule(dfSolver, config),
                                             minIters, maxIters, verbose)
         last = {}
 
@@ -352,7 +353,7 @@ def _solveDivergenceFreeImpl(
         # Host syncs only at the schedule's checkpoints -- see the optimal-step loop.
         fluidIndex = fluidMask.nonzero().squeeze(1)
         schedule = ConvergenceCheckSchedule(schemeConfig, 'divergenceFreeFixed',
-                                            getattr(dfSolver, 'convergenceCheckSchedule', 'every'),
+                                            resolveCheckSchedule(dfSolver, config),
                                             minIters, maxIters, verbose)
         last = {}
 

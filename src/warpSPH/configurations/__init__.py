@@ -10,6 +10,8 @@ including `schemes/builder.py`'s per-scheme `SchemeBundle` registry.
 """
 
 from .simulationConfig import SimulationConfig, buildConfig, configurationToDict, dictToConfig
+from .compute import (ComputeConfig, EXECUTION_MODES, CHECK_SCHEDULES, GRAPH_MAX_PARTICLES, graphParticleLimit, requestedExecution, resolveExecution,
+                      resolveCheckSchedule, resolveKrylovCheckEvery)
 from .waveEquationConfig import ShapeSpec as WaveShapeSpec
 from .waveEquationConfig import WaveSource, WaveBoundary
 from .waveEquationConfig import CaseConfig as WaveCaseConfig
@@ -35,6 +37,8 @@ from .artificialCompressible import (ArtificialCompressibilityParams,
 
 
 __all__ = [
+    'ComputeConfig', 'EXECUTION_MODES', 'CHECK_SCHEDULES', 'GRAPH_MAX_PARTICLES', 'graphParticleLimit', 'requestedExecution', 'resolveExecution',
+    'resolveCheckSchedule', 'resolveKrylovCheckEvery',
     'SimulationConfig',
     'buildConfig',
     'configurationToDict',

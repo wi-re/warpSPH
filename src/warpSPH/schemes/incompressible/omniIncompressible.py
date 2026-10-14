@@ -85,6 +85,7 @@ from typing import Any
 import torch
 from ...modules.boundaryConditions.pinned import pinnedKeepWeight
 from warpSPHCore.linalg import runStationary
+from ...configurations.compute import resolveCheckSchedule
 from ...modules.incompressible.convergence import ConvergenceCheckSchedule
 
 from warpSPHCore import (GradientScheme, OperationDirection, OperationProperties,
@@ -726,7 +727,7 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
         vEnter=vEnter, warmStart=torch.zeros_like(st.densities), dt=dt,
         mode='divergence', minIters=DIVERGENCE_ITERATIONS,
         maxIters=DIVERGENCE_ITERATIONS, tol=divCfg.tolerance,
-        checkSchedule=getattr(divCfg, 'convergenceCheckSchedule', 'every'))
+        checkSchedule=resolveCheckSchedule(divCfg, config))
     accel = accel + a_p_div
 
     # --- 4. densitySolve() -- min 3 / max 256, warm start 0.5 * p_prior ---
@@ -737,7 +738,7 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
             vEnter=vEnter, warmStart=0.5 * pPrior, dt=dt, mode='density',
             minIters=DENSITY_MIN_ITERATIONS, maxIters=DENSITY_MAX_ITERATIONS,
             tol=denCfg.tolerance,
-            checkSchedule=getattr(denCfg, 'convergenceCheckSchedule', 'every'))
+            checkSchedule=resolveCheckSchedule(denCfg, config))
     else:
         # DFSPH2D densitySolve=False: the divergence-free projection is the only pressure solve (closed domains, where the density correction is position-correction noise); its pressure is the carried one
         a_p_rho, pRho, nRho, errRho = torch.zeros_like(accel), pDiv, 0, 0.0
