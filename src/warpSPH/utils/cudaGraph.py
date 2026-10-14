@@ -95,13 +95,22 @@ def _captureGuard():
     `test_renderThreadFramesMatchMainThread` failed in most runs once the
     test session ran a few more cases before it, and in none of 10 with this
     guard (2026-09-28). `torch.cuda.graph`
-    collects on entry; this keeps the collector off until the capture ends."""
+    collects on entry; this keeps the collector off until the capture ends.
+
+    Also puts torch back on the stream it was on. A capture that CUDA invalidates (an op that is not
+    allowed while recording, e.g. a host-sized boolean-mask index) makes `torch.cuda.graph.__exit__` raise
+    in `capture_end()` BEFORE it restores the stream, so torch stayed on the capture's side stream while
+    warp (whose own `ScopedStream` did exit) was back on its stream: every later eager step mixed two
+    streams with no ordering between them and went non-finite (README docs/compsph_step 5, item 10)."""
     with CAPTURE_LOCK:
         enabled = gc.isenabled()
         gc.disable()
+        previous = torch.cuda.current_stream() if torch.cuda.is_available() else None
         try:
             yield
         finally:
+            if previous is not None and torch.cuda.current_stream() != previous:
+                torch.cuda.set_stream(previous)
             if enabled:
                 gc.enable()
 
@@ -256,7 +265,7 @@ class GraphedStateFunction:
                 import traceback
                 traceback.print_exc()
             torch.cuda.synchronize()
-            aborted = getattr(state, 'captureAborted', None)
+            aborted = getattr(system, 'captureAborted', None)
             if aborted is not None:
                 aborted()                   # drop what the recorded step left on shared objects (its tensors are gone now)
             self._disable(f'capture failed ({type(e).__name__}: {str(e).splitlines()[0][:200]})')
@@ -711,6 +720,9 @@ class GraphedIntegratorStep:
                 import traceback
                 traceback.print_exc()
             torch.cuda.synchronize()
+            aborted = getattr(state, 'captureAborted', None)
+            if aborted is not None:
+                aborted()                   # drop what the recorded step left on shared objects (its tensors are gone now)
             self._disable(f'capture failed ({type(ex).__name__}: {str(ex).splitlines()[0][:200]})')
             return False
         finally:

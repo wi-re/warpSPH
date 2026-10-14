@@ -219,3 +219,19 @@ def test_velocityAlarmOnThePipelinedLoop():
     healthy = _marrone(24, 8, cudaGraph=True)
     assert healthy.ctx.scratch['velocityAlarmMonitor'].source == 'referenceVelocity'
     assert healthy.velocityAlarms == []
+
+
+@cuda
+def test_captureGuardPutsTorchBackOnItsStreamAfterAnInvalidatedCapture():
+    """`torch.cuda.graph.__exit__` raises in `capture_end()` before it restores the stream when CUDA invalidated the capture (an op that
+    syncs the host, here a boolean-mask index): without the guard torch stays on the capture's side stream."""
+    from warpSPH.utils.cudaGraph import _captureGuard
+    before = torch.cuda.current_stream()
+    x = torch.arange(8.0, device='cuda')
+    graph, side = torch.cuda.CUDAGraph(), torch.cuda.Stream()
+    with pytest.raises(Exception):
+        with _captureGuard(), torch.cuda.graph(graph, stream=side, capture_error_mode='thread_local'):
+            x[x > 2]
+    torch.cuda.synchronize()
+    assert torch.cuda.current_stream() == before
+    assert torch.equal(x[x > 2], torch.arange(3.0, 8.0, device='cuda'))        # eager work is fine again

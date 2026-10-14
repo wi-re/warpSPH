@@ -144,3 +144,38 @@ def test_graphRequestThatCannotBeHonouredRunsEagerlyWithAWarning():
     with pytest.warns(UserWarning, match="stepMode='graph' runs eagerly"):
         result, graphs = _stepModeRun('sedovWalls', 'graph', steps=3)
     assert not graphs and result.nSteps == 3
+
+
+def _rayleighTaylorCompSPH(steps, graph, monkeypatch=None):
+    """rayleighTaylor on CompSPH (Dirichlet BCs: their host-sized boolean-mask index is not allowed while a graph is recorded)."""
+    base = getCase('rayleighTaylor')
+    inner = base.configureScheme
+
+    def configure(ctx, *a, **k):
+        out = inner(ctx, *a, **k) if inner else None
+        if graph:
+            ctx.schemeConfig.stepMode = 'graph'
+        else:
+            ctx.schemeConfig.supportSolveOnGrid = True      # the eager step on the same grid solve
+            ctx.schemeConfig.inPlaceAdjacency = True
+        return out
+    return run(dataclasses.replace(base, configureScheme=configure), quiet=True, progress=False, nSteps=steps,
+               scheme='CompSPH')
+
+
+@needsCuda
+def test_captureThatCudaInvalidatesLeavesTheNextEagerStepsIntact(monkeypatch):
+    """A capture CUDA itself invalidates (`cudaErrorStreamCaptureUnsupported`, here the Dirichlet BC's mask index) used to leave torch on
+    the capture's side stream (`torch.cuda.graph.__exit__` raises before it restores it) while warp was back on its own: the eager steps
+    after it raced across two streams and went non-finite. They must now be the plain eager steps."""
+    import warpSPH.modules.compSPH.stepMode as stepMode
+    before = torch.cuda.current_stream()
+    monkeypatch.setattr(stepMode, '_blocker', lambda ctx, runningState, spec: None)       # let the unsupported capture be attempted
+    with pytest.warns(UserWarning, match='capture failed'):
+        graphed = _rayleighTaylorCompSPH(8, graph=True)
+    assert torch.cuda.current_stream() == before
+    monkeypatch.undo()
+    eager = _rayleighTaylorCompSPH(8, graph=False)
+    for name, a in _final(eager).items():
+        assert torch.isfinite(_final(graphed)[name]).all(), name
+        assert torch.equal(a, _final(graphed)[name]), name
