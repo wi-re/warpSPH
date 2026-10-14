@@ -11,77 +11,27 @@ persist it).
 in call order): every region does one thing, so a profile or a call audit names it.
 """
 
-from ...modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
+from ...modules.adaptiveSupport import computeOmega, solveStageSupport
 from ...modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
 from ...modules.compressibleWall import beginCompressibleWall, clampSupportsToVolume
 from ...modules.compSPH.operators import computeCompSPHAccel, computeCompSPHdudt, computeCompSPHBalanceTerm
+from ...modules.compSPH.pairWork import accumulateStage, startStage, stageRebuildSlack
+from ...modules.compSPH.supportGrid import solvesOnGrid
 from ...modules.density import computeDensities
 from ...modules.eos import idealGasEOS
 from ...modules.momentum import computeMomentumConsistent
+from ...modules.reconstruction import requireRawPairVelocity
 from ...modules.shockCapturing import computeViscositySwitchTerms, updateViscositySwitch
-from ...enumTypes import EnergyScheme, ViscositySwitch
-
-from warpSPHCore.profiling import record_function
-from warpSPHCore import verletStaleFlag
-from warpSPHCore import (
-    GradHState, OperationProperties, SupportScheme, buildVerletList,
-)
-from ...modules.compSPH.pairWork import accumulateStage, startStage, stageRebuildSlack
-from ...modules.compSPH.supportGrid import ensureSupportGrid, refreshSupportGrid, noteOutgrown, solvesOnGrid, pairListGridFactory, pairListCapacity
-from ...modules.compSPH.pairWork import listFitsParticles
-from ...enumTypes import AdaptiveSupportScheme
-from ...systems.compSPH import CompSPHSystem, CompSPHState
+from ...systems.compSPH import CompSPHSystem
+from ...systems.compressibleMonaghan import CompressibleSystemUpdate
 from ...configurations.compSPHConfig import CompSPHConfig
 from ...configurations.simulationConfig import SimulationConfig
+from ...utils.pairList import stagePairList
+from warpSPHCore import GradHState, OperationProperties, SupportScheme
+from warpSPHCore.profiling import record_function
 import torch
-from ...systems.compressibleMonaghan import CompressibleSystemUpdate
-
-from ...modules.shockCapturing.CullenHopkins import computeHopkinsTerms, computeHopkinsUpdate
-from ...modules.reconstruction import requireRawPairVelocity
 
 __all__ = ['compSPH_step']
-
-
-def _optimalSupport(currentSystem, currentState, config, schemeConfig, onGrid, rebuildSlack):
-    """The adaptive support solve; leaves `supports` / `densities` on the state."""
-    if onGrid:
-        # the solve runs on a fixed-shape grid (graph-replayed build, no host read) and looks at no neighbour list
-        holder = ensureSupportGrid(currentSystem.supportGrid, currentState, config)
-        info = {}
-        rho_optimal, h_optimal, *_ = evaluateOptimalSupport(
-            currentState, config, schemeConfig, SupportScheme.Gather, None, computeDensity=False,
-            grid=refreshSupportGrid(holder, currentState), gridRadius=holder.radius, info=info)
-        noteOutgrown(holder, info)
-    else:
-        rho_optimal, h_optimal, currentSystem.adjacency, *_ = evaluateOptimalSupport(
-            currentState, config, schemeConfig, SupportScheme.Gather, currentSystem.adjacency,
-            validateOnce=True, rebuildSlack=rebuildSlack, computeDensity=False)
-    currentState.supports = h_optimal
-    currentState.densities = rho_optimal
-
-
-def _pairList(currentSystem, currentState, config, schemeConfig, onGrid, rebuildSlack):
-    """The super-symmetric pair list for this stage's positions and new supports."""
-    pairWork = currentSystem.pairWork
-    if onGrid and pairWork is not None and not pairWork.conservative and listFitsParticles(currentSystem.adjacency, currentState):
-        # optimistic stage: no host read. The list was validated (with slack) for the positions this step starts from
-        # when the previous step ended; whether it is also long enough for THIS stage's positions and new supports is a
-        # device flag, read once at the end of the step (finalize) -- a failing flag repeats the step conservatively
-        adjacency = currentSystem.adjacency
-        pairWork.flags.append(verletStaleFlag(currentState.positions, currentState.supports, adjacency, config.domain,
-                                              config.verletScale))
-    elif onGrid:
-        # the explicit validity check and (re)build of the pair list, for the positions and the new supports
-        adjacency = buildVerletList(
-            currentState, config.domain, verletScale = config.verletScale, supportMode = SupportScheme.SuperSymmetric,
-            priorNeighborhood = None if (pairWork is not None and pairWork.rebuildList) else currentSystem.adjacency,
-            verbose = False, rebuildSlack = rebuildSlack, capacity = pairListCapacity(schemeConfig),
-            gridFactory = pairListGridFactory(currentSystem.listGrid, currentState, config))
-        currentSystem.adjacency = adjacency
-    else:
-        # the solver validated this list against the particles and every support it used, and rebuilt it if needed
-        adjacency = currentSystem.adjacency
-    return adjacency
 
 
 def compSPH_step(
@@ -105,10 +55,10 @@ def compSPH_step(
         startStage(currentSystem, currentState, config, stageIndex)
 
     with record_function("[warpSPH] - [compSPH - 02] optimal support"):
-        _optimalSupport(currentSystem, currentState, config, schemeConfig, onGrid, rebuildSlack)
+        solveStageSupport(currentSystem, currentState, config, schemeConfig, onGrid=onGrid, rebuildSlack=rebuildSlack)
 
     with record_function("[warpSPH] - [compSPH - 03] adjacency"):
-        adjacency = _pairList(currentSystem, currentState, config, schemeConfig, onGrid, rebuildSlack)
+        adjacency = stagePairList(currentSystem, currentState, config, schemeConfig, onGrid=onGrid, rebuildSlack=rebuildSlack)
 
     with record_function("[warpSPH] - [compSPH - 04] support clamp"):
         # only reduces h, so the list stays valid; wall cases only (modules/compressibleWall/supportClamp.py)
