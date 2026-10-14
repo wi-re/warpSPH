@@ -37,9 +37,9 @@ def compressibleSPH_InutsukaGSPH(
     with record_function("[warpSPH] - [inutsuka - 02] pair list"):
         # the Gaussian's h: eta times the local particle spacing (Inutsuka 2002 Eq. 81); every Gaussian is cut at 3 sqrt2 h, so the list must reach it
         gaussianH = float(schemeConfig.diffusionParams.gaussianEta) * (currentState.masses / currentState.densities) ** (1.0 / config.dim)
-        reach = float((3.0 * 2.0 ** 0.5 * gaussianH / currentState.supports).max())          # (a host read: the list scale is a launch argument)
+        reach = (3.0 * 2.0 ** 0.5 * gaussianH / currentState.supports).max()                  # a 0-d DEVICE tensor: the list scale needs no host read
         adjacency = buildVerletList(
-            currentState, config.domain, verletScale = max(config.verletScale, 1.05 * reach),
+            currentState, config.domain, verletScale = torch.clamp(1.05 * reach, min = config.verletScale),
             supportMode = SupportScheme.SuperSymmetric, priorNeighborhood = currentSystem.adjacency, verbose = False)
 
     props = OperationProperties(kernel = config.kernel, supportMode = SupportScheme.KernelMeanSymmetric)

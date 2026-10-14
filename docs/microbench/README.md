@@ -22,3 +22,6 @@
   `[mfm|mfv - NN]`). Per step: MFM (ssprk) 542 ops / 10 integrator syncs, MFV (hancock) 159 ops / 4 syncs, plus the timestep hook's geometry (320 ops, 9.3 syncs, in the
   core `MeshlessWarp.build`). 2 syncs per step are the geometry hand-over's host `torch.equal` (`common.py takeGeometry`); a system-owned hand-over keyed on tensor versions would remove them
   (not done: it trusts that the integrator's copy equals the stashed source).
+* `audit_InutsukaGSPH_sod2d_deviceReach_2026-10-14.txt` -- Inutsuka after the Gaussian reach became a device scalar (the core's validity kernels accept a 0-d device `verletScale`): integrator syncs
+  8.2 -> 6.2 per step, results bitwise equal to the host-read version, wall unchanged (~7.1 ms/step). Left: two validity checks per stage (the Owen solve's list at the default scale, then the larger-scale
+  Gaussian list) + rebuilds.
