@@ -32,7 +32,9 @@ from ..pressure.iisph import computePressureAccelIISPH
 from .drift import computePressureShiftIISPH
 from ...configurations import JacobiRelaxationMode, PressureSolverType
 from .krylov import solvePressureKrylov
+from warpSPHCore.linalg import runStationary
 from .consistent import applyConsistentCoupling
+from .convergence import ConvergenceCheckSchedule
 from .wallPressure import wallPressureExtrapolation
 from ...configurations import BoundaryPressureMode
 
@@ -261,19 +263,26 @@ def _solveIncompressibleImpl(
         pressureA = torch.where(fluidMask, pressureA, boundaryPressure)
         pressureB = pressureA.clone()
 
-        errors = []
-        pressures = []
-        i = 0
-        error = 0.
-
         # The stopping test is an absolute test on the mean floored residual
         # (`flooredOneSided`, the statistic §1.7 in DFSPH_FINDINGS.md calls
         # broken -- kept for continuity with the historical behaviour rather
-        # than fixed here). See `convergence.py` /
+        # than fixed here), over all rows. See `convergence.py` /
         # `JacobiConvergenceCriterion` for the general form this solve does
         # not currently use.
+        #
+        # The loop, its device-side stopping test and the one history read are
+        # `warpSPHCore.linalg.runStationary`: the statistic and the pressure
+        # log stay on the device, and the convergence flag is read back only at
+        # the check schedule's checkpoints (`pressureSolver.
+        # convergenceCheckSchedule`; `every` reproduces the historical
+        # four-reads-per-iteration loop's iterate bitwise).
+        fluidIndex = _fluidRows.nonzero().squeeze(1) if closedDomainGauge else None
+        schedule = ConvergenceCheckSchedule(schemeConfig, 'incompressibleConstantDensity',
+                                            getattr(schemeConfig.solverConfig.pressureSolver, 'convergenceCheckSchedule', 'every'),
+                                            minIters, maxIters, verbose)
+        last = {}
 
-        for i in range(maxIters):
+        def step(pressureB, i):
                 pressureA = pressureB.clone()
                 if _SHIFT_WALL_PRESSURE is not None:
                         # Recompute the wall pressure from the current fluid
@@ -325,25 +334,24 @@ def _solveIncompressibleImpl(
                         # a closed domain has no free surface, so there is no
                         # tensile instability for the clamp to be guarding
                         # against (`band2018pb.CLOSED_DOMAIN_GAUGE`'s pairing).
-                        offset = pressureB[_fluidRows].mean()
+                        offset = pressureB.index_select(0, fluidIndex).mean()
                         pressureB = torch.where(_fluidRows, pressureB - offset,
                                                 boundaryPressure)
                 else:
                         pressureB = torch.clamp(pressureB, min=0.0)  # Ensure non-negative pressures
                         pressureB = torch.where(fluidMask, pressureB, boundaryPressure)
 
-                error = torch.mean(torch.clamp(-residual, min=-threshold)).cpu().item()
-                errors.append(error)
+                last['residual'] = residual
+                return pressureB, torch.mean(torch.clamp(-residual, min=-threshold)), None
 
-                pressures.append((pressureB.min().cpu().item(), pressureB.max().cpu().item(), pressureB.mean().cpu().item()))
+        def report(i, pressureB, stat):
+                print(f"\t[IS] Iteration {i+1}/{maxIters}, error: {float(stat):.6g}, pressure min/max/mean: {tuple(torch.stack([pressureB.min(), pressureB.max(), pressureB.mean()]).tolist())}")
 
-                if i >= minIters and (error < threshold):
-                    break
-
-                if verbose:
-                    print(f"\t[IS] Iteration {i+1}/{maxIters}, error: {error:.6g}, pressure min/max/mean: {pressures[-1]}")
-                    if len(errors) > 1 and error > errors[-2]:
-                        print(f"!!![IS] Warning: Error increased from {errors[-2]:.6g} to {error:.6g}.!!!")
+        out = runStationary(step, pressureB, maxIters=maxIters, tolerance=threshold, schedule=schedule,
+                            track=lambda p: torch.stack([p.min(), p.max(), p.mean()]),
+                            onIteration=report if verbose else None)
+        pressureB = out.x
+        errors, pressures = out.stats, out.tracked
 
         a_p = computePressureAccelIISPH(
                 state = particles,
@@ -355,6 +363,7 @@ def _solveIncompressibleImpl(
         a_p = torch.where(fluidMask.unsqueeze(-1), a_p, torch.zeros_like(a_p))
 
         if verbose:
+            residual = last['residual']
             print(f'[IS] final Residual: {residual.mean().cpu().item():.6g}, min: {residual.min().cpu().item():.6g}, max: {residual.max().cpu().item():.6g}')
         return a_p, pressureB, errors, pressures
 

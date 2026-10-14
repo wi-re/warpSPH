@@ -10,8 +10,8 @@
     python scripts/scheme_baseline.py time --scheme CRKSPH --case sod2d --nx 400 --mode graph
     PYTHONPATH=/tmp/wt/src python scripts/scheme_baseline.py time --scheme CRKSPH --case sod2d --nx 400 --mode graph
 
-Pitfalls (each cost time once): compare GRAPH against EAGER of the same tree too, not only old against new (a latent graph bug was hidden by an unused
-`.clone()`; OPEN_PROBLEMS 35); a case that is nondeterministic in the OLD code (`tgv-wc`: old vs old differs by 9e-2) carries no signal; the `Iter k/16
+Pitfalls (each cost time once): `--set` takes several values after one flag and repeated flags now accumulate (until 2026-10-14 the last flag silently won); compare GRAPH against EAGER of the same tree too, not only old against new (a latent graph bug was hidden by an unused
+`.clone()`; OPEN_PROBLEMS 35); a case that is nondeterministic in the OLD code carries no signal (check old vs old first; the periodic cases were, until the script seeded torch before every run); the `Iter k/16
 Sampling Error` log lines of the case setup match a grep for "Error"; the cases a scheme cannot run (walls, Dirichlet BCs) fail the same way before and after.
 """
 import argparse
@@ -25,7 +25,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def _runCase(case, scheme, steps, cudaGraph=None, setCfg=None, params=None, nx=None, stepMode=None):
+    import torch
     from warpSPH.runner import run
+    torch.manual_seed(1234)                       # the periodic cases jitter their lattice with an unseeded torch.rand_like: without this old vs old differs by ~100 %
+    torch.cuda.manual_seed_all(1234)
     if setCfg or stepMode:
         inner = case.configureScheme
 
@@ -127,7 +130,7 @@ if __name__ == '__main__':
     d = sub.add_parser('dump'); d.add_argument('--scheme', required=True); d.add_argument('--out', required=True)
     d.add_argument('--steps', type=int, default=20); d.add_argument('--cases', nargs='*'); d.add_argument('--graph', action='store_true')
     d.add_argument('--temporal', nargs='*', default=[]); d.add_argument('--switches', nargs='*', default=[])
-    d.add_argument('--set', nargs='*', default=[], metavar='KEY=VALUE', help='scheme-config attributes (dotted), value read as a Python literal')
+    d.add_argument('--set', nargs='*', action='extend', default=[], metavar='KEY=VALUE', help='scheme-config attributes (dotted), value read as a Python literal')
     d.set_defaults(fn=cmdDump)
     c = sub.add_parser('compare'); c.add_argument('a'); c.add_argument('b'); c.set_defaults(fn=cmdCompare)
     t = sub.add_parser('time'); t.add_argument('--scheme', required=True); t.add_argument('--case', required=True); t.add_argument('--nx', type=int, default=None)

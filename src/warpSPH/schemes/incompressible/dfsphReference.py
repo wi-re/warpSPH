@@ -163,7 +163,10 @@ from ...modules.boundaryConditions import (computeForcing, enforceDirichlet,
 from ...modules.deltaSPH import computeVelocityDiffusion
 from ...modules.density import computeDensities
 from ...modules.gravity import computeGravity, computeBodyForce
+from warpSPHCore.linalg import runStationary
+
 from ...modules.incompressible.consistent import applyConsistentCoupling
+from ...modules.incompressible.convergence import ConvergenceCheckSchedule
 from ...modules.incompressible.wallPressure import wallPressureExtrapolation
 from ...modules.incompressible.wp_dfsph_factor import computeDFSPHFactor
 from ...modules.mdbc import computeBoundaryVelocities
@@ -514,9 +517,16 @@ def _jacobiSolve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
             # not from the carried kappa^v; the gauge's pinned rows do the
             # same.
             p = torch.where(exempt, torch.zeros_like(p), p)
-    err = 0.0
-    it = 0
-    for it in range(maxIters):
+    # The loop, its device-side stopping test and the one history read are `warpSPHCore.linalg.runStationary`; the error stays on the device and
+    # the convergence flag is read back only at the check schedule's checkpoints (`solverCfg.convergenceCheckSchedule`; `every` reproduces the
+    # historical per-iteration reads -- three syncs each: `fluidMask.any()`, the boolean-mask mean and the float -- bitwise).
+    hasFluid = bool(fluidMask.any())
+    fluidIndex = fluidMask.nonzero().squeeze(1)
+    schedule = ConvergenceCheckSchedule(schemeConfig, f'dfsphReference.{mode}',
+                                        getattr(solverCfg, 'convergenceCheckSchedule', 'adaptive'),
+                                        max(0, minIters - 1), maxIters)       # `it + 1 >= minIters` is `it >= minIters - 1`
+
+    def step(p, it):
         pIn = wallPressureExtrapolation(
             state, config, adjacency, p, fluidMask, mode=wallPressure) \
             if wallPressure else p
@@ -540,7 +550,7 @@ def _jacobiSolve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
             # they are not unknowns, so their Jacobi update is discarded and
             # the interior iterates against a zero Dirichlet row set.
             p = torch.where(pin, torch.zeros_like(p), p)
-        if fluidMask.any():
+        if hasFluid:
             # SPlisHSPlasH's convergence metric: ONE-SIDED, compression-only --
             # `residuum = min(resid, 0)` per particle, then `err = rho0 *
             # mean(-residuum)` over the fluid. Under-compressed particles
@@ -554,9 +564,15 @@ def _jacobiSolve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
             if mode == 'divergence':
                 residuum = torch.where(
                     exempt, torch.zeros_like(residuum), residuum)
-            err = float(rho0 * (-residuum)[fluidMask].mean())
-        if it + 1 >= minIters and err < tol:
-            break
+            err = rho0 * (-residuum).index_select(0, fluidIndex).mean()
+        else:
+            err = torch.zeros((), dtype=resid.dtype, device=resid.device)
+        return p, err, None
+
+    out = runStationary(step, p, maxIters=maxIters, tolerance=tol, schedule=schedule)
+    p = out.x
+    it = out.iterations - 1
+    err = out.stats[-1] if out.stats else 0.0
 
     pIn = wallPressureExtrapolation(
         state, config, adjacency, p, fluidMask, mode=wallPressure) \

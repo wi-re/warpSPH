@@ -36,10 +36,12 @@ from typing import Any
 import torch
 
 from warpSPHCore import (SupportScheme, buildVerletList)
+from warpSPHCore.linalg import runStationary
 
 from ...modules.boundaryConditions import (computeForcing, enforceDirichlet,
                                           enforceUpdates)
 from ...modules.density import computeDensities
+from ...modules.incompressible.convergence import ConvergenceCheckSchedule
 from ...modules.gravity import computeGravity
 from ...modules.incompressible.pressureBoundaries import (
     bandActualVolumes, bandApplyOperator, bandBoundaryUnknownMask,
@@ -197,9 +199,17 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
                 f'Unknown CLOSED_DOMAIN_GAUGE: {CLOSED_DOMAIN_GAUGE!r}')
 
         p = torch.where(rows, warmStart, torch.zeros_like(warmStart))
-        err = 0.0
-        it = 0
-        for it in range(DENSITY_MAX_ITERATIONS):
+        # The loop, its device-side stopping test and the one history read are `warpSPHCore.linalg.runStationary`; the error stays on the
+        # device and the convergence flag is read back only at the check schedule's checkpoints (`pressureSolver.convergenceCheckSchedule`;
+        # `every` reproduces the historical per-iteration reads -- `rows.any()` and the boolean-mask mean -- bitwise).
+        hasRows = bool(rows.any())
+        rowsIndex = rows.nonzero().squeeze(1)
+        tol = _tol(schemeConfig)
+        schedule = ConvergenceCheckSchedule(schemeConfig, 'band2018pb',
+                                            getattr(schemeConfig.solverConfig.pressureSolver, 'convergenceCheckSchedule', 'adaptive'),
+                                            DENSITY_MIN_ITERATIONS - 1, DENSITY_MAX_ITERATIONS)      # `it + 1 >= min` is `it >= min - 1`
+
+        def step(p, it):
             a_p = bandPressureAccel(state, config, adjacency, p, V, fluid)
             Ap = bandApplyOperator(state, config, adjacency, a_p, dt, rows)
             if shift:
@@ -208,18 +218,24 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
             if gauge:
                 # Pin the unconstrained constant instead of clamping (a closed
                 # domain has no free surface, so no tensile instability).
-                p = p - torch.where(rows, p[rows].mean().expand_as(p),
+                p = p - torch.where(rows, p.index_select(0, rowsIndex).mean().expand_as(p),
                                     torch.zeros_like(p))
                 p = torch.where(rows, p, torch.zeros_like(p))
             else:
                 p = p.clamp(min=0.0)
             bad = diagBad | (~torch.isfinite(p)) | (p.abs() > 1e25) | ~rows
             p = torch.where(bad, torch.zeros_like(p), p)
-            if rows.any():
+            if hasRows:
                 residual = torch.clamp(Ap - source, min=RESIDUAL_FLOOR)
-                err = float(residual[rows].mean())
-            if it + 1 >= DENSITY_MIN_ITERATIONS and err <= _tol(schemeConfig):
-                break
+                err = residual.index_select(0, rowsIndex).mean()
+            else:
+                err = torch.zeros((), dtype=p.dtype, device=p.device)
+            return p, err, None
+
+        out = runStationary(step, p, maxIters=DENSITY_MAX_ITERATIONS, tolerance=tol, inclusive=True, schedule=schedule)
+        p = out.x
+        it = out.iterations - 1
+        err = out.stats[-1] if out.stats else 0.0
         a_p = bandPressureAccel(state, config, adjacency, p, V, fluid)
     return a_p, p, it + 1, err
 

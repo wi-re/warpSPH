@@ -84,6 +84,7 @@ from typing import Any
 
 import torch
 from ...modules.boundaryConditions.pinned import pinnedKeepWeight
+from warpSPHCore.linalg import runStationary
 from ...modules.incompressible.convergence import ConvergenceCheckSchedule
 
 from warpSPHCore import (GradientScheme, OperationDirection, OperationProperties,
@@ -575,19 +576,16 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *, checkS
             return accel(x), x, len(conv), resNorm
 
         p = torch.where(fluid, warmStart, torch.zeros_like(warmStart))
-        err = 0.0
-        it = 0
-        # Host syncs only at the check schedule's checkpoints (convergence.py,
-        # `convergenceCheckSchedule`): the error stays on the device, and the
-        # fluid rows are gathered through an index computed once per solve,
-        # which selects exactly what `x[fluid]` did (bitwise-equal statistic).
+        # The loop, its device-side stopping test and the one history read are `warpSPHCore.linalg.runStationary` (host syncs only at the
+        # check schedule's checkpoints, `convergence.py` / `convergenceCheckSchedule`): the error stays on the device, and the fluid rows are
+        # gathered through an index computed once per solve, which selects exactly what `x[fluid]` did (bitwise-equal statistic).
         hasFluid = bool(fluid.any())
         fluidIndex = fluid.nonzero().squeeze(1) if hasFluid else None
         # `it + 1 >= minIters` here is `it >= minIters - 1` in the schedule's terms
         schedule = ConvergenceCheckSchedule(schemeConfig, f'omniIncompressible.{mode}', checkSchedule,
                                             max(0, minIters - 1), maxIters, VERBOSE_SOLVE)
-        errT, flags = None, []
-        for it in range(maxIters):
+
+        def step(p, it):
             a_p = accel(p)
             aP = applyA(p, a_p)
             p = p + invAlpha * (source - aP)
@@ -602,13 +600,14 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *, checkS
             if hasFluid:
                 residual = aP - source
                 errT = torch.clamp(residual, min=RESIDUAL_FLOOR).index_select(0, fluidIndex).mean()
-                flags.append(errT <= tol)
-            if schedule.check(it) and (errT is None or bool(errT <= tol)):
-                break
-        if errT is not None:
-            host = torch.stack([errT.float()] + [f.float() for f in flags]).cpu().tolist()
-            err = host[0]
-            schedule.record([bool(f) for f in host[1:]])
+            else:
+                errT = torch.zeros((), dtype=p.dtype, device=p.device)
+            return p, errT, None
+
+        out = runStationary(step, p, maxIters=maxIters, tolerance=tol, inclusive=True, schedule=schedule)
+        p = out.x
+        it = out.iterations - 1
+        err = out.stats[-1] if out.stats else 0.0
         if VERBOSE_SOLVE:
             print(f'[{mode}] {it + 1} iters, err {err:.3g}, p[{float(p.min()):+.3g}, {float(p.max()):+.3g}]')
         a_p = accel(p)
