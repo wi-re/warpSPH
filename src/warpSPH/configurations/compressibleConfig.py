@@ -1,7 +1,7 @@
 """`CompressibleSPHConfig`, the base scheme config for compressible SPH: EOS
 (`gamma`, `rho0`, `backgroundPressure`), adaptive-support, `diffusionParams`,
 `viscositySwitchParams`, and `boundaryConditions`. Used directly by the plain
-Monaghan scheme (`schemes/monaghan.py`) and subclassed by `CompSPHConfig` and
+Monaghan scheme (`schemes/compressible/monaghan.py`) and subclassed by `CompSPHConfig` and
 `CRKSPHConfig`; read as `schemeConfig`/`compParams` throughout
 `modules/{shockCapturing,adaptiveSupport,timestep,boundaryConditions}` and
 `sample/`. `compressibleConfigToDict`/`dictToCompressibleConfig` are the dict

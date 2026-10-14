@@ -10,7 +10,7 @@ put in that namespace unqualified.
 The ``randomize*`` flags and the ``*Range`` pairs exist so one casefile
 describes a *family* of cases rather than a single one -- the wave system's
 purpose is generating varied unstructured-data samples, so a case is a
-distribution to draw from. See :mod:`warpSPH.schemes.waveEquation`.
+distribution to draw from. See :mod:`warpSPH.schemes.pde.waveEquation`.
 """
 
 import torch
@@ -99,7 +99,7 @@ class CaseConfig:
 @dataclass
 class WaveEquationConfig:
     """The wave scheme's own config: which kernel/operator modes
-    `f_wave_equation` (`schemes/waveEquation.py`) uses for its Laplacian.
+    `f_wave_equation` (`schemes/pde/waveEquation.py`) uses for its Laplacian.
 
     Fills the `SimulationConfig` slot of `WaveEquationScheme`'s `SchemeBundle`
     (`schemes/builder.py`), i.e. this is what `f_wave_equation` receives as

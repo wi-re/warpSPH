@@ -244,7 +244,7 @@ d(V_iρ_i)/dt = 0                                       (mass constant)
 ρ_i du_i/dt = Σ_j (P_i+P_j) ∇W V_j + Π_i + V_iρ_i g
 ```
 
-This is `schemes/deltaSPH.py` exactly. With `correctdrhodt`/`correctdvdt` on we
+This is `schemes/weaklyCompressible/deltaSPH.py` exactly. With `correctdrhodt`/`correctdvdt` on we
 are one step *beyond* it (the quasi-Lagrangian variant).
 
 ## 3.2 Parshikov & Medin, Riemann fluxes (§4.2.2) — **needs a Riemann solver**

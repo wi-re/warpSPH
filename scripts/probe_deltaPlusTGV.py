@@ -37,7 +37,7 @@ delta-SPH, the "delta+-SPH by Sun et al. [5]" (= Sun et al. 2017, the
 `literature/sun2017_delta-plus-sph-model.pdf` scheme) and the "present
 delta+-SPH" (the 2019 paper's own consistent-PST scheme, which folds the
 shifting transport back into the continuity and momentum equations).  **This
-repo implements the middle one** -- `schemes/deltaSPH.py` +
+repo implements the middle one** -- `schemes/weaklyCompressible/deltaSPH.py` +
 `modules/shifting/delta.py`'s Sun 2017 Eq. (7) law, with `correctdrhodt` /
 `correctdvdt` off -- so the green `delta+-SPH (Sun et al. 2017)` curve is what
 a correct implementation here has to reproduce, *including its known errors*:

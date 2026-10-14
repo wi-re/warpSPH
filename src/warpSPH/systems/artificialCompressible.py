@@ -1,5 +1,5 @@
 """State/update/system triad for artificial-compressibility SPH
-(`schemes/artificialCompressible.py`, De Courcy et al. 2024; `ACSPH_PLAN.md`).
+(`schemes/incompressible/artificialCompressible.py`, De Courcy et al. 2024; `ACSPH_PLAN.md`).
 
 Two structural differences from `WeaklyCompressibleState`, and they are the
 whole point of the scheme:

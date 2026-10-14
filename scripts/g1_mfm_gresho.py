@@ -50,7 +50,7 @@ from warpSPHIntegrators.integration import IntegrationSchemeType
 from warpSPH.systems.meshless import MeshlessState, MeshlessSystem
 from warpSPH.configurations.meshless import MeshlessConfig
 from warpSPH.configurations.simulationConfig import SimulationConfig
-from warpSPH.schemes.meshless import meshlessStep, supports_from_volume
+from warpSPH.schemes.compressible.meshless import meshlessStep, supports_from_volume
 
 G = 5.0 / 3.0
 P_OUTER = 3 + 4 * math.log(2)

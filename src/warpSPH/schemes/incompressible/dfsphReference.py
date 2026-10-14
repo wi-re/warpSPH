@@ -4,7 +4,7 @@ existing warp operators, not dedicated kernels) allows.
 
 Why this exists
 ---------------
-`IncompressibleSPHScheme.divergenceFree` (`schemes/divergenceFree.py`) is Cornelis et
+`IncompressibleSPHScheme.divergenceFree` (`schemes/incompressible/divergenceFree.py`) is Cornelis et
 al.'s VD+PS step, not DFSPH: it enforces `div v = 0` with a projection and then
 applies the *density-invariance* correction as a momentum-neutral **position
 shift** (`x += dt**2 a_p`, `DFSPH_IMPROVEMENT_PLAN.md` 1.2/1.3). A position
@@ -157,21 +157,21 @@ import torch
 from warpSPHCore import (GradientScheme, OperationProperties, SupportScheme, WarpOperation,
                          buildVerletList, warpOperation)
 
-from ..configurations import BoundaryPressureMode
-from ..modules.boundaryConditions import (computeForcing, enforceDirichlet,
+from ...configurations import BoundaryPressureMode
+from ...modules.boundaryConditions import (computeForcing, enforceDirichlet,
                                           enforceUpdates)
-from ..modules.deltaSPH import computeVelocityDiffusion
-from ..modules.density import computeDensities
-from ..modules.gravity import computeGravity, computeBodyForce
-from ..modules.incompressible.consistent import applyConsistentCoupling
-from ..modules.incompressible.wallPressure import wallPressureExtrapolation
-from ..modules.incompressible.wp_dfsph_factor import computeDFSPHFactor
-from ..modules.mdbc import computeBoundaryVelocities
-from ..modules.momentum.incompressible import computeMomentumIncompressible
-from ..modules.pressure.iisph import computePressureAccelIISPH
-from ..modules.surfaceDetection import detectFreeSurface
-from ..modules.util import countNeighbors
-from ..systems.incompressible import IncompressibleSystemUpdate
+from ...modules.deltaSPH import computeVelocityDiffusion
+from ...modules.density import computeDensities
+from ...modules.gravity import computeGravity, computeBodyForce
+from ...modules.incompressible.consistent import applyConsistentCoupling
+from ...modules.incompressible.wallPressure import wallPressureExtrapolation
+from ...modules.incompressible.wp_dfsph_factor import computeDFSPHFactor
+from ...modules.mdbc import computeBoundaryVelocities
+from ...modules.momentum.incompressible import computeMomentumIncompressible
+from ...modules.pressure.iisph import computePressureAccelIISPH
+from ...modules.surfaceDetection import detectFreeSurface
+from ...modules.util import countNeighbors
+from ...systems.incompressible import IncompressibleSystemUpdate
 
 __all__ = ['dfsphReference_step', 'iisph_step']
 
@@ -225,8 +225,8 @@ XSPH_BOUNDARY_EPSILON = 0.0
 # `schemeConfig.diffusionParams.viscidNu` / `inviscid`) plus the boundary
 # velocity field extended by `computeBoundaryVelocities` (also step 2, driven
 # by each boundary region's `BCType` -- `freeSlip` reflection / `noSlip`
-# mirror / `extended` MLS -- exactly as `schemes/deltaSPH.py` and
-# `schemes/divergenceFree.py` do). Part 39's `_physViscosity` + `PHYS_VISCOSITY_*`
+# mirror / `extended` MLS -- exactly as `schemes/weaklyCompressible/deltaSPH.py` and
+# `schemes/incompressible/divergenceFree.py` do). Part 39's `_physViscosity` + `PHYS_VISCOSITY_*`
 # module globals (a hand-rolled Brookshaw Laplacian and a hand-rolled Adami
 # no-slip mirror) duplicated that machinery and were removed; the wall no-slip
 # is `BCType.noSlip` on the boundary region (`hydrostaticColumn`'s `wallBC`
@@ -285,7 +285,7 @@ def _factor(state: Any, config: Any, schemeConfig: Any, adjacency: Any, wall: An
     diag = computeDFSPHFactor(state, config, schemeConfig, adjacency,
                               apparentVolumes=apparentArea)
     if wall is not None:
-        from ..modules.analyticBoundary import wallAlphaCorrection
+        from ...modules.analyticBoundary import wallAlphaCorrection
         gradSum = warpOperation(
             state, OperationProperties(kernel=config.kernel, operation=WarpOperation.Gradient, gradientMode=GradientScheme.Naive, supportMode=SupportScheme.Gather),
             queryValues=apparentArea * state.densities / state.masses, domain=config.domain, adjacency=adjacency)
@@ -305,7 +305,7 @@ def _drhodt(state: Any, config: Any, schemeConfig: Any, adjacency: Any,
         currentState=state, config=config, schemeConfig=schemeConfig,
         adjacency=adjacency, advectionVelocities=advectionVelocities)
     if wall is not None:
-        from ..modules.analyticBoundary import wallDivergence
+        from ...modules.analyticBoundary import wallDivergence
         out = out - schemeConfig.fluid.restDensity * wallDivergence(wall, advectionVelocities, bodyVelocity=bodyVelocity)
     return out
 
@@ -317,7 +317,7 @@ def _pressureAccel(state, config, adjacency, p, fluidMask, wall=None, rho0=1.0):
     if wall is not None:
         # analytic walls: omniSPH's symmetric wall form (mirrored `p_b = p_i^+`, hydrostatic offset, `p_b >= 0`), the boundaries repo's `DFSPH2D._boundary_accel`; it carries the weight the
         # `akinciBoundaryVolumeScale = 2` of this scheme gives its wall particles (the symmetric form's `p / rho^2 + p / rho0^2` is 2 p at rho = rho0)
-        from ..modules.analyticBoundary import wallPressureAccelerationOmni
+        from ...modules.analyticBoundary import wallPressureAccelerationOmni
         a_p = a_p + wallPressureAccelerationOmni(wall, p, state.densities, rho0, wallMass=wall.wm, h=wall.support)
     # Zero `a_p` for every non-fluid row `i` (`kind == 1` boundary AND `kind ==
     # 2` ghost): a static particle takes no reaction (`staticBoundary` /
@@ -444,7 +444,7 @@ def _jacobiSolve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *,
     maxIters = solverCfg.maxIterations
     tol = solverCfg.tolerance
     # |diag|: opDt * |computeDFSPHFactor|  (_factor returns <= 0).
-    from ..modules.analyticBoundary import resolveWall
+    from ...modules.analyticBoundary import resolveWall
     wall = resolveWall(state, config, schemeConfig, adjacency)
     invDiag = 1.0 / (opDt * (-_factor(state, config, schemeConfig, adjacency, wall)))
 
@@ -616,14 +616,14 @@ def dfsphReference_step(system: Any, dt: float, config: Any, schemeConfig: Any,
             raise NotImplementedError('dfsphReference / iisph on analytic walls are written for static bodies (moving and free bodies: omniIncompressible, divergenceFree)')
     fricPerBody = None
     if getattr(schemeConfig, 'boundaryFriction', 0.0):
-        from ..modules.xsph import computeBoundaryFriction
+        from ...modules.xsph import computeBoundaryFriction
         if getattr(schemeConfig, 'analyticWallLoads', False):
             fricPerBody = computeBoundaryFriction(st, config, schemeConfig, adjacency, perBody=True)
             st.velocities = st.velocities + fricPerBody.sum(0)
         else:
             st.velocities = st.velocities + computeBoundaryFriction(st, config, schemeConfig, adjacency)
     if getattr(schemeConfig, 'xsphCoefficient', 0.0) or getattr(schemeConfig, 'xsphBoundaryCoefficient', 0.0):
-        from ..modules.xsph import computeXSPH
+        from ...modules.xsph import computeXSPH
         st.velocities = st.velocities + computeXSPH(st, config, schemeConfig, adjacency)
 
     if st.pressures is None:
@@ -650,7 +650,7 @@ def dfsphReference_step(system: Any, dt: float, config: Any, schemeConfig: Any,
     enforceDirichlet(system, system.t, dt, config, schemeConfig)
     # Extend the boundary velocity field per each boundary region's `BCType`
     # (`freeSlip` reflection / `noSlip` mirror / `extended` MLS), exactly as
-    # `schemes/deltaSPH.py` and `schemes/divergenceFree.py` do -- this is what gives
+    # `schemes/weaklyCompressible/deltaSPH.py` and `schemes/incompressible/divergenceFree.py` do -- this is what gives
     # `computeVelocityDiffusion` (below) a real no-slip wall when the case
     # asks for one. A strict no-op with no `kind == 1` particles (periodic
     # cases). The boundary rows keep the extended velocity for the rest of the
@@ -732,7 +732,7 @@ def dfsphReference_step(system: Any, dt: float, config: Any, schemeConfig: Any,
 
     if provider is not None:
         from .omniIncompressible import _bookWallLoads, _wallViscousPerBody
-        from ..modules.analyticBoundary import resolveWall
+        from ...modules.analyticBoundary import resolveWall
         _bookWallLoads(st, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0, pDiv=kappaV, pRho=kappa, frictionPerBody=fricPerBody, dt=dt,
                        densityApplied=True, divergenceHasWall=not skipDivergence,
                        viscousPerBody=_wallViscousPerBody(st, config, schemeConfig, adjacency, resolveWall(st, config, schemeConfig, adjacency)) if getattr(schemeConfig, 'analyticWallLoads', False) and not schemeConfig.diffusionParams.inviscid else None)

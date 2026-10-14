@@ -32,7 +32,7 @@ argp.add_argument('--maxiter', type=int, default=400)
 argp.add_argument('--rtol', type=float, default=1e-8)
 args = argp.parse_args()
 
-import warpSPH.schemes.band2018pb as bmod
+import warpSPH.schemes.incompressible.band2018pb as bmod
 from warpSPH.runner import run
 from warpSPH.modules.incompressible.pressureBoundaries import (
     bandActualVolumes, bandApplyOperator, bandDiagonal, bandInjectVolumes,

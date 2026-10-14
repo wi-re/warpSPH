@@ -4,7 +4,7 @@ and `IncompressibleSolverConfig`, which bundles two of the former
 `.solverConfig` on `IncompressibleSPHConfig` and read via
 `schemeConfig.solverConfig.{pressureSolver,divergenceFreeSolver}.*` by
 `modules/incompressible/{incompressible,divergenceFree}.py` and
-`schemes/divergenceFree.py`. `buildDefaultPSConfig`/`buildDefaultDFConfig` give the
+`schemes/incompressible/divergenceFree.py`. `buildDefaultPSConfig`/`buildDefaultDFConfig` give the
 pressure and divergence-free solvers different tuned defaults (iteration caps,
 tolerances, relaxation) rather than sharing one default.
 """
@@ -64,7 +64,7 @@ class JacobiRelaxationMode(Enum):
 class BoundaryPressureMode(Enum):
     """How `kind==1` boundary particles are handled by the incompressible
     pressure solvers (`solveDivergenceFree`/`solveIncompressible`) and by
-    `schemes/divergenceFree.py`'s mDBC wiring.
+    `schemes/incompressible/divergenceFree.py`'s mDBC wiring.
 
     In all three modes, boundary particles are excluded from the pressure
     *unknowns*: their pressure is held fixed (not driven by the
@@ -226,7 +226,7 @@ class ShiftApplication(Enum):
     use the raw source as it does now.
 
     - `inStepVelocity`: DFSPH proper. The correction is computed and applied
-      *inside* the step (`schemes/divergenceFree.py`), folded into the same `dvdt` the
+      *inside* the step (`schemes/incompressible/divergenceFree.py`), folded into the same `dvdt` the
       integrator advects with, and the position shift is dropped entirely --
       two velocity-level solves per step and no repositioning, which is the
       original formulation. Best wall behavior of the three by a wide margin:
@@ -298,7 +298,7 @@ class BoundaryOperatorTerms(Enum):
     set, so a boundary particle is treated exactly like a fluid one.
 
     Two of those contributions describe the *neighbour's* response to `p_i`,
-    and they are wrong for a particle that never moves. `schemes/divergenceFree.py`
+    and they are wrong for a particle that never moves. `schemes/incompressible/divergenceFree.py`
     zeroes `dxdt`/`dvdt` for every `kind != 0` row, so boundary and ghost
     particles are static by construction:
 
@@ -388,7 +388,7 @@ class DensityEvolution(Enum):
     summation, or the continuity equation integrated in time.
 
     Weakly-compressible SPH conventionally integrates `drho/dt = -rho div v`
-    and never re-sums (`schemes/deltaSPH.py` does exactly that, which is why
+    and never re-sums (`schemes/weaklyCompressible/deltaSPH.py` does exactly that, which is why
     it carries a density-diffusion term at all). This scheme re-sums twice per
     step instead: once at the top of `divergenceFree_step`, and once inside
     `IncompressibleSystem.finalize` before the constant-density solve. The

@@ -110,7 +110,7 @@ def parseArgs(argv):
                         'space, matching the original run.')
     p.add_argument('--pressureForceRenormalized', action='store_true',
                    help='apply the DualSPHysics-style completeness-gated '
-                        'pressure-force renormalization (schemes/deltaSPH.py '
+                        'pressure-force renormalization (schemes/weaklyCompressible/deltaSPH.py '
                         'step 13, BOUNDARY_DENSITY_PLAN.md §10 / '
                         'DELTASPH_VALIDATION_PLAN.md §5.23/§5.32).')
     return p.parse_args(argv)
@@ -127,7 +127,7 @@ def main(argv=None):
     from warpSPH.runner import getCase, run, CaseSpec
     from warpSPH.enumTypes import DensityDiffusionScheme
     import warpSPH.modules.mdbc.english2025 as eng2025mod
-    import warpSPH.schemes.deltaSPH as deltaSPHmod
+    import warpSPH.schemes.weaklyCompressible.deltaSPH as deltaSPHmod
 
     if not hasattr(eng2025mod, '_CAPTURE'):
         print('WARNING: english2025.py does not carry the §10 _CAPTURE hook '

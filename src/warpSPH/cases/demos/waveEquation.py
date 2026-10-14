@@ -1,7 +1,7 @@
 """Scalar wave equation on SPH particles, 1D/2D/3D.
 
 The registered `Case` for the non-fluid demo scheme in
-`schemes/waveEquation.py`: `d2u/dt2 = c^2 laplacian(u)` on a static particle
+`schemes/pde/waveEquation.py`: `d2u/dt2 = c^2 laplacian(u)` on a static particle
 lattice, with a couple of Gaussian-ish sources and (in 2D) an optional
 circular obstacle of reduced wave speed, absorbed at the domain edge by the
 cosine border-damping profile (`caseUtils/waveEquation/damping.py`) instead

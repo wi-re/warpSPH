@@ -21,7 +21,7 @@ into the fluid has to enter `div(v)` with its own normal velocity, otherwise the
 density change the wall drives is missing while gravity's forcing is not, and
 the two diverge. diffSPH's delta-SPH does the same thing by a different route --
 it restores `boundaryBodyVelocities` before `computeMomentum`
-(`schemes/deltaSPH.py:169`) instead of folding the body velocity into the BC.
+(`schemes/weaklyCompressible/deltaSPH.py:169`) instead of folding the body velocity into the BC.
 
 Graded against the wall normal (`scripts/probe_boundaryVelocityModes.py --mode
 verify`) the decomposition (normal, tangential) is now `freeSlip` **(-1, +1)**,

@@ -1,4 +1,4 @@
-"""Config of the Godunov SPH scheme (`schemes/gsph.py`, GODUNOV_SPH_PLAN): a `CompressibleSPHConfig` whose `diffusionParams` carry the Riemann
+"""Config of the Godunov SPH scheme (`schemes/compressible/gsph.py`, GODUNOV_SPH_PLAN): a `CompressibleSPHConfig` whose `diffusionParams` carry the Riemann
 settings instead of the artificial-viscosity ones -- `riemannSolver`, `velocityPairPolicy` (`Raw`: first-order states; `Limited`: the
 second-order reconstruction of the velocity), `riemannReconstruction` (the same for `rho` and `P`), `limiterType` and the taper constants. There is no
 viscosity switch and no viscosity term in the scheme; the fields that only the AV operator reads are unused.
@@ -57,7 +57,7 @@ def dictToGSPHConfig(configDict: Dict[str, Any]) -> GSPHConfig:
 
 @dataclass
 class InutsukaGSPHConfig(GSPHConfig):
-    """Inutsuka (2002) Godunov SPH (`schemes/gsphInutsuka.py`, layer 3): Gaussian kernel (`supports / 3` is its h), interpolated specific volume, interface `s*`.
+    """Inutsuka (2002) Godunov SPH (`schemes/compressible/gsphInutsuka.py`, layer 3): Gaussian kernel (`supports / 3` is its h), interpolated specific volume, interface `s*`.
     `cubicVolume`: the cubic Hermite interpolant of `V = 1/rho` (Murante's reference) instead of the linear one; `verletScale` of the neighbour list is
     raised to reach `sqrt2` times the support."""
     diffusionParams: DiffusionParameters = field(default_factory=buildDefaultDiffusionParamsInutsuka)

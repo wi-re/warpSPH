@@ -1,6 +1,6 @@
 # GODUNOV_SPH_PLAN layer 2: simplified Godunov SPH (2026-10-08)
 
-`schemes/gsph.py` + `modules/godunov/wp_gsph.py`: `a_i = -sum m_j p*_ij [grad W(h_i)/rho_i^2 + grad W(h_j)/rho_j^2]`,
+`schemes/compressible/gsph.py` + `modules/godunov/wp_gsph.py`: `a_i = -sum m_j p*_ij [grad W(h_i)/rho_i^2 + grad W(h_j)/rho_j^2]`,
 `du_i/dt = -sum m_j p*_ij (u*_ij - u_i)(n . F)` with `(p*, u*)` from `modules/riemann` (Adaptive solver), no viscosity switch, no artificial
 viscosity, no conductivity (Cha & Whitworth Case 3 / Puri Eq. 15 / Iwasaki Eq. 24). Full profile, video, no velocity alarm; final frames of the
 second-order run in `frames/`. Configs (`av_report` group `gsph`): `gsphO1` first-order states; `gsphO2v` second-order velocity only; `gsphO2` second-order

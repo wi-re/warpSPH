@@ -38,7 +38,7 @@ import math
 import torch
 
 from warpSPH.sample.acousticCore import buildPeriodicVortexAcousticCoreSystem
-from warpSPH.schemes.acousticCore import f_acoustic_core
+from warpSPH.schemes.experimental.acousticCore import f_acoustic_core
 
 from warpSPHIntegrators import FixedPointSolver, JFNKSolver, get_reference_state, getIntegrator
 from warpSPHCore import SupportScheme, buildVerletList

@@ -38,7 +38,7 @@ def tank(scheme, nSteps=1, nh=2.57, setup=None):
 
 
 def test_the_operator_diagonal_is_the_dfsph_factor_with_the_wall():
-    import warpSPH.schemes.dfsphReference as D
+    import warpSPH.schemes.incompressible.dfsphReference as D
     from warpSPH.modules.analyticBoundary import resolveWall
     r = tank('dfsphReference')
     st, ctx = r.state.state, r.ctx

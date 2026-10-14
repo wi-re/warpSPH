@@ -76,7 +76,7 @@ from warpSPH.configurations import BoundaryOperatorTerms
 from warpSPH.configurations.moduleConfigurations.boundaryConditions import BCType
 from warpSPH.cases.common.weaklyCompressible import domainBoundarySdf
 import warpSPH.modules.mdbc.velocity as velmod
-import warpSPH.schemes.divergenceFree as dfsphmod
+import warpSPH.schemes.incompressible.divergenceFree as dfsphmod
 import warpSPH.systems.incompressible as sysmod
 import warpSPH.cases.periodic.randomFlow as rfmod
 
@@ -170,7 +170,7 @@ def runVerify():
                    applied=out.clone())
         return out
 
-    import warpSPH.schemes.deltaSPH as deltamod
+    import warpSPH.schemes.weaklyCompressible.deltaSPH as deltamod
     holders = [velmod, dfsphmod, deltamod]
     originals = [getattr(h, 'computeBoundaryVelocities', None) for h in holders]
     for h in holders:

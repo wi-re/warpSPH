@@ -4,7 +4,7 @@ import os, runpy, sys
 import numpy as np
 from scipy.spatial import cKDTree
 sys.path.insert(0, 'src'); sys.path.insert(0, 'scripts')
-import warpSPH.schemes.crkSPH as crk, warpSPH.schemes.builder as builder, warpSPH.schemes as schemes
+import warpSPH.schemes.compressible.crkSPH as crk, warpSPH.schemes.builder as builder, warpSPH.schemes as schemes
 _orig = crk.crkSPH_step
 N = [0]; ROWS = []
 DX = float(os.environ.get('DX', '0.01'))

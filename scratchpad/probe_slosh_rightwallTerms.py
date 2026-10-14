@@ -5,7 +5,7 @@ attributes this whole class ("SPH with too few neighbours") but nothing so far
 has actually decomposed the acceleration into its terms at the moment of the
 kick. `deltaSPH_step` sums
 `dvdt = dvdt_pressure + dvdt_forcing + dvdt_gravity + dvdt_diss + dvdt_nopenshift`
-(schemes/deltaSPH.py:249) -- this monkeypatches each of those five calls
+(schemes/weaklyCompressible/deltaSPH.py:249) -- this monkeypatches each of those five calls
 in-process (no file edits) to capture their return values, then resumes the
 checkpoint and steps through the event with a per-term breakdown per UID.
 """
@@ -32,7 +32,7 @@ from warpSPH.io.hdf5 import loadState
 from warpSPH.systems.weaklyCompressible import WeaklyCompressibleState
 from warpSPH.cases.freeSurface.sloshingTank import sloshingTankCase
 from warpSPH.runner import run
-import warpSPH.schemes.deltaSPH as deltaSPHModule
+import warpSPH.schemes.weaklyCompressible.deltaSPH as deltaSPHModule
 
 # -- monkeypatch: wrap each term-producing call to stash its return value --
 _captured = {}

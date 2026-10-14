@@ -19,7 +19,7 @@ the notebook's last section.
    This docstring used to record that the measured `nu_eff` lands *consistently
    below* the prescribed one, because `computeVelocityDiffusion`'s Monaghan
    switch (`approachOnly=True`) zeroed the viscous term for separating pairs and
-   so halved it. That is **no longer true**: `schemes/deltaSPH.py` passes
+   so halved it. That is **no longer true**: `schemes/weaklyCompressible/deltaSPH.py` passes
    `approachOnly=False` (Marrone et al. 2011 Eq. (5b) / Sun et al. 2017 Eq. (1)
    are two-sided; `DELTASPH_VALIDATION_PLAN.md` Part 1), which is the Monaghan &
    Gingold velocity Laplacian proper. The decay now tracks `exp(-4 nu k^2 t)`

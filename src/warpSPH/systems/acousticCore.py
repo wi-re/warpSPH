@@ -10,7 +10,7 @@ for the three physical fields this needs -- `positions`/`velocities`/
 `densities` -- but drops every field that scheme carries for surface
 detection, mDBC, and shifting, none of which this core has code paths for.
 
-See :mod:`warpSPH.schemes.acousticCore` for the step function.
+See :mod:`warpSPH.schemes.experimental.acousticCore` for the step function.
 """
 
 import torch

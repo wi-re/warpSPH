@@ -1,7 +1,7 @@
 # `divergenceFree` (DFSPH) on analytic walls, and the DFSPH2D extras (MLS wall pressure, XSPH, boundary friction) — 2026-10-09
 
 Evidence for [ANALYTIC_BOUNDARIES_PORT_SURVEY.md](../../historic_plans/ANALYTIC_BOUNDARIES_PORT_SURVEY.md) §6c. Code state: commit 4f871c6 (the extras) plus the `divergenceFree` hook-up of the next commit
-(`schemes/divergenceFree.py`: analytic no-penetration, friction, XSPH; the runner / `sloshingTank` / `dambreak` allow the scheme). Raw output stays in `results/divfree_analytic_2026-10-09/` (gitignored).
+(`schemes/incompressible/divergenceFree.py`: analytic no-penetration, friction, XSPH; the runner / `sloshingTank` / `dambreak` allow the scheme). Raw output stays in `results/divfree_analytic_2026-10-09/` (gitignored).
 
 ## The extras (omniIncompressible and divergenceFree)
 

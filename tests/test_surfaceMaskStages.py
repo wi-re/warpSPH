@@ -1,5 +1,5 @@
 """OPEN_PROBLEMS.md §1 step 1: the Antuono switch's surface mask across the
-stages of one step (`schemes/deltaSPH.py:_surfaceMaskAcrossStages`). CPU only:
+stages of one step (`schemes/weaklyCompressible/deltaSPH.py:_surfaceMaskAcrossStages`). CPU only:
 the stage bookkeeping, not the physics."""
 
 from types import SimpleNamespace
@@ -8,7 +8,7 @@ import torch
 
 
 def _call(sc, t, dt, mask, stageIndex=None):
-    from warpSPH.schemes.deltaSPH import _surfaceMaskAcrossStages
+    from warpSPH.schemes.weaklyCompressible.deltaSPH import _surfaceMaskAcrossStages
     # the RHS's particle state has no `t` -- the system's time is passed in
     state = SimpleNamespace(surfaceIndicators=torch.tensor(mask, dtype=torch.int32))
     _surfaceMaskAcrossStages(state, dt, sc, stageIndex, t)

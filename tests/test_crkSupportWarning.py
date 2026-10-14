@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from warpSPHCore import SupportScheme
 
-from warpSPH.schemes import crkSPH
+from warpSPH.schemes.compressible import crkSPH
 
 
 @pytest.fixture(autouse=True)

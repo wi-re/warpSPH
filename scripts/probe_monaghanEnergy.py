@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """OPEN_PROBLEMS §16 probe: which term of the Monaghan RHS breaks total-energy conservation?
 
-Runs a case for a few steps, then evaluates the RHS pieces of `schemes/monaghan.py` on the
+Runs a case for a few steps, then evaluates the RHS pieces of `schemes/compressible/monaghan.py` on the
 resulting state (`--switch ReadHayfield2012` adds the SPHS entropy-dissipation source) and reports, for each, the *net energy rate it injects*
 
     E_dot = sum_i m_i ( v_i . dvdt_i + dudt_i )

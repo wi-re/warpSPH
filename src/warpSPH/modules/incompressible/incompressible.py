@@ -87,7 +87,7 @@ _CLOSED_BOX_PROJECT_THRESHOLD = 0.7
 #: `WARPSPH_WALL_PRESSURE_MODE` overrides this at import time (`'none'` maps to
 #: `None`) -- for `scripts/validate_scheme.py` comparison sweeps
 #: (`--wallPressure`) across schemes/solves without editing this file. Shared
-#: with `schemes/omniIncompressible.py`'s `WALL_PRESSURE_MODE`, which reads the
+#: with `schemes/incompressible/omniIncompressible.py`'s `WALL_PRESSURE_MODE`, which reads the
 #: same variable: the two module globals govern different call sites
 #: (`_psShift`'s VD+PS shift here vs `INSTEP_CD`'s in-step fold there), so a
 #: `--scheme divergenceFree` sweep needs both toggled together to cover every

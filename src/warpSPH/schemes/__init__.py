@@ -9,14 +9,14 @@ demo scheme (see `cases/demos/waveEquation.py` for its registered `Case`), but i
 follows the same `SchemeBundle`/`buildScheme` contract as the rest.
 """
 
-from .monaghan import compressibleSPH_Monaghan
-from .gsph import compressibleSPH_GSPH
-from .gsphInutsuka import compressibleSPH_InutsukaGSPH
-from .compSPH import compSPH_step
-from .crkSPH import crkSPH_step
-from .divergenceFree import divergenceFree_step
-from .waveEquation import f_wave_equation
-from .meshless import meshlessStep
+from .compressible.monaghan import compressibleSPH_Monaghan
+from .compressible.gsph import compressibleSPH_GSPH
+from .compressible.gsphInutsuka import compressibleSPH_InutsukaGSPH
+from .compressible.compSPH import compSPH_step
+from .compressible.crkSPH import crkSPH_step
+from .incompressible.divergenceFree import divergenceFree_step
+from .pde.waveEquation import f_wave_equation
+from .compressible.meshless import meshlessStep
 
 from .builder import buildScheme, CompressibleSPHScheme
 

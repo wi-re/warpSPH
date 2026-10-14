@@ -59,7 +59,7 @@ from warpSPH.configurations import BoundaryOperatorTerms, BoundaryPressureMode
 from warpSPH.modules.incompressible.consistent import akinciBoundaryMass
 
 import warpSPH.systems.incompressible as sysmod
-import warpSPH.schemes.divergenceFree as dfsphmod
+import warpSPH.schemes.incompressible.divergenceFree as dfsphmod
 
 mod = importlib.import_module(f'warpSPH.cases.{args.case}')
 case = getattr(mod, f'{args.case}Case')

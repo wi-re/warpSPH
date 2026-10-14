@@ -2,7 +2,7 @@
 """torch.autograd.gradcheck against CompSPH's core physics kernels -- Tier 1
 of docs/historic_plans/CLEANUP_PLAN.md's Phase 4.1 gradcheck rollout.
 
-`compSPH_step` (schemes/compSPH.py) always calls all three of
+`compSPH_step` (schemes/compressible/compSPH.py) always calls all three of
 `computeCompSPHAccelWarp` (modules/compSPH/accel.py),
 `computeCompSPHdudtWarp` (modules/compSPH/dudt.py), and
 `computeCompSPHBalanceTermWarp` (modules/compSPH/balance.py) in sequence, so

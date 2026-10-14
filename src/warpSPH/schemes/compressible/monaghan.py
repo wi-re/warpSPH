@@ -9,22 +9,22 @@ added on top.
 # from warpSPHCore import SupportScheme
 # from warpSPH.modules import computePressureForceSymmetric, computeDudtMonaghan, computeMomentumConsistent
 # from warpSPH.modules import computeViscosity, computeConductivity, computeThermalDissipation
-from ..configurations.moduleConfigurations.diffusionParameters import DiffusionParameters, ViscosityTerms
-from ..systems import CompressibleSystem, CompressibleSystemUpdate
-from ..configurations import SimulationConfig, CompressibleSPHConfig
+from ...configurations.moduleConfigurations.diffusionParameters import DiffusionParameters, ViscosityTerms
+from ...systems import CompressibleSystem, CompressibleSystemUpdate
+from ...configurations import SimulationConfig, CompressibleSPHConfig
 import torch
 
-from ..modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
-from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
-from ..modules.compressibleWall import beginCompressibleWall
-from ..modules.density import computeDensities
-from ..modules.dissipation import computeConductivity, computeThermalDissipation, computeViscosity
-from ..modules.eos import idealGasEOS
-from ..modules.internalEnergy import computeDudtMonaghan
-from ..modules.momentum import computeMomentumConsistent
-from ..modules.pressure import computePressureForceSymmetric, computePerSidePressureWarp
-from ..modules.reconstruction import reconstructionInputs, stateGradientInputs
-from ..modules.shockCapturing import computeViscositySwitchTerms, updateViscositySwitch
+from ...modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
+from ...modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
+from ...modules.compressibleWall import beginCompressibleWall
+from ...modules.density import computeDensities
+from ...modules.dissipation import computeConductivity, computeThermalDissipation, computeViscosity
+from ...modules.eos import idealGasEOS
+from ...modules.internalEnergy import computeDudtMonaghan
+from ...modules.momentum import computeMomentumConsistent
+from ...modules.pressure import computePressureForceSymmetric, computePerSidePressureWarp
+from ...modules.reconstruction import reconstructionInputs, stateGradientInputs
+from ...modules.shockCapturing import computeViscositySwitchTerms, updateViscositySwitch
 from warpSPHCore import (
     GradHState, OperationProperties, SupportScheme, buildVerletList,
 )

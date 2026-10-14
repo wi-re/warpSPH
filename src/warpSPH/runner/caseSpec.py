@@ -113,7 +113,7 @@ class CaseSpec:
     #: small problems; bitwise identical to eager (self-checked at every
     #: capture, falling back to eager on any mismatch). Only the delta-SPH
     #: family acts on it, and only in configurations whose RHS is a pure
-    #: function of the state (`schemes/deltaSPH.py:_rhsIsGraphable`); a no-op
+    #: function of the state (`schemes/weaklyCompressible/deltaSPH.py:_rhsIsGraphable`); a no-op
     #: elsewhere. The scheme config must not be changed after the first step.
     cudaGraph: bool = False
     #: With a whole-step graph: run step n's diagnostics and plot frame on a

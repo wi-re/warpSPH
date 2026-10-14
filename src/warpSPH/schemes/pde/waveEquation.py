@@ -24,8 +24,8 @@ See :mod:`warpSPH.systems.waveSystem` for the state it integrates,
 section "The wave system" for how the pieces fit together.
 """
 
-from ..systems import WaveSystemUpdatev3, WaveSystemv3
-from ..configurations import SimulationConfig, WaveEquationConfig
+from ...systems import WaveSystemUpdatev3, WaveSystemv3
+from ...configurations import SimulationConfig, WaveEquationConfig
 from warpSPHCore import OperationProperties, WarpOperation, warpOperation
 
 __all__ = ['f_wave_equation']

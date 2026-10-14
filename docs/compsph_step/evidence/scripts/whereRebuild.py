@@ -2,7 +2,7 @@ import sys, collections
 from warpSPHBootstrap import bootstrap
 bootstrap(precision='float32')
 import warpSPH.modules.adaptiveSupport.optimalSupportOwen as owen
-import warpSPH.schemes.compSPH as sch
+import warpSPH.schemes.compressible.compSPH as sch
 stage=[0]; cnt=collections.Counter()
 origSolve=sch.evaluateOptimalSupport
 def solve(*a,**k):

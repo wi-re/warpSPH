@@ -1,5 +1,5 @@
 """`ArtificialCompressibleSPHConfig`, the scheme config for
-artificial-compressibility SPH (`schemes/artificialCompressible.py`, De Courcy
+artificial-compressibility SPH (`schemes/incompressible/artificialCompressible.py`, De Courcy
 et al. 2024; `ACSPH_PLAN.md`), registered in `schemes/builder.py`.
 
 Modelled on `WeaklyCompressibleSPHConfig` -- same fluid / adaptive-support /

@@ -36,7 +36,7 @@ argp.add_argument('--rtol', type=float, default=1e-3)
 argp.add_argument('--restart', type=int, default=50)
 args = argp.parse_args()
 
-import warpSPH.schemes.omniIncompressible as omod
+import warpSPH.schemes.incompressible.omniIncompressible as omod
 from warpSPH.runner import run
 
 _orig_solve = omod._solve

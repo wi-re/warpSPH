@@ -83,26 +83,26 @@ import os
 from typing import Any
 
 import torch
-from ..modules.boundaryConditions.pinned import pinnedKeepWeight
-from ..modules.incompressible.convergence import ConvergenceCheckSchedule
+from ...modules.boundaryConditions.pinned import pinnedKeepWeight
+from ...modules.incompressible.convergence import ConvergenceCheckSchedule
 
 from warpSPHCore import (GradientScheme, OperationDirection, OperationProperties,
                          SupportScheme, WarpOperation, buildVerletList,
                          warpOperation)
 
-from ..configurations import BoundaryPressureMode
-from ..modules.boundaryConditions import (computeForcing, enforceDirichlet,
+from ...configurations import BoundaryPressureMode
+from ...modules.boundaryConditions import (computeForcing, enforceDirichlet,
                                           enforceUpdates)
-from ..modules.density import computeDensities
-from ..modules.gravity import computeGravity, computeBodyForce
-from ..modules.incompressible.consistent import applyConsistentCoupling
-from ..modules.incompressible.wallPressure import wallPressureExtrapolation
-from ..modules.analyticBoundary import resolveWall, wallDensity
-from ..modules.incompressible.wp_alpha import computeAlpha
-from ..modules.pressure.iisph import computePressureAccelIISPH
-from ..modules.shifting.bicgstab import bicgstabSolve
-from ..modules.shifting.gmres import gmresSolve
-from ..systems.incompressible import IncompressibleSystemUpdate
+from ...modules.density import computeDensities
+from ...modules.gravity import computeGravity, computeBodyForce
+from ...modules.incompressible.consistent import applyConsistentCoupling
+from ...modules.incompressible.wallPressure import wallPressureExtrapolation
+from ...modules.analyticBoundary import resolveWall, wallDensity
+from ...modules.incompressible.wp_alpha import computeAlpha
+from ...modules.pressure.iisph import computePressureAccelIISPH
+from ...modules.shifting.bicgstab import bicgstabSolve
+from ...modules.shifting.gmres import gmresSolve
+from ...systems.incompressible import IncompressibleSystemUpdate
 
 __all__ = ['omniIncompressible_step']
 
@@ -326,7 +326,7 @@ def _divergence(state: Any, config: Any, adjacency: Any,
         consistentDivergence=False,
     )
     if wall is not None:
-        from ..modules.analyticBoundary import wallDivergence
+        from ...modules.analyticBoundary import wallDivergence
         div = div + wallDivergence(wall, field, bodyVelocity=bodyVelocity)
     return div
 
@@ -334,7 +334,7 @@ def _divergence(state: Any, config: Any, adjacency: Any,
 def _xsphFilter(state: Any, config: Any, adjacency: Any,
                 fluidMask: torch.Tensor) -> torch.Tensor:
     """omniSPH's XSPH velocity filter at the module constants `XSPH_FLUID` / `XSPH_BOUNDARY` (`divergenceFree`'s `xsphFilterScale` scales it); the filter itself is `modules/xsph`."""
-    from ..modules.xsph import computeXSPH
+    from ...modules.xsph import computeXSPH
     return computeXSPH(state, config, None, adjacency, fluidCoefficient=XSPH_FLUID, boundaryCoefficient=XSPH_BOUNDARY)
 
 
@@ -350,7 +350,7 @@ def _pressureAccel(state: Any, config: Any, adjacency: Any,
     if wall is not None:
         # analytic walls: the mirrored pressure `p_b = p_i^+` plus the hydrostatic wall pressure, clamped at 0, in omniSPH's own symmetric form (its triangle boundary term, the boundaries
         # repo's `DFSPH2D._boundary_accel`, equal to ~1e-6); `rho0` is the rest density of the mirror and of the hydrostatic offset
-        from ..modules.analyticBoundary import wallPressureAccelerationOmni
+        from ...modules.analyticBoundary import wallPressureAccelerationOmni
         # `mlsFit` (analyticWallPressure = 'mls'): the wall pressure extrapolated linearly from the fluid's current pressure iterate instead of the hydrostatic one
         a_p = a_p + wallPressureAccelerationOmni(wall, p, state.densities, rho0, wallMass=wall.wm, h=wall.support,
                                                  gradient=None if mlsFit is None else mlsFit.gradient(p), clampPressure=clampPressure)
@@ -399,7 +399,7 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *, checkS
     """
     if mode == 'divergence' and getattr(schemeConfig, 'projection', 'jacobi') == 'compact':
         # the divergence stage as the compact approximate projection (`modules/incompressible/compactProjection.py`, DFSPH2D `projection='compact'`): converged CG instead of 3 relaxed Jacobi sweeps
-        from ..modules.incompressible.compactProjection import CompactCG, solveCompactProjection
+        from ...modules.incompressible.compactProjection import CompactCG, solveCompactProjection
         wall = resolveWall(state, config, schemeConfig, adjacency)
         if wall is None and bool((state.kinds != 0).any()):
             raise NotImplementedError("projection='compact' is written for analytic walls (the compact Laplacian has no boundary-particle terms)")
@@ -494,7 +494,7 @@ def _solve(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *, checkS
         # analyticWallPressure = 'mls' (DFSPH2D wallPressure='linear'): the wall's pressure gradient fitted to the fluid's current pressure every iterate (the fit's geometry once per solve)
         mlsFit = None
         if wall is not None and getattr(schemeConfig, 'analyticWallPressure', 'hydrostatic') == 'mls':
-            from ..modules.analyticBoundary import buildMLSPressureFit
+            from ...modules.analyticBoundary import buildMLSPressureFit
             mlsFit = buildMLSPressureFit(state, config, adjacency, fluid, rho0)
 
         def accel(pt, clampWall=True):
@@ -627,7 +627,7 @@ def _bookWallLoads(state: Any, config: Any, schemeConfig: Any, adjacency: Any, *
     wall = resolveWall(state, config, schemeConfig, adjacency)
     if provider is None or wall is None:
         return
-    from ..modules.analyticBoundary import wallPressureAccelerationOmni, wallLoads, buildMLSPressureFit
+    from ...modules.analyticBoundary import wallPressureAccelerationOmni, wallLoads, buildMLSPressureFit
     acc = torch.zeros((wall.G.shape[0],) + tuple(state.velocities.shape), dtype=torch.float64, device=state.velocities.device)
     compact = getattr(schemeConfig, 'projection', 'jacobi') == 'compact'
     mls = getattr(schemeConfig, 'analyticWallPressure', 'hydrostatic') == 'mls'
@@ -658,10 +658,10 @@ def _wallViscousPerBody(state: Any, config: Any, schemeConfig: Any, adjacency: A
     exact wall Laplacian of the delta+ forms; None without a wall."""
     if wall is None:
         return None
-    from ..modules.deltaSPH import computeVelocityDiffusion
-    from ..modules.analyticBoundary import viscousPrefactor, wallViscousAcceleration
+    from ...modules.deltaSPH import computeVelocityDiffusion
+    from ...modules.analyticBoundary import viscousPrefactor, wallViscousAcceleration
     if getattr(schemeConfig, 'wallViscosityClosure', 'mirror') == 'noslipMoment':
-        from ..modules.analyticBoundary.wallViscosity import wallNoSlipAcceleration
+        from ...modules.analyticBoundary.wallViscosity import wallNoSlipAcceleration
         viscf = computeVelocityDiffusion(state, config, schemeConfig, adjacency, wall=False)
         return wallNoSlipAcceleration(state, config, schemeConfig, adjacency, wall, viscf, perBody=True)
     return wallViscousAcceleration(wall, state.densities, state.velocities, viscousPrefactor(schemeConfig, config, wall.support), wall.support, wallMass=wall.wm, kernel=config.kernel, perBody=True)
@@ -674,7 +674,7 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
     fcol = fluid.unsqueeze(-1)
     rho0 = schemeConfig.fluid.restDensity
 
-    from ..modules.incompressible.compactProjection import resolveClosedPreset
+    from ...modules.incompressible.compactProjection import resolveClosedPreset
     resolveClosedPreset(schemeConfig, config)
     provider = getattr(schemeConfig, 'boundaryProvider', None)
     if provider is not None and any(getattr(rb, 'dynamic', False) for rb in provider.rigidBodies):
@@ -695,7 +695,7 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
     # the one the density just made)
     fricPerBody = None
     if getattr(schemeConfig, 'boundaryFriction', 0.0):
-        from ..modules.xsph import computeBoundaryFriction
+        from ...modules.xsph import computeBoundaryFriction
         if getattr(schemeConfig, 'analyticWallLoads', False):
             fricPerBody = computeBoundaryFriction(st, config, schemeConfig, adjacency, perBody=True)
             st.velocities = st.velocities + fricPerBody.sum(0)
@@ -713,7 +713,7 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
     viscousAcc = None
     if getattr(schemeConfig, 'omniViscosity', False):
         # the physical viscosity of DFSPH2D (`viscosity`): the Morris / alpha diffusion with its wall term (`computeVelocityDiffusion(wall=)`), explicit, with the step limit of the incompressible time step
-        from ..modules.deltaSPH import computeVelocityDiffusion
+        from ...modules.deltaSPH import computeVelocityDiffusion
         viscousAcc = computeVelocityDiffusion(st, config, schemeConfig, adjacency)
         accel = accel + torch.where((st.kinds == 0).unsqueeze(-1), viscousAcc, torch.zeros_like(viscousAcc))
     forcing = computeForcing(system, dt, system.t, config, schemeConfig)
@@ -751,7 +751,7 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
     # `accel`), so this and the pressure impulse `dt*accel` add independently.
     # (`schemeConfig.xsphCoefficient`, `xsphBoundaryCoefficient`: both 0 = the faithful no-dissipation loop; DFSPH2D's default is 1e-4)
     if getattr(schemeConfig, 'xsphCoefficient', 0.0) or getattr(schemeConfig, 'xsphBoundaryCoefficient', 0.0):
-        from ..modules.xsph import computeXSPH
+        from ...modules.xsph import computeXSPH
         st.velocities = st.velocities + computeXSPH(st, config, schemeConfig, adjacency)
 
     # --- 6. integrate (omniSPH Integrate: single semi-implicit Euler) -----
@@ -762,7 +762,7 @@ def omniIncompressible_step(system: Any, dt: float, config: Any,
     shiftNow = None
     if getattr(schemeConfig, 'shifting', 'none') != 'none':
         # DFSPH2D `shifting='fixed' / 'fickian'`: a position move after the advection, the concentration gradient at the pre-move positions (the pair list still describes them)
-        from ..modules.shifting.fickian import computeFickianShift
+        from ...modules.shifting.fickian import computeFickianShift
         shiftNow = computeFickianShift(st, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0, dt=dt,
                                        velocities=st.velocities, wall=resolveWall(st, config, schemeConfig, adjacency))
     st.positions = st.positions + dt * torch.where(

@@ -434,7 +434,7 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
         runningState = stepResult.state
         # Scheme-specific extra step data that doesn't fit the state (e.g.
         # ACSPH's `update.pseudoIterations`/`.epsilonV`, set ad hoc on the
-        # `ArtificialCompressibleSystemUpdate` `schemes/artificialCompressible.py`
+        # `ArtificialCompressibleSystemUpdate` `schemes/incompressible/artificialCompressible.py`
         # returns) rides on the last stage's `update` object, which `diagnostics`/
         # `postStep` cannot otherwise reach -- neither gets `stepResult`, only
         # `runningState`. Stashed here, read with `getattr(..., None)` by anything
@@ -825,14 +825,14 @@ def _setupPlot(ctx: RunContext, case: Case, state):
 def _stepGraphable(ctx, runningState=None) -> bool:
     """Whole-step graphs are wired for the weakly-compressible delta-SPH family
     (its RHS, integrator path and `finalize` were made sync-free; see
-    `schemes/deltaSPH.py:_rhsIsGraphable` for the per-configuration rules) and
+    `schemes/weaklyCompressible/deltaSPH.py:_rhsIsGraphable` for the per-configuration rules) and
     for CompSPH in its `stepMode='graph'` (`modules/compSPH/stepMode.py`)."""
     from ..enumTypes import CompressibleSPHScheme, WeaklyCompressibleSPHScheme
     if ctx.scheme == CompressibleSPHScheme.CompSPH:
         return ctx.scratch.get('compSPHStepMode') == 'graph'        # `stepMode`, resolved before the loop
     if not isinstance(ctx.scheme, WeaklyCompressibleSPHScheme):
         return False
-    from ..schemes.deltaSPH import _rhsIsGraphable
+    from ..schemes.weaklyCompressible.deltaSPH import _rhsIsGraphable
     return _rhsIsGraphable(ctx.schemeConfig, None)
 
 

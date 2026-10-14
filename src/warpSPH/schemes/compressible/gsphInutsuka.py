@@ -5,15 +5,15 @@ no switch, no conductivity; same system / state / update classes as the Monaghan
 
 import torch
 
-from ..configurations import SimulationConfig
-from ..configurations.gsph import InutsukaGSPHConfig
-from ..configurations.moduleConfigurations.diffusionParameters import VelocityPairPolicy, resolveReconstructionLimiter
-from ..systems import CompressibleSystem, CompressibleSystemUpdate
-from ..modules.adaptiveSupport import evaluateOptimalSupport
-from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
-from ..modules.eos import idealGasEOS
-from ..modules.godunov import computeGaussianDensityWarp, computeInutsukaWarp
-from ..modules.reconstruction import computeStateGradients, computeVelocityJacobian
+from ...configurations import SimulationConfig
+from ...configurations.gsph import InutsukaGSPHConfig
+from ...configurations.moduleConfigurations.diffusionParameters import VelocityPairPolicy, resolveReconstructionLimiter
+from ...systems import CompressibleSystem, CompressibleSystemUpdate
+from ...modules.adaptiveSupport import evaluateOptimalSupport
+from ...modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
+from ...modules.eos import idealGasEOS
+from ...modules.godunov import computeGaussianDensityWarp, computeInutsukaWarp
+from ...modules.reconstruction import computeStateGradients, computeVelocityJacobian
 from warpSPHCore import OperationProperties, SupportScheme, buildVerletList
 
 __all__ = ['compressibleSPH_InutsukaGSPH']

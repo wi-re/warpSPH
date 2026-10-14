@@ -1,6 +1,6 @@
 """Probe (per the project owner's own instruction, 2026-08-26): does this
 codebase's existing incompressible SPH solver ("DFSPH", `scheme='divergenceFree'`,
-`schemes/divergenceFree.py`) already deliver -- for free, with no JFNK -- some or all of
+`schemes/incompressible/divergenceFree.py`) already deliver -- for free, with no JFNK -- some or all of
 what `JFNK_PLAN.md`'s compressible-acoustic-core effort (Phases B/E1/E1.5/E1.6/
 E1.7) is chasing, on the *same* 2D forced Kolmogorov-flow shear-instability
 problem?

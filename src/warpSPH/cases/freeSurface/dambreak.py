@@ -337,7 +337,7 @@ def _configureArtificialCompressibleExtra(ctx: RunContext) -> None:
         schemeConfig.dt_accelerationConstraint = False        # D12
 
     # The ACSPH step owns its whole real-time advance and returns an exact
-    # per-step delta (`schemes/artificialCompressible.py`); any multi-stage
+    # per-step delta (`schemes/incompressible/artificialCompressible.py`); any multi-stage
     # integrator would run the dual-time solve once per stage and blend,
     # which is silently wrong. `configureArtificialCompressible` enforces
     # this for cases that go through it; this case does not, so it is

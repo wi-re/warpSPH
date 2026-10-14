@@ -262,7 +262,7 @@ Now, in every branch, after the solves:
     currentState.soundspeeds <- divergence-free projection p               (pDiv)
 
 Raw solver iterates, fluid rows only (non-fluid held at 0). This is the same
-carrier convention `schemes/dfsphReference.py` already uses
+carrier convention `schemes/incompressible/dfsphReference.py` already uses
 (`st.pressures`=CD kappa, `st.soundspeeds`=DF kappaV) -- the DFSPH family has
 no acoustic sound speed, so `soundspeeds` is a free slot. Incompressible /
 DFSPH test subset stays green (`tests/... -k "dfsph or incompressible or

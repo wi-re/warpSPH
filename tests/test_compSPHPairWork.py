@@ -7,8 +7,8 @@ import pytest
 import torch
 
 import warpSPH.modules.compSPH.pairWork as pairWork
-import warpSPH.schemes.compSPH as compSPHScheme
-import warpSPH.schemes.crkSPH as crkSPHScheme
+import warpSPH.schemes.compressible.compSPH as compSPHScheme
+import warpSPH.schemes.compressible.crkSPH as crkSPHScheme
 from warpSPH.cases import importAll
 from warpSPH.runner import run
 from warpSPH.runner.case import getCase

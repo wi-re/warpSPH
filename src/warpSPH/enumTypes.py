@@ -100,7 +100,7 @@ class WeaklyCompressibleSPHScheme(Enum):
     #: Not tied to any one paper's exact prescription.
     deltaSPH = 0
     #: Sun et al. 2017's own delta+-SPH prescription: identical physics/step
-    #: function to `deltaSPH` (`schemes/deltaSPH.py`, no new code), but
+    #: function to `deltaSPH` (`schemes/weaklyCompressible/deltaSPH.py`, no new code), but
     #: `Sun2017DeltaSPHConfig` defaults `freezeDiffusionAcrossStages=True` --
     #: Sec. 2's RK4-with-frozen-diffusion pairing (Antuono/Jameson), confirmed
     #: to fix a genuine violent-impact pressure artefact in
@@ -117,7 +117,7 @@ class IncompressibleSPHScheme(Enum):
     #: VD+PS DFSPH (Bender & Koschier 2015/2017): a divergence-free Jacobi
     #: pass plus a constant-density Jacobi pass, applied as a momentum-neutral
     #: position shift for most cases or folded into the velocity update
-    #: in-step for body-force (gravity) cases (`schemes/divergenceFree.py`'s
+    #: in-step for body-force (gravity) cases (`schemes/incompressible/divergenceFree.py`'s
     #: `INSTEP_CD`/`_RESTORE_PS_SHIFT` gates). **The recommended default for
     #: general use** -- as of DFSPH_IMPROVEMENT_PLAN.md Part 56/57/58, it does
     #: not diverge on any case in the suite (including every wall-bounded one),
@@ -136,7 +136,7 @@ class IncompressibleSPHScheme(Enum):
     #: pressure impulses, not as the momentum-neutral position shift the
     #: `divergenceFree` (VD+PS) scheme uses. Exists as the ground-truth
     #: comparison for the hydrostatic-column failure -- see
-    #: `DFSPH_IMPROVEMENT_PLAN.md` Part 23 and `schemes/dfsphReference.py`.
+    #: `DFSPH_IMPROVEMENT_PLAN.md` Part 23 and `schemes/incompressible/dfsphReference.py`.
     dfsphReference = 1
     #: Plain IISPH (Ihmsen et al. 2014): a single constant-density projection
     #: per step, applied as a velocity impulse -- no divergence-free pass, no
@@ -150,7 +150,7 @@ class IncompressibleSPHScheme(Enum):
     #: divergence + density solves on one neighbourhood, accelerations
     #: accumulated into a single semi-implicit Euler step. No free-surface
     #: gauge, deficiency guard, damped warm start, or masking -- just the
-    #: loop as omniSPH runs it. See `schemes/omniIncompressible.py`.
+    #: loop as omniSPH runs it. See `schemes/incompressible/omniIncompressible.py`.
     omniIncompressible = 3
     #: IISPH with Pressure Boundaries (Band et al. 2018, ACM TOG 37(2):14):
     #: the extended PPE where `kind == 1` boundary samples are pressure
@@ -158,7 +158,7 @@ class IncompressibleSPHScheme(Enum):
     #: relaxed-Jacobi loop as the fluid -- removes the near-wall rank
     #: deficiency that stalls the `omniIncompressible` / `iisph`
     #: constant-density solve at a wall corner (DFSPH_IMPROVEMENT_PLAN.md
-    #: Parts 41-44). See `schemes/band2018pb.py`.
+    #: Parts 41-44). See `schemes/incompressible/band2018pb.py`.
     #: **A real trade-off against `divergenceFree`, not a strict upgrade**
     #: (Part 57/58): tighter density control on closed wall-bounded cases
     #: (~4-5% vs `divergenceFree`'s ~7-8%), at the cost of growing particle

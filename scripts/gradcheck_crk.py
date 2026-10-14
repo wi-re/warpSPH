@@ -2,7 +2,7 @@
 """torch.autograd.gradcheck against CRKSPH's core physics kernels -- Tier 1
 of docs/historic_plans/CLEANUP_PLAN.md's Phase 4.1 gradcheck rollout.
 
-`crkSPH_step` (schemes/crkSPH.py) always calls both `computeCrkSPHAccelWarp`
+`crkSPH_step` (schemes/compressible/crkSPH.py) always calls both `computeCrkSPHAccelWarp`
 (modules/crk/accel.py) and `computeCrkSPHdudtWarp` (modules/crk/dudt.py) in
 sequence with the same `crkState`/`apparentVolume`/`queryVelocityTensor`, so
 they're checked together here, mirroring gradcheck_compSPH.py's grouping.

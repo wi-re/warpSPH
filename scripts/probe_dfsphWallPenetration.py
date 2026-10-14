@@ -22,7 +22,7 @@ import sys
 import numpy as np
 
 from warpSPH.runner import run
-import warpSPH.schemes.divergenceFree as dfsph
+import warpSPH.schemes.incompressible.divergenceFree as dfsph
 
 
 def _series(r, key, default=np.nan):

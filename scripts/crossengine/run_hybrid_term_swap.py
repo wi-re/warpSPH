@@ -163,7 +163,7 @@ def diffDdtWrapper(currentState, config, schemeConfig, adjacency, gradRho, gradR
     return drhodt_diss.to(pdt)
 
 
-import warpSPH.schemes.deltaSPH as w_deltaSPH_mod
+import warpSPH.schemes.weaklyCompressible.deltaSPH as w_deltaSPH_mod
 
 if cliArgs.swap in ('viscosity', 'both'):
     w_deltaSPH_mod.computeVelocityDiffusion = diffViscosityWrapper

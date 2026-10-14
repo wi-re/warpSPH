@@ -61,13 +61,13 @@ its config field and raises rather than silently no-opping.
 from warpSPHCore import SupportScheme, buildVerletList
 from warpSPHCore.profiling import record_function
 
-from ..configurations import ArtificialCompressibleSPHConfig, SimulationConfig
-from ..modules.artificialCompressible import (
+from ...configurations import ArtificialCompressibleSPHConfig, SimulationConfig
+from ...modules.artificialCompressible import (
     acParameters, bdfHistory, bodyForces, contactMasks, detectSurface, exactDeltaUpdate,
     makeDualTimeProblem, makeWallBounce, solveDualTime, zeroNonFluidRows)
-from ..modules.boundaryConditions import enforceDirichlet, enforceUpdates
-from ..modules.mdbc import computeBoundaryVelocities
-from ..systems.artificialCompressible import ArtificialCompressibleSystem
+from ...modules.boundaryConditions import enforceDirichlet, enforceUpdates
+from ...modules.mdbc import computeBoundaryVelocities
+from ...systems.artificialCompressible import ArtificialCompressibleSystem
 
 __all__ = ['artificialCompressible_step', 'PHYSICS_IMPLEMENTED']
 

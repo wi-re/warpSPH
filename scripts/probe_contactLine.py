@@ -126,7 +126,7 @@ def patchWallMode(mode):
     import warpSPH.modules.artificialCompressible.dualTime as ac       # holds the per-stage wall closures
     import warpSPH.modules.artificialCompressible.residual as res     # holds the viscosity
     from warpSPH.modules.artificialCompressible import workingState as ws
-    import warpSPH.schemes.artificialCompressible as sch              # the step's own boundary-velocity call
+    import warpSPH.schemes.incompressible.artificialCompressible as sch              # the step's own boundary-velocity call
     orig = ac.wallPressures
     if mode == 'eq61':
         return

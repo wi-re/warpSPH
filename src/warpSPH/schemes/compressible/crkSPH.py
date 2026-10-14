@@ -13,17 +13,17 @@ any first call with unset `divergence` -- fixed 2026-08-15 by assigning it
 before that branch instead.
 """
 
-from ..modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
-from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
-from ..modules.compressibleWall import beginCompressibleWall, clampSupportsToVolume
-from ..modules.compSPH.accel import computeCompSPHAccelWarp
-from ..modules.compSPH.dudt import computeCompSPHdudtWarp
-from ..modules.compSPH.operators import computeCompSPHBalanceTerm
-from ..modules.crk import computeCrkSPHdudtWarp
-from ..modules.eos import idealGasEOS
-from ..modules.momentum import computeMomentumConsistent
-from ..modules.shockCapturing import computeViscositySwitchTerms, updateViscositySwitch
-from ..enumTypes import EnergyScheme
+from ...modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
+from ...modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
+from ...modules.compressibleWall import beginCompressibleWall, clampSupportsToVolume
+from ...modules.compSPH.accel import computeCompSPHAccelWarp
+from ...modules.compSPH.dudt import computeCompSPHdudtWarp
+from ...modules.compSPH.operators import computeCompSPHBalanceTerm
+from ...modules.crk import computeCrkSPHdudtWarp
+from ...modules.eos import idealGasEOS
+from ...modules.momentum import computeMomentumConsistent
+from ...modules.shockCapturing import computeViscositySwitchTerms, updateViscositySwitch
+from ...enumTypes import EnergyScheme
 
 import warnings
 
@@ -32,19 +32,19 @@ from warpSPHCore import (
     WarpOperation, buildVerletList, computeCRKFactors,
     warpOperation,
 )
-from ..systems.compSPH import CompSPHSystem, CompSPHState
-from ..configurations.compSPHConfig import CompSPHConfig
-from ..configurations.simulationConfig import SimulationConfig
+from ...systems.compSPH import CompSPHSystem, CompSPHState
+from ...configurations.compSPHConfig import CompSPHConfig
+from ...configurations.simulationConfig import SimulationConfig
 import torch
-from ..systems.compressibleMonaghan import CompressibleSystemUpdate
+from ...systems.compressibleMonaghan import CompressibleSystemUpdate
 
-from ..modules.shockCapturing.CullenHopkins import computeHopkinsTerms, computeHopkinsUpdate
+from ...modules.shockCapturing.CullenHopkins import computeHopkinsTerms, computeHopkinsUpdate
 
 from warpSPHCore.profiling import record_function
-from ..modules.compSPH.pairWork import accumulateStage, startStage, stageRebuildSlack
-from ..modules.crk.accel import computeCrkSPHAccelWarp
-from ..configurations.crkSPH import resolveCRKLimiter
-from ..modules.reconstruction import requireRawPairVelocity
+from ...modules.compSPH.pairWork import accumulateStage, startStage, stageRebuildSlack
+from ...modules.crk.accel import computeCrkSPHAccelWarp
+from ...configurations.crkSPH import resolveCRKLimiter
+from ...modules.reconstruction import requireRawPairVelocity
 
 __all__ = ['crkSPH_step']
 

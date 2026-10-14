@@ -1,6 +1,6 @@
 """State/system pair for the CompSPH scheme (Owen's compatible-energy
-compressible formulation, `schemes/compSPH.py` and, sharing this state,
-`schemes/crkSPH.py`/`schemes/deltaSPH.py`). Extends the base particle fields
+compressible formulation, `schemes/compressible/compSPH.py` and, sharing this state,
+`schemes/compressible/crkSPH.py`/`schemes/weaklyCompressible/deltaSPH.py`). Extends the base particle fields
 with internal energy as the integrated quantity plus EOS outputs
 (pressure/soundspeed/entropy/total energy), the CullenDehnen2010
 shock-detector state (`divergence`, `alpha0s`/`alphas`), and the pairwise

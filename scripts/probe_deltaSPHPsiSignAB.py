@@ -45,7 +45,7 @@ from warpSPHBootstrap import bootstrap
 
 bootstrap(precision='float32')
 
-import warpSPH.schemes.deltaSPH as deltaSPHScheme
+import warpSPH.schemes.weaklyCompressible.deltaSPH as deltaSPHScheme
 
 _realGradRhoL = deltaSPHScheme.computeGradRhoL
 

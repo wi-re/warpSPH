@@ -171,7 +171,7 @@ def configureArtificialCompressible(ctx: RunContext) -> None:
     The integrator **is** overridden here, to `forwardEuler`, and loudly. The
     ACSPH step owns its whole real advance and returns an exact per-step delta;
     any multi-stage integrator would run the dual-time solve once per stage and
-    blend the results (`schemes/artificialCompressible.py`). The step refuses
+    blend the results (`schemes/incompressible/artificialCompressible.py`). The step refuses
     that outright, so without this override every dual-scheme case would need
     `--integrationScheme forwardEuler` typed by hand and would otherwise fail at
     the first step with a stack trace instead of running.

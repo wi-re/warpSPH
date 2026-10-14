@@ -14,7 +14,7 @@ from warpSPH.cases import importAll; importAll()
 from warpSPH.runner import getCase, run
 from warpSPHCore import OperationDirection
 import warpSPH.modules.deltaSPH.densityDiffusion as dd
-import warpSPH.schemes.deltaSPH as sch
+import warpSPH.schemes.weaklyCompressible.deltaSPH as sch
 
 MODE = OperationDirection[sys.argv[1]] if len(sys.argv) > 1 else OperationDirection.FluidToFluid
 steps = int(sys.argv[2]) if len(sys.argv) > 2 else 3000

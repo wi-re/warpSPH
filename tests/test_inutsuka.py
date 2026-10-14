@@ -1,4 +1,4 @@
-"""GODUNOV_SPH_PLAN layer 3: Inutsuka (2002) Godunov SPH (`modules/godunov/wp_inutsuka.py`, `schemes/gsphInutsuka.py`).
+"""GODUNOV_SPH_PLAN layer 3: Inutsuka (2002) Godunov SPH (`modules/godunov/wp_inutsuka.py`, `schemes/compressible/gsphInutsuka.py`).
 
 * the Gaussian density (Murante's symmetrised sum) and its gradient: a uniform lattice has a uniform density equal to the kernel sum; the gradient of a
   linearly varying particle density... (checked through the mass-weighted sum identity: the mean density times the volume is the total mass);

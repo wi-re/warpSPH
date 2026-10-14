@@ -16,7 +16,7 @@ import numpy as np
 import warpSPH.systems.incompressible as I
 from warpSPH.cases import randomFlowIncompressible as rf
 from warpSPH.runner import run
-from warpSPH.schemes import divergenceFree as D
+from warpSPH.schemes.incompressible import divergenceFree as D
 
 OUT = "/home/lu26029/dev/warpSPH/scripts/videos/dfsph_bounded_random"
 os.makedirs(OUT, exist_ok=True)

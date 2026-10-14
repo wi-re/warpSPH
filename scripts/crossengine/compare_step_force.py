@@ -96,7 +96,7 @@ schemeConfig_w = copy.deepcopy(ctx.schemeConfig)
 schemeConfig_w.regions = []
 schemeConfig_w.boundaryConditions = []
 
-from warpSPH.schemes.deltaSPH import deltaSPH_step
+from warpSPH.schemes.weaklyCompressible.deltaSPH import deltaSPH_step
 
 update_w, adjacency_w, currentState_w = deltaSPH_step(fluidSystem_w, dt, ctx.config, schemeConfig_w)
 dvdt_w = update_w.dvdt.detach().cpu().numpy()

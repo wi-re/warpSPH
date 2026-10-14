@@ -41,7 +41,7 @@ no host syncs (``.item()``, ``bool(tensor)``, boolean-mask indexing -- see
 ``utils/syncFree.py``), no data-dependent Python control flow, and no
 dependence on Python scalars that change between calls (``t``, ``dt``), since
 those are baked into the graph at capture time. Callers are responsible for
-only routing such a configuration here (``schemes/deltaSPH.py``).
+only routing such a configuration here (``schemes/weaklyCompressible/deltaSPH.py``).
 """
 
 from __future__ import annotations

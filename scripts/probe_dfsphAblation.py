@@ -27,7 +27,7 @@ import warpSPH.systems.incompressible as I
 from warpSPH.cases import drivenSquare, randomFlowIncompressible
 from warpSPH.configurations.moduleConfigurations.gravity import GravityType
 from warpSPH.runner import run
-from warpSPH.schemes import divergenceFree as D
+from warpSPH.schemes.incompressible import divergenceFree as D
 
 NS = int(sys.argv[1]) if len(sys.argv) > 1 else 300
 GRAV = (9.81, 1.0)  # (magnitude-scale, period) for the oscillating body force

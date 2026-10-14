@@ -47,7 +47,7 @@ closure is a no-op away from a wall" check (DFSPH_IMPROVEMENT_PLAN.md Part 56).
 `--wallPressure {shepard,mls,mirror,none}` sets `WARPSPH_WALL_PRESSURE_MODE`
 for every child subprocess -- the shared env override
 `modules/incompressible/incompressible.py` (`_SHIFT_WALL_PRESSURE`, the VD+PS
-shift, non-gravity cases) and `schemes/omniIncompressible.py`
+shift, non-gravity cases) and `schemes/incompressible/omniIncompressible.py`
 (`WALL_PRESSURE_MODE`, the in-step CD fold, gravity cases) both read, so one
 flag covers every boundary experiment in this table regardless of which path
 its case takes. Omit it to run each module's own compiled-in default

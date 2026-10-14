@@ -47,7 +47,7 @@ Not reproduced here: Figs. 11-12's energy budget.  Sun's "total energy" is
 constant only because it includes the energy the artificial viscosity and the
 density-diffusion term (`Q_delta`) have dissipated, and neither is recoverable
 from the state a diagnostic sees -- both are per-step integrals of terms
-`schemes/deltaSPH.py` folds into `dvdt`/`drhodt` and does not hand back.  The
+`schemes/weaklyCompressible/deltaSPH.py` folds into `dvdt`/`drhodt` and does not hand back.  The
 mechanical/potential/elastic split *is* recorded (`mechanicalEnergy`,
 `elasticEnergy`, `totalEnergy`), and the report prints its drift, but that
 drift is not comparable to Fig. 12's 1.2 % without the dissipation ledger, so

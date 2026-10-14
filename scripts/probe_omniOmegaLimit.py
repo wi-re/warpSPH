@@ -22,7 +22,7 @@ def main():
     from warpSPH.cases import importAll
     from warpSPH.runner import getCase, run
     from warpSPH.runner.caseSpec import CaseSpec
-    import warpSPH.schemes.omniIncompressible as O
+    import warpSPH.schemes.incompressible.omniIncompressible as O
     importAll()
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 150
     default = O.OMEGA

@@ -1,6 +1,6 @@
 # GODUNOV_SPH_PLAN L3: Inutsuka (2002) Godunov SPH, 2026-10-08
 
-`InutsukaGSPH` (`schemes/gsphInutsuka.py`, `modules/godunov/wp_inutsuka.py`): symmetrised Gaussian density, the convolution-form force and energy with the
+`InutsukaGSPH` (`schemes/compressible/gsphInutsuka.py`, `modules/godunov/wp_inutsuka.py`): symmetrised Gaussian density, the convolution-form force and energy with the
 pair volumes `V_ij^2(h)` and interface position `s*` (cubic Hermite `V(t)`), Riemann `p*, u*` on the reconstructed interface states, no artificial viscosity, no
 conductivity, adaptive support, Gaussian width `h_G = eta (m/rho)^(1/d)` (Inutsuka Eq. 81, `eta = 1`). Full profile, video, no velocity alarm, float32, RK2.
 `av_report --config godunovL3` (`report.md`, final frames in `frames/`). Configs: `gsphO2H` simplified GSPH with the harmonic state limiter (the layer-2 reference);

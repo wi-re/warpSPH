@@ -2,7 +2,7 @@
 
 Unlike the other compressible steps, this one owns the *entire* time step internally and hands
 the integrator the exact per-step deltas ``(x^{n+1} - x^n) / dt`` -- the same exact-delta
-contract as `schemes/artificialCompressible.py`. The spatial part is the meshless geometry (a
+contract as `schemes/incompressible/artificialCompressible.py`. The spatial part is the meshless geometry (a
 warm-started graph-Laplacian closure solve from the previous step's ``lam``), the primitives
 (rho, v, P) derived from the conserved ``Q`` and the geometric volume, and the re-derived
 supports (``h = (N_ngb V / C_nu)^(1/nu)``, lagged one step behind as in the core driver). The
@@ -30,9 +30,9 @@ import torch
 
 from warpSPHIntegrators.integration import IntegrationSchemeType
 
-from ..configurations import SimulationConfig
-from ..configurations.meshless import MeshlessConfig
-from ..systems.meshless import MeshlessSystem, MeshlessSystemUpdate
+from ...configurations import SimulationConfig
+from ...configurations.meshless import MeshlessConfig
+from ...systems.meshless import MeshlessSystem, MeshlessSystemUpdate
 from warpSPHCore.mfm import MeshlessWarp, primitives
 
 __all__ = ['meshlessStep', 'supports_from_volume', 'resolve_temporal_scheme',

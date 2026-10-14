@@ -4,7 +4,7 @@
 
 `computeDensityDiffusionDeltaSPH` and `computeVelocityDiffusionDeltaSPH` are the
 deltaSPH scheme's density- and velocity-diffusion correction terms
-(schemes/deltaSPH.py). Both share the same `Func_i` shape as every other module
+(schemes/weaklyCompressible/deltaSPH.py). Both share the same `Func_i` shape as every other module
 gradchecked so far: a same-array-safe apparent-volume ternary
 (`apparentVolume = mj / rhoj if not useVolume else referenceVolumes[j]`, confirmed
 non-issue per Tier 0's own findings since the two branches read different arrays)

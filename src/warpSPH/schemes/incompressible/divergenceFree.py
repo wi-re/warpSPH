@@ -5,7 +5,7 @@ being named after its `IncompressibleSPHScheme` value (`omniIncompressible.py`,
 `band2018pb.py`, `dfsphReference.py`); it stopped being VD+PS-only at commit
 `c637785`, which is what made the old name stop fitting. Historical prose
 elsewhere in this repo (`DFSPH_FINDINGS.md`, `git log`) still says
-`schemes/divergenceFree.py` / `divergenceFree_step` -- that was the name at the time.
+`schemes/incompressible/divergenceFree.py` / `divergenceFree_step` -- that was the name at the time.
 
 Adjacency, density (mDBC-corrected), boundary velocities/Dirichlet BCs,
 free-surface detection, delta-SPH velocity diffusion, continuity `drhodt`,
@@ -15,7 +15,7 @@ pressure correction (`dvdt_pressure`).
 
 Both projection pressures are persisted after the solves (they were computed
 and discarded before, so this step exposed no readable pressure field), on
-the same carriers `schemes/dfsphReference.py` uses:
+the same carriers `schemes/incompressible/dfsphReference.py` uses:
 `currentState.pressures` holds the constant-density / particle-shift solve
 pressure, `currentState.soundspeeds` (a free slot -- this scheme has no
 acoustic sound speed) holds the divergence-free projection pressure. Raw
@@ -31,7 +31,7 @@ recomputed from scratch each step via `computeDensities`.
 """
 
 from warpSPH.configurations import SimulationConfig, WeaklyCompressibleSPHConfig
-from warpSPH.schemes.omniIncompressible import _solve, _xsphFilter
+from warpSPH.schemes.incompressible.omniIncompressible import _solve, _xsphFilter
 from warpSPH.systems import CompSPHSystem, WeaklyCompressibleSystemUpdate
 from warpSPH.modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
 from warpSPH.modules.deltaSPH import computeVelocityDiffusion
@@ -49,11 +49,11 @@ from warpSPH.modules.surfaceDetection import detectFreeSurface
 from warpSPHCore import SupportScheme, buildVerletList
 
 import torch
-from ..modules.boundaryConditions.pinned import pinnedKeepWeight
+from ...modules.boundaryConditions.pinned import pinnedKeepWeight
 from warpSPH.utils.timer import TimedBlock
 from torch.profiler import profile, ProfilerActivity
 from warpSPHCore.profiling import record_function
-from ..systems.incompressible import IncompressibleSystem, IncompressibleState, IncompressibleSystemUpdate
+from ...systems.incompressible import IncompressibleSystem, IncompressibleState, IncompressibleSystemUpdate
 
 import numpy as np
 
@@ -140,7 +140,7 @@ GRAVITY_OSC = None
 #: rewrite dropped (FINDINGS 1.6). `computeMdbcNoPenShift` returns a per-fluid
 #: corrective velocity that damps motion closing on a nearby wall; it is folded
 #: into `dvdt` as `nopenshift / dt` *before* the pressure solves, exactly where
-#: the pre-rewrite `divergenceFree_step` and `schemes/deltaSPH.py` put it. The DFSPH
+#: the pre-rewrite `divergenceFree_step` and `schemes/weaklyCompressible/deltaSPH.py` put it. The DFSPH
 #: paper (Bender & Koschier) has no such term and relies on the pressure
 #: projection alone, but FINDINGS 2 measured that removing it is strictly worse
 #: on the wall-crossing metrics, and post-`c637785` `columnCollapse` /
@@ -292,7 +292,7 @@ def divergenceFree_step(
     # The `c637785` rewrite commented this out, leaving the pressure projection
     # alone to stop wall penetration -- not enough for a violent impact
     # (`columnCollapse`, `dambreak`). Folded into `dvdt` before the pressure
-    # solves, matching the pre-rewrite step and `schemes/deltaSPH.py`.
+    # solves, matching the pre-rewrite step and `schemes/weaklyCompressible/deltaSPH.py`.
     with record_function("[warpSPH] - [deltaSPH - 16] - compute mDBC no-pen shift"):
         _noPenOn = (schemeConfig.solverConfig.mdbcNoPenetrationShift
                     if NOPEN_SHIFT == 'config' else NOPEN_SHIFT)
@@ -376,7 +376,7 @@ def divergenceFree_step(
     # before (`currentState.pressures` stayed at its zero init unless the
     # `vdps` branch ran, so `dfsph` had no readable wall pressure -- see the
     # sloshingTank verification, `examples/sloshingTank/PLAN.md`). Same carrier
-    # convention as `schemes/dfsphReference.py`:
+    # convention as `schemes/incompressible/dfsphReference.py`:
     #   `pressures`   <- constant-density / particle-shift solve pressure (pRho)
     #   `soundspeeds` <- divergence-free projection pressure (pDiv)
     # This scheme has no acoustic sound speed, so `soundspeeds` is a free slot.
@@ -494,7 +494,7 @@ def divergenceFree_step(
         from warpSPH.modules.xsph import computeXSPH
         dvdt_xsph = dvdt_xsph + computeXSPH(currentState, config, schemeConfig, adjacency) / dt
 
-    from warpSPH.schemes.omniIncompressible import _bookWallLoads, _wallViscousPerBody
+    from warpSPH.schemes.incompressible.omniIncompressible import _bookWallLoads, _wallViscousPerBody
     from warpSPH.modules.analyticBoundary import resolveWall as _resolveWall
     _bookWallLoads(currentState, config, schemeConfig, adjacency, fluid=fluid, rho0=rho0, pDiv=_pDiv, pRho=_pRho,
                    viscousPerBody=_wallViscousPerBody(currentState, config, schemeConfig, adjacency, _resolveWall(currentState, config, schemeConfig, adjacency)) if getattr(schemeConfig, 'analyticWallLoads', False) and not schemeConfig.diffusionParams.inviscid else None,

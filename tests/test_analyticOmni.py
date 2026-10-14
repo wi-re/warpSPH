@@ -27,7 +27,7 @@ def tank(params=None):
 
 
 def test_operator_diagonal_is_alpha():
-    import warpSPH.schemes.omniIncompressible as O
+    import warpSPH.schemes.incompressible.omniIncompressible as O
     from warpSPH.modules.analyticBoundary import resolveWall
     from warpSPH.modules.incompressible.wp_alpha import computeAlpha
     r = tank()

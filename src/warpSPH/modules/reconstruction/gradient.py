@@ -142,7 +142,7 @@ def velocityTensorArguments(diffusionParams, queryVelocityTensor, referenceVeloc
 
 def reconstructionInputs(particleState, simulationConfig, diffusionParams, adjacency,
                          supportScheme: SupportScheme = SupportScheme.SuperSymmetric):
-    """What the Monaghan viscosity kernels need besides the state, as `schemes/monaghan.py` evaluates it:
+    """What the Monaghan viscosity kernels need besides the state, as `schemes/compressible/monaghan.py` evaluates it:
     `(params, J, B)` -- the params with the n_h-derived limiter constants resolved, the velocity Jacobian (None if not
     read) and the Balsara factor (None if not read). One place, so the scheme and the diagnostics that re-evaluate
     the operator (`dissipation.avPower`, `scripts/probe_monaghanEnergy.py`) see the same thing."""

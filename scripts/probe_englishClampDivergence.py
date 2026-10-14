@@ -30,7 +30,7 @@ wall-clock cost), with two layers of instrumentation:
      each ghost/boundary particle's position and UID.
   2. Monkeypatches (namespace-level, not import-time-bound -- see the module
      docstring below for why this specific pair of functions was chosen) on
-     `warpSPH.schemes.deltaSPH.enforceDirichlet` (to recover the real
+     `warpSPH.schemes.weaklyCompressible.deltaSPH.enforceDirichlet` (to recover the real
      simulation time `t`, which lives on `currentSystem`, not the
      `currentState` object `computeMdbcDensityEnglish2025` receives) and
      `.computePressureForceSurfaceAware` (downstream pressure-force
@@ -148,7 +148,7 @@ def main(argv=None):
     from warpSPH.runner import getCase, run, CaseSpec
     from warpSPH.enumTypes import DensityDiffusionScheme
     import warpSPH.modules.mdbc.english2025 as eng2025mod
-    import warpSPH.schemes.deltaSPH as deltaSPHmod
+    import warpSPH.schemes.weaklyCompressible.deltaSPH as deltaSPHmod
 
     if not hasattr(eng2025mod, '_DEBUG_HOOK') and 'DIAGNOSTIC ONLY' not in open(eng2025mod.__file__).read():
         print('WARNING: src/warpSPH/modules/mdbc/english2025.py does not look '

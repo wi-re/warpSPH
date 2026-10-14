@@ -1,5 +1,5 @@
 """Run `hydrostaticColumn` through the standard divergence-free (DFSPH) path
--- `IncompressibleSPHScheme.divergenceFree`, solver `schemes/divergenceFree.py::divergenceFree_step`
+-- `IncompressibleSPHScheme.divergenceFree`, solver `schemes/incompressible/divergenceFree.py::divergenceFree_step`
 -- at nx=64.
 
 This is the failing baseline documented in `cases/boundaries/hydrostaticColumn.py` /

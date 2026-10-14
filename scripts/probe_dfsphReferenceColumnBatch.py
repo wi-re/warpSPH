@@ -58,7 +58,7 @@ args = args.parse_args()
 
 from warpSPH.cases import hydrostaticColumn
 from warpSPH.runner import run
-import warpSPH.schemes.dfsphReference as ref
+import warpSPH.schemes.incompressible.dfsphReference as ref
 
 SAMPLES = [int(s) for s in args.samples.split(',')]
 ARMS = []

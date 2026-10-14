@@ -22,7 +22,7 @@ from ...configurations.meshless import MeshlessConfig
 from ...configurations.simulationConfig import SimulationConfig
 from ...systems.meshless import MeshlessSystem
 from warpSPHCore.mfm import MeshlessWarp, primitives
-from ...schemes.meshless import stashGeometry
+from ...schemes.compressible.meshless import stashGeometry
 
 __all__ = ['computeTimestep']
 

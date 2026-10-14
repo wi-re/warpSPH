@@ -30,7 +30,7 @@ in `sph.cuh` (`getContrib2`); per-particle residual in `HashFunctions_cuda.cuh`
 
 ## 1. What already matches (and two plan questions the code answers)
 
-Our `schemes/artificialCompressible.py` is a faithful port of the structure:
+Our `schemes/incompressible/artificialCompressible.py` is a faithful port of the structure:
 
 - Dual-time loop, BDF2 variable-step source frozen at the stage-0 value
   (`Get_PT_derivs`, `particles.cu`), `I_c = diag{0,1,1}`, `ṽ = v − Dx/Dt` as the
@@ -120,7 +120,7 @@ matches the paper and our scheme.
 ## 3. Suggested order
 
 **Status 2026-10-12:** D1 is implemented as `acParams.wallPressureEdgeRelax = 'off' | 'zero' | 'lambda'`
-(`modules/incompressible/wallPressure._edgeRelaxFactor`, wired in `schemes/artificialCompressible.py`; case param
+(`modules/incompressible/wallPressure._edgeRelaxFactor`, wired in `schemes/incompressible/artificialCompressible.py`; case param
 `acWallEdgeRelax`, probe flag `--edgeRelax`; tests `test_edgeRelax*`). It uses the raw (undilated) edge set
 and the `detectFreeSurface` λ, both frozen for the real step until D2 lands. Results (Marrone 3.1, nx 70, tLimit 2.45, one realisation each; logs
 `scripts/out_contactLine/d1_m31_nx70_{lambda,zero}.log`; both runs were killed by hand once t had frozen with |v| still

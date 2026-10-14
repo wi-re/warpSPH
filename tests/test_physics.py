@@ -570,7 +570,7 @@ def test_acsphColumnHoldsTheWall(acsphColumnResult):
     ACSPH's boundary closure: the solved bulk pressure has to balance the
     Eq. (61) wall pressure (Shepard extrapolation plus the hydrostatic
     body-force correction) that
-    `schemes/artificialCompressible.py`'s `wallPressures` recomputes at
+    `schemes/incompressible/artificialCompressible.py`'s `wallPressures` recomputes at
     every RK stage. Without the extrapolation the wall reads `p = 0`
     (the non-fluid rows are masked every step) and the column simply
     falls out of the box; without the body-force correction it under-reads

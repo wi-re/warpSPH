@@ -546,7 +546,7 @@ its Phase 8. Three concrete couplings:
   together with the `limitXi` duplicate and the `correctXi`/Ξ naming collision.
   Mark them closed here when that lands.
 
-AV_PLAN's Phase 6 work (Cullen & Dehnen 2010 wired into `schemes/monaghan.py`,
+AV_PLAN's Phase 6 work (Cullen & Dehnen 2010 wired into `schemes/compressible/monaghan.py`,
 Read & Hayfield 2012 added) is complete as of 2026-09-19, which satisfies the §2
 audit row that assumes a validated C&D switch.
 

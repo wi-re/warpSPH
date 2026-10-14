@@ -14,7 +14,7 @@ import torch
 from warpSPH.configurations import WaveCaseConfig, WaveEquationConfig, buildConfig
 from warpSPH.sample.bySamplingScheme import sampleParticles
 from warpSPH.sample.waveSystem import sampleSmoothPointSourceWaveSystem
-from warpSPH.schemes.waveEquation import f_wave_equation
+from warpSPH.schemes.pde.waveEquation import f_wave_equation
 from warpSPH.systems.waveSystem import WaveSystemStatev3, WaveSystemv3, computeDt
 from warpSPH.utils import buildDomainDescription
 from warpSPHCore import SupportScheme, buildVerletList

@@ -1,5 +1,5 @@
 """`WeaklyCompressibleSPHConfig`, the scheme config for delta-SPH / weakly
-compressible SPH (`schemes/deltaSPH.py`, `modules/timestep/weaklyCompressible.py`,
+compressible SPH (`schemes/weaklyCompressible/deltaSPH.py`, `modules/timestep/weaklyCompressible.py`,
 `modules/mdbc/velocity.py`), registered in the delta-SPH `SchemeBundle` in
 `schemes/builder.py`. Same field set as `IncompressibleSPHConfig` minus
 `solverConfig` (no pressure solver here): fluid properties, adaptive support,
@@ -61,7 +61,7 @@ class WeaklyCompressibleSPHConfig:
     # every RK4 sub-stage rather than recomputed fresh at each stage's
     # (intermediate, possibly wildly different during a violent event) state.
     # False (default) leaves every existing case's behaviour unchanged --
-    # `schemes/deltaSPH.py` recomputes fresh every stage as it always has.
+    # `schemes/weaklyCompressible/deltaSPH.py` recomputes fresh every stage as it always has.
     # `DELTASPH_VALIDATION_PLAN.md` Part 1 flagged this as a known deviation
     # from Sun 2017; Part 5.1's Marrone dam-break investigation is the first
     # case to actually exercise the flag. Only meaningful with a multi-stage
@@ -125,7 +125,7 @@ class WeaklyCompressibleSPHConfig:
     #: DualSPHysics' own production advanced-shifting extension does instead
     #: -- gate on kernel-sum completeness (`poup1>0.95`) and bulk
     #: classification, falling back to the raw gradient everywhere else --
-    #: and this flag now reproduces exactly that gate (`schemes/deltaSPH.py`
+    #: and this flag now reproduces exactly that gate (`schemes/weaklyCompressible/deltaSPH.py`
     #: step 13), rather than applying `Li` unconditionally.
     pressureForceRenormalized: bool = field(default=False, metadata={'description': 'Apply gradient renormalization to the pressure-force kernel gradient, gated on kernel-sum completeness and bulk classification (DualSPHysics-style)'})
 
@@ -167,7 +167,7 @@ class WeaklyCompressibleSPHConfig:
 
     bandwith: float = field(default=10.0, metadata={'description': 'Bandwith for the divergence-free noise sampling module'})
 
-    #: Which mDBC wall-density extrapolation `schemes/deltaSPH.py` calls.
+    #: Which mDBC wall-density extrapolation `schemes/weaklyCompressible/deltaSPH.py` calls.
     #: `'ramped'` (default): `density2025.py`'s `computeMdbcDensity` --
     #: English et al. 2022 Eq. (12) ghost-node extrapolation, smoothly
     #: ramped down to a 0th-order Shepard fallback on `numNeighbors`/
@@ -199,7 +199,7 @@ def _buildSun2017ShiftProperties() -> ShiftProperties:
 @dataclass
 class Sun2017DeltaSPHConfig(WeaklyCompressibleSPHConfig):
     """Sun et al. 2017's own delta+-SPH prescription -- identical to
-    `WeaklyCompressibleSPHConfig` (same step function, `schemes/deltaSPH.py`;
+    `WeaklyCompressibleSPHConfig` (same step function, `schemes/weaklyCompressible/deltaSPH.py`;
     no new physics) except for two field defaults:
 
     * `freezeDiffusionAcrossStages` -> `True` (Sec. 2's

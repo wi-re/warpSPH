@@ -21,7 +21,7 @@ import torch
 torch.set_grad_enabled(False)
 
 from warpSPHCore.mfm import MeshlessWarp, primitives, conserved
-from warpSPH.schemes.meshless import supports_from_volume
+from warpSPH.schemes.compressible.meshless import supports_from_volume
 
 
 def geometry(system, cfg, sc, closure, supports=None):

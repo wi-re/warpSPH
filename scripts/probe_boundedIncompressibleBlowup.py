@@ -88,7 +88,7 @@ from warpSPH.runner.runner import buildContext
 from warpSPH.runner.caseSpec import CaseSpec
 
 import warpSPH.systems.incompressible as sysmod
-import warpSPH.schemes.divergenceFree as dfsphmod
+import warpSPH.schemes.incompressible.divergenceFree as dfsphmod
 solveLog = {}
 
 

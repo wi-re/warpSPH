@@ -515,7 +515,7 @@ capture-failure path that resets or avoids the poisoned context is open.
 ## 29. The graph's validation / re-capture executes the step more than once on a cloned state, but rigid-body tensors are shared (found 2026-10-09)
 
 A moving rigid body is advanced extra times by the graph's validation and re-capture runs (the state is cloned, the body tensors are not). Only static bodies are graphed for that reason
-(`schemes/deltaSPH.py::_rhsIsGraphable`). Fix: clone the rigid-body tensors with the state during validation.
+(`schemes/weaklyCompressible/deltaSPH.py::_rhsIsGraphable`). Fix: clone the rigid-body tensors with the state during validation.
 
 ## 30. `test_threeWayShiftComparison_allRelaxTowardUniformDensity` fails inside a full-suite run, passes alone (found earlier, filed 2026-10-09)
 

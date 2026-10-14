@@ -72,7 +72,7 @@ def tank(params=None, nSteps=1, nh=2.57):
 def test_compact_projection_reduces_the_divergence_of_a_noisy_field_in_the_bulk():
     from warpSPH.modules.analyticBoundary import resolveWall
     from warpSPH.modules.incompressible.compactProjection import solveCompactProjection
-    from warpSPH.schemes.omniIncompressible import _divergence
+    from warpSPH.schemes.incompressible.omniIncompressible import _divergence
     r = tank(nSteps=1)
     st, ctx = r.state.state, r.ctx
     sc, cfg, adj = ctx.schemeConfig, ctx.config, r.state.adjacency

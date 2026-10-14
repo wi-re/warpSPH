@@ -3,7 +3,7 @@ saves the input state and every pair-summed term of that evaluation, then lets t
 import copy, os, runpy, sys
 import numpy as np, torch
 sys.path.insert(0, 'src'); sys.path.insert(0, 'scripts')
-import warpSPH.schemes.crkSPH as crk
+import warpSPH.schemes.compressible.crkSPH as crk
 import warpSPH.schemes.builder as builder
 import warpSPH.schemes as schemes
 

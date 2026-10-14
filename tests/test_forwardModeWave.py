@@ -37,7 +37,7 @@ import torch
 from warpSPH.configurations import WaveCaseConfig, WaveEquationConfig, buildConfig
 from warpSPH.caseUtils.waveEquation.damping import DampingProfiles, createDampingProfile
 from warpSPH.sample.waveSystem import _wendlandKernelBump
-from warpSPH.schemes.waveEquation import f_wave_equation
+from warpSPH.schemes.pde.waveEquation import f_wave_equation
 from warpSPH.systems.waveSystem import WaveSystemStatev3, WaveSystemv3, sampleInitialWaveState
 from warpSPHCore import SupportScheme, buildVerletList
 

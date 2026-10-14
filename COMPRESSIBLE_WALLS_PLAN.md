@@ -5,7 +5,7 @@
 ## Goal
 
 One scheme-agnostic wall treatment for the compressible schemes
-(`schemes/monaghan.py`, `schemes/compSPH.py`, `schemes/crkSPH.py`), so fast
+(`schemes/compressible/monaghan.py`, `schemes/compressible/compSPH.py`, `schemes/compressible/crkSPH.py`), so fast
 flows and compression dynamics can run against solid boundaries. Today none
 of them reads `kinds == 1`; only the weakly-compressible/ACSPH paths do (via
 `modules/mdbc`).
@@ -151,7 +151,7 @@ changes the fluid's local spacing but not the wall row spacing).
 - 2026-10-05: first Monaghan wall. `modules/compressibleWall/` (Shepard gather
   of rho, u from fluid rows onto `kinds == 1` rows via `FluidToBoundary`,
   prescribed wall velocity, zeroed wall update) hooked into
-  `schemes/monaghan.py` after the density sum. Case `closedBox`
+  `schemes/compressible/monaghan.py` after the density sum. Case `closedBox`
   (`cases/compressibleWalls/closedBox.py`, `examples/compressibleWalls/01-closedBox.py`, 1D, 8
   wall layers per side): 1000 steps to t=0.5 in float32, fluid max|v| 3e-6,
   pressure error 7e-6, wall pressure error 3e-6, energy flat; no alarms.

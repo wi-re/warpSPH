@@ -436,7 +436,7 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     d['sensorDensityRatio'] = ratio
 
     if isIncompressibleScheme(ctx.scheme):
-        # DFSPH now persists both projection pressures (schemes/divergenceFree.py):
+        # DFSPH now persists both projection pressures (schemes/incompressible/divergenceFree.py):
         #   pressures   -> constant-density / particle-shift solve pressure
         #   soundspeeds -> divergence-free projection pressure
         # Both are populated on fluid rows only, so the wall sensor particle

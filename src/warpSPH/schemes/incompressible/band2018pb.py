@@ -37,15 +37,15 @@ import torch
 
 from warpSPHCore import (SupportScheme, buildVerletList)
 
-from ..modules.boundaryConditions import (computeForcing, enforceDirichlet,
+from ...modules.boundaryConditions import (computeForcing, enforceDirichlet,
                                           enforceUpdates)
-from ..modules.density import computeDensities
-from ..modules.gravity import computeGravity
-from ..modules.incompressible.pressureBoundaries import (
+from ...modules.density import computeDensities
+from ...modules.gravity import computeGravity
+from ...modules.incompressible.pressureBoundaries import (
     bandActualVolumes, bandApplyOperator, bandBoundaryUnknownMask,
     bandConstantModeRatio, bandDiagonal, bandInjectVolumes, bandPressureAccel,
     bandRelaxation, bandRestVolumes, bandVelocityDivergence, bandWellPosedMask)
-from ..systems.incompressible import IncompressibleSystemUpdate
+from ...systems.incompressible import IncompressibleSystemUpdate
 
 __all__ = ['band2018pb_step']
 

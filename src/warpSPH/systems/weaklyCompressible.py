@@ -1,5 +1,5 @@
 """State/update/system triad for the weakly-compressible delta-SPH schemes
-(`schemes/deltaSPH.py`, `schemes/divergenceFree.py`'s WCSPH path): density is
+(`schemes/weaklyCompressible/deltaSPH.py`, `schemes/incompressible/divergenceFree.py`'s WCSPH path): density is
 integrated via `drhodt`, with free-surface fields (`surfaceIndicators`/
 `surfaceNormals`/`surfaceLambdas`) and the boundary-ghost bookkeeping
 (`ghostIndices`/`ghostOffsets`) that mDBC and `rigidBody/` read and write.
@@ -467,7 +467,7 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
         # Same guarantee for position. `integrated('dxdt', ...)`
         # (`warpSPHIntegrators/fields.py`) declares `fluid_only=True` on this
         # field, but that flag is never actually consulted by any generic
-        # integration path -- it's dead metadata. `schemes/deltaSPH.py` masks
+        # integration path -- it's dead metadata. `schemes/weaklyCompressible/deltaSPH.py` masks
         # `update.dxdt` to zero for `kinds != 0` (belt) after every stage, which
         # covers the explicit/RK integrators, but `symplecticEuler`'s second
         # position half-step (`semi_implicit_position_step`,

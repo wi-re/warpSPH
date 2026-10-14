@@ -32,7 +32,7 @@ argp.add_argument('--step', type=int, default=30,
                   help='density-solve index to capture (1-based)')
 args = argp.parse_args()
 
-import warpSPH.schemes.omniIncompressible as omod
+import warpSPH.schemes.incompressible.omniIncompressible as omod
 import warpSPH.modules.shifting.bicgstab as bmod
 import warpSPH.modules.shifting.gmres as gmod
 from warpSPH.runner import run

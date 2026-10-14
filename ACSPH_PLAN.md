@@ -1178,7 +1178,7 @@ Ordered by how much is genuinely new.
 
 ## 4.1 The dual-time driver — *entirely new, the core of the work*
 
-`schemes/artificialCompressible.py`. Owns the whole real-time step:
+`schemes/incompressible/artificialCompressible.py`. Owns the whole real-time step:
 
 ```
 for m in 0..maxPseudoIters:
@@ -1307,7 +1307,7 @@ Then add, new:
   `(N, dim)` `bodyForce` form is already accepted, so wiring a source is all
   that would be left.
 
-  **Wired into ACSPH on 2026-09-05** (`schemes/artificialCompressible.py`'s
+  **Wired into ACSPH on 2026-09-05** (`schemes/incompressible/artificialCompressible.py`'s
   `wallPressures`): recomputed at every RK stage from the current fluid
   pressure, `clampNonNeg=False` because ACSPH's pressure is a solved field that
   legitimately goes negative. Without it the wall reads `p = 0` (the non-fluid
@@ -1472,7 +1472,7 @@ both times, in the same words.
 
 Same `𝔽`, same one-support dilation, one set. **Resolved as written — no
 separate knob.** The implementation matches: both consumers read the single
-`currentState.surfaceIndicators` that `schemes/artificialCompressible.py`
+`currentState.surfaceIndicators` that `schemes/incompressible/artificialCompressible.py`
 computes once per real step, dilated by the shared
 `SurfaceDetectionConfig.expansionIterations`. A second, JST-only dilation count
 would be inventing a degree of freedom the paper does not have; if a future
@@ -1685,7 +1685,7 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
 4. ~~**Scaffold the new family** (§4.6).~~ **Done 2026-09-05.** `--scheme
    artificialCompressible` resolves, builds, and runs a step end to end through
    the real integrator; the step is a deliberate no-op
-   (`schemes/artificialCompressible.py::PHYSICS_IMPLEMENTED = False`, warns
+   (`schemes/incompressible/artificialCompressible.py::PHYSICS_IMPLEMENTED = False`, warns
    once on entry) with a marked socket where step 5's driver goes.
    - `ArtificialCompressibleSPHScheme` + `PressureSmoothingScheme` +
      `isArtificialCompressibleScheme` in `enumTypes.py`.
@@ -1710,7 +1710,7 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
      `test_variableStepBdf2DifferentiatesAQuadraticExactly`: the fixed-step
      limit alone would not catch a swapped `Δtⁿ`/`Δtⁿ⁻¹` in Eq. (42).
 5. ~~**The dual-time driver** (§4.1) with AC-2L and RK2 only.~~ **Done
-   2026-09-05.** `schemes/artificialCompressible.py` now runs the full
+   2026-09-05.** `schemes/incompressible/artificialCompressible.py` now runs the full
    Eqs. (38)–(48) loop: frozen stage-0 BDF source, frozen-per-iteration `D^p`,
    a general explicit Butcher RK sweep, `I_c = diag{0,1,1}`, point-implicit
    `α_PI`, and the `ε_v` convergence test on `ṽ`. `ṽ` advection, internal
@@ -1900,7 +1900,7 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
      paper-literal `min` (which the plan had already predicted zeroes the
      operator in smooth flow). The dilated free-surface set `𝕍`
      (`currentState.surfaceIndicators`, already computed once per real step
-     by `schemes/artificialCompressible.py`) gates AC-2L-alone at the
+     by `schemes/incompressible/artificialCompressible.py`) gates AC-2L-alone at the
      surface vs. the interior blend elsewhere, no new surface-detection work
      needed.
    - **AC-JST cross-validates AC-4, and settles the question its own

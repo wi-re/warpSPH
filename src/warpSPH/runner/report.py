@@ -224,7 +224,7 @@ def _meshlessDescription(schemeConfig) -> Optional[str]:
         return None
     # Imported only for a meshless run: it pulls in the `warpSPHCore.mfm` backend, which
     # a Monaghan / delta-SPH banner has no reason to load.
-    from ..schemes.meshless import resolve_temporal_scheme
+    from ..schemes.compressible.meshless import resolve_temporal_scheme
     return _joined(f'MUSCL order {schemeConfig.order}',
                    f'N_ngb {schemeConfig.nngb:g}',
                    f'temporal {resolve_temporal_scheme(schemeConfig)}',

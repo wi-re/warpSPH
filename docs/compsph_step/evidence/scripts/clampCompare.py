@@ -1,7 +1,7 @@
 import sys, hashlib
 from warpSPHBootstrap import bootstrap
 bootstrap(precision='float32')
-import warpSPH.schemes.crkSPH as crk, warpSPH.schemes.compSPH as comp
+import warpSPH.schemes.compressible.crkSPH as crk, warpSPH.schemes.compressible.compSPH as comp
 mode = sys.argv[3]
 if mode == 'summation':
     for m in (crk, comp):

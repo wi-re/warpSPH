@@ -53,7 +53,7 @@ argp.add_argument('--maxiter', type=int, default=400)
 argp.add_argument('--rtol', type=float, default=1e-8)
 args = argp.parse_args()
 
-import warpSPH.schemes.omniIncompressible as omod
+import warpSPH.schemes.incompressible.omniIncompressible as omod
 from warpSPH.runner import run
 from warpSPH.configurations import BoundaryPressureMode, BoundaryOperatorTerms
 from warpSPH.modules.incompressible.consistent import applyConsistentCoupling

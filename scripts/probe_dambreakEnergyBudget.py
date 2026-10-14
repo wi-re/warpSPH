@@ -54,7 +54,7 @@ control of Part 19 carries the same viscosity, so the cross-scheme gap is the
 part this probe does not explain by itself.
 
 The probe monkey-patches the per-step force functions in
-`warpSPH.schemes.divergenceFree`, the `solveIncompressible` binding in
+`warpSPH.schemes.incompressible.divergenceFree`, the `solveIncompressible` binding in
 `warpSPH.systems.incompressible`, and wraps `IncompressibleSystem.finalize`;
 the scheme runs untouched and every patch is restored on exit.
 
@@ -90,7 +90,7 @@ import torch
 from warpSPH.runner.cli import caseMain
 from warpSPH.cases.freeSurface.dambreak import dambreakCase as case
 
-import warpSPH.schemes.divergenceFree as dfsph_mod
+import warpSPH.schemes.incompressible.divergenceFree as dfsph_mod
 import warpSPH.systems.incompressible as sysmod
 
 # ------------------------------------------------------------------

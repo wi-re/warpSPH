@@ -72,10 +72,10 @@ from warpSPHCore import (
     WarpOperation, buildVerletList, warpOperation,
 )
 
-from ..configurations import AcousticCoreConfig, SimulationConfig
-from ..math import getPeriodicPositions
-from ..modules.eos.weaklyCompressible import isoThermalEOS
-from ..systems.acousticCore import AcousticCoreSystem, AcousticCoreSystemUpdate
+from ...configurations import AcousticCoreConfig, SimulationConfig
+from ...math import getPeriodicPositions
+from ...modules.eos.weaklyCompressible import isoThermalEOS
+from ...systems.acousticCore import AcousticCoreSystem, AcousticCoreSystemUpdate
 
 __all__ = ['f_acoustic_core', 'f_acoustic_core_rebuildAdjacency']
 

@@ -49,7 +49,7 @@ bootstrap(precision='float32')
 import numpy as np
 import torch
 from warpSPHCore import OperationProperties, WarpOperation, SupportScheme, OperationDirection, GradientScheme, warpOperation
-import warpSPH.schemes.deltaSPH as S
+import warpSPH.schemes.weaklyCompressible.deltaSPH as S
 from warpSPH.enumTypes import PressureForceScheme
 import warpSPH.modules.mdbc.english2025 as E
 from warpSPH.modules.pressure.wp_surfaceAware import computePressureSurfaceAwareWarp

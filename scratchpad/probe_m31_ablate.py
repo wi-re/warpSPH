@@ -24,7 +24,7 @@ clampMode  = sys.argv[3] if len(sys.argv) > 3 else 'fallback'
 pst        = sys.argv[4] if len(sys.argv) > 4 else 'on'
 tLimit     = float(sys.argv[5]) if len(sys.argv) > 5 else 1.24
 
-import warpSPH.schemes.deltaSPH as sch
+import warpSPH.schemes.weaklyCompressible.deltaSPH as sch
 NOPEN_MODE = nopen if isinstance(nopen, str) else ('derivative' if nopen else 'off')
 
 if clampMode == 'blanket':

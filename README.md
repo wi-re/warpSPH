@@ -420,7 +420,7 @@ in this repo's history — see `docs/historic_plans/WAVE_EQUATION_PLAN.md` for h
 
 | piece | where |
 |---|---|
-| the scheme | [`schemes/waveEquation.py`](src/warpSPH/schemes/waveEquation.py) |
+| the scheme | [`schemes/pde/waveEquation.py`](src/warpSPH/schemes/waveEquation.py) |
 | the case | [`cases/demos/waveEquation.py`](src/warpSPH/cases/demos/waveEquation.py) |
 | state and system | [`systems/waveSystem.py`](src/warpSPH/systems/waveSystem.py) |
 | configuration | [`configurations/waveEquationConfig.py`](src/warpSPH/configurations/waveEquationConfig.py) |

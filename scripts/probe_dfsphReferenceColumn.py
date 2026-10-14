@@ -33,7 +33,7 @@ import torch
 
 from warpSPH.cases import hydrostaticColumn
 from warpSPH.runner import run
-import warpSPH.schemes.dfsphReference as ref
+import warpSPH.schemes.incompressible.dfsphReference as ref
 
 args = argparse.ArgumentParser()
 args.add_argument('--nx', type=int, default=32)

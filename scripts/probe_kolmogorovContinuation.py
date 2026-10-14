@@ -32,7 +32,7 @@ bootstrap(precision='float32')
 import torch
 
 from warpSPH.configurations import AcousticCoreConfig, buildConfig
-from warpSPH.schemes.acousticCore import f_acoustic_core
+from warpSPH.schemes.experimental.acousticCore import f_acoustic_core
 from warpSPH.systems.acousticCore import AcousticCoreState, AcousticCoreSystem
 from warpSPH.utils import buildDomainDescription
 from warpSPHIntegrators import JFNKSolver, get_reference_state, getIntegrator

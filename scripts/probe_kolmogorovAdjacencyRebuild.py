@@ -18,7 +18,7 @@ forced/decaying branches) rather than a rewrite -- the only new axis is
 rebuildAdjacency`), run back-to-back on the *same* loaded snapshot so the
 comparison is apples-to-apples. Also counts extra `buildVerletList` calls
 the rebuild variant makes (via a thin counting wrapper monkey-patched onto
-`warpSPH.schemes.acousticCore.buildVerletList` for the duration of a rebuild
+`warpSPH.schemes.experimental.acousticCore.buildVerletList` for the duration of a rebuild
 run only) and reports wall-clock overhead, per JFNK_PLAN.md's own honesty
 convention about cost, not just stability.
 
@@ -38,9 +38,9 @@ bootstrap(precision='float32')
 
 import torch
 
-import warpSPH.schemes.acousticCore as acousticCoreScheme
+import warpSPH.schemes.experimental.acousticCore as acousticCoreScheme
 from warpSPH.configurations import AcousticCoreConfig, buildConfig
-from warpSPH.schemes.acousticCore import f_acoustic_core, f_acoustic_core_rebuildAdjacency
+from warpSPH.schemes.experimental.acousticCore import f_acoustic_core, f_acoustic_core_rebuildAdjacency
 from warpSPH.systems.acousticCore import AcousticCoreState, AcousticCoreSystem
 from warpSPH.utils import buildDomainDescription
 from warpSPHIntegrators import JFNKSolver, get_reference_state, getIntegrator
@@ -87,7 +87,7 @@ def diagnostics(state):
 class _CallCounter:
     """Counts calls to `buildVerletList` made *inside* `f_acoustic_core_
     rebuildAdjacency` for one run, via a thin wrapper monkey-patched onto
-    `warpSPH.schemes.acousticCore.buildVerletList` for that run's duration
+    `warpSPH.schemes.experimental.acousticCore.buildVerletList` for that run's duration
     only -- doesn't touch the real `buildVerletList` or any production path,
     and is restored unconditionally (`finally`) even on divergence/exception.
     """

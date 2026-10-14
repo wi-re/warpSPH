@@ -91,7 +91,7 @@ interesting empirical question, not just a bug to silently paper over:
 - **The IC's own `supports`/`densities` snapshot doesn't need to be
   differentiable, and neither does `evaluateOptimalSupport`'s fixed-point
   solver.** `compSPH_step` calls `evaluateOptimalSupport` itself as the
-  *first thing it does every step* (`schemes/compSPH.py:42`) and immediately
+  *first thing it does every step* (`schemes/compressible/compSPH.py:42`) and immediately
   recomputes `densities` from current `masses`/`positions`/`supports` right
   after (line 63). Whatever `supports`/`densities` an IC starts with gets
   overwritten by real physics on step 1 regardless of how it was produced.
@@ -151,7 +151,7 @@ Sod's default `5/3`). Reuse the reference IC completely unchanged (same
 `schemeConfig.gamma` is wrong) — set `schemeConfig.gamma = gammaGuess`
 each iteration before stepping, since `compSPH_step` recomputes
 `pressures`/`soundspeeds`/`entropies` from `internalEnergies` + `gamma`
-every step (`schemes/compSPH.py:108-114`), which is exactly where the
+every step (`schemes/compressible/compSPH.py:108-114`), which is exactly where the
 trajectory starts diverging from the target. Adam over `[gammaGuess]`;
 clamp to `>1.01` after each step (unphysical/NaN-producing below that).
 Written once as a function taking the same fixed seed/init/lr/iteration
@@ -225,7 +225,7 @@ pre/post-fix comparison the plan designed had to be restructured, because a
 notebook cannot reload a changed `@wp.kernel` signature mid-session. Instead
 the pre-fix behaviour is re-created *in* the fixed source by detaching `gamma`
 at the balance call site only (a `functools.wraps` patch of
-`warpSPH.schemes.compSPH.computeCompSPHBalanceTermWarp`). That emulation was
+`warpSPH.schemes.compressible.compSPH.computeCompSPHBalanceTermWarp`). That emulation was
 validated against the real pre-fix source: case 2 was run for 60 iterations
 against unfixed `balance.py`, then again after the fix with the emulation, and
 the two agree **bit-for-bit** on loss, parameter error and gradient norm at

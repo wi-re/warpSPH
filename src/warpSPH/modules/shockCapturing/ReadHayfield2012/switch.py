@@ -28,7 +28,7 @@ method has three parts:
    discontinuity thermal-energy/pressure overshoot.
 
 The artificial-viscosity *momentum* term (eqs. 29-31) is supplied by the
-existing Monaghan viscosity in ``schemes/monaghan.py`` driven by this
+existing Monaghan viscosity in ``schemes/compressible/monaghan.py`` driven by this
 switch's ``alpha`` (``queryAlphas``); the only R&H-specific addition to the
 scheme is the entropy-dissipation internal-energy rate returned here as
 ``switchState.dudt_diss``.

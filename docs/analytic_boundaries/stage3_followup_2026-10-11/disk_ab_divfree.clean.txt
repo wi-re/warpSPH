@@ -3,7 +3,7 @@
 # preset -> compact CG projection, densitySolve = False). The std over t >= 20 is the oscillation amplitude
 # (the oracle and the faithful port are smooth, std ~ 0).
 #
-# Runs: .tmp/disk_ab.py (monkeypatches warpSPH.schemes.divergenceFree module constants: DIVERGENCE_SOLVER,
+# Runs: .tmp/disk_ab.py (monkeypatches warpSPH.schemes.incompressible.divergenceFree module constants: DIVERGENCE_SOLVER,
 # NOPEN_SHIFT, XSPH_SCALE, INSTEP_CD, SOLVE_ORDER). The `omni_ctrl` row is the port's omniIncompressible
 # scheme (the stage-2 verified term-by-term port of DFSPH2D) as the smooth control -- it does not use the
 # divergenceFree constants. nu re-calibrated on the lattice per run (the xsph_on run's XSPH shifts the

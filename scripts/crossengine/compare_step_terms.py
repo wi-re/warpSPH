@@ -49,7 +49,7 @@ c_s = float(ctx.schemeConfig.fluid.fixedSoundSpeed)
 # ---------------------------------------------------------------------------
 # Spy-patch warpSPH's deltaSPH_step's own term functions.
 # ---------------------------------------------------------------------------
-import warpSPH.schemes.deltaSPH as w_deltaSPH_mod
+import warpSPH.schemes.weaklyCompressible.deltaSPH as w_deltaSPH_mod
 
 _W_TERM_NAMES = ['computePressureForceSurfaceAware', 'computeVelocityDiffusion',
                  'computeDensityDiffusion', 'computeMomentum', 'computeGravity']
@@ -95,7 +95,7 @@ for name in _D_TERM_NAMES:
 
 from warpSPH.systems.weaklyCompressible import (WeaklyCompressibleState as WState_w,
                                                 WeaklyCompressibleSystem as WSystem_w)
-from warpSPH.schemes.deltaSPH import deltaSPH_step
+from warpSPH.schemes.weaklyCompressible.deltaSPH import deltaSPH_step
 
 from diffSPH.sampling import buildDomainDescription
 from diffSPH.modules.adaptiveSmoothingASPH import n_h_to_nH

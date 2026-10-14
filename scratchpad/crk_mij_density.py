@@ -2,11 +2,11 @@
   rho_i = sum_j m_ij V_j W^R_ij / sum_j V_j^2 W^R_ij,   m_ij = m_j (same material), m_i (different material)
 built by linearity out of ordinary density passes with masked masses (the core kernel has no material tag):
   material-a row i:  R[m 1_a] + m_i R[1_b],   R[f] = density pass with per-particle 'mass' f.
-Patches warpSPH.schemes.crkSPH.computeCRKFactors, then runs probe_triplePointPileup.py with the given args."""
+Patches warpSPH.schemes.compressible.crkSPH.computeCRKFactors, then runs probe_triplePointPileup.py with the given args."""
 import copy, os, runpy, sys
 import torch
 sys.path.insert(0, 'src'); sys.path.insert(0, 'scripts')
-import warpSPH.schemes.crkSPH as crk
+import warpSPH.schemes.compressible.crkSPH as crk
 
 _orig = crk.computeCRKFactors
 STATE = {'on': os.environ.get('MIJ', '1') == '1'}

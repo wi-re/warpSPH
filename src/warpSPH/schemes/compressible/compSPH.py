@@ -11,33 +11,33 @@ persist it).
 in call order): every region does one thing, so a profile or a call audit names it.
 """
 
-from ..modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
-from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
-from ..modules.compressibleWall import beginCompressibleWall, clampSupportsToVolume
-from ..modules.compSPH.operators import computeCompSPHAccel, computeCompSPHdudt, computeCompSPHBalanceTerm
-from ..modules.density import computeDensities
-from ..modules.eos import idealGasEOS
-from ..modules.momentum import computeMomentumConsistent
-from ..modules.shockCapturing import computeViscositySwitchTerms, updateViscositySwitch
-from ..enumTypes import EnergyScheme, ViscositySwitch
+from ...modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
+from ...modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
+from ...modules.compressibleWall import beginCompressibleWall, clampSupportsToVolume
+from ...modules.compSPH.operators import computeCompSPHAccel, computeCompSPHdudt, computeCompSPHBalanceTerm
+from ...modules.density import computeDensities
+from ...modules.eos import idealGasEOS
+from ...modules.momentum import computeMomentumConsistent
+from ...modules.shockCapturing import computeViscositySwitchTerms, updateViscositySwitch
+from ...enumTypes import EnergyScheme, ViscositySwitch
 
 from warpSPHCore.profiling import record_function
 from warpSPHCore import verletStaleFlag
 from warpSPHCore import (
     GradHState, OperationProperties, SupportScheme, buildVerletList,
 )
-from ..modules.compSPH.pairWork import accumulateStage, startStage, stageRebuildSlack
-from ..modules.compSPH.supportGrid import ensureSupportGrid, refreshSupportGrid, noteOutgrown, solvesOnGrid, pairListGridFactory, pairListCapacity
-from ..modules.compSPH.pairWork import listFitsParticles
-from ..enumTypes import AdaptiveSupportScheme
-from ..systems.compSPH import CompSPHSystem, CompSPHState
-from ..configurations.compSPHConfig import CompSPHConfig
-from ..configurations.simulationConfig import SimulationConfig
+from ...modules.compSPH.pairWork import accumulateStage, startStage, stageRebuildSlack
+from ...modules.compSPH.supportGrid import ensureSupportGrid, refreshSupportGrid, noteOutgrown, solvesOnGrid, pairListGridFactory, pairListCapacity
+from ...modules.compSPH.pairWork import listFitsParticles
+from ...enumTypes import AdaptiveSupportScheme
+from ...systems.compSPH import CompSPHSystem, CompSPHState
+from ...configurations.compSPHConfig import CompSPHConfig
+from ...configurations.simulationConfig import SimulationConfig
 import torch
-from ..systems.compressibleMonaghan import CompressibleSystemUpdate
+from ...systems.compressibleMonaghan import CompressibleSystemUpdate
 
-from ..modules.shockCapturing.CullenHopkins import computeHopkinsTerms, computeHopkinsUpdate
-from ..modules.reconstruction import requireRawPairVelocity
+from ...modules.shockCapturing.CullenHopkins import computeHopkinsTerms, computeHopkinsUpdate
+from ...modules.reconstruction import requireRawPairVelocity
 
 __all__ = ['compSPH_step']
 

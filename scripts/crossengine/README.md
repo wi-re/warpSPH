@@ -84,6 +84,6 @@ All scripts assume the `diffSPHEnv` conda env (has both `warpSPH` and
 - Monkey-patching one of these functions must target the *importing*
   module's namespace, not the defining module's -- e.g.
   `warpSPH.schemes.builder.deltaSPH_step`, not
-  `warpSPH.schemes.deltaSPH.deltaSPH_step`, because `builder.py` did
+  `warpSPH.schemes.weaklyCompressible.deltaSPH.deltaSPH_step`, because `builder.py` did
   `from .deltaSPH import deltaSPH_step` (binds the name once, at import
   time) rather than a lazy attribute lookup.

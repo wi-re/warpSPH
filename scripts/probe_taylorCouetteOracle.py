@@ -37,7 +37,7 @@ def main():
     from warpSPH.modules.deltaSPH import computeVelocityDiffusion
     from warpSPH.modules.incompressible.compactProjection import morrisCalibration
     from warpSPH.enumTypes import ViscosityTerm
-    import warpSPH.schemes.omniIncompressible as O
+    import warpSPH.schemes.incompressible.omniIncompressible as O
     from warpSPHBoundaries.scene.implicitBodies import DiskBody
     from warpSPHBoundaries.scene.scene import Body, DiskArrayRep, ImplicitRep, Scene
     import _oracle  # exits with the checkout instructions when the retired solver layer is absent

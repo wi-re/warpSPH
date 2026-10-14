@@ -28,31 +28,31 @@ superseded by the active `record_function` markers) are left in place, not
 removed (tracked separately in docs/historic_plans/CLEANUP_PLAN.md).
 """
 
-from ..configurations import SimulationConfig, WeaklyCompressibleSPHConfig
-from ..systems import CompSPHSystem, WeaklyCompressibleSystemUpdate
-from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
-from ..modules.boundaryConditions.pinned import pinnedKeepWeight
-from ..modules.deltaSPH import computeDensityDiffusion, computeVelocityDiffusion
-from ..modules.density import computeDensities, computeGradRho, computeGradRhoL
-from ..modules.eos import weaklyCompressibleEOS
-from ..modules.gravity import computeGravity, computeBodyForce, bodyForceVector
-from ..modules.mdbc import computeBoundaryVelocities, computeMdbcDensity, computeMdbcDensityBand, computeMdbcDensityEnglish2025, computeMdbcNoPenShift
-from ..modules.momentum import computeMomentum
-from ..modules.pressure import computePressureForceSurfaceAware, antuonoSwitch
-from ..modules.surfaceDetection import detectFreeSurface
-from ..modules.util import countNeighbors
-from ..enumTypes import DensityDiffusionScheme
+from ...configurations import SimulationConfig, WeaklyCompressibleSPHConfig
+from ...systems import CompSPHSystem, WeaklyCompressibleSystemUpdate
+from ...modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
+from ...modules.boundaryConditions.pinned import pinnedKeepWeight
+from ...modules.deltaSPH import computeDensityDiffusion, computeVelocityDiffusion
+from ...modules.density import computeDensities, computeGradRho, computeGradRhoL
+from ...modules.eos import weaklyCompressibleEOS
+from ...modules.gravity import computeGravity, computeBodyForce, bodyForceVector
+from ...modules.mdbc import computeBoundaryVelocities, computeMdbcDensity, computeMdbcDensityBand, computeMdbcDensityEnglish2025, computeMdbcNoPenShift
+from ...modules.momentum import computeMomentum
+from ...modules.pressure import computePressureForceSurfaceAware, antuonoSwitch
+from ...modules.surfaceDetection import detectFreeSurface
+from ...modules.util import countNeighbors
+from ...enumTypes import DensityDiffusionScheme
 from warpSPHCore import (SupportScheme, buildVerletList, OperationProperties,
                          WarpOperation, warpOperation, RenormalizationState)
 
 import torch
-from ..utils.timer import TimedBlock
+from ...utils.timer import TimedBlock
 from torch.profiler import profile, ProfilerActivity
 from warpSPHCore.profiling import record_function
 __all__ = ['deltaSPH_step']
 
 
-from ..modules.analyticBoundary import evaluateWall, viscousPrefactor, wallLoads, wallPressureAcceleration, wallViscousAcceleration
+from ...modules.analyticBoundary import evaluateWall, viscousPrefactor, wallLoads, wallPressureAcceleration, wallViscousAcceleration
 
 
 def deltaSPH_step(
@@ -182,7 +182,7 @@ def _surfaceMaskAcrossStages(currentState, dt, schemeConfig, stageIndex, t) -> N
 def _graphedRHS(schemeConfig):
     g = getattr(schemeConfig, '_rhsGraph', None)
     if g is None:
-        from ..utils.cudaGraph import GraphedStateFunction
+        from ...utils.cudaGraph import GraphedStateFunction
         g = GraphedStateFunction(_deltaSPH_rhs, 'deltaSPH right-hand side')
         schemeConfig._rhsGraph = g
     return g
@@ -405,7 +405,7 @@ def _deltaSPH_rhs(
                 accP = accP + accVP.to(accP.dtype)
             if getattr(schemeConfig, 'wallViscosityClosure', 'mirror') == 'noslipMoment':
                 # the no-slip moment closure's per-body term (its balance needs the fluid-only Morris acceleration of the particles)
-                from ..modules.analyticBoundary.wallViscosity import wallNoSlipAcceleration
+                from ...modules.analyticBoundary.wallViscosity import wallNoSlipAcceleration
                 viscf = computeVelocityDiffusion(currentState, config, schemeConfig, adjacency, wall=False)
                 accV = wallNoSlipAcceleration(currentState, config, schemeConfig, adjacency, wall, viscf, perBody=True)
             else:

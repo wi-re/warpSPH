@@ -168,7 +168,7 @@ def solveCompactProjection(state: Any, config: Any, schemeConfig: Any, adjacency
 
     The wall (Robin, `projectionWall='robin'`): `v*` carries the pressure-independent wall part (the hydrostatic extrapolation, the wall force at `P = 0`), the source the wall flux (times
     `schemeConfig.projectionWallFlux`), the operator the wall row `D`, the correction is the scheme's own pressure force."""
-    from ...schemes.omniIncompressible import _divergence, _pressureAccel
+    from ...schemes.incompressible.omniIncompressible import _divergence, _pressureAccel
     from ..analyticBoundary import wallPressureAccelerationOmni, wallDivergence
     if config.kernel != KernelFunctions.Wendland2:
         raise NotImplementedError('the compact projection is written for the Wendland C2 kernel')

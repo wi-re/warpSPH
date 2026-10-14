@@ -11,7 +11,7 @@ In warpSPH the wall is **a particle population** (`state.kinds == 1`, boundary p
 `SuperSymmetric` over fluid + wall. The analytic walls are the opposite: a separate adjacency per body (`Scene.buildAdjacency`) and one integral per term. A port therefore has to **split every pair operation
 into a fluid–fluid part (unchanged) and a wall part (scene)** and drop the mDBC population-writing stage.
 
-Step order of one RHS call (`schemes/deltaSPH.py::_deltaSPH_rhs`) and the stages that disappear or change:
+Step order of one RHS call (`schemes/weaklyCompressible/deltaSPH.py::_deltaSPH_rhs`) and the stages that disappear or change:
 
 1. `buildVerletList(..., SuperSymmetric)` (warpSPHCore) — fluid adjacency stays; the wall layers leave it; one `Scene.buildAdjacency` is added (Verlet-style reuse is not implemented there, §4).
 2. `computeDensities` (`modules/density/density.py`) — fluid sum; wall adds `λ` (`Density`).
@@ -47,7 +47,7 @@ The numerical kernels of the scene layer are **already Warp float64** launched o
 obstacle. The obstacles are in the orchestration around the kernels:
 
 * **Data-dependent shapes.** The broadphase and adjacency build use `int(cnt.sum())`, `torch.nonzero` and `repeat_interleave` (`scene.py` `buildCellList`, `ParticleCells`, `buildAdjacency`): every call synchronises the host and
-  produces variable-length pair lists. warpSPH captures its RHS in a CUDA graph (`schemes/deltaSPH.py::_graphedRHS`, only when `_rhsIsGraphable`), which needs fixed shapes, so the scene adjacency has to become a
+  produces variable-length pair lists. warpSPH captures its RHS in a CUDA graph (`schemes/weaklyCompressible/deltaSPH.py::_graphedRHS`, only when `_rhsIsGraphable`), which needs fixed shapes, so the scene adjacency has to become a
   fixed-capacity, Verlet-style structure (build every few steps with a skin, reuse in between) before it can sit inside a graph.
 * **Per-step rebuild.** `DFSPH2D` rebuilds the scene adjacency each step (and reuses the friction adjacency as the next step's). warpSPH reuses Verlet lists across steps (`verletScale`).
 * **Python loops over bodies** (~3 ms of launch overhead per body, `scene-architecture.md`): fine for a tank + a few obstacles, not for hundreds of bodies without batching.
@@ -98,7 +98,7 @@ One line per change that matters to the port: date, what changed in *this* repo,
 | 2026-10-02 | `DeltaSPH2D.settle` / `pack` / `residual` (experimental layout tools), `staircase` control | none | diagnostic only |
 
 
-| 2026-10-02 | dam break (`marrone_dambreak`, `wall_probes`, `run_dambreak`): wall term of `computeVelocityDiffusion` (free-slip mirror, polar quadrature of the solid, 24 x 96), time-centred continuity (`symplecticEuler` drift field: `rho += dt (K(x_h, vbar) - kin(k1))`), dilated surface mask for the Antuono switch (warpSPH binds `fs, fsm` swapped in `_deltaSPH_rhs`: the switch sees the DILATED set), `Scene.signed_distance` | `modules/deltaSPH/velocityDissipation.py`, `systems/weaklyCompressible.py::drift_rates`, `schemes/deltaSPH.py` | wall viscosity by quadrature (1 % of the exact half-plane value), not exact; mirror velocity = the particle's own |
+| 2026-10-02 | dam break (`marrone_dambreak`, `wall_probes`, `run_dambreak`): wall term of `computeVelocityDiffusion` (free-slip mirror, polar quadrature of the solid, 24 x 96), time-centred continuity (`symplecticEuler` drift field: `rho += dt (K(x_h, vbar) - kin(k1))`), dilated surface mask for the Antuono switch (warpSPH binds `fs, fsm` swapped in `_deltaSPH_rhs`: the switch sees the DILATED set), `Scene.signed_distance` | `modules/deltaSPH/velocityDissipation.py`, `systems/weaklyCompressible.py::drift_rates`, `schemes/weaklyCompressible/deltaSPH.py` | wall viscosity by quadrature (1 % of the exact half-plane value), not exact; mirror velocity = the particle's own |
 | 2026-10-02 | `DeltaSPH2D.shift` (delta+ PST: Eq. 7 with the Sun-2019 surface treatment: lambda_min normals, curvature gate 15 deg, lambda gate 0.4 fluid-only, Eq. 14 cap, 0.5 dx clamp), `no_penetration` (impulse placement) | `modules/shifting/delta.py::computeDeltaShift`, `modules/shifting/wrapper.py::solveShifting`, `systems/weaklyCompressible.py::finalize`, `modules/mdbc/wp_nopenshift.py` | wall part of the tensile control `int W^4 grad W dA` by polar quadrature (no `W^5` kernel needed); normals from lambda gradients of the fluid pairs with L = (fluid + wall covariance)^-1; no-penetration law re-derived for an analytic wall at dp/2 (`f(d)`), static walls only |
 | 2026-10-02 | speed: `neighbor_pairs` uses a dense distance matrix for N <= 8000 (82 -> 4 ms at N = 3240) | `buildVerletList` | none; the remaining cost is `Scene.buildAdjacency` + 3 scene operations per RHS call (~60 ms): a port should fuse them and reuse the adjacency across the two RHS calls of a step |
 \n

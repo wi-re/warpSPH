@@ -27,14 +27,14 @@ from ..configurations import (
     dictToWaveEquationConfig, incompressibleConfigToDict, meshlessConfigToDict,
     waveEquationConfigToDict, weaklyCompressibleConfigToDict,
 )
-from .compSPH import compSPH_step
-from .deltaSPH import deltaSPH_step
-from .crkSPH import crkSPH_step
-from .monaghan import compressibleSPH_Monaghan
-from .gsph import compressibleSPH_GSPH
-from .gsphInutsuka import compressibleSPH_InutsukaGSPH
-from .meshless import meshlessStep
-from .waveEquation import f_wave_equation
+from .compressible.compSPH import compSPH_step
+from .weaklyCompressible.deltaSPH import deltaSPH_step
+from .compressible.crkSPH import crkSPH_step
+from .compressible.monaghan import compressibleSPH_Monaghan
+from .compressible.gsph import compressibleSPH_GSPH
+from .compressible.gsphInutsuka import compressibleSPH_InutsukaGSPH
+from .compressible.meshless import meshlessStep
+from .pde.waveEquation import f_wave_equation
 from ..enumTypes import (
     ArtificialCompressibleSPHScheme, CompressibleSPHScheme,
     WeaklyCompressibleSPHScheme, IncompressibleSPHScheme, WaveEquationScheme,
@@ -207,7 +207,7 @@ def _divergenceFree() -> SchemeBundle:
     # `..configurations`, which is where they are defined --
     # `divergenceFree` used to relay them only as a side effect of star
     # importing that package.
-    from .divergenceFree import divergenceFree_step
+    from .incompressible.divergenceFree import divergenceFree_step
     from ..systems.incompressible import (IncompressibleSystem, IncompressibleState,
                                           IncompressibleSystemUpdate)
     return SchemeBundle(
@@ -226,8 +226,8 @@ def _dfsphReference() -> SchemeBundle:
     # state/config/update and their codecs -- the only thing that differs is the
     # step function and the system's `finalize` (see
     # `systems/incompressible.py::DFSPHReferenceSystem` and
-    # `schemes/dfsphReference.py`).
-    from .dfsphReference import dfsphReference_step
+    # `schemes/incompressible/dfsphReference.py`).
+    from .incompressible.dfsphReference import dfsphReference_step
     from ..systems.incompressible import (DFSPHReferenceSystem, IncompressibleState,
                                           IncompressibleSystemUpdate)
     return SchemeBundle(
@@ -246,9 +246,9 @@ def _iisph() -> SchemeBundle:
     # incompressible state/config/update, codecs and `DFSPHReferenceSystem`
     # (the whole time integration happens inside the step), differing only in
     # the step function -- the divergence-free pass is switched off. See
-    # `schemes/dfsphReference.py::iisph_step` and DFSPH_IMPROVEMENT_PLAN.md
+    # `schemes/incompressible/dfsphReference.py::iisph_step` and DFSPH_IMPROVEMENT_PLAN.md
     # Part 33.
-    from .dfsphReference import iisph_step
+    from .incompressible.dfsphReference import iisph_step
     from ..systems.incompressible import (DFSPHReferenceSystem, IncompressibleState,
                                           IncompressibleSystemUpdate)
     return SchemeBundle(
@@ -266,8 +266,8 @@ def _omniIncompressible() -> SchemeBundle:
     # Direct port of omniSPH's incompressible solver loop. Same lazy-import
     # rationale as `_divergenceFree`; reuses the incompressible
     # state/config/update and `DFSPHReferenceSystem` (the whole time
-    # integration happens inside the step). See `schemes/omniIncompressible.py`.
-    from .omniIncompressible import omniIncompressible_step
+    # integration happens inside the step). See `schemes/incompressible/omniIncompressible.py`.
+    from .incompressible.omniIncompressible import omniIncompressible_step
     from ..systems.incompressible import (DFSPHReferenceSystem, IncompressibleState,
                                           IncompressibleSystemUpdate)
     return SchemeBundle(
@@ -285,8 +285,8 @@ def _band2018pb() -> SchemeBundle:
     # IISPH with Pressure Boundaries (Band et al. 2018). Same lazy-import
     # rationale as `_divergenceFree`; reuses the incompressible
     # state/config/update and `DFSPHReferenceSystem` (the whole time
-    # integration happens inside the step). See `schemes/band2018pb.py`.
-    from .band2018pb import band2018pb_step
+    # integration happens inside the step). See `schemes/incompressible/band2018pb.py`.
+    from .incompressible.band2018pb import band2018pb_step
     from ..systems.incompressible import (DFSPHReferenceSystem, IncompressibleState,
                                           IncompressibleSystemUpdate)
     return SchemeBundle(
@@ -303,10 +303,10 @@ def _band2018pb() -> SchemeBundle:
 def _artificialCompressible() -> SchemeBundle:
     # Same lazy-import rationale as `_divergenceFree`: keeps `builder` from
     # importing the scheme module at its own import time. See
-    # `schemes/artificialCompressible.py` -- this scheme owns its whole real
+    # `schemes/incompressible/artificialCompressible.py` -- this scheme owns its whole real
     # step (a dual-time solve) and hands the integrator an exact delta, which
     # is why it pins `forwardEuler` and validates it at step entry.
-    from .artificialCompressible import artificialCompressible_step
+    from .incompressible.artificialCompressible import artificialCompressible_step
     from ..systems.artificialCompressible import (ArtificialCompressibleState,
                                                   ArtificialCompressibleSystem,
                                                   ArtificialCompressibleSystemUpdate)

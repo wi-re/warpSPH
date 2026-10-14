@@ -18,7 +18,7 @@ import torch
 from warpSPHIntegrators import getIntegrator
 from warpSPHIntegrators.integration import IntegrationSchemeType
 
-import warpSPH.schemes.artificialCompressible as acmod
+import warpSPH.schemes.incompressible.artificialCompressible as acmod
 import warpSPH.modules.artificialCompressible as acm
 from warpSPHCore import (GradientScheme, OperationDirection, OperationProperties, SupportScheme,
                          WarpOperation, warpOperation)
@@ -924,7 +924,7 @@ def test_convergenceMetricDeviceIsBitwiseHostMetric():
     """The dual-time loop's device-side eps_v (read back only at checkpoints)
     must be the exact number `convergenceMetric` computes on the host."""
     import torch
-    from warpSPH.schemes import artificialCompressible as acmod
+    from warpSPH.schemes.incompressible import artificialCompressible as acmod
     from warpSPH.configurations.artificialCompressible import ArtificialCompressibleSPHConfig
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     g = torch.Generator(device='cpu').manual_seed(3)

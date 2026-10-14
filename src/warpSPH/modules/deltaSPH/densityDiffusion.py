@@ -7,7 +7,7 @@ by `delta * h / xi * c_s`, the standard delta-SPH prefactor, where `delta` is
 formulation is evaluated (delta-SPH, non-renormalized, density-only, ...) is
 selected via `schemeConfig.diffusionParams.densityDiffusionTerm`
 (`DensityDiffusionScheme`) and forwarded to the underlying kernel; the caller
-(`schemes/deltaSPH.py`) is responsible for only supplying `gradRho`/`gradRhoL`
+(`schemes/weaklyCompressible/deltaSPH.py`) is responsible for only supplying `gradRho`/`gradRhoL`
 when the selected scheme actually needs them.
 
 `computeScalarFieldDiffusion` is the same operator with neither the field nor

@@ -26,7 +26,7 @@ import numpy as np
 import warpSPH.systems.incompressible as I
 from warpSPH.cases import hydrostaticColumn, tgv
 from warpSPH.runner import run
-from warpSPH.schemes import divergenceFree as D
+from warpSPH.schemes.incompressible import divergenceFree as D
 
 OUT = "/home/lu26029/dev/warpSPH/scripts/videos/dfsph_ps_compare"
 os.makedirs(OUT, exist_ok=True)

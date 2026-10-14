@@ -5,18 +5,18 @@ no conductivity). Same system / state / update classes as the Monaghan scheme.
 
 import torch
 
-from ..configurations import SimulationConfig
-from ..configurations.gsph import GSPHConfig
-from ..configurations.moduleConfigurations.diffusionParameters import VelocityPairPolicy, resolveReconstructionLimiter
-from ..systems import CompressibleSystem, CompressibleSystemUpdate
-from ..modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
-from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
-from ..modules.compressibleWall import beginCompressibleWall, clampSupportsToVolume
-from ..modules.density import computeDensities
-from ..modules.eos import idealGasEOS
-from ..modules.godunov import computeGodunovWarp
-from ..modules.momentum import computeMomentumConsistent
-from ..modules.reconstruction import computeStateGradients, computeVelocityJacobian
+from ...configurations import SimulationConfig
+from ...configurations.gsph import GSPHConfig
+from ...configurations.moduleConfigurations.diffusionParameters import VelocityPairPolicy, resolveReconstructionLimiter
+from ...systems import CompressibleSystem, CompressibleSystemUpdate
+from ...modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
+from ...modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
+from ...modules.compressibleWall import beginCompressibleWall, clampSupportsToVolume
+from ...modules.density import computeDensities
+from ...modules.eos import idealGasEOS
+from ...modules.godunov import computeGodunovWarp
+from ...modules.momentum import computeMomentumConsistent
+from ...modules.reconstruction import computeStateGradients, computeVelocityJacobian
 from warpSPHCore import GradHState, OperationProperties, SupportScheme, buildVerletList
 
 __all__ = ['compressibleSPH_GSPH']

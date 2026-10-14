@@ -62,7 +62,7 @@ def main():
     from warpSPH.runner.runner import buildContext
     from warpSPH.runner.caseSpec import CaseSpec
     from warpSPH.cases.compressible.kelvinHelmholtz import kelvinHelmholtzCase as case
-    from warpSPH.schemes.meshless import meshlessStep
+    from warpSPH.schemes.compressible.meshless import meshlessStep
     from warpSPH.modules.timestep.meshless import computeTimestep
 
     spec = CaseSpec(caseName=case.name, scheme=args.scheme, params=dict(case.params))

@@ -6,7 +6,7 @@
 
 ## 1. What is wrong (measured / read from the code, 2026-10-13)
 
-`schemes/artificialCompressible.py` is 906 lines. `artificialCompressible_step` is ~350 lines and contains, as nested closures
+`schemes/incompressible/artificialCompressible.py` is 906 lines. `artificialCompressible_step` is ~350 lines and contains, as nested closures
 and inline torch, everything the repo otherwise puts in `modules/`:
 
 | Inline in the scheme | Belongs in |
@@ -24,7 +24,7 @@ Consequence (measured): ~260 launches per pseudo-iteration, the iteration body i
 detection, bounce setup, forcing) is eager, and the stop test is a host sync. GPU utilisation 25-40 %. The whole-step graph that
 delta-SPH has (`runner._stepGraphable`, `GraphedIntegratorStep`) is not available to ACSPH at all.
 
-The same drift is under way in `schemes/deltaSPH.py` (`_surfaceMaskAcrossStages`, `_graphedRHS`, `_rhsIsGraphable`, section-by-section
+The same drift is under way in `schemes/weaklyCompressible/deltaSPH.py` (`_surfaceMaskAcrossStages`, `_graphedRHS`, `_rhsIsGraphable`, section-by-section
 inline calls in `_deltaSPH_rhs`). Part of the inline ACSPH code (wall bounce, taper, the surface-flag closure) was added in the
 2026-10-12/13 sessions on top of the existing pattern; the pattern itself is older.
 
@@ -57,7 +57,7 @@ meanwhile so ordinary runs stay fast). Each phase ends bitwise-checked, audited 
 | 3 | Collapse the torch-op storms: fused warp kernels for the RK stage combine + fluid mask, projection, wall bounce (pair kernel, no scatter_reduce), convergence metric, surface-flag/taper arithmetic | audit `ops/step`, `launch/step`; per-kernel tests vs the torch reference; gradcheck script if differentiable; bitwise or tolerance stated |
 | 4 | Per-step setup (contact masks, bounce setup, parameters, solver construction) as one or two kernels / cached per Verlet generation | audit |
 | 5 | Only then graphs: persistent graph per Verlet generation, device-side stop test (`capture_while`), whole-step graph | utilisation >= 80 %, ms/step vs the eager phase-4 number |
-| 6 | Same extraction + cleanup in `schemes/deltaSPH.py` | its tests + Marrone 3.1 reference timing (108.7 s) |
+| 6 | Same extraction + cleanup in `schemes/weaklyCompressible/deltaSPH.py` | its tests + Marrone 3.1 reference timing (108.7 s) |
 
 Acceptance: Marrone 3.1 nx 70 and sloshing nx 100 with graphs OFF at high GPU utilisation and low `sync/step`, then graphs ON as a bonus.
 
@@ -69,7 +69,7 @@ timer, speed read, diagnostics ~1-1.6 each). Coverage 100 % of ops / launches, 9
 
 ## 3a. Status
 
-**Phase 1 done (2026-10-13).** `schemes/artificialCompressible.py` 906 -> 133 lines (59 of them the module docstring): the step is
+**Phase 1 done (2026-10-13).** `schemes/incompressible/artificialCompressible.py` 906 -> 133 lines (59 of them the module docstring): the step is
 calls into `modules/artificialCompressible/` and nothing else. New modules: `parameters.py` (acParameters, convergence metric), `surfaceFlags.py` (`SurfaceFlags`, `detectSurface`, taper), `wallClosure.py` (Eq. 61 wall pressure,
 unilateral variants, `WallBounce`/`makeWallBounce`, `ContactMasks`/`contactMasks`), `residual.py` (the spatial residual and viscosity),
 `forcing.py` (`bodyForces`); configuration facts and checks live in `configurations/artificialCompressible.py` (`RK_TABLEAUS`, `RECOMMENDED_CFL_TAU`, `EXACT_DELTA_INTEGRATORS`, `ArtificialCompressibilityParams.validate()`, `ArtificialCompressibleSPHConfig.validate(simulationConfig)`; the step makes one guard call) -- user's rule, 2026-10-13: configuration and its validity checks go in the configurations, not in a module folder called from the step, `workingState.py`, `dualTime.py` (`DualTimeProblem`, `iterate`, `solveDualTime`, `exactDeltaUpdate`, `zeroNonFluidRows`,
@@ -145,5 +145,5 @@ the list is decided at step end.
   toolkit 12.9). Fallback: a fixed-count unrolled graph with the stop flag masking updates.
 * Phase 3 changes when the loop stops (first converged iteration instead of the next checkpoint): not bitwise with today's runs,
   only with the every-iteration eager reference.
-* Two sessions edit this file today (the user's call who owns the refactor); no edits to `schemes/artificialCompressible.py` by a
+* Two sessions edit this file today (the user's call who owns the refactor); no edits to `schemes/incompressible/artificialCompressible.py` by a
   second session while a phase is open.

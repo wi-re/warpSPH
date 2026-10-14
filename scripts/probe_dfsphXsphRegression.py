@@ -14,7 +14,7 @@ args = argp.parse_args()
 
 from warpSPH.runner import run
 from warpSPH.cases import tgv as tgv_case
-from warpSPH.schemes import divergenceFree as D
+from warpSPH.schemes.incompressible import divergenceFree as D
 
 
 def run_one(scale):

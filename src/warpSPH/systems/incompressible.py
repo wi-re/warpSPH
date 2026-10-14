@@ -1,5 +1,5 @@
 """State/update/system triad for the divergence-free incompressible scheme
-(DFSPH, `schemes/divergenceFree.py`): unlike the weakly-compressible schemes, density
+(DFSPH, `schemes/incompressible/divergenceFree.py`): unlike the weakly-compressible schemes, density
 is itself an integrated quantity here (`drhodt`), corrected in `finalize` by a
 pressure-Poisson solve (`modules.incompressible.solveIncompressible`) plus the
 same delta-SPH-style particle shifting and rigid-body pose update
@@ -7,7 +7,7 @@ same delta-SPH-style particle shifting and rigid-body pose update
 Field layout otherwise mirrors `WeaklyCompressibleState` closely enough that
 `rigidBody.update.updateBodyParticlesWCSPH` rebuilds either interchangeably
 via `type(particleState)`. Not re-exported from `systems/__init__.py` --
-`schemes/divergenceFree.py` and `schemes/builder.py` import it directly.
+`schemes/incompressible/divergenceFree.py` and `schemes/builder.py` import it directly.
 """
 
 from warpSPHIntegrators import *
@@ -236,7 +236,7 @@ class IncompressibleSystem(BaseIntegrationSystem):
                 elif _analyticWalls:
                     # analytic walls: the same constant-density iteration as `solveIncompressible`, through the wall-aware solve of `omniIncompressible` (density, alpha, source and pressure force carry
                     # the wall), from the velocity the step ended with (dvdt = 0)
-                    from ..schemes.omniIncompressible import _solve
+                    from ..schemes.incompressible.omniIncompressible import _solve
                     dvdt_incomp, _p_ps, _e_ps, _ = _solve(
                         self.state, config, schemeConfig, self.adjacency, fluid=self.state.kinds == 0, rho0=schemeConfig.fluid.restDensity,
                         vEnter=self.state.velocities, warmStart=torch.zeros_like(self.state.densities), dt=dt, mode='density', minIters=3, maxIters=256, tol=1e-3)
@@ -492,7 +492,7 @@ class IncompressibleSystem(BaseIntegrationSystem):
 
         # if shiftApplication is not ShiftApplication.inStepVelocity:
         #     # `inStepVelocity` has already applied this solve's correction to
-        #     # the velocity inside the step (`schemes/divergenceFree.py`), which is the
+        #     # the velocity inside the step (`schemes/incompressible/divergenceFree.py`), which is the
         #     # whole of DFSPH proper's constant-density treatment -- applying
         #     # the position shift on top of it corrects the same density error
         #     # twice per step, which on `tgv` injects energy rather than
