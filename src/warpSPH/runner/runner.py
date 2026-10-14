@@ -29,6 +29,7 @@ from warpSPHCore.profiling import record_function
 from warpSPHIntegrators.util import deferHostTime
 
 from ..configurations import buildConfig
+from ..schemes.exactDelta import pinExactDeltaIntegrator
 from ..enumTypes import (ArtificialCompressibleSPHScheme, CompressibleSPHScheme,
                          IncompressibleSPHScheme, WaveEquationScheme,
                          WeaklyCompressibleSPHScheme)
@@ -129,12 +130,11 @@ def buildContext(case: Case, spec: CaseSpec) -> RunContext:
     # exact per-step delta, so it must run under a single-evaluation integrator;
     # the case's multi-stage default (rungeKutta2) would run the step once per
     # stage and blend. The step refuses any other integrator itself
-    # (`meshlessStep.validateIntegrationScheme`); set the right one up front so
+    # (`schemes/exactDelta.requireExactDeltaIntegrator`); set the right one up front so
     # the banner reports what actually runs.
     integrationSchemeName = spec.integrationScheme
-    if scheme in (CompressibleSPHScheme.MFM, CompressibleSPHScheme.MFV) and \
-            integrationSchemeName not in ('forwardEuler', 'explicitEuler'):
-        integrationSchemeName = 'forwardEuler'
+    if scheme in (CompressibleSPHScheme.MFM, CompressibleSPHScheme.MFV):
+        integrationSchemeName = pinExactDeltaIntegrator(integrationSchemeName)
 
     config, integrator = buildConfig(
         domain=domain,

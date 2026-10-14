@@ -1,5 +1,5 @@
 """`MeshlessConfig`, the scheme config for the meshless finite-mass / finite-volume (MFM / MFV)
-scheme (`schemes/compressible/meshless.py`, COMPRESSIBLE_SPH_PLAN E1): the EOS (`gamma`), the mode (`MFM` /
+scheme (`schemes/compressible/meshless/` (`mfm.py`, `mfv.py`, `temporal.py`), COMPRESSIBLE_SPH_PLAN E1): the EOS (`gamma`), the mode (`MFM` /
 `MFV`), the MUSCL order, the neighbour count `nngb` for the support re-derivation, the CFL
 factor, and the pass-through parameters of the core `warpSPHCore.mfm` backend (the
 `MeshlessWarp.build` closure solve and the `MeshlessWarp.rates` Riemann / limiter stage).
@@ -26,7 +26,7 @@ class MeshlessConfig:
     schemeName: str = field(default='Meshless SPH (MFM/MFV)', metadata={'description': 'Name of the scheme'})
 
     # temporal integration (D4: the step owns the whole time step, so the
-    # integrator must be single-evaluation -- see `schemes/compressible/meshless.py`). The
+    # integrator must be single-evaluation -- see `schemes/compressible/meshless/` (`mfm.py`, `mfv.py`, `temporal.py`)). The
     # per-mode default comes from the D4 measurement (COMPRESSIBLE_SPH_PLAN).
     temporalScheme: str = field(default='auto', metadata={"description": "the temporal scheme the step performs: 'auto' (per-mode default from the D4 measurement: MFM -> 'ssprk', MFV -> 'hancock'), 'hancock' (the core driver's single-stage MUSCL-Hancock + Euler; the G1 port-fidelity setting), 'ssprk' (two-stage SSPRK, rates evaluated at dt = 0), or 'kdk' (kick-drift-kick, rates at dt = 0)"})
 

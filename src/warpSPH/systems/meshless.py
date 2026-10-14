@@ -1,5 +1,5 @@
 """State / update / system triad for the meshless finite-mass / finite-volume (MFM / MFV)
-scheme (Hopkins 2015; COMPRESSIBLE_SPH_PLAN E1, `schemes/compressible/meshless.py`).
+scheme (Hopkins 2015; COMPRESSIBLE_SPH_PLAN E1, `schemes/compressible/meshless/` (`mfm.py`, `mfv.py`, `temporal.py`)).
 
 The integrated physics quantity is the *conserved* vector ``Q = (m, m v, m e_tot)`` per
 particle (a single ``(N, 2+dim)`` tensor) together with the positions. The primitives
@@ -70,7 +70,7 @@ class MeshlessSystem(BaseIntegrationSystem):
 
     def apply_position_update(self, update, spec: PositionUpdateSpec, **kwargs):
         # applies the step's exact net drift delta (pos += dt * dxdt, wrapping): the step
-        # (`schemes/compressible/meshless.py`, D4) owns the temporal scheme, so dxdt is its time-centred /
+        # (`schemes/compressible/meshless/` (`mfm.py`, `mfv.py`, `temporal.py`), D4) owns the temporal scheme, so dxdt is its time-centred /
         # drift velocity, not a raw start-of-step velocity. 'velocity' fills the integrator's
         # kick-tag slot only: the kick terms (current_velocity_dt / update_velocity_dt) are
         # None for the single-evaluation integrators the step admits, so it is never read --

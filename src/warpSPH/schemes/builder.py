@@ -33,7 +33,7 @@ from .compressible.crkSPH import crkSPH_step
 from .compressible.monaghan import compressibleSPH_Monaghan
 from .compressible.gsph import compressibleSPH_GSPH
 from .compressible.gsphInutsuka import compressibleSPH_InutsukaGSPH
-from .compressible.meshless import meshlessStep
+from .compressible.meshless import mfmStep, mfvStep
 from .pde.waveEquation import f_wave_equation
 from ..enumTypes import (
     ArtificialCompressibleSPHScheme, CompressibleSPHScheme,
@@ -129,7 +129,7 @@ def _mfm() -> SchemeBundle:
         SimulationState=MeshlessState,
         SimulationConfig=MFMConfig,
         SimulationUpdate=MeshlessSystemUpdate,
-        stepFunction=meshlessStep,
+        stepFunction=mfmStep,
         exportFunction=meshlessConfigToDict,
         importFunction=dictToMeshlessConfig,
     )
@@ -141,7 +141,7 @@ def _mfv() -> SchemeBundle:
         SimulationState=MeshlessState,
         SimulationConfig=MFVConfig,
         SimulationUpdate=MeshlessSystemUpdate,
-        stepFunction=meshlessStep,
+        stepFunction=mfvStep,
         exportFunction=meshlessConfigToDict,
         importFunction=dictToMeshlessConfig,
     )

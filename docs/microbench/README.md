@@ -18,3 +18,7 @@
 * `audit_{GSPH,InutsukaGSPH}_sod2d_{before,after}_2026-10-14.txt` -- the two Godunov steps before and after their cleanup (shared support solve, one validity check per
   stage, stage times deferred): GSPH integrator syncs 10.4 -> 4.2 per step, 7.05 -> 6.15 ms/step; Inutsuka 12.2 -> 8.2 syncs, wall unchanged (it still builds a second,
   larger-scale list per stage for the Gaussian reach and reads that reach on the host: 2 validity checks + 1 reach read per stage + rebuilds).
+* `audit_{MFM,MFV}_sod2d_{before,after}_2026-10-14.txt` -- the meshless steps before and after the MFM / MFV split (a restructure: counts unchanged, sections now named
+  `[mfm|mfv - NN]`). Per step: MFM (ssprk) 542 ops / 10 integrator syncs, MFV (hancock) 159 ops / 4 syncs, plus the timestep hook's geometry (320 ops, 9.3 syncs, in the
+  core `MeshlessWarp.build`). 2 syncs per step are the geometry hand-over's host `torch.equal` (`common.py takeGeometry`); a system-owned hand-over keyed on tensor versions would remove them
+  (not done: it trusts that the integrator's copy equals the stashed source).
