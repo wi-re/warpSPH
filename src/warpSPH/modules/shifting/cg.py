@@ -20,10 +20,17 @@ threshold bailout; ``-14`` max-iteration budget exhausted; ``-16`` indefinite /
 zero-curvature breakdown. ``convergence`` holds the per-iterate residual norm,
 with the final entry always the verified true residual ``||b - A x||`` of the
 returned iterate.
+
+The solver itself is `warpSPHCore.linalg.krylov.cg` (device-predicated: the stopping and breakdown tests run on the device, the iterate is frozen from
+the iteration a test fires, and the host reads one flag per `checkEvery` iterations -- bitwise the iterate, status and history of the host-branching
+loop that lived here, `tests/linalg/_legacyKrylov.py` in the core). This module keeps the legacy `(x, status, convergence)` call.
 """
 
 from typing import Callable, List, Optional, Tuple, Union
+
 import torch
+
+from warpSPHCore.linalg.krylov import cg as _cg
 
 __all__ = ['cgSolve']
 
@@ -40,90 +47,13 @@ def cgSolve(
     verbose: bool = False,
     threshold: Optional[float] = None,
     dim: int = 1,
+    checkEvery: int = 8,
 ) -> Tuple[torch.Tensor, int, List[torch.Tensor]]:
-    """Solve ``matvec(x) == b`` matrix-free with (left-)preconditioned conjugate
-    gradient. The operator must be symmetric positive definite (see the module
-    docstring for how the IISPH operator's negative diagonal is sign-flipped by
-    the dispatch before calling here)."""
-    xk = x0.clone() if x0 is not None else torch.zeros_like(b)
-
-    bnrm2 = torch.linalg.norm(b)
-    atol = max(float(atol), float(tol), float(rtol) * float(bnrm2))
-    convergence: List[torch.Tensor] = []
+    """Solve ``matvec(x) == b`` matrix-free with (left-)preconditioned conjugate gradient. The operator must be symmetric positive definite (see
+    the module docstring for how the IISPH operator's negative diagonal is sign-flipped by the dispatch before calling here)."""
+    result = _cg(matvec, b, x0, tol=tol, rtol=rtol, atol=atol, maxiter=maxiter, precond=precond, threshold=threshold, dim=dim,
+                 checkEvery=checkEvery)
+    out = result.legacy()
     if verbose:
-        print(f'PCG: initial |b| = {bnrm2}, atol = {atol}')
-
-    if bnrm2 == 0:
-        return xk, 0, convergence
-
-    n = b.shape[0]
-    if maxiter is None:
-        maxiter = n * 10
-    eps = torch.finfo(xk.dtype).eps
-
-    if precond is None:
-        psolve = (lambda v: v)
-    elif callable(precond):
-        psolve = precond
-    else:
-        psolve = (lambda v: precond * v)
-
-    def thresholdExceeded(x: torch.Tensor) -> bool:
-        if threshold is None:
-            return False
-        return bool(torch.any(torch.linalg.norm(x.view(-1, dim), dim=-1) > threshold))
-
-    def finish(x: torch.Tensor, status: int) -> Tuple[torch.Tensor, int, List[torch.Tensor]]:
-        # stamp every returned iterate with its verified true residual, so
-        # callers always know the quality of what they received
-        convergence.append(torch.linalg.norm(matvec(x) - b))
-        return x, status, convergence
-
-    # --- initial residual ----------------------------------------------------
-    r = b - matvec(xk)
-    rnrm = torch.linalg.norm(r)
-    convergence.append(rnrm)
-    if rnrm < atol:
-        if verbose:
-            print(f'\t[  0] already converged, |r| = {rnrm}')
-        return xk, 0, convergence
-    if thresholdExceeded(xk):
-        return finish(xk, -12)
-
-    # --- Krylov recurrence ---------------------------------------------------
-    z = psolve(r)
-    p = z.clone()
-    rz = torch.dot(r, z)
-
-    for k in range(maxiter):
-        if (not bool(torch.isfinite(rz))) or rz <= 0:
-            if verbose:
-                print(f'\t[{k:3d}] breakdown: r^T M r = {rz} (non-finite or non-positive)')
-            return finish(xk, -16)
-        ap = matvec(p)
-        pap = torch.dot(p, ap)
-        if (not bool(torch.isfinite(pap))) or pap <= 0:
-            # the operator is not positive definite in the search direction:
-            # CG's curvature is non-positive, so the method is not well-posed
-            # here (this is the indefinite case the operator probe quantifies)
-            if verbose:
-                print(f'\t[{k:3d}] indefinite: p^T A p = {pap} <= 0 (operator not SPD)')
-            return finish(xk, -16)
-        alpha = rz / pap
-        xk = xk + alpha * p
-        r = r - alpha * ap
-        rnrm = torch.linalg.norm(r)
-        convergence.append(rnrm)
-        if rnrm < atol:
-            if verbose:
-                print(f'\t[{k:3d}] converged, |r| = {rnrm}')
-            return xk, k, convergence
-        if thresholdExceeded(xk):
-            return finish(xk, -12)
-        z = psolve(r)
-        rz_new = torch.dot(r, z)
-        beta = rz_new / rz
-        p = z + beta * p
-        rz = rz_new
-
-    return finish(xk, -14)
+        print(f'PCG: status {out[1]}, {len(out[2])} residual entries, final |r| = {float(out[2][-1]) if out[2] else float("nan")}')
+    return out
