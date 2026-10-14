@@ -382,7 +382,8 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
     # trajectory/state storing, which reads the per-stage data a replayed
     # step does not reconstruct.
     deferStageTimes = ctx.scheme in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH, CompressibleSPHScheme.Monaghan,
-                                      CompressibleSPHScheme.GSPH, CompressibleSPHScheme.InutsukaGSPH)
+                                      CompressibleSPHScheme.GSPH, CompressibleSPHScheme.InutsukaGSPH,
+                                      WeaklyCompressibleSPHScheme.deltaSPH, WeaklyCompressibleSPHScheme.sun2017DeltaSPH)
     stepGraph = None
     graphWanted = spec.cudaGraph
     if ctx.scheme in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH):
@@ -833,7 +834,7 @@ def _stepGraphable(ctx, runningState=None) -> bool:
         return ctx.scratch.get('compSPHStepMode') == 'graph'        # `stepMode`, resolved before the loop
     if not isinstance(ctx.scheme, WeaklyCompressibleSPHScheme):
         return False
-    from ..schemes.weaklyCompressible.deltaSPH import _rhsIsGraphable
+    from ..schemes.weaklyCompressible.graphRoute import rhsIsGraphable as _rhsIsGraphable
     return _rhsIsGraphable(ctx.schemeConfig, None)
 
 

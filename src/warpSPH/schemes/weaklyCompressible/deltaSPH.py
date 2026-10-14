@@ -1,31 +1,21 @@
-"""The delta-SPH (weakly-compressible) step: build adjacency, then density
-via `computeDensities` (only if unset) followed by an mDBC density
-correction (`computeMdbcDensity`). The call site's inline comment claims this
-is "skipped since no boundaries are present", which is stale as a comment --
-the call itself is unconditional -- but harmless in practice, since
-`computeMdbcDensity`/`computeBoundaryVelocities` both no-op internally
-(`if not torch.any(currentState.kinds == 1): return unchanged`) when there
-are no boundary-kind particles. `computeBoundaryVelocities` only overwrites
-the boundary-kind (`kinds == 1`) entries of `currentState.velocities` (fluid
-entries pass through unchanged); the in-place update is not reverted
-afterwards (the revert line is commented out), so those entries carry the
-BC-enforced velocity into the rest of the step and into the next one -- for
-`dxdt` specifically this has no observable effect, since non-fluid particles'
-`dxdt`/`dvdt`/`drhodt` are zeroed after `enforceUpdates` regardless (see
-below). After the weakly-compressible EOS and free-surface detection,
-`gradRho`/`gradRhoL` are computed only when
-`schemeConfig.diffusionParams.densityDiffusionTerm` actually needs them
-(`denormalized(Only)` vs `deltaSPH`/`deltaOnly`) and fed to
-`computeDensityDiffusion`; velocity diffusion, continuity `drhodt`,
-surface-aware pressure force, forcing, gravity, and the mDBC no-penetration
-shift (converted from a position correction to an acceleration via `/dt`)
-are summed into the final update. Non-fluid particles (`kinds != 0`) have
-their `dxdt`/`dvdt`/`drhodt` zeroed after `enforceUpdates`, so boundary/ghost
-motion comes entirely from the BC machinery, not integration. Large stretches
-of commented-out code (an alternate Shepard-corrected density path, per-term
-diagnostic prints, a `TimedBlock`/`performanceDict` profiling scaffold
-superseded by the active `record_function` markers) are left in place, not
-removed (tracked separately in docs/historic_plans/CLEANUP_PLAN.md).
+"""The delta-SPH (weakly compressible) step, and delta+-SPH (`Sun2017DeltaSPHConfig`: the same step with two config defaults).
+
+`deltaSPH_step` builds the adjacency and then evaluates the right-hand side `_deltaSPH_rhs`, eagerly or (with `schemeConfig.cudaGraph`, when
+`graphRoute.rhsIsGraphable`) from a CUDA graph. The right-hand side is a list of single-purpose regions (one `record_function` each, numbered in call order,
+`[deltaSPH - NN]`):
+
+    density (if unset) -> mDBC density -> boundary velocities -> Dirichlet BCs -> weakly compressible EOS -> analytic wall aggregates -> free-surface
+    detection -> gradRho / gradRhoL -> density diffusion -> velocity diffusion -> continuity -> surface-aware pressure force (+ wall terms) -> forcing
+    -> gravity -> mDBC no-penetration shift -> update -> BCs on the update
+
+Details worth knowing (each used to be a paragraph of this docstring):
+
+* ``computeMdbcDensity`` / ``computeBoundaryVelocities`` no-op when there are no boundary-kind particles; ``computeBoundaryVelocities`` overwrites only the
+  boundary-kind entries of ``velocities`` and the overwrite is not reverted, so those entries carry the BC-enforced velocity through the step and into the
+  next (no effect on ``dxdt``: non-fluid ``dxdt`` / ``dvdt`` / ``drhodt`` are zeroed after ``enforceUpdates``, so boundary motion comes from the BC machinery).
+* ``gradRho`` / ``gradRhoL`` are computed only when ``schemeConfig.diffusionParams.densityDiffusionTerm`` needs them (``denormalized(Only)`` vs ``deltaSPH`` / ``deltaOnly``).
+* ``freezeDiffusionAcrossStages`` (Sun et al. 2017 Sec. 2, the delta+ preset) evaluates the two diffusive terms once per real step and holds them across the RK stages.
+* The mDBC no-penetration shift is a velocity correction made an acceleration by ``/ config.dt`` (the real step length, not the stage dt): see region 19.
 """
 
 from ...configurations import SimulationConfig, WeaklyCompressibleSPHConfig
@@ -38,21 +28,24 @@ from ...modules.eos import weaklyCompressibleEOS
 from ...modules.gravity import computeGravity, computeBodyForce, bodyForceVector
 from ...modules.mdbc import computeBoundaryVelocities, computeMdbcDensity, computeMdbcDensityBand, computeMdbcDensityEnglish2025, computeMdbcNoPenShift
 from ...modules.momentum import computeMomentum
-from ...modules.pressure import computePressureForceSurfaceAware, antuonoSwitch
+from ...modules.pressure import computePressureForceSurfaceAware
 from ...modules.surfaceDetection import detectFreeSurface
-from ...modules.util import countNeighbors
 from ...enumTypes import DensityDiffusionScheme
 from warpSPHCore import (SupportScheme, buildVerletList, OperationProperties,
                          WarpOperation, warpOperation, RenormalizationState)
+from warpSPHCore.profiling import record_function
 
 import torch
-from ...utils.timer import TimedBlock
-from torch.profiler import profile, ProfilerActivity
-from warpSPHCore.profiling import record_function
+
+from .analyticWall import bookWallLoads, evaluateStageWall, wallPressureViscousAcceleration
+from .graphRoute import graphedRHS, liveConfigKey, rhsIsGraphable
+from .surfaceMask import surfaceMaskAcrossStages
+
 __all__ = ['deltaSPH_step']
 
-
-from ...modules.analyticBoundary import evaluateWall, viscousPrefactor, wallLoads, wallPressureAcceleration, wallViscousAcceleration
+#: (kept for the callers that import the old private names)
+_rhsIsGraphable = rhsIsGraphable
+_surfaceMaskAcrossStages = surfaceMaskAcrossStages
 
 
 def deltaSPH_step(
@@ -63,129 +56,46 @@ def deltaSPH_step(
     verbose = False,
     stageIndex = None,
 ):
-    currentSystem = system#
+    currentSystem = system
     currentState = currentSystem.state
-    adjacency = currentSystem.adjacency
 
-    # 1. Compute adjacency
-    # with TimedBlock('compute adjacency', use_cuda=True, device=config.device) as tb_adjacency:
-    with record_function("[warpSPH] - [deltaSPH - 01] - compute adjacency"):
-        verletScale = config.verletScale
-
-        adjacency = buildVerletList(
-            currentState, 
+    with record_function("[warpSPH] - [deltaSPH - 01] adjacency"):
+        currentSystem.adjacency = buildVerletList(
+            currentState,
             config.domain, verletScale = config.verletScale, supportMode = SupportScheme.SuperSymmetric,
-            priorNeighborhood = adjacency,
+            priorNeighborhood = currentSystem.adjacency,
             verbose = False)
-        currentSystem.adjacency = adjacency
 
-    # Everything after the adjacency update is the right-hand side proper;
-    # with `schemeConfig.cudaGraph` it is captured once per Verlet-list
-    # generation and replayed (utils/cudaGraph.py) -- bitwise the same result,
-    # without the per-op CPU cost that dominates small problems.
-    if getattr(schemeConfig, 'cudaGraph', False) and _rhsIsGraphable(schemeConfig, stageIndex):
-        return _graphedRHS(schemeConfig)(currentSystem, dt, config, schemeConfig, verbose, stageIndex,
-                                         extraKey=stageIndex)
+    # Everything after the adjacency update is the right-hand side proper; with `schemeConfig.cudaGraph` it is captured once per
+    # Verlet-list generation and replayed (graphRoute.py).
+    if getattr(schemeConfig, 'cudaGraph', False) and rhsIsGraphable(schemeConfig, stageIndex):
+        return graphedRHS(schemeConfig, _deltaSPH_rhs)(currentSystem, dt, config, schemeConfig, verbose, stageIndex,
+                                                       extraKey=(stageIndex, liveConfigKey(schemeConfig)))
     return _deltaSPH_rhs(currentSystem, dt, config, schemeConfig, verbose, stageIndex)
 
 
-def _rhsIsGraphable(schemeConfig, stageIndex) -> bool:
-    """Whether `_deltaSPH_rhs` is a pure function of the state here, i.e.
-    safe to capture: a graph bakes in every Python scalar it saw at capture,
-    so anything depending on `t`/`dt` (Dirichlet/forcing/update BC hooks,
-    the 'derivative' no-penetration shift's `/ config.dt`) must run eagerly,
-    as must frozen diffusion under a stage-indexed integrator: its later
-    stages read the tensors stage 0 left in `schemeConfig._frozenDiffusionCache`,
-    Python-side state a replay does not refresh. (`stageIndex is None`, e.g.
-    symplectic Euler, recomputes the diffusion every call and never reads it.)"""
-    if getattr(schemeConfig, 'mdbcNoPenShiftMode', 'derivative') == 'derivative':
-        return False
-    # analytic walls: capturable when the support is the host constant fixed at initialisation (no device-to-host read inside the capture)
-    if getattr(schemeConfig, 'boundaryProvider', None) is not None:
-        if not getattr(schemeConfig, '_analyticSupport', None):
-            return False
-        # a mixed scene's particle bodies are moved by `updateBodyParticlesWCSPH` (host reads), not capturable
-        bodies = getattr(schemeConfig, 'rigidBodies', None) or []
-        if any(getattr(rb, 'representation', None) is None for rb in bodies):
-            return False
-        # a moving analytic body (prescribed or driven by the fluid) is advanced in place by every execution of the step, and the graph's validation executes it more than once: only static bodies
-        # (evaluated once, at the first call)
-        static = getattr(schemeConfig, '_analyticBodiesStatic', None)
-        if static is None:
-            # a prescribed spin of AXISYMMETRIC bodies about their own centres (`schemeConfig.analyticSpinAxisymmetric`, e.g. the inner cylinder of Taylor-Couette) changes no wall term between steps: its pose is irrelevant, only its angular velocity enters
-            static = not any(rb.dynamic or (float(rb.angularVelocity) != 0.0 and not getattr(schemeConfig, 'analyticSpinAxisymmetric', False)) or float(rb.linearVelocity.abs().max()) != 0.0 for rb in bodies)
-            schemeConfig._analyticBodiesStatic = static
-        if not static:
-            return False
-    # the implicit shifting solves its linear system with host-synchronising Krylov solvers: a capture of the step fails and leaves the CUDA context in an error state
-    sp = getattr(schemeConfig, 'shiftProperties', None)
-    if sp is not None and sp.active and getattr(sp.scheme, 'name', None) in ('implicit', 'dynamic'):
-        return False
-    if getattr(schemeConfig, 'freezeDiffusionAcrossStages', False) and stageIndex is not None:
-        return False
-    # both keep Python-side per-step state (the stage-0 mask, flip counters)
-    if getattr(schemeConfig, 'freezeSurfaceMaskAcrossStages', False) or \
-            getattr(schemeConfig, 'surfaceMaskDiagnostics', False):
-        return False
-    for bc in getattr(schemeConfig, 'boundaryConditions', None) or []:
-        if bc.dirichletFunctions or bc.forcingFunctions or bc.updateFunctions:
-            return False
-    return True
+def _gatedPressureRenormalization(currentState, config, adjacency, renormalizationState):
+    """The renormalization matrices of the pressure force, gated per particle (DELTASPH_VALIDATION_PLAN sections 5.23 / 5.32).
 
-
-def _isFirstStage(t, dt, schemeConfig, stageIndex) -> bool:
-    """Whether this RHS call is the first stage of a real step. From
-    `stageIndex` where the integrator passes one (RungeKuttaB); otherwise
-    (symplectic Euler: k0 at t^n, k1 at t^n + dt/2, both called with the
-    stage `dt/2` and no index) from the time: a later stage sits exactly one
-    stage-`dt` after the step's first one."""
-    if stageIndex is not None:
-        return stageIndex == 0
-    t = float(t)
-    t0 = getattr(schemeConfig, '_surfaceMaskStepT', None)
-    if t0 is not None and abs(t - (t0 + float(dt))) <= 1e-9 * max(1.0, abs(t)):
-        return False
-    return True
-
-
-def _surfaceMaskAcrossStages(currentState, dt, schemeConfig, stageIndex, t) -> None:
-    """OPEN_PROBLEMS.md §1 step 1: the Antuono switch's surface mask,
-    measured (`surfaceMaskDiagnostics`) and optionally frozen across the
-    stages of a step (`freezeSurfaceMaskAcrossStages`). Eager only."""
-    freeze = getattr(schemeConfig, 'freezeSurfaceMaskAcrossStages', False)
-    diag = getattr(schemeConfig, 'surfaceMaskDiagnostics', False)
-    if not (freeze or diag):
-        return
-    mask = currentState.surfaceIndicators
-    if _isFirstStage(t, dt, schemeConfig, stageIndex):
-        stats = getattr(schemeConfig, '_surfaceMaskStats', None)
-        if diag:
-            prev = getattr(schemeConfig, '_surfaceMaskStepStart', None)
-            stats = {'maskSurface': int(mask.sum()), 'maskFlipsIntraStep': 0,
-                     'maskFlipsStepToStep': (int((prev != mask).sum())
-                                             if prev is not None and prev.shape == mask.shape else -1)}
-            schemeConfig._surfaceMaskStats = stats
-        schemeConfig._surfaceMaskStepStart = mask.clone()
-        schemeConfig._surfaceMaskStepT = float(t)
-        return
-    start = getattr(schemeConfig, '_surfaceMaskStepStart', None)
-    if start is None or start.shape != mask.shape:
-        return
-    if diag:
-        # rows whose classification this stage differs from the step's first
-        stats = schemeConfig._surfaceMaskStats
-        stats['maskFlipsIntraStep'] = max(stats['maskFlipsIntraStep'], int((start != mask).sum()))
-    if freeze:
-        currentState.surfaceIndicators = start.clone()
-
-
-def _graphedRHS(schemeConfig):
-    g = getattr(schemeConfig, '_rhsGraph', None)
-    if g is None:
-        from ...utils.cudaGraph import GraphedStateFunction
-        g = GraphedStateFunction(_deltaSPH_rhs, 'deltaSPH right-hand side')
-        schemeConfig._rhsGraph = g
-    return g
+    Applying ``Li`` unconditionally makes Marrone 3.1's free-surface peak 8.8x WORSE: ``Li`` comes from ``detectFreeSurface``'s covariance fit, which is most
+    ill-conditioned exactly in the sparse / disordered neighbourhoods where the pressure-force truncation artifact lives. DualSPHysics' advanced-shifting
+    extension instead gates the renormalized form on kernel-sum COMPLETENESS (``poup1 > 0.95``, a plain partition-of-unity sum) AND bulk classification, falling
+    back to the raw gradient everywhere else (every free-surface particle included). Reproduced here on the matrix itself (per particle): the identity matrix for
+    a gated-off particle makes ``matmul(Li, gradw_ij) == gradw_ij``, with no kernel change. Same support scheme as ``computePressureForceSurfaceAware``,
+    ``surfaceIndicators`` as the bulk / free-surface classification."""
+    completenessProps = OperationProperties(
+        kernel=config.kernel, operation=WarpOperation.Interpolate,
+        supportMode=SupportScheme.SuperSymmetric)
+    kernelCompleteness = warpOperation(
+        currentState, completenessProps, domain=config.domain,
+        referenceValues=torch.ones_like(currentState.densities),
+        adjacency=adjacency)
+    wellConditioned = (kernelCompleteness > 0.95) & (currentState.surfaceIndicators == 0)
+    Li = renormalizationState.renormalizationMatrices
+    dim = currentState.positions.shape[1]
+    identity = torch.eye(dim, dtype=Li.dtype, device=Li.device)
+    gatedMatrices = torch.where(wellConditioned.view(-1, 1, 1), Li, identity)
+    return RenormalizationState(renormalizationMatrices=gatedMatrices)
 
 
 def _deltaSPH_rhs(
@@ -199,35 +109,12 @@ def _deltaSPH_rhs(
     currentState = currentSystem.state
     adjacency = currentSystem.adjacency
 
-    # 2. Compute density if density is none
-    # with TimedBlock('compute density', use_cuda=True, device=config.device) as tb_density:
-    with record_function("[warpSPH] - [deltaSPH - 02] - compute density"):
+    with record_function("[warpSPH] - [deltaSPH - 02] density"):
         if currentState.densities is None:
             print("Computing densities...")
             currentState.densities = computeDensities(currentState, config, schemeConfig, adjacency)
-    # 3. Skipped mDBC density computation since no boundaries are present
-    # with TimedBlock('compute mDBC density', use_cuda=True, device=config.device) as tb_mdbc:
-    with record_function("[warpSPH] - [deltaSPH - 03] - compute mDBC density"):
-        numNeighbors = countNeighbors(currentState, config, schemeConfig, adjacency)
-        # rho = computeDensities(currentState, config, schemeConfig, adjacency)
-        # rhoCurrent = currentState.densities.clone()
-        # currentState.densities = rho
-        # shepDenom = warpOperation(
-        #     currentState,
-        #     OperationProperties(
-        #         kernel = config.kernel,
-        #         operation = WarpOperation.Interpolate,
-        #         supportMode = SupportScheme.Gather, # cullen switch E.1 in the CRK paper uses gather for density estimation
-        #     ),
-        #     queryValues = torch.ones_like(currentState.densities),
-        #     domain = config.domain,
-        #     adjacency = adjacency,
-        # )
-        # currentState.densities = rhoCurrent
-        # mask = torch.logical_and(numNeighbors < 9, currentState.kinds == 0)
-        # currentState.densities[mask] = rho[mask] / shepDenom[mask]
-        # currentState.densities[numNeighbors == 1] = schemeConfig.fluid.restDensity
 
+    with record_function("[warpSPH] - [deltaSPH - 03] mDBC density"):
         _mdbcDensityScheme = getattr(schemeConfig, 'mdbcDensityScheme', 'ramped')
         if _mdbcDensityScheme == 'band':
             currentState.densities = computeMdbcDensityBand(currentState, config, schemeConfig, adjacency)
@@ -236,256 +123,112 @@ def _deltaSPH_rhs(
         else:
             currentState.densities = computeMdbcDensity(currentState, config, schemeConfig, adjacency)
 
-        # print(f'Fluid density stats: min={currentState.densities[currentState.kinds == 0].min().item()}, max={currentState.densities[currentState.kinds == 0].max().item()}, mean={currentState.densities[currentState.kinds == 0].mean().item()}')
-        # print(f'Boundary density stats: min={currentState.densities[currentState.kinds == 1].min().item()}, max={currentState.densities[currentState.kinds == 1].max().item()}, mean={currentState.densities[currentState.kinds == 1].mean().item()}')
-    # 4. enforce BCs
-    with record_function("[warpSPH] - [deltaSPH - 06] - compute boundary velocities"):
-        currentVelocities = currentState.velocities.clone()
+    with record_function("[warpSPH] - [deltaSPH - 04] boundary velocities"):
         currentState.velocities = computeBoundaryVelocities(currentState, config, schemeConfig, adjacency)
-    
 
-    # with TimedBlock('enforce BCs', use_cuda=True, device=config.device) as tb_bcs:
-    with record_function("[warpSPH] - [deltaSPH - 04] - enforce BCs"):
+    with record_function("[warpSPH] - [deltaSPH - 05] Dirichlet BCs"):
         enforceDirichlet(currentSystem, currentSystem.t, config.dt, config, schemeConfig)
-    # 5. compute EOS (WC version)
-    # with TimedBlock('compute EOS', use_cuda=True, device=config.device) as tb_eos:
-    with record_function("[warpSPH] - [deltaSPH - 05] - compute EOS"):
+
+    with record_function("[warpSPH] - [deltaSPH - 06] EOS"):
         currentState.pressures = weaklyCompressibleEOS(currentState, schemeConfig)
 
-    # Analytic boundaries (a boundary provider, no wall particles): the kernel integrals over the solid at the fluid
-    # particles, once per right-hand-side evaluation; `modules/analyticBoundary` turns them into the wall terms of
-    # the stages below. None without analytic bodies: the particle path above is then untouched.
+    # Analytic boundaries (a boundary provider, no wall particles): the kernel integrals over the solid at the fluid particles, once per right-hand-side
+    # evaluation. None without analytic bodies: the particle path above is then untouched.
     provider = getattr(schemeConfig, 'boundaryProvider', None)
-    wall = None
-    if provider is not None:
-        if getattr(schemeConfig, 'analyticWallPressure', 'hydrostatic') == 'mls':
-            raise NotImplementedError("analyticWallPressure='mls' is an omniIncompressible option (the delta+ wall pressure is hydrostatic or normal)")
-        with record_function("[warpSPH] - [deltaSPH - 05b] - analytic wall aggregates"):
-            wall = evaluateWall(provider, currentState, config, schemeConfig, computeGravity(currentState, config, schemeConfig, adjacency))
-    # 6. Skipped boundary velocity computation since no boundaries are present
-    # with TimedBlock('compute boundary velocities', use_cuda=True, device=config.device) as tb_boundary_velocities:
+    with record_function("[warpSPH] - [deltaSPH - 07] analytic wall aggregates"):
+        wall = evaluateStageWall(currentState, config, schemeConfig, adjacency)
 
-    # 7. Compute Covariance Matrices for gradRho_l terms
-    # Done in gradRhoL for now
-    # 8. Run surface detection (only if free surface)
-    # with TimedBlock('compute surface detection', use_cuda=True, device=config.device) as tb_surface:
-    with record_function("[warpSPH] - [deltaSPH - 08] - compute surface detection"):
-        fs, fsm, n, renormalizationState_, lMin = detectFreeSurface(currentState, config, schemeConfig, schemeConfig.surfaceDetectionConfig, adjacency, returnNormals = True) 
+    with record_function("[warpSPH] - [deltaSPH - 08] free-surface detection"):
+        fs, fsm, n, renormalizationState_, lMin = detectFreeSurface(currentState, config, schemeConfig, schemeConfig.surfaceDetectionConfig, adjacency, returnNormals = True)
         currentState.surfaceIndicators = (fsm > 0.5).to(torch.int32)
         currentState.surfaceNormals = n
         currentState.surfaceLambdas = lMin
-        _surfaceMaskAcrossStages(currentState, dt, schemeConfig, stageIndex, currentSystem.t)
-        # print(f'Surface particles: {currentState.surfaceIndicators.sum().item()} / {currentState.surfaceIndicators.shape[0]} ({100 * currentState.surfaceIndicators.sum().item() / currentState.surfaceIndicators.shape[0]:.2f}%)')
+        surfaceMaskAcrossStages(currentState, dt, schemeConfig, stageIndex, currentSystem.t)
 
-
-    # 9-11. gradRho/gradRhoL + the two diffusive terms (density diffusion,
-    # velocity/artificial-viscosity diffusion). Sun et al. 2017 Sec. 2
-    # (Antuono/Jameson technique) evaluates these ONCE per real step, at the
-    # committed t^n state, and holds them fixed across every RK sub-stage --
-    # `schemeConfig.freezeDiffusionAcrossStages` (default False, so every
-    # existing case is unaffected) opts into that. `stageIndex` is threaded in
-    # by `warpSPHIntegrators.RungeKuttaB` (opt-in: only functions whose
-    # signature declares the parameter receive it), 0 (or None, e.g. under a
-    # single-evaluation integrator where freezing is a no-op anyway) for the
-    # first stage of a real step, 1.. for later sub-stages.
+    # The two diffusive terms. Sun et al. 2017 Sec. 2 (Antuono / Jameson technique) evaluates them ONCE per real step, at the committed t^n state, and holds
+    # them fixed across every RK sub-stage: `schemeConfig.freezeDiffusionAcrossStages` (default False; the delta+ preset sets it) opts in. `stageIndex` is threaded in by
+    # `warpSPHIntegrators.RungeKuttaB` (0, or None under a single-evaluation integrator where freezing is a no-op, for the first stage; 1.. for later ones).
     freezeDiffusion = getattr(schemeConfig, 'freezeDiffusionAcrossStages', False)
     isFirstStage = stageIndex is None or stageIndex == 0
     cached = getattr(schemeConfig, '_frozenDiffusionCache', None) if freezeDiffusion else None
+    diffusionTerm = schemeConfig.diffusionParams.densityDiffusionTerm
 
     if freezeDiffusion and not isFirstStage and cached is not None:
-        with record_function("[warpSPH] - [deltaSPH - 09-11] - reuse frozen diffusion"):
+        with record_function("[warpSPH] - [deltaSPH - 09-12] reuse frozen diffusion"):
             drhodt_diss, dvdt_diss = cached
     else:
-        #9. Compute gradRho and gradRhoL
-        with record_function("[warpSPH] - [deltaSPH - 09] - compute gradRho and gradRhoL"):
-            if schemeConfig.diffusionParams.densityDiffusionTerm == DensityDiffusionScheme.denormalized or schemeConfig.diffusionParams.densityDiffusionTerm == DensityDiffusionScheme.denormalizedOnly:
+        with record_function("[warpSPH] - [deltaSPH - 09] gradRho"):
+            if diffusionTerm == DensityDiffusionScheme.denormalized or diffusionTerm == DensityDiffusionScheme.denormalizedOnly:
                 gradRho = computeGradRho(currentState, config, schemeConfig, adjacency)
             else:
                 gradRho = None
-        with record_function("[warpSPH] - [deltaSPH - 09] - compute gradRhoL"):
-            if schemeConfig.diffusionParams.densityDiffusionTerm == DensityDiffusionScheme.deltaSPH or schemeConfig.diffusionParams.densityDiffusionTerm == DensityDiffusionScheme.deltaOnly:
+        with record_function("[warpSPH] - [deltaSPH - 10] gradRhoL"):
+            if diffusionTerm == DensityDiffusionScheme.deltaSPH or diffusionTerm == DensityDiffusionScheme.deltaOnly:
                 gradRhoL = computeGradRhoL(currentState, config, schemeConfig, adjacency, L = renormalizationState_)
             else:
                 gradRhoL = None
-
-        # 10. Compute drhodt_diss
-        with record_function("[warpSPH] - [deltaSPH - 10] - compute drhodt_diss"):
+        with record_function("[warpSPH] - [deltaSPH - 11] density diffusion"):
             drhodt_diss = computeDensityDiffusion(currentState, config, schemeConfig, adjacency, gradRho, gradRhoL)
-
-        # 11. Compute dvdt_diss.
-        # `approachOnly=False`: Marrone 2011 Eq. (5b) / Sun 2017 Eq. (1) apply the
-        # artificial-viscosity term `alpha h c0 pi_ij` to *every* pair, not only
-        # approaching ones. The approach-only clamp is Monaghan's shock viscosity,
-        # a different term -- it under-damps the tensile/shear regions a violent
-        # free-surface impact grows. See `DELTASPH_VALIDATION_PLAN.md` Part 1.
-        with record_function("[warpSPH] - [deltaSPH - 11] - compute dvdt_diss"):
+        # `approachOnly=False`: Marrone 2011 Eq. (5b) / Sun 2017 Eq. (1) apply the artificial-viscosity term `alpha h c0 pi_ij` to *every* pair, not only
+        # approaching ones; the approach-only clamp is Monaghan's shock viscosity, which under-damps the tensile / shear regions a violent free-surface impact
+        # grows (DELTASPH_VALIDATION_PLAN Part 1).
+        with record_function("[warpSPH] - [deltaSPH - 12] velocity diffusion"):
             dvdt_diss = computeVelocityDiffusion(currentState, config, schemeConfig, adjacency,
                                                  approachOnly=False, wall=wall)      # the wall's share is inside the (possibly frozen) tuple
-
         if freezeDiffusion:
             schemeConfig._frozenDiffusionCache = (drhodt_diss, dvdt_diss)
 
-    # 12. Compute drhodt
-    # with TimedBlock('compute drhodt', use_cuda=True, device=config.device) as tb_drhodt:
-    with record_function("[warpSPH] - [deltaSPH - 12] - compute drhodt"):
+    with record_function("[warpSPH] - [deltaSPH - 13] continuity"):
         drhodt = computeMomentum(currentState, config, schemeConfig, adjacency, wall=wall)      # wall: free-slip mirror in the continuity equation
 
-    # 13. Compute dvdt from pressure
-    # with TimedBlock('compute dvdt', use_cuda=True, device=config.device) as tb_dvdt:
-    with record_function("[warpSPH] - [deltaSPH - 13] - compute dvdt from pressure"):
+    with record_function("[warpSPH] - [deltaSPH - 14] pressure force"):
         pressureRenormalizationState = None
         if getattr(schemeConfig, 'pressureForceRenormalized', False):
-            # DELTASPH_VALIDATION_PLAN.md §5.23 found applying `Li` to the
-            # pressure-force gradient unconditionally makes Marrone 3.1's
-            # free-surface peak 8.8x WORSE, not better: `Li` comes from
-            # `detectFreeSurface`'s own covariance fit, which is most
-            # ill-conditioned exactly in the sparse/disordered neighbourhoods
-            # where the pressure-force truncation artifact
-            # ([[sph-symmetric-pressure-truncation-artifact]]) lives, so
-            # renormalizing there amplifies noise instead of correcting it.
-            # §5.32 traced what DualSPHysics' own (production, proven)
-            # advanced-shifting/ALE extension actually does instead: gate the
-            # renormalized form on kernel-sum COMPLETENESS (its `poup1`, a
-            # plain Shepard/partition-of-unity sum -- ~1.0 for a full,
-            # regular neighbourhood, well below 1 wherever support is
-            # truncated) AND bulk classification, falling back to the raw,
-            # unrenormalized gradient everywhere else -- including every
-            # free-surface particle. Reproduced here: same support scheme
-            # `computePressureForceSurfaceAware` itself uses (so the
-            # completeness measure reflects the identical neighbourhood the
-            # pressure force actually sees), `currentState.surfaceIndicators`
-            # as the bulk/free-surface classification (this codebase's own
-            # Barecasco-based analogue of DualSPHysics' `fstype`), and
-            # DualSPHysics' own `poup1>0.95` threshold. Gating is done here
-            # (on the renormalization MATRIX itself, per particle) rather
-            # than inside `wp_surfaceAware.py`'s kernel, since
-            # `useGradientRenormalization` there is a single call-wide flag,
-            # not per-particle -- substituting the identity matrix for a
-            # gated-off particle makes `matmul(Li, gradw_ij) == gradw_ij`,
-            # exactly the unrenormalized fallback, with no kernel changes.
-            completenessProps = OperationProperties(
-                kernel=config.kernel, operation=WarpOperation.Interpolate,
-                supportMode=SupportScheme.SuperSymmetric)
-            kernelCompleteness = warpOperation(
-                currentState, completenessProps, domain=config.domain,
-                referenceValues=torch.ones_like(currentState.densities),
-                adjacency=adjacency)
-            wellConditioned = (kernelCompleteness > 0.95) & (currentState.surfaceIndicators == 0)
-            Li = renormalizationState_.renormalizationMatrices
-            dim = currentState.positions.shape[1]
-            identity = torch.eye(dim, dtype=Li.dtype, device=Li.device)
-            gatedMatrices = torch.where(wellConditioned.view(-1, 1, 1), Li, identity)
-            pressureRenormalizationState = RenormalizationState(renormalizationMatrices=gatedMatrices)
+            pressureRenormalizationState = _gatedPressureRenormalization(currentState, config, adjacency, renormalizationState_)
         dvdt_pressure = computePressureForceSurfaceAware(
             currentState, config, schemeConfig, adjacency,
             renormalizationState=pressureRenormalizationState, wall=wall)      # wall: the wall's pressure force, same Antuono switch as the fluid pairs
 
-    accVP = None
-    if wall is not None and getattr(schemeConfig, 'wallPressureViscous', False):
-        # the wall pressure condition with the viscous term (the boundaries repo's `wallPressureViscous`): at a no-slip wall the momentum balance gives grad p = rho (g + f - a_wall) + rho nu lap u, so the ghost
-        # pressure extends with the hydrostatic gradient (already in A) PLUS the particle's own viscous acceleration (fluid pairs + wall term): matters where the pressure is viscous-dominated (flow past a curved wall at low Re)
-        from warpSPHBoundaries.scene import WallOutput
-        a1v = (schemeConfig.fluid.restDensity * dvdt_diss.double())[None].expand(wall.G.shape[0], -1, -1).contiguous()
-        Av = wall.wm * wall.agg.evaluate((WallOutput('A', 0, 'a1g1'),), a1=a1v)['A']
-        accVP = -Av / currentState.densities.double()[None, :, None]                      # [B, N, 2]
-        dvdt_pressure = dvdt_pressure + accVP.sum(0).to(dvdt_pressure.dtype)
-    if wall is not None and (getattr(schemeConfig, 'analyticWallLoads', False) or any(rb.dynamic for rb in provider.rigidBodies)):
-        # the load of the fluid on every analytic body (pressure, wall viscous): the reaction to the wall terms, booked on the RigidBody for diagnostics and for the free bodies
-        with record_function("[warpSPH] - [deltaSPH - 13b] - analytic wall loads"):
-            hWall, wm = wall.support, wall.wm
-            switch = antuonoSwitch(currentState.pressures, currentState.surfaceIndicators)
-            if getattr(schemeConfig, 'pressureConsistent', False):
-                # the load must not depend on the pressure level: only the deviation from the mean pressure of the fluid exerts a net force (`pressureConsistent`: the wall's symmetric term 2 (P - mean P) G + A)
-                fl = currentState.kinds == 0
-                Pload = currentState.pressures - (currentState.pressures * fl).sum() / fl.sum()                     # the mean over the fluid rows, without a boolean-mask gather (a host sync)
-                accP = (-(2.0 * Pload.double()[None, :, None] * wall.G.double() + wall.A.double()) / currentState.densities.double()[None, :, None]).to(wall.dtype)
-            else:
-                accP = wallPressureAcceleration(wall, currentState.pressures, switch, currentState.densities, wallMass=wm, h=hWall, perBody=True)
-            if accVP is not None:
-                accP = accP + accVP.to(accP.dtype)
-            if getattr(schemeConfig, 'wallViscosityClosure', 'mirror') == 'noslipMoment':
-                # the no-slip moment closure's per-body term (its balance needs the fluid-only Morris acceleration of the particles)
-                from ...modules.analyticBoundary.wallViscosity import wallNoSlipAcceleration
-                viscf = computeVelocityDiffusion(currentState, config, schemeConfig, adjacency, wall=False)
-                accV = wallNoSlipAcceleration(currentState, config, schemeConfig, adjacency, wall, viscf, perBody=True)
-            else:
-                accV = wallViscousAcceleration(wall, currentState.densities, currentState.velocities, viscousPrefactor(schemeConfig, config, hWall), hWall, wallMass=wm, kernel=config.kernel, perBody=True)
-            loads = wallLoads(accP, accV, currentState.positions, currentState.masses, torch.stack([rb.centerOfMass.to(torch.float64).reshape(2) for rb in provider.rigidBodies]))
-            for bi, rb in enumerate(provider.rigidBodies):
-                cur = getattr(rb, 'load', None)
-                if cur is not None and cur.shape == loads[:, bi, :].shape and cur.dtype == loads.dtype and cur.device == loads.device:
-                    cur.copy_(loads[:, bi, :])                       # in place: a CUDA-graph replay updates this tensor, a fresh one would be left at the state of the capture
-                else:
-                    rb.load = loads[:, bi, :].clone()
+    with record_function("[warpSPH] - [deltaSPH - 15] wall pressure with viscous term"):
+        accVP = wallPressureViscousAcceleration(wall, schemeConfig, dvdt_diss, currentState)
+        if accVP is not None:
+            dvdt_pressure = dvdt_pressure + accVP.sum(0).to(dvdt_pressure.dtype)
 
-    # 14. Apply forcing
-    # with TimedBlock('compute forcing', use_cuda=True, device=config.device) as tb_forcing:
-    with record_function("[warpSPH] - [deltaSPH - 14] - compute forcing"):
+    bookWallLoads(wall, accVP, currentState, config, schemeConfig, adjacency, provider)           # (region 16: only when asked for or a body is dynamic)
+
+    with record_function("[warpSPH] - [deltaSPH - 17] forcing"):
         forcing = computeForcing(currentSystem, config.dt, currentSystem.t, config, schemeConfig)
         dvdt_forcing = forcing / currentState.masses.view(-1,1)
 
-
-    # 15. Compute gravity
-    # with TimedBlock('compute gravity', use_cuda=True, device=config.device) as tb_gravity:
-    with record_function("[warpSPH] - [deltaSPH - 15] - compute gravity"):
+    with record_function("[warpSPH] - [deltaSPH - 18] gravity"):
         gravity = computeGravity(currentState, config, schemeConfig, adjacency)
         dvdt_gravity = gravity
         if bodyForceVector(schemeConfig) is not None:
             dvdt_gravity = gravity + computeBodyForce(currentState, schemeConfig)          # the channel driver: momentum only, not in the density diffusion's hydrostatic term
 
-    # Revert boundary velocity
-    # with TimedBlock('compute mDBC no-pen shift', use_cuda=True, device=config.device) as tb_nopenshift:
-    with record_function("[warpSPH] - [deltaSPH - 16] - compute mDBC no-pen shift"):
-        # Only the `'derivative'` placement contributes here; `'finalize'`
-        # applies the correction once per step in
-        # `WeaklyCompressibleSystem.finalize` instead (DualSPHysics' structure),
-        # and `'off'` drops it. `DELTASPH_VALIDATION_PLAN.md` 5.9.
+    with record_function("[warpSPH] - [deltaSPH - 19] mDBC no-penetration shift"):
+        # Only the `'derivative'` placement contributes here; `'finalize'` applies the correction once per step in `WeaklyCompressibleSystem.finalize` instead
+        # (DualSPHysics' structure), and `'off'` drops it (DELTASPH_VALIDATION_PLAN 5.9).
         if getattr(schemeConfig, 'mdbcNoPenShiftMode', 'derivative') == 'derivative':
             nopenshift = computeMdbcNoPenShift(currentState, config, schemeConfig, adjacency)
-            # `config.dt`, the real step length -- NOT the stage `dt` this
-            # function was called with. `nopenshift` is a *velocity*
-            # correction, so `/dt` makes it an acceleration the integrator
-            # multiplies by the step length again; with the full step those
-            # cancel and the particle gets exactly the intended correction,
-            # with a stage `dt` they do not. `symplecticEuler` calls the
-            # derivative with `dt/2` but updates with `dt`, so the correction
-            # landed at **2x** in every stage.
+            # `config.dt`, the real step length -- NOT the stage `dt` this function was called with. `nopenshift` is a *velocity* correction, so `/dt` makes it an
+            # acceleration the integrator multiplies by the step length again; with the full step those cancel and the particle gets exactly the intended correction,
+            # with a stage `dt` they do not. `symplecticEuler` calls the derivative with `dt/2` but updates with `dt`, so the correction landed at **2x** in every stage.
             dvdt_nopenshift = nopenshift / config.dt
         else:
             dvdt_nopenshift = torch.zeros_like(currentState.velocities)
-    # currentState.velocities = currentVelocities
 
-    # 16. build update
-    # with TimedBlock('build update', use_cuda=True, device=config.device) as tb_update:
-    # print(f'End of step: t={currentSystem.t:.6f}, dt={config.dt:.6f}, min density={currentState.densities.min().item():.6f}, max density={currentState.densities.max().item():.6f}, mean density={currentState.densities.mean().item():.6f}')
-    # print(f'\tmin pressure={currentState.pressures.min().item():.6f}, max pressure={currentState.pressures.max().item():.6f}, mean pressure={currentState.pressures.mean().item():.6f}')
-    # print(f'\tmin velocity={currentState.velocities.norm(dim=1).min().item():.6f}, max velocity={currentState.velocities.norm(dim=1).max().item():.6f}, mean velocity={currentState.velocities.norm(dim=1).mean().item():.6f}')
-    # print(f'\tdvdt:')
-    # print(f'\t[pressure]\tmin dvdt={dvdt_pressure.norm(dim=1).min().item():.6f}, max dvdt={dvdt_pressure.norm(dim=1).max().item():.6f}, mean dvdt={dvdt_pressure.norm(dim=1).mean().item():.6f}')
-    # print(f'\t[forcing]\tmin dvdt={dvdt_forcing.norm(dim=1).min().item():.6f}, max dvdt={dvdt_forcing.norm(dim=1).max().item():.6f}, mean dvdt={dvdt_forcing.norm(dim=1).mean().item():.6f}')
-    # print(f'\t[gravity]\tmin dvdt={dvdt_gravity.norm(dim=1).min().item():.6f}, max dvdt={dvdt_gravity.norm(dim=1).max().item():.6f}, mean dvdt={dvdt_gravity.norm(dim=1).mean().item():.6f}')
-    # print(f'\t[nopenshift]\tmin dvdt={dvdt_nopenshift.norm(dim=1).min().item():.6f}, max dvdt={dvdt_nopenshift.norm(dim=1).max().item():.6f}, mean dvdt={dvdt_nopenshift.norm(dim=1).mean().item():.6f}')
-    # print(f'\t[dissipation]\tmin dvdt={dvdt_diss.norm(dim=1).min().item():.6f}, max dvdt={dvdt_diss.norm(dim=1).max().item():.6f}, mean dvdt={dvdt_diss.norm(dim=1).mean().item():.6f}')
-    # print(f'\tdrhodt:')
-    # print(f'\t[drhodt]\tmin drhodt={drhodt.min().item():.6f}, max drhodt={drhodt.max().item():.6f}, mean drhodt={drhodt.mean().item():.6f}')    
-    # print(f'\t[drhodt_diss]\tmin drhodt={drhodt_diss.min().item():.6f}, max drhodt={drhodt_diss.max().item():.6f}, mean drhodt={drhodt_diss.mean().item():.6f}')
-    # print(f'------------------------------------------------------------')
-
-    with record_function("[warpSPH] - [deltaSPH - 16] - build update"):
+    with record_function("[warpSPH] - [deltaSPH - 20] update"):
         update = WeaklyCompressibleSystemUpdate(
-            dxdt = currentState.velocities.clone(),#+ dvdt_nopenshift  * dt,
+            dxdt = currentState.velocities.clone(),
             dvdt = dvdt_pressure + dvdt_forcing + dvdt_gravity + dvdt_diss+ dvdt_nopenshift,
             drhodt = drhodt + drhodt_diss,
             passive = torch.zeros(currentState.densities.shape, device=currentState.densities.device, dtype=torch.bool),
-            # the velocity-linear part of drhodt, for the density as a drift field
-            # (warpSPHIntegrators/drift.py, CEILING_STICKING_PLAN.md §6)
+            # the velocity-linear part of drhodt, for the density as a drift field (warpSPHIntegrators/drift.py, CEILING_STICKING_PLAN.md section 6)
             drhodt_kin = drhodt,
         )
-    # update.drhodt = update.drhodt
 
-    # 17. Enforce BCs on update
-    # with TimedBlock('enforce updates', use_cuda=True, device=config.device) as tb_enforce:
-    with record_function("[warpSPH] - [deltaSPH - 17] - enforce updates"):
+    with record_function("[warpSPH] - [deltaSPH - 21] enforce updates"):
         enforceUpdates(update, currentSystem, config.dt, currentSystem.t, config, schemeConfig)
         keepBand = pinnedKeepWeight(currentState, config, schemeConfig)           # a pinned band: no acceleration inside (mask-free, capturable)
         if keepBand is not None:
@@ -495,30 +238,4 @@ def _deltaSPH_rhs(
         update.dvdt = torch.where(nonFluidMask, torch.zeros_like(update.dvdt), update.dvdt)
         update.drhodt = torch.where(nonFluidMask.squeeze(-1), torch.zeros_like(update.drhodt), update.drhodt)
         update.drhodt_kin = torch.where(nonFluidMask.squeeze(-1), torch.zeros_like(update.drhodt_kin), update.drhodt_kin)
-
-    # performanceDict = {
-    #     'tb_adjacency': tb_adjacency,
-    #     'tb_density': tb_density,
-    #     'tb_mdbc': tb_mdbc,
-    #     'tb_bcs': tb_bcs,
-    #     'tb_eos': tb_eos,
-    #     'tb_boundary_velocities': tb_boundary_velocities,
-    #     'tb_surface': tb_surface,
-    #     'tb_gradRho': tb_gradRho,
-    #     'tb_gradRhoL': tb_gradRhoL,
-    #     'tb_drhodt_diss': tb_drhodt_diss,
-    #     'tb_dvdt_diss': tb_dvdt_diss,
-    #     'tb_drhodt': tb_drhodt,
-    #     'tb_dvdt': tb_dvdt,
-    #     'tb_forcing': tb_forcing,
-    #     'tb_gravity': tb_gravity,
-    #     'tb_nopenshift': tb_nopenshift,
-    #     'tb_update': tb_update,
-    #     'tb_enforce': tb_enforce,
-    # }
-
-    # for key, tb in performanceDict.items():
-    #     tb.cuda_ms = tb._start_event.elapsed_time(tb._end_event) if tb.use_cuda else None
-    #     print(f"[{key}] CPU: {tb.cpu_ms:.3f} ms | CUDA: {tb.cuda_ms:.3f} ms, ratio {tb.cuda_ms / tb.cpu_ms if tb.cuda_ms is not None else 'N/A'}")
-
     return update, adjacency, currentState

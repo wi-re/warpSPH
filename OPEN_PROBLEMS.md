@@ -593,6 +593,17 @@ Counts do not depend on N; times are for that GPU. What stands out (a switch is 
   these look latency bound (a long serial per-thread loop / low occupancy), the signature the multi-lane CompSPH kernels fixed (README docs/compsph_step 2.8). Not checked: whether they use the tiled `laneSum` path.
 * Open: fold the Hopkins update's relaxation into one warp kernel; look at the Balsara / ReadHayfield / CullenDehnen kernels' lanes. Only the counts at N = 2.5k-10k were taken; re-take at 100k before judging the kernels.
 
+## 35. The delta-SPH CUDA-graph right-hand side replayed a stale gravity direction in sloshingTank (found and FIXED 2026-10-14, delta-SPH sweep)
+
+`sloshingTank` (`cudaGraph=True`) rolls gravity in the tank frame from a `postStep` hook that REPLACED `gravityConfig.direction` with a new tensor every step. The graphed right-hand side
+(`graphRoute.graphedRHS`) captured the tensor it saw and kept replaying that address: graph vs eager runs of the same tank differed by 24-98 % in velocity (positions ~1e-5) from step 3 on, and
+which way they differed depended on the allocator layout (removing one unused `.clone()` during the delta-SPH refactor changed the result of a graph run; eager was bitwise unaffected). It was
+already there at `f1b5cc6` (start of the day); the existing graph tests (Marrone 3.1) never vary a config tensor. Found by taking bitwise baselines of every weakly compressible case before refactoring
+`deltaSPH.py`, then bisecting (eager old == eager new; graph old != eager; direct graph-vs-eager comparison of the right-hand side; the Field view cache, warp allocations during capture and the stream
+restore were ruled out). Fixes: the case updates the direction IN PLACE (`sloshingTank._applyRollGravity`), and the graph key now includes the direction tensor's address (`graphRoute.liveConfigKey`),
+so a case that replaces it recaptures instead of replaying stale data. Test: `tests/test_deltaGraphSloshing.py` (fails with both fixes disabled). Open: any other config tensor read by address inside a graphed
+step (none found: `dambreak` and the other graph cases set theirs once); a general guard (key the capture on every tensor attribute of the scheme config) is not done.
+
 ## Resolved (details in [RESOLVED_PROBLEMS.md](docs/historic_plans/RESOLVED_PROBLEMS.md); numbers kept so references stay valid)
 
 - **§5** englishWedge concave-corner residual -- sign bug in the `fourtakas2019` hydrostatic correction, fixed `68a9a6d`; 2026-09-29 re-validation: keep the default combo.

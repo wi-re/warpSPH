@@ -1,0 +1,20 @@
+section (tree, inclusive unless "self")                                   calls  ops/call  self ops launch/call sync/call self sync sync/step
+coverage: 0.0 % of 3086 ops, 100.0 % of 0 launches, 0.0 % of 123 syncs inside a section (40 marked steps)
+  OUTSIDE any section: ops 3086, launches 0, syncs 123
+    sync sites  : runner.py:181 _scalar x41, cudaGraph.py:518 <lambda> x41, cudaGraph.py:777 _finishReplay x40, report.py:370 reportRun x1
+    top ops     : clone x1001, div x287, mul x205, minimum x164, _to_copy x162, where x123
+
+call audit: 0 section entries over 40 marked step(s)
+section                                          calls  ops/call     self launch/call sync/call sync/step replays
+(outside any section)                                  ops 3086, launches 0, syncs 123
+    sync sites  : runner.py:181 _scalar x41, cudaGraph.py:518 <lambda> x41, cudaGraph.py:777 _finishReplay x40, report.py:370 reportRun x1
+
+worst 8 of the last 40 marked steps (by syncs, then ops):
+  step 0: up to 0 ops / 0 syncs in one section
+  step 1: up to 0 ops / 0 syncs in one section
+  step 2: up to 0 ops / 0 syncs in one section
+  step 3: up to 0 ops / 0 syncs in one section
+  step 4: up to 0 ops / 0 syncs in one section
+  step 5: up to 0 ops / 0 syncs in one section
+  step 6: up to 0 ops / 0 syncs in one section
+  step 7: up to 0 ops / 0 syncs in one section

@@ -8,7 +8,7 @@ import torch
 
 
 def _call(sc, t, dt, mask, stageIndex=None):
-    from warpSPH.schemes.weaklyCompressible.deltaSPH import _surfaceMaskAcrossStages
+    from warpSPH.schemes.weaklyCompressible.surfaceMask import surfaceMaskAcrossStages as _surfaceMaskAcrossStages
     # the RHS's particle state has no `t` -- the system's time is passed in
     state = SimpleNamespace(surfaceIndicators=torch.tensor(mask, dtype=torch.int32))
     _surfaceMaskAcrossStages(state, dt, sc, stageIndex, t)

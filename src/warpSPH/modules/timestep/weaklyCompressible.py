@@ -50,15 +50,8 @@ def computeTimestep(
 
     dtype =  config.dtype
     device = config.device
+    const = lambda value: torch.full((), value, dtype = dtype, device = device)         # a 0-d device scalar from a fill kernel (torch.tensor(value, device=...) is a blocking host-to-device copy)
 
-    # if verbose:
-    #     print(f'[SPH] - Adaptive Timestep Update')
-    #     print(f'\tCFL: {timestepCFL}, maxDt: {maxDt}, minDt: {minDt}')
-    #     print(f'\tDiffusion: {diffusionAlpha}, {diffusionScheme}')
-    #     print(f'\tFluid: {fluidCs}, {particleSupport}, {kernelScale}')
-
-
-    # with record_function("[SPH] - Adaptive Timestep Update"):
     state = system.state
     dim = state.positions.shape[1]
 
@@ -68,38 +61,31 @@ def computeTimestep(
     else:
         nu = compParams.diffusionParams.viscidNu
 
-    # nu = config.get('diffusion', {}).get('nu', nu) if diffusionScheme == 'deltaSPH_viscid' else nu
     dt_v = 0.125 * particleSupport**2 / nu / kernelScale
-    dt_v = torch.tensor(dt_v, dtype = dtype, device = device) if not isinstance(dt_v, torch.Tensor) else dt_v
+    dt_v = const(dt_v) if not isinstance(dt_v, torch.Tensor) else dt_v
 
     dt_c = timestepCFL * particleSupport / c_s / kernelScale
-    dt_c = torch.tensor(dt_c, dtype = dtype, device = device) if not isinstance(dt_c, torch.Tensor) else dt_c
+    dt_c = const(dt_c) if not isinstance(dt_c, torch.Tensor) else dt_c
 
-    # acceleration timestep condition -- Sun et al. 2017 Eq. (5) `dt_a =
-    # 0.25 min sqrt(h / ||a||)`. The per-particle acceleration is the update's
-    # `dvdt` (`WeaklyCompressibleSystemUpdate`); older callers passed an object
-    # carrying `.velocities` (a dv), so accept either.
+    # acceleration timestep condition -- Sun et al. 2017 Eq. (5) `dt_a = 0.25 min sqrt(h / ||a||)`. The per-particle acceleration is the update's `dvdt`
+    # (`WeaklyCompressibleSystemUpdate`); older callers passed an object carrying `.velocities` (a dv), so accept either. The max runs over the particles
+    # whose acceleration is not NaN, as a masked reduction (a boolean-mask index would read the host to size its result); with none finite: `maxDt`.
     dudt = getattr(systemUpdate, 'dvdt', None) if systemUpdate is not None else None
     if dudt is None and systemUpdate is not None:
         dudt = getattr(systemUpdate, 'velocities', None)
     if dudt is not None and dudt.numel():
-        finite = dudt[~torch.isnan(dudt).any(dim=-1)] if dudt.ndim > 1 else dudt[~torch.isnan(dudt)]
-        if finite.numel():
-            max_accel = torch.max(torch.linalg.norm(finite, dim = -1))
-            dt_a = 0.25 * torch.sqrt(particleSupport / (max_accel + 1e-7)) / kernelScale
-        else:
-            dt_a = torch.tensor(maxDt, dtype = dtype, device = device)
+        finite = ~torch.isnan(dudt).any(dim=-1) if dudt.ndim > 1 else ~torch.isnan(dudt)
+        norms = torch.linalg.norm(dudt, dim = -1) if dudt.ndim > 1 else dudt.abs()
+        max_accel = torch.where(finite, norms, torch.zeros_like(norms)).max()
+        dt_a = 0.25 * torch.sqrt(particleSupport / (max_accel + 1e-7)) / kernelScale
+        dt_a = torch.where(finite.any(), dt_a, const(maxDt))
     else:
-        dt_a = torch.tensor(maxDt, dtype = dtype, device = device)
-    dt_a = torch.tensor(dt_a, dtype = dtype, device = device) if not isinstance(dt_a, torch.Tensor) else dt_a
-    # if verbose:
-        # print(f'\tViscosity: {dt_v}, Acoustic: {dt_c}, Acceleration: {dt_a}')
+        dt_a = const(maxDt)
 
-    # dt = config['timestep']['dt']
     if dt is None:
-        dt = torch.tensor(maxDt, dtype = dtype, device = device)
+        dt = const(maxDt)
     else:
-        dt = torch.tensor(dt, dtype = dtype, device = device) if not isinstance(dt, torch.Tensor) else dt
+        dt = const(dt) if not isinstance(dt, torch.Tensor) else dt
     new_dt = dt
     if compParams.dt_viscosityConstraint:
         new_dt = dt_v
@@ -107,10 +93,10 @@ def computeTimestep(
         new_dt = torch.min(new_dt, dt_a)
     if compParams.dt_acousticConstraint:
         new_dt = torch.min(new_dt, dt_c)
-    new_dt = torch.min(new_dt, torch.tensor(maxDt, dtype = dtype, device = device))
-    new_dt = torch.max(new_dt, torch.tensor(minDt, dtype = dtype, device = device))
-    if dt is not None and new_dt > dt:
-        new_dt = torch.clamp(new_dt, max=config.dtGrowthFactor * dt)
+    new_dt = torch.min(new_dt, const(maxDt))
+    new_dt = torch.max(new_dt, const(minDt))
+    # growth limit: a larger step is capped at `dtGrowthFactor * dt` (as `torch.where`, not a Python `if` on a device value)
+    new_dt = torch.where(new_dt > dt, torch.minimum(new_dt, config.dtGrowthFactor * dt), new_dt)
     return new_dt
 
 
