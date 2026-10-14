@@ -194,8 +194,8 @@ the graph tests; it is slower than both.
   kernel took 5.4 ms per launch (~8 ns per pair, 2 % occupancy). Eager list mode, ms per step: `sod3d` N = 6k **25.3 -> 7.6**, N = 8k 27.1 -> 9.5;
   `sod2d` 2.5k 5.5 -> 5.0, 15k 6.3 -> 5.8; `sod` unchanged (launch bound). Results equal to round-off (sum order).
 * **Graph mode refuses Dirichlet boundary conditions**: `rayleighTaylor` / `kidder` / `yee` evaluate boolean-mask indexing in the BC (host-sized). Worse, a
-  capture that fails at the CUDA level (not a Python exception) leaves the next eager step non-finite -- not understood, only avoided; a forced Python
-  failure inside a capture recovers cleanly (`captfail3`). Treat 'capture failed' as untrusted until that is understood.
+  capture that fails at the CUDA level (not a Python exception) used to leave the next eager step non-finite -- understood and fixed 2026-10-14 (stream
+  leak, section 5 item 10).
 * **Support-grid headroom 1.5 -> 1.15** (`supportGrid.RADIUS_HEADROOM`): sod2d graph N = 2.5k 1.9 -> 1.3 ms, N = 10k 5.1 -> 3.1 ms; the number of regrows
   (recaptures) on sod2d, gresho, KH, noh, sedov, triplePoint did not change in a way that matters (sedov 6 -> 7 at 1.1). 3D is unaffected by the headroom.
 * **3D graph mode is dominated by `computePsi0` on the grid**: 12 of 17.8 ms at N = 3k (5.7 ms per call vs ~0.2 ms on the list). Not the headroom (tried 1.1-1.5,
@@ -263,13 +263,37 @@ the graph tests; it is slower than both.
 9. **3D graph mode is 2.5-4x slower than eager** even at N = 3k: `computePsi0` on the grid is 12 of 17.8 ms (5.7 ms per call vs 0.2 on the list). Not the
    headroom. Suspects: the 3^3 cell stencil, per-candidate table lookups before the distance test, lane imbalance (27 cells over 32 lanes). Profile with
    `evidence/scripts/` style torch.profiler (see 2.8); a radius-2 stencil with half-size cells in `buildFixed` is the structural option.
-10. **A capture that fails at the CUDA level leaves the next eager step non-finite** (`rayleighTaylor` with a forced graph request before the Dirichlet
-    blocker): state is finite right after, a Python exception inside a capture recovers cleanly, a dry run without capture is fine. Not understood.
-    `GraphedIntegratorStep` should either be proven to recover or stop trusting 'capture failed -> eager' for the CompSPH route.
+10. **A capture that fails at the CUDA level left the next eager steps non-finite: FIXED 2026-10-14.** Cause: when CUDA itself invalidates a capture (an op
+    that is not allowed while recording, e.g. the Dirichlet BC's host-sized boolean-mask index, `cudaErrorStreamCaptureUnsupported`),
+    `torch.cuda.graph.__exit__` raises in `capture_end()` BEFORE it runs `stream_ctx.__exit__`, so torch stayed on the capture's side stream
+    while warp (its `ScopedStream` is the innermost context and did exit) was back on its own: every later eager step mixed two streams with no
+    ordering between them. A Python exception inside the capture lets `capture_end` succeed, which is why `captfail3` recovered. The state was
+    finite right after the failure and went non-finite a step later because the damage is a race, not a value. Fix: `_captureGuard` (all three
+    capture sites use it) records torch's current stream on entry and restores it on the way out; the fallback run is now bitwise the grid-eager
+    run. Tests: `test_cudaGraph.py::test_captureGuardPutsTorchBackOnItsStreamAfterAnInvalidatedCapture` and
+    `test_compSPHGraph.py::test_captureThatCudaInvalidatesLeavesTheNextEagerStepsIntact` (both fail without the fix). Found on the way: the
+    `captureAborted` hook (494922e) sat in `GraphedStateFunction._capture`, where `state` is undefined (a `NameError` inside the except
+    handler, so a failed delta-SPH-RHS capture would have crashed instead of falling back), and `GraphedIntegratorStep._capture`, which CompSPH uses, never
+    called it; both fixed. `warpSPHCore`'s `GraphedBuild` (`slots.py`, `torch.cuda.graph(graph)` without the guard) has the same stream exposure but its body
+    cannot be invalidated (plain `buildFixed`); not changed.
 11. **Re-measure the `auto` thresholds** (`stepMode.GRAPH_MAX_PARTICLES`) per GPU: measured once, before the multi-lane kernels and headroom 1.15, which moved the
     2D crossover up (graph still ahead at 10k). User: hardware dependent, rough defaults only; a calibration helper is the long-term answer.
-12. **Re-run the rebuild-count scan** (`slackScan.py`, `countGrid.py`) after the Gather-grid fix; `USAGE_GUARD`, headroom 1.15, `CHECK_EVERY` are still single-case guesses.
-13. **Full frontend suite** was last run before the multi-lane kernels / headroom / Dirichlet blocker (passed before them; the targeted tests + 17-case smoke pass after).
-14. **Eager-path leftovers**: the integrator's 51 clones per step (14 `constant` fields x 3 state copies; a 'shared' field behaviour, CompSPH state only, user: not other
+12. **Rebuild-count scan re-run after the Gather-grid fix: DONE 2026-10-14** (`sod2d` CompSPH, grid solve, 300 steps, `slackScan.py`, `countGrid.py`): zero second passes for rungeKutta2, heunsMethod, sspRK3, rungeKutta4; end-of-step rebuilds 69 / 75 / 81 at `USAGE_GUARD` 1.0 / 1.25 / 1.5 (75 at the default, unchanged from 2.5 -- the fix did not move the count, and 1.25 is not the binding choice). No change made. `USAGE_GUARD`, headroom 1.15, `CHECK_EVERY` are still single-case (sod2d) values.
+13. **Full frontend suite: DONE 2026-10-14** on dev f1b5cc6 (clean tree): 100 %, no failures, 1 skip -- covers the multi-lane kernels, headroom 1.15 and the Dirichlet blocker.
+14. **Eager-path leftovers** (2026-10-14: the 'shared' field behaviour would save ~9 of the 51 clones only -- `supports`, `densities`, `pressures`, ... are rewritten per substep and wall `masses` too -- and lives in `warpSPHIntegrators`, which another agent has uncommitted work in; measure the clones' wall cost first): the integrator's 51 clones per step (14 `constant` fields x 3 state copies; a 'shared' field behaviour, CompSPH state only, user: not other
     schemes yet), the X6 `einsum` -> bmm/gemv (3 per step), CRKSPH has no graph mode and no grid solve (needs the same `stepMode` wiring), then ACSPH phase 2.
 15. Wall cases and Dirichlet-BC cases run eagerly under `stepMode='graph'` (pair arrays sized to the live edge count / host-sized masks): making them graphable is open.
+
+### The CompSPH scheme as single-purpose regions (2026-10-14, user)
+
+* **Interface.** `modules/compSPH/operators.py`: `computeCompSPHAccel`, `computeCompSPHdudt`, `computeCompSPHBalanceTerm` take
+  `(state, config, schemeConfig, adjacency, gradH)` like `computeMomentumConsistent` / `computeDensities` (the balance term also takes the
+  half-step velocity and `dt`, and reads `ap_ij` / `av_ij` from the state). The kernel, diffusion parameters, energy scheme, gamma and the support
+  mode each operator is defined for (E.2 / E.3) are read or fixed inside; the `*Warp` launchers stay as the low-level layer (gradcheck scripts,
+  `OperationProperties` + separate tensors). `crkSPH_step` calls the balance wrapper as well.
+* **Scheme.** `compSPH_step` is now 20 regions, one operation each (wall, optimal support, adjacency, support clamp, density, wall closure,
+  grad-h, first-time divergence, Dirichlet BC, EOS, switch terms, accel, dudt, switch update, divergence, dE/dt, forcing, update, f_ij, pair work);
+  the support solve and the pair list moved into `_optimalSupport` / `_pairList`. The old region 08 (switch update + divergence + dE/dt) and 05 (BC +
+  EOS + switch terms) are split. Bitwise identical to the previous commit: 17 eager CompSPH/CRKSPH cases x 30 steps and the graph `sod`/`sod2d`
+  hashes; sod2d eager 5.9-6.0 vs 6.0 ms/step, graph 2.18 vs 2.18 (no change, same GPU, another agent was running tests). The section names changed
+  (nothing else refers to them).

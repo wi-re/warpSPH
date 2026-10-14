@@ -18,7 +18,7 @@ from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enfor
 from ..modules.compressibleWall import beginCompressibleWall, clampSupportsToVolume
 from ..modules.compSPH.accel import computeCompSPHAccelWarp
 from ..modules.compSPH.dudt import computeCompSPHdudtWarp
-from ..modules.compSPH.balance import computeCompSPHBalanceTermWarp
+from ..modules.compSPH.operators import computeCompSPHBalanceTerm
 from ..modules.crk import computeCrkSPHdudtWarp
 from ..modules.eos import idealGasEOS
 from ..modules.momentum import computeMomentumConsistent
@@ -437,27 +437,8 @@ def crkSPH_step(
 
     v_halfstep = currentState.velocities + 0.5 * dt * update.dvdt
 
-    currentState.f_ij = computeCompSPHBalanceTermWarp(
-        queryParticles = currentState,
-        operationProperties = OperationProperties(
-            kernel = config.kernel,
-            supportMode = config.supportMode
-        ),
-        domain = config.domain,
-
-        queryEnergies = currentState.internalEnergies,
-        queryVelocities= v_halfstep,
-        queryPressures = currentState.pressures,
-
-        pairWise_pressureAccel= currentState.ap_ij,
-        pairWise_viscosityAccel = currentState.av_ij,
-        energyScheme = schemeConfig.energyScheme,
-        dt= dt,
-        gamma = schemeConfig.gamma,
-
-        adjacency = adjacency,
-        gradHState = gradHState
-    )
+    currentState.f_ij = computeCompSPHBalanceTerm(
+        currentState, config, schemeConfig, adjacency, v_halfstep, dt, gradHState)
     if wall is not None:
         currentState.f_ij = wall.balanceFractions(currentState.f_ij, adjacency, currentState)
 

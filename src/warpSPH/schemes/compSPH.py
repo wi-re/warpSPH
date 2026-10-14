@@ -1,19 +1,20 @@
 """The CompSPH (Owen 2010-style compatible-hydro) step: adaptive support
 solve, super-symmetric adjacency, Gather-mode density, optional grad-h
 (`GradHState`), ideal-gas EOS, the Cullen-Hopkins viscosity switch, the
-CompSPH pressure/viscosity acceleration and dudt kernels, and the
+CompSPH pressure/viscosity acceleration and dudt operators, and the
 Monaghan-Price energy-balance term `f_ij` (evaluated at the half-step
 velocity). Falls back to computing `divergence` from `computeMomentumConsistent`
 the first time a state has none (e.g. right after a resume that doesn't
 persist it).
+
+`compSPH_step` is a list of single-purpose regions (one `record_function` each, numbered
+in call order): every region does one thing, so a profile or a call audit names it.
 """
 
 from ..modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
 from ..modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
 from ..modules.compressibleWall import beginCompressibleWall, clampSupportsToVolume
-from ..modules.compSPH.accel import computeCompSPHAccelWarp
-from ..modules.compSPH.dudt import computeCompSPHdudtWarp
-from ..modules.compSPH.balance import computeCompSPHBalanceTermWarp
+from ..modules.compSPH.operators import computeCompSPHAccel, computeCompSPHdudt, computeCompSPHBalanceTerm
 from ..modules.density import computeDensities
 from ..modules.eos import idealGasEOS
 from ..modules.momentum import computeMomentumConsistent
@@ -38,9 +39,49 @@ from ..systems.compressibleMonaghan import CompressibleSystemUpdate
 from ..modules.shockCapturing.CullenHopkins import computeHopkinsTerms, computeHopkinsUpdate
 from ..modules.reconstruction import requireRawPairVelocity
 
-lut = None
-
 __all__ = ['compSPH_step']
+
+
+def _optimalSupport(currentSystem, currentState, config, schemeConfig, onGrid, rebuildSlack):
+    """The adaptive support solve; leaves `supports` / `densities` on the state."""
+    if onGrid:
+        # the solve runs on a fixed-shape grid (graph-replayed build, no host read) and looks at no neighbour list
+        holder = ensureSupportGrid(currentSystem.supportGrid, currentState, config)
+        info = {}
+        rho_optimal, h_optimal, *_ = evaluateOptimalSupport(
+            currentState, config, schemeConfig, SupportScheme.Gather, None, computeDensity=False,
+            grid=refreshSupportGrid(holder, currentState), gridRadius=holder.radius, info=info)
+        noteOutgrown(holder, info)
+    else:
+        rho_optimal, h_optimal, currentSystem.adjacency, *_ = evaluateOptimalSupport(
+            currentState, config, schemeConfig, SupportScheme.Gather, currentSystem.adjacency,
+            validateOnce=True, rebuildSlack=rebuildSlack, computeDensity=False)
+    currentState.supports = h_optimal
+    currentState.densities = rho_optimal
+
+
+def _pairList(currentSystem, currentState, config, schemeConfig, onGrid, rebuildSlack):
+    """The super-symmetric pair list for this stage's positions and new supports."""
+    pairWork = currentSystem.pairWork
+    if onGrid and pairWork is not None and not pairWork.conservative and listFitsParticles(currentSystem.adjacency, currentState):
+        # optimistic stage: no host read. The list was validated (with slack) for the positions this step starts from
+        # when the previous step ended; whether it is also long enough for THIS stage's positions and new supports is a
+        # device flag, read once at the end of the step (finalize) -- a failing flag repeats the step conservatively
+        adjacency = currentSystem.adjacency
+        pairWork.flags.append(verletStaleFlag(currentState.positions, currentState.supports, adjacency, config.domain,
+                                              config.verletScale))
+    elif onGrid:
+        # the explicit validity check and (re)build of the pair list, for the positions and the new supports
+        adjacency = buildVerletList(
+            currentState, config.domain, verletScale = config.verletScale, supportMode = SupportScheme.SuperSymmetric,
+            priorNeighborhood = None if (pairWork is not None and pairWork.rebuildList) else currentSystem.adjacency,
+            verbose = False, rebuildSlack = rebuildSlack, capacity = pairListCapacity(schemeConfig),
+            gridFactory = pairListGridFactory(currentSystem.listGrid, currentState, config))
+        currentSystem.adjacency = adjacency
+    else:
+        # the solver validated this list against the particles and every support it used, and rebuilt it if needed
+        adjacency = currentSystem.adjacency
+    return adjacency
 
 
 def compSPH_step(
@@ -50,84 +91,43 @@ def compSPH_step(
     schemeConfig: CompSPHConfig,
     verbose = False,
     stageIndex = None,     # injected by the Runge-Kutta integrator (it inspects this signature)
-    # dsphConfig = None,
-):        
-    global lut
+):
     requireRawPairVelocity(schemeConfig.diffusionParams, 'CompSPH')
-    currentSystem = system#
+    currentSystem = system
     currentState = currentSystem.state
-    # currentSystem.adjacency = None
 
     t = currentSystem.t
     onGrid = solvesOnGrid(schemeConfig)
     rebuildSlack = stageRebuildSlack(currentSystem, stageIndex)
-    with record_function("[warpSPH] - [compSPH - 01] wall + optimal support"):
+
+    with record_function("[warpSPH] - [compSPH - 01] wall"):
         wall = beginCompressibleWall(currentState, config)
         startStage(currentSystem, currentState, config, stageIndex)
-        if onGrid:
-            # the solve runs on a fixed-shape grid (graph-replayed build, no host read) and looks at no neighbour list
-            holder = ensureSupportGrid(currentSystem.supportGrid, currentState, config)
-            info = {}
-            rho_optimal, h_optimal, *_ = evaluateOptimalSupport(
-                currentState, config, schemeConfig, SupportScheme.Gather, None, computeDensity=False,
-                grid=refreshSupportGrid(holder, currentState), gridRadius=holder.radius, info=info)
-            noteOutgrown(holder, info)
-        else:
-            rho_optimal, h_optimal, currentSystem.adjacency, *_ = evaluateOptimalSupport(
-                currentState, config, schemeConfig, SupportScheme.Gather, currentSystem.adjacency,
-                validateOnce=True, rebuildSlack=rebuildSlack, computeDensity=False)
-        currentState.supports = h_optimal
-        currentState.densities = rho_optimal
 
-    with record_function("[warpSPH] - [compSPH - 02] adjacency"):
-        pairWork = currentSystem.pairWork
-        if onGrid and pairWork is not None and not pairWork.conservative and listFitsParticles(currentSystem.adjacency, currentState):
-            # optimistic stage: no host read. The list was validated (with slack) for the positions this step starts from
-            # when the previous step ended; whether it is also long enough for THIS stage's positions and new supports is a
-            # device flag, read once at the end of the step (finalize) -- a failing flag repeats the step conservatively
-            adjacency = currentSystem.adjacency
-            pairWork.flags.append(verletStaleFlag(currentState.positions, currentState.supports, adjacency, config.domain,
-                                                  config.verletScale))
-        elif onGrid:
-            # the explicit validity check and (re)build of the pair list, for the positions and the new supports
-            adjacency = buildVerletList(
-                currentState, config.domain, verletScale = config.verletScale, supportMode = SupportScheme.SuperSymmetric,
-                priorNeighborhood = None if (pairWork is not None and pairWork.rebuildList) else currentSystem.adjacency,
-                verbose = False, rebuildSlack = rebuildSlack, capacity = pairListCapacity(schemeConfig),
-                gridFactory = pairListGridFactory(currentSystem.listGrid, currentState, config))
-            currentSystem.adjacency = adjacency
-        else:
-            # the solver validated this list against the particles and every support it used, and rebuilt it if needed
-            adjacency = currentSystem.adjacency
+    with record_function("[warpSPH] - [compSPH - 02] optimal support"):
+        _optimalSupport(currentSystem, currentState, config, schemeConfig, onGrid, rebuildSlack)
+
+    with record_function("[warpSPH] - [compSPH - 03] adjacency"):
+        adjacency = _pairList(currentSystem, currentState, config, schemeConfig, onGrid, rebuildSlack)
+
+    with record_function("[warpSPH] - [compSPH - 04] support clamp"):
         # only reduces h, so the list stays valid; wall cases only (modules/compressibleWall/supportClamp.py)
         currentState.supports = clampSupportsToVolume(currentState, config, adjacency, wall)
 
-    # with TimedBlock('compute csr', use_cuda=True, device=device):
-        # csr_neighrs = coo_to_csr(neighbors.get('noghost')[0])
-        # adjacency.i = neighbors.neighbors.row
-        # adjacency.j = neighbors.neighbors.col
-        # adjacency.numNeighbors = csr_neighrs.rowEntries.to(torch.int32)
-        # adjacency.edgeOffsets = csr_neighrs.indptr.to(torch.int32)
-        # # currentSystem.adjacency = adjacency
+    with record_function("[warpSPH] - [compSPH - 05] density"):
+        # gather (the default) -- cullen switch E.1 in the CRK paper uses gather for density estimation
+        currentState.densities = computeDensities(currentState, config, schemeConfig, adjacency)
 
-    with record_function("[warpSPH] - [compSPH - 03] density (+ wall closure)"):
-        # gather (the default) -- cullen switch E.1 in the CRK paper uses gather
-        # for density estimation
-        currentState.densities = computeDensities(
-            currentState, config, schemeConfig, adjacency)
-        if wall is not None:
+    if wall is not None:
+        with record_function("[warpSPH] - [compSPH - 06] wall closure"):
             wall.apply(currentState, config, schemeConfig, adjacency)
             # the wall masses just changed, so the fluid density sum has to be redone
-            currentState.densities = computeDensities(
-                currentState, config, schemeConfig, adjacency)
+            currentState.densities = computeDensities(currentState, config, schemeConfig, adjacency)
             wall.apply(currentState, config, schemeConfig, adjacency)
-    with record_function("[warpSPH] - [compSPH - 04] grad-h terms"):
-        # Computed here (rather than where it is otherwise used, further down)
-        # because a state reconstructed with `divergence=None` (e.g. resumed from
-        # a trajectory export, which doesn't persist divergence) needs it in the
-        # first-time branch immediately below; `computeOmega` only reads
-        # positions/supports/masses/densities, all already finalised above, so
-        # moving this earlier changes nothing about what it computes.
+
+    with record_function("[warpSPH] - [compSPH - 07] grad-h terms"):
+        # Computed before the divergence fallback below; `computeOmega` only reads
+        # positions/supports/masses/densities, all finalised above.
         if schemeConfig.adaptiveSupportCorrections:
             omega = computeOmega(currentState,
                     OperationProperties(
@@ -137,28 +137,26 @@ def compSPH_step(
                     domain = config.domain,
                     adjacency = adjacency
             )
-
-            gradHState = GradHState(
-                queryOmegas = omega
-            )
+            gradHState = GradHState(queryOmegas = omega)
         else:
             gradHState = None
 
-        if currentState.divergence is None:
+    if currentState.divergence is None:
+        # a state reconstructed without `divergence` (e.g. resumed from a trajectory export, which doesn't persist it)
+        with record_function("[warpSPH] - [compSPH - 08] divergence (first time)"):
             print('Warning: divergence is None, computing for the first time')
-            drhodt = computeMomentumConsistent(
+            currentState.divergence = computeMomentumConsistent(
                 currentState,
                 config,
                 schemeConfig = schemeConfig,
                 adjacency = adjacency,
                 gradH = gradHState
             )
-            currentState.divergence = drhodt
 
-    # enforceDirichlet(currentSystem.state, dsphConfig, t, dt)
-
-    with record_function("[warpSPH] - [compSPH - 05] EOS + viscosity-switch terms"):
+    with record_function("[warpSPH] - [compSPH - 09] Dirichlet BC"):
         enforceDirichlet(currentSystem, t, dt, config, schemeConfig)
+
+    with record_function("[warpSPH] - [compSPH - 10] EOS"):
         currentState.entropies, _, currentState.pressures, currentState.soundspeeds = idealGasEOS(
             A = None,
             u = currentState.internalEnergies,
@@ -167,66 +165,31 @@ def compSPH_step(
             gamma = schemeConfig.gamma,
         )
 
+    with record_function("[warpSPH] - [compSPH - 11] viscosity-switch terms"):
         currentState.alphas, switchState = computeViscositySwitchTerms(
             dt,
-            currentState, 
-            config, schemeConfig, 
-            SupportScheme.SuperSymmetric, 
-            adjacency)   
+            currentState,
+            config, schemeConfig,
+            SupportScheme.SuperSymmetric,
+            adjacency)
 
+    with record_function("[warpSPH] - [compSPH - 12] pressure / viscosity acceleration"):
+        dvdt, currentState.ap_ij, currentState.av_ij = computeCompSPHAccel(
+            currentState, config, schemeConfig, adjacency, gradHState)
 
-    with record_function("[warpSPH] - [compSPH - 06] pressure / viscosity acceleration"):
-        dvdt, currentState.ap_ij, currentState.av_ij = computeCompSPHAccelWarp(
-            queryParticles = currentState,
-            operationProperties = OperationProperties(
-                kernel = config.kernel,
-                supportMode =  SupportScheme.KernelMeanSymmetric
-            ),
-            domain = config.domain,
-            conductivityParams= schemeConfig.diffusionParams,
+    with record_function("[warpSPH] - [compSPH - 13] dudt"):
+        dudt = computeCompSPHdudt(currentState, config, schemeConfig, adjacency, gradHState)
 
-            queryEnergies = currentState.internalEnergies,
-            queryVelocities= currentState.velocities,
-            queryCs = currentState.soundspeeds,
-            queryAlphas = currentState.alphas,
-            queryPressures = currentState.pressures,
-
-            adjacency = adjacency,
-            gradHState = gradHState
-        )
-
-    with record_function("[warpSPH] - [compSPH - 07] dudt"):
-        dudt = computeCompSPHdudtWarp(
-            queryParticles = currentState,
-            operationProperties = OperationProperties(
-                kernel = config.kernel,
-                supportMode = SupportScheme.Gather #E.3
-             ),
-            domain = config.domain,
-            conductivityParams= schemeConfig.diffusionParams,
-
-            queryEnergies = currentState.internalEnergies,
-            queryVelocities= currentState.velocities,
-            queryCs = currentState.soundspeeds,
-            queryAlphas = currentState.alphas,
-            queryPressures = currentState.pressures,
-
-            adjacency = adjacency,
-            gradHState = gradHState
-        )
-
-    with record_function("[warpSPH] - [compSPH - 08] switch update, divergence, dE/dt"):
-        # particles.alpha0s, switchState = updateViscositySwitch(particles, wrappedKernel, neighbors.get('noghost'), SupportScheme.Gather, config, dt, dvdt, switchState)
-
+    with record_function("[warpSPH] - [compSPH - 14] viscosity-switch update"):
         currentState.alpha0s, switchState = updateViscositySwitch(
             switchState,
             dt, dvdt,
-            currentState, 
-            config, schemeConfig, 
-            SupportScheme.SuperSymmetric, 
-            adjacency)   
+            currentState,
+            config, schemeConfig,
+            SupportScheme.SuperSymmetric,
+            adjacency)
 
-
+    with record_function("[warpSPH] - [compSPH - 15] divergence / drho/dt"):
         drhodt = computeMomentumConsistent(
             currentState,
             config,
@@ -235,16 +198,15 @@ def compSPH_step(
             gradH = gradHState
         )
         currentState.divergence = -drhodt / currentState.densities
-        dEdt = currentState.masses * torch.einsum('ij,ij->i', currentState.velocities, (dvdt)) + currentState.masses * (dudt)
 
-    # drhodt = torch.zeros_like(currentState.densities)
-    # dEdt = torch.zeros_like(currentState.densities)
+    with record_function("[warpSPH] - [compSPH - 16] dE/dt"):
+        dEdt = currentState.masses * torch.einsum('ij,ij->i', currentState.velocities, dvdt) + currentState.masses * dudt
 
-    # with TimedBlock('compute forcing', use_cuda=True, device=device):
-    with record_function("[warpSPH] - [compSPH - 09] forcing + update"):
+    with record_function("[warpSPH] - [compSPH - 17] forcing"):
         forcing = computeForcing(currentSystem, dt, t, config, schemeConfig)
         dvdt += forcing / currentState.masses.view(-1,1)
 
+    with record_function("[warpSPH] - [compSPH - 18] update"):
         update = CompressibleSystemUpdate(
             dxdt = currentState.velocities.clone(),
             dvdt = dvdt,
@@ -253,43 +215,21 @@ def compSPH_step(
             dEdt = dEdt,
             passive = torch.zeros(currentState.densities.shape, device=currentState.densities.device, dtype=torch.bool)
         )
-
-        # with TimedBlock('enforce updates', use_cuda=True, device=device):
         enforceUpdates(update, currentSystem, dt, t, config, schemeConfig)
         if wall is not None:
             wall.finishUpdate(update)
 
-    with record_function("[warpSPH] - [compSPH - 10] energy-partition f_ij"):
+    with record_function("[warpSPH] - [compSPH - 19] energy-partition f_ij"):
         v_halfstep = currentState.velocities + 0.5 * dt * update.dvdt
-
-        currentState.f_ij = computeCompSPHBalanceTermWarp(
-            queryParticles = currentState,
-            operationProperties = OperationProperties(
-                kernel = config.kernel,
-                supportMode = config.supportMode
-            ),
-            domain = config.domain,
-
-            queryEnergies = currentState.internalEnergies,
-            queryVelocities= v_halfstep,
-            queryPressures = currentState.pressures,
-
-            pairWise_pressureAccel= currentState.ap_ij,
-            pairWise_viscosityAccel = currentState.av_ij,
-            energyScheme = schemeConfig.energyScheme,
-            dt= dt,
-            gamma = schemeConfig.gamma,
-
-            adjacency = adjacency,
-            gradHState = gradHState
-        )
+        currentState.f_ij = computeCompSPHBalanceTerm(
+            currentState, config, schemeConfig, adjacency, v_halfstep, dt, gradHState)
         if wall is not None:
             currentState.f_ij = wall.balanceFractions(currentState.f_ij, adjacency, currentState)
 
     if currentSystem.pairWork is not None:
         currentSystem.pairWork.latest = adjacency
     if schemeConfig.compatibleEnergy and currentSystem.pairWork is not None:
-        with record_function("[warpSPH] - [compSPH - 11] pair work -> running sum"):
+        with record_function("[warpSPH] - [compSPH - 20] pair work -> running sum"):
             accumulateStage(currentSystem.pairWork, stageIndex, adjacency, currentState, schemeConfig.energyScheme)
             # the pair arrays now live in the running sum: do not keep one set per stage on the returned state
             currentState.ap_ij = currentState.av_ij = currentState.f_ij = None
