@@ -265,6 +265,9 @@ CRKSPH shares CompSPH's system class, config base and `finalize`, so the graph r
 
 ## 5. Open items and the plan from here (user, 2026-10-13)
 
+> **Status 2026-10-14:** items 4 (CRKSPH graph mode: section 2.9), 10 (failed-capture corruption), 12 (rebuild scan) and 13 (full suite) below are done; the cleanup of the other schemes and the
+> open list in priority order live in [../../SCHEME_CLEANUP_PLAN.md](../../SCHEME_CLEANUP_PLAN.md) section 6. This section is kept as the record of the CompSPH work.
+
 1. **The remaining syncs**: DONE for `hostTime`, the diagnostics and the time / max-speed read (see 2.x above; 4.8 per step in the whole loop). What is left
    is structural: the step-end flag read (1), the rebuilds' edge-total read (0.6), the grid-radius flag (0.13), the diagnostics read (1), the timer (1).
 2. **The integrator's 110 self ops per step** (state copies, stage combines: `mul`, `clone`, `detach`, `view`, `add`, `zeros`).

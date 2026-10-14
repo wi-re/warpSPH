@@ -3,6 +3,10 @@
 > **Progress marker:** this plan's row in [PLANS.md](PLANS.md). Opened 2026-10-13 on the user's instruction ("clean up the scheme
 > first": the ACSPH run is at 25-40 % GPU utilisation and every comparison is impractical). Related: OPEN_PROBLEMS §33,
 > [ACSPH_PLAN.md](ACSPH_PLAN.md), `docs/acsph/DYNGPUSPH_COMPARISON.md` ("Launch overhead").
+>
+> **2026-10-14:** the cleanup recipe, the shared helpers and the lessons that came out of applying it to the other schemes (CompSPH, Monaghan, CRKSPH, GSPH, Inutsuka,
+> meshless, delta-SPH) are in [SCHEME_CLEANUP_PLAN.md](SCHEME_CLEANUP_PLAN.md); phase 6 below is done there. ACSPH's own phases 2-5 are still open: start from that plan's section 1
+> (baselines in eager AND graph mode first) and its section 5 (graph-vs-eager comparison, address-read hazards).
 
 ## 1. What is wrong (measured / read from the code, 2026-10-13)
 
@@ -57,7 +61,7 @@ meanwhile so ordinary runs stay fast). Each phase ends bitwise-checked, audited 
 | 3 | Collapse the torch-op storms: fused warp kernels for the RK stage combine + fluid mask, projection, wall bounce (pair kernel, no scatter_reduce), convergence metric, surface-flag/taper arithmetic | audit `ops/step`, `launch/step`; per-kernel tests vs the torch reference; gradcheck script if differentiable; bitwise or tolerance stated |
 | 4 | Per-step setup (contact masks, bounce setup, parameters, solver construction) as one or two kernels / cached per Verlet generation | audit |
 | 5 | Only then graphs: persistent graph per Verlet generation, device-side stop test (`capture_while`), whole-step graph | utilisation >= 80 %, ms/step vs the eager phase-4 number |
-| 6 | Same extraction + cleanup in `schemes/weaklyCompressible/deltaSPH.py` | its tests + Marrone 3.1 reference timing (108.7 s) |
+| 6 | **Done 2026-10-14** (SCHEME_CLEANUP_PLAN.md): same extraction + cleanup in `schemes/weaklyCompressible/deltaSPH.py` | its tests + Marrone 3.1 reference timing (108.7 s) |
 
 Acceptance: Marrone 3.1 nx 70 and sloshing nx 100 with graphs OFF at high GPU utilisation and low `sync/step`, then graphs ON as a bonus.
 
