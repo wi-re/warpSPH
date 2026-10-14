@@ -381,7 +381,7 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
     # step, self-checked, eager fallback on any Verlet rebuild). Not with
     # trajectory/state storing, which reads the per-stage data a replayed
     # step does not reconstruct.
-    deferStageTimes = ctx.scheme in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH)
+    deferStageTimes = ctx.scheme in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH, CompressibleSPHScheme.Monaghan)
     stepGraph = None
     graphWanted = spec.cudaGraph
     if ctx.scheme == CompressibleSPHScheme.CompSPH:

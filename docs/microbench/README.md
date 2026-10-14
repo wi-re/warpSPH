@@ -9,3 +9,6 @@
 * `wadsley_after_2026-10-14.txt`, `wadsley_detector_before_after_2026-10-14.txt` -- the Wadsley detector before (torch ops) and after (warp kernels,
   `Wadsley2017/kernels.py`): 6 -> 0 syncs and 110 -> 43 ops per detector call, 127 -> 51 ops and 8 -> 0 syncs per terms call
   (`scripts/microbench_wadsleyDetector.py`).
+* `audit_monaghan_sod2d_{before,after}_2026-10-14.txt` -- the call audit of the Monaghan step (`audit_case.py sod2d --scheme Monaghan`) before and after its
+  cleanup: integrator syncs 10.0 -> 5.2 per step (one Verlet validity check per stage instead of two, the Owen solve's host convergence read gone, the
+  stage-time reads deferred), launches 33 -> 26, wall 8.76 -> 7.59 ms/step. Remaining syncs: 2 validity checks, ~2.2 list rebuild, 1 switch step hook (host time).
