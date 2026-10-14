@@ -119,8 +119,14 @@ def _rollAngle(ctx: RunContext, t: float) -> float:
 def _applyRollGravity(ctx: RunContext, t: float) -> None:
     """Rotate the (down) gravity vector into the tank frame at time ``t``."""
     theta = _rollAngle(ctx, t)
-    ctx.schemeConfig.gravityConfig.direction = torch.tensor(
-        [-math.sin(theta), -math.cos(theta)], device=ctx.device, dtype=ctx.dtype)
+    direction = torch.tensor([-math.sin(theta), -math.cos(theta)], device=ctx.device, dtype=ctx.dtype)
+    current = ctx.schemeConfig.gravityConfig.direction
+    if isinstance(current, torch.Tensor) and current.shape == direction.shape and current.dtype == direction.dtype and current.device == direction.device:
+        # IN PLACE: a CUDA-graph replay of the right-hand side (`cudaGraph=True` on this case) reads this tensor's memory; a new tensor every step left the
+        # graph replaying the direction it captured (or whatever reused the freed memory)
+        current.copy_(direction)
+    else:
+        ctx.schemeConfig.gravityConfig.direction = direction
     ctx.scratch['rollAngle'] = theta
 
 
