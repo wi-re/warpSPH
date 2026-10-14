@@ -12,3 +12,6 @@
 * `audit_monaghan_sod2d_{before,after}_2026-10-14.txt` -- the call audit of the Monaghan step (`audit_case.py sod2d --scheme Monaghan`) before and after its
   cleanup: integrator syncs 10.0 -> 5.2 per step (one Verlet validity check per stage instead of two, the Owen solve's host convergence read gone, the
   stage-time reads deferred), launches 33 -> 26, wall 8.76 -> 7.59 ms/step. Remaining syncs: 2 validity checks, ~2.2 list rebuild, 1 switch step hook (host time).
+* `audit_crkSPH_sod2d_{before,after}_2026-10-14.txt` -- the CRKSPH step (`audit_case.py sod2d --scheme CRKSPH`) before and after its cleanup: integrator 904 -> 504 ops
+  and 9.2 -> 3.2 syncs per step (the CRK correction terms were ~290 torch ops and 3 host reads per stage in `computeCRKTermsWarp`, now one warp kernel
+  `modules/crk/terms.py`; the torch version stays for the forward-mode tangent path), wall 9.4 -> 7.6 ms/step. The remaining syncs are the Verlet validity check and rebuilds.

@@ -3,48 +3,34 @@
 ideal-gas EOS, the Cullen-Hopkins viscosity switch, a CRK velocity gradient
 used both for `drhodt` (via its trace) and as an input to the CRK
 pressure/viscosity acceleration and dudt kernels, and the Monaghan-Price
-energy-balance term `f_ij`. Large stretches of an earlier
-`computeCompSPHAccelWarp`/grad-h formulation are commented out rather than
-removed (tracked separately in docs/historic_plans/CLEANUP_PLAN.md); `gradHState` is
-unconditionally `None` (its adaptive-support branch is also commented out).
-It used to only be assigned *after* the `currentState.divergence is None`
-fallback branch that reads it -- an `UnboundLocalError` waiting to happen on
-any first call with unset `divergence` -- fixed 2026-08-15 by assigning it
-before that branch instead.
+energy-balance term `f_ij`. `gradHState` is unconditionally `None` (the grad-h formulation is not used with CRK).
+
+`crkSPH_step` is a list of single-purpose regions (one `record_function` each, numbered in call order), in the same shape as
+`compSPH_step` and `compressibleSPH_Monaghan`. The CRK correction terms come from `modules/crk/terms.py` (one warp kernel, no host
+read; the torch version stays in the core for the forward-mode tangent path).
 """
 
-from ...modules.adaptiveSupport import computeOmega, evaluateOptimalSupport
+from ...modules.adaptiveSupport import solveStageSupport
 from ...modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
 from ...modules.compressibleWall import beginCompressibleWall, clampSupportsToVolume
-from ...modules.compSPH.accel import computeCompSPHAccelWarp
-from ...modules.compSPH.dudt import computeCompSPHdudtWarp
 from ...modules.compSPH.operators import computeCompSPHBalanceTerm
-from ...modules.crk import computeCrkSPHdudtWarp
+from ...modules.compSPH.pairWork import accumulateStage, startStage, stageRebuildSlack
+from ...modules.crk import CRKStage, computeCRKAccel, computeCRKdudt, crkFactors
 from ...modules.eos import idealGasEOS
 from ...modules.momentum import computeMomentumConsistent
+from ...modules.reconstruction import requireRawPairVelocity
 from ...modules.shockCapturing import computeViscositySwitchTerms, updateViscositySwitch
-from ...enumTypes import EnergyScheme
+from ...configurations.compSPHConfig import CompSPHConfig
+from ...configurations.crkSPH import resolveCRKLimiter
+from ...configurations.simulationConfig import SimulationConfig
+from ...systems.compSPH import CompSPHSystem
+from ...systems.compressibleMonaghan import CompressibleSystemUpdate
 
 import warnings
 
-from warpSPHCore import (
-    GradientScheme, OperationProperties, SupportScheme,
-    WarpOperation, buildVerletList, computeCRKFactors,
-    warpOperation,
-)
-from ...systems.compSPH import CompSPHSystem, CompSPHState
-from ...configurations.compSPHConfig import CompSPHConfig
-from ...configurations.simulationConfig import SimulationConfig
-import torch
-from ...systems.compressibleMonaghan import CompressibleSystemUpdate
-
-from ...modules.shockCapturing.CullenHopkins import computeHopkinsTerms, computeHopkinsUpdate
-
+from warpSPHCore import GradientScheme, OperationProperties, SupportScheme, WarpOperation, warpOperation
 from warpSPHCore.profiling import record_function
-from ...modules.compSPH.pairWork import accumulateStage, startStage, stageRebuildSlack
-from ...modules.crk.accel import computeCrkSPHAccelWarp
-from ...configurations.crkSPH import resolveCRKLimiter
-from ...modules.reconstruction import requireRawPairVelocity
+import torch
 
 __all__ = ['crkSPH_step']
 
@@ -102,350 +88,146 @@ def crkSPH_step(
     verbose = False,
     stageIndex = None,     # injected by the Runge-Kutta integrator (it inspects this signature)
 ):
-
     _warnNonConservativeSupport(config)
     requireRawPairVelocity(schemeConfig.diffusionParams, 'CRKSPH')
     crkViscosityParams = resolveCRKLimiter(schemeConfig.crkViscosityParams, config.n_h)
-    currentSystem = system#
+    currentSystem = system
     currentState = currentSystem.state
     t = currentSystem.t
-    wall = beginCompressibleWall(currentState, config)
-    startStage(currentSystem, currentState, config, stageIndex)
-
-    IE = currentState.internalEnergies * currentState.masses
-    KE = 0.5 * currentState.masses * torch.einsum('ij,ij->i', currentState.velocities, currentState.velocities)
-    TE = IE + KE
-
-    # print(f"TE: {TE.sum().item()}, IE: {IE.sum().item()}, KE: {KE.sum().item()}")
-    # print(f'\tmin/max/mean TE: {TE.min().item()}/{TE.max().item()}/{TE.mean().item()}')
-    # print(f'\tmin/max/mean IE: {IE.min().item()}/{IE.max().item()}/{IE.mean().item()}')
-    # print(f'\tmin/max/mean KE: {KE.min().item()}/{KE.max().item()}/{KE.mean().item()}')
-
-    rho_optimal, h_optimal, currentSystem.adjacency, *_ = evaluateOptimalSupport(
-        currentState, config, schemeConfig, SupportScheme.Gather, currentSystem.adjacency,
-        validateOnce=True, rebuildSlack=stageRebuildSlack(currentSystem, stageIndex), computeDensity=False)
-    currentState.supports = h_optimal
-    currentState.densities = rho_optimal
-
-    # print(f"\tOptimal support: min/max/mean h: {h_optimal.min().item()}/{h_optimal.max().item()}/{h_optimal.mean().item()}")
-    # print(f'\tDensity: min/max/mean rho: {rho_optimal.min().item()}/{rho_optimal.max().item()}/{rho_optimal.mean().item()}')
-
-    # meanSupport = currentState.supports[10:-10].mean().item()
-    # currentState.supports[:10] = meanSupport
-    # currentState.supports[-10:] = meanSupport
-    # currentState.supports[:] = meanSupport
-
-    verletScale = config.verletScale
-
-    # the solver validated this list against the particles and every support it used, and rebuilt it if needed
-    adjacency = currentSystem.adjacency
-    # only reduces h, so the list stays valid; wall cases only (modules/compressibleWall/supportClamp.py)
-    currentState.supports = clampSupportsToVolume(currentState, config, adjacency, wall)
-
-    apparentVolume, currentState.densities, crkState = computeCRKFactors(currentState, config.domain, config.kernel, adjacency = adjacency)
-    if wall is not None:
-        # wall rows enter the CRK moment sums like fluid rows; their support and
-        # mass change here, so the factors (and the fluid density) are redone
-        wall.apply(currentState, config, schemeConfig, adjacency, latticeSupport=True)
-        apparentVolume, currentState.densities, crkState = computeCRKFactors(currentState, config.domain, config.kernel, adjacency = adjacency)
-        wall.apply(currentState, config, schemeConfig, adjacency, latticeSupport=True)
-
-    # currentState.densities = warpOperation(
-    #     currentState,
-    #     OperationProperties(
-    #         kernel = config.kernel,
-    #         operation = WarpOperation.Density,
-    #         supportMode = SupportScheme.Gather, # cullen switch E.1 in the CRK paper uses gather for density estimation
-    #     ),
-    #     domain = config.domain,
-    #     adjacency = adjacency,
-    # )
-    # gradHState is only ever actually set below (currently unconditionally None --
-    # see the commented-out adaptiveSupportCorrections branch further down); assigned
-    # here too so the first-call fallback below doesn't read it before it exists.
     gradHState = None
+
+    with record_function("[warpSPH] - [crkSPH - 01] wall"):
+        wall = beginCompressibleWall(currentState, config)
+        startStage(currentSystem, currentState, config, stageIndex)
+
+    with record_function("[warpSPH] - [crkSPH - 02] optimal support"):
+        solveStageSupport(currentSystem, currentState, config, schemeConfig,
+                          rebuildSlack=stageRebuildSlack(currentSystem, stageIndex))
+        # the solver validated this list against the particles and every support it used, and rebuilt it if needed
+        adjacency = currentSystem.adjacency
+
+    with record_function("[warpSPH] - [crkSPH - 03] support clamp"):
+        # only reduces h, so the list stays valid; wall cases only (modules/compressibleWall/supportClamp.py)
+        currentState.supports = clampSupportsToVolume(currentState, config, adjacency, wall)
+
+    with record_function("[warpSPH] - [crkSPH - 04] CRK factors"):
+        apparentVolume, currentState.densities, crkState = crkFactors(currentState, config.domain, config.kernel, adjacency = adjacency)
+
+    if wall is not None:
+        with record_function("[warpSPH] - [crkSPH - 05] wall closure"):
+            # wall rows enter the CRK moment sums like fluid rows; their support and mass change here, so the factors (and
+            # the fluid density) are redone
+            wall.apply(currentState, config, schemeConfig, adjacency, latticeSupport=True)
+            apparentVolume, currentState.densities, crkState = crkFactors(currentState, config.domain, config.kernel, adjacency = adjacency)
+            wall.apply(currentState, config, schemeConfig, adjacency, latticeSupport=True)
+
     if currentState.divergence is None:
-        print('Warning: divergence is None, computing for the first time')
-        drhodt = computeMomentumConsistent(
-            currentState,
-            config,
-            schemeConfig = schemeConfig,
-            adjacency = adjacency,
-            gradH = gradHState
+        with record_function("[warpSPH] - [crkSPH - 06] divergence (first time)"):
+            print('Warning: divergence is None, computing for the first time')
+            drhodt = computeMomentumConsistent(
+                currentState,
+                config,
+                schemeConfig = schemeConfig,
+                adjacency = adjacency,
+                gradH = gradHState
+            )
+            currentState.divergence = -drhodt/currentState.densities
+
+    with record_function("[warpSPH] - [crkSPH - 07] Dirichlet BC"):
+        enforceDirichlet(currentSystem, t, dt, config, schemeConfig)
+
+    with record_function("[warpSPH] - [crkSPH - 08] EOS"):
+        currentState.entropies, _, currentState.pressures, currentState.soundspeeds = idealGasEOS(
+            A = None,
+            u = currentState.internalEnergies,
+            P = None,
+            rho = currentState.densities,
+            gamma = schemeConfig.gamma,
         )
-        currentState.divergence = -drhodt/currentState.densities
 
-    # currentState.densities = warpOperation(
-    #     currentState,
-    #     OperationProperties(
-    #         kernel = config.kernel,
-    #         operation = WarpOperation.Density,
-    #         supportMode = SupportScheme.Gather, # cullen switch E.1 in the CRK paper uses gather for density estimation
-    #     ),
-    #     domain = config.domain,
-    #     adjacency = adjacency,
-    # )
-    enforceDirichlet(currentSystem, t, dt, config, schemeConfig)
-    currentState.entropies, _, currentState.pressures, currentState.soundspeeds = idealGasEOS(
-        A = None,
-        u = currentState.internalEnergies,
-        P = None,
-        rho = currentState.densities,
-        gamma = schemeConfig.gamma,
-    )
+    with record_function("[warpSPH] - [crkSPH - 09] velocity gradient"):
+        velocityGradient = warpOperation(
+            currentState,
+            OperationProperties(
+                kernel = config.kernel,
+                operation = WarpOperation.Gradient,
+                supportMode = SupportScheme.Scatter, # E.3
+                gradientMode = GradientScheme.Difference, # E.3
+            ),
+            queryValues = currentState.velocities,
+            domain = config.domain,
+            adjacency = adjacency,
+            queryVolumes = apparentVolume,
+            crkState= crkState,
+        ).mT
 
-    # nabla_dot_v = warpOperation(
-    #     currentState,
-    #     OperationProperties(
-    #         kernel = config.kernel,
-    #         operation = WarpOperation.Divergence,
-    #         supportMode = SupportScheme.Scatter, # E.3
-    #         gradientMode = GradientScheme.Difference, # E.3
-    #     ),
-    #     queryValues = currentState.velocities,
-    #     domain = config.domain,
-    #     adjacency = adjacency,
-    #     queryVolumes = apparentVolume,
-    #     crkState= crkState,
-    # )
-    # nabla_times_v = warpOperation(
-    #     currentState,
-    #     OperationProperties(
-    #         kernel = config.kernel,
-    #         operation = WarpOperation.Curl,
-    #         supportMode = SupportScheme.Scatter, # E.3
-    #         gradientMode = GradientScheme.Difference, # E.3
-    #     ),
-    #     queryValues = currentState.velocities,
-    #     domain = config.domain,
-    #     adjacency = adjacency,
-    #     queryVolumes = apparentVolume,
-    #     crkState= crkState,
-    # )
+    with record_function("[warpSPH] - [crkSPH - 10] drho/dt"):
+        drhodt = -torch.einsum('...ii->...', velocityGradient) * currentState.densities
 
-    # balsara = torch.abs(nabla_dot_v) / (torch.abs(nabla_dot_v) + torch.norm(nabla_times_v, dim=-1) + 1e-4 * currentState.soundspeeds )
-    # currentState.alphas = torch.clamp(balsara, 0.0, 1.0) 
+    with record_function("[warpSPH] - [crkSPH - 11] viscosity-switch terms"):
+        currentState.alphas, switchState = computeViscositySwitchTerms(
+            dt,
+            currentState,
+            config, schemeConfig,
+            SupportScheme.SuperSymmetric,
+            adjacency)
 
-    # if schemeConfig.adaptiveSupportCorrections:
-    #     omega = computeOmega(currentState, 
-    #             OperationProperties(
-    #                 kernel = config.kernel,
-    #                 supportMode = SupportScheme.Gather, # E.5
-    #             ),
-    #             domain = config.domain,
-    #             adjacency = adjacency
-    #     )
+    stage = CRKStage(volumes = apparentVolume, crkState = crkState, velocityGradient = velocityGradient,
+                     viscosityParams = crkViscosityParams)
 
-    #     gradHState = GradHState(
-    #         queryOmegas = omega
-    #     )
-    # else:
-    #     gradHState = None
-    # (gradHState is set to None near the top of this function instead, see there)
+    with record_function("[warpSPH] - [crkSPH - 12] pressure / viscosity acceleration"):
+        dvdt, currentState.ap_ij, currentState.av_ij = computeCRKAccel(
+            currentState, config, schemeConfig, adjacency, stage, gradHState)
 
-    # currentState.alphas, switchState = computeViscositySwitchTerms(
-    #     dt,
-    #     currentState, 
-    #     config, schemeConfig, 
-    #     SupportScheme.SuperSymmetric, 
-    #     adjacency)   
+    with record_function("[warpSPH] - [crkSPH - 13] dudt"):
+        dudt = computeCRKdudt(currentState, config, schemeConfig, adjacency, stage, gradHState)
 
-    velocityGradient = warpOperation(
-        currentState,
-        OperationProperties(
-            kernel = config.kernel,
-            operation = WarpOperation.Gradient,
-            supportMode = SupportScheme.Scatter, # E.3
-            gradientMode = GradientScheme.Difference, # E.3
-        ),
-        queryValues = currentState.velocities,
-        domain = config.domain,
-        adjacency = adjacency,
-        queryVolumes = apparentVolume,
-        crkState= crkState,
-    ).mT
-    drhodt = -torch.einsum('...ii->...', velocityGradient) * currentState.densities
+    with record_function("[warpSPH] - [crkSPH - 14] viscosity-switch update"):
+        # Advance the switch's stored alpha0 (mirrors the Monaghan / compSPH wiring). AV_PLAN S2 had this call deleted; but
+        # `computeCullenTerms` only decays the stored alpha0 by ONE step, so without writing it back it stays at its initial 1 and
+        # alpha sticks at ~0.97-0.98 -- C&D / R&H under CRKSPH were fixed-alpha runs (AV_PLAN Phase 1 clean-up, item 3).
+        currentState.alpha0s, switchState = updateViscositySwitch(
+            switchState,
+            dt, dvdt,
+            currentState,
+            config, schemeConfig,
+            SupportScheme.SuperSymmetric,
+            adjacency)
 
+    with record_function("[warpSPH] - [crkSPH - 15] divergence"):
+        currentState.divergence = -drhodt / currentState.densities
 
-    # dvdt, currentState.ap_ij, currentState.av_ij = computeCompSPHAccelWarp(
-    #     queryParticles = currentState,
-    #     operationProperties = OperationProperties(
-    #         kernel = config.kernel,
-    #         supportMode =  SupportScheme.KernelMeanSymmetric
-    #     ),
-    #     domain = config.domain,
-    #     conductivityParams= schemeConfig.diffusionParams,
+    with record_function("[warpSPH] - [crkSPH - 16] dE/dt"):
+        dEdt = currentState.masses * torch.einsum('ij,ij->i', currentState.velocities, (dvdt)) + currentState.masses * (dudt)
 
-    #     queryEnergies = currentState.internalEnergies,
-    #     queryVelocities= currentState.velocities,
-    #     queryCs = currentState.soundspeeds,
-    #     queryAlphas = currentState.alphas,
-    #     queryPressures = currentState.pressures,
+    with record_function("[warpSPH] - [crkSPH - 17] forcing"):
+        forcing = computeForcing(currentSystem, dt, t, config, schemeConfig)
+        dvdt += forcing / currentState.masses.view(-1,1)
 
-    #     adjacency = adjacency,
-    #     gradHState = gradHState
-    # )
+    with record_function("[warpSPH] - [crkSPH - 18] update"):
+        update = CompressibleSystemUpdate(
+            dxdt = currentState.velocities.clone(),
+            dvdt = dvdt,
+            dudt = dudt,
+            drhodt = drhodt,
+            dEdt = dEdt,
+            passive = torch.zeros(currentState.densities.shape, device=currentState.densities.device, dtype=torch.bool)
+        )
+        enforceUpdates(update, currentSystem, dt, t, config, schemeConfig)
+        if wall is not None:
+            wall.finishUpdate(update)
 
-
-    currentState.alphas, switchState = computeViscositySwitchTerms(
-        dt,
-        currentState, 
-        config, schemeConfig, 
-        SupportScheme.SuperSymmetric, 
-        adjacency)   
-
-
-    # dvdt, currentState.ap_ij, currentState.av_ij = computeCompSPHAccelWarp(
-    #     queryParticles = currentState,
-    #     operationProperties = OperationProperties(
-    #         kernel = config.kernel,
-    #         supportMode =  SupportScheme.KernelMeanSymmetric
-    #     ),
-    #     domain = config.domain,
-    #     conductivityParams= schemeConfig.diffusionParams,
-
-    #     queryEnergies = currentState.internalEnergies,
-    #     queryVelocities= currentState.velocities,
-    #     queryCs = currentState.soundspeeds,
-    #     queryAlphas = currentState.alphas,
-    #     queryPressures = currentState.pressures,
-
-    #     adjacency = adjacency,
-    #     gradHState = gradHState
-    # )
-
-    # dudt = computeCompSPHdudtWarp(
-    #     queryParticles = currentState,
-    #     operationProperties = OperationProperties(
-    #         kernel = config.kernel,
-    #         supportMode = SupportScheme.Gather #E.3
-    #      ),
-    #     domain = config.domain,
-    #     conductivityParams= schemeConfig.diffusionParams,
-
-    #     queryEnergies = currentState.internalEnergies,
-    #     queryVelocities= currentState.velocities,
-    #     queryCs = currentState.soundspeeds,
-    #     queryAlphas = currentState.alphas,
-    #     queryPressures = currentState.pressures,
-
-    #     adjacency = adjacency,
-    #     gradHState = gradHState
-    # )
-
-    dvdt, currentState.ap_ij, currentState.av_ij = computeCrkSPHAccelWarp(
-        queryParticles = currentState,
-        operationProperties = OperationProperties(
-            kernel = config.kernel,
-            supportMode =  SupportScheme.KernelMeanSymmetric
-        ),
-        domain = config.domain,
-        conductivityParams= schemeConfig.diffusionParams,
-        crkViscosityParams = crkViscosityParams,
-        queryVelocityTensor= velocityGradient,
-        queryEnergies = currentState.internalEnergies,
-        queryVelocities= currentState.velocities,
-        queryCs = currentState.soundspeeds,
-        queryAlphas = currentState.alphas,
-        queryPressures = currentState.pressures,
-        queryVolumes = apparentVolume,
-        crkState = crkState,
-
-        adjacency = adjacency,
-        gradHState = gradHState,
-    )
-
-    dudt = computeCrkSPHdudtWarp(
-        queryParticles = currentState,
-        operationProperties = OperationProperties(
-            kernel = config.kernel,
-            supportMode = SupportScheme.KernelMeanSymmetric #E.3
-         ),
-        domain = config.domain,
-        conductivityParams= schemeConfig.diffusionParams,
-        crkViscosityParams = crkViscosityParams,
-        queryVelocityTensor= velocityGradient,
-
-        queryEnergies = currentState.internalEnergies,
-        queryVelocities= currentState.velocities,
-        queryCs = currentState.soundspeeds,
-        queryAlphas = currentState.alphas,
-        queryPressures = currentState.pressures,
-        queryVolumes = apparentVolume,
-        crkState = crkState,
-
-        adjacency = adjacency,
-        gradHState = gradHState
-    )
-    # dudt = computeCompSPHdudtWarp(
-    #     queryParticles = currentState,
-    #     operationProperties = OperationProperties(
-    #         kernel = config.kernel,
-    #         supportMode = SupportScheme.Gather #E.3
-    #      ),
-    #     domain = config.domain,
-    #     conductivityParams= schemeConfig.diffusionParams,
-
-    #     queryEnergies = currentState.internalEnergies,
-    #     queryVelocities= currentState.velocities,
-    #     queryCs = currentState.soundspeeds,
-    #     queryAlphas = currentState.alphas,
-    #     queryPressures = currentState.pressures,
-    #     # queryVolumes = apparentVolume,
-    #     # crkState = crkState,
-
-    #     adjacency = adjacency,
-    #     gradHState = gradHState
-    # )
-
-    # Advance the viscosity switch's stored alpha0 (mirrors the Monaghan / compSPH wiring). AV_PLAN S2 had this call
-    # deleted; but `computeCullenTerms` only decays the stored alpha0 by ONE step, so without writing it back it stays at its
-    # initial 1 and alpha sticks at ~0.97-0.98 -- C&D / R&H under CRKSPH were fixed-alpha runs (AV_PLAN Phase 1 clean-up, item 3).
-    currentState.alpha0s, switchState = updateViscositySwitch(
-        switchState,
-        dt, dvdt,
-        currentState,
-        config, schemeConfig,
-        SupportScheme.SuperSymmetric,
-        adjacency)
-
-    # drhodt = computeMomentumConsistent(
-    #     currentState,
-    #     config,
-    #     supportScheme = SupportScheme.Gather,
-    #     adjacency = adjacency,
-    #     gradH = gradHState
-    # )
-    currentState.divergence = -drhodt / currentState.densities
-    dEdt = currentState.masses * torch.einsum('ij,ij->i', currentState.velocities, (dvdt)) + currentState.masses * (dudt)
-
-    forcing = computeForcing(currentSystem, dt, t, config, schemeConfig)
-    dvdt += forcing / currentState.masses.view(-1,1)
-
-    update = CompressibleSystemUpdate(
-        dxdt = currentState.velocities.clone(),
-        dvdt = dvdt,
-        dudt = dudt,
-        drhodt = drhodt,
-        dEdt = dEdt,
-        passive = torch.zeros(currentState.densities.shape, device=currentState.densities.device, dtype=torch.bool)
-    )
-
-    enforceUpdates(update, currentSystem, dt, t, config, schemeConfig)
-    if wall is not None:
-        wall.finishUpdate(update)
-
-    v_halfstep = currentState.velocities + 0.5 * dt * update.dvdt
-
-    currentState.f_ij = computeCompSPHBalanceTerm(
-        currentState, config, schemeConfig, adjacency, v_halfstep, dt, gradHState)
-    if wall is not None:
-        currentState.f_ij = wall.balanceFractions(currentState.f_ij, adjacency, currentState)
+    with record_function("[warpSPH] - [crkSPH - 19] energy-partition f_ij"):
+        v_halfstep = currentState.velocities + 0.5 * dt * update.dvdt
+        currentState.f_ij = computeCompSPHBalanceTerm(
+            currentState, config, schemeConfig, adjacency, v_halfstep, dt, gradHState)
+        if wall is not None:
+            currentState.f_ij = wall.balanceFractions(currentState.f_ij, adjacency, currentState)
 
     if currentSystem.pairWork is not None:
         currentSystem.pairWork.latest = adjacency
     if schemeConfig.compatibleEnergy and currentSystem.pairWork is not None:
-        with record_function("[warpSPH] - [crkSPH - 11] pair work -> running sum"):
+        with record_function("[warpSPH] - [crkSPH - 20] pair work -> running sum"):
             accumulateStage(currentSystem.pairWork, stageIndex, adjacency, currentState, schemeConfig.energyScheme)
             # the pair arrays now live in the running sum: do not keep one set per stage on the returned state
             currentState.ap_ij = currentState.av_ij = currentState.f_ij = None

@@ -8,5 +8,7 @@ in `modules/reconstruction` (re-exported by `limiter`) to build a monotonic pseu
 
 from .accel import computeCrkSPHAccelWarp
 from .dudt import computeCrkSPHdudtWarp
+from .operators import CRKStage, computeCRKAccel, computeCRKdudt
+from .terms import computeCRKTerms, crkFactors
 
-__all__ = ['computeCrkSPHAccelWarp', 'computeCrkSPHdudtWarp']
+__all__ = ['computeCrkSPHAccelWarp', 'computeCrkSPHdudtWarp', 'CRKStage', 'computeCRKAccel', 'computeCRKdudt', 'computeCRKTerms', 'crkFactors']
