@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))  # warpSPH
 
 import d4_mfm_wave as d4
 from warpSPHCore.mfm import primitives
-from warpSPHIntegrators.integration import IntegrationSchemeType
+from warpSPHIntegrators.schemes import IntegrationSchemeType
 from warpSPH.systems.meshless import MeshlessState, MeshlessSystem
 from warpSPH.configurations.meshless import MeshlessConfig
 from warpSPH.configurations.simulationConfig import SimulationConfig

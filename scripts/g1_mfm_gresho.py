@@ -46,7 +46,7 @@ from particle_sets import build_case
 from warpSPHCore.enumTypes import KernelFunctions
 from warpSPHCore.mfm import MeshlessWarp, primitives, conserved
 
-from warpSPHIntegrators.integration import IntegrationSchemeType
+from warpSPHIntegrators.schemes import IntegrationSchemeType
 from warpSPH.systems.meshless import MeshlessState, MeshlessSystem
 from warpSPH.configurations.meshless import MeshlessConfig
 from warpSPH.configurations.simulationConfig import SimulationConfig

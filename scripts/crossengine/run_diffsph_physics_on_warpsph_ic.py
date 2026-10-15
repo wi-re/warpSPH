@@ -72,7 +72,7 @@ from diffSPH.enums import *
 from diffSPH.schemes.deltaSPH import deltaPlusSPHScheme, DeltaPlusSPHSystem
 from diffSPH.schemes.states.wcsph import WeaklyCompressibleState as WState_d
 from diffSPH.modules.timestep import computeTimestep
-from diffSPH.integration import getIntegrator
+from diffSPH.integration import get_scheme
 
 kernelD = KernelType.Wendland4
 schemeD = SimulationScheme.DeltaSPH
@@ -141,7 +141,7 @@ particleSystem = DeltaPlusSPHSystem(domainD, None, 0.0, stateD, 'momentum', None
 
 dt = float(computeTimestep(schemeD, 1e-2, stateD, configD, None))
 print(f'fixed dt = {dt:.6g}')
-integrationScheme = getIntegrator(integrationD)
+integrationScheme = get_scheme(integrationD)
 
 tLimit = 4.0
 timesteps = cliArgs.nSteps if cliArgs.nSteps is not None else int(tLimit / dt)

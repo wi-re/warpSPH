@@ -339,7 +339,7 @@ def enumChoices() -> Dict[str, List[str]]:
     which resolve precision on first import, and building a parser must not
     force that choice.
     """
-    from warpSPHIntegrators import IntegrationSchemeType
+    from warpSPHIntegrators.schemes import IntegrationSchemeType
     from warpSPHCore import (GradientScheme, KernelFunctions, LaplacianScheme,
                              SupportScheme)
     from ..geometry import SamplingScheme

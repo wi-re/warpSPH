@@ -19,7 +19,9 @@ import torch
 from warpSPH.sample.acousticCore import buildPeriodicVortexAcousticCoreSystem
 from warpSPH.schemes.experimental.acousticCore import f_acoustic_core
 
-from warpSPHIntegrators import FixedPointSolver, JFNKSolver, get_reference_state, getIntegrator
+from warpSPHIntegrators.solvers import FixedPointSolver, JFNKSolver
+from warpSPHIntegrators.state import get_reference_state
+from warpSPHIntegrators import get_scheme
 
 
 def test_acousticCoreStepProducesFiniteBoundedDerivatives():
@@ -90,7 +92,7 @@ def test_acousticCoreWiredThroughGenericDIRKWithJFNK():
     silently no-op rather than solve anything.
     """
     system, config, schemeConfig = buildPeriodicVortexAcousticCoreSystem()
-    scheme = getIntegrator('Backward Euler (implicit)')
+    scheme = get_scheme('Backward Euler (implicit)')
     solver = JFNKSolver(matvec='fd', tol=1e-8, max_iterations=20)
 
     dt = 1e-3
@@ -111,7 +113,7 @@ def test_acousticCorePicardAlsoRunsOneStep():
     dedicated stability comparison at a much larger `dt`).
     """
     system, config, schemeConfig = buildPeriodicVortexAcousticCoreSystem()
-    scheme = getIntegrator('Backward Euler (implicit)')
+    scheme = get_scheme('Backward Euler (implicit)')
     solver = FixedPointSolver(iterations=5)
 
     dt = 1e-4

@@ -10,7 +10,8 @@ extra fields layered on top. Referenced directly (not just as a base class) by
 `modules/momentum/consistent.py`'s type hint.
 """
 
-from warpSPHIntegrators import *
+from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state, tagged
+from warpSPHIntegrators.state.fields import update_component, update_position
 from dataclasses import dataclass
 import torch
 from typing import Optional

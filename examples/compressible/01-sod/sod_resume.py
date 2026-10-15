@@ -20,7 +20,7 @@ bootstrap(precision='float32')
 import h5py
 import torch
 from tqdm.autonotebook import tqdm
-from warpSPHIntegrators.integration import getIntegrator
+from warpSPHIntegrators import get_scheme
 
 from warpSPH.cases.compressible.sod import sodCase
 from warpSPH.io import importConfigs, latestExportPath, loadTrajectory, loadTrajectoryFrame, writeFrame
@@ -66,7 +66,7 @@ exportInterval = args.exportInterval if args.exportInterval is not None \
     else float(h5py.File(os.path.join(exportPath, 'trajectory.h5'), 'r').attrs['exportInterval'])
 
 ctx = RunContext(
-    spec=spec, case=sodCase, config=config, integrator=getIntegrator(config.integrationScheme),
+    spec=spec, case=sodCase, config=config, integrator=get_scheme(config.integrationScheme),
     schemeConfig=schemeConfig, scheme=meta['scheme'], device=device, dtype=config.dtype, bundle=meta['bundle'],
     exportPath=exportPath,
 )

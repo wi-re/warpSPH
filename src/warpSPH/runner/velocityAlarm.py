@@ -35,7 +35,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 
-from warpSPHIntegrators import get_tagged_attr
+from warpSPHIntegrators.state import get_tagged_attr
 
 __all__ = ['ALARM_TAG', 'ESCALATION', 'VelocityAlarm', 'maxSpeed', 'resolveVelocityScale']
 

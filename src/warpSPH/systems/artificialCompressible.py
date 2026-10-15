@@ -36,7 +36,8 @@ from typing import Optional, Tuple
 import torch
 from warpSPHCore.profiling import record_function
 from warpSPHCore import *
-from warpSPHIntegrators import *
+from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state, tagged
+from warpSPHIntegrators.state.fields import update_component, update_position
 
 from ..rigidBody.integrate import integrateRigidBody
 from ..rigidBody.update import updateBodyParticlesWCSPH

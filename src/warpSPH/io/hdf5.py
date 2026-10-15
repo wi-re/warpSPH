@@ -9,7 +9,7 @@ import pickle
 import torch
 
 from warpSPHCore import *
-from warpSPHIntegrators.specs import StageResult
+from warpSPHIntegrators.state import StageResult
 
 
 def dumpAdjacency(adjacency, adjacencyGroup):

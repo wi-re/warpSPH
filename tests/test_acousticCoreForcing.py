@@ -43,7 +43,9 @@ import torch
 from warpSPH.sample.acousticCore import buildPeriodicVortexAcousticCoreSystem
 from warpSPH.schemes.experimental.acousticCore import f_acoustic_core
 
-from warpSPHIntegrators import FixedPointSolver, JFNKSolver, get_reference_state, getIntegrator
+from warpSPHIntegrators.solvers import FixedPointSolver, JFNKSolver
+from warpSPHIntegrators.state import get_reference_state
+from warpSPHIntegrators import get_scheme
 from warpSPHCore import SupportScheme, buildVerletList
 
 _NX = 24
@@ -66,7 +68,7 @@ def _runUntilDiverged(integrationScheme, dt, nSteps, solver=None, nx=_NX, diverg
     `rho` exceeded `divergeRhoMax * rho0`, or `nSteps + 1` if it never did.
     """
     system, config, schemeConfig = _buildForcedSystem(nx=nx)
-    scheme = getIntegrator(integrationScheme)
+    scheme = get_scheme(integrationScheme)
     kwargs = dict(f=f_acoustic_core, dt=dt, config=config, schemeConfig=schemeConfig, verbose=False)
     if solver is not None:
         kwargs['solver'] = solver
@@ -119,7 +121,7 @@ def test_forcedFlowGrowsSmoothlyAtSmallDt():
     # Re-run to inspect the final vMax (kept separate from the diverge-scan
     # loop above for clarity).
     finalSystem, _config2, _schemeConfig2 = _buildForcedSystem()
-    scheme = getIntegrator('Backward Euler (implicit)')
+    scheme = get_scheme('Backward Euler (implicit)')
     state = finalSystem
     for _ in range(nSteps):
         result = scheme(state=state, f=f_acoustic_core, dt=dt, config=config, schemeConfig=schemeConfig,

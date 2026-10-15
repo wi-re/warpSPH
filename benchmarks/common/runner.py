@@ -287,7 +287,7 @@ def runScheme(ctx, system, scheme: SchemeSpec, nSteps: int, dt: float,
     `max_iterations` budget without converging shows up as
     `convergedSolves < solves` even when the state itself stayed finite.
     """
-    from warpSPHIntegrators import getIntegrator
+    from warpSPHIntegrators import get_scheme
 
     device = ctx.device
     record = RunRecord(
@@ -318,7 +318,7 @@ def runScheme(ctx, system, scheme: SchemeSpec, nSteps: int, dt: float,
         recorder = RecordingSolver(scheme.makeSolver())
         kwargs['solver'] = recorder
 
-    integrator = getIntegrator(scheme.integrationScheme)
+    integrator = get_scheme(scheme.integrationScheme)
     isMultistep = scheme.integrationScheme.lower() in MULTISTEP_SCHEMES
     history = None
 

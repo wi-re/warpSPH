@@ -72,7 +72,7 @@ run('minres', lambda: minresSolve(A, b, x0, precond=inv, dim=1, **kw))
 run('richardson', lambda: richardsonSolve(A, b, x0, dim=1, **kw))
 
 # integrators' JFNK gmres (flat vector, 1-arg precond)
-from warpSPHIntegrators.jfnk import gmres as jgmres
+from warpSPHIntegrators.solvers import gmres as jgmres
 run('integrators.gmres(30)', lambda: (jgmres(A, b, x0, tol=1e-30, maxiter=IT, restart=30, preconditioner=lambda v: inv * v)[0], 0, [None] * IT))
 
 # compact CG: needs a pair list; build the same 5-point graph (w = -1 off-diagonals, D = shift)

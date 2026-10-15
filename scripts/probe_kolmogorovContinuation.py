@@ -35,7 +35,9 @@ from warpSPH.configurations import AcousticCoreConfig, buildConfig
 from warpSPH.schemes.experimental.acousticCore import f_acoustic_core
 from warpSPH.systems.acousticCore import AcousticCoreState, AcousticCoreSystem
 from warpSPH.utils import buildDomainDescription
-from warpSPHIntegrators import JFNKSolver, get_reference_state, getIntegrator
+from warpSPHIntegrators.solvers import JFNKSolver
+from warpSPHIntegrators.state import get_reference_state
+from warpSPHIntegrators import get_scheme
 from warpSPHCore import SupportScheme, buildVerletList
 
 
@@ -77,7 +79,7 @@ def diagnostics(state):
 
 
 def runReference(system, config, schemeConfig, dtSmall, duration, printEvery):
-    scheme = getIntegrator('RK4')
+    scheme = get_scheme('RK4')
     state = system
     nSteps = int(duration / dtSmall)
     trace = []
@@ -100,7 +102,7 @@ def runReference(system, config, schemeConfig, dtSmall, duration, printEvery):
 
 
 def runJFNK(system, config, schemeConfig, dtLarge, duration, printEvery, matvec='fd'):
-    scheme = getIntegrator('Backward Euler (implicit)')
+    scheme = get_scheme('Backward Euler (implicit)')
     solver = JFNKSolver(matvec=matvec, tol=1e-6, max_iterations=25, gmres_maxiter=80, gmres_restart=40)
     state = system
     nSteps = max(1, int(duration / dtLarge))

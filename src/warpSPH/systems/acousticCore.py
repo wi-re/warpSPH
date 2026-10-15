@@ -17,7 +17,8 @@ import torch
 from typing import Optional
 from dataclasses import dataclass
 
-from warpSPHIntegrators import *
+from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state, tagged
+from warpSPHIntegrators.state.fields import update_component, update_position
 from warpSPHCore import *
 
 __all__ = ['AcousticCoreState', 'AcousticCoreSystemUpdate', 'AcousticCoreSystem']

@@ -59,7 +59,8 @@ import torch
 
 from warpSPHCore import (KernelFunctions, SupportScheme, buildVerletList,
                          n_h_to_nH, sphKernelScale)
-from warpSPHIntegrators import IntegrationSchemeType, get_reference_state
+from warpSPHIntegrators.schemes import IntegrationSchemeType
+from warpSPHIntegrators.state import get_reference_state
 from warpSPH.configurations import BoundaryCondition, BoundaryConditionType, buildConfig
 from warpSPH.modules import computeDensities, shuffleParticles
 from warpSPH.modules.deltaSPH import alphaToNu
@@ -271,8 +272,8 @@ def run(nx, xi, k, nu, jitter, nSteps, cflFactor, printEvery, verboseEvery,
 
 
 def config_integrator_call(bundle, system, dt, config, schemeConfig, verbose):
-    from warpSPHIntegrators import getIntegrator
-    integrator = getIntegrator('Semi-Implicit Euler')
+    from warpSPHIntegrators import get_scheme
+    integrator = get_scheme('Semi-Implicit Euler')
     return integrator(state=system, f=bundle.stepFunction, dt=dt, config=config,
                       schemeConfig=schemeConfig, verbose=verbose)
 

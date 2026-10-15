@@ -13,7 +13,8 @@ CompressibleSystemUpdate` instead (its commented-out draft below is dead).
 `schemeConfig.compatibleEnergy` is set.
 """
 
-from warpSPHIntegrators import *
+from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state
+from warpSPHIntegrators.state.fields import update_component, update_position
 from dataclasses import dataclass
 import torch
 from typing import Optional

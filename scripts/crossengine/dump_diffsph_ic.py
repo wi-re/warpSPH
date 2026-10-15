@@ -4,7 +4,7 @@ import torch
 
 from diffSPH.sampling import buildDomainDescription
 from diffSPH.modules.adaptiveSmoothingASPH import n_h_to_nH
-from diffSPH.integration import getIntegrator
+from diffSPH.integration import get_scheme
 from diffSPH.util import volumeToSupport
 from diffSPH.boundary import sampleDomainSDF
 from diffSPH.kernels import Kernel_Scale
@@ -53,7 +53,7 @@ wrappedKernel = kernel
 simulator, SimulationSystem, config, integrator = getSimulationScheme(
      scheme, kernel, integrationScheme,
      1.0, targetNeighbors, domain)
-integrationScheme = getIntegrator(integrationScheme)
+integrationScheme = get_scheme(integrationScheme)
 
 config['particle'] = {
     'nx': nx + 2 * band,

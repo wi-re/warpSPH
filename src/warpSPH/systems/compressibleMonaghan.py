@@ -11,7 +11,8 @@ never read back anywhere; the one call site that would have used it
 an earlier `return`.
 """
 
-from warpSPHIntegrators import *
+from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state, tagged
+from warpSPHIntegrators.state.fields import update_component, update_position
 from dataclasses import dataclass
 import torch
 from typing import Optional

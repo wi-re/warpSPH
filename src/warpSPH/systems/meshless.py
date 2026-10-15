@@ -15,7 +15,8 @@ integrated); the step refreshes them and `finalize` carries the last substep's v
 forward so the runner's plot / diagnostic hooks can read them.
 """
 
-from warpSPHIntegrators import *
+from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state, tagged
+from warpSPHIntegrators.state.fields import update_component, update_position
 from dataclasses import dataclass
 import torch
 from typing import Optional

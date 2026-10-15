@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from warpSPHIntegrators.integration import IntegrationSchemeType
+from warpSPHIntegrators.schemes import IntegrationSchemeType
 
 from warpSPH.configurations.meshless import MFMConfig, MFVConfig, MeshlessConfig
 from warpSPH.schemes.compressible.meshless import (meshlessStep, mfmStep, mfvStep, resolve_temporal_scheme, validateIntegrationScheme)

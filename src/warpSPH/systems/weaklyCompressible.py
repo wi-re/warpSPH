@@ -12,7 +12,8 @@ integrator can't see (`DELTASPH_VALIDATION_PLAN.md` item C -- this used to be
 a single-evaluation exponential override instead).
 """
 
-from warpSPHIntegrators import *
+from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state, tagged
+from warpSPHIntegrators.state.fields import update_component, update_position
 from dataclasses import dataclass
 import torch
 from warpSPHCore import compileGlue

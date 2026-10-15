@@ -18,7 +18,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass
 
 from ..utils import *
-from warpSPHIntegrators import *
+from typing import Any, List, Optional, Union
+from dataclasses import dataclass, field
 from warpSPHCore import *
 
 from dataclasses import dataclass, field

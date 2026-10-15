@@ -26,7 +26,7 @@ import numpy as np
 import torch
 from warpSPHCore import callAudit
 from warpSPHCore.profiling import record_function
-from warpSPHIntegrators.util import deferHostTime
+from warpSPHIntegrators.state import deferHostTime
 
 from ..configurations import buildConfig
 from ..schemes.exactDelta import pinExactDeltaIntegrator
@@ -114,7 +114,7 @@ def buildContext(case: Case, spec: CaseSpec) -> RunContext:
     wp.init()
 
     from warpSPHCore.type_config import get_torch_precision
-    from warpSPHIntegrators import IntegrationSchemeType
+    from warpSPHIntegrators.schemes import IntegrationSchemeType
     from warpSPHCore import (GradientScheme, KernelFunctions, LaplacianScheme,
                              SupportScheme)
     from ..geometry import SamplingScheme

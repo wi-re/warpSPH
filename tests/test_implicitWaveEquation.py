@@ -249,13 +249,15 @@ def test_implicitStandingWaveErrorShrinksWithResolution():
 # --- JFNK_PLAN.md Phase A6: the generic warpSPHIntegrators JFNK solver, -----
 # validated against this module's own hand-rolled CG reference. -------------
 
-from warpSPHIntegrators import (
-    FixedPointSolver, JFNKSolver, get_reference_state, getIntegrator,
-)
-from warpSPHIntegrators.dirk import DIRK, getDIRKTableau
-from warpSPHIntegrators.fields import flatten_integrated
-from warpSPHIntegrators.jfnk import fd_matvec, gmres, jvp_matvec
-from warpSPHIntegrators.util import updateStateEuler, updateStep
+from warpSPHIntegrators.solvers import FixedPointSolver, JFNKSolver
+from warpSPHIntegrators.state import get_reference_state
+from warpSPHIntegrators import get_scheme
+from warpSPHIntegrators.drivers.implicit.dirk import DIRK
+from warpSPHIntegrators.schemes.coefficients.implicit import getDIRKTableau
+from warpSPHIntegrators.state import flatten_integrated
+from warpSPHIntegrators.solvers import fd_matvec, gmres, jvp_matvec
+from warpSPHIntegrators.state import updateStateEuler
+from warpSPHIntegrators.state.lifecycle import updateStep
 
 
 def _backwardEulerStageStepFn(system: WaveSystemv3, dt: float, config, schemeConfig: WaveEquationConfig):
@@ -276,13 +278,13 @@ def _backwardEulerStageStepFn(system: WaveSystemv3, dt: float, config, schemeCon
     return y0, step_fn
 
 
-# --- Step 4: `getIntegrator('Backward Euler (implicit)')` + JFNKSolver -----
+# --- Step 4: `get_scheme('Backward Euler (implicit)')` + JFNKSolver -----
 # reproduces the hand-eliminated CG reference, for both matvec modes. -------
 
 @pytest.mark.parametrize('matvec', ['fd', 'jvp'])
 def test_jfnkThroughGenericDIRKAgreesWithHandRolledCG(matvec):
     """`implicitBackwardEulerStep` solves the hand-eliminated `N`-dimensional
-    equation for `u` alone; `getIntegrator(...)` + `JFNKSolver` solves the full
+    equation for `u` alone; `get_scheme(...)` + `JFNKSolver` solves the full
     `2N`-dimensional coupled `(u, v)` stage system a generic driver has to use,
     since it has no way to know the problem-specific algebraic elimination is
     available. Both solve for the same fixed point, so they should agree to
@@ -295,7 +297,7 @@ def test_jfnkThroughGenericDIRKAgreesWithHandRolledCG(matvec):
     cgResult = implicitBackwardEulerStep(cgSystem, dt, config, schemeConfig, tol=1e-10)
 
     jfnkSystem, _config2, _k2 = _buildStandingWaveSystem(nx=32, dim=1)
-    scheme = getIntegrator('Backward Euler (implicit)')
+    scheme = get_scheme('Backward Euler (implicit)')
     solver = JFNKSolver(matvec=matvec, tol=1e-10, max_iterations=15)
     result = scheme(jfnkSystem, dt, f_wave_equation, config, schemeConfig, solver=solver)
     jfnkState = get_reference_state(result.state)
@@ -312,7 +314,7 @@ def test_jfnkThroughGenericDIRKAgreesWithHandRolledCG(matvec):
 def test_picardDivergesWhereJFNKStaysBoundedOnAStiffStep():
     dt = 2.0  # far past the CFL-scaled dt (~0.006 at nx=32) this case normally uses
     schemeConfig = WaveEquationConfig()
-    scheme = getIntegrator('Backward Euler (implicit)')
+    scheme = get_scheme('Backward Euler (implicit)')
 
     picardSystem, config, _k = _buildStandingWaveSystem(nx=32, dim=1)
     picardResult = scheme(picardSystem, dt, f_wave_equation, config, schemeConfig,
@@ -431,14 +433,14 @@ def test_blockLaplacianPreconditionerCutsGMRESIterationsOnTheStageSolve(matvec):
 
 @pytest.mark.parametrize('matvec', ['fd', 'jvp'])
 def test_jfnkWithPreconditionerMatchesReferenceAndReportsFewerIterations(matvec):
-    """End to end through `getIntegrator('Backward Euler (implicit)')`: the
+    """End to end through `get_scheme('Backward Euler (implicit)')`: the
     preconditioned solve must agree with both the unpreconditioned JFNK solve
     and the hand-eliminated CG reference, and report fewer GMRES iterations
     in the `solver_diagnostics` a caller actually sees.
     """
     dt = 0.01
     schemeConfig = WaveEquationConfig()
-    scheme = getIntegrator('Backward Euler (implicit)')
+    scheme = get_scheme('Backward Euler (implicit)')
 
     cgSystem, config, _k = _buildStandingWaveSystem(nx=32, dim=1)
     cgResult = implicitBackwardEulerStep(cgSystem, dt, config, schemeConfig, tol=1e-10)
@@ -476,7 +478,7 @@ def test_jfnkWorksWithOtherDIRKTableausOnTheWaveEquation(schemeName, matvec):
     dt = 0.01
     system, config, _k = _buildStandingWaveSystem(nx=32, dim=1)
     schemeConfig = WaveEquationConfig()
-    scheme = getIntegrator(schemeName)
+    scheme = get_scheme(schemeName)
     solver = JFNKSolver(matvec=matvec, tol=1e-8, max_iterations=15)
     result = scheme(system, dt, f_wave_equation, config, schemeConfig, solver=solver)
     st = get_reference_state(result.state)

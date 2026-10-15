@@ -35,7 +35,8 @@ import torch
 from warpSPH.sample.acousticCore import buildPeriodicVortexAcousticCoreSystem
 from warpSPH.schemes.experimental.acousticCore import f_acoustic_core
 from warpSPH.modules.deltaSPH import alphaToNu
-from warpSPHIntegrators import get_reference_state, getIntegrator
+from warpSPHIntegrators.state import get_reference_state
+from warpSPHIntegrators import get_scheme
 from warpSPHCore import SupportScheme, buildVerletList
 
 # cases/periodic/kolmogorov.py's own defaults (xi, k, alpha) -- WEAKLY_COMPRESSIBLE_PARAMS/
@@ -79,7 +80,7 @@ def run(nx: int, xi: float, tLimit: float, outDir: str, snapshotEvery: int, prin
     nSteps = int(tLimit / dt)
     print(f'nx={nx} xi={xi} h={h:.5f} nu={nu:.6f} (alpha={ALPHA}) dt={dt:.6f} (dtFactor={dtFactor}) -> {nSteps} steps for t={tLimit}s')
 
-    scheme = getIntegrator('RK4')
+    scheme = get_scheme('RK4')
     state = system
     t0 = time.time()
     for i in range(1, nSteps + 1):

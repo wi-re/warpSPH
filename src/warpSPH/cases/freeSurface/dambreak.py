@@ -342,8 +342,8 @@ def _configureArtificialCompressibleExtra(ctx: RunContext) -> None:
     # which is silently wrong. `configureArtificialCompressible` enforces
     # this for cases that go through it; this case does not, so it is
     # enforced here instead, the same way and for the same reason.
-    from warpSPHIntegrators import getIntegrator
-    from warpSPHIntegrators.integration import IntegrationSchemeType
+    from warpSPHIntegrators import get_scheme
+    from warpSPHIntegrators.schemes import IntegrationSchemeType
     wanted = IntegrationSchemeType.forwardEuler
     current = ctx.config.integrationScheme
     if current is not wanted and current is not IntegrationSchemeType.explicitEuler:
@@ -352,7 +352,7 @@ def _configureArtificialCompressibleExtra(ctx: RunContext) -> None:
               f"{name!r} -> 'forwardEuler'. The step returns an exact per-step "
               f"delta, which only a single-evaluation integrator applies unchanged.")
         ctx.config.integrationScheme = wanted
-        ctx.integrator = getIntegrator(wanted)
+        ctx.integrator = get_scheme(wanted)
 
 
 def buildSystem(ctx: RunContext):

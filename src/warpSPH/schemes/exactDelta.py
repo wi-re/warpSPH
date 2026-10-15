@@ -12,7 +12,7 @@ would run the step once per stage and *blend* the results -- a plausible-looking
 (ACSPH keeps its own copy of this tuple in `configurations/artificialCompressible.py` for now.)
 """
 
-from warpSPHIntegrators.integration import IntegrationSchemeType
+from warpSPHIntegrators.schemes import IntegrationSchemeType
 
 __all__ = ['EXACT_DELTA_INTEGRATORS', 'EXACT_DELTA_INTEGRATOR_NAMES', 'pinExactDeltaIntegrator', 'requireExactDeltaIntegrator']
 

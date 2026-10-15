@@ -79,10 +79,13 @@ import torch
 from warpSPH.sample.acousticCore import buildPeriodicVortexAcousticCoreSystem
 from warpSPH.schemes.experimental.acousticCore import f_acoustic_core
 
-from warpSPHIntegrators import JFNKSolver, get_reference_state, getIntegrator
-from warpSPHIntegrators.fields import flatten_integrated
-from warpSPHIntegrators.jfnk import fd_matvec, jvp_matvec
-from warpSPHIntegrators.util import updateStateEuler, updateStep
+from warpSPHIntegrators.solvers import JFNKSolver
+from warpSPHIntegrators.state import get_reference_state
+from warpSPHIntegrators import get_scheme
+from warpSPHIntegrators.state import flatten_integrated
+from warpSPHIntegrators.solvers import fd_matvec, jvp_matvec
+from warpSPHIntegrators.state import updateStateEuler
+from warpSPHIntegrators.state.lifecycle import updateStep
 from warpSPHCore import SupportScheme, buildVerletList
 
 _NX = 24
@@ -163,7 +166,7 @@ def test_jfnkThroughGenericDIRKConvergesWithBothDissipationTermsLive():
     """
     for matvec in ('fd', 'jvp'):
         system, config, schemeConfig = _buildDissipativeForcedSystem()
-        scheme = getIntegrator('Backward Euler (implicit)')
+        scheme = get_scheme('Backward Euler (implicit)')
         solver = JFNKSolver(matvec=matvec, tol=1e-8, max_iterations=20)
         result = scheme(system, 1e-3, f_acoustic_core, config, schemeConfig, solver=solver)
         resultState = get_reference_state(result.state)
@@ -189,7 +192,7 @@ def _runUntilDiverged(integrationScheme, dt, nSteps, solver=None, nx=_NX, diverg
         nx=nx, uMag=0.0, forcingAmplitude=_FORCING_AMPLITUDE, forcingWavenumber=_FORCING_WAVENUMBER,
         densityDiffusionCoefficient=densityDiffusionCoefficient,
         velocityDiffusionCoefficient=velocityDiffusionCoefficient)
-    scheme = getIntegrator(integrationScheme)
+    scheme = get_scheme(integrationScheme)
     kwargs = dict(f=f_acoustic_core, dt=dt, config=config, schemeConfig=schemeConfig, verbose=False)
     if solver is not None:
         kwargs['solver'] = solver

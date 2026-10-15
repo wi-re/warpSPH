@@ -31,7 +31,7 @@ dependencies = [
     "numpy",
     "warpSPHCore>=0.6.1",
     "warpSPHPlotting>=0.5.0",
-    "warpSPHIntegrators>=0.5.0",
+    "warpSPHIntegrators>=0.7.0",
     "vispy",
     "jupyter_rfb",
     "pyvirtualdisplay", "piglet", "glfw",

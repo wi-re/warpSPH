@@ -23,7 +23,8 @@ from ..configurations import SimulationConfig
 from ..sample.bySamplingScheme import sampleParticles
 
 from ..utils import *
-from warpSPHIntegrators import *
+from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state, tagged
+from warpSPHIntegrators.state.fields import update_component, update_position
 from warpSPHCore import *
 
 

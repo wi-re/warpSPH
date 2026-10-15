@@ -26,7 +26,7 @@ from typing import Any, Optional, Tuple
 
 import torch
 from warpSPHCore.profiling import record_function
-from warpSPHIntegrators.butcher import getButcherTableau
+from warpSPHIntegrators.schemes.coefficients.explicit import getButcherTableau
 
 from ...systems.artificialCompressible import ArtificialCompressibleSystemUpdate
 from ...configurations.compute import resolveCheckSchedule

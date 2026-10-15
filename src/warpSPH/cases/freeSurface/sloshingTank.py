@@ -275,8 +275,8 @@ def _configureArtificialCompressible(ctx: RunContext) -> None:
         sc.acParams.uChar = 0.1 * sc.acParams.referenceSoundSpeedForViscosity
         sc.dt_accelerationConstraint = False
 
-    from warpSPHIntegrators import getIntegrator
-    from warpSPHIntegrators.integration import IntegrationSchemeType
+    from warpSPHIntegrators import get_scheme
+    from warpSPHIntegrators.schemes import IntegrationSchemeType
     wanted = IntegrationSchemeType.forwardEuler
     current = ctx.config.integrationScheme
     if current is not wanted and current is not IntegrationSchemeType.explicitEuler:
@@ -284,7 +284,7 @@ def _configureArtificialCompressible(ctx: RunContext) -> None:
               f"{getattr(current, 'name', current)!r} -> 'forwardEuler' (the step "
               f"returns an exact per-step delta).")
         ctx.config.integrationScheme = wanted
-        ctx.integrator = getIntegrator(wanted)
+        ctx.integrator = get_scheme(wanted)
 
 
 def buildSystem(ctx: RunContext):

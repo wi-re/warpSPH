@@ -19,7 +19,7 @@ from warpSPHCore.profiling import record_function
 import numpy as np
 
 # custom SPH libraries
-from warpSPHIntegrators.integration import *
+import torch
 from warpSPHCore import *
 
 # This library

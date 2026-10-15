@@ -693,7 +693,7 @@ class GraphedIntegratorStep:
         import time
         import warp as wp
         from warpSPHCore import deferVerletChecks
-        from warpSPHIntegrators.util import deferHostTime
+        from warpSPHIntegrators.state import deferHostTime
         from .stepDecisions import collectStepDecisions
         t0 = time.perf_counter()
         staticSys = _cloneState(state)
@@ -753,7 +753,7 @@ class GraphedIntegratorStep:
 
     def _materialize(self, e, state, tHost):
         """Fresh Python objects around clones of the replayed static outputs."""
-        from warpSPHIntegrators.specs import IntegrationResult, StageResult
+        from warpSPHIntegrators.state import IntegrationResult, StageResult
         final = e['final']
         out = copy.copy(final)
         out.state = copy.copy(final.state)

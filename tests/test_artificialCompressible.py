@@ -15,8 +15,8 @@ coefficients at unequal step sizes, and the `1/N` in the convergence metric.
 
 import pytest
 import torch
-from warpSPHIntegrators import getIntegrator
-from warpSPHIntegrators.integration import IntegrationSchemeType
+from warpSPHIntegrators import get_scheme
+from warpSPHIntegrators.schemes import IntegrationSchemeType
 
 import warpSPH.schemes.incompressible.artificialCompressible as acmod
 import warpSPH.modules.artificialCompressible as acm
@@ -179,11 +179,11 @@ def test_forwardEulerIsAccepted(built):
 # --- the step itself -------------------------------------------------------
 
 def test_theStepRunsThroughTheRealIntegrator(built):
-    """One step through `getIntegrator(forwardEuler)` exactly as the runner
+    """One step through `get_scheme(forwardEuler)` exactly as the runner
     drives it -- the point being that the state/update tag wiring
     (`pressure`/`pressure_derivative`) actually resolves."""
     system, config, schemeConfig = built
-    integrator = getIntegrator(config.integrationScheme)
+    integrator = get_scheme(config.integrationScheme)
     result = integrator.function(state=system, f=acmod.artificialCompressible_step,
                                  dt=1e-3, config=config, verbose=False,
                                  schemeConfig=schemeConfig)
@@ -195,7 +195,7 @@ def test_theStepRollsTheBdfHistory(built):
     """`finalize` must advance `u^n -> u^{n-1}`, so the second step is the
     first one that can use BDF2."""
     system, config, schemeConfig = built
-    integrator = getIntegrator(config.integrationScheme)
+    integrator = get_scheme(config.integrationScheme)
     assert system.positionsPrev is None
     assert system.bdfCoefficients(1e-3)[3] == 1
 
@@ -296,7 +296,7 @@ def runOneStep(system, config, schemeConfig, maxIterations):
     local = ArtificialCompressibleSystem(state=copy.deepcopy(system.state),
                                          domain=config.domain)
     schemeConfig.acParams.maxPseudoIterations = maxIterations
-    integrator = getIntegrator(config.integrationScheme)
+    integrator = get_scheme(config.integrationScheme)
     result = integrator.function(state=local, f=acmod.artificialCompressible_step,
                                  dt=config.dt, config=config, verbose=False,
                                  schemeConfig=schemeConfig)
@@ -353,7 +353,7 @@ def test_theUpdateIsAnExactDelta(periodicBox):
                                          domain=config.domain)
     update, _, _ = acmod.artificialCompressible_step(local, config.dt, config,
                                                      schemeConfig)
-    integrator = getIntegrator(config.integrationScheme)
+    integrator = get_scheme(config.integrationScheme)
     local2 = ArtificialCompressibleSystem(state=copy.deepcopy(system.state),
                                           domain=config.domain)
     stepped = integrator.function(state=local2, f=acmod.artificialCompressible_step,

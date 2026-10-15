@@ -17,7 +17,8 @@ from dataclasses import dataclass
 
 
 from ..utils import *
-from warpSPHIntegrators import *
+from warpSPHIntegrators.schemes import IntegrationSchemeType
+from warpSPHIntegrators import get_scheme
 from warpSPHCore import *
 
 from dataclasses import dataclass, field
@@ -218,7 +219,7 @@ def buildConfig(
         gradientMode=gradientMode,
         laplacianMode=laplacianMode,
         samplingScheme=samplingScheme,
-    ), getIntegrator(integrationScheme)
+    ), get_scheme(integrationScheme)
 
 import numpy as np
 import enum

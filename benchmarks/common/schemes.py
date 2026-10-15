@@ -20,12 +20,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, List, Optional
 
-from warpSPHIntegrators import FixedPointSolver, JFNKSolver, getIntegrator
+from warpSPHIntegrators.solvers import FixedPointSolver, JFNKSolver
+from warpSPHIntegrators import get_scheme
 
 #: `IntegrationSchemeType` member names of the explicit linear multistep
 #: schemes -- the only ones whose nominal one-evaluation-per-step cost
 #: requires threading `IntegrationResult.history` back into the next call
-#: (see `warpSPHIntegrators.multistep`'s docstring: called without it they
+#: (see `warpSPHIntegrators.drivers.history.adams`'s docstring: called without it they
 #: transparently re-run their high-order starter every step). The suite's
 #: step loop threads `history=` for exactly these names.
 MULTISTEP_SCHEMES = frozenset({'ab2', 'ab3', 'ab4', 'ab5', 'abm2', 'abm3', 'abm4'})
@@ -48,7 +49,7 @@ class SchemeSpec:
 def _explicit(key: str, label: str, integrationScheme: str) -> SchemeSpec:
     return SchemeSpec(
         key=key, label=label, kind='explicit', integrationScheme=integrationScheme,
-        order=getIntegrator(integrationScheme).order, makeSolver=None, solverDesc='-')
+        order=get_scheme(integrationScheme).order, makeSolver=None, solverDesc='-')
 
 
 def _implicit(tag: str, label: str, integrationScheme: str,
@@ -56,7 +57,7 @@ def _implicit(tag: str, label: str, integrationScheme: str,
     return SchemeSpec(
         key=f'{tag}_{stag}', label=f'{label} + {slabel}', kind='implicit',
         integrationScheme=integrationScheme,
-        order=getIntegrator(integrationScheme).order, makeSolver=factory, solverDesc=sdesc)
+        order=get_scheme(integrationScheme).order, makeSolver=factory, solverDesc=sdesc)
 
 
 def _picard(iterations: int) -> Callable:

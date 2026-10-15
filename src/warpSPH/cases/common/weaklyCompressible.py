@@ -210,8 +210,8 @@ def configureArtificialCompressible(ctx: RunContext) -> None:
 
 
 def _forceForwardEuler(ctx: RunContext) -> None:
-    from warpSPHIntegrators import getIntegrator
-    from warpSPHIntegrators.integration import IntegrationSchemeType
+    from warpSPHIntegrators import get_scheme
+    from warpSPHIntegrators.schemes import IntegrationSchemeType
 
     wanted = IntegrationSchemeType.forwardEuler
     current = ctx.config.integrationScheme
@@ -222,7 +222,7 @@ def _forceForwardEuler(ctx: RunContext) -> None:
           f"{name!r} -> 'forwardEuler'. The step returns an exact per-step delta, "
           f"which only a single-evaluation integrator applies unchanged.")
     ctx.config.integrationScheme = wanted
-    ctx.integrator = getIntegrator(wanted)
+    ctx.integrator = get_scheme(wanted)
 
 
 # -- SDF helpers -------------------------------------------------------------

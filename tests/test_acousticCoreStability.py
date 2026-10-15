@@ -40,7 +40,9 @@ import torch
 from warpSPH.sample.acousticCore import buildPeriodicVortexAcousticCoreSystem
 from warpSPH.schemes.experimental.acousticCore import f_acoustic_core
 
-from warpSPHIntegrators import FixedPointSolver, JFNKSolver, get_reference_state, getIntegrator
+from warpSPHIntegrators.solvers import FixedPointSolver, JFNKSolver
+from warpSPHIntegrators.state import get_reference_state
+from warpSPHIntegrators import get_scheme
 from warpSPHCore import SupportScheme, buildVerletList
 
 _NX = 24
@@ -67,7 +69,7 @@ def _runSteps(integrationScheme, dt, nSteps, solver=None, nx=_NX, rebuildAdjacen
     `(finalRhoMax, finalRhoStd, finalVMax, diverged)`.
     """
     system, config, schemeConfig = buildPeriodicVortexAcousticCoreSystem(nx=nx)
-    scheme = getIntegrator(integrationScheme)
+    scheme = get_scheme(integrationScheme)
     kwargs = dict(f=f_acoustic_core, dt=dt, config=config, schemeConfig=schemeConfig, verbose=False)
     if solver is not None:
         kwargs['solver'] = solver

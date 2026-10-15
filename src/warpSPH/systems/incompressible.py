@@ -10,7 +10,8 @@ via `type(particleState)`. Not re-exported from `systems/__init__.py` --
 `schemes/incompressible/divergenceFree.py` and `schemes/builder.py` import it directly.
 """
 
-from warpSPHIntegrators import *
+from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state, tagged
+from warpSPHIntegrators.state.fields import update_component, update_position
 from dataclasses import dataclass
 import torch
 from typing import Optional
