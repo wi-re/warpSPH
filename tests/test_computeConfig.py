@@ -36,7 +36,7 @@ def test_roundTripAndOldFiles():
     config, _ = buildConfig(compute={'execution': 'auto', 'graphMaxParticles': 123, 'iterationChecks': 'every', 'krylovCheckEvery': 3,
                                      'pipelineOutputs': False})
     d = configurationToDict(config)
-    assert d['compute'] == {'execution': 'auto', 'graphMaxParticles': 123, 'pipelineOutputs': False, 'iterationChecks': 'every', 'krylovCheckEvery': 3}
+    assert d['compute'] == {'execution': 'auto', 'graphMaxParticles': 123, 'pipelineOutputs': False, 'iterationChecks': 'every', 'krylovCheckEvery': 3, 'neighborCollection': 'auto', 'neighborQueryOrder': 'auto', 'neighborGridBuild': 'scheme'}
     back = dictToConfig(d)
     assert back.compute == config.compute
     del d['compute']                                                    # a file written before the field existed
@@ -131,3 +131,41 @@ def test_runnerPicksTheExecutionFromTheComputeConfig(spec, expected):
     assert result.ctx.scratch['execution'] == expected
     assert bool(getattr(result.ctx.schemeConfig, 'cudaGraph', False)) == (expected == 'graph')
     assert (result.ctx.scratch.get('stepGraph') is not None) == (expected == 'graph')
+
+
+@pytest.mark.parametrize('bad', [dict(neighborCollection='bad'), dict(neighborQueryOrder='bad'), dict(neighborGridBuild='bad')])
+def test_invalidNeighborChoicesRaise(bad):
+    with pytest.raises(ValueError, match='compute.neighbor'):
+        ComputeConfig(**bad)
+
+
+def test_neighborOptionsRoundTripAndFactorySelection():
+    from warpSPH.configurations import neighborSearchOptions
+    config, _ = buildConfig(compute={'neighborCollection': 'fused', 'neighborQueryOrder': 'input', 'neighborGridBuild': 'eager'})
+    assert dictToConfig(configurationToDict(config)).compute == config.compute
+    factory = lambda: None
+    assert neighborSearchOptions(config, gridFactory=factory) == dict(collection='fused', queryOrder='input', gridFactory=None)
+    assert neighborSearchOptions(types.SimpleNamespace(), gridFactory=factory) == dict(collection='auto', queryOrder='auto', gridFactory=factory)
+    assert neighborSearchOptions(None) == dict(collection='auto', queryOrder='auto')
+    config.compute.neighborQueryOrder = 'bad'
+    with pytest.raises(ValueError, match='neighborQueryOrder'):
+        neighborSearchOptions(config)
+
+
+def test_neighborChoicesReachARealSchemeCall(monkeypatch):
+    import importlib
+    module = importlib.import_module('warpSPH.schemes.weaklyCompressible.deltaSPH')
+    seen = {}
+    class StopAfterSearch(Exception):
+        pass
+    def search(*args, **kwargs):
+        seen.update(kwargs)
+        raise StopAfterSearch
+    monkeypatch.setattr(module, 'buildVerletList', search)
+    config = _cfg(neighborCollection='fused', neighborQueryOrder='input')
+    config.domain = None
+    config.verletScale = 1.2
+    system = types.SimpleNamespace(state=object(), adjacency=None)
+    with pytest.raises(StopAfterSearch):
+        module.deltaSPH_step(system, .01, config, types.SimpleNamespace())
+    assert seen['collection'] == 'fused' and seen['queryOrder'] == 'input'

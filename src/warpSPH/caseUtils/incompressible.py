@@ -14,6 +14,8 @@ asserted by `tests/test_physics.py` and are unchanged by the move.
 
 from __future__ import annotations
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 __all__ = ['relaxLattice']
 
 import sys
@@ -65,9 +67,14 @@ def relaxLattice(ctx, system, steps: int, dt: float, jitter: float) -> None:
                                              jitterAmount=jitter)
     state.state.velocities = torch.zeros_like(state.state.velocities)
 
-    adjacency = buildVerletList(state.state, ctx.config.domain, verletScale=1.4,
-                                supportMode=SupportScheme.SuperSymmetric,
-                                priorNeighborhood=None, verbose=False)
+    adjacency = buildVerletList(
+        state.state,
+        ctx.config.domain,
+        verletScale=1.4,
+        supportMode=SupportScheme.SuperSymmetric,
+        priorNeighborhood=None,
+        verbose=False,
+        **neighborSearchOptions(ctx.config))
     state.state.densities = computeDensities(state.state, ctx.config, ctx.schemeConfig,
                                              adjacency)
     rho0 = ctx.schemeConfig.fluid.restDensity
@@ -85,9 +92,14 @@ def relaxLattice(ctx, system, steps: int, dt: float, jitter: float) -> None:
     if showProgress is None:
         showProgress = sys.stderr.isatty()
     for _ in _maybeProgress(range(steps), showProgress and not ctx.spec.quiet, 'relaxing'):
-        adjacency = buildVerletList(state.state, ctx.config.domain, verletScale=1.4,
-                                    supportMode=SupportScheme.SuperSymmetric,
-                                    priorNeighborhood=adjacency, verbose=False)
+        adjacency = buildVerletList(
+            state.state,
+            ctx.config.domain,
+            verletScale=1.4,
+            supportMode=SupportScheme.SuperSymmetric,
+            priorNeighborhood=adjacency,
+            verbose=False,
+            **neighborSearchOptions(ctx.config))
         state.state.densities = computeDensities(state.state, ctx.config, ctx.schemeConfig, adjacency)
         state.state.pressures[:] = 0.0
         accel, _, _, _ = solveIncompressible(

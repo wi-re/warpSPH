@@ -61,6 +61,8 @@ Both coefficients default to `0.0` (off), recovering Phase B/E1 exactly --
 opt-in, like `forcingAmplitude`.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 import math
 from typing import Optional
 
@@ -244,10 +246,13 @@ def f_acoustic_core_rebuildAdjacency(
     queryView = _PositionSupportsView(primalPositions, state.supports)
 
     adjacency = buildVerletList(
-        queryView, system.domain, verletScale=config.verletScale,
+        queryView,
+        system.domain,
+        verletScale=config.verletScale,
         supportMode=SupportScheme.SuperSymmetric,
-        priorNeighborhood=system.adjacency, verbose=verbose,
-    )
+        priorNeighborhood=system.adjacency,
+        verbose=verbose,
+        **neighborSearchOptions(config))
 
     divV = warpOperation(
         state, queryValues=state.velocities,

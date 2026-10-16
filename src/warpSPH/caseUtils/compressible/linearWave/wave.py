@@ -10,6 +10,8 @@ density/pressure against that same analytic traveling-wave profile advected
 at `c_s`.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from ....modules.timestep.compressible import computeTimestep
 
 # final import blocks that are generic
@@ -96,10 +98,13 @@ def sampleLinearWave(
 
 
         adjacency = buildVerletList(
-            simulationState, 
-            config.domain, verletScale = 1.4, supportMode = SupportScheme.SuperSymmetric,
-            priorNeighborhood = adjacency,
-            verbose = False)
+            simulationState,
+            config.domain,
+            verletScale=1.4,
+            supportMode=SupportScheme.SuperSymmetric,
+            priorNeighborhood=adjacency,
+            verbose=False,
+            **neighborSearchOptions(config))
         
         rho = warpOperation(
             simulationState,

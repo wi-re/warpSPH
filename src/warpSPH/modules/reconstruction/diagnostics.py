@@ -9,6 +9,8 @@ Off the hot path: only costs anything when called.
 
 from __future__ import annotations
 
+from warpSPHCore.type_config import index_t, offset_t
+
 from typing import Any
 
 import torch
@@ -28,7 +30,7 @@ __all__ = ['computePairPhiMean']
 
 @wp.kernel
 def _pairPhiKernel(
-    I: wp.array(dtype=wp.int64), J: wp.array(dtype=wp.int64),
+    I: wp.array(dtype=index_t), J: wp.array(dtype=index_t),
     x: wp.array(dtype=vector(length=Any, dtype=scalar_t)), v: wp.array(dtype=vector(length=Any, dtype=scalar_t)),  # type: ignore
     h: wp.array(dtype=scalar_t), grad: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)),  # type: ignore
     B: wp.array(dtype=scalar_t),
@@ -66,7 +68,7 @@ def computePairPhiMean(system, simulationConfig, diffusionParams) -> torch.Tenso
     nPairs = adjI.shape[0]
     phi = wp.zeros(nPairs, dtype=scalar_t, device=dev)
     wp.launch(_pairPhiKernel, dim=nPairs, device=dev, inputs=[
-        castTorchToWarp(adjI.to(torch.int64)), castTorchToWarp(adjJ.to(torch.int64)),
+        castTorchToWarp(adjI), castTorchToWarp(adjJ),
         castTorchToWarpAsBuiltins(st.positions), castTorchToWarpAsBuiltins(st.velocities),
         castTorchToWarp(st.supports), castTorchToWarpAsBuiltins(grad.contiguous()), castTorchToWarp(B.contiguous()),
         buildDomainState(simulationConfig.domain), int(params.velocityPairPolicy), simulationConfig.kernel.value,

@@ -28,3 +28,5 @@
 * `audit_deltaSPH_dambreak_{eager,graph}_{before,after}_2026-10-14.txt` -- the delta-SPH step (`audit_case.py dambreak --scheme sun2017DeltaSPH --nx 70`) before / after its sweep: eager integrator
   syncs 5.0 -> 3.0 per step (stage times deferred in the eager runner) and 12.2 -> 6.1 for the whole loop, graph mode 7.2 -> 3.1 per step (the timestep module was 4 syncs per step: a boolean-mask
   index, two `torch.tensor(scalar, device=cuda)` constants and a Python `if` on a device value; now sync-free). Wall: eager 19.2 -> 18.2 ms/step, graph 4.7 -> 4.7.
+
+* [frontend_search_2026-10-15.md](frontend_search_2026-10-15.md) — actual simulation timing and correctness after the core index/search changes: 90 serial trials, ordered 2D/3D cases, eager/graph/default pipeline, matched controls and historical context.

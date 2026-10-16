@@ -8,6 +8,8 @@ left at whatever `setupBasicCompressibleInitialState` set (zero), which is the
 point of the test: the exact solution never moves.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from ....sample import *
 import torch
 from ....sample.compressible import setupBasicCompressibleInitialState
@@ -38,10 +40,13 @@ def buildHydrostaticInitialState(rho_low, rho_high, nx, config, schemeConfig, Si
     schemeConfig.adaptiveSupportIterations = 1
 
     adjacency = buildVerletList(
-        compressibleSystem.state, 
-        config.domain, verletScale = 1.4, supportMode = SupportScheme.SuperSymmetric,
-        priorNeighborhood = None,
-        verbose = False)
+        compressibleSystem.state,
+        config.domain,
+        verletScale=1.4,
+        supportMode=SupportScheme.SuperSymmetric,
+        priorNeighborhood=None,
+        verbose=False,
+        **neighborSearchOptions(config))
 
     apparentVolume, compressibleSystem.state.densities, crkState = computeCRKFactors(compressibleSystem.state, config.domain, config.kernel, adjacency = adjacency)
 

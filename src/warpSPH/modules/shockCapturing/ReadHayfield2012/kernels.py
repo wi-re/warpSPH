@@ -22,6 +22,8 @@ use the same core pieces as every other operator: `computeDistanceVec` (minimum 
   it is deterministic (no atomics).
 """
 
+from warpSPHCore.type_config import index_t, offset_t
+
 import warp as wp
 from warp.types import vector, matrix
 from typing import Any
@@ -59,7 +61,7 @@ def rhVmax_Func_i_argmax(
     referenceState: Any,
     domainState: domainData,
     kernelProperties: kernelState,
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype=wp.int64),  # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype=index_t),  # type: ignore
     ki: wp.int32, referenceKinds: wp.array(dtype=wp.int32),  # type: ignore
     vel_i: vector(length=Any, dtype=scalar_t), referenceVelocities: wp.array(dtype=vector(length=Any, dtype=scalar_t)),  # type: ignore
     cs_i: scalar_t, referenceCs: wp.array(dtype=scalar_t),  # type: ignore
@@ -68,7 +70,7 @@ def rhVmax_Func_i_argmax(
     bestVal = scalar_t(0.0)
     bestJ = wp.int32(0)
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j = wp.int32(offsetArray[jj])
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
             if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
@@ -110,17 +112,18 @@ def rhVmax_Func_Adjacency_argmax(
     globalBestVal = scalar_t(0.0)
     globalBestJ = wp.int32(0)
     for o in range(numOffsets):
-        beginIndex = wp.int32(0)
+        beginIndex = offset_t(0)
         numIndices = wp.int32(0)
         if useAdjacency:
             beginIndex = adjacencyState.neighborOffsets[i]
             numIndices = adjacencyState.numNeighbors[i]
         else:
-            beginIndex, numIndices = checkOffset(
+            gridBegin, numIndices = checkOffset(
                 i, queryState.positions, gridState.numCells, gridState.D,
                 o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
                 domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
             )
+            beginIndex = offset_t(gridBegin)
             if beginIndex < 0:
                 continue
         found, bestVal, bestJ = rhVmax_Func_i_argmax(
@@ -222,7 +225,7 @@ def rhEntropy_Func_i(
     referenceState: Any,
     domainState: domainData,
     kernelProperties: kernelState,
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype=wp.int64),  # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype=index_t),  # type: ignore
     ki: wp.int32, referenceKinds: wp.array(dtype=wp.int32),  # type: ignore
     vel_i: vector(length=Any, dtype=scalar_t), referenceVelocities: wp.array(dtype=vector(length=Any, dtype=scalar_t)),  # type: ignore
     cs_i: scalar_t, referenceCs: wp.array(dtype=scalar_t),  # type: ignore
@@ -234,7 +237,7 @@ def rhEntropy_Func_i(
 ):
     out = zero_like_warp(outputValue)
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j = wp.int32(offsetArray[jj])
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
             if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
@@ -287,17 +290,18 @@ def rhEntropy_Func_Adjacency(
             return zero_like_warp(outputValue)
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
-        beginIndex = wp.int32(0)
+        beginIndex = offset_t(0)
         numIndices = wp.int32(0)
         if useAdjacency:
             beginIndex = adjacencyState.neighborOffsets[i]
             numIndices = adjacencyState.numNeighbors[i]
         else:
-            beginIndex, numIndices = checkOffset(
+            gridBegin, numIndices = checkOffset(
                 i, queryState.positions, gridState.numCells, gridState.D,
                 o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
                 domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
             )
+            beginIndex = offset_t(gridBegin)
             if beginIndex < 0:
                 continue
         out += rhEntropy_Func_i(

@@ -58,6 +58,8 @@ advective corrections (Eqs. 27-31), internal shifting, `k3`. Each is gated by
 its config field and raises rather than silently no-opping.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from warpSPHCore import SupportScheme, buildVerletList
 from warpSPHCore.profiling import record_function
 
@@ -85,9 +87,13 @@ def artificialCompressible_step(
 
     with record_function("[warpSPH] - [acsph - 01] - compute adjacency"):
         adjacency = buildVerletList(
-            state, config.domain, verletScale=config.verletScale,
+            state,
+            config.domain,
+            verletScale=config.verletScale,
             supportMode=SupportScheme.SuperSymmetric,
-            priorNeighborhood=system.adjacency, verbose=False)
+            priorNeighborhood=system.adjacency,
+            verbose=False,
+            **neighborSearchOptions(config))
         system.adjacency = adjacency
 
     with record_function("[warpSPH] - [acsph - 02] - boundary velocities"):

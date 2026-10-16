@@ -17,6 +17,8 @@ design (its CFL/computeMach/c_max/dx arguments do not affect the output),
 so the scaling is applied here, exactly as `delta.computeDeltaShift` does.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from .regular import sampleRegularParticles
 from ..geometry import ParticleSet
 import torch
@@ -56,7 +58,7 @@ def _wrapPeriodic(pos, domain):
     return torch.where(domain.periodic, wrapped, pos)
 
 
-def sampleOptimal(nx, domain, targetNeighbors, kernel, jitter = 0.1, shiftIters = 128, shiftScheme = 'Delta', seed = None):
+def sampleOptimal(nx, domain, targetNeighbors, kernel, jitter = 0.1, shiftIters = 128, shiftScheme = 'Delta', seed = None, *, config=None):
     dim = domain.dim
     device = domain.min.device
 
@@ -93,10 +95,12 @@ def sampleOptimal(nx, domain, targetNeighbors, kernel, jitter = 0.1, shiftIters 
 
     for i in range(shiftIters):
         adjacency = radiusSearchCompactHashMap(
-            particles, domain,
-            mode = SupportScheme.SuperSymmetric,
-            hashMapLengthMode = HashMapLengthMode.Fixed, fixedHashMapLength = 4096
-        )
+            particles,
+            domain,
+            mode=SupportScheme.SuperSymmetric,
+            hashMapLengthMode=HashMapLengthMode.Fixed,
+            fixedHashMapLength=4096,
+            **neighborSearchOptions(config))
 
         # density first: the shift's mean-density weight uses rho_i/rho_j
         particles = particles._replace(densities = warpOperation(

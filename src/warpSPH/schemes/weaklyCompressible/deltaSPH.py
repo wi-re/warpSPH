@@ -18,6 +18,8 @@ Details worth knowing (each used to be a paragraph of this docstring):
 * The mDBC no-penetration shift is a velocity correction made an acceleration by ``/ config.dt`` (the real step length, not the stage dt): see region 19.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from ...configurations import SimulationConfig, WeaklyCompressibleSPHConfig
 from ...systems import CompSPHSystem, WeaklyCompressibleSystemUpdate
 from ...modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
@@ -62,9 +64,12 @@ def deltaSPH_step(
     with record_function("[warpSPH] - [deltaSPH - 01] adjacency"):
         currentSystem.adjacency = buildVerletList(
             currentState,
-            config.domain, verletScale = config.verletScale, supportMode = SupportScheme.SuperSymmetric,
-            priorNeighborhood = currentSystem.adjacency,
-            verbose = False)
+            config.domain,
+            verletScale=config.verletScale,
+            supportMode=SupportScheme.SuperSymmetric,
+            priorNeighborhood=currentSystem.adjacency,
+            verbose=False,
+            **neighborSearchOptions(config))
 
     # Everything after the adjacency update is the right-hand side proper; with `schemeConfig.cudaGraph` it is captured once per
     # Verlet-list generation and replayed (graphRoute.py).

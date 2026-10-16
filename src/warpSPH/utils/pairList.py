@@ -10,6 +10,8 @@
 * grid mode otherwise: the explicit validity check and (re)build, through the fixed-shape list grid and the list capacity of the scheme config.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from warpSPHCore import SupportScheme, buildVerletList, verletStaleFlag
 
 __all__ = ['stagePairList']
@@ -26,9 +28,14 @@ def stagePairList(system, state, config, schemeConfig, *, onGrid: bool = False, 
         pairWork.flags.append(verletStaleFlag(state.positions, state.supports, adjacency, config.domain, config.verletScale))
         return adjacency
     adjacency = buildVerletList(
-        state, config.domain, verletScale = config.verletScale, supportMode = SupportScheme.SuperSymmetric,
-        priorNeighborhood = None if (pairWork is not None and pairWork.rebuildList) else system.adjacency,
-        verbose = False, rebuildSlack = rebuildSlack, capacity = pairListCapacity(schemeConfig),
-        gridFactory = pairListGridFactory(system.listGrid, state, config))
+        state,
+        config.domain,
+        verletScale=config.verletScale,
+        supportMode=SupportScheme.SuperSymmetric,
+        priorNeighborhood=None if pairWork is not None and pairWork.rebuildList else system.adjacency,
+        verbose=False,
+        rebuildSlack=rebuildSlack,
+        capacity=pairListCapacity(schemeConfig),
+        **neighborSearchOptions(config, gridFactory=pairListGridFactory(system.listGrid, state, config)))
     system.adjacency = adjacency
     return adjacency

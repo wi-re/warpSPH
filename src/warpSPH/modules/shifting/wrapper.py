@@ -27,6 +27,8 @@ All modes zero the shift for non-fluid particles (`kinds != 0`). Normals/
 `systemState`.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 import math
 
 import warp as wp
@@ -174,10 +176,13 @@ def solveShifting(
         for i in range(shiftIters):
             with record_function(f"[warpSPH] - (shift) - adjacency"):
                 adjacency = buildVerletList(
-                    systemState, 
-                    config.domain, verletScale = config.verletScale, supportMode = SupportScheme.SuperSymmetric,
-                    priorNeighborhood = adjacency,
-                    verbose = False)
+                    systemState,
+                    config.domain,
+                    verletScale=config.verletScale,
+                    supportMode=SupportScheme.SuperSymmetric,
+                    priorNeighborhood=adjacency,
+                    verbose=False,
+                    **neighborSearchOptions(config))
 
             with record_function(f"[warpSPH] - (shift) - countNeighbors"):
                 numNeighbors = countNeighbors(systemState, config, schemeConfig, adjacency)

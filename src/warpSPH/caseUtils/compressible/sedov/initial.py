@@ -10,6 +10,8 @@ normalized SPH interpolation pass. Works for `dim` 1, 2 or 3 via the shared
 the origin.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from warpSPH.configurations.compressibleConfig import CompressibleSPHConfig
 from warpSPH.modules.timestep.compressible import computeTimestep
 
@@ -233,9 +235,12 @@ def buildSedov(
     else:
         raise ValueError(f'Unknown initialization {initialization}')
 
-    adjacency = buildVerletList(simulationState_, 
-                                domain = config.domain,
-                                verletScale = 2**(1/config.dim), supportMode = config.supportMode)
+    adjacency = buildVerletList(
+        simulationState_,
+        domain=config.domain,
+        verletScale=2 ** (1 / config.dim),
+        supportMode=config.supportMode,
+        **neighborSearchOptions(config))
 
     compressibleSystem = SimulationSystem(
         state=simulationState_, 

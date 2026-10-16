@@ -10,6 +10,8 @@ code from earlier iterations of the ramp, left untouched (separately tracked
 cleanup item), which the live smoothIC path does not depend on.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from typing import NamedTuple
 
 from warpSPH.configurations import SimulationConfig
@@ -236,9 +238,12 @@ def buildSod1D(
     particleState.soundspeeds = c_s
     particleState.entropies = A_
 
-    adjacency = buildVerletList(particleState, 
-                                domain = config.domain,
-                                verletScale = 2**(1/config.dim), supportMode = config.supportMode)
+    adjacency = buildVerletList(
+        particleState,
+        domain=config.domain,
+        verletScale=2 ** (1 / config.dim),
+        supportMode=config.supportMode,
+        **neighborSearchOptions(config))
 
     compressibleSystem = SimulationSystem(
         state=particleState,

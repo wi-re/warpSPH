@@ -12,6 +12,8 @@ the pattern in `kidder/bc.py`. Contains extensive commented-out
 diagnostic/plotting code.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from ....sample import *
 import torch
 from ....sample.compressible import setupBasicCompressibleInitialState
@@ -136,7 +138,14 @@ def sampleYeeVortex(nr, nx, buffer_rings, config, schemeConfig, extraData, Simul
     rho_optimal, h_optimal, adjacency, rhos_iter, supports_iter = evaluateOptimalSupport(particles, config, supportScheme = SupportScheme.Gather, compParams = compressibleSPHConfigAdapt)
 
 
-    adjacency = buildVerletList(particles, domain = config.domain, verletScale = 1.0, supportMode = SupportScheme.SuperSymmetric, priorNeighborhood=None, verbose=False)
+    adjacency = buildVerletList(
+        particles,
+        domain=config.domain,
+        verletScale=1.0,
+        supportMode=SupportScheme.SuperSymmetric,
+        priorNeighborhood=None,
+        verbose=False,
+        **neighborSearchOptions(config))
 
     print(f'Optimal Support min: {h_optimal.min()}, max: {h_optimal.max()}, mean: {h_optimal.mean()}')
     print(f'Number of neighbors min: {adjacency.numNeighbors.min()}, max: {adjacency.numNeighbors.max()}, mean: {adjacency.numNeighbors.float().mean()}')
@@ -158,7 +167,14 @@ def sampleYeeVortex(nr, nx, buffer_rings, config, schemeConfig, extraData, Simul
 
 
 
-    adjacency = buildVerletList(particles, domain = config.domain, verletScale = 1.0, supportMode = SupportScheme.SuperSymmetric, priorNeighborhood=None, verbose=False)
+    adjacency = buildVerletList(
+        particles,
+        domain=config.domain,
+        verletScale=1.0,
+        supportMode=SupportScheme.SuperSymmetric,
+        priorNeighborhood=None,
+        verbose=False,
+        **neighborSearchOptions(config))
 
     print(f'Optimal Support min: {h_optimal.min()}, max: {h_optimal.max()}, mean: {h_optimal.mean()}')
     print(f'Number of neighbors min: {adjacency.numNeighbors.min()}, max: {adjacency.numNeighbors.max()}, mean: {adjacency.numNeighbors.float().mean()}')
@@ -216,10 +232,13 @@ def sampleYeeVortex(nr, nx, buffer_rings, config, schemeConfig, extraData, Simul
     rho_optimal, h_optimal, adjacency, rhos_iter, supports_iter = evaluateOptimalSupport(particles, config, supportScheme = SupportScheme.Gather, compParams = compressibleSPHConfigAdapt)
     # simulationState_.densities = rho_optimal
     adjacency = buildVerletList(
-        simulationState_, 
-        config.domain, verletScale = 1.4, supportMode = SupportScheme.SuperSymmetric,
-        priorNeighborhood = None,
-        verbose = False)
+        simulationState_,
+        config.domain,
+        verletScale=1.4,
+        supportMode=SupportScheme.SuperSymmetric,
+        priorNeighborhood=None,
+        verbose=False,
+        **neighborSearchOptions(config))
 
     apparentVolume, simulationState_.densities, crkState = computeCRKFactors(simulationState_, config.domain, config.kernel, adjacency = adjacency)
 
@@ -237,9 +256,12 @@ def sampleYeeVortex(nr, nx, buffer_rings, config, schemeConfig, extraData, Simul
     print(f"min mass: {simulationState_.masses.min()}, max mass: {simulationState_.masses.max()}")
     print(f"min support: {simulationState_.supports.min()}, max support: {simulationState_.supports.max()}")
 
-    adjacency = buildVerletList(simulationState_, 
-                            domain = config.domain,
-                            verletScale = 2**(1/config.dim), supportMode = config.supportMode)
+    adjacency = buildVerletList(
+        simulationState_,
+        domain=config.domain,
+        verletScale=2 ** (1 / config.dim),
+        supportMode=config.supportMode,
+        **neighborSearchOptions(config))
 
     compressibleSystem = SimulationSystem(
         state=simulationState_, 

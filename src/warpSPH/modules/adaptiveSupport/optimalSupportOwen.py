@@ -14,6 +14,8 @@ otherwise-canonical versions in ``warpSPH.utils.support`` -- not re-exported
 here to avoid that ambiguity spreading further.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from ...systems import CompressibleState
 from ...configurations import SimulationConfig, CompressibleSPHConfig
 import numpy as np
@@ -146,7 +148,14 @@ def evaluateOptimalSupportOwen(
             if onGrid:
                 adjacency_ = grid
             elif not validateOnce or not _listFits(adjacency, particles):
-                adjacency = buildVerletList(particles, domain = config.domain, verletScale = verletScale, supportMode = SupportScheme.SuperSymmetric, priorNeighborhood=adjacency, verbose=False)
+                adjacency = buildVerletList(
+                    particles,
+                    domain=config.domain,
+                    verletScale=verletScale,
+                    supportMode=SupportScheme.SuperSymmetric,
+                    priorNeighborhood=adjacency,
+                    verbose=False,
+                    **neighborSearchOptions(config))
             if not onGrid:
                 adjacency_ = adjacency
 
@@ -205,9 +214,15 @@ def evaluateOptimalSupportOwen(
             i += 1
             if validateOnce and not onGrid and i == nIter and attempt == 0:
                 # one validation for the whole solve: the particles with the largest support any iteration used
-                checked = buildVerletList(SimpleNamespace(positions=particles.positions, supports=peakSupports), domain = config.domain, verletScale = verletScale,
-                                          supportMode = SupportScheme.SuperSymmetric, priorNeighborhood=adjacency,
-                                          verbose=False, rebuildSlack=rebuildSlack)
+                checked = buildVerletList(
+                    SimpleNamespace(positions=particles.positions, supports=peakSupports),
+                    domain=config.domain,
+                    verletScale=verletScale,
+                    supportMode=SupportScheme.SuperSymmetric,
+                    priorNeighborhood=adjacency,
+                    verbose=False,
+                    rebuildSlack=rebuildSlack,
+                    **neighborSearchOptions(config))
                 if checked is not adjacency:
                     # the list was too short for some iterate: use the new one and solve again from the supplied supports
                     adjacency = checked

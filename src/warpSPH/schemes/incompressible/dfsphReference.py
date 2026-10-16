@@ -150,6 +150,8 @@ across in `finalize` and skips the VD+PS machinery entirely.
 
 from __future__ import annotations
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from typing import Any
 
 import torch
@@ -265,9 +267,13 @@ WALL_PRESSURE_ON_DIVERGENCE = False
 
 def _rebuildAdjacency(state: Any, system: Any, config: Any):
     adjacency = buildVerletList(
-        state, config.domain, verletScale=config.verletScale,
+        state,
+        config.domain,
+        verletScale=config.verletScale,
         supportMode=SupportScheme.SuperSymmetric,
-        priorNeighborhood=system.adjacency, verbose=False)
+        priorNeighborhood=system.adjacency,
+        verbose=False,
+        **neighborSearchOptions(config))
     system.adjacency = adjacency
     return adjacency
 

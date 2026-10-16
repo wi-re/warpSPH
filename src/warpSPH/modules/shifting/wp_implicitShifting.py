@@ -11,6 +11,8 @@ that machinery with a hand-rolled `wp.kernel` + `wp.launch`, following the
 calling convention of `warpSPHCore.radiusSearch.small.wp_radius_small`.
 """
 
+from warpSPHCore.type_config import index_t, offset_t
+
 from typing import Any
 import warp as wp
 from warp.types import vector, matrix
@@ -26,8 +28,8 @@ def computeShiftingPairTerms_Kernel(
     queryState: Any,
     domainState: domainData,
     kernelProperties: kernelState,
-    edgeI: wp.array(dtype=wp.int64),
-    edgeJ: wp.array(dtype=wp.int64),
+    edgeI: wp.array(dtype=index_t),
+    edgeJ: wp.array(dtype=index_t),
     outK: wp.array(dtype=scalar_t),
     outJ: wp.array(dtype=Any),
     outH: wp.array(dtype=Any),

@@ -8,6 +8,8 @@ rather than building sampling from scratch. Not a `Case` -- there is no
 notebooks) call this directly.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 import math
 from typing import Optional
 
@@ -78,7 +80,13 @@ def buildPeriodicVortexAcousticCoreSystem(
         UIDs=torch.arange(n, device=device, dtype=torch.int32),
         UIDcounter=n,
     )
-    adjacency = buildVerletList(state, config.domain, 1.0, SupportScheme.SuperSymmetric, None)
+    adjacency = buildVerletList(
+        state,
+        config.domain,
+        1.0,
+        SupportScheme.SuperSymmetric,
+        None,
+        **neighborSearchOptions(config))
     system = AcousticCoreSystem(state=state, adjacency=adjacency, domain=config.domain, t=0.0)
     schemeConfig = AcousticCoreConfig(restDensity=rho0, soundSpeed=soundSpeed,
                                       forcingAmplitude=forcingAmplitude, forcingWavenumber=forcingWavenumber,

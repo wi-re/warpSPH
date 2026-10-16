@@ -13,6 +13,8 @@ CompressibleSystemUpdate` instead (its commented-out draft below is dead).
 `schemeConfig.compatibleEnergy` is set.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state
 from warpSPHIntegrators.state.fields import update_component, update_position
 from dataclasses import dataclass
@@ -184,9 +186,14 @@ class CompSPHSystem(BaseIntegrationSystem):
                 rebuilt = SimpleNamespace(positions=system.state.positions, supports=system.state.supports)
                 for attempt in range(2):
                     system.adjacency = buildVerletList(
-                        rebuilt, config.domain, verletScale=config.verletScale, supportMode=SupportScheme.SuperSymmetric,
-                        priorNeighborhood=system.adjacency, forceRebuild=True, capacity=pairListCapacity(schemeConfig),
-                        gridFactory=pairListGridFactory(listGrid, rebuilt, config))
+                        rebuilt,
+                        config.domain,
+                        verletScale=config.verletScale,
+                        supportMode=SupportScheme.SuperSymmetric,
+                        priorNeighborhood=system.adjacency,
+                        forceRebuild=True,
+                        capacity=pairListCapacity(schemeConfig),
+                        **neighborSearchOptions(config, gridFactory=pairListGridFactory(listGrid, rebuilt, config)))
                     tooSmall = takeListGridFlags(listGrid)          # nothing replays the next step's finalize to read these
                     if not tooSmall or not bool(torch.stack(tooSmall).any()):
                         break
@@ -282,10 +289,14 @@ class CompSPHSystem(BaseIntegrationSystem):
             with record_function("[warpSPH] - [compSPH finalize - 02] list for the next step"):
                 rebuilt = SimpleNamespace(positions=self.state.positions, supports=self.state.supports)
                 self.adjacency = buildVerletList(
-                    rebuilt, config.domain, verletScale=config.verletScale, supportMode=SupportScheme.SuperSymmetric,
-                    priorNeighborhood=self.adjacency, forceRebuild=True,         # the step-end flag already said stale
+                    rebuilt,
+                    config.domain,
+                    verletScale=config.verletScale,
+                    supportMode=SupportScheme.SuperSymmetric,
+                    priorNeighborhood=self.adjacency,
+                    forceRebuild=True,
                     capacity=pairListCapacity(schemeConfig),
-                    gridFactory=pairListGridFactory(self.listGrid, rebuilt, config))
+                    **neighborSearchOptions(config, gridFactory=pairListGridFactory(self.listGrid, rebuilt, config)))
 
         updateValues[-1].dudt = (self.state.internalEnergies - initialState.state.internalEnergies) /dt
 

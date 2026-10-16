@@ -549,6 +549,8 @@ notebooks used to fall into.
 
 ## Configuration reference
 
+Neighbor-list execution choices are documented in [Neighbor-search compute choices](docs/compute-neighbor-search.md).
+
 `buildConfig(...)` returns a `SimulationConfig` and the matching integrator.
 Every option below is also a `CaseSpec` field, so it is reachable as a CLI flag
 of the same name.

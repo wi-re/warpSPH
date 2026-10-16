@@ -76,6 +76,8 @@ not). `tests/test_physics.py` checks the agreement and this difference.
 
 from __future__ import annotations
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 import math
 from typing import NamedTuple
 
@@ -363,8 +365,12 @@ def buildSodND(
     particleState.soundspeeds = c_s
     particleState.entropies = A_
 
-    adjacency = buildVerletList(particleState, domain=config.domain,
-                                verletScale=2 ** (1 / dim), supportMode=config.supportMode)
+    adjacency = buildVerletList(
+        particleState,
+        domain=config.domain,
+        verletScale=2 ** (1 / dim),
+        supportMode=config.supportMode,
+        **neighborSearchOptions(config))
     system = SimulationSystem(state=particleState, adjacency=adjacency, domain=config.domain)
 
     config.dx = denseDx

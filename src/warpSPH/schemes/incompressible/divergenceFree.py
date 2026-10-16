@@ -30,6 +30,8 @@ drives the density update or is overridden depends on
 recomputed from scratch each step via `computeDensities`.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from warpSPH.configurations import SimulationConfig, WeaklyCompressibleSPHConfig
 from warpSPH.schemes.incompressible.omniIncompressible import _solve, _xsphFilter
 from warpSPH.systems import CompSPHSystem, WeaklyCompressibleSystemUpdate
@@ -171,10 +173,13 @@ def divergenceFree_step(
         verletScale = config.verletScale
 
         adjacency = buildVerletList(
-            currentState, 
-            config.domain, verletScale = verletScale, supportMode = SupportScheme.SuperSymmetric,
-            priorNeighborhood = currentSystem.adjacency,
-            verbose = False)
+            currentState,
+            config.domain,
+            verletScale=verletScale,
+            supportMode=SupportScheme.SuperSymmetric,
+            priorNeighborhood=currentSystem.adjacency,
+            verbose=False,
+            **neighborSearchOptions(config))
         currentSystem.adjacency = adjacency
 
     # 2. Compute density if density is none

@@ -10,6 +10,8 @@ This is the last stage of the wave pipeline, not an entry point -- there is no
 ``Case`` wrapping it, so a caller has to run the earlier stages themselves.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 import torch
 from ..systems.waveSystem import computeDt, WaveSystemv3, WaveSystemStatev3, sampleInitialWaveState
 from ..caseUtils.waveEquation.damping import DampingProfiles, createDampingProfile
@@ -81,7 +83,13 @@ def finalizeWaveSystemSetup(
         c=cGrid,
         damping=dampGrid
     )
-    adjacency = buildVerletList(waveState, config.domain, 1.0, SupportScheme.SuperSymmetric, None)
+    adjacency = buildVerletList(
+        waveState,
+        config.domain,
+        1.0,
+        SupportScheme.SuperSymmetric,
+        None,
+        **neighborSearchOptions(config))
 
 
     waveSystem = WaveSystemv3(
@@ -138,7 +146,13 @@ def sampleSmoothPointSourceWaveSystem(
     distances = torch.linalg.norm(particleState.positions - position, dim=-1)
     particleState.u = magnitude * _wendlandKernelBump(distances, radius)
 
-    adjacency = buildVerletList(particleState, config.domain, 1.0, SupportScheme.SuperSymmetric, None)
+    adjacency = buildVerletList(
+        particleState,
+        config.domain,
+        1.0,
+        SupportScheme.SuperSymmetric,
+        None,
+        **neighborSearchOptions(config))
     return WaveSystemv3(
         state=particleState,
         adjacency=adjacency,

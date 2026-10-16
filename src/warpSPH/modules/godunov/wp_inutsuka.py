@@ -26,6 +26,8 @@ Cha et al. 2010 blame for the spurious force), and `grad rho_i` the same sum of 
 No time-centring (`xdot*_i = v_i + a_i dt/2`) and no `C dt/2` evolution of the states: the right-hand side is an ODE system for the integrator.
 """
 
+from warpSPHCore.type_config import index_t, offset_t
+
 import warp as wp
 from warp.types import vector, matrix
 from typing import Any, Optional, Union
@@ -68,24 +70,25 @@ def gaussianDensity_Func_Adjacency(
             return grad, rho
     hGi = queryH[i]
     for o in range(numOffsets):
-        beginIndex = wp.int32(0)
+        beginIndex = offset_t(0)
         numIndices = wp.int32(0)
         if useAdjacency:
             beginIndex = adjacencyState.neighborOffsets[i]
             numIndices = adjacencyState.numNeighbors[i]
         else:
-            beginIndex, numIndices = checkOffset(
+            gridBegin, numIndices = checkOffset(
                 i, queryState.positions, gridState.numCells, gridState.D,
                 o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
                 domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
             )
+            beginIndex = offset_t(gridBegin)
             if beginIndex < 0:
                 continue
         offsetArray = gridState.sortIndex
         if useAdjacency:
             offsetArray = adjacencyState.neighborList
         for neighborIndex in range(numIndices):
-            jj = beginIndex + neighborIndex
+            jj = beginIndex + offset_t(neighborIndex)
             j = wp.int32(offsetArray[jj])
             if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
                 if not checkDirectionality_j(referenceState.kinds[j], kernelProperties.operationMode):
@@ -230,24 +233,25 @@ def inutsuka_Func_Adjacency(
         J_i = queryVelocityTensor[i]
         G_i = queryStateGradients[i]
     for o in range(numOffsets):
-        beginIndex = wp.int32(0)
+        beginIndex = offset_t(0)
         numIndices = wp.int32(0)
         if useAdjacency:
             beginIndex = adjacencyState.neighborOffsets[i]
             numIndices = adjacencyState.numNeighbors[i]
         else:
-            beginIndex, numIndices = checkOffset(
+            gridBegin, numIndices = checkOffset(
                 i, queryState.positions, gridState.numCells, gridState.D,
                 o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
                 domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
             )
+            beginIndex = offset_t(gridBegin)
             if beginIndex < 0:
                 continue
         offsetArray = gridState.sortIndex
         if useAdjacency:
             offsetArray = adjacencyState.neighborList
         for neighborIndex in range(numIndices):
-            jj = beginIndex + neighborIndex
+            jj = beginIndex + offset_t(neighborIndex)
             j = wp.int32(offsetArray[jj])
             if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
                 if not checkDirectionality_j(referenceState.kinds[j], kernelProperties.operationMode):

@@ -5,6 +5,8 @@ returns the particle state's current density/support unchanged for
 ``NoScheme``.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from .optimalSupportOwen import evaluateOptimalSupportOwen
 from .optimalSupportMonaghan import evaluateOptimalSupportMonaghan
 from ...systems.baseState import BaseState
@@ -77,9 +79,15 @@ def evaluateOptimalSupport(
             if validateOnce:
                 # the contract of `validateOnce`: the returned list is valid for the returned supports and the current
                 # positions, whichever scheme produced the supports (here: the ones the particles already have)
-                adjacency = buildVerletList(particleState, domain=config.domain, verletScale=config.verletScale,
-                                            supportMode=SupportScheme.SuperSymmetric, priorNeighborhood=adjacency,
-                                            verbose=False, rebuildSlack=rebuildSlack)
+                adjacency = buildVerletList(
+                    particleState,
+                    domain=config.domain,
+                    verletScale=config.verletScale,
+                    supportMode=SupportScheme.SuperSymmetric,
+                    priorNeighborhood=adjacency,
+                    verbose=False,
+                    rebuildSlack=rebuildSlack,
+                    **neighborSearchOptions(config))
             return particleState.densities, particleState.supports, adjacency, None, None
         else:
             raise ValueError(f"Unsupported adaptive support scheme: {compParams.adaptiveSupportScheme}")

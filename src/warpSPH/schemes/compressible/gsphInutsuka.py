@@ -5,6 +5,8 @@ no switch, no conductivity; same system / state / update classes as the Monaghan
 `compressibleSPH_InutsukaGSPH` is a list of single-purpose regions (one `record_function` each, numbered in call order).
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 import torch
 
 from ...configurations import SimulationConfig
@@ -39,8 +41,13 @@ def compressibleSPH_InutsukaGSPH(
         gaussianH = float(schemeConfig.diffusionParams.gaussianEta) * (currentState.masses / currentState.densities) ** (1.0 / config.dim)
         reach = (3.0 * 2.0 ** 0.5 * gaussianH / currentState.supports).max()                  # a 0-d DEVICE tensor: the list scale needs no host read
         adjacency = buildVerletList(
-            currentState, config.domain, verletScale = torch.clamp(1.05 * reach, min = config.verletScale),
-            supportMode = SupportScheme.SuperSymmetric, priorNeighborhood = currentSystem.adjacency, verbose = False)
+            currentState,
+            config.domain,
+            verletScale=torch.clamp(1.05 * reach, min=config.verletScale),
+            supportMode=SupportScheme.SuperSymmetric,
+            priorNeighborhood=currentSystem.adjacency,
+            verbose=False,
+            **neighborSearchOptions(config))
 
     props = OperationProperties(kernel = config.kernel, supportMode = SupportScheme.KernelMeanSymmetric)
 

@@ -13,6 +13,8 @@ depends on how the step runs:
 By default the densities the solve returns are the particles' current ones (`computeDensity=False`): most callers sum their own density next.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from warpSPHCore import SupportScheme, buildVerletList
 
 from ...enumTypes import AdaptiveSupportScheme
@@ -42,5 +44,11 @@ def solveStageSupport(system, state, config, schemeConfig, *, onGrid: bool = Fal
     if schemeConfig.adaptiveSupportScheme in (AdaptiveSupportScheme.Monaghan, AdaptiveSupportScheme.NumberDensity):
         # those solvers ignore `validateOnce`: validate the list here, for the supports they returned
         system.adjacency = buildVerletList(
-            state, config.domain, verletScale=config.verletScale, supportMode=SupportScheme.SuperSymmetric,
-            priorNeighborhood=system.adjacency, verbose=False, rebuildSlack=rebuildSlack)
+            state,
+            config.domain,
+            verletScale=config.verletScale,
+            supportMode=SupportScheme.SuperSymmetric,
+            priorNeighborhood=system.adjacency,
+            verbose=False,
+            rebuildSlack=rebuildSlack,
+            **neighborSearchOptions(config))

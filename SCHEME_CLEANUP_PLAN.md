@@ -103,3 +103,7 @@ python scripts/scheme_baseline.py dump --scheme <S> --out $SCRATCH/new --steps 2
 python -m pytest tests -q -p no:cacheprovider        # full suite, ~12 min, in the background; one GPU job at a time
 ```
 Conda env `warp` (`/home/lu26029/miniconda3/envs/warp/bin/python`), repo root as the working directory. Memory: `compsph-step-cleanup-state`, `viscosity-switch-microbench`.
+
+## Core search/index consumer qualification (2026-10-15)
+
+[Frontend simulation results](docs/microbench/frontend_search_2026-10-15.md): 90 serial trials / 18,000 steps. Index width, collection and query scheduling preserve final tensors/trajectories bitwise, including default output pipelining. Large eager cases use 20–23% less peak Torch memory; timestep gains are small and spatial scheduling costs about 1% in ordered 3D. Different grid construction has small quantified float32 differences. Per-stage consumers and developed-flow locality are the next performance measurements; full pressure/MFM trajectory batteries remain open.

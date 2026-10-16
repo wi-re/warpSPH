@@ -10,6 +10,8 @@ via `type(particleState)`. Not re-exported from `systems/__init__.py` --
 `schemes/incompressible/divergenceFree.py` and `schemes/builder.py` import it directly.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state, tagged
 from warpSPHIntegrators.state.fields import update_component, update_position
 from dataclasses import dataclass
@@ -224,9 +226,13 @@ class IncompressibleSystem(BaseIntegrationSystem):
         if _psShift and config is not None and schemeConfig is not None:
             with record_function("[warpSPH] - [dfsph] - VD+PS particle shift"):
                 self.adjacency = buildVerletList(
-                    self.state, config.domain, verletScale=config.verletScale,
+                    self.state,
+                    config.domain,
+                    verletScale=config.verletScale,
                     supportMode=SupportScheme.SuperSymmetric,
-                    priorNeighborhood=self.adjacency, verbose=False)
+                    priorNeighborhood=self.adjacency,
+                    verbose=False,
+                    **neighborSearchOptions(config))
                 self.state.densities = computeDensities(
                     self.state, config, schemeConfig, self.adjacency)
                 if _PS_SHIFT_MODE == 'delta':

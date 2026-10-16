@@ -17,6 +17,8 @@ does not depend on the masses at all. It returns ``rho_i = m_i n_i`` as the dens
 list of per-iteration number densities in place of the density history.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from ...configurations.compressibleConfig import CompressibleSPHConfig
 
 from .wp_omega import computeOmegaWarp
@@ -79,7 +81,14 @@ def evaluateOptimalSupportMonaghan(
         for i in range(nIter):
             with record_function(f"[evalOS] Iteration {i}"):
                 with record_function("[evalOS] buildVerletList"):
-                    adjacency = buildVerletList(iterState, domain = config.domain, verletScale = verletScale, supportMode = SupportScheme.SuperSymmetric, priorNeighborhood=adjacency, verbose=False)
+                    adjacency = buildVerletList(
+                        iterState,
+                        domain=config.domain,
+                        verletScale=verletScale,
+                        supportMode=SupportScheme.SuperSymmetric,
+                        priorNeighborhood=adjacency,
+                        verbose=False,
+                        **neighborSearchOptions(config))
 
                 iterState.densities = warpOperation(
                     iterState,
@@ -127,7 +136,14 @@ def evaluateOptimalSupportMonaghan(
                     # print('Stopping Early')
                     break
 
-        adjacency = buildVerletList(iterState, domain = config.domain, verletScale = verletScale, supportMode = SupportScheme.SuperSymmetric, priorNeighborhood=adjacency, verbose=False)
+        adjacency = buildVerletList(
+            iterState,
+            domain=config.domain,
+            verletScale=verletScale,
+            supportMode=SupportScheme.SuperSymmetric,
+            priorNeighborhood=adjacency,
+            verbose=False,
+            **neighborSearchOptions(config))
         densities = warpOperation(
             iterState,
             OperationProperties(

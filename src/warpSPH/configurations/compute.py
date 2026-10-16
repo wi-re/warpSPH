@@ -14,6 +14,10 @@ so existing cases and tests keep working (`stepMode`, `CaseSpec.cudaGraph` and a
   request a run cannot honour (no CUDA, stored trajectories, host-sized boundary conditions, ...) runs eagerly, with a warning for an explicit one.
   The crossover is where the step stops being limited by the host: below it the replay is faster, above it the eager path is, because the
   graphed variants (fixed-shape grid support solve, deferred checks) cost kernel time.
+* `neighborCollection`: `auto` selects split I/J collection on CUDA and fused collection on CPU; explicit `fused` or `split` overrides.
+* `neighborQueryOrder`: `auto` reuses the grid permutation for aliased self queries; `input` forces original execution order, `spatial` requires aliases.
+  This schedules work only: particle state, original CSR rows and per-row neighbor order stay unchanged.
+* `neighborGridBuild`: `scheme` uses an existing scheme pair-grid factory; `eager` bypasses it without changing support-solve grid traversal.
 * `pipelineOutputs`: with a whole-step graph, run step n's diagnostics / frame while step n+1 replays.
 * `iterationChecks`: ``'adaptive'`` (default) or ``'every'`` -- when a relaxed-Jacobi style loop (`warpSPHCore.linalg.CheckSchedule`) reads its
   convergence test back: after every iteration, or at checkpoints learned from the previous solve of the same kind (a solve may run past its first
@@ -29,7 +33,7 @@ from typing import Any, Dict, Optional, Tuple
 from ..enumTypes import CompressibleSPHScheme, WeaklyCompressibleSPHScheme
 
 __all__ = ['ComputeConfig', 'EXECUTION_MODES', 'CHECK_SCHEDULES', 'DEFAULT_KRYLOV_CHECK_EVERY', 'GRAPH_MAX_PARTICLES', 'graphParticleLimit',
-           'requestedExecution', 'resolveExecution', 'resolveCheckSchedule', 'resolveKrylovCheckEvery']
+           'requestedExecution', 'resolveExecution', 'resolveCheckSchedule', 'resolveKrylovCheckEvery', 'neighborSearchOptions']
 
 EXECUTION_MODES = ('eager', 'graph', 'auto')
 CHECK_SCHEDULES = ('every', 'adaptive')
@@ -61,10 +65,15 @@ class ComputeConfig:
     iterationChecks: str = field(default='adaptive', metadata={'description': "relaxed-Jacobi style loops read their convergence test back after every iteration ('every') or at checkpoints learned from the previous solve ('adaptive')"})
     krylovCheckEvery: Optional[int] = field(default=None, metadata={'description': 'Krylov solvers read their still-running flag every this many iterations (None = DEFAULT_KRYLOV_CHECK_EVERY)'})
 
+    neighborCollection: str = field(default='auto', metadata={'description': "neighbor pair collection: 'auto' uses split I/J on CUDA and fused on CPU; 'split' and 'fused' explicitly select either path"})
+    neighborQueryOrder: str = field(default='auto', metadata={'description': "query traversal: 'auto' reuses the grid permutation for self searches; 'input' preserves execution order; 'spatial' requires aliased query/reference positions. Particle/CSR row order is always preserved"})
+    neighborGridBuild: str = field(default='scheme', metadata={'description': "pair-list grid build: 'scheme' uses the scheme's grid factory when available; 'eager' bypasses it. Does not change adaptive-support/direct-grid operator traversal"})
+
     def __post_init__(self):
         self.validate()
 
     def validate(self) -> None:
+        _validateNeighborChoices(self.neighborCollection, self.neighborQueryOrder, self.neighborGridBuild)
         if self.execution not in EXECUTION_MODES:
             raise ValueError(f"compute.execution must be one of {EXECUTION_MODES}, not {self.execution!r}")
         if self.iterationChecks not in CHECK_SCHEDULES:
@@ -124,3 +133,24 @@ def resolveCheckSchedule(solverCfg, config) -> str:
 def resolveKrylovCheckEvery(config) -> int:
     value = _compute(config).krylovCheckEvery
     return DEFAULT_KRYLOV_CHECK_EVERY if value is None else int(value)
+
+
+def neighborSearchOptions(config, *, gridFactory=None) -> dict:
+    """Per-call search policy, including pair-grid factory selection; no global state."""
+    compute = getattr(config, 'compute', None)
+    collection = getattr(compute, 'neighborCollection', 'auto')
+    order = getattr(compute, 'neighborQueryOrder', 'auto')
+    build = getattr(compute, 'neighborGridBuild', 'scheme')
+    _validateNeighborChoices(collection, order, build)
+    options = dict(collection=collection, queryOrder=order)
+    if gridFactory is not None:
+        options['gridFactory'] = None if build == 'eager' else gridFactory
+    return options
+
+
+def _validateNeighborChoices(collection, order, build):
+    for name, value, choices in (('neighborCollection', collection, ('auto', 'fused', 'split')),
+                                 ('neighborQueryOrder', order, ('auto', 'input', 'spatial')),
+                                 ('neighborGridBuild', build, ('scheme', 'eager'))):
+        if value not in choices:
+            raise ValueError(f'compute.{name} must be one of {choices}, not {value!r}')

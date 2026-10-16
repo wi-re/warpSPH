@@ -13,6 +13,8 @@ Forward only: the detector's outputs are detached by the caller. Launched with `
 operation, so they follow the current stream (graph captures included) and need no synchronisation.
 """
 
+from warpSPHCore.type_config import index_t, offset_t
+
 import torch
 import warp as wp
 from warp.types import matrix
@@ -74,19 +76,19 @@ def wadsleyPointKernel(V: wp.array2d(dtype=scalar_t), gradP: wp.array2d(dtype=sc
 
 @wp.kernel
 def wadsleyNeighbourMeanKernel(x: wp.array2d(dtype=scalar_t), H: wp.array(dtype=scalar_t), m: wp.array(dtype=scalar_t),
-                               ratio: wp.array(dtype=scalar_t), edgeOffsets: wp.array(dtype=wp.int32),
-                               numNeighbors: wp.array(dtype=wp.int32), neighbors: wp.array(dtype=wp.int64),
+                               ratio: wp.array(dtype=scalar_t), edgeOffsets: wp.array(dtype=offset_t),
+                               numNeighbors: wp.array(dtype=wp.int32), neighbors: wp.array(dtype=index_t),
                                domainMin: wp.array(dtype=scalar_t), domainMax: wp.array(dtype=scalar_t),
                                periodic: wp.array(dtype=wp.bool), dim: int, tiny: scalar_t,
                                R: wp.array(dtype=scalar_t)):
     """Eq. (29): R_i = sum_j w_ij (D_j / |T|_j) / sum_j w_ij over i's row, w_ij = (1 - (r_ij / H_i)^4) m_j for r_ij < H_i, clamped to [-1, 1]."""
     i = wp.tid()
-    begin = wp.int32(edgeOffsets[i])
+    begin = edgeOffsets[i]
     count = wp.int32(numNeighbors[i])
     num = scalar_t(0.0)
     den = scalar_t(0.0)
     for k in range(count):
-        j = wp.int32(neighbors[begin + k])
+        j = wp.int32(neighbors[begin + offset_t(k)])
         r2 = scalar_t(0.0)
         for a in range(3):
             if a < dim:
@@ -128,12 +130,10 @@ def wadsleyNeighbourMean(state, ratio: torch.Tensor, adjacency, domain) -> torch
     """R (Eq. 29) for every particle from its CSR row of `adjacency`."""
     N, dim = state.positions.shape
     R = torch.empty(N, dtype=ratio.dtype, device=ratio.device)
-    # the list's own dtypes (int32 row arrays, int64 columns): converting per call would copy
-    as32 = lambda t: t if t.dtype == torch.int32 else t.to(torch.int32)
-    as64 = lambda t: t if t.dtype == torch.int64 else t.to(torch.int64)
+    # Adjacency buffers already use the configured integer roles.
     wp.launch(wadsleyNeighbourMeanKernel, dim=N, device=wp.device_from_torch(ratio.device),
               inputs=[_w(state.positions), _w(state.supports), _w(state.masses), _w(ratio),
-                      _w(as32(adjacency.edgeOffsets)), _w(as32(adjacency.numNeighbors)), _w(as64(adjacency.paddedJ)),
+                      _w(adjacency.edgeOffsets), _w(adjacency.numNeighbors), _w(adjacency.paddedJ),
                       _w(domain.min.to(ratio.dtype)), _w(domain.max.to(ratio.dtype)), _w(domain.periodic),
                       dim, torch.finfo(ratio.dtype).tiny, _w(R)])
     return R

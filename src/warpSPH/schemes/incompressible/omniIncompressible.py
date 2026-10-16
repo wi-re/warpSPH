@@ -79,6 +79,8 @@ across in `finalize`.
 
 from __future__ import annotations
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 import os
 from typing import Any
 
@@ -294,9 +296,13 @@ CD_TIKHONOV = 0.0
 
 def _rebuildAdjacency(state: Any, system: Any, config: Any):
     adjacency = buildVerletList(
-        state, config.domain, verletScale=config.verletScale,
+        state,
+        config.domain,
+        verletScale=config.verletScale,
         supportMode=SupportScheme.SuperSymmetric,
-        priorNeighborhood=system.adjacency, verbose=False)
+        priorNeighborhood=system.adjacency,
+        verbose=False,
+        **neighborSearchOptions(config))
     system.adjacency = adjacency
     return adjacency
 
