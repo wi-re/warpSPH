@@ -246,17 +246,33 @@ def run(case: Case, spec: Optional[CaseSpec] = None, *, onVelocityAlarm=None,
         return _run(case, spec, startedAt, onVelocityAlarm)
 
 
-def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> RunResult:
+def prepareContext(case: Case, spec: CaseSpec) -> RunContext:
+    """Configure/validate a case without sampling particles or advancing time."""
     ctx = buildContext(case, spec)
-
     if case.configureScheme is not None:
         case.configureScheme(ctx)
-    # once per run, after the case has had its say: a scheme config that can check itself does
-    # (ACSPH: unimplemented options, and the exact-delta integrator contract)
+    from .configuration import applySchemeOverrides
+    applySchemeOverrides(ctx)
     if hasattr(ctx.schemeConfig, 'validate'):
         ctx.schemeConfig.validate(ctx.config)
+    return ctx
 
+
+def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> RunResult:
+    ctx = prepareContext(case, spec)
+    try:
+        return _runContext(ctx, case, spec, startedAt, onVelocityAlarm)
+    finally:
+        # Optional adapters may stop at a safe hook boundary by raising. Always
+        # finish the recording before they report a terminal run state.
+        outFile = ctx.scratch.pop('trajectoryFile', None)
+        if outFile is not None:
+            outFile.close()
+
+
+def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
     system = case.buildSystem(ctx)
+    ctx.scratch['initialParticleCount'] = int(system.state.positions.shape[0])
     # How the run executes (`configurations/compute.py`): the scheme's `stepMode`, the spec's `cudaGraph` / `execution` or `config.compute`, and for
     # 'auto' the particle count. The scheme-level graph routes (delta-SPH's right-hand side, ACSPH's dual-time iteration) key on `schemeConfig.cudaGraph`.
     from ..configurations import resolveExecution
@@ -313,6 +329,9 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
                                     ctx.scheme, ctx.exportFunction,
                                     exportRoot=spec.exportRoot)
         spec.save(os.path.join(ctx.exportPath, 'caseSpec.json'))
+        if spec.configuration is not None or spec.schemeOverrides:
+            from .configuration import _write, resolvedConfiguration
+            _write(os.path.join(ctx.exportPath, 'resolvedConfiguration.json'), resolvedConfiguration(ctx))
 
     if spec.plot and case.setupPlot is not None:
         ctx.imagePath = os.path.join(ctx.exportPath, 'images')
@@ -323,6 +342,7 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
 
     if spec.store and spec.storeMode == 'trajectory':
         outFile = createOutFile(ctx.exportPath)
+        ctx.scratch['trajectoryFile'] = outFile
         groups = writeInitialData(ctx.exportPath, outFile, ctx.scheme, ctx.config,
                                   ctx.schemeConfig,
                                   SimpleNamespace(exportInterval=spec.exportInterval),

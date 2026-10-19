@@ -20,6 +20,8 @@ restated, so the three cases cannot drift apart.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import functools
 
 from ...caseUtils import buildSodND
@@ -27,6 +29,8 @@ from ...configurations.meshless import MeshlessConfig
 from ...runner import Case, RunContext, caseMain, registerCase, resolveEnum
 from .common import paramExtraData
 from .sod import configureScheme, diagnostics, setupPlot, states, updatePlot
+from ..common.parameters import COMPRESSIBLE_PARAMETERS, RIEMANN_STATE_PARAMETERS, COMPRESSIBLE_SCHEMES
+from ...runner.parameters import Parameter as P
 
 __all__ = ['sod2dCase', 'sod3dCase']
 
@@ -96,6 +100,21 @@ def _sodNDCase(name: str, dim: int, nx: int, description: str) -> Case:
             plotInterval=10,
             storeInterval=50,
         ),
+        supportedSchemes=COMPRESSIBLE_SCHEMES,
+        parameterDefinitions={
+            **COMPRESSIBLE_PARAMETERS, **RIEMANN_STATE_PARAMETERS,
+            'adaptiveSupportScheme': replace(COMPRESSIBLE_PARAMETERS['adaptiveSupportScheme'],
+                description='Adaptive smoothing-support prescription; also used for initial meshless sampling.',
+                schemes=COMPRESSIBLE_SCHEMES),
+            'transverseSpacings': P('integer', 'Slab width in dense-side particle spacings.', 'domain', minimum=1),
+            'equalMass': P('boolean', 'Use equal particle masses across the density jump.', 'sampling'),
+        },
+        simulationParameters={
+            'dim': P('integer', 'Dimension of this Sod slab variant.', 'domain', choices=(dim,)),
+            'L': P('number', 'The mirrored Sod slab uses the fixed domain length 2.', 'domain', choices=(2.0,)),
+            'periodic': P('boolean', 'The Sod slab is periodic.', 'domain', choices=(True,)),
+        },
+        variants={'classic': {'params': {'gamma': 1.4, 'right_rho': 0.125, 'right_pressure': 0.1}}},
         params=dict(
             gamma=5 / 3,
             #: Width of the periodic slab in each transverse direction, in

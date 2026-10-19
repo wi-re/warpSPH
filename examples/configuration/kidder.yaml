@@ -1,0 +1,16 @@
+schemaVersion: 1
+case: kidder
+simulation:
+  dim: 1
+  nx: 100
+  device: cuda
+params:
+  # gamma and the geometry index nu are derived from dimension.
+  # Duration is derived from the analytical collapse time and tauFraction.
+  r_inner: 0.9
+  r_outer: 1.0
+  P_inner: 0.1
+  P_outer: 1.0
+  tauFraction: 0.9
+solver:
+  scheme: CRKSPH

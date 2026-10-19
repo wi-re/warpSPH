@@ -110,6 +110,13 @@ Both print what they are about to do, then what they did:
 
 ## Running cases
 
+All 16 compressible-family cases, Taylor–Green WCSPH/ACSPH and random flow
+support the versioned YAML/JSON configuration interface: documented case parameters, solver-specific numerical
+overrides, validation without stepping, and resolved run manifests. See
+[Configuring simulations](docs/CONFIGURATION.md) and the runnable files in
+[`examples/configuration/`](examples/configuration/). Existing Python calls,
+flat `CaseSpec` files and case flags remain supported.
+
 A case is run through a shared runner rather than per-script boilerplate. Every
 flag below is a field of `CaseSpec`, so a run is fully described by a file as
 well as by a command line.

@@ -18,6 +18,9 @@ from .common import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            paramExtraData)
 from ..common.plotting import Field, particlePlot
 
+from ..common.parameters import COMPRESSIBLE_CASE_PARAMETERS, COMPRESSIBLE_SCHEMES, SPH_SCHEMES
+from ...runner.parameters import Parameter as P
+
 __all__ = ['greshoVortexCase', 'GRESHO_FIELDS']
 
 
@@ -67,6 +70,13 @@ greshoVortexCase = registerCase(Case(
         storeInterval=500,
     ),
     # cuspWidth > 0: smoothed-cusp variant (see `greshoProfile`); 0 = the standard profile
+    supportedSchemes=COMPRESSIBLE_SCHEMES,
+    parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
+        'cuspWidth': P('number', 'Width of the smoothed Gresho cusp; zero uses the piecewise standard profile.', 'initial', units='length', minimum=0),
+        'jitter': P('number', 'Initial displacement as a fraction of lattice spacing.', 'sampling', minimum=0),
+    },
+    simulationParameters={'dim': P('integer', 'Dimension supported by this initial-condition sampler.', 'domain', choices=(2,))},
+    variants={'smoothed': {'params': {'cuspWidth': 0.02}}},
     params=dict(COMPRESSIBLE_PARAMS, markerSize=4, cuspWidth=0.0, jitter=0.0),
 ))
 

@@ -139,6 +139,14 @@ class Case:
 
     description: str = ''
 
+    # Optional versioned-configuration metadata. Legacy cases need not migrate together.
+    parameterDefinitions: Dict[str, Any] = field(default_factory=dict)
+    simulationParameters: Dict[str, Any] = field(default_factory=dict)
+    variants: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    supportedSchemes: tuple = ()
+    validateConfiguration: Optional[Callable[[Any], None]] = None
+    deriveParameters: Optional[Callable[[Any], Dict[str, Any]]] = None
+
 
 _REGISTRY: Dict[str, Case] = {}
 

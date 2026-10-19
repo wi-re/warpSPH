@@ -19,17 +19,7 @@ from typing import Any, Dict, List, Optional
 __all__ = ['CaseSpec', 'buildArgumentParser', 'schemeNames', 'specFromArgs']
 
 
-def _readMapping(path: str) -> Dict[str, Any]:
-    """Load a ``.json``/``.yaml``/``.yml`` file, requiring a top-level mapping."""
-    with open(path, 'r') as f:
-        if os.path.splitext(path)[1].lower() in ('.yaml', '.yml'):
-            import yaml
-            data = yaml.safe_load(f)
-        else:
-            data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f'{path} must contain a mapping, got {type(data).__name__}.')
-    return data
+from warpSPHConfig import readMapping as _readMapping
 
 
 @dataclass
@@ -191,6 +181,10 @@ class CaseSpec:
 
     # --- case-specific knobs ------------------------------------------------
     params: Dict[str, Any] = field(default_factory=dict)
+    #: Validated numerical overrides, applied after the case's configureScheme.
+    schemeOverrides: Dict[str, Any] = field(default_factory=dict)
+    #: Original versioned document for provenance; absent for the legacy API.
+    configuration: Optional[Dict[str, Any]] = None
 
     # -- convenience ---------------------------------------------------------
 
@@ -396,7 +390,8 @@ def schemeNames() -> List[str]:
 
 def buildArgumentParser(description: str = 'Run a warpSPH case.',
                         caseParams: Optional[Dict[str, Any]] = None,
-                        defaults: Optional[Dict[str, Any]] = None) -> argparse.ArgumentParser:
+                        defaults: Optional[Dict[str, Any]] = None,
+                        parameterDefinitions: Optional[Dict[str, Any]] = None) -> argparse.ArgumentParser:
     """An argparse parser covering every :class:`CaseSpec` field.
 
     `caseParams` are the case's own knobs and their defaults; each becomes a
@@ -422,7 +417,7 @@ def buildArgumentParser(description: str = 'Run a warpSPH case.',
                         help='Write the fully resolved spec to this path and continue.')
 
     for f in fields(CaseSpec):
-        if f.name in ('params', 'plotBackendOptions'):
+        if f.name in ('params', 'plotBackendOptions', 'schemeOverrides', 'configuration'):
             continue
         shown = (defaults or {}).get(f.name, f.default)
         if f.name == 'scheme':
@@ -436,15 +431,24 @@ def buildArgumentParser(description: str = 'Run a warpSPH case.',
         # default of a different type must not change the flag's type.
         _addField(parser, f.name, f.default, f.type, helpText)
 
+    parser.add_argument('--describeConfig', metavar='JSON', help='Write the case/solver JSON schema and exit.')
+    parser.add_argument('--parameterReference', metavar='MARKDOWN', help='Write generated parameter documentation and exit.')
+    parser.add_argument('--checkConfig', action='store_true', help='Configure and validate without sampling particles or stepping.')
+    parser.add_argument('--saveResolvedConfig', metavar='JSON', help='Write actual configuration and package versions after setup.')
+
     configOnly = []
     for name, value in (caseParams or {}).items():
         # A list/dict-valued parameter (Woodward-Colella's shock regions, the
         # dam break's gravity vector) has no sensible flag form -- argparse
         # would infer `float` from it. Those stay settable via --config only.
-        if isinstance(value, (list, dict)):
+        descriptor = (parameterDefinitions or {}).get(name)
+        if isinstance(value, (list, dict)) or (descriptor and descriptor.kind in ('object', 'array')):
             configOnly.append(name)
             continue
-        _addField(parser, name, value, type(value), f'case parameter (default: {value!r})')
+        annotation = {'number': float, 'integer': int, 'boolean': 'Optional[bool]',
+                      'string': str}.get(descriptor.kind, type(value)) if descriptor else type(value)
+        helpText = descriptor.description if descriptor else 'case parameter'
+        _addField(parser, name, value, annotation, f'{helpText} (default: {value!r})')
 
     if configOnly:
         # Silently dropping these leaves no way to find out they exist.
@@ -484,7 +488,7 @@ def specFromArgs(args: argparse.Namespace,
     overrides = {}
     params = dict(spec.params)
     for name, value in vars(args).items():
-        if value is None or name in ('config', 'saveConfig'):
+        if value is None or name in ('config', 'saveConfig', 'describeConfig', 'parameterReference', 'checkConfig', 'saveResolvedConfig'):
             continue
         if name in known:
             overrides[name] = value

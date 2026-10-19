@@ -18,6 +18,9 @@ from .common import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            paramExtraData)
 from ..common.plotting import Field, particlePlot
 
+from ..common.parameters import COMPRESSIBLE_CASE_PARAMETERS, COMPRESSIBLE_SCHEMES, SPH_SCHEMES
+from ...runner.parameters import Parameter as P
+
 __all__ = ['shearingNohCase', 'SHEARING_NOH_FIELDS']
 
 
@@ -69,6 +72,12 @@ shearingNohCase = registerCase(Case(
         plotInterval=1,
         storeInterval=500,
     ),
+    supportedSchemes=COMPRESSIBLE_SCHEMES,
+    parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
+        'vs': P('number', 'Transverse shear velocity amplitude.', 'initial', units='velocity'),
+    },
+    simulationParameters={'dim': P('integer', 'Dimension supported by this initial-condition sampler.', 'domain', choices=(2,))},
+    variants={},
     params=dict(COMPRESSIBLE_PARAMS, vs=5.0),
 ))
 

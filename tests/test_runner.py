@@ -395,3 +395,24 @@ def test_gridInterpolatedPlotsStayOffTheRenderThread():
     from warpSPH.cases.common.plotting import Field, particlePlot
     assert particlePlot([Field('densities', 'rho', gridResolution=64)])[1].usesWarp
     assert not particlePlot([Field('densities', 'rho')])[1].usesWarp
+
+
+def test_trajectory_writer_closes_when_a_control_hook_interrupts(tmp_path):
+    from warpSPH.cases.periodic.tgvWeaklyCompressible import tgvWeaklyCompressibleCase
+    from warpSPH.runner import run
+    seen=[]
+    class ControlledStop(Exception):
+        pass
+    def post(ctx, state, step):
+        if step == 1:
+            seen.append(ctx.scratch['trajectoryFile'])
+            raise ControlledStop()
+    case=dataclasses.replace(tgvWeaklyCompressibleCase,postStep=post)
+    with pytest.raises(ControlledStop):
+        run(case,nx=16,nSteps=4,store=True,storeMode='trajectory',exportInterval=1e-6,
+            exportRoot=str(tmp_path),plot=False,quiet=True)
+    assert len(seen)==1 and not seen[0].id.valid
+    import h5py
+    path=next(tmp_path.rglob('trajectory.h5'))
+    with h5py.File(path,'r') as file:
+        assert len(file['positions']) == 1

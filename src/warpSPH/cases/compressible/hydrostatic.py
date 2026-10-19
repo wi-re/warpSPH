@@ -20,6 +20,9 @@ from .common import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            paramExtraData)
 from ..common.plotting import Field, particlePlot
 
+from ..common.parameters import COMPRESSIBLE_CASE_PARAMETERS, COMPRESSIBLE_SCHEMES, SPH_SCHEMES
+from ...runner.parameters import Parameter as P
+
 __all__ = ['hydrostaticCase', 'HYDROSTATIC_FIELDS']
 
 
@@ -71,6 +74,14 @@ hydrostaticCase = registerCase(Case(
         plotInterval=1,
         storeInterval=500,
     ),
+    supportedSchemes=SPH_SCHEMES,
+    parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
+        'rho_low': P('number', 'Background density.', 'initial', units='density', exclusiveMinimum=0),
+        'rho_high': P('number', 'Density of the central square patch.', 'initial', units='density', exclusiveMinimum=0),
+        'E0': P('number', 'Unused legacy export label; the sampler determines initial pressure.', 'legacy', readOnly=True, deprecated=True),
+    },
+    simulationParameters={'dim': P('integer', 'Dimension supported by this initial-condition sampler.', 'domain', choices=(2,))},
+    variants={},
     params=dict(
         COMPRESSIBLE_PARAMS,
         rho_low=1.0,

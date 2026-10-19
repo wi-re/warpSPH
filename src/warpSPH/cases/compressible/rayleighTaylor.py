@@ -21,6 +21,9 @@ from .common import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            paramExtraData)
 from ..common.plotting import Field, particlePlot
 
+from ..common.parameters import COMPRESSIBLE_CASE_PARAMETERS, COMPRESSIBLE_SCHEMES, SPH_SCHEMES
+from ...runner.parameters import Parameter as P
+
 __all__ = ['rayleighTaylorCase', 'RAYLEIGH_TAYLOR_FIELDS']
 
 
@@ -92,6 +95,17 @@ rayleighTaylorCase = registerCase(Case(
         plotInterval=1,
         storeInterval=500,
     ),
+    supportedSchemes=SPH_SCHEMES,
+    parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
+        'rho_low': P('number', 'Density of the lower fluid.', 'initial', units='density', exclusiveMinimum=0),
+        'rho_high': P('number', 'Density of the upper fluid.', 'initial', units='density', exclusiveMinimum=0),
+        'delta': P('number', 'Interface perturbation amplitude.', 'initial', units='length', minimum=0),
+        'g': P('number', 'Downward gravitational acceleration magnitude.', 'forcing', units='length/time^2', exclusiveMinimum=0),
+        'aspect': P('number', 'Box height/width ratio.', 'domain', exclusiveMinimum=0),
+        'band': P('integer', 'Dirichlet buffer thickness in particle layers.', 'boundary', minimum=1),
+    },
+    simulationParameters={'dim': P('integer', 'Dimension supported by this initial-condition sampler.', 'domain', choices=(2,))},
+    variants={},
     params=dict(
         COMPRESSIBLE_PARAMS,
         gamma=1.4,

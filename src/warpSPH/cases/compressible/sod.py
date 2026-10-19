@@ -16,6 +16,8 @@ from ...configurations.meshless import MeshlessConfig
 from ...enumTypes import AdaptiveSupportScheme, ViscositySwitch
 from ...runner import Case, RunContext, caseMain, registerCase, resolveEnum
 from .common import applyViscositySwitchParam, compressibleDiagnostics
+from ..common.parameters import COMPRESSIBLE_PARAMETERS, RIEMANN_STATE_PARAMETERS
+from ...runner.parameters import Parameter as P
 from ..common.plotting import openWindow, pumpEvents
 
 __all__ = ['sodCase', 'states']
@@ -44,10 +46,9 @@ def configureScheme(ctx: RunContext) -> None:
     ctx.schemeConfig.gamma = ctx.param('gamma')
     ctx.schemeConfig.rho0 = left.rho
     applyViscositySwitchParam(ctx)
-    ctx.schemeConfig.viscositySwitchParams.alpha_min = ctx.param(
-        'alpha_min', ctx.schemeConfig.viscositySwitchParams.alpha_min)
-    ctx.schemeConfig.viscositySwitchParams.alpha_max = ctx.param(
-        'alpha_max', ctx.schemeConfig.viscositySwitchParams.alpha_max)
+    for name in ('alpha_min', 'alpha_max'):
+        if ctx.param(name) is not None:
+            setattr(ctx.schemeConfig.viscositySwitchParams, name, ctx.param(name))
     ctx.schemeConfig.adaptiveSupportScheme = resolveEnum(
         AdaptiveSupportScheme, ctx.param('adaptiveSupportScheme'))
     ctx.schemeConfig.adaptiveSupportCorrections = ctx.param('adaptiveSupportCorrections')
@@ -108,6 +109,11 @@ def extraData(ctx: RunContext, state) -> Dict[str, Any]:
     return {k: ctx.param(k) for k in sodCase.params}
 
 
+def validateConfiguration(spec):
+    if spec.params['samplingRatio'] > spec.nx:
+        raise ValueError('params.samplingRatio: must not exceed simulation.nx')
+
+
 sodCase = registerCase(Case(
     name='sod',
     scheme='CompSPH',
@@ -143,7 +149,29 @@ sodCase = registerCase(Case(
         plotInterval=10,
         storeInterval=50,
     ),
+    validateConfiguration=validateConfiguration,
+    supportedSchemes=('CompSPH', 'Monaghan', 'CRKSPH', 'GSPH', 'InutsukaGSPH', 'MFM', 'MFV'),
+    simulationParameters={
+        'dim': P('integer', 'This case is the one-dimensional Sod sampler.', choices=(1,)),
+        'L': P('number', 'The current periodic mirrored Sod sampler uses a fixed domain length.', choices=(2.0,)),
+        'periodic': P('boolean', 'The mirrored Sod layout requires a periodic domain.', choices=(True,)),
+    },
+    parameterDefinitions={
+        **COMPRESSIBLE_PARAMETERS,
+        'smoothIC': P('boolean', 'Smooth the initial discontinuity.', 'initial', schemes=('CompSPH', 'CRKSPH', 'Monaghan', 'GSPH', 'InutsukaGSPH')),
+        'samplingRatio': P('integer', 'Dense/light side particle-count ratio; independent of density ratio.', 'sampling', minimum=1),
+        **RIEMANN_STATE_PARAMETERS,
+        'alpha_min': P('number', 'Optional override of the viscosity switch lower bound.', 'solver.viscosity', minimum=0, nullable=True, schemes=('CompSPH', 'CRKSPH', 'Monaghan')),
+        'alpha_max': P('number', 'Optional override of the viscosity switch upper bound.', 'solver.viscosity', minimum=0, nullable=True, schemes=('CompSPH', 'CRKSPH', 'Monaghan')),
+        'jitter': P('number', 'Initial displacement as a fraction of lattice spacing.', 'sampling', minimum=0),
+    },
+    variants={
+        'classic': {'params': {'gamma': 1.4, 'right_rho': 0.125, 'right_pressure': 0.1, 'samplingRatio': 8}},
+        'smoothed': {'params': {'smoothIC': True}},
+    },
     params=dict(
+        alpha_min=None,
+        alpha_max=None,
         gamma=5 / 3,
         smoothIC=False,
         samplingRatio=4,

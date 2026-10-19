@@ -18,6 +18,9 @@ from .common import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            configureCompressible, paramExtraData)
 from ..common.plotting import ProfileAxis, profilePlot
 
+from ..common.parameters import COMPRESSIBLE_CASE_PARAMETERS, COMPRESSIBLE_SCHEMES, SPH_SCHEMES
+from ...runner.parameters import Parameter as P
+
 __all__ = ['woodwardColellaCase', 'WOODWARD_REGIONS', 'drawWoodwardColella']
 
 #: The three initial states, as `sampleShockRegions1D` wants them. Positions are
@@ -50,6 +53,18 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     return compressibleDiagnostics(ctx, state)
 
 
+def validateConfiguration(spec):
+    previous = 0.0
+    for i, region in enumerate(spec.params['regions']):
+        if region['end'] <= region['begin']:
+            raise ValueError(f'params.regions[{i}].end: must exceed begin')
+        if abs(region['begin'] - previous) > 1e-12:
+            raise ValueError(f'params.regions[{i}].begin: regions must cover the domain contiguously from zero')
+        previous = region['end']
+    if previous < spec.L / 2:
+        raise ValueError('params.regions: the last region must reach the domain edge L/2')
+
+
 woodwardColellaCase = registerCase(Case(
     name='woodwardColella',
     scheme='CRKSPH',
@@ -72,6 +87,19 @@ woodwardColellaCase = registerCase(Case(
         plotInterval=50,
         storeInterval=500,
     ),
+    supportedSchemes=SPH_SCHEMES,
+    parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
+        'regions': P('array', 'Mirrored initial pressure/density regions; each span must be ordered and non-overlapping.', 'initial', minItems=1,
+            items=P('object', 'One initial state region.', properties={
+                'begin': P('number', 'Inner absolute x coordinate.', units='length', minimum=0),
+                'end': P('number', 'Outer absolute x coordinate.', units='length', exclusiveMinimum=0),
+                'pressure': P('number', 'Initial pressure in this span.', units='pressure', exclusiveMinimum=0),
+                'density': P('number', 'Initial density in this span.', units='density', exclusiveMinimum=0),
+            }, required=('begin', 'end', 'pressure', 'density'))),
+    },
+    simulationParameters={'dim': P('integer', 'Dimension supported by this initial-condition sampler.', 'domain', choices=(1,))},
+    variants={},
+    validateConfiguration=validateConfiguration,
     params=dict(
         COMPRESSIBLE_PARAMS,
         gamma=1.4,

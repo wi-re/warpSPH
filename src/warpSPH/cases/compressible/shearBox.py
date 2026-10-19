@@ -27,6 +27,9 @@ from .common import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            paramExtraData)
 from ..common.plotting import Field, particlePlot
 
+from ..common.parameters import COMPRESSIBLE_CASE_PARAMETERS, COMPRESSIBLE_SCHEMES, SPH_SCHEMES
+from ...runner.parameters import Parameter as P
+
 __all__ = ['shearBoxCase', 'modeAmplitude']
 
 
@@ -106,6 +109,13 @@ shearBoxCase = registerCase(Case(
         plotInterval=1,
         storeInterval=500,
     ),
+    supportedSchemes=COMPRESSIBLE_SCHEMES,
+    parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
+        'v0': P('number', 'Signed amplitude of the periodic shear velocity.', 'initial', units='velocity'),
+        'P0': P('number', 'Uniform initial pressure.', 'initial', units='pressure', exclusiveMinimum=0),
+    },
+    simulationParameters={'dim': P('integer', 'Dimension supported by this initial-condition sampler.', 'domain', choices=(2,))},
+    variants={},
     params=dict(COMPRESSIBLE_PARAMS, markerSize=4, v0=0.5, P0=1.0),
 ))
 

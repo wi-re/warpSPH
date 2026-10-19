@@ -26,6 +26,9 @@ from .common import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            configureCompressible, paramExtraData)
 from ..common.plotting import ProfileAxis, profilePlot
 
+from ..common.parameters import COMPRESSIBLE_CASE_PARAMETERS, COMPRESSIBLE_SCHEMES, SPH_SCHEMES
+from ...runner.parameters import Parameter as P
+
 __all__ = ['kidderCase', 'kidderStates', 'drawKidder']
 
 
@@ -123,6 +126,20 @@ def extraData(ctx: RunContext, state) -> Dict[str, float]:
     return dict(paramExtraData(ctx, state), rho_inner=rhoInner, s=entropy)
 
 
+def deriveConfiguration(spec):
+    return {'nu': spec.dim, 'gamma': 1 + 2 / spec.dim}
+
+
+def validateConfiguration(spec):
+    p = spec.params
+    if p['r_inner'] >= p['r_outer']:
+        raise ValueError('params.r_inner: must be smaller than params.r_outer')
+    if p['P_inner'] >= p['P_outer']:
+        raise ValueError('params.P_inner: compression requires P_inner < P_outer')
+    if 2 * p['band'] >= spec.nx:
+        raise ValueError('params.band: two boundary bands must leave interior particles')
+
+
 kidderCase = registerCase(Case(
     name='kidder',
     scheme='CRKSPH',
@@ -147,6 +164,24 @@ kidderCase = registerCase(Case(
         plotInterval=100,
         storeInterval=500,
     ),
+    supportedSchemes=SPH_SCHEMES,
+    parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
+        'gamma': P('number', 'Isentropic compression adiabatic index.', 'fluid', exclusiveMinimum=1,
+                   readOnly=True, derivation='1 + 2 / simulation.dim'),
+        'nu': P('integer', 'Geometry index: planar 1, cylindrical 2, spherical 3; not kinematic viscosity.', 'domain',
+                choices=(1, 2, 3), readOnly=True, derivation='simulation.dim'),
+        'band': P('integer', 'Particles at each shell edge held to the analytical solution.', 'boundary', minimum=1),
+        'r_inner': P('number', 'Initial inner shell radius.', 'domain', units='length', exclusiveMinimum=0),
+        'r_outer': P('number', 'Initial outer shell radius.', 'domain', units='length', exclusiveMinimum=0),
+        'P_inner': P('number', 'Inner pressure.', 'initial', units='pressure', exclusiveMinimum=0),
+        'P_outer': P('number', 'Outer pressure.', 'initial', units='pressure', exclusiveMinimum=0),
+        'rho_outer': P('number', 'Initial outer density.', 'initial', units='density', exclusiveMinimum=0),
+        'tauFraction': P('number', 'Fraction of analytical collapse time to integrate.', 'time', exclusiveMinimum=0, exclusiveMaximum=1),
+    },
+    simulationParameters={'tLimit': P('number', 'Run duration is derived from tauFraction and the collapse solution during sampling.', 'time', readOnly=True, derivation='params.tauFraction and the analytical collapse time', exclusiveMinimum=0)},
+    variants={},
+    deriveParameters=deriveConfiguration,
+    validateConfiguration=validateConfiguration,
     params=dict(
         COMPRESSIBLE_PARAMS,
         band=10,

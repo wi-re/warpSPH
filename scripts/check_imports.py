@@ -44,7 +44,7 @@ SRC = REPO / "src"
 # third-party and not this script's problem.
 FIRST_PARTY_PREFIX = "warpSPH"
 # optional first-party packages: their imports are verified only when the package is installed (`pip install -e "warpSPH/[boundaries]"`)
-OPTIONAL_PACKAGES = {"warpSPHBoundaries"}
+OPTIONAL_PACKAGES = {"warpSPHBoundaries", "warpSPHCases"}
 
 SKIP_DIRS = {"__pycache__", ".git", ".ipynb_checkpoints", "build", "dist", ".venv", "venv"}
 

@@ -21,6 +21,9 @@ from .common import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            paramExtraData)
 from ..common.plotting import Field, particlePlot
 
+from ..common.parameters import COMPRESSIBLE_CASE_PARAMETERS, COMPRESSIBLE_SCHEMES, SPH_SCHEMES
+from ...runner.parameters import Parameter as P
+
 __all__ = ['kelvinHelmholtzCase', 'KELVIN_HELMHOLTZ_FIELDS']
 
 
@@ -89,6 +92,21 @@ kelvinHelmholtzCase = registerCase(Case(
         plotInterval=1,
         storeInterval=500,
     ),
+    supportedSchemes=COMPRESSIBLE_SCHEMES,
+    parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
+        'rho1': P('number', 'Density of the outer shear layer.', 'initial', units='density', exclusiveMinimum=0),
+        'rho2': P('number', 'Density of the inner shear layer.', 'initial', units='density', exclusiveMinimum=0),
+        'v1': P('number', 'Streamwise velocity of the outer layer.', 'initial', units='velocity'),
+        'v2': P('number', 'Streamwise velocity of the inner layer.', 'initial', units='velocity'),
+        'delta': P('number', 'Velocity-interface smoothing thickness.', 'initial', units='length', exclusiveMinimum=0),
+        'freq': P('number', 'Transverse seed spatial frequency.', 'initial', exclusiveMinimum=0),
+        'w0': P('number', 'Transverse velocity perturbation amplitude.', 'initial', units='velocity'),
+        'sigma': P('number', 'Width of the transverse perturbation envelope.', 'initial', units='length', exclusiveMinimum=0),
+        'smoothDensity': P('integer', 'Use the smooth Frontiere density interface (1) or sharp interface (0).', 'initial', choices=(0, 1)),
+        'jitter': P('number', 'Initial displacement as a fraction of lattice spacing.', 'sampling', minimum=0),
+    },
+    simulationParameters={'dim': P('integer', 'Dimension supported by this initial-condition sampler.', 'domain', choices=(2,))},
+    variants={'smooth-density': {'params': {'smoothDensity': 1}}},
     params=dict(
         COMPRESSIBLE_PARAMS,
         rho1=1.0,

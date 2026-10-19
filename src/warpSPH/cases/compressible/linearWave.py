@@ -8,6 +8,8 @@ overlay in `plotState` a meaningful check.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import os
 from typing import Dict
 
@@ -19,6 +21,9 @@ from .common import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            compressibleDiagnostics, configureCompressible,
                            paramExtraData)
 from ..common.plotting import openWindow, pumpEvents
+
+from ..common.parameters import COMPRESSIBLE_CASE_PARAMETERS, COMPRESSIBLE_SCHEMES, SPH_SCHEMES
+from ...runner.parameters import Parameter as P
 
 __all__ = ['linearWaveCase']
 
@@ -115,6 +120,20 @@ linearWaveCase = registerCase(Case(
         plotInterval=10,
         storeInterval=50,
     ),
+    supportedSchemes=COMPRESSIBLE_SCHEMES,
+    parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
+        'adaptiveSupportScheme': replace(COMPRESSIBLE_CASE_PARAMETERS['adaptiveSupportScheme'],
+            description='Adaptive smoothing-support prescription; also used for initial meshless sampling.',
+            schemes=COMPRESSIBLE_SCHEMES),
+        'A': P('number', 'Sinusoidal acoustic perturbation amplitude.', 'initial', minimum=0),
+        'lamda': P('number', 'Acoustic wavelength (legacy spelling retained).', 'initial', units='length', exclusiveMinimum=0),
+        'c_s': P('number', 'Initial sound speed.', 'fluid', units='velocity', exclusiveMinimum=0),
+        'E0': P('number', 'Unused legacy export label; EOS energy comes from rho0, gamma and c_s.', 'legacy', readOnly=True, deprecated=True),
+        'nIters': P('integer', 'Initial support/density relaxation iterations.', 'sampling', minimum=1),
+        'stepsPerCrossing': P('integer', 'Steps used to derive dt when simulation.dt is null.', 'time', minimum=1),
+    },
+    simulationParameters={'dim': P('integer', 'Dimension supported by this initial-condition sampler.', 'domain', choices=(1,))},
+    variants={},
     params=dict(
         COMPRESSIBLE_PARAMS,
         A=1e-6,

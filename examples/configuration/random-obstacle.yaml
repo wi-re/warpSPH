@@ -1,0 +1,18 @@
+schemaVersion: 1
+case: randomFlow
+variant: obstacle
+simulation:
+  nx: 64
+  tLimit: 1.0
+  device: cuda
+params:
+  inviscid: false
+  nu: 0.01
+  seed: 123
+  obstacleShape: circle
+  obstacleSize: 0.25
+  obstacleOffset: [0.0, 0.0]
+solver:
+  scheme: deltaSPH
+  diffusionParams:
+    densityDelta: 0.1

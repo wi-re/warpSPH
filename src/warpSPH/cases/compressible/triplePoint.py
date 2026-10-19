@@ -30,6 +30,9 @@ from .common import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            configureCompressible, paramExtraData)
 from ..common.plotting import Field, particlePlot
 
+from ..common.parameters import COMPRESSIBLE_CASE_PARAMETERS, COMPRESSIBLE_SCHEMES, SPH_SCHEMES
+from ...runner.parameters import Parameter as P
+
 __all__ = ['triplePointCase', 'TRIPLE_POINT_FIELDS']
 
 
@@ -96,6 +99,12 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
                 .max().detach().cpu().item())
 
 
+def validateConfiguration(spec):
+    p = spec.params
+    if p['equalMass'] and (abs(p['rho_I'] / p['rho_II'] - 8) > 1e-10 or abs(p['rho_III'] / p['rho_II'] - 8) > 1e-10):
+        raise ValueError('params.equalMass: this recipe requires rho_I = rho_III = 8 rho_II; choose equalMass=false for other states')
+
+
 triplePointCase = registerCase(Case(
     name='triplePoint',
     scheme='CRKSPH',
@@ -119,6 +128,19 @@ triplePointCase = registerCase(Case(
         plotInterval=1,
         storeInterval=500,
     ),
+    supportedSchemes=COMPRESSIBLE_SCHEMES,
+    parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
+        'equalMass': P('boolean', 'Use the 8:1 density-contrast equal-mass sampling recipe.', 'sampling'),
+        'splitX': P('number', 'Streamwise initial discontinuity position.', 'initial', units='length', exclusiveMinimum=0, exclusiveMaximum=7),
+        'splitY': P('number', 'Absolute transverse interface position.', 'initial', units='length', exclusiveMinimum=0, exclusiveMaximum=3),
+        **{f'{prefix}_{region}': P('number', f'Region {region} initial {label}.', 'initial', units=label, exclusiveMinimum=0)
+           for region in ('I', 'II', 'III') for prefix, label in (('rho', 'density'), ('p', 'pressure'))},
+        'aspect': P('number', 'Unused legacy label; the sampler uses the fixed 14 by 6 domain.', 'legacy', readOnly=True, deprecated=True),
+        'band': P('integer', 'Unused legacy label; this periodic sampler does not construct buffer bands.', 'legacy', readOnly=True, deprecated=True),
+    },
+    simulationParameters={'dim': P('integer', 'The triple-point sampler is two-dimensional.', 'domain', choices=(2,)), 'L': P('number', 'The triple-point sampler constructs its fixed domain independently of L.', 'domain', readOnly=True, deprecated=True)},
+    variants={},
+    validateConfiguration=validateConfiguration,
     params=dict(
         COMPRESSIBLE_PARAMS,
         gamma=1.4,

@@ -29,6 +29,10 @@ from ..common.weaklyCompressible import (OBSTACLE_PARAMS, VELOCITY_DENSITY_FIELD
                                  paramExtraData, paramShapeSdf, setupTimestep,
                                  weaklyCompressibleDiagnostics)
 
+from ..common.parameters import WEAKLY_COMPRESSIBLE_PARAMETERS, NOISE_PARAMETERS, obstacleParameters
+from ..common.weaklyCompressible import SHAPE_PRESETS
+from ...runner.parameters import Parameter as P
+
 __all__ = ['randomFlowCase', 'noiseVelocities', 'BOUNDED_BAND']
 
 #: Particle layers of wall `--bounded` gets when `--band` is left at its
@@ -137,6 +141,19 @@ randomFlowCase = registerCase(Case(
         L=2.0,
         tLimit=10.0,
     ),
+    supportedSchemes=('deltaSPH', 'sun2017DeltaSPH', 'artificialCompressible'),
+    parameterDefinitions={
+        **WEAKLY_COMPRESSIBLE_PARAMETERS, **NOISE_PARAMETERS, **obstacleParameters(SHAPE_PRESETS),
+        'bounded': P('boolean', 'Add the surrounding wall region.', 'boundary'),
+        'obstacle': P('boolean', 'Add the configured interior obstacle.', 'obstacle'),
+        'band': P('integer', 'Wall layers; zero automatically selects five when bounded.', 'boundary', minimum=0),
+        'bandWidth': P('number', 'Inverse relative surface-detection bandwidth.', 'surface', exclusiveMinimum=0),
+    },
+    simulationParameters={'dim': P('integer', 'The noise-field sampler is two-dimensional.', 'domain', choices=(2,))},
+    variants={
+        'bounded': {'params': {'bounded': True, 'band': BOUNDED_BAND}},
+        'obstacle': {'params': {'obstacle': True}},
+    },
     params=dict(
         WEAKLY_COMPRESSIBLE_PARAMS,
         targetDt=0.00025,

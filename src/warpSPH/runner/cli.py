@@ -6,13 +6,17 @@ import sys
 from typing import List, Optional
 
 from .case import Case
-from .caseSpec import buildArgumentParser, specFromArgs
+from .caseSpec import buildArgumentParser, specFromArgs, _readMapping, CaseSpec
+from .configuration import (RunConfiguration, configurationSchema, parameterReference,
+                            resolvedConfiguration, parameterApplies, _write)
+from .runner import prepareContext
+from dataclasses import fields
 from .runner import RunResult, run
 
 __all__ = ['caseMain']
 
 
-def caseMain(case: Case, argv: Optional[List[str]] = None) -> RunResult:
+def caseMain(case: Case, argv: Optional[List[str]] = None) -> Optional[RunResult]:
     """Parse `argv` against `case`'s knobs and run it.
 
     Note that ``--precision`` can only take effect when the process was
@@ -34,9 +38,40 @@ def caseMain(case: Case, argv: Optional[List[str]] = None) -> RunResult:
         description=case.description or f'Run the {case.name} case.',
         caseParams=case.params,
         defaults=defaults,
+        parameterDefinitions=case.parameterDefinitions,
     )
     args = parser.parse_args(argv)
-    spec = specFromArgs(args, caseParams=case.params, defaults=defaults)
+    raw = _readMapping(args.config) if args.config else None
+    if raw is not None and 'schemaVersion' in raw:
+        document = RunConfiguration.fromDict(raw)
+        if document.case != case.name:
+            raise ValueError(f'configuration.case: expected {case.name!r}, got {document.case!r}')
+        known = {f.name for f in fields(CaseSpec)}
+        metadata = {'config', 'saveConfig', 'describeConfig', 'parameterReference', 'checkConfig', 'saveResolvedConfig'}
+        for name, value in vars(args).items():
+            if value is None or name in metadata:
+                continue
+            if name == 'scheme':
+                document.solver['scheme'] = value
+            elif name in known:
+                document.simulation[name] = value
+            else:
+                document.params[name] = value
+        spec = document.resolve(case)
+        if args.saveConfig:
+            spec.save(args.saveConfig)
+    else:
+        spec = specFromArgs(args, caseParams=case.params, defaults=defaults)
+
+    if args.describeConfig:
+        _write(args.describeConfig, configurationSchema(case, spec.scheme))
+    if args.parameterReference:
+        from pathlib import Path
+        target = Path(args.parameterReference)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(parameterReference(case, spec.scheme))
+    if args.describeConfig or args.parameterReference:
+        return None
 
     from warpSPHBootstrap import activePrecision, bootstrap
     active = activePrecision()
@@ -48,4 +83,29 @@ def caseMain(case: Case, argv: Optional[List[str]] = None) -> RunResult:
         spec = spec.merged(precision=active)
     bootstrap(precision=spec.precision, verbose=spec.verbose)
 
-    return run(case, spec)
+    if args.checkConfig:
+        if spec.configuration is None:
+            # Apply the same typed validation to --checkConfig on a legacy file.
+            simulation = {k: v for k, v in spec.toDict().items()
+                          if k not in ('params', 'scheme', 'schemeOverrides', 'configuration')}
+            params = dict(spec.params)
+            explicit = set((raw or {}).get('params', {}))
+            explicit.update(k for k, value in vars(args).items() if value is not None)
+            explicit.update(k for k in (raw or {}) if k in case.params)
+            for name, descriptor in case.parameterDefinitions.items():
+                inactive = not parameterApplies(descriptor, spec)
+                inactive = inactive or (descriptor.schemes and spec.scheme not in descriptor.schemes)
+                derivedDefault = descriptor.derivation and name not in explicit
+                if (inactive or derivedDefault) and params.get(name) == case.params.get(name):
+                    params.pop(name, None)
+            spec = RunConfiguration(case.name, simulation=simulation, params=params,
+                                    solver={'scheme': spec.scheme, **spec.schemeOverrides}).resolve(case)
+        ctx = prepareContext(case, spec)
+        if args.saveResolvedConfig:
+            _write(args.saveResolvedConfig, resolvedConfiguration(ctx))
+        print(f'Configuration valid: {case.name} / {spec.scheme} (no particles sampled or steps run).')
+        return None
+    result = run(case, spec)
+    if args.saveResolvedConfig:
+        _write(args.saveResolvedConfig, resolvedConfiguration(result.ctx))
+    return result

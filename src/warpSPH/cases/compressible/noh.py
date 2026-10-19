@@ -17,6 +17,9 @@ from .common import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            paramExtraData)
 from ..common.plotting import ProfileAxis, profilePlot
 
+from ..common.parameters import COMPRESSIBLE_CASE_PARAMETERS, COMPRESSIBLE_SCHEMES, SPH_SCHEMES
+from ...runner.parameters import Parameter as P
+
 __all__ = ['nohCase', 'shockState', 'drawNoh']
 
 
@@ -66,6 +69,10 @@ def extraData(ctx: RunContext, state) -> Dict[str, float]:
     return dict(paramExtraData(ctx, state), rho_s=rhoShock, P_s=pressureShock)
 
 
+def deriveConfiguration(spec):
+    return {'v_s': (spec.params['gamma'] - 1) / 2}
+
+
 nohCase = registerCase(Case(
     name='noh',
     scheme='CRKSPH',
@@ -89,6 +96,14 @@ nohCase = registerCase(Case(
         plotInterval=25,
         storeInterval=500,
     ),
+    supportedSchemes=COMPRESSIBLE_SCHEMES,
+    parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
+        'v_s': P('number', 'Reference shock-front propagation speed.', 'reference', units='velocity', exclusiveMinimum=0,
+                 readOnly=True, derivation='(params.gamma - 1) / 2 for the unit inflow speed'),
+    },
+    simulationParameters={'dim': P('integer', 'Dimension supported by this initial-condition sampler.', 'domain', choices=(1,))},
+    variants={},
+    deriveParameters=deriveConfiguration,
     params=dict(
         COMPRESSIBLE_PARAMS,
         v_s=1 / 3,

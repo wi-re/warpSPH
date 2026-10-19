@@ -1,0 +1,22 @@
+# Physical variant, numerical settings and execution/output have separate homes.
+schemaVersion: 1
+case: sod
+variant: classic
+simulation:
+  nx: 400
+  tLimit: 0.15
+  kernel: B7
+  device: cuda
+  precision: float32
+  plot: false
+  store: false
+params:
+  left_rho: 1.0
+  left_pressure: 1.0
+  right_rho: 0.125
+  right_pressure: 0.1
+solver:
+  scheme: CompSPH
+  diffusionParams:
+    K: 1.0
+    thermalConductivity: 0.5

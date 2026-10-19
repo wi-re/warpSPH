@@ -20,6 +20,9 @@ from .common import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            paramExtraData)
 from ..common.plotting import Field, particlePlot
 
+from ..common.parameters import COMPRESSIBLE_CASE_PARAMETERS, COMPRESSIBLE_SCHEMES, SPH_SCHEMES
+from ...runner.parameters import Parameter as P
+
 __all__ = ['yeeVortexCase', 'YEE_FIELDS']
 
 
@@ -68,6 +71,10 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     return compressibleDiagnostics(ctx, state)
 
 
+def deriveConfiguration(spec):
+    return {'bufferRings': 0} if spec.scheme in ('MFM', 'MFV') else {}
+
+
 yeeVortexCase = registerCase(Case(
     name='yee',
     scheme='CRKSPH',
@@ -88,6 +95,20 @@ yeeVortexCase = registerCase(Case(
         plotInterval=1,
         storeInterval=500,
     ),
+    supportedSchemes=COMPRESSIBLE_SCHEMES,
+    parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
+        'nr': P('integer', 'Radial shell count.', 'sampling', minimum=1),
+        'bufferRings': P('integer', 'Fixed outer buffer rings for SPH; MFM/MFV use zero.', 'boundary', minimum=0,
+                         derivation='zero for MFM/MFV; configurable for SPH'),
+        'xc': P('number', 'Vortex centre x coordinate.', 'initial', units='length'),
+        'yc': P('number', 'Vortex centre y coordinate.', 'initial', units='length'),
+        'beta': P('number', 'Signed vortex strength.', 'initial'),
+        'P_infty': P('number', 'Far-field pressure.', 'initial', units='pressure', exclusiveMinimum=0),
+        'rho_infty': P('number', 'Far-field density.', 'initial', units='density', exclusiveMinimum=0),
+    },
+    simulationParameters={'dim': P('integer', 'Dimension supported by this initial-condition sampler.', 'domain', choices=(2,))},
+    variants={},
+    deriveParameters=deriveConfiguration,
     params=dict(
         COMPRESSIBLE_PARAMS,
         gamma=1.4,

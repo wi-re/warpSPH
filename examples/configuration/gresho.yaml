@@ -1,0 +1,11 @@
+schemaVersion: 1
+case: gresho
+variant: smoothed
+simulation:
+  nx: 128
+  tLimit: 3.0
+  device: cuda
+solver:
+  scheme: CRKSPH
+  diffusionParams:
+    K: 1.0

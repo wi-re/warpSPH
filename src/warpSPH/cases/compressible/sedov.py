@@ -23,6 +23,9 @@ from .common import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            paramExtraData)
 from ..common.plotting import ProfileAxis, profilePlot
 
+from ..common.parameters import COMPRESSIBLE_CASE_PARAMETERS, COMPRESSIBLE_SCHEMES, SPH_SCHEMES
+from ...runner.parameters import Parameter as P
+
 __all__ = ['sedovCase', 'sedovSolution', 'goalTime', 'drawSedov']
 
 
@@ -145,6 +148,14 @@ sedovCase = registerCase(Case(
         plotInterval=25,
         storeInterval=500,
     ),
+    supportedSchemes=COMPRESSIBLE_SCHEMES,
+    parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
+        'E0': P('number', 'Deposited blast energy.', 'initial', units='energy', exclusiveMinimum=0),
+        'goalRadius': P('number', 'Shock radius that determines the stop time.', 'time', units='length', exclusiveMinimum=0),
+        'initialization': P('string', 'Spatial deposition of initial blast energy.', 'initial', choices=('singular', 'hat', 'quadrant')),
+    },
+    simulationParameters={'tLimit': P('number', 'Run duration is derived from goalRadius and the Sedov solution during sampling.', 'time', readOnly=True, derivation='params.goalRadius and the Sedov solution', exclusiveMinimum=0)},
+    variants={'singular': {'params': {'initialization': 'singular'}}, 'quadrant': {'params': {'initialization': 'quadrant'}}},
     params=dict(
         COMPRESSIBLE_PARAMS,
         E0=1.0,

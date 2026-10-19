@@ -384,6 +384,15 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     return d
 
 
+from ..common.parameters import WEAKLY_COMPRESSIBLE_PARAMETERS
+from ...runner.parameters import Parameter as P
+
+
+def validateConfiguration(spec):
+    if spec.params.get('machTarget') is not None and spec.params.get('referenceVelocity') is None:
+        raise ValueError('params.referenceVelocity: required when params.machTarget is set')
+
+
 tgvWeaklyCompressibleCase = registerCase(Case(
     name='tgv-wc',
     scheme='deltaSPH',
@@ -403,6 +412,29 @@ tgvWeaklyCompressibleCase = registerCase(Case(
         L=2 * np.pi,
         tLimit=2.0,
     ),
+    validateConfiguration=validateConfiguration,
+    supportedSchemes=('deltaSPH', 'sun2017DeltaSPH', 'artificialCompressible'),
+    simulationParameters={
+        'dim': P('integer', 'This Taylor-Green initial field is two-dimensional.', choices=(2,)),
+        'periodic': P('boolean', 'The Taylor-Green validation box is periodic.', choices=(True,)),
+    },
+    parameterDefinitions={
+        **WEAKLY_COMPRESSIBLE_PARAMETERS,
+        'k': P('number', 'Twice the spatial wave number used by the initial field.', 'initial', exclusiveMinimum=0),
+        'phase': P('number', 'Initial field phase; null uses the even-k centring rule.', 'initial', units='radian', nullable=True),
+        'uMag': P('number', 'Initial peak velocity scale.', 'initial', units='velocity', exclusiveMinimum=0),
+        'shuffleIters': P('integer', 'Initial particle relaxation iterations; zero skips relaxation.', 'sampling', minimum=0),
+        'jitter': P('number', 'Jitter for initial particle relaxation.', 'sampling', minimum=0),
+        'shifting': P('boolean', 'Enable particle shifting; null keeps the solver default.', 'shifting', nullable=True),
+        'shuffleEq7': P('boolean', 'Eq. 7 strength during initial relaxation only; null inherits the solver.', 'sampling', nullable=True),
+        'initialPressure': P('boolean', 'Start from the analytical pressure field.', 'initial', schemes=('deltaSPH', 'sun2017DeltaSPH')),
+        'machTarget': P('number', 'Target Mach number for sound-speed selection; null uses targetDt.', 'fluid', exclusiveMinimum=0, nullable=True, schemes=('deltaSPH', 'sun2017DeltaSPH')),
+        'referenceVelocity': P('number', 'Velocity used with machTarget to select sound speed.', 'fluid', units='velocity', exclusiveMinimum=0, nullable=True, schemes=('deltaSPH', 'sun2017DeltaSPH')),
+    },
+    variants={
+        'analytic-pressure': {'params': {'initialPressure': True, 'machTarget': 0.1, 'referenceVelocity': 1.0}},
+        'no-shifting': {'params': {'shifting': False}},
+    },
     params=dict(
         WEAKLY_COMPRESSIBLE_PARAMS,
         targetDt=0.001,
