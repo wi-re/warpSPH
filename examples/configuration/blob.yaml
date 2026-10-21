@@ -1,0 +1,17 @@
+schemaVersion: 1
+case: blob
+simulation:
+  nx: 256
+  plot: true
+  video: true
+  progress: true
+  execution: eager
+  plotInterval: 100
+solver:
+  scheme: CRKSPH
+  crkDensityPolicy: sameMaterial
+  crkEvolution: spheral
+  crkEnergyPartition: native
+  crkEnergyPredictor: raw
+params:
+  massMatch: true

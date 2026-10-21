@@ -18,7 +18,7 @@ from ...modules.compSPH.pairWork import accumulateStage, startStage, stageRebuil
 from ...modules.compSPH.supportGrid import solvesOnGrid
 from ...utils.pairList import stagePairList
 from ...modules.crk import CRKStage, computeCRKAccel, computeCRKdudt, crkFactors
-from ...modules.eos import idealGasEOS
+from ...modules.eos import refreshEOS
 from ...modules.momentum import computeMomentumConsistent
 from ...modules.reconstruction import requireRawPairVelocity
 from ...modules.shockCapturing import computeViscositySwitchTerms, updateViscositySwitch
@@ -118,14 +118,17 @@ def crkSPH_step(
         currentState.supports = clampSupportsToVolume(currentState, config, adjacency, wall)
 
     with record_function("[warpSPH] - [crkSPH - 04] CRK factors"):
-        apparentVolume, currentState.densities, crkState = crkFactors(currentState, config.domain, config.kernel, adjacency = adjacency)
+        apparentVolume, currentState.densities, crkState = crkFactors(currentState, config.domain, config.kernel, adjacency=adjacency,
+            densityPolicy=schemeConfig.crkDensityPolicy, volumes=currentState.crkVolumes,
+            computeDensity=schemeConfig.crkEvolution == 'summation')
 
     if wall is not None:
         with record_function("[warpSPH] - [crkSPH - 05] wall closure"):
             # wall rows enter the CRK moment sums like fluid rows; their support and mass change here, so the factors (and
             # the fluid density) are redone
             wall.apply(currentState, config, schemeConfig, adjacency, latticeSupport=True)
-            apparentVolume, currentState.densities, crkState = crkFactors(currentState, config.domain, config.kernel, adjacency = adjacency)
+            apparentVolume, currentState.densities, crkState = crkFactors(currentState, config.domain, config.kernel, adjacency=adjacency,
+                densityPolicy=schemeConfig.crkDensityPolicy)
             wall.apply(currentState, config, schemeConfig, adjacency, latticeSupport=True)
 
     if currentState.divergence is None:
@@ -144,13 +147,7 @@ def crkSPH_step(
         enforceDirichlet(currentSystem, t, dt, config, schemeConfig)
 
     with record_function("[warpSPH] - [crkSPH - 08] EOS"):
-        currentState.entropies, _, currentState.pressures, currentState.soundspeeds = idealGasEOS(
-            A = None,
-            u = currentState.internalEnergies,
-            P = None,
-            rho = currentState.densities,
-            gamma = schemeConfig.gamma,
-        )
+        refreshEOS(currentState, schemeConfig)
 
     with record_function("[warpSPH] - [crkSPH - 09] velocity gradient"):
         velocityGradient = warpOperation(
@@ -179,7 +176,9 @@ def crkSPH_step(
             SupportScheme.SuperSymmetric,
             adjacency)
 
-    stage = CRKStage(volumes = apparentVolume, crkState = crkState, velocityGradient = velocityGradient,
+    from ...modules.crk.viscosityControl import viscosityGradient
+    qGradient = viscosityGradient(currentSystem, velocityGradient, schemeConfig.crkViscosityGradient)
+    stage = CRKStage(volumes = apparentVolume, crkState = crkState, velocityGradient = qGradient,
                      viscosityParams = crkViscosityParams)
 
     with record_function("[warpSPH] - [crkSPH - 12] pressure / viscosity acceleration"):
@@ -220,6 +219,8 @@ def crkSPH_step(
             dEdt = dEdt,
             passive = torch.zeros(currentState.densities.shape, device=currentState.densities.device, dtype=torch.bool)
         )
+        if currentState.crkVolumes is not None:
+            update.dVdt = -currentState.masses / currentState.densities.square() * drhodt
         enforceUpdates(update, currentSystem, dt, t, config, schemeConfig)
         if wall is not None:
             wall.finishUpdate(update)
@@ -235,7 +236,11 @@ def crkSPH_step(
         currentSystem.pairWork.latest = adjacency
     if schemeConfig.compatibleEnergy and currentSystem.pairWork is not None:
         with record_function("[warpSPH] - [crkSPH - 20] pair work -> running sum"):
-            accumulateStage(currentSystem.pairWork, stageIndex, adjacency, currentState, schemeConfig.energyScheme)
+            from ...modules.crk.energyControl import enabled as controlledEnergy, retain
+            if controlledEnergy(schemeConfig):
+                retain(currentSystem,currentState,update,adjacency,stageIndex,schemeConfig)
+            else:
+                accumulateStage(currentSystem.pairWork, stageIndex, adjacency, currentState, schemeConfig.energyScheme)
             # the pair arrays now live in the running sum: do not keep one set per stage on the returned state
             currentState.ap_ij = currentState.av_ij = currentState.f_ij = None
 

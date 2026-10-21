@@ -15,6 +15,7 @@ CompressibleSystemUpdate` instead (its commented-out draft below is dead).
 
 from warpSPH.configurations.compute import neighborSearchOptions
 
+from .identity import ParticleIdentityState
 from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state
 from warpSPHIntegrators.state.fields import update_component, update_position
 from dataclasses import dataclass
@@ -29,7 +30,7 @@ __all__ = ['CompSPHState', 'CompSPHSystem']
 
 
 @dataclass
-class CompSPHState(BaseState):
+class CompSPHState(ParticleIdentityState):
     positions : torch.Tensor = integrated('dxdt', tags=('position',))
     velocities: torch.Tensor = integrated('dvdt', tags=('velocity',))
     supports : torch.Tensor = constant(tags=('particle_support',))
@@ -42,6 +43,9 @@ class CompSPHState(BaseState):
     UIDcounter : int = constant(tags=('particle_UIDcounter',))
 
     internalEnergies : torch.Tensor = integrated('dudt', tags=('internalEnergy',))
+    crkMassDensities: Optional[torch.Tensor] = integrated('drhodt', tags=('crk_density',), default=None)
+    crkVolumes: Optional[torch.Tensor] = integrated('dVdt', tags=('crk_volume',), default=None)
+    crkQGradient: Optional[torch.Tensor] = constant(tags=('crk_Q_gradient',), default=None)
     totalEnergies : torch.Tensor = constant(tags=('energy',), default=None)
     entropies : torch.Tensor = constant(tags=('entropy',), default=None)
     pressures : torch.Tensor = constant(tags=('pressure',), default=None)
@@ -108,7 +112,15 @@ class CompSPHSystem(BaseIntegrationSystem):
     rerunRequest: Optional[torch.Tensor] = None
 
     def initialize(self, dt, *args, stageWeights=None, rerun=None, **kwargs):
+        schemeConfig = kwargs.get('schemeConfig')
+        if getattr(schemeConfig, 'crkEvolution', 'summation') in ('spheral', 'paper') and rerun is None:
+            from ..modules.crk.evolution import prepareStep
+            prepareStep(self, kwargs['config'], schemeConfig)
+        elif getattr(schemeConfig, 'crkEvolution', 'summation') not in ('spheral', 'paper'):
+            self.state.crkMassDensities = self.state.crkVolumes = None
         self.pairWork = beginPairWork(stageWeights, rerun)
+        if getattr(schemeConfig, 'crkViscosityGradient', 'current') == 'cached':
+            self.pairWork.crkQGradient = self.state.crkQGradient
         if self.supportGrid is None:
             self.supportGrid = SupportGrid()
         if self.listGrid is None:
@@ -141,16 +153,23 @@ class CompSPHSystem(BaseIntegrationSystem):
 
     def apply_quantity_update(self, update, spec: ComponentUpdateSpec, **kwargs):
         updatedsystem = update_component(self, update, spec, 'internalEnergy', 'internalEnergy_derivative')
+        if self.state.crkMassDensities is not None:
+            from ..modules.crk.evolution import updateContinuityState
+            updateContinuityState(self, update, spec, kwargs['config'],kwargs.get('schemeConfig'))
         # updatedsystem = update_component(updatedsystem, update, spec, 'totalEnergy', 'totalEnergy_derivative')
         # updatedsystem = update_component(updatedsystem, update, spec, 'density', 'density_derivative')
         return updatedsystem
 
     def apply_state_update(self, update, spec: ComponentUpdateSpec, **kwargs):
         # Note: DO NOT advance self.t here. Time is managed by the integrator.
+        from ..modules.crk.energyControl import energyBeforeUpdate
+        energy = energyBeforeUpdate(self, update, spec, kwargs.get('schemeConfig'))
         position_spec = PositionUpdateSpec(derivative_dt=spec.derivative_dt, blend=spec.blend)
         self.apply_position_update(update, position_spec, **kwargs)
         self.apply_velocity_update(update, spec, **kwargs)
         self.apply_quantity_update(update, spec, **kwargs)
+        if energy is not None:
+            self.state.internalEnergies = energy
         return self
     
     def captureAborted(self):
@@ -251,7 +270,8 @@ class CompSPHSystem(BaseIntegrationSystem):
                     self.rerunRequest = RerunRequest(halfVelocity=None, conservative=True, rebuildList=any(values[len(inStep):-1]))
                     return self
                 rebuildForNextStep = rebuildNeeded(self.listGrid, values[-1])
-        if schemeConfig.compatibleEnergy:
+        from ..modules.crk.energyControl import enabled as controlledEnergy
+        if schemeConfig.compatibleEnergy and not controlledEnergy(schemeConfig):
             with record_function("[warpSPH] - [compSPH finalize - 01] compatible energy"):
                 delta_u, rerun = energyIncrement(self.pairWork, initialState.state, updateValues, weights, dt)
             if rerun is not None:
@@ -260,7 +280,10 @@ class CompSPHSystem(BaseIntegrationSystem):
                 return self
             self.state.internalEnergies = initialState.state.internalEnergies + delta_u * dt
         if self.supportGrid is not None and recording is None:
-            growIfOutgrown(self.supportGrid)
+            # Material contacts expose support-radius clipping. Graph replays
+            # grow on the first binding flag; use that same schedule eagerly
+            # so the two paths do not evolve with different clipped supports.
+            growIfOutgrown(self.supportGrid, immediate=schemeConfig.materials is not None)
 
         # solid wall rows (modules/compressibleWall): the state of the last stage, not an
         # integrated one -- their pair work went to the fluid (f_ij = 1), and their mass
@@ -270,7 +293,12 @@ class CompSPHSystem(BaseIntegrationSystem):
         self.state.masses.copy_(lastState.masses)
 
         self.state.supports.copy_(lastState.supports)
-        self.state.densities.copy_(lastState.densities)
+        if getattr(schemeConfig, 'crkViscosityGradient', 'current') == 'cached':
+            self.state.crkQGradient = lastState.crkQGradient
+        if self.state.crkMassDensities is None:
+            self.state.densities.copy_(lastState.densities)
+        else:
+            self.state.densities = self.state.crkMassDensities
 
         # Compressible system specific attributes (internal eneryg is integrated)
         self.state.totalEnergies.copy_(lastState.totalEnergies)
@@ -282,6 +310,9 @@ class CompSPHSystem(BaseIntegrationSystem):
         self.state.divergence.copy_(lastState.divergence)
         self.state.alpha0s.copy_(lastState.alpha0s)
         self.state.alphas.copy_(lastState.alphas)
+        if getattr(schemeConfig, 'materials', None) is not None:
+            from ..modules.eos import refreshEOS
+            refreshEOS(self.state, schemeConfig)
         from ..modules.shockCapturing.wrapper import advanceViscositySwitchStep  # (circular at import time)
         advanceViscositySwitchStep(self, initialState, returnValues, schemeConfig, config)
 
@@ -301,4 +332,3 @@ class CompSPHSystem(BaseIntegrationSystem):
         updateValues[-1].dudt = (self.state.internalEnergies - initialState.state.internalEnergies) /dt
 
         return super().finalize(initialState, dt, returnValues, updateValues, weights, config, schemeConfig, *args, **kwargs)
-    

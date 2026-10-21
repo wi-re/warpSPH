@@ -1,6 +1,9 @@
 """The CRK viscosity limiter's (eta_crit, eta_fold) default to (1/n_h, 0.2/n_h) in r/H (one and 0.2 nominal
-particle spacings; Frontiere 2017 Eqs. 51-53, Spheral etaCritFrac/nPerh), resolved per step from `n_h` by
+particle spacings; current Spheral etaCritFrac/nPerh and etaFoldFrac/nPerh), resolved per step from `n_h` by
 `resolveCRKLimiter`; an explicit positive value overrides (CRKSPH_LIMITER_PLAN O2)."""
+
+# The literal paper fixes eta_fold=0.2 in spline smoothing-length units;
+# that is identical to this spacing-based convention only for nPerh=1.
 
 import pytest
 

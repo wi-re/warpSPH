@@ -54,6 +54,10 @@ CASE_MODULES = (
     'compressible.shearBox',
     'compressible.kelvinHelmholtz',
     'compressible.rayleighTaylor',
+    'compressible.richtmyerMeshkov',
+    'compressible.twoGasSod',
+    'compressible.shockBubble',
+    'compressible.blob',
     'compressible.triplePoint',
     # compressible with solid walls
     'compressibleWalls.closedBox',

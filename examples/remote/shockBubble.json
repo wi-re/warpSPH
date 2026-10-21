@@ -1,0 +1,10 @@
+{
+  "preset": "shockBubble",
+  "scheme": "CRKSPH",
+  "nx": 200,
+  "duration": 0.3,
+  "record": true,
+  "exportInterval": 0.005,
+  "measurements": true,
+  "diagnosticInterval": 0.005
+}

@@ -27,6 +27,8 @@ def _blocker(ctx, runningState, spec) -> Optional[str]:
     """Why this run cannot replay the step from a graph, or None."""
     from ..compressibleWall.wall import beginCompressibleWall
     from ..shockCapturing.wrapper import STEP_HOOKS
+    if getattr(ctx.schemeConfig, 'crkEvolution', 'summation') in ('spheral', 'paper'):
+        return 'experimental CRK evolution uses an eager pre-step density reset'
     if not runningState.state.positions.is_cuda:
         return 'the particles are not on a CUDA device'
     if getattr(spec, 'store', False):

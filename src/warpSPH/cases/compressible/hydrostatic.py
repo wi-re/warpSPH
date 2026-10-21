@@ -14,6 +14,7 @@ from typing import Dict
 import torch
 
 from ...caseUtils import buildHydrostaticInitialState
+from ...caseUtils.compressible.materialValidation import hostScalars
 from ...runner import Case, RunContext, caseMain, registerCase
 from .common import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            compressibleDiagnostics, configureCompressible,
@@ -27,9 +28,16 @@ __all__ = ['hydrostaticCase', 'HYDROSTATIC_FIELDS']
 
 
 def buildSystem(ctx: RunContext):
-    return buildHydrostaticInitialState(
+    system = buildHydrostaticInitialState(
         ctx.param('rho_low'), ctx.param('rho_high'), ctx.spec.nx,
-        ctx.config, ctx.schemeConfig, ctx.SimulationState, ctx.SimulationSystem)
+        ctx.config, ctx.schemeConfig, ctx.SimulationState, ctx.SimulationSystem,
+        shape=ctx.param('shape'), boost=ctx.param('boost'))
+    ctx.scratch['contactPositions'] = system.state.positions.clone()
+    ctx.scratch['contactEnergy'] = system.state.totalEnergies.sum().detach()
+    ctx.scratch['contactDensity'] = system.state.masses / (ctx.spec.L/ctx.spec.nx)**ctx.spec.dim
+    ctx.velocityScale = 1.
+    ctx.velocityScaleSource = 'unit contact sound-speed scale'
+    return system
 
 
 #: The two panels, as `particlePlot`/`buildFieldPlotter` want them -- named
@@ -46,9 +54,21 @@ setupPlot, updatePlot = particlePlot(HYDROSTATIC_FIELDS)
 def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     # maxVelocity is the actual figure of merit: it is exactly zero in the
     # continuum solution, so whatever it reaches is discretisation error.
-    return dict(compressibleDiagnostics(ctx, state),
-                maxVelocity=torch.linalg.norm(state.state.velocities, dim=-1)
-                .max().detach().cpu().item())
+    s = state.state
+    velocity = s.velocities.clone()
+    velocity[:, 0] -= ctx.param('boost')
+    displacement = s.positions - ctx.scratch['contactPositions']
+    displacement[:, 0] -= ctx.param('boost') * state.t
+    span = ctx.config.domain.max - ctx.config.domain.min
+    displacement = torch.remainder(displacement + .5 * span, span) - .5 * span
+    return hostScalars(dict(compressibleDiagnostics(ctx, state),
+                maxVelocity=torch.linalg.vector_norm(s.velocities, dim=-1).max(),
+                maxPeculiarVelocity=torch.linalg.vector_norm(velocity, dim=-1).max(),
+                pressureError=(s.pressures - 1).abs().max(),
+                shapeDisplacement=torch.linalg.vector_norm(displacement, dim=-1).max(),
+                peculiarKineticEnergy=(.5 * s.masses * velocity.square().sum(-1)).sum(),
+                densityRelativeL1=((s.densities-ctx.scratch['contactDensity']).abs()/ctx.scratch['contactDensity']).mean(),
+                relativeEnergyDrift=(s.masses * (s.internalEnergies + .5 * s.velocities.square().sum(-1))).sum() / ctx.scratch['contactEnergy'] - 1))
 
 
 hydrostaticCase = registerCase(Case(
@@ -61,6 +81,7 @@ hydrostaticCase = registerCase(Case(
     setupPlot=setupPlot,
     updatePlot=updatePlot,
     extraData=paramExtraData,
+    extraFields=('internalEnergies', 'supports'),
     defaults=dict(
         COMPRESSIBLE_DEFAULTS,
         caseName='08-hydrostatic',
@@ -79,15 +100,26 @@ hydrostaticCase = registerCase(Case(
         'rho_low': P('number', 'Background density.', 'initial', units='density', exclusiveMinimum=0),
         'rho_high': P('number', 'Density of the central square patch.', 'initial', units='density', exclusiveMinimum=0),
         'E0': P('number', 'Unused legacy export label; the sampler determines initial pressure.', 'legacy', readOnly=True, deprecated=True),
+        'shape': P('string', 'Pressure-balanced inclusion geometry.', 'initial', choices=('box', 'ellipse')),
+        'boost': P('number', 'Common x velocity of both gases.', 'initial', units='velocity'),
     },
     simulationParameters={'dim': P('integer', 'Dimension supported by this initial-condition sampler.', 'domain', choices=(2,))},
-    variants={},
+    variants={
+        'literature': {'simulation': {'nx': 100, 'tLimit': 7.}, 'params': {'rho_high': 4., 'gamma': 1.5}},
+        'twoGas': {'params': {'rho_high': 4.}, 'solver': {'materials': [
+            {'name': 'background', 'eos': {'type': 'idealGas', 'gamma': 1.4}},
+            {'name': 'inclusion', 'eos': {'type': 'idealGas', 'gamma': 5/3}}]}},
+        'advectedEllipse': {'params': {'rho_high': 4., 'shape': 'ellipse', 'boost': 1.}, 'solver': {'materials': [
+            {'name': 'background', 'eos': {'type': 'idealGas', 'gamma': 1.4}},
+            {'name': 'inclusion', 'eos': {'type': 'idealGas', 'gamma': 5/3}}]}},
+    },
     params=dict(
         COMPRESSIBLE_PARAMS,
         rho_low=1.0,
         rho_high=2.0,
         E0=1.0,
         markerSize=4,
+        shape='box', boost=0.,
     ),
 ))
 

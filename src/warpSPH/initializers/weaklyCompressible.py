@@ -25,6 +25,7 @@ from ..configurations import *
 from ..systems import *
 from ..rigidBody import *
 from ..regions import *
+from ..systems.identity import initialMaterialIDs, particleBodyIDs
 
 
 def initializeWeaklyCompressibleState(regions, config, verbose = True):
@@ -78,6 +79,8 @@ def initializeWeaklyCompressibleState(regions, config, verbose = True):
     soundspeeds = []
     kinds = []
     materials = []
+    emitters = []
+    bodyIDs = []
 
     particleRegions = []
     for region in regions:
@@ -90,21 +93,25 @@ def initializeWeaklyCompressibleState(regions, config, verbose = True):
             densities.append(getInitialValue(region, region['particles'].positions, 'densities', torch.ones_like(region['particles'].masses) * config['fluid']['rho0']))
             pressures.append(getInitialValue(region, region['particles'].positions, 'pressures', torch.zeros_like(region['particles'].masses)))
             soundspeeds.append(getInitialValue(region, region['particles'].positions, 'soundspeeds', torch.ones_like(region['particles'].masses) * config['fluid']['c_s']))
-    fluidMaterials = 0
-    boundaryMaterials = 0
+    boundaryBody = 0
     
-    for region in particleRegions:
+    from types import SimpleNamespace
+    for source, region in enumerate(particleRegions):
+        materials.append(initialMaterialIDs(SimpleNamespace(initialConditions=region.get('initialConditions')),
+                                             region['particles'].positions))
+        emitters.append(torch.full_like(region['particles'].masses, source, dtype=torch.int32))
         if region['type'] == 'fluid':
             kinds.append(torch.zeros_like(region['particles'].masses, dtype = torch.int32))
-            materials.append(torch.ones_like(region['particles'].masses, dtype = torch.int32) * fluidMaterials)
-            fluidMaterials += 1
+            bodyIDs.append(torch.full_like(region['particles'].masses, -1, dtype=torch.int32))
         elif region['type'] == 'boundary':
             kinds.append(torch.ones_like(region['particles'].masses, dtype = torch.int32))
-            materials.append(torch.ones_like(region['particles'].masses, dtype = torch.int32)* boundaryMaterials)
-            boundaryMaterials += 1
+            bodyIDs.append(torch.full_like(region['particles'].masses, boundaryBody, dtype=torch.int32))
+            boundaryBody += 1
             
     kinds = torch.cat(kinds, dim = 0)
     materials = torch.cat(materials, dim = 0)
+    emitters = torch.cat(emitters, dim = 0)
+    bodyIDs = torch.cat(bodyIDs, dim = 0)
     positions = torch.cat(positions, dim = 0)
     UIDs = torch.arange(positions.shape[0], device = device, dtype = torch.int64)
 
@@ -128,6 +135,8 @@ def initializeWeaklyCompressibleState(regions, config, verbose = True):
         
         kinds = kinds,
         materials = materials,
+        emitters = emitters,
+        bodyIDs = bodyIDs,
         UIDs = UIDs,
         
         UIDcounter = positions.shape[0],
@@ -179,6 +188,7 @@ def initializeState(regions, config, schemeConfig, SimulationState, verbose = Tr
     uidCounter = 0
 
     states = []
+    sourceIDs = {id(region): i for i, region in enumerate(regions)}
     for ty in (RegionType.Fluid, RegionType.Boundary):
         for ir, region in enumerate([r for r in regions if r.type == ty]):
             positions = region.particles.positions
@@ -194,7 +204,9 @@ def initializeState(regions, config, schemeConfig, SimulationState, verbose = Tr
                 soundspeeds = getInitialValue(region, positions, 'soundspeeds', None),
 
                 kinds = torch.ones_like(region.particles.masses, dtype = torch.int32) * (0 if region.type == RegionType.Fluid else 1),
-                materials = torch.ones_like(region.particles.masses, dtype = torch.int32) * ir,
+                materials = initialMaterialIDs(region, positions),
+                emitters = torch.full_like(region.particles.masses, sourceIDs[id(region)], dtype=torch.int32),
+                bodyIDs = torch.full_like(region.particles.masses, ir if ty == RegionType.Boundary else -1, dtype=torch.int32),
                 UIDs = torch.arange(uidCounter, uidCounter + positions.shape[0], device = positions.device, dtype = torch.int64),
 
                 UIDcounter = uidCounter + positions.shape[0],
@@ -221,6 +233,8 @@ def initializeState(regions, config, schemeConfig, SimulationState, verbose = Tr
 
         kinds = joined('kinds'),
         materials = joined('materials'),
+        emitters = joined('emitters'),
+        bodyIDs = joined('bodyIDs'),
         UIDs = joined('UIDs'),
 
         UIDcounter = uidCounter,
@@ -241,7 +255,7 @@ def initializeSimulation(regions, config, schemeConfig, SimulationSystem, Simula
     # neighborhood, sparseNeighborhood_ = buildNeighborhood(particleState, particleState, config['domain'], verletScale = config['neighborhood']['verletScale'], mode = 'superSymmetric', priorNeighborhood=None)         
     # ghostNeighbors = filterNeighborhoodByKind(particleState, sparseNeighborhood_, which = 'fluidToGhost')
 
-    rigidBodyIDs = torch.unique(particleState.materials[particleState.kinds == 1]).cpu().numpy()
+    rigidBodyIDs = torch.unique(particleBodyIDs(particleState)[particleState.kinds == 1]).cpu().numpy()
     # print(rigidBodyIDs)
     rigidBodies = []
     for id in rigidBodyIDs:
@@ -250,7 +264,7 @@ def initializeSimulation(regions, config, schemeConfig, SimulationSystem, Simula
         if(rigidBody is not None):
             rigidBodies.append(rigidBody)
 
-    # Analytic boundaries: no particles, so no material id appears above; their RigidBody comes from the
+    # Analytic boundaries: no particles, so no body id appears above; their RigidBody comes from the
     # representation. Appended in region order after the particle bodies (a mixed scene keeps both kinds).
     restDensity = schemeConfig.fluid.restDensity if hasattr(schemeConfig, 'fluid') else config.rho0
     boundaryRegions = [r for r in regions if r.type == RegionType.Boundary]

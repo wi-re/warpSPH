@@ -18,7 +18,7 @@ from ...modules.compSPH.operators import computeCompSPHAccel, computeCompSPHdudt
 from ...modules.compSPH.pairWork import accumulateStage, startStage, stageRebuildSlack
 from ...modules.compSPH.supportGrid import solvesOnGrid
 from ...modules.density import computeDensities
-from ...modules.eos import idealGasEOS
+from ...modules.eos import refreshEOS
 from ...modules.momentum import computeMomentumConsistent
 from ...modules.reconstruction import requireRawPairVelocity
 from ...modules.shockCapturing import computeViscositySwitchTerms, updateViscositySwitch
@@ -107,13 +107,7 @@ def compSPH_step(
         enforceDirichlet(currentSystem, t, dt, config, schemeConfig)
 
     with record_function("[warpSPH] - [compSPH - 10] EOS"):
-        currentState.entropies, _, currentState.pressures, currentState.soundspeeds = idealGasEOS(
-            A = None,
-            u = currentState.internalEnergies,
-            P = None,
-            rho = currentState.densities,
-            gamma = schemeConfig.gamma,
-        )
+        refreshEOS(currentState, schemeConfig)
 
     with record_function("[warpSPH] - [compSPH - 11] viscosity-switch terms"):
         currentState.alphas, switchState = computeViscositySwitchTerms(

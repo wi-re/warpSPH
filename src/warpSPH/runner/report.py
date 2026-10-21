@@ -140,6 +140,10 @@ def _fluidDescription(schemeConfig) -> Optional[str]:
         return _joined(*parts)
 
     if hasattr(schemeConfig, 'gamma'):
+        materials = getattr(schemeConfig, 'materials', None)
+        if materials is not None:
+            return 'material EOS table | ' + ', '.join(
+                f'{i}: {m.name} ({m.eos.type}, gamma {m.eos.gamma:.5g})' for i, m in enumerate(materials))
         background = _scalarValue(getattr(schemeConfig, 'backgroundPressure', None))
         return _joined('ideal gas',
                        _number('gamma', schemeConfig.gamma),

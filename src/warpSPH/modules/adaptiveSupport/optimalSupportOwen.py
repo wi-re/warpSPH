@@ -112,8 +112,12 @@ def evaluateOptimalSupportOwen(
         key = (kernel, config.domain.dim, table)
         PsiLUT_fn = PsiLUTs.get(key)
         if PsiLUT_fn is None:
-            PsiLUT_fn = PsiLUTs[key] = computeOwen(
-                kernel, dim = config.domain.dim, nMin = 2.0, nMax = 6.0, nLUT = 2**12, table = table)
+            if table == 'hermiteShell':
+                from .owenHermite import HermiteOwen
+                PsiLUT_fn = PsiLUTs[key] = HermiteOwen(kernel,config.domain.dim)
+            else:
+                PsiLUT_fn = PsiLUTs[key] = computeOwen(
+                    kernel, dim = config.domain.dim, nMin = 2.0, nMax = 6.0, nLUT = 2**12, table = table)
         # particles, domain, kernel, targetNeighbors, PsiLUT_fn, nIter = 16, neighborhood = None, verbose = False,eps = 1e-3, neighborhoodAlgorithm = 'compact'):
         hs = [particles.supports]
         # print(particles)
@@ -161,14 +165,20 @@ def evaluateOptimalSupportOwen(
 
             
             # psi_0, psi_0_H = computePsi_0(particles, kernel_, neighbors.get('noghost'), supportScheme, config)
-            psi_0, psi_0_H = computePsi0Warp(
+            psiFunction = computePsi0Warp
+            psiOptions = {}
+            if getattr(compConfig, 'owenMaterialWeights', False) or table == 'hermiteShell':
+                from .wp_materialPsi import computeMaterialPsi0Warp
+                psiFunction = computeMaterialPsi0Warp
+                psiOptions = dict(weighted=getattr(compConfig,'owenMaterialWeights',False),table=PsiLUT_fn if table=='hermiteShell' else None)
+            psi_0, psi_0_H = psiFunction(
                 particles,
                 operationProperties=OperationProperties(
                     kernel = config.kernel,
                     supportMode = SupportScheme.Gather
                 ),
                 domain = config.domain,
-                adjacency = adjacency_
+                adjacency = adjacency_, **psiOptions
             )
             if verbose:
                 print(f'Psi: {psi_0_H.min()} | {psi_0_H.max()} | {psi_0_H.mean()}')

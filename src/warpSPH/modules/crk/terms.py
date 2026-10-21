@@ -114,14 +114,14 @@ def computeCRKTerms(m_0, m_1, m_2, dm_0dgamma, dm_1dgamma, dm_2dgamma, num_nbrs,
     return A, B, gradA, gradB
 
 
-def crkFactors(queryParticles, domain, kernel, adjacency=None):
+def crkFactors(queryParticles, domain, kernel, adjacency=None, *, densityPolicy='legacy', volumes=None, computeDensity=True):
     """`warpSPHCore.crk.computeCRKFactors` with the terms from the kernel: `(apparentVolume, crkDensity, CRKState)`."""
     from warpSPHCore import CRKState, OperationDirection, OperationProperties, SupportScheme
     from warpSPHCore.crk.crk_density import _computeCRKDensity_stateBackend
     from warpSPHCore.crk.crk_moments import _computeCRKMoments_stateBackend
     from warpSPHCore.crk.crk_volume import _computeCRKVolume_stateBackend
     mode = OperationDirection.AllToAll
-    apparentArea = _computeCRKVolume_stateBackend(
+    apparentArea = volumes if volumes is not None else _computeCRKVolume_stateBackend(
         queryParticles, OperationProperties(kernel=kernel, supportMode=SupportScheme.Gather, operationMode=mode), domain,
         adjacency=adjacency, referenceParticles=None)
     m_0, m_1, m_2, dm_0, dm_1, dm_2, numNeighbors = _computeCRKMoments_stateBackend(
@@ -129,7 +129,13 @@ def crkFactors(queryParticles, domain, kernel, adjacency=None):
         queryVolumes=apparentArea, referenceVolumes=apparentArea, adjacency=adjacency, referenceParticles=None)
     A, B, gradA, gradB = computeCRKTerms(m_0, m_1, m_2, dm_0, dm_1, dm_2, numNeighbors, queryParticles.supports)
     state = CRKState(A=A, B=B, gradA=gradA, gradB=gradB)
-    crkDensity = _computeCRKDensity_stateBackend(
-        queryParticles, OperationProperties(kernel=kernel, supportMode=SupportScheme.Scatter, operationMode=mode), domain,
-        crkState=state, queryVolumes=apparentArea, referenceVolumes=apparentArea, adjacency=adjacency, referenceParticles=None)
+    if not computeDensity:
+        crkDensity = queryParticles.densities
+    elif densityPolicy == 'legacy':
+        crkDensity = _computeCRKDensity_stateBackend(
+            queryParticles, OperationProperties(kernel=kernel, supportMode=SupportScheme.Scatter, operationMode=mode), domain,
+            crkState=state, queryVolumes=apparentArea, referenceVolumes=apparentArea, adjacency=adjacency, referenceParticles=None)
+    else:
+        from .materialDensity import materialDensity
+        crkDensity = materialDensity(queryParticles, domain, kernel, apparentArea, state, adjacency, densityPolicy)
     return apparentArea, crkDensity, state

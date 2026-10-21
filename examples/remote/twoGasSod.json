@@ -1,0 +1,11 @@
+{
+  "preset": "twoGasSod",
+  "scheme": "CRKSPH",
+  "variant": "twoGamma",
+  "nx": 400,
+  "duration": 0.15,
+  "record": true,
+  "exportInterval": 0.005,
+  "measurements": true,
+  "diagnosticInterval": 0.005
+}

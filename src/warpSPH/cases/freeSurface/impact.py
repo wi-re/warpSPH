@@ -341,16 +341,17 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     if fluid.sum() == 0:
         return d
 
-    # `materials` is the region's index in its type's list, assigned by
-    # `initializeState` -- so for the `pair` arrangement (two fluid regions)
-    # it labels the bodies. The `gap` is the nearest particle-to-particle
+    # Passive emitter IDs distinguish the two fluid sources, which share one
+    # physical material. The `gap` is the nearest particle-to-particle
     # distance between them: it starts at the surface gap, closes to ~`dx` at
     # contact, and hovers there afterwards once the bodies have merged, which
     # is exactly the collision signature the case exists to grade.
-    materials = particles.materials[fluid]
-    if materials.unique().numel() == 2:
-        posA = particles.positions[fluid & (particles.materials == 0)]
-        posB = particles.positions[fluid & (particles.materials == 1)]
+    from ...systems.identity import particleEmitters
+    emitters = particleEmitters(particles)
+    sources = emitters[fluid].unique()
+    if sources.numel() == 2:
+        posA = particles.positions[fluid & (emitters == sources[0])]
+        posB = particles.positions[fluid & (emitters == sources[1])]
         d['gap'] = torch.cdist(posA, posB).min().detach().cpu().item()
 
     com0 = ctx.scratch.get('initialCenterOfMass')

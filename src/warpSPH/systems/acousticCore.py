@@ -17,6 +17,7 @@ import torch
 from typing import Optional
 from dataclasses import dataclass
 
+from .identity import ParticleIdentityState
 from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state, tagged
 from warpSPHIntegrators.state.fields import update_component, update_position
 from warpSPHCore import *
@@ -25,7 +26,7 @@ __all__ = ['AcousticCoreState', 'AcousticCoreSystemUpdate', 'AcousticCoreSystem'
 
 
 @dataclass
-class AcousticCoreState(BaseState):
+class AcousticCoreState(ParticleIdentityState):
     positions : torch.Tensor = integrated('dxdt', tags=('position',))
     velocities: torch.Tensor = integrated('dvdt', tags=('velocity',))
     densities : torch.Tensor = integrated('drhodt', tags=('density',))

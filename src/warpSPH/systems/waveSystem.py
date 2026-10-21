@@ -23,13 +23,14 @@ from ..configurations import SimulationConfig
 from ..sample.bySamplingScheme import sampleParticles
 
 from ..utils import *
+from .identity import ParticleIdentityState
 from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state, tagged
 from warpSPHIntegrators.state.fields import update_component, update_position
 from warpSPHCore import *
 
 
 @dataclass
-class WaveSystemStatev3(BaseState):
+class WaveSystemStatev3(ParticleIdentityState):
     positions : torch.Tensor = constant(tags=('particle_position',))
     supports : torch.Tensor = constant(tags=('particle_support',))
     masses : torch.Tensor = constant(tags=('particle_mass',))

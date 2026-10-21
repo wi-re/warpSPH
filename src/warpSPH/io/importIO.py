@@ -165,6 +165,8 @@ def loadTrajectory(
         'materials': _toTensor(trajectoryFile['combinedMaterials'], device),
         'UIDs': _toTensor(trajectoryFile['combinedUIDs'], device),
     }
+    for field, dataset in (('emitters', 'combinedEmitters'), ('bodyIDs', 'combinedBodyIDs')):
+        static[field] = _toTensor(trajectoryFile[dataset], device).to(torch.int32) if dataset in trajectoryFile else None
 
     meta = dict(
         SimulationSystem=SimulationSystem,
@@ -174,7 +176,7 @@ def loadTrajectory(
         scheme=schemeEnum,
         static=static,
         frameKeys=sorted(trajectoryFile['positions'].keys()),
-        extraFields=tuple(name for name in extraFields if name in trajectoryFile),
+        extraFields=tuple(dict.fromkeys(name for name in (*extraFields, 'crkMassDensities', 'crkVolumes') if name in trajectoryFile)),
     )
     return trajectoryFile, meta
 
@@ -207,6 +209,7 @@ def loadTrajectoryFrame(trajectoryFile, meta, frameIndex: int, schemeConfig=None
     stateKwargs = dict(
         positions=positions, velocities=velocities, densities=densities, supports=supports,
         masses=static['masses'], kinds=static['kinds'], materials=static['materials'], UIDs=static['UIDs'],
+        emitters=static.get('emitters'), bodyIDs=static.get('bodyIDs'),
         UIDcounter=int(static['UIDs'].max().item()) + 1,
         # Matches the case IC builders (e.g. buildSod1D): a fresh state always
         # starts divergence at zero and alpha0s/alphas at one -- a resumed
@@ -216,10 +219,23 @@ def loadTrajectoryFrame(trajectoryFile, meta, frameIndex: int, schemeConfig=None
         divergence=torch.zeros_like(densities),
         alpha0s=torch.ones_like(densities), alphas=torch.ones_like(densities),
     )
+    for name in ('crkMassDensities', 'crkVolumes'):
+        if name in frameFields:
+            stateKwargs[name] = frameFields[name]
 
     if internalEnergies is not None:
+        from ..modules.eos import evaluateEOS
+        if getattr(schemeConfig, 'materials', None) is not None and gamma is not None:
+            raise ValueError('gamma override is ambiguous with a material EOS table')
         gammaValue = gamma if gamma is not None else schemeConfig.gamma
-        A_, u_, P_, c_s = idealGasEOS(A=None, u=internalEnergies, P=None, rho=densities, gamma=gammaValue)
+        if getattr(schemeConfig, 'materials', None) is not None:
+            ids = stateKwargs['materials']
+            if not torch.equal(ids, ids.to(torch.int32).to(ids.dtype)):
+                raise ValueError('materials: trajectory IDs must be integral')
+            stateKwargs['materials'] = ids.to(torch.int32)
+            A_, u_, P_, c_s = evaluateEOS(densities, stateKwargs['materials'], schemeConfig, u=internalEnergies)
+        else:
+            A_, u_, P_, c_s = idealGasEOS(A=None, u=internalEnergies, P=None, rho=densities, gamma=gammaValue)
         # Same formula the case's own IC builder (e.g. buildSod1D) uses --
         # totalEnergies isn't in extraFields (it's a pure function of
         # velocities/internalEnergies/masses, all already reconstructed
@@ -231,6 +247,9 @@ def loadTrajectoryFrame(trajectoryFile, meta, frameIndex: int, schemeConfig=None
                           totalEnergies=totalEnergies)
 
     state = meta['SimulationState'](**stateKwargs)
+    if getattr(schemeConfig, 'materials', None) is not None:
+        from ..modules.eos import validateMaterialState
+        validateMaterialState(state, schemeConfig)
     system = meta['SimulationSystem'](state=state, adjacency=None, t=t)
     return system, t
 

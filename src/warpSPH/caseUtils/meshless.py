@@ -23,7 +23,7 @@ __all__ = ['buildMeshlessState', 'toMeshlessSystem']
 
 
 def buildMeshlessState(positions, supports, masses, densities, velocities, pressures,
-                       gamma, kinds, materials, UIDs):
+                       gamma, kinds, materials, UIDs, *, emitters=None, bodyIDs=None):
     """The meshless initial state from the compressible IC fields.
 
     `masses` / `densities` / `pressures` (N,), `velocities` (N, dim),
@@ -40,6 +40,8 @@ def buildMeshlessState(positions, supports, masses, densities, velocities, press
         supports=supports,
         kinds=kinds,
         materials=materials,
+        emitters=emitters,
+        bodyIDs=bodyIDs,
         UIDs=UIDs,
         UIDcounter=int(UIDs.max().item()) + 1,
     )
@@ -75,7 +77,7 @@ def toMeshlessSystem(compSystem, config, schemeConfig):
         st.positions, st.supports, st.masses,
         st.densities, st.velocities, st.pressures,
         float(schemeConfig.gamma),
-        st.kinds, st.materials, st.UIDs)
+        st.kinds, st.materials, st.UIDs, emitters=st.emitters, bodyIDs=st.bodyIDs)
     system = MeshlessSystem(state=state, domain=config.domain)
     config.dt = computeTimestep(system, config, schemeConfig, dt=None)
     return system

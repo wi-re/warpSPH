@@ -20,6 +20,8 @@ from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
 
+from ..eos.materials import MaterialTable, uniformMaterialTable
+
 __all__ = ['computeCompSPHBalanceTermWarp']
 
 
@@ -71,6 +73,8 @@ def computeCompSPHBalanceTerm_Func_i(
     av_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     energyScheme_int: wp.int32, dt: scalar_t, gamma: scalar_t,  # type: ignore
 
+    materialTable: MaterialTable,
+    queryMaterials: wp.array(dtype=wp.int32), referenceMaterials: wp.array(dtype=wp.int32),
     f_ij : wp.array(dtype = Any) # type: ignore
 ):
     # # Loop over neighbors to compute the gradient contribution from each neighbor    
@@ -149,8 +153,23 @@ def computeCompSPHBalanceTerm_Func_i(
             # chi = 1-chi
             f = chi * f_ij_mono + (scalar_t(1.0) - chi) * f_ij_sm
         elif energyScheme_int == wp.static(EnergyScheme.CRK.value):
-            s_i = P_i / wp.pow(rhoi, gamma)
-            s_j = P_j / wp.pow(rhoj, gamma)
+            gi = gamma
+            gj = gamma
+            if materialTable.count > 0:
+                im = wp.int32(queryMaterials[i])
+                jm = wp.int32(referenceMaterials[j])
+                if im < 0 or jm < 0 or im >= materialTable.count or jm >= materialTable.count:
+                    f_ij[jj] = scalar_t(wp.nan)
+                    continue
+                gi = materialTable.entries[im].gamma
+                gj = materialTable.entries[jm].gamma
+            # Entropic functions with different gamma are not comparable.
+            # Equal-work across unlike EOS preserves complementary pair work.
+            if gi != gj:
+                f_ij[jj] = scalar_t(0.5)
+                continue
+            s_i = P_i / wp.pow(rhoi, gi)
+            s_j = P_j / wp.pow(rhoj, gj)
             s_min = wp.min(wp.abs(s_i), wp.abs(s_j))
             s_max = wp.max(wp.abs(s_i), wp.abs(s_j))
 
@@ -206,6 +225,8 @@ def computeCompSPHBalanceTerm_Func_Adjacency(
     viscosityAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     energyScheme_int: wp.int32, dt: scalar_t, gamma: scalar_t,  # type: ignore
 
+    materialTable: MaterialTable,
+    queryMaterials: wp.array(dtype=wp.int32), referenceMaterials: wp.array(dtype=wp.int32),
     f_ij : wp.array(dtype = Any), # type: ignore
 ):
     xi, hi, mi, rhoi, ki = getParticle(queryState, i)
@@ -261,7 +282,7 @@ def computeCompSPHBalanceTerm_Func_Adjacency(
             P_i, referencePressures,
             pressureAccel_ij, viscosityAccel_ij,
             energyScheme_int, dt, gamma,
-            f_ij
+            materialTable, queryMaterials, referenceMaterials, f_ij
         )
 
 
@@ -286,6 +307,8 @@ def computeCompSPHBalanceTerm_Kernel(
     energyScheme_int: wp.int32, dt: wp.array(dtype = scalar_t), gamma: wp.array(dtype = scalar_t), # type: ignore
 
     # The last parameter is always the output array and should not be changed
+    materialTable: MaterialTable,
+    queryMaterials: wp.array(dtype=wp.int32), referenceMaterials: wp.array(dtype=wp.int32),
     f_ij : wp.array(dtype = Any), # type: ignore
 ):
     i = wp.tid()
@@ -304,7 +327,7 @@ def computeCompSPHBalanceTerm_Kernel(
         queryPressures, referencePressures,
         pressureAccel_ij, viscosityAccel_ij,
         energyScheme_int, dt[0], gamma[0],
-        f_ij
+        materialTable, queryMaterials, referenceMaterials, f_ij
     )
 
 
@@ -328,6 +351,8 @@ def computeCompSPHBalanceTerm_KernelTiled(
     energyScheme_int: wp.int32, dt: wp.array(dtype = scalar_t), gamma: wp.array(dtype = scalar_t), # type: ignore
 
     # The last parameter is always the output array and should not be changed
+    materialTable: MaterialTable,
+    queryMaterials: wp.array(dtype=wp.int32), referenceMaterials: wp.array(dtype=wp.int32),
     f_ij : wp.array(dtype = Any), # type: ignore
 ):
     # Multi-lane variant of computeCompSPHBalanceTerm_Kernel (warpSPHCore autograd/lanes.py):
@@ -344,7 +369,7 @@ def computeCompSPHBalanceTerm_KernelTiled(
         queryPressures, referencePressures,
         pressureAccel_ij, viscosityAccel_ij,
         energyScheme_int, dt[0], gamma[0],
-        f_ij
+        materialTable, queryMaterials, referenceMaterials, f_ij
     )
 
 from ...enumTypes import EnergyScheme
@@ -380,6 +405,9 @@ _COMPSPH_BALANCE_TERM = OperatorSpec(
         ExtraSpec("energyScheme", ExtraKind.SCALAR),
         ExtraSpec("dt", ExtraKind.TENSOR),
         ExtraSpec("gamma", ExtraKind.TENSOR),
+        ExtraSpec("materialTable", ExtraKind.SCALAR),
+        ExtraSpec("queryMaterials", ExtraKind.TENSOR),
+        ExtraSpec("referenceMaterials", ExtraKind.TENSOR),
     ),
 )
 
@@ -406,6 +434,7 @@ def computeCompSPHBalanceTermWarp(
     crkState: Optional[CRKState] = None,
     gradHState: Optional[Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor], GradHState]] = None,
     renormalizationState: Optional[Union[torch.Tensor,RenormalizationState]] = None,
+    materialTable=None,
 ):
     if adjacency is None or isinstance(adjacency, CompactHashMap):
         raise ValueError("This module requires an adjacency structure.")
@@ -465,6 +494,9 @@ def computeCompSPHBalanceTermWarp(
                 queryPressures=queryPressures_, referencePressures=referencePressures_,
                 pairWisePressureAccel=pairWise_pressureAccel, pairWiseViscosityAccel=pairWise_viscosityAccel,
                 energyScheme=wp.int32(energyScheme.value), dt=asScalarArg(dt, device=device),
+                materialTable=materialTable if materialTable is not None else uniformMaterialTable(device),
+                queryMaterials=queryParticles.materials if materialTable is not None else queryParticles.kinds,
+                referenceMaterials=referenceParticles.materials if materialTable is not None else referenceParticles.kinds,
                 gamma=asScalarArg(gamma if isinstance(gamma, torch.Tensor) else deviceConstant([float(gamma)], get_torch_precision(), device), device=device),
             )
 

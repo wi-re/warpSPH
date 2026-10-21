@@ -2,8 +2,11 @@
 
 Computes the rate of change of specific internal energy from pressure work
 and Monaghan-type artificial-viscosity dissipation, summed over neighbors.
-Uses the same one-sided kernel gradient, gradient-renormalization, and
-grad-h/CRK correction options as `accel.py`, so the two must be kept in sync.
+The production wrapper uses the gather gradient here, while `accel.py` averages
+the two support gradients in its force. At unequal supports this predictor
+does not generally balance instantaneous force power; do not treat it as a
+standalone conservative energy rate. The separate final compatible update
+balances the actual pair accelerations. See the fixed-pair heating audit.
 """
 
 from warpSPHCore.type_config import index_t, offset_t

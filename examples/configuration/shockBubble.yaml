@@ -1,0 +1,14 @@
+schemaVersion: 1
+case: shockBubble
+simulation:
+  nx: 200
+  tLimit: 0.3
+  plot: true
+  video: true
+  progress: true
+  plotInterval: 25
+  execution: eager
+solver:
+  scheme: CRKSPH
+params:
+  initialDensity: prescribed

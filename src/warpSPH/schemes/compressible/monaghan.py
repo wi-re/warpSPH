@@ -15,7 +15,7 @@ from ...modules.boundaryConditions import computeForcing, enforceDirichlet, enfo
 from ...modules.compressibleWall import beginCompressibleWall
 from ...modules.density import computeDensities
 from ...modules.dissipation import computeConductivity, computeThermalDissipation, computeViscosity
-from ...modules.eos import idealGasEOS
+from ...modules.eos import refreshEOS
 from ...modules.internalEnergy import computeDudtMonaghan
 from ...modules.momentum import computeMomentumConsistent
 from ...modules.pressure import computePressureForceSymmetric, computePerSidePressureWarp
@@ -68,13 +68,7 @@ def compressibleSPH_Monaghan(
         enforceDirichlet(currentSystem, t, dt, config, schemeConfig)
 
     with record_function("[warpSPH] - [monaghan - 06] EOS"):
-        currentState.entropies, _, currentState.pressures, currentState.soundspeeds = idealGasEOS(
-            A = None,
-            u = currentState.internalEnergies,
-            P = None,
-            rho = currentState.densities,
-            gamma = schemeConfig.gamma,
-        )
+        refreshEOS(currentState, schemeConfig)
 
     with record_function("[warpSPH] - [monaghan - 07] grad-h terms"):
         if schemeConfig.adaptiveSupportCorrections:

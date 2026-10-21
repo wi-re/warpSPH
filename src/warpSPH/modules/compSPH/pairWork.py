@@ -48,6 +48,12 @@ class RerunRequest:
 
 @dataclass
 class PairWork:
+    #: Opt-in midpoint control only: latest RHS retained until its state update,
+    #: then released. Not a per-stage history and not used by the native path.
+    crkEnergyStage: Any = None
+    #: experimental CRK Q gradient, shared by stages; seeded from the initial
+    #: state on every attempt so an energy/list replay cannot advance it twice.
+    crkQGradient: Optional[torch.Tensor] = None
     #: the combination weights of the propagated solution, one per stage (None: the integrator does not provide them)
     weights: Optional[Tuple[float, ...]] = None
     #: second pass only: the half-step velocity found by the first pass

@@ -81,7 +81,7 @@ def buildSod1D(
     combinedDensities = torch.where(tags == 0, leftState.rho, rightState.rho).to(combinedPositions.dtype)
     combinedVelocities = torch.where(tags[:, None] == 0, float(leftState.v), float(rightState.v)).to(combinedPositions.dtype)
     combinedKinds = torch.zeros_like(tags)
-    combinedMaterials = tags
+    combinedMaterials = torch.zeros_like(tags)
     combinedUIDs = torch.cat([
         torch.arange(particles_l.positions.shape[0], dtype = torch.int32, device = particles_l.positions.device),
         torch.arange(particles_r.positions.shape[0], dtype = torch.int32, device = particles_r.positions.device)], dim = 0)
@@ -96,6 +96,7 @@ def buildSod1D(
 
         kinds = combinedKinds,
         materials = combinedMaterials,
+        emitters = tags,
         UIDs = combinedUIDs,
         UIDcounter=combinedUIDs.max() + 1,
 
@@ -143,7 +144,7 @@ def buildSod1D(
     # h_optimal = particleState.supports
 
     eosRho = rho_optimal if smoothIC else particleState.densities
-    P_initial = torch.where(particleState.materials == 0, leftState.p, rightState.p)
+    P_initial = torch.where(tags == 0, leftState.p, rightState.p)
     # particleState.densities = eosRho
 
     u = 1 / (gamma - 1) * (P_initial / eosRho)
@@ -299,7 +300,7 @@ def buildSod1DMeshless(
     combinedVelocities = torch.where(tags[:, None] == 0, float(leftState.v), float(rightState.v)).to(combinedPositions.dtype)
     combinedPressures = torch.where(tags == 0, float(leftState.p), float(rightState.p)).to(combinedPositions.dtype)
     combinedKinds = torch.zeros_like(tags)
-    combinedMaterials = tags
+    combinedMaterials = torch.zeros_like(tags)
     combinedUIDs = torch.cat([
         torch.arange(particles_l.positions.shape[0], dtype = torch.int32, device = particles_l.positions.device),
         torch.arange(particles_r.positions.shape[0], dtype = torch.int32, device = particles_r.positions.device)], dim = 0)
@@ -307,7 +308,7 @@ def buildSod1DMeshless(
     particleState = buildMeshlessState(
         combinedPositions, combinedSupports, combinedMasses,
         combinedDensities, combinedVelocities, combinedPressures,
-        gamma, combinedKinds, combinedMaterials, combinedUIDs)
+        gamma, combinedKinds, combinedMaterials, combinedUIDs, emitters=tags)
 
     meshlessSystem = SimulationSystem(state=particleState, domain=config.domain)
     config.dt = computeTimestep(meshlessSystem, config, schemeConfig, dt=None)

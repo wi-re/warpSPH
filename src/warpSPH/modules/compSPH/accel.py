@@ -2,8 +2,9 @@
 
 Computes the SPH momentum-equation acceleration `-P/rho^2 gradW` plus a
 Monaghan-type artificial viscosity term, symmetrizing the two one-sided kernel
-gradients (gather/scatter) into the "super-symmetric" form per E.2 of the
-CRKSPH paper. Optionally applies gradient renormalization, grad-h (omega)
+gradients into their arithmetic mean. This is the current Warp force policy;
+paper Eq.E.2 and native Spheral SPH retain separate support gradients for the
+two pressure coefficients. Optionally applies gradient renormalization, grad-h (omega)
 corrections, apparent-volume weighting, and CRK kernel correction. Also
 returns the per-pair pressure and viscosity contributions (`pressureAccel_ij`,
 `viscosityAccel_ij`), which `balance.py` consumes to partition thermal energy
@@ -145,7 +146,7 @@ def computeCompSPHAccel_Func_i(
             gradw_j = matmul(Li, gradw_j)
 
         gradw_i = scalar_t(0.5) * (gradw_i + gradw_j)
-        gradw_j = gradw_i # E.2 in crksph suggests using the super symmetric form
+        gradw_j = gradw_i # Current mean-gradient force policy; Eq.E.2 keeps the two gradients separate.
 
 
         Pj = access_optional(referencePressures, j, explicitPressure, scalar_t(0.0))

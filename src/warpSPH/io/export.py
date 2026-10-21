@@ -343,7 +343,12 @@ def writeInitialData(
     outFile.create_dataset('combinedKinds', data=initialState.kinds.detach().cpu().numpy(), dtype=np.int32)
     outFile.create_dataset('combinedDensities', data=initialState.densities.detach().cpu().numpy(), dtype=np.float32)
     outFile.create_dataset('combinedVelocities', data=initialState.velocities.detach().cpu().numpy(), dtype=np.float32)
-    outFile.create_dataset('combinedMaterials', data=initialState.materials.detach().cpu().numpy(), dtype=np.float32)
+    outFile.create_dataset('combinedMaterials', data=initialState.materials.detach().cpu().numpy(), dtype=np.int32)
+    # Provenance and body membership are independent of physical materials.
+    for field, dataset in (('emitters', 'combinedEmitters'), ('bodyIDs', 'combinedBodyIDs')):
+        ids = getattr(initialState, field, None)
+        if ids is not None:
+            outFile.create_dataset(dataset, data=ids.detach().cpu().numpy(), dtype=np.int32)
     if stateGhostOffsets is not None:
         outFile.create_dataset('combinedGhostOffsets', data=stateGhostOffsets.detach().cpu().numpy(), dtype=np.float32)
         outFile.create_dataset('combinedGhostIndices', data=initialState.ghostIndices.detach().cpu().numpy(), dtype=np.int32)
@@ -354,6 +359,9 @@ def writeInitialData(
     timeGroup = outFile.create_group('times')
     rigidBodyGroup = outFile.create_group('rigidBodyTrajectories')
     extraGroups = tuple(outFile.create_group(name) for name in extraFields)
+    for name in ('crkMassDensities', 'crkVolumes'):
+        if getattr(initialState, name, None) is not None and name not in outFile:
+            outFile.create_group(name)
 
     return (positionGroup, velocityGroup, densityGroup, timeGroup, rigidBodyGroup) + extraGroups
 
@@ -371,6 +379,10 @@ def writeFrame(groups, i, state, stages, config, schemeConfig, uniqueParticles=T
     )
     for name, group in zip(extraFields, extraGroups):
         group.create_dataset(f'frame_{i:05d}', data=getattr(state.state, name).detach().cpu().numpy())
+    for name in ('crkMassDensities', 'crkVolumes'):
+        value = getattr(state.state, name, None)
+        if value is not None and name not in extraFields:
+            positionGroup.file[name].create_dataset(f'frame_{i:05d}', data=value.detach().cpu().numpy())
 
     rbg = rigidBodyGroup.create_group(f'frame_{i:05d}')
     for r, rigidBody in enumerate(getattr(schemeConfig, 'rigidBodies', []) or []):

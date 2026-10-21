@@ -471,3 +471,19 @@ all stable, energy at round-off. Noh L1 rho 0.1042 -> 0.1073 (+3 %); Yee core L1
 (KE x21, dE/E 1.9e-4), triple point, Sod 2D, Woodward-Colella, hydrostatic (max |v| 6e-7) unchanged. Final frames of triple point and shearing Noh: symmetric roll-ups / stripes, no fliers (triple point keeps its known slight ripple along the lower contact, OPEN_PROBLEMS §15).
 
 **AV_PLAN CRK baseline re-taken** as `results/av_M0f_crk` (18 pairs; AV_PLAN updated). 3D Sedov and Noh ran without video: with video the CRK 3D Sedov leaks GPU memory per drawn frame and OOMs on the shared GPU -- logged as OPEN_PROBLEMS §18.
+
+## Source-audit correction — 2026-10-20
+
+The historical measurements and user-selected defaults above remain valid for
+the actual convention tested. The statement that eta_fold=0.2/n_h in support
+units is universally the paper's definition was too broad. Current Warp and
+pinned Spheral use0.2 nominal spacings; Frontiere2017 Eqs51–53 and the parameter
+summary state0.2 spline smoothing lengths. With R=K*h_s and n_h=K*nPerh, these
+widths are0.2/n_h versus0.2/K in r/R. They coincide at nPerh=1, including the
+recent W7 paper-matched blob. Onset1/n_h agrees generally. The old B7 n_h4
+point corresponds to K3.5/nPerh8/7, so the literal-paper width would be
+0.0571429R rather than the tested0.05R. Do not retroactively relabel the old
+trajectory as a different setting. No default is changed by this correction.
+
+Compiled source/pair audit and quantitative curves:
+`reports/materialEOS/spheral/limiterThresholds/README.md`.

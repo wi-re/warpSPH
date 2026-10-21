@@ -12,6 +12,7 @@ via `type(particleState)`. Not re-exported from `systems/__init__.py` --
 
 from warpSPH.configurations.compute import neighborSearchOptions
 
+from .identity import ParticleIdentityState
 from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state, tagged
 from warpSPHIntegrators.state.fields import update_component, update_position
 from dataclasses import dataclass
@@ -33,7 +34,7 @@ __all__ = ['IncompressibleState', 'IncompressibleSystemUpdate', 'IncompressibleS
 
 
 @dataclass
-class IncompressibleState(BaseState):
+class IncompressibleState(ParticleIdentityState):
     positions : torch.Tensor = integrated('dxdt', tags=('position',))
     velocities: torch.Tensor = integrated('dvdt', tags=('velocity',))
     supports : torch.Tensor = constant(tags=('particle_support',))

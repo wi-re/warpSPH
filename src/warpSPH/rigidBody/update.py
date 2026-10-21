@@ -121,6 +121,8 @@ def updateBodyParticlesWCSPH(particleState, rigidBody: RigidBody):
 
         kinds = particleState.kinds,
         materials = particleState.materials,
+        emitters = particleState.emitters,
+        bodyIDs = particleState.bodyIDs,
         UIDs = particleState.UIDs,
 
         UIDcounter=particleState.UIDcounter,

@@ -18,7 +18,7 @@ from ...configurations.compressibleConfig import CompressibleSPHConfig
 from ...configurations.simulationConfig import SimulationConfig
 from typing import Optional, Union
 from warpSPHCore import *
-from ...modules.eos import idealGasEOS
+from ...modules.eos import evaluateEOS
 import torch
 import warp as wp
 
@@ -37,13 +37,10 @@ def computeTimestep(
         # we can get the internal energies for each state via the gas EOS
         u = system.state.internalEnergies
         # c_s = system.soundspeeds.max()            
-        A_, _, P_, c_s = idealGasEOS(
-            A = None,
-            u = system.state.internalEnergies,
-            P = None,
-            rho = system.state.densities,
-            gamma = compParams.gamma,
-        )
+        _, _, _, c_s = evaluateEOS(
+            system.state.densities, system.state.materials, compParams,
+            u=system.state.internalEnergies)
+
 
         # print(f"Initial internal energy: u (min: {u.min()}, max: {u.max()}, mean: {u.mean()})")
         # print(f"Initial sound speed: c_s (min: {c_s.min()}, max: {c_s.max()}, mean: {c_s.mean()})")

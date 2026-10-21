@@ -20,6 +20,29 @@ going on, so it is not optional bookkeeping:
    go in `PLANS.md`'s decisions log as well as in the plan they concern.
 5. **Branches:** work on `dev`; merge it back into `main` periodically.
 
+## Numerical-model changes: establish the reason for each choice
+
+User decision (2026-10-20): for each change to the numerical model, verify the
+formula against its paper, cross-check the corresponding Spheral implementation
+where applicable, then use a case that explicitly measures that choice's
+influence. Distinguish the published method, current reference-code behavior,
+and any local experimental variant. Reference-code agreement alone does not
+justify adoption.
+
+- Change one model choice at a time, with a declared baseline and quantitative
+  targets. Record initialization differences needed to maintain the same physical
+  state (for example, pressure-balanced u when changing a density estimator).
+- Report accuracy, dissipation/entropy, positivity and relevant conservation
+  properties, including costs and limitations. Conserved total energy or a
+  visually appealing interface alone is insufficient. Check timestep/resolution
+  sensitivity when it could change the conclusion.
+- Document the evidence and a keep/reject/unresolved verdict before promoting a
+  choice to a default. Preserve failed cases as evidence; do not tune to a picture.
+- In the CRKSPH/Spheral comparison, keep the selected Butcher integrator and fresh
+  stage evaluations fixed. Do not pursue CheapRK2 derivative reuse or cached
+  values that change kick/drift/stage semantics as model improvements. Existing
+  such comparison rows remain diagnostic records, not adoption candidates.
+
 ## Running simulations (probes, validation runs, A/Bs, reference checks)
 
 These apply to **every** run, including throwaway inline probes that call

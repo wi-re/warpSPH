@@ -11,6 +11,7 @@ never read back anywhere; the one call site that would have used it
 an earlier `return`.
 """
 
+from .identity import ParticleIdentityState
 from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state, tagged
 from warpSPHIntegrators.state.fields import update_component, update_position
 from dataclasses import dataclass
@@ -22,7 +23,7 @@ __all__ = ['CompressibleState', 'CompressibleSystemUpdate', 'CompressibleSystem'
 
 
 @dataclass
-class CompressibleState(BaseState):
+class CompressibleState(ParticleIdentityState):
     positions : torch.Tensor = integrated('dxdt', tags=('position',))
     velocities: torch.Tensor = integrated('dvdt', tags=('velocity',))
     supports : torch.Tensor = constant(tags=('particle_support',))
@@ -70,6 +71,7 @@ class CompressibleSystemUpdate:
     dEdt: torch.Tensor = tagged(tags=('totalEnergy_derivative',))
     drhodt: torch.Tensor = tagged(tags=('density_derivative',))
     passive: Optional[torch.Tensor] = tagged(tags=('passive_derivative',), default=None)
+    dVdt: Optional[torch.Tensor] = tagged(tags=('crk_volume_derivative',), default=None)
 
 @dataclass
 class CompressibleSystem(BaseIntegrationSystem):
@@ -122,10 +124,13 @@ class CompressibleSystem(BaseIntegrationSystem):
         self.state.divergence.copy_(lastState.divergence)
         self.state.alpha0s.copy_(lastState.alpha0s)
         self.state.alphas.copy_(lastState.alphas)
+        eosConfig = kwargs.get('schemeConfig', args[1] if len(args) > 1 else None)
+        if getattr(eosConfig, 'materials', None) is not None:
+            from ..modules.eos import refreshEOS
+            refreshEOS(self.state, eosConfig)
         from ..modules.shockCapturing.wrapper import advanceViscositySwitchStep  # (circular at import time)
         advanceViscositySwitchStep(self, initialState, returnValues,
                                    kwargs.get('schemeConfig', args[1] if len(args) > 1 else None),
                                    kwargs.get('config', args[0] if len(args) > 0 else None))
 
         return super().finalize(initialState, dt, returnValues, updateValues, weights, *args, **kwargs)
-    

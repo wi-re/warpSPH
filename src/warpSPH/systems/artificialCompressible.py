@@ -36,6 +36,7 @@ from typing import Optional, Tuple
 import torch
 from warpSPHCore.profiling import record_function
 from warpSPHCore import *
+from .identity import ParticleIdentityState
 from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state, tagged
 from warpSPHIntegrators.state.fields import update_component, update_position
 
@@ -48,7 +49,7 @@ __all__ = ['ArtificialCompressibleState', 'ArtificialCompressibleSystemUpdate',
 
 
 @dataclass
-class ArtificialCompressibleState(BaseState):
+class ArtificialCompressibleState(ParticleIdentityState):
     positions: torch.Tensor = integrated('dxdt', tags=('position',))
     velocities: torch.Tensor = integrated('dvdt', tags=('velocity',))
     #: The scheme's third integrated field -- see the module docstring.

@@ -159,6 +159,13 @@ def solverParameters(scheme):
         'Cu_l': 'Linear conductivity coefficient.', 'Cu_q': 'Quadratic conductivity coefficient.',
     }.items()}
     out.update({
+        'materials': P('array', 'Pure-material EOS table; list position is the fluid material ID. Null uses global gamma.',
+            'fluid', nullable=True, minItems=1, items=P('object', 'Material description.',
+                properties={'name': P('string', 'Material name.'),
+                    'eos': P('object', 'Equation of state.', properties={
+                        'type': P('string', 'EOS family.', choices=('idealGas',)),
+                        'gamma': P('number', 'Ratio of specific heats.', exclusiveMinimum=1)}, required=('type', 'gamma'))},
+                required=('name', 'eos'))),
         'diffusionParams.viscosityTerm': choice(ViscosityTerms, 'Artificial-viscosity formulation.', 'diffusion'),
         'diffusionParams.betaMode': choice(BetaMode, 'Quadratic coefficient coupling policy.', 'diffusion'),
         'viscositySwitchParams.scheme': choice(ViscositySwitch, 'Artificial-viscosity switch.', 'viscositySwitch'),
@@ -169,6 +176,20 @@ def solverParameters(scheme):
     policies = (VelocityPairPolicy.Raw,) if scheme in ('CompSPH', 'CRKSPH') else tuple(VelocityPairPolicy)
     out['diffusionParams.velocityPairPolicy'] = P('string', 'Pair velocity supplied to viscosity.',
                                                  'reconstruction', choices=tuple(m.name for m in policies))
+    if scheme == 'CRKSPH':
+        out['crkDensityPolicy'] = P('string', 'CRK density sum; material policies are opt-in and retain all-material volume/moment/force support.',
+            'fluid', choices=('legacy', 'sameMaterial', 'massReplacement'))
+        out['crkEvolution'] = P('string', 'Density/volume scheduling: native summation, experimental current-Spheral stages or paper Eq75/76 stages. Support and pair force remain Warp.',
+            'fluid', choices=('summation', 'spheral', 'paper'))
+        out['crkViscosityGradient'] = P('string', 'Experimental AV gradient timing; cached requires midpoint integration.',
+            'reconstruction', choices=('current', 'cached'))
+        out['crkViscosityParams.viscosityKernelScale'] = P('number', 'Experimental Frontiere Q compact-radius/viscous-length ratio; zero keeps native kernel scale.',
+            'diffusion', minimum=0)
+        out['crkViscosityParams.oneSidedWork'] = P('boolean', 'Experimental one-sided Spheral raw viscous heating.', 'fluid')
+        out['crkViscosityParams.meanVolumeWeights'] = P('boolean', 'Experimental arithmetic-mean squared pair volumes instead of product.', 'fluid')
+        out['crkEnergyPartition'] = P('string', 'Experimental midpoint compatible-work weights.', 'fluid', choices=('native', 'entropy', 'spheral'))
+        out['crkEnergyPredictor'] = P('string', 'Experimental midpoint energy predictor.', 'fluid', choices=('raw', 'compatible'))
+        out['compatibleEnergy'] = P('boolean', 'Apply the final compatible energy update; false integrates the thermal du/dt directly.', 'fluid')
     return out
 
 
@@ -371,6 +392,9 @@ def applySchemeOverrides(ctx):
         if not hasattr(owner, name):
             raise ValueError(f'solver.{path}: unavailable on {scheme}')
         old = getattr(owner, name)
+        if path == 'materials':
+            from ..configurations.moduleConfigurations.materials import normalizeMaterials
+            value = normalizeMaterials(value)
         enum = enums.get(path)
         if enum:
             member = enum[value]
@@ -399,6 +423,9 @@ def configurationSchema(case, scheme=None):
             value = getattr(value, name)
         if path in enums:
             value = value.name if isinstance(value, Enum) else enums[path](value).name
+        elif path == 'materials':
+            from ..configurations.moduleConfigurations.materials import materialsToDict
+            value = materialsToDict(value)
         elif descriptor.kind == 'number':
             value = float(value)
         numerical[path] = descriptor.schema(value)

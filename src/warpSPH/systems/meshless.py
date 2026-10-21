@@ -15,6 +15,7 @@ integrated); the step refreshes them and `finalize` carries the last substep's v
 forward so the runner's plot / diagnostic hooks can read them.
 """
 
+from .identity import ParticleIdentityState
 from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state, tagged
 from warpSPHIntegrators.state.fields import update_component, update_position
 from dataclasses import dataclass
@@ -26,7 +27,7 @@ __all__ = ['MeshlessState', 'MeshlessSystemUpdate', 'MeshlessSystem']
 
 
 @dataclass
-class MeshlessState(BaseState):
+class MeshlessState(ParticleIdentityState):
     positions: torch.Tensor = integrated('dxdt', tags=('position',))
     # the conserved vector (m, m v, m e_tot); the single integrated physics quantity
     Q: torch.Tensor = integrated('dQdt', tags=('conserved',))

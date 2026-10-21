@@ -139,7 +139,7 @@ def run_dudt_gradcheck() -> bool:
         return False
 
 
-def run_balance_gradcheck(scheme: EnergyScheme) -> bool:
+def run_balance_gradcheck(scheme: EnergyScheme, materials=None) -> bool:
     domain, positions, supports, masses, densities, adjacency, kinds, velocities, internalEnergies, pressures, soundspeeds, alphas = _build_case()
     numEdges = adjacency.livePairs()[0].shape[0]
     ap_ij = torch.randn(numEdges, DIM, dtype=DTYPE, device=DEVICE, requires_grad=True)
@@ -147,6 +147,11 @@ def run_balance_gradcheck(scheme: EnergyScheme) -> bool:
 
     def f(pos, sup, mass, dens, vel, u, press, ap, av):
         state = make_compressible_state(pos, sup, mass, dens, vel, u, pressures=press, kinds=kinds)
+        extra = {}
+        if materials is not None:
+            from warpSPH.modules.eos.materials import materialRuntime
+            state.materials = torch.arange(N, device=pos.device, dtype=torch.int32) % len(materials.materials)
+            extra['materialTable'] = materialRuntime(materials, dens).table
         return computeCompSPHBalanceTermWarp(
             queryParticles=state,
             operationProperties=OperationProperties(kernel=KERNEL, supportMode=SupportScheme.Gather),
@@ -157,9 +162,11 @@ def run_balance_gradcheck(scheme: EnergyScheme) -> bool:
             pairWise_pressureAccel=ap,
             pairWise_viscosityAccel=av,
             adjacency=adjacency,
+            **extra,
         )
 
-    print(f"\n=== computeCompSPHBalanceTermWarp ({scheme.name}): torch.autograd.gradcheck ===")
+    label = scheme.name + (', materials' if materials is not None else '')
+    print(f"\n=== computeCompSPHBalanceTermWarp ({label}): torch.autograd.gradcheck ===")
     inputs = (positions, supports, masses, densities, velocities, internalEnergies, pressures, ap_ij, av_ij)
     try:
         ok = torch.autograd.gradcheck(f, inputs, eps=1e-6, atol=1e-5)
@@ -226,6 +233,10 @@ def main():
         ok &= run_balance_gradcheck(scheme)
     for scheme in EnergyScheme:
         ok &= run_balance_gamma_gradcheck(scheme)
+    from warpSPH.configurations import CRKSPHConfig, EOSConfig, MaterialConfig
+    mixed = CRKSPHConfig(materials=[MaterialConfig('gas0', EOSConfig(gamma=1.4)),
+                                   MaterialConfig('gas1', EOSConfig(gamma=5/3))])
+    ok &= run_balance_gradcheck(EnergyScheme.CRK, materials=mixed)
 
     print()
     if ok:

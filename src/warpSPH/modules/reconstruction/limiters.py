@@ -6,9 +6,10 @@ reconstructed velocity gradient and applies a van Leer flux limiter; the
 zero-denominator branch must return early (before dividing) rather than
 patching a NaN afterward, since reverse-mode AD differentiates the
 un-guarded division itself (see the inline note referencing
-`scripts/gradcheck_crk.py`, docs/historic_plans/CLEANUP_PLAN.md Phase 4.1 Tier 1). `crkLimiter`
-tapers the viscosity to zero for particle pairs closer than `eta_crit`
-smoothing lengths apart, via a Gaussian fall-off scaled by `eta_fold`.
+`scripts/gradcheck_crk.py`, docs/historic_plans/CLEANUP_PLAN.md Phase 4.1 Tier 1).
+`crkLimiter` tapers the midpoint reconstruction factor toward zero for close
+pairs, restoring unreconstructed artificial viscosity. Its distance and
+thresholds are expressed in support-radius units, not smoothing-length units.
 """
 
 import warp as wp
@@ -113,10 +114,10 @@ def computeVanLeer(
     grad_i = wp.dot(corr_i, xij)
     grad_j = wp.dot(corr_j, xij)
 
-    # A zero denominator here (most commonly the self-interaction pair,
-    # xij == 0, so grad_i == grad_j == 0) means there is no flow or the flow
-    # is perfectly linear, so the limiter should just be 1 in these cases --
-    # same intent as the original NaN-check-after-the-fact version, but the
+    # A tiny projected slope makes the ratio singular. This implementation
+    # continues each missing ratio with 1; if both are tiny, phi=1. That is
+    # a numerical continuation, not proof that the flow is linear. Native
+    # Spheral instead floors the signed denominator at 1e-30. The
     # guard now has to happen *before* the division, not after: computing
     # the division unconditionally and only patching the resulting NaN value
     # is forward-safe but not backward-safe. The un-guarded division's local

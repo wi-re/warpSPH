@@ -270,9 +270,10 @@ def computeBoundaryVelocities(currentState: Any, config: SimulationConfig, schem
         BCTypes = [region.kind for region in boundaryRegions]
         BCTypesT = deviceConstant([bct.value for bct in BCTypes], torch.int64, currentState.velocities.device)
 
-        boundaryMaterials = torch.where(currentState.kinds != 1,
-                                        torch.zeros_like(currentState.materials), currentState.materials)
-        BCmask = BCTypesT[boundaryMaterials.long()]
+        from ...systems.identity import particleBodyIDs
+        bodyIDs = particleBodyIDs(currentState)
+        boundaryBodies = torch.where(boundaryMask, bodyIDs, torch.zeros_like(bodyIDs))
+        BCmask = BCTypesT[boundaryBodies.long()]
         
         outputVelocities = currentState.velocities.clone()
 

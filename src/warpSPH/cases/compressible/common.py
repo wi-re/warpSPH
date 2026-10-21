@@ -130,9 +130,13 @@ def compressibleDiagnostics(ctx: RunContext, state) -> Dict[str, float]:
     kinetic = 0.5 * (torch.linalg.norm(particles.velocities, dim=-1) ** 2 * mass).sum()
     thermal = (particles.internalEnergies * mass).sum()
 
-    gamma = float(ctx.schemeConfig.gamma)
     rho = particles.densities
-    entropy = (mass * (gamma - 1.0) * particles.internalEnergies * rho ** (1.0 - gamma)).sum()
+    materialConfigs = getattr(ctx.schemeConfig, 'materials', None)
+    if materialConfigs is None:
+        gamma = float(ctx.schemeConfig.gamma)
+        entropy = (mass * (gamma - 1.0) * particles.internalEnergies * rho ** (1.0 - gamma)).sum()
+    else:
+        entropy = torch.zeros((), device=mass.device, dtype=mass.dtype)
 
     pos, vel = particles.positions, particles.velocities
     dim = pos.shape[-1]
@@ -150,6 +154,13 @@ def compressibleDiagnostics(ctx: RunContext, state) -> Dict[str, float]:
         'entropy': entropy,
         'angularMomentum': angular,
     }
+    if materialConfigs is not None:
+        A = particles.entropies
+        out.pop('entropy')
+        for i in range(len(materialConfigs)):
+            materialMass = torch.where(particles.materials == i, mass, torch.zeros_like(mass))
+            out[f'material{i}Mass'] = materialMass.sum()
+            out[f'material{i}EntropicFunction'] = (materialMass * A).sum()
     alphas = getattr(particles, 'alphas', None)
     if alphas is not None:
         out['alphaMean'] = alphas.mean()

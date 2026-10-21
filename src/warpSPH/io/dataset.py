@@ -67,6 +67,10 @@ def sample_to_state(
         soundspeeds=None,
         kinds=static["combinedKinds"][mask].to(torch.int32).to(target_device),
         materials=static["combinedMaterials"][mask].to(torch.int32).to(target_device),
+        emitters=(static["combinedEmitters"][mask].to(torch.int32).to(target_device)
+                  if "combinedEmitters" in static else None),
+        bodyIDs=(static["combinedBodyIDs"][mask].to(torch.int32).to(target_device)
+                 if "combinedBodyIDs" in static else None),
         UIDs=static["combinedUIDs"][mask].to(torch.int64).to(target_device),
         UIDcounter=int(mask.sum().item()),
         ghostIndices=(
@@ -232,6 +236,8 @@ class SPHDataset(torch.utils.data.Dataset):
             "combinedSupports",
             "combinedUIDs",
             "combinedMaterials",
+            "combinedEmitters",
+            "combinedBodyIDs",
             "combinedGhostIndices",
             "combinedGhostOffsets",
             "boundaryPositions",
@@ -462,6 +468,10 @@ class SPHDataset(torch.utils.data.Dataset):
                 materials=torch.as_tensor(
                     f["combinedMaterials"][:][mask], dtype=torch.int32, device=state_device
                 ),
+                emitters=(torch.as_tensor(f["combinedEmitters"][:][mask], dtype=torch.int32, device=state_device)
+                          if "combinedEmitters" in f else None),
+                bodyIDs=(torch.as_tensor(f["combinedBodyIDs"][:][mask], dtype=torch.int32, device=state_device)
+                         if "combinedBodyIDs" in f else None),
                 UIDs=torch.as_tensor(
                     f["combinedUIDs"][:][mask], dtype=torch.int64, device=state_device
                 ),

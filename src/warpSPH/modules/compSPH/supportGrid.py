@@ -88,11 +88,14 @@ def noteOutgrown(holder: SupportGrid, info: dict) -> None:
         holder.pending.append(flag)
 
 
-def growIfOutgrown(holder: SupportGrid) -> None:
-    """Step end: every `CHECK_EVERY` steps one host read of the flags noted since; if the limit was binding the next
-    stage makes a grid for a larger radius."""
+def growIfOutgrown(holder: SupportGrid, *, immediate: bool = False) -> None:
+    """Grow after a binding flag, checked every CHECK_EVERY steps by default.
+
+    `immediate` aligns explicit-material eager runs with the graph's per-step
+    growth schedule so density contrasts do not produce different clipped h.
+    """
     holder.age += 1
-    if holder.age < CHECK_EVERY or not holder.pending:
+    if (not immediate and holder.age < CHECK_EVERY) or not holder.pending:
         return
     binding = bool(torch.stack(holder.pending).any())
     holder.pending, holder.age = [], 0

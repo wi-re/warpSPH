@@ -6,8 +6,9 @@ field as a separate tensor (which is what the gradcheck scripts need). The schem
 want the same call shape as `computeMomentumConsistent` / `computeDensities`:
 `(state, config, schemeConfig, adjacency, gradH)`. These wrappers read the fields from
 the particle state, take the kernel / diffusion parameters / energy scheme from the
-configs, and fix the support mode each operator is defined for (E.2, E.3 in the CRKSPH
-paper), so a scheme cannot pick the wrong one by accident.
+configs, and select the current mean-force/gather-heating support policies.
+Paper E.2 instead keeps the individual force gradients; see the heating audit
+for the resulting instantaneous-power distinction at unequal supports.
 """
 
 from typing import Optional, Tuple, Union
@@ -30,7 +31,7 @@ def computeCompSPHAccel(
     adjacency,
     gradH: Optional[GradHState] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Pressure + artificial-viscosity acceleration (super-symmetric, E.2).
+    """Pressure + artificial-viscosity acceleration (current mean-gradient policy).
 
     Returns `(dvdt, ap_ij, av_ij)`: the acceleration and the per-pair pressure and
     viscosity contributions that `computeCompSPHBalanceTerm` partitions the energy with.
@@ -96,6 +97,8 @@ def computeCompSPHBalanceTerm(
 
     Reads the per-pair `ap_ij` / `av_ij` that `computeCompSPHAccel` left on the state.
     """
+    from ..eos.materials import materialRuntime
+    runtime = materialRuntime(schemeConfig, state.densities)
     return computeCompSPHBalanceTermWarp(
         queryParticles = state,
         operationProperties = OperationProperties(
@@ -113,6 +116,7 @@ def computeCompSPHBalanceTerm(
         energyScheme = schemeConfig.energyScheme,
         dt = dt,
         gamma = schemeConfig.gamma,
+        materialTable = runtime.table if runtime is not None else None,
 
         adjacency = adjacency,
         gradHState = gradH,

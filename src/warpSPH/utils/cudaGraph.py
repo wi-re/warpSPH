@@ -621,6 +621,10 @@ class GraphedIntegratorStep:
         #: (`_hasBoundaryParticles`, `_hostDxValue`, device constants, ...)
         #: whose one-time reads would otherwise break the capture
         self._warm = False
+        # Warp-owned material arrays must live as long as their captured
+        # launches. A changed table also requires a new capture.
+        self._materialOwner = None
+        self._crkDensityPolicy = None
 
     def _disable(self, reason):
         self.disabled = reason
@@ -649,10 +653,24 @@ class GraphedIntegratorStep:
         runs it while the caller does other work, e.g. the previous step's
         diagnostics on another stream); an eager step runs to completion.
         Pass the handle to `finish`."""
+        if getattr(schemeConfig, 'crkEvolution', 'summation') in ('spheral', 'paper'):
+            self._entry = None
+            self._validated = False
+            return {'result': self._eager(state, dt, config, schemeConfig, verbose)}
         if (self.disabled is not None or verbose or not isinstance(dt, torch.Tensor)
                 or not state.state.positions.is_cuda or not self._warm):
             self._warm = True
             return {'result': self._eager(state, dt, config, schemeConfig, verbose)}
+        owner = None
+        if getattr(schemeConfig, 'materials', None) is not None:
+            from ..modules.eos.materials import materialRuntime
+            owner = materialRuntime(schemeConfig, state.state.densities)
+        densityPolicy = getattr(schemeConfig, 'crkDensityPolicy', 'legacy')
+        if self._materialOwner is not owner or self._crkDensityPolicy != densityPolicy:
+            self._entry = None
+            self._validated = False
+            self._materialOwner = owner
+            self._crkDensityPolicy = densityPolicy
         e = self._entry
         if e is None or e['key'] != self._key(state):
             # new Verlet generation (or first step): capture now

@@ -272,6 +272,24 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
 
 def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
     system = case.buildSystem(ctx)
+    if getattr(ctx.schemeConfig, 'crkEvolution', 'summation') in ('spheral', 'paper'):
+        state = system.state
+        if state.crkMassDensities is None:
+            state.crkMassDensities = state.densities.clone()
+        if ctx.schemeConfig.crkEvolution=='spheral' and state.crkVolumes is None:
+            state.crkVolumes = state.masses/state.densities
+    if getattr(ctx.schemeConfig, 'materials', None) is not None:
+        from ..modules.eos import evaluateEOS, validateMaterialState
+        validateMaterialState(system.state, ctx.schemeConfig)
+        state = system.state
+        # Existing IC builders prescribe pressure using the scalar closure.
+        # Preserve that pressure, converting the energy with the actual material.
+        state.entropies, state.internalEnergies, state.pressures, state.soundspeeds = evaluateEOS(
+            state.densities, state.materials, ctx.schemeConfig, P=state.pressures)
+        state.totalEnergies = state.masses * (state.internalEnergies + 0.5 * state.velocities.square().sum(-1))
+        if ctx.config.adaptiveDt:
+            from ..modules.timestep.compressible import computeTimestep
+            ctx.config.dt = computeTimestep(system, ctx.config, ctx.schemeConfig)
     ctx.scratch['initialParticleCount'] = int(system.state.positions.shape[0])
     # How the run executes (`configurations/compute.py`): the scheme's `stepMode`, the spec's `cudaGraph` / `execution` or `config.compute`, and for
     # 'auto' the particle count. The scheme-level graph routes (delta-SPH's right-hand side, ACSPH's dual-time iteration) key on `schemeConfig.cudaGraph`.
@@ -319,6 +337,8 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
             print(f'-- resumed from {spec.resumeFrom} '
                  f'(t={system.t:.6f}, step offset {spec.resumeStepOffset}) --')
 
+    from ..modules.eos import validateMaterialState
+    validateMaterialState(system.state, ctx.schemeConfig)
     runningState = system.initializeNewState()
 
     # --- output setup -------------------------------------------------------

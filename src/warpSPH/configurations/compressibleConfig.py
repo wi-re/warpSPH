@@ -29,6 +29,7 @@ from .moduleConfigurations.viscositySwitchParameters import ViscositySwitchConfi
 
 from .moduleConfigurations.boundaryConditions import BoundaryCondition, BoundaryConditionType, boundaryConditionToDict, dictToBoundaryCondition
 from typing import List
+from .moduleConfigurations.materials import MaterialConfig, normalizeMaterials, materialsToDict
 
 def buildDefaultViscositySwitchConfigCompressibleSPH() -> ViscositySwitchConfig:
     """The Monaghan host's default switch (2026-10-08, user): Rosswog (2020)'s entropy trigger at the paper's
@@ -45,6 +46,7 @@ def buildDefaultViscositySwitchConfigCompressibleSPH() -> ViscositySwitchConfig:
 @dataclass
 class CompressibleSPHConfig:
     gamma: float = field(default=1.4, metadata={'description': 'Adiabatic index'})
+    materials: Optional[List[MaterialConfig]] = field(default=None, kw_only=True, metadata={'description': 'EOS table indexed by fluid particle material ID; None preserves global gamma for every label'})
     backgroundPressure: float = field(default=0.0, metadata={'description': 'Background pressure to prevent tensile instability'})
 
     rho0: float = field(default=1.0, metadata={'description': 'Reference density'})
@@ -58,7 +60,8 @@ class CompressibleSPHConfig:
     adaptiveSupportThreshold: float = field(default=1e-3, metadata={'description': 'Threshold for adaptive support scheme'})
     adaptiveSupportCorrections: bool = field(default=True, metadata={'description': 'Whether to apply corrections in the adaptive support scheme (grad-H terms)'})
     pressureFormulation: str = field(default='meanKernel', metadata={'description': "Monaghan scheme pressure force + pdV work: 'meanKernel' (symmetric gradient with the mean kernel (grad W(h_i) + grad W(h_j))/2, du/dt from a velocity divergence) or 'perSide' (Price 2012 Eqs. 43-45: each side with its own h, the conjugate du/dt; with Omega when adaptiveSupportCorrections) -- SUPPORT_SOLVER_PLAN option C"})
-    owenTable: str = field(default='lattice', metadata={'description': "Owen psi_H lookup table: 'lattice' (default since 2026-10-06: the lattice sum the runtime measures, exact on lattices in 1D/2D/3D) or 'shell' (the old continuum shell approximation, exact only in 1D; h 2 % / 0.9 % too large on a 2D / 3D lattice) -- SUPPORT_SOLVER_PLAN step 1a"})
+    owenTable: str = field(default='lattice', metadata={'description': "Owen calibration: lattice (default, exact on regular lattices), shell (legacy linear shell table), or hermiteShell (opt-in locally generated wide-range shell/Hermite lookup with matching quadratic-gradient moment)."})
+    owenMaterialWeights: bool = field(default=False, metadata={'description': 'Opt-in Owen moment weighting: across physical material IDs use (m_j/rho_j)/(m_i/rho_i), within one material use 1. Retains the chosen lookup, bounds and stage timing in 1D/2D/3D.'})
 
 
     diffusionParams: DiffusionParameters = field(default_factory=buildDefaultDiffusionParamsCompressibleSPH)
@@ -73,12 +76,21 @@ class CompressibleSPHConfig:
     wallRiemannState: bool = field(default=True, metadata={'description': 'Wall state = star state of the mirrored Riemann problem (shock on approach, rarefaction on recession) instead of the plain Shepard gather'})
     wallLatticeSupport: Optional[bool] = field(default=None, metadata={'description': "Floor the wall rows' h at their own lattice spacing's (None: the scheme's default -- on for CRKSPH, whose moment matrices need it, off otherwise)"})
 
+    def validate(self, config=None):
+        from ..modules.eos.materials import validateMaterialOptions
+        validateMaterialOptions(self)
+        if self.owenTable not in ('lattice','shell','hermiteShell'):
+            raise ValueError('owenTable must be lattice, shell or hermiteShell')
+        if self.owenMaterialWeights and self.materials is None:
+            raise ValueError('owenMaterialWeights requires an explicit materials table')
+
 from typing import Dict, Any
 
 
 def compressibleConfigToDict(config: CompressibleSPHConfig) -> Dict[str, Any]:
     return {
         'gamma': config.gamma,
+        'materials': materialsToDict(config.materials),
         'backgroundPressure': config.backgroundPressure,
         'rho0': config.rho0,
         'adaptiveSupportScheme': config.adaptiveSupportScheme.name,
@@ -90,6 +102,7 @@ def compressibleConfigToDict(config: CompressibleSPHConfig) -> Dict[str, Any]:
         'adaptiveSupportThreshold': config.adaptiveSupportThreshold,
         'adaptiveSupportCorrections': config.adaptiveSupportCorrections,
         'owenTable': config.owenTable,
+        'owenMaterialWeights': config.owenMaterialWeights,
         'pressureFormulation': config.pressureFormulation,
         'diffusionParams': diffusionParamsToDict(config.diffusionParams),
         'viscositySwitchParams': viscositySwitchConfigToDict(config.viscositySwitchParams),
@@ -103,6 +116,7 @@ def compressibleConfigToDict(config: CompressibleSPHConfig) -> Dict[str, Any]:
 def dictToCompressibleConfig(configDict: Dict[str, Any]) -> CompressibleSPHConfig:
     config = CompressibleSPHConfig()
     config.gamma = configDict['gamma']
+    config.materials = normalizeMaterials(configDict.get('materials'))
     config.backgroundPressure = configDict['backgroundPressure']
     config.rho0 = configDict['rho0']
     config.adaptiveSupportScheme = AdaptiveSupportScheme[configDict['adaptiveSupportScheme']] if isinstance(configDict['adaptiveSupportScheme'], str) else configDict['adaptiveSupportScheme']
@@ -114,6 +128,7 @@ def dictToCompressibleConfig(configDict: Dict[str, Any]) -> CompressibleSPHConfi
     config.adaptiveSupportThreshold = configDict['adaptiveSupportThreshold']
     config.adaptiveSupportCorrections = configDict['adaptiveSupportCorrections']
     config.owenTable = configDict.get('owenTable', 'shell')  # stored configs from before the field ran the shell table
+    config.owenMaterialWeights = configDict.get('owenMaterialWeights', False)
     config.pressureFormulation = configDict.get('pressureFormulation', 'meanKernel')
     config.diffusionParams = dictToDiffusionParams(configDict['diffusionParams'])
     config.viscositySwitchParams = dictToViscositySwitchConfig(configDict['viscositySwitchParams'])

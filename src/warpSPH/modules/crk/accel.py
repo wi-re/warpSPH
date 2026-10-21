@@ -147,9 +147,9 @@ def computeCrkSPHAccel_Func_i(
         # `Frontiere2017` term of `modules/dissipation/pi/terms.py`
         alpha_j = access_optional(referenceAlphas, j, viscositySwitch, scalar_t(1.0))
         Q_i = computeFrontiereQ(xi, xj, hi, hj, rhoi, rhoj, vij_dot, domainState, kernelProperties.kernelFunction,
-                                cs_i, cs_j, alpha_i, alpha_j, viscosityParams, False)
+                                cs_i, cs_j, alpha_i, alpha_j, viscosityParams, False, crkViscosityParams.viscosityKernelScale)
         Q_j = computeFrontiereQ(xi, xj, hi, hj, rhoi, rhoj, vij_dot, domainState, kernelProperties.kernelFunction,
-                                cs_i, cs_j, alpha_i, alpha_j, viscosityParams, True)
+                                cs_i, cs_j, alpha_i, alpha_j, viscosityParams, True, crkViscosityParams.viscosityKernelScale)
 
 
         gradw_ij = scalar_t(0.5) * (gradw_i + gradw_j)
