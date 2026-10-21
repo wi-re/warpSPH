@@ -84,3 +84,32 @@ def test_shifted_log_preserves_zero_lower_endpoint():
     a=build_coefficients(gradient,2);m=a['lookupMeta'];n=int(m[3]);y=a['lookupData']
     assert a['inverseLogOffset']>0 and np.isfinite(y).all()
     np.testing.assert_allclose(hermite_values(m[0],m[0],m[1],y[:n],y[n:]),1.1,atol=1.e-14)
+
+
+@pytest.mark.parametrize('scheme',['Monaghan','CompSPH','CRKSPH'])
+@pytest.mark.parametrize('table',['lattice','shell','hermiteShell'])
+def test_runner_accepts_and_preserves_owen_controls(scheme,table,tmp_path):
+    from warpSPH.runner import RunConfiguration,resolvedConfiguration,configurationSchema
+    from warpSPH.cases.compressible.sod import sodCase
+    document=RunConfiguration('sod',params=dict(viscositySwitch='NoneSwitch'),solver=dict(scheme=scheme,owenTable=table,owenMaterialWeights=True,
+        materials=[dict(name='gas',eos=dict(type='idealGas',gamma=1.4))]))
+    loaded=RunConfiguration.load(document.save(tmp_path/'owen.json'))
+    ctx=loaded.prepare(sodCase)
+    assert ctx.schemeConfig.owenTable==table and ctx.schemeConfig.owenMaterialWeights
+    snapshot=resolvedConfiguration(ctx)['solverConfig']
+    assert snapshot['owenTable']==table and snapshot['owenMaterialWeights']
+    schema=configurationSchema(sodCase,scheme)['properties']['solver']['properties']
+    assert table in schema['owenTable']['enum']
+    assert schema['owenMaterialWeights']['type']=='boolean'
+
+
+@pytest.mark.parametrize('values,match',[
+    (dict(owenTable='typo'),'owenTable'),
+    (dict(owenMaterialWeights='true'),'owenMaterialWeights'),
+    (dict(owenMaterialWeights=True),'materials table'),
+])
+def test_runner_rejects_invalid_owen_configuration(values,match):
+    from warpSPH.runner import RunConfiguration
+    from warpSPH.cases.compressible.sod import sodCase
+    with pytest.raises(ValueError,match=match):
+        RunConfiguration('sod',solver=dict(scheme='CRKSPH',**values)).prepare(sodCase)

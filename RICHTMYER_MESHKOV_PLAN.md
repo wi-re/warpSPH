@@ -3039,7 +3039,7 @@ claim every current source hash was used for those runs. Full 1D/3D flows,
 other kernels/float32 flows, bounds/calibration separation and performance
 optimization remain separate work.
 
-### Generated Owen full-flow dimensional qualification (2026-10-21, pending)
+### Generated Owen full-flow dimensional qualification (2026-10-21, spot checks complete)
 
 User requests a snapshot commit after adding generated reports to .gitignore,
 then 1D/3D physical checks of hermiteShell. Use the same fresh midpoint,
@@ -3048,3 +3048,51 @@ run sequentially with the daemon and vispy recordings. Prefer a planar Sod
 problem in both dimensions with an analytic reference, plus a pressure contact
 if needed to isolate cross-material weighting. Record dimensional symmetry,
 positivity, conservation, errors and wall/ms-per-step; retain failures.
+
+Snapshot commit: `db84b94` on dev (213 files); generated reports ignored,
+existing tracked report documents retained. The initial qualification attempt
+failed before sampling because the runner schema omitted owenTable and
+owenMaterialWeights. Added both public descriptors for compressible SPH and
+12 save/load/prepare/schema/invalid-input regression checks; all pass. Preserve
+that startup log under results/materialEOS/owen_dimensions_2026-10-21_startup_schema_failure.
+The physical cases use the public options directly, not a support replacement
+overlay. Numerical sources are hashed/snapshotted before the sequential queue.
+
+Four sequential controls complete at t=.2: generated hermiteShell / lattice,
+both material-aware, in 1D (300 particles, dx=.01) and genuine 3D
+(120x16x16=30,720 particles, dx=.025). Two material labels share gamma1.4
+to retain the classical Sod analytic reference. Periodic reservoirs on
+x=[-1.5,1.5], compare |x|<.5; 3D transverse periods .4 exceed twice max
+support .15116. No added support clamp, no forces constrained to be planar.
+Fresh midpoint, paper density, geometric volumes, original compatible energy
+and AV held fixed; 200steps at dt=.001, 400 fresh RHSs and 200 resets each.
+Report: reports/materialEOS/owenDimensions/README.md.
+
+Generated density/P/v/u L1 errors: 1D .019726/.021501/.037282/.042745;
+3D .041100/.050345/.083526/.105904. 1D generated/lattice density/P relative
+L1 differences ~1e-8; 3D .000701/.000886, positionRMS .0001605, support
+relativeL1 .01179. Different resolutions across dimensions; not a convergence
+comparison. Positive accepted states, no negative EOS calls, exact masses/
+material IDs/UIDs. Max energy drift across all4 <8.55e-14; generated3D max
+transverse speed7.05e-15, density-plane spread2.33e-14, momentum error per
+mass<7.2e-15. All4 daemon histories/HDF5/videos verified, 41frames each.
+
+Retain common numerical limitations: contact overshoots visible in both
+lookups; generated3D global mean delta log(P/rho^gamma) ends -.009898 vs
+lattice -.009997, minima -.010842/-.010900. Significant particle entropy
+loss (threshold-.01) has the same .12222 mass fraction for both. 1D also
+has a transient negative mean, ending +.0000465. These periodic-box measures
+include the reverse Riemann problem at the outer seam. Do not infer entropy
+monotonicity from compatible total energy conservation or attribute this
+shared defect to local table generation. Density/energy isolation remains
+a future model task, alongside spatial/dt/unequal-spacing qualification.
+
+Costs (wall seconds / wall ms per step): generated1D16.17/80.84, lattice1D
+7.86/39.31, generated3D193.16/965.79, lattice3D124.67/623.37. First generated
+rows bear first-load/JIT costs. Sampled warm median after step10: 1D11.05/
+12.60ms, 3D647.40/595.75ms (generated/lattice), about9% 3D overhead including
+changed support/neighbors, diagnostics, shadow evaluations and recording.
+No hidden-history optimization introduced. Focused Owen/material/runner
+regressions:109passed, two legacy two-step physical parity tests deselected.
+All snapshotted execution source hashes unchanged. Defaults unchanged;
+accept dimensional operation as a spot check, keep full qualification open.

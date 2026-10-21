@@ -159,6 +159,10 @@ def solverParameters(scheme):
         'Cu_l': 'Linear conductivity coefficient.', 'Cu_q': 'Quadratic conductivity coefficient.',
     }.items()}
     out.update({
+        'owenTable': P('string', 'Owen support calibration and interpolation.',
+            'geometry', choices=('lattice', 'shell', 'hermiteShell')),
+        'owenMaterialWeights': P('boolean', 'Weight cross-material Owen moments by physical volume ratio; requires a materials table.',
+            'geometry'),
         'materials': P('array', 'Pure-material EOS table; list position is the fluid material ID. Null uses global gamma.',
             'fluid', nullable=True, minItems=1, items=P('object', 'Material description.',
                 properties={'name': P('string', 'Material name.'),
