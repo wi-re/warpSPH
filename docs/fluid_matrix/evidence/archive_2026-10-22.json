@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "archive": "/home/lu26029/dev/warpSPHDevelopment/core/archives/fluid-matrix-2026-10-21-v1.tar.zst",
+  "sha256": "edc06911a3c1054d21a4d4c12f004ccb84a4bb3d85ce6e1273b2fa3617b94921",
+  "archive_bytes": 7212926353,
+  "inventory": "/home/lu26029/dev/warpSPHDevelopment/core/archives/fluid-matrix-2026-10-21-v1.tar.zst.inventory.json",
+  "verified_files": 16625,
+  "verified_bytes": 11657141225,
+  "verified_utc": "2026-10-22T07:27:00Z",
+  "backup_scope": "Local filesystem only. No upload/synchronization performed.",
+  "supplemental_source_context": {
+    "path": "/home/lu26029/dev/warpSPHDevelopment/core/archives/fluid-matrix-2026-10-21-v1-source-context.tar.zst",
+    "sha256": "4b70eb98339fb79d6eca626faa21b3b98d3f5b3b6a750741b86536ed7c08b667",
+    "files": 933,
+    "note": "Supplemental current installed-source context. Measured launch/per-run snapshots remain authoritative. Captures the analytic-boundary package under its actual curvatureBoundaries path."
+  },
+  "validation": {
+    "full_payload_hashes": "16625/16625 passed",
+    "tampered_payload_rejected": true,
+    "harness_tests_passed": 7,
+    "runtime_modules_imported": 514,
+    "static_scan": "30 existing Python-2 syntax files under ignored results/materialEOS/spheral-build plus 3 obsolete imports in ignored .tmp probes; unrelated to this baseline"
+  }
+}

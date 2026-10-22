@@ -1,0 +1,3797 @@
+{
+  "version": 1,
+  "created": "2026-10-21",
+  "schemes": [
+    "divergenceFree",
+    "dfsphReference",
+    "iisph",
+    "omniIncompressible",
+    "band2018pb",
+    "deltaSPH",
+    "sun2017DeltaSPH",
+    "artificialCompressible"
+  ],
+  "rows": [
+    {
+      "id": "tgv__divergenceFree__periodic",
+      "test": "tgv",
+      "case": "tgv",
+      "scheme": "divergenceFree",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 256,
+        "tLimit": 5.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.005,
+        "cflFactor": 0.3
+      },
+      "params": {
+        "nu": 0.01,
+        "k": 2,
+        "uMag": 1.0
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "tgv__dfsphReference__periodic",
+      "test": "tgv",
+      "case": "tgv",
+      "scheme": "dfsphReference",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 256,
+        "tLimit": 5.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.005,
+        "cflFactor": 0.3
+      },
+      "params": {
+        "nu": 0.01,
+        "k": 2,
+        "uMag": 1.0
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "tgv__iisph__periodic",
+      "test": "tgv",
+      "case": "tgv",
+      "scheme": "iisph",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 256,
+        "tLimit": 5.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.005,
+        "cflFactor": 0.3
+      },
+      "params": {
+        "nu": 0.01,
+        "k": 2,
+        "uMag": 1.0
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "tgv__omniIncompressible__periodic",
+      "test": "tgv",
+      "case": "tgv",
+      "scheme": "omniIncompressible",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 256,
+        "tLimit": 5.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.005,
+        "cflFactor": 0.3
+      },
+      "params": {
+        "nu": 0.01,
+        "k": 2,
+        "uMag": 1.0
+      },
+      "scheme_settings": {
+        "omniViscosity": true
+      },
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "tgv__band2018pb__periodic",
+      "test": "tgv",
+      "case": "tgv",
+      "scheme": "band2018pb",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 256,
+        "tLimit": 5.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.005,
+        "cflFactor": 0.3
+      },
+      "params": {
+        "nu": 0.01,
+        "k": 2,
+        "uMag": 1.0
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": "Band omits the configured physical viscosity source."
+    },
+    {
+      "id": "tgv__deltaSPH__periodic",
+      "test": "tgv",
+      "case": "tgv-wc",
+      "scheme": "deltaSPH",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 256,
+        "tLimit": 5.0,
+        "nSteps": null,
+        "kernel": "Wendland2"
+      },
+      "params": {
+        "nu": 0.01,
+        "k": 2,
+        "uMag": 1.0,
+        "inviscid": false,
+        "initialPressure": true,
+        "machTarget": 0.1,
+        "referenceVelocity": 1.0,
+        "shuffleEq7": false,
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "tgv__sun2017DeltaSPH__periodic",
+      "test": "tgv",
+      "case": "tgv-wc",
+      "scheme": "sun2017DeltaSPH",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 256,
+        "tLimit": 5.0,
+        "nSteps": null,
+        "kernel": "Wendland2"
+      },
+      "params": {
+        "nu": 0.01,
+        "k": 2,
+        "uMag": 1.0,
+        "inviscid": false,
+        "initialPressure": true,
+        "machTarget": 0.1,
+        "referenceVelocity": 1.0,
+        "shuffleEq7": false,
+        "shifting": true
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "tgv__artificialCompressible__periodic",
+      "test": "tgv",
+      "case": "tgv-wc",
+      "scheme": "artificialCompressible",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 256,
+        "tLimit": 5.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "forwardEuler"
+      },
+      "params": {
+        "nu": 0.01,
+        "k": 2,
+        "uMag": 1.0,
+        "inviscid": false,
+        "initialPressure": true,
+        "machTarget": 0.1,
+        "referenceVelocity": 1.0,
+        "shuffleEq7": false
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "decayingVortices__divergenceFree__periodic",
+      "test": "decayingVortices",
+      "case": "randomFlowIncompressible",
+      "scheme": "divergenceFree",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 192,
+        "tLimit": 5.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.005,
+        "cflFactor": 0.4
+      },
+      "params": {
+        "bounded": false,
+        "nu": 0.01,
+        "seed": 45906734
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "decayingVortices__dfsphReference__periodic",
+      "test": "decayingVortices",
+      "case": "randomFlowIncompressible",
+      "scheme": "dfsphReference",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 192,
+        "tLimit": 5.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.005,
+        "cflFactor": 0.4
+      },
+      "params": {
+        "bounded": false,
+        "nu": 0.01,
+        "seed": 45906734
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "decayingVortices__iisph__periodic",
+      "test": "decayingVortices",
+      "case": "randomFlowIncompressible",
+      "scheme": "iisph",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 192,
+        "tLimit": 5.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.005,
+        "cflFactor": 0.4
+      },
+      "params": {
+        "bounded": false,
+        "nu": 0.01,
+        "seed": 45906734
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "decayingVortices__omniIncompressible__periodic",
+      "test": "decayingVortices",
+      "case": "randomFlowIncompressible",
+      "scheme": "omniIncompressible",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 192,
+        "tLimit": 5.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.005,
+        "cflFactor": 0.4
+      },
+      "params": {
+        "bounded": false,
+        "nu": 0.01,
+        "seed": 45906734
+      },
+      "scheme_settings": {
+        "omniViscosity": true
+      },
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "decayingVortices__band2018pb__periodic",
+      "test": "decayingVortices",
+      "case": "randomFlowIncompressible",
+      "scheme": "band2018pb",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 192,
+        "tLimit": 5.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.005,
+        "cflFactor": 0.4
+      },
+      "params": {
+        "bounded": false,
+        "nu": 0.01,
+        "seed": 45906734
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": "Band omits the configured physical viscosity source."
+    },
+    {
+      "id": "decayingVortices__deltaSPH__periodic",
+      "test": "decayingVortices",
+      "case": "randomFlow",
+      "scheme": "deltaSPH",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 192,
+        "tLimit": 5.0,
+        "nSteps": null,
+        "kernel": "Wendland2"
+      },
+      "params": {
+        "bounded": false,
+        "nu": 0.01,
+        "seed": 45906734,
+        "inviscid": false,
+        "targetDt": 0.00025,
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "decayingVortices__sun2017DeltaSPH__periodic",
+      "test": "decayingVortices",
+      "case": "randomFlow",
+      "scheme": "sun2017DeltaSPH",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 192,
+        "tLimit": 5.0,
+        "nSteps": null,
+        "kernel": "Wendland2"
+      },
+      "params": {
+        "bounded": false,
+        "nu": 0.01,
+        "seed": 45906734,
+        "inviscid": false,
+        "targetDt": 0.00025,
+        "shifting": true
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "decayingVortices__artificialCompressible__periodic",
+      "test": "decayingVortices",
+      "case": "randomFlow",
+      "scheme": "artificialCompressible",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 192,
+        "tLimit": 5.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "forwardEuler"
+      },
+      "params": {
+        "bounded": false,
+        "nu": 0.01,
+        "seed": 45906734,
+        "inviscid": false,
+        "targetDt": 0.00025
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "shearDecay__divergenceFree__periodic",
+      "test": "shearDecay",
+      "case": "periodicChannel",
+      "scheme": "divergenceFree",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 192,
+        "tLimit": 2.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2
+      },
+      "params": {
+        "shearWave": true,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "nuPhysical": 0.0185,
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "shearDecay__dfsphReference__periodic",
+      "test": "shearDecay",
+      "case": "periodicChannel",
+      "scheme": "dfsphReference",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 192,
+        "tLimit": 2.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2
+      },
+      "params": {
+        "shearWave": true,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "nuPhysical": 0.0185,
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "shearDecay__iisph__periodic",
+      "test": "shearDecay",
+      "case": "periodicChannel",
+      "scheme": "iisph",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 192,
+        "tLimit": 2.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2
+      },
+      "params": {
+        "shearWave": true,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "nuPhysical": 0.0185,
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "shearDecay__omniIncompressible__periodic",
+      "test": "shearDecay",
+      "case": "periodicChannel",
+      "scheme": "omniIncompressible",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 192,
+        "tLimit": 2.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2
+      },
+      "params": {
+        "shearWave": true,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "nuPhysical": 0.0185,
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "shearDecay__band2018pb__periodic",
+      "test": "shearDecay",
+      "case": "periodicChannel",
+      "scheme": "band2018pb",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 192,
+        "tLimit": 2.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2
+      },
+      "params": {
+        "shearWave": true,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "nuPhysical": 0.0185,
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": "Band omits the configured physical viscosity source."
+    },
+    {
+      "id": "shearDecay__deltaSPH__periodic",
+      "test": "shearDecay",
+      "case": "periodicChannel",
+      "scheme": "deltaSPH",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 192,
+        "tLimit": 2.0,
+        "nSteps": null,
+        "kernel": "Wendland2"
+      },
+      "params": {
+        "shearWave": true,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "nuPhysical": 0.0185,
+        "shifting": false,
+        "alpha": 2.004311668395996
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "shearDecay__sun2017DeltaSPH__periodic",
+      "test": "shearDecay",
+      "case": "periodicChannel",
+      "scheme": "sun2017DeltaSPH",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 192,
+        "tLimit": 2.0,
+        "nSteps": null,
+        "kernel": "Wendland2"
+      },
+      "params": {
+        "shearWave": true,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "nuPhysical": 0.0185,
+        "shifting": false,
+        "alpha": 2.004311668395996
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "shearDecay__artificialCompressible__periodic",
+      "test": "shearDecay",
+      "case": "periodicChannel",
+      "scheme": "artificialCompressible",
+      "boundary": "periodic",
+      "precision": "float32",
+      "spec": {
+        "nx": 192,
+        "tLimit": 2.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "forwardEuler"
+      },
+      "params": {
+        "shearWave": true,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "nuPhysical": 0.0185,
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": "The existing periodic-channel viscous configuration has no ACSPH branch.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "boundedVortices__divergenceFree__particles",
+      "test": "boundedVortices",
+      "case": "randomFlowIncompressible",
+      "scheme": "divergenceFree",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 3.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.005,
+        "cflFactor": 0.4
+      },
+      "params": {
+        "bounded": true,
+        "nu": 0.01,
+        "seed": 45906734
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "boundedVortices__divergenceFree__analytic",
+      "test": "boundedVortices",
+      "case": "randomFlowIncompressible",
+      "scheme": "divergenceFree",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 3.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.005,
+        "cflFactor": 0.4
+      },
+      "params": {
+        "bounded": true,
+        "nu": 0.01,
+        "seed": 45906734
+      },
+      "scheme_settings": {},
+      "skip": "The existing random-flow case has no analytic-wall geometry adapter.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "boundedVortices__dfsphReference__particles",
+      "test": "boundedVortices",
+      "case": "randomFlowIncompressible",
+      "scheme": "dfsphReference",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 3.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.005,
+        "cflFactor": 0.4
+      },
+      "params": {
+        "bounded": true,
+        "nu": 0.01,
+        "seed": 45906734
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "boundedVortices__dfsphReference__analytic",
+      "test": "boundedVortices",
+      "case": "randomFlowIncompressible",
+      "scheme": "dfsphReference",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 3.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.005,
+        "cflFactor": 0.4
+      },
+      "params": {
+        "bounded": true,
+        "nu": 0.01,
+        "seed": 45906734
+      },
+      "scheme_settings": {},
+      "skip": "The existing random-flow case has no analytic-wall geometry adapter.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "boundedVortices__iisph__particles",
+      "test": "boundedVortices",
+      "case": "randomFlowIncompressible",
+      "scheme": "iisph",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 3.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.005,
+        "cflFactor": 0.4
+      },
+      "params": {
+        "bounded": true,
+        "nu": 0.01,
+        "seed": 45906734
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "boundedVortices__iisph__analytic",
+      "test": "boundedVortices",
+      "case": "randomFlowIncompressible",
+      "scheme": "iisph",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 3.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.005,
+        "cflFactor": 0.4
+      },
+      "params": {
+        "bounded": true,
+        "nu": 0.01,
+        "seed": 45906734
+      },
+      "scheme_settings": {},
+      "skip": "The existing random-flow case has no analytic-wall geometry adapter.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "boundedVortices__omniIncompressible__particles",
+      "test": "boundedVortices",
+      "case": "randomFlowIncompressible",
+      "scheme": "omniIncompressible",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 3.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.005,
+        "cflFactor": 0.4
+      },
+      "params": {
+        "bounded": true,
+        "nu": 0.01,
+        "seed": 45906734
+      },
+      "scheme_settings": {
+        "omniViscosity": true
+      },
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "boundedVortices__omniIncompressible__analytic",
+      "test": "boundedVortices",
+      "case": "randomFlowIncompressible",
+      "scheme": "omniIncompressible",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 3.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.005,
+        "cflFactor": 0.4
+      },
+      "params": {
+        "bounded": true,
+        "nu": 0.01,
+        "seed": 45906734
+      },
+      "scheme_settings": {
+        "omniViscosity": true
+      },
+      "skip": "The existing random-flow case has no analytic-wall geometry adapter.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "boundedVortices__band2018pb__particles",
+      "test": "boundedVortices",
+      "case": "randomFlowIncompressible",
+      "scheme": "band2018pb",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 3.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.005,
+        "cflFactor": 0.4
+      },
+      "params": {
+        "bounded": true,
+        "nu": 0.01,
+        "seed": 45906734
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": "Band omits the configured physical viscosity source."
+    },
+    {
+      "id": "boundedVortices__band2018pb__analytic",
+      "test": "boundedVortices",
+      "case": "randomFlowIncompressible",
+      "scheme": "band2018pb",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 3.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.005,
+        "cflFactor": 0.4
+      },
+      "params": {
+        "bounded": true,
+        "nu": 0.01,
+        "seed": 45906734
+      },
+      "scheme_settings": {},
+      "skip": "The existing random-flow case has no analytic-wall geometry adapter.",
+      "timeout_seconds": 7200,
+      "notes": "Band omits the configured physical viscosity source."
+    },
+    {
+      "id": "boundedVortices__deltaSPH__particles",
+      "test": "boundedVortices",
+      "case": "randomFlow",
+      "scheme": "deltaSPH",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 3.0,
+        "nSteps": null,
+        "kernel": "Wendland2"
+      },
+      "params": {
+        "bounded": true,
+        "nu": 0.01,
+        "seed": 45906734,
+        "inviscid": false,
+        "targetDt": 0.00025,
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "boundedVortices__deltaSPH__analytic",
+      "test": "boundedVortices",
+      "case": "randomFlow",
+      "scheme": "deltaSPH",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 3.0,
+        "nSteps": null,
+        "kernel": "Wendland2"
+      },
+      "params": {
+        "bounded": true,
+        "nu": 0.01,
+        "seed": 45906734,
+        "inviscid": false,
+        "targetDt": 0.00025,
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": "The existing random-flow case has no analytic-wall geometry adapter.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "boundedVortices__sun2017DeltaSPH__particles",
+      "test": "boundedVortices",
+      "case": "randomFlow",
+      "scheme": "sun2017DeltaSPH",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 3.0,
+        "nSteps": null,
+        "kernel": "Wendland2"
+      },
+      "params": {
+        "bounded": true,
+        "nu": 0.01,
+        "seed": 45906734,
+        "inviscid": false,
+        "targetDt": 0.00025,
+        "shifting": true
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "boundedVortices__sun2017DeltaSPH__analytic",
+      "test": "boundedVortices",
+      "case": "randomFlow",
+      "scheme": "sun2017DeltaSPH",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 3.0,
+        "nSteps": null,
+        "kernel": "Wendland2"
+      },
+      "params": {
+        "bounded": true,
+        "nu": 0.01,
+        "seed": 45906734,
+        "inviscid": false,
+        "targetDt": 0.00025,
+        "shifting": true
+      },
+      "scheme_settings": {},
+      "skip": "The existing random-flow case has no analytic-wall geometry adapter.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "boundedVortices__artificialCompressible__particles",
+      "test": "boundedVortices",
+      "case": "randomFlow",
+      "scheme": "artificialCompressible",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 3.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "forwardEuler"
+      },
+      "params": {
+        "bounded": true,
+        "nu": 0.01,
+        "seed": 45906734,
+        "inviscid": false,
+        "targetDt": 0.00025
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "boundedVortices__artificialCompressible__analytic",
+      "test": "boundedVortices",
+      "case": "randomFlow",
+      "scheme": "artificialCompressible",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 3.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "forwardEuler"
+      },
+      "params": {
+        "bounded": true,
+        "nu": 0.01,
+        "seed": 45906734,
+        "inviscid": false,
+        "targetDt": 0.00025
+      },
+      "scheme_settings": {},
+      "skip": "The existing random-flow case has no analytic-wall geometry adapter.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "marrone31__divergenceFree__particles",
+      "test": "marrone31",
+      "case": "dambreak",
+      "scheme": "divergenceFree",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 100,
+        "tLimit": 2.45,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "particles",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 3.2196,
+        "fillRatio": 0.6,
+        "fluidWidth": 0.37271710771524413,
+        "referenceVelocity": 4.73091058888244,
+        "machTarget": 0.1,
+        "pressureProbeHeights": [
+          0.16,
+          0.584,
+          1.0
+        ],
+        "pressureProbeInset": 0.0,
+        "pressureProbeDiscRadius": 0.045
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "marrone31__divergenceFree__analytic",
+      "test": "marrone31",
+      "case": "dambreak",
+      "scheme": "divergenceFree",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 100,
+        "tLimit": 2.45,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 3.2196,
+        "fillRatio": 0.6,
+        "fluidWidth": 0.37271710771524413,
+        "referenceVelocity": 4.73091058888244,
+        "machTarget": 0.1,
+        "pressureProbeHeights": [
+          0.16,
+          0.584,
+          1.0
+        ],
+        "pressureProbeInset": 0.0,
+        "pressureProbeDiscRadius": 0.045
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "marrone31__dfsphReference__particles",
+      "test": "marrone31",
+      "case": "dambreak",
+      "scheme": "dfsphReference",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 100,
+        "tLimit": 2.45,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "particles",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 3.2196,
+        "fillRatio": 0.6,
+        "fluidWidth": 0.37271710771524413,
+        "referenceVelocity": 4.73091058888244,
+        "machTarget": 0.1,
+        "pressureProbeHeights": [
+          0.16,
+          0.584,
+          1.0
+        ],
+        "pressureProbeInset": 0.0,
+        "pressureProbeDiscRadius": 0.045
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "marrone31__dfsphReference__analytic",
+      "test": "marrone31",
+      "case": "dambreak",
+      "scheme": "dfsphReference",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 100,
+        "tLimit": 2.45,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 3.2196,
+        "fillRatio": 0.6,
+        "fluidWidth": 0.37271710771524413,
+        "referenceVelocity": 4.73091058888244,
+        "machTarget": 0.1,
+        "pressureProbeHeights": [
+          0.16,
+          0.584,
+          1.0
+        ],
+        "pressureProbeInset": 0.0,
+        "pressureProbeDiscRadius": 0.045
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "marrone31__iisph__particles",
+      "test": "marrone31",
+      "case": "dambreak",
+      "scheme": "iisph",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 100,
+        "tLimit": 2.45,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "particles",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 3.2196,
+        "fillRatio": 0.6,
+        "fluidWidth": 0.37271710771524413,
+        "referenceVelocity": 4.73091058888244,
+        "machTarget": 0.1,
+        "pressureProbeHeights": [
+          0.16,
+          0.584,
+          1.0
+        ],
+        "pressureProbeInset": 0.0,
+        "pressureProbeDiscRadius": 0.045
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "marrone31__iisph__analytic",
+      "test": "marrone31",
+      "case": "dambreak",
+      "scheme": "iisph",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 100,
+        "tLimit": 2.45,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 3.2196,
+        "fillRatio": 0.6,
+        "fluidWidth": 0.37271710771524413,
+        "referenceVelocity": 4.73091058888244,
+        "machTarget": 0.1,
+        "pressureProbeHeights": [
+          0.16,
+          0.584,
+          1.0
+        ],
+        "pressureProbeInset": 0.0,
+        "pressureProbeDiscRadius": 0.045
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "marrone31__omniIncompressible__particles",
+      "test": "marrone31",
+      "case": "dambreak",
+      "scheme": "omniIncompressible",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 100,
+        "tLimit": 2.45,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "particles",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 3.2196,
+        "fillRatio": 0.6,
+        "fluidWidth": 0.37271710771524413,
+        "referenceVelocity": 4.73091058888244,
+        "machTarget": 0.1,
+        "pressureProbeHeights": [
+          0.16,
+          0.584,
+          1.0
+        ],
+        "pressureProbeInset": 0.0,
+        "pressureProbeDiscRadius": 0.045
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "marrone31__omniIncompressible__analytic",
+      "test": "marrone31",
+      "case": "dambreak",
+      "scheme": "omniIncompressible",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 100,
+        "tLimit": 2.45,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 3.2196,
+        "fillRatio": 0.6,
+        "fluidWidth": 0.37271710771524413,
+        "referenceVelocity": 4.73091058888244,
+        "machTarget": 0.1,
+        "pressureProbeHeights": [
+          0.16,
+          0.584,
+          1.0
+        ],
+        "pressureProbeInset": 0.0,
+        "pressureProbeDiscRadius": 0.045
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "marrone31__band2018pb__particles",
+      "test": "marrone31",
+      "case": "dambreak",
+      "scheme": "band2018pb",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 100,
+        "tLimit": 2.45,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "particles",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 3.2196,
+        "fillRatio": 0.6,
+        "fluidWidth": 0.37271710771524413,
+        "referenceVelocity": 4.73091058888244,
+        "machTarget": 0.1,
+        "pressureProbeHeights": [
+          0.16,
+          0.584,
+          1.0
+        ],
+        "pressureProbeInset": 0.0,
+        "pressureProbeDiscRadius": 0.045
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": "Band omits the configured physical viscosity source."
+    },
+    {
+      "id": "marrone31__band2018pb__analytic",
+      "test": "marrone31",
+      "case": "dambreak",
+      "scheme": "band2018pb",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 100,
+        "tLimit": 2.45,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 3.2196,
+        "fillRatio": 0.6,
+        "fluidWidth": 0.37271710771524413,
+        "referenceVelocity": 4.73091058888244,
+        "machTarget": 0.1,
+        "pressureProbeHeights": [
+          0.16,
+          0.584,
+          1.0
+        ],
+        "pressureProbeInset": 0.0,
+        "pressureProbeDiscRadius": 0.045
+      },
+      "scheme_settings": {},
+      "skip": "Existing runner analytic-wall allowlist excludes this scheme.",
+      "timeout_seconds": 7200,
+      "notes": "Band omits the configured physical viscosity source."
+    },
+    {
+      "id": "marrone31__deltaSPH__particles",
+      "test": "marrone31",
+      "case": "dambreak",
+      "scheme": "deltaSPH",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 100,
+        "tLimit": 2.45,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "particles",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 3.2196,
+        "fillRatio": 0.6,
+        "fluidWidth": 0.37271710771524413,
+        "referenceVelocity": 4.73091058888244,
+        "machTarget": 0.1,
+        "pressureProbeHeights": [
+          0.16,
+          0.584,
+          1.0
+        ],
+        "pressureProbeInset": 0.0,
+        "pressureProbeDiscRadius": 0.045,
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "marrone31__deltaSPH__analytic",
+      "test": "marrone31",
+      "case": "dambreak",
+      "scheme": "deltaSPH",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 100,
+        "tLimit": 2.45,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 3.2196,
+        "fillRatio": 0.6,
+        "fluidWidth": 0.37271710771524413,
+        "referenceVelocity": 4.73091058888244,
+        "machTarget": 0.1,
+        "pressureProbeHeights": [
+          0.16,
+          0.584,
+          1.0
+        ],
+        "pressureProbeInset": 0.0,
+        "pressureProbeDiscRadius": 0.045,
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "marrone31__sun2017DeltaSPH__particles",
+      "test": "marrone31",
+      "case": "dambreak",
+      "scheme": "sun2017DeltaSPH",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 100,
+        "tLimit": 2.45,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "particles",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 3.2196,
+        "fillRatio": 0.6,
+        "fluidWidth": 0.37271710771524413,
+        "referenceVelocity": 4.73091058888244,
+        "machTarget": 0.1,
+        "pressureProbeHeights": [
+          0.16,
+          0.584,
+          1.0
+        ],
+        "pressureProbeInset": 0.0,
+        "pressureProbeDiscRadius": 0.045,
+        "shifting": true
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "marrone31__sun2017DeltaSPH__analytic",
+      "test": "marrone31",
+      "case": "dambreak",
+      "scheme": "sun2017DeltaSPH",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 100,
+        "tLimit": 2.45,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 3.2196,
+        "fillRatio": 0.6,
+        "fluidWidth": 0.37271710771524413,
+        "referenceVelocity": 4.73091058888244,
+        "machTarget": 0.1,
+        "pressureProbeHeights": [
+          0.16,
+          0.584,
+          1.0
+        ],
+        "pressureProbeInset": 0.0,
+        "pressureProbeDiscRadius": 0.045,
+        "shifting": true
+      },
+      "scheme_settings": {},
+      "skip": "Existing runner analytic-wall allowlist excludes this scheme.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "marrone31__artificialCompressible__particles",
+      "test": "marrone31",
+      "case": "dambreak",
+      "scheme": "artificialCompressible",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 100,
+        "tLimit": 2.45,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "forwardEuler",
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "particles",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 3.2196,
+        "fillRatio": 0.6,
+        "fluidWidth": 0.37271710771524413,
+        "referenceVelocity": 4.73091058888244,
+        "machTarget": 0.1,
+        "pressureProbeHeights": [
+          0.16,
+          0.584,
+          1.0
+        ],
+        "pressureProbeInset": 0.0,
+        "pressureProbeDiscRadius": 0.045
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "marrone31__artificialCompressible__analytic",
+      "test": "marrone31",
+      "case": "dambreak",
+      "scheme": "artificialCompressible",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 100,
+        "tLimit": 2.45,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "forwardEuler",
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 3.2196,
+        "fillRatio": 0.6,
+        "fluidWidth": 0.37271710771524413,
+        "referenceVelocity": 4.73091058888244,
+        "machTarget": 0.1,
+        "pressureProbeHeights": [
+          0.16,
+          0.584,
+          1.0
+        ],
+        "pressureProbeInset": 0.0,
+        "pressureProbeDiscRadius": 0.045
+      },
+      "scheme_settings": {},
+      "skip": "Existing runner analytic-wall allowlist excludes this scheme.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "sloshing__divergenceFree__particles",
+      "test": "sloshing",
+      "case": "sloshingTank",
+      "scheme": "divergenceFree",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 200,
+        "tLimit": 7.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "n_h": 4.0
+      },
+      "params": {
+        "wallRepresentation": "particles"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "sloshing__divergenceFree__analytic",
+      "test": "sloshing",
+      "case": "sloshingTank",
+      "scheme": "divergenceFree",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 200,
+        "tLimit": 7.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "n_h": 4.0
+      },
+      "params": {
+        "wallRepresentation": "analytic"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "sloshing__dfsphReference__particles",
+      "test": "sloshing",
+      "case": "sloshingTank",
+      "scheme": "dfsphReference",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 200,
+        "tLimit": 7.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "n_h": 4.0
+      },
+      "params": {
+        "wallRepresentation": "particles"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "sloshing__dfsphReference__analytic",
+      "test": "sloshing",
+      "case": "sloshingTank",
+      "scheme": "dfsphReference",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 200,
+        "tLimit": 7.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "n_h": 4.0
+      },
+      "params": {
+        "wallRepresentation": "analytic"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "sloshing__iisph__particles",
+      "test": "sloshing",
+      "case": "sloshingTank",
+      "scheme": "iisph",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 200,
+        "tLimit": 7.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "n_h": 4.0
+      },
+      "params": {
+        "wallRepresentation": "particles"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "sloshing__iisph__analytic",
+      "test": "sloshing",
+      "case": "sloshingTank",
+      "scheme": "iisph",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 200,
+        "tLimit": 7.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "n_h": 4.0
+      },
+      "params": {
+        "wallRepresentation": "analytic"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "sloshing__omniIncompressible__particles",
+      "test": "sloshing",
+      "case": "sloshingTank",
+      "scheme": "omniIncompressible",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 200,
+        "tLimit": 7.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "n_h": 2.57
+      },
+      "params": {
+        "wallRepresentation": "particles"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "sloshing__omniIncompressible__analytic",
+      "test": "sloshing",
+      "case": "sloshingTank",
+      "scheme": "omniIncompressible",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 200,
+        "tLimit": 7.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "n_h": 2.57
+      },
+      "params": {
+        "wallRepresentation": "analytic"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "sloshing__band2018pb__particles",
+      "test": "sloshing",
+      "case": "sloshingTank",
+      "scheme": "band2018pb",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 200,
+        "tLimit": 7.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "n_h": 4.0
+      },
+      "params": {
+        "wallRepresentation": "particles"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": "Band omits the configured physical viscosity source."
+    },
+    {
+      "id": "sloshing__band2018pb__analytic",
+      "test": "sloshing",
+      "case": "sloshingTank",
+      "scheme": "band2018pb",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 200,
+        "tLimit": 7.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "n_h": 4.0
+      },
+      "params": {
+        "wallRepresentation": "analytic"
+      },
+      "scheme_settings": {},
+      "skip": "Existing runner analytic-wall allowlist excludes this scheme.",
+      "timeout_seconds": 7200,
+      "notes": "Band omits the configured physical viscosity source."
+    },
+    {
+      "id": "sloshing__deltaSPH__particles",
+      "test": "sloshing",
+      "case": "sloshingTank",
+      "scheme": "deltaSPH",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 200,
+        "tLimit": 7.0,
+        "nSteps": null,
+        "kernel": "Wendland4"
+      },
+      "params": {
+        "wallRepresentation": "particles",
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "sloshing__deltaSPH__analytic",
+      "test": "sloshing",
+      "case": "sloshingTank",
+      "scheme": "deltaSPH",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 200,
+        "tLimit": 7.0,
+        "nSteps": null,
+        "kernel": "Wendland4"
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "sloshing__sun2017DeltaSPH__particles",
+      "test": "sloshing",
+      "case": "sloshingTank",
+      "scheme": "sun2017DeltaSPH",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 200,
+        "tLimit": 7.0,
+        "nSteps": null,
+        "kernel": "Wendland4"
+      },
+      "params": {
+        "wallRepresentation": "particles",
+        "shifting": true
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "sloshing__sun2017DeltaSPH__analytic",
+      "test": "sloshing",
+      "case": "sloshingTank",
+      "scheme": "sun2017DeltaSPH",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 200,
+        "tLimit": 7.0,
+        "nSteps": null,
+        "kernel": "Wendland4"
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "shifting": true
+      },
+      "scheme_settings": {},
+      "skip": "Existing runner analytic-wall allowlist excludes this scheme.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "sloshing__artificialCompressible__particles",
+      "test": "sloshing",
+      "case": "sloshingTank",
+      "scheme": "artificialCompressible",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 200,
+        "tLimit": 7.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "forwardEuler"
+      },
+      "params": {
+        "wallRepresentation": "particles"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "sloshing__artificialCompressible__analytic",
+      "test": "sloshing",
+      "case": "sloshingTank",
+      "scheme": "artificialCompressible",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 200,
+        "tLimit": 7.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "forwardEuler"
+      },
+      "params": {
+        "wallRepresentation": "analytic"
+      },
+      "scheme_settings": {},
+      "skip": "Existing runner analytic-wall allowlist excludes this scheme.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "hydrostatic__divergenceFree__particles",
+      "test": "hydrostatic",
+      "case": "hydrostaticColumn",
+      "scheme": "divergenceFree",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2
+      },
+      "params": {
+        "calibrateRestDensity": true,
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "hydrostatic__divergenceFree__analytic",
+      "test": "hydrostatic",
+      "case": "dambreak",
+      "scheme": "divergenceFree",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 1.0,
+        "fillRatio": 0.5,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "hydrostatic__dfsphReference__particles",
+      "test": "hydrostatic",
+      "case": "hydrostaticColumn",
+      "scheme": "dfsphReference",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2
+      },
+      "params": {
+        "calibrateRestDensity": true,
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "hydrostatic__dfsphReference__analytic",
+      "test": "hydrostatic",
+      "case": "dambreak",
+      "scheme": "dfsphReference",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 1.0,
+        "fillRatio": 0.5,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "hydrostatic__iisph__particles",
+      "test": "hydrostatic",
+      "case": "hydrostaticColumn",
+      "scheme": "iisph",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2
+      },
+      "params": {
+        "calibrateRestDensity": true,
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "hydrostatic__iisph__analytic",
+      "test": "hydrostatic",
+      "case": "dambreak",
+      "scheme": "iisph",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 1.0,
+        "fillRatio": 0.5,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "hydrostatic__omniIncompressible__particles",
+      "test": "hydrostatic",
+      "case": "hydrostaticColumn",
+      "scheme": "omniIncompressible",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2
+      },
+      "params": {
+        "calibrateRestDensity": true,
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "hydrostatic__omniIncompressible__analytic",
+      "test": "hydrostatic",
+      "case": "dambreak",
+      "scheme": "omniIncompressible",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 1.0,
+        "fillRatio": 0.5,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "hydrostatic__band2018pb__particles",
+      "test": "hydrostatic",
+      "case": "hydrostaticColumn",
+      "scheme": "band2018pb",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2
+      },
+      "params": {
+        "calibrateRestDensity": true,
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": "Band omits the configured physical viscosity source."
+    },
+    {
+      "id": "hydrostatic__band2018pb__analytic",
+      "test": "hydrostatic",
+      "case": "dambreak",
+      "scheme": "band2018pb",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 1.0,
+        "fillRatio": 0.5,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": "Existing runner analytic-wall allowlist excludes this scheme.",
+      "timeout_seconds": 7200,
+      "notes": "Band omits the configured physical viscosity source."
+    },
+    {
+      "id": "hydrostatic__deltaSPH__particles",
+      "test": "hydrostatic",
+      "case": "dambreak",
+      "scheme": "deltaSPH",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "L": 1.0
+      },
+      "params": {
+        "W": 1.0,
+        "fillRatio": 0.5,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "gravityMagnitude": 9.81,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "wallRepresentation": "particles",
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "hydrostatic__deltaSPH__analytic",
+      "test": "hydrostatic",
+      "case": "dambreak",
+      "scheme": "deltaSPH",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 1.0,
+        "fillRatio": 0.5,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "hydrostatic__sun2017DeltaSPH__particles",
+      "test": "hydrostatic",
+      "case": "dambreak",
+      "scheme": "sun2017DeltaSPH",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "L": 1.0
+      },
+      "params": {
+        "W": 1.0,
+        "fillRatio": 0.5,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "gravityMagnitude": 9.81,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "wallRepresentation": "particles",
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "hydrostatic__sun2017DeltaSPH__analytic",
+      "test": "hydrostatic",
+      "case": "dambreak",
+      "scheme": "sun2017DeltaSPH",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 1.0,
+        "fillRatio": 0.5,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": "Existing runner analytic-wall allowlist excludes this scheme.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "hydrostatic__artificialCompressible__particles",
+      "test": "hydrostatic",
+      "case": "hydrostaticColumn",
+      "scheme": "artificialCompressible",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "forwardEuler"
+      },
+      "params": {
+        "calibrateRestDensity": true,
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "hydrostatic__artificialCompressible__analytic",
+      "test": "hydrostatic",
+      "case": "dambreak",
+      "scheme": "artificialCompressible",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 128,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "forwardEuler",
+        "L": 1.0
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 1.0,
+        "fillRatio": 0.5,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": "Existing runner analytic-wall allowlist excludes this scheme.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "englishWedge__divergenceFree__particles",
+      "test": "englishWedge",
+      "case": "dambreak",
+      "scheme": "divergenceFree",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 120,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.2
+      },
+      "params": {
+        "wallRepresentation": "particles",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 2.4,
+        "fillRatio": 0.4166666666666667,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "obstacleActive": true,
+        "obstacleType": "equilateralBottom",
+        "offsetX": 0.0,
+        "aoa": 0.0,
+        "maxExtent": 0.29032258064516125,
+        "obstacleRepresentation": "particles",
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "englishWedge__divergenceFree__analytic",
+      "test": "englishWedge",
+      "case": "dambreak",
+      "scheme": "divergenceFree",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 120,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.2
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 2.4,
+        "fillRatio": 0.4166666666666667,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "obstacleActive": true,
+        "obstacleType": "equilateralBottom",
+        "offsetX": 0.0,
+        "aoa": 0.0,
+        "maxExtent": 0.29032258064516125,
+        "obstacleRepresentation": "analytic",
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "englishWedge__dfsphReference__particles",
+      "test": "englishWedge",
+      "case": "dambreak",
+      "scheme": "dfsphReference",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 120,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.2
+      },
+      "params": {
+        "wallRepresentation": "particles",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 2.4,
+        "fillRatio": 0.4166666666666667,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "obstacleActive": true,
+        "obstacleType": "equilateralBottom",
+        "offsetX": 0.0,
+        "aoa": 0.0,
+        "maxExtent": 0.29032258064516125,
+        "obstacleRepresentation": "particles",
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "englishWedge__dfsphReference__analytic",
+      "test": "englishWedge",
+      "case": "dambreak",
+      "scheme": "dfsphReference",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 120,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.2
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 2.4,
+        "fillRatio": 0.4166666666666667,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "obstacleActive": true,
+        "obstacleType": "equilateralBottom",
+        "offsetX": 0.0,
+        "aoa": 0.0,
+        "maxExtent": 0.29032258064516125,
+        "obstacleRepresentation": "analytic",
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "englishWedge__iisph__particles",
+      "test": "englishWedge",
+      "case": "dambreak",
+      "scheme": "iisph",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 120,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.2
+      },
+      "params": {
+        "wallRepresentation": "particles",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 2.4,
+        "fillRatio": 0.4166666666666667,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "obstacleActive": true,
+        "obstacleType": "equilateralBottom",
+        "offsetX": 0.0,
+        "aoa": 0.0,
+        "maxExtent": 0.29032258064516125,
+        "obstacleRepresentation": "particles",
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "englishWedge__iisph__analytic",
+      "test": "englishWedge",
+      "case": "dambreak",
+      "scheme": "iisph",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 120,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.2
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 2.4,
+        "fillRatio": 0.4166666666666667,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "obstacleActive": true,
+        "obstacleType": "equilateralBottom",
+        "offsetX": 0.0,
+        "aoa": 0.0,
+        "maxExtent": 0.29032258064516125,
+        "obstacleRepresentation": "analytic",
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "englishWedge__omniIncompressible__particles",
+      "test": "englishWedge",
+      "case": "dambreak",
+      "scheme": "omniIncompressible",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 120,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.2,
+        "n_h": 2.57
+      },
+      "params": {
+        "wallRepresentation": "particles",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 2.4,
+        "fillRatio": 0.4166666666666667,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "obstacleActive": true,
+        "obstacleType": "equilateralBottom",
+        "offsetX": 0.0,
+        "aoa": 0.0,
+        "maxExtent": 0.29032258064516125,
+        "obstacleRepresentation": "particles",
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "englishWedge__omniIncompressible__analytic",
+      "test": "englishWedge",
+      "case": "dambreak",
+      "scheme": "omniIncompressible",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 120,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.2,
+        "n_h": 2.57
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 2.4,
+        "fillRatio": 0.4166666666666667,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "obstacleActive": true,
+        "obstacleType": "equilateralBottom",
+        "offsetX": 0.0,
+        "aoa": 0.0,
+        "maxExtent": 0.29032258064516125,
+        "obstacleRepresentation": "analytic",
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "englishWedge__band2018pb__particles",
+      "test": "englishWedge",
+      "case": "dambreak",
+      "scheme": "band2018pb",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 120,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.2
+      },
+      "params": {
+        "wallRepresentation": "particles",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 2.4,
+        "fillRatio": 0.4166666666666667,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "obstacleActive": true,
+        "obstacleType": "equilateralBottom",
+        "offsetX": 0.0,
+        "aoa": 0.0,
+        "maxExtent": 0.29032258064516125,
+        "obstacleRepresentation": "particles",
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": "Band omits the configured physical viscosity source."
+    },
+    {
+      "id": "englishWedge__band2018pb__analytic",
+      "test": "englishWedge",
+      "case": "dambreak",
+      "scheme": "band2018pb",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 120,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.001,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "L": 1.2
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 2.4,
+        "fillRatio": 0.4166666666666667,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "obstacleActive": true,
+        "obstacleType": "equilateralBottom",
+        "offsetX": 0.0,
+        "aoa": 0.0,
+        "maxExtent": 0.29032258064516125,
+        "obstacleRepresentation": "analytic",
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": "Existing runner analytic-wall allowlist excludes this scheme.",
+      "timeout_seconds": 7200,
+      "notes": "Band omits the configured physical viscosity source."
+    },
+    {
+      "id": "englishWedge__deltaSPH__particles",
+      "test": "englishWedge",
+      "case": "dambreak",
+      "scheme": "deltaSPH",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 120,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "L": 1.2
+      },
+      "params": {
+        "wallRepresentation": "particles",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 2.4,
+        "fillRatio": 0.4166666666666667,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "obstacleActive": true,
+        "obstacleType": "equilateralBottom",
+        "offsetX": 0.0,
+        "aoa": 0.0,
+        "maxExtent": 0.29032258064516125,
+        "obstacleRepresentation": "particles",
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "englishWedge__deltaSPH__analytic",
+      "test": "englishWedge",
+      "case": "dambreak",
+      "scheme": "deltaSPH",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 120,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "L": 1.2
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 2.4,
+        "fillRatio": 0.4166666666666667,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "obstacleActive": true,
+        "obstacleType": "equilateralBottom",
+        "offsetX": 0.0,
+        "aoa": 0.0,
+        "maxExtent": 0.29032258064516125,
+        "obstacleRepresentation": "analytic",
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "englishWedge__sun2017DeltaSPH__particles",
+      "test": "englishWedge",
+      "case": "dambreak",
+      "scheme": "sun2017DeltaSPH",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 120,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "L": 1.2
+      },
+      "params": {
+        "wallRepresentation": "particles",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 2.4,
+        "fillRatio": 0.4166666666666667,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "obstacleActive": true,
+        "obstacleType": "equilateralBottom",
+        "offsetX": 0.0,
+        "aoa": 0.0,
+        "maxExtent": 0.29032258064516125,
+        "obstacleRepresentation": "particles",
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "englishWedge__sun2017DeltaSPH__analytic",
+      "test": "englishWedge",
+      "case": "dambreak",
+      "scheme": "sun2017DeltaSPH",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 120,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "L": 1.2
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 2.4,
+        "fillRatio": 0.4166666666666667,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "obstacleActive": true,
+        "obstacleType": "equilateralBottom",
+        "offsetX": 0.0,
+        "aoa": 0.0,
+        "maxExtent": 0.29032258064516125,
+        "obstacleRepresentation": "analytic",
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": "Existing runner analytic-wall allowlist excludes this scheme.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "englishWedge__artificialCompressible__particles",
+      "test": "englishWedge",
+      "case": "dambreak",
+      "scheme": "artificialCompressible",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 120,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "forwardEuler",
+        "L": 1.2
+      },
+      "params": {
+        "wallRepresentation": "particles",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 2.4,
+        "fillRatio": 0.4166666666666667,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "obstacleActive": true,
+        "obstacleType": "equilateralBottom",
+        "offsetX": 0.0,
+        "aoa": 0.0,
+        "maxExtent": 0.29032258064516125,
+        "obstacleRepresentation": "particles",
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "englishWedge__artificialCompressible__analytic",
+      "test": "englishWedge",
+      "case": "dambreak",
+      "scheme": "artificialCompressible",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 120,
+        "tLimit": 4.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "forwardEuler",
+        "L": 1.2
+      },
+      "params": {
+        "wallRepresentation": "analytic",
+        "gravityMagnitude": 9.81,
+        "wallBC": "freeSlip",
+        "W": 2.4,
+        "fillRatio": 0.4166666666666667,
+        "fluidWidth": 1.0,
+        "hydrostaticInit": true,
+        "referenceVelocity": 2.2147234590350102,
+        "machTarget": 0.05,
+        "pressureProbeHeights": [],
+        "obstacleActive": true,
+        "obstacleType": "equilateralBottom",
+        "offsetX": 0.0,
+        "aoa": 0.0,
+        "maxExtent": 0.29032258064516125,
+        "obstacleRepresentation": "analytic",
+        "shifting": "off"
+      },
+      "scheme_settings": {},
+      "skip": "Existing runner analytic-wall allowlist excludes this scheme.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "taylorCouette__divergenceFree__particles",
+      "test": "taylorCouette",
+      "case": "taylorCouette",
+      "scheme": "divergenceFree",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 96,
+        "tLimit": 25.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.002,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "n_h": 2.505,
+        "adaptiveDt": false
+      },
+      "params": {
+        "closedPreset": true,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": "Existing Couette case is analytic-only; no prescribed spinning particle-wall adapter.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "taylorCouette__divergenceFree__analytic",
+      "test": "taylorCouette",
+      "case": "taylorCouette",
+      "scheme": "divergenceFree",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 96,
+        "tLimit": 25.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.002,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "n_h": 2.505,
+        "adaptiveDt": false
+      },
+      "params": {
+        "closedPreset": true,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "taylorCouette__dfsphReference__particles",
+      "test": "taylorCouette",
+      "case": "taylorCouette",
+      "scheme": "dfsphReference",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 96,
+        "tLimit": 25.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.002,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "n_h": 2.505,
+        "adaptiveDt": false
+      },
+      "params": {
+        "closedPreset": true,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": "Existing Couette case is analytic-only; no prescribed spinning particle-wall adapter.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "taylorCouette__dfsphReference__analytic",
+      "test": "taylorCouette",
+      "case": "taylorCouette",
+      "scheme": "dfsphReference",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 96,
+        "tLimit": 25.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.002,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "n_h": 2.505,
+        "adaptiveDt": false
+      },
+      "params": {
+        "closedPreset": true,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": "Prescribed rotating analytic bodies / viscous Couette closure unsupported by this scheme.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "taylorCouette__iisph__particles",
+      "test": "taylorCouette",
+      "case": "taylorCouette",
+      "scheme": "iisph",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 96,
+        "tLimit": 25.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.002,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "n_h": 2.505,
+        "adaptiveDt": false
+      },
+      "params": {
+        "closedPreset": true,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": "Existing Couette case is analytic-only; no prescribed spinning particle-wall adapter.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "taylorCouette__iisph__analytic",
+      "test": "taylorCouette",
+      "case": "taylorCouette",
+      "scheme": "iisph",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 96,
+        "tLimit": 25.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.002,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "n_h": 2.505,
+        "adaptiveDt": false
+      },
+      "params": {
+        "closedPreset": true,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": "Prescribed rotating analytic bodies / viscous Couette closure unsupported by this scheme.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "taylorCouette__omniIncompressible__particles",
+      "test": "taylorCouette",
+      "case": "taylorCouette",
+      "scheme": "omniIncompressible",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 96,
+        "tLimit": 25.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.002,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "n_h": 2.505,
+        "adaptiveDt": false
+      },
+      "params": {
+        "closedPreset": true,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": "Existing Couette case is analytic-only; no prescribed spinning particle-wall adapter.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "taylorCouette__omniIncompressible__analytic",
+      "test": "taylorCouette",
+      "case": "taylorCouette",
+      "scheme": "omniIncompressible",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 96,
+        "tLimit": 25.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.002,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "n_h": 2.505,
+        "adaptiveDt": false
+      },
+      "params": {
+        "closedPreset": true,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "taylorCouette__band2018pb__particles",
+      "test": "taylorCouette",
+      "case": "taylorCouette",
+      "scheme": "band2018pb",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 96,
+        "tLimit": 25.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.002,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "n_h": 2.505,
+        "adaptiveDt": false
+      },
+      "params": {
+        "closedPreset": true,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": "Existing Couette case is analytic-only; no prescribed spinning particle-wall adapter.",
+      "timeout_seconds": 7200,
+      "notes": "Band omits the configured physical viscosity source."
+    },
+    {
+      "id": "taylorCouette__band2018pb__analytic",
+      "test": "taylorCouette",
+      "case": "taylorCouette",
+      "scheme": "band2018pb",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 96,
+        "tLimit": 25.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "semiImplicitEuler",
+        "supportMode": "SuperSymmetric",
+        "dt": 0.002,
+        "maxDt": 0.002,
+        "cflFactor": 0.2,
+        "n_h": 2.505,
+        "adaptiveDt": false
+      },
+      "params": {
+        "closedPreset": true,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "shifting": false
+      },
+      "scheme_settings": {},
+      "skip": "Prescribed rotating analytic bodies / viscous Couette closure unsupported by this scheme.",
+      "timeout_seconds": 7200,
+      "notes": "Band omits the configured physical viscosity source."
+    },
+    {
+      "id": "taylorCouette__deltaSPH__particles",
+      "test": "taylorCouette",
+      "case": "taylorCouette",
+      "scheme": "deltaSPH",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 96,
+        "tLimit": 25.0,
+        "nSteps": null,
+        "kernel": "Wendland2"
+      },
+      "params": {
+        "closedPreset": false,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "shifting": false,
+        "alpha": 1.002155834197998,
+        "nuReference": 0.0185
+      },
+      "scheme_settings": {},
+      "skip": "Existing Couette case is analytic-only; no prescribed spinning particle-wall adapter.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "taylorCouette__deltaSPH__analytic",
+      "test": "taylorCouette",
+      "case": "taylorCouette",
+      "scheme": "deltaSPH",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 96,
+        "tLimit": 25.0,
+        "nSteps": null,
+        "kernel": "Wendland2"
+      },
+      "params": {
+        "closedPreset": false,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "shifting": false,
+        "alpha": 1.002155834197998,
+        "nuReference": 0.0185
+      },
+      "scheme_settings": {},
+      "skip": null,
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "taylorCouette__sun2017DeltaSPH__particles",
+      "test": "taylorCouette",
+      "case": "taylorCouette",
+      "scheme": "sun2017DeltaSPH",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 96,
+        "tLimit": 25.0,
+        "nSteps": null,
+        "kernel": "Wendland2"
+      },
+      "params": {
+        "closedPreset": false,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "shifting": true,
+        "alpha": 1.002155834197998,
+        "nuReference": 0.0185
+      },
+      "scheme_settings": {},
+      "skip": "Existing Couette case is analytic-only; no prescribed spinning particle-wall adapter.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "taylorCouette__sun2017DeltaSPH__analytic",
+      "test": "taylorCouette",
+      "case": "taylorCouette",
+      "scheme": "sun2017DeltaSPH",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 96,
+        "tLimit": 25.0,
+        "nSteps": null,
+        "kernel": "Wendland2"
+      },
+      "params": {
+        "closedPreset": false,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "shifting": true,
+        "alpha": 1.002155834197998,
+        "nuReference": 0.0185
+      },
+      "scheme_settings": {},
+      "skip": "Prescribed rotating analytic bodies / viscous Couette closure unsupported by this scheme.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "taylorCouette__artificialCompressible__particles",
+      "test": "taylorCouette",
+      "case": "taylorCouette",
+      "scheme": "artificialCompressible",
+      "boundary": "particles",
+      "precision": "float32",
+      "spec": {
+        "nx": 96,
+        "tLimit": 25.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "forwardEuler"
+      },
+      "params": {
+        "closedPreset": false,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "shifting": true
+      },
+      "scheme_settings": {},
+      "skip": "Existing Couette case is analytic-only; no prescribed spinning particle-wall adapter.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    },
+    {
+      "id": "taylorCouette__artificialCompressible__analytic",
+      "test": "taylorCouette",
+      "case": "taylorCouette",
+      "scheme": "artificialCompressible",
+      "boundary": "analytic",
+      "precision": "float32",
+      "spec": {
+        "nx": 96,
+        "tLimit": 25.0,
+        "nSteps": null,
+        "kernel": "Wendland2",
+        "integrationScheme": "forwardEuler"
+      },
+      "params": {
+        "closedPreset": false,
+        "fluidViscosity": "morris",
+        "wallViscosityClosure": "noslipMoment",
+        "shifting": true
+      },
+      "scheme_settings": {},
+      "skip": "Prescribed rotating analytic bodies / viscous Couette closure unsupported by this scheme.",
+      "timeout_seconds": 7200,
+      "notes": ""
+    }
+  ],
+  "policy": "One GPU child at a time. No retries or outcome-driven tuning. Preserve failures.",
+  "reference_notes": "See docs/fluid_matrix/README.md for historical presets and comparison limits."
+}
