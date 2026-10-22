@@ -224,7 +224,9 @@ def _provenance(ctx: RunContext) -> str:
     # unambiguous on their own, and spelling out "scheme ... integrator ...
     # kernel ..." pushed the line past the figure width, where the backends
     # clip rather than wrap.
-    bits = [str(spec.scheme), str(spec.integrationScheme), kernelName]
+    driver = getattr(getattr(ctx, 'integrator', None), 'identifier', None)
+    integratorName = getattr(driver, 'name', None) or str(spec.integrationScheme)
+    bits = [str(spec.scheme), integratorName, kernelName]
     # The *absolute* sound speed, whatever route set it: cases disagree on
     # whether the knob is `soundSpeed` (absolute) or `c0Ratio` (a multiple of
     # sqrt(gH)), so the echoed input alone does not tell you what ran.

@@ -1,0 +1,99 @@
+"""Core geometry builds and a version-checked, state-owned timestep handover.
+
+Clone lineage is registered only where MeshlessSystem explicitly clones its state.
+A changed source, clone, domain tensor, kernel or conditioning setting invalidates
+reuse without reading GPU values. External callers retain the legacy one-slot API.
+"""
+from dataclasses import dataclass
+import torch
+from warpSPHCore.mfm import MeshlessWarp
+
+
+def _versions(*values):
+    return tuple((id(t), t._version) if isinstance(t, torch.Tensor) else t for t in values)
+
+
+def _settings(domain, kernel, config):
+    return (id(domain), domain.dim, _versions(domain.min, domain.max, domain.periodic), kernel,
+            config.condMax, config.faceCondMax)
+
+
+@dataclass
+class GeometryTicket:
+    positions: torch.Tensor
+    supports: torch.Tensor
+    sourceVersions: tuple
+    settings: tuple
+    geometry: object
+    targetVersions: tuple
+
+    def validSource(self):
+        return self.sourceVersions == _versions(self.positions, self.supports)
+
+
+_pendingGeometry = None   # compatibility for direct timestep/step callers
+
+
+def stashGeometry(positions, supports, domain, kernel, schemeConfig, geometry, *, owner=None):
+    versions = _versions(positions, supports)
+    ticket = GeometryTicket(positions, supports, versions, _settings(domain, kernel, schemeConfig), geometry, versions)
+    if owner is not None:
+        owner._meshlessGeometry = ticket
+    else:
+        global _pendingGeometry
+        _pendingGeometry = ticket
+
+
+def inheritGeometry(source, target):
+    """Register an exact clone; later in-place writes invalidate its ticket."""
+    ticket = getattr(source, '_meshlessGeometry', None)
+    if ticket is not None and ticket.validSource() and ticket.targetVersions == _versions(source.positions, source.supports):
+        target._meshlessGeometry = GeometryTicket(ticket.positions, ticket.supports, ticket.sourceVersions,
+            ticket.settings, ticket.geometry, _versions(target.positions, target.supports))
+
+
+def takeGeometry(positions, supports, domain, kernel, schemeConfig, *, owner=None):
+    global _pendingGeometry
+    ticket = getattr(owner, '_meshlessGeometry', None) if owner is not None else None
+    if owner is not None:
+        owner._meshlessGeometry = None
+    legacy = owner is None
+    if legacy:
+        ticket, _pendingGeometry = _pendingGeometry, None
+    if ticket is None or not ticket.validSource() or ticket.settings != _settings(domain, kernel, schemeConfig):
+        return None
+    if ticket.targetVersions == _versions(positions, supports):
+        return ticket.geometry
+    if legacy and ticket.positions.shape == positions.shape and ticket.supports.shape == supports.shape:
+        if torch.equal(ticket.positions, positions) and torch.equal(ticket.supports, supports):
+            return ticket.geometry
+    return None
+
+
+def buildGeometry(positions, supports, lam0, config, schemeConfig, domain):
+    return MeshlessWarp.build(
+        positions, supports, domain, config.kernel,
+        cond_max=schemeConfig.condMax, closure=schemeConfig.closure,
+        closure_power=schemeConfig.closurePower, rtol=None, cg_tol=schemeConfig.cgTol,
+        cg_iters=schemeConfig.cgIters, lam0=lam0, guards=True,
+        face_cond_max=schemeConfig.faceCondMax, centred_weights=True, area_cap=False,
+        closure_solver=schemeConfig.closureSolver,
+        mg_min_particles=schemeConfig.mgMinParticles, mg_max_coarse=schemeConfig.mgMaxCoarse,
+        closure_cap=schemeConfig.closureCap)
+
+
+def startOfStepGeometry(state, domain, config, schemeConfig):
+    """The start-of-step geometry: the timestep's one at the same positions / supports when it is there (only the closure solve is added),
+    else a fresh build, warm-starting the closure solve from the previous step's lam."""
+    geom = takeGeometry(state.positions, state.supports, domain, config.kernel, schemeConfig, owner=state)
+    if geom is None:
+        return buildGeometry(state.positions, state.supports, state.lam, config, schemeConfig, domain)
+    if schemeConfig.closure == 'project':
+        geom.close(closure_power=schemeConfig.closurePower, cg_tol=schemeConfig.cgTol,
+                   cg_iters=schemeConfig.cgIters, lam0=state.lam,
+                   closure_solver=schemeConfig.closureSolver,
+                   mg_min_particles=schemeConfig.mgMinParticles, mg_max_coarse=schemeConfig.mgMaxCoarse,
+                   closure_cap=schemeConfig.closureCap)
+    return geom
+
+

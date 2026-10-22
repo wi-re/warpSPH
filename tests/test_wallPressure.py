@@ -18,6 +18,7 @@ import pytest
 import torch
 
 from warpSPHCore import ParticleState
+from warpSPHCore.type_config import get_torch_precision
 from warpSPH.configurations.simulationConfig import SimulationConfig
 from warpSPH.modules.incompressible.wallPressure import (
     _MIN_WEIGHT, _shepardValue, wallPressureExtrapolation)
@@ -75,7 +76,7 @@ def hydrostatic(positions):
 @pytest.fixture(scope='module')
 def column(runtime):
     device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
-    return buildColumn(device, torch.float32)
+    return buildColumn(device, runtime.dtype)
 
 
 def wallRows(state, config):
@@ -179,7 +180,7 @@ def buildWrappingColumn(device, periodicAxes):
     """A column whose lattice reaches both faces of the domain, so a
     minimum-image pair genuinely can wrap. `buildColumn`'s domain is four
     times the lattice, which is exactly the case the guard must *not* fire on."""
-    dtype = torch.float32
+    dtype = get_torch_precision()
     state, config = buildColumn(device, dtype, periodic=periodicAxes)
     positions = state.positions
     low = positions.min(dim=0).values - 0.25 * DX

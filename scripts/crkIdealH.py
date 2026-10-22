@@ -66,16 +66,16 @@ def ideal_kernel(x:wp.array2d(dtype=scalar_t),R:wp.array(dtype=scalar_t),m:wp.ar
 
 
 _tables={}
-def tables(path,device):
-    key=(str(Path(path).resolve()),str(device))
+def tables(path,device,dtype=torch.float64):
+    key=(str(Path(path).resolve()),str(device),dtype)
     if key not in _tables:
-        a=dict(np.load(path));_tables[key]={k:torch.as_tensor(a[k],device=device,dtype=torch.float64).contiguous() for k in ('gradMeta','gradData','lookupMeta','lookupData')}
+        a=dict(np.load(path));_tables[key]={k:torch.as_tensor(a[k],device=device,dtype=dtype).contiguous() for k in ('gradMeta','gradData','lookupMeta','lookupData')}
     return _tables[key]
 
 
 def ideal_support(state,domain,adjacency,table_path,*,weighted=True,target=1.,damping=1.,hmin=1.e-5,hmax=.5):
-    if state.positions.shape[1]!=2 or state.positions.dtype!=torch.float64:raise ValueError('IdealH research control requires float64 2D')
-    t=tables(table_path,state.positions.device);out=torch.empty_like(state.supports);root=torch.empty_like(out);current=torch.empty_like(out)
+    if state.positions.shape[1]!=2:raise ValueError('IdealH research control requires 2D')
+    t=tables(table_path,state.positions.device,state.positions.dtype);out=torch.empty_like(state.supports);root=torch.empty_like(out);current=torch.empty_like(out)
     w=lambda a:wp.from_torch(a.contiguous())
     tag=state.materials.to(torch.int32);length=domain.max-domain.min
     wp.launch(ideal_kernel,dim=len(out),device=wp.device_from_torch(out.device),inputs=[w(state.positions),w(state.supports),w(state.masses),w(state.densities),w(tag),

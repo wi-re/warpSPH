@@ -4,11 +4,9 @@ divergenceFree}.py`), registered in the incompressible `SchemeBundle` in
 `schemes/builder.py`. Bundles fluid properties, adaptive support, diffusion,
 viscosity switch, boundary conditions, delta-SPH shifting, `regions`/
 `rigidBodies`, surface detection, gravity, and `solverConfig` (the relaxed-Jacobi
-pressure/divergence-free solver settings). Note: unlike its
-`WeaklyCompressibleSPHConfig` sibling, `incompressibleConfigToDict`/
-`dictToIncompressibleSPHConfig` do not round-trip `regions` or `rigidBodies` at
-all -- they're silently dropped on export and left at the dataclass default
-(empty list) on import.
+pressure/divergence-free solver settings). Regions, rigid bodies, shifting selectors and both convergence-check schedules
+round-trip through the established configuration codecs. Missing legacy keys
+retain the previous decoder defaults.
 """
 
 __all__ = ['IncompressibleSPHConfig', 'incompressibleConfigToDict', 'dictToIncompressibleSPHConfig']
@@ -43,6 +41,7 @@ from .rigidBody import RigidBody
 
 from .moduleConfigurations.surfaceDetection import SurfaceDetectionConfig, buildDefaultSurfaceDetectionConfig
 from .moduleConfigurations import *
+from .moduleConfigurations.shifting import shiftPropertiesToDict, dictToShiftProperties
 from ..enumTypes import *
 
 @dataclass
@@ -108,19 +107,9 @@ def incompressibleConfigToDict(config: IncompressibleSPHConfig) -> Dict[str, Any
         'bandwith': config.bandwith,
 
         'pressureForceTerm': config.pressureForceTerm.name,
-        'shiftProperties': {
-            'iterations': config.shiftProperties.iterations,
-            'CFL': config.shiftProperties.CFL,
-            'computeMach': config.shiftProperties.computeMach,
-            'maxC': config.shiftProperties.maxC,
-            'active': config.shiftProperties.active,
-            'scheme': config.shiftProperties.scheme.name,
-            'projectionScheme': config.shiftProperties.projectionScheme.name,
-            'summationDensity': config.shiftProperties.summationDensity,
-            'surfaceScaling': config.shiftProperties.surfaceScaling,
-            'threshold': config.shiftProperties.threshold,
-            'projectQuantities': config.shiftProperties.projectQuantities,
-        },
+        'shiftProperties': shiftPropertiesToDict(config.shiftProperties),
+        'regions': [region.toDict() for region in config.regions],
+        'rigidBodies': [body.toDict() for body in config.rigidBodies],
         'surfaceDetectionConfig': {
             'active': config.surfaceDetectionConfig.active,
             'colorFieldThreshold': config.surfaceDetectionConfig.colorFieldThreshold,
@@ -146,6 +135,7 @@ def incompressibleConfigToDict(config: IncompressibleSPHConfig) -> Dict[str, Any
                 'krylovFp64': config.solverConfig.pressureSolver.krylovFp64,
                 'boundaryOperatorTerms': config.solverConfig.pressureSolver.boundaryOperatorTerms.name,
                 'convergenceCriterion': config.solverConfig.pressureSolver.convergenceCriterion.name,
+                'convergenceCheckSchedule': config.solverConfig.pressureSolver.convergenceCheckSchedule,
             },
             'divergenceFreeSolver': {
                 'minIterations': config.solverConfig.divergenceFreeSolver.minIterations,
@@ -160,6 +150,7 @@ def incompressibleConfigToDict(config: IncompressibleSPHConfig) -> Dict[str, Any
                 'krylovFp64': config.solverConfig.divergenceFreeSolver.krylovFp64,
                 'boundaryOperatorTerms': config.solverConfig.divergenceFreeSolver.boundaryOperatorTerms.name,
                 'convergenceCriterion': config.solverConfig.divergenceFreeSolver.convergenceCriterion.name,
+                'convergenceCheckSchedule': config.solverConfig.divergenceFreeSolver.convergenceCheckSchedule,
             },
             'integrateRho': config.solverConfig.integrateRho,
             'densityEvolution': config.solverConfig.densityEvolution.name,
@@ -200,20 +191,9 @@ def dictToIncompressibleSPHConfig(configDict: Dict[str, Any]) -> IncompressibleS
     # config.densityDiffusionTerm = DensityDiffusionScheme[configDict['densityDiffusionTerm']] if isinstance(configDict['densityDiffusionTerm'], str) else configDict['densityDiffusionTerm']
     config.pressureForceTerm = PressureForceScheme[configDict['pressureForceTerm']] if isinstance(configDict['pressureForceTerm'], str) else configDict['pressureForceTerm']
     config.bandwith = configDict.get('bandwith', 10.0)
-    shiftPropsDict = configDict.get('shiftProperties', {})
-    config.shiftProperties = ShiftProperties(
-        iterations=shiftPropsDict.get('iterations', 1),
-        CFL=shiftPropsDict.get('CFL', 0.3),
-        computeMach=shiftPropsDict.get('computeMach', False),
-        maxC=shiftPropsDict.get('maxC', 0.3),
-        active=shiftPropsDict.get('active', True),
-        scheme=ShiftingScheme[shiftPropsDict.get('scheme', ShiftingScheme.deltaSPH.name)] if isinstance(shiftPropsDict.get('scheme', ShiftingScheme.deltaSPH.name), str) else shiftPropsDict.get('scheme', ShiftingScheme.deltaSPH),
-        projectionScheme=ShiftingProjectionScheme[shiftPropsDict.get('projectionScheme', ShiftingProjectionScheme.dot.name)] if isinstance(shiftPropsDict.get('projectionScheme', ShiftingProjectionScheme.dot.name), str) else shiftPropsDict.get('projectionScheme', ShiftingProjectionScheme.dot),
-        summationDensity=shiftPropsDict.get('summationDensity', False),
-        surfaceScaling=shiftPropsDict.get('surfaceScaling', 0.1),
-        threshold=shiftPropsDict.get('threshold', 0.5),
-        projectQuantities=shiftPropsDict.get('projectQuantities', False),
-    )
+    config.shiftProperties = dictToShiftProperties(configDict.get('shiftProperties', {}))
+    config.regions = [ParticleRegion.fromDict(value) for value in configDict.get('regions', [])]
+    config.rigidBodies = [RigidBody.fromDict(value) for value in configDict.get('rigidBodies', [])]
     surfaceConfigDict = configDict.get('surfaceDetectionConfig')
     if surfaceConfigDict is not None:
         config.surfaceDetectionConfig = SurfaceDetectionConfig(
@@ -280,6 +260,7 @@ def dictToIncompressibleSPHConfig(configDict: Dict[str, Any]) -> IncompressibleS
             krylovFp64=psDict.get('krylovFp64', buildDefaultPSConfig().krylovFp64),
             boundaryOperatorTerms=_boundaryOperatorTerms(psDict, buildDefaultPSConfig().boundaryOperatorTerms),
             convergenceCriterion=_convergenceCriterion(psDict, buildDefaultPSConfig().convergenceCriterion),
+            convergenceCheckSchedule=psDict.get('convergenceCheckSchedule', buildDefaultPSConfig().convergenceCheckSchedule),
         ),
         divergenceFreeSolver=RelaxedJacobiSolverConfig(
             minIterations=dfDict.get('minIterations', buildDefaultDFConfig().minIterations),
@@ -294,6 +275,7 @@ def dictToIncompressibleSPHConfig(configDict: Dict[str, Any]) -> IncompressibleS
             krylovFp64=dfDict.get('krylovFp64', buildDefaultDFConfig().krylovFp64),
             boundaryOperatorTerms=_boundaryOperatorTerms(dfDict, buildDefaultDFConfig().boundaryOperatorTerms),
             convergenceCriterion=_convergenceCriterion(dfDict, buildDefaultDFConfig().convergenceCriterion),
+            convergenceCheckSchedule=dfDict.get('convergenceCheckSchedule', buildDefaultDFConfig().convergenceCheckSchedule),
         ),
         integrateRho=solverConfigDict.get('integrateRho', buildDefaultIncompressibleSolverConfig().integrateRho),
         densityEvolution=_densityEvolution(solverConfigDict),

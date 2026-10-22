@@ -10,5 +10,5 @@ from .temporal import conservedHancockUpdate
 __all__ = ['mfmStep']
 
 
-def mfmStep(system, dt, config, schemeConfig, verbose = False):
-    return runMeshlessStep(system, dt, config, schemeConfig, mode='MFM', hancockUpdate=conservedHancockUpdate)
+def mfmStep(system, dt, config, schemeConfig, verbose = False, **kwargs):
+    return runMeshlessStep(system, dt, config, schemeConfig, mode='MFM', hancockUpdate=conservedHancockUpdate, **kwargs)

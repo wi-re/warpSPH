@@ -1,0 +1,742 @@
+{
+  "archive": "/home/lu26029/dev/warpSPHDevelopment/core/experiments/delta-cleanup-2026-10-21",
+  "protocol": {
+    "case": "dambreak",
+    "nx": 432,
+    "particles": 72816,
+    "warmup_steps": 10,
+    "timed_steps": 100,
+    "trials": 3,
+    "source_order": "alternating",
+    "aggregation": "median of trial means",
+    "render": false,
+    "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition"
+  },
+  "timing": {
+    "deltaSPH_float32_eager": {
+      "before": {
+        "wall_ms_mean": 17.087757750414312,
+        "integrator_ms_mean": 13.577680501070889,
+        "trials": [
+          {
+            "wall_ms_mean": 16.78366611711681,
+            "integrator_ms_mean": 13.33661346435547
+          },
+          {
+            "wall_ms_mean": 17.087757750414312,
+            "integrator_ms_mean": 13.577680501070889
+          },
+          {
+            "wall_ms_mean": 17.26957628969103,
+            "integrator_ms_mean": 13.763321568267514
+          }
+        ]
+      },
+      "after": {
+        "wall_ms_mean": 16.730990121141076,
+        "integrator_ms_mean": 13.235500615052503,
+        "trials": [
+          {
+            "wall_ms_mean": 16.553744710981846,
+            "integrator_ms_mean": 13.119451837539673
+          },
+          {
+            "wall_ms_mean": 16.730990121141076,
+            "integrator_ms_mean": 13.235500615052503
+          },
+          {
+            "wall_ms_mean": 16.807057498954237,
+            "integrator_ms_mean": 13.327139584705083
+          }
+        ]
+      },
+      "wall_improvement_percent": 2.0878551445088545
+    },
+    "deltaSPH_float32_graph": {
+      "before": {
+        "wall_ms_mean": 13.661311971955001,
+        "integrator_ms_mean": 13.304282599128783,
+        "trials": [
+          {
+            "wall_ms_mean": 13.686007931828499,
+            "integrator_ms_mean": 13.304282599128783
+          },
+          {
+            "wall_ms_mean": 13.661311971955001,
+            "integrator_ms_mean": 13.310126480505321
+          },
+          {
+            "wall_ms_mean": 13.525250069797039,
+            "integrator_ms_mean": 13.185521300806842
+          }
+        ]
+      },
+      "after": {
+        "wall_ms_mean": 13.504715459421277,
+        "integrator_ms_mean": 13.151425181539974,
+        "trials": [
+          {
+            "wall_ms_mean": 13.582910620607436,
+            "integrator_ms_mean": 13.19358017295599
+          },
+          {
+            "wall_ms_mean": 13.504715459421277,
+            "integrator_ms_mean": 13.147064221251492
+          },
+          {
+            "wall_ms_mean": 13.492212598212063,
+            "integrator_ms_mean": 13.151425181539974
+          }
+        ]
+      },
+      "wall_improvement_percent": 1.1462772598649251
+    },
+    "sun2017DeltaSPH_float32_eager": {
+      "before": {
+        "wall_ms_mean": 17.173552503809333,
+        "integrator_ms_mean": 13.618826962480641,
+        "trials": [
+          {
+            "wall_ms_mean": 17.510198797099292,
+            "integrator_ms_mean": 13.961807069778443
+          },
+          {
+            "wall_ms_mean": 17.173552503809333,
+            "integrator_ms_mean": 13.618826962480641
+          },
+          {
+            "wall_ms_mean": 17.019046787172556,
+            "integrator_ms_mean": 13.495146674339217
+          }
+        ]
+      },
+      "after": {
+        "wall_ms_mean": 17.36996806692332,
+        "integrator_ms_mean": 13.81146955971766,
+        "trials": [
+          {
+            "wall_ms_mean": 18.177300039678812,
+            "integrator_ms_mean": 14.569682846069336
+          },
+          {
+            "wall_ms_mean": 17.36996806692332,
+            "integrator_ms_mean": 13.81146955971766
+          },
+          {
+            "wall_ms_mean": 16.764414170756936,
+            "integrator_ms_mean": 13.25004509241894
+          }
+        ]
+      },
+      "wall_improvement_percent": -1.1437095677811593
+    },
+    "sun2017DeltaSPH_float32_graph": {
+      "before": {
+        "wall_ms_mean": 13.720162003301084,
+        "integrator_ms_mean": 13.358319229963753,
+        "trials": [
+          {
+            "wall_ms_mean": 13.68283729068935,
+            "integrator_ms_mean": 13.311843406409025
+          },
+          {
+            "wall_ms_mean": 13.720162003301084,
+            "integrator_ms_mean": 13.358319229963753
+          },
+          {
+            "wall_ms_mean": 13.74165132176131,
+            "integrator_ms_mean": 13.396701549716068
+          }
+        ]
+      },
+      "after": {
+        "wall_ms_mean": 13.481294997036457,
+        "integrator_ms_mean": 13.131893803365529,
+        "trials": [
+          {
+            "wall_ms_mean": 13.486759793013334,
+            "integrator_ms_mean": 13.131893803365529
+          },
+          {
+            "wall_ms_mean": 13.481294997036457,
+            "integrator_ms_mean": 13.136273348760424
+          },
+          {
+            "wall_ms_mean": 13.449504682794213,
+            "integrator_ms_mean": 13.121432112059509
+          }
+        ]
+      },
+      "wall_improvement_percent": 1.7409926078653881
+    },
+    "deltaSPH_float64_eager": {
+      "before": {
+        "wall_ms_mean": 66.25402940902859,
+        "integrator_ms_mean": 53.89222324255741,
+        "trials": [
+          {
+            "wall_ms_mean": 66.3331228774041,
+            "integrator_ms_mean": 53.89222324255741
+          },
+          {
+            "wall_ms_mean": 66.13966186065227,
+            "integrator_ms_mean": 53.608978194419784
+          },
+          {
+            "wall_ms_mean": 66.25402940902859,
+            "integrator_ms_mean": 53.95898587775953
+          }
+        ]
+      },
+      "after": {
+        "wall_ms_mean": 65.75864293146878,
+        "integrator_ms_mean": 53.24366556032739,
+        "trials": [
+          {
+            "wall_ms_mean": 65.49267855938524,
+            "integrator_ms_mean": 53.06893593373925
+          },
+          {
+            "wall_ms_mean": 65.75864293146878,
+            "integrator_ms_mean": 53.24366556032739
+          },
+          {
+            "wall_ms_mean": 65.8527609333396,
+            "integrator_ms_mean": 53.30617484661064
+          }
+        ]
+      },
+      "wall_improvement_percent": 0.7477076971446728
+    },
+    "deltaSPH_float64_graph": {
+      "before": {
+        "wall_ms_mean": 71.86263494193554,
+        "integrator_ms_mean": 70.02916362023714,
+        "trials": [
+          {
+            "wall_ms_mean": 71.75884548109025,
+            "integrator_ms_mean": 69.9772931578936
+          },
+          {
+            "wall_ms_mean": 71.86263494193554,
+            "integrator_ms_mean": 70.02916362023714
+          },
+          {
+            "wall_ms_mean": 71.8942596996203,
+            "integrator_ms_mean": 70.09272364843072
+          }
+        ]
+      },
+      "after": {
+        "wall_ms_mean": 70.92546808999032,
+        "integrator_ms_mean": 69.1413250046246,
+        "trials": [
+          {
+            "wall_ms_mean": 70.81127351615578,
+            "integrator_ms_mean": 69.0558678000187
+          },
+          {
+            "wall_ms_mean": 70.92546808999032,
+            "integrator_ms_mean": 69.1413250046246
+          },
+          {
+            "wall_ms_mean": 70.95777598209679,
+            "integrator_ms_mean": 69.19055662089677
+          }
+        ]
+      },
+      "wall_improvement_percent": 1.304108668854742
+    },
+    "sun2017DeltaSPH_float64_eager": {
+      "before": {
+        "wall_ms_mean": 66.42838740721345,
+        "integrator_ms_mean": 53.731268834586096,
+        "trials": [
+          {
+            "wall_ms_mean": 66.35706915985793,
+            "integrator_ms_mean": 53.66153058138761
+          },
+          {
+            "wall_ms_mean": 66.43846123013645,
+            "integrator_ms_mean": 53.731268834586096
+          },
+          {
+            "wall_ms_mean": 66.42838740721345,
+            "integrator_ms_mean": 53.942494324963505
+          }
+        ]
+      },
+      "after": {
+        "wall_ms_mean": 65.81602939870209,
+        "integrator_ms_mean": 53.29357705935083,
+        "trials": [
+          {
+            "wall_ms_mean": 65.81602939870209,
+            "integrator_ms_mean": 53.268959083942455
+          },
+          {
+            "wall_ms_mean": 65.76654755044729,
+            "integrator_ms_mean": 53.29357705935083
+          },
+          {
+            "wall_ms_mean": 66.32759220898151,
+            "integrator_ms_mean": 53.3345903338808
+          }
+        ]
+      },
+      "wall_improvement_percent": 0.9218318137960257
+    },
+    "sun2017DeltaSPH_float64_graph": {
+      "before": {
+        "wall_ms_mean": 71.75024604890496,
+        "integrator_ms_mean": 69.96199519213552,
+        "trials": [
+          {
+            "wall_ms_mean": 71.80478557012975,
+            "integrator_ms_mean": 69.99980110787985
+          },
+          {
+            "wall_ms_mean": 71.75024604890496,
+            "integrator_ms_mean": 69.96199519213552
+          },
+          {
+            "wall_ms_mean": 71.70549036934972,
+            "integrator_ms_mean": 69.94071150330281
+          }
+        ]
+      },
+      "after": {
+        "wall_ms_mean": 70.9583479212597,
+        "integrator_ms_mean": 69.17925447583048,
+        "trials": [
+          {
+            "wall_ms_mean": 70.9583479212597,
+            "integrator_ms_mean": 69.17925447583048
+          },
+          {
+            "wall_ms_mean": 70.91653754003346,
+            "integrator_ms_mean": 69.1329758247417
+          },
+          {
+            "wall_ms_mean": 71.11831032205373,
+            "integrator_ms_mean": 69.35338244651153
+          }
+        ]
+      },
+      "wall_improvement_percent": 1.103686985415353
+    }
+  },
+  "profiles": {
+    "sun2017DeltaSPH_float32_graph_before_0": {
+      "cudaLaunchKernel": 61.0,
+      "cudaStreamSynchronize": 11.0,
+      "cudaGraphLaunch": 2.0,
+      "cudaDeviceSynchronize": 1.3333333333333333,
+      "GPU_kernel_events_per_step": 966.0,
+      "native_update_kernel_events_per_step": 0.0
+    },
+    "sun2017DeltaSPH_float32_graph_after_0": {
+      "cudaLaunchKernel": 61.0,
+      "cudaStreamSynchronize": 11.0,
+      "cudaGraphLaunch": 2.0,
+      "cudaDeviceSynchronize": 1.3333333333333333,
+      "GPU_kernel_events_per_step": 935.0,
+      "native_update_kernel_events_per_step": 4.0
+    },
+    "deltaSPH_float32_eager_after_0": {
+      "cudaLaunchKernel": 796.0,
+      "cudaStreamSynchronize": 10.666666666666666,
+      "cudaDeviceSynchronize": 2.3333333333333335,
+      "GPU_kernel_events_per_step": 842.0,
+      "native_update_kernel_events_per_step": 0.0
+    },
+    "sun2017DeltaSPH_float32_eager_before_0": {
+      "cudaLaunchKernel": 805.0,
+      "cudaStreamSynchronize": 13.0,
+      "cudaDeviceSynchronize": 2.3333333333333335,
+      "GPU_kernel_events_per_step": 852.0,
+      "native_update_kernel_events_per_step": 0.0
+    },
+    "deltaSPH_float32_eager_before_0": {
+      "cudaLaunchKernel": 798.0,
+      "cudaStreamSynchronize": 10.666666666666666,
+      "cudaDeviceSynchronize": 2.3333333333333335,
+      "GPU_kernel_events_per_step": 845.0,
+      "native_update_kernel_events_per_step": 0.0
+    },
+    "sun2017DeltaSPH_float32_eager_after_0": {
+      "cudaLaunchKernel": 803.0,
+      "cudaStreamSynchronize": 13.0,
+      "cudaDeviceSynchronize": 2.3333333333333335,
+      "GPU_kernel_events_per_step": 849.0,
+      "native_update_kernel_events_per_step": 0.0
+    },
+    "deltaSPH_float32_graph_before_0": {
+      "cudaLaunchKernel": 54.0,
+      "cudaStreamSynchronize": 8.666666666666666,
+      "cudaGraphLaunch": 2.0,
+      "cudaDeviceSynchronize": 1.3333333333333333,
+      "GPU_kernel_events_per_step": 959.0,
+      "native_update_kernel_events_per_step": 0.0
+    },
+    "deltaSPH_float32_graph_after_0": {
+      "cudaLaunchKernel": 54.0,
+      "cudaStreamSynchronize": 8.666666666666666,
+      "cudaGraphLaunch": 2.0,
+      "cudaDeviceSynchronize": 1.3333333333333333,
+      "GPU_kernel_events_per_step": 928.0,
+      "native_update_kernel_events_per_step": 4.0
+    }
+  },
+  "qualification": {
+    "focused32": 136,
+    "focused64": 28,
+    "configuration": 104,
+    "configuration_idempotence": 4,
+    "state_pairs": 35,
+    "all_pairs_bitwise": true,
+    "requested_graph_eager_pairs": 12,
+    "all_requested_graph_eager_bitwise": true,
+    "post_codec_default_pairs": 4,
+    "all_post_codec_bitwise": true,
+    "matched_analytic_delta_plus_refusal": true
+  },
+  "physical_runs": {
+    "physical_sun2017DeltaSPH_before": {
+      "scheme": "sun2017DeltaSPH",
+      "case": "dambreak",
+      "nx": 64,
+      "precision": "float32",
+      "requested_graph": false,
+      "particles": 5751,
+      "steps": 300,
+      "time": 0.15,
+      "diverged": false,
+      "stop_reason": null,
+      "wall_ms_mean": 17.713892799802125,
+      "integrator_ms_mean": 15.072008361816406,
+      "run_wall_seconds": 8.414728424046189,
+      "run_wall_ms_per_step": 28.04909474682063,
+      "graph": null,
+      "step_graph": null,
+      "mass_relative_drift": 0.0,
+      "max_particle_mass_change": 0.0,
+      "density_min": 1.0000282526016235,
+      "density_max": 1.0055960416793823,
+      "velocity_max": 2.875976085662842,
+      "density_rms_relative": 0.002465164987370372,
+      "kinetic_energy": 0.6478621240853166,
+      "initial_kinetic_energy": 0.0,
+      "integrator": "symplecticEuler",
+      "export_path": "/home/lu26029/dev/warpSPH/results/delta_performance_2026-10-21/final_timing/physical_sun2017DeltaSPH_before/video/3-dambreak_2026-10-21_19-24-38",
+      "daemon_run_id": "7d7efdf56b9a4bb69a7b4ee41f9d82d5",
+      "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition"
+    },
+    "physical_deltaSPH_before": {
+      "scheme": "deltaSPH",
+      "case": "dambreak",
+      "nx": 64,
+      "precision": "float32",
+      "requested_graph": false,
+      "particles": 5751,
+      "steps": 300,
+      "time": 0.15,
+      "diverged": false,
+      "stop_reason": null,
+      "wall_ms_mean": 17.955978359095752,
+      "integrator_ms_mean": 15.27912992477417,
+      "run_wall_seconds": 8.560757515020669,
+      "run_wall_ms_per_step": 28.53585838340223,
+      "graph": null,
+      "step_graph": null,
+      "mass_relative_drift": 0.0,
+      "max_particle_mass_change": 0.0,
+      "density_min": 1.0000280141830444,
+      "density_max": 1.0056419372558594,
+      "velocity_max": 2.878932476043701,
+      "density_rms_relative": 0.0024654690641909838,
+      "kinetic_energy": 0.6479644102278366,
+      "initial_kinetic_energy": 0.0,
+      "integrator": "symplecticEuler",
+      "export_path": "/home/lu26029/dev/warpSPH/results/delta_performance_2026-10-21/final_timing/physical_deltaSPH_before/video/3-dambreak_2026-10-21_19-24-12",
+      "daemon_run_id": "59c281a8dc78471f9681bd72f2e298dc",
+      "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition"
+    },
+    "physical_deltaSPH_after": {
+      "scheme": "deltaSPH",
+      "case": "dambreak",
+      "nx": 64,
+      "precision": "float32",
+      "requested_graph": false,
+      "particles": 5751,
+      "steps": 300,
+      "time": 0.15,
+      "diverged": false,
+      "stop_reason": null,
+      "wall_ms_mean": 17.227407922036946,
+      "integrator_ms_mean": 14.690329322814941,
+      "run_wall_seconds": 8.497484052088112,
+      "run_wall_ms_per_step": 28.324946840293705,
+      "graph": null,
+      "step_graph": null,
+      "mass_relative_drift": 0.0,
+      "max_particle_mass_change": 0.0,
+      "density_min": 1.0000280141830444,
+      "density_max": 1.0056419372558594,
+      "velocity_max": 2.878932476043701,
+      "density_rms_relative": 0.0024654690641909838,
+      "kinetic_energy": 0.6479644102278366,
+      "initial_kinetic_energy": 0.0,
+      "integrator": "symplecticEuler",
+      "export_path": "/home/lu26029/dev/warpSPH/results/delta_performance_2026-10-21/final_timing/physical_deltaSPH_after/video/3-dambreak_2026-10-21_19-24-25",
+      "daemon_run_id": "c6e9759f5d9a47569dfa204c4d3a4922",
+      "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition"
+    },
+    "physical_sun2017DeltaSPH_after": {
+      "scheme": "sun2017DeltaSPH",
+      "case": "dambreak",
+      "nx": 64,
+      "precision": "float32",
+      "requested_graph": false,
+      "particles": 5751,
+      "steps": 300,
+      "time": 0.15,
+      "diverged": false,
+      "stop_reason": null,
+      "wall_ms_mean": 17.348171109333634,
+      "integrator_ms_mean": 14.740940446853637,
+      "run_wall_seconds": 8.381586368195713,
+      "run_wall_ms_per_step": 27.938621227319043,
+      "graph": null,
+      "step_graph": null,
+      "mass_relative_drift": 0.0,
+      "max_particle_mass_change": 0.0,
+      "density_min": 1.0000282526016235,
+      "density_max": 1.0055960416793823,
+      "velocity_max": 2.875976085662842,
+      "density_rms_relative": 0.002465164987370372,
+      "kinetic_energy": 0.6478621240853166,
+      "initial_kinetic_energy": 0.0,
+      "integrator": "symplecticEuler",
+      "export_path": "/home/lu26029/dev/warpSPH/results/delta_performance_2026-10-21/final_timing/physical_sun2017DeltaSPH_after/video/3-dambreak_2026-10-21_19-24-51",
+      "daemon_run_id": "70c1791725b741bf9dabe6772900595b",
+      "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition"
+    }
+  },
+  "physical_comparisons": {
+    "deltaSPH": {
+      "bitwise": true,
+      "fields": {
+        "emitters": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "bodyIDs": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "positions": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "velocities": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "supports": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "masses": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "densities": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "kinds": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "materials": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "UIDs": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "pressures": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "surfaceIndicators": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "surfaceNormals": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "surfaceLambdas": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "ghostIndices": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "ghostOffsets": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "boundaryAccelerations": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        }
+      }
+    },
+    "sun2017DeltaSPH": {
+      "bitwise": true,
+      "fields": {
+        "emitters": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "bodyIDs": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "positions": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "velocities": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "supports": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "masses": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "densities": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "kinds": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "materials": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "UIDs": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "pressures": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "surfaceIndicators": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "surfaceNormals": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "surfaceLambdas": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "ghostIndices": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "ghostOffsets": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        },
+        "boundaryAccelerations": {
+          "bitwise": true,
+          "absolute": 0.0,
+          "relative_to_field": 0.0
+        }
+      }
+    }
+  },
+  "daemon_verified": [
+    {
+      "id": "59c281a8dc78471f9681bd72f2e298dc",
+      "name": "deltaSPH dambreak | float32 | physical_deltaSPH_before",
+      "status": "completed",
+      "step": 300,
+      "time": 0.15,
+      "particles": 5751
+    },
+    {
+      "id": "c6e9759f5d9a47569dfa204c4d3a4922",
+      "name": "deltaSPH dambreak | float32 | physical_deltaSPH_after",
+      "status": "completed",
+      "step": 300,
+      "time": 0.15,
+      "particles": 5751
+    },
+    {
+      "id": "7d7efdf56b9a4bb69a7b4ee41f9d82d5",
+      "name": "sun2017DeltaSPH dambreak | float32 | physical_sun2017DeltaSPH_before",
+      "status": "completed",
+      "step": 300,
+      "time": 0.15,
+      "particles": 5751
+    },
+    {
+      "id": "70c1791725b741bf9dabe6772900595b",
+      "name": "sun2017DeltaSPH dambreak | float32 | physical_sun2017DeltaSPH_after",
+      "status": "completed",
+      "step": 300,
+      "time": 0.15,
+      "particles": 5751
+    }
+  ]
+}

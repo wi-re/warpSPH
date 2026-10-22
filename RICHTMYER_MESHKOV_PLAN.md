@@ -3096,3 +3096,320 @@ No hidden-history optimization introduced. Focused Owen/material/runner
 regressions:109passed, two legacy two-step physical parity tests deselected.
 All snapshotted execution source hashes unchanged. Defaults unchanged;
 accept dimensional operation as a spot check, keep full qualification open.
+
+### 1D entropy accounting (2026-10-21, complete)
+
+User accepts entropy accounting as the next focused follow-up. Reuse saved
+density-reset audits first, then instrument fresh midpoint Sod and stationary
+pressure-contact controls to attribute delta log(P/rho^gamma) to reset,
+stage/state evolution and compatible correction. Keep generated material-aware
+Owen, before-RHS timing, paper density, geometric volumes and original native
+compatible policy fixed. Add model controls only when needed to isolate a
+measured contribution; retain positivity, accuracy, conservation and cost
+evidence. New physical executions remain sequential, daemon-visible, recorded.
+
+Completed report: reports/materialEOS/entropyAccounting/README.md; raw data:
+results/materialEOS/entropy_accounting_2026-10-21/. Saved 1D/3D audits first
+show reset budgets -.004775/-.013315 versus remaining step contributions
++.004822/+.003417. Initial reset negligible in1D and6.13e-7 in3D; accumulated
+dynamic resets dominate the negative global budget, not startup calibration.
+No new3D flow rerun. Pinned Spheral preStepInitialize also replaces rigorous
+sum density without an associated u rescale in that function; this source
+fact does not establish Spheral's net entropy behavior. Source hashes saved.
+
+Four new1D controls: Sod300particles and stationary material contact100,
+equal spacing dx.01, gamma1.4, generated/material-aware Owen before each RHS,
+paper density, geometric volumes, fresh midpoint, native compatible energy,
+raw averaged-Q heating, current gradient, Cl2/Cq1/AV R4 fixed. Each runs to
+t.2 at dt.001/.0005 (200/400steps); all sequential, daemon-visible, recorded.
+No numerical production formula/default modified.
+
+New observational ledger telescopes per particle: pre-reset -> reset -> raw
+full-step midpoint candidate -> compatible accepted state. The temporary
+half-step predictor is a separate branch, never added to accepted entropy.
+A read-only zero-AV thermal operator evaluates pressure heating; deep-copy
+Warp diffusion structs to avoid sharing cached ctypes storage. All saved
+coarse Sod physical fields remain bitwise identical to the retained baseline.
+Pointwise cumulative closure<2.34e-14, per-step<4.8e-16; endpoint telescoping
+residual<1.3e-31. Six new identity/shadow-isolation tests;37focused checks pass,
+one existing unrecorded trajectory test deselected. Source hashes unchanged.
+
+Global entropy-function budgets (coarse/fine): reset-.00477509/-.00483903;
+continuity+pressure-.00076474/-.00078480; AV thermal residual+.00491168/
++.00498017; compatible correction+.00067466/+.00065764; net+.00004651/
++.00001399. AV residual includes floating-point raw-update rounding. The
+instantaneous midpoint pressure/continuity integrals independently agree at
+-.00076665/-.00078540. Negative reset and pressure/continuity budgets persist
+under dt bisection; neither temporal nor spatial convergence is established.
+
+Initial-interface particles (|x0|<.05) have mean net-.04055/-.04139. Largest
+contact pressure spike is UID149: P.586404/.585855 vs exact.303130. Its coarse
+reset contribution-.301360, raw+.127671, compatible+.028226, net-.145463.
+First light particleUID150 has raw-.871746 and compatible+.717994, so global
+positive compatible change does not imply pointwise monotonicity. Two adjacent
+light particles reverse x order by~1.6e-4 on both dt grids; retained observation
+with no repair. This moving multi-mass contact remains a useful counterexample.
+
+Stationary pressure contact remains at roundoff: maxspeed6.28e-15, pressure
+error<7.2e-15, displacement<1.2e-14spacings. All4 positive, exactmass/IDs, zero
+nonpositive EOS calls, maxrelativeE drift2.11e-15. Every daemon/HDF5/video
+recording verified with41frames. Wall s / ms per step: Sodcoarse6.49/32.43,
+Sodfine9.13/22.82, contactcoarse6.22/31.09, contactfine8.62/21.55. Heavily
+observed cached/JIT-warm controls; not a production throughput benchmark.
+
+Disposition: fixed-u density projection is the leading negative operation
+on these trajectories, with a second pressure/continuity consistency residual.
+The compatible correction is not the leading negative global contribution.
+This accounting is not a counterfactual removing resets and does not justify
+rescaling u or replacing density/energy policies. Next: compare geometric
+density-estimator changes with the continuity derivative on saved contact
+states, separate support order/evolution and unequal-resolution geometry,
+cross-check that operator in Spheral, then refine space/sampling.
+
+### Density derivative and reconstructed/integrated energy (2026-10-21, complete)
+
+User requests the geometric-density/continuity investigation and consideration
+of compatible reconstructed energy versus integrating instantaneous du/dt.
+Previous ledger only compares two local candidates on the compatible trajectory.
+Extend with matched raw/compatible physical controls at two timesteps, preserving
+interim predictor and other physics, plus frozen-state geometric-density
+derivative tests with support held fixed and support evolution separated.
+Cross-check relevant native Spheral operators, quantify accuracy/entropy/
+positivity/conservation/cost, retain failures and recorded daemon histories.
+No default/model promotion from energy conservation or picture agreement.
+
+
+Completed: `reports/materialEOS/densityEnergy/README.md`, reproducible with
+`study_densityEnergy.py`, `analyze_densityEnergy.py`,
+`audit_densityDerivative1d.py` and `plot_densityDerivative1d.py`. Sixteen
+sequential daemon-connected GPU runs cover Sod/contact, two dt values, and
+standard/entropy-work interim derivatives with compatible finalization on/off.
+Every run has verified 41-frame HDF5/video history; all remain positive with
+zero nonpositive EOS calls. Four preferred controls are bitwise unchanged from
+the preceding ledger study. Added focused tests: 42 passed across six files;
+one existing trajectory check deselected in favor of the recorded controls.
+Initial observer keyword-signature failure retained separately, before any
+accepted step, and its daemon entry marked failed. No production source or
+numerical default changes. Total runner wall121.25s; observed21.35–32.80ms/step
+with instrumentation, not a throughput benchmark.
+
+The distinction requested by the user is now explicit. Read-only production
+compatible shadows on every trajectory close global energy within1.11e-15.
+Standard interim-vs-compatible mean local energy-rate difference stays
+.06603/.06669 at dt.001/.0005 on the preferred Sod trajectory. Integrating
+that interim RHS alone gives UID150 u=.8508/.8450 versus compatible1.8831/
+1.8765. The existing experimental entropy-work ODE gives1.8640/1.8680 alone
+and1.8677/1.8691 with compatible finalization; it is neither Eq78 nor unchanged
+Spheral. Its same-state mean rate mismatch falls.002162→.000542. Standalone
+maxrelativeE drift falls~7e-6→2e-6, compatible stays2.11e-15. The contact
+pressure spike remains~.586 (standard standalone~.610), exact.30313. Quiet
+contact maxspeed6.28e-15. No general order claim from two dt grids.
+
+Nineteen frozen states include three affine controls and sixteen moving Sod
+states. Recompute V/RK/rho under x±epsilon*v and separately measured midpoint
+Rdot, for epsilon1e-5/3e-6/1e-6. Corrected-density log-rate versus continuity
+mass-weighted error at nominalt.06 is.33066/.33978 with fixedR for coarse/
+fine dt; measuredRdot gives.23867/.24465. FixedR mismatch excludes support
+ordering as the sole explanation. Rdot is a discrete measured rate, not an
+analytic/converged law. One further Owen relaxation at saved geometry is not
+an actual before/after-RHS trace or alternate ordering trajectory.
+
+Compiled pinned Spheral components reproduce V/rho/gradient/pressure work
+within moving-state relativeL2~1e-8 and density finite differences~5e-6.
+Native volume cap/density floor never active. Native stock density also has a
+continuity mismatch on these common states. Corrected mass-replacement rho
+and pressure formula are declared paper formulas using native RK kernels;
+no new native hydro trajectory or entropy budget is claimed. Static adapter
+exports only new audit symbols, no interposition/LD_PRELOAD. Uniform affine
+and equal-spacing variable-mass material controls are accurate~2e-9; a4:1
+spacing jump has fixedR maxrateerror.03615, restored to5.78e-9 by homothetic
+support evolution. Native table knots have~1e-6 finite-difference noise.
+
+Disposition: keep predictor/standalone ODE/finite-step compatible work distinct.
+Energy selection does not remove the observed geometric-density/continuity
+inconsistency. Native component agreement supports a discrete limitation,
+not a Warp-only coefficient bug. Next: spatial refinement and equal-mass versus
+equal-spacing sampling, then distinct-gamma checks; a native matched trajectory
+would test Spheral's full feedback separately. No energy or density repair or
+default promotion justified solely by these results.
+
+### Return to full trajectory matching (2026-10-21, complete)
+
+User redirects effort to WarpSPH/Spheral matching rather than characterization
+of the shared geometric-density/continuity limitation. Retain existing results
+as research observations, but do not make their spatial refinement a prerequisite.
+The earlier native-target/state-replacement blob control already agrees within
+cloud position RMS8.69e-5 at half dt; preferred before-RHS support deliberately
+differs and has RMS.042. Reuse compiled native fresh-midpoint/averaged-Q
+reference and inspect early recorded states/RHS audits. Isolate native Warp
+RHS-estimated compatible work sign versus final-work entropy partition with
+identical support/density/AV/Butcher policies. Native-style support replacement
+is a diagnostic match control, not a promotion or change of preferred semantics.
+All new physical runs sequential, daemon-visible, recorded; defaults unchanged.
+
+
+Completed report: `reports/materialEOS/spheralMatching/README.md`; scripts
+`study_spheralMatching.py` and `analyze_spheralMatching.py`. Four full blob
+runs, two timestep grids × RHS-estimated/native-final-work entropy fraction.
+Native weighted target/state-replacement support is an explicitly diagnostic
+reference-match control; paper density/geometric volume, raw thermal midpoint,
+fresh Butcher midpoint and averaged Q/current gradient fixed. Preferred
+before-RHS explicit support and all production defaults remain unchanged.
+
+Using the native final compatible fraction reduces cloud position RMS vs the
+compiled paper-overlay Spheral reference from2.42254e-4 to9.04504e-7 coarse,
+and8.68905e-5 to7.09757e-7 fine. Fine cloud relative L1 P/u/v differences
+9.95e-7/5.85e-7/6.30e-7. Reference fraction includes final-work sign and native
+1e-15 thresholds/denominator; this is not a sign-only factorial. Actual native
+scalar fraction agrees within2e-16 over1003 random/threshold samples. Standard
+interim du/dt retained, no experimental entropy thermal ODE. Both baseline
+replays reproduce earlier final fields bitwise. Cold-mass endpoints exactly
+match native .51265823/.51898734. No full512 or new native flow needed.
+
+Earliest differences already occur in geometric/RK reset: volume relativeL1
+9.31e-10, rho1.44e-9, A2.96e-10, AB1.89e-8, supports identical, max u diff
+2.78e-17. After first coarse accepted step maxpositiondistance5.96e-14,
+u relativeL1~1.1e-10; no large initial thermodynamic divergence. Native step2
+RHS records require bijective geometry matching because State FieldList and
+example nodeSet orders differ. Saved gradient tensors are transposed; retain
+raw and convention-normalized metrics. Trace and longitudinal Q contractions
+are transpose invariant here, not a general tensor-consumer qualification.
+Evolved step2 accel/du relativeL1 differences up to5.44e-6/4.10e-6; previous
+same-state actual-kernel replay independently found~1e-8 relativeL2. Direct
+versus native table kernels remain; no unique cause claimed for final residual.
+
+All four positive (minrho>.2029,minu>.04612), zero bad EOS calls, exact
+material masses/IDs; maxrelativeE2.67e-15, relative momentum<6.96e-14.
+Cloud mean logentropy coarse1.2648432/1.2648719 and fine1.2698645/1.2698718
+(RHS/final fraction). Do not infer entropy monotonicity or exact mixing accuracy.
+21 focused tests pass. Four daemon histories/HDF5/videos verified42frames each;
+reused two native recordings verified63/115frames. Physical source/reference
+hashes unchanged. Wall s/msperstep: coarse30.98/59.02 and31.15/59.34;
+fine55.24/52.61 and55.70/53.05. Total173.08s; fine replay~5% above previous
+50.17ms, observation/runner variability, fraction control adds<1% paired cost.
+Initial context harness discarded energy option and failed before first RHS;
+fixed with regression test and preserved in `_context_failure`, including
+preceding completed replay. Daemon recording paths updated after relocation.
+
+Disposition: matching established to~1e-6 on this short blob under aligned
+policies, with neither shared-density research nor new model repair needed.
+Final-fraction control is midpoint-specific and remains experimental for the
+general Butcher path. Keep preferred support semantics. Further solver matching
+should reuse this declared baseline; distinct-EOS/other cases remain separate
+qualification, and the expensive full-resolution run stays deferred.
+
+### Paper resolution long matched blob (2026-10-21, in progress)
+
+User accepts short-blob parity and requests the higher-resolution long paper
+case with a matching Remote visualization. Target Fig21: ambient512x128,
+mass-matched density10 cloud, gamma5/3, Mach2.7, periodic40x10, to8KH.
+Reuse retained native-relaxed70181-particle initialization; use the qualified
+matching policies (native weighted support target/state replacement, paper
+density/geometric volumes, fresh midpoint, original raw averaged-Q du/dt,
+actual-final-work entropy fraction). Preferred/default support unchanged.
+Use a conservative timestep cap, exact paper-time snapshots, accepted-state
+checkpoints, vispy video, daemon publishing, finite/positivity/stall watchdogs.
+Persist long execution across chat turns; set Remote to smooth density, fixed
+linear.75–10 blue/white/red palette, matching Fig21 style. No new native CPU
+trajectory or unqualified full512 parity claim.
+
+User performance steering: current long run costs~290ms/step with high GPU utilization but~30% power budget, projected~4hours. Measure actual kernel/host-sync costs; qualify numerical identity before changing the running setup.
+
+
+Launched persistently as `Paper blob n512 | 8 KH | matched CRKSPH`, PID1544680,
+daemon run `f030e344e1aa4acfad7c0b24e522f65c` on localhost8766. Raw evidence:
+`results/materialEOS/blob_paper_long_2026-10-21/`; report:
+`reports/materialEOS/blobPaperLong/README.md`. Full duration remains pending;
+this is not a new high-resolution native parity result. All27 frozen source
+hashes still match. Eight targeted launcher/matching tests passed.
+The initial requested dt=.0001 is replaced by runner startup adaptive selection:
+actual initial/max dt=.0005, with CFL reduction and quarter-KH output clipping.
+Trajectory HDF5 is every20 steps (exportInterval=.01/startupDt); vispy frames
+are every100 steps. Accepted-state NPZ checkpoints retain fields and time/dt,
+but an automatic restart CLI has not been qualified.
+
+Remote local preview verified live with smooth1024x256 density reconstruction,
+fixed linear range.75–10 and coolwarm, no overlays. Coolwarm approximates
+paper Fig21 RdBu_r; the local vispy renderer uses RdBu_r. Credential-free style
+URLs and explicit settings are retained in remoteView.json. No Remote source
+change or deployment was needed. Browser reconstruction is display-only.
+
+Performance audit: main paused during six sequential recorded GPU probes,
+then resumed unchanged. Six profiled steps contain260.5ms raw GPU kernel time
+per step: acceleration71.7, heating70.4, volume35.6, moments24.4,
+velocity gradient14.8ms. Acceleration/heating use198/194registers per thread;
+profiler estimates17% occupancy with registers the resident-block limit.
+One running sample showed2842MHz vs3090MHz maximum,229.6W of600W,56C.
+High utilization reports active time, not full arithmetic throughput; power
+alone does not establish a bottleneck. The trace establishes substantial
+interaction computation rather than a primarily viewer/Python delay.
+
+Same-checkpoint20-step lane controls, warmed last15-step medians:
+32=268.9ms;16=405.8;8=700.9;4=1251.5;scalar1=468.3. JIT/initial steps excluded
+from these medians but retained in logs. All positive; endpoint relative L2
+field differences vs32 below3.8e-16, maximum energy drift6.7e-16. Each of the
+six diagnostics has completed daemon history/HDF5/video frame agreement.
+Keep32 lanes. Next candidate: share repeated force/heating pair calculations,
+with register-pressure measurements and checkpoint/trajectory parity before
+adoption. No production numerical or execution defaults changed this turn.
+At tKH=.59266 the main run remains positive, energy drift~6e-15 and material
+mass error0. Progress wall/ETA includes deliberate profiling pauses; use the
+live runner timing for current throughput.
+
+
+Interim screenshot review near physical t6 (~2.07KH): crescent/curl/wake is
+qualitatively plausible between Fig21's1KH/4KH panels. Do not call this paper
+agreement: saved2KH cold/dense mass=.58638 vs visual Fig23~.6–.65, falling
+further near6seconds. Positive state and tiny conservation errors support
+continuing unchanged; compare full curve and4/8KH panels. Screenshot particle
+marks/auto-like range~.31–14.1 differ from smooth fixed.75–10 preset. Evidence
+assessment_t6.json/report. This is read-only analysis, no new physical run.
+
+
+Exact4KH checkpoint assessment (physical11.6124): cold/dense mass=.0317276,
+vs Fig23 visual estimate~.23–.25. Qualitative curls/filament breakup plausible,
+but this is significantly faster threshold-defined mass loss, not a cosmetic
+quality gap. Keep full run frozen; source of paper discrepancy unresolved,
+without a matching high-resolution native trajectory. Preserve
+assessment_4KH.json and report before investigating a model change.
+
+
+User decision (2026-10-21): stop rather than spend another~2hours reaching8KH;
+the structural and cold-mass differences are already substantial. Stopped via
+the existing daemon control, verified daemon status stopped and PID exited.
+Last measured accepted state t=11.9848831013 (4.12830678KH),24044steps; latest
+physical arrays retained in failedState.npz (historical harness naming). The
+failure.json traceback is the expected SimulationStopped control exception,
+not a solver failure. Exact4KH/quarterKH and periodic checkpoints preserved.
+Trajectory opens successfully with1203frames to t~11.98338; diagnostics extend
+to the last measured state. Encoded the existing241vispy frames into output.mp4
+and ffprobe confirms241frames. Different video/trajectory cadence is deliberate.
+Updated progress.json to stopped; stoppedSummary.json and stopVerification.json
+retain the reason and preservation checks. No8KH completion claim. Next use
+retained curves/checkpoints to locate divergence, then choose a bounded native
+comparison; no replacement expensive run launched.
+
+
+User requested published mass-curve overlay. Extracted green2D CRKSPH vector
+path from local published Fig23 (page193), calibrated with plot rectangle;
+no time shift/amplitude fit. Plotting script, source hash/calibration/raw path,
+CSV and early/full overlay figures retained. Vector extraction corrects prior
+visual4KH reference estimate23–25% to~21.23%; Warp3.17%. At1KH paper63.17%
+vsWarp64.91%,2KH61.52%vs58.64%,3KH47.63%vs29.50%. Early agreement is close,
+then nonlinear departure grows. No new dynamics run. Next bounded comparison
+should focus on emerging nonlinear departure rather than initialization alone.
+
+
+### Disposition: frozen by user, sufficient for now (2026-10-21)
+
+User accepts the current qualitative blob breakup for the present scope and
+requests freezing this train of investigation. The faster loss of cold/dense
+mass relative to published CRKSPH remains documented (4KH:3.17% vs21.23% from
+the vector trace); it does not establish excessive numerical dissipation, and
+the prolonged dense-cloud survival characteristic of the paper's older methods
+is absent. This is acceptance for now, not a claim of quantitative paper parity
+or proof of a dissipation mechanism. Preserve all short native matching, model
+ablations, initialization/provenance, long-run checkpoints, trajectory/video,
+performance controls and published-curve overlay. No further reference runs,
+parameter tuning or performance investigations on this line unless the user
+reopens it. No production default change follows from this disposition.

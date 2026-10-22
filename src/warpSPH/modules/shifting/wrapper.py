@@ -154,8 +154,6 @@ def solveShifting(
         shiftIters = schemeConfig.shiftProperties.iterations
         summationDensity = schemeConfig.shiftProperties.summationDensity
         freeSurface = schemeConfig.surfaceDetectionConfig.active
-        freeSurfaceScheme = schemeConfig.surfaceDetectionConfig.scheme
-        normalScheme = schemeConfig.surfaceDetectionConfig.normalSource
         projectionScheme = schemeConfig.shiftProperties.projectionScheme
         surfaceScaling = schemeConfig.shiftProperties.surfaceScaling
         shiftingThreshold = schemeConfig.shiftProperties.threshold
@@ -168,7 +166,6 @@ def solveShifting(
         # kept on the device (no host read); the clamp bounds below are formed
         # in float64 exactly as the host float arithmetic used to form them
         spacing = torch.pow(systemState.masses / rho0, 1/systemState.positions.shape[1]).mean()
-        projectQuantities = schemeConfig.shiftProperties.projectQuantities
 
         initialPositions = systemState.positions.clone()
         initialDensities = systemState.densities.clone()
@@ -183,9 +180,6 @@ def solveShifting(
                     priorNeighborhood=adjacency,
                     verbose=False,
                     **neighborSearchOptions(config))
-
-            with record_function(f"[warpSPH] - (shift) - countNeighbors"):
-                numNeighbors = countNeighbors(systemState, config, schemeConfig, adjacency)
 
             if summationDensity:
                 with record_function(f"[warpSPH] - (shift) - computeDensities"):

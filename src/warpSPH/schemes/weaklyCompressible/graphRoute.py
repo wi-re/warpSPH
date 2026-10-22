@@ -15,7 +15,7 @@ def rhsIsGraphable(schemeConfig, stageIndex) -> bool:
     so anything depending on `t`/`dt` (Dirichlet/forcing/update BC hooks,
     the 'derivative' no-penetration shift's `/ config.dt`) must run eagerly,
     as must frozen diffusion under a stage-indexed integrator: its later
-    stages read the tensors stage 0 left in `schemeConfig._frozenDiffusionCache`,
+    stages read the tensors stage 0 left in the step-owned diffusion holder (legacy direct callers use the config adapter),
     Python-side state a replay does not refresh. (`stageIndex is None`, e.g.
     symplectic Euler, recomputes the diffusion every call and never reads it.)"""
     if getattr(schemeConfig, 'mdbcNoPenShiftMode', 'derivative') == 'derivative':

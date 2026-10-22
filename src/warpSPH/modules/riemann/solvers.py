@@ -24,7 +24,7 @@ import warp as wp
 from warpSPHCore import *
 from ...configurations.moduleConfigurations.diffusionParameters import RiemannSolver
 
-__all__ = ['RiemannSolver', 'riemannStarState', 'hllcFlux']
+__all__ = ['RiemannSolver', 'riemannStarState', 'hllcFlux', 'hllcContact']
 
 
 # smallest density / pressure a state may have in the solver (relative scale is the caller's: these only stop a
@@ -82,6 +82,17 @@ def _tsrsStar(rhoL: scalar_t, uL: scalar_t, pL: scalar_t, aL: scalar_t,
 
 
 @wp.func
+def hllcContact(SL: scalar_t, SR: scalar_t, rhoL: scalar_t, uL: scalar_t, pL: scalar_t,
+                rhoR: scalar_t, uR: scalar_t, pR: scalar_t):
+    """Contact speed/pressure for caller-selected HLLC wave speeds."""
+    num = pR - pL + rhoL * uL * (SL - uL) - rhoR * uR * (SR - uR)
+    den = rhoL * (SL - uL) - rhoR * (SR - uR)
+    speed = num / den
+    pressure = pL + rhoL * (SL - uL) * (speed - uL)
+    return speed, pressure
+
+
+@wp.func
 def _hllcWaveSpeeds(rhoL: scalar_t, uL: scalar_t, pL: scalar_t, aL: scalar_t,
                     rhoR: scalar_t, uR: scalar_t, pR: scalar_t, aR: scalar_t, gamma: scalar_t):
     """Toro Eqs. (10.59)-(10.61) with the PVRS pressure: (S_L, S_R, S*), S* by Eq. (10.37)."""
@@ -95,9 +106,7 @@ def _hllcWaveSpeeds(rhoL: scalar_t, uL: scalar_t, pL: scalar_t, aL: scalar_t,
         qR = wp.sqrt(scalar_t(1.0) + k * (pStarEst / pR - scalar_t(1.0)))
     SL = uL - aL * qL
     SR = uR + aR * qR
-    num = pR - pL + rhoL * uL * (SL - uL) - rhoR * uR * (SR - uR)
-    den = rhoL * (SL - uL) - rhoR * (SR - uR)      # < 0: SL < uL and SR > uR
-    Sstar = num / den
+    Sstar, _ = hllcContact(SL, SR, rhoL, uL, pL, rhoR, uR, pR)
     return SL, SR, Sstar
 
 

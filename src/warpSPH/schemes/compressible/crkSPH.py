@@ -226,11 +226,16 @@ def crkSPH_step(
             wall.finishUpdate(update)
 
     with record_function("[warpSPH] - [crkSPH - 19] energy-partition f_ij"):
-        v_halfstep = currentState.velocities + 0.5 * dt * update.dvdt
-        currentState.f_ij = computeCompSPHBalanceTerm(
-            currentState, config, schemeConfig, adjacency, v_halfstep, dt, gradHState)
-        if wall is not None:
-            currentState.f_ij = wall.balanceFractions(currentState.f_ij, adjacency, currentState)
+        if schemeConfig.crkEnergyPartition == 'native':
+            v_halfstep = currentState.velocities + 0.5 * dt * update.dvdt
+            currentState.f_ij = computeCompSPHBalanceTerm(
+                currentState, config, schemeConfig, adjacency, v_halfstep, dt, gradHState)
+            if wall is not None:
+                currentState.f_ij = wall.balanceFractions(currentState.f_ij, adjacency, currentState)
+        else:
+            # These controls partition final work at the state update and use
+            # the unweighted pair acceleration, never the RHS-estimated f_ij.
+            currentState.f_ij = None
 
     if currentSystem.pairWork is not None:
         currentSystem.pairWork.latest = adjacency

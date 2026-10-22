@@ -41,6 +41,7 @@ from .rigidBody import RigidBody
 
 from .moduleConfigurations.surfaceDetection import SurfaceDetectionConfig, buildDefaultSurfaceDetectionConfig
 from .moduleConfigurations import *
+from .moduleConfigurations.shifting import shiftPropertiesToDict, dictToShiftProperties
 from ..enumTypes import *
 
 @dataclass
@@ -262,19 +263,7 @@ def weaklyCompressibleConfigToDict(config: WeaklyCompressibleSPHConfig) -> Dict[
 
         'pressureForceTerm': config.pressureForceTerm.name,
         'pressureForceRenormalized': config.pressureForceRenormalized,
-        'shiftProperties': {
-            'iterations': config.shiftProperties.iterations,
-            'CFL': config.shiftProperties.CFL,
-            'computeMach': config.shiftProperties.computeMach,
-            'maxC': config.shiftProperties.maxC,
-            'active': config.shiftProperties.active,
-            'scheme': config.shiftProperties.scheme.name,
-            'projectionScheme': config.shiftProperties.projectionScheme.name,
-            'summationDensity': config.shiftProperties.summationDensity,
-            'surfaceScaling': config.shiftProperties.surfaceScaling,
-            'threshold': config.shiftProperties.threshold,
-            'projectQuantities': config.shiftProperties.projectQuantities,
-        },
+        'shiftProperties': shiftPropertiesToDict(config.shiftProperties),
         'surfaceDetectionConfig': {
             'active': config.surfaceDetectionConfig.active,
             'colorFieldThreshold': config.surfaceDetectionConfig.colorFieldThreshold,
@@ -291,6 +280,12 @@ def weaklyCompressibleConfigToDict(config: WeaklyCompressibleSPHConfig) -> Dict[
         'freezeDiffusionAcrossStages': config.freezeDiffusionAcrossStages,
         'freezeSurfaceMaskAcrossStages': config.freezeSurfaceMaskAcrossStages,
         'surfaceMaskDiagnostics': config.surfaceMaskDiagnostics,
+        'timeCentredContinuity': config.timeCentredContinuity,
+        'loneDensityReset': config.loneDensityReset,
+        'mdbcOneSidedHydrostatic': config.mdbcOneSidedHydrostatic,
+        'mdbcNoPenShiftMode': config.mdbcNoPenShiftMode,
+        'mdbcDensityScheme': config.mdbcDensityScheme,
+        'bandwith': config.bandwith,
     }
 
 def dictToWeaklyCompressibleConfig(configDict: Dict[str, Any]) -> WeaklyCompressibleSPHConfig:
@@ -317,20 +312,7 @@ def dictToWeaklyCompressibleConfig(configDict: Dict[str, Any]) -> WeaklyCompress
     config.pressureForceTerm = PressureForceScheme[configDict['pressureForceTerm']] if isinstance(configDict['pressureForceTerm'], str) else configDict['pressureForceTerm']
     config.pressureForceRenormalized = bool(configDict.get('pressureForceRenormalized', False))
     config.bandwith = float(configDict.get('bandwith', 10.0))
-    shiftPropsDict = configDict.get('shiftProperties', {})
-    config.shiftProperties = ShiftProperties(
-        iterations=int(shiftPropsDict.get('iterations', 1)),
-        CFL=float(shiftPropsDict.get('CFL', 0.3)),
-        computeMach=bool(shiftPropsDict.get('computeMach', False)),
-        maxC=float(shiftPropsDict.get('maxC', 0.3)),
-        active=bool(shiftPropsDict.get('active', True)),
-        scheme=ShiftingScheme[shiftPropsDict.get('scheme', ShiftingScheme.deltaSPH.name)] if isinstance(shiftPropsDict.get('scheme', ShiftingScheme.deltaSPH.name), str) else shiftPropsDict.get('scheme', ShiftingScheme.deltaSPH),
-        projectionScheme=ShiftingProjectionScheme[shiftPropsDict.get('projectionScheme', ShiftingProjectionScheme.dot.name)] if isinstance(shiftPropsDict.get('projectionScheme', ShiftingProjectionScheme.dot.name), str) else shiftPropsDict.get('projectionScheme', ShiftingProjectionScheme.dot),
-        summationDensity=bool(shiftPropsDict.get('summationDensity', False)),
-        surfaceScaling=float(shiftPropsDict.get('surfaceScaling', 0.1)),
-        threshold=float(shiftPropsDict.get('threshold', 0.5)),
-        projectQuantities=bool(shiftPropsDict.get('projectQuantities', False)),
-    )
+    config.shiftProperties = dictToShiftProperties(configDict.get('shiftProperties', {}))
     surfaceConfigDict = configDict.get('surfaceDetectionConfig')
     if surfaceConfigDict is not None:
         config.surfaceDetectionConfig = SurfaceDetectionConfig(
@@ -349,5 +331,10 @@ def dictToWeaklyCompressibleConfig(configDict: Dict[str, Any]) -> WeaklyCompress
     config.freezeDiffusionAcrossStages = bool(configDict.get('freezeDiffusionAcrossStages', False))
     config.freezeSurfaceMaskAcrossStages = bool(configDict.get('freezeSurfaceMaskAcrossStages', False))
     config.surfaceMaskDiagnostics = bool(configDict.get('surfaceMaskDiagnostics', False))
+    config.timeCentredContinuity = bool(configDict.get('timeCentredContinuity', config.timeCentredContinuity))
+    config.loneDensityReset = bool(configDict.get('loneDensityReset', config.loneDensityReset))
+    config.mdbcOneSidedHydrostatic = bool(configDict.get('mdbcOneSidedHydrostatic', config.mdbcOneSidedHydrostatic))
+    config.mdbcNoPenShiftMode = str(configDict.get('mdbcNoPenShiftMode', config.mdbcNoPenShiftMode))
+    config.mdbcDensityScheme = str(configDict.get('mdbcDensityScheme', config.mdbcDensityScheme))
 
     return config

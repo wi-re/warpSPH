@@ -13,3 +13,6 @@ The exact (iterative) solution is the test reference only (`tests/test_riemann.p
 from .solvers import riemannStarState, hllcFlux, RiemannSolver
 
 __all__ = ['riemannStarState', 'hllcFlux', 'RiemannSolver']
+
+from .meshless import hllcStar as movingFaceHLLCStar, faceFluxPair as movingFaceFlux
+__all__ += ['movingFaceHLLCStar', 'movingFaceFlux']

@@ -30,13 +30,17 @@ def computeCompSPHAccel(
     schemeConfig,
     adjacency,
     gradH: Optional[GradHState] = None,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    *, returnDudt: bool = False,
+) -> Tuple[torch.Tensor, ...]:
     """Pressure + artificial-viscosity acceleration (current mean-gradient policy).
 
     Returns `(dvdt, ap_ij, av_ij)`: the acceleration and the per-pair pressure and
     viscosity contributions that `computeCompSPHBalanceTerm` partitions the energy with.
+    With `returnDudt=True`, the fourth result is the unchanged gather heating
+    predictor, evaluated using the same pair traversal.
     """
     return computeCompSPHAccelWarp(
+        returnDudt=returnDudt,
         queryParticles = state,
         operationProperties = OperationProperties(
             kernel = config.kernel,

@@ -1,0 +1,26 @@
+{
+  "date": "2026-10-21",
+  "references": {
+    "SPlisHSPlasH": "eccce86155776f6ac52d5080b1f720a52bf29450",
+    "omniSPH": "6f2207f8bd35c25141c689e21499098560e738a3"
+  },
+  "sha256": {
+    "/home/lu26029/dev/warpSPH/literature/ihmsen2014_implicit-incompressible-sph.pdf": "ed921e5e52bcd38ef1d2c4e1fb7d2a6f8569790d086d58ca88943114941cae66",
+    "/home/lu26029/dev/warpSPH/literature/bender2015_divergence-free-sph.pdf": "71171b766a300510646a506a05b8235759ae12980213050246cbe318bc0f4619",
+    "/home/lu26029/dev/warpSPH/literature/cornelis2019_optimized-source-term.pdf": "5fcc0a3379ae8d0cec78297a168f00521a83b649e9d03451b2ea22b2265fcbaa",
+    "/home/lu26029/dev/warpSPH/literature/band2018_mls-pressure-boundaries.pdf": "ef46a40f748092692dcdba27c63f0acc6f6e115dea26ca5de9dff562fde38513",
+    "/home/lu26029/dev/warpSPH/literature/bender2023_consistent-rigid-fluid-coupling.pdf": "d5f1698fe2d701b5acbce2b360a8e01c52d60e069ca5499fc2322205a964fed1",
+    "/home/lu26029/dev/warpSPH/literature/bender2017_divergence-free-sph-viscous.pdf": "fb2d3f40d8c9fc202a954e1b50b1520a28f470b18534aaa3a6214ef17be4469c",
+    "/home/lu26029/dev/warpSPH/literature/band2018pb_pressure-boundaries-iisph.pdf": "47b26a226ef75c5d38ca62c4d323cb25bd45acd3af45819a85c0c4029c2e0bba",
+    "/home/lu26029/dev/SPlisHSPlasH/SPlisHSPlasH/DFSPH/TimeStepDFSPH.cpp": "5dcc295c24fbf083c200f264e2284516a540b5b1b61747cdea80a56ac74e9889",
+    "/home/lu26029/dev/SPlisHSPlasH/SPlisHSPlasH/IISPH/TimeStepIISPH.cpp": "330c6fc74babf2c8401718603317c64799a4b62228e1344fb62594bce0f65e3a",
+    "/home/lu26029/dev/omniSPH/simulation/SPH.cpp": "cbd8c4694ec2d3340db0c89fad2f829fac1e4d3576b6fcc90dc380e496f90654",
+    "/home/lu26029/dev/omniSPH/simulation/fluidMechanics.cpp": "c9204455d1685c83042ca279fac7ff117d4a0b6377aa421a84dca32358a96d87"
+  },
+  "reference_files_match_commit": {
+    "SPlisHSPlasH/SPlisHSPlasH/DFSPH/TimeStepDFSPH.cpp": true,
+    "SPlisHSPlasH/SPlisHSPlasH/IISPH/TimeStepIISPH.cpp": true,
+    "omniSPH/simulation/SPH.cpp": true,
+    "omniSPH/simulation/fluidMechanics.cpp": true
+  }
+}

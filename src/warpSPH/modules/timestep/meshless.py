@@ -21,8 +21,9 @@ import torch
 from ...configurations.meshless import MeshlessConfig
 from ...configurations.simulationConfig import SimulationConfig
 from ...systems.meshless import MeshlessSystem
-from warpSPHCore.mfm import MeshlessWarp, primitives
-from ...schemes.compressible.meshless import stashGeometry
+from warpSPHCore.mfm import MeshlessWarp
+from ..meshless.primitives import primitives
+from ..meshless.geometry import stashGeometry
 
 __all__ = ['computeTimestep']
 
@@ -51,7 +52,7 @@ def computeTimestep(
         centred_weights=True, area_cap=False)
     # the step that follows starts from these positions / supports: hand it this geometry so it
     # only adds the closure solve (`schemes/meshless.stashGeometry`)
-    stashGeometry(state.positions, state.supports, system.domain, config.kernel, compParams, g)
+    stashGeometry(state.positions, state.supports, system.domain, config.kernel, compParams, g, owner=state)
     rho, vel, P = primitives(state.Q, g.volume, gamma)
     dts = g.timestep(rho, vel, P, gamma, compParams.cfl)          # 2 C h / v_sig, h the kernel radius
     if compParams.cflLength == 'particle':
@@ -62,9 +63,11 @@ def computeTimestep(
     elif compParams.cflLength != 'support':
         raise ValueError("cflLength must be 'particle' or 'support'")
     initial_dt = torch.min(dts)
-    if initial_dt < config.minDt:
-        print(f"Warning: initial dt {initial_dt.item()} is less than minDt {config.minDt}. Clamping to minDt.")
+    # Floor reporting belongs to the runner's existing timestep-stall diagnostics.
+    # No device scalar is read by Python on this path.
     initial_dt = torch.clamp(initial_dt, min=config.minDt, max=config.maxDt)
-    if dt is not None and initial_dt > config.dt:
-        initial_dt = torch.clamp(initial_dt, max=config.dtGrowthFactor * config.dt)
+    if dt is not None:
+        previous = torch.as_tensor(config.dt, dtype=initial_dt.dtype, device=initial_dt.device)
+        initial_dt = torch.where(initial_dt > previous,
+            torch.minimum(initial_dt, config.dtGrowthFactor * previous), initial_dt)
     return initial_dt

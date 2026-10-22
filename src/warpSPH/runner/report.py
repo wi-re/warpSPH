@@ -256,7 +256,7 @@ def describeRun(ctx, state, nSteps: int, timeLimited: bool) -> None:
     print(_row('domain', _domainDescription(config.domain)))
     print(_row('kernel', f'{_enumName(config.kernel)} | n_h {spec.n_h:g} | '
                          f'targetNeighbors {float(config.targetNeighbors):.1f}'))
-    print(_row('integrator', f'{_enumName(config.integrationScheme)} | '
+    print(_row('integrator', f'{_enumName(ctx.integrator.identifier)} | '
                              f'support {_enumName(config.supportMode)}'))
 
     # After `configureScheme` and the case's own setup have run, so these are

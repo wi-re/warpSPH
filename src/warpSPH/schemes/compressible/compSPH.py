@@ -14,7 +14,7 @@ in call order): every region does one thing, so a profile or a call audit names 
 from ...modules.adaptiveSupport import computeOmega, solveStageSupport
 from ...modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
 from ...modules.compressibleWall import beginCompressibleWall, clampSupportsToVolume
-from ...modules.compSPH.operators import computeCompSPHAccel, computeCompSPHdudt, computeCompSPHBalanceTerm
+from ...modules.compSPH.operators import computeCompSPHAccel, computeCompSPHBalanceTerm
 from ...modules.compSPH.pairWork import accumulateStage, startStage, stageRebuildSlack
 from ...modules.compSPH.supportGrid import solvesOnGrid
 from ...modules.density import computeDensities
@@ -117,12 +117,9 @@ def compSPH_step(
             SupportScheme.SuperSymmetric,
             adjacency)
 
-    with record_function("[warpSPH] - [compSPH - 12] pressure / viscosity acceleration"):
-        dvdt, currentState.ap_ij, currentState.av_ij = computeCompSPHAccel(
-            currentState, config, schemeConfig, adjacency, gradHState)
-
-    with record_function("[warpSPH] - [compSPH - 13] dudt"):
-        dudt = computeCompSPHdudt(currentState, config, schemeConfig, adjacency, gradHState)
+    with record_function("[warpSPH] - [compSPH - 12] pressure / viscosity acceleration and dudt"):
+        dvdt, currentState.ap_ij, currentState.av_ij, dudt = computeCompSPHAccel(
+            currentState, config, schemeConfig, adjacency, gradHState, returnDudt=True)
 
     with record_function("[warpSPH] - [compSPH - 14] viscosity-switch update"):
         currentState.alpha0s, switchState = updateViscositySwitch(

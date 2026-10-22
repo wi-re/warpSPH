@@ -1,7 +1,7 @@
 """The exact-delta integrator contract, in one place.
 
-Some steps own their whole time step (the MFM / MFV meshless steps; the ACSPH dual-time step) and hand the integrator the *exact* per-step
-delta ``(x^{n+1} - x^n) / dt``. Forward Euler applied to an exact delta is the identity, so the runner reproduces the converged state byte for
+Some direct compatibility steps own their whole time step (the legacy MFM / MFV adapter; the ACSPH dual-time step) and hand the integrator the *exact* per-step
+delta ``(x^{n+1} - x^n) / dt``. Normal MFM/MFV runs instead use the package-owned ConservedLagrangian driver. Forward Euler applied to an exact delta is the identity, so the runner reproduces the converged state byte for
 byte and no integrator needs to know about the scheme. That only holds for a **single-evaluation** integrator: a multi-stage one (RK2, RK4, ...)
 would run the step once per stage and *blend* the results -- a plausible-looking but wrong update. So such a step
 

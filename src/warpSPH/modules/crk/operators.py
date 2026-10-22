@@ -21,11 +21,12 @@ __all__ = ['CRKStage', 'computeCRKAccel', 'computeCRKdudt']
 
 @dataclass
 class CRKStage:
-    """What one CRK stage computes once and every CRK operator of the stage reads."""
+    """Data for one fresh RHS evaluation; never shared between RK stages."""
     volumes: torch.Tensor              # apparent volumes
     crkState: CRKState                 # A, B, grad A, grad B
     velocityGradient: torch.Tensor     # (N, dim, dim), `J[i] @ dx` = velocity change along dx
     viscosityParams: Any               # the limiter constants resolved from n_h (`resolveCRKLimiter`)
+    dudt: Optional[torch.Tensor] = None  # raw heating from the same fresh RHS evaluation
 
 
 def _common(state, config, schemeConfig, adjacency, stage: CRKStage, gradH: Optional[GradHState]):
@@ -50,9 +51,13 @@ def _common(state, config, schemeConfig, adjacency, stage: CRKStage, gradH: Opti
 
 def computeCRKAccel(state, config, schemeConfig, adjacency, stage: CRKStage, gradH: Optional[GradHState] = None):
     """Pressure + CRK pseudo-viscosity acceleration; returns `(dvdt, ap_ij, av_ij)` (the pair terms the energy balance partitions)."""
-    return computeCrkSPHAccelWarp(**_common(state, config, schemeConfig, adjacency, stage, gradH))
+    acceleration, pressure, viscosity, stage.dudt = computeCrkSPHAccelWarp(
+        **_common(state, config, schemeConfig, adjacency, stage, gradH), returnDudt=True)
+    return acceleration, pressure, viscosity
 
 
 def computeCRKdudt(state, config, schemeConfig, adjacency, stage: CRKStage, gradH: Optional[GradHState] = None):
     """The matching specific internal-energy rate."""
+    if stage.dudt is not None:
+        return stage.dudt
     return computeCrkSPHdudtWarp(**_common(state, config, schemeConfig, adjacency, stage, gradH))

@@ -26,7 +26,7 @@ from typing import Any, List, Optional, Tuple
 import torch
 
 from ...enumTypes import EnergyScheme
-from ...math.scatter import segment_sum
+from .workReduction import reducePairWork
 from warpSPHCore.profiling import record_function
 
 __all__ = ['PairWork', 'RerunRequest', 'beginPairWork', 'listFitsParticles', 'startFromLatest', 'startStage', 'stageRebuildSlack', 'weightedStages', 'accumulateStage', 'energyIncrement']
@@ -144,9 +144,7 @@ def accumulateStage(pairWork: PairWork, stageIndex: Optional[int], adjacency, st
     with record_function("[warpSPH] - [compSPH pairWork] accumulate stage"):
         w = k * _pairVector(state, energyScheme)
         if pairWork.halfVelocity is not None:
-            i, j = adjacency.paddedI, adjacency.paddedJ      # padded like w: the -1 tail gathers a harmless last row and `segment_sum` never reads it
-            vji = pairWork.halfVelocity[j] - pairWork.halfVelocity[i]
-            rows = segment_sum(torch.einsum('ij,ij->i', vji, w), adjacency.numNeighbors)
+            rows = reducePairWork(adjacency, pairWork.halfVelocity, w)
             pairWork.deltaU = rows if pairWork.deltaU is None else pairWork.deltaU + rows
         elif pairWork.adjacency is None:
             pairWork.adjacency, pairWork.work = adjacency, w
@@ -170,6 +168,4 @@ def energyIncrement(pairWork: PairWork, initialState, updates: List[Any], weight
         halfStepVelocity = initialState.velocities + 0.5 * fullAcceleration * dt
         if not pairWork.consistent or pairWork.work is None:
             return None, RerunRequest(halfVelocity=halfStepVelocity, conservative=True)
-        i, j = pairWork.adjacency.paddedI, pairWork.adjacency.paddedJ
-        vji = halfStepVelocity[j] - halfStepVelocity[i]
-        return segment_sum(torch.einsum('ij,ij->i', vji, pairWork.work), pairWork.adjacency.numNeighbors), None
+        return reducePairWork(pairWork.adjacency, halfStepVelocity, pairWork.work), None

@@ -8,3 +8,6 @@ from .materials import evaluateEOS, refreshEOS, validateMaterialState
 from ...enumTypes import EquationOfState
 
 __all__ = ['idealGasEOS', 'weaklyCompressibleEOS', 'EquationOfState', 'evaluateEOS', 'refreshEOS', 'validateMaterialState']
+
+from .conserved import idealGasPrimitives
+__all__ += ['idealGasPrimitives']

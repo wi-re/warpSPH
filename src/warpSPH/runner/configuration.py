@@ -432,6 +432,8 @@ def configurationSchema(case, scheme=None):
             value = materialsToDict(value)
         elif descriptor.kind == 'number':
             value = float(value)
+        elif descriptor.kind == 'boolean':
+            value = bool(value)
         numerical[path] = descriptor.schema(value)
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -524,6 +526,7 @@ def resolvedConfiguration(ctx):
     return {'schemaVersion': VERSION, 'case': ctx.case.name,
             'requested': ctx.spec.configuration,
             'spec': ctx.spec.toDict(), 'simulationConfig': configurationToDict(ctx.config),
+            'integrator': {'identifier': ctx.integrator.identifier.name, 'name': ctx.integrator.name},
             'solverConfig': ctx.exportFunction(ctx.schemeConfig), 'versions': versions,
             'stage': 'setup (no particle sampling)' if 'initialParticleCount' not in ctx.scratch else 'initialized'}
 

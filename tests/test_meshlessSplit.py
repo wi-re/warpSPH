@@ -67,7 +67,7 @@ def test_dispatcherFollowsTheConfigMode():
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason='warp kernels')
 def test_bothModesRunAndKeepTheirInvariants():
-    """MFM conserves each particle's mass exactly (dm = 0); both conserve total mass; the registered schemes run under the pinned integrator."""
+    """MFM conserves each particle's mass exactly (dm = 0); both conserve total mass; the registered schemes use the package-owned time driver."""
     from warpSPH.cases import importAll
     from warpSPH.runner import run
     from warpSPH.runner.case import getCase
@@ -75,6 +75,27 @@ def test_bothModesRunAndKeepTheirInvariants():
     for scheme in ('MFM', 'MFV'):
         r = run(getCase('sod2d'), quiet=True, progress=False, nSteps=8, scheme=scheme, plot=False, video=False, integrationScheme='rungeKutta2')
         assert r.nSteps == 8 and not r.diverged
-        assert str(r.ctx.config.integrationScheme).endswith('forwardEuler')           # the runner pinned it
+        assert r.ctx.integrator.__class__.__module__.startswith('warpSPHIntegrators.')
+        assert r.ctx.integrator.temporal == ('ssprk' if scheme == 'MFM' else 'hancock')
         Q = r.state.state.Q
         assert torch.isfinite(Q).all()
+
+
+@pytest.mark.parametrize('scheme', ['MFM', 'MFV'])
+def test_activeDriverMetadataKeepsSimulationConfigRoundTrippable(scheme):
+    import json
+    from warpSPH.configurations import configurationToDict, dictToConfig
+    from warpSPH.runner import RunConfiguration
+    from warpSPH.runner.configuration import resolvedConfiguration
+    ctx = RunConfiguration('sod', simulation={'device': 'cpu', 'nx': 32}, solver={'scheme': scheme}).prepare()
+    restored = dictToConfig(configurationToDict(ctx.config))
+    assert restored.integrationScheme == ctx.config.integrationScheme
+    assert isinstance(restored.integrationScheme, IntegrationSchemeType)
+    manifest = json.loads(json.dumps(resolvedConfiguration(ctx)))
+    assert manifest['integrator']['identifier'] == ctx.integrator.identifier.name
+    assert manifest['integrator']['name'] == ctx.integrator.name
+
+    from warpSPH.cases.common.plotting import _provenance
+    title = _provenance(ctx)
+    assert ctx.integrator.identifier.name in title
+    assert 'rungeKutta2' not in title

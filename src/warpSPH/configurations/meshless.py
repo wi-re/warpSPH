@@ -15,6 +15,19 @@ from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
 
 
+TEMPORAL_SCHEMES = ('hancock', 'ssprk', 'kdk')
+AUTO_TEMPORAL_SCHEME = {'MFM': 'ssprk', 'MFV': 'hancock'}
+
+
+def resolve_temporal_scheme(config):
+    temporal = config.temporalScheme
+    if temporal == 'auto':
+        return AUTO_TEMPORAL_SCHEME[config.mode]
+    if temporal not in TEMPORAL_SCHEMES:
+        raise ValueError(f'temporalScheme {temporal!r} is not recognised; expected auto or {TEMPORAL_SCHEMES}')
+    return temporal
+
+
 @dataclass
 class MeshlessConfig:
     gamma: float = field(default=1.4, metadata={'description': 'Adiabatic index'})
@@ -25,9 +38,7 @@ class MeshlessConfig:
     cflLength: str = field(default='particle', metadata={"description": "length L of the CFL timestep: 'particle' (default; GIZMO's Get_Particle_Size, L = V^(1/d) from the moment volume -- ~4x smaller than the kernel radius at ~50 neighbours) or 'support' (the kernel radius h of the core driver's `2 C h / v_sig`; what the core-parity scripts compare against, and ~4x GIZMO's step at the same C -- its Hancock predictor shows stripe noise at C = 0.2)"})
     schemeName: str = field(default='Meshless SPH (MFM/MFV)', metadata={'description': 'Name of the scheme'})
 
-    # temporal integration (D4: the step owns the whole time step, so the
-    # integrator must be single-evaluation -- see `schemes/compressible/meshless/` (`mfm.py`, `mfv.py`, `temporal.py`)). The
-    # per-mode default comes from the D4 measurement (COMPRESSIBLE_SPH_PLAN).
+    # The package-owned driver retains the D4-measured per-mode time map.
     temporalScheme: str = field(default='auto', metadata={"description": "the temporal scheme the step performs: 'auto' (per-mode default from the D4 measurement: MFM -> 'ssprk', MFV -> 'hancock'), 'hancock' (the core driver's single-stage MUSCL-Hancock + Euler; the G1 port-fidelity setting), 'ssprk' (two-stage SSPRK, rates evaluated at dt = 0), or 'kdk' (kick-drift-kick, rates at dt = 0)"})
 
     # geometry / closure solve (warpSPHCore.mfm.MeshlessWarp.build)
@@ -55,6 +66,11 @@ class MeshlessConfig:
     faceGuard: int = field(default=0, metadata={'description': "EXPERIMENTAL: re-guard the closure-corrected face A' = A_g + |A_g| (lam_j - lam_i): 0 off, 1 drop the correction on pairs with A'.d <= 0, 2 scale it to keep A'.d >= 0.25 A_g.d, 3 / 4 cap |A' - A_g| at 0.5 / 0.25 |A_g|"})
     closureCap: float = field(default=0.0, metadata={'description': "EXPERIMENTAL bounded closure: 0 = the shipped unbounded projection; c > 0 enters the face correction through the vector clip of the potential difference to magnitude c (A' = A_g + kappa clip(lam_j - lam_i, c), solved by lagged secant weights), so |A' - A_g| <= c |A_g| (power 1): no reversed / over-amplified face while the cell closure is kept wherever the bound is not saturated"})
     mfvUpdate: str = field(default='conserved', metadata={'description': "EXPERIMENTAL (MFV, hancock): 'conserved' integrates Q with the capped mass flux and the full momentum / energy; 'primitive' is GIZMO's kick: v += dt (F_p - v F_m,full) / m_new, u += dt (F_E - v.F_p + v^2/2 F_m,full - u F_m,full) / m (u halved at most), mass capped per pair and floored at -0.99 m"})
+
+
+    def integrationMethod(self):
+        from warpSPHIntegrators.schemes import ConservedLagrangian
+        return ConservedLagrangian(resolve_temporal_scheme(self))
 
 
 @dataclass

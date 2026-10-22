@@ -1,6 +1,6 @@
 """IISPH constant-density pressure solver: relaxed-Jacobi iteration that
 solves for a pressure field driving the predicted density back to
-`schemeConfig.fluid.restDensity` (source term `rho0 - rhoStar`, the
+`schemeConfig.fluid.restDensity` (source term `1 - rhoStar/rho0`, the
 density-error formulation, as opposed to `divergenceFree.py`'s divergence
 formulation).
 
@@ -13,20 +13,21 @@ alpha` (`dt**2 * computeAlpha`'s IISPH diagonal term). Pressures are kept
 non-negative each iterate, except where `_CLOSED_DOMAIN_GAUGE` fires (a
 closed, wall-only domain has no free surface for the clamp to guard against,
 so the unconstrained constant mode is pinned by mean-centering instead).
-`rhoStar` is clamped to a minimum of 0.9 and `alpha` to a maximum of -1e-6 to
-avoid division blow-up. Iterates between `solverConfig.pressureSolver.
+The current code does not clamp predicted density; the old 0.9-floor comment
+was stale. `alpha` is clamped to a maximum of -1e-6 before division. Iterates between `solverConfig.pressureSolver.
 {minIterations,maxIterations,tolerance,relaxationFactor}`, stopping early once
 past `minIterations` and below `tolerance`.
 """
 
-from warpSPHCore import *
+from warpSPHCore import AdjacencyList, CompactHashMap, SupportScheme
 import os
 import torch
-from warpSPH.systems import *
-from warpSPH.modules import *
+
+
 from warpSPH.configurations import SimulationConfig
 from typing import Any, Optional, Union
 from .wp_alpha import computeAlpha
+from .sources import densityInvarianceSource
 from ..momentum.incompressible import computeMomentumIncompressible
 from ..pressure.iisph import computePressureAccelIISPH
 from .drift import computePressureShiftIISPH
@@ -158,8 +159,7 @@ def _solveIncompressibleImpl(
         )
 
         rho0 = schemeConfig.fluid.restDensity
-        rhoStar = particles.densities + dt * divergence
-        sourceTerm = (1 - rhoStar/rho0)
+        sourceTerm = densityInvarianceSource(particles.densities, divergence, rho0=rho0, dt=dt)
 
         _fluidRows = particles.kinds == 0
         if _CLOSED_BOX_SOURCE_PROJECT and bool(_fluidRows.any()):

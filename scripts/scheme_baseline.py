@@ -53,7 +53,7 @@ def _runCase(case, scheme, steps, cudaGraph=None, setCfg=None, params=None, nx=N
 def _save(r, path):
     import torch
     st = r.state.state
-    fields = ('positions', 'velocities', 'densities', 'internalEnergies', 'pressures', 'supports', 'Q', 'lam')
+    fields = ('positions', 'velocities', 'densities', 'internalEnergies', 'pressures', 'supports', 'Q', 'lam', 'masses')
     torch.save({k: getattr(st, k).detach().cpu() for k in fields if getattr(st, k, None) is not None}, path)
 
 
@@ -67,7 +67,7 @@ def _literal(raw):
 
 def cmdDump(a):
     from warpSPHBootstrap import bootstrap
-    bootstrap(precision='float32')
+    bootstrap(precision=a.precision)
     from warpSPH.cases import importAll
     from warpSPH.runner.case import getCase, listCases
     importAll()
@@ -128,7 +128,7 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest='cmd', required=True)
     d = sub.add_parser('dump'); d.add_argument('--scheme', required=True); d.add_argument('--out', required=True)
-    d.add_argument('--steps', type=int, default=20); d.add_argument('--cases', nargs='*'); d.add_argument('--graph', action='store_true')
+    d.add_argument('--precision', choices=['float32', 'float64'], default='float32'); d.add_argument('--steps', type=int, default=20); d.add_argument('--cases', nargs='*'); d.add_argument('--graph', action='store_true')
     d.add_argument('--temporal', nargs='*', default=[]); d.add_argument('--switches', nargs='*', default=[])
     d.add_argument('--set', nargs='*', action='extend', default=[], metavar='KEY=VALUE', help='scheme-config attributes (dotted), value read as a Python literal')
     d.set_defaults(fn=cmdDump)

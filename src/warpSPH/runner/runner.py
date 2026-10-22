@@ -29,7 +29,6 @@ from warpSPHCore.profiling import record_function
 from warpSPHIntegrators.state import deferHostTime
 
 from ..configurations import buildConfig
-from ..schemes.exactDelta import pinExactDeltaIntegrator
 from ..enumTypes import (ArtificialCompressibleSPHScheme, CompressibleSPHScheme,
                          IncompressibleSPHScheme, WaveEquationScheme,
                          WeaklyCompressibleSPHScheme)
@@ -126,15 +125,7 @@ def buildContext(case: Case, spec: CaseSpec) -> RunContext:
     domain = buildDomainDescription(spec.L, spec.dim, spec.periodic, device, dtype)
 
     scheme = _resolveScheme(spec.scheme or case.scheme)
-    # The meshless step owns the whole time step (D4) and hands the integrator the
-    # exact per-step delta, so it must run under a single-evaluation integrator;
-    # the case's multi-stage default (rungeKutta2) would run the step once per
-    # stage and blend. The step refuses any other integrator itself
-    # (`schemes/exactDelta.requireExactDeltaIntegrator`); set the right one up front so
-    # the banner reports what actually runs.
     integrationSchemeName = spec.integrationScheme
-    if scheme in (CompressibleSPHScheme.MFM, CompressibleSPHScheme.MFV):
-        integrationSchemeName = pinExactDeltaIntegrator(integrationSchemeName)
 
     config, integrator = buildConfig(
         domain=domain,
@@ -253,6 +244,10 @@ def prepareContext(case: Case, spec: CaseSpec) -> RunContext:
         case.configureScheme(ctx)
     from .configuration import applySchemeOverrides
     applySchemeOverrides(ctx)
+    integrationMethod = getattr(ctx.schemeConfig, 'integrationMethod', None) or ctx.bundle.integrationMethod
+    if integrationMethod is not None:
+        from warpSPHIntegrators.schemes import get_scheme
+        ctx.integrator = get_scheme(integrationMethod())
     if hasattr(ctx.schemeConfig, 'validate'):
         ctx.schemeConfig.validate(ctx.config)
     return ctx

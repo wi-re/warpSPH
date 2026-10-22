@@ -286,3 +286,30 @@ def buildDefaultShiftProperties() -> ShiftProperties:
         threshold=0.5,
         projectQuantities=False
     )
+
+
+def shiftPropertiesToDict(config: ShiftProperties) -> dict:
+    """Serialize every shifting option; enum names keep the legacy JSON shape."""
+    from dataclasses import fields
+    return {f.name: (getattr(config, f.name).name if isinstance(getattr(config, f.name), Enum)
+                     else getattr(config, f.name)) for f in fields(ShiftProperties)}
+
+
+def dictToShiftProperties(data: dict) -> ShiftProperties:
+    """Restore explicit options; absent keys keep the legacy constructor defaults."""
+    from dataclasses import fields
+    defaults = ShiftProperties()
+    values = {}
+    for f in fields(ShiftProperties):
+        default = getattr(defaults, f.name)
+        value = data.get(f.name, default)
+        if isinstance(default, Enum):
+            values[f.name] = type(default)[value] if isinstance(value, str) else value
+        elif default is None:
+            values[f.name] = None if value is None else float(value)
+        else:
+            values[f.name] = type(default)(value)
+    return ShiftProperties(**values)
+
+
+__all__.extend(['shiftPropertiesToDict', 'dictToShiftProperties'])

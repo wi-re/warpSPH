@@ -67,7 +67,7 @@ def install_support(s):
         return system.adjacency
     def solve_support(system,state,c,sc,**kwargs):
         assert sc.adaptiveSupportIterations==1 and sc.crkEvolution=='paper' and sc.compatibleEnergy
-        assert sc.crkEnergyPartition=='native' and sc.crkViscosityGradient=='current' and sc.crkEnergyPredictor=='raw'
+        assert sc.crkEnergyPartition==s.get('matchingEnergyPartition','native') and sc.crkViscosityGradient=='current' and sc.crkEnergyPredictor=='raw'
         if policy in ('warp','bounded','shell','material','generated','generatedNative'):
             if policy=='material':sc.owenMaterialWeights=True
             if policy in ('generated','generatedNative'):

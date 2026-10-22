@@ -53,21 +53,19 @@ Relaxation mode (`relaxationMode`):
     the exact residual recurrence.
 """
 
-from warpSPHCore import *
+from warpSPHCore import AdjacencyList, CompactHashMap, SupportScheme
 import torch
-from warpSPH.systems import *
-from warpSPH.modules import *
-from warpSPH.configurations import SimulationConfig
-from typing import Optional, Union, Any
-
 
 
 from warpSPH.configurations import SimulationConfig
-from typing import Optional
-
-
 from typing import Any, Optional, Union
+
+
+
+
+
 from .wp_alpha import computeAlpha
+from .sources import velocityDivergenceSource
 from ..momentum.incompressible import computeMomentumIncompressible
 from ..pressure.iisph import computePressureAccelIISPH
 from .drift import computePressureShiftIISPH
@@ -75,11 +73,10 @@ from ...configurations import PressureSolverType, JacobiRelaxationMode, Boundary
 from .krylov import solvePressureKrylov
 from ...configurations.compute import resolveCheckSchedule
 from warpSPHCore.linalg import runStationary
-from .convergence import ConvergenceCheckSchedule, evaluateResidual, residualStats, sourceNorm
+from .convergence import ConvergenceCheckSchedule, residualStats, sourceNorm
 from .consistent import applyConsistentCoupling
 from ...configurations import BoundaryPressureMode
 
-from typing import Any, Optional, Union
 
 __all__ = ['solveDivergenceFree']
 
@@ -271,7 +268,7 @@ def _solveDivergenceFreeImpl(
 
         # sourceTerm = dt * divergence
         # sourceTerm = (rho0 - rhoStar)# / dt
-        sourceTerm =  -divergence# * dt
+        sourceTerm = velocityDivergenceSource(divergence)
 
 
         # sourceTerm = sourceTerm - sourceTerm.mean()  # Remove mean to ensure zero-mean source term

@@ -1,16 +1,15 @@
-"""The meshless finite-mass (MFM) and finite-volume (MFV) schemes of Hopkins (2015), on the `warpSPHCore.mfm` backend (COMPRESSIBLE_SPH_PLAN E1 + D4).
+"""MFM/MFV spatial RHS entry points and direct-step compatibility APIs.
 
-* `mfm.py`      `mfmStep`  -- conserved face fluxes, dm = 0.
-* `mfv.py`      `mfvStep`  -- the same fluxes plus the GIZMO mass-flux limiter (dm != 0), and the experimental GIZMO primitive update.
-* `step.py`     `runMeshlessStep` -- the skeleton both share: integrator guard, geometry, primitives and supports, temporal scheme, the update.
-* `temporal.py` the temporal schemes ('hancock', 'ssprk', 'kdk'), the per-mode 'auto' default, and the exact-delta contract they work under.
-* `common.py`   geometry build, the start-of-step primitives / diagnostics / supports, the geometry hand-over from the timestep.
+Normal runs use the ConservedLagrangian driver in warpSPHIntegrators. The
+MeshlessSystem lifecycle prepares fresh geometry/primitives, applies compatible
+corrections and finalizes diagnostics. Shared spatial work lives in modules:
+meshless face accumulation, reconstruction/limiting, ideal-gas primitives and
+moving-face Riemann policy. Geometry remains in warpSPHCore.mfm.
 
-Unlike the other compressible steps a meshless step owns its whole time step and hands the integrator the exact per-step deltas, so it must run under a
-single-evaluation integrator (`schemes/exactDelta.py`). The geometry is built by the backend from the frontend's own positions / supports, so no
-frontend Verlet list is needed (the returned adjacency is None).
-
-`meshlessStep` dispatches on `schemeConfig.mode` for callers that hold a config and not a scheme (the core-parity scripts, the benchmark).
+The temporal/common exports preserve older direct callers. That exact-delta
+adapter requires a single-evaluation Euler integrator; the normal staged runner
+does not use this adapter. Returned frontend adjacency remains None because
+meshless geometry owns its own neighbor structure.
 """
 
 from ...exactDelta import requireExactDeltaIntegrator
@@ -23,16 +22,16 @@ from .temporal import AUTO_TEMPORAL_SCHEME, TEMPORAL_SCHEMES, resolve_temporal_s
 __all__ = ['meshlessStep', 'mfmStep', 'mfvStep', 'supports_from_volume', 'resolve_temporal_scheme', 'validateIntegrationScheme', 'stashGeometry']
 
 
-def meshlessStep(system, dt, config, schemeConfig, verbose = False):
+def meshlessStep(system, dt, config, schemeConfig, verbose = False, **kwargs):
     """The step of the scheme `schemeConfig.mode` names ('MFM' / 'MFV')."""
     mode = str(schemeConfig.mode).upper()
     if mode == 'MFM':
-        return mfmStep(system, dt, config, schemeConfig, verbose)
+        return mfmStep(system, dt, config, schemeConfig, verbose, **kwargs)
     if mode == 'MFV':
-        return mfvStep(system, dt, config, schemeConfig, verbose)
+        return mfvStep(system, dt, config, schemeConfig, verbose, **kwargs)
     raise ValueError(f"meshless mode {schemeConfig.mode!r} is not 'MFM' or 'MFV'")
 
 
 def validateIntegrationScheme(config) -> None:
-    """Refuse any integrator that would run the step more than once per time step (`schemes/exactDelta.py`)."""
+    """Validate the legacy direct-step adapter; normal staging is package-owned."""
     requireExactDeltaIntegrator(config, 'MFM / MFV meshless')

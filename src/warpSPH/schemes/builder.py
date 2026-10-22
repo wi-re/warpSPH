@@ -7,6 +7,7 @@ pre-merge cleanup pass) lazily to avoid a circular import with
 `schemes/__init__.py`, which imports `divergenceFree` first.
 """
 
+from warpSPHIntegrators.schemes import ProjectedStep
 from dataclasses import dataclass
 from typing import Callable, Union
 
@@ -78,6 +79,8 @@ class SchemeBundle:
     exportFunction: Callable
     #: The inverse of `exportFunction`.
     importFunction: Callable
+    #: Optional consumer-specific time driver; legacy seven-member unpacking is unchanged.
+    integrationMethod: Callable | None = None
 
     def __iter__(self):
         """Legacy 7-tuple unpacking. Pinned to `_LEGACY_TUPLE_ORDER`."""
@@ -225,16 +228,17 @@ def _dfsphReference() -> SchemeBundle:
     # Same lazy-import rationale as `_divergenceFree`. Reuses the incompressible
     # state/config/update and their codecs -- the only thing that differs is the
     # step function and the system's `finalize` (see
-    # `systems/incompressible.py::DFSPHReferenceSystem` and
+    # `systems/incompressible.py::ProjectedSystem` and
     # `schemes/incompressible/dfsphReference.py`).
     from .incompressible.dfsphReference import dfsphReference_step
-    from ..systems.incompressible import (DFSPHReferenceSystem, IncompressibleState,
+    from ..systems.incompressible import (ProjectedSystem, IncompressibleState,
                                           IncompressibleSystemUpdate)
     return SchemeBundle(
-        SimulationSystem=DFSPHReferenceSystem,
+        SimulationSystem=ProjectedSystem,
         SimulationState=IncompressibleState,
         SimulationConfig=IncompressibleSPHConfig,
         SimulationUpdate=IncompressibleSystemUpdate,
+        integrationMethod=ProjectedStep,
         stepFunction=dfsphReference_step,
         exportFunction=incompressibleConfigToDict,
         importFunction=dictToIncompressibleSPHConfig,
@@ -243,19 +247,20 @@ def _dfsphReference() -> SchemeBundle:
 
 def _iisph() -> SchemeBundle:
     # Plain IISPH ([I], Ihmsen et al. 2014): shares `dfsphReference`'s
-    # incompressible state/config/update, codecs and `DFSPHReferenceSystem`
+    # incompressible state/config/update, codecs and `ProjectedSystem`
     # (the whole time integration happens inside the step), differing only in
     # the step function -- the divergence-free pass is switched off. See
     # `schemes/incompressible/dfsphReference.py::iisph_step` and DFSPH_IMPROVEMENT_PLAN.md
     # Part 33.
-    from .incompressible.dfsphReference import iisph_step
-    from ..systems.incompressible import (DFSPHReferenceSystem, IncompressibleState,
+    from .incompressible.iisph import iisph_step
+    from ..systems.incompressible import (ProjectedSystem, IncompressibleState,
                                           IncompressibleSystemUpdate)
     return SchemeBundle(
-        SimulationSystem=DFSPHReferenceSystem,
+        SimulationSystem=ProjectedSystem,
         SimulationState=IncompressibleState,
         SimulationConfig=IncompressibleSPHConfig,
         SimulationUpdate=IncompressibleSystemUpdate,
+        integrationMethod=ProjectedStep,
         stepFunction=iisph_step,
         exportFunction=incompressibleConfigToDict,
         importFunction=dictToIncompressibleSPHConfig,
@@ -265,16 +270,17 @@ def _iisph() -> SchemeBundle:
 def _omniIncompressible() -> SchemeBundle:
     # Direct port of omniSPH's incompressible solver loop. Same lazy-import
     # rationale as `_divergenceFree`; reuses the incompressible
-    # state/config/update and `DFSPHReferenceSystem` (the whole time
+    # state/config/update and `ProjectedSystem` (the whole time
     # integration happens inside the step). See `schemes/incompressible/omniIncompressible.py`.
     from .incompressible.omniIncompressible import omniIncompressible_step
-    from ..systems.incompressible import (DFSPHReferenceSystem, IncompressibleState,
+    from ..systems.incompressible import (ProjectedSystem, IncompressibleState,
                                           IncompressibleSystemUpdate)
     return SchemeBundle(
-        SimulationSystem=DFSPHReferenceSystem,
+        SimulationSystem=ProjectedSystem,
         SimulationState=IncompressibleState,
         SimulationConfig=IncompressibleSPHConfig,
         SimulationUpdate=IncompressibleSystemUpdate,
+        integrationMethod=ProjectedStep,
         stepFunction=omniIncompressible_step,
         exportFunction=incompressibleConfigToDict,
         importFunction=dictToIncompressibleSPHConfig,
@@ -284,16 +290,17 @@ def _omniIncompressible() -> SchemeBundle:
 def _band2018pb() -> SchemeBundle:
     # IISPH with Pressure Boundaries (Band et al. 2018). Same lazy-import
     # rationale as `_divergenceFree`; reuses the incompressible
-    # state/config/update and `DFSPHReferenceSystem` (the whole time
+    # state/config/update and `ProjectedSystem` (the whole time
     # integration happens inside the step). See `schemes/incompressible/band2018pb.py`.
     from .incompressible.band2018pb import band2018pb_step
-    from ..systems.incompressible import (DFSPHReferenceSystem, IncompressibleState,
+    from ..systems.incompressible import (ProjectedSystem, IncompressibleState,
                                           IncompressibleSystemUpdate)
     return SchemeBundle(
-        SimulationSystem=DFSPHReferenceSystem,
+        SimulationSystem=ProjectedSystem,
         SimulationState=IncompressibleState,
         SimulationConfig=IncompressibleSPHConfig,
         SimulationUpdate=IncompressibleSystemUpdate,
+        integrationMethod=ProjectedStep,
         stepFunction=band2018pb_step,
         exportFunction=incompressibleConfigToDict,
         importFunction=dictToIncompressibleSPHConfig,

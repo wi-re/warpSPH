@@ -1,5 +1,8 @@
-"""Incompressible schemes: the projection / pressure-solve family (divergenceFree, the DFSPH and IISPH references, omniSPH, IISPH with pressure boundaries) and artificial-compressibility SPH (ACSPH).
+"""Projection scheme compositions; reusable equations live in modules.
 
-One module per scheme, each a single per-step function wired by `schemes/builder.py`. Nothing is re-exported here: the
-modules are imported by their full path (`warpSPH.schemes.incompressible.<module>`) so that patching a name in the module patches the step.
+The full-map DFSPH reference, IISPH, omni and Band compositions select the
+package ProjectedStep driver. divergenceFree/VD+PS retains an ordinary RHS
+and the selected integrator. Artificial compressibility remains a separate,
+deferred dual-time method. Import scheme modules explicitly; the legacy
+private names and experiment switches are compatibility interfaces.
 """
