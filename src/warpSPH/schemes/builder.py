@@ -7,7 +7,7 @@ pre-merge cleanup pass) lazily to avoid a circular import with
 `schemes/__init__.py`, which imports `divergenceFree` first.
 """
 
-from warpSPHIntegrators.schemes import ProjectedStep
+from warpSPHIntegrators.schemes import ProjectedStep, IntegrationSchemeType
 from dataclasses import dataclass, replace
 from typing import Callable, Union
 
@@ -79,8 +79,8 @@ class SchemeBundle:
     exportFunction: Callable
     #: The inverse of `exportFunction`.
     importFunction: Callable
-    #: Optional consumer-specific time driver; legacy seven-member unpacking is unchanged.
-    integrationMethod: Callable | None = None
+    #: Optional driver constructor or registered scheme enum; legacy unpacking is unchanged.
+    integrationMethod: Callable | IntegrationSchemeType | None = None
     #: Resolve an integrated-field layout after scheme config overrides.
     stateFactory: Callable | None = None
 
@@ -263,14 +263,14 @@ def _iisph() -> SchemeBundle:
     # Native IISPH (Ihmsen et al. 2014), one rest-volume density projection.
     # Shares state/time infrastructure, not DFSPH's coefficients or policy.
     from .incompressible.iisph import iisph_step
-    from ..systems.incompressible import (ProjectedSystem, IncompressibleState,
+    from ..systems.incompressible import (IISPHSystem, IncompressibleState,
                                           IncompressibleSystemUpdate)
     return SchemeBundle(
-        SimulationSystem=ProjectedSystem,
+        SimulationSystem=IISPHSystem,
         SimulationState=IncompressibleState,
         SimulationConfig=IncompressibleSPHConfig,
         SimulationUpdate=IncompressibleSystemUpdate,
-        integrationMethod=ProjectedStep,
+        integrationMethod=IntegrationSchemeType.semiImplicitEuler,
         stepFunction=iisph_step,
         exportFunction=incompressibleConfigToDict,
         importFunction=dictToIncompressibleSPHConfig,

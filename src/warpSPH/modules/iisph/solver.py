@@ -88,12 +88,14 @@ def computeIISPHCoefficients(state, config, schemeConfig, adjacency, *, boundary
     return IISPHCoefficients(pairs, volume, densityRatio, G, c, diagonal, contact)
 
 
-def solveIISPH(state, config, schemeConfig, velocity, dt, adjacency, previousPressure=None, *,
+def solveIISPH(state, config, schemeConfig, acceleration, dt, adjacency, previousPressure=None, *,
                boundaryIntegrals=None, contactPoints=None, gravity=None):
     """Assemble and solve IISPH at fixed geometry with physical-pressure carry.
 
     The signed statistic uses the new diagonal and old off-diagonal iterate,
     averaged over all fluid rows. Tolerance is a percentage of rest density.
+    The nonpressure acceleration supplies a temporary predicted velocity;
+    simulation positions and velocities remain untouched.
     Pressure coefficients, contact interpolation and gravity extrapolation
     are local to this solve. The known wall acceleration contributes to
     both the source and the final pressure acceleration.
@@ -107,12 +109,14 @@ def solveIISPH(state, config, schemeConfig, velocity, dt, adjacency, previousPre
         raise ValueError("IISPH requires a finite positive timestep")
     if previousPressure is None:
         previousPressure = torch.zeros_like(state.masses)
-    if velocity.requires_grad or previousPressure.requires_grad:
+    if acceleration.requires_grad or previousPressure.requires_grad:
         raise NotImplementedError("IISPH has no autograd contract")
     coefficients = computeIISPHCoefficients(state, config, schemeConfig, adjacency,
         boundaryIntegrals=boundaryIntegrals, contactPoints=contactPoints)
     boundaryAcceleration = computeIISPHBoundaryPressureAcceleration(state, config,
         schemeConfig, coefficients, boundaryIntegrals, contactPoints, gravity)
+    velocity = state.velocities + dt * torch.where(
+        fluid[:, None], acceleration, torch.zeros_like(acceleration))
     dt2 = dt * dt
     b = (1 - coefficients.densityRatio - dt * computeIISPHDensityRate(state, velocity, coefficients)
          - dt2 * computeIISPHDensityRate(state, boundaryAcceleration, coefficients))

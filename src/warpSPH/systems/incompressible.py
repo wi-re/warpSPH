@@ -35,6 +35,7 @@ __all__ = [
     "IncompressibleSystemUpdate",
     "IncompressibleSystem",
     "ProjectedSystem",
+    "IISPHSystem",
     "DFSPHReferenceSystem",
 ]
 
@@ -136,7 +137,7 @@ class IncompressibleSystem(BaseIntegrationSystem):
         state = get_reference_state(self)
         if verbose:  # self.t may be a device tensor: format it only when printing
             print(f"Initializing new state [t={self.t}]")
-        return IncompressibleSystem(
+        return type(self)(
             state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain
         )
 
@@ -235,8 +236,39 @@ class IncompressibleSystem(BaseIntegrationSystem):
 
 
 @dataclass
+class IISPHSystem(IncompressibleSystem):
+    """Ordinary integration of x and v with summed density and pressure carry.
+
+    Inherit the normal derivative updates. Finalization retains only fields
+    recomputed by the RHS; positions and velocities belong to the integrator.
+    """
+
+    def finalize(self, initialState, dt, returnValues, updateValues, weights=..., *args, **kwargs):
+        self.adjacency = returnValues[-1][0]
+        lastState = returnValues[-1][1]
+        for name in ('supports', 'densities', 'pressures', 'soundspeeds',
+                     'surfaceIndicators', 'surfaceNormals', 'surfaceLambdas'):
+            value = getattr(lastState, name)
+            target = getattr(self.state, name)
+            if value is None:
+                setattr(self.state, name, None)
+            elif target is not None and target.shape == value.shape:
+                target.copy_(value)
+            else:
+                setattr(self.state, name, value.clone())
+
+        schemeConfig = kwargs.get('schemeConfig', None)
+        if schemeConfig is not None:
+            from ..rigidBody.stages import advanceUnforcedBodies
+            advanceUnforcedBodies(self, dt, schemeConfig)
+        applyPinnedVelocity(self.state, kwargs.get('config', None), schemeConfig)
+        return BaseIntegrationSystem.finalize(
+            self, initialState, dt, returnValues, updateValues, weights, *args, **kwargs)
+
+
+@dataclass
 class ProjectedSystem(IncompressibleSystem):
-    """State adapter for the reference DFSPH, IISPH, omni and Band full maps.
+    """State adapter for the reference DFSPH, omni and Band full maps.
 
     The package ProjectedStep driver evaluates one full projected map -- two
     pressure solves with a position advance between them -- so this system

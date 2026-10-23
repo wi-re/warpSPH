@@ -250,8 +250,11 @@ def prepareContext(case: Case, spec: CaseSpec) -> RunContext:
     applySchemeOverrides(ctx)
     integrationMethod = getattr(ctx.schemeConfig, 'integrationMethod', None) or ctx.bundle.integrationMethod
     if integrationMethod is not None:
-        from warpSPHIntegrators.schemes import get_scheme
-        ctx.integrator = get_scheme(integrationMethod())
+        from warpSPHIntegrators.schemes import get_scheme, IntegrationSchemeType
+        method = integrationMethod() if callable(integrationMethod) else integrationMethod
+        ctx.integrator = get_scheme(method)
+        if isinstance(method, IntegrationSchemeType):
+            ctx.config.integrationScheme = method
     if hasattr(ctx.schemeConfig, 'validate'):
         ctx.schemeConfig.validate(ctx.config)
     ctx.bundle = ctx.bundle.configured(ctx.schemeConfig)

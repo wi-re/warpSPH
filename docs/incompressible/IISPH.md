@@ -9,8 +9,8 @@ retains its composed DFSPH formulation.
 
 `schemes/incompressible/iisph.py` follows the numbered module-call layout
 of delta-SPH: Core adjacency, density, Dirichlet conditions, forces,
-boundary geometry, pressure solve, Integrators kick/drift, and update.
-The scheme orders those calls and assigns their results to the current state.
+boundary geometry, pressure solve, derivative assembly and update boundary
+conditions. It does not advance positions or velocities.
 
 `modules/iisph` exposes ordinary functions:
 
@@ -22,11 +22,13 @@ The scheme orders those calls and assigns their results to the current state.
 - `computeIISPHPressureAcceleration(state, normalizedPressure, coefficients)`
   applies the linear pressure force; `computeIISPHPressureOperator` composes
   force and continuity.
-- `solveIISPH(state, config, schemeConfig, velocity, dt, adjacency,
+- `solveIISPH(state, config, schemeConfig, acceleration, dt, adjacency,
   previousPressure=None, boundaryIntegrals=None, contactPoints=None, gravity=None)`
   assembles the pressure coefficients, contact-pressure weights, exact Jacobi
   diagonal, and known gravity extrapolation inside the solve. It returns an
-  `IISPHResult` without modifying input fields. Omit previous pressure for a
+  `IISPHResult` without modifying input fields. The supplied nonpressure
+  acceleration forms a local predicted velocity inside the solver; it does
+  not advance the simulation velocity. Omit previous pressure for a
   cold start. The gravity extension enters both the source and final pressure
   acceleration. The provider's `Cov` is the first spatial moment of the kernel
   gradient, `integral_solid (x_solid-x_i) tensor grad_i W dV`.
@@ -38,8 +40,14 @@ records of tensors. They retain no simulation state, configuration, callable,
 or solver instance. Coefficients belong to the supplied positions and must
 be recomputed after particles move. The Warp kernels in `wp_operators.py`
 use Core neighbor lists, kernel functions and precision. Core's stationary
-driver controls iteration; the package `ProjectedStep` driver owns the
-full timestep lifecycle. Configuration is explicit in
+driver controls iteration. The standard `semiImplicitEuler` driver advances
+velocity from the combined nonpressure and pressure acceleration, then
+advects positions with that updated velocity. IISPH selects this registered
+single-evaluation driver through its scheme bundle. `IISPHSystem` uses normal
+derivative updates and carries only summed density, pressure, and other
+recomputed fields at finalization. It does not run the VD+PS shifting hooks.
+The RHS has no kick/drift calls or zero-update full-map adapter.
+Configuration is explicit in
 `IncompressibleSPHConfig.iisph` and uses the existing codecs.
 
 Density uses the shared `modules.density.computeDensities` function. Its
@@ -136,6 +144,8 @@ silently increasing the configured cap. Nonfinite pressure raises an error.
 
 `tests/test_projectionModules.py` checks independent dense force/continuity
 oracles, the exact coupled diagonal, iteration policy, density-unit scaling,
-configuration round trips, policy isolation and CPU/CUDA parity.
+configuration round trips, policy isolation and CPU/CUDA parity. It also
+checks RHS input ownership, standard integrator selection, derivative boundary
+conditions, fixed sampled walls, summed-density carry and pressure warm starts.
 `tests/test_analyticIisph.py`
 exercises the standard scheme/driver on an analytic tank.

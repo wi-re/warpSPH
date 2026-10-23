@@ -7,9 +7,11 @@ from .boundaryPressureAcceleration import computeIISPHBoundaryPressureAccelerati
 from .operators import (computeIISPHDensityRate, computeIISPHPressureAcceleration,
                         computeIISPHPressureOperator)
 from .viscosity import computeIISPHViscosity
+from .updates import assembleIISPHUpdate, maskIISPHUpdate
 
 __all__ = ['IISPHCoefficients', 'IISPHResult',
            'computeIISPHCoefficients', 'computeIISPHBoundaryIntegrals',
            'computeIISPHContactPoints', 'computeIISPHBoundaryPressureAcceleration', 'solveIISPH',
            'computeIISPHDensityRate', 'computeIISPHPressureAcceleration',
-           'computeIISPHPressureOperator', 'computeIISPHViscosity']
+           'computeIISPHPressureOperator', 'computeIISPHViscosity',
+           'assembleIISPHUpdate', 'maskIISPHUpdate']
