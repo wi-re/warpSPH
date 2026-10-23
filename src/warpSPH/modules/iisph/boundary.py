@@ -20,7 +20,6 @@ class IISPHContactWeights(NamedTuple):
 
 
 class IISPHBoundaryTerms(NamedTuple):
-    density: torch.Tensor
     gradient: torch.Tensor
     sampled: bool
     contactPoints: torch.Tensor = None
@@ -56,7 +55,6 @@ def computeIISPHBoundaryTerms(state, config, schemeConfig):
         raise ValueError("Analytic IISPH boundaries require a boundaryProvider")
     if analytic and bool((state.kinds == 1).any()):
         raise ValueError("Analytic IISPH boundaries cannot also contain sampled solids; select particles explicitly")
-    B = torch.zeros_like(state.masses)
     G = torch.zeros_like(state.positions)
     covariance = None
     if provider is not None:
@@ -70,7 +68,6 @@ def computeIISPHBoundaryTerms(state, config, schemeConfig):
         if config.calibrateNormalization:
             from warpSPHCore.util.latticeDensity import latticeDensityFactor
             packing *= latticeDensityFactor(config.kernel, float(config.n_h), 2)
-        B = packing * aggregate.out['lam'].sum(0).to(B)
         G = packing * aggregate.out['G'].sum(0).to(G)
         covariance = packing * aggregate.out['Cov'].sum(0).to(state.positions)
     points = None
@@ -82,4 +79,4 @@ def computeIISPHBoundaryTerms(state, config, schemeConfig):
         if not bool(hit[state.kinds == 0].all()):
             raise ValueError("IISPH contact geometry did not cover every fluid query")
         points = state.positions - distance[:, None]*normal.to(state.positions)
-    return IISPHBoundaryTerms(B, G, not analytic, points, covariance)
+    return IISPHBoundaryTerms(G, not analytic, points, covariance)

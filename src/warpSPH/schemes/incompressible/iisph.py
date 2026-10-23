@@ -31,19 +31,20 @@ def iisph_step(
             priorNeighborhood=system.adjacency, verbose=False, **neighborSearchOptions(config))
         system.adjacency = adjacency
 
-    with record_function('[warpSPH] - [IISPH - 02] static wall geometry'):
-        boundary = computeIISPHBoundaryTerms(currentState, config, schemeConfig)
-
-    with record_function('[warpSPH] - [IISPH - 03] density'):
+    with record_function('[warpSPH] - [IISPH - 02] density'):
         currentState.densities = computeDensities(currentState, config, schemeConfig, adjacency,
-            wall=schemeConfig.fluid.restDensity * boundary.density)
+            boundaryRepresentation=schemeConfig.iisph.boundaryRepresentation,
+            wallMassDensity=schemeConfig.fluid.restDensity)
 
-    with record_function('[warpSPH] - [IISPH - 04] Dirichlet boundary conditions'):
+    with record_function('[warpSPH] - [IISPH - 03] Dirichlet boundary conditions'):
         enforceDirichlet(system, system.t, dt, config, schemeConfig)
 
-    with record_function('[warpSPH] - [IISPH - 05] gravity and body force'):
+    with record_function('[warpSPH] - [IISPH - 04] gravity and body force'):
         gravity = computeGravity(currentState, config, schemeConfig, adjacency)
         acceleration = gravity + computeBodyForce(currentState, schemeConfig)
+
+    with record_function('[warpSPH] - [IISPH - 05] pressure boundary geometry'):
+        boundary = computeIISPHBoundaryTerms(currentState, config, schemeConfig)
 
     with record_function('[warpSPH] - [IISPH - 06] pressure coefficients'):
         coefficients = computeIISPHCoefficients(currentState, config, schemeConfig, adjacency,

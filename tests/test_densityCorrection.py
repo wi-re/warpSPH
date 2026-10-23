@@ -145,6 +145,37 @@ def test_physicalWallDensityIsAddedBeforeCorrection(corrected):
     torch.testing.assert_close(actual, expected, rtol=0, atol=0)
 
 
+@pytest.mark.parametrize('representation', ['analytic', 'particles', 'auto'])
+@pytest.mark.parametrize('normalized', [False, True])
+def test_densityEvaluatesPhysicalWallWithoutPressureGeometry(representation, normalized):
+    from types import SimpleNamespace as NS
+    from warpSPHCore.util.latticeDensity import latticeDensityFactor
+
+    dim, kernel = 2, KernelFunctions.Wendland4
+    H = _H(dim, 100.0)
+    state, _, _ = _stateAndDomain(dim, H)
+    config = _buildConfig(dim, kernel, None)
+    config.calibrateNormalization = normalized
+    lam = torch.full((1, len(state.masses)), .2, dtype=state.masses.dtype)
+    calls = []
+
+    def aggregate(particles, support, kernel, **kwargs):
+        calls.append(particles)
+        return NS(out={'lam': lam})  # No pressure gradient, moments, or contact geometry.
+
+    scheme = NS(boundaryProvider=NS(aggregate=aggregate, rigidBodies=[]),
+                rigidBodies=[], analyticWallMass=.83)
+    adjacency = _adjacency(dim, H)
+    expected = computeDensities(state, config, scheme, adjacency, wall=False)
+    if representation != 'particles':
+        packing = .83 * (latticeDensityFactor(kernel, config.n_h, dim) if normalized else 1.)
+        expected = expected + 1000. * (packing * lam.sum(0))
+    actual = computeDensities(state, config, scheme, adjacency,
+        boundaryRepresentation=representation, wallMassDensity=1000.)
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+    assert len(calls) == (representation != 'particles')
+
+
 @pytest.mark.parametrize('kernel', WENDLANDS)
 @pytest.mark.parametrize('dim', [2, 3])
 @pytest.mark.parametrize('off', [None, False, DensityCorrection()])

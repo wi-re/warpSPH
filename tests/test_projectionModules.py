@@ -180,7 +180,7 @@ def _nativeIisphFixture(device, dim, contact, rho0=1000.0, wrappedWall=False):
         points[:, 1] = 0
         g = torch.zeros_like(x)
         g[:, 1] = -9.81
-        boundary = IISPHBoundaryTerms(torch.zeros_like(state.masses), torch.zeros_like(x), True, points)
+        boundary = IISPHBoundaryTerms(torch.zeros_like(x), True, points)
     scheme = NS(fluid=NS(restDensity=rho0), iisph=IISPHConfig())
     state.densities = computeDensities(state, config, scheme, adj, wall=False)
     coefficients = computeIISPHCoefficients(state, config, scheme, adj, boundary, gravity=g)
@@ -249,6 +249,7 @@ def test_iisphDensityInitializationDoesNotBuildPressureCoefficients(monkeypatch)
         pytest.fail('Density initialization must not build pressure coefficients')
 
     monkeypatch.setattr(iisph, 'computeIISPHCoefficients', unexpected)
+    monkeypatch.setattr(iisph, 'computeIISPHBoundaryTerms', unexpected)
     initializeProjectionDensity(ctx, NS(state=state, adjacency=None))
     torch.testing.assert_close(state.densities, expected)
 

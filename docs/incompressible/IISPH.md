@@ -8,8 +8,8 @@ retains its composed DFSPH formulation.
 ## Functional API and ownership
 
 `schemes/incompressible/iisph.py` follows the numbered module-call layout
-of delta-SPH: Core adjacency, wall geometry, density, Dirichlet conditions,
-forces and pressure coefficients, pressure solve, Integrators kick/drift, and update.
+of delta-SPH: Core adjacency, density, Dirichlet conditions, forces,
+pressure boundary geometry and coefficients, pressure solve, Integrators kick/drift, and update.
 The scheme orders those calls and assigns their results to the current state.
 
 `modules/iisph` exposes ordinary functions:
@@ -38,8 +38,10 @@ driver controls iteration; the package `ProjectedStep` driver owns the
 full timestep lifecycle. Configuration is explicit in
 `IncompressibleSPHConfig.iisph` and uses the existing codecs.
 
-Density uses the shared `modules.density.computeDensities` function, with
-the analytic solid contribution supplied in physical units as `rho0 * B`.
+Density uses the shared `modules.density.computeDensities` function. Its
+`boundaryRepresentation` and `wallMassDensity` arguments select sampled
+walls or a geometry-only solid integral in physical density units. The
+scheme does not construct wall density from pressure boundary data.
 Dirichlet conditions run after this summation. Pressure coefficients read
 that resulting density; they neither recompute it nor overwrite prescribed
 values. Initial density reporting uses the same summation without building

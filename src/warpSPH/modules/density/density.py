@@ -31,12 +31,15 @@ from ...enumTypes import *
 __all__ = ['computeDensities']
 
 
-def computeDensities(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], supportMode: Optional[SupportScheme] = None, wall: Optional[Any] = None) -> torch.Tensor:
+def computeDensities(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], supportMode: Optional[SupportScheme] = None, wall: Optional[Any] = None, *, boundaryRepresentation: str = 'auto', wallMassDensity: Optional[float] = None) -> torch.Tensor:
     """Sum particle masses and the wall contribution, then apply corrections.
 
     ``wall`` can be an evaluated analytic wall, a tensor containing its
     contribution in density units, or ``False`` to omit analytic walls.
     ``None`` resolves the scheme's analytic boundary provider as usual.
+    Supply ``wallMassDensity`` to evaluate the physical solid-density integral
+    directly from geometry; ``boundaryRepresentation='particles'`` leaves the
+    sampled wall contribution entirely in the particle sum.
     """
     with record_function("[warpSPH] - computeDensities"):
         densities = warpOperation(
@@ -60,7 +63,11 @@ def computeDensities(currentState: Any, config: SimulationConfig, schemeConfig: 
         )
         # analytic walls: the wall's share of the sum (the boundary particles' `sum_k V_k W_ik`), `wall=None` resolves the scheme's provider
         from ..analyticBoundary import resolveWall, wallDensity
-        if isinstance(wall, torch.Tensor):
+        if wallMassDensity is not None:
+            from ..analyticBoundary.density import computeWallDensity
+            densities = densities + computeWallDensity(currentState, config, schemeConfig,
+                representation=boundaryRepresentation, massDensity=wallMassDensity)
+        elif isinstance(wall, torch.Tensor):
             densities = densities + wall
         else:
             wall = resolveWall(currentState, config, schemeConfig, adjacency, wall)

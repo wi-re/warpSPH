@@ -37,15 +37,10 @@ def initializeProjectionDensity(ctx, system):
     state = system.state
     from ..enumTypes import IncompressibleSPHScheme
     if ctx.scheme == IncompressibleSPHScheme.iisph:
-        # Report the exact density the native pressure solve consumes,
-        # including physical rho0 times the dimensionless solid integral.
-        from ..modules.incompressible.operators import rebuildAdjacency
-        from ..modules.iisph import computeIISPHBoundaryTerms
         config, schemeConfig = ctx.config, ctx.schemeConfig
-        adjacency = rebuildAdjacency(state, system, config)
-        boundary = computeIISPHBoundaryTerms(state, config, schemeConfig)
-        state.densities = computeDensities(state, config, schemeConfig, adjacency,
-            wall=schemeConfig.fluid.restDensity * boundary.density)
+        state.densities = computeDensities(state, config, schemeConfig, system.adjacency,
+            boundaryRepresentation=schemeConfig.iisph.boundaryRepresentation,
+            wallMassDensity=schemeConfig.fluid.restDensity)
     else:
         state.densities = computeDensities(state, ctx.config, ctx.schemeConfig, None)
     rho = state.densities[state.kinds == 0] / ctx.schemeConfig.fluid.restDensity
