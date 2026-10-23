@@ -41,6 +41,8 @@ and the visualisation in [`warpSPHPlotting`](https://github.com/wi-re/warpSPHPlo
 - [Tests](#tests)
 - [Classic-fluid comparison baseline](docs/fluid_matrix/README.md) — preserved
   eight-scheme results, rankings, failure evidence and raw-data archive
+- [Compressible comparison matrix](docs/compressible_matrix/README.md) — fixed-resolution
+  case/method selection, retained attempts, parameter trials and quality/cost figures
 - [Contributing](CONTRIBUTING.md) — dev setup, nbstripout, what to run before committing
 - [Plans](PLANS.md) — which plan is active, priorities, per-plan progress markers
 - [Gallery](#gallery)
