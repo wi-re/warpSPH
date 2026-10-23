@@ -7,16 +7,29 @@ retains its composed DFSPH formulation.
 
 ## Ownership
 
-- `schemes/incompressible/iisph.py` orders summation, the nonpressure
-  predictor, projection, velocity kick and position drift. It uses the
-  package's `ProjectedStep` driver and Integrators' temporal primitives.
-- `modules/incompressible/iisph.py` exposes `IISPHOperator` and `IISPHResult`.
+- `schemes/incompressible/iisph.py` contains seven numbered profiling
+  sections that delegate boundary setup, adjacency, density/coefficients,
+  prediction, projection, time advancement and result bookkeeping. It has
+  no numerical expressions, model switches or run-state globals.
+- `modules/iisph/solver.py` exposes `IISPHOperator` and `IISPHResult`.
   The fixed-geometry operator can be reused independently of the scheme.
-- `modules/incompressible/iisphBoundary.py` supplies static solid terms and
+- `modules/iisph/boundary.py` supplies static solid terms and
   optional closest-contact pressure extrapolation.
-- `modules/incompressible/wp_iisph.py` implements device reductions using
+- `modules/iisph/operators.py` prepares kernel geometry, and
+  `modules/iisph/wp_operators.py` implements device reductions using
   Core's neighbor lists, kernel functions and precision. Core's stationary
   driver owns iteration and nonfinite termination.
+- `modules/iisph/viscosity.py` supplies the configured predictor viscosity.
+- `modules/iisph/stages.py` owns the predictor, warm-start handoff, update
+  bookkeeping and calls to Integrators' kick/drift primitives. The package
+  `ProjectedStep` driver continues to own the full timestep lifecycle.
+
+Use `from warpSPH.modules.iisph import IISPHOperator, IISPHBoundary` for the
+reusable public API. The old `modules.incompressible` package-level exports
+remain aliases of these classes. Its former native IISPH source files have
+been removed. Configuration remains in `IncompressibleSPHConfig.iisph` and
+round-trips through the existing codecs; no configuration or numerical
+default changed in the module extraction.
 
 There is no SciPy dependency or assembled pressure matrix in this path.
 Geometry and iterative fields stay on the state's CPU or CUDA device.
@@ -99,5 +112,6 @@ silently increasing the configured cap. Nonfinite pressure raises an error.
 
 `tests/test_projectionModules.py` checks independent dense force/continuity
 oracles, the exact coupled diagonal, iteration policy, density-unit scaling,
-configuration round trips and CPU/CUDA parity. `tests/test_analyticIisph.py`
+configuration round trips, policy isolation and CPU/CUDA parity.
+`tests/test_analyticIisph.py`
 exercises the standard scheme/driver on an analytic tank.

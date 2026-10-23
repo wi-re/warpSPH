@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import torch
 from warpSPHCore import buildVerletList, SupportScheme
 from ...configurations.compute import neighborSearchOptions
-from .iisph import IISPHPairs
+from .operators import IISPHPairs
 
 
 class ContactPressure:

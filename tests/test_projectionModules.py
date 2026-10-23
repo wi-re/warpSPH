@@ -152,8 +152,7 @@ def test_configRoundTripPreservesPressureSchedulesAndAllShiftingFields():
 def _nativeIisphFixture(device, dim, contact, rho0=1000.0, wrappedWall=False):
     from warpSPHCore import DomainDescription, KernelFunctions, SupportScheme, buildVerletList
     from warpSPHCore.type_config import get_torch_precision
-    from warpSPH.modules.incompressible.iisph import IISPHOperator
-    from warpSPH.modules.incompressible.iisphBoundary import IISPHBoundary
+    from warpSPH.modules.iisph import IISPHOperator, IISPHBoundary
 
     dtype = get_torch_precision()
     x = torch.tensor([[-.31, .14], [-.06, .17], [.24, .12], [-.28, .42], [.01, .39], [.27, .43],
@@ -263,7 +262,7 @@ def test_nativeIisphDensityUnitsAndDeviceParity():
 
 
 def test_nativeIisphViscosityIsFreeSlipAndDissipatesFluidMotion():
-    from warpSPH.modules.incompressible.iisph import iisphViscosity
+    from warpSPH.modules.iisph import iisphViscosity
     from warpSPH.configurations import IncompressibleSPHConfig
     op = _nativeIisphFixture('cpu', 2, False)
     state = op.state
@@ -294,6 +293,38 @@ def test_nativeIisphSampledGravityUsesTheNearestPeriodicWallImage():
     torch.testing.assert_close(wrapped.diagonal, base.diagonal, rtol=3e-6, atol=3e-6)
 
 
+def test_iisphPoliciesAndPressureCarryDoNotLeakBetweenSolves():
+    from dataclasses import asdict
+    from warpSPH.configurations import IISPHConfig
+    first = _nativeIisphFixture('cpu', 2, True)
+    other = _nativeIisphFixture('cpu', 2, False)
+    short = IISPHConfig(minIterations=2, maxIterations=2, relaxationFactor=.25)
+    longer = IISPHConfig(minIterations=6, maxIterations=6, relaxationFactor=.4)
+    original = asdict(short), asdict(longer)
+    previous = torch.full_like(first.volume, 1000.)
+    carry = previous.clone()
+    before = first.solve(first.state.velocities, previous, .001, short)
+    between = other.solve(other.state.velocities, previous, .001, longer)
+    after = first.solve(first.state.velocities, previous, .001, short)
+    assert (before.iterations, between.iterations, after.iterations) == (2, 6, 2)
+    assert (asdict(short), asdict(longer)) == original
+    assert torch.equal(previous, carry)
+    assert torch.equal(before.pressure, after.pressure)
+    assert torch.equal(before.acceleration, after.acceleration)
+
+
+def test_iisphProjectionRejectsNonfiniteResultsBeforeStateAdvance():
+    from warpSPH.modules.iisph.stages import solveIISPHPressure
+    state = NS(masses=torch.ones(3), pressures=None, positions=torch.zeros(3, 2))
+    def failed(velocity, previous, dt, policy):
+        assert torch.equal(previous, torch.zeros_like(state.masses))
+        return NS(termination='nonfinite')
+    with pytest.raises(FloatingPointError, match='Nonfinite IISPH'):
+        solveIISPHPressure(state, .01, NS(solve=failed), torch.zeros(3, 2), NS())
+    assert state.pressures is None
+    assert torch.equal(state.positions, torch.zeros(3, 2))
+
+
 @pytest.mark.parametrize("scheme", ["dfsphReference", "iisph", "omniIncompressible", "band2018pb"])
 def test_fullMapSchemesSelectPackageDriverEvenWhenRKRequested(scheme):
     from warpSPH.cases import importAll
@@ -308,7 +339,7 @@ def test_fullMapSchemesSelectPackageDriverEvenWhenRKRequested(scheme):
     assert len(tuple(ctx.bundle)) == 7
 
 
-@pytest.mark.parametrize("name", ["dfsphReference", "omniIncompressible", "band2018pb"])
+@pytest.mark.parametrize("name", ["iisph", "dfsphReference", "omniIncompressible", "band2018pb"])
 def test_directFullMapCallRefusesMultistageWrapper(name):
     from importlib import import_module
     from warpSPHIntegrators.schemes import IntegrationSchemeType as I

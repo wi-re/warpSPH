@@ -161,7 +161,7 @@ def solveReference(
     in the DF solve); the config tolerances here are kept as-is.
 
     The former `iisph` wrapper called this density mode. Native IISPH now
-    lives in `.iisph`. Pinned SPlisHSPlasH IISPH uses rest-volume
+    lives in `modules.iisph`. Pinned SPlisHSPlasH IISPH uses rest-volume
     continuity, its separate density-dependent coefficients, half the
     previous pressure, omega=0.5, and a signed average on pressure-active
     rows evaluated with new diagonal / old off-diagonal iterates. Its
