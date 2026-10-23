@@ -242,7 +242,7 @@ def computeConductivity_Kernel(
     if i >= numParticles:
         return
 
-    outputValues[i] = computeConductivity_Func_Adjacency(
+    outputValues[i] = viscosityParams.thermalConductivity * computeConductivity_Func_Adjacency(
         i, domainState.dim, 
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
@@ -304,6 +304,8 @@ def computeConductivityWarp(
     gradHState: Optional[Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor], GradHState]] = None,
     renormalizationState: Optional[Union[torch.Tensor,RenormalizationState]] = None,
 ):
+    if conductivityParams.thermalConductivity == 0:
+        return torch.zeros_like(queryParticles.densities)
     if referenceVelocities is None:
         referenceVelocities = queryVelocities
     if referenceCs is None:
@@ -387,5 +389,3 @@ def computeConductivityWarp(
         #         explicitPressure, queryPressures_, referencePressures_,
         #         conductivityParams
         #     )
-
-    return conductivityParams.thermalConductivity * warp_result

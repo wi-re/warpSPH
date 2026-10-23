@@ -39,7 +39,8 @@ def sampleLinearWave(
     SimulationSystem,
     A, lamda, c_s, rho0, gamma,
     nIters = 16,
-    supportScheme = AdaptiveSupportScheme.NoScheme
+    supportScheme = AdaptiveSupportScheme.NoScheme,
+    analyticMass = False,
 ):
 
     particles_l = sampleRegularParticles(nx, config.domain, config.targetNeighbors, jitter = 0.0)
@@ -94,7 +95,15 @@ def sampleLinearWave(
 
     adjacency = None
 
-    for i in range(16):    
+    if analyticMass:
+        # Prescribe the physical acoustic density using unequal masses on
+        # the existing regular volume samples. Preserve total mass; do not
+        # iterate masses to hide a kernel quadrature error.
+        rho = rho0 + delta_i/(c_s*c_s)
+        simulationState.masses = particles_l.masses*rho
+        simulationState.densities = rho
+
+    for i in range(0 if analyticMass else 16):
 
 
         adjacency = buildVerletList(
@@ -138,8 +147,9 @@ def sampleLinearWave(
     A_, u_, P_, c_ = idealGasEOS(A = None, u = None, P = pressures, rho = rho, gamma = gamma)
 
     # c_[:] = c_s
-    v_ = (c_s * delta_i).view(-1,1)
-    u_[:] = 1/(gamma - 1) - 1 / (gamma * (delta_i + 1))
+    v_ = (delta_i/(rho0*c_s) if analyticMass else c_s*delta_i).view(-1,1)
+    if not analyticMass:
+        u_[:] = 1/(gamma - 1) - 1 / (gamma * (delta_i + 1))
 
     simulationState.internalEnergies = u_
     simulationState.pressures = P_

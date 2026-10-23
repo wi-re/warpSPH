@@ -95,7 +95,7 @@ rayleighTaylorCase = registerCase(Case(
         plotInterval=1,
         storeInterval=500,
     ),
-    supportedSchemes=SPH_SCHEMES,
+    supportedSchemes=(*SPH_SCHEMES, 'PESPH'),
     parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
         'rho_low': P('number', 'Density of the lower fluid.', 'initial', units='density', exclusiveMinimum=0),
         'rho_high': P('number', 'Density of the upper fluid.', 'initial', units='density', exclusiveMinimum=0),

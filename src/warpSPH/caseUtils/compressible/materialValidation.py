@@ -32,9 +32,14 @@ def buildMaterialSystem(ctx, positions, volumes, rho, pressure, ids, velocity=No
     system = ctx.SimulationSystem(state=state, domain=ctx.config.domain)
     validateMaterialState(state, ctx.schemeConfig)
     solveStageSupport(system, state, ctx.config, ctx.schemeConfig)
-    _, summed, _ = crkFactors(state, ctx.config.domain, ctx.config.kernel, system.adjacency,
-        densityPolicy=ctx.schemeConfig.crkDensityPolicy,
-        volumes=volumes if getattr(ctx.schemeConfig, 'crkEvolution', 'summation') == 'spheral' else None)
+    from ...configurations.pesph import PESPHConfig
+    if isinstance(ctx.schemeConfig, PESPHConfig):
+        from ...modules.pesph import computePressureSums
+        summed = computePressureSums(state, ctx.config, state.masses, system.adjacency).massDensity
+    else:
+        _, summed, _ = crkFactors(state, ctx.config.domain, ctx.config.kernel, system.adjacency,
+            densityPolicy=ctx.schemeConfig.crkDensityPolicy,
+            volumes=volumes if getattr(ctx.schemeConfig, 'crkEvolution', 'summation') == 'spheral' else None)
     ctx.scratch['prescribedDensity'] = rho.clone()
     ctx.scratch['initialSummedDensity'] = summed.clone()
     state.densities = summed if ctx.param('initialDensity') == 'summed' else rho.clone()

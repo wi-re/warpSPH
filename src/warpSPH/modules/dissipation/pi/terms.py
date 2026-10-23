@@ -156,6 +156,24 @@ def price2008(pair: PairData):
 
 
 @wp.func
+def hopkins2015Conductivity(pair: PairData):
+    # Hopkins (2015) F18; Spheral PSPH.cc's optional HopkinsConductivity.
+    # The shared conductivity kernel has -1/2*(u_j-u_i)*mean(grad W).
+    # Factor 2 here gives (u_i-u_j)*(grad W_i+grad W_j)/(rho_i+rho_j).
+    # thermalConductivity supplies alpha_C; C_l is switched Cu_l*alpha_bar.
+    signal = wp.max(scalar_t(0.0), pair.c_i + pair.c_j - scalar_t(3.0)*_muRaw(pair))
+    P_i = pair.P_i
+    P_j = pair.P_j
+    if not pair.explicitPressure:
+        P_i = pair.rho_i*pair.c_i*pair.c_i
+        P_j = pair.rho_j*pair.c_j*pair.c_j
+    contrast = scalar_t(0.0)
+    if P_i + P_j > scalar_t(0.0):
+        contrast = wp.abs(P_i-P_j)/(P_i+P_j)
+    return _val(pair, scalar_t(2.0), pair.rho_bar, pair.C_l*signal*contrast, scalar_t(1.0))
+
+
+@wp.func
 def frontiere2017(pair: PairData, viscosityParams: DiffusionParameters):
     """CRKSPH's one-sided viscous pressure Q_i = rho_i (-C_l c_i mu + C_q mu^2) (Frontiere et al. 2017 Eq. (69)),
     mu = min(0, v.eta / (eta.eta + eps^2)), eta = x_ij / h_i, eps^2 = 1e-2 -- Monaghan's (1992) mu with the particle's
@@ -243,6 +261,8 @@ def evaluateTerm(viscosityTerm: wp.int32, pair: PairData, viscosityParams: Diffu
         val = price2012Eq98Label(pair)
     elif viscosityTerm == wp.static(ViscosityTerms.Price2012.value):
         val = price2012(pair)
+    elif viscosityTerm == wp.static(ViscosityTerms.Hopkins2015.value):
+        val = hopkins2015Conductivity(pair)
     elif viscosityTerm == wp.static(ViscosityTerms.Price2008.value):
         val = price2008(pair)
     elif viscosityTerm == wp.static(ViscosityTerms.Wadsley2008.value):

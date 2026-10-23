@@ -14,6 +14,7 @@ from ...caseUtils import sampleShearingNoh
 from ...configurations.meshless import MeshlessConfig
 from ...runner import Case, RunContext, caseMain, registerCase
 from .common import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
+                           addUniformInternalEnergy,
                            compressibleDiagnostics, configureCompressible,
                            paramExtraData)
 from ..common.plotting import Field, particlePlot
@@ -30,9 +31,11 @@ def buildSystem(ctx: RunContext):
         from ...systems.compressibleMonaghan import CompressibleState, CompressibleSystem
         comp = sampleShearingNoh(ctx.param('vs'), ctx.spec.nx, ctx.config, ctx.schemeConfig,
                                  dict(ctx.spec.params), CompressibleState, CompressibleSystem)
+        addUniformInternalEnergy(comp, ctx.param('gamma'), ctx.param('uAmbient'))
         return toMeshlessSystem(comp, ctx.config, ctx.schemeConfig)
-    return sampleShearingNoh(ctx.param('vs'), ctx.spec.nx, ctx.config, ctx.schemeConfig,
-                             dict(ctx.spec.params), ctx.SimulationState, ctx.SimulationSystem)
+    system = sampleShearingNoh(ctx.param('vs'), ctx.spec.nx, ctx.config, ctx.schemeConfig,
+                              dict(ctx.spec.params), ctx.SimulationState, ctx.SimulationSystem)
+    return addUniformInternalEnergy(system, ctx.param('gamma'), ctx.param('uAmbient'))
 
 
 #: The two panels, exported so a notebook can pass them to
@@ -72,13 +75,14 @@ shearingNohCase = registerCase(Case(
         plotInterval=1,
         storeInterval=500,
     ),
-    supportedSchemes=COMPRESSIBLE_SCHEMES,
+    supportedSchemes=(*COMPRESSIBLE_SCHEMES, 'PESPH'),
     parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
+        'uAmbient': P('number', 'Uniform initial specific internal energy added to the flow; zero retains legacy ICs.', 'initial', minimum=0),
         'vs': P('number', 'Transverse shear velocity amplitude.', 'initial', units='velocity'),
     },
     simulationParameters={'dim': P('integer', 'Dimension supported by this initial-condition sampler.', 'domain', choices=(2,))},
     variants={},
-    params=dict(COMPRESSIBLE_PARAMS, vs=5.0),
+    params=dict(COMPRESSIBLE_PARAMS, vs=5.0, uAmbient=0.),
 ))
 
 

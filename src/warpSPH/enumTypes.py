@@ -77,7 +77,7 @@ class CompressibleSPHScheme(Enum):
     #: Godunov SPH of Inutsuka (2002): the kernel-convolution form with a Gaussian kernel (GODUNOV_SPH_PLAN layer 3)
     InutsukaGSPH = 4
     #: Pressure-based SPH (PESPH_PLAN): `P_bar_i` by kernel summation instead of `rho_i`; variant in `PESPHVariant`.
-    #: Enum member only so far (Phase 0): `buildScheme` raises until the scheme is assembled (Phase 4)
+    #: Pressure-energy with dissipation, or adiabatic pressure-entropy; see PESPHConfig.
     PESPH = 5
     #: Meshless finite-mass / finite-volume SPH (Hopkins 2015; COMPRESSIBLE_SPH_PLAN E1).
     #: MFM: the conserved face fluxes, mass is conserved (dm = 0). MFV: the same fluxes plus
@@ -87,7 +87,7 @@ class CompressibleSPHScheme(Enum):
 
 
 class PESPHVariant(Enum):
-    #: Frontiere et al. (2017) App. G / Hopkins F2: evolves the specific total energy, `P_bar_i = (gamma-1) sum_j m_j u_j W_ij`
+    #: Frontiere et al. (2017) App. G / Hopkins F2: evolves particle total energy, `P_bar_i = (gamma-1) sum_j m_j u_j W_ij`
     PressureEnergy = 0
     #: Hopkins (2013): evolves the entropic function `A`, `P_bar_i = (sum_j m_j A_j^(1/gamma) W_ij)^gamma`;
     #: velocity-independent force, the variational one

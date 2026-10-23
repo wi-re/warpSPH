@@ -250,6 +250,7 @@ def prepareContext(case: Case, spec: CaseSpec) -> RunContext:
         ctx.integrator = get_scheme(integrationMethod())
     if hasattr(ctx.schemeConfig, 'validate'):
         ctx.schemeConfig.validate(ctx.config)
+    ctx.bundle = ctx.bundle.configured(ctx.schemeConfig)
     return ctx
 
 
@@ -334,6 +335,19 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
 
     from ..modules.eos import validateMaterialState
     validateMaterialState(system.state, ctx.schemeConfig)
+    if ctx.scheme is CompressibleSPHScheme.PESPH:
+        from ..modules.pesph.initialization import initializePESPHState, CHECKPOINT_FIELDS
+        from ..modules.pesph.stage import refreshPESPHState
+        from ..modules.timestep.pesph import pesphTimestep
+        if ctx.scratch['execution'] != 'eager':
+            raise ValueError('PESPH currently supports eager execution only')
+        if spec.resumeFrom:
+            refreshPESPHState(system, ctx.config, ctx.schemeConfig)
+        else:
+            initializePESPHState(system, ctx.config, ctx.schemeConfig)
+        case = replace(case, timestep=pesphTimestep,
+                       extraFields=tuple(dict.fromkeys((*case.extraFields, *CHECKPOINT_FIELDS))))
+        ctx.config.dt = pesphTimestep(ctx, system)
     runningState = system.initializeNewState()
 
     # --- output setup -------------------------------------------------------
@@ -426,6 +440,10 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
     deferStageTimes = ctx.scheme in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH, CompressibleSPHScheme.Monaghan,
                                       CompressibleSPHScheme.GSPH, CompressibleSPHScheme.InutsukaGSPH,
                                       WeaklyCompressibleSPHScheme.deltaSPH, WeaklyCompressibleSPHScheme.sun2017DeltaSPH)
+    # Float32 deferred stage times change scalar switch-history rounding on
+    # continuation. Restrict this PESPH optimization to the checked CUDA/f64 path.
+    deferStageTimes = deferStageTimes or (ctx.scheme is CompressibleSPHScheme.PESPH
+        and ctx.dtype == torch.float64 and torch.device(ctx.device).type == 'cuda')
     stepGraph = None
     graphWanted = ctx.scratch['execution'] == 'graph'
     if ctx.scheme in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH):
@@ -1033,9 +1051,9 @@ def _describeStep(i: int, nSteps: Optional[int], row: Dict[str, float],
     current_memory_allocated = torch.cuda.memory_allocated() / (1024 ** 2)  # in MB
     current_memory_reserved = torch.cuda.memory_reserved() / (1024 ** 2)
 
-    warp_memory = wp.get_mempool_used_mem_current() / (1024 ** 2)  # in MB
+    warp_memory = wp.get_mempool_used_mem_current() / (1024 ** 2) if wp.get_device().is_cuda else 0.0
 
-    if i % 100 == 0:
+    if i % 100 == 0 and torch.cuda.is_available():
         torch.cuda.empty_cache()
 
 

@@ -30,6 +30,7 @@ class ViscosityTerms(Enum):
     Price2012_98 = 7
     Price2012 = 8
     Price2008 = 9
+    Hopkins2015 = 14  # Thermal conductivity only: Appendix F2 Eq. F18; strength = alpha_C.
     Wadsley2008 = 10
     DeltaSPH = 11
     RiemannDissipation = 13   # Pi = (p*(u_ij) - p*(0)) (1/rho_i^2 + 1/rho_j^2): the velocity-jump part of the star pressure of the pair's Riemann problem (AV_PLAN Phase 7b; solver = `DiffusionParameters.riemannSolver`)
@@ -68,6 +69,9 @@ class VelocityPairPolicy(Enum):
     * `BalsaraLimited`: `Limited` with `phi_ij` further scaled by `1 - Bbar_ij^p` (Garcia-Senz & Cabezon 2026
       Eqs. 18-19, `p = reconstructionBalsaraPower`): less reconstruction -- more dissipation -- where the flow is
       compressive (B -> 1), full reconstruction in shear (B -> 0). Their recommended AVSLRB2 is p = 2.
+    * `MonotoneLimited`: experimental composition of `Limited` with a minmod bound on its normal correction
+      against the sampled normal velocity jump. Prevents a reversed/enlarged normal jump, retaining tangential
+      reconstruction. This is not the published Frontiere limiter; native/default `Limited` stays unchanged.
 
     Only the viscous force and its heating use it; the conductivity keeps the raw velocity.
     """
@@ -75,6 +79,7 @@ class VelocityPairPolicy(Enum):
     Linear = 1
     Limited = 2
     BalsaraLimited = 3
+    MonotoneLimited = 4
 
 
 class RiemannSolver(Enum):
@@ -285,7 +290,8 @@ def resolveReconstructionLimiter(diffusionParams: DiffusionParameters, n_h) -> D
     """`diffusionParams` with a non-positive `reconstructionEtaCrit` / `reconstructionEtaFold` replaced by the
     n_h-derived value (1/n_h, 0.2/n_h -- CRKSPH's `resolveCRKLimiter`). Returns `diffusionParams` itself when
     the policy is not a limited one or both values are explicit."""
-    if (diffusionParams.velocityPairPolicy not in (VelocityPairPolicy.Limited.value, VelocityPairPolicy.BalsaraLimited.value)
+    if (diffusionParams.velocityPairPolicy not in (VelocityPairPolicy.Limited.value, VelocityPairPolicy.BalsaraLimited.value,
+                                                  VelocityPairPolicy.MonotoneLimited.value)
             and not diffusionParams.riemannReconstruction):
         return diffusionParams
     if diffusionParams.reconstructionEtaCrit > 0 and diffusionParams.reconstructionEtaFold > 0:

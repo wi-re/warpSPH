@@ -13,6 +13,7 @@ from ...caseUtils import sampleNoh1D
 from ...configurations.meshless import MeshlessConfig
 from ...runner import Case, RunContext, caseMain, registerCase
 from .common import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
+                           addUniformInternalEnergy,
                            compressibleDiagnostics, configureCompressible,
                            paramExtraData)
 from ..common.plotting import ProfileAxis, profilePlot
@@ -36,9 +37,11 @@ def buildSystem(ctx: RunContext):
         from ...systems.compressibleMonaghan import CompressibleState, CompressibleSystem
         comp = sampleNoh1D(ctx.spec.nx, ctx.config, ctx.schemeConfig,
                            CompressibleState, CompressibleSystem)
+        addUniformInternalEnergy(comp, ctx.param('gamma'), ctx.param('uAmbient'))
         return toMeshlessSystem(comp, ctx.config, ctx.schemeConfig)
-    return sampleNoh1D(ctx.spec.nx, ctx.config, ctx.schemeConfig,
-                       ctx.SimulationState, ctx.SimulationSystem)
+    system = sampleNoh1D(ctx.spec.nx, ctx.config, ctx.schemeConfig,
+                        ctx.SimulationState, ctx.SimulationSystem)
+    return addUniformInternalEnergy(system, ctx.param('gamma'), ctx.param('uAmbient'))
 
 
 def _shockFront(ctx: RunContext, state):
@@ -96,8 +99,9 @@ nohCase = registerCase(Case(
         plotInterval=25,
         storeInterval=500,
     ),
-    supportedSchemes=COMPRESSIBLE_SCHEMES,
+    supportedSchemes=(*COMPRESSIBLE_SCHEMES, 'PESPH'),
     parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
+        'uAmbient': P('number', 'Uniform initial specific internal energy; zero retains the exactly cold IC.', 'initial', minimum=0),
         'v_s': P('number', 'Reference shock-front propagation speed.', 'reference', units='velocity', exclusiveMinimum=0,
                  readOnly=True, derivation='(params.gamma - 1) / 2 for the unit inflow speed'),
     },
@@ -106,6 +110,7 @@ nohCase = registerCase(Case(
     deriveParameters=deriveConfiguration,
     params=dict(
         COMPRESSIBLE_PARAMS,
+        uAmbient=0.,
         v_s=1 / 3,
     ),
 ))

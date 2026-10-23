@@ -95,7 +95,7 @@ yeeVortexCase = registerCase(Case(
         plotInterval=1,
         storeInterval=500,
     ),
-    supportedSchemes=COMPRESSIBLE_SCHEMES,
+    supportedSchemes=(*COMPRESSIBLE_SCHEMES, 'PESPH'),
     parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
         'nr': P('integer', 'Radial shell count.', 'sampling', minimum=1),
         'bufferRings': P('integer', 'Fixed outer buffer rings for SPH; MFM/MFV use zero.', 'boundary', minimum=0,

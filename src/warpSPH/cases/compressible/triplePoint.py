@@ -128,7 +128,7 @@ triplePointCase = registerCase(Case(
         plotInterval=1,
         storeInterval=500,
     ),
-    supportedSchemes=COMPRESSIBLE_SCHEMES,
+    supportedSchemes=(*COMPRESSIBLE_SCHEMES, 'PESPH'),
     parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
         'equalMass': P('boolean', 'Use the 8:1 density-contrast equal-mass sampling recipe.', 'sampling'),
         'splitX': P('number', 'Streamwise initial discontinuity position.', 'initial', units='length', exclusiveMinimum=0, exclusiveMaximum=7),

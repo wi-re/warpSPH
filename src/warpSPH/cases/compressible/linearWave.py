@@ -16,6 +16,7 @@ from typing import Dict
 from ...caseUtils import plotState, sampleLinearWave
 from ...configurations.meshless import MeshlessConfig
 from ...enumTypes import AdaptiveSupportScheme
+from ...configurations.pesph import PESPHConfig
 from ...runner import Case, RunContext, caseMain, registerCase, resolveEnum
 from .common import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            compressibleDiagnostics, configureCompressible,
@@ -50,7 +51,8 @@ def buildSystem(ctx: RunContext):
         ctx.param('A'), ctx.param('lamda'), ctx.param('c_s'),
         ctx.param('rho0'), ctx.param('gamma'),
         nIters=ctx.param('nIters'),
-        supportScheme=resolveEnum(AdaptiveSupportScheme, ctx.param('adaptiveSupportScheme')),
+        supportScheme=ctx.schemeConfig.adaptiveSupportScheme,
+        analyticMass=isinstance(ctx.schemeConfig, PESPHConfig),
     )
 
 
@@ -120,7 +122,7 @@ linearWaveCase = registerCase(Case(
         plotInterval=10,
         storeInterval=50,
     ),
-    supportedSchemes=COMPRESSIBLE_SCHEMES,
+    supportedSchemes=(*COMPRESSIBLE_SCHEMES, 'PESPH'),
     parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
         'adaptiveSupportScheme': replace(COMPRESSIBLE_CASE_PARAMETERS['adaptiveSupportScheme'],
             description='Adaptive smoothing-support prescription; also used for initial meshless sampling.',
