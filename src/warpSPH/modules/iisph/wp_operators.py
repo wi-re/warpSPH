@@ -37,32 +37,50 @@ def kernels(dim):
         weights[e] = sphKernel_(d, h[i], kernel)
 
     @wp.kernel
-    def coefficients(jj: wp.array(dtype=wp.int64), starts: wp.array(dtype=wp.int64),
-                     counts: wp.array(dtype=wp.int64), grad: wp.array(dtype=V),
-                     volume: wp.array(dtype=scalar_t),
-                     kinds: wp.array(dtype=wp.int32), sampled: wp.bool,
-                     G: wp.array(dtype=V),
-                     density: wp.array(dtype=scalar_t), wallG: wp.array(dtype=V),
-                     c: wp.array(dtype=V), diagonal: wp.array(dtype=scalar_t)):
+    def wall_gradient(jj: wp.array(dtype=wp.int64), starts: wp.array(dtype=wp.int64),
+                      counts: wp.array(dtype=wp.int64), grad: wp.array(dtype=V),
+                      volume: wp.array(dtype=scalar_t), kinds: wp.array(dtype=wp.int32),
+                      wallGradient: wp.array(dtype=V)):
         i = wp.int64(wp.tid())
-        s = density[i]
-        boundary = G[i]
+        boundary = V(scalar_t(0.0))
+        for k in range(wp.int32(counts[i])):
+            e = starts[i] + wp.int64(k)
+            j = jj[e]
+            if kinds[j] == 1:
+                boundary += volume[j] * grad[e]
+        wallGradient[i] = boundary
+
+    @wp.kernel
+    def gradient_sum(jj: wp.array(dtype=wp.int64), starts: wp.array(dtype=wp.int64),
+                     counts: wp.array(dtype=wp.int64), grad: wp.array(dtype=V),
+                     volume: wp.array(dtype=scalar_t), kinds: wp.array(dtype=wp.int32),
+                     wallGradient: wp.array(dtype=V), gradientSum: wp.array(dtype=V)):
+        i = wp.int64(wp.tid())
         total = V(scalar_t(0.0))
-        squares = scalar_t(0.0)
         for k in range(wp.int32(counts[i])):
             e = starts[i] + wp.int64(k)
             j = jj[e]
             if kinds[j] == 0:
                 total += volume[j] * grad[e]
+        gradientSum[i] = total + wallGradient[i]
+
+    @wp.kernel
+    def pressure_diagonal(jj: wp.array(dtype=wp.int64), starts: wp.array(dtype=wp.int64),
+                          counts: wp.array(dtype=wp.int64), grad: wp.array(dtype=V),
+                          volume: wp.array(dtype=scalar_t), kinds: wp.array(dtype=wp.int32),
+                          densityRatio: wp.array(dtype=scalar_t), gradientSum: wp.array(dtype=V),
+                          diagonal: wp.array(dtype=scalar_t)):
+        i = wp.int64(wp.tid())
+        squares = scalar_t(0.0)
+        for k in range(wp.int32(counts[i])):
+            e = starts[i] + wp.int64(k)
+            j = jj[e]
+            if kinds[j] == 0:
                 squares += volume[j] * wp.dot(grad[e], grad[e])
-            elif sampled and kinds[j] == 1:
-                boundary += volume[j] * grad[e]
-        total += boundary
-        wallG[i] = boundary
-        c[i] = total
         diagonal[i] = scalar_t(0.0)
         if kinds[i] == 0:
-            diagonal[i] = -(wp.dot(total, total) + volume[i] * squares) / (s * s)
+            s = densityRatio[i]
+            diagonal[i] = -(wp.dot(gradientSum[i], gradientSum[i]) + volume[i] * squares) / (s * s)
 
     @wp.kernel
     def rate(jj: wp.array(dtype=wp.int64), starts: wp.array(dtype=wp.int64),
@@ -151,7 +169,7 @@ def kernels(dim):
                     d = displacement(x[i], contact[j], length, periodic)
                     tji = volume[i] * sphKernel_(d, h[j], kernel) / denominator[j]
                     delta += volume[j] * tji * wp.dot(grad[e], G[j])
-        diagonal[i] += delta
+        diagonal[i] = delta
 
     @wp.kernel
     def sampled_gravity(jj: wp.array(dtype=wp.int64), starts: wp.array(dtype=wp.int64),
@@ -171,6 +189,7 @@ def kernels(dim):
                     value -= volume[j] * wp.dot(gravity[i], d) * grad[e]
         output[i] = value
 
-    return dict(V=V, I=I, geometry=geometry, coefficients=coefficients, rate=rate, force=force,
+    return dict(V=V, I=I, geometry=geometry, wall_gradient=wall_gradient,
+                gradient_sum=gradient_sum, pressure_diagonal=pressure_diagonal, rate=rate, force=force,
                 contact_denominator=contact_denominator, contact_value=contact_value,
                 contact_diagonal=contact_diagonal, sampled_gravity=sampled_gravity)

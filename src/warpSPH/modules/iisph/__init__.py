@@ -4,6 +4,10 @@ from .solver import IISPHCoefficients, IISPHResult, computeIISPHCoefficients, so
 from .boundaryIntegrals import computeIISPHBoundaryIntegrals
 from .contactPoints import computeIISPHContactPoints
 from .boundaryPressureAcceleration import computeIISPHBoundaryPressureAcceleration
+from .wallGradient import computeIISPHWallGradient
+from .gradientSum import computeIISPHGradientSum
+from .pressureDiagonal import computeIISPHPressureDiagonal
+from .contactPressureDiagonal import computeIISPHContactPressureDiagonal
 from .operators import (computeIISPHDensityRate, computeIISPHPressureAcceleration,
                         computeIISPHPressureOperator)
 from .updates import assembleIISPHUpdate, maskIISPHUpdate
@@ -11,6 +15,8 @@ from .updates import assembleIISPHUpdate, maskIISPHUpdate
 __all__ = ['IISPHCoefficients', 'IISPHResult',
            'computeIISPHCoefficients', 'computeIISPHBoundaryIntegrals',
            'computeIISPHContactPoints', 'computeIISPHBoundaryPressureAcceleration', 'solveIISPH',
+           'computeIISPHWallGradient', 'computeIISPHGradientSum',
+           'computeIISPHPressureDiagonal', 'computeIISPHContactPressureDiagonal',
            'computeIISPHDensityRate', 'computeIISPHPressureAcceleration',
            'computeIISPHPressureOperator',
            'assembleIISPHUpdate', 'maskIISPHUpdate']

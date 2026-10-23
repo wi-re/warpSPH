@@ -19,6 +19,17 @@ conditions. It does not advance positions or velocities.
   The pressure solver calls this internally.
 - `computeIISPHContactPoints(state, schemeConfig)` returns closest surface
   points when contact pressure is selected, independently of the integrals.
+- `computeIISPHWallGradient` returns the solid gradient contribution from
+  sampled rest volumes or scaled analytic integrals.
+- `computeIISPHGradientSum` adds fluid gradient contributions to the supplied
+  wall gradient, returning the self-pressure force's total gradient.
+- `computeIISPHPressureDiagonal` returns the diagonal of continuity composed
+  with the self/fluid pressure force, before the timestep factor.
+- `computeIISPHContactPressureDiagonal` returns the additional diagonal from
+  contact-pressure interpolation. It does not modify the base diagonal.
+- `computeIISPHCoefficients` connects these functions and adds the two diagonal
+  contributions. Each term is computed separately with explicit inputs and a
+  returned tensor; the assembly function launches no kernels itself.
 - `computeIISPHDensityRate(state, field, coefficients)` applies continuity.
 - `computeIISPHPressureAcceleration(state, normalizedPressure, coefficients)`
   applies the linear pressure force; `computeIISPHPressureOperator` composes

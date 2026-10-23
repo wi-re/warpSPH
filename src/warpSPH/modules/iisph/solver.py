@@ -5,12 +5,16 @@ from typing import NamedTuple
 from types import SimpleNamespace
 import torch
 from warpSPHCore.linalg import CheckSchedule, runStationary
-from .operators import (IISPHKernelData, computeIISPHKernelGeometry, launchIISPHKernel,
-    pairArguments, geometryParameters, computeIISPHDensityRate, computeIISPHPressureOperator,
+from .operators import (IISPHKernelData, computeIISPHKernelGeometry,
+    computeIISPHDensityRate, computeIISPHPressureOperator,
     computeIISPHPressureAcceleration)
 from .contactWeights import IISPHContactWeights, computeIISPHContactWeights
 from .boundaryPressureAcceleration import computeIISPHBoundaryPressureAcceleration
 from .boundaryIntegrals import computeIISPHBoundaryIntegrals
+from .wallGradient import computeIISPHWallGradient
+from .gradientSum import computeIISPHGradientSum
+from .pressureDiagonal import computeIISPHPressureDiagonal
+from .contactPressureDiagonal import computeIISPHContactPressureDiagonal
 
 
 @dataclass
@@ -34,7 +38,7 @@ class IISPHCoefficients(NamedTuple):
 
 
 def computeIISPHCoefficients(state, config, schemeConfig, adjacency, *, boundaryIntegrals=None, contactPoints=None):
-    """Return fixed-position tensor coefficients; no state or policy is retained.
+    """Connect the fixed-position pressure terms into a plain tensor record.
 
     Static kind-1 samples use rest volumes, as do the kind-0 fluid unknowns.
     Density is read from state after Dirichlet conditions are enforced.
@@ -44,27 +48,20 @@ def computeIISPHCoefficients(state, config, schemeConfig, adjacency, *, boundary
     """
     rho0 = schemeConfig.fluid.restDensity
     pairs = computeIISPHKernelGeometry(state, config, adjacency)
-    volume = (state.masses / rho0).contiguous()
-    kinds = state.kinds.to(torch.int32).contiguous()
+    restVolumes = (state.masses / rho0).contiguous()
     densityRatio = (state.densities / rho0).contiguous()
-    G = torch.empty_like(state.positions)
-    c = torch.empty_like(state.positions)
-    diagonal = torch.empty_like(state.masses)
-    wallGradient = torch.zeros_like(state.positions)
-    if boundaryIntegrals is not None:
-        massFactor = float(getattr(schemeConfig, 'analyticWallMass', 1.0))
-        wallGradient = massFactor * boundaryIntegrals.out['G'].sum(0).to(state.positions)
-    sampled = boundaryIntegrals is None
-    launchIISPHKernel('coefficients', state, pairArguments(pairs) +
-        [volume, kinds, sampled, wallGradient, densityRatio, G, c, diagonal])
+    wallGradient = computeIISPHWallGradient(state, pairs, restVolumes,
+        boundaryIntegrals=boundaryIntegrals,
+        massFactor=float(getattr(schemeConfig, 'analyticWallMass', 1.0)))
+    gradientSum = computeIISPHGradientSum(state, pairs, restVolumes, wallGradient)
+    diagonal = computeIISPHPressureDiagonal(state, pairs, restVolumes, densityRatio, gradientSum)
     contact = None
     if contactPoints is not None:
-        points = contactPoints.contiguous()
-        contact = computeIISPHContactWeights(state, config, points, G, volume)
-        launchIISPHKernel('contact_diagonal', state, pairArguments(pairs) +
-            [volume, kinds, state.positions, points, state.supports,
-             G, c, contact.denominator, *geometryParameters(state, config), diagonal])
-    return IISPHCoefficients(pairs, volume, densityRatio, G, c, diagonal, contact)
+        contact = computeIISPHContactWeights(state, config, contactPoints, wallGradient, restVolumes)
+        contactDiagonal = computeIISPHContactPressureDiagonal(state, config, pairs,
+            restVolumes, wallGradient, gradientSum, contactPoints, contact)
+        diagonal = diagonal + contactDiagonal
+    return IISPHCoefficients(pairs, restVolumes, densityRatio, wallGradient, gradientSum, diagonal, contact)
 
 
 def solveIISPH(state, config, schemeConfig, acceleration, dt, adjacency, previousPressure=None, *,
