@@ -164,7 +164,6 @@ def preserve(root, archive):
                    backup_scope='Local filesystem only. No upload/synchronization performed.')
     write_json(archive.with_name(archive.name + '.verification.json'), receipt)
     write_json(keep / 'archive_receipt.json', receipt)
-    write_json(REPO / 'docs/fluid_matrix/evidence/archive_2026-10-22.json', receipt)
     for path in (archive, sidecar, inventory_sidecar, archive.with_name(archive.name + '.verification.json')):
         path.chmod(0o444)
     print(json.dumps(receipt, indent=2), flush=True)

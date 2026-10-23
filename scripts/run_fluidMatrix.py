@@ -7,6 +7,7 @@ No solver settings are adapted in response to an outcome.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import csv
 from dataclasses import replace
 import hashlib
@@ -25,7 +26,7 @@ PROJECTION = ('divergenceFree', 'dfsphReference', 'iisph', 'omniIncompressible',
 SCHEMES = (*PROJECTION, 'deltaSPH', 'sun2017DeltaSPH', 'artificialCompressible')
 ANALYTIC = ('divergenceFree', 'dfsphReference', 'iisph', 'omniIncompressible', 'deltaSPH')
 REPO = Path(__file__).resolve().parents[1]
-DEFAULT_ROOT = Path('/home/lu26029/dev/warpSPHDevelopment/core/experiments/fluid-matrix-2026-10-21')
+DEFAULT_ROOT = REPO / '.tmp/fluid-matrix'
 
 
 def snapEndpoint(state, end):
@@ -44,7 +45,7 @@ def write_json(path, value):
     tmp.replace(path)
 
 
-def make_plan():
+def make_plan(schemes=SCHEMES):
     rows = []
     # Periodic decay controls and the extra bounded-vortex wall check.
     definitions = [
@@ -59,7 +60,7 @@ def make_plan():
         ('taylorCouette', 96, 25.0, ('particles', 'analytic')),
     ]
     for test, nx, end, reps in definitions:
-        for scheme in SCHEMES:
+        for scheme in schemes:
             inc, ac = scheme in PROJECTION, scheme == 'artificialCompressible'
             for rep in reps:
                 skip = None
@@ -72,12 +73,13 @@ def make_plan():
                         skip = 'Existing Couette case is analytic-only; no prescribed spinning particle-wall adapter.'
                     elif scheme not in ('omniIncompressible', 'divergenceFree', 'deltaSPH'):
                         skip = 'Prescribed rotating analytic bodies / viscous Couette closure unsupported by this scheme.'
-                spec = dict(nx=nx, tLimit=end, nSteps=None, kernel='Wendland2')
+                spec = dict(nx=nx, tLimit=end, nSteps=None, kernel='Wendland2', n_h=4.0)
                 params = {}
                 settings = {}
                 if inc:
                     spec.update(integrationScheme='semiImplicitEuler', supportMode='SuperSymmetric',
-                                dt=1e-3, maxDt=2e-3, cflFactor=0.2)
+                                dt=1e-3, maxDt=2e-3, cflFactor=0.2, adaptiveDt=True,
+                                calibrateNormalization=True)
                 if ac:
                     spec['integrationScheme'] = 'forwardEuler'
                 if test == 'tgv':
@@ -111,16 +113,11 @@ def make_plan():
                         params['alpha'] = 0.0185 * 8 * 2.8213846683502197 / (10.0 * 4.0 / nx)
                     if ac:
                         skip = 'The existing periodic-channel viscous configuration has no ACSPH branch.'
-                    if scheme == 'band2018pb':
-                        # Run it and explicitly expose its missing viscous source.
-                        settings = {}
                 elif test == 'sloshing':
                     case = 'sloshingTank'
                     params.update(wallRepresentation=rep)
-                    if scheme == 'omniIncompressible':
-                        spec['n_h'] = 2.57  # Historical TC10 pressure match.
-                    elif inc:
-                        spec['n_h'] = 4.0
+                    if inc:
+                        params['hydrostaticInit'] = True
                     if not inc and not ac:
                         spec['kernel'] = 'Wendland4'
                 elif test == 'taylorCouette':
@@ -131,7 +128,7 @@ def make_plan():
                         params['alpha'] = 0.0185 * 8 * 2.8213846683502197 / (10.0 * 4.0 / nx)
                         params['nuReference'] = 0.0185
                     if inc:
-                        spec.update(n_h=2.505, dt=0.002, adaptiveDt=False)
+                        spec.update(dt=0.001, adaptiveDt=True)
                 elif test == 'hydrostatic' and rep == 'particles':
                     case = 'hydrostaticColumn'
                     params.update(calibrateRestDensity=True)
@@ -160,8 +157,6 @@ def make_plan():
                                       machTarget=0.05, pressureProbeHeights=[], obstacleActive=True,
                                       obstacleType='equilateralBottom', offsetX=0.0, aoa=0.0,
                                       maxExtent=0.30 * (0.24 / 0.248), obstacleRepresentation=rep)
-                        if scheme == 'omniIncompressible':
-                            spec['n_h'] = 2.57
                     elif test == 'hydrostatic':
                         params.update(W=1.0, fillRatio=0.5, fluidWidth=1.0,
                                       hydrostaticInit=True, referenceVelocity=math.sqrt(9.81 * 0.5),
@@ -174,24 +169,47 @@ def make_plan():
                     params['shifting'] = False  # Viscosity control, independent of PST.
                 if test in ('hydrostatic', 'englishWedge'):
                     params['shifting'] = False if case != 'dambreak' else 'off'
+                if test == 'englishWedge':
+                    params['unifyAttachedObstacles'] = True
+                if scheme == 'band2018pb' and rep == 'periodic':
+                    settings['bandViscosity'] = True
                 rows.append(dict(id=f'{test}__{scheme}__{rep}', test=test, case=case,
                                  scheme=scheme, boundary=rep, precision='float32',
                                  spec=spec, params=params, scheme_settings=settings,
                                  skip=skip, timeout_seconds=7200,
-                                 notes=('Band omits the configured physical viscosity source.'
+                                 notes=('Band includes configured physical viscosity in its non-pressure predictor.'
+                                        if settings.get('bandViscosity') else
+                                        'Band retains its nonviscous predictor outside the periodic controls.'
                                         if scheme == 'band2018pb' else '')))
-    return dict(version=1, created='2026-10-21', schemes=list(SCHEMES), rows=rows,
+    return dict(version=5, created=datetime.now(timezone.utc).date().isoformat(), schemes=list(schemes), rows=rows,
+                initialization='Normalized summation density, physical mass, scheme-aware hydrostatic seeds, unified static floor-wedge contour; continuum analytic wall density; first/every-step physical limits.',
+                timestep='Fixed-case adaptive recovery uses initialized nominal ceiling and existing dtGrowthFactor; physical limits cap every step.',
                 policy='One GPU child at a time. No retries or outcome-driven tuning. Preserve failures.',
                 reference_notes='See docs/fluid_matrix/README.md for historical presets and comparison limits.')
 
 
+def addSourceFile(archive, path, relative):
+    """Archive file bytes without blocking on network user/group lookups."""
+    import tarfile
+    info = path.stat()
+    entry = tarfile.TarInfo(str(relative))
+    entry.size, entry.mtime = info.st_size, info.st_mtime
+    entry.uid, entry.gid = info.st_uid, info.st_gid
+    entry.mode = info.st_mode & 0o777
+    with path.open('rb') as content:
+        archive.addfile(entry, content)
+
+
 def snapshot(root):
+    import importlib.util
     roots = [REPO / 'src', REPO / 'scripts' / 'run_fluidMatrix.py',
              REPO / 'scripts' / 'analyze_fluidMatrix.py',
-             REPO / 'docs/fluid_matrix/matrix_2026-10-21.json',
+             root / 'manifest.json',
              REPO / 'examples/sloshingTank/SPHERIC_TestCase10/data_files/lateral_water_1x.txt']
     for name in ('warpSPHCore', 'warpSPHIntegrators', 'warpSPHBoundaries', 'warpSPHPlotting'):
-        roots.append(REPO.parent / name / 'src')
+        package = importlib.util.find_spec(name)
+        if package is not None and package.origin:
+            roots.append(Path(package.origin).parent)
     hashes = {}
     for base in roots:
         for path in ([base] if base.is_file() else base.rglob('*.py')):
@@ -201,7 +219,11 @@ def snapshot(root):
     import tarfile
     with tarfile.open(root / 'sources.tar.gz', 'w:gz') as archive:
         for path in hashes:
-            archive.add(path, arcname=str(Path(path).relative_to(REPO.parent)))
+            try:
+                relative = Path(path).relative_to(REPO.parent)
+            except ValueError:
+                relative = Path('external') / str(path).lstrip('/')
+            addSourceFile(archive, Path(path), relative)
 
 
 def worker(root, row):
@@ -230,11 +252,11 @@ def worker(root, row):
     case = getCase(row['case'])
     original_config, original_diag = case.configureScheme, case.diagnostics
     original_post, original_initial = case.postStep, case.initialConditions
-    # A case without a timestep hook keeps its initialized dt in the runner.
-    # In particular, projection-native TGV must not hit the compressible dt
-    # dispatcher, and the Couette oracle intentionally uses a fixed step.
+    # Preserve case choices; the runner caps every projection step with its
+    # physical advection/viscosity limits, including formerly fixed cases.
     original_dt = case.timestep
     ctx_box, initial, last = [], {}, [0.0]
+    diagnostic_time = [0.0]
     end = row['spec']['tLimit']
     publisher = SimulationPublisher('Fluid matrix | ' + row['id'], measurements=True,
                                     export_every_steps=100, autostart=False)
@@ -251,9 +273,18 @@ def worker(root, row):
     def initialize(ctx, system):
         if original_initial:
             original_initial(ctx, system)
+        if row['scheme'] in PROJECTION:
+            from warpSPH.caseUtils.projection import initializeProjectionDensity
+            write_json(out / 'initial_calibration.json', initializeProjectionDensity(ctx, system))
         st = system.state
         initial.update(particles=len(st.positions), fluid_particles=int((st.kinds == 0).sum()),
-                       mass=float(st.masses[st.kinds == 0].double().sum()))
+                       mass=float(st.masses[st.kinds == 0].double().sum()),
+                       nominal_dt=float(ctx.config.dt),
+                       pressure_seed=ctx.scratch.get('initialPressureCalibration'),
+                       band_viscosity=bool(getattr(ctx.schemeConfig, 'bandViscosity', False)),
+                       actual_viscosity=float(ctx.schemeConfig.diffusionParams.viscidNu),
+                       analytic_bodies=len(ctx.schemeConfig.boundaryProvider.scene.bodies)
+                       if getattr(ctx.schemeConfig, 'boundaryProvider', None) is not None else 0)
         torch.save({k: v.detach().cpu() for k, v in vars(st).items()
                     if isinstance(v, torch.Tensor) and not k.startswith('_')}, out / 'initial_state.pt')
         write_json(out / 'effective_spec.json', ctx.spec.toDict())
@@ -270,6 +301,18 @@ def worker(root, row):
         result.update(fluidKineticEnergy=float((0.5 * mass * vel.square().sum(-1)).sum()),
                       fluidMass=float(mass.sum()), fluidDensityMin=float(st.densities[f].min()),
                       fluidDensityMax=float(st.densities[f].max()))
+        if row['scheme'] in PROJECTION:
+            from warpSPH.modules.timestep.projection import projectionTimestep
+            projectionTimestep(ctx, state, float(ctx.config.dt))
+            limits = ctx.scratch['projectionTimestepLimits']
+            result['projectionStepLimit'] = limits['maximum']
+        result['nextDt'] = float(ctx.config.dt)
+        result['takenDt'] = float(state.t) - diagnostic_time[0]
+        diagnostic_time[0] = float(state.t)
+        if 'matrixTakenStepLimit' in ctx.scratch:
+            result['stepLimitAtStart'] = ctx.scratch['matrixTakenStepLimit']
+            if result['takenDt'] > result['stepLimitAtStart'] * (1.0 + 1e-7) + 1e-10:
+                raise RuntimeError('Comparison step exceeded its physical timestep limit.')
         t = float(state.t)
         if row['test'] == 'tgv':
             result['analyticEnergyRatio'] = math.exp(-4.0 * 0.01 * (2.0 / 2.0) ** 2 * t)
@@ -297,10 +340,25 @@ def worker(root, row):
         return result
 
     def timestep(ctx, state):
-        dt = original_dt(ctx, state) if original_dt else ctx.config.dt
+        if original_dt:
+            dt = original_dt(ctx, state)
+        elif row['scheme'] in PROJECTION:
+            from warpSPH.modules.timestep.projection import fixedProjectionRequest
+            dt = fixedProjectionRequest(ctx)
+        else:
+            dt = ctx.config.dt
+        if row['scheme'] not in PROJECTION:
+            # Case hooks and fixed initial choices are ceilings too: evaluate
+            # the WCSPH / ACSPH physical constraints even without a native hook.
+            from warpSPH.modules.timestep import computeTimestep
+            dt = min(float(dt), float(computeTimestep(
+                state, ctx.config, ctx.schemeConfig, dt=dt,
+                systemUpdate=ctx.scratch.get('lastStageUpdate'))))
         return min(float(dt), max(0.0, end - float(state.t)))
 
     def post(ctx, state, step):
+        if row['scheme'] in PROJECTION:
+            ctx.scratch['matrixTakenStepLimit'] = ctx.scratch['projectionTimestepLimits']['maximum']
         if original_post:
             original_post(ctx, state, step)
         # Do not evaluate pressure maps at a rounding-sized residual dt.
@@ -333,7 +391,7 @@ def worker(root, row):
                      store=True, storeMode='trajectory', exportInterval=end / 150,
                      plotInterval=interval, cudaGraph=not inc,
                      velocityAlarmPlotInterval=1, velocityScale=scale,
-                     velocityAlarmFactor=20.0, velocityAlarmStopRatio=100.0,
+                     velocityAlarmFactor=20.0, velocityAlarmStopRatio=20.0,
                      stallProgress=1e-3, stallDtSteps=100)
         st = result.state.state
         torch.save({k: v.detach().cpu() for k, v in vars(st).items()
@@ -349,7 +407,8 @@ def worker(root, row):
             k: np.asarray([r.get(k, float('nan')) for r in trajectory]) for k in keys})
         times = [r['stepTime_ms'] for r in trajectory[11:] if 'stepTime_ms' in r]
         graph = result.ctx.scratch.get('stepGraph')
-        data = dict(id=row['id'], status='failed' if result.diverged else 'completed',
+        complete = not result.diverged and float(result.state.t) >= end-1e-10*max(1.0, end)
+        data = dict(id=row['id'], status='completed' if complete else 'failed',
                     diverged=bool(result.diverged), stop_reason=result.stopReason,
                     time=float(result.state.t), target_time=end, steps=result.nSteps,
                     wall_seconds=result.wallTime,
@@ -468,13 +527,13 @@ def report(root, plan):
         plt.close(fig)
     counts = {status: sum(r['status'] == status for r in results)
               for status in sorted({r['status'] for r in results})}
-    title = 'Classic fluid matrix — 2026-10-21'
+    title = 'Classic fluid matrix — ' + plan['created']
     (root / 'index.html').write_text('<!doctype html><meta charset="utf-8"><title>' + title + '</title>'
         + '<style>body{font:14px system-ui;margin:28px}td,th{padding:6px;border-bottom:1px solid #ddd;text-align:left}table{border-collapse:collapse}img{max-width:100%}</style>'
         + f'<h1>{title}</h1><p>Updated {time.strftime("%Y-%m-%d %H:%M:%S %Z")}. {html.escape(str(counts))}</p>'
         + '<p>FP32; sequential GPU jobs; no outcome-driven tuning. Completion is not an accuracy verdict. '
           'Unsupported combinations are retained. Presets and initialization differ where required by the existing cases. '
-          'Band has no physical-viscosity source; its viscous-decay curves expose that limitation.</p>'
+          'Band periodic controls include the configured physical viscosity when bandViscosity is enabled; other rows retain their declared settings.</p>'
         + ''.join(plots) + '<table><tr>' + ''.join('<th>' + k + '</th>' for k in
             ('test', 'scheme', 'boundary', 'status', 't', 'target', 'particles', 'wall ms/step', 'reason', 'data'))
         + '</tr>' + ''.join(table) + '</table>')
@@ -528,11 +587,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=('plan', 'run', 'worker', 'report'))
     parser.add_argument('--root', type=Path, default=DEFAULT_ROOT)
-    parser.add_argument('--manifest', type=Path, default=REPO / 'docs/fluid_matrix/matrix_2026-10-21.json')
+    parser.add_argument('--manifest', type=Path, help='Defaults to ROOT/manifest.json.')
     parser.add_argument('--row')
+    parser.add_argument('--schemes', nargs='+', choices=SCHEMES, default=SCHEMES,
+                        help='Schemes included when generating a new immutable plan.')
     args = parser.parse_args()
+    args.manifest = args.manifest or args.root / 'manifest.json'
     if args.action == 'plan':
-        plan = make_plan()
+        plan = make_plan(args.schemes)
         write_json(args.manifest, plan)
         print(json.dumps(dict(slots=len(plan['rows']), supported=sum(not r['skip'] for r in plan['rows']))))
         return

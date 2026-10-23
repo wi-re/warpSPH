@@ -157,7 +157,7 @@ questions identified in the inventory.
 
 ## Evidence and reproduction
 
-[Machine evidence](evidence/qualification_2026-10-21.json) contains strict field/
+The local qualification evidence contains strict field/
 byte comparisons, every timing trial, tests, source pins, control diagnostics,
 operator scaling and daemon verification. Raw states, logs, videos, JUnit,
 source snapshots and exact measured source variants live outside Git at:

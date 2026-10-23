@@ -83,6 +83,31 @@ They run as subprocesses because gradcheck needs float64 and precision is baked
 in at first `warpSPHCore` import — see the docstring in
 [`tests/test_gradcheck_scripts.py`](tests/test_gradcheck_scripts.py).
 
+## Repository layout and experiments
+
+Keep reusable library code in `src/`, durable commands in `scripts/`, and
+regressions for supported behavior in the existing relevant test modules.
+A script needs a purpose beyond one prompt or investigation session to belong
+in `scripts/`. Experimental solvers, calibration adapters and frozen replay
+fixtures must not add public configuration switches or branches to the
+library before they are accepted as supported functionality.
+
+Use the Git-ignored `.tmp/` directory for investigations: temporary drivers,
+ad hoc checks, source snapshots, trial plots, raw particle trajectories,
+run manifests, metrics, videos, logs and session notes. Keep a small local
+index with commands and descriptive names so the work can be recovered.
+`docs/` is for maintained user/developer documentation. Do not save prompt
+responses, chronological trial reports or generated run products there.
+
+Keep only focused regression checks for lasting fixes in `tests/`; leave
+checks of experimental hypotheses beside the experiment. Group related
+regressions in an existing test module instead of creating one per trial.
+Plots must name the physical choices, quantities and units directly; internal
+run IDs such as `free_g1` are not figure titles or legend labels.
+
+Review and commit coherent changes regularly. Keep local investigation output
+out of commits, and preserve unrelated work when cleaning up.
+
 ## Adding a case
 
 A `Case` is a name, a scheme, and a set of hooks over a `RunContext`; only
@@ -95,6 +120,23 @@ Put the module in the family subpackage it belongs to under
 across families go in `common`), register it in `CASE_MODULES`
 ([`src/warpSPH/cases/__init__.py`](src/warpSPH/cases/__init__.py)) as
 `'<family>.<module>'`, and it becomes reachable as `warpsph-run <name>`.
+
+Cases that feed a summation density into a pressure or thermodynamic solve
+must start from a calibrated state consistent with that solve. A rest lattice
+must not generate an artificial initial pressure jump or velocity kick.
+Preserve intended physical compression and free-surface kernel deficiency;
+use one uniform synthetic-neighborhood mass calibration for a raw kernel,
+or kernel normalization without applying the same correction twice. Measure
+the actual summation field and preserve intended free-surface deficiency;
+do not repair it by clipping density or fitting particle positions. Include
+a zero-force startup check when adding a new wall or sampling adapter.
+
+Use `n_h=4` by default. Narrow supports such as 2.56 require an explicit
+experiment setting and must not replace a requested support silently.
+Comparison matrices must respect physical timestep limits on the first and
+every subsequent step, including fixed-step requests, and record the steps
+actually taken. Keep changed numerical presets and reruns separate from
+retained baselines.
 
 ## Regenerating example media
 

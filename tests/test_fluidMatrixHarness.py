@@ -29,3 +29,42 @@ def test_ordinary_remaining_time_is_preserved(time, end):
     state = SimpleNamespace(t=time)
     assert not harness.snapEndpoint(state, end)
     assert state.t == time
+
+
+def test_new_matrix_uses_calibrated_wide_support_and_adaptive_projection_limits():
+    plan = harness.make_plan()
+    assert harness.DEFAULT_ROOT.parts[-2] == '.tmp'
+    for row in plan['rows']:
+        assert row['spec']['n_h'] == 4.0
+        if row['scheme'] in harness.PROJECTION:
+            assert row['spec']['calibrateNormalization']
+            assert row['spec'].get('adaptiveDt', True)
+
+
+def test_projection_rerun_enables_band_viscosity_only_for_periodic_controls():
+    plan = harness.make_plan(harness.PROJECTION)
+    assert len(plan['rows']) == 75 and plan['version'] == 5
+    for row in plan['rows']:
+        if row['scheme'] == 'band2018pb':
+            assert bool(row['scheme_settings'].get('bandViscosity')) == (row['boundary'] == 'periodic')
+        if row['test'] == 'englishWedge':
+            assert row['params']['unifyAttachedObstacles']
+
+
+def test_source_archive_does_not_resolve_user_or_group_names(tmp_path, monkeypatch):
+    import io
+    import tarfile
+    def forbidden(*args):
+        raise AssertionError('Source archive attempted a network-backed account lookup')
+    monkeypatch.setattr(tarfile.pwd, 'getpwuid', forbidden)
+    monkeypatch.setattr(tarfile.grp, 'getgrgid', forbidden)
+    source = tmp_path / 'source.py'
+    source.write_bytes(b'physical_source = 1\n')
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode='w') as archive:
+        harness.addSourceFile(archive, source, Path('src/source.py'))
+    buffer.seek(0)
+    with tarfile.open(fileobj=buffer, mode='r') as archive:
+        member = archive.getmember('src/source.py')
+        assert member.uid == source.stat().st_uid and member.gid == source.stat().st_gid
+        assert archive.extractfile(member).read() == source.read_bytes()

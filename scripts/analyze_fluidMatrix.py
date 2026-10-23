@@ -76,6 +76,8 @@ def analyze(root):
                  wall_seconds=data.get('wall_seconds'), wall_ms_per_step=data.get('wall_ms_per_step'),
                  integrator_ms=data.get('integrator_ms_mean'),
                  reason=row['skip'] or data.get('stop_reason') or data.get('error'), notes=row['notes'])
+        m.update(matrix_version=manifest['version'], run_date=manifest['created'],
+                 band_viscosity=bool(row.get('scheme_settings', {}).get('bandViscosity', False)))
         series = out / 'series.npz'
         # Exceptions and wall-budget stops still have every diagnostic row
         # written before the failure. Export those as explicitly partial data.

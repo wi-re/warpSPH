@@ -188,6 +188,16 @@ User requests one figure with per-case best-to-worst colors and explicitly choos
 
 User explicitly requests durable retention for future improvements. Preserve report, static figure, metrics, manifest and scripts in a scoped Git commit; keep the entire raw matrix (videos/HDF5/states/logs/source bundles/reference/runtime) in a versioned archive under `warpSPHDevelopment/core/archives`, with per-file hashes, complete streamed verification and restore instructions. Original raw root marked KEEP; future runs must use distinct output directories/versions. This is local preservation, with no implied cloud upload.
 
-Preservation verification complete: 16,625 payload files, 11,657,141,225 uncompressed bytes, 7,212,926,353-byte read-only zstd archive; every member hash checked. SHA-256 `edc06911a3c1054d21a4d4c12f004ccb84a4bb3d85ce6e1273b2fa3617b94921`. Curated receipt in `docs/fluid_matrix/evidence/archive_2026-10-22.json`; original matrix has a KEEP marker and restore instructions. No cloud synchronization performed.
+Preservation verification complete: 16,625 payload files, 11,657,141,225 uncompressed bytes, 7,212,926,353-byte read-only zstd archive; every member hash checked. SHA-256 `edc06911a3c1054d21a4d4c12f004ccb84a4bb3d85ce6e1273b2fa3617b94921`. Local receipt retained with the Git-ignored investigation archive; original matrix has a KEEP marker and restore instructions. No cloud synchronization performed.
 
 Curated baseline committed as `582b032da9512d3dd61070c94f0cc64c56ad6aaa` (16 scoped files; unrelated solver WIP left unchanged). A separately verified report capsule from that commit is retained alongside the full raw archive, so the report does not depend on this checkout surviving.
+
+
+### Incompressible follow-up
+
+General fixes cover pressure-unit scaling, projection initialization and physical
+timestep limits, unified attached obstacles, and optional Band viscosity.
+The experimental IISPH/reference-boundary investigation remains unpromoted.
+Its drivers, frozen checks, source snapshot, notes and generated figures live
+under the Git-ignored `.tmp/incompressible-investigation/`; raw runs remain
+under `.tmp/`. See CONTRIBUTING.md for repository layout requirements.

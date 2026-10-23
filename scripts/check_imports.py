@@ -29,6 +29,7 @@ import ast
 import importlib
 import importlib.util
 import json
+import os
 import pkgutil
 import sys
 import traceback
@@ -46,7 +47,7 @@ FIRST_PARTY_PREFIX = "warpSPH"
 # optional first-party packages: their imports are verified only when the package is installed (`pip install -e "warpSPH/[boundaries]"`)
 OPTIONAL_PACKAGES = {"warpSPHBoundaries", "warpSPHCases"}
 
-SKIP_DIRS = {"__pycache__", ".git", ".ipynb_checkpoints", "build", "dist", ".venv", "venv"}
+SKIP_DIRS = {"__pycache__", ".git", ".ipynb_checkpoints", "build", "dist", ".venv", "venv", ".tmp", "results", "reports"}
 
 
 @dataclass
@@ -91,12 +92,10 @@ def runtime_pass(verbose: bool) -> list[Failure]:
 # --------------------------------------------------------------------------
 def iter_source_files() -> list[Path]:
     files: list[Path] = []
-    for path in REPO.rglob("*"):
-        if path.suffix not in (".py", ".ipynb"):
-            continue
-        if any(part in SKIP_DIRS for part in path.parts):
-            continue
-        files.append(path)
+    for directory, subdirs, names in os.walk(REPO):
+        subdirs[:] = [name for name in subdirs if name not in SKIP_DIRS]
+        files.extend(Path(directory) / name for name in names
+                     if Path(name).suffix in (".py", ".ipynb"))
     return sorted(files)
 
 

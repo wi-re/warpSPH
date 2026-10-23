@@ -23,7 +23,7 @@ and algorithms; third-party documents are not added to Git. Primary links:
 The reference source files were inspected locally (including the C++ loop
 conditions). Web indexing could not retrieve several author PDFs or the omni
 commit page; the local copies, hashes and commit identities are retained in the
-evidence bundle. `evidence/source_inventory_2026-10-21.json` pins those inputs.
+local evidence bundle. Generated inventories are retained with the local experiment, outside documentation.
 Spheral is a compressible solid/astro reference and has no corresponding
 DFSPH/IISPH implementation here; SPlisHSPlasH is the applicable reference.
 
@@ -54,9 +54,9 @@ actual kernel; it is corrected here. Moreover, the volume-only factor is
 invariant when masses and densities scale together, whereas this code's
 physical-pressure acceleration/true diagonal scale as `1/rho0` in uniform
 bulk. Reference names such as “kappa” must not imply its normalization is
-identical to upstream's `pressure_rho2` field. That scaling mismatch needs
-separate correction/normalization evidence before any physical-density
-validation is claimed.
+identical to upstream's `pressure_rho2` field. The local reference denominator
+now includes `1/rho0` to match the physical-pressure force. This corrects the
+units without changing the composed method into native IISPH.
 
 The old legacy constant-density module header also claimed a 0.9 predicted-
 density floor that is absent from its current implementation. Its documentation

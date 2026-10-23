@@ -45,7 +45,7 @@ COLUMNS = [
 RECIPES = {
     'tgv': '100 sqrt(integral((E/E0-exp(-0.04t))^2) dt / integral(exp(-0.04t)^2) dt).',
     'shearDecay': 'Same energy-curve relative L2 error; expected E/E0=exp(-2*0.0185*(2*pi)^2*t). Includes energy in unwanted modes.',
-    'decayingVortices': 'User-requested relative energy retention, not analytic accuracy: completed runs whose maximum E/E0 <= 1.001 rank by 100*(1-Efinal/E0), less loss better. Any >0.1% rise above initial energy puts a run behind all nongrowing runs, ordered by maximum gain. Cells show loss %, or GAIN and maximum gain %. Physical viscosity and sampling differ; Band has no physical viscosity.',
+    'decayingVortices': 'User-requested relative energy retention, not analytic accuracy: completed runs whose maximum E/E0 <= 1.001 rank by 100*(1-Efinal/E0), less loss better. Any >0.1% rise above initial energy puts a run behind all nongrowing runs, ordered by maximum gain. Cells show loss %, or GAIN and maximum gain %. Physical viscosity and sampling differ; Band viscosity is included only when the row settings enable it.',
     'boundedVortices': 'Same energy-retention ranking and growth penalty as periodic vortices.',
     'marrone31': '100 sqrt(mean per-sensor normalized MSE), P1/P2 samples against existing coarse Buchner digitization in probe_deltaSPHMarrone.py. Resample simulated nondimensional pressure to dt*=0.005 and use a 0.1 t* rolling median before sampling at reference times. Dry zero readings are retained. Reference approximate +/-0.05 P*, +/-0.15 t*: close ranks not significant.',
     'sloshing': 'Relative L2 pressure-trace error, 100 sqrt(integral((p_sim-p_exp)^2)/integral(p_exp^2)), over common full record; case-native sensorPressure. Both experiment and simulation use existing gap-aware 10ms Gaussian smoothing on 1ms grid; at least 95% coverage required. Includes pressure magnitude and timing; no time shifting. Native estimators differ between some schemes/wall representations; common fluid probe has dry/unresolved gaps and is not silently filled to create a ranking.',
@@ -54,13 +54,14 @@ RECIPES = {
     'taylorCouette': '100 max(abs(profileAmplitude-1), abs(inner torque/exact-1), abs(outer opposing torque/exact-1)); existing tail medians.',
     'runtime': 'Total run wall seconds including initialization, video, diagnostics and HDF5 exports. Only completed runs ranked; presets, dt, initialization and I/O work differ. Not an isolated solver benchmark.',
     'colors': 'Independent log-loss min/max per case/boundary column among eligible completed runs. Numeric ranks are ordinal; close metric values have close colors. Only one candidate gets neutral blue, not a claim of comparative superiority.',
-    'endpoint': 'The thirteen negligible terminal remainder samples are excluded using the existing audited comparison flags. Four corrupted raw shear endpoints are thus omitted; preceding time is already at target within roundoff. Raw source data are unchanged.',
+    'endpoint': 'Historical negligible terminal remainder samples are excluded using retained audited flags; four original corrupted shear endpoints used valid preterminal samples. New runs snap rounding-sized endpoint labels before another physics step. Raw source data are unchanged.',
     'coverage': 'Unsupported, stopped and missing-data cases are separate categories; they receive no invented numeric loss. No averaging across cases and no combined quality/speed score.',
 }
 
 
 def series(root, item):
-    with np.load(root / item['id'] / 'series.npz') as z:
+    source = Path(item.get('data_root', root))
+    with np.load(source / item['id'] / 'series.npz') as z:
         arrays = {key: z[key] for key in z.files}
     if item.get('roundoff_terminal_sample_excluded'):
         arrays = {key: value[:-1] for key, value in arrays.items()}
@@ -80,6 +81,8 @@ def nrmse(t, observed, expected):
 def loss(root, item, experimental):
     test = item['test']
     if test in ('decayingVortices', 'boundedVortices'):
+        if not all(math.isfinite(item[key]) for key in ('energy_max_ratio', 'energy_final_ratio')):
+            return None, 'missing_data'
         growth = item['energy_max_ratio'] > 1.001
         return (100 * (item['energy_max_ratio'] - 1) if growth
                 else 100 * max(0, 1 - item['energy_final_ratio'])), 'energy_growth' if growth else 'ranked'
@@ -140,8 +143,19 @@ def ranking(values):
     return result
 
 
-def plot(root, destination):
-    rows = json.loads((root / 'comparison_metrics.json').read_text())
+def measured_loss(root, item, experimental):
+    """Incomplete exports remain missing data, never an invented score."""
+    try:
+        value, status = loss(root, item, experimental)
+        if value is None or not math.isfinite(value):
+            return None, 'missing_data', 'No finite case metric'
+        return value, status, None
+    except (KeyError, TypeError, ValueError, OSError, IndexError) as error:
+        return None, 'missing_data', f'{type(error).__name__}: {error}'
+
+
+def plot(root, destination, metrics=None):
+    rows = json.loads((metrics or root / 'comparison_metrics.json').read_text())
     lookup = {r['id']: r for r in rows}
     raw = np.genfromtxt(ROLL, delimiter='\t', skip_header=1)
     experimental = smooth(raw[:, 0], raw[:, 1] * 100, .01)
@@ -154,10 +168,14 @@ def plot(root, destination):
             item = lookup[key]
             record = dict(id=key, test=test, boundary=boundary, scheme=scheme,
                           run_status=item['status'], completion_fraction=min(1, (item.get('actual_time') or 0) / item['target_time']),
-                          loss=None, accuracy_status=item['status'], runtime_seconds=None)
+                          loss=None, accuracy_status=item['status'], runtime_seconds=None,
+                          metric_error=None,
+                          run_date=item.get('run_date'), data_root=item.get('data_root', str(root)),
+                          band_viscosity=bool(item.get('band_viscosity', False)))
             if item['status'] == 'completed':
-                value, status = loss(root, item, experimental)
-                record.update(loss=value, accuracy_status=status, runtime_seconds=item['wall_seconds'])
+                value, status, error = measured_loss(root, item, experimental)
+                record.update(loss=value, accuracy_status=status, metric_error=error,
+                              runtime_seconds=item['wall_seconds'])
                 if status in ('ranked', 'energy_growth'):
                     loss_values.append((key, value, status == 'energy_growth'))
                 time_values.append((key, item['wall_seconds']))
@@ -197,10 +215,12 @@ def plot(root, destination):
                     label = ('only' if only else f'#{score["rank"]}') + '\n' + detail
                     if panel == 0 and item['accuracy_status'] == 'energy_growth':
                         label = f'#{score["rank"]}\nGAIN +{score["value"]:.3g}%'
-                    if panel == 0 and item['scheme'] == 'band2018pb' and test in ('tgv', 'shearDecay', 'decayingVortices', 'boundedVortices'):
+                    if panel == 0 and item['scheme'] == 'band2018pb' and not item['band_viscosity'] and test in ('tgv', 'shearDecay', 'decayingVortices', 'boundedVortices'):
                         label += ' †'
                 elif item['run_status'] == 'unsupported':
                     color, label = '#e8eaed', '—'
+                elif item['run_status'] in ('pending', 'running'):
+                    color, label = '#454d59', item['run_status'].upper()
                 elif item['run_status'] != 'completed':
                     progress = 100 * item['completion_fraction']
                     color, label = '#454d59', 'STOP\n' + ('<1% t' if progress < 1 else f'{progress:.0f}% t')
@@ -215,7 +235,11 @@ def plot(root, destination):
                         fontsize=8.5, linespacing=1.4)
         ax.set(xlim=(-.5, len(COLUMNS) - .5), ylim=(len(SCHEMES) - .5, -.5))
         ax.set_xticks(range(len(COLUMNS)), labels, fontsize=8.5)
-        ax.set_yticks(range(len(SCHEMES)), NAMES, fontsize=10)
+        row_names = []
+        for scheme, name in zip(SCHEMES, NAMES):
+            dates = sorted({r['run_date'] for r in table if r['scheme'] == scheme and r['run_date']})
+            row_names.append(name + ('\n' + ', '.join(dates) if dates else ''))
+        ax.set_yticks(range(len(SCHEMES)), row_names, fontsize=10)
         ax.tick_params(length=0, pad=9)
         for spine in ax.spines.values():
             spine.set_visible(False)
@@ -242,8 +266,8 @@ def plot(root, destination):
         'Vortices = energy loss 1 − Efinal/Einitial (less is better); >0.1% growth above initial energy is ranked below all nongrowing runs. GAIN shows maximum growth.',
         'Couette = worst relative error of tail profile amplitude and the two torques. Energy retention is a relative criterion, not exact viscous-decay accuracy.',
         'Colors use log-loss scaling independently within a column: ranks and raw values are shown. A best color is not a physics pass; close ranks are not significant.',
-        '† Band omits physical viscosity. Four corrupted shear endpoints are excluded using already-audited preterminal samples. Presets and initialization differ.',
-        'Wall times include setup, video, diagnostics and particle exports. No reruns, convergence study, timing repeats or overall aggregate score. Exact recipes accompany the figure.',
+        '† This Band cell uses its nonviscous predictor. Inspect per-row viscosity settings; dates distinguish runs from retained controls.',
+        'Wall times include setup, video, diagnostics and exports. Initialization and steps changed in the rerun; no timing repeats or overall aggregate. Recipes accompany the figure.',
     ]
     for i, note in enumerate(notes):
         fig.text(.13, .132 - .0175 * i, note, fontsize=9.1, color='#435058')
@@ -269,5 +293,6 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--root', type=Path, default=DEFAULT_ROOT)
     p.add_argument('--out', type=Path)
+    p.add_argument('--metrics', type=Path, help='Explicit merged metrics with per-row source roots and run dates.')
     args = p.parse_args()
-    plot(args.root, args.out or args.root / 'ranking')
+    plot(args.root, args.out or args.root / 'ranking', args.metrics)

@@ -25,6 +25,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+# Local experiments, ad hoc checks, run data, figures and session notes.
 .tmp/
 
 # PyInstaller
