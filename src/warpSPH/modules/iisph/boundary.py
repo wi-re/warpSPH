@@ -24,7 +24,6 @@ class IISPHBoundaryTerms(NamedTuple):
     gradient: torch.Tensor
     sampled: bool
     contactPoints: torch.Tensor = None
-    gravity: torch.Tensor = None
     covariance: torch.Tensor = None
 
 
@@ -43,7 +42,7 @@ def computeIISPHContactWeights(state, config, points, wallGradient, restVolumes)
     return IISPHContactWeights(pairs, denominator)
 
 
-def computeIISPHBoundaryTerms(state, config, schemeConfig, gravity):
+def computeIISPHBoundaryTerms(state, config, schemeConfig):
     policy = schemeConfig.iisph
     policy.validate()
     provider = getattr(schemeConfig, 'boundaryProvider', None)
@@ -75,7 +74,6 @@ def computeIISPHBoundaryTerms(state, config, schemeConfig, gravity):
         G = packing * aggregate.out['G'].sum(0).to(G)
         covariance = packing * aggregate.out['Cov'].sum(0).to(state.positions)
     points = None
-    extension = None
     if policy.boundaryPressure == 'contactShepard' and (analytic or bool((state.kinds == 1).any())):
         if provider is None:
             raise ValueError("Contact Shepard IISPH needs the solid contour in boundaryProvider; "
@@ -84,5 +82,4 @@ def computeIISPHBoundaryTerms(state, config, schemeConfig, gravity):
         if not bool(hit[state.kinds == 0].all()):
             raise ValueError("IISPH contact geometry did not cover every fluid query")
         points = state.positions - distance[:, None]*normal.to(state.positions)
-        extension = gravity if policy.contactGravity else None
-    return IISPHBoundaryTerms(B, G, not analytic, points, extension, covariance)
+    return IISPHBoundaryTerms(B, G, not analytic, points, covariance)

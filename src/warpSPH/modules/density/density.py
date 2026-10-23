@@ -32,6 +32,12 @@ __all__ = ['computeDensities']
 
 
 def computeDensities(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], supportMode: Optional[SupportScheme] = None, wall: Optional[Any] = None) -> torch.Tensor:
+    """Sum particle masses and the wall contribution, then apply corrections.
+
+    ``wall`` can be an evaluated analytic wall, a tensor containing its
+    contribution in density units, or ``False`` to omit analytic walls.
+    ``None`` resolves the scheme's analytic boundary provider as usual.
+    """
     with record_function("[warpSPH] - computeDensities"):
         densities = warpOperation(
             currentState,
@@ -54,9 +60,12 @@ def computeDensities(currentState: Any, config: SimulationConfig, schemeConfig: 
         )
         # analytic walls: the wall's share of the sum (the boundary particles' `sum_k V_k W_ik`), `wall=None` resolves the scheme's provider
         from ..analyticBoundary import resolveWall, wallDensity
-        wall = resolveWall(currentState, config, schemeConfig, adjacency, wall)
-        if wall is not None:
-            densities = densities + wallDensity(wall)
+        if isinstance(wall, torch.Tensor):
+            densities = densities + wall
+        else:
+            wall = resolveWall(currentState, config, schemeConfig, adjacency, wall)
+            if wall is not None:
+                densities = densities + wallDensity(wall)
         # The D&A (2012) eq. 18/19 self-term correction: a per-particle
         # remap of the finished raw estimate (eps depends on N_H, which
         # depends on the raw density), applied after the operator, so the

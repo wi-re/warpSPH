@@ -39,13 +39,13 @@ def kernels(dim):
     @wp.kernel
     def coefficients(jj: wp.array(dtype=wp.int64), starts: wp.array(dtype=wp.int64),
                      counts: wp.array(dtype=wp.int64), grad: wp.array(dtype=V),
-                     weights: wp.array(dtype=scalar_t), volume: wp.array(dtype=scalar_t),
+                     volume: wp.array(dtype=scalar_t),
                      kinds: wp.array(dtype=wp.int32), sampled: wp.bool,
-                     B: wp.array(dtype=scalar_t), G: wp.array(dtype=V),
+                     G: wp.array(dtype=V),
                      density: wp.array(dtype=scalar_t), wallG: wp.array(dtype=V),
                      c: wp.array(dtype=V), diagonal: wp.array(dtype=scalar_t)):
         i = wp.int64(wp.tid())
-        s = B[i]
+        s = density[i]
         boundary = G[i]
         total = V(scalar_t(0.0))
         squares = scalar_t(0.0)
@@ -53,21 +53,16 @@ def kernels(dim):
             e = starts[i] + wp.int64(k)
             j = jj[e]
             if kinds[j] == 0:
-                s += volume[j] * weights[e]
                 total += volume[j] * grad[e]
                 squares += volume[j] * wp.dot(grad[e], grad[e])
             elif sampled and kinds[j] == 1:
-                s += volume[j] * weights[e]
                 boundary += volume[j] * grad[e]
         total += boundary
-        density[i] = s
         wallG[i] = boundary
         c[i] = total
         diagonal[i] = scalar_t(0.0)
         if kinds[i] == 0:
             diagonal[i] = -(wp.dot(total, total) + volume[i] * squares) / (s * s)
-        else:
-            density[i] = scalar_t(1.0)
 
     @wp.kernel
     def rate(jj: wp.array(dtype=wp.int64), starts: wp.array(dtype=wp.int64),

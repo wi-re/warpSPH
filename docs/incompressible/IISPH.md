@@ -8,15 +8,16 @@ retains its composed DFSPH formulation.
 ## Functional API and ownership
 
 `schemes/incompressible/iisph.py` follows the numbered module-call layout
-of delta-SPH: boundary conditions, Core adjacency, wall terms, density and
-coefficients, forces, pressure solve, Integrators kick/drift, and update.
+of delta-SPH: Core adjacency, wall geometry, density, Dirichlet conditions,
+forces and pressure coefficients, pressure solve, Integrators kick/drift, and update.
 The scheme orders those calls and assigns their results to the current state.
 
 `modules/iisph` exposes ordinary functions:
 
-- `computeIISPHBoundaryTerms(state, config, schemeConfig, gravity)` evaluates
-  the static solid integrals and contact geometry.
-- `computeIISPHCoefficients(state, config, schemeConfig, adjacency, boundary)`
+- `computeIISPHBoundaryTerms(state, config, schemeConfig)` evaluates
+  static solid integrals and contact geometry independently of gravity.
+- `computeIISPHCoefficients(state, config, schemeConfig, adjacency, boundary,
+  gravity=gravity)` consumes the density already stored in the state and
   returns tensor data for the fixed-position pressure solve.
 - `computeIISPHDensityRate(state, field, coefficients)` applies continuity.
 - `computeIISPHPressureAcceleration(state, normalizedPressure, coefficients)`
@@ -36,6 +37,13 @@ use Core neighbor lists, kernel functions and precision. Core's stationary
 driver controls iteration; the package `ProjectedStep` driver owns the
 full timestep lifecycle. Configuration is explicit in
 `IncompressibleSPHConfig.iisph` and uses the existing codecs.
+
+Density uses the shared `modules.density.computeDensities` function, with
+the analytic solid contribution supplied in physical units as `rho0 * B`.
+Dirichlet conditions run after this summation. Pressure coefficients read
+that resulting density; they neither recompute it nor overwrite prescribed
+values. Initial density reporting uses the same summation without building
+pressure coefficients or evaluating gravity.
 
 There is no SciPy dependency or assembled pressure matrix in this path.
 Geometry and iterative fields stay on the state's CPU or CUDA device.

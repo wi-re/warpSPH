@@ -34,10 +34,11 @@ class IISPHCoefficients(NamedTuple):
     contactWeights: IISPHContactWeights = None
 
 
-def computeIISPHCoefficients(state, config, schemeConfig, adjacency, boundary=None):
+def computeIISPHCoefficients(state, config, schemeConfig, adjacency, boundary=None, *, gravity=None):
     """Return fixed-position tensor coefficients; no state or policy is retained.
 
     Static kind-1 samples use rest volumes, as do the kind-0 fluid unknowns.
+    Density is read from state after Dirichlet conditions are enforced.
     The diagonal includes the nonlocal contact-pressure interpolation.
     """
     rho0 = schemeConfig.fluid.restDensity
@@ -64,15 +65,14 @@ def computeIISPHCoefficients(state, config, schemeConfig, adjacency, boundary=No
     pairs = computeIISPHKernelGeometry(state, config, adjacency)
     volume = (state.masses / rho0).contiguous()
     kinds = state.kinds.to(torch.int32).contiguous()
-    densityRatio = torch.empty_like(state.masses)
+    densityRatio = (state.densities / rho0).contiguous()
     G = torch.empty_like(state.positions)
     c = torch.empty_like(state.positions)
     diagonal = torch.empty_like(state.masses)
-    B = torch.zeros_like(state.masses) if boundary is None else boundary.density
     wallGradient = torch.zeros_like(state.positions) if boundary is None else boundary.gradient
     sampled = boundary is None or boundary.sampled
-    launchIISPHKernel('coefficients', state, pairArguments(pairs) + [pairs.weights,
-        volume, kinds, sampled, B, wallGradient, densityRatio, G, c, diagonal])
+    launchIISPHKernel('coefficients', state, pairArguments(pairs) +
+        [volume, kinds, sampled, wallGradient, densityRatio, G, c, diagonal])
     gravityAcceleration = torch.zeros_like(state.positions)
     contact = None
     if boundary is not None and boundary.contactPoints is not None:
@@ -81,14 +81,14 @@ def computeIISPHCoefficients(state, config, schemeConfig, adjacency, boundary=No
         launchIISPHKernel('contact_diagonal', state, pairArguments(pairs) +
             [volume, kinds, state.positions, points, state.supports,
              G, c, contact.denominator, *geometryParameters(state, config), diagonal])
-        if boundary.gravity is not None:
+        if gravity is not None and schemeConfig.iisph.contactGravity:
             if boundary.sampled:
                 launchIISPHKernel('sampled_gravity', state, pairArguments(pairs) +
-                    [volume, kinds, state.positions, points, boundary.gravity,
+                    [volume, kinds, state.positions, points, gravity,
                      *geometryParameters(state, config)[:2], gravityAcceleration])
             else:
-                gravityAcceleration = (-torch.einsum('na,nab->nb', boundary.gravity, boundary.covariance)
-                    - ((state.positions-points)*boundary.gravity).sum(-1, keepdim=True)*G)
+                gravityAcceleration = (-torch.einsum('na,nab->nb', gravity, boundary.covariance)
+                    - ((state.positions-points)*gravity).sum(-1, keepdim=True)*G)
                 gravityAcceleration = torch.where(fluid[:, None], gravityAcceleration, 0)
     return IISPHCoefficients(pairs, volume, densityRatio, G, c, diagonal, gravityAcceleration, contact)
 

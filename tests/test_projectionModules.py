@@ -153,6 +153,8 @@ def _nativeIisphFixture(device, dim, contact, rho0=1000.0, wrappedWall=False):
     from warpSPHCore import DomainDescription, KernelFunctions, SupportScheme, buildVerletList
     from warpSPHCore.type_config import get_torch_precision
     from warpSPH.modules.iisph import computeIISPHCoefficients, IISPHBoundaryTerms
+    from warpSPH.modules.density import computeDensities
+    from warpSPH.configurations import IISPHConfig
 
     dtype = get_torch_precision()
     x = torch.tensor([[-.31, .14], [-.06, .17], [.24, .12], [-.28, .42], [.01, .39], [.27, .43],
@@ -168,18 +170,87 @@ def _nativeIisphFixture(device, dim, contact, rho0=1000.0, wrappedWall=False):
     config = NS(domain=domain, kernel=KernelFunctions.Wendland4, n_h=4., calibrateNormalization=False)
     state = NS(positions=x, supports=torch.full((n,), .8, dtype=dtype, device=device),
         masses=rho0*torch.linspace(.08, .12, n, dtype=dtype, device=device),
-        kinds=torch.tensor([0]*6+[1]*2, dtype=torch.int32, device=device), velocities=torch.zeros_like(x))
+        kinds=torch.tensor([0]*6+[1]*2, dtype=torch.int32, device=device), velocities=torch.zeros_like(x),
+        densities=torch.full((n,), rho0, dtype=dtype, device=device))
     adj = buildVerletList(state, domain, supportMode=SupportScheme.Gather)
     boundary = None
+    g = None
     if contact:
         points = x.clone()
         points[:, 1] = 0
         g = torch.zeros_like(x)
         g[:, 1] = -9.81
-        boundary = IISPHBoundaryTerms(torch.zeros_like(state.masses), torch.zeros_like(x), True, points, g)
-    scheme = NS(fluid=NS(restDensity=rho0))
-    coefficients = computeIISPHCoefficients(state, config, scheme, adj, boundary)
+        boundary = IISPHBoundaryTerms(torch.zeros_like(state.masses), torch.zeros_like(x), True, points)
+    scheme = NS(fluid=NS(restDensity=rho0), iisph=IISPHConfig())
+    state.densities = computeDensities(state, config, scheme, adj, wall=False)
+    coefficients = computeIISPHCoefficients(state, config, scheme, adj, boundary, gravity=g)
     return NS(state=state, config=config, scheme=scheme, coefficients=coefficients)
+
+
+def test_iisphDirichletDensityReachesPressureSolve(monkeypatch):
+    from warpSPH.schemes.incompressible import iisph
+    from warpSPH.configurations.moduleConfigurations.boundaryConditions import BoundaryCondition, BoundaryConditionType
+
+    fixture = _nativeIisphFixture('cpu', 2, False)
+    state, config, scheme = fixture.state, fixture.config, fixture.scheme
+    config.verletScale = 1.0
+    scheme.rigidBodies = []
+    sampledDensity = state.densities.clone()
+    prescribed = 1.1 * scheme.fluid.restDensity
+
+    def sdf(positions):
+        distance = torch.ones_like(positions[:, 0])
+        distance[0] = -1
+        return distance, torch.zeros_like(positions)
+
+    def densityBC(currentState, *args):
+        torch.testing.assert_close(currentState.densities, sampledDensity)
+        return torch.full_like(currentState.densities, prescribed)
+
+    scheme.boundaryConditions = [BoundaryCondition(BoundaryConditionType.constant, sdf,
+        dirichletFunctions={'densities': densityBC})]
+    system = NS(state=state, adjacency=None, t=0.)
+    state.densities = torch.zeros_like(state.masses)
+    state.pressures = None
+    expected = sampledDensity.clone()
+    expected[0] = prescribed
+    monkeypatch.setattr(iisph, 'computeGravity', lambda *args: torch.zeros_like(state.positions))
+    monkeypatch.setattr(iisph, 'computeBodyForce', lambda *args: torch.zeros_like(state.positions))
+    monkeypatch.setattr(iisph, 'computeIISPHViscosity', lambda *args: torch.zeros_like(state.positions))
+
+    class ReachedPressureSolve(Exception):
+        pass
+
+    def pressure(currentState, config, schemeConfig, velocity, dt, coefficients, **kwargs):
+        torch.testing.assert_close(currentState.densities, expected)
+        torch.testing.assert_close(coefficients.densityRatio, expected / scheme.fluid.restDensity)
+        raise ReachedPressureSolve
+
+    monkeypatch.setattr(iisph, 'solveIISPH', pressure)
+    with pytest.raises(ReachedPressureSolve):
+        iisph.iisph_step(system, .001, config, scheme)
+
+
+def test_iisphDensityInitializationDoesNotBuildPressureCoefficients(monkeypatch):
+    from warpSPH.modules import iisph
+    from warpSPH.caseUtils.projection import initializeProjectionDensity
+    from warpSPH.enumTypes import IncompressibleSPHScheme
+
+    fixture = _nativeIisphFixture('cpu', 2, False)
+    state, config, scheme = fixture.state, fixture.config, fixture.scheme
+    config.verletScale = 1.0
+    scheme.rigidBodies = []
+    expected = state.densities.clone()
+    state.densities = torch.zeros_like(state.masses)
+    ctx = NS(scheme=IncompressibleSPHScheme.iisph, config=config, schemeConfig=scheme,
+             spec=NS(n_h=config.n_h), scratch={})
+
+    def unexpected(*args, **kwargs):
+        pytest.fail('Density initialization must not build pressure coefficients')
+
+    monkeypatch.setattr(iisph, 'computeIISPHCoefficients', unexpected)
+    initializeProjectionDensity(ctx, NS(state=state, adjacency=None))
+    torch.testing.assert_close(state.densities, expected)
 
 
 @pytest.mark.parametrize('device', ['cpu', pytest.param('cuda', marks=pytest.mark.skipif(

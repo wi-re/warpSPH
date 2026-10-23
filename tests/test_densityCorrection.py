@@ -129,6 +129,22 @@ def _buildConfig(dim, kernel, dc):
 # The hook: off is the identity, on is the util on the raw estimate
 # --------------------------------------------------------------------------- #
 
+@pytest.mark.parametrize('corrected', [False, True])
+def test_physicalWallDensityIsAddedBeforeCorrection(corrected):
+    dim, kernel = 2, KernelFunctions.Wendland4
+    H = _H(dim, 100.0)
+    state, _, _ = _stateAndDomain(dim, H)
+    config = _buildConfig(dim, kernel, corrected)
+    adjacency = _adjacency(dim, H)
+    bulk = computeDensities(state, _buildConfig(dim, kernel, None), None, adjacency, wall=False)
+    wall = torch.full_like(bulk, 0.25)
+    expected = bulk + wall
+    if corrected:
+        expected = applyDensityCorrection(expected, state.masses, state.supports, kernel, dim)
+    actual = computeDensities(state, config, None, adjacency, wall=wall)
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
+
 @pytest.mark.parametrize('kernel', WENDLANDS)
 @pytest.mark.parametrize('dim', [2, 3])
 @pytest.mark.parametrize('off', [None, False, DensityCorrection()])
