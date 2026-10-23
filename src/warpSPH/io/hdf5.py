@@ -7,6 +7,7 @@ import dill
 import h5py
 import pickle
 import torch
+from dataclasses import fields
 
 from warpSPHCore import *
 from warpSPHIntegrators.state import StageResult
@@ -104,6 +105,12 @@ def loadState(stateGroup, device, SimulationState):
             stateDict[fieldName] = torch.from_numpy(fieldValue[:]).to(device).to(hdfDtypeToTorchDtype(fieldValue.dtype)) if fieldValue.shape else torch.tensor(fieldValue[()], device=device, dtype=hdfDtypeToTorchDtype(fieldValue.dtype))
         else:
             stateDict[fieldName] = fieldValue
+    # Scalar switch history and state discriminators are written as attrs.
+    # Restore declared fields only; do not pass unrelated export metadata.
+    declared = {f.name for f in fields(SimulationState)}
+    for name, value in stateGroup.attrs.items():
+        if name in declared and name not in stateDict:
+            stateDict[name] = None if isinstance(value, str) and value == 'None' else value
     # `UIDcounter` is a plain int, not a per-particle array, so the writer --
     # which emits datasets -- never stores it, and rebuilding the dataclass
     # then fails on the missing required argument. That made every

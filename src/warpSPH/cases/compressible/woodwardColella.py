@@ -87,7 +87,7 @@ woodwardColellaCase = registerCase(Case(
         plotInterval=50,
         storeInterval=500,
     ),
-    supportedSchemes=SPH_SCHEMES,
+    supportedSchemes=(*SPH_SCHEMES, 'PESPH'),
     parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
         'regions': P('array', 'Mirrored initial pressure/density regions; each span must be ordered and non-overlapping.', 'initial', minItems=1,
             items=P('object', 'One initial state region.', properties={

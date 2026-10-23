@@ -151,6 +151,25 @@ def solverParameters(scheme):
             'diffusionParams.stateLimiter': choice(StateLimiter, 'Reconstructed-state limiter.', 'reconstruction'),
             'diffusionParams.shockSwitchC': positive('First-order shock-switch coefficient; 0 disables it.', 'reconstruction'),
         }
+    if scheme == 'PESPH':
+        from ..enumTypes import PESPHVariant, AdaptiveSupportScheme
+        out = solverParameters('Monaghan')
+        for name in ('materials', 'owenTable', 'owenMaterialWeights'):
+            out.pop(name)
+        out.update({
+            'variant': choice(PESPHVariant, 'Integrated thermodynamic variable.', 'fluid'),
+            'dissipation': P('boolean', 'Enable AV, conductivity and viscous heating; entropy requires an explicit source policy.', 'diffusion'),
+            'entropyHeating': P('string', 'Entropy heat conversion: Guarded default, approximate SwiftLocal, or experimental continuous NonlocalPower (conductivity must be off).',
+                                'diffusion', choices=('Guarded', 'SwiftLocal', 'NonlocalPower')),
+            'entropyInitialization': P('string', 'Entropy initialization: historical PressureVolume or experimental ThermalEnergy inversion (entropy only, 1 < gamma < 2).',
+                                'diffusion', choices=('PressureVolume', 'ThermalEnergy')),
+            'adaptiveSupportScheme': P('string', 'Number-density h constraint, or fixed supports.', 'geometry',
+                                       choices=('NumberDensity', 'NoScheme')),
+            'adaptiveSupportCorrections': P('boolean', 'Grad-h: on for NumberDensity, off for fixed supports.', 'geometry'),
+            'adaptiveSupportIterations': P('integer', 'Maximum support iterations.', 'geometry', minimum=1),
+            'adaptiveSupportThreshold': P('number', 'Relative support convergence tolerance.', 'geometry', exclusiveMinimum=0),
+        })
+        return out
     if scheme not in ('CompSPH', 'CRKSPH', 'Monaghan'):
         raise ValueError(f'solver.scheme: no version-{VERSION} configuration contract for {scheme!r}')
     out = {f'diffusionParams.{name}': positive(description) for name, description in {
@@ -170,7 +189,8 @@ def solverParameters(scheme):
                         'type': P('string', 'EOS family.', choices=('idealGas',)),
                         'gamma': P('number', 'Ratio of specific heats.', exclusiveMinimum=1)}, required=('type', 'gamma'))},
                 required=('name', 'eos'))),
-        'diffusionParams.viscosityTerm': choice(ViscosityTerms, 'Artificial-viscosity formulation.', 'diffusion'),
+        'diffusionParams.viscosityTerm': P('string', 'Artificial-viscosity formulation.', 'diffusion',
+            choices=tuple(term.name for term in ViscosityTerms if term is not ViscosityTerms.Hopkins2015)),
         'diffusionParams.betaMode': choice(BetaMode, 'Quadratic coefficient coupling policy.', 'diffusion'),
         'viscositySwitchParams.scheme': choice(ViscositySwitch, 'Artificial-viscosity switch.', 'viscositySwitch'),
         'viscositySwitchParams.alpha_min': positive('Lower switch coefficient.', 'viscositySwitch'),
@@ -178,6 +198,12 @@ def solverParameters(scheme):
     })
     # These hosts require Raw; advertising other policies would offer an unusable setting.
     policies = (VelocityPairPolicy.Raw,) if scheme in ('CompSPH', 'CRKSPH') else tuple(VelocityPairPolicy)
+    if scheme == 'Monaghan':
+        out['diffusionParams.thermalConductivityTerm'] = choice(ViscosityTerms,
+            'Thermal-conductivity signal formulation; Hopkins2015 follows Eq. F18 with strength alpha_C.', 'diffusion')
+        # PESPH reuses this descriptor set and the same reconstruction inputs.
+        out['diffusionParams.correctReconstructionGradient'] = P('boolean',
+            'Apply the existing matrix correction to the reconstructed velocity gradient.', 'reconstruction')
     out['diffusionParams.velocityPairPolicy'] = P('string', 'Pair velocity supplied to viscosity.',
                                                  'reconstruction', choices=tuple(m.name for m in policies))
     if scheme == 'CRKSPH':
@@ -373,11 +399,12 @@ def _merge(base, overrides):
 def _solverEnums():
     from ..configurations.moduleConfigurations.diffusionParameters import (
         ViscosityTerms, BetaMode, VelocityPairPolicy, RiemannSolver, StateLimiter)
-    from ..enumTypes import DensityDiffusionScheme, ViscositySwitch
-    return {'diffusionParams.viscosityTerm': ViscosityTerms, 'diffusionParams.betaMode': BetaMode,
+    from ..enumTypes import DensityDiffusionScheme, ViscositySwitch, PESPHVariant, AdaptiveSupportScheme
+    return {'diffusionParams.viscosityTerm': ViscosityTerms, 'diffusionParams.thermalConductivityTerm': ViscosityTerms, 'diffusionParams.betaMode': BetaMode,
             'diffusionParams.velocityPairPolicy': VelocityPairPolicy, 'diffusionParams.riemannSolver': RiemannSolver,
             'diffusionParams.stateLimiter': StateLimiter, 'diffusionParams.densityDiffusionTerm': DensityDiffusionScheme,
-            'viscositySwitchParams.scheme': ViscositySwitch}
+            'viscositySwitchParams.scheme': ViscositySwitch, 'variant': PESPHVariant,
+            'adaptiveSupportScheme': AdaptiveSupportScheme}
 
 
 def applySchemeOverrides(ctx):

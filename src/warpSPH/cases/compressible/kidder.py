@@ -164,7 +164,7 @@ kidderCase = registerCase(Case(
         plotInterval=100,
         storeInterval=500,
     ),
-    supportedSchemes=SPH_SCHEMES,
+    supportedSchemes=(*SPH_SCHEMES, 'PESPH'),
     parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
         'gamma': P('number', 'Isentropic compression adiabatic index.', 'fluid', exclusiveMinimum=1,
                    readOnly=True, derivation='1 + 2 / simulation.dim'),

@@ -92,7 +92,7 @@ kelvinHelmholtzCase = registerCase(Case(
         plotInterval=1,
         storeInterval=500,
     ),
-    supportedSchemes=COMPRESSIBLE_SCHEMES,
+    supportedSchemes=(*COMPRESSIBLE_SCHEMES, 'PESPH'),
     parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
         'rho1': P('number', 'Density of the outer shear layer.', 'initial', units='density', exclusiveMinimum=0),
         'rho2': P('number', 'Density of the inner shear layer.', 'initial', units='density', exclusiveMinimum=0),

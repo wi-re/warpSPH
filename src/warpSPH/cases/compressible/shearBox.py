@@ -109,7 +109,7 @@ shearBoxCase = registerCase(Case(
         plotInterval=1,
         storeInterval=500,
     ),
-    supportedSchemes=COMPRESSIBLE_SCHEMES,
+    supportedSchemes=(*COMPRESSIBLE_SCHEMES, 'PESPH'),
     parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
         'v0': P('number', 'Signed amplitude of the periodic shear velocity.', 'initial', units='velocity'),
         'P0': P('number', 'Uniform initial pressure.', 'initial', units='pressure', exclusiveMinimum=0),

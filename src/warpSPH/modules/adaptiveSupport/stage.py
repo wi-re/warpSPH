@@ -15,9 +15,8 @@ By default the densities the solve returns are the particles' current ones (`com
 
 from warpSPH.configurations.compute import neighborSearchOptions
 
-from warpSPHCore import SupportScheme, buildVerletList
+from warpSPHCore import SupportScheme
 
-from ...enumTypes import AdaptiveSupportScheme
 from .optimalSupport import evaluateOptimalSupport
 
 __all__ = ['solveStageSupport']
@@ -41,14 +40,3 @@ def solveStageSupport(system, state, config, schemeConfig, *, onGrid: bool = Fal
         state, config, schemeConfig, SupportScheme.Gather, system.adjacency,
         validateOnce=True, rebuildSlack=rebuildSlack, computeDensity=computeDensity)
     state.supports, state.densities = h, rho
-    if schemeConfig.adaptiveSupportScheme in (AdaptiveSupportScheme.Monaghan, AdaptiveSupportScheme.NumberDensity):
-        # those solvers ignore `validateOnce`: validate the list here, for the supports they returned
-        system.adjacency = buildVerletList(
-            state,
-            config.domain,
-            verletScale=config.verletScale,
-            supportMode=SupportScheme.SuperSymmetric,
-            priorNeighborhood=system.adjacency,
-            verbose=False,
-            rebuildSlack=rebuildSlack,
-            **neighborSearchOptions(config))

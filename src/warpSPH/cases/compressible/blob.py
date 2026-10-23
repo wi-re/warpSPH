@@ -1,6 +1,7 @@
 """Periodic 2D wind-cloud blob, Frontiere et al. 2017 section 4.5.1."""
 import torch
 from ...configurations import EOSConfig,MaterialConfig
+from ...configurations.pesph import PESPHConfig
 from ...runner import Case,registerCase,caseMain
 from ...runner.parameters import Parameter as P
 from ...caseUtils.compressible.blob import sampleBlob,blobScales
@@ -13,7 +14,8 @@ from .common import COMPRESSIBLE_DEFAULTS,COMPRESSIBLE_PARAMS,configureCompressi
 def configureScheme(ctx):
     if ctx.param('rho0')!=1.:raise ValueError('blob nondimensional ambient density is fixed at one')
     configureCompressible(ctx)
-    ctx.schemeConfig.materials=[MaterialConfig(name,EOSConfig(gamma=ctx.param('gamma'))) for name in ('ambient','cloud')]
+    if not isinstance(ctx.schemeConfig, PESPHConfig):
+        ctx.schemeConfig.materials=[MaterialConfig(name,EOSConfig(gamma=ctx.param('gamma'))) for name in ('ambient','cloud')]
     ctx.config.domain.min=torch.zeros(2,device=ctx.device,dtype=ctx.dtype)
     ctx.config.domain.max=torch.tensor([40.,10.],device=ctx.device,dtype=ctx.dtype)*ctx.spec.L
 
@@ -47,7 +49,7 @@ setupPlot,updatePlot=particlePlot([Field('densities','Density',vMin=.5,vMax=10.)
 blobCase=registerCase(Case(name='blob',scheme='CRKSPH',
     description='2D periodic Mach-2.7 wind / density-10 cloud; published CRKSPH geometry.',
     configureScheme=configureScheme,buildSystem=buildSystem,diagnostics=diagnostics,timestep=compressibleTimestep,postStep=postStep,
-    setupPlot=setupPlot,updatePlot=updatePlot,extraData=paramExtraData,extraFields=('internalEnergies','supports'),supportedSchemes=('CRKSPH',),
+    setupPlot=setupPlot,updatePlot=updatePlot,extraData=paramExtraData,extraFields=('internalEnergies','supports'),supportedSchemes=('CRKSPH','PESPH'),
     defaults=dict(COMPRESSIBLE_DEFAULTS,caseName='blob',dim=2,nx=256,L=1.,kernel='QuinticSpline',n_h=4.05,tLimit=8*blobScales()['tKH'],cflFactor=.15,plotInterval=100),
     params=dict(COMPRESSIBLE_PARAMS,viscositySwitch='NoneSwitch',massMatch=True,mach=2.7,contrast=10.,initialDensity='prescribed'),
     parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,

@@ -8,7 +8,7 @@ pre-merge cleanup pass) lazily to avoid a circular import with
 """
 
 from warpSPHIntegrators.schemes import ProjectedStep
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Union
 
 from ..systems import (
@@ -81,6 +81,11 @@ class SchemeBundle:
     importFunction: Callable
     #: Optional consumer-specific time driver; legacy seven-member unpacking is unchanged.
     integrationMethod: Callable | None = None
+    #: Resolve an integrated-field layout after scheme config overrides.
+    stateFactory: Callable | None = None
+
+    def configured(self, config):
+        return self if self.stateFactory is None else replace(self, SimulationState=self.stateFactory(config))
 
     def __iter__(self):
         """Legacy 7-tuple unpacking. Pinned to `_LEGACY_TUPLE_ORDER`."""
@@ -100,6 +105,15 @@ def _monaghan() -> SchemeBundle:
         exportFunction=compressibleConfigToDict,
         importFunction=dictToCompressibleConfig,
     )
+
+
+def _pesph() -> SchemeBundle:
+    from ..configurations.pesph import PESPHConfig, pesphConfigToDict, dictToPESPHConfig
+    from ..systems.pesph import PESPHSystem, PressureEnergyState, PESPHSystemUpdate, pesphStateType
+    from .compressible.pesph import pesphStep
+    return SchemeBundle(PESPHSystem, PressureEnergyState, PESPHConfig, PESPHSystemUpdate,
+                        pesphStep, pesphConfigToDict, dictToPESPHConfig,
+                        stateFactory=lambda config: pesphStateType(config.variant))
 
 
 def _gsph() -> SchemeBundle:
@@ -350,6 +364,7 @@ _SCHEMES = {
     CompressibleSPHScheme.CRKSPH: _crkSPH,
     CompressibleSPHScheme.GSPH: _gsph,
     CompressibleSPHScheme.InutsukaGSPH: _inutsukaGSPH,
+    CompressibleSPHScheme.PESPH: _pesph,
     CompressibleSPHScheme.MFM: _mfm,
     CompressibleSPHScheme.MFV: _mfv,
     WeaklyCompressibleSPHScheme.deltaSPH: _deltaSPH,
@@ -377,8 +392,6 @@ def buildScheme(
                       WaveEquationScheme]
 ) -> SchemeBundle:
     """Resolve a scheme name or enum member to its :class:`SchemeBundle`."""
-    if schemeName is CompressibleSPHScheme.PESPH or (isinstance(schemeName, str) and schemeName.lower() == 'pesph'):
-        raise NotImplementedError('PESPH is registered as an enum member only; the scheme is assembled in PESPH_PLAN Phase 4')
     if isinstance(schemeName, str):
         member = _ALIASES.get(schemeName.lower())
     else:

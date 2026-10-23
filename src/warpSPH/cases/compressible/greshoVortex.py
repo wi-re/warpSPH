@@ -70,7 +70,7 @@ greshoVortexCase = registerCase(Case(
         storeInterval=500,
     ),
     # cuspWidth > 0: smoothed-cusp variant (see `greshoProfile`); 0 = the standard profile
-    supportedSchemes=COMPRESSIBLE_SCHEMES,
+    supportedSchemes=(*COMPRESSIBLE_SCHEMES, 'PESPH'),
     parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
         'cuspWidth': P('number', 'Width of the smoothed Gresho cusp; zero uses the piecewise standard profile.', 'initial', units='length', minimum=0),
         'jitter': P('number', 'Initial displacement as a fraction of lattice spacing.', 'sampling', minimum=0),

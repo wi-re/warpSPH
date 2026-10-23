@@ -19,6 +19,7 @@ from ...caseUtils import SedovSolution, beta, buildSedov, radius
 from ...configurations.meshless import MeshlessConfig
 from ...runner import Case, RunContext, caseMain, registerCase
 from .common import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
+                           addUniformInternalEnergy,
                            compressibleDiagnostics, configureCompressible,
                            paramExtraData)
 from ..common.plotting import ProfileAxis, profilePlot
@@ -63,8 +64,16 @@ def buildSystem(ctx: RunContext):
         from ...caseUtils.meshless import toMeshlessSystem
         from ...systems.compressibleMonaghan import CompressibleState, CompressibleSystem
         comp = buildSedov(CompressibleSystem, CompressibleState, **kwargs)
+        _ambientEnergy(ctx, comp)
         return toMeshlessSystem(comp, ctx.config, ctx.schemeConfig)
-    return buildSedov(ctx.SimulationSystem, ctx.SimulationState, **kwargs)
+    system = buildSedov(ctx.SimulationSystem, ctx.SimulationState, **kwargs)
+    _ambientEnergy(ctx, system)
+    return system
+
+
+def _ambientEnergy(ctx, system):
+    """Explicit common positive-temperature Sedov IC; zero retains legacy ICs."""
+    addUniformInternalEnergy(system, ctx.param('gamma'), ctx.param('uAmbient'))
 
 
 # -- plotting ----------------------------------------------------------------
@@ -148,9 +157,10 @@ sedovCase = registerCase(Case(
         plotInterval=25,
         storeInterval=500,
     ),
-    supportedSchemes=COMPRESSIBLE_SCHEMES,
+    supportedSchemes=(*COMPRESSIBLE_SCHEMES, 'PESPH'),
     parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
         'E0': P('number', 'Deposited blast energy.', 'initial', units='energy', exclusiveMinimum=0),
+        'uAmbient': P('number', 'Uniform initial specific internal energy added to the blast; zero retains the exactly cold IC.', 'initial', minimum=0),
         'goalRadius': P('number', 'Shock radius that determines the stop time.', 'time', units='length', exclusiveMinimum=0),
         'initialization': P('string', 'Spatial deposition of initial blast energy.', 'initial', choices=('singular', 'hat', 'quadrant')),
     },
@@ -159,6 +169,7 @@ sedovCase = registerCase(Case(
     params=dict(
         COMPRESSIBLE_PARAMS,
         E0=1.0,
+        uAmbient=0.0,
         goalRadius=0.8,
         # 'hat' deposits E0 on the single particle nearest the origin, same as
         # 'singular', then smooths that spike with one SPH interpolation pass

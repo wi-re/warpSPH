@@ -100,7 +100,7 @@ def _sodNDCase(name: str, dim: int, nx: int, description: str) -> Case:
             plotInterval=10,
             storeInterval=50,
         ),
-        supportedSchemes=COMPRESSIBLE_SCHEMES,
+        supportedSchemes=(*COMPRESSIBLE_SCHEMES, 'PESPH'),
         parameterDefinitions={
             **COMPRESSIBLE_PARAMETERS, **RIEMANN_STATE_PARAMETERS,
             'adaptiveSupportScheme': replace(COMPRESSIBLE_PARAMETERS['adaptiveSupportScheme'],

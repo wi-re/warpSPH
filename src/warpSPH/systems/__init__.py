@@ -11,6 +11,7 @@ submodule instead.
 
 from .baseState import BaseParticleState, BaseSystemUpdate, BaseSystem
 from .compressibleMonaghan import CompressibleState, CompressibleSystemUpdate, CompressibleSystem
+from .pesph import PESPHState, PressureEnergyState, PressureEntropyState, PESPHSystem, PESPHSystemUpdate
 from .meshless import MeshlessState, MeshlessSystemUpdate, MeshlessSystem
 from .waveSystem import WaveSystemStatev3, WaveSystemUpdatev3, WaveSystemv3
 from .compSPH import CompSPHState, CompSPHSystem
@@ -24,6 +25,7 @@ from .artificialCompressible import (ArtificialCompressibleState,
 __all__ = [
     'BaseParticleState', 'BaseSystemUpdate', 'BaseSystem',
     'CompressibleState', 'CompressibleSystemUpdate', 'CompressibleSystem',
+    'PESPHState', 'PressureEnergyState', 'PressureEntropyState', 'PESPHSystem', 'PESPHSystemUpdate',
     'MeshlessState', 'MeshlessSystemUpdate', 'MeshlessSystem',
     'WaveSystemStatev3', 'WaveSystemUpdatev3', 'WaveSystemv3',
     'CompSPHState', 'CompSPHSystem',

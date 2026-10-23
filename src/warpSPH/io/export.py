@@ -229,6 +229,8 @@ def writeInitialData(
         extraData = {}
 
     outFile.attrs['scheme'] = schemeAttribute(scheme)
+    if hasattr(runningState.state, 'thermodynamicVariable'):
+        outFile.attrs['thermodynamicVariable'] = runningState.state.thermodynamicVariable
     outFile.attrs['time'] = runningState.t if isinstance(runningState.t, float) else runningState.t.cpu().item()
     outFile.create_group('states')
     outFile.create_group('stages')
@@ -292,6 +294,8 @@ def writeInitialData(
         cGroup.attrs['sdf'] = _encode_callable(rigidBody.sdf)
 
     initialState = runningState.state
+    storedFloat = np.float64 if (hasattr(initialState, 'thermodynamicVariable')
+                                 and initialState.positions.dtype == torch.float64) else np.float32
     kinds = initialState.kinds
 
     boundaryMask = kinds == 1
@@ -336,9 +340,9 @@ def writeInitialData(
     outFile.create_dataset('ghostUIDs', data=ghostUIDs.detach().cpu().numpy(), dtype=np.int32)
     outFile.create_dataset('ghostKinds', data=ghostKinds.detach().cpu().numpy(), dtype=np.int32)
 
-    outFile.create_dataset('combinedPositions', data=initialState.positions.detach().cpu().numpy(), dtype=np.float32)
-    outFile.create_dataset('combinedMasses', data=initialState.masses.detach().cpu().numpy(), dtype=np.float32)
-    outFile.create_dataset('combinedSupports', data=initialState.supports.detach().cpu().numpy(), dtype=np.float32)
+    outFile.create_dataset('combinedPositions', data=initialState.positions.detach().cpu().numpy(), dtype=storedFloat)
+    outFile.create_dataset('combinedMasses', data=initialState.masses.detach().cpu().numpy(), dtype=storedFloat)
+    outFile.create_dataset('combinedSupports', data=initialState.supports.detach().cpu().numpy(), dtype=storedFloat)
     outFile.create_dataset('combinedUIDs', data=initialState.UIDs.detach().cpu().numpy(), dtype=np.int32)
     outFile.create_dataset('combinedKinds', data=initialState.kinds.detach().cpu().numpy(), dtype=np.int32)
     outFile.create_dataset('combinedDensities', data=initialState.densities.detach().cpu().numpy(), dtype=np.float32)
@@ -375,10 +379,16 @@ def writeFrame(groups, i, state, stages, config, schemeConfig, uniqueParticles=T
     densityGroup.create_dataset(f'frame_{i:05d}', data=state.state.densities.cpu().numpy())
     timeGroup.create_dataset(
         f'frame_{i:05d}',
-        data=np.array([state.t.cpu().item() if isinstance(state.t, torch.Tensor) else state.t], dtype=np.float32),
+        data=np.array([state.t.cpu().item() if isinstance(state.t, torch.Tensor) else state.t],
+                      dtype=np.float64 if hasattr(state.state, 'thermodynamicVariable') else np.float32),
     )
     for name, group in zip(extraFields, extraGroups):
-        group.create_dataset(f'frame_{i:05d}', data=getattr(state.state, name).detach().cpu().numpy())
+        value = getattr(state.state, name)
+        key = f'frame_{i:05d}'
+        if value is None:
+            group.attrs[key] = 'None'
+        else:
+            group.create_dataset(key, data=value.detach().cpu().numpy() if isinstance(value, torch.Tensor) else value)
     for name in ('crkMassDensities', 'crkVolumes'):
         value = getattr(state.state, name, None)
         if value is not None and name not in extraFields:

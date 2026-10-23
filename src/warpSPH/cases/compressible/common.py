@@ -18,12 +18,25 @@ import torch
 
 from ...configurations.moduleConfigurations.viscositySwitchParameters import ViscositySwitchConfig
 from ...configurations.meshless import MeshlessConfig
+from ...configurations.pesph import PESPHConfig
 from ...enumTypes import AdaptiveSupportScheme, ViscositySwitch
 from ...modules.timestep.compressible import computeTimestep
 from ...runner import RunContext, resolveEnum
 
 __all__ = ['COMPRESSIBLE_DEFAULTS', 'COMPRESSIBLE_PARAMS', 'configureCompressible',
            'compressibleDiagnostics', 'ALPHA_ACTIVE_THRESHOLD', 'avReportDiagnostics', 'compressibleTimestep', 'paramExtraData']
+
+
+def addUniformInternalEnergy(system, gamma, amount):
+    """Explicit shared cold-test IC option; amount=0 leaves legacy ICs intact."""
+    if amount == 0:
+        return system
+    from ...modules.eos import idealGasEOS
+    s = system.state
+    s.entropies, s.internalEnergies, s.pressures, s.soundspeeds = idealGasEOS(
+        A=None, u=s.internalEnergies+amount, P=None, rho=s.densities, gamma=gamma)
+    s.totalEnergies = s.masses*(s.internalEnergies+.5*s.velocities.square().sum(-1))
+    return system
 
 
 #: `CaseSpec` fields shared by the compressible examples. A case merges these
@@ -86,9 +99,7 @@ def configureCompressible(ctx: RunContext) -> None:
     schemeConfig.gamma = ctx.param('gamma')
     schemeConfig.rho0 = ctx.param('rho0')
     applyViscositySwitchParam(ctx)
-    schemeConfig.adaptiveSupportScheme = resolveEnum(
-        AdaptiveSupportScheme, ctx.param('adaptiveSupportScheme'))
-    schemeConfig.adaptiveSupportCorrections = ctx.param('adaptiveSupportCorrections')
+    configureSupport(ctx)
     # solid-wall knobs, for the cases that have walls (cases/compressibleWalls/common.py WALL_PARAMS)
     params = ctx.spec.params
     if 'wallSlip' in params:
@@ -97,6 +108,15 @@ def configureCompressible(ctx: RunContext) -> None:
         schemeConfig.wallRiemannState = params['wallRiemannState']
     if 'wallLatticeSupport' in params:
         schemeConfig.wallLatticeSupport = {'auto': None, 'on': True, 'off': False}[params['wallLatticeSupport']]
+
+
+def configureSupport(ctx):
+    """PESPH exposes its support contract in solver controls, not legacy case defaults."""
+    if isinstance(ctx.schemeConfig, PESPHConfig):
+        return
+    ctx.schemeConfig.adaptiveSupportScheme = resolveEnum(
+        AdaptiveSupportScheme, ctx.param('adaptiveSupportScheme'))
+    ctx.schemeConfig.adaptiveSupportCorrections = ctx.param('adaptiveSupportCorrections')
 
 
 #: A particle counts as "active" for the AV report when its switched alpha
@@ -135,6 +155,8 @@ def compressibleDiagnostics(ctx: RunContext, state) -> Dict[str, float]:
     if materialConfigs is None:
         gamma = float(ctx.schemeConfig.gamma)
         entropy = (mass * (gamma - 1.0) * particles.internalEnergies * rho ** (1.0 - gamma)).sum()
+        if isinstance(ctx.schemeConfig, PESPHConfig):
+            entropy = (mass*particles.entropies).sum()
     else:
         entropy = torch.zeros((), device=mass.device, dtype=mass.dtype)
 

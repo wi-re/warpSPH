@@ -77,7 +77,8 @@ def computeTimestep(
         # runner.py's `_scalar`), not have that decision made for them here.
         return initial_dt
     else:
-        if dt is not None:
-            return dt
+        requested = dt if dt is not None else config.dt
+        if requested is not None:
+            return requested
         else:
             raise ValueError("dt must be provided if adaptiveDt is False")

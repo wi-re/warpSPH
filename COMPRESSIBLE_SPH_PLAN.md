@@ -29,7 +29,7 @@ a comparison matrix every scheme reports into (§2).
 | `CRKSPH` | limiter default (1/n_h, 0.2/n_h); deterministic; Gresho spin-up is intrinsic (a slowly converging tangential pressure pump the viscosity cancels); same-lattice triple point piles up (parked); curved-wall stagnation fails (OPEN §19) | archived `CRKSPH_LIMITER_PLAN.md`; OPEN §15, §19 |
 | `GSPH` (Cha & Whitworth form) | baseline, no AV; equals standard SPH at constant `P` (measured) | `docs/av/godunov_l2_2026-10-08/`, `godunov_densityJump/` |
 | `InutsukaGSPH` | Gaussian-kernel convolution form; stable for Gaussian width η ≤ 1; first-order shock switch on by default | `docs/av/godunov_l3_2026-10-08/` |
-| `PESPH` | enum member + `PESPHVariant` only; `AdaptiveSupportScheme.NumberDensity` done; `buildScheme` raises | [PESPH_PLAN.md](PESPH_PLAN.md) |
+| `PESPH` | 2026-10-22: E/A integrated; shared support/conductivity fixes validated; experimental A source and initialization greatly reduce energy defects; focused restart fixtures pass. Accuracy, heat transport and residual cost remain open; no merge | [PESPH_PLAN.md](PESPH_PLAN.md) |
 | **MFM / MFV** | **not in the frontend.** Complete backend in warpSPHCore `main` (torch reference + warp kernels, GIZMO-parity Riemann chain, closure solve, 77 tests); unreleased (after the 0.6.0 bump) | warpSPHCore `higher_order.md` Phase 8 |
 
 ## 2. The organising deliverable: one comparison matrix
@@ -110,16 +110,96 @@ stable width η ≤ 1, and strong-shock energy needs the first-order switch).
 
 ### Track D — PESPH — in progress ([`PESPH_PLAN.md`](PESPH_PLAN.md), kept as is)
 
-Status: Phase 0 done (enum, variant, EOS wiring found unnecessary, state tags fixed); Phase 2 part 1 done
-(`AdaptiveSupportScheme.NumberDensity`, Newton, quadratic convergence, `tests/test_numberDensitySupport.py`). Next:
-Phase 1 (`P̄` by summation), then `∂n/∂h`, `∂P̄/∂h`, `fH_ij` and the Kidder gate, then the momentum / energy kernels,
-assembly, validation. The "gated on AV_PLAN M8" line is moot (user, 2026-10-09: the gate is minor); the AV configuration
-PESPH should run with is the Track A default.
+**2026-10-23 integration:** the user authorizes merging the completed worktree into
+`dev`, superseding the historical no-merge entries below. Both working variants,
+guarded defaults and numerical limitations are retained. See [usage and limits](docs/pesph.md)
+and PESPH_PLAN's integration entry. Generated evidence is preserved locally in
+`.tmp/pesph/`, outside Git; the current incompressible paths are retained.
+
+
+Implemented 2026-10-22 in the managed `codex/pesph` worktree: shared pressure sums/grad-h, per-side conservative
+force/work, pressure-volume closure and authoritative E/A state contracts. PESPH-E now reuses existing AV, heating,
+conductivity, reconstruction and switch operators through a small rate composer; forcing work is included in E.
+Both variants are registered with config-selected state construction, typed runner controls, Sod/linear-wave
+initialization, CFL, diagnostics and faithful E/A/history I/O. Adiabatic A is available; dissipative A is guarded
+because the naive local heat conversion has a measured 1.3975% energy defect. No compensating numerical model
+was invented. The support solver, kernel launcher, EOS and integrators are reused; no persistent pressure-pair arrays.
+
+Six CPU float64/RK4 video-recorded runs: acoustic refinement N48->96 gives 3.8–3.9x smaller errors for both variants;
+Sod E to t=.1 stays positive and conserves E to roundoff, with <=.55% error change on halving CFL. These are initial
+analytic checks, not baseline-solver or strong-shock/mixing acceptance. CUDA float32 Rosswog entropy differences
+amplify cache-rebuild roundoff; I/O histories restore exactly, but switch continuation is not bitwise stable.
+[PESPH_PLAN section 0](PESPH_PLAN.md#0-scope-audit--2026-10-22) records equations/Spheral cross-checks, tests,
+runtime and the limitation. The additional float64 CUDA integration check passes the default-switch restart rows
+but fails Rosswog E's strict 2e-11 alpha0 continuation tolerance after rebuilding neighbours (15 passed before the
+failure); exact recovered fields and the physical continuation pass up to that assertion. That check remains an
+open gate.
+
+The requested 19-case CRK/E/A matrix subsequently ran after the incompressible GPU queue cleared:
+53/57 reached target; E/A Noh and shearing Noh failed their first step. Eight separate diagnostic runs
+identify timestep sensitivity and conductivity-driven contact drift. The shared conductivity operator ignores
+its strength multiplier; nominal zero is ineffective, while explicit source removal restores stationary
+contact through t=1. The original source state is archived separately from later corrections. E conserves closed-system energy but
+native vortex damping and cost are poor; opt-in SwiftLocal A starts Sedov 14–21% low in energy and loses
+another ~8%. [Final report](.tmp/pesph/docs/validation/pesph_evaluation_2026-10-22/index.html) records all fields,
+movies, quantitative metrics, failures and limitations. Native presets differ; no isolated formulation or
+exact paper-reproduction claim. Next: tested conductivity fix/contact source treatment, full cold-shock
+positivity, conservative A heating/blast initialization, Yee bands, cost and strict Rosswog restart tolerance.
+No primary-checkout merge until readiness. The AV M8 tag is not a blocker.
+
+Completed follow-up: [support, Noh and performance report](.tmp/pesph/docs/validation/pesph_followup_2026-10-22/index.html).
+The support convergence bug fix reduces full KH runtime by 2.18–2.34×. Warm startup
+E/A medians are now 56.7/56.8 ms versus CRK 18.7 ms and the explicit classic
+raw/constant-AV/no-conductivity control 19.5 ms. Launch/sync counts identify repeated
+support/list work for further reuse. Experimental shared `MonotoneLimited` completes
+Noh positively at CFL .15/.075 with E energy at roundoff, but A still loses ~5%, KH
+is more damped and shearing-Noh accuracy remains poor; corrected-gradient controls
+provide only a small improvement. Keep this policy opt-in and A guarded. Eighteen
+full controls, six timing probes and five call audits completed. New policy/schema
+checks pass; two known strict Rosswog E restart failures remain. Original evidence
+and exact pre-correction source copies are preserved; no merge or readiness claim.
+
+
+Latest [source/efficiency report](.tmp/pesph/docs/validation/pesph_efficiency_2026-10-22/index.html):
+47/57 completed requested goals, including eight fixed-step probes; eight preflight
+rejections and two Sedov-E startup failures remain visible. Full KH gains another
+6.8–7.6% from shared support/list reuse. Conductivity strength now scales correctly;
+Hopkins2015 contact control stays at roundoff but remains opt-in. Experimental
+NonlocalPower cuts Noh A energy error 4.057%→.02133%→.005786% with half CFL.
+ThermalEnergy recovers Sedov's initial energy; source drift falls 2.794%→.1223%
+(and .03562% at half CFL). Coarse spatial errors remain mixed and CRK cheaper.
+Sedov E off-conductivity needs quarter CFL for positive midpoint prediction and
+then conserves to roundoff. Focused CPU/CUDA checks pass, including the previously
+failing strict Rosswog fixtures and a fresh repeat; earlier failures remain archived.
+Keep default dissipative A guarded. Heat transport, shear, spatial convergence,
+boundary bands and cost remain open; no merge. See PESPH_PLAN final checkpoint.
+
+
+Adiabatic A [Hamiltonian qualification](.tmp/pesph/docs/validation/pesph_hamiltonian_2026-10-22/index.html)
+now passes independent implicit-support force/potential, canonical Jacobian/map,
+A/E structural controls and stock Verlet/PEFRL temporal-order checks. Eleven
+recorded CPU/f64 wave runs finish; measured orders 2.000 and 4.002/4.034,
+positive with bitwise fixed A through twenty crossings. No production numerical
+change. This supports the user's primary timestepper motivation, separately
+from shock rankings. Automatic JVP classification fails at the Torch/Warp storage
+boundary; composition-aware lifecycle/RHS capability admission remains open.
+Details and handoff in PESPH_PLAN final checkpoint; no merge.
+
+Numerical closeout completed, [report/limitations](.tmp/pesph/docs/validation/pesph_numerical_closeout_2026-10-22/index.html):
+PESPH hydrostatic sampling preserves its configured stage support budget; adaptive
+closures reject unconverged supports with calibration/precision handled. Independent
+adaptive viscous energy/entropy checks pass on CPU and CUDA; four recorded
+contact/Noh/Sedov endpoints complete positively. General A heat transport remains
+guarded (an exact-power signed-heat allocation can decrease discrete entropy).
+Cold E midpoint/CFL, native shock/shear accuracy, coarse blast error and cost
+limitations remain documented. User explicitly cancels merging: stop in the
+worktree, with no primary checkout edits or commits. Timestepper AD/split interfaces
+remain a separate handoff.
 
 **Shared with Track E** (do these once): `AdaptiveSupportScheme.NumberDensity` is exactly the `n h^d = const` constraint
-MFM uses for its supports (`V = 1/Σ_j W_ij`, `h = (N_ngb V / C)^{1/d}`); `totalEnergies` promoted from `constant()` to
-`integrated('dEdt')` serves PESPH-E and MFM / MFV alike (`dEdt` already exists on the update); both need the "new
-per-particle state needs a copy in `finalize`" rule (§7).
+MFM uses for its supports (`V = 1/Σ_j W_ij`, `h = (N_ngb V / C)^{1/d}`); the existing promotion of `totalEnergies` to
+`integrated('dEdt')` is groundwork for PESPH-E. Integrated E/A must survive `finalize`; derived thermodynamics need
+a PESPH closure at the accepted state, rather than an unconditional copy of the last substage.
 
 ### Track E — MFM / MFV: migrating from warpSPHCore into the frontend
 

@@ -36,9 +36,9 @@ def evaluateOptimalSupport(
         info: Optional[dict] = None,
 ):
     """`validateOnce` / `rebuildSlack`: the Owen solver validates the neighbour list once per solve instead of once
-    per iteration (see `evaluateOptimalSupportOwen`); the other support schemes ignore them. `grid` / `gridRadius` / `info` (Owen
+    per iteration (see `evaluateOptimalSupportOwen`); the Newton solvers also validate once, with an eager retry when needed. `grid` / `gridRadius` / `info` (Owen
     only): run on a fixed-shape hash-map grid and look at no neighbour list at all, see `evaluateOptimalSupportOwen`.
-    `computeDensity=False` (Owen only) skips the closing summation density: the returned densities are then the particles' current ones --
+    `computeDensity=False` skips the closing summation density: the returned densities are then the particles' current ones --
     for a caller that computes its own density next. (The wall cases' support volume clamp is no longer applied here:
     `modules/compressibleWall/supportClamp.py`, called by the step after the list.)"""
     with record_function("[warpSPH] - evaluateOptimalSupport"):
@@ -62,7 +62,8 @@ def evaluateOptimalSupport(
                 config = config,
                 compParams = compParams,
                 supportScheme = supportScheme,
-                adjacency = adjacency
+                adjacency = adjacency,
+                validateOnce=validateOnce, rebuildSlack=rebuildSlack, computeDensity=computeDensity,
             )
         elif compParams.adaptiveSupportScheme == AdaptiveSupportScheme.NumberDensity:
             result = evaluateOptimalSupportMonaghan(
@@ -71,7 +72,8 @@ def evaluateOptimalSupport(
                 compParams = compParams,
                 supportScheme = supportScheme,
                 adjacency = adjacency,
-                numberDensity = True
+                numberDensity = True,
+                validateOnce=validateOnce, rebuildSlack=rebuildSlack, computeDensity=computeDensity,
             )
         elif compParams.adaptiveSupportScheme == AdaptiveSupportScheme.NoScheme:
 

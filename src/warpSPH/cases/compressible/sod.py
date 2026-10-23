@@ -15,7 +15,7 @@ from ...caseUtils import buildSod1D, buildSod1DMeshless, plotSod, plotSod_, sodI
 from ...configurations.meshless import MeshlessConfig
 from ...enumTypes import AdaptiveSupportScheme, ViscositySwitch
 from ...runner import Case, RunContext, caseMain, registerCase, resolveEnum
-from .common import applyViscositySwitchParam, compressibleDiagnostics
+from .common import applyViscositySwitchParam, compressibleDiagnostics, configureSupport
 from ..common.parameters import COMPRESSIBLE_PARAMETERS, RIEMANN_STATE_PARAMETERS
 from ...runner.parameters import Parameter as P
 from ..common.plotting import openWindow, pumpEvents
@@ -49,9 +49,7 @@ def configureScheme(ctx: RunContext) -> None:
     for name in ('alpha_min', 'alpha_max'):
         if ctx.param(name) is not None:
             setattr(ctx.schemeConfig.viscositySwitchParams, name, ctx.param(name))
-    ctx.schemeConfig.adaptiveSupportScheme = resolveEnum(
-        AdaptiveSupportScheme, ctx.param('adaptiveSupportScheme'))
-    ctx.schemeConfig.adaptiveSupportCorrections = ctx.param('adaptiveSupportCorrections')
+    configureSupport(ctx)
 
 
 def buildSystem(ctx: RunContext):
@@ -150,7 +148,7 @@ sodCase = registerCase(Case(
         storeInterval=50,
     ),
     validateConfiguration=validateConfiguration,
-    supportedSchemes=('CompSPH', 'Monaghan', 'CRKSPH', 'GSPH', 'InutsukaGSPH', 'MFM', 'MFV'),
+    supportedSchemes=('CompSPH', 'Monaghan', 'CRKSPH', 'GSPH', 'InutsukaGSPH', 'MFM', 'MFV', 'PESPH'),
     simulationParameters={
         'dim': P('integer', 'This case is the one-dimensional Sod sampler.', choices=(1,)),
         'L': P('number', 'The current periodic mirrored Sod sampler uses a fixed domain length.', choices=(2.0,)),
