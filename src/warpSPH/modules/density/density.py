@@ -31,7 +31,7 @@ from ...enumTypes import *
 __all__ = ['computeDensities']
 
 
-def computeDensities(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], supportMode: Optional[SupportScheme] = None, wall: Optional[Any] = None, *, boundaryRepresentation: str = 'auto', wallMassDensity: Optional[float] = None) -> torch.Tensor:
+def computeDensities(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], supportMode: Optional[SupportScheme] = None, wall: Optional[Any] = None, *, boundaryRepresentation: str = 'auto', wallMassDensity: Optional[float] = None, wallSupport: Optional[float] = None) -> torch.Tensor:
     """Sum particle masses and the wall contribution, then apply corrections.
 
     ``wall`` can be an evaluated analytic wall, a tensor containing its
@@ -40,6 +40,7 @@ def computeDensities(currentState: Any, config: SimulationConfig, schemeConfig: 
     Supply ``wallMassDensity`` to evaluate the physical solid-density integral
     directly from geometry; ``boundaryRepresentation='particles'`` leaves the
     sampled wall contribution entirely in the particle sum.
+    ``wallSupport`` supplies a validated host support for fixed-support scenes.
     """
     with record_function("[warpSPH] - computeDensities"):
         densities = warpOperation(
@@ -66,7 +67,7 @@ def computeDensities(currentState: Any, config: SimulationConfig, schemeConfig: 
         if wallMassDensity is not None:
             from ..analyticBoundary.density import computeWallDensity
             densities = densities + computeWallDensity(currentState, config, schemeConfig,
-                representation=boundaryRepresentation, massDensity=wallMassDensity)
+                representation=boundaryRepresentation, massDensity=wallMassDensity, support=wallSupport)
         elif isinstance(wall, torch.Tensor):
             densities = densities + wall
         else:

@@ -24,7 +24,7 @@ from warpSPHIntegrators.state import (
 from warpSPHIntegrators.state.fields import update_component, update_position
 from dataclasses import dataclass
 import torch
-from typing import Optional
+from typing import Optional, Any
 from warpSPHCore import AdjacencyList, DomainDescription
 
 
@@ -242,6 +242,17 @@ class IISPHSystem(IncompressibleSystem):
     Inherit the normal derivative updates. Finalization retains only fields
     recomputed by the RHS; positions and velocities belong to the integrator.
     """
+
+    boundarySupport: Optional[float] = None
+    analyticBoundaryProvider: Optional[Any] = None
+    contactBoundaryProvider: Optional[Any] = None
+
+    def initializeNewState(self, *args, verbose=False, **kwargs):
+        system = super().initializeNewState(*args, verbose=verbose, **kwargs)
+        system.boundarySupport = self.boundarySupport
+        system.analyticBoundaryProvider = self.analyticBoundaryProvider
+        system.contactBoundaryProvider = self.contactBoundaryProvider
+        return system
 
     def finalize(self, initialState, dt, returnValues, updateValues, weights=..., *args, **kwargs):
         self.adjacency = returnValues[-1][0]

@@ -18,11 +18,12 @@ from .wp_viscosityDelta import computeVelocityDiffusionDeltaSPH
 
 __all__ = ['computeVelocityDiffusion']
 
-def computeVelocityDiffusion(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], approachOnly: Optional[bool] = None, wall: Optional[Any] = None, operationMode: OperationDirection = OperationDirection.AllToAll, *, boundaryRepresentation: str = 'auto') -> torch.Tensor:
+def computeVelocityDiffusion(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], approachOnly: Optional[bool] = None, wall: Optional[Any] = None, operationMode: OperationDirection = OperationDirection.AllToAll, *, boundaryRepresentation: str = 'auto', wallSupport: Optional[float] = None) -> torch.Tensor:
     """Sampled walls use reflected fluid samples unless mDBC ghost rows already
     supply their velocities. Analytic walls use the solid Laplacian and local
     mirrored velocity without evaluating wall pressure. boundaryRepresentation
     selects the geometric path; a supplied WallState reuses its geometry.
+    wallSupport supplies the host support already resolved during initialization.
 
     `approachOnly=False` lifts the approaching-neighbours clamp, turning the
     `inviscid=False` branch into the Monaghan & Gingold (1983) velocity
@@ -79,4 +80,5 @@ def computeVelocityDiffusion(currentState: Any, config: SimulationConfig, scheme
             from ..analyticBoundary.wallViscosity import wallNoSlipAcceleration
             return dvdt_diss + wallNoSlipAcceleration(currentState, config, schemeConfig, adjacency, wall, dvdt_diss)
         from ..analyticBoundary.viscosity import computeWallViscosity
-        return dvdt_diss + computeWallViscosity(currentState, config, schemeConfig, wall, approachOnly=approachOnly)
+        return dvdt_diss + computeWallViscosity(currentState, config, schemeConfig, wall,
+            approachOnly=approachOnly, support=wallSupport)

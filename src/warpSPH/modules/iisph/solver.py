@@ -27,7 +27,8 @@ class IISPHResult:
 
 def computeIISPHCoefficients(state, config, schemeConfig, adjacency, *, boundaryIntegrals=None, contactPoints=None):
     """Return rest volumes, density ratios, wall/total gradients, pressure
-    diagonal, contact adjacency and contact normalization as separate outputs.
+    diagonal, contact adjacency, contact normalization and a device-side
+    missing-support flag as separate outputs.
 
     Static kind-1 samples use rest volumes, as do the kind-0 fluid unknowns.
     Density is read from state after Dirichlet conditions are enforced.
@@ -55,19 +56,22 @@ def computeIISPHCoefficients(state, config, schemeConfig, adjacency, *, boundary
     # region Contact-pressure interpolation and diagonal contribution
     contactAdjacency = None
     contactDenominator = None
+    missingContactSupport = torch.zeros((), dtype=torch.bool, device=state.positions.device)
     if contactPoints is not None:
-        contactAdjacency, contactDenominator = computeIISPHContactWeights(
+        contactAdjacency, contactDenominator, missingContactSupport = computeIISPHContactWeights(
             state, config, contactPoints, wallGradient, restVolumes)
         contactDiagonal = computeIISPHContactPressureDiagonal(state, config, adjacency,
             restVolumes, wallGradient, gradientSum, contactPoints, contactDenominator)
         diagonal = diagonal + contactDiagonal
     # endregion
 
-    return restVolumes, densityRatio, wallGradient, gradientSum, diagonal, contactAdjacency, contactDenominator
+    return (restVolumes, densityRatio, wallGradient, gradientSum, diagonal,
+            contactAdjacency, contactDenominator, missingContactSupport)
 
 
 def solveIISPH(state, config, schemeConfig, acceleration, dt, adjacency, previousPressure=None, *,
-               contactPoints=None, gravity=None):
+               analyticProvider=None, boundarySupport=None,
+               contactPoints=None, contactCoverageFailure=None, contactGravity=True, gravity=None):
     """Assemble and solve IISPH at fixed geometry with physical-pressure carry.
 
     The signed statistic uses the new diagonal and old off-diagonal iterate,
@@ -82,15 +86,25 @@ def solveIISPH(state, config, schemeConfig, acceleration, dt, adjacency, previou
     policy = schemeConfig.iisph
     rho0 = schemeConfig.fluid.restDensity
     fluid = state.kinds == 0
-    policy.validate()
 
     # region Compute contributing pressure terms
-    boundaryIntegrals = computeIISPHBoundaryIntegrals(state, config, schemeConfig)
+    boundaryIntegrals = None
+    if analyticProvider is not None:
+        boundaryIntegrals = computeIISPHBoundaryIntegrals(state, analyticProvider, boundarySupport, config.kernel)
     (restVolumes, densityRatio, wallGradient, gradientSum, pressureDiagonal,
-     contactAdjacency, contactDenominator) = computeIISPHCoefficients(
+     contactAdjacency, contactDenominator, missingContactSupport) = computeIISPHCoefficients(
         state, config, schemeConfig, adjacency, boundaryIntegrals=boundaryIntegrals, contactPoints=contactPoints)
+    # One geometry diagnostic checkpoint, before entering the pressure iteration.
+    if contactPoints is not None:
+        coverage = torch.zeros_like(missingContactSupport) if contactCoverageFailure is None else contactCoverageFailure
+        uncovered, unsupported = torch.stack((coverage, missingContactSupport)).cpu().tolist()
+        if uncovered:
+            raise ValueError('IISPH contact geometry did not cover every fluid query')
+        if unsupported:
+            raise ValueError('IISPH contact pressure has no fluid support at a solid contact')
     boundaryAcceleration = computeIISPHBoundaryPressureAcceleration(state, config,
-        schemeConfig, adjacency, restVolumes, wallGradient, boundaryIntegrals, contactPoints, gravity)
+        adjacency, restVolumes, wallGradient, boundaryIntegrals, contactPoints, gravity,
+        contactGravity=contactGravity, massFactor=float(getattr(schemeConfig, 'analyticWallMass', 1.0)))
     # endregion
 
     # region Set up solver state
@@ -107,6 +121,7 @@ def solveIISPH(state, config, schemeConfig, acceleration, dt, adjacency, previou
     valid = fluid & (diagonal.abs() > 1.e-9)
     denominator = torch.where(valid, diagonal, 1)
     omega = policy.relaxationFactor
+    fluidCount = fluid.sum()
     # endregion
 
     # region Run the pressure solver
@@ -117,7 +132,7 @@ def solveIISPH(state, config, schemeConfig, acceleration, dt, adjacency, previou
             contactDenominator=contactDenominator) - diagonal * old
         new = torch.where(valid, ((1-omega)*old + omega*(b-off)/denominator).clamp_min(0), 0)
         errors = torch.where(new != 0, rho0*(diagonal*new + off-b), 0)
-        return new, errors[fluid].mean(), None
+        return new, errors.sum() / fluidCount, None
 
     schedule = CheckSchedule(SimpleNamespace(), 'iisph', 'every',
                              policy.minIterations-1, policy.maxIterations)

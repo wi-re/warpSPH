@@ -183,12 +183,13 @@ def _nativeIisphFixture(device, dim, contact, rho0=1000.0, wrappedWall=False):
     scheme = NS(fluid=NS(restDensity=rho0), iisph=IISPHConfig(), rigidBodies=[])
     state.densities = computeDensities(state, config, scheme, adj, wall=False)
     (restVolumes, densityRatio, wallGradient, gradientSum, diagonal,
-     contactAdjacency, contactDenominator) = computeIISPHCoefficients(state, config, scheme, adj, contactPoints=points)
+     contactAdjacency, contactDenominator, _) = computeIISPHCoefficients(state, config, scheme, adj, contactPoints=points)
     coefficients = NS(restVolumes=restVolumes, densityRatio=densityRatio, wallGradient=wallGradient,
         gradientSum=gradientSum, diagonal=diagonal, contactAdjacency=contactAdjacency,
         contactDenominator=contactDenominator)
     boundaryAcceleration = computeIISPHBoundaryPressureAcceleration(
-        state, config, scheme, adj, restVolumes, wallGradient, None, points, g)
+        state, config, adj, restVolumes, wallGradient, None, points, g,
+        contactGravity=scheme.iisph.contactGravity)
     return NS(state=state, config=config, scheme=scheme, coefficients=coefficients,
               boundaryAcceleration=boundaryAcceleration, adjacency=adj, contactPoints=points, gravity=g)
 
@@ -215,7 +216,8 @@ def test_iisphDirichletDensityReachesPressureSolve(monkeypatch):
 
     scheme.boundaryConditions = [BoundaryCondition(BoundaryConditionType.constant, sdf,
         dirichletFunctions={'densities': densityBC})]
-    system = NS(state=state, adjacency=None, t=0.)
+    system = NS(state=state, adjacency=None, t=0., boundarySupport=.8,
+                analyticBoundaryProvider=None, contactBoundaryProvider=None)
     state.densities = torch.zeros_like(state.masses)
     state.pressures = None
     expected = sampledDensity.clone()
@@ -272,7 +274,7 @@ def test_iisphInitializationCalibratesMassesOnceAndLeavesOrdinaryKernels(monkeyp
     from warpSPH.caseUtils.projection import initializeProjectionDensity
     from warpSPH.enumTypes import IncompressibleSPHScheme
     from warpSPH.configurations import IISPHConfig
-    from warpSPH.modules.iisph import computeIISPHBoundaryIntegrals, computeIISPHCoefficients
+    from warpSPH.modules.iisph import computeIISPHCoefficients
 
     dtype, rho0, dx = get_torch_precision(), 1000., .125
     axis = dx * torch.arange(-4, 5, dtype=dtype)
@@ -307,10 +309,115 @@ def test_iisphInitializationCalibratesMassesOnceAndLeavesOrdinaryKernels(monkeyp
     from importlib import import_module
     monkeypatch.setattr(import_module('warpSPHCore.util.latticeDensity'), 'latticeDensityFactor', unexpected)
     initializeProjectionDensity(ctx, system)
-    integrals = computeIISPHBoundaryIntegrals(state, config, scheme)
+    integrals = None
     computeIISPHCoefficients(state, config, scheme, system.adjacency, boundaryIntegrals=integrals)
     assert torch.equal(state.masses, calibratedMasses)
     assert scheme.analyticWallMass == factor
+
+
+@pytest.mark.parametrize('representation,providerPresent,sampled', [
+    ('auto', False, True), ('auto', True, False), ('particles', True, True),
+])
+def test_iisphBoundarySetupResolvesProvidersAndHostSupport(representation, providerPresent, sampled):
+    from warpSPH.modules.iisph import initializeIISPHBoundaries, computeIISPHBoundaryIntegrals
+    from warpSPH.systems.incompressible import IISPHSystem
+
+    fixture = _nativeIisphFixture('cpu', 2, False)
+    state, scheme = fixture.state, fixture.scheme
+    if not sampled:
+        state.kinds.zero_()
+    aggregate = object()
+    calls = []
+
+    def evaluate(current, support, kernel, *, lean):
+        calls.append((current, support, kernel, lean))
+        return aggregate
+
+    provider = NS(rigidBodies=[], aggregate=evaluate) if providerPresent else None
+    scheme.boundaryProvider = provider
+    scheme.iisph.boundaryRepresentation = representation
+    scheme.iisph.boundaryPressure = 'contactShepard' if providerPresent else 'self'
+    support, analytic, contact = initializeIISPHBoundaries(state, scheme)
+    assert isinstance(support, float) and support == float(state.supports[0])
+    assert scheme.iisph.boundaryRepresentation == ('analytic' if representation == 'auto' and providerPresent else 'particles')
+    assert analytic is (provider if scheme.iisph.boundaryRepresentation == 'analytic' else None)
+    assert contact is provider
+    if analytic is not None:
+        assert computeIISPHBoundaryIntegrals(state, analytic, support, fixture.config.kernel) is aggregate
+        assert calls == [(state, support, fixture.config.kernel, True)]
+    system = IISPHSystem(state=state, boundarySupport=support,
+        analyticBoundaryProvider=analytic, contactBoundaryProvider=contact)
+    # Stage creation must carry setup metadata without inspecting particle data.
+    from warpSPH.systems.incompressible import IncompressibleState
+    kinds = state.kinds
+    system.state = IncompressibleState(**vars(state), materials=torch.zeros_like(kinds),
+        UIDs=torch.arange(len(kinds), dtype=torch.int32), UIDcounter=len(kinds))
+    stage = system.initializeNewState()
+    assert stage.boundarySupport == support
+    assert stage.analyticBoundaryProvider is analytic and stage.contactBoundaryProvider is contact
+
+
+@pytest.mark.parametrize('covered,supported,message', [
+    (False, True, 'did not cover'), (True, False, 'no fluid support'), (False, False, 'did not cover'),
+])
+def test_iisphGeometryFailuresShareOneCheckpoint(monkeypatch, covered, supported, message):
+    from importlib import import_module
+    from warpSPH.modules.iisph import computeIISPHContactPoints, solveIISPH, solver
+    weightsModule = import_module('warpSPH.modules.iisph.contactWeights')
+    fixture = _nativeIisphFixture('cpu', 2, True)
+    state = fixture.state
+
+    def distance(positions):
+        hit = torch.ones_like(state.kinds, dtype=torch.bool)
+        hit[0] = covered
+        normal = torch.zeros_like(positions)
+        normal[:, 1] = 1
+        return positions[:, 1], normal, hit
+
+    points, coverage = computeIISPHContactPoints(state, NS(signed_distance=distance))
+    if not supported:
+        monkeypatch.setattr(weightsModule, 'warpOperation', lambda *a, **kw: torch.zeros_like(state.masses))
+
+    def unexpected(*args, **kwargs):
+        pytest.fail('Invalid geometry must be reported before pressure iteration')
+
+    monkeypatch.setattr(solver, 'runStationary', unexpected)
+    reads = []
+    tensorCpu = torch.Tensor.cpu
+
+    def read(tensor, *args, **kwargs):
+        if tensor.dtype == torch.bool and tensor.shape == (2,):
+            reads.append(tensor.clone())
+        return tensorCpu(tensor, *args, **kwargs)
+
+    monkeypatch.setattr(torch.Tensor, 'cpu', read)
+    with pytest.raises(ValueError, match=message):
+        solveIISPH(state, fixture.config, fixture.scheme, torch.zeros_like(state.velocities),
+            .001, fixture.adjacency, contactPoints=points, contactCoverageFailure=coverage)
+    assert len(reads) == 1
+    assert reads[0].tolist() == [not covered, not supported]
+
+
+@pytest.mark.parametrize('device', ['cpu', pytest.param('cuda', marks=pytest.mark.skipif(
+    not torch.cuda.is_available(), reason='CUDA'))])
+def test_iisphIterationDoesNotReadScalarValuesOrCompactMasks(monkeypatch, device):
+    from warpSPH.modules.iisph import solveIISPH, solver
+    fixture = _nativeIisphFixture(device, 2, False)
+    fixture.scheme.iisph.minIterations = fixture.scheme.iisph.maxIterations = 6
+    driver = solver.runStationary
+
+    def inspect(step, initial, **kwargs):
+        step(initial, 0)  # Compile operators before profiling the iteration itself.
+        with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU]) as trace:
+            step(initial, 0)
+        operations = {event.key for event in trace.key_averages()}
+        assert not operations.intersection({'aten::nonzero', 'aten::item', 'aten::_local_scalar_dense'})
+        return driver(step, initial, **kwargs)
+
+    monkeypatch.setattr(solver, 'runStationary', inspect)
+    result = solveIISPH(fixture.state, fixture.config, fixture.scheme,
+        torch.zeros_like(fixture.state.velocities), .001, fixture.adjacency)
+    assert result.iterations == 6
 
 
 def _denseIisphKernels(state, config, points=None):
@@ -435,7 +542,7 @@ def test_nativeIisphOperatorGradients(device):
         current = NS(**{**vars(state), 'positions': positions, 'supports': supports,
                         'masses': masses, 'densities': densities})
         (restVolumes, densityRatio, wallGradient, gradientSum, diagonal,
-         contactAdjacency, contactDenominator) = computeIISPHCoefficients(
+         contactAdjacency, contactDenominator, _) = computeIISPHCoefficients(
             current, fixture.config, fixture.scheme, fixture.adjacency, contactPoints=points)
         return (
             wallGradient, gradientSum, diagonal, contactDenominator,
@@ -443,8 +550,9 @@ def test_nativeIisphOperatorGradients(device):
                 restVolumes, densityRatio, gradientSum, wallGradient,
                 contactPoints=points, contactAdjacency=contactAdjacency, contactDenominator=contactDenominator),
             computeIISPHDensityRate(current, fixture.config, fixture.adjacency, field, restVolumes, wallGradient),
-            computeIISPHBoundaryPressureAcceleration(current, fixture.config, fixture.scheme,
-                fixture.adjacency, restVolumes, wallGradient, None, points, gravity),
+            computeIISPHBoundaryPressureAcceleration(current, fixture.config,
+                fixture.adjacency, restVolumes, wallGradient, None, points, gravity,
+                contactGravity=fixture.scheme.iisph.contactGravity),
         )
 
     # CUDA adjoints accumulate neighbor contributions with floating-point atomics.
@@ -530,13 +638,15 @@ def test_iisphAnalyticGravityExtensionMatchesSolidQuadrature():
             expected -= .8*volumes[body, sample]*q[:, None]*gradients[body, :, sample]
     expected[state.kinds != 0] = 0
     actual = computeIISPHBoundaryPressureAcceleration(
-        state, None, scheme, None, None, wallGradient, integrals, points, gravity)
+        state, None, None, None, wallGradient, integrals, points, gravity,
+        contactGravity=scheme.iisph.contactGravity, massFactor=scheme.analyticWallMass)
     torch.testing.assert_close(actual, expected)
     # Gravity-off contact pressure needs no first moment at all.
     scheme.iisph.contactGravity = False
     del integrals.out['Cov']
     actual = computeIISPHBoundaryPressureAcceleration(
-        state, None, scheme, None, None, wallGradient, integrals, points, gravity)
+        state, None, None, None, wallGradient, integrals, points, gravity,
+        contactGravity=scheme.iisph.contactGravity, massFactor=scheme.analyticWallMass)
     torch.testing.assert_close(actual, torch.zeros_like(x))
 
 
@@ -622,7 +732,7 @@ def test_iisphRhsAndIntegratorOwnSeparateUpdates(monkeypatch, override):
         UIDs=torch.arange(len(kinds), dtype=torch.int32), UIDcounter=len(kinds), pressures=None)
     fluid = kinds == 0
     state.velocities[fluid] = .2
-    system = IISPHSystem(state=state, domain=fixture.config.domain, t=.5)
+    system = IISPHSystem(state=state, domain=fixture.config.domain, t=.5, boundarySupport=.8)
     config, scheme = fixture.config, fixture.scheme
     config.verletScale = 1.
     scheme.rigidBodies, scheme.boundaryConditions = [], []

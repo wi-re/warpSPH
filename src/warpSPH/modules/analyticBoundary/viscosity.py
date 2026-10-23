@@ -19,7 +19,7 @@ def mirrorViscousAcceleration(velocity, wallVelocity, normal, laplacian, *,
     return (-2 * viscosity * wallVolume * laplacian / density)[:, None] * relative
 
 
-def computeWallViscosity(state, config, schemeConfig, wall=None, *, perBody=False, approachOnly=None):
+def computeWallViscosity(state, config, schemeConfig, wall=None, *, perBody=False, approachOnly=None, support=None):
     """Integrate the mirrored wall velocity without evaluating wall pressure.
 
     Free slip preserves tangential relative velocity and reverses its normal
@@ -32,7 +32,8 @@ def computeWallViscosity(state, config, schemeConfig, wall=None, *, perBody=Fals
     velocity = state.velocities.double()
     if wall is None:
         bindBodies(provider, bodies)
-        support = float(state.supports.max())
+        if support is None:
+            support = float(state.supports.max())
         integrals = provider.aggregate(state, support, config.kernel, laplacian=True)
         kinematics = provider.scene.kinematics(state.positions.double())
         packing = float(getattr(schemeConfig, 'analyticWallMass', 1.0))

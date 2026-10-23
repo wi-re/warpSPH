@@ -19,7 +19,5 @@ def computeIISPHContactWeights(state, config, points, wallGradient, restVolumes)
         referenceValues=torch.ones_like(restVolumes))
     active = (state.kinds == 0) & (wallGradient.square().sum(-1) > 1.e-24)
     denominator = torch.where(active, denominator, 0)
-    missing = (state.kinds == 0) & (wallGradient.square().sum(-1) > 1.e-24) & (denominator <= 0)
-    if bool(missing.any()):
-        raise ValueError("IISPH contact pressure has no fluid support at a solid contact")
-    return adjacency, denominator
+    missing = active & (denominator <= 0)
+    return adjacency, denominator, missing.any()

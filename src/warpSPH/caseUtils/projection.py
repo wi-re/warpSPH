@@ -48,9 +48,12 @@ def initializeProjectionDensity(ctx, system):
             config.calibrateNormalization = False
             ctx.scratch['initialMassCalibration'] = dict(factor=factor,
                 kernel=config.kernel.name, n_h=float(config.n_h), dimension=state.positions.shape[1])
+        from ..modules.iisph import initializeIISPHBoundaries
+        (system.boundarySupport, system.analyticBoundaryProvider,
+         system.contactBoundaryProvider) = initializeIISPHBoundaries(state, schemeConfig)
         state.densities = computeDensities(state, config, schemeConfig, system.adjacency,
             boundaryRepresentation=schemeConfig.iisph.boundaryRepresentation,
-            wallMassDensity=schemeConfig.fluid.restDensity)
+            wallMassDensity=schemeConfig.fluid.restDensity, wallSupport=system.boundarySupport)
     else:
         state.densities = computeDensities(state, ctx.config, ctx.schemeConfig, None)
     rho = state.densities[state.kinds == 0] / ctx.schemeConfig.fluid.restDensity

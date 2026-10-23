@@ -1,19 +1,15 @@
 """Closest surface contacts used by the IISPH wall pressure law."""
 
 
-def computeIISPHContactPoints(state, schemeConfig):
-    """Return closest wall points, or None when contact pressure is disabled."""
-    policy = schemeConfig.iisph
-    provider = getattr(schemeConfig, 'boundaryProvider', None)
-    analytic = policy.boundaryRepresentation == 'analytic' or (
-        policy.boundaryRepresentation == 'auto' and provider is not None)
-    if policy.boundaryPressure != 'contactShepard' or not (
-            analytic or bool((state.kinds == 1).any())):
-        return None
+import torch
+
+
+def computeIISPHContactPoints(state, provider):
+    """Return closest contacts and a device-side coverage-failure flag."""
     if provider is None:
-        raise ValueError("Contact Shepard IISPH needs the solid contour in boundaryProvider; "
-                         "for sampled walls select boundaryRepresentation='particles'")
+        return None, torch.zeros((), dtype=torch.bool, device=state.positions.device)
     distance, normal, hit = provider.signed_distance(state.positions)
-    if not bool(hit[state.kinds == 0].all()):
-        raise ValueError("IISPH contact geometry did not cover every fluid query")
-    return state.positions - distance[:, None] * normal.to(state.positions)
+    points = state.positions - distance[:, None] * normal.to(state.positions)
+    # Keep uncovered queries finite until the batched diagnostic checkpoint.
+    points = torch.where(hit[:, None], points, state.positions)
+    return points, ((state.kinds == 0) & ~hit).any()

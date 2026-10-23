@@ -14,11 +14,16 @@ conditions. It does not advance positions or velocities.
 
 `modules/iisph` exposes ordinary functions:
 
-- `computeIISPHBoundaryIntegrals(state, config, schemeConfig)` returns the
-  analytic provider's raw per-body geometry, or `None` for sampled walls.
-  The pressure solver calls this internally.
-- `computeIISPHContactPoints(state, schemeConfig)` returns closest surface
-  points when contact pressure is selected, independently of the integrals.
+- `initializeIISPHBoundaries(state, schemeConfig)` validates the static boundary
+  setup and resolves `auto`. It returns a host support value and the selected
+  analytic/contact providers. Projection initialization stores these explicit
+  inputs on `IISPHSystem`; stage creation carries them forward.
+- `computeIISPHBoundaryIntegrals(state, provider, support, kernel)` evaluates the
+  supplied analytic provider's raw per-body geometry. It performs no policy
+  selection, validation or device-scalar conversion. The pressure solver calls
+  it internally when an analytic provider is supplied.
+- `computeIISPHContactPoints(state, provider)` returns closest surface points
+  and a device-side coverage-failure flag, independently of the integrals.
 - `computeIISPHWallGradient` returns the solid gradient contribution from
   sampled rest volumes or scaled analytic integrals.
 - `computeIISPHGradientSum` adds fluid gradient contributions to the supplied
@@ -31,14 +36,16 @@ conditions. It does not advance positions or velocities.
   contributions. Each term is computed separately with explicit inputs and a
   returned tensor; the assembly function launches no kernels itself. It returns
   rest volumes, density ratios, wall/total gradients, the diagonal, contact
-  adjacency and contact normalization as seven separate outputs.
+  adjacency, contact normalization and a missing-contact-support flag as eight
+  separate outputs.
 - `computeIISPHDensityRate(state, config, adjacency, field, restVolumes, wallGradient)` applies continuity.
 - `computeIISPHPressureAcceleration` takes the pressure, rest volumes, density
   ratios, total gradient, wall gradient and optional contact data explicitly. It
   applies the linear pressure force; `computeIISPHPressureOperator` composes
   force and continuity.
 - `solveIISPH(state, config, schemeConfig, acceleration, dt, adjacency,
-  previousPressure=None, contactPoints=None, gravity=None)`
+  previousPressure=None, analyticProvider=None, boundarySupport=None,
+  contactPoints=None, contactCoverageFailure=None, contactGravity=True, gravity=None)`
   evaluates boundary integrals and assembles pressure coefficients,
   contact-pressure weights, exact Jacobi diagonal, and known gravity
   extrapolation inside the solve. It returns an
@@ -49,7 +56,8 @@ conditions. It does not advance positions or velocities.
   acceleration. The provider's `Cov` is the first spatial moment of the kernel
   gradient, `integral_solid (x_solid-x_i) tensor grad_i W dV`.
 - The scheme calls `modules.deltaSPH.computeVelocityDiffusion` directly,
-  passing the selected boundary representation and the physical particle fields.
+  passing the resolved boundary representation, host support and physical
+  particle fields. Shared density receives that host support as well.
 
 Pressure terms are local tensors and Core adjacency lists, unpacked directly
 by the solver. Operators receive only the terms they use; no coefficient or
@@ -178,6 +186,17 @@ Already calibrated inputs keep `config.calibrateNormalization=False` before
 initialization. The first density report uses the shared density function.
 The returned timestep density is the summation at the solve's pre-drift
 positions, as in the IISPH recurrence.
+
+Boundary representation, static-body compatibility and common support are
+validated after initial conditions, outside timestep evaluation. The resolved
+representation is written back to `iisph.boundaryRepresentation`. Reinitialization
+is required if the boundary setup or fixed support changes. Geometry coverage
+and interpolation support remain dynamic: their device flags are read together
+at one diagnostic checkpoint before pressure iteration, preserving both errors.
+The iteration computes its signed mean as `errors.sum() / fluidCount`, with
+`fluidCount` reduced once on the device. No boolean compaction or scalar read
+occurs inside the IISPH update itself. Core's existing per-iteration convergence
+check and final history transfer are unchanged.
 
 `IISPHResult` exposes pressure, acceleration, iterations, error, termination
 and the corrected source. Scheme results are available on the last stage

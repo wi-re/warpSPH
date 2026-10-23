@@ -33,7 +33,7 @@ def iisph_step(
     with record_function('[warpSPH] - [IISPH - 02] density'):
         currentState.densities = computeDensities(currentState, config, schemeConfig, adjacency,
             boundaryRepresentation=schemeConfig.iisph.boundaryRepresentation,
-            wallMassDensity=schemeConfig.fluid.restDensity)
+            wallMassDensity=schemeConfig.fluid.restDensity, wallSupport=system.boundarySupport)
 
     with record_function('[warpSPH] - [IISPH - 03] Dirichlet boundary conditions'):
         enforceDirichlet(system, system.t, dt, config, schemeConfig)
@@ -43,11 +43,11 @@ def iisph_step(
         acceleration = gravity + computeBodyForce(currentState, schemeConfig)
 
     with record_function('[warpSPH] - [IISPH - 05] boundary contact points'):
-        contactPoints = computeIISPHContactPoints(currentState, schemeConfig)
+        contactPoints, contactCoverageFailure = computeIISPHContactPoints(currentState, system.contactBoundaryProvider)
 
     with record_function('[warpSPH] - [IISPH - 06] viscosity'):
         acceleration = acceleration + computeVelocityDiffusion(currentState, config, schemeConfig, adjacency,
-            boundaryRepresentation=schemeConfig.iisph.boundaryRepresentation)
+            boundaryRepresentation=schemeConfig.iisph.boundaryRepresentation, wallSupport=system.boundarySupport)
 
     with record_function('[warpSPH] - [IISPH - 07] forcing'):
         forcing = computeForcing(system, dt, system.t, config, schemeConfig)
@@ -56,7 +56,9 @@ def iisph_step(
     with record_function('[warpSPH] - [IISPH - 08] pressure projection'):
         result = solveIISPH(currentState, config, schemeConfig, acceleration, dt,
                             adjacency, previousPressure=currentState.pressures,
-                            contactPoints=contactPoints, gravity=gravity)
+                            analyticProvider=system.analyticBoundaryProvider, boundarySupport=system.boundarySupport,
+                            contactPoints=contactPoints, contactCoverageFailure=contactCoverageFailure,
+                            contactGravity=schemeConfig.iisph.contactGravity, gravity=gravity)
 
     with record_function('[warpSPH] - [IISPH - 09] update'):
         currentState.pressures = result.pressure

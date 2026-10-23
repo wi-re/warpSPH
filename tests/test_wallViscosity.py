@@ -172,6 +172,16 @@ def test_freeSlipViscosityReflectsNormalVelocityAndPreservesTangential(represent
     normal = computeVelocityDiffusion(state, config, scheme, adjacency, boundaryRepresentation=representation)
     assert float(normal[fluid, 1].min()) < -.001
     if representation == 'analytic':
+        cachedSupport = computeVelocityDiffusion(state, config, scheme, adjacency,
+            boundaryRepresentation=representation, wallSupport=float(state.supports[0]))
+        torch.testing.assert_close(cachedSupport, normal, rtol=0, atol=0)
+        from warpSPH.modules.density import computeDensities
+        density = computeDensities(state, config, scheme, adjacency,
+            boundaryRepresentation=representation, wallMassDensity=scheme.fluid.restDensity)
+        cachedDensity = computeDensities(state, config, scheme, adjacency,
+            boundaryRepresentation=representation, wallMassDensity=scheme.fluid.restDensity,
+            wallSupport=float(state.supports[0]))
+        torch.testing.assert_close(cachedDensity, density, rtol=0, atol=0)
         reused = computeVelocityDiffusion(state, config, scheme, adjacency, wall=wall)
         torch.testing.assert_close(reused[fluid], normal[fluid], rtol=0, atol=0)
     # This is the distinction from simply omitting the walls.
