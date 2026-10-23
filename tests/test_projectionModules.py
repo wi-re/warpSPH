@@ -186,7 +186,7 @@ def _nativeIisphFixture(device, dim, contact, rho0=1000.0, wrappedWall=False):
     boundaryAcceleration = computeIISPHBoundaryPressureAcceleration(
         state, config, scheme, coefficients, None, points, g)
     return NS(state=state, config=config, scheme=scheme, coefficients=coefficients,
-              boundaryAcceleration=boundaryAcceleration)
+              boundaryAcceleration=boundaryAcceleration, adjacency=adj, contactPoints=points, gravity=g)
 
 
 def test_iisphDirichletDensityReachesPressureSolve(monkeypatch):
@@ -223,7 +223,10 @@ def test_iisphDirichletDensityReachesPressureSolve(monkeypatch):
     class ReachedPressureSolve(Exception):
         pass
 
-    def pressure(currentState, config, schemeConfig, velocity, dt, coefficients, **kwargs):
+    def pressure(currentState, config, schemeConfig, velocity, dt, adjacency, **kwargs):
+        from warpSPH.modules.iisph import computeIISPHCoefficients
+        coefficients = computeIISPHCoefficients(currentState, config, schemeConfig, adjacency,
+            boundaryIntegrals=kwargs['boundaryIntegrals'], contactPoints=kwargs['contactPoints'])
         torch.testing.assert_close(currentState.densities, expected)
         torch.testing.assert_close(coefficients.densityRatio, expected / scheme.fluid.restDensity)
         raise ReachedPressureSolve
@@ -356,8 +359,8 @@ def test_nativeIisphForceContinuityAndExactDiagonal(device, dim, contact):
     previous = q*rho0
     dt = .01
     fixture.scheme.iisph = policy
-    actual = solveIISPH(state, fixture.config, fixture.scheme, v, dt, coefficients, previous,
-                        boundaryAcceleration=fixture.boundaryAcceleration)
+    actual = solveIISPH(state, fixture.config, fixture.scheme, v, dt, fixture.adjacency, previous,
+                        contactPoints=fixture.contactPoints, gravity=fixture.gravity)
     b = 1-coefficients.densityRatio-dt*(C@v.flatten())-dt**2*(C@fixture.boundaryAcceleration.flatten())
     A = dt**2*C@F
     diagonal = A.diagonal()
@@ -386,15 +389,15 @@ def test_nativeIisphDensityUnitsAndDeviceParity():
     from warpSPH.modules.iisph import solveIISPH
     a.scheme.iisph = b.scheme.iisph = policy
     outputs = [solveIISPH(op.state, op.config, op.scheme, op.state.velocities, .001,
-                          op.coefficients, boundaryAcceleration=op.boundaryAcceleration) for op in (a, b)]
+                          op.adjacency, contactPoints=op.contactPoints, gravity=op.gravity) for op in (a, b)]
     assert float(outputs[1].pressure.max()) > 0
     torch.testing.assert_close(outputs[0].pressure, outputs[1].pressure/1000)
     torch.testing.assert_close(outputs[0].acceleration, outputs[1].acceleration)
     if torch.cuda.is_available():
         gpu = _nativeIisphFixture('cuda', 2, True)
         gpu.scheme.iisph = policy
-        result = solveIISPH(gpu.state, gpu.config, gpu.scheme, gpu.state.velocities, .001, gpu.coefficients,
-                            boundaryAcceleration=gpu.boundaryAcceleration)
+        result = solveIISPH(gpu.state, gpu.config, gpu.scheme, gpu.state.velocities, .001, gpu.adjacency,
+                            contactPoints=gpu.contactPoints, gravity=gpu.gravity)
         torch.testing.assert_close(result.pressure.cpu(), outputs[1].pressure, rtol=2e-5, atol=.005)
         torch.testing.assert_close(result.acceleration.cpu(), outputs[1].acceleration, rtol=2e-5, atol=2e-5)
         assert result.iterations == outputs[1].iterations
@@ -483,14 +486,14 @@ def test_iisphPoliciesAndPressureCarryDoNotLeakBetweenSolves():
     carry = previous.clone()
     first.scheme.iisph, other.scheme.iisph = short, longer
     before = solveIISPH(first.state, first.config, first.scheme, first.state.velocities,
-                        .001, first.coefficients, previous,
-                        boundaryAcceleration=first.boundaryAcceleration)
+                        .001, first.adjacency, previous,
+                        contactPoints=first.contactPoints, gravity=first.gravity)
     between = solveIISPH(other.state, other.config, other.scheme, other.state.velocities,
-                         .001, other.coefficients, previous,
-                         boundaryAcceleration=other.boundaryAcceleration)
+                         .001, other.adjacency, previous,
+                         contactPoints=other.contactPoints, gravity=other.gravity)
     after = solveIISPH(first.state, first.config, first.scheme, first.state.velocities,
-                       .001, first.coefficients, previous,
-                        boundaryAcceleration=first.boundaryAcceleration)
+                       .001, first.adjacency, previous,
+                        contactPoints=first.contactPoints, gravity=first.gravity)
     assert (before.iterations, between.iterations, after.iterations) == (2, 6, 2)
     assert (asdict(short), asdict(longer)) == original
     assert torch.equal(previous, carry)
@@ -507,7 +510,8 @@ def test_iisphProjectionRejectsNonfiniteResultsBeforeStateAdvance(monkeypatch):
     before = state.positions.clone(), state.velocities.clone()
     monkeypatch.setattr(solver, 'runStationary', lambda *a, **kw: NS(termination='nonfinite'))
     with pytest.raises(FloatingPointError, match='Nonfinite IISPH'):
-        solveIISPH(state, fixture.config, fixture.scheme, state.velocities, .01, fixture.coefficients)
+        solveIISPH(state, fixture.config, fixture.scheme, state.velocities, .01, fixture.adjacency,
+                   contactPoints=fixture.contactPoints, gravity=fixture.gravity)
     assert torch.equal(state.positions, before[0])
     assert torch.equal(state.velocities, before[1])
 

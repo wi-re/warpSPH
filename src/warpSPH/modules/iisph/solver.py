@@ -11,6 +11,7 @@ from .operators import (IISPHKernelData, computeIISPHKernelGeometry, launchIISPH
     pairArguments, geometryParameters, computeIISPHDensityRate, computeIISPHPressureOperator,
     computeIISPHPressureAcceleration)
 from .contactWeights import IISPHContactWeights, computeIISPHContactWeights
+from .boundaryPressureAcceleration import computeIISPHBoundaryPressureAcceleration
 
 
 @dataclass
@@ -87,13 +88,15 @@ def computeIISPHCoefficients(state, config, schemeConfig, adjacency, *, boundary
     return IISPHCoefficients(pairs, volume, densityRatio, G, c, diagonal, contact)
 
 
-def solveIISPH(state, config, schemeConfig, velocity, dt, coefficients, previousPressure=None, *, boundaryAcceleration=None):
-    """Solve pressure from explicit coefficients and physical-pressure carry.
+def solveIISPH(state, config, schemeConfig, velocity, dt, adjacency, previousPressure=None, *,
+               boundaryIntegrals=None, contactPoints=None, gravity=None):
+    """Assemble and solve IISPH at fixed geometry with physical-pressure carry.
 
     The signed statistic uses the new diagonal and old off-diagonal iterate,
     averaged over all fluid rows. Tolerance is a percentage of rest density.
-    boundaryAcceleration is the known pressure extrapolation at the wall,
-    included in both the source and final pressure acceleration.
+    Pressure coefficients, contact interpolation and gravity extrapolation
+    are local to this solve. The known wall acceleration contributes to
+    both the source and the final pressure acceleration.
     No input field is modified; the caller applies the returned acceleration.
     """
     policy = schemeConfig.iisph
@@ -106,8 +109,10 @@ def solveIISPH(state, config, schemeConfig, velocity, dt, coefficients, previous
         previousPressure = torch.zeros_like(state.masses)
     if velocity.requires_grad or previousPressure.requires_grad:
         raise NotImplementedError("IISPH has no autograd contract")
-    if boundaryAcceleration is None:
-        boundaryAcceleration = torch.zeros_like(state.positions)
+    coefficients = computeIISPHCoefficients(state, config, schemeConfig, adjacency,
+        boundaryIntegrals=boundaryIntegrals, contactPoints=contactPoints)
+    boundaryAcceleration = computeIISPHBoundaryPressureAcceleration(state, config,
+        schemeConfig, coefficients, boundaryIntegrals, contactPoints, gravity)
     dt2 = dt * dt
     b = (1 - coefficients.densityRatio - dt * computeIISPHDensityRate(state, velocity, coefficients)
          - dt2 * computeIISPHDensityRate(state, boundaryAcceleration, coefficients))

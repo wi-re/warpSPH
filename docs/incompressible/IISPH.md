@@ -9,8 +9,7 @@ retains its composed DFSPH formulation.
 
 `schemes/incompressible/iisph.py` follows the numbered module-call layout
 of delta-SPH: Core adjacency, density, Dirichlet conditions, forces,
-pressure boundary geometry and coefficients, wall pressure extrapolation,
-pressure solve, Integrators kick/drift, and update.
+boundary geometry, pressure solve, Integrators kick/drift, and update.
 The scheme orders those calls and assigns their results to the current state.
 
 `modules/iisph` exposes ordinary functions:
@@ -19,24 +18,18 @@ The scheme orders those calls and assigns their results to the current state.
   analytic provider's raw per-body geometry, or `None` for sampled walls.
 - `computeIISPHContactPoints(state, schemeConfig)` returns closest surface
   points when contact pressure is selected, independently of the integrals.
-- `computeIISPHCoefficients(state, config, schemeConfig, adjacency,
-  boundaryIntegrals=..., contactPoints=...)` consumes the density already
-  stored in the state and builds the linear pressure operator and diagonal.
-- `computeIISPHBoundaryPressureAcceleration(state, config, schemeConfig,
-  coefficients, boundaryIntegrals, contactPoints, gravity)` evaluates the
-  known hydrostatic extension separately from the linear pressure operator.
-  It applies the calibrated wall mass factor at the physical equation. The
-  provider's `Cov` is the first spatial moment of the kernel gradient,
-  `integral_solid (x_solid-x_i) tensor grad_i W dV`, not a statistical covariance.
 - `computeIISPHDensityRate(state, field, coefficients)` applies continuity.
 - `computeIISPHPressureAcceleration(state, normalizedPressure, coefficients)`
   applies the linear pressure force; `computeIISPHPressureOperator` composes
   force and continuity.
-- `solveIISPH(state, config, schemeConfig, velocity, dt, coefficients,
-  previousPressure=None, boundaryAcceleration=None)` returns an `IISPHResult` without modifying inputs.
-  Omit previous pressure for a cold start. The known boundary acceleration
-  enters both the pressure source and the final acceleration through the
-  explicit `boundaryAcceleration` argument.
+- `solveIISPH(state, config, schemeConfig, velocity, dt, adjacency,
+  previousPressure=None, boundaryIntegrals=None, contactPoints=None, gravity=None)`
+  assembles the pressure coefficients, contact-pressure weights, exact Jacobi
+  diagonal, and known gravity extrapolation inside the solve. It returns an
+  `IISPHResult` without modifying input fields. Omit previous pressure for a
+  cold start. The gravity extension enters both the source and final pressure
+  acceleration. The provider's `Cov` is the first spatial moment of the kernel
+  gradient, `integral_solid (x_solid-x_i) tensor grad_i W dV`.
 - `computeIISPHViscosity(state, config, schemeConfig, adjacency)` evaluates
   the configured fluid viscosity.
 
