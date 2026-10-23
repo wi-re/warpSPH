@@ -27,16 +27,19 @@ from .wp_densityDelta import computeDensityDiffusionDeltaSPH
 
 __all__ = ['computeVelocityDiffusion']
 
-def computeVelocityDiffusion(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], approachOnly: bool = True, wall: Optional[Any] = None, operationMode: OperationDirection = OperationDirection.AllToAll) -> torch.Tensor:
+def computeVelocityDiffusion(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], approachOnly: Optional[bool] = None, wall: Optional[Any] = None, operationMode: OperationDirection = OperationDirection.AllToAll) -> torch.Tensor:
     """`wall`: the analytic boundary's `WallState` (`modules/analyticBoundary`) adds the wall's share of the diffusion (exact wall Laplacian with the same prefactor
     as the pair term); `None`: resolved from `schemeConfig.boundaryProvider` (`resolveWall`), no wall term for boundary particles.
 
     `approachOnly=False` lifts the approaching-neighbours clamp, turning the
     `inviscid=False` branch into the Monaghan & Gingold (1983) velocity
     Laplacian proper -- see `wp_viscosityDelta.py`'s docstring.
-    `operationMode=FluidToFluid, wall=False` excludes wall drag for free slip;
-    the default retains the existing all-particle and analytic contributions."""
+    An omitted approachOnly uses diffusionParams.approachOnly. Excluding
+    boundary interactions removes their viscosity contribution entirely;
+    it does not impose a reflected free-slip velocity field."""
     with record_function("[warpSPH] - (deltaSPH) - computeVelocityDiffusion"):
+        if approachOnly is None:
+            approachOnly = schemeConfig.diffusionParams.approachOnly
         dvdt_diss = computeVelocityDiffusionDeltaSPH(
             currentState,
             operationProperties = OperationProperties(

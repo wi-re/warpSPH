@@ -78,3 +78,16 @@ def test_viscousTermDefaultsToTheProjectedForm():
     old = wcDiffusionParamsToDict(buildDefaultDiffusionParamsWeaklyCompressibleSPH())
     old.pop('viscousTerm')
     assert dictToWCDiffusionParams(old).viscousTerm == ViscosityTerm.monaghanGingold
+
+
+@pytest.mark.parametrize('approachOnly', [False, True])
+def test_approachOnlyRoundTripsAsADiffusionParameter(approachOnly):
+    from warpSPH.configurations.moduleConfigurations.weaklyCompressibleDiffusionParams import (
+        buildDefaultDiffusionParamsWeaklyCompressibleSPH, dictToWCDiffusionParams, wcDiffusionParamsToDict)
+    params = buildDefaultDiffusionParamsWeaklyCompressibleSPH()
+    assert not params.approachOnly
+    params.approachOnly = approachOnly
+    encoded = wcDiffusionParamsToDict(params)
+    assert dictToWCDiffusionParams(encoded).approachOnly == approachOnly
+    del encoded['approachOnly']
+    assert not dictToWCDiffusionParams(encoded).approachOnly

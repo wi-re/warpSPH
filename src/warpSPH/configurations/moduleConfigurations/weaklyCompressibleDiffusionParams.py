@@ -24,6 +24,8 @@ class WeaklyCompressibleDiffusionParams():
     inviscid : bool = field(default=True, metadata={"description": "Whether to use inviscid diffusion parameters"})
     inviscidAlpha : float = field(default=0.01, metadata={"description": "Alpha value for inviscid diffusion"})
 
+    approachOnly: bool = field(default=False, metadata={"description": "Apply projected viscosity only to approaching pairs; False gives two-sided diffusion"})
+
     viscidNu : float = field(default=1e-3, metadata={"description": "Kinematic viscosity for viscous diffusion"})
     viscousTerm: ViscosityTerm = field(default=ViscosityTerm.monaghanGingold, metadata={"description": "Physical-viscosity form when inviscid=False: monaghanGingold (normal-projected, default) or morris1997 (shear-carrying)"})
 
@@ -63,6 +65,7 @@ def wcDiffusionParamsToDict(diffusionParams: WeaklyCompressibleDiffusionParams) 
     return {
         'inviscid': diffusionParams.inviscid,
         'inviscidAlpha': diffusionParams.inviscidAlpha,
+        'approachOnly': diffusionParams.approachOnly,
         'viscidNu': diffusionParams.viscidNu,
         'viscousTerm': diffusionParams.viscousTerm.name if isinstance(diffusionParams.viscousTerm, Enum) else diffusionParams.viscousTerm,
         'densityDelta': diffusionParams.densityDelta,
@@ -72,6 +75,7 @@ def dictToWCDiffusionParams(diffusionParamsDict: Dict[str, Any]) -> WeaklyCompre
     return WeaklyCompressibleDiffusionParams(
         inviscid=diffusionParamsDict.get('inviscid', True),
         inviscidAlpha=diffusionParamsDict.get('inviscidAlpha', 0.01),
+        approachOnly=diffusionParamsDict.get('approachOnly', False),
         viscidNu=diffusionParamsDict.get('viscidNu', 1e-3),
         viscousTerm=ViscosityTerm[diffusionParamsDict.get('viscousTerm', 'monaghanGingold')] if isinstance(diffusionParamsDict.get('viscousTerm', 'monaghanGingold'), str) else diffusionParamsDict['viscousTerm'],
         densityDelta=diffusionParamsDict.get('densityDelta', 0.1),

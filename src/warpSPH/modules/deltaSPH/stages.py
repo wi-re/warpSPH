@@ -41,12 +41,9 @@ def diffusionRates(currentState, config, schemeConfig, adjacency, renormalizatio
                 gradRhoL = None
         with record_function("[warpSPH] - [deltaSPH - 11] density diffusion"):
             drhodt_diss = computeDensityDiffusion(currentState, config, schemeConfig, adjacency, gradRho, gradRhoL)
-        # `approachOnly=False`: Marrone 2011 Eq. (5b) / Sun 2017 Eq. (1) apply the artificial-viscosity term `alpha h c0 pi_ij` to *every* pair, not only
-        # approaching ones; the approach-only clamp is Monaghan's shock viscosity, which under-damps the tensile / shear regions a violent free-surface impact
-        # grows (DELTASPH_VALIDATION_PLAN Part 1).
         with record_function("[warpSPH] - [deltaSPH - 12] velocity diffusion"):
             dvdt_diss = computeVelocityDiffusion(currentState, config, schemeConfig, adjacency,
-                                                 approachOnly=False, wall=wall)      # the wall's share is inside the (possibly frozen) tuple
+                                                 wall=wall)      # the wall's share is inside the (possibly frozen) tuple
         if freezeDiffusion:
             if owner is not None:
                 owner.diffusion = (drhodt_diss, dvdt_diss)
