@@ -143,7 +143,8 @@ def calibrateChannel(ctx: RunContext, system) -> None:
     fluid = st.kinds == 0
     dx = ctx.config.dx
     h = float(st.supports[fluid].max())
-    cal = latticeCalibration(dx, dx, h, ctx.config.kernel)
+    cal = latticeCalibration(dx, dx, h, ctx.config.kernel,
+                             calibrateNormalization=ctx.config.calibrateNormalization)
     st.masses = torch.where(fluid, torch.full_like(st.masses, sc.fluid.restDensity * cal['V']), st.masses)
     sc.analyticWallMass = cal['mu']
     off = cal['dwallY'] - 0.5 * dx                              # the first row is at dx / 2 from the plate plane: the plane moves outward by the difference
@@ -173,7 +174,8 @@ def initialConditions(ctx: RunContext, system) -> None:
         if ctx.param('shearWave'):
             from ...modules.analyticBoundary import latticeCalibration
             fl = st.kinds == 0
-            cal = latticeCalibration(ctx.config.dx, ctx.config.dx, float(st.supports[fl].max()), ctx.config.kernel)
+            cal = latticeCalibration(ctx.config.dx, ctx.config.dx, float(st.supports[fl].max()), ctx.config.kernel,
+                                     calibrateNormalization=ctx.config.calibrateNormalization)
             st.masses = torch.where(fl, torch.full_like(st.masses, ctx.schemeConfig.fluid.restDensity * cal['V']), st.masses)           # a fluid-only lattice: the bulk density is exactly rho0
         elif ctx.param('calibratedLattice'):
             calibrateChannel(ctx, system)

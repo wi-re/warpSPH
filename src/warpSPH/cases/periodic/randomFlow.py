@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Dict
 
-from ...enumTypes import isArtificialCompressibleScheme
+from ...enumTypes import isArtificialCompressibleScheme, isIncompressibleScheme
 from ...modules.noise.sampleDivergenceFree import sampleDivergenceFreeNoise
 from ...runner import Case, RunContext, caseMain, registerCase
 from ..common.plotting import particlePlot
@@ -112,6 +112,9 @@ def randomFlowTimestep(ctx: RunContext, state) -> float:
         from ...modules.timestep import computeTimestep
         return computeTimestep(state, ctx.config, ctx.schemeConfig,
                                dt=ctx.config.dt)
+    if isIncompressibleScheme(ctx.scheme):
+        from ...modules.timestep.projection import fixedProjectionRequest
+        return fixedProjectionRequest(ctx)
     return ctx.config.dt
 
 

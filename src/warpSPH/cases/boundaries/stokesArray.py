@@ -17,7 +17,7 @@ import torch
 from ...configurations.region import BCType
 from ...enumTypes import isIncompressibleScheme
 from ...runner import Case, RunContext, caseMain, registerCase
-from ...utils import buildDomainDescription, n_h_to_nH
+from ...utils import buildDomainDescription
 from .periodicChannel import XI, configureFlow
 from ..common.plotting import particlePlot
 from ..common.weaklyCompressible import (VELOCITY_DENSITY_FIELDS, WEAKLY_COMPRESSIBLE_DEFAULTS, WEAKLY_COMPRESSIBLE_PARAMS, boundaryRegion,
@@ -72,15 +72,6 @@ def configureScheme(ctx: RunContext) -> None:
     ctx.scratch['W'] = ctx.spec.L
     configureFlow(ctx, dx, shear=False)
     ctx.schemeConfig.analyticPeriodicWalls = True
-    # Lattice-match each scheme to its own oracle by default: the incompressible loops'
-    # oracle (DFSPH2D) runs at H = 2.505 dx, while the WC delta+ oracle (DeltaSPH2D,
-    # periodic_cylinder_array.py) runs at H = 4.0 dx (the case default). Retarget the
-    # support for the incompressible loops while n_h is still the case default; an explicit
-    # n_h (any other value) is respected. buildConfig has already read spec.n_h, so the
-    # support is re-derived here from targetNeighbors (the neighbour search reads it).
-    if isIncompressibleScheme(ctx.scheme) and ctx.spec.n_h == 4.0:
-        ctx.spec.n_h = 2.505
-        ctx.config.targetNeighbors = n_h_to_nH(2.505, ctx.spec.dim)
 
 
 def buildSystem(ctx: RunContext):
@@ -99,7 +90,8 @@ def initialConditions(ctx: RunContext, system) -> None:
     if isIncompressibleScheme(ctx.scheme):
         from ...modules.analyticBoundary import latticeCalibration
         fl = st.kinds == 0
-        cal = latticeCalibration(dx, dx, float(st.supports[fl].max()), ctx.config.kernel)
+        cal = latticeCalibration(dx, dx, float(st.supports[fl].max()), ctx.config.kernel,
+                                 calibrateNormalization=ctx.config.calibrateNormalization)
         st.masses = torch.where(fl, torch.full_like(st.masses, sc.fluid.restDensity * cal['V']), st.masses)      # the bulk lattice at exactly rho0; the wall continuum `mu` of the flat-wall calibration (no plane offset: the body is cut from the lattice)
         sc.analyticWallMass = cal['mu']
         ctx.scratch['nuNominal'] = ctx.param('nuPhysical')

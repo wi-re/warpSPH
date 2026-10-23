@@ -29,13 +29,15 @@ from ..util import countNeighbors
 def computeReferenceFactor(
     state: Any, config: Any, schemeConfig: Any, adjacency: Any, wall: Any = None
 ) -> torch.Tensor:
-    """Local volume-based stiffness denominator, negated and floored.
+    """Local stiffness denominator for physical pressure, negated and floored.
 
     `computeDFSPHFactor` includes ALL non-ghost neighbor squares for fluid
     queries, including static boundary neighbors. This deliberately differs
-    from upstream's fluid-only back-reaction sum. Its volume-only scaling is
-    also distinct from the physical-pressure IISPH diagonal, particularly
-    when rho0 is not one. See the source inventory; this pass preserves it.
+    from upstream DFSPH's fluid-only back-reaction sum. Its volume-only scaling is
+    also distinct from the exact composed IISPH diagonal on nonuniform states.
+    The volume-only denominator acts on normalized pressure p/rho0. The force
+    below consumes physical p, so divide by rho0 to match its units. Omitting
+    this factor makes the pressure iteration depend on density units.
     The analytic correction adds 2 S.G + |G|^2 without a 1/rho weight.
     """
     apparentArea = state.masses / state.densities
@@ -58,7 +60,9 @@ def computeReferenceFactor(
         diag = diag - wallAlphaCorrection(
             wall, gradSum, torch.ones_like(state.densities)
         )  # wallAlphaCorrection is the negative IISPH-diagonal term: -(2 S.G + |G|^2) / rho
-    return torch.clamp(-diag, max=-1e-8)
+    factor = torch.clamp(-diag, max=-1e-8)
+    rho0 = schemeConfig.fluid.restDensity
+    return factor if rho0 == 1.0 else factor / rho0
 
 
 def referenceDensityRate(
@@ -148,13 +152,20 @@ def solveReference(
     `aij_pj` reuses `_drhodt` (the same scatter-divergence operator as the
     source, applied to the acceleration field), so no new kernel.
     Warm-started from `warmStart` (the carried kappa). Returns `(a_p, p,
-    nIters, err)`, where `err` is SPlisHSPlasH's one-sided compression-only
+    nIters, err)`, where `err` is the DFSPH-style one-sided compression-only
     metric: `residuum = min(resid, 0)` per particle (the DF solve zeroes it
     -- and the DF source and warm start -- for particles with < 7 (2D) /
     < 20 (3D) neighbours; the CD solve has no such guard), then `err =
     rho0 * mean(-residuum)` over the fluid. Note the tolerance calibration
     differs from the reference (its eta is a percent of rho0, scaled by 1/h
     in the DF solve); the config tolerances here are kept as-is.
+
+    The local `iisph` wrapper also calls this density mode; that does not
+    make it native IISPH. Pinned SPlisHSPlasH IISPH instead uses rest-volume
+    continuity, its separate density-dependent coefficients, half the
+    previous pressure, omega=0.5, and a signed average on pressure-active
+    rows evaluated with new diagonal / old off-diagonal iterates. Its
+    clamp alone does not specify the solve policy.
 
     `surfaceMask` (Part 30, step 3; divergence solve only): rows the
     (dilated) `detectFreeSurface` flags are held at `kappa^v = 0` for the
@@ -185,8 +196,9 @@ def solveReference(
     # step-1 divergence solve grows ~1.2x/iteration in its asymptotic phase
     # (spectral radius > 1) while 0.3 decays in all four (step, mode) states
     # and 0.1/0.05 regrow late. The window is ~[0.2, 0.35]; 0.3 is the
-    # reference value's nearest stable neighbour. The reference runs 0.5 in
-    # 3D, where the composed operator is better conditioned.
+    # reference value's nearest stable neighbour. Native IISPH also runs
+    # 0.5 in 2D; this composed-operator measurement does not justify changing
+    # that distinct method's relaxation.
     omega = 0.3
     maxIters = solverCfg.maxIterations
     tol = solverCfg.tolerance
@@ -308,7 +320,8 @@ def solveReference(
             # the interior iterates against a zero Dirichlet row set.
             p = torch.where(pin, torch.zeros_like(p), p)
         if hasFluid:
-            # SPlisHSPlasH's convergence metric: ONE-SIDED, compression-only --
+            # DFSPH-style metric (not native IISPH's signed pressure-active
+            # average): ONE-SIDED, compression-only --
             # `residuum = min(resid, 0)` per particle, then `err = rho0 *
             # mean(-residuum)` over the fluid. Under-compressed particles
             # (resid > 0, which the one-sided pressure cannot fix) contribute

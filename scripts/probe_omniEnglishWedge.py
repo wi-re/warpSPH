@@ -35,7 +35,7 @@ def main():
     ap.add_argument('--scheme', choices=('omni', 'dfsph'), default='omni')
     ap.add_argument('--wedge', action=argparse.BooleanOptionalAction, default=True)
     ap.add_argument('--rep', nargs='+', default=['analytic'], choices=('analytic', 'particles'))
-    ap.add_argument('--nh', type=float, default=2.57)
+    ap.add_argument('--nh', type=float, default=4.0)
     ap.add_argument('--video', action='store_true')
     ap.add_argument('--massScale', type=float, default=1.0, help='extra factor on the particle mass (particle walls: 0.9715 = omniSPH V = pi r^2)')
     a = ap.parse_args()

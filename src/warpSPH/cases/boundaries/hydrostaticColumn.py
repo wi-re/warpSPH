@@ -265,87 +265,25 @@ def initialConditions(ctx: RunContext, system) -> None:
     #     jitterAmount=ctx.param('jitter'))
     particles.velocities[:] = 0.0
 
-    # Optional rest-density calibration (Part 33, `dfsphReference` only in
-    # practice). `tgv`/`kolmogorovIncompressible` normalise the fluid mass so
-    # the sampled lattice integrates to `rho0` (DFSPH_FINDINGS.md §1.1); this
-    # case does not, so at `n_h = 4` the at-rest bulk reads ~0.95 rho0. That
-    # ~5% deficit is the constant-density solve's source `s = 1 - rho/rho0` at
-    # rest: on step 1 the two forced Jacobi iterations (minIters = 2) see
-    # `s > 0` everywhere and drive the IC hydrostatic seed to exactly 0
-    # (Part 31), so the reference scheme cold-starts and the column slumps --
-    # the slump feeds the free-slip vortex pair Part 32 could only damp at the
-    # wall. Calibrating the bulk to `rho0` makes `s ~ 0` at rest, so the seed
-    # survives and the column starts balanced. Off by default: `divergenceFree`
-    # is graded against the uncalibrated sampling and §1.1 shows calibration
-    # hurts the periodic cases; this is the bounded free-surface case where
-    # `rho = rho0` at rest is the physically correct target.
+    # Use the shared kernel-normalization calibration, preserving sampled mass.
+    # All projection families receive the same physical hydrostatic profile in
+    # the pressure gauge actually consumed by their selected solve route.
     if ctx.param('calibrateRestDensity'):
-        from ...modules import computeDensities
-        dens = computeDensities(particles, ctx.config, ctx.schemeConfig, None)
-        fluid0 = particles.kinds == 0
-        y = particles.positions[:, 1]
-        dx = ctx.config.dx
-        ylo = y[fluid0].min()
-        yhi = y[fluid0].max()
-        bulk = fluid0 & (y > ylo + 3.0 * dx) & (y < yhi - 4.0 * dx)
-        ref = float(dens[bulk].median()) if int(bulk.sum()) >= 8 \
-            else float(dens[fluid0].median())
-        rho0 = ctx.schemeConfig.fluid.restDensity
-        particles.masses = particles.masses / ref * rho0
-        if ctx.spec.verbose:
-            check = computeDensities(particles, ctx.config, ctx.schemeConfig, None)
-            print(f'[hydrostaticColumn] rest-density calibration: bulk median '
-                  f'{ref:.4f} -> {float(check[bulk].median()):.4f} (rho0={rho0})')
+        from ..common.weaklyCompressible import calibrateRestDensity
+        calibrateRestDensity(ctx, system, verbose=ctx.spec.verbose)
 
-    # the above code is garbage
-
-    # Start from the exact at-rest state, not from zero pressure. The step's
-    # projection warm-starts from 75% of the incoming pressure (see
-    # `solveDivergenceFree`), so a zero start spends its first steps *building*
-    # the hydrostatic balance, and the early-termination residual of each of
-    # those steps leaks a fraction of `g` into the velocity -- the column
-    # visibly falls before it is supported. Initialising the analytic profile
-    # makes the run grade whether the scheme *maintains* the balance, which is
-    # what the case exists to measure.
-    #
-    # Gauge: `solveDivergenceFree` re-centres the *fluid* pressure to zero
-    # mean every iteration, and the boundary rows are frozen at their incoming
-    # values -- so the boundary is initialised at the same shifted profile,
-    # not the raw one. A raw initialisation would leave a fluid-versus-wall
-    # jump of the fluid mean's size at every contact, a spurious wall force
-    # with nothing to do with the scheme under test. Above the free surface
-    # the gauge pressure is 0 (the clamp), matching the air side.
-    positions = particles.positions
-    fluid = particles.kinds == 0
-    surfaceY = positions[fluid, 1].max()
-    p = ctx.schemeConfig.fluid.restDensity * ctx.param('gravityMagnitude') \
-        * (surfaceY - positions[:, 1])
-    p = torch.clamp(p, min=0.0)
-    if ctx.param('wallPressure') == 'zero':
-        p = torch.where(fluid, p, torch.zeros_like(p))
-    # `dfsphReference` (DFSPH proper) and `iisph` both carry a *non-negative*
-    # pressure/kappa and warm-start their constant-density solve from it
-    # directly, so they want the raw hydrostatic profile (0 at the surface,
-    # rho0 g H at the floor). `divergenceFree` (VD+PS) re-centres the fluid
-    # pressure to zero mean every iteration, so it is initialised at that
-    # shifted profile instead -- a raw start would open a fluid-vs-wall jump
-    # of the mean's size. See the module docstring.
-    # `artificialCompressible` also wants the raw profile, and for a stronger
-    # reason than the two above: it has **no pressure gauge at all**. Its
-    # pressure is an absolute, integrated field -- the wall extrapolation
-    # (Eq. 61) and the `(p_i + p_j)` gradient both read it directly, and the
-    # free-surface condition is `p = 0` there. Seeding the mean-shifted profile
-    # puts the surface at `-mean(p) ~ -rho0 g H / 2`, which is not a gauge
-    # choice for this scheme but an error of half the column's pressure drop
-    # at exactly the place the scheme is most sensitive.
-    if ctx.scheme in (IncompressibleSPHScheme.dfsphReference,
-                      IncompressibleSPHScheme.iisph) or \
-            isArtificialCompressibleScheme(ctx.scheme):
-        particles.pressures = p
+    from ...caseUtils.projection import initializeHydrostaticPressure
+    if isinstance(ctx.scheme, IncompressibleSPHScheme):
+        initializeHydrostaticPressure(ctx, system)
     else:
-        particles.pressures = p - p[fluid].mean()
+        # ACSPH needs the absolute hydrostatic field as its integrated pressure.
+        particles = system.state
+        fluid = particles.kinds == 0
+        surface = particles.positions[fluid, 1].max()
+        particles.pressures = (ctx.schemeConfig.fluid.restDensity*ctx.param('gravityMagnitude')
+                               *(surface-particles.positions[:, 1]).clamp_min(0))
 
-    ctx.scratch['initialPositions'] = positions.clone()
+    ctx.scratch['initialPositions'] = particles.positions.clone()
 
 
 def hydrostaticDiagnostics(ctx: RunContext, state) -> Dict[str, float]:

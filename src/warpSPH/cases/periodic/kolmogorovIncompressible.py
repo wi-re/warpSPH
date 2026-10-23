@@ -127,31 +127,8 @@ def kolmogorovIncompressibleTimestep(ctx: RunContext, state) -> float:
     `max(vMax, 1e-3)` floor and the `config.maxDt` ceiling both matter from
     the very first step, not just once the flow has spun up.
     """
-    particles = state.state
-    h = particles.supports.mean().item()
-    vMax = particles.velocities.norm(dim=1).max().item()
-    nu = ctx.param('nu', 0.0)
-    kernelScale = float(sphKernelScale(ctx.config.kernel.value, ctx.config.dim))
-    # The advective condition is Bender & Koschier's, in their units: `dt <=
-    # 0.4 * d / |v_max|` with `d` the particle *diameter*, i.e. the sampling
-    # spacing `dx`. This used to be written against the support radius
-    # instead (`cflFactor * h`), which is a different condition in two ways:
-    # it is `n_h` times larger (4x here, so the historical `cflFactor=0.3`
-    # allowed 1.2 spacings of travel per step, 3x the published limit), and it
-    # silently rescales with the neighbour count, so the same `cflFactor`
-    # meant different physics at different `n_h`. Written in `dx` the number
-    # in the config *is* the published constant and is resolution- and
-    # `n_h`-independent. See `DFSPH_IMPROVEMENT_PLAN.md` Part 12.
-    dt_adv = ctx.config.cflFactor * ctx.config.dx / max(vMax, 1e-3)
-    # The viscous limit stays in `h`: it is a diffusion condition over the
-    # smoothing length, not an advection condition over the particle spacing.
-    # Morris et al. 1997: `dt <= 0.125 hs^2 / nu` with `hs` the smoothing
-    # length, `hs = h / kernelScale` for the support radius `h` -- so the
-    # scale enters squared. Dividing by it once allowed nu dt / hs^2 = 0.24,
-    # and under a no-slip wall with the Morris term that ran as a step-to-step
-    # sign-flipping velocity (OPEN_PROBLEMS.md §7, 2026-09-28).
-    dt_visc = 0.125 * (h / kernelScale) ** 2 / nu if nu > 0 else float('inf')
-    return float(min(max(min(dt_adv, dt_visc), ctx.config.minDt), ctx.config.maxDt))
+    from ...modules.timestep.projection import projectionTimestep
+    return projectionTimestep(ctx, state)
 
 
 def diagnostics(ctx: RunContext, state) -> Dict[str, float]:

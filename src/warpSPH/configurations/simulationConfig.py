@@ -91,7 +91,8 @@ class SimulationConfig:
     supportVolumeClamp: str = 'walls'
     #: Scale the kernel by `1 / L(kernel, n_h, dim)` so a defect-free lattice measures `rho0` exactly
     #: (`L` is the lattice-quadrature offset of the kernel sum: `int W dV = 1` does not make
-    #: `sum_j m_j W_ij = rho0`). Off by default; meaningful only at uniform resolution.
+    #: `sum_j m_j W_ij = rho0`). The runner enables it for pressure-projection
+    #: schemes; other families opt in for uniform-resolution rest states.
     #:
     #: **Applied to the summation density only** (`modules/density/density.py`). The gradient,
     #: divergence, Laplacian, curl and interpolation operators (~130 `OperationProperties(...)` call

@@ -62,3 +62,12 @@ def test_applied_to_the_analytic_dam_break():
     cal = latticeCalibration(0.9 * 0 + res.ctx.config.dx, res.ctx.config.dx, float(res.state.state.supports.max()))
     assert sc.analyticWallMass == pytest.approx(cal['mu'], rel=2e-3)             # the wall mass is the lattice's (the lattice spacings of the sample are within a percent of dx)
     assert float(res.state.state.masses.max()) == pytest.approx(cal['V'], rel=0.02)
+
+
+def test_normalized_lattice_uses_physical_mass_without_double_normalization():
+    dx, h = .01, .04
+    calibration = latticeCalibration(dx, dx, h, calibrateNormalization=True)
+    assert calibration['V'] == dx**2
+    gx, gy = np.meshgrid(np.arange(-8, 9), np.arange(-8, 9))
+    normalized_weights = wendland2(np.hypot(gx*dx, gy*dx), h) / calibration['S']
+    assert calibration['V'] * normalized_weights.sum() == pytest.approx(1., abs=1e-12)

@@ -797,7 +797,7 @@ def alignInteriorDomainToLattice(domain, interiorDomain, dx, periodic=None):
     return interiorDomain
 
 
-def analyticTankBody(interiorDomain, offset=0.0):
+def analyticTankBody(interiorDomain, offset=0.0, obstacleVertices=None):
     """The walls of a rectangular tank as one analytic `warpSPHBoundaries` Body: the inner faces are the box
     [min, max] of `interiorDomain` moved outward by `offset` (a calibrated lattice: the wall continuum is the integral of the kernel over the solid, the fluid a lattice
     sum, and the two differ by the midpoint-rule error of a lattice at four cells per support; moving the wall plane by a fraction of dx removes it, OPEN_PROBLEMS 31),
@@ -808,6 +808,14 @@ def analyticTankBody(interiorDomain, offset=0.0):
     loOff, hiOff = np.broadcast_to(np.asarray(loOff, dtype=float), (2,)), np.broadcast_to(np.asarray(hiOff, dtype=float), (2,))
     lo = [float(v) - float(o) for v, o in zip(interiorDomain.min, loOff)]
     hi = [float(v) + float(o) for v, o in zip(interiorDomain.max, hiOff)]
+    if obstacleVertices is not None:
+        from .attachedBoundary import floorAttachedPolygon
+        from warpSPHBoundaries.scene.scene import SurfaceRep
+        polygon = floorAttachedPolygon(lo, hi, obstacleVertices)
+        if polygon is not None:
+            body = Body(bodyId=0, reps=[SurfaceRep.polygon(polygon, solid='outside')])
+            body._attachedObstacleVertices = np.asarray(obstacleVertices, float)
+            return body
     return Body(bodyId = 0, reps = [BoxRep(tuple(lo), tuple(hi), solid = 'outside')])
 
 
@@ -870,13 +878,28 @@ def buildRegions(config, schemeConfig, simSetup, args, domain, interiorDomain, o
     if isinstance(wallBC, str):
         wallBC = BCType[wallBC]
     # `wallRepresentation='analytic'`: the tank walls are a boundary-provider body (warpSPHBoundaries) instead of boundary
-    # particles. The region keeps `domain_sdf` (the fluid is clipped against it as usual) but is not sampled; an obstacle
-    # is not supported in this mode (its sdf is merged into `domain_sdf` above).
+    # particles. The region keeps `domain_sdf` for fluid clipping. Attached
+    # static triangles form one contour; independent obstacles keep a body.
     representation = None
     obstacleRegion = []
+    from .attachedBoundary import floorAttachedPolygon, obstaclePolygonVertices, polygonSolidSDF
+    attached = None
+    if (getattr(args, 'obstacleActive', False) and getattr(args, 'unifyAttachedObstacles', True)
+            and not getattr(args, 'obstacleDynamic', False)
+            and not (getattr(args, 'semiPeriodic', False) or getattr(args, 'fullyPeriodic', False))
+            and (getattr(args, 'wallRepresentation', 'particles') == 'particles'
+                 or getattr(args, 'obstacleRepresentation', 'analytic') == 'analytic')):
+        vertices = obstaclePolygonVertices(obstacle)
+        if vertices is not None:
+            polygon = floorAttachedPolygon(interiorDomain.min.cpu().numpy(), interiorDomain.max.cpu().numpy(), vertices)
+            if polygon is not None:
+                attached = vertices
+                domain_sdf = polygonSolidSDF(polygon)
     if getattr(args, 'wallRepresentation', 'particles') == 'analytic':
-        representation = analyticTankBody(interiorDomain, offset = float(getattr(args, 'analyticWallOffset', 0.0)) * float(simSetup.dx))
-        if getattr(args, 'obstacleActive', False):
+        representation = analyticTankBody(interiorDomain, offset = float(getattr(args, 'analyticWallOffset', 0.0)) * float(simSetup.dx), obstacleVertices=attached)
+        if attached is not None and not hasattr(representation, '_attachedObstacleVertices'):
+            attached = None  # an explicit wall offset can separate the objects
+        if getattr(args, 'obstacleActive', False) and attached is None:
             # the tank and the obstacle are two analytic bodies, two (unsampled) boundary regions; the fluid is clipped against both SDFs as usual
             tank_sdf = lambda x: sampleSDF(x, lambda y: domainSDF(y, interiorDomain, invert = False), invert = False)
             obstacle_sdf = buildObstacleSDF(obstacle['obstacleType'], obstacle['offsetX'], obstacle['offsetY'], obstacle['maxExtent'], obstacle['aspectRatio'], obstacle['aoa'],

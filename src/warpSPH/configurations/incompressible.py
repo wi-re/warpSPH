@@ -65,6 +65,7 @@ class IncompressibleSPHConfig:
     dt_viscosityConstraint: bool = field(default=True, metadata={'description': 'Whether to apply viscosity constraint in timestep computation'})
     dt_accelerationConstraint: bool = field(default=True, metadata={'description': 'Whether to apply acceleration constraint in timestep computation'})
     dt_acousticConstraint: bool = field(default=True, metadata={'description': 'Whether to apply acoustic constraint in timestep computation'})
+    bandViscosity: bool = field(default=False, metadata={'description': 'Include configured physical velocity diffusion in the Band non-pressure predictor (explicit comparison variant).'})
     pressureForceTerm: PressureForceScheme = field(default=PressureForceScheme.Antuono, metadata={'description': 'Pressure force term to use'})
 
     shiftProperties: ShiftProperties = field(default_factory=buildDefaultShiftProperties, metadata={'description': 'Properties for the delta-SPH shift'})
@@ -104,6 +105,7 @@ def incompressibleConfigToDict(config: IncompressibleSPHConfig) -> Dict[str, Any
         'dt_viscosityConstraint': config.dt_viscosityConstraint,
         'dt_accelerationConstraint': config.dt_accelerationConstraint,
         'dt_acousticConstraint': config.dt_acousticConstraint,
+        'bandViscosity': config.bandViscosity,
         'bandwith': config.bandwith,
 
         'pressureForceTerm': config.pressureForceTerm.name,
@@ -188,6 +190,7 @@ def dictToIncompressibleSPHConfig(configDict: Dict[str, Any]) -> IncompressibleS
     config.dt_viscosityConstraint = configDict['dt_viscosityConstraint']
     config.dt_accelerationConstraint = configDict['dt_accelerationConstraint']
     config.dt_acousticConstraint = configDict['dt_acousticConstraint']
+    config.bandViscosity = bool(configDict.get('bandViscosity', False))
     # config.densityDiffusionTerm = DensityDiffusionScheme[configDict['densityDiffusionTerm']] if isinstance(configDict['densityDiffusionTerm'], str) else configDict['densityDiffusionTerm']
     config.pressureForceTerm = PressureForceScheme[configDict['pressureForceTerm']] if isinstance(configDict['pressureForceTerm'], str) else configDict['pressureForceTerm']
     config.bandwith = configDict.get('bandwith', 10.0)

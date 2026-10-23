@@ -448,6 +448,15 @@ def initialConditions(ctx: RunContext, system) -> None:
         ctx.config.dt = ctx.param('targetDt')
         return
 
+    if isIncompressibleScheme(ctx.scheme):
+        # Projection has no acoustic CFL. Respect the requested startup step;
+        # the projection timestep hook enforces advection/viscosity limits.
+        ctx.config.dt = ctx.spec.dt if ctx.spec.dt is not None else 1e-3
+        if ctx.param('hydrostaticInit', False):
+            from ...caseUtils.projection import initializeHydrostaticPressure
+            initializeHydrostaticPressure(ctx, system)
+        return
+
     # The sound speed and dt are chosen together: dt follows from the acoustic
     # CFL, so this is what finally fixes config.dt for the run.
     #
@@ -1163,6 +1172,9 @@ dambreakCase = registerCase(Case(
         # (`alignInteriorDomainToLattice`). Default on; False keeps the raw
         # lattice phase (a row can land on the wall) for A/B.
         alignBoundaryLattice=True,
+        # Static floor-attached triangles share one exposed tank contour for
+        # sampling and analytic moments. False retains the two-body diagnostic.
+        unifyAttachedObstacles=True,
         # ACSPH only: keep the non-paper acceleration constraint in Eq. (46)'s
         # timestep (default). Set False for the paper's literal advective +
         # viscous constraint set -- see `_configureArtificialCompressibleExtra`.

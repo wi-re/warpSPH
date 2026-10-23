@@ -1,8 +1,9 @@
 """The analytic-wall terms of `omniIncompressible` (OPEN_PROBLEMS 31): the pieces that are verified.
 
-* the diagonal of the discrete operator `A p = -dt^2 div(a_p(p))` (wall terms in `_divergence` and `_pressureAccel`) equals the `alpha` the Jacobi iteration divides by
-  (`computeAlpha(wall=)`, the wall's gradient added to the vector sum), on the first wall row and in the bulk: a unit pressure on one particle, the diagonal entry of the
-  response;
+* the linear pressure response includes both mirrored wall pressure and wall
+  divergence. The historical Jacobi alpha is an approximation to that response,
+  not its exact diagonal; check each against its own independently assembled
+  wall correction rather than a geometry-specific relative tolerance.
 """
 import numpy as np
 import pytest
@@ -26,10 +27,11 @@ def tank(params=None):
     return run(case, spec)
 
 
-def test_operator_diagonal_is_alpha():
+def test_operator_diagonal_matches_mirrored_wall_response():
     import warpSPH.schemes.incompressible.omniIncompressible as O
     from warpSPH.modules.analyticBoundary import resolveWall
     from warpSPH.modules.incompressible.wp_alpha import computeAlpha
+    from warpSPHCore import warpOperation, OperationProperties, WarpOperation, GradientScheme, SupportScheme
     r = tank()
     st, ctx = r.state.state, r.ctx
     sc, cfg, adj = ctx.schemeConfig, ctx.config, r.state.adjacency
@@ -38,9 +40,16 @@ def test_operator_diagonal_is_alpha():
     fluid = st.kinds == 0
     wall = resolveWall(st, cfg, sc, adj)
     alpha = dt * dt * computeAlpha(st, cfg, sc, adj, apparentVolumes=st.masses / st.densities, includeBoundaryReaction=False, wall=wall)
+    alpha0 = dt * dt * computeAlpha(st, cfg, sc, adj, apparentVolumes=st.masses / st.densities, includeBoundaryReaction=False, wall=False)
+    grad = warpOperation(st, OperationProperties(kernel=cfg.kernel, operation=WarpOperation.Gradient,
+                         gradientMode=GradientScheme.Naive, supportMode=SupportScheme.Gather),
+                         queryValues=torch.ones_like(st.densities), domain=cfg.domain, adjacency=adj).double()
+    G = wall.G.sum(0)
+    expected_alpha_wall = -dt*dt*(2*(grad*G).sum(1)+G.square().sum(1))/st.densities.double()
+    assert torch.allclose((alpha-alpha0).double(), expected_alpha_wall, atol=1e-8, rtol=1e-5)
 
     def Ap(p):
-        a_p = O._pressureAccel(st, cfg, adj, p, fluid, wall, sc.fluid.restDensity)
+        a_p = O._pressureAccel(st, cfg, adj, p, fluid, wall, sc.fluid.restDensity, clampPressure=False)
         return torch.where(fluid, -dt * dt * O._divergence(st, cfg, adj, a_p, wall), torch.zeros_like(p))
 
     pos = st.positions.cpu().numpy()
@@ -51,8 +60,13 @@ def test_operator_diagonal_is_alpha():
         e = torch.zeros_like(st.densities)
         e[i] = 1.0
         d = float((Ap(e) - base)[i])
-        tol = 0.07 if y < dx else 0.01             # the first row: omniSPH's `alpha` has |A + G|^2 where the operator has (A + 2G).(A + G) (the mirrored wall pressure), 5 % at the calibrated lattice
-        assert d / float(alpha[i]) == pytest.approx(1.0, abs=tol), (y, d, float(alpha[i]))
+        a_fluid = O._pressureAccel(st, cfg, adj, e, fluid)
+        d_fluid = float((-dt*dt*O._divergence(st, cfg, adj, a_fluid))[i])
+        # The wall responds only at i; fluid and wall divergence both see
+        # that response. Wall divergence also sees the fluid acceleration.
+        a_wall_i = -(1/st.densities[i].double()**2 + 1/sc.fluid.restDensity**2)*G[i]
+        correction = dt*dt*((a_wall_i*(grad[i]+G[i])).sum()+(a_fluid[i].double()*G[i]).sum())
+        assert d == pytest.approx(d_fluid+float(correction), rel=2e-5, abs=1e-8)
 
 
 def test_explicit_no_wall_is_not_resolved():

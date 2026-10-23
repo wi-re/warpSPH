@@ -87,7 +87,8 @@ def initialConditions(ctx: RunContext, system) -> None:
     if isIncompressibleScheme(ctx.scheme):
         from ...modules.analyticBoundary import latticeCalibration
         fl = st.kinds == 0
-        cal = latticeCalibration(dx, dx, float(st.supports[fl].max()), ctx.config.kernel)
+        cal = latticeCalibration(dx, dx, float(st.supports[fl].max()), ctx.config.kernel,
+                                 calibrateNormalization=ctx.config.calibrateNormalization)
         st.masses = torch.where(fl, torch.full_like(st.masses, sc.fluid.restDensity * cal['V']), st.masses)
         sc.analyticWallMass = cal['mu']
         ctx.scratch['nuNominal'] = ctx.param('nuPhysical')

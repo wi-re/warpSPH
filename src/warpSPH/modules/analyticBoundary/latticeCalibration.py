@@ -42,8 +42,13 @@ def wallIntegral(d, h):
     return float(np.sum(w * wendland2(r, h) * 2.0 * np.arccos(np.clip(d / r, -1.0, 1.0)) * r * drds))
 
 
-def latticeCalibration(dx, dy, h, kernel=KernelFunctions.Wendland2):
-    """`dict(S, V, mu, dwallX, dwallY)`: lattice sum, particle mass (rho0 = 1), wall mass, and the distance of the first row from a wall normal to x / to y (see the module docstring)."""
+def latticeCalibration(dx, dy, h, kernel=KernelFunctions.Wendland2, *, calibrateNormalization=False):
+    """Return lattice mass and wall geometry for the chosen density kernel.
+
+    The wall geometry preserves the oracle's first-row fit. Normalized
+    density keeps physical cell mass, avoiding a second application of the
+    lattice normalization. Wall density continues to use continuum integrals.
+    """
     if kernel != KernelFunctions.Wendland2:
         raise NotImplementedError('the calibrated lattice is derived for Wendland C2 only')
     N = int(math.ceil(h / min(dx, dy))) + 2
@@ -69,4 +74,8 @@ def latticeCalibration(dx, dy, h, kernel=KernelFunctions.Wendland2):
                 a, fa = c, fc
         return 0.5 * (a + b)
 
-    return dict(S=S, V=Vp, mu=mu, dwallX=solve(dx, dy), dwallY=solve(dy, dx))
+    # With a normalized summation kernel, physical cell mass already gives
+    # Vp*W in the density. Keep the analytic continuum scaled by mu; scaling
+    # mass as well would apply the fluid correction twice.
+    return dict(S=S, V=dx * dy if calibrateNormalization else Vp,
+                mu=mu, dwallX=solve(dx, dy), dwallY=solve(dy, dx))

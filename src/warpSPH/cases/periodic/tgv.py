@@ -51,7 +51,8 @@ def buildSystem(ctx: RunContext):
     # whatever the regular lattice happens to integrate to.
     rho0 = ctx.param('rho0')
     densities = computeDensities(system.state, ctx.config, ctx.schemeConfig, None)
-    system.state.masses = system.state.masses / densities.mean() * rho0
+    if not ctx.config.calibrateNormalization:
+        system.state.masses = system.state.masses / densities.mean() * rho0
     if ctx.spec.verbose:
         corrected = computeDensities(system.state, ctx.config, ctx.schemeConfig, None)
         print(f'density after mass correction: mean={corrected.mean().item():.6g}, '

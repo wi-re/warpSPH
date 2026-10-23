@@ -21,7 +21,9 @@ def _spacing(values):
 def calibrateAnalyticLattice(ctx, system, interior, touch=1.5, verbose=False):
     """Calibrate the sampled fluid in the analytic tank `interior` (box domain of the tank, before any wall offset); returns the calibration dict plus `offsets`.
 
-    particle mass = `restDensity * V'`, `schemeConfig.analyticWallMass = mu`, and every wall of the box within `touch` spacings of the first fluid row is moved outward by `d_wall - distance`
+    Particle mass uses the physical cell volume for normalized density (the
+    legacy unnormalized mode uses V'). The continuum wall factor is mu. Every wall of
+    the box within `touch` spacings of the first fluid row is moved by `d_wall - distance`
     (the others stay at the box). Only the tank (the first analytic body) is calibrated: the calibration is derived for a flat wall.
     """
     from ..caseUtils.weaklyCompressible import analyticTankBody
@@ -36,7 +38,8 @@ def calibrateAnalyticLattice(ctx, system, interior, touch=1.5, verbose=False):
     pos = st.positions[fluid].double().cpu().numpy()
     dx, dy = _spacing(pos[:, 0]), _spacing(pos[:, 1])
     h = float(st.supports[fluid].max())
-    cal = latticeCalibration(dx, dy, h, ctx.config.kernel)
+    cal = latticeCalibration(dx, dy, h, ctx.config.kernel,
+                             calibrateNormalization=ctx.config.calibrateNormalization)
     rho0 = sc.fluid.restDensity
     st.masses = torch.where(fluid, torch.full_like(st.masses, rho0 * cal['V']), st.masses)
     sc.analyticWallMass = cal['mu']
@@ -48,8 +51,9 @@ def calibrateAnalyticLattice(ctx, system, interior, touch=1.5, verbose=False):
     offsets = np.where(dist < touch * spacing, wanted - dist, 0.0)
     loOff, hiOff = offsets[:2], offsets[2:]
 
-    body = analyticTankBody(interior, offset=(loOff, hiOff))
     old = provider.rigidBodies[0]
+    attached = getattr(old.representation, '_attachedObstacleVertices', None)
+    body = analyticTankBody(interior, offset=(loOff, hiOff), obstacleVertices=attached)
     tankRegion = next(r for r in ctx.config.regions if getattr(r, 'representation', None) is old.representation)
     body.bodyId = old.representation.bodyId
     tankRegion.representation = body

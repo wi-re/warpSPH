@@ -1,6 +1,9 @@
 """The generic machinery: does one loop really drive every scheme?"""
 
 import dataclasses
+from types import SimpleNamespace as NS
+
+import torch
 
 import pytest
 
@@ -416,3 +419,91 @@ def test_trajectory_writer_closes_when_a_control_hook_interrupts(tmp_path):
     path=next(tmp_path.rglob('trajectory.h5'))
     with h5py.File(path,'r') as file:
         assert len(file['positions']) == 1
+
+
+
+
+def test_projection_diffusion_limit_reads_scheme_viscosity_and_overrides_fixed_step():
+    from warpSPH.modules.timestep.projection import projectionTimestep
+    from warpSPHCore import KernelFunctions, sphKernelScale
+
+    state = NS(kinds=torch.zeros(4, dtype=torch.int32), supports=torch.full((4,), 0.026),
+               velocities=torch.zeros(4, 2))
+    config = NS(kernel=KernelFunctions.Wendland2, dim=2, dx=1/96,
+                cflFactor=0.2, maxDt=0.002, minDt=1e-8, adaptiveDt=False)
+    sc = NS(diffusionParams=NS(inviscid=False, viscidNu=0.01935), dt_viscosityConstraint=True)
+    ctx = NS(config=config, schemeConfig=sc, scratch={})
+    # No case nu parameter: viscosity comes from the actual force operator.
+    dt = projectionTimestep(ctx, NS(state=state), requested=0.002)
+    expected = 0.125*(float(state.supports.min())/float(sphKernelScale(config.kernel.value, 2)))**2/0.01935
+    assert dt == pytest.approx(expected)
+    assert dt < 0.002
+    config.minDt = 0.0015
+    with pytest.raises(ValueError, match='below minDt'):
+        projectionTimestep(ctx, NS(state=state), requested=0.002)
+
+
+def test_fixed_projection_step_recovers_after_a_transient_without_crossing_limits():
+    from warpSPH.modules.timestep.projection import fixedProjectionRequest, projectionTimestep
+    from warpSPHCore import KernelFunctions
+    state = NS(kinds=torch.zeros(4, dtype=torch.int32), supports=torch.full((4,), .04),
+               velocities=torch.ones(4, 2))
+    config = NS(kernel=KernelFunctions.Wendland2, dim=2, dx=.01,
+                cflFactor=.3, maxDt=.005, minDt=1e-8, adaptiveDt=True,
+                dt=.001, dtGrowthFactor=1.05)
+    ctx = NS(config=config, schemeConfig=NS(diffusionParams=NS(inviscid=True)), scratch={})
+    assert fixedProjectionRequest(ctx) == .001
+    state.velocities.fill_(100)
+    config.dt = projectionTimestep(ctx, NS(state=state), fixedProjectionRequest(ctx))
+    capped = config.dt
+    assert capped < .0001
+    state.velocities.fill_(1)
+    for _ in range(100):
+        previous = config.dt
+        config.dt = projectionTimestep(ctx, NS(state=state), fixedProjectionRequest(ctx))
+        assert config.dt <= previous * config.dtGrowthFactor * (1 + 1e-12)
+        assert config.dt <= ctx.scratch['projectionTimestepLimits']['maximum']
+        assert config.dt <= .001
+    assert config.dt == .001 and config.dt > capped
+    config.adaptiveDt = False
+    config.dt = capped
+    assert fixedProjectionRequest(ctx) == capped
+
+
+def test_first_projection_step_obeys_initialized_viscous_limit():
+    from warpSPH.cases import importAll
+    from warpSPH.runner import getCase, run
+
+    importAll()
+    # Setup asks for 1 ms, but the actual Morris coefficient at this spacing
+    # requires ~0.80 ms. Checking only subsequent hooks misses the first step.
+    result = run(getCase('periodicChannel'), scheme='omniIncompressible',
+                 nx=192, n_h=4.0, dt=0.001, maxDt=0.002, nSteps=1,
+                 integrationScheme='semiImplicitEuler', plot=False, video=False,
+                 store=False, show=False, progress=False, quiet=True,
+                 params=dict(shearWave=True, fluidViscosity='morris',
+                             wallViscosityClosure='noslipMoment', nuPhysical=0.0185, shifting=False))
+    limit = result.ctx.scratch['projectionTimestepLimits']['maximum']
+    assert float(result.state.t) <= limit*(1+1e-7)
+    assert float(result.state.t) < 0.001
+
+
+@pytest.mark.parametrize('name', ['omniIncompressible', 'iisph', 'dfsphReference', 'divergenceFree', 'band2018pb'])
+def test_all_pressure_families_enable_lattice_normalization(name):
+    from warpSPH.cases import importAll
+    from warpSPH.runner import getCase, prepareContext, CaseSpec
+
+    importAll()
+    ctx = prepareContext(getCase('tgv'), CaseSpec(scheme=name))
+    assert ctx.config.calibrateNormalization
+    assert ctx.spec.calibrateNormalization
+
+
+def test_stokes_array_respects_default_support():
+    from warpSPH.cases import importAll
+    from warpSPH.runner import getCase, prepareContext, CaseSpec
+
+    importAll()
+    case = getCase('stokesArray')
+    ctx = prepareContext(case, CaseSpec(scheme='omniIncompressible', n_h=4.0, params=dict(case.params)))
+    assert ctx.spec.n_h == ctx.config.n_h == 4.0

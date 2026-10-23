@@ -350,6 +350,9 @@ def initialConditions(ctx: RunContext, system) -> None:
 
     ctx.scratch['sensorIndex'] = None
     _applyRollGravity(ctx, 0.0)
+    if isIncompressibleScheme(ctx.scheme) and ctx.param('hydrostaticInit', False):
+        from ...caseUtils.projection import initializeHydrostaticPressure
+        initializeHydrostaticPressure(ctx, system)
 
 
 def postStep(ctx: RunContext, state, step: int) -> None:
@@ -597,6 +600,9 @@ sloshingTankCase = registerCase(Case(
         wallRepresentation='particles',
         # analytic walls under an incompressible scheme: the calibrated lattice (OPEN_PROBLEMS 31); 'auto' = on there, True / False force it
         calibratedLattice='auto',
+        # Explicit pressure-seeded comparison IC; the historical cold-start
+        # control remains available independently of density calibration.
+        hydrostaticInit=False,
         # analytic walls: the wall plane moved outward by this fraction of dx (the calibrated lattice of the incompressible schemes, OPEN_PROBLEMS 31)
         analyticWallOffset=0.0,
         # analytic walls only: 'hydrostatic', 'normal' (see dambreak) or 'mls' (omniIncompressible: the wall pressure gradient fitted to the fluid's pressure iterate)

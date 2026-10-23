@@ -125,6 +125,8 @@ def buildContext(case: Case, spec: CaseSpec) -> RunContext:
     domain = buildDomainDescription(spec.L, spec.dim, spec.periodic, device, dtype)
 
     scheme = _resolveScheme(spec.scheme or case.scheme)
+    if isinstance(scheme, IncompressibleSPHScheme):
+        spec = replace(spec, calibrateNormalization=True)
     integrationSchemeName = spec.integrationScheme
 
     config, integrator = buildConfig(
@@ -132,6 +134,8 @@ def buildContext(case: Case, spec: CaseSpec) -> RunContext:
         dim=spec.dim,
         kernel=resolveEnum(KernelFunctions, spec.kernel),
         n_h=spec.n_h,
+        # Summation densities entering a pressure solve must represent the
+        # initial rest lattice, rather than its kernel quadrature offset.
         calibrateNormalization=spec.calibrateNormalization,
         densityCorrection=spec.densityCorrection,
         supportMode=resolveEnum(SupportScheme, spec.supportMode),
@@ -266,6 +270,9 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
 
 
 def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
+    if isinstance(ctx.scheme, IncompressibleSPHScheme):
+        from ..modules.timestep.projection import limitProjectionCase
+        case = limitProjectionCase(case)
     system = case.buildSystem(ctx)
     if getattr(ctx.schemeConfig, 'crkEvolution', 'summation') in ('spheral', 'paper'):
         state = system.state
@@ -309,6 +316,9 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
             warnings.warn(f"{schemeName!r} on analytic walls is EXPERIMENTAL: the wall terms are in and match the omni loop where the formulas coincide, but the scheme itself is unreliable on a free surface with impacts (still-tank peak velocity several times that of boundary particles; dfsphReference can go NaN), with analytic walls or without (docs/analytic_boundaries/compact_projection_2026-10-09, section C)", stacklevel=2)
     if case.initialConditions is not None:
         case.initialConditions(ctx, system)
+    if isinstance(ctx.scheme, IncompressibleSPHScheme):
+        from ..caseUtils.projection import initializeProjectionDensity
+        initializeProjectionDensity(ctx, system)
 
     # Setup may replace the spec -- Kidder only learns its time limit once the
     # analytic collapse time exists -- so the loop reads it back from the
@@ -335,6 +345,11 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
     from ..modules.eos import validateMaterialState
     validateMaterialState(system.state, ctx.schemeConfig)
     runningState = system.initializeNewState()
+    if isinstance(ctx.scheme, IncompressibleSPHScheme):
+        # The loop calls the hook only AFTER a step. Cap the first step too,
+        # after case initialization (or checkpoint restore) sets the actual
+        # velocities, supports and viscosity. Setup dt is only a ceiling.
+        ctx.config.dt = case.timestep(ctx, runningState)
 
     # --- output setup -------------------------------------------------------
     outFile = None

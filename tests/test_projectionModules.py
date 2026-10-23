@@ -171,3 +171,87 @@ def test_projectedSystemKeepsLegacyClassAlias():
     from warpSPH.systems.incompressible import ProjectedSystem, DFSPHReferenceSystem
 
     assert DFSPHReferenceSystem is ProjectedSystem
+
+
+def test_band_viscosity_flag_round_trips_and_defaults_off():
+    from warpSPH.configurations.incompressible import IncompressibleSPHConfig, incompressibleConfigToDict, dictToIncompressibleSPHConfig
+    c = IncompressibleSPHConfig()
+    assert not c.bandViscosity
+    c.bandViscosity = True
+    assert dictToIncompressibleSPHConfig(incompressibleConfigToDict(c)).bandViscosity
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+def test_band_viscosity_enters_predictor_and_does_not_move_wall_particles(monkeypatch, enabled):
+    from warpSPH.schemes.incompressible import band2018pb as band
+    from warpSPH.modules.incompressible import stages
+
+    state = NS(kinds=torch.tensor([0, 1]), positions=torch.zeros(2, 2),
+               velocities=torch.zeros(2, 2), masses=torch.ones(2),
+               densities=torch.ones(2), pressures=torch.zeros(2))
+    system = NS(state=state, t=0.)
+    config = NS()
+    scheme = NS(fluid=NS(restDensity=1.), bandViscosity=enabled)
+    diffusion = torch.tensor([[2., 0.], [4., 0.]])
+    monkeypatch.setattr(band, 'requireProjectedStep', lambda *a: None)
+    monkeypatch.setattr(band, '_rebuildAdjacency', lambda *a: None)
+    monkeypatch.setattr(band, 'computeDensities', lambda *a: torch.ones(2))
+    monkeypatch.setattr(band, 'bandBoundaryUnknownMask', lambda *a: torch.zeros(2, dtype=torch.bool))
+    monkeypatch.setattr(band, 'enforceDirichlet', lambda *a: None)
+    monkeypatch.setattr(band, 'projectedUpdate', lambda *a: None)
+    monkeypatch.setattr(stages, 'computeGravity', lambda *a: torch.zeros(2, 2))
+    monkeypatch.setattr(stages, 'computeForcing', lambda *a, **kw: torch.zeros(2, 2))
+    monkeypatch.setattr(stages, 'computeVelocityDiffusion', lambda *a, **kw: diffusion)
+    entered = []
+
+    def pressure(*a, **kw):
+        entered.append(kw['vStar'].clone())
+        return torch.zeros(2, 2), torch.zeros(2), 0, 0.
+
+    monkeypatch.setattr(band, '_solve', pressure)
+    band.band2018pb_step(system, .1, config, scheme)
+    expected = torch.tensor([[.2 if enabled else 0., 0.], [0., 0.]])
+    torch.testing.assert_close(entered[0], expected)
+    torch.testing.assert_close(state.velocities, expected)
+    torch.testing.assert_close(state.positions[1], torch.zeros(2))
+
+
+@pytest.mark.parametrize('mode', ['density', 'divergence'])
+def test_reference_pressure_correction_is_invariant_under_density_units(mode):
+    """A physical-pressure preconditioner must scale with the force operator."""
+    from warpSPH.cases import importAll
+    from warpSPH.runner import getCase, prepareContext, CaseSpec
+    from warpSPH.modules.incompressible.operators import rebuildAdjacency
+    from warpSPH.modules.incompressible.reference import solveReference
+
+    importAll()
+    case = getCase('periodicChannel')
+    results = []
+    for rho0 in (1., 1000.):
+        spec = CaseSpec(caseName=case.name, scheme='iisph', nx=16, L=1., dim=2,
+                        n_h=4., dt=.001, device='cpu', kernel='Wendland2',
+                        supportMode='SuperSymmetric', quiet=True, cudaGraph=False,
+                        params={**case.params, 'shearWave': True})
+        ctx = prepareContext(case, spec)
+        ctx.schemeConfig.fluid.restDensity = rho0
+        system = case.buildSystem(ctx)
+        case.initialConditions(ctx, system)
+        state = system.state
+        fluid = state.kinds == 0
+        state.densities[fluid] *= 1 + .02 * torch.sin(2 * torch.pi * state.positions[fluid, 0])
+        velocity = torch.zeros_like(state.velocities)
+        velocity[fluid, 0] = .1 * torch.sin(2 * torch.pi * state.positions[fluid, 0])
+        solver = ctx.schemeConfig.solverConfig.pressureSolver
+        solver.maxIterations = 12
+        solver.tolerance = 0.
+        adjacency = rebuildAdjacency(state, system, ctx.config)
+        acceleration, pressure, iterations, _ = solveReference(
+            state, ctx.config, ctx.schemeConfig, adjacency, vEnter=velocity,
+            rho0=rho0, warmStart=torch.zeros_like(state.densities),
+            opDt=.001**(2 if mode == 'density' else 1), solverCfg=solver,
+            minIters=12, fluidMask=fluid, mode=mode)
+        assert iterations == 12
+        results.append((acceleration[fluid], pressure[fluid] / rho0))
+    tolerance = 5e-5 if results[0][0].dtype == torch.float32 else 2e-10
+    for actual, expected in zip(results[1], results[0]):
+        assert torch.linalg.vector_norm(actual - expected) < tolerance * torch.linalg.vector_norm(expected)
