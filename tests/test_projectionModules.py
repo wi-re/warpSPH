@@ -180,7 +180,7 @@ def _nativeIisphFixture(device, dim, contact, rho0=1000.0, wrappedWall=False):
         points[:, 1] = 0
         g = torch.zeros_like(x)
         g[:, 1] = -9.81
-    scheme = NS(fluid=NS(restDensity=rho0), iisph=IISPHConfig())
+    scheme = NS(fluid=NS(restDensity=rho0), iisph=IISPHConfig(), rigidBodies=[])
     state.densities = computeDensities(state, config, scheme, adj, wall=False)
     coefficients = computeIISPHCoefficients(state, config, scheme, adj, contactPoints=points)
     boundaryAcceleration = computeIISPHBoundaryPressureAcceleration(
@@ -226,7 +226,7 @@ def test_iisphDirichletDensityReachesPressureSolve(monkeypatch):
     def pressure(currentState, config, schemeConfig, velocity, dt, adjacency, **kwargs):
         from warpSPH.modules.iisph import computeIISPHCoefficients
         coefficients = computeIISPHCoefficients(currentState, config, schemeConfig, adjacency,
-            boundaryIntegrals=kwargs['boundaryIntegrals'], contactPoints=kwargs['contactPoints'])
+            contactPoints=kwargs['contactPoints'])
         torch.testing.assert_close(currentState.densities, expected)
         torch.testing.assert_close(coefficients.densityRatio, expected / scheme.fluid.restDensity)
         raise ReachedPressureSolve

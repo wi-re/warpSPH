@@ -3,15 +3,14 @@
 from dataclasses import dataclass
 from typing import NamedTuple
 from types import SimpleNamespace
-import math
 import torch
 from warpSPHCore.linalg import CheckSchedule, runStationary
-from warpSPHCore.type_config import get_torch_precision
 from .operators import (IISPHKernelData, computeIISPHKernelGeometry, launchIISPHKernel,
     pairArguments, geometryParameters, computeIISPHDensityRate, computeIISPHPressureOperator,
     computeIISPHPressureAcceleration)
 from .contactWeights import IISPHContactWeights, computeIISPHContactWeights
 from .boundaryPressureAcceleration import computeIISPHBoundaryPressureAcceleration
+from .boundaryIntegrals import computeIISPHBoundaryIntegrals
 
 
 @dataclass
@@ -44,26 +43,6 @@ def computeIISPHCoefficients(state, config, schemeConfig, adjacency, *, boundary
     evaluated or retained by these coefficients.
     """
     rho0 = schemeConfig.fluid.restDensity
-    if not math.isfinite(rho0) or rho0 <= 0 or len(state.positions) == 0:
-        raise ValueError("IISPH requires a nonempty state and positive rest density")
-    if state.positions.shape[1] not in (2, 3):
-        raise NotImplementedError("IISPH supports 2D and 3D")
-    fields = [state.positions, state.supports, state.masses, state.velocities]
-    if any(v.requires_grad for v in fields):
-        raise NotImplementedError("IISPH has no autograd contract")
-    if any(v.dtype != get_torch_precision() or v.device != state.positions.device for v in fields):
-        raise ValueError("IISPH fields must share the bootstrapped precision and device")
-    if not bool((torch.isfinite(state.masses) & (state.masses > 0)).all()):
-        raise ValueError("IISPH requires finite positive particle masses")
-    if not bool((state.supports == state.supports[0]).all()) or not bool((state.supports > 0).all()):
-        raise NotImplementedError("IISPH requires fixed common support")
-    if not bool(((state.kinds == 0) | (state.kinds == 1)).all()):
-        raise NotImplementedError("IISPH supports fluid and static boundary samples; no ghost rows")
-    fluid = state.kinds == 0
-    if not bool(fluid.any()):
-        raise ValueError("IISPH requires fluid particles")
-    if bool((state.velocities[~fluid] != 0).any()):
-        raise NotImplementedError("IISPH supports static bodies only")
     pairs = computeIISPHKernelGeometry(state, config, adjacency)
     volume = (state.masses / rho0).contiguous()
     kinds = state.kinds.to(torch.int32).contiguous()
@@ -89,28 +68,25 @@ def computeIISPHCoefficients(state, config, schemeConfig, adjacency, *, boundary
 
 
 def solveIISPH(state, config, schemeConfig, acceleration, dt, adjacency, previousPressure=None, *,
-               boundaryIntegrals=None, contactPoints=None, gravity=None):
+               contactPoints=None, gravity=None):
     """Assemble and solve IISPH at fixed geometry with physical-pressure carry.
 
     The signed statistic uses the new diagonal and old off-diagonal iterate,
     averaged over all fluid rows. Tolerance is a percentage of rest density.
     The nonpressure acceleration supplies a temporary predicted velocity;
     simulation positions and velocities remain untouched.
-    Pressure coefficients, contact interpolation and gravity extrapolation
-    are local to this solve. The known wall acceleration contributes to
-    both the source and the final pressure acceleration.
+    Boundary integrals, pressure coefficients, contact interpolation and gravity
+    extrapolation are local to this solve. The known wall acceleration contributes
+    to both the source and the final pressure acceleration.
     No input field is modified; the caller applies the returned acceleration.
     """
     policy = schemeConfig.iisph
     rho0 = schemeConfig.fluid.restDensity
     fluid = state.kinds == 0
     policy.validate()
-    if not math.isfinite(dt) or dt <= 0:
-        raise ValueError("IISPH requires a finite positive timestep")
     if previousPressure is None:
         previousPressure = torch.zeros_like(state.masses)
-    if acceleration.requires_grad or previousPressure.requires_grad:
-        raise NotImplementedError("IISPH has no autograd contract")
+    boundaryIntegrals = computeIISPHBoundaryIntegrals(state, config, schemeConfig)
     coefficients = computeIISPHCoefficients(state, config, schemeConfig, adjacency,
         boundaryIntegrals=boundaryIntegrals, contactPoints=contactPoints)
     boundaryAcceleration = computeIISPHBoundaryPressureAcceleration(state, config,

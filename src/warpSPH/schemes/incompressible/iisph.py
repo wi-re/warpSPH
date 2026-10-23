@@ -9,7 +9,7 @@ from ...modules.boundaryConditions import enforceDirichlet, computeForcing, enfo
 from ...modules.density import computeDensities
 from ...modules.gravity import computeGravity, computeBodyForce
 from ...modules.deltaSPH import computeVelocityDiffusion
-from ...modules.iisph import (computeIISPHBoundaryIntegrals, computeIISPHContactPoints,
+from ...modules.iisph import (computeIISPHContactPoints,
                              solveIISPH, assembleIISPHUpdate, maskIISPHUpdate)
 
 __all__ = ['iisph_step']
@@ -42,8 +42,7 @@ def iisph_step(
         gravity = computeGravity(currentState, config, schemeConfig, adjacency)
         acceleration = gravity + computeBodyForce(currentState, schemeConfig)
 
-    with record_function('[warpSPH] - [IISPH - 05] pressure boundary geometry'):
-        boundaryIntegrals = computeIISPHBoundaryIntegrals(currentState, config, schemeConfig)
+    with record_function('[warpSPH] - [IISPH - 05] boundary contact points'):
         contactPoints = computeIISPHContactPoints(currentState, schemeConfig)
 
     with record_function('[warpSPH] - [IISPH - 06] viscosity'):
@@ -57,7 +56,7 @@ def iisph_step(
     with record_function('[warpSPH] - [IISPH - 08] pressure projection'):
         result = solveIISPH(currentState, config, schemeConfig, acceleration, dt,
                             adjacency, previousPressure=currentState.pressures,
-                            boundaryIntegrals=boundaryIntegrals, contactPoints=contactPoints, gravity=gravity)
+                            contactPoints=contactPoints, gravity=gravity)
 
     with record_function('[warpSPH] - [IISPH - 09] update'):
         currentState.pressures = result.pressure

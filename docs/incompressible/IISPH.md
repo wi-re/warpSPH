@@ -9,13 +9,14 @@ retains its composed DFSPH formulation.
 
 `schemes/incompressible/iisph.py` follows the numbered module-call layout
 of delta-SPH: Core adjacency, density, Dirichlet conditions, forces,
-boundary geometry, pressure solve, derivative assembly and update boundary
+boundary contacts, pressure solve, derivative assembly and update boundary
 conditions. It does not advance positions or velocities.
 
 `modules/iisph` exposes ordinary functions:
 
 - `computeIISPHBoundaryIntegrals(state, config, schemeConfig)` returns the
   analytic provider's raw per-body geometry, or `None` for sampled walls.
+  The pressure solver calls this internally.
 - `computeIISPHContactPoints(state, schemeConfig)` returns closest surface
   points when contact pressure is selected, independently of the integrals.
 - `computeIISPHDensityRate(state, field, coefficients)` applies continuity.
@@ -23,9 +24,10 @@ conditions. It does not advance positions or velocities.
   applies the linear pressure force; `computeIISPHPressureOperator` composes
   force and continuity.
 - `solveIISPH(state, config, schemeConfig, acceleration, dt, adjacency,
-  previousPressure=None, boundaryIntegrals=None, contactPoints=None, gravity=None)`
-  assembles the pressure coefficients, contact-pressure weights, exact Jacobi
-  diagonal, and known gravity extrapolation inside the solve. It returns an
+  previousPressure=None, contactPoints=None, gravity=None)`
+  evaluates boundary integrals and assembles pressure coefficients,
+  contact-pressure weights, exact Jacobi diagonal, and known gravity
+  extrapolation inside the solve. It returns an
   `IISPHResult` without modifying input fields. The supplied nonpressure
   acceleration forms a local predicted velocity inside the solver; it does
   not advance the simulation velocity. Omit previous pressure for a
@@ -138,7 +140,7 @@ There is no shifting, divergence pass or no-penetration position correction.
 The particle/periodic operator supports 2D and 3D, one fluid, common fixed
 support, kind-0 fluid and kind-1 stationary solids. Analytic solid integrals
 currently support 2D Wendland C2/C4. Moving bodies, ghost rows, adaptive
-supports and autograd are rejected. CUDA graph capture is not implemented.
+supports and autograd are unsupported. CUDA graph capture is not implemented.
 
 Initial masses and geometry must be calibrated before stepping. Preserve
 free-surface kernel deficiency; do not calibrate it away. IISPH initialization
