@@ -41,6 +41,7 @@ def configureScheme(ctx: RunContext) -> None:
     ctx.schemeConfig.diffusionParams.inviscid = False
     ctx.schemeConfig.diffusionParams.viscidNu = ctx.param('nu')
     ctx.schemeConfig.shiftProperties.active = ctx.param('shifting')
+    ctx.schemeConfig.iisph.clampPressure = False
 
 
 def buildSystem(ctx: RunContext):

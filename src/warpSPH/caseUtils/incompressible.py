@@ -1,16 +1,4 @@
-"""What the `divergenceFree` cases share.
-
-Currently one thing: the lattice pre-relaxation every one of them wants before
-its initial condition is imposed. A perfectly regular lattice is an unstable
-equilibrium for SPH -- it is also the configuration where the summation density
-is *lowest* (`DFSPH_IMPROVEMENT_PLAN.md` §1.1), so a run started on one spends
-its first steps resolving lattice noise rather than the physics under test.
-Jittering and then pressure-relaxing removes that transient.
-
-Extracted verbatim from `cases/periodic/tgv.py`, which had the only copy, when
-`shearWave` turned out to need exactly the same thing. `tgv`'s numbers are
-asserted by `tests/test_physics.py` and are unchanged by the move.
-"""
+"""Lattice initialization shared by the incompressible periodic cases."""
 
 from __future__ import annotations
 
@@ -36,18 +24,16 @@ def _maybeProgress(iterable, enabled, description):
 def relaxLattice(ctx, system, steps: int, dt: float, jitter: float) -> None:
     """Jitter the sampled lattice and pressure-relax it in place.
 
-    Runs `steps` constant-density (shifting) solves on a scratch state with the
+    Runs `steps` pressure solves on a scratch state with the
     velocities zeroed, displacing positions by `dt**2 * a_p` each time, then
     copies the relaxed positions back onto `system.state`. A no-op when
-    `steps` is 0.
+    `steps` is 0. Native IISPH calibrates uniform masses first and uses its
+    own pressure operator; the composed schemes retain their shifting solve.
 
-    Not for free-surface states: the solve's source is `rho0 - rhoStar` with
-    `rhoStar` clamped at `0.9`, so a surface layer (which legitimately reads
-    ~0.5) is driven toward that floor every step. On a surface state the
-    shifts are O(10%) of the domain per step and the blob collapses within a
-    few steps (`DFSPH_IMPROVEMENT_PLAN.md` Part 23) -- the guard below fails
-    loudly instead. Jitter only (`shuffleParticles` with `shiftIters=0`) is
-    the safe setup for those.
+    Not for free-surface states: their legitimate kernel density deficit
+    would be treated as a bulk density error and compact the surface.
+    Jitter only (`shuffleParticles` with `shiftIters=0`) is the safe setup
+    for those. The guard rejects a minimum density below `0.9*rho0`.
     """
     if not steps:
         return
@@ -55,6 +41,13 @@ def relaxLattice(ctx, system, steps: int, dt: float, jitter: float) -> None:
     from warpSPHCore import SupportScheme, buildVerletList
 
     from ..modules import computeDensities, shuffleParticles, solveIncompressible
+    from ..enumTypes import IncompressibleSPHScheme
+
+    nativeIISPH = ctx.scheme == IncompressibleSPHScheme.iisph
+    if nativeIISPH:
+        from .projection import initializeProjectionDensity
+        from ..modules.iisph import computeIISPHContactPoints, solveIISPH
+        initializeProjectionDensity(ctx, system)
 
     state = system.initializeNewState()
     # `divergenceFree_step` allocates the pressure array on the first step it runs
@@ -83,7 +76,7 @@ def relaxLattice(ctx, system, steps: int, dt: float, jitter: float) -> None:
         raise ValueError(
             f'relaxLattice: the jittered state has a free surface '
             f'(min density {minDensity:.4g} < 0.9 * rho0 = {0.9 * rho0:.4g}); the '
-            f'constant-density solve would compact it toward the clamp floor. '
+            f'pressure relaxation would compact its free surface. '
             f'Jitter only instead (shuffleParticles with shiftIters=0).')
 
     # `progress` is tri-state (None = auto), so resolve it the same way the
@@ -102,10 +95,18 @@ def relaxLattice(ctx, system, steps: int, dt: float, jitter: float) -> None:
             **neighborSearchOptions(ctx.config))
         state.state.densities = computeDensities(state.state, ctx.config, ctx.schemeConfig, adjacency)
         state.state.pressures[:] = 0.0
-        accel, _, _, _ = solveIncompressible(
-            particles=state.state, config=ctx.config, schemeConfig=ctx.schemeConfig,
-            adjacency=adjacency,
-            dvdt=torch.zeros_like(state.state.velocities), dt=dt, verbose=False)
+        if nativeIISPH:
+            contactPoints, coverageFailure = computeIISPHContactPoints(state.state, state.contactBoundaryProvider)
+            pressure = solveIISPH(state.state, ctx.config, ctx.schemeConfig,
+                torch.zeros_like(state.state.velocities), dt, adjacency,
+                analyticProvider=state.analyticBoundaryProvider, boundarySupport=state.boundarySupport,
+                contactPoints=contactPoints, contactCoverageFailure=coverageFailure)
+            accel = pressure.acceleration
+        else:
+            accel, _, _, _ = solveIncompressible(
+                particles=state.state, config=ctx.config, schemeConfig=ctx.schemeConfig,
+                adjacency=adjacency,
+                dvdt=torch.zeros_like(state.state.velocities), dt=dt, verbose=False)
         state.state.positions = state.state.positions + dt * dt * accel
 
     system.state.positions = state.state.positions.clone()

@@ -316,6 +316,50 @@ def test_iisphInitializationCalibratesMassesOnceAndLeavesOrdinaryKernels(monkeyp
     assert scheme.analyticWallMass == factor
 
 
+@pytest.mark.parametrize('device', ['cpu', pytest.param('cuda', marks=pytest.mark.skipif(
+    not torch.cuda.is_available(), reason='CUDA'))])
+def test_iisphLatticeRelaxationUsesNativePressureAndCalibratedMasses(monkeypatch, device):
+    from warpSPH.runner.runner import prepareContext
+    from warpSPH.runner.caseSpec import CaseSpec
+    from warpSPH.cases.periodic.tgv import tgvCase
+    from warpSPH.caseUtils.incompressible import relaxLattice
+    from warpSPH.caseUtils.projection import initializeProjectionDensity
+    from warpSPHCore.type_config import get_torch_precision
+    from warpSPHCore.util.latticeDensity import latticeDensityFactor
+    import warpSPH.modules as modules
+    from warpSPH.modules import iisph
+
+    spec = CaseSpec(caseName='tgv', scheme='iisph', params=dict(tgvCase.params)).merged(**tgvCase.defaults).merged(
+        nx=16, kernel='Wendland4', n_h=4., device=device, precision=str(get_torch_precision()).split('.')[-1],
+        plot=False, store=False, show=False, quiet=True, progress=False)
+    ctx = prepareContext(tgvCase, spec)
+    system = tgvCase.buildSystem(ctx)
+    expectedMasses = system.state.masses * latticeDensityFactor(ctx.config.kernel, 4., 2)
+    originalPositions = system.state.positions.clone()
+    originalSolve = iisph.solveIISPH
+    calls = []
+
+    def unexpected(*args, **kwargs):
+        pytest.fail('Native IISPH initialization must not use the legacy shifting solve')
+
+    def observed(state, config, scheme, acceleration, dt, adjacency, **kwargs):
+        assert not config.calibrateNormalization
+        assert not scheme.iisph.clampPressure
+        torch.testing.assert_close(state.masses, expectedMasses, rtol=0, atol=0)
+        assert not bool(state.velocities.any())
+        calls.append(1)
+        return originalSolve(state, config, scheme, acceleration, dt, adjacency, **kwargs)
+
+    monkeypatch.setattr(modules, 'solveIncompressible', unexpected)
+    monkeypatch.setattr(iisph, 'solveIISPH', observed)
+    relaxLattice(ctx, system, 2, .001, .01)
+    assert len(calls) == 2
+    assert not torch.equal(system.state.positions, originalPositions)
+    assert not bool(system.state.velocities.any())
+    initializeProjectionDensity(ctx, system)
+    torch.testing.assert_close(system.state.masses, expectedMasses, rtol=0, atol=0)
+
+
 @pytest.mark.parametrize('representation,providerPresent,sampled', [
     ('auto', False, True), ('auto', True, False), ('particles', True, True),
 ])

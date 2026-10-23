@@ -127,6 +127,12 @@ pressure-mean or source-mean projection. On disordered SPH particles a
 constant pressure can produce a force, so pressure centering would change
 the discrete problem.
 
+Periodic TGV and shear-wave cases explicitly disable the pressure floor.
+Their lattice initializer uses native IISPH when that scheme is selected,
+with uniform mass calibration applied before the relaxation solves. It
+relaxes positions at zero velocity before imposing the case's velocity field.
+The composed schemes retain their existing initialization solve.
+
 ## Configuration
 
 `IncompressibleSPHConfig.iisph` is an `IISPHConfig`, serialized under `iisph`.
