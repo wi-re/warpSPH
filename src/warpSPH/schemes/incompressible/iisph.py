@@ -5,7 +5,6 @@ from warpSPHCore.profiling import record_function
 from warpSPHIntegrators.drivers.mechanics.projection import kick, drift
 from ...configurations import SimulationConfig, IncompressibleSPHConfig
 from ...configurations.compute import neighborSearchOptions
-from ...enumTypes import AdaptiveSupportScheme
 from ...systems.incompressible import ProjectedSystem
 from ...modules.boundaryConditions import enforceDirichlet, computeForcing
 from ...modules.gravity import computeGravity, computeBodyForce
@@ -23,8 +22,6 @@ def iisph_step(
     schemeConfig: IncompressibleSPHConfig,
     verbose=False,
 ):
-    if schemeConfig.adaptiveSupportScheme != AdaptiveSupportScheme.NoScheme:
-        raise NotImplementedError('IISPH requires fixed common support')
     currentState = system.state
 
     with record_function('[warpSPH] - [IISPH - 01] entering boundary conditions'):
