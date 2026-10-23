@@ -10,7 +10,7 @@ from warpSPHCore.type_config import get_torch_precision
 from .operators import (IISPHKernelData, computeIISPHKernelGeometry, launchIISPHKernel,
     pairArguments, geometryParameters, computeIISPHDensityRate, computeIISPHPressureOperator,
     computeIISPHPressureAcceleration)
-from .boundary import IISPHContactWeights, computeIISPHContactWeights
+from .contactWeights import IISPHContactWeights, computeIISPHContactWeights
 
 
 @dataclass
@@ -30,16 +30,17 @@ class IISPHCoefficients(NamedTuple):
     wallGradient: torch.Tensor
     gradientSum: torch.Tensor
     diagonal: torch.Tensor
-    gravityAcceleration: torch.Tensor
     contactWeights: IISPHContactWeights = None
 
 
-def computeIISPHCoefficients(state, config, schemeConfig, adjacency, boundary=None, *, gravity=None):
+def computeIISPHCoefficients(state, config, schemeConfig, adjacency, *, boundaryIntegrals=None, contactPoints=None):
     """Return fixed-position tensor coefficients; no state or policy is retained.
 
     Static kind-1 samples use rest volumes, as do the kind-0 fluid unknowns.
     Density is read from state after Dirichlet conditions are enforced.
     The diagonal includes the nonlocal contact-pressure interpolation.
+    Raw analytic geometry supplies the wall gradient; no gravity term is
+    evaluated or retained by these coefficients.
     """
     rho0 = schemeConfig.fluid.restDensity
     if not math.isfinite(rho0) or rho0 <= 0 or len(state.positions) == 0:
@@ -69,35 +70,30 @@ def computeIISPHCoefficients(state, config, schemeConfig, adjacency, boundary=No
     G = torch.empty_like(state.positions)
     c = torch.empty_like(state.positions)
     diagonal = torch.empty_like(state.masses)
-    wallGradient = torch.zeros_like(state.positions) if boundary is None else boundary.gradient
-    sampled = boundary is None or boundary.sampled
+    wallGradient = torch.zeros_like(state.positions)
+    if boundaryIntegrals is not None:
+        massFactor = float(getattr(schemeConfig, 'analyticWallMass', 1.0))
+        wallGradient = massFactor * boundaryIntegrals.out['G'].sum(0).to(state.positions)
+    sampled = boundaryIntegrals is None
     launchIISPHKernel('coefficients', state, pairArguments(pairs) +
         [volume, kinds, sampled, wallGradient, densityRatio, G, c, diagonal])
-    gravityAcceleration = torch.zeros_like(state.positions)
     contact = None
-    if boundary is not None and boundary.contactPoints is not None:
-        points = boundary.contactPoints.contiguous()
+    if contactPoints is not None:
+        points = contactPoints.contiguous()
         contact = computeIISPHContactWeights(state, config, points, G, volume)
         launchIISPHKernel('contact_diagonal', state, pairArguments(pairs) +
             [volume, kinds, state.positions, points, state.supports,
              G, c, contact.denominator, *geometryParameters(state, config), diagonal])
-        if gravity is not None and schemeConfig.iisph.contactGravity:
-            if boundary.sampled:
-                launchIISPHKernel('sampled_gravity', state, pairArguments(pairs) +
-                    [volume, kinds, state.positions, points, gravity,
-                     *geometryParameters(state, config)[:2], gravityAcceleration])
-            else:
-                gravityAcceleration = (-torch.einsum('na,nab->nb', gravity, boundary.covariance)
-                    - ((state.positions-points)*gravity).sum(-1, keepdim=True)*G)
-                gravityAcceleration = torch.where(fluid[:, None], gravityAcceleration, 0)
-    return IISPHCoefficients(pairs, volume, densityRatio, G, c, diagonal, gravityAcceleration, contact)
+    return IISPHCoefficients(pairs, volume, densityRatio, G, c, diagonal, contact)
 
 
-def solveIISPH(state, config, schemeConfig, velocity, dt, coefficients, previousPressure=None):
+def solveIISPH(state, config, schemeConfig, velocity, dt, coefficients, previousPressure=None, *, boundaryAcceleration=None):
     """Solve pressure from explicit coefficients and physical-pressure carry.
 
     The signed statistic uses the new diagonal and old off-diagonal iterate,
     averaged over all fluid rows. Tolerance is a percentage of rest density.
+    boundaryAcceleration is the known pressure extrapolation at the wall,
+    included in both the source and final pressure acceleration.
     No input field is modified; the caller applies the returned acceleration.
     """
     policy = schemeConfig.iisph
@@ -110,9 +106,11 @@ def solveIISPH(state, config, schemeConfig, velocity, dt, coefficients, previous
         previousPressure = torch.zeros_like(state.masses)
     if velocity.requires_grad or previousPressure.requires_grad:
         raise NotImplementedError("IISPH has no autograd contract")
+    if boundaryAcceleration is None:
+        boundaryAcceleration = torch.zeros_like(state.positions)
     dt2 = dt * dt
     b = (1 - coefficients.densityRatio - dt * computeIISPHDensityRate(state, velocity, coefficients)
-         - dt2 * computeIISPHDensityRate(state, coefficients.gravityAcceleration, coefficients))
+         - dt2 * computeIISPHDensityRate(state, boundaryAcceleration, coefficients))
     b = torch.where(fluid, b, 0)
     q = torch.where(fluid, 0.5 * previousPressure / rho0, 0)
     diagonal = dt2 * coefficients.diagonal
@@ -133,5 +131,5 @@ def solveIISPH(state, config, schemeConfig, velocity, dt, coefficients, previous
     if result.termination == 'nonfinite':
         raise FloatingPointError('Nonfinite IISPH pressure iteration')
     return IISPHResult(result.x*rho0,
-        computeIISPHPressureAcceleration(state, result.x, coefficients)+coefficients.gravityAcceleration,
+        computeIISPHPressureAcceleration(state, result.x, coefficients)+boundaryAcceleration,
         result.iterations, result.stats[-1], result.termination, b)
