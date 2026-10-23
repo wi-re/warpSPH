@@ -122,6 +122,7 @@ def test_configRoundTripPreservesPressureSchedulesAndAllShiftingFields():
     config.solverConfig.pressureSolver.convergenceCheckSchedule = "every"
     config.solverConfig.divergenceFreeSolver.convergenceCheckSchedule = "adaptive"
     config.iisph.relaxationFactor = 0.25
+    config.iisph.clampPressure = False
     config.iisph.boundaryPressure = "contactShepard"
     config.shiftProperties.correctdrhodt = True
     config.shiftProperties.implicitSolverThreshold = 0.023
@@ -440,7 +441,8 @@ def _denseIisphKernels(state, config, points=None):
 @pytest.mark.parametrize('device', ['cpu', pytest.param('cuda', marks=pytest.mark.skipif(
     not torch.cuda.is_available(), reason='CUDA'))])
 @pytest.mark.parametrize('dim,contact', [(2, False), (2, True), (3, False), (3, True)])
-def test_nativeIisphForceContinuityAndExactDiagonal(device, dim, contact):
+@pytest.mark.parametrize('clampPressure', [True, False])
+def test_nativeIisphForceContinuityAndExactDiagonal(device, dim, contact, clampPressure):
     from warpSPH.modules.iisph import computeIISPHPressureAcceleration, computeIISPHDensityRate, solveIISPH
     # Independent small dense F/C oracle. Unequal volumes, unequal density,
     # disordered positions and static samples distinguish IISPH from DFSPH.
@@ -494,7 +496,8 @@ def test_nativeIisphForceContinuityAndExactDiagonal(device, dim, contact):
     torch.testing.assert_close(coefficients.diagonal, (C@F).diagonal(), rtol=6e-6, atol=6e-6)
 
     from warpSPH.configurations import IISPHConfig
-    policy = IISPHConfig(minIterations=6, maxIterations=6, relaxationFactor=.25, maxErrorPercent=0)
+    policy = IISPHConfig(minIterations=6, maxIterations=6, relaxationFactor=.25, maxErrorPercent=0,
+        clampPressure=clampPressure)
     previous = q*rho0
     dt = .01
     fixture.scheme.iisph = policy
@@ -510,8 +513,13 @@ def test_nativeIisphForceContinuityAndExactDiagonal(device, dim, contact):
     valid = fluid & (diagonal.abs() > 1.e-9)
     for _ in range(6):
         off = A@old-diagonal*old
-        new = torch.where(valid, (.75*old+.25*(b-off)/torch.where(valid, diagonal, 1)).clamp_min(0), 0)
-        error = torch.where(new != 0, rho0*(diagonal*new+off-b), 0)[fluid].mean()
+        new = .75*old+.25*(b-off)/torch.where(valid, diagonal, 1)
+        if clampPressure:
+            new = torch.where(valid, new.clamp_min(0), 0)
+            error = torch.where(new != 0, rho0*(diagonal*new+off-b), 0)[fluid].mean()
+        else:
+            new = torch.where(valid, new, 0)
+            error = (rho0*(A@old-b))[fluid].abs().mean()
         old = new
     torch.testing.assert_close(actual.pressure/rho0, old, rtol=1.e-5, atol=1.e-5)
     torch.testing.assert_close(actual.acceleration.flatten(),

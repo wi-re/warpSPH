@@ -10,6 +10,8 @@ class IISPHConfig:
     maxIterations: int = 100
     maxErrorPercent: float = 0.01
     relaxationFactor: float = 0.5
+    # Disable the free-surface pressure floor when signed pressure is admissible.
+    clampPressure: bool = True
     # auto: analytic if a provider is present, otherwise sampled particles.
     boundaryRepresentation: str = "auto"
     # self: static boundary with no pressure unknown of its own.

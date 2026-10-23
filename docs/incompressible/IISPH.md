@@ -113,11 +113,19 @@ nonlocal contact interpolation. Each relaxed Jacobi step evaluates `A q`
 through force and continuity reductions. The scheme stores physical `p`,
 and starts the next solve from half the previous pressure.
 
-The stopping statistic follows the IISPH reference policy: signed density
-error on pressure-active rows, evaluated using the new diagonal and old
+With `clampPressure=True`, the stopping statistic follows the IISPH reference
+policy: signed density error on pressure-active rows, evaluated using the new diagonal and old
 off-diagonal iterate, averaged over all fluid rows. It is neither an
 absolute residual norm nor a divergence-free convergence test. Checks occur
 each iteration, after the configured minimum.
+
+`clampPressure=False` allows signed pressure and stops on the mean absolute
+residual of the input iterate, so positive and negative residuals cannot
+cancel. This is an explicit choice for domains without a free surface,
+such as periodic TGV. The solver retains the original source and applies no
+pressure-mean or source-mean projection. On disordered SPH particles a
+constant pressure can produce a force, so pressure centering would change
+the discrete problem.
 
 ## Configuration
 
@@ -128,14 +136,15 @@ It is independent of `solverConfig`'s DFSPH and shifting solver settings.
 | --- | --- | --- |
 | `minIterations` | 2 | Minimum pressure iterations |
 | `maxIterations` | 100 | Iteration budget |
-| `maxErrorPercent` | 0.01 | Signed mean density error, percent of `rho0` |
+| `maxErrorPercent` | 0.01 | Density error tolerance, percent of `rho0`; statistic depends on `clampPressure` |
 | `relaxationFactor` | 0.5 | Fixed Jacobi relaxation; wider supports may require a smaller value |
+| `clampPressure` | `True` | Nonnegative pressure floor; set `False` to allow signed pressure |
 | `boundaryRepresentation` | `auto` | `analytic` with a provider; otherwise `particles` |
 | `boundaryPressure` | `self` | `self` or `contactShepard` |
 | `contactGravity` | `True` | Affine gravity extension for `contactShepard` |
 
 `self` gives static solids no pressure unknown of their own. It retains the
-fluid's self-pressure wall force. `contactShepard` reconstructs a nonnegative
+fluid's self-pressure wall force. `contactShepard` reconstructs a
 Shepard pressure value at the closest solid contact, inside every pressure
 iteration. With gravity enabled it extends that value into the solid as
 `q(x)=q(contact)+g.(x-contact)`. The known affine acceleration enters both the

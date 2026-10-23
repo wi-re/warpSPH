@@ -1,4 +1,4 @@
-"""Stateless native IISPH coefficients and positive Jacobi pressure solve."""
+"""Stateless native IISPH coefficients and relaxed Jacobi pressure solve."""
 
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -74,8 +74,10 @@ def solveIISPH(state, config, schemeConfig, acceleration, dt, adjacency, previou
                contactPoints=None, contactCoverageFailure=None, contactGravity=True, gravity=None):
     """Assemble and solve IISPH at fixed geometry with physical-pressure carry.
 
-    The signed statistic uses the new diagonal and old off-diagonal iterate,
-    averaged over all fluid rows. Tolerance is a percentage of rest density.
+    Nonnegative pressure uses the reference signed statistic with the new
+    diagonal and old off-diagonal iterate. Signed pressure uses the mean
+    absolute residual of the input iterate.
+    Tolerance is a percentage of rest density.
     The nonpressure acceleration supplies a temporary predicted velocity;
     simulation positions and velocities remain untouched.
     Boundary integrals, pressure coefficients, contact interpolation and gravity
@@ -122,6 +124,7 @@ def solveIISPH(state, config, schemeConfig, acceleration, dt, adjacency, previou
     denominator = torch.where(valid, diagonal, 1)
     omega = policy.relaxationFactor
     fluidCount = fluid.sum()
+    clampPressure = policy.clampPressure
     # endregion
 
     # region Run the pressure solver
@@ -130,8 +133,13 @@ def solveIISPH(state, config, schemeConfig, acceleration, dt, adjacency, previou
             restVolumes, densityRatio, gradientSum, wallGradient,
             contactPoints=contactPoints, contactAdjacency=contactAdjacency,
             contactDenominator=contactDenominator) - diagonal * old
-        new = torch.where(valid, ((1-omega)*old + omega*(b-off)/denominator).clamp_min(0), 0)
-        errors = torch.where(new != 0, rho0*(diagonal*new + off-b), 0)
+        new = (1-omega)*old + omega*(b-off)/denominator
+        if clampPressure:
+            new = torch.where(valid, new.clamp_min(0), 0)
+            errors = torch.where(new != 0, rho0*(diagonal*new + off-b), 0)
+        else:
+            new = torch.where(valid, new, 0)
+            errors = torch.where(fluid, rho0*(diagonal*old + off-b).abs(), 0)
         return new, errors.sum() / fluidCount, None
 
     schedule = CheckSchedule(SimpleNamespace(), 'iisph', 'every',
