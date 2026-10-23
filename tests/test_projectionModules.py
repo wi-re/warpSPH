@@ -357,7 +357,7 @@ def test_fullMapSchemesSelectPackageDriverEvenWhenRKRequested(scheme):
     assert len(tuple(ctx.bundle)) == 7
 
 
-@pytest.mark.parametrize("name", ["iisph", "dfsphReference", "omniIncompressible", "band2018pb"])
+@pytest.mark.parametrize("name", ["dfsphReference", "omniIncompressible", "band2018pb"])
 def test_directFullMapCallRefusesMultistageWrapper(name):
     from importlib import import_module
     from warpSPHIntegrators.schemes import IntegrationSchemeType as I

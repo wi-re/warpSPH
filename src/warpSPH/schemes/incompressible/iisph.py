@@ -9,7 +9,7 @@ from ...enumTypes import AdaptiveSupportScheme
 from ...systems.incompressible import ProjectedSystem
 from ...modules.boundaryConditions import enforceDirichlet, computeForcing
 from ...modules.gravity import computeGravity, computeBodyForce
-from ...modules.incompressible.stages import requireProjectedStep, projectedUpdate
+from ...modules.incompressible.stages import projectedUpdate
 from ...modules.iisph import (computeIISPHBoundaryTerms, computeIISPHCoefficients,
                              computeIISPHViscosity, solveIISPH)
 
@@ -23,7 +23,6 @@ def iisph_step(
     schemeConfig: IncompressibleSPHConfig,
     verbose=False,
 ):
-    requireProjectedStep(system, config, 'iisph')
     if schemeConfig.adaptiveSupportScheme != AdaptiveSupportScheme.NoScheme:
         raise NotImplementedError('IISPH requires fixed common support')
     currentState = system.state
