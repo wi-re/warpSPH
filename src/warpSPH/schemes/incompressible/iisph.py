@@ -1,22 +1,17 @@
-"""Native IISPH stage ordering; all numerical work lives in modules.iisph.
+"""Native IISPH: boundary terms, prediction, one pressure solve and drift."""
 
-Entering BCs -> adjacency -> density/coefficients -> nonpressure predictor
--> one pressure projection -> kick/drift -> update and diagnostics.
-The package ProjectedStep driver consumes this complete state map once.
-"""
-
+from warpSPHCore import SupportScheme, buildVerletList
 from warpSPHCore.profiling import record_function
+from warpSPHIntegrators.drivers.mechanics.projection import kick, drift
 from ...configurations import SimulationConfig, IncompressibleSPHConfig
+from ...configurations.compute import neighborSearchOptions
+from ...enumTypes import AdaptiveSupportScheme
 from ...systems.incompressible import ProjectedSystem
-from ...modules.incompressible.operators import rebuildAdjacency
-from ...modules.iisph.stages import (
-    prepareIISPHStep,
-    buildIISPHOperator,
-    predictIISPHVelocity,
-    solveIISPHPressure,
-    advanceIISPHState,
-    finishIISPHStep,
-)
+from ...modules.boundaryConditions import enforceDirichlet, computeForcing
+from ...modules.gravity import computeGravity, computeBodyForce
+from ...modules.incompressible.stages import requireProjectedStep, projectedUpdate
+from ...modules.iisph import (computeIISPHBoundaryTerms, computeIISPHCoefficients,
+                             computeIISPHViscosity, solveIISPH)
 
 __all__ = ['iisph_step']
 
@@ -28,24 +23,54 @@ def iisph_step(
     schemeConfig: IncompressibleSPHConfig,
     verbose=False,
 ):
-    with record_function('[warpSPH] - [IISPH - 01] entering boundary conditions'):
-        prepareIISPHStep(system, dt, config, schemeConfig)
-
+    requireProjectedStep(system, config, 'iisph')
+    if schemeConfig.adaptiveSupportScheme != AdaptiveSupportScheme.NoScheme:
+        raise NotImplementedError('IISPH requires fixed common support')
     currentState = system.state
+
+    with record_function('[warpSPH] - [IISPH - 01] entering boundary conditions'):
+        enforceDirichlet(system, system.t, dt, config, schemeConfig)
+
     with record_function('[warpSPH] - [IISPH - 02] adjacency'):
-        adjacency = rebuildAdjacency(currentState, system, config)
+        adjacency = buildVerletList(currentState, config.domain,
+            verletScale=config.verletScale, supportMode=SupportScheme.SuperSymmetric,
+            priorNeighborhood=system.adjacency, verbose=False, **neighborSearchOptions(config))
+        system.adjacency = adjacency
 
-    with record_function('[warpSPH] - [IISPH - 03] density and pressure coefficients'):
-        operator = buildIISPHOperator(currentState, config, schemeConfig, adjacency)
+    with record_function('[warpSPH] - [IISPH - 03] static wall terms'):
+        gravity = computeGravity(currentState, config, schemeConfig, adjacency)
+        boundary = computeIISPHBoundaryTerms(currentState, config, schemeConfig, gravity)
 
-    with record_function('[warpSPH] - [IISPH - 04] nonpressure predictor'):
-        predicted = predictIISPHVelocity(system, dt, config, schemeConfig, adjacency, operator)
+    with record_function('[warpSPH] - [IISPH - 04] density and pressure coefficients'):
+        coefficients = computeIISPHCoefficients(currentState, config, schemeConfig, adjacency, boundary)
+        currentState.densities = coefficients.densityRatio * schemeConfig.fluid.restDensity
 
-    with record_function('[warpSPH] - [IISPH - 05] pressure projection'):
-        result = solveIISPHPressure(currentState, dt, operator, predicted, schemeConfig.iisph)
+    with record_function('[warpSPH] - [IISPH - 05] gravity and body force'):
+        acceleration = computeGravity(currentState, config, schemeConfig, adjacency)
+        acceleration = acceleration + computeBodyForce(currentState, schemeConfig)
 
-    with record_function('[warpSPH] - [IISPH - 06] pressure kick and position drift'):
-        advanceIISPHState(currentState, dt, predicted, operator.fluid, result)
+    with record_function('[warpSPH] - [IISPH - 06] viscosity'):
+        acceleration = acceleration + computeIISPHViscosity(currentState, config, schemeConfig, adjacency)
 
-    with record_function('[warpSPH] - [IISPH - 07] update and boundary conditions'):
-        return finishIISPHStep(system, dt, config, schemeConfig, adjacency, result, verbose)
+    with record_function('[warpSPH] - [IISPH - 07] forcing and velocity prediction'):
+        forcing = computeForcing(system, dt, system.t, config, schemeConfig)
+        acceleration = acceleration + forcing / currentState.masses.view(-1, 1)
+        fluid = (currentState.kinds == 0)[:, None]
+        predicted = kick(currentState.velocities, dt, acceleration, mask=fluid)
+
+    with record_function('[warpSPH] - [IISPH - 08] pressure projection'):
+        result = solveIISPH(currentState, config, schemeConfig, predicted, dt,
+                            coefficients, previousPressure=currentState.pressures)
+
+    with record_function('[warpSPH] - [IISPH - 09] pressure kick and position drift'):
+        currentState.velocities = kick(predicted, dt, result.acceleration, mask=fluid)
+        currentState.positions = drift(currentState.positions, dt, currentState.velocities, mask=fluid)
+        currentState.pressures = result.pressure
+
+    with record_function('[warpSPH] - [IISPH - 10] update and boundary conditions'):
+        update = projectedUpdate(system, dt, config, schemeConfig)
+        update.iisphResult = result
+        if verbose:
+            print(f'[iisph] t={system.t+dt:.6g} iterations={result.iterations} '
+                  f'density error={result.error:.6g} termination={result.termination}')
+        return update, adjacency, currentState, ([], [result.error, 0.0])

@@ -1,12 +1,12 @@
-"""Reusable native IISPH solver, static wall coupling and predictor terms.
+"""Stateless native IISPH pressure projection and static-wall coupling."""
 
-Numerical policy is explicit in IISPHConfig, passed to each solve. Spatial
-state belongs to an IISPHOperator instance; stages own no global run state.
-"""
+from .solver import IISPHCoefficients, IISPHResult, computeIISPHCoefficients, solveIISPH
+from .boundary import IISPHBoundaryTerms, computeIISPHBoundaryTerms
+from .operators import (computeIISPHDensityRate, computeIISPHPressureAcceleration,
+                        computeIISPHPressureOperator)
+from .viscosity import computeIISPHViscosity
 
-from .solver import IISPHOperator, IISPHResult
-from .boundary import IISPHBoundary, buildIISPHBoundary
-from .viscosity import iisphViscosity
-
-__all__ = ['IISPHOperator', 'IISPHResult', 'IISPHBoundary',
-           'buildIISPHBoundary', 'iisphViscosity']
+__all__ = ['IISPHCoefficients', 'IISPHResult', 'IISPHBoundaryTerms',
+           'computeIISPHCoefficients', 'computeIISPHBoundaryTerms', 'solveIISPH',
+           'computeIISPHDensityRate', 'computeIISPHPressureAcceleration',
+           'computeIISPHPressureOperator', 'computeIISPHViscosity']

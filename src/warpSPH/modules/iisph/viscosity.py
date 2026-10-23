@@ -3,7 +3,7 @@
 from copy import copy
 
 
-def iisphViscosity(state, config, schemeConfig, adjacency):
+def computeIISPHViscosity(state, config, schemeConfig, adjacency):
     """Configured two-sided fluid viscosity with free-slip static walls.
 
     The shared viscosity divides its kinematic coefficient by density. A

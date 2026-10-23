@@ -5,31 +5,37 @@ replaces the former wrapper around `dfsphReference` with rest-volume
 continuity and density-dependent pressure coefficients. `dfsphReference`
 retains its composed DFSPH formulation.
 
-## Ownership
+## Functional API and ownership
 
-- `schemes/incompressible/iisph.py` contains seven numbered profiling
-  sections that delegate boundary setup, adjacency, density/coefficients,
-  prediction, projection, time advancement and result bookkeeping. It has
-  no numerical expressions, model switches or run-state globals.
-- `modules/iisph/solver.py` exposes `IISPHOperator` and `IISPHResult`.
-  The fixed-geometry operator can be reused independently of the scheme.
-- `modules/iisph/boundary.py` supplies static solid terms and
-  optional closest-contact pressure extrapolation.
-- `modules/iisph/operators.py` prepares kernel geometry, and
-  `modules/iisph/wp_operators.py` implements device reductions using
-  Core's neighbor lists, kernel functions and precision. Core's stationary
-  driver owns iteration and nonfinite termination.
-- `modules/iisph/viscosity.py` supplies the configured predictor viscosity.
-- `modules/iisph/stages.py` owns the predictor, warm-start handoff, update
-  bookkeeping and calls to Integrators' kick/drift primitives. The package
-  `ProjectedStep` driver continues to own the full timestep lifecycle.
+`schemes/incompressible/iisph.py` follows the numbered module-call layout
+of delta-SPH: boundary conditions, Core adjacency, wall terms, density and
+coefficients, forces, pressure solve, Integrators kick/drift, and update.
+The scheme orders those calls and assigns their results to the current state.
 
-Use `from warpSPH.modules.iisph import IISPHOperator, IISPHBoundary` for the
-reusable public API. The old `modules.incompressible` package-level exports
-remain aliases of these classes. Its former native IISPH source files have
-been removed. Configuration remains in `IncompressibleSPHConfig.iisph` and
-round-trips through the existing codecs; no configuration or numerical
-default changed in the module extraction.
+`modules/iisph` exposes ordinary functions:
+
+- `computeIISPHBoundaryTerms(state, config, schemeConfig, gravity)` evaluates
+  the static solid integrals and contact geometry.
+- `computeIISPHCoefficients(state, config, schemeConfig, adjacency, boundary)`
+  returns tensor data for the fixed-position pressure solve.
+- `computeIISPHDensityRate(state, field, coefficients)` applies continuity.
+- `computeIISPHPressureAcceleration(state, normalizedPressure, coefficients)`
+  applies the linear pressure force; `computeIISPHPressureOperator` composes
+  force and continuity.
+- `solveIISPH(state, config, schemeConfig, velocity, dt, coefficients,
+  previousPressure=None)` returns an `IISPHResult` without modifying inputs.
+  Omit previous pressure for a cold start.
+- `computeIISPHViscosity(state, config, schemeConfig, adjacency)` evaluates
+  the configured fluid viscosity.
+
+`IISPHCoefficients`, `IISPHBoundaryTerms`, and contact/kernel data are plain
+records of tensors. They retain no simulation state, configuration, callable,
+or solver instance. Coefficients belong to the supplied positions and must
+be recomputed after particles move. The Warp kernels in `wp_operators.py`
+use Core neighbor lists, kernel functions and precision. Core's stationary
+driver controls iteration; the package `ProjectedStep` driver owns the
+full timestep lifecycle. Configuration is explicit in
+`IncompressibleSPHConfig.iisph` and uses the existing codecs.
 
 There is no SciPy dependency or assembled pressure matrix in this path.
 Geometry and iterative fields stay on the state's CPU or CUDA device.

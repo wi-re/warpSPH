@@ -6,45 +6,20 @@ distinct from extrapolating a separate pressure at every boundary particle.
 The optional affine extension is q(x_solid)=q(contact)+g.(x_solid-contact).
 """
 
-from dataclasses import dataclass
+from typing import NamedTuple
 from types import SimpleNamespace
 import torch
 from warpSPHCore import buildVerletList, SupportScheme
 from ...configurations.compute import neighborSearchOptions
-from .operators import IISPHPairs
+from .operators import IISPHKernelData, computeIISPHKernelGeometry, launchIISPHKernel
 
 
-class ContactPressure:
-    def __init__(self, operator, points):
-        state, config = operator.state, operator.config
-        self.operator = operator
-        self.points = points.contiguous()
-        query = SimpleNamespace(positions=self.points, supports=state.supports)
-        # Contact-centered support differs from the fluid-centered support;
-        # reusing the original pairs would truncate the extrapolation stencil.
-        adjacency = buildVerletList(query, config.domain, supportMode=SupportScheme.Gather,
-            referenceParticles=state, **neighborSearchOptions(config))
-        self.pairs = IISPHPairs(query, config, adjacency, reference=state)
-        self.denominator = torch.empty_like(operator.volume)
-        self.pairs.launch('contact_denominator', [self.pairs.j, self.pairs.starts,
-            self.pairs.counts, self.pairs.weights, operator.volume, operator.kinds,
-            operator.G, self.denominator])
-        missing = operator.fluid & (operator.G.square().sum(-1) > 1.e-24) & (self.denominator <= 0)
-        if bool(missing.any()):
-            raise ValueError("IISPH contact pressure has no fluid support at a solid contact")
-        operator.pairs.launch('contact_diagonal', operator.pairs.base() +
-            [operator.volume, operator.kinds, state.positions, self.points, state.supports,
-             operator.G, operator.c, self.denominator, *operator.pairs.geometryParameters, operator.diagonal])
-
-    def value(self, q):
-        out = torch.empty_like(q)
-        self.pairs.launch('contact_value', [self.pairs.j, self.pairs.starts, self.pairs.counts,
-            self.pairs.weights, self.operator.volume, self.operator.kinds, self.denominator, q, out])
-        return out
+class IISPHContactWeights(NamedTuple):
+    pairs: IISPHKernelData
+    denominator: torch.Tensor
 
 
-@dataclass
-class IISPHBoundary:
+class IISPHBoundaryTerms(NamedTuple):
     density: torch.Tensor
     gradient: torch.Tensor
     sampled: bool
@@ -52,24 +27,23 @@ class IISPHBoundary:
     gravity: torch.Tensor = None
     covariance: torch.Tensor = None
 
-    def attach(self, operator):
-        if self.contactPoints is None:
-            return
-        operator.contact = ContactPressure(operator, self.contactPoints)
-        if self.gravity is None:
-            return
-        if self.sampled:
-            operator.pairs.launch('sampled_gravity', operator.pairs.base() +
-                [operator.volume, operator.kinds, operator.state.positions,
-                 self.contactPoints, self.gravity, *operator.pairs.geometryParameters[:2], operator.constantAcceleration])
-        else:
-            # Cov[a,b] = integral (x_solid-x_i)[a] grad_i W[b].
-            operator.constantAcceleration = (-torch.einsum('na,nab->nb', self.gravity, self.covariance)
-                - ((operator.state.positions-self.contactPoints)*self.gravity).sum(-1, keepdim=True)*operator.G)
-            operator.constantAcceleration = torch.where(operator.fluid[:, None], operator.constantAcceleration, 0)
+
+def computeIISPHContactWeights(state, config, points, wallGradient, restVolumes):
+    # Contact-centered support differs from fluid-centered support.
+    query = SimpleNamespace(positions=points.contiguous(), supports=state.supports)
+    adjacency = buildVerletList(query, config.domain, supportMode=SupportScheme.Gather,
+        referenceParticles=state, **neighborSearchOptions(config))
+    pairs = computeIISPHKernelGeometry(query, config, adjacency, reference=state)
+    denominator = torch.empty_like(restVolumes)
+    launchIISPHKernel('contact_denominator', state, [pairs.indices, pairs.offsets,
+        pairs.counts, pairs.weights, restVolumes, state.kinds.to(torch.int32), wallGradient, denominator])
+    missing = (state.kinds == 0) & (wallGradient.square().sum(-1) > 1.e-24) & (denominator <= 0)
+    if bool(missing.any()):
+        raise ValueError("IISPH contact pressure has no fluid support at a solid contact")
+    return IISPHContactWeights(pairs, denominator)
 
 
-def buildIISPHBoundary(state, config, schemeConfig, gravity):
+def computeIISPHBoundaryTerms(state, config, schemeConfig, gravity):
     policy = schemeConfig.iisph
     policy.validate()
     provider = getattr(schemeConfig, 'boundaryProvider', None)
@@ -111,4 +85,4 @@ def buildIISPHBoundary(state, config, schemeConfig, gravity):
             raise ValueError("IISPH contact geometry did not cover every fluid query")
         points = state.positions - distance[:, None]*normal.to(state.positions)
         extension = gravity if policy.contactGravity else None
-    return IISPHBoundary(B, G, not analytic, points, extension, covariance)
+    return IISPHBoundaryTerms(B, G, not analytic, points, extension, covariance)

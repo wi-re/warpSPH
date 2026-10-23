@@ -152,7 +152,7 @@ def test_configRoundTripPreservesPressureSchedulesAndAllShiftingFields():
 def _nativeIisphFixture(device, dim, contact, rho0=1000.0, wrappedWall=False):
     from warpSPHCore import DomainDescription, KernelFunctions, SupportScheme, buildVerletList
     from warpSPHCore.type_config import get_torch_precision
-    from warpSPH.modules.iisph import IISPHOperator, IISPHBoundary
+    from warpSPH.modules.iisph import computeIISPHCoefficients, IISPHBoundaryTerms
 
     dtype = get_torch_precision()
     x = torch.tensor([[-.31, .14], [-.06, .17], [.24, .12], [-.28, .42], [.01, .39], [.27, .43],
@@ -176,68 +176,75 @@ def _nativeIisphFixture(device, dim, contact, rho0=1000.0, wrappedWall=False):
         points[:, 1] = 0
         g = torch.zeros_like(x)
         g[:, 1] = -9.81
-        boundary = IISPHBoundary(torch.zeros_like(state.masses), torch.zeros_like(x), True, points, g)
-    return IISPHOperator(state, config, adj, rho0, boundary=boundary)
+        boundary = IISPHBoundaryTerms(torch.zeros_like(state.masses), torch.zeros_like(x), True, points, g)
+    scheme = NS(fluid=NS(restDensity=rho0))
+    coefficients = computeIISPHCoefficients(state, config, scheme, adj, boundary)
+    return NS(state=state, config=config, scheme=scheme, coefficients=coefficients)
 
 
 @pytest.mark.parametrize('device', ['cpu', pytest.param('cuda', marks=pytest.mark.skipif(
     not torch.cuda.is_available(), reason='CUDA'))])
 @pytest.mark.parametrize('dim,contact', [(2, False), (2, True), (3, False), (3, True)])
 def test_nativeIisphForceContinuityAndExactDiagonal(device, dim, contact):
+    from warpSPH.modules.iisph import computeIISPHPressureAcceleration, computeIISPHDensityRate, solveIISPH
     # Independent small dense F/C oracle. Unequal volumes, unequal density,
     # disordered positions and static samples distinguish IISPH from DFSPH.
-    op = _nativeIisphFixture(device, dim, contact)
-    n = len(op.volume)
-    F = torch.zeros((n*dim, n), dtype=op.volume.dtype, device=device)
-    C = torch.zeros((n, n*dim), dtype=op.volume.dtype, device=device)
-    T = torch.zeros((n, n), dtype=op.volume.dtype, device=device)
+    fixture = _nativeIisphFixture(device, dim, contact)
+    state, coefficients = fixture.state, fixture.coefficients
+    volume, pairs = coefficients.restVolumes, coefficients.pairs
+    fluid, rho0 = state.kinds == 0, fixture.scheme.fluid.restDensity
+    n = len(volume)
+    F = torch.zeros((n*dim, n), dtype=volume.dtype, device=device)
+    C = torch.zeros((n, n*dim), dtype=volume.dtype, device=device)
+    T = torch.zeros((n, n), dtype=volume.dtype, device=device)
     if contact:
-        cp = op.contact.pairs
+        cp = coefficients.contactWeights.pairs
         for i in range(n):
-            if op.contact.denominator[i] > 0:
-                for e in range(int(cp.starts[i]), int(cp.starts[i]+cp.counts[i])):
-                    j = int(cp.j[e])
-                    if op.fluid[j]:
-                        T[i, j] += op.volume[j]*cp.weights[e]/op.contact.denominator[i]
+            if coefficients.contactWeights.denominator[i] > 0:
+                for e in range(int(cp.offsets[i]), int(cp.offsets[i]+cp.counts[i])):
+                    j = int(cp.indices[e])
+                    if fluid[j]:
+                        T[i, j] += volume[j]*cp.weights[e]/coefficients.contactWeights.denominator[i]
     for i in range(n):
-        if not op.fluid[i]:
+        if not fluid[i]:
             continue
         rows = slice(i*dim, (i+1)*dim)
-        C[i, rows] += op.G[i]
-        F[rows, i] -= op.G[i]/op.densityRatio[i]**2
-        F[rows] -= op.G[i, :, None]*T[i, None, :]
-        for e in range(int(op.pairs.starts[i]), int(op.pairs.starts[i]+op.pairs.counts[i])):
-            j = int(op.pairs.j[e])
-            if not op.fluid[j]:
+        C[i, rows] += coefficients.wallGradient[i]
+        F[rows, i] -= coefficients.wallGradient[i]/coefficients.densityRatio[i]**2
+        F[rows] -= coefficients.wallGradient[i, :, None]*T[i, None, :]
+        for e in range(int(pairs.offsets[i]), int(pairs.offsets[i]+pairs.counts[i])):
+            j = int(pairs.indices[e])
+            if not fluid[j]:
                 continue
-            g = op.pairs.gradient[e]
-            C[i, rows] += op.volume[j]*g
-            C[i, j*dim:(j+1)*dim] -= op.volume[j]*g
-            F[rows, i] -= op.volume[j]*g/op.densityRatio[i]**2
-            F[rows, j] -= op.volume[j]*g/op.densityRatio[j]**2
-    q = torch.linspace(.2, 1.4, n, dtype=op.volume.dtype, device=device)
+            g = pairs.gradient[e]
+            C[i, rows] += volume[j]*g
+            C[i, j*dim:(j+1)*dim] -= volume[j]*g
+            F[rows, i] -= volume[j]*g/coefficients.densityRatio[i]**2
+            F[rows, j] -= volume[j]*g/coefficients.densityRatio[j]**2
+    q = torch.linspace(.2, 1.4, n, dtype=volume.dtype, device=device)
     v = torch.sin(torch.arange(n*dim, dtype=q.dtype, device=device)).reshape(n, dim)
-    torch.testing.assert_close(op.acceleration(q).flatten(), F@q, rtol=4e-6, atol=4e-6)
-    torch.testing.assert_close(op.densityRate(v), C@v.flatten(), rtol=4e-6, atol=4e-6)
-    torch.testing.assert_close(op.diagonal, (C@F).diagonal(), rtol=6e-6, atol=6e-6)
+    torch.testing.assert_close(computeIISPHPressureAcceleration(state, q, coefficients).flatten(), F@q, rtol=4e-6, atol=4e-6)
+    torch.testing.assert_close(computeIISPHDensityRate(state, v, coefficients), C@v.flatten(), rtol=4e-6, atol=4e-6)
+    torch.testing.assert_close(coefficients.diagonal, (C@F).diagonal(), rtol=6e-6, atol=6e-6)
 
     from warpSPH.configurations import IISPHConfig
     policy = IISPHConfig(minIterations=6, maxIterations=6, relaxationFactor=.25, maxErrorPercent=0)
-    previous = q*op.rho0
+    previous = q*rho0
     dt = .01
-    actual = op.solve(v, previous, dt, policy)
-    b = 1-op.densityRatio-dt*(C@v.flatten())-dt**2*(C@op.constantAcceleration.flatten())
+    fixture.scheme.iisph = policy
+    actual = solveIISPH(state, fixture.config, fixture.scheme, v, dt, coefficients, previous)
+    b = 1-coefficients.densityRatio-dt*(C@v.flatten())-dt**2*(C@coefficients.gravityAcceleration.flatten())
     A = dt**2*C@F
     diagonal = A.diagonal()
-    old = .5*previous/op.rho0
-    old[~op.fluid] = 0
-    valid = op.fluid & (diagonal.abs() > 1.e-9)
+    old = .5*previous/rho0
+    old[~fluid] = 0
+    valid = fluid & (diagonal.abs() > 1.e-9)
     for _ in range(6):
         off = A@old-diagonal*old
         new = torch.where(valid, (.75*old+.25*(b-off)/torch.where(valid, diagonal, 1)).clamp_min(0), 0)
-        error = torch.where(new != 0, op.rho0*(diagonal*new+off-b), 0)[op.fluid].mean()
+        error = torch.where(new != 0, rho0*(diagonal*new+off-b), 0)[fluid].mean()
         old = new
-    torch.testing.assert_close(actual.pressure/op.rho0, old, rtol=1.e-5, atol=1.e-5)
+    torch.testing.assert_close(actual.pressure/rho0, old, rtol=1.e-5, atol=1.e-5)
     assert actual.iterations == 6
     assert actual.error == pytest.approx(float(error), rel=2.e-5, abs=.003)
 
@@ -245,67 +252,76 @@ def test_nativeIisphForceContinuityAndExactDiagonal(device, dim, contact):
 def test_nativeIisphDensityUnitsAndDeviceParity():
     a = _nativeIisphFixture('cpu', 2, True, rho0=1.)
     b = _nativeIisphFixture('cpu', 2, True, rho0=1000.)
-    torch.testing.assert_close(a.densityRatio, b.densityRatio)
-    torch.testing.assert_close(a.diagonal, b.diagonal)
+    torch.testing.assert_close(a.coefficients.densityRatio, b.coefficients.densityRatio)
+    torch.testing.assert_close(a.coefficients.diagonal, b.coefficients.diagonal)
     from warpSPH.configurations import IISPHConfig
     policy = IISPHConfig(relaxationFactor=.25)
-    outputs = [op.solve(op.state.velocities, torch.zeros_like(op.volume), .001, policy) for op in (a, b)]
+    from warpSPH.modules.iisph import solveIISPH
+    a.scheme.iisph = b.scheme.iisph = policy
+    outputs = [solveIISPH(op.state, op.config, op.scheme, op.state.velocities, .001,
+                          op.coefficients) for op in (a, b)]
     assert float(outputs[1].pressure.max()) > 0
     torch.testing.assert_close(outputs[0].pressure, outputs[1].pressure/1000)
     torch.testing.assert_close(outputs[0].acceleration, outputs[1].acceleration)
     if torch.cuda.is_available():
         gpu = _nativeIisphFixture('cuda', 2, True)
-        result = gpu.solve(gpu.state.velocities, torch.zeros_like(gpu.volume), .001, policy)
+        gpu.scheme.iisph = policy
+        result = solveIISPH(gpu.state, gpu.config, gpu.scheme, gpu.state.velocities, .001, gpu.coefficients)
         torch.testing.assert_close(result.pressure.cpu(), outputs[1].pressure, rtol=2e-5, atol=.005)
         torch.testing.assert_close(result.acceleration.cpu(), outputs[1].acceleration, rtol=2e-5, atol=2e-5)
         assert result.iterations == outputs[1].iterations
 
 
 def test_nativeIisphViscosityIsFreeSlipAndDissipatesFluidMotion():
-    from warpSPH.modules.iisph import iisphViscosity
+    from warpSPH.modules.iisph import computeIISPHViscosity
     from warpSPH.configurations import IncompressibleSPHConfig
     op = _nativeIisphFixture('cpu', 2, False)
     state = op.state
-    state.densities = op.densityRatio*op.rho0
+    state.densities = op.coefficients.densityRatio*op.scheme.fluid.restDensity
     config = IncompressibleSPHConfig()
-    config.fluid.restDensity = op.rho0
+    config.fluid.restDensity = op.scheme.fluid.restDensity
     config.fluid.fixedSoundSpeed = 10.
     config.diffusionParams.inviscid = False
     config.diffusionParams.viscidNu = .01
     # Stationary sampled walls exert no viscous drag on uniform fluid motion.
-    state.velocities[op.fluid] = torch.tensor([1., 2.], dtype=state.positions.dtype)
+    state.velocities[(op.state.kinds == 0)] = torch.tensor([1., 2.], dtype=state.positions.dtype)
     from warpSPHCore import buildVerletList
     adj = buildVerletList(state, op.config.domain)
-    acceleration = iisphViscosity(state, op.config, config, adj)
+    acceleration = computeIISPHViscosity(state, op.config, config, adj)
     torch.testing.assert_close(acceleration, torch.zeros_like(acceleration))
     # Converging and separating pairs both contribute; net work is negative.
-    state.velocities[op.fluid] = state.positions[op.fluid]
-    acceleration = iisphViscosity(state, op.config, config, adj)
+    state.velocities[(op.state.kinds == 0)] = state.positions[(op.state.kinds == 0)]
+    acceleration = computeIISPHViscosity(state, op.config, config, adj)
     assert float((state.masses[:, None]*state.velocities*acceleration).sum()) < 0
-    assert torch.equal(acceleration[~op.fluid], torch.zeros_like(acceleration[~op.fluid]))
+    assert torch.equal(acceleration[~(op.state.kinds == 0)], torch.zeros_like(acceleration[~(op.state.kinds == 0)]))
 
 
 def test_nativeIisphSampledGravityUsesTheNearestPeriodicWallImage():
     base = _nativeIisphFixture('cpu', 2, True)
     wrapped = _nativeIisphFixture('cpu', 2, True, wrappedWall=True)
-    torch.testing.assert_close(wrapped.densityRatio, base.densityRatio, rtol=3e-6, atol=3e-6)
-    torch.testing.assert_close(wrapped.constantAcceleration, base.constantAcceleration, rtol=3e-6, atol=3e-6)
-    torch.testing.assert_close(wrapped.diagonal, base.diagonal, rtol=3e-6, atol=3e-6)
+    torch.testing.assert_close(wrapped.coefficients.densityRatio, base.coefficients.densityRatio, rtol=3e-6, atol=3e-6)
+    torch.testing.assert_close(wrapped.coefficients.gravityAcceleration, base.coefficients.gravityAcceleration, rtol=3e-6, atol=3e-6)
+    torch.testing.assert_close(wrapped.coefficients.diagonal, base.coefficients.diagonal, rtol=3e-6, atol=3e-6)
 
 
 def test_iisphPoliciesAndPressureCarryDoNotLeakBetweenSolves():
     from dataclasses import asdict
+    from warpSPH.modules.iisph import solveIISPH
     from warpSPH.configurations import IISPHConfig
     first = _nativeIisphFixture('cpu', 2, True)
     other = _nativeIisphFixture('cpu', 2, False)
     short = IISPHConfig(minIterations=2, maxIterations=2, relaxationFactor=.25)
     longer = IISPHConfig(minIterations=6, maxIterations=6, relaxationFactor=.4)
     original = asdict(short), asdict(longer)
-    previous = torch.full_like(first.volume, 1000.)
+    previous = torch.full_like(first.coefficients.restVolumes, 1000.)
     carry = previous.clone()
-    before = first.solve(first.state.velocities, previous, .001, short)
-    between = other.solve(other.state.velocities, previous, .001, longer)
-    after = first.solve(first.state.velocities, previous, .001, short)
+    first.scheme.iisph, other.scheme.iisph = short, longer
+    before = solveIISPH(first.state, first.config, first.scheme, first.state.velocities,
+                        .001, first.coefficients, previous)
+    between = solveIISPH(other.state, other.config, other.scheme, other.state.velocities,
+                         .001, other.coefficients, previous)
+    after = solveIISPH(first.state, first.config, first.scheme, first.state.velocities,
+                       .001, first.coefficients, previous)
     assert (before.iterations, between.iterations, after.iterations) == (2, 6, 2)
     assert (asdict(short), asdict(longer)) == original
     assert torch.equal(previous, carry)
@@ -313,16 +329,18 @@ def test_iisphPoliciesAndPressureCarryDoNotLeakBetweenSolves():
     assert torch.equal(before.acceleration, after.acceleration)
 
 
-def test_iisphProjectionRejectsNonfiniteResultsBeforeStateAdvance():
-    from warpSPH.modules.iisph.stages import solveIISPHPressure
-    state = NS(masses=torch.ones(3), pressures=None, positions=torch.zeros(3, 2))
-    def failed(velocity, previous, dt, policy):
-        assert torch.equal(previous, torch.zeros_like(state.masses))
-        return NS(termination='nonfinite')
+def test_iisphProjectionRejectsNonfiniteResultsBeforeStateAdvance(monkeypatch):
+    from warpSPH.modules.iisph import solveIISPH, solver
+    from warpSPH.configurations import IISPHConfig
+    fixture = _nativeIisphFixture('cpu', 2, True)
+    fixture.scheme.iisph = IISPHConfig()
+    state = fixture.state
+    before = state.positions.clone(), state.velocities.clone()
+    monkeypatch.setattr(solver, 'runStationary', lambda *a, **kw: NS(termination='nonfinite'))
     with pytest.raises(FloatingPointError, match='Nonfinite IISPH'):
-        solveIISPHPressure(state, .01, NS(solve=failed), torch.zeros(3, 2), NS())
-    assert state.pressures is None
-    assert torch.equal(state.positions, torch.zeros(3, 2))
+        solveIISPH(state, fixture.config, fixture.scheme, state.velocities, .01, fixture.coefficients)
+    assert torch.equal(state.positions, before[0])
+    assert torch.equal(state.velocities, before[1])
 
 
 @pytest.mark.parametrize("scheme", ["dfsphReference", "iisph", "omniIncompressible", "band2018pb"])
