@@ -2,6 +2,8 @@
 
 Free-surface kernel deficiency remains a physical boundary property; it is
 not filled by increasing particle masses or clipping the measured density.
+IISPH's uniform lattice correction is applied once to particle and solid mass
+here, before density evaluation, so its timestep uses unmodified kernels.
 """
 
 import torch
@@ -38,6 +40,14 @@ def initializeProjectionDensity(ctx, system):
     from ..enumTypes import IncompressibleSPHScheme
     if ctx.scheme == IncompressibleSPHScheme.iisph:
         config, schemeConfig = ctx.config, ctx.schemeConfig
+        if config.calibrateNormalization:
+            from warpSPHCore.util.latticeDensity import latticeDensityFactor
+            factor = latticeDensityFactor(config.kernel, float(config.n_h), state.positions.shape[1])
+            state.masses = state.masses * factor
+            schemeConfig.analyticWallMass = float(getattr(schemeConfig, 'analyticWallMass', 1.0)) * factor
+            config.calibrateNormalization = False
+            ctx.scratch['initialMassCalibration'] = dict(factor=factor,
+                kernel=config.kernel.name, n_h=float(config.n_h), dimension=state.positions.shape[1])
         state.densities = computeDensities(state, config, schemeConfig, system.adjacency,
             boundaryRepresentation=schemeConfig.iisph.boundaryRepresentation,
             wallMassDensity=schemeConfig.fluid.restDensity)

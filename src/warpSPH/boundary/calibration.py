@@ -42,7 +42,12 @@ def calibrateAnalyticLattice(ctx, system, interior, touch=1.5, verbose=False):
                              calibrateNormalization=ctx.config.calibrateNormalization)
     rho0 = sc.fluid.restDensity
     st.masses = torch.where(fluid, torch.full_like(st.masses, rho0 * cal['V']), st.masses)
-    sc.analyticWallMass = cal['mu']
+    from ..enumTypes import IncompressibleSPHScheme
+    if ctx.scheme == IncompressibleSPHScheme.iisph and ctx.config.calibrateNormalization:
+        # IISPH applies the common particle/solid mass factor after the case ICs.
+        sc.analyticWallMass = 1.0
+    else:
+        sc.analyticWallMass = cal['mu']
 
     lo, hi = np.array([float(interior.min[0]), float(interior.min[1])]), np.array([float(interior.max[0]), float(interior.max[1])])
     dist = np.array([pos[:, 0].min() - lo[0], pos[:, 1].min() - lo[1], hi[0] - pos[:, 0].max(), hi[1] - pos[:, 1].max()])      # lo x, lo y, hi x, hi y

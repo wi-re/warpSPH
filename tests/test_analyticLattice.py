@@ -71,3 +71,29 @@ def test_normalized_lattice_uses_physical_mass_without_double_normalization():
     gx, gy = np.meshgrid(np.arange(-8, 9), np.arange(-8, 9))
     normalized_weights = wendland2(np.hypot(gx*dx, gy*dx), h) / calibration['S']
     assert calibration['V'] * normalized_weights.sum() == pytest.approx(1., abs=1e-12)
+
+
+def test_iisphAnalyticLatticeDefersTheCommonMassFactorToInitialization():
+    pytest.importorskip('warpSPHBoundaries')
+    from warpSPH.cases import importAll
+    from warpSPH.runner import getCase, prepareContext, CaseSpec
+    from warpSPH.caseUtils.projection import initializeProjectionDensity
+    from warpSPHCore.util.latticeDensity import latticeDensityFactor
+
+    importAll()
+    case = getCase('dambreak')
+    spec = CaseSpec(caseName=case.name, scheme='iisph',
+        params={**case.params, 'wallRepresentation': 'analytic', 'calibratedLattice': True,
+                'obstacleActive': False}).merged(**case.defaults).merged(
+            scheme='iisph', nx=20, n_h=4., kernel='Wendland2', device='cpu', quiet=True)
+    ctx = prepareContext(case, spec)
+    system = case.buildSystem(ctx)
+    case.initialConditions(ctx, system)
+    assert ctx.config.calibrateNormalization
+    assert ctx.schemeConfig.analyticWallMass == 1.
+    originalMasses = system.state.masses.clone()
+    factor = latticeDensityFactor(ctx.config.kernel, ctx.config.n_h, 2)
+    initializeProjectionDensity(ctx, system)
+    assert not ctx.config.calibrateNormalization
+    assert ctx.schemeConfig.analyticWallMass == factor
+    torch.testing.assert_close(system.state.masses, originalMasses*factor, rtol=0, atol=0)

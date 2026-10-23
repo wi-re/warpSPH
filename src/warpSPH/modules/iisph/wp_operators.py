@@ -28,13 +28,13 @@ def kernels(dim):
     @wp.kernel
     def geometry(x: wp.array(dtype=V), reference: wp.array(dtype=V),
                  h: wp.array(dtype=scalar_t), ii: wp.array(dtype=wp.int64), jj: wp.array(dtype=wp.int64),
-                 length: V, periodic: I, kernel: wp.int32, norm: scalar_t,
+                 length: V, periodic: I, kernel: wp.int32,
                  grad: wp.array(dtype=V), weights: wp.array(dtype=scalar_t)):
         e = wp.tid()
         i = ii[e]
         d = displacement(x[i], reference[jj[e]], length, periodic)
-        grad[e] = norm * sphGradient_(d, h[i], kernel)
-        weights[e] = norm * sphKernel_(d, h[i], kernel)
+        grad[e] = sphGradient_(d, h[i], kernel)
+        weights[e] = sphKernel_(d, h[i], kernel)
 
     @wp.kernel
     def coefficients(jj: wp.array(dtype=wp.int64), starts: wp.array(dtype=wp.int64),
@@ -135,21 +135,21 @@ def kernels(dim):
                          volume: wp.array(dtype=scalar_t), kinds: wp.array(dtype=wp.int32),
                          x: wp.array(dtype=V), contact: wp.array(dtype=V), h: wp.array(dtype=scalar_t),
                          G: wp.array(dtype=V), c: wp.array(dtype=V), denominator: wp.array(dtype=scalar_t),
-                         length: V, periodic: I, kernel: wp.int32, norm: scalar_t,
+                         length: V, periodic: I, kernel: wp.int32,
                          diagonal: wp.array(dtype=scalar_t)):
         i = wp.int64(wp.tid())
         delta = scalar_t(0.0)
         if kinds[i] == 0:
             if denominator[i] > scalar_t(0.0):
                 d = displacement(x[i], contact[i], length, periodic)
-                tii = volume[i] * norm * sphKernel_(d, h[i], kernel) / denominator[i]
+                tii = volume[i] * sphKernel_(d, h[i], kernel) / denominator[i]
                 delta -= tii * wp.dot(c[i], G[i])
             for k in range(wp.int32(counts[i])):
                 e = starts[i] + wp.int64(k)
                 j = jj[e]
                 if kinds[j] == 0 and denominator[j] > scalar_t(0.0):
                     d = displacement(x[i], contact[j], length, periodic)
-                    tji = volume[i] * norm * sphKernel_(d, h[j], kernel) / denominator[j]
+                    tji = volume[i] * sphKernel_(d, h[j], kernel) / denominator[j]
                     delta += volume[j] * tji * wp.dot(grad[e], G[j])
         diagonal[i] += delta
 

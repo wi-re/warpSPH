@@ -114,9 +114,13 @@ currently support 2D Wendland C2/C4. Moving bodies, ghost rows, adaptive
 supports and autograd are rejected. CUDA graph capture is not implemented.
 
 Initial masses and geometry must be calibrated before stepping. Preserve
-free-surface kernel deficiency; do not calibrate it away. Uniform mass
-calibration and kernel normalization are alternative lattice corrections;
-avoid applying both. The first density report uses the native operator.
+free-surface kernel deficiency; do not calibrate it away. IISPH initialization
+consumes `config.calibrateNormalization`: it applies the lattice factor once
+to every particle mass and to analytic solid packing, then sets that flag
+to false. All subsequent IISPH operations use ordinary kernels and gradients.
+The applied factor is recorded in `ctx.scratch['initialMassCalibration']`.
+Already calibrated inputs keep `config.calibrateNormalization=False` before
+initialization. The first density report uses the shared density function.
 The returned timestep density is the summation at the solve's pre-drift
 positions, as in the IISPH recurrence.
 

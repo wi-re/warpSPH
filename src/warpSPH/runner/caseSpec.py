@@ -256,8 +256,8 @@ _FIELD_HELP = {
     'dim': 'spatial dimension (1, 2 or 3)',
     'L': 'domain edge length',
     'n_h': 'neighbours per smoothing length; converted to targetNeighbors',
-    'calibrateNormalization': 'scale the kernel by 1/L so a perfect lattice reads rho0 '
-                              '(summation density only; LATTICE_DENSITY_PLAN.md); off by default',
+    'calibrateNormalization': 'calibrate lattice sums by 1/L; IISPH applies the factor '
+                              'once to initial particle and solid masses, while other schemes normalize the kernel',
     'densityCorrection': 'subtract eps m W(0,h) from the raw density (Dehnen & Aly '
                          '2012 eq. 18/19, constants from warpSPHCore.util.densityCorrection); '
                          'off by default',

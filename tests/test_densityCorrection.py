@@ -148,8 +148,11 @@ def test_physicalWallDensityIsAddedBeforeCorrection(corrected):
 @pytest.mark.parametrize('representation', ['analytic', 'particles', 'auto'])
 @pytest.mark.parametrize('normalized', [False, True])
 def test_densityEvaluatesPhysicalWallWithoutPressureGeometry(representation, normalized):
+    from copy import copy
     from types import SimpleNamespace as NS
-    from warpSPHCore.util.latticeDensity import latticeDensityFactor
+    from warpSPH.caseUtils.projection import initializeProjectionDensity
+    from warpSPH.enumTypes import IncompressibleSPHScheme
+    from warpSPH.configurations import IISPHConfig
 
     dim, kernel = 2, KernelFunctions.Wendland4
     H = _H(dim, 100.0)
@@ -164,11 +167,19 @@ def test_densityEvaluatesPhysicalWallWithoutPressureGeometry(representation, nor
         return NS(out={'lam': lam})  # No pressure gradient, moments, or contact geometry.
 
     scheme = NS(boundaryProvider=NS(aggregate=aggregate, rigidBodies=[]),
-                rigidBodies=[], analyticWallMass=.83)
+                rigidBodies=[], analyticWallMass=.83, fluid=NS(restDensity=1000.),
+                iisph=IISPHConfig(boundaryRepresentation=representation))
     adjacency = _adjacency(dim, H)
+    if normalized:
+        state = copy(state)
+        ctx = NS(scheme=IncompressibleSPHScheme.iisph, config=config, schemeConfig=scheme,
+                 spec=NS(n_h=config.n_h), scratch={})
+        initializeProjectionDensity(ctx, NS(state=state, adjacency=adjacency))
+        assert not config.calibrateNormalization
+        calls.clear()
     expected = computeDensities(state, config, scheme, adjacency, wall=False)
     if representation != 'particles':
-        packing = .83 * (latticeDensityFactor(kernel, config.n_h, dim) if normalized else 1.)
+        packing = scheme.analyticWallMass
         expected = expected + 1000. * (packing * lam.sum(0))
     actual = computeDensities(state, config, scheme, adjacency,
         boundaryRepresentation=representation, wallMassDensity=1000.)

@@ -94,7 +94,9 @@ class SimulationConfig:
     #: `sum_j m_j W_ij = rho0`). The runner enables it for pressure-projection
     #: schemes; other families opt in for uniform-resolution rest states.
     #:
-    #: **Applied to the summation density only** (`modules/density/density.py`). The gradient,
+    #: IISPH consumes this option during initialization by scaling particle and
+    #: solid masses once, then clears it and uses ordinary kernels thereafter.
+    #: For the other schemes, **applied to the summation density only** (`modules/density/density.py`). The gradient,
     #: divergence, Laplacian, curl and interpolation operators (~130 `OperationProperties(...)` call
     #: sites) keep the unscaled kernel. From a theoretical SPH point of view the same offset
     #: touches every kernel sum, and a consistent correction would scale all of them (via a

@@ -254,6 +254,56 @@ def test_iisphDensityInitializationDoesNotBuildPressureCoefficients(monkeypatch)
     torch.testing.assert_close(state.densities, expected)
 
 
+@pytest.mark.parametrize('kernelName', ['Wendland2', 'Wendland4'])
+@pytest.mark.parametrize('n_h', [2., 4.])
+def test_iisphInitializationCalibratesMassesOnceAndLeavesOrdinaryKernels(monkeypatch, kernelName, n_h):
+    from warpSPHCore import DomainDescription, KernelFunctions, buildVerletList
+    from warpSPHCore.type_config import get_torch_precision
+    from warpSPHCore.util.latticeDensity import latticeDensityFactor
+    from warpSPH.caseUtils.projection import initializeProjectionDensity
+    from warpSPH.enumTypes import IncompressibleSPHScheme
+    from warpSPH.configurations import IISPHConfig
+    from warpSPH.modules.iisph import computeIISPHBoundaryTerms, computeIISPHCoefficients
+
+    dtype, rho0, dx = get_torch_precision(), 1000., .125
+    axis = dx * torch.arange(-4, 5, dtype=dtype)
+    positions = torch.stack(torch.meshgrid(axis, axis, indexing='ij'), -1).reshape(-1, 2)
+    kinds = torch.zeros(len(positions), dtype=torch.int32)
+    kinds[:9] = 1  # Sampled wall masses receive the same calibration as fluid masses.
+    domain = DomainDescription(-torch.ones(2, dtype=dtype), torch.ones(2, dtype=dtype),
+                               torch.zeros(2, dtype=torch.bool), 2)
+    config = NS(domain=domain, kernel=KernelFunctions[kernelName], n_h=n_h,
+                calibrateNormalization=True)
+    scheme = NS(fluid=NS(restDensity=rho0), iisph=IISPHConfig(boundaryRepresentation='particles'),
+                rigidBodies=[], analyticWallMass=1.)
+    state = NS(positions=positions, supports=torch.full((len(positions),), n_h*dx, dtype=dtype),
+        masses=torch.full((len(positions),), rho0*dx**2, dtype=dtype), kinds=kinds,
+        densities=torch.zeros(len(positions), dtype=dtype), velocities=torch.zeros_like(positions))
+    system = NS(state=state, adjacency=buildVerletList(state, domain))
+    ctx = NS(scheme=IncompressibleSPHScheme.iisph, config=config, schemeConfig=scheme,
+             spec=NS(n_h=n_h), scratch={})
+    originalMasses = state.masses.clone()
+    factor = latticeDensityFactor(config.kernel, n_h, 2)
+    initializeProjectionDensity(ctx, system)
+    assert not config.calibrateNormalization
+    assert scheme.analyticWallMass == factor
+    torch.testing.assert_close(state.masses, originalMasses*factor, rtol=0, atol=0)
+    assert float(state.densities[40]) == pytest.approx(rho0, rel=2e-6)
+    calibratedMasses = state.masses.clone()
+
+    def unexpected(*args, **kwargs):
+        pytest.fail('Lattice calibration must not run after initialization')
+
+    # Import the module rather than the util package's same-named function.
+    from importlib import import_module
+    monkeypatch.setattr(import_module('warpSPHCore.util.latticeDensity'), 'latticeDensityFactor', unexpected)
+    initializeProjectionDensity(ctx, system)
+    wall = computeIISPHBoundaryTerms(state, config, scheme)
+    computeIISPHCoefficients(state, config, scheme, system.adjacency, wall)
+    assert torch.equal(state.masses, calibratedMasses)
+    assert scheme.analyticWallMass == factor
+
+
 @pytest.mark.parametrize('device', ['cpu', pytest.param('cuda', marks=pytest.mark.skipif(
     not torch.cuda.is_available(), reason='CUDA'))])
 @pytest.mark.parametrize('dim,contact', [(2, False), (2, True), (3, False), (3, True)])

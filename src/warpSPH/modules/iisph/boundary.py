@@ -65,9 +65,6 @@ def computeIISPHBoundaryTerms(state, config, schemeConfig):
             raise NotImplementedError("IISPH analytic solid integrals currently support 2D")
         aggregate = provider.aggregate(state, float(state.supports[0]), config.kernel, lean=True)
         packing = float(getattr(schemeConfig, 'analyticWallMass', 1.0))
-        if config.calibrateNormalization:
-            from warpSPHCore.util.latticeDensity import latticeDensityFactor
-            packing *= latticeDensityFactor(config.kernel, float(config.n_h), 2)
         G = packing * aggregate.out['G'].sum(0).to(G)
         covariance = packing * aggregate.out['Cov'].sum(0).to(state.positions)
     points = None

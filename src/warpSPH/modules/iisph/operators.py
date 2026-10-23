@@ -3,7 +3,6 @@
 from typing import NamedTuple
 import torch
 import warp as wp
-from warpSPHCore.type_config import scalar_t
 from .wp_operators import kernels
 
 
@@ -30,13 +29,9 @@ def pairArguments(pairs):
 
 def geometryParameters(state, config):
     compiled = kernels(state.positions.shape[1])
-    norm = 1.0
-    if config.calibrateNormalization:
-        from warpSPHCore.util.latticeDensity import latticeDensityFactor
-        norm = latticeDensityFactor(config.kernel, float(config.n_h), state.positions.shape[1])
     return [compiled['V'](*(config.domain.max-config.domain.min).tolist()),
             compiled['I'](*[int(v) for v in config.domain.periodic.tolist()]),
-            config.kernel.value, scalar_t(norm)]
+            config.kernel.value]
 
 
 def computeIISPHKernelGeometry(state, config, adjacency, reference=None):
