@@ -32,8 +32,8 @@ conditions. It does not advance positions or velocities.
   cold start. The gravity extension enters both the source and final pressure
   acceleration. The provider's `Cov` is the first spatial moment of the kernel
   gradient, `integral_solid (x_solid-x_i) tensor grad_i W dV`.
-- `computeIISPHViscosity(state, config, schemeConfig, adjacency)` evaluates
-  the configured fluid viscosity.
+- The scheme calls `modules.deltaSPH.computeVelocityDiffusion` directly,
+  passing the selected boundary representation and the physical particle fields.
 
 `IISPHCoefficients` and contact/kernel data are plain
 records of tensors. They retain no simulation state, configuration, callable,
@@ -114,8 +114,23 @@ extension use the actual wall samples. Analytic walls use solid integrals
 and their first moments. Their dimensionless density contribution is
 multiplied by physical `rho0`.
 
-Viscosity uses the shared configured delta-SPH operator with a normalized
-density view, two-sided fluid interactions and zero wall drag (free slip).
+Viscosity uses the shared delta-SPH operator on physical masses and densities.
+`diffusionParams.approachOnly` selects approaching pairs only (`True`) or
+two-sided diffusion (`False`, the default). The shared projected operator
+converts the configured kinematic viscosity to reference dynamic viscosity
+`mu0 = rho0 * nu`; IISPH has no viscosity adapter or normalized state copy.
+
+Free slip uses `u_mirror = u_wall + w_t - w_n`, where `w = u_fluid - u_wall`.
+The normal component is reflected while the tangential component is retained.
+Sampled walls interpolate fluid velocity at reflected sample positions into
+an independent viscous reference field; stored rigid-body velocities remain
+unchanged. Existing mDBC ghost rows reuse their established boundary field.
+Analytic walls integrate the same local mirror closure through the solid
+Laplacian, using geometric surface normals without evaluating wall pressure.
+The selected boundary representation prevents counting analytic and sampled
+walls together. Wall velocity conditions come from the configured `BCType`;
+use `freeSlip` for the Marrone setup. Omitting walls from diffusion is a
+separate control and does not impose this boundary condition.
 There is no shifting, divergence pass or no-penetration position correction.
 
 ## Supported scope and checks

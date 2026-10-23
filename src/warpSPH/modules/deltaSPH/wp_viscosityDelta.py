@@ -23,8 +23,9 @@ proper, `nu K sum_j (v_ij . x_ij)/|x_ij|^2 gradW_ij V_j` with
 verbatim, which is why ACSPH passes it (ACSPH_PLAN.md Sec. 4.1). Note this is
 still the *normal-projected* form both papers use, not a shear-carrying
 term; and note the `/ mean(rho_i, rho_j)`, which Eq. (25) does not have --
-a caller wanting the literal form on a constant-density state compensates
-exactly by passing `nu * rho0`.
+the shared entry point converts its configured kinematic viscosity to
+`rho0 * nu`, the reference dynamic viscosity. Direct low-level callers use
+that dynamic coefficient on the projected branch.
 `morris=True` (with `inviscid=False`) replaces that branch with the Morris,
 Fox & Zhu (1997) Eq. (8) viscous Laplacian, `sum_j m_j (mu_i + mu_j)/(rho_i
 rho_j) (x_ij . gradW_ij)/(|x_ij|^2 + eta^2) v_ij`, mu = rho nu: the full

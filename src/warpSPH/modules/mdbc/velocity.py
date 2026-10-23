@@ -70,6 +70,7 @@ from ...configurations.weaklyCompressible import WeaklyCompressibleSPHConfig
 
 from ..liu import interpolateLiuLiu
 from ._util import stateHasBoundaryParticles
+from ..boundaryConditions.mirrorVelocity import mirrorVelocity
 from ...utils.syncFree import deviceConstant, ghostSourceIndex, ghostTargetIndex, scatterRows
 
 
@@ -146,8 +147,7 @@ def _slipVelocity(qVelSum, shepValue, bodyVelocity, ghostOffsets, reflect: bool)
     n_b = ghostOffsets / (r_ib.view(-1,1) + 1e-7)
     w = qVel - bodyVelocity
     if reflect:
-        w_n = torch.einsum('nd, nd -> n', w, n_b).view(-1,1) * n_b
-        return bodyVelocity + (w - w_n) - w_n          # = u_body + w_t - w_n
+        return mirrorVelocity(qVel, bodyVelocity, n_b)
     w_t = w - torch.einsum('nd, nd -> n', w, n_b).view(-1,1) * n_b
     return bodyVelocity - w_t
 

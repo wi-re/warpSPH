@@ -94,7 +94,6 @@ def wallViscousPerBody(state: Any, config: Any, schemeConfig: Any, adjacency: An
     if wall is None:
         return None
     from ...modules.deltaSPH import computeVelocityDiffusion
-    from ...modules.analyticBoundary import viscousPrefactor, wallViscousAcceleration
 
     if getattr(schemeConfig, "wallViscosityClosure", "mirror") == "noslipMoment":
         from ...modules.analyticBoundary.wallViscosity import wallNoSlipAcceleration
@@ -103,13 +102,5 @@ def wallViscousPerBody(state: Any, config: Any, schemeConfig: Any, adjacency: An
         return wallNoSlipAcceleration(
             state, config, schemeConfig, adjacency, wall, viscf, perBody=True
         )
-    return wallViscousAcceleration(
-        wall,
-        state.densities,
-        state.velocities,
-        viscousPrefactor(schemeConfig, config, wall.support),
-        wall.support,
-        wallMass=wall.wm,
-        kernel=config.kernel,
-        perBody=True,
-    )
+    from ..analyticBoundary.viscosity import computeWallViscosity
+    return computeWallViscosity(state, config, schemeConfig, wall, perBody=True)

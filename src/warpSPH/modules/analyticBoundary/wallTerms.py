@@ -215,8 +215,8 @@ def wallPressureAccelerationOmni(wall, P, rho, rho0, wallMass=1.0, h=1.0, perBod
 def wallViscousAcceleration(wall, rho, v, fac, h, wallMass=1.0, kernel=KernelFunctions.Wendland2, perBody=False):
     """The wall term of the velocity diffusion of stage 11 through the exact wall Laplacian: free slip ('laplacian':
     the normal relative velocity along the wall normal) or the antisymmetric mirror ('noslipMirror'). `fac` is the
-    prefactor of the pair term, alpha c_s h / xi for the artificial viscosity and 2 (dim + 2) nu = 8 nu for the
-    physical one (the effective kinematic viscosity is fac / 8)."""
+    reference dynamic prefactor of the pair term: rho0 alpha c_s h / xi
+    for artificial viscosity or 8 rho0 nu for physical viscosity in 2D."""
     from warpSPHBoundaries.scene.viscosity import lap_factor
     rho64, v64 = rho.to(F64), v.to(F64)
     dl_all = lap_factor(h, FAMILY[kernel]) * wall.agg.out['lap']
@@ -225,29 +225,29 @@ def wallViscousAcceleration(wall, rho, v, fac, h, wallMass=1.0, kernel=KernelFun
     for bi in range(wall.G.shape[0]):
         gm = wall.G[bi].norm(dim=1)
         nb = wall.G[bi] / gm.clamp(min=1e-300)[:, None]
-        vrel = v64 - _wallVelocity(wall, bi)
         dl = dl_all[bi]
-        if wall.mirror[bi]:
-            part = (-2.0 * (fac / 8.0) * wallMass / rho64 * dl * wall.near)[:, None] * vrel
-        else:
-            un = (vrel * nb).sum(1)
-            part = (-2.0 * (fac / 8.0) * wallMass * un / rho64 * dl * wall.near)[:, None] * nb
+        from .viscosity import mirrorViscousAcceleration
+        part = mirrorViscousAcceleration(v64, _wallVelocity(wall, bi), nb, dl * wall.near,
+            viscosity=fac / 8, wallVolume=wallMass, density=rho64, freeSlip=not wall.mirror[bi])
         out = out + part
         parts.append(part)
     return torch.stack(parts).to(wall.dtype) if perBody else out.to(wall.dtype)
 
 
 def viscousPrefactor(schemeConfig, config, h):
-    """The prefactor `fac` of the pair viscosity of stage 11 (`modules/deltaSPH/wp_viscosityDelta.py`): alpha c_s h / xi
-    (artificial viscosity, `inviscid`) or 2 (dim + 2) nu = 8 nu (physical, 2D). The shear-carrying Morris term has no
-    exact wall Laplacian here."""
+    """Reference dynamic coefficient shared by the projected pair and wall terms.
+
+    rho0 alpha c_s h / xi (artificial) or 8 rho0 nu (physical, 2D).
+    The shear-carrying Morris term has no exact wall Laplacian here.
+    """
     from ...enumTypes import ViscosityTerm
     dp = schemeConfig.diffusionParams
     if getattr(dp, 'viscousTerm', ViscosityTerm.monaghanGingold) == ViscosityTerm.morris1997 and not dp.inviscid:
         raise NotImplementedError('the Morris viscosity has no analytic-wall term')
+    rho0 = float(schemeConfig.fluid.restDensity)
     if dp.inviscid:
-        return float(dp.inviscidAlpha) * float(schemeConfig.fluid.fixedSoundSpeed) * float(h) / XI[config.kernel]
-    return 8.0 * float(dp.viscidNu)
+        return rho0 * float(dp.inviscidAlpha) * float(schemeConfig.fluid.fixedSoundSpeed) * float(h) / XI[config.kernel]
+    return rho0 * 8.0 * float(dp.viscidNu)
 
 
 def wallLoads(accP, accV, x, m, centers):

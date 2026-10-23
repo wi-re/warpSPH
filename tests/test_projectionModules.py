@@ -218,7 +218,7 @@ def test_iisphDirichletDensityReachesPressureSolve(monkeypatch):
     expected[0] = prescribed
     monkeypatch.setattr(iisph, 'computeGravity', lambda *args: torch.zeros_like(state.positions))
     monkeypatch.setattr(iisph, 'computeBodyForce', lambda *args: torch.zeros_like(state.positions))
-    monkeypatch.setattr(iisph, 'computeIISPHViscosity', lambda *args: torch.zeros_like(state.positions))
+    monkeypatch.setattr(iisph, 'computeVelocityDiffusion', lambda *args, **kwargs: torch.zeros_like(state.positions))
 
     class ReachedPressureSolve(Exception):
         pass
@@ -405,8 +405,8 @@ def test_nativeIisphDensityUnitsAndDeviceParity():
         assert result.iterations == outputs[1].iterations
 
 
-def test_nativeIisphViscosityIsFreeSlipAndDissipatesFluidMotion():
-    from warpSPH.modules.iisph import computeIISPHViscosity
+def test_sharedViscosityDissipatesFluidMotionWithoutWallInteractions():
+    from warpSPH.modules.deltaSPH import computeVelocityDiffusion
     from warpSPH.configurations import IncompressibleSPHConfig
     op = _nativeIisphFixture('cpu', 2, False)
     state = op.state
@@ -416,15 +416,17 @@ def test_nativeIisphViscosityIsFreeSlipAndDissipatesFluidMotion():
     config.fluid.fixedSoundSpeed = 10.
     config.diffusionParams.inviscid = False
     config.diffusionParams.viscidNu = .01
-    # Stationary sampled walls exert no viscous drag on uniform fluid motion.
+    # Explicit wall exclusion leaves uniform fluid motion unchanged.
     state.velocities[(op.state.kinds == 0)] = torch.tensor([1., 2.], dtype=state.positions.dtype)
-    from warpSPHCore import buildVerletList
+    from warpSPHCore import buildVerletList, OperationDirection
     adj = buildVerletList(state, op.config.domain)
-    acceleration = computeIISPHViscosity(state, op.config, config, adj)
+    acceleration = computeVelocityDiffusion(state, op.config, config, adj, wall=False,
+        operationMode=OperationDirection.FluidToFluid)
     torch.testing.assert_close(acceleration, torch.zeros_like(acceleration))
     # Converging and separating pairs both contribute; net work is negative.
     state.velocities[(op.state.kinds == 0)] = state.positions[(op.state.kinds == 0)]
-    acceleration = computeIISPHViscosity(state, op.config, config, adj)
+    acceleration = computeVelocityDiffusion(state, op.config, config, adj, wall=False,
+        operationMode=OperationDirection.FluidToFluid)
     assert float((state.masses[:, None]*state.velocities*acceleration).sum()) < 0
     assert torch.equal(acceleration[~(op.state.kinds == 0)], torch.zeros_like(acceleration[~(op.state.kinds == 0)]))
 
@@ -557,7 +559,7 @@ def test_iisphRhsAndIntegratorOwnSeparateUpdates(monkeypatch, override):
     pressureAcceleration = torch.full_like(state.velocities, -.3)
     monkeypatch.setattr(iisph, 'computeGravity', lambda *a: acceleration)
     monkeypatch.setattr(iisph, 'computeBodyForce', lambda *a: torch.zeros_like(acceleration))
-    monkeypatch.setattr(iisph, 'computeIISPHViscosity', lambda *a: torch.zeros_like(acceleration))
+    monkeypatch.setattr(iisph, 'computeVelocityDiffusion', lambda *a, **kwargs: torch.zeros_like(acceleration))
     previousPressures = []
 
     def pressure(current, config, scheme, nonpressure, dt, adjacency, **kwargs):

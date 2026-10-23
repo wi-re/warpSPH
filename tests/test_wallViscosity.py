@@ -102,3 +102,91 @@ def test_the_closure_needs_the_morris_viscosity():
     sc.diffusionParams.inviscid = True
     with pytest.raises(NotImplementedError, match='Morris'):
         computeVelocityDiffusion(st, cfg, sc, adj)
+
+
+def _mirrorViscosityFixture(representation, rho0, device):
+    from types import SimpleNamespace as NS
+    from warpSPHCore import DomainDescription, KernelFunctions, ParticleState, buildVerletList
+    from warpSPHCore.type_config import get_torch_precision
+    from warpSPHBoundaries.scene import AnalyticBoundary, Body, Scene
+    from warpSPHBoundaries.scene.scene import BoxRep
+    from warpSPH.configurations import IncompressibleSPHConfig
+    from warpSPH.configurations.region import BCType
+
+    dtype = get_torch_precision()
+    axis = torch.arange(-.9, 1., .2, dtype=dtype, device=device)
+    x, y = torch.meshgrid(axis, torch.arange(.1, .8, .2, dtype=dtype, device=device), indexing='ij')
+    fluid = torch.stack((x.flatten(), y.flatten()), -1)
+    x, y = torch.meshgrid(axis, torch.arange(-.7, 0., .2, dtype=dtype, device=device), indexing='ij')
+    solid = torch.stack((x.flatten(), y.flatten()), -1)
+    positions = torch.cat((fluid, solid)) if representation == 'particles' else fluid
+    n = len(positions)
+    kinds = torch.zeros(n, dtype=torch.int32, device=device)
+    kinds[len(fluid):] = 1
+    state = ParticleState(positions, torch.full((n,), .8, dtype=dtype, device=device),
+        torch.full((n,), rho0*.04, dtype=dtype, device=device), kinds,
+        torch.full((n,), rho0, dtype=dtype, device=device))
+    state.velocities = torch.zeros_like(positions)
+    state.materials = torch.zeros_like(kinds)
+    domain = DomainDescription(-2*torch.ones(2, dtype=dtype, device=device),
+        2*torch.ones(2, dtype=dtype, device=device), torch.zeros(2, dtype=torch.bool, device=device), 2)
+    config = NS(domain=domain, kernel=KernelFunctions.Wendland4, calibrateNormalization=False)
+    scheme = IncompressibleSPHConfig()
+    scheme.fluid.restDensity = rho0
+    scheme.diffusionParams.inviscid = False
+    scheme.diffusionParams.viscidNu = .01
+    body = Body(bodyId=0, reps=[BoxRep((-10., -10.), (10., 0.), solid='inside')], center=(0., 0.))
+    rigid = NS(bodyID=0, kind=BCType.freeSlip, representation=body,
+        centerOfMass=torch.zeros(2, dtype=dtype, device=device), orientation=0.,
+        linearVelocity=torch.zeros(2, dtype=dtype, device=device), angularVelocity=0.)
+    provider = AnalyticBoundary(Scene([body], str(device)))
+    provider.rigidBodies = scheme.rigidBodies = [rigid]
+    scheme.boundaryProvider = provider
+    return state, config, scheme, buildVerletList(state, domain)
+
+
+@pytest.mark.parametrize('device', ['cpu', pytest.param('cuda', marks=cuda)])
+@pytest.mark.parametrize('representation', ['analytic', 'particles'])
+def test_freeSlipViscosityReflectsNormalVelocityAndPreservesTangential(representation, device):
+    from warpSPH.modules.deltaSPH import computeVelocityDiffusion
+    from warpSPH.configurations.region import BCType
+
+    state, config, scheme, adjacency = _mirrorViscosityFixture(representation, 1000., device)
+    fluid = state.kinds == 0
+    state.velocities[fluid, 0] = 1.
+    tangent = computeVelocityDiffusion(state, config, scheme, adjacency, boundaryRepresentation=representation)
+    torch.testing.assert_close(tangent[fluid], torch.zeros_like(tangent[fluid]), atol=2e-6, rtol=0)
+    if representation == 'analytic':
+        from warpSPH.modules.analyticBoundary import evaluateWall
+        wall = evaluateWall(scheme.boundaryProvider, state, config, scheme, torch.zeros_like(state.velocities))
+        reused = computeVelocityDiffusion(state, config, scheme, adjacency, wall=wall)
+        torch.testing.assert_close(reused[fluid], tangent[fluid], rtol=0, atol=0)
+    # The no-slip control must resist the same tangential motion.
+    scheme.rigidBodies[0].kind = BCType.noSlip
+    noSlip = computeVelocityDiffusion(state, config, scheme, adjacency, boundaryRepresentation=representation)
+    assert float(noSlip[fluid, 0].min()) < -.001
+    scheme.rigidBodies[0].kind = BCType.freeSlip
+    state.velocities.zero_()
+    state.velocities[fluid, 1] = 1.
+    before = state.velocities.clone()
+    normal = computeVelocityDiffusion(state, config, scheme, adjacency, boundaryRepresentation=representation)
+    assert float(normal[fluid, 1].min()) < -.001
+    if representation == 'analytic':
+        reused = computeVelocityDiffusion(state, config, scheme, adjacency, wall=wall)
+        torch.testing.assert_close(reused[fluid], normal[fluid], rtol=0, atol=0)
+    # This is the distinction from simply omitting the walls.
+    state.velocities[fluid, 1] = -1.
+    approaching = computeVelocityDiffusion(state, config, scheme, adjacency, boundaryRepresentation=representation)
+    torch.testing.assert_close(normal[fluid], -approaching[fluid], rtol=2e-5, atol=2e-6)
+    torch.testing.assert_close(state.velocities, -before, rtol=0, atol=0)
+    scheme.diffusionParams.approachOnly = True
+    state.velocities[fluid, 1] = 1.
+    clamped = computeVelocityDiffusion(state, config, scheme, adjacency, boundaryRepresentation=representation)
+    torch.testing.assert_close(clamped[fluid], torch.zeros_like(clamped[fluid]), atol=2e-6, rtol=0)
+    override = computeVelocityDiffusion(state, config, scheme, adjacency,
+        boundaryRepresentation=representation, approachOnly=False)
+    torch.testing.assert_close(override[fluid], normal[fluid], rtol=0, atol=0)
+    other, otherConfig, otherScheme, otherAdjacency = _mirrorViscosityFixture(representation, 1., device)
+    other.velocities[other.kinds == 0, 1] = 1.
+    scaled = computeVelocityDiffusion(other, otherConfig, otherScheme, otherAdjacency, boundaryRepresentation=representation)
+    torch.testing.assert_close(normal[fluid], scaled[other.kinds == 0], rtol=3e-5, atol=2e-6)

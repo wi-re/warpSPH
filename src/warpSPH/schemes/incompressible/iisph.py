@@ -8,8 +8,9 @@ from ...systems.incompressible import IISPHSystem
 from ...modules.boundaryConditions import enforceDirichlet, computeForcing, enforceUpdates
 from ...modules.density import computeDensities
 from ...modules.gravity import computeGravity, computeBodyForce
+from ...modules.deltaSPH import computeVelocityDiffusion
 from ...modules.iisph import (computeIISPHBoundaryIntegrals, computeIISPHContactPoints,
-                             computeIISPHViscosity, solveIISPH, assembleIISPHUpdate, maskIISPHUpdate)
+                             solveIISPH, assembleIISPHUpdate, maskIISPHUpdate)
 
 __all__ = ['iisph_step']
 
@@ -46,7 +47,8 @@ def iisph_step(
         contactPoints = computeIISPHContactPoints(currentState, schemeConfig)
 
     with record_function('[warpSPH] - [IISPH - 06] viscosity'):
-        acceleration = acceleration + computeIISPHViscosity(currentState, config, schemeConfig, adjacency)
+        acceleration = acceleration + computeVelocityDiffusion(currentState, config, schemeConfig, adjacency,
+            boundaryRepresentation=schemeConfig.iisph.boundaryRepresentation)
 
     with record_function('[warpSPH] - [IISPH - 07] forcing'):
         forcing = computeForcing(system, dt, system.t, config, schemeConfig)

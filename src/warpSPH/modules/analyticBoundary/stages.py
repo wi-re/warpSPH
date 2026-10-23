@@ -8,7 +8,7 @@
 
 import torch
 
-from . import evaluateWall, viscousPrefactor, wallLoads, wallPressureAcceleration, wallViscousAcceleration
+from . import evaluateWall, wallLoads, wallPressureAcceleration
 from ..deltaSPH import computeVelocityDiffusion
 from ..gravity import computeGravity
 from ..pressure import antuonoSwitch
@@ -62,7 +62,8 @@ def bookWallLoads(wall, accVP, currentState, config, schemeConfig, adjacency, pr
             viscf = computeVelocityDiffusion(currentState, config, schemeConfig, adjacency, wall=False)
             accV = wallNoSlipAcceleration(currentState, config, schemeConfig, adjacency, wall, viscf, perBody=True)
         else:
-            accV = wallViscousAcceleration(wall, currentState.densities, currentState.velocities, viscousPrefactor(schemeConfig, config, hWall), hWall, wallMass=wm, kernel=config.kernel, perBody=True)
+            from .viscosity import computeWallViscosity
+            accV = computeWallViscosity(currentState, config, schemeConfig, wall, perBody=True)
         loads = wallLoads(accP, accV, currentState.positions, currentState.masses, torch.stack([rb.centerOfMass.to(torch.float64).reshape(2) for rb in provider.rigidBodies]))
         for bi, rb in enumerate(provider.rigidBodies):
             cur = getattr(rb, 'load', None)

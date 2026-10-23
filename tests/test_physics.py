@@ -346,22 +346,10 @@ def test_theSolverIsSelectedByTheSchemeFlag():
 # --- TGV: incompressible, viscously decaying --------------------------------
 
 def test_tgvKineticEnergyDecaysAtRoughlyTheAnalyticRate(tgvResult):
-    """`KE(t) = KE(0) exp(-4 nu k^2 t)` for the Taylor-Green vortex.
+    """Two-sided viscosity reproduces KE(t) = KE(0) exp(-4 nu k^2 t).
 
-    The measured rate sits near 0.55-0.6x the analytic one and is *stable under
-    refinement* (0.605 at nx=32/20 steps, 0.564 at nx=32/50, 0.550 at
-    nx=64/200), so it is not discretisation error.
-
-    It is the Monaghan switch in the diffusion operator: viscosity is
-    deactivated for particle pairs that are separating, so only the approaching
-    half of the pairs dissipates at any instant and the effective viscosity is
-    roughly half the prescribed nu. This is expected SPH behaviour, not a bug.
-    Disabling the switch does recover the analytic decay rate, at the cost of
-    stability elsewhere in the simulation, so it stays on.
-
-    The band is therefore wide on purpose: it catches viscosity being
-    disconnected (rate -> 0) or mis-scaled, without pretending the ~0.55 factor
-    is an error to be driven out.
+    The configured approach-only switch is off by default; the prescribed
+    viscosity should therefore act on both approaching and separating pairs.
     """
     from warpSPH.cases.periodic.tgv import analyticDecayRate
 
@@ -370,7 +358,7 @@ def test_tgvKineticEnergyDecaysAtRoughlyTheAnalyticRate(tgvResult):
     measured = -np.polyfit(time, np.log(kinetic), 1)[0]
     analytic = analyticDecayRate(tgvResult.ctx)
 
-    assert measured / analytic == pytest.approx(0.6, rel=0.45)
+    assert measured / analytic == pytest.approx(1.0, rel=0.25)
 
 
 def test_tgvKineticEnergyIsMonotoneDecreasing(tgvResult):
