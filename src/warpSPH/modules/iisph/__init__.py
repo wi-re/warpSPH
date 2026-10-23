@@ -1,18 +1,18 @@
 """Stateless native IISPH pressure projection and static-wall coupling."""
 
-from .solver import IISPHCoefficients, IISPHResult, computeIISPHCoefficients, solveIISPH
+from .solver import IISPHResult, computeIISPHCoefficients, solveIISPH
 from .boundaryIntegrals import computeIISPHBoundaryIntegrals
 from .contactPoints import computeIISPHContactPoints
 from .boundaryPressureAcceleration import computeIISPHBoundaryPressureAcceleration
-from .wallGradient import computeIISPHWallGradient
-from .gradientSum import computeIISPHGradientSum
-from .pressureDiagonal import computeIISPHPressureDiagonal
-from .contactPressureDiagonal import computeIISPHContactPressureDiagonal
-from .operators import (computeIISPHDensityRate, computeIISPHPressureAcceleration,
-                        computeIISPHPressureOperator)
+from .wp_wallGradient import computeIISPHWallGradient
+from .wp_gradientSum import computeIISPHGradientSum
+from .wp_pressureDiagonal import computeIISPHPressureDiagonal
+from .wp_contactPressureDiagonal import computeIISPHContactPressureDiagonal
+from .wp_densityRate import computeIISPHDensityRate
+from .wp_pressureAcceleration import computeIISPHPressureAcceleration, computeIISPHPressureOperator
 from .updates import assembleIISPHUpdate, maskIISPHUpdate
 
-__all__ = ['IISPHCoefficients', 'IISPHResult',
+__all__ = ['IISPHResult',
            'computeIISPHCoefficients', 'computeIISPHBoundaryIntegrals',
            'computeIISPHContactPoints', 'computeIISPHBoundaryPressureAcceleration', 'solveIISPH',
            'computeIISPHWallGradient', 'computeIISPHGradientSum',

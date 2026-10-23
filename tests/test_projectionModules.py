@@ -182,9 +182,13 @@ def _nativeIisphFixture(device, dim, contact, rho0=1000.0, wrappedWall=False):
         g[:, 1] = -9.81
     scheme = NS(fluid=NS(restDensity=rho0), iisph=IISPHConfig(), rigidBodies=[])
     state.densities = computeDensities(state, config, scheme, adj, wall=False)
-    coefficients = computeIISPHCoefficients(state, config, scheme, adj, contactPoints=points)
+    (restVolumes, densityRatio, wallGradient, gradientSum, diagonal,
+     contactAdjacency, contactDenominator) = computeIISPHCoefficients(state, config, scheme, adj, contactPoints=points)
+    coefficients = NS(restVolumes=restVolumes, densityRatio=densityRatio, wallGradient=wallGradient,
+        gradientSum=gradientSum, diagonal=diagonal, contactAdjacency=contactAdjacency,
+        contactDenominator=contactDenominator)
     boundaryAcceleration = computeIISPHBoundaryPressureAcceleration(
-        state, config, scheme, coefficients, None, points, g)
+        state, config, scheme, adj, restVolumes, wallGradient, None, points, g)
     return NS(state=state, config=config, scheme=scheme, coefficients=coefficients,
               boundaryAcceleration=boundaryAcceleration, adjacency=adj, contactPoints=points, gravity=g)
 
@@ -225,10 +229,10 @@ def test_iisphDirichletDensityReachesPressureSolve(monkeypatch):
 
     def pressure(currentState, config, schemeConfig, velocity, dt, adjacency, **kwargs):
         from warpSPH.modules.iisph import computeIISPHCoefficients
-        coefficients = computeIISPHCoefficients(currentState, config, schemeConfig, adjacency,
+        _, densityRatio, *_ = computeIISPHCoefficients(currentState, config, schemeConfig, adjacency,
             contactPoints=kwargs['contactPoints'])
         torch.testing.assert_close(currentState.densities, expected)
-        torch.testing.assert_close(coefficients.densityRatio, expected / scheme.fluid.restDensity)
+        torch.testing.assert_close(densityRatio, expected / scheme.fluid.restDensity)
         raise ReachedPressureSolve
 
     monkeypatch.setattr(iisph, 'solveIISPH', pressure)
@@ -309,6 +313,23 @@ def test_iisphInitializationCalibratesMassesOnceAndLeavesOrdinaryKernels(monkeyp
     assert scheme.analyticWallMass == factor
 
 
+def _denseIisphKernels(state, config, points=None):
+    """Independent dense Wendland C4 values/gradients for the IISPH fixture."""
+    query = state.positions if points is None else points
+    distance = query[:, None] - state.positions[None, :]
+    length = config.domain.max - config.domain.min
+    distance = distance - torch.where(config.domain.periodic,
+        torch.round(distance / length) * length, 0)
+    dim = distance.shape[-1]
+    support = state.supports[:, None]
+    radius = torch.linalg.vector_norm(distance, dim=-1) / support
+    cutoff = (1 - radius).clamp_min(0)
+    normalization = (9.0 if dim == 2 else 495.0 / 32.0) / torch.pi
+    weights = normalization / support**dim * cutoff**6 * (1 + 6*radius + 35/3*radius**2)
+    gradient = (-56/3 * normalization / support**(dim+2) * (5*radius+1) * cutoff**5)[..., None] * distance
+    return weights, gradient
+
+
 @pytest.mark.parametrize('device', ['cpu', pytest.param('cuda', marks=pytest.mark.skipif(
     not torch.cuda.is_available(), reason='CUDA'))])
 @pytest.mark.parametrize('dim,contact', [(2, False), (2, True), (3, False), (3, True)])
@@ -318,20 +339,27 @@ def test_nativeIisphForceContinuityAndExactDiagonal(device, dim, contact):
     # disordered positions and static samples distinguish IISPH from DFSPH.
     fixture = _nativeIisphFixture(device, dim, contact)
     state, coefficients = fixture.state, fixture.coefficients
-    volume, pairs = coefficients.restVolumes, coefficients.pairs
+    volume = coefficients.restVolumes
+    _, gradients = _denseIisphKernels(state, fixture.config)
     fluid, rho0 = state.kinds == 0, fixture.scheme.fluid.restDensity
     n = len(volume)
     F = torch.zeros((n*dim, n), dtype=volume.dtype, device=device)
     C = torch.zeros((n, n*dim), dtype=volume.dtype, device=device)
     T = torch.zeros((n, n), dtype=volume.dtype, device=device)
+    expectedWallGradient = (gradients[:, ~fluid] * volume[~fluid][None, :, None]).sum(1)
+    torch.testing.assert_close(coefficients.wallGradient, expectedWallGradient, rtol=4e-6, atol=4e-6)
+    expectedGradientSum = (gradients * volume[None, :, None]).sum(1)
+    torch.testing.assert_close(coefficients.gradientSum, expectedGradientSum, rtol=4e-6, atol=4e-6)
     if contact:
-        cp = coefficients.contactWeights.pairs
+        contactWeights, _ = _denseIisphKernels(state, fixture.config, fixture.contactPoints)
+        denominator = contactWeights[:, fluid] @ volume[fluid]
+        denominator = torch.where(fluid & (expectedWallGradient.square().sum(-1) > 1.e-24), denominator, 0)
+        torch.testing.assert_close(coefficients.contactDenominator, denominator, rtol=4e-6, atol=4e-6)
         for i in range(n):
-            if coefficients.contactWeights.denominator[i] > 0:
-                for e in range(int(cp.offsets[i]), int(cp.offsets[i]+cp.counts[i])):
-                    j = int(cp.indices[e])
+            if coefficients.contactDenominator[i] > 0:
+                for j in range(n):
                     if fluid[j]:
-                        T[i, j] += volume[j]*cp.weights[e]/coefficients.contactWeights.denominator[i]
+                        T[i, j] = volume[j]*contactWeights[i, j]/coefficients.contactDenominator[i]
     for i in range(n):
         if not fluid[i]:
             continue
@@ -339,19 +367,23 @@ def test_nativeIisphForceContinuityAndExactDiagonal(device, dim, contact):
         C[i, rows] += coefficients.wallGradient[i]
         F[rows, i] -= coefficients.wallGradient[i]/coefficients.densityRatio[i]**2
         F[rows] -= coefficients.wallGradient[i, :, None]*T[i, None, :]
-        for e in range(int(pairs.offsets[i]), int(pairs.offsets[i]+pairs.counts[i])):
-            j = int(pairs.indices[e])
+        for j in range(n):
             if not fluid[j]:
                 continue
-            g = pairs.gradient[e]
+            g = gradients[i, j]
             C[i, rows] += volume[j]*g
             C[i, j*dim:(j+1)*dim] -= volume[j]*g
             F[rows, i] -= volume[j]*g/coefficients.densityRatio[i]**2
             F[rows, j] -= volume[j]*g/coefficients.densityRatio[j]**2
     q = torch.linspace(.2, 1.4, n, dtype=volume.dtype, device=device)
     v = torch.sin(torch.arange(n*dim, dtype=q.dtype, device=device)).reshape(n, dim)
-    torch.testing.assert_close(computeIISPHPressureAcceleration(state, q, coefficients).flatten(), F@q, rtol=4e-6, atol=4e-6)
-    torch.testing.assert_close(computeIISPHDensityRate(state, v, coefficients), C@v.flatten(), rtol=4e-6, atol=4e-6)
+    acceleration = computeIISPHPressureAcceleration(state, fixture.config, fixture.adjacency, q,
+        volume, coefficients.densityRatio, coefficients.gradientSum, coefficients.wallGradient,
+        contactPoints=fixture.contactPoints, contactAdjacency=coefficients.contactAdjacency,
+        contactDenominator=coefficients.contactDenominator)
+    torch.testing.assert_close(acceleration.flatten(), F@q, rtol=4e-6, atol=4e-6)
+    torch.testing.assert_close(computeIISPHDensityRate(state, fixture.config, fixture.adjacency,
+        v, volume, coefficients.wallGradient), C@v.flatten(), rtol=4e-6, atol=4e-6)
     torch.testing.assert_close(coefficients.diagonal, (C@F).diagonal(), rtol=6e-6, atol=6e-6)
 
     from warpSPH.configurations import IISPHConfig
@@ -379,6 +411,45 @@ def test_nativeIisphForceContinuityAndExactDiagonal(device, dim, contact):
         F@old + fixture.boundaryAcceleration.flatten(), rtol=1.e-5, atol=1.e-5)
     assert actual.iterations == 6
     assert actual.error == pytest.approx(float(error), rel=2.e-5, abs=.003)
+
+
+@pytest.mark.parametrize('device', ['cpu', pytest.param('cuda', marks=pytest.mark.skipif(
+    not torch.cuda.is_available(), reason='CUDA'))])
+def test_nativeIisphOperatorGradients(device):
+    from warpSPH.modules.iisph import (
+        computeIISPHCoefficients, computeIISPHBoundaryPressureAcceleration,
+        computeIISPHPressureAcceleration, computeIISPHDensityRate,
+    )
+    fixture = _nativeIisphFixture(device, 2, True)
+    state = fixture.state
+    if state.positions.dtype != torch.float64:
+        pytest.skip('Run with warpSPHCore_PRECISION=float64 for numerical gradient checks')
+    q = torch.linspace(.2, 1.4, len(state.masses), dtype=state.positions.dtype, device=device)
+    velocity = torch.sin(torch.arange(state.positions.numel(), dtype=q.dtype, device=device)).reshape_as(state.positions)
+    inputs = tuple(value.detach().clone().requires_grad_() for value in (
+        state.positions, state.supports, state.masses, state.densities,
+        fixture.contactPoints, fixture.gravity, q, velocity,
+    ))
+
+    def evaluate(positions, supports, masses, densities, points, gravity, pressure, field):
+        current = NS(**{**vars(state), 'positions': positions, 'supports': supports,
+                        'masses': masses, 'densities': densities})
+        (restVolumes, densityRatio, wallGradient, gradientSum, diagonal,
+         contactAdjacency, contactDenominator) = computeIISPHCoefficients(
+            current, fixture.config, fixture.scheme, fixture.adjacency, contactPoints=points)
+        return (
+            wallGradient, gradientSum, diagonal, contactDenominator,
+            computeIISPHPressureAcceleration(current, fixture.config, fixture.adjacency, pressure,
+                restVolumes, densityRatio, gradientSum, wallGradient,
+                contactPoints=points, contactAdjacency=contactAdjacency, contactDenominator=contactDenominator),
+            computeIISPHDensityRate(current, fixture.config, fixture.adjacency, field, restVolumes, wallGradient),
+            computeIISPHBoundaryPressureAcceleration(current, fixture.config, fixture.scheme,
+                fixture.adjacency, restVolumes, wallGradient, None, points, gravity),
+        )
+
+    # CUDA adjoints accumulate neighbor contributions with floating-point atomics.
+    assert torch.autograd.gradcheck(evaluate, inputs, eps=1.e-6, atol=5.e-5, rtol=5.e-4,
+        nondet_tol=1.e-10 if device == 'cuda' else 0, fast_mode=True)
 
 
 def test_nativeIisphDensityUnitsAndDeviceParity():
@@ -451,7 +522,7 @@ def test_iisphAnalyticGravityExtensionMatchesSolidQuadrature():
               offset[..., :, None] * gradients[..., None, :]).sum(2)
     scheme = NS(iisph=IISPHConfig(), analyticWallMass=.8)
     integrals = NS(out={'G': bodyGradient, 'Cov': moment})
-    coefficients = NS(wallGradient=.8*bodyGradient.sum(0))
+    wallGradient = .8*bodyGradient.sum(0)
     expected = torch.zeros_like(x)
     for body in range(2):
         for sample in range(2):
@@ -459,13 +530,13 @@ def test_iisphAnalyticGravityExtensionMatchesSolidQuadrature():
             expected -= .8*volumes[body, sample]*q[:, None]*gradients[body, :, sample]
     expected[state.kinds != 0] = 0
     actual = computeIISPHBoundaryPressureAcceleration(
-        state, None, scheme, coefficients, integrals, points, gravity)
+        state, None, scheme, None, None, wallGradient, integrals, points, gravity)
     torch.testing.assert_close(actual, expected)
     # Gravity-off contact pressure needs no first moment at all.
     scheme.iisph.contactGravity = False
     del integrals.out['Cov']
     actual = computeIISPHBoundaryPressureAcceleration(
-        state, None, scheme, coefficients, integrals, points, gravity)
+        state, None, scheme, None, None, wallGradient, integrals, points, gravity)
     torch.testing.assert_close(actual, torch.zeros_like(x))
 
 

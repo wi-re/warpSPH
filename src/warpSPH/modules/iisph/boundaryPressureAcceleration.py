@@ -1,10 +1,12 @@
 """Known IISPH wall acceleration from hydrostatic pressure extrapolation."""
 
 import torch
-from .operators import launchIISPHKernel, pairArguments, geometryParameters
+from warpSPHCore import OperationProperties
+from .wp_sampledGravity import computeIISPHSampledGravityWarp
 
 
-def computeIISPHBoundaryPressureAcceleration(state, config, schemeConfig, coefficients,
+def computeIISPHBoundaryPressureAcceleration(state, config, schemeConfig, adjacency,
+                                            restVolumes, wallGradient,
                                             boundaryIntegrals, contactPoints, gravity):
     """Integrate the gravity extension of q_solid = q_contact + g·(x_solid-contact).
 
@@ -16,11 +18,9 @@ def computeIISPHBoundaryPressureAcceleration(state, config, schemeConfig, coeffi
     if contactPoints is None or gravity is None or not schemeConfig.iisph.contactGravity:
         return acceleration
     if boundaryIntegrals is None:
-        launchIISPHKernel('sampled_gravity', state, pairArguments(coefficients.pairs) +
-            [coefficients.restVolumes, state.kinds.to(torch.int32).contiguous(),
-             state.positions, contactPoints.contiguous(), gravity,
-             *geometryParameters(state, config)[:2], acceleration])
-        return acceleration
+        return computeIISPHSampledGravityWarp(state, OperationProperties(kernel=config.kernel),
+            config.domain, adjacency=adjacency,
+            restVolumes=restVolumes, contactPoints=contactPoints, gravity=gravity)
 
     # The provider calls this Cov: M_ab = integral_solid
     # (x_solid - x_i)_a * (grad_i W)_b dV, a first gradient moment.
@@ -29,5 +29,5 @@ def computeIISPHBoundaryPressureAcceleration(state, config, schemeConfig, coeffi
     massFactor = float(getattr(schemeConfig, 'analyticWallMass', 1.0))
     firstGradientMoment = massFactor * boundaryIntegrals.out['Cov'].sum(0).to(state.positions)
     acceleration = (-torch.einsum('na,nab->nb', gravity, firstGradientMoment)
-        - ((state.positions-contactPoints)*gravity).sum(-1, keepdim=True)*coefficients.wallGradient)
+        - ((state.positions-contactPoints)*gravity).sum(-1, keepdim=True)*wallGradient)
     return torch.where((state.kinds == 0)[:, None], acceleration, 0)

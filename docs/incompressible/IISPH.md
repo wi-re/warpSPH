@@ -29,9 +29,12 @@ conditions. It does not advance positions or velocities.
   contact-pressure interpolation. It does not modify the base diagonal.
 - `computeIISPHCoefficients` connects these functions and adds the two diagonal
   contributions. Each term is computed separately with explicit inputs and a
-  returned tensor; the assembly function launches no kernels itself.
-- `computeIISPHDensityRate(state, field, coefficients)` applies continuity.
-- `computeIISPHPressureAcceleration(state, normalizedPressure, coefficients)`
+  returned tensor; the assembly function launches no kernels itself. It returns
+  rest volumes, density ratios, wall/total gradients, the diagonal, contact
+  adjacency and contact normalization as seven separate outputs.
+- `computeIISPHDensityRate(state, config, adjacency, field, restVolumes, wallGradient)` applies continuity.
+- `computeIISPHPressureAcceleration` takes the pressure, rest volumes, density
+  ratios, total gradient, wall gradient and optional contact data explicitly. It
   applies the linear pressure force; `computeIISPHPressureOperator` composes
   force and continuity.
 - `solveIISPH(state, config, schemeConfig, acceleration, dt, adjacency,
@@ -48,11 +51,21 @@ conditions. It does not advance positions or velocities.
 - The scheme calls `modules.deltaSPH.computeVelocityDiffusion` directly,
   passing the selected boundary representation and the physical particle fields.
 
-`IISPHCoefficients` and contact/kernel data are plain
-records of tensors. They retain no simulation state, configuration, callable,
-or solver instance. Coefficients belong to the supplied positions and must
-be recomputed after particles move. The Warp kernels in `wp_operators.py`
-use Core neighbor lists, kernel functions and precision. Core's stationary
+Pressure terms are local tensors and Core adjacency lists, unpacked directly
+by the solver. Operators receive only the terms they use; no coefficient or
+contact-data container is passed between them. Coefficients belong to the
+supplied positions and must be recomputed after particles move. Each
+`wp_<term>.py` file declares a generic per-neighbor function, adjacency/grid
+traversal, a top-level kernel,
+and an `OperatorSpec` launched through Core's `SPHContext`/`launchOperator`
+wrapper. Kernels use Core's configured index/offset types, domain distances,
+kernel functions and precision. Convenience wrappers live beside their kernels
+in the same files. Contact pressure and its normalization reuse Core's existing
+interpolation operator, with explicit Shepard normalization in PyTorch.
+There is no IISPH kernel factory, private launch dispatcher, copied CSR index
+buffer, or cached pair-gradient array.
+Pressure operators receive configuration explicitly to evaluate kernel
+gradients at the current positions. Core's stationary
 driver controls iteration. The standard `semiImplicitEuler` driver advances
 velocity from the combined nonpressure and pressure acceleration, then
 advects positions with that updated velocity. IISPH selects this registered
@@ -150,8 +163,10 @@ There is no shifting, divergence pass or no-penetration position correction.
 
 The particle/periodic operator supports 2D and 3D, one fluid, common fixed
 support, kind-0 fluid and kind-1 stationary solids. Analytic solid integrals
-currently support 2D Wendland C2/C4. Moving bodies, ghost rows, adaptive
-supports and autograd are unsupported. CUDA graph capture is not implemented.
+currently support 2D Wendland C2/C4. Moving bodies, ghost rows and adaptive
+supports are unsupported. Operator reverse-mode gradients use Core's normal
+autograd wrapper; neighbor selection and iteration stopping remain discrete
+decisions. CUDA graph capture is not implemented.
 
 Initial masses and geometry must be calibrated before stepping. Preserve
 free-surface kernel deficiency; do not calibrate it away. IISPH initialization
@@ -172,7 +187,9 @@ silently increasing the configured cap. Nonfinite pressure raises an error.
 
 `tests/test_projectionModules.py` checks independent dense force/continuity
 oracles, the exact coupled diagonal, iteration policy, density-unit scaling,
-configuration round trips, policy isolation and CPU/CUDA parity. It also
+configuration round trips, policy isolation and CPU/CUDA parity. Double-precision
+gradient checks cover positions, supports, masses, densities, contact points,
+gravity, pressure and velocity through the pressure terms. It also
 checks RHS input ownership, standard integrator selection, derivative boundary
 conditions, fixed sampled walls, summed-density carry and pressure warm starts.
 `tests/test_analyticIisph.py`
