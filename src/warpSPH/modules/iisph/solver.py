@@ -46,21 +46,33 @@ def computeIISPHCoefficients(state, config, schemeConfig, adjacency, *, boundary
     Raw analytic geometry supplies the wall gradient; no gravity term is
     evaluated or retained by these coefficients.
     """
+    # region Particle geometry and normalized fields
     rho0 = schemeConfig.fluid.restDensity
     pairs = computeIISPHKernelGeometry(state, config, adjacency)
     restVolumes = (state.masses / rho0).contiguous()
     densityRatio = (state.densities / rho0).contiguous()
+    # endregion
+
+    # region Pressure-force gradient terms
     wallGradient = computeIISPHWallGradient(state, pairs, restVolumes,
         boundaryIntegrals=boundaryIntegrals,
         massFactor=float(getattr(schemeConfig, 'analyticWallMass', 1.0)))
     gradientSum = computeIISPHGradientSum(state, pairs, restVolumes, wallGradient)
+    # endregion
+
+    # region Base pressure diagonal
     diagonal = computeIISPHPressureDiagonal(state, pairs, restVolumes, densityRatio, gradientSum)
+    # endregion
+
+    # region Contact-pressure interpolation and diagonal contribution
     contact = None
     if contactPoints is not None:
         contact = computeIISPHContactWeights(state, config, contactPoints, wallGradient, restVolumes)
         contactDiagonal = computeIISPHContactPressureDiagonal(state, config, pairs,
             restVolumes, wallGradient, gradientSum, contactPoints, contact)
         diagonal = diagonal + contactDiagonal
+    # endregion
+
     return IISPHCoefficients(pairs, restVolumes, densityRatio, wallGradient, gradientSum, diagonal, contact)
 
 
@@ -81,25 +93,32 @@ def solveIISPH(state, config, schemeConfig, acceleration, dt, adjacency, previou
     rho0 = schemeConfig.fluid.restDensity
     fluid = state.kinds == 0
     policy.validate()
-    if previousPressure is None:
-        previousPressure = torch.zeros_like(state.masses)
+
+    # region Compute contributing pressure terms
     boundaryIntegrals = computeIISPHBoundaryIntegrals(state, config, schemeConfig)
     coefficients = computeIISPHCoefficients(state, config, schemeConfig, adjacency,
         boundaryIntegrals=boundaryIntegrals, contactPoints=contactPoints)
     boundaryAcceleration = computeIISPHBoundaryPressureAcceleration(state, config,
         schemeConfig, coefficients, boundaryIntegrals, contactPoints, gravity)
+    # endregion
+
+    # region Set up solver state
     velocity = state.velocities + dt * torch.where(
         fluid[:, None], acceleration, torch.zeros_like(acceleration))
     dt2 = dt * dt
     b = (1 - coefficients.densityRatio - dt * computeIISPHDensityRate(state, velocity, coefficients)
          - dt2 * computeIISPHDensityRate(state, boundaryAcceleration, coefficients))
     b = torch.where(fluid, b, 0)
+    if previousPressure is None:
+        previousPressure = torch.zeros_like(state.masses)
     q = torch.where(fluid, 0.5 * previousPressure / rho0, 0)
     diagonal = dt2 * coefficients.diagonal
     valid = fluid & (diagonal.abs() > 1.e-9)
     denominator = torch.where(valid, diagonal, 1)
     omega = policy.relaxationFactor
+    # endregion
 
+    # region Run the pressure solver
     def iteration(old, _):
         off = dt2 * computeIISPHPressureOperator(state, old, coefficients) - diagonal * old
         new = torch.where(valid, ((1-omega)*old + omega*(b-off)/denominator).clamp_min(0), 0)
@@ -112,6 +131,10 @@ def solveIISPH(state, config, schemeConfig, acceleration, dt, adjacency, previou
         tolerance=0.01*policy.maxErrorPercent*rho0, inclusive=True, schedule=schedule)
     if result.termination == 'nonfinite':
         raise FloatingPointError('Nonfinite IISPH pressure iteration')
+    # endregion
+
+    # region Compute final pressure acceleration and return
     return IISPHResult(result.x*rho0,
         computeIISPHPressureAcceleration(state, result.x, coefficients)+boundaryAcceleration,
         result.iterations, result.stats[-1], result.termination, b)
+    # endregion
