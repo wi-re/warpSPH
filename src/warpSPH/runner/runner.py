@@ -314,7 +314,10 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
             raise NotImplementedError(f"analytic boundaries (a region with a `representation`) are hooked into the schemes {sorted(ANALYTIC_WALL_SCHEMES)} only, not {schemeName!r}")
         if schemeName in EXPERIMENTAL_ANALYTIC_WALL_SCHEMES:
             import warnings
-            warnings.warn(f"{schemeName!r} on analytic walls is EXPERIMENTAL: the wall terms are in and match the omni loop where the formulas coincide, but the scheme itself is unreliable on a free surface with impacts (still-tank peak velocity several times that of boundary particles; dfsphReference can go NaN), with analytic walls or without (docs/analytic_boundaries/compact_projection_2026-10-09, section C)", stacklevel=2)
+            if schemeName == 'iisph':
+                warnings.warn("'iisph' on analytic walls is EXPERIMENTAL: static, fixed-support IISPH boundary coupling; free-surface impact behavior depends on calibrated initial geometry and the selected wall pressure closure.", stacklevel=2)
+            else:
+                warnings.warn(f"{schemeName!r} on analytic walls is EXPERIMENTAL: the wall terms are in and match the omni loop where the formulas coincide, but the scheme itself is unreliable on a free surface with impacts (still-tank peak velocity several times that of boundary particles; dfsphReference can go NaN), with analytic walls or without (docs/analytic_boundaries/compact_projection_2026-10-09, section C)", stacklevel=2)
     if case.initialConditions is not None:
         case.initialConditions(ctx, system)
     if isinstance(ctx.scheme, IncompressibleSPHScheme):

@@ -8,6 +8,9 @@ from `warpSPH.configurations` (`__all__` there extends this module's).
 
 __all__ = []
 
+from .iisph import IISPHConfig
+__all__.append('IISPHConfig')
+
 from .boundaryConditions import BoundaryCondition, BoundaryConditionType, boundaryConditionToDict, dictToBoundaryCondition, BCType
 __all__.extend(['BoundaryCondition', 'BoundaryConditionType', 'boundaryConditionToDict', 'dictToBoundaryCondition', 'BCType'])
 

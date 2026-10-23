@@ -260,12 +260,8 @@ def _dfsphReference() -> SchemeBundle:
 
 
 def _iisph() -> SchemeBundle:
-    # Plain IISPH ([I], Ihmsen et al. 2014): shares `dfsphReference`'s
-    # incompressible state/config/update, codecs and `ProjectedSystem`
-    # (the whole time integration happens inside the step), differing only in
-    # the step function -- the divergence-free pass is switched off. See
-    # `schemes/incompressible/dfsphReference.py::iisph_step` and DFSPH_IMPROVEMENT_PLAN.md
-    # Part 33.
+    # Native IISPH (Ihmsen et al. 2014), one rest-volume density projection.
+    # Shares state/time infrastructure, not DFSPH's coefficients or policy.
     from .incompressible.iisph import iisph_step
     from ..systems.incompressible import (ProjectedSystem, IncompressibleState,
                                           IncompressibleSystemUpdate)

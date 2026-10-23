@@ -1,4 +1,4 @@
-"""Local DFSPH/IISPH pressure solve (the composed reference variant).
+"""Local DFSPH pressure solve (the composed reference variant).
 
 The divergence equation uses opDt=dt and a source with units 1/time;
 omni uses opDt=dt**2 and a dimensionless source. Do not interchange them.
@@ -160,8 +160,8 @@ def solveReference(
     differs from the reference (its eta is a percent of rho0, scaled by 1/h
     in the DF solve); the config tolerances here are kept as-is.
 
-    The local `iisph` wrapper also calls this density mode; that does not
-    make it native IISPH. Pinned SPlisHSPlasH IISPH instead uses rest-volume
+    The former `iisph` wrapper called this density mode. Native IISPH now
+    lives in `.iisph`. Pinned SPlisHSPlasH IISPH uses rest-volume
     continuity, its separate density-dependent coefficients, half the
     previous pressure, omega=0.5, and a signed average on pressure-active
     rows evaluated with new diagonal / old off-diagonal iterates. Its

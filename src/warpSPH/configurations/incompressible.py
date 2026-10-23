@@ -42,6 +42,8 @@ from .rigidBody import RigidBody
 from .moduleConfigurations.surfaceDetection import SurfaceDetectionConfig, buildDefaultSurfaceDetectionConfig
 from .moduleConfigurations import *
 from .moduleConfigurations.shifting import shiftPropertiesToDict, dictToShiftProperties
+from .moduleConfigurations.iisph import IISPHConfig
+from dataclasses import asdict
 from ..enumTypes import *
 
 @dataclass
@@ -80,6 +82,7 @@ class IncompressibleSPHConfig:
     bandwith: float = field(default=10.0, metadata={'description': 'Bandwith for the divergence-free noise sampling module'})
 
     solverConfig : IncompressibleSolverConfig = field(default_factory=buildDefaultIncompressibleSolverConfig, metadata={'description': 'Configuration for the incompressible solver'})
+    iisph: IISPHConfig = field(default_factory=IISPHConfig, metadata={'description': 'Native IISPH policy; independent of the composed DFSPH/shifting solvers'})
 
 from typing import Dict, Any
 
@@ -106,6 +109,7 @@ def incompressibleConfigToDict(config: IncompressibleSPHConfig) -> Dict[str, Any
         'dt_accelerationConstraint': config.dt_accelerationConstraint,
         'dt_acousticConstraint': config.dt_acousticConstraint,
         'bandViscosity': config.bandViscosity,
+        'iisph': asdict(config.iisph),
         'bandwith': config.bandwith,
 
         'pressureForceTerm': config.pressureForceTerm.name,
@@ -191,6 +195,8 @@ def dictToIncompressibleSPHConfig(configDict: Dict[str, Any]) -> IncompressibleS
     config.dt_accelerationConstraint = configDict['dt_accelerationConstraint']
     config.dt_acousticConstraint = configDict['dt_acousticConstraint']
     config.bandViscosity = bool(configDict.get('bandViscosity', False))
+    config.iisph = IISPHConfig(**configDict.get('iisph', {}))
+    config.iisph.validate()
     # config.densityDiffusionTerm = DensityDiffusionScheme[configDict['densityDiffusionTerm']] if isinstance(configDict['densityDiffusionTerm'], str) else configDict['densityDiffusionTerm']
     config.pressureForceTerm = PressureForceScheme[configDict['pressureForceTerm']] if isinstance(configDict['pressureForceTerm'], str) else configDict['pressureForceTerm']
     config.bandwith = configDict.get('bandwith', 10.0)

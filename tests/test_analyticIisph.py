@@ -1,5 +1,6 @@
-"""`iisph` and `dfsphReference` on analytic walls (stage 2 C; the SPlisHSPlasH-style troubleshooting schemes of DFSPH_IMPROVEMENT_PLAN.md, EXPERIMENTAL): the operator's diagonal equals the DFSPH factor
-with the wall in it, the schemes run a still tank bounded, and they refuse moving bodies.
+"""Native IISPH and the composed DFSPH reference on analytic walls:
+the legacy factor is checked separately, both run a bounded still tank,
+and both refuse moving bodies. Native coefficient tests: projectionModules.
 """
 import os
 
