@@ -506,6 +506,7 @@ def test_nativeIisphForceContinuityAndExactDiagonal(device, dim, contact, clampP
                         contactPoints=fixture.contactPoints, gravity=fixture.gravity)
     torch.testing.assert_close(state.velocities, torch.where(fluid[:, None], v, 0), rtol=0, atol=0)
     b = 1-coefficients.densityRatio-dt*(C@v.flatten())-dt**2*(C@fixture.boundaryAcceleration.flatten())
+    torch.testing.assert_close(actual.source, torch.where(fluid, b, 0), rtol=2.e-6, atol=2.e-6)
     A = dt**2*C@F
     diagonal = A.diagonal()
     old = .5*previous/rho0

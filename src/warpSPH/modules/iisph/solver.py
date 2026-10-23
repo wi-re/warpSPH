@@ -25,6 +25,15 @@ class IISPHResult:
     source: torch.Tensor
 
 
+def computeIISPHSource(state, config, adjacency, velocity, dt, restVolumes,
+                      densityRatio, wallGradient, boundaryAcceleration):
+    """Return the rest-density defect after predicted motion and known wall acceleration."""
+    source = (1 - densityRatio
+        - dt * computeIISPHDensityRate(state, config, adjacency, velocity, restVolumes, wallGradient)
+        - dt * dt * computeIISPHDensityRate(state, config, adjacency, boundaryAcceleration, restVolumes, wallGradient))
+    return torch.where(state.kinds == 0, source, 0)
+
+
 def computeIISPHCoefficients(state, config, schemeConfig, adjacency, *, boundaryIntegrals=None, contactPoints=None):
     """Return rest volumes, density ratios, wall/total gradients, pressure
     diagonal, contact adjacency, contact normalization and a device-side
@@ -113,9 +122,8 @@ def solveIISPH(state, config, schemeConfig, acceleration, dt, adjacency, previou
     velocity = state.velocities + dt * torch.where(
         fluid[:, None], acceleration, torch.zeros_like(acceleration))
     dt2 = dt * dt
-    b = (1 - densityRatio - dt * computeIISPHDensityRate(state, config, adjacency, velocity, restVolumes, wallGradient)
-         - dt2 * computeIISPHDensityRate(state, config, adjacency, boundaryAcceleration, restVolumes, wallGradient))
-    b = torch.where(fluid, b, 0)
+    b = computeIISPHSource(state, config, adjacency, velocity, dt, restVolumes,
+                          densityRatio, wallGradient, boundaryAcceleration)
     if previousPressure is None:
         previousPressure = torch.zeros_like(state.masses)
     q = torch.where(fluid, 0.5 * previousPressure / rho0, 0)
