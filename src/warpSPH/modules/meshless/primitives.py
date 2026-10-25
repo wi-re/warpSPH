@@ -37,7 +37,7 @@ def primitives(Q, volume, gamma, *, returnEnergy=False):
     return idealGasPrimitives(Q, volume, gamma, returnEnergy=returnEnergy)
 
 
-def refreshPrimitives(state, geom, gamma, nngb, dim):
+def refreshPrimitives(state, geom, gamma, nngb, dim, *, updateSupports=True):
     rho, vel, pressure, energy = primitives(state.Q, geom.volume, gamma, returnEnergy=True)
     support, sound, entropy = (torch.empty_like(rho) for _ in range(3))
     w = lambda t: wp.from_torch(t.detach(), dtype=scalar_t)
@@ -45,7 +45,9 @@ def refreshPrimitives(state, geom, gamma, nngb, dim):
         wp.launch(_diagnostics, dim=len(rho), device=wp.device_from_torch(rho.device),
             inputs=[w(geom.volume), w(rho), w(pressure), scalar_t(gamma), scalar_t(nngb), scalar_t(BALL[dim]),
                     scalar_t(1. / dim), w(support), w(sound), w(entropy)])
-    state.supports, state.soundspeeds, state.entropies = support, sound, entropy
+    if updateSupports:
+        state.supports = support
+    state.soundspeeds, state.entropies = sound, entropy
     state.densities, state.velocities, state.pressures = rho, vel, pressure
     state.masses, state.totalEnergies = state.Q[:, 0], state.Q[:, -1]
     state.internalEnergies = energy

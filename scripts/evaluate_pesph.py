@@ -109,6 +109,12 @@ def arrays(ctx, system):
     s = system.state
     a = {k: getattr(s, k).detach().cpu().numpy() for k in
          ('positions', 'velocities', 'densities', 'pressures', 'masses', 'internalEnergies', 'entropies', 'supports')}
+    # Keep the actual integrated variables as well as derived diagnostics.
+    # Lagged primitives cannot reconstruct an accepted meshless conserved state.
+    for key in ('Q', 'totalEnergies'):
+        value = getattr(s, key, None)
+        if value is not None:
+            a[key] = value.detach().cpu().numpy()
     a['time'] = np.array(float(system.t))
     a['phase'] = ctx.scratch['evalPhase'].detach().cpu().numpy()
     for name in ('min', 'max', 'periodic'):

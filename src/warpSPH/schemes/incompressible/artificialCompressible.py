@@ -83,6 +83,10 @@ def artificialCompressible_step(
     schemeConfig: ArtificialCompressibleSPHConfig,
     verbose: bool = False,
 ):
+    # Direct callers must obey the same one-evaluation map contract as the
+    # runner. Otherwise a generic RK call repeats and blends full BDF solves.
+    from ..exactDelta import requireExactDeltaIntegrator
+    requireExactDeltaIntegrator(config, 'artificialCompressible')
     state = system.state
 
     with record_function("[warpSPH] - [acsph - 01] - compute adjacency"):

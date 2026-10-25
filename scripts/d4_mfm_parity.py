@@ -26,7 +26,8 @@ from warpSPHIntegrators.schemes import IntegrationSchemeType
 from warpSPH.systems.meshless import MeshlessState, MeshlessSystem
 from warpSPH.configurations.meshless import MeshlessConfig
 from warpSPH.configurations.simulationConfig import SimulationConfig
-from warpSPH.schemes.compressible.meshless import meshlessStep, validateIntegrationScheme
+from warpSPH.schemes.compressible.meshless import validateIntegrationScheme
+from warpSPH.modules.meshless.compatibility import legacyMeshlessStep as meshlessStep
 
 
 def make_frontend(st0, dom, kernel, device, mode, order, nngb, cfl, scheme):

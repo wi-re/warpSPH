@@ -29,6 +29,7 @@ def compressibleSPH_InutsukaGSPH(
     schemeConfig: InutsukaGSPHConfig,
     verbose = False,
 ):
+    schemeConfig.validateRHS()
     currentSystem = system
     currentState = currentSystem.state
     t = currentSystem.t
@@ -70,11 +71,6 @@ def compressibleSPH_InutsukaGSPH(
 
     with record_function("[warpSPH] - [inutsuka - 07] Riemann pair rates"):
         dvdt, dudt = computeInutsukaWarp(currentState, props, **pairKwargs)
-
-    if params.timeCentredEnergy:
-        with record_function("[warpSPH] - [inutsuka - 08] time-centred energy rate"):
-            # Inutsuka (2002) Eq. 67: the energy rate at the time-centred velocity v_i + a_i dt/2 (a second pass: it needs the accelerations)
-            _, dudt = computeInutsukaWarp(currentState, props, **pairKwargs, queryAccelerations = dvdt, halfDt = 0.5 * dt)
 
     with record_function("[warpSPH] - [inutsuka - 09] drho/dt and divergence"):
         # the density is re-summed (Gaussian) at the start of every step, so the integrators' estimate of d rho / dt is not used: zero

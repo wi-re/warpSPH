@@ -1,6 +1,8 @@
-"""Selection, evidence retention and independent ranking oracles; no simulations."""
+"""Matrix contracts and a short native PESPH endpoint regression."""
 from copy import deepcopy
+import os
 from pathlib import Path
+import subprocess
 import sys
 from types import SimpleNamespace
 
@@ -34,9 +36,9 @@ def result(root, row, run_id, error=.1, seconds=4., status='completed', **extra)
 
 def test_filters_are_cartesian_and_unknown_names_fail():
     plan = matrix.make_plan()
-    assert len(plan['rows']) == len(matrix.CASES)*len(matrix.METHODS) == 90
+    assert len(plan['rows']) == len(matrix.CASES)*len(matrix.METHODS) == 120
     assert len(matrix.select_rows(plan, cases=['noh'])) == 10
-    assert len(matrix.select_rows(plan, methods=['MFV'])) == 9
+    assert len(matrix.select_rows(plan, methods=['MFV'])) == 12
     assert len(matrix.select_rows(plan, ['sod', 'gresho'], ['CRKSPH', 'MFM'])) == 4
     with pytest.raises(ValueError, match='Unknown'):
         matrix.select_rows(plan, ['typo'])
@@ -140,7 +142,8 @@ def test_trials_merge_without_overwriting_or_mixing_precision(tmp_path):
     assert len(plotting.collect(view)[0]) == 2
     with pytest.raises(ValueError, match='Duplicate method'):
         matrix.comparison(main, includes=[main])
-    other['precision'] = 'float64'
+    other = matrix.make_plan(['sod'], ['CRK-trial'], precision='float64',
+                            presets={'CRK-trial': {'base': 'CRKSPH'}})
     matrix.write_json(trial/'manifest.json', other)
     with pytest.raises(ValueError, match='precisions'):
         matrix.comparison(main, includes=[trial])
@@ -252,3 +255,68 @@ def test_json_has_no_nonstandard_nan_or_infinity(tmp_path):
     path = tmp_path/'metrics.json'
     matrix.write_json(path, {'failed': float('nan'), 'overflow': float('inf')})
     assert matrix.read_json(path) == {'failed': None, 'overflow': None}
+
+
+def test_requested_resolutions_precisions_and_native_support():
+    plan = matrix.make_plan()
+    expected = dict(linearWave=128, sod=800, sod2d=512, noh=256, kidder=200,
+                    sedov1d=800, sedov2d=256, sedov3d=64, gresho=256,
+                    hydrostatic=100, kelvinHelmholtz=256, khSmooth=256)
+    for row in plan['rows']:
+        cid = row['caseId']
+        assert row['configuration']['simulation']['nx'] == expected[cid]
+        assert row['configuration']['simulation']['precision'] == (
+            'float64' if cid in ('noh', 'kidder') else 'float32')
+        assert bool(row.get('unsupportedReason')) == (cid in ('kidder', 'hydrostatic') and row['method'] in ('MFM', 'MFV'))
+    assert matrix.case_precisions(plan) == plan['casePrecisions']
+
+
+@pytest.mark.parametrize('actual,positive,stop,expected', [
+    (.15, True, None, 'completed'),
+    (.15, False, None, 'completed_invalid'),
+    (.15025, True, None, 'endpoint_mismatch'),
+    (.05, True, 'velocity alarm', 'stopped'),
+    (.15, True, 'velocity alarm', 'stopped'),
+])
+def test_legacy_stop_records_distinguish_endpoint_and_admissibility(actual, positive, stop, expected):
+    record = dict(status='stopped', actualTime=actual, targetTime=.15,
+                  stopReason=stop, admissibility=dict(positive=positive, finite=True))
+    assert matrix.classify_outcome(record) == expected
+
+
+def test_completed_invalid_retains_cost_but_never_accuracy_rank(tmp_path):
+    plan = planned(tmp_path, cases=['sod'], methods=['CRKSPH', 'CompSPH'])
+    result(tmp_path, plan['rows'][0], 'invalid', status='stopped', seconds=2.,
+           admissibility=dict(positive=False, finite=True))
+    result(tmp_path, plan['rows'][1], 'overshoot', status='stopped', seconds=1.,
+           admissibility=dict(positive=True, finite=True))
+    path = tmp_path/'runs/overshoot/result.json'
+    record = matrix.read_json(path)
+    record['actualTime'] = .151
+    matrix.write_json(path, record)
+    rows, _ = plotting.collect(matrix.comparison(tmp_path))
+    assert rows[0]['status'] == 'completed_invalid'
+    assert rows[0]['qualityRank'] is None and rows[0]['runtimeSeconds'] == 2.
+    assert rows[1]['status'] == 'endpoint_mismatch'
+    assert rows[1]['qualityRank'] is None and rows[1]['runtimeRank'] is None
+
+
+@pytest.mark.parametrize('method', ['PESPH-E', 'PESPH-A'])
+def test_native_pesph_callback_cannot_bypass_endpoint_cap(tmp_path, monkeypatch, method):
+    # The native runner replaces Case.timestep for PESPH. A multi-step physical
+    # run catches that replacement bypassing a cap, unlike a helper-only test.
+    definition = deepcopy(matrix.CASES['linearWave'])
+    definition['simulation'].update(nx=24, tLimit=.037)
+    monkeypatch.setitem(matrix.CASES, 'endpointRegression', definition)
+    plan = planned(tmp_path, cases=['endpointRegression'], methods=[method], device='cpu')
+    env = dict(os.environ, OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1', MKL_NUM_THREADS='1')
+    for key, folder in (('WARP_CACHE_PATH', 'warp'), ('NUMBA_CACHE_DIR', 'numba'), ('MPLCONFIGDIR', 'matplotlib')):
+        env.setdefault(key, str(tmp_path/'cache'/folder))
+    run = subprocess.run([sys.executable, str(SCRIPTS/'run_compressibleMatrix.py'), 'run',
+                          '--root', str(tmp_path)], env=env, capture_output=True, text=True, timeout=300)
+    selection = matrix.read_json(tmp_path/'selection.json')
+    record = matrix.read_json(tmp_path/'runs'/selection[plan['rows'][0]['id']]/'result.json')
+    assert run.returncode == 0, record.get('error', run.stdout+run.stderr)
+    assert record['status'] == 'completed'
+    assert record['nSteps'] > 2 and record['actualTime'] == record['targetTime'] == .037
+    assert record['admissibility']['positive'] and record['admissibility']['finite']

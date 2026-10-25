@@ -25,7 +25,7 @@ import time
 import traceback
 
 from compressible_matrix import (CASES, METHODS, DEFAULT_ROOT, REPO, clean, comparison,
-    complete, digest, identifier, make_plan, now, read_json, select_rows, snap_endpoint, write_json)
+    classify_outcome, complete, digest, identifier, make_plan, now, read_json, select_rows, snap_endpoint, write_json)
 
 
 def git_info(root):
@@ -92,15 +92,20 @@ def worker(root, row, run_id):
         method=row['method'], inputSHA256=row['inputSHA256'], created=now(), status='running',
         targetTime=None, actualTime=0., nSteps=0, metrics={}, configuration=row['configuration'])
     write_json(directory/'result.json', record)
+    if row.get('unsupportedReason'):
+        record.update(status='unsupported', error=row['unsupportedReason'], finished=now())
+        write_json(directory/'result.json', record)
+        return 0
     started = time.perf_counter()
     roots, before = {}, {}
     history, result, initial, latest = [], None, None, {}
     plan = read_json(root/'manifest.json')
+    precision = row['configuration']['simulation'].get('precision', plan['precision'])
     history_file = (directory/'history.jsonl').open('w', buffering=1)
     try:
         sys.path.insert(0, str(REPO/'src'))
         from warpSPHBootstrap import bootstrap
-        bootstrap(precision=plan['precision'])
+        bootstrap(precision=precision)
         import numpy as np
         import torch
         import warp
@@ -123,7 +128,7 @@ def worker(root, row, run_id):
         provenance = dict(created=now(), python=sys.version, platform=platform.platform(),
             processor=platform.processor(), torch=torch.__version__, warp=warp.__version__,
             device=device, deviceName=torch.cuda.get_device_name(device) if cuda else platform.machine(),
-            cuda=torch.version.cuda, precision=plan['precision'],
+            cuda=torch.version.cuda, precision=precision,
             torchThreads=torch.get_num_threads(), cpuCount=os.cpu_count(),
             repositories={name: dict(path=str(path), **git_info(path)) for name, path in roots.items()},
             sourceSHA256=digest(before), inputSHA256=row['inputSHA256'],
@@ -154,11 +159,29 @@ def worker(root, row, run_id):
                 supportScheme=ctx.schemeConfig.adaptiveSupportScheme, analyticMass=True)
 
         def timestep(ctx, system):
-            # Native scheme dispatch: MFM/MFV have their own signal/CFL policy.
-            step = (base.timestep or defaultTimestep)(ctx, system)
-            at_end = snap_endpoint(system, float(ctx.spec.tLimit), plan['precision'])
-            remaining = 0. if at_end else max(0., float(ctx.spec.tLimit)-float(system.t))
-            return torch.clamp(step, max=remaining) if isinstance(step, torch.Tensor) else min(float(step), remaining)
+            # PESPH's runner installs its native callback after case assembly.
+            # Initial diagnostics must use that same policy, too.
+            from warpSPH.configurations.pesph import PESPHConfig
+            if isinstance(ctx.schemeConfig, PESPHConfig):
+                from warpSPH.modules.timestep.pesph import pesphTimestep
+                return pesphTimestep(ctx, system)
+            return (base.timestep or defaultTimestep)(ctx, system)
+
+        def post_step(ctx, system, step):
+            if base.postStep:
+                base.postStep(ctx, system, step)
+            # This runs before the runner reads time and picks the next dt.
+            # Snap only time-roundoff; a finite physical step is never skipped.
+            snap_endpoint(system, float(ctx.spec.tLimit), precision)
+
+        def cap_next_step(ctx, system):
+            # Diagnostics follow EVERY native timestep callback, including
+            # PESPH's replacement. Cap that proposed step without replacing
+            # any scheme's physical CFL calculation.
+            remaining = max(0., float(ctx.spec.tLimit)-float(system.t))
+            step = ctx.config.dt
+            ctx.config.dt = (torch.clamp(step, max=remaining) if isinstance(step, torch.Tensor)
+                             else min(float(step), remaining))
 
         def warmup_timestep(ctx, system):
             # Warmup has a fixed step count, not a physical endpoint; do not
@@ -174,12 +197,13 @@ def worker(root, row, run_id):
                     if base.name == 'kelvinHelmholtz' else torch.zeros_like(system.state.masses))
                 initial = {k: np.array(v, copy=True) for k, v in arrays(ctx, system).items()}
                 np.savez_compressed(directory/'initial.npz', **initial)
-                ctx.config.dt = timestep(ctx, system)  # physical cap on the first step too
+                ctx.config.dt = timestep(ctx, system)
                 write_json(directory/'resolved.json', resolvedConfiguration(ctx))
                 record.update(targetTime=float(ctx.spec.tLimit), particles=len(system.state.masses))
                 if cuda:
                     torch.cuda.synchronize(device)
                 latest['loopStart'] = time.perf_counter()
+            cap_next_step(ctx, system)
             values = diagnostics(base.diagnostics, ctx, system)
             values.update(t=float(system.t), dt=float(ctx.config.dt))
             history.append(values)
@@ -198,7 +222,8 @@ def worker(root, row, run_id):
                 latest['loopStart'] = latest['loopEnd']
             return values
 
-        wrapped = replace(base, buildSystem=build_case, diagnostics=record_diagnostics, timestep=timestep)
+        wrapped = replace(base, buildSystem=build_case, diagnostics=record_diagnostics,
+                          timestep=timestep, postStep=post_step)
         with torch.no_grad():
             if not plan['smoke']:
                 # Warm an independent run, then rebuild the measured initial
@@ -213,9 +238,11 @@ def worker(root, row, run_id):
                         stopReason=warm_result.stopReason)
                     del warm_result
                 except Exception:
-                    # Preserve a failed warmup, then evaluate the declared
-                    # physical run independently, without parameter changes.
+                    # A CUDA assertion can poison the whole process. Preserve
+                    # the original error and let the next cell start fresh.
                     record['warmup'] = dict(error=traceback.format_exc())
+                    record['failurePhase'] = 'warmup'
+                    raise
                 if cuda:
                     torch.cuda.synchronize(device)
                 record['warmup']['wallSeconds'] = time.perf_counter()-warm_started
@@ -237,11 +264,15 @@ def worker(root, row, run_id):
         finite_state = finite_state and all(np.isfinite(final_arrays[k]).all() for k in
             ('positions', 'velocities', 'masses', 'supports', 'densities', 'pressures', 'internalEnergies'))
         positive = positive and bool(np.all(final_arrays['masses'] > 0))
-        finished = not result.diverged and not result.stopReason and positive and finite_state
-        record['admissibility'] = dict(positive=positive, finite=finite_state)
-        record['status'] = ('smoke' if plan['smoke'] and finished else 'completed'
-            if complete('finished' if finished else 'stopped', record['actualTime'], record['targetTime'])
-            else 'stopped')
+        violations = []
+        for field in ('minDensity', 'minEnergy', 'minSupport'):
+            bad = next((h for h in history if not math.isfinite(h[field]) or h[field] <= 0), None)
+            if bad is not None:
+                violations.append(dict(field=field, time=bad['t'], value=bad[field]))
+        record['admissibility'] = dict(positive=positive, finite=finite_state, violations=violations)
+        record['executionStatus'] = 'stopped' if result.diverged or result.stopReason else 'completed'
+        record['status'] = 'stopped' if result.diverged else 'finished'
+        record['status'] = classify_outcome(record, smoke=plan['smoke'])
         times = result.series('stepTime_ms')[1:]
         steady = times[plan['warmupSteps']:]
         # A failed reference/accuracy calculation must not discard separately
@@ -347,7 +378,7 @@ def execute(root, plan, rows, rerun=False, timeout=14400):
             selection[row['id']] = run_id
             write_json(root/'selection.json', selection)
             print(f"{record['status'].upper()} {row['id']} (log: {directory/'worker.log'})", flush=True)
-            failed |= record['status'] not in ('completed', 'smoke')
+            failed |= record['status'] not in ('completed', 'smoke', 'unsupported')
             if interrupted:
                 return 130
     finally:
@@ -362,7 +393,8 @@ def main(argv=None):
     parser.add_argument('--cases', nargs='+', help='Case IDs; omitted = all cases in the saved plan.')
     parser.add_argument('--methods', '--schemes', nargs='+', help='Preset IDs; omitted = all methods in the saved plan.')
     parser.add_argument('--presets', type=Path, help='Plan only: JSON object of named presets with base/solver/simulation/params overrides.')
-    parser.add_argument('--precision', choices=('float32', 'float64'), default='float32', help='Plan only.')
+    parser.add_argument('--precision', choices=('float32', 'float64'), default='float32',
+        help='Plan only: default precision; Noh/Kidder columns always use float64.')
     parser.add_argument('--device', default='cuda:0', help='Plan only; unavailable CUDA never falls back to CPU.')
     parser.add_argument('--smoke', action='store_true', help='Plan only: three coarse steps, excluded from endpoint rankings.')
     parser.add_argument('--rerun', action='store_true', help='Run: append new attempts even for already selected cells.')
@@ -429,6 +461,9 @@ def main(argv=None):
             importAll()
             failed = False
             for row in rows:
+                if row.get('unsupportedReason'):
+                    print('UNSUPPORTED '+row['id']+': '+row['unsupportedReason'])
+                    continue
                 try:
                     # Use CPU for metadata preparation: this does not sample or step.
                     config = RunConfiguration.fromDict(row['configuration'])

@@ -8,6 +8,7 @@ Uniform cold gas converges on the origin at `v_s`; the exact post-shock state is
 from __future__ import annotations
 
 from typing import Dict
+import torch
 
 from ...caseUtils import sampleNoh1D
 from ...configurations.meshless import MeshlessConfig
@@ -41,7 +42,15 @@ def buildSystem(ctx: RunContext):
         return toMeshlessSystem(comp, ctx.config, ctx.schemeConfig)
     system = sampleNoh1D(ctx.spec.nx, ctx.config, ctx.schemeConfig,
                         ctx.SimulationState, ctx.SimulationSystem)
-    return addUniformInternalEnergy(system, ctx.param('gamma'), ctx.param('uAmbient'))
+    addUniformInternalEnergy(system, ctx.param('gamma'), ctx.param('uAmbient'))
+    if ctx.param('outerBoundary') == 'open':
+        # Preserve the native sampled lattice and its thermodynamic fields;
+        # only remove the artificial separating jump across the periodic seam.
+        ctx.config.domain.periodic = torch.zeros_like(ctx.config.domain.periodic)
+        system.domain = ctx.config.domain
+        system.adjacency = None
+        ctx.spec = ctx.spec.merged(periodic=False)
+    return system
 
 
 def _shockFront(ctx: RunContext, state):
@@ -76,6 +85,11 @@ def deriveConfiguration(spec):
     return {'v_s': (spec.params['gamma'] - 1) / 2}
 
 
+def validateConfiguration(spec):
+    if spec.params['outerBoundary'] == 'open' and spec.scheme in ('MFM', 'MFV'):
+        raise ValueError('params.outerBoundary: open edges are not supported by MFM/MFV; these schemes require a periodic domain')
+
+
 nohCase = registerCase(Case(
     name='noh',
     scheme='CRKSPH',
@@ -102,15 +116,18 @@ nohCase = registerCase(Case(
     supportedSchemes=(*COMPRESSIBLE_SCHEMES, 'PESPH'),
     parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
         'uAmbient': P('number', 'Uniform initial specific internal energy; zero retains the exactly cold IC.', 'initial', minimum=0),
+        'outerBoundary': P('string', 'native retains configured periodicity; open removes periodic seam interactions after sampling the same initial particles.', 'boundary', choices=('native', 'open')),
         'v_s': P('number', 'Reference shock-front propagation speed.', 'reference', units='velocity', exclusiveMinimum=0,
                  readOnly=True, derivation='(params.gamma - 1) / 2 for the unit inflow speed'),
     },
     simulationParameters={'dim': P('integer', 'Dimension supported by this initial-condition sampler.', 'domain', choices=(1,))},
     variants={},
     deriveParameters=deriveConfiguration,
+    validateConfiguration=validateConfiguration,
     params=dict(
         COMPRESSIBLE_PARAMS,
         uAmbient=0.,
+        outerBoundary='native',
         v_s=1 / 3,
     ),
 ))

@@ -17,8 +17,6 @@ from __future__ import annotations
 from typing import Dict, Optional, Tuple
 
 import numpy as np
-import torch
-
 from ...caseUtils import buildKidder, buildKidderBCs
 from ...runner import Case, RunContext, caseMain, registerCase
 from .common import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
@@ -73,16 +71,17 @@ def buildSystem(ctx: RunContext):
 
 
 def postStep(ctx: RunContext, state, step: int) -> None:
-    """Re-impose the analytic radial velocity on the two boundary bands."""
-    solution = ctx.scratch['solution']
-    band = ctx.param('band')
-    t = float(state.t)
-    positions = state.state.positions.detach().cpu().numpy()[:, 0]
-    velocities = torch.as_tensor(solution.vr(t, positions),
-                                 dtype=state.state.velocities.dtype,
-                                 device=state.state.velocities.device)
-    state.state.velocities[:band, 0] = velocities[:band]
-    state.state.velocities[-band:, 0] = velocities[-band:]
+    """Restore the driven state after the integrator's final energy update.
+
+    Dirichlet values set inside an RHS belong to that stage's copy. In
+    particular, compatible work can overwrite the prescribed internal energy
+    when assembling the accepted step. These externally driven particles must
+    obey all three prescriptions at the accepted time, too.
+    """
+    from ...modules.boundaryConditions import enforceDirichlet
+    from ...modules.eos import refreshEOS
+    enforceDirichlet(state, float(state.t), 0., ctx.config, ctx.schemeConfig)
+    refreshEOS(state.state, ctx.schemeConfig)
 
 
 def _shell(ctx: RunContext, state):

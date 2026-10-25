@@ -62,9 +62,10 @@ def merge(base, patch):
     return result
 
 
-def case(name, source, nx, end, dim, label, metric, scale=1., params=None):
+def case(name, source, nx, end, dim, label, metric, scale=1., params=None, precision=None, unsupported=()):
     return dict(id=name, case=source, label=label, simulation=dict(nx=nx, dim=dim, tLimit=end),
-                params=params or {}, quality=dict(metric=metric, scale=scale, lowerIsBetter=True))
+                params=params or {}, precision=precision, unsupportedSchemes=list(unsupported),
+                quality=dict(metric=metric, scale=scale, lowerIsBetter=True))
 
 
 # One fixed resolution per column. Sedov's native sampler derives its endpoint
@@ -72,18 +73,24 @@ def case(name, source, nx, end, dim, label, metric, scale=1., params=None):
 CASES = {c['id']: c for c in (
     case('linearWave', 'linearWave', 128, 1., 1, 'Linear wave\n1D · nx=128', 'normalizedVelocityL1',
          params={'A': 1e-3}),
-    case('sod', 'sod', 400, .15, 1, 'Sod\n1D · nx=400', 'densityVolumeWeightedL1',
+    case('sod', 'sod', 800, .15, 1, 'Sod\n1D · nx=800', 'densityVolumeWeightedL1',
          params={'gamma': 1.4, 'right_rho': .125, 'right_pressure': .1, 'samplingRatio': 8}),
-    case('sod2d', 'sod2d', 160, .15, 2, 'Sod strip\n2D · nx=160', 'densityVolumeWeightedL1'),
+    case('sod2d', 'sod2d', 512, .15, 2, 'Sod strip\n2D · nx=512', 'densityVolumeWeightedL1'),
     case('noh', 'noh', 256, .6, 1, 'Noh\n1D · nx=256', 'postShockDensityAbsoluteRelativeError',
-         params={'uAmbient': 1e-8}),
-    case('sedov2d', 'sedov', 96, None, 2, 'Sedov\n2D · nx=96', 'densityVolumeWeightedL1',
+         params={'uAmbient': 1e-8}, precision='float64'),
+    case('kidder', 'kidder', 200, None, 1, 'Kidder\n1D · nx=200', 'densityVolumeWeightedL1',
+         params={'tauFraction': .99}, precision='float64', unsupported=('MFM', 'MFV')),
+    case('sedov1d', 'sedov', 800, None, 1, 'Sedov\n1D · nx=800', 'densityVolumeWeightedL1',
          params={'uAmbient': 1e-8, 'goalRadius': .8}),
-    case('sedov3d', 'sedov', 40, None, 3, 'Sedov\n3D · nx=40', 'densityVolumeWeightedL1',
+    case('sedov2d', 'sedov', 256, None, 2, 'Sedov\n2D · nx=256', 'densityVolumeWeightedL1',
          params={'uAmbient': 1e-8, 'goalRadius': .8}),
-    case('gresho', 'gresho', 64, 3., 2, 'Gresho\n2D · nx=64', 'tangentialVelocityL1'),
-    case('kelvinHelmholtz', 'kelvinHelmholtz', 128, 2.5, 2, 'KH sharp density\n2D · nx=128', None),
-    case('khSmooth', 'kelvinHelmholtz', 128, 2.5, 2, 'KH smooth density\n2D · nx=128', None,
+    case('sedov3d', 'sedov', 64, None, 3, 'Sedov\n3D · nx=64', 'densityVolumeWeightedL1',
+         params={'uAmbient': 1e-8, 'goalRadius': .8}),
+    case('gresho', 'gresho', 256, 3., 2, 'Gresho\n2D · nx=256', 'tangentialVelocityL1'),
+    case('hydrostatic', 'hydrostatic', 100, 7., 2, 'Pressure equilibrium\n2D · nx=100', 'pressureError',
+         params={'rho_high': 4., 'gamma': 1.5}, unsupported=('MFM', 'MFV')),
+    case('kelvinHelmholtz', 'kelvinHelmholtz', 256, 2.5, 2, 'KH sharp density\n2D · nx=256', None),
+    case('khSmooth', 'kelvinHelmholtz', 256, 2.5, 2, 'KH smooth density\n2D · nx=256', None,
          params={'smoothDensity': 1}),
 )}
 
@@ -109,9 +116,12 @@ RECIPES = {
     'sod': 'Volume-weighted density L1 against the exact Riemann profile (density units).',
     'sod2d': 'Volume-weighted density L1 against the exact Riemann profile (density units).',
     'noh': 'Absolute relative mean post-shock density error in 0.2–0.8 of the exact front radius; excludes centre/seam.',
+    'kidder': 'Volume-weighted density L1 against analytic compression at 0.99 collapse time; analytic boundary bands excluded. Boundary work means total energy is not a closed-system invariant.',
+    'sedov1d': 'Volume-weighted density L1 inside 1.15 exact shock radii (density units); initial energy is also reported.',
     'sedov2d': 'Volume-weighted density L1 inside 1.15 exact shock radii (density units); initial energy is also reported.',
     'sedov3d': 'Volume-weighted density L1 inside 1.15 exact shock radii (density units); initial energy is also reported.',
     'gresho': 'Tangential velocity L1 within radius 0.5 against the stationary piecewise Gresho profile (velocity units).',
+    'hydrostatic': 'Maximum absolute pressure error from P=1 in the stationary dense-square contact test (also a relative error here); no gravity. Displacement and spurious velocity are retained separately.',
     'kelvinHelmholtz': 'Mode amplitude is a diagnostic, not accuracy; no matched continuum reference is assumed.',
     'khSmooth': 'Mode amplitude is a diagnostic, not accuracy; density smoothing alone does not match McNally ICs.',
 }
@@ -159,11 +169,11 @@ def make_plan(cases=None, methods=None, presets=None, precision='float32', devic
         definition = deepcopy(CASES[cid])
         for mid in method_ids:
             preset = catalog[mid]
-            case_controls = {'nx', 'dim', 'L', 'periodic', 'tLimit', 'nSteps'} & set(preset.get('simulation', {}))
+            case_controls = {'nx', 'dim', 'L', 'periodic', 'tLimit', 'nSteps', 'precision'} & set(preset.get('simulation', {}))
             if case_controls:
                 raise ValueError(f'{mid}: presets cannot change fixed case controls {sorted(case_controls)}; '
                                  'define a separate case/study instead')
-            simulation = dict(device=device, precision=precision, nSteps=None, kernel='B7', n_h=4.,
+            simulation = dict(device=device, precision=definition.get('precision') or precision, nSteps=None, kernel='B7', n_h=4.,
                 integrationScheme='rungeKutta2', supportMode='KernelMeanSymmetric',
                 adaptiveDt=True, cflFactor=.15, minDt=1e-10, maxDt=.01,
                 calibrateNormalization=True, execution='eager', cudaGraph=False,
@@ -177,10 +187,13 @@ def make_plan(cases=None, methods=None, presets=None, precision='float32', devic
                 params=merge(definition['params'], preset.get('params', {})), solver=deepcopy(preset['solver']))
             row = dict(id=cid+'__'+mid, caseId=cid, method=mid, configuration=configuration,
                        caseDefinition=definition, preset=deepcopy(preset))
+            if preset['solver']['scheme'] in definition.get('unsupportedSchemes', ()):
+                row['unsupportedReason'] = f"Native {definition['case']} case does not support {preset['solver']['scheme']}"
             row['inputSHA256'] = digest(row)
             rows.append(row)
     return dict(schemaVersion=VERSION, id=identifier(), created=now(), smoke=smoke,
                 precision=precision, device=device, warmupSteps=10, seed=1234,
+                casePrecisions={cid: CASES[cid].get('precision') or precision for cid in case_ids},
                 cases={c: deepcopy(CASES[c]) for c in case_ids},
                 methods={m: catalog[m] for m in method_ids}, rows=rows,
                 protocol=dict(resolution='One fixed nx per case; actual particle counts and initial-array hashes retained.',
@@ -196,6 +209,44 @@ def make_plan(cases=None, methods=None, presets=None, precision='float32', devic
 def complete(status, actual, target, smoke=False):
     return (not smoke and status == 'finished' and actual is not None and target is not None
             and abs(actual-target) <= 2e-6 * max(abs(target), 1e-30))
+
+
+def classify_outcome(record, *, smoke=False):
+    """Keep endpoint completion, early termination and admissibility distinct.
+
+    Also interprets earlier records without rewriting their saved evidence.
+    An endpoint overshoot cannot be repaired by relabelling it as complete.
+    """
+    status = record.get('status', 'pending')
+    if status in ('pending', 'running', 'error', 'timeout', 'interrupted', 'unsupported', 'rejected'):
+        return status
+    if record.get('stopReason'):
+        return 'stopped'
+    if record.get('executionStatus') == 'stopped':
+        return 'stopped'
+    if status == 'stopped' and 'admissibility' not in record:
+        return 'stopped'
+    if smoke or status == 'smoke':
+        return 'smoke'
+    actual, target = record.get('actualTime'), record.get('targetTime')
+    if not complete('finished', actual, target):
+        return 'endpoint_mismatch' if actual is not None and target is not None and actual >= target else 'stopped'
+    admissibility = record.get('admissibility', {})
+    if admissibility.get('positive') is False or admissibility.get('finite') is False:
+        return 'completed_invalid'
+    return 'completed'
+
+
+def case_precisions(plan):
+    """Infer per-column precision from frozen rows, including older manifests."""
+    precisions = {}
+    for row in plan['rows']:
+        cid = row['caseId']
+        value = row['configuration']['simulation'].get('precision', plan['precision'])
+        if cid in precisions and precisions[cid] != value:
+            raise ValueError(f'Mixed precisions within case {cid}')
+        precisions[cid] = value
+    return precisions
 
 
 def snap_endpoint(system, target, precision):
@@ -220,6 +271,7 @@ def comparison(root, cases=None, methods=None, includes=()):
     plan = read_json(root/'manifest.json')
     rows = select_rows(plan, cases, methods)
     out = dict(schemaVersion=VERSION, id=identifier(), created=now(), smoke=plan['smoke'],
+               casePrecisions=case_precisions(plan),
                cases={r['caseId']: plan['cases'][r['caseId']] for r in rows},
                methods={r['method']: plan['methods'][r['method']] for r in rows}, cells=[])
     sources = [(root, plan, rows)]
@@ -227,8 +279,9 @@ def comparison(root, cases=None, methods=None, includes=()):
         other = Path(other).resolve()
         other_plan = read_json(other/'manifest.json')
         select_rows(other_plan)  # validate frozen row hashes even for partial trials
-        if other_plan['smoke'] != plan['smoke'] or other_plan['precision'] != plan['precision']:
-            raise ValueError('Cannot merge smoke/full runs or different precisions')
+        if other_plan['smoke'] != plan['smoke']:
+            raise ValueError('Cannot merge smoke/full runs')
+        other_precisions = case_precisions(other_plan)
         # A trial may cover only a subset of the displayed cases. Keep its
         # other cells pending instead of requiring another full matrix.
         extra = [r for r in other_plan['rows'] if r['caseId'] in out['cases']]
@@ -236,6 +289,8 @@ def comparison(root, cases=None, methods=None, includes=()):
             cid, mid = r['caseId'], r['method']
             if cid not in out['cases']:
                 continue
+            if other_precisions[cid] != out['casePrecisions'][cid]:
+                raise ValueError(f'Cannot merge different precisions within case {cid}')
             if other_plan['cases'][cid] != out['cases'][cid]:
                 raise ValueError(f'Case definitions differ: {cid}')
             if mid in out['methods']:

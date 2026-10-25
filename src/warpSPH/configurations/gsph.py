@@ -45,6 +45,16 @@ class GSPHConfig(CompressibleSPHConfig):
     viscositySwitchParams: ViscositySwitchConfig = field(default_factory=ViscositySwitchConfig)
     schemeName: str = field(default='GSPH', metadata={'description': 'Godunov SPH'})
 
+    def validateRHS(self):
+        if self.diffusionParams.timeCentredEnergy:
+            raise ValueError(
+                'timeCentredEnergy is a finite-step pair-operator experiment and cannot be used in a Godunov stage RHS; '
+                'set timeCentredEnergy=False and let warpSPHIntegrators advance the stage energy')
+
+    def validate(self, config=None):
+        super().validate(config)
+        self.validateRHS()
+
 
 def gsphConfigToDict(config: GSPHConfig) -> Dict[str, Any]:
     return compressibleConfigToDict(config)

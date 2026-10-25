@@ -6,16 +6,16 @@ corrections and finalizes diagnostics. Shared spatial work lives in modules:
 meshless face accumulation, reconstruction/limiting, ideal-gas primitives and
 moving-face Riemann policy. Geometry remains in warpSPHCore.mfm.
 
-The temporal/common exports preserve older direct callers. That exact-delta
-adapter requires a single-evaluation Euler integrator; the normal staged runner
-does not use this adapter. Returned frontend adjacency remains None because
+The temporal/common exports preserve oracle utilities. The explicit historical
+map is isolated in modules.meshless.compatibility; registered RHSs refuse calls
+without the package driver's stage lifecycle. Returned frontend adjacency remains None because
 meshless geometry owns its own neighbor structure.
 """
 
 from ...exactDelta import requireExactDeltaIntegrator
 from .common import BALL, StepContext, stashGeometry, supports_from_volume, wrap
 from .mfm import mfmStep
-from .mfv import gizmoPrimitiveUpdate, mfvStep
+from .mfv import mfvStep
 from .step import runMeshlessStep
 from .temporal import AUTO_TEMPORAL_SCHEME, TEMPORAL_SCHEMES, resolve_temporal_scheme
 

@@ -1,5 +1,10 @@
 # Fixed-resolution compressible comparison
 
+Integration ownership and the accepted-state meshless diagnostic fix are
+documented in [the integrator audit](integrator_audit_2026-10-24.md).
+Godunov cold-shock failures and labeled controls are covered in
+[the shock audit](godunov_shock_audit_2026-10-24.md).
+
 This harness compares declared numerical presets on one fixed resolution per
 case. It is an overview for finding outliers, not an equal-compute or convergence
 study. It does not change solver implementations or tune settings after failures.
@@ -18,7 +23,7 @@ python scripts/run_compressibleMatrix.py plan --root .tmp/compressible-matrix
 python scripts/run_compressibleMatrix.py check --root .tmp/compressible-matrix
 ```
 
-`manifest.json` freezes the inputs for 90 cells: nine cases and ten presets.
+`manifest.json` freezes the inputs for 120 cells: twelve cases and ten presets (116 supported combinations).
 `check` validates typed configurations on CPU without sampling or stepping.
 Planning refuses to overwrite a manifest. Choose a fresh root when changing
 inputs; runtime source versions are recorded separately for each attempt.
@@ -26,14 +31,17 @@ inputs; runtime source versions are recorded separately for each attempt.
 | Case ID | Fixed nx | Endpoint | Primary quality metric |
 |---|---:|---|---|
 | `linearWave` | 128 | t=1 | Velocity L1 / imposed wave amplitude |
-| `sod` | 400 | t=.15 | Volume-weighted density L1 |
-| `sod2d` | 160 | t=.15 | Volume-weighted density L1 |
+| `sod` | 800 | t=.15 | Volume-weighted density L1 |
+| `sod2d` | 512 | t=.15 | Volume-weighted density L1 |
 | `noh` | 256 | t=.6 | Absolute relative post-shock density error |
-| `sedov2d` | 96 | Shock reaches radius .8 | Volume-weighted density L1 within 1.15 shock radii |
-| `sedov3d` | 40 | Shock reaches radius .8 | Same radial metric in 3D |
-| `gresho` | 64 | t=3 | Tangential velocity L1 within radius .5 |
-| `kelvinHelmholtz` | 128 | t=2.5 | Mode amplitude/mixing diagnostics, unranked |
-| `khSmooth` | 128 | t=2.5 | Same diagnostics with smooth initial density |
+| `kidder` | 200 | 0.99 analytic collapse time | Interior volume-weighted density L1 |
+| `sedov1d` | 800 | Shock reaches radius .8 | Volume-weighted density L1 within 1.15 shock radii |
+| `sedov2d` | 256 | Shock reaches radius .8 | Volume-weighted density L1 within 1.15 shock radii |
+| `sedov3d` | 64 | Shock reaches radius .8 | Same radial metric in 3D |
+| `gresho` | 256 | t=3 | Tangential velocity L1 within radius .5 |
+| `hydrostatic` | 100 | t=7 | Maximum pressure error from P=1 |
+| `kelvinHelmholtz` | 256 | t=2.5 | Mode amplitude/mixing diagnostics, unranked |
+| `khSmooth` | 256 | t=2.5 | Same diagnostics with smooth initial density |
 
 `nx` is the case sampler's resolution, not always the actual particle count.
 Native samplers can differ between methods. Initial physical arrays, their
@@ -54,12 +62,18 @@ promote dissipative A to a recommended default. Noh and Sedov use a common
 `uAmbient=1e-8` for all methods. Cold-state failures remain failures; no floors,
 automatic CFL retries or replacement presets are introduced.
 
-Common controls are B7, n_h=4, eager execution and FP32. Each method retains its
+Noh and Kidder use FP64 for every method; other columns default to FP32.
+Precision appears in column labels and provenance, never mixed within a column.
+The hydrostatic case is the literature dense-square pressure-equilibrium test
+(rho_high=4, gamma=1.5), without gravity. Kidder and hydrostatic have no native
+MFM/MFV setup: those four cells are retained as unsupported, without execution.
+
+Common controls are B7, n_h=4 and eager execution. Each method retains its
 native timestep/support policy and package time driver; RK2 is requested where
 the ODE-integrator contract applies. MFM/MFV retain their own CFL controls.
 The first timestep is physically limited, and the final timestep is capped at
 the endpoint. Use `--precision float64` or `--device cpu` **at plan time** for a
-separate cohort. `--smoke` plans only three coarse steps and never generates
+separate cohort (Noh/Kidder stay FP64). `--smoke` plans only three coarse steps and never generates
 endpoint rankings. Resolutions and endpoints are not changed by run filters.
 
 ## Select what to execute
@@ -107,7 +121,7 @@ python scripts/run_compressibleMatrix.py report --cases sod noh gresho
 
 Reports go to new `comparisons/<comparison-id>/` directories. Each contains:
 
-- `matrix.png` / `matrix.svg`: quality and loop-cost panels, independently ranked
+- `matrix.pdf` / `matrix.png` / `matrix.svg`: quality and loop-cost panels, independently ranked
   within each column. Cells contain ranks/values/status, **no dates or commits**.
 - `index.html`: figure, metric definitions and a separate provenance table.
 - `metrics.json` / `metrics.csv`: all diagnostics, not only the primary score.
@@ -116,8 +130,23 @@ Reports go to new `comparisons/<comparison-id>/` directories. Each contains:
 - `comparison.json`: explicit result paths and input hashes for every selected
   cell. Rebuilding this manifest never picks a best run or the newest run.
 
+An explicitly composed comparison can group boundary variants in one displayed
+case without changing saved run evidence. Set a cell's `sourceCaseId` to its
+original result case ID; its input hash and method are still checked against
+the original result. Use `boundaryTreatment` to record the actual boundary setup,
+`marker` to flag exceptional cells in both panels, and top-level `figureNotes`
+to explain the marker in the PDF and HTML. These fields are also retained in the
+metric/provenance exports. The consolidated Noh view uses open edges for SPH and
+marks MFM/MFV with `‡`: they require periodic boundaries in the current
+implementation. Their modified boundary protocol must be considered when
+interpreting ranks in that column.
+
 Pending cells remain visible. Stopped runs show the fraction of target physical
-time reached and cannot win endpoint ranks. Smoke runs remain unranked. Runs
+time reached and cannot win endpoint ranks. Completed endpoints with nonpositive
+or nonfinite states show INVALID in the quality panel; their measured endpoint
+cost is retained with a dagger. They receive no accuracy rank. Endpoint
+overshoots show ENDPOINT and receive neither rank. These distinctions also
+interpret retained older records without rewriting their evidence. Smoke runs remain unranked. Runs
 whose source files changed during execution are marked invalid for comparison.
 Missing metrics are not converted to zeros. Raw errors have their documented
 units; the figure does not imply a shared percentage scale or absolute pass.
@@ -164,12 +193,12 @@ python scripts/run_compressibleMatrix.py report --cases sod noh gresho \
 
 Overrides use the existing typed case/solver schema; unsupported controls fail
 `check` or worker setup. Trial roots can be included as additional figure rows.
-Duplicate preset IDs, changed case definitions, mixed precision and mixed
+Duplicate preset IDs, changed case definitions, mixed precision within a column and mixed
 smoke/full plans are rejected. The exact overridden resolution, physical
 parameters and numerical settings remain in input/resolved records; inspect
 them before treating an intentionally changed trial as a matched comparison.
 Presets cannot override nx, dimension, domain extent/periodicity, endpoint or
-step count. Change the case catalog for a separate fixed-resolution study;
+step count or precision. Change the case catalog for a separate fixed-resolution study;
 `--smoke` is the explicit exception for plumbing checks. Physical case-parameter
 overrides, if used, must be distinguished from numerical-parameter experiments.
 
@@ -179,7 +208,9 @@ No rendering, video, full trajectory export or daemon work runs in this
 protocol. Every attempt retains initial/final NPZ arrays and diagnostic history.
 Full runs first execute a separate ten-step warmup, then rebuild the measured
 initial state with the same seed. Warmup time/outcome is retained separately;
-the measured trajectory does not start from an advanced warmup state. This
+the measured trajectory does not start from an advanced warmup state. A warmup
+exception aborts that attempt with its original error; CUDA errors are never
+followed by a measured run in a potentially poisoned process. This
 warms initial code paths, not every branch a later shock/geometry may encounter.
 Smoke runs omit that warmup.
 Loop wall time excludes case construction but includes stepping, timestep
@@ -204,3 +235,24 @@ require inspection of that provenance.
 Generated data stays under Git-ignored `.tmp/`. Preserve the whole root, including
 its runs, when retaining or moving a study. Comparison manifests currently use
 absolute result paths; update those paths explicitly if relocating the archive.
+
+## Revised cohort and previous endpoint audit
+
+Sedov 3D was reduced from nx=128 to nx=64 at the user's request after the
+nx=128 runs proved too slow. The original manifest and attempts stay intact;
+nx=64 uses a separate manifest with identical other numerical settings. Complete
+the remaining non-3D cases first, then run every Sedov 3D method at nx=64.
+The resulting comparison selects the nx=64 column explicitly and retains
+nx=128 attempts separately, without mixing resolutions within that column.
+
+Use a new root (for example `.tmp/compressible-matrix-20261024-v2`) for the
+revised resolutions and per-case precision. Existing manifests keep their exact
+original inputs. The earlier PESPH endpoint wrapper was replaced by the native
+runner callback, allowing small endpoint overshoots. The revised harness caps
+the native proposed timestep in diagnostics, after that callback, and snaps only
+time-dtype roundoff before the runner reads the new time. No solver policy or
+physical state is repaired. Earlier overshoots remain excluded from ranks.
+
+Regression checks: `python -m pytest tests/test_compressibleMatrix.py -q` includes
+short multi-step CPU runs of both PESPH variants, exercising the native runner
+callback replacement and the final endpoint cap.

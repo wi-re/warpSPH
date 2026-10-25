@@ -165,7 +165,7 @@ class DiffusionParameters:
     gaussianEta: scalar_t = field(default=scalar_t(1.0)) # Inutsuka scheme: the Gaussian's smoothing length is `eta (m / rho)^(1/d)`, the local particle spacing times eta (Inutsuka 2002 Eq. 81 with C_smooth = 1: ~6 neighbours inside 3h in 1D, ~100 in 3D). A Gaussian wider than the spacing has its gradient still rising at the neighbours: the pairing instability
     cubicVolume: wp.bool = field(default=True) # Inutsuka scheme: cubic Hermite interpolant of the specific volume 1/rho along the pair axis (else linear)
     interfaceClamp: wp.bool = field(default=False) # Inutsuka scheme: keep the interface `s*` between the two particles, |s*| <= s_ij / 2
-    timeCentredEnergy: wp.bool = field(default=False) # Godunov schemes: the energy rate uses the time-centred velocity `v_i + a_i dt/2` of Inutsuka (2002) Eq. (67) / Puri Eq. (36) (a second pass over the neighbours for `a_i`)
+    timeCentredEnergy: wp.bool = field(default=False) # Standalone Godunov pair-operator experiment only: v_i + a_i dt/2. Rejected by registered Godunov stage RHSs.
     stateLimiter: wp.int32 = field(default=StateLimiter.PairRatio.value) # `StateLimiter`: the limiter of the Godunov scheme's second-order states
     shockSwitchC: scalar_t = field(default=scalar_t(0.0)) # Godunov scheme: first-order states for a pair with `C (v_j - v_i) . n > min(c_i, c_j)` (Inutsuka 2002 Eq. 75, C = 3); 0 = off
     riemannReconstruction: wp.bool = field(default=False) # `RiemannDissipation`: left / right states of rho and P are the limited midpoint extrapolations (GODUNOV_SPH_PLAN layer 1; needs the (rho, P) gradients, `reconstruction.computeStateGradients`), not the particle values

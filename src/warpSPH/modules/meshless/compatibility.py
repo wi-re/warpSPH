@@ -6,6 +6,14 @@ from .context import StepContext, refreshPrimitives, startOfStepGeometry
 from .temporal import advance, resolve_temporal_scheme
 
 
+def legacyMeshlessStep(system, dt, config, schemeConfig, verbose=False):
+    """Explicit historical map for oracle scripts only; never a registered RHS."""
+    from .temporal import conservedHancockUpdate
+    from .updates import gizmoPrimitiveUpdate
+    update = gizmoPrimitiveUpdate if schemeConfig.mode == 'MFV' and schemeConfig.mfvUpdate == 'primitive' else conservedHancockUpdate
+    return exactDeltaStep(system, dt, config, schemeConfig, mode=schemeConfig.mode, hancockUpdate=update)
+
+
 def exactDeltaStep(system, dt, config, schemeConfig, *, mode, hancockUpdate):
     with record_function(f"[warpSPH] - [{mode.lower()} - 01] integrator guard"):
         requireExactDeltaIntegrator(config, f'{mode} meshless')           # the step owns the full time step: one evaluation per step

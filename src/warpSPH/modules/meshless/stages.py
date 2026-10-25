@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from .context import StepContext
 from .geometry import startOfStepGeometry
 from .primitives import primitives, refreshPrimitives
-from .updates import gizmoPrimitiveUpdate
 from warpSPHCore.profiling import record_function
 
 
@@ -31,11 +30,3 @@ def prepareStage(system, dt, config, schemeConfig, stageIndex):
     system.meshlessContext = StepContext(dt=dt, gamma=float(schemeConfig.gamma), config=config, schemeConfig=schemeConfig,
         domain=system.domain, pos=state.positions, supports=state.supports, Q=state.Q,
         rho=rho, vel=vel, P=pressure, u=energy, geom=geom)
-
-
-def compatibleStage(system, dt, schemeConfig, temporal):
-    """MFV's experimental primitive kick is a solver correction to the raw flux."""
-    if temporal == 'hancock' and schemeConfig.mode == 'MFV' and schemeConfig.mfvUpdate == 'primitive':
-        with record_function('[warpSPH] - [meshless postprocess] primitive kick'):
-            update = system.meshlessUpdate
-            update.dQdt, _ = gizmoPrimitiveUpdate(system.meshlessContext, full=update.dQdt)

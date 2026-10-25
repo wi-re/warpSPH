@@ -65,12 +65,17 @@ class MeshlessConfig:
     # EXPERIMENTAL switches of the E2 wave-2 D confirmation runs (default off = the shipped behaviour)
     faceGuard: int = field(default=0, metadata={'description': "EXPERIMENTAL: re-guard the closure-corrected face A' = A_g + |A_g| (lam_j - lam_i): 0 off, 1 drop the correction on pairs with A'.d <= 0, 2 scale it to keep A'.d >= 0.25 A_g.d, 3 / 4 cap |A' - A_g| at 0.5 / 0.25 |A_g|"})
     closureCap: float = field(default=0.0, metadata={'description': "EXPERIMENTAL bounded closure: 0 = the shipped unbounded projection; c > 0 enters the face correction through the vector clip of the potential difference to magnitude c (A' = A_g + kappa clip(lam_j - lam_i, c), solved by lagged secant weights), so |A' - A_g| <= c |A_g| (power 1): no reversed / over-amplified face while the cell closure is kept wherever the bound is not saturated"})
-    mfvUpdate: str = field(default='conserved', metadata={'description': "EXPERIMENTAL (MFV, hancock): 'conserved' integrates Q with the capped mass flux and the full momentum / energy; 'primitive' is GIZMO's kick: v += dt (F_p - v F_m,full) / m_new, u += dt (F_E - v.F_p + v^2/2 F_m,full - u F_m,full) / m (u halved at most), mass capped per pair and floored at -0.99 m"})
+    mfvUpdate: str = field(default='conserved', metadata={'description': "Conserved flux update. The historical experimental 'primitive' whole-step map is rejected by registered schemes; it remains available only in the explicit oracle adapter."})
 
 
     def integrationMethod(self):
         from warpSPHIntegrators.schemes import ConservedLagrangian
         return ConservedLagrangian(resolve_temporal_scheme(self))
+
+    def validate(self, config=None):
+        resolve_temporal_scheme(self)
+        if self.mfvUpdate != 'conserved':
+            raise ValueError('mfvUpdate must be conserved: the experimental primitive kick is a whole-step map, not a stage derivative')
 
 
 @dataclass

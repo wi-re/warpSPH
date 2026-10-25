@@ -31,6 +31,7 @@ def compressibleSPH_GSPH(
     schemeConfig: GSPHConfig,
     verbose = False,
 ):
+    schemeConfig.validateRHS()
     currentSystem = system
     currentState = currentSystem.state
     t = currentSystem.t
@@ -82,11 +83,6 @@ def compressibleSPH_GSPH(
 
     with record_function("[warpSPH] - [gsph - 10] Riemann pair rates"):
         dvdt, dudt = computeGodunovWarp(currentState, pairProperties, **pairKwargs)
-
-    if params.timeCentredEnergy:
-        with record_function("[warpSPH] - [gsph - 11] time-centred energy rate"):
-            # Inutsuka (2002) Eq. 67: the energy rate at the time-centred velocity v_i + a_i dt/2, which needs the accelerations of a first pass
-            _, dudt = computeGodunovWarp(currentState, pairProperties, **pairKwargs, queryAccelerations = dvdt, halfDt = 0.5 * dt)
 
     with record_function("[warpSPH] - [gsph - 12] drho/dt"):
         drhodt = computeMomentumConsistent(

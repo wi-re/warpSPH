@@ -1,9 +1,8 @@
 """Conserved MFM/MFV state and spatial lifecycle hooks.
 
-The integrators package owns time staging. Geometry, primitive refresh and
-compatible MFV corrections run through initialize/preprocess/postprocess/finalize,
-as CRK carries its compatible pair work through the same lifecycle. Supports and
-public diagnostics retain the historical start-of-step lag. Derived fields use
+The integrators package owns time staging. Geometry and primitive refresh run
+through initialize/preprocess/finalize. Supports retain their historical
+start-of-step policy; diagnostics describe the accepted conserved state. Derived fields use
 copied semantics so stage clones do not duplicate values about to be recomputed.
 """
 
@@ -69,12 +68,6 @@ class MeshlessSystem(BaseIntegrationSystem):
             prepareStage(self, dt, kwargs['config'], kwargs['schemeConfig'], stageIndex)
         return self
 
-    def postprocess(self, currentState, dt, r, *args, conservedIntegration=False, temporalScheme=None, **kwargs):
-        if conservedIntegration:
-            from ..modules.meshless.stages import compatibleStage
-            compatibleStage(currentState, dt, kwargs['schemeConfig'], temporalScheme)
-        return self
-
     def conserved_velocity(self, Q):
         return Q[:, 1:-1] / Q[:, 0:1]
 
@@ -129,24 +122,33 @@ class MeshlessSystem(BaseIntegrationSystem):
 
     def finalize(self, initialState, dt, returnValues, updateValues, weights=..., *args, **kwargs):
         self.adjacency = returnValues[-1][0]
-        # Copy the last substep's non-integrated values into the current state
         lastState = returnValues[-1][1]
         if kwargs.get('conservedIntegration', False):
-            # Keep historical lagged support/diagnostic values; carry the last
-            # stage's closure potential separately, as CRK carries pair work.
-            lastLam = lastState.lam
-            lastState = self.meshlessStages.startState
+            # Time stepping has already accepted (x,Q). Preserve the support
+            # update and closure warm start used by the historical method, but
+            # never overwrite its diagnostics with a previous stage's (v,u,m).
+            self.state.supports = self.meshlessStages.startState.supports.clone()
+            self.state.lam = lastState.lam.clone() if lastState.lam is not None else None
+            config = kwargs.get('config', args[0] if args else None)
+            scheme = kwargs.get('schemeConfig', args[1] if len(args) > 1 else None)
+            from ..modules.meshless.geometry import buildGeometry, stashGeometry
+            from ..modules.meshless.primitives import refreshPrimitives
+            geometry = buildGeometry(self.state.positions, self.state.supports, self.state.lam,
+                                     config, scheme, self.domain)
+            refreshPrimitives(self.state, geometry, float(scheme.gamma), scheme.nngb, config.dim,
+                              updateSupports=False)
+            stashGeometry(self.state.positions, self.state.supports, self.domain,
+                          config.kernel, scheme, geometry, owner=self.state)
+            return super().finalize(initialState, dt, returnValues, updateValues, weights, *args, **kwargs)
         self.state.supports.copy_(lastState.supports)
-        lam = lastLam if kwargs.get('conservedIntegration', False) else lastState.lam
+        lam = lastState.lam
         if self.state.lam is not None and lam is not None:
             self.state.lam.copy_(lam)
         for _f in ('masses', 'densities', 'velocities', 'internalEnergies', 'totalEnergies',
                    'entropies', 'pressures', 'soundspeeds'):
             value = getattr(lastState, _f)
             if value is not None:
-                if kwargs.get('conservedIntegration', False):
-                    setattr(self.state, _f, value)
-                elif getattr(self.state, _f) is None:
+                if getattr(self.state, _f) is None:
                     setattr(self.state, _f, value.clone())
                 else:
                     getattr(self.state, _f).copy_(value)

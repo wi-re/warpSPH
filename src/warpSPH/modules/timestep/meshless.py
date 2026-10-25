@@ -23,7 +23,7 @@ from ...configurations.simulationConfig import SimulationConfig
 from ...systems.meshless import MeshlessSystem
 from warpSPHCore.mfm import MeshlessWarp
 from ..meshless.primitives import primitives
-from ..meshless.geometry import stashGeometry
+from ..meshless.geometry import stashGeometry, takeGeometry
 
 __all__ = ['computeTimestep']
 
@@ -45,11 +45,13 @@ def computeTimestep(
     # reads `lam`, so this is adjacency + moments only. Same positions /
     # supports / domain / kernel the step builds from, so the two geometries
     # agree on everything the signal speed depends on.
-    g = MeshlessWarp.build(
-        state.positions, state.supports, system.domain, config.kernel,
-        cond_max=compParams.condMax, closure="none", rtol=None, lam0=None,
-        guards=True, face_cond_max=compParams.faceCondMax,
-        centred_weights=True, area_cap=False)
+    g = takeGeometry(state.positions, state.supports, system.domain, config.kernel, compParams, owner=state)
+    if g is None:
+        g = MeshlessWarp.build(
+            state.positions, state.supports, system.domain, config.kernel,
+            cond_max=compParams.condMax, closure="none", rtol=None, lam0=None,
+            guards=True, face_cond_max=compParams.faceCondMax,
+            centred_weights=True, area_cap=False)
     # the step that follows starts from these positions / supports: hand it this geometry so it
     # only adds the closure solve (`schemes/meshless.stashGeometry`)
     stashGeometry(state.positions, state.supports, system.domain, config.kernel, compParams, g, owner=state)

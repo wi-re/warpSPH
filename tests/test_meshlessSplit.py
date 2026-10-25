@@ -58,7 +58,7 @@ def test_dispatcherFollowsTheConfigMode():
     class Sys: state = None; domain = None
     class Cfg: integrationScheme = IntegrationSchemeType.rungeKutta2; dim = 2
     for cfg in (MFMConfig(), MFVConfig()):
-        with pytest.raises(ValueError, match='single-evaluation'):       # reaches the mode's step, which refuses the integrator first
+        with pytest.raises(ValueError, match='ConservedLagrangian'):  # never interpret a completed step as an RHS
             meshlessStep(Sys, 1e-3, Cfg, cfg)
     bad = MeshlessConfig(); bad.mode = 'XYZ'
     with pytest.raises(ValueError, match="not 'MFM' or 'MFV'"):
