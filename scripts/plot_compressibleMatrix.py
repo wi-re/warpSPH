@@ -19,7 +19,11 @@ def finite(value):
 def case_recipe(view, cid):
     """Case variants retain their source case's metric and explicit protocol note."""
     definition = view['cases'][cid]
-    recipe = RECIPES.get(cid, RECIPES.get(definition['case'], 'See the saved case definition.'))
+    if definition.get('variant') == 'advectedEllipse':
+        recipe = ('Maximum absolute pressure error from the common initial P=1 (also a relative error here). '
+                  'Displacement is measured relative to uniform advection; spurious velocity is measured relative to the boost.')
+    else:
+        recipe = RECIPES.get(cid, RECIPES.get(definition['case'], 'See the saved case definition.'))
     return recipe + (' ' + definition['metricNote'] if definition.get('metricNote') else '')
 
 

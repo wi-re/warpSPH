@@ -23,7 +23,7 @@ python scripts/run_compressibleMatrix.py plan --root .tmp/compressible-matrix
 python scripts/run_compressibleMatrix.py check --root .tmp/compressible-matrix
 ```
 
-`manifest.json` freezes the inputs for 120 cells: twelve cases and ten presets (116 supported combinations).
+`manifest.json` freezes the inputs for 150 cells: fifteen cases and ten presets (142 supported combinations).
 `check` validates typed configurations on CPU without sampling or stepping.
 Planning refuses to overwrite a manifest. Choose a fresh root when changing
 inputs; runtime source versions are recorded separately for each attempt.
@@ -34,12 +34,15 @@ inputs; runtime source versions are recorded separately for each attempt.
 | `sod` | 800 | t=.15 | Volume-weighted density L1 |
 | `sod2d` | 512 | t=.15 | Volume-weighted density L1 |
 | `noh` | 256 | t=.6 | Absolute relative post-shock density error |
+| `nohOpen` | 256 | t=.6 | Same shock metric with explicit open boundaries |
 | `kidder` | 200 | 0.99 analytic collapse time | Interior volume-weighted density L1 |
 | `sedov1d` | 800 | Shock reaches radius .8 | Volume-weighted density L1 within 1.15 shock radii |
 | `sedov2d` | 256 | Shock reaches radius .8 | Volume-weighted density L1 within 1.15 shock radii |
 | `sedov3d` | 64 | Shock reaches radius .8 | Same radial metric in 3D |
 | `gresho` | 256 | t=3 | Tangential velocity L1 within radius .5 |
 | `hydrostatic` | 100 | t=7 | Maximum pressure error from P=1 |
+| `hydrostaticTwoGas` | 100 | t=7 | Maximum pressure error from P=1; gamma=1.4 and 5/3 |
+| `hydrostaticAdvectedEllipse` | 100 | t=1 | Same pressure metric after one periodic crossing |
 | `kelvinHelmholtz` | 256 | t=2.5 | Mode amplitude/mixing diagnostics, unranked |
 | `khSmooth` | 256 | t=2.5 | Same diagnostics with smooth initial density |
 
@@ -62,7 +65,7 @@ promote dissipative A to a recommended default. Noh and Sedov use a common
 `uAmbient=1e-8` for all methods. Cold-state failures remain failures; no floors,
 automatic CFL retries or replacement presets are introduced.
 
-Noh and Kidder use FP64 for every method; other columns default to FP32.
+Both Noh columns and Kidder use FP64 for every method; other columns default to FP32.
 Precision appears in column labels and provenance, never mixed within a column.
 The hydrostatic case is the literature dense-square pressure-equilibrium test
 (rho_high=4, gamma=1.5), without gravity. Native MFM/MFV setups initialize this
@@ -71,6 +74,22 @@ moving bands in conserved variables. New plans execute those cells. Existing
 saved plans and unsupported results remain historical evidence; regenerate a
 plan to include the new routes. See [meshless cases](../meshless.md) for the
 boundary and precision limitations.
+
+`hydrostaticTwoGas` selects the native `twoGas` material variant; the advected
+ellipse selects `advectedEllipse`, with a common x velocity of 1. Both use
+rho=1 and 4, gamma=1.4 and 5/3, and equal initial P=1. These are periodic
+pressure-equilibrium contacts without gravity or a free surface. Their material
+tables are resolved from the named variant and retained in the effective inputs.
+PESPH, GSPH and InutsukaGSPH do not support those material configurations and
+are declared unsupported; the other six presets can execute them. The existing
+`hydrostatic` column retains its common gamma=1.5 definition.
+
+`noh` retains its native boundary protocol for historical reproducibility.
+`nohOpen` explicitly requests open edges for every preset. Its meshless cells
+record `analytic Lagrangian inflow reservoir` in comparison and provenance
+metadata; SPH cells record `native open edges`. Treat differences between those
+boundary implementations as part of the comparison protocol. The finite meshless
+Lagrangian domain must remain outside the analytic shock until the endpoint.
 
 Common controls are B7, n_h=4 and eager execution. Each method retains its
 native timestep/support policy and package time driver; RK2 is requested where
@@ -92,6 +111,14 @@ python scripts/run_compressibleMatrix.py run --methods CRKSPH
 # Intersection: two cases across three selected methods
 python scripts/run_compressibleMatrix.py run \
   --cases noh gresho --methods Monaghan Monaghan-CD CRKSPH
+
+# Fresh full-length meshless validation cohort (use a new root)
+python scripts/run_compressibleMatrix.py plan --root .tmp/meshless-matrix \
+  --cases hydrostatic hydrostaticTwoGas hydrostaticAdvectedEllipse kidder nohOpen \
+  --methods MFM MFV
+python scripts/run_compressibleMatrix.py check --root .tmp/meshless-matrix
+python scripts/run_compressibleMatrix.py run --root .tmp/meshless-matrix
+python scripts/run_compressibleMatrix.py report --root .tmp/meshless-matrix
 
 # Full planned matrix: only run when the GPU is available for the whole study
 python scripts/run_compressibleMatrix.py run
