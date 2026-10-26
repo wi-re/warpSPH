@@ -234,6 +234,37 @@ step count or precision. Change the case catalog for a separate fixed-resolution
 `--smoke` is the explicit exception for plumbing checks. Physical case-parameter
 overrides, if used, must be distinguished from numerical-parameter experiments.
 
+## Validated Godunov rows in composed views
+
+The validated full-row selection uses **Godunov SPH (C=3)** and **Inutsuka
+tangent** in place of the native GSPH and original Inutsuka rows. These are
+explicit method IDs `GSPH-C3` and `Inutsuka-tangent-periodic`, retaining the
+original result/input hashes and earlier comparisons. The tangent row must use
+the corrected arbitrary-image periodic geometry; the earlier one-image trial
+is rejected for KH field defects despite finite completion. See
+[the shock audit](godunov_shock_audit_2026-10-24.md) for the full qualification.
+
+This is a saved comparison selection, not a change to the library defaults or
+the native plan catalog. The Inutsuka method metadata identifies its archived
+operator and worker; its typed solver configuration alone does not install
+tangent continuation. Keep those sources and per-run archives with the study
+when reproducing the selected numerical method.
+
+Both validated rows complete all thirteen supported catalog cases with positive,
+finite accepted and RHS-stage states. A consolidated Noh view selects their
+explicit `nohOpen` results. Unequal-gamma square and advected-ellipse columns
+remain unsupported for these schemes. The matrix retains the measured accuracy
+costs: GSPH Sod error +5.83% and 2D Sod +1.67%; Inutsuka pressure-equilibrium
+error +23.1% (0.04557 versus 0.03703), despite removal of the energy impulse.
+KH amplitudes remain unranked diagnostics.
+
+A composed cell can declare `runtimeComparable: false` with a `runtimeNote`
+explaining different instrumentation or execution conditions. Its measured
+seconds remain visible in the cost panel and exports, but it receives no cost
+rank and does not set the cost color scale. Quality ranking is independent.
+The Godunov qualification rows use this metadata because their workers add
+RHS-stage observations and synchronization. This does not alter raw run records.
+
 ## Timing and retained evidence
 
 No rendering, video, full trajectory export or daemon work runs in this

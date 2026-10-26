@@ -104,6 +104,31 @@ def test_independent_quality_cost_ranks_and_failures_never_win(tmp_path):
     assert by_method['MFV']['runtimeRank'] is None
 
 
+def test_instrumented_runtime_is_retained_without_affecting_cost_ranks(tmp_path):
+    plan = planned(tmp_path, cases=['sod'], methods=['Monaghan', 'CRKSPH'])
+    result(tmp_path, plan['rows'][0], 'native', error=.1, seconds=12.)
+    path = result(tmp_path, plan['rows'][1], 'instrumented', error=.01, seconds=.1)
+    before = path.read_bytes()
+    view = matrix.comparison(tmp_path)
+    view['cells'][1].update(runtimeComparable=False, runtimeNote='Additional RHS-stage observations')
+    rows, provenance = plotting.collect(view)
+    native, measured = rows
+    assert native['runtimeRank'] == 1
+    assert measured['runtimeSeconds'] == .1 and measured['runtimeRank'] is None
+    assert measured['qualityRank'] == 1
+    assert provenance[1]['runtimeComparable'] is False
+    assert provenance[1]['runtimeNote'] == 'Additional RHS-stage observations'
+    destination = tmp_path/'report'
+    plotting.report(view, destination)
+    assert 'unranked' in (destination/'matrix.svg').read_text()
+    assert 'runtimeComparable' in (destination/'provenance.csv').read_text()
+    assert matrix.read_json(destination/'metrics.json')[1]['runtimeRank'] is None
+    assert path.read_bytes() == before
+    view['cells'][1]['runtimeComparable'] = 'false'
+    with pytest.raises(ValueError, match='boolean'):
+        plotting.collect(view)
+
+
 def test_selection_keeps_old_attempt_and_frozen_comparison(tmp_path):
     plan = planned(tmp_path, cases=['sod'], methods=['CRKSPH'])
     first = result(tmp_path, plan['rows'][0], 'first')
