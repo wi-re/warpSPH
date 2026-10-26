@@ -42,8 +42,16 @@ At the saved resolution, initial conditions and shared integrator:
 - Full Sedov 1D also reaches t=0.5556113729836043 in 20,996 steps, without
   negative accepted or RHS-stage energies. Its minimum accepted u remains the
   1e-8 ambient value and total energy change is -0.02321%.
-- The switch passes the first-failure windows in all three Sedov dimensions:
-  t=0.0003 at nx=800 / 256 / 64. These short 2D/3D controls are not full-case passes.
+- The later full-row campaign reaches every supported endpoint (13 cases),
+  including native/open Noh and full Sedov 2D/3D at nx=256/64, with finite,
+  positive accepted and RHS-stage states. Sedov 2D/3D physical energy changes
+  are -0.03464% / -0.03590%. Fresh matched C=0 controls still lose positivity
+  in both Noh columns and all three Sedov dimensions.
+- The switch has a measured accuracy cost: volume-weighted density L1 increases
+  5.831% in Sod and 1.669% in 2D Sod. The wave, Kidder, Gresho, common-gamma
+  pressure-equilibrium and both KH results are unchanged in these controls.
+  This does not establish that the switch is inactive in every other smooth
+  flow or that first-order triggering has no diffusion cost.
 
 This isolates the high-order reconstruction as the positivity problem under
 these cold-shock inputs. Exact pair/global conservation tests do not guarantee
@@ -280,13 +288,13 @@ Riemann solvers give relative conservation residuals below 1.4e-8 in FP32 and
 1.4e-14 in FP64 (coordinate torque only in the open domain).
 
 The candidate removes the observed instability but retains a roughly 23%
-pressure-error increase relative to the original stable contact run. It is
-not promoted to a default: the remaining Sedov/KH/Kidder cohorts, first-order
-policies, extreme width contrasts, opposite-sign-slope linear fallback and
-coincident-point automatic derivatives still need qualification. The hard
-cutoff remains part of the density definition. Full evidence, rejected
-controls and exact runtime archives are indexed in
-`.tmp/inutsuka-remedies-20261026/`.
+pressure-error increase relative to the original stable contact run. The later
+full-row campaign below extends this limited qualification and exposes a
+periodic-geometry bug. First-order policies, extreme width contrasts,
+opposite-sign-slope linear fallback and coincident-point automatic derivatives
+still need qualification before promotion. The hard cutoff remains part of
+the density definition. These initial controls and exact runtime archives are
+indexed in `.tmp/inutsuka-remedies-20261026/`.
 
 The original paper derives its interpolation first at constant h and discusses
 variable smoothing separately ([sections 3.1 and 3.3](https://arxiv.org/html/astro-ph/0206401)).
@@ -299,18 +307,84 @@ must use a dedicated scalar field rather than the experimental extra gradient
 row. The tangent-continuation candidate avoids that additional derivative;
 its remaining qualification requirements are described above.
 
+## Full-row controls and a periodic-geometry correction (2026-10-26)
+
+The row campaign preserves B7, n_h=4, native adaptive CFL=0.15, original
+resolutions/endpoints and physical initial arrays. Noh and Kidder use FP64;
+other cases use FP32. All accepted states and both RK2 RHS stages are checked.
+Fresh C=0 GSPH controls isolate the effect of C=3. Other original Inutsuka
+controls use retained runs with matching runtime-library hashes, with a fresh
+native-Noh failure control. Unequal-gamma square and advected-ellipse columns
+remain explicitly unsupported for both Godunov schemes; common-gamma pressure
+equilibrium is the two-fluid density-1/4, P=1 contact without gravity/free surface.
+
+The first tangent-continuation row reaches all 13 executable endpoints with
+positive states, but **fails the KH physical-quality comparison**. Sharp and
+smooth KH minimum pressures fall to about 0.05 and peak speeds exceed 4, versus
+original minimum pressures above 2 and speeds below 0.81. Small global energy
+drift does not excuse these local defects. The failed trial is retained.
+
+The cause is an experimental geometry helper that corrects at most one periodic
+image while native integrators retain unwrapped coordinates. A captured real
+neighbor has raw x difference -1.999475 in a unit box. Subtracting one image
+leaves -0.999475, falsely excluding a pair whose nearest-image separation is
+0.001463 and whose interaction reach is about 0.017. The corrected helper uses
+`delta -= sign(delta) * L * floor(abs(delta)/L + 0.5)` on periodic axes. This
+handles arbitrary image counts, preserves small differences and is odd under
+pair reversal. FP32/FP64 tests check 256 pairs plus reversals over up to 24
+image differences, close pairs and periodic coincidence; revised FP64 gradient
+checks also pass.
+
+A separate corrected row reruns every column rather than inferring a pass from
+KH alone. Both corrected KH cases restore bounded pressure/density fields:
+minimum accepted pressure is about 2.08 / 2.21 and peak speed about 0.85.
+Final mode amplitudes are 0.123332 / 0.187153 versus original 0.120068 /
+0.185636. These amplitudes remain unranked diagnostics, not accuracy claims.
+The corrected full row reaches all 13 supported endpoints with finite,
+positive accepted and RHS-stage states, including native/open Noh, Kidder,
+Sedov 1D/2D/3D, Gresho and pressure equilibrium. Its closed-system energy
+excursion stays below 0.028%; Kidder is driven and is not ranked by closed
+energy conservation. No floors or reduced-CFL retries are used.
+
+| Corrected Inutsuka case | Primary error change versus admissible original |
+|---|---:|
+| Linear wave | -0.861% |
+| Sod / 2D Sod strip | -0.643% / -0.0652% |
+| Kidder | +0.244% |
+| Sedov 1D / 2D / 3D | -2.071% / -0.204% / +0.208% |
+| Gresho | +0.0556% |
+| Pressure equilibrium | +23.083% |
+
+Negative changes mean lower error in that case's native primary metric. Failed
+original Noh trajectories receive no endpoint accuracy delta; corrected native
+and open Noh both have plateau-density error 0.005884%. Pressure-equilibrium
+error is 0.0455728 versus 0.0370259, with energy drift -0.000294% versus
++0.02504%: removing the catastrophic impulse still leaves a contact-accuracy
+tradeoff. The hydrostatic result is not an unconditional accuracy pass.
+
+All 39 matched comparisons (C=3, first Inutsuka trial and corrected trial)
+have identical physical initial arrays and matching resolved solver parameters
+apart from the named C=3 switch. Each frozen phase has stable runtime hashes;
+production library source files match across phases. Corrected-operator
+close/coincident-pair checks for three Riemann solvers, including many-image
+periodic coordinates with fixed valid adjacency/reconstruction, have maximum
+relative conservation residuals below 1.4e-8 in FP32 and 1.4e-14 in FP64.
+The corrected fields,
+failed trial, full histories, `verification.json`, `RESULTS.md` and `rows.pdf`
+are retained separately in `.tmp/godunov-rows-20261026/`. Production operators
+and defaults remain unchanged.
+
 ## Priorities
 
-1. **GSPH:** extend the successful switch control to full Sedov 2D/3D
-   and rerun Sod/contact, Gresho and KH controls before changing the
-   default. Do not clip negative u or relax the matrix admissibility criterion.
-2. **Inutsuka:** qualify tangent continuation with native gradients, stable
-   periodic geometry and the exact-zero pair limit across the remaining matrix.
-   Address the linear fallback and gradient limits before promotion. The
-   chain-rule-only candidate fails
-   pressure equilibrium despite passing Noh. Preserve pair symmetry/conservation
-   and qualify physical energy, contact accuracy and the wider shock suite.
-   Merely selecting RK4 or relabelling the alarm does not fix it.
+1. **GSPH:** assess the measured Sod diffusion cost before changing the default.
+   The full-row C=3 control now covers Sedov 2D/3D and the smooth/contact/KH
+   cases. Do not clip negative u or relax the matrix admissibility criterion.
+2. **Inutsuka:** address the linear fallback, extreme-width and gradient limits
+   before promotion. Keep tangent continuation with native gradients, correct
+   arbitrary-image periodic geometry and the exact-zero pair limit together.
+   The chain-rule-only candidate fails pressure equilibrium despite passing
+   Noh. Preserve pair symmetry/conservation and assess contact accuracy alongside
+   physical energy. Merely selecting RK4 or relabelling the alarm does not fix it.
 3. Keep the robust-control rows and original defaults separately in future
    comparisons. Measure performance only in isolated production runs after the
    numerical policies are selected.
