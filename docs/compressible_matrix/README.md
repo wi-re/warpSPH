@@ -65,8 +65,12 @@ automatic CFL retries or replacement presets are introduced.
 Noh and Kidder use FP64 for every method; other columns default to FP32.
 Precision appears in column labels and provenance, never mixed within a column.
 The hydrostatic case is the literature dense-square pressure-equilibrium test
-(rho_high=4, gamma=1.5), without gravity. Kidder and hydrostatic have no native
-MFM/MFV setup: those four cells are retained as unsupported, without execution.
+(rho_high=4, gamma=1.5), without gravity. Native MFM/MFV setups initialize this
+contact with their number-volume geometry and evolve Kidder with prescribed
+moving bands in conserved variables. New plans execute those cells. Existing
+saved plans and unsupported results remain historical evidence; regenerate a
+plan to include the new routes. See [meshless cases](../meshless.md) for the
+boundary and precision limitations.
 
 Common controls are B7, n_h=4 and eager execution. Each method retains its
 native timestep/support policy and package time driver; RK2 is requested where

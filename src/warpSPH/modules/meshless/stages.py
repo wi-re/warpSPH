@@ -17,8 +17,12 @@ class MeshlessStages:
 
 def prepareStage(system, dt, config, schemeConfig, stageIndex):
     state = system.state
+    if system.drivenParticles is not None:
+        system.drivenParticles.position(state, system.t)
     with record_function('[warpSPH] - [meshless stage - 01] geometry'):
         geom = startOfStepGeometry(state, system.domain, config, schemeConfig)
+    if system.drivenParticles is not None:
+        system.drivenParticles.conserved(state, geom, system.t, float(schemeConfig.gamma))
     with record_function('[warpSPH] - [meshless stage - 02] primitives'):
         if stageIndex == 0:
             rho, vel, pressure, energy = refreshPrimitives(state, geom, float(schemeConfig.gamma), schemeConfig.nngb, config.dim)

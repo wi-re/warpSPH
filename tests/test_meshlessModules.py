@@ -272,3 +272,31 @@ def test_disabledAutogradKeepsNeighborTraversalMetadata(flow):
     eps = torch.finfo(DTYPE).eps
     torch.testing.assert_close(got, expected, rtol=128 * eps, atol=128 * eps * expected.abs().max().item())
     assert not got.requires_grad
+
+
+@pytest.mark.parametrize('scheme', ['MFM', 'MFV'])
+@pytest.mark.parametrize('shape,boost', [('box', 0.), ('ellipse', .7)])
+def test_nativePressureEquilibriumStartsBalancedAndAdvects(scheme, shape, boost):
+    from warpSPH.runner import RunConfiguration, run
+    from warpSPH.cases.compressible.hydrostatic import hydrostaticCase
+    ctx = RunConfiguration('hydrostatic', simulation=dict(device=DEVICE, nx=24,
+        nSteps=40, plot=False, video=False, quiet=True, progress=False),
+        params=dict(rho_high=4., gamma=1.5, shape=shape, boost=boost),
+        solver=dict(scheme=scheme)).prepare(hydrostaticCase)
+    system = hydrostaticCase.buildSystem(ctx)
+    geom = MeshlessWarp.build(system.state.positions, system.state.supports,
+        system.domain, ctx.config.kernel, closure='none')
+    rho, vel, pressure = primitives(system.state.Q, geom.volume, 1.5)
+    eps = torch.finfo(DTYPE).eps
+    torch.testing.assert_close(pressure, torch.ones_like(pressure), atol=16*eps, rtol=16*eps)
+    # Cell masses retain the density jump; it is not smeared by SPH support adaptation.
+    assert torch.unique(system.state.masses).numel() == 2
+    initialMass = system.state.masses.sum()
+    r = run(hydrostaticCase, ctx.spec)
+    assert r.nSteps == 40 and not r.diverged
+    metrics = r.trajectory[-1]
+    assert metrics['pressureError'] < 3e-4
+    assert metrics['maxPeculiarVelocity'] < 3e-4
+    assert metrics['shapeDisplacement'] < 3e-4
+    assert metrics['relativeEnergyDrift'] < 3e-5
+    torch.testing.assert_close(r.state.state.masses.sum(), initialMass, atol=64*eps, rtol=64*eps)

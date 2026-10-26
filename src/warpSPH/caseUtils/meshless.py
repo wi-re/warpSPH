@@ -19,7 +19,7 @@ from warpSPHCore.mfm import conserved
 
 from ..systems.meshless import MeshlessState
 
-__all__ = ['buildMeshlessState', 'toMeshlessSystem']
+__all__ = ['buildMeshlessState', 'toMeshlessSystem', 'buildPressureEquilibriumSystem', 'buildKidderMeshlessSystem']
 
 
 def buildMeshlessState(positions, supports, masses, densities, velocities, pressures,
@@ -80,4 +80,94 @@ def toMeshlessSystem(compSystem, config, schemeConfig):
         st.kinds, st.materials, st.UIDs, emitters=st.emitters, bodyIDs=st.bodyIDs)
     system = MeshlessSystem(state=state, domain=config.domain)
     config.dt = computeTimestep(system, config, schemeConfig, dt=None)
+    return system
+
+
+def buildPressureEquilibriumSystem(ctx):
+    """Sample a contact using number-volume geometry and physical cell masses.
+
+    SPH density/support adaptation across a mass jump is not a meshless volume
+    partition. Initialize the energy with the same geometric volumes that the
+    first RHS reads, so uniform pressure survives primitive refresh.
+    """
+    from ..sample.regular import sampleRegularParticles
+    from ..modules.meshless.geometry import buildGeometry, stashGeometry
+    from ..systems.meshless import MeshlessSystem
+    from ..modules.timestep import computeTimestep
+
+    cfg, scheme = ctx.config, ctx.schemeConfig
+    particles = sampleRegularParticles(ctx.spec.nx, cfg.domain, cfg.targetNeighbors)
+    pos, supports = particles.positions, particles.supports
+    L = cfg.domain.max[0] - cfg.domain.min[0]
+    if ctx.param('shape') == 'ellipse':
+        mask = (pos[:, 0] / (L / 4)).square() + (pos[:, 1] / (L / 8)).square() < 1
+    else:
+        mask = (pos[:, 0].abs() < L / 4) & (pos[:, 1].abs() < L / 4)
+    density = torch.full_like(particles.masses, ctx.param('rho_low'))
+    density[mask] = ctx.param('rho_high')
+    mass = density * particles.masses
+    geometry = buildGeometry(pos, supports, None, cfg, scheme, cfg.domain)
+    velocity = torch.zeros_like(pos)
+    velocity[:, 0] = ctx.param('boost')
+    labels = torch.zeros(len(pos), device=pos.device, dtype=torch.int32)
+    state = buildMeshlessState(pos, supports, mass, mass / geometry.volume,
+        velocity, torch.ones_like(mass), scheme.gamma, labels, labels.clone(),
+        torch.arange(len(pos), device=pos.device, dtype=torch.int32))
+    state.lam = geometry.lam
+    stashGeometry(pos, supports, cfg.domain, cfg.kernel, scheme, geometry, owner=state)
+    system = MeshlessSystem(state=state, domain=cfg.domain)
+    cfg.dt = computeTimestep(system, cfg, scheme, dt=cfg.dt)
+    return system
+
+
+def buildKidderMeshlessSystem(ctx, solution):
+    """Planar shell with analytic moving bands around an evolved interior."""
+    from ..modules.meshless.boundary import DrivenParticles
+    from ..modules.meshless.geometry import buildGeometry
+    from ..modules.meshless.primitives import refreshPrimitives
+    from ..modules.meshless.context import supports_from_volume
+    from ..systems.meshless import MeshlessSystem
+    from ..modules.timestep import computeTimestep
+
+    cfg, scheme = ctx.config, ctx.schemeConfig
+    pos = torch.linspace(solution.r0, solution.r1, ctx.spec.nx,
+                         device=cfg.device, dtype=cfg.dtype)[:, None]
+    dx = (solution.r1 - solution.r0) / (ctx.spec.nx - 1)
+    supports = supports_from_volume(torch.full_like(pos[:, 0], dx), scheme.nngb, 1)
+    radius = pos[:, 0]
+
+    def initialDensity(radius):
+        weight = (radius.square() - solution.r0**2) / (solution.r1**2 - solution.r0**2)
+        return ((1 - weight) * solution.rho0**solution.gamma1 +
+                weight * solution.rho1**solution.gamma1)**(1 / solution.gamma1)
+
+    density = initialDensity(radius)
+    mass = density * dx
+    geometry = buildGeometry(pos, supports, None, cfg, scheme, cfg.domain)
+    labels = torch.zeros(len(pos), dtype=torch.int32, device=pos.device)
+    initialPressure = solution.S * density**solution.gamma
+    state = buildMeshlessState(pos, supports, mass, mass / geometry.volume,
+        torch.zeros_like(pos), initialPressure, scheme.gamma, labels, labels.clone(),
+        torch.arange(len(pos), device=pos.device, dtype=torch.int32))
+    index = torch.arange(len(pos), device=pos.device)
+    mask = (index < ctx.param('band')) | (index >= len(pos) - ctx.param('band'))
+
+    def scale(time):
+        return (1 - (time / solution.tau)**2)**.5
+
+    def trajectory(time, reference):
+        return reference * scale(time)
+
+    def primitives(time, positions):
+        h = scale(time)
+        velocity = -positions * time / (solution.tau * h)**2
+        pressure = initialPressure / h**(solution.nu * solution.gamma)
+        return velocity, pressure
+
+    driven = DrivenParticles(mask, pos.clone(), mass.clone(), trajectory, primitives)
+    system = MeshlessSystem(state=state, domain=cfg.domain, drivenParticles=driven)
+    driven.conserved(state, geometry, 0., float(scheme.gamma))
+    refreshPrimitives(state, geometry, float(scheme.gamma), scheme.nngb, cfg.dim, updateSupports=False)
+    cfg.dx = dx
+    cfg.dt = computeTimestep(system, cfg, scheme, dt=cfg.dt)
     return system

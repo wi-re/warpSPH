@@ -20,7 +20,7 @@ from ...configurations.moduleConfigurations.viscositySwitchParameters import Vis
 from ...configurations.meshless import MeshlessConfig
 from ...configurations.pesph import PESPHConfig
 from ...enumTypes import AdaptiveSupportScheme, ViscositySwitch
-from ...modules.timestep.compressible import computeTimestep
+from ...modules.timestep import computeTimestep
 from ...runner import RunContext, resolveEnum
 
 __all__ = ['COMPRESSIBLE_DEFAULTS', 'COMPRESSIBLE_PARAMS', 'configureCompressible',

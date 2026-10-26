@@ -267,7 +267,7 @@ def test_requested_resolutions_precisions_and_native_support():
         assert row['configuration']['simulation']['nx'] == expected[cid]
         assert row['configuration']['simulation']['precision'] == (
             'float64' if cid in ('noh', 'kidder') else 'float32')
-        assert bool(row.get('unsupportedReason')) == (cid in ('kidder', 'hydrostatic') and row['method'] in ('MFM', 'MFV'))
+        assert not row.get('unsupportedReason')
     assert matrix.case_precisions(plan) == plan['casePrecisions']
 
 
