@@ -19,7 +19,7 @@ _TINY = 1.0e-30
 
 from warpSPHCore.mfm.wp_mfm import guardedFace
 from ..reconstruction.meshless import reconstructSide, sideTimeDerivative
-from ..riemann.meshless import faceFluxPair, hllcStar
+from ..riemann.meshless import faceFluxPairMaterial
 
 @wp.func
 def mfmFlux_Func_i(
@@ -29,7 +29,7 @@ def mfmFlux_Func_i(
     gRho: wp.array(dtype=Any), gVel: wp.array(dtype=Any), gP: wp.array(dtype=Any),  # type: ignore
     aRho: wp.array(dtype=scalar_t), aVel: wp.array(dtype=Any), aP: wp.array(dtype=scalar_t),  # type: ignore
     vol: wp.array(dtype=scalar_t), Einv: wp.array(dtype=Any), lam: wp.array(dtype=Any), condBad: wp.array(dtype=wp.int32),  # type: ignore
-    gamma: scalar_t, dt: scalar_t, mode: wp.int32, order: wp.int32, psi1: scalar_t, psi2: scalar_t,
+    gamma: wp.array(dtype=scalar_t), materials: wp.array(dtype=wp.int32), dt: scalar_t, mode: wp.int32, order: wp.int32, psi1: scalar_t, psi2: scalar_t,
     power: scalar_t, timeCentred: wp.int32, centred: wp.int32, areaCap: wp.int32, retry: wp.int32, massLimit: scalar_t,
     faceGuard: wp.int32, closureCap: scalar_t,
     dmIn: scalar_t, dpIn: Any, deIn: scalar_t,
@@ -109,8 +109,8 @@ def mfmFlux_Func_i(
                 for k in range(va.length):
                     gvl_a[c, k] = aVel[a][c] * gVel[a][c, k]
                     gvl_b[c, k] = aVel[b][c] * gVel[b][c, k]
-            _r1, dva, _p1 = sideTimeDerivative(rho[a], va, pres[a], aRho[a] * gRho[a], gvl_a, aP[a] * gP[a], gamma)
-            _r2, dvb, _p2 = sideTimeDerivative(rho[b], vb, pres[b], aRho[b] * gRho[b], gvl_b, aP[b] * gP[b], gamma)
+            _r1, dva, _p1 = sideTimeDerivative(rho[a], va, pres[a], aRho[a] * gRho[a], gvl_a, aP[a] * gP[a], gamma[a])
+            _r2, dvb, _p2 = sideTimeDerivative(rho[b], vb, pres[b], aRho[b] * gRho[b], gvl_b, aP[b] * gP[b], gamma[b])
             vha = va + scalar_t(0.5) * dt * dva
             vhb = vb + scalar_t(0.5) * dt * dvb
         # the face frame is time-centred in both modes (GIZMO's per-direction MFV bias averages
@@ -120,10 +120,10 @@ def mfmFlux_Func_i(
 
         rL, vL, pL = reconstructSide(
             rho[a], va, pres[a], rho[b], vb, pres[b], gRho[a], gVel[a], gP[a], aRho[a], aVel[a], aP[a],
-            frac * d, frac, vframe, dt, gamma, order, psi1, psi2, timeCentred)
+            frac * d, frac, vframe, dt, gamma[a], order, psi1, psi2, timeCentred)
         rR, vR, pR = reconstructSide(
             rho[b], vb, pres[b], rho[a], va, pres[a], gRho[b], gVel[b], gP[b], aRho[b], aVel[b], aP[b],
-            -(scalar_t(1.0) - frac) * d, scalar_t(1.0) - frac, vframe, dt, gamma, order, psi1, psi2, timeCentred)
+            -(scalar_t(1.0) - frac) * d, scalar_t(1.0) - frac, vframe, dt, gamma[b], order, psi1, psi2, timeCentred)
         rL = wp.max(rL, scalar_t(_TINY))
         rR = wp.max(rR, scalar_t(_TINY))
         pL = wp.max(pL, scalar_t(_TINY))
@@ -132,7 +132,13 @@ def mfmFlux_Func_i(
         uR = wp.dot(vR, nrm)
         vtL = vL - uL * nrm
         vtR = vR - uR * nrm
-        Fm, Fp, Fe, Ss, Ps = faceFluxPair(rL, uL, vtL, pL, rR, uR, vtR, pR, gamma, mode, nrm, vframe)
+        # A material ID denotes a pure fluid, not a mixed composition. Use a
+        # contact-moving face across IDs; MFV still exchanges mass within each
+        # material. This prevents transferring donor gas into a different EOS.
+        pairMode = mode
+        if materials[a] != materials[b]:
+            pairMode = 0
+        Fm, Fp, Fe, Ss, Ps = faceFluxPairMaterial(rL, uL, vtL, pL, rR, uR, vtR, pR, gamma[a], pairMode, nrm, vframe, gamma[b])
         if retry != 0:
             # GIZMO's failure handling: invalid star pressure -> first-order states -> zero velocity jump
             s1 = wp.max(scalar_t(0.0), -wp.dot(vb - va, d) / wp.max(r, scalar_t(_TINY)))
@@ -140,7 +146,7 @@ def mfmFlux_Func_i(
             v2 = wp.max(s1, s2)
             v2 = v2 * v2
             limit = scalar_t(1.1) * wp.max(pres[a] + rho[a] * v2, pres[b] + rho[b] * v2)
-            if mode == 1:
+            if pairMode == 1:
                 limit = limit * scalar_t(2.0)
             ok = Ps > scalar_t(0.0) and wp.isfinite(Ps) and wp.isfinite(Ss) and Ps <= scalar_t(1.4) * limit and wp.isfinite(Fm) and wp.isfinite(Fe)
             if not ok:
@@ -152,13 +158,13 @@ def mfmFlux_Func_i(
                 r1R = wp.max(rho[b], scalar_t(_TINY))
                 p1L = wp.max(pres[a], scalar_t(_TINY))
                 p1R = wp.max(pres[b], scalar_t(_TINY))
-                Fm, Fp, Fe, Ss, Ps = faceFluxPair(r1L, uL1, vL1 - uL1 * nrm, p1L, r1R, uR1, vR1 - uR1 * nrm, p1R,
-                                                  gamma, mode, nrm, vframe)
+                Fm, Fp, Fe, Ss, Ps = faceFluxPairMaterial(r1L, uL1, vL1 - uL1 * nrm, p1L, r1R, uR1, vR1 - uR1 * nrm, p1R,
+                                                  gamma[a], pairMode, nrm, vframe, gamma[b])
                 ok2 = Ps > scalar_t(0.0) and wp.isfinite(Ps) and wp.isfinite(Ss) and wp.isfinite(Fm) and wp.isfinite(Fe)
                 if not ok2:
                     zero = scalar_t(0.0)
-                    Fm, Fp, Fe, Ss, Ps = faceFluxPair(r1L, zero, vL1 * zero, p1L, r1R, zero, vR1 * zero, p1R,
-                                                      gamma, mode, nrm, vframe)
+                    Fm, Fp, Fe, Ss, Ps = faceFluxPairMaterial(r1L, zero, vL1 * zero, p1L, r1R, zero, vR1 * zero, p1R,
+                                                      gamma[a], pairMode, nrm, vframe, gamma[b])
         if mode == 1 and massLimit > scalar_t(0.0) and dt > scalar_t(0.0):
             # GIZMO: a pair moves at most massLimit of the donor's mass per step (mass update only)
             dmass = Amag * Fm * dt
@@ -189,7 +195,7 @@ def _makeFluxKernel(listMode: bool):
         gRho: wp.array(dtype=Any), gVel: wp.array(dtype=Any), gP: wp.array(dtype=Any),  # type: ignore
         aRho: wp.array(dtype=scalar_t), aVel: wp.array(dtype=Any), aP: wp.array(dtype=scalar_t),  # type: ignore
         vol: wp.array(dtype=scalar_t), Einv: wp.array(dtype=Any), lam: wp.array(dtype=Any), condBad: wp.array(dtype=wp.int32),  # type: ignore
-        gamma: scalar_t, dt: wp.array(dtype=scalar_t), mode: wp.int32, order: wp.int32, psi1: scalar_t, psi2: scalar_t,
+        gamma: wp.array(dtype=scalar_t), materials: wp.array(dtype=wp.int32), dt: wp.array(dtype=scalar_t), mode: wp.int32, order: wp.int32, psi1: scalar_t, psi2: scalar_t,
         power: scalar_t, timeCentred: wp.int32, centred: wp.int32, areaCap: wp.int32, retry: wp.int32, massLimit: scalar_t,
         faceGuard: wp.int32, closureCap: scalar_t,
     
@@ -213,7 +219,7 @@ def _makeFluxKernel(listMode: bool):
                 i, iPtcl, referenceState, domainState, kernelProperties, beginIndex, numIndices,
                 adjacencyState.neighborList if traversal else gridState.sortIndex,
                 rho, vel, pres, gRho, gVel, gP, aRho, aVel, aP, vol, Einv, lam, condBad,
-                gamma, stepDt, mode, order, psi1, psi2, power, timeCentred, centred, areaCap, retry, massLimit, faceGuard, closureCap, dm, dp, de)
+                gamma, materials, stepDt, mode, order, psi1, psi2, power, timeCentred, centred, areaCap, retry, massLimit, faceGuard, closureCap, dm, dp, de)
         # rates dQ/dt = -sum_j |A| F with the sign convention folded into the accumulation above
         output_dm[i] = dm
         output_dp[i] = dp
@@ -229,7 +235,7 @@ _FLUX_SPEC = OperatorSpec(
             ExtraSpec("aRho", ExtraKind.TENSOR), ExtraSpec("aVel", ExtraKind.TENSOR), ExtraSpec("aP", ExtraKind.TENSOR),
             ExtraSpec("vol", ExtraKind.TENSOR), ExtraSpec("Einv", ExtraKind.TENSOR), ExtraSpec("lam", ExtraKind.TENSOR),
             ExtraSpec("condBad", ExtraKind.TENSOR),
-            ExtraSpec("gamma", ExtraKind.SCALAR), ExtraSpec("dt", ExtraKind.TENSOR), ExtraSpec("mode", ExtraKind.SCALAR),
+            ExtraSpec("gamma", ExtraKind.TENSOR), ExtraSpec("materials", ExtraKind.TENSOR), ExtraSpec("dt", ExtraKind.TENSOR), ExtraSpec("mode", ExtraKind.SCALAR),
             ExtraSpec("order", ExtraKind.SCALAR), ExtraSpec("psi1", ExtraKind.SCALAR), ExtraSpec("psi2", ExtraKind.SCALAR),
             ExtraSpec("power", ExtraKind.SCALAR), ExtraSpec("timeCentred", ExtraKind.SCALAR),
             ExtraSpec("centred", ExtraKind.SCALAR), ExtraSpec("areaCap", ExtraKind.SCALAR), ExtraSpec("retry", ExtraKind.SCALAR),

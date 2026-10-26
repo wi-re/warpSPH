@@ -23,7 +23,7 @@ python scripts/run_compressibleMatrix.py plan --root .tmp/compressible-matrix
 python scripts/run_compressibleMatrix.py check --root .tmp/compressible-matrix
 ```
 
-`manifest.json` freezes the inputs for 120 cells: twelve cases and ten presets (116 supported combinations).
+`manifest.json` freezes the inputs for 150 cells: fifteen cases and ten presets (142 supported combinations).
 `check` validates typed configurations on CPU without sampling or stepping.
 Planning refuses to overwrite a manifest. Choose a fresh root when changing
 inputs; runtime source versions are recorded separately for each attempt.
@@ -34,12 +34,15 @@ inputs; runtime source versions are recorded separately for each attempt.
 | `sod` | 800 | t=.15 | Volume-weighted density L1 |
 | `sod2d` | 512 | t=.15 | Volume-weighted density L1 |
 | `noh` | 256 | t=.6 | Absolute relative post-shock density error |
+| `nohOpen` | 256 | t=.6 | Same shock metric with explicit open boundaries |
 | `kidder` | 200 | 0.99 analytic collapse time | Interior volume-weighted density L1 |
 | `sedov1d` | 800 | Shock reaches radius .8 | Volume-weighted density L1 within 1.15 shock radii |
 | `sedov2d` | 256 | Shock reaches radius .8 | Volume-weighted density L1 within 1.15 shock radii |
 | `sedov3d` | 64 | Shock reaches radius .8 | Same radial metric in 3D |
 | `gresho` | 256 | t=3 | Tangential velocity L1 within radius .5 |
 | `hydrostatic` | 100 | t=7 | Maximum pressure error from P=1 |
+| `hydrostaticTwoGas` | 100 | t=7 | Maximum pressure error from P=1; gamma=1.4 and 5/3 |
+| `hydrostaticAdvectedEllipse` | 100 | t=1 | Same pressure metric after one periodic crossing |
 | `kelvinHelmholtz` | 256 | t=2.5 | Mode amplitude/mixing diagnostics, unranked |
 | `khSmooth` | 256 | t=2.5 | Same diagnostics with smooth initial density |
 
@@ -62,11 +65,31 @@ promote dissipative A to a recommended default. Noh and Sedov use a common
 `uAmbient=1e-8` for all methods. Cold-state failures remain failures; no floors,
 automatic CFL retries or replacement presets are introduced.
 
-Noh and Kidder use FP64 for every method; other columns default to FP32.
+Both Noh columns and Kidder use FP64 for every method; other columns default to FP32.
 Precision appears in column labels and provenance, never mixed within a column.
 The hydrostatic case is the literature dense-square pressure-equilibrium test
-(rho_high=4, gamma=1.5), without gravity. Kidder and hydrostatic have no native
-MFM/MFV setup: those four cells are retained as unsupported, without execution.
+(rho_high=4, gamma=1.5), without gravity. Native MFM/MFV setups initialize this
+contact with their number-volume geometry and evolve Kidder with prescribed
+moving bands in conserved variables. New plans execute those cells. Existing
+saved plans and unsupported results remain historical evidence; regenerate a
+plan to include the new routes. See [meshless cases](../meshless.md) for the
+boundary and precision limitations.
+
+`hydrostaticTwoGas` selects the native `twoGas` material variant; the advected
+ellipse selects `advectedEllipse`, with a common x velocity of 1. Both use
+rho=1 and 4, gamma=1.4 and 5/3, and equal initial P=1. These are periodic
+pressure-equilibrium contacts without gravity or a free surface. Their material
+tables are resolved from the named variant and retained in the effective inputs.
+PESPH, GSPH and InutsukaGSPH do not support those material configurations and
+are declared unsupported; the other six presets can execute them. The existing
+`hydrostatic` column retains its common gamma=1.5 definition.
+
+`noh` retains its native boundary protocol for historical reproducibility.
+`nohOpen` explicitly requests open edges for every preset. Its meshless cells
+record `analytic Lagrangian inflow reservoir` in comparison and provenance
+metadata; SPH cells record `native open edges`. Treat differences between those
+boundary implementations as part of the comparison protocol. The finite meshless
+Lagrangian domain must remain outside the analytic shock until the endpoint.
 
 Common controls are B7, n_h=4 and eager execution. Each method retains its
 native timestep/support policy and package time driver; RK2 is requested where
@@ -88,6 +111,14 @@ python scripts/run_compressibleMatrix.py run --methods CRKSPH
 # Intersection: two cases across three selected methods
 python scripts/run_compressibleMatrix.py run \
   --cases noh gresho --methods Monaghan Monaghan-CD CRKSPH
+
+# Fresh full-length meshless validation cohort (use a new root)
+python scripts/run_compressibleMatrix.py plan --root .tmp/meshless-matrix \
+  --cases hydrostatic hydrostaticTwoGas hydrostaticAdvectedEllipse kidder nohOpen \
+  --methods MFM MFV
+python scripts/run_compressibleMatrix.py check --root .tmp/meshless-matrix
+python scripts/run_compressibleMatrix.py run --root .tmp/meshless-matrix
+python scripts/run_compressibleMatrix.py report --root .tmp/meshless-matrix
 
 # Full planned matrix: only run when the GPU is available for the whole study
 python scripts/run_compressibleMatrix.py run
@@ -136,10 +167,11 @@ original result case ID; its input hash and method are still checked against
 the original result. Use `boundaryTreatment` to record the actual boundary setup,
 `marker` to flag exceptional cells in both panels, and top-level `figureNotes`
 to explain the marker in the PDF and HTML. These fields are also retained in the
-metric/provenance exports. The consolidated Noh view uses open edges for SPH and
-marks MFM/MFV with `‡`: they require periodic boundaries in the current
-implementation. Their modified boundary protocol must be considered when
-interpreting ranks in that column.
+metric/provenance exports. Retained consolidated Noh views use open edges for
+SPH and mark the historical periodic MFM/MFV cells with `‡`. New meshless runs
+can instead select `params.outerBoundary=open`, which uses an analytic
+Lagrangian inflow reservoir. Keep that boundary treatment in new comparison
+metadata and preserve the periodic labels on retained evidence.
 
 Pending cells remain visible. Stopped runs show the fraction of target physical
 time reached and cannot win endpoint ranks. Completed endpoints with nonpositive
@@ -201,6 +233,40 @@ Presets cannot override nx, dimension, domain extent/periodicity, endpoint or
 step count or precision. Change the case catalog for a separate fixed-resolution study;
 `--smoke` is the explicit exception for plumbing checks. Physical case-parameter
 overrides, if used, must be distinguished from numerical-parameter experiments.
+
+## Validated Godunov rows in composed views
+
+The validated full-row selection uses **Godunov SPH (C=3)** and **Inutsuka
+tangent** in place of the native GSPH and original Inutsuka rows. These are
+explicit method IDs `GSPH-C3` and `Inutsuka-tangent-periodic`, retaining the
+original result/input hashes and earlier comparisons. The tangent row must use
+the corrected arbitrary-image periodic geometry; the earlier one-image trial
+is rejected for KH field defects despite finite completion. See
+[the shock audit](godunov_shock_audit_2026-10-24.md) for the full qualification.
+
+This is a saved comparison selection, not a change to the library defaults or
+the native plan catalog. The Inutsuka method metadata identifies its archived
+operator and worker; its typed solver configuration alone does not install
+tangent continuation. Keep those sources and per-run archives with the study
+when reproducing the selected numerical method.
+
+Both validated rows complete all thirteen supported catalog cases with positive,
+finite accepted and RHS-stage states. A consolidated Noh view selects their
+explicit `nohOpen` results. Unequal-gamma square and advected-ellipse columns
+remain unsupported for these schemes. The matrix retains the measured accuracy
+costs: GSPH Sod error +5.83% and 2D Sod +1.67%; Inutsuka pressure-equilibrium
+error +23.1% (0.04557 versus 0.03703), despite removal of the energy impulse.
+KH amplitudes remain unranked diagnostics.
+
+A composed cell can declare `runtimeComparable: false` with a `runtimeNote`
+explaining different instrumentation or execution conditions. Its measured
+seconds remain visible in the cost panel and exports, but it receives no cost
+rank and does not set the cost color scale. Quality ranking is independent.
+The selected Godunov overview includes their measured times in the cost ranks
+at the user's request. Both row headings state that timing includes stage
+checks; the full timing note also records additional synchronization. This
+caveat leaves their quality ranks independent and does not alter raw run records.
+The earlier view with excluded Godunov cost ranks remains retained.
 
 ## Timing and retained evidence
 

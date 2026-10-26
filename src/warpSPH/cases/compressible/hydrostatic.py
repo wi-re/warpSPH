@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Dict
 from dataclasses import replace
 from ...configurations.pesph import PESPHConfig
+from ...configurations.meshless import MeshlessConfig
 
 import torch
 
@@ -30,20 +31,26 @@ __all__ = ['hydrostaticCase', 'HYDROSTATIC_FIELDS']
 
 
 def buildSystem(ctx: RunContext):
-    # The legacy sampler changes its support iteration budget to 16, then 1.
-    # PESPH needs its configured stage solve after sampling; isolate those
-    # sampling-only assignments without changing the other schemes' convention.
-    samplingConfig = replace(ctx.schemeConfig) if isinstance(ctx.schemeConfig, PESPHConfig) else ctx.schemeConfig
-    system = buildHydrostaticInitialState(
-        ctx.param('rho_low'), ctx.param('rho_high'), ctx.spec.nx,
-        ctx.config, samplingConfig, ctx.SimulationState, ctx.SimulationSystem,
-        shape=ctx.param('shape'), boost=ctx.param('boost'))
+    if isinstance(ctx.schemeConfig, MeshlessConfig):
+        from ...caseUtils.meshless import buildPressureEquilibriumSystem
+        system = buildPressureEquilibriumSystem(ctx)
+    else:
+        system = _buildSPHSystem(ctx)
     ctx.scratch['contactPositions'] = system.state.positions.clone()
     ctx.scratch['contactEnergy'] = system.state.totalEnergies.sum().detach()
     ctx.scratch['contactDensity'] = system.state.masses / (ctx.spec.L/ctx.spec.nx)**ctx.spec.dim
     ctx.velocityScale = 1.
     ctx.velocityScaleSource = 'unit contact sound-speed scale'
     return system
+
+
+def _buildSPHSystem(ctx):
+    # Isolate the legacy sampler's support-iteration assignments for PESPH.
+    samplingConfig = replace(ctx.schemeConfig) if isinstance(ctx.schemeConfig, PESPHConfig) else ctx.schemeConfig
+    return buildHydrostaticInitialState(
+        ctx.param('rho_low'), ctx.param('rho_high'), ctx.spec.nx,
+        ctx.config, samplingConfig, ctx.SimulationState, ctx.SimulationSystem,
+        shape=ctx.param('shape'), boost=ctx.param('boost'))
 
 
 #: The two panels, as `particlePlot`/`buildFieldPlotter` want them -- named
@@ -101,7 +108,7 @@ hydrostaticCase = registerCase(Case(
         plotInterval=1,
         storeInterval=500,
     ),
-    supportedSchemes=(*SPH_SCHEMES, 'PESPH'),
+    supportedSchemes=(*COMPRESSIBLE_SCHEMES, 'PESPH'),
     parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
         'rho_low': P('number', 'Background density.', 'initial', units='density', exclusiveMinimum=0),
         'rho_high': P('number', 'Density of the central square patch.', 'initial', units='density', exclusiveMinimum=0),

@@ -134,6 +134,13 @@ def solverParameters(scheme):
         }
     if scheme in ('MFM', 'MFV'):
         return {
+            'materials': P('array', 'Pure-material EOS table; list position is the fluid material ID. Null uses global gamma.',
+                'fluid', nullable=True, minItems=1, items=P('object', 'Material description.',
+                    properties={'name': P('string', 'Material name.'),
+                        'eos': P('object', 'Equation of state.', properties={
+                            'type': P('string', 'EOS family.', choices=('idealGas',)),
+                            'gamma': P('number', 'Ratio of specific heats.', exclusiveMinimum=1)}, required=('type', 'gamma'))},
+                    required=('name', 'eos'))),
             'order': P('integer', 'Spatial reconstruction order.', 'reconstruction', choices=(1, 2)),
             'cfl': P('number', 'Meshless signal timestep CFL factor.', 'time', exclusiveMinimum=0),
             'cflLength': P('string', 'Length used in the CFL estimate.', 'time', choices=('particle', 'support')),
@@ -368,7 +375,7 @@ class RunConfiguration:
                 raise ValueError(f'params.{name}: not used by {scheme}')
             if name in params and not parameterApplies(descriptor, spec):
                 raise ValueError(f'params.{name}: inactive for the selected solver/settings')
-        if scheme in ('MFM', 'MFV') and not spec.periodic:
+        if scheme in ('MFM', 'MFV') and not spec.periodic and not (case.name == 'noh' and spec.params['outerBoundary'] == 'open'):
             raise ValueError('simulation.periodic: MFM/MFV currently require a periodic domain')
         if spec.minDt is not None and spec.maxDt is not None and spec.minDt > spec.maxDt:
             raise ValueError('simulation.minDt: must not exceed simulation.maxDt')

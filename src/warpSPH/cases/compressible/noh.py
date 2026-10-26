@@ -36,10 +36,22 @@ def buildSystem(ctx: RunContext):
     if isinstance(ctx.schemeConfig, MeshlessConfig):
         from ...caseUtils.meshless import toMeshlessSystem
         from ...systems.compressibleMonaghan import CompressibleState, CompressibleSystem
+        if ctx.param('outerBoundary') == 'open':
+            # Sampling is the same cell-centred lattice as native Noh even
+            # when a saved/resolved run already records periodic=False.
+            ctx.config.domain.periodic = torch.ones_like(ctx.config.domain.periodic)
         comp = sampleNoh1D(ctx.spec.nx, ctx.config, ctx.schemeConfig,
                            CompressibleState, CompressibleSystem)
         addUniformInternalEnergy(comp, ctx.param('gamma'), ctx.param('uAmbient'))
-        return toMeshlessSystem(comp, ctx.config, ctx.schemeConfig)
+        reservoir = None
+        if ctx.param('outerBoundary') == 'open':
+            validateConfiguration(ctx.spec)
+            from ...modules.meshless.reservoir import nohReservoir
+            reservoir = nohReservoir(comp.state, ctx.config, ctx.schemeConfig,
+                                     ctx.param('rho0'), ctx.param('uAmbient'))
+            ctx.config.domain.periodic = torch.zeros_like(ctx.config.domain.periodic)
+            ctx.spec = ctx.spec.merged(periodic=False)
+        return toMeshlessSystem(comp, ctx.config, ctx.schemeConfig, inflowReservoir=reservoir)
     system = sampleNoh1D(ctx.spec.nx, ctx.config, ctx.schemeConfig,
                         ctx.SimulationState, ctx.SimulationSystem)
     addUniformInternalEnergy(system, ctx.param('gamma'), ctx.param('uAmbient'))
@@ -78,7 +90,9 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
 
 def extraData(ctx: RunContext, state) -> Dict[str, float]:
     rhoShock, pressureShock = shockState(ctx)
-    return dict(paramExtraData(ctx, state), rho_s=rhoShock, P_s=pressureShock)
+    treatment = ('analytic Lagrangian inflow reservoir' if getattr(state, 'inflowReservoir', None) is not None
+                 else ctx.param('outerBoundary'))
+    return dict(paramExtraData(ctx, state), rho_s=rhoShock, P_s=pressureShock, boundaryTreatment=treatment)
 
 
 def deriveConfiguration(spec):
@@ -87,7 +101,13 @@ def deriveConfiguration(spec):
 
 def validateConfiguration(spec):
     if spec.params['outerBoundary'] == 'open' and spec.scheme in ('MFM', 'MFV'):
-        raise ValueError('params.outerBoundary: open edges are not supported by MFM/MFV; these schemes require a periodic domain')
+        if spec.schemeOverrides.get('closure', 'none') != 'none':
+            raise ValueError('solver.closure: open Noh inflow reservoirs require closure=none')
+        # There is a finite physical Lagrangian mass: the analytic shock must
+        # not reach the incoming outermost physical particle during this run.
+        encounter = .5*spec.L/(1+spec.params['v_s'])
+        if spec.tLimit >= encounter:
+            raise ValueError('simulation.tLimit: open meshless Noh must stop before the shock reaches the material edge; enlarge L')
 
 
 nohCase = registerCase(Case(
@@ -116,7 +136,7 @@ nohCase = registerCase(Case(
     supportedSchemes=(*COMPRESSIBLE_SCHEMES, 'PESPH'),
     parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
         'uAmbient': P('number', 'Uniform initial specific internal energy; zero retains the exactly cold IC.', 'initial', minimum=0),
-        'outerBoundary': P('string', 'native retains configured periodicity; open removes periodic seam interactions after sampling the same initial particles.', 'boundary', choices=('native', 'open')),
+        'outerBoundary': P('string', 'native retains configured periodicity; open removes seam interactions. MFM/MFV add exterior analytic inflow quadrature.', 'boundary', choices=('native', 'open')),
         'v_s': P('number', 'Reference shock-front propagation speed.', 'reference', units='velocity', exclusiveMinimum=0,
                  readOnly=True, derivation='(params.gamma - 1) / 2 for the unit inflow speed'),
     },

@@ -36,9 +36,9 @@ def result(root, row, run_id, error=.1, seconds=4., status='completed', **extra)
 
 def test_filters_are_cartesian_and_unknown_names_fail():
     plan = matrix.make_plan()
-    assert len(plan['rows']) == len(matrix.CASES)*len(matrix.METHODS) == 120
+    assert len(plan['rows']) == len(matrix.CASES)*len(matrix.METHODS) == 150
     assert len(matrix.select_rows(plan, cases=['noh'])) == 10
-    assert len(matrix.select_rows(plan, methods=['MFV'])) == 12
+    assert len(matrix.select_rows(plan, methods=['MFV'])) == 15
     assert len(matrix.select_rows(plan, ['sod', 'gresho'], ['CRKSPH', 'MFM'])) == 4
     with pytest.raises(ValueError, match='Unknown'):
         matrix.select_rows(plan, ['typo'])
@@ -102,6 +102,31 @@ def test_independent_quality_cost_ranks_and_failures_never_win(tmp_path):
     assert by_method['CRKSPH']['runtimeRank'] == 1
     assert by_method['MFV']['qualityRank'] is None
     assert by_method['MFV']['runtimeRank'] is None
+
+
+def test_instrumented_runtime_is_retained_without_affecting_cost_ranks(tmp_path):
+    plan = planned(tmp_path, cases=['sod'], methods=['Monaghan', 'CRKSPH'])
+    result(tmp_path, plan['rows'][0], 'native', error=.1, seconds=12.)
+    path = result(tmp_path, plan['rows'][1], 'instrumented', error=.01, seconds=.1)
+    before = path.read_bytes()
+    view = matrix.comparison(tmp_path)
+    view['cells'][1].update(runtimeComparable=False, runtimeNote='Additional RHS-stage observations')
+    rows, provenance = plotting.collect(view)
+    native, measured = rows
+    assert native['runtimeRank'] == 1
+    assert measured['runtimeSeconds'] == .1 and measured['runtimeRank'] is None
+    assert measured['qualityRank'] == 1
+    assert provenance[1]['runtimeComparable'] is False
+    assert provenance[1]['runtimeNote'] == 'Additional RHS-stage observations'
+    destination = tmp_path/'report'
+    plotting.report(view, destination)
+    assert 'unranked' in (destination/'matrix.svg').read_text()
+    assert 'runtimeComparable' in (destination/'provenance.csv').read_text()
+    assert matrix.read_json(destination/'metrics.json')[1]['runtimeRank'] is None
+    assert path.read_bytes() == before
+    view['cells'][1]['runtimeComparable'] = 'false'
+    with pytest.raises(ValueError, match='boolean'):
+        plotting.collect(view)
 
 
 def test_selection_keeps_old_attempt_and_frozen_comparison(tmp_path):
@@ -261,13 +286,16 @@ def test_requested_resolutions_precisions_and_native_support():
     plan = matrix.make_plan()
     expected = dict(linearWave=128, sod=800, sod2d=512, noh=256, kidder=200,
                     sedov1d=800, sedov2d=256, sedov3d=64, gresho=256,
-                    hydrostatic=100, kelvinHelmholtz=256, khSmooth=256)
+                    hydrostatic=100, hydrostaticTwoGas=100, hydrostaticAdvectedEllipse=100,
+                    nohOpen=256, kelvinHelmholtz=256, khSmooth=256)
     for row in plan['rows']:
         cid = row['caseId']
         assert row['configuration']['simulation']['nx'] == expected[cid]
         assert row['configuration']['simulation']['precision'] == (
-            'float64' if cid in ('noh', 'kidder') else 'float32')
-        assert bool(row.get('unsupportedReason')) == (cid in ('kidder', 'hydrostatic') and row['method'] in ('MFM', 'MFV'))
+            'float64' if cid in ('noh', 'nohOpen', 'kidder') else 'float32')
+        unsupported = (cid in ('hydrostaticTwoGas', 'hydrostaticAdvectedEllipse')
+                       and row['configuration']['solver']['scheme'] in ('PESPH', 'GSPH', 'InutsukaGSPH'))
+        assert bool(row.get('unsupportedReason')) == unsupported
     assert matrix.case_precisions(plan) == plan['casePrecisions']
 
 
@@ -320,3 +348,39 @@ def test_native_pesph_callback_cannot_bypass_endpoint_cap(tmp_path, monkeypatch,
     assert record['status'] == 'completed'
     assert record['nSteps'] > 2 and record['actualTime'] == record['targetTime'] == .037
     assert record['admissibility']['positive'] and record['admissibility']['finite']
+
+
+def test_material_variants_reach_typed_configuration():
+    # Native variants supply the material table; a label/params-only route would
+    # silently execute the original single-gamma problem instead.
+    from warpSPH.cases import importAll
+    from warpSPH.runner import RunConfiguration
+    importAll()
+    for row in matrix.make_plan(['hydrostaticTwoGas', 'hydrostaticAdvectedEllipse'], ['MFM', 'MFV'])['rows']:
+        config = RunConfiguration.fromDict(row['configuration'])
+        config.simulation['device'] = 'cpu'
+        ctx = config.prepare()
+        assert row['configuration']['variant'] == matrix.CASES[row['caseId']]['variant']
+        assert [m.eos.gamma for m in ctx.schemeConfig.materials] == [1.4, 5/3]
+        if row['caseId'] == 'hydrostaticAdvectedEllipse':
+            assert ctx.param('shape') == 'ellipse'
+            assert ctx.param('boost') == 1.
+
+
+def test_open_boundary_metadata_survives_comparison(tmp_path):
+    plan = planned(tmp_path, cases=['nohOpen'], methods=['MFM', 'CompSPH'])
+    for i, row in enumerate(plan['rows']):
+        result(tmp_path, row, f'open-{i}')
+        assert row['configuration']['params']['outerBoundary'] == 'open'
+    view = matrix.comparison(tmp_path)
+    rows, provenance = plotting.collect(view)
+    assert [r['boundaryTreatment'] for r in rows] == [
+        'analytic Lagrangian inflow reservoir', 'native open edges']
+    assert [r['boundaryTreatment'] for r in provenance] == [r['boundaryTreatment'] for r in rows]
+    assert 'reservoir' in plotting.case_recipe(view, 'nohOpen')
+
+
+def test_advected_metric_description_uses_moving_reference(tmp_path):
+    planned(tmp_path, cases=['hydrostaticAdvectedEllipse'], methods=['MFV'])
+    recipe = plotting.case_recipe(matrix.comparison(tmp_path), 'hydrostaticAdvectedEllipse')
+    assert 'uniform advection' in recipe and 'stationary dense-square' not in recipe

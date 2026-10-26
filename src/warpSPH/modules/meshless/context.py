@@ -40,7 +40,7 @@ def wrap(pos, domain):
 class StepContext:
     """Everything a temporal scheme reads: the start-of-step state and primitives, the start-of-step geometry, and the two ways to evaluate more."""
     dt: Any
-    gamma: float
+    gamma: Any
     config: Any
     schemeConfig: Any
     domain: Any
@@ -52,6 +52,8 @@ class StepContext:
     P: torch.Tensor
     u: torch.Tensor             # specific internal energy
     geom: Any                   # the start-of-step geometry
+    materials: Any = None
+    reservoir: Any = None
 
     def build(self, positions, lam0):
         """A fresh geometry at `positions` (this step's supports), warm-started from `lam0`."""
@@ -59,26 +61,30 @@ class StepContext:
 
     def ratesAtRest(self, geometry, Q):
         """The face-flux rate of the conserved vector `Q` on `geometry` with no internal prediction (dt = 0)."""
-        return ratesAtRest(geometry, Q, self.gamma, self.schemeConfig)
+        return ratesAtRest(geometry, Q, self.gamma, self.schemeConfig, materials=self.materials)
 
     def rates(self, massFluxLimit, dt=None):
         """The start-of-step rate with the internal (MUSCL-Hancock) prediction over `dt` (default: the step's)."""
+        if self.reservoir is not None:
+            return self.reservoir.rates(self, massFluxLimit, self.dt if dt is None else dt)
         return computeRates(self.geom,
             self.rho, self.vel, self.P, self.gamma, dt=self.dt if dt is None else dt, mode=self.schemeConfig.mode,
             order=self.schemeConfig.order, beta_min=self.schemeConfig.betaMin, beta_max=self.schemeConfig.betaMax,
             cond_crit=self.schemeConfig.condCrit, psi1=self.schemeConfig.psi1, psi2=self.schemeConfig.psi2,
             timeCentredFrame=self.schemeConfig.timeCentredFrame, retry=self.schemeConfig.retry,
-            massFluxLimit=massFluxLimit, faceGuard=self.schemeConfig.faceGuard)
+            massFluxLimit=massFluxLimit, faceGuard=self.schemeConfig.faceGuard, materials=self.materials)
 
 
 # ------------------------------------------------------------------------------------------------------------- geometry / rates
 
-def ratesAtRest(geometry, Q, gamma, schemeConfig):
+def ratesAtRest(geometry, Q, gamma, schemeConfig, *, materials=None):
+    if getattr(schemeConfig, 'materials', None) is not None and materials is None:
+        raise ValueError('meshless material rates require particle material IDs')
     rho, vel, P = primitives(Q, geometry.volume, gamma)
     return computeRates(geometry,
         rho, vel, P, gamma, dt=0.0, mode=schemeConfig.mode, order=schemeConfig.order,
         beta_min=schemeConfig.betaMin, beta_max=schemeConfig.betaMax,
         cond_crit=schemeConfig.condCrit, psi1=schemeConfig.psi1, psi2=schemeConfig.psi2,
         timeCentredFrame=schemeConfig.timeCentredFrame, retry=schemeConfig.retry,
-        massFluxLimit=schemeConfig.massFluxLimit, faceGuard=schemeConfig.faceGuard)
+        massFluxLimit=schemeConfig.massFluxLimit, faceGuard=schemeConfig.faceGuard, materials=materials)
 

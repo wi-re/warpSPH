@@ -272,3 +272,92 @@ def test_disabledAutogradKeepsNeighborTraversalMetadata(flow):
     eps = torch.finfo(DTYPE).eps
     torch.testing.assert_close(got, expected, rtol=128 * eps, atol=128 * eps * expected.abs().max().item())
     assert not got.requires_grad
+
+
+@pytest.mark.parametrize('scheme', ['MFM', 'MFV'])
+@pytest.mark.parametrize('shape,boost', [('box', 0.), ('ellipse', .7)])
+def test_nativePressureEquilibriumStartsBalancedAndAdvects(scheme, shape, boost):
+    from warpSPH.runner import RunConfiguration, run
+    from warpSPH.cases.compressible.hydrostatic import hydrostaticCase
+    ctx = RunConfiguration('hydrostatic', simulation=dict(device=DEVICE, nx=24,
+        nSteps=40, plot=False, video=False, quiet=True, progress=False),
+        params=dict(rho_high=4., gamma=1.5, shape=shape, boost=boost),
+        solver=dict(scheme=scheme)).prepare(hydrostaticCase)
+    system = hydrostaticCase.buildSystem(ctx)
+    geom = MeshlessWarp.build(system.state.positions, system.state.supports,
+        system.domain, ctx.config.kernel, closure='none')
+    rho, vel, pressure = primitives(system.state.Q, geom.volume, 1.5)
+    eps = torch.finfo(DTYPE).eps
+    torch.testing.assert_close(pressure, torch.ones_like(pressure), atol=16*eps, rtol=16*eps)
+    # Cell masses retain the density jump; it is not smeared by SPH support adaptation.
+    assert torch.unique(system.state.masses).numel() == 2
+    initialMass = system.state.masses.sum()
+    r = run(hydrostaticCase, ctx.spec)
+    assert r.nSteps == 40 and not r.diverged
+    metrics = r.trajectory[-1]
+    assert metrics['pressureError'] < 3e-4
+    assert metrics['maxPeculiarVelocity'] < 3e-4
+    assert metrics['shapeDisplacement'] < 3e-4
+    assert metrics['relativeEnergyDrift'] < 3e-5
+    torch.testing.assert_close(r.state.state.masses.sum(), initialMass, atol=64*eps, rtol=64*eps)
+
+
+@pytest.mark.parametrize('mode', ['MFM', 'MFV'])
+def test_materialFluxesConserveEachPureFluidAndRetainMfvExchange(flow, mode):
+    geom, Q, rho, vel, pressure = flow
+    ids = (torch.arange(len(rho), device=rho.device) % 3 == 0).to(torch.int32)
+    gammas = torch.where(ids == 0, torch.full_like(rho, 1.4), torch.full_like(rho, 5/3))
+    rate = computeRates(geom, rho, vel, pressure, gammas, mode=mode, dt=.001, materials=ids)
+    eps = torch.finfo(DTYPE).eps
+    tolerance = len(rho)*64*eps*rate.abs().max()
+    assert rate.sum(0).abs().max() < tolerance
+    for material in (0, 1):
+        assert rate[ids == material, 0].sum().abs() < tolerance
+    if mode == 'MFM':
+        assert torch.count_nonzero(rate[:, 0]) == 0
+    else:
+        assert rate[:, 0].abs().max() > 0  # within-fluid MFV mass exchange remains active
+
+
+@pytest.mark.parametrize('scheme', ['MFM', 'MFV'])
+@pytest.mark.parametrize('variant', ['twoGas', 'advectedEllipse'])
+def test_materialContactInitializationAndAcceptedStateUseTheSameEos(scheme, variant):
+    from warpSPH.runner import RunConfiguration, run
+    from warpSPH.cases.compressible.hydrostatic import hydrostaticCase
+    ctx = RunConfiguration('hydrostatic', variant=variant,
+        simulation=dict(device=DEVICE, nx=24, nSteps=40, quiet=True, progress=False),
+        solver=dict(scheme=scheme)).prepare(hydrostaticCase)
+    initial = hydrostaticCase.buildSystem(ctx).state
+    ids = initial.materials
+    gamma = torch.where(ids == 0, torch.full_like(initial.masses, 1.4), torch.full_like(initial.masses, 5/3))
+    expected = (gamma-1)*initial.densities*(initial.Q[:, -1]/initial.masses-.5*initial.velocities.square().sum(-1))
+    eps = torch.finfo(DTYPE).eps
+    torch.testing.assert_close(expected, torch.ones_like(expected), atol=32*eps, rtol=32*eps)
+    r = run(hydrostaticCase, ctx.spec)
+    assert r.nSteps == 40 and not r.diverged
+    assert r.trajectory[-1]['pressureError'] < 4e-4
+    assert r.trajectory[-1]['maxPeculiarVelocity'] < 4e-4
+    for material in (0, 1):
+        before = initial.masses[ids == material].sum()
+        after = r.state.state.masses[ids == material].sum()
+        torch.testing.assert_close(after, before, atol=128*eps, rtol=128*eps)
+    state = r.state.state
+    torch.testing.assert_close(state.soundspeeds.square(), gamma*state.pressures/state.densities, rtol=64*eps, atol=64*eps)
+
+
+def test_explicit_material_primitive_refresh_does_not_hide_negative_energy():
+    Q = torch.tensor([[1., 0., -1.]], device=DEVICE, dtype=DTYPE)
+    volume = torch.ones(1, device=DEVICE, dtype=DTYPE)
+    gamma = torch.full_like(volume, 1.4)
+    state = SimpleNamespace(Q=Q)
+    refreshPrimitives(state, SimpleNamespace(volume=volume), gamma, 8., 1)
+    assert state.internalEnergies[0] < 0
+    assert state.pressures[0] < 0
+    assert torch.isnan(state.soundspeeds[0])
+
+
+def test_material_gamma_inputs_retain_the_forward_only_contract(flow):
+    geom, Q, rho, vel, pressure = flow
+    gamma = torch.full_like(rho, 1.4, requires_grad=True)
+    with pytest.raises(NotImplementedError, match='forward-only'):
+        computeRates(geom, rho, vel, pressure, gamma)

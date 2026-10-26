@@ -211,3 +211,17 @@ def test_yaml_anchors_keep_explicit_override_precedence(tmp_path):
     path.write_text('defaults: &base {nx: 80, gamma: 1.4}\n'
                     'run: {<<: *base, nx: 100}\n')
     assert readMapping(path)['run'] == {'nx': 100, 'gamma': 1.4}
+
+
+@pytest.mark.parametrize('scheme', ['MFM', 'MFV'])
+def test_meshless_material_eos_table_roundtrips(scheme):
+    from warpSPH.configurations.meshless import meshlessConfigToDict, dictToMeshlessConfig
+    from warpSPH.cases.compressible.hydrostatic import hydrostaticCase
+    ctx = RunConfiguration('hydrostatic', variant='twoGas', solver=dict(scheme=scheme),
+        simulation=dict(device='cpu')).prepare(hydrostaticCase)
+    document = meshlessConfigToDict(ctx.schemeConfig)
+    restored = dictToMeshlessConfig(document)
+    assert restored.materials == ctx.schemeConfig.materials
+    assert restored.mode == scheme
+    assert document['materials'][0]['eos']['gamma'] == 1.4
+    assert document['materials'][1]['eos']['gamma'] == 5/3

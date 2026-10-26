@@ -13,6 +13,7 @@ __all__ = ['MeshlessConfig', 'MFMConfig', 'MFVConfig', 'meshlessConfigToDict', '
 
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
+from .moduleConfigurations.materials import normalizeMaterials, materialsToDict
 
 
 TEMPORAL_SCHEMES = ('hancock', 'ssprk', 'kdk')
@@ -31,6 +32,7 @@ def resolve_temporal_scheme(config):
 @dataclass
 class MeshlessConfig:
     gamma: float = field(default=1.4, metadata={'description': 'Adiabatic index'})
+    materials: Optional[list] = field(default=None, metadata={'description': 'Pure-material ideal-gas EOS table; interfaces have no cross-material mass exchange'})
     mode: str = field(default='MFM', metadata={"description": "'MFM' (conserved face fluxes, dm = 0) or 'MFV' (MFM fluxes + the GIZMO mass-flux limiter, dm != 0)"})
     order: int = field(default=2, metadata={"description": 'MUSCL-Hancock reconstruction order (1 = particle / Godunov, 2 = the limited gradient)'})
     nngb: float = field(default=7.0, metadata={"description": 'target neighbour count N_ngb for the support re-derivation h = (N_ngb V / C_nu)^(1/nu)'})
@@ -74,6 +76,7 @@ class MeshlessConfig:
 
     def validate(self, config=None):
         resolve_temporal_scheme(self)
+        self.materials = normalizeMaterials(self.materials)
         if self.mfvUpdate != 'conserved':
             raise ValueError('mfvUpdate must be conserved: the experimental primitive kick is a whole-step map, not a stage derivative')
 
@@ -93,6 +96,7 @@ class MFVConfig(MeshlessConfig):
 def meshlessConfigToDict(config: MeshlessConfig) -> Dict[str, Any]:
     return {
         'gamma': config.gamma,
+        'materials': materialsToDict(config.materials),
         'mode': config.mode,
         'order': config.order,
         'nngb': config.nngb,
@@ -126,6 +130,7 @@ def meshlessConfigToDict(config: MeshlessConfig) -> Dict[str, Any]:
 def dictToMeshlessConfig(configDict: Dict[str, Any]) -> MeshlessConfig:
     config = MeshlessConfig()
     config.gamma = configDict.get('gamma', config.gamma)
+    config.materials = normalizeMaterials(configDict.get('materials'))
     config.mode = configDict.get('mode', config.mode)
     config.order = configDict.get('order', config.order)
     config.nngb = configDict.get('nngb', config.nngb)

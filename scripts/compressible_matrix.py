@@ -62,10 +62,19 @@ def merge(base, patch):
     return result
 
 
-def case(name, source, nx, end, dim, label, metric, scale=1., params=None, precision=None, unsupported=()):
-    return dict(id=name, case=source, label=label, simulation=dict(nx=nx, dim=dim, tLimit=end),
-                params=params or {}, precision=precision, unsupportedSchemes=list(unsupported),
-                quality=dict(metric=metric, scale=scale, lowerIsBetter=True))
+def case(name, source, nx, end, dim, label, metric, scale=1., params=None, precision=None, unsupported=(),
+         variant=None, metric_note=None, boundaries=None):
+    definition = dict(id=name, case=source, label=label, simulation=dict(nx=nx, dim=dim, tLimit=end),
+                      params=params or {}, precision=precision, unsupportedSchemes=list(unsupported),
+                      quality=dict(metric=metric, scale=scale, lowerIsBetter=True))
+    # Optional additions leave the original twelve case definitions unchanged.
+    if variant is not None:
+        definition['variant'] = variant
+    if metric_note is not None:
+        definition['metricNote'] = metric_note
+    if boundaries is not None:
+        definition['boundaryTreatments'] = boundaries
+    return definition
 
 
 # One fixed resolution per column. Sedov's native sampler derives its endpoint
@@ -78,8 +87,13 @@ CASES = {c['id']: c for c in (
     case('sod2d', 'sod2d', 512, .15, 2, 'Sod strip\n2D · nx=512', 'densityVolumeWeightedL1'),
     case('noh', 'noh', 256, .6, 1, 'Noh\n1D · nx=256', 'postShockDensityAbsoluteRelativeError',
          params={'uAmbient': 1e-8}, precision='float64'),
+    case('nohOpen', 'noh', 256, .6, 1, 'Noh open edges\n1D · nx=256', 'postShockDensityAbsoluteRelativeError',
+         params={'uAmbient': 1e-8, 'outerBoundary': 'open'}, precision='float64',
+         metric_note='Open edges; MFM/MFV use an analytic Lagrangian inflow reservoir, SPH uses its native open boundary.',
+         boundaries={'MFM': 'analytic Lagrangian inflow reservoir',
+                     'MFV': 'analytic Lagrangian inflow reservoir', 'default': 'native open edges'}),
     case('kidder', 'kidder', 200, None, 1, 'Kidder\n1D · nx=200', 'densityVolumeWeightedL1',
-         params={'tauFraction': .99}, precision='float64', unsupported=('MFM', 'MFV')),
+         params={'tauFraction': .99}, precision='float64'),
     case('sedov1d', 'sedov', 800, None, 1, 'Sedov\n1D · nx=800', 'densityVolumeWeightedL1',
          params={'uAmbient': 1e-8, 'goalRadius': .8}),
     case('sedov2d', 'sedov', 256, None, 2, 'Sedov\n2D · nx=256', 'densityVolumeWeightedL1',
@@ -88,7 +102,13 @@ CASES = {c['id']: c for c in (
          params={'uAmbient': 1e-8, 'goalRadius': .8}),
     case('gresho', 'gresho', 256, 3., 2, 'Gresho\n2D · nx=256', 'tangentialVelocityL1'),
     case('hydrostatic', 'hydrostatic', 100, 7., 2, 'Pressure equilibrium\n2D · nx=100', 'pressureError',
-         params={'rho_high': 4., 'gamma': 1.5}, unsupported=('MFM', 'MFV')),
+         params={'rho_high': 4., 'gamma': 1.5}),
+    case('hydrostaticTwoGas', 'hydrostatic', 100, 7., 2, 'Two-gas equilibrium\n2D · nx=100',
+         'pressureError', variant='twoGas', unsupported=('PESPH', 'GSPH', 'InutsukaGSPH'),
+         metric_note='Stationary square with rho=1 and 4, gamma=1.4 and 5/3, and common P=1; no gravity.'),
+    case('hydrostaticAdvectedEllipse', 'hydrostatic', 100, 1., 2, 'Advected two-gas ellipse\n2D · nx=100',
+         'pressureError', variant='advectedEllipse', unsupported=('PESPH', 'GSPH', 'InutsukaGSPH'),
+         metric_note='Ellipse with rho=1 and 4, gamma=1.4 and 5/3, common P=1 and x velocity=1; one periodic crossing, no gravity.'),
     case('kelvinHelmholtz', 'kelvinHelmholtz', 256, 2.5, 2, 'KH sharp density\n2D · nx=256', None),
     case('khSmooth', 'kelvinHelmholtz', 256, 2.5, 2, 'KH smooth density\n2D · nx=256', None,
          params={'smoothDensity': 1}),
@@ -185,10 +205,12 @@ def make_plan(cases=None, methods=None, presets=None, precision='float32', devic
                 simulation.update(nx=12 if simulation['dim'] == 3 else 24, nSteps=3)
             configuration = dict(schemaVersion=1, case=definition['case'], simulation=simulation,
                 params=merge(definition['params'], preset.get('params', {})), solver=deepcopy(preset['solver']))
+            if 'variant' in definition:
+                configuration['variant'] = definition['variant']
             row = dict(id=cid+'__'+mid, caseId=cid, method=mid, configuration=configuration,
                        caseDefinition=definition, preset=deepcopy(preset))
             if preset['solver']['scheme'] in definition.get('unsupportedSchemes', ()):
-                row['unsupportedReason'] = f"Native {definition['case']} case does not support {preset['solver']['scheme']}"
+                row['unsupportedReason'] = f"Native {definition['case']} {definition.get('variant', '')} case does not support {preset['solver']['scheme']}"
             row['inputSHA256'] = digest(row)
             rows.append(row)
     return dict(schemaVersion=VERSION, id=identifier(), created=now(), smoke=smoke,
@@ -306,4 +328,8 @@ def comparison(root, cases=None, methods=None, includes=()):
             out['cells'].append(dict(caseId=row['caseId'], method=row['method'], inputSHA256=row['inputSHA256'],
                 result=str(source/'runs'/run_id/'result.json') if run_id else None,
                 root=str(source)))
+            boundaries = row['caseDefinition'].get('boundaryTreatments', {})
+            boundary = boundaries.get(row['preset']['solver']['scheme'], boundaries.get('default'))
+            if boundary:
+                out['cells'][-1]['boundaryTreatment'] = boundary
     return out

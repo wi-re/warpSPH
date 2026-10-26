@@ -90,7 +90,9 @@ def validateMaterialOptions(config, scheme=None):
     if getattr(config, 'materials', None) is None:
         return
     config.materials = normalizeMaterials(config.materials)
-    name = scheme or config.schemeName
+    name = scheme or getattr(config, 'mode', None) or config.schemeName
+    if name in ('MFM', 'MFV'):
+        return  # pure-material contact faces use the two-sided meshless Riemann solver
     if name not in ('CRKSPH', 'CompSPH', 'Monaghan', 'Compressible SPH', 'Comp SPH'):
         raise ValueError(f'materials: {name} does not support material EOS tables')
     from ...enumTypes import ViscositySwitch

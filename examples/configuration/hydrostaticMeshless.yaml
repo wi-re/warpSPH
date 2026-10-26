@@ -1,0 +1,10 @@
+schemaVersion: 1
+case: hydrostatic
+variant: twoGas
+simulation:
+  nx: 100
+  tLimit: 7.0
+  n_h: 4.0
+  precision: float32
+solver:
+  scheme: MFV

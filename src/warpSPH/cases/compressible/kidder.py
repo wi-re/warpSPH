@@ -18,6 +18,7 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 from ...caseUtils import buildKidder, buildKidderBCs
+from ...configurations.meshless import MeshlessConfig
 from ...runner import Case, RunContext, caseMain, registerCase
 from .common import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
                            compressibleDiagnostics, compressibleTimestep,
@@ -53,6 +54,16 @@ def configureScheme(ctx: RunContext) -> None:
 
 
 def buildSystem(ctx: RunContext):
+    if isinstance(ctx.schemeConfig, MeshlessConfig):
+        validateConfiguration(ctx.spec)
+        from ...caseUtils.compressible.kidder.kidder import KidderIsentropicCapsuleAnalyticSolution
+        from ...caseUtils.meshless import buildKidderMeshlessSystem
+        solution = KidderIsentropicCapsuleAnalyticSolution(ctx.param('nu'),
+            ctx.param('r_inner'), ctx.param('r_outer'), ctx.param('P_inner'),
+            ctx.param('P_outer'), ctx.param('rho_outer'))
+        ctx.scratch['solution'] = solution
+        ctx.spec = ctx.spec.merged(tLimit=ctx.param('tauFraction') * solution.tau)
+        return buildKidderMeshlessSystem(ctx, solution)
     system, solution = buildKidder(
         ctx.config, ctx.schemeConfig, ctx.SimulationState, ctx.SimulationSystem,
         ctx.param('r_inner'), ctx.param('r_outer'),
@@ -78,6 +89,8 @@ def postStep(ctx: RunContext, state, step: int) -> None:
     when assembling the accepted step. These externally driven particles must
     obey all three prescriptions at the accepted time, too.
     """
+    if isinstance(ctx.schemeConfig, MeshlessConfig):
+        return  # driven conserved states are restored by the stage lifecycle
     from ...modules.boundaryConditions import enforceDirichlet
     from ...modules.eos import refreshEOS
     enforceDirichlet(state, float(state.t), 0., ctx.config, ctx.schemeConfig)
@@ -131,6 +144,13 @@ def deriveConfiguration(spec):
 
 def validateConfiguration(spec):
     p = spec.params
+    if spec.scheme in ('MFM', 'MFV'):
+        if spec.schemeOverrides.get('materials') is not None:
+            raise ValueError('solver.materials: Kidder has a single analytic EOS; use global gamma')
+        if spec.dim != 1:
+            raise ValueError('simulation.dim: meshless Kidder currently supports the planar shell (dim=1)')
+        if spec.schemeOverrides.get('closure', 'none') != 'none':
+            raise ValueError('solver.closure: driven Kidder bands require closure=none')
     if p['r_inner'] >= p['r_outer']:
         raise ValueError('params.r_inner: must be smaller than params.r_outer')
     if p['P_inner'] >= p['P_outer']:
@@ -163,7 +183,7 @@ kidderCase = registerCase(Case(
         plotInterval=100,
         storeInterval=500,
     ),
-    supportedSchemes=(*SPH_SCHEMES, 'PESPH'),
+    supportedSchemes=(*COMPRESSIBLE_SCHEMES, 'PESPH'),
     parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
         'gamma': P('number', 'Isentropic compression adiabatic index.', 'fluid', exclusiveMinimum=1,
                    readOnly=True, derivation='1 + 2 / simulation.dim'),
