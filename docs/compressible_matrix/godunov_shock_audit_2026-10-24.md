@@ -202,9 +202,14 @@ linear moment about 0.213. A standalone reproduction of all contributions to
 each affected particle matches the captured acceleration/heating to FP32
 roundoff. A distance-only arithmetic control restores equal-and-opposite
 pair forces, but leaves the large cubic moment; it is not a qualified remedy.
-Even evaluating the captured fields with FP64 arithmetic leaves a moment
-about 23,456, so the unresolved close-pair cubic extrapolation remains.
-Evidence is indexed in `.tmp/inutsuka-hydrostatic-failure-20261026/`.
+Evaluating the saved FP32 fields with FP64 arithmetic leaves a moment about
+23,456. This is not a full-precision RHS test: recomputing all density and
+derivative sums in FP64 at the same particle positions reduces the moment to
+0.21397, close to direct inverse-density quadrature (0.21353). FP32 summation
+errors are therefore another amplified input to the extrapolation. The onset
+and exact pair evidence are indexed in
+`.tmp/inutsuka-hydrostatic-failure-20261026/`; the recomputed-field controls are
+in `.tmp/inutsuka-remedies-20261026/`.
 
 The pressure-equilibrium candidate must therefore be labelled **numerical
 failure** even though its execution record says it completed. Completion,
@@ -218,13 +223,70 @@ identical physical initial arrays and one archived source set, with full matrix
 resolutions/endpoints and no failure-specific tuning. Evidence and the explicit
 rejected qualification are indexed in `.tmp/inutsuka-validation-20261026/`.
 
-The width-derivative inconsistency is therefore a useful diagnosis, but a
-chain-rule correction alone is insufficient. Algebraic pair symmetry, FP64
-RHS conservation checks and thermal positivity do not guarantee accurate,
-energy-conserving finite-time evolution or pair symmetry in FP32. Further work must address unresolved cubic
-extrapolation, finite-precision periodic geometry and force stiffness, then
-repeat the contact and wider
-accuracy checks before changing defaults.
+### Close-pair extrapolation and the Gaussian cutoff
+
+The failure has a more general source than query-width consistency. With
+pair separation s, the cubic coefficient is A = -2 delta/s^3, where
+`delta = Vi - Vj - (di + dj)s/2`. The leading squared Gaussian moment is
+`(15/16)(h/s)^6 delta^2`. Extending a cubic fitted over a very short interval
+across the whole Gaussian amplifies small endpoint/derivative mismatches.
+
+A full FP64 contact control also fails, stopping at t=1.311993 with speed
+about 640. Its captured trigger is a single neighbor crossing the hard Gaussian
+cutoff: particle 4680 is at 3.001342 Gaussian widths from endpoint 4574 but
+2.999960 from endpoint 4474. The resulting density contribution, about 7.02e-6,
+is present at only one endpoint and absent from the local derivatives. At pair
+separation 1.66346e-5, this creates a specific-volume compatibility residual
+1.20e-6 and a moment 174,668. Recomputing with an uncut Gaussian or one shared
+neighbor mask reduces the residual to about 9e-12 and the moment to
+0.1784–0.1785. These controls isolate the cutoff discontinuity; they do not
+silently replace the production density kernel. Precision alone is insufficient.
+
+An isolated alternative fits the cubic only **between** the endpoints and
+continues with their tangents outside. Its Gaussian moments use interior
+quadrature for s/h<=2 and analytic polynomial tails for larger separations.
+Independent adaptive quadrature checks cover s/h from 1e-6 to 20 and agree
+to about 5e-15 in the selected fields. The first fixed-node prototypes fail
+this check at large normalized separations and remain rejected evidence.
+
+This alternative initially exposes an exact-coincidence division by zero.
+A captured stage has particles 2574/2673 at identical FP32 positions and
+density 2.58459, with positive thermal energy but nonfinite force updates.
+For the finite-moment piecewise profile the Gaussian pair force and work tend
+to zero at coincidence; the experimental operator handles that case before
+any division, without a finite separation floor or particle displacement.
+
+The simpler candidate uses native partial density gradients, tangent
+continuation, antisymmetric nearest-image geometry for wrapped positions, and
+that exact-zero pair limit. It does not require the query-width derivative.
+At unchanged B7, n_h=4 and native CFL=0.15, five matched full cases reach their
+exact endpoints with finite, positive accepted and RHS-stage states:
+
+| Case | Candidate result relative to original |
+|---|---|
+| Pressure equilibrium, nx=100, t=7, FP32 | Pressure error 0.04557 versus 0.03703; physical energy drift -0.000294% versus +0.02504%; no impulse |
+| Open Noh, nx=256, t=.6, FP64 | Completes where original stops; plateau-density error 0.005884%; physical energy drift +0.001892% |
+| Sod, nx=800 | Volume-weighted density L1 decreases 0.643% |
+| Gresho, nx=256, t=3 | Tangential-velocity L1 increases 0.0556% |
+| FP32 analytic-mass linear wave, nx=128, t=1 | Normalized velocity L1 decreases 0.861% |
+
+Physical initial positions, masses, velocities and thermal energies match
+exactly in each pair. Noh plateau-density absolute relative errors decrease
+from 0.165815% at nx=128 to 0.005884% at 256 and 0.000837% at 512. All three
+reach t=.6 with positive accepted/stage energies and physical energy drift
+below 0.00222%. These plateau diagnostics are not a proof of global convergence.
+FP64 automatic-gradient checks pass; close/coincident-pair tests with three
+Riemann solvers give relative conservation residuals below 1.4e-8 in FP32 and
+1.4e-14 in FP64 (coordinate torque only in the open domain).
+
+The candidate removes the observed instability but retains a roughly 23%
+pressure-error increase relative to the original stable contact run. It is
+not promoted to a default: the remaining Sedov/KH/Kidder cohorts, first-order
+policies, extreme width contrasts, opposite-sign-slope linear fallback and
+coincident-point automatic derivatives still need qualification. The hard
+cutoff remains part of the density definition. Full evidence, rejected
+controls and exact runtime archives are indexed in
+`.tmp/inutsuka-remedies-20261026/`.
 
 The original paper derives its interpolation first at constant h and discusses
 variable smoothing separately ([sections 3.1 and 3.3](https://arxiv.org/html/astro-ph/0206401)).
@@ -232,18 +294,20 @@ variable smoothing separately ([sections 3.1 and 3.3](https://arxiv.org/html/ast
 The prototype and quantitative evidence live in
 `.tmp/inutsuka-noh-20261026/`, with physical choices and limitations indexed
 there. Production operators, defaults and saved matrix selections remain
-unchanged. A production implementation should pass the query-width derivative
-as a dedicated scalar field, preserve the constant-width limit and pair
-symmetry, handle coincident pairs and cutoff transitions, and qualify the
-wider shock/contact/vortex suite before promoting this policy.
+unchanged. If the width-derivative policy is pursued separately, its derivative
+must use a dedicated scalar field rather than the experimental extra gradient
+row. The tangent-continuation candidate avoids that additional derivative;
+its remaining qualification requirements are described above.
 
 ## Priorities
 
 1. **GSPH:** extend the successful switch control to full Sedov 2D/3D
    and rerun Sod/contact, Gresho and KH controls before changing the
    default. Do not clip negative u or relax the matrix admissibility criterion.
-2. **Inutsuka:** address variable-width consistency together with unresolved
-   cubic extrapolation and force stiffness. The chain-rule-only candidate fails
+2. **Inutsuka:** qualify tangent continuation with native gradients, stable
+   periodic geometry and the exact-zero pair limit across the remaining matrix.
+   Address the linear fallback and gradient limits before promotion. The
+   chain-rule-only candidate fails
    pressure equilibrium despite passing Noh. Preserve pair symmetry/conservation
    and qualify physical energy, contact accuracy and the wider shock suite.
    Merely selecting RK4 or relabelling the alarm does not fix it.
