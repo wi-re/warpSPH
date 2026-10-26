@@ -143,6 +143,7 @@ def omniIncompressible_step(
         adjacency,
         includeBodyForce=True,
         viscosity=viscousAcc,
+        boundaryVelocitiesPrepared=False,
         maskViscosity=True,
     )
     accel = torch.where(fcol, accel, torch.zeros_like(accel))

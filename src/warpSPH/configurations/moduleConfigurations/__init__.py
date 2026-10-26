@@ -10,6 +10,8 @@ __all__ = []
 
 from .iisph import IISPHConfig
 __all__.append('IISPHConfig')
+from .dfsph import DFSPHConfig, DFSPHProjectionConfig
+__all__.extend(['DFSPHConfig', 'DFSPHProjectionConfig'])
 
 from .boundaryConditions import BoundaryCondition, BoundaryConditionType, boundaryConditionToDict, dictToBoundaryCondition, BCType
 __all__.extend(['BoundaryCondition', 'BoundaryConditionType', 'boundaryConditionToDict', 'dictToBoundaryCondition', 'BCType'])

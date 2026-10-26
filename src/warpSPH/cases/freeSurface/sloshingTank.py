@@ -162,8 +162,8 @@ def configureScheme(ctx: RunContext) -> None:
     if ctx.param('wallRepresentation') == 'analytic':
         # the tank is one analytic warpSPHBoundaries body (docs/historic_plans/ANALYTIC_BOUNDARIES_PLAN.md): deltaSPH and omniIncompressible, static walls
         # (the roll is carried by the rotated gravity, the walls never move in this frame)
-        if getattr(ctx.scheme, 'name', ctx.scheme) not in ('deltaSPH', 'omniIncompressible', 'divergenceFree', 'dfsphReference', 'iisph'):
-            raise ValueError("sloshingTank wallRepresentation='analytic' is hooked into deltaSPH, omniIncompressible, divergenceFree, dfsphReference and iisph only "
+        if getattr(ctx.scheme, 'name', ctx.scheme) not in ('deltaSPH', 'omniIncompressible', 'divergenceFree', 'dfsphReference', 'iisph', 'dfsph'):
+            raise ValueError("sloshingTank wallRepresentation='analytic' is hooked into deltaSPH, omniIncompressible, divergenceFree, dfsphReference, iisph and dfsph only "
                              "(docs/historic_plans/ANALYTIC_BOUNDARIES_PORT_SURVEY.md)")
         sc.analyticWallPressure = ctx.param('analyticWallPressure')
         if getattr(ctx.scheme, 'name', ctx.scheme) not in ('omniIncompressible', 'divergenceFree', 'dfsphReference', 'iisph') and (sc.analyticWallPressure == 'mls' or ctx.param('boundaryFriction') or ctx.param('xsphCoefficient')):

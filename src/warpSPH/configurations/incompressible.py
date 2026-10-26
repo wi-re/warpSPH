@@ -43,6 +43,7 @@ from .moduleConfigurations.surfaceDetection import SurfaceDetectionConfig, build
 from .moduleConfigurations import *
 from .moduleConfigurations.shifting import shiftPropertiesToDict, dictToShiftProperties
 from .moduleConfigurations.iisph import IISPHConfig
+from .moduleConfigurations.dfsph import DFSPHConfig, dictToDFSPHConfig
 from dataclasses import asdict
 from ..enumTypes import *
 
@@ -83,6 +84,7 @@ class IncompressibleSPHConfig:
 
     solverConfig : IncompressibleSolverConfig = field(default_factory=buildDefaultIncompressibleSolverConfig, metadata={'description': 'Configuration for the incompressible solver'})
     iisph: IISPHConfig = field(default_factory=IISPHConfig, metadata={'description': 'Native IISPH policy; independent of the composed DFSPH/shifting solvers'})
+    dfsph: DFSPHConfig = field(default_factory=DFSPHConfig, metadata={'description': 'Native DFSPH density/divergence policies; static boundary settings are in iisph'})
 
 from typing import Dict, Any
 
@@ -110,6 +112,7 @@ def incompressibleConfigToDict(config: IncompressibleSPHConfig) -> Dict[str, Any
         'dt_acousticConstraint': config.dt_acousticConstraint,
         'bandViscosity': config.bandViscosity,
         'iisph': asdict(config.iisph),
+        'dfsph': asdict(config.dfsph),
         'bandwith': config.bandwith,
 
         'pressureForceTerm': config.pressureForceTerm.name,
@@ -197,6 +200,7 @@ def dictToIncompressibleSPHConfig(configDict: Dict[str, Any]) -> IncompressibleS
     config.bandViscosity = bool(configDict.get('bandViscosity', False))
     config.iisph = IISPHConfig(**configDict.get('iisph', {}))
     config.iisph.validate()
+    config.dfsph = dictToDFSPHConfig(configDict.get('dfsph', {}))
     # config.densityDiffusionTerm = DensityDiffusionScheme[configDict['densityDiffusionTerm']] if isinstance(configDict['densityDiffusionTerm'], str) else configDict['densityDiffusionTerm']
     config.pressureForceTerm = PressureForceScheme[configDict['pressureForceTerm']] if isinstance(configDict['pressureForceTerm'], str) else configDict['pressureForceTerm']
     config.bandwith = configDict.get('bandwith', 10.0)

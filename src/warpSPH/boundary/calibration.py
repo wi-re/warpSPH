@@ -43,8 +43,8 @@ def calibrateAnalyticLattice(ctx, system, interior, touch=1.5, verbose=False):
     rho0 = sc.fluid.restDensity
     st.masses = torch.where(fluid, torch.full_like(st.masses, rho0 * cal['V']), st.masses)
     from ..enumTypes import IncompressibleSPHScheme
-    if ctx.scheme == IncompressibleSPHScheme.iisph and ctx.config.calibrateNormalization:
-        # IISPH applies the common particle/solid mass factor after the case ICs.
+    if ctx.scheme in (IncompressibleSPHScheme.iisph, IncompressibleSPHScheme.dfsph) and ctx.config.calibrateNormalization:
+        # Native IISPH/DFSPH apply the common mass factor after the case ICs.
         sc.analyticWallMass = 1.0
     else:
         sc.analyticWallMass = cal['mu']

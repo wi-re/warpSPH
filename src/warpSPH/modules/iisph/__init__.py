@@ -1,6 +1,6 @@
 """Stateless native IISPH pressure projection and static-wall coupling."""
 
-from .solver import IISPHResult, computeIISPHCoefficients, solveIISPH
+from .solver import IISPHResult, computeIISPHCoefficients, computeIISPHProjectionGeometry, solveIISPH
 from .initialization import initializeIISPHBoundaries
 from .boundaryIntegrals import computeIISPHBoundaryIntegrals
 from .contactPoints import computeIISPHContactPoints
@@ -15,6 +15,7 @@ from .updates import assembleIISPHUpdate, maskIISPHUpdate
 
 __all__ = ['IISPHResult', 'initializeIISPHBoundaries',
            'computeIISPHCoefficients', 'computeIISPHBoundaryIntegrals',
+           'computeIISPHProjectionGeometry',
            'computeIISPHContactPoints', 'computeIISPHBoundaryPressureAcceleration', 'solveIISPH',
            'computeIISPHWallGradient', 'computeIISPHGradientSum',
            'computeIISPHPressureDiagonal', 'computeIISPHContactPressureDiagonal',

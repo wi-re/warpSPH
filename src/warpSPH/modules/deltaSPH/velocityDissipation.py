@@ -18,7 +18,7 @@ from .wp_viscosityDelta import computeVelocityDiffusionDeltaSPH
 
 __all__ = ['computeVelocityDiffusion']
 
-def computeVelocityDiffusion(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], approachOnly: Optional[bool] = None, wall: Optional[Any] = None, operationMode: OperationDirection = OperationDirection.AllToAll, *, boundaryRepresentation: str = 'auto', wallSupport: Optional[float] = None) -> torch.Tensor:
+def computeVelocityDiffusion(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], approachOnly: Optional[bool] = None, wall: Optional[Any] = None, operationMode: OperationDirection = OperationDirection.AllToAll, *, boundaryRepresentation: str = 'auto', wallSupport: Optional[float] = None, boundaryVelocitiesPrepared: bool = True) -> torch.Tensor:
     """Sampled walls use reflected fluid samples unless mDBC ghost rows already
     supply their velocities. Analytic walls use the solid Laplacian and local
     mirrored velocity without evaluating wall pressure. boundaryRepresentation
@@ -29,7 +29,9 @@ def computeVelocityDiffusion(currentState: Any, config: SimulationConfig, scheme
     `inviscid=False` branch into the Monaghan & Gingold (1983) velocity
     Laplacian proper -- see `wp_viscosityDelta.py`'s docstring.
     An omitted approachOnly uses diffusionParams.approachOnly. Excluding
-    boundary interactions removes their viscosity contribution entirely;
+    Native projections request boundaryVelocitiesPrepared=False: reflected
+    mDBC references are computed without changing the pressure boundary state.
+    Excluding boundary interactions removes their viscosity contribution entirely;
     it does not impose a reflected free-slip velocity field."""
     with record_function("[warpSPH] - (deltaSPH) - computeVelocityDiffusion"):
         if approachOnly is None:
@@ -47,7 +49,8 @@ def computeVelocityDiffusion(currentState: Any, config: SimulationConfig, scheme
         referenceVelocities = currentState.velocities
         if not analytic and wall is not False:
             from ..mdbc.viscosityVelocity import computeViscosityBoundaryVelocities
-            referenceVelocities = computeViscosityBoundaryVelocities(currentState, config, schemeConfig)
+            referenceVelocities = computeViscosityBoundaryVelocities(currentState, config, schemeConfig,
+                adjacency=adjacency, boundaryVelocitiesPrepared=boundaryVelocitiesPrepared)
         dvdt_diss = computeVelocityDiffusionDeltaSPH(
             currentState,
             operationProperties = OperationProperties(

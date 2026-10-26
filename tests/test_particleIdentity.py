@@ -9,7 +9,7 @@ from warpSPH.configurations.region import ParticleRegion, RegionType, BCType
 from warpSPH.geometry import ParticleSet
 from warpSPH.initializers.weaklyCompressible import initializeState
 from warpSPH.systems import WeaklyCompressibleState, ArtificialCompressibleState
-from warpSPH.systems.incompressible import IncompressibleState
+from warpSPH.systems.incompressible import IncompressibleState, DFSPHState
 from warpSPH.systems.identity import initialMaterialIDs, particleBodyIDs
 
 
@@ -20,7 +20,7 @@ def region(kind=RegionType.Fluid, offset=0., materials=None, bc=BCType.constant)
     return ParticleRegion(sdf, kind, particles, initialConditions={} if materials is None else {'materials': materials}, kind=bc)
 
 
-@pytest.mark.parametrize('cls', [WeaklyCompressibleState, IncompressibleState, ArtificialCompressibleState])
+@pytest.mark.parametrize('cls', [WeaklyCompressibleState, IncompressibleState, DFSPHState, ArtificialCompressibleState])
 def test_one_source_can_contain_two_materials_and_two_sources_share_a_material(cls):
     regions = [region(materials=lambda p: (p[:, 0] > .5).to(torch.int32)), region(offset=2.)]
     s = initializeState(regions, SimpleNamespace(), WeaklyCompressibleSPHConfig(), cls)
@@ -117,3 +117,41 @@ def test_identity_export_and_dataset_masking(tmp_path, legacy):
                 torch.testing.assert_close(meta['static'][name], getattr(s, name))
     finally:
         f.close()
+
+
+@pytest.mark.parametrize('analytic', [False, True])
+def test_body_update_preserves_dfsph_pressure_histories(analytic, monkeypatch):
+    from warpSPH.rigidBody.build import buildRigidBody, buildAnalyticRigidBody
+    from warpSPH.rigidBody.update import updateBodyParticlesWCSPH
+
+    regions = [region()]
+    if not analytic:
+        regions.append(region(RegionType.Boundary, 2., bc=BCType.freeSlip))
+    state = initializeState(regions, SimpleNamespace(), WeaklyCompressibleSPHConfig(), DFSPHState)
+    if not analytic:
+        import warpSPH.rigidBody.ghostParticles as ghosts
+        monkeypatch.setattr(ghosts, '_gridSnapGhostOffsets', lambda p, *args: torch.full_like(p, .125))
+        state = ghosts.addBoundaryGhostParticles(regions, state)
+    else:
+        state.ghostOffsets = torch.zeros_like(state.positions)
+        state.ghostIndices = torch.arange(len(state.positions), dtype=torch.int64)
+    if analytic:
+        pytest.importorskip('warpSPHBoundaries')
+        from warpSPHBoundaries.scene import Body
+        from warpSPHBoundaries.scene.scene import BoxRep
+        boundary = ParticleRegion(sdf=lambda x: x[:, 0], type=RegionType.Boundary,
+            particles=None, kind=BCType.freeSlip,
+            representation=Body(bodyId=0, reps=[BoxRep((-1., -1.), (4., 4.), solid='outside')],
+                                center=(0., 0.)))
+        body = buildAnalyticRigidBody(boundary, 0, state)
+    else:
+        body = buildRigidBody(state, regions, 0)
+
+    fields = ('divergencePressures', 'densityPressureImpulse', 'divergencePressureImpulse')
+    for index, name in enumerate(fields):
+        setattr(state, name, torch.arange(len(state.positions), dtype=state.positions.dtype) + index + 1)
+    updated = updateBodyParticlesWCSPH(state, body)
+    for name in fields:
+        torch.testing.assert_close(getattr(updated, name), getattr(state, name), rtol=0, atol=0)
+    for name in ('positions', 'velocities', 'masses'):
+        torch.testing.assert_close(getattr(updated, name), getattr(state, name), rtol=0, atol=0)

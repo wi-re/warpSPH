@@ -37,6 +37,8 @@ __all__ = [
     "ProjectedSystem",
     "IISPHSystem",
     "DFSPHReferenceSystem",
+    "DFSPHState",
+    "DFSPHSystem",
 ]
 
 
@@ -340,3 +342,35 @@ class ProjectedSystem(IncompressibleSystem):
 
 # Compatibility for old imports and serialized Python class references.
 DFSPHReferenceSystem = ProjectedSystem
+
+
+@dataclass
+class DFSPHState(IncompressibleState):
+    """Physical projection pressures and independent timestep-scaled histories."""
+
+    divergencePressures: Optional[torch.Tensor] = constant(default=None, tags=('pressure',))
+    densityPressureImpulse: Optional[torch.Tensor] = constant(default=None, tags=('pressure_history',))
+    divergencePressureImpulse: Optional[torch.Tensor] = constant(default=None, tags=('pressure_history',))
+
+
+@dataclass
+class DFSPHSystem(ProjectedSystem):
+    """One native DFSPH staged map, with IISPH's resolved static geometry."""
+
+    boundarySupport: Optional[float] = None
+    analyticBoundaryProvider: Optional[Any] = None
+    contactBoundaryProvider: Optional[Any] = None
+
+    def initializeNewState(self, *args, verbose=False, **kwargs):
+        system = super().initializeNewState(*args, verbose=verbose, **kwargs)
+        system.boundarySupport = self.boundarySupport
+        system.analyticBoundaryProvider = self.analyticBoundaryProvider
+        system.contactBoundaryProvider = self.contactBoundaryProvider
+        return system
+
+    def finalize(self, initialState, dt, returnValues, updateValues, weights=..., *args, **kwargs):
+        lastState = returnValues[-1][1]
+        for name in ('divergencePressures', 'densityPressureImpulse', 'divergencePressureImpulse'):
+            value = getattr(lastState, name)
+            setattr(self.state, name, None if value is None else value.clone())
+        return super().finalize(initialState, dt, returnValues, updateValues, weights, *args, **kwargs)

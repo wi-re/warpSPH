@@ -161,7 +161,7 @@ from ..systems.incompressible import *
 #: Every state class `initializeState` knows how to build. They share a field
 #: layout by design (`systems/artificialCompressible.py` says so explicitly),
 #: which is what lets one construction serve all three.
-_SUPPORTED_STATES = (WeaklyCompressibleState, IncompressibleState,
+_SUPPORTED_STATES = (WeaklyCompressibleState, IncompressibleState, DFSPHState,
                      ArtificialCompressibleState)
 
 

@@ -114,24 +114,16 @@ class WeaklyCompressibleSPHScheme(Enum):
 
 # @torch.jit.script
 class IncompressibleSPHScheme(Enum):
-    #: VD+PS DFSPH (Bender & Koschier 2015/2017): a divergence-free Jacobi
-    #: pass plus a constant-density Jacobi pass, applied as a momentum-neutral
-    #: position shift for most cases or folded into the velocity update
-    #: in-step for body-force (gravity) cases (`schemes/incompressible/divergenceFree.py`'s
-    #: `INSTEP_CD`/`_RESTORE_PS_SHIFT` gates). **The recommended default for
-    #: general use** -- as of DFSPH_IMPROVEMENT_PLAN.md Part 56/57/58, it does
-    #: not diverge on any case in the suite (including every wall-bounded one),
-    #: and where it has quality caveats they are modest and non-fatal: a
-    #: closed box's density sits ~5-8% high against a strict 5% target
-    #: (`randomFlowIncompressible --bounded`/`--obstacle`), and two cases
-    #: (`impact`, `columnCollapse`) develop growing particle pairing after an
-    #: impact while the walls themselves hold exactly. Reach for `band2018pb`
-    #: instead specifically when a closed, wall-dominated case needs tighter
-    #: incompressibility than the above and can tolerate rougher particle
-    #: distribution -- see that scheme's own docstring below.
+    #: Native DFSPH on IISPH's rest-volume C/F operators and exact diagonal.
+    #: Divergence projection precedes nonpressure forces; density projection
+    #: precedes the single position drift. This is the repo's DFSPH scheme.
+    dfsph = 5
+    #: Legacy VD+PS/omni hybrid. Density correction is a position shift or an
+    #: in-step velocity kick depending on its selected policy. Use `dfsph`
+    #: for the native two-constraint DFSPH velocity projection.
     divergenceFree = 0
-    #: Reference DFSPH (Bender & Koschier 2015/2017) as implemented in
-    #: SPlisHSPlasH's `TimeStepDFSPH.cpp`: the constant-density and
+    #: Legacy composed DFSPH comparison (not a literal SPlisHSPlasH port).
+    #: Use `dfsph` for the native IISPH-based implementation. Density and
     #: divergence-free corrections are applied to the *velocity* as warm-started
     #: pressure impulses, not as the momentum-neutral position shift the
     #: `divergenceFree` (VD+PS) scheme uses. Exists as the ground-truth

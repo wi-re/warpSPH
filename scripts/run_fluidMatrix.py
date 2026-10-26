@@ -61,10 +61,10 @@ def make_plan(schemes=SCHEMES):
     ]
     for test, nx, end, reps in definitions:
         for scheme in schemes:
-            inc, ac = scheme in PROJECTION, scheme == 'artificialCompressible'
+            inc, ac = scheme in (*PROJECTION, 'dfsph'), scheme == 'artificialCompressible'
             for rep in reps:
                 skip = None
-                if rep == 'analytic' and scheme not in ANALYTIC:
+                if rep == 'analytic' and scheme not in (*ANALYTIC, 'dfsph'):
                     skip = 'Existing runner analytic-wall allowlist excludes this scheme.'
                 if test == 'boundedVortices' and rep == 'analytic':
                     skip = 'The existing random-flow case has no analytic-wall geometry adapter.'
@@ -204,6 +204,7 @@ def snapshot(root):
     import importlib.util
     roots = [REPO / 'src', REPO / 'scripts' / 'run_fluidMatrix.py',
              REPO / 'scripts' / 'analyze_fluidMatrix.py',
+             REPO / 'scripts' / 'prepared_fluidMatrix.py',
              root / 'manifest.json',
              REPO / 'examples/sloshingTank/SPHERIC_TestCase10/data_files/lateral_water_1x.txt']
     for name in ('warpSPHCore', 'warpSPHIntegrators', 'warpSPHBoundaries', 'warpSPHPlotting'):
@@ -227,6 +228,7 @@ def snapshot(root):
 
 
 def worker(root, row):
+    inc = row.get('solver', row['scheme']) in (*PROJECTION, 'dfsph')
     from warpSPHBootstrap import bootstrap
     bootstrap(precision=row['precision'])
     import numpy as np
@@ -250,6 +252,13 @@ def worker(root, row):
     write_json(out / 'environment.json', {k: os.environ.get(k) for k in
                ('WARPSPH_COMPILE_WALLS', 'CUDA_VISIBLE_DEVICES', 'OMP_NUM_THREADS')})
     case = getCase(row['case'])
+    pressure_observation,restore_pressure_observer={},lambda:None
+    if row.get('initialization'):
+        from prepared_fluidMatrix import observe_legacy_pressures
+        pressure_observation,restore_pressure_observer=observe_legacy_pressures(row.get('solver',row['scheme']))
+    if row.get('initialization'):
+        from prepared_fluidMatrix import prepared_case
+        case = prepared_case(case, root, row)
     original_config, original_diag = case.configureScheme, case.diagnostics
     original_post, original_initial = case.postStep, case.initialConditions
     # Preserve case choices; the runner caps every projection step with its
@@ -273,16 +282,25 @@ def worker(root, row):
     def initialize(ctx, system):
         if original_initial:
             original_initial(ctx, system)
-        if row['scheme'] in PROJECTION:
+        if inc:
             from warpSPH.caseUtils.projection import initializeProjectionDensity
             write_json(out / 'initial_calibration.json', initializeProjectionDensity(ctx, system))
         st = system.state
         initial.update(particles=len(st.positions), fluid_particles=int((st.kinds == 0).sum()),
                        mass=float(st.masses[st.kinds == 0].double().sum()),
                        nominal_dt=float(ctx.config.dt),
+                       density_source_policy=getattr(ctx.schemeConfig.iisph,'densitySourcePolicy','absolute') if row.get('initialization') else None,
+                       dfsph_ordering=getattr(ctx.schemeConfig.dfsph,'ordering',None) if row.get('initialization') else None,
+                       actual_step=ctx.stepFunction.__module__+'.'+ctx.stepFunction.__qualname__,
                        pressure_seed=ctx.scratch.get('initialPressureCalibration'),
                        band_viscosity=bool(getattr(ctx.schemeConfig, 'bandViscosity', False)),
                        actual_viscosity=float(ctx.schemeConfig.diffusionParams.viscidNu),
+                       actual_inviscid=bool(ctx.schemeConfig.diffusionParams.inviscid),
+                       actual_artificial_viscosity_alpha=float(ctx.schemeConfig.diffusionParams.inviscidAlpha),
+                       actual_reference_sound_speed=float(ctx.schemeConfig.fluid.fixedSoundSpeed),
+                       actual_viscosity_term=ctx.schemeConfig.diffusionParams.viscousTerm.name,
+                       viscosity_calibration=ctx.scratch.get('matrixViscosityCalibration'),
+                       numerical_preset=row.get('numerical_preset'),
                        analytic_bodies=len(ctx.schemeConfig.boundaryProvider.scene.bodies)
                        if getattr(ctx.schemeConfig, 'boundaryProvider', None) is not None else 0)
         torch.save({k: v.detach().cpu() for k, v in vars(st).items()
@@ -291,17 +309,27 @@ def worker(root, row):
         write_json(out / 'initial.json', initial)
 
     def diagnostics(ctx, state):
-        result = dict(original_diag(ctx, state) if original_diag else {})
         st = state.state
+        stored_pressure = st.pressures
+        update = ctx.scratch.get('lastStageUpdate')
+        if row.get('initialization') and row.get('solver') == 'dfsph' and update is not None:
+            st.pressures = update.divergenceResult.pressure + (0 if row.get('ordering') == 'np_df_shift' else update.densityResult.pressure)
+        if pressure_observation:
+            st.pressures=pressure_observation['divergence']+(pressure_observation['density'] if pressure_observation['densityApplied'] else 0)
+        result = dict(original_diag(ctx, state) if original_diag else {})
+        if row.get('initialization') and row['test']=='sloshing':
+            # These historical fields assume the soundspeed slot is DF pressure;
+            # the common physical probe above is authoritative for this profile.
+            result.pop('sensorPressureCD',None);result.pop('sensorPressureDF',None)
         f = st.kinds == 0
         # Common scalar quantities use fluid particles only, including when
         # the case's own diagnostic includes wall samples.
         mass = st.masses[f].double()
         vel = st.velocities[f].double()
-        result.update(fluidKineticEnergy=float((0.5 * mass * vel.square().sum(-1)).sum()),
+        result.update(maxVelocity=float(vel.norm(dim=-1).max()), fluidKineticEnergy=float((0.5 * mass * vel.square().sum(-1)).sum()),
                       fluidMass=float(mass.sum()), fluidDensityMin=float(st.densities[f].min()),
                       fluidDensityMax=float(st.densities[f].max()))
-        if row['scheme'] in PROJECTION:
+        if inc:
             from warpSPH.modules.timestep.projection import projectionTimestep
             projectionTimestep(ctx, state, float(ctx.config.dt))
             limits = ctx.scratch['projectionTimestepLimits']
@@ -313,6 +341,31 @@ def worker(root, row):
             result['stepLimitAtStart'] = ctx.scratch['matrixTakenStepLimit']
             if result['takenDt'] > result['stepLimitAtStart'] * (1.0 + 1e-7) + 1e-10:
                 raise RuntimeError('Comparison step exceeded its physical timestep limit.')
+        if row.get('initialization'):
+            rho0 = float(ctx.schemeConfig.fluid.restDensity)
+            result.update(fluidRmsSpeed=float(vel.square().sum(-1).mean().sqrt()),
+                fluidDensityMean=float(st.densities[f].mean()/rho0),
+                fluidDensityStd=float(st.densities[f].std()/rho0),
+                fluidRestVolume=float((st.masses[f]/rho0).double().sum()),
+                pressureMean=float(st.pressures[f].mean()) if st.pressures is not None else 0.,
+                fluidHeight=float(st.positions[f,1].max()-st.positions[f,1].min()),
+                fluidCenterY=float((mass*st.positions[f,1].double()).sum()/mass.sum()))
+            if row['test']=='tgv':
+                from prepared_fluidMatrix import sample_field
+                exact=sample_field(st.positions[f], 'tgv',2*math.pi)*math.exp(-.02*float(state.t))
+                result['tgvVelocityRelativeL2']=float((st.velocities[f]-exact).norm()/exact.norm())
+            if row['test']=='shearDecay':
+                mode=torch.sin(2*math.pi*st.positions[f,1]/float(ctx.spec.L))
+                result['modeAmplitude']=float((st.velocities[f,0]*mode).sum()/mode.square().sum()/.05)
+            if update is not None:
+                for prefix, name in (('DF','divergenceResult'),('CD','densityResult'),('IISPH','iisphResult')):
+                    res=getattr(update,name,None)
+                    if res is not None:
+                        result[prefix+'Iterations']=res.iterations
+                        result[prefix+'Cap']=int(res.termination=='budget')
+                        result[prefix+'Error']=res.error
+                        result[prefix+'PressureMean']=float(res.pressure[f].mean())
+            assert torch.equal(st.masses,ctx.scratch['matrixInitialMasses']), 'Particle mass changed during evolution'
         t = float(state.t)
         if row['test'] == 'tgv':
             result['analyticEnergyRatio'] = math.exp(-4.0 * 0.01 * (2.0 / 2.0) ** 2 * t)
@@ -337,38 +390,57 @@ def worker(root, row):
             last[0] = time.monotonic()
             write_json(out / 'progress.json', payload)
             print('MATRIX_PROGRESS ' + json.dumps(payload), flush=True)
+        st.pressures = stored_pressure
         return result
 
     def timestep(ctx, state):
         if original_dt:
             dt = original_dt(ctx, state)
-        elif row['scheme'] in PROJECTION:
+        elif inc:
             from warpSPH.modules.timestep.projection import fixedProjectionRequest
             dt = fixedProjectionRequest(ctx)
         else:
             dt = ctx.config.dt
-        if row['scheme'] not in PROJECTION:
+        if not inc:
             # Case hooks and fixed initial choices are ceilings too: evaluate
             # the WCSPH / ACSPH physical constraints even without a native hook.
             from warpSPH.modules.timestep import computeTimestep
             dt = min(float(dt), float(computeTimestep(
                 state, ctx.config, ctx.schemeConfig, dt=dt,
                 systemUpdate=ctx.scratch.get('lastStageUpdate'))))
+        if (row.get('initialization') and row.get('solver')=='dfsph'
+                and row['params'].get('hydrostaticInit',False) and float(state.t)==0.
+                and not ctx.scratch.get('matrixPressureSeedEncoded')):
+            from warpSPH.modules.timestep.projection import projectionTimestep
+            from prepared_fluidMatrix import seed_projection_pressure
+            # Mirror the outer first-step limiter before converting pressure
+            # to timestep-scaled histories; the outer cap is idempotent.
+            dt=projectionTimestep(ctx,state,min(float(dt),float(ctx.config.dt)))
+            seed_projection_pressure(state.state,row['ordering'],dt)
+            ctx.scratch['matrixPressureSeedEncoded']=True
+            write_json(out/'pressure_seed.json',dict(actualFirstDt=dt,
+                physicalStage='divergence' if row['ordering']=='np_df_shift' else 'density',
+                auxiliaryShiftSeedZero=row['ordering']=='np_df_shift',
+                source='shared hydrostatic physical pressure; no preparation history'))
+            torch.save({k:v.detach().cpu() for k,v in vars(state.state).items()
+                if isinstance(v,torch.Tensor) and not k.startswith('_')},out/'first_step_state.pt')
         return min(float(dt), max(0.0, end - float(state.t)))
 
     def post(ctx, state, step):
-        if row['scheme'] in PROJECTION:
+        if inc:
             ctx.scratch['matrixTakenStepLimit'] = ctx.scratch['projectionTimestepLimits']['maximum']
         if original_post:
             original_post(ctx, state, step)
         # Do not evaluate pressure maps at a rounding-sized residual dt.
         # This changes only the time label at an already reached endpoint.
         snapEndpoint(state, end)
+        if row.get('initialization'):
+            from prepared_fluidMatrix import wrap
+            state.state.positions=wrap(state.state.positions,ctx.config.domain)
 
     case = replace(case, configureScheme=configure, initialConditions=initialize,
                    diagnostics=diagnostics, postStep=post, timestep=timestep)
     case = publisher.bind_case(case)
-    inc = row['scheme'] in PROJECTION
     interval = 50 if inc else 200
     params = dict(row['params'])
     spec = dict(row['spec'])
@@ -385,7 +457,7 @@ def worker(root, row):
         raise TimeoutError('Matrix wall budget / termination signal; preserve partial evidence.')
     signal.signal(signal.SIGTERM, terminate)
     try:
-        result = run(case, scheme=row['scheme'], params=params, **spec,
+        result = run(case, scheme=row.get('solver', row['scheme']), params=params, **spec,
                      plot=True, video=True, plotBackend='vispy', show=False,
                      progress=True, quiet=True, exportRoot=str(out / 'recording'),
                      store=True, storeMode='trajectory', exportInterval=end / 150,
@@ -394,8 +466,13 @@ def worker(root, row):
                      velocityAlarmFactor=20.0, velocityAlarmStopRatio=20.0,
                      stallProgress=1e-3, stallDtSteps=100)
         st = result.state.state
-        torch.save({k: v.detach().cpu() for k, v in vars(st).items()
-                    if isinstance(v, torch.Tensor) and not k.startswith('_')}, out / 'final_state.pt')
+        final_fields={k:v.detach().cpu() for k,v in vars(st).items() if isinstance(v,torch.Tensor) and not k.startswith('_')}
+        u=result.ctx.scratch.get('lastStageUpdate')
+        if row.get('solver')=='dfsph' and u is not None:
+            final_fields['physicalPressures']=(u.divergenceResult.pressure+(0 if row.get('ordering')=='np_df_shift' else u.densityResult.pressure)).detach().cpu()
+        elif pressure_observation:
+            final_fields['physicalPressures']=(pressure_observation['divergence']+(pressure_observation['density'] if pressure_observation['densityApplied'] else 0)).detach().cpu()
+        torch.save(final_fields,out/'final_state.pt')
         trajectory = result.trajectory
         write_json(out / 'trajectory.json', trajectory)
         keys = sorted(set().union(*(r.keys() for r in trajectory)))
@@ -412,6 +489,8 @@ def worker(root, row):
                     diverged=bool(result.diverged), stop_reason=result.stopReason,
                     time=float(result.state.t), target_time=end, steps=result.nSteps,
                     wall_seconds=result.wallTime,
+                    preparation_seconds_this_run=result.ctx.scratch.get('matrixPreparationSecondsThisRun',0.),
+                    evolution_and_output_seconds=result.wallTime-result.ctx.scratch.get('matrixPreparationSecondsThisRun',0.),
                     wall_ms_per_step=1000 * result.wallTime / max(result.nSteps, 1),
                     integrator_ms_mean=float(np.mean(times)) if times else None,
                     integrator=result.ctx.integrator.identifier.name,
@@ -445,6 +524,7 @@ def worker(root, row):
         write_json(out / 'result.json', data)
         raise
     finally:
+        restore_pressure_observer()
         stream.close()
         if analysis_script.exists():
             subprocess.run([sys.executable, str(analysis_script), '--root', str(root)], check=False)
@@ -589,12 +669,20 @@ def main():
     parser.add_argument('--root', type=Path, default=DEFAULT_ROOT)
     parser.add_argument('--manifest', type=Path, help='Defaults to ROOT/manifest.json.')
     parser.add_argument('--row')
-    parser.add_argument('--schemes', nargs='+', choices=SCHEMES, default=SCHEMES,
+    parser.add_argument('--profile', choices=('legacy','prepared'), default='legacy')
+    parser.add_argument('--scale', choices=('full','screen'), default='full', help='Screen uses nx<=64; endpoints unchanged, never pooled with full scale.')
+    parser.add_argument('--prepared-revision',choices=('original','stability-v1','consistency-v1','sampling-recovery-v1'),default='sampling-recovery-v1',
+                        help='Prepared preset revision; existing saved manifests retain their own explicit overrides.')
+    parser.add_argument('--schemes', nargs='+', default=None,
                         help='Schemes included when generating a new immutable plan.')
     args = parser.parse_args()
     args.manifest = args.manifest or args.root / 'manifest.json'
     if args.action == 'plan':
-        plan = make_plan(args.schemes)
+        if args.profile == 'prepared':
+            from prepared_fluidMatrix import make_prepared_plan, METHODS
+            plan = make_prepared_plan(make_plan, args.schemes or METHODS, args.scale, args.prepared_revision)
+        else:
+            plan = make_plan(args.schemes or SCHEMES)
         write_json(args.manifest, plan)
         print(json.dumps(dict(slots=len(plan['rows']), supported=sum(not r['skip'] for r in plan['rows']))))
         return

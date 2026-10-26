@@ -18,8 +18,15 @@ class IISPHConfig:
     # contactShepard: interpolate fluid pressure at the closest solid contact.
     boundaryPressure: str = "self"
     contactGravity: bool = True
+    # Explicit periodic experiment: remove the arithmetic fluid-source mean.
+    # This changes the density constraint, not masses or measured densities.
+    densitySourcePolicy: str = "absolute"
 
     def validate(self):
+        if self.densitySourcePolicy not in ("absolute", "periodicMeanFree"):
+            raise ValueError("densitySourcePolicy must be absolute or periodicMeanFree")
+        if self.densitySourcePolicy == "periodicMeanFree" and self.clampPressure:
+            raise ValueError("periodicMeanFree requires signed pressure")
         if not (isinstance(self.minIterations, int) and isinstance(self.maxIterations, int)
                 and 2 <= self.minIterations <= self.maxIterations):
             raise ValueError("IISPH requires 2 <= minIterations <= maxIterations")

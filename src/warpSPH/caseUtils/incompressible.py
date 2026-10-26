@@ -43,7 +43,7 @@ def relaxLattice(ctx, system, steps: int, dt: float, jitter: float) -> None:
     from ..modules import computeDensities, shuffleParticles, solveIncompressible
     from ..enumTypes import IncompressibleSPHScheme
 
-    nativeIISPH = ctx.scheme == IncompressibleSPHScheme.iisph
+    nativeIISPH = ctx.scheme in (IncompressibleSPHScheme.iisph, IncompressibleSPHScheme.dfsph)
     if nativeIISPH:
         from .projection import initializeProjectionDensity
         from ..modules.iisph import computeIISPHContactPoints, solveIISPH
@@ -97,10 +97,22 @@ def relaxLattice(ctx, system, steps: int, dt: float, jitter: float) -> None:
         state.state.pressures[:] = 0.0
         if nativeIISPH:
             contactPoints, coverageFailure = computeIISPHContactPoints(state.state, state.contactBoundaryProvider)
-            pressure = solveIISPH(state.state, ctx.config, ctx.schemeConfig,
-                torch.zeros_like(state.state.velocities), dt, adjacency,
-                analyticProvider=state.analyticBoundaryProvider, boundarySupport=state.boundarySupport,
-                contactPoints=contactPoints, contactCoverageFailure=coverageFailure)
+            if ctx.scheme == IncompressibleSPHScheme.dfsph:
+                from ..modules.iisph import computeIISPHProjectionGeometry
+                from ..modules.dfsph import solveDFSPHProjection
+                V, s, G, S, diagonal, contactAdjacency, denominator, _ = computeIISPHProjectionGeometry(
+                    state.state, ctx.config, ctx.schemeConfig, adjacency,
+                    analyticProvider=state.analyticBoundaryProvider, boundarySupport=state.boundarySupport,
+                    contactPoints=contactPoints, contactCoverageFailure=coverageFailure)
+                pressure = solveDFSPHProjection(state.state, ctx.config, ctx.schemeConfig, dt, adjacency,
+                    V, s, G, S, diagonal, mode='density', velocity=state.state.velocities,
+                    contactPoints=contactPoints, contactAdjacency=contactAdjacency,
+                    contactDenominator=denominator)
+            else:
+                pressure = solveIISPH(state.state, ctx.config, ctx.schemeConfig,
+                    torch.zeros_like(state.state.velocities), dt, adjacency,
+                    analyticProvider=state.analyticBoundaryProvider, boundarySupport=state.boundarySupport,
+                    contactPoints=contactPoints, contactCoverageFailure=coverageFailure)
             accel = pressure.acceleration
         else:
             accel, _, _, _ = solveIncompressible(

@@ -90,7 +90,8 @@ def band2018pb_step(system: Any, dt: float, config: Any, schemeConfig: Any, verb
     enforceDirichlet(system, system.t, dt, config, schemeConfig)
     accel = nonPressureAcceleration(
         system, dt, config, schemeConfig, adjacency, includeBodyForce=False,
-        viscosity=bool(getattr(schemeConfig, 'bandViscosity', False)), maskViscosity=True
+        viscosity=bool(getattr(schemeConfig, 'bandViscosity', False)), maskViscosity=True,
+        boundaryVelocitiesPrepared=False
     )
     accel = torch.where(fcol, accel, torch.zeros_like(accel))
     vStar = st.velocities + dt * accel

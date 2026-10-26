@@ -145,6 +145,9 @@ def ranking(values):
 
 def measured_loss(root, item, experimental):
     """Incomplete exports remain missing data, never an invented score."""
+    if (item.get('test') in ('marrone31','sloshing','hydrostatic','englishWedge')
+            and item.get('pressure_observation_complete') is False):
+        return None,'missing_data','Incomplete physical-pressure observation; see per-row qualification.'
     try:
         value, status = loss(root, item, experimental)
         if value is None or not math.isfinite(value):
@@ -154,31 +157,44 @@ def measured_loss(root, item, experimental):
         return None, 'missing_data', f'{type(error).__name__}: {error}'
 
 
+def display_layout(manifest):
+    """A combined report declares its rows without changing legacy defaults."""
+    schemes, names, columns = SCHEMES, NAMES, list(COLUMNS)
+    if manifest.get('profile') in ('prepared-incompressible', 'classic-fluid-comparison'):
+        schemes = tuple(manifest['schemes'])
+        names = tuple(manifest['labels'][k] for k in schemes)
+        columns.insert(4, ('boundedVortices', 'analytic', 'Box vortices', 'retention'))
+    return schemes, names, columns
+
+
 def plot(root, destination, metrics=None):
+    manifest=json.loads((root/'manifest.json').read_text())
+    schemes, names, columns = display_layout(manifest)
     rows = json.loads((metrics or root / 'comparison_metrics.json').read_text())
     lookup = {r['id']: r for r in rows}
     raw = np.genfromtxt(ROLL, delimiter='\t', skip_header=1)
     experimental = smooth(raw[:, 0], raw[:, 1] * 100, .01)
     table = []
     agreement, cost = {}, {}
-    for j, (test, boundary, _, _) in enumerate(COLUMNS):
+    for j, (test, boundary, _, _) in enumerate(columns):
         loss_values, time_values = [], []
-        for scheme in SCHEMES:
+        for scheme in schemes:
             key = f'{test}__{scheme}__{boundary}'
-            item = lookup[key]
+            item = lookup.get(key,dict(status='pending',target_time=1.))
             record = dict(id=key, test=test, boundary=boundary, scheme=scheme,
                           run_status=item['status'], completion_fraction=min(1, (item.get('actual_time') or 0) / item['target_time']),
                           loss=None, accuracy_status=item['status'], runtime_seconds=None,
                           metric_error=None,
                           run_date=item.get('run_date'), data_root=item.get('data_root', str(root)),
-                          band_viscosity=bool(item.get('band_viscosity', False)))
+                          band_viscosity=bool(item.get('band_viscosity', False)),
+                          cap_count=sum(item.get(p+'_cap_count',0) for p in ('DF','CD','IISPH')))
             if item['status'] == 'completed':
                 value, status, error = measured_loss(root, item, experimental)
                 record.update(loss=value, accuracy_status=status, metric_error=error,
-                              runtime_seconds=item['wall_seconds'])
+                              runtime_seconds=item.get('evolution_and_output_seconds',item['wall_seconds']))
                 if status in ('ranked', 'energy_growth'):
                     loss_values.append((key, value, status == 'energy_growth'))
-                time_values.append((key, item['wall_seconds']))
+                time_values.append((key,item.get('evolution_and_output_seconds',item['wall_seconds'])))
             table.append(record)
         agreement.update(ranking(loss_values))
         cost.update(ranking(time_values))
@@ -193,15 +209,15 @@ def plot(root, destination, metrics=None):
         w.writerows(table)
     by_id = {r['id']: r for r in table}
     cmap = LinearSegmentedColormap.from_list('case_loss', ['#268781', '#f3edb0', '#cf5b49'])
-    fig = plt.figure(figsize=(21.5, 13.2), facecolor='white')
-    grid = fig.add_gridspec(2, 1, left=.13, right=.975, top=.815, bottom=.18, hspace=.40)
+    fig = plt.figure(figsize=(23 if len(schemes)>8 else 21.5, 13.2 + .65*max(0,len(schemes)-8)), facecolor='white')
+    grid = fig.add_gridspec(2, 1, left=.13, right=.975, top=.815, bottom=.215, hspace=.40)
     labels = [name + '\n' + ('periodic' if boundary == 'periodic' else boundary)
-              for _, boundary, name, _ in COLUMNS]
+              for _, boundary, name, _ in columns]
     for panel, (scores, title) in enumerate(((agreement, 'A  Quality: physical agreement or energy retention'),
                                            (cost, 'B  Wall time to complete the case'))):
         ax = fig.add_subplot(grid[panel])
-        for i, scheme in enumerate(SCHEMES):
-            for j, (test, boundary, _, metric) in enumerate(COLUMNS):
+        for i, scheme in enumerate(schemes):
+            for j, (test, boundary, _, metric) in enumerate(columns):
                 key = f'{test}__{scheme}__{boundary}'
                 item = by_id[key]
                 score = scores.get(key)
@@ -213,6 +229,7 @@ def plot(root, destination, metrics=None):
                     number = f'{score["value"]:,.0f}' if score['value'] >= 100 else f'{score["value"]:.3g}'
                     detail = number + suffix
                     label = ('only' if only else f'#{score["rank"]}') + '\n' + detail
+                    if item.get('cap_count'):label+=' *'
                     if panel == 0 and item['accuracy_status'] == 'energy_growth':
                         label = f'#{score["rank"]}\nGAIN +{score["value"]:.3g}%'
                     if panel == 0 and item['scheme'] == 'band2018pb' and not item['band_viscosity'] and test in ('tgv', 'shearDecay', 'decayingVortices', 'boundedVortices'):
@@ -233,20 +250,23 @@ def plot(root, destination, metrics=None):
                 dark = item['run_status'] not in ('completed', 'unsupported')
                 ax.text(j, i, label, ha='center', va='center', color='white' if dark else '#14242b',
                         fontsize=8.5, linespacing=1.4)
-        ax.set(xlim=(-.5, len(COLUMNS) - .5), ylim=(len(SCHEMES) - .5, -.5))
-        ax.set_xticks(range(len(COLUMNS)), labels, fontsize=8.5)
+        ax.set(xlim=(-.5, len(columns) - .5), ylim=(len(schemes) - .5, -.5))
+        ax.set_xticks(range(len(columns)), labels, fontsize=8.5)
         row_names = []
-        for scheme, name in zip(SCHEMES, NAMES):
+        for scheme, name in zip(schemes, names):
             dates = sorted({r['run_date'] for r in table if r['scheme'] == scheme and r['run_date']})
-            row_names.append(name + ('\n' + ', '.join(dates) if dates else ''))
-        ax.set_yticks(range(len(SCHEMES)), row_names, fontsize=10)
+            date_label=(', '.join(dates) if len(dates)<2 or dates[0][:8]!=dates[-1][:8]
+                        else dates[0]+'–'+dates[-1][-2:])
+            row_names.append(name + ('\n' + date_label if dates else ''))
+        ax.set_yticks(range(len(schemes)), row_names, fontsize=10)
         ax.tick_params(length=0, pad=9)
         for spine in ax.spines.values():
             spine.set_visible(False)
         ax.set_title(title + ('\ncell = rank + case-specific loss (%); GAIN is penalized below nongrowing runs' if panel == 0
                              else '\ncell = rank + total seconds; completed runs only'),
                      loc='left', pad=15, fontsize=12, fontweight='bold')
-    fig.suptitle('Classic-fluid schemes: quantitative ranking by case', x=.13, ha='left', y=.977,
+    title = manifest.get('comparison_title') or (('Prepared incompressible comparison — '+manifest['scale']+' scale') if manifest.get('profile')=='prepared-incompressible' else 'Classic-fluid schemes: quantitative ranking by case')
+    fig.suptitle(title, x=.13, ha='left', y=.977,
                  fontsize=21, fontweight='bold', color='#14242b')
     fig.text(.13, .94, 'FP32 saved runs  ·  each column has its own best-to-worst color range  ·  quality and cost remain separate',
              fontsize=12, color='#46545b')
@@ -266,11 +286,16 @@ def plot(root, destination, metrics=None):
         'Vortices = energy loss 1 − Efinal/Einitial (less is better); >0.1% growth above initial energy is ranked below all nongrowing runs. GAIN shows maximum growth.',
         'Couette = worst relative error of tail profile amplitude and the two torques. Energy retention is a relative criterion, not exact viscous-decay accuracy.',
         'Colors use log-loss scaling independently within a column: ranks and raw values are shown. A best color is not a physics pass; close ranks are not significant.',
-        '† This Band cell uses its nonviscous predictor. Inspect per-row viscosity settings; dates distinguish runs from retained controls.',
-        'Wall times include setup, video, diagnostics and exports. Initialization and steps changed in the rerun; no timing repeats or overall aggregate. Recipes accompany the figure.',
+        '* Native projection iteration caps occurred; legacy cap counters unavailable. A diagnostic rank does not qualify convergence. † This Band cell uses its nonviscous predictor. Inspect per-row viscosity settings; dates distinguish runs from retained controls.',
+        'Prepared-profile cost subtracts fixture creation; preparation is reported separately. Times include setup, video, diagnostics and exports. No timing repeats or overall aggregate.',
     ]
+    if manifest.get('profile') in ('prepared-incompressible','classic-fluid-comparison'):
+        notes.append('Native periodic rows use a mean-free density source as well as prepared ICs; legacy source policies differ. Mean sampled density can drift. Improved ranks do not validate unchanged absolute-density evolution.')
+    if manifest.get('profile')=='classic-fluid-comparison':
+        notes.append('Dated Delta / Sun / AC controls retain their original ICs, C2 kernels and presets; prepared projection rows use C4 (Couette C2). This is a capability survey, not a solver-only A/B. Separate TGV IC control excluded.')
+    notes.extend(manifest.get('comparison_notes',[]))
     for i, note in enumerate(notes):
-        fig.text(.13, .132 - .0175 * i, note, fontsize=9.1, color='#435058')
+        fig.text(.13, .15 - (.014 if len(notes)>9 else .017) * i, note, fontsize=9.1, color='#435058')
     for ext in ('png', 'pdf', 'svg'):
         fig.savefig(destination / ('case_ranking.' + ext), dpi=220, facecolor='white')
     plt.close(fig)

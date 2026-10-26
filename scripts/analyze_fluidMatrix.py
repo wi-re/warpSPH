@@ -55,7 +55,7 @@ def profiles(out, row):
         csv_write(output, [dict(radius=float(ri), azimuthal_velocity=float(ui),
                                 steady_exact_velocity=float(ei)) for ri, ui, ei in zip(r, u, exact)])
     elif st.get('pressures') is not None:
-        p = st['pressures'].numpy()[f]
+        p = st.get('physicalPressures',st['pressures']).numpy()[f]
         csv_write(output, [dict(x=float(xi[0]), y=float(xi[1]), pressure=float(pi),
                                 density=float(ri)) for xi, pi, ri in zip(x, p, st['densities'].numpy()[f])])
 
@@ -74,10 +74,24 @@ def analyze(root):
                  status=state, target_time=row['spec']['tLimit'], actual_time=data.get('time'),
                  particles=data.get('initial', {}).get('particles'), steps=data.get('steps'),
                  wall_seconds=data.get('wall_seconds'), wall_ms_per_step=data.get('wall_ms_per_step'),
+                 evolution_and_output_seconds=data.get('evolution_and_output_seconds',data.get('wall_seconds')),
                  integrator_ms=data.get('integrator_ms_mean'),
                  reason=row['skip'] or data.get('stop_reason') or data.get('error'), notes=row['notes'])
-        m.update(matrix_version=manifest['version'], run_date=manifest['created'],
+        m.update(initialization=row.get('initialization'), density_source_policy=row.get('density_source_policy'), solver=row.get('solver',row['scheme']),
+                 matrix_version=manifest['version'], run_date=manifest['created'],
                  band_viscosity=bool(row.get('scheme_settings', {}).get('bandViscosity', False)))
+        if row.get('numerical_preset'):
+            m.update(numerical_preset=row['numerical_preset'],
+                     actual_inviscid=data.get('initial',{}).get('actual_inviscid'),
+                     actual_artificial_viscosity_alpha=data.get('initial',{}).get('actual_artificial_viscosity_alpha'),
+                     actual_reference_sound_speed=data.get('initial',{}).get('actual_reference_sound_speed'),
+                     actual_viscosity_term=data.get('initial',{}).get('actual_viscosity_term'),
+                     actual_viscosity=data.get('initial',{}).get('actual_viscosity'))
+        pressure_note=out/'pressure_observation_qualification.json'
+        if pressure_note.exists():
+            note=json.loads(pressure_note.read_text())
+            m['pressure_observation_complete']=note['physicalPressureObservationComplete']
+            m['pressure_observation_note']=note['reason']
         series = out / 'series.npz'
         # Exceptions and wall-budget stops still have every diagnostic row
         # written before the failure. Export those as explicitly partial data.
@@ -130,6 +144,22 @@ def analyze(root):
             m['density_min_all_times'] = finite(np.nanmin(a['fluidDensityMin']))
             m['density_max_all_times'] = finite(np.nanmax(a['fluidDensityMax']))
             m['mass_relative_drift'] = finite(a['fluidMass'][-1] / a['fluidMass'][0] - 1)
+            for prefix in ('DF','CD','IISPH'):
+                if prefix+'Cap' in a:
+                    m[prefix+'_cap_count']=int(np.nansum(a[prefix+'Cap']))
+                    m[prefix+'_cap_fraction']=float(np.nansum(a[prefix+'Cap'])/max(1,len(t)-1))
+            for key in ('fluidRmsSpeed','fluidDensityMean','fluidDensityStd','pressureMean','fluidHeight','fluidCenterY','tgvVelocityRelativeL2'):
+                if key in a:m[key+'_tail_median']=tail(a[key])
+            if 'fluidHeight' in a:m['fluidHeightRelativeChange']=finite(a['fluidHeight'][-1]/a['fluidHeight'][0]-1)
+            if 'pressureMean' in a and len(t)>20:
+                ix=max(1,int(.9*len(t)));pt=t[ix:];pp=a['pressureMean'][ix:]
+                fit=np.polyval(np.polyfit(pt,pp,1),pt)
+                m['pressureMean_tail_detrended_std']=finite(np.std(pp-fit))
+            fixture=out/'fixture.json'
+            if fixture.exists():
+                fm=json.loads(fixture.read_text());m['fixture_sha256']=fm['sha256'];m['preparation_wall_seconds']=fm['report']['wallSeconds']
+                m['initialization_settled']=fm['report'].get('settled')
+                m['preparation_rest_caps']=fm['report'].get('restCaps')
             m['reached_target'] = bool(t[-1] >= row['spec']['tLimit'] - 1e-6)
             for key in ('pressureSlopeRatio', 'matrixPressureSlopeRatio', 'pressureResidual',
                         'profileAmplitude', 'embeddedMinDensity', 'densityP05', 'voidFraction'):

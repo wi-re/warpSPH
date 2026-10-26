@@ -1,10 +1,15 @@
 # Incompressible projection inventory — 21 October 2026
 
-Scope: `divergenceFree` (local VD+PS variant), `dfsphReference`, `iisph`,
+Scope: native `dfsph`, `divergenceFree` (local VD+PS variant), `dfsphReference`, `iisph`,
 `omniIncompressible`, `band2018pb`, their common pressure operators, walls,
 configuration and integration. AC is deferred by the user. This is an inventory
 and architecture pass; numerical defaults below describe the current code and
 are not endorsements or claims of paper fidelity.
+
+Updated for native IISPH and the DFSPH source audit on 25 October 2026.
+[IISPH.md](IISPH.md) describes the implemented native route;
+[DFSPH.md](DFSPH.md) gives the shared operator relationship, paper versus
+reference-code timestep placement, and the implemented native DFSPH contract.
 
 ## Sources inspected
 
@@ -36,10 +41,11 @@ not a paper's opposite-sign divergence convention.
 
 | Local route | Fixed RHS and operator | Correction and state | Boundary pressure and stopping |
 |---|---|---|---|
+| `dfsph` | Native IISPH rest-volume `C`, density-dependent `F`, exact `CF` diagonal. CD source `1-rho/rho0-dt C(v*)-dt² C(a_wall)` with `dt² CF`; DF source `-C(v)` with `dt CF` | Shared pre-drift geometry; DF kick before forces, CD correction before one kick/drift; ProjectedStep evaluates once. Dedicated physical pressures and `p dt²` / `p_v dt` histories; no soundspeed reuse | IISPH static self/contact boundary models; known hydrostatic acceleration in CD only. Separate DFSPH policies, omega .3; percentage density and percentage/dt divergence thresholds. Clamped compression-only or signed absolute statistics. |
 | `divergenceFree`, shipped `DIVERGENCE_SOLVER='omni'` | Omni sources below; VD min 2/max 32/tol .01, CD min 3/max 256/tol .001 | VD into RHS acceleration. `INSTEP_CD='auto'` puts CD into velocity when gravity is active; otherwise finalize uses a density-driven position shift plus `grad(v) dx` resampling. `shifting != 'none'` disables that finalize shift. | Uses omni wall solve, plus separate VD+PS shift solver on particle walls; sources/BCs of those two are not interchangeable. No-penetration impulse precedes pressure. |
 | `divergenceFree`, `DIVERGENCE_SOLVER='vdps'` | Legacy module divergence RHS `-R(v*)`, operator `dt * pressureShift(p)`; CD module `1 - (rho + dt R(v*))/rho0`, operator `dt**2 * pressureShift(p)` | Normal selected integrator advances the RHS; finalize owns PS. Historical density integration options are commented out and density is overwritten/summed. | Config-driven fixed/optimal Jacobi or Krylov; divergence mean gauge vs CD pressure clamp, source projection and optional gauge are separate. |
 | `dfsphReference` | CD `s=1-rho/rho0-dt R(v*)/rho0`, `A=opDt R(a(p))/rho0`, `opDt=dt**2`. DF `s=-R(v*)/rho0`, `opDt=dt`. | Non-pressure kick, CD velocity kick, drift, rebuild/density, DF velocity kick. Raw CD pressure in `pressures`; raw DF carrier historically in `soundspeeds`, or dt-scaled carriers when damped warm start is selected. | Static Akinci particle coupling; local band scale automatically 2 if initially 1; wall pressure extrapolation off by default. Both pressure iterates nonnegative; DF deficiency thresholds 7/20 neighbors. Compression-only mean error `rho0 mean(-min(s-Ap,0))`; omega .3, budgets at least 100. |
-| `iisph` | Same CD equation/diagonal as local reference, DF skipped | Same composed spatial stages and CD velocity kick/drift; post-drift density rebuilt even without DF | Same local reference wall/relaxation settings. It is not a literal port of the separate SPlisHSPlasH IISPH `d_ii/d_ij` coefficients. |
+| `iisph` | Native rest-volume continuity `C`, density-dependent force `F`, exact diagonal of `CF`; `dt**2 CF(q)=1-rho/rho0-dt C(v*)`, with explicit known wall acceleration in the source | Stateless pressure solve, physical pressure carry, ordinary derivatives; standard semi-implicit Euler owns kick/drift | Separate IISPH config: omega .5, min 2/max 100, tolerance .01 percent; self or contact-Shepard static walls, separated gravity extension. Signed pressure-active statistic when clamped, absolute input residual when signed. |
 | `omniIncompressible` | DF `s=dt D(v*)`; CD `s=1-rho/rho0+dt D(v*)`; both `A=-dt**2 D(a(p))` | Same positions for both solves; accumulate non-pressure+DF+CD accelerations, optional XSPH, one velocity kick/drift. DF starts zero; CD starts .5 prior pressure. | Particle CD wall pressure Shepard by default, no per-iterate DF wall pressure. Analytic CD mirrored pressure plus hydrostatic offset/clamp or MLS; analytic DF wall disabled by default unless configured/compact. DF signed pressure, CD nonnegative except compatibility projection. Mean floor-clipped signed residual `mean(max(Ap-s,-.001))`; omega .3, DF 3 sweeps, CD 3–256. |
 | `band2018pb` | `s=1-V0/V + dt D_V(v*)`, `A=-dt**2 D_V(a_V(p))` on fluid and selected boundary rows | Extended pressure vector `[p_f,p_b]`; actual volumes temporarily injected through `rho=m/V`; one kick/drift; prior warm start .5 | Boundary pressure is an unknown, not Shepard/MLS. Boundary acceleration zero. Only boundary samples with fluid contact enter; weak-diagonal rows dropped; .05 median-diagonal Tikhonov, auto constant-mode gauge, local base relaxation .1 scaled by V0. Same floor-clipped signed statistic, min 8/max 256. |
 
@@ -71,7 +77,8 @@ for bitwise source/state comparison.
 | Route | External acceleration before pressure | Extra velocity/position treatment |
 |---|---|---|
 | VD+PS | gravity + per-particle body force + forcing/mass + velocity diffusion | boundary velocity extension; mDBC/analytic no-penetration impulse; XSPH and shifting in their original locations |
-| Reference DFSPH/IISPH | gravity + body force + forcing/mass + velocity diffusion | boundary velocity extension; optional legacy XSPH acceleration; configured friction/XSPH before the solve |
+| Reference DFSPH | gravity + body force + forcing/mass + velocity diffusion | boundary velocity extension; optional legacy XSPH acceleration; configured friction/XSPH before the solve |
+| Native IISPH | gravity + body force + forcing/mass + shared velocity diffusion | explicit Dirichlet data, resolved static boundary/contact geometry; no VD+PS finalize shift |
 | Omni | gravity + body force + forcing/mass; diffusion only with `omniViscosity` | analytic friction before solve; configured XSPH after solves; optional Fickian shift before drift |
 | Band | gravity + forcing/mass | optional legacy XSPH after solve; no generic body-force or viscosity call in current route |
 
@@ -91,7 +98,7 @@ and pressure force. Their geometric partition and discretization differ from
 omni's thick triangle slab/MLS boundary. The known first-row diagonal discrepancy
 and free-surface instability remain documented in `OPEN_PROBLEMS.md` §§31–32.
 Changing an alpha alone does not establish a physically valid wall solve.
-Static-wall refusal for reference DFSPH/IISPH and dynamic-body refusal for omni
+Static-wall refusal for reference DFSPH and native IISPH, and dynamic-body refusal for omni
 remain. Load accounting is a reaction diagnostic, not evidence that those
 schemes integrate bodies from the recorded load.
 
@@ -103,7 +110,9 @@ schemes integrate bodies from the recorded load.
 2. **DFSPH time ordering:** pinned SPlisHSPlasH does DF before non-pressure
    forces/CD/drift. Local reference does CD/drift/rebuild/DF. This can be viewed
    as moving DF across the time-step boundary, but startup, changing dt and
-   carried fields differ. Keep local ordering and stop claiming literal order.
+   carried fields differ. The local sequence agrees with the published 2017
+   Algorithm 1; the placement is not by itself a defect. Keep the method and
+   output velocity phase explicit; see [DFSPH.md](DFSPH.md).
 3. **Reference defaults:** local .3 relaxation, factor/band weighting, tolerance
    units and undamped/raw carry differ from SPlisHSPlasH's .5, percentage/dt
    thresholds and capped .5 damped dt-scaled carry. Preserve; no claim of exact
@@ -144,6 +153,14 @@ schemes integrate bodies from the recorded load.
     RK can blend/multiply full steps. The package-owned `ProjectedStep` driver now evaluates these maps once;
     direct legacy multistage use fails clearly. Ordinary single-evaluation
     Euler maps are preserved bitwise in the comparison matrix.
+11. **DF deficiency guard differs from the pinned code:** upstream clamps a
+    local copy for initialization and suppresses the deficient-row error
+    statistic, but iterates against the original stored density-change source.
+    Local reference additionally zeroes that source. Neither pins the pressure
+    iterate unless the separate local free-surface gauge is selected. The
+    source-guard parity claim in the local reference docstring is inaccurate;
+    [DFSPH.md](DFSPH.md) identifies the literal C++ paths. No numerical policy
+    is changed by documenting the mismatch.
 
 No numerical mismatch above is repaired merely by rearranging code. A future
 adoption requires one change, a declared matched initial state, hydrostatic

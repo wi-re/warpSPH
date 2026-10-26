@@ -9,16 +9,23 @@ from ...systems.identity import particleBodyIDs
 from ..boundaryConditions.mirrorVelocity import mirrorVelocity
 
 
-def computeViscosityBoundaryVelocities(state, config, schemeConfig):
+def computeViscosityBoundaryVelocities(state, config, schemeConfig, *,
+                                       adjacency=None, boundaryVelocitiesPrepared=True):
     """Sample reflected fluid points and return a separate reference-velocity field.
 
-    Existing mDBC ghost rows already supply boundary velocities through
-    computeBoundaryVelocities. Without them, construct the same mirrored
+    A caller with mDBC ghost rows must either have prepared their boundary
+    velocities or request a fresh, separate viscosity reference field here.
+    Without ghost rows, construct the same mirrored
     sampling geometry from the contour or the stored boundary-to-ghost offset.
     Stored particle velocities continue to describe the rigid body's motion.
     """
-    if not bool((state.kinds == 1).any()) or bool((state.kinds == 2).any()):
+    if not bool((state.kinds == 1).any()):
         return state.velocities
+    if bool((state.kinds == 2).any()):
+        if boundaryVelocitiesPrepared:
+            return state.velocities
+        from .velocity import computeBoundaryVelocities
+        return computeBoundaryVelocities(state, config, schemeConfig, adjacency)
     provider = getattr(schemeConfig, 'boundaryProvider', None)
     bodies = getattr(schemeConfig, 'rigidBodies', [])
     if not bodies:

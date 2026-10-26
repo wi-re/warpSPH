@@ -73,7 +73,8 @@ def test_normalized_lattice_uses_physical_mass_without_double_normalization():
     assert calibration['V'] * normalized_weights.sum() == pytest.approx(1., abs=1e-12)
 
 
-def test_iisphAnalyticLatticeDefersTheCommonMassFactorToInitialization():
+@pytest.mark.parametrize('scheme', ['iisph', 'dfsph'])
+def test_iisphAnalyticLatticeDefersTheCommonMassFactorToInitialization(scheme):
     pytest.importorskip('warpSPHBoundaries')
     from warpSPH.cases import importAll
     from warpSPH.runner import getCase, prepareContext, CaseSpec
@@ -82,10 +83,10 @@ def test_iisphAnalyticLatticeDefersTheCommonMassFactorToInitialization():
 
     importAll()
     case = getCase('dambreak')
-    spec = CaseSpec(caseName=case.name, scheme='iisph',
+    spec = CaseSpec(caseName=case.name, scheme=scheme,
         params={**case.params, 'wallRepresentation': 'analytic', 'calibratedLattice': True,
                 'obstacleActive': False}).merged(**case.defaults).merged(
-            scheme='iisph', nx=20, n_h=4., kernel='Wendland2', device='cpu', quiet=True)
+            scheme=scheme, nx=20, n_h=4., kernel='Wendland2', device='cpu', quiet=True)
     ctx = prepareContext(case, spec)
     system = case.buildSystem(ctx)
     case.initialConditions(ctx, system)
@@ -97,3 +98,16 @@ def test_iisphAnalyticLatticeDefersTheCommonMassFactorToInitialization():
     assert not ctx.config.calibrateNormalization
     assert ctx.schemeConfig.analyticWallMass == factor
     torch.testing.assert_close(system.state.masses, originalMasses*factor, rtol=0, atol=0)
+
+
+def test_c4_flat_wall_fit_matches_bulk_mass_without_changing_default_c2():
+    from warpSPHCore import KernelFunctions
+    from warpSPH.modules.analyticBoundary.latticeCalibration import wendland4
+    dx=.03125;h=4*dx
+    cal=latticeCalibration(dx,dx,h,KernelFunctions.Wendland4)
+    n=np.arange(-7,8);k=np.arange(0,8)
+    xx,yy=np.meshgrid(n*dx,k*dx,indexing='ij')
+    row=cal['V']*wendland4(np.hypot(xx,yy),h).sum()+cal['mu']*wallIntegral(cal['dwallY'],h,KernelFunctions.Wendland4)
+    assert row==pytest.approx(1.,abs=1e-10)
+    assert cal['V']/dx**2==pytest.approx(1/1.00041575,rel=1e-7)
+    assert wallIntegral(0,h,KernelFunctions.Wendland4)==pytest.approx(.5,abs=1e-8)

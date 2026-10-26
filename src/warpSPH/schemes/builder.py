@@ -238,6 +238,21 @@ def _divergenceFree() -> SchemeBundle:
     )
 
 
+def _dfsph() -> SchemeBundle:
+    from .incompressible.dfsph import dfsph_step
+    from ..systems.incompressible import DFSPHState, DFSPHSystem, IncompressibleSystemUpdate
+    return SchemeBundle(
+        SimulationSystem=DFSPHSystem,
+        SimulationState=DFSPHState,
+        SimulationConfig=IncompressibleSPHConfig,
+        SimulationUpdate=IncompressibleSystemUpdate,
+        integrationMethod=ProjectedStep,
+        stepFunction=dfsph_step,
+        exportFunction=incompressibleConfigToDict,
+        importFunction=dictToIncompressibleSPHConfig,
+    )
+
+
 def _dfsphReference() -> SchemeBundle:
     # Same lazy-import rationale as `_divergenceFree`. Reuses the incompressible
     # state/config/update and their codecs -- the only thing that differs is the
@@ -366,6 +381,7 @@ _SCHEMES = {
     WeaklyCompressibleSPHScheme.deltaSPH: _deltaSPH,
     WeaklyCompressibleSPHScheme.sun2017DeltaSPH: _sun2017DeltaSPH,
     IncompressibleSPHScheme.divergenceFree: _divergenceFree,
+    IncompressibleSPHScheme.dfsph: _dfsph,
     IncompressibleSPHScheme.dfsphReference: _dfsphReference,
     IncompressibleSPHScheme.iisph: _iisph,
     IncompressibleSPHScheme.omniIncompressible: _omniIncompressible,

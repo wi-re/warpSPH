@@ -1,0 +1,512 @@
+{
+  "date": "2026-10-26",
+  "test": "7s sloshing",
+  "implementation": "Native IISPH rest-volume DFSPH; explicit gate0 versus0.9; classic ordering",
+  "settings": {
+    "precision": "GPU FP32",
+    "fluidParticles": 4200,
+    "kernel": "Wendland4",
+    "n_h": 4.0,
+    "dtCeiling": 0.0002,
+    "viscosity": 1e-06,
+    "DFTolerancePercent": 0.1,
+    "CDTolerancePercent": 0.01,
+    "cap": 100,
+    "relaxation": 0.25
+  },
+  "pressureError": "Relative L2 over full common0\u20137s record, same10ms filter, no time alignment",
+  "results": {
+    "analytic_baseline": {
+      "status": "completed",
+      "time": 7.0,
+      "steps": 35000,
+      "peakSpeed": 4.034012388384601,
+      "peakKPerMass": 0.31161346003674206,
+      "integratedKPerMass": 0.7252022405037708,
+      "finalKPerMass": 0.17638699250088935,
+      "centerXPeakToPeak": 0.2978445738554001,
+      "denseCrestPeak": 0.24272260069847107,
+      "pressureErrorPercent": 74.45429339898257,
+      "rawSensorPeakPa": 12083.435546875,
+      "matched10msPeaks": [
+        {
+          "impact": 1,
+          "peakPa": 1788.9902796559222,
+          "time": 2.361,
+          "referencePeakPa": 1800.1301897245578,
+          "referenceTime": 2.39
+        },
+        {
+          "impact": 2,
+          "peakPa": 1508.5872848402894,
+          "time": 4.057,
+          "referencePeakPa": 2322.0458918962627,
+          "referenceTime": 4.066
+        },
+        {
+          "impact": 3,
+          "peakPa": 2177.7323568972124,
+          "time": 5.623,
+          "referencePeakPa": 1170.847343594683,
+          "referenceTime": 5.697
+        }
+      ],
+      "persistentNearSelf": 6,
+      "persistentBelow03": 44,
+      "persistentBelow05": 64,
+      "nearSelfFinal": 98,
+      "nearSelfNearBulkFinal": 12,
+      "below03Final": 172,
+      "below05Final": 221,
+      "selfDensity": 0.17897498224971903,
+      "pairedFractionFinal": 0.05772900953888893,
+      "pairedFractionMax": 0.07642856985330582,
+      "voidFractionFinal": 0.052719466388225555,
+      "densityMin": 0.1789749562740326,
+      "densityMax": 1.0108801126480103,
+      "massDrift": 0.0,
+      "maxWallOutside": 19,
+      "maxWallOutsideHalfDx": 4,
+      "maxWallExcursionDx": 0.8868111968040466,
+      "endpointWallOutside": 1,
+      "DFCaps": 0,
+      "CDCaps": 0,
+      "DFIterationsMean": 1.0,
+      "CDIterationsMean": 2.020742857142857,
+      "wallSeconds": 797.0735407667235,
+      "wallMsPerStep": 22.7735297361921,
+      "engineMsPerStep": 19.403236216359495,
+      "snapshotFrames": 701
+    },
+    "analytic_active09": {
+      "status": "completed",
+      "time": 7.0,
+      "steps": 35000,
+      "peakSpeed": 4.493703285062161,
+      "peakKPerMass": 0.3071876100485181,
+      "integratedKPerMass": 0.7228909424229788,
+      "finalKPerMass": 0.1839796898807517,
+      "centerXPeakToPeak": 0.2834598869085312,
+      "denseCrestPeak": 0.2676358222961426,
+      "pressureErrorPercent": 71.6480885349252,
+      "rawSensorPeakPa": 19265.5390625,
+      "matched10msPeaks": [
+        {
+          "impact": 1,
+          "peakPa": 1800.8481368976115,
+          "time": 2.38,
+          "referencePeakPa": 1800.1301897245578,
+          "referenceTime": 2.39
+        },
+        {
+          "impact": 2,
+          "peakPa": 2613.525939184346,
+          "time": 4.03,
+          "referencePeakPa": 2322.0458918962627,
+          "referenceTime": 4.066
+        },
+        {
+          "impact": 3,
+          "peakPa": 2409.7721053322325,
+          "time": 5.66,
+          "referencePeakPa": 1170.847343594683,
+          "referenceTime": 5.697
+        }
+      ],
+      "persistentNearSelf": 0,
+      "persistentBelow03": 0,
+      "persistentBelow05": 0,
+      "nearSelfFinal": 24,
+      "nearSelfNearBulkFinal": 0,
+      "below03Final": 52,
+      "below05Final": 123,
+      "selfDensity": 0.17897498224971903,
+      "pairedFractionFinal": 0.08094555884599686,
+      "pairedFractionMax": 0.09476190060377121,
+      "voidFractionFinal": 0.026026742532849312,
+      "densityMin": 0.1789749562740326,
+      "densityMax": 1.0140032768249512,
+      "massDrift": 0.0,
+      "maxWallOutside": 28,
+      "maxWallOutsideHalfDx": 12,
+      "maxWallExcursionDx": 0.9124080538749695,
+      "endpointWallOutside": 0,
+      "DFCaps": 0,
+      "CDCaps": 0,
+      "DFIterationsMean": 1.0,
+      "CDIterationsMean": 2.015,
+      "wallSeconds": 803.6530832340941,
+      "wallMsPerStep": 22.961516663831258,
+      "engineMsPerStep": 19.542815489277018,
+      "snapshotFrames": 701
+    },
+    "particle_baseline": {
+      "status": "completed",
+      "time": 7.0,
+      "steps": 35000,
+      "peakSpeed": 3.7569586163976347,
+      "peakKPerMass": 0.3066384003126963,
+      "integratedKPerMass": 0.7370496067837308,
+      "finalKPerMass": 0.17487497599240842,
+      "centerXPeakToPeak": 0.30250948667526245,
+      "denseCrestPeak": 0.2499537616968155,
+      "pressureErrorPercent": 96.02703563053126,
+      "rawSensorPeakPa": 38785.890625,
+      "matched10msPeaks": [
+        {
+          "impact": 1,
+          "peakPa": 2868.4193395628104,
+          "time": 2.354,
+          "referencePeakPa": 1800.1301897245578,
+          "referenceTime": 2.39
+        },
+        {
+          "impact": 2,
+          "peakPa": 2284.480591938266,
+          "time": 4.011,
+          "referencePeakPa": 2322.0458918962627,
+          "referenceTime": 4.066
+        },
+        {
+          "impact": 3,
+          "peakPa": 2405.22069263912,
+          "time": 5.596,
+          "referencePeakPa": 1170.847343594683,
+          "referenceTime": 5.697
+        }
+      ],
+      "persistentNearSelf": 8,
+      "persistentBelow03": 39,
+      "persistentBelow05": 62,
+      "nearSelfFinal": 122,
+      "nearSelfNearBulkFinal": 12,
+      "below03Final": 199,
+      "below05Final": 234,
+      "selfDensity": 0.1789749178579529,
+      "pairedFractionFinal": 0.06749343872070312,
+      "pairedFractionMax": 0.07866507768630981,
+      "voidFractionFinal": 0.053660862147808075,
+      "densityMin": 0.1789749264717102,
+      "densityMax": 1.002224326133728,
+      "massDrift": 0.0,
+      "maxWallOutside": 13,
+      "maxWallOutsideHalfDx": 4,
+      "maxWallExcursionDx": 0.7757081389427185,
+      "endpointWallOutside": 0,
+      "DFCaps": 0,
+      "CDCaps": 0,
+      "DFIterationsMean": 1.0,
+      "CDIterationsMean": 2.0215714285714284,
+      "wallSeconds": 832.9325169315562,
+      "wallMsPerStep": 23.798071912330176,
+      "engineMsPerStep": 16.91703471011794,
+      "snapshotFrames": 701
+    },
+    "particle_active09": {
+      "status": "completed",
+      "time": 7.0,
+      "steps": 35053,
+      "peakSpeed": 5.336551140102454,
+      "peakKPerMass": 0.3087878661764719,
+      "integratedKPerMass": 0.7276746441299006,
+      "finalKPerMass": 0.18298939680587875,
+      "centerXPeakToPeak": 0.28641022741794586,
+      "denseCrestPeak": 0.26376065611839294,
+      "pressureErrorPercent": 71.50125533510901,
+      "rawSensorPeakPa": 16053.9091796875,
+      "matched10msPeaks": [
+        {
+          "impact": 1,
+          "peakPa": 2060.217578511704,
+          "time": 2.369,
+          "referencePeakPa": 1800.1301897245578,
+          "referenceTime": 2.39
+        },
+        {
+          "impact": 2,
+          "peakPa": 2159.8455547533417,
+          "time": 4.032,
+          "referencePeakPa": 2322.0458918962627,
+          "referenceTime": 4.066
+        },
+        {
+          "impact": 3,
+          "peakPa": 2556.7668984038246,
+          "time": 5.659,
+          "referencePeakPa": 1170.847343594683,
+          "referenceTime": 5.697
+        }
+      ],
+      "persistentNearSelf": 0,
+      "persistentBelow03": 0,
+      "persistentBelow05": 0,
+      "nearSelfFinal": 22,
+      "nearSelfNearBulkFinal": 2,
+      "below03Final": 56,
+      "below05Final": 112,
+      "selfDensity": 0.1789749178579529,
+      "pairedFractionFinal": 0.07379985600709915,
+      "pairedFractionMax": 0.09875953942537308,
+      "voidFractionFinal": 0.02173393778502941,
+      "densityMin": 0.1789749264717102,
+      "densityMax": 1.0087974071502686,
+      "massDrift": 0.0,
+      "maxWallOutside": 22,
+      "maxWallOutsideHalfDx": 7,
+      "maxWallExcursionDx": 0.8475582003593445,
+      "endpointWallOutside": 0,
+      "DFCaps": 0,
+      "CDCaps": 0,
+      "DFIterationsMean": 1.0,
+      "CDIterationsMean": 2.0143496990271874,
+      "wallSeconds": 650.559183687903,
+      "wallMsPerStep": 18.559301163606623,
+      "engineMsPerStep": 14.476687504868766,
+      "snapshotFrames": 701
+    }
+  },
+  "impactsAndResiduals": {
+    "measured": {
+      "matched10msImpacts": [
+        {
+          "peakPa": 1800.1301897245578,
+          "peakTime": 2.39,
+          "halfMaximumWidthSeconds": 0.04899999999999993,
+          "positiveWindowImpulsePaSeconds": 364.7108012109689
+        },
+        {
+          "peakPa": 2322.0458918962627,
+          "peakTime": 4.066,
+          "halfMaximumWidthSeconds": 0.041999999999999815,
+          "positiveWindowImpulsePaSeconds": 310.48451657730203
+        },
+        {
+          "peakPa": 1170.847343594683,
+          "peakTime": 5.697,
+          "halfMaximumWidthSeconds": 0.09699999999999953,
+          "positiveWindowImpulsePaSeconds": 305.083213559481
+        }
+      ]
+    },
+    "analytic_baseline": {
+      "matched10msImpacts": [
+        {
+          "peakPa": 1788.9902796559222,
+          "peakTime": 2.361,
+          "halfMaximumWidthSeconds": 0.06099999999999994,
+          "positiveWindowImpulsePaSeconds": 421.539534204893
+        },
+        {
+          "peakPa": 1508.5872848402894,
+          "peakTime": 4.057,
+          "halfMaximumWidthSeconds": 0.19300000000000006,
+          "positiveWindowImpulsePaSeconds": 508.3879781014285
+        },
+        {
+          "peakPa": 2177.7323568972124,
+          "peakTime": 5.623,
+          "halfMaximumWidthSeconds": 0.09799999999999986,
+          "positiveWindowImpulsePaSeconds": 513.6516918430929
+        }
+      ],
+      "postSecondImpactResidualRmsPa": {
+        "sensorPressure": 79.5488438362545,
+        "DFPressureMean": 348.7839180285379,
+        "CDPressureMean": 29.800032906492238
+      },
+      "postSecondImpactWindow": [
+        4.15,
+        4.6
+      ],
+      "residualTrendSigmaSeconds": 0.01,
+      "commonInterpolationDtSeconds": 0.0001,
+      "gateTransitions": 0.0,
+      "maximumInactiveCount": 0.0,
+      "maxDisabledPressure": 0.0,
+      "DFWork": -0.059412383985979034,
+      "CDWork": -0.003866612758979926
+    },
+    "analytic_active09": {
+      "matched10msImpacts": [
+        {
+          "peakPa": 1800.8481368976115,
+          "peakTime": 2.38,
+          "halfMaximumWidthSeconds": 0.05099999999999971,
+          "positiveWindowImpulsePaSeconds": 412.74032146173084
+        },
+        {
+          "peakPa": 2613.525939184346,
+          "peakTime": 4.03,
+          "halfMaximumWidthSeconds": 0.04699999999999971,
+          "positiveWindowImpulsePaSeconds": 459.1473306218099
+        },
+        {
+          "peakPa": 2409.7721053322325,
+          "peakTime": 5.66,
+          "halfMaximumWidthSeconds": 0.04899999999999949,
+          "positiveWindowImpulsePaSeconds": 455.86283267773103
+        }
+      ],
+      "postSecondImpactResidualRmsPa": {
+        "sensorPressure": 133.93100946367346,
+        "DFPressureMean": 4.093534291869715,
+        "CDPressureMean": 37.29059530133827
+      },
+      "postSecondImpactWindow": [
+        4.15,
+        4.6
+      ],
+      "residualTrendSigmaSeconds": 0.01,
+      "commonInterpolationDtSeconds": 0.0001,
+      "gateTransitions": 69979.0,
+      "maximumInactiveCount": 646.0,
+      "maxDisabledPressure": 0.0,
+      "DFWork": -0.05691926963131255,
+      "CDWork": -0.003222216117901411
+    },
+    "particle_baseline": {
+      "matched10msImpacts": [
+        {
+          "peakPa": 2868.4193395628104,
+          "peakTime": 2.354,
+          "halfMaximumWidthSeconds": 0.04100000000000037,
+          "positiveWindowImpulsePaSeconds": 461.57590751644034
+        },
+        {
+          "peakPa": 2284.480591938266,
+          "peakTime": 4.011,
+          "halfMaximumWidthSeconds": 0.08400000000000007,
+          "positiveWindowImpulsePaSeconds": 518.6992948952446
+        },
+        {
+          "peakPa": 2405.22069263912,
+          "peakTime": 5.596,
+          "halfMaximumWidthSeconds": 0.10400000000000009,
+          "positiveWindowImpulsePaSeconds": 568.7187422005361
+        }
+      ],
+      "postSecondImpactResidualRmsPa": {
+        "sensorPressure": 92.45066179985416,
+        "DFPressureMean": 345.60197107343413,
+        "CDPressureMean": 32.55948299591305
+      },
+      "postSecondImpactWindow": [
+        4.15,
+        4.6
+      ],
+      "residualTrendSigmaSeconds": 0.01,
+      "commonInterpolationDtSeconds": 0.0001
+    },
+    "particle_active09": {
+      "matched10msImpacts": [
+        {
+          "peakPa": 2060.217578511704,
+          "peakTime": 2.369,
+          "halfMaximumWidthSeconds": 0.040000000000000036,
+          "positiveWindowImpulsePaSeconds": 419.68160107020236
+        },
+        {
+          "peakPa": 2159.8455547533417,
+          "peakTime": 4.032,
+          "halfMaximumWidthSeconds": 0.06599999999999984,
+          "positiveWindowImpulsePaSeconds": 457.00665459216054
+        },
+        {
+          "peakPa": 2556.7668984038246,
+          "peakTime": 5.659,
+          "halfMaximumWidthSeconds": 0.04499999999999993,
+          "positiveWindowImpulsePaSeconds": 462.0449660504196
+        }
+      ],
+      "postSecondImpactResidualRmsPa": {
+        "sensorPressure": 115.49354229241483,
+        "DFPressureMean": 3.8944164601752576,
+        "CDPressureMean": 35.09496458123623
+      },
+      "postSecondImpactWindow": [
+        4.15,
+        4.6
+      ],
+      "residualTrendSigmaSeconds": 0.01,
+      "commonInterpolationDtSeconds": 0.0001
+    }
+  },
+  "analyticWallChecks": {
+    "baseline": {
+      "fittedInnerBounds": [
+        [
+          -0.45011536087133885,
+          -0.0001353512968095081
+        ],
+        [
+          0.45011536087133885,
+          0.5080000162124634
+        ]
+      ],
+      "savedFrameMaxFittedWallExcursionDx": 0.8573797014024521,
+      "savedFrameMaxFittedWallOutsideHalfDx": 4,
+      "endpointFittedWallOutside": 1,
+      "physicalFluidVolume": 0.08493788482155651,
+      "standardAuditPassed": true
+    },
+    "active09": {
+      "fittedInnerBounds": [
+        [
+          -0.45011536087133885,
+          -0.0001353512968095081
+        ],
+        [
+          0.45011536087133885,
+          0.5080000162124634
+        ]
+      ],
+      "savedFrameMaxFittedWallExcursionDx": 0.8659627702501084,
+      "savedFrameMaxFittedWallOutsideHalfDx": 9,
+      "endpointFittedWallOutside": 0,
+      "physicalFluidVolume": 0.08493788482155651,
+      "standardAuditPassed": true
+    }
+  },
+  "cohortDefinition": "After6.2s, >=80% saved samples below the named density bound and >=50% at least3dx inside the tank and within1.1support of rho>=.85 fluid. Observational sparse-residence criterion; includes flow-dependent transport, not proof of hovering.",
+  "crossBoundaryInitialization": {
+    "positions": {
+      "equal": true,
+      "maxDifference": 0.0
+    },
+    "velocities": {
+      "equal": true,
+      "maxDifference": 0.0
+    },
+    "masses": {
+      "equal": false,
+      "maxDifference": 7.275957614183426e-12
+    },
+    "supports": {
+      "equal": true,
+      "maxDifference": 0.0
+    },
+    "densities": {
+      "equal": false,
+      "maxDifference": 0.010881900787353516
+    },
+    "pressures": {
+      "equal": true,
+      "maxDifference": 0.0
+    },
+    "UIDs": {
+      "equal": true,
+      "maxDifference": 0.0
+    },
+    "fluidMassRatio": 1.000000359780951
+  },
+  "sourceArchiveSha256": {
+    "baseline": "21b7b368063425c689a6d14b564e9a1541e9a113f6bb42d95688eb34c6f19a5c",
+    "active09": "33750519075310190798caca4c765207c01e42c1bfc213eb0a87d7812051c2f9"
+  },
+  "localEvidence": ".tmp/dfsph-analytic-sloshing-2026-10-26",
+  "limits": [
+    "One realization per variant; no statistical ranking",
+    "Pressure transients, third impact amplitude, pairing and transient wall penetration remain",
+    "Analytic startup density defect and transient retained in both arms"
+  ]
+}

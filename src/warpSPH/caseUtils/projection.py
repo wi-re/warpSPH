@@ -38,8 +38,10 @@ def initializeHydrostaticPressure(ctx, system):
 def initializeProjectionDensity(ctx, system):
     state = system.state
     from ..enumTypes import IncompressibleSPHScheme
-    if ctx.scheme == IncompressibleSPHScheme.iisph:
+    if ctx.scheme in (IncompressibleSPHScheme.iisph, IncompressibleSPHScheme.dfsph):
         config, schemeConfig = ctx.config, ctx.schemeConfig
+        if ctx.scheme == IncompressibleSPHScheme.dfsph:
+            schemeConfig.dfsph.validate()
         if config.calibrateNormalization:
             from warpSPHCore.util.latticeDensity import latticeDensityFactor
             factor = latticeDensityFactor(config.kernel, float(config.n_h), state.positions.shape[1])

@@ -47,7 +47,8 @@ def iisph_step(
 
     with record_function('[warpSPH] - [IISPH - 06] viscosity'):
         acceleration = acceleration + computeVelocityDiffusion(currentState, config, schemeConfig, adjacency,
-            boundaryRepresentation=schemeConfig.iisph.boundaryRepresentation, wallSupport=system.boundarySupport)
+            boundaryRepresentation=schemeConfig.iisph.boundaryRepresentation, wallSupport=system.boundarySupport,
+            boundaryVelocitiesPrepared=False)
 
     with record_function('[warpSPH] - [IISPH - 07] forcing'):
         forcing = computeForcing(system, dt, system.t, config, schemeConfig)

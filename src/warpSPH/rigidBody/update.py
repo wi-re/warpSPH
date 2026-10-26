@@ -136,4 +136,9 @@ def updateBodyParticlesWCSPH(particleState, rigidBody: RigidBody):
     )
     if hasattr(particleState, 'boundaryAccelerations'):
         kwargs['boundaryAccelerations'] = updatedAccelerations
+    # Boundary motion must not reset the projection multipliers or their
+    # timestep-scaled warm starts when rebuilding a DFSPH particle state.
+    for name in ('divergencePressures', 'densityPressureImpulse', 'divergencePressureImpulse'):
+        if hasattr(particleState, name):
+            kwargs[name] = getattr(particleState, name)
     return WeaklyCompressibleState(**kwargs)

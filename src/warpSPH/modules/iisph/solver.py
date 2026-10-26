@@ -34,6 +34,21 @@ def computeIISPHSource(state, config, adjacency, velocity, dt, restVolumes,
     return torch.where(state.kinds == 0, source, 0)
 
 
+def applyDensitySourcePolicy(source, state, config, policy):
+    """Select the explicitly requested density constraint; preserve raw density.
+
+    Mean removal is a diagnostic periodic constraint variant. In particular it
+    does not restore the absolute density mean as the particle sampling evolves.
+    """
+    if policy == 'absolute':
+        return source
+    if policy != 'periodicMeanFree':
+        raise ValueError(f'Unknown density source policy: {policy}')
+    if not bool(config.domain.periodic.all()) or bool((state.kinds != 0).any()):
+        raise ValueError('periodicMeanFree requires a fully periodic fluid-only domain')
+    return source - source.mean()
+
+
 def computeIISPHCoefficients(state, config, schemeConfig, adjacency, *, boundaryIntegrals=None, contactPoints=None):
     """Return rest volumes, density ratios, wall/total gradients, pressure
     diagonal, contact adjacency, contact normalization and a device-side
@@ -78,6 +93,32 @@ def computeIISPHCoefficients(state, config, schemeConfig, adjacency, *, boundary
             contactAdjacency, contactDenominator, missingContactSupport)
 
 
+def computeIISPHProjectionGeometry(state, config, schemeConfig, adjacency, *,
+                                   analyticProvider=None, boundarySupport=None,
+                                   contactPoints=None, contactCoverageFailure=None):
+    """Assemble fixed-geometry pressure terms and check contact coverage once.
+
+    Return volumes, density ratios, wall/total gradients, exact diagonal,
+    contact adjacency/normalization and raw boundary integrals explicitly.
+    Both native pressure schemes share these terms; gravity is evaluated later.
+    """
+    integrals = None
+    if analyticProvider is not None:
+        integrals = computeIISPHBoundaryIntegrals(state, analyticProvider, boundarySupport, config.kernel)
+    (restVolumes, densityRatio, wallGradient, gradientSum, diagonal,
+     contactAdjacency, contactDenominator, missingSupport) = computeIISPHCoefficients(
+        state, config, schemeConfig, adjacency, boundaryIntegrals=integrals, contactPoints=contactPoints)
+    if contactPoints is not None:
+        coverage = torch.zeros_like(missingSupport) if contactCoverageFailure is None else contactCoverageFailure
+        uncovered, unsupported = torch.stack((coverage, missingSupport)).cpu().tolist()
+        if uncovered:
+            raise ValueError('IISPH contact geometry did not cover every fluid query')
+        if unsupported:
+            raise ValueError('IISPH contact pressure has no fluid support at a solid contact')
+    return (restVolumes, densityRatio, wallGradient, gradientSum, diagonal,
+            contactAdjacency, contactDenominator, integrals)
+
+
 def solveIISPH(state, config, schemeConfig, acceleration, dt, adjacency, previousPressure=None, *,
                analyticProvider=None, boundarySupport=None,
                contactPoints=None, contactCoverageFailure=None, contactGravity=True, gravity=None):
@@ -99,20 +140,11 @@ def solveIISPH(state, config, schemeConfig, acceleration, dt, adjacency, previou
     fluid = state.kinds == 0
 
     # region Compute contributing pressure terms
-    boundaryIntegrals = None
-    if analyticProvider is not None:
-        boundaryIntegrals = computeIISPHBoundaryIntegrals(state, analyticProvider, boundarySupport, config.kernel)
     (restVolumes, densityRatio, wallGradient, gradientSum, pressureDiagonal,
-     contactAdjacency, contactDenominator, missingContactSupport) = computeIISPHCoefficients(
-        state, config, schemeConfig, adjacency, boundaryIntegrals=boundaryIntegrals, contactPoints=contactPoints)
-    # One geometry diagnostic checkpoint, before entering the pressure iteration.
-    if contactPoints is not None:
-        coverage = torch.zeros_like(missingContactSupport) if contactCoverageFailure is None else contactCoverageFailure
-        uncovered, unsupported = torch.stack((coverage, missingContactSupport)).cpu().tolist()
-        if uncovered:
-            raise ValueError('IISPH contact geometry did not cover every fluid query')
-        if unsupported:
-            raise ValueError('IISPH contact pressure has no fluid support at a solid contact')
+     contactAdjacency, contactDenominator, boundaryIntegrals) = computeIISPHProjectionGeometry(
+        state, config, schemeConfig, adjacency, analyticProvider=analyticProvider,
+        boundarySupport=boundarySupport, contactPoints=contactPoints,
+        contactCoverageFailure=contactCoverageFailure)
     boundaryAcceleration = computeIISPHBoundaryPressureAcceleration(state, config,
         adjacency, restVolumes, wallGradient, boundaryIntegrals, contactPoints, gravity,
         contactGravity=contactGravity, massFactor=float(getattr(schemeConfig, 'analyticWallMass', 1.0)))
@@ -124,6 +156,7 @@ def solveIISPH(state, config, schemeConfig, acceleration, dt, adjacency, previou
     dt2 = dt * dt
     b = computeIISPHSource(state, config, adjacency, velocity, dt, restVolumes,
                           densityRatio, wallGradient, boundaryAcceleration)
+    b = applyDensitySourcePolicy(b, state, config, getattr(policy, 'densitySourcePolicy', 'absolute'))
     if previousPressure is None:
         previousPressure = torch.zeros_like(state.masses)
     q = torch.where(fluid, 0.5 * previousPressure / rho0, 0)

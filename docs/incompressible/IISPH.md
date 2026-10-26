@@ -5,6 +5,12 @@ replaces the former wrapper around `dfsphReference` with rest-volume
 continuity and density-dependent pressure coefficients. `dfsphReference`
 retains its composed DFSPH formulation.
 
+The native `dfsph` scheme now reuses these spatial operators and the shared
+`computeIISPHProjectionGeometry` assembly. It has its own density/divergence
+iteration policies, pressure histories and staged time map; standalone IISPH's
+equations, default policy and ordinary semi-implicit Euler updates are unchanged.
+See [DFSPH.md](DFSPH.md).
+
 ## Functional API and ownership
 
 `schemes/incompressible/iisph.py` follows the numbered module-call layout
@@ -228,3 +234,26 @@ checks RHS input ownership, standard integrator selection, derivative boundary
 conditions, fixed sampled walls, summed-density carry and pressure warm starts.
 `tests/test_analyticIisph.py`
 exercises the standard scheme/driver on an analytic tank.
+
+
+The optional `iisph.densitySourcePolicy='periodicMeanFree'` subtracts the
+arithmetic fluid mean from the native density RHS. It requires signed pressure
+and a fully periodic fluid-only domain. It applies to native IISPH and DFSPH;
+`absolute` remains the default. This experimental constraint addresses the
+periodic mean-source incompatibility without changing mass or raw density,
+but does not constrain the evolving mean density estimator. Prepared matrix
+results must identify this option explicitly.
+
+
+## Shared sampling-recovery contract
+
+Native IISPH and the three DFSPH compositions share density/force operators,
+static wall completion, contact pressure, case viscosity and prepared physical
+fixtures. IISPH's density constraint allows under-sampled particles to recover
+until predicted density reaches the target. It does not receive the separate
+0.9ρ₀ DF gate: that rule applies only to clamped divergence pressure, where
+forbidding any compression would prevent re-entry. Prescribed density reaches
+pressure coefficients before the solve in every native physical-stage path.
+Signed periodic sources and raw density remain unchanged.
+See [Sampling recovery](SAMPLING_RECOVERY.md) for the shared initialization,
+pressure-history contracts, configuration and evidence.

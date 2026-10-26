@@ -124,6 +124,9 @@ def test_configRoundTripPreservesPressureSchedulesAndAllShiftingFields():
     config.iisph.relaxationFactor = 0.25
     config.iisph.clampPressure = False
     config.iisph.boundaryPressure = "contactShepard"
+    config.dfsph.divergence.maxErrorPercent = .025
+    config.dfsph.deficiencyGuard = False
+    config.dfsph.warmStart = False
     config.shiftProperties.correctdrhodt = True
     config.shiftProperties.implicitSolverThreshold = 0.023
     config.regions = [
@@ -136,6 +139,7 @@ def test_configRoundTripPreservesPressureSchedulesAndAllShiftingFields():
     assert restored.shiftProperties == config.shiftProperties
     assert restored.solverConfig == config.solverConfig
     assert restored.iisph == config.iisph
+    assert restored.dfsph == config.dfsph
     assert len(restored.regions) == 1
     assert torch.equal(restored.regions[0].sdf(torch.tensor([[2.0, 3.0]])), torch.tensor([2.0]))
     for sub in ("pressureSolver", "divergenceFreeSolver"):
@@ -143,11 +147,14 @@ def test_configRoundTripPreservesPressureSchedulesAndAllShiftingFields():
     encoded.pop("regions")
     encoded.pop("rigidBodies")
     encoded.pop("iisph")
+    encoded.pop("dfsph")
     legacy = dictToIncompressibleSPHConfig(encoded)
     assert legacy.solverConfig.pressureSolver.convergenceCheckSchedule == "auto"
     assert legacy.regions == legacy.rigidBodies == []
     from warpSPH.configurations import IISPHConfig
     assert legacy.iisph == IISPHConfig()
+    from warpSPH.configurations import DFSPHConfig
+    assert legacy.dfsph == DFSPHConfig()
 
 
 def _nativeIisphFixture(device, dim, contact, rho0=1000.0, wrappedWall=False):
@@ -333,6 +340,10 @@ def test_iisphLatticeRelaxationUsesNativePressureAndCalibratedMasses(monkeypatch
         nx=16, kernel='Wendland4', n_h=4., device=device, precision=str(get_torch_precision()).split('.')[-1],
         plot=False, store=False, show=False, quiet=True, progress=False)
     ctx = prepareContext(tgvCase, spec)
+    # This checks initializer ownership, not the reference omega=.5. At this
+    # support .5 is outside the native Jacobi window and makes the jittered
+    # fixture fail nondeterministically (also reproduced on the baseline).
+    ctx.schemeConfig.iisph.relaxationFactor = .3
     system = tgvCase.buildSystem(ctx)
     expectedMasses = system.state.masses * latticeDensityFactor(ctx.config.kernel, 4., 2)
     originalPositions = system.state.positions.clone()
@@ -844,7 +855,7 @@ def test_iisphRhsAndIntegratorOwnSeparateUpdates(monkeypatch, override):
     assert len(previousPressures) == 2 and result2.state.t == .5+2*dt
     torch.testing.assert_close(previousPressures[-1], torch.full_like(state.masses, 200.))
 
-@pytest.mark.parametrize("scheme", ["dfsphReference", "omniIncompressible", "band2018pb"])
+@pytest.mark.parametrize("scheme", ["dfsph", "dfsphReference", "omniIncompressible", "band2018pb"])
 def test_fullMapSchemesSelectPackageDriverEvenWhenRKRequested(scheme):
     from warpSPH.cases import importAll
     from warpSPH.runner import getCase, prepareContext
@@ -858,7 +869,7 @@ def test_fullMapSchemesSelectPackageDriverEvenWhenRKRequested(scheme):
     assert len(tuple(ctx.bundle)) == 7
 
 
-@pytest.mark.parametrize("name", ["dfsphReference", "omniIncompressible", "band2018pb"])
+@pytest.mark.parametrize("name", ["dfsph", "dfsphReference", "omniIncompressible", "band2018pb"])
 def test_directFullMapCallRefusesMultistageWrapper(name):
     from importlib import import_module
     from warpSPHIntegrators.schemes import IntegrationSchemeType as I
@@ -956,3 +967,476 @@ def test_reference_pressure_correction_is_invariant_under_density_units(mode):
     tolerance = 5e-5 if results[0][0].dtype == torch.float32 else 2e-10
     for actual, expected in zip(results[1], results[0]):
         assert torch.linalg.vector_norm(actual - expected) < tolerance * torch.linalg.vector_norm(expected)
+
+
+def _denseDfsphMatrices(fixture):
+    """Independent dense C/F with static walls and optional contact pressure."""
+    state, coefficients = fixture.state, fixture.coefficients
+    volume, ratio = coefficients.restVolumes, coefficients.densityRatio
+    _, gradient = _denseIisphKernels(state, fixture.config)
+    n, dim = state.positions.shape
+    fluid = state.kinds == 0
+    wall = torch.einsum('j,ijd->id', volume[~fluid], gradient[:, ~fluid])
+    C = volume.new_zeros((n, n*dim))
+    F = volume.new_zeros((n*dim, n))
+    T = volume.new_zeros((n, n))
+    if fixture.contactPoints is not None:
+        weights, _ = _denseIisphKernels(state, fixture.config, fixture.contactPoints)
+        for i in range(n):
+            if fluid[i] and wall[i].square().sum() > 1.e-24:
+                T[i, fluid] = weights[i, fluid]*volume[fluid]/(weights[i, fluid]@volume[fluid])
+    for i in range(n):
+        if not fluid[i]:
+            continue
+        rows = slice(i*dim, (i+1)*dim)
+        C[i, rows] += wall[i]
+        F[rows, i] -= wall[i]/ratio[i]**2
+        F[rows] -= wall[i, :, None]*T[i, None, :]
+        for j in range(n):
+            if fluid[j]:
+                C[i, rows] += volume[j]*gradient[i, j]
+                C[i, j*dim:(j+1)*dim] -= volume[j]*gradient[i, j]
+                F[rows, i] -= volume[j]*gradient[i, j]/ratio[i]**2
+                F[rows, j] -= volume[j]*gradient[i, j]/ratio[j]**2
+    return C, F
+
+
+@pytest.mark.parametrize('mode', ['density', 'divergence'])
+@pytest.mark.parametrize('dim,contact', [(2, False), (2, True), (3, False), (3, True)])
+@pytest.mark.parametrize('clamp', [False, True])
+def test_dfsphProjectionsMatchIndependentDenseJacobi(mode, dim, contact, clamp):
+    from warpSPH.configurations import DFSPHConfig
+    from warpSPH.modules.dfsph import solveDFSPHProjection
+
+    fixture = _nativeIisphFixture('cpu', dim, contact)
+    state, c, sc = fixture.state, fixture.coefficients, fixture.scheme
+    sc.dfsph = DFSPHConfig(minDivergenceDensityRatio=0.)
+    for policy in (sc.dfsph.density, sc.dfsph.divergence):
+        policy.minIterations = policy.maxIterations = 6
+        policy.maxErrorPercent, policy.relaxationFactor, policy.clampPressure = 0, .25, clamp
+    C, F = _denseDfsphMatrices(fixture)
+    fluid, rho0 = state.kinds == 0, sc.fluid.restDensity
+    velocity = torch.sin(torch.arange(state.positions.numel(), dtype=state.masses.dtype)).reshape_as(state.positions)
+    velocity[~fluid] = 0
+    dt, oldDt = .02, .01
+    scale = dt**(2 if mode == 'density' else 1)
+    previous = rho0*torch.linspace(.2, 1.4, len(fluid), dtype=state.masses.dtype)
+    impulse = previous*oldDt**(2 if mode == 'density' else 1)
+    deficient = fluid & (torch.arange(len(fluid)) < 2)
+    before = {name: value.clone() for name, value in vars(state).items() if torch.is_tensor(value)}
+    result = solveDFSPHProjection(state, fixture.config, sc, dt, fixture.adjacency,
+        c.restVolumes, c.densityRatio, c.wallGradient, c.gradientSum, c.diagonal,
+        mode=mode, velocity=velocity, pressureImpulse=impulse,
+        boundaryAcceleration=fixture.boundaryAcceleration, deficient=deficient,
+        contactPoints=fixture.contactPoints, contactAdjacency=c.contactAdjacency,
+        contactDenominator=c.contactDenominator)
+    known = fixture.boundaryAcceleration if mode == 'density' else torch.zeros_like(velocity)
+    b = -C@velocity.flatten()
+    if mode == 'density':
+        b = 1-c.densityRatio+dt*b-dt**2*(C@known.flatten())
+    b = torch.where(fluid, b, 0)
+    torch.testing.assert_close(result.source, b, rtol=3.e-6, atol=3.e-6)
+    A = scale*(C@F)
+    diagonal = A.diagonal()
+    valid = fluid & (diagonal != 0)
+    excluded = deficient if clamp and mode == 'divergence' else torch.zeros_like(fluid)
+    old = torch.where(fluid, .5*impulse/(rho0*scale), 0)
+    if clamp:
+        old = torch.where((b < 0) & ~excluded, old.clamp_min(0), 0)
+    for _ in range(6):
+        residual = b-A@old
+        new = old+.25*residual/torch.where(valid, diagonal, 1)
+        error = (-residual).clamp_min(0) if clamp else residual.abs()
+        error = rho0*torch.where(fluid & ~excluded, error, 0).sum()/fluid.sum()
+        old = torch.where(valid, new.clamp_min(0) if clamp else new, 0)
+    torch.testing.assert_close(result.pressure/rho0, old, rtol=1.e-5, atol=2.e-5)
+    torch.testing.assert_close(result.acceleration.flatten(), F@old+known.flatten(), rtol=2.e-5, atol=2.e-5)
+    assert result.iterations == 6
+    assert result.error == pytest.approx(float(error), rel=3.e-5, abs=.005)
+    for name, value in before.items():
+        torch.testing.assert_close(getattr(state, name), value, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize('mode', ['density', 'divergence'])
+def test_dfsphCorrectionAndWarmHistoryAreInvariantUnderDensityUnitsAndDt(mode):
+    from warpSPH.configurations import DFSPHConfig
+    from warpSPH.modules.dfsph import solveDFSPHProjection
+
+    corrections, histories = [], []
+    for rho0, dt in ((1., .01), (1000., .01), (1000., .000001)):
+        f = _nativeIisphFixture('cpu', 2, False, rho0=rho0)
+        state, c, sc = f.state, f.coefficients, f.scheme
+        sc.dfsph = DFSPHConfig()
+        for policy in (sc.dfsph.density, sc.dfsph.divergence):
+            policy.minIterations = policy.maxIterations = 8
+            policy.maxErrorPercent, policy.relaxationFactor, policy.clampPressure = 0, .25, False
+        # With fixed density defect (CD) or velocity (DF), the displacement /
+        # velocity correction and its scaled pressure history are dt invariant.
+        velocity = torch.zeros_like(state.velocities) if mode == 'density' else -state.positions
+        scale = dt**(2 if mode == 'density' else 1)
+        history = torch.linspace(.001, .008, len(state.masses), dtype=state.masses.dtype)*rho0
+        result = solveDFSPHProjection(state, f.config, sc, dt, f.adjacency,
+            c.restVolumes, c.densityRatio, c.wallGradient, c.gradientSum, c.diagonal,
+            mode=mode, velocity=velocity, pressureImpulse=history)
+        corrections.append(scale*result.acceleration)
+        histories.append(scale*result.pressure/rho0)
+    for sequence in (corrections, histories):
+        for value in sequence[1:]:
+            torch.testing.assert_close(value, sequence[0], rtol=3.e-5, atol=3.e-6)
+
+
+@pytest.mark.parametrize('rho0,dt', [(1., .001), (1., .002), (1000., .001)])
+def test_dfsphDivergenceAloneRemovesCompressionAndPreservesPeriodicVortex(rho0, dt):
+    """A velocity projection must recover a solenoidal flow without density correction."""
+    import math
+    from warpSPHCore import DomainDescription, KernelFunctions, SupportScheme, buildVerletList
+    from warpSPHCore.type_config import get_torch_precision
+    from warpSPH.configurations import IISPHConfig, DFSPHConfig
+    from warpSPH.modules.iisph import computeIISPHCoefficients, computeIISPHDensityRate
+    from warpSPH.modules.dfsph import solveDFSPHProjection
+
+    dtype = get_torch_precision()
+    dx = 2 * math.pi / 16
+    line = (torch.arange(16, dtype=dtype) + .5) * dx
+    x = torch.stack(torch.meshgrid(line, line, indexing='ij'), -1).reshape(-1, 2).contiguous()
+    n = len(x)
+    state = NS(positions=x, supports=torch.full((n,), 4*dx, dtype=dtype),
+        masses=torch.full((n,), rho0*dx*dx, dtype=dtype),
+        densities=torch.full((n,), rho0, dtype=dtype),
+        kinds=torch.zeros(n, dtype=torch.int32), velocities=torch.zeros_like(x))
+    config = NS(domain=DomainDescription(torch.zeros(2, dtype=dtype),
+        torch.full((2,), 2*math.pi, dtype=dtype), torch.ones(2, dtype=torch.bool), 2),
+        kernel=KernelFunctions.Wendland4, n_h=4., calibrateNormalization=False)
+    scheme = NS(fluid=NS(restDensity=rho0), rigidBodies=[],
+        iisph=IISPHConfig(), dfsph=DFSPHConfig())
+    scheme.dfsph.warmStart = False
+    policy = scheme.dfsph.divergence
+    policy.clampPressure = False
+    policy.maxErrorPercent = 1.e-7
+    policy.maxIterations = 100
+    policy.relaxationFactor = .25
+    adjacency = buildVerletList(state, config.domain, supportMode=SupportScheme.SuperSymmetric)
+    geometry = computeIISPHCoefficients(state, config, scheme, adjacency)
+
+    # The symmetric periodic lattice makes the analytic Taylor-Green velocity
+    # solenoidal for C. Add a longitudinal Fourier mode with nonzero divergence.
+    vortex = torch.stack((-torch.sin(x[:, 0])*torch.cos(x[:, 1]),
+                           torch.cos(x[:, 0])*torch.sin(x[:, 1])), 1)
+    velocity = vortex + .1*torch.sin(2*x)
+    result = solveDFSPHProjection(state, config, scheme, dt, adjacency,
+        *geometry[:5], mode='divergence', velocity=velocity)
+    projected = velocity + dt*result.acceleration
+    rate = computeIISPHDensityRate(state, config, adjacency, projected, geometry[0], geometry[2])
+
+    assert result.termination == 'converged'
+    assert float(rate.square().mean().sqrt()) < 2.e-5
+    torch.testing.assert_close(projected, vortex, atol=2.e-5, rtol=2.e-5)
+    # Internal pressure forces must not change total momentum.
+    momentumChange = (state.masses[:, None]*(projected-velocity)).sum(0)
+    assert float(momentumChange.norm()/state.masses.sum()) < 2.e-6
+
+
+def test_dfsphDeficientRowsRetainRawSourceAndUpdateButAreExcludedFromStatistic():
+    from warpSPH.configurations import DFSPHConfig
+    from warpSPH.modules.dfsph import solveDFSPHProjection
+
+    f = _nativeIisphFixture('cpu', 2, False)
+    state, c, sc = f.state, f.coefficients, f.scheme
+    sc.dfsph = DFSPHConfig(minDivergenceDensityRatio=0.)
+    sc.dfsph.divergence.maxIterations = 1
+    fluid = state.kinds == 0
+    velocity = -state.positions
+    velocity[~fluid] = 0
+    result = solveDFSPHProjection(state, f.config, sc, .01, f.adjacency,
+        c.restVolumes, c.densityRatio, c.wallGradient, c.gradientSum, c.diagonal,
+        mode='divergence', velocity=velocity, deficient=fluid,
+        pressureImpulse=torch.ones_like(state.masses))
+    assert bool((result.source[fluid] < 0).any())
+    assert bool((result.pressure[fluid] > 0).any())
+    assert result.error == 0 and result.iterations == 1
+
+
+def test_dfsphStagesShareGeometryProjectBeforeViscosityAndAdvanceOnce(monkeypatch, tmp_path):
+    from warpSPH.schemes.incompressible import dfsph
+    from warpSPH.systems.incompressible import DFSPHState, DFSPHSystem
+    from warpSPH.configurations import DFSPHConfig
+    from warpSPH.modules.iisph import IISPHResult
+    from warpSPHIntegrators.schemes import ProjectedStep
+    from warpSPH.io.hdf5 import dumpState, loadState
+    import h5py
+
+    f = _nativeIisphFixture('cpu', 2, False)
+    fields, sc, config = vars(f.state), f.scheme, f.config
+    kinds = fields['kinds']
+    state = DFSPHState(**fields, materials=torch.zeros_like(kinds),
+        UIDs=torch.arange(len(kinds), dtype=torch.int32), UIDcounter=len(kinds),
+        soundspeeds=torch.full_like(f.state.masses, 7.))
+    fluid = kinds == 0
+    state.velocities[fluid] = .2
+    sc.dfsph, sc.boundaryConditions = DFSPHConfig(), []
+    config.verletScale = 1.
+    system = DFSPHSystem(state=state, domain=config.domain, t=.5, boundarySupport=.8)
+    events, histories = [], []
+    originalGeometry = dfsph.computeIISPHProjectionGeometry
+
+    def geometry(*args, **kwargs):
+        events.append('geometry')
+        return originalGeometry(*args, **kwargs)
+
+    monkeypatch.setattr(dfsph, 'computeIISPHProjectionGeometry', geometry)
+    monkeypatch.setattr(dfsph, 'computeGravity', lambda *a: torch.full_like(state.positions, .7))
+    monkeypatch.setattr(dfsph, 'computeBodyForce', lambda *a: torch.zeros_like(state.positions))
+
+    def viscosity(current, *args, **kwargs):
+        events.append('viscosity')
+        torch.testing.assert_close(current.velocities[fluid], expectedProjected)
+        return torch.zeros_like(current.velocities)
+
+    monkeypatch.setattr(dfsph, 'computeVelocityDiffusion', viscosity)
+
+    def projection(current, config, scheme, dt, adjacency, *args, mode, velocity, **kwargs):
+        events.append(mode)
+        if mode == 'density':
+            torch.testing.assert_close(velocity[fluid], expectedProjected+dt*.7)
+        histories.append((mode, kwargs['pressureImpulse']))
+        value = .2 if mode == 'divergence' else -.3
+        acceleration = torch.where(fluid[:, None], torch.full_like(current.velocities, value), 0)
+        pressure = torch.where(fluid, torch.full_like(current.masses, 100. if mode == 'divergence' else 200.), 0)
+        return IISPHResult(pressure, acceleration, 2, 0., 'converged', torch.zeros_like(pressure))
+
+    monkeypatch.setattr(dfsph, 'solveDFSPHProjection', projection)
+    snapshot = {name: value.clone() for name, value in vars(state).items() if torch.is_tensor(value)}
+    dt = .01
+    expectedProjected = state.velocities[fluid]+dt*.2
+    first = ProjectedStep()(system, dt, dfsph.dfsph_step, config=config, schemeConfig=sc)
+    result = first.state
+    assert events == ['geometry', 'divergence', 'viscosity', 'density']
+    assert result.t == .5+dt and len(first.stages) == 1
+    expectedVelocity = snapshot['velocities'].clone()
+    expectedVelocity[fluid] = expectedProjected+dt*.4
+    expectedPosition = snapshot['positions']+dt*expectedVelocity
+    torch.testing.assert_close(result.state.velocities, expectedVelocity)
+    torch.testing.assert_close(result.state.positions, expectedPosition)
+    torch.testing.assert_close(result.state.soundspeeds, snapshot['soundspeeds'], rtol=0, atol=0)
+    torch.testing.assert_close(result.state.densityPressureImpulse, result.state.pressures*dt**2)
+    torch.testing.assert_close(result.state.divergencePressureImpulse, result.state.divergencePressures*dt)
+    assert histories == [('divergence', None), ('density', None)]
+    for name, value in snapshot.items():
+        torch.testing.assert_close(getattr(system.state, name), value, rtol=0, atol=0)
+    # The dedicated fields survive a checkpoint and a new dt without leaking
+    # into soundspeeds, state pressure units, or another system's histories.
+    with h5py.File(tmp_path/'dfsph.h5', 'w') as output:
+        dumpState(result.state, output.create_group('state'))
+    with h5py.File(tmp_path/'dfsph.h5', 'r') as source:
+        restored = loadState(source['state'], 'cpu', DFSPHState)
+    for name in ('pressures', 'divergencePressures', 'densityPressureImpulse', 'divergencePressureImpulse'):
+        torch.testing.assert_close(getattr(restored, name), getattr(result.state, name), rtol=0, atol=0)
+    result.state = restored
+    dt2 = .02
+    expectedProjected = restored.velocities[fluid]+dt2*.2
+    second = ProjectedStep()(result, dt2, dfsph.dfsph_step, config=config, schemeConfig=sc)
+    assert second.state.t == .5+dt+dt2
+    torch.testing.assert_close(histories[2][1], restored.divergencePressureImpulse)
+    torch.testing.assert_close(histories[3][1], restored.densityPressureImpulse)
+    assert second.state.boundarySupport == .8
+
+
+def test_dfsphRejectsNonfiniteSolveBeforeMutatingInputs(monkeypatch):
+    from warpSPH.configurations import DFSPHConfig
+    from warpSPH.modules.dfsph import solver
+
+    f = _nativeIisphFixture('cpu', 2, False)
+    f.scheme.dfsph = DFSPHConfig()
+    state, c = f.state, f.coefficients
+    before = state.velocities.clone()
+    monkeypatch.setattr(solver, 'computeIISPHPressureOperator',
+                        lambda *a, **kw: torch.full_like(state.densities, float('nan')))
+    with pytest.raises(FloatingPointError, match='Nonfinite DFSPH divergence'):
+        solver.solveDFSPHProjection(state, f.config, f.scheme, .01, f.adjacency,
+            c.restVolumes, c.densityRatio, c.wallGradient, c.gradientSum, c.diagonal,
+            mode='divergence', velocity=state.velocities)
+    torch.testing.assert_close(state.velocities, before, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize('kernel', ['Wendland2', 'Wendland4'])
+def test_dfsphDefaultRelaxationDampsTheWideSupportPressureMode(kernel):
+    """A matched exact diagonal does not make reference omega=.5 stable at n_h=4."""
+    from warpSPH.cases import importAll
+    from warpSPH.runner import getCase, prepareContext, CaseSpec
+    from warpSPH.caseUtils.projection import initializeProjectionDensity
+    from warpSPH.modules.iisph import computeIISPHProjectionGeometry
+    from warpSPH.modules.dfsph import solveDFSPHProjection
+    from warpSPHCore import buildVerletList, SupportScheme
+
+    importAll()
+    case = getCase('tgv')
+    ctx = prepareContext(case, CaseSpec(scheme='dfsph', device='cpu', nx=16,
+        n_h=4., kernel=kernel, calibrateNormalization=True, L=2*torch.pi,
+        params={**case.params, 'relaxSteps': 0, 'jitter': 0.}, quiet=True))
+    system = case.buildSystem(ctx)
+    case.initialConditions(ctx, system)
+    initializeProjectionDensity(ctx, system)
+    state, cfg, sc = system.state, ctx.config, ctx.schemeConfig
+    adj = buildVerletList(state, cfg.domain, supportMode=SupportScheme.SuperSymmetric)
+    V, s, G, S, diagonal, *_ = computeIISPHProjectionGeometry(state, cfg, sc, adj)
+    # Independent periodic C and its highest Jacobi mode. Equal masses make
+    # F_chi=-C^T, so H=C C^T and the diagonal is spatially constant here.
+    x = state.positions.double()
+    distance = x[:, None]-x[None, :]
+    length = (cfg.domain.max-cfg.domain.min).double()
+    distance -= torch.round(distance/length)*length
+    h = state.supports.double()[:, None]
+    radius = distance.norm(dim=-1)/h
+    cutoff = (1-radius).clamp_min(0)
+    derivative = (-20*(7/torch.pi)/h**4*cutoff**3 if kernel == 'Wendland2'
+                  else -56/3*(9/torch.pi)/h**4*(5*radius+1)*cutoff**5)
+    gradient = derivative[..., None]*distance
+    C = -V.double()[None, :, None]*gradient
+    index = torch.arange(len(x))
+    C[index, index] += torch.einsum('j,ijd->id', V.double(), gradient)
+    C = C.reshape(len(x), -1)
+    H = C@C.T
+    D = H.diagonal().sqrt()
+    eigenvalues, eigenvectors = torch.linalg.eigh(H/D[:, None]/D[None, :])
+    maximum = float(eigenvalues[-1])
+    policy = sc.dfsph.divergence
+    assert policy.relaxationFactor < 2/maximum < .5
+    error = eigenvectors[:, -1].to(state.masses)
+    dt = .01
+    policy.maxIterations = 1
+    result = solveDFSPHProjection(state, cfg, sc, dt, adj, V, s, G, S, diagonal,
+        mode='divergence', velocity=torch.zeros_like(state.velocities),
+        pressureImpulse=error*sc.fluid.restDensity*dt)
+    assert (result.pressure/sc.fluid.restDensity).norm() < .9*(.5*error).norm()
+
+
+@pytest.mark.parametrize('name,value', [('maxErrorPercent', -1.), ('maxErrorPercent', float('nan')),
+                                        ('relaxationFactor', 0.), ('maxIterations', 0)])
+def test_dfsphPoliciesRejectInvalidValues(name, value):
+    from warpSPH.configurations import DFSPHConfig
+    config = DFSPHConfig()
+    setattr(config.divergence, name, value)
+    with pytest.raises(ValueError, match='DFSPH'):
+        config.validate()
+
+
+def test_dfsphPartialPolicyDecoderPreservesIndependentDensityDefaults():
+    from warpSPH.configurations.moduleConfigurations.dfsph import dictToDFSPHConfig
+    config = dictToDFSPHConfig({'density': {'maxErrorPercent': .02}, 'warmStart': False})
+    assert config.density.minIterations == 2 and config.density.maxErrorPercent == .02
+    assert config.divergence.minIterations == 1 and config.divergence.maxErrorPercent == .1
+    assert config.density is not config.divergence and not config.warmStart
+
+
+def test_nativeContactGeometryKeepsParticlePrecisionWhenProviderUsesDouble():
+    from warpSPH.modules.iisph import computeIISPHContactPoints
+    state = NS(positions=torch.tensor([[.2, .1], [.3, .2]], dtype=torch.float32),
+               kinds=torch.zeros(2, dtype=torch.int32))
+
+    def distance(positions):
+        normal = torch.tensor([[0., 1.], [0., 1.]], dtype=torch.float64)
+        return positions[:, 1].double(), normal, torch.tensor([True, False])
+
+    points, failed = computeIISPHContactPoints(state, NS(signed_distance=distance))
+    assert points.dtype == state.positions.dtype and points.device == state.positions.device
+    torch.testing.assert_close(points, torch.tensor([[.2, 0.], [.3, .2]], dtype=torch.float32))
+    assert bool(failed)
+
+
+def test_dfsphLatticeInitializationUsesItsNativeDensityPolicy(monkeypatch):
+    from warpSPH.cases import importAll
+    from warpSPH.runner import getCase, prepareContext, CaseSpec
+    from warpSPH.caseUtils.projection import initializeProjectionDensity
+    from warpSPH.modules import dfsph, iisph
+    import warpSPH.modules as modules
+
+    importAll()
+    case = getCase('tgv')
+    ctx = prepareContext(case, CaseSpec(scheme='dfsph', device='cpu', nx=16,
+        n_h=4., kernel='Wendland4', calibrateNormalization=True, L=2*torch.pi,
+        params={**case.params, 'relaxSteps': 2, 'jitter': .001}, quiet=True))
+    system = case.buildSystem(ctx)
+    calls = []
+    original = dfsph.solveDFSPHProjection
+
+    def observe(state, config, sc, *args, **kwargs):
+        assert not config.calibrateNormalization
+        assert not sc.dfsph.density.clampPressure
+        assert sc.dfsph.density.relaxationFactor == .3
+        assert kwargs['mode'] == 'density'
+        assert not bool(state.velocities.any())
+        calls.append(1)
+        return original(state, config, sc, *args, **kwargs)
+
+    def unexpected(*args, **kwargs):
+        pytest.fail('Native DFSPH initialization must use its own density projection')
+
+    monkeypatch.setattr(dfsph, 'solveDFSPHProjection', observe)
+    monkeypatch.setattr(iisph, 'solveIISPH', unexpected)
+    monkeypatch.setattr(modules, 'solveIncompressible', unexpected)
+    case.initialConditions(ctx, system)
+    assert calls == [1, 1]
+    masses = system.state.masses.clone()
+    initializeProjectionDensity(ctx, system)
+    torch.testing.assert_close(system.state.masses, masses, rtol=0, atol=0)
+
+
+def test_periodic_density_source_policy_is_explicit_and_preserves_raw_density():
+    from warpSPH.modules.iisph.solver import applyDensitySourcePolicy
+    state=NS(kinds=torch.zeros(3,dtype=torch.int32),densities=torch.tensor([1.01,1.02,.99]))
+    cfg=NS(domain=NS(periodic=torch.tensor([True,True])))
+    source=torch.tensor([.001,.002,-.001])
+    before=state.densities.clone()
+    assert applyDensitySourcePolicy(source,state,cfg,'absolute') is source
+    centered=applyDensitySourcePolicy(source,state,cfg,'periodicMeanFree')
+    assert centered.sum().abs()<1e-9
+    torch.testing.assert_close(centered[1]-centered[0],source[1]-source[0])
+    assert torch.equal(state.densities,before)
+    cfg.domain.periodic[0]=False
+    with pytest.raises(ValueError,match='fully periodic'):
+        applyDensitySourcePolicy(source,state,cfg,'periodicMeanFree')
+
+
+def test_new_projection_policies_default_to_existing_method_and_roundtrip():
+    from warpSPH.configurations.moduleConfigurations.dfsph import DFSPHConfig,dictToDFSPHConfig
+    from warpSPH.configurations.moduleConfigurations.iisph import IISPHConfig
+    assert DFSPHConfig().ordering=='df_np_cd'
+    assert IISPHConfig().densitySourcePolicy=='absolute'
+    assert dictToDFSPHConfig({'ordering':'np_df_shift'}).ordering=='np_df_shift'
+    p=IISPHConfig(densitySourcePolicy='periodicMeanFree')
+    with pytest.raises(ValueError,match='signed'):p.validate()
+    p.clampPressure=False;p.validate()
+
+
+@pytest.mark.parametrize('order',['np_df_cd','np_df_shift'])
+def test_composed_projection_preserves_uniform_periodic_transport(order):
+    import math
+    from warpSPH.runner import CaseSpec,prepareContext
+    from warpSPH.cases.periodic.tgv import tgvCase
+    from warpSPH.caseUtils.projection import initializeProjectionDensity
+    from warpSPH.modules.dfsph.composition import advanceDFSPH
+    ctx=prepareContext(tgvCase,CaseSpec(scheme='dfsph',device='cpu',nx=12,
+        L=2*math.pi,periodic=True,n_h=4.,kernel='Wendland4',
+        params={**tgvCase.params,'relaxSteps':0}))
+    ctx.config.calibrateNormalization=False
+    sc=ctx.schemeConfig
+    sc.iisph.densitySourcePolicy='periodicMeanFree'
+    sc.diffusionParams.viscidNu=0.
+    sc.dfsph.warmStart=False
+    system=tgvCase.buildSystem(ctx)
+    initializeProjectionDensity(ctx,system)
+    st=system.state
+    st.velocities[:]=torch.tensor([.7,-.2])
+    st.pressures=torch.zeros_like(st.masses)
+    st.divergencePressureImpulse=None;st.densityPressureImpulse=None
+    x,mass=st.positions.clone(),st.masses.clone()
+    system._projectedStepActive=True
+    update,_,after,_=advanceDFSPH(system,.01,ctx.config,sc,order)
+    expected=x+.01*torch.tensor([.7,-.2])
+    expected=torch.remainder(expected,2*math.pi)
+    torch.testing.assert_close(after.velocities,torch.tensor([.7,-.2]).expand_as(after.velocities),atol=2e-5,rtol=0)
+    torch.testing.assert_close(after.positions,expected,atol=2e-6,rtol=0)
+    assert torch.equal(after.masses,mass)
+    if order=='np_df_shift':
+        events=update.orderAudit['events']
+        assert events.index('drift')<events.index('rebuild_after_drift')<events.index('density_position')<events.index('velocity_resample')

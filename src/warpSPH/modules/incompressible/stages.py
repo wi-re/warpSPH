@@ -15,6 +15,7 @@ def nonPressureAcceleration(
     *,
     includeBodyForce,
     viscosity,
+    boundaryVelocitiesPrepared=True,
     maskViscosity=False,
     extraAcceleration=None,
 ):
@@ -29,7 +30,8 @@ def nonPressureAcceleration(
     if includeBodyForce:
         acceleration = acceleration + computeBodyForce(state, schemeConfig)
     if viscosity:
-        viscous = computeVelocityDiffusion(state, config, schemeConfig, adjacency)
+        viscous = computeVelocityDiffusion(state, config, schemeConfig, adjacency,
+            boundaryVelocitiesPrepared=boundaryVelocitiesPrepared)
         if maskViscosity:
             viscous = torch.where(
                 (state.kinds == 0).unsqueeze(-1), viscous, torch.zeros_like(viscous)

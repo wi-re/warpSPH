@@ -562,7 +562,7 @@ and apply before the interface overturns.
 
 **Analytic walls (optional).** With the optional package `warpSPHBoundaries` installed (`pip install -e "warpSPH/[boundaries]"`), `dambreak --wallRepresentation analytic` replaces the tank's wall particles by exact
 kernel integrals over the solid (obstacles, mixed scenes, Michel / implicit shifting, free bodies and the whole-step graph included); see [docs/historic_plans/ANALYTIC_BOUNDARIES_PLAN.md](docs/historic_plans/ANALYTIC_BOUNDARIES_PLAN.md).
-Besides δ⁺ the analytic walls are hooked into `omniIncompressible`, `divergenceFree`, `iisph` and `dfsphReference` (`iisph` and `dfsphReference` are flagged EXPERIMENTAL, a `UserWarning` at run time: the schemes themselves are unreliable on a free surface; `omniIncompressible` and `divergenceFree` are validated and unflagged); ACSPH is not hooked and refuses. The solvers of the boundaries repo
+Besides δ⁺ the analytic walls are hooked into `omniIncompressible`, `divergenceFree`, `iisph`, `dfsph` and `dfsphReference`. Native IISPH/DFSPH's static boundary coupling and the legacy reference remain flagged EXPERIMENTAL; long free-surface impacts require separate qualification. `omniIncompressible` and `divergenceFree` retain their existing validation status; ACSPH is not hooked and refuses. The solvers of the boundaries repo
 this was validated against (`DeltaSPH2D`, `DFSPH2D`) were retired into warpSPH on 2026-10-11 and are kept at that repo's git tag `oracle-solvers-2026-10-11` ([record](docs/analytic_boundaries/retirement_2026-10-11/README.md)).
 
 The viscous, low-Reynolds group has its own cases and options (evidence: [docs/analytic_boundaries/](docs/analytic_boundaries/)):
@@ -578,6 +578,20 @@ The viscous, low-Reynolds group has its own cases and options (evidence: [docs/a
 | graph options | the δ⁺ analytic-wall step is replayed from a CUDA graph (`--cudaGraph`; a spinning axisymmetric body needs `schemeConfig.analyticSpinAxisymmetric`); `WARPSPH_COMPILE_WALLS=1` (or `schemeConfig.compileWalls`) `torch.compile`s the no-slip closure. The omni / `divergenceFree` loops are not graphed (sync-heavy) |
 
 ### Incompressible (DFSPH)
+
+`--scheme dfsph` selects native DFSPH on IISPH's rest-volume operators and exact
+pressure diagonal: divergence projection, nonpressure forces, density
+projection, then the final nonpressure/density kick and position drift. It supports the same
+static sampled/analytic boundary models as native IISPH. Density and divergence
+policies live in `schemeConfig.dfsph.density` and `.divergence`; boundary settings
+remain in `schemeConfig.iisph`. Dedicated pressure histories survive checkpoints. All three native DFSPH orderings
+share the default 0.9ρ₀ divergence sampling-recovery gate with sampled or
+analytic walls; signed divergence and density constraints are unchanged.
+[Sampling recovery](docs/incompressible/SAMPLING_RECOVERY.md) documents the
+rule, original-policy override and measured tradeoffs.
+See [DFSPH](docs/incompressible/DFSPH.md) for equations, defaults and validation
+limits. `dfsphReference` retains the legacy comparison; `divergenceFree` is the
+separate VD+PS/omni hybrid.
 
 | case | script | notes |
 |---|---|---|
