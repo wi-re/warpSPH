@@ -262,8 +262,11 @@ A composed cell can declare `runtimeComparable: false` with a `runtimeNote`
 explaining different instrumentation or execution conditions. Its measured
 seconds remain visible in the cost panel and exports, but it receives no cost
 rank and does not set the cost color scale. Quality ranking is independent.
-The Godunov qualification rows use this metadata because their workers add
-RHS-stage observations and synchronization. This does not alter raw run records.
+The selected Godunov overview includes their measured times in the cost ranks
+at the user's request. Both row headings state that timing includes stage
+checks; the full timing note also records additional synchronization. This
+caveat leaves their quality ranks independent and does not alter raw run records.
+The earlier view with excluded Godunov cost ranks remains retained.
 
 ## Timing and retained evidence
 
