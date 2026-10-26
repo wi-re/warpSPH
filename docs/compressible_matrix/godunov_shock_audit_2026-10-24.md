@@ -125,14 +125,72 @@ failures, and Gaussian width changes spatial accuracy and neighbour coupling.
 The quarter-CFL control is a demonstrated immediate workaround; proper close-pair
 robustness still needs a reconstruction/timestep treatment and convergence tests.
 
+## Variable-width consistency of the cubic data
+
+The large moment also has an identifiable upstream cause in the current
+[Gaussian density and pair operator](../../src/warpSPH/modules/godunov/wp_inutsuka.py).
+Its symmetrized density is
+
+\[
+ \rho(x,h_q)=\tfrac12\sum_k m_k\left[
+ W(x-x_k,\sqrt2 h_q)+W(x-x_k,\sqrt2 h_k)\right].
+\]
+
+The endpoint densities use different query widths, \(h_q=h_i\) and \(h_q=h_j\).
+The supplied gradients differentiate position while holding that query width
+fixed. Those values and slopes therefore do not describe a single fixed-width
+field. Hermite interpolation amplifies the mismatch as the pair approaches.
+This is distinct from an error in the polynomial's analytic Gaussian moment.
+
+At the critical pair above, the specific-volume secant has magnitude 6.0794,
+while the mean supplied slope has magnitude 4.5748. Recomputing both endpoint
+values and slopes with the same query width reduces the volume moment from
+44,521 to 0.1868. Direct quadrature of that inverse-density field gives 0.1850;
+the remaining difference is the cubic approximation error.
+
+An alternative consistent construction lets query width vary linearly along
+the pair. Its axial density derivative includes the chain rule
+
+\[
+ \frac{d\rho}{ds}=\left.\frac{\partial\rho}{\partial s}\right|_{h_q}
+       +\frac{\partial\rho}{\partial h_q}\frac{h_i-h_j}{r_{ij}},
+ \qquad
+ \frac{\partial\rho}{\partial h_q}
+ =\tfrac12\sum_k m_k W(x-x_k,\sqrt2 h_q)
+ \frac{|x-x_k|^2/h_q^2-d}{h_q}.
+\]
+
+Applying this derivative to the specific-volume slopes reduces the critical
+moment to 0.1881 and preserves the symmetric pair coefficient. The correction
+vanishes for equal query widths. It changes the interpolation policy; it is
+not the standard Monaghan force's grad-h factor.
+
+An isolated implementation passes full open Noh at nx=128, 256 and 512 with the
+original CFL, positive accepted and RHS-stage thermal energies, and decreasing
+absolute post-shock density error. Matched acoustic-wave controls remain
+essentially unchanged. Close-pair RHS conservation and a targeted automatic-
+gradient check also pass. These checks support the density/derivative consistency
+diagnosis; they do not qualify a new default across the wider solver suite.
+The original paper derives its interpolation first at constant h and discusses
+variable smoothing separately ([sections 3.1 and 3.3](https://arxiv.org/html/astro-ph/0206401)).
+
+The prototype and quantitative evidence live in
+`.tmp/inutsuka-noh-20261026/`, with physical choices and limitations indexed
+there. Production operators, defaults and saved matrix selections remain
+unchanged. A production implementation should pass the query-width derivative
+as a dedicated scalar field, preserve the constant-width limit and pair
+symmetry, handle coincident pairs and cutoff transitions, and qualify the
+wider shock/contact/vortex suite before promoting this policy.
+
 ## Priorities
 
 1. **GSPH:** extend the successful switch control to full Sedov 2D/3D
    and rerun Sod/contact, Gresho and KH controls before changing the
    default. Do not clip negative u or relax the matrix admissibility criterion.
-2. **Inutsuka:** make cubic specific-volume reconstruction robust for nearly
-   coincident particles, with pair symmetry/conservation and smooth-flow accuracy
-   tests. Reconcile the adaptive timestep with the resulting force stiffness.
+2. **Inutsuka:** resolve the variable-width density/derivative inconsistency
+   before adding a generic close-pair limiter. Preserve pair symmetry/conservation
+   and qualify smooth-flow accuracy and the wider shock suite. Reconcile the
+   adaptive timestep with any remaining force stiffness.
    Merely selecting RK4 or relabelling the alarm does not fix it.
 3. Keep the robust-control rows and original defaults separately in future
    comparisons. Measure performance only in isolated production runs after the
