@@ -6,7 +6,7 @@ pair-work lifecycle, spatial state is shared explicitly and finalized once.
 from dataclasses import dataclass
 from .context import StepContext
 from .geometry import startOfStepGeometry
-from .primitives import primitives, refreshPrimitives
+from .primitives import primitives, refreshPrimitives, particleGamma
 from warpSPHCore.profiling import record_function
 
 
@@ -20,17 +20,22 @@ def prepareStage(system, dt, config, schemeConfig, stageIndex):
     if system.drivenParticles is not None:
         system.drivenParticles.position(state, system.t)
     with record_function('[warpSPH] - [meshless stage - 01] geometry'):
-        geom = startOfStepGeometry(state, system.domain, config, schemeConfig)
+        geom = (system.inflowReservoir.build(state, config, schemeConfig, system.t)
+                if system.inflowReservoir is not None else
+                startOfStepGeometry(state, system.domain, config, schemeConfig))
     if system.drivenParticles is not None:
         system.drivenParticles.conserved(state, geom, system.t, float(schemeConfig.gamma))
+    gamma = particleGamma(state, schemeConfig)
     with record_function('[warpSPH] - [meshless stage - 02] primitives'):
         if stageIndex == 0:
-            rho, vel, pressure, energy = refreshPrimitives(state, geom, float(schemeConfig.gamma), schemeConfig.nngb, config.dim)
+            rho, vel, pressure, energy = refreshPrimitives(state, geom, gamma, schemeConfig.nngb, config.dim)
             system.meshlessStages.startState = state
         else:
             # Supports and public diagnostics retain their start-of-step policy.
-            rho, vel, pressure, energy = primitives(state.Q, geom.volume, float(schemeConfig.gamma), returnEnergy=True)
+            rho, vel, pressure, energy = primitives(state.Q, geom.volume, gamma, returnEnergy=True)
     state.lam = geom.lam
-    system.meshlessContext = StepContext(dt=dt, gamma=float(schemeConfig.gamma), config=config, schemeConfig=schemeConfig,
+    system.meshlessContext = StepContext(dt=dt, gamma=gamma, config=config, schemeConfig=schemeConfig,
         domain=system.domain, pos=state.positions, supports=state.supports, Q=state.Q,
-        rho=rho, vel=vel, P=pressure, u=energy, geom=geom)
+        rho=rho, vel=vel, P=pressure, u=energy, geom=geom,
+        materials=state.materials if getattr(schemeConfig, 'materials', None) is not None else None,
+        reservoir=system.inflowReservoir)

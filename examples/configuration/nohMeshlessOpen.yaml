@@ -1,0 +1,13 @@
+schemaVersion: 1
+case: noh
+simulation:
+  nx: 256
+  L: 2.0
+  tLimit: 0.6
+  n_h: 4.0
+  precision: float64
+params:
+  outerBoundary: open
+  uAmbient: 1.0e-8
+solver:
+  scheme: MFM

@@ -32,7 +32,7 @@ def buildMeshlessState(positions, supports, masses, densities, velocities, press
     `CompressibleState`. Returns a `MeshlessState`: the conserved Q integrated,
     the primitives as diagnostics, `lam` unset for the first closure solve.
     """
-    gamma = float(gamma)
+    gamma = gamma if isinstance(gamma, torch.Tensor) else float(gamma)
     Q = conserved(masses, densities, velocities, pressures, gamma)
     state = MeshlessState(
         positions=positions,
@@ -59,7 +59,7 @@ def buildMeshlessState(positions, supports, masses, densities, velocities, press
     return state
 
 
-def toMeshlessSystem(compSystem, config, schemeConfig):
+def toMeshlessSystem(compSystem, config, schemeConfig, *, inflowReservoir=None):
     """The shared E2 case path: a built compressible system to the meshless form.
 
     Each battery case's meshless branch runs the case's own sampler unchanged
@@ -73,13 +73,18 @@ def toMeshlessSystem(compSystem, config, schemeConfig):
     from ..systems.meshless import MeshlessSystem
 
     st = compSystem.state
+    gamma = float(schemeConfig.gamma)
+    if schemeConfig.materials is not None:
+        from ..modules.eos.materials import validateMaterialState, materialRuntime
+        validateMaterialState(st, schemeConfig)
+        gamma = materialRuntime(schemeConfig, st.densities).gammas[st.materials.long()]
     state = buildMeshlessState(
         st.positions, st.supports, st.masses,
         st.densities, st.velocities, st.pressures,
-        float(schemeConfig.gamma),
+        gamma,
         st.kinds, st.materials, st.UIDs, emitters=st.emitters, bodyIDs=st.bodyIDs)
-    system = MeshlessSystem(state=state, domain=config.domain)
-    config.dt = computeTimestep(system, config, schemeConfig, dt=None)
+    system = MeshlessSystem(state=state, domain=config.domain, inflowReservoir=inflowReservoir)
+    config.dt = computeTimestep(system, config, schemeConfig, dt=None if config.adaptiveDt else config.dt)
     return system
 
 
@@ -110,8 +115,16 @@ def buildPressureEquilibriumSystem(ctx):
     velocity = torch.zeros_like(pos)
     velocity[:, 0] = ctx.param('boost')
     labels = torch.zeros(len(pos), device=pos.device, dtype=torch.int32)
+    materialIDs = labels.clone()
+    gamma = scheme.gamma
+    if scheme.materials is not None:
+        if len(scheme.materials) != 2:
+            raise ValueError('hydrostatic requires exactly two EOS entries when materials is configured')
+        materialIDs = mask.to(torch.int32)
+        from ..modules.eos.materials import materialRuntime
+        gamma = materialRuntime(scheme, mass).gammas[materialIDs.long()]
     state = buildMeshlessState(pos, supports, mass, mass / geometry.volume,
-        velocity, torch.ones_like(mass), scheme.gamma, labels, labels.clone(),
+        velocity, torch.ones_like(mass), gamma, labels, materialIDs,
         torch.arange(len(pos), device=pos.device, dtype=torch.int32))
     state.lam = geometry.lam
     stashGeometry(pos, supports, cfg.domain, cfg.kernel, scheme, geometry, owner=state)

@@ -15,10 +15,22 @@ This prevents the initial primitive refresh from introducing a pressure jump.
 No SPH mass-weighted support adaptation or CRK density renormalization is used.
 No equilibrium correction is applied during evolution.
 
-`shape=ellipse` and a common `boost` also work with the single ideal-gas EOS.
-The two-material variants require material EOS support in the meshless flux
-operator and remain unavailable. `closure=none` remains the general default;
-the graph projection is not required to balance this regular contact.
+Both the common-gamma case and the `twoGas` variant (gamma 1.4 and 5/3) are
+supported. `advectedEllipse` combines two material EOS entries, an elliptical
+inclusion and a common translation. Each particle's gamma is used consistently
+for initial energy, primitive refresh, sound speeds, prediction and Riemann
+states. The scalar-gamma path remains available without a material table.
+
+Material IDs denote pure fluids. MFM retains zero mass flux everywhere. MFV
+uses a contact-moving, zero-mass-flux face between different material IDs, while
+retaining its mass exchange within each fluid. Pair momentum and pressure work
+remain antisymmetric; each material's total mass is conserved up to arithmetic
+roundoff. This is an immiscible-material interface treatment, not a mixed-species
+EOS or a species-mixing model. Negative thermal energy on the explicit material
+path remains visible rather than being repaired by a pressure floor.
+
+`closure=none` remains the general default; the graph projection is not required
+to balance this regular contact.
 
 The separate gravity-driven `hydrostaticColumn` tank is still outside meshless
 support. It requires gravity in the conserved momentum and energy sources,
@@ -35,12 +47,25 @@ shock-density metric looks accurate. The matrix uses the same explicit
 `uAmbient=1e-8` and float64 for all Noh methods. Exactly cold runs remain possible,
 but positive thermal energy is not a meaningful invariant for their unshocked gas.
 
-`outerBoundary=open` remains unsupported for MFM/MFV. Dropping seam neighbors
-without supplying reservoir/wall fluxes leaves an unclosed particle domain.
-A future inflow route must prescribe incoming states and account for boundary
-mass, momentum and energy; it must be labeled separately from the existing
-SPH open-edge comparison. Periodic seam rarefaction limits the useful time and
-spatial comparison window even when the central shock is accurate.
+`outerBoundary=open` is supported for MFM/MFV with `closure=none`. The native
+cell-centred initial particles, masses and IDs are retained, and the execution
+domain becomes nonperiodic. Exterior quadrature particles complete the number
+volumes and supply the analytical incoming density, velocity and thermal
+energy at every temporal stage. Their positions follow the incoming streams;
+they are not integrated, exported or counted as physical fluid particles.
+Resolved configurations with `periodic=false` reproduce the same initial lattice.
+
+This is an analytic Lagrangian inflow reservoir, labeled as such in exported
+`boundaryTreatment` metadata. It differs from the SPH open-edge route, which
+only removes periodic seam interactions. The physical domain has finite
+Lagrangian mass: stop before the shock reaches its material edge,
+`t < (L/2)/(1+v_s)`. The default L=2 and t=0.6 satisfy this limit; the setup
+rejects longer requests unless L is enlarged. This route does not implement
+ongoing particle injection at a fixed Eulerian boundary.
+
+The reservoir supplies exterior pressure work and, for MFV, numerical mass and
+energy exchange. Full-fluid energy is therefore not an exact closed-system
+invariant. The native periodic route remains available for retained comparisons.
 
 ## Planar Kidder
 
@@ -73,3 +98,14 @@ warpsph-run hydrostatic --scheme MFV --nx 100 --tLimit 7
 warpsph-run noh --scheme MFM --nx 256 --precision float64
 warpsph-run kidder --scheme MFV --nx 200 --precision float64
 ```
+
+Versioned examples for the unequal-gamma contact and open-edge inflow:
+
+```bash
+warpsph-run --config examples/configuration/hydrostaticMeshless.yaml
+warpsph-run --config examples/configuration/nohMeshlessOpen.yaml
+```
+
+Override `--scheme MFM` or `--scheme MFV` to compare the methods. The open Noh
+example chooses float64 before imports; its configured reservoir is retained
+when rerunning a saved nonperiodic configuration.

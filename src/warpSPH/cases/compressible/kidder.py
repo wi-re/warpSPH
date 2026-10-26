@@ -55,6 +55,7 @@ def configureScheme(ctx: RunContext) -> None:
 
 def buildSystem(ctx: RunContext):
     if isinstance(ctx.schemeConfig, MeshlessConfig):
+        validateConfiguration(ctx.spec)
         from ...caseUtils.compressible.kidder.kidder import KidderIsentropicCapsuleAnalyticSolution
         from ...caseUtils.meshless import buildKidderMeshlessSystem
         solution = KidderIsentropicCapsuleAnalyticSolution(ctx.param('nu'),
@@ -144,6 +145,8 @@ def deriveConfiguration(spec):
 def validateConfiguration(spec):
     p = spec.params
     if spec.scheme in ('MFM', 'MFV'):
+        if spec.schemeOverrides.get('materials') is not None:
+            raise ValueError('solver.materials: Kidder has a single analytic EOS; use global gamma')
         if spec.dim != 1:
             raise ValueError('simulation.dim: meshless Kidder currently supports the planar shell (dim=1)')
         if spec.schemeOverrides.get('closure', 'none') != 'none':

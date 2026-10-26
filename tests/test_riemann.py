@@ -22,10 +22,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 import warp as wp
+from warp.types import vector
 
 from warpSPHCore import scalar_t
 
 from warpSPH.modules.riemann import RiemannSolver, hllcFlux, riemannStarState
+from warpSPH.modules.riemann.meshless import faceFluxPairMaterial
 
 REPO = Path(__file__).resolve().parents[1]
 FLOAT64 = scalar_t is wp.float64
@@ -255,3 +257,35 @@ def test_float64():
 def test_requested_precision():
     if os.environ.get('warpSPHCore_PRECISION') == 'float64':
         assert FLOAT64
+
+
+_materialVec2 = vector(length=2, dtype=scalar_t)
+
+
+@wp.kernel
+def _materialFaceKernel(rhoL: scalar_t, rhoR: scalar_t, velocity: scalar_t,
+                        gammaL: scalar_t, gammaR: scalar_t, mode: wp.int32,
+                        result: wp.array(dtype=scalar_t)):
+    # Match the selected package scalar precision in the vector ABI.
+    zero = _materialVec2(scalar_t(0.))
+    n = _materialVec2(scalar_t(1.), scalar_t(0.))
+    dm, dp, de, contact, pressure = faceFluxPairMaterial(rhoL, velocity, zero, scalar_t(1.),
+        rhoR, velocity, zero, scalar_t(1.), gammaL, mode, n, zero, gammaR)
+    result[0] = dm
+    result[1] = dp[0]
+    result[2] = de
+
+
+@pytest.mark.parametrize('velocity', [-.3, .3])
+@pytest.mark.parametrize('mode', [0, 1])
+def test_meshless_material_face_uses_each_sides_caloric_eos(velocity, mode):
+    out = wp.zeros(3, dtype=scalar_t)
+    wp.launch(_materialFaceKernel, dim=1,
+        inputs=[scalar_t(1.), scalar_t(4.), scalar_t(velocity), scalar_t(1.4), scalar_t(5/3), mode], outputs=[out])
+    if mode == 0:
+        expected = [0., 1., velocity]
+    else:
+        rho, gamma = (1., 1.4) if velocity > 0 else (4., 5/3)
+        expected = [rho*velocity, rho*velocity**2+1.,
+                    (gamma/(gamma-1.)+.5*rho*velocity**2)*velocity]
+    np.testing.assert_allclose(out.numpy(), expected, rtol=EXACT_TOL, atol=EXACT_TOL)

@@ -56,6 +56,7 @@ class MeshlessSystem(BaseIntegrationSystem):
     t: float = 0.0
     meshlessStages: object = None
     drivenParticles: object = None
+    inflowReservoir: object = None
 
     def initialize(self, dt, *args, conservedIntegration=False, **kwargs):
         if conservedIntegration:
@@ -91,7 +92,7 @@ class MeshlessSystem(BaseIntegrationSystem):
                     setattr(newState, name, value.clone())
         from ..modules.meshless.geometry import inheritGeometry
         inheritGeometry(state, newState)
-        return MeshlessSystem(state=newState, adjacency=self.adjacency, t=self.t, domain=self.domain, meshlessStages=self.meshlessStages, drivenParticles=self.drivenParticles)
+        return MeshlessSystem(state=newState, adjacency=self.adjacency, t=self.t, domain=self.domain, meshlessStages=self.meshlessStages, drivenParticles=self.drivenParticles, inflowReservoir=self.inflowReservoir)
 
     def apply_position_update(self, update, spec: PositionUpdateSpec, **kwargs):
         # Legacy exact-delta callers apply the already time-centred net drift
@@ -133,17 +134,20 @@ class MeshlessSystem(BaseIntegrationSystem):
             config = kwargs.get('config', args[0] if args else None)
             scheme = kwargs.get('schemeConfig', args[1] if len(args) > 1 else None)
             from ..modules.meshless.geometry import buildGeometry, stashGeometry
-            from ..modules.meshless.primitives import refreshPrimitives
+            from ..modules.meshless.primitives import refreshPrimitives, particleGamma
             if self.drivenParticles is not None:
                 self.drivenParticles.position(self.state, self.t)
-            geometry = buildGeometry(self.state.positions, self.state.supports, self.state.lam,
-                                     config, scheme, self.domain)
+            geometry = (self.inflowReservoir.build(self.state, config, scheme, self.t)
+                        if self.inflowReservoir is not None else
+                        buildGeometry(self.state.positions, self.state.supports, self.state.lam,
+                                      config, scheme, self.domain))
             if self.drivenParticles is not None:
                 self.drivenParticles.conserved(self.state, geometry, self.t, float(scheme.gamma))
-            refreshPrimitives(self.state, geometry, float(scheme.gamma), scheme.nngb, config.dim,
+            refreshPrimitives(self.state, geometry, particleGamma(self.state, scheme), scheme.nngb, config.dim,
                               updateSupports=False)
-            stashGeometry(self.state.positions, self.state.supports, self.domain,
-                          config.kernel, scheme, geometry, owner=self.state)
+            if self.inflowReservoir is None:
+                stashGeometry(self.state.positions, self.state.supports, self.domain,
+                              config.kernel, scheme, geometry, owner=self.state)
             return super().finalize(initialState, dt, returnValues, updateValues, weights, *args, **kwargs)
         self.state.supports.copy_(lastState.supports)
         lam = lastState.lam

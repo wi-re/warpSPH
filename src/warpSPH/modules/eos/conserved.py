@@ -2,7 +2,8 @@
 
 Native forward conversion is fused. Reverse/JVP inputs use Torch arithmetic.
 Pressure uses raw specific energy; diagnostic energy retains its mass floor.
-This helper does not select material laws or alter meshless EOS support.
+This helper does not select material laws. Explicit material callers can disable
+the legacy pressure floor so negative thermal energy remains visible.
 """
 import torch
 import torch.autograd.forward_ad as fwAD
@@ -31,8 +32,8 @@ def _primitives(Q: wp.array2d(dtype=scalar_t), volume: wp.array(dtype=scalar_t),
     energy[i] = Q[i, Q.shape[1] - 1] / wp.max(m, scalar_t(1.e-30)) - kinetic
 
 
-def idealGasPrimitives(Q, volume, gamma, *, returnEnergy=False):
-    if (isinstance(gamma, torch.Tensor) or Q.dtype != get_torch_precision() or volume.dtype != Q.dtype
+def idealGasPrimitives(Q, volume, gamma, *, returnEnergy=False, floorPressure=True):
+    if (not floorPressure or isinstance(gamma, torch.Tensor) or Q.dtype != get_torch_precision() or volume.dtype != Q.dtype
             or (torch.is_grad_enabled() and (Q.requires_grad or volume.requires_grad))
             or fwAD.unpack_dual(Q).tangent is not None or fwAD.unpack_dual(volume).tangent is not None):
         mass = Q[:, 0]
@@ -40,7 +41,9 @@ def idealGasPrimitives(Q, volume, gamma, *, returnEnergy=False):
         vel = Q[:, 1:-1] / mass[:, None]
         kinetic = .5 * (vel * vel).sum(-1)
         rawEnergy = Q[:, -1] / mass - kinetic
-        pressure = ((gamma - 1.) * rho * rawEnergy).clamp_min(1.e-30)
+        pressure = (gamma - 1.) * rho * rawEnergy
+        if floorPressure:
+            pressure = pressure.clamp_min(1.e-30)
         energy = Q[:, -1] / mass.clamp_min(1.e-30) - kinetic
         return (rho, vel, pressure, energy) if returnEnergy else (rho, vel, pressure)
     n, dim = Q.shape[0], Q.shape[1] - 2

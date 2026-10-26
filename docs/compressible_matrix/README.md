@@ -140,10 +140,11 @@ original result case ID; its input hash and method are still checked against
 the original result. Use `boundaryTreatment` to record the actual boundary setup,
 `marker` to flag exceptional cells in both panels, and top-level `figureNotes`
 to explain the marker in the PDF and HTML. These fields are also retained in the
-metric/provenance exports. The consolidated Noh view uses open edges for SPH and
-marks MFM/MFV with `‡`: they require periodic boundaries in the current
-implementation. Their modified boundary protocol must be considered when
-interpreting ranks in that column.
+metric/provenance exports. Retained consolidated Noh views use open edges for
+SPH and mark the historical periodic MFM/MFV cells with `‡`. New meshless runs
+can instead select `params.outerBoundary=open`, which uses an analytic
+Lagrangian inflow reservoir. Keep that boundary treatment in new comparison
+metadata and preserve the periodic labels on retained evidence.
 
 Pending cells remain visible. Stopped runs show the fraction of target physical
 time reached and cannot win endpoint ranks. Completed endpoints with nonpositive

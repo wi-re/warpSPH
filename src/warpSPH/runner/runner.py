@@ -293,8 +293,13 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         state.entropies, state.internalEnergies, state.pressures, state.soundspeeds = evaluateEOS(
             state.densities, state.materials, ctx.schemeConfig, P=state.pressures)
         state.totalEnergies = state.masses * (state.internalEnergies + 0.5 * state.velocities.square().sum(-1))
+        if hasattr(state, 'Q'):
+            # The meshless conserved vector must carry the prescribed material
+            # energy too; primitive-only initialization is overwritten by Q.
+            state.Q = torch.cat((state.masses[:, None], state.masses[:, None]*state.velocities,
+                                 state.totalEnergies[:, None]), dim=-1)
         if ctx.config.adaptiveDt:
-            from ..modules.timestep.compressible import computeTimestep
+            from ..modules.timestep import computeTimestep
             ctx.config.dt = computeTimestep(system, ctx.config, ctx.schemeConfig)
     ctx.scratch['initialParticleCount'] = int(system.state.positions.shape[0])
     # How the run executes (`configurations/compute.py`): the scheme's `stepMode`, the spec's `cudaGraph` / `execution` or `config.compute`, and for
