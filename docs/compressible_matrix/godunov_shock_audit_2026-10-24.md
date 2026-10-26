@@ -174,12 +174,42 @@ diagnosis; they do not qualify a new default across the wider solver suite.
 The wider fixed-preset campaign rejects this unregularized correction as a
 general default. All twelve candidate cases reach finite, positive endpoints,
 including all RHS stages, but the common-gamma pressure-equilibrium contact
-suffers a large accuracy/conservation regression: final maximum pressure error
-8.87 versus 0.0370 for the original scheme, and physical energy growth 25.9%
+suffers a numerical instability, not a bounded accuracy regression: final
+maximum pressure error 8.87 versus 0.0370 for the original scheme, and physical energy growth 25.9%
 versus 0.025%. A sharp impulse near t=4.707 generates the defect; peak pressure
 error is about 966. The separately integrated energy buffer changes by only
 about -0.0023%, so it must not substitute for the physical energy computed from
 mass, internal energy and velocity.
+
+An instrumented replay matches every recorded physical diagnostic through the
+failure (only the final cap at the shorter replay endpoint differs). The
+trigger is a near-coincident pair, particles 6725 and 6925, with separation
+9.21e-6 and Gaussian width about 0.011824. At t=4.706483 the maximum RHS
+acceleration is 125,846; the following RK midpoint reaches speed 57.58 while
+remaining finite and thermally positive. The native sound-speed timestep,
+about 9.44e-4, does not resolve this force impulse. It shrinks only after the
+accepted pressure/energy jump. The configured velocity stop ceiling is 100
+on the case's unit velocity scale; the accepted peak speed 19.2 does not
+trigger it. Neither this ceiling nor positivity tests bound contact pressure
+error or physical energy production.
+
+The failing pair also exposes FP32 amplification in periodic distance
+calculation. Its forward x-separation is 1.3113022e-6 but its reverse is
+-1.2814999e-6. Subtracting directly within the primary domain gives equal and
+opposite values. The cubic volume moment amplifies the wrapping roundoff:
+native forward/reverse moments are about 257,204 and 28,287, compared with a
+linear moment about 0.213. A standalone reproduction of all contributions to
+each affected particle matches the captured acceleration/heating to FP32
+roundoff. A distance-only arithmetic control restores equal-and-opposite
+pair forces, but leaves the large cubic moment; it is not a qualified remedy.
+Even evaluating the captured fields with FP64 arithmetic leaves a moment
+about 23,456, so the unresolved close-pair cubic extrapolation remains.
+Evidence is indexed in `.tmp/inutsuka-hydrostatic-failure-20261026/`.
+
+The pressure-equilibrium candidate must therefore be labelled **numerical
+failure** even though its execution record says it completed. Completion,
+finite/positive states and accuracy qualification are separate properties;
+the failed contact is excluded from ordinary relative-error comparisons.
 
 Sod, Kidder and Gresho remain close to the controls. Sedov density L1 improves
 in 1D and 3D but increases by 3.6% in 2D; the FP32 linear-wave error increases
@@ -189,10 +219,11 @@ resolutions/endpoints and no failure-specific tuning. Evidence and the explicit
 rejected qualification are indexed in `.tmp/inutsuka-validation-20261026/`.
 
 The width-derivative inconsistency is therefore a useful diagnosis, but a
-chain-rule correction alone is insufficient. Pair/RHS conservation and thermal
-positivity do not guarantee accurate, energy-conserving finite-time evolution
-of a stiff reconstruction. Further work must address unresolved cubic
-extrapolation and remaining force stiffness, then repeat the contact and wider
+chain-rule correction alone is insufficient. Algebraic pair symmetry, FP64
+RHS conservation checks and thermal positivity do not guarantee accurate,
+energy-conserving finite-time evolution or pair symmetry in FP32. Further work must address unresolved cubic
+extrapolation, finite-precision periodic geometry and force stiffness, then
+repeat the contact and wider
 accuracy checks before changing defaults.
 
 The original paper derives its interpolation first at constant h and discusses
