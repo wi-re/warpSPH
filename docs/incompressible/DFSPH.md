@@ -934,3 +934,16 @@ containment remain follow-up issues. No statistical ranking or pressure
 convergence claim is made from one realization per variant.
 
 [Report, figures, videos and source/field audits](../../.tmp/dfsph-analytic-sloshing-2026-10-26/README.md).
+
+
+### Performance follow-up — 26 October 2026
+
+[Measured native DFSPH performance investigation](PERFORMANCE_2026-10-26.md):
+shared-input CPU/GPU tank costs, bare/prepared sloshing windows, call audits,
+CUDA trace, temporary bitwise geometry/transform ablations and the recommended
+shared-operator optimization sequence. Checkpoint `529f431`; no production
+performance changes or numerical-default changes in this investigation.
+
+Particle-wall [startup scaling](STARTUP_SCALING_2026-10-26.md) now measures the
+fixed overhead and CPU crossover explicitly, with a pinned boundary dependency
+and unchanged solver paths.

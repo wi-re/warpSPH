@@ -1759,3 +1759,118 @@ Earlier experiment-time defaults/failures remain a historical record. The
 selected classic-flow remedy transfers, while spatial accuracy, pressure
 transients, pairing and containment remain qualification topics.
 Validation logs: `.tmp/incompressible-consolidation-2026-10-26`.
+
+
+### Native DFSPH performance investigation — 26 October 2026
+
+User requested a checkpoint then investigation of the runtime gap versus CPU
+SPlisHSPlasH. Checkpoint is `529f431`; tracked tree was unchanged at task start.
+Profile the adopted native solver, separating step/observer/output costs and
+declaring CPU-reference workload differences. Compilation/audit overhead are
+excluded from throughput timings. Short counting/timing windows omit video
+under the tiny-A/B exception; full evolving controls retain it. Numerical
+defaults, stage order, stopping rules and physical initialization stay fixed.
+
+Performance investigation complete: current local GPU solver takes 21.89 ms/step
+on the shared 465-particle native tank inputs, versus 0.297–0.313 ms CPU reference.
+Initial geometry/velocity/mass/support sets are bitwise equal after native
+spatial reorder, but wall laws, relaxation and CD counts differ (11.46 local
+versus 5.25 native). Bare current sloshing still costs 13.97 ms sampled /
+17.09–17.15 ms analytic at DF 1 / CD approximately 2, and 18.61 ms for the
+resumed developed analytic state.
+
+No output-only explanation: the engine audit has 1,259 Torch operations /
+38 syncs analytic and 876 / 30.25 sampled; a separate trace has 968 CUDA kernels /
+7.15 ms device activity versus 26.44 ms profiled integration wall. Major causes
+are per-step contact-search rebuilding, repeated exact wall integrals, eight
+rigid-transform scalar transfers, small-op iteration bookkeeping, duplicated
+physical timestep reads and recomputation of geometry/gradients. Native
+Release/AVX caches Vj grad Wij.
+
+Temporary in-step integral reuse and tensor-only transform assembly preserve
+every saved final tensor bitwise after 330 steps. The latter removes eight
+integration syncs; total measured gains are small/noisy and no production change
+is adopted. Next implementation targets: shared geometry/workspace/contact
+index, eliminate round trips with correct stream ordering, then fuse/capture
+iteration work while preserving stopping/nonfinite/stage semantics across all
+three orders and both walls.
+See [full performance report](docs/incompressible/PERFORMANCE_2026-10-26.md) and
+portable receipts. Full traces/fields/failures retained in
+`.tmp/dfsph-performance-2026-10-26`. No full matrix rerun.
+
+
+### Particle-wall DFSPH startup scaling — 26 October 2026
+
+User requested a resolution sweep of dam-break startup compute cost against
+CPU SPlisHSPlasH, measuring where the GPU launch plateau ends and whether the
+curves intersect. Boundary implementation is under simultaneous development:
+do not edit it; freeze a read-only benchmark dependency snapshot if needed.
+Use declared common fluid/wall geometry, support and timestep scaling, report
+iterations and neighbour work, separate warmed solver cost from output/setup,
+and distinguish work-matched probes from production-policy differences. Short
+startup timing windows omit video under the tiny-A/B exception, retain progress
+and watchdogs, and run GPU cases sequentially. No numerical tuning to force a
+crossover; report an observed bracket or the measured range without one.
+
+Scaling design is frozen before measurement: 3.2×1 m particle tank, 1.2×0.6 m
+left column, six physical wall layers plus normal local ghost samples; FP32,
+common cubic support 4dx with one-time lattice mass normalization, C4/4dx GPU
+overlay, native pressure policies (DF0.1%/CD0.01%, caps100, local omega0.25 /
+native0.5). Repeated first integration resets x/v/rho/pressure histories outside
+the timer, retains the normal main-list reuse and native neighbour search.
+Both solvers converge at DF1/CD2 at every completed size. Timestep is kept
+below common viscosity limits, with negligible single-step displacement.
+Boundary snapshot copies116Python sources, verified unchanged; no live boundary
+source edits. CPU uses four/eight P cores on the Ultra9 285K, affinity declared.
+Initial sweep450–1,843,200fluid particles; refine nx225/250around the observed
+four-core crossing and nx500around departure from the fixed-cost plateau.
+First native setup failed to resolve an absolute wall-file path; preserved,
+corrected to scene-relative before any valid CPU measurement.
+
+Particle-wall scaling complete: 44 workers at ten resolutions, 3,168 timed
+integrations plus 528 warmups; every solve uses DF 1 / CD 2 without caps.
+GPU fixed-cost floor is approximately 12 ms through 28,800 fluid particles;
+the stable four-P-core CPU curve crosses between 28,800 and 36,450 (roughly
+34,000 by local interpolation). Block ranges are separated at both endpoints.
+A 20%-above-floor departure criterion brackets the GPU knee at 115,200–180,000.
+At 1,843,200 fluid particles GPU cubic/C4 costs 95.9/97.1 ms, versus CPU four /
+eight / all 24 cores 851.5/662.8/594.1 ms; GPU is 6.2 times faster than full CPU.
+More-thread CPU configurations are variable at smaller sizes; raw values and
+block ranges retained, not replaced by selected best timings. C4 follows cubic.
+
+Shared FP32 fluid/wall IC audits and effective-volume checks pass on all workers;
+all GPU imports use the unchanged pinned 116-file boundary snapshot. The live
+boundary repository was not edited. Local ghosts/contact Shepard/padded lists
+differ from native Akinci/self pressure: this is their actual implementation
+cost at common geometry/support/iteration counts, not identical wall operators
+or a developed-flow accuracy ranking. Local sqrt(2) Verlet padding produces
+about 100 candidate neighbours per bulk fluid row, versus native roughly 48
+true fluid neighbours; 199.3 million candidate entries at the largest size.
+No production optimization or numerical policy change in this measurement.
+
+[Report and scaling figure](docs/incompressible/STARTUP_SCALING_2026-10-26.md),
+[benchmark](scripts/bench_dfsphScaling.py); portable 44 receipts/IC audits and CSV
+under `docs/incompressible/startup_scaling_2026-10-26`. Full fixtures/dependency/
+logs/setup failure preserved in `.tmp/dfsph-startup-scaling-2026-10-26`.
+Next target is the roughly 12 ms fixed overhead for existing small cases, then
+redundant traversal/geometry work at larger sizes.
+
+User decision: retain the startup scaling benchmark and its current receipts as
+the baseline for subsequent performance work. Preserve the shared fixtures,
+pinned boundary dependency and original measurements; future optimizations
+should add comparable results rather than overwrite these. The approximately
+12 ms plateau supports fixed dispatch/launch/synchronization overhead; device
+saturation itself was not measured by this sweep.
+
+
+### Clean checkpoint before the next matrix — 26 October 2026
+
+User requested committing the repository to a clean state before any new
+comparison run. Retain the startup benchmark, performance reports and curated
+measurements in this checkpoint. A fresh matrix of the current solver and
+boundary-handling configurations is the next candidate; execution is explicitly
+deferred. Before a later run, record the then-current dependency revisions and
+initialization/settings so concurrent boundary development is attributable.
+No new simulation or benchmark runs were launched for this checkpoint.
+An unrelated untracked preview image was preserved with a SHA-256 receipt under
+`.tmp/preserved-scratch-2026-10-26` rather than included in the commit.
