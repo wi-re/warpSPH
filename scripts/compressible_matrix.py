@@ -103,7 +103,7 @@ CASES = {c['id']: c for c in (
     case('gresho', 'gresho', 256, 3., 2, 'Gresho\n2D · nx=256', 'tangentialVelocityL1'),
     case('hydrostatic', 'hydrostatic', 100, 7., 2, 'Pressure equilibrium\n2D · nx=100', 'pressureError',
          params={'rho_high': 4., 'gamma': 1.5}),
-    case('hydrostaticTwoGas', 'hydrostatic', 100, 7., 2, 'Pressure equilibrium: two gases\n2D · nx=100',
+    case('hydrostaticTwoGas', 'hydrostatic', 100, 7., 2, 'Two-gas equilibrium\n2D · nx=100',
          'pressureError', variant='twoGas', unsupported=('PESPH', 'GSPH', 'InutsukaGSPH'),
          metric_note='Stationary square with rho=1 and 4, gamma=1.4 and 5/3, and common P=1; no gravity.'),
     case('hydrostaticAdvectedEllipse', 'hydrostatic', 100, 1., 2, 'Advected two-gas ellipse\n2D · nx=100',
