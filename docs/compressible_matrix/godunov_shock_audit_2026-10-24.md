@@ -167,10 +167,34 @@ not the standard Monaghan force's grad-h factor.
 
 An isolated implementation passes full open Noh at nx=128, 256 and 512 with the
 original CFL, positive accepted and RHS-stage thermal energies, and decreasing
-absolute post-shock density error. Matched acoustic-wave controls remain
+absolute post-shock density error. Matched FP64 acoustic-wave controls remain
 essentially unchanged. Close-pair RHS conservation and a targeted automatic-
 gradient check also pass. These checks support the density/derivative consistency
 diagnosis; they do not qualify a new default across the wider solver suite.
+The wider fixed-preset campaign rejects this unregularized correction as a
+general default. All twelve candidate cases reach finite, positive endpoints,
+including all RHS stages, but the common-gamma pressure-equilibrium contact
+suffers a large accuracy/conservation regression: final maximum pressure error
+8.87 versus 0.0370 for the original scheme, and physical energy growth 25.9%
+versus 0.025%. A sharp impulse near t=4.707 generates the defect; peak pressure
+error is about 966. The separately integrated energy buffer changes by only
+about -0.0023%, so it must not substitute for the physical energy computed from
+mass, internal energy and velocity.
+
+Sod, Kidder and Gresho remain close to the controls. Sedov density L1 improves
+in 1D and 3D but increases by 3.6% in 2D; the FP32 linear-wave error increases
+by 3.1%. KH mode amplitudes remain unranked diagnostics. These outcomes use
+identical physical initial arrays and one archived source set, with full matrix
+resolutions/endpoints and no failure-specific tuning. Evidence and the explicit
+rejected qualification are indexed in `.tmp/inutsuka-validation-20261026/`.
+
+The width-derivative inconsistency is therefore a useful diagnosis, but a
+chain-rule correction alone is insufficient. Pair/RHS conservation and thermal
+positivity do not guarantee accurate, energy-conserving finite-time evolution
+of a stiff reconstruction. Further work must address unresolved cubic
+extrapolation and remaining force stiffness, then repeat the contact and wider
+accuracy checks before changing defaults.
+
 The original paper derives its interpolation first at constant h and discusses
 variable smoothing separately ([sections 3.1 and 3.3](https://arxiv.org/html/astro-ph/0206401)).
 
@@ -187,10 +211,10 @@ wider shock/contact/vortex suite before promoting this policy.
 1. **GSPH:** extend the successful switch control to full Sedov 2D/3D
    and rerun Sod/contact, Gresho and KH controls before changing the
    default. Do not clip negative u or relax the matrix admissibility criterion.
-2. **Inutsuka:** resolve the variable-width density/derivative inconsistency
-   before adding a generic close-pair limiter. Preserve pair symmetry/conservation
-   and qualify smooth-flow accuracy and the wider shock suite. Reconcile the
-   adaptive timestep with any remaining force stiffness.
+2. **Inutsuka:** address variable-width consistency together with unresolved
+   cubic extrapolation and force stiffness. The chain-rule-only candidate fails
+   pressure equilibrium despite passing Noh. Preserve pair symmetry/conservation
+   and qualify physical energy, contact accuracy and the wider shock suite.
    Merely selecting RK4 or relabelling the alarm does not fix it.
 3. Keep the robust-control rows and original defaults separately in future
    comparisons. Measure performance only in isolated production runs after the
