@@ -23,6 +23,13 @@ def runMeshlessStep(system, dt, config, schemeConfig, *, mode,
     ctx = system.meshlessContext
     with record_function(f"[warpSPH] - [{mode.lower()} - 03] reconstructed face flux"):
         rate = ctx.rates(schemeConfig.massFluxLimit)
+    source_energy = None
+    if system.sourceTerms is not None:
+        if temporalScheme != 'ssprk':
+            raise ValueError('meshless source terms currently require solver.temporalScheme=ssprk')
+        with record_function('[warpSPH] - [meshless - external sources]'):
+            source, source_energy = system.sourceTerms.rates(ctx, system.t)
+            rate = rate+source
     with record_function(f"[warpSPH] - [{mode.lower()} - 04] stage derivative"):
-        update = MeshlessSystemUpdate(dxdt=ctx.vel, dQdt=rate)
+        update = MeshlessSystemUpdate(dxdt=ctx.vel, dQdt=rate, sourceEnergyRates=source_energy)
     return update, None, system.state

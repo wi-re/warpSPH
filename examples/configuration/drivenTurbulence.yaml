@@ -1,0 +1,28 @@
+schemaVersion: 1
+case: drivenTurbulence
+simulation:
+  dim: 2
+  nx: 64
+  tLimit: 4.0
+  n_h: 4.0
+  precision: float32
+  execution: eager
+  plot: false
+  video: false
+  store: false
+params:
+  gamma: 1.6666666666666667
+  soundSpeed: 1.0
+  accelerationRMS: 0.3
+  correlationTime: 0.5
+  forcingInterval: 0.05
+  kMin: 1
+  kMax: 2
+  solenoidalWeight: 1.0
+  seed: 1234
+  removeMeanAcceleration: true
+  thermalModel: relaxation
+  coolingTime: 0.2
+solver:
+  scheme: MFM
+  temporalScheme: ssprk

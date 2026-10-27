@@ -43,6 +43,8 @@ and the visualisation in [`warpSPHPlotting`](https://github.com/wi-re/warpSPHPlo
   eight-scheme results, rankings, failure evidence and raw-data archive
 - [Compressible comparison matrix](docs/compressible_matrix/README.md) — fixed-resolution
   case/method selection, retained attempts, parameter trials and quality/cost figures
+- [Driven 2D compressible turbulence](docs/driven_turbulence.md) — Fourier OU forcing,
+  explicit finite-time thermal relaxation and developing-flow validation
 - [Driven compressible turbulence roadmap](docs/roadmap/driven_compressible_turbulence.md) —
   2D setup studies, local/HPC feasibility, thermal convection and later MHD
 - [Contributing](CONTRIBUTING.md) — dev setup, nbstripout, what to run before committing

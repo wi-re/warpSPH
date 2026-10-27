@@ -645,7 +645,9 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         exportSimulationSystem(ctx.exportPath, 'finalState', ctx.scheme, runningState,
                                exportAdjacency=False, stages=stepResult.stages,
                                exportStagesAdjacency=True,
-                               extraData=dict(extraData, frame_num=result.nSteps))
+                               extraData=dict(extraData,
+                                              **(case.extraData(ctx, runningState) if case.extraData else {}),
+                                              frame_num=result.nSteps))
     if outFile is not None:
         outFile.close()
 

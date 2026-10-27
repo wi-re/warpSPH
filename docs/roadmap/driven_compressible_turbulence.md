@@ -8,9 +8,12 @@ larger HPC campaigns. Extend the validated hydrodynamic foundation to thermal
 convection, then ideal MHD and magnetoconvection. Open boundaries and injection
 form a separate development track.
 
-Status: planned work. The existing compressible comparison and merged solver
-work provide the starting point; the stages below are qualification gates,
-not claims that these new problems are implemented or validated.
+Status: Stage A implementation started. The drivenTurbulence case now provides
+fixed-clock Fourier OU acceleration, stage-consistent meshless force work and
+named finite-time cooling/adiabatic modes. Simple controls and initial GPU
+developing-flow pilots are covered in [the case guide](../driven_turbulence.md).
+Exact-isothermal dynamics, stationary statistics, full runner restarts and HPC
+production qualification remain open. Later stages below retain their own gates.
 
 ## Scope and dependencies
 
