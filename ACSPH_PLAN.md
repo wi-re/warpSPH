@@ -2,6 +2,13 @@
 
 > **Progress marker:** this plan's row in [PLANS.md](PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
 
+**Priority checkpoint — 2026-10-27 (user):** merge the current `dev` path
+into `main`, then make ACSPH the next target. Before choosing the next
+implementation change, reconcile the current numerical baseline, retained
+matrix failures and the remaining work in [ACSPH_REFACTOR_PLAN.md](ACSPH_REFACTOR_PLAN.md).
+The older TODO list below is historical and needs that reconciliation; this
+priority decision does not start new runs or change numerical defaults.
+
 Target paper — `literature/decourcy2024_incompressible-delta-sph-artificial-compressibility.pdf`, bib key `decourcy2024`:
 
 > **Incompressible δ-SPH via artificial compressibility**
