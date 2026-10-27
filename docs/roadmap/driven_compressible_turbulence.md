@@ -184,6 +184,14 @@ for the selected boundaries, heat-flux balance and Nusselt diagnostics. Resolve
 thermal and viscous boundary layers before extending to strongly chaotic
 convection. Keep any Boussinesq/WCSPH comparison on its own named physical path.
 
+Thermal-boundary audit (2026-10-27): [capability inventory and CPU controls](../thermal_boundary_audit_2026-10-27.md).
+RT has stage rho/u/v prescriptions, but ordinary-SPH accepted states do not
+consistently retain them; PESPH entropy prescriptions do not exactly hold u.
+MFM/MFV pressure reservoirs work, with RT adapter and fixed-u geometry handling
+still missing. Prioritize initialization/accepted-state consistency, explicit
+boundary exchange budgets and dimensional heat transport before convection.
+These are implementation findings; no thermal-wall model has been promoted.
+
 ## Stage E Interface and shock instability cases
 
 Revisit Richtmyer–Meshkov with a short audit of the incident shock, transmitted
@@ -334,3 +342,10 @@ Five native SPH routes now share the driver/thermal model, with compatible
 source work, exact tested CPU checkpoint continuation, recorded developing
 pilots and timestep controls. GPU and long statistical qualification remain
 separate gates.
+
+## Thermal-boundary audit decision (2026-10-27)
+
+User requested checking all schemes against RT-style Dirichlet thermal bands
+while GPU work remains contended. Audit completed on CPU in both precisions;
+the findings and implementation order are linked in Stage D. Solver changes
+and thermal-convection qualification are subsequent work.
