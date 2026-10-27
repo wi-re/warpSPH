@@ -15,7 +15,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'src'))
 from warpSPH.utils.turbulence import (particleStatistics, weightedPDF, depositCIC2D,
-    spectra2D, structureFunctions2D, stationarityScreen, fieldCorrelationTime)
+    spectra2D, structureFunctions2D, stationarityScreen, fieldCorrelationTime, depositKernel2D)
 
 
 def plain(value):
@@ -41,7 +41,7 @@ def timeMean(times, values, low, high):
     return (np.trapezoid(interp, t, axis=0)/(high-low)).reshape(values.shape[1:])
 
 
-def analyze(path, output, grids, blocks):
+def analyze(path, output, grids, blocks, deposition='cic'):
     config = json.loads((path/'input.json').read_text())
     params = config.get('params', {})
     gamma, length = params.get('gamma', 5/3), config['simulation'].get('L', 1.)
@@ -66,8 +66,11 @@ def analyze(path, output, grids, blocks):
                 pdf['logDensity'+name] = weightedPDF(logrho, weights, edges)
                 pdf['logPressure'+name] = weightedPDF(logpressure, weights, edges)
             for n in grids:
-                grid = depositCIC2D(s['positions'], mass, velocity, gridSize=n, length=length)
+                grid = (depositCIC2D(s['positions'], mass, velocity, gridSize=n, length=length) if deposition == 'cic' else
+                        depositKernel2D(s['positions'], mass, velocity, s['supports'], gridSize=n, length=length))
                 item = {k: grid[k] for k in ['emptyCellFraction', 'relativeMassError', 'momentumError', 'unresolvedKineticFraction']}
+                if deposition == 'kernel':
+                    item.update({k: grid[k] for k in ['minFilterRadius', 'maxFilterRadius', 'broadenedParticleFraction']})
                 if not grid['emptyCellFraction']:
                     item.update(spectra=spectra2D(grid['velocity'], grid['density']),
                                 structure=structureFunctions2D(grid['velocity'], length=length),
@@ -92,6 +95,8 @@ def analyze(path, output, grids, blocks):
     for n, measurements in data.items():
         valid = np.array(['spectra' in item for item in measurements])
         arrays = {k: np.array([item[k] for item in measurements]) for k in ['emptyCellFraction', 'relativeMassError', 'momentumError', 'unresolvedKineticFraction']}
+        if deposition == 'kernel':
+            arrays.update({k: np.array([item[k] for item in measurements]) for k in ['minFilterRadius', 'maxFilterRadius', 'broadenedParticleFraction']})
         indices = np.flatnonzero(valid)
         for kind, key in [('spectra', 'velocityEnergy'), ('spectra', 'compressionalEnergy'), ('spectra', 'solenoidalEnergy'), ('spectra', 'densityPower'), ('structure', 'longitudinal'), ('structure', 'transverse')]:
             if len(indices):
@@ -102,6 +107,8 @@ def analyze(path, output, grids, blocks):
                            maxMomentumError=float(abs(arrays['momentumError']).max()),
                            comparisonKMax=n//4,
                            medianUnresolvedKineticFraction=float(np.median(arrays['unresolvedKineticFraction'])))
+        if deposition == 'kernel':
+            gridSummary.update(minFilterRadius=float(arrays['minFilterRadius'].min()), maxFilterRadius=float(arrays['maxFilterRadius'].max()), meanBroadenedParticleFraction=float(arrays['broadenedParticleFraction'].mean()))
         selected = (times >= window[0]) & (times <= window[1])
         if valid[selected].all():
             fields = np.array([measurements[i]['velocity'] for i in np.flatnonzero(selected)])
@@ -139,7 +146,7 @@ def analyze(path, output, grids, blocks):
                 if not file.exists() or hashlib.sha256(file.read_bytes()).hexdigest() != expected:
                     sourceChanges.append(key)
     report = dict(path=str(path), completeAssessmentWindow=complete, samples=len(times),
-                  timeRange=[times[0], times[-1]], window=window, nx=nx, params=params,
+                  timeRange=[times[0], times[-1]], window=window, nx=nx, params=params, deposition=deposition,
                   stationaryScalarScreenPassed=bool(passed), screens=screens, boxCrossings=turnovers,
                   means=means, meanPDFs=meanPDFs, grid=summaries, budget=budget,
                   runtimeResult=result, changedArchivedWarpSPHSources=sourceChanges)
@@ -152,11 +159,12 @@ def main():
     p.add_argument('runs', type=Path, nargs='+')
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--grids', type=int, nargs='+', default=[16, 32])
+    p.add_argument('--deposition', choices=['cic', 'kernel'], default='cic')
     p.add_argument('--blocks', type=float, nargs='+', default=[10., 20., 30., 40.])
     args = p.parse_args()
     if len({r.name for r in args.runs}) != len(args.runs):
         p.error('run directory basenames must be unique')
-    reports = {r.name: analyze(r.resolve(), args.output/r.name, args.grids, args.blocks) for r in args.runs}
+    reports = {r.name: analyze(r.resolve(), args.output/r.name, args.grids, args.blocks, args.deposition) for r in args.runs}
     args.output.mkdir(parents=True, exist_ok=True)
     (args.output/'summary.json').write_text(json.dumps(plain(reports), indent=2, allow_nan=False)+'\n')
     for name, r in reports.items():

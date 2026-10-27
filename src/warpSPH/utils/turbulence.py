@@ -252,3 +252,61 @@ def fieldCorrelationTime(times, fields):
 
 
 __all__.append('fieldCorrelationTime')
+
+
+def depositKernel2D(positions, mass, velocity, supports, *, gridSize, length=1.):
+    """Conservative periodic compact-kernel measurement with adaptive radii.
+
+    Use a Wendland C2 shape (1-q)^4(1+4q), q=r/H<1, and H=max(support,2 dx).
+    The declared cell-scale broadening ensures each particle sees grid centres.
+    Normalize each particle's discrete stencil to conserve mass/momentum.
+    This is a measurement filter, independent of the hydrodynamic kernel; it
+    cannot recover unresolved scales. Empty cells still invalidate spectra.
+    """
+    positions, velocity = map(lambda x: np.asarray(x, dtype=np.float64), (positions, velocity))
+    mass, supports = _positive(mass, 'mass'), _positive(supports, 'supports')
+    if mass.ndim != 1 or not len(mass) or supports.shape != mass.shape or positions.shape != (len(mass), 2) or velocity.shape != positions.shape:
+        raise ValueError('expected N x 2 positions/velocities and N masses/supports')
+    if not np.isfinite(positions).all() or not np.isfinite(velocity).all():
+        raise ValueError('positions and velocities must be finite')
+    if type(gridSize) is not int or gridSize < 4 or not np.isfinite(length) or length <= 0 or supports.max() > length/2:
+        raise ValueError('need integer gridSize >=4, positive length and supports <= half the box')
+    dx = length/gridSize
+    radius = np.maximum(supports, 2*dx)
+    cell = np.remainder(positions, length)/dx-.5
+    sums = np.zeros((gridSize**2, 3))
+    for start in range(0, len(mass), 256):
+        sl = slice(start, start+256)
+        lower = np.floor(cell[sl]).astype(np.int64)
+        fraction = cell[sl]-lower
+        extent = int(np.ceil(radius[sl].max()/dx))
+        axis = np.arange(-extent, extent+1)
+        ox, oy = np.meshgrid(axis, axis, indexing='xy')
+        offsets = np.stack((ox.ravel(), oy.ravel()), axis=-1)
+        delta = (offsets[None, :, :]-fraction[:, None, :])*dx
+        q = np.linalg.norm(delta, axis=-1)/radius[sl, None]
+        oneMinusQ = np.maximum(0., 1-q)
+        weight = oneMinusQ**4*(1+4*q)
+        weight /= weight.sum(axis=1, keepdims=True)
+        cells = (lower[:, None, :]+offsets[None, :, :]) % gridSize
+        index = (cells[..., 1]*gridSize+cells[..., 0]).ravel()
+        extensive = np.column_stack((mass[sl], mass[sl, None]*velocity[sl]))
+        for component in range(3):
+            sums[:, component] += np.bincount(index, weights=(weight*extensive[:, component, None]).ravel(), minlength=gridSize**2)
+    sums = sums.reshape(gridSize, gridSize, 3)
+    cellMass = sums[..., 0]
+    occupied = cellMass > 0
+    vel = np.full((gridSize, gridSize, 2), np.nan)
+    np.divide(sums[..., 1:], cellMass[..., None], out=vel, where=occupied[..., None])
+    bulk = np.average(velocity, axis=0, weights=mass)
+    kinetic = .5*np.sum(mass*np.sum((velocity-bulk)**2, axis=1))
+    resolved = .5*np.sum(cellMass[occupied]*np.sum((vel[occupied]-bulk)**2, axis=1))
+    return dict(density=cellMass/dx**2, velocity=vel, emptyCellFraction=float(1-occupied.mean()),
+                relativeMassError=float(cellMass.sum()/mass.sum()-1),
+                momentumError=sums[..., 1:].sum(axis=(0, 1))-(mass[:, None]*velocity).sum(axis=0),
+                unresolvedKineticFraction=float(1-resolved/kinetic) if kinetic > 0 else 0.,
+                minFilterRadius=float(radius.min()), maxFilterRadius=float(radius.max()),
+                broadenedParticleFraction=float(np.mean(supports < 2*dx)))
+
+
+__all__.append('depositKernel2D')

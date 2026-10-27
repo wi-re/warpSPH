@@ -150,6 +150,15 @@ The measurement conventions are:
   Grid velocity is deposited momentum divided by deposited mass. Record the
   kinetic energy removed by this measurement filter. Empty cells retain NaN
   velocity and invalidate spectra; they are never filled for plotting or fits.
+- `--deposition kernel` selects an explicit adaptive measurement filter for sparse
+  regions: a compact Wendland C2 shape with radius max(particle support, twice
+  the grid spacing). Each particle's discrete stencil is normalized to conserve
+  mass and momentum. Report the filter radii, fraction of particles with
+  cell-scale broadening, empty cells and unresolved kinetic energy. This requires
+  supports in the snapshots. It changes the observation operator, not the fluid
+  model, and does not recover unresolved structure. Retain CIC failures and
+  compare low modes at multiple grid resolutions rather than joining spectra
+  from different filters. Uncovered cells still invalidate kernel spectra.
 - Velocity spectra subtract the grid volume mean and use the full 2D FFT divided
   by the number of cells. Shell sums of half the squared transform obey Parseval.
   The longitudinal and transverse projections describe velocity, not a

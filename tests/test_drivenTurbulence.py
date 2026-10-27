@@ -257,3 +257,85 @@ def test_field_correlation_matches_scalar_for_one_pattern():
     a, b = correlationTime(times, values), fieldCorrelationTime(times, fields)
     np.testing.assert_allclose(a['acf'], b['acf'], rtol=1e-12, atol=1e-14)
     assert a['tau'] == pytest.approx(b['tau'])
+
+
+def test_cic_transfer_function_exposes_filtered_velocity_power():
+    import numpy as np
+    from warpSPH.utils.turbulence import depositCIC2D, spectra2D
+    n, mode = 16, 3
+    x, y = np.meshgrid((np.arange(n)+.5)/n, (np.arange(n)+.5)/n)
+    positions = np.stack((x+.25/n, y), axis=-1).reshape(-1, 2)
+    velocity = np.stack((np.zeros_like(x), np.sin(2*np.pi*mode*x)), axis=-1).reshape(-1, 2)
+    grid = depositCIC2D(positions, np.full(n*n, 1/(n*n)), velocity, gridSize=n)
+    spectra = spectra2D(grid['velocity'])
+    gain2 = .75**2+.25**2+2*.75*.25*np.cos(2*np.pi*mode/n)
+    assert spectra['solenoidalEnergy'][mode] == pytest.approx(.25*gain2)
+    assert spectra['compressionalEnergy'].sum() < 1e-25
+    assert grid['unresolvedKineticFraction'] == pytest.approx(1-gain2)
+
+
+def test_offline_qualification_command_writes_synthetic_measurements(tmp_path):
+    import importlib.util
+    import json
+    import numpy as np
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[1]/'scripts/analyze_drivenTurbulence.py'
+    spec = importlib.util.spec_from_file_location('driven_analysis', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    run = tmp_path/'flow'
+    (run/'samples').mkdir(parents=True)
+    (run/'input.json').write_text(json.dumps({'simulation': {'nx': 8}, 'params': {}}))
+    x, y = np.meshgrid((np.arange(8)+.5)/8, (np.arange(8)+.5)/8)
+    positions = np.stack((x, y), axis=-1).reshape(-1, 2)
+    for i, t in enumerate(np.linspace(0, .7, 8)):
+        velocity = np.stack((np.sin(2*np.pi*y)*(1+.05*np.sin(20*t)), np.zeros_like(x)), axis=-1).reshape(-1, 2)
+        np.savez(run/'samples'/f'{i:04d}.npz', t=t, positions=positions, velocities=velocity,
+                 masses=np.full(64, 1/64), densities=np.ones(64), pressures=np.full(64, .6), internalEnergies=np.full(64, .9), supports=np.full(64, .2))
+    report = module.analyze(run, tmp_path/'output', [8], [0., .3, .7])
+    assert report['completeAssessmentWindow'] and report['samples'] == 8
+    assert report['grid']['8']['maxEmptyCellFraction'] == 0
+    assert report['grid']['8']['maxMassError'] == pytest.approx(0)
+    assert report['budget'] is None
+    assert sum(report['meanPDFs']['logDensityMass']) == pytest.approx(1)
+    assert (tmp_path/'output/particle-statistics.npz').exists()
+    kernel = module.analyze(run, tmp_path/'kernel', [8], [0., .3, .7], deposition='kernel')
+    assert kernel['deposition'] == 'kernel'
+    assert kernel['grid']['8']['maxEmptyCellFraction'] == 0
+    assert kernel['grid']['8']['minFilterRadius'] == pytest.approx(.25)
+
+
+def test_adaptive_kernel_projection_preserves_budgets_and_filter_changes():
+    import numpy as np
+    from warpSPH.utils.turbulence import depositKernel2D, spectra2D
+    n = 64
+    x, y = np.meshgrid((np.arange(n)+.5)/n, (np.arange(n)+.5)/n)
+    position = np.stack((x, y), axis=-1).reshape(-1, 2)
+    velocity = np.stack((np.sin(4*np.pi*y), np.zeros_like(x)), axis=-1).reshape(-1, 2)
+    mass, support = np.full(n*n, 1/(n*n)), np.full(n*n, .125)
+    powers = []
+    for gridSize in [16, 32]:
+        a = depositKernel2D(position, mass, velocity, support, gridSize=gridSize)
+        b = depositKernel2D(position+[2., -3.], mass, velocity, support, gridSize=gridSize)
+        assert a['emptyCellFraction'] == 0
+        assert abs(a['relativeMassError']) < 2e-14
+        np.testing.assert_allclose(a['momentumError'], 0., atol=1e-14)
+        np.testing.assert_allclose(a['velocity'], b['velocity'], atol=2e-14)
+        power = spectra2D(a['velocity'])['velocityEnergy'][2]
+        powers.append(power)
+        assert .1 < power < .25
+        assert a['unresolvedKineticFraction'] == pytest.approx(1-4*power, abs=1e-12)
+    # Same physical filter at two deposition resolutions resolves this mode.
+    assert powers[0] == pytest.approx(powers[1], rel=.002)
+
+
+def test_adaptive_projection_reports_cell_broadening_without_filling_holes():
+    import numpy as np
+    from warpSPH.utils.turbulence import depositKernel2D, spectra2D
+    a = depositKernel2D([[0., 0.]], [1.], [[1., 0.]], [.01], gridSize=16)
+    assert a['broadenedParticleFraction'] == 1
+    assert a['minFilterRadius'] == pytest.approx(.125)
+    assert a['emptyCellFraction'] > 0
+    assert np.isnan(a['velocity']).any()
+    with pytest.raises(ValueError, match='fully covered'):
+        spectra2D(a['velocity'])
