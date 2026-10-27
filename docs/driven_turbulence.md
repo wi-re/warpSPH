@@ -31,14 +31,25 @@ supports eager execution, a single ideal gas and two spatial dimensions. The
 native meshless Courant parameter is `solver.cfl`; the example explicitly uses
 0.1. The general simulation.cflFactor does not replace that meshless setting.
 
+CRKSPH, CompSPH, Monaghan, GSPH and InutsukaGSPH are also supported. They use
+native explicit-midpoint RK2 by default; RK4 is controlled as well. Their
+source/energy/state adapters and CPU qualification are described in
+[the scheme-extension report](driven_turbulence_scheme_support_2026-10-27.md).
+Use `examples/configuration/drivenTurbulenceCRKSPH.yaml` for CRKSPH; change
+`solver.scheme` for the other fixed-mass SPH routes. They use the native SPH
+CFL through `simulation.cflFactor`. Their GPU and long statistical qualification
+remain open; they do not inherit the MFM long-run results.
+
 ## Physical model
 
 The gas retains a finite ratio of specific heats greater than one and the
 standard ideal-gas fluxes and acoustic signal speeds. Initially, velocity is
 zero, nominal density is rho0, and the prescribed adiabatic sound speed fixes
 `u0 = soundSpeed² / [gamma (gamma - 1)]`. Physical masses
-come from periodic cell volumes; energy and pressure use the initial meshless
-geometry, without relaxing masses or particle positions.
+come from periodic cell volumes. MFM/MFV density uses initial meshless
+geometry. Fixed-mass SPH uses its native kernel/support initialization; all
+routes prescribe the same specific energy/sound speed. Initialization and
+resolved support policies are recorded per method.
 
 For thermalModel=relaxation the source is du/dt = (u0-u)/coolingTime. This is a
 heat bath: the signed thermal exchange may heat expanding fluid or cool heated
@@ -91,7 +102,10 @@ a valid continuation but has a different step sequence from a run that never
 stopped at that endpoint. Same-source/device/precision controls cover MFM and
 MFV on CPU and GPU, including a late clustered supersonic state. Cross-device
 statistical reproduction and production-scale restart remain separate gates.
-Trajectory files are observation output, not native restart checkpoints.
+The added SPH routes also pass bitwise CPU split controls, retaining native
+neighbor-list ordering and validity references in the checkpoint. Their GPU
+restart controls remain pending. Trajectory files are observation output, not
+native restart checkpoints.
 The generic runner derives its trajectory output stride from the initial
 timestep; adaptive timesteps therefore produce nonuniform physical output
 intervals. Consume the recorded timestamps and retain the model timestep.
@@ -106,10 +120,13 @@ By default, the instantaneous mass-weighted mean acceleration is removed,
 including when MFV changes individual masses.
 
 Force work and signed bath heat are diagnostic integrals in sourceEnergyBudget.
-They accumulate in FP64 using the accepted integrator's stage weights in finalization, without
-changing stage selection or duplicating the physical time driver. The energy
-budget residual compares the actual conserved total energy against the initial
-energy plus those two exchanges. Cooling is therefore not mistaken for a
+They accumulate in FP64 at acceptance without changing stage selection or
+duplicating the physical time driver. MFM/MFV and ordinary SPH RK paths use
+stage power quadrature; compatible CRKSPH/CompSPH use the total half-kick body
+work and add the weighted bath heat to accepted compatible thermal energy.
+The residual compares physical energy against the initial energy plus both
+exchanges. Ordinary SPH RK residuals include kinetic-energy truncation and
+must be assessed through timestep refinement. Cooling is therefore not mistaken for a
 conservation defect.
 
 The first and subsequent steps obey native signal limits, with additional
@@ -126,7 +143,9 @@ E′=E+v·aΔt give u′=u−|aΔt|²/2. With a conservative bound A on
 the mean-removed acceleration, Δt≤√(2 min(u))/(4A) limits that loss to
 min(u)/16. Native signal restrictions still control the hydrodynamic update;
 this source bound alone is not a proof of positivity for an arbitrary coupled
-flow. Time-limited runs cap
+flow. The initial SPH adapter retains the same conservative source caps,
+although its body acceleration does not directly lower primitive predictor u
+as in the meshless conserved update. Time-limited runs cap
 the final step and snap only time roundoff. No thermal clipping, support
 reduction or failure-driven CFL retry is introduced by this case.
 
@@ -140,7 +159,8 @@ qualification before reference training-data production.
 ## Output and validation
 
 State exports include the accepted budget and versioned restart context.
-Trajectory frames retain actual Q, masses, particle IDs, supports and budget
+Trajectory frames retain Q (integrated for MFM/MFV, derived from accepted
+primitives for fixed-mass SPH), masses, particle IDs, supports and budget
 integrals alongside the primitives. Physical timestamps are stored in FP64,
 without rounding a FP64 simulation clock to FP32.
 

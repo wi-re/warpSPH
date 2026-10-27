@@ -4,12 +4,14 @@ This is a developing-flow setup, not an exact-isothermal Hopkins benchmark.
 The forcing amplitude is an input; RMS Mach is measured, never feedback-clamped.
 """
 import math
+from dataclasses import replace
+import inspect
 import json
 import torch
 
 from ...runner import Case, registerCase, caseMain
 from ...runner.parameters import Parameter as P
-from ...configurations.meshless import resolve_temporal_scheme
+from ...configurations.meshless import MeshlessConfig, resolve_temporal_scheme
 from ...modules.forcing import FourierOU
 from ...modules.meshless.sources import ConservedSources
 from .common import COMPRESSIBLE_DEFAULTS, configureCompressible, compressibleTimestep
@@ -24,11 +26,14 @@ def validateConfiguration(spec):
         raise ValueError('params.kMin/kMax: require kMin <= kMax < nx/2')
     if p['forcingInterval'] > p['correlationTime']:
         raise ValueError('params.forcingInterval: must not exceed correlationTime')
-    temporal = spec.schemeOverrides.get('temporalScheme', 'auto')
-    if temporal == 'auto':
-        temporal = 'ssprk' if spec.scheme == 'MFM' else 'hancock'
-    if temporal != 'ssprk':
-        raise ValueError('drivenTurbulence requires solver.temporalScheme=ssprk for stage-consistent sources')
+    if spec.scheme in ('MFM', 'MFV'):
+        temporal = spec.schemeOverrides.get('temporalScheme', 'auto')
+        if temporal == 'auto':
+            temporal = 'ssprk' if spec.scheme == 'MFM' else 'hancock'
+        if temporal != 'ssprk':
+            raise ValueError('drivenTurbulence requires solver.temporalScheme=ssprk for stage-consistent sources')
+    elif str(getattr(spec.integrationScheme, 'name', spec.integrationScheme)) not in ('rungeKutta2', 'rungeKutta4'):
+        raise ValueError('drivenTurbulence SPH sources require native rungeKutta2 or rungeKutta4')
     if spec.cudaGraph or spec.execution not in (None, 'eager'):
         raise ValueError('drivenTurbulence currently requires eager execution')
     if not spec.adaptiveDt:
@@ -44,6 +49,8 @@ def buildSystem(ctx):
     from ...systems.meshless import MeshlessSystem
 
     cfg, scheme = ctx.config, ctx.schemeConfig
+    if not isinstance(scheme, MeshlessConfig):
+        return buildSPHSystem(ctx)
     if resolve_temporal_scheme(scheme) != 'ssprk':
         raise ValueError('drivenTurbulence requires SSPRK sources')
     particles = sampleRegularParticles(ctx.spec.nx, cfg.domain, cfg.targetNeighbors)
@@ -72,6 +79,61 @@ def buildSystem(ctx):
     ctx.scratch['checkpointSignature'] = checkpointSignature(ctx)
     ctx.scratch['completedSteps'] = 0
     cfg.dt = timestep(ctx, system)
+    return system
+
+
+def configureScheme(ctx):
+    if isinstance(ctx.schemeConfig, MeshlessConfig):
+        return configureCompressible(ctx)
+    from ...enumTypes import AdaptiveSupportScheme
+    scheme = ctx.schemeConfig
+    scheme.gamma, scheme.rho0 = ctx.param('gamma'), ctx.param('rho0')
+    # Same declared support policy as the other fully compressible examples.
+    scheme.adaptiveSupportScheme = AdaptiveSupportScheme.Owen
+    scheme.adaptiveSupportCorrections = False
+
+
+def buildSPHSystem(ctx):
+    from ...sample.compressible import setupBasicCompressibleInitialState
+    from ...caseUtils.drivenTurbulence import DrivenCompSPHState, DrivenGasState
+    from ...modules.forcing.primitive import applySources
+    from ...modules.eos import refreshEOS
+    from ...systems.compSPH import CompSPHSystem
+    scheme = ctx.schemeConfig
+    if getattr(scheme, 'stepMode', None) not in (None, 'eager'):
+        raise ValueError('drivenTurbulence sources currently require eager SPH steps')
+    if any(getattr(scheme, name, default) != default for name, default in
+           [('crkEnergyPartition', 'native'), ('crkEnergyPredictor', 'raw'), ('crkEvolution', 'summation')]):
+        raise ValueError('drivenTurbulence initially supports the native CRK energy and summation-density policy')
+    stateType = DrivenCompSPHState if issubclass(ctx.SimulationSystem, CompSPHSystem) else DrivenGasState
+    native = ctx.stepFunction
+    wantsIndex = 'stageIndex' in inspect.signature(native).parameters
+    def sourced(system, dt, config, schemeConfig, verbose=False, stageIndex=None):
+        kw = dict(verbose=verbose)
+        if wantsIndex:
+            kw['stageIndex'] = stageIndex
+        update, *rest = native(system, dt, config, schemeConfig, **kw)
+        return (applySources(system, update), *rest)
+    ctx.bundle = replace(ctx.bundle, SimulationState=stateType, stepFunction=sourced)
+    system = setupBasicCompressibleInitialState(ctx.spec.nx, ctx.config, scheme, stateType, ctx.SimulationSystem)
+    s = system.state
+    s.masses = s.masses*ctx.param('rho0')
+    s.densities = s.densities*ctx.param('rho0')
+    u0 = ctx.param('soundSpeed')**2/(scheme.gamma*(scheme.gamma-1))
+    s.internalEnergies = torch.full_like(s.masses, u0)
+    s.sourceEnergyBudget = s.masses.new_zeros(2, dtype=torch.float64)
+    refreshEOS(s, scheme)
+    s.totalEnergies = s.masses*s.internalEnergies
+    field = FourierOU(dim=2, length=ctx.spec.L, kMin=ctx.param('kMin'), kMax=ctx.param('kMax'),
+        accelerationRMS=ctx.param('accelerationRMS'), correlationTime=ctx.param('correlationTime'),
+        updateInterval=ctx.param('forcingInterval'), solenoidalWeight=ctx.param('solenoidalWeight'), seed=ctx.param('seed'))
+    cooling = ctx.param('coolingTime') if ctx.param('thermalModel') == 'relaxation' else None
+    system.sourceTerms = ConservedSources(field, ctx.param('removeMeanAcceleration'), u0, cooling)
+    ctx.scratch.update(driving=field, initialMass=s.masses.double().sum(),
+        initialEnergy=(s.masses.double()*s.internalEnergies.double()).sum(), completedSteps=0)
+    ctx.velocityScale, ctx.velocityScaleSource = ctx.param('soundSpeed'), 'drivenTurbulence reference sound speed'
+    ctx.scratch['checkpointSignature'] = checkpointSignature(ctx)
+    ctx.config.dt = timestep(ctx, system)
     return system
 
 
@@ -111,20 +173,21 @@ def postStep(ctx, system, step):
     if ctx.spec.nSteps is None:
         # Snap only accumulated time roundoff after a physically capped step.
         t, target = float(system.t), ctx.spec.tLimit
-        eps = torch.finfo(system.state.Q.dtype).eps
+        eps = torch.finfo(system.state.positions.dtype).eps
         if abs(t-target) <= 4*eps*max(abs(t), abs(target)):
             system.t = float(target)
 
 
 def diagnostics(ctx, system):
     s = system.state
-    mass, velocity, u = s.Q[:, 0].double(), s.velocities.double(), s.internalEnergies.double()
+    mass, velocity, u = s.masses.double(), s.velocities.double(), s.internalEnergies.double()
     total_mass = mass.sum()
     mean = (mass[:, None]*velocity).sum(0)/total_mass
     fluctuating = velocity-mean
     sound2 = ctx.schemeConfig.gamma*(ctx.schemeConfig.gamma-1)*u
     kinetic = (.5*mass*velocity.square().sum(-1)).sum()
-    total = s.Q[:, -1].double().sum()
+    total = (s.Q[:, -1].double().sum() if isinstance(ctx.schemeConfig, MeshlessConfig)
+             else (mass*(u+.5*velocity.square().sum(-1))).sum())
     budget = s.sourceEnergyBudget.double()
     rho = s.densities.double()
     values = dict(kineticEnergy=kinetic, thermalEnergy=(mass*u).sum(), totalEnergy=total,
@@ -146,12 +209,18 @@ def extraData(ctx, system):
                 forcingModes=field.modes, forcingCoefficients=field.coefficients(float(system.t)),
                 forcingTime=float(system.t), sourceEnergyBudget=system.state.sourceEnergyBudget.detach().cpu(),
                 initialEnergy=float(ctx.scratch['initialEnergy']), initialMass=float(ctx.scratch['initialMass']))
+    data.update(conservedOutputPolicy=('integrated' if isinstance(ctx.schemeConfig, MeshlessConfig) else 'derived'),
+        sourceWorkPolicy=('compatibleHalfKick' if getattr(ctx.schemeConfig, 'compatibleEnergy', False) else 'stagePowerRK'),
+        densityOutputPolicy=('acceptedMeshlessGeometry' if isinstance(ctx.schemeConfig, MeshlessConfig) else 'nativeSPHStageDensity'))
     if ctx.spec.storeMode == 'states':
         state = field.state_dict()
         data.update(checkpointVersion=1, checkpointSignature=ctx.scratch['checkpointSignature'],
                     checkpointCompletedSteps=ctx.scratch['completedSteps'],
                     checkpointNextDt=torch.as_tensor(ctx.scratch['nextPhysicalDt']).detach().cpu(),
                     forcingCheckpoint=dict(knots=state['knots'], generator=state['generator']))
+        if not isinstance(ctx.schemeConfig, MeshlessConfig):
+            from ...caseUtils.drivenTurbulence import adjacencyCheckpoint
+            data.update(adjacencyCheckpoint(system))
     return data
 
 
@@ -201,17 +270,20 @@ def restoreCheckpoint(ctx, system, checkpoint):
         value = float(checkpoint.attrs[name])
         if not math.isfinite(value) or value <= 0:
             raise ValueError(f'drivenTurbulence resumeFrom: invalid {name}')
-        ctx.scratch[name] = system.state.Q.new_tensor(value, dtype=torch.float64)
+        ctx.scratch[name] = system.state.positions.new_tensor(value, dtype=torch.float64)
     state = checkpoint['dict_forcingCheckpoint']
     field = FourierOU.from_state_dict(dict(parameters=ctx.scratch['driving'].parameters,
         knots=torch.from_numpy(state['knots'][:]), generator=torch.from_numpy(state['generator'][:])))
     ctx.scratch.update(driving=field, completedSteps=completed,
-                       nextPhysicalDt=system.state.Q.new_tensor(nextDt))
+                       nextPhysicalDt=system.state.positions.new_tensor(nextDt))
     system.sourceTerms.acceleration = field
+    if not isinstance(ctx.schemeConfig, MeshlessConfig):
+        from ...caseUtils.drivenTurbulence import restoreAdjacency
+        restoreAdjacency(system, checkpoint)
     system.state.UIDcounter = int(system.state.UIDcounter)
     ctx.spec.resumeStepOffset = completed
     # Preserve growth history while capping the new endpoint/forcing/cooling.
-    ctx.config.dt = system.state.Q.new_tensor(nextDt)
+    ctx.config.dt = system.state.positions.new_tensor(nextDt)
     if ctx.spec.nSteps is None:
         ctx.config.dt = torch.clamp(ctx.config.dt, max=ctx.spec.tLimit-system.t)
 
@@ -224,7 +296,7 @@ setupPlot, updatePlot = particlePlot([
 
 drivenTurbulenceCase = registerCase(Case(
     name='drivenTurbulence', scheme='MFM', buildSystem=buildSystem,
-    configureScheme=configureCompressible, timestep=timestep, postStep=postStep,
+    configureScheme=configureScheme, timestep=timestep, postStep=postStep,
     diagnostics=diagnostics, extraData=extraData, trajectoryData=trajectoryData, restoreCheckpoint=restoreCheckpoint, setupPlot=setupPlot, updatePlot=updatePlot,
     description='Developing periodic 2D compressible turbulence with OU acceleration and named finite-time cooling.',
     defaults=dict(COMPRESSIBLE_DEFAULTS, caseName='drivenTurbulence', dim=2, nx=64, L=1.,
@@ -233,7 +305,7 @@ drivenTurbulenceCase = registerCase(Case(
                 correlationTime=.5, forcingInterval=.05, kMin=1, kMax=2,
                 solenoidalWeight=1., seed=1234, removeMeanAcceleration=True,
                 thermalModel='relaxation', coolingTime=.2),
-    supportedSchemes=('MFM', 'MFV'), validateConfiguration=validateConfiguration,
+    supportedSchemes=('MFM', 'MFV', 'CRKSPH', 'CompSPH', 'Monaghan', 'GSPH', 'InutsukaGSPH'), validateConfiguration=validateConfiguration,
     simulationParameters={
         'dim': P('integer', 'This first turbulence case is two dimensional.', 'domain', choices=(2,)),
         'periodic': P('boolean', 'Periodic box on every axis.', 'domain', choices=(True,)),

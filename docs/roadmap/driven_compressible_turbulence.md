@@ -319,3 +319,18 @@ Opt-in exact-neighbor caching reduces observed shared-GPU step wall time by
 18–28% across repeated 64²/128² weak/strong MFM/MFV windows. The original
 search remains default; uncontended throughput and long cached-flow
 statistics remain open.
+
+## Stage A scheme extension (2026-10-27)
+
+Implement CRKSPH and CompSPH compatible source work, plus fixed-mass
+compressible adapters where the same interface applies. Preserve each native
+Runge–Kutta tableau and hydro/viscosity formulas. Establish uniform-force,
+thermal-only, combined source, temporal-refinement, positivity and restart
+controls on CPU while GPU contention continues. Keep this implementation
+qualification distinct from long chaotic statistics and performance rankings.
+
+Scheme-extension result: [CPU implementation qualification](../driven_turbulence_scheme_support_2026-10-27.md).
+Five native SPH routes now share the driver/thermal model, with compatible
+source work, exact tested CPU checkpoint continuation, recorded developing
+pilots and timestep controls. GPU and long statistical qualification remain
+separate gates.

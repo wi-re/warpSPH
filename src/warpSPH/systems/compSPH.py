@@ -110,6 +110,8 @@ class CompSPHSystem(BaseIntegrationSystem):
     listGrid: Optional[SupportGrid] = None
     #: set by `finalize` when the step has to be run again (the pair list changed between stages)
     rerunRequest: Optional[torch.Tensor] = None
+    #: Optional body sources; appended to preserve positional construction.
+    sourceTerms: object = None
 
     def initialize(self, dt, *args, stageWeights=None, rerun=None, **kwargs):
         schemeConfig = kwargs.get('schemeConfig')
@@ -137,7 +139,7 @@ class CompSPHSystem(BaseIntegrationSystem):
         if verbose:   # self.t may be a device tensor: format it only when printing
             print(f'Initializing new state [t={self.t}]')
         return CompSPHSystem(state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain,
-                             pairWork=self.pairWork, supportGrid=self.supportGrid, listGrid=self.listGrid)
+                             pairWork=self.pairWork, supportGrid=self.supportGrid, listGrid=self.listGrid, sourceTerms=self.sourceTerms)
     
     def apply_position_update(self, update, spec: PositionUpdateSpec, **kwargs):
         return update_position(self, update, spec, 'position', 'position_derivative', 'velocity', 'velocity_derivative')
@@ -313,6 +315,10 @@ class CompSPHSystem(BaseIntegrationSystem):
         if getattr(schemeConfig, 'materials', None) is not None:
             from ..modules.eos import refreshEOS
             refreshEOS(self.state, schemeConfig)
+        if self.sourceTerms is not None:
+            from ..modules.forcing.primitive import finishSources
+            finishSources(self, initialState, updateValues, weights, dt, schemeConfig,
+                          compatible=schemeConfig.compatibleEnergy)
         from ..modules.shockCapturing.wrapper import advanceViscositySwitchStep  # (circular at import time)
         advanceViscositySwitchStep(self, initialState, returnValues, schemeConfig, config)
 

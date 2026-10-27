@@ -11,6 +11,9 @@ import argparse, hashlib, json, shutil, sys, time, traceback
 repo = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(repo / 'src'), str(repo / 'scripts')]
 p = argparse.ArgumentParser(description=__doc__)
+p.add_argument('--scheme', choices=['MFM','MFV','CRKSPH','CompSPH','Monaghan','GSPH','InutsukaGSPH'], default='MFM')
+p.add_argument('--max-dt', type=float, default=.01)
+p.add_argument('--plot-interval', type=int, default=1000)
 p.add_argument('--nx', type=int, default=64)
 p.add_argument('--time', type=float, default=40.0)
 p.add_argument('--seed', type=int, default=1234)
@@ -35,7 +38,7 @@ configuration = dict(
         kernel='B7', n_h=4., nx=args.nx, nSteps=None, tLimit=args.time,
         plot=True, video=True, store=False, show=False, quiet=True, progress=True,
         plotBackend='vispy', plotBackendOptions={'app_backend':'egl', 'jupyter_backend':'image'},
-        plotInterval=1000, exportRoot=str(root/'exports'),
+        plotInterval=args.plot_interval, maxDt=args.max_dt, exportRoot=str(root/'exports'),
         cudaGraph=False, execution='eager', velocityAlarmStopRatio=20.,
         stallProgress=1e-3),
     params=dict(
@@ -43,7 +46,8 @@ configuration = dict(
         accelerationRMS=args.acceleration, correlationTime=.5,
         forcingInterval=.05, kMin=1, kMax=2, solenoidalWeight=1.,
         removeMeanAcceleration=True, thermalModel='relaxation', coolingTime=.2),
-    solver=dict(scheme='MFM', temporalScheme='ssprk', cfl=.1))
+    solver=(dict(scheme=args.scheme, temporalScheme='ssprk', cfl=.1)
+            if args.scheme in ('MFM','MFV') else dict(scheme=args.scheme)))
 write_json(root / 'input.json', configuration)
 shutil.copy2(__file__, root / 'driver.py')
 roots = source_paths()
@@ -77,11 +81,16 @@ def build(ctx):
     latest['ctx'] = ctx
     rhs = ctx.stepFunction
 
-    def observed(s, dt, **kw):
+    def observed(s, dt, stageIndex=None, **kw):
+        if stageIndex is not None:
+            kw['stageIndex'] = stageIndex
         update, *rest = rhs(s, dt, **kw)
         state = s.state
-        stage = s.meshlessContext
-        probes = [stage.u.min(), stage.P.min()] + [torch.isfinite(v).all().to(stage.u) for v in [state.Q, state.positions, stage.u, stage.P, stage.rho, update.dQdt]]
+        stage = getattr(s, 'meshlessContext', None)
+        u, pressure, density = ((stage.u, stage.P, stage.rho) if stage is not None else
+            (state.internalEnergies, state.pressures, state.densities))
+        rates = ([update.dQdt] if stage is not None else [update.dvdt, update.dudt, update.dEdt])
+        probes = [u.min(), pressure.min()] + [torch.isfinite(v).all().to(u) for v in [state.Q, state.positions, u, pressure, density, *rates]]
         values = torch.stack(probes).detach().cpu().tolist()
         u, pressure = values[:2]
         finite = all(values[2:])
@@ -122,8 +131,10 @@ try:
     positive = all((r['minEnergy'] > 0 and r['minDensity'] > 0 and (r['minPressure'] > 0) and all((np.isfinite(r[k]) for k in ['totalEnergy', 'rmsMachMass', 'maxVelocity', 'relativeEnergyBudgetResidual'])) for r in history))
     after = {k: v[1] for k, v in source_inventory(roots).items()}
     good = not result.diverged and (not result.stopReason) and positive and (stats['bad'] == 0) and (float(result.state.t) == args.time) and (before == after)
-    record = dict(status='completed' if good else 'failed', actualTime=float(result.state.t), targetTime=args.time, nSteps=result.nSteps, particles=len(result.state.state.Q), stageChecks=stats, acceptedPositiveFinite=positive, sourcesStable=before == after, final=final, maxAbsoluteEnergyBudgetResidual=max((abs(r['relativeEnergyBudgetResidual']) for r in history)), maxMach=max((r['rmsMachMass'] for r in history)), loopWallSeconds=elapsed, peakTorchAllocatedBytes=torch.cuda.max_memory_allocated() if args.device.startswith('cuda') else None, peakTorchReservedBytes=torch.cuda.max_memory_reserved() if args.device.startswith('cuda') else None, stopReason=result.stopReason)
-    assert stats['count'] == 2 * result.nSteps
+    record = dict(status='completed' if good else 'failed', extraRHS=stats['count']-2*result.nSteps, scheme=args.scheme, actualTime=float(result.state.t), targetTime=args.time, nSteps=result.nSteps, particles=len(result.state.state.Q), stageChecks=stats, acceptedPositiveFinite=positive, sourcesStable=before == after, final=final, maxAbsoluteEnergyBudgetResidual=max((abs(r['relativeEnergyBudgetResidual']) for r in history)), maxMach=max((r['rmsMachMass'] for r in history)), loopWallSeconds=elapsed, peakTorchAllocatedBytes=torch.cuda.max_memory_allocated() if args.device.startswith('cuda') else None, peakTorchReservedBytes=torch.cuda.max_memory_reserved() if args.device.startswith('cuda') else None, stopReason=result.stopReason)
+    assert stats['count'] >= 2 * result.nSteps
+    if args.scheme in ('MFM','MFV'):
+        assert stats['count'] == 2 * result.nSteps
 except Exception:
     record.update(status='error', error=traceback.format_exc())
     raise

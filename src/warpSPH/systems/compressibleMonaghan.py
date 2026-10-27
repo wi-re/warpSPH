@@ -72,6 +72,9 @@ class CompressibleSystemUpdate:
     drhodt: torch.Tensor = tagged(tags=('density_derivative',))
     passive: Optional[torch.Tensor] = tagged(tags=('passive_derivative',), default=None)
     dVdt: Optional[torch.Tensor] = tagged(tags=('crk_volume_derivative',), default=None)
+    sourceAcceleration: Optional[torch.Tensor] = None
+    sourceHeat: Optional[torch.Tensor] = None
+    sourceEnergyRates: Optional[torch.Tensor] = None
 
 @dataclass
 class CompressibleSystem(BaseIntegrationSystem):
@@ -79,11 +82,12 @@ class CompressibleSystem(BaseIntegrationSystem):
     adjacency: Optional[AdjacencyList] = None
     domain: Optional[DomainDescription] = None
     t: float = 0.0
+    sourceTerms: object = None
     def initializeNewState(self, *args, verbose=False, **kwargs):
         state = get_reference_state(self)
         if verbose:   # self.t may be a device tensor: format it only when printing
             print(f'Initializing new state [t={self.t}]')
-        return CompressibleSystem(state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain)
+        return CompressibleSystem(state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain, sourceTerms=self.sourceTerms)
     
     def apply_position_update(self, update, spec: PositionUpdateSpec, **kwargs):
         return update_position(self, update, spec, 'position', 'position_derivative', 'velocity', 'velocity_derivative')
@@ -128,6 +132,9 @@ class CompressibleSystem(BaseIntegrationSystem):
         if getattr(eosConfig, 'materials', None) is not None:
             from ..modules.eos import refreshEOS
             refreshEOS(self.state, eosConfig)
+        if self.sourceTerms is not None:
+            from ..modules.forcing.primitive import finishSources
+            finishSources(self, initialState, updateValues, weights, dt, eosConfig)
         from ..modules.shockCapturing.wrapper import advanceViscositySwitchStep  # (circular at import time)
         advanceViscositySwitchStep(self, initialState, returnValues,
                                    kwargs.get('schemeConfig', args[1] if len(args) > 1 else None),
