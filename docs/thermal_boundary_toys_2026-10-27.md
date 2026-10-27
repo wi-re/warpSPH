@@ -197,3 +197,8 @@ known Fourier eigenmodes, zero transport versus harmonic contamination, the
 native pressure-reservoir law, and two-step MFM/MFV/PESPH-E stage observations.
 Nine pass in FP32 (1.16 s) and nine in FP64 (1.16 s). See the preceding
 [boundary audit](thermal_boundary_audit_2026-10-27.md) for the RT-specific findings.
+
+Follow-up: [prescribed-state repair and CPU qualification](thermal_state_qualification_2026-10-27.md)
+fixes the measured startup/accepted-state and entropy-temperature defects.
+The measurements above remain the baseline record; physical conducting-wall
+and convection qualification remain open.

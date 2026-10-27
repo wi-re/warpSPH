@@ -109,3 +109,18 @@ warpsph-run --config examples/configuration/nohMeshlessOpen.yaml
 Override `--scheme MFM` or `--scheme MFV` to compare the methods. The open Noh
 example chooses float64 before imports; its configured reservoir is retained
 when rerunning a saved nonperiodic configuration.
+
+## Prescribed thermal state in driven bands
+
+`DrivenParticles` retains its trajectory and `(velocity, pressure)` primitive
+callback. Passing an additional `specificInternalEnergy(time, positions)`
+callback instead prescribes u, forms `E=m*u+KE`, and lets pressure follow the
+fresh geometric volume. The primitive callback may return `(velocity, None)`
+in this mode. u must be finite and positive. It is a driven fluid reservoir,
+not an impermeable conducting-wall or physical heat-diffusion model.
+
+The prescribed initial state is applied before the first diagnostic. Accepted
+projections accumulate `state.boundaryProjectionBudget` (FP64 thermal and
+kinetic energy changes); stage calls do not advance it. The counter records
+projection exchanges, not all reservoir flux or mechanical-reaction work.
+[CPU controls and limits](thermal_state_qualification_2026-10-27.md).

@@ -63,6 +63,9 @@ class CompressibleState(ParticleIdentityState):
     # when the case gives no geometry (modules/compressibleWall then estimates them)
     wallNormals: torch.Tensor = constant(tags=('wall_normal',), default=None)
 
+    # Accepted prescribed-state projection: thermal and kinetic energy exchange.
+    boundaryProjectionBudget: Optional[torch.Tensor] = constant(default=None)
+
 @dataclass
 class CompressibleSystemUpdate:
     dxdt: torch.Tensor = tagged(tags=('position_derivative',))
@@ -135,6 +138,8 @@ class CompressibleSystem(BaseIntegrationSystem):
         if self.sourceTerms is not None:
             from ..modules.forcing.primitive import finishSources
             finishSources(self, initialState, updateValues, weights, dt, eosConfig)
+        from ..modules.boundaryConditions.thermal import finishThermalDirichlet
+        finishThermalDirichlet(self, dt, kwargs.get('config', args[0] if args else None), eosConfig)
         from ..modules.shockCapturing.wrapper import advanceViscositySwitchStep  # (circular at import time)
         advanceViscositySwitchStep(self, initialState, returnValues,
                                    kwargs.get('schemeConfig', args[1] if len(args) > 1 else None),

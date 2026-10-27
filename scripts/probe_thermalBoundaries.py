@@ -138,7 +138,9 @@ def boundary_toy(scheme, variant, nx, dt, end, tableau, pattern, output):
         caloricEnergyResidual=last['totalEnergy']-first['totalEnergy']-expectedHeat,
         initialResetHeat=first['missingResetHeat'],
         caloricResidualIncludingInitialReset=last['totalEnergy']-first['totalEnergy']-expectedHeat-first['missingResetHeat'],
-        missingResetHeat=last['missingResetHeat'])
+        missingResetHeat=last['missingResetHeat'],
+        boundaryProjectionBudget=(result.state.state.boundaryProjectionBudget.detach().cpu().tolist()
+            if getattr(result.state.state,'boundaryProjectionBudget',None) is not None else None))
     s=result.state.state
     np.savez_compressed(output/'fields.npz',positions=s.positions.detach().numpy(),masses=s.masses.detach().numpy(),
         velocities=s.velocities.detach().numpy(),internalEnergies=s.internalEnergies.detach().numpy())

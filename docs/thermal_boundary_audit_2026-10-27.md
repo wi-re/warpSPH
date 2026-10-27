@@ -177,3 +177,8 @@ and `modules/dissipation/pi/terms.py`, all beneath `src/warpSPH/`.
 
 Follow-up: [small CPU toy controls](thermal_boundary_toys_2026-10-27.md) isolate
 these effects without RT, and provide a reusable measurement probe.
+
+Follow-up: [prescribed-state repair and CPU qualification](thermal_state_qualification_2026-10-27.md)
+fixes the measured startup/accepted-state and entropy-temperature defects.
+The measurements above remain the baseline record; physical conducting-wall
+and convection qualification remain open.

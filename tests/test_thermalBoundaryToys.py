@@ -55,6 +55,8 @@ def test_uniform_caloric_prescription_is_measured_through_native_stages(scheme,v
     from probe_thermalBoundaries import boundary_toy
     row=boundary_toy(scheme,variant,16,.002,.004,'rungeKutta2','uniform',tmp_path)
     assert row['steps']==2 and not row['diverged']
+    from warpSPHCore.type_config import get_torch_precision
+    assert row['initialURelativeError']<(2e-10 if get_torch_precision() is torch.float64 else 2e-6)
     assert row['t']==pytest.approx(.004,abs=1e-9)
     assert row['acceptedURelativeError']<2e-6
     assert row['maxStageURelativeError']<2e-6

@@ -373,6 +373,40 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         case = replace(case, timestep=pesphTimestep,
                        extraFields=tuple(dict.fromkeys((*case.extraFields, *CHECKPOINT_FIELDS))))
         ctx.config.dt = pesphTimestep(ctx, system)
+    def capPrescribedStartupTimestep():
+        # Re-evaluate safety after a prescribed-state change, preserving an
+        # initializer's deliberate step ceiling (e.g. RT's 2/3 startup factor).
+        previous = ctx.config.dt
+        proposed = (case.timestep(ctx, system) if case.timestep is not None else
+                    defaultTimestep(ctx, system))
+        if previous is None:
+            ctx.config.dt = proposed
+        elif isinstance(proposed, torch.Tensor):
+            ctx.config.dt = torch.minimum(torch.as_tensor(previous, device=proposed.device, dtype=proposed.dtype), proposed)
+        elif isinstance(previous, torch.Tensor):
+            ctx.config.dt = torch.minimum(previous, previous.new_tensor(proposed))
+        else:
+            ctx.config.dt = min(previous, proposed)
+
+    if getattr(system, 'drivenParticles', None) is not None:
+        if not spec.resumeFrom:
+            from ..modules.meshless.boundary import initializeDrivenParticles
+            initializeDrivenParticles(system, ctx.config, ctx.schemeConfig)
+            if ctx.config.adaptiveDt:
+                capPrescribedStartupTimestep()
+        elif system.state.boundaryProjectionBudget is None:
+            system.state.boundaryProjectionBudget = system.state.Q.new_zeros(2, dtype=torch.float64)
+    from ..modules.boundaryConditions.thermal import finishThermalDirichlet, hasThermalDirichlet
+    if not spec.resumeFrom and finishThermalDirichlet(system, 0., ctx.config, ctx.schemeConfig, account=False):
+        if ctx.config.adaptiveDt:
+            capPrescribedStartupTimestep()
+    if hasThermalDirichlet(ctx.schemeConfig):
+        # A thermal trajectory must contain the evolved thermal state as well
+        # as its exchange counter, including after checkpoint continuation.
+        case = replace(case, extraFields=tuple(dict.fromkeys((*case.extraFields,
+            'internalEnergies', 'supports', 'boundaryProjectionBudget'))))
+    elif getattr(system.state, 'boundaryProjectionBudget', None) is not None:
+        case = replace(case, extraFields=tuple(dict.fromkeys((*case.extraFields, 'boundaryProjectionBudget'))))
     runningState = system.initializeNewState()
     if isinstance(ctx.scheme, IncompressibleSPHScheme):
         # The loop calls the hook only AFTER a step. Cap the first step too,

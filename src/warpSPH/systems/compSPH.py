@@ -77,6 +77,9 @@ class CompSPHState(ParticleIdentityState):
     # when the case gives no geometry (modules/compressibleWall then estimates them)
     wallNormals: torch.Tensor = constant(tags=('wall_normal',), default=None)
 
+    # Accepted prescribed-state projection: thermal and kinetic energy exchange.
+    boundaryProjectionBudget: Optional[torch.Tensor] = constant(default=None)
+
 
 # from .compressibleMonaghan import CompressibleSystemUpdate
 # from ..configurations.compSPHConfig import CompSPHConfig
@@ -319,6 +322,8 @@ class CompSPHSystem(BaseIntegrationSystem):
             from ..modules.forcing.primitive import finishSources
             finishSources(self, initialState, updateValues, weights, dt, schemeConfig,
                           compatible=schemeConfig.compatibleEnergy)
+        from ..modules.boundaryConditions.thermal import finishThermalDirichlet
+        finishThermalDirichlet(self, dt, config, schemeConfig)
         from ..modules.shockCapturing.wrapper import advanceViscositySwitchStep  # (circular at import time)
         advanceViscositySwitchStep(self, initialState, returnValues, schemeConfig, config)
 

@@ -1,7 +1,9 @@
 """Translate existing driven fluid-band BCs to authoritative PESPH E/A.
 
 Kidder and Rayleigh-Taylor prescribe rho/u/v in fluid buffer bands. Reuse
-their existing dispatcher, then translate prescribed thermal values once.
+their dispatcher, then enforce the authoritative energy or coupled entropy
+constraint. Prescribed u takes priority over the auxiliary density input: the
+pressure-volume density remains an outcome of the discrete closure.
 These are driven open-system bands, not a solid-wall pressure closure.
 """
 
@@ -19,6 +21,7 @@ def applyPESPHDirichlet(system, dt, config, scheme, pressure):
     state = system.state
     thermal = torch.zeros_like(state.masses, dtype=torch.bool)
     velocity = thermal.clone()
+    energy = thermal.clone()
     prescribedRho = pressure.thermodynamicDensity.clone()
     for bc in conditions:
         names = set(bc.dirichletFunctions)
@@ -27,6 +30,8 @@ def applyPESPHDirichlet(system, dt, config, scheme, pressure):
         mask = bc.sdf(getPeriodicPositions(state.positions, config.domain))[0] < 0
         if names & {'densities', 'internalEnergies'}:
             thermal |= mask
+        if 'internalEnergies' in names:
+            energy |= mask
         if 'velocities' in names:
             velocity |= mask
     enforceDirichlet(system, system.t, dt, config, scheme)
@@ -39,5 +44,10 @@ def applyPESPHDirichlet(system, dt, config, scheme, pressure):
         state.totalEnergies = torch.where(thermal | velocity, target, state.totalEnergies)
     else:
         target = (scheme.gamma-1)*state.internalEnergies*prescribedRho.pow(1-scheme.gamma)
-        state.entropies = torch.where(thermal, target, state.entropies)
+        # Preserve the historical density-only entropy prescription. An
+        # explicit u prescription instead solves the nonlocal closure, without
+        # changing entropy on unconstrained rows.
+        state.entropies = torch.where(thermal & ~energy, target, state.entropies)
+        from .thermalBoundary import matchBoundaryInternalEnergy
+        matchBoundaryInternalEnergy(state, config, scheme, state.internalEnergies.clone(), energy, system.adjacency)
     return True

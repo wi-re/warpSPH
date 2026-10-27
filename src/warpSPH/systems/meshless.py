@@ -44,6 +44,8 @@ class MeshlessState(ParticleIdentityState):
     pressures: torch.Tensor = copied(tags=('pressure',), default=None)
     soundspeeds: torch.Tensor = copied(tags=('soundSpeed',), default=None)
 
+    # Accepted driven-state projection: thermal and kinetic energy exchange.
+    boundaryProjectionBudget: Optional[torch.Tensor] = constant(default=None)
 
 @dataclass
 class MeshlessSystemUpdate:
@@ -154,7 +156,12 @@ class MeshlessSystem(BaseIntegrationSystem):
                         buildGeometry(self.state.positions, self.state.supports, self.state.lam,
                                       config, scheme, self.domain, owner=self.state))
             if self.drivenParticles is not None:
+                from ..modules.boundaryConditions.thermal import caloricConserved
+                before = caloricConserved(self.state.Q)
                 self.drivenParticles.conserved(self.state, geometry, self.t, float(scheme.gamma))
+                exchange = caloricConserved(self.state.Q)-before
+                previous = self.state.boundaryProjectionBudget
+                self.state.boundaryProjectionBudget = (torch.zeros_like(exchange) if previous is None else previous)+exchange
             refreshPrimitives(self.state, geometry, particleGamma(self.state, scheme), scheme.nngb, config.dim,
                               updateSupports=False)
             if self.inflowReservoir is None:

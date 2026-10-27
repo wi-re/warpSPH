@@ -77,9 +77,11 @@ class PESPHSystem(CompressibleSystem):
             setattr(self.state, name, None if value is None else value.clone())
         from ..modules.pesph.stage import refreshPESPHState
         pressure = refreshPESPHState(self, config, schemeConfig)
+        from ..modules.boundaryConditions.thermal import finishThermalDirichlet
         from ..modules.pesph.boundaries import applyPESPHDirichlet
-        if applyPESPHDirichlet(self, dt, config, schemeConfig, pressure):
-            refreshPESPHState(self, config, schemeConfig, solveSupport=False)
+        if not finishThermalDirichlet(self, dt, config, schemeConfig, pressure=pressure):
+            if applyPESPHDirichlet(self, dt, config, schemeConfig, pressure):
+                refreshPESPHState(self, config, schemeConfig, solveSupport=False)
         if schemeConfig.dissipation:
             from ..modules.shockCapturing.wrapper import advanceViscositySwitchStep
             advanceViscositySwitchStep(self, initialState, returnValues, schemeConfig, config)

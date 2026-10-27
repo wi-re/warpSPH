@@ -364,3 +364,19 @@ Boundary-target defects persist under timestep/tableau refinement; heat-operator
 response varies with resolution/amplitude and some formulations switch off at
 equal pressure. Small physical slab/insulation/gravity gates remain pending
 boundary repair and a dimensional transport operator. No model was promoted.
+
+## Thermal implementation investigation (2026-10-27)
+
+Prioritize the measured thermal constraints and exchange budgets before further
+turbulence runs. Start with initialization and accepted-state enforcement,
+then isolate entropy/geometry conversion and dimensional diffusion. Preserve
+native fresh integration stages and qualify each change on the small controls
+before any larger coupled convection run.
+
+Thermal-state result: [repair and CPU qualification](../thermal_state_qualification_2026-10-27.md).
+Prescribed u now survives startup/acceptance, PESPH entropy is inverted against
+its closure, meshless bands can prescribe u independently of volume, and
+projection exchanges survive replay/restart/output. CPU toys and short coupled
+controls pass; no-prescription parity is bitwise in nine saved controls.
+Physical heat transport/wall fluxes, calibrated physical viscosity and GPU/long
+convection qualification remain open. Turbulence campaigns remain deferred.

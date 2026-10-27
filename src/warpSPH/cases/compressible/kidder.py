@@ -3,11 +3,10 @@
 The script form of this case was
 `examples/compressible/03-kidder-isentropic-compression.ipynb`.
 
-Two things make this case unlike the other compressible examples, and both are
-carried over as hooks rather than folded into the runner:
+The analytic solution supplies two case-specific ingredients:
 
 * the inner and outer boundary bands are *driven* from the analytic solution
-  after every step (`postStep`), not integrated;
+  by the shared accepted-state boundary lifecycle, not integrated;
 * `dt` is re-derived from the state every step (`timestep`), because the shell
   compresses by more than an order of magnitude over the run.
 """
@@ -81,22 +80,6 @@ def buildSystem(ctx: RunContext):
     return system
 
 
-def postStep(ctx: RunContext, state, step: int) -> None:
-    """Restore the driven state after the integrator's final energy update.
-
-    Dirichlet values set inside an RHS belong to that stage's copy. In
-    particular, compatible work can overwrite the prescribed internal energy
-    when assembling the accepted step. These externally driven particles must
-    obey all three prescriptions at the accepted time, too.
-    """
-    if isinstance(ctx.schemeConfig, MeshlessConfig):
-        return  # driven conserved states are restored by the stage lifecycle
-    from ...modules.boundaryConditions import enforceDirichlet
-    from ...modules.eos import refreshEOS
-    enforceDirichlet(state, float(state.t), 0., ctx.config, ctx.schemeConfig)
-    refreshEOS(state.state, ctx.schemeConfig)
-
-
 def _shell(ctx: RunContext, state):
     solution = ctx.scratch['solution']
     t = float(state.t)
@@ -166,7 +149,6 @@ kidderCase = registerCase(Case(
     buildSystem=buildSystem,
     configureScheme=configureScheme,
     diagnostics=diagnostics,
-    postStep=postStep,
     timestep=compressibleTimestep,
     setupPlot=setupPlot,
     updatePlot=updatePlot,

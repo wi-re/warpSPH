@@ -192,7 +192,7 @@ def loadTrajectory(
     for field, dataset in (('emitters', 'combinedEmitters'), ('bodyIDs', 'combinedBodyIDs')):
         static[field] = _toTensor(trajectoryFile[dataset], device).to(torch.int32) if dataset in trajectoryFile else None
 
-    storedFields = ('crkMassDensities', 'crkVolumes')
+    storedFields = ('crkMassDensities', 'crkVolumes', 'boundaryProjectionBudget')
     if schemeEnum is CompressibleSPHScheme.PESPH:
         from ..modules.pesph.initialization import CHECKPOINT_FIELDS
         missing = set(CHECKPOINT_FIELDS)-set(trajectoryFile)
@@ -253,7 +253,7 @@ def loadTrajectoryFrame(trajectoryFile, meta, frameIndex: int, schemeConfig=None
         divergence=torch.zeros_like(densities),
         alpha0s=torch.ones_like(densities), alphas=torch.ones_like(densities),
     )
-    for name in ('crkMassDensities', 'crkVolumes'):
+    for name in ('crkMassDensities', 'crkVolumes', 'boundaryProjectionBudget'):
         if name in frameFields:
             stateKwargs[name] = frameFields[name]
 

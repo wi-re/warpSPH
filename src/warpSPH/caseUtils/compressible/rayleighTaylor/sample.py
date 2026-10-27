@@ -111,6 +111,14 @@ def sampleRayleighTaylor(rho_b, rho_t, delta, g, L, dx, aspect, nx, config, sche
     compressibleSystem.state.velocities = vInitial
     # compressibleSystem.state.densities = rhoInitial
 
+    # The support/density solve and pressure initialization above replaced the
+    # preliminary band values. Restore the prescribed initial state last.
+    enforceDirichlet(compressibleSystem, compressibleSystem.t, config.dt, config, schemeConfig)
+    from ....modules.eos import refreshEOS
+    refreshEOS(compressibleSystem.state, schemeConfig)
+    compressibleSystem.state.totalEnergies = compressibleSystem.state.masses * (
+        compressibleSystem.state.internalEnergies + .5*compressibleSystem.state.velocities.square().sum(-1))
+
     # config.dt = computeTimestep(compressibleSystem, config, schemeConfig, dt = None)
     config.dt = computeTimestep(compressibleSystem, config, schemeConfig, dt = None) * 2/3
 
