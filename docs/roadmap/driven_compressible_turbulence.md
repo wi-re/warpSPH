@@ -349,3 +349,18 @@ User requested checking all schemes against RT-style Dirichlet thermal bands
 while GPU work remains contended. Audit completed on CPU in both precisions;
 the findings and implementation order are linked in Stage D. Solver changes
 and thermal-convection qualification are subsequent work.
+
+## Small thermal controls (2026-10-27)
+
+Measure the audited gaps with small CPU problems: uniform prescribed heating
+through stage/accepted state, a frozen-lattice thermal Fourier mode for the
+existing artificial conductivity, and an expanding pressure reservoir. Record
+explicit unsupported physical-diffusion/convection gates rather than treating
+a fitted artificial diffusion rate as calibrated physical heat transport.
+
+Results: [small thermal controls](../thermal_boundary_toys_2026-10-27.md).
+184 CPU diagnostics (92 per precision) and nine tests per precision complete.
+Boundary-target defects persist under timestep/tableau refinement; heat-operator
+response varies with resolution/amplitude and some formulations switch off at
+equal pressure. Small physical slab/insulation/gravity gates remain pending
+boundary repair and a dimensional transport operator. No model was promoted.

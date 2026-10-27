@@ -174,3 +174,6 @@ Code entry points: `cases/compressible/rayleighTaylor.py`,
 `modules/meshless/{boundary,reservoir,stages}.py`, `systems/meshless.py`,
 `modules/compressibleWall/wall.py`, `modules/dissipation/{rates,wp_conductivity}.py`
 and `modules/dissipation/pi/terms.py`, all beneath `src/warpSPH/`.
+
+Follow-up: [small CPU toy controls](thermal_boundary_toys_2026-10-27.md) isolate
+these effects without RT, and provide a reusable measurement probe.
