@@ -257,6 +257,9 @@ choosing its case. Add explicit resistivity when claiming controlled magnetic
 Reynolds or magnetic Prandtl numbers; numerical dissipation alone does not set
 those physical parameters.
 
+Independent [MHD references and implementation contracts](../mhd_scaffolding.md)
+are now available; production magnetic state, fluxes and cleaning remain open.
+
 ## Stage I Rayleigh–Bénard magnetoconvection
 
 Combine qualified thermal convection with the tested MHD solver. Specify field
@@ -393,3 +396,14 @@ oracles, explicit caloric units and signed face-flux energy references.
 22 CPU oracle checks pass; no new solver physics or GPU campaign. The stationary
 fixed-density controls must be mechanically frozen, and convection's common
 c_p diffusivity must be distinguished from the c_v heat-equation diffusivity.
+
+## MHD reference scaffolding (2026-10-27)
+
+[MHD scaffolding and contracts](../mhd_scaffolding.md) now supplies independent
+magnetic-energy/finite-source-work, wave-speed, Alfvén-wave, vector-potential,
+force-free resistive-decay and divergence-summary references; 26 CPU checks pass.
+The audit identifies hydro conserved-vector slicing and spatial/vector dimension
+coupling as prerequisites for magnetic integration. State/restart, divergence
+control, magnetic driving, resistivity, wall and magnetoconvection contracts are
+recorded. No production MHD algorithm or scheme qualification is introduced;
+turbulence campaigns remain deferred.
