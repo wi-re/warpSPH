@@ -1,11 +1,4 @@
-"""Resolve a scheme name/enum member to its `SchemeBundle`: the state, config,
-and update classes plus step/export/import functions for every registered SPH
-scheme (Monaghan, CompSPH, CRKSPH, deltaSPH, the five incompressible ones,
-artificial-compressibility, and the non-fluid wave equation). `_divergenceFree`
-imports `divergenceFree` (`divergenceFree.py`, renamed from `dfsph.py` in the
-pre-merge cleanup pass) lazily to avoid a circular import with
-`schemes/__init__.py`, which imports `divergenceFree` first.
-"""
+"""Resolve supported schemes to state/config/update, driver and codec bundles."""
 
 from warpSPHIntegrators.schemes import ProjectedStep, IntegrationSchemeType
 from dataclasses import dataclass, replace
@@ -216,59 +209,19 @@ def _sun2017DeltaSPH() -> SchemeBundle:
     )
 
 
-def _divergenceFree() -> SchemeBundle:
-    # Deferred, as the original branch was: it keeps `builder` from importing
-    # `divergenceFree` at its own import time. (`schemes/__init__` imports
-    # `divergenceFree` first in practice, so this is about the dependency
-    # edge, not about saving the load.) The config codecs come from
-    # `..configurations`, which is where they are defined --
-    # `divergenceFree` used to relay them only as a side effect of star
-    # importing that package.
-    from .incompressible.divergenceFree import divergenceFree_step
-    from ..systems.incompressible import (IncompressibleSystem, IncompressibleState,
-                                          IncompressibleSystemUpdate)
-    return SchemeBundle(
-        SimulationSystem=IncompressibleSystem,
-        SimulationState=IncompressibleState,
-        SimulationConfig=IncompressibleSPHConfig,
-        SimulationUpdate=IncompressibleSystemUpdate,
-        stepFunction=divergenceFree_step,
-        exportFunction=incompressibleConfigToDict,
-        importFunction=dictToIncompressibleSPHConfig,
-    )
-
-
-def _dfsph() -> SchemeBundle:
+def _dfsph(ordering='df_np_cd') -> SchemeBundle:
     from .incompressible.dfsph import dfsph_step
+    from ..configurations.incompressible import PredictorDFSPHConfig, ShiftDFSPHConfig
+    configType = {'df_np_cd': IncompressibleSPHConfig, 'np_df_cd': PredictorDFSPHConfig,
+                  'np_df_shift': ShiftDFSPHConfig}[ordering]
     from ..systems.incompressible import DFSPHState, DFSPHSystem, IncompressibleSystemUpdate
     return SchemeBundle(
         SimulationSystem=DFSPHSystem,
         SimulationState=DFSPHState,
-        SimulationConfig=IncompressibleSPHConfig,
+        SimulationConfig=configType,
         SimulationUpdate=IncompressibleSystemUpdate,
         integrationMethod=ProjectedStep,
         stepFunction=dfsph_step,
-        exportFunction=incompressibleConfigToDict,
-        importFunction=dictToIncompressibleSPHConfig,
-    )
-
-
-def _dfsphReference() -> SchemeBundle:
-    # Same lazy-import rationale as `_divergenceFree`. Reuses the incompressible
-    # state/config/update and their codecs -- the only thing that differs is the
-    # step function and the system's `finalize` (see
-    # `systems/incompressible.py::ProjectedSystem` and
-    # `schemes/incompressible/dfsphReference.py`).
-    from .incompressible.dfsphReference import dfsphReference_step
-    from ..systems.incompressible import (ProjectedSystem, IncompressibleState,
-                                          IncompressibleSystemUpdate)
-    return SchemeBundle(
-        SimulationSystem=ProjectedSystem,
-        SimulationState=IncompressibleState,
-        SimulationConfig=IncompressibleSPHConfig,
-        SimulationUpdate=IncompressibleSystemUpdate,
-        integrationMethod=ProjectedStep,
-        stepFunction=dfsphReference_step,
         exportFunction=incompressibleConfigToDict,
         importFunction=dictToIncompressibleSPHConfig,
     )
@@ -292,49 +245,8 @@ def _iisph() -> SchemeBundle:
     )
 
 
-def _omniIncompressible() -> SchemeBundle:
-    # Direct port of omniSPH's incompressible solver loop. Same lazy-import
-    # rationale as `_divergenceFree`; reuses the incompressible
-    # state/config/update and `ProjectedSystem` (the whole time
-    # integration happens inside the step). See `schemes/incompressible/omniIncompressible.py`.
-    from .incompressible.omniIncompressible import omniIncompressible_step
-    from ..systems.incompressible import (ProjectedSystem, IncompressibleState,
-                                          IncompressibleSystemUpdate)
-    return SchemeBundle(
-        SimulationSystem=ProjectedSystem,
-        SimulationState=IncompressibleState,
-        SimulationConfig=IncompressibleSPHConfig,
-        SimulationUpdate=IncompressibleSystemUpdate,
-        integrationMethod=ProjectedStep,
-        stepFunction=omniIncompressible_step,
-        exportFunction=incompressibleConfigToDict,
-        importFunction=dictToIncompressibleSPHConfig,
-    )
-
-
-def _band2018pb() -> SchemeBundle:
-    # IISPH with Pressure Boundaries (Band et al. 2018). Same lazy-import
-    # rationale as `_divergenceFree`; reuses the incompressible
-    # state/config/update and `ProjectedSystem` (the whole time
-    # integration happens inside the step). See `schemes/incompressible/band2018pb.py`.
-    from .incompressible.band2018pb import band2018pb_step
-    from ..systems.incompressible import (ProjectedSystem, IncompressibleState,
-                                          IncompressibleSystemUpdate)
-    return SchemeBundle(
-        SimulationSystem=ProjectedSystem,
-        SimulationState=IncompressibleState,
-        SimulationConfig=IncompressibleSPHConfig,
-        SimulationUpdate=IncompressibleSystemUpdate,
-        integrationMethod=ProjectedStep,
-        stepFunction=band2018pb_step,
-        exportFunction=incompressibleConfigToDict,
-        importFunction=dictToIncompressibleSPHConfig,
-    )
-
-
 def _artificialCompressible() -> SchemeBundle:
-    # Same lazy-import rationale as `_divergenceFree`: keeps `builder` from
-    # importing the scheme module at its own import time. See
+    # Import the dual-time implementation lazily. See
     # `schemes/incompressible/artificialCompressible.py` -- this scheme owns its whole real
     # step (a dual-time solve) and hands the integrator an exact delta, which
     # is why it pins `forwardEuler` and validates it at step entry.
@@ -380,12 +292,10 @@ _SCHEMES = {
     CompressibleSPHScheme.MFV: _mfv,
     WeaklyCompressibleSPHScheme.deltaSPH: _deltaSPH,
     WeaklyCompressibleSPHScheme.sun2017DeltaSPH: _sun2017DeltaSPH,
-    IncompressibleSPHScheme.divergenceFree: _divergenceFree,
     IncompressibleSPHScheme.dfsph: _dfsph,
-    IncompressibleSPHScheme.dfsphReference: _dfsphReference,
+    IncompressibleSPHScheme.dfsphPredictor: lambda: _dfsph('np_df_cd'),
+    IncompressibleSPHScheme.dfsphShift: lambda: _dfsph('np_df_shift'),
     IncompressibleSPHScheme.iisph: _iisph,
-    IncompressibleSPHScheme.omniIncompressible: _omniIncompressible,
-    IncompressibleSPHScheme.band2018pb: _band2018pb,
     ArtificialCompressibleSPHScheme.artificialCompressible: _artificialCompressible,
     WaveEquationScheme.waveEquation: _waveEquation,
 }
@@ -404,6 +314,7 @@ def buildScheme(
                       WaveEquationScheme]
 ) -> SchemeBundle:
     """Resolve a scheme name or enum member to its :class:`SchemeBundle`."""
+    rejectRetiredScheme(schemeName)
     if isinstance(schemeName, str):
         member = _ALIASES.get(schemeName.lower())
     else:
@@ -415,3 +326,19 @@ def buildScheme(
             f'{sorted(_ALIASES)}.'
         )
     return _SCHEMES[member]()
+
+
+RETIRED_SCHEMES = {
+    'divergencefree': 'dfsphShift (native VD+PS)',
+    'dfsphreference': 'dfsph (classic DFSPH)',
+    'omniincompressible': 'dfsphPredictor (predictor-first DFSPH)',
+    'band2018pb': "dfsph with dfsph.pressureBoundary='band2018' (experimental, static sampled walls only)",
+}
+
+
+def rejectRetiredScheme(name):
+    replacement = RETIRED_SCHEMES.get(str(getattr(name, 'name', name)).lower())
+    if replacement is not None:
+        raise ValueError(f"Scheme {name!r} is retired; select {replacement} explicitly. "
+                         "Native operators/policies differ; old checkpoints cannot be silently migrated. "
+                         "See docs/incompressible/MIGRATION.md.")

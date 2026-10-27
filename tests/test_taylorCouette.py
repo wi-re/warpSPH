@@ -15,7 +15,7 @@ from warpSPH.runner.caseSpec import CaseSpec  # noqa: E402
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA')
 
 
-def lattice(scheme='omniIncompressible', nx=48, n_h=2.505, **params):
+def lattice(scheme='dfsphPredictor', nx=48, n_h=2.505, **params):
     importAll()
     case = getCase('taylorCouette')
     kw = dict(integrationScheme='semiImplicitEuler', supportMode='SuperSymmetric', dt=2e-3, adaptiveDt=False) if scheme != 'deltaSPH' else {}

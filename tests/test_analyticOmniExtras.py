@@ -25,8 +25,8 @@ ROLL = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 def tank(params=None, nSteps=1, nh=2.57):
     importAll()
     case = getCase('sloshingTank')
-    spec = CaseSpec(caseName='omni', scheme='omniIncompressible', params={**case.params, 'wallRepresentation': 'analytic', 'rollDataFile': ROLL, 'rollStartTime': 100.0, **(params or {})}).merged(**case.defaults).merged(
-        scheme='omniIncompressible', integrationScheme='semiImplicitEuler', kernel='Wendland2', supportMode='SuperSymmetric', cflFactor=0.2, dt=1e-3, maxDt=2e-3, nx=100, n_h=nh, nSteps=nSteps,
+    spec = CaseSpec(caseName='omni', scheme='dfsphPredictor', params={**case.params, 'wallRepresentation': 'analytic', 'rollDataFile': ROLL, 'rollStartTime': 100.0, **(params or {})}).merged(**case.defaults).merged(
+        scheme='dfsphPredictor', integrationScheme='semiImplicitEuler', kernel='Wendland2', supportMode='SuperSymmetric', cflFactor=0.2, dt=1e-3, maxDt=2e-3, nx=100, n_h=nh, nSteps=nSteps,
         plot=False, store=False, progress=False, video=False, show=False, quiet=True)
     return run(case, spec)
 
@@ -71,14 +71,6 @@ def test_mls_wall_term_contracts_the_first_moment_like_the_hydrostatic_one():
     assert float((mls[near] - hyd[near]).norm(dim=1).max()) < 0.05 * ref
 
 
-@pytest.mark.parametrize('nh', [2.57, 4.0])
-def test_mls_wall_pressure_tank_stays_bounded(nh):
-    """The MLS wall pressure is the noisier closure (DFSPH2D's own `linear`: 1.5-2x the velocity, ~4x the kinetic energy of the hydrostatic one on a still column, OPEN_PROBLEMS 31): a still tank stays
-    bounded (peak < 1.5 m/s) and does not grow (the last 100 of 250 steps < 0.8 m/s: its noise floor is ~0.3); the hydrostatic closure stays the default."""
-    res = tank({'analyticWallPressure': 'mls'}, nSteps=250, nh=nh)
-    v = np.asarray(res.series('maxVelocity'))
-    assert float(np.nanmax(v)) < 1.5
-    assert float(np.nanmax(v[-100:])) < 0.8                       # the MLS closure's noise floor, not growth
 
 
 def test_xsph_conserves_momentum_and_smooths():
@@ -117,7 +109,7 @@ def test_boundary_friction_is_tangential_and_local():
 
 
 def test_delta_plus_refuses_the_mls_wall_pressure():
-    with pytest.raises(ValueError, match='omniIncompressible / divergenceFree options'):
+    with pytest.raises(ValueError, match='analyticWallPressure=mls is a retired projection option'):
         importAll()
         case = getCase('sloshingTank')
         spec = CaseSpec(caseName='x', scheme='deltaSPH', params={**case.params, 'wallRepresentation': 'analytic', 'analyticWallPressure': 'mls'}).merged(**case.defaults).merged(

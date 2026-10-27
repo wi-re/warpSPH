@@ -147,7 +147,7 @@ def extraData(ctx: RunContext, state) -> Dict[str, Any]:
 
 staticBlobCase = registerCase(Case(
     name='staticBlob',
-    scheme='divergenceFree',
+    scheme='dfsph',
     description='Static square blob in free space (2D, periodic): nothing should happen.',
     buildSystem=buildSystem,
     configureScheme=configureScheme,

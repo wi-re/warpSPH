@@ -16,7 +16,7 @@ import os
 
 import torch
 
-from ..incompressible.compactProjection import MORRIS_ETA2, _dwendland2, _anyPeriodic, minimumImage, morrisCalibration
+from ..analyticBoundary.viscosityCalibration import MORRIS_ETA2, _dwendland2, _anyPeriodic, minimumImage, morrisCalibration
 from .wallMoments import CurvedWallMoments
 
 __all__ = ['complementSums', 'closureAcceleration', 'wallNoSlipAcceleration']

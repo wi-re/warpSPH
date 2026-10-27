@@ -1,50 +1,18 @@
-"""`IncompressibleSPHConfig`, the scheme config for the DFSPH divergence-free
-incompressible solver (`schemes/incompressible/divergenceFree.py`, `modules/incompressible/{incompressible,
-divergenceFree}.py`), registered in the incompressible `SchemeBundle` in
-`schemes/builder.py`. Bundles fluid properties, adaptive support, diffusion,
-viscosity switch, boundary conditions, delta-SPH shifting, `regions`/
-`rigidBodies`, surface detection, gravity, and `solverConfig` (the relaxed-Jacobi
-pressure/divergence-free solver settings). Regions, rigid bodies, shifting selectors and both convergence-check schedules
-round-trip through the established configuration codecs. Missing legacy keys
-retain the previous decoder defaults.
-"""
+"""Shared physical configuration and independent native IISPH/DFSPH policies."""
 
 __all__ = ['IncompressibleSPHConfig', 'incompressibleConfigToDict', 'dictToIncompressibleSPHConfig']
 
-# from ..system import CompressibleSystem, CompressibleSystemUpdate
-# from ..config import SimulationConfig
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List
 import torch
-
-# from ..modules import *
-from warpSPHCore import *
-
-from dataclasses import dataclass, field
-from typing import Optional
-from ..enumTypes import AdaptiveSupportScheme, ViscositySwitch, EquationOfState
-
-from .moduleConfigurations.diffusionParameters import DiffusionParameters, buildDefaultDiffusionParamsCompressibleSPH, diffusionParamsToDict, dictToDiffusionParams
-from .moduleConfigurations.viscositySwitchParameters import ViscositySwitchConfig, viscositySwitchConfigToDict, dictToViscositySwitchConfig
-
-
-
-
-from .moduleConfigurations.boundaryConditions import BoundaryCondition, BoundaryConditionType, boundaryConditionToDict, dictToBoundaryCondition
-from typing import List
-
-
-from dataclasses import dataclass, field
-from typing import Optional
-from enum import Enum
-
-from .region import RegionType, ParticleRegion
-from .rigidBody import RigidBody
-
-from .moduleConfigurations.surfaceDetection import SurfaceDetectionConfig, buildDefaultSurfaceDetectionConfig
 from .moduleConfigurations import *
+from .moduleConfigurations.boundaryConditions import boundaryConditionToDict, dictToBoundaryCondition
 from .moduleConfigurations.shifting import shiftPropertiesToDict, dictToShiftProperties
 from .moduleConfigurations.iisph import IISPHConfig
 from .moduleConfigurations.dfsph import DFSPHConfig, dictToDFSPHConfig
-from dataclasses import asdict
+from .moduleConfigurations.viscositySwitchParameters import ViscositySwitchConfig, viscositySwitchConfigToDict, dictToViscositySwitchConfig
+from .region import ParticleRegion
+from .rigidBody import RigidBody
 from ..enumTypes import *
 
 @dataclass
@@ -61,14 +29,13 @@ class IncompressibleSPHConfig:
 
     viscositySwitchParams: ViscositySwitchConfig = field(default_factory=ViscositySwitchConfig)
 
-    schemeName: str = field(default='Compressible SPH', metadata={'description': 'Name of the compressible SPH scheme to use'})
+    schemeName: str = field(default='Incompressible SPH', metadata={'description': 'Name of the native projection scheme'})
 
     boundaryConditions: List[BoundaryCondition] = field(default_factory=list, metadata={'description': 'List of boundary conditions to apply in the simulation'})
 
     dt_viscosityConstraint: bool = field(default=True, metadata={'description': 'Whether to apply viscosity constraint in timestep computation'})
     dt_accelerationConstraint: bool = field(default=True, metadata={'description': 'Whether to apply acceleration constraint in timestep computation'})
     dt_acousticConstraint: bool = field(default=True, metadata={'description': 'Whether to apply acoustic constraint in timestep computation'})
-    bandViscosity: bool = field(default=False, metadata={'description': 'Include configured physical velocity diffusion in the Band non-pressure predictor (explicit comparison variant).'})
     pressureForceTerm: PressureForceScheme = field(default=PressureForceScheme.Antuono, metadata={'description': 'Pressure force term to use'})
 
     shiftProperties: ShiftProperties = field(default_factory=buildDefaultShiftProperties, metadata={'description': 'Properties for the delta-SPH shift'})
@@ -82,11 +49,24 @@ class IncompressibleSPHConfig:
 
     bandwith: float = field(default=10.0, metadata={'description': 'Bandwith for the divergence-free noise sampling module'})
 
-    solverConfig : IncompressibleSolverConfig = field(default_factory=buildDefaultIncompressibleSolverConfig, metadata={'description': 'Configuration for the incompressible solver'})
     iisph: IISPHConfig = field(default_factory=IISPHConfig, metadata={'description': 'Native IISPH policy; independent of the composed DFSPH/shifting solvers'})
     dfsph: DFSPHConfig = field(default_factory=DFSPHConfig, metadata={'description': 'Native DFSPH density/divergence policies; static boundary settings are in iisph'})
 
-from typing import Dict, Any
+    def validate(self, simulationConfig=None):
+        if hasattr(self, 'solverConfig'):
+            raise ValueError('solverConfig is retired; configure native iisph/dfsph policies')
+        self.iisph.validate()
+        self.dfsph.validate()
+
+
+@dataclass
+class PredictorDFSPHConfig(IncompressibleSPHConfig):
+    dfsph: DFSPHConfig = field(default_factory=lambda: DFSPHConfig(ordering='np_df_cd'))
+
+
+@dataclass
+class ShiftDFSPHConfig(IncompressibleSPHConfig):
+    dfsph: DFSPHConfig = field(default_factory=lambda: DFSPHConfig(ordering='np_df_shift'))
 
 
 def incompressibleConfigToDict(config: IncompressibleSPHConfig) -> Dict[str, Any]:
@@ -110,7 +90,6 @@ def incompressibleConfigToDict(config: IncompressibleSPHConfig) -> Dict[str, Any
         'dt_viscosityConstraint': config.dt_viscosityConstraint,
         'dt_accelerationConstraint': config.dt_accelerationConstraint,
         'dt_acousticConstraint': config.dt_acousticConstraint,
-        'bandViscosity': config.bandViscosity,
         'iisph': asdict(config.iisph),
         'dfsph': asdict(config.dfsph),
         'bandwith': config.bandwith,
@@ -130,51 +109,7 @@ def incompressibleConfigToDict(config: IncompressibleSPHConfig) -> Dict[str, Any
             'normalSource': config.surfaceDetectionConfig.normalSource.name,
         },
         'gravityConfig': gravityConfigurationToDict(config.gravityConfig),
-        'solverConfig': {
-            'pressureSolver': {
-                'minIterations': config.solverConfig.pressureSolver.minIterations,
-                'maxIterations': config.solverConfig.pressureSolver.maxIterations,
-                'tolerance': config.solverConfig.pressureSolver.tolerance,
-                'relaxationFactor': config.solverConfig.pressureSolver.relaxationFactor,
-                'relaxationMode': config.solverConfig.pressureSolver.relaxationMode.name,
-                'solverType': config.solverConfig.pressureSolver.solverType.name,
-                'rtol': config.solverConfig.pressureSolver.rtol,
-                'atol': config.solverConfig.pressureSolver.atol,
-                'restart': config.solverConfig.pressureSolver.restart,
-                'krylovFp64': config.solverConfig.pressureSolver.krylovFp64,
-                'boundaryOperatorTerms': config.solverConfig.pressureSolver.boundaryOperatorTerms.name,
-                'convergenceCriterion': config.solverConfig.pressureSolver.convergenceCriterion.name,
-                'convergenceCheckSchedule': config.solverConfig.pressureSolver.convergenceCheckSchedule,
-            },
-            'divergenceFreeSolver': {
-                'minIterations': config.solverConfig.divergenceFreeSolver.minIterations,
-                'maxIterations': config.solverConfig.divergenceFreeSolver.maxIterations,
-                'tolerance': config.solverConfig.divergenceFreeSolver.tolerance,
-                'relaxationFactor': config.solverConfig.divergenceFreeSolver.relaxationFactor,
-                'relaxationMode': config.solverConfig.divergenceFreeSolver.relaxationMode.name,
-                'solverType': config.solverConfig.divergenceFreeSolver.solverType.name,
-                'rtol': config.solverConfig.divergenceFreeSolver.rtol,
-                'atol': config.solverConfig.divergenceFreeSolver.atol,
-                'restart': config.solverConfig.divergenceFreeSolver.restart,
-                'krylovFp64': config.solverConfig.divergenceFreeSolver.krylovFp64,
-                'boundaryOperatorTerms': config.solverConfig.divergenceFreeSolver.boundaryOperatorTerms.name,
-                'convergenceCriterion': config.solverConfig.divergenceFreeSolver.convergenceCriterion.name,
-                'convergenceCheckSchedule': config.solverConfig.divergenceFreeSolver.convergenceCheckSchedule,
-            },
-            'integrateRho': config.solverConfig.integrateRho,
-            'densityEvolution': config.solverConfig.densityEvolution.name,
-            # None = no bundle-level override; each solver's own setting stands.
-            'boundaryOperatorTerms': (config.solverConfig.boundaryOperatorTerms.name
-                                     if config.solverConfig.boundaryOperatorTerms is not None else None),
-            'forceShiftPressureGauge': config.solverConfig.forceShiftPressureGauge,
-            'boundaryPressureMode': config.solverConfig.boundaryPressureMode.name,
-            'mdbcNoPenetrationShift': config.solverConfig.mdbcNoPenetrationShift,
-            'warmStartConstantDensity': config.solverConfig.warmStartConstantDensity,
-            'akinciBoundaryVolume': config.solverConfig.akinciBoundaryVolume,
-            'akinciBoundaryVolumeScale': config.solverConfig.akinciBoundaryVolumeScale,
-            'shiftPressureGauge': config.solverConfig.shiftPressureGauge.name,
-            'shiftApplication': config.solverConfig.shiftApplication.name,
-        }
+
     }
 
 def dictToIncompressibleSPHConfig(configDict: Dict[str, Any]) -> IncompressibleSPHConfig:
@@ -197,7 +132,6 @@ def dictToIncompressibleSPHConfig(configDict: Dict[str, Any]) -> IncompressibleS
     config.dt_viscosityConstraint = configDict['dt_viscosityConstraint']
     config.dt_accelerationConstraint = configDict['dt_accelerationConstraint']
     config.dt_acousticConstraint = configDict['dt_acousticConstraint']
-    config.bandViscosity = bool(configDict.get('bandViscosity', False))
     config.iisph = IISPHConfig(**configDict.get('iisph', {}))
     config.iisph.validate()
     config.dfsph = dictToDFSPHConfig(configDict.get('dfsph', {}))
@@ -220,95 +154,11 @@ def dictToIncompressibleSPHConfig(configDict: Dict[str, Any]) -> IncompressibleS
             normalSource=NormalSource[surfaceConfigDict.get('normalSource', buildDefaultSurfaceDetectionConfig().normalSource.name)] if isinstance(surfaceConfigDict.get('normalSource', buildDefaultSurfaceDetectionConfig().normalSource.name), str) else surfaceConfigDict.get('normalSource', buildDefaultSurfaceDetectionConfig().normalSource),
         )
     config.gravityConfig = dictToGravityConfiguration(configDict['gravityConfig']) if configDict.get('gravityConfig') is not None else buildDefaultGravityConfiguration()
-    solverConfigDict = configDict.get('solverConfig', {})
-    psDict = solverConfigDict.get('pressureSolver', {})
-    dfDict = solverConfigDict.get('divergenceFreeSolver', {})
-
-    def _solverType(d):
-        v = d.get('solverType', PressureSolverType.relaxedJacobi)
-        return PressureSolverType[v] if isinstance(v, str) else v
-
-    def _relaxationMode(d):
-        v = d.get('relaxationMode', JacobiRelaxationMode.fixed)
-        return JacobiRelaxationMode[v] if isinstance(v, str) else v
-
-    def _boundaryPressureMode(d):
-        v = d.get('boundaryPressureMode', BoundaryPressureMode.mdbcDensity)
-        return BoundaryPressureMode[v] if isinstance(v, str) else v
-
-    def _shiftApplication(d):
-        v = d.get('shiftApplication',
-                  buildDefaultIncompressibleSolverConfig().shiftApplication)
-        return ShiftApplication[v] if isinstance(v, str) else v
-
-    def _densityEvolution(d):
-        v = d.get('densityEvolution',
-                  buildDefaultIncompressibleSolverConfig().densityEvolution)
-        return DensityEvolution[v] if isinstance(v, str) else v
-
-    def _convergenceCriterion(d, default):
-        v = d.get('convergenceCriterion', default)
-        return JacobiConvergenceCriterion[v] if isinstance(v, str) else v
-
-    def _boundaryOperatorTerms(d, default):
-        v = d.get('boundaryOperatorTerms', default)
-        return BoundaryOperatorTerms[v] if isinstance(v, str) else v
-
-    def _shiftPressureGauge(d):
-        v = d.get('shiftPressureGauge',
-                  buildDefaultIncompressibleSolverConfig().shiftPressureGauge)
-        return ShiftPressureGauge[v] if isinstance(v, str) else v
-
-    config.solverConfig = IncompressibleSolverConfig(
-        pressureSolver=RelaxedJacobiSolverConfig(
-            minIterations=psDict.get('minIterations', buildDefaultPSConfig().minIterations),
-            maxIterations=psDict.get('maxIterations', buildDefaultPSConfig().maxIterations),
-            tolerance=psDict.get('tolerance', buildDefaultPSConfig().tolerance),
-            relaxationFactor=psDict.get('relaxationFactor', buildDefaultPSConfig().relaxationFactor),
-            relaxationMode=_relaxationMode(psDict),
-            solverType=_solverType(psDict),
-            rtol=psDict.get('rtol', buildDefaultPSConfig().rtol),
-            atol=psDict.get('atol', buildDefaultPSConfig().atol),
-            restart=psDict.get('restart', buildDefaultPSConfig().restart),
-            krylovFp64=psDict.get('krylovFp64', buildDefaultPSConfig().krylovFp64),
-            boundaryOperatorTerms=_boundaryOperatorTerms(psDict, buildDefaultPSConfig().boundaryOperatorTerms),
-            convergenceCriterion=_convergenceCriterion(psDict, buildDefaultPSConfig().convergenceCriterion),
-            convergenceCheckSchedule=psDict.get('convergenceCheckSchedule', buildDefaultPSConfig().convergenceCheckSchedule),
-        ),
-        divergenceFreeSolver=RelaxedJacobiSolverConfig(
-            minIterations=dfDict.get('minIterations', buildDefaultDFConfig().minIterations),
-            maxIterations=dfDict.get('maxIterations', buildDefaultDFConfig().maxIterations),
-            tolerance=dfDict.get('tolerance', buildDefaultDFConfig().tolerance),
-            relaxationFactor=dfDict.get('relaxationFactor', buildDefaultDFConfig().relaxationFactor),
-            relaxationMode=_relaxationMode(dfDict),
-            solverType=_solverType(dfDict),
-            rtol=dfDict.get('rtol', buildDefaultDFConfig().rtol),
-            atol=dfDict.get('atol', buildDefaultDFConfig().atol),
-            restart=dfDict.get('restart', buildDefaultDFConfig().restart),
-            krylovFp64=dfDict.get('krylovFp64', buildDefaultDFConfig().krylovFp64),
-            boundaryOperatorTerms=_boundaryOperatorTerms(dfDict, buildDefaultDFConfig().boundaryOperatorTerms),
-            convergenceCriterion=_convergenceCriterion(dfDict, buildDefaultDFConfig().convergenceCriterion),
-            convergenceCheckSchedule=dfDict.get('convergenceCheckSchedule', buildDefaultDFConfig().convergenceCheckSchedule),
-        ),
-        integrateRho=solverConfigDict.get('integrateRho', buildDefaultIncompressibleSolverConfig().integrateRho),
-        densityEvolution=_densityEvolution(solverConfigDict),
-        boundaryOperatorTerms=_boundaryOperatorTerms(
-            solverConfigDict, buildDefaultIncompressibleSolverConfig().boundaryOperatorTerms),
-        forceShiftPressureGauge=solverConfigDict.get(
-            'forceShiftPressureGauge', buildDefaultIncompressibleSolverConfig().forceShiftPressureGauge),
-        boundaryPressureMode=_boundaryPressureMode(solverConfigDict),
-        mdbcNoPenetrationShift=solverConfigDict.get(
-            'mdbcNoPenetrationShift', buildDefaultIncompressibleSolverConfig().mdbcNoPenetrationShift),
-        warmStartConstantDensity=solverConfigDict.get(
-            'warmStartConstantDensity', buildDefaultIncompressibleSolverConfig().warmStartConstantDensity),
-        akinciBoundaryVolume=solverConfigDict.get(
-            'akinciBoundaryVolume', buildDefaultIncompressibleSolverConfig().akinciBoundaryVolume),
-        akinciBoundaryVolumeScale=solverConfigDict.get(
-            'akinciBoundaryVolumeScale', buildDefaultIncompressibleSolverConfig().akinciBoundaryVolumeScale),
-        shiftPressureGauge=_shiftPressureGauge(solverConfigDict),
-        shiftApplication=_shiftApplication(solverConfigDict),
-    )
-    
-
-
+    if configDict.get('solverConfig'):
+        if 'iisph' not in configDict or 'dfsph' not in configDict:
+            raise ValueError('Legacy incompressible solverConfig is retired; rebuild the configuration '
+                             'with native iisph/dfsph policies. See docs/incompressible/MIGRATION.md.')
+        import warnings
+        warnings.warn('Ignoring retired solverConfig in a native configuration; only iisph/dfsph '
+                      'policies control native projections.', DeprecationWarning, stacklevel=2)
     return config

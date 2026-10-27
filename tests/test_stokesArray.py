@@ -1,6 +1,7 @@
 """`stokesArray` (periodic array of analytic cylinders / squares, stage 3 E6) and delta+ `pressureConsistent` (E4): a uniform pressure exerts no force, the case runs on every analytic-wall scheme and
 carries the right load; the drag coefficient against Sangani-Acrivos is `scripts/probe_stokesArray.py` (20 s, too long for a test).
 """
+from dataclasses import replace
 import numpy as np
 import pytest
 import torch
@@ -17,6 +18,13 @@ pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA')
 def array(scheme='deltaSPH', params=None, nSteps=1, nx=32):
     importAll()
     case = getCase('stokesArray')
+    if scheme != 'deltaSPH':
+        original = case.configureScheme
+        def configured(ctx):
+            original(ctx)
+            # Same declared relaxation as the prepared native comparison.
+            ctx.schemeConfig.iisph.relaxationFactor = .25
+        case = replace(case, configureScheme=configured)
     inc = scheme != 'deltaSPH'
     spec = CaseSpec(caseName='arr', scheme=scheme, params={**case.params, **(params or {})}).merged(**case.defaults).merged(
         scheme=scheme, nx=nx, nSteps=nSteps, plot=False, store=False, progress=False, video=False, show=False, quiet=True,
@@ -39,19 +47,6 @@ def test_the_array_cell_holds_the_body_and_the_lattice_around_it():
     assert r.ctx.schemeConfig.boundaryProvider.scene.periodic is not None
 
 
-def test_the_disk_is_lattice_matched_to_its_oracle_per_scheme():
-    # the incompressible loops' oracle (DFSPH2D) runs at H = 2.505 dx, the WC delta+ oracle
-    # (DeltaSPH2D) at H = 4.0 dx: the case retargets the support per scheme so a default run
-    # (n_h left at the case default) is lattice-matched to its own oracle
-    def supp(r):
-        st = r.state.state
-        f = st.kinds == 0
-        return float(st.supports[f].max()) / r.ctx.config.dx
-
-    assert supp(array('omniIncompressible', {'wallViscosityClosure': 'noslipMoment', 'closedPreset': True})) == pytest.approx(2.505, rel=0.02)
-    assert supp(array()) == pytest.approx(4.0, rel=0.02)
-
-
 @pytest.mark.parametrize('consistent', [False, True])
 def test_pressure_consistent_removes_the_force_of_a_uniform_pressure(consistent):
     from warpSPH.modules.pressure import computePressureForceSurfaceAware
@@ -72,19 +67,12 @@ def test_pressure_consistent_removes_the_force_of_a_uniform_pressure(consistent)
         assert mag > 0.05 * 7.0 / 0.0833, mag                        # the cut lattice on the curved wall: a spurious force of a uniform pressure
 
 
-@pytest.mark.parametrize('scheme', ['omniIncompressible', 'divergenceFree'])
-def test_the_incompressible_array_carries_the_body_force_load(scheme):
-    r = array(scheme, {'wallViscosityClosure': 'noslipMoment', 'closedPreset': scheme == 'omniIncompressible'}, nSteps=500)
-    t = np.asarray(r.series('t'))
-    F = np.asarray(r.series('bodyLoad'))
-    M = np.asarray(r.series('fluidMass'))
-    U = np.asarray(r.series('superficialVelocity'))
+@pytest.mark.parametrize('scheme', ['dfsph', 'dfsphPredictor', 'dfsphShift', 'iisph'])
+def test_native_array_keeps_declared_support_and_does_not_claim_legacy_drag(scheme):
+    r = array(scheme, {'wallViscosityClosure': 'noslipMoment'}, nSteps=2, nx=16)
     st = r.state.state
-    f = st.kinds == 0
+    fluid = st.kinds == 0
+    assert float(st.supports[fluid].max())/r.ctx.config.dx == pytest.approx(4.)
     assert not r.diverged
-    assert float(np.nanmax(r.series('maxVelocity'))) < 0.5
-    assert 0.0 < U[-1] < 0.03 * float(t[-1])                          # held back by the cylinder (a free fluid reaches f t)
-    lo, hi = len(t) // 2, len(t) - 1
-    # momentum balance: the body force on the fluid = the load on the body + the rate of change of the fluid momentum
-    dMom = (U[hi] - U[lo]) / (t[hi] - t[lo]) * 1.0                      # d(sum m u / L^2)/dt with rho0 = 1
-    assert (F[lo:hi]).mean() + dMom == pytest.approx(0.03 * float(M[0]), rel=0.08)
+    assert 'bodyLoad' not in r.trajectory[-1] and 'dragCoefficient' not in r.trajectory[-1]
+    assert np.isfinite(r.trajectory[-1]['superficialVelocity'])

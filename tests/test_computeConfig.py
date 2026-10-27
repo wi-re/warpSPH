@@ -90,25 +90,6 @@ def test_checkScheduleResolution():
     assert set(CHECK_SCHEDULES) == {'every', 'adaptive'} and set(EXECUTION_MODES) == {'eager', 'graph', 'auto'}
 
 
-def test_krylovIntervalReachesThePressureSolver(monkeypatch):
-    import warpSPH.modules.incompressible.krylov as krylov
-    seen = {}
-
-    def fake(matvec, b, x0, **kw):
-        seen.update(kw)
-        return b, 0, [torch.zeros(())]
-    monkeypatch.setattr(krylov, 'cgSolve', fake)
-    monkeypatch.setattr(krylov, 'buildIISPHMatvec', lambda *a, **k: (lambda p: p))
-    monkeypatch.setattr(krylov, 'buildIISPHPrecond', lambda *a, **k: torch.ones(4))
-    monkeypatch.setattr(krylov, 'computePressureAccelIISPH', lambda **k: torch.zeros(4, 2))
-    monkeypatch.setattr(krylov, 'resolveBoundaryOperatorTerms', lambda *a, **k: types.SimpleNamespace(operatorMovesBoundary=True))
-    particles = types.SimpleNamespace(kinds=torch.zeros(4, dtype=torch.int32), pressures=torch.zeros(4), densities=torch.ones(4))
-    solverCfg = types.SimpleNamespace(solverType=krylov.PressureSolverType.cg, rtol=1e-5, atol=0.0, maxIterations=5, restart=30, krylovFp64=False)
-    schemeConfig = types.SimpleNamespace(solverConfig=types.SimpleNamespace())
-    krylov.solvePressureKrylov(particles, _cfg(krylovCheckEvery=3), schemeConfig, None, torch.ones(4), 1.0, solverCfg, gauge=None)
-    assert seen['checkEvery'] == 3
-
-
 def _dambreak(**spec):
     from warpSPH.cases.freeSurface.dambreak import dambreakCase
     from warpSPH.runner import run

@@ -55,7 +55,7 @@ def load_dataset(root):
     return manifest, rows
 
 
-def compose(baseline, prepared, *, native_only=False):
+def compose(baseline, prepared, *, native_only=True):
     baseline, prepared = baseline.resolve(), prepared.resolve()
     bm, br = load_dataset(baseline)
     pm, pr = load_dataset(prepared)
@@ -313,7 +313,7 @@ def report(root, manifest, rows, images):
     (root/'comparison.html').write_text('\n'.join(body)+ '</table>')
 
 
-def build(baseline, prepared, output, *, native_only=False):
+def build(baseline, prepared, output, *, native_only=True):
     manifest, rows = compose(baseline, prepared, native_only=native_only)
     output = output.resolve()
     # A separate empty destination prevents any accidental source/report overwrite.
@@ -351,7 +351,7 @@ if __name__ == '__main__':
     parser.add_argument('--baseline', type=Path, required=True)
     parser.add_argument('--prepared', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--native-only', action='store_true',
+    parser.add_argument('--native-only', action='store_true', default=True,
                         help='Select the complete four-method current native cohort; omit historical legacy projections.')
     args = parser.parse_args()
     build(args.baseline, args.prepared, args.out, native_only=args.native_only)

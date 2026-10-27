@@ -15,21 +15,14 @@ def initializeHydrostaticPressure(ctx, system):
     """Seed the at-rest profile in the gauge consumed by the selected route.
 
     Raw nonnegative pressure is needed by the free-surface density projections.
-    Only the explicitly selected legacy VD+PS solver uses a mean-shifted seed.
     Fluid and sampled wall rows share the same profile; ghosts are not sources.
     """
-    from ..enumTypes import IncompressibleSPHScheme
     state, sc = system.state, ctx.schemeConfig
     fluid = state.kinds == 0
     surface = state.positions[fluid, 1].max()
     gravity = float(sc.gravityConfig.magnitude) if sc.gravityConfig.active else 0.0
     pressure = sc.fluid.restDensity*gravity*(surface-state.positions[:, 1]).clamp_min(0)
     gauge = 'free-surface-zero'
-    if ctx.scheme == IncompressibleSPHScheme.divergenceFree:
-        from ..schemes.incompressible import divergenceFree
-        if divergenceFree.DIVERGENCE_SOLVER == 'vdps':
-            pressure = pressure-pressure[fluid].mean()
-            gauge = 'legacy-vdps-mean-zero'
     state.pressures = torch.where(state.kinds != 2, pressure, torch.zeros_like(pressure))
     ctx.scratch['initialPressureCalibration'] = dict(gauge=gauge, surface=float(surface),
         fluid_min=float(pressure[fluid].min()), fluid_max=float(pressure[fluid].max()))
@@ -37,10 +30,10 @@ def initializeHydrostaticPressure(ctx, system):
 
 def initializeProjectionDensity(ctx, system):
     state = system.state
-    from ..enumTypes import IncompressibleSPHScheme
-    if ctx.scheme in (IncompressibleSPHScheme.iisph, IncompressibleSPHScheme.dfsph):
+    from ..enumTypes import IncompressibleSPHScheme, isDFSPHScheme
+    if (ctx.scheme == IncompressibleSPHScheme.iisph or isDFSPHScheme(ctx.scheme)):
         config, schemeConfig = ctx.config, ctx.schemeConfig
-        if ctx.scheme == IncompressibleSPHScheme.dfsph:
+        if isDFSPHScheme(ctx.scheme):
             schemeConfig.dfsph.validate()
         if config.calibrateNormalization:
             from warpSPHCore.util.latticeDensity import latticeDensityFactor
@@ -65,3 +58,31 @@ def initializeProjectionDensity(ctx, system):
                   p99=float(torch.quantile(rho.float(), 0.99)))
     ctx.scratch['initialDensityCalibration'] = report
     return report
+
+
+def validateProjectionOptions(ctx):
+    """Fail explicit legacy options that native operators do not implement."""
+    defaults = dict(projection='jacobi', closedPreset=False, particleShift='none',
+                    densitySolve=True, xsphCoefficient=0., xsphScale=0., boundaryFriction=0.)
+    for name, default in defaults.items():
+        if name in ctx.spec.params and ctx.spec.params[name] != default:
+            raise ValueError(f'{name}={ctx.spec.params[name]!r} is a retired projection option; '
+                             'select dfsph/dfsphPredictor/dfsphShift and native iisph/dfsph policies. '
+                             'See docs/incompressible/MIGRATION.md.')
+    if ctx.spec.params.get('analyticWallPressure') == 'mls':
+        raise ValueError('analyticWallPressure=mls is a retired projection option; use native wall closure')
+
+
+def physicalProjectionPressure(state, schemeConfig):
+    """Physical pressure, excluding VD+PS's auxiliary displacement multiplier.
+
+    Never reinterpret soundspeeds or mutate the density pressure warm start.
+    Native IISPH has only density pressure; DFSPH stores its stages separately.
+    """
+    density = getattr(state, 'pressures', None)
+    divergence = getattr(state, 'divergencePressures', None)
+    if divergence is None:
+        return density
+    if schemeConfig.dfsph.ordering == 'np_df_shift':
+        return divergence
+    return divergence if density is None else density + divergence

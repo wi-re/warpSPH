@@ -14,8 +14,8 @@ holds for a **one-stage, one-evaluation** integrator: under RK2 the solve would
 run twice per step and the results would be *blended*, which is wrong and not
 visibly wrong. `ArtificialCompressibleSPHConfig.validate` (called once per run by the runner) therefore refuses anything else,
 loudly, at step entry -- `cases/freeSurface/dambreak.py` documents the same class of trap
-for `divergenceFree`/`semiImplicitEuler` and notes that nothing enforces it;
-here it is enforced.
+for full-state maps. Native DFSPH uses ProjectedStep to enforce one map
+evaluation; this dual-time route enforces its own one-stage contract.
 
 The loop (Eqs. 38-48)
 ---------------------

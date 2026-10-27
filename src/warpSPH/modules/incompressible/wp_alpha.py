@@ -1,17 +1,9 @@
-"""IISPH diagonal coefficient `a_ii` (per-particle pressure-Laplacian
-normalization) used by both incompressible solvers to turn a divergence/
-density residual into a pressure update.
+"""Bare volume-centric pressure diagonal primitive.
 
-`computeAlpha` returns the negated per-particle sum
-`areaI/mi * |sum_j V_j gradW_ij|^2 + areaI * sum_j (V_j^2/mj) |gradW_ij|^2`
-(apparent-area-weighted, gather support mode), matching the IISPH `a_ii`
-term; callers divide the pressure residual by this value each Jacobi
-iteration. `includeBoundaryReaction=False` restricts the *second* sum to
-`kind == 0` neighbours, which is what the published formulations do (a static
-boundary particle takes no reaction force, so `dp_i/dx_j` does not exist for
-it) -- see `BoundaryOperatorTerms`; the first sum always runs over everything.
-Contains an unused, commented-out Barecasco free-surface detector left over
-from an earlier version of this file.
+computeAlphaWarp returns the negative fluid-motion and pair-reaction sums.
+Static solid samples contribute to the first sum; the second can exclude
+solid reaction. Native DFSPH's experimental pressure-boundary operator uses
+this primitive directly. The legacy pressure/automatic-wall wrapper is retired.
 """
 
 from warpSPHCore.type_config import index_t, offset_t
@@ -30,7 +22,7 @@ from warpSPHCore import *
 from warpSPH.enumTypes import *
 from warpSPH.configurations.simulationConfig import SimulationConfig
 
-__all__ = ['computeAlpha']
+__all__ = ['computeAlphaWarp']
 
 # @torch.jit.script
 # def detectFreeSurfaceBarecasco(
@@ -333,36 +325,3 @@ def computeAlphaWarp(
         #     )
 
     # return warp_result
-
-
-def computeAlpha(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], apparentVolumes: torch.Tensor, includeBoundaryReaction: bool = True, wall: Optional[Any] = None) -> torch.Tensor:
-    """`wall`: the analytic boundary's `WallState`; `None`: resolved from `schemeConfig.boundaryProvider`, boundary particles when there is none (`wallAlphaCorrection`)."""
-    with record_function("[warpSPH] - computeDensities"):
-        dt = config.dt
-        alpha = computeAlphaWarp(
-            queryParticles=currentState,
-            operationProperties=OperationProperties(
-                kernel = config.kernel,
-                operation = WarpOperation.Density,
-                supportMode = SupportScheme.Gather, # cullen switch E.1 in the CRK paper uses gather for density estimation
-            ),
-            domain=config.domain,
-            adjacency=adjacency,
-
-            queryApparentAreas=apparentVolumes,
-            # includeBoundaryReaction=includeBoundaryReaction,
-        )
-        alpha = -alpha
-        from ..analyticBoundary import resolveWall, wallAlphaCorrection
-        wall = resolveWall(currentState, config, schemeConfig, adjacency, wall)
-        if wall is not None:
-            # analytic walls: the wall adds its gradient `G` to the vector sum `sum_j A_j grad W_ij` of the first term (A_j the apparent volumes), a static wall has no second-sum part
-            gradSum = warpOperation(
-                currentState,
-                OperationProperties(kernel = config.kernel, operation = WarpOperation.Gradient, gradientMode = GradientScheme.Naive, supportMode = SupportScheme.Gather),
-                queryValues = apparentVolumes * currentState.densities / currentState.masses,
-                domain = config.domain,
-                adjacency = adjacency,
-            )
-            alpha = alpha + wallAlphaCorrection(wall, gradSum, currentState.densities)
-        return alpha

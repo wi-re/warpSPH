@@ -1,5 +1,9 @@
 # Incompressible projection inventory — 21 October 2026
 
+Historical inventory. Legacy runtime routes below were retired on 27 October;
+see [current entries and migration](MIGRATION.md). This document preserves the
+experiment-time equations and policies.
+
 Scope: native `dfsph`, `divergenceFree` (local VD+PS variant), `dfsphReference`, `iisph`,
 `omniIncompressible`, `band2018pb`, their common pressure operators, walls,
 configuration and integration. AC is deferred by the user. This is an inventory

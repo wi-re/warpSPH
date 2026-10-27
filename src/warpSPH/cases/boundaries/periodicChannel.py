@@ -77,7 +77,7 @@ def configureFlow(ctx: RunContext, dx: float, shear: bool = False) -> None:
     if ctx.param('fluidViscosity') == 'morris':
         # Morris et al. 1997 viscous operator (carries shear: what a no-slip wall closure needs), nu such that the REALISED long-wave viscosity is the alpha one: nu_used = nominal / cal
         from ...enumTypes import ViscosityTerm
-        from ...modules.incompressible.compactProjection import morrisCalibration
+        from ...modules.analyticBoundary.viscosityCalibration import morrisCalibration
         h = float(ctx.spec.n_h) * dx
         cal = morrisCalibration(h, dx, dx * dx)
         sc.diffusionParams.inviscid = False
@@ -90,7 +90,7 @@ def configureFlow(ctx: RunContext, dx: float, shear: bool = False) -> None:
     if inc:
         # the incompressible loops (omniIncompressible, divergenceFree, ...): the viscosity is the physical Morris one (`nuPhysical`, the realised long-wave value), the loop's own explicit term
         from ...enumTypes import ViscosityTerm
-        from ...modules.incompressible.compactProjection import morrisCalibration
+        from ...modules.analyticBoundary.viscosityCalibration import morrisCalibration
         h = float(ctx.spec.n_h) * dx
         cal = morrisCalibration(h, dx, dx * dx)
         sc.diffusionParams.inviscid = False
@@ -98,10 +98,6 @@ def configureFlow(ctx: RunContext, dx: float, shear: bool = False) -> None:
         sc.diffusionParams.viscidNu = ctx.param('nuPhysical') / cal
         sc.morrisCalibration = None
         sc.complementMoments = ctx.param('complementMoments')
-        sc.omniViscosity = True
-        sc.projection, sc.projectionTol, sc.densitySolve = ctx.param('projection'), ctx.param('projectionTol'), ctx.param('densitySolve')
-        sc.shifting, sc.shiftA = ctx.param('particleShift'), ctx.param('shiftA')
-        sc.closedPreset = ctx.param('closedPreset')
         sc.freeSurface = False
         ctx.scratch['morrisCal'] = cal
     sc.analyticPeriodicWalls = not shear
@@ -110,7 +106,7 @@ def configureFlow(ctx: RunContext, dx: float, shear: bool = False) -> None:
     sc.bodyForce = (ctx.param('fShear') if shear else ctx.param('f'), 0.0)
     sc.bodyForceAtWall = ctx.param('bodyForceAtWall')
     if not shear:
-        sc.analyticWallLoads = True
+        sc.analyticWallLoads = not inc
     if hasattr(sc, 'shiftProperties'):
         from ...configurations.moduleConfigurations.shifting import ShiftingProjectionScheme, ShiftingScheme
         sc.shiftProperties.active = ctx.param('shifting')
@@ -146,7 +142,7 @@ def calibrateChannel(ctx: RunContext, system) -> None:
     cal = latticeCalibration(dx, dx, h, ctx.config.kernel,
                              calibrateNormalization=ctx.config.calibrateNormalization)
     st.masses = torch.where(fluid, torch.full_like(st.masses, sc.fluid.restDensity * cal['V']), st.masses)
-    sc.analyticWallMass = cal['mu']
+    sc.analyticWallMass = 1.0 if ctx.config.calibrateNormalization else cal['mu']
     off = cal['dwallY'] - 0.5 * dx                              # the first row is at dx / 2 from the plate plane: the plane moves outward by the difference
     W = ctx.scratch['W']
     old = sc.boundaryProvider
@@ -207,7 +203,8 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     out['meanVelocity'] = float(u.mean())
     out['meanVelocityRef'] = ctx.param('f') * W * W / (12.0 * nu)
     loads = [rb.load[:, 0].sum() for rb in ctx.schemeConfig.boundaryProvider.rigidBodies if getattr(rb, 'load', None) is not None]
-    if loads:
+    out['fluidMass'] = float(st.masses[f].sum())
+    if loads and not isIncompressibleScheme(ctx.scheme):
         out['plateLoad'] = float(sum(loads))                 # the load of the fluid on both plates, x (pressure + viscous), per unit depth
         out['fluidMass'] = float(st.masses[f].sum())
     return out
@@ -261,12 +258,6 @@ periodicChannelCase = registerCase(Case(
         # the incompressible loops (--scheme omniIncompressible | divergenceFree): physical Morris viscosity, calibrated lattice, the projection / shift options of the stage 2 schemes
         nuPhysical=0.0185,
         calibratedLattice=True,
-        projection='jacobi',
-        projectionTol=1e-8,
-        densitySolve=True,
-        particleShift='none',
-        shiftA=0.5,
-        closedPreset=False,
         shifting=True,
         shiftScheme='michel2022',
         shiftProjection='michel2022',

@@ -93,7 +93,7 @@ def initialConditions(ctx: RunContext, system) -> None:
         cal = latticeCalibration(dx, dx, float(st.supports[fl].max()), ctx.config.kernel,
                                  calibrateNormalization=ctx.config.calibrateNormalization)
         st.masses = torch.where(fl, torch.full_like(st.masses, sc.fluid.restDensity * cal['V']), st.masses)      # the bulk lattice at exactly rho0; the wall continuum `mu` of the flat-wall calibration (no plane offset: the body is cut from the lattice)
-        sc.analyticWallMass = cal['mu']
+        sc.analyticWallMass = 1.0 if ctx.config.calibrateNormalization else cal['mu']
         ctx.scratch['nuNominal'] = ctx.param('nuPhysical')
         if ctx.config.dt is None:
             ctx.config.dt = ctx.spec.dt if ctx.spec.dt is not None else 2e-3
@@ -118,7 +118,7 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     out['superficialVelocity'] = U
     out['fluidMass'] = float(st.masses[f].sum())
     loads = [rb.load[:, 0].sum() for rb in ctx.schemeConfig.boundaryProvider.rigidBodies if getattr(rb, 'load', None) is not None]
-    if loads:
+    if loads and not isIncompressibleScheme(ctx.scheme):
         F = float(sum(loads))
         out['bodyLoad'] = F
         out['dragCoefficient'] = F / (nu * U) if U > 0 else 0.0
@@ -176,12 +176,6 @@ stokesArrayCase = registerCase(Case(
         nuPhysical=0.0185,
         calibratedLattice=False,
         wallCut=None,
-        projection='jacobi',
-        projectionTol=1e-8,
-        densitySolve=True,
-        particleShift='none',
-        shiftA=0.5,
-        closedPreset=False,
         shifting=True,
         shiftScheme='michel2022',
         shiftProjection='michel2022',

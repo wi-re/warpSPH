@@ -114,52 +114,22 @@ class WeaklyCompressibleSPHScheme(Enum):
 
 # @torch.jit.script
 class IncompressibleSPHScheme(Enum):
-    #: Native DFSPH on IISPH's rest-volume C/F operators and exact diagonal.
-    #: Divergence projection precedes nonpressure forces; density projection
-    #: precedes the single position drift. This is the repo's DFSPH scheme.
-    dfsph = 5
-    #: Legacy VD+PS/omni hybrid. Density correction is a position shift or an
-    #: in-step velocity kick depending on its selected policy. Use `dfsph`
-    #: for the native two-constraint DFSPH velocity projection.
-    divergenceFree = 0
-    #: Legacy composed DFSPH comparison (not a literal SPlisHSPlasH port).
-    #: Use `dfsph` for the native IISPH-based implementation. Density and
-    #: divergence-free corrections are applied to the *velocity* as warm-started
-    #: pressure impulses, not as the momentum-neutral position shift the
-    #: `divergenceFree` (VD+PS) scheme uses. Exists as the ground-truth
-    #: comparison for the hydrostatic-column failure -- see
-    #: `DFSPH_IMPROVEMENT_PLAN.md` Part 23 and `schemes/incompressible/dfsphReference.py`.
-    dfsphReference = 1
-    #: Native IISPH (Ihmsen et al. 2014): one rest-volume density projection,
-    #: density-dependent pressure coefficients, exact diagonal and half carry
-    #: of physical pressure. Policy: IncompressibleSPHConfig.iisph.
+    """Native pressure projections; legacy IDs 0, 1, 3, 4 are retired.
+
+    The DFSPH variants share operators and policies and differ in stage order.
+    Saved legacy trajectories remain historical evidence, not restart inputs.
+    """
     iisph = 2
-    #: Direct port of the omniSPH incompressible solver loop
-    #: (`~/dev/omniSPH/simulation/{SPH,fluidMechanics}.cpp`): DFSPH-style
-    #: divergence + density solves on one neighbourhood, accelerations
-    #: accumulated into a single semi-implicit Euler step. No free-surface
-    #: gauge, deficiency guard, damped warm start, or masking -- just the
-    #: loop as omniSPH runs it. See `schemes/incompressible/omniIncompressible.py`.
-    omniIncompressible = 3
-    #: IISPH with Pressure Boundaries (Band et al. 2018, ACM TOG 37(2):14):
-    #: the extended PPE where `kind == 1` boundary samples are pressure
-    #: unknowns with their own equation + diagonal, iterated in the same
-    #: relaxed-Jacobi loop as the fluid -- removes the near-wall rank
-    #: deficiency that stalls the `omniIncompressible` / `iisph`
-    #: constant-density solve at a wall corner (DFSPH_IMPROVEMENT_PLAN.md
-    #: Parts 41-44). See `schemes/incompressible/band2018pb.py`.
-    #: **A real trade-off against `divergenceFree`, not a strict upgrade**
-    #: (Part 57/58): tighter density control on closed wall-bounded cases
-    #: (~4-5% vs `divergenceFree`'s ~7-8%), at the cost of growing particle
-    #: pairing/voids there instead. Its bigger limitation is structural: the
-    #: paper has **no free-surface treatment at all** (every scenario in it is
-    #: a closed tank), so it inherits real free-surface problems on
-    #: `dambreak`-like violent impacts and fails `staticBlob` outright (a
-    #: free-space body just is not its regime, Part 51). Use it deliberately
-    #: for closed, wall-dominated flows where incompressibility matters more
-    #: than particle-distribution smoothness -- not as a general-purpose
-    #: replacement for `divergenceFree`.
-    band2018pb = 4
+    dfsph = 5
+    dfsphPredictor = 6
+    dfsphShift = 7
+
+
+def isDFSPHScheme(scheme) -> bool:
+    return scheme in (IncompressibleSPHScheme.dfsph,
+                      IncompressibleSPHScheme.dfsphPredictor,
+                      IncompressibleSPHScheme.dfsphShift)
+
 
 # @torch.jit.script
 class ArtificialCompressibleSPHScheme(Enum):
@@ -219,15 +189,7 @@ def isArtificialCompressibleScheme(scheme) -> bool:
 
 # @torch.jit.script
 def isIncompressibleScheme(scheme) -> bool:
-    """Is `scheme` any member of `IncompressibleSPHScheme`?
-
-    Cases that need "the pressure-projection path" (its own CFL, no acoustic
-    term, a solved `pressures` field rather than an EOS one) must test *this*,
-    not `scheme is IncompressibleSPHScheme.divergenceFree`. That identity test
-    was written when `divergenceFree` was the only incompressible scheme; it
-    silently routes `iisph` / `omniIncompressible` / `band2018pb` down the
-    weakly-compressible branch, which is wrong in every case that has one.
-    """
+    """Whether a supported scheme uses pressure projection rather than an EOS."""
     return isinstance(scheme, IncompressibleSPHScheme)
 
 

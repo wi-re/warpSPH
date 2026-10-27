@@ -37,5 +37,5 @@ __all__.extend(['WeaklyCompressibleDiffusionParams', 'buildDefaultDiffusionParam
 from .gravity import GravityType, gravityConfiguration, buildDefaultGravityConfiguration, gravityConfigurationToDict, dictToGravityConfiguration
 __all__.extend(['GravityType', 'gravityConfiguration', 'buildDefaultGravityConfiguration', 'gravityConfigurationToDict', 'dictToGravityConfiguration'])
 
-from .solver import PressureSolverType, JacobiRelaxationMode, JacobiConvergenceCriterion, BoundaryPressureMode, ShiftPressureGauge, ShiftApplication, BoundaryOperatorTerms, DensityEvolution, resolveDensityEvolution, resolveBoundaryOperatorTerms, RelaxedJacobiSolverConfig, buildDefaultPSConfig, buildDefaultDFConfig, IncompressibleSolverConfig, buildDefaultIncompressibleSolverConfig
-__all__.extend(['PressureSolverType', 'JacobiRelaxationMode', 'JacobiConvergenceCriterion', 'BoundaryPressureMode', 'ShiftPressureGauge', 'ShiftApplication', 'BoundaryOperatorTerms', 'DensityEvolution', 'resolveDensityEvolution', 'resolveBoundaryOperatorTerms', 'RelaxedJacobiSolverConfig', 'buildDefaultPSConfig', 'buildDefaultDFConfig', 'IncompressibleSolverConfig', 'buildDefaultIncompressibleSolverConfig'])
+from .solver import JacobiConvergenceCriterion
+__all__.extend(['JacobiConvergenceCriterion'])

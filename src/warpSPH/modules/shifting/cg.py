@@ -6,14 +6,9 @@ interface and same ``(x, status, convergence)`` return convention as
 family (PCG additionally uses ``-16`` for an indefinite / zero-curvature
 breakdown, i.e. ``p^T A p <= 0`` or a non-finite curvature).
 
-CG is only well-posed for a symmetric operator and converges in finitely many
-steps only when it is symmetric *positive definite*. The discrete SPH pressure
-operator is *expected* to be nonsymmetric and -- by its negative IISPH diagonal --
-negative-definite, so the dispatch in ``incompressible.krylov`` flips the sign of
-the operator/RHS/preconditioner before calling this when the diagonal is
-negative, giving PCG a positive-definite system. If the operator is genuinely
-indefinite (not merely negative-definite) -- the question the Phase-0 operator
-probe settles -- PCG bails with ``-16``. See ``docs/historic_plans/INCOMPRESSIBLE_SOLVER_PLAN.md``.
+CG requires a symmetric positive-definite operator. Callers must supply the
+appropriate operator/RHS/preconditioner signs; a zero or negative curvature
+returns -16. Native IISPH/DFSPH use their stationary driver instead.
 
 Status codes: ``>= 0`` converged at that iterate; ``-12`` per-particle ``|x|``
 threshold bailout; ``-14`` max-iteration budget exhausted; ``-16`` indefinite /

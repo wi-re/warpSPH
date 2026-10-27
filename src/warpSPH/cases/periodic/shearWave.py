@@ -1,55 +1,5 @@
-"""Shear-wave decay (2D, fully periodic), divergence-free incompressible SPH.
-
-Cornelis et al.'s reference case, ported per `DFSPH_IMPROVEMENT_PLAN.md` §4
-item 8. It exists because every other incompressible case here grades this
-codebase against *itself*: `tgv`'s decay rate has no published counterpart
-(§5 Q5), `kolmogorovIncompressible` has no analytic solution at all, and
-`randomFlowIncompressible` is a statistical steady state. This one has an exact
-answer that is known in closed form and is trivial to state.
-
-**The physics.** A transverse sinusoidal shear wave on a periodic box:
-
-    u_x(y, 0) = u0 sin(k_w y),   u_y = 0,   k_w = 2 pi k / L
-
-Both nonlinear terms vanish identically. `(u . grad) u = u_x d_x u_x e_x = 0`
-because `u_x` depends only on `y`, and `div u = d_x u_x = 0` for the same
-reason. So the incompressible Navier-Stokes solution is exactly
-
-    u_x(y, t) = u0 sin(k_w y) exp(-nu k_w^2 t),   p = const
-
-**for all time, at any amplitude** -- and, unlike the Taylor-Green vortex,
-**with zero pressure gradient**. TGV is also an exact solution, but it is one
-in which a nontrivial pressure field balances a nontrivial advection term, so
-an error in the pressure solve and an error in the advection are measured
-together. Here the exact pressure is constant, so *every* pressure the solver
-produces is an artifact, and every departure of the amplitude from the analytic
-exponential is numerical dissipation. At the default `nu = 0` the analytic
-answer is that nothing happens at all.
-
-**What it grades, and why those are two separate axes.** [C]'s Fig. 3 and
-Fig. 4 report the sinus amplitude and the maximum density on this case
-separately, and the separation is the point:
-
-- `amplitudeRatio` -- the velocity field projected onto the analytic mode,
-  divided by the analytic amplitude at that time. This is **artificial
-  viscosity**: 1.0 is exact, below 1.0 is dissipation. It is the axis [C]'s
-  abstract is about ("the DI source term suffers from significant artificial
-  viscosity").
-- `maxDensity` / `densityStd` -- **volume error and disorder**. A scheme can
-  hold the amplitude perfectly while the sampling degrades, or keep a pristine
-  sampling by damping the flow. One number cannot see both.
-
-Those are exactly the axes the `ShiftApplication` modes trade off against each
-other (§1.2), which is why this case is the one that can grade them: the
-position shift is momentum-neutral and should cost amplitude nothing, while the
-velocity modes feed a permanent residual into momentum and should show up here
-as dissipation.
-
-**Not yet done: the comparison against [C]'s published curves.** The paper's
-figures are not in this repository and this case does not hard-code numbers
-read off them. What is here is the case and this codebase's measurement on it;
-grading that against Fig. 3 and Fig. 4 needs the paper in hand.
-"""
+"""Periodic viscous shear mode for native incompressible projection.
+Diagnostics separate longitudinal damping and transverse contamination."""
 
 from __future__ import annotations
 
@@ -203,7 +153,7 @@ def extraData(ctx: RunContext, state) -> Dict[str, Any]:
 
 shearWaveCase = registerCase(Case(
     name='shearWave',
-    scheme='divergenceFree',
+    scheme='dfsph',
     description='Shear-wave decay (2D, periodic): an exact solution with zero pressure gradient.',
     buildSystem=buildSystem,
     configureScheme=configureScheme,

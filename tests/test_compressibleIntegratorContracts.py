@@ -133,7 +133,7 @@ def test_dual_time_map_cannot_be_called_as_a_multistage_rhs():
                                     ArtificialCompressibleSPHConfig())
 
 
-@pytest.mark.parametrize('method', ['deltaSPH', 'sun2017DeltaSPH', 'divergenceFree', 'iisph'])
+@pytest.mark.parametrize('method', ['deltaSPH', 'sun2017DeltaSPH', 'iisph'])
 def test_other_derivative_schemes_leave_kinematics_to_the_driver(method):
     from warpSPH.cases import importAll
     from warpSPH.runner import getCase, prepareContext, CaseSpec

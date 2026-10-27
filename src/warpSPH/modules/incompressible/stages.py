@@ -1,66 +1,6 @@
 """Shared projection stages with force and boundary choices stated by callers."""
 
 import torch
-from ..boundaryConditions import computeForcing, enforceUpdates
-from ..gravity import computeGravity, computeBodyForce
-from ..deltaSPH import computeVelocityDiffusion
-
-
-def nonPressureAcceleration(
-    system,
-    dt,
-    config,
-    schemeConfig,
-    adjacency,
-    *,
-    includeBodyForce,
-    viscosity,
-    boundaryVelocitiesPrepared=True,
-    maskViscosity=False,
-    extraAcceleration=None,
-):
-    """Preserve gravity/body/viscosity/extra/forcing accumulation order.
-
-    Band historically omits body force and viscosity; omni opts into
-    viscosity; reference DFSPH always invokes its configured diffusion.
-    These choices are explicit rather than inferred from solver names.
-    """
-    state = system.state
-    acceleration = computeGravity(state, config, schemeConfig, adjacency)
-    if includeBodyForce:
-        acceleration = acceleration + computeBodyForce(state, schemeConfig)
-    if viscosity:
-        viscous = computeVelocityDiffusion(state, config, schemeConfig, adjacency,
-            boundaryVelocitiesPrepared=boundaryVelocitiesPrepared)
-        if maskViscosity:
-            viscous = torch.where(
-                (state.kinds == 0).unsqueeze(-1), viscous, torch.zeros_like(viscous)
-            )
-        acceleration = acceleration + viscous
-    if extraAcceleration is not None:
-        acceleration = acceleration + extraAcceleration()
-    forcing = computeForcing(system, dt, system.t, config, schemeConfig)
-    return acceleration + forcing / state.masses.view(-1, 1)
-
-
-def projectedUpdate(system, dt, config, schemeConfig):
-    """Compatibility update for an already advanced map, with the usual BCs.
-
-    ProjectedStep consumes the stage state exactly once. Direct legacy
-    single-evaluation callers still receive the historical zero update.
-    """
-    from ...systems.incompressible import IncompressibleSystemUpdate
-
-    state = system.state
-    zeros = torch.zeros_like(state.velocities)
-    update = IncompressibleSystemUpdate(
-        dxdt=zeros.clone(),
-        dvdt=zeros.clone(),
-        drhodt=torch.zeros_like(state.densities),
-        passive=torch.zeros_like(state.densities, dtype=torch.bool),
-    )
-    enforceUpdates(update, system, dt, system.t, config, schemeConfig)
-    return update
 
 
 def carryProjectionFields(destination, source):

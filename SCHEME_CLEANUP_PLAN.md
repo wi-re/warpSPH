@@ -2018,3 +2018,37 @@ pressure-boundary option without promoting it. Old names/configuration must
 fail with migration guidance rather than silently selecting different physics.
 The replacement is not merely a Krylov-to-Jacobi change: legacy paths also
 used Jacobi by default, with different operators, policies and wall closures.
+
+
+Retirement completed: supported runtime entries are native dfsph / dfsphPredictor /
+dfsphShift / iisph. Removed four legacy scheme drivers, their pressure/shift/
+Krylov adapters and obsolete switches/configuration; retained generic Krylov,
+ACSPH wall primitives, performance benchmark, historical reports and source
+checkpoint18d069d. Case/CLI/example/matrix routing uses the current cohort;
+old names and IDs cannot silently select different physics. Experimental native
+Band option preserved without further physics work or default promotion.
+
+Native initialization is shared across named variants; analytic tank/channel/
+array wall mass calibration now applies once. Sloshing and matrix diagnostics
+read dedicated stage fields and exclude the VD+PS shift potential from physical
+pressure, without mutating solver carry. Legacy analytic per-body load booking
+is not ported; native channel/array diagnostics omit load/drag fields explicitly.
+Moving bodies/compact preset remain unsupported, with tested refusal. Native
+Morris analytic walls require their explicit no-slip moment adapter.
+
+Validation:406 FP32 checks pass /2skip;215 FP64 contracts pass after correcting
+2 dtype-only expected vectors (213initial +2rerun). Adapter131checks overlap.
+All12 GPUFP32 pre/post tensor sets and current changed-dt HDF5 continuations
+match bitwise across4methods ×3setups. Three-step timed windows0.628/0.600s
+before/after,4.30–69.45/4.35–67.34ms perstep; too short/cache-sensitive for a
+performance claim. Raw periodic smoke:9pass/2strict expected failures. The raw
+absolute-density TGV injects energy identically in the preserved native solver
+and cleanup (20-step seeded energy/time series bitwise, decayratio−18.4228).
+Kept original physical assertions as strict xfails; no equation/tolerance tuning
+to make the cleanup appear physically qualified. Existing matrix limitations
+remain. Full collection succeeds; unrelated full physics battery not run.
+
+Migration/operators/policies/retired probes and limitations are documented in
+docs/incompressible/MIGRATION.md. Local receipts/source A/Bs retained with KEEP
+under.tmp/native-retirement-2026-10-27; no existing matrix or failure evidence
+overwritten. Further pressure-boundary work remains deferred by the user.

@@ -379,14 +379,9 @@ def buildSystem(ctx: RunContext):
     ctx.scratch['obstacle'] = obstacle
     # analytic walls (wallRepresentation='analytic'): which wall pressure condition (modules/analyticBoundary/wallTerms.py)
     ctx.schemeConfig.analyticWallPressure = ctx.param('analyticWallPressure')
-    if getattr(ctx.scheme, 'name', ctx.scheme) in ('omniIncompressible', 'divergenceFree'):
-        ctx.schemeConfig.xsphCoefficient = ctx.param('xsphCoefficient')
-        ctx.schemeConfig.projection, ctx.schemeConfig.projectionTol, ctx.schemeConfig.densitySolve = ctx.param('projection'), ctx.param('projectionTol'), ctx.param('densitySolve')
-        ctx.schemeConfig.shifting, ctx.schemeConfig.shiftA = ctx.param('particleShift'), ctx.param('shiftA')
-        ctx.schemeConfig.boundaryFriction = ctx.param('boundaryFriction')
-    elif ctx.param('xsphCoefficient') or ctx.param('boundaryFriction') or ctx.schemeConfig.analyticWallPressure == 'mls':
-        raise ValueError("analyticWallPressure='mls', boundaryFriction and xsphCoefficient are omniIncompressible / divergenceFree options")
-
+    if isIncompressibleScheme(ctx.scheme):
+        from ...caseUtils.projection import validateProjectionOptions
+        validateProjectionOptions(ctx)
     # Stash the obstacle's own SDF (negative inside the solid) so `diagnostics`
     # can measure fluid penetration into the obstacle -- the interior-AABB
     # penetration watch there only sees the tank walls, not a solid island in
@@ -1078,15 +1073,6 @@ dambreakCase = registerCase(Case(
         # analytic walls only: 'hydrostatic' (the wall pressure gradient rho (g - a_w) in all directions: exact for a fluid in hydrostatic balance) or
         # 'normal' (only dp/dn = rho (g - a_w) . n, as the boundary particles' ghost extrapolation: no tangential force on a fluid in free fall)
         analyticWallPressure='hydrostatic',
-        # omniIncompressible velocity filters (modules/xsph): XSPH coefficient and the analytic walls' boundary friction; 0 = off
-        xsphCoefficient=0.0,
-        boundaryFriction=0.0,
-        # incompressible analytic walls: the divergence stage as 'jacobi' (omniSPH, default) or the converged 'compact' projection (modules/incompressible/compactProjection.py); densitySolve=False leaves the projection the only pressure solve
-        projection='jacobi',
-        particleShift='none',
-        shiftA=0.5,
-        projectionTol=1e-8,
-        densitySolve=True,
         targetDt=0.0005,
         # Downstream-wall pressure sensors (`ACSPH_PLAN.md` §4.5): heights above
         # the tank bed, in the case's length unit. Empty -> no probing. See

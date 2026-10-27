@@ -310,6 +310,12 @@ walls): growth there would point at the solve, none at the wall closure.
 
 ## 13. `hydrostaticColumn` under `iisph` blows up in its default free-slip configuration
 
+**Historical implementation (2026-10-27):** the legacy projection runtime described
+below is retired. Its failures are retained as evidence, not a current native
+solver qualification. Current native issues and migration are tracked in
+[SCHEME_CLEANUP_PLAN.md](SCHEME_CLEANUP_PLAN.md) and
+[the native migration guide](docs/incompressible/MIGRATION.md).
+
 **What it is (2026-09-28, found by the §7 Morris A/B):** `iisph`, nx=128,
 `semiImplicitEuler`, `wallBC=freeSlip`, `nu=0` — the configuration
 `docs/historic_plans/DFSPH_FINDINGS.md` §1.14's post-Part-41 table graded as
@@ -349,6 +355,12 @@ integrator-side issue is not known. Videos/script:
 `scratchpad/hydroRecheck/`, `probe_hydroRecheck.py` (session scratchpad).
 
 ## 14. DFSPH + physical viscosity + free-slip walls: the column's velocity alternates sign every step
+
+**Historical implementation (2026-10-27):** the legacy projection runtime described
+below is retired. Its failures are retained as evidence, not a current native
+solver qualification. Current native issues and migration are tracked in
+[SCHEME_CLEANUP_PLAN.md](SCHEME_CLEANUP_PLAN.md) and
+[the native migration guide](docs/incompressible/MIGRATION.md).
 
 **What it is (2026-09-28, found by §7's A/B):** `hydrostaticColumn`,
 `divergenceFree`, `wallBC=freeSlip`, `nu=0.01`: the mean vertical velocity of

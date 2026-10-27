@@ -118,14 +118,14 @@ def _fluidDescription(schemeConfig) -> Optional[str]:
     Only the parameters the selected EOS reads are printed. `fluidProperties`
     defaults every field, so showing `kappa` beside an isothermal EOS would
     suggest it played a part when `isoThermalEOS` never looks at it. DFSPH
-    (the config with a `solverConfig`) gets its pressure from the solver and
+    (the config with native `iisph` policies) gets its pressure from the solver and
     never calls the EOS at all, so naming one there would be a lie -- it still
     reads `restDensity` and `fixedSoundSpeed`, via shifting and the boundaries.
     """
     fluid = getattr(schemeConfig, 'fluid', None)
     if fluid is not None:
         eos = _enumName(fluid.eosType)
-        incompressible = hasattr(schemeConfig, 'solverConfig')
+        incompressible = hasattr(schemeConfig, 'iisph')
         # rho0 and c_s stay on the line whatever the EOS is: the timestep,
         # the dissipation terms and the shifting all read them directly.
         parts = ['incompressible (pressure from solver)' if incompressible
@@ -174,8 +174,8 @@ def _viscosityDescriptions(schemeConfig) -> List[str]:
         else:
             viscosity = _joined('physical', _number('nu', params.viscidNu))
         # Density diffusion belongs to the same block but only delta-SPH runs
-        # it -- DFSPH (the config with a `solverConfig`) leaves the call out.
-        if not hasattr(schemeConfig, 'solverConfig'):
+        # it -- DFSPH (the config with native `iisph` policies) leaves the call out.
+        if not hasattr(schemeConfig, 'iisph'):
             viscosity = _joined(viscosity,
                                 _joined(f'density diffusion '
                                         f'{_enumName(params.densityDiffusionTerm)}',

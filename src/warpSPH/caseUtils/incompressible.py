@@ -28,7 +28,7 @@ def relaxLattice(ctx, system, steps: int, dt: float, jitter: float) -> None:
     velocities zeroed, displacing positions by `dt**2 * a_p` each time, then
     copies the relaxed positions back onto `system.state`. A no-op when
     `steps` is 0. Native IISPH calibrates uniform masses first and uses its
-    own pressure operator; the composed schemes retain their shifting solve.
+    own pressure operator; native DFSPH uses its density stage.
 
     Not for free-surface states: their legitimate kernel density deficit
     would be treated as a bulk density error and compact the surface.
@@ -40,20 +40,17 @@ def relaxLattice(ctx, system, steps: int, dt: float, jitter: float) -> None:
 
     from warpSPHCore import SupportScheme, buildVerletList
 
-    from ..modules import computeDensities, shuffleParticles, solveIncompressible
-    from ..enumTypes import IncompressibleSPHScheme
+    from ..modules import computeDensities, shuffleParticles
+    from ..enumTypes import IncompressibleSPHScheme, isDFSPHScheme
 
-    nativeIISPH = ctx.scheme in (IncompressibleSPHScheme.iisph, IncompressibleSPHScheme.dfsph)
+    nativeIISPH = (ctx.scheme == IncompressibleSPHScheme.iisph or isDFSPHScheme(ctx.scheme))
     if nativeIISPH:
         from .projection import initializeProjectionDensity
         from ..modules.iisph import computeIISPHContactPoints, solveIISPH
         initializeProjectionDensity(ctx, system)
 
     state = system.initializeNewState()
-    # `divergenceFree_step` allocates the pressure array on the first step it runs
-    # (see `schemes/incompressible/divergenceFree.py`); a region-built system has not stepped yet, so
-    # give its scratch state one the same way, otherwise the `pressures[:] = 0.0`
-    # below has nothing to write into.
+    # Region-built states have not yet allocated a pressure carry.
     if state.state.pressures is None:
         state.state.pressures = torch.zeros_like(state.state.densities)
     state.state.positions = shuffleParticles(state.state, ctx.config, ctx.schemeConfig, 0,
@@ -97,7 +94,7 @@ def relaxLattice(ctx, system, steps: int, dt: float, jitter: float) -> None:
         state.state.pressures[:] = 0.0
         if nativeIISPH:
             contactPoints, coverageFailure = computeIISPHContactPoints(state.state, state.contactBoundaryProvider)
-            if ctx.scheme == IncompressibleSPHScheme.dfsph:
+            if isDFSPHScheme(ctx.scheme):
                 from ..modules.iisph import computeIISPHProjectionGeometry
                 from ..modules.dfsph import solveDFSPHProjection
                 V, s, G, S, diagonal, contactAdjacency, denominator, _ = computeIISPHProjectionGeometry(
@@ -115,10 +112,7 @@ def relaxLattice(ctx, system, steps: int, dt: float, jitter: float) -> None:
                     contactPoints=contactPoints, contactCoverageFailure=coverageFailure)
             accel = pressure.acceleration
         else:
-            accel, _, _, _ = solveIncompressible(
-                particles=state.state, config=ctx.config, schemeConfig=ctx.schemeConfig,
-                adjacency=adjacency,
-                dvdt=torch.zeros_like(state.state.velocities), dt=dt, verbose=False)
+            raise ValueError('relaxLattice requires a native incompressible scheme')
         state.state.positions = state.state.positions + dt * dt * accel
 
     system.state.positions = state.state.positions.clone()

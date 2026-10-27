@@ -20,7 +20,7 @@ cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA')
 def test_curved_tables_match_a_brute_force_integral_over_the_solid():
     """the Morris moments of a flat wall at distance d: `T_k = int_S K(r) s'^k dA'` over the half plane beyond d, by a fine polar sum; `M1_n = int_S K (y . n) dA'`."""
     from warpSPH.modules.analyticBoundary.wallMoments import CurvedWallMoments
-    from warpSPH.modules.incompressible.compactProjection import MORRIS_ETA2, _dwendland2
+    from warpSPH.modules.analyticBoundary.viscosityCalibration import MORRIS_ETA2, _dwendland2
     H = 1.0
     tab = CurvedWallMoments(H, 'cpu', weight='morris')
     for d in (0.1, 0.35, 0.6):
@@ -68,7 +68,7 @@ def test_fluid_plus_wall_is_nu_u_second_for_a_wall_quadratic_profile(complement)
     """w(s) = a s + L s^2 / 2 with w = 0 at the wall plane: the closure makes `fluid sum + wall term = nu_p L` at the particles of the first rows (complement: on the actual neighbourhood, to the
     float32 round-off; the geometric tables miss it by ~10 % on the first row, the oracle's negative control)."""
     from warpSPH.modules.deltaSPH import computeVelocityDiffusion
-    from warpSPH.modules.incompressible.compactProjection import morrisCalibration
+    from warpSPH.modules.analyticBoundary.viscosityCalibration import morrisCalibration
     r = channel()
     st, ctx = r.state.state, r.ctx
     sc, cfg, adj = ctx.schemeConfig, ctx.config, r.state.adjacency

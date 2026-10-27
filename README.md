@@ -13,7 +13,7 @@ three families of scheme against one shared infrastructure:
 |---|---|---|
 | compressible | `Monaghan`, `CompSPH`, `CRKSPH` | shock tubes, blast waves, instabilities |
 | weakly compressible | `deltaSPH` | free surfaces, dam breaks, channel flow |
-| incompressible | `divergenceFree` (DFSPH) | Taylor-Green, decaying turbulence |
+| incompressible | `dfsph`, `dfsphPredictor`, `dfsphShift`, `iisph` | Taylor-Green, decaying turbulence |
 
 Everything a run needs — configuration, geometry, the step loop, export,
 plotting, video encoding — is shared, so a *case* is only the physics that
@@ -564,7 +564,10 @@ and apply before the interface overturns.
 
 **Analytic walls (optional).** With the optional package `warpSPHBoundaries` installed (`pip install -e "warpSPH/[boundaries]"`), `dambreak --wallRepresentation analytic` replaces the tank's wall particles by exact
 kernel integrals over the solid (obstacles, mixed scenes, Michel / implicit shifting, free bodies and the whole-step graph included); see [docs/historic_plans/ANALYTIC_BOUNDARIES_PLAN.md](docs/historic_plans/ANALYTIC_BOUNDARIES_PLAN.md).
-Besides δ⁺ the analytic walls are hooked into `omniIncompressible`, `divergenceFree`, `iisph`, `dfsph` and `dfsphReference`. Native IISPH/DFSPH's static boundary coupling and the legacy reference remain flagged EXPERIMENTAL; long free-surface impacts require separate qualification. `omniIncompressible` and `divergenceFree` retain their existing validation status; ACSPH is not hooked and refuses. The solvers of the boundaries repo
+Besides δ⁺, analytic walls support native `iisph`, `dfsph`, `dfsphPredictor`
+and `dfsphShift` with static, fixed-support coupling. Free-surface impact accuracy
+remains experimental; use the documented prepared initial conditions. ACSPH
+refuses analytic walls. The solvers of the boundaries repo
 this was validated against (`DeltaSPH2D`, `DFSPH2D`) were retired into warpSPH on 2026-10-11 and are kept at that repo's git tag `oracle-solvers-2026-10-11` ([record](docs/analytic_boundaries/retirement_2026-10-11/README.md)).
 
 The viscous, low-Reynolds group has its own cases and options (evidence: [docs/analytic_boundaries/](docs/analytic_boundaries/)):
@@ -577,7 +580,7 @@ The viscous, low-Reynolds group has its own cases and options (evidence: [docs/a
 | `fluidViscosity='morris'`, `complementMoments`, `wallViscosityClosure='noslipMoment'` | the Morris physical viscosity with the no-slip wall closure (moment tables of the solid); `pressureConsistent` removes the force a uniform pressure exerts through the lattice-vs-wall residual, `wallPressureViscous` adds the viscous term to the wall pressure condition |
 | `modules.boundaryConditions.PinnedBand` / `pinnedBandBC` | a band of fluid particles held at the stream velocity (free stream of the wake): acceleration zeroed, velocity reset after the step, no shift inside (`cylinderWake`) |
 | case parameter `wallCut` | the distance from a body wall inside which the case's lattice is cut (`stokesArray`, `taylorCouette`); `None` takes the rule of the scheme (δ⁺: half a spacing; incompressible loops: the calibrated first-row distance). Compare against a reference only on the identical lattice |
-| graph options | the δ⁺ analytic-wall step is replayed from a CUDA graph (`--cudaGraph`; a spinning axisymmetric body needs `schemeConfig.analyticSpinAxisymmetric`); `WARPSPH_COMPILE_WALLS=1` (or `schemeConfig.compileWalls`) `torch.compile`s the no-slip closure. The omni / `divergenceFree` loops are not graphed (sync-heavy) |
+| graph options | the δ⁺ analytic-wall step is replayed from a CUDA graph (`--cudaGraph`; a spinning axisymmetric body needs `schemeConfig.analyticSpinAxisymmetric`); `WARPSPH_COMPILE_WALLS=1` (or `schemeConfig.compileWalls`) `torch.compile`s the no-slip closure. Native incompressible projections run eagerly |
 
 ### Incompressible (DFSPH)
 
@@ -592,14 +595,24 @@ analytic walls; signed divergence and density constraints are unchanged.
 [Sampling recovery](docs/incompressible/SAMPLING_RECOVERY.md) documents the
 rule, original-policy override and measured tradeoffs.
 See [DFSPH](docs/incompressible/DFSPH.md) for equations, defaults and validation
-limits. `dfsphReference` retains the legacy comparison; `divergenceFree` is the
-separate VD+PS/omni hybrid.
+limits. The native stage orders are:
+
+| entry | order |
+|---|---|
+| `dfsph` | divergence → forces → density velocity correction → drift |
+| `dfsphPredictor` | forces → divergence → density velocity correction → drift |
+| `dfsphShift` | forces → divergence → drift → density position shift and velocity resampling |
+| `iisph` | forces → density projection → semi-implicit Euler kick/drift |
+
+Legacy names and solver switches are retired with explicit migration errors.
+See [migration and policy differences](docs/incompressible/MIGRATION.md).
+
 
 | case | script | notes |
 |---|---|---|
 | `tgv` | [01-taylor-green-vortex.py](examples/incompressible/01-taylor-green-vortex.py) | Taylor-Green vortex, divergence-free |
-| `squarePatch` | [03-rotating-square-patch.py](examples/incompressible/03-rotating-square-patch.py) | same case at `--scheme divergenceFree` |
-| `randomFlow` | [periodic-random-flow.py](examples/incompressible/periodic-random-flow.py) | same case at `--scheme divergenceFree` |
+| `squarePatch` | [03-rotating-square-patch.py](examples/incompressible/03-rotating-square-patch.py) | same case at `--scheme dfsph` |
+| `randomFlow` | [periodic-random-flow.py](examples/incompressible/periodic-random-flow.py) | same case at `--scheme dfsph` |
 
 Several cases cover more than one notebook, because those notebooks differed
 only in a flag; the scripts pin the flag. Two notebooks deliberately have no

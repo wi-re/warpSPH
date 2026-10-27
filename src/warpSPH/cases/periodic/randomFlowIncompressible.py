@@ -1,55 +1,10 @@
-"""Decaying random flow (2D), divergence-free incompressible SPH (DFSPH).
-
-The incompressible sibling of :mod:`randomFlow` (weakly compressible
-`deltaSPH`), added for `DFSPH_IMPROVEMENT_PLAN.md` Part 2 steps 7/8: the
-bounded (`--bounded`) variant is what exercises this codebase's mDBC
-boundary-particle machinery (`BoundaryPressureMode` and its pressure-solver
-masking, `computeMdbcDensity`) end to end for the first
-time -- no incompressible case samples `kind==1` boundary particles yet, and
-this is also the first case of *any* scheme to actually run mDBC's ghost
-particles (`kind==2`, produced generically by
-`initializers.weaklyCompressible.addBoundaryGhostParticles` for every scheme)
-through a full step loop rather than as a verified no-op.
-
-This is a **separate case module**, not a `--scheme divergenceFree` flag on
-`randomFlow` itself, even though `--scheme` is already a generic CLI override
-on every case (`CaseSpec.scheme`, read by `runner.run` in preference to
-`Case.scheme`) -- see `randomFlow.py`'s own docstring, which already assumed
-this worked. It does not, for two independent reasons found while building
-this case:
-
-- `Case.timestep` is one hook shared by every scheme a case might run under.
-  `randomFlow` leaves it unset, which is correct for its `deltaSPH` default
-  (falls through to `modules.timestep.computeTimestep`'s
-  `WeaklyCompressibleSystem` branch) but not for `divergenceFree`: an
-  `IncompressibleSystem` falls through to the *compressible* branch instead
-  (`computeTimestep`'s dispatcher only special-cases
-  `WeaklyCompressibleSystem`), which reads `system.state.internalEnergies` --
-  an attribute `IncompressibleState` does not have. `--scheme
-  divergenceFree` on the existing case crashes with an `AttributeError` on
-  the first adaptive-dt step, exactly the failure `kolmogorovIncompressible`
-  already worked around with its own CFL-only `timestep` hook (reused here
-  as-is -- the formula does not depend on anything Kolmogorov-specific).
-- `randomFlow.initialConditions` finishes with `setupTimestep`, which sets a
-  *fixed* `dt = targetDt` for the whole run (mechanically harmless for DFSPH,
-  since the sound speed it also derives is unused by this scheme, but not
-  adaptive) and unconditionally warns above 10% of a synthetic acoustic Mach
-  number that means nothing for an incompressible solver.
-
-Everything else `randomFlow` does -- `buildSystem`'s region sampling/mass
-handling, `configureScheme`'s domain/band widening, the boundary and obstacle
-SDFs, the divergence-free noise seeding, the diagnostics -- turned out to be
-scheme-agnostic already (`initializers.weaklyCompressible.initializeSimulation`
-branches generically on `SimulationState is IncompressibleState`) and is
-reused directly rather than re-implemented.
-"""
+"""Decaying divergence-free random flow using native pressure projections."""
 
 from __future__ import annotations
 
 from typing import Any, Dict
 
-from ...configurations import BoundaryPressureMode
-from ...runner import Case, RunContext, caseMain, registerCase, resolveEnum
+from ...runner import Case, RunContext, caseMain, registerCase
 from .kolmogorovIncompressible import kolmogorovIncompressibleTimestep
 from .randomFlow import BOUNDED_BAND, buildSystem, noiseVelocities
 from ..common.weaklyCompressible import (OBSTACLE_PARAMS, VELOCITY_DENSITY_FIELDS,
@@ -66,30 +21,12 @@ def configureScheme(ctx: RunContext) -> None:
         ctx.spec.params['band'] = BOUNDED_BAND
     configureWeaklyCompressible(ctx)
 
-    # HISTORY (`DFSPH_IMPROVEMENT_PLAN.md` Part 48, superseded by Part 56):
-    # the `--bounded` variant used to DIVERGE under `divergenceFree` at every
-    # resolution -- a density excursion built near the wall over many steps
-    # then the pressure response detonated the velocity. Root cause (Part 56):
-    # the VD+PS shift's constant-density `solveIncompressible`
-    # (`systems/incompressible.finalize`) froze the wall's pressure at its
-    # pre-solve snapshot for the whole Jacobi iteration instead of re-deriving
-    # it from the current fluid iterate each sweep. Fixed by
-    # `modules/incompressible/incompressible.py`'s `_SHIFT_WALL_PRESSURE`
-    # defaulting to `'shepard'`; holds cleanly at every resolution now
-    # (`DFSPH_FINDINGS.md` §1.18). `iisph` / `omniIncompressible` still fail
-    # this case (they never got the equivalent fix); `band2018pb` holds it
-    # independently. The regression test no longer xfails.
-
-    # `configureWeaklyCompressible` wires the shared `inviscid`/`alpha`
-    # (artificial-viscosity) knobs `deltaSPH` uses; DFSPH has no such term
-    # (see `kolmogorovIncompressible`), so this scheme always runs with a
-    # plain physical viscosity instead.
     schemeConfig = ctx.schemeConfig
     schemeConfig.diffusionParams.inviscid = False
     schemeConfig.diffusionParams.viscidNu = ctx.param('nu')
     schemeConfig.shiftProperties.active = ctx.param('shifting')
-    schemeConfig.solverConfig.boundaryPressureMode = resolveEnum(
-        BoundaryPressureMode, ctx.param('boundaryPressureMode'))
+    if ctx.param('boundaryPressureMode', 'mdbcDensity') != 'mdbcDensity':
+        raise ValueError('boundaryPressureMode is retired; configure iisph.boundaryPressure instead')
     # The surface-detection bandwidth is measured in particle spacings.
     schemeConfig.bandwith = ctx.spec.L / ctx.param('bandWidth') / ctx.config.dx
 
@@ -112,7 +49,7 @@ setupPlot, updatePlot = particlePlot(VELOCITY_DENSITY_FIELDS)
 
 randomFlowIncompressibleCase = registerCase(Case(
     name='randomFlowIncompressible',
-    scheme='divergenceFree',
+    scheme='dfsph',
     description='Decaying divergence-free random flow (2D), DFSPH, periodic or bounded.',
     buildSystem=buildSystem,
     configureScheme=configureScheme,
@@ -159,7 +96,6 @@ randomFlowIncompressibleCase = registerCase(Case(
         kind='perlin',
         seed=45906734,
         shifting=False,
-        boundaryPressureMode='mdbcDensity',
         markerSize=8,
     ),
 ))

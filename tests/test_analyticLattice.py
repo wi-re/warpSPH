@@ -54,8 +54,8 @@ def test_applied_to_the_analytic_dam_break():
     from warpSPH.runner.caseSpec import CaseSpec
     importAll()
     case = getCase('dambreak')
-    spec = CaseSpec(caseName='cal', scheme='omniIncompressible', params={**case.params, 'wallRepresentation': 'analytic'}).merged(**case.defaults).merged(
-        scheme='omniIncompressible', nx=60, n_h=2.57, nSteps=1, integrationScheme='semiImplicitEuler', kernel='Wendland2', supportMode='SuperSymmetric', cflFactor=1.0, dt=1e-3, maxDt=1e-3,
+    spec = CaseSpec(caseName='cal', scheme='dfsphPredictor', params={**case.params, 'wallRepresentation': 'analytic'}).merged(**case.defaults).merged(
+        scheme='dfsphPredictor', nx=60, n_h=2.57, nSteps=1, integrationScheme='semiImplicitEuler', kernel='Wendland2', supportMode='SuperSymmetric', cflFactor=1.0, dt=1e-3, maxDt=1e-3,
         plot=False, store=False, progress=False, video=False, show=False, quiet=True)
     res = run(case, spec)
     sc = res.ctx.schemeConfig
@@ -73,7 +73,7 @@ def test_normalized_lattice_uses_physical_mass_without_double_normalization():
     assert calibration['V'] * normalized_weights.sum() == pytest.approx(1., abs=1e-12)
 
 
-@pytest.mark.parametrize('scheme', ['iisph', 'dfsph'])
+@pytest.mark.parametrize('scheme', ['iisph', 'dfsph', 'dfsphPredictor', 'dfsphShift'])
 def test_iisphAnalyticLatticeDefersTheCommonMassFactorToInitialization(scheme):
     pytest.importorskip('warpSPHBoundaries')
     from warpSPH.cases import importAll

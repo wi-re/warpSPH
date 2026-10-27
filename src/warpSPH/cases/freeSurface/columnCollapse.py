@@ -1,34 +1,6 @@
-"""Water-column collapse in a closed tank (2D), divergence-free incompressible SPH.
-
-A tall, narrow block of fluid against the left wall of a closed tank is
-released at t=0, collapses to the right, climbs the far wall, and sloshes back
-and forth -- a damped free oscillation settling to a flat pool at
-`blockWidth * fillHeight` of the tank height. This is the Koshizuka & Oka 1996
-"collapse of a water column" test: gravity-driven, one initially-flat free
-surface, well-known geometry -- the free-surface companion to
-`hydrostaticColumn`.
-
-**Not a sloshing tank.** A sloshing tank proper is a *wide, shallow* basin
-under a *laterally oscillating* excitation (realised as a time-varying gravity
-direction), which this case does not do -- it is a one-shot release. A real
-`sloshingTank` case (wide basin, thin layer, oscillating gravity) is a TODO;
-`tiltDeg` here only rotates gravity to a *fixed* angle for a tilted-tank
-variant.
-
-`gravityConfig.active` is True, so the Part 47 gate routes this through the
-in-step constant-density velocity impulse (`divergenceFree.INSTEP_CD` auto-on) -- the
-same path `hydrostaticColumn` and `dambreak` take; the VD+PS position shift is
-off here. `configureScheme`, the walled-box `buildSystem`, `wallBC`, `nu`,
-`xsphScale` and the surface-detection bandwidth are all `hydrostaticColumn`'s.
-
-**Wall penetration (was a known issue; resolved Part 49):** the `c637785`
-rewrite had commented `computeMdbcNoPenShift`'s call out of `divergenceFree_step`,
-leaving the pressure projection alone for no-penetration, and that let ~6
-fluid particles cross the wall band a full spacing at the collapse impact.
-`divergenceFree.NOPEN_SHIFT` re-wires the shift (default on); with it, `nPenetrating`
-stays 0-1 through the impact. `diagnostics` still reports `nPenetrating` /
-`maxPenetrationDx` each step. See `DFSPH_FINDINGS.md` 1.6 / 2.
-"""
+"""Water-column collapse in a closed tank using native pressure projection.
+A one-shot gravity release, distinct from the driven sloshingTank case.
+Wall containment is measured; no legacy no-penetration impulse is implied."""
 
 from __future__ import annotations
 
@@ -152,7 +124,7 @@ def extraData(ctx: RunContext, state) -> Dict[str, Any]:
 
 columnCollapseCase = registerCase(Case(
     name='columnCollapse',
-    scheme='divergenceFree',
+    scheme='dfsph',
     description='Water-column collapse in a closed tank (2D): a released column '
                'oscillates under gravity.',
     buildSystem=buildSystem,

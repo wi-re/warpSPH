@@ -14,6 +14,12 @@ python scripts/audit_fluidMatrix.py --root .tmp/fluid-matrix
 python scripts/plot_fluidMatrixRanking.py --root .tmp/fluid-matrix
 ```
 
+`plan` now defaults to the prepared incompressible profile and the complete
+four-method native cohort: DFSPH, predictor-first DFSPH, native VD+PS and IISPH.
+For new WCSPH controls, use `--profile classic --schemes deltaSPH sun2017DeltaSPH artificialCompressible`; native comparisons use the prepared profile. Historical result
+IDs remain readable, but retired projection manifests cannot execute against
+the current runtime; restore checkpoint `18d069d` in an isolated checkout.
+
 `plan` writes `ROOT/manifest.json`. Inspect the declared support, initialization,
 viscosity, boundary representation, timestep limits and endpoints before
 running. Use `--schemes` to select a subset and `--manifest` for an explicit
@@ -63,13 +69,12 @@ kernels and presets; the combined ranking is a capability survey, not a
 controlled solver-only comparison. Do not pass its comparison-only manifest
 to the simulation runner.
 
-For a full rerun explicitly limited to the four current native methods, pass
-`--native-only`. This requires exactly DFSPH, predictor-first DFSPH, native
-VD+PS and IISPH, and builds a seven-method comparison with the three retained
-controls. Without this option the complete eight-method prepared cohort is
-still required. Both modes require identical declared case/wall slots across
-methods and preserve failed outcomes; neither fills cells with historical
-projection results.
+The composer defaults to the four current native methods, building a
+seven-method comparison with the three retained controls. `--native-only`
+is retained as an explicit spelling. Historical eight-method datasets can
+still be read via the Python API with `native_only=False`; their execution
+requires the old checkpoint. Every cohort requires identical declared case/wall
+slots and preserves failed outcomes; missing cells are never backfilled.
 
 Figure legends and titles describe the physical settings and use explicit
 units. Keep run identifiers in machine-readable metadata.
@@ -97,16 +102,13 @@ python scripts/audit_fluidMatrix.py --root .tmp/incompressible-prepared
 python scripts/plot_fluidMatrixRanking.py --root .tmp/incompressible-prepared
 ```
 
-This opt-in profile includes native IISPH, native DF-first DFSPH,
-predictor-first DFSPH, post-drift density shift with velocity resampling, and
-all four legacy projection routes. The legacy reference divergence-pressure
-carrier is explicitly zeroed independently of its historical soundspeed slot.
-The latter retain their operator/source
-policies and have explicit legacy labels. `--schemes` selects profile method
-IDs; `--scale screen` caps resolution at64 while retaining the endpoints.
-Screen and full results belong in separate roots and must not be pooled.
+The default profile includes native IISPH, native DF-first DFSPH,
+predictor-first DFSPH and post-drift density shift with velocity resampling.
+`--schemes` selects these method IDs; `--scale screen` caps resolution at64
+while retaining endpoints. Screen and full results belong in separate roots.
 Full scale retains the original resolutions, including256²TGV particles.
-Unsupported moving-wall and Band analytic-wall combinations remain visible.
+Unsupported moving-wall combinations remain visible. Historical manifests
+retain their original legacy rows, labels and pressure-carrier declarations.
 
 The 26 October full rerun of `stability-v1` was **stopped and rejected** by the user: sloshing remains physically underactive, with suppressed wave motion, unexpectedly low speeds and large pressure errors. Removal of startup eruptions is not a physical qualification. Completed and partial evidence is retained under `.tmp/incompressible-corrected-rows-2026-10-26`; the normal matrix has not been replaced by these results. The preset remains experimental.
 
@@ -139,12 +141,12 @@ the current recovery policy is selected separately by version 9.
 | VD+PS with native operators | Nonpressure velocity prediction → divergence → drift → density shift and velocity resampling |
 | IISPH | Nonpressure velocity prediction → pressure → drift |
 
-The native variants share IISPH operators. The separately labeled legacy omni
-route retains its own operators and policies; it is a distinct comparison row.
+The native variants share IISPH operators. Historical legacy rows remain in
+their original reports and are excluded from new plans.
 
 | Domain | Common initialization | Density constraint |
 |---|---|---|
-| Fully periodic | Nominal cell masses, bounded0.01dx jitter, zero velocity, damped native DFSPH preparation, fresh undamped rest check; sample the analytic field afterward | Native IISPH/DFSPH explicitly select `periodicMeanFree`; legacy policies remain declared separately |
+| Fully periodic | Nominal cell masses, bounded0.01dx jitter, zero velocity, damped native DFSPH preparation, fresh undamped rest check; sample the analytic field afterward | Native IISPH/DFSPH explicitly select `periodicMeanFree` |
 | Closed static box | Nominal fluid/solid cell masses, theoretical fixed walls, jitter and damped preparation, fresh rest check; sample an analytic streamfunction curl afterward | Absolute density with compression-only pressure |
 | Free surface | One bulk mass calibration; analytic flat-wall lattice alignment; scheme-independent saved physical arrays | Absolute density, compression-only pressure |
 
@@ -199,16 +201,11 @@ The evidence audit also records initial and final closed-box containment.
 Small rest velocities do not imply a wall-contained or isotropic fixture;
 initial boundary crossings remain visible independently of subsequent decay.
 
-The prepared-profile pressure probes observe the actual legacy stage pressures
-at the existing wall-load bookkeeping call and combine only the components
-applied to velocity. The observer forwards the original call unchanged and
-does not modify state or force arrays. This avoids treating a density-only
-carry or a historical soundspeed carrier as total physical pressure. The
-reference also observes its returned solve pressures, since its wall-load
-bookkeeping is skipped when an analytic provider is absent. That observer
-forwards the exact original inputs and returned tuple unchanged. The
-old ambiguous sloshing `sensorPressureCD/DF` aliases are omitted by this
-profile; `sensorPressure` is the physical total used by its ranking.
+Native pressure probes read dedicated physical stage fields without mutating
+the carried density pressure. Coupled methods report CD+DF; VD+PS reports DF
+and labels its auxiliary density multiplier separately as a shift pressure.
+The historical legacy pressure observers and soundspeed-carrier conventions
+remain part of their saved source archives, not the current runtime.
 
 Where `hydrostaticInit` is enabled, every native route receives the same
 physical pressure profile. At the actual first timestep the adapter encodes
@@ -220,3 +217,9 @@ accidentally erasing a pressure seed by passing a zero impulse history.
 
 
 The saved dam-break energy audit also exposes specific preset and wall differences: prepared runs force physical `nu=0.01` while retained WCSPH uses artificial `alpha=0.01`; native sampled viscosity assumes mDBC ghost velocities have been prepared but its step does not perform that update. These records therefore cannot isolate projection dissipation. See [energy curves and archived call-path evidence](../../.tmp/dambreak-energy-audit-2026-10-26/README.md). No simulations were resumed for this audit.
+
+
+Legacy runtime retirement and test coverage are documented in
+[the native migration guide](../incompressible/MIGRATION.md). The normal composer
+now defaults to the four-method native cohort. Existing reports/evidence remain
+unchanged; this cleanup does not rerun or qualify their failed trajectories.

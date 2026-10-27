@@ -46,7 +46,6 @@ from warpSPH.modules.shifting.bicgstab import bicgstabSolve
 from warpSPH.modules.shifting.gmres import gmresSolve
 from warpSPH.modules.shifting.minres import minresSolve
 from warpSPH.modules.shifting.richardson import richardsonSolve
-from warpSPH.modules.incompressible.compactProjection import CompactCG
 
 rows, iters = [], {}
 kw = dict(tol=0.0, rtol=1e-30, maxiter=IT)
@@ -74,18 +73,6 @@ run('richardson', lambda: richardsonSolve(A, b, x0, dim=1, **kw))
 # integrators' JFNK gmres (flat vector, 1-arg precond)
 from warpSPHIntegrators.solvers import gmres as jgmres
 run('integrators.gmres(30)', lambda: (jgmres(A, b, x0, tol=1e-30, maxiter=IT, restart=30, preconditioner=lambda v: inv * v)[0], 0, [None] * IT))
-
-# compact CG: needs a pair list; build the same 5-point graph (w = -1 off-diagonals, D = shift)
-idx = torch.arange(n, device=dev).view(m, m)
-pi, pj = [], []
-for a, c in ((idx[1:, :], idx[:-1, :]), (idx[:-1, :], idx[1:, :]), (idx[:, 1:], idx[:, :-1]), (idx[:, :-1], idx[:, 1:])):
-    pi.append(a.reshape(-1)); pj.append(c.reshape(-1))
-pi, pj = torch.cat(pi), torch.cat(pj)
-w = -torch.ones(pi.shape[0], device=dev)
-D = torch.full((n,), -shift, device=dev)           # CompactCG convention: sum w (Pi-Pj) + D P = rhs, w<=0
-cg = CompactCG(warmStart=False)
-rhs = -b
-run('CompactCG', lambda: (cg.solve(pi, pj, w, rhs.clone(), tol=1e-30, maxIterations=IT, diag=D)[0], 0, [None] * IT))
 
 text = formatTable(rows)
 print(text)

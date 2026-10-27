@@ -1,11 +1,6 @@
-"""Taylor-Green vortex (2D), incompressible.
-
-The script form of this case was `examples/incompressible/01-taylor-green-vortex.py`.
-Two things that file did are dropped here rather than carried over: it built a
-`regions` list that was never passed anywhere, and it imported the local
-zero-byte `dfsph.py` / `divergenceFree_step.py` -- the real step function comes from
-`buildScheme`, which the runner already unpacks.
-"""
+"""Taylor–Green vortex with native incompressible projection. The prepared
+matrix uses shared nominal-mass relaxed periodic fixtures; case defaults
+retain their explicit lattice relaxation controls."""
 
 from __future__ import annotations
 
@@ -121,7 +116,7 @@ def extraData(ctx: RunContext, state) -> Dict[str, Any]:
 
 tgvCase = registerCase(Case(
     name='tgv',
-    scheme='divergenceFree',
+    scheme='dfsph',
     description='Taylor-Green vortex (2D), divergence-free incompressible SPH.',
     buildSystem=buildSystem,
     configureScheme=configureScheme,

@@ -2,7 +2,8 @@
 
 `dfsph` is the native DFSPH scheme, built on IISPH's rest-volume operators,
 exact diagonal and static boundary coupling. Select it with `--scheme dfsph`.
-`dfsphReference` remains the legacy composed variant for comparison. See
+`dfsphPredictor` and `dfsphShift` select the other native compositions. Legacy
+runtime paths are retired; see [migration and policy differences](MIGRATION.md). See
 [IISPH.md](IISPH.md) for the shared spatial API and boundary restrictions.
 
 The native default now includes the reference weak-factor cutoff and the

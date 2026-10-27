@@ -162,17 +162,15 @@ def configureScheme(ctx: RunContext) -> None:
     if ctx.param('wallRepresentation') == 'analytic':
         # the tank is one analytic warpSPHBoundaries body (docs/historic_plans/ANALYTIC_BOUNDARIES_PLAN.md): deltaSPH and omniIncompressible, static walls
         # (the roll is carried by the rotated gravity, the walls never move in this frame)
-        if getattr(ctx.scheme, 'name', ctx.scheme) not in ('deltaSPH', 'omniIncompressible', 'divergenceFree', 'dfsphReference', 'iisph', 'dfsph'):
-            raise ValueError("sloshingTank wallRepresentation='analytic' is hooked into deltaSPH, omniIncompressible, divergenceFree, dfsphReference, iisph and dfsph only "
+        if getattr(ctx.scheme, 'name', ctx.scheme) not in ('deltaSPH', 'iisph', 'dfsph', 'dfsphPredictor', 'dfsphShift'):
+            raise ValueError("sloshingTank wallRepresentation='analytic' is hooked into deltaSPH and native IISPH/DFSPH variants only "
                              "(docs/historic_plans/ANALYTIC_BOUNDARIES_PORT_SURVEY.md)")
         sc.analyticWallPressure = ctx.param('analyticWallPressure')
-        if getattr(ctx.scheme, 'name', ctx.scheme) not in ('omniIncompressible', 'divergenceFree', 'dfsphReference', 'iisph') and (sc.analyticWallPressure == 'mls' or ctx.param('boundaryFriction') or ctx.param('xsphCoefficient')):
-            raise ValueError("analyticWallPressure='mls', boundaryFriction and xsphCoefficient are omniIncompressible / divergenceFree options")
-    if getattr(ctx.scheme, 'name', ctx.scheme) in ('omniIncompressible', 'divergenceFree', 'dfsphReference', 'iisph'):
-        sc.xsphCoefficient = ctx.param('xsphCoefficient')
-        sc.projection, sc.projectionTol, sc.densitySolve = ctx.param('projection'), ctx.param('projectionTol'), ctx.param('densitySolve')
-        sc.shifting, sc.shiftA = ctx.param('particleShift'), ctx.param('shiftA')
-        sc.boundaryFriction = ctx.param('boundaryFriction')
+        if sc.analyticWallPressure == 'mls':
+            raise ValueError('analyticWallPressure=mls is a retired projection option; select a native wall closure')
+    if isIncompressibleScheme(ctx.scheme):
+        from ...caseUtils.projection import validateProjectionOptions
+        validateProjectionOptions(ctx)
     sc.surfaceDetectionConfig.active = True
     sc.gravityConfig.active = True
     sc.gravityConfig.type = GravityType.Directional
@@ -185,8 +183,6 @@ def configureScheme(ctx: RunContext) -> None:
         sc.diffusionParams.viscidNu = ctx.param('nu')
         if hasattr(sc, 'shiftProperties'):
             sc.shiftProperties.active = ctx.param('shifting', False)
-        if hasattr(sc, 'xsphFilterScale'):
-            sc.xsphFilterScale = ctx.param('xsphScale', 0.0)
     elif isArtificialCompressibleScheme(ctx.scheme):
         _configureArtificialCompressible(ctx)
     else:                                # deltaSPH -- weakly compressible
@@ -419,16 +415,27 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     d.update(particleDistributionMetrics(ctx, state))
     d.update(stepAccelerationDiagnostics(state))
 
+    if isIncompressibleScheme(ctx.scheme):
+        from ...caseUtils.projection import physicalProjectionPressure
+        scale = rho0Phys / rho0
+        physical = physicalProjectionPressure(particles, ctx.schemeConfig)
+        probe = _probePressure(ctx, particles, physical * scale) if physical is not None else None
+        d['sensorPressure'] = probe if probe is not None else 0.0
+        if probe is not None:
+            d['sensorPressureProbe'] = probe
+        for field, label in (('pressures', 'CD'), ('divergencePressures', 'DF')):
+            pressure = getattr(particles, field, None)
+            if pressure is not None:
+                value = _probePressure(ctx, particles, pressure * scale)
+                if value is not None:
+                    d['sensorPressure' + label] = value
+        if ctx.schemeConfig.dfsph.ordering == 'np_df_shift' and hasattr(particles, 'divergencePressures'):
+            d['sensorPressureShift'] = d.pop('sensorPressureCD', 0.0)
+        return d
+
     if ctx.param('wallRepresentation') == 'analytic':
-        # no wall particle to read: Sensor 1 is the Gaussian-smoothed pressure of the fluid within `probeRadius`
-        # of the sensor position (the same `sensorPressureProbe` the particle walls record next to the wall reading):
-        # the carried solver pressure of an incompressible scheme, else the Tait pressure of the density
-        if isIncompressibleScheme(ctx.scheme):
-            quantity = (particles.pressures if particles.pressures is not None else torch.zeros_like(particles.densities)) * rho0Phys
-        else:
-            cs = float(ctx.schemeConfig.fluid.fixedSoundSpeed)
-            scale = rho0Phys * cs * cs
-            quantity = scale / _TAIT_GAMMA * ((particles.densities / rho0) ** _TAIT_GAMMA - 1.0)
+        cs = float(ctx.schemeConfig.fluid.fixedSoundSpeed)
+        quantity = rho0Phys * cs * cs / _TAIT_GAMMA * ((particles.densities / rho0) ** _TAIT_GAMMA - 1.0)
         probe = _probePressure(ctx, particles, quantity)
         d['sensorPressure'] = probe if probe is not None else 0.0
         if probe is not None:
@@ -444,33 +451,7 @@ def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
     d['sensorRho'] = sensorRho
     d['sensorDensityRatio'] = ratio
 
-    if isIncompressibleScheme(ctx.scheme):
-        # DFSPH now persists both projection pressures (schemes/incompressible/divergenceFree.py):
-        #   pressures   -> constant-density / particle-shift solve pressure
-        #   soundspeeds -> divergence-free projection pressure
-        # Both are populated on fluid rows only, so the wall sensor particle
-        # reads 0 -- take the sensor value from a fluid-particle probe instead.
-        pCD = getattr(particles, 'pressures', None)
-        pDF = getattr(particles, 'soundspeeds', None)
-        probe = _probePressure(ctx, particles, pCD * rho0Phys) if pCD is not None else None
-        probeDF = _probePressure(ctx, particles, pDF * rho0Phys) if pDF is not None else None
-        if probe is not None:
-            d['sensorPressureCD'] = probe
-        if probeDF is not None:
-            d['sensorPressureDF'] = probeDF
-        d['sensorPressure'] = probe if probe is not None else 0.0
-
-        # `band2018pb` solves the pressure AT the boundary sample (that is the
-        # whole point of the extended PPE -- and the paper's own Sec. 3.3 tank
-        # scenario is exactly this: "Pressure Boundaries enable the analysis of
-        # computed pressure values at the boundary"). Where the wall row
-        # carries a solved pressure, report it directly as well: it is the
-        # quantity Sensor 1 physically measures, with no fluid-probe smoothing
-        # in between. Kept as an extra series rather than a replacement so the
-        # `sensorPressure` column stays comparable across schemes.
-        if pCD is not None and bool(particles.kinds[idx] != 0):
-            d['sensorPressureWall'] = float(pCD[idx]) * rho0Phys
-    elif isArtificialCompressibleScheme(ctx.scheme):
+    if isArtificialCompressibleScheme(ctx.scheme):
         # ACSPH integrates `pressures` (fluid rows) and fills the wall rows
         # with its Eq. (61) closure, so the wall sensor row carries a pressure
         # of its own -- reported as an extra series next to the fluid probe,
@@ -607,16 +588,6 @@ sloshingTankCase = registerCase(Case(
         analyticWallOffset=0.0,
         # analytic walls only: 'hydrostatic', 'normal' (see dambreak) or 'mls' (omniIncompressible: the wall pressure gradient fitted to the fluid's pressure iterate)
         analyticWallPressure='hydrostatic',
-        # omniIncompressible velocity filters (modules/xsph): the XSPH coefficient (DFSPH2D 1e-4) and the analytic walls' boundary friction (DFSPH2D 5e-3); 0 = off
-        xsphCoefficient=0.0,
-        boundaryFriction=0.0,
-        # incompressible analytic walls: the divergence stage as 'jacobi' (omniSPH, default) or the converged 'compact' projection (modules/incompressible/compactProjection.py); densitySolve=False leaves the projection the only pressure solve
-        projection='jacobi',
-        # DFSPH2D Fickian particle shift of the incompressible analytic-wall schemes (modules/shifting/fickian.py): particleShift 'none' | 'fixed' | 'fickian', shiftA
-        particleShift='none',
-        shiftA=0.5,
-        projectionTol=1e-8,
-        densitySolve=True,
         gravityMagnitude=9.81,
         rho0Physical=1000.0,
         # Normalise the particle mass so the at-rest sampling measures `rho0`.
@@ -645,9 +616,7 @@ sloshingTankCase = registerCase(Case(
         nu=1.0e-6,
         # WCSPH: uniform background pressure added to the EOS (0 = off)
         backgroundPressure=0.0,
-        # divergenceFree only
         shifting=False,
-        xsphScale=0.0,
         markerSize=4,
         # mDBC no-penetration placement; None = the scheme config's default.
         noPenShift=None,

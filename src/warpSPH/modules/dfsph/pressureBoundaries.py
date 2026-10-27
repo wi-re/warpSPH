@@ -9,14 +9,13 @@ Static one-way sampled walls only. Analytic/contact wall closures stay native.
 """
 from copy import copy
 from dataclasses import dataclass
+from typing import Any
 from types import SimpleNamespace
 import torch
 from warpSPHCore import (OperationProperties, WarpOperation, GradientScheme,
                         SupportScheme, OperationDirection, warpOperation)
 from warpSPHCore.linalg import CheckSchedule, runStationary
 from ..iisph.solver import IISPHResult, applyDensitySourcePolicy
-from ..incompressible.pressureBoundaries import (
-    bandActualVolumes, bandBoundaryUnknownMask)
 from ..incompressible.wp_alpha import computeAlphaWarp
 
 
@@ -129,3 +128,48 @@ def solvePressureBoundaryProjection(state, config, schemeConfig, dt, adjacency, 
         raise FloatingPointError(f'Nonfinite Band DFSPH {mode} pressure iteration')
     return IISPHResult(result.x*rho0, geometry.acceleration(config, adjacency, result.x),
                        result.iterations, result.stats[-1], result.termination, source)
+
+
+MIN_FLUID_CONTACT = 0.02
+
+def _bareKernelSum(state: Any, config: Any, adjacency: Any,
+                   direction: OperationDirection,
+                   weights: torch.Tensor | None = None) -> torch.Tensor:
+    """`sum_{j in `direction`} w_j W_ij` via an `Interpolate` whose `m_j/rho_j`
+    weight is divided back out. `weights=None` -> `w_j = 1` (a plain kernel
+    sum); otherwise `w_j = weights[j]`. Independent of the actual density value
+    (the `rho_j` cancels), so it is valid before the volume injection."""
+    inv = state.densities / state.masses
+    ref = inv if weights is None else weights * inv
+    return warpOperation(
+        state,
+        OperationProperties(
+            kernel=config.kernel, operation=WarpOperation.Interpolate,
+            supportMode=SupportScheme.SuperSymmetric,
+            operationMode=direction),
+        referenceValues=ref, domain=config.domain, adjacency=adjacency)
+
+
+
+
+def bandActualVolumes(state: Any, config: Any, adjacency: Any,
+                      V0: torch.Tensor, rho0: float) -> torch.Tensor:
+    """`V_i = V0_i / sum_{all j} V0_j W_ij` -- Eq. 13, applied to fluid and
+    boundary rows alike. Near-complete support (a fluid row in the bulk, or a
+    boundary interface row with a full band behind it) gives `V_i ~ V0_i`."""
+    denom = _bareKernelSum(state, config, adjacency,
+                           OperationDirection.AllToAll, weights=V0)
+    return V0 / denom.clamp_min(1e-12)
+
+
+def bandBoundaryUnknownMask(state: Any, config: Any, adjacency: Any,
+                            rho0: float) -> torch.Tensor:
+    """`kind == 1` rows with enough fluid contact to be pressure unknowns --
+    `sum_bf V0_f W_bf > MIN_FLUID_CONTACT`. The 3-4 band layers behind the
+    interface get no fluid neighbours (zero Eq. 20 diagonal) and are excluded;
+    their pressure stays 0 and is never read by a fluid row anyway."""
+    boundary = state.kinds == 1
+    V0f = state.masses / rho0
+    kf = _bareKernelSum(state, config, adjacency,
+                        OperationDirection.FluidToBoundary, weights=V0f)
+    return boundary & (kf > MIN_FLUID_CONTACT)

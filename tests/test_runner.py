@@ -47,7 +47,7 @@ def test_allStepFunctionsAgreeOnTheKeyword():
 
     from warpSPH.schemes import buildScheme
     for name in ('compSPH', 'crkSPH', 'MonaghanCompressibleSPH', 'deltaSPH',
-                 'divergenceFree'):
+                 'dfsphShift'):
         parameters = signature(buildScheme(name).stepFunction).parameters
         assert 'schemeConfig' in parameters, name
         assert 'compParams' not in parameters, name
@@ -477,7 +477,7 @@ def test_first_projection_step_obeys_initialized_viscous_limit():
     importAll()
     # Setup asks for 1 ms, but the actual Morris coefficient at this spacing
     # requires ~0.80 ms. Checking only subsequent hooks misses the first step.
-    result = run(getCase('periodicChannel'), scheme='omniIncompressible',
+    result = run(getCase('periodicChannel'), scheme='dfsphPredictor',
                  nx=192, n_h=4.0, dt=0.001, maxDt=0.002, nSteps=1,
                  integrationScheme='semiImplicitEuler', plot=False, video=False,
                  store=False, show=False, progress=False, quiet=True,
@@ -488,7 +488,7 @@ def test_first_projection_step_obeys_initialized_viscous_limit():
     assert float(result.state.t) < 0.001
 
 
-@pytest.mark.parametrize('name', ['omniIncompressible', 'iisph', 'dfsphReference', 'divergenceFree', 'band2018pb'])
+@pytest.mark.parametrize('name', ['dfsphPredictor', 'iisph', 'dfsph', 'dfsphShift', 'iisph'])
 def test_all_pressure_families_enable_lattice_normalization(name):
     from warpSPH.cases import importAll
     from warpSPH.runner import getCase, prepareContext, CaseSpec
@@ -505,5 +505,5 @@ def test_stokes_array_respects_default_support():
 
     importAll()
     case = getCase('stokesArray')
-    ctx = prepareContext(case, CaseSpec(scheme='omniIncompressible', n_h=4.0, params=dict(case.params)))
+    ctx = prepareContext(case, CaseSpec(scheme='dfsphPredictor', n_h=4.0, params=dict(case.params)))
     assert ctx.spec.n_h == ctx.config.n_h == 4.0

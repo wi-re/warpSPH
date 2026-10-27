@@ -261,7 +261,7 @@ def main() -> int:
     ap.add_argument('--tol', type=float, nargs='*',
                     default=[1e-2, 3e-3, 1e-3, 3e-4, 1e-4, 3e-5])
     ap.add_argument('--validate', default=None, help='case name to check against')
-    ap.add_argument('--scheme', default='divergenceFree')
+    ap.add_argument('--scheme', default='dfsph')
     ap.add_argument('--nx', type=int, nargs='*', default=[60, 100, 200])
     args = ap.parse_args()
     if args.validate:

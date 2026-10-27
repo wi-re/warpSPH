@@ -25,7 +25,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
         "--scheme",
-        choices=("divergenceFree", "dfsphReference", "iisph", "omniIncompressible", "band2018pb"),
+        choices=("dfsph", "dfsphPredictor", "dfsphShift", "iisph"),
         required=True,
     )
     p.add_argument("--case", default="dambreak")

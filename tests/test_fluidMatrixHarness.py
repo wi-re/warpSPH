@@ -41,16 +41,6 @@ def test_new_matrix_uses_calibrated_wide_support_and_adaptive_projection_limits(
             assert row['spec'].get('adaptiveDt', True)
 
 
-def test_projection_rerun_enables_band_viscosity_only_for_periodic_controls():
-    plan = harness.make_plan(harness.PROJECTION)
-    assert len(plan['rows']) == 75 and plan['version'] == 5
-    for row in plan['rows']:
-        if row['scheme'] == 'band2018pb':
-            assert bool(row['scheme_settings'].get('bandViscosity')) == (row['boundary'] == 'periodic')
-        if row['test'] == 'englishWedge':
-            assert row['params']['unifyAttachedObstacles']
-
-
 def test_source_archive_does_not_resolve_user_or_group_names(tmp_path, monkeypatch):
     import io
     import tarfile
@@ -90,7 +80,7 @@ def test_prepared_profile_preserves_volume_and_declares_periodic_source_variant(
                 assert row['density_source_policy']=='periodicMeanFree'
         if row['test']=='boundedVortices':
             assert row['initialization']=='closed-jitter-damped'
-            if row['scheme']!='band2018pb':assert row['skip'] is None
+            assert row['skip'] is None
     screen=make_prepared_plan(harness.make_plan,scale='screen')
     assert all(r['spec']['nx']<=64 for r in screen['rows'])
     assert [r['spec']['tLimit'] for r in screen['rows']]==[r['spec']['tLimit'] for r in plan['rows']]
@@ -152,7 +142,7 @@ def test_corrected_presets_preserve_unaffected_rows_and_old_manifest_replay():
             assert preset['targetKinematicViscosity']==.0185
         elif new['test']=='sloshing':assert new['spec']['dt']==new['spec']['maxDt']==.0002
         else:assert new['id']=='tgv__dfsphShift__periodic' and preset['divergenceTolerancePercent']==.001
-    assert len(affected)==24
+    assert len(affected)==13
 
 
 def test_prepared_jitter_is_bounded_and_velocity_field_is_wall_compatible():
@@ -174,7 +164,7 @@ def test_prepared_jitter_is_bounded_and_velocity_field_is_wall_compatible():
     assert (dx+dy).abs().max()<1e-12
 
 
-@pytest.mark.parametrize('method',['dfsph','band2018pb'])
+@pytest.mark.parametrize('method',['dfsph','iisph'])
 def test_prepared_sampled_box_keeps_physical_volume_and_auxiliary_ghosts(tmp_path,method):
     import sys
     import torch
@@ -193,8 +183,7 @@ def test_prepared_sampled_box_keeps_physical_volume_and_auxiliary_ghosts(tmp_pat
     assert int(fluid.sum())==144
     assert float(st.masses[fluid].double().sum())==pytest.approx(4.,rel=1e-7)
     assert int((st.kinds==2).sum())==int((st.kinds==1).sum())>0
-    if method=='band2018pb':assert ctx.schemeConfig.boundaryProvider is None
-    else:assert ctx.schemeConfig.iisph.boundaryRepresentation=='particles'
+    assert ctx.schemeConfig.iisph.boundaryRepresentation=='particles'
 
 
 @pytest.mark.parametrize('boundary',['particles','analytic'])
@@ -216,58 +205,6 @@ def test_prepared_sampling_gate_reaches_native_config_for_both_walls(tmp_path,bo
     assert ctx.schemeConfig.iisph.boundaryRepresentation==boundary
     assert ctx.schemeConfig.dfsph.density.maxErrorPercent==.01
     assert ctx.schemeConfig.dfsph.divergence.maxErrorPercent==.1
-
-
-@pytest.mark.parametrize('method',['divergenceFree','omniIncompressible','dfsphReference'])
-@pytest.mark.parametrize('density_applied',[True,False])
-def test_legacy_pressure_observer_is_read_only_and_forwards_exact_call(monkeypatch,method,density_applied):
-    import sys
-    import torch
-    sys.path.insert(0,str(path.parent))
-    from prepared_fluidMatrix import observe_legacy_pressures
-    from warpSPH.modules.incompressible import loads
-    rho=torch.tensor([1.,2.]);div=torch.tensor([3.,4.]);original_rho=rho.clone();original_div=div.clone()
-    args=(object(),object(),SimpleNamespace(densitySolve=True),object())
-    kwargs=dict(pDiv=div,pRho=rho,densityApplied=density_applied)
-    token=object();calls=[]
-    def original(*a,**k):
-        calls.append((a,k));return token
-    monkeypatch.setattr(loads,'bookProjectionWallLoads',original)
-    observed,restore=observe_legacy_pressures(method)
-    try:
-        assert loads.bookProjectionWallLoads(*args,**kwargs) is token
-        assert all(a is b for a,b in zip(calls[0][0],args))
-        assert calls[0][1]['pDiv'] is div and calls[0][1]['pRho'] is rho
-        assert observed['divergence'] is div and observed['density'] is rho
-        assert observed['densityApplied']==density_applied
-        assert torch.equal(rho,original_rho) and torch.equal(div,original_div)
-    finally:restore()
-    assert loads.bookProjectionWallLoads is original
-
-
-@pytest.mark.parametrize('mode,key',[('density','density'),('divergence','divergence')])
-def test_reference_pressure_observation_without_wall_bookkeeping(monkeypatch,mode,key):
-    import sys
-    import torch
-    import importlib
-    sys.path.insert(0,str(path.parent))
-    from prepared_fluidMatrix import observe_legacy_pressures
-    module=importlib.import_module('warpSPH.schemes.incompressible.dfsphReference')
-    pressure=torch.tensor([2.,3.]);before=pressure.clone();calls=[]
-    result=(object(),pressure,object(),object());args=(object(),object())
-    kwargs=dict(mode=mode,opDt=.000173)
-    def solve(*a,**k):
-        calls.append((a,k));return result
-    monkeypatch.setattr(module,'_jacobiSolve',solve)
-    observed,restore=observe_legacy_pressures('dfsphReference')
-    try:
-        assert module._jacobiSolve(*args,**kwargs) is result
-        assert all(a is b for a,b in zip(calls[0][0],args))
-        assert calls[0][1]==kwargs
-        assert observed[key] is pressure and observed['densityApplied']
-        assert torch.equal(pressure,before)
-    finally:restore()
-    assert module._jacobiSolve is solve
 
 
 @pytest.mark.parametrize('ordering',['df_np_cd','np_df_cd','np_df_shift'])
@@ -335,7 +272,7 @@ def test_native_comparison_requires_complete_explicit_cohort_and_preserves_stop(
         (root/'comparison_metrics.json').write_text(json.dumps(rows))
     original = (prepared/'comparison_metrics.json').read_bytes()
     with pytest.raises(ValueError, match='native-only'):
-        compose(base, prepared)
+        compose(base, prepared, native_only=False)
     manifest, rows = compose(base, prepared, native_only=True)
     assert len(rows) == 7 and manifest['projection_cohort'] == 'current-native'
     stopped = next(r for r in rows if r['scheme'] == 'iisph')

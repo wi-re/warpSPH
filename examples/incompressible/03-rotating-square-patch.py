@@ -5,8 +5,8 @@ The notebook this came from is `03-rotating-square-patch.ipynb`; the case itself
 `warpSPH.cases.freeSurface.rotatingSquarePatch`, and everything generic (config, step loop, export,
 plotting, ffmpeg) is `warpSPH.runner`. Equivalent invocations::
 
-    python examples/incompressible/03-rotating-square-patch.py --scheme divergenceFree
-    warpsph-run squarePatch --scheme divergenceFree            # also honours --precision
+    python examples/incompressible/03-rotating-square-patch.py --scheme dfsph
+    warpsph-run squarePatch --scheme dfsph            # also honours --precision
 """
 
 import sys
@@ -22,7 +22,7 @@ from warpSPH.runner import caseMain                # noqa: E402
 #: because these are prepended to the command line rather than appended.
 #: `--plot` is on because an example is meant to be watched -- pass `--no-plot`
 #: for a headless run, or `--no-show` to keep the frames without a window.
-PRESET = ['--plot', '--scheme', 'divergenceFree']
+PRESET = ['--plot', '--scheme', 'dfsph']
 
 if __name__ == '__main__':
     caseMain(rotatingSquarePatchCase, PRESET + sys.argv[1:])

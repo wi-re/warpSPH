@@ -2,7 +2,7 @@
 
 All numerical choices are declared in the manifest. Fixture creation is done
 once by a canonical native DFSPH preparation, independent of the tested method.
-The legacy matrix and production case defaults are unchanged.
+The default cohort is the four supported native projection variants.
 """
 from dataclasses import replace, fields
 from pathlib import Path
@@ -12,12 +12,9 @@ import json
 import math
 import time
 
-METHODS = ('dfsph', 'dfsphPredictor', 'dfsphShift', 'iisph',
-           'divergenceFree', 'omniIncompressible', 'dfsphReference', 'band2018pb')
+METHODS = ('dfsph', 'dfsphPredictor', 'dfsphShift', 'iisph')
 LABELS = dict(dfsph='DFSPH', dfsphPredictor='Predictor-first DFSPH',
-              dfsphShift='VD+PS (native operators)', iisph='IISPH',
-              divergenceFree='Legacy divergenceFree', omniIncompressible='Legacy omni',
-              dfsphReference='Legacy reference DFSPH', band2018pb='Band pressure BC')
+              dfsphShift='VD+PS (native operators)', iisph='IISPH')
 ORDERS = dict(dfsph='df_np_cd', dfsphPredictor='np_df_cd', dfsphShift='np_df_shift')
 CLOSED = ('tgv', 'decayingVortices', 'shearDecay', 'boundedVortices')
 
@@ -115,10 +112,8 @@ def make_prepared_plan(make_plan, methods=METHODS, scale='full', revision='sampl
             if r['test'] == 'taylorCouette':
                 if r['boundary'] == 'particles':
                     r['skip'] = 'No prescribed spinning sampled-wall adapter.'
-                elif r['solver'] not in ('omniIncompressible', 'divergenceFree'):
-                    r['skip'] = 'Native static-wall projections/Band do not support rotating analytic solids.'
-            if r['boundary'] == 'analytic' and method == 'band2018pb':
-                r['skip'] = 'Band has no analytic-wall adapter.'
+                else:
+                    r['skip'] = 'Native static-wall projections do not support rotating analytic solids.'
             spec = r['spec']
             spec.update(kernel='Wendland4', n_h=4., dt=.001, maxDt=.001,
                         adaptiveDt=True, device='cuda', pipelineOutputs=False)
@@ -143,7 +138,7 @@ def make_prepared_plan(make_plan, methods=METHODS, scale='full', revision='sampl
                 r['solver'] in ('dfsph','iisph') else 'absolute' if r['solver'] in
                 ('dfsph','iisph') else 'legacy-native-policy')
             r['ordering'] = ORDERS.get(method)
-            r['scheme_settings'] = dict(omniViscosity=True, bandViscosity=True)
+            r['scheme_settings'] = {}
             spec['calibrateNormalization'] = False
             if r['test'] in CLOSED:
                 spec['L'] = 2*math.pi if r['test'] == 'tgv' else 1. if r['test']=='shearDecay' else 2.
@@ -406,10 +401,6 @@ def prepared_case(case, root, row):
         data=torch.load(fixture_file,map_location=ctx.device,weights_only=True)
         for k,v in data.items():
             if hasattr(st,k):setattr(st,k,v.clone())
-        if row.get('solver')=='dfsphReference':
-            # This legacy route stores its divergence-pressure history in the
-            # soundspeeds slot. It must start at zero pressure, not c0.
-            st.soundspeeds=torch.zeros_like(st.masses)
         sc.analyticWallMass=meta['analyticWallMass'];cfg.calibrateNormalization=False
         system.adjacency=None
         initializeProjectionDensity(ctx,system)
@@ -496,46 +487,6 @@ def relax_fixture(ctx,system,directory,periodic):
         rawDensityRetained=True)
 
 
-def observe_legacy_pressures(method):
-    """Read applied stage pressures at the existing load-bookkeeping boundary.
-
-    Forward the exact original arguments and result. No state or pressure
-    array is changed; the caller combines these references during diagnostics.
-    This also avoids interpreting the legacy soundspeed carrier as physical c0.
-    """
-    if method not in ('divergenceFree','omniIncompressible','dfsphReference'):
-        return {},lambda:None
-    import importlib
-    from warpSPH.modules.incompressible import loads
-    modules=[loads]
-    if method in ('omniIncompressible','dfsphReference'):
-        modules.append(importlib.import_module('warpSPH.schemes.incompressible.'+method))
-    original=loads.bookProjectionWallLoads
-    prior=[(m,'bookProjectionWallLoads' if m is loads else '_bookWallLoads',
-        getattr(m,'bookProjectionWallLoads' if m is loads else '_bookWallLoads')) for m in modules]
-    last={}
-    def observer(*args,**kwargs):
-        result=original(*args,**kwargs)
-        applied=kwargs.get('densityApplied')
-        if applied is None:applied=bool(getattr(args[2],'densitySolve',True))
-        last.update(divergence=kwargs['pDiv'],density=kwargs['pRho'],densityApplied=bool(applied))
-        return result
-    for module,name,_ in prior:setattr(module,name,observer)
-    if method=='dfsphReference':
-        # The reference books wall loads only with an analytic provider.
-        # Observe its returned physical pressures on sampled/periodic paths
-        # too, before optional timestep scaling of its warm-start carriers.
-        module=modules[-1];original_solve=module._jacobiSolve
-        prior.append((module,'_jacobiSolve',original_solve))
-        def observe_solve(*args,**kwargs):
-            result=original_solve(*args,**kwargs)
-            key='divergence' if kwargs['mode']=='divergence' else 'density'
-            last[key]=result[1];last['densityApplied']=True
-            return result
-        module._jacobiSolve=observe_solve
-    def restore():
-        for module,name,callback in prior:setattr(module,name,callback)
-    return last,restore
 
 
 def seed_projection_pressure(state, ordering, dt):

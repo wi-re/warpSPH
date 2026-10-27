@@ -2,8 +2,8 @@
 
 The `iisph` scheme uses a single IISPH density projection per timestep. It
 replaces the former wrapper around `dfsphReference` with rest-volume
-continuity and density-dependent pressure coefficients. `dfsphReference`
-retains its composed DFSPH formulation.
+continuity and density-dependent pressure coefficients. The old composed
+runtime is now retired; see [MIGRATION.md](MIGRATION.md).
 
 The native `dfsph` scheme now reuses these spatial operators and the shared
 `computeIISPHProjectionGeometry` assembly. It has its own density/divergence

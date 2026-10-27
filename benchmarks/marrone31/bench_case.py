@@ -44,7 +44,7 @@ def worker(a):
             pass
     case = getCase(a.case)
     if a.schemeSet:
-        # dotted scheme-config overrides, e.g. solverConfig.divergenceFreeSolver.convergenceCheckSchedule=every
+        # dotted scheme-config overrides, e.g. dfsph.divergence.maxIterations=100
         prevCfg = case.configureScheme
 
         def cfg(ctx, _p=prevCfg):

@@ -14,7 +14,7 @@ import torch
 
 from warpSPHCore import KernelFunctions
 
-from ..incompressible.compactProjection import _dwendland2, minimumImage
+from ..analyticBoundary.viscosityCalibration import _dwendland2, minimumImage
 
 __all__ = ['computeFickianShift']
 

@@ -83,21 +83,17 @@ def test_an_invalid_onResidual_is_rejected_once_there_is_a_residual(fresh):
         calibrateRestDensity(ctx, system, onResidual='whatever')
 
 
-@pytest.mark.parametrize('legacy_vdps', [False, True])
-def test_hydrostatic_pressure_seed_uses_the_solvers_pressure_gauge(monkeypatch, legacy_vdps):
+@pytest.mark.parametrize('scheme', ['iisph', 'dfsph', 'dfsphPredictor', 'dfsphShift'])
+def test_hydrostatic_pressure_seed_uses_the_solvers_pressure_gauge(scheme):
     from types import SimpleNamespace as NS
     import torch
     from warpSPH.caseUtils.projection import initializeHydrostaticPressure
     from warpSPH.enumTypes import IncompressibleSPHScheme
-    from warpSPH.schemes.incompressible import divergenceFree
 
-    monkeypatch.setattr(divergenceFree, 'DIVERGENCE_SOLVER', 'vdps' if legacy_vdps else 'omni')
     state = NS(positions=torch.tensor([[0., .1], [0., .3], [0., -.1], [0., -.2]]),
                kinds=torch.tensor([0, 0, 1, 2]))
-    ctx = NS(scheme=IncompressibleSPHScheme.divergenceFree, scratch={},
+    ctx = NS(scheme=IncompressibleSPHScheme[scheme], scratch={},
              schemeConfig=NS(fluid=NS(restDensity=1000.), gravityConfig=NS(active=True, magnitude=9.81)))
     initializeHydrostaticPressure(ctx, NS(state=state))
     expected = torch.tensor([1962., 0., 3924., 0.])
-    if legacy_vdps:
-        expected[:3] -= 981.
     torch.testing.assert_close(state.pressures, expected)

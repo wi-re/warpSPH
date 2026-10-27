@@ -13,7 +13,7 @@ import math
 
 import torch
 
-from ..incompressible.compactProjection import MORRIS_ETA2, _dwendland2
+from ..analyticBoundary.viscosityCalibration import MORRIS_ETA2, _dwendland2
 
 __all__ = ['curvedMoments', 'CurvedWallMoments']
 

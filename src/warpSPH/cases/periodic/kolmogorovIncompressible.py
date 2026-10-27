@@ -1,37 +1,4 @@
-"""Kolmogorov flow (2D), divergence-free incompressible SPH (DFSPH).
-
-The incompressible sibling of :mod:`kolmogorov` (weakly compressible
-`deltaSPH`), added per `warpSPHIntegrators/JFNK_PLAN.md` E1.9/E1.10: does
-this codebase's existing incompressible solver (`scheme='divergenceFree'`)
-already deliver, for free, some or all of what that plan's JFNK effort is
-chasing on the same forced-shear-instability problem? Its scheme mechanics
-(`buildSystem`'s mass normalisation, the `divergenceFree` scheme itself) are
-`tgv`'s (the only other `divergenceFree` case); its physics (the sinusoidal
-`v_x = xi*sin(k*pi*y)` body force plus a Perlin-noise `v_y` term to break
-the shear layer's symmetry so it can actually go unstable) are `kolmogorov`'s.
-Script form validated first as `scripts/probe_kolmogorovIncompressible.py`
-(simpler jitter-only symmetry breaking, no Case machinery) -- this is the
-same physics wired through the full `Case` protocol instead, with the
-noise-based symmetry breaking `kolmogorov` itself uses rather than that
-probe's shortcut.
-
-Two things a naive port of `kolmogorov.py` would get wrong for this scheme,
-both found running the probe and worth restating here:
-
-- DFSPH has no acoustic term (no sound speed drives its `dt` the way
-  `deltaSPH`'s does) -- but it still needs a real per-step adaptive `dt`,
-  because this flow's own velocity scale changes by roughly an order of
-  magnitude between the quiescent start and the saturated turbulent state
-  (`JFNK_PLAN.md` E1.6's finding on the compressible core; the same is true
-  here). `kolmogorovIncompressibleTimestep` below is that hook -- advective
-  + viscous CFL, no acoustic term, mirroring the formula validated across
-  nx=24..128 in the probe's own `pickDt`.
-- `IncompressibleSystem`'s own implicit particle-shifting mechanism (a
-  second, constant-density pressure solve in `finalize`) needed a real bug
-  fix (`systems/incompressible.py`, E1.10) before this case was stable with
-  the default forcing/viscosity at production resolution -- already applied,
-  nothing this case needs to work around.
-"""
+"""Forced periodic Kolmogorov flow using native pressure projection."""
 
 from __future__ import annotations
 
@@ -161,7 +128,7 @@ def extraData(ctx: RunContext, state) -> Dict[str, Any]:
 
 kolmogorovIncompressibleCase = registerCase(Case(
     name='kolmogorovIncompressible',
-    scheme='divergenceFree',
+    scheme='dfsph',
     description='Kolmogorov flow (2D), divergence-free incompressible SPH (DFSPH).',
     buildSystem=buildSystem,
     configureScheme=configureScheme,

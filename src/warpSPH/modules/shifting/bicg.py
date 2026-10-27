@@ -5,14 +5,9 @@ interface and same ``(x, status, convergence)`` return convention as
 ``atol = max(atol, tol, rtol*||b||)`` floor and the status-code family match that
 family.
 
-BiCG is the only one of the four Krylov methods that needs the **adjoint**
-operator ``A^T`` (the dual residual lives in the ``A^T``-Krylov space), so it is
-the most expensive to wire in: ``warpSPHCore`` exposes no ready adjoint of the
-pressure ``accel``/``shift`` pair, so the dispatch in ``incompressible.krylov``
-supplies ``A^T`` via ``buildIISPHMatvecT`` -- currently a *self-adjoint
-placeholder* (``A^T ~= A``). That placeholder is only correct if the operator is
-symmetric, which the Phase-0 operator probe quantifies; a rigorously derived
-transpose is the Phase-4 work item. Until then BiCG results are provisional.
+BiCG requires the true adjoint matvec as a separate input. Callers own that
+contract; the old pressure-specific approximate-adjoint adapter is retired.
+Native IISPH/DFSPH use their stationary driver instead.
 
 Method: left-preconditioned BiCG on ``M^{-1} A x = M^{-1} b``. The adjoint of
 ``M^{-1} A`` is ``A^T M^{-T}``; for the diagonal IISPH preconditioner

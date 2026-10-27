@@ -1,107 +1,7 @@
-"""Hydrostatic column (2D, wall-bounded), divergence-free incompressible SPH.
-
-Baseline case 3 of `DFSPH_IMPROVEMENT_PLAN.md`'s "what is left" item 2: a
-fluid with gravity in a container, at rest. Nothing much should happen -- the
-velocities stay ~0, no drift, and the column holds.
-
-**Status: the scheme currently does NOT pass this case.** `divergenceFree`
-diverges in this case (Part 23 of the plan): the column falls, the free
-surface compacts, and the velocity and pressure grow without bound. At
-`nx=32` (fixed `dt=1e-2`) the run hits NaN/Inf within ~5-8 steps; at `nx=64`
-(adaptive `dt`) it does not reach Inf by `t=1`, but it is already grossly
-unphysical by step ~25 -- max velocity ~14 in a unit domain (peaking at ~73),
-displacements exceeding the whole domain, and a fitted pressure slope ~10x
-the hydrostatic value and still climbing. The case is kept as the *failing*
-baseline that exposes the limitation; its figures of merit are what a correct
-scheme would show, and the "why the scheme fails it" section below records
-the diagnosis.
-
-**The physics.** A column of fluid fills the bottom `fillRatio` of a walled
-box; gravity points down; the flat top is a free surface. The exact solution
-is static: `v = 0`, and the pressure is linear in depth,
-
-    p(y) = p0 - rho0 g y        (g > 0, gravity in -y)
-
-with the surface the level where `p` reaches its gauge value. Two axes are
-measured separately, for the same reason `shearWave` separates amplitude from
-density:
-
-- `pressureSlopeRatio` -- the fitted `dp/dy`, divided by the analytic
-  `-rho0 * g`: 1.0 is the exact hydrostatic gradient. This is the axis that
-  grades the pressure *field*.
-- `pressureResidual` -- the rms departure of the pressure from the best
-  straight line, normalised by the column's own pressure drop
-  `rho0 g H`: the spurious-noise axis, independent of the slope. Free-surface
-  pressure noise is exactly this -- a field whose gradient is right on
-  average but that is not a straight line.
-
-The fit runs over the **bulk only**: a `bulkMargin`-spacing skin off the free
-surface (where the profile legitimately departs from the straight line, since
-the surface is where the pressure meets its gauge level) and a `wallMargin`
-off the walls (where the boundary treatment, not the bulk physics, rules).
-
-**The density axis is graded spray-robust.** Under `--scheme iisph` (and to a
-lesser extent the others) the bulk slosh throws 1-3 fluid particles 1-3 dx
-above the free surface; isolated, they read `rho` ~0.14-0.3 by kernel
-deficiency and dominate the plain `minDensity`, which then tracks cosmetic
-ballistic spray rather than the column (DFSPH_FINDINGS.md Part 33/34). So the
-diagnostics also report `densityP05` (5th percentile of the fluid density) and
-`embeddedMinDensity` (min over fluid rows more than 1 dx below the
-95th-percentile surface height) -- both grade the column body, and both hold
-~0.9 for a run `iisph` completes clean while `minDensity` swings 0.2-0.6.
-
-**One caveat on the pressure axis.** The stored pressure is the
-divergence-free solve's (the step's projection), which `solveDivergenceFree`
-re-centres to zero mean over the fluid every iteration -- a pure gauge choice,
-consistent with `DFSPH_IMPROVEMENT_PLAN.md` §1.4/§1.5 (the operator's constant
-mode is null). So the level `p0` is not a figure of merit; the *gradient* is.
-And for this scheme the hydrostatic support does not live in the stored DF
-pressure: the DF projection enforces `div v = 0`, and its source is exactly
-zero for the uniform gravity velocity `v* = dt*g` (see below), so the stored
-field is flat, not hydrostatic. A correct scheme would show the balance in
-this gradient; here it is a diagnostic of the failure, not of correctness.
-
-**Why the scheme fails it (Part 23).** Not a case-setup artifact -- the
-failure is specific to the quiescent, wall-bounded, free-surface-under-gravity
-state and is the limitation this case exists to expose. Two coupled mechanisms:
-
-1. **The DF projection cannot balance a uniform body force.** Its source is
-   `-div(v*)`, and the mDBC operator's divergence is exactly 0 for the
-   gravity-driven `v* = dt*g` (the wall is velocity-transparent to uniform
-   normal motion, and a uniform field is divergence-free). So the DF solve's
-   correct solution is a flat pressure field -- it enforces `div v = 0`, which
-   it cannot use to oppose gravity. The column's support must come from the
-   constant-density solve's fall-and-push-back cycle instead.
-2. **That cycle is unstable here.** (a) The DF Jacobi carries a
-   boundary-layer mode the mean-residual convergence test cannot see: the
-   per-iteration mean residual decays toward the tolerance while the
-   wall/surface-adjacent pressure amplitude grows monotonically, and the
-   0.75x warm start of the large hydrostatic gradient feeds it -- so each
-   step's early exit is clean on the mean and locally divergent. (b) The
-   constant-density solve's pressure drifts under the `nonNegativeClamp`
-   gauge -- the free-surface guard downgrades `minShift` to the clamp, which
-   does not pin the constant null mode -- compounding the free-surface
-   compaction. `|div v'|/|div v*|` is ~4.3 (amplification, not damping),
-   `|a_p|max` grows 35 -> 49 -> 79 -> 2549 over the first five steps, and the
-   free surface then compacts to 1e12. The documented "better wall"
-   configurations do not stabilise it: `inStepVelocity` diverges *faster*,
-   `forceGauge` (keeping `minShift` on the surface) diverges, and a zero
-   initial pressure diverges more slowly but still diverges (Part 23 A/B).
-
-**Initial state.** The sampled lattice is jittered first (the same
-de-correlation `tgv`, `shearWave` and `staticBlob` apply): a perfectly regular
-lattice is an unstable equilibrium whose own setup transient would be measured
-as motion, and the displacement figures of merit are taken from the jittered
-state. The jitter moves fluid particles only -- the wall band is the
-container and stays put. The constant-density pre-relaxation `tgv`/`shearWave`
-get is deliberately not run here: it drives the free surface toward its `0.9`
-clamp floor before the run even starts (see `staticBlob`'s docstring for the
-measurement). Fluid *and* wall pressure are initialised to the analytic
-hydrostatic profile in the DF gauge (see `initialConditions`): the exact
-at-rest state is the correct starting point for this test, and a zero start
-only trades "maintain the balance" for "build it up from zero", which the
-0.75x warm start turns into a slower version of the same divergence.
-"""
+"""Hydrostatic column: gravity balance, pressure profile, density and wall
+penetration diagnostics. Native solver qualification and prepared initial
+states are documented in docs/incompressible; historical legacy outcomes
+are not expectations for these implementations."""
 
 from __future__ import annotations
 
@@ -170,7 +70,6 @@ def configureScheme(ctx: RunContext) -> None:
     # sink for it. `1.0` takes nx=64 KE 3e-5 -> 5e-7 and nx=128 KE 7e-4 ->
     # 3e-7 (`densityP05` / `embeddedMinDensity` -> 1.000 at nx=128) for a ~3%
     # `densityP05` cost at nx=64. Default 0.0 -- opt-in, and only this case.
-    schemeConfig.xsphFilterScale = ctx.param('xsphScale', 0.0)
     schemeConfig.gravityConfig.active = True
     schemeConfig.gravityConfig.type = GravityType.Directional
     schemeConfig.gravityConfig.magnitude = ctx.param('gravityMagnitude')
@@ -378,7 +277,7 @@ def extraData(ctx: RunContext, state) -> Dict[str, Any]:
 
 hydrostaticColumnCase = registerCase(Case(
     name='hydrostaticColumn',
-    scheme='divergenceFree',
+    scheme='dfsph',
     description='Hydrostatic column in a walled box (2D): at rest under gravity, '
                 'pressure linear in depth.',
     buildSystem=buildSystem,
@@ -435,7 +334,6 @@ hydrostaticColumnCase = registerCase(Case(
         # Post-solve fluid XSPH scale for `divergenceFree` (`DFSPH_FINDINGS.md`
         # 1.16), units of `XSPH_FLUID = 0.05`. 0 = the graded default; ~1.0
         # decays the free-surface residual limit cycle.
-        xsphScale=0.0,
         # Lattice de-correlation (`shuffleParticles`, `shiftIters=0`); see
         # `initialConditions` for why the constant-density pre-relaxation
         # `tgv`/`shearWave` use is not run here.

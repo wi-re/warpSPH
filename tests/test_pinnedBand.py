@@ -78,7 +78,7 @@ def test_the_shift_weight_is_zero_inside_the_band_only():
 
 def test_the_band_holds_the_stream_in_the_incompressible_loop():
     """the same band on `divergenceFree` (projection + VD+PS shift): the end-of-step reset keeps the band exactly at the stream although the projection and the shift touch every fluid particle."""
-    r, band = pinnedRun(0.0, 30, nx=24, scheme='divergenceFree', caseName='tgv')
+    r, band = pinnedRun(0.0, 30, nx=24, scheme='dfsphShift', caseName='tgv')
     st = r.state.state
     fl = st.kinds == 0
     from warpSPH.math import getPeriodicPositions

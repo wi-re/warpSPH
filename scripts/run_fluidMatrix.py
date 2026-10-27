@@ -22,9 +22,9 @@ import sys
 import time
 import traceback
 
-PROJECTION = ('divergenceFree', 'dfsphReference', 'iisph', 'omniIncompressible', 'band2018pb')
+PROJECTION = ('dfsph', 'dfsphPredictor', 'dfsphShift', 'iisph')
 SCHEMES = (*PROJECTION, 'deltaSPH', 'sun2017DeltaSPH', 'artificialCompressible')
-ANALYTIC = ('divergenceFree', 'dfsphReference', 'iisph', 'omniIncompressible', 'deltaSPH')
+ANALYTIC = (*PROJECTION, 'deltaSPH')
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_ROOT = REPO / '.tmp/fluid-matrix'
 
@@ -71,7 +71,7 @@ def make_plan(schemes=SCHEMES):
                 if test == 'taylorCouette':
                     if rep == 'particles':
                         skip = 'Existing Couette case is analytic-only; no prescribed spinning particle-wall adapter.'
-                    elif scheme not in ('omniIncompressible', 'divergenceFree', 'deltaSPH'):
+                    elif scheme != 'deltaSPH':
                         skip = 'Prescribed rotating analytic bodies / viscous Couette closure unsupported by this scheme.'
                 spec = dict(nx=nx, tLimit=end, nSteps=None, kernel='Wendland2', n_h=4.0)
                 params = {}
@@ -87,8 +87,6 @@ def make_plan(schemes=SCHEMES):
                     params.update(nu=0.01, k=2, uMag=1.0)
                     if inc:
                         spec.update(maxDt=5e-3, cflFactor=0.3)
-                        if scheme == 'omniIncompressible':
-                            settings['omniViscosity'] = True
                     else:
                         params.update(inviscid=False, initialPressure=True, machTarget=0.1,
                                       referenceVelocity=1.0, shuffleEq7=False)
@@ -97,8 +95,6 @@ def make_plan(schemes=SCHEMES):
                     params.update(bounded=test == 'boundedVortices', nu=0.01, seed=45906734)
                     if inc:
                         spec.update(maxDt=5e-3, cflFactor=0.4)
-                        if scheme == 'omniIncompressible':
-                            settings['omniViscosity'] = True
                     else:
                         params.update(inviscid=False, targetDt=0.00025)
                 elif test == 'shearDecay':
@@ -171,16 +167,11 @@ def make_plan(schemes=SCHEMES):
                     params['shifting'] = False if case != 'dambreak' else 'off'
                 if test == 'englishWedge':
                     params['unifyAttachedObstacles'] = True
-                if scheme == 'band2018pb' and rep == 'periodic':
-                    settings['bandViscosity'] = True
                 rows.append(dict(id=f'{test}__{scheme}__{rep}', test=test, case=case,
                                  scheme=scheme, boundary=rep, precision='float32',
                                  spec=spec, params=params, scheme_settings=settings,
                                  skip=skip, timeout_seconds=7200,
-                                 notes=('Band includes configured physical viscosity in its non-pressure predictor.'
-                                        if settings.get('bandViscosity') else
-                                        'Band retains its nonviscous predictor outside the periodic controls.'
-                                        if scheme == 'band2018pb' else '')))
+                                 notes=''))
     return dict(version=5, created=datetime.now(timezone.utc).date().isoformat(), schemes=list(schemes), rows=rows,
                 initialization='Normalized summation density, physical mass, scheme-aware hydrostatic seeds, unified static floor-wedge contour; continuum analytic wall density; first/every-step physical limits.',
                 timestep='Fixed-case adaptive recovery uses initialized nominal ceiling and existing dtGrowthFactor; physical limits cap every step.',
@@ -252,10 +243,6 @@ def worker(root, row):
     write_json(out / 'environment.json', {k: os.environ.get(k) for k in
                ('WARPSPH_COMPILE_WALLS', 'CUDA_VISIBLE_DEVICES', 'OMP_NUM_THREADS')})
     case = getCase(row['case'])
-    pressure_observation,restore_pressure_observer={},lambda:None
-    if row.get('initialization'):
-        from prepared_fluidMatrix import observe_legacy_pressures
-        pressure_observation,restore_pressure_observer=observe_legacy_pressures(row.get('solver',row['scheme']))
     if row.get('initialization'):
         from prepared_fluidMatrix import prepared_case
         case = prepared_case(case, root, row)
@@ -276,7 +263,7 @@ def worker(root, row):
         ctx_box.append(ctx)
         if original_config:
             original_config(ctx)
-        for key, value in row['scheme_settings'].items():
+        for key, value in row.get('scheme_settings', {}).items():
             setattr(ctx.schemeConfig, key, value)
 
     def initialize(ctx, system):
@@ -310,17 +297,13 @@ def worker(root, row):
 
     def diagnostics(ctx, state):
         st = state.state
-        stored_pressure = st.pressures
         update = ctx.scratch.get('lastStageUpdate')
-        if row.get('initialization') and row.get('solver') == 'dfsph' and update is not None:
-            st.pressures = update.divergenceResult.pressure + (0 if row.get('ordering') == 'np_df_shift' else update.densityResult.pressure)
-        if pressure_observation:
-            st.pressures=pressure_observation['divergence']+(pressure_observation['density'] if pressure_observation['densityApplied'] else 0)
+        if inc:
+            from warpSPH.caseUtils.projection import physicalProjectionPressure
+            pressure = physicalProjectionPressure(st, ctx.schemeConfig)
+        else:
+            pressure = st.pressures
         result = dict(original_diag(ctx, state) if original_diag else {})
-        if row.get('initialization') and row['test']=='sloshing':
-            # These historical fields assume the soundspeed slot is DF pressure;
-            # the common physical probe above is authoritative for this profile.
-            result.pop('sensorPressureCD',None);result.pop('sensorPressureDF',None)
         f = st.kinds == 0
         # Common scalar quantities use fluid particles only, including when
         # the case's own diagnostic includes wall samples.
@@ -347,7 +330,7 @@ def worker(root, row):
                 fluidDensityMean=float(st.densities[f].mean()/rho0),
                 fluidDensityStd=float(st.densities[f].std()/rho0),
                 fluidRestVolume=float((st.masses[f]/rho0).double().sum()),
-                pressureMean=float(st.pressures[f].mean()) if st.pressures is not None else 0.,
+                pressureMean=float(pressure[f].mean()) if pressure is not None else 0.,
                 fluidHeight=float(st.positions[f,1].max()-st.positions[f,1].min()),
                 fluidCenterY=float((mass*st.positions[f,1].double()).sum()/mass.sum()))
             if row['test']=='tgv':
@@ -369,7 +352,7 @@ def worker(root, row):
         t = float(state.t)
         if row['test'] == 'tgv':
             result['analyticEnergyRatio'] = math.exp(-4.0 * 0.01 * (2.0 / 2.0) ** 2 * t)
-        if row['test'] in ('hydrostatic', 'englishWedge') and st.pressures is not None:
+        if row['test'] in ('hydrostatic', 'englishWedge') and pressure is not None:
             x = st.positions[f].double()
             y = x[:, 1]
             # Gauge-independent pressure slope over the interior water depth.
@@ -378,7 +361,7 @@ def worker(root, row):
             if row['test'] == 'englishWedge':
                 mask &= x[:, 0].abs() > 0.4
             if int(mask.sum()) > 8:
-                yy, pp = y[mask], st.pressures[f][mask].double()
+                yy, pp = y[mask], pressure[f][mask].double()
                 yc, pc = yy - yy.mean(), pp - pp.mean()
                 slope = (yc * pc).sum() / yc.square().sum()
                 rho0 = float(ctx.schemeConfig.fluid.restDensity)
@@ -390,7 +373,6 @@ def worker(root, row):
             last[0] = time.monotonic()
             write_json(out / 'progress.json', payload)
             print('MATRIX_PROGRESS ' + json.dumps(payload), flush=True)
-        st.pressures = stored_pressure
         return result
 
     def timestep(ctx, state):
@@ -470,8 +452,7 @@ def worker(root, row):
         u=result.ctx.scratch.get('lastStageUpdate')
         if row.get('solver')=='dfsph' and u is not None:
             final_fields['physicalPressures']=(u.divergenceResult.pressure+(0 if row.get('ordering')=='np_df_shift' else u.densityResult.pressure)).detach().cpu()
-        elif pressure_observation:
-            final_fields['physicalPressures']=(pressure_observation['divergence']+(pressure_observation['density'] if pressure_observation['densityApplied'] else 0)).detach().cpu()
+
         torch.save(final_fields,out/'final_state.pt')
         trajectory = result.trajectory
         write_json(out / 'trajectory.json', trajectory)
@@ -524,7 +505,6 @@ def worker(root, row):
         write_json(out / 'result.json', data)
         raise
     finally:
-        restore_pressure_observer()
         stream.close()
         if analysis_script.exists():
             subprocess.run([sys.executable, str(analysis_script), '--root', str(root)], check=False)
@@ -669,7 +649,7 @@ def main():
     parser.add_argument('--root', type=Path, default=DEFAULT_ROOT)
     parser.add_argument('--manifest', type=Path, help='Defaults to ROOT/manifest.json.')
     parser.add_argument('--row')
-    parser.add_argument('--profile', choices=('legacy','prepared'), default='legacy')
+    parser.add_argument('--profile', choices=('classic','prepared'), default='prepared')
     parser.add_argument('--scale', choices=('full','screen'), default='full', help='Screen uses nx<=64; endpoints unchanged, never pooled with full scale.')
     parser.add_argument('--prepared-revision',choices=('original','stability-v1','consistency-v1','sampling-recovery-v1'),default='sampling-recovery-v1',
                         help='Prepared preset revision; existing saved manifests retain their own explicit overrides.')
@@ -688,6 +668,9 @@ def main():
         return
     plan = json.loads(args.manifest.read_text())
     if args.action == 'run':
+        from warpSPH.schemes.builder import rejectRetiredScheme
+        for row in plan['rows']:
+            rejectRetiredScheme(row.get('solver', row['scheme']))
         execute(args.root, plan)
     elif args.action == 'worker':
         worker(args.root, next(r for r in plan['rows'] if r['id'] == args.row))
