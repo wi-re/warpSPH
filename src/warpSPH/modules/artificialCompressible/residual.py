@@ -37,14 +37,14 @@ def spatialResidual(view, config, schemeConfig, adjacency, k1, k2, diffusion,
         diffusion = diffusion * taper
     rP = -k1 * rho * divV + k2 * diffusion
 
-    # `computePressureSurfaceAwareWarp` returns `-sum_j V_j p_ij gradW`, which
-    # is `rho * dv/dt`; Eq. (25) carries the explicit `1/rho_i`. delta-SPH
-    # omits that division because it runs at `restDensity = 1`, where it is a
-    # no-op; ACSPH does not assume that.
+    # The shared pressure operator already returns acceleration,
+    # `-sum_j V_j p_ij gradW / rho_i` (Eq. 25). The unilateral wrapper is a
+    # linear combination of that same acceleration. Dividing again would
+    # weaken pressure support by rho_i; rho0=1 tests cannot reveal it.
     if unilateralWall:
-        rV = unilateralWallForce(view, config, schemeConfig, adjacency) / rho.unsqueeze(-1)
+        rV = unilateralWallForce(view, config, schemeConfig, adjacency)
     else:
-        rV = computePressureForceSurfaceAware(view, config, schemeConfig, adjacency) / rho.unsqueeze(-1)
+        rV = computePressureForceSurfaceAware(view, config, schemeConfig, adjacency)
 
     rV = rV + viscosity(view, config, adjacency, nu)
 

@@ -9,6 +9,34 @@ matrix failures and the remaining work in [ACSPH_REFACTOR_PLAN.md](ACSPH_REFACTO
 The older TODO list below is historical and needs that reconciliation; this
 priority decision does not start new runs or change numerical defaults.
 
+## Lobovsky comparison — 2026-10-27 (active)
+
+User: begin the warpSPH comparison with the supplied Lobovsky preset. Import
+its exact initial physical particle arrays (320,000 fluid + 32,176 wall),
+constant density/mass and hydrostatic pressure; do not resample, renormalize
+mass or relax the IC. Use CUDA FP64 for parity with the reference, Wendland C2
+support 4 dx, common viscosity, SSPRK3 / CFL_tau / iteration controls, and
+replay the reference timestep sequence for the first controlled comparison.
+Retain current warpSPH numerical operators and list remaining reference-code
+differences explicitly. First inspect a bounded startup comparison before
+extending toward the wall impact. Video/progress/watchdogs and per-step costs
+are required. Record the fixture audit and field/energy/pressure errors in
+`docs/acsph/LOBOVSKY_COMPARISON_2026-10-27.md`.
+
+**Startup comparison complete:** all physical initial arrays bitwise equal,
+CUDA FP64 / shared reference dt. A confirmed extra 1/rho in the ACSPH pressure
+acceleration was removed (Eq. 25 + actual shared-kernel units; both ordinary
+and unilateral paths). Full FP32 ACSPH suite 66 pass; FP64 focused checks 3
+pass, including a density-unit-scaling regression that failed before fixing.
+At three steps, pressure RMS vs reference falls 508 -> 110 Pa; p_max 9.26 ->
+3.22 kPa (reference 2.94 kPa). Probe-only h/coefficient and BDF2-history
+mapping gives KE 1.23x reference / pressure RMS 108 Pa, but all solves cap at
+200 and residual wall/free-face differences remain. No h/startup defaults
+promoted. CUDA graph fallback traced to a host bool in shared boundary
+viscosity; that code is untouched. Do not extend to the full impact until
+initial operators and the convergence-controlling rows are compared.
+
+
 ## Reference bring-up — 2026-10-27
 
 User: use the four supplied `~/dev/dynGPUSPH/tosend` presets as a runnable

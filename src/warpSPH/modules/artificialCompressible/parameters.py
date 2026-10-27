@@ -15,9 +15,11 @@ def acParameters(currentState, config, schemeConfig, dt: float):
     spatially constant (so particle displacements stay smooth) and `beta` is
     derived, per particle, from each particle's own `h`.
 
-    `h` here is the paper's *smoothing length*, `supports / xi` -- this repo
-    stores the kernel's support radius, and `modules/deltaSPH/densityDiffusion.py`
-    applies the same `/xi` to the `delta h c_s` prefactor `k2` is modelled on.
+    The legacy conversion here is `h = supports / xi`, the core's packing
+    length. For Wendland C2 the paper/reference instead use half the compact
+    support radius. The Lobovsky comparison audits that mismatch and maps
+    beta/k2 in an explicit probe variant; defaults are not changed here.
+    See `docs/acsph/LOBOVSKY_COMPARISON_2026-10-27.md`.
 
     `nu` comes from `acParams.nu` unless `referenceSoundSpeedForViscosity` is
     set, in which case it is the paper's `nu = alpha_nu h c0 / K` -- see the
@@ -25,7 +27,9 @@ def acParameters(currentState, config, schemeConfig, dt: float):
     for nothing else.
     """
     acParams = schemeConfig.acParams
-    xi = sphKernel_xi(config.kernel.value, config.dim)
+    # Warp's float64 scalar wrapper does not participate in Torch arithmetic.
+    # This is a host-side kernel constant, not a device tensor.
+    xi = float(sphKernel_xi(config.kernel.value, config.dim))
     h = currentState.supports / xi
 
     dtau = dt / acParams.dtOverDtau

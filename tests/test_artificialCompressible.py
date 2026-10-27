@@ -389,15 +389,16 @@ def test_higherRkOrderBuysNoAccuracy(periodicBox):
 
 def test_acParametersFollowEquation24(periodicBox):
     """`dtau = dt/R`, `beta = CFL_tau h / dtau`, `k1 = beta^2`,
-    `k2 = k2Factor h beta` -- with `h` the paper's smoothing length,
-    `supports / xi`, not this repo's support radius."""
+    `k2 = k2Factor h beta` -- pin the current `supports / xi` convention.
+    Its mismatch with the reference's half-radius h is audited separately
+    by the Lobovsky comparison; this test does not establish paper parity."""
     from warpSPHCore import sphKernel_xi
     system, config, schemeConfig = periodicBox
     dt = 1e-3
     dtau, beta, k1, k2, nu = acm.acParameters(system.state, config, schemeConfig, dt)
 
     assert dtau == pytest.approx(dt / schemeConfig.acParams.dtOverDtau)
-    h = system.state.supports / sphKernel_xi(config.kernel.value, config.dim)
+    h = system.state.supports / float(sphKernel_xi(config.kernel.value, config.dim))
     assert torch.allclose(beta, schemeConfig.acParams.cflTau * h / dtau)
     assert torch.allclose(k1, beta ** 2)
     assert torch.allclose(k2, schemeConfig.acParams.k2Factor * h * beta)
@@ -407,7 +408,7 @@ def test_theConvergenceMetricUsesOneOverNNotOneOverSqrtN(periodicBox):
     """Eq. (48) as printed -- and it matters. With a per-particle residual `c`,
     `|tilde v|_2 = c sqrt(N)`, so `eps_v = log10(c / U_eps) - 0.5 log10(N)`:
     doubling the particle count at the *same* per-particle residual lowers
-    `eps_v` by `0.5 log10(2)`, i.e. a fixed target is a stricter tolerance at
+    `eps_v` by `0.5 log10(2)`, i.e. a fixed target is a looser tolerance at
     higher resolution (about 0.6 of a decade across the paper's own
     `L/dx = 200 -> 800` sweep). An RMS -- `1/sqrt(N)` -- would make it
     resolution-independent instead, which is exactly the "cleanup" this test
@@ -1138,3 +1139,37 @@ def test_bounceTargetsAreNoOpsWithoutWallsAndAreValidated(periodicBox):
     finally:
         schemeConfig.acParams.wallBounceBack = False
         schemeConfig.acParams.wallBounceTarget = 'position'
+
+
+@pytest.mark.parametrize('unilateral', [False, True])
+def test_pressureAccelerationIsInvariantUnderDensityUnitScaling(runtime, unilateral):
+    """Eq. (25): scaling rho, m and p together leaves acceleration unchanged.
+
+    This exercises the real shared pressure operator at rho=1 and rho=1000;
+    rho=1-only projection tests cannot detect an extra division by density.
+    """
+    import copy
+    from warpSPHCore import buildVerletList
+    from warpSPHCore.type_config import get_torch_precision
+    from warpSPH.modules.artificialCompressible.residual import spatialResidual
+    dtype = get_torch_precision()
+    system, config, sc = buildPeriodicBox(torch.device('cpu'), dtype)
+    state = system.state
+    state.pressures = 2.0 + torch.sin(2.0 * torch.pi * state.positions[:, 0])
+    adjacency = buildVerletList(state, config.domain,
+                               supportMode=SupportScheme.SuperSymmetric)
+
+    def acceleration(st):
+        zero = torch.zeros_like(st.pressures)
+        return spatialResidual(st, config, sc, adjacency, 0.0, 0.0, zero,
+                               torch.zeros_like(st.velocities), 0.0,
+                               unilateralWall=unilateral)[1]
+
+    baseline = acceleration(state)
+    scaled = copy.deepcopy(state)
+    scaled.densities = scaled.densities * 1000.0
+    scaled.masses = scaled.masses * 1000.0
+    scaled.pressures = scaled.pressures * 1000.0
+    assert float(baseline.norm()) > 1e-3
+    tol = 2e-4 if dtype == torch.float32 else 1e-10
+    assert torch.allclose(acceleration(scaled), baseline, rtol=tol, atol=tol)
