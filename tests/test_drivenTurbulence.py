@@ -178,3 +178,82 @@ def test_stored_state_retains_forcing_and_accepted_energy_budget(tmp_path):
         torch.testing.assert_close(torch.from_numpy(f['forcingCoefficients'][:]), r.state.sourceTerms.acceleration.coefficients(float(r.state.t)))
         assert f['dict_forcingParameters'].attrs['seed'] == cfg.resolve().params['seed']
         assert f.attrs['forcingTime'] == float(r.state.t)
+
+
+def test_particle_measurements_distinguish_mass_and_volume_weights():
+    import numpy as np
+    from warpSPH.utils.turbulence import particleStatistics, weightedPDF
+    mass, rho = np.array([.5, .5]), np.array([2., 2/3])
+    velocity = np.array([[1., 0.], [-1., 0.]])
+    stats = particleStatistics(mass, rho, velocity, np.ones(2))
+    assert stats['volumeQuadratureRelativeError'] == pytest.approx(0)
+    assert stats['bulkVelocityMass'] == pytest.approx([0., 0.])
+    assert stats['bulkVelocityVolume'] == pytest.approx([-.5, 0.])
+    assert stats['rmsVelocityVolume'] == pytest.approx(np.sqrt(.75))
+    pdf = weightedPDF([-3, -1, 0, 1, 3], np.ones(5), [-1, 0, 1])
+    np.testing.assert_allclose(pdf, [.2, .2, .4, .2])
+    assert pdf.sum() == pytest.approx(1)
+
+
+def test_periodic_cic_preserves_mass_momentum_and_records_filter_loss():
+    import numpy as np
+    from warpSPH.utils.turbulence import depositCIC2D
+    rng = np.random.default_rng(17)
+    x, mass, v = rng.random((2000, 2)), rng.uniform(.5, 1.5, 2000), rng.normal(size=(2000, 2))
+    a = depositCIC2D(x, mass, v, gridSize=16)
+    b = depositCIC2D(x+[2, -3], mass, v, gridSize=16)
+    np.testing.assert_allclose(a['density'], b['density'], rtol=1e-13, atol=1e-11)
+    np.testing.assert_allclose(a['velocity'], b['velocity'], rtol=1e-11, atol=1e-13)
+    assert a['relativeMassError'] == pytest.approx(0, abs=1e-14)
+    np.testing.assert_allclose(a['momentumError'], 0, atol=1e-12)
+    assert 0 < a['unresolvedKineticFraction'] < 1
+    assert a['emptyCellFraction'] == 0
+
+
+def test_spectral_normalization_projection_and_structure_functions():
+    import numpy as np
+    from warpSPH.utils.turbulence import depositCIC2D, spectra2D, structureFunctions2D
+    n = 32
+    x, y = np.meshgrid((np.arange(n)+.5)/n, (np.arange(n)+.5)/n)
+    velocity = np.stack((np.sin(2*np.pi*y), 2*np.sin(4*np.pi*y)), axis=-1)
+    spectra = spectra2D(velocity, 1+.2*np.cos(2*np.pi*x))
+    assert spectra['parsevalError'] == pytest.approx(0, abs=1e-14)
+    assert spectra['solenoidalEnergy'][1] == pytest.approx(.25)
+    assert spectra['compressionalEnergy'][2] == pytest.approx(1.)
+    assert spectra['velocityEnergy'].sum() == pytest.approx(1.25)
+    assert spectra['densityPower'][1] == pytest.approx(.02)
+    sf = structureFunctions2D(velocity)
+    np.testing.assert_allclose(sf['transverse'], .5*(1-np.cos(2*np.pi*sf['separation'])), atol=1e-14)
+    np.testing.assert_allclose(sf['longitudinal'], 2*(1-np.cos(4*np.pi*sf['separation'])), atol=1e-14)
+    empty = depositCIC2D([[0, 0]], [1], [[1, 0]], gridSize=8)
+    assert empty['emptyCellFraction'] > 0
+    with pytest.raises(ValueError, match='fully covered'):
+        spectra2D(empty['velocity'])
+
+
+def test_correlation_and_time_weighted_stationarity_screen():
+    import numpy as np
+    from warpSPH.utils.turbulence import correlationTime, stationarityScreen
+    t = np.arange(0, 40.0001, .05)
+    periodic = 1+.05*np.sin(2*np.pi*t)
+    c = correlationTime(t, periodic)
+    assert not c['censored'] and .1 < c['tau'] < .2
+    assert stationarityScreen(t, periodic)['passed']
+    drift = stationarityScreen(t, 1+t*.1)
+    assert not drift['passed'] and drift['relativeSpread'] > .5
+    assert correlationTime(t, np.ones_like(t))['censored']
+    # Irregular timestamps must still give the exact time mean of a linear field.
+    irregular = np.r_[np.linspace(0, 15, 301), np.linspace(15.01, 40, 2000)]
+    s = stationarityScreen(irregular, 1+irregular*.1)
+    assert s['blockMeans'] == pytest.approx([2.5, 3.5, 4.5])
+
+
+def test_field_correlation_matches_scalar_for_one_pattern():
+    import numpy as np
+    from warpSPH.utils.turbulence import correlationTime, fieldCorrelationTime
+    times = np.arange(0, 20, .05)
+    values = np.sin(2*np.pi*times)
+    fields = values[:, None, None]*np.array([[[1., 2., -3.]]])
+    a, b = correlationTime(times, values), fieldCorrelationTime(times, fields)
+    np.testing.assert_allclose(a['acf'], b['acf'], rtol=1e-12, atol=1e-14)
+    assert a['tau'] == pytest.approx(b['tau'])

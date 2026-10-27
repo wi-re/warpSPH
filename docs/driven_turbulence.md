@@ -117,3 +117,75 @@ RHS admissibility, exact runtime sources and source hashes. Their timings includ
 extra observations/synchronization; peak Torch memory is not the complete device
 residency needed for the HPC feasibility gate. A pilot is not a stationary or
 resolution-converged dataset.
+
+## Statistical qualification protocol
+
+`warpSPH.utils.turbulence` provides offline FP64 measurements, separate from the
+physical update. `scripts/analyze_drivenTurbulence.py` analyzes retained particle
+snapshots without running a simulation:
+
+```bash
+python scripts/analyze_drivenTurbulence.py .tmp/campaign/weak64-seed1234 \
+  .tmp/campaign/weak128-seed1234 --output .tmp/campaign/analysis \
+  --grids 16 32 --blocks 10 20 30 40
+```
+
+Each input directory contains `input.json` and chronological `samples/*.npz`.
+Each snapshot supplies scalar `t`, positions/velocities of shape N by 2, and
+masses, densities, pressures and internalEnergies of shape N. The qualification
+probe also retains Q and supports for physical audits. Optional history.jsonl
+and result.json supply all-step budgets and the runtime/admissibility outcome.
+Keep experiment drivers, snapshots and generated analysis under `.tmp/`.
+Output includes per-snapshot particle statistics/PDFs, filtered spectra,
+structure functions, correlation estimates and a machine-readable summary.
+
+The measurement conventions are:
+
+- Particle means and PDFs use either actual masses or meshless volumes m/rho,
+  with each set of weights explicitly normalized. Report the difference between
+  the summed meshless volume and physical box area. Log density is relative to
+  sum(m)/L²; pressure PDFs are relative to the initial nominal pressure. Common
+  PDF edges retain underflow and overflow as separate probability bins.
+- Periodic, cell-centred cloud-in-cell deposition conserves mass and momentum.
+  Grid velocity is deposited momentum divided by deposited mass. Record the
+  kinetic energy removed by this measurement filter. Empty cells retain NaN
+  velocity and invalidate spectra; they are never filled for plotting or fits.
+- Velocity spectra subtract the grid volume mean and use the full 2D FFT divided
+  by the number of cells. Shell sums of half the squared transform obey Parseval.
+  The longitudinal and transverse projections describe velocity, not a
+  variable-density kinetic-energy spectrum. Density power uses rho/mean(rho)-1.
+  There is no CIC deconvolution. Retain all shells for the normalization check,
+  but compare at k <= gridSize/4 and check sensitivity to deposition resolution.
+  A few resolved modes do not establish an inertial-range slope.
+- Second-order longitudinal/transverse increments average the two grid-axis
+  directions; an isotropic angular average is not assumed.
+- Scalar and connected Eulerian-velocity autocorrelations use actual physical
+  timestamps, interpolated to a uniform clock. Integrate the initial positive
+  correlation lobe, including half the zero-lag bin. Report right censoring when
+  no zero crossing is observed within half the record, and report effective
+  sample counts. These are finite-record diagnostics, not confidence guarantees.
+
+The first declared long-flow screen uses t=0..40, discards t<10, and compares
+three blocks [10,20], [20,30], [30,40]. Time means use piecewise-linear quadrature,
+not an average over adaptive step counts. For each of RMS Mach, kinetic energy,
+and mass/volume log-density spread, require block-mean spread <=10% of its mean,
+blocks at least five estimated integrated correlation times long, uncensored
+correlation estimates, and at least ten accumulated box crossings in the
+assessment window. A failed screen means stationarity is **not established**;
+it does not by itself distinguish secular evolution from sampling uncertainty.
+A passing scalar screen still needs spatial-correlation, PDF/spectrum,
+resolution and independent-seed checks before any stationary-data claim.
+
+Use whole independent trajectories as training/validation/test partitions.
+The saved 0.1-time snapshot cadence supports correlation measurement; it does
+not declare adjacent frames independent. Choose a decorrelated sampling cadence
+from the slowest relevant measured field/observable, and keep temporally dense
+trajectories labelled as correlated sequences with their forcing inputs.
+
+The first long-flow campaign is retained under
+`.tmp/driven-qualification-20261027`: weak and strong acceleration inputs 0.3 and
+6, three 64² seeds, and a matched 128² seed, without changes to thermal closure,
+forcing or solver policy. It tests the finite-time relaxation model. The
+isothermal Hopkins reference remains a different physical problem
+([section 4.4.4](https://arxiv.org/html/1409.7395#S4.SS4.SSS4)); neither changing
+gamma to one nor interpreting a short cooling time as an exact EOS qualifies it.
