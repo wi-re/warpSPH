@@ -112,7 +112,7 @@ class Case:
     #: (ctx, state, handle, step) -> None.
     updatePlot: Optional[Callable[[RunContext, Any, Any, int], None]] = None
 
-    #: (ctx, state) -> dict merged into every exported frame's extra data.
+    #: (ctx, state) -> initial trajectory metadata and per-checkpoint metadata.
     extraData: Optional[Callable[[RunContext, Any], Dict[str, Any]]] = None
 
     #: (ctx, state, step) -> None, called after every integrator step. This is
@@ -146,6 +146,14 @@ class Case:
     supportedSchemes: tuple = ()
     validateConfiguration: Optional[Callable[[Any], None]] = None
     deriveParameters: Optional[Callable[[Any], Dict[str, Any]]] = None
+
+    #: (ctx, system) -> dict of per-frame conditional inputs/metadata.
+    #: Opt in for trajectory output; extraData remains initial metadata otherwise.
+    trajectoryData: Optional[Callable[[RunContext, Any], Dict[str, Any]]] = None
+
+    #: (ctx, system, open HDF5 checkpoint) -> None, after state/time restoration.
+    #: Restore case-owned forcing, budget references and timestep history.
+    restoreCheckpoint: Optional[Callable[[RunContext, Any, Any], None]] = None
 
 
 _REGISTRY: Dict[str, Case] = {}

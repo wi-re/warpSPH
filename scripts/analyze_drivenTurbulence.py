@@ -42,6 +42,10 @@ def timeMean(times, values, low, high):
     return (np.trapezoid(interp, t, axis=0)/(high-low)).reshape(values.shape[1:])
 
 
+def frameKeys(group):
+    return sorted(group, key=lambda name: int(name.rsplit('_', 1)[-1]))
+
+
 def snapshots(path):
     """Read retained NPZ observations or native driven trajectory output."""
     if (path/'samples').is_dir():
@@ -59,7 +63,7 @@ def snapshots(path):
         required = ('positions', 'masses', 'velocities', 'densities', 'pressures', 'internalEnergies', 'supports')
         if any(name not in f for name in required):
             raise ValueError('trajectory lacks per-frame driven particle measurements')
-        for key in sorted(f['positions']):
+        for key in frameKeys(f['positions']):
             state = {name: f[name][key][:] for name in required}
             state['t'] = float(f['times'][key][0])
             for name in ('Q', 'sourceEnergyBudget'):
@@ -69,6 +73,56 @@ def snapshots(path):
                 if name in f.attrs:
                     state['_'+name] = float(f.attrs[name])
             yield f'{path}/trajectory.h5:{key}', state
+
+
+def forcingObservation(path):
+    """Audit complete native conditional inputs, including between-frame knots."""
+    if not (path/'trajectory.h5').exists():
+        return dict(scope='investigation forcing checkpoint', available=(path/'forcing.pt').exists())
+    import h5py
+    with h5py.File(path/'trajectory.h5') as f:
+        if 'frameData' not in f:
+            return dict(timeVaryingCoefficients=False, completeKnots=False)
+        frames = [f['frameData'][key] for key in frameKeys(f['positions'])]
+        if not frames or any('forcingCoefficients' not in frame for frame in frames):
+            return dict(timeVaryingCoefficients=False, completeKnots=False)
+        if any('forcingKnots' not in frame or 'forcingKnotStart' not in frame.attrs for frame in frames):
+            return dict(timeVaryingCoefficients=True, completeKnots=False)
+        raw, nextKnot = [], 0
+        for frame in frames:
+            if int(frame.attrs['forcingKnotStart']) != nextKnot:
+                raise ValueError('forcing knot history has missing or duplicate chunks')
+            knot = frame['forcingKnots'][:]
+            raw.append(knot); nextKnot += len(knot)
+        raw = np.concatenate(raw)
+        if not np.isfinite(raw).all():
+            raise ValueError('forcing knot history is nonfinite')
+        parameters = dict(frames[0]['forcingParameters'].attrs)
+        modes = frames[0]['forcingModes'][:]
+        normal = modes/np.linalg.norm(modes, axis=1, keepdims=True)
+        longitudinal = normal[:, :, None]*normal[:, None, :]
+        z = parameters['solenoidalWeight']
+        projection = z*(np.eye(parameters['dim'])-longitudinal)+(1-z)*longitudinal
+        scale = parameters['accelerationRMS']/np.sqrt(len(modes)*(z*z*(parameters['dim']-1)+(1-z)**2))
+        error = 0.
+        for key, frame in zip(frameKeys(f['positions']), frames):
+            if dict(frame['forcingParameters'].attrs) != parameters or not np.array_equal(frame['forcingModes'][:], modes):
+                raise ValueError('forcing parameters/modes change across the saved trajectory')
+            if 'forcingKnotCoefficients' in frame:
+                projected = scale*np.einsum('mij,kpmj->kpmi', projection, frame['forcingKnots'][:])
+                if projected.size and np.max(abs(projected-frame['forcingKnotCoefficients'][:])) > 1e-12*max(1., parameters['accelerationRMS']):
+                    raise ValueError('projected knot coefficients disagree with raw forcing knots')
+            time = float(f['times'][key][0])
+            if time != frame.attrs['forcingTime']:
+                raise ValueError('frame time and applied forcing time disagree')
+            clock = time/parameters['updateInterval'];index = int(np.floor(clock));alpha = clock-index
+            if index+1 >= len(raw):
+                raise ValueError('forcing history does not cover the fluid observation window')
+            expected = scale*np.einsum('mij,pmj->pmi', projection, (1-alpha)*raw[index]+alpha*raw[index+1])
+            error = max(error, float(abs(expected-frame['forcingCoefficients'][:]).max()))
+        if error > 1e-12*max(1., parameters['accelerationRMS']):
+            raise ValueError('forcing coefficients disagree with the saved knot history')
+        return dict(timeVaryingCoefficients=True, completeKnots=True, knots=nextKnot, maxCoefficientError=error)
 
 
 def analyze(path, output, grids, blocks, deposition='cic'):
@@ -133,6 +187,7 @@ def analyze(path, output, grids, blocks, deposition='cic'):
         arrays = {k: np.array([item[k] for item in measurements]) for k in ['emptyCellFraction', 'relativeMassError', 'momentumError', 'unresolvedKineticFraction']}
         if deposition == 'kernel':
             arrays.update({k: np.array([item[k] for item in measurements]) for k in ['minFilterRadius', 'maxFilterRadius', 'broadenedParticleFraction']})
+        arrays['boxModeEnergy'] = np.array([item['spectra']['boxModeEnergy'] if valid[i] else np.nan for i,item in enumerate(measurements)])
         indices = np.flatnonzero(valid)
         for kind, key in [('spectra', 'velocityEnergy'), ('spectra', 'compressionalEnergy'), ('spectra', 'solenoidalEnergy'), ('spectra', 'densityPower'), ('structure', 'longitudinal'), ('structure', 'transverse')]:
             if len(indices):
@@ -146,20 +201,32 @@ def analyze(path, output, grids, blocks, deposition='cic'):
         if deposition == 'kernel':
             gridSummary.update(minFilterRadius=float(arrays['minFilterRadius'].min()), maxFilterRadius=float(arrays['maxFilterRadius'].max()), meanBroadenedParticleFraction=float(arrays['broadenedParticleFraction'].mean()))
         selected = (times >= window[0]) & (times <= window[1])
-        if valid[selected].all():
-            fields = np.array([measurements[i]['velocity'] for i in np.flatnonzero(selected)])
-            corr = fieldCorrelationTime(times[selected], fields)
-            gridSummary['fieldCorrelation'] = {k: corr[k] for k in ['tau', 'effectiveSamples', 'censored']}
-            arrays.update(correlationLag=corr['lag'], velocityFieldACF=corr['acf'])
-            gridSummary['means'] = {key: timeMean(times, arrays[key], *window) for key in ['velocityEnergy', 'compressionalEnergy', 'solenoidalEnergy', 'densityPower', 'longitudinal', 'transverse']}
+        # Quadrature needs the bracketing observations, even just outside the
+        # assessment window. Invalid earlier startup frames are not interpolants.
+        low = max(0, np.searchsorted(times, window[0], side='right')-1)
+        high = min(len(times), np.searchsorted(times, window[1], side='left')+1)
+        stencil = slice(low, high)
+        gridSummary['comparisonCoverageComplete'] = bool(valid[stencil].all())
+        if gridSummary['comparisonCoverageComplete']:
+            if np.count_nonzero(selected) >= 8:
+                fields = np.array([measurements[i]['velocity'] for i in np.flatnonzero(selected)])
+                corr = fieldCorrelationTime(times[selected], fields)
+                gridSummary['fieldCorrelation'] = {k: corr[k] for k in ['tau', 'effectiveSamples', 'censored']}
+                arrays.update(correlationLag=corr['lag'], velocityFieldACF=corr['acf'])
+            else:
+                gridSummary['fieldCorrelation'] = dict(tau=None, effectiveSamples=None, censored=True)
+            gridSummary['means'] = {key: timeMean(times[stencil], arrays[key][stencil], *window) for key in ['velocityEnergy', 'compressionalEnergy', 'solenoidalEnergy', 'densityPower', 'longitudinal', 'transverse']}
             velocityE = arrays['velocityEnergy']
-            fraction = velocityE[:, 1]/velocityE[:, 1:].sum(axis=1).clip(min=np.finfo(float).tiny)
+            denominator = velocityE[:, 1:].sum(axis=1).clip(min=np.finfo(float).tiny)
+            fraction = arrays['boxModeEnergy']/denominator
+            arrays['lowestShellFraction'] = velocityE[:, 1]/denominator
+            gridSummary['lowestShellFractionMean'] = float(timeMean(times[stencil], arrays['lowestShellFraction'][stencil], *window))
             arrays['boxModeFraction'] = fraction
-            gridSummary['boxModeFractionMean'] = float(timeMean(times, fraction, *window))
+            gridSummary['boxModeFractionMean'] = float(timeMean(times[stencil], fraction[stencil], *window))
             if complete:
-                gridSummary['boxModeScreen'] = stationarityScreen(times, fraction, blocks=blocks)
+                gridSummary['boxModeScreen'] = stationarityScreen(times[stencil], fraction[stencil], blocks=blocks)
         else:
-            gridSummary['invalidSpectralSnapshots'] = int(np.count_nonzero(~valid & selected))
+            gridSummary['invalidSpectralSnapshots'] = int(np.count_nonzero(~valid[stencil]))
         np.savez_compressed(output/f'grid-{n}.npz', t=times, **arrays)
         summaries[str(n)] = gridSummary
     means = {k: timeMean(times, series[k], *window) for k in rows[0]}
@@ -183,12 +250,13 @@ def analyze(path, output, grids, blocks, deposition='cic'):
                 file = Path(__file__).resolve().parents[1]/key.removeprefix('warpSPH/')
                 if not file.exists() or hashlib.sha256(file.read_bytes()).hexdigest() != expected:
                     sourceChanges.append(key)
-    report = dict(path=str(path), completeAssessmentWindow=complete, samples=len(times),
+    report = dict(measurementVersion=2, path=str(path), completeAssessmentWindow=complete, samples=len(times),
                   timeRange=[times[0], times[-1]], window=window, nx=nx, params=params, deposition=deposition,
                   stationaryScalarScreenPassed=bool(passed), screens=screens, boxCrossings=turnovers,
                   means=means, meanPDFs=meanPDFs, grid=summaries, budget=budget,
                   runtimeResult=result, budgetScope='all accepted states' if (path/'history.jsonl').exists() else 'saved snapshots only',
-                  sourceManifestAvailable=reference.exists(), changedArchivedWarpSPHSources=sourceChanges)
+                  sourceManifestAvailable=reference.exists(), conditionalForcing=forcingObservation(path),
+                  changedArchivedWarpSPHSources=sourceChanges)
     (output/'summary.json').write_text(json.dumps(plain(report), indent=2, allow_nan=False)+'\n')
     return report
 

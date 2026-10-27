@@ -207,7 +207,7 @@ def loadTrajectory(
         bundle=bundle,
         scheme=schemeEnum,
         static=static,
-        frameKeys=sorted(trajectoryFile['positions'].keys()),
+        frameKeys=sorted(trajectoryFile['positions'].keys(), key=lambda name: int(name.rsplit('_', 1)[-1])),
         extraFields=tuple(dict.fromkeys(name for name in (*extraFields, *storedFields) if name in trajectoryFile)),
     )
     return trajectoryFile, meta

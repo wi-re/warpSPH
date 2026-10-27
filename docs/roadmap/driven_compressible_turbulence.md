@@ -12,8 +12,13 @@ Status: Stage A implementation started. The drivenTurbulence case now provides
 fixed-clock Fourier OU acceleration, stage-consistent meshless force work and
 named finite-time cooling/adiabatic modes. Simple controls and initial GPU
 developing-flow pilots are covered in [the case guide](../driven_turbulence.md).
-Exact-isothermal dynamics, stationary statistics, full runner restarts and HPC
-production qualification remain open. Later stages below retain their own gates.
+Offline mass/volume statistics, conservative observation filters, explicit
+stationarity screens, native checkpoint context and complete per-frame driving
+history are implemented. Cold-gas controls exposed and now guard the explicit
+force predictor with an available-energy timestep limit. Long-flow studies are numerically healthy while
+stationary/reference-data precision and resolution convergence remain open.
+Exact-isothermal dynamics, larger/3D feasibility and HPC production qualification
+also remain open. Later stages below retain their own gates.
 
 ## Scope and dependencies
 
@@ -107,6 +112,8 @@ case with:
   resolved scales, rather than requiring identical late chaotic trajectories.
 - Repeated runs and checkpoint/restart tests that preserve the same forcing
   process. Exclude startup transients from any claimed stationary dataset.
+  Use same-forcing perturbed twins when distinguishing intrinsic sensitivity
+  from variation caused by the random driving itself.
 
 Proceed when the source terms and thermal closure pass their simple controls
 and the 2D flow has a documented, physically interpretable statistical regime.

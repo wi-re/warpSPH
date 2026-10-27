@@ -4,6 +4,7 @@ This is a developing-flow setup, not an exact-isothermal Hopkins benchmark.
 The forcing amplitude is an input; RMS Mach is measured, never feedback-clamped.
 """
 import math
+import json
 import torch
 
 from ...runner import Case, registerCase, caseMain
@@ -19,8 +20,6 @@ __all__ = ['drivenTurbulenceCase']
 
 def validateConfiguration(spec):
     p = spec.params
-    if spec.resumeFrom is not None:
-        raise ValueError('simulation.resumeFrom: full runner restart is not yet qualified for drivenTurbulence; standalone forcing checkpoints are supported')
     if p['kMin'] > p['kMax'] or p['kMax'] >= spec.nx/2:
         raise ValueError('params.kMin/kMax: require kMin <= kMax < nx/2')
     if p['forcingInterval'] > p['correlationTime']:
@@ -70,6 +69,8 @@ def buildSystem(ctx):
                        initialEnergy=state.Q[:, -1].double().sum())
     ctx.velocityScale = ctx.param('soundSpeed')
     ctx.velocityScaleSource = 'drivenTurbulence reference sound speed'
+    ctx.scratch['checkpointSignature'] = checkpointSignature(ctx)
+    ctx.scratch['completedSteps'] = 0
     cfg.dt = timestep(ctx, system)
     return system
 
@@ -81,18 +82,32 @@ def timestep(ctx, system):
     limit = ctx.param('forcingInterval')
     if system.sourceTerms.coolingTime is not None:
         limit = min(limit, .2*system.sourceTerms.coolingTime)
-    coefficients = field.coefficients(float(system.t))
-    bound = float(coefficients.norm(dim=-1).sum())
+    # A step spans at most one knot interval, possibly crossing a knot.
+    # Norms are convex on each linear segment: all three enclosing knots bound
+    # the acceleration throughout both SSPRK stages, including future growth.
+    bound = field.accelerationBound(float(system.t))
     if bound > 0:
         # Mean removal can double the acceleration bound. Use nominal dx here;
         # the native acoustic signal restriction still follows evolving geometry.
-        limit = min(limit, math.sqrt(.25*ctx.config.dx/(2*bound)))
+        accelerationBound = 2*bound
+        limit = min(limit, math.sqrt(.25*ctx.config.dx/accelerationBound))
+        thermal = float(system.state.internalEnergies.min())
+        if not math.isfinite(thermal) or thermal <= 0:
+            raise ValueError('drivenTurbulence timestep requires positive finite internal energy')
+        # Forward Euler force work lowers predictor u by |a dt|^2/2 even though
+        # SSPRK's full constant-force step preserves u. Reserve thermal energy
+        # for that predictor: force alone consumes at most 1/16 of min(u).
+        limit = min(limit, .25*math.sqrt(2*thermal)/accelerationBound)
+    physical = torch.clamp(dt, max=limit) if isinstance(dt, torch.Tensor) else min(dt, limit)
+    ctx.scratch['nextPhysicalDt'] = physical
     if ctx.spec.nSteps is None:
-        limit = min(limit, max(0., ctx.spec.tLimit-float(system.t)))
-    return torch.clamp(dt, max=limit) if isinstance(dt, torch.Tensor) else min(dt, limit)
+        remaining = max(0., ctx.spec.tLimit-float(system.t))
+        return torch.clamp(physical, max=remaining) if isinstance(physical, torch.Tensor) else min(physical, remaining)
+    return physical
 
 
 def postStep(ctx, system, step):
+    ctx.scratch['completedSteps'] = step+1
     if ctx.spec.nSteps is None:
         # Snap only accumulated time roundoff after a physically capped step.
         t, target = float(system.t), ctx.spec.tLimit
@@ -127,10 +142,74 @@ def diagnostics(ctx, system):
 
 def extraData(ctx, system):
     field = ctx.scratch['driving']
-    return dict(ctx.spec.params, forcingParameters=dict(field.parameters),
+    data = dict(ctx.spec.params, forcingParameters=dict(field.parameters),
                 forcingModes=field.modes, forcingCoefficients=field.coefficients(float(system.t)),
                 forcingTime=float(system.t), sourceEnergyBudget=system.state.sourceEnergyBudget.detach().cpu(),
                 initialEnergy=float(ctx.scratch['initialEnergy']), initialMass=float(ctx.scratch['initialMass']))
+    if ctx.spec.storeMode == 'states':
+        state = field.state_dict()
+        data.update(checkpointVersion=1, checkpointSignature=ctx.scratch['checkpointSignature'],
+                    checkpointCompletedSteps=ctx.scratch['completedSteps'],
+                    checkpointNextDt=torch.as_tensor(ctx.scratch['nextPhysicalDt']).detach().cpu(),
+                    forcingCheckpoint=dict(knots=state['knots'], generator=state['generator']))
+    return data
+
+
+def trajectoryData(ctx, system):
+    """Export every forcing knot once, including knots between stored frames."""
+    data = extraData(ctx, system)
+    field = ctx.scratch['driving']
+    start = ctx.scratch.get('exportedForcingKnots', 0)
+    shape = (0, *field.knots[0].shape)
+    raw = (torch.stack(field.knots[start:]) if start < len(field.knots)
+           else field.knots[0].new_empty(shape))
+    data.update(forcingKnotStart=start, forcingKnots=raw,
+        forcingKnotCoefficients=field.scale*torch.einsum('mij,kpmj->kpmi', field.projection, raw))
+    ctx.scratch['exportedForcingKnots'] = len(field.knots)
+    return data
+
+
+def checkpointSignature(ctx):
+    """Physical/numerical policy; allow output settings and endpoint to change."""
+    signature = dict(parameters=ctx.spec.params, solver=ctx.exportFunction(ctx.schemeConfig),
+        scheme=ctx.spec.scheme, precision=str(ctx.dtype),
+        domain={name: getattr(ctx.spec, name) for name in ('dim', 'nx', 'L', 'periodic', 'kernel', 'n_h')},
+        timestep={name: getattr(ctx.config, name) for name in ('adaptiveDt', 'minDt', 'maxDt', 'dtGrowthFactor')},
+        integrator=ctx.integrator.identifier.name)
+    return json.dumps(signature, sort_keys=True, separators=(',', ':'), allow_nan=False)
+
+
+def restoreCheckpoint(ctx, system, checkpoint):
+    required = ('checkpointVersion', 'checkpointSignature', 'checkpointCompletedSteps', 'initialEnergy', 'initialMass')
+    if any(name not in checkpoint.attrs for name in required) or any(name not in checkpoint for name in ('checkpointNextDt', 'dict_forcingCheckpoint')):
+        raise ValueError('drivenTurbulence resumeFrom: checkpoint is missing forcing/timestep/budget context')
+    if checkpoint.attrs['checkpointVersion'] != 1 or checkpoint.attrs['checkpointSignature'] != ctx.scratch['checkpointSignature']:
+        raise ValueError('drivenTurbulence resumeFrom: incompatible checkpoint physical/numerical configuration')
+    if not math.isfinite(system.t) or system.t < 0 or (ctx.spec.nSteps is None and ctx.spec.tLimit <= system.t):
+        raise ValueError('drivenTurbulence resumeFrom: endpoint must be later than the checkpoint time')
+    completed = int(checkpoint.attrs['checkpointCompletedSteps'])
+    if completed < 0 or ctx.spec.resumeStepOffset not in (0, completed):
+        raise ValueError('drivenTurbulence resumeStepOffset does not match checkpointCompletedSteps')
+    nextDt = float(checkpoint['checkpointNextDt'][()])
+    if not math.isfinite(nextDt) or nextDt <= 0 or system.state.sourceEnergyBudget is None:
+        raise ValueError('drivenTurbulence resumeFrom: invalid timestep or missing accepted energy budget')
+    for name in ('initialMass', 'initialEnergy'):
+        value = float(checkpoint.attrs[name])
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(f'drivenTurbulence resumeFrom: invalid {name}')
+        ctx.scratch[name] = system.state.Q.new_tensor(value, dtype=torch.float64)
+    state = checkpoint['dict_forcingCheckpoint']
+    field = FourierOU.from_state_dict(dict(parameters=ctx.scratch['driving'].parameters,
+        knots=torch.from_numpy(state['knots'][:]), generator=torch.from_numpy(state['generator'][:])))
+    ctx.scratch.update(driving=field, completedSteps=completed,
+                       nextPhysicalDt=system.state.Q.new_tensor(nextDt))
+    system.sourceTerms.acceleration = field
+    system.state.UIDcounter = int(system.state.UIDcounter)
+    ctx.spec.resumeStepOffset = completed
+    # Preserve growth history while capping the new endpoint/forcing/cooling.
+    ctx.config.dt = system.state.Q.new_tensor(nextDt)
+    if ctx.spec.nSteps is None:
+        ctx.config.dt = torch.clamp(ctx.config.dt, max=ctx.spec.tLimit-system.t)
 
 
 setupPlot, updatePlot = particlePlot([
@@ -142,7 +221,7 @@ setupPlot, updatePlot = particlePlot([
 drivenTurbulenceCase = registerCase(Case(
     name='drivenTurbulence', scheme='MFM', buildSystem=buildSystem,
     configureScheme=configureCompressible, timestep=timestep, postStep=postStep,
-    diagnostics=diagnostics, extraData=extraData, setupPlot=setupPlot, updatePlot=updatePlot,
+    diagnostics=diagnostics, extraData=extraData, trajectoryData=trajectoryData, restoreCheckpoint=restoreCheckpoint, setupPlot=setupPlot, updatePlot=updatePlot,
     description='Developing periodic 2D compressible turbulence with OU acceleration and named finite-time cooling.',
     defaults=dict(COMPRESSIBLE_DEFAULTS, caseName='drivenTurbulence', dim=2, nx=64, L=1.,
                   tLimit=4., cflFactor=.15, execution='eager', cudaGraph=False, maxDt=.01),
@@ -171,7 +250,7 @@ drivenTurbulenceCase = registerCase(Case(
         'coolingTime': P('number', 'Specific internal-energy relaxation time.', 'thermal', exclusiveMinimum=0,
                          appliesWhen={'thermalModel': 'relaxation'}),
     },
-    extraFields=('internalEnergies', 'pressures', 'supports', 'masses'),
+    extraFields=('internalEnergies', 'pressures', 'supports', 'masses', 'Q', 'sourceEnergyBudget', 'UIDs'),
 ))
 
 if __name__ == '__main__':

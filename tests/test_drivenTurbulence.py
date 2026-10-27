@@ -88,7 +88,6 @@ def test_sources_apply_actual_mass_and_compatible_work():
     ({}, {}, {'scheme': 'MFV'}, 'ssprk'),
     ({}, {}, {'temporalScheme': 'hancock'}, 'ssprk'),
     ({'execution': 'graph'}, {}, {}, 'eager'),
-    ({'resumeFrom': 'not-read.h5'}, {}, {}, 'resumeFrom'),
 ])
 def test_case_contract_rejects_unsupported_physics(simulation, params, solver, message):
     with pytest.raises(ValueError, match=message):
@@ -367,10 +366,326 @@ def test_offline_analysis_reads_native_fields_and_scopes_budget_checks(tmp_path)
                           supports=np.full(64, .2), Q=np.column_stack((mass, mass[:, None]*velocity, energy)),
                           sourceEnergyBudget=np.array([energy.sum()-1.15, 0.]), times=np.array([t]))
             for name, values in fields.items():
-                f.require_group(name).create_dataset(f'frame_{i:05d}', data=values)
+                f.require_group(name).create_dataset(f'frame_{i+99998:05d}', data=values)
     report = module.analyze(run, tmp_path/'analysis', [8], [0., .3, .7], deposition='kernel')
     assert report['completeAssessmentWindow']
     assert report['budgetScope'] == 'saved snapshots only'
     assert not report['sourceManifestAvailable']
     assert report['budget']['maxRelativeEnergyResidual'] < 1e-15
     assert report['budget']['maxRelativeMassChange'] == 0
+
+
+def _restartConfiguration(steps, scheme='MFM'):
+    cfg = configuration(accelerationRMS=.3)
+    cfg.simulation.update(nSteps=steps, tLimit=4.)
+    cfg.solver.update(scheme=scheme, temporalScheme='ssprk')
+    return cfg
+
+
+@pytest.mark.parametrize('scheme', ['MFM', 'MFV'])
+def test_native_restart_preserves_physics_clock_and_absolute_step_count(tmp_path, scheme):
+    import h5py
+    from pathlib import Path
+    full = _restartConfiguration(160, scheme).run()
+    firstConfig = _restartConfiguration(60, scheme)
+    firstConfig.simulation.update(store=True, storeMode='states', storeInterval=25,
+                                  exportRoot=str(tmp_path/'first'))
+    first = firstConfig.run()
+    path = Path(first.exportPath)/'trajectory/finalState.h5'
+    restoredConfig = _restartConfiguration(100, scheme)
+    restoredConfig.simulation.update(resumeFrom=str(path), store=True, storeMode='states',
+                                     exportRoot=str(tmp_path/'restored'))
+    restored = restoredConfig.run()
+    assert float(full.state.t) == float(restored.state.t)
+    assert restored.trajectory[0]['t'] == float(first.state.t)
+    assert restored.trajectory[0]['step'] == 59
+    assert restored.trajectory[1]['step'] == 60
+    for key in ['positions', 'Q', 'supports', 'lam', 'internalEnergies', 'densities',
+                'velocities', 'pressures', 'sourceEnergyBudget']:
+        torch.testing.assert_close(getattr(full.state.state, key),
+                                   getattr(restored.state.state, key), rtol=0, atol=0)
+    for time in [.01, float(restored.state.t), 2.7]:
+        torch.testing.assert_close(full.state.sourceTerms.acceleration.coefficients(time),
+                                   restored.state.sourceTerms.acceleration.coefficients(time), rtol=0, atol=0)
+    with h5py.File(Path(restored.exportPath)/'trajectory/finalState.h5') as f:
+        assert f.attrs['checkpointCompletedSteps'] == 160
+        assert f.attrs['frame_num'] == 160
+    # A regular interior checkpoint stores the completed count, independent of its filename's index.
+    interior = _restartConfiguration(134, scheme)
+    interior.simulation['resumeFrom'] = str(Path(first.exportPath)/'trajectory/state_0025.h5')
+    result = interior.run()
+    assert result.trajectory[1]['step'] == 26
+    torch.testing.assert_close(result.state.state.Q, full.state.state.Q, rtol=0, atol=0)
+
+
+def test_time_limited_restart_retains_a_positive_physical_next_timestep(tmp_path):
+    import h5py
+    from pathlib import Path
+    firstConfig = _restartConfiguration(None)
+    firstConfig.simulation.update(tLimit=.04, store=True, storeMode='states', exportRoot=str(tmp_path))
+    first = firstConfig.run()
+    path = Path(first.exportPath)/'trajectory/finalState.h5'
+    with h5py.File(path) as f:
+        assert f['checkpointNextDt'][()] > 0
+    cfg = _restartConfiguration(None)
+    cfg.simulation.update(tLimit=.08, resumeFrom=str(path))
+    result = cfg.run()
+    assert not result.diverged and float(result.state.t) == .08
+    assert abs(result.trajectory[-1]['relativeEnergyBudgetResidual']) < 2e-6
+
+
+def test_restart_rejects_changed_physics_and_incomplete_context(tmp_path):
+    import h5py
+    from pathlib import Path
+    cfg = _restartConfiguration(10)
+    cfg.simulation.update(store=True, storeMode='states', exportRoot=str(tmp_path))
+    result = cfg.run()
+    path = Path(result.exportPath)/'trajectory/finalState.h5'
+    other = _restartConfiguration(10)
+    other.simulation['resumeFrom'] = str(path)
+    other.params['seed'] = 789
+    with pytest.raises(ValueError, match='incompatible'):
+        other.run()
+    with h5py.File(path, 'a') as f:
+        del f.attrs['checkpointVersion']
+    other = _restartConfiguration(10)
+    other.simulation['resumeFrom'] = str(path)
+    with pytest.raises(ValueError, match='missing'):
+        other.run()
+
+
+def test_trajectory_retains_conserved_fields_and_complete_time_dependent_driving(tmp_path):
+    import h5py
+    from pathlib import Path
+    cfg = _restartConfiguration(60)
+    cfg.simulation.update(store=True, storeMode='trajectory', exportInterval=.01,
+                          exportRoot=str(tmp_path))
+    result = cfg.run()
+    with h5py.File(Path(result.exportPath)/'trajectory.h5') as f:
+        keys = sorted(f['positions'])
+        assert len(keys) >= 8
+        field = result.state.sourceTerms.acceleration
+        knots, nextKnot = [], 0
+        for key in keys:
+            frame, time = f['frameData'][key], float(f['times'][key][0])
+            assert f['times'][key].dtype.itemsize == 8
+            assert frame.attrs['forcingTime'] == time
+            torch.testing.assert_close(torch.from_numpy(frame['forcingCoefficients'][:]),
+                                       field.coefficients(time), rtol=0, atol=0)
+            assert frame['forcingParameters'].attrs['seed'] == 1234
+            assert frame.attrs['forcingKnotStart'] == nextKnot
+            raw = torch.from_numpy(frame['forcingKnots'][:])
+            knots.extend(raw.unbind())
+            nextKnot += len(raw)
+        assert nextKnot >= int(float(result.state.t)/.05)+2
+        for index, raw in enumerate(knots):
+            torch.testing.assert_close(raw, field.knots[index], rtol=0, atol=0)
+        first, last = f['frameData'][keys[0]], f['frameData'][keys[-1]]
+        assert not torch.equal(torch.from_numpy(first['forcingCoefficients'][:]),
+                               torch.from_numpy(last['forcingCoefficients'][:]))
+        for name in ['Q', 'sourceEnergyBudget', 'UIDs', 'masses', 'positions', 'velocities', 'densities']:
+            torch.testing.assert_close(torch.from_numpy(f[name][keys[-1]][:]),
+                                       getattr(result.state.state, name).cpu(), rtol=0, atol=0)
+
+
+def test_native_driving_audit_detects_missing_between_frame_knots(tmp_path):
+    import importlib.util
+    import h5py
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[1]/'scripts/analyze_drivenTurbulence.py'
+    spec = importlib.util.spec_from_file_location('audit_native_forcing', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    cfg = _restartConfiguration(60)
+    cfg.simulation.update(store=True, storeMode='trajectory', exportInterval=.01,
+                          exportRoot=str(tmp_path))
+    result = cfg.run()
+    path = Path(result.exportPath)
+    audit = module.forcingObservation(path)
+    assert audit['completeKnots'] and audit['knots'] >= 4
+    assert audit['maxCoefficientError'] < 1e-14
+    # Exercise the actual native run through the reusable offline command too.
+    analysis = module.analyze(path, tmp_path/'analysis', [8], [.01, .06, float(result.state.t)], deposition='kernel')
+    assert analysis['conditionalForcing']['completeKnots']
+    assert analysis['budgetScope'] == 'saved snapshots only'
+    assert analysis['budget']['maxRelativeEnergyResidual'] < 2e-6
+    with h5py.File(path/'trajectory.h5', 'a') as f:
+        keys = sorted(f['frameData'])
+        f['frameData'][keys[-1]].attrs['forcingKnotStart'] += 1
+    with pytest.raises(ValueError, match='missing or duplicate'):
+        module.forcingObservation(path)
+
+
+
+def test_trajectory_frame_metadata_orders_long_step_indices_numerically(tmp_path):
+    import h5py
+    import numpy as np
+    from warpSPH.io.importIO import loadTrajectory
+    indices = [99999, 100000, 100001]
+    with h5py.File(tmp_path/'trajectory.h5', 'w') as f:
+        f.attrs['scheme'] = 'MFM'
+        for name in ('combinedMasses', 'combinedSupports'):
+            f[name] = np.ones(1, dtype=np.float32)
+        for name in ('combinedKinds', 'combinedMaterials', 'combinedUIDs'):
+            f[name] = np.zeros(1, dtype=np.int32)
+        for i, index in enumerate(indices):
+            f.require_group('positions')[f'frame_{index:05d}'] = np.zeros((1, 2), dtype=np.float32)
+    handle, meta = loadTrajectory(str(tmp_path), 'cpu')
+    try:
+        assert meta['frameKeys'] == [f'frame_{i:05d}' for i in indices]
+    finally:
+        handle.close()
+
+
+@pytest.mark.parametrize('scheme', ['MFM', 'MFV'])
+@pytest.mark.parametrize('thermalModel', ['relaxation', 'adiabatic'])
+def test_cold_driving_preserves_raw_internal_energy_in_every_rhs(scheme, thermalModel):
+    observed = []
+    def build(ctx):
+        system = drivenTurbulenceCase.buildSystem(ctx)
+        rhs = ctx.stepFunction
+        def checked(state, dt, **kwargs):
+            result = rhs(state, dt, **kwargs)
+            stage = state.meshlessContext
+            observed.append((float(stage.u.min()), float(stage.P.min()), float(stage.rho.min())))
+            return result
+        ctx.bundle = replace(ctx.bundle, stepFunction=checked)
+        return system
+    cfg = configuration(soundSpeed=.01, accelerationRMS=6., thermalModel=thermalModel)
+    cfg.simulation.update(tLimit=.02, maxDt=.01, velocityAlarmStopRatio=100)
+    cfg.solver.update(scheme=scheme, temporalScheme='ssprk')
+    result = cfg.run(replace(drivenTurbulenceCase, buildSystem=build))
+    assert not result.diverged and float(result.state.t) == .02
+    assert observed and all(energy > 0 and pressure > 1e-25 and density > 0
+                            for energy, pressure, density in observed)
+    assert all(row['minEnergy'] > 0 for row in result.trajectory)
+    assert result.trajectory[-1]['rmsMachMass'] > 1
+
+
+def test_cold_uniform_force_with_a_bath_preserves_the_analytic_temperature():
+    acceleration = torch.tensor([6., 0.])
+    def build(ctx):
+        system = drivenTurbulenceCase.buildSystem(ctx)
+        system.sourceTerms.acceleration = lambda positions, time: acceleration.to(positions).expand_as(positions)
+        system.sourceTerms.removeMeanAcceleration = False
+        return system
+    cfg = configuration(soundSpeed=.01, accelerationRMS=6., thermalModel='relaxation')
+    cfg.simulation.update(tLimit=.02, maxDt=.01, velocityAlarmStopRatio=100)
+    result = cfg.run(replace(drivenTurbulenceCase, buildSystem=build))
+    u0 = .01**2/((5/3)*(2/3))
+    torch.testing.assert_close(result.state.state.internalEnergies,
+                               torch.full_like(result.state.state.internalEnergies, u0),
+                               rtol=2e-3, atol=5e-9)
+    expected = (float(result.state.t)*acceleration.to(result.state.state.velocities)).expand_as(result.state.state.velocities)
+    torch.testing.assert_close(result.state.state.velocities, expected, rtol=3e-4, atol=1e-7)
+    assert abs(float(result.state.state.sourceEnergyBudget[1])) < .002*float(result.ctx.scratch['initialEnergy'])
+
+
+@pytest.mark.parametrize('scheme', ['MFM', 'MFV'])
+def test_cold_source_limit_anticipates_a_force_appearing_across_a_knot(scheme):
+    observed = []
+    def build(ctx):
+        system = drivenTurbulenceCase.buildSystem(ctx)
+        field = ctx.scratch['driving']
+        # A prescribed solenoidal pulse: zero before .05, growing towards .10.
+        field.knots[0].zero_()
+        field.knots[1].zero_()
+        field.knots[2].zero_()
+        mode = int(torch.nonzero((field.modes == torch.tensor([1., 0.])).all(dim=1))[0])
+        field.knots[2][0, mode, 1] = 8.
+        system.t = .049
+        # A zero-force past allows a large previous step; test future growth explicitly.
+        ctx.config.dt = .01
+        ctx.config.dt = drivenTurbulenceCase.timestep(ctx, system)
+        rhs = ctx.stepFunction
+        def checked(state, dt, **kwargs):
+            result = rhs(state, dt, **kwargs)
+            observed.append(float(state.meshlessContext.u.min()))
+            return result
+        ctx.bundle = replace(ctx.bundle, stepFunction=checked)
+        return system
+    cfg = configuration(soundSpeed=.01, accelerationRMS=6., thermalModel='adiabatic')
+    cfg.simulation.update(tLimit=.06, maxDt=.01, velocityAlarmStopRatio=100)
+    cfg.solver.update(scheme=scheme, temporalScheme='ssprk')
+    result = cfg.run(replace(drivenTurbulenceCase, buildSystem=build))
+    assert not result.diverged and float(result.state.t) == .06
+    assert observed and min(observed) > 0
+    assert all(row['minEnergy'] > 0 for row in result.trajectory)
+
+
+@pytest.mark.parametrize('dim', [2, 3])
+def test_force_bound_covers_spatial_samples_across_a_knot_without_changing_noise(dim):
+    field, untouched = FourierOU(dim=dim, seed=481), FourierOU(dim=dim, seed=481)
+    points = torch.rand(91, dim, dtype=torch.float64)
+    for time in [.049, .211, .07, .049]:
+        bound = field.accelerationBound(time)
+        for sample in [time, time+.03, time+field.parameters['updateInterval']]:
+            acceleration = field(points, sample)
+            assert float(acceleration.norm(dim=1).max()) <= bound*(1+1e-12)
+            torch.testing.assert_close(acceleration, untouched(points, sample), rtol=0, atol=0)
+
+
+def test_force_bound_cache_tracks_prescribed_knots_and_checkpoint_reconstruction():
+    field = FourierOU(seed=481)
+    before = field.accelerationBound(.03)
+    field.knots[1].mul_(100)
+    after = field.accelerationBound(.03)
+    restored = FourierOU.from_state_dict(field.state_dict())
+    assert after > before
+    assert after == restored.accelerationBound(.03)
+
+
+def test_exact_box_power_does_not_include_diagonal_modes_in_the_first_shell():
+    import numpy as np
+    from warpSPH.utils.turbulence import spectra2D
+    x, y = np.meshgrid((np.arange(32)+.5)/32, (np.arange(32)+.5)/32)
+    diagonal = np.stack((np.sin(2*np.pi*(x+y)), np.zeros_like(x)), axis=-1)
+    spectra = spectra2D(diagonal)
+    assert spectra['velocityEnergy'][1] == pytest.approx(.25)
+    assert spectra['boxModeEnergy'] == pytest.approx(0, abs=1e-28)
+    axial = np.stack((np.sin(2*np.pi*y), np.zeros_like(x)), axis=-1)
+    assert spectra2D(axial)['boxModeEnergy'] == pytest.approx(.25)
+
+
+@pytest.mark.parametrize('badTime', [0., 9.9])
+def test_analysis_requires_valid_interpolation_brackets_but_excludes_earlier_startup(tmp_path, badTime):
+    import importlib.util
+    import json
+    import numpy as np
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[1]/'scripts/analyze_drivenTurbulence.py'
+    spec = importlib.util.spec_from_file_location('driven_coverage_analysis', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    run = tmp_path/'flow'
+    (run/'samples').mkdir(parents=True)
+    (run/'input.json').write_text(json.dumps({'simulation': {'nx': 8}, 'params': {}}))
+    x, y = np.meshgrid((np.arange(8)+.5)/8, (np.arange(8)+.5)/8)
+    regular = np.stack((x, y), axis=-1).reshape(-1, 2)
+    for i, t in enumerate([0., 5., 9.9, 10.1, 14., 18., 22., 26., 30., 34., 38., 40.]):
+        positions = np.zeros_like(regular) if t == badTime else regular
+        velocity = np.stack((np.sin(2*np.pi*y)*(1+.05*np.sin(t)), np.zeros_like(x)), axis=-1).reshape(-1, 2)
+        np.savez(run/'samples'/f'{i:04d}.npz', t=t, positions=positions, velocities=velocity,
+                 masses=np.full(64, 1/64), densities=np.ones(64), pressures=np.full(64, .6),
+                 internalEnergies=np.full(64, .9), supports=np.full(64, .2))
+    report = module.analyze(run, tmp_path/'output', [8], [10., 20., 30., 40.])
+    grid = report['grid']['8']
+    assert grid['maxEmptyCellFraction'] > 0
+    if badTime == 0.:
+        assert grid['comparisonCoverageComplete']
+        assert np.isfinite(grid['means']['velocityEnergy']).all()
+        assert 'boxModeScreen' in grid
+    else:
+        assert not grid['comparisonCoverageComplete']
+        assert grid['invalidSpectralSnapshots'] == 1
+        assert 'means' not in grid
+
+
+def test_stationarity_screen_reports_insufficient_assessment_samples_without_failing():
+    import numpy as np
+    from warpSPH.utils.turbulence import stationarityScreen
+    for times in [np.arange(0., 41., 4.), np.array([0., 40.])]:
+        screen = stationarityScreen(times, 1+.01*np.sin(times), blocks=[30., 35., 40.])
+        assert len(screen['blockMeans']) == 2
+        assert screen['tau'] is None and screen['effectiveSamples'] is None
+        assert screen['correlationCensored'] and not screen['passed']

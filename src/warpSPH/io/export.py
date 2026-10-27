@@ -370,8 +370,20 @@ def writeInitialData(
     return (positionGroup, velocityGroup, densityGroup, timeGroup, rigidBodyGroup) + extraGroups
 
 
+def _writeFrameData(group, values):
+    for name, value in values.items():
+        if isinstance(value, dict):
+            _writeFrameData(group.create_group(name), value)
+        elif isinstance(value, torch.Tensor):
+            group.create_dataset(name, data=value.detach().cpu().numpy())
+        elif isinstance(value, (np.ndarray, list, tuple)):
+            group.create_dataset(name, data=np.asarray(value))
+        else:
+            group.attrs[name] = 'None' if value is None else value
+
+
 def writeFrame(groups, i, state, stages, config, schemeConfig, uniqueParticles=True, writeStages=False,
-              extraFields: tuple = ()):
+              extraFields: tuple = (), extraData: dict | None = None):
     positionGroup, velocityGroup, densityGroup, timeGroup, rigidBodyGroup, *extraGroups = groups
 
     positionGroup.create_dataset(f'frame_{i:05d}', data=state.state.positions.cpu().numpy())
@@ -380,7 +392,7 @@ def writeFrame(groups, i, state, stages, config, schemeConfig, uniqueParticles=T
     timeGroup.create_dataset(
         f'frame_{i:05d}',
         data=np.array([state.t.cpu().item() if isinstance(state.t, torch.Tensor) else state.t],
-                      dtype=np.float64 if hasattr(state.state, 'thermodynamicVariable') else np.float32),
+                      dtype=np.float64),
     )
     for name, group in zip(extraFields, extraGroups):
         value = getattr(state.state, name)
@@ -393,6 +405,11 @@ def writeFrame(groups, i, state, stages, config, schemeConfig, uniqueParticles=T
         value = getattr(state.state, name, None)
         if value is not None and name not in extraFields:
             positionGroup.file[name].create_dataset(f'frame_{i:05d}', data=value.detach().cpu().numpy())
+
+    if extraData is not None:
+        # Time-varying forcing/budgets cannot live only in initial file attrs.
+        frame = positionGroup.file.require_group('frameData').create_group(f'frame_{i:05d}')
+        _writeFrameData(frame, extraData)
 
     rbg = rigidBodyGroup.create_group(f'frame_{i:05d}')
     for r, rigidBody in enumerate(getattr(schemeConfig, 'rigidBodies', []) or []):

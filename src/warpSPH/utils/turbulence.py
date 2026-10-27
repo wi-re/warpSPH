@@ -121,7 +121,7 @@ def spectra2D(velocity, density=None):
     n = velocity.shape[0]
     v = velocity-velocity.mean(axis=(0, 1))
     transform = np.fft.fftn(v, axes=(0, 1))/n**2
-    k = np.fft.fftfreq(n)*n
+    k = np.rint(np.fft.fftfreq(n)*n)
     kx, ky = np.meshgrid(k, k, indexing='xy')
     k2 = kx*kx+ky*ky
     # Nyquist planes have ambiguous derivative sign for real discrete fields.
@@ -135,6 +135,9 @@ def spectra2D(velocity, density=None):
     out = dict(k=np.arange(shells.max()+1), velocityEnergy=.5*shell(power),
                compressionalEnergy=.5*shell(longitudinal),
                solenoidalEnergy=.5*shell(np.maximum(0., power-longitudinal)))
+    # The rounded first radial shell also includes |k|=sqrt(2). Keep exact
+    # box-wavelength power separate when assessing a possible condensate.
+    out['boxModeEnergy'] = .5*np.sum(power[k2 == 1])
     out['parsevalError'] = float(out['velocityEnergy'].sum()-.5*np.mean(np.sum(v*v, axis=-1)))
     if density is not None:
         density = _positive(density, 'grid density')
@@ -201,7 +204,7 @@ def stationarityScreen(times, values, *, blocks=(10., 20., 30., 40.), tolerance=
     uncensored correlation estimate over the entire assessment window.
     """
     times, values, blocks = map(lambda x: np.asarray(x, dtype=np.float64), (times, values, blocks))
-    if times.ndim != 1 or values.shape != times.shape or len(times) < 8 or not np.isfinite(times).all() or not np.isfinite(values).all() or np.any(np.diff(times) <= 0):
+    if times.ndim != 1 or values.shape != times.shape or len(times) < 2 or not np.isfinite(times).all() or not np.isfinite(values).all() or np.any(np.diff(times) <= 0):
         raise ValueError('need finite increasing time series')
     if blocks.ndim != 1 or len(blocks) < 3 or not np.isfinite(blocks).all() or np.any(np.diff(blocks) <= 0) or blocks[0] < times[0] or blocks[-1] > times[-1] or not 0 < tolerance < 1:
         raise ValueError('need >=2 complete nonoverlapping blocks and tolerance in (0, 1)')
@@ -214,7 +217,8 @@ def stationarityScreen(times, values, *, blocks=(10., 20., 30., 40.), tolerance=
     scale = max(abs(np.mean(means)), np.finfo(float).tiny)
     spread = float(np.ptp(means)/scale)
     selected = (times >= blocks[0]) & (times <= blocks[-1])
-    corr = correlationTime(times[selected], values[selected])
+    corr = (correlationTime(times[selected], values[selected]) if np.count_nonzero(selected) >= 8
+            else dict(tau=None, effectiveSamples=None, censored=True))
     longEnough = corr['tau'] is not None and np.min(np.diff(blocks)) >= 5*corr['tau'] and not corr['censored']
     return dict(blockMeans=means, relativeSpread=spread, tau=corr['tau'], effectiveSamples=corr['effectiveSamples'],
                 correlationCensored=corr['censored'], blockLongEnough=bool(longEnough),

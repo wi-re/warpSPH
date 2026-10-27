@@ -352,6 +352,8 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         with h5py.File(spec.resumeFrom, 'r') as f:
             system.state = loadState(f['state'], ctx.config.device, type(system.state))
             system.t = float(f.attrs['time'])
+            if case.restoreCheckpoint is not None:
+                case.restoreCheckpoint(ctx, system, f)
         if not spec.quiet:
             print(f'-- resumed from {spec.resumeFrom} '
                  f'(t={system.t:.6f}, step offset {spec.resumeStepOffset}) --')
@@ -434,11 +436,11 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         exportSimulationSystem(ctx.exportPath, 'initialState', ctx.scheme, runningState,
                                exportAdjacency=False, stages=None,
                                exportStagesAdjacency=False,
-                               extraData=dict(extraData, frame_num=0))
+                               extraData=dict(extraData, frame_num=spec.resumeStepOffset))
 
     result = RunResult(ctx=ctx, state=runningState, exportPath=ctx.exportPath)
     if case.diagnostics is not None:
-        result.trajectory.append(dict(case.diagnostics(ctx, runningState), step=-1, t=0.0,
+        result.trajectory.append(dict(case.diagnostics(ctx, runningState), step=spec.resumeStepOffset-1, t=_scalar(runningState.t),
                                       stepTime_ms=0.0))
 
     stepResult = None
@@ -647,7 +649,7 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
                                exportStagesAdjacency=True,
                                extraData=dict(extraData,
                                               **(case.extraData(ctx, runningState) if case.extraData else {}),
-                                              frame_num=result.nSteps))
+                                              frame_num=spec.resumeStepOffset+result.nSteps))
     if outFile is not None:
         outFile.close()
 
@@ -1009,7 +1011,8 @@ def _plotAndStore(ctx: RunContext, case: Case, spec: CaseSpec, state, stepResult
             writeFrame(groups, i, stepResult.state, stepResult.stages,
                        config=ctx.config, schemeConfig=ctx.schemeConfig,
                        uniqueParticles=True, writeStages=False,
-                       extraFields=case.extraFields)
+                       extraFields=case.extraFields,
+                       extraData=case.trajectoryData(ctx, state) if case.trajectoryData else None)
         else:
             exportSimulationSystem(ctx.exportPath, f'state_{i:04d}', ctx.scheme,
                                    state, exportAdjacency=False,

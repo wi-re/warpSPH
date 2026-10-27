@@ -45,6 +45,7 @@ class FourierOU:
         self.generator = torch.Generator(device='cpu').manual_seed(seed)
         self.knots = [self._draw()]
         self._deviceModes = {}
+        self._boundCache = None
 
     def _draw(self):
         return torch.randn((2, len(self.modes), self.parameters['dim']),
@@ -60,6 +61,28 @@ class FourierOU:
             self.knots.append(self.decay*self.knots[-1] + self.innovation*self._draw())
         raw = (1-(clock-index))*self.knots[index] + (clock-index)*self.knots[index+1]
         return self.scale*torch.einsum('mij,pmj->pmi', self.projection, raw)
+
+    def accelerationBound(self, time):
+        """Spatial norm bound over the next fixed update interval.
+
+        Three enclosing knots bound both linear segments. Cache only this
+        diagnostic bound; tensor identity/version checks retain correctness for
+        prescribed-knot controls and checkpoint reconstruction.
+        """
+        time = float(time)
+        if not math.isfinite(time) or time < 0:
+            raise ValueError('FourierOU time must be finite and nonnegative')
+        index = math.floor(time/self.parameters['updateInterval'])
+        while len(self.knots) <= index+2:
+            self.knots.append(self.decay*self.knots[-1] + self.innovation*self._draw())
+        knots = self.knots[index:index+3]
+        key = (index, self.scale, id(self.projection), self.projection._version,
+               tuple((id(knot), knot._version) for knot in knots))
+        if self._boundCache is None or self._boundCache[0] != key:
+            coefficients = self.scale*torch.einsum('mij,kpmj->kpmi', self.projection, torch.stack(knots))
+            bound = float(coefficients.norm(dim=-1).sum(dim=(1, 2)).max())
+            self._boundCache = (key, bound)
+        return self._boundCache[1]
 
     def __call__(self, positions, time):
         if positions.ndim != 2 or positions.shape[1] != self.parameters['dim']:
