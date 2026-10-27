@@ -78,3 +78,64 @@ def test_viscousTermDefaultsToTheProjectedForm():
     old = wcDiffusionParamsToDict(buildDefaultDiffusionParamsWeaklyCompressibleSPH())
     old.pop('viscousTerm')
     assert dictToWCDiffusionParams(old).viscousTerm == ViscosityTerm.monaghanGingold
+
+
+@pytest.mark.parametrize('approachOnly', [False, True])
+def test_approachOnlyRoundTripsAsADiffusionParameter(approachOnly):
+    from warpSPH.configurations.moduleConfigurations.weaklyCompressibleDiffusionParams import (
+        buildDefaultDiffusionParamsWeaklyCompressibleSPH, dictToWCDiffusionParams, wcDiffusionParamsToDict)
+    params = buildDefaultDiffusionParamsWeaklyCompressibleSPH()
+    assert not params.approachOnly
+    params.approachOnly = approachOnly
+    encoded = wcDiffusionParamsToDict(params)
+    assert dictToWCDiffusionParams(encoded).approachOnly == approachOnly
+    del encoded['approachOnly']
+    assert not dictToWCDiffusionParams(encoded).approachOnly
+
+
+def test_sharedViscosityUsesTheConfiguredApproachOnlyPolicy():
+    from types import SimpleNamespace as NS
+    from warpSPHCore import DomainDescription, KernelFunctions, ParticleState, buildVerletList
+    from warpSPHCore.type_config import get_torch_precision
+    from warpSPH.configurations import IncompressibleSPHConfig
+    from warpSPH.modules.deltaSPH import computeVelocityDiffusion
+
+    dtype = get_torch_precision()
+    positions = torch.tensor([[-.2, 0.], [.2, 0.], [0., .3]], dtype=dtype)
+    state = ParticleState(positions, torch.full((3,), .8, dtype=dtype),
+        torch.ones(3, dtype=dtype), torch.zeros(3, dtype=torch.int32), torch.ones(3, dtype=dtype))
+    state.velocities = positions.clone()  # Every pair is separating.
+    domain = DomainDescription(-torch.ones(2, dtype=dtype), torch.ones(2, dtype=dtype),
+                               torch.zeros(2, dtype=torch.bool), 2)
+    config = NS(domain=domain, kernel=KernelFunctions.Wendland4, calibrateNormalization=False)
+    scheme = IncompressibleSPHConfig()
+    scheme.diffusionParams.inviscid = False
+    adjacency = buildVerletList(state, domain)
+    scheme.diffusionParams.approachOnly = True
+    clamped = computeVelocityDiffusion(state, config, scheme, adjacency)
+    torch.testing.assert_close(clamped, torch.zeros_like(clamped))
+    scheme.diffusionParams.approachOnly = False
+    twoSided = computeVelocityDiffusion(state, config, scheme, adjacency)
+    assert float((twoSided*state.velocities).sum()) < 0
+
+
+@pytest.mark.parametrize('rho0', [1., 1000.])
+def test_sharedProjectedViscosityUsesPhysicalUnits(rho0):
+    from types import SimpleNamespace as NS
+    from warpSPHCore import KernelFunctions
+    from warpSPH.configurations import IncompressibleSPHConfig
+    from warpSPH.modules.deltaSPH import computeVelocityDiffusion
+
+    state, domain, adjacency, velocities, positions, k = _shearWave()
+    state.masses *= rho0
+    state.densities *= rho0
+    scheme = IncompressibleSPHConfig()
+    scheme.fluid.restDensity = rho0
+    scheme.diffusionParams.inviscid = False
+    scheme.diffusionParams.viscidNu = .01
+    config = NS(domain=domain, kernel=KernelFunctions.Wendland2, calibrateNormalization=False)
+    acceleration = computeVelocityDiffusion(state, config, scheme, adjacency, wall=False)
+    exact = -.01*k*k*torch.sin(k*positions[:, 1])
+    error = torch.linalg.norm(acceleration[:, 0]-exact)/torch.linalg.norm(exact)
+    assert float(error) < .05
+    torch.testing.assert_close(state.velocities, velocities, rtol=0, atol=0)

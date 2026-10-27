@@ -46,7 +46,7 @@ bootstrap(precision='float32')
 import numpy as np
 import torch
 import warpSPH.runner as R
-from warpSPH.cases.dambreak import dambreakCase
+from warpSPH.cases.freeSurface.dambreak import dambreakCase
 import probe_deltaSPHMarrone as P
 
 os.makedirs(args.out, exist_ok=True)

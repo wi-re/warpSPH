@@ -1,9 +1,9 @@
 """Live plot windows, and their teardown.
 
-Separate from :mod:`warpSPH.cases.plotting` for one reason: the runner has to
+Separate from :mod:`warpSPH.cases.common.plotting` for one reason: the runner has to
 tear a figure down at the end of a run, and the runner must not import from
 `warpSPH.cases` -- it is generic over cases, not built on them. The case-facing
-names are re-exported from `warpSPH.cases.plotting`, so a case still says
+names are re-exported from `warpSPH.cases.common.plotting`, so a case still says
 ``from .plotting import openWindow``.
 
 Why any of this is needed: a notebook frontend displays a figure for you, so

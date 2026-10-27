@@ -30,7 +30,7 @@ import torch
 
 from warpSPH.io.hdf5 import loadState
 from warpSPH.systems.weaklyCompressible import WeaklyCompressibleState
-from warpSPH.cases.sloshingTank import sloshingTankCase
+from warpSPH.cases.freeSurface.sloshingTank import sloshingTankCase
 from warpSPH.runner import run
 from warpSPH.modules.mdbc import computeMdbcDensity
 from warpSPH.modules.liu import interpolateLiuLiu, determinantThresholdFor

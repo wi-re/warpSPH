@@ -22,6 +22,7 @@ def computeFrontiereQ(
     alpha_i: scalar_t, alpha_j: scalar_t,
     viscosityParams: DiffusionParameters,
     useJ : wp.bool,
+    kernelScaleOverride: scalar_t = scalar_t(0.0),
 ):
     """Frontiere et al. (2017) viscous pressure `Q` of particle i (or j with `useJ`):
     `Q_i = rho_i (-C_l c_i mu_i + C_q mu_i^2)`, from the `Frontiere2017` term of `computePi_term` (the formula lives there once).
@@ -32,7 +33,7 @@ def computeFrontiereQ(
     val = computePi_term(
         wp.static(ViscosityTerms.Frontiere2017.value), x_i, x_j, h_i, h_j, scalar_t(1.0), scalar_t(1.0), rho_i, rho_j,
         False, scalar_t(0.0), scalar_t(0.0), u_ij, domainState, kernel_int, c_i, c_j, alpha_i, alpha_j,
-        viscosityParams, useJ, False)
+        viscosityParams, useJ, False, scalar_t(-1.0), scalar_t(-1.0), scalar_t(-1.0), scalar_t(-1.0), kernelScaleOverride)
     x_ij = computeDistanceVec(x_i, x_j, domainState)
     r_ij = safe_sqrt(wp.dot(x_ij, x_ij))
     w = wp.dot(u_ij, x_ij) / (r_ij + scalar_t(1.0e-14) * h_i)

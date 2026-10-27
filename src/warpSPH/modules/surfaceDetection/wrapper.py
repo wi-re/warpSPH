@@ -99,18 +99,22 @@ def detectFreeSurface(
 
     adjacency: Optional[Union[AdjacencyList, CompactHashMap]],
     renormalizationState: Optional[RenormalizationState] = None,
-    returnNormals: bool = True
+    returnNormals: bool = True,
+    wall: Optional[Any] = None,
 ):
+    """`wall`: the analytic boundary's `WallState`; `None`: resolved from `schemeConfig.boundaryProvider`, boundary particles when there is none."""
     with record_function("[warpSPH] - (freesurface) - detectFreeSurface"):
         if surfaceConfig.active == False:
             fsm = torch.zeros(currentState.positions.shape[0], device = currentState.positions.device, dtype = currentState.positions.dtype)
             normals = torch.zeros_like(currentState.positions)
             return (fsm, fsm, None, None) if not returnNormals else (fsm, fsm, normals, None, None)
 
-        if getattr(schemeConfig, 'boundaryProvider', None) is not None:
+        from ..analyticBoundary import resolveWall
+        wall = resolveWall(currentState, config, schemeConfig, adjacency, wall)
+        if wall is not None:
             # analytic walls: the wall continuum is added to the detector's partial sums before the decisions (modules/analyticBoundary/detector.py)
             from ..analyticBoundary.detector import detectFreeSurfaceAnalytic
-            return detectFreeSurfaceAnalytic(currentState, config, schemeConfig, surfaceConfig, adjacency, returnNormals = returnNormals)
+            return detectFreeSurfaceAnalytic(currentState, config, schemeConfig, surfaceConfig, adjacency, returnNormals = returnNormals, wall = wall)
 
         normals, renormalizationState_, lambdas = computeNormals(
             currentState,

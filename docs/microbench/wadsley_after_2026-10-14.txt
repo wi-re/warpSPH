@@ -1,0 +1,67 @@
+=== sod2d / CompSPH, nx=100, N=2500 particles, per call ===
+                          ops launch  sync    host us  wall us   gpu us  dev k
+------------------------------------------------------------------------------
+Wadsley2017 terms        51.0    7.0  0.00        943      949      684   23.0
+Wadsley2017 update        0.0    0.0  0.00          0        0        0    0.0
+Wadsley2017 step hook    29.0    0.0  0.00        121      121       28   28.0
+
+--- per step (2 stages: terms and update every stage, the step hook once) ---
+                ops launch  sync    host us  wall us   gpu us  dev k
+--------------------------------------------------------------------
+Wadsley2017   131.0   14.0  0.00       2007     2019     1396   74.0
+
+=== sod2d / CompSPH, nx=200, N=5000 particles, per call ===
+                          ops launch  sync    host us  wall us   gpu us  dev k
+------------------------------------------------------------------------------
+Wadsley2017 terms        51.0    7.0  0.00        970      976      732   23.0
+Wadsley2017 update        0.0    0.0  0.00          0        0        0    0.0
+Wadsley2017 step hook    29.0    0.0  0.00        124      124       31   28.0
+
+--- per step (2 stages: terms and update every stage, the step hook once) ---
+                ops launch  sync    host us  wall us   gpu us  dev k
+--------------------------------------------------------------------
+Wadsley2017   131.0   14.0  0.00       2065     2077     1495   74.0
+
+=== sod2d / CompSPH, nx=400, N=10000 particles, per call ===
+                          ops launch  sync    host us  wall us   gpu us  dev k
+------------------------------------------------------------------------------
+Wadsley2017 terms        51.0    7.0  0.00        980      985      774   23.0
+Wadsley2017 update        0.0    0.0  0.00          0        0        0    0.0
+Wadsley2017 step hook    29.0    0.0  0.00        123      123       30   28.0
+
+--- per step (2 stages: terms and update every stage, the step hook once) ---
+                ops launch  sync    host us  wall us   gpu us  dev k
+--------------------------------------------------------------------
+Wadsley2017   131.0   14.0  0.00       2082     2094     1578   74.0
+
+sync call sites (counting pass):
+
+
+section trees:
+
+--- Wadsley2017 terms
+section (tree, inclusive unless "self")                                   calls  ops/call  self ops launch/call sync/call self sync sync/step
+microBench                                                                   10      51.0      43.0         7.0      0.00      0.00      0.00
+  warpWrapper2 [WW2]                                                         40       2.0       1.0         1.0      0.00      0.00      0.00
+    SAWF.forward - launch                                                    40       1.0       0.0         1.0      0.00      0.00      0.00
+      launch_kernel - allocate_output                                        40       1.0       1.0         0.0      0.00      0.00      0.00
+  warpSPH[computeM]                                                          10       1.0       0.0         1.0      0.00      0.00      0.00
+    warpSPH[computeM] - Kernel Execution                                     10       1.0       0.0         1.0      0.00      0.00      0.00
+  warpSPH[computeVsig]                                                       10       1.0       0.0         1.0      0.00      0.00      0.00
+    warpSPH[computeVsig] - Kernel Execution                                  10       1.0       0.0         1.0      0.00      0.00      0.00
+coverage: 100.0 % of 510 ops, 100.0 % of 70 launches, 0.0 % of 1 syncs inside a section (0 marked steps)
+  OUTSIDE any section: ops 0, launches 0, syncs 1
+    sync sites  : microBench.py:49 _sync [torch.cuda.synchronize] x1
+
+--- Wadsley2017 update
+section (tree, inclusive unless "self")                                   calls  ops/call  self ops launch/call sync/call self sync sync/step
+coverage: 100.0 % of 0 ops, 100.0 % of 0 launches, 0.0 % of 1 syncs inside a section (0 marked steps)
+  OUTSIDE any section: ops 0, launches 0, syncs 1
+    sync sites  : microBench.py:49 _sync [torch.cuda.synchronize] x1
+
+--- Wadsley2017 step hook
+section (tree, inclusive unless "self")                                   calls  ops/call  self ops launch/call sync/call self sync sync/step
+microBench                                                                   10      29.0      29.0         0.0      0.00      0.00      0.00
+coverage: 100.0 % of 290 ops, 100.0 % of 0 launches, 0.0 % of 1 syncs inside a section (0 marked steps)
+  OUTSIDE any section: ops 0, launches 0, syncs 1
+    sync sites  : microBench.py:49 _sync [torch.cuda.synchronize] x1

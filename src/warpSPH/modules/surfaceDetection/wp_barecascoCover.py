@@ -3,6 +3,8 @@ the decision): a boundary representation adds its own cover contribution (an exa
 set: `countNeighbors - 1` (warpSPH `modules/util`).
 """
 
+from warpSPHCore.type_config import index_t, offset_t
+
 import warp as wp
 from warp.types import vector, matrix
 from typing import Any
@@ -31,9 +33,9 @@ def computeBarecascoCover_Func_i(
     kernelProperties: kernelState,
 
     # Operation specific parameters
-    beginIndex: wp.int32, # type: ignore
+    beginIndex: offset_t, # type: ignore
     numIndices: wp.int32, # type: ignore
-    offsetArray: wp.array(dtype = wp.int64), # type: ignore
+    offsetArray: wp.array(dtype = index_t), # type: ignore
 
     # Operation Mode for masking certain kinds of interactions, e.g. for directional operations
     ki : wp.int32, referenceKinds : wp.array(dtype = wp.int32), # type: ignore
@@ -53,7 +55,7 @@ def computeBarecascoCover_Func_i(
 
     # Loop over neighbors
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j  = wp.int32(offsetArray[jj])
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
             if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
@@ -109,17 +111,18 @@ def computeBarecascoCover_Func_Adjacency(
         # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
         if not useAdjacency and (o % lanes) != lane:
             continue
-        beginIndex = wp.int32(0)
+        beginIndex = offset_t(0)
         numIndices = wp.int32(0)
         if useAdjacency:
             beginIndex = adjacencyState.neighborOffsets[i]
             numIndices = adjacencyState.numNeighbors[i]
         else:
-            beginIndex, numIndices = checkOffset(
+            gridBegin, numIndices = checkOffset(
                 i, queryState.positions, gridState.numCells, gridState.D,
                 o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
                 domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
             )
+            beginIndex = offset_t(gridBegin)
             if beginIndex < 0:
                 continue
 

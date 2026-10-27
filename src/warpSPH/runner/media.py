@@ -15,7 +15,7 @@ __all__ = ['encodeFrames']
 # The frames are fed to ffmpeg through a temp directory of symlinks named
 # `f%06d.png` in true numeric order (see `_orderedFrameDir`), NOT via
 # `-pattern_type glob -i 'frame_*.png'`. glob ordering is lexicographic, and
-# `cases/plotting.py` names frames `frame_{step:05d}.png` -- a 5-wide pad that
+# `cases/common/plotting.py` names frames `frame_{step:05d}.png` -- a 5-wide pad that
 # overflows the moment a run exceeds 100k steps (a high-resolution delta-SPH
 # case easily does: H/dx=320 is ~156k steps). Once that happens
 # `frame_100100.png` sorts before `frame_99840.png`, so every frame past step

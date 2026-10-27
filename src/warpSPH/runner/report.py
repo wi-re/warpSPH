@@ -118,14 +118,14 @@ def _fluidDescription(schemeConfig) -> Optional[str]:
     Only the parameters the selected EOS reads are printed. `fluidProperties`
     defaults every field, so showing `kappa` beside an isothermal EOS would
     suggest it played a part when `isoThermalEOS` never looks at it. DFSPH
-    (the config with a `solverConfig`) gets its pressure from the solver and
+    (the config with native `iisph` policies) gets its pressure from the solver and
     never calls the EOS at all, so naming one there would be a lie -- it still
     reads `restDensity` and `fixedSoundSpeed`, via shifting and the boundaries.
     """
     fluid = getattr(schemeConfig, 'fluid', None)
     if fluid is not None:
         eos = _enumName(fluid.eosType)
-        incompressible = hasattr(schemeConfig, 'solverConfig')
+        incompressible = hasattr(schemeConfig, 'iisph')
         # rho0 and c_s stay on the line whatever the EOS is: the timestep,
         # the dissipation terms and the shifting all read them directly.
         parts = ['incompressible (pressure from solver)' if incompressible
@@ -140,6 +140,10 @@ def _fluidDescription(schemeConfig) -> Optional[str]:
         return _joined(*parts)
 
     if hasattr(schemeConfig, 'gamma'):
+        materials = getattr(schemeConfig, 'materials', None)
+        if materials is not None:
+            return 'material EOS table | ' + ', '.join(
+                f'{i}: {m.name} ({m.eos.type}, gamma {m.eos.gamma:.5g})' for i, m in enumerate(materials))
         background = _scalarValue(getattr(schemeConfig, 'backgroundPressure', None))
         return _joined('ideal gas',
                        _number('gamma', schemeConfig.gamma),
@@ -170,8 +174,8 @@ def _viscosityDescriptions(schemeConfig) -> List[str]:
         else:
             viscosity = _joined('physical', _number('nu', params.viscidNu))
         # Density diffusion belongs to the same block but only delta-SPH runs
-        # it -- DFSPH (the config with a `solverConfig`) leaves the call out.
-        if not hasattr(schemeConfig, 'solverConfig'):
+        # it -- DFSPH (the config with native `iisph` policies) leaves the call out.
+        if not hasattr(schemeConfig, 'iisph'):
             viscosity = _joined(viscosity,
                                 _joined(f'density diffusion '
                                         f'{_enumName(params.densityDiffusionTerm)}',
@@ -209,6 +213,28 @@ def _viscosityDescriptions(schemeConfig) -> List[str]:
     return rows
 
 
+def _meshlessDescription(schemeConfig) -> Optional[str]:
+    """The meshless (MFM / MFV) scheme's own knobs, which no other row shows.
+
+    The mode is the scheme name itself (MFM / MFV), so it is not repeated. What
+    would otherwise be invisible in the banner is the MUSCL order, the neighbour
+    count the supports are re-derived from (N_ngb -- the generic `support` mode
+    the integrator row prints is not what this scheme reads), the *resolved*
+    temporal scheme (so `auto` reads as the D4 per-mode default that actually
+    runs, not the flag value), and the closure solve.
+    """
+    from ..configurations.meshless import MeshlessConfig
+    if not isinstance(schemeConfig, MeshlessConfig):
+        return None
+    # Imported only for a meshless run: it pulls in the `warpSPHCore.mfm` backend, which
+    # a Monaghan / delta-SPH banner has no reason to load.
+    from ..schemes.compressible.meshless import resolve_temporal_scheme
+    return _joined(f'MUSCL order {schemeConfig.order}',
+                   f'N_ngb {schemeConfig.nngb:g}',
+                   f'temporal {resolve_temporal_scheme(schemeConfig)}',
+                   f'closure {schemeConfig.closure} ({schemeConfig.closureSolver})')
+
+
 def describeRun(ctx, state, nSteps: int, timeLimited: bool) -> None:
     """The pre-run banner. Called once `dt` and the step count are final."""
     spec = ctx.spec
@@ -230,7 +256,7 @@ def describeRun(ctx, state, nSteps: int, timeLimited: bool) -> None:
     print(_row('domain', _domainDescription(config.domain)))
     print(_row('kernel', f'{_enumName(config.kernel)} | n_h {spec.n_h:g} | '
                          f'targetNeighbors {float(config.targetNeighbors):.1f}'))
-    print(_row('integrator', f'{_enumName(config.integrationScheme)} | '
+    print(_row('integrator', f'{_enumName(ctx.integrator.identifier)} | '
                              f'support {_enumName(config.supportMode)}'))
 
     # After `configureScheme` and the case's own setup have run, so these are
@@ -240,6 +266,9 @@ def describeRun(ctx, state, nSteps: int, timeLimited: bool) -> None:
     fluid = _fluidDescription(ctx.schemeConfig)
     if fluid:
         print(_row('fluid', fluid))
+    meshless = _meshlessDescription(ctx.schemeConfig)
+    if meshless:
+        print(_row('meshless', meshless))
     for index, viscosity in enumerate(_viscosityDescriptions(ctx.schemeConfig)):
         print(_row('viscosity' if index == 0 else '', viscosity))
 

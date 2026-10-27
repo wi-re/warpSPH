@@ -1,0 +1,23 @@
+{
+  "preset": "twoGasSod",
+  "scheme": "CRKSPH",
+  "variant": "stationary",
+  "nx": 200,
+  "duration": 0.02,
+  "record": true,
+  "exportInterval": 0.002,
+  "measurements": true,
+  "diagnosticInterval": 0.002,
+  "configuration": {
+    "simulation": {"execution": "eager", "integrationScheme": "rungeKutta2"},
+    "params": {"equalMass": true, "initialDensity": "prescribed"},
+    "solver": {
+      "crkDensityPolicy": "sameMaterial",
+      "crkEvolution": "spheral",
+      "materials": [
+        {"name": "leftGas", "eos": {"type": "idealGas", "gamma": 1.4}},
+        {"name": "rightGas", "eos": {"type": "idealGas", "gamma": 1.6666666666666667}}
+      ]
+    }
+  }
+}

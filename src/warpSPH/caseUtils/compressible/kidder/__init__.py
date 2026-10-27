@@ -1,4 +1,4 @@
-"""Kidder isentropic-compression helpers, used by `warpSPH.cases.kidder`.
+"""Kidder isentropic-compression helpers, used by `warpSPH.cases.compressible.kidder`.
 
 Combines the 1D IC builder (`buildKidder`), the driven inner/outer boundary
 bands that pin the state to the analytic solution (`buildKidderBCs`), and the

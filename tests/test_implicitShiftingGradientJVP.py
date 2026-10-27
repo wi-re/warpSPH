@@ -67,8 +67,8 @@ def test_densityPositionJVP_matches_implicitShiftings_ownGradient():
 
     # --- Hand-built reference: implicitShifting.py's own J, assembled into Jw ---
     _K, J, _H = computeShiftingPairTerms(state, domain, config.kernel, adjacency)
-    pairMask = adjacency.i != adjacency.j  # implicitShifting.py drops self-pairs before assembly
-    i, j, Jm = adjacency.i[pairMask], adjacency.j[pairMask], J[pairMask]
+    pairMask = adjacency.livePairs()[0] != adjacency.livePairs()[1]  # implicitShifting.py drops self-pairs before assembly
+    i, j, Jm = adjacency.livePairs()[0][pairMask], adjacency.livePairs()[1][pairMask], J[pairMask]
     omega = state.masses / rho0
     JwReference = scatter_sum(Jm * omega[j, None], i, dim=0, dim_size=n)
 

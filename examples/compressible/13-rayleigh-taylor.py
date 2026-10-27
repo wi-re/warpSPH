@@ -2,7 +2,7 @@
 """13 rayleigh taylor -- thin wrapper around the shared runner.
 
 The notebook this came from is `13-rayleigh-taylor.ipynb`; the case itself is
-`warpSPH.cases.rayleighTaylor`, and everything generic (config, step loop, export,
+`warpSPH.cases.compressible.rayleighTaylor`, and everything generic (config, step loop, export,
 plotting, ffmpeg) is `warpSPH.runner`. Equivalent invocations::
 
     python examples/compressible/13-rayleigh-taylor.py
@@ -15,7 +15,7 @@ from warpSPHBootstrap import bootstrap
 
 bootstrap(precision='float32')
 
-from warpSPH.cases.rayleighTaylor import rayleighTaylorCase    # noqa: E402
+from warpSPH.cases.compressible.rayleighTaylor import rayleighTaylorCase    # noqa: E402
 from warpSPH.runner import caseMain                # noqa: E402
 
 #: What this example fixes relative to the case defaults; still overridable,

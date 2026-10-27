@@ -30,6 +30,7 @@ class ViscosityTerms(Enum):
     Price2012_98 = 7
     Price2012 = 8
     Price2008 = 9
+    Hopkins2015 = 14  # Thermal conductivity only: Appendix F2 Eq. F18; strength = alpha_C.
     Wadsley2008 = 10
     DeltaSPH = 11
     RiemannDissipation = 13   # Pi = (p*(u_ij) - p*(0)) (1/rho_i^2 + 1/rho_j^2): the velocity-jump part of the star pressure of the pair's Riemann problem (AV_PLAN Phase 7b; solver = `DiffusionParameters.riemannSolver`)
@@ -68,6 +69,9 @@ class VelocityPairPolicy(Enum):
     * `BalsaraLimited`: `Limited` with `phi_ij` further scaled by `1 - Bbar_ij^p` (Garcia-Senz & Cabezon 2026
       Eqs. 18-19, `p = reconstructionBalsaraPower`): less reconstruction -- more dissipation -- where the flow is
       compressive (B -> 1), full reconstruction in shear (B -> 0). Their recommended AVSLRB2 is p = 2.
+    * `MonotoneLimited`: experimental composition of `Limited` with a minmod bound on its normal correction
+      against the sampled normal velocity jump. Prevents a reversed/enlarged normal jump, retaining tangential
+      reconstruction. This is not the published Frontiere limiter; native/default `Limited` stays unchanged.
 
     Only the viscous force and its heating use it; the conductivity keeps the raw velocity.
     """
@@ -75,6 +79,7 @@ class VelocityPairPolicy(Enum):
     Linear = 1
     Limited = 2
     BalsaraLimited = 3
+    MonotoneLimited = 4
 
 
 class RiemannSolver(Enum):
@@ -160,7 +165,7 @@ class DiffusionParameters:
     gaussianEta: scalar_t = field(default=scalar_t(1.0)) # Inutsuka scheme: the Gaussian's smoothing length is `eta (m / rho)^(1/d)`, the local particle spacing times eta (Inutsuka 2002 Eq. 81 with C_smooth = 1: ~6 neighbours inside 3h in 1D, ~100 in 3D). A Gaussian wider than the spacing has its gradient still rising at the neighbours: the pairing instability
     cubicVolume: wp.bool = field(default=True) # Inutsuka scheme: cubic Hermite interpolant of the specific volume 1/rho along the pair axis (else linear)
     interfaceClamp: wp.bool = field(default=False) # Inutsuka scheme: keep the interface `s*` between the two particles, |s*| <= s_ij / 2
-    timeCentredEnergy: wp.bool = field(default=False) # Godunov schemes: the energy rate uses the time-centred velocity `v_i + a_i dt/2` of Inutsuka (2002) Eq. (67) / Puri Eq. (36) (a second pass over the neighbours for `a_i`)
+    timeCentredEnergy: wp.bool = field(default=False) # Standalone Godunov pair-operator experiment only: v_i + a_i dt/2. Rejected by registered Godunov stage RHSs.
     stateLimiter: wp.int32 = field(default=StateLimiter.PairRatio.value) # `StateLimiter`: the limiter of the Godunov scheme's second-order states
     shockSwitchC: scalar_t = field(default=scalar_t(0.0)) # Godunov scheme: first-order states for a pair with `C (v_j - v_i) . n > min(c_i, c_j)` (Inutsuka 2002 Eq. 75, C = 3); 0 = off
     riemannReconstruction: wp.bool = field(default=False) # `RiemannDissipation`: left / right states of rho and P are the limited midpoint extrapolations (GODUNOV_SPH_PLAN layer 1; needs the (rho, P) gradients, `reconstruction.computeStateGradients`), not the particle values
@@ -285,7 +290,8 @@ def resolveReconstructionLimiter(diffusionParams: DiffusionParameters, n_h) -> D
     """`diffusionParams` with a non-positive `reconstructionEtaCrit` / `reconstructionEtaFold` replaced by the
     n_h-derived value (1/n_h, 0.2/n_h -- CRKSPH's `resolveCRKLimiter`). Returns `diffusionParams` itself when
     the policy is not a limited one or both values are explicit."""
-    if (diffusionParams.velocityPairPolicy not in (VelocityPairPolicy.Limited.value, VelocityPairPolicy.BalsaraLimited.value)
+    if (diffusionParams.velocityPairPolicy not in (VelocityPairPolicy.Limited.value, VelocityPairPolicy.BalsaraLimited.value,
+                                                  VelocityPairPolicy.MonotoneLimited.value)
             and not diffusionParams.riemannReconstruction):
         return diffusionParams
     if diffusionParams.reconstructionEtaCrit > 0 and diffusionParams.reconstructionEtaFold > 0:

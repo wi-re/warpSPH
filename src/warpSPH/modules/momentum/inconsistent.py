@@ -22,9 +22,11 @@ from warpSPH.configurations.simulationConfig import SimulationConfig
 from ...enumTypes import *
 
 
-def computeMomentum(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]]) -> torch.Tensor:
+def computeMomentum(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], wall: Optional[Any] = None) -> torch.Tensor:
+    """`wall`: the analytic boundary's `WallState` (`modules/analyticBoundary`) adds the free-slip mirror of the wall to the divergence (the continuity
+    equation's wall flux); `None`: resolved from `schemeConfig.boundaryProvider` (`resolveWall`), no wall term for boundary particles."""
     with record_function("[warpSPH] - computeMomentum"):
-        return -currentState.densities * warpOperation(
+        drhodt = -currentState.densities * warpOperation(
             currentState,
             OperationProperties(
                 kernel = config.kernel,
@@ -38,3 +40,9 @@ def computeMomentum(currentState: Any, config: SimulationConfig, schemeConfig: A
             adjacency = adjacency,
             consistentDivergence = False
         )
+        from ..analyticBoundary import resolveWall
+        wall = resolveWall(currentState, config, schemeConfig, adjacency, wall)
+        if wall is not None:
+            from ..analyticBoundary import wallContinuity
+            drhodt = drhodt + wallContinuity(wall, currentState.densities, currentState.velocities)
+        return drhodt

@@ -4,9 +4,8 @@ region descriptor built by `regions/region.py`'s `buildRegion` and stored on
 throughout `regions/`, `rigidBody/`, `modules/mdbc`, `modules/noise`, and
 `initializers/weaklyCompressible.py`. Also re-exports `BCType` (defined in
 `moduleConfigurations.boundaryConditions`) since several `cases/*.py` modules
-import it from here rather than its defining module. Note: `parseInitialConditions`
-(below) builds its output dict but has no `return` statement, so it always
-yields `None`; its sibling helpers `parseParticleSet`/`unparseParticleSet` are
+import it from here rather than its defining module. The sibling helpers
+`parseParticleSet`/`unparseParticleSet` are
 defined but never called anywhere -- `ParticleRegion.toDict`/`fromDict` always
 pass `particles=None` with those calls commented out.
 """
@@ -62,17 +61,18 @@ def unparseParticleSet(particleSetDict: dict) -> ParticleSet:
 
 def parseInitialConditions(initialConditions: dict) -> dict:
     outDict = {}
-    for key, value in initialConditions.items():
+    for key, value in (initialConditions or {}).items():
         if isinstance(value, torch.Tensor):
             outDict[key] = value.detach().cpu().numpy().tolist()
         elif isinstance(value, Callable):
             outDict[key] = _encode_callable(value)
         else:
             outDict[key] = value
+    return outDict
 
 def unparseInitialConditions(initialConditionsDict: dict) -> dict:
     outDict = {}
-    for key, value in initialConditionsDict.items():
+    for key, value in (initialConditionsDict or {}).items():
         if isinstance(value, (list, tuple)):
             outDict[key] = torch.tensor(value)
         elif isinstance(value, dict):

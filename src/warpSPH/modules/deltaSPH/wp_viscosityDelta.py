@@ -23,8 +23,9 @@ proper, `nu K sum_j (v_ij . x_ij)/|x_ij|^2 gradW_ij V_j` with
 verbatim, which is why ACSPH passes it (ACSPH_PLAN.md Sec. 4.1). Note this is
 still the *normal-projected* form both papers use, not a shear-carrying
 term; and note the `/ mean(rho_i, rho_j)`, which Eq. (25) does not have --
-a caller wanting the literal form on a constant-density state compensates
-exactly by passing `nu * rho0`.
+the shared entry point converts its configured kinematic viscosity to
+`rho0 * nu`, the reference dynamic viscosity. Direct low-level callers use
+that dynamic coefficient on the projected branch.
 `morris=True` (with `inviscid=False`) replaces that branch with the Morris,
 Fox & Zhu (1997) Eq. (8) viscous Laplacian, `sum_j m_j (mu_i + mu_j)/(rho_i
 rho_j) (x_ij . gradW_ij)/(|x_ij|^2 + eta^2) v_ij`, mu = rho nu: the full
@@ -36,6 +37,8 @@ Selected by `diffusionParams.viscousTerm = ViscosityTerm.morris1997`.
 `c_s`, `h`, `n=dim`, and vice versa) so a case can be configured in either
 unit system.
 """
+
+from warpSPHCore.type_config import index_t, offset_t
 
 import warp as wp
 from warp.types import vector, matrix
@@ -70,9 +73,9 @@ def computeVelocityDiffusionDeltaSPH_Func_i(
     # Operation specific parameters
      # type: ignore
             
-    beginIndex: wp.int32, # type: ignore
+    beginIndex: offset_t, # type: ignore
     numIndices: wp.int32, # type: ignore
-    offsetArray: wp.array(dtype = wp.int64), # type: ignore
+    offsetArray: wp.array(dtype = index_t), # type: ignore
 
     # Operation Mode for masking certain kinds of interactions, e.g. for directional operations
     ki : wp.int32, referenceKinds : wp.array(dtype = wp.int32), # type: ignore
@@ -101,7 +104,7 @@ def computeVelocityDiffusionDeltaSPH_Func_i(
     
     # # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j  = wp.int32(offsetArray[jj])
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
             if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
@@ -209,17 +212,18 @@ def computeVelocityDiffusionDeltaSPH_Func_Adjacency(
         # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
         if not useAdjacency and (o % lanes) != lane:
             continue
-        beginIndex = wp.int32(0)
+        beginIndex = offset_t(0)
         numIndices = wp.int32(0)
         if useAdjacency:    
             beginIndex = adjacencyState.neighborOffsets[i]
             numIndices = adjacencyState.numNeighbors[i]
         else:
-            beginIndex, numIndices = checkOffset(
+            gridBegin, numIndices = checkOffset(
                 i, queryState.positions, gridState.numCells, gridState.D, 
                 o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
                 domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
             )
+            beginIndex = offset_t(gridBegin)
             if beginIndex < 0:
                 continue
         

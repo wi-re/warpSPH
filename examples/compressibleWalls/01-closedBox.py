@@ -11,7 +11,7 @@ from warpSPHBootstrap import bootstrap
 
 bootstrap(precision='float32')
 
-from warpSPH.cases.closedBox import closedBoxCase   # noqa: E402
+from warpSPH.cases.compressibleWalls.closedBox import closedBoxCase   # noqa: E402
 from warpSPH.runner import caseMain                 # noqa: E402
 
 PRESET = ['--plot', '--video']

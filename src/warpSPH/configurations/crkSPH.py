@@ -1,8 +1,8 @@
-"""Two config surfaces for the CRK-SPH scheme (`schemes/crkSPH.py`,
+"""Two config surfaces for the CRK-SPH scheme (`schemes/compressible/crkSPH.py`,
 `schemes/builder.py`'s CRK `SchemeBundle`, `modules/crk/{accel,dudt}.py`):
 `CRKViscosity` (a `wp.struct` of CRK-limiter / van-Leer-limiter tunables) and
 `CRKSPHConfig`, a `CompressibleSPHConfig` subclass that adds `crkViscosityParams`
-plus CRK-tuned `diffusionParams` defaults. Note: `schemes/crkSPH.py`'s
+plus CRK-tuned `diffusionParams` defaults. Note: `schemes/compressible/crkSPH.py`'s
 `crkSPH_step` type-hints its `schemeConfig` parameter as `CompSPHConfig`, but
 `schemes/builder.py` actually passes it a `CRKSPHConfig` (accessing
 `.crkViscosityParams`, which `CompSPHConfig` lacks) -- a stale type hint,
@@ -30,8 +30,10 @@ from dataclasses import dataclass, field
 class CRKViscosity:
     # Limiter constants in units of r/H (H = support radius). A value <= 0 means "derive from n_h" and is
     # resolved per step by `resolveCRKLimiter`: eta_crit = 1/n_h, eta_fold = 0.2/n_h, i.e. one and 0.2 nominal
-    # particle spacings (Frontiere et al. 2017 Eqs. 51-53 with (eta_crit, eta_fold) = (1/n_h, 0.2) in units of the
-    # smoothing scale; Spheral: etaCritFrac/nPerh, etaFoldFrac/nPerh). CRKSPH_LIMITER_PLAN O2. Set an explicit
+    # particle spacings, matching current Spheral's etaCritFrac/nPerh and etaFoldFrac/nPerh after unit conversion.
+    # Frontiere 2017 Eqs. 51-53 instead state eta_fold=0.2 in smoothing-length units: in r/R this is 0.2/K,
+    # K=kernel support extent, and agrees with this default when nPerh=n_h/K=1. See the limiter-threshold audit.
+    # CRKSPH_LIMITER_PLAN O2 records the existing default decision. Set an explicit
     # positive value to override.
     eta_fold: scalar_t = field(default = scalar_t(-1.0))
     eta_crit: scalar_t = field(default = scalar_t(-1.0))
@@ -44,9 +46,14 @@ class CRKViscosity:
     forceVanLeerOff: bool = field(default = False)
     forceVanLeerOn: bool = field(default = False)
 
-    # Pair weight of the CRK force / energy terms: False = V_i V_j (Frontiere 2017 Eq. 38), True = ((V_i + V_j)/2)^2 (Spheral's w_ij^2,
-    # CRKSPH_LIMITER_PLAN note (f)). Both are symmetric in i <-> j, so both conserve.
+    # Pair weight: False = V_i V_j (Frontiere 2017 Eq. 38 and pinned Spheral
+    # 116c71f2), True = ((V_i + V_j)/2)^2 experimental alternative.
+    # Both are symmetric in i <-> j, so both conserve pair momentum.
     meanVolumeWeights: bool = field(default = False)
+    # Experimental AV length parity control: zero retains sphKernelScale;
+    # positive uses h=compact support/this value in Frontiere Q only.
+    viscosityKernelScale: scalar_t = field(default=scalar_t(0.0))
+    oneSidedWork: bool = field(default=False)
 
 def resolveCRKLimiter(params, n_h):
     """`params` with any non-positive `eta_crit` / `eta_fold` replaced by the n_h-derived value
@@ -54,7 +61,7 @@ def resolveCRKLimiter(params, n_h):
     if params.eta_crit > 0 and params.eta_fold > 0:
         return params
     out = CRKViscosity()
-    for name in ('enableCRKLimiter', 'enableVanLeerLimiter', 'limiterType', 'forceVanLeerOff', 'forceVanLeerOn', 'meanVolumeWeights'):
+    for name in ('enableCRKLimiter', 'enableVanLeerLimiter', 'limiterType', 'forceVanLeerOff', 'forceVanLeerOn', 'meanVolumeWeights', 'viscosityKernelScale', 'oneSidedWork'):
         setattr(out, name, getattr(params, name))
     out.eta_crit = float(params.eta_crit) if params.eta_crit > 0 else 1.0 / float(n_h)
     out.eta_fold = float(params.eta_fold) if params.eta_fold > 0 else 0.2 / float(n_h)
@@ -117,6 +124,45 @@ class CRKSPHConfig(CompressibleSPHConfig):
     schemeName: str = field(default='CRKSPH', metadata={'description': 'Name of the CRK SPH scheme to use'})
     
     compatibleEnergy: bool = field(default=True, metadata={'description': 'Whether to use a compatible energy discretization (e.g. evolve total energy and compute internal energy from it) or not (e.g. evolve internal energy directly)'})
+    crkDensityPolicy: str = field(default='legacy', metadata={'description': 'Opt-in CRK material density rule: legacy, sameMaterial (Spheral raw-kernel sum), or massReplacement (paper corrected-kernel mass rule). Volumes/moments retain all neighbours.'})
+    crkEvolution: str = field(default='summation', metadata={'description': 'Default summation: density/volume every RHS. Experimental spheral: m/rho reset, same-material density, bounded continuity volume. Experimental paper: Eq76 reset once/step, continuity density, geometric Eq75 volume every RHS. Stage modes require midpoint.'})
+    crkViscosityGradient: str = field(default='current', metadata={'description': 'Experimental AV timing control: current stage (default) or cached previous RHS gradient; cached requires spheral midpoint evolution.'})
+    crkEnergyPartition: str = field(default='native', metadata={'description': 'Midpoint work partition: native entropy estimator, entropy with final compatible-work sign, or Spheral node dudt weights.'})
+    crkEnergyPredictor: str = field(default='raw', metadata={'description': 'Experimental midpoint internal energy predictor: raw dudt (native) or compatible pair work.'})
+
+    def validate(self, config=None):
+        super().validate(config)
+        if self.crkEnergyPartition not in ('native', 'entropy', 'spheral') or self.crkEnergyPredictor not in ('raw', 'compatible'):
+            raise ValueError('Invalid CRK energy partition/predictor')
+        if self.crkEnergyPartition != 'native' or self.crkEnergyPredictor != 'raw':
+            if not self.compatibleEnergy or self.energyScheme != EnergyScheme.CRK:
+                raise ValueError('Experimental CRK energy controls require compatibleEnergy and energyScheme=CRK')
+        if self.crkViscosityGradient not in ('current', 'cached'):
+            raise ValueError('crkViscosityGradient must be current or cached')
+        import math
+        if not math.isfinite(float(self.crkViscosityParams.viscosityKernelScale)) or self.crkViscosityParams.viscosityKernelScale < 0:
+            raise ValueError('viscosityKernelScale must be finite and nonnegative')
+        if self.crkDensityPolicy not in ('legacy', 'sameMaterial', 'massReplacement'):
+            raise ValueError('crkDensityPolicy must be legacy, sameMaterial or massReplacement')
+        if self.crkDensityPolicy != 'legacy' and self.materials is None:
+            raise ValueError('material CRK density policies require an explicit materials table')
+        if self.crkEvolution not in ('summation', 'spheral', 'paper'):
+            raise ValueError('crkEvolution must be summation, spheral or paper')
+        if self.crkEvolution in ('spheral', 'paper'):
+            required='sameMaterial' if self.crkEvolution=='spheral' else 'massReplacement'
+            if self.crkDensityPolicy != required:
+                raise ValueError(f'crkEvolution={self.crkEvolution} requires crkDensityPolicy={required}')
+            if self.boundaryConditions:
+                raise ValueError('Experimental CRK stage modes do not yet support Dirichlet boundary conditions')
+        midpoint=(self.crkEvolution!='summation' or self.crkEnergyPartition!='native' or self.crkEnergyPredictor!='raw' or self.crkViscosityGradient=='cached')
+        if midpoint:
+            if config is not None:
+                if config.integrationScheme.name != 'rungeKutta2':
+                    raise ValueError('Experimental CRK controls currently require midpoint rungeKutta2')
+                from ..modules.crk.evolution import kernelExtent
+                kernelExtent(config.kernel)
+                if not bool(config.domain.periodic.all()):
+                    raise ValueError('Experimental CRK controls are currently qualified only for periodic fluid cases')
 
 from typing import Dict, Any
 
@@ -125,6 +171,11 @@ def crkSPHConfigToDict(config: CRKSPHConfig) -> Dict[str, Any]:
     baseDict.update({
         'energyScheme': config.energyScheme.name,
         'compatibleEnergy': config.compatibleEnergy,
+        'crkDensityPolicy': config.crkDensityPolicy,
+        'crkEvolution': config.crkEvolution,
+        'crkViscosityGradient': config.crkViscosityGradient,
+        'crkEnergyPartition': config.crkEnergyPartition,
+        'crkEnergyPredictor': config.crkEnergyPredictor,
         'crkViscosityParams': {
             'eta_fold': config.crkViscosityParams.eta_fold,
             'eta_crit': config.crkViscosityParams.eta_crit,
@@ -133,7 +184,9 @@ def crkSPHConfigToDict(config: CRKSPHConfig) -> Dict[str, Any]:
             'limiterType': LimiterType(config.crkViscosityParams.limiterType).name,
             'forceVanLeerOff': config.crkViscosityParams.forceVanLeerOff,
             'forceVanLeerOn': config.crkViscosityParams.forceVanLeerOn,
-            'meanVolumeWeights': config.crkViscosityParams.meanVolumeWeights
+            'meanVolumeWeights': config.crkViscosityParams.meanVolumeWeights,
+            'viscosityKernelScale': float(config.crkViscosityParams.viscosityKernelScale),
+            'oneSidedWork': bool(config.crkViscosityParams.oneSidedWork)
         }
     })
     return baseDict
@@ -143,6 +196,11 @@ def dictToCRKSPHConfig(configDict: Dict[str, Any]) -> CRKSPHConfig:
     crkSPHConfig = CRKSPHConfig(**compressibleConfig.__dict__)
     crkSPHConfig.energyScheme = EnergyScheme[configDict['energyScheme']] if isinstance(configDict['energyScheme'], str) else configDict['energyScheme']
     crkSPHConfig.compatibleEnergy = configDict['compatibleEnergy']
+    crkSPHConfig.crkDensityPolicy = configDict.get('crkDensityPolicy', 'legacy')
+    crkSPHConfig.crkEvolution = configDict.get('crkEvolution', 'summation')
+    crkSPHConfig.crkViscosityGradient = configDict.get('crkViscosityGradient', 'current')
+    crkSPHConfig.crkEnergyPartition = configDict.get('crkEnergyPartition', 'native')
+    crkSPHConfig.crkEnergyPredictor = configDict.get('crkEnergyPredictor', 'raw')
     crkViscosityParamsDict = configDict['crkViscosityParams']
     crkSPHConfig.crkViscosityParams = CRKViscosity()
     crkSPHConfig.crkViscosityParams.eta_fold = crkViscosityParamsDict['eta_fold']
@@ -154,5 +212,7 @@ def dictToCRKSPHConfig(configDict: Dict[str, Any]) -> CRKSPHConfig:
     crkSPHConfig.crkViscosityParams.forceVanLeerOff = crkViscosityParamsDict['forceVanLeerOff']
     crkSPHConfig.crkViscosityParams.forceVanLeerOn = crkViscosityParamsDict['forceVanLeerOn']
     crkSPHConfig.crkViscosityParams.meanVolumeWeights = crkViscosityParamsDict.get('meanVolumeWeights', False)
+    crkSPHConfig.crkViscosityParams.viscosityKernelScale = crkViscosityParamsDict.get('viscosityKernelScale', 0.)
+    crkSPHConfig.crkViscosityParams.oneSidedWork = crkViscosityParamsDict.get('oneSidedWork', False)
     
     return crkSPHConfig

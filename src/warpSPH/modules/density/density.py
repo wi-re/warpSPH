@@ -31,7 +31,17 @@ from ...enumTypes import *
 __all__ = ['computeDensities']
 
 
-def computeDensities(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], supportMode: Optional[SupportScheme] = None) -> torch.Tensor:
+def computeDensities(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], supportMode: Optional[SupportScheme] = None, wall: Optional[Any] = None, *, boundaryRepresentation: str = 'auto', wallMassDensity: Optional[float] = None, wallSupport: Optional[float] = None) -> torch.Tensor:
+    """Sum particle masses and the wall contribution, then apply corrections.
+
+    ``wall`` can be an evaluated analytic wall, a tensor containing its
+    contribution in density units, or ``False`` to omit analytic walls.
+    ``None`` resolves the scheme's analytic boundary provider as usual.
+    Supply ``wallMassDensity`` to evaluate the physical solid-density integral
+    directly from geometry; ``boundaryRepresentation='particles'`` leaves the
+    sampled wall contribution entirely in the particle sum.
+    ``wallSupport`` supplies a validated host support for fixed-support scenes.
+    """
     with record_function("[warpSPH] - computeDensities"):
         densities = warpOperation(
             currentState,
@@ -52,6 +62,18 @@ def computeDensities(currentState: Any, config: SimulationConfig, schemeConfig: 
             domain = config.domain,
             adjacency = adjacency,
         )
+        # analytic walls: the wall's share of the sum (the boundary particles' `sum_k V_k W_ik`), `wall=None` resolves the scheme's provider
+        from ..analyticBoundary import resolveWall, wallDensity
+        if wallMassDensity is not None:
+            from ..analyticBoundary.density import computeWallDensity
+            densities = densities + computeWallDensity(currentState, config, schemeConfig,
+                representation=boundaryRepresentation, massDensity=wallMassDensity, support=wallSupport)
+        elif isinstance(wall, torch.Tensor):
+            densities = densities + wall
+        else:
+            wall = resolveWall(currentState, config, schemeConfig, adjacency, wall)
+            if wall is not None:
+                densities = densities + wallDensity(wall)
         # The D&A (2012) eq. 18/19 self-term correction: a per-particle
         # remap of the finished raw estimate (eps depends on N_H, which
         # depends on the raw density), applied after the operator, so the

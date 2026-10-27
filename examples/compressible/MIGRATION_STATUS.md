@@ -1,5 +1,7 @@
 # Compressible examples: notebook-migration status
 
+> `PORTING_EXAMPLES.md`, referenced below, was removed 2026-10-11 (no longer needed); last version: `git show 0739275:PORTING_EXAMPLES.md`.
+
 **Done.** All 13 compressible examples (14 cases, since `06-sedov` and
 `14-triplePoint` each cover multiple variants in one directory) are in the
 current style. This file is kept as a record of what that style is and how
@@ -39,7 +41,7 @@ file.
   inside a Jupyter cell in this environment.
 - **`particlePlot`** (2D field view, vispy via `visualizeWithFallback`):
   `08-hydrostatic.ipynb` through `13-rayleigh-taylor.ipynb`,
-  `14-triplePoint/`. `08` is the pilot: `cases/plotting.py` gained
+  `14-triplePoint/`. `08` is the pilot: `cases/common/plotting.py` gained
   `buildFieldPlotter`/`refreshFieldPlotter`, the window/event-loop-free core
   of `particlePlot`'s `setupPlot`/`updatePlot` (mirroring `profilePlot`'s
   `draw`). Each case exports its own `Field` list (`HYDROSTATIC_FIELDS`,

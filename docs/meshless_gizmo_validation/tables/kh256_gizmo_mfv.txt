@@ -1,0 +1,14 @@
+GIZMO 000              t= 0.00 maxV=  0.500 nFast=    0 KE=0.15940 rho[0.999,1.999] p0.1/p99.9 0.999/1.999 outside  0.000%
+GIZMO 001              t= 0.20 maxV=  0.503 nFast=    0 KE=0.15933 rho[0.995,2.014] p0.1/p99.9 0.995/2.014 outside  0.000%
+GIZMO 002              t= 0.40 maxV=  0.505 nFast=    0 KE=0.15928 rho[0.995,2.015] p0.1/p99.9 0.995/2.014 outside  0.000%
+GIZMO 003              t= 0.60 maxV=  0.507 nFast=    0 KE=0.15924 rho[0.993,2.024] p0.1/p99.9 0.993/2.022 outside  0.000%
+GIZMO 004              t= 0.80 maxV=  0.519 nFast=    0 KE=0.15917 rho[0.992,2.036] p0.1/p99.9 0.992/2.033 outside  0.000%
+GIZMO 005              t= 1.00 maxV=  0.542 nFast=    0 KE=0.15912 rho[0.982,2.048] p0.1/p99.9 0.983/2.043 outside  0.000%
+GIZMO 006              t= 1.20 maxV=  0.589 nFast=    0 KE=0.15894 rho[0.977,2.075] p0.1/p99.9 0.978/2.063 outside  0.000%
+GIZMO 007              t= 1.40 maxV=  0.665 nFast=    0 KE=0.15855 rho[0.963,2.089] p0.1/p99.9 0.965/2.076 outside  0.000%
+GIZMO 008              t= 1.60 maxV=  0.705 nFast=    0 KE=0.15807 rho[0.957,2.101] p0.1/p99.9 0.960/2.089 outside  0.000%
+GIZMO 009              t= 1.80 maxV=  0.757 nFast=    0 KE=0.15751 rho[0.928,2.094] p0.1/p99.9 0.941/2.084 outside  0.000%
+GIZMO 010              t= 2.00 maxV=  0.821 nFast=    0 KE=0.15700 rho[0.920,2.098] p0.1/p99.9 0.936/2.089 outside  0.000%
+GIZMO 011              t= 2.20 maxV=  0.876 nFast=    0 KE=0.15653 rho[0.929,2.192] p0.1/p99.9 0.931/2.092 outside  0.000%
+GIZMO 012              t= 2.40 maxV=  0.888 nFast=    0 KE=0.15613 rho[0.931,2.195] p0.1/p99.9 0.936/2.113 outside  0.000%
+GIZMO 013              t= 2.60 maxV=  0.790 nFast=    0 KE=0.15560 rho[0.934,2.544] p0.1/p99.9 0.937/2.403 outside  0.128%

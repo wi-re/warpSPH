@@ -11,6 +11,8 @@ that machinery with a hand-rolled `wp.kernel` + `wp.launch`, following the
 calling convention of `warpSPHCore.radiusSearch.small.wp_radius_small`.
 """
 
+from warpSPHCore.type_config import index_t, offset_t
+
 from typing import Any
 import warp as wp
 from warp.types import vector, matrix
@@ -26,8 +28,8 @@ def computeShiftingPairTerms_Kernel(
     queryState: Any,
     domainState: domainData,
     kernelProperties: kernelState,
-    edgeI: wp.array(dtype=wp.int64),
-    edgeJ: wp.array(dtype=wp.int64),
+    edgeI: wp.array(dtype=index_t),
+    edgeJ: wp.array(dtype=index_t),
     outK: wp.array(dtype=scalar_t),
     outJ: wp.array(dtype=Any),
     outH: wp.array(dtype=Any),
@@ -81,18 +83,19 @@ def computeShiftingPairTerms(
 ):
     """Per-pair kernel value `K`, gradient `J` and Hessian `H` (shapes
     `[numPairs]`, `[numPairs, dim]`, `[numPairs, dim, dim]`) for every
-    `(i, j) = (adjacency.i, adjacency.j)` pair, evaluated with gather support
+    `(i, j) = adjacency.livePairs()` pair, evaluated with gather support
     (`h = h_i`), matching diffSPH's `implicitShifting.evalKernel` convention.
     """
     dim = domain.dim
-    numPairs = adjacency.i.shape[0]
+    liveI, liveJ = adjacency.livePairs()
+    numPairs = liveI.shape[0]
 
     queryState = _buildParticleSoA(state, dim)
     domainState = _buildDomainState(domain)
     kernelProperties = _buildKernelState(kernel)
 
-    edgeI = castTorchToWarp(adjacency.i)
-    edgeJ = castTorchToWarp(adjacency.j)
+    edgeI = castTorchToWarp(liveI)
+    edgeJ = castTorchToWarp(liveJ)
 
     K_t, K_w = allocateTorchWarp(numPairs, scalar_t, edgeI.device)
     J_t, J_w = allocateTorchWarp(numPairs, vector(length=dim, dtype=scalar_t), edgeI.device)

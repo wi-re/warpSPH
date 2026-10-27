@@ -77,12 +77,17 @@ class CompressibleSPHScheme(Enum):
     #: Godunov SPH of Inutsuka (2002): the kernel-convolution form with a Gaussian kernel (GODUNOV_SPH_PLAN layer 3)
     InutsukaGSPH = 4
     #: Pressure-based SPH (PESPH_PLAN): `P_bar_i` by kernel summation instead of `rho_i`; variant in `PESPHVariant`.
-    #: Enum member only so far (Phase 0): `buildScheme` raises until the scheme is assembled (Phase 4)
+    #: Pressure-energy with dissipation, or adiabatic pressure-entropy; see PESPHConfig.
     PESPH = 5
+    #: Meshless finite-mass / finite-volume SPH (Hopkins 2015; COMPRESSIBLE_SPH_PLAN E1).
+    #: MFM: the conserved face fluxes, mass is conserved (dm = 0). MFV: the same fluxes plus
+    #: the GIZMO mass-flux limiter, which redistributes mass across faces (dm != 0).
+    MFM = 6
+    MFV = 7
 
 
 class PESPHVariant(Enum):
-    #: Frontiere et al. (2017) App. G / Hopkins F2: evolves the specific total energy, `P_bar_i = (gamma-1) sum_j m_j u_j W_ij`
+    #: Frontiere et al. (2017) App. G / Hopkins F2: evolves particle total energy, `P_bar_i = (gamma-1) sum_j m_j u_j W_ij`
     PressureEnergy = 0
     #: Hopkins (2013): evolves the entropic function `A`, `P_bar_i = (sum_j m_j A_j^(1/gamma) W_ij)^gamma`;
     #: velocity-independent force, the variational one
@@ -95,7 +100,7 @@ class WeaklyCompressibleSPHScheme(Enum):
     #: Not tied to any one paper's exact prescription.
     deltaSPH = 0
     #: Sun et al. 2017's own delta+-SPH prescription: identical physics/step
-    #: function to `deltaSPH` (`schemes/deltaSPH.py`, no new code), but
+    #: function to `deltaSPH` (`schemes/weaklyCompressible/deltaSPH.py`, no new code), but
     #: `Sun2017DeltaSPHConfig` defaults `freezeDiffusionAcrossStages=True` --
     #: Sec. 2's RK4-with-frozen-diffusion pairing (Antuono/Jameson), confirmed
     #: to fix a genuine violent-impact pressure artefact in
@@ -104,68 +109,27 @@ class WeaklyCompressibleSPHScheme(Enum):
     #: prescription is an explicit choice (`--scheme sun2017`), not a silent
     #: behaviour change for every existing `deltaSPH` case. Kernel/integrator
     #: choice (Wendland C2, RK4) remain case-level settings either way --
-    #: `cases/dambreak.py` already defaults to both, independent of scheme.
+    #: `cases/freeSurface/dambreak.py` already defaults to both, independent of scheme.
     sun2017DeltaSPH = 1
 
 # @torch.jit.script
 class IncompressibleSPHScheme(Enum):
-    #: VD+PS DFSPH (Bender & Koschier 2015/2017): a divergence-free Jacobi
-    #: pass plus a constant-density Jacobi pass, applied as a momentum-neutral
-    #: position shift for most cases or folded into the velocity update
-    #: in-step for body-force (gravity) cases (`schemes/divergenceFree.py`'s
-    #: `INSTEP_CD`/`_RESTORE_PS_SHIFT` gates). **The recommended default for
-    #: general use** -- as of DFSPH_IMPROVEMENT_PLAN.md Part 56/57/58, it does
-    #: not diverge on any case in the suite (including every wall-bounded one),
-    #: and where it has quality caveats they are modest and non-fatal: a
-    #: closed box's density sits ~5-8% high against a strict 5% target
-    #: (`randomFlowIncompressible --bounded`/`--obstacle`), and two cases
-    #: (`impact`, `columnCollapse`) develop growing particle pairing after an
-    #: impact while the walls themselves hold exactly. Reach for `band2018pb`
-    #: instead specifically when a closed, wall-dominated case needs tighter
-    #: incompressibility than the above and can tolerate rougher particle
-    #: distribution -- see that scheme's own docstring below.
-    divergenceFree = 0
-    #: Reference DFSPH (Bender & Koschier 2015/2017) as implemented in
-    #: SPlisHSPlasH's `TimeStepDFSPH.cpp`: the constant-density and
-    #: divergence-free corrections are applied to the *velocity* as warm-started
-    #: pressure impulses, not as the momentum-neutral position shift the
-    #: `divergenceFree` (VD+PS) scheme uses. Exists as the ground-truth
-    #: comparison for the hydrostatic-column failure -- see
-    #: `DFSPH_IMPROVEMENT_PLAN.md` Part 23 and `schemes/dfsphReference.py`.
-    dfsphReference = 1
-    #: Plain IISPH (Ihmsen et al. 2014): a single constant-density projection
-    #: per step, applied as a velocity impulse -- no divergence-free pass, no
-    #: VD+PS position shift. Shares `dfsphReference`'s body with the divergence
-    #: solve off (`iisph_step`). Part 33 measured it as the first scheme in the
-    #: codebase to hold `hydrostaticColumn`; it also holds `staticBlob` where
-    #: the two-solve `dfsphReference` diverges.
+    """Native pressure projections; legacy IDs 0, 1, 3, 4 are retired.
+
+    The DFSPH variants share operators and policies and differ in stage order.
+    Saved legacy trajectories remain historical evidence, not restart inputs.
+    """
     iisph = 2
-    #: Direct port of the omniSPH incompressible solver loop
-    #: (`~/dev/omniSPH/simulation/{SPH,fluidMechanics}.cpp`): DFSPH-style
-    #: divergence + density solves on one neighbourhood, accelerations
-    #: accumulated into a single semi-implicit Euler step. No free-surface
-    #: gauge, deficiency guard, damped warm start, or masking -- just the
-    #: loop as omniSPH runs it. See `schemes/omniIncompressible.py`.
-    omniIncompressible = 3
-    #: IISPH with Pressure Boundaries (Band et al. 2018, ACM TOG 37(2):14):
-    #: the extended PPE where `kind == 1` boundary samples are pressure
-    #: unknowns with their own equation + diagonal, iterated in the same
-    #: relaxed-Jacobi loop as the fluid -- removes the near-wall rank
-    #: deficiency that stalls the `omniIncompressible` / `iisph`
-    #: constant-density solve at a wall corner (DFSPH_IMPROVEMENT_PLAN.md
-    #: Parts 41-44). See `schemes/band2018pb.py`.
-    #: **A real trade-off against `divergenceFree`, not a strict upgrade**
-    #: (Part 57/58): tighter density control on closed wall-bounded cases
-    #: (~4-5% vs `divergenceFree`'s ~7-8%), at the cost of growing particle
-    #: pairing/voids there instead. Its bigger limitation is structural: the
-    #: paper has **no free-surface treatment at all** (every scenario in it is
-    #: a closed tank), so it inherits real free-surface problems on
-    #: `dambreak`-like violent impacts and fails `staticBlob` outright (a
-    #: free-space body just is not its regime, Part 51). Use it deliberately
-    #: for closed, wall-dominated flows where incompressibility matters more
-    #: than particle-distribution smoothness -- not as a general-purpose
-    #: replacement for `divergenceFree`.
-    band2018pb = 4
+    dfsph = 5
+    dfsphPredictor = 6
+    dfsphShift = 7
+
+
+def isDFSPHScheme(scheme) -> bool:
+    return scheme in (IncompressibleSPHScheme.dfsph,
+                      IncompressibleSPHScheme.dfsphPredictor,
+                      IncompressibleSPHScheme.dfsphShift)
+
 
 # @torch.jit.script
 class ArtificialCompressibleSPHScheme(Enum):
@@ -225,15 +189,7 @@ def isArtificialCompressibleScheme(scheme) -> bool:
 
 # @torch.jit.script
 def isIncompressibleScheme(scheme) -> bool:
-    """Is `scheme` any member of `IncompressibleSPHScheme`?
-
-    Cases that need "the pressure-projection path" (its own CFL, no acoustic
-    term, a solved `pressures` field rather than an EOS one) must test *this*,
-    not `scheme is IncompressibleSPHScheme.divergenceFree`. That identity test
-    was written when `divergenceFree` was the only incompressible scheme; it
-    silently routes `iisph` / `omniIncompressible` / `band2018pb` down the
-    weakly-compressible branch, which is wrong in every case that has one.
-    """
+    """Whether a supported scheme uses pressure projection rather than an EOS."""
     return isinstance(scheme, IncompressibleSPHScheme)
 
 

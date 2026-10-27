@@ -1,22 +1,24 @@
 """Assembles a `RigidBody` snapshot from a particle state's fluid/ghost
-particles for one boundary material ID: center of mass, moment of inertia
+particles for one rigid-body ID: center of mass, moment of inertia
 about it, and per-particle positions/boundary distances/normals stored
 relative to that center of mass. Called once per rigid body during
 initialization (`initializers/weaklyCompressible.py`) to seed each body before
 its pose is integrated; `angularVelocity`/`linearVelocity` always start at
 zero here regardless of any velocity the particles were sampled with -- a case
-sets the prescribed rate afterward (e.g. `cases/movingObstacle.py`).
+sets the prescribed rate afterward (e.g. `cases/wallBounded/movingObstacle.py`).
 """
 
 import torch
 from ..configurations.weaklyCompressible import RegionType, ParticleRegion, RigidBody
+from ..systems.identity import particleBodyIDs
 
 __all__ = ['buildRigidBody', 'buildAnalyticRigidBody']
 
 
 def buildRigidBody(particleState, regions, bodyId):
-    particleIndices = torch.logical_and(particleState.kinds == 1, particleState.materials == bodyId)
-    ghostIndices = torch.logical_and(particleState.kinds == 2, particleState.materials == bodyId)
+    bodyIDs = particleBodyIDs(particleState)
+    particleIndices = torch.logical_and(particleState.kinds == 1, bodyIDs == bodyId)
+    ghostIndices = torch.logical_and(particleState.kinds == 2, bodyIDs == bodyId)
 
     boundaryRegions = [region for region in regions if region.type == RegionType.Boundary]
     currentRegion = boundaryRegions[bodyId] if len(boundaryRegions) > bodyId else None

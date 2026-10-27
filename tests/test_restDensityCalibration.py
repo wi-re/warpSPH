@@ -8,8 +8,8 @@ import warnings
 
 import pytest
 
-from warpSPH.cases.sloshingTank import sloshingTankCase
-from warpSPH.cases.weaklyCompressible import calibrateRestDensity
+from warpSPH.cases.freeSurface.sloshingTank import sloshingTankCase
+from warpSPH.cases.common.weaklyCompressible import calibrateRestDensity
 from warpSPH.runner import run
 
 
@@ -81,3 +81,19 @@ def test_an_invalid_onResidual_is_rejected_once_there_is_a_residual(fresh):
     _corrupt(system, 1.01)
     with pytest.raises(ValueError, match='raise/warn/ignore'):
         calibrateRestDensity(ctx, system, onResidual='whatever')
+
+
+@pytest.mark.parametrize('scheme', ['iisph', 'dfsph', 'dfsphPredictor', 'dfsphShift'])
+def test_hydrostatic_pressure_seed_uses_the_solvers_pressure_gauge(scheme):
+    from types import SimpleNamespace as NS
+    import torch
+    from warpSPH.caseUtils.projection import initializeHydrostaticPressure
+    from warpSPH.enumTypes import IncompressibleSPHScheme
+
+    state = NS(positions=torch.tensor([[0., .1], [0., .3], [0., -.1], [0., -.2]]),
+               kinds=torch.tensor([0, 0, 1, 2]))
+    ctx = NS(scheme=IncompressibleSPHScheme[scheme], scratch={},
+             schemeConfig=NS(fluid=NS(restDensity=1000.), gravityConfig=NS(active=True, magnitude=9.81)))
+    initializeHydrostaticPressure(ctx, NS(state=state))
+    expected = torch.tensor([1962., 0., 3924., 0.])
+    torch.testing.assert_close(state.pressures, expected)

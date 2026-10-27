@@ -1,18 +1,12 @@
-"""IISPH diagonal coefficient `a_ii` (per-particle pressure-Laplacian
-normalization) used by both incompressible solvers to turn a divergence/
-density residual into a pressure update.
+"""Bare volume-centric pressure diagonal primitive.
 
-`computeAlpha` returns the negated per-particle sum
-`areaI/mi * |sum_j V_j gradW_ij|^2 + areaI * sum_j (V_j^2/mj) |gradW_ij|^2`
-(apparent-area-weighted, gather support mode), matching the IISPH `a_ii`
-term; callers divide the pressure residual by this value each Jacobi
-iteration. `includeBoundaryReaction=False` restricts the *second* sum to
-`kind == 0` neighbours, which is what the published formulations do (a static
-boundary particle takes no reaction force, so `dp_i/dx_j` does not exist for
-it) -- see `BoundaryOperatorTerms`; the first sum always runs over everything.
-Contains an unused, commented-out Barecasco free-surface detector left over
-from an earlier version of this file.
+computeAlphaWarp returns the negative fluid-motion and pair-reaction sums.
+Static solid samples contribute to the first sum; the second can exclude
+solid reaction. Native DFSPH's experimental pressure-boundary operator uses
+this primitive directly. The legacy pressure/automatic-wall wrapper is retired.
 """
+
+from warpSPHCore.type_config import index_t, offset_t
 
 import warp as wp
 from warp.types import vector, matrix
@@ -28,7 +22,7 @@ from warpSPHCore import *
 from warpSPH.enumTypes import *
 from warpSPH.configurations.simulationConfig import SimulationConfig
 
-__all__ = ['computeAlpha']
+__all__ = ['computeAlphaWarp']
 
 # @torch.jit.script
 # def detectFreeSurfaceBarecasco(
@@ -70,9 +64,9 @@ def computeAlpha_Func_i_first(
     # Operation specific parameters
      # type: ignore
             
-    beginIndex: wp.int32, # type: ignore
+    beginIndex: offset_t, # type: ignore
     numIndices: wp.int32, # type: ignore
-    offsetArray: wp.array(dtype = wp.int64), # type: ignore
+    offsetArray: wp.array(dtype = index_t), # type: ignore
 
     # Operation Mode for masking certain kinds of interactions, e.g. for directional operations
     ki : wp.int32, referenceKinds : wp.array(dtype = wp.int32), # type: ignore
@@ -103,7 +97,7 @@ def computeAlpha_Func_i_first(
     
     # # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j  = wp.int32(offsetArray[jj])
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
             if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
@@ -179,17 +173,18 @@ def computeAlpha_Func_Adjacency_first(
     
     out = zero_like_warp(queryState.densities)
     for o in range(numOffsets):
-        beginIndex = wp.int32(0)
+        beginIndex = offset_t(0)
         numIndices = wp.int32(0)
         if useAdjacency:    
             beginIndex = adjacencyState.neighborOffsets[i]
             numIndices = adjacencyState.numNeighbors[i]
         else:
-            beginIndex, numIndices = checkOffset(
+            gridBegin, numIndices = checkOffset(
                 i, queryState.positions, gridState.numCells, gridState.D, 
                 o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
                 domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
             )
+            beginIndex = offset_t(gridBegin)
             if beginIndex < 0:
                 continue
         
@@ -330,23 +325,3 @@ def computeAlphaWarp(
         #     )
 
     # return warp_result
-
-
-def computeAlpha(currentState: Any, config: SimulationConfig, schemeConfig: Any, adjacency: Optional[Union[AdjacencyList, CompactHashMap]], apparentVolumes: torch.Tensor, includeBoundaryReaction: bool = True) -> torch.Tensor:
-    with record_function("[warpSPH] - computeDensities"):
-        dt = config.dt
-        alpha = computeAlphaWarp(
-            queryParticles=currentState,
-            operationProperties=OperationProperties(
-                kernel = config.kernel,
-                operation = WarpOperation.Density,
-                supportMode = SupportScheme.Gather, # cullen switch E.1 in the CRK paper uses gather for density estimation
-            ),
-            domain=config.domain,
-            adjacency=adjacency,
-
-            queryApparentAreas=apparentVolumes,
-            # includeBoundaryReaction=includeBoundaryReaction,
-        )
-        # return alpha
-        return - alpha

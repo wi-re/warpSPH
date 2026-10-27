@@ -16,7 +16,7 @@ import torch
 def _acousticEnergyRatio(timeCentred: bool, nx=32, courant=0.6, lamDx=6.0, nSteps=150, eps=1e-4,
                          integrator='symplecticEuler'):
     from warpSPH.runner import run
-    from warpSPH.cases.tgvWeaklyCompressible import tgvWeaklyCompressibleCase as case
+    from warpSPH.cases.periodic.tgvWeaklyCompressible import tgvWeaklyCompressibleCase as case
     from warpSPH.enumTypes import PressureForceScheme
 
     c0 = 10.0

@@ -11,8 +11,8 @@ purely so ``warpSPHIntegrators`` treats the pair with its position/velocity
 integrators; neither is a position or a velocity. That reuse is the point --
 the wave system rides the same integrator machinery as the fluid schemes.
 
-Not a fluid scheme; see :mod:`warpSPH.schemes.waveEquation` for the step
-function and :mod:`warpSPH.cases.waveEquation` for the registered `Case`.
+Not a fluid scheme; see :mod:`warpSPH.schemes.pde.waveEquation` for the step
+function and :mod:`warpSPH.cases.demos.waveEquation` for the registered `Case`.
 """
 
 import torch
@@ -23,12 +23,14 @@ from ..configurations import SimulationConfig
 from ..sample.bySamplingScheme import sampleParticles
 
 from ..utils import *
-from warpSPHIntegrators import *
+from .identity import ParticleIdentityState
+from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state, tagged
+from warpSPHIntegrators.state.fields import update_component, update_position
 from warpSPHCore import *
 
 
 @dataclass
-class WaveSystemStatev3(BaseState):
+class WaveSystemStatev3(ParticleIdentityState):
     positions : torch.Tensor = constant(tags=('particle_position',))
     supports : torch.Tensor = constant(tags=('particle_support',))
     masses : torch.Tensor = constant(tags=('particle_mass',))
@@ -57,7 +59,8 @@ class WaveSystemv3(BaseIntegrationSystem):
     t: float = 0.0
     def initializeNewState(self, *args, verbose=False, **kwargs):
         state = get_reference_state(self)
-        verbosePrint(verbose, f'Initializing new state [t={self.t}]')
+        if verbose:   # self.t may be a device tensor: format it only when printing
+            print(f'Initializing new state [t={self.t}]')
         return WaveSystemv3(state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain)
     
     def apply_position_update(self, update, spec: PositionUpdateSpec, **kwargs):

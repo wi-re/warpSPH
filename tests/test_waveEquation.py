@@ -14,13 +14,13 @@ import torch
 from warpSPH.configurations import WaveCaseConfig, WaveEquationConfig, buildConfig
 from warpSPH.sample.bySamplingScheme import sampleParticles
 from warpSPH.sample.waveSystem import sampleSmoothPointSourceWaveSystem
-from warpSPH.schemes.waveEquation import f_wave_equation
+from warpSPH.schemes.pde.waveEquation import f_wave_equation
 from warpSPH.systems.waveSystem import WaveSystemStatev3, WaveSystemv3, computeDt
 from warpSPH.utils import buildDomainDescription
 from warpSPHCore import SupportScheme, buildVerletList
 
 #: The scheme's own Laplacian is stiffer than `computeDt`'s acoustic CFL
-#: number accounts for (see `cases/waveEquation.py`'s default override for
+#: number accounts for (see `cases/demos/waveEquation.py`'s default override for
 #: the same reason): 0.3, the `SimulationConfig`/`CaseSpec` default, is
 #: unstable by nx=256 in 1D even with zero damping here; 0.1 stays stable and
 #: convergent at every resolution these tests use.

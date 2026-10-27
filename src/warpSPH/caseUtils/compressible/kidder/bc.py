@@ -1,4 +1,4 @@
-"""Driven boundary bands for the Kidder case, used by `warpSPH.cases.kidder`.
+"""Driven boundary bands for the Kidder case, used by `warpSPH.cases.compressible.kidder`.
 
 `buildKidderBCs` builds a dynamic `BoundaryCondition` that pins velocity,
 density, and internal energy on the first/last `band` particles (the inner

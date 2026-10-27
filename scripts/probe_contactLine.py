@@ -63,7 +63,7 @@ def pressureSplit(system, ctx):
     import torch
     from warpSPH.modules.gravity import computeGravity
     from warpSPH.modules.pressure import computePressureForceSurfaceAware
-    from warpSPH.schemes.artificialCompressible import _workingState, wallPressures
+    from warpSPH.modules.artificialCompressible import workingState as _workingState, wallPressures
     from warpSPH.modules.incompressible.wallPressure import _shepardValue
 
     state = system.state
@@ -123,14 +123,17 @@ def withWcSwitches(case, args):
 def patchWallMode(mode):
     """Swap `artificialCompressible.wallPressures` (looked up by module global
     inside the step) for an A/B variant. Probe-only; nothing in src changes."""
-    import warpSPH.schemes.artificialCompressible as ac
+    import warpSPH.modules.artificialCompressible.dualTime as ac       # holds the per-stage wall closures
+    import warpSPH.modules.artificialCompressible.residual as res     # holds the viscosity
+    from warpSPH.modules.artificialCompressible import workingState as ws
+    import warpSPH.schemes.incompressible.artificialCompressible as sch              # the step's own boundary-velocity call
     orig = ac.wallPressures
     if mode == 'eq61':
         return
     if mode == 'noHydro':
-        ac.wallPressures = lambda view, config, adj, bf, clampNonNeg=False: orig(view, config, adj, None)
+        ac.wallPressures = lambda view, config, adj, bf, clampNonNeg=False, **kw: orig(view, config, adj, None, **kw)
     elif mode == 'blanketClamp':
-        ac.wallPressures = lambda view, config, adj, bf, clampNonNeg=False: orig(view, config, adj, bf, clampNonNeg=True)
+        ac.wallPressures = lambda view, config, adj, bf, clampNonNeg=False, **kw: orig(view, config, adj, bf, clampNonNeg=True, **kw)
     elif mode == 'dtsph':
         # Dual-time SPH (Ramachandran, Muta & Ramakrishna; gitlab.com/pypr/dtsph,
         # dtsph.py): SetPressureSolid = Adami Eq. 27 incl. the hydrostatic term,
@@ -140,8 +143,8 @@ def patchWallMode(mode):
         # enters SolidWallNoSlipBC, and their dam break runs nu = 0). Static
         # walls only.
         import torch
-        ac.wallPressures = lambda view, config, adj, bf, clampNonNeg=False: orig(view, config, adj, bf, clampNonNeg=True)
-        ac.computeBoundaryVelocities = lambda view, config, sc, adj: torch.where(
+        ac.wallPressures = lambda view, config, adj, bf, clampNonNeg=False, **kw: orig(view, config, adj, bf, clampNonNeg=True, **kw)
+        ac.computeBoundaryVelocities = sch.computeBoundaryVelocities = lambda view, config, sc, adj: torch.where(
             (view.kinds == 1).unsqueeze(-1), torch.zeros_like(view.velocities), view.velocities)
     elif mode == 'dtsphDiv':
         # 'dtsph' with the static wall velocity in the pressure (continuity)
@@ -150,8 +153,8 @@ def patchWallMode(mode):
         # velocity everywhere adds to ACSPH's viscous term (Marrone 3.1 is
         # free-slip; 'dtsph' slowed the whole surge).
         import torch
-        ac.wallPressures = lambda view, config, adj, bf, clampNonNeg=False: orig(view, config, adj, bf, clampNonNeg=True)
-        origBV, origVisc = ac.computeBoundaryVelocities, ac._viscosity
+        ac.wallPressures = lambda view, config, adj, bf, clampNonNeg=False, **kw: orig(view, config, adj, bf, clampNonNeg=True, **kw)
+        origBV, origVisc = ac.computeBoundaryVelocities, res.viscosity
         last = {}
 
         def staticWalls(view, config, sc, adj):
@@ -160,11 +163,11 @@ def patchWallMode(mode):
                                torch.zeros_like(view.velocities), view.velocities)
 
         def mirroredViscosity(view, config, adj, nu):
-            v = ac._workingState(view, view.positions, view.velocities, view.pressures)
+            v = ws(view, view.positions, view.velocities, view.pressures)
             v.velocities = origBV(v, config, last['sc'], adj)
             return origVisc(v, config, adj, nu)
-        ac.computeBoundaryVelocities = staticWalls
-        ac._viscosity = mirroredViscosity
+        ac.computeBoundaryVelocities = sch.computeBoundaryVelocities = staticWalls
+        res.viscosity = mirroredViscosity
 
 
 def makeDiagnostics(baseDiagnostics, toy, record):
@@ -237,8 +240,8 @@ def makeDiagnostics(baseDiagnostics, toy, record):
 
 def buildCase(toy: str, dambreakLikeAC: bool, cav: str = 'off', nuOff=False, shiftOff=False, ddt=None):
     import torch
-    from warpSPH.cases.hydrostaticColumn import hydrostaticColumnCase as base
-    from warpSPH.cases.plotting import Field, particlePlot
+    from warpSPH.cases.boundaries.hydrostaticColumn import hydrostaticColumnCase as base
+    from warpSPH.cases.common.plotting import Field, particlePlot
     from warpSPH.configurations.moduleConfigurations.shifting import ShiftingProjectionScheme, ShiftingScheme
 
     def configureScheme(ctx):
@@ -288,7 +291,7 @@ def buildCase(toy: str, dambreakLikeAC: bool, cav: str = 'off', nuOff=False, shi
         if isWC(ctx):
             # weakly compressible: Sun et al. 2017 Eq. (2), Ma = 0.1 on the
             # free-fall speed over the box height; dt from the acoustic CFL
-            from warpSPH.cases.weaklyCompressible import setupTimestep
+            from warpSPH.cases.common.weaklyCompressible import setupTimestep
             g = ctx.param('gravityMagnitude')
             # c0 at Ma 0.1, but dt pinned at an acoustic Courant number
             # c0 dt / dx = 0.3: the machTarget route's CFL gave 0.84 here, and
@@ -305,14 +308,14 @@ def buildCase(toy: str, dambreakLikeAC: bool, cav: str = 'off', nuOff=False, shi
         system.state.pressures = torch.full_like(system.state.pressures, P0_OFFSET)
 
     def buildSystem(ctx):
-        from warpSPH.cases.hydrostaticColumn import columnSdf
-        from warpSPH.cases.weaklyCompressible import (boundaryRegion, buildRegionSystem,
+        from warpSPH.cases.boundaries.hydrostaticColumn import columnSdf
+        from warpSPH.cases.common.weaklyCompressible import (boundaryRegion, buildRegionSystem,
                                                       domainBoundarySdf, fluidRegion, shapeSdf)
         from warpSPH.configurations.region import BCType
         if not ctx.param('blockWidth'):
             return base.buildSystem(ctx)
         if not ctx.param('band'):
-            from warpSPH.cases.randomFlow import BOUNDED_BAND
+            from warpSPH.cases.periodic.randomFlow import BOUNDED_BAND
             ctx.spec.params['band'] = BOUNDED_BAND
         L = ctx.spec.L
         halfH = 0.5 * ctx.param('fillRatio') * L
@@ -448,7 +451,7 @@ class FlierTracker:
 
     def _traceTracked(self, st, config, adjacency, uid, fluid, nF, nW, t):
         import torch
-        from warpSPH.schemes.artificialCompressible import _wallAdjacent
+        from warpSPH.modules.artificialCompressible import wallAdjacent as _wallAdjacent
         rows = torch.nonzero(fluid & torch.isin(uid, torch.tensor(sorted(self.tracked), device=uid.device))).squeeze(-1)
         if rows.numel() == 0:
             return
@@ -546,8 +549,8 @@ def runMarrone(args):
     import torch
     sys.path.insert(0, HERE)
     import probe_deltaSPHMarrone as M
-    from warpSPH.cases.dambreak import dambreakCase
-    from warpSPH.cases.sloshingTank import sloshingTankCase
+    from warpSPH.cases.freeSurface.dambreak import dambreakCase
+    from warpSPH.cases.freeSurface.sloshingTank import sloshingTankCase
     from warpSPH.runner import run
     sloshing = args.toy == 'sloshing'
     baseCase = sloshingTankCase if sloshing else dambreakCase
@@ -598,6 +601,13 @@ def runMarrone(args):
     case = dataclasses.replace(baseCase, diagnostics=diagnostics)
     tag = (f'{args.toy}_{args.scheme}_nx{args.nx}_cav{args.cav}'
            + ('_iso0' if args.isoZero else '')
+           + (f'_edge{args.edgeRelax}' if args.edgeRelax != 'off' else '')
+           + ('_noalign' if args.noAlign else '')
+           + ('_taper' if args.taper else '')
+           + ('_redet' if args.redetect else '') + ('_bounce' if args.bounce else '')
+           + (f'_bt{args.bounceTarget}' if args.bounceTarget != 'position' else '')
+           + ('_hardbounce' if args.bounceRamp == 0 else (f'_ramp{args.bounceRamp:g}' if args.bounceRamp != 0.5 else ''))
+           + ('_authors' if args.authors else '') + (f'_no-{args.authorsOff.replace(",", "-")}' if args.authorsOff else '')
            + ('_lone0' if args.loneReset else '')
            + ('_hyd1' if args.oneSidedHydro else '')
            + (f'_j{args.seed}' if args.jitter > 0.0 else '')
@@ -610,6 +620,8 @@ def runMarrone(args):
                   pressureProbeInset=0.0, pressureProbeDiscRadius=M.PROBE_DISC_RADIUS,
                   referenceVelocity=M.U_MAX, machTarget=1.95 / 40.0,
                   acCavitationProjection=args.cav, acIsolatedZeroPressure=args.isoZero,
+                  acWallEdgeRelax=args.edgeRelax, acDiffusionTaper=args.taper or not args.noAlign, acLowCostAlign=not args.noAlign,
+                  acRedetect=args.redetect, acBounceBack=args.bounce or not args.noAlign, acBounceTarget=args.bounceTarget, acBounceRamp=args.bounceRamp, acAuthors=args.authors, acAuthorsOff=args.authorsOff,
                   epsilonV=-5.0)
     if args.scheme != 'artificialCompressible' and args.cav != 'off':
         raise SystemExit('--cav is ACSPH-only: the delta-SPH variants were tried '
@@ -620,10 +632,15 @@ def runMarrone(args):
         # the case's own defaults (diffSPH TC10 reproduction); only the
         # contact treatment and the run length change
         kw = dict(tLimit=args.tLimit, quiet=False, progress=True, store=args.store)
+        # the ACSPH contact settings the case reads with `ctx.param` (only the ones that differ from the config defaults matter)
+        kw['params'] = dict(acLowCostAlign=not args.noAlign, acCavitationProjection=args.cav, acIsolatedZeroPressure=args.isoZero,
+                            acDiffusionTaper=args.taper or not args.noAlign, acBounceBack=args.bounce or not args.noAlign,
+                            acBounceTarget=args.bounceTarget, acBounceRamp=args.bounceRamp)
         if args.scheme != 'default':
             kw['scheme'] = args.scheme
         if args.nx:
             kw['nx'] = args.nx
+    kw.update(cudaGraph=bool(args.cudaGraph))     # explicit: the cases default it on, --no-cudaGraph must win
     if args.store:
         kw.update(storeMode='states', storeInterval=args.storeInterval, exportRoot=runRoot)
     if args.resume:
@@ -636,7 +653,10 @@ def runMarrone(args):
     t0 = time.perf_counter()
     status = 'ok'
     try:
-        r = run(case, **kw)
+        if args.profile:
+            r = profiledRun(run, case, kw, runRoot)
+        else:
+            r = run(case, **kw)
         status = f'diverged={r.diverged} steps={r.nSteps}'
     except Stalled as e:
         status = f'STALLED: {e}'
@@ -648,6 +668,55 @@ def runMarrone(args):
         json.dump(fliers.trace, f)
     last = record[-1] if record else {}
     print(f'[{tag}] {status}  t={last.get("t", 0):.4f} t*={last.get("tStar", 0):.3f}', flush=True)
+
+
+def profiledRun(run, case, kw, runRoot):
+    """`run(case, **kw)` under the torch profiler; prints, per step, the CPU time of
+    every `[warpSPH] - [acsph - NN]` section, the device kernel launches, the
+    cudaStreamSynchronize / cudaMemcpy calls and the GPU-busy time. Use a short
+    `--tLimit` (the trace holds every launch)."""
+    import collections
+    import torch
+    from torch.profiler import ProfilerActivity, profile
+    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+        r = run(case, **kw)
+        torch.cuda.synchronize()
+    n = max(1, r.nSteps)
+    evs = list(prof.events())
+    sections = [(e.time_range.start, e.time_range.end, e.name) for e in evs if '[acsph - ' in e.name or e.name.startswith('[warpSPH]')]
+    sections.sort()
+    def sectionOf(t):
+        best = None
+        for s0, s1, nm in sections:
+            if s0 <= t <= s1 and (best is None or s1 - s0 < best[0]):
+                best = (s1 - s0, nm)
+        return best[1] if best else '(outside any section)'
+    cpu = collections.defaultdict(float)
+    for s0, s1, nm in sections:
+        cpu[nm] += s1 - s0
+    api = collections.Counter()
+    where = collections.defaultdict(collections.Counter)
+    gpuBusy = 0.0
+    for e in evs:
+        if e.device_type == torch.autograd.DeviceType.CUDA:
+            gpuBusy += e.device_time_total
+            continue
+        nm = e.name
+        if nm in ('cudaLaunchKernel', 'cuLaunchKernel', 'cudaGraphLaunch', 'cuGraphLaunch', 'cudaStreamSynchronize',
+                  'cudaDeviceSynchronize', 'cudaMemcpyAsync', 'cudaMemcpy', 'cudaMemsetAsync', 'cudaEventSynchronize') \
+                or nm.startswith('cudaMemcpy'):
+            api[nm] += 1
+            if 'ynchronize' in nm or nm.startswith('cudaMemcpy'):
+                where[nm][sectionOf(e.time_range.start)] += 1
+    print(f'[profile] {n} steps, GPU-busy {gpuBusy / n / 1e3:.2f} ms/step; CUDA runtime calls per step:', flush=True)
+    for nm, c in api.most_common():
+        print(f'[profile]   {c / n:8.1f}  {nm}', flush=True)
+    for nm in where:
+        for sec, c in where[nm].most_common(6):
+            print(f'[profile]   {nm}: {c / n:7.1f}/step in {sec}', flush=True)
+    for nm, us in sorted(cpu.items(), key=lambda kv: -kv[1])[:14]:
+        print(f'[profile]   {us / n / 1e3:8.2f} ms/step (section wall)  {nm}', flush=True)
+    return r
 
 
 def main():
@@ -672,6 +741,24 @@ def main():
     ap.add_argument('--cav', default='off', choices=['off', 'wall', 'vicinity', 'contact', 'fluid'])
     ap.add_argument('--isoZero', action='store_true',
                     help='ACSPH acParams.isolatedZeroPressure (p = 0 on empty supports, §11.1)')
+    ap.add_argument('--edgeRelax', default='off', choices=['off', 'zero', 'lambda'],
+                    help="ACSPH acParams.wallPressureEdgeRelax: the authors' wall-pressure attenuation beside an edge particle (DYNGPUSPH_COMPARISON D1)")
+    ap.add_argument('--taper', action='store_true',
+                    help='ACSPH acParams.diffusionLambdaTaper: C2 ramp of lambda on k2 D^p (DYNGPUSPH_COMPARISON D3)')
+    ap.add_argument('--redetect', action='store_true', help='ACSPH D2: re-detect the surface every dual-time iteration')
+    ap.add_argument('--bounce', action='store_true', help='ACSPH D5: position-row wall bounce-back')
+    ap.add_argument('--bounceRamp', type=float, default=0.5, help='ACSPH D5: fade the bounce out smoothly over this fraction of its distance (default 0.5, the dambreak case default; 0 = the authors\' hard switch)')
+    ap.add_argument('--bounceTarget', default='position', choices=['position', 'stage', 'both'], help='ACSPH D5: what the bounce reflects')
+    ap.add_argument('--profile', action='store_true', help='run under the torch profiler and print per-step launches/syncs/section CPU time (marrone31/sloshing only)')
+    ap.add_argument('--cudaGraph', action=argparse.BooleanOptionalAction, default=True,
+                    help='CaseSpec.cudaGraph (default ON, --no-cudaGraph for eager): replay the ACSPH pseudo-iteration '
+                         '(and the delta-SPH RHS) from a CUDA graph; bitwise, self-checked. ACSPH Marrone nx 70 to t=2.45: '
+                         '1475 s eager -> 333 s, identical diagnostics')
+    ap.add_argument('--noAlign', action='store_true',
+                    help="ACSPH: switch the cheap authors'-code alignments (now default: D3, D5, dt/dtau 2, CFL_t 0.4, D10, D12) OFF -- the pre-2026-10-13 baseline")
+    ap.add_argument('--authors', action='store_true',
+                    help="ACSPH: ALL authors'-code alignments, adding the costly D1/D2/D9 to the default cheap set (D1 lambda, D2, D3, D5, RK3/0.75, dt/dtau 2, CFL_t 0.4, U_char 0.1 c0, no accel constraint)")
+    ap.add_argument('--authorsOff', default='', help='with --authors, comma list to leave off: d1,d2,d3,d5,rk,dt,accel,uchar')
     ap.add_argument('--loneReset', action='store_true',
                     help='delta-SPH schemeConfig.loneDensityReset: rho = rho0 on rows with no fluid neighbour (§12)')
     ap.add_argument('--oneSidedHydro', action='store_true',

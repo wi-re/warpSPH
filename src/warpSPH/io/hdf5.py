@@ -7,14 +7,16 @@ import dill
 import h5py
 import pickle
 import torch
+from dataclasses import fields
 
 from warpSPHCore import *
-from warpSPHIntegrators.specs import StageResult
+from warpSPHIntegrators.state import StageResult
 
 
 def dumpAdjacency(adjacency, adjacencyGroup):
-    adjacencyGroup.create_dataset('i', data=adjacency.i.cpu().numpy())
-    adjacencyGroup.create_dataset('j', data=adjacency.j.cpu().numpy())
+    liveI, liveJ = adjacency.livePairs()   # the real entries only: the capacity padding is not part of the data
+    adjacencyGroup.create_dataset('i', data=liveI.cpu().numpy())
+    adjacencyGroup.create_dataset('j', data=liveJ.cpu().numpy())
     adjacencyGroup.create_dataset('numNeighbors', data=adjacency.numNeighbors.cpu().numpy())
     adjacencyGroup.create_dataset('edgeOffsets', data=adjacency.edgeOffsets.cpu().numpy())
 
@@ -92,7 +94,8 @@ def loadAdjacency(adjacencyGroup, device):
     numRows = adjacencyGroup.attrs['numRows']
     numCols = adjacencyGroup.attrs['numCols']
 
-    return AdjacencyList(i, j, numNeighbors, edgeOffsets, numRows, numCols, queryPositions, referencePositions, querySupports, referenceSupports)
+    return AdjacencyList(i, j, numNeighbors, edgeOffsets, numRows, numCols, queryPositions, referencePositions, querySupports, referenceSupports,
+                         numEdges=int(i.shape[0]))
 
 def loadState(stateGroup, device, SimulationState):
     stateDict = {}
@@ -102,6 +105,12 @@ def loadState(stateGroup, device, SimulationState):
             stateDict[fieldName] = torch.from_numpy(fieldValue[:]).to(device).to(hdfDtypeToTorchDtype(fieldValue.dtype)) if fieldValue.shape else torch.tensor(fieldValue[()], device=device, dtype=hdfDtypeToTorchDtype(fieldValue.dtype))
         else:
             stateDict[fieldName] = fieldValue
+    # Scalar switch history and state discriminators are written as attrs.
+    # Restore declared fields only; do not pass unrelated export metadata.
+    declared = {f.name for f in fields(SimulationState)}
+    for name, value in stateGroup.attrs.items():
+        if name in declared and name not in stateDict:
+            stateDict[name] = None if isinstance(value, str) and value == 'None' else value
     # `UIDcounter` is a plain int, not a per-particle array, so the writer --
     # which emits datasets -- never stores it, and rebuilding the dataclass
     # then fails on the missing required argument. That made every

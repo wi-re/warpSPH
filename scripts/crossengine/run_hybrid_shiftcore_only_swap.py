@@ -46,7 +46,7 @@ MATCHED_ARGS = [
 if cliArgs.nSteps is not None:
     MATCHED_ARGS += ['--nSteps', str(cliArgs.nSteps)]
 
-from warpSPH.cases.dambreak import dambreakCase
+from warpSPH.cases.freeSurface.dambreak import dambreakCase
 from warpSPH.runner import caseMain
 
 _probe = caseMain(dambreakCase, MATCHED_ARGS[:MATCHED_ARGS.index('--wallBC') + 2] +

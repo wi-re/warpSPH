@@ -13,7 +13,7 @@ both kernels to derive that shape-driven scale factor, so a C4 case can use a
 properly-scaled threshold instead of DualSPHysics' literal constant.
 
 Two reference geometries, both centred on a query "ghost" point at the origin,
-support = n_h * dx for both kernels (n_h = 4.0, matching `cases/dambreak.py`):
+support = n_h * dx for both kernels (n_h = 4.0, matching `cases/freeSurface/dambreak.py`):
   - 'healthy'    -- a half-disc of fluid neighbours: a normal near-wall mDBC
                     point with full one-sided support.
   - 'degenerate' -- a thin, nearly coplanar band of neighbours: the
@@ -35,7 +35,7 @@ from __future__ import annotations
 import argparse
 
 ap = argparse.ArgumentParser()
-ap.add_argument('--nh', type=float, default=4.0, help='support / dx, matching cases/dambreak.py n_h')
+ap.add_argument('--nh', type=float, default=4.0, help='support / dx, matching cases/freeSurface/dambreak.py n_h')
 ap.add_argument('--dx', type=float, default=0.015, help='particle spacing (Marrone H/dx=40: H=0.6, dx=0.015)')
 ap.add_argument('--jitter', type=float, default=0.1, help='fractional lattice jitter (of dx)')
 ap.add_argument('--seed', type=int, default=0)

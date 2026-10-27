@@ -30,7 +30,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 
-from warpSPH.cases.waveEquation import waveEquationCase
+from warpSPH.cases.demos.waveEquation import waveEquationCase
 
 from .schemes import MULTISTEP_SCHEMES, SchemeSpec
 
@@ -222,7 +222,7 @@ def buildWaveCase(nx: int, device: Optional[str] = None,
     # stays cheap and -- more importantly -- happens only *after* the calling
     # script has run `warpSPHBootstrap.bootstrap`, which is the only point at
     # which precision can still be chosen.
-    from warpSPH.cases.waveEquation import waveEquationCase
+    from warpSPH.cases.demos.waveEquation import waveEquationCase
     from warpSPH.runner import CaseSpec
     from warpSPH.runner.runner import buildContext
 
@@ -287,7 +287,7 @@ def runScheme(ctx, system, scheme: SchemeSpec, nSteps: int, dt: float,
     `max_iterations` budget without converging shows up as
     `convergedSolves < solves` even when the state itself stayed finite.
     """
-    from warpSPHIntegrators import getIntegrator
+    from warpSPHIntegrators import get_scheme
 
     device = ctx.device
     record = RunRecord(
@@ -318,7 +318,7 @@ def runScheme(ctx, system, scheme: SchemeSpec, nSteps: int, dt: float,
         recorder = RecordingSolver(scheme.makeSolver())
         kwargs['solver'] = recorder
 
-    integrator = getIntegrator(scheme.integrationScheme)
+    integrator = get_scheme(scheme.integrationScheme)
     isMultistep = scheme.integrationScheme.lower() in MULTISTEP_SCHEMES
     history = None
 

@@ -3,10 +3,10 @@
 
 The 264 lines that used to live here (boilerplate cell, argparse block, step
 loop, export, ffmpeg) are now `warpSPH.runner`, and the case itself is
-`warpSPH.cases.sod`. Equivalent invocations::
+`warpSPH.cases.compressible.sod`. Equivalent invocations::
 
     python examples/compressible/01-sod/sod_1d.py --plot --store
-    python -m warpSPH.cases.sod --plot --store
+    python -m warpSPH.cases.compressible.sod --plot --store
     warpsph-run sod --plot --store            # also honours --precision
 
 This example demos this case's export as a single growing `trajectory.h5`
@@ -22,7 +22,7 @@ from warpSPHBootstrap import bootstrap
 
 bootstrap(precision='float32')
 
-from warpSPH.cases.sod import sodCase          # noqa: E402
+from warpSPH.cases.compressible.sod import sodCase          # noqa: E402
 from warpSPH.runner import caseMain            # noqa: E402
 
 #: `--plot`/`--video` are on because an example is meant to be watched -- pass

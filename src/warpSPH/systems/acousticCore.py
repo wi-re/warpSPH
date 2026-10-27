@@ -10,21 +10,23 @@ for the three physical fields this needs -- `positions`/`velocities`/
 `densities` -- but drops every field that scheme carries for surface
 detection, mDBC, and shifting, none of which this core has code paths for.
 
-See :mod:`warpSPH.schemes.acousticCore` for the step function.
+See :mod:`warpSPH.schemes.experimental.acousticCore` for the step function.
 """
 
 import torch
 from typing import Optional
 from dataclasses import dataclass
 
-from warpSPHIntegrators import *
+from .identity import ParticleIdentityState
+from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state, tagged
+from warpSPHIntegrators.state.fields import update_component, update_position
 from warpSPHCore import *
 
 __all__ = ['AcousticCoreState', 'AcousticCoreSystemUpdate', 'AcousticCoreSystem']
 
 
 @dataclass
-class AcousticCoreState(BaseState):
+class AcousticCoreState(ParticleIdentityState):
     positions : torch.Tensor = integrated('dxdt', tags=('position',))
     velocities: torch.Tensor = integrated('dvdt', tags=('velocity',))
     densities : torch.Tensor = integrated('drhodt', tags=('density',))
@@ -53,7 +55,8 @@ class AcousticCoreSystem(BaseIntegrationSystem):
 
     def initializeNewState(self, *args, verbose=False, **kwargs):
         state = get_reference_state(self)
-        verbosePrint(verbose, f'Initializing new state [t={self.t}]')
+        if verbose:   # self.t may be a device tensor: format it only when printing
+            print(f'Initializing new state [t={self.t}]')
         return AcousticCoreSystem(state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain)
 
     def apply_position_update(self, update, spec: PositionUpdateSpec, **kwargs):

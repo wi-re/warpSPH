@@ -1,0 +1,26 @@
+# Experimental unequal-spacing contact; currently fails local equilibrium gates.
+schemaVersion: 1
+case: twoGasSod
+variant: stationary
+simulation:
+  nx: 200
+  tLimit: 0.02
+  integrationScheme: rungeKutta2
+  execution: eager
+  plot: true
+  video: true
+  progress: true
+  plotBackend: vispy
+  plotInterval: 25
+params:
+  equalMass: true
+  initialDensity: prescribed
+solver:
+  scheme: CRKSPH
+  crkDensityPolicy: sameMaterial
+  crkEvolution: spheral
+  materials:
+    - name: leftGas
+      eos: {type: idealGas, gamma: 1.4}
+    - name: rightGas
+      eos: {type: idealGas, gamma: 1.6666666666666667}

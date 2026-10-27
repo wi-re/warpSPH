@@ -159,8 +159,27 @@ def _bodyForceMoment(state, config, adjacency, den, bodyForce):
     return (bf * moment).sum(-1) / den.clamp_min(1e-12)
 
 
+def _edgeRelaxFactor(state, config, adjacency, den, mode, edgeFlags, lambdas):
+    """Per-wall-row multiplier for a NEGATIVE wall pressure beside an edge
+    particle (dynGPUSPH `noSlipCell3`; `ArtificialCompressibilityParams.
+    wallPressureEdgeRelax`): 1 with no raw free-surface fluid in the support,
+    else 0 ('zero') or `sum_f max(0, 2(lambda_f - 1/2)) W V / sum_f W V`
+    ('lambda'). `edgeFlags`: raw (undilated) free-surface mask per row;
+    `lambdas`: min eigenvalue of the renormalisation matrix per row."""
+    num, _ = _shepardValue(state, config, adjacency, edgeFlags.to(den.dtype))
+    nearEdge = num > 0.0   # Shepard of a 0/1 flag over positive kernel weights: > 0 iff an edge row is in support
+    if mode == 'zero':
+        factor = torch.zeros_like(num)
+    elif mode == 'lambda':
+        w = (2.0 * (lambdas - 0.5)).clamp_min(0.0)
+        factor, _ = _shepardValue(state, config, adjacency, w.to(den.dtype))
+    else:
+        raise ValueError(f"wallPressureEdgeRelax must be 'off', 'zero' or 'lambda', got {mode!r}")
+    return torch.where(nearEdge, factor, torch.ones_like(num))
+
+
 def _shepardMirror(state, config, adjacency, p, fluid, clampNonNeg=True,
-                   bodyForce=None):
+                   bodyForce=None, edgeRelax='off', edgeFlags=None, lambdas=None):
     """Zero-order Shepard mirror. With `bodyForce` this is Adami et al. 2012
     Eq. 27 / De Courcy et al. 2024 Eq. (61) exactly -- see the module
     docstring's Adami-correction section."""
@@ -168,6 +187,11 @@ def _shepardMirror(state, config, adjacency, p, fluid, clampNonNeg=True,
     p_b, den = _shepardValue(state, config, adjacency, p)
     if bodyForce is not None:
         p_b = p_b + _bodyForceMoment(state, config, adjacency, den, bodyForce)
+    if edgeRelax != 'off':
+        if edgeFlags is None or (edgeRelax == 'lambda' and lambdas is None):
+            raise ValueError("edgeRelax needs edgeFlags (and lambdas for 'lambda')")
+        factor = _edgeRelaxFactor(state, config, adjacency, den, edgeRelax, edgeFlags, lambdas)
+        p_b = torch.where(p_b < 0.0, p_b * factor, p_b)
     if clampNonNeg:
         p_b = p_b.clamp(min=0.0)
     p_b = torch.where(den > _MIN_WEIGHT, p_b, torch.zeros_like(p_b))
@@ -206,7 +230,10 @@ def wallPressureExtrapolation(state: Any, config: Any, adjacency: Any,
                               p: torch.Tensor, fluid: torch.Tensor, *,
                               mode: str = 'mls',
                               clampNonNeg: bool = True,
-                              bodyForce: Any = None) -> torch.Tensor:
+                              bodyForce: Any = None,
+                              edgeRelax: str = 'off',
+                              edgeFlags: Any = None,
+                              lambdas: Any = None) -> torch.Tensor:
     """Return `p` with the `kind == 1` rows filled with the extrapolated wall
     pressure. `mode` in {'shepard', 'mls', 'mirror'}; `'mls'` falls back to
     'shepard' when there are no ghost points to run the Liu-Liu fit at. A
@@ -224,14 +251,22 @@ def wallPressureExtrapolation(state: Any, config: Any, adjacency: Any,
     or `(N, dim)` tensor. `'shepard'` + `bodyForce` is Adami et al. 2012
     Eq. 27 / De Courcy et al. 2024 Eq. (61) exactly. Not supported by 'mls',
     whose first-order Liu-Liu fit already carries the local pressure gradient
-    (adding the correction on top would double-count it)."""
+    (adding the correction on top would double-count it).
+
+    `edgeRelax` ('off' | 'zero' | 'lambda', 'shepard' only; with `edgeFlags`,
+    the raw free-surface mask, and for 'lambda' the per-row `lambdas`): attenuate
+    a negative wall pressure beside an edge fluid particle, as dynGPUSPH does
+    (`_edgeRelaxFactor`)."""
     # `kinds` is run-constant: the per-run cached check, not a sync per call
     if not stateHasBoundaryParticles(state, config):
         return p
 
     if mode == 'shepard':
         return _shepardMirror(state, config, adjacency, p, fluid, clampNonNeg,
-                              bodyForce=bodyForce)
+                              bodyForce=bodyForce, edgeRelax=edgeRelax,
+                              edgeFlags=edgeFlags, lambdas=lambdas)
+    if edgeRelax != 'off':
+        raise ValueError("edgeRelax is implemented for mode='shepard' only")
     if mode == 'mirror':
         return _adamiMirror(state, config, adjacency, p, fluid, clampNonNeg,
                             bodyForce=bodyForce)

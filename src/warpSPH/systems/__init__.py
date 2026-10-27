@@ -5,12 +5,14 @@
 every other module here extends. `systems/waveSystem.py`'s wave-equation
 triad is documented separately (not a fluid scheme). `systems/incompressible.py`
 (the divergence-free/DFSPH state) is deliberately not re-exported here --
-`schemes/divergenceFree.py` and `schemes/builder.py` import it directly from that
+`schemes/incompressible/{iisph,dfsph}.py` and `schemes/builder.py` import it directly from that
 submodule instead.
 """
 
 from .baseState import BaseParticleState, BaseSystemUpdate, BaseSystem
 from .compressibleMonaghan import CompressibleState, CompressibleSystemUpdate, CompressibleSystem
+from .pesph import PESPHState, PressureEnergyState, PressureEntropyState, PESPHSystem, PESPHSystemUpdate
+from .meshless import MeshlessState, MeshlessSystemUpdate, MeshlessSystem
 from .waveSystem import WaveSystemStatev3, WaveSystemUpdatev3, WaveSystemv3
 from .compSPH import CompSPHState, CompSPHSystem
 from .weaklyCompressible import WeaklyCompressibleState, WeaklyCompressibleSystem, WeaklyCompressibleSystemUpdate
@@ -23,6 +25,8 @@ from .artificialCompressible import (ArtificialCompressibleState,
 __all__ = [
     'BaseParticleState', 'BaseSystemUpdate', 'BaseSystem',
     'CompressibleState', 'CompressibleSystemUpdate', 'CompressibleSystem',
+    'PESPHState', 'PressureEnergyState', 'PressureEntropyState', 'PESPHSystem', 'PESPHSystemUpdate',
+    'MeshlessState', 'MeshlessSystemUpdate', 'MeshlessSystem',
     'WaveSystemStatev3', 'WaveSystemUpdatev3', 'WaveSystemv3',
     'CompSPHState', 'CompSPHSystem',
     'WeaklyCompressibleState', 'WeaklyCompressibleSystem', 'WeaklyCompressibleSystemUpdate',

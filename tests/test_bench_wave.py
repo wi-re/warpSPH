@@ -21,7 +21,9 @@ if str(REPO) not in sys.path:
 
 from benchmarks.common import SCHEMES, getSchemes, runScheme, buildWaveCase, relL2
 from benchmarks.common.schemes import MULTISTEP_SCHEMES
-from warpSPHIntegrators import NonlinearSolver, getIntegrationEnum, getIntegrator
+from warpSPHIntegrators.solvers import NonlinearSolver
+from warpSPHIntegrators import get_scheme
+from warpSPHIntegrators import get_scheme
 
 
 @pytest.fixture(scope='module')
@@ -53,9 +55,10 @@ def testJfnkJvpMatvecMatchesFdomANonIdentityDirection(case):
     if not torch.cuda.is_available():
         pytest.skip('the forward-mode bridge is only exercised on the CUDA build')
     ctx, system, dt = case
-    from warpSPHIntegrators.fields import flatten_integrated
-    from warpSPHIntegrators.jfnk import fd_matvec, jvp_matvec
-    from warpSPHIntegrators.util import updateStateEuler, updateStep
+    from warpSPHIntegrators.state import flatten_integrated
+    from warpSPHIntegrators.solvers import fd_matvec, jvp_matvec
+    from warpSPHIntegrators.state import updateStateEuler
+    from warpSPHIntegrators.state.lifecycle import updateStep
 
     f = ctx.stepFunction
     initialState = system.initializeNewState()
@@ -98,8 +101,8 @@ def testSchemeRegistryResolves():
     uses, carries its true order, and (implicit only) a buildable solver."""
     assert len(SCHEMES) >= 60
     for key, spec in SCHEMES.items():
-        getIntegrationEnum(spec.integrationScheme)  # raises on drift
-        assert spec.order == getIntegrator(spec.integrationScheme).order, key
+        get_scheme(spec.integrationScheme).identifier  # raises on drift
+        assert spec.order == get_scheme(spec.integrationScheme).order, key
         assert spec.kind in ('explicit', 'implicit'), key
         if spec.kind == 'explicit':
             assert spec.makeSolver is None, key

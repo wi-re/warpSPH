@@ -23,7 +23,7 @@ adaptive dt -- the same harness the core audit used.
 | `modules/shifting/delta.py:57` `computeDeltaShift` | `if c_max < 1e-6: c_max = 0.1` (1/step) | `torch.where`, NaN-safe (NaN compares False either way) |
 | `systems/weaklyCompressible.py:130` `finalize` | `max_velocity_magnitude = ...item()...` (1/step) | deleted -- fed only a commented-out `print`, dead |
 | `systems/weaklyCompressible.py:230` `finalize` | `if torch.any(kinds != 0): densities[mask] = midRho[mask]` (1/step) | `torch.where`, no guard |
-| `schemes/deltaSPH.py`, `schemes/dfsph.py`, `"[deltaSPH - 17] - enforce updates"` | 3 unconditional masked `index_put_` zeroing `dxdt`/`dvdt`/`drhodt` for non-fluid particles (6/step) | `torch.where`, no `index_put_` |
+| `schemes/weaklyCompressible/deltaSPH.py`, `schemes/dfsph.py`, `"[deltaSPH - 17] - enforce updates"` | 3 unconditional masked `index_put_` zeroing `dxdt`/`dvdt`/`drhodt` for non-fluid particles (6/step) | `torch.where`, no `index_put_` |
 
 **The `stateHasBoundaryParticles` fix, in detail.** `kinds` is a run-constant
 field -- assigned once at particle generation

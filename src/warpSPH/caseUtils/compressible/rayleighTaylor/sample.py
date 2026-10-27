@@ -1,4 +1,4 @@
-"""Builds the Rayleigh-Taylor initial state for `cases/rayleighTaylor.py`:
+"""Builds the Rayleigh-Taylor initial state for `cases/compressible/rayleighTaylor.py`:
 heavy fluid (`rho_t`) over light (`rho_b`) in a tall periodic-in-x box, with a
 smooth logistic density interface at ``y = 0.5`` (see `bcs.py`), a
 hydrostatic pressure profile balancing the constant gravity `g`, and a small

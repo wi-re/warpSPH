@@ -19,7 +19,7 @@ import torch
 
 from ..configurations.region import RegionType
 
-__all__ = ['BoundaryProvider', 'buildBoundaryProvider', 'bindBodies']
+__all__ = ['BoundaryProvider', 'buildBoundaryProvider', 'bindBodies', 'periodicBox']
 
 
 class BoundaryProvider(Protocol):
@@ -30,16 +30,34 @@ class BoundaryProvider(Protocol):
     def signed_distance(self, x: torch.Tensor, body: Any = None, supportMax: float = None, want_body: bool = False) -> Any: ...
 
 
-def buildBoundaryProvider(regions, device):
+def periodicBox(domain):
+    """The `warpSPHBoundaries` `Periodic` box of a warpSPH domain description (None without a periodic axis): the bounds and the per-axis flags (2D)."""
+    flags = [bool(f) for f in domain.periodic.tolist()] if hasattr(domain.periodic, 'tolist') else [bool(f) for f in domain.periodic]
+    if not any(flags):
+        return None
+    from warpSPHBoundaries.scene.periodic import Periodic
+    lo, hi = [float(v) for v in domain.min.tolist()], [float(v) for v in domain.max.tolist()]
+    return Periodic(tuple(lo[:2]), tuple(hi[:2]), tuple(flags[:2]))
+
+
+def buildBoundaryProvider(regions, device, domain=None, support=None):
     """The provider of the analytic boundary regions (None when there are none): one scene holding the
-    representations in region order."""
+    representations in region order. With a periodic `domain` (a periodic channel; passed only where the case sets `schemeConfig.analyticPeriodicWalls`: the sloshing / dam-break domains are periodic only as a hash-grid wrapper) every body sees the particles at the nearest image
+    of its centre (`Scene.setPeriodic`; `support`: the largest kernel support, the reach of the images): a plate that spans the box
+    is itself periodic."""
     reps = [r.representation for r in regions if r.type == RegionType.Boundary and getattr(r, 'representation', None) is not None]
     if not reps:
         return None
     from warpSPHBoundaries.scene import AnalyticBoundary, Scene
     for i, b in enumerate(reps):
         b.bodyId = i
-    return AnalyticBoundary(Scene(reps, str(device)))
+    scene = Scene(reps, str(device))
+    box = periodicBox(domain) if domain is not None else None
+    if box is not None:
+        if support is not None:
+            box.checkSupport(float(support))
+        scene.setPeriodic(box, float(support or 0.0))
+    return AnalyticBoundary(scene)
 
 
 def bindBodies(provider, rigidBodies):

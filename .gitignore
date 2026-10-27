@@ -25,6 +25,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+# Local experiments, ad hoc checks, run data, figures and session notes.
 .tmp/
 
 # PyInstaller
@@ -250,3 +251,6 @@ results/
 # DELTASPH_VALIDATION_PLAN.md), their output directories are not.
 /scratchpad/*/
 benchmarks/marrone31/out/
+
+# Generated local research reports and figures. Existing tracked docs stay tracked.
+/reports/

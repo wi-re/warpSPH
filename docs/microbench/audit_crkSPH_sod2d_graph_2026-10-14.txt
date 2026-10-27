@@ -1,0 +1,96 @@
+section (tree, inclusive unless "self")                                   calls  ops/call  self ops launch/call sync/call self sync sync/step
+[warpSPH] - buildVerletList                                                  14      87.6       0.0         2.3      2.14      0.00      0.60
+  [Verlet] SupportScheme.SuperSymmetric                                      14      87.6       0.0         2.3      2.14      0.00      0.60
+    [Verlet] Forced rebuild                                                  14      87.6       6.1         2.3      2.14      0.14      0.60
+      warpNeighborSearch - radiusSearchCompactHashMap                        14      66.0      48.0         2.0      2.00      1.00      0.56
+        neighborSearch - allocate neighbors                                  14      10.0      10.0         0.0      1.00      1.00      0.28
+        neighborSearch - collect neighbors                                   14       6.0       6.0         1.0      0.00      0.00      0.00
+        neighborSearch - count neighbors                                     14       2.0       2.0         1.0      0.00      0.00      0.00
+      neighborSearch - buildFixed                                             2     108.0     108.0         2.0      0.00      0.00      0.00
+coverage: 22.2 % of 5522 ops, 100.0 % of 32 launches, 15.2 % of 197 syncs inside a section (50 marked steps)
+  OUTSIDE any section: ops 4296, launches 0, syncs 167
+    sync sites  : runner.py:181 _scalar x51, common.py:162 compressibleDiagnostics x51, cudaGraph.py:777 _finishReplay x50, compSPH.py:190 apply x14, report.py:370 reportRun x1
+    top ops     : clone x1150, view x508, detach x459, mul x459, _to_copy x253, sum x204
+
+call audit: 100 section entries over 50 marked step(s)
+section                                          calls  ops/call     self launch/call sync/call sync/step replays
+[warpSPH] - buildVerletList                         14      87.6      0.0         2.3      2.14      0.60      14
+[Verlet] SupportScheme.SuperSymmetric               14      87.6      0.0         2.3      2.14      0.60      14
+[Verlet] Forced rebuild                             14      87.6      6.1         2.3      2.14      0.60      14
+warpNeighborSearch - radiusSearchCompactHashMa      14      66.0     48.0         2.0      2.00      0.56       0
+neighborSearch - allocate neighbors                 14      10.0     10.0         0.0      1.00      0.28       0
+neighborSearch - collect neighbors                  14       6.0      6.0         1.0      0.00      0.00       0
+neighborSearch - count neighbors                    14       2.0      2.0         1.0      0.00      0.00       0
+neighborSearch - buildFixed                          2     108.0    108.0         2.0      0.00      0.00       0
+  [warpSPH] - buildVerletList
+    top ops     : select x18.3, copy_ x9.3, sub x9.1, remainder x4.6, add x4.3, transpose x4.0
+    top kernels : radiusSearchCountNeighborsCompactHashMap x1.0, radiusSearchCollectCompactHashMap x1.0, indexCells x0.1, hashCells x0.1
+    sync sites  : search.py:42 radiusSearchOnCompactHashMap x14, search.py:95 radiusSearchOnCompactHashMap x14, slots.py:193 replay [torch.cuda.synchronize] x1, slots.py:200 replay [torch.cuda.synchronize] x1
+  [Verlet] SupportScheme.SuperSymmetric
+    top ops     : select x18.3, copy_ x9.3, sub x9.1, remainder x4.6, add x4.3, transpose x4.0
+    top kernels : radiusSearchCountNeighborsCompactHashMap x1.0, radiusSearchCollectCompactHashMap x1.0, indexCells x0.1, hashCells x0.1
+    sync sites  : search.py:42 radiusSearchOnCompactHashMap x14, search.py:95 radiusSearchOnCompactHashMap x14, slots.py:193 replay [torch.cuda.synchronize] x1, slots.py:200 replay [torch.cuda.synchronize] x1
+  [Verlet] Forced rebuild
+    top ops     : select x18.3, copy_ x9.3, sub x9.1, remainder x4.6, add x4.3, transpose x4.0
+    top kernels : radiusSearchCountNeighborsCompactHashMap x1.0, radiusSearchCollectCompactHashMap x1.0, indexCells x0.1, hashCells x0.1
+    sync sites  : search.py:42 radiusSearchOnCompactHashMap x14, search.py:95 radiusSearchOnCompactHashMap x14, slots.py:193 replay [torch.cuda.synchronize] x1, slots.py:200 replay [torch.cuda.synchronize] x1
+  warpNeighborSearch - radiusSearchCompactHashMap
+    top ops     : select x16.0, sub x8.0, copy_ x6.0, transpose x4.0, remainder x4.0, add x4.0
+    top kernels : radiusSearchCountNeighborsCompactHashMap x1.0, radiusSearchCollectCompactHashMap x1.0
+    sync sites  : search.py:42 radiusSearchOnCompactHashMap x14, search.py:95 radiusSearchOnCompactHashMap x14
+  neighborSearch - allocate neighbors
+    top ops     : slice x2.0, fill_ x2.0, sum x1.0, _to_copy x1.0, _local_scalar_dense x1.0, zeros x1.0
+    sync sites  : search.py:95 radiusSearchOnCompactHashMap x14
+  neighborSearch - collect neighbors
+    top ops     : copy_ x5.0, clone x1.0
+    top kernels : radiusSearchCollectCompactHashMap x1.0
+  neighborSearch - count neighbors
+    top ops     : zeros x1.0, clone x1.0
+    top kernels : radiusSearchCountNeighborsCompactHashMap x1.0
+  neighborSearch - buildFixed
+    top ops     : select x16.0, copy_ x9.0, sub x8.0, index x7.0, _to_copy x6.0, slice x6.0
+    top kernels : indexCells x1.0, hashCells x1.0
+(outside any section)                                  ops 4296, launches 0, syncs 167
+    sync sites  : runner.py:181 _scalar x51, common.py:162 compressibleDiagnostics x51, cudaGraph.py:777 _finishReplay x50, compSPH.py:190 apply x14, report.py:370 reportRun x1
+
+worst 8 of the last 50 marked steps (by syncs, then ops):
+  step 1: up to 290 ops / 4 syncs in one section
+      [warpSPH] - buildVerletList                        ops    290  launches     6  syncs    4
+      [Verlet] SupportScheme.SuperSymmetric              ops    290  launches     6  syncs    4
+      [Verlet] Forced rebuild                            ops    290  launches     6  syncs    4
+      warpNeighborSearch - radiusSearchCompactHashMap    ops     66  launches     2  syncs    2
+  step 4: up to 72 ops / 2 syncs in one section
+      [warpSPH] - buildVerletList                        ops     72  launches     2  syncs    2
+      [Verlet] SupportScheme.SuperSymmetric              ops     72  launches     2  syncs    2
+      [Verlet] Forced rebuild                            ops     72  launches     2  syncs    2
+      warpNeighborSearch - radiusSearchCompactHashMap    ops     66  launches     2  syncs    2
+  step 7: up to 72 ops / 2 syncs in one section
+      [warpSPH] - buildVerletList                        ops     72  launches     2  syncs    2
+      [Verlet] SupportScheme.SuperSymmetric              ops     72  launches     2  syncs    2
+      [Verlet] Forced rebuild                            ops     72  launches     2  syncs    2
+      warpNeighborSearch - radiusSearchCompactHashMap    ops     66  launches     2  syncs    2
+  step 10: up to 72 ops / 2 syncs in one section
+      [warpSPH] - buildVerletList                        ops     72  launches     2  syncs    2
+      [Verlet] SupportScheme.SuperSymmetric              ops     72  launches     2  syncs    2
+      [Verlet] Forced rebuild                            ops     72  launches     2  syncs    2
+      warpNeighborSearch - radiusSearchCompactHashMap    ops     66  launches     2  syncs    2
+  step 13: up to 72 ops / 2 syncs in one section
+      [warpSPH] - buildVerletList                        ops     72  launches     2  syncs    2
+      [Verlet] SupportScheme.SuperSymmetric              ops     72  launches     2  syncs    2
+      [Verlet] Forced rebuild                            ops     72  launches     2  syncs    2
+      warpNeighborSearch - radiusSearchCompactHashMap    ops     66  launches     2  syncs    2
+  step 16: up to 72 ops / 2 syncs in one section
+      [warpSPH] - buildVerletList                        ops     72  launches     2  syncs    2
+      [Verlet] SupportScheme.SuperSymmetric              ops     72  launches     2  syncs    2
+      [Verlet] Forced rebuild                            ops     72  launches     2  syncs    2
+      warpNeighborSearch - radiusSearchCompactHashMap    ops     66  launches     2  syncs    2
+  step 20: up to 72 ops / 2 syncs in one section
+      [warpSPH] - buildVerletList                        ops     72  launches     2  syncs    2
+      [Verlet] SupportScheme.SuperSymmetric              ops     72  launches     2  syncs    2
+      [Verlet] Forced rebuild                            ops     72  launches     2  syncs    2
+      warpNeighborSearch - radiusSearchCompactHashMap    ops     66  launches     2  syncs    2
+  step 24: up to 72 ops / 2 syncs in one section
+      [warpSPH] - buildVerletList                        ops     72  launches     2  syncs    2
+      [Verlet] SupportScheme.SuperSymmetric              ops     72  launches     2  syncs    2
+      [Verlet] Forced rebuild                            ops     72  launches     2  syncs    2
+      warpNeighborSearch - radiusSearchCompactHashMap    ops     66  launches     2  syncs    2

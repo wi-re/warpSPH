@@ -45,7 +45,7 @@ __all__ = ['computeMichelShift']
 
 
 def computeMichelShift(currentState, config, schemeConfig, domain, adjacency, beta, dt, iters=-1,
-                        returnVelocity=False):
+                        returnVelocity=False, wall=None):
     """`returnVelocity=True` additionally returns Eq. (22)'s own
     `delta_u` (the last iteration's shifting *velocity*, pre-`dt`) as a third
     element -- what Michel's own `delta_u_max` convergence-rate figures (Fig.
@@ -61,7 +61,7 @@ def computeMichelShift(currentState, config, schemeConfig, domain, adjacency, be
     dim = currentState.positions.shape[1]
     dx = config.dx if not isinstance(config.dx, torch.Tensor) else config.dx.cpu().item()
 
-    for _ in range(schemeConfig.shiftProperties.iterations if iters == -1 else iters):
+    for iteration in range(schemeConfig.shiftProperties.iterations if iters == -1 else iters):
         # Eq. (2)/(3): the tensile-corrected, pure-volume-weighted kernel
         # gradient sum. R=0.2, n=4 match Eq. (3) exactly.
         gradCtilde = computeDeltaShiftWarp(
@@ -105,14 +105,13 @@ def computeMichelShift(currentState, config, schemeConfig, domain, adjacency, be
             adjacency=adjacency,
         )
 
-        provider = getattr(schemeConfig, 'boundaryProvider', None)
-        if provider is not None:
+        from ..analyticBoundary import resolveWall
+        wallNow = resolveWall(currentState, config, schemeConfig, adjacency, wall if iteration == 0 else None)      # a passed wall is valid for the input positions only
+        if wallNow is not None:
             # analytic walls: the wall continuum's share of the same two ingredients (modules/analyticBoundary/shifting.py)
-            from ..analyticBoundary import evaluateWall, wallShiftRaw, wallUChar
-            from ..gravity import computeGravity
-            wall = evaluateWall(provider, currentState, config, schemeConfig, computeGravity(currentState, config, schemeConfig, adjacency))
-            gradCtilde = gradCtilde + wallShiftRaw(wall, currentState, config, schemeConfig, R=0.2, volumeWeighted=True).to(gradCtilde.dtype)
-            U_char = torch.maximum(U_char, wallUChar(wall, currentState).to(U_char.dtype))
+            from ..analyticBoundary import wallShiftRaw, wallUChar
+            gradCtilde = gradCtilde + wallShiftRaw(wallNow, currentState, config, schemeConfig, R=0.2, volumeWeighted=True).to(gradCtilde.dtype)
+            U_char = torch.maximum(U_char, wallUChar(wallNow, currentState).to(U_char.dtype))
 
         R_i = currentState.supports
         achievedDx_i = torch.pow(currentState.masses / rho0, 1.0 / dim)

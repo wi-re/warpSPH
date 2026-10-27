@@ -1,4 +1,4 @@
-"""Linear acoustic wave initial state and reference plot, used by `warpSPH.cases.linearWave`.
+"""Linear acoustic wave initial state and reference plot, used by `warpSPH.cases.compressible.linearWave`.
 
 `sampleLinearWave` samples a regular 1D lattice with a sinusoidal pressure
 perturbation of amplitude `A` and wavelength `lamda` on top of rest density
@@ -10,6 +10,8 @@ density/pressure against that same analytic traveling-wave profile advected
 at `c_s`.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from ....modules.timestep.compressible import computeTimestep
 
 # final import blocks that are generic
@@ -19,7 +21,7 @@ from warpSPHCore.profiling import record_function
 import numpy as np
 
 # custom SPH libraries
-from warpSPHIntegrators.integration import *
+import torch
 from warpSPHCore import *
 
 # This library
@@ -37,7 +39,8 @@ def sampleLinearWave(
     SimulationSystem,
     A, lamda, c_s, rho0, gamma,
     nIters = 16,
-    supportScheme = AdaptiveSupportScheme.NoScheme
+    supportScheme = AdaptiveSupportScheme.NoScheme,
+    analyticMass = False,
 ):
 
     particles_l = sampleRegularParticles(nx, config.domain, config.targetNeighbors, jitter = 0.0)
@@ -92,14 +95,25 @@ def sampleLinearWave(
 
     adjacency = None
 
-    for i in range(16):    
+    if analyticMass:
+        # Prescribe the physical acoustic density using unequal masses on
+        # the existing regular volume samples. Preserve total mass; do not
+        # iterate masses to hide a kernel quadrature error.
+        rho = rho0 + delta_i/(c_s*c_s)
+        simulationState.masses = particles_l.masses*rho
+        simulationState.densities = rho
+
+    for i in range(0 if analyticMass else 16):
 
 
         adjacency = buildVerletList(
-            simulationState, 
-            config.domain, verletScale = 1.4, supportMode = SupportScheme.SuperSymmetric,
-            priorNeighborhood = adjacency,
-            verbose = False)
+            simulationState,
+            config.domain,
+            verletScale=1.4,
+            supportMode=SupportScheme.SuperSymmetric,
+            priorNeighborhood=adjacency,
+            verbose=False,
+            **neighborSearchOptions(config))
         
         rho = warpOperation(
             simulationState,
@@ -133,14 +147,16 @@ def sampleLinearWave(
     A_, u_, P_, c_ = idealGasEOS(A = None, u = None, P = pressures, rho = rho, gamma = gamma)
 
     # c_[:] = c_s
-    v_ = (c_s * delta_i).view(-1,1)
-    u_[:] = 1/(gamma - 1) - 1 / (gamma * (delta_i + 1))
+    v_ = (delta_i/(rho0*c_s) if analyticMass else c_s*delta_i).view(-1,1)
+    if not analyticMass:
+        u_[:] = 1/(gamma - 1) - 1 / (gamma * (delta_i + 1))
 
     simulationState.internalEnergies = u_
     simulationState.pressures = P_
     simulationState.soundspeeds = c_
     simulationState.entropies = A_
-    simulationState.totalEnergies = u_ + torch.linalg.norm(v_, dim = -1)**2/2 
+    # total (not specific) energy: `totalEnergies` is integrated with the total rate `dEdt` (X3)
+    simulationState.totalEnergies = (u_ + torch.linalg.norm(v_, dim = -1)**2/2) * simulationState.masses 
 
     simulationState.velocities = v_
 

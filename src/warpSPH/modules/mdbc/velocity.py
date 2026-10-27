@@ -21,7 +21,7 @@ into the fluid has to enter `div(v)` with its own normal velocity, otherwise the
 density change the wall drives is missing while gravity's forcing is not, and
 the two diverge. diffSPH's delta-SPH does the same thing by a different route --
 it restores `boundaryBodyVelocities` before `computeMomentum`
-(`schemes/deltaSPH.py:169`) instead of folding the body velocity into the BC.
+(`schemes/weaklyCompressible/deltaSPH.py:169`) instead of folding the body velocity into the BC.
 
 Graded against the wall normal (`scripts/probe_boundaryVelocityModes.py --mode
 verify`) the decomposition (normal, tangential) is now `freeSlip` **(-1, +1)**,
@@ -70,6 +70,7 @@ from ...configurations.weaklyCompressible import WeaklyCompressibleSPHConfig
 
 from ..liu import interpolateLiuLiu
 from ._util import stateHasBoundaryParticles
+from ..boundaryConditions.mirrorVelocity import mirrorVelocity
 from ...utils.syncFree import deviceConstant, ghostSourceIndex, ghostTargetIndex, scatterRows
 
 
@@ -146,8 +147,7 @@ def _slipVelocity(qVelSum, shepValue, bodyVelocity, ghostOffsets, reflect: bool)
     n_b = ghostOffsets / (r_ib.view(-1,1) + 1e-7)
     w = qVel - bodyVelocity
     if reflect:
-        w_n = torch.einsum('nd, nd -> n', w, n_b).view(-1,1) * n_b
-        return bodyVelocity + (w - w_n) - w_n          # = u_body + w_t - w_n
+        return mirrorVelocity(qVel, bodyVelocity, n_b)
     w_t = w - torch.einsum('nd, nd -> n', w, n_b).view(-1,1) * n_b
     return bodyVelocity - w_t
 
@@ -270,9 +270,10 @@ def computeBoundaryVelocities(currentState: Any, config: SimulationConfig, schem
         BCTypes = [region.kind for region in boundaryRegions]
         BCTypesT = deviceConstant([bct.value for bct in BCTypes], torch.int64, currentState.velocities.device)
 
-        boundaryMaterials = torch.where(currentState.kinds != 1,
-                                        torch.zeros_like(currentState.materials), currentState.materials)
-        BCmask = BCTypesT[boundaryMaterials.long()]
+        from ...systems.identity import particleBodyIDs
+        bodyIDs = particleBodyIDs(currentState)
+        boundaryBodies = torch.where(boundaryMask, bodyIDs, torch.zeros_like(bodyIDs))
+        BCmask = BCTypesT[boundaryBodies.long()]
         
         outputVelocities = currentState.velocities.clone()
 

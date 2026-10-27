@@ -1,6 +1,6 @@
 """Configuration for the rudimentary WCSPH acoustic core (`JFNK_PLAN.md`
 Phase B): which kernel/operator modes `f_acoustic_core`
-(`schemes/acousticCore.py`) uses for its continuity divergence and pressure
+(`schemes/experimental/acousticCore.py`) uses for its continuity divergence and pressure
 gradient, plus the (isothermal) equation-of-state constants.
 
 Deliberately as small as `WaveEquationConfig` -- no diffusion, no surface
@@ -9,12 +9,12 @@ feeds has none of those code paths either; see the scheme module's docstring
 for why.
 
 `forcingAmplitude`/`forcingWavenumber` (`JFNK_PLAN.md` Phase E1) add the one
-piece of `cases/kolmogorov.py`'s physics this core can express with zero new
+piece of `cases/periodic/kolmogorov.py`'s physics this core can express with zero new
 machinery: a steady sinusoidal body acceleration, `dv_x/dt += forcingAmplitude
 * sin(forcingWavenumber * pi * y)`. `forcingAmplitude=0.0` (the default)
 recovers Phase B's unforced core exactly -- opt-in, like `JFNKSolver` itself.
 Unlike the real case, this is an acceleration directly, not a per-particle
-force divided by mass elsewhere (`schemes/deltaSPH.py`'s
+force divided by mass elsewhere (`schemes/weaklyCompressible/deltaSPH.py`'s
 `dvdt_forcing = forcing / currentState.masses`) -- same net physics, one
 fewer indirection since there's no `BoundaryCondition`/`forcingFunctions`
 machinery here to route through. Also omits that case's symmetry-breaking
@@ -76,7 +76,7 @@ class AcousticCoreConfig:
     soundSpeed: float = field(default=10.0)
 
     #: Kolmogorov-flow body acceleration (`JFNK_PLAN.md` Phase E1), zero
-    #: (off) by default. `forcingWavenumber=4` matches `cases/kolmogorov.py`'s
+    #: (off) by default. `forcingWavenumber=4` matches `cases/periodic/kolmogorov.py`'s
     #: own default `k`.
     forcingAmplitude: float = field(default=0.0)
     forcingWavenumber: float = field(default=4.0)

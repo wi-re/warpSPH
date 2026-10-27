@@ -16,9 +16,9 @@ from warpSPHBootstrap import bootstrap
 
 bootstrap(precision='float32')
 
-from warpSPH.cases.shockCylinder import cylinderStates  # noqa: E402
-from warpSPH.cases.shockCylinder import diagnostics as caseDiagnostics  # noqa: E402
-from warpSPH.cases.shockCylinder import shockCylinderCase  # noqa: E402
+from warpSPH.cases.compressibleWalls.shockCylinder import cylinderStates  # noqa: E402
+from warpSPH.cases.compressibleWalls.shockCylinder import diagnostics as caseDiagnostics  # noqa: E402
+from warpSPH.cases.compressibleWalls.shockCylinder import shockCylinderCase  # noqa: E402
 from warpSPH.runner import run  # noqa: E402
 
 

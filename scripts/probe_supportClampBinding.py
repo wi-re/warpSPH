@@ -22,9 +22,9 @@ from warpSPH.runner import run  # noqa: E402
 from warpSPH.utils.support import nH_to_n_h  # noqa: E402
 
 CASES = {
-    'gresho': ('warpSPH.cases.greshoVortex', 'greshoVortexCase', dict(nx=100, tLimit=3.0), {}),
-    'kelvinHelmholtz': ('warpSPH.cases.kelvinHelmholtz', 'kelvinHelmholtzCase', dict(nx=128, tLimit=1.5), {}),
-    'sod': ('warpSPH.cases.sod', 'sodCase', dict(nx=400, nSteps=400), dict(right_rho=0.125, right_pressure=0.1)),
+    'gresho': ('warpSPH.cases.compressible.greshoVortex', 'greshoVortexCase', dict(nx=100, tLimit=3.0), {}),
+    'kelvinHelmholtz': ('warpSPH.cases.compressible.kelvinHelmholtz', 'kelvinHelmholtzCase', dict(nx=128, tLimit=1.5), {}),
+    'sod': ('warpSPH.cases.compressible.sod', 'sodCase', dict(nx=400, nSteps=400), dict(right_rho=0.125, right_pressure=0.1)),
 }
 
 

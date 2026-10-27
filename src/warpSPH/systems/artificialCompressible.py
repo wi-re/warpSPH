@@ -1,5 +1,5 @@
 """State/update/system triad for artificial-compressibility SPH
-(`schemes/artificialCompressible.py`, De Courcy et al. 2024; `ACSPH_PLAN.md`).
+(`schemes/incompressible/artificialCompressible.py`, De Courcy et al. 2024; `ACSPH_PLAN.md`).
 
 Two structural differences from `WeaklyCompressibleState`, and they are the
 whole point of the scheme:
@@ -36,7 +36,9 @@ from typing import Optional, Tuple
 import torch
 from warpSPHCore.profiling import record_function
 from warpSPHCore import *
-from warpSPHIntegrators import *
+from .identity import ParticleIdentityState
+from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state, tagged
+from warpSPHIntegrators.state.fields import update_component, update_position
 
 from ..rigidBody.integrate import integrateRigidBody
 from ..rigidBody.update import updateBodyParticlesWCSPH
@@ -47,7 +49,7 @@ __all__ = ['ArtificialCompressibleState', 'ArtificialCompressibleSystemUpdate',
 
 
 @dataclass
-class ArtificialCompressibleState(BaseState):
+class ArtificialCompressibleState(ParticleIdentityState):
     positions: torch.Tensor = integrated('dxdt', tags=('position',))
     velocities: torch.Tensor = integrated('dvdt', tags=('velocity',))
     #: The scheme's third integrated field -- see the module docstring.
@@ -122,7 +124,8 @@ class ArtificialCompressibleSystem(BaseIntegrationSystem):
 
     def initializeNewState(self, *args, verbose=False, **kwargs):
         state = get_reference_state(self)
-        verbosePrint(verbose, f'Initializing new state [t={self.t}]')
+        if verbose:   # self.t may be a device tensor: format it only when printing
+            print(f'Initializing new state [t={self.t}]')
         # The history is carried by reference, deliberately: it is frozen input
         # to the step, not per-stage state, and cloning it at every integrator
         # stage would be pure waste. `rollHistory` is the only writer.

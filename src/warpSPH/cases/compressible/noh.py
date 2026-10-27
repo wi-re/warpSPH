@@ -1,0 +1,157 @@
+"""Noh implosion (1D), compressible.
+
+The script form of this case was `examples/compressible/04-noh-implosion.ipynb`.
+Uniform cold gas converges on the origin at `v_s`; the exact post-shock state is
+`rho_s = rho0 ((gamma+1)/(gamma-1))^dim`, drawn as the reference line.
+"""
+
+from __future__ import annotations
+
+from typing import Dict
+import torch
+
+from ...caseUtils import sampleNoh1D
+from ...configurations.meshless import MeshlessConfig
+from ...runner import Case, RunContext, caseMain, registerCase
+from .common import (COMPRESSIBLE_DEFAULTS, COMPRESSIBLE_PARAMS,
+                           addUniformInternalEnergy,
+                           compressibleDiagnostics, configureCompressible,
+                           paramExtraData)
+from ..common.plotting import ProfileAxis, profilePlot
+
+from ..common.parameters import COMPRESSIBLE_CASE_PARAMETERS, COMPRESSIBLE_SCHEMES, SPH_SCHEMES
+from ...runner.parameters import Parameter as P
+
+__all__ = ['nohCase', 'shockState', 'drawNoh']
+
+
+def shockState(ctx: RunContext):
+    """`(rho_s, P_s)`, the exact post-shock density and pressure."""
+    gamma = ctx.param('gamma')
+    rhoShock = ctx.param('rho0') * ((gamma + 1) / (gamma - 1)) ** ctx.spec.dim
+    return rhoShock, ctx.param('v_s') * rhoShock
+
+
+def buildSystem(ctx: RunContext):
+    if isinstance(ctx.schemeConfig, MeshlessConfig):
+        from ...caseUtils.meshless import toMeshlessSystem
+        from ...systems.compressibleMonaghan import CompressibleState, CompressibleSystem
+        if ctx.param('outerBoundary') == 'open':
+            # Sampling is the same cell-centred lattice as native Noh even
+            # when a saved/resolved run already records periodic=False.
+            ctx.config.domain.periodic = torch.ones_like(ctx.config.domain.periodic)
+        comp = sampleNoh1D(ctx.spec.nx, ctx.config, ctx.schemeConfig,
+                           CompressibleState, CompressibleSystem)
+        addUniformInternalEnergy(comp, ctx.param('gamma'), ctx.param('uAmbient'))
+        reservoir = None
+        if ctx.param('outerBoundary') == 'open':
+            validateConfiguration(ctx.spec)
+            from ...modules.meshless.reservoir import nohReservoir
+            reservoir = nohReservoir(comp.state, ctx.config, ctx.schemeConfig,
+                                     ctx.param('rho0'), ctx.param('uAmbient'))
+            ctx.config.domain.periodic = torch.zeros_like(ctx.config.domain.periodic)
+            ctx.spec = ctx.spec.merged(periodic=False)
+        return toMeshlessSystem(comp, ctx.config, ctx.schemeConfig, inflowReservoir=reservoir)
+    system = sampleNoh1D(ctx.spec.nx, ctx.config, ctx.schemeConfig,
+                        ctx.SimulationState, ctx.SimulationSystem)
+    addUniformInternalEnergy(system, ctx.param('gamma'), ctx.param('uAmbient'))
+    if ctx.param('outerBoundary') == 'open':
+        # Preserve the native sampled lattice and its thermodynamic fields;
+        # only remove the artificial separating jump across the periodic seam.
+        ctx.config.domain.periodic = torch.zeros_like(ctx.config.domain.periodic)
+        system.domain = ctx.config.domain
+        system.adjacency = None
+        ctx.spec = ctx.spec.merged(periodic=False)
+    return system
+
+
+def _shockFront(ctx: RunContext, state):
+    """The two symmetric shock fronts, at +/- v_s t."""
+    front = ctx.param('v_s') * float(state.t)
+    return [front, -front]
+
+
+setupPlot, updatePlot, drawNoh = profilePlot(
+    [
+        ProfileAxis('densities', 'Density',
+                    hlines=lambda ctx, state: [shockState(ctx)[0]]),
+        ProfileAxis('pressures', 'Pressure',
+                    hlines=lambda ctx, state: [shockState(ctx)[1]],
+                    vlines=_shockFront),
+        ProfileAxis('velocities', 'Velocity', component=0),
+    ],
+    shape=(1, 3), figsize=(10, 5), xlim=(0, 1),
+)
+
+
+def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
+    return compressibleDiagnostics(ctx, state)
+
+
+def extraData(ctx: RunContext, state) -> Dict[str, float]:
+    rhoShock, pressureShock = shockState(ctx)
+    treatment = ('analytic Lagrangian inflow reservoir' if getattr(state, 'inflowReservoir', None) is not None
+                 else ctx.param('outerBoundary'))
+    return dict(paramExtraData(ctx, state), rho_s=rhoShock, P_s=pressureShock, boundaryTreatment=treatment)
+
+
+def deriveConfiguration(spec):
+    return {'v_s': (spec.params['gamma'] - 1) / 2}
+
+
+def validateConfiguration(spec):
+    if spec.params['outerBoundary'] == 'open' and spec.scheme in ('MFM', 'MFV'):
+        if spec.schemeOverrides.get('closure', 'none') != 'none':
+            raise ValueError('solver.closure: open Noh inflow reservoirs require closure=none')
+        # There is a finite physical Lagrangian mass: the analytic shock must
+        # not reach the incoming outermost physical particle during this run.
+        encounter = .5*spec.L/(1+spec.params['v_s'])
+        if spec.tLimit >= encounter:
+            raise ValueError('simulation.tLimit: open meshless Noh must stop before the shock reaches the material edge; enlarge L')
+
+
+nohCase = registerCase(Case(
+    name='noh',
+    scheme='CRKSPH',
+    description='Noh implosion (1D), compressible SPH.',
+    buildSystem=buildSystem,
+    configureScheme=configureCompressible,
+    diagnostics=diagnostics,
+    setupPlot=setupPlot,
+    updatePlot=updatePlot,
+    extraData=extraData,
+    defaults=dict(
+        COMPRESSIBLE_DEFAULTS,
+        caseName='04-nohImplosion',
+        dim=1,
+        nx=200,
+        L=2.0,
+        tLimit=0.6,
+        # `sampleNoh1D` does not set a CFL dt of its own, so this run needs an
+        # explicit one -- the notebook's value.
+        dt=1e-4,
+        plotInterval=25,
+        storeInterval=500,
+    ),
+    supportedSchemes=(*COMPRESSIBLE_SCHEMES, 'PESPH'),
+    parameterDefinitions={**COMPRESSIBLE_CASE_PARAMETERS,
+        'uAmbient': P('number', 'Uniform initial specific internal energy; zero retains the exactly cold IC.', 'initial', minimum=0),
+        'outerBoundary': P('string', 'native retains configured periodicity; open removes seam interactions. MFM/MFV add exterior analytic inflow quadrature.', 'boundary', choices=('native', 'open')),
+        'v_s': P('number', 'Reference shock-front propagation speed.', 'reference', units='velocity', exclusiveMinimum=0,
+                 readOnly=True, derivation='(params.gamma - 1) / 2 for the unit inflow speed'),
+    },
+    simulationParameters={'dim': P('integer', 'Dimension supported by this initial-condition sampler.', 'domain', choices=(1,))},
+    variants={},
+    deriveParameters=deriveConfiguration,
+    validateConfiguration=validateConfiguration,
+    params=dict(
+        COMPRESSIBLE_PARAMS,
+        uAmbient=0.,
+        outerBoundary='native',
+        v_s=1 / 3,
+    ),
+))
+
+
+if __name__ == '__main__':
+    caseMain(nohCase)

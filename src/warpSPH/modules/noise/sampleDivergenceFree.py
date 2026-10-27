@@ -15,6 +15,8 @@ The resulting velocity is unit-normalized by its maximum magnitude and zeroed
 on non-fluid (``kinds != 0``) particles.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from ...math.interpolation import RegularGridInterpolator
 from ..density.density import computeDensities
 from warpSPHCore import *
@@ -101,10 +103,13 @@ def sampleDivergenceFreeNoise(particleState, domain, config, schemeConfig, nxGri
     # neighborhood, neighbors = evaluateNeighborhood(particleState, domain, config['kernel'], verletScale = config['neighborhood']['verletScale'], mode =  SupportScheme.SuperSymmetric, priorNeighborhood=None)
     
     adjacency = buildVerletList(
-        particleState, 
-        config.domain, verletScale = config.verletScale, supportMode = SupportScheme.SuperSymmetric,
-        priorNeighborhood = None,
-        verbose = False)
+        particleState,
+        config.domain,
+        verletScale=config.verletScale,
+        supportMode=SupportScheme.SuperSymmetric,
+        priorNeighborhood=None,
+        verbose=False,
+        **neighborSearchOptions(config))
 
     noiseGen = generateNoiseInterpolator(nxGrid, nxGrid, domain, dim = domain.dim, octaves = octaves, lacunarity = lacunarity, persistence = persistence, baseFrequency = baseFrequency, tileable = tileable, kind = kind, seed = seed)
 

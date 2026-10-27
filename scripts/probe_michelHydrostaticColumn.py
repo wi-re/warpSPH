@@ -39,7 +39,7 @@ bootstrap(precision='float32')
 
 import numpy as np
 
-from warpSPH.cases.hydrostaticColumn import hydrostaticColumnCase as case
+from warpSPH.cases.boundaries.hydrostaticColumn import hydrostaticColumnCase as case
 from warpSPH.runner import run
 from warpSPH.configurations.moduleConfigurations.shifting import ShiftingScheme, ShiftingProjectionScheme
 

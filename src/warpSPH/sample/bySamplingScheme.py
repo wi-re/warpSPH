@@ -98,8 +98,8 @@ def sampleParticles(nx: int,config : SimulationConfig):
             targetNeighbors=config.targetNeighbors,
             kernel=config.kernel,
             jitter = 0.1,
-            shiftIters=128
-        )
+            shiftIters=128,
+            config=config)
     elif config.samplingScheme == SamplingScheme.densest:
         particles = sampleDensestParticles(
             nx = nx,

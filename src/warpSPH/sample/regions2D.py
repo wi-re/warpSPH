@@ -12,6 +12,8 @@ problem's per-region resolution. The `splitDomain`/`maskParticles`/
 for `plotDomain`) and not used outside this file.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 import numpy as np
 from ..configurations import *
 from warpSPH.modules import *
@@ -364,9 +366,12 @@ def sampleRegionSystem(
         
 
 
-    adjacency = buildVerletList(simulationState_, 
-                                domain = config.domain,
-                                verletScale = 2**(1/config.dim), supportMode = config.supportMode)
+    adjacency = buildVerletList(
+        simulationState_,
+        domain=config.domain,
+        verletScale=2 ** (1 / config.dim),
+        supportMode=config.supportMode,
+        **neighborSearchOptions(config))
 
     compressibleSystem = SimulationSystem(
         state=simulationState_, 

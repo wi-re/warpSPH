@@ -14,10 +14,13 @@ otherwise-canonical versions in ``warpSPH.utils.support`` -- not re-exported
 here to avoid that ambiguity spreading further.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from ...systems import CompressibleState
 from ...configurations import SimulationConfig, CompressibleSPHConfig
 import numpy as np
 import torch
+from types import SimpleNamespace
 from warpSPHCore import *
 from typing import Optional, Union
 
@@ -62,6 +65,9 @@ def computeNewSupport(target, n_h, h):
     # h_i_new = s * h
     return h_i_new
 
+from .listValidation import listFits as _listFits
+
+
 def evaluateOptimalSupportOwen(
         particles: CompressibleState,
         config: SimulationConfig,
@@ -69,8 +75,27 @@ def evaluateOptimalSupportOwen(
         kernel_: Optional[KernelFunctions] = None,
         adjacency: Optional[Union[AdjacencyList, CompactHashMap]] = None,
         supportScheme: Optional[SupportScheme] = None,
-        verbose = False
+        verbose = False,
+        validateOnce: bool = False,
+        rebuildSlack: float = 0.0,
+        computeDensity: bool = True,
+        grid = None,
+        gridRadius: Optional[float] = None,
+        info: Optional[dict] = None,
         ):
+    """`validateOnce=False` (default): the neighbour list is validated, and rebuilt if needed, at the start of
+    every iteration. `validateOnce=True`: the iterations run on the incoming list without a check (the particles do
+    not move, only `h` changes) and the list is validated ONCE afterwards against the largest support any iteration
+    used (and the particle motion); if that finds the list too short the list is rebuilt and the iterations are
+    run again from the incoming supports. The returned list then covers every iterate and the final supports, so
+    the caller needs no check of its own. `rebuildSlack` rebuilds that final check early (see `buildVerletList`).
+    `computeDensity=False` skips the closing summation density and returns the particles' own densities instead.
+    `grid` (a `CompactHashMap` built for supports up to `gridRadius`): the iterations and the closing density run on
+    the grid and no neighbour list is looked at, validated or built here (`adjacency` is handed back untouched). Every
+    iterate is limited to `gridRadius` so the grid stays valid; `info['outgrown']` receives a device flag that is true
+    when that limit was binding (the caller then makes a grid for a larger radius).
+    Also: the early stop on the support change is evaluated on the device (a finished iteration freezes `h`)
+    instead of a host read per iteration."""
     with record_function("[warpSPH] - evaluateOptimalSupport - Owen"):
         kernel = kernel_ if kernel_ is not None else config.kernel
         # Note `kernel`, not `kernel_`: the table is built from whichever kernel
@@ -80,8 +105,12 @@ def evaluateOptimalSupportOwen(
         key = (kernel, config.domain.dim, table)
         PsiLUT_fn = PsiLUTs.get(key)
         if PsiLUT_fn is None:
-            PsiLUT_fn = PsiLUTs[key] = computeOwen(
-                kernel, dim = config.domain.dim, nMin = 2.0, nMax = 6.0, nLUT = 2**12, table = table)
+            if table == 'hermiteShell':
+                from .owenHermite import HermiteOwen
+                PsiLUT_fn = PsiLUTs[key] = HermiteOwen(kernel,config.domain.dim)
+            else:
+                PsiLUT_fn = PsiLUTs[key] = computeOwen(
+                    kernel, dim = config.domain.dim, nMin = 2.0, nMax = 6.0, nLUT = 2**12, table = table)
         # particles, domain, kernel, targetNeighbors, PsiLUT_fn, nIter = 16, neighborhood = None, verbose = False,eps = 1e-3, neighborhoodAlgorithm = 'compact'):
         hs = [particles.supports]
         # print(particles)
@@ -101,22 +130,48 @@ def evaluateOptimalSupportOwen(
         adaptiveHThreshold = compConfig.adaptiveSupportThreshold
         # verbose = False
         
-        for i in range(nIter):
+        suppliedSupports = particles.supports
+        peakSupports = particles.supports
+        converged = None                       # device flag: an iteration changed h by less than the threshold
+        attempt = 0
+        i = 0
+        onGrid = grid is not None
+        deviceStop = validateOnce or onGrid
+        outgrown = None
+        while i < nIter:
             if verbose:
                 print('----------------------------------')
                 print(f'Iteration {i}, target: {nhTarget}')
-            adjacency = buildVerletList(particles, domain = config.domain, verletScale = verletScale, supportMode = SupportScheme.SuperSymmetric, priorNeighborhood=adjacency, verbose=False)
+            if onGrid:
+                adjacency_ = grid
+            elif not validateOnce or not _listFits(adjacency, particles):
+                adjacency = buildVerletList(
+                    particles,
+                    domain=config.domain,
+                    verletScale=verletScale,
+                    supportMode=SupportScheme.SuperSymmetric,
+                    priorNeighborhood=adjacency,
+                    verbose=False,
+                    **neighborSearchOptions(config))
+            if not onGrid:
+                adjacency_ = adjacency
 
             
             # psi_0, psi_0_H = computePsi_0(particles, kernel_, neighbors.get('noghost'), supportScheme, config)
-            psi_0, psi_0_H = computePsi0Warp(
+            psiFunction = computePsi0Warp
+            psiOptions = {}
+            if getattr(compConfig, 'owenMaterialWeights', False) or table == 'hermiteShell':
+                from .wp_materialPsi import computeMaterialPsi0Warp
+                psiFunction = computeMaterialPsi0Warp
+                psiOptions = dict(weighted=getattr(compConfig,'owenMaterialWeights',False),table=PsiLUT_fn if table=='hermiteShell' else None)
+            psi_0, psi_0_H = psiFunction(
                 particles,
                 operationProperties=OperationProperties(
                     kernel = config.kernel,
                     supportMode = SupportScheme.Gather
                 ),
                 domain = config.domain,
-                adjacency = adjacency
+                adjacency = adjacency_, **psiOptions
             )
             if verbose:
                 print(f'Psi: {psi_0_H.min()} | {psi_0_H.max()} | {psi_0_H.mean()}')
@@ -128,10 +183,20 @@ def evaluateOptimalSupportOwen(
             h = computeNewSupport(nhTarget, n_h_i, particles.supports)
             psis.append(psi_0_H)
             h = h.clamp(min = hMin * 0.25, max = hMax * 4.0)
+            if onGrid:
+                binding = h.max() > gridRadius
+                outgrown = binding if outgrown is None else (outgrown | binding)
+                h = h.clamp(max = gridRadius)
             hMin = h.min()
             hMax = h.max()
             
             h_ratio = h / particles.supports
+            if deviceStop:
+                # a converged iteration freezes h (what the early `break` did), without reading the flag on the host
+                if converged is not None:
+                    h = torch.where(converged, particles.supports, h)
+                    h_ratio = torch.where(converged, torch.ones_like(h_ratio), h_ratio)
+                peakSupports = torch.maximum(peakSupports, h)
             
             if verbose: 
                 print(f'Support: {h.min()} | {h.max()} | {h.mean()}')
@@ -141,12 +206,42 @@ def evaluateOptimalSupportOwen(
 
             hs.append(h)
 
-            if (h_ratio - 1).abs().max() < adaptiveHThreshold:
+            if deviceStop:
+                done = (h_ratio - 1).abs().max() < adaptiveHThreshold
+                converged = done if converged is None else (converged | done)
+            elif (h_ratio - 1).abs().max() < adaptiveHThreshold:
                 if verbose: 
                     print('Stopping Early')
                 # print('Stopping Early')
                 break
+            i += 1
+            if validateOnce and not onGrid and i == nIter and attempt == 0:
+                # one validation for the whole solve: the particles with the largest support any iteration used
+                checked = buildVerletList(
+                    SimpleNamespace(positions=particles.positions, supports=peakSupports),
+                    domain=config.domain,
+                    verletScale=verletScale,
+                    supportMode=SupportScheme.SuperSymmetric,
+                    priorNeighborhood=adjacency,
+                    verbose=False,
+                    rebuildSlack=rebuildSlack,
+                    **neighborSearchOptions(config))
+                if checked is not adjacency:
+                    # the list was too short for some iterate: use the new one and solve again from the supplied supports
+                    adjacency = checked
+                    attempt = 1
+                    i = 0
+                    particles.supports = suppliedSupports
+                    peakSupports = suppliedSupports
+                    converged = None
+                    hs = [suppliedSupports]
+                    psis = []
 
+        if info is not None and outgrown is not None:
+            info['outgrown'] = outgrown
+        if not computeDensity:
+            # the caller recomputes its density (in its own sense) right after: hand back the one the particles have
+            return particles.densities, hs[-1], adjacency, psis, hs
         densities = warpOperation(
             particles,
             OperationProperties(
@@ -155,7 +250,7 @@ def evaluateOptimalSupportOwen(
                 supportMode = supportScheme,
             ),
             domain = config.domain,
-            adjacency = adjacency
+            adjacency = grid if onGrid else adjacency
         )
         
         return densities, hs[-1], adjacency, psis, hs

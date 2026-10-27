@@ -16,7 +16,7 @@ pytest.importorskip('warpSPHBoundaries')
 from warpSPH.cases import importAll  # noqa: E402
 from warpSPH.runner import buildContext, getCase, run  # noqa: E402
 from warpSPH.runner.caseSpec import CaseSpec  # noqa: E402
-from warpSPH.schemes.deltaSPH import deltaSPH_step  # noqa: E402
+from warpSPH.schemes.weaklyCompressible.deltaSPH import deltaSPH_step  # noqa: E402
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA')
 

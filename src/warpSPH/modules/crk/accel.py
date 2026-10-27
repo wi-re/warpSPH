@@ -10,6 +10,8 @@ Q_j` built from velocity-gradient-reconstructed pair velocities
 pressure/viscosity contributions consumed elsewhere for diagnostics.
 """
 
+from warpSPHCore.type_config import index_t, offset_t
+
 import warp as wp
 from warp.types import vector, matrix
 from typing import Any
@@ -45,9 +47,9 @@ def computeCrkSPHAccel_Func_i(
     # Operation specific parameters
      # type: ignore
             
-    beginIndex: wp.int32, # type: ignore
+    beginIndex: offset_t, # type: ignore
     numIndices: wp.int32, # type: ignore
-    offsetArray: wp.array(dtype = wp.int64), # type: ignore
+    offsetArray: wp.array(dtype = index_t), # type: ignore
 
     # Operation Mode for masking certain kinds of interactions, e.g. for directional operations
     ki : wp.int32, referenceKinds : wp.array(dtype = wp.int32), # type: ignore
@@ -73,6 +75,7 @@ def computeCrkSPHAccel_Func_i(
 
     gradV_i: matrix(shape=(Any, Any), dtype=scalar_t), referenceVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)),# type: ignore
 
+    calculateDudt: wp.bool,
     # Dummy value to allow allocation
     pressureAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     viscosityAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
@@ -81,9 +84,10 @@ def computeCrkSPHAccel_Func_i(
 
     # Initialize the output value
     out = zero_like_warp(pressureAccel_ij[i])
+    heating = scalar_t(0.0)
     # # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j  = wp.int32(offsetArray[jj])
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
             if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
@@ -145,9 +149,9 @@ def computeCrkSPHAccel_Func_i(
         # `Frontiere2017` term of `modules/dissipation/pi/terms.py`
         alpha_j = access_optional(referenceAlphas, j, viscositySwitch, scalar_t(1.0))
         Q_i = computeFrontiereQ(xi, xj, hi, hj, rhoi, rhoj, vij_dot, domainState, kernelProperties.kernelFunction,
-                                cs_i, cs_j, alpha_i, alpha_j, viscosityParams, False)
+                                cs_i, cs_j, alpha_i, alpha_j, viscosityParams, False, crkViscosityParams.viscosityKernelScale)
         Q_j = computeFrontiereQ(xi, xj, hi, hj, rhoi, rhoj, vij_dot, domainState, kernelProperties.kernelFunction,
-                                cs_i, cs_j, alpha_i, alpha_j, viscosityParams, True)
+                                cs_i, cs_j, alpha_i, alpha_j, viscosityParams, True, crkViscosityParams.viscosityKernelScale)
 
 
         gradw_ij = scalar_t(0.5) * (gradw_i + gradw_j)
@@ -192,7 +196,16 @@ def computeCrkSPHAccel_Func_i(
         viscosityAccel_ij[jj] = viscosityTerm_ij
         pressureAccel_ij[jj] = pressureTerm_ij
         out += pressureTerm_ij + viscosityTerm_ij
-    return out
+        if calculateDudt:
+            # Same raw predictor as dudt.py; reuse the pair geometry, corrected
+            # gradient and one-sided Q values already evaluated for momentum.
+            dot = wp.dot(vel_i - vel_j, gradw_ij)
+            pTerm = P_j * dot * pairWeight / mi
+            vTerm = scalar_t(0.5) * (Q_i + Q_j) * mu_ij * dot * pairWeight / mi
+            if crkViscosityParams.oneSidedWork:
+                vTerm = Q_j * mu_ij * dot * pairWeight / mi
+            heating += pTerm + vTerm
+    return out, heating
 
 
 
@@ -221,6 +234,7 @@ def computeCrkSPHAccel_Func_Adjacency(
     crkViscosityParams: CRKViscosity,
 
     queryVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), referenceVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)),# type: ignore
+    calculateDudt: wp.bool,
     accel: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     pressureAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     viscosityAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)) # type: ignore
@@ -228,7 +242,7 @@ def computeCrkSPHAccel_Func_Adjacency(
     xi, hi, mi, rhoi, ki = getParticle(queryState, i)
     if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
         if not checkDirectionality_i(ki, kernelProperties.operationMode):
-            return zero_like_warp(accel[i])
+            return zero_like_warp(accel[i]), scalar_t(0.0)
 
     useGradientRenormalization, Li = getL_i(correctionData, i)
     useGradHTerms, omega_i = getGradH_i(correctionData, i)
@@ -243,26 +257,28 @@ def computeCrkSPHAccel_Func_Adjacency(
     gradV_i = queryVelocityTensor[i]
 
     out = zero_like_warp(accel[i])
+    heating = scalar_t(0.0)
     for o in range(numOffsets):
         # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
         if not useAdjacency and (o % lanes) != lane:
             continue
-        beginIndex = wp.int32(0)
+        beginIndex = offset_t(0)
         numIndices = wp.int32(0)
         if useAdjacency:    
             beginIndex = adjacencyState.neighborOffsets[i]
             numIndices = adjacencyState.numNeighbors[i]
         else:
-            beginIndex, numIndices = checkOffset(
+            gridBegin, numIndices = checkOffset(
                 i, queryState.positions, gridState.numCells, gridState.D, 
                 o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
                 domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
             )
+            beginIndex = offset_t(gridBegin)
             if beginIndex < 0:
                 continue
         
         beginIndex, numIndices = laneSlice(beginIndex, numIndices, lane, lanes, useAdjacency)
-        out += computeCrkSPHAccel_Func_i(
+        partial, thermal = computeCrkSPHAccel_Func_i(
             i, dim, 
             xi, hi, mi, rhoi,
             referenceState,  correctionData, domainState,
@@ -284,9 +300,11 @@ def computeCrkSPHAccel_Func_Adjacency(
             crkViscosityParams,
             gradV_i, referenceVelocityTensor,
 
-            pressureAccel_ij, viscosityAccel_ij
+            calculateDudt, pressureAccel_ij, viscosityAccel_ij
         )
-    return out
+        out += partial
+        heating += thermal
+    return out, heating
 
 
 
@@ -310,17 +328,19 @@ def computeCrkSPHAccel_Kernel(
     crkViscosityParams: CRKViscosity,
 
     queryVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), referenceVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)),# type: ignore
-    # The last parameter is always the output array and should not be changed
+    calculateDudt: wp.bool,
+    # Outputs
     accel : wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     pressureAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     viscosityAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    dudt: wp.array(dtype=scalar_t),
 ):
     i = wp.tid()
     numParticles = queryState.positions.shape[0]
     if i >= numParticles:
         return
 
-    accel[i] = computeCrkSPHAccel_Func_Adjacency(
+    acceleration, heating = computeCrkSPHAccel_Func_Adjacency(
         i, domainState.dim, 0, 1,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
@@ -334,8 +354,11 @@ def computeCrkSPHAccel_Kernel(
         viscosityParams,
         crkViscosityParams,
         queryVelocityTensor, referenceVelocityTensor,
-        accel, pressureAccel_ij, viscosityAccel_ij
+        calculateDudt, accel, pressureAccel_ij, viscosityAccel_ij
     )
+
+    accel[i] = acceleration
+    dudt[i] = heating
 
 @wp.kernel
 def computeCrkSPHAccel_KernelTiled(
@@ -357,16 +380,18 @@ def computeCrkSPHAccel_KernelTiled(
     crkViscosityParams: CRKViscosity,
 
     queryVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), referenceVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)),# type: ignore
-    # The last parameter is always the output array and should not be changed
+    calculateDudt: wp.bool,
+    # Outputs
     accel : wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     pressureAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     viscosityAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    dudt: wp.array(dtype=scalar_t),
 ):
     # Multi-lane variant of computeCrkSPHAccel_Kernel (warpSPHCore autograd/lanes.py):
     # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
 
     i, lane = wp.tid()
-    partial = computeCrkSPHAccel_Func_Adjacency(
+    partial, thermal = computeCrkSPHAccel_Func_Adjacency(
         i, domainState.dim, lane, wp.block_dim(),
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
@@ -379,15 +404,17 @@ def computeCrkSPHAccel_KernelTiled(
         viscosityParams,
         crkViscosityParams,
         queryVelocityTensor, referenceVelocityTensor,
-        accel, pressureAccel_ij, viscosityAccel_ij
+        calculateDudt, accel, pressureAccel_ij, viscosityAccel_ij
     )
     total = laneSum(partial)
+    thermalTotal = laneSum(thermal)
     if lane == 0:
         accel[i] = total
+        dudt[i] = thermalTotal
 
 
 def _crkAccelPairShape(ctx, extras):
-    return ctx.adjacency.i.shape[0]
+    return ctx.adjacency.paddedI.shape[0]   # per-edge outputs have the PADDED capacity (a fixed shape for a graph); the kernels fill the first numEdges
 
 
 def _crkAccelDtype(ctx, extras):
@@ -401,6 +428,7 @@ _CRK_ACCEL = OperatorSpec(
         OutputSpec(dtype=_crkAccelDtype, shape=ShapeOf.QUERY),
         OutputSpec(dtype=_crkAccelDtype, shape=_crkAccelPairShape),
         OutputSpec(dtype=_crkAccelDtype, shape=_crkAccelPairShape),
+        OutputSpec(dtype=scalar_t, shape=ShapeOf.QUERY),
     ),
     extras=(
         ExtraSpec("queryVelocities", ExtraKind.TENSOR),
@@ -420,6 +448,7 @@ _CRK_ACCEL = OperatorSpec(
         ExtraSpec("crkViscosityParams", ExtraKind.SCALAR),
         ExtraSpec("queryVelocityTensor", ExtraKind.TENSOR),
         ExtraSpec("referenceVelocityTensor", ExtraKind.TENSOR),
+        ExtraSpec("calculateDudt", ExtraKind.SCALAR),
     ),
 )
 
@@ -444,6 +473,7 @@ def computeCrkSPHAccelWarp(
     crkState: Optional[CRKState] = None,
     gradHState: Optional[Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor], GradHState]] = None,
     renormalizationState: Optional[Union[torch.Tensor,RenormalizationState]] = None,
+    *, returnDudt: bool = False,
 ):
     if adjacency is None or isinstance(adjacency, CompactHashMap):
         raise ValueError("This module requires an adjacency structure.")
@@ -515,7 +545,7 @@ def computeCrkSPHAccelWarp(
                     crk=crkState, gradH=gradHState, renorm=renormalizationState,
                 ),
             )
-            return launchOperator(
+            result = launchOperator(
                 _CRK_ACCEL, ctx,
                 queryVelocities=queryVelocities_, referenceVelocities=referenceVelocities_,
                 queryEnergies=queryEnergies_, referenceEnergies=referenceEnergies_,
@@ -525,7 +555,9 @@ def computeCrkSPHAccelWarp(
                 conductivityParams=conductivityParams,
                 crkViscosityParams=crkViscosityParams,
                 queryVelocityTensor=queryVelocityTensor, referenceVelocityTensor=referenceVelocityTensor,
+                calculateDudt=returnDudt,
             )
+            return result if returnDudt else result[:3]
 
 
         # with record_function("warpSPH[CRKVolume] - Kernel Execution"):

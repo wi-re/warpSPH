@@ -64,6 +64,23 @@ def test_equal_masses_match_the_mass_density_solve(dim, nx):
     assert torch.allclose(rhoN, rhoM, rtol=1e-4)
 
 
+@pytest.mark.parametrize('scheme', [AdaptiveSupportScheme.Monaghan, AdaptiveSupportScheme.NumberDensity])
+@pytest.mark.parametrize('length', [2.0, .02])
+def test_converged_small_support_stops_without_spending_the_iteration_budget(scheme, length):
+    cfg = _config(1, l=length)
+    x, dx = _jitteredLattice(1, 128, jitter=0, l=length)
+    masses = torch.full((len(x),), dx)
+    state = _state(x, masses, torch.full((len(x),), cfg.n_h*dx))
+    _, converged, _ = _solve(state, cfg, scheme, iters=30)
+    state.supports = converged.clone()
+    params = CompressibleSPHConfig(adaptiveSupportScheme=scheme, adaptiveSupportIterations=16,
+        adaptiveSupportThreshold=1e-5, adaptiveSupportCorrections=False)
+    _, actual, _, _, history = evaluateOptimalSupport(state, cfg, params, SupportScheme.Gather, None)
+    # The old absolute 1e-6 denominator offset forced all 16 iterations here.
+    assert len(history)-1 <= 2
+    assert torch.allclose(actual, converged, rtol=1e-5, atol=0)
+
+
 def test_unequal_masses_do_not_enter_h_and_satisfy_the_constraint():
     dim, nx = 2, 40
     cfg = _config(dim)
@@ -91,13 +108,12 @@ def test_unequal_masses_do_not_enter_h_and_satisfy_the_constraint():
     assert ((hMass - h1).abs() / h1).max() > 1e-2
 
 
-def test_pesph_is_an_enum_member_only_until_phase_4():
+def test_pesph_resolves_to_the_registered_energy_variant():
     assert CompressibleSPHScheme.PESPH.value == 5
     assert {v.name for v in PESPHVariant} == {'PressureEnergy', 'PressureEntropy'}
-    with pytest.raises(NotImplementedError, match='Phase 4'):
-        buildScheme(CompressibleSPHScheme.PESPH)
-    with pytest.raises(NotImplementedError, match='Phase 4'):
-        buildScheme('PESPH')
+    from warpSPH.systems.pesph import PressureEnergyState
+    for name in (CompressibleSPHScheme.PESPH, 'PESPH'):
+        assert buildScheme(name).SimulationState is PressureEnergyState
 
 
 @pytest.mark.parametrize('gamma', [1.4, 5.0 / 3.0])
@@ -116,3 +132,75 @@ def test_ideal_gas_entropy_round_trip(gamma):
         assert torch.allclose(u2, u, rtol=1e-12)
         assert torch.allclose(P2, P, rtol=1e-12)
         assert torch.allclose(c2, c, rtol=1e-12)
+
+
+@pytest.mark.parametrize('scheme', [AdaptiveSupportScheme.Monaghan, AdaptiveSupportScheme.NumberDensity])
+@pytest.mark.parametrize('scenario', ['unchanged', 'moved', 'grown', 'count'])
+@pytest.mark.parametrize('dim,nx', [(1, 64), (2, 14), (3, 7)])
+def test_validate_once_newton_matches_eager_and_covers_all_supports(scheme, scenario, dim, nx):
+    from warpSPHCore import buildVerletList
+    cfg = _config(dim, n_h=2.0)
+    cfg.kernel = KernelFunctions.CubicSpline
+    cfg.verletScale = 1.1
+    x, dx = _jitteredLattice(dim, nx)
+    m = dx**dim*(1+torch.rand(len(x), generator=torch.Generator().manual_seed(5)))
+    h = torch.full((len(x),), 2.0*dx)
+    st = _state(x, m, h)
+    params = CompressibleSPHConfig(adaptiveSupportScheme=scheme, adaptiveSupportIterations=30,
+        adaptiveSupportThreshold=1e-5, adaptiveSupportCorrections=False)
+    _, settled, adjacency, *_ = evaluateOptimalSupport(st, cfg, params, SupportScheme.Gather)
+    h = settled.clone()
+    if scenario == 'moved':
+        # Core lists retain input positions: move into a new tensor, as the
+        # integrators do, so the cached generation remains immutable.
+        x = x.clone()
+        x[:len(x)//2, 0] += .7*dx
+    elif scenario == 'grown':
+        # Deliberately incomplete list and a Newton trajectory that outgrows it.
+        small = _state(x, m, .55*h)
+        adjacency = buildVerletList(small, cfg.domain, verletScale=cfg.verletScale,
+            supportMode=SupportScheme.SuperSymmetric)
+        h = .9*h
+    elif scenario == 'count':
+        x, m, h = x[:-3], m[:-3], h[:-3]
+    eager = evaluateOptimalSupport(_state(x, m, h), cfg, params, SupportScheme.Gather, None)
+    state = _state(x, m, h)
+    actual = evaluateOptimalSupport(state, cfg, params, SupportScheme.Gather, adjacency, validateOnce=True)
+    assert torch.allclose(actual[1], eager[1], rtol=3e-5, atol=1e-7)
+    assert torch.allclose(actual[0], eager[0], rtol=5e-5, atol=1e-6)
+    # Re-sum on a newly built final list, independently of the speculative list.
+    from warpSPHCore import OperationProperties, WarpOperation, warpOperation
+    final = buildVerletList(state, cfg.domain, verletScale=cfg.verletScale,
+        supportMode=SupportScheme.SuperSymmetric)
+    fresh = warpOperation(state, OperationProperties(kernel=cfg.kernel, operation=WarpOperation.Density,
+        supportMode=SupportScheme.Gather), domain=cfg.domain, adjacency=final)
+    if scheme is AdaptiveSupportScheme.NumberDensity:
+        # Its returned density is m_i*n_i, independent of reference masses.
+        masses = state.masses
+        state.masses = torch.ones_like(masses)
+        fresh = masses*warpOperation(state, OperationProperties(kernel=cfg.kernel,
+            operation=WarpOperation.Density, supportMode=SupportScheme.Gather),
+            domain=cfg.domain, adjacency=final)
+        state.masses = masses
+    assert torch.allclose(actual[0], fresh, rtol=3e-5, atol=1e-6)
+    assert torch.equal(state.masses, m.to(DEV))
+    if scenario == 'grown':
+        assert actual[2] is not adjacency, 'The short speculative list must be discarded'
+
+
+@pytest.mark.parametrize('scheme', [AdaptiveSupportScheme.Monaghan, AdaptiveSupportScheme.NumberDensity])
+def test_newton_can_skip_unused_closing_density_without_changing_support(scheme):
+    cfg = _config(1)
+    x, dx = _jitteredLattice(1, 64)
+    m = torch.linspace(dx, 2*dx, len(x))
+    h = torch.full((len(x),), 1.3*cfg.n_h*dx)
+    params = CompressibleSPHConfig(adaptiveSupportScheme=scheme, adaptiveSupportIterations=24,
+        adaptiveSupportThreshold=1e-5, adaptiveSupportCorrections=False)
+    full = evaluateOptimalSupport(_state(x, m, h), cfg, params, SupportScheme.Gather, validateOnce=True)
+    state = _state(x, m, h)
+    original = state.densities
+    skipped = evaluateOptimalSupport(state, cfg, params, SupportScheme.Gather,
+        validateOnce=True, computeDensity=False)
+    assert torch.equal(skipped[1], full[1])
+    assert skipped[0] is original and state.densities is original
+    assert torch.equal(state.masses, m.to(DEV))

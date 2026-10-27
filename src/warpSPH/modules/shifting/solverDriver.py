@@ -61,7 +61,8 @@ def runKrylov(
     `maxiter`, `precond`, `threshold`, `dim` -- the dict both production
     callers already build."""
     if solver == ShiftingImplicitSolver.gmres:
-        return gmresSolve(matvec, b, x0, restart=restart, **solverArgs)
+        # (GMRES reads the host once per cycle; the still-running-flag interval is for the device-predicated solvers)
+        return gmresSolve(matvec, b, x0, restart=restart, **{k: v for k, v in solverArgs.items() if k != 'checkEvery'})
     return bicgstabSolve(matvec, b, x0, **solverArgs)
 
 

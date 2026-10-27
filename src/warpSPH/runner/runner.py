@@ -11,18 +11,22 @@ module is that code, parameterised by a :class:`~warpSPH.runner.case.Case`.
 from __future__ import annotations
 
 import collections
+import contextlib
 import itertools
 import math
 import os
 import sys
 import time
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 import torch
+from warpSPHCore import callAudit
+from warpSPHCore.profiling import record_function
+from warpSPHIntegrators.state import deferHostTime
 
 from ..configurations import buildConfig
 from ..enumTypes import (ArtificialCompressibleSPHScheme, CompressibleSPHScheme,
@@ -30,6 +34,7 @@ from ..enumTypes import (ArtificialCompressibleSPHScheme, CompressibleSPHScheme,
                          WeaklyCompressibleSPHScheme)
 from ..io.hdf5 import createOutFile
 from ..io.export import exportSimulationSystem, prepExport, writeFrame, writeInitialData
+from ..modules.timestep import defaultTimestep
 from ..schemes import buildScheme
 from ..utils import buildDomainDescription
 from .case import Case, RunContext
@@ -70,6 +75,12 @@ class RunResult:
         return np.array([row[key] for row in self.trajectory if key in row])
 
 
+#: the schemes whose step consumes the analytic boundary provider (a scheme leaves the refusal when it is ported)
+ANALYTIC_WALL_SCHEMES = frozenset({'deltaSPH', 'iisph', 'dfsph', 'dfsphPredictor', 'dfsphShift'})
+#: Native static analytic coupling remains experimental for free-surface impact accuracy.
+EXPERIMENTAL_ANALYTIC_WALL_SCHEMES = frozenset({'iisph', 'dfsph', 'dfsphPredictor', 'dfsphShift'})
+
+
 def resolveEnum(enumClass, value):
     """Case-insensitive name lookup, passing through values already resolved."""
     if value is None or isinstance(value, enumClass):
@@ -85,6 +96,8 @@ def resolveEnum(enumClass, value):
 
 def _resolveScheme(name: str):
     """Map a scheme name onto whichever of the five scheme enums owns it."""
+    from ..schemes.builder import rejectRetiredScheme
+    rejectRetiredScheme(name)
     for enumClass in (CompressibleSPHScheme, WeaklyCompressibleSPHScheme, IncompressibleSPHScheme,
                       ArtificialCompressibleSPHScheme, WaveEquationScheme):
         for member in enumClass:
@@ -102,7 +115,7 @@ def buildContext(case: Case, spec: CaseSpec) -> RunContext:
     wp.init()
 
     from warpSPHCore.type_config import get_torch_precision
-    from warpSPHIntegrators import IntegrationSchemeType
+    from warpSPHIntegrators.schemes import IntegrationSchemeType
     from warpSPHCore import (GradientScheme, KernelFunctions, LaplacianScheme,
                              SupportScheme)
     from ..geometry import SamplingScheme
@@ -113,18 +126,27 @@ def buildContext(case: Case, spec: CaseSpec) -> RunContext:
 
     domain = buildDomainDescription(spec.L, spec.dim, spec.periodic, device, dtype)
 
+    scheme = _resolveScheme(spec.scheme or case.scheme)
+    if isinstance(scheme, IncompressibleSPHScheme):
+        spec = replace(spec, calibrateNormalization=True)
+    integrationSchemeName = spec.integrationScheme
+
     config, integrator = buildConfig(
         domain=domain,
         dim=spec.dim,
         kernel=resolveEnum(KernelFunctions, spec.kernel),
         n_h=spec.n_h,
+        # Summation densities entering a pressure solve must represent the
+        # initial rest lattice, rather than its kernel quadrature offset.
         calibrateNormalization=spec.calibrateNormalization,
         densityCorrection=spec.densityCorrection,
         supportMode=resolveEnum(SupportScheme, spec.supportMode),
         gradientMode=resolveEnum(GradientScheme, spec.gradientMode),
         laplacianMode=resolveEnum(LaplacianScheme, spec.laplacianMode),
-        integrationScheme=resolveEnum(IntegrationSchemeType, spec.integrationScheme),
+        integrationScheme=resolveEnum(IntegrationSchemeType, integrationSchemeName),
         samplingScheme=resolveEnum(SamplingScheme, spec.samplingScheme),
+        compute={k: v for k, v in dict(execution=spec.execution, graphMaxParticles=spec.graphMaxParticles, iterationChecks=spec.iterationChecks,
+                                      krylovCheckEvery=spec.krylovCheckEvery, pipelineOutputs=spec.pipelineOutputs).items() if v is not None},
         verletScale=spec.verletScale,
         device=device,
         dtype=dtype,
@@ -137,7 +159,6 @@ def buildContext(case: Case, spec: CaseSpec) -> RunContext:
         dx=spec.L / spec.nx,
     )
 
-    scheme = _resolveScheme(spec.scheme or case.scheme)
     bundle = buildScheme(scheme)
 
     return RunContext(
@@ -159,6 +180,16 @@ def _scalar(value) -> float:
     return value.detach().cpu().item() if isinstance(value, torch.Tensor) else float(value)
 
 
+def _scalars(*values) -> List[float]:
+    """Several scalars (device tensors or host numbers) with ONE host transfer; each value is
+    exactly what `_scalar` returns (a float32 widened to float64 is exact)."""
+    tensors = [v for v in values if isinstance(v, torch.Tensor)]
+    if len(tensors) <= 1:
+        return [_scalar(v) for v in values]
+    host = iter(torch.stack([v.detach().reshape(()).double() for v in tensors]).cpu().tolist())
+    return [next(host) if isinstance(v, torch.Tensor) else float(v) for v in values]
+
+
 class _Timer:
     """CUDA-event timing where available, wall clock otherwise."""
 
@@ -177,7 +208,8 @@ class _Timer:
     def __exit__(self, *exc):
         if self.cuda:
             self._end.record()
-            torch.cuda.synchronize()
+            with record_function("[runner] step timer (cuda synchronize)"):
+                torch.cuda.synchronize()
             self.elapsed_ms = self._begin.elapsed_time(self._end)
         else:
             self.elapsed_ms = (time.perf_counter() - self._begin) * 1000.0
@@ -211,17 +243,96 @@ def run(case: Case, spec: Optional[CaseSpec] = None, *, onVelocityAlarm=None,
         return _run(case, spec, startedAt, onVelocityAlarm)
 
 
-def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> RunResult:
+def prepareContext(case: Case, spec: CaseSpec) -> RunContext:
+    """Configure/validate a case without sampling particles or advancing time."""
     ctx = buildContext(case, spec)
-
     if case.configureScheme is not None:
         case.configureScheme(ctx)
-    if spec.cudaGraph:
-        ctx.schemeConfig.cudaGraph = True
+    from .configuration import applySchemeOverrides
+    applySchemeOverrides(ctx)
+    if isinstance(ctx.scheme, IncompressibleSPHScheme):
+        from ..caseUtils.projection import validateProjectionOptions
+        validateProjectionOptions(ctx)
+    integrationMethod = getattr(ctx.schemeConfig, 'integrationMethod', None) or ctx.bundle.integrationMethod
+    if integrationMethod is not None:
+        from warpSPHIntegrators.schemes import get_scheme, IntegrationSchemeType
+        method = integrationMethod() if callable(integrationMethod) else integrationMethod
+        ctx.integrator = get_scheme(method)
+        if isinstance(method, IntegrationSchemeType):
+            ctx.config.integrationScheme = method
+    if hasattr(ctx.schemeConfig, 'validate'):
+        ctx.schemeConfig.validate(ctx.config)
+    ctx.bundle = ctx.bundle.configured(ctx.schemeConfig)
+    return ctx
 
+
+def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> RunResult:
+    ctx = prepareContext(case, spec)
+    try:
+        return _runContext(ctx, case, spec, startedAt, onVelocityAlarm)
+    finally:
+        # Optional adapters may stop at a safe hook boundary by raising. Always
+        # finish the recording before they report a terminal run state.
+        outFile = ctx.scratch.pop('trajectoryFile', None)
+        if outFile is not None:
+            outFile.close()
+
+
+def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
+    if isinstance(ctx.scheme, IncompressibleSPHScheme):
+        from ..modules.timestep.projection import limitProjectionCase
+        case = limitProjectionCase(case)
     system = case.buildSystem(ctx)
+    if getattr(ctx.schemeConfig, 'crkEvolution', 'summation') in ('spheral', 'paper'):
+        state = system.state
+        if state.crkMassDensities is None:
+            state.crkMassDensities = state.densities.clone()
+        if ctx.schemeConfig.crkEvolution=='spheral' and state.crkVolumes is None:
+            state.crkVolumes = state.masses/state.densities
+    if getattr(ctx.schemeConfig, 'materials', None) is not None:
+        from ..modules.eos import evaluateEOS, validateMaterialState
+        validateMaterialState(system.state, ctx.schemeConfig)
+        state = system.state
+        # Existing IC builders prescribe pressure using the scalar closure.
+        # Preserve that pressure, converting the energy with the actual material.
+        state.entropies, state.internalEnergies, state.pressures, state.soundspeeds = evaluateEOS(
+            state.densities, state.materials, ctx.schemeConfig, P=state.pressures)
+        state.totalEnergies = state.masses * (state.internalEnergies + 0.5 * state.velocities.square().sum(-1))
+        if hasattr(state, 'Q'):
+            # The meshless conserved vector must carry the prescribed material
+            # energy too; primitive-only initialization is overwritten by Q.
+            state.Q = torch.cat((state.masses[:, None], state.masses[:, None]*state.velocities,
+                                 state.totalEnergies[:, None]), dim=-1)
+        if ctx.config.adaptiveDt:
+            from ..modules.timestep import computeTimestep
+            ctx.config.dt = computeTimestep(system, ctx.config, ctx.schemeConfig)
+    ctx.scratch['initialParticleCount'] = int(system.state.positions.shape[0])
+    # How the run executes (`configurations/compute.py`): the scheme's `stepMode`, the spec's `cudaGraph` / `execution` or `config.compute`, and for
+    # 'auto' the particle count. The scheme-level graph routes (delta-SPH's right-hand side, ACSPH's dual-time iteration) key on `schemeConfig.cudaGraph`.
+    from ..configurations import resolveExecution
+    _positions = system.state.positions
+    ctx.scratch['execution'] = resolveExecution(ctx.config, ctx.scheme, ctx.schemeConfig, ctx.spec, _positions.shape[0], _positions.shape[1])
+    if ctx.scratch['execution'] == 'graph' and ctx.scheme not in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH):
+        ctx.schemeConfig.cudaGraph = True
+    if case.timestep is None and ctx.scheme in (CompressibleSPHScheme.MFM, CompressibleSPHScheme.MFV):
+        # The meshless schemes re-pick the core signal dt every step
+        # (`modules/timestep/meshless.py`); a case without a `timestep` hook
+        # (fixed dt after setup is the compressible convention) would otherwise
+        # run at the setup dt for its whole life.
+        case = replace(case, timestep=defaultTimestep)
+    if getattr(ctx.schemeConfig, 'boundaryProvider', None) is not None:
+        schemeName = getattr(ctx.scheme, 'name', ctx.scheme)
+        if schemeName not in ANALYTIC_WALL_SCHEMES:
+            # a scheme that does not consume the boundary provider would run with no wall at all (docs/historic_plans/ANALYTIC_BOUNDARIES_PORT_SURVEY.md)
+            raise NotImplementedError(f"analytic boundaries (a region with a `representation`) are hooked into the schemes {sorted(ANALYTIC_WALL_SCHEMES)} only, not {schemeName!r}")
+        if schemeName in EXPERIMENTAL_ANALYTIC_WALL_SCHEMES:
+            import warnings
+            warnings.warn(f"{schemeName!r} on analytic walls is EXPERIMENTAL: static, fixed-support IISPH boundary coupling; free-surface impact behavior depends on calibrated initial geometry and the selected wall pressure closure.", stacklevel=2)
     if case.initialConditions is not None:
         case.initialConditions(ctx, system)
+    if isinstance(ctx.scheme, IncompressibleSPHScheme):
+        from ..caseUtils.projection import initializeProjectionDensity
+        initializeProjectionDensity(ctx, system)
 
     # Setup may replace the spec -- Kidder only learns its time limit once the
     # analytic collapse time exists -- so the loop reads it back from the
@@ -245,7 +356,27 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
             print(f'-- resumed from {spec.resumeFrom} '
                  f'(t={system.t:.6f}, step offset {spec.resumeStepOffset}) --')
 
+    from ..modules.eos import validateMaterialState
+    validateMaterialState(system.state, ctx.schemeConfig)
+    if ctx.scheme is CompressibleSPHScheme.PESPH:
+        from ..modules.pesph.initialization import initializePESPHState, CHECKPOINT_FIELDS
+        from ..modules.pesph.stage import refreshPESPHState
+        from ..modules.timestep.pesph import pesphTimestep
+        if ctx.scratch['execution'] != 'eager':
+            raise ValueError('PESPH currently supports eager execution only')
+        if spec.resumeFrom:
+            refreshPESPHState(system, ctx.config, ctx.schemeConfig)
+        else:
+            initializePESPHState(system, ctx.config, ctx.schemeConfig)
+        case = replace(case, timestep=pesphTimestep,
+                       extraFields=tuple(dict.fromkeys((*case.extraFields, *CHECKPOINT_FIELDS))))
+        ctx.config.dt = pesphTimestep(ctx, system)
     runningState = system.initializeNewState()
+    if isinstance(ctx.scheme, IncompressibleSPHScheme):
+        # The loop calls the hook only AFTER a step. Cap the first step too,
+        # after case initialization (or checkpoint restore) sets the actual
+        # velocities, supports and viscosity. Setup dt is only a ceiling.
+        ctx.config.dt = case.timestep(ctx, runningState)
 
     # --- output setup -------------------------------------------------------
     outFile = None
@@ -255,6 +386,9 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
                                     ctx.scheme, ctx.exportFunction,
                                     exportRoot=spec.exportRoot)
         spec.save(os.path.join(ctx.exportPath, 'caseSpec.json'))
+        if spec.configuration is not None or spec.schemeOverrides:
+            from .configuration import _write, resolvedConfiguration
+            _write(os.path.join(ctx.exportPath, 'resolvedConfiguration.json'), resolvedConfiguration(ctx))
 
     if spec.plot and case.setupPlot is not None:
         ctx.imagePath = os.path.join(ctx.exportPath, 'images')
@@ -265,6 +399,7 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
 
     if spec.store and spec.storeMode == 'trajectory':
         outFile = createOutFile(ctx.exportPath)
+        ctx.scratch['trajectoryFile'] = outFile
         groups = writeInitialData(ctx.exportPath, outFile, ctx.scheme, ctx.config,
                                   ctx.schemeConfig,
                                   SimpleNamespace(exportInterval=spec.exportInterval),
@@ -330,16 +465,32 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
     # step, self-checked, eager fallback on any Verlet rebuild). Not with
     # trajectory/state storing, which reads the per-stage data a replayed
     # step does not reconstruct.
+    deferStageTimes = ctx.scheme in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH, CompressibleSPHScheme.Monaghan,
+                                      CompressibleSPHScheme.GSPH, CompressibleSPHScheme.InutsukaGSPH,
+                                      WeaklyCompressibleSPHScheme.deltaSPH, WeaklyCompressibleSPHScheme.sun2017DeltaSPH)
+    # Float32 deferred stage times change scalar switch-history rounding on
+    # continuation. Restrict this PESPH optimization to the checked CUDA/f64 path.
+    deferStageTimes = deferStageTimes or (ctx.scheme is CompressibleSPHScheme.PESPH
+        and ctx.dtype == torch.float64 and torch.device(ctx.device).type == 'cuda')
     stepGraph = None
-    if spec.cudaGraph and not spec.store and _stepGraphable(ctx):
+    graphWanted = ctx.scratch['execution'] == 'graph'
+    if ctx.scheme in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH):
+        # CompSPH / CRKSPH have their own switch, `stepMode`, instead of the spec's flag
+        from ..modules.compSPH.stepMode import resolveStepMode
+        ctx.scratch['compSPHStepMode'] = resolveStepMode(ctx, runningState, spec)
+        graphWanted = ctx.scratch['compSPHStepMode'] == 'graph'
+    if graphWanted and not spec.store and _stepGraphable(ctx, runningState):
         from ..utils.cudaGraph import GraphedDiagnostics, GraphedIntegratorStep
         stepGraph = GraphedIntegratorStep(ctx.integrator.function, ctx.stepFunction)
+        if case.timestep is None and not isinstance(ctx.config.dt, torch.Tensor) and ctx.config.dt is not None and ctx.device != 'cpu':
+            # a case with a FIXED host-float step (`soundSpeed` + `targetDt`, the analytic-wall cases; no `timestep` hook): the replay reads dt from the device, as the adaptive cases already do (theirs becomes a tensor from the hook, the first step stays as eager)
+            ctx.config.dt = torch.tensor(float(ctx.config.dt), dtype=ctx.dtype, device=ctx.device)
         ctx.scratch['stepGraph'] = stepGraph
         # cases whose diagnostics have a sync-free device part replay it too
-        # (`cases/dambreak.py:_diagnosticsHost`); ignored by every other case
+        # (`cases/freeSurface/dambreak.py:_diagnosticsHost`); ignored by every other case
         ctx.scratch['graphedDiagnostics'] = GraphedDiagnostics()
 
-    if stepGraph is not None and spec.pipelineOutputs:
+    if stepGraph is not None and ctx.config.compute.pipelineOutputs:
         # Pipelined loop: step n+1 runs on the GPU while step n's diagnostics
         # and frame are computed (see `_runPipelined`); same values, same rows.
         runningState, stepResult = _runPipelined(
@@ -349,24 +500,31 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
 
     for i in steps:
         with _Timer(ctx.device) as timer:
-            if stepGraph is not None:
-                stepResult = stepGraph(runningState, ctx.config.dt, ctx.config, ctx.schemeConfig,
-                                       verbose=spec.verbose)
-            else:
-                stepResult = ctx.integrator.function(
-                    state=runningState,
-                    f=ctx.stepFunction,
-                    dt=ctx.config.dt,
-                    config=ctx.config,
-                    # Forwarded to the step function *and* to `system.finalize`, so
-                    # this is what makes --verbose reach the scheme's own reporting.
-                    verbose=spec.verbose,
-                    schemeConfig=ctx.schemeConfig,
-                )
+            with record_function("[runner] integrator step"):
+                if stepGraph is not None:
+                    stepResult = stepGraph(runningState, ctx.config.dt, ctx.config, ctx.schemeConfig,
+                                           verbose=spec.verbose)
+                else:
+                    # A device dt would make the integrator read every stage time
+                    # back (`float(t + c dt)`, a sync each); the runner reads the
+                    # step time once below anyway, so the stage times stay tensors.
+                    # Only for the schemes whose step was checked not to need a host
+                    # time (the delta-SPH right-hand-side graph does).
+                    with (deferHostTime() if deferStageTimes else contextlib.nullcontext()):
+                        stepResult = ctx.integrator.function(
+                            state=runningState,
+                            f=ctx.stepFunction,
+                            dt=ctx.config.dt,
+                            config=ctx.config,
+                            # Forwarded to the step function *and* to `system.finalize`, so
+                            # this is what makes --verbose reach the scheme's own reporting.
+                            verbose=spec.verbose,
+                            schemeConfig=ctx.schemeConfig,
+                        )
         runningState = stepResult.state
         # Scheme-specific extra step data that doesn't fit the state (e.g.
         # ACSPH's `update.pseudoIterations`/`.epsilonV`, set ad hoc on the
-        # `ArtificialCompressibleSystemUpdate` `schemes/artificialCompressible.py`
+        # `ArtificialCompressibleSystemUpdate` `schemes/incompressible/artificialCompressible.py`
         # returns) rides on the last stage's `update` object, which `diagnostics`/
         # `postStep` cannot otherwise reach -- neither gets `stepResult`, only
         # `runningState`. Stashed here, read with `getattr(..., None)` by anything
@@ -380,16 +538,22 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
         # reads as a continuation, not a restart from 0. Purely-internal loop
         # arithmetic (progress-bar total, `i == nSteps - 1`) stays on `i`.
         absStep = i + spec.resumeStepOffset
+        callAudit.markStep()    # no-op unless the call audit is on (warpSPHCore/callAudit.py)
 
         if case.postStep is not None:
-            case.postStep(ctx, runningState, absStep)
+            with record_function("[runner] case postStep hook"):
+                case.postStep(ctx, runningState, absStep)
         if case.timestep is not None:
-            ctx.config.dt = case.timestep(ctx, runningState)
+            with record_function("[runner] case timestep hook"):
+                ctx.config.dt = case.timestep(ctx, runningState)
 
-        t = _scalar(runningState.t)
+        # the step time and max |v| (non-finite check, velocity alarm) in one host transfer
+        with record_function("[runner] read time + max speed (non-finite check, velocity alarm)"):
+            t, vmax = _scalars(runningState.t, maxSpeed(runningState))
         row = {'step': absStep, 't': t, 'stepTime_ms': timer.elapsed_ms}
         if case.diagnostics is not None:
-            row.update(case.diagnostics(ctx, runningState))
+            with record_function("[runner] case diagnostics"):
+                row.update(case.diagnostics(ctx, runningState))
         result.trajectory.append(row)
 
         # `stallDtSteps` watchdog: a healthy adaptive-dt run should never sit
@@ -399,7 +563,9 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
         # step burns wall-clock without progress, so stop rather than run out
         # the clock to tLimit/nSteps at the floor.
         if spec.stallDtSteps is not None and ctx.config.minDt is not None:
-            if _scalar(ctx.config.dt) <= ctx.config.minDt * 1.0001:
+            with record_function("[runner] stall watchdog dt read"):
+                dtAtFloor = _scalar(ctx.config.dt) <= ctx.config.minDt * 1.0001
+            if dtAtFloor:
                 dtAtFloorStreak += 1
             else:
                 dtAtFloorStreak = 0
@@ -426,16 +592,19 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
                 break
 
         if progress is not None:
-            _showStep(progress, i, None if timeLimited else nSteps, row, spec.tLimit,
-                      force=(timeLimited and t >= spec.tLimit) or (not timeLimited and i == nSteps - 1))
+            with record_function("[runner] progress bar"):
+                _showStep(progress, i, None if timeLimited else nSteps, row, spec.tLimit,
+                          force=(timeLimited and t >= spec.tLimit) or (not timeLimited and i == nSteps - 1))
 
         if timeLimited and t >= spec.tLimit:
-            _plotAndStore(ctx, case, spec, runningState, stepResult, absStep, extraData,
-                          groups, storeSteps, final=True)
+            with record_function("[runner] plot and store"):
+                _plotAndStore(ctx, case, spec, runningState, stepResult, absStep, extraData,
+                              groups, storeSteps, final=True)
             break
 
-        _plotAndStore(ctx, case, spec, runningState, stepResult, absStep, extraData,
-                      groups, storeSteps, final=(not timeLimited and i == nSteps - 1))
+        with record_function("[runner] plot and store"):
+            _plotAndStore(ctx, case, spec, runningState, stepResult, absStep, extraData,
+                          groups, storeSteps, final=(not timeLimited and i == nSteps - 1))
 
         # Read by tag rather than the `velocities` field name: every fluid
         # scheme's velocity field happens to be named that, but the wave
@@ -446,13 +615,14 @@ def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> 
         # the dfsphReference late-time failure can collapse into a degenerate
         # uniform-density state with inf velocities (DFSPH_IMPROVEMENT_PLAN.md
         # Part 29) where no NaN ever appears.
-        vmax = _scalar(maxSpeed(runningState))
         if not math.isfinite(vmax):
             say(f'non-finite velocities detected at step {absStep}; stopping.')
             result.diverged = True
             result.stopReason = 'non-finite velocities'
             break
-        if alarm.check(ctx, runningState, vmax, absStep, t):
+        with record_function("[runner] velocity alarm check"):
+            alarmStops = alarm.check(ctx, runningState, vmax, absStep, t)
+        if alarmStops:
             say(f'velocity alarm stops the run at step {absStep} (t={t:g}): '
                 f'{alarm.stopReason}.')
             result.diverged = True
@@ -524,6 +694,8 @@ def _runPipelined(ctx, case, spec, result, stepGraph, steps, progress, runningSt
 
     def outputs(i, absStep, state, stepRes, stepMs, ready, final):
         """Diagnostics row + progress + frame for one finished step."""
+        from ..utils.cudaGraph import applyWallLoadSnapshot
+        applyWallLoadSnapshot(stepRes)                     # this step's wall loads (a later replay has been launched: the bodies' own tensors may already hold the next step's)
         with torch.cuda.stream(side), wp.ScopedStream(wside, sync_enter=False, sync_exit=False):
             if ready is not None:
                 side.wait_event(ready)
@@ -552,6 +724,7 @@ def _runPipelined(ctx, case, spec, result, stepGraph, steps, progress, runningSt
         runningState = stepResult.state
         ctx.scratch['lastStageUpdate'] = stepResult.stages[-1].update if stepResult.stages else None
         absStep = i + spec.resumeStepOffset
+        callAudit.markStep()    # no-op unless the call audit is on (warpSPHCore/callAudit.py)
 
         if case.postStep is not None:
             case.postStep(ctx, runningState, absStep)
@@ -592,6 +765,8 @@ def _runPipelined(ctx, case, spec, result, stepGraph, steps, progress, runningSt
         if stop is not None:
             # as the sequential loop: the row is recorded, no frame, then stop
             row = {'step': absStep, 't': t, 'stepTime_ms': stepMs}
+            from ..utils.cudaGraph import applyWallLoadSnapshot
+            applyWallLoadSnapshot(stepResult)
             if case.diagnostics is not None:
                 row.update(case.diagnostics(ctx, runningState))
             result.trajectory.append(row)
@@ -702,7 +877,7 @@ def _setupPlot(ctx: RunContext, case: Case, state):
     backend = spec.plotBackend or ('vispy' if spec.dim == 2 else None)
     opts = dict(spec.plotBackendOptions or {})
     # Plot hooks that launch warp kernels (grid-interpolated panels,
-    # `cases/plotting.py:particlePlot`) stay on the loop thread: warp's
+    # `cases/common/plotting.py:particlePlot`) stay on the loop thread: warp's
     # current stream and module loading are per process, so warp work on the
     # render thread races the step's (OPEN_PROBLEMS §12).
     usesWarp = getattr(case.updatePlot, 'usesWarp', False) or getattr(case.setupPlot, 'usesWarp', False)
@@ -737,20 +912,23 @@ def _setupPlot(ctx: RunContext, case: Case, state):
     return handle
 
 
-def _stepGraphable(ctx) -> bool:
-    """Whole-step graphs are only wired for the weakly-compressible delta-SPH
-    family (its RHS, integrator path and `finalize` were made sync-free; see
-    `schemes/deltaSPH.py:_rhsIsGraphable` for the per-configuration rules)."""
-    from ..enumTypes import WeaklyCompressibleSPHScheme
+def _stepGraphable(ctx, runningState=None) -> bool:
+    """Whole-step graphs are wired for the weakly-compressible delta-SPH family
+    (its RHS, integrator path and `finalize` were made sync-free; see
+    `schemes/weaklyCompressible/deltaSPH.py:_rhsIsGraphable` for the per-configuration rules) and
+    for CompSPH / CRKSPH in their `stepMode='graph'` (`modules/compSPH/stepMode.py`)."""
+    from ..enumTypes import CompressibleSPHScheme, WeaklyCompressibleSPHScheme
+    if ctx.scheme in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH):
+        return ctx.scratch.get('compSPHStepMode') == 'graph'        # `stepMode`, resolved before the loop
     if not isinstance(ctx.scheme, WeaklyCompressibleSPHScheme):
         return False
-    from ..schemes.deltaSPH import _rhsIsGraphable
+    from ..schemes.weaklyCompressible.graphRoute import rhsIsGraphable as _rhsIsGraphable
     return _rhsIsGraphable(ctx.schemeConfig, None)
 
 
 def _drainFrameWrites() -> None:
     """Wait for frames the vispy backend is still encoding on its writer
-    threads (`cases/plotting.py:_fastPngOptions`), so every PNG is complete
+    threads (`cases/common/plotting.py:_fastPngOptions`), so every PNG is complete
     before the video encode -- or the caller -- reads it."""
     try:
         from warpSPHPlotting import waitForExports
@@ -855,7 +1033,12 @@ def _showStep(progress, i: int, nSteps: Optional[int], row: Dict[str, float],
 def _writer(progress):
     """A flushed line to the terminal that does not collide with the bar."""
     if progress is not None:
-        return lambda message: progress.write(message)
+        def write(message):
+            # tqdm.write goes to Python's block-buffered stdout: behind a
+            # pipe (`| stdbuf -oL tr`) the line would only appear at exit.
+            progress.write(message)
+            sys.stdout.flush()
+        return write
     return lambda message: print(message, flush=True)
 
 
@@ -896,9 +1079,9 @@ def _describeStep(i: int, nSteps: Optional[int], row: Dict[str, float],
     current_memory_allocated = torch.cuda.memory_allocated() / (1024 ** 2)  # in MB
     current_memory_reserved = torch.cuda.memory_reserved() / (1024 ** 2)
 
-    warp_memory = wp.get_mempool_used_mem_current() / (1024 ** 2)  # in MB
+    warp_memory = wp.get_mempool_used_mem_current() / (1024 ** 2) if wp.get_device().is_cuda else 0.0
 
-    if i % 100 == 0:
+    if i % 100 == 0 and torch.cuda.is_available():
         torch.cuda.empty_cache()
 
 

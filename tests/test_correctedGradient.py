@@ -20,7 +20,7 @@ A = torch.tensor([[0.3, -0.7], [0.5, 0.2]])
 
 
 def test_cullen_divergence_is_not_divided_by_density():
-    from warpSPH.cases.sodND import sod2dCase
+    from warpSPH.cases.compressible.sodND import sod2dCase
     res = run(sod2dCase, scheme='Monaghan', nSteps=1, progress=False, quiet=True,
               params=dict(viscositySwitch='CullenDehnen2010'))
     st, adj, config, sc = res.state.state, res.state.adjacency, res.ctx.config, res.ctx.schemeConfig
@@ -36,7 +36,7 @@ def test_cullen_divergence_is_not_divided_by_density():
 
 
 def test_corrected_shear_tensor_exact_on_jittered_lattice():
-    from warpSPH.cases.greshoVortex import greshoVortexCase
+    from warpSPH.cases.compressible.greshoVortex import greshoVortexCase
     res = run(greshoVortexCase, scheme='Monaghan', nx=32, nSteps=1, progress=False, quiet=True,
               params=dict(viscositySwitch='CullenDehnen2010'))
     st, config, sc = res.state.state, res.ctx.config, res.ctx.schemeConfig

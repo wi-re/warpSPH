@@ -39,7 +39,7 @@ MATCHED_ARGS += ['--no-store']
 if cliArgs.nSteps is not None:
     MATCHED_ARGS += ['--nSteps', str(cliArgs.nSteps)]
 
-from warpSPH.cases.dambreak import dambreakCase
+from warpSPH.cases.freeSurface.dambreak import dambreakCase
 from warpSPH.runner import caseMain
 from warpSPH.enumTypes import DensityDiffusionScheme
 

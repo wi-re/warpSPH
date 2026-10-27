@@ -16,6 +16,18 @@ from ..schemes import buildScheme
 from .hdf5 import loadAdjacency, loadState, loadStage, hdfDtypeToTorchDtype
 
 
+def _bundleForStoredState(scheme, variable=None):
+    bundle = buildScheme(scheme)
+    if scheme is CompressibleSPHScheme.PESPH:
+        from ..enumTypes import PESPHVariant
+        choices = {'energy': PESPHVariant.PressureEnergy, 'entropy': PESPHVariant.PressureEntropy}
+        if variable not in choices:
+            raise ValueError('PESPH checkpoint is missing a valid thermodynamicVariable')
+        config = bundle.SimulationConfig(variant=choices[variable], dissipation=False)
+        bundle = bundle.configured(config)
+    return bundle
+
+
 def schemeNameToSimulationScheme(name: str) -> CompressibleSPHScheme:
     for scheme in CompressibleSPHScheme:
         # print(f'Comparing {scheme.name.lower()} to {name.lower()}')
@@ -51,7 +63,7 @@ def importSimulationSystem(
     scheme = inFile.attrs['scheme']
     schemeEnum = schemeNameToSimulationScheme(scheme)
     if SimulationSystem is None or SimulationState is None or SimulationUpdate is None:
-        bundle = buildScheme(schemeEnum)
+        bundle = _bundleForStoredState(schemeEnum, inFile['state'].attrs.get('thermodynamicVariable'))
         SimulationSystem = bundle.SimulationSystem
         SimulationState = bundle.SimulationState
         SimulationUpdate = bundle.SimulationUpdate
@@ -120,7 +132,16 @@ def importConfigs(configPath, import_fn):
 
 
 def _toTensor(dataset, device):
-    return torch.from_numpy(dataset[:]).to(device).to(hdfDtypeToTorchDtype(dataset.dtype))
+    value = dataset[()] if dataset.shape == () else dataset[:]
+    return torch.as_tensor(value, device=device, dtype=hdfDtypeToTorchDtype(dataset.dtype))
+
+
+def _frameValue(group, key, device):
+    if key in group:
+        return _toTensor(group[key], device)
+    if group.attrs.get(key) == 'None':
+        return None
+    raise ValueError(f'Trajectory field {group.name} is missing frame {key}')
 
 
 def loadTrajectory(
@@ -153,10 +174,13 @@ def loadTrajectory(
     # `bundle.stepFunction`/`exportFunction` are what a resume loop needs to
     # keep stepping, and building it is cheap class resolution, not a kernel
     # compile.
-    bundle = buildScheme(schemeEnum)
+    bundle = _bundleForStoredState(schemeEnum, trajectoryFile.attrs.get('thermodynamicVariable'))
     SimulationSystem = SimulationSystem or bundle.SimulationSystem
     SimulationState = SimulationState or bundle.SimulationState
     SimulationUpdate = SimulationUpdate or bundle.SimulationUpdate
+    if schemeEnum is CompressibleSPHScheme.PESPH and SimulationState is not bundle.SimulationState:
+        trajectoryFile.close()
+        raise ValueError('PESPH trajectory state override does not match its stored variant')
 
     static = {
         'masses': _toTensor(trajectoryFile['combinedMasses'], device),
@@ -165,7 +189,17 @@ def loadTrajectory(
         'materials': _toTensor(trajectoryFile['combinedMaterials'], device),
         'UIDs': _toTensor(trajectoryFile['combinedUIDs'], device),
     }
+    for field, dataset in (('emitters', 'combinedEmitters'), ('bodyIDs', 'combinedBodyIDs')):
+        static[field] = _toTensor(trajectoryFile[dataset], device).to(torch.int32) if dataset in trajectoryFile else None
 
+    storedFields = ('crkMassDensities', 'crkVolumes')
+    if schemeEnum is CompressibleSPHScheme.PESPH:
+        from ..modules.pesph.initialization import CHECKPOINT_FIELDS
+        missing = set(CHECKPOINT_FIELDS)-set(trajectoryFile)
+        if missing:
+            trajectoryFile.close()
+            raise ValueError(f'PESPH trajectory is missing restart fields: {sorted(missing)}')
+        storedFields = (*storedFields, *CHECKPOINT_FIELDS)
     meta = dict(
         SimulationSystem=SimulationSystem,
         SimulationState=SimulationState,
@@ -174,7 +208,7 @@ def loadTrajectory(
         scheme=schemeEnum,
         static=static,
         frameKeys=sorted(trajectoryFile['positions'].keys()),
-        extraFields=tuple(name for name in extraFields if name in trajectoryFile),
+        extraFields=tuple(dict.fromkeys(name for name in (*extraFields, *storedFields) if name in trajectoryFile)),
     )
     return trajectoryFile, meta
 
@@ -187,9 +221,11 @@ def loadTrajectoryFrame(trajectoryFile, meta, frameIndex: int, schemeConfig=None
     ``materials``/``UIDs`` (and ``supports``, unless it was exported every
     frame) come from the static initial-condition snapshot `loadTrajectory`
     already read. ``pressures``/``soundspeeds``/``entropies`` are not stored --
-    they are recomputed from ``densities``/``internalEnergies`` via the same
+    they are recomputed for legacy schemes from ``densities``/``internalEnergies`` via the same
     ``idealGasEOS`` call the case's own IC builder makes, using ``gamma`` (or
     ``schemeConfig.gamma`` when ``gamma`` is not given).
+    PESPH instead restores its authoritative thermal fields and switch history
+    directly, selecting the integrated-field layout from the stored variant.
     """
     key = meta['frameKeys'][frameIndex]
     static = meta['static']
@@ -200,13 +236,14 @@ def loadTrajectoryFrame(trajectoryFile, meta, frameIndex: int, schemeConfig=None
     densities = _toTensor(trajectoryFile['densities'][key], device)
     t = float(trajectoryFile['times'][key][0])
 
-    frameFields = {name: _toTensor(trajectoryFile[name][key], device) for name in meta['extraFields']}
+    frameFields = {name: _frameValue(trajectoryFile[name], key, device) for name in meta['extraFields']}
     supports = frameFields.get('supports', static['supports'])
     internalEnergies = frameFields.get('internalEnergies')
 
     stateKwargs = dict(
         positions=positions, velocities=velocities, densities=densities, supports=supports,
         masses=static['masses'], kinds=static['kinds'], materials=static['materials'], UIDs=static['UIDs'],
+        emitters=static.get('emitters'), bodyIDs=static.get('bodyIDs'),
         UIDcounter=int(static['UIDs'].max().item()) + 1,
         # Matches the case IC builders (e.g. buildSod1D): a fresh state always
         # starts divergence at zero and alpha0s/alphas at one -- a resumed
@@ -216,10 +253,34 @@ def loadTrajectoryFrame(trajectoryFile, meta, frameIndex: int, schemeConfig=None
         divergence=torch.zeros_like(densities),
         alpha0s=torch.ones_like(densities), alphas=torch.ones_like(densities),
     )
+    for name in ('crkMassDensities', 'crkVolumes'):
+        if name in frameFields:
+            stateKwargs[name] = frameFields[name]
+
+    if meta['scheme'] is CompressibleSPHScheme.PESPH:
+        if gamma is not None:
+            raise ValueError('PESPH authoritative E/A cannot be loaded with a gamma override')
+        if schemeConfig is not None:
+            configured = meta['bundle'].configured(schemeConfig)
+            if configured.SimulationState is not meta['SimulationState']:
+                raise ValueError('PESPH trajectory variant does not match schemeConfig')
+        stateKwargs.update(frameFields)
+        state = meta['SimulationState'](**stateKwargs)
+        return meta['SimulationSystem'](state=state, adjacency=None, t=t), t
 
     if internalEnergies is not None:
+        from ..modules.eos import evaluateEOS
+        if getattr(schemeConfig, 'materials', None) is not None and gamma is not None:
+            raise ValueError('gamma override is ambiguous with a material EOS table')
         gammaValue = gamma if gamma is not None else schemeConfig.gamma
-        A_, u_, P_, c_s = idealGasEOS(A=None, u=internalEnergies, P=None, rho=densities, gamma=gammaValue)
+        if getattr(schemeConfig, 'materials', None) is not None:
+            ids = stateKwargs['materials']
+            if not torch.equal(ids, ids.to(torch.int32).to(ids.dtype)):
+                raise ValueError('materials: trajectory IDs must be integral')
+            stateKwargs['materials'] = ids.to(torch.int32)
+            A_, u_, P_, c_s = evaluateEOS(densities, stateKwargs['materials'], schemeConfig, u=internalEnergies)
+        else:
+            A_, u_, P_, c_s = idealGasEOS(A=None, u=internalEnergies, P=None, rho=densities, gamma=gammaValue)
         # Same formula the case's own IC builder (e.g. buildSod1D) uses --
         # totalEnergies isn't in extraFields (it's a pure function of
         # velocities/internalEnergies/masses, all already reconstructed
@@ -231,6 +292,9 @@ def loadTrajectoryFrame(trajectoryFile, meta, frameIndex: int, schemeConfig=None
                           totalEnergies=totalEnergies)
 
     state = meta['SimulationState'](**stateKwargs)
+    if getattr(schemeConfig, 'materials', None) is not None:
+        from ..modules.eos import validateMaterialState
+        validateMaterialState(state, schemeConfig)
     system = meta['SimulationSystem'](state=state, adjacency=None, t=t)
     return system, t
 

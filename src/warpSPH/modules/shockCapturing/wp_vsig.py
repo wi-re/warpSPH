@@ -12,6 +12,8 @@ safe because only the winning *index* (an int, never differentiated by Warp)
 crosses out of it. ``computeVsigWarp`` is the torch-facing entry point.
 """
 
+from warpSPHCore.type_config import index_t, offset_t
+
 import warp as wp
 from warp.types import vector, matrix
 from typing import Any
@@ -81,9 +83,9 @@ def computeVsig_Func_i_argmax(
     # Operation specific parameters
      # type: ignore
 
-    beginIndex: wp.int32, # type: ignore
+    beginIndex: offset_t, # type: ignore
     numIndices: wp.int32, # type: ignore
-    offsetArray: wp.array(dtype = wp.int64), # type: ignore
+    offsetArray: wp.array(dtype = index_t), # type: ignore
 
     # Operation Mode for masking certain kinds of interactions, e.g. for directional operations
     ki : wp.int32, referenceKinds : wp.array(dtype = wp.int32), # type: ignore
@@ -104,7 +106,7 @@ def computeVsig_Func_i_argmax(
     bestJ = wp.int32(0)
 
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j  = wp.int32(offsetArray[jj])
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
             if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
@@ -193,17 +195,18 @@ def computeVsig_Func_Adjacency_argmax(
     globalBestJ = wp.int32(0)
 
     for o in range(numOffsets):
-        beginIndex = wp.int32(0)
+        beginIndex = offset_t(0)
         numIndices = wp.int32(0)
         if useAdjacency:
             beginIndex = adjacencyState.neighborOffsets[i]
             numIndices = adjacencyState.numNeighbors[i]
         else:
-            beginIndex, numIndices = checkOffset(
+            gridBegin, numIndices = checkOffset(
                 i, queryState.positions, gridState.numCells, gridState.D,
                 o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
                 domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
             )
+            beginIndex = offset_t(gridBegin)
             if beginIndex < 0:
                 continue
 

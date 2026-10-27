@@ -3,7 +3,7 @@ import numpy as np, torch
 from scipy.optimize import brentq
 from warpSPHBootstrap import bootstrap
 bootstrap(precision='float32')
-from warpSPH.cases.sodND import sod2dCase
+from warpSPH.cases.compressible.sodND import sod2dCase
 from warpSPH.runner import run
 
 def exact(xi, t, x0=0.5, g=5/3, rl=1.0, pl=1.0, rr=0.25, pr=0.1795):

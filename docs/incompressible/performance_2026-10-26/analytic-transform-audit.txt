@@ -1,0 +1,151 @@
+section (tree, inclusive unless "self")                                   calls  ops/call  self ops launch/call sync/call self sync sync/step
+[runner] integrator step                                                     20    1262.0     131.0        52.0     30.00      8.00     30.00
+  [warpSPH] - [DFSPH - 04] pressure geometry                                 20     429.0     188.0        13.0      9.00      3.00      9.00
+  [warpSPH] - [DFSPH - 07] viscosity                                         20     253.0       1.0        12.0      6.00      0.00      6.00
+    [warpSPH] - (deltaSPH) - computeVelocityDiffusion                        20     252.0     250.0        12.0      6.00      6.00      6.00
+      warpSPH[computeVelocityDiffusion]                                      20       2.0       0.0         1.0      0.00      0.00      0.00
+        warpSPH[computeVelocityDiffusionDeltaSPH] - Kernel Execution         20       2.0       0.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [DFSPH - 09] density projection                                20     191.0     170.0        11.0      2.00      2.00      2.00
+    warpWrapper2 [WW2]                                                      500       2.3       1.3         1.0      0.00      0.00      0.00
+      SAWF.forward - launch                                                 500       1.0       0.0         1.0      0.00      0.00      0.00
+        launch_kernel - allocate_output                                     500       1.0       1.0         0.0      0.00      0.00      0.00
+    warpSPH - Operation                                                     140       3.1       0.0         1.0      0.00      0.00      0.00
+      warpSPH[Interpolation]                                                120       2.7       0.0         1.0      0.00      0.00      0.00
+        warpSPH[Interpolation] - Kernel Execution                           120       2.7       0.0         1.0      0.00      0.00      0.00
+      warpSPH[Density]                                                       20       6.0       0.0         1.0      0.00      0.00      0.00
+        warpSPH[Density] - Kernel Execution                                  20       6.0       0.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [DFSPH - 05] divergence projection                             20     115.0     101.0         8.0      2.00      2.00      2.00
+    warpSPH[countNeighbors]                                                  20       1.0       0.0         1.0      0.00      0.00      0.00
+      warpSPH[countNeighbors] - Kernel Execution                             20       1.0       0.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [DFSPH - 02] density                                           20     103.0       0.0         5.0      2.00      0.00      2.00
+    [warpSPH] - computeDensities                                             20     103.0      97.0         5.0      2.00      2.00      2.00
+  [warpSPH] - [DFSPH - 01] adjacency                                         20       6.0       0.0         3.0      1.00      0.00      1.00
+    [warpSPH] - buildVerletList                                              40     116.0       0.5         4.0      3.50      0.00      7.00
+      [Verlet] SupportScheme.Gather                                          20     225.0       0.0         5.0      6.00      0.00      6.00
+        [Verlet] no prior                                                    20     225.0       2.0         5.0      6.00      0.00      6.00
+          warpNeighborSearch - radiusSearchCompactHashMap                    20     223.0      47.0         5.0      6.00      1.00      6.00
+            warpNeighborSearch - buildCompactHashMap                         20     162.0       1.0         2.0      4.00      0.00      4.00
+              neighborSearch - sortParticles                                 20      98.0      98.0         1.0      2.00      2.00      2.00
+              neighborSearch - buildHashMap                                  20       6.0       6.0         1.0      1.00      1.00      1.00
+              neighborSearch - buildCells                                    20      20.0      20.0         0.0      1.00      1.00      1.00
+              neighborSearch - buildHashTable                                20      15.0      15.0         0.0      0.00      0.00      0.00
+              neighborSearch - precomputeOffsets                             20      15.0      15.0         0.0      0.00      0.00      0.00
+              neighborSearch - sort cells                                    20       6.0       6.0         0.0      0.00      0.00      0.00
+              neighborSearch - preprocess                                    20       1.0       1.0         0.0      0.00      0.00      0.00
+            neighborSearch - allocate neighbors                              20      11.0      11.0         0.0      1.00      1.00      1.00
+            neighborSearch - collect neighbors                               20       1.0       1.0         2.0      0.00      0.00      0.00
+            neighborSearch - count neighbors                                 20       2.0       2.0         1.0      0.00      0.00      0.00
+      [Verlet] SupportScheme.SuperSymmetric                                  20       6.0       0.0         3.0      1.00      0.00      1.00
+        [Verlet] Checking validity of prior neighborhood                     20       6.0       6.0         3.0      1.00      1.00      1.00
+  [warpSPH] - [DFSPH - 10] update boundary conditions                        20      13.0      13.0         0.0      0.00      0.00      0.00
+  [warpSPH] - [DFSPH - 11] kick and drift                                    20      12.0      12.0         0.0      0.00      0.00      0.00
+  [warpSPH] - [DFSPH - 06] gravity and body force                            20       5.0       2.0         0.0      0.00      0.00      0.00
+    [warpSPH] - computeGravity                                               20       3.0       3.0         0.0      0.00      0.00      0.00
+  [warpSPH] - [DFSPH - 08] forcing                                           20       4.0       3.0         0.0      0.00      0.00      0.00
+    [warpSPH] - computeForcing                                               20       1.0       1.0         0.0      0.00      0.00      0.00
+[runner] case timestep hook                                                  21      16.0      16.0         0.0      8.00      8.00      8.40
+[runner] case postStep hook                                                  21       2.0       2.0         0.0      2.00      2.00      2.10
+[runner] read time + max speed (non-finite check, velocity alarm)            21       5.0       5.0         0.0      1.00      1.00      1.05
+[runner] step timer (cuda synchronize)                                       20       0.0       0.0         0.0      1.00      1.00      1.00
+coverage: 100.0 % of 25723 ops, 100.0 % of 1040 launches, 100.0 % of 851 syncs inside a section (20 marked steps)
+
+call audit: 2743 section entries over 20 marked step(s)
+section                                          calls  ops/call     self launch/call sync/call sync/step replays
+[runner] integrator step                            20    1262.0    131.0        52.0     30.00     30.00       0
+[warpSPH] - [DFSPH - 04] pressure geometry          20     429.0    188.0        13.0      9.00      9.00       0
+[runner] case timestep hook                         21      16.0     16.0         0.0      8.00      8.40       0
+[warpSPH] - buildVerletList                         40     116.0      0.5         4.0      3.50      7.00       0
+[warpSPH] - [DFSPH - 07] viscosity                  20     253.0      1.0        12.0      6.00      6.00       0
+[warpSPH] - (deltaSPH) - computeVelocityDiffus      20     252.0    250.0        12.0      6.00      6.00       0
+[Verlet] SupportScheme.Gather                       20     225.0      0.0         5.0      6.00      6.00       0
+[Verlet] no prior                                   20     225.0      2.0         5.0      6.00      6.00       0
+warpNeighborSearch - radiusSearchCompactHashMa      20     223.0     47.0         5.0      6.00      6.00       0
+warpNeighborSearch - buildCompactHashMap            20     162.0      1.0         2.0      4.00      4.00       0
+[warpSPH] - [DFSPH - 09] density projection         20     191.0    170.0        11.0      2.00      2.00       0
+[warpSPH] - [DFSPH - 05] divergence projection      20     115.0    101.0         8.0      2.00      2.00       0
+[warpSPH] - [DFSPH - 02] density                    20     103.0      0.0         5.0      2.00      2.00       0
+[warpSPH] - computeDensities                        20     103.0     97.0         5.0      2.00      2.00       0
+neighborSearch - sortParticles                      20      98.0     98.0         1.0      2.00      2.00       0
+[runner] case postStep hook                         21       2.0      2.0         0.0      2.00      2.10       0
+warpWrapper2 [WW2]                                 500       2.3      1.3         1.0      0.00      0.00       0
+SAWF.forward - launch                              500       1.0      0.0         1.0      0.00      0.00       0
+[warpSPH] - [DFSPH - 01] adjacency                  20       6.0      0.0         3.0      1.00      1.00       0
+[Verlet] SupportScheme.SuperSymmetric               20       6.0      0.0         3.0      1.00      1.00       0
+[Verlet] Checking validity of prior neighborho      20       6.0      6.0         3.0      1.00      1.00       0
+neighborSearch - buildHashMap                       20       6.0      6.0         1.0      1.00      1.00       0
+[runner] read time + max speed (non-finite che      21       5.0      5.0         0.0      1.00      1.05       0
+neighborSearch - buildCells                         20      20.0     20.0         0.0      1.00      1.00       0
+neighborSearch - allocate neighbors                 20      11.0     11.0         0.0      1.00      1.00       0
+  [runner] integrator step
+    top ops     : _to_copy x97.0, select x93.0, mul x90.0, zeros x81.0, sub x69.0, unsqueeze x59.0
+    top kernels : computeSPHInterpolation_KernelTiled x6.0, computeIISPHDensityRate_Kernel x6.0, _box_tensor_kernel x5.0, _box_block_kernel x5.0, computeIISPHPressureAcceleration_Kernel x5.0
+    sync sites  : precision.py:68 sync [wp.synchronize_device] x180, stationary.py:194 runStationary x40, stationary.py:203 runStationary x40, build.py:132 buildVerletList_ x20, buildHashmap.py:54 buildCompactHashMap x20
+  [warpSPH] - [DFSPH - 04] pressure geometry
+    top ops     : select x53.0, _to_copy x38.0, sub x37.0, zeros x28.0, mul x21.0, unsqueeze x21.0
+    top kernels : _box_tensor_kernel x1.0, _box_block_kernel x1.0, _fixed_topology_kernel x1.0, _wall_contract_kernel x1.0, computeIISPHGradientSum_Kernel x1.0
+    sync sites  : precision.py:68 sync [wp.synchronize_device] x40, buildHashmap.py:54 buildCompactHashMap x20, buildHashmap.py:65 buildCompactHashMap x20, buildHashmap.py:75 buildCompactHashMap x20, buildHashmap.py:130 buildCompactHashMap x20
+  [runner] case timestep hook
+    top ops     : index x4.0, _local_scalar_dense x4.0, eq x2.0, min x2.0, linalg_vector_norm x2.0, max x2.0
+    sync sites  : projection.py:29 projectionTimestep x84, projection.py:30 projectionTimestep x84
+  [warpSPH] - buildVerletList
+    top ops     : select x18.5, sub x11.5, _to_copy x8.5, remainder x5.0, div x5.0, zeros x5.0
+    top kernels : _validityReduce x1.0, _validityDecide x0.5, indexCells x0.5, hashCells x0.5, radiusSearchCountNeighborsCompactHashMap x0.5
+    sync sites  : build.py:132 buildVerletList_ x20, buildHashmap.py:54 buildCompactHashMap x20, buildHashmap.py:65 buildCompactHashMap x20, buildHashmap.py:75 buildCompactHashMap x20, buildHashmap.py:130 buildCompactHashMap x20
+  [warpSPH] - [DFSPH - 07] viscosity
+    top ops     : _to_copy x33.0, mul x23.0, select x21.0, zeros x20.0, unsqueeze x20.0, sub x17.0
+    top kernels : _box_tensor_kernel x3.0, _box_block_kernel x3.0, _wall_contract_kernel x2.0, computeVelocityDiffusionDeltaSPH_KernelTiled x1.0, _fixed_topology_kernel x1.0
+    sync sites  : precision.py:68 sync [wp.synchronize_device] x100, viscosity.py:55 computeWallViscosity x20
+  [warpSPH] - (deltaSPH) - computeVelocityDiffusion
+    top ops     : _to_copy x33.0, mul x23.0, select x21.0, zeros x20.0, unsqueeze x20.0, sub x17.0
+    top kernels : _box_tensor_kernel x3.0, _box_block_kernel x3.0, _wall_contract_kernel x2.0, computeVelocityDiffusionDeltaSPH_KernelTiled x1.0, _fixed_topology_kernel x1.0
+    sync sites  : precision.py:68 sync [wp.synchronize_device] x100, viscosity.py:55 computeWallViscosity x20
+  [Verlet] SupportScheme.Gather
+    top ops     : select x37.0, sub x23.0, _to_copy x17.0, remainder x10.0, div x10.0, zeros x10.0
+    top kernels : indexCells x1.0, hashCells x1.0, radiusSearchCountNeighborsCompactHashMap x1.0, radiusSearchCollectJOnly x1.0, fillCSRRows x1.0
+    sync sites  : buildHashmap.py:54 buildCompactHashMap x20, buildHashmap.py:65 buildCompactHashMap x20, buildHashmap.py:75 buildCompactHashMap x20, buildHashmap.py:130 buildCompactHashMap x20, search.py:59 radiusSearchOnCompactHashMap x20
+  [Verlet] no prior
+    top ops     : select x37.0, sub x23.0, _to_copy x17.0, remainder x10.0, div x10.0, zeros x10.0
+    top kernels : indexCells x1.0, hashCells x1.0, radiusSearchCountNeighborsCompactHashMap x1.0, radiusSearchCollectJOnly x1.0, fillCSRRows x1.0
+    sync sites  : buildHashmap.py:54 buildCompactHashMap x20, buildHashmap.py:65 buildCompactHashMap x20, buildHashmap.py:75 buildCompactHashMap x20, buildHashmap.py:130 buildCompactHashMap x20, search.py:59 radiusSearchOnCompactHashMap x20
+
+worst 8 of the last 20 marked steps (by syncs, then ops):
+  step 0: up to 1262 ops / 30 syncs in one section
+      [runner] integrator step                           ops   1262  launches    52  syncs   30
+      [warpSPH] - [DFSPH - 04] pressure geometry         ops    429  launches    13  syncs    9
+      [runner] case timestep hook                        ops     16  launches     0  syncs    8
+      [warpSPH] - buildVerletList                        ops    232  launches     8  syncs    7
+  step 1: up to 1262 ops / 30 syncs in one section
+      [runner] integrator step                           ops   1262  launches    52  syncs   30
+      [warpSPH] - [DFSPH - 04] pressure geometry         ops    429  launches    13  syncs    9
+      [runner] case timestep hook                        ops     16  launches     0  syncs    8
+      [warpSPH] - buildVerletList                        ops    232  launches     8  syncs    7
+  step 2: up to 1262 ops / 30 syncs in one section
+      [runner] integrator step                           ops   1262  launches    52  syncs   30
+      [warpSPH] - [DFSPH - 04] pressure geometry         ops    429  launches    13  syncs    9
+      [runner] case timestep hook                        ops     16  launches     0  syncs    8
+      [warpSPH] - buildVerletList                        ops    232  launches     8  syncs    7
+  step 3: up to 1262 ops / 30 syncs in one section
+      [runner] integrator step                           ops   1262  launches    52  syncs   30
+      [warpSPH] - [DFSPH - 04] pressure geometry         ops    429  launches    13  syncs    9
+      [runner] case timestep hook                        ops     16  launches     0  syncs    8
+      [warpSPH] - buildVerletList                        ops    232  launches     8  syncs    7
+  step 4: up to 1262 ops / 30 syncs in one section
+      [runner] integrator step                           ops   1262  launches    52  syncs   30
+      [warpSPH] - [DFSPH - 04] pressure geometry         ops    429  launches    13  syncs    9
+      [runner] case timestep hook                        ops     16  launches     0  syncs    8
+      [warpSPH] - buildVerletList                        ops    232  launches     8  syncs    7
+  step 5: up to 1262 ops / 30 syncs in one section
+      [runner] integrator step                           ops   1262  launches    52  syncs   30
+      [warpSPH] - [DFSPH - 04] pressure geometry         ops    429  launches    13  syncs    9
+      [runner] case timestep hook                        ops     16  launches     0  syncs    8
+      [warpSPH] - buildVerletList                        ops    232  launches     8  syncs    7
+  step 6: up to 1262 ops / 30 syncs in one section
+      [runner] integrator step                           ops   1262  launches    52  syncs   30
+      [warpSPH] - [DFSPH - 04] pressure geometry         ops    429  launches    13  syncs    9
+      [runner] case timestep hook                        ops     16  launches     0  syncs    8
+      [warpSPH] - buildVerletList                        ops    232  launches     8  syncs    7
+  step 7: up to 1262 ops / 30 syncs in one section
+      [runner] integrator step                           ops   1262  launches    52  syncs   30
+      [warpSPH] - [DFSPH - 04] pressure geometry         ops    429  launches    13  syncs    9
+      [runner] case timestep hook                        ops     16  launches     0  syncs    8
+      [warpSPH] - buildVerletList                        ops    232  launches     8  syncs    7

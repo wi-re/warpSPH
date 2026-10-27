@@ -1,0 +1,1273 @@
+{
+  "checkpoint": "529f431",
+  "runs": {
+    "analytic": {
+      "row": {
+        "id": "sloshing__dfsph__analytic",
+        "test": "sloshing",
+        "case": "sloshingTank",
+        "scheme": "dfsph",
+        "boundary": "analytic",
+        "precision": "float32",
+        "spec": {
+          "nx": 200,
+          "tLimit": 7.0,
+          "nSteps": null,
+          "kernel": "Wendland4",
+          "n_h": 4.0,
+          "integrationScheme": "semiImplicitEuler",
+          "supportMode": "SuperSymmetric",
+          "dt": 0.0002,
+          "maxDt": 0.0002,
+          "cflFactor": 0.2,
+          "adaptiveDt": true,
+          "calibrateNormalization": false,
+          "device": "cuda",
+          "pipelineOutputs": false
+        },
+        "params": {
+          "wallRepresentation": "analytic",
+          "hydrostaticInit": true,
+          "shifting": false,
+          "calibratedLattice": false,
+          "calibrateRestDensity": false
+        },
+        "scheme_settings": {
+          "omniViscosity": true,
+          "bandViscosity": true
+        },
+        "skip": null,
+        "timeout_seconds": 14400,
+        "notes": "Analytic-wall transfer: native bounds, corrected case viscosity/cutoff, exact saved fitted-wall IC; only DF density gate differs.",
+        "solver": "dfsph",
+        "initialization": "calibrated-free-surface",
+        "density_source_policy": "absolute",
+        "ordering": "df_np_cd",
+        "numerical_preset": {
+          "revision": "consistency-v1",
+          "stepCeilingSeconds": 0.0002,
+          "viscosityPolicy": "case"
+        },
+        "df_sampling_gate": {
+          "minDivergenceDensityRatio": 0.9,
+          "scope": "clamped divergence only",
+          "defaultPromoted": false
+        }
+      },
+      "checkpoint": "529f431",
+      "root": ".tmp/dfsph-analytic-sloshing-2026-10-26/active09",
+      "state": "None",
+      "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+      "wall_ms": 18.592906994745135,
+      "engine_ms": 18.02796481450399,
+      "run_wall_seconds": 7.9914144882932305,
+      "steps": 340,
+      "run_wall_ms": 23.50416025968597,
+      "iterations_mean": [
+        1,
+        2.05
+      ],
+      "hook_ms": 0.04780875338662055,
+      "diagnostics_ms": 0,
+      "diverged": false,
+      "stop": null,
+      "qualification": "Profiler not stopped before process exit: segmentation fault at teardown; excluded from throughput claims."
+    },
+    "analytic-profile": {
+      "row": {
+        "id": "sloshing__dfsph__analytic",
+        "test": "sloshing",
+        "case": "sloshingTank",
+        "scheme": "dfsph",
+        "boundary": "analytic",
+        "precision": "float32",
+        "spec": {
+          "nx": 200,
+          "tLimit": 7.0,
+          "nSteps": null,
+          "kernel": "Wendland4",
+          "n_h": 4.0,
+          "integrationScheme": "semiImplicitEuler",
+          "supportMode": "SuperSymmetric",
+          "dt": 0.0002,
+          "maxDt": 0.0002,
+          "cflFactor": 0.2,
+          "adaptiveDt": true,
+          "calibrateNormalization": false,
+          "device": "cuda",
+          "pipelineOutputs": false
+        },
+        "params": {
+          "wallRepresentation": "analytic",
+          "hydrostaticInit": true,
+          "shifting": false,
+          "calibratedLattice": false,
+          "calibrateRestDensity": false
+        },
+        "scheme_settings": {
+          "omniViscosity": true,
+          "bandViscosity": true
+        },
+        "skip": null,
+        "timeout_seconds": 14400,
+        "notes": "Analytic-wall transfer: native bounds, corrected case viscosity/cutoff, exact saved fitted-wall IC; only DF density gate differs.",
+        "solver": "dfsph",
+        "initialization": "calibrated-free-surface",
+        "density_source_policy": "absolute",
+        "ordering": "df_np_cd",
+        "numerical_preset": {
+          "revision": "consistency-v1",
+          "stepCeilingSeconds": 0.0002,
+          "viscosityPolicy": "case"
+        },
+        "df_sampling_gate": {
+          "minDivergenceDensityRatio": 0.9,
+          "scope": "clamped divergence only",
+          "defaultPromoted": false
+        }
+      },
+      "checkpoint": "529f431",
+      "root": ".tmp/dfsph-analytic-sloshing-2026-10-26/active09",
+      "state": "None",
+      "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+      "wall_ms": 21.773489772652585,
+      "engine_ms": 20.93182632446289,
+      "run_wall_seconds": 9.281006873585284,
+      "steps": 340,
+      "run_wall_ms": 27.297079039956717,
+      "iterations_mean": [
+        1,
+        2.05
+      ],
+      "hook_ms": 0.07641189581444187,
+      "diagnostics_ms": 0,
+      "diverged": false,
+      "stop": null
+    },
+    "analytic-audit": {
+      "row": {
+        "id": "sloshing__dfsph__analytic",
+        "test": "sloshing",
+        "case": "sloshingTank",
+        "scheme": "dfsph",
+        "boundary": "analytic",
+        "precision": "float32",
+        "spec": {
+          "nx": 200,
+          "tLimit": 7.0,
+          "nSteps": null,
+          "kernel": "Wendland4",
+          "n_h": 4.0,
+          "integrationScheme": "semiImplicitEuler",
+          "supportMode": "SuperSymmetric",
+          "dt": 0.0002,
+          "maxDt": 0.0002,
+          "cflFactor": 0.2,
+          "adaptiveDt": true,
+          "calibrateNormalization": false,
+          "device": "cuda",
+          "pipelineOutputs": false
+        },
+        "params": {
+          "wallRepresentation": "analytic",
+          "hydrostaticInit": true,
+          "shifting": false,
+          "calibratedLattice": false,
+          "calibrateRestDensity": false
+        },
+        "scheme_settings": {
+          "omniViscosity": true,
+          "bandViscosity": true
+        },
+        "skip": null,
+        "timeout_seconds": 14400,
+        "notes": "Analytic-wall transfer: native bounds, corrected case viscosity/cutoff, exact saved fitted-wall IC; only DF density gate differs.",
+        "solver": "dfsph",
+        "initialization": "calibrated-free-surface",
+        "density_source_policy": "absolute",
+        "ordering": "df_np_cd",
+        "numerical_preset": {
+          "revision": "consistency-v1",
+          "stepCeilingSeconds": 0.0002,
+          "viscosityPolicy": "case"
+        },
+        "df_sampling_gate": {
+          "minDivergenceDensityRatio": 0.9,
+          "scope": "clamped divergence only",
+          "defaultPromoted": false
+        }
+      },
+      "checkpoint": "529f431",
+      "root": ".tmp/dfsph-analytic-sloshing-2026-10-26/active09",
+      "state": "None",
+      "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+      "wall_ms": 33.78343861550093,
+      "engine_ms": 31.712331771850586,
+      "run_wall_seconds": 4.2318771639838815,
+      "steps": 30,
+      "run_wall_ms": 141.06257213279605,
+      "iterations_mean": [
+        1,
+        2
+      ],
+      "hook_ms": 0.19829357042908669,
+      "diagnostics_ms": 0,
+      "diverged": false,
+      "stop": null
+    },
+    "particles": {
+      "row": {
+        "id": "sloshing__dfsph__particles",
+        "test": "sloshing",
+        "case": "sloshingTank",
+        "scheme": "dfsph",
+        "boundary": "particles",
+        "precision": "float32",
+        "spec": {
+          "nx": 200,
+          "tLimit": 7.0,
+          "nSteps": null,
+          "kernel": "Wendland4",
+          "n_h": 4.0,
+          "integrationScheme": "semiImplicitEuler",
+          "supportMode": "SuperSymmetric",
+          "dt": 0.0002,
+          "maxDt": 0.0002,
+          "cflFactor": 0.2,
+          "adaptiveDt": true,
+          "calibrateNormalization": false,
+          "device": "cuda",
+          "pipelineOutputs": false
+        },
+        "params": {
+          "wallRepresentation": "particles",
+          "hydrostaticInit": true,
+          "shifting": false,
+          "calibratedLattice": false,
+          "calibrateRestDensity": false
+        },
+        "scheme_settings": {
+          "omniViscosity": true,
+          "bandViscosity": true
+        },
+        "skip": null,
+        "timeout_seconds": 14400,
+        "notes": "DFSPH; shared prepared fixture; density source: absolute; fixed declared tolerances; no outcome-driven tuning.; stability-v1: {\"stepCeilingSeconds\": 0.0002}; consistency-v1: case viscosity; reflected sampled-wall viscosity references",
+        "solver": "dfsph",
+        "initialization": "calibrated-free-surface",
+        "density_source_policy": "absolute",
+        "ordering": "df_np_cd",
+        "numerical_preset": {
+          "revision": "consistency-v1",
+          "stepCeilingSeconds": 0.0002,
+          "viscosityPolicy": "case"
+        }
+      },
+      "checkpoint": "529f431",
+      "root": ".tmp/dfsph-remedy-sloshing-2026-10-26/active09",
+      "state": "None",
+      "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+      "wall_ms": 14.883847860619426,
+      "engine_ms": 13.97197044334284,
+      "run_wall_seconds": 6.481497543863952,
+      "steps": 330,
+      "run_wall_ms": 19.64090164807258,
+      "iterations_mean": [
+        1,
+        2.02
+      ],
+      "hook_ms": 0.09128711186349392,
+      "diagnostics_ms": 0,
+      "diverged": false,
+      "stop": null
+    },
+    "particles-audit": {
+      "row": {
+        "id": "sloshing__dfsph__particles",
+        "test": "sloshing",
+        "case": "sloshingTank",
+        "scheme": "dfsph",
+        "boundary": "particles",
+        "precision": "float32",
+        "spec": {
+          "nx": 200,
+          "tLimit": 7.0,
+          "nSteps": null,
+          "kernel": "Wendland4",
+          "n_h": 4.0,
+          "integrationScheme": "semiImplicitEuler",
+          "supportMode": "SuperSymmetric",
+          "dt": 0.0002,
+          "maxDt": 0.0002,
+          "cflFactor": 0.2,
+          "adaptiveDt": true,
+          "calibrateNormalization": false,
+          "device": "cuda",
+          "pipelineOutputs": false
+        },
+        "params": {
+          "wallRepresentation": "particles",
+          "hydrostaticInit": true,
+          "shifting": false,
+          "calibratedLattice": false,
+          "calibrateRestDensity": false
+        },
+        "scheme_settings": {
+          "omniViscosity": true,
+          "bandViscosity": true
+        },
+        "skip": null,
+        "timeout_seconds": 14400,
+        "notes": "DFSPH; shared prepared fixture; density source: absolute; fixed declared tolerances; no outcome-driven tuning.; stability-v1: {\"stepCeilingSeconds\": 0.0002}; consistency-v1: case viscosity; reflected sampled-wall viscosity references",
+        "solver": "dfsph",
+        "initialization": "calibrated-free-surface",
+        "density_source_policy": "absolute",
+        "ordering": "df_np_cd",
+        "numerical_preset": {
+          "revision": "consistency-v1",
+          "stepCeilingSeconds": 0.0002,
+          "viscosityPolicy": "case"
+        }
+      },
+      "checkpoint": "529f431",
+      "root": ".tmp/dfsph-remedy-sloshing-2026-10-26/active09",
+      "state": "None",
+      "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+      "wall_ms": 33.21691635064781,
+      "engine_ms": 32.051245739585475,
+      "run_wall_seconds": 2.2594015914946795,
+      "steps": 30,
+      "run_wall_ms": 75.31338638315599,
+      "iterations_mean": [
+        1,
+        2.25
+      ],
+      "hook_ms": 0.16611660830676556,
+      "diagnostics_ms": 0,
+      "diverged": false,
+      "stop": null,
+      "reuse_wall_integrals": false,
+      "wall_calls": [
+        0,
+        0
+      ],
+      "sections_host_ms": {}
+    },
+    "analytic-clean": {
+      "row": {
+        "id": "sloshing__dfsph__analytic",
+        "test": "sloshing",
+        "case": "sloshingTank",
+        "scheme": "dfsph",
+        "boundary": "analytic",
+        "precision": "float32",
+        "spec": {
+          "nx": 200,
+          "tLimit": 7.0,
+          "nSteps": null,
+          "kernel": "Wendland4",
+          "n_h": 4.0,
+          "integrationScheme": "semiImplicitEuler",
+          "supportMode": "SuperSymmetric",
+          "dt": 0.0002,
+          "maxDt": 0.0002,
+          "cflFactor": 0.2,
+          "adaptiveDt": true,
+          "calibrateNormalization": false,
+          "device": "cuda",
+          "pipelineOutputs": false
+        },
+        "params": {
+          "wallRepresentation": "analytic",
+          "hydrostaticInit": true,
+          "shifting": false,
+          "calibratedLattice": false,
+          "calibrateRestDensity": false
+        },
+        "scheme_settings": {
+          "omniViscosity": true,
+          "bandViscosity": true
+        },
+        "skip": null,
+        "timeout_seconds": 14400,
+        "notes": "Analytic-wall transfer: native bounds, corrected case viscosity/cutoff, exact saved fitted-wall IC; only DF density gate differs.",
+        "solver": "dfsph",
+        "initialization": "calibrated-free-surface",
+        "density_source_policy": "absolute",
+        "ordering": "df_np_cd",
+        "numerical_preset": {
+          "revision": "consistency-v1",
+          "stepCeilingSeconds": 0.0002,
+          "viscosityPolicy": "case"
+        },
+        "df_sampling_gate": {
+          "minDivergenceDensityRatio": 0.9,
+          "scope": "clamped divergence only",
+          "defaultPromoted": false
+        }
+      },
+      "checkpoint": "529f431",
+      "root": ".tmp/dfsph-analytic-sloshing-2026-10-26/active09",
+      "state": "None",
+      "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+      "wall_ms": 17.580778437356155,
+      "engine_ms": 17.085497706231465,
+      "run_wall_seconds": 8.561967772431672,
+      "steps": 330,
+      "run_wall_ms": 25.94535688615658,
+      "iterations_mean": [
+        1,
+        2.05
+      ],
+      "hook_ms": 0.042128205920259156,
+      "diagnostics_ms": 0,
+      "diverged": false,
+      "stop": null,
+      "reuse_wall_integrals": false,
+      "wall_calls": [
+        0,
+        0
+      ],
+      "sections_host_ms": {
+        "[warpSPH] - [DFSPH - 01] adjacency": 0.3017458940545718,
+        "[warpSPH] - [DFSPH - 02] density": 1.6989159242560465,
+        "[warpSPH] - [DFSPH - 03] Dirichlet boundary conditions": 0.0018805637955665588,
+        "[warpSPH] - [DFSPH - 04] pressure geometry": 4.5966321509331465,
+        "[warpSPH] - [DFSPH - 05] divergence projection": 2.182023019219438,
+        "[warpSPH] - [DFSPH - 06] gravity and body force": 0.056062269334991775,
+        "[warpSPH] - [DFSPH - 07] viscosity": 3.968417663127184,
+        "[warpSPH] - [DFSPH - 08] forcing": 0.01718602143228054,
+        "[warpSPH] - [DFSPH - 09] density projection": 3.228860537831982,
+        "[warpSPH] - [DFSPH - 10] update boundary conditions": 0.06641656781236331,
+        "[warpSPH] - [DFSPH - 11] kick and drift": 0.050304572408397995
+      }
+    },
+    "analytic-clean-repeat": {
+      "row": {
+        "id": "sloshing__dfsph__analytic",
+        "test": "sloshing",
+        "case": "sloshingTank",
+        "scheme": "dfsph",
+        "boundary": "analytic",
+        "precision": "float32",
+        "spec": {
+          "nx": 200,
+          "tLimit": 7.0,
+          "nSteps": null,
+          "kernel": "Wendland4",
+          "n_h": 4.0,
+          "integrationScheme": "semiImplicitEuler",
+          "supportMode": "SuperSymmetric",
+          "dt": 0.0002,
+          "maxDt": 0.0002,
+          "cflFactor": 0.2,
+          "adaptiveDt": true,
+          "calibrateNormalization": false,
+          "device": "cuda",
+          "pipelineOutputs": false
+        },
+        "params": {
+          "wallRepresentation": "analytic",
+          "hydrostaticInit": true,
+          "shifting": false,
+          "calibratedLattice": false,
+          "calibrateRestDensity": false
+        },
+        "scheme_settings": {
+          "omniViscosity": true,
+          "bandViscosity": true
+        },
+        "skip": null,
+        "timeout_seconds": 14400,
+        "notes": "Analytic-wall transfer: native bounds, corrected case viscosity/cutoff, exact saved fitted-wall IC; only DF density gate differs.",
+        "solver": "dfsph",
+        "initialization": "calibrated-free-surface",
+        "density_source_policy": "absolute",
+        "ordering": "df_np_cd",
+        "numerical_preset": {
+          "revision": "consistency-v1",
+          "stepCeilingSeconds": 0.0002,
+          "viscosityPolicy": "case"
+        },
+        "df_sampling_gate": {
+          "minDivergenceDensityRatio": 0.9,
+          "scope": "clamped divergence only",
+          "defaultPromoted": false
+        }
+      },
+      "checkpoint": "529f431",
+      "root": ".tmp/dfsph-analytic-sloshing-2026-10-26/active09",
+      "state": "None",
+      "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+      "wall_ms": 17.772834555556376,
+      "engine_ms": 17.150052743611926,
+      "run_wall_seconds": 7.358234914019704,
+      "steps": 330,
+      "run_wall_ms": 22.297681557635467,
+      "iterations_mean": [
+        1,
+        2.05
+      ],
+      "hook_ms": 0.043361932039260864,
+      "diagnostics_ms": 0,
+      "diverged": false,
+      "stop": null,
+      "reuse_wall_integrals": false,
+      "tensor_transform": false,
+      "wall_calls": [
+        0,
+        0
+      ],
+      "sections_host_ms": {
+        "[warpSPH] - [DFSPH - 01] adjacency": 0.3077875543385744,
+        "[warpSPH] - [DFSPH - 02] density": 1.6962880951662858,
+        "[warpSPH] - [DFSPH - 03] Dirichlet boundary conditions": 0.0018027424812316895,
+        "[warpSPH] - [DFSPH - 04] pressure geometry": 4.612248906244834,
+        "[warpSPH] - [DFSPH - 05] divergence projection": 2.1830330633868775,
+        "[warpSPH] - [DFSPH - 06] gravity and body force": 0.0582736482222875,
+        "[warpSPH] - [DFSPH - 07] viscosity": 3.9774796242515245,
+        "[warpSPH] - [DFSPH - 08] forcing": 0.017302421232064564,
+        "[warpSPH] - [DFSPH - 09] density projection": 3.2439149698863425,
+        "[warpSPH] - [DFSPH - 10] update boundary conditions": 0.06660094795127709,
+        "[warpSPH] - [DFSPH - 11] kick and drift": 0.0514742328474919
+      }
+    },
+    "analytic-developed": {
+      "row": {
+        "id": "sloshing__dfsph__analytic",
+        "test": "sloshing",
+        "case": "sloshingTank",
+        "scheme": "dfsph",
+        "boundary": "analytic",
+        "precision": "float32",
+        "spec": {
+          "nx": 200,
+          "tLimit": 7.0,
+          "nSteps": null,
+          "kernel": "Wendland4",
+          "n_h": 4.0,
+          "integrationScheme": "semiImplicitEuler",
+          "supportMode": "SuperSymmetric",
+          "dt": 0.0002,
+          "maxDt": 0.0002,
+          "cflFactor": 0.2,
+          "adaptiveDt": true,
+          "calibrateNormalization": false,
+          "device": "cuda",
+          "pipelineOutputs": false
+        },
+        "params": {
+          "wallRepresentation": "analytic",
+          "hydrostaticInit": true,
+          "shifting": false,
+          "calibratedLattice": false,
+          "calibrateRestDensity": false
+        },
+        "scheme_settings": {
+          "omniViscosity": true,
+          "bandViscosity": true
+        },
+        "skip": null,
+        "timeout_seconds": 14400,
+        "notes": "Analytic-wall transfer: native bounds, corrected case viscosity/cutoff, exact saved fitted-wall IC; only DF density gate differs.",
+        "solver": "dfsph",
+        "initialization": "calibrated-free-surface",
+        "density_source_policy": "absolute",
+        "ordering": "df_np_cd",
+        "numerical_preset": {
+          "revision": "consistency-v1",
+          "stepCeilingSeconds": 0.0002,
+          "viscosityPolicy": "case"
+        },
+        "df_sampling_gate": {
+          "minDivergenceDensityRatio": 0.9,
+          "scope": "clamped divergence only",
+          "defaultPromoted": false
+        }
+      },
+      "checkpoint": "529f431",
+      "root": ".tmp/dfsph-analytic-sloshing-2026-10-26/active09",
+      "state": ".tmp/dfsph-analytic-sloshing-2026-10-26/active09/sloshing__dfsph__analytic/last_observed_state.pt",
+      "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+      "wall_ms": 19.19427367237707,
+      "engine_ms": 18.61001187582877,
+      "run_wall_seconds": 8.183076961897314,
+      "steps": 330,
+      "run_wall_ms": 24.797202914840344,
+      "iterations_mean": [
+        1,
+        2.0033333333333334
+      ],
+      "hook_ms": 0.047137029469013214,
+      "diagnostics_ms": 0,
+      "diverged": false,
+      "stop": null,
+      "reuse_wall_integrals": false,
+      "wall_calls": [
+        0,
+        0
+      ],
+      "sections_host_ms": {
+        "[warpSPH] - [DFSPH - 01] adjacency": 0.5835704070826372,
+        "[warpSPH] - [DFSPH - 02] density": 1.740120757992069,
+        "[warpSPH] - [DFSPH - 03] Dirichlet boundary conditions": 0.0020603804538647332,
+        "[warpSPH] - [DFSPH - 04] pressure geometry": 4.813294485211372,
+        "[warpSPH] - [DFSPH - 05] divergence projection": 2.2565405257046223,
+        "[warpSPH] - [DFSPH - 06] gravity and body force": 0.06421706639230251,
+        "[warpSPH] - [DFSPH - 07] viscosity": 4.599501847599943,
+        "[warpSPH] - [DFSPH - 08] forcing": 0.01856210020681222,
+        "[warpSPH] - [DFSPH - 09] density projection": 3.4034979653855166,
+        "[warpSPH] - [DFSPH - 10] update boundary conditions": 0.06797182373702526,
+        "[warpSPH] - [DFSPH - 11] kick and drift": 0.0522189245869716
+      }
+    },
+    "analytic-diagnostics": {
+      "row": {
+        "id": "sloshing__dfsph__analytic",
+        "test": "sloshing",
+        "case": "sloshingTank",
+        "scheme": "dfsph",
+        "boundary": "analytic",
+        "precision": "float32",
+        "spec": {
+          "nx": 200,
+          "tLimit": 7.0,
+          "nSteps": null,
+          "kernel": "Wendland4",
+          "n_h": 4.0,
+          "integrationScheme": "semiImplicitEuler",
+          "supportMode": "SuperSymmetric",
+          "dt": 0.0002,
+          "maxDt": 0.0002,
+          "cflFactor": 0.2,
+          "adaptiveDt": true,
+          "calibrateNormalization": false,
+          "device": "cuda",
+          "pipelineOutputs": false
+        },
+        "params": {
+          "wallRepresentation": "analytic",
+          "hydrostaticInit": true,
+          "shifting": false,
+          "calibratedLattice": false,
+          "calibrateRestDensity": false
+        },
+        "scheme_settings": {
+          "omniViscosity": true,
+          "bandViscosity": true
+        },
+        "skip": null,
+        "timeout_seconds": 14400,
+        "notes": "Analytic-wall transfer: native bounds, corrected case viscosity/cutoff, exact saved fitted-wall IC; only DF density gate differs.",
+        "solver": "dfsph",
+        "initialization": "calibrated-free-surface",
+        "density_source_policy": "absolute",
+        "ordering": "df_np_cd",
+        "numerical_preset": {
+          "revision": "consistency-v1",
+          "stepCeilingSeconds": 0.0002,
+          "viscosityPolicy": "case"
+        },
+        "df_sampling_gate": {
+          "minDivergenceDensityRatio": 0.9,
+          "scope": "clamped divergence only",
+          "defaultPromoted": false
+        }
+      },
+      "checkpoint": "529f431",
+      "root": ".tmp/dfsph-analytic-sloshing-2026-10-26/active09",
+      "state": "None",
+      "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+      "wall_ms": 20.58859057103594,
+      "engine_ms": 18.726220083077216,
+      "run_wall_seconds": 8.61898210644722,
+      "steps": 330,
+      "run_wall_ms": 26.118127595294606,
+      "iterations_mean": [
+        1,
+        2.05
+      ],
+      "hook_ms": 0.052713382368286446,
+      "diagnostics_ms": 1.2850606368477162,
+      "diverged": false,
+      "stop": null,
+      "reuse_wall_integrals": false,
+      "wall_calls": [
+        0,
+        0
+      ],
+      "sections_host_ms": {
+        "[warpSPH] - [DFSPH - 01] adjacency": 0.5397838726639748,
+        "[warpSPH] - [DFSPH - 02] density": 1.8117332085967064,
+        "[warpSPH] - [DFSPH - 03] Dirichlet boundary conditions": 0.0021597898254791894,
+        "[warpSPH] - [DFSPH - 04] pressure geometry": 4.863645353664954,
+        "[warpSPH] - [DFSPH - 05] divergence projection": 2.7205158987392983,
+        "[warpSPH] - [DFSPH - 06] gravity and body force": 0.06502934421102206,
+        "[warpSPH] - [DFSPH - 07] viscosity": 4.193673571571708,
+        "[warpSPH] - [DFSPH - 08] forcing": 0.01807578218479951,
+        "[warpSPH] - [DFSPH - 09] density projection": 3.3647507739563784,
+        "[warpSPH] - [DFSPH - 10] update boundary conditions": 0.06852602896591027,
+        "[warpSPH] - [DFSPH - 11] kick and drift": 0.0527870561927557
+      }
+    },
+    "analytic-reuse": {
+      "row": {
+        "id": "sloshing__dfsph__analytic",
+        "test": "sloshing",
+        "case": "sloshingTank",
+        "scheme": "dfsph",
+        "boundary": "analytic",
+        "precision": "float32",
+        "spec": {
+          "nx": 200,
+          "tLimit": 7.0,
+          "nSteps": null,
+          "kernel": "Wendland4",
+          "n_h": 4.0,
+          "integrationScheme": "semiImplicitEuler",
+          "supportMode": "SuperSymmetric",
+          "dt": 0.0002,
+          "maxDt": 0.0002,
+          "cflFactor": 0.2,
+          "adaptiveDt": true,
+          "calibrateNormalization": false,
+          "device": "cuda",
+          "pipelineOutputs": false
+        },
+        "params": {
+          "wallRepresentation": "analytic",
+          "hydrostaticInit": true,
+          "shifting": false,
+          "calibratedLattice": false,
+          "calibrateRestDensity": false
+        },
+        "scheme_settings": {
+          "omniViscosity": true,
+          "bandViscosity": true
+        },
+        "skip": null,
+        "timeout_seconds": 14400,
+        "notes": "Analytic-wall transfer: native bounds, corrected case viscosity/cutoff, exact saved fitted-wall IC; only DF density gate differs.",
+        "solver": "dfsph",
+        "initialization": "calibrated-free-surface",
+        "density_source_policy": "absolute",
+        "ordering": "df_np_cd",
+        "numerical_preset": {
+          "revision": "consistency-v1",
+          "stepCeilingSeconds": 0.0002,
+          "viscosityPolicy": "case"
+        },
+        "df_sampling_gate": {
+          "minDivergenceDensityRatio": 0.9,
+          "scope": "clamped divergence only",
+          "defaultPromoted": false
+        }
+      },
+      "checkpoint": "529f431",
+      "root": ".tmp/dfsph-analytic-sloshing-2026-10-26/active09",
+      "state": "None",
+      "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+      "wall_ms": 18.73136457676689,
+      "engine_ms": 17.63437098882669,
+      "run_wall_seconds": 11.259548959322274,
+      "steps": 330,
+      "run_wall_ms": 34.11984533127962,
+      "iterations_mean": [
+        1,
+        2.05
+      ],
+      "hook_ms": 0.09605585287014642,
+      "diagnostics_ms": 0,
+      "diverged": false,
+      "stop": null,
+      "reuse_wall_integrals": true,
+      "wall_calls": [
+        991,
+        660
+      ],
+      "sections_host_ms": {
+        "[warpSPH] - [DFSPH - 01] adjacency": 0.3451723977923393,
+        "[warpSPH] - [DFSPH - 02] density": 1.795636061578989,
+        "[warpSPH] - [DFSPH - 03] Dirichlet boundary conditions": 0.0018770558138688405,
+        "[warpSPH] - [DFSPH - 04] pressure geometry": 3.7072027071068683,
+        "[warpSPH] - [DFSPH - 05] divergence projection": 2.2864464235802493,
+        "[warpSPH] - [DFSPH - 06] gravity and body force": 0.060345353558659554,
+        "[warpSPH] - [DFSPH - 07] viscosity": 4.317548284307122,
+        "[warpSPH] - [DFSPH - 08] forcing": 0.01754108505944411,
+        "[warpSPH] - [DFSPH - 09] density projection": 3.3559047244489193,
+        "[warpSPH] - [DFSPH - 10] update boundary conditions": 0.06749009403089683,
+        "[warpSPH] - [DFSPH - 11] kick and drift": 0.05204692172507445
+      }
+    },
+    "analytic-reuse-repeat": {
+      "row": {
+        "id": "sloshing__dfsph__analytic",
+        "test": "sloshing",
+        "case": "sloshingTank",
+        "scheme": "dfsph",
+        "boundary": "analytic",
+        "precision": "float32",
+        "spec": {
+          "nx": 200,
+          "tLimit": 7.0,
+          "nSteps": null,
+          "kernel": "Wendland4",
+          "n_h": 4.0,
+          "integrationScheme": "semiImplicitEuler",
+          "supportMode": "SuperSymmetric",
+          "dt": 0.0002,
+          "maxDt": 0.0002,
+          "cflFactor": 0.2,
+          "adaptiveDt": true,
+          "calibrateNormalization": false,
+          "device": "cuda",
+          "pipelineOutputs": false
+        },
+        "params": {
+          "wallRepresentation": "analytic",
+          "hydrostaticInit": true,
+          "shifting": false,
+          "calibratedLattice": false,
+          "calibrateRestDensity": false
+        },
+        "scheme_settings": {
+          "omniViscosity": true,
+          "bandViscosity": true
+        },
+        "skip": null,
+        "timeout_seconds": 14400,
+        "notes": "Analytic-wall transfer: native bounds, corrected case viscosity/cutoff, exact saved fitted-wall IC; only DF density gate differs.",
+        "solver": "dfsph",
+        "initialization": "calibrated-free-surface",
+        "density_source_policy": "absolute",
+        "ordering": "df_np_cd",
+        "numerical_preset": {
+          "revision": "consistency-v1",
+          "stepCeilingSeconds": 0.0002,
+          "viscosityPolicy": "case"
+        },
+        "df_sampling_gate": {
+          "minDivergenceDensityRatio": 0.9,
+          "scope": "clamped divergence only",
+          "defaultPromoted": false
+        }
+      },
+      "checkpoint": "529f431",
+      "root": ".tmp/dfsph-analytic-sloshing-2026-10-26/active09",
+      "state": "None",
+      "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+      "wall_ms": 16.22422531247139,
+      "engine_ms": 15.684715455989775,
+      "run_wall_seconds": 6.843300373293459,
+      "steps": 330,
+      "run_wall_ms": 20.737273858465027,
+      "iterations_mean": [
+        1,
+        2.05
+      ],
+      "hook_ms": 0.03951147819558779,
+      "diagnostics_ms": 0,
+      "diverged": false,
+      "stop": null,
+      "reuse_wall_integrals": true,
+      "tensor_transform": false,
+      "wall_calls": [
+        991,
+        660
+      ],
+      "sections_host_ms": {
+        "[warpSPH] - [DFSPH - 01] adjacency": 0.30600607705612975,
+        "[warpSPH] - [DFSPH - 02] density": 1.6899004019796848,
+        "[warpSPH] - [DFSPH - 03] Dirichlet boundary conditions": 0.001890445128083229,
+        "[warpSPH] - [DFSPH - 04] pressure geometry": 3.288658264403542,
+        "[warpSPH] - [DFSPH - 05] divergence projection": 2.1548614650964737,
+        "[warpSPH] - [DFSPH - 06] gravity and body force": 0.056238522132237755,
+        "[warpSPH] - [DFSPH - 07] viscosity": 3.9420327295859656,
+        "[warpSPH] - [DFSPH - 08] forcing": 0.01696075623234113,
+        "[warpSPH] - [DFSPH - 09] density projection": 3.2172243172923722,
+        "[warpSPH] - [DFSPH - 10] update boundary conditions": 0.06599871752162774,
+        "[warpSPH] - [DFSPH - 11] kick and drift": 0.0509915966540575
+      }
+    },
+    "analytic-transform": {
+      "row": {
+        "id": "sloshing__dfsph__analytic",
+        "test": "sloshing",
+        "case": "sloshingTank",
+        "scheme": "dfsph",
+        "boundary": "analytic",
+        "precision": "float32",
+        "spec": {
+          "nx": 200,
+          "tLimit": 7.0,
+          "nSteps": null,
+          "kernel": "Wendland4",
+          "n_h": 4.0,
+          "integrationScheme": "semiImplicitEuler",
+          "supportMode": "SuperSymmetric",
+          "dt": 0.0002,
+          "maxDt": 0.0002,
+          "cflFactor": 0.2,
+          "adaptiveDt": true,
+          "calibrateNormalization": false,
+          "device": "cuda",
+          "pipelineOutputs": false
+        },
+        "params": {
+          "wallRepresentation": "analytic",
+          "hydrostaticInit": true,
+          "shifting": false,
+          "calibratedLattice": false,
+          "calibrateRestDensity": false
+        },
+        "scheme_settings": {
+          "omniViscosity": true,
+          "bandViscosity": true
+        },
+        "skip": null,
+        "timeout_seconds": 14400,
+        "notes": "Analytic-wall transfer: native bounds, corrected case viscosity/cutoff, exact saved fitted-wall IC; only DF density gate differs.",
+        "solver": "dfsph",
+        "initialization": "calibrated-free-surface",
+        "density_source_policy": "absolute",
+        "ordering": "df_np_cd",
+        "numerical_preset": {
+          "revision": "consistency-v1",
+          "stepCeilingSeconds": 0.0002,
+          "viscosityPolicy": "case"
+        },
+        "df_sampling_gate": {
+          "minDivergenceDensityRatio": 0.9,
+          "scope": "clamped divergence only",
+          "defaultPromoted": false
+        }
+      },
+      "checkpoint": "529f431",
+      "root": ".tmp/dfsph-analytic-sloshing-2026-10-26/active09",
+      "state": "None",
+      "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+      "wall_ms": 17.53766767059763,
+      "engine_ms": 17.032857052857263,
+      "run_wall_seconds": 7.286796540953219,
+      "steps": 330,
+      "run_wall_ms": 22.08120163925218,
+      "iterations_mean": [
+        1,
+        2.05
+      ],
+      "hook_ms": 0.045659299939870834,
+      "diagnostics_ms": 0,
+      "diverged": false,
+      "stop": null,
+      "reuse_wall_integrals": false,
+      "tensor_transform": true,
+      "wall_calls": [
+        0,
+        0
+      ],
+      "sections_host_ms": {
+        "[warpSPH] - [DFSPH - 01] adjacency": 0.30884675681591034,
+        "[warpSPH] - [DFSPH - 02] density": 1.694848733022809,
+        "[warpSPH] - [DFSPH - 03] Dirichlet boundary conditions": 0.0018366364141305287,
+        "[warpSPH] - [DFSPH - 04] pressure geometry": 4.596744008983175,
+        "[warpSPH] - [DFSPH - 05] divergence projection": 2.1702888514846563,
+        "[warpSPH] - [DFSPH - 06] gravity and body force": 0.05703930743038654,
+        "[warpSPH] - [DFSPH - 07] viscosity": 3.9794704504311085,
+        "[warpSPH] - [DFSPH - 08] forcing": 0.017489151408274967,
+        "[warpSPH] - [DFSPH - 09] density projection": 3.2288893529524407,
+        "[warpSPH] - [DFSPH - 10] update boundary conditions": 0.06648687335352103,
+        "[warpSPH] - [DFSPH - 11] kick and drift": 0.05002051591873169
+      }
+    },
+    "analytic-transform-audit": {
+      "row": {
+        "id": "sloshing__dfsph__analytic",
+        "test": "sloshing",
+        "case": "sloshingTank",
+        "scheme": "dfsph",
+        "boundary": "analytic",
+        "precision": "float32",
+        "spec": {
+          "nx": 200,
+          "tLimit": 7.0,
+          "nSteps": null,
+          "kernel": "Wendland4",
+          "n_h": 4.0,
+          "integrationScheme": "semiImplicitEuler",
+          "supportMode": "SuperSymmetric",
+          "dt": 0.0002,
+          "maxDt": 0.0002,
+          "cflFactor": 0.2,
+          "adaptiveDt": true,
+          "calibrateNormalization": false,
+          "device": "cuda",
+          "pipelineOutputs": false
+        },
+        "params": {
+          "wallRepresentation": "analytic",
+          "hydrostaticInit": true,
+          "shifting": false,
+          "calibratedLattice": false,
+          "calibrateRestDensity": false
+        },
+        "scheme_settings": {
+          "omniViscosity": true,
+          "bandViscosity": true
+        },
+        "skip": null,
+        "timeout_seconds": 14400,
+        "notes": "Analytic-wall transfer: native bounds, corrected case viscosity/cutoff, exact saved fitted-wall IC; only DF density gate differs.",
+        "solver": "dfsph",
+        "initialization": "calibrated-free-surface",
+        "density_source_policy": "absolute",
+        "ordering": "df_np_cd",
+        "numerical_preset": {
+          "revision": "consistency-v1",
+          "stepCeilingSeconds": 0.0002,
+          "viscosityPolicy": "case"
+        },
+        "df_sampling_gate": {
+          "minDivergenceDensityRatio": 0.9,
+          "scope": "clamped divergence only",
+          "defaultPromoted": false
+        }
+      },
+      "checkpoint": "529f431",
+      "root": ".tmp/dfsph-analytic-sloshing-2026-10-26/active09",
+      "state": "None",
+      "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+      "wall_ms": 28.48950824700296,
+      "engine_ms": 27.322214628520765,
+      "run_wall_seconds": 2.473280904814601,
+      "steps": 30,
+      "run_wall_ms": 82.44269682715337,
+      "iterations_mean": [
+        1,
+        2
+      ],
+      "hook_ms": 0.10726163163781166,
+      "diagnostics_ms": 0,
+      "diverged": false,
+      "stop": null,
+      "reuse_wall_integrals": false,
+      "tensor_transform": true,
+      "wall_calls": [
+        0,
+        0
+      ],
+      "sections_host_ms": {}
+    },
+    "native-tank": {
+      "source": ".tmp/dfsph-native-init-2026-10-25/default-tol/native/scene.json",
+      "particles": 465,
+      "precision": "float32",
+      "device": "CPU",
+      "threads": "4",
+      "engine_ms": 0.29719149383405846,
+      "median_ms": 0.2900362014770508,
+      "steps": 300,
+      "warmup": 30,
+      "iterations_mean": [
+        1,
+        5.253333333333333
+      ],
+      "support": 0.0625,
+      "kernel": 0,
+      "wall_method": 2,
+      "head": "eccce86155776f6ac52d5080b1f720a52bf29450",
+      "binding_sha256": "18753b5e97d59bcc800d072208bb368124f9f000fe65741c07cfa21438b6c495"
+    },
+    "native-tank-repeat": {
+      "source": ".tmp/dfsph-native-init-2026-10-25/default-tol/native/scene.json",
+      "particles": 465,
+      "precision": "float32",
+      "device": "CPU",
+      "threads": "4",
+      "engine_ms": 0.31272181930641335,
+      "median_ms": 0.3180955536663532,
+      "steps": 300,
+      "warmup": 30,
+      "iterations_mean": [
+        1,
+        5.25
+      ],
+      "support": 0.0625,
+      "kernel": 0,
+      "wall_method": 2,
+      "head": "eccce86155776f6ac52d5080b1f720a52bf29450",
+      "binding_sha256": "18753b5e97d59bcc800d072208bb368124f9f000fe65741c07cfa21438b6c495"
+    },
+    "local-tank-fluid-viscosity": {
+      "engine_ms": 21.893460505803425,
+      "wall_ms": 22.32328805141151,
+      "run_wall_seconds": 7.9832046162337065,
+      "run_wall_ms": 24.19152914010214,
+      "steps": 330,
+      "particles": 465,
+      "iterations_mean": [
+        1.19,
+        11.46
+      ],
+      "diverged": false,
+      "stop": null,
+      "gate": 0.9,
+      "relaxation": 0.25,
+      "source": "/home/lu26029/dev/warpSPH/.tmp/dfsph-native-init-2026-10-25/default-tol"
+    }
+  },
+  "tank_initial_audit": {
+    "activeParticles": 465,
+    "ignoredBufferCapacity": 10000,
+    "nativeReordersParticles": true,
+    "comparison": "lexicographic initial-position order; zero velocities and uniform masses/supports",
+    "bitwise": {
+      "positions": true,
+      "velocities": true,
+      "masses": true,
+      "supports": true
+    }
+  },
+  "wall_reuse_parity": {
+    "emitters": {
+      "equal": true,
+      "max_abs": null
+    },
+    "bodyIDs": {
+      "equal": true,
+      "max_abs": null
+    },
+    "positions": {
+      "equal": true,
+      "max_abs": 0.0
+    },
+    "velocities": {
+      "equal": true,
+      "max_abs": 0.0
+    },
+    "supports": {
+      "equal": true,
+      "max_abs": 0.0
+    },
+    "masses": {
+      "equal": true,
+      "max_abs": 0.0
+    },
+    "densities": {
+      "equal": true,
+      "max_abs": 0.0
+    },
+    "kinds": {
+      "equal": true,
+      "max_abs": null
+    },
+    "materials": {
+      "equal": true,
+      "max_abs": null
+    },
+    "UIDs": {
+      "equal": true,
+      "max_abs": null
+    },
+    "pressures": {
+      "equal": true,
+      "max_abs": 0.0
+    },
+    "ghostIndices": {
+      "equal": true,
+      "max_abs": null
+    },
+    "ghostOffsets": {
+      "equal": true,
+      "max_abs": 0.0
+    },
+    "boundaryAccelerations": {
+      "equal": true,
+      "max_abs": 0.0
+    },
+    "divergencePressures": {
+      "equal": true,
+      "max_abs": 0.0
+    },
+    "densityPressureImpulse": {
+      "equal": true,
+      "max_abs": 0.0
+    },
+    "divergencePressureImpulse": {
+      "equal": true,
+      "max_abs": 0.0
+    }
+  },
+  "transform_parity": {
+    "emitters": true,
+    "bodyIDs": true,
+    "positions": true,
+    "velocities": true,
+    "supports": true,
+    "masses": true,
+    "densities": true,
+    "kinds": true,
+    "materials": true,
+    "UIDs": true,
+    "pressures": true,
+    "ghostIndices": true,
+    "ghostOffsets": true,
+    "boundaryAccelerations": true,
+    "divergencePressures": true,
+    "densityPressureImpulse": true,
+    "divergencePressureImpulse": true
+  },
+  "profile": {
+    "sections_ms": {
+      "[runner] case timestep hook": 0.7257380999999997,
+      "[runner] read time + max speed (non-finite check, velocity alarm)": 0.0747409,
+      "[runner] progress bar": 0.0590028,
+      "[runner] plot and store": 0.0050766,
+      "[runner] velocity alarm check": 0.004605100000000001,
+      "[runner] integrator step": 26.4422427,
+      "[warpSPH] - [DFSPH - 01] adjacency": 0.3994872,
+      "[warpSPH] - [DFSPH - 02] density": 2.3325504,
+      "[warpSPH] - [DFSPH - 03] Dirichlet boundary conditions": 0.0131571,
+      "[warpSPH] - [DFSPH - 04] pressure geometry": 7.1546383,
+      "[warpSPH] - [DFSPH - 05] divergence projection": 3.5082424000000003,
+      "[warpSPH] - [DFSPH - 06] gravity and body force": 0.1130912,
+      "[warpSPH] - [DFSPH - 07] viscosity": 5.9427695,
+      "[warpSPH] - [DFSPH - 08] forcing": 0.047586800000000005,
+      "[warpSPH] - [DFSPH - 09] density projection": 5.145919900000001,
+      "[warpSPH] - [DFSPH - 10] update boundary conditions": 0.1360187,
+      "[warpSPH] - [DFSPH - 11] kick and drift": 0.0997682,
+      "[runner] step timer (cuda synchronize)": 0.0215611,
+      "[runner] case postStep hook": 2.3083214
+    },
+    "gpu_busy_ms": 7.152704099999999
+  },
+  "method": "Warmup30 +300 timed steps, audit10+20, profile10 after timing. Short windows omit recording. No production changes.",
+  "sources": {
+    "src/warpSPH/rigidBody/transformation.py": "cfb0a335cf88cd6d27e432b8057d376d34ab3609cdfa3b3becc1faa1fdb80f92",
+    "src/warpSPH/modules/iisph/wp_pressureAcceleration.py": "2558aa88205c71e3090b17e87668a8abfdc217fc46a66c0e743e23b554ba5c1c",
+    "src/warpSPH/modules/iisph/contactWeights.py": "0ece9838bdb423c5f994ea8bf1467fe00ac108b17778b2b63a41b3905c12f32a",
+    "src/warpSPH/modules/iisph/solver.py": "0c1eeadd0631cc2c8100378a14c983a8797d62d3685cce5cc030afcc63a11193",
+    "src/warpSPH/modules/iisph/wp_densityRate.py": "9dfaf02490b22d22b88c97d4889c1b7911b6a5f475bf9599738fc6c6a61e00fb",
+    "src/warpSPH/modules/timestep/projection.py": "56a727222c566b2cdb80496a0efcb7a4596682c60d513dfcd71b87ac38d5cb86",
+    "src/warpSPH/modules/dfsph/solver.py": "c25bccdd22d75b1c7f13f737c0b832118f1e235c6c9ce143d1e41e9fe1f4fb49",
+    "src/warpSPH/modules/analyticBoundary/viscosity.py": "c2c7ec9882bfc62bcaf1a3621081fab83aaa1c71ada8cd585793380b0c929ab6",
+    "src/warpSPH/modules/analyticBoundary/density.py": "d5233c688c34c8c39e4f8574738ef570b91841a1800b51c090f5a1fcfd590759",
+    "src/warpSPH/schemes/incompressible/dfsph.py": "c1a6837df0f445459923a8e624ab98f09aba4e25c6ee26ef8d55c9bd2138138b",
+    "../warpSPHCore/src/warpSPHCore/linalg/stationary.py": "2ff6d1deb46fdb8429731d0ccd90def42628b2af9e040e3c2f4cd08c31b6ca11",
+    "../curvatureBoundaries/src/warpSPHBoundaries/scene/provider.py": "ebc8c94b124ccce87cec1bb6245a969ebecc9a39731b89bdba4121af85790753",
+    "../curvatureBoundaries/src/warpSPHBoundaries/scene/box.py": "fafad303d835c9b547d52681299065753c715b1e1a0fb804ae80da42513043bf",
+    "../curvatureBoundaries/src/warpSPHBoundaries/edge/precision.py": "d53f1227255cb35729adeb6285a162ab08eff0098a5a2c79ec4df3b51f82f9b7",
+    ".tmp/dfsph-performance-2026-10-26/profile_native.py": "f09cfc5929519bcef4242111044e0b68c19ad83fa1660d7b5cade96fd9a4e45c",
+    ".tmp/dfsph-performance-2026-10-26/profile_local.py": "ba3fda67333a5571da010d5f0ab5b9ebaaf7ec387dd9e8f194d30ceb607f8494",
+    ".tmp/dfsph-performance-2026-10-26/profile_local_tank.py": "019ea0aeb5adc838037c1033e32b0585e2ace0acb358c9793da785ed2d0d3eb4"
+  },
+  "failures": [
+    {
+      "run": "analytic",
+      "reason": "Initial harness stopped profiler one index too late; process exited with active profiler and segfaulted after its summary. Corrected index and repeated successfully as analytic-profile."
+    },
+    {
+      "run": "local-tank",
+      "reason": "Exact CubicSpline wall viscosity unsupported; stopped before first step. Repeated with explicit fluid-only viscosity matching reference zero wall viscosity."
+    }
+  ]
+}

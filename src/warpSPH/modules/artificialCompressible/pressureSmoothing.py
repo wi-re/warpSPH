@@ -2,7 +2,7 @@
 Eqs. 32-37; `ACSPH_PLAN.md` Secs. 1.4 and 4.3).
 
 Returns the **unscaled** operator -- the `k2 = 0.1 h beta` prefactor of Eq. (24)
-belongs to the caller (`schemes/artificialCompressible.py`), which is the only
+belongs to the caller (`schemes/incompressible/artificialCompressible.py`), which is the only
 place `beta` exists.
 
 Nothing here is new numerics. AC-2 and AC-2L are the delta-SPH density-diffusion
@@ -153,7 +153,7 @@ def _jst(currentState, config, schemeConfig, adjacency, renormalizationState, p)
     standard JST literature uses `max`). `acParams.jstUsePrintedMin` reproduces
     the printed form for comparison; default is `max`.
 
-    `surfaceIndicators` (the dilated free-surface set `V`, `schemes/artificialCompressible.py`'s
+    `surfaceIndicators` (the dilated free-surface set `V`, `schemes/incompressible/artificialCompressible.py`'s
     per-real-step `detectFreeSurface` call, frozen for the whole dual-time
     loop like everything else that reads it) is read directly off
     `currentState` -- `None`/absent (surface detection inactive) means no

@@ -22,7 +22,7 @@ registry default) both diverge by step 5-6, `JFNKSolver` by step ~13,
 consistent across repeated runs (unlike Phase B's Picard(2) comparison,
 this timing is *not* GPU-reduction-order-flaky, confirmed by 3 repeats
 landing on the exact same step each time). This is a genuinely different
-answer from Phase B's, and it is the expected one: real `cases/kolmogorov.py`
+answer from Phase B's, and it is the expected one: real `cases/periodic/kolmogorov.py`
 both seeds symmetry-breaking noise deliberately (to trigger transition on
 purpose) and relies on δ-SPH's artificial/physical viscosity to keep the
 resulting turbulent cascade numerically bounded -- dissipation here is
@@ -41,9 +41,11 @@ import math
 import torch
 
 from warpSPH.sample.acousticCore import buildPeriodicVortexAcousticCoreSystem
-from warpSPH.schemes.acousticCore import f_acoustic_core
+from warpSPH.schemes.experimental.acousticCore import f_acoustic_core
 
-from warpSPHIntegrators import FixedPointSolver, JFNKSolver, get_reference_state, getIntegrator
+from warpSPHIntegrators.solvers import FixedPointSolver, JFNKSolver
+from warpSPHIntegrators.state import get_reference_state
+from warpSPHIntegrators import get_scheme
 from warpSPHCore import SupportScheme, buildVerletList
 
 _NX = 24
@@ -66,7 +68,7 @@ def _runUntilDiverged(integrationScheme, dt, nSteps, solver=None, nx=_NX, diverg
     `rho` exceeded `divergeRhoMax * rho0`, or `nSteps + 1` if it never did.
     """
     system, config, schemeConfig = _buildForcedSystem(nx=nx)
-    scheme = getIntegrator(integrationScheme)
+    scheme = get_scheme(integrationScheme)
     kwargs = dict(f=f_acoustic_core, dt=dt, config=config, schemeConfig=schemeConfig, verbose=False)
     if solver is not None:
         kwargs['solver'] = solver
@@ -119,7 +121,7 @@ def test_forcedFlowGrowsSmoothlyAtSmallDt():
     # Re-run to inspect the final vMax (kept separate from the diverge-scan
     # loop above for clarity).
     finalSystem, _config2, _schemeConfig2 = _buildForcedSystem()
-    scheme = getIntegrator('Backward Euler (implicit)')
+    scheme = get_scheme('Backward Euler (implicit)')
     state = finalSystem
     for _ in range(nSteps):
         result = scheme(state=state, f=f_acoustic_core, dt=dt, config=config, schemeConfig=schemeConfig,

@@ -144,7 +144,7 @@ def test_rosswog2020_engages_at_the_sod_shock_and_stays_off_in_smooth_flow(schem
     """nx = 400 (~250 particles per half): at nx = 100 this host's entropy error through the
     rarefaction is ~1 %, epsdot ~ 3e-3 > eps_0, and the trigger fires there (AV_PLAN Phase 2 notes);
     the paper's thresholds were set on MAGMA2. Regions are by |x| at t = 0.15 (mirrored Sod)."""
-    from warpSPH.cases.sod import sodCase
+    from warpSPH.cases.compressible.sod import sodCase
     res = run(sodCase, scheme=scheme, nx=400, progress=False, quiet=True,
               params=dict(right_rho=0.125, right_pressure=0.1, viscositySwitch='Rosswog2020',
                           alpha_min=0.0, alpha_max=1.0))

@@ -6,6 +6,8 @@
 quantities the Owen lookup table (``owenLUT.py``) was built against.
 """
 
+from warpSPHCore.type_config import index_t, offset_t
+
 import warp as wp
 from warp.types import vector, matrix
 from typing import Any
@@ -37,9 +39,9 @@ def computePsi0_Func_i_raw(
     # Operation specific parameters
      # type: ignore
             
-    beginIndex: wp.int32, # type: ignore
+    beginIndex: offset_t, # type: ignore
     numIndices: wp.int32, # type: ignore
-    offsetArray: wp.array(dtype = wp.int64), # type: ignore
+    offsetArray: wp.array(dtype = index_t), # type: ignore
 
     # Operation Mode for masking certain kinds of interactions, e.g. for directional operations
     ki : wp.int32, referenceKinds : wp.array(dtype = wp.int32), # type: ignore
@@ -61,7 +63,7 @@ def computePsi0_Func_i_raw(
     
     # # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j  = wp.int32(offsetArray[jj])
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
             if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
@@ -132,9 +134,9 @@ def computePsi0_Func_i(
     # Operation specific parameters
      # type: ignore
             
-    beginIndex: wp.int32, # type: ignore
+    beginIndex: offset_t, # type: ignore
     numIndices: wp.int32, # type: ignore
-    offsetArray: wp.array(dtype = wp.int64), # type: ignore
+    offsetArray: wp.array(dtype = index_t), # type: ignore
 
     # Operation Mode for masking certain kinds of interactions, e.g. for directional operations
     ki : wp.int32, referenceKinds : wp.array(dtype = wp.int32), # type: ignore
@@ -178,56 +180,14 @@ def computePsi0_Func_Adjacency(
 
     kernelProperties: kernelState, 
 ):
-    xi, hi, mi, rhoi, ki = getParticle(queryState, i)
-    if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
-        if not checkDirectionality_i(ki, kernelProperties.operationMode):
-            return scalar_t(0.0), scalar_t(0.0)
-        
-    useGradientRenormalization, Li = getL_i(correctionData, i)
-    useGradHTerms, omega_i = getGradH_i(correctionData, i)
-    useVolume, Vi = getVolume_i(correctionData, i)
-    useCRK, Ai, Bi, gradA_i, gradB_i = getCRK_i(correctionData, i)
-
-    out_psi0 = zero_like_warp(queryState.densities) # type: ignore
-    out_psi0h = zero_like_warp(queryState.densities)
-    for o in range(numOffsets):
-        # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
-        if not useAdjacency and (o % lanes) != lane:
-            continue
-        beginIndex = wp.int32(0)
-        numIndices = wp.int32(0)
-        if useAdjacency:    
-            beginIndex = adjacencyState.neighborOffsets[i]
-            numIndices = adjacencyState.numNeighbors[i]
-        else:
-            beginIndex, numIndices = checkOffset(
-                i, queryState.positions, gridState.numCells, gridState.D, 
-                o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
-                domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
-            )
-            if beginIndex < 0:
-                continue
-        
-        beginIndex, numIndices = laneSlice(beginIndex, numIndices, lane, lanes, useAdjacency)
-        psi0_, psi0h_ = computePsi0_Func_i(
-            i, dim, 
-            xi, hi, mi, rhoi,
-            referenceState, domainState,
-            kernelProperties,
-
-            beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
-            ki, referenceState.kinds,
-
-            useGradientRenormalization, Li,
-            useGradHTerms, omega_i, correctionData.referenceOmegas,
-            useVolume, Vi , correctionData.referenceVolumes,
-            useCRK, Ai, Bi, gradA_i, gradB_i,
-
-            # Omega function parameters
-        )
-        out_psi0 += psi0_
-        out_psi0h += psi0h_
-    return out_psi0, out_psi0h
+    # The loop over the cells (a grid traversal) lives in `_raw`; the dim-th root of the finished sum is taken HERE,
+    # after that function has returned. Warp cannot differentiate a non-linear step applied to a value that was
+    # accumulated in a dynamic loop of the same function, and the root is not additive across cells anyway (a root
+    # per cell, summed, was 1.6-1.9x too big on a grid traversal) -- the function boundary is what keeps both right.
+    psi0, psi0h = computePsi0_Func_Adjacency_raw(
+        i, dim, lane, lanes, queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, numOffsets, kernelProperties)
+    return psi0**(scalar_t(1.0)/scalar_t(dim)), psi0h**(scalar_t(1.0)/scalar_t(dim))
 
 
 
@@ -263,17 +223,18 @@ def computePsi0_Func_Adjacency_raw(
         # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
         if not useAdjacency and (o % lanes) != lane:
             continue
-        beginIndex = wp.int32(0)
+        beginIndex = offset_t(0)
         numIndices = wp.int32(0)
         if useAdjacency:    
             beginIndex = adjacencyState.neighborOffsets[i]
             numIndices = adjacencyState.numNeighbors[i]
         else:
-            beginIndex, numIndices = checkOffset(
+            gridBegin, numIndices = checkOffset(
                 i, queryState.positions, gridState.numCells, gridState.D, 
                 o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
                 domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
             )
+            beginIndex = offset_t(gridBegin)
             if beginIndex < 0:
                 continue
         
@@ -351,32 +312,23 @@ def computePsi0_KernelTiled(
     # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
 
     i, lane = wp.tid()
-    if useAdjacency:
-        # raw sums reduced across lanes, THEN the roots (see computePsi0_Func_i)
-        psi0, psi0h = computePsi0_Func_Adjacency_raw(
-            i, domainState.dim, lane, wp.block_dim(),
-            queryState, referenceState, correctionData, domainState,
-            useAdjacency, adjacencyState, gridState, 1,
-            kernelProperties,
-        )
-        s_psi0 = laneSum(psi0)
-        s_psi0h = laneSum(psi0h)
-        if lane == 0:
-            output_psi0[i] = s_psi0**(scalar_t(1.0)/scalar_t(domainState.dim))
-            output_psi0_H[i] = s_psi0h**(scalar_t(1.0)/scalar_t(domainState.dim))
-    else:
-        # grid traversal takes the roots per cell (historical semantics), which
-        # does not decompose over lanes: lane 0 runs the full sum (the branch is
-        # uniform across the block, so no tile op diverges)
-        if lane == 0:
-            psi0, psi0h = computePsi0_Func_Adjacency(
-                i, domainState.dim, 0, 1,
-                queryState, referenceState, correctionData, domainState,
-                useAdjacency, adjacencyState, gridState, gridState.numOffsets,
-                kernelProperties,
-            )
-            output_psi0[i] = psi0
-            output_psi0_H[i] = psi0h
+    # lists AND grids use the lane-parallel raw sums (a grid traversal gives whole cells to the lanes round-robin);
+    # the roots are taken once, on the lane sum, after it. (The grid branch used to run on lane 0 alone and took the
+    # root per cell -- not the sum's root; see computePsi0_Func_Adjacency.)
+    numOffsets = wp.int32(1)
+    if not useAdjacency:
+        numOffsets = gridState.numOffsets
+    psi0, psi0h = computePsi0_Func_Adjacency_raw(
+        i, domainState.dim, lane, wp.block_dim(),
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, numOffsets,
+        kernelProperties,
+    )
+    s_psi0 = laneSum(psi0)
+    s_psi0h = laneSum(psi0h)
+    if lane == 0:
+        output_psi0[i] = s_psi0**(scalar_t(1.0)/scalar_t(domainState.dim))
+        output_psi0_H[i] = s_psi0h**(scalar_t(1.0)/scalar_t(domainState.dim))
 
 
 def _psi0Dtype(ctx, extras):

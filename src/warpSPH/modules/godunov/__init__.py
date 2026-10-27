@@ -7,5 +7,6 @@ Ramachandran (2014) Eq. (15), any kernel (layer 2 of the plan). """
 
 from .wp_gsph import computeGodunovWarp
 from .wp_inutsuka import computeGaussianDensityWarp, computeInutsukaWarp
+from .inputs import godunovReconstruction
 
-__all__ = ['computeGodunovWarp', 'computeGaussianDensityWarp', 'computeInutsukaWarp']
+__all__ = ['computeGodunovWarp', 'computeGaussianDensityWarp', 'computeInutsukaWarp', 'godunovReconstruction']

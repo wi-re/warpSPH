@@ -1,4 +1,4 @@
-"""1D Sod shock tube sampling for `cases/sod.py`: the left/right Riemann
+"""1D Sod shock tube sampling for `cases/compressible/sod.py`: the left/right Riemann
 state container (`sodInitialState`) and `buildSod1D`, which lays out two
 independently-sampled periodic lattices (dense left half, coarser right half
 by `samplingRatio`) and derives the EOS state from the given pressures via
@@ -9,6 +9,8 @@ discontinuity; that block carries a fair amount of commented-out debug/dead
 code from earlier iterations of the ramp, left untouched (separately tracked
 cleanup item), which the live smoothIC path does not depend on.
 """
+
+from warpSPH.configurations.compute import neighborSearchOptions
 
 from typing import NamedTuple
 
@@ -21,7 +23,7 @@ from ....systems import *
 from ....modules import idealGasEOS, evaluateOptimalSupport
 # from optimalSupport import evaluateOptimalSupport
 
-__all__ = ['sodInitialState', 'buildSod1D']
+__all__ = ['sodInitialState', 'buildSod1D', 'buildSod1DMeshless']
 
 
 class sodInitialState(NamedTuple):
@@ -43,13 +45,14 @@ def buildSod1D(
     config: SimulationConfig,
     smoothIC: bool = False,
     adaptiveSupportScheme: AdaptiveSupportScheme = AdaptiveSupportScheme.Monaghan,
+    jitter: float = 0.0,
 ):
-    
-    nx = config.nx 
+
+    nx = config.nx
     actualRatio = nx / (nx // samplingRatio)
 
-    particles_l = sampleRegularParticles(nx, buildDomainDescription(1, config.dim, periodic = True, device = config.device, dtype = config.dtype), config.targetNeighbors, jitter = 0.0)
-    particles_r = sampleRegularParticles(nx // samplingRatio, buildDomainDescription(1, config.dim, periodic = True, device = config.device, dtype = config.dtype), config.targetNeighbors, jitter = 0.0)
+    particles_l = sampleRegularParticles(nx, buildDomainDescription(1, config.dim, periodic = True, device = config.device, dtype = config.dtype), config.targetNeighbors, jitter = jitter)
+    particles_r = sampleRegularParticles(nx // samplingRatio, buildDomainDescription(1, config.dim, periodic = True, device = config.device, dtype = config.dtype), config.targetNeighbors, jitter = jitter)
 
     particles_r = particles_r._replace(masses = torch.ones_like(particles_r.masses) * particles_l.masses.min())
     pos_r = particles_r.positions
@@ -78,7 +81,7 @@ def buildSod1D(
     combinedDensities = torch.where(tags == 0, leftState.rho, rightState.rho).to(combinedPositions.dtype)
     combinedVelocities = torch.where(tags[:, None] == 0, float(leftState.v), float(rightState.v)).to(combinedPositions.dtype)
     combinedKinds = torch.zeros_like(tags)
-    combinedMaterials = tags
+    combinedMaterials = torch.zeros_like(tags)
     combinedUIDs = torch.cat([
         torch.arange(particles_l.positions.shape[0], dtype = torch.int32, device = particles_l.positions.device),
         torch.arange(particles_r.positions.shape[0], dtype = torch.int32, device = particles_r.positions.device)], dim = 0)
@@ -93,6 +96,7 @@ def buildSod1D(
 
         kinds = combinedKinds,
         materials = combinedMaterials,
+        emitters = tags,
         UIDs = combinedUIDs,
         UIDcounter=combinedUIDs.max() + 1,
 
@@ -140,7 +144,7 @@ def buildSod1D(
     # h_optimal = particleState.supports
 
     eosRho = rho_optimal if smoothIC else particleState.densities
-    P_initial = torch.where(particleState.materials == 0, leftState.p, rightState.p)
+    P_initial = torch.where(tags == 0, leftState.p, rightState.p)
     # particleState.densities = eosRho
 
     u = 1 / (gamma - 1) * (P_initial / eosRho)
@@ -235,13 +239,16 @@ def buildSod1D(
     particleState.soundspeeds = c_s
     particleState.entropies = A_
 
-    adjacency = buildVerletList(particleState, 
-                                domain = config.domain,
-                                verletScale = 2**(1/config.dim), supportMode = config.supportMode)
+    adjacency = buildVerletList(
+        particleState,
+        domain=config.domain,
+        verletScale=2 ** (1 / config.dim),
+        supportMode=config.supportMode,
+        **neighborSearchOptions(config))
 
     compressibleSystem = SimulationSystem(
-        state=particleState, 
-        adjacency = adjacency, 
+        state=particleState,
+        adjacency = adjacency,
         domain = config.domain)
     compParams.gamma = gamma
 
@@ -249,3 +256,60 @@ def buildSod1D(
     config.dx = dx
     config.dt = computeTimestep(compressibleSystem, config, compParams, dt = None)
     return compressibleSystem
+
+
+def buildSod1DMeshless(
+    SimulationSystem,
+    samplingRatio: int,
+    leftState: sodInitialState,
+    rightState: sodInitialState,
+    gamma: float,
+    config: SimulationConfig,
+    schemeConfig,
+    jitter: float = 0.0,
+):
+    """The meshless (MFM / MFV) form of `buildSod1D` (COMPRESSIBLE_SPH_PLAN E2):
+    the same double-Sod lattice, but the state is the conserved Q (the G1
+    pattern, `caseUtils/meshless.py`) and the dt is the core signal timestep
+    (`modules/timestep/meshless.py`) instead of the acoustic CFL one."""
+    from warpSPH.modules.timestep import computeTimestep
+    from ...meshless import buildMeshlessState
+
+    nx = config.nx
+    actualRatio = nx / (nx // samplingRatio)
+
+    particles_l = sampleRegularParticles(nx, buildDomainDescription(1, config.dim, periodic = True, device = config.device, dtype = config.dtype), config.targetNeighbors, jitter = jitter)
+    particles_r = sampleRegularParticles(nx // samplingRatio, buildDomainDescription(1, config.dim, periodic = True, device = config.device, dtype = config.dtype), config.targetNeighbors, jitter = jitter)
+    particles_r = particles_r._replace(masses = torch.ones_like(particles_r.masses) * particles_l.masses.min())
+    pos_r = particles_r.positions
+    pos_r[pos_r[:, 0] < 0, 0] -= 0.5
+    pos_r[pos_r[:, 0] > 0, 0] += 0.5
+    particles_r = particles_r._replace(positions = pos_r)
+
+    combinedPositions = torch.cat([particles_l.positions, particles_r.positions], dim = 0)
+    tags = torch.cat([
+        torch.zeros(particles_l.positions.shape[0], dtype = torch.int32, device = particles_l.positions.device),
+        torch.ones(particles_r.positions.shape[0], dtype = torch.int32, device = particles_r.positions.device)], dim = 0)
+
+    leftMass = particles_l.masses.min() * leftState.rho
+    rightMass = particles_l.masses.min() * rightState.rho * actualRatio
+
+    combinedMasses = torch.where(tags == 0, leftMass, rightMass).to(combinedPositions.dtype)
+    combinedSupports = torch.where(tags[:, None] == 0, particles_l.supports.min(), particles_r.supports.min())[:, 0]
+    combinedDensities = torch.where(tags == 0, leftState.rho, rightState.rho).to(combinedPositions.dtype)
+    combinedVelocities = torch.where(tags[:, None] == 0, float(leftState.v), float(rightState.v)).to(combinedPositions.dtype)
+    combinedPressures = torch.where(tags == 0, float(leftState.p), float(rightState.p)).to(combinedPositions.dtype)
+    combinedKinds = torch.zeros_like(tags)
+    combinedMaterials = torch.zeros_like(tags)
+    combinedUIDs = torch.cat([
+        torch.arange(particles_l.positions.shape[0], dtype = torch.int32, device = particles_l.positions.device),
+        torch.arange(particles_r.positions.shape[0], dtype = torch.int32, device = particles_r.positions.device)], dim = 0)
+
+    particleState = buildMeshlessState(
+        combinedPositions, combinedSupports, combinedMasses,
+        combinedDensities, combinedVelocities, combinedPressures,
+        gamma, combinedKinds, combinedMaterials, combinedUIDs, emitters=tags)
+
+    meshlessSystem = SimulationSystem(state=particleState, domain=config.domain)
+    config.dt = computeTimestep(meshlessSystem, config, schemeConfig, dt=None)
+    return meshlessSystem

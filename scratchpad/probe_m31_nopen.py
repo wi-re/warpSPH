@@ -19,12 +19,12 @@ nopen      = (sys.argv[2] if len(sys.argv) > 2 else 'on') == 'on'
 shifting   = sys.argv[3] if len(sys.argv) > 3 else 'on'
 tLimit     = float(sys.argv[4]) if len(sys.argv) > 4 else 1.24
 
-import warpSPH.schemes.deltaSPH as sch
+import warpSPH.schemes.weaklyCompressible.deltaSPH as sch
 if not nopen:
     sch.computeMdbcNoPenShift = lambda state, *a, **k: torch.zeros_like(state.positions)
 
 from warpSPH.cases import importAll; importAll()
-from warpSPH.cases.dambreak import dambreakCase
+from warpSPH.cases.freeSurface.dambreak import dambreakCase
 from warpSPH.runner import run
 
 H, TANK_L, G = 0.6, 1.0, 9.81

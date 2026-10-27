@@ -1,6 +1,6 @@
 """Probe (per conversation, 2026-08-25): does the rudimentary acoustic core
 (`JFNK_PLAN.md` Phase E1.5) develop genuine 2D Kolmogorov turbulence at
-*realistic* operating parameters -- `cases/kolmogorov.py`'s own `xi=1.0`
+*realistic* operating parameters -- `cases/periodic/kolmogorov.py`'s own `xi=1.0`
 (forcingAmplitude), `k=4` (forcingWavenumber), `alpha=0.01`
 (artificial-viscosity floor) -- rather than the small, toy-scale sweep
 `test_acousticCoreDissipation.py` used? That sweep found a viscous stability
@@ -33,12 +33,13 @@ bootstrap(precision='float32')
 import torch
 
 from warpSPH.sample.acousticCore import buildPeriodicVortexAcousticCoreSystem
-from warpSPH.schemes.acousticCore import f_acoustic_core
+from warpSPH.schemes.experimental.acousticCore import f_acoustic_core
 from warpSPH.modules.deltaSPH import alphaToNu
-from warpSPHIntegrators import get_reference_state, getIntegrator
+from warpSPHIntegrators.state import get_reference_state
+from warpSPHIntegrators import get_scheme
 from warpSPHCore import SupportScheme, buildVerletList
 
-# cases/kolmogorov.py's own defaults (xi, k, alpha) -- WEAKLY_COMPRESSIBLE_PARAMS/
+# cases/periodic/kolmogorov.py's own defaults (xi, k, alpha) -- WEAKLY_COMPRESSIBLE_PARAMS/
 # kolmogorovCase.params -- reused verbatim by default so this probe targets
 # the real operating point, not an arbitrary one. `xi`/`dtFactor` are
 # CLI-overridable (see `--xi`/`--dt-factor`) for the Ma-scaling follow-up
@@ -79,7 +80,7 @@ def run(nx: int, xi: float, tLimit: float, outDir: str, snapshotEvery: int, prin
     nSteps = int(tLimit / dt)
     print(f'nx={nx} xi={xi} h={h:.5f} nu={nu:.6f} (alpha={ALPHA}) dt={dt:.6f} (dtFactor={dtFactor}) -> {nSteps} steps for t={tLimit}s')
 
-    scheme = getIntegrator('RK4')
+    scheme = get_scheme('RK4')
     state = system
     t0 = time.time()
     for i in range(1, nSteps + 1):

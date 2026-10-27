@@ -1,0 +1,185 @@
+section (tree, inclusive unless "self")                                   calls  ops/call  self ops launch/call sync/call self sync sync/step
+[runner] integrator step                                                     40     805.0     128.0        49.0      5.00      2.00      5.00
+  [warpSPH] - [deltaSPH - 01] - compute adjacency                            80       6.0       0.0         3.0      1.00      0.00      2.00
+    [warpSPH] - buildVerletList                                             120       6.0       0.0         3.0      1.00      0.00      3.00
+      [Verlet] SupportScheme.SuperSymmetric                                 120       6.0       0.0         3.0      1.00      0.00      3.00
+        [Verlet] Checking validity of prior neighborhood                    120       6.0       6.0         3.0      1.00      1.00      3.00
+  [warpSPH] - [deltaSPH] - solve shifting                                    40     137.0       1.0         7.0      1.00      0.00      1.00
+    [warpSPH] - shift                                                        40     136.0      37.0         7.0      1.00      0.00      1.00
+      [warpSPH] - (shift) - adjacency                                        40       6.0       0.0         3.0      1.00      0.00      1.00
+      [warpSPH] - (shift) - projectShift                                     40      57.0      42.0         2.0      0.00      0.00      0.00
+      [warpSPH] - (shift) - computeShift                                     40      29.0      28.0         1.0      0.00      0.00      0.00
+        warpSPH[CRKVolume]                                                   40       1.0       0.0         1.0      0.00      0.00      0.00
+      [warpSPH] - (shift) - countNeighbors                                   40       6.0       0.0         1.0      0.00      0.00      0.00
+      [warpSPH] - (shift) - detectFreeSurface                                40       1.0       1.0         0.0      0.00      0.00      0.00
+  [warpSPH] - [deltaSPH - 08] - compute surface detection                    80      47.0       2.0         6.0      0.00      0.00      0.00
+    [warpSPH] - (freesurface) - detectFreeSurface                            80      45.0       2.0         6.0      0.00      0.00      0.00
+      [warpSPH] - (freesurface) - computeNormals                             80      29.0       9.0         3.0      0.00      0.00      0.00
+        [warpSPH] - computeRenormalizationMatrices                          120      13.7       0.0         2.0      0.00      0.00      0.00
+          [warpSPH] - Renorm - Pseudo Inverse                               120       6.0       4.0         1.0      0.00      0.00      0.00
+          [warpSPH] - Renorm - Compute Covariance                           120       2.7       0.0         1.0      0.00      0.00      0.00
+          [warpSPH] - Renorm - Covariance Postprocess                       120       5.0       5.0         0.0      0.00      0.00      0.00
+      [warpSPH] - (freesurface) - detectFreeSurface - dilation               80       5.0       3.0         1.0      0.00      0.00      0.00
+        warpSPH[dilateSurfaceMask]                                           80       2.0       0.0         1.0      0.00      0.00      0.00
+          warpSPH[dilateSurfaceMask] - Kernel Execution                      80       2.0       0.0         1.0      0.00      0.00      0.00
+      [warpSPH] - (freesurface) - detectFreeSurface - scheme                 80       3.0       1.0         1.0      0.00      0.00      0.00
+        warpSPH[computeBarecascoSurfaceDetection]                            80       2.0       0.0         1.0      0.00      0.00      0.00
+          warpSPH[computeBarecascoSurfaceDetection] - Kernel Execution       80       2.0       0.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [deltaSPH - 03] - compute mDBC density                         80      68.0       0.0         4.0      0.00      0.00      0.00
+    [warpSPH] - (mdbc) - computeMdbcDensityEnglish2025                       80      62.0      51.0         3.0      0.00      0.00      0.00
+      warpSPH[computeLiuMatrices]                                            80       5.0       0.0         1.0      0.00      0.00      0.00
+        warpSPH[computeLiuMatrices] - Kernel Execution                       80       5.0       0.0         1.0      0.00      0.00      0.00
+      [warpSPH] - computeGravity                                            160       3.0       3.0         0.0      0.00      0.00      0.00
+    warpSPH[countNeighbors]                                                 120       6.0       0.0         1.0      0.00      0.00      0.00
+      warpSPH[countNeighbors] - Kernel Execution                            120       6.0       0.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [deltaSPH - 06] - compute boundary velocities                  80      58.0       1.0         2.0      0.00      0.00      0.00
+    [warpSPH] - (mdbc) - computeBoundaryVelocities                          120      56.7      52.0         2.0      0.00      0.00      0.00
+      warpSPH - Operation                                                   800       3.6       0.3         1.0      0.00      0.00      0.00
+        warpSPH[Interpolation]                                              400       2.0       0.0         1.0      0.00      0.00      0.00
+          warpSPH[Interpolation] - Kernel Execution                         400       2.0       0.0         1.0      0.00      0.00      0.00
+            warpWrapper2 [WW2]                                             1480       2.9       1.6         1.0      0.00      0.00      0.00
+              SAWF.forward - launch                                        1480       1.3       0.0         1.0      0.00      0.00      0.00
+                launch_kernel - allocate_output                            2200       1.0       1.0         0.0      0.00      0.00      0.00
+        warpSPH[Divergence]                                                 200       5.0       0.0         1.0      0.00      0.00      0.00
+          warpSPH[Divergence] - Kernel Execution                            200       5.0       2.0         1.0      0.00      0.00      0.00
+        warpSPH[Covariance]                                                 120       2.7       0.0         1.0      0.00      0.00      0.00
+          warpSPH[Covariance] - Kernel Execution                            120       2.7       0.0         1.0      0.00      0.00      0.00
+        warpSPH[Gradient]                                                    80       6.0       0.0         1.0      0.00      0.00      0.00
+          warpSPH[Gradient] - Kernel Execution                               80       6.0       2.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [deltaSPH - 10] - compute drhodt_diss                          80      11.0       0.0         1.0      0.00      0.00      0.00
+    [warpSPH] - (deltaSPH) - computeDensityDiffusion                         80      11.0       6.0         1.0      0.00      0.00      0.00
+      [warpSPH] - (deltaSPH) - computeScalarFieldDiffusion                   80       5.0       0.0         1.0      0.00      0.00      0.00
+        warpSPH[computeDensityDiffusion]                                     80       5.0       0.0         1.0      0.00      0.00      0.00
+          warpSPH[computeDensityDiffusionDeltaSPH] - Kernel Execution        80       2.0       0.0         1.0      0.00      0.00      0.00
+          warpSPH[computeDensityDiffusion] - Preprocessing                   80       3.0       3.0         0.0      0.00      0.00      0.00
+  [warpSPH] - [deltaSPH - 12] - compute drhodt                               80       8.0       0.0         1.0      0.00      0.00      0.00
+    [warpSPH] - computeMomentum                                             120       8.0       2.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [deltaSPH - 13] - compute dvdt from pressure                   80       3.0       0.0         1.0      0.00      0.00      0.00
+    [warpSPH] - computePressureForceSurfaceAware                             80       3.0       0.0         1.0      0.00      0.00      0.00
+      warpSPH[computePressureSurfaceAware]                                   80       3.0       0.0         1.0      0.00      0.00      0.00
+        warpSPH[computePressureSurfaceAware] - Kernel Execution              80       3.0       0.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [deltaSPH - 11] - compute dvdt_diss                            80       2.0       0.0         1.0      0.00      0.00      0.00
+    [warpSPH] - (deltaSPH) - computeVelocityDiffusion                        80       2.0       0.0         1.0      0.00      0.00      0.00
+      warpSPH[computeVelocityDiffusion]                                      80       2.0       0.0         1.0      0.00      0.00      0.00
+        warpSPH[computeVelocityDiffusionDeltaSPH] - Kernel Execution         80       2.0       0.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [deltaSPH] - no-pen shift (impulse)                            40      12.0       6.0         1.0      0.00      0.00      0.00
+    warpSPH - (mdbc) - computeMdbcNoPenShift                                 40       6.0       0.0         1.0      0.00      0.00      0.00
+      warpSPH[computeMdbcNoPenShift]                                         40       6.0       0.0         1.0      0.00      0.00      0.00
+        warpSPH[computeMdbcNoPenShift] - Kernel Execution                    40       6.0       0.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [deltaSPH - 17] - enforce updates                              80      12.0      12.0         0.0      0.00      0.00      0.00
+  [warpSPH] - [deltaSPH - 16] - build update                                 80       7.0       7.0         0.0      0.00      0.00      0.00
+  [warpSPH] - [deltaSPH - 05] - compute EOS                                  80       3.0       0.0         0.0      0.00      0.00      0.00
+    [warpSPH] - weaklyCompressibleEOS                                        80       3.0       3.0         0.0      0.00      0.00      0.00
+  [warpSPH] - [deltaSPH - 14] - compute forcing                              80       3.0       2.0         0.0      0.00      0.00      0.00
+    [warpSPH] - computeForcing                                               80       1.0       1.0         0.0      0.00      0.00      0.00
+  [warpSPH] - [deltaSPH - 15] - compute gravity                              80       3.0       0.0         0.0      0.00      0.00      0.00
+  [warpSPH] - [deltaSPH - 16] - compute mDBC no-pen shift                    80       1.0       1.0         0.0      0.00      0.00      0.00
+[runner] case timestep hook                                                  41      29.0      29.0         0.0      4.00      4.00      4.10
+[runner] case diagnostics                                                    41     315.0     315.0         0.0      1.00      1.00      1.02
+[runner] read time + max speed (non-finite check, velocity alarm)            41       5.0       5.0         0.0      1.00      1.00      1.02
+[runner] step timer (cuda synchronize)                                       40       0.0       0.0         0.0      1.00      1.00      1.00
+coverage: 100.0 % of 46510 ops, 100.0 % of 1960 launches, 99.8 % of 487 syncs inside a section (40 marked steps)
+  OUTSIDE any section: ops 1, launches 0, syncs 1
+    sync sites  : report.py:370 reportRun x1
+    top ops     : _local_scalar_dense x1
+
+call audit: 12763 section entries over 40 marked step(s)
+section                                          calls  ops/call     self launch/call sync/call sync/step replays
+[runner] integrator step                            40     805.0    128.0        49.0      5.00      5.00       0
+[runner] case timestep hook                         41      29.0     29.0         0.0      4.00      4.10       0
+[warpSPH] - buildVerletList                        120       6.0      0.0         3.0      1.00      3.00       0
+[Verlet] SupportScheme.SuperSymmetric              120       6.0      0.0         3.0      1.00      3.00       0
+[Verlet] Checking validity of prior neighborho     120       6.0      6.0         3.0      1.00      3.00       0
+[warpSPH] - [deltaSPH - 01] - compute adjacenc      80       6.0      0.0         3.0      1.00      2.00       0
+warpWrapper2 [WW2]                                1480       2.9      1.6         1.0      0.00      0.00       0
+SAWF.forward - launch                             1480       1.3      0.0         1.0      0.00      0.00       0
+[warpSPH] - [deltaSPH] - solve shifting             40     137.0      1.0         7.0      1.00      1.00       0
+[warpSPH] - shift                                   40     136.0     37.0         7.0      1.00      1.00       0
+[runner] case diagnostics                           41     315.0    315.0         0.0      1.00      1.02       0
+[warpSPH] - (shift) - adjacency                     40       6.0      0.0         3.0      1.00      1.00       0
+warpSPH - Operation                                800       3.6      0.3         1.0      0.00      0.00       0
+[runner] read time + max speed (non-finite che      41       5.0      5.0         0.0      1.00      1.02       0
+[runner] step timer (cuda synchronize)              40       0.0      0.0         0.0      1.00      1.00       0
+[warpSPH] - [deltaSPH - 08] - compute surface       80      47.0      2.0         6.0      0.00      0.00       0
+[warpSPH] - (freesurface) - detectFreeSurface       80      45.0      2.0         6.0      0.00      0.00       0
+[warpSPH] - [deltaSPH - 03] - compute mDBC den      80      68.0      0.0         4.0      0.00      0.00       0
+warpSPH[Interpolation]                             400       2.0      0.0         1.0      0.00      0.00       0
+warpSPH[Interpolation] - Kernel Execution          400       2.0      0.0         1.0      0.00      0.00       0
+[warpSPH] - (mdbc) - computeBoundaryVelocities     120      56.7     52.0         2.0      0.00      0.00       0
+[warpSPH] - (mdbc) - computeMdbcDensityEnglish      80      62.0     51.0         3.0      0.00      0.00       0
+[warpSPH] - (freesurface) - computeNormals          80      29.0      9.0         3.0      0.00      0.00       0
+[warpSPH] - computeRenormalizationMatrices         120      13.7      0.0         2.0      0.00      0.00       0
+[warpSPH] - [deltaSPH - 06] - compute boundary      80      58.0      1.0         2.0      0.00      0.00       0
+  [runner] integrator step
+    top ops     : view x78.0, detach x71.0, clone x62.0, zeros x59.0, mul x52.0, where x47.0
+    top kernels : computeSPHInterpolation_KernelTiled x10.0, _validityReduce x6.0, computeSPHDivergenceTensor_KernelTiled x5.0, _validityDecide x3.0, countNeighbors_KernelTiled x3.0
+    sync sites  : build.py:125 buildVerletList_ x120, util.py:339 hostTime x80
+  [runner] case timestep hook
+    top ops     : div x7.0, mul x4.0, minimum x3.0, lift_fresh x2.0, min x1.0, pow x1.0
+    sync sites  : weaklyCompressible.py:86 computeTimestep x41, weaklyCompressible.py:110 computeTimestep x41, weaklyCompressible.py:111 computeTimestep x41, weaklyCompressible.py:112 computeTimestep x41
+  [warpSPH] - buildVerletList
+    top ops     : empty x2.0, full x1.0, unbind x1.0, view x1.0, _local_scalar_dense x1.0
+    top kernels : _validityReduce x2.0, _validityDecide x1.0
+    sync sites  : build.py:125 buildVerletList_ x120
+  [Verlet] SupportScheme.SuperSymmetric
+    top ops     : empty x2.0, full x1.0, unbind x1.0, view x1.0, _local_scalar_dense x1.0
+    top kernels : _validityReduce x2.0, _validityDecide x1.0
+    sync sites  : build.py:125 buildVerletList_ x120
+  [Verlet] Checking validity of prior neighborhood
+    top ops     : empty x2.0, full x1.0, unbind x1.0, view x1.0, _local_scalar_dense x1.0
+    top kernels : _validityReduce x2.0, _validityDecide x1.0
+    sync sites  : build.py:125 buildVerletList_ x120
+  [warpSPH] - [deltaSPH - 01] - compute adjacency
+    top ops     : empty x2.0, full x1.0, unbind x1.0, view x1.0, _local_scalar_dense x1.0
+    top kernels : _validityReduce x2.0, _validityDecide x1.0
+    sync sites  : build.py:125 buildVerletList_ x80
+  warpWrapper2 [WW2]
+    top ops     : detach x1.6, zeros x1.3
+    top kernels : computeSPHInterpolation_KernelTiled x0.3, computeSPHDivergenceTensor_KernelTiled x0.1, countNeighbors_KernelTiled x0.1, computeCovariance_KernelTiled x0.1, computeLiuMatrices_KernelTiled x0.1
+  SAWF.forward - launch
+    top ops     : zeros x1.3
+    top kernels : computeSPHInterpolation_KernelTiled x0.3, computeSPHDivergenceTensor_KernelTiled x0.1, countNeighbors_KernelTiled x0.1, computeCovariance_KernelTiled x0.1, computeLiuMatrices_KernelTiled x0.1
+(outside any section)                                  ops 1, launches 0, syncs 1
+    sync sites  : report.py:370 reportRun x1
+
+worst 8 of the last 40 marked steps (by syncs, then ops):
+  step 0: up to 805 ops / 5 syncs in one section
+      [runner] integrator step                           ops    805  launches    49  syncs    5
+      [runner] case timestep hook                        ops     29  launches     0  syncs    4
+      [warpSPH] - buildVerletList                        ops     18  launches     9  syncs    3
+      [Verlet] SupportScheme.SuperSymmetric              ops     18  launches     9  syncs    3
+  step 1: up to 805 ops / 5 syncs in one section
+      [runner] integrator step                           ops    805  launches    49  syncs    5
+      [runner] case timestep hook                        ops     29  launches     0  syncs    4
+      [warpSPH] - buildVerletList                        ops     18  launches     9  syncs    3
+      [Verlet] SupportScheme.SuperSymmetric              ops     18  launches     9  syncs    3
+  step 2: up to 805 ops / 5 syncs in one section
+      [runner] integrator step                           ops    805  launches    49  syncs    5
+      [runner] case timestep hook                        ops     29  launches     0  syncs    4
+      [warpSPH] - buildVerletList                        ops     18  launches     9  syncs    3
+      [Verlet] SupportScheme.SuperSymmetric              ops     18  launches     9  syncs    3
+  step 3: up to 805 ops / 5 syncs in one section
+      [runner] integrator step                           ops    805  launches    49  syncs    5
+      [runner] case timestep hook                        ops     29  launches     0  syncs    4
+      [warpSPH] - buildVerletList                        ops     18  launches     9  syncs    3
+      [Verlet] SupportScheme.SuperSymmetric              ops     18  launches     9  syncs    3
+  step 4: up to 805 ops / 5 syncs in one section
+      [runner] integrator step                           ops    805  launches    49  syncs    5
+      [runner] case timestep hook                        ops     29  launches     0  syncs    4
+      [warpSPH] - buildVerletList                        ops     18  launches     9  syncs    3
+      [Verlet] SupportScheme.SuperSymmetric              ops     18  launches     9  syncs    3
+  step 5: up to 805 ops / 5 syncs in one section
+      [runner] integrator step                           ops    805  launches    49  syncs    5
+      [runner] case timestep hook                        ops     29  launches     0  syncs    4
+      [warpSPH] - buildVerletList                        ops     18  launches     9  syncs    3
+      [Verlet] SupportScheme.SuperSymmetric              ops     18  launches     9  syncs    3
+  step 6: up to 805 ops / 5 syncs in one section
+      [runner] integrator step                           ops    805  launches    49  syncs    5
+      [runner] case timestep hook                        ops     29  launches     0  syncs    4
+      [warpSPH] - buildVerletList                        ops     18  launches     9  syncs    3
+      [Verlet] SupportScheme.SuperSymmetric              ops     18  launches     9  syncs    3
+  step 7: up to 805 ops / 5 syncs in one section
+      [runner] integrator step                           ops    805  launches    49  syncs    5
+      [runner] case timestep hook                        ops     29  launches     0  syncs    4
+      [warpSPH] - buildVerletList                        ops     18  launches     9  syncs    3
+      [Verlet] SupportScheme.SuperSymmetric              ops     18  launches     9  syncs    3

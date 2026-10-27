@@ -40,7 +40,7 @@ def _run(case, out, **kw):
 
 
 def timestep(out: Path, nx: int, tLimit: float):
-    from warpSPH.cases.sod import sodCase
+    from warpSPH.cases.compressible.sod import sodCase
     alphas = {}
     for cfl in (0.3, 0.15):
         res = _run(sodCase, out / f'cfl{cfl}', nx=nx, tLimit=tLimit, cflFactor=cfl,
@@ -57,7 +57,7 @@ def timestep(out: Path, nx: int, tLimit: float):
 
 
 def resolution(out: Path, nxs, tLimit: float):
-    from warpSPH.cases.greshoVortex import greshoVortexCase
+    from warpSPH.cases.compressible.greshoVortex import greshoVortexCase
     means = []
     for nx in nxs:
         res = _run(greshoVortexCase, out / f'nx{nx}', nx=nx, tLimit=tLimit)

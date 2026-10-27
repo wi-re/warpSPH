@@ -2,6 +2,13 @@
 
 > **Progress marker:** this plan's row in [PLANS.md](PLANS.md). Update its *Last worked* date and *Where it stands* whenever you work on this plan.
 
+**Priority checkpoint — 2026-10-27 (user):** merge the current `dev` path
+into `main`, then make ACSPH the next target. Before choosing the next
+implementation change, reconcile the current numerical baseline, retained
+matrix failures and the remaining work in [ACSPH_REFACTOR_PLAN.md](ACSPH_REFACTOR_PLAN.md).
+The older TODO list below is historical and needs that reconciliation; this
+priority decision does not start new runs or change numerical defaults.
+
 Target paper — `literature/decourcy2024_incompressible-delta-sph-artificial-compressibility.pdf`, bib key `decourcy2024`:
 
 > **Incompressible δ-SPH via artificial compressibility**
@@ -73,7 +80,7 @@ audit could not settle without a judgement call.
    items 1 and 7 (which the plan already describes as landed —
    `rigidBody/update.py`, `wp_densityDelta.py`, the two periodic cases, two
    test files) and this audit's own changes (the `wallBC` flip in
-   `cases/dambreak.py` + `caseUtils/weaklyCompressible.py`, the three probe
+   `cases/freeSurface/dambreak.py` + `caseUtils/weaklyCompressible.py`, the three probe
    docstrings, `uChar` on the two periodic cases, this plan and
    `DELTASPH_VALIDATION_PLAN.md` §5.7). Worth splitting into two commits.
 
@@ -109,7 +116,7 @@ audit could not settle without a judgement call.
 ### Model / config changes
 
 - **`dambreak`'s `wallBC` default flipped `'constant'` → `'freeSlip'`**
-  (`cases/dambreak.py`, `caseUtils/weaklyCompressible.py::buildRegions`, which
+  (`cases/freeSurface/dambreak.py`, `caseUtils/weaklyCompressible.py::buildRegions`, which
   `dambreak` is the only caller of). Every reference this family is graded
   against specifies free slip — De Courcy §4.5 explicitly, Marrone 2011 §3
   (3.1 and 3.4.1), Lobovský 2014 / Buchner 2002 — and `'constant'` is not it:
@@ -272,7 +279,7 @@ against the commit *before* the psi-sign fix in an isolated `git worktree`,
 and got the documented pre-fix numbers back almost exactly
 (`noShift` diverges at `t=2.76`, `surfaceNormal` survives to `t=4.0`). See
 decision 1's update below for why that fix is correct and should not be
-reverted. **Fix applied**: `cases/sloshingTank.py`'s `deltaSPH` branch now
+reverted. **Fix applied**: `cases/freeSurface/sloshingTank.py`'s `deltaSPH` branch now
 defaults to `ShiftingScheme.michel2022`/`ShiftingProjectionScheme.michel2022`
 instead of the shared default, confirmed end-to-end through the case's own
 real entry point (`run(sloshingTankCase, params={'shifting': True}, nx=60,
@@ -605,7 +612,7 @@ the §4.4 closeout.** Six things landed:
    understood: more diffusion generically looks "better behaved" on a
    short-window A/B even though it is quantitatively wrong and, on this
    specific violent-impact case, was load-bearing for stability over the
-   full run.) **Fix**: `cases/sloshingTank.py` no longer relies on the
+   full run.) **Fix**: `cases/freeSurface/sloshingTank.py` no longer relies on the
    shared shift default for this case — see `PST_ALE_PLAN.md` §7.1 for the
    applied fix and its end-to-end confirmation.
    → **Full validation-case sweep also done** (2026-09-05, Part 9.1): every
@@ -681,7 +688,7 @@ the §4.4 closeout.** Six things landed:
 | §5.6 | Eq. (46)'s `CFL_t h` is a length. Is `h` there carrying an implicit reference velocity (which is what the term *does*)? And is the absence of a body-force constraint deliberate? |
 | §5.7 | §4.4 prints `Δτ/Δt = 2` where Table 1, §4.5 and §3.1.3 all imply `Δt/Δτ = 2`. Transposition? |
 | Part 3 | The `ψ` sign error above — does their δ-SPH reference implementation have it? |
-| §4.1.1 | **AC-4 run standalone (not blended into AC-JST) diverges catastrophically for us** — pressure/velocity reaching `O(1e5-1e6)` within ~15 real steps on both `hydrostaticColumn` and a wall-free case (`rotatingSquarePatch`), nx=24. The paper reports only that AC-4 alone "struggles to maintain a converged kinetic energy" — bounded but non-convergent, not a blow-up — and separately that it resolves the hydrostatic free-surface profile fine at `t=50s`. Is the discrepancy resolution (our nx=24 vs. their finer grids), or something in `k2`/timestep tuning specific to AC-4 that isn't shared with AC-2L? We cross-checked the *formula* against the PDF character-by-character and again indirectly via AC-JST (which uses the identical AC-4 operator, scaled by `epsilon_4 <= kappa_4 = 1/32`, and stays bounded on the same cases) — confident the transcription is right, curious whether the severity we see is expected at coarser resolution or points at a parameter we're missing. |
+| §4.1.1 | **AC-4 run standalone (not blended into AC-JST) diverges catastrophically for us** — pressure/velocity reaching `O(1e5-1e6)` within ~15 real steps on both `hydrostaticColumn` and a wall-free case (`rotatingSquarePatch`), nx=24. The paper reports only that AC-4 alone "struggles to maintain a converged kinetic energy" — bounded but non-convergent, not a blow-up — and separately that it resolves the hydrostatic free-surface profile fine at `t=50s`. Is the discrepancy resolution (our nx=24 vs. their finer grids), or something in `k2`/timestep tuning specific to AC-4 that isn't shared with AC-2L? We cross-checked the *formula* against the PDF character-by-character and again indirectly via AC-JST (which uses the identical AC-4 operator, scaled by `epsilon_4 <= kappa_4 = 1/32`, and stays bounded on the same cases) — confident the transcription is right, curious whether the severity we see is expected at coarser resolution or points at a parameter we're missing. **Re-checked 2026-10-13 with the current scheme (graph, D3, D5): unchanged** (\|v\| 1e17 by t = 0.005 at nx 24, also with D5 off); open hypothesis: `_biharmonic` uses `supports^2` (kernel support radius) where the paper's `h` is the smoothing length (`supports / xi`, as `acParameters` uses for beta and k2), i.e. `xi^2` too strong -- `scripts/probe_ac4Scale.py` tests it. |
 | §4.3 | **Table 1/2's `CFL_t=0.4 -> 0.6` error cliff did not reproduce cleanly for us at reduced scale** (nx=24, one oscillation period only, vs. the paper's `L/Δx=200`-class, presumably multi-period runs): our `CFL_t=0.4` row was the *lowest*-error row measured, not a cliff edge, though the **cost** trend (`w`/`e` falling sharply with `CFL_t`) reproduced cleanly at every scale we tried. Is the accuracy cliff itself only clean at finer resolution / longer integration, or is there a specific measurement window (post-transient, particular oscillation number) Table 1's numbers are drawn from that we should match? |
 
 ---
@@ -1178,7 +1185,7 @@ Ordered by how much is genuinely new.
 
 ## 4.1 The dual-time driver — *entirely new, the core of the work*
 
-`schemes/artificialCompressible.py`. Owns the whole real-time step:
+`schemes/incompressible/artificialCompressible.py`. Owns the whole real-time step:
 
 ```
 for m in 0..maxPseudoIters:
@@ -1307,7 +1314,7 @@ Then add, new:
   `(N, dim)` `bodyForce` form is already accepted, so wiring a source is all
   that would be left.
 
-  **Wired into ACSPH on 2026-09-05** (`schemes/artificialCompressible.py`'s
+  **Wired into ACSPH on 2026-09-05** (`schemes/incompressible/artificialCompressible.py`'s
   `wallPressures`): recomputed at every RK stage from the current fluid
   pressure, `clampNonNeg=False` because ACSPH's pressure is a solved field that
   legitimately goes negative. Without it the wall reads `p = 0` (the non-fluid
@@ -1472,7 +1479,7 @@ both times, in the same words.
 
 Same `𝔽`, same one-support dilation, one set. **Resolved as written — no
 separate knob.** The implementation matches: both consumers read the single
-`currentState.surfaceIndicators` that `schemes/artificialCompressible.py`
+`currentState.surfaceIndicators` that `schemes/incompressible/artificialCompressible.py`
 computes once per real step, dilated by the shared
 `SurfaceDetectionConfig.expansionIterations`. A second, JST-only dilation count
 would be inventing a degree of freedom the paper does not have; if a future
@@ -1685,7 +1692,7 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
 4. ~~**Scaffold the new family** (§4.6).~~ **Done 2026-09-05.** `--scheme
    artificialCompressible` resolves, builds, and runs a step end to end through
    the real integrator; the step is a deliberate no-op
-   (`schemes/artificialCompressible.py::PHYSICS_IMPLEMENTED = False`, warns
+   (`schemes/incompressible/artificialCompressible.py::PHYSICS_IMPLEMENTED = False`, warns
    once on entry) with a marked socket where step 5's driver goes.
    - `ArtificialCompressibleSPHScheme` + `PressureSmoothingScheme` +
      `isArtificialCompressibleScheme` in `enumTypes.py`.
@@ -1710,7 +1717,7 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
      `test_variableStepBdf2DifferentiatesAQuadraticExactly`: the fixed-step
      limit alone would not catch a swapped `Δtⁿ`/`Δtⁿ⁻¹` in Eq. (42).
 5. ~~**The dual-time driver** (§4.1) with AC-2L and RK2 only.~~ **Done
-   2026-09-05.** `schemes/artificialCompressible.py` now runs the full
+   2026-09-05.** `schemes/incompressible/artificialCompressible.py` now runs the full
    Eqs. (38)–(48) loop: frozen stage-0 BDF source, frozen-per-iteration `D^p`,
    a general explicit Butcher RK sweep, `I_c = diag{0,1,1}`, point-implicit
    `α_PI`, and the `ε_v` convergence test on `ṽ`. `ṽ` advection, internal
@@ -1741,7 +1748,7 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
    *Wiring.* `initializers/weaklyCompressible.py::initializeState` now builds
    any of the three state classes from one construction (it had a
    character-identical `if`-branch per class and no `else`, so an unknown class
-   fell through to a `NameError`); `cases/weaklyCompressible.py` gains
+   fell through to a `NameError`); `cases/common/weaklyCompressible.py` gains
    `configureDomain` + `configureArtificialCompressible`, which also **forces
    `forwardEuler`** (loudly) since the exact-delta contract requires it;
    `hydrostaticColumn` branches on `isArtificialCompressibleScheme` and takes
@@ -1759,7 +1766,7 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
    that decomposition with a real kernel taking `x_ij` from
    `computeDistanceVec`, so the moment is minimum-image correct by construction.
    The case is back on the shared `periodic=True` default
-   ([hydrostaticColumn.py:441](src/warpSPH/cases/hydrostaticColumn.py#L441)) and
+   ([hydrostaticColumn.py:441](src/warpSPH/cases/boundaries/hydrostaticColumn.py#L441)) and
    needs no guard, no restriction and no case-level workaround.
 
    *Measured — the scheme is right.* With `p` seeded analytically and `v = 0`
@@ -1900,7 +1907,7 @@ how their numbers are quoted and the only fair way to compare against our δ-SPH
      paper-literal `min` (which the plan had already predicted zeroes the
      operator in smooth flow). The dilated free-surface set `𝕍`
      (`currentState.surfaceIndicators`, already computed once per real step
-     by `schemes/artificialCompressible.py`) gates AC-2L-alone at the
+     by `schemes/incompressible/artificialCompressible.py`) gates AC-2L-alone at the
      surface vs. the interior blend elsewhere, no new surface-detection work
      needed.
    - **AC-JST cross-validates AC-4, and settles the question its own

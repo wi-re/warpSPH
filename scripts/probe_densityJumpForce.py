@@ -26,7 +26,7 @@ except ImportError:
     pass
 
 from warpSPHCore import OperationProperties, SupportScheme                     # noqa: E402
-from warpSPH.cases.sod import sodCase                                           # noqa: E402
+from warpSPH.cases.compressible.sod import sodCase                                           # noqa: E402
 from warpSPH.runner import run                                                  # noqa: E402
 
 P0 = 1.0

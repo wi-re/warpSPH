@@ -11,7 +11,7 @@ bootstrap(precision='float32')
 
 import torch
 import numpy as np
-from warpSPH.cases.dambreak import dambreakCase
+from warpSPH.cases.freeSurface.dambreak import dambreakCase
 from warpSPH.modules.mdbc import computeMdbcDensity
 from warpSPH.enumTypes import isIncompressibleScheme
 from warpSPH.runner import run

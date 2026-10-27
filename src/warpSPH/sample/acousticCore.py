@@ -1,12 +1,14 @@
 """Builds an `AcousticCoreSystem` (`JFNK_PLAN.md` Phase B) on a periodic,
 boundary-free domain seeded with a Taylor-Green-vortex-like velocity field,
-reusing `cases/tgvWeaklyCompressible.py`'s sampling/domain approach
+reusing `cases/periodic/tgvWeaklyCompressible.py`'s sampling/domain approach
 (`sampleParticles` on a periodic `DomainDescription`) per Phase B step 2,
 rather than building sampling from scratch. Not a `Case` -- there is no
 `Case`/CLI wrapping this, matching `sample/waveSystem.py`'s own
 "last stage of the pipeline, not an entry point" framing -- callers (tests,
 notebooks) call this directly.
 """
+
+from warpSPH.configurations.compute import neighborSearchOptions
 
 import math
 from typing import Optional
@@ -38,7 +40,7 @@ def buildPeriodicVortexAcousticCoreSystem(
     dtype: Optional[torch.dtype] = None,
 ):
     """A rotational, divergence-free (in the continuum limit) periodic
-    vortex field -- the same family `cases/tgvWeaklyCompressible.py` seeds,
+    vortex field -- the same family `cases/periodic/tgvWeaklyCompressible.py` seeds,
     just without that case's shuffling/`Case` machinery -- on a uniform
     initial density `rho0`. Returns `(system, config, schemeConfig)`.
 
@@ -78,7 +80,13 @@ def buildPeriodicVortexAcousticCoreSystem(
         UIDs=torch.arange(n, device=device, dtype=torch.int32),
         UIDcounter=n,
     )
-    adjacency = buildVerletList(state, config.domain, 1.0, SupportScheme.SuperSymmetric, None)
+    adjacency = buildVerletList(
+        state,
+        config.domain,
+        1.0,
+        SupportScheme.SuperSymmetric,
+        None,
+        **neighborSearchOptions(config))
     system = AcousticCoreSystem(state=state, adjacency=adjacency, domain=config.domain, t=0.0)
     schemeConfig = AcousticCoreConfig(restDensity=rho0, soundSpeed=soundSpeed,
                                       forcingAmplitude=forcingAmplitude, forcingWavenumber=forcingWavenumber,

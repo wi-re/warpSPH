@@ -2,12 +2,12 @@
 """Sedov-Taylor blast wave (1D) -- thin wrapper around the shared runner.
 
 `sedovCase` is one `Case` covering all three dimensionalities (see
-`warpSPH.cases.sedov`'s module docstring); this script just pins `--dim 1` and
+`warpSPH.cases.compressible.sedov`'s module docstring); this script just pins `--dim 1` and
 the resolution the old `06-Sedov_Taylor_Blastwave_1D.ipynb` used. Equivalent
 invocations::
 
     python examples/compressible/06-sedov/sedov_1d.py --plot --store
-    python -m warpSPH.cases.sedov --plot --store --dim 1
+    python -m warpSPH.cases.compressible.sedov --plot --store --dim 1
     warpsph-run sedov --plot --store --dim 1   # also honours --precision
 
 Localized energy deposited into a near-rest medium drives a self-similar
@@ -28,7 +28,7 @@ from warpSPHBootstrap import bootstrap
 
 bootstrap(precision='float32')
 
-from warpSPH.cases.sedov import sedovCase       # noqa: E402
+from warpSPH.cases.compressible.sedov import sedovCase       # noqa: E402
 from warpSPH.runner import caseMain             # noqa: E402
 
 #: `--plot`/`--video` are on because an example is meant to be watched -- pass

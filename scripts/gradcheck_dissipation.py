@@ -5,7 +5,7 @@ of docs/historic_plans/CLEANUP_PLAN.md's Phase 4.1 gradcheck rollout.
 `computeViscosityWarp` (modules/dissipation/wp_diffusion.py),
 `computeConductivityWarp` (modules/dissipation/wp_conductivity.py), and
 `computeThermalDissipationWarp` (modules/dissipation/wp_dissipation.py) are
-called together by `compressibleSPH_Monaghan` (schemes/monaghan.py), and
+called together by `compressibleSPH_Monaghan` (schemes/compressible/monaghan.py), and
 independently reused by `computeCompSPHAccelWarp`/`computeCompSPHdudtWarp`
 (modules/compSPH/{accel,dudt}.py, already gradchecked clean in
 gradcheck_compSPH.py) via the shared `computePi_actual` helper

@@ -1,0 +1,19 @@
+{
+  "experiment": "mode/order/no-prediction plus traversal flux specialization",
+  "verdict": "reject broad variants; retain grid/list variants only",
+  "reason": "register reduction did not change occupancy; small timing gain, substantial cumulative compilation cost",
+  "generic_fp64": {
+    "duration_ms": 4.25,
+    "registers_per_thread": 184,
+    "theoretical_occupancy_percent": 16.67
+  },
+  "broad_specialization_fp64": {
+    "duration_ms": 4.13,
+    "registers_per_thread": 178,
+    "theoretical_occupancy_percent": 16.67
+  },
+  "counter_reports": [
+    "results/meshless_performance_2026-10-21/mfm_flux64.csv",
+    "results/meshless_performance_2026-10-21/mfm_flux64_split.csv"
+  ]
+}

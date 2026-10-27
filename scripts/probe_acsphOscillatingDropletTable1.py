@@ -70,7 +70,7 @@ bootstrap(precision='float32')
 
 import numpy as np
 
-from warpSPH.cases.oscillatingDroplet import (DROPLET_PERIOD, analyticSolution,
+from warpSPH.cases.freeSurface.oscillatingDroplet import (DROPLET_PERIOD, analyticSolution,
                                                oscillatingDropletCase as case)
 from warpSPH.runner import run
 

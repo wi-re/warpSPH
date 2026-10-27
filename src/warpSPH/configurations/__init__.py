@@ -10,12 +10,17 @@ including `schemes/builder.py`'s per-scheme `SchemeBundle` registry.
 """
 
 from .simulationConfig import SimulationConfig, buildConfig, configurationToDict, dictToConfig
+from .compute import (ComputeConfig, EXECUTION_MODES, CHECK_SCHEDULES, GRAPH_MAX_PARTICLES, graphParticleLimit, requestedExecution, resolveExecution,
+                      resolveCheckSchedule, resolveKrylovCheckEvery, neighborSearchOptions)
 from .waveEquationConfig import ShapeSpec as WaveShapeSpec
 from .waveEquationConfig import WaveSource, WaveBoundary
 from .waveEquationConfig import CaseConfig as WaveCaseConfig
 from .waveEquationConfig import WaveEquationConfig, waveEquationConfigToDict, dictToWaveEquationConfig
 from .acousticCoreConfig import AcousticCoreConfig, acousticCoreConfigToDict, dictToAcousticCoreConfig
 from .compressibleConfig import CompressibleSPHConfig, compressibleConfigToDict, dictToCompressibleConfig
+from .pesph import PESPHConfig, pesphConfigToDict, dictToPESPHConfig
+from .moduleConfigurations.materials import EOSConfig, MaterialConfig
+from .meshless import MeshlessConfig, MFMConfig, MFVConfig, meshlessConfigToDict, dictToMeshlessConfig
 from .compSPHConfig import CompSPHConfig, compSPHConfigToDict, dictToCompSPHConfig
 from .crkSPH import CRKViscosity, CRKSPHConfig, crkSPHConfigToDict, dictToCRKSPHConfig
 from .gsph import GSPHConfig, InutsukaGSPHConfig, gsphConfigToDict, dictToGSPHConfig, dictToInutsukaGSPHConfig
@@ -34,6 +39,8 @@ from .artificialCompressible import (ArtificialCompressibilityParams,
 
 
 __all__ = [
+    'ComputeConfig', 'EXECUTION_MODES', 'CHECK_SCHEDULES', 'GRAPH_MAX_PARTICLES', 'graphParticleLimit', 'requestedExecution', 'resolveExecution',
+    'resolveCheckSchedule', 'resolveKrylovCheckEvery',
     'SimulationConfig',
     'buildConfig',
     'configurationToDict',
@@ -49,6 +56,9 @@ __all__ = [
     'acousticCoreConfigToDict',
     'dictToAcousticCoreConfig',
     'CompressibleSPHConfig',
+    'PESPHConfig', 'pesphConfigToDict', 'dictToPESPHConfig',
+    'EOSConfig', 'MaterialConfig',
+    'MeshlessConfig', 'MFMConfig', 'MFVConfig', 'meshlessConfigToDict', 'dictToMeshlessConfig',
     'CompSPHConfig',
     'CRKViscosity',
     'CRKSPHConfig',

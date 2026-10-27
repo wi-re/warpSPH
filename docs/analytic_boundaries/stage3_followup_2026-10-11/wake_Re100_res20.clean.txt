@@ -1,0 +1,3 @@
+RESULT deltaSPH disk Re=100 D/dx=20 N=179684 t=150.0 blockage=0.083 diverged=False
+RESULT C_D=1.4252  C_L rms=0.1654 amp=0.3198  St=0.1739  L_w/D=1.785
+RESULT unconfined literature: CD 1.33-1.35  CLamp 0.32-0.34  St 0.164-0.166

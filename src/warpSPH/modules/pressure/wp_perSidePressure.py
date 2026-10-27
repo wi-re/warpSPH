@@ -17,6 +17,8 @@ mode reduces to the plain kernel gradient at h, with the configured normalisatio
 cover `max(h_i, h_j)` (the SuperSymmetric Verlet list the compressible schemes build does).
 """
 
+from warpSPHCore.type_config import index_t, offset_t
+
 import warp as wp
 from warp.types import vector
 from typing import Any, Optional, Union
@@ -34,7 +36,7 @@ def perSide_Func_i(
     referenceState: Any,
     domainState: domainData,
     kernelProperties: kernelState,
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype=wp.int64),  # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype=index_t),  # type: ignore
     ki: wp.int32, referenceKinds: wp.array(dtype=wp.int32),  # type: ignore
     vel_i: vector(length=Any, dtype=scalar_t), referenceVelocities: wp.array(dtype=vector(length=Any, dtype=scalar_t)),  # type: ignore
     f_i: scalar_t, referencePressures: wp.array(dtype=scalar_t), referenceOmegas: wp.array(dtype=scalar_t),  # type: ignore
@@ -44,7 +46,7 @@ def perSide_Func_i(
     acc = zero_like_warp(accelValue)
     work = workValue
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j = wp.int32(offsetArray[jj])
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
             if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
@@ -87,17 +89,18 @@ def perSide_Func_Adjacency(
         omega_i = queryOmegas[i]
     f_i = queryPressures[i] / (omega_i * rhoi * rhoi)
     for o in range(numOffsets):
-        beginIndex = wp.int32(0)
+        beginIndex = offset_t(0)
         numIndices = wp.int32(0)
         if useAdjacency:
             beginIndex = adjacencyState.neighborOffsets[i]
             numIndices = adjacencyState.numNeighbors[i]
         else:
-            beginIndex, numIndices = checkOffset(
+            gridBegin, numIndices = checkOffset(
                 i, queryState.positions, gridState.numCells, gridState.D,
                 o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
                 domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
             )
+            beginIndex = offset_t(gridBegin)
             if beginIndex < 0:
                 continue
         a_o, w_o = perSide_Func_i(

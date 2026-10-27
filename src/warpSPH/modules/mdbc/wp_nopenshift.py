@@ -16,6 +16,8 @@ code begins at `computeMdbcNoPenShift_Func_i` below (separate, already-tracked
 cleanup item -- see docs/historic_plans/CLEANUP_PLAN.md -- to remove them).
 """
 
+from warpSPHCore.type_config import index_t, offset_t
+
 __all__ = ['computeMdbcNoPenShift']
 
 # def mDBCPenetrationCheck(particles: Union[CompressibleState, WeaklyCompressibleState],
@@ -223,9 +225,9 @@ def computeMdbcNoPenShift_Func_i(
     # Operation specific parameters
      # type: ignore
             
-    beginIndex: wp.int32, # type: ignore
+    beginIndex: offset_t, # type: ignore
     numIndices: wp.int32, # type: ignore
-    offsetArray: wp.array(dtype = wp.int64), # type: ignore
+    offsetArray: wp.array(dtype = index_t), # type: ignore
 
     # Operation Mode for masking certain kinds of interactions, e.g. for directional operations
     ki : wp.int32, referenceKinds : wp.array(dtype = wp.int32), # type: ignore
@@ -250,7 +252,7 @@ def computeMdbcNoPenShift_Func_i(
     
     # # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j  = wp.int32(offsetArray[jj])
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
             if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
@@ -384,17 +386,18 @@ def computeMdbcNoPenShift_Func_Adjacency(
         if not useAdjacency and (o % lanes) != lane:
 
             continue
-        beginIndex = wp.int32(0)
+        beginIndex = offset_t(0)
         numIndices = wp.int32(0)
         if useAdjacency:    
             beginIndex = adjacencyState.neighborOffsets[i]
             numIndices = adjacencyState.numNeighbors[i]
         else:
-            beginIndex, numIndices = checkOffset(
+            gridBegin, numIndices = checkOffset(
                 i, queryState.positions, gridState.numCells, gridState.D, 
                 o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
                 domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
             )
+            beginIndex = offset_t(gridBegin)
             if beginIndex < 0:
                 continue
         

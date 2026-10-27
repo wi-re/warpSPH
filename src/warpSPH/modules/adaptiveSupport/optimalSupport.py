@@ -5,6 +5,8 @@ returns the particle state's current density/support unchanged for
 ``NoScheme``.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from .optimalSupportOwen import evaluateOptimalSupportOwen
 from .optimalSupportMonaghan import evaluateOptimalSupportMonaghan
 from ...systems.baseState import BaseState
@@ -20,45 +22,25 @@ from warpSPHCore.profiling import record_function
 __all__ = ['evaluateOptimalSupport']
 
 
-def _clampSupportsToVolume(state, h, densities, config):
-    """Upper-bound each fluid row's h at the target spacing ``n_h_target * (m/rho)^(1/d)``.
-
-    The adaptive-support relaxations are one-way ratchets: they grow h while a
-    kernel is under-sampled but never shrink a well-sampled one, so h can freeze
-    over-large after a transient (the outermost rows of a shock reflection sit at
-    ~1.8x their neighbour's h despite the same ``m/rho``). Clamping to the
-    spacing restores ``h ~ spacing`` and is a no-op for density-tracking h, so it
-    cannot block a particle from growing a large support where ``m/rho`` is large.
-    Corrects a derived quantity on existing rows only -- no insert/remove/move.
-    """
-    dim = config.domain.dim
-    n_h_target = nH_to_n_h(config.targetNeighbors, dim)
-    volume = state.masses / densities.clamp_min(1e-12)
-    bound = n_h_target * volume ** (1.0 / dim)
-    fluid = state.kinds == 0
-    return torch.where(fluid, torch.minimum(h, bound), h)
-
-
-def _clampEnabled(state, config) -> bool:
-    mode = getattr(config, 'supportVolumeClamp', 'walls')
-    if mode == 'always':
-        return True
-    if mode == 'off':
-        return False
-    if mode == 'walls':
-        # read from this state, not `stateHasBoundaryParticles`' per-config cache: case builders
-        # solve the supports before the wall rows are appended
-        return bool((state.kinds != 0).any())
-    raise ValueError(f"supportVolumeClamp must be 'always', 'walls' or 'off', got {mode!r}")
-
-
 def evaluateOptimalSupport(
         particleState: BaseState,
         config: SimulationConfig,
         compParams: CompressibleSPHConfig,
         supportScheme: SupportScheme = SupportScheme.Scatter,
         adjacency: Optional[AdjacencyList] = None,
+        validateOnce: bool = False,
+        rebuildSlack: float = 0.0,
+        computeDensity: bool = True,
+        grid = None,
+        gridRadius: Optional[float] = None,
+        info: Optional[dict] = None,
 ):
+    """`validateOnce` / `rebuildSlack`: the Owen solver validates the neighbour list once per solve instead of once
+    per iteration (see `evaluateOptimalSupportOwen`); the Newton solvers also validate once, with an eager retry when needed. `grid` / `gridRadius` / `info` (Owen
+    only): run on a fixed-shape hash-map grid and look at no neighbour list at all, see `evaluateOptimalSupportOwen`.
+    `computeDensity=False` skips the closing summation density: the returned densities are then the particles' current ones --
+    for a caller that computes its own density next. (The wall cases' support volume clamp is no longer applied here:
+    `modules/compressibleWall/supportClamp.py`, called by the step after the list.)"""
     with record_function("[warpSPH] - evaluateOptimalSupport"):
         if compParams.adaptiveSupportScheme == AdaptiveSupportScheme.Owen:
             result = evaluateOptimalSupportOwen(
@@ -68,7 +50,11 @@ def evaluateOptimalSupport(
                 kernel_ = config.kernel,
                 adjacency = adjacency,
                 supportScheme = supportScheme,
-                verbose = False
+                verbose = False,
+                validateOnce = validateOnce,
+                rebuildSlack = rebuildSlack,
+                computeDensity = computeDensity,
+                grid = grid, gridRadius = gridRadius, info = info,
             )
         elif compParams.adaptiveSupportScheme == AdaptiveSupportScheme.Monaghan:
             result = evaluateOptimalSupportMonaghan(
@@ -76,7 +62,8 @@ def evaluateOptimalSupport(
                 config = config,
                 compParams = compParams,
                 supportScheme = supportScheme,
-                adjacency = adjacency
+                adjacency = adjacency,
+                validateOnce=validateOnce, rebuildSlack=rebuildSlack, computeDensity=computeDensity,
             )
         elif compParams.adaptiveSupportScheme == AdaptiveSupportScheme.NumberDensity:
             result = evaluateOptimalSupportMonaghan(
@@ -85,16 +72,26 @@ def evaluateOptimalSupport(
                 compParams = compParams,
                 supportScheme = supportScheme,
                 adjacency = adjacency,
-                numberDensity = True
+                numberDensity = True,
+                validateOnce=validateOnce, rebuildSlack=rebuildSlack, computeDensity=computeDensity,
             )
         elif compParams.adaptiveSupportScheme == AdaptiveSupportScheme.NoScheme:
 
             # print('Adaptive support scheme set to NoneSupport, skipping optimal support evaluation')
+            if validateOnce:
+                # the contract of `validateOnce`: the returned list is valid for the returned supports and the current
+                # positions, whichever scheme produced the supports (here: the ones the particles already have)
+                adjacency = buildVerletList(
+                    particleState,
+                    domain=config.domain,
+                    verletScale=config.verletScale,
+                    supportMode=SupportScheme.SuperSymmetric,
+                    priorNeighborhood=adjacency,
+                    verbose=False,
+                    rebuildSlack=rebuildSlack,
+                    **neighborSearchOptions(config))
             return particleState.densities, particleState.supports, adjacency, None, None
         else:
             raise ValueError(f"Unsupported adaptive support scheme: {compParams.adaptiveSupportScheme}")
 
-        densities, h, adjacency, *rest = result
-        if _clampEnabled(particleState, config):
-            h = _clampSupportsToVolume(particleState, h, densities, config)
-        return (densities, h, adjacency) + tuple(rest)
+        return tuple(result)

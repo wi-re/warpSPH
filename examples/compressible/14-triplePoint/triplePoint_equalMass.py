@@ -3,7 +3,7 @@
 shared runner.
 
 The notebook this came from is `triplePoint_equalMass.ipynb`; the case itself
-is `warpSPH.cases.triplePoint` (one `Case` covers both sampling strategies,
+is `warpSPH.cases.compressible.triplePoint` (one `Case` covers both sampling strategies,
 selected by `--equalMass`/`--no-equalMass` the way `sedovCase` selects
 dimension by `--dim`), and everything generic (config, step loop, export,
 plotting, ffmpeg) is `warpSPH.runner`. Equivalent invocations::
@@ -20,7 +20,7 @@ from warpSPHBootstrap import bootstrap
 
 bootstrap(precision='float32')
 
-from warpSPH.cases.triplePoint import triplePointCase    # noqa: E402
+from warpSPH.cases.compressible.triplePoint import triplePointCase    # noqa: E402
 from warpSPH.runner import caseMain                # noqa: E402
 
 #: What this example fixes relative to the case defaults; still overridable,

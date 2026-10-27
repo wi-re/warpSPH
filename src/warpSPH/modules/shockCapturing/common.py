@@ -9,6 +9,7 @@ Cullen-corrected one via ``schemeConfig.viscositySwitchParams.divergenceScheme``
 """
 
 from warpSPHCore import *
+from ...linalg import pinvSymmetric
 from ...systems.compressibleMonaghan import CompressibleState
 from ...configurations import *
 from typing import Union, Tuple, Dict, Optional
@@ -128,7 +129,7 @@ def computeDivergence(
     elif viscousDivergenceScheme == 'cullen':
         if schemeConfig.viscositySwitchParams.correctVelocityGradient:
             M = computeM(particleState, simulationConfig, schemeConfig, supportScheme, adjacency)
-            M_inv = torch.linalg.pinv(M)        
+            M_inv = pinvSymmetric(M)
         else:
             M = None
             M_inv = None

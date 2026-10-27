@@ -1,0 +1,33 @@
+USDT:2026-10-14 10:12:37 2977637:2977637 SyncActivityProfilerHandler.cpp:52] profiler_start
+USDT:2026-10-14 10:12:37 2977637:2977637 SyncActivityProfilerHandler.cpp:59] profiler_stop
+USDT:2026-10-14 10:12:38 2977637:2977637 SyncActivityProfilerHandler.cpp:52] profiler_start
+USDT:2026-10-14 10:12:38 2977637:2977637 SyncActivityProfilerHandler.cpp:59] profiler_stop
+USDT:2026-10-14 10:12:38 2977637:2977637 SyncActivityProfilerHandler.cpp:52] profiler_start
+USDT:2026-10-14 10:12:38 2977637:2977637 SyncActivityProfilerHandler.cpp:59] profiler_stop
+USDT:2026-10-14 10:12:39 2977637:2977637 SyncActivityProfilerHandler.cpp:52] profiler_start
+USDT:2026-10-14 10:12:39 2977637:2977637 SyncActivityProfilerHandler.cpp:59] profiler_stop
+USDT:2026-10-14 10:12:39 2977637:2977637 SyncActivityProfilerHandler.cpp:52] profiler_start
+USDT:2026-10-14 10:12:39 2977637:2977637 SyncActivityProfilerHandler.cpp:59] profiler_stop
+USDT:2026-10-14 10:12:39 2977637:2977637 SyncActivityProfilerHandler.cpp:52] profiler_start
+USDT:2026-10-14 10:12:39 2977637:2977637 SyncActivityProfilerHandler.cpp:59] profiler_stop
+Warp 1.17.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "x86_64"
+     "cuda:0"   : "NVIDIA RTX PRO 6000 Blackwell Workstation Edition" (95 GiB, sm_120, mempool enabled)
+   Kernel cache:
+     /home/lu26029/.cache/warp/1.17.0
+=== sod2d CompSPH, nx=100, N=2500, per call ===
+                                   ops launch  sync    host us  wall us   gpu us  dev k
+---------------------------------------------------------------------------------------
+detector (torch ops, before)     110.0    4.0  6.00       1206     1206      462   89.0
+detector (warp kernels, after)    43.0    6.0  0.00        767      768      391   17.0
+Wadsley2017 terms (after)         51.0    7.0  0.00        986      992      686   23.0
+detector (torch ops, before): Wadsley2017.py:116 wadsleyDetectorReference x2, Wadsley2017.py:117 wadsleyDetectorReference x2, Wadsley2017.py:118 wadsleyDetectorReference x2
+=== sod2d CompSPH, nx=400, N=10000, per call ===
+                                   ops launch  sync    host us  wall us   gpu us  dev k
+---------------------------------------------------------------------------------------
+detector (torch ops, before)     110.0    4.0  6.00       1313     1314      580   89.0
+detector (warp kernels, after)    43.0    6.0  0.00        772      773      475   17.0
+Wadsley2017 terms (after)         51.0    7.0  0.00        976      981      768   23.0
+detector (torch ops, before): Wadsley2017.py:116 wadsleyDetectorReference x2, Wadsley2017.py:117 wadsleyDetectorReference x2, Wadsley2017.py:118 wadsleyDetectorReference x2

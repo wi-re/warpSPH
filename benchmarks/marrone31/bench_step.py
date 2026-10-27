@@ -108,7 +108,7 @@ def worker(a):
     bootstrap(precision='float32')
     import numpy as np
     import torch
-    from warpSPH.cases.dambreak import dambreakCase
+    from warpSPH.cases.freeSurface.dambreak import dambreakCase
     from warpSPH.runner import run
     import probe_deltaSPHMarrone as P
 

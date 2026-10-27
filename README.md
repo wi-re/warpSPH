@@ -13,7 +13,7 @@ three families of scheme against one shared infrastructure:
 |---|---|---|
 | compressible | `Monaghan`, `CompSPH`, `CRKSPH` | shock tubes, blast waves, instabilities |
 | weakly compressible | `deltaSPH` | free surfaces, dam breaks, channel flow |
-| incompressible | `divergenceFree` (DFSPH) | Taylor-Green, decaying turbulence |
+| incompressible | `dfsph`, `dfsphPredictor`, `dfsphShift`, `iisph` | Taylor-Green, decaying turbulence |
 
 Everything a run needs — configuration, geometry, the step loop, export,
 plotting, video encoding — is shared, so a *case* is only the physics that
@@ -39,6 +39,12 @@ and the visualisation in [`warpSPHPlotting`](https://github.com/wi-re/warpSPHPlo
 - [Configuration reference](#configuration-reference)
 - [Package layout](#package-layout)
 - [Tests](#tests)
+- [Classic-fluid comparison baseline](docs/fluid_matrix/README.md) — preserved
+  eight-scheme results, rankings, failure evidence and raw-data archive
+- [Compressible comparison matrix](docs/compressible_matrix/README.md) — fixed-resolution
+  case/method selection, retained attempts, parameter trials and quality/cost figures
+- [Driven compressible turbulence roadmap](docs/roadmap/driven_compressible_turbulence.md) —
+  2D setup studies, local/HPC feasibility, thermal convection and later MHD
 - [Contributing](CONTRIBUTING.md) — dev setup, nbstripout, what to run before committing
 - [Plans](PLANS.md) — which plan is active, priorities, per-plan progress markers
 - [Gallery](#gallery)
@@ -110,6 +116,13 @@ Both print what they are about to do, then what they did:
 
 ## Running cases
 
+All 16 compressible-family cases, Taylor–Green WCSPH/ACSPH and random flow
+support the versioned YAML/JSON configuration interface: documented case parameters, solver-specific numerical
+overrides, validation without stepping, and resolved run manifests. See
+[Configuring simulations](docs/CONFIGURATION.md) and the runnable files in
+[`examples/configuration/`](examples/configuration/). Existing Python calls,
+flat `CaseSpec` files and case flags remain supported.
+
 A case is run through a shared runner rather than per-script boilerplate. Every
 flag below is a field of `CaseSpec`, so a run is fully described by a file as
 well as by a command line.
@@ -118,7 +131,7 @@ well as by a command line.
 
 ```bash
 warpsph-run <case> [flags]                  # the console script
-python -m warpSPH.cases.sod [flags]         # the same case, as a module
+python -m warpSPH.cases.compressible.sod [flags]         # the same case, as a module
 python examples/compressible/01-sod/sod_1d.py [flags]
 ```
 
@@ -362,7 +375,176 @@ notebooks stay for exploration; the scripts are what you run unattended.
 | `shearingNoh` | [11-shearing-noh-implosion-2d.py](examples/compressible/11-shearing-noh-implosion-2d.py) | Noh implosion with transverse shear |
 | `kelvinHelmholtz` | [12-kelvin-helmholtz.py](examples/compressible/12-kelvin-helmholtz.py) | Kelvin-Helmholtz instability |
 | `rayleighTaylor` | [13-rayleigh-taylor.py](examples/compressible/13-rayleigh-taylor.py) | Rayleigh-Taylor instability |
+| `richtmyerMeshkov` | [15-richtmyer-meshkov.py](examples/compressible/15-richtmyer-meshkov.py) | Two ideal gases with separate EOS parameters; incident Rankine–Hugoniot shock, sinusoidal material contact, and distant periodic seam. [Configuration](examples/configuration/richtmyerMeshkov.yaml). |
+| `blob` | [runner configuration](examples/configuration/blob.yaml) | Periodic Mach-2.7 wind over a density-10 cloud; CRKSPH paper geometry. [Partition comparison and limitations](reports/materialEOS/spheral/blobPartition/README.md). |
 | `triplePoint` | [14-triplePoint/](examples/compressible/14-triplePoint/) ([equalSpacing](examples/compressible/14-triplePoint/triplePoint_equalSpacing.py), [equalMass](examples/compressible/14-triplePoint/triplePoint_equalMass.py)) | `--equalMass` or `--no-equalMass` sampling; own directory like `sedov` |
+
+### Per-material compressible equations of state
+
+CRKSPH, CompSPH and Monaghan accept `solver.materials`, a list of named
+materials with an `eos` description. Each fluid particle's integer
+`state.materials` value selects that list entry. For example, the
+[RM configuration](examples/configuration/richtmyerMeshkov.yaml) uses
+`gamma=1.4` for material 0 and `gamma=5/3` for material 1. Shocked and
+unshocked regions of the incident gas both have material ID 0.
+
+```bash
+python -m warpSPHRun richtmyerMeshkov --config examples/configuration/richtmyerMeshkov.yaml
+python scripts/probe_materialEOS.py --mode contact --nx 64
+python scripts/probe_materialEOS.py --mode planar --nx 64 --time 1.5
+python scripts/probe_materialEOS.py --mode rm --nx 128 --time 2
+```
+
+The case is also discovered by **warpSPHRemote** from this runner installation.
+In the connected Remote head, select **Connection → Refresh available cases**,
+then launch **compressible → richtmyerMeshkov → CRKSPH**. Start with the
+`default` variant, **nx = 64**, **end time = 2**. For the larger visible
+perturbation, choose `demonstration`, **nx = 64**, **end time = 6**; this uses
+131,072 particles and wider streamwise buffers. Set the end time explicitly:
+the Remote launcher's end-time control overrides the variant's default.
+Enable particle recording for replay and physical/performance diagnostics
+for the retained run report. Color the live view by material or density and
+zoom to the interface around x = 0; the full domain includes distant buffers.
+The two EOS entries are editable under the solver's `materials` setting.
+This demonstration exercises weak-shock interface growth; nonlinear roll-up
+against a matched literature benchmark remains unqualified.
+
+[examples/remote/richtmyerMeshkov.json](examples/remote/richtmyerMeshkov.json)
+is the same demonstration as a companion **POST /v1/runs** request body
+(not a `warpSPHRun --config` document). For an already paired companion:
+
+```bash
+curl --fail-with-body "$WARPSPH_REMOTE_ENDPOINT/v1/runs" \
+  -H "Authorization: Bearer $WARPSPH_REMOTE_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data-binary @examples/remote/richtmyerMeshkov.json
+```
+
+Use your companion endpoint and pairing token for these environment variables.
+The companion's simulation Python must load this updated warpSPH checkout;
+no browser bundle or Remote preset-list change is required.
+
+For a sequential qualification campaign registered with the resident companion:
+
+```bash
+python scripts/study_materialEOS.py --phase pilot
+python scripts/study_materialEOS.py --phase refinement
+```
+
+Runs appear as `RM study <case name>`, with live controls, measurements and
+recording. A Stop command ends the queue. Each campaign writes `campaign.json`
+and per-case progress logs under its output directory; `--only` selects named
+members and `--dry-run` prints commands. See the
+[study results and limitations](reports/materialEOS/README.md#controlled-diagnostics-study).
+The large streamwise padding isolates the interaction from the periodic seam;
+it is not a physical requirement. RT's Dirichlet-band machinery is available,
+but compact RM reservoir boundaries still need a separate comparison.
+
+The material verification controls are also registered runner cases:
+`hydrostatic` (`literature`, `twoGas`, `advectedEllipse`), `twoGasSod`
+(`twoGamma`) and `shockBubble` (`summedContact`, `stationary`). Runnable
+documents are in [examples/configuration](examples/configuration/twoGasSod.yaml),
+with companion launch bodies for [Sod](examples/remote/twoGasSod.json) and
+[shock–bubble](examples/remote/shockBubble.json). Refresh available cases in
+Remote after updating the solver checkout.
+
+The [actual compiled-Spheral shock–bubble comparison](reports/materialEOS/spheral/shockBubble/README.md)
+retains failed positivity and boundary qualifications. The runner's freely
+evolved mirrored periodic copies only model reflecting walls while their
+symmetry holds; both tested resolutions lose that symmetry. Bubble translation
+agreement alone does not qualify nonlinear mixing accuracy.
+
+```bash
+python scripts/study_materialCases.py --phase pilot
+python scripts/study_materialCases.py --phase refinement
+python scripts/study_materialCases.py --phase contact
+```
+
+These sequential campaigns register every run as `Material check <name>`,
+record video/trajectories and diagnostics, and halt on Remote Stop or a failed
+qualification gate. The contact phase isolates initialization of an unforced
+helium bubble; a failure is retained as evidence. The shock-driven bubble
+matches Spheral's pressure-driven variant, rather than the Mach-1.22
+Quirk–Karni experiment. [Reference definitions and findings](reports/materialEOS/controls/README.md)
+distinguish exact-solution checks from numerical-reference work still needed.
+
+CRKSPH also exposes opt-in `solver.crkDensityPolicy`: `legacy` (default),
+`sameMaterial` (Spheral-style density sum) or `massReplacement` (paper mass
+rule). Both material policies require an explicit EOS table. They sharpen
+equally spaced contacts while retaining all-material volume/moment/force
+support. Abrupt particle-spacing changes still expose a separate volume
+estimate limitation. See the [density audit and RM comparisons](reports/materialEOS/density/README.md).
+The [same-material RM configuration](examples/configuration/richtmyerMeshkovSameMaterial.yaml)
+and [companion launch body](examples/remote/richtmyerMeshkovSameMaterial.json)
+select the qualified regular-sampling option explicitly; the original recipes
+remain the legacy baseline. The new field is available in Remote after
+refreshing its available-case/configuration metadata.
+
+Python users can construct `MaterialConfig(name, EOSConfig(gamma=...))`
+objects from `warpSPH.configurations`. Use
+`warpSPH.modules.eos.evaluateEOS(rho, materialIDs, schemeConfig, P=pressure)`
+to initialize energy consistently, or `u=internalEnergy` during evolution.
+The result is `(entropicFunction, internalEnergy, pressure, soundSpeed)`.
+The material table is cached on the configuration for its device/precision;
+changing it requires recapturing any CUDA graph.
+
+Particle identity has three independent meanings:
+
+- `materials`: physical material IDs used by the EOS and material-interface rules.
+- `emitters`: passive source labels for diagnostics and coloring. Multiple
+  emitters can produce material 0; one emitter can contain several materials.
+- `bodyIDs`: rigid-body membership for boundary/ghost rows (`-1` for fluid).
+
+Region initialization defaults every particle to material 0, assigns emitter
+labels by source region, and assigns boundary body IDs independently. To mark
+two materials inside one sampled region, use its existing initial-condition map:
+
+```python
+region = buildRegion(config, schemeConfig, domainSDF,
+    initialConditions={
+        'materials': lambda x: (x[:, 0] > interface(x[:, 1])).to(torch.int32),
+    })
+```
+
+For a case that builds its particle state directly, assign the material map
+before initializing EOS energy or computing material-dependent density:
+`state.materials[mask] = 1`. The RM sampler already follows this single-source
+pattern. An omitted `emitters` tensor denotes an unlabeled source (display
+label 0), so a single source needs no extra per-particle allocation. The
+region API above applies to the region-based initializers; it does not add
+multi-material EOS support to the weakly compressible schemes.
+
+Source/body IDs survive state cloning and trajectory/dataset export and reload.
+Older files without these fields keep their material labels unchanged; missing
+source provenance is left unset, while old boundary membership can still be
+read from its historical material field. Emitter IDs never select an EOS,
+density policy, force interaction or boundary condition.
+
+An experimental `solver.crkEvolution: spheral` option uses a pre-step `m/rho`
+volume reset and same-material density sum, then continuity density and bounded
+volume updates within explicit midpoint stages. It requires
+`crkDensityPolicy: sameMaterial`, `rungeKutta2`, a supported spline kernel and
+fluid-only periodic cases; it runs eagerly. The default remains `summation`.
+This improves the unequal-spacing pressure contact but still fails local
+equilibrium, so it is a diagnostic option. See the
+[volume/timing experiment](reports/materialEOS/volume/README.md),
+[runner setup](examples/configuration/pressureContactSpheral.yaml) and
+[Remote launch body](examples/remote/pressureContactSpheral.json).
+
+With `materials=None` the original scalar `gamma` applies to every particle
+label. An explicit list is authoritative and currently supports ideal gases
+with fixed gamma, fluid particles, and the `NoneSwitch` or `CullenDehnen2010`
+viscosity switch. Solid-wall rows, Riemann artificial viscosity and other
+switches are rejected. GSPH, Inutsuka, MFM/MFV and weakly compressible closures
+retain their existing EOS paths. Material IDs identify pure parcels;
+species diffusion and a molecular mixture EOS are separate capabilities.
+
+The RM domain is periodic in both directions with distant x ends. Its setup
+rejects observation times that could include signals from the remote seam;
+enlarge `xLeft`/`xRight` together with the duration for later growth. The
+`planar`, `contact`, `smoke` and `demonstration` variants distinguish controls
+from seeded growth. Fourier diagnostics track Lagrangian interface markers
+and apply before the interface overturns.
 
 ### Weakly compressible (deltaSPH)
 
@@ -381,15 +563,56 @@ notebooks stay for exploration; the scripts are what you run unattended.
 | `openFlow` | [13-open-flow.py](examples/weaklyCompressible/13-open-flow.py) | open channel flow past an obstacle |
 
 **Analytic walls (optional).** With the optional package `warpSPHBoundaries` installed (`pip install -e "warpSPH/[boundaries]"`), `dambreak --wallRepresentation analytic` replaces the tank's wall particles by exact
-kernel integrals over the solid (obstacles, mixed scenes, Michel / implicit shifting, free bodies and the whole-step graph included); see [ANALYTIC_BOUNDARIES_PLAN.md](ANALYTIC_BOUNDARIES_PLAN.md).
+kernel integrals over the solid (obstacles, mixed scenes, Michel / implicit shifting, free bodies and the whole-step graph included); see [docs/historic_plans/ANALYTIC_BOUNDARIES_PLAN.md](docs/historic_plans/ANALYTIC_BOUNDARIES_PLAN.md).
+Besides δ⁺, analytic walls support native `iisph`, `dfsph`, `dfsphPredictor`
+and `dfsphShift` with static, fixed-support coupling. Free-surface impact accuracy
+remains experimental; use the documented prepared initial conditions. ACSPH
+refuses analytic walls. The solvers of the boundaries repo
+this was validated against (`DeltaSPH2D`, `DFSPH2D`) were retired into warpSPH on 2026-10-11 and are kept at that repo's git tag `oracle-solvers-2026-10-11` ([record](docs/analytic_boundaries/retirement_2026-10-11/README.md)).
+
+The viscous, low-Reynolds group has its own cases and options (evidence: [docs/analytic_boundaries/](docs/analytic_boundaries/)):
+
+| case / option | what it does |
+|---|---|
+| `periodicChannel`, `stokesArray`, `taylorCouette`, `cylinderWake` | plane Poiseuille / Couette, a periodic array of disks or squares (Stokes drag `K`), Taylor-Couette torque, the cylinder wake at Re 20-100; each has a `scripts/probe_<case>.py` that runs it with video |
+| `schemeConfig.bodyForce = (fx, fy)` | uniform acceleration in the momentum equation only (not in the DDT hydrostatic term, no-penetration or the shift reference); `bodyForceAtWall` (default on) also puts it in the wall pressure condition `dp/dn = rho (g + f - a_w) . n` |
+| `schemeConfig.analyticPeriodicWalls` | the wall integrals take the nearest periodic image of the body, so a wall may span a periodic box (set by the periodic cases) |
+| `fluidViscosity='morris'`, `complementMoments`, `wallViscosityClosure='noslipMoment'` | the Morris physical viscosity with the no-slip wall closure (moment tables of the solid); `pressureConsistent` removes the force a uniform pressure exerts through the lattice-vs-wall residual, `wallPressureViscous` adds the viscous term to the wall pressure condition |
+| `modules.boundaryConditions.PinnedBand` / `pinnedBandBC` | a band of fluid particles held at the stream velocity (free stream of the wake): acceleration zeroed, velocity reset after the step, no shift inside (`cylinderWake`) |
+| case parameter `wallCut` | the distance from a body wall inside which the case's lattice is cut (`stokesArray`, `taylorCouette`); `None` takes the rule of the scheme (δ⁺: half a spacing; incompressible loops: the calibrated first-row distance). Compare against a reference only on the identical lattice |
+| graph options | the δ⁺ analytic-wall step is replayed from a CUDA graph (`--cudaGraph`; a spinning axisymmetric body needs `schemeConfig.analyticSpinAxisymmetric`); `WARPSPH_COMPILE_WALLS=1` (or `schemeConfig.compileWalls`) `torch.compile`s the no-slip closure. Native incompressible projections run eagerly |
 
 ### Incompressible (DFSPH)
+
+`--scheme dfsph` selects native DFSPH on IISPH's rest-volume operators and exact
+pressure diagonal: divergence projection, nonpressure forces, density
+projection, then the final nonpressure/density kick and position drift. It supports the same
+static sampled/analytic boundary models as native IISPH. Density and divergence
+policies live in `schemeConfig.dfsph.density` and `.divergence`; boundary settings
+remain in `schemeConfig.iisph`. Dedicated pressure histories survive checkpoints. All three native DFSPH orderings
+share the default 0.9ρ₀ divergence sampling-recovery gate with sampled or
+analytic walls; signed divergence and density constraints are unchanged.
+[Sampling recovery](docs/incompressible/SAMPLING_RECOVERY.md) documents the
+rule, original-policy override and measured tradeoffs.
+See [DFSPH](docs/incompressible/DFSPH.md) for equations, defaults and validation
+limits. The native stage orders are:
+
+| entry | order |
+|---|---|
+| `dfsph` | divergence → forces → density velocity correction → drift |
+| `dfsphPredictor` | forces → divergence → density velocity correction → drift |
+| `dfsphShift` | forces → divergence → drift → density position shift and velocity resampling |
+| `iisph` | forces → density projection → semi-implicit Euler kick/drift |
+
+Legacy names and solver switches are retired with explicit migration errors.
+See [migration and policy differences](docs/incompressible/MIGRATION.md).
+
 
 | case | script | notes |
 |---|---|---|
 | `tgv` | [01-taylor-green-vortex.py](examples/incompressible/01-taylor-green-vortex.py) | Taylor-Green vortex, divergence-free |
-| `squarePatch` | [03-rotating-square-patch.py](examples/incompressible/03-rotating-square-patch.py) | same case at `--scheme divergenceFree` |
-| `randomFlow` | [periodic-random-flow.py](examples/incompressible/periodic-random-flow.py) | same case at `--scheme divergenceFree` |
+| `squarePatch` | [03-rotating-square-patch.py](examples/incompressible/03-rotating-square-patch.py) | same case at `--scheme dfsph` |
+| `randomFlow` | [periodic-random-flow.py](examples/incompressible/periodic-random-flow.py) | same case at `--scheme dfsph` |
 
 Several cases cover more than one notebook, because those notebooks differed
 only in a flag; the scripts pin the flag. Two notebooks deliberately have no
@@ -406,8 +629,8 @@ in this repo's history — see `docs/historic_plans/WAVE_EQUATION_PLAN.md` for h
 
 | piece | where |
 |---|---|
-| the scheme | [`schemes/waveEquation.py`](src/warpSPH/schemes/waveEquation.py) |
-| the case | [`cases/waveEquation.py`](src/warpSPH/cases/waveEquation.py) |
+| the scheme | [`schemes/pde/waveEquation.py`](src/warpSPH/schemes/waveEquation.py) |
+| the case | [`cases/demos/waveEquation.py`](src/warpSPH/cases/demos/waveEquation.py) |
 | state and system | [`systems/waveSystem.py`](src/warpSPH/systems/waveSystem.py) |
 | configuration | [`configurations/waveEquationConfig.py`](src/warpSPH/configurations/waveEquationConfig.py) |
 | case generation | [`caseUtils/waveEquation/`](src/warpSPH/caseUtils/waveEquation/) |
@@ -431,10 +654,6 @@ landed since.
 
 A `Case` is a name, a scheme, and a set of hooks over a `RunContext`. Only
 `buildSystem` is required.
-
-Porting an *existing* example onto this, or taking a case up to 2D/3D, has a
-procedure and a set of things that bite:
-[PORTING_EXAMPLES.md](PORTING_EXAMPLES.md).
 
 ```python
 from warpSPH.runner import Case, RunContext, caseMain, registerCase
@@ -467,9 +686,10 @@ if __name__ == '__main__':
     caseMain(myCase)
 ```
 
-Add the module name to `CASE_MODULES` in
-[`warpSPH/cases/__init__.py`](src/warpSPH/cases/__init__.py) and it is reachable
-as `warpsph-run myCase`.
+Put the module in its family subpackage (`src/warpSPH/cases/<family>/`, e.g.
+`freeSurface`, `compressible`; see the package docstring), add `'<family>.<module>'`
+to `CASE_MODULES` in [`warpSPH/cases/__init__.py`](src/warpSPH/cases/__init__.py)
+and it is reachable as `warpsph-run myCase`.
 
 The full hook set, in call order:
 
@@ -489,8 +709,8 @@ The full hook set, in call order:
 analytic solution — and the loop reads it back.
 
 Most of a case is already written: `warpSPH.cases.compressible` and
-`warpSPH.cases.weaklyCompressible` carry the setup each family shares, and
-`warpSPH.cases.plotting` turns a list of fields into a `setupPlot`/`updatePlot`
+`warpSPH.cases.common.weaklyCompressible` carry the setup each family shares, and
+`warpSPH.cases.common.plotting` turns a list of fields into a `setupPlot`/`updatePlot`
 pair.
 
 ---
@@ -502,7 +722,7 @@ from warpSPHBootstrap import bootstrap
 bootstrap(precision='float32')          # must precede any warpSPH import
 
 from warpSPH.runner import run
-from warpSPH.cases.tgv import tgvCase
+from warpSPH.cases.periodic.tgv import tgvCase
 
 result = run(tgvCase, nx=64, nSteps=200, quiet=True)
 result.series('kineticEnergy')          # one diagnostic across the run
@@ -537,6 +757,8 @@ notebooks used to fall into.
 ---
 
 ## Configuration reference
+
+Neighbor-list execution choices are documented in [Neighbor-search compute choices](docs/compute-neighbor-search.md).
 
 `buildConfig(...)` returns a `SimulationConfig` and the matching integrator.
 Every option below is also a `CaseSpec` field, so it is reachable as a CLI flag
@@ -622,10 +844,10 @@ tests/                     pytest suite
 scripts/run_tests.sh          # or plain `pytest`
 ```
 
-89 tests, about two minutes once the warp kernel cache is warm; a CUDA device
-is required. Most of that is the 15 `gradcheck_*.py` scripts, which each run in
-their own subprocess -- deselecting `tests/test_gradcheck_scripts.py` brings
-the rest in under 30 seconds. The script just wraps pytest, silencing the
+89 test files, about 20 minutes (measured 2026-10-13: ~19 min wall, warm warp kernel cache);
+a CUDA device is required. A good part of that is the `gradcheck_*.py` scripts, which each
+run in their own subprocess (some start a nested `pytest`, which is why a second `pytest`
+process shows up in `ps` -- it is not a second run). Use `-x` and `-k` for a quick check. The script just wraps pytest, silencing the
 third-party warnings that otherwise bury the result; it forwards any extra
 arguments (`scripts/run_tests.sh -k sod -v`). They assert *properties* rather
 than golden numbers — total-energy conservation for Sod, Taylor-Green decay

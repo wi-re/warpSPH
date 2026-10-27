@@ -52,7 +52,7 @@ kinematics -- `WCSPH_DEFAULT_CLOSEOUT_PLAN.md` item D). For every static wall
 (the whole Marrone 3.1/3.4/dam-break/sloshingTank suite) this is exactly zero,
 matching the old hardcoded-zero behaviour bit-for-bit; it is only nonzero for
 a case with a genuinely rotating/translating rigid body (e.g.
-`cases/movingObstacle.py`'s constant angular velocity). If the field itself is
+`cases/wallBounded/movingObstacle.py`'s constant angular velocity). If the field itself is
 `None` (no rigid body has been stepped yet in this run), `a_b` falls back to
 zero, the same as before this field existed.
 """

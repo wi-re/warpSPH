@@ -1,0 +1,88 @@
+"""Initialize the summation field that the first pressure solve will read.
+
+Free-surface kernel deficiency remains a physical boundary property; it is
+not filled by increasing particle masses or clipping the measured density.
+IISPH's uniform lattice correction is applied once to particle and solid mass
+here, before density evaluation, so its timestep uses unmodified kernels.
+"""
+
+import torch
+
+from ..modules.density import computeDensities
+
+
+def initializeHydrostaticPressure(ctx, system):
+    """Seed the at-rest profile in the gauge consumed by the selected route.
+
+    Raw nonnegative pressure is needed by the free-surface density projections.
+    Fluid and sampled wall rows share the same profile; ghosts are not sources.
+    """
+    state, sc = system.state, ctx.schemeConfig
+    fluid = state.kinds == 0
+    surface = state.positions[fluid, 1].max()
+    gravity = float(sc.gravityConfig.magnitude) if sc.gravityConfig.active else 0.0
+    pressure = sc.fluid.restDensity*gravity*(surface-state.positions[:, 1]).clamp_min(0)
+    gauge = 'free-surface-zero'
+    state.pressures = torch.where(state.kinds != 2, pressure, torch.zeros_like(pressure))
+    ctx.scratch['initialPressureCalibration'] = dict(gauge=gauge, surface=float(surface),
+        fluid_min=float(pressure[fluid].min()), fluid_max=float(pressure[fluid].max()))
+
+
+def initializeProjectionDensity(ctx, system):
+    state = system.state
+    from ..enumTypes import IncompressibleSPHScheme, isDFSPHScheme
+    if (ctx.scheme == IncompressibleSPHScheme.iisph or isDFSPHScheme(ctx.scheme)):
+        config, schemeConfig = ctx.config, ctx.schemeConfig
+        if isDFSPHScheme(ctx.scheme):
+            schemeConfig.dfsph.validate()
+        if config.calibrateNormalization:
+            from warpSPHCore.util.latticeDensity import latticeDensityFactor
+            factor = latticeDensityFactor(config.kernel, float(config.n_h), state.positions.shape[1])
+            state.masses = state.masses * factor
+            schemeConfig.analyticWallMass = float(getattr(schemeConfig, 'analyticWallMass', 1.0)) * factor
+            config.calibrateNormalization = False
+            ctx.scratch['initialMassCalibration'] = dict(factor=factor,
+                kernel=config.kernel.name, n_h=float(config.n_h), dimension=state.positions.shape[1])
+        from ..modules.iisph import initializeIISPHBoundaries
+        (system.boundarySupport, system.analyticBoundaryProvider,
+         system.contactBoundaryProvider) = initializeIISPHBoundaries(state, schemeConfig)
+        state.densities = computeDensities(state, config, schemeConfig, system.adjacency,
+            boundaryRepresentation=schemeConfig.iisph.boundaryRepresentation,
+            wallMassDensity=schemeConfig.fluid.restDensity, wallSupport=system.boundarySupport)
+    else:
+        state.densities = computeDensities(state, ctx.config, ctx.schemeConfig, None)
+    rho = state.densities[state.kinds == 0] / ctx.schemeConfig.fluid.restDensity
+    report = dict(normalized=bool(ctx.config.calibrateNormalization),
+                  n_h=float(ctx.spec.n_h), minimum=float(rho.min()),
+                  median=float(rho.median()), maximum=float(rho.max()),
+                  p99=float(torch.quantile(rho.float(), 0.99)))
+    ctx.scratch['initialDensityCalibration'] = report
+    return report
+
+
+def validateProjectionOptions(ctx):
+    """Fail explicit legacy options that native operators do not implement."""
+    defaults = dict(projection='jacobi', closedPreset=False, particleShift='none',
+                    densitySolve=True, xsphCoefficient=0., xsphScale=0., boundaryFriction=0.)
+    for name, default in defaults.items():
+        if name in ctx.spec.params and ctx.spec.params[name] != default:
+            raise ValueError(f'{name}={ctx.spec.params[name]!r} is a retired projection option; '
+                             'select dfsph/dfsphPredictor/dfsphShift and native iisph/dfsph policies. '
+                             'See docs/incompressible/MIGRATION.md.')
+    if ctx.spec.params.get('analyticWallPressure') == 'mls':
+        raise ValueError('analyticWallPressure=mls is a retired projection option; use native wall closure')
+
+
+def physicalProjectionPressure(state, schemeConfig):
+    """Physical pressure, excluding VD+PS's auxiliary displacement multiplier.
+
+    Never reinterpret soundspeeds or mutate the density pressure warm start.
+    Native IISPH has only density pressure; DFSPH stores its stages separately.
+    """
+    density = getattr(state, 'pressures', None)
+    divergence = getattr(state, 'divergencePressures', None)
+    if divergence is None:
+        return density
+    if schemeConfig.dfsph.ordering == 'np_df_shift':
+        return divergence
+    return divergence if density is None else density + divergence

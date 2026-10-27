@@ -41,11 +41,12 @@ no host syncs (``.item()``, ``bool(tensor)``, boolean-mask indexing -- see
 ``utils/syncFree.py``), no data-dependent Python control flow, and no
 dependence on Python scalars that change between calls (``t``, ``dt``), since
 those are baked into the graph at capture time. Callers are responsible for
-only routing such a configuration here (``schemes/deltaSPH.py``).
+only routing such a configuration here (``schemes/weaklyCompressible/deltaSPH.py``).
 """
 
 from __future__ import annotations
 
+import os
 import contextlib
 import copy
 import dataclasses
@@ -56,7 +57,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 
-__all__ = ['GraphedStateFunction', 'GraphedTensorFunction', 'GraphedIntegratorStep']
+__all__ = ['GraphedStateFunction', 'GraphedTensorFunction', 'GraphedIntegratorStep', 'applyWallLoadSnapshot']
 
 #: True while a whole integrator step is being captured: the nested per-RHS
 #: graphs then run their function eagerly, so it is recorded into the outer graph.
@@ -94,13 +95,22 @@ def _captureGuard():
     `test_renderThreadFramesMatchMainThread` failed in most runs once the
     test session ran a few more cases before it, and in none of 10 with this
     guard (2026-09-28). `torch.cuda.graph`
-    collects on entry; this keeps the collector off until the capture ends."""
+    collects on entry; this keeps the collector off until the capture ends.
+
+    Also puts torch back on the stream it was on. A capture that CUDA invalidates (an op that is not
+    allowed while recording, e.g. a host-sized boolean-mask index) makes `torch.cuda.graph.__exit__` raise
+    in `capture_end()` BEFORE it restores the stream, so torch stayed on the capture's side stream while
+    warp (whose own `ScopedStream` did exit) was back on its stream: every later eager step mixed two
+    streams with no ordering between them and went non-finite (README docs/compsph_step 5, item 10)."""
     with CAPTURE_LOCK:
         enabled = gc.isenabled()
         gc.disable()
+        previous = torch.cuda.current_stream() if torch.cuda.is_available() else None
         try:
             yield
         finally:
+            if previous is not None and torch.cuda.current_stream() != previous:
+                torch.cuda.set_stream(previous)
             if enabled:
                 gc.enable()
 
@@ -251,7 +261,13 @@ class GraphedStateFunction:
                 update, _, _ = self.fn(staticSys, *args, **kwargs)
             torch.cuda.synchronize()
         except Exception as e:  # noqa: BLE001 -- any capture failure -> eager
+            if os.environ.get('WARPSPH_CUDAGRAPH_TRACE'):                                      # the first failing call of a capture (the reason string keeps only the last line)
+                import traceback
+                traceback.print_exc()
             torch.cuda.synchronize()
+            aborted = getattr(system, 'captureAborted', None)
+            if aborted is not None:
+                aborted()                   # drop what the recorded step left on shared objects (its tensors are gone now)
             self._disable(f'capture failed ({type(e).__name__}: {str(e).splitlines()[0][:200]})')
             return None
 
@@ -356,6 +372,9 @@ class GraphedTensorFunction:
                 out = self.fn(*self.staticIn)
             torch.cuda.synchronize()
         except Exception as e:  # noqa: BLE001 -- any capture failure -> eager
+            if os.environ.get('WARPSPH_CUDAGRAPH_TRACE'):                                      # the first failing call of a capture (the reason string keeps only the last line)
+                import traceback
+                traceback.print_exc()
             torch.cuda.synchronize()
             self._disable(f'capture failed ({type(e).__name__}: {str(e).splitlines()[0][:200]})')
             return False
@@ -444,7 +463,7 @@ class GraphedDiagnostics:
     """Replay a case's per-step diagnostics from a CUDA graph.
 
     ``deviceFn(ctx, state) -> {name: device tensor}`` must be sync-free
-    once its caches are warm (e.g. `cases/dambreak.py:_diagnosticsDevice`);
+    once its caches are warm (e.g. `cases/freeSurface/dambreak.py:_diagnosticsDevice`);
     `__call__` returns the values on the host, in one transfer. The inputs
     are the tensors of the particle state and of the step statistics
     (`stepDiagnostics.raw`); the neighbour list is baked in, so there is one
@@ -530,6 +549,38 @@ class GraphedDiagnostics:
         self.captures += 1
 
 
+def applyWallLoadSnapshot(stepResult) -> None:
+    """Give the analytic bodies the wall loads of the step `stepResult` (a replayed step carries them as clones; the graph itself rewrites the bodies' own tensors at every replay): call before the step's diagnostics when
+    a later step has been launched already (the pipelined loop)."""
+    for rb, snap in getattr(stepResult, 'wallLoadSnapshot', None) or ():
+        rb.load = snap
+
+
+def _adjacencyKey(adjacency):
+    """What a captured step is bound to in a pair list: the ADDRESSES and shapes of the arrays its kernels read (a rebuild that
+    keeps the capacity in place (`CapacityPolicy.inPlace`) is the same key; a new allocation is a recapture)."""
+    if adjacency is None:
+        return None
+    names = ('paddedI', 'paddedJ', 'numNeighbors', 'edgeOffsets', 'queryPositions', 'referencePositions', 'querySupports',
+             'referenceSupports')
+    return tuple((getattr(adjacency, n).data_ptr(), tuple(getattr(adjacency, n).shape)) if getattr(adjacency, n, None) is not None
+                 else None for n in names)
+
+
+def _cloneAdjacency(adjacency):
+    """A list with its own copies of every array (the eager validation step must not rebuild the buffers a graph reads)."""
+    if adjacency is None:
+        return None
+    clone = copy.copy(adjacency)
+    for n in ('paddedI', 'paddedJ', 'numNeighbors', 'edgeOffsets', 'queryPositions', 'referencePositions', 'querySupports',
+              'referenceSupports'):
+        v = getattr(adjacency, n, None)
+        if v is not None:
+            setattr(clone, n, v.clone())
+    clone.hashMap = None
+    return clone
+
+
 class GraphedIntegratorStep:
     """Replay a whole integrator step (every RHS evaluation, the state updates
     and `finalize`) from one CUDA graph -- the runner-level extension of
@@ -570,6 +621,10 @@ class GraphedIntegratorStep:
         #: (`_hasBoundaryParticles`, `_hostDxValue`, device constants, ...)
         #: whose one-time reads would otherwise break the capture
         self._warm = False
+        # Warp-owned material arrays must live as long as their captured
+        # launches. A changed table also requires a new capture.
+        self._materialOwner = None
+        self._crkDensityPolicy = None
 
     def _disable(self, reason):
         self.disabled = reason
@@ -577,13 +632,18 @@ class GraphedIntegratorStep:
         warnings.warn(f'[warpSPH] CUDA graph for {self.name} disabled, running eagerly: {reason}', stacklevel=3)
 
     def _eager(self, state, dt, config, schemeConfig, verbose):
-        return self.integratorFn(state=state, f=self.stepFunction, dt=dt, config=config,
-                                 verbose=verbose, schemeConfig=schemeConfig)
+        res = self.integratorFn(state=state, f=self.stepFunction, dt=dt, config=config,
+                                verbose=verbose, schemeConfig=schemeConfig)
+        if not _OUTER_CAPTURE[0]:
+            # the loads this step booked (in place into the bodies' tensors, which the NEXT step's capture / validation / replay rewrites before a pipelined loop reads them)
+            object.__setattr__(res, 'wallLoadSnapshot', [(rb, t.clone()) for rb, t in self._loadTensors(schemeConfig)])
+        return res
 
     @staticmethod
     def _key(state):
-        return (id(state.adjacency),) + tuple((n, tuple(t.shape), t.dtype)
-                                              for n, t in _tensorAttrs(state.state).items())
+        extra = getattr(state, 'graphKey', None)
+        return (_adjacencyKey(state.adjacency), extra() if extra is not None else None) + tuple(
+            (n, tuple(t.shape), t.dtype) for n, t in _tensorAttrs(state.state).items())
 
     def __call__(self, state, dt, config, schemeConfig, verbose=False):
         return self.finish(self.launch(state, dt, config, schemeConfig, verbose))
@@ -593,14 +653,31 @@ class GraphedIntegratorStep:
         runs it while the caller does other work, e.g. the previous step's
         diagnostics on another stream); an eager step runs to completion.
         Pass the handle to `finish`."""
+        if getattr(schemeConfig, 'crkEvolution', 'summation') in ('spheral', 'paper'):
+            self._entry = None
+            self._validated = False
+            return {'result': self._eager(state, dt, config, schemeConfig, verbose)}
         if (self.disabled is not None or verbose or not isinstance(dt, torch.Tensor)
                 or not state.state.positions.is_cuda or not self._warm):
             self._warm = True
             return {'result': self._eager(state, dt, config, schemeConfig, verbose)}
+        owner = None
+        if getattr(schemeConfig, 'materials', None) is not None:
+            from ..modules.eos.materials import materialRuntime
+            owner = materialRuntime(schemeConfig, state.state.densities)
+        densityPolicy = getattr(schemeConfig, 'crkDensityPolicy', 'legacy')
+        if self._materialOwner is not owner or self._crkDensityPolicy != densityPolicy:
+            self._entry = None
+            self._validated = False
+            self._materialOwner = owner
+            self._crkDensityPolicy = densityPolicy
         e = self._entry
-        if e is None or e['adjacency'] is not state.adjacency or e['key'] != self._key(state):
+        if e is None or e['key'] != self._key(state):
             # new Verlet generation (or first step): capture now
             self._entry = None
+            prepare = getattr(state, 'prepareCapture', None)
+            if prepare is not None:
+                prepare(config)             # host work a capture cannot do (sizing a grid from a device value)
             if not self._capture(state, dt, config, schemeConfig):
                 return {'result': self._eager(state, dt, config, schemeConfig, verbose)}
             e = self._entry
@@ -610,9 +687,18 @@ class GraphedIntegratorStep:
         self.replays += 1
         # the integrator's own time expression, float32: float(t + dt); and
         # the OR of the deferred Verlet checks -- read together in `finish`
-        pending = torch.stack([e['flag'].to(dt.dtype), (state.t + dt).reshape(())])
+        pending = torch.cat([torch.stack([e['flag'].to(dt.dtype), (state.t + dt).reshape(())])]
+                            + [d.values.to(dt.dtype).reshape(-1) for d in e['decisions']])
         return {'entry': e, 'state': state, 'dt': dt, 'config': config,
                 'schemeConfig': schemeConfig, 'pending': pending}
+
+    @staticmethod
+    def _loadTensors(schemeConfig):
+        """The wall-load tensors of the analytic bodies (`RigidBody.load`), which the captured step updates IN PLACE (the graph writes to these addresses)."""
+        provider = getattr(schemeConfig, 'boundaryProvider', None)
+        if provider is None:
+            return []
+        return [(rb, rb.load) for rb in provider.rigidBodies if getattr(rb, 'load', None) is not None]
 
     def finish(self, handle):
         """Complete a step started by `launch` and return its IntegrationResult."""
@@ -625,7 +711,8 @@ class GraphedIntegratorStep:
         import time
         import warp as wp
         from warpSPHCore import deferVerletChecks
-        from warpSPHIntegrators.util import deferHostTime
+        from warpSPHIntegrators.state import deferHostTime
+        from .stepDecisions import collectStepDecisions
         t0 = time.perf_counter()
         staticSys = _cloneState(state)
         staticIn = _tensorAttrs(staticSys.state)
@@ -638,7 +725,7 @@ class GraphedIntegratorStep:
             torch.cuda.synchronize()
             config.dt = staticDt
             _OUTER_CAPTURE[0] = True
-            with _captureGuard(), deferHostTime(), deferVerletChecks() as flags, \
+            with _captureGuard(), deferHostTime(), deferVerletChecks() as flags, collectStepDecisions() as decisions, \
                     torch.cuda.graph(graph, stream=stream, capture_error_mode=_CAPTURE_MODE), \
                     wp.ScopedStream(wstream, sync_enter=False, sync_exit=False):
                 result = self._eager(staticSys, staticDt, config, schemeConfig, False)
@@ -647,21 +734,28 @@ class GraphedIntegratorStep:
                 nChecks = len(flags)
             torch.cuda.synchronize()
         except Exception as ex:  # noqa: BLE001 -- any capture failure -> eager
+            if os.environ.get('WARPSPH_CUDAGRAPH_TRACE'):                                      # the first failing call of a capture (the reason string keeps only the last line)
+                import traceback
+                traceback.print_exc()
             torch.cuda.synchronize()
+            aborted = getattr(state, 'captureAborted', None)
+            if aborted is not None:
+                aborted()                   # drop what the recorded step left on shared objects (its tensors are gone now)
             self._disable(f'capture failed ({type(ex).__name__}: {str(ex).splitlines()[0][:200]})')
             return False
         finally:
             _OUTER_CAPTURE[0] = False
             config.dt = prevDt
         final = result.state
-        if final.adjacency is not state.adjacency:
+        if _adjacencyKey(final.adjacency) != _adjacencyKey(state.adjacency):
             self._disable('the captured step replaced the adjacency object')
             return False
         lastUpdate = result.stages[-1].update if result.stages else None
-        self._entry = dict(adjacency=state.adjacency, key=self._key(state), graph=graph,
+        self._entry = dict(adjacency=state.adjacency, key=self._key(state), graph=graph, decisions=list(decisions),
                            names=list(staticIn), staticIn=[staticIn[n] for n in staticIn],
                            staticDt=staticDt, final=final, lastUpdate=lastUpdate, flag=flag,
                            nChecks=nChecks)
+        self._entry['loads'] = self._loadTensors(schemeConfig)
         self.lastCaptureChecks = nChecks
         self.captures += 1
         self.captureSeconds += time.perf_counter() - t0
@@ -677,7 +771,7 @@ class GraphedIntegratorStep:
 
     def _materialize(self, e, state, tHost):
         """Fresh Python objects around clones of the replayed static outputs."""
-        from warpSPHIntegrators.specs import IntegrationResult, StageResult
+        from warpSPHIntegrators.state import IntegrationResult, StageResult
         final = e['final']
         out = copy.copy(final)
         out.state = copy.copy(final.state)
@@ -692,7 +786,10 @@ class GraphedIntegratorStep:
         if upd is not None and dataclasses.is_dataclass(upd):
             fields = {f.name: self._cloneTree(getattr(upd, f.name)) for f in dataclasses.fields(upd)}
             upd = type(upd)(**fields)
-        return IntegrationResult(state=out, stages=[StageResult(aux=None, update=upd)])
+        res = IntegrationResult(state=out, stages=[StageResult(aux=None, update=upd)])
+        # the wall loads of this step, cloned right behind its replay (stream order: before the next replay rewrites the graph's tensors); the pipelined loop gives them back to the bodies just before this step's outputs
+        object.__setattr__(res, 'wallLoadSnapshot', [(rb, static.clone()) for rb, static in e.get('loads', ())])          # IntegrationResult is frozen
+        return res
 
     def _finishReplay(self, e, state, dt, config, schemeConfig, pending):
         host = pending.cpu().tolist()
@@ -700,14 +797,33 @@ class GraphedIntegratorStep:
             # a Verlet check fired inside the step: redo it eagerly (rebuild)
             self.fallbacks += 1
             return self._eager(state, dt, config, schemeConfig, False)
+        slices, at = [], 2
+        for d in e['decisions']:
+            n = d.values.numel()
+            slices.append(host[at:at + n])
+            at += n
+        if any(d.redo(h) for d, h in zip(e['decisions'], slices)):
+            # a deferred check says a stage ran on a pair list an eager step would have refreshed: the eager step does
+            self.fallbacks += 1
+            return self._eager(state, dt, config, schemeConfig, False)
         result = self._materialize(e, state, host[1])
         if not self._validated:
             self._validated = True
-            eager = self._eager(_cloneState(state), dt, config, schemeConfig, False)
+            # the eager step starts from copies of the state AND of the list (it may rebuild it in place), and must not
+            # teach the host-side state (usage estimates, grid sizes) a second time
+            restores = [d.hostState() for d in e['decisions'] if d.hostState is not None]
+            probe = _cloneState(state)
+            if e['decisions']:
+                probe.adjacency = _cloneAdjacency(state.adjacency)      # (only where a decision can rebuild it in place)
+            eager = self._eager(probe, dt, config, schemeConfig, False)
+            for restore in restores:
+                restore()
             bad = self._compare(eager, result)
             if bad:
                 self._disable('graph replay differs from the eager step in ' + ', '.join(bad[:8]))
                 return eager
+        for d, h in zip(e['decisions'], slices):
+            d.apply(h, result.state)
         return result
 
     @staticmethod

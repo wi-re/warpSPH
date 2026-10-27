@@ -34,11 +34,14 @@ def computePi_term(
     thermalConductivity : wp.bool = False,  # the conductivity coefficients (`Cu_l`, `Cu_q`); no Monaghan switch
     rhoRec_i: scalar_t = scalar_t(-1.0), rhoRec_j: scalar_t = scalar_t(-1.0), # density / pressure at the pair midpoint (`Riemann` term); negative: not reconstructed
     PRec_i: scalar_t = scalar_t(-1.0), PRec_j: scalar_t = scalar_t(-1.0),
+    kernelScaleOverride: scalar_t = scalar_t(0.0),
 ):
     pair = buildPair(
         x_i, x_j, h_i, h_j, rho_i, rho_j, explicitPressure, P_i, P_j, u_ij,
         domainState, kernel_int, c_i, c_j, alpha_i, alpha_j, viscosityParams, useJ, thermalConductivity,
         rhoRec_i, rhoRec_j, PRec_i, PRec_j)
+    if kernelScaleOverride > scalar_t(0.0):
+        pair.kernelScale = kernelScaleOverride
 
     val = evaluateTerm(viscosityTerm, pair, viscosityParams)
 

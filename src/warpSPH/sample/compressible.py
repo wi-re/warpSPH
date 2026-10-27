@@ -24,8 +24,9 @@ def setupBasicCompressibleInitialState(
         nx,
         config, schemeConfig,
         SimulationState, SimulationSystem,
+        jitter=0.0,
 ):
-    particles_l = sampleRegularParticles(nx, config.domain, config.targetNeighbors, jitter = 0.0)
+    particles_l = sampleRegularParticles(nx, config.domain, config.targetNeighbors, jitter = jitter)
     Pinitial = torch.zeros_like(particles_l.densities)
     rhoInitial = torch.ones_like(particles_l.densities)
     v_initial = torch.zeros_like(particles_l.positions)

@@ -59,7 +59,7 @@ import torch
 
 from warpSPH.runner.cli import caseMain
 from warpSPH.modules.density import computeDensities
-from warpSPH.cases.weaklyCompressible import domainBoundarySdf
+from warpSPH.cases.common.weaklyCompressible import domainBoundarySdf
 
 mod = importlib.import_module(f'warpSPH.cases.{args.case}')
 case = getattr(mod, f'{args.case}Case')

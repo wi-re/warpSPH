@@ -5,18 +5,19 @@ signature `(system, dt, config, schemeConfig, verbose) -> update, adjacency,
 `SchemeBundle` (state/config/update classes plus this step function); nothing
 here should be called by name without going through it. `waveEquation.py`
 (`f_wave_equation`) is the exception among the fluid schemes: a non-fluid
-demo scheme (see `cases/waveEquation.py` for its registered `Case`), but it
+demo scheme (see `cases/demos/waveEquation.py` for its registered `Case`), but it
 follows the same `SchemeBundle`/`buildScheme` contract as the rest.
 """
 
-from .monaghan import compressibleSPH_Monaghan
-from .gsph import compressibleSPH_GSPH
-from .gsphInutsuka import compressibleSPH_InutsukaGSPH
-from .compSPH import compSPH_step
-from .crkSPH import crkSPH_step
-from .divergenceFree import divergenceFree_step
-from .waveEquation import f_wave_equation
+from .compressible.monaghan import compressibleSPH_Monaghan
+from .compressible.gsph import compressibleSPH_GSPH
+from .compressible.gsphInutsuka import compressibleSPH_InutsukaGSPH
+from .compressible.compSPH import compSPH_step
+from .compressible.crkSPH import crkSPH_step
+from .incompressible.dfsph import dfsph_step
+from .pde.waveEquation import f_wave_equation
+from .compressible.meshless import meshlessStep
 
 from .builder import buildScheme, CompressibleSPHScheme
 
-__all__ = ['f_wave_equation', 'compressibleSPH_Monaghan', 'compressibleSPH_GSPH', 'compressibleSPH_InutsukaGSPH', 'compSPH_step', 'crkSPH_step', 'buildScheme', 'CompressibleSPHScheme', 'divergenceFree_step']
+__all__ = ['f_wave_equation', 'compressibleSPH_Monaghan', 'compressibleSPH_GSPH', 'compressibleSPH_InutsukaGSPH', 'compSPH_step', 'crkSPH_step', 'buildScheme', 'CompressibleSPHScheme', 'dfsph_step', 'meshlessStep']

@@ -1,0 +1,8 @@
+[gizmo] yee_nx64_j0.0          MFM | t=2.00 keR=0.9926 L1rho=1.0357e-03 L1v=3.6807e-03
+[gizmo] yee_nx64_j0.0          MFV | t=2.00 keR=0.9972 L1rho=9.9671e-04 L1v=3.8166e-03
+[gizmo] yee_nx64_j0.0_cons     MFM | t=2.00 keR=0.9926 L1rho=1.0339e-03 L1v=3.6807e-03
+[gizmo] yee_nx64_j0.0_cons     MFV | t=2.00 keR=0.9972 L1rho=9.9501e-04 L1v=3.8166e-03
+[gizmo] yee_nx64_j0.25         MFM | t=2.00 keR=0.9885 L1rho=2.9977e-03 L1v=7.3996e-03
+[gizmo] yee_nx64_j0.25         MFV | t=2.00 keR=0.9913 L1rho=3.2971e-03 L1v=7.7535e-03
+[gizmo] yee_nx64_j0.25_cons    MFM | t=2.00 keR=0.9892 L1rho=1.6247e-02 L1v=5.4161e-03
+[gizmo] yee_nx64_j0.25_cons    MFV | t=2.00 keR=0.9911 L1rho=1.7803e-02 L1v=5.6405e-03

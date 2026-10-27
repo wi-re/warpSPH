@@ -1,5 +1,5 @@
 > **Superseded record (moved to `docs/historic_plans/` 2026-10-01).** Work log of Phase 6 (sessions 1-5, 2026-09-19); the summary is `phase6.md`.
-> The compressible dissipation work continues in [`AV_PLAN.md`](../../AV_PLAN.md); its reference numbers are the AV baseline
+> The compressible dissipation work continues in [`AV_PLAN.md`](AV_PLAN.md); its reference numbers are the AV baseline
 > (`docs/av/av_baseline_2026-09-30.md`, now **M0e**).
 >
 > **Read-Hayfield numbers below are out of date.** Two bugs were found after this log was written, both fixed 2026-10-01 (see

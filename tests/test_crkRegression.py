@@ -23,8 +23,8 @@ import torch
 
 from warpSPH.caseUtils.compressible.greshoVortex import greshoProfile
 from warpSPH.caseUtils.compressible.sod.sodSolution import solve
-from warpSPH.cases.greshoVortex import greshoVortexCase
-from warpSPH.cases.sod import sodCase
+from warpSPH.cases.compressible.greshoVortex import greshoVortexCase
+from warpSPH.cases.compressible.sod import sodCase
 from warpSPH.runner import run
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason='needs a GPU')

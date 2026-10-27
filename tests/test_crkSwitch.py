@@ -12,7 +12,7 @@ from warpSPH.runner import run
 
 
 def _sod(switch: str, nSteps: int = 150):
-    from warpSPH.cases.sod import sodCase
+    from warpSPH.cases.compressible.sod import sodCase
     return run(sodCase, scheme='CRKSPH', nx=100, nSteps=nSteps, progress=False, quiet=True,
                params=dict(viscositySwitch=switch))
 

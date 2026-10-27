@@ -1,37 +1,34 @@
-"""Resolve a scheme name/enum member to its `SchemeBundle`: the state, config,
-and update classes plus step/export/import functions for every registered SPH
-scheme (Monaghan, CompSPH, CRKSPH, deltaSPH, the five incompressible ones,
-artificial-compressibility, and the non-fluid wave equation). `_divergenceFree`
-imports `divergenceFree` (`divergenceFree.py`, renamed from `dfsph.py` in the
-pre-merge cleanup pass) lazily to avoid a circular import with
-`schemes/__init__.py`, which imports `divergenceFree` first.
-"""
+"""Resolve supported schemes to state/config/update, driver and codec bundles."""
 
-from dataclasses import dataclass
+from warpSPHIntegrators.schemes import ProjectedStep, IntegrationSchemeType
+from dataclasses import dataclass, replace
 from typing import Callable, Union
 
 from ..systems import (
     CompSPHState, CompSPHSystem, CompressibleState,
-    CompressibleSystem, CompressibleSystemUpdate, WeaklyCompressibleState,
+    CompressibleSystem, CompressibleSystemUpdate, MeshlessState,
+    MeshlessSystem, MeshlessSystemUpdate, WeaklyCompressibleState,
     WeaklyCompressibleSystem, WaveSystemStatev3, WaveSystemUpdatev3, WaveSystemv3,
 )
 from ..configurations import (
     CRKSPHConfig, CompSPHConfig, CompressibleSPHConfig, GSPHConfig, InutsukaGSPHConfig,
-    IncompressibleSPHConfig, WeaklyCompressibleSPHConfig, Sun2017DeltaSPHConfig,
+    IncompressibleSPHConfig, MFMConfig, MFVConfig, MeshlessConfig,
+    WeaklyCompressibleSPHConfig, Sun2017DeltaSPHConfig,
     WaveEquationConfig,
     compSPHConfigToDict, compressibleConfigToDict, crkSPHConfigToDict,
     dictToCRKSPHConfig, dictToCompSPHConfig, dictToCompressibleConfig, dictToGSPHConfig, dictToInutsukaGSPHConfig, gsphConfigToDict,
-    dictToIncompressibleSPHConfig, dictToWeaklyCompressibleConfig,
-    dictToWaveEquationConfig, incompressibleConfigToDict,
+    dictToIncompressibleSPHConfig, dictToMeshlessConfig, dictToWeaklyCompressibleConfig,
+    dictToWaveEquationConfig, incompressibleConfigToDict, meshlessConfigToDict,
     waveEquationConfigToDict, weaklyCompressibleConfigToDict,
 )
-from .compSPH import compSPH_step
-from .deltaSPH import deltaSPH_step
-from .crkSPH import crkSPH_step
-from .monaghan import compressibleSPH_Monaghan
-from .gsph import compressibleSPH_GSPH
-from .gsphInutsuka import compressibleSPH_InutsukaGSPH
-from .waveEquation import f_wave_equation
+from .compressible.compSPH import compSPH_step
+from .weaklyCompressible.deltaSPH import deltaSPH_step
+from .compressible.crkSPH import crkSPH_step
+from .compressible.monaghan import compressibleSPH_Monaghan
+from .compressible.gsph import compressibleSPH_GSPH
+from .compressible.gsphInutsuka import compressibleSPH_InutsukaGSPH
+from .compressible.meshless import mfmStep, mfvStep
+from .pde.waveEquation import f_wave_equation
 from ..enumTypes import (
     ArtificialCompressibleSPHScheme, CompressibleSPHScheme,
     WeaklyCompressibleSPHScheme, IncompressibleSPHScheme, WaveEquationScheme,
@@ -75,6 +72,13 @@ class SchemeBundle:
     exportFunction: Callable
     #: The inverse of `exportFunction`.
     importFunction: Callable
+    #: Optional driver constructor or registered scheme enum; legacy unpacking is unchanged.
+    integrationMethod: Callable | IntegrationSchemeType | None = None
+    #: Resolve an integrated-field layout after scheme config overrides.
+    stateFactory: Callable | None = None
+
+    def configured(self, config):
+        return self if self.stateFactory is None else replace(self, SimulationState=self.stateFactory(config))
 
     def __iter__(self):
         """Legacy 7-tuple unpacking. Pinned to `_LEGACY_TUPLE_ORDER`."""
@@ -94,6 +98,15 @@ def _monaghan() -> SchemeBundle:
         exportFunction=compressibleConfigToDict,
         importFunction=dictToCompressibleConfig,
     )
+
+
+def _pesph() -> SchemeBundle:
+    from ..configurations.pesph import PESPHConfig, pesphConfigToDict, dictToPESPHConfig
+    from ..systems.pesph import PESPHSystem, PressureEnergyState, PESPHSystemUpdate, pesphStateType
+    from .compressible.pesph import pesphStep
+    return SchemeBundle(PESPHSystem, PressureEnergyState, PESPHConfig, PESPHSystemUpdate,
+                        pesphStep, pesphConfigToDict, dictToPESPHConfig,
+                        stateFactory=lambda config: pesphStateType(config.variant))
 
 
 def _gsph() -> SchemeBundle:
@@ -117,6 +130,30 @@ def _inutsukaGSPH() -> SchemeBundle:
         stepFunction=compressibleSPH_InutsukaGSPH,
         exportFunction=gsphConfigToDict,
         importFunction=dictToInutsukaGSPHConfig,
+    )
+
+
+def _mfm() -> SchemeBundle:
+    return SchemeBundle(
+        SimulationSystem=MeshlessSystem,
+        SimulationState=MeshlessState,
+        SimulationConfig=MFMConfig,
+        SimulationUpdate=MeshlessSystemUpdate,
+        stepFunction=mfmStep,
+        exportFunction=meshlessConfigToDict,
+        importFunction=dictToMeshlessConfig,
+    )
+
+
+def _mfv() -> SchemeBundle:
+    return SchemeBundle(
+        SimulationSystem=MeshlessSystem,
+        SimulationState=MeshlessState,
+        SimulationConfig=MFVConfig,
+        SimulationUpdate=MeshlessSystemUpdate,
+        stepFunction=mfvStep,
+        exportFunction=meshlessConfigToDict,
+        importFunction=dictToMeshlessConfig,
     )
 
 
@@ -172,114 +209,48 @@ def _sun2017DeltaSPH() -> SchemeBundle:
     )
 
 
-def _divergenceFree() -> SchemeBundle:
-    # Deferred, as the original branch was: it keeps `builder` from importing
-    # `divergenceFree` at its own import time. (`schemes/__init__` imports
-    # `divergenceFree` first in practice, so this is about the dependency
-    # edge, not about saving the load.) The config codecs come from
-    # `..configurations`, which is where they are defined --
-    # `divergenceFree` used to relay them only as a side effect of star
-    # importing that package.
-    from .divergenceFree import divergenceFree_step
-    from ..systems.incompressible import (IncompressibleSystem, IncompressibleState,
-                                          IncompressibleSystemUpdate)
+def _dfsph(ordering='df_np_cd') -> SchemeBundle:
+    from .incompressible.dfsph import dfsph_step
+    from ..configurations.incompressible import PredictorDFSPHConfig, ShiftDFSPHConfig
+    configType = {'df_np_cd': IncompressibleSPHConfig, 'np_df_cd': PredictorDFSPHConfig,
+                  'np_df_shift': ShiftDFSPHConfig}[ordering]
+    from ..systems.incompressible import DFSPHState, DFSPHSystem, IncompressibleSystemUpdate
     return SchemeBundle(
-        SimulationSystem=IncompressibleSystem,
-        SimulationState=IncompressibleState,
-        SimulationConfig=IncompressibleSPHConfig,
+        SimulationSystem=DFSPHSystem,
+        SimulationState=DFSPHState,
+        SimulationConfig=configType,
         SimulationUpdate=IncompressibleSystemUpdate,
-        stepFunction=divergenceFree_step,
-        exportFunction=incompressibleConfigToDict,
-        importFunction=dictToIncompressibleSPHConfig,
-    )
-
-
-def _dfsphReference() -> SchemeBundle:
-    # Same lazy-import rationale as `_divergenceFree`. Reuses the incompressible
-    # state/config/update and their codecs -- the only thing that differs is the
-    # step function and the system's `finalize` (see
-    # `systems/incompressible.py::DFSPHReferenceSystem` and
-    # `schemes/dfsphReference.py`).
-    from .dfsphReference import dfsphReference_step
-    from ..systems.incompressible import (DFSPHReferenceSystem, IncompressibleState,
-                                          IncompressibleSystemUpdate)
-    return SchemeBundle(
-        SimulationSystem=DFSPHReferenceSystem,
-        SimulationState=IncompressibleState,
-        SimulationConfig=IncompressibleSPHConfig,
-        SimulationUpdate=IncompressibleSystemUpdate,
-        stepFunction=dfsphReference_step,
+        integrationMethod=ProjectedStep,
+        stepFunction=dfsph_step,
         exportFunction=incompressibleConfigToDict,
         importFunction=dictToIncompressibleSPHConfig,
     )
 
 
 def _iisph() -> SchemeBundle:
-    # Plain IISPH ([I], Ihmsen et al. 2014): shares `dfsphReference`'s
-    # incompressible state/config/update, codecs and `DFSPHReferenceSystem`
-    # (the whole time integration happens inside the step), differing only in
-    # the step function -- the divergence-free pass is switched off. See
-    # `schemes/dfsphReference.py::iisph_step` and DFSPH_IMPROVEMENT_PLAN.md
-    # Part 33.
-    from .dfsphReference import iisph_step
-    from ..systems.incompressible import (DFSPHReferenceSystem, IncompressibleState,
+    # Native IISPH (Ihmsen et al. 2014), one rest-volume density projection.
+    # Shares state/time infrastructure, not DFSPH's coefficients or policy.
+    from .incompressible.iisph import iisph_step
+    from ..systems.incompressible import (IISPHSystem, IncompressibleState,
                                           IncompressibleSystemUpdate)
     return SchemeBundle(
-        SimulationSystem=DFSPHReferenceSystem,
+        SimulationSystem=IISPHSystem,
         SimulationState=IncompressibleState,
         SimulationConfig=IncompressibleSPHConfig,
         SimulationUpdate=IncompressibleSystemUpdate,
+        integrationMethod=IntegrationSchemeType.semiImplicitEuler,
         stepFunction=iisph_step,
         exportFunction=incompressibleConfigToDict,
         importFunction=dictToIncompressibleSPHConfig,
     )
 
 
-def _omniIncompressible() -> SchemeBundle:
-    # Direct port of omniSPH's incompressible solver loop. Same lazy-import
-    # rationale as `_divergenceFree`; reuses the incompressible
-    # state/config/update and `DFSPHReferenceSystem` (the whole time
-    # integration happens inside the step). See `schemes/omniIncompressible.py`.
-    from .omniIncompressible import omniIncompressible_step
-    from ..systems.incompressible import (DFSPHReferenceSystem, IncompressibleState,
-                                          IncompressibleSystemUpdate)
-    return SchemeBundle(
-        SimulationSystem=DFSPHReferenceSystem,
-        SimulationState=IncompressibleState,
-        SimulationConfig=IncompressibleSPHConfig,
-        SimulationUpdate=IncompressibleSystemUpdate,
-        stepFunction=omniIncompressible_step,
-        exportFunction=incompressibleConfigToDict,
-        importFunction=dictToIncompressibleSPHConfig,
-    )
-
-
-def _band2018pb() -> SchemeBundle:
-    # IISPH with Pressure Boundaries (Band et al. 2018). Same lazy-import
-    # rationale as `_divergenceFree`; reuses the incompressible
-    # state/config/update and `DFSPHReferenceSystem` (the whole time
-    # integration happens inside the step). See `schemes/band2018pb.py`.
-    from .band2018pb import band2018pb_step
-    from ..systems.incompressible import (DFSPHReferenceSystem, IncompressibleState,
-                                          IncompressibleSystemUpdate)
-    return SchemeBundle(
-        SimulationSystem=DFSPHReferenceSystem,
-        SimulationState=IncompressibleState,
-        SimulationConfig=IncompressibleSPHConfig,
-        SimulationUpdate=IncompressibleSystemUpdate,
-        stepFunction=band2018pb_step,
-        exportFunction=incompressibleConfigToDict,
-        importFunction=dictToIncompressibleSPHConfig,
-    )
-
-
 def _artificialCompressible() -> SchemeBundle:
-    # Same lazy-import rationale as `_divergenceFree`: keeps `builder` from
-    # importing the scheme module at its own import time. See
-    # `schemes/artificialCompressible.py` -- this scheme owns its whole real
+    # Import the dual-time implementation lazily. See
+    # `schemes/incompressible/artificialCompressible.py` -- this scheme owns its whole real
     # step (a dual-time solve) and hands the integrator an exact delta, which
     # is why it pins `forwardEuler` and validates it at step entry.
-    from .artificialCompressible import artificialCompressible_step
+    from .incompressible.artificialCompressible import artificialCompressible_step
     from ..systems.artificialCompressible import (ArtificialCompressibleState,
                                                   ArtificialCompressibleSystem,
                                                   ArtificialCompressibleSystemUpdate)
@@ -316,13 +287,15 @@ _SCHEMES = {
     CompressibleSPHScheme.CRKSPH: _crkSPH,
     CompressibleSPHScheme.GSPH: _gsph,
     CompressibleSPHScheme.InutsukaGSPH: _inutsukaGSPH,
+    CompressibleSPHScheme.PESPH: _pesph,
+    CompressibleSPHScheme.MFM: _mfm,
+    CompressibleSPHScheme.MFV: _mfv,
     WeaklyCompressibleSPHScheme.deltaSPH: _deltaSPH,
     WeaklyCompressibleSPHScheme.sun2017DeltaSPH: _sun2017DeltaSPH,
-    IncompressibleSPHScheme.divergenceFree: _divergenceFree,
-    IncompressibleSPHScheme.dfsphReference: _dfsphReference,
+    IncompressibleSPHScheme.dfsph: _dfsph,
+    IncompressibleSPHScheme.dfsphPredictor: lambda: _dfsph('np_df_cd'),
+    IncompressibleSPHScheme.dfsphShift: lambda: _dfsph('np_df_shift'),
     IncompressibleSPHScheme.iisph: _iisph,
-    IncompressibleSPHScheme.omniIncompressible: _omniIncompressible,
-    IncompressibleSPHScheme.band2018pb: _band2018pb,
     ArtificialCompressibleSPHScheme.artificialCompressible: _artificialCompressible,
     WaveEquationScheme.waveEquation: _waveEquation,
 }
@@ -341,8 +314,7 @@ def buildScheme(
                       WaveEquationScheme]
 ) -> SchemeBundle:
     """Resolve a scheme name or enum member to its :class:`SchemeBundle`."""
-    if schemeName is CompressibleSPHScheme.PESPH or (isinstance(schemeName, str) and schemeName.lower() == 'pesph'):
-        raise NotImplementedError('PESPH is registered as an enum member only; the scheme is assembled in PESPH_PLAN Phase 4')
+    rejectRetiredScheme(schemeName)
     if isinstance(schemeName, str):
         member = _ALIASES.get(schemeName.lower())
     else:
@@ -354,3 +326,19 @@ def buildScheme(
             f'{sorted(_ALIASES)}.'
         )
     return _SCHEMES[member]()
+
+
+RETIRED_SCHEMES = {
+    'divergencefree': 'dfsphShift (native VD+PS)',
+    'dfsphreference': 'dfsph (classic DFSPH)',
+    'omniincompressible': 'dfsphPredictor (predictor-first DFSPH)',
+    'band2018pb': "dfsph with dfsph.pressureBoundary='band2018' (experimental, static sampled walls only)",
+}
+
+
+def rejectRetiredScheme(name):
+    replacement = RETIRED_SCHEMES.get(str(getattr(name, 'name', name)).lower())
+    if replacement is not None:
+        raise ValueError(f"Scheme {name!r} is retired; select {replacement} explicitly. "
+                         "Native operators/policies differ; old checkpoints cannot be silently migrated. "
+                         "See docs/incompressible/MIGRATION.md.")

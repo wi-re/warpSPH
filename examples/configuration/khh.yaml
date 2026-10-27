@@ -1,0 +1,14 @@
+schemaVersion: 1
+case: kelvinHelmholtz
+variant: smooth-density
+simulation:
+  nx: 128
+  tLimit: 4.0
+  device: cuda
+params:
+  rho1: 1.0
+  rho2: 2.0
+  v1: 0.5
+  v2: -0.5
+solver:
+  scheme: CRKSPH

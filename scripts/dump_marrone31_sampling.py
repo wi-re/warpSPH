@@ -36,7 +36,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from warpSPH.cases.dambreak import dambreakCase
+from warpSPH.cases.freeSurface.dambreak import dambreakCase
 from warpSPH.runner import run
 
 os.makedirs(args.out, exist_ok=True)

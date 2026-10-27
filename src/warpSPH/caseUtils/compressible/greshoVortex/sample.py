@@ -1,4 +1,4 @@
-"""Gresho-Chan rotating vortex initial state, used by `warpSPH.cases.greshoVortex`.
+"""Gresho-Chan rotating vortex initial state, used by `warpSPH.cases.compressible.greshoVortex`.
 
 Samples a regular lattice and imposes the piecewise-analytic radial pressure
 and angular-velocity profile of the vortex (three annuli, balanced so the
@@ -21,7 +21,7 @@ from warpSPHCore import *
 from ....modules.timestep.compressible import computeTimestep
 import math
 
-__all__ = ['sampleGreshoVortex', 'greshoProfile']
+__all__ = ['sampleGreshoVortex', 'greshoProfile', 'sampleGreshoVortexMeshless']
 
 
 _P_OUTER = 3 + 4 * math.log(2)   # the standard profile's pressure for r >= 0.4
@@ -78,8 +78,8 @@ def greshoProfile(r, cuspWidth=0.0):
     return vphi, P
 
 
-def sampleGreshoVortex(nx, config, schemeConfig, SimulationState, SimulationSystem, cuspWidth=0.0):
-    compressibleSystem = setupBasicCompressibleInitialState(nx, config, schemeConfig, SimulationState, SimulationSystem)
+def sampleGreshoVortex(nx, config, schemeConfig, SimulationState, SimulationSystem, cuspWidth=0.0, jitter=0.0):
+    compressibleSystem = setupBasicCompressibleInitialState(nx, config, schemeConfig, SimulationState, SimulationSystem, jitter=jitter)
     
 
     positions = compressibleSystem.state.positions
@@ -104,3 +104,28 @@ def sampleGreshoVortex(nx, config, schemeConfig, SimulationState, SimulationSyst
 
     config.dt = computeTimestep(compressibleSystem, config, schemeConfig)
     return compressibleSystem
+
+
+def sampleGreshoVortexMeshless(nx, config, schemeConfig, cuspWidth=0.0, jitter=0.0):
+    """The meshless (MFM / MFV) form of `sampleGreshoVortex` (E2): the same
+    relaxed lattice the compressible path uses (positions / masses / supports),
+    but the state is the conserved Q (the G1 pattern, `caseUtils/meshless.py`)
+    and the dt is the core signal timestep (`modules/timestep/meshless.py`)."""
+    from ....systems.compressibleMonaghan import CompressibleState, CompressibleSystem
+    from ...meshless import toMeshlessSystem
+
+    # the lattice the compressible Gresho uses (the base state is otherwise discarded)
+    base = setupBasicCompressibleInitialState(
+        nx, config, schemeConfig, CompressibleState, CompressibleSystem, jitter=jitter)
+    st = base.state
+    r = torch.linalg.norm(st.positions, dim=-1)
+    vphi, Pinitial = greshoProfile(r, cuspWidth)
+    vphi = vphi.to(st.densities.dtype)
+    Pinitial = Pinitial.to(st.densities.dtype)
+    vinitial = torch.zeros_like(st.positions)
+    vinitial[:, 0] = -vphi * st.positions[:, 1] / r
+    vinitial[:, 1] = vphi * st.positions[:, 0] / r
+
+    st.velocities = vinitial
+    st.pressures = Pinitial
+    return toMeshlessSystem(base, config, schemeConfig)

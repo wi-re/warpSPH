@@ -56,7 +56,7 @@ bootstrap(precision='float32')
 import numpy as np
 import torch
 
-from warpSPH.cases.hydrostaticColumn import hydrostaticColumnCase as case
+from warpSPH.cases.boundaries.hydrostaticColumn import hydrostaticColumnCase as case
 from warpSPH.runner import run
 from warpSPH.configurations.moduleConfigurations.shifting import ShiftingScheme, ShiftingProjectionScheme
 from warpSPH.modules.noise.shuffleParticles import shuffleParticles

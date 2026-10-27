@@ -12,6 +12,8 @@ than mutating ``state`` in place. An earlier version of this function is left
 commented out above the active one.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 import torch
 from warpSPHCore import *
 
@@ -56,10 +58,13 @@ def shuffleParticles(state, config, schemeConfig, shiftIters, jitterAmount = 0.0
     adjacency = None
     for i in range(shiftIters):
         adjacency = buildVerletList(
-            state, 
-            config.domain, verletScale = config.verletScale, supportMode = SupportScheme.SuperSymmetric,
-            priorNeighborhood = adjacency,
-            verbose = False)
+            state,
+            config.domain,
+            verletScale=config.verletScale,
+            supportMode=SupportScheme.SuperSymmetric,
+            priorNeighborhood=adjacency,
+            verbose=False,
+            **neighborSearchOptions(config))
         state.densities = warpOperation(
             state,
             operationProperties = OperationProperties(

@@ -1,9 +1,9 @@
 """State/update/system triad for the artificial-viscosity ('Monaghan')
-compressible scheme (`schemes/monaghan.py`), carrying internal energy as the
+compressible scheme (`schemes/compressible/monaghan.py`), carrying internal energy as the
 integrated quantity plus the EOS outputs and CullenDehnen2010 shock-detector
 fields every energy-based compressible scheme needs. `CompressibleSystemUpdate`
 is reused as the generic update container across schemes beyond this one --
-`schemes/compSPH.py` and `schemes/crkSPH.py` build one too, since `compSPH.py`
+`schemes/compressible/compSPH.py` and `schemes/compressible/crkSPH.py` build one too, since `compSPH.py`
 (this package) defines no update class of its own. Its `passive` field is
 populated (as an all-`False` mask) by every scheme that constructs one, but is
 never read back anywhere; the one call site that would have used it
@@ -11,7 +11,9 @@ never read back anywhere; the one call site that would have used it
 an earlier `return`.
 """
 
-from warpSPHIntegrators import *
+from .identity import ParticleIdentityState
+from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state, tagged
+from warpSPHIntegrators.state.fields import update_component, update_position
 from dataclasses import dataclass
 import torch
 from typing import Optional
@@ -21,7 +23,7 @@ __all__ = ['CompressibleState', 'CompressibleSystemUpdate', 'CompressibleSystem'
 
 
 @dataclass
-class CompressibleState(BaseState):
+class CompressibleState(ParticleIdentityState):
     positions : torch.Tensor = integrated('dxdt', tags=('position',))
     velocities: torch.Tensor = integrated('dvdt', tags=('velocity',))
     supports : torch.Tensor = constant(tags=('particle_support',))
@@ -34,7 +36,7 @@ class CompressibleState(BaseState):
     UIDcounter : int = constant(tags=('particle_UIDcounter',))
 
     internalEnergies : torch.Tensor = integrated('dudt', tags=('internalEnergy',))
-    totalEnergies : torch.Tensor = constant(tags=('energy',), default=None)
+    totalEnergies : torch.Tensor = integrated('dEdt', tags=('energy',), default=None)
     entropies : torch.Tensor = constant(tags=('entropy',), default=None)
     pressures : torch.Tensor = constant(tags=('pressure',), default=None)
     soundspeeds : torch.Tensor = constant(tags=('soundSpeed',), default=None)
@@ -69,6 +71,7 @@ class CompressibleSystemUpdate:
     dEdt: torch.Tensor = tagged(tags=('totalEnergy_derivative',))
     drhodt: torch.Tensor = tagged(tags=('density_derivative',))
     passive: Optional[torch.Tensor] = tagged(tags=('passive_derivative',), default=None)
+    dVdt: Optional[torch.Tensor] = tagged(tags=('crk_volume_derivative',), default=None)
 
 @dataclass
 class CompressibleSystem(BaseIntegrationSystem):
@@ -78,7 +81,8 @@ class CompressibleSystem(BaseIntegrationSystem):
     t: float = 0.0
     def initializeNewState(self, *args, verbose=False, **kwargs):
         state = get_reference_state(self)
-        verbosePrint(verbose, f'Initializing new state [t={self.t}]')
+        if verbose:   # self.t may be a device tensor: format it only when printing
+            print(f'Initializing new state [t={self.t}]')
         return CompressibleSystem(state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain)
     
     def apply_position_update(self, update, spec: PositionUpdateSpec, **kwargs):
@@ -87,7 +91,7 @@ class CompressibleSystem(BaseIntegrationSystem):
         return update_component(self, update, spec, 'velocity', 'velocity_derivative')
     def apply_quantity_update(self, update, spec: ComponentUpdateSpec, **kwargs):
         updatedsystem = update_component(self, update, spec, 'internalEnergy', 'internalEnergy_derivative')
-        # updatedsystem = update_component(updatedsystem, update, spec, 'totalEnergy', 'totalEnergy_derivative')
+        updatedsystem = update_component(updatedsystem, update, spec, 'energy', 'totalEnergy_derivative')
         # updatedsystem = update_component(updatedsystem, update, spec, 'density', 'density_derivative')
         return updatedsystem
 
@@ -111,8 +115,7 @@ class CompressibleSystem(BaseIntegrationSystem):
         # it back to the initial value and the wall would read as rest density
         self.state.masses.copy_(lastState.masses)
 
-        # Compressible system specific attributes (internal eneryg is integrated)
-        self.state.totalEnergies.copy_(lastState.totalEnergies)
+        # Compressible system specific attributes (internal and total energy are integrated, not copied)
         self.state.entropies.copy_(lastState.entropies)
         self.state.pressures.copy_(lastState.pressures)
         self.state.soundspeeds.copy_(lastState.soundspeeds)
@@ -121,10 +124,13 @@ class CompressibleSystem(BaseIntegrationSystem):
         self.state.divergence.copy_(lastState.divergence)
         self.state.alpha0s.copy_(lastState.alpha0s)
         self.state.alphas.copy_(lastState.alphas)
+        eosConfig = kwargs.get('schemeConfig', args[1] if len(args) > 1 else None)
+        if getattr(eosConfig, 'materials', None) is not None:
+            from ..modules.eos import refreshEOS
+            refreshEOS(self.state, eosConfig)
         from ..modules.shockCapturing.wrapper import advanceViscositySwitchStep  # (circular at import time)
         advanceViscositySwitchStep(self, initialState, returnValues,
                                    kwargs.get('schemeConfig', args[1] if len(args) > 1 else None),
                                    kwargs.get('config', args[0] if len(args) > 0 else None))
 
         return super().finalize(initialState, dt, returnValues, updateValues, weights, *args, **kwargs)
-    

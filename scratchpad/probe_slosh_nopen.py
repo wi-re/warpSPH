@@ -17,7 +17,7 @@ integ  = sys.argv[1] if len(sys.argv) > 1 else 'symplecticEuler'
 nopen  = (sys.argv[2] if len(sys.argv) > 2 else 'on') == 'on'
 tLimit = float(sys.argv[3]) if len(sys.argv) > 3 else 1.5
 
-import warpSPH.schemes.deltaSPH as sch
+import warpSPH.schemes.weaklyCompressible.deltaSPH as sch
 if not nopen:
     sch.computeMdbcNoPenShift = lambda state, *a, **k: torch.zeros_like(state.positions)
 

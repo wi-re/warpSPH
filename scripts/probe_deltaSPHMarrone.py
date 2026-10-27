@@ -11,7 +11,7 @@ Reference geometry (Marrone 2011 Fig. 2, `literature/marrone2011_*.pdf`)
 - Vertical impact wall on the right (x = L_w).  Pressure probes on it at
   z = 160 / 584 / 1000 mm above the bed  (z/H = 0.267 / 0.973 / 1.667), probe
   diameter phi = 90 mm, flush on the wall.  Marrone reports each signal
-  area-integrated over that disc; `cases/dambreak.py`'s `pressureProbeDiscRadius`
+  area-integrated over that disc; `cases/freeSurface/dambreak.py`'s `pressureProbeDiscRadius`
   reproduces that directly -- a 7-point Gauss-Legendre quadrature over the
   disc's vertical chord (the 2D reduction of the area integral, since there is
   no out-of-plane extent to integrate over), not a single MLS point.
@@ -153,7 +153,7 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
     from warpSPHBootstrap import bootstrap
     bootstrap(precision='float32')
     import numpy as np
-    from warpSPH.cases.dambreak import dambreakCase
+    from warpSPH.cases.freeSurface.dambreak import dambreakCase
     from warpSPH.runner import run
     from _mdbcDensityHook import installMdbcDensityToState
 
@@ -196,7 +196,7 @@ def _runOne(nx: int, c0Ratio: float, tLimit: float, out: str, video: bool,
     # Marrone reports each signal area-integrated over a phi = 90 mm probe disc
     # flush on the wall; `pressureProbeDiscRadius` reproduces that directly (a
     # 7-point Gauss-Legendre quadrature over the disc's vertical chord --
-    # `cases/dambreak.py`'s `diagnostics` docstring), so the probe sits
+    # `cases/freeSurface/dambreak.py`'s `diagnostics` docstring), so the probe sits
     # exactly on the wall (inset 0) like the real transducer, and the several
     # dx of vertical averaging give it neighbour support even at first
     # contact -- no need for the old single-point-inset-by-dx workaround.

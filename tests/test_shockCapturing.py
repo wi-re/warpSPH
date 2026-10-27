@@ -45,7 +45,7 @@ def sod1d():
     valid. `state` is a fresh clone per test (the overwrites would otherwise leak
     between tests within the module scope).
     """
-    from warpSPH.cases.sod import sodCase
+    from warpSPH.cases.compressible.sod import sodCase
     from warpSPH.modules.shockCapturing.CullenDehnen2010 import (computeR,
                                                                   computeXi,
                                                                   computeSecondOrderV)
@@ -176,7 +176,7 @@ def _sod_contact_spike(switch, nx=200, nSteps=300, extra=None):
     `extra` is an optional dict of additional case params (e.g. the R&H alpha
     range ``{'alpha_min': 0.2, 'alpha_max': 1.0}``).
     """
-    from warpSPH.cases.sod import sodCase
+    from warpSPH.cases.compressible.sod import sodCase
     from warpSPH.caseUtils.compressible.sod.sodSolution import solve
 
     import dataclasses

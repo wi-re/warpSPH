@@ -34,8 +34,8 @@ from warpSPH.caseUtils import (
 )
 from warpSPH.io.hdf5 import copy_dict_to_h5, restore_config_from_h5
 from warpSPH.runner import CaseSpec, buildContext
-from warpSPH.cases.dambreak import dambreakCase
-from warpSPH.cases.impact import impactCase
+from warpSPH.cases.freeSurface.dambreak import dambreakCase
+from warpSPH.cases.freeSurface.impact import impactCase
 
 
 # Backward-compatible legacy name.

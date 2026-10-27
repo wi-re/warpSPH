@@ -49,7 +49,7 @@ def scatter_sum(src: torch.Tensor, index: torch.Tensor, dim: int = -1,
 def segment_sum(src: torch.Tensor, numNeighbors: torch.Tensor) -> torch.Tensor:
     """Row sums of per-pair values over a row-sorted (CSR) adjacency list.
 
-    Run-to-run deterministic replacement for `scatter_sum(src, adjacency.i, ...)`:
+    Run-to-run deterministic replacement for `scatter_sum(src, adjacency.livePairs()[0], ...)`:
     `scatter_add_` uses CUDA atomics, so the float summation order (and the
     last bits of the result) changes between runs. `torch.segment_reduce` sums
     each row in a fixed order. Requires `src` ordered by row, with

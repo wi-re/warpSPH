@@ -1,0 +1,192 @@
+section (tree, inclusive unless "self")                                   calls  ops/call  self ops launch/call sync/call self sync sync/step
+[runner] integrator step                                                     50   21057.5      60.0       907.0     25.72      2.00     25.72
+  [warpSPH] - [acsph - 09] - dual-time loop                                  50   20412.5       0.0       886.6     10.12      0.00     10.12
+    [dualTime] eager iteration                                             2111     483.1       0.0        21.0      0.07      0.00      3.00
+      [dualTime] RK stage slopes (residual)                                4222     173.6      99.6         8.0      0.04      0.04      3.00
+        [warpSPH] - (mdbc) - computeBoundaryVelocities                     4272      60.1      56.0         2.0      0.00      0.00      0.00
+          warpSPH[Interpolation]                                          21210       2.1       0.0         1.0      0.00      0.00      0.00
+            warpSPH[Interpolation] - Kernel Execution                     21210       2.1       0.0         1.0      0.00      0.00      0.00
+              warpWrapper2 [WW2]                                          45131       2.1       1.1         1.0      0.00      0.00      0.00
+                SAWF.forward - launch                                     45131       1.0       0.0         1.0      0.00      0.00      0.00
+                  launch_kernel - allocate_output                         45581       1.0       1.0         0.0      0.00      0.00      0.00
+        warpSPH[computeWallMoment]                                         6333       1.0       0.0         1.0      0.00      0.00      0.00
+        warpSPH[Divergence]                                                4322       5.0       0.0         1.0      0.00      0.00      0.00
+          warpSPH[Divergence] - Kernel Execution                           4322       5.0       2.0         1.0      0.00      0.00      0.00
+        [warpSPH] - computePressureForceSurfaceAware                       4222       2.0       0.0         1.0      0.00      0.00      0.00
+          warpSPH[computePressureSurfaceAware]                             4222       2.0       0.0         1.0      0.00      0.00      0.00
+            warpSPH[computePressureSurfaceAware] - Kernel Execution        4222       2.0       0.0         1.0      0.00      0.00      0.00
+        [warpSPH] - (deltaSPH) - computeVelocityDiffusion                  4222       2.0       0.0         1.0      0.00      0.00      0.00
+          warpSPH[computeVelocityDiffusion]                                4222       2.0       0.0         1.0      0.00      0.00      0.00
+            warpSPH[computeVelocityDiffusionDeltaSPH] - Kernel Execution   4222       2.0       0.0         1.0      0.00      0.00      0.00
+      [dualTime] stage-0 closures (BDF source, surface, wall pressure, d   2111      53.0      30.0         5.0      0.00      0.00      0.00
+        [warpSPH] - (acsph) - computePressureSmoothing                     2111      17.0       0.0         2.0      0.00      0.00      0.00
+          [warpSPH] - (deltaSPH) - computeGradRhoL                         2111      14.0      11.0         1.0      0.00      0.00      0.00
+          [warpSPH] - (deltaSPH) - computeScalarFieldDiffusion             2111       3.0       0.0         1.0      0.00      0.00      0.00
+            warpSPH[computeDensityDiffusion]                               2111       3.0       0.0         1.0      0.00      0.00      0.00
+              warpSPH[computeDensityDiffusionDeltaSPH] - Kernel Executio   2111       3.0       0.0         1.0      0.00      0.00      0.00
+      [dualTime] convergence metric (device)                               2111      74.0      74.0         0.0      0.00      0.00      0.00
+      [dualTime] RK accumulation and projection                            2111       9.0       9.0         0.0      0.00      0.00      0.00
+    [dualTime] stop test (host read at schedule checkpoints)               2111       0.3       0.3         0.0      0.14      0.14      6.12
+    [dualTime] eps history read (host)                                       50       2.0       2.0         0.0      1.00      1.00      1.00
+  [warpSPH] - [acsph - 07] - contact masks and wall bounce setup             50      35.0      35.0         0.0      5.00      5.00      5.00
+  [warpSPH] - [ACSPH] - solve shifting                                       50     267.5       2.0        11.2      2.80      0.00      2.80
+    [warpSPH] - shift                                                        50     265.5      37.0        11.2      2.80      0.00      2.80
+      [warpSPH] - (shift) - adjacency                                        50      91.6       0.0         1.2      2.80      0.00      2.80
+      [warpSPH] - (shift) - detectFreeSurface                                50      58.0       1.0         6.0      0.00      0.00      0.00
+      [warpSPH] - (shift) - computeShift                                     50      31.0      28.0         2.0      0.00      0.00      0.00
+        warpSPH[computeUChar]                                                50       2.0       0.0         1.0      0.00      0.00      0.00
+        warpSPH[CRKVolume]                                                   50       1.0       0.0         1.0      0.00      0.00      0.00
+      [warpSPH] - (shift) - michel beta                                      50      14.0      10.0         1.0      0.00      0.00      0.00
+        warpSPH[computeNearestSurfaceNormal]                                 50       4.0       0.0         1.0      0.00      0.00      0.00
+      [warpSPH] - (shift) - countNeighbors                                   50       6.9       0.0         1.0      0.00      0.00      0.00
+        warpSPH[countNeighbors]                                              50       6.9       0.0         1.0      0.00      0.00      0.00
+          warpSPH[countNeighbors] - Kernel Execution                         50       6.9       0.0         1.0      0.00      0.00      0.00
+      [warpSPH] - (shift) - projectShift                                     50      27.0      27.0         0.0      0.00      0.00      0.00
+  [warpSPH] - [acsph - 01] - compute adjacency                               50      91.6       0.0         1.2      2.80      0.00      2.80
+    [warpSPH] - buildVerletList                                             100      91.6       0.0         1.2      2.80      0.00      5.60
+      [Verlet] SupportScheme.SuperSymmetric                                 100      91.6       0.0         1.2      2.80      0.00      5.60
+        [Verlet] Checking validity of prior neighborhood                    100      91.6      43.0         1.2      2.80      1.00      5.60
+          [Verlet] Rebuilding Invalid                                        30     162.0       2.0         4.0      6.00      0.00      3.60
+            warpNeighborSearch - radiusSearchCompactHashMap                  30     160.0      16.0         4.0      6.00      1.00      3.60
+              warpNeighborSearch - buildCompactHashMap                       30     131.0       0.0         2.0      4.00      0.00      2.40
+                neighborSearch - sortParticles                               30      66.0      66.0         1.0      2.00      2.00      1.20
+                neighborSearch - buildHashMap                                30       6.0       6.0         1.0      1.00      1.00      0.60
+                neighborSearch - buildCells                                  30      20.0      20.0         0.0      1.00      1.00      0.60
+                neighborSearch - buildHashTable                              30      15.0      15.0         0.0      0.00      0.00      0.00
+                neighborSearch - precomputeOffsets                           30      15.0      15.0         0.0      0.00      0.00      0.00
+                neighborSearch - sort cells                                  30       6.0       6.0         0.0      0.00      0.00      0.00
+                neighborSearch - preprocess                                  30       3.0       3.0         0.0      0.00      0.00      0.00
+              neighborSearch - allocate neighbors                            30      10.0      10.0         0.0      1.00      1.00      0.60
+              neighborSearch - count neighbors                               30       2.0       2.0         1.0      0.00      0.00      0.00
+              neighborSearch - collect neighbors                             30       1.0       1.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [acsph - 05] - step parameters and BDF coefficients            50      24.0      24.0         0.0      1.00      1.00      1.00
+  [warpSPH] - [acsph - 06] - forcing                                         50      12.0       8.0         0.0      1.00      1.00      1.00
+    [warpSPH] - computeGravity                                               50       3.0       3.0         0.0      0.00      0.00      0.00
+    [warpSPH] - computeForcing                                               50       1.0       1.0         0.0      0.00      0.00      0.00
+  [warpSPH] - [acsph - 08] - dual-time solver setup                          50       4.0       4.0         0.0      1.00      1.00      1.00
+  [warpSPH] - [acsph - 04] - surface detection                               50      69.0      12.0         6.0      0.00      0.00      0.00
+    [warpSPH] - (freesurface) - detectFreeSurface                           100      57.0       5.0         6.0      0.00      0.00      0.00
+      [warpSPH] - (freesurface) - computeNormals                            100      39.0      20.0         3.0      0.00      0.00      0.00
+        [warpSPH] - computeRenormalizationMatrices                          100      15.0       0.0         2.0      0.00      0.00      0.00
+          [warpSPH] - Renorm - Pseudo Inverse                               100       6.0       4.0         1.0      0.00      0.00      0.00
+          [warpSPH] - Renorm - Compute Covariance                           100       4.0       2.0         1.0      0.00      0.00      0.00
+            warpSPH[Covariance]                                             100       2.0       0.0         1.0      0.00      0.00      0.00
+              warpSPH[Covariance] - Kernel Execution                        100       2.0       0.0         1.0      0.00      0.00      0.00
+          [warpSPH] - Renorm - Covariance Postprocess                       100       5.0       5.0         0.0      0.00      0.00      0.00
+      [warpSPH] - (freesurface) - detectFreeSurface - dilation              100       5.0       3.0         1.0      0.00      0.00      0.00
+        warpSPH[dilateSurfaceMask]                                          100       2.0       0.0         1.0      0.00      0.00      0.00
+          warpSPH[dilateSurfaceMask] - Kernel Execution                     100       2.0       0.0         1.0      0.00      0.00      0.00
+      [warpSPH] - (freesurface) - detectFreeSurface - scheme                100       3.0       1.0         1.0      0.00      0.00      0.00
+        warpSPH[computeBarecascoSurfaceDetection]                           100       2.0       0.0         1.0      0.00      0.00      0.00
+          warpSPH[computeBarecascoSurfaceDetection] - Kernel Execution      100       2.0       0.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [acsph - 02] - boundary velocities                             50      65.9       0.0         2.0      0.00      0.00      0.00
+  [warpSPH] - [acsph - 11] - enforce updates                                 50       9.0       9.0         0.0      0.00      0.00      0.00
+  [warpSPH] - [acsph - 10] - build update                                    50       7.0       7.0         0.0      0.00      0.00      0.00
+[runner] case timestep hook                                                  51      23.0      23.0         0.0      9.00      9.00      9.18
+[runner] case diagnostics                                                    51     176.1     176.1         0.0      1.59      1.59      1.62
+[runner] max speed read (non-finite check, velocity alarm)                   51       5.0       5.0         0.0      1.00      1.00      1.02
+[runner] step timer (cuda synchronize)                                       50       0.0       0.0         0.0      1.00      1.00      1.00
+coverage: 100.0 % of 1063283 ops, 100.0 % of 45351 launches, 99.9 % of 1928 syncs inside a section (50 marked steps)
+  OUTSIDE any section: ops 1, launches 0, syncs 1
+    sync sites  : report.py:370 reportRun x1
+    top ops     : _local_scalar_dense x1
+
+call audit: 251819 section entries over 50 marked step(s)
+section                                          calls  ops/call     self launch/call sync/call sync/step replays
+[runner] integrator step                            50   21057.5     60.0       907.0     25.72     25.72       0
+[warpSPH] - [acsph - 09] - dual-time loop           50   20412.5      0.0       886.6     10.12     10.12       0
+[dualTime] eager iteration                        2111     483.1      0.0        21.0      0.07      3.00       0
+[dualTime] RK stage slopes (residual)             4222     173.6     99.6         8.0      0.04      3.00       0
+warpWrapper2 [WW2]                               45131       2.1      1.1         1.0      0.00      0.00       0
+SAWF.forward - launch                            45131       1.0      0.0         1.0      0.00      0.00       0
+warpSPH[Interpolation]                           21210       2.1      0.0         1.0      0.00      0.00       0
+warpSPH[Interpolation] - Kernel Execution        21210       2.1      0.0         1.0      0.00      0.00       0
+[warpSPH] - (mdbc) - computeBoundaryVelocities    4272      60.1     56.0         2.0      0.00      0.00       0
+[dualTime] stage-0 closures (BDF source, surfa    2111      53.0     30.0         5.0      0.00      0.00       0
+[runner] case timestep hook                         51      23.0     23.0         0.0      9.00      9.18       0
+warpSPH[computeWallMoment]                        6333       1.0      0.0         1.0      0.00      0.00       0
+[dualTime] stop test (host read at schedule ch    2111       0.3      0.3         0.0      0.14      6.12       0
+[warpSPH] - buildVerletList                        100      91.6      0.0         1.2      2.80      5.60       0
+[Verlet] SupportScheme.SuperSymmetric              100      91.6      0.0         1.2      2.80      5.60       0
+[Verlet] Checking validity of prior neighborho     100      91.6     43.0         1.2      2.80      5.60       0
+[warpSPH] - [acsph - 07] - contact masks and w      50      35.0     35.0         0.0      5.00      5.00       0
+[warpSPH] - (acsph) - computePressureSmoothing    2111      17.0      0.0         2.0      0.00      0.00       0
+warpSPH[Divergence]                               4322       5.0      0.0         1.0      0.00      0.00       0
+warpSPH[Divergence] - Kernel Execution            4322       5.0      2.0         1.0      0.00      0.00       0
+[warpSPH] - computePressureForceSurfaceAware      4222       2.0      0.0         1.0      0.00      0.00       0
+warpSPH[computePressureSurfaceAware]              4222       2.0      0.0         1.0      0.00      0.00       0
+warpSPH[computePressureSurfaceAware] - Kernel     4222       2.0      0.0         1.0      0.00      0.00       0
+[warpSPH] - (deltaSPH) - computeVelocityDiffus    4222       2.0      0.0         1.0      0.00      0.00       0
+warpSPH[computeVelocityDiffusion]                 4222       2.0      0.0         1.0      0.00      0.00       0
+  [runner] integrator step
+    top ops     : mul x2958.6, add x1378.6, view x1264.0, where x1247.8, div x1100.5, index x1071.3
+    top kernels : computeSPHInterpolation_KernelTiled x424.2, computeWallMoment_KernelTiled x126.7, computeSPHDivergenceTensor_KernelTiled x86.4, computePressureSurfaceAware_KernelTiled x84.4, computeVelocityDiffusionDeltaSPH_KernelTiled x84.4
+    sync sites  : dualTime.py:206 solve x306, build.py:104 buildVerletList_ x100, wallClosure.py:157 wallBounceSetup x100, residual.py:115 viscosityScalars x100, artificialCompressible.py:98 bdfCoefficients x50
+  [warpSPH] - [acsph - 09] - dual-time loop
+    top ops     : mul x2913.2, add x1351.0, where x1224.4, view x1224.4, div x1055.5, index x1055.5
+    top kernels : computeSPHInterpolation_KernelTiled x422.2, computeWallMoment_KernelTiled x126.7, computeSPHDivergenceTensor_KernelTiled x84.4, computePressureSurfaceAware_KernelTiled x84.4, computeVelocityDiffusionDeltaSPH_KernelTiled x84.4
+    sync sites  : dualTime.py:206 solve x306, residual.py:115 viscosityScalars x100, residual.py:113 viscosityScalars x50, dualTime.py:209 solve x50
+  [dualTime] eager iteration
+    top ops     : mul x69.0, add x32.0, where x29.0, view x29.0, div x25.0, index x25.0
+    top kernels : computeSPHInterpolation_KernelTiled x10.0, computeWallMoment_KernelTiled x3.0, computeSPHDivergenceTensor_KernelTiled x2.0, computePressureSurfaceAware_KernelTiled x2.0, computeVelocityDiffusionDeltaSPH_KernelTiled x2.0
+    sync sites  : residual.py:115 viscosityScalars x100, residual.py:113 viscosityScalars x50
+  [dualTime] RK stage slopes (residual)
+    top ops     : mul x21.0, view x13.0, where x12.0, add x10.5, div x10.0, index x9.0
+    top kernels : computeSPHInterpolation_KernelTiled x4.0, computeWallMoment_KernelTiled x1.0, computeSPHDivergenceTensor_KernelTiled x1.0, computePressureSurfaceAware_KernelTiled x1.0, computeVelocityDiffusionDeltaSPH_KernelTiled x1.0
+    sync sites  : residual.py:115 viscosityScalars x100, residual.py:113 viscosityScalars x50
+  warpWrapper2 [WW2]
+    top ops     : detach x1.1, zeros x1.0
+    top kernels : computeSPHInterpolation_KernelTiled x0.5, computeWallMoment_KernelTiled x0.1, computeSPHDivergenceTensor_KernelTiled x0.1, computePressureSurfaceAware_KernelTiled x0.1, computeVelocityDiffusionDeltaSPH_KernelTiled x0.1
+  SAWF.forward - launch
+    top ops     : zeros x1.0
+    top kernels : computeSPHInterpolation_KernelTiled x0.5, computeWallMoment_KernelTiled x0.1, computeSPHDivergenceTensor_KernelTiled x0.1, computePressureSurfaceAware_KernelTiled x0.1, computeVelocityDiffusionDeltaSPH_KernelTiled x0.1
+  warpSPH[Interpolation]
+    top ops     : detach x1.1, zeros x1.0
+    top kernels : computeSPHInterpolation_KernelTiled x1.0
+  warpSPH[Interpolation] - Kernel Execution
+    top ops     : detach x1.1, zeros x1.0
+    top kernels : computeSPHInterpolation_KernelTiled x1.0
+(outside any section)                                  ops 1, launches 0, syncs 1
+    sync sites  : report.py:370 reportRun x1
+
+worst 8 of the last 50 marked steps (by syncs, then ops):
+  step 9: up to 24410 ops / 34 syncs in one section
+      [runner] integrator step                           ops  24410  launches  1051  syncs   34
+      [warpSPH] - [acsph - 09] - dual-time loop          ops  23699  launches  1029  syncs   16
+      [dualTime] eager iteration                         ops  23673  launches  1029  syncs    3
+      [dualTime] RK stage slopes (residual)              ops  17010  launches   784  syncs    3
+  step 6: up to 14744 ops / 31 syncs in one section
+      [runner] integrator step                           ops  14744  launches   631  syncs   31
+      [warpSPH] - [acsph - 09] - dual-time loop          ops  14033  launches   609  syncs   13
+      [dualTime] eager iteration                         ops  14013  launches   609  syncs    3
+      [dualTime] RK stage slopes (residual)              ops  10070  launches   464  syncs    3
+  step 7: up to 21512 ops / 34 syncs in one section
+      [runner] integrator step                           ops  21512  launches   925  syncs   34
+      [warpSPH] - [acsph - 09] - dual-time loop          ops  20801  launches   903  syncs   16
+      [dualTime] eager iteration                         ops  20775  launches   903  syncs    3
+      [dualTime] RK stage slopes (residual)              ops  14928  launches   688  syncs    3
+  step 15: up to 14253 ops / 27 syncs in one section
+      [runner] integrator step                           ops  14253  launches   610  syncs   27
+      [warpSPH] - [acsph - 09] - dual-time loop          ops  13542  launches   588  syncs    9
+      [dualTime] eager iteration                         ops  13530  launches   588  syncs    3
+      [dualTime] RK stage slopes (residual)              ops   9723  launches   448  syncs    3
+  step 18: up to 13287 ops / 27 syncs in one section
+      [runner] integrator step                           ops  13287  launches   568  syncs   27
+      [warpSPH] - [acsph - 09] - dual-time loop          ops  12576  launches   546  syncs    9
+      [dualTime] eager iteration                         ops  12564  launches   546  syncs    3
+      [dualTime] RK stage slopes (residual)              ops   9029  launches   416  syncs    3
+  step 21: up to 12804 ops / 27 syncs in one section
+      [runner] integrator step                           ops  12804  launches   547  syncs   27
+      [warpSPH] - [acsph - 09] - dual-time loop          ops  12093  launches   525  syncs    9
+      [dualTime] eager iteration                         ops  12081  launches   525  syncs    3
+      [dualTime] RK stage slopes (residual)              ops   8682  launches   400  syncs    3
+  step 24: up to 12804 ops / 27 syncs in one section
+      [runner] integrator step                           ops  12804  launches   547  syncs   27
+      [warpSPH] - [acsph - 09] - dual-time loop          ops  12093  launches   525  syncs    9
+      [dualTime] eager iteration                         ops  12081  launches   525  syncs    3
+      [dualTime] RK stage slopes (residual)              ops   8682  launches   400  syncs    3
+  step 27: up to 12804 ops / 27 syncs in one section
+      [runner] integrator step                           ops  12804  launches   547  syncs   27
+      [warpSPH] - [acsph - 09] - dual-time loop          ops  12093  launches   525  syncs    9
+      [dualTime] eager iteration                         ops  12081  launches   525  syncs    3
+      [dualTime] RK stage slopes (residual)              ops   8682  launches   400  syncs    3

@@ -3,7 +3,7 @@ dense columns H1-H3 and light columns L1-L5, every 4 steps until t=0.25. Same pr
 import os, runpy, sys
 import numpy as np, torch
 sys.path.insert(0, 'src'); sys.path.insert(0, 'scripts')
-import warpSPH.schemes.crkSPH as crk, warpSPH.schemes.builder as builder, warpSPH.schemes as schemes
+import warpSPH.schemes.compressible.crkSPH as crk, warpSPH.schemes.builder as builder, warpSPH.schemes as schemes
 _orig = crk.crkSPH_step
 N = [0]; INIT = {}; ROWS = []
 def wrapped(system, dt, config, schemeConfig, verbose=False):

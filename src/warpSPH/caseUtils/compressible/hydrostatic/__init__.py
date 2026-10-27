@@ -1,4 +1,4 @@
-"""Hydrostatic-equilibrium IC builder, used by `warpSPH.cases.hydrostatic`."""
+"""Hydrostatic-equilibrium IC builder, used by `warpSPH.cases.compressible.hydrostatic`."""
 
 from .sample import *
 

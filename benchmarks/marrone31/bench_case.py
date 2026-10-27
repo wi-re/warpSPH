@@ -34,15 +34,17 @@ def worker(a):
     import warpSPH.cases  # noqa: F401
     from warpSPH.runner import run
     from warpSPH.runner.case import getCase
-    for mod in ('tgv', 'tgvWeaklyCompressible', 'greshoVortex', 'kelvinHelmholtz', 'sedov', 'sod',
-                'dambreak', 'noh', 'yeeVortex', 'triplePoint'):
+    for mod in ('periodic.tgv', 'periodic.tgvWeaklyCompressible', 'compressible.greshoVortex',
+                'compressible.kelvinHelmholtz', 'compressible.sedov', 'compressible.sod',
+                'freeSurface.dambreak', 'compressible.noh', 'compressible.yeeVortex',
+                'compressible.triplePoint'):
         try:
             importlib.import_module(f'warpSPH.cases.{mod}')
         except Exception:  # noqa: BLE001
             pass
     case = getCase(a.case)
     if a.schemeSet:
-        # dotted scheme-config overrides, e.g. solverConfig.divergenceFreeSolver.convergenceCheckSchedule=every
+        # dotted scheme-config overrides, e.g. dfsph.divergence.maxIterations=100
         prevCfg = case.configureScheme
 
         def cfg(ctx, _p=prevCfg):

@@ -1,28 +1,36 @@
 """State/system pair for the CompSPH scheme (Owen's compatible-energy
-compressible formulation, `schemes/compSPH.py` and, sharing this state,
-`schemes/crkSPH.py`/`schemes/deltaSPH.py`). Extends the base particle fields
+compressible formulation, `schemes/compressible/compSPH.py` and, sharing this state,
+`schemes/compressible/crkSPH.py`/`schemes/weaklyCompressible/deltaSPH.py`). Extends the base particle fields
 with internal energy as the integrated quantity plus EOS outputs
 (pressure/soundspeed/entropy/total energy), the CullenDehnen2010
 shock-detector state (`divergence`, `alpha0s`/`alphas`), and the pairwise
-accel/energy-partition arrays (`ap_ij`/`av_ij`/`f_ij`) `compSPH_deltaU_multistep`
-consumes to keep energy exchange compatible between neighbors. There is no
+accel/energy-partition arrays (`ap_ij`/`av_ij`/`f_ij`), which a stage hands to
+`modules/compSPH/pairWork` (cleared from the stage state afterwards) to keep energy exchange
+compatible between neighbors. There is no
 `CompSPHSystemUpdate` here -- callers build a `compressibleMonaghan.
 CompressibleSystemUpdate` instead (its commented-out draft below is dead).
 `CompSPHSystem.finalize` only runs the multistep energy correction when
 `schemeConfig.compatibleEnergy` is set.
 """
 
-from warpSPHIntegrators import *
+from warpSPH.configurations.compute import neighborSearchOptions
+
+from .identity import ParticleIdentityState
+from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state
+from warpSPHIntegrators.state.fields import update_component, update_position
 from dataclasses import dataclass
 import torch
 from typing import Optional
 from warpSPHCore import *
+from warpSPHCore.profiling import record_function
+from warpSPHCore import verletUsage, buildVerletList, SupportScheme
+from types import SimpleNamespace
 
 __all__ = ['CompSPHState', 'CompSPHSystem']
 
 
 @dataclass
-class CompSPHState(BaseState):
+class CompSPHState(ParticleIdentityState):
     positions : torch.Tensor = integrated('dxdt', tags=('position',))
     velocities: torch.Tensor = integrated('dvdt', tags=('velocity',))
     supports : torch.Tensor = constant(tags=('particle_support',))
@@ -35,6 +43,9 @@ class CompSPHState(BaseState):
     UIDcounter : int = constant(tags=('particle_UIDcounter',))
 
     internalEnergies : torch.Tensor = integrated('dudt', tags=('internalEnergy',))
+    crkMassDensities: Optional[torch.Tensor] = integrated('drhodt', tags=('crk_density',), default=None)
+    crkVolumes: Optional[torch.Tensor] = integrated('dVdt', tags=('crk_volume',), default=None)
+    crkQGradient: Optional[torch.Tensor] = constant(tags=('crk_Q_gradient',), default=None)
     totalEnergies : torch.Tensor = constant(tags=('energy',), default=None)
     entropies : torch.Tensor = constant(tags=('entropy',), default=None)
     pressures : torch.Tensor = constant(tags=('pressure',), default=None)
@@ -79,7 +90,10 @@ class CompSPHState(BaseState):
 #     dEdt: torch.Tensor = tagged(tags=('totalEnergy_derivative',))
 #     drhodt: torch.Tensor = tagged(tags=('density_derivative',))
 
-from ..modules.compSPH.multistep import compSPH_deltaU_multistep
+from ..modules.compSPH.pairWork import PairWork, RerunRequest, beginPairWork, energyIncrement, STAGE_ZERO_REBUILD_SLACK
+from ..modules.compSPH.supportGrid import (RADIUS_HEADROOM, SupportGrid, ensureSupportGrid, growIfOutgrown, pairListCapacity, pairListGridFactory,
+                                           rebuildNeeded, solvesOnGrid, takeListGridFlags)
+from ..utils.stepDecisions import StepDecision, recordingStepDecisions
 
 
 @dataclass
@@ -88,10 +102,42 @@ class CompSPHSystem(BaseIntegrationSystem):
     adjacency: Optional[AdjacencyList] = None
     domain: Optional[DomainDescription] = None
     t: float = 0.0
+    #: the step's running compatible-energy sum, shared (by reference) by the stage systems of one step
+    pairWork: Optional[PairWork] = None
+    #: the fixed-shape grid the support solve runs on (one per run; replaced when the supports outgrow its radius)
+    supportGrid: Optional[SupportGrid] = None
+    #: the grid the pair-list rebuilds search (fixed-shape, graph-replayed; one per run)
+    listGrid: Optional[SupportGrid] = None
+    #: set by `finalize` when the step has to be run again (the pair list changed between stages)
+    rerunRequest: Optional[torch.Tensor] = None
+
+    def initialize(self, dt, *args, stageWeights=None, rerun=None, **kwargs):
+        schemeConfig = kwargs.get('schemeConfig')
+        if getattr(schemeConfig, 'crkEvolution', 'summation') in ('spheral', 'paper') and rerun is None:
+            from ..modules.crk.evolution import prepareStep
+            prepareStep(self, kwargs['config'], schemeConfig)
+        elif getattr(schemeConfig, 'crkEvolution', 'summation') not in ('spheral', 'paper'):
+            self.state.crkMassDensities = self.state.crkVolumes = None
+        self.pairWork = beginPairWork(stageWeights, rerun)
+        if getattr(schemeConfig, 'crkViscosityGradient', 'current') == 'cached':
+            self.pairWork.crkQGradient = self.state.crkQGradient
+        if self.supportGrid is None:
+            self.supportGrid = SupportGrid()
+        if self.listGrid is None:
+            self.listGrid = SupportGrid()
+        self.rerunRequest = None
+        if recordingStepDecisions() is not None:
+            # a captured step reads only flags it computes itself: the ones left by earlier eager steps are not graph
+            # outputs (their memory is free once these references are gone)
+            self.supportGrid.pending, self.listGrid.pending = [], []
+        return super().initialize(dt, *args, **kwargs)
+
     def initializeNewState(self, *args, verbose=False, **kwargs):
         state = get_reference_state(self)
-        verbosePrint(verbose, f'Initializing new state [t={self.t}]')
-        return CompSPHSystem(state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain)
+        if verbose:   # self.t may be a device tensor: format it only when printing
+            print(f'Initializing new state [t={self.t}]')
+        return CompSPHSystem(state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain,
+                             pairWork=self.pairWork, supportGrid=self.supportGrid, listGrid=self.listGrid)
     
     def apply_position_update(self, update, spec: PositionUpdateSpec, **kwargs):
         return update_position(self, update, spec, 'position', 'position_derivative', 'velocity', 'velocity_derivative')
@@ -107,18 +153,81 @@ class CompSPHSystem(BaseIntegrationSystem):
 
     def apply_quantity_update(self, update, spec: ComponentUpdateSpec, **kwargs):
         updatedsystem = update_component(self, update, spec, 'internalEnergy', 'internalEnergy_derivative')
+        if self.state.crkMassDensities is not None:
+            from ..modules.crk.evolution import updateContinuityState
+            updateContinuityState(self, update, spec, kwargs['config'],kwargs.get('schemeConfig'))
         # updatedsystem = update_component(updatedsystem, update, spec, 'totalEnergy', 'totalEnergy_derivative')
         # updatedsystem = update_component(updatedsystem, update, spec, 'density', 'density_derivative')
         return updatedsystem
 
     def apply_state_update(self, update, spec: ComponentUpdateSpec, **kwargs):
         # Note: DO NOT advance self.t here. Time is managed by the integrator.
+        from ..modules.crk.energyControl import energyBeforeUpdate
+        energy = energyBeforeUpdate(self, update, spec, kwargs.get('schemeConfig'))
         position_spec = PositionUpdateSpec(derivative_dt=spec.derivative_dt, blend=spec.blend)
         self.apply_position_update(update, position_spec, **kwargs)
         self.apply_velocity_update(update, spec, **kwargs)
         self.apply_quantity_update(update, spec, **kwargs)
+        if energy is not None:
+            self.state.internalEnergies = energy
         return self
     
+    def captureAborted(self):
+        """A recording that failed leaves the flags its stages noted in the holders; their memory belongs to the graph that is gone."""
+        for holder in (self.supportGrid, self.listGrid):
+            if holder is not None:
+                holder.pending = []
+
+    def prepareCapture(self, config):
+        """Make the support grid the capture will read (sizing it reads the supports: not possible while recording)."""
+        if self.supportGrid is not None:
+            ensureSupportGrid(self.supportGrid, self.state, config)
+
+    def graphKey(self):
+        """What else a captured step is bound to: the grids whose static buffers it reads (a new grid is a recapture, as is a
+        pending request for a larger support grid, which the capture makes)."""
+        support, pairs = self.supportGrid, self.listGrid
+        return (id(support.build) if support else None, id(pairs.build) if pairs else None,
+                bool(support and support.radius < support.minRadius))
+
+    def _replayDecision(self, values, nInStep, nGrid, config, schemeConfig) -> StepDecision:
+        """What a graphed step does with the numbers `finalize` would have read (see `utils/stepDecisions.py`): the values
+        are [in-step flags..., list-grid-too-small flags..., a support-grid limit was binding, buffer usage]."""
+        listGrid, supportGrid = self.listGrid, self.supportGrid
+
+        def redo(host):
+            return any(host[:nInStep + nGrid])        # a stage ran on a pair list that was too short (or came from a too-small grid)
+
+        def apply(host, system):
+            if host[-2]:
+                supportGrid.minRadius = RADIUS_HEADROOM * supportGrid.radius        # the next capture makes the larger grid
+            if rebuildNeeded(listGrid, host[-1]):
+                rebuilt = SimpleNamespace(positions=system.state.positions, supports=system.state.supports)
+                for attempt in range(2):
+                    system.adjacency = buildVerletList(
+                        rebuilt,
+                        config.domain,
+                        verletScale=config.verletScale,
+                        supportMode=SupportScheme.SuperSymmetric,
+                        priorNeighborhood=system.adjacency,
+                        forceRebuild=True,
+                        capacity=pairListCapacity(schemeConfig),
+                        **neighborSearchOptions(config, gridFactory=pairListGridFactory(listGrid, rebuilt, config)))
+                    tooSmall = takeListGridFlags(listGrid)          # nothing replays the next step's finalize to read these
+                    if not tooSmall or not bool(torch.stack(tooSmall).any()):
+                        break
+                    listGrid.minRadius = 2.0 * listGrid.radius
+
+        def hostState():
+            saved = [(h, dict(vars(h))) for h in (listGrid, supportGrid)]
+
+            def restore():
+                for holder, attrs in saved:
+                    vars(holder).update(attrs)
+            return restore
+
+        return StepDecision(values=values, redo=redo, apply=apply, hostState=hostState)
+
     def finalize(self, initialState, dt, returnValues, updateValues, weights, config, schemeConfig, *args, **kwargs):
         self.adjacency = returnValues[-1][0]  # Assuming the adjacency list is the last return value from the derivative function
         # Copy the last substeps values into the current state to ensure the final state is correct
@@ -132,18 +241,49 @@ class CompSPHSystem(BaseIntegrationSystem):
         #         print(f'\ttype(item): {type(item)}')
 
         
-        if schemeConfig.compatibleEnergy:
-            delta_u = compSPH_deltaU_multistep(
-                dt,
-                initialState.state,
-                returnValues,
-                updateValues,
-                weights,
-                config,
-                schemeConfig,
-                # verbose = verbose
-            )
+        # Grid mode: ONE host read per step. The in-step flags (was the list long enough for every stage?) and the
+        # step-end flag (is it still long enough, with half the Verlet buffer to spare, for the NEXT step's stages?)
+        # come back together; a failing in-step flag repeats the step with the list validated at every stage, a failing
+        # step-end flag rebuilds the list now, so the next step starts on a list that needs no check.
+        rebuildForNextStep = False
+        recording = recordingStepDecisions()
+        if solvesOnGrid(schemeConfig) and self.pairWork is not None:
+            with record_function("[warpSPH] - [compSPH finalize - 00] list flags"):
+                usage = verletUsage(self.state.positions, lastState.supports, self.adjacency, config.domain, config.verletScale)
+                inStep = [f.to(usage.dtype) for f in (self.pairWork.flags or [])]
+                listGridTooSmall = [f.to(usage.dtype) for f in takeListGridFlags(self.listGrid)]   # the list came from a too-small grid
+                if recording is not None:
+                    # the step is being recorded into a CUDA graph: nothing is read here. The same numbers are read ONCE after
+                    # each replay, together with the step time (utils/stepDecisions.py), and acted on there
+                    outgrown = self.supportGrid.pending or []
+                    self.supportGrid.pending, self.supportGrid.age = [], 0
+                    anyOutgrown = torch.stack([f.to(usage.dtype) for f in outgrown]).max() if outgrown else torch.zeros_like(usage)
+                    recording.append(self._replayDecision(torch.stack(inStep + listGridTooSmall + [anyOutgrown, usage]),
+                                                          len(inStep), len(listGridTooSmall), config, schemeConfig))
+                    values = None
+                else:
+                    values = torch.stack(inStep + listGridTooSmall + [usage]).tolist()
+            if values is not None:
+                if any(values[:-1]):
+                    if any(values[len(inStep):-1]):
+                        self.listGrid.minRadius = 2.0 * self.listGrid.radius        # make a larger grid; rebuild from scratch
+                    self.rerunRequest = RerunRequest(halfVelocity=None, conservative=True, rebuildList=any(values[len(inStep):-1]))
+                    return self
+                rebuildForNextStep = rebuildNeeded(self.listGrid, values[-1])
+        from ..modules.crk.energyControl import enabled as controlledEnergy
+        if schemeConfig.compatibleEnergy and not controlledEnergy(schemeConfig):
+            with record_function("[warpSPH] - [compSPH finalize - 01] compatible energy"):
+                delta_u, rerun = energyIncrement(self.pairWork, initialState.state, updateValues, weights, dt)
+            if rerun is not None:
+                # the pair list changed between stages: the integrator repeats the step with this half-step velocity
+                self.rerunRequest = rerun
+                return self
             self.state.internalEnergies = initialState.state.internalEnergies + delta_u * dt
+        if self.supportGrid is not None and recording is None:
+            # Material contacts expose support-radius clipping. Graph replays
+            # grow on the first binding flag; use that same schedule eagerly
+            # so the two paths do not evolve with different clipped supports.
+            growIfOutgrown(self.supportGrid, immediate=schemeConfig.materials is not None)
 
         # solid wall rows (modules/compressibleWall): the state of the last stage, not an
         # integrated one -- their pair work went to the fluid (f_ij = 1), and their mass
@@ -153,7 +293,12 @@ class CompSPHSystem(BaseIntegrationSystem):
         self.state.masses.copy_(lastState.masses)
 
         self.state.supports.copy_(lastState.supports)
-        self.state.densities.copy_(lastState.densities)
+        if getattr(schemeConfig, 'crkViscosityGradient', 'current') == 'cached':
+            self.state.crkQGradient = lastState.crkQGradient
+        if self.state.crkMassDensities is None:
+            self.state.densities.copy_(lastState.densities)
+        else:
+            self.state.densities = self.state.crkMassDensities
 
         # Compressible system specific attributes (internal eneryg is integrated)
         self.state.totalEnergies.copy_(lastState.totalEnergies)
@@ -165,10 +310,25 @@ class CompSPHSystem(BaseIntegrationSystem):
         self.state.divergence.copy_(lastState.divergence)
         self.state.alpha0s.copy_(lastState.alpha0s)
         self.state.alphas.copy_(lastState.alphas)
+        if getattr(schemeConfig, 'materials', None) is not None:
+            from ..modules.eos import refreshEOS
+            refreshEOS(self.state, schemeConfig)
         from ..modules.shockCapturing.wrapper import advanceViscositySwitchStep  # (circular at import time)
         advanceViscositySwitchStep(self, initialState, returnValues, schemeConfig, config)
+
+        if rebuildForNextStep:
+            with record_function("[warpSPH] - [compSPH finalize - 02] list for the next step"):
+                rebuilt = SimpleNamespace(positions=self.state.positions, supports=self.state.supports)
+                self.adjacency = buildVerletList(
+                    rebuilt,
+                    config.domain,
+                    verletScale=config.verletScale,
+                    supportMode=SupportScheme.SuperSymmetric,
+                    priorNeighborhood=self.adjacency,
+                    forceRebuild=True,
+                    capacity=pairListCapacity(schemeConfig),
+                    **neighborSearchOptions(config, gridFactory=pairListGridFactory(self.listGrid, rebuilt, config)))
 
         updateValues[-1].dudt = (self.state.internalEnergies - initialState.state.internalEnergies) /dt
 
         return super().finalize(initialState, dt, returnValues, updateValues, weights, config, schemeConfig, *args, **kwargs)
-    

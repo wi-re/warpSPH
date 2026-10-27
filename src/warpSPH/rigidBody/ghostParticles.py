@@ -3,8 +3,8 @@
 fluid-facing interface into the fluid, appends the ghost particles to every
 per-particle array, and records each boundary particle's ghost index/offset
 (and the reverse, on the new ghost particle) on the returned state. Assumes one
-region per boundary material ID, assigned in region order starting at 0
-(`boundaryMaterial`); called once during initialization, from
+region per rigid-body ID, assigned in boundary-region order starting at 0
+(`boundaryBody`); called once during initialization, from
 `initializers/weaklyCompressible.py`.
 
 **Ghost placement is a pure function of the boundary geometry**, evaluated once
@@ -547,7 +547,9 @@ def addBoundaryGhostParticles(regions, particleState : Any):
     ghostIndices = particleState.positions.new_ones(particleState.positions.shape[0], dtype = torch.int64) * -1
     ghostOffsets = torch.zeros_like(particleState.positions)
     
-    boundaryMaterial = 0
+    from ..systems.identity import particleBodyIDs
+    bodyIDs = particleBodyIDs(particleState)
+    boundaryBody = 0
     numParticles = particleState.positions.shape[0]
     ghostPositions = []
     boundaryIndices = []
@@ -560,12 +562,12 @@ def addBoundaryGhostParticles(regions, particleState : Any):
     for region in regions:
         # print(f"Processing region {region} of type {region.type}")
         if region.type == RegionType.Boundary and getattr(region, 'representation', None) is not None:
-            boundaryMaterial += 1                      # an analytic boundary has no particles and no ghost layer; its material id is still taken
+            boundaryBody += 1                      # an analytic boundary has no particles and no ghost layer; its body id is still taken
             continue
         if region.type == RegionType.Boundary:
             particleIndices = torch.arange(particleState.positions.shape[0], device = device, dtype = torch.int64)
-            relevantParticles = torch.logical_and(particleState.kinds == 1, particleState.materials == boundaryMaterial)
-            # print('Boundary region', boundaryMaterial, 'has', torch.sum(relevantParticles).item(), 'fluid particles.')
+            relevantParticles = torch.logical_and(particleState.kinds == 1, bodyIDs == boundaryBody)
+            # print('Boundary region', boundaryBody, 'has', torch.sum(relevantParticles).item(), 'fluid particles.')
             relevantParticles = particleIndices[relevantParticles]
 
             dim = float(particleState.positions.shape[-1])
@@ -620,7 +622,7 @@ def addBoundaryGhostParticles(regions, particleState : Any):
             
             
             ghostPositions.append(particleState.positions[relevantParticles] - offsets)
-            boundaryMaterial += 1
+            boundaryBody += 1
 
             # print(f"Added {offsets.shape[0]} ghost particles for boundary region {region}.")
             
@@ -638,6 +640,10 @@ def addBoundaryGhostParticles(regions, particleState : Any):
         
         kinds = torch.cat([particleState.kinds, torch.ones_like(boundaryIndices).to(particleState.kinds.dtype) * 2], dim = 0),
         materials = torch.cat([particleState.materials, particleState.materials[boundaryIndices]], dim = 0),
+        emitters = (torch.cat([particleState.emitters, particleState.emitters[boundaryIndices]])
+                    if particleState.emitters is not None else None),
+        bodyIDs = (torch.cat([particleState.bodyIDs, particleState.bodyIDs[boundaryIndices]])
+                   if particleState.bodyIDs is not None else None),
         UIDs = torch.cat([particleState.UIDs, -particleState.UIDs[boundaryIndices]], dim = 0),
         
         ghostIndices = torch.cat([ghostIndices, boundaryIndices], dim = 0),

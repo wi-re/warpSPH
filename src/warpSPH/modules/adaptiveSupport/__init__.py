@@ -6,6 +6,7 @@ on the density-support constraint) schemes on
 """
 
 from .optimalSupport import evaluateOptimalSupport
+from .stage import solveStageSupport
 from .wp_omega import computeOmegaWarp as computeOmega
 
-__all__ = ['evaluateOptimalSupport', 'computeOmega']
+__all__ = ['evaluateOptimalSupport', 'solveStageSupport', 'computeOmega']

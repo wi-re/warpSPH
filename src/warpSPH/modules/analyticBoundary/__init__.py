@@ -7,7 +7,9 @@ and, in the later patches, the detector, the shifting and the no-penetration imp
 """
 from .noPenetration import analyticNoPenShift
 from .shifting import wallShiftRaw, kernelAtSpacing, wallUChar, wallConcentrationGradient
+from .latticeCalibration import latticeCalibration, wallIntegral
 from .detector import detectFreeSurfaceAnalytic, sym2LamPinv
-from .wallTerms import (WallState, evaluateWall, wallContinuity, wallPressureAcceleration, wallViscousAcceleration, viscousPrefactor, wallLoads)
+from .wallPressureMLS import MLSPressureFit, buildMLSPressureFit
+from .wallTerms import (WallState, evaluateWall, resolveWall, wallDensity, wallDivergence, wallAlphaCorrection, wallPressureAccelerationOmni, wallContinuity, wallPressureAcceleration, wallViscousAcceleration, viscousPrefactor, wallLoads)
 
-__all__ = ['analyticNoPenShift', 'wallShiftRaw', 'kernelAtSpacing', 'wallUChar', 'wallConcentrationGradient', 'detectFreeSurfaceAnalytic', 'sym2LamPinv', 'WallState', 'evaluateWall', 'wallContinuity', 'wallPressureAcceleration', 'wallViscousAcceleration', 'viscousPrefactor', 'wallLoads']
+__all__ = ['MLSPressureFit', 'buildMLSPressureFit', 'latticeCalibration', 'wallIntegral', 'analyticNoPenShift', 'wallShiftRaw', 'kernelAtSpacing', 'wallUChar', 'wallConcentrationGradient', 'detectFreeSurfaceAnalytic', 'sym2LamPinv', 'WallState', 'evaluateWall', 'resolveWall', 'wallDensity', 'wallDivergence', 'wallAlphaCorrection', 'wallPressureAccelerationOmni', 'wallContinuity', 'wallPressureAcceleration', 'wallViscousAcceleration', 'viscousPrefactor', 'wallLoads']

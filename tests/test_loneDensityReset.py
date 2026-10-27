@@ -36,7 +36,7 @@ def test_loneResetIsANoOpWithoutLoneParticles(runtime):
     """A resting delta-SPH column has no lone particle: the flag must leave
     the run bit-identical."""
     from warpSPH.runner import run
-    from warpSPH.cases.hydrostaticColumn import hydrostaticColumnCase as base
+    from warpSPH.cases.boundaries.hydrostaticColumn import hydrostaticColumnCase as base
 
     def withFlag(flag):
         def configureScheme(ctx):
@@ -59,7 +59,7 @@ def test_oneSidedHydrostaticOnlyEverRaisesTheWallDensity(runtime):
     side-wall ghosts sit slightly off level, so a few side-wall increments are
     small negatives even in an open column."""
     from warpSPH.runner import run
-    from warpSPH.cases.hydrostaticColumn import hydrostaticColumnCase as base
+    from warpSPH.cases.boundaries.hydrostaticColumn import hydrostaticColumnCase as base
     from warpSPH.modules.mdbc.english2025 import computeMdbcDensityEnglish2025
     r = run(base, scheme='deltaSPH', nx=16, nSteps=1, progress=False, plot=False,
             store=False, quiet=True)

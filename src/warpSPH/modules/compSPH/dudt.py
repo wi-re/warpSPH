@@ -2,9 +2,14 @@
 
 Computes the rate of change of specific internal energy from pressure work
 and Monaghan-type artificial-viscosity dissipation, summed over neighbors.
-Uses the same one-sided kernel gradient, gradient-renormalization, and
-grad-h/CRK correction options as `accel.py`, so the two must be kept in sync.
+The production wrapper uses the gather gradient here, while `accel.py` averages
+the two support gradients in its force. At unequal supports this predictor
+does not generally balance instantaneous force power; do not treat it as a
+standalone conservative energy rate. The separate final compatible update
+balances the actual pair accelerations. See the fixed-pair heating audit.
 """
+
+from warpSPHCore.type_config import index_t, offset_t
 
 import warp as wp
 from warp.types import vector, matrix
@@ -38,9 +43,9 @@ def computeCompSPHdudt_Func_i(
     # Operation specific parameters
      # type: ignore
             
-    beginIndex: wp.int32, # type: ignore
+    beginIndex: offset_t, # type: ignore
     numIndices: wp.int32, # type: ignore
-    offsetArray: wp.array(dtype = wp.int64), # type: ignore
+    offsetArray: wp.array(dtype = index_t), # type: ignore
 
     # Operation Mode for masking certain kinds of interactions, e.g. for directional operations
     ki : wp.int32, referenceKinds : wp.array(dtype = wp.int32), # type: ignore
@@ -71,7 +76,7 @@ def computeCompSPHdudt_Func_i(
     out = scalar_t(0.0)
     # # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j  = wp.int32(offsetArray[jj])
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
             if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
@@ -151,7 +156,7 @@ def computeCompSPHdudt_Func_i(
 
 @wp.func
 def computeCompSPHdudt_Func_Adjacency(
-    i : wp.int32, dim: wp.int32, 
+    i : wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32,
 
     queryState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
     referenceState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
@@ -191,20 +196,25 @@ def computeCompSPHdudt_Func_Adjacency(
 
     out = zero_like_warp(dudt)
     for o in range(numOffsets):
-        beginIndex = wp.int32(0)
+        # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
+        if not useAdjacency and (o % lanes) != lane:
+            continue
+        beginIndex = offset_t(0)
         numIndices = wp.int32(0)
         if useAdjacency:    
             beginIndex = adjacencyState.neighborOffsets[i]
             numIndices = adjacencyState.numNeighbors[i]
         else:
-            beginIndex, numIndices = checkOffset(
+            gridBegin, numIndices = checkOffset(
                 i, queryState.positions, gridState.numCells, gridState.D, 
                 o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
                 domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
             )
+            beginIndex = offset_t(gridBegin)
             if beginIndex < 0:
                 continue
         
+        beginIndex, numIndices = laneSlice(beginIndex, numIndices, lane, lanes, useAdjacency)
         out += computeCompSPHdudt_Func_i(
             i, dim, 
             xi, hi, mi, rhoi,
@@ -255,7 +265,7 @@ def computeCompSPHdudt_Kernel(
         return
 
     out_dudt[i] = computeCompSPHdudt_Func_Adjacency(
-        i, domainState.dim, 
+        i, domainState.dim, 0, 1, 
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,  #queryKinds, referenceKinds,
@@ -269,12 +279,55 @@ def computeCompSPHdudt_Kernel(
         out_dudt
     )
 
+
+@wp.kernel
+def computeCompSPHdudt_KernelTiled(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+    
+    kernelProperties: kernelState,
+    # Do not change the parameters above
+    queryVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
+    queryEnergies: wp.array(dtype = scalar_t), referenceEnergies: wp.array(dtype = scalar_t), # type: ignore
+    individual_cs: wp.bool, queryCs: wp.array(dtype = scalar_t), referenceCs: wp.array(dtype = scalar_t), # type: ignore
+    viscositySwitch: wp.bool, queryAlphas: wp.array(dtype = scalar_t), referenceAlphas: wp.array(dtype = scalar_t), # type: ignore
+    explicitPressure: wp.bool, queryPressures: wp.array(dtype = scalar_t), referencePressures: wp.array(dtype = scalar_t), # type: ignore
+    viscosityParams: DiffusionParameters,
+    # The last parameter is always the output array and should not be changed
+    out_dudt : wp.array(dtype = Any), # type: ignore
+):
+    # Multi-lane variant of computeCompSPHdudt_Kernel (warpSPHCore autograd/lanes.py):
+    # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
+    i, lane = wp.tid()
+    partial = computeCompSPHdudt_Func_Adjacency(
+        i, domainState.dim, lane, wp.block_dim(), 
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,  #queryKinds, referenceKinds,
+        # The parameters above are default parameters and shold not be changed
+        queryVelocities, referenceVelocities,
+        queryEnergies, referenceEnergies,
+        individual_cs, queryCs, referenceCs,
+        viscositySwitch, queryAlphas, referenceAlphas,
+        explicitPressure, queryPressures, referencePressures,
+        viscosityParams,
+        out_dudt
+    )
+    total = laneSum(partial)
+    if lane == 0:
+        out_dudt[i] = total
+
 def _compSPHdudtDtype(ctx, extras):
     return castTorchToWarpAsBuiltins(ctx.query.densities).dtype
 
 
 _COMPSPH_DUDT = OperatorSpec(
     kernel=computeCompSPHdudt_Kernel,
+    tiledKernel=computeCompSPHdudt_KernelTiled,
     outputs=(OutputSpec(dtype=_compSPHdudtDtype, shape=ShapeOf.QUERY),),
     extras=(
         ExtraSpec("queryVelocities", ExtraKind.TENSOR),

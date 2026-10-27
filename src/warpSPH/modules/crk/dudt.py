@@ -6,7 +6,15 @@ pressure/pseudo-viscosity terms, deliberately kept algebraically parallel to
 limiters, same one-sided kernel gradients) so the energy and momentum updates
 stay mutually consistent -- comments in the kernel gradient calls flag where
 this must match `accel.py`.
+
+This is the interim thermal predictor. Default viscous work uses the mean
+of Q_i and Q_j; `oneSidedWork` selects the neighbour Q_j of paper Eq.78 and
+native Spheral. Both shares balance the instantaneous force pair power, but
+neither provides exact finite-step conservation by itself. Final compatible
+work is computed separately in `compSPH/pairWork.py` or the opt-in controls.
 """
+
+from warpSPHCore.type_config import index_t, offset_t
 
 import warp as wp
 from warp.types import vector, matrix
@@ -44,9 +52,9 @@ def computeCrkSPHdudt_Func_i(
     # Operation specific parameters
      # type: ignore
             
-    beginIndex: wp.int32, # type: ignore
+    beginIndex: offset_t, # type: ignore
     numIndices: wp.int32, # type: ignore
-    offsetArray: wp.array(dtype = wp.int64), # type: ignore
+    offsetArray: wp.array(dtype = index_t), # type: ignore
 
     # Operation Mode for masking certain kinds of interactions, e.g. for directional operations
     ki : wp.int32, referenceKinds : wp.array(dtype = wp.int32), # type: ignore
@@ -81,7 +89,7 @@ def computeCrkSPHdudt_Func_i(
     out = scalar_t(0.0)
     # # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j  = wp.int32(offsetArray[jj])
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
             if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
@@ -141,9 +149,9 @@ def computeCrkSPHdudt_Func_i(
         # `Frontiere2017` term of `modules/dissipation/pi/terms.py`
         alpha_j = access_optional(referenceAlphas, j, viscositySwitch, scalar_t(1.0))
         Q_i = computeFrontiereQ(xi, xj, hi, hj, rhoi, rhoj, vij_dot, domainState, kernelProperties.kernelFunction,
-                                cs_i, cs_j, alpha_i, alpha_j, viscosityParams, False)
+                                cs_i, cs_j, alpha_i, alpha_j, viscosityParams, False, crkViscosityParams.viscosityKernelScale)
         Q_j = computeFrontiereQ(xi, xj, hi, hj, rhoi, rhoj, vij_dot, domainState, kernelProperties.kernelFunction,
-                                cs_i, cs_j, alpha_i, alpha_j, viscosityParams, True)
+                                cs_i, cs_j, alpha_i, alpha_j, viscosityParams, True, crkViscosityParams.viscosityKernelScale)
 
         # gradw_ij = 0.5*(gradw_i - gradw_j) mirrors accel.py's 0.5*(gradw_i + (-gradw_j))
         # same deltagrad as the force — required for energy-momentum consistency
@@ -175,6 +183,8 @@ def computeCrkSPHdudt_Func_i(
             pairWeight = scalar_t(0.25) * (Vi + Vj) * (Vi + Vj)
         pTerm = Pj * dot * pairWeight / mi
         vTerm = scalar_t(1.0/2.0) * (Q_i + Q_j) * mu_ij * dot * pairWeight / mi
+        if crkViscosityParams.oneSidedWork:
+            vTerm = Q_j * mu_ij * dot * pairWeight / mi
 
         # apparentVolume = mj/rhoj
         # pTerm = - apparentVolume * pressureTerm_i * rhoj * dot
@@ -233,17 +243,18 @@ def computeCrkSPHdudt_Func_Adjacency(
         # grid traversal: lanes take whole cells round-robin (no-op for lanes == 1)
         if not useAdjacency and (o % lanes) != lane:
             continue
-        beginIndex = wp.int32(0)
+        beginIndex = offset_t(0)
         numIndices = wp.int32(0)
         if useAdjacency:    
             beginIndex = adjacencyState.neighborOffsets[i]
             numIndices = adjacencyState.numNeighbors[i]
         else:
-            beginIndex, numIndices = checkOffset(
+            gridBegin, numIndices = checkOffset(
                 i, queryState.positions, gridState.numCells, gridState.D, 
                 o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
                 domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
             )
+            beginIndex = offset_t(gridBegin)
             if beginIndex < 0:
                 continue
         

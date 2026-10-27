@@ -31,7 +31,7 @@ bootstrap(precision='float32')
 
 import torch
 
-from warpSPH.cases.kolmogorov import kolmogorovCase as case
+from warpSPH.cases.periodic.kolmogorov import kolmogorovCase as case
 from warpSPH.runner import run
 
 

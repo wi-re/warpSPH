@@ -69,7 +69,7 @@ def test_balsara_limits():
 # --- wiring through the scheme: each switch runs, engages at the shock, and stays low in shear --
 
 def _sod(switch, nSteps=200, **params):
-    return run(__import__('warpSPH.cases.sod', fromlist=['sodCase']).sodCase, scheme='Monaghan',
+    return run(__import__('warpSPH.cases.compressible.sod', fromlist=['sodCase']).sodCase, scheme='Monaghan',
                nx=100, nSteps=nSteps, progress=False, quiet=True,
                params=dict(_SOD, viscositySwitch=switch, **params))
 
@@ -115,7 +115,7 @@ def test_limiter_switches_are_high_in_compression_and_low_in_shear(switch):
     assert 0.0 <= a.min() and a.max() <= 1.0 + 1e-6
     assert a.max() > 0.8, 'no compressive region found in Sod'
 
-    from warpSPH.cases.greshoVortex import greshoVortexCase
+    from warpSPH.cases.compressible.greshoVortex import greshoVortexCase
     gresho = run(greshoVortexCase, scheme='Monaghan', nx=32, nSteps=40, progress=False, quiet=True,
                  params=dict(viscositySwitch=switch))
     g = gresho.state.state.alphas.detach().cpu()

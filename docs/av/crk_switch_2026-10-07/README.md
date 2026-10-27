@@ -3,7 +3,7 @@
 Two defects hid each other (AV_PLAN Phase 1 clean-up, items 2-3), both fixed the same day:
 
 1. CRK's one-sided `Q_i`, `Q_j` (Frontiere et al. 2017 Eq. 69) used raw `C_l`, `C_q`: the switched alpha and `BetaMode` never reached the viscosity.
-2. `schemes/crkSPH.py` never wrote the switch's `alpha0s` back (the `updateViscositySwitch` call had been deleted in S2), so under C&D alpha stayed
+2. `schemes/compressible/crkSPH.py` never wrote the switch's `alpha0s` back (the `updateViscositySwitch` call had been deleted in S2), so under C&D alpha stayed
    at ~0.97-0.98 (initial 1, decayed one step per step).
 
 `report_crkCullenDehnen2010_before_alpha0s_fix.md` is the state after fix 1 only: C&D alphaMean 0.97-0.98, metrics ~ `crkNone`.

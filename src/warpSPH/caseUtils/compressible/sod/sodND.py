@@ -76,6 +76,8 @@ not). `tests/test_physics.py` checks the agreement and this difference.
 
 from __future__ import annotations
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 import math
 from typing import NamedTuple
 
@@ -283,10 +285,10 @@ def buildSodND(
         (_lattice(lightX, transverse, lightNt, dim, device, dtype), 1),
     ]
     positions = torch.cat([block for block, _ in blocks], dim=0)
-    materials = torch.cat([torch.full((block.shape[0],), tag, dtype=torch.int32, device=device)
+    emitters = torch.cat([torch.full((block.shape[0],), tag, dtype=torch.int32, device=device)
                            for block, tag in blocks], dim=0)
 
-    isDense = materials == 0
+    isDense = emitters == 0
     masses = torch.where(isDense, denseMass, lightMass).to(dtype)
     densities = torch.where(isDense, leftState.rho, rightState.rho).to(dtype)
     velocities = torch.zeros_like(positions)
@@ -308,8 +310,9 @@ def buildSodND(
         masses=masses,
         densities=densities,
 
-        kinds=torch.zeros_like(materials),
-        materials=materials,
+        kinds=torch.zeros_like(emitters),
+        materials=torch.zeros_like(emitters),
+        emitters=emitters,
         UIDs=UIDs,
         UIDcounter=UIDs.max() + 1,
 
@@ -363,8 +366,12 @@ def buildSodND(
     particleState.soundspeeds = c_s
     particleState.entropies = A_
 
-    adjacency = buildVerletList(particleState, domain=config.domain,
-                                verletScale=2 ** (1 / dim), supportMode=config.supportMode)
+    adjacency = buildVerletList(
+        particleState,
+        domain=config.domain,
+        verletScale=2 ** (1 / dim),
+        supportMode=config.supportMode,
+        **neighborSearchOptions(config))
     system = SimulationSystem(state=particleState, adjacency=adjacency, domain=config.domain)
 
     config.dx = denseDx

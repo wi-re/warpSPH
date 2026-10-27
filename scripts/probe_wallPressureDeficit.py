@@ -18,7 +18,7 @@ import argparse
 
 import torch
 
-from warpSPH.cases.shockReflection import shockReflectionCase
+from warpSPH.cases.compressibleWalls.shockReflection import shockReflectionCase
 from warpSPH.runner import run
 
 

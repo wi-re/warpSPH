@@ -4,7 +4,7 @@ sys.path.insert(0, '/home/lu26029/dev/warpSPH/examples/weaklyCompressible')
 from warpSPHBootstrap import bootstrap
 bootstrap(precision='float32')
 
-from warpSPH.cases.dambreak import dambreakCase
+from warpSPH.cases.freeSurface.dambreak import dambreakCase
 from warpSPH.runner import caseMain
 
 args = [

@@ -42,7 +42,7 @@ bootstrap(precision='float32')
 
 import numpy as np
 
-from warpSPH.cases.sloshingTank import sloshingTankCase as case
+from warpSPH.cases.freeSurface.sloshingTank import sloshingTankCase as case
 from warpSPH.runner import run
 from warpSPH.configurations.moduleConfigurations.shifting import ShiftingProjectionScheme, ShiftingScheme
 

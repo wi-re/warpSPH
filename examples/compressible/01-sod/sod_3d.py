@@ -29,7 +29,7 @@ from warpSPHBootstrap import bootstrap
 
 bootstrap(precision='float32')
 
-from warpSPH.cases.sodND import sod3dCase        # noqa: E402
+from warpSPH.cases.compressible.sodND import sod3dCase        # noqa: E402
 from warpSPH.runner import caseMain              # noqa: E402
 
 PRESET = ['--plot', '--video', '--store', '--storeMode', 'trajectory', '--exportInterval', '0.005']

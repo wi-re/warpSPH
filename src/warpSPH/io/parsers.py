@@ -1,7 +1,7 @@
 """String -> enum parsers for CLI/config values."""
 
 from ..enumTypes import *
-from warpSPHIntegrators.integration import IntegrationSchemeType
+from warpSPHIntegrators.schemes import IntegrationSchemeType
 
 
 def parseKernelFunctions(kernelName):

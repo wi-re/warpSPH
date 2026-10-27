@@ -1,0 +1,33 @@
+"""Known IISPH wall acceleration from hydrostatic pressure extrapolation."""
+
+import torch
+from warpSPHCore import OperationProperties
+from .wp_sampledGravity import computeIISPHSampledGravityWarp
+
+
+def computeIISPHBoundaryPressureAcceleration(state, config, adjacency,
+                                            restVolumes, wallGradient,
+                                            boundaryIntegrals, contactPoints, gravity, *,
+                                            contactGravity=True, massFactor=1.0):
+    """Integrate the gravity extension of q_solid = q_contact + g·(x_solid-contact).
+
+    q is pressure divided by rest density. The contact-pressure unknown is
+    handled by the linear pressure operator, independently of this known
+    acceleration. Analytic integrals remain raw until used in this equation.
+    """
+    acceleration = torch.zeros_like(state.positions)
+    if contactPoints is None or gravity is None or not contactGravity:
+        return acceleration
+    if boundaryIntegrals is None:
+        return computeIISPHSampledGravityWarp(state, OperationProperties(kernel=config.kernel),
+            config.domain, adjacency=adjacency,
+            restVolumes=restVolumes, contactPoints=contactPoints, gravity=gravity)
+
+    # The provider calls this Cov: M_ab = integral_solid
+    # (x_solid - x_i)_a * (grad_i W)_b dV, a first gradient moment.
+    # It is not a statistical covariance. Summation combines the solid bodies;
+    # analyticWallMass converts their geometric volume to calibrated rest volume.
+    firstGradientMoment = massFactor * boundaryIntegrals.out['Cov'].sum(0).to(state.positions)
+    acceleration = (-torch.einsum('na,nab->nb', gravity, firstGradientMoment)
+        - ((state.positions-contactPoints)*gravity).sum(-1, keepdim=True)*wallGradient)
+    return torch.where((state.kinds == 0)[:, None], acceleration, 0)

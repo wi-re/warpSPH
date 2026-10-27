@@ -1,0 +1,118 @@
+section (tree, inclusive unless "self")                                   calls  ops/call  self ops launch/call sync/call self sync sync/step
+[runner] case timestep hook                                                  31     319.7      89.7         6.0      9.00      3.00      9.30
+  warpNeighborSearch - radiusSearchCompactHashMap                            31     226.0      48.0         4.0      6.00      1.00      6.20
+    warpNeighborSearch - buildCompactHashMap                                 31     163.0       0.0         2.0      4.00      0.00      4.13
+      neighborSearch - sortParticles                                         31      98.0      98.0         1.0      2.00      2.00      2.07
+      neighborSearch - buildHashMap                                          31       6.0       6.0         1.0      1.00      1.00      1.03
+      neighborSearch - buildCells                                            31      20.0      20.0         0.0      1.00      1.00      1.03
+      neighborSearch - buildHashTable                                        31      15.0      15.0         0.0      0.00      0.00      0.00
+      neighborSearch - precomputeOffsets                                     31      15.0      15.0         0.0      0.00      0.00      0.00
+      neighborSearch - sort cells                                            31       6.0       6.0         0.0      0.00      0.00      0.00
+      neighborSearch - preprocess                                            31       3.0       3.0         0.0      0.00      0.00      0.00
+    neighborSearch - allocate neighbors                                      31      12.0      12.0         0.0      1.00      1.00      1.03
+    neighborSearch - count neighbors                                         31       2.0       2.0         1.0      0.00      0.00      0.00
+    neighborSearch - collect neighbors                                       31       1.0       1.0         1.0      0.00      0.00      0.00
+[runner] integrator step                                                     30     159.0     150.0         3.0      4.00      4.00      4.00
+  launch_kernel - allocate_output                                           394       1.0       1.0         0.0      0.00      0.00      0.00
+[runner] case diagnostics                                                    31      44.0      44.0         0.0      1.00      1.00      1.03
+[runner] read time + max speed (non-finite check, velocity alarm)            31       5.0       5.0         0.0      1.00      1.00      1.03
+[runner] step timer (cuda synchronize)                                       30       0.0       0.0         0.0      1.00      1.00      1.00
+coverage: 100.0 % of 16201 ops, 100.0 % of 276 launches, 99.8 % of 492 syncs inside a section (30 marked steps)
+  OUTSIDE any section: ops 1, launches 0, syncs 1
+    sync sites  : report.py:370 reportRun x1
+    top ops     : _local_scalar_dense x1
+
+call audit: 919 section entries over 30 marked step(s)
+section                                          calls  ops/call     self launch/call sync/call sync/step replays
+[runner] case timestep hook                         31     319.7     89.7         6.0      9.00      9.30       0
+warpNeighborSearch - radiusSearchCompactHashMa      31     226.0     48.0         4.0      6.00      6.20       0
+warpNeighborSearch - buildCompactHashMap            31     163.0      0.0         2.0      4.00      4.13       0
+[runner] integrator step                            30     159.0    150.0         3.0      4.00      4.00       0
+neighborSearch - sortParticles                      31      98.0     98.0         1.0      2.00      2.07       0
+neighborSearch - buildHashMap                       31       6.0      6.0         1.0      1.00      1.03       0
+[runner] case diagnostics                           31      44.0     44.0         0.0      1.00      1.03       0
+neighborSearch - buildCells                         31      20.0     20.0         0.0      1.00      1.03       0
+neighborSearch - allocate neighbors                 31      12.0     12.0         0.0      1.00      1.03       0
+[runner] read time + max speed (non-finite che      31       5.0      5.0         0.0      1.00      1.03       0
+[runner] step timer (cuda synchronize)              30       0.0      0.0         0.0      1.00      1.00       0
+neighborSearch - count neighbors                    31       2.0      2.0         1.0      0.00      0.00       0
+neighborSearch - collect neighbors                  31       1.0      1.0         1.0      0.00      0.00       0
+neighborSearch - buildHashTable                     31      15.0     15.0         0.0      0.00      0.00       0
+neighborSearch - precomputeOffsets                  31      15.0     15.0         0.0      0.00      0.00       0
+launch_kernel - allocate_output                    394       1.0      1.0         0.0      0.00      0.00       0
+neighborSearch - sort cells                         31       6.0      6.0         0.0      0.00      0.00       0
+neighborSearch - preprocess                         31       3.0      3.0         0.0      0.00      0.00       0
+  [runner] case timestep hook
+    top ops     : select x39.0, sub x24.0, detach x21.0, _to_copy x18.0, div x17.0, zeros x16.0
+    top kernels : indexCells x1.0, hashCells x1.0, radiusSearchCountNeighborsCompactHashMap x1.0, radiusSearchCollectCompactHashMap x1.0, mfmMoments_Kernel x1.0
+    sync sites  : buildHashmap.py:46 buildCompactHashMap x31, buildHashmap.py:57 buildCompactHashMap x31, buildHashmap.py:67 buildCompactHashMap x31, buildHashmap.py:122 buildCompactHashMap x31, search.py:42 radiusSearchOnCompactHashMap x31
+  warpNeighborSearch - radiusSearchCompactHashMap
+    top ops     : select x37.0, sub x23.0, _to_copy x17.0, remainder x10.0, div x10.0, zeros x10.0
+    top kernels : indexCells x1.0, hashCells x1.0, radiusSearchCountNeighborsCompactHashMap x1.0, radiusSearchCollectCompactHashMap x1.0
+    sync sites  : buildHashmap.py:46 buildCompactHashMap x31, buildHashmap.py:57 buildCompactHashMap x31, buildHashmap.py:67 buildCompactHashMap x31, buildHashmap.py:122 buildCompactHashMap x31, search.py:42 radiusSearchOnCompactHashMap x31
+  warpNeighborSearch - buildCompactHashMap
+    top ops     : select x21.0, _to_copy x15.0, sub x15.0, div x10.0, index x8.0, remainder x6.0
+    top kernels : indexCells x1.0, hashCells x1.0
+    sync sites  : buildHashmap.py:46 buildCompactHashMap x31, buildHashmap.py:57 buildCompactHashMap x31, buildHashmap.py:67 buildCompactHashMap x31, buildHashmap.py:122 buildCompactHashMap x31
+  [runner] integrator step
+    top ops     : clone x30.0, detach x25.0, mul x14.0, zeros x9.0, copy_ x9.0, div x8.0
+    top kernels : mfmGradients_Kernel x1.0, mfmLimiter_Kernel x1.0, mfmFlux_Kernel x1.0
+    sync sites  : meshless.py:112 _takeGeometry x60, launcher.py:106 _launchMaybeTiled x30, util.py:334 hostTime x30
+  neighborSearch - sortParticles
+    top ops     : select x16.0, sub x15.0, div x8.0, _to_copy x7.0, add x5.0, transpose x4.0
+    top kernels : indexCells x1.0
+    sync sites  : buildHashmap.py:46 buildCompactHashMap x31, buildHashmap.py:57 buildCompactHashMap x31
+  neighborSearch - buildHashMap
+    top ops     : index x2.0, zeros x1.0, sort x1.0, unique_consecutive x1.0, _to_copy x1.0
+    top kernels : hashCells x1.0
+    sync sites  : buildHashmap.py:122 buildCompactHashMap x31
+  [runner] case diagnostics
+    top ops     : mul x9.0, detach x8.0, view x8.0, sum x4.0, select x4.0, pow x2.0
+    sync sites  : common.py:162 compressibleDiagnostics x31
+  neighborSearch - buildCells
+    top ops     : _to_copy x4.0, zeros x2.0, remainder x2.0, select x2.0, copy_ x2.0, div x2.0
+    sync sites  : buildHashmap.py:67 buildCompactHashMap x31
+(outside any section)                                  ops 1, launches 0, syncs 1
+    sync sites  : report.py:370 reportRun x1
+
+worst 8 of the last 30 marked steps (by syncs, then ops):
+  step 3: up to 321 ops / 9 syncs in one section
+      [runner] case timestep hook                        ops    321  launches     6  syncs    9
+      warpNeighborSearch - radiusSearchCompactHashMap    ops    226  launches     4  syncs    6
+      warpNeighborSearch - buildCompactHashMap           ops    163  launches     2  syncs    4
+      [runner] integrator step                           ops    159  launches     3  syncs    4
+  step 4: up to 321 ops / 9 syncs in one section
+      [runner] case timestep hook                        ops    321  launches     6  syncs    9
+      warpNeighborSearch - radiusSearchCompactHashMap    ops    226  launches     4  syncs    6
+      warpNeighborSearch - buildCompactHashMap           ops    163  launches     2  syncs    4
+      [runner] integrator step                           ops    159  launches     3  syncs    4
+  step 5: up to 321 ops / 9 syncs in one section
+      [runner] case timestep hook                        ops    321  launches     6  syncs    9
+      warpNeighborSearch - radiusSearchCompactHashMap    ops    226  launches     4  syncs    6
+      warpNeighborSearch - buildCompactHashMap           ops    163  launches     2  syncs    4
+      [runner] integrator step                           ops    159  launches     3  syncs    4
+  step 12: up to 321 ops / 9 syncs in one section
+      [runner] case timestep hook                        ops    321  launches     6  syncs    9
+      warpNeighborSearch - radiusSearchCompactHashMap    ops    226  launches     4  syncs    6
+      warpNeighborSearch - buildCompactHashMap           ops    163  launches     2  syncs    4
+      [runner] integrator step                           ops    159  launches     3  syncs    4
+  step 13: up to 321 ops / 9 syncs in one section
+      [runner] case timestep hook                        ops    321  launches     6  syncs    9
+      warpNeighborSearch - radiusSearchCompactHashMap    ops    226  launches     4  syncs    6
+      warpNeighborSearch - buildCompactHashMap           ops    163  launches     2  syncs    4
+      [runner] integrator step                           ops    159  launches     3  syncs    4
+  step 14: up to 321 ops / 9 syncs in one section
+      [runner] case timestep hook                        ops    321  launches     6  syncs    9
+      warpNeighborSearch - radiusSearchCompactHashMap    ops    226  launches     4  syncs    6
+      warpNeighborSearch - buildCompactHashMap           ops    163  launches     2  syncs    4
+      [runner] integrator step                           ops    159  launches     3  syncs    4
+  step 15: up to 321 ops / 9 syncs in one section
+      [runner] case timestep hook                        ops    321  launches     6  syncs    9
+      warpNeighborSearch - radiusSearchCompactHashMap    ops    226  launches     4  syncs    6
+      warpNeighborSearch - buildCompactHashMap           ops    163  launches     2  syncs    4
+      [runner] integrator step                           ops    159  launches     3  syncs    4
+  step 21: up to 321 ops / 9 syncs in one section
+      [runner] case timestep hook                        ops    321  launches     6  syncs    9
+      warpNeighborSearch - radiusSearchCompactHashMap    ops    226  launches     4  syncs    6
+      warpNeighborSearch - buildCompactHashMap           ops    163  launches     2  syncs    4
+      [runner] integrator step                           ops    159  launches     3  syncs    4

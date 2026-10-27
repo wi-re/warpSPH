@@ -1,5 +1,5 @@
 """Six-panel Sod profile plotting (density, supports, velocity, thermal
-energy, pressure, entropy vs. `x`), shared by `cases/sod.py` and the 2D/3D
+energy, pressure, entropy vs. `x`), shared by `cases/compressible/sod.py` and the 2D/3D
 `sodND` cases via the `scatter` flag -- since those share many particles at
 the same `x`, a scatter reads better than a connecting line. `plotSod`
 creates the figure, `plotSod_` redraws into an existing one for per-frame

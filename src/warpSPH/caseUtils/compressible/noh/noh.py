@@ -1,4 +1,4 @@
-"""Noh implosion initial state, used by `warpSPH.cases.noh`.
+"""Noh implosion initial state, used by `warpSPH.cases.compressible.noh`.
 
 Sets every particle's velocity to a unit vector pointing at the origin
 (`-normalize(positions)`), so uniform cold gas converges radially from rest

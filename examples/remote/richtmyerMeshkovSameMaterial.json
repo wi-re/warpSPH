@@ -1,0 +1,35 @@
+{
+  "preset": "richtmyerMeshkov",
+  "scheme": "CRKSPH",
+  "variant": "demonstration",
+  "nx": 64,
+  "duration": 6.0,
+  "record": true,
+  "exportInterval": 0.05,
+  "measurements": true,
+  "diagnosticInterval": 0.05,
+  "configuration": {
+    "simulation": {
+      "execution": "eager"
+    },
+    "solver": {
+      "materials": [
+        {
+          "name": "incidentGas",
+          "eos": {
+            "type": "idealGas",
+            "gamma": 1.4
+          }
+        },
+        {
+          "name": "transmittedGas",
+          "eos": {
+            "type": "idealGas",
+            "gamma": 1.6666666666666667
+          }
+        }
+      ],
+      "crkDensityPolicy": "sameMaterial"
+    }
+  }
+}

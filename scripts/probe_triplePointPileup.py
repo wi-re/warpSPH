@@ -41,10 +41,10 @@ bootstrap(precision='float32')
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
 
-from warpSPH.cases.compressible import compressibleDiagnostics  # noqa: E402
-from warpSPH.cases.sod import sodCase  # noqa: E402
-from warpSPH.cases.sodND import sod2dCase  # noqa: E402
-from warpSPH.cases.triplePoint import triplePointCase  # noqa: E402
+from warpSPH.cases.compressible.common import compressibleDiagnostics  # noqa: E402
+from warpSPH.cases.compressible.sod import sodCase  # noqa: E402
+from warpSPH.cases.compressible.sodND import sod2dCase  # noqa: E402
+from warpSPH.cases.compressible.triplePoint import triplePointCase  # noqa: E402
 from warpSPH.runner import caseMain  # noqa: E402
 
 # case -> (Case, lattice dx, x window of the contact/shock zone, default CLI prefix)

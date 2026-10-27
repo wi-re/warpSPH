@@ -158,7 +158,7 @@ def test_1dLimitersStepExtremumAndBounds(limiter):
 
 
 def _greshoState(nx=32):
-    from warpSPH.cases.greshoVortex import greshoVortexCase
+    from warpSPH.cases.compressible.greshoVortex import greshoVortexCase
     res = run(greshoVortexCase, scheme='Monaghan', nx=nx, nSteps=1, progress=False, quiet=True)
     return res.state, res.ctx.config
 

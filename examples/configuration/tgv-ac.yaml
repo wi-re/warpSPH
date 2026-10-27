@@ -1,0 +1,14 @@
+schemaVersion: 1
+case: tgv-wc
+simulation:
+  nx: 64
+  tLimit: 0.1
+  device: cuda
+params:
+  nu: 0.01
+  shuffleIters: 0
+solver:
+  scheme: artificialCompressible
+  acParams:
+    epsilonV: -5.0
+    maxPseudoIterations: 100

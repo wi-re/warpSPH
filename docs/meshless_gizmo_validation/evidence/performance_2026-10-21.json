@@ -1,0 +1,515 @@
+{
+  "archive": "/home/lu26029/dev/warpSPHDevelopment/core/experiments/meshless-cleanup-2026-10-21",
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+  "timing_protocol": {
+    "case": "kelvinHelmholtz",
+    "nx": 256,
+    "particles": 65536,
+    "warmup": 10,
+    "timed_steps": 100,
+    "trials": 3,
+    "order": "alternating before/after",
+    "video": false,
+    "aggregation": "median of trial means"
+  },
+  "timing": {
+    "mfm_float32": {
+      "before": {
+        "wall_ms_mean": 7.2559258714318275,
+        "integrator_ms_mean": 4.468149466514587,
+        "trials": [
+          {
+            "wall_ms_mean": 7.2559258714318275,
+            "integrator_ms_mean": 4.468149466514587
+          },
+          {
+            "wall_ms_mean": 7.430777749978006,
+            "integrator_ms_mean": 4.577583192574857
+          },
+          {
+            "wall_ms_mean": 7.251785499975085,
+            "integrator_ms_mean": 4.458510225469416
+          }
+        ]
+      },
+      "after": {
+        "wall_ms_mean": 7.248653932474554,
+        "integrator_ms_mean": 4.43057648340861,
+        "trials": [
+          {
+            "wall_ms_mean": 7.219566497951746,
+            "integrator_ms_mean": 4.423176326751709
+          },
+          {
+            "wall_ms_mean": 7.276790258474648,
+            "integrator_ms_mean": 4.4400934161561905
+          },
+          {
+            "wall_ms_mean": 7.248653932474554,
+            "integrator_ms_mean": 4.43057648340861
+          }
+        ]
+      },
+      "wall_improvement_percent": 0.10022068976620613
+    },
+    "mfv_float32": {
+      "before": {
+        "wall_ms_mean": 4.345712889917195,
+        "integrator_ms_mean": 1.5045171711179945,
+        "trials": [
+          {
+            "wall_ms_mean": 4.369977447204292,
+            "integrator_ms_mean": 1.5066608011722564
+          },
+          {
+            "wall_ms_mean": 4.345712889917195,
+            "integrator_ms_mean": 1.5045171711179945
+          },
+          {
+            "wall_ms_mean": 4.305398361757398,
+            "integrator_ms_mean": 1.4781598382525973
+          }
+        ]
+      },
+      "after": {
+        "wall_ms_mean": 4.066468980163336,
+        "integrator_ms_mean": 1.2856992314560245,
+        "trials": [
+          {
+            "wall_ms_mean": 4.03785262722522,
+            "integrator_ms_mean": 1.284578241109848
+          },
+          {
+            "wall_ms_mean": 4.188665519468486,
+            "integrator_ms_mean": 1.3194624607009118
+          },
+          {
+            "wall_ms_mean": 4.066468980163336,
+            "integrator_ms_mean": 1.2856992314560245
+          }
+        ]
+      },
+      "wall_improvement_percent": 6.425733057555483
+    },
+    "mfm_float64": {
+      "before": {
+        "wall_ms_mean": 20.783398668281734,
+        "integrator_ms_mean": 15.788487800444015,
+        "trials": [
+          {
+            "wall_ms_mean": 20.826284680515528,
+            "integrator_ms_mean": 15.809618054014264
+          },
+          {
+            "wall_ms_mean": 20.783398668281734,
+            "integrator_ms_mean": 15.788487800444015
+          },
+          {
+            "wall_ms_mean": 20.72470324113965,
+            "integrator_ms_mean": 15.778963705505987
+          }
+        ]
+      },
+      "after": {
+        "wall_ms_mean": 20.650046826340258,
+        "integrator_ms_mean": 15.710342137500493,
+        "trials": [
+          {
+            "wall_ms_mean": 20.673508723266423,
+            "integrator_ms_mean": 15.71860719931246
+          },
+          {
+            "wall_ms_mean": 20.649151150137186,
+            "integrator_ms_mean": 15.69366109250772
+          },
+          {
+            "wall_ms_mean": 20.650046826340258,
+            "integrator_ms_mean": 15.710342137500493
+          }
+        ]
+      },
+      "wall_improvement_percent": 0.6416267332878034
+    },
+    "mfv_float64": {
+      "before": {
+        "wall_ms_mean": 12.85725248977542,
+        "integrator_ms_mean": 7.862267812093099,
+        "trials": [
+          {
+            "wall_ms_mean": 12.809161050245166,
+            "integrator_ms_mean": 7.858435548917211
+          },
+          {
+            "wall_ms_mean": 12.892981311306357,
+            "integrator_ms_mean": 7.862267812093099
+          },
+          {
+            "wall_ms_mean": 12.85725248977542,
+            "integrator_ms_mean": 7.874420686201616
+          }
+        ]
+      },
+      "after": {
+        "wall_ms_mean": 12.649801759980619,
+        "integrator_ms_mean": 7.6594450305206605,
+        "trials": [
+          {
+            "wall_ms_mean": 12.911080638878047,
+            "integrator_ms_mean": 7.784102454329982
+          },
+          {
+            "wall_ms_mean": 12.649801759980619,
+            "integrator_ms_mean": 7.6594450305206605
+          },
+          {
+            "wall_ms_mean": 12.636121092364192,
+            "integrator_ms_mean": 7.6398661642363574
+          }
+        ]
+      },
+      "wall_improvement_percent": 1.6134919179643825
+    }
+  },
+  "profile": {
+    "mfm_before": {
+      "cudaLaunchKernel": 594.0,
+      "cudaStreamSynchronize": 23.0,
+      "cudaDeviceSynchronize": 2.3333333333333335
+    },
+    "mfm_after": {
+      "cudaLaunchKernel": 522.0,
+      "cudaStreamSynchronize": 20.0,
+      "cudaDeviceSynchronize": 2.3333333333333335
+    },
+    "mfv_before": {
+      "cudaLaunchKernel": 326.0,
+      "cudaStreamSynchronize": 17.0,
+      "cudaDeviceSynchronize": 2.3333333333333335
+    },
+    "mfv_after": {
+      "cudaLaunchKernel": 278.0,
+      "cudaStreamSynchronize": 12.0,
+      "cudaDeviceSynchronize": 2.3333333333333335
+    }
+  },
+  "qualification": {
+    "frontend32": 238,
+    "frontend64": 72,
+    "core32": 125,
+    "core_skipped": 12,
+    "integrators_cpu": 8792,
+    "integrators_skipped": 639,
+    "metadata_plot": 2,
+    "state_pairs": 60
+  },
+  "label_only_reruns_bitwise": {
+    "mfm": true,
+    "mfv": true
+  },
+  "state_comparison_maxima": {
+    "float32": {
+      "positions": 6.020671131435827e-08,
+      "Q": 2.108524740192499e-06,
+      "velocities": 1.2875066021967605e-05,
+      "densities": 4.289061796325799e-06,
+      "pressures": 4.573275303551148e-06,
+      "supports": 2.5026701106585384e-06,
+      "masses": 5.960399818851529e-07,
+      "internalEnergies": 7.626496405981792e-07
+    },
+    "float64": {
+      "positions": 5.645736403633609e-13,
+      "Q": 1.0711754826602715e-10,
+      "velocities": 4.3073807385411265e-10,
+      "densities": 3.662687252407179e-11,
+      "pressures": 5.32082979258327e-11,
+      "supports": 2.7958015979700055e-12,
+      "masses": 4.629432706403619e-11,
+      "internalEnergies": 2.6361382150022355e-11
+    }
+  },
+  "physical_comparisons": {
+    "mfm": {
+      "densities": 5.808932359724657e-06,
+      "pressures": 1.1053337739552753e-05,
+      "internalEnergies": 8.8587707557044e-06,
+      "positions": 7.156115124002057e-07,
+      "Q": 8.62250643060583e-06,
+      "materials": 0.0,
+      "supports": 3.1499709489471726e-06,
+      "velocities": 2.9287724595717177e-05,
+      "masses": 0.0
+    },
+    "mfv": {
+      "densities": 1.2622573784277252e-05,
+      "pressures": 9.256351344650324e-06,
+      "internalEnergies": 1.4698796631061155e-05,
+      "positions": 5.367072260292986e-07,
+      "Q": 8.799653531479333e-06,
+      "materials": 0.0,
+      "supports": 2.971541782076397e-06,
+      "velocities": 2.972706379025819e-05,
+      "masses": 1.0125901890255714e-05
+    }
+  },
+  "physical_runs": {
+    "physical_mfm_float32_before": {
+      "completed_steps": 819,
+      "simulated_time": 0.3,
+      "conservation": {
+        "initial": [
+          1.5,
+          -0.2251025647856295,
+          -6.629181004642529e-11,
+          3.909406078280881
+        ],
+        "final": [
+          1.5,
+          -0.2251025462629741,
+          -2.093683004744662e-09,
+          3.9094059601047775
+        ],
+        "mass_relative_drift": 0.0,
+        "energy_relative_drift": -3.0228659086122326e-08,
+        "min_mass": 6.103515625e-05,
+        "max_particle_mass_change": 0.0,
+        "min_raw_internal_energy": 1.868287444114685
+      },
+      "run_wall_seconds": 10.473183736205101,
+      "daemon_run_id": "b2f2443491e14710be6692f035953a46",
+      "export_path": "/home/lu26029/dev/warpSPH/results/meshless_performance_2026-10-21/settled/physical_mfm_float32_before/video/12-kelvinHelmholtz_2026-10-21_18-23-19"
+    },
+    "physical_mfm_float32_after_labeled": {
+      "completed_steps": 819,
+      "simulated_time": 0.3,
+      "conservation": {
+        "initial": [
+          1.5,
+          -0.2251025647856295,
+          -6.629181004642529e-11,
+          3.909406078280881
+        ],
+        "final": [
+          1.5,
+          -0.22510253723748974,
+          1.10039422018815e-09,
+          3.909405954706017
+        ],
+        "mass_relative_drift": 0.0,
+        "energy_relative_drift": -3.160962602627149e-08,
+        "min_mass": 6.103515625e-05,
+        "max_particle_mass_change": 0.0,
+        "min_raw_internal_energy": 1.8682842254638672
+      },
+      "run_wall_seconds": 10.199635306373239,
+      "daemon_run_id": "0c51452e541040409c455c798be80949",
+      "export_path": "/home/lu26029/dev/warpSPH/results/meshless_performance_2026-10-21/settled/physical_mfm_float32_after_labeled/video/12-kelvinHelmholtz_2026-10-21_18-25-43"
+    },
+    "physical_mfv_float32_after_labeled": {
+      "completed_steps": 817,
+      "simulated_time": 0.3,
+      "conservation": {
+        "initial": [
+          1.5,
+          -0.2251025647856295,
+          -6.629181004642529e-11,
+          3.909406078280881
+        ],
+        "final": [
+          1.4999998546700226,
+          -0.2251025577013479,
+          5.034008765392173e-10,
+          3.909406055143336
+        ],
+        "mass_relative_drift": -9.68866515904665e-08,
+        "energy_relative_drift": -5.918429743496429e-09,
+        "min_mass": 6.102193219703622e-05,
+        "max_particle_mass_change": 1.1319061741232872e-06,
+        "min_raw_internal_energy": 1.8682053089141846
+      },
+      "run_wall_seconds": 7.677635141182691,
+      "daemon_run_id": "a174d865777f4440bf8d51121b5a8c02",
+      "export_path": "/home/lu26029/dev/warpSPH/results/meshless_performance_2026-10-21/settled/physical_mfv_float32_after_labeled/video/12-kelvinHelmholtz_2026-10-21_18-25-58"
+    },
+    "physical_mfv_float32_after": {
+      "completed_steps": 817,
+      "simulated_time": 0.3,
+      "conservation": {
+        "initial": [
+          1.5,
+          -0.2251025647856295,
+          -6.629181004642529e-11,
+          3.909406078280881
+        ],
+        "final": [
+          1.4999998546700226,
+          -0.2251025577013479,
+          5.034008765392173e-10,
+          3.909406055143336
+        ],
+        "mass_relative_drift": -9.68866515904665e-08,
+        "energy_relative_drift": -5.918429743496429e-09,
+        "min_mass": 6.102193219703622e-05,
+        "max_particle_mass_change": 1.1319061741232872e-06,
+        "min_raw_internal_energy": 1.8682053089141846
+      },
+      "run_wall_seconds": 7.828255524858832,
+      "daemon_run_id": "12026aba3ae94c4482c55fc72733fd2f",
+      "export_path": "/home/lu26029/dev/warpSPH/results/meshless_performance_2026-10-21/settled/physical_mfv_float32_after/video/12-kelvinHelmholtz_2026-10-21_18-24-00"
+    },
+    "physical_mfm_float32_after": {
+      "completed_steps": 819,
+      "simulated_time": 0.3,
+      "conservation": {
+        "initial": [
+          1.5,
+          -0.2251025647856295,
+          -6.629181004642529e-11,
+          3.909406078280881
+        ],
+        "final": [
+          1.5,
+          -0.22510253723748974,
+          1.10039422018815e-09,
+          3.909405954706017
+        ],
+        "mass_relative_drift": 0.0,
+        "energy_relative_drift": -3.160962602627149e-08,
+        "min_mass": 6.103515625e-05,
+        "max_particle_mass_change": 0.0,
+        "min_raw_internal_energy": 1.8682842254638672
+      },
+      "run_wall_seconds": 10.25941054476425,
+      "daemon_run_id": "998a58aada7a444c8ee071305dadae24",
+      "export_path": "/home/lu26029/dev/warpSPH/results/meshless_performance_2026-10-21/settled/physical_mfm_float32_after/video/12-kelvinHelmholtz_2026-10-21_18-23-34"
+    },
+    "physical_mfv_float32_before": {
+      "completed_steps": 817,
+      "simulated_time": 0.3,
+      "conservation": {
+        "initial": [
+          1.5,
+          -0.2251025647856295,
+          -6.629181004642529e-11,
+          3.909406078280881
+        ],
+        "final": [
+          1.4999998563980625,
+          -0.22510256248847327,
+          -1.0649522652617094e-09,
+          3.9094060370407533
+        ],
+        "mass_relative_drift": -9.573462496822079e-08,
+        "energy_relative_drift": -1.0548949618282314e-08,
+        "min_mass": 6.1021939472993836e-05,
+        "max_particle_mass_change": 1.1320371413603425e-06,
+        "min_raw_internal_energy": 1.8682045936584473
+      },
+      "run_wall_seconds": 7.786041483283043,
+      "daemon_run_id": "466f6de3770a4becbdb8933cfd5fe964",
+      "export_path": "/home/lu26029/dev/warpSPH/results/meshless_performance_2026-10-21/settled/physical_mfv_float32_before/video/12-kelvinHelmholtz_2026-10-21_18-23-48"
+    }
+  },
+  "developed_runs": {
+    "developed_mfm_float32_before": {
+      "wall_ms_mean": 11.103974264115095,
+      "integrator_ms_mean": 6.995114433522127,
+      "completed_steps": 60,
+      "simulated_time": 0.0029400023631751537,
+      "conservation": {
+        "initial": [
+          1.5,
+          -0.22502655544797703,
+          -2.345429711558822e-09,
+          3.909404890846872
+        ],
+        "final": [
+          1.5,
+          -0.2250265556373352,
+          -2.6568534594595405e-09,
+          3.909404896801334
+        ],
+        "mass_relative_drift": 0.0,
+        "energy_relative_drift": 1.5231120793982227e-09,
+        "min_mass": 1.52587890625e-05,
+        "max_particle_mass_change": 0.0,
+        "min_raw_internal_energy": 0.12873899936676025
+      }
+    },
+    "developed_mfm_float32_after": {
+      "wall_ms_mean": 10.957666020840406,
+      "integrator_ms_mean": 6.878957047754405,
+      "completed_steps": 60,
+      "simulated_time": 0.002940002828836441,
+      "conservation": {
+        "initial": [
+          1.5,
+          -0.22502655544797703,
+          -2.345429711558822e-09,
+          3.909404890846872
+        ],
+        "final": [
+          1.5,
+          -0.22502655585065467,
+          -2.5495646566175978e-09,
+          3.9094048967585877
+        ],
+        "mass_relative_drift": 0.0,
+        "energy_relative_drift": 1.5121778701830529e-09,
+        "min_mass": 1.52587890625e-05,
+        "max_particle_mass_change": 0.0,
+        "min_raw_internal_energy": 0.12873899936676025
+      }
+    },
+    "developed_mfv_float32_before": {
+      "wall_ms_mean": 6.342890253290534,
+      "integrator_ms_mean": 2.285435423559072,
+      "completed_steps": 60,
+      "simulated_time": 0.002944138366729021,
+      "conservation": {
+        "initial": [
+          1.5,
+          -0.22502655544797703,
+          -2.345429711558822e-09,
+          3.909404890846872
+        ],
+        "final": [
+          1.4999999981218934,
+          -0.22502655507216007,
+          -2.23506266272544e-09,
+          3.9094048850106446
+        ],
+        "mass_relative_drift": -1.2520710394407313e-09,
+        "energy_relative_drift": -1.4928685219945616e-09,
+        "min_mass": 9.737245818541851e-06,
+        "max_particle_mass_change": 2.0699451852124184e-05,
+        "min_raw_internal_energy": 0.13979437947273254
+      }
+    },
+    "developed_mfv_float32_after": {
+      "wall_ms_mean": 6.215856317430735,
+      "integrator_ms_mean": 2.1194638451751397,
+      "completed_steps": 60,
+      "simulated_time": 0.0029441385995596647,
+      "conservation": {
+        "initial": [
+          1.5,
+          -0.22502655544797703,
+          -2.345429711558822e-09,
+          3.909404890846872
+        ],
+        "final": [
+          1.499999997679879,
+          -0.22502655536424432,
+          -2.518954309027599e-09,
+          3.909404882867875
+        ],
+        "mass_relative_drift": -1.54674732281516e-09,
+        "energy_relative_drift": -2.0409748392486035e-09,
+        "min_mass": 9.737243090057746e-06,
+        "max_particle_mass_change": 2.0699440938187763e-05,
+        "min_raw_internal_energy": 0.13979440927505493
+      }
+    }
+  }
+}

@@ -1,0 +1,159 @@
+section (tree, inclusive unless "self")                                   calls  ops/call  self ops launch/call sync/call self sync sync/step
+[runner] integrator step                                                     30     975.0     110.0        22.0     24.00      4.00     24.00
+  [warpSPH] - [compSPH - 02] adjacency                                       60     228.0       0.0         4.0      6.00      0.00     12.00
+  [warpSPH] - [compSPH - 01] wall + optimal support                          60     105.0       0.0         2.0      3.00      0.00      6.00
+    [warpSPH] - evaluateOptimalSupport                                       60     105.0       3.0         2.0      3.00      1.00      6.00
+      [warpSPH] - evaluateOptimalSupport - Owen                              60     102.0      50.0         2.0      2.00      1.00      4.00
+        [warpSPH] - buildVerletList                                         120     135.5       0.0         2.0      3.50      0.00     14.00
+          [Verlet] SupportScheme.SuperSymmetric                             120     135.5       0.0         2.0      3.50      0.00     14.00
+            [Verlet] no prior                                                60     228.0       2.0         4.0      6.00      0.00     12.00
+              warpNeighborSearch - radiusSearchCompactHashMap                60     226.0      48.0         4.0      6.00      1.00     12.00
+                warpNeighborSearch - buildCompactHashMap                     60     163.0       0.0         2.0      4.00      0.00      8.00
+                  neighborSearch - sortParticles                             60      98.0      98.0         1.0      2.00      2.00      4.00
+                  neighborSearch - buildHashMap                              60       6.0       6.0         1.0      1.00      1.00      2.00
+                  neighborSearch - buildCells                                60      20.0      20.0         0.0      1.00      1.00      2.00
+                  neighborSearch - buildHashTable                            60      15.0      15.0         0.0      0.00      0.00      0.00
+                  neighborSearch - precomputeOffsets                         60      15.0      15.0         0.0      0.00      0.00      0.00
+                  neighborSearch - sort cells                                60       6.0       6.0         0.0      0.00      0.00      0.00
+                  neighborSearch - preprocess                                60       3.0       3.0         0.0      0.00      0.00      0.00
+                neighborSearch - allocate neighbors                          60      12.0      12.0         0.0      1.00      1.00      2.00
+                neighborSearch - count neighbors                             60       2.0       2.0         1.0      0.00      0.00      0.00
+                neighborSearch - collect neighbors                           60       1.0       1.0         1.0      0.00      0.00      0.00
+            [Verlet] Checking validity of prior neighborhood                 60      43.0      43.0         0.0      1.00      1.00      2.00
+        warpSPH[Density]                                                    120       3.5       0.0         1.0      0.00      0.00      0.00
+          warpSPH[Density] - Kernel Execution                               120       3.5       0.0         1.0      0.00      0.00      0.00
+            warpWrapper2 [WW2]                                              420       4.7       3.3         1.0      0.00      0.00      0.00
+              SAWF.forward - launch                                         420       1.4       0.0         1.0      0.00      0.00      0.00
+                launch_kernel - allocate_output                             600       1.0       1.0         0.0      0.00      0.00      0.00
+        warpSPH[computePsi0]                                                 60       7.0       0.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [compSPH - 10] energy-partition f_ij                           60      13.0       3.0         1.0      1.00      0.00      2.00
+    warpSPH[computeCompSPHBalanceTerm]                                       60      10.0       0.0         1.0      1.00      0.00      2.00
+      warpSPH[computeCompSPHBalanceTerm] - Kernel Execution                  60      10.0       4.0         1.0      1.00      1.00      2.00
+  [warpSPH] - [compSPH - 08] switch update, divergence, dE/dt                60      25.0      15.0         1.0      0.00      0.00      0.00
+    warpSPH - computeMomentumConsistent                                      60      10.0       5.0         1.0      0.00      0.00      0.00
+      warpSPH[Divergence]                                                    60       5.0       0.0         1.0      0.00      0.00      0.00
+        warpSPH[Divergence] - Kernel Execution                               60       5.0       2.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [compSPH - 06] pressure / viscosity acceleration               60      13.0       0.0         1.0      0.00      0.00      0.00
+    warpSPH[computeCompSPHAccel]                                             60      13.0       0.0         1.0      0.00      0.00      0.00
+      warpSPH[computeCompSPHAccel] - Kernel Execution                        60      13.0       4.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [compSPH - 03] density (+ wall closure)                        60       7.0       0.0         1.0      0.00      0.00      0.00
+    [warpSPH] - computeDensities                                             60       7.0       2.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [compSPH - 07] dudt                                            60       1.0       0.0         1.0      0.00      0.00      0.00
+    warpSPH[computeCompSPHdudt]                                              60       1.0       0.0         1.0      0.00      0.00      0.00
+      warpSPH[computeCompSPHdudt] - Kernel Execution                         60       1.0       0.0         1.0      0.00      0.00      0.00
+  [warpSPH] - [compSPH finalize - 01] compatible energy                      30      51.0      49.0         0.0      0.00      0.00      0.00
+    segment_sum                                                              60       1.0       1.0         0.0      0.00      0.00      0.00
+  [warpSPH] - [compSPH - 05] EOS + viscosity-switch terms                    60       9.0       0.0         0.0      0.00      0.00      0.00
+    EOS[IdealGas]                                                            60       9.0       9.0         0.0      0.00      0.00      0.00
+  [warpSPH] - [compSPH - 09] forcing + update                                60       6.0       5.0         0.0      0.00      0.00      0.00
+    [warpSPH] - computeForcing                                               60       1.0       1.0         0.0      0.00      0.00      0.00
+[runner] case diagnostics                                                    31      54.0      54.0         0.0      8.00      8.00      8.27
+[runner] max speed read (non-finite check, velocity alarm)                   31       5.0       5.0         0.0      1.00      1.00      1.03
+[runner] step timer (cuda synchronize)                                       30       0.0       0.0         0.0      1.00      1.00      1.00
+coverage: 100.0 % of 31080 ops, 100.0 % of 660 launches, 99.9 % of 1030 syncs inside a section (30 marked steps)
+  OUTSIDE any section: ops 1, launches 0, syncs 1
+    sync sites  : report.py:370 reportRun x1
+    top ops     : _local_scalar_dense x1
+
+call audit: 4412 section entries over 30 marked step(s)
+section                                          calls  ops/call     self launch/call sync/call sync/step replays
+[runner] integrator step                            30     975.0    110.0        22.0     24.00     24.00       0
+[warpSPH] - buildVerletList                        120     135.5      0.0         2.0      3.50     14.00       0
+[Verlet] SupportScheme.SuperSymmetric              120     135.5      0.0         2.0      3.50     14.00       0
+[warpSPH] - [compSPH - 02] adjacency                60     228.0      0.0         4.0      6.00     12.00       0
+[Verlet] no prior                                   60     228.0      2.0         4.0      6.00     12.00       0
+warpNeighborSearch - radiusSearchCompactHashMa      60     226.0     48.0         4.0      6.00     12.00       0
+warpNeighborSearch - buildCompactHashMap            60     163.0      0.0         2.0      4.00      8.00       0
+[runner] case diagnostics                           31      54.0     54.0         0.0      8.00      8.27       0
+[warpSPH] - [compSPH - 01] wall + optimal supp      60     105.0      0.0         2.0      3.00      6.00       0
+[warpSPH] - evaluateOptimalSupport                  60     105.0      3.0         2.0      3.00      6.00       0
+[warpSPH] - evaluateOptimalSupport - Owen           60     102.0     50.0         2.0      2.00      4.00       0
+neighborSearch - sortParticles                      60      98.0     98.0         1.0      2.00      4.00       0
+[warpSPH] - [compSPH - 10] energy-partition f_      60      13.0      3.0         1.0      1.00      2.00       0
+warpSPH[computeCompSPHBalanceTerm]                  60      10.0      0.0         1.0      1.00      2.00       0
+warpSPH[computeCompSPHBalanceTerm] - Kernel Ex      60      10.0      4.0         1.0      1.00      2.00       0
+neighborSearch - buildHashMap                       60       6.0      6.0         1.0      1.00      2.00       0
+[Verlet] Checking validity of prior neighborho      60      43.0     43.0         0.0      1.00      2.00       0
+neighborSearch - buildCells                         60      20.0     20.0         0.0      1.00      2.00       0
+neighborSearch - allocate neighbors                 60      12.0     12.0         0.0      1.00      2.00       0
+[runner] max speed read (non-finite check, vel      31       5.0      5.0         0.0      1.00      1.03       0
+[runner] step timer (cuda synchronize)              30       0.0      0.0         0.0      1.00      1.00       0
+warpWrapper2 [WW2]                                 420       4.7      3.3         1.0      0.00      0.00       0
+SAWF.forward - launch                              420       1.4      0.0         1.0      0.00      0.00       0
+warpSPH[Density]                                   120       3.5      0.0         1.0      0.00      0.00       0
+warpSPH[Density] - Kernel Execution                120       3.5      0.0         1.0      0.00      0.00       0
+  [runner] integrator step
+    top ops     : select x74.0, sub x73.0, mul x68.0, clone x67.0, add x52.0, detach x46.0
+    top kernels : computeSPHDensity_KernelTiled x4.0, computePsi0_KernelTiled x2.0, indexCells x2.0, hashCells x2.0, radiusSearchCountNeighborsCompactHashMap x2.0
+    sync sites  : build.py:107 buildVerletList_ x60, optimalSupportOwen.py:144 evaluateOptimalSupportOwen x60, optimalSupport.py:51 _clampEnabled x60, buildHashmap.py:46 buildCompactHashMap x60, buildHashmap.py:57 buildCompactHashMap x60
+  [warpSPH] - buildVerletList
+    top ops     : select x18.5, sub x15.5, _to_copy x8.5, div x8.0, add x6.5, remainder x6.0
+    top kernels : indexCells x0.5, hashCells x0.5, radiusSearchCountNeighborsCompactHashMap x0.5, radiusSearchCollectCompactHashMap x0.5
+    sync sites  : build.py:107 buildVerletList_ x60, buildHashmap.py:46 buildCompactHashMap x60, buildHashmap.py:57 buildCompactHashMap x60, buildHashmap.py:67 buildCompactHashMap x60, buildHashmap.py:122 buildCompactHashMap x60
+  [Verlet] SupportScheme.SuperSymmetric
+    top ops     : select x18.5, sub x15.5, _to_copy x8.5, div x8.0, add x6.5, remainder x6.0
+    top kernels : indexCells x0.5, hashCells x0.5, radiusSearchCountNeighborsCompactHashMap x0.5, radiusSearchCollectCompactHashMap x0.5
+    sync sites  : build.py:107 buildVerletList_ x60, buildHashmap.py:46 buildCompactHashMap x60, buildHashmap.py:57 buildCompactHashMap x60, buildHashmap.py:67 buildCompactHashMap x60, buildHashmap.py:122 buildCompactHashMap x60
+  [warpSPH] - [compSPH - 02] adjacency
+    top ops     : select x37.0, sub x23.0, _to_copy x17.0, remainder x10.0, div x10.0, zeros x10.0
+    top kernels : indexCells x1.0, hashCells x1.0, radiusSearchCountNeighborsCompactHashMap x1.0, radiusSearchCollectCompactHashMap x1.0
+    sync sites  : buildHashmap.py:46 buildCompactHashMap x60, buildHashmap.py:57 buildCompactHashMap x60, buildHashmap.py:67 buildCompactHashMap x60, buildHashmap.py:122 buildCompactHashMap x60, search.py:41 radiusSearchOnCompactHashMap x60
+  [Verlet] no prior
+    top ops     : select x37.0, sub x23.0, _to_copy x17.0, remainder x10.0, div x10.0, zeros x10.0
+    top kernels : indexCells x1.0, hashCells x1.0, radiusSearchCountNeighborsCompactHashMap x1.0, radiusSearchCollectCompactHashMap x1.0
+    sync sites  : buildHashmap.py:46 buildCompactHashMap x60, buildHashmap.py:57 buildCompactHashMap x60, buildHashmap.py:67 buildCompactHashMap x60, buildHashmap.py:122 buildCompactHashMap x60, search.py:41 radiusSearchOnCompactHashMap x60
+  warpNeighborSearch - radiusSearchCompactHashMap
+    top ops     : select x37.0, sub x23.0, _to_copy x17.0, remainder x10.0, div x10.0, zeros x10.0
+    top kernels : indexCells x1.0, hashCells x1.0, radiusSearchCountNeighborsCompactHashMap x1.0, radiusSearchCollectCompactHashMap x1.0
+    sync sites  : buildHashmap.py:46 buildCompactHashMap x60, buildHashmap.py:57 buildCompactHashMap x60, buildHashmap.py:67 buildCompactHashMap x60, buildHashmap.py:122 buildCompactHashMap x60, search.py:41 radiusSearchOnCompactHashMap x60
+  warpNeighborSearch - buildCompactHashMap
+    top ops     : select x21.0, _to_copy x15.0, sub x15.0, div x10.0, index x8.0, remainder x6.0
+    top kernels : indexCells x1.0, hashCells x1.0
+    sync sites  : buildHashmap.py:46 buildCompactHashMap x60, buildHashmap.py:57 buildCompactHashMap x60, buildHashmap.py:67 buildCompactHashMap x60, buildHashmap.py:122 buildCompactHashMap x60
+  [runner] case diagnostics
+    top ops     : mul x9.0, _to_copy x9.0, detach x8.0, _local_scalar_dense x8.0, sum x4.0, select x4.0
+    sync sites  : common.py:161 compressibleDiagnostics x248
+(outside any section)                                  ops 1, launches 0, syncs 1
+    sync sites  : report.py:370 reportRun x1
+
+worst 8 of the last 30 marked steps (by syncs, then ops):
+  step 0: up to 975 ops / 24 syncs in one section
+      [runner] integrator step                           ops    975  launches    22  syncs   24
+      [warpSPH] - buildVerletList                        ops    542  launches     8  syncs   14
+      [Verlet] SupportScheme.SuperSymmetric              ops    542  launches     8  syncs   14
+      [warpSPH] - [compSPH - 02] adjacency               ops    456  launches     8  syncs   12
+  step 1: up to 975 ops / 24 syncs in one section
+      [runner] integrator step                           ops    975  launches    22  syncs   24
+      [warpSPH] - buildVerletList                        ops    542  launches     8  syncs   14
+      [Verlet] SupportScheme.SuperSymmetric              ops    542  launches     8  syncs   14
+      [warpSPH] - [compSPH - 02] adjacency               ops    456  launches     8  syncs   12
+  step 2: up to 975 ops / 24 syncs in one section
+      [runner] integrator step                           ops    975  launches    22  syncs   24
+      [warpSPH] - buildVerletList                        ops    542  launches     8  syncs   14
+      [Verlet] SupportScheme.SuperSymmetric              ops    542  launches     8  syncs   14
+      [warpSPH] - [compSPH - 02] adjacency               ops    456  launches     8  syncs   12
+  step 3: up to 975 ops / 24 syncs in one section
+      [runner] integrator step                           ops    975  launches    22  syncs   24
+      [warpSPH] - buildVerletList                        ops    542  launches     8  syncs   14
+      [Verlet] SupportScheme.SuperSymmetric              ops    542  launches     8  syncs   14
+      [warpSPH] - [compSPH - 02] adjacency               ops    456  launches     8  syncs   12
+  step 4: up to 975 ops / 24 syncs in one section
+      [runner] integrator step                           ops    975  launches    22  syncs   24
+      [warpSPH] - buildVerletList                        ops    542  launches     8  syncs   14
+      [Verlet] SupportScheme.SuperSymmetric              ops    542  launches     8  syncs   14
+      [warpSPH] - [compSPH - 02] adjacency               ops    456  launches     8  syncs   12
+  step 5: up to 975 ops / 24 syncs in one section
+      [runner] integrator step                           ops    975  launches    22  syncs   24
+      [warpSPH] - buildVerletList                        ops    542  launches     8  syncs   14
+      [Verlet] SupportScheme.SuperSymmetric              ops    542  launches     8  syncs   14
+      [warpSPH] - [compSPH - 02] adjacency               ops    456  launches     8  syncs   12
+  step 6: up to 975 ops / 24 syncs in one section
+      [runner] integrator step                           ops    975  launches    22  syncs   24
+      [warpSPH] - buildVerletList                        ops    542  launches     8  syncs   14
+      [Verlet] SupportScheme.SuperSymmetric              ops    542  launches     8  syncs   14
+      [warpSPH] - [compSPH - 02] adjacency               ops    456  launches     8  syncs   12
+  step 7: up to 975 ops / 24 syncs in one section
+      [runner] integrator step                           ops    975  launches    22  syncs   24
+      [warpSPH] - buildVerletList                        ops    542  launches     8  syncs   14
+      [Verlet] SupportScheme.SuperSymmetric              ops    542  launches     8  syncs   14
+      [warpSPH] - [compSPH - 02] adjacency               ops    456  launches     8  syncs   12

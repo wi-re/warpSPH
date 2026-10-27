@@ -1,0 +1,19 @@
+schemaVersion: 1
+case: tgv-wc
+variant: analytic-pressure
+simulation:
+  nx: 64
+  tLimit: 0.1
+  device: cuda
+  precision: float32
+  plot: false
+  store: false
+params:
+  nu: 0.01
+  inviscid: false
+  shuffleIters: 0
+solver:
+  scheme: deltaSPH
+  diffusionParams:
+    densityDelta: 0.1
+    densityDiffusionTerm: fourtakas2019

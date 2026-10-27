@@ -10,7 +10,7 @@ from warpSPHBootstrap import bootstrap
 
 bootstrap(precision='float32')
 
-from warpSPH.cases.shockReflection import shockReflectionCase   # noqa: E402
+from warpSPH.cases.compressibleWalls.shockReflection import shockReflectionCase   # noqa: E402
 from warpSPH.runner import caseMain                             # noqa: E402
 
 PRESET = ['--plot', '--video']

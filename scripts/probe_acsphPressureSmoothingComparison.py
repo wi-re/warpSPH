@@ -31,6 +31,8 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--nx', type=int, default=32)
 parser.add_argument('--nSteps', type=int, default=100)
+parser.add_argument('--no-cudaGraph', dest='cudaGraph', action='store_false')
+parser.add_argument('--noBounce', action='store_true', help='D5 wall bounce-back off (config default is on)')
 parser.add_argument('--schemes', nargs='+',
                      default=['laplacian', 'renormalizedBiLaplacian', 'biharmonic', 'jst'],
                      choices=['laplacian', 'renormalizedBiLaplacian', 'biharmonic', 'jst'])
@@ -41,7 +43,7 @@ bootstrap(precision='float32')
 
 import numpy as np
 
-from warpSPH.cases.hydrostaticColumn import hydrostaticColumnCase as case
+from warpSPH.cases.boundaries.hydrostaticColumn import hydrostaticColumnCase as case
 from warpSPH.runner import run
 from warpSPH.enumTypes import PressureSmoothingScheme
 
@@ -57,6 +59,8 @@ def _configure(mode):
     def wrapped(ctx):
         base(ctx)
         ctx.schemeConfig.acParams.pressureSmoothing = mode
+        if args.noBounce:
+            ctx.schemeConfig.acParams.wallBounceBack = False
 
     return wrapped
 
@@ -72,7 +76,8 @@ for name in args.schemes:
     case.configureScheme = _configure(mode)
     try:
         r = run(case, scheme='artificialCompressible', nx=args.nx, nSteps=args.nSteps,
-                store=False, plot=False, quiet=True, progress=False)
+                store=False, plot=False, quiet=True, progress=False,
+                cudaGraph=args.cudaGraph)   # bitwise, ~3x: the dual-time loop replays from a graph (OPEN_PROBLEMS §33)
     finally:
         case.configureScheme = _orig
 

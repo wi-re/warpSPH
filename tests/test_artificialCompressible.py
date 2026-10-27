@@ -15,10 +15,14 @@ coefficients at unequal step sizes, and the `1/N` in the convergence metric.
 
 import pytest
 import torch
-from warpSPHIntegrators import getIntegrator
-from warpSPHIntegrators.integration import IntegrationSchemeType
+from warpSPHIntegrators import get_scheme
+from warpSPHIntegrators.schemes import IntegrationSchemeType
 
-import warpSPH.schemes.artificialCompressible as acmod
+import warpSPH.schemes.incompressible.artificialCompressible as acmod
+import warpSPH.modules.artificialCompressible as acm
+from warpSPHCore import (GradientScheme, OperationDirection, OperationProperties, SupportScheme,
+                         WarpOperation, warpOperation)
+from warpSPH.modules.pressure import computePressureForceSurfaceAware
 from warpSPH.configurations import (ArtificialCompressibleSPHConfig,
                                     artificialCompressibleConfigToDict,
                                     dictToArtificialCompressibleConfig)
@@ -160,26 +164,26 @@ def test_variableStepBdf2DifferentiatesAQuadraticExactly(dtPrev):
 def test_aMultiStageIntegratorIsRefused(built):
     """The exact-delta contract only holds for a single-evaluation integrator;
     anything else would run the dual-time solve once per stage and blend the
-    results. Refused at step entry, not warned about."""
+    results. Refused when the run is set up (`validate`, called by the runner), not warned about."""
     system, config, schemeConfig = built
     config.integrationScheme = IntegrationSchemeType.rungeKutta4
     with pytest.raises(ValueError, match='forwardEuler'):
-        acmod.artificialCompressible_step(system, 1e-3, config, schemeConfig)
+        schemeConfig.validate(config)
 
 
 def test_forwardEulerIsAccepted(built):
     system, config, schemeConfig = built
-    acmod.validateIntegrationScheme(config)  # does not raise
+    schemeConfig.validate(config)  # does not raise
 
 
 # --- the step itself -------------------------------------------------------
 
 def test_theStepRunsThroughTheRealIntegrator(built):
-    """One step through `getIntegrator(forwardEuler)` exactly as the runner
+    """One step through `get_scheme(forwardEuler)` exactly as the runner
     drives it -- the point being that the state/update tag wiring
     (`pressure`/`pressure_derivative`) actually resolves."""
     system, config, schemeConfig = built
-    integrator = getIntegrator(config.integrationScheme)
+    integrator = get_scheme(config.integrationScheme)
     result = integrator.function(state=system, f=acmod.artificialCompressible_step,
                                  dt=1e-3, config=config, verbose=False,
                                  schemeConfig=schemeConfig)
@@ -191,7 +195,7 @@ def test_theStepRollsTheBdfHistory(built):
     """`finalize` must advance `u^n -> u^{n-1}`, so the second step is the
     first one that can use BDF2."""
     system, config, schemeConfig = built
-    integrator = getIntegrator(config.integrationScheme)
+    integrator = get_scheme(config.integrationScheme)
     assert system.positionsPrev is None
     assert system.bdfCoefficients(1e-3)[3] == 1
 
@@ -292,7 +296,7 @@ def runOneStep(system, config, schemeConfig, maxIterations):
     local = ArtificialCompressibleSystem(state=copy.deepcopy(system.state),
                                          domain=config.domain)
     schemeConfig.acParams.maxPseudoIterations = maxIterations
-    integrator = getIntegrator(config.integrationScheme)
+    integrator = get_scheme(config.integrationScheme)
     result = integrator.function(state=local, f=acmod.artificialCompressible_step,
                                  dt=config.dt, config=config, verbose=False,
                                  schemeConfig=schemeConfig)
@@ -349,7 +353,7 @@ def test_theUpdateIsAnExactDelta(periodicBox):
                                          domain=config.domain)
     update, _, _ = acmod.artificialCompressible_step(local, config.dt, config,
                                                      schemeConfig)
-    integrator = getIntegrator(config.integrationScheme)
+    integrator = get_scheme(config.integrationScheme)
     local2 = ArtificialCompressibleSystem(state=copy.deepcopy(system.state),
                                           domain=config.domain)
     stepped = integrator.function(state=local2, f=acmod.artificialCompressible_step,
@@ -390,7 +394,7 @@ def test_acParametersFollowEquation24(periodicBox):
     from warpSPHCore import sphKernel_xi
     system, config, schemeConfig = periodicBox
     dt = 1e-3
-    dtau, beta, k1, k2, nu = acmod.acParameters(system.state, config, schemeConfig, dt)
+    dtau, beta, k1, k2, nu = acm.acParameters(system.state, config, schemeConfig, dt)
 
     assert dtau == pytest.approx(dt / schemeConfig.acParams.dtOverDtau)
     h = system.state.supports / sphKernel_xi(config.kernel.value, config.dim)
@@ -416,7 +420,7 @@ def test_theConvergenceMetricUsesOneOverNNotOneOverSqrtN(periodicBox):
         tildeV = torch.full((n, 2), 1e-3, device=device)
         velocities = torch.zeros((n, 2), device=device)
         fluid = torch.ones(n, dtype=torch.bool, device=device)
-        return acmod.convergenceMetric(tildeV, velocities, fluid, schemeConfig)
+        return acm.convergenceMetric(tildeV, velocities, fluid, schemeConfig)
 
     import math
     drift = epsFor(2000) - epsFor(1000)
@@ -434,9 +438,9 @@ def test_uCharCapsTheNormalisation(periodicBox):
     fluid = torch.ones(100, dtype=torch.bool, device=device)
 
     schemeConfig.acParams.uChar = None
-    uncapped = acmod.convergenceMetric(tildeV, fast, fluid, schemeConfig)
+    uncapped = acm.convergenceMetric(tildeV, fast, fluid, schemeConfig)
     schemeConfig.acParams.uChar = 1.0
-    capped = acmod.convergenceMetric(tildeV, fast, fluid, schemeConfig)
+    capped = acm.convergenceMetric(tildeV, fast, fluid, schemeConfig)
     assert capped > uncapped, 'a smaller U_eps must give a LARGER (worse) eps_v'
 
 
@@ -456,7 +460,7 @@ def test_theUnimplementedOptionsRaiseRatherThanNoOp(periodicBox, field, value):
     setattr(schemeConfig.acParams, field, value)
     try:
         with pytest.raises(NotImplementedError, match='ACSPH_PLAN'):
-            acmod.artificialCompressible_step(system, config.dt, config, schemeConfig)
+            schemeConfig.validate(config)
     finally:
         setattr(schemeConfig.acParams, field, original)
 
@@ -753,10 +757,10 @@ def _walledLattice():
 
 
 def _force(st, config, schemeConfig, p, unilateral):
-    view = acmod._workingState(st, st.positions, st.velocities, p)
+    view = acm.workingState(st, st.positions, st.velocities, p)
     if unilateral:
-        return acmod._unilateralWallForce(view, config, schemeConfig, None)
-    return acmod.computePressureForceSurfaceAware(view, config, schemeConfig, None)
+        return acm.unilateralWallForce(view, config, schemeConfig, None)
+    return computePressureForceSurfaceAware(view, config, schemeConfig, None)
 
 
 def test_unilateralWallForceIsExactWithoutTension(runtime):
@@ -804,12 +808,12 @@ def test_wallModeIsANoOpWithoutWalls(periodicBox):
 
 
 def _divergence(st, config, v):
-    view = acmod._workingState(st, st.positions, v, st.pressures)
-    return acmod.warpOperation(
-        view, acmod.OperationProperties(kernel=config.kernel, operation=acmod.WarpOperation.Divergence,
-                                        supportMode=acmod.SupportScheme.SuperSymmetric,
-                                        operationMode=acmod.OperationDirection.AllToAll,
-                                        gradientMode=acmod.GradientScheme.Difference),
+    view = acm.workingState(st, st.positions, v, st.pressures)
+    return warpOperation(
+        view, OperationProperties(kernel=config.kernel, operation=WarpOperation.Divergence,
+                                        supportMode=SupportScheme.SuperSymmetric,
+                                        operationMode=OperationDirection.AllToAll,
+                                        gradientMode=GradientScheme.Difference),
         queryValues=v, domain=config.domain, adjacency=None)
 
 
@@ -823,8 +827,8 @@ def test_theWallSplitOfTheDivergenceIsExact(runtime):
     v = torch.zeros_like(st.positions)
     v[fluid, 1] = 0.3 + 0.1 * torch.sin(7.0 * st.positions[fluid, 0])
     div = _divergence(st, config, v)
-    uni = acmod._unilateralWallDivergence(
-        acmod._workingState(st, st.positions, v, st.pressures), config, None, div)
+    uni = acm.unilateralWallDivergence(
+        acm.workingState(st, st.positions, v, st.pressures), config, None, div)
     # rows next to the floor: fluid moving up = away from the wall = separating,
     # so the wall share is positive and must be dropped entirely
     H = float(st.supports.max())
@@ -843,8 +847,8 @@ def test_anApproachingWallStillCompresses(runtime):
     v = torch.zeros_like(st.positions)
     v[fluid, 1] = -0.3
     div = _divergence(st, config, v)
-    uni = acmod._unilateralWallDivergence(
-        acmod._workingState(st, st.positions, v, st.pressures), config, None, div)
+    uni = acm.unilateralWallDivergence(
+        acm.workingState(st, st.positions, v, st.pressures), config, None, div)
     assert float(div[fluid].min()) < 0.0
     assert torch.allclose(uni[fluid], div[fluid], atol=1e-6)
 
@@ -858,8 +862,8 @@ def test_aSeparatingRowHasNoWallDivergence(runtime):
     v = torch.zeros_like(st.positions)
     v[fluid, 1] = 0.3
     div = _divergence(st, config, v)
-    uni = acmod._unilateralWallDivergence(
-        acmod._workingState(st, st.positions, v, st.pressures), config, None, div)
+    uni = acm.unilateralWallDivergence(
+        acm.workingState(st, st.positions, v, st.pressures), config, None, div)
     H = float(st.supports.max())
     near = fluid & (st.positions[:, 1] < 3.0 / N_PER_SIDE + 0.9 * H)
     assert float(div[near].abs().max()) > 1e-3
@@ -874,7 +878,7 @@ def test_wallAdjacentIsExactlyTheRowsWithAWallInSupport(runtime):
     wall row (gradW = 0 there, the lattice puts some on the edge) are a float
     tie either way and are excluded."""
     st, config, _, wall = _walledLattice()
-    adj = acmod._wallAdjacent(st, config, None)
+    adj = acm.wallAdjacent(st, config, None)
     d = torch.cdist(st.positions, st.positions[wall])
     H = st.supports.unsqueeze(-1)
     ref = (d < H).any(-1)
@@ -920,7 +924,7 @@ def test_convergenceMetricDeviceIsBitwiseHostMetric():
     """The dual-time loop's device-side eps_v (read back only at checkpoints)
     must be the exact number `convergenceMetric` computes on the host."""
     import torch
-    from warpSPH.schemes import artificialCompressible as acmod
+    from warpSPH.schemes.incompressible import artificialCompressible as acmod
     from warpSPH.configurations.artificialCompressible import ArtificialCompressibleSPHConfig
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     g = torch.Generator(device='cpu').manual_seed(3)
@@ -931,10 +935,206 @@ def test_convergenceMetricDeviceIsBitwiseHostMetric():
     schemeConfig = ArtificialCompressibleSPHConfig()
     for uChar in (None, 0.5):
         schemeConfig.acParams.uChar = uChar
-        host = acmod.convergenceMetric(tildeV, velocities, fluid, schemeConfig)
+        host = acm.convergenceMetric(tildeV, velocities, fluid, schemeConfig)
         idx = fluid.nonzero().squeeze(1)
-        dev = float(acmod.convergenceMetricDevice(tildeV, velocities, idx, int(idx.numel()), schemeConfig))
+        dev = float(acm.convergenceMetricDevice(tildeV, velocities, idx, int(idx.numel()), schemeConfig))
         assert dev == host, (uChar, dev, host)
     zero = torch.zeros_like(tildeV)
     idx = fluid.nonzero().squeeze(1)
-    assert float(acmod.convergenceMetricDevice(zero, velocities, idx, int(idx.numel()), schemeConfig)) == float('-inf')
+    assert float(acm.convergenceMetricDevice(zero, velocities, idx, int(idx.numel()), schemeConfig)) == float('-inf')
+
+
+# --- the authors' edge-conditioned wall-pressure attenuation (D1) -----------
+
+def _edgeRelaxed(mode, edge, lam, p):
+    from warpSPH.modules.incompressible.wallPressure import wallPressureExtrapolation
+    st, config, _, wall = _walledLattice()
+    return st, wall, wallPressureExtrapolation(
+        st, config, None, p, ~wall, mode='shepard', clampNonNeg=False,
+        edgeRelax=mode, edgeFlags=edge, lambdas=lam)
+
+
+def test_edgeRelaxOnlyTouchesNegativeWallRowsBesideAnEdge(runtime):
+    """'zero' zeroes a negative wall pressure iff a flagged fluid row is in the
+    wall row's support; everything else (positive wall pressure, wall rows far
+    from the flag, fluid rows) is bit-identical to 'off'."""
+    st, config, _, wall = _walledLattice()
+    p = -torch.ones(st.positions.shape[0], device=st.positions.device)
+    lam = torch.ones_like(p)
+    edge = torch.zeros_like(p, dtype=torch.bool)
+    fluidIdx = (~wall).nonzero().squeeze(1)
+    hit = fluidIdx[0]                       # lowest fluid row, beside the wall
+    edge[hit] = True
+    _, _, off = _edgeRelaxed('off', edge, lam, p)
+    _, _, zero = _edgeRelaxed('zero', edge, lam, p)
+    near = wall & ((st.positions - st.positions[hit]).norm(dim=-1) < st.supports)
+    assert bool(near.any())
+    assert bool((off[wall] < 0).all())
+    assert bool((zero[near] == 0).all())
+    assert torch.equal(zero[~near], off[~near])
+    # positive pressure is never attenuated
+    _, _, offP = _edgeRelaxed('off', edge, lam, -p)
+    _, _, zeroP = _edgeRelaxed('zero', edge, lam, -p)
+    assert torch.equal(offP, zeroP)
+
+
+def test_edgeRelaxLambdaInterpolatesBetweenZeroAndOff(runtime):
+    st, config, _, wall = _walledLattice()
+    p = -torch.ones(st.positions.shape[0], device=st.positions.device)
+    edge = torch.zeros_like(p, dtype=torch.bool)
+    edge[(~wall).nonzero().squeeze(1)[0]] = True
+    _, _, off = _edgeRelaxed('off', edge, torch.ones_like(p), p)
+    _, _, sparse = _edgeRelaxed('lambda', edge, torch.full_like(p, 0.3), p)
+    # lambda >= 1 beside the edge row leaves the wall pressure nearly untouched;
+    # lambda <= 1/2 everywhere zeroes it entirely
+    nearEdge = (sparse != off) & wall
+    assert bool(nearEdge.any())
+    assert bool((sparse[nearEdge] == 0).all())
+
+
+def test_edgeRelaxIsANoOpWithoutWalls(periodicBox):
+    system, config, schemeConfig = periodicBox
+    try:
+        schemeConfig.acParams.wallPressureEdgeRelax = 'off'
+        off = runOneStep(system, config, schemeConfig, 20).state
+        schemeConfig.acParams.wallPressureEdgeRelax = 'lambda'
+        rel = runOneStep(system, config, schemeConfig, 20).state
+    finally:
+        schemeConfig.acParams.wallPressureEdgeRelax = 'off'
+    assert torch.equal(off.pressures, rel.pressures)
+    assert torch.equal(off.velocities, rel.velocities)
+
+
+def test_edgeRelaxRoundTripsAndExcludesCavitation():
+    config = ArtificialCompressibleSPHConfig()
+    config.acParams.wallPressureEdgeRelax = 'lambda'
+    back = dictToArtificialCompressibleConfig(artificialCompressibleConfigToDict(config))
+    assert back.acParams.wallPressureEdgeRelax == 'lambda'
+
+
+# --- the authors' lambda taper on the pressure diffusion (D3) ----------------
+
+def test_diffusionTaperIsAC2RampBetweenTheTwoLambdas():
+    lam = torch.tensor([0.0, 0.1, 0.25, 0.4, 0.7, 1.0])
+    t = acm.diffusionTaper(lam, 0.1, 0.4)
+    assert torch.allclose(t[[0, 1]], torch.zeros(2))
+    assert torch.allclose(t[[3, 4, 5]], torch.ones(3))
+    assert 0.0 < float(t[2]) < 1.0
+    assert bool((t[1:4].diff() >= 0).all())
+    # authors' formula at the midpoint: q = 0.5 -> (0.5)^4 * 3
+    assert float(t[2]) == pytest.approx(0.5 ** 4 * 3.0, rel=1e-5)
+
+
+def test_diffusionTaperIsANoOpWhereEveryRowIsWellSupported(periodicBox):
+    """Periodic box: lambda ~ 1 everywhere, so the taper is 1 and the step is
+    bit-identical."""
+    system, config, schemeConfig = periodicBox
+    try:
+        schemeConfig.acParams.diffusionLambdaTaper = False
+        off = runOneStep(system, config, schemeConfig, 20).state
+        schemeConfig.acParams.diffusionLambdaTaper = True
+        on = runOneStep(system, config, schemeConfig, 20).state
+    finally:
+        schemeConfig.acParams.diffusionLambdaTaper = False
+    assert torch.allclose(off.pressures, on.pressures, atol=1e-6, rtol=1e-5)
+
+
+def test_diffusionTaperRoundTrips():
+    config = ArtificialCompressibleSPHConfig()
+    config.acParams.diffusionLambdaTaper = True
+    config.acParams.diffusionTaperLambdaOne = 0.5
+    back = dictToArtificialCompressibleConfig(artificialCompressibleConfigToDict(config))
+    assert back.acParams.diffusionLambdaTaper is True
+    assert back.acParams.diffusionTaperLambdaOne == pytest.approx(0.5)
+
+
+def test_authorsCheapAlignmentsAreTheDefault():
+    """2026-10-13 (user): the cheap authors'-code alignments are on by default --
+    D3 taper, D5 wall bounce-back with the stable 'position' target -- and the
+    costly ones (D1, D2) stay off."""
+    ap = ArtificialCompressibleSPHConfig().acParams
+    assert ap.diffusionLambdaTaper is True
+    assert ap.wallBounceBack is True and ap.wallBounceTarget == 'position' and ap.wallBounceRamp == 0.0
+    assert ap.wallPressureEdgeRelax == 'off' and ap.redetectSurfacePerIteration is False
+
+
+# --- per-iteration re-detection (D2) and wall bounce-back (D5) ---------------
+
+def test_wallBounceReversesOnlyTheNormalComponentOfAnApproachingNearWallRow(runtime):
+    pos = torch.tensor([[0.0, 0.0], [0.1, 0.1], [0.5, 0.5], [0.1, 0.0]])  # wall, near, far, near-but-leaving
+    n = torch.tensor([[0.0, 1.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]])    # wall normal points +y
+    v = torch.tensor([[0.0, 0.0], [1.0, -2.0], [1.0, -2.0], [1.0, 3.0]])
+    pi, pj = torch.tensor([1, 2, 3]), torch.tensor([0, 0, 0])
+    out = acm.wallBounce(pos, v, pi, pj, n, 1.0, 0.25)
+    # row 1: 0.1 above the wall -> bounce; tangential kept, normal flipped
+    assert torch.allclose(out[1], torch.tensor([1.0, 2.0]))
+    # row 2: far away (beyond 1.155 dx)
+    assert torch.equal(out[2], v[2])
+    # row 3: close but moving away from the wall
+    assert torch.equal(out[3], v[3])
+    # not a fluid-wall pair member
+    assert torch.equal(out[0], v[0])
+
+
+def test_wallBounceRampIsContinuousInTheWallDistance(runtime):
+    """ramp = 0 jumps at `distance`; ramp > 0 fades the reversal out smoothly: full
+    below (1 - ramp) * distance, nothing at `distance`, monotone in between,
+    never touching a leaving row."""
+    d = torch.linspace(0.0, 0.3, 61)
+    pos = torch.cat([torch.zeros(1, 2), torch.stack([torch.zeros_like(d), d], dim=1)])
+    n = torch.zeros_like(pos); n[0] = torch.tensor([0.0, 1.0])
+    v = torch.zeros_like(pos); v[1:] = torch.tensor([1.0, -2.0])
+    pi, pj = torch.arange(1, pos.shape[0]), torch.zeros(pos.shape[0] - 1, dtype=torch.long)
+    hard = acm.wallBounce(pos, v, pi, pj, n, 1.0, 0.25)[1:, 1]
+    soft = acm.wallBounce(pos, v, pi, pj, n, 1.0, 0.25, ramp=0.5)[1:, 1]
+    assert float(hard.max() - hard.min()) == pytest.approx(4.0)            # the jump: +2 -> -2
+    assert float(soft[0]) == pytest.approx(2.0)                            # touching: full reversal
+    assert float(soft[d >= 0.25].max()) == pytest.approx(-2.0)             # at / beyond distance: untouched
+    assert float(soft[d <= 0.125].min()) == pytest.approx(2.0)             # inside (1 - ramp) * distance: full
+    assert float((soft[1:] - soft[:-1]).abs().max()) < 0.4                 # no jump
+    assert bool((soft[1:] <= soft[:-1] + 1e-6).all())                      # monotone
+    leaving = v.clone(); leaving[1:] = torch.tensor([1.0, 3.0])
+    assert torch.equal(acm.wallBounce(pos, leaving, pi, pj, n, 1.0, 0.25, ramp=0.5), leaving)
+
+
+def test_wallBounceSetupIsEmptyWithoutGhostsAndTheStepIsUnchanged(runtime):
+    st, config, schemeConfig, wall = _walledLattice()
+    from warpSPHCore import buildVerletList, SupportScheme
+    adj = buildVerletList(st, config.domain, verletScale=config.verletScale,
+                          supportMode=SupportScheme.SuperSymmetric, priorNeighborhood=None, verbose=False)
+    pi, pj, nW = acm.wallBounceSetup(st, adj)
+    assert pi.numel() > 0 and float(nW.abs().max()) == 0.0
+    v = torch.randn_like(st.velocities)
+    assert torch.equal(acm.wallBounce(st.positions, v, pi, pj, nW, 1.0, 0.25), v)
+
+
+def test_redetectAndBounceAreNoOpsInAPeriodicBox(periodicBox):
+    system, config, schemeConfig = periodicBox
+    try:
+        off = runOneStep(system, config, schemeConfig, 20).state
+        schemeConfig.acParams.redetectSurfacePerIteration = True
+        schemeConfig.acParams.wallBounceBack = True
+        on = runOneStep(system, config, schemeConfig, 20).state
+    finally:
+        schemeConfig.acParams.redetectSurfacePerIteration = False
+        schemeConfig.acParams.wallBounceBack = False
+    assert torch.allclose(off.pressures, on.pressures, atol=1e-5, rtol=1e-4)
+    assert torch.allclose(off.velocities, on.velocities, atol=1e-5, rtol=1e-4)
+
+
+def test_bounceTargetsAreNoOpsWithoutWallsAndAreValidated(periodicBox):
+    system, config, schemeConfig = periodicBox
+    try:
+        off = runOneStep(system, config, schemeConfig, 20).state
+        schemeConfig.acParams.wallBounceBack = True
+        for target in ('position', 'stage', 'both'):
+            schemeConfig.acParams.wallBounceTarget = target
+            on = runOneStep(system, config, schemeConfig, 20).state
+            assert torch.allclose(off.pressures, on.pressures, atol=1e-5, rtol=1e-4), target
+            assert torch.allclose(off.velocities, on.velocities, atol=1e-5, rtol=1e-4), target
+        schemeConfig.acParams.wallBounceTarget = 'nonsense'
+        with pytest.raises(ValueError):
+            schemeConfig.validate(config)
+    finally:
+        schemeConfig.acParams.wallBounceBack = False
+        schemeConfig.acParams.wallBounceTarget = 'position'

@@ -1,4 +1,4 @@
-"""Shearing Noh implosion initial state, used by `warpSPH.cases.shearingNoh`.
+"""Shearing Noh implosion initial state, used by `warpSPH.cases.compressible.shearingNoh`.
 
 Layers a transverse shear onto the Noh setup: the x-velocity is a sign step at
 `x=0` (converging left/right halves, as in the plain Noh case) while the

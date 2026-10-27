@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "warpSPH"
-version = "0.6.0"
+version = "0.6.1"
 authors = [
   { name="Rene Winchenbach", email="contact@fluids.dev" },
 ]
@@ -29,9 +29,10 @@ dependencies = [
     "torch",
     "warp-lang>=1.17.0",
     "numpy",
-    "warpSPHCore>=0.5.0",
+    "pyyaml>=6",
+    "warpSPHCore>=0.6.1",
     "warpSPHPlotting>=0.5.0",
-    "warpSPHIntegrators>=0.5.0",
+    "warpSPHIntegrators>=0.7.0",
     "vispy",
     "jupyter_rfb",
     "pyvirtualdisplay", "piglet", "glfw",
@@ -66,7 +67,7 @@ warpsph-run = "warpSPHRun:main"
 package-dir = {"" = "src"}
 # Must be importable before `warpSPH` -- they choose the precision that
 # `warpSPHCore.type_config` locks in at its first import.
-py-modules = ["warpSPHBootstrap", "warpSPHRun"]
+py-modules = ["warpSPHBootstrap", "warpSPHRun", "warpSPHConfig"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -7,7 +7,7 @@ positions and velocities through the resulting transform
 (`transformation.getTransformationMatrix`, `update.updateBodyParticlesWCSPH`).
 `systems/weaklyCompressible.py` and `systems/incompressible.py` call the
 integrate/update pair every step to move rigid obstacles such as
-`cases/movingObstacle.py`'s spinning hexagon.
+`cases/wallBounded/movingObstacle.py`'s spinning hexagon.
 """
 
 from .build import buildRigidBody, buildAnalyticRigidBody

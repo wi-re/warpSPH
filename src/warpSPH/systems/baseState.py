@@ -10,7 +10,9 @@ extra fields layered on top. Referenced directly (not just as a base class) by
 `modules/momentum/consistent.py`'s type hint.
 """
 
-from warpSPHIntegrators import *
+from .identity import ParticleIdentityState
+from warpSPHIntegrators.state import BaseIntegrationSystem, BaseState, ComponentUpdateSpec, PositionUpdateSpec, constant, get_reference_state, integrated, reference_state, tagged
+from warpSPHIntegrators.state.fields import update_component, update_position
 from dataclasses import dataclass
 import torch
 from typing import Optional
@@ -20,7 +22,7 @@ __all__ = ['BaseState', 'BaseParticleState', 'BaseSystemUpdate', 'BaseSystem']
 
 
 @dataclass
-class BaseParticleState(BaseState):
+class BaseParticleState(ParticleIdentityState):
     positions : torch.Tensor = integrated('dxdt', tags=('position',))
     velocities: torch.Tensor = integrated('dvdt', tags=('velocity',))
     supports : torch.Tensor = constant(tags=('particle_support',))
@@ -45,7 +47,8 @@ class BaseSystem(BaseIntegrationSystem):
     t: float = 0.0
     def initializeNewState(self, *args, verbose=False, **kwargs):
         state = get_reference_state(self)
-        verbosePrint(verbose, f'Initializing new state [t={self.t}]')
+        if verbose:   # self.t may be a device tensor: format it only when printing
+            print(f'Initializing new state [t={self.t}]')
         return BaseSystem(state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain)
     
     def apply_position_update(self, update, spec: PositionUpdateSpec, **kwargs):

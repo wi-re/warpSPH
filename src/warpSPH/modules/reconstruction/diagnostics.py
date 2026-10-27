@@ -9,6 +9,8 @@ Off the hot path: only costs anything when called.
 
 from __future__ import annotations
 
+from warpSPHCore.type_config import index_t, offset_t
+
 from typing import Any
 
 import torch
@@ -28,7 +30,7 @@ __all__ = ['computePairPhiMean']
 
 @wp.kernel
 def _pairPhiKernel(
-    I: wp.array(dtype=wp.int64), J: wp.array(dtype=wp.int64),
+    I: wp.array(dtype=index_t), J: wp.array(dtype=index_t),
     x: wp.array(dtype=vector(length=Any, dtype=scalar_t)), v: wp.array(dtype=vector(length=Any, dtype=scalar_t)),  # type: ignore
     h: wp.array(dtype=scalar_t), grad: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)),  # type: ignore
     B: wp.array(dtype=scalar_t),
@@ -62,19 +64,20 @@ def computePairPhiMean(system, simulationConfig, diffusionParams) -> torch.Tenso
     if B is None:
         B = torch.zeros_like(st.supports)
     dev = str(st.positions.device)
-    nPairs = adj.i.shape[0]
+    adjI, adjJ = adj.livePairs()
+    nPairs = adjI.shape[0]
     phi = wp.zeros(nPairs, dtype=scalar_t, device=dev)
     wp.launch(_pairPhiKernel, dim=nPairs, device=dev, inputs=[
-        castTorchToWarp(adj.i.to(torch.int64)), castTorchToWarp(adj.j.to(torch.int64)),
+        castTorchToWarp(adjI), castTorchToWarp(adjJ),
         castTorchToWarpAsBuiltins(st.positions), castTorchToWarpAsBuiltins(st.velocities),
         castTorchToWarp(st.supports), castTorchToWarpAsBuiltins(grad.contiguous()), castTorchToWarp(B.contiguous()),
         buildDomainState(simulationConfig.domain), int(params.velocityPairPolicy), simulationConfig.kernel.value,
         float(params.reconstructionEtaCrit), float(params.reconstructionEtaFold), float(params.reconstructionBalsaraPower), int(params.limiterType),
         phi])
     phi = wp.to_torch(phi)
-    notSelf = (adj.i != adj.j).to(phi.dtype)
+    notSelf = (adjI != adjJ).to(phi.dtype)
     # deterministic per-row sums (no atomics): the Verlet list is row-sorted
-    rows = adj.i.to(torch.int64)
+    rows = adjI.to(torch.int64)
     counts = torch.bincount(rows, minlength=n)
     sums = torch.segment_reduce(phi * notSelf, 'sum', lengths=counts)
     nb = torch.segment_reduce(notSelf, 'sum', lengths=counts)

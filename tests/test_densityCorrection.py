@@ -129,6 +129,64 @@ def _buildConfig(dim, kernel, dc):
 # The hook: off is the identity, on is the util on the raw estimate
 # --------------------------------------------------------------------------- #
 
+@pytest.mark.parametrize('corrected', [False, True])
+def test_physicalWallDensityIsAddedBeforeCorrection(corrected):
+    dim, kernel = 2, KernelFunctions.Wendland4
+    H = _H(dim, 100.0)
+    state, _, _ = _stateAndDomain(dim, H)
+    config = _buildConfig(dim, kernel, corrected)
+    adjacency = _adjacency(dim, H)
+    bulk = computeDensities(state, _buildConfig(dim, kernel, None), None, adjacency, wall=False)
+    wall = torch.full_like(bulk, 0.25)
+    expected = bulk + wall
+    if corrected:
+        expected = applyDensityCorrection(expected, state.masses, state.supports, kernel, dim)
+    actual = computeDensities(state, config, None, adjacency, wall=wall)
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize('representation', ['analytic', 'particles', 'auto'])
+@pytest.mark.parametrize('normalized', [False, True])
+def test_densityEvaluatesPhysicalWallWithoutPressureGeometry(representation, normalized):
+    from copy import copy
+    from types import SimpleNamespace as NS
+    from warpSPH.caseUtils.projection import initializeProjectionDensity
+    from warpSPH.enumTypes import IncompressibleSPHScheme
+    from warpSPH.configurations import IISPHConfig
+
+    dim, kernel = 2, KernelFunctions.Wendland4
+    H = _H(dim, 100.0)
+    state, _, _ = _stateAndDomain(dim, H)
+    config = _buildConfig(dim, kernel, None)
+    config.calibrateNormalization = normalized
+    lam = torch.full((1, len(state.masses)), .2, dtype=state.masses.dtype)
+    calls = []
+
+    def aggregate(particles, support, kernel, **kwargs):
+        calls.append(particles)
+        return NS(out={'lam': lam})  # No pressure gradient, moments, or contact geometry.
+
+    scheme = NS(boundaryProvider=NS(aggregate=aggregate, rigidBodies=[]),
+                rigidBodies=[], analyticWallMass=.83, fluid=NS(restDensity=1000.),
+                iisph=IISPHConfig(boundaryRepresentation=representation))
+    adjacency = _adjacency(dim, H)
+    if normalized:
+        state = copy(state)
+        ctx = NS(scheme=IncompressibleSPHScheme.iisph, config=config, schemeConfig=scheme,
+                 spec=NS(n_h=config.n_h), scratch={})
+        initializeProjectionDensity(ctx, NS(state=state, adjacency=adjacency))
+        assert not config.calibrateNormalization
+        calls.clear()
+    expected = computeDensities(state, config, scheme, adjacency, wall=False)
+    if representation != 'particles':
+        packing = scheme.analyticWallMass
+        expected = expected + 1000. * (packing * lam.sum(0))
+    actual = computeDensities(state, config, scheme, adjacency,
+        boundaryRepresentation=representation, wallMassDensity=1000.)
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+    assert len(calls) == (representation != 'particles')
+
+
 @pytest.mark.parametrize('kernel', WENDLANDS)
 @pytest.mark.parametrize('dim', [2, 3])
 @pytest.mark.parametrize('off', [None, False, DensityCorrection()])

@@ -1,0 +1,17 @@
+InitCondFile                       kh_mcnally_2d_ics
+OutputDir                          output
+TimeMax                            2
+BoxSize                            1
+TimeBetSnapshot                    0.5
+MaxSizeTimestep                    0.02
+DesNumNgb                          40
+ErrTolIntAccuracy                  0.01
+CourantFac                         0.1
+MaxRMSDisplacementFac              0.1
+ErrTolForceAcc                     0.001
+TimeBetStatistics                  0.5
+MaxMemSize                         1000
+ErrTolTheta                        0.7
+MaxNumNgbDeviation                 0.1
+ResubmitOn                         0
+ResubmitCommand                    none

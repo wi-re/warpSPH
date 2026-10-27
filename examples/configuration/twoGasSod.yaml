@@ -1,0 +1,14 @@
+schemaVersion: 1
+case: twoGasSod
+variant: twoGamma
+simulation:
+  nx: 400
+  tLimit: 0.15
+  plot: true
+  video: true
+  progress: true
+  plotBackend: vispy
+  plotInterval: 25
+  execution: eager
+solver:
+  scheme: CRKSPH

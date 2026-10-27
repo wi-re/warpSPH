@@ -9,7 +9,7 @@ docstrings for why), and are used by `io/{dataset,importIO,export}.py`.
 """
 
 __all__ = ['SimulationConfig', 'buildConfig', 'configurationToDict', 'dictToConfig',
-           'DensityCorrection']
+           'DensityCorrection', 'ComputeConfig']
 
 import torch
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -17,13 +17,15 @@ from dataclasses import dataclass
 
 
 from ..utils import *
-from warpSPHIntegrators import *
+from warpSPHIntegrators.schemes import IntegrationSchemeType
+from warpSPHIntegrators import get_scheme
 from warpSPHCore import *
 
 from dataclasses import dataclass, field
 
 # from waves.utils.domain import buildDomainDescription
 from ..geometry import SamplingScheme
+from .compute import ComputeConfig
 
 @dataclass
 class DensityCorrection:
@@ -60,7 +62,7 @@ class SimulationConfig:
     kernel: KernelFunctions = field(default=KernelFunctions.Wendland2, metadata={'description': 'Kernel function to use'})
     
     integrationScheme: IntegrationSchemeType = field(default=IntegrationSchemeType.rungeKutta4, metadata={'description': 'Integration scheme for time stepping'})
-    cflFactor: float = field(default=0.3, metadata={'description': 'CFL factor for time step calculation. NOTE: what it multiplies is scheme-dependent. The compressible/weakly-compressible timesteps apply it to the support radius h; the incompressible (DFSPH) cases apply it to the particle *diameter* dx, which is the form Bender & Koschier state their dt <= 0.4 d/|v_max| in, so their constant can be written in the config directly (see cases/kolmogorovIncompressible.py and DFSPH_IMPROVEMENT_PLAN.md Part 12). With n_h = 4 the two conventions differ by 4x for the same number.'})
+    cflFactor: float = field(default=0.3, metadata={'description': 'CFL factor for time step calculation. NOTE: what it multiplies is scheme-dependent. The compressible/weakly-compressible timesteps apply it to the support radius h; the incompressible (DFSPH) cases apply it to the particle *diameter* dx, which is the form Bender & Koschier state their dt <= 0.4 d/|v_max| in, so their constant can be written in the config directly (see cases/periodic/kolmogorovIncompressible.py and DFSPH_IMPROVEMENT_PLAN.md Part 12). With n_h = 4 the two conventions differ by 4x for the same number.'})
     dt: Optional[float] = None
     minDt: Optional[float] = field(default=1e-6, metadata={'description': 'Minimum time step for adaptive time stepping'})
     maxDt: Optional[float] = field(default=1e-2, metadata={'description': 'Maximum time step for adaptive time stepping'})
@@ -89,9 +91,12 @@ class SimulationConfig:
     supportVolumeClamp: str = 'walls'
     #: Scale the kernel by `1 / L(kernel, n_h, dim)` so a defect-free lattice measures `rho0` exactly
     #: (`L` is the lattice-quadrature offset of the kernel sum: `int W dV = 1` does not make
-    #: `sum_j m_j W_ij = rho0`). Off by default; meaningful only at uniform resolution.
+    #: `sum_j m_j W_ij = rho0`). The runner enables it for pressure-projection
+    #: schemes; other families opt in for uniform-resolution rest states.
     #:
-    #: **Applied to the summation density only** (`modules/density/density.py`). The gradient,
+    #: IISPH consumes this option during initialization by scaling particle and
+    #: solid masses once, then clears it and uses ordinary kernels thereafter.
+    #: For the other schemes, **applied to the summation density only** (`modules/density/density.py`). The gradient,
     #: divergence, Laplacian, curl and interpolation operators (~130 `OperationProperties(...)` call
     #: sites) keep the unscaled kernel. From a theoretical SPH point of view the same offset
     #: touches every kernel sum, and a consistent correction would scale all of them (via a
@@ -105,6 +110,8 @@ class SimulationConfig:
     #: `calibrateNormalization` -- a different correction; see
     #: `DensityCorrection`'s docstring. Off by default.
     densityCorrection: DensityCorrection = field(default_factory=DensityCorrection)
+    #: how the run uses the machine (eager / CUDA graph / auto by size, how often iterative solvers read the host): `ComputeConfig`.
+    compute: ComputeConfig = field(default_factory=ComputeConfig)
     supportMode: SupportScheme = field(default=SupportScheme.SuperSymmetric, metadata={'description': 'Support scheme for neighbor search'})
     
     
@@ -133,6 +140,7 @@ def buildConfig(
     n_h: Optional[float] = None,
     calibrateNormalization: Optional[bool] = None,
     densityCorrection: Optional[Union[bool, DensityCorrection]] = None,
+    compute: Optional[Union[ComputeConfig, Dict[str, Any]]] = None,
     supportMode: Optional[SupportScheme] = None,
     gradientMode: Optional[GradientScheme] = None,
     laplacianMode: Optional[LaplacianScheme] = None,
@@ -170,6 +178,10 @@ def buildConfig(
     elif isinstance(densityCorrection, bool):
         # Bool shorthand: on/off with the warpSPHCore-shipped constants.
         densityCorrection = DensityCorrection(enabled=densityCorrection)
+    if compute is None:
+        compute = ComputeConfig()
+    elif isinstance(compute, dict):
+        compute = ComputeConfig(**compute)
     if supportMode is None:
         supportMode = SupportScheme.SuperSymmetric
     if gradientMode is None:
@@ -205,11 +217,12 @@ def buildConfig(
         n_h=n_h,
         calibrateNormalization=calibrateNormalization,
         densityCorrection=densityCorrection,
+        compute=compute,
         supportMode=supportMode,
         gradientMode=gradientMode,
         laplacianMode=laplacianMode,
         samplingScheme=samplingScheme,
-    ), getIntegrator(integrationScheme)
+    ), get_scheme(integrationScheme)
 
 import numpy as np
 import enum
@@ -302,17 +315,17 @@ def _decodeValue(annotation: Any, value: Any, device, dtype) -> Any:
                 periodic=torch.tensor(_atLeast1D(value['periodic']), device=device, dtype=torch.bool),
                 dim=int(value['dim']),
             )
-        if annotation is DensityCorrection:
-            # Keys absent from a dict written before the field existed fall
+        if _isDataclass(annotation):
+            # A nested config dataclass (DensityCorrection, ComputeConfig). Keys absent from a dict written before the field existed fall
             # back to the dataclass defaults (like every other field here).
-            hints = typing.get_type_hints(DensityCorrection)
+            hints = typing.get_type_hints(annotation)
             nested = {}
-            for f in _dataclassFields(DensityCorrection):
+            for f in _dataclassFields(annotation):
                 if f.name not in value:
                     continue
                 nested[f.name] = _decodeValue(
                     hints.get(f.name, f.type), value[f.name], device, dtype)
-            return DensityCorrection(**nested)
+            return annotation(**nested)
         if annotation is bool:
             return bool(value)
     # Normalize numpy scalars that come back out of HDF5 without changing width.

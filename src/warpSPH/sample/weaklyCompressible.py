@@ -2,8 +2,8 @@
 lattice (zero pressure/velocity, unit density/soundspeed), wrapped straight
 into `SimulationState`/`SimulationSystem` with no support/density relaxation
 step (unlike `sample.compressible`'s counterpart). Re-exported at the
-top-level `warpSPH` package; used by the TGV cases (`cases/tgv.py`,
-`cases/tgvWeaklyCompressible.py`).
+top-level `warpSPH` package; used by the TGV cases (`cases/periodic/tgv.py`,
+`cases/periodic/tgvWeaklyCompressible.py`).
 """
 
 import torch

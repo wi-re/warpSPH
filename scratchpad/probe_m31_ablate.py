@@ -24,7 +24,7 @@ clampMode  = sys.argv[3] if len(sys.argv) > 3 else 'fallback'
 pst        = sys.argv[4] if len(sys.argv) > 4 else 'on'
 tLimit     = float(sys.argv[5]) if len(sys.argv) > 5 else 1.24
 
-import warpSPH.schemes.deltaSPH as sch
+import warpSPH.schemes.weaklyCompressible.deltaSPH as sch
 NOPEN_MODE = nopen if isinstance(nopen, str) else ('derivative' if nopen else 'off')
 
 if clampMode == 'blanket':
@@ -36,7 +36,7 @@ if clampMode == 'blanket':
     sch.computeMdbcDensity = clamped
 
 from warpSPH.cases import importAll; importAll()
-from warpSPH.cases.dambreak import dambreakCase
+from warpSPH.cases.freeSurface.dambreak import dambreakCase
 from warpSPH.runner import run
 
 H, TANK_L, G = 0.6, 1.0, 9.81

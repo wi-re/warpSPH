@@ -72,6 +72,30 @@ def limitedPairPhi(
 
 
 @wp.func
+def monotoneNormalJump(
+    raw: vector(dtype=scalar_t, length=Any), reconstructed: vector(dtype=scalar_t, length=Any),
+    x_ij: vector(dtype=scalar_t, length=Any),
+):
+    """Experimental minmod of the normal correction against the sampled jump.
+
+    Keep the normal reconstructed jump between zero and the raw jump. For a
+    radial viscous force with positive coefficients, its product with the raw
+    normal jump is nonnegative, as conjugate viscous heating requires. The
+    native Frontiere reconstruction and tangential components are unchanged.
+    This is an opt-in composition, not a thermal floor or energy correction.
+    """
+    r2 = wp.dot(x_ij, x_ij)
+    if r2 <= scalar_t(0.0):
+        return reconstructed
+    normal = x_ij / wp.sqrt(r2)
+    rawNormal = wp.dot(raw, normal)
+    reconstructedNormal = wp.dot(reconstructed, normal)
+    limitedNormal = wp.min(wp.max(reconstructedNormal, wp.min(rawNormal, scalar_t(0.0))),
+                           wp.max(rawNormal, scalar_t(0.0)))
+    return reconstructed + (limitedNormal-reconstructedNormal)*normal
+
+
+@wp.func
 def reconstructPairVelocity(
     policy: wp.int32,
     v_i: vector(dtype = scalar_t, length=Any), v_j: vector(dtype = scalar_t, length=Any), # type: ignore
@@ -99,4 +123,7 @@ def reconstructPairVelocity(
         # a zero base is not safe for every p (the AD rule of limiters.py's van Leer division, AV_PLAN §2.6)
         if B_bar > scalar_t(0.0):
             phi = phi * (scalar_t(1.0) - wp.pow(B_bar, balsaraPower))
-    return linearPairVelocity(v_i, v_j, J_i, J_j, x_ij, phi)
+    reconstructed = linearPairVelocity(v_i, v_j, J_i, J_j, x_ij, phi)
+    if policy == wp.static(VelocityPairPolicy.MonotoneLimited.value):
+        return monotoneNormalJump(rawPairVelocity(v_i,v_j), reconstructed, x_ij)
+    return reconstructed

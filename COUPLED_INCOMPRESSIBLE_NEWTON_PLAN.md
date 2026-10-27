@@ -95,7 +95,7 @@ need forming), because there is no Jacobian being avoided here.
 Phase 6's deferral reasons were three: *coupled pressure/velocity DOFs*, *boundary and
 free-surface handling*, and *EOS coupling*. Re-examined against the current tree:
 
-- **Coupled DOFs.** `divergenceFree_step` (`schemes/divergenceFree.py`) is a splitting/projection scheme, not an
+- **Coupled DOFs.** `divergenceFree_step` (`schemes/incompressible/divergenceFree.py`) is a splitting/projection scheme, not an
   implicit coupled solve: `dvdt` (forces, gravity, diffusion) is computed explicitly *once*,
   `solveDivergenceFree` then solves a **linear** pressure-Poisson correction against that frozen
   `dvdt`, and the pressure correction is added back in afterward
@@ -110,8 +110,8 @@ free-surface handling*, and *EOS coupling*. Re-examined against the current tree
   the Jacobi and Krylov paths — the same pattern the shifting solve uses. Not a blocker on its
   own; would carry over to a coupled solve the same way.
 - **EOS coupling.** Confirmed **not currently exercised on the incompressible path at all**:
-  `weaklyCompressibleEOS` is called from `schemes/deltaSPH.py` (the *explicit* weakly-compressible
-  scheme) but is dead-commented in `schemes/divergenceFree.py` (`# currentState.pressures =
+  `weaklyCompressibleEOS` is called from `schemes/weaklyCompressible/deltaSPH.py` (the *explicit* weakly-compressible
+  scheme) but is dead-commented in `schemes/incompressible/divergenceFree.py` (`# currentState.pressures =
   weaklyCompressibleEOS(...)`, line 92) — the incompressible/IISPH path computes pressure purely
   from the Poisson solve and never consults an equation of state. Weakly-compressible-explicit and
   incompressible-implicit are two structurally separate scheme families today, selected at the
@@ -181,6 +181,6 @@ ask it was found while scoping.
   this document's Phase 1 proposal builds on.
 - `warpSPHIntegrators/NOTES.md` §3.4 — the solver-ladder framing Phase 6 was reasoning from;
   still the right frame for a future coupled solve, just not for the pressure-only sub-problem.
-- `schemes/divergenceFree.py`, `schemes/deltaSPH.py`, `modules/incompressible/{incompressible,
+- `schemes/incompressible/divergenceFree.py`, `schemes/weaklyCompressible/deltaSPH.py`, `modules/incompressible/{incompressible,
   divergenceFree}.py`, `modules/eos/weaklyCompressible.py` — the architecture facts this document
   is based on.

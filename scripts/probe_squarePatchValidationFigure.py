@@ -55,7 +55,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from warpSPH.cases.rotatingSquarePatch import rotatingSquarePatchCase as case
+from warpSPH.cases.freeSurface.rotatingSquarePatch import rotatingSquarePatchCase as case
 from warpSPH.runner import run
 from warpSPH.configurations.moduleConfigurations.shifting import ShiftingProjectionScheme
 

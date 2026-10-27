@@ -1,4 +1,4 @@
-"""Samples the initial state for `cases/sedov.py`'s Sedov-Taylor blast wave:
+"""Samples the initial state for `cases/compressible/sedov.py`'s Sedov-Taylor blast wave:
 a uniform (`rho0`) regular lattice at rest with zero pressure, relaxed to
 optimal supports/densities via `evaluateOptimalSupport`, then given a point
 energy deposit `E0` at the origin under one of three `initialization`
@@ -9,6 +9,8 @@ normalized SPH interpolation pass. Works for `dim` 1, 2 or 3 via the shared
 (singular/hat) or even (quadrant) so the deposit lands symmetrically about
 the origin.
 """
+
+from warpSPH.configurations.compute import neighborSearchOptions
 
 from warpSPH.configurations.compressibleConfig import CompressibleSPHConfig
 from warpSPH.modules.timestep.compressible import computeTimestep
@@ -233,9 +235,12 @@ def buildSedov(
     else:
         raise ValueError(f'Unknown initialization {initialization}')
 
-    adjacency = buildVerletList(simulationState_, 
-                                domain = config.domain,
-                                verletScale = 2**(1/config.dim), supportMode = config.supportMode)
+    adjacency = buildVerletList(
+        simulationState_,
+        domain=config.domain,
+        verletScale=2 ** (1 / config.dim),
+        supportMode=config.supportMode,
+        **neighborSearchOptions(config))
 
     compressibleSystem = SimulationSystem(
         state=simulationState_, 

@@ -1,5 +1,5 @@
 """`WeaklyCompressibleSPHConfig`, the scheme config for delta-SPH / weakly
-compressible SPH (`schemes/deltaSPH.py`, `modules/timestep/weaklyCompressible.py`,
+compressible SPH (`schemes/weaklyCompressible/deltaSPH.py`, `modules/timestep/weaklyCompressible.py`,
 `modules/mdbc/velocity.py`), registered in the delta-SPH `SchemeBundle` in
 `schemes/builder.py`. Same field set as `IncompressibleSPHConfig` minus
 `solverConfig` (no pressure solver here): fluid properties, adaptive support,
@@ -41,6 +41,7 @@ from .rigidBody import RigidBody
 
 from .moduleConfigurations.surfaceDetection import SurfaceDetectionConfig, buildDefaultSurfaceDetectionConfig
 from .moduleConfigurations import *
+from .moduleConfigurations.shifting import shiftPropertiesToDict, dictToShiftProperties
 from ..enumTypes import *
 
 @dataclass
@@ -61,7 +62,7 @@ class WeaklyCompressibleSPHConfig:
     # every RK4 sub-stage rather than recomputed fresh at each stage's
     # (intermediate, possibly wildly different during a violent event) state.
     # False (default) leaves every existing case's behaviour unchanged --
-    # `schemes/deltaSPH.py` recomputes fresh every stage as it always has.
+    # `schemes/weaklyCompressible/deltaSPH.py` recomputes fresh every stage as it always has.
     # `DELTASPH_VALIDATION_PLAN.md` Part 1 flagged this as a known deviation
     # from Sun 2017; Part 5.1's Marrone dam-break investigation is the first
     # case to actually exercise the flag. Only meaningful with a multi-stage
@@ -125,7 +126,7 @@ class WeaklyCompressibleSPHConfig:
     #: DualSPHysics' own production advanced-shifting extension does instead
     #: -- gate on kernel-sum completeness (`poup1>0.95`) and bulk
     #: classification, falling back to the raw gradient everywhere else --
-    #: and this flag now reproduces exactly that gate (`schemes/deltaSPH.py`
+    #: and this flag now reproduces exactly that gate (`schemes/weaklyCompressible/deltaSPH.py`
     #: step 13), rather than applying `Li` unconditionally.
     pressureForceRenormalized: bool = field(default=False, metadata={'description': 'Apply gradient renormalization to the pressure-force kernel gradient, gated on kernel-sum completeness and bulk classification (DualSPHysics-style)'})
 
@@ -167,7 +168,7 @@ class WeaklyCompressibleSPHConfig:
 
     bandwith: float = field(default=10.0, metadata={'description': 'Bandwith for the divergence-free noise sampling module'})
 
-    #: Which mDBC wall-density extrapolation `schemes/deltaSPH.py` calls.
+    #: Which mDBC wall-density extrapolation `schemes/weaklyCompressible/deltaSPH.py` calls.
     #: `'ramped'` (default): `density2025.py`'s `computeMdbcDensity` --
     #: English et al. 2022 Eq. (12) ghost-node extrapolation, smoothly
     #: ramped down to a 0th-order Shepard fallback on `numNeighbors`/
@@ -199,7 +200,7 @@ def _buildSun2017ShiftProperties() -> ShiftProperties:
 @dataclass
 class Sun2017DeltaSPHConfig(WeaklyCompressibleSPHConfig):
     """Sun et al. 2017's own delta+-SPH prescription -- identical to
-    `WeaklyCompressibleSPHConfig` (same step function, `schemes/deltaSPH.py`;
+    `WeaklyCompressibleSPHConfig` (same step function, `schemes/weaklyCompressible/deltaSPH.py`;
     no new physics) except for two field defaults:
 
     * `freezeDiffusionAcrossStages` -> `True` (Sec. 2's
@@ -219,7 +220,7 @@ class Sun2017DeltaSPHConfig(WeaklyCompressibleSPHConfig):
     frozen diffusion is specifically an RK-multi-stage companion technique.
 
     Kernel and integrator (Wendland C2, RK4) are case-level settings either
-    way, not part of this config -- `cases/dambreak.py` already defaults to
+    way, not part of this config -- `cases/freeSurface/dambreak.py` already defaults to
     both regardless of which `WeaklyCompressibleSPHScheme` is selected.
     """
     freezeDiffusionAcrossStages: bool = field(
@@ -262,19 +263,7 @@ def weaklyCompressibleConfigToDict(config: WeaklyCompressibleSPHConfig) -> Dict[
 
         'pressureForceTerm': config.pressureForceTerm.name,
         'pressureForceRenormalized': config.pressureForceRenormalized,
-        'shiftProperties': {
-            'iterations': config.shiftProperties.iterations,
-            'CFL': config.shiftProperties.CFL,
-            'computeMach': config.shiftProperties.computeMach,
-            'maxC': config.shiftProperties.maxC,
-            'active': config.shiftProperties.active,
-            'scheme': config.shiftProperties.scheme.name,
-            'projectionScheme': config.shiftProperties.projectionScheme.name,
-            'summationDensity': config.shiftProperties.summationDensity,
-            'surfaceScaling': config.shiftProperties.surfaceScaling,
-            'threshold': config.shiftProperties.threshold,
-            'projectQuantities': config.shiftProperties.projectQuantities,
-        },
+        'shiftProperties': shiftPropertiesToDict(config.shiftProperties),
         'surfaceDetectionConfig': {
             'active': config.surfaceDetectionConfig.active,
             'colorFieldThreshold': config.surfaceDetectionConfig.colorFieldThreshold,
@@ -291,6 +280,12 @@ def weaklyCompressibleConfigToDict(config: WeaklyCompressibleSPHConfig) -> Dict[
         'freezeDiffusionAcrossStages': config.freezeDiffusionAcrossStages,
         'freezeSurfaceMaskAcrossStages': config.freezeSurfaceMaskAcrossStages,
         'surfaceMaskDiagnostics': config.surfaceMaskDiagnostics,
+        'timeCentredContinuity': config.timeCentredContinuity,
+        'loneDensityReset': config.loneDensityReset,
+        'mdbcOneSidedHydrostatic': config.mdbcOneSidedHydrostatic,
+        'mdbcNoPenShiftMode': config.mdbcNoPenShiftMode,
+        'mdbcDensityScheme': config.mdbcDensityScheme,
+        'bandwith': config.bandwith,
     }
 
 def dictToWeaklyCompressibleConfig(configDict: Dict[str, Any]) -> WeaklyCompressibleSPHConfig:
@@ -317,20 +312,7 @@ def dictToWeaklyCompressibleConfig(configDict: Dict[str, Any]) -> WeaklyCompress
     config.pressureForceTerm = PressureForceScheme[configDict['pressureForceTerm']] if isinstance(configDict['pressureForceTerm'], str) else configDict['pressureForceTerm']
     config.pressureForceRenormalized = bool(configDict.get('pressureForceRenormalized', False))
     config.bandwith = float(configDict.get('bandwith', 10.0))
-    shiftPropsDict = configDict.get('shiftProperties', {})
-    config.shiftProperties = ShiftProperties(
-        iterations=int(shiftPropsDict.get('iterations', 1)),
-        CFL=float(shiftPropsDict.get('CFL', 0.3)),
-        computeMach=bool(shiftPropsDict.get('computeMach', False)),
-        maxC=float(shiftPropsDict.get('maxC', 0.3)),
-        active=bool(shiftPropsDict.get('active', True)),
-        scheme=ShiftingScheme[shiftPropsDict.get('scheme', ShiftingScheme.deltaSPH.name)] if isinstance(shiftPropsDict.get('scheme', ShiftingScheme.deltaSPH.name), str) else shiftPropsDict.get('scheme', ShiftingScheme.deltaSPH),
-        projectionScheme=ShiftingProjectionScheme[shiftPropsDict.get('projectionScheme', ShiftingProjectionScheme.dot.name)] if isinstance(shiftPropsDict.get('projectionScheme', ShiftingProjectionScheme.dot.name), str) else shiftPropsDict.get('projectionScheme', ShiftingProjectionScheme.dot),
-        summationDensity=bool(shiftPropsDict.get('summationDensity', False)),
-        surfaceScaling=float(shiftPropsDict.get('surfaceScaling', 0.1)),
-        threshold=float(shiftPropsDict.get('threshold', 0.5)),
-        projectQuantities=bool(shiftPropsDict.get('projectQuantities', False)),
-    )
+    config.shiftProperties = dictToShiftProperties(configDict.get('shiftProperties', {}))
     surfaceConfigDict = configDict.get('surfaceDetectionConfig')
     if surfaceConfigDict is not None:
         config.surfaceDetectionConfig = SurfaceDetectionConfig(
@@ -349,5 +331,10 @@ def dictToWeaklyCompressibleConfig(configDict: Dict[str, Any]) -> WeaklyCompress
     config.freezeDiffusionAcrossStages = bool(configDict.get('freezeDiffusionAcrossStages', False))
     config.freezeSurfaceMaskAcrossStages = bool(configDict.get('freezeSurfaceMaskAcrossStages', False))
     config.surfaceMaskDiagnostics = bool(configDict.get('surfaceMaskDiagnostics', False))
+    config.timeCentredContinuity = bool(configDict.get('timeCentredContinuity', config.timeCentredContinuity))
+    config.loneDensityReset = bool(configDict.get('loneDensityReset', config.loneDensityReset))
+    config.mdbcOneSidedHydrostatic = bool(configDict.get('mdbcOneSidedHydrostatic', config.mdbcOneSidedHydrostatic))
+    config.mdbcNoPenShiftMode = str(configDict.get('mdbcNoPenShiftMode', config.mdbcNoPenShiftMode))
+    config.mdbcDensityScheme = str(configDict.get('mdbcDensityScheme', config.mdbcDensityScheme))
 
     return config

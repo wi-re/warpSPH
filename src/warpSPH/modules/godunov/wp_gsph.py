@@ -23,6 +23,8 @@ force. It is the cheap baseline; the convolution form of Inutsuka (2002) is the 
 The neighbour list must cover `max(h_i, h_j)` (the SuperSymmetric Verlet list the compressible schemes build does).
 """
 
+from warpSPHCore.type_config import index_t, offset_t
+
 import warp as wp
 from warp.types import vector, matrix
 from typing import Any, Optional, Union
@@ -94,7 +96,7 @@ def godunov_Func_i(
     domainState: domainData,
     kernelProperties: kernelState,
     dim: wp.int32,
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype=wp.int64),  # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype=index_t),  # type: ignore
     ki: wp.int32, referenceKinds: wp.array(dtype=wp.int32),  # type: ignore
     vel_i: vector(length=Any, dtype=scalar_t), referenceVelocities: wp.array(dtype=vector(length=Any, dtype=scalar_t)),  # type: ignore
     P_i: scalar_t, referencePressures: wp.array(dtype=scalar_t),  # type: ignore
@@ -107,7 +109,7 @@ def godunov_Func_i(
     acc = zero_like_warp(accelValue)
     work = workValue
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j = wp.int32(offsetArray[jj])
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
             if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
@@ -167,17 +169,18 @@ def godunov_Func_Adjacency(
         if params.riemannReconstruction:
             G_i = queryStateGradients[i]
     for o in range(numOffsets):
-        beginIndex = wp.int32(0)
+        beginIndex = offset_t(0)
         numIndices = wp.int32(0)
         if useAdjacency:
             beginIndex = adjacencyState.neighborOffsets[i]
             numIndices = adjacencyState.numNeighbors[i]
         else:
-            beginIndex, numIndices = checkOffset(
+            gridBegin, numIndices = checkOffset(
                 i, queryState.positions, gridState.numCells, gridState.D,
                 o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
                 domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
             )
+            beginIndex = offset_t(gridBegin)
             if beginIndex < 0:
                 continue
         a_o, w_o = godunov_Func_i(

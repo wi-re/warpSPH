@@ -17,6 +17,8 @@ does not depend on the masses at all. It returns ``rho_i = m_i n_i`` as the dens
 list of per-iteration number densities in place of the density history.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
+
 from ...configurations.compressibleConfig import CompressibleSPHConfig
 
 from .wp_omega import computeOmegaWarp
@@ -26,6 +28,8 @@ from ...configurations import SimulationConfig
 from ...utils.support import volumeToSupport, nH_to_n_h
 from torch.profiler import profile, ProfilerActivity
 from warpSPHCore.profiling import record_function
+from types import SimpleNamespace
+from .listValidation import listFits
 from typing import Optional
 import torch
 
@@ -48,95 +52,142 @@ def evaluateOptimalSupportMonaghan(
         supportScheme: SupportScheme = SupportScheme.Scatter,
         adjacency: Optional[AdjacencyList] = None,
         numberDensity: bool = False,
+        validateOnce: bool = False,
+        rebuildSlack: float = 0.0,
+        computeDensity: bool = True,
 ):
+    """Validate all Newton iterates once when requested, retaining eager fallback.
+
+    A speculative solve may use an existing list while supports change. Its
+    largest support (including the input and output) is checked afterwards. If
+    the list was too short, discard the solve and restart from the input with
+    per-iteration validation. No state from an invalid list is accepted.
+    computeDensity=False skips only the closing sum, not the Newton densities.
+    """
     if numberDensity:
         realMasses = particleState.masses
         particleState.masses = torch.ones_like(realMasses)
         try:
             n, h, adjacency, ns, supports = evaluateOptimalSupportMonaghan(
-                particleState, config, compParams, supportScheme, adjacency)
+                particleState, config, compParams, supportScheme, adjacency,
+                validateOnce=validateOnce, rebuildSlack=rebuildSlack, computeDensity=computeDensity)
         finally:
             particleState.masses = realMasses
-        return realMasses * n, h, adjacency, ns, supports
+        return (realMasses * n if computeDensity else n), h, adjacency, ns, supports
     with record_function("[warpSPH] - evaluateOptimalSupport - Monaghan"):
-        rhos = [particleState.densities]
-        supports = [particleState.supports]
-
-        # verletScale = 2**(1/particleState.positions.shape[1])
         verletScale = config.verletScale
-        # nIter = 16
         nIter = compParams.adaptiveSupportIterations
-        # hThreshold = 1e-3
         hThreshold = compParams.adaptiveSupportThreshold
+        iterState = particleState
+        originalDensities = iterState.densities
+        suppliedSupports = iterState.supports
+        speculative = validateOnce
+        if speculative and not listFits(adjacency, iterState):
+            adjacency = buildVerletList(
+                iterState, domain=config.domain, verletScale=verletScale,
+                supportMode=SupportScheme.SuperSymmetric, priorNeighborhood=adjacency,
+                verbose=False, **neighborSearchOptions(config))
 
-        hMin = particleState.supports.min()
-        hMax = particleState.supports.max()
+        while True:
+            iterState.supports = suppliedSupports
+            iterState.densities = originalDensities
+            hMin, hMax = suppliedSupports.min(), suppliedSupports.max()
+            peakSupports = suppliedSupports
+            rhos, supports = [originalDensities], [suppliedSupports]
+            retryEager = False
+            for i in range(nIter):
+                with record_function(f"[evalOS] Iteration {i}"):
+                    if not speculative:
+                        with record_function("[evalOS] buildVerletList"):
+                            adjacency = buildVerletList(
+                                iterState,
+                                domain=config.domain,
+                                verletScale=verletScale,
+                                supportMode=SupportScheme.SuperSymmetric,
+                                priorNeighborhood=adjacency,
+                                verbose=False,
+                                **neighborSearchOptions(config))
 
-        iterState = particleState#.initializeNewState()
-        originalDensities = iterState.densities.clone()
-        # adjacency = None
-
-        for i in range(nIter):
-            with record_function(f"[evalOS] Iteration {i}"):
-                with record_function("[evalOS] buildVerletList"):
-                    adjacency = buildVerletList(iterState, domain = config.domain, verletScale = verletScale, supportMode = SupportScheme.SuperSymmetric, priorNeighborhood=adjacency, verbose=False)
-
-                iterState.densities = warpOperation(
-                    iterState,
-                    OperationProperties(
-                        kernel = config.kernel,
-                        operation = WarpOperation.Density,
-                        supportMode = supportScheme,
-                    ),
-                    domain = config.domain,
-                    adjacency=adjacency
-                )
-                h_prev = iterState.supports
-
-                safe_rho = torch.clamp(torch.nan_to_num(iterState.densities, nan=1.0, posinf=1.0, neginf=1.0), min=1e-12)
-                F_ = F(h_prev, safe_rho, iterState.masses, targetNeighbors = config.targetNeighbors, dim = config.dim)
-                dFdh_ = computeOmegaWarp(iterState, 
+                    iterState.densities = warpOperation(
+                        iterState,
                         OperationProperties(
                             kernel = config.kernel,
+                            operation = WarpOperation.Density,
                             supportMode = supportScheme,
                         ),
                         domain = config.domain,
-                        adjacency=adjacency)
-                dFdh_safe = torch.nan_to_num(dFdh_, nan=0.0, posinf=0.0, neginf=0.0)
-                step = F_ / (dFdh_safe + 1e-6)
-                step = torch.nan_to_num(step, nan=0.0, posinf=0.0, neginf=0.0)
-                h_new = h_prev - step
-                h_new = torch.where(torch.isfinite(h_new), h_new, h_prev)
+                        adjacency=adjacency
+                    )
+                    h_prev = iterState.supports
 
-                h_new = h_new.clamp(min = hMin * 0.25, max = hMax * 4.0)
-                hMin = h_new.min()
-                hMax = h_new.max()
+                    safe_rho = torch.clamp(torch.nan_to_num(iterState.densities, nan=1.0, posinf=1.0, neginf=1.0), min=1e-12)
+                    F_ = F(h_prev, safe_rho, iterState.masses, targetNeighbors = config.targetNeighbors, dim = config.dim)
+                    dFdh_ = computeOmegaWarp(iterState,
+                            OperationProperties(
+                                kernel = config.kernel,
+                                supportMode = supportScheme,
+                            ),
+                            domain = config.domain,
+                            adjacency=adjacency)
+                    dFdh_safe = torch.nan_to_num(dFdh_, nan=0.0, posinf=0.0, neginf=0.0)
+                    step = F_ / (dFdh_safe + 1e-6)
+                    step = torch.nan_to_num(step, nan=0.0, posinf=0.0, neginf=0.0)
+                    h_new = h_prev - step
+                    h_new = torch.where(torch.isfinite(h_new), h_new, h_prev)
 
-                h_diff = h_new - h_prev
-                h_ratio = h_new / (h_prev + 1e-6)
-                iterState.supports = h_new
+                    h_new = h_new.clamp(min = hMin * 0.25, max = hMax * 4.0)
+                    hMin = h_new.min()
+                    hMax = h_new.max()
 
-                rhos.append(iterState.densities)
-                supports.append(iterState.supports)
-                        
-                # print(f'Iteration: {i} | h_ratio: {h_ratio.min()} | {h_ratio.max()} | {h_ratio.mean()}')
-                # print(f'Densities: {iterState.densities.min()} | {iterState.densities.max()} | {iterState.densities.mean()}')
-                # print(f'Supports: {h_new.min()} | {h_new.max()} | {h_new.mean()}')
-                # print(f'Iteration: {i} | Support: {h_new.min()} | {h_new.max()} | {h_new.mean()} | Ratio: {h_ratio.min()} | {h_ratio.max()} | {h_ratio.mean()}')
-                if (h_ratio - 1).abs().max() < hThreshold:
-                    # print('Stopping Early')
-                    break
+                    # Relative *change* must vanish for unchanged positive supports.
+                    # Adding an absolute length to h_prev biases this check and
+                    # prevents convergence at tight tolerances/small length scales.
+                    relativeChange = (h_new - h_prev).abs() / h_prev.abs().clamp_min(torch.finfo(h_prev.dtype).tiny)
+                    iterState.supports = h_new
+                    if speculative:
+                        peakSupports = torch.maximum(peakSupports, h_new)
 
-        adjacency = buildVerletList(iterState, domain = config.domain, verletScale = verletScale, supportMode = SupportScheme.SuperSymmetric, priorNeighborhood=adjacency, verbose=False)
-        densities = warpOperation(
-            iterState,
-            OperationProperties(
-                kernel = config.kernel,
-                operation = WarpOperation.Density,
-                supportMode = supportScheme,
-            ),
-            domain = config.domain,
-            adjacency=adjacency
-        )
+                    rhos.append(iterState.densities)
+                    supports.append(iterState.supports)
+
+                    if speculative:
+                        # A bad speculative density must not generate an enormous
+                        # fictitious support and then an enormous list rebuild.
+                        # Share the existing convergence read with this early
+                        # escape; the eager retry starts from the supplied h.
+                        done, outside = torch.stack((relativeChange.max() < hThreshold,
+                            (h_new > adjacency.querySupports).any())).tolist()
+                        if outside:
+                            retryEager = True
+                            break
+                        if done:
+                            break
+                    elif relativeChange.max() < hThreshold:
+                        break
+
+            if retryEager:
+                speculative = False
+                continue
+            checked = buildVerletList(
+                SimpleNamespace(positions=iterState.positions,
+                                supports=peakSupports if speculative else iterState.supports),
+                domain=config.domain, verletScale=verletScale,
+                supportMode=SupportScheme.SuperSymmetric, priorNeighborhood=adjacency,
+                verbose=False, rebuildSlack=rebuildSlack, **neighborSearchOptions(config))
+            if speculative and checked is not adjacency:
+                adjacency = checked
+                speculative = False
+                continue
+            adjacency = checked
+            break
+
+        if computeDensity:
+            densities = warpOperation(
+                iterState,
+                OperationProperties(kernel=config.kernel, operation=WarpOperation.Density,
+                                    supportMode=supportScheme),
+                domain=config.domain, adjacency=adjacency)
+        else:
+            densities = originalDensities
         particleState.densities = originalDensities
         return densities, iterState.supports, adjacency, rhos, supports

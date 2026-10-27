@@ -7,8 +7,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from warpSPH.cases.shearingNoh import shearingNohCase
-from warpSPH.cases.triplePoint import triplePointCase
+from warpSPH.cases.compressible.shearingNoh import shearingNohCase
+from warpSPH.cases.compressible.triplePoint import triplePointCase
 from warpSPH.runner import run
 
 CASES = {'triplePoint': (triplePointCase, dict(nx=64, tLimit=2.0)), 'shearingNoh': (shearingNohCase, dict(nx=64, tLimit=0.6))}

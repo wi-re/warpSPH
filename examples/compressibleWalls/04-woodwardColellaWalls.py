@@ -13,7 +13,7 @@ from warpSPHBootstrap import bootstrap
 
 bootstrap(precision='float32')
 
-from warpSPH.cases.woodwardColellaWalls import woodwardColellaWallsCase   # noqa: E402
+from warpSPH.cases.compressibleWalls.woodwardColellaWalls import woodwardColellaWallsCase   # noqa: E402
 from warpSPH.runner import caseMain                                       # noqa: E402
 
 PRESET = ['--plot', '--video']

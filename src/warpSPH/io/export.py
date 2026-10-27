@@ -229,21 +229,31 @@ def writeInitialData(
         extraData = {}
 
     outFile.attrs['scheme'] = schemeAttribute(scheme)
+    if hasattr(runningState.state, 'thermodynamicVariable'):
+        outFile.attrs['thermodynamicVariable'] = runningState.state.thermodynamicVariable
     outFile.attrs['time'] = runningState.t if isinstance(runningState.t, float) else runningState.t.cpu().item()
     outFile.create_group('states')
     outFile.create_group('stages')
 
     uniqueParticles = True
 
+    def _hostValue(value):
+        # a case may stash a device tensor in its extra data (tgv-wc: a sound speed); h5py cannot take one
+        return value.detach().cpu().numpy() if isinstance(value, torch.Tensor) else value
+
     for key, value in extraData.items():
+        if value is None:
+            continue   # an unset case param (sod: viscositySwitch=None); HDF5 has no None attribute
         if not isinstance(value, dict):
-            outFile.attrs[key] = value
+            outFile.attrs[key] = _hostValue(value)
         else:
             for subkey, subvalue in value.items():
+                if subvalue is None:
+                    continue
                 if isinstance(subvalue, (list, np.ndarray)):
                     outFile.attrs[f'{key}_{subkey}'] = np.array(subvalue)
                 else:
-                    outFile.attrs[f'{key}_{subkey}'] = subvalue
+                    outFile.attrs[f'{key}_{subkey}'] = _hostValue(subvalue)
 
     outFile.attrs['uniqueParticles'] = uniqueParticles
     outFile.attrs['exportInterval'] = args.exportInterval
@@ -272,17 +282,20 @@ def writeInitialData(
         cGroup.create_dataset('particleBoundaryDistances', data=rigidBody.particleBoundaryDistances.cpu().numpy())
         cGroup.create_dataset('particleBoundaryNormals', data=rigidBody.particleBoundaryNormals.cpu().numpy())
 
-        cGroup.create_dataset('particlePositions', data=rigidBody.ghostParticlePositions.cpu().numpy())
-        cGroup.create_dataset('particleIndices', data=rigidBody.ghostParticleIndices.cpu().numpy())
-        cGroup.create_dataset('particleUIDs', data=rigidBody.ghostParticleUIDs.cpu().numpy())
-        cGroup.create_dataset('particleBoundaryDistances', data=rigidBody.ghostParticleBoundaryDistances.cpu().numpy())
-        cGroup.create_dataset('particleBoundaryNormals', data=rigidBody.ghostParticleBoundaryNormals.cpu().numpy())
+        # the ghost datasets reused the body's names, so any rigid body with ghosts failed with "name already exists"
+        cGroup.create_dataset('ghostParticlePositions', data=rigidBody.ghostParticlePositions.cpu().numpy())
+        cGroup.create_dataset('ghostParticleIndices', data=rigidBody.ghostParticleIndices.cpu().numpy())
+        cGroup.create_dataset('ghostParticleUIDs', data=rigidBody.ghostParticleUIDs.cpu().numpy())
+        cGroup.create_dataset('ghostParticleBoundaryDistances', data=rigidBody.ghostParticleBoundaryDistances.cpu().numpy())
+        cGroup.create_dataset('ghostParticleBoundaryNormals', data=rigidBody.ghostParticleBoundaryNormals.cpu().numpy())
 
         cGroup.attrs['bodyID'] = rigidBody.bodyID
         cGroup.attrs['kind'] = rigidBody.kind.value
         cGroup.attrs['sdf'] = _encode_callable(rigidBody.sdf)
 
     initialState = runningState.state
+    storedFloat = np.float64 if (hasattr(initialState, 'thermodynamicVariable')
+                                 and initialState.positions.dtype == torch.float64) else np.float32
     kinds = initialState.kinds
 
     boundaryMask = kinds == 1
@@ -327,14 +340,19 @@ def writeInitialData(
     outFile.create_dataset('ghostUIDs', data=ghostUIDs.detach().cpu().numpy(), dtype=np.int32)
     outFile.create_dataset('ghostKinds', data=ghostKinds.detach().cpu().numpy(), dtype=np.int32)
 
-    outFile.create_dataset('combinedPositions', data=initialState.positions.detach().cpu().numpy(), dtype=np.float32)
-    outFile.create_dataset('combinedMasses', data=initialState.masses.detach().cpu().numpy(), dtype=np.float32)
-    outFile.create_dataset('combinedSupports', data=initialState.supports.detach().cpu().numpy(), dtype=np.float32)
+    outFile.create_dataset('combinedPositions', data=initialState.positions.detach().cpu().numpy(), dtype=storedFloat)
+    outFile.create_dataset('combinedMasses', data=initialState.masses.detach().cpu().numpy(), dtype=storedFloat)
+    outFile.create_dataset('combinedSupports', data=initialState.supports.detach().cpu().numpy(), dtype=storedFloat)
     outFile.create_dataset('combinedUIDs', data=initialState.UIDs.detach().cpu().numpy(), dtype=np.int32)
     outFile.create_dataset('combinedKinds', data=initialState.kinds.detach().cpu().numpy(), dtype=np.int32)
     outFile.create_dataset('combinedDensities', data=initialState.densities.detach().cpu().numpy(), dtype=np.float32)
     outFile.create_dataset('combinedVelocities', data=initialState.velocities.detach().cpu().numpy(), dtype=np.float32)
-    outFile.create_dataset('combinedMaterials', data=initialState.materials.detach().cpu().numpy(), dtype=np.float32)
+    outFile.create_dataset('combinedMaterials', data=initialState.materials.detach().cpu().numpy(), dtype=np.int32)
+    # Provenance and body membership are independent of physical materials.
+    for field, dataset in (('emitters', 'combinedEmitters'), ('bodyIDs', 'combinedBodyIDs')):
+        ids = getattr(initialState, field, None)
+        if ids is not None:
+            outFile.create_dataset(dataset, data=ids.detach().cpu().numpy(), dtype=np.int32)
     if stateGhostOffsets is not None:
         outFile.create_dataset('combinedGhostOffsets', data=stateGhostOffsets.detach().cpu().numpy(), dtype=np.float32)
         outFile.create_dataset('combinedGhostIndices', data=initialState.ghostIndices.detach().cpu().numpy(), dtype=np.int32)
@@ -345,6 +363,9 @@ def writeInitialData(
     timeGroup = outFile.create_group('times')
     rigidBodyGroup = outFile.create_group('rigidBodyTrajectories')
     extraGroups = tuple(outFile.create_group(name) for name in extraFields)
+    for name in ('crkMassDensities', 'crkVolumes'):
+        if getattr(initialState, name, None) is not None and name not in outFile:
+            outFile.create_group(name)
 
     return (positionGroup, velocityGroup, densityGroup, timeGroup, rigidBodyGroup) + extraGroups
 
@@ -358,10 +379,20 @@ def writeFrame(groups, i, state, stages, config, schemeConfig, uniqueParticles=T
     densityGroup.create_dataset(f'frame_{i:05d}', data=state.state.densities.cpu().numpy())
     timeGroup.create_dataset(
         f'frame_{i:05d}',
-        data=np.array([state.t.cpu().item() if isinstance(state.t, torch.Tensor) else state.t], dtype=np.float32),
+        data=np.array([state.t.cpu().item() if isinstance(state.t, torch.Tensor) else state.t],
+                      dtype=np.float64 if hasattr(state.state, 'thermodynamicVariable') else np.float32),
     )
     for name, group in zip(extraFields, extraGroups):
-        group.create_dataset(f'frame_{i:05d}', data=getattr(state.state, name).detach().cpu().numpy())
+        value = getattr(state.state, name)
+        key = f'frame_{i:05d}'
+        if value is None:
+            group.attrs[key] = 'None'
+        else:
+            group.create_dataset(key, data=value.detach().cpu().numpy() if isinstance(value, torch.Tensor) else value)
+    for name in ('crkMassDensities', 'crkVolumes'):
+        value = getattr(state.state, name, None)
+        if value is not None and name not in extraFields:
+            positionGroup.file[name].create_dataset(f'frame_{i:05d}', data=value.detach().cpu().numpy())
 
     rbg = rigidBodyGroup.create_group(f'frame_{i:05d}')
     for r, rigidBody in enumerate(getattr(schemeConfig, 'rigidBodies', []) or []):

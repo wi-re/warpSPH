@@ -19,17 +19,7 @@ from typing import Any, Dict, List, Optional
 __all__ = ['CaseSpec', 'buildArgumentParser', 'schemeNames', 'specFromArgs']
 
 
-def _readMapping(path: str) -> Dict[str, Any]:
-    """Load a ``.json``/``.yaml``/``.yml`` file, requiring a top-level mapping."""
-    with open(path, 'r') as f:
-        if os.path.splitext(path)[1].lower() in ('.yaml', '.yml'):
-            import yaml
-            data = yaml.safe_load(f)
-        else:
-            data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f'{path} must contain a mapping, got {type(data).__name__}.')
-    return data
+from warpSPHConfig import readMapping as _readMapping
 
 
 @dataclass
@@ -108,19 +98,24 @@ class CaseSpec:
     # --- runtime ------------------------------------------------------------
     precision: str = 'float32'
     device: Optional[str] = None
-    #: Capture the scheme's right-hand side in a CUDA graph and replay it
-    #: (`utils/cudaGraph.py`) -- removes the per-op CPU cost that dominates
-    #: small problems; bitwise identical to eager (self-checked at every
-    #: capture, falling back to eager on any mismatch). Only the delta-SPH
-    #: family acts on it, and only in configurations whose RHS is a pure
-    #: function of the state (`schemes/deltaSPH.py:_rhsIsGraphable`); a no-op
-    #: elsewhere. The scheme config must not be changed after the first step.
-    cudaGraph: bool = False
+    #: How the run uses the machine (`configurations/compute.py`, `SimulationConfig.compute`): `execution` 'eager' / 'graph' / 'auto' (CUDA-graph
+    #: replay below a particle count that depends on the scheme and the dimension -- removes the per-op CPU cost that dominates small problems; bitwise
+    #: identical to eager, self-checked at every capture, falling back to eager on any mismatch), `graphMaxParticles` (the 'auto' limit; None = the
+    #: table), `iterationChecks` ('every' / 'adaptive': when relaxed-Jacobi style loops read their convergence test back) and `krylovCheckEvery`.
+    #: None = the `ComputeConfig` default. A scheme config's own `stepMode` and the legacy `cudaGraph` flag below take precedence.
+    execution: Optional[str] = None
+    graphMaxParticles: Optional[int] = None
+    iterationChecks: Optional[str] = None
+    krylovCheckEvery: Optional[int] = None
+    #: Legacy spelling of `execution`: True is 'graph', False is 'eager', None defers to `execution`. Only the schemes with a graph route act on it
+    #: (the delta-SPH family, ACSPH's dual-time iteration, CompSPH / CRKSPH through their `stepMode`); a no-op elsewhere. The scheme config must not
+    #: be changed after the first step.
+    cudaGraph: Optional[bool] = None
     #: With a whole-step graph: run step n's diagnostics and plot frame on a
     #: side stream while step n+1 replays (`runner.py:_runPipelined`). Same
     #: rows and frames; `stepTime_ms` becomes the per-step wall throughput.
-    #: Off restores the one-thing-at-a-time loop (A/B timing, debugging).
-    pipelineOutputs: bool = True
+    #: Off restores the one-thing-at-a-time loop (A/B timing, debugging). None = `ComputeConfig.pipelineOutputs` (on).
+    pipelineOutputs: Optional[bool] = None
 
     # --- output -------------------------------------------------------------
     plot: bool = False
@@ -186,6 +181,10 @@ class CaseSpec:
 
     # --- case-specific knobs ------------------------------------------------
     params: Dict[str, Any] = field(default_factory=dict)
+    #: Validated numerical overrides, applied after the case's configureScheme.
+    schemeOverrides: Dict[str, Any] = field(default_factory=dict)
+    #: Original versioned document for provenance; absent for the legacy API.
+    configuration: Optional[Dict[str, Any]] = None
 
     # -- convenience ---------------------------------------------------------
 
@@ -257,8 +256,8 @@ _FIELD_HELP = {
     'dim': 'spatial dimension (1, 2 or 3)',
     'L': 'domain edge length',
     'n_h': 'neighbours per smoothing length; converted to targetNeighbors',
-    'calibrateNormalization': 'scale the kernel by 1/L so a perfect lattice reads rho0 '
-                              '(summation density only; LATTICE_DENSITY_PLAN.md); off by default',
+    'calibrateNormalization': 'calibrate lattice sums by 1/L; native IISPH/DFSPH apply the factor '
+                              'once to initial particle and solid masses, while other schemes normalize the kernel',
     'densityCorrection': 'subtract eps m W(0,h) from the raw density (Dehnen & Aly '
                          '2012 eq. 18/19, constants from warpSPHCore.util.densityCorrection); '
                          'off by default',
@@ -296,6 +295,12 @@ _FIELD_HELP = {
     'precision': 'scalar precision; resolved before import, so pass it to '
                  'warpsph-run rather than to a case module',
     'device': "torch device; unset picks cuda:0 when one is available",
+    'execution': "eager, graph (CUDA-graph replay where the scheme supports it) or auto (graph below a per-scheme particle count); unset: eager",
+    'graphMaxParticles': "execution=auto: graph below this many particles; unset uses the per-scheme table",
+    'iterationChecks': "relaxed-Jacobi loops read their convergence test back every iteration ('every') or at learned checkpoints ('adaptive', default)",
+    'krylovCheckEvery': 'Krylov solvers read their still-running flag every this many iterations; unset: 8',
+    'cudaGraph': 'legacy spelling of --execution graph / eager',
+    'pipelineOutputs': 'with a whole-step graph, compute step n\'s diagnostics while step n+1 replays (default on)',
     # -- output --
     'plot': 'draw frames while the run proceeds',
     'plotInterval': 'steps between drawn frames',
@@ -328,7 +333,7 @@ def enumChoices() -> Dict[str, List[str]]:
     which resolve precision on first import, and building a parser must not
     force that choice.
     """
-    from warpSPHIntegrators import IntegrationSchemeType
+    from warpSPHIntegrators.schemes import IntegrationSchemeType
     from warpSPHCore import (GradientScheme, KernelFunctions, LaplacianScheme,
                              SupportScheme)
     from ..geometry import SamplingScheme
@@ -385,7 +390,8 @@ def schemeNames() -> List[str]:
 
 def buildArgumentParser(description: str = 'Run a warpSPH case.',
                         caseParams: Optional[Dict[str, Any]] = None,
-                        defaults: Optional[Dict[str, Any]] = None) -> argparse.ArgumentParser:
+                        defaults: Optional[Dict[str, Any]] = None,
+                        parameterDefinitions: Optional[Dict[str, Any]] = None) -> argparse.ArgumentParser:
     """An argparse parser covering every :class:`CaseSpec` field.
 
     `caseParams` are the case's own knobs and their defaults; each becomes a
@@ -411,7 +417,7 @@ def buildArgumentParser(description: str = 'Run a warpSPH case.',
                         help='Write the fully resolved spec to this path and continue.')
 
     for f in fields(CaseSpec):
-        if f.name in ('params', 'plotBackendOptions'):
+        if f.name in ('params', 'plotBackendOptions', 'schemeOverrides', 'configuration'):
             continue
         shown = (defaults or {}).get(f.name, f.default)
         if f.name == 'scheme':
@@ -425,15 +431,24 @@ def buildArgumentParser(description: str = 'Run a warpSPH case.',
         # default of a different type must not change the flag's type.
         _addField(parser, f.name, f.default, f.type, helpText)
 
+    parser.add_argument('--describeConfig', metavar='JSON', help='Write the case/solver JSON schema and exit.')
+    parser.add_argument('--parameterReference', metavar='MARKDOWN', help='Write generated parameter documentation and exit.')
+    parser.add_argument('--checkConfig', action='store_true', help='Configure and validate without sampling particles or stepping.')
+    parser.add_argument('--saveResolvedConfig', metavar='JSON', help='Write actual configuration and package versions after setup.')
+
     configOnly = []
     for name, value in (caseParams or {}).items():
         # A list/dict-valued parameter (Woodward-Colella's shock regions, the
         # dam break's gravity vector) has no sensible flag form -- argparse
         # would infer `float` from it. Those stay settable via --config only.
-        if isinstance(value, (list, dict)):
+        descriptor = (parameterDefinitions or {}).get(name)
+        if isinstance(value, (list, dict)) or (descriptor and descriptor.kind in ('object', 'array')):
             configOnly.append(name)
             continue
-        _addField(parser, name, value, type(value), f'case parameter (default: {value!r})')
+        annotation = {'number': float, 'integer': int, 'boolean': 'Optional[bool]',
+                      'string': str}.get(descriptor.kind, type(value)) if descriptor else type(value)
+        helpText = descriptor.description if descriptor else 'case parameter'
+        _addField(parser, name, value, annotation, f'{helpText} (default: {value!r})')
 
     if configOnly:
         # Silently dropping these leaves no way to find out they exist.
@@ -473,7 +488,7 @@ def specFromArgs(args: argparse.Namespace,
     overrides = {}
     params = dict(spec.params)
     for name, value in vars(args).items():
-        if value is None or name in ('config', 'saveConfig'):
+        if value is None or name in ('config', 'saveConfig', 'describeConfig', 'parameterReference', 'checkConfig', 'saveResolvedConfig'):
             continue
         if name in known:
             overrides[name] = value

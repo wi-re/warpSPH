@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Decaying random flow, periodic box with an obstacle (2D) -- thin wrapper.
 
-The case itself is `warpSPH.cases.randomFlow`, and everything generic (config,
+The case itself is `warpSPH.cases.periodic.randomFlow`, and everything generic (config,
 step loop, export, plotting, ffmpeg) is `warpSPH.runner`. Equivalent
 invocations::
 
@@ -24,7 +24,7 @@ from warpSPHBootstrap import bootstrap
 
 bootstrap(precision='float32')
 
-from warpSPH.cases.randomFlow import randomFlowCase    # noqa: E402
+from warpSPH.cases.periodic.randomFlow import randomFlowCase    # noqa: E402
 from warpSPH.runner import caseMain                    # noqa: E402
 
 #: What this example fixes relative to the case defaults; still overridable,
