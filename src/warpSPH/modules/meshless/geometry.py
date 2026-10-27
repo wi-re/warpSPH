@@ -9,6 +9,43 @@ import torch
 from warpSPHCore.mfm import MeshlessWarp
 
 
+@dataclass
+class NeighborCache:
+    signature: tuple = None
+    adjacency: object = None
+
+
+def cachedAdjacency(positions, supports, domain, schemeConfig, *, owner=None):
+    """Exact current neighbors filtered from a validity-checked, padded list.
+
+    The skin changes search work only. Every geometry recomputes moments and
+    filters pairs at the current supports. Baseline search remains the default.
+    """
+    skin = schemeConfig.neighborSkin
+    if skin == 1. or owner is None:
+        return None
+    from warpSPHCore.dataTypes import ParticleState
+    from warpSPHCore.enumTypes import SupportScheme
+    from warpSPHCore.radiusSearch.verlet import buildVerletList, filterVerletList
+    cache = getattr(owner, '_meshlessNeighbors', None)
+    if cache is None:
+        cache = owner._meshlessNeighbors = NeighborCache()
+    signature = (id(domain), domain.dim, _versions(domain.min, domain.max, domain.periodic),
+                 positions.shape, positions.device, positions.dtype, skin)
+    prior = cache.adjacency if cache.signature == signature else None
+    particles = ParticleState(positions=positions, supports=supports,
+        masses=torch.ones_like(supports), kinds=torch.zeros_like(supports, dtype=torch.int32))
+    padded = buildVerletList(particles, domain, verletScale=skin,
+        supportMode=SupportScheme.SuperSymmetric, priorNeighborhood=prior)
+    if padded is not prior:
+        # A baseline must survive later in-place changes to the public state.
+        padded.queryPositions = padded.referencePositions = positions.clone()
+        padded.querySupports = padded.referenceSupports = (supports*skin).clone()
+        padded.hashMap = None
+    cache.signature, cache.adjacency = signature, padded
+    return filterVerletList(particles, domain, padded, supportMode=SupportScheme.SuperSymmetric)
+
+
 def _versions(*values):
     return tuple((id(t), t._version) if isinstance(t, torch.Tensor) else t for t in values)
 
@@ -35,6 +72,8 @@ _pendingGeometry = None   # compatibility for direct timestep/step callers
 
 
 def stashGeometry(positions, supports, domain, kernel, schemeConfig, geometry, *, owner=None):
+    if owner is not None and not hasattr(owner, '_meshlessNeighbors'):
+        owner._meshlessNeighbors = NeighborCache()
     versions = _versions(positions, supports)
     ticket = GeometryTicket(positions, supports, versions, _settings(domain, kernel, schemeConfig), geometry, versions)
     if owner is not None:
@@ -46,6 +85,8 @@ def stashGeometry(positions, supports, domain, kernel, schemeConfig, geometry, *
 
 def inheritGeometry(source, target):
     """Register an exact clone; later in-place writes invalidate its ticket."""
+    if hasattr(source, '_meshlessNeighbors'):
+        target._meshlessNeighbors = source._meshlessNeighbors
     ticket = getattr(source, '_meshlessGeometry', None)
     if ticket is not None and ticket.validSource() and ticket.targetVersions == _versions(source.positions, source.supports):
         target._meshlessGeometry = GeometryTicket(ticket.positions, ticket.supports, ticket.sourceVersions,
@@ -70,9 +111,10 @@ def takeGeometry(positions, supports, domain, kernel, schemeConfig, *, owner=Non
     return None
 
 
-def buildGeometry(positions, supports, lam0, config, schemeConfig, domain):
+def buildGeometry(positions, supports, lam0, config, schemeConfig, domain, *, owner=None):
     return MeshlessWarp.build(
         positions, supports, domain, config.kernel,
+        adjacency=cachedAdjacency(positions, supports, domain, schemeConfig, owner=owner),
         cond_max=schemeConfig.condMax, closure=schemeConfig.closure,
         closure_power=schemeConfig.closurePower, rtol=None, cg_tol=schemeConfig.cgTol,
         cg_iters=schemeConfig.cgIters, lam0=lam0, guards=True,
@@ -87,7 +129,7 @@ def startOfStepGeometry(state, domain, config, schemeConfig):
     else a fresh build, warm-starting the closure solve from the previous step's lam."""
     geom = takeGeometry(state.positions, state.supports, domain, config.kernel, schemeConfig, owner=state)
     if geom is None:
-        return buildGeometry(state.positions, state.supports, state.lam, config, schemeConfig, domain)
+        return buildGeometry(state.positions, state.supports, state.lam, config, schemeConfig, domain, owner=state)
     if schemeConfig.closure == 'project':
         geom.close(closure_power=schemeConfig.closurePower, cg_tol=schemeConfig.cgTol,
                    cg_iters=schemeConfig.cgIters, lam0=state.lam,

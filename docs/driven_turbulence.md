@@ -299,3 +299,16 @@ flow stationary or resolution-converged. Long-flow studies retain source
 archives and all failures under `.tmp/driven-qualification-20261027`; the
 maintained measurement protocol above separates numerical admissibility,
 finite-record sampling uncertainty and spatial-resolution evidence.
+
+## Performance controls
+
+See [the MFM/MFV performance investigation](driven_turbulence_performance_2026-10-27.md).
+`solver.neighborSkin=1.25` opts into validity-checked padded neighbor lists with
+exact current-pair filtering; the default remains 1 (fresh search). This reuses
+search work, while moments and physics remain fresh. It changes neighbor
+summation order, so cached continuations/restarts may differ at roundoff and
+late chaotic trajectories need statistical comparison. Baseline skin=1 keeps
+the existing bitwise restart contract. Short shared-GPU A/Bs improved observed
+wall time, but uncontended throughput and long cached-flow statistics remain
+unqualified. `scripts/profile_drivenTurbulence.py` separates timing, full
+diagnostics and per-RHS observation modes.

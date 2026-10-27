@@ -152,7 +152,7 @@ class MeshlessSystem(BaseIntegrationSystem):
             geometry = (self.inflowReservoir.build(self.state, config, scheme, self.t)
                         if self.inflowReservoir is not None else
                         buildGeometry(self.state.positions, self.state.supports, self.state.lam,
-                                      config, scheme, self.domain))
+                                      config, scheme, self.domain, owner=self.state))
             if self.drivenParticles is not None:
                 self.drivenParticles.conserved(self.state, geometry, self.t, float(scheme.gamma))
             refreshPrimitives(self.state, geometry, particleGamma(self.state, scheme), scheme.nngb, config.dim,

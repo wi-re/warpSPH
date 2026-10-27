@@ -301,3 +301,21 @@ Git-ignored .tmp directories. Commit supported reusable functionality, focused
 regressions and maintained documentation as each stage is qualified. This
 roadmap records future scope; HPC jobs and solver implementations are separate
 execution tasks.
+
+## Performance investigation (2026-10-27)
+
+User requested profiling and tuning MFM/MFV before longer driven campaigns.
+Separate setup, fresh SSPRK spatial stages, timestep, accepted-state refresh,
+forcing, diagnostics and export. Use short sequential windows from startup and
+saved weak/strong flow states, and compare both methods at the same physical
+input. Preserve CFL, support, thermodynamics, stage semantics and safety checks.
+Profiler counts explain bottlenecks; instrumented or GPU-contended wall times
+are not throughput rankings. Require repeatable untimed field/budget agreement
+and relevant regressions before adopting optimizations. The existing long-run
+qualification wall times include observers and contention.
+
+Performance pass: [report](../driven_turbulence_performance_2026-10-27.md).
+Opt-in exact-neighbor caching reduces observed shared-GPU step wall time by
+18–28% across repeated 64²/128² weak/strong MFM/MFV windows. The original
+search remains default; uncontended throughput and long cached-flow
+statistics remain open.

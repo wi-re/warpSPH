@@ -145,6 +145,7 @@ def solverParameters(scheme):
             'cfl': P('number', 'Meshless signal timestep CFL factor.', 'time', exclusiveMinimum=0),
             'cflLength': P('string', 'Length used in the CFL estimate.', 'time', choices=('particle', 'support')),
             'temporalScheme': P('string', 'Meshless time advance.', 'time', choices=('auto', 'ssprk', 'hancock', 'kdk')),
+            'neighborSkin': P('number', 'Validity-checked neighbor-search skin; 1 rebuilds, >1 caches padded lists and filters current pairs.', 'geometry', minimum=1),
             'closure': P('string', 'Effective-face closure treatment.', 'geometry', choices=('none', 'project')),
         }
     if scheme in ('deltaSPH', 'sun2017DeltaSPH'):

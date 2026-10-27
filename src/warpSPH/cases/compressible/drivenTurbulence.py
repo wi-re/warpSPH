@@ -176,6 +176,10 @@ def checkpointSignature(ctx):
         domain={name: getattr(ctx.spec, name) for name in ('dim', 'nx', 'L', 'periodic', 'kernel', 'n_h')},
         timestep={name: getattr(ctx.config, name) for name in ('adaptiveDt', 'minDt', 'maxDt', 'dtGrowthFactor')},
         integrator=ctx.integrator.identifier.name)
+    # Preserve version-1 checkpoint compatibility for the unchanged default.
+    # Opt-in search ordering is explicit metadata; its cache is scratch only.
+    if signature['solver'].get('neighborSkin') == 1.:
+        signature['solver'].pop('neighborSkin')
     return json.dumps(signature, sort_keys=True, separators=(',', ':'), allow_nan=False)
 
 
