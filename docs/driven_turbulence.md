@@ -130,12 +130,17 @@ python scripts/analyze_drivenTurbulence.py .tmp/campaign/weak64-seed1234 \
   --grids 16 32 --blocks 10 20 30 40
 ```
 
-Each input directory contains `input.json` and chronological `samples/*.npz`.
+The command accepts a native run directory containing `trajectory.h5` and
+`caseSpec.json`, or an investigation directory with `input.json` and
+chronological `samples/*.npz`.
 Each snapshot supplies scalar `t`, positions/velocities of shape N by 2, and
 masses, densities, pressures and internalEnergies of shape N. The qualification
 probe also retains Q and supports for physical audits. Optional history.jsonl
 and result.json supply all-step budgets and the runtime/admissibility outcome.
 Keep experiment drivers, snapshots and generated analysis under `.tmp/`.
+Native budget checks cover saved snapshots only; an independent RHS/accepted-step
+observer is still needed for an all-stage qualification. Missing source manifests
+and runtime results are explicitly identified rather than inferred from HDF5.
 Output includes per-snapshot particle statistics/PDFs, filtered spectra,
 structure functions, correlation estimates and a machine-readable summary.
 

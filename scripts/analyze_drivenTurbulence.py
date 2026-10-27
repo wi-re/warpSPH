@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Qualify saved 2D compressible particle flows without launching simulations.
 
-Each run contains input.json, result.json/history.jsonl (optional while running),
+Accept native trajectory.h5 plus caseSpec.json, or a run with input.json,
+result.json/history.jsonl (optional while running),
 and samples/*.npz with scalar t, positions[N,2], masses[N], densities[N],
 velocities[N,2], internalEnergies[N], pressures[N], Q[N,4], supports[N].
 See docs/driven_turbulence.md for measurement and acceptance conventions.
@@ -41,42 +42,77 @@ def timeMean(times, values, low, high):
     return (np.trapezoid(interp, t, axis=0)/(high-low)).reshape(values.shape[1:])
 
 
+def snapshots(path):
+    """Read retained NPZ observations or native driven trajectory output."""
+    if (path/'samples').is_dir():
+        refs = {}
+        if (path/'initial.npz').exists():
+            with np.load(path/'initial.npz') as initial:
+                refs = dict(_initialEnergy=float(initial['Q'][:, -1].astype(float).sum()),
+                            _initialMass=float(initial['Q'][:, 0].astype(float).sum()))
+        for file in sorted((path/'samples').glob('*.npz')):
+            with np.load(file) as state:
+                yield file, dict(state, **refs)
+        return
+    import h5py
+    with h5py.File(path/'trajectory.h5') as f:
+        required = ('positions', 'masses', 'velocities', 'densities', 'pressures', 'internalEnergies', 'supports')
+        if any(name not in f for name in required):
+            raise ValueError('trajectory lacks per-frame driven particle measurements')
+        for key in sorted(f['positions']):
+            state = {name: f[name][key][:] for name in required}
+            state['t'] = float(f['times'][key][0])
+            for name in ('Q', 'sourceEnergyBudget'):
+                if name in f:
+                    state[name] = f[name][key][:]
+            for name in ('initialEnergy', 'initialMass'):
+                if name in f.attrs:
+                    state['_'+name] = float(f.attrs[name])
+            yield f'{path}/trajectory.h5:{key}', state
+
+
 def analyze(path, output, grids, blocks, deposition='cic'):
-    config = json.loads((path/'input.json').read_text())
+    if (path/'input.json').exists():
+        config = json.loads((path/'input.json').read_text())
+    else:
+        spec = json.loads((path/'caseSpec.json').read_text())
+        config = dict(simulation=spec, params=spec.get('params', {}))
     params = config.get('params', {})
     gamma, length = params.get('gamma', 5/3), config['simulation'].get('L', 1.)
     nx = config['simulation']['nx']
     edges = np.linspace(-8, 8, 161)
     p0 = params.get('rho0', 1.)*params.get('soundSpeed', 1.)**2/gamma
-    times, rows, pdfs, data = [], [], [], {n: [] for n in grids}
-    for file in sorted((path/'samples').glob('*.npz')):
-        with np.load(file) as s:
-            t = float(s['t'])
-            mass, rho, velocity, u = (s[k] for k in ['masses', 'densities', 'velocities', 'internalEnergies'])
-            row = particleStatistics(mass, rho, velocity, u, gamma=gamma, length=length)
-            volume, logrho = mass/rho, np.log(rho/(mass.sum()/length**2))
-            logpressure = np.log(s['pressures']/p0)
-            if not np.isfinite(logpressure).all():
-                raise ValueError(f'{file}: invalid pressure')
-            row['kineticEnergy'] = float(.5*np.sum(mass*np.sum(velocity.astype(float)**2, axis=1)))
-            row['thermalEnergy'] = float(np.sum(mass.astype(float)*u))
-            row['minDensity'], row['minEnergy'] = float(rho.min()), float(u.min())
-            pdf = {}
-            for name, weights in [('Mass', mass), ('Volume', volume)]:
-                pdf['logDensity'+name] = weightedPDF(logrho, weights, edges)
-                pdf['logPressure'+name] = weightedPDF(logpressure, weights, edges)
-            for n in grids:
-                grid = (depositCIC2D(s['positions'], mass, velocity, gridSize=n, length=length) if deposition == 'cic' else
-                        depositKernel2D(s['positions'], mass, velocity, s['supports'], gridSize=n, length=length))
-                item = {k: grid[k] for k in ['emptyCellFraction', 'relativeMassError', 'momentumError', 'unresolvedKineticFraction']}
-                if deposition == 'kernel':
-                    item.update({k: grid[k] for k in ['minFilterRadius', 'maxFilterRadius', 'broadenedParticleFraction']})
-                if not grid['emptyCellFraction']:
-                    item.update(spectra=spectra2D(grid['velocity'], grid['density']),
-                                structure=structureFunctions2D(grid['velocity'], length=length),
-                                velocity=grid['velocity'].astype(np.float32))
-                data[n].append(item)
-            times.append(t); rows.append(row); pdfs.append(pdf)
+    times, rows, pdfs, snapshotBudgets, data = [], [], [], [], {n: [] for n in grids}
+    for file, s in snapshots(path):
+        t = float(s['t'])
+        mass, rho, velocity, u = (s[k] for k in ['masses', 'densities', 'velocities', 'internalEnergies'])
+        row = particleStatistics(mass, rho, velocity, u, gamma=gamma, length=length)
+        volume, logrho = mass/rho, np.log(rho/(mass.sum()/length**2))
+        logpressure = np.log(s['pressures']/p0)
+        if not np.isfinite(logpressure).all():
+            raise ValueError(f'{file}: invalid pressure')
+        row['kineticEnergy'] = float(.5*np.sum(mass*np.sum(velocity.astype(float)**2, axis=1)))
+        row['thermalEnergy'] = float(np.sum(mass.astype(float)*u))
+        row['minDensity'], row['minEnergy'] = float(rho.min()), float(u.min())
+        pdf = {}
+        for name, weights in [('Mass', mass), ('Volume', volume)]:
+            pdf['logDensity'+name] = weightedPDF(logrho, weights, edges)
+            pdf['logPressure'+name] = weightedPDF(logpressure, weights, edges)
+        for n in grids:
+            grid = (depositCIC2D(s['positions'], mass, velocity, gridSize=n, length=length) if deposition == 'cic' else
+                    depositKernel2D(s['positions'], mass, velocity, s['supports'], gridSize=n, length=length))
+            item = {k: grid[k] for k in ['emptyCellFraction', 'relativeMassError', 'momentumError', 'unresolvedKineticFraction']}
+            if deposition == 'kernel':
+                item.update({k: grid[k] for k in ['minFilterRadius', 'maxFilterRadius', 'broadenedParticleFraction']})
+            if not grid['emptyCellFraction']:
+                item.update(spectra=spectra2D(grid['velocity'], grid['density']),
+                            structure=structureFunctions2D(grid['velocity'], length=length),
+                            velocity=grid['velocity'].astype(np.float32))
+            data[n].append(item)
+        if all(k in s for k in ('Q', 'sourceEnergyBudget', '_initialEnergy', '_initialMass')):
+            snapshotBudgets.append(dict(relativeEnergyBudgetResidual=float((s['Q'][:, -1].astype(float).sum()-s['_initialEnergy']-s['sourceEnergyBudget'].sum())/s['_initialEnergy']),
+                relativeMassChange=float(s['Q'][:, 0].astype(float).sum()/s['_initialMass']-1), meanSpeed=float(np.linalg.norm(row['bulkVelocityMass']))))
+        times.append(t); rows.append(row); pdfs.append(pdf)
     if len(times) < 8:
         raise ValueError(f'{path}: need at least8 snapshots')
     times = np.asarray(times)
@@ -132,6 +168,8 @@ def analyze(path, output, grids, blocks, deposition='cic'):
     passed = complete and all(s['passed'] for s in screens.values()) and turnovers >= 10
     result = json.loads((path/'result.json').read_text()) if (path/'result.json').exists() else None
     history = [json.loads(line) for line in (path/'history.jsonl').read_text().splitlines() if line.strip()] if (path/'history.jsonl').exists() else []
+    if not history:
+        history = snapshotBudgets
     budget = dict(maxRelativeEnergyResidual=max(abs(r['relativeEnergyBudgetResidual']) for r in history),
                   maxRelativeMassChange=max(abs(r['relativeMassChange']) for r in history),
                   maxMeanSpeed=max(r['meanSpeed'] for r in history)) if history else None
@@ -149,7 +187,8 @@ def analyze(path, output, grids, blocks, deposition='cic'):
                   timeRange=[times[0], times[-1]], window=window, nx=nx, params=params, deposition=deposition,
                   stationaryScalarScreenPassed=bool(passed), screens=screens, boxCrossings=turnovers,
                   means=means, meanPDFs=meanPDFs, grid=summaries, budget=budget,
-                  runtimeResult=result, changedArchivedWarpSPHSources=sourceChanges)
+                  runtimeResult=result, budgetScope='all accepted states' if (path/'history.jsonl').exists() else 'saved snapshots only',
+                  sourceManifestAvailable=reference.exists(), changedArchivedWarpSPHSources=sourceChanges)
     (output/'summary.json').write_text(json.dumps(plain(report), indent=2, allow_nan=False)+'\n')
     return report
 

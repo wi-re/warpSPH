@@ -339,3 +339,38 @@ def test_adaptive_projection_reports_cell_broadening_without_filling_holes():
     assert np.isnan(a['velocity']).any()
     with pytest.raises(ValueError, match='fully covered'):
         spectra2D(a['velocity'])
+
+
+def test_offline_analysis_reads_native_fields_and_scopes_budget_checks(tmp_path):
+    import importlib.util
+    import json
+    import numpy as np
+    import h5py
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[1]/'scripts/analyze_drivenTurbulence.py'
+    spec = importlib.util.spec_from_file_location('driven_native_analysis', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    run = tmp_path/'native'
+    run.mkdir()
+    (run/'caseSpec.json').write_text(json.dumps({'nx': 8, 'L': 1., 'params': {}}))
+    x, y = np.meshgrid((np.arange(8)+.5)/8, (np.arange(8)+.5)/8)
+    positions = np.stack((x, y), axis=-1).reshape(-1, 2)
+    mass = np.full(64, 1/64)
+    with h5py.File(run/'trajectory.h5', 'w') as f:
+        f.attrs.update(initialEnergy=1.15, initialMass=1.)
+        for i, t in enumerate(np.linspace(0, .7, 8)):
+            velocity = np.stack((np.sin(2*np.pi*y)*(1+.05*np.sin(20*t)), np.zeros_like(x)), axis=-1).reshape(-1, 2)
+            energy = mass*(.9+.5*np.sum(velocity**2, axis=-1))
+            fields = dict(positions=positions, velocities=velocity, masses=mass,
+                          densities=np.ones(64), pressures=np.full(64, .6), internalEnergies=np.full(64, .9),
+                          supports=np.full(64, .2), Q=np.column_stack((mass, mass[:, None]*velocity, energy)),
+                          sourceEnergyBudget=np.array([energy.sum()-1.15, 0.]), times=np.array([t]))
+            for name, values in fields.items():
+                f.require_group(name).create_dataset(f'frame_{i:05d}', data=values)
+    report = module.analyze(run, tmp_path/'analysis', [8], [0., .3, .7], deposition='kernel')
+    assert report['completeAssessmentWindow']
+    assert report['budgetScope'] == 'saved snapshots only'
+    assert not report['sourceManifestAvailable']
+    assert report['budget']['maxRelativeEnergyResidual'] < 1e-15
+    assert report['budget']['maxRelativeMassChange'] == 0
