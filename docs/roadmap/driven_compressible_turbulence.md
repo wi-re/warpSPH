@@ -184,13 +184,16 @@ for the selected boundaries, heat-flux balance and Nusselt diagnostics. Resolve
 thermal and viscous boundary layers before extending to strongly chaotic
 convection. Keep any Boussinesq/WCSPH comparison on its own named physical path.
 
-Thermal-boundary audit (2026-10-27): [capability inventory and CPU controls](../thermal_boundary_audit_2026-10-27.md).
-RT has stage rho/u/v prescriptions, but ordinary-SPH accepted states do not
-consistently retain them; PESPH entropy prescriptions do not exactly hold u.
-MFM/MFV pressure reservoirs work, with RT adapter and fixed-u geometry handling
-still missing. Prioritize initialization/accepted-state consistency, explicit
-boundary exchange budgets and dimensional heat transport before convection.
-These are implementation findings; no thermal-wall model has been promoted.
+Thermal-boundary work (2026-10-27): the [initial audit](../thermal_boundary_audit_2026-10-27.md)
+identified initialization/accepted-u and entropy-closure failures. The
+[CPU-qualified repair](../thermal_state_qualification_2026-10-27.md) now retains
+prescribed u, supports geometry-independent meshless u, and records restartable
+projection exchange. The meshless RT case adapter, physical conductivity,
+conducting/insulated walls and physical viscosity remain open.
+[Reference scaffolding](../thermal_transport_scaffolding.md) defines caloric
+units, distinct c_v/c_p diffusivities, analytic conduction profiles and signed
+face heat budgets for the next small controls. No physical thermal-wall model
+has been promoted.
 
 ## Stage E Interface and shock instability cases
 
@@ -360,10 +363,11 @@ a fitted artificial diffusion rate as calibrated physical heat transport.
 
 Results: [small thermal controls](../thermal_boundary_toys_2026-10-27.md).
 184 CPU diagnostics (92 per precision) and nine tests per precision complete.
-Boundary-target defects persist under timestep/tableau refinement; heat-operator
-response varies with resolution/amplitude and some formulations switch off at
-equal pressure. Small physical slab/insulation/gravity gates remain pending
-boundary repair and a dimensional transport operator. No model was promoted.
+The initial boundary-target defects persisted under timestep/tableau refinement;
+the subsequent state repair is recorded below. Artificial heat-operator response
+varies with resolution/amplitude and some formulations switch off at equal
+pressure. Physical slab/insulation/gravity gates still need a dimensional
+transport operator and their case adapters. No transport model was promoted.
 
 ## Thermal implementation investigation (2026-10-27)
 
@@ -380,3 +384,12 @@ projection exchanges survive replay/restart/output. CPU toys and short coupled
 controls pass; no-prescription parity is bitwise in nine saved controls.
 Physical heat transport/wall fluxes, calibrated physical viscosity and GPU/long
 convection qualification remain open. Turbulence campaigns remain deferred.
+
+## Thermal reference scaffolding (2026-10-27)
+
+Before physical transport, add independent periodic/insulated/plate conduction
+oracles, explicit caloric units and signed face-flux energy references.
+[Scaffolding and measurement contract](../thermal_transport_scaffolding.md):
+22 CPU oracle checks pass; no new solver physics or GPU campaign. The stationary
+fixed-density controls must be mechanically frozen, and convection's common
+c_p diffusivity must be distinguished from the c_v heat-equation diffusivity.

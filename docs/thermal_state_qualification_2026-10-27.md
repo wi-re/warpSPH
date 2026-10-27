@@ -220,6 +220,11 @@ supported conductive layer and convection onset. Keep turbulence campaigns
 back while these thermal foundations are being investigated; the GPU can be
 used later when it is available and useful for the next qualification scope.
 
+Independent follow-up [reference scaffolding](thermal_transport_scaffolding.md)
+now supplies analytic periodic/insulated/plate solutions, caloric conventions
+and signed heat budgets for those future transport controls (22 CPU oracle
+checks). It does not add physical transport or extend solver qualification.
+
 ## Reproduction and raw evidence
 
 Use the [toy probe](../scripts/probe_thermalBoundaries.py) and commands in the
