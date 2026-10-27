@@ -34,10 +34,20 @@ def geometry(system,cfg,sc,*,dt=None):
     if dt is not None:
         enforceDirichlet(system,system.t,dt,cfg,sc)
     cp,coverage=computeIISPHContactPoints(st,system.contactBoundaryProvider)
-    out=computeIISPHProjectionGeometry(st,cfg,sc,adj,analyticProvider=system.analyticBoundaryProvider,
-        boundarySupport=system.boundarySupport,contactPoints=cp,contactCoverageFailure=coverage)
+    pressureBoundaryGeometry=None
+    if sc.dfsph.pressureBoundary=='band2018':
+        from .pressureBoundaries import buildPressureBoundaryGeometry
+        pressureBoundaryGeometry=buildPressureBoundaryGeometry(st,cfg,sc,adj,
+            analyticProvider=system.analyticBoundaryProvider)
+        z=torch.zeros_like(st.positions)
+        out=(pressureBoundaryGeometry.restVolumes,pressureBoundaryGeometry.ratios,z,z,
+             pressureBoundaryGeometry.diagonal,None,None,None)
+        cp=None
+    else:
+        out=computeIISPHProjectionGeometry(st,cfg,sc,adj,analyticProvider=system.analyticBoundaryProvider,
+            boundarySupport=system.boundarySupport,contactPoints=cp,contactCoverageFailure=coverage)
     return NS(adjacency=adj,args=out[:5],integrals=out[7],contactPoints=cp,
-        contactAdjacency=out[5],contactDenominator=out[6])
+        contactAdjacency=out[5],contactDenominator=out[6],pressureBoundaryGeometry=pressureBoundaryGeometry)
 
 
 def solve(st,cfg,sc,dt,g,mode,velocity,history):
@@ -46,7 +56,8 @@ def solve(st,cfg,sc,dt,g,mode,velocity,history):
         deficient=countNeighbors(st,cfg,sc,g.adjacency)<(7 if cfg.domain.dim==2 else 20)
     return solveDFSPHProjection(st,cfg,sc,dt,g.adjacency,*g.args,mode=mode,velocity=velocity,
         pressureImpulse=history,contactPoints=g.contactPoints,contactAdjacency=g.contactAdjacency,
-        contactDenominator=g.contactDenominator,deficient=deficient)
+        contactDenominator=g.contactDenominator,deficient=deficient,
+        pressureBoundaryGeometry=g.pressureBoundaryGeometry)
 
 
 def advanceDFSPH(system,dt,cfg,sc,order,*,fluidOnlyViscosity=False):

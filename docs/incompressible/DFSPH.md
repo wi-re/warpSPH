@@ -947,3 +947,16 @@ performance changes or numerical-default changes in this investigation.
 Particle-wall [startup scaling](STARTUP_SCALING_2026-10-26.md) now measures the
 fixed overhead and CPU crossover explicitly, with a pinned boundary dependency
 and unchanged solver paths.
+
+
+## Follow-up: periodic conditioning and coupled wall pressures
+
+The [27 October TGV investigation](TGV_2026-10-27.md) reproduces the IISPH
+stop, separates divergence tolerance from near-lattice sampling, and measures
+pressure work and viscous loss. Improved capped controls remain unqualified.
+
+The opt-in [native pressure-boundary experiment](PRESSURE_BOUNDARIES.md)
+extends Band's volume-centric fluid/solid pressure unknowns to both DFSPH
+constraints and all three native compositions. It is a distinct sampled-wall
+model with unresolved wall-pressure conditioning and flow dissipation; it
+does not replace the default native IISPH self/contact operators.

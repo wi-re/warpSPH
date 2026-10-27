@@ -295,7 +295,8 @@ def plot(root, destination, metrics=None):
         notes.append('Dated Delta / Sun / AC controls retain their original ICs, C2 kernels and presets; prepared projection rows use C4 (Couette C2). This is a capability survey, not a solver-only A/B. Separate TGV IC control excluded.')
     notes.extend(manifest.get('comparison_notes',[]))
     for i, note in enumerate(notes):
-        fig.text(.13, .15 - (.014 if len(notes)>9 else .017) * i, note, fontsize=9.1, color='#435058')
+        spacing = min(.017, .15 / max(1, len(notes)-1))
+        fig.text(.13, .17 - spacing * i, note, fontsize=9.1, color='#435058')
     for ext in ('png', 'pdf', 'svg'):
         fig.savefig(destination / ('case_ranking.' + ext), dpi=220, facecolor='white')
     plt.close(fig)

@@ -26,14 +26,14 @@ from run_fluidMatrix import write_json
 
 
 RETAINED = ('deltaSPH', 'sun2017DeltaSPH', 'artificialCompressible')
+NATIVE = {'dfsph', 'dfsphPredictor', 'dfsphShift', 'iisph'}
 QUALIFICATION = (
     'Prepared incompressible rows replace the earlier projection results in the normal '
     'matrix. Delta-SPH, Sun delta-plus and ACSPH retain their original dated runs. '
     'Initial states, kernels, viscosity discretizations, source policies and timestep '
     'presets differ: this is a capability comparison, not a controlled solver-only A/B. '
     'Native periodic projections use periodicMeanFree during evolution; preparation '
-    'alone does not account for their results. The separate rearranged TGV control is '
-    'excluded from these rankings. Completion and evidence integrity do not certify '
+    'alone does not account for their results. Completion and evidence integrity do not certify '
     'physical correctness. No overall score is computed.'
 )
 
@@ -55,7 +55,7 @@ def load_dataset(root):
     return manifest, rows
 
 
-def compose(baseline, prepared):
+def compose(baseline, prepared, *, native_only=False):
     baseline, prepared = baseline.resolve(), prepared.resolve()
     bm, br = load_dataset(baseline)
     pm, pr = load_dataset(prepared)
@@ -64,10 +64,12 @@ def compose(baseline, prepared):
     if set(pm['schemes']) & set(RETAINED):
         raise ValueError('Prepared scheme IDs collide with retained control methods')
     # A subset/control must never silently discard other incompressible methods.
-    required = {'dfsph', 'dfsphPredictor', 'dfsphShift', 'iisph',
-                'divergenceFree', 'omniIncompressible', 'dfsphReference', 'band2018pb'}
+    required = NATIVE if native_only else NATIVE | {
+        'divergenceFree', 'omniIncompressible', 'dfsphReference', 'band2018pb'}
     if set(pm['schemes']) != required:
-        raise ValueError('Expected the complete eight-method prepared matrix')
+        raise ValueError('Expected the complete four-method native matrix' if native_only
+                         else 'Expected the complete eight-method prepared matrix; '
+                         'use --native-only for the declared four-method native cohort')
     labels = dict(zip(SCHEMES, NAMES))
     labels.update(pm['labels'])
     schemes = list(RETAINED[:2]) + list(pm['schemes']) + [RETAINED[-1]]
@@ -111,6 +113,15 @@ def compose(baseline, prepared):
                     sources=[dict(root=str(root), manifest_sha256=digest(root/'manifest.json'),
                                   metrics_sha256=digest(root/'comparison_metrics.json'))
                              for root in (baseline, prepared)])
+    manifest['projection_cohort'] = 'current-native' if native_only else 'native-and-legacy'
+    if native_only:
+        manifest['comparison_notes'] = [
+            'Four current native projection methods are selected as a complete cohort. '
+            'Older legacy projection experiments remain in their original reports and are excluded here.',
+            f'Prepared revision: {pm.get("revision", "unspecified")}; '
+            f'frontend checkpoint: {pm.get("frontend_checkpoint", "unspecified")}. '
+            'Exact dependency revisions and fixture policies remain in the prepared source manifest.',
+        ]
     for key in ('comparison_title','comparison_notes','details_root','correction_sources'):
         if key in pm:manifest[key]=pm[key]
     return manifest, selected
@@ -220,7 +231,10 @@ def overlays(root, manifest, rows):
                     handles.append(h); labels.append(label)
         fig.suptitle(f'{test} — dated classic controls and prepared projections', y=.99)
         fig.legend(handles, labels, loc='lower center', ncol=4, fontsize=8)
-        fig.text(.5, .14, 'Solid: completed; dashed: partial stop. Different ICs / kernels / presets. Retained controls: 21 Oct; prepared: 25–26 Oct 2026.', ha='center', fontsize=8)
+        dates = '; '.join(f'{cohort}: '+', '.join(sorted({r['run_date'] for r in rows
+                            if r['comparison_cohort'] == cohort}))
+                          for cohort in ('retained-classic', 'prepared-incompressible'))
+        fig.text(.5, .14, 'Solid: completed; dashed: partial stop. Different ICs / kernels / presets. '+dates, ha='center', fontsize=8)
         fig.tight_layout(rect=(0, .17, 1, .96))
         name = f'comparison_{test}.png'
         fig.savefig(root/name, dpi=150)
@@ -245,13 +259,16 @@ def report(root, manifest, rows, images):
     prepared = Path(manifest['sources'][1]['root'])
     details = Path(manifest.get('details_root',prepared))
     incomplete=sum(r.get('pressure_observation_complete') is False for r in rows)
-    lines += ['', 'The prepared primary matrix includes unfinished-quietness fixtures, initial closed-box wall crossings, '
-              'native iteration caps, periodic density drift and genuine shortened-final-step pressure responses. '
-              f'These qualifications remain in the source report. Its {incomplete} incomplete legacy pressure records stay excluded '
-              'from pressure metrics.', '',
-              f'[Prepared report]({prepared}/README.md) · [Static-water details]({details}/STATIC_WATER.md) · '
-              f'[Separate TGV preparation control]({details}/TGV_PREPARATION_CONTROL.md)', '',
-              'The alternate TGV control does not replace a single failed primary cell. Historical roundoff exclusions '
+    source_links = [('Prepared report', prepared/'README.md'),
+                    ('Prepared curves', prepared/'comparison.html'),
+                    ('Evidence audit', prepared/'final_audit.json'),
+                    ('Static-water details', details/'STATIC_WATER.md'),
+                    ('Separate TGV preparation control', details/'TGV_PREPARATION_CONTROL.md')]
+    lines += ['', 'Inspect prepared fixture quietness, containment, iteration caps and density drift in the source evidence. '
+              f'{incomplete} incomplete pressure records are excluded from pressure metrics. '
+              'All failed primary cells remain present.', '',
+              ' · '.join(f'[{label}]({path})' for label, path in source_links if path.exists()), '',
+              'Historical roundoff exclusions '
               'in retained controls are carried forward exactly; new legitimate terminal samples are kept. '
               'Prepared runtime subtracts shared fixture creation; preparation cost is a separate metrics field. '
               'Runtime includes setup and output and is not an isolated solver benchmark.', '',
@@ -269,7 +286,7 @@ def report(root, manifest, rows, images):
             '<h1>Classic fluid comparison</h1>', f'<p>{esc(QUALIFICATION)}</p>',
             '<p><a href="README.md">Report</a> · <a href="comparison_metrics.csv">Metrics CSV</a> · '
             '<a href="manifest.json">Per-row input settings</a> · <a href="provenance.json">Source receipts</a></p>',
-            '<p>Prepared fixture qualification and separate TGV control: '
+            '<p>Prepared fixture settings and qualification: '
             f'<a href="{esc(str(prepared/"README.md"))}">source report</a>. '
             'Iteration caps are marked *. Unsupported rows and stops are unscored. A rank does not establish physical validity.</p>']
     for image in images:
@@ -283,6 +300,11 @@ def report(root, manifest, rows, images):
         evidence = ' · '.join(f'<a href="{esc(str(directory/name))}">{label}</a>' for name,label in
                               (('result.json','result'),('series.csv','series'),('effective_spec.json','effective inputs'))
                               if (directory/name).exists())
+        result_path = directory/'result.json'
+        if result_path.exists():
+            video = json.loads(result_path.read_text()).get('video_path')
+            if video and Path(video).is_file():
+                evidence += f' · <a href="{esc(video)}">video</a>'
         quality = f"{rank['loss']:.5g}%" if rank.get('loss') is not None else '—'
         runtime = f"{rank['runtime_seconds']:.5g}" if rank.get('runtime_seconds') is not None else '—'
         cells = [item['test'],item['boundary'],names[item['scheme']],item['run_date'],item['comparison_cohort'],item['status'],
@@ -291,8 +313,8 @@ def report(root, manifest, rows, images):
     (root/'comparison.html').write_text('\n'.join(body)+ '</table>')
 
 
-def build(baseline, prepared, output):
-    manifest, rows = compose(baseline, prepared)
+def build(baseline, prepared, output, *, native_only=False):
+    manifest, rows = compose(baseline, prepared, native_only=native_only)
     output = output.resolve()
     # A separate empty destination prevents any accidental source/report overwrite.
     output.mkdir(parents=True, exist_ok=True)
@@ -329,5 +351,7 @@ if __name__ == '__main__':
     parser.add_argument('--baseline', type=Path, required=True)
     parser.add_argument('--prepared', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--native-only', action='store_true',
+                        help='Select the complete four-method current native cohort; omit historical legacy projections.')
     args = parser.parse_args()
-    build(args.baseline, args.prepared, args.out)
+    build(args.baseline, args.prepared, args.out, native_only=args.native_only)

@@ -316,3 +316,34 @@ def test_prepared_overlay_retains_failures_and_actual_sources(tmp_path):
     (rerun/'comparison_metrics.json').write_text(json.dumps([changed]))
     with pytest.raises(ValueError,match='endpoint'):
         overlay_prepared(base,rerun,tmp_path/'bad-overlay')
+
+
+def test_native_comparison_requires_complete_explicit_cohort_and_preserves_stop(tmp_path):
+    import sys, json
+    sys.path.insert(0, str(path.parent))
+    from compare_preparedFluidMatrix import compose, NATIVE, RETAINED
+    base, prepared = tmp_path/'base', tmp_path/'prepared'
+    for root, methods in ((base, RETAINED), (prepared, sorted(NATIVE))):
+        root.mkdir()
+        rows = [dict(id=f'tgv__{method}__periodic', test='tgv', scheme=method,
+                     boundary='periodic', status='failed' if method == 'iisph' else 'completed',
+                     target_time=5., actual_time=4.781 if method == 'iisph' else 5.,
+                     data_root=str(root)) for method in methods]
+        manifest = dict(profile='prepared-incompressible', scale='full', created='2026-10-26',
+                        schemes=list(methods), labels={m:m for m in methods}, rows=rows)
+        (root/'manifest.json').write_text(json.dumps(manifest))
+        (root/'comparison_metrics.json').write_text(json.dumps(rows))
+    original = (prepared/'comparison_metrics.json').read_bytes()
+    with pytest.raises(ValueError, match='native-only'):
+        compose(base, prepared)
+    manifest, rows = compose(base, prepared, native_only=True)
+    assert len(rows) == 7 and manifest['projection_cohort'] == 'current-native'
+    stopped = next(r for r in rows if r['scheme'] == 'iisph')
+    assert stopped['status'] == 'failed' and stopped['actual_time'] == 4.781
+    assert stopped['data_root'] == str(prepared)
+    assert (prepared/'comparison_metrics.json').read_bytes() == original
+    plan = json.loads((prepared/'manifest.json').read_text())
+    plan['schemes'].remove('iisph')
+    (prepared/'manifest.json').write_text(json.dumps(plan))
+    with pytest.raises(ValueError, match='four-method'):
+        compose(base, prepared, native_only=True)

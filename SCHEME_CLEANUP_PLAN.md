@@ -1874,3 +1874,147 @@ initialization/settings so concurrent boundary development is attributable.
 No new simulation or benchmark runs were launched for this checkpoint.
 An unrelated untracked preview image was preserved with a SHA-256 receipt under
 `.tmp/preserved-scratch-2026-10-26` rather than included in the commit.
+
+
+### Overnight native incompressible matrix — 26 October 2026
+
+User authorized starting the deferred row runs with exclusive overnight GPU
+access. Queue the four current native solver compositions at full resolution
+using version-9 sampling-recovery preparation (60 slots, 52 supported). Fresh
+shared fixtures per case/wall configuration; preserve nominal-volume relaxed
+closed/periodic preparation and calibrated/fitted free surfaces. Freeze current
+frontend/core/integrator/boundary/plotting source dependencies before launch;
+record live Git revisions and content hashes. Run sequentially with VisPy video,
+progress, finite/velocity/stall guards and existing per-row wall budgets.
+No tolerance/model tuning or automatic failed-row retries. Existing historical
+WCSPH/legacy results remain unchanged. Start with hydrostatic rows, then dam
+break/sloshing, followed by periodic/closed and obstacle rows.
+
+Launched under a detached supervisor (PID 3086687; queue PID 3086856) in
+`.tmp/incompressible-native-matrix-2026-10-26-night`. Frozen revisions:
+frontend `56023e87`, core `98081c1d`, integrators `1fea2a3d`, boundaries
+`c624db74`, plotting `05caeb33`, remote `b549e134`; full file hashes and runtime
+import checks accompany the manifest. The first particle-wall DFSPH hydrostatic
+row is advancing, with recorded frames/trajectory, finite fields, no penetration
+and no iteration caps in the initial checks. Live status and per-row reports are
+updated by the durable supervisor; final analysis, evidence audit and comparison
+assembly are queued after the rows finish. These are launch checks, not final
+matrix results.
+
+
+### Overnight matrix rebuilt — 27 October 2026
+
+The frozen queue finished at 04:29 UK: 51/52 attempted rows reached their
+endpoints; IISPH periodic TGV stopped at t=4.781/5 s on the velocity guard
+(72.5 times the reference scale). All 52 attempts pass the evidence audit,
+with 464,889 steps, no setup mismatches, missing terminal tensors, measured
+mass drift or timestep-limit violations. Summed simulation wall time is
+5.076 h (39.3 ms/step averaged over heterogeneous cases, not a solver benchmark).
+
+The automatic combined-report step failed because its composer required all
+eight historical prepared methods. Add explicit `--native-only` admission for
+exactly the four authorized native methods, retaining the strict default and
+case/wall slot checks. Preserve the failed IISPH outcome and all historical
+control rows; no simulations rerun. Rebuilt seven-method report:
+`.tmp/fluid-matrix-native-comparison-2026-10-27/comparison.html`, with quality
+and cost figure, curves, exact metrics, video links and hashed provenance.
+The complete comparison has 105 slots: 76 endpoints, four failures (including
+three retained ACSPH failures), 25 unsupported. All completed plotted cells
+have their expected metrics. Legacy projection experiments remain separate.
+
+At the existing case metrics, predictor-first DFSPH leads sloshing with both
+walls (64.78% / 65.79% pressure-trace error), followed by classic DFSPH
+(71.50% / 71.65%). Coupled hydrostatic losses are below 0.6%; native VD+PS
+has roughly 23% hydrostatic loss and frequent caps. Native TGV errors are
+6.63–6.93%, above retained WCSPH controls; native periodic vortex energy losses
+are about 99.3–99.4%, versus about 87% for retained controls. Different physical
+presets and initialization prevent interpreting this as a solver-only A/B.
+These rankings do not promote a default or qualify capped solves.
+
+
+### TGV failure and native pressure-boundary follow-up — 27 October 2026
+
+User requests investigation of the IISPH periodic TGV velocity stop and weak
+TGV performance of the three native DFSPH compositions, plus rebuilding the
+pressure-boundary formulation for native DFSPH. Start from the frozen overnight
+records, separate initialization/source/solver/transport effects, and reproduce
+the failure with focused instrumentation before changing a numerical choice.
+Review the published pressure-boundary method and current legacy implementation;
+implement an explicit shared native option and qualify with recorded tank and
+flow controls. Preserve the matrix and its failed evidence; no broad rerun or
+default promotion is implied. Track accuracy, conservation, caps and cost.
+
+
+TGV follow-up results: instrumented IISPH and DFSPH work replays match frozen
+matrix endpoint fields bitwise. Actual D^-1 A spectrum rises from 4.272 to
+8.10469 before IISPH's 4.781 s failure; omega .25 requires lambda<8. Half dt
+fails at4.8405s (lambda8.45976); omega .1 delays the stop to4.9893s but does
+not repair dense clustering/mean sampled-density drift. Do not loosen guards
+or promote lower relaxation as a physical fix. Error paths retain numerical
+prefixes/videos; half-dt and interrupted-budget cleanup subsequently segfault.
+
+The prepared periodic fixture remains near crystalline (Q4 .999740); the
+saved rearranged/cooled control has Q4 .256752, fixed nominal mass, and its
+original duration-limited preparation qualification. Exact TGV advection of
+near-lattice samples alone yields mean kernel rho1.14069 at5s. A four-cell
+IC x DF-tolerance study plus intermediate tolerance isolates both effects.
+Near-lattice DF .1% gives velocity error21.28%, energy-curve error6.669%; at
+.0001% these become4.66%/4.493%. Rearranged .1% gives13.58%/3.077%; rearranged
+.0001% gives2.67%/1.481%, rho_mean1.00491, but527 DF caps. Runtime45.09s/6.50ms
+engine perstep baseline vs178.86s/33.20ms best candidate. Raising the latter
+budget to1000 still caps118 times by0.651s; explicitly stopped at0.786s,
+not a qualified completed solution. Other orderings not requalified at this
+bound. DF .1% atdt1ms allows mean normalized divergence1/s; rate-error scaling
+and conditioning need further work.
+
+Work accounting: loose near-lattice DF/CD corrections +6.709/-6.149 J/m,
+viscosity -3.781; rearranged/tight -0.042/-0.008/-2.007. Fixed-geometry
+viscosity damping of recorded loose velocity is1.63x analytic, but the exact
+TGV field at those same positions gives.92x: changing nu would mask the
+numerical state error. See docs/incompressible/TGV_2026-10-27.md.
+
+Rebuilt pressure boundaries as explicit DFSPHConfig.pressureBoundary='band2018'
+(volume-centric, coupled fluid/static sampled-solid unknowns) in all three
+native orders. Reuses bare pair kernels, exact diagonal and native histories/
+policies; no legacy Tikhonov or automatic gauge. Local full-band volume and
+fluid-contact masks are declared deviations from the single-layer paper.
+Ghost queries excluded, clamped fluid DF uses the shared .9rho0 recovery gate.
+Analytic/moving-wall forms are explicitly rejected. Dense 2D/3D force/C/diagonal,
+Jacobi, ghost/nonmutation/config/gate tests pass in FP32/64;182 FP32 regression
+checks pass with one skip, plus12 FP64 new-path checks. Default native results
+remain unchanged.
+
+At declared1000 budget the classic tank completes4s, zero caps/penetration,
+tail median pressure gradient ratio1.00128, RMS speed.000245m/s,235.67s wall /
+54.41ms engine (native346.25s/80.74ms). Predictor-first .25s is quiet. VD+PS
+.25s still hasRMS.388m/s and219 shift caps: pressure slope alone is not a pass.
+The1s dam-break prefix completes with zero caps/penetration in36.55s/14.17ms,
+but integrated K/M is85.15% of native and84.00% of retained Delta. Solved wall
+pressure spread is also unphysical despite a good bulk tank slope. Keep the
+rebuilt full-band variant experimental; next boundary work is conditioning and
+faithful surface sampling, not default promotion. Documented in
+ docs/incompressible/PRESSURE_BOUNDARIES.md; reusable
+scripts/probe_preparedProjection.py selects saved fixtures and explicit overrides.
+All raw evidence, plots, sources and error receipts are retained under
+.tmp/tgv-pressure-investigation-2026-10-27/ with KEEP. The normal matrix is intact.
+
+Final evidence check: all16 attempt source archives verified against their
+recorded hashes, all16 videos fully decoded, terminal fields finite and
+particle masses unchanged wherever terminal tensors exist. Normal-matrix
+manifest/metric hashes remain unchanged. Final tests:182 FP32 passes/one skip
+and12 FP64 passes, including internal pressure momentum/torque conservation.
+Report, failed/partial runs and provenance retained with KEEP.
+
+
+### Native incompressible retirement — 27 October 2026
+
+User defers further pressure-boundary investigation and requests retiring the
+legacy projection implementations in favour of the three native DFSPH stage
+orders and IISPH. Remove redundant runtime drivers, migrate active cases and
+matrix generation, retain historical evidence/readers, and test routing,
+initialization, stage ownership, histories and numerical contracts. This is
+code consolidation, not numerical default tuning. Preserve the experimental
+pressure-boundary option without promoting it. Old names/configuration must
+fail with migration guidance rather than silently selecting different physics.
+The replacement is not merely a Krylov-to-Jacobi change: legacy paths also
+used Jacobi by default, with different operators, policies and wall closures.

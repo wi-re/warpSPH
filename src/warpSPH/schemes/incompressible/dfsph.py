@@ -2,8 +2,9 @@
 
 Both projections use native IISPH's C/F/exact diagonal at the same geometry.
 The package ProjectedStep driver owns one evaluation of this staged map;
-temporal kick/drift primitives come from warpSPHIntegrators. No VD+PS shift,
-mDBC velocity extension, wall-volume scaling or sound-speed pressure carry.
+temporal kick/drift primitives come from warpSPHIntegrators. The explicit
+band2018 option substitutes volume-centric fluid/wall pressure unknowns for
+both constraints. No VD+PS shift or sound-speed pressure carry in this order.
 """
 
 import torch
@@ -47,11 +48,21 @@ def dfsph_step(system, dt, config, schemeConfig, verbose=False):
 
     with record_function('[warpSPH] - [DFSPH - 04] pressure geometry'):
         contactPoints, coverage = computeIISPHContactPoints(state, system.contactBoundaryProvider)
-        (volumes, ratios, wallGradient, gradientSum, diagonal,
-         contactAdjacency, contactDenominator, integrals) = computeIISPHProjectionGeometry(
-            state, config, schemeConfig, adjacency,
-            analyticProvider=system.analyticBoundaryProvider, boundarySupport=system.boundarySupport,
-            contactPoints=contactPoints, contactCoverageFailure=coverage)
+        pressureBoundaryGeometry = None
+        if schemeConfig.dfsph.pressureBoundary == 'band2018':
+            from ...modules.dfsph.pressureBoundaries import buildPressureBoundaryGeometry
+            pressureBoundaryGeometry = buildPressureBoundaryGeometry(state, config, schemeConfig,
+                adjacency, analyticProvider=system.analyticBoundaryProvider)
+            volumes, ratios = pressureBoundaryGeometry.restVolumes, pressureBoundaryGeometry.ratios
+            wallGradient = gradientSum = torch.zeros_like(state.positions)
+            diagonal = pressureBoundaryGeometry.diagonal
+            contactPoints = contactAdjacency = contactDenominator = integrals = None
+        else:
+            (volumes, ratios, wallGradient, gradientSum, diagonal,
+             contactAdjacency, contactDenominator, integrals) = computeIISPHProjectionGeometry(
+                state, config, schemeConfig, adjacency,
+                analyticProvider=system.analyticBoundaryProvider, boundarySupport=system.boundarySupport,
+                contactPoints=contactPoints, contactCoverageFailure=coverage)
 
     with record_function('[warpSPH] - [DFSPH - 05] divergence projection'):
         deficient = None
@@ -63,7 +74,8 @@ def dfsph_step(system, dt, config, schemeConfig, verbose=False):
             mode='divergence', velocity=state.velocities,
             pressureImpulse=state.divergencePressureImpulse,
             contactPoints=contactPoints, contactAdjacency=contactAdjacency,
-            contactDenominator=contactDenominator, deficient=deficient)
+            contactDenominator=contactDenominator, deficient=deficient,
+            pressureBoundaryGeometry=pressureBoundaryGeometry)
         state.velocities = kick(state.velocities, dt, divergence.acceleration)
 
     with record_function('[warpSPH] - [DFSPH - 06] gravity and body force'):
@@ -89,7 +101,7 @@ def dfsph_step(system, dt, config, schemeConfig, verbose=False):
             mode='density', velocity=predictor, previousPressure=state.pressures,
             pressureImpulse=state.densityPressureImpulse, boundaryAcceleration=knownWall,
             contactPoints=contactPoints, contactAdjacency=contactAdjacency,
-            contactDenominator=contactDenominator)
+            contactDenominator=contactDenominator, pressureBoundaryGeometry=pressureBoundaryGeometry)
 
     with record_function('[warpSPH] - [DFSPH - 10] update boundary conditions'):
         update = assembleIISPHUpdate(state, acceleration, density.acceleration)

@@ -44,8 +44,14 @@ class DFSPHConfig:
     minDivergenceDensityRatio: float = 0.9
     # Alternate compositions are opt-in; the native/published cycle stays default.
     ordering: str = 'df_np_cd'
+    # band2018: explicit pressure unknowns on static sampled solids, with
+    # volume-centric C/F. Experimental full-band extension of Band et al.
+    # native retains the IISPH self/contact closure and existing operators.
+    pressureBoundary: str = 'native'
 
     def validate(self):
+        if self.pressureBoundary not in ('native', 'band2018'):
+            raise ValueError('DFSPH pressureBoundary must be native or band2018')
         if not math.isfinite(self.minDivergenceDensityRatio) or not 0 <= self.minDivergenceDensityRatio <= 1:
             raise ValueError('DFSPH minDivergenceDensityRatio must be in [0, 1]')
         if not math.isfinite(self.weakFactorThreshold) or self.weakFactorThreshold < 0:

@@ -52,7 +52,7 @@ python scripts/compare_preparedFluidMatrix.py \
 ```
 
 Use an empty destination. This produces a comparison-only manifest, dated
-11-scheme quality/runtime figures, case curves, HTML, CSV and hashed source
+quality/runtime figures, case curves, HTML, CSV and hashed source
 receipts without running physics or modifying either input. All declared
 failures and unsupported slots remain. Per-row `data_root` resolves the actual
 record, and the original specs/settings remain in the combined manifest.
@@ -62,6 +62,14 @@ into the primary matrix. Retained and prepared runs have different ICs,
 kernels and presets; the combined ranking is a capability survey, not a
 controlled solver-only comparison. Do not pass its comparison-only manifest
 to the simulation runner.
+
+For a full rerun explicitly limited to the four current native methods, pass
+`--native-only`. This requires exactly DFSPH, predictor-first DFSPH, native
+VD+PS and IISPH, and builds a seven-method comparison with the three retained
+controls. Without this option the complete eight-method prepared cohort is
+still required. Both modes require identical declared case/wall slots across
+methods and preserve failed outcomes; neither fills cells with historical
+projection results.
 
 Figure legends and titles describe the physical settings and use explicit
 units. Keep run identifiers in machine-readable metadata.

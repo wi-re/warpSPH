@@ -18,7 +18,8 @@ def solveDFSPHProjection(state, config, schemeConfig, dt, adjacency,
                          restVolumes, densityRatio, wallGradient, gradientSum, pressureDiagonal, *,
                          mode, velocity, previousPressure=None, pressureImpulse=None,
                          boundaryAcceleration=None, contactPoints=None,
-                         contactAdjacency=None, contactDenominator=None, deficient=None):
+                         contactAdjacency=None, contactDenominator=None, deficient=None,
+                         pressureBoundaryGeometry=None):
     """Solve one constraint without mutating input geometry or velocity.
 
     Density solves dt² CF(q)=1-s-dt C(v*)-dt² C(a_wall), divergence solves
@@ -33,6 +34,13 @@ def solveDFSPHProjection(state, config, schemeConfig, dt, adjacency,
     """
     if mode not in ('density', 'divergence'):
         raise ValueError(f'Unknown DFSPH projection mode: {mode!r}')
+    if pressureBoundaryGeometry is not None:
+        from .pressureBoundaries import solvePressureBoundaryProjection
+        return solvePressureBoundaryProjection(state, config, schemeConfig, dt, adjacency,
+            pressureBoundaryGeometry, mode=mode, velocity=velocity,
+            pressureImpulse=pressureImpulse, previousPressure=previousPressure)
+    if schemeConfig.dfsph.pressureBoundary != 'native':
+        raise ValueError('Band DFSPH projection requires its pressure-boundary geometry')
     density = mode == 'density'
     policy = schemeConfig.dfsph.density if density else schemeConfig.dfsph.divergence
     rho0 = schemeConfig.fluid.restDensity
