@@ -48,8 +48,9 @@ def convergenceMetric(tildeV: torch.Tensor, velocities: torch.Tensor,
         U_eps = max( min(|v|_max, U_char), eps_s )
 
     Note the `1/N`, **not** `1/sqrt(N)`: this is not an RMS. A fixed `eps_v`
-    target is therefore a *stricter per-particle* tolerance at higher
-    resolution, by `-0.5 log10 N` -- about 0.6 of a decade across the paper's
+    target permits an RMS residual of `10**eps_v * U_eps * sqrt(N)`, so it
+    becomes looser per particle as N increases. For a fixed RMS residual the
+    metric drops by `0.5 log10 N` -- about 0.6 of a decade across the paper's
     own `L/dx = 200 -> 800` sweep. Reproduced verbatim because it is what their
     numbers mean; recorded here because it is a real property of the metric,
     not of the scheme (`ACSPH_PLAN.md` Sec. 1.6).

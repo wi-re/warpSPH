@@ -9,6 +9,31 @@ matrix failures and the remaining work in [ACSPH_REFACTOR_PLAN.md](ACSPH_REFACTO
 The older TODO list below is historical and needs that reconciliation; this
 priority decision does not start new runs or change numerical defaults.
 
+## Reference bring-up — 2026-10-27
+
+User: use the four supplied `~/dev/dynGPUSPH/tosend` presets as a runnable
+reference, allowing build/compiler compatibility work. Presets: `Impact200`,
+`LDCAVITY_400_2L_RE1000`, `SquareRotation400_2L`,
+`dambreak_Lobovsky_400_2L`. Source checkout: `FSI_devel` paper-era commit
+`2dbc27a`. Build in an isolated copy; preserve original source and input hashes,
+record compile flags per case, and separate compatibility/output changes from
+numerical changes. First qualify short original-resolution runs with snapshots,
+video, progress and stop conditions before longer reference comparisons.
+The old makefile points at CUDA 7.5 / private include paths; local CUDA is 13.0
+on Blackwell. Track recipes and results in `docs/acsph/REFERENCE_PRESETS.md`.
+
+**Bring-up complete:** CUDA 13 / Blackwell base and no-slip cavity binaries;
+all four original-resolution bounded samples exit 0 with video. Impact crosses
+first collision (19/69 steps capped), Lobovsky startup caps on 17/25 steps;
+cavity and square startup have no cap hits. Clean-rebuild 20-step impact
+control matches every stored field bitwise; the original teardown failure is
+retained. Native `VOL` double-counts the self kernel and the final probe's time
+is one dt ahead, so neither is used silently as physical-volume/time truth.
+Next: import these exact ICs into warpSPH, match mass/kernel/viscosity/wall motion,
+then compare fields and convergence. No warpSPH equations/defaults changed.
+The normalization's old “stricter at higher N” interpretation is corrected
+below; the formula is unchanged.
+
 Target paper — `literature/decourcy2024_incompressible-delta-sph-artificial-compressibility.pdf`, bib key `decourcy2024`:
 
 > **Incompressible δ-SPH via artificial compressibility**
@@ -890,8 +915,9 @@ Iterate until `ε_v` drops below target. Recommended targets from the paper:
 
 > ⚠ Note the `1/N` (not `1/√N`) — this is *not* an RMS. Per-particle residual
 > `v̄` gives `ε_v = log10(v̄ / (√N U_ε))`, so a fixed `ε_v` target is a
-> **stricter per-particle tolerance at higher resolution** by `−½log₁₀N`. Across
-> the paper's own `L/Δx = 200 → 800` sweep that is a ~0.6-decade drift. Reproduce
+> **looser per-particle tolerance at higher resolution**: the allowed RMS
+> residual is `10^ε_v U_ε √N`. At fixed RMS residual the metric drops by
+> `½log₁₀N`; across the paper's `L/Δx = 200 → 800` sweep that is ~0.6 decades. Reproduce
 > it verbatim (it is what their numbers mean) but record it, and consider
 > exposing a normalised variant as a non-default option.
 

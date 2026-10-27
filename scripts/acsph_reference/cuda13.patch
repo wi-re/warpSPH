@@ -1,0 +1,216 @@
+--- a/gpusph3d.cu
++++ b/gpusph3d.cu
+@@ -114,9 +114,9 @@
+ 		printf("  Max dimension size of a thread block (x,y,z): (%d, %d, %d)\n", devp.maxThreadsDim[0], devp.maxThreadsDim[1], devp.maxThreadsDim[2]);
+ 		printf("  Max dimension size of a grid size (x,y,z): (%d, %d, %d)\n", devp.maxGridSize[0], devp.maxGridSize[1], devp.maxGridSize[2]);
+ 		printf("  Memory global:             %d MB\n", int(devp.totalGlobalMem / (1024 * 1024)));
+-		printf("  Clock rate:                %.2f GHz\n", devp.clockRate * 1e-6f);
++		printf("  Clock rate:                unavailable in CUDA 13 device properties\n");
+ #if CUDART_VERSION >= 2020
+-		printf("  Run time limit on kernels: %s\n", (devp.kernelExecTimeoutEnabled ? "Yes" : "No"));
++		printf("  Kernel timeout:            unavailable in CUDA 13 device properties\n");
+ #endif
+ #if CUDART_VERSION >= 3010
+ 		printf("  ECC support enabled:       %s\n", (devp.ECCEnabled ? "Yes" : "No"));
+@@ -968,6 +968,7 @@
+ 
+ 	////////////////////////////////////////////////
+ 
++	reference_set_masses(m_h, npts);
+ 	writeDataToFile(grd_h, P_h, rho_h, vel_h, bc_h, npts, 0.0, gasForces_h, surften_h, isurf_h, V_h, RK_RPh);
+ 
+ 	if (fsi.FSIon)
+@@ -1750,6 +1751,19 @@
+ 
+ 		tstep++;
+ 		act_time += deltatc;
++        // Reference instrumentation: observation and explicit bounded-run stop only.
++        double ref_vmax = sqrt(thrust::transform_reduce(thrust::device, vel_np1_d,
++            vel_np1_d + pIndex[0], vlenSqr(), 0.0, thrust::maximum<double>()));
++        printf("REFERENCE STEP step=%d t=%.17g dt=%.17g iterations=%d vmax=%.9g solver_ms=%.9g\n",
++               tstep, act_time, deltatc, subit_count - 1, ref_vmax, (double)milliseconds);
++        fflush(stdout);
++        const char* ref_alarm = std::getenv("DYNGPU_MAX_SPEED");
++        if (!std::isfinite(ref_vmax) || (ref_alarm && ref_vmax > std::atof(ref_alarm))) {
++            fprintf(stderr, "REFERENCE VELOCITY ALARM\n"); exit(3);
++        }
++        const char* ref_steps = std::getenv("DYNGPU_MAX_STEPS");
++        if (ref_steps && tstep >= std::atoi(ref_steps)) break;
++
+ 
+ 		
+ 
+@@ -1759,6 +1773,17 @@
+ 
+ 
+ 
++
++    // Always retain the terminal state, even when the bounded run ends between output times.
++    checkCudaErrors(cudaMemcpy(grd_h, grdnp1_d, npts * sizeof(vect), cudaMemcpyDeviceToHost));
++    checkCudaErrors(cudaMemcpy(P_h, P_np1_d, npts * sizeof(double), cudaMemcpyDeviceToHost));
++    checkCudaErrors(cudaMemcpy(rho_h, rhonp1_d, npts * sizeof(double), cudaMemcpyDeviceToHost));
++    checkCudaErrors(cudaMemcpy(vel_h, vel_np1_d, npts * sizeof(vect), cudaMemcpyDeviceToHost));
++    checkCudaErrors(cudaMemcpy(bc_h, bc_d, npts * sizeof(int), cudaMemcpyDeviceToHost));
++    checkCudaErrors(cudaMemcpy(V_h, V_d, npts * sizeof(double), cudaMemcpyDeviceToHost));
++    checkCudaErrors(cudaMemcpy(isurf_h, isurf_d, npts * sizeof(double), cudaMemcpyDeviceToHost));
++    writeDataToFile(grd_h, P_h, rho_h, vel_h, bc_h, npts, act_time, gasForces_h, surften_h, isurf_h, V_h, RK_RPh);
++
+ 	/// FINAL PROBE OUTPUT
+ 
+ 	cudaEventRecord(stop);
+@@ -1954,7 +1979,7 @@
+ 	// needed to ensure correct operation when the application is being
+ 	// profiled. Calling cudaDeviceReset causes all profile data to be
+ 	// flushed before the application exits
+-	err = cudaDeviceReset();
++	err = cudaDeviceSynchronize(); // Keep the context alive until local Thrust containers are destroyed.
+ 	if (err != cudaSuccess)
+ 	{
+ 		fprintf(stderr, "Failed to deinitialize the device! error=%s\n", cudaGetErrorString(err));
+--- a/HashFunctions.cu
++++ b/HashFunctions.cu
+@@ -1,3 +1,4 @@
++#include <cuda/std/functional>
+ // For the CUDA runtime routines (prefixed with "cuda_")
+ #include <cuda_runtime.h>
+ #include <helper_cuda.h>
+@@ -1305,33 +1306,33 @@
+ 		int newn = npts - nremove;
+ 
+ 		//This seems quite inefficient, compress indices of to_remove and loop over
+-		thrust::remove_if(thrust::device, grd_d, grd_d + npts, to_remove, thrust::identity<int>());
+-		thrust::remove_if(thrust::device, grdnp1_d, grdnp1_d + npts, to_remove, thrust::identity<int>());
+-		thrust::remove_if(thrust::device, vel_d, vel_d + npts, to_remove, thrust::identity<int>());
+-		thrust::remove_if(thrust::device, velnp1_d, velnp1_d + npts, to_remove, thrust::identity<int>());
+-		thrust::remove_if(thrust::device, P_d, P_d + npts, to_remove, thrust::identity<int>());
+-		thrust::remove_if(thrust::device, rho_d, rho_d + npts, to_remove, thrust::identity<int>());
+-		thrust::remove_if(thrust::device, rhonp1_d, rhonp1_d + npts, to_remove, thrust::identity<int>());
+-		thrust::remove_if(thrust::device, isurf_out_d, isurf_out_d + npts, to_remove, thrust::identity<int>());
+-		thrust::remove_if(thrust::device, accVST_d, accVST_d + npts, to_remove, thrust::identity<int>());
+-		thrust::remove_if(thrust::device, surften_d, surften_d + npts, to_remove, thrust::identity<int>());
+-		thrust::remove_if(thrust::device, deltaU_np1_d, deltaU_np1_d + npts, to_remove, thrust::identity<int>());
+-		thrust::remove_if(thrust::device, deltaU_d, deltaU_d + npts, to_remove, thrust::identity<int>());
+-		thrust::remove_if(thrust::device, RV_d, RV_d + npts, to_remove, thrust::identity<int>());
+-		thrust::remove_if(thrust::device, RVnp1_d, RVnp1_d + npts, to_remove, thrust::identity<int>());
+-		thrust::remove_if(thrust::device, Rrho_d, Rrho_d + npts, to_remove, thrust::identity<int>());
+-		thrust::remove_if(thrust::device, Rrhonp1_d, Rrhonp1_d + npts, to_remove, thrust::identity<int>());
+-		thrust::remove_if(thrust::device, m_d, m_d + npts, to_remove, thrust::identity<int>());
+-		thrust::remove_if(thrust::device, bc_d, bc_d + npts, to_remove, thrust::identity<int>());
+-		thrust::remove_if(thrust::device, grd0_d, grd0_d + npts, to_remove, thrust::identity<int>());
+-		thrust::remove_if(thrust::device, is_surf_d, is_surf_d + npts, to_remove, thrust::identity<int>());
++		thrust::remove_if(thrust::device, grd_d, grd_d + npts, to_remove, cuda::std::identity{});
++		thrust::remove_if(thrust::device, grdnp1_d, grdnp1_d + npts, to_remove, cuda::std::identity{});
++		thrust::remove_if(thrust::device, vel_d, vel_d + npts, to_remove, cuda::std::identity{});
++		thrust::remove_if(thrust::device, velnp1_d, velnp1_d + npts, to_remove, cuda::std::identity{});
++		thrust::remove_if(thrust::device, P_d, P_d + npts, to_remove, cuda::std::identity{});
++		thrust::remove_if(thrust::device, rho_d, rho_d + npts, to_remove, cuda::std::identity{});
++		thrust::remove_if(thrust::device, rhonp1_d, rhonp1_d + npts, to_remove, cuda::std::identity{});
++		thrust::remove_if(thrust::device, isurf_out_d, isurf_out_d + npts, to_remove, cuda::std::identity{});
++		thrust::remove_if(thrust::device, accVST_d, accVST_d + npts, to_remove, cuda::std::identity{});
++		thrust::remove_if(thrust::device, surften_d, surften_d + npts, to_remove, cuda::std::identity{});
++		thrust::remove_if(thrust::device, deltaU_np1_d, deltaU_np1_d + npts, to_remove, cuda::std::identity{});
++		thrust::remove_if(thrust::device, deltaU_d, deltaU_d + npts, to_remove, cuda::std::identity{});
++		thrust::remove_if(thrust::device, RV_d, RV_d + npts, to_remove, cuda::std::identity{});
++		thrust::remove_if(thrust::device, RVnp1_d, RVnp1_d + npts, to_remove, cuda::std::identity{});
++		thrust::remove_if(thrust::device, Rrho_d, Rrho_d + npts, to_remove, cuda::std::identity{});
++		thrust::remove_if(thrust::device, Rrhonp1_d, Rrhonp1_d + npts, to_remove, cuda::std::identity{});
++		thrust::remove_if(thrust::device, m_d, m_d + npts, to_remove, cuda::std::identity{});
++		thrust::remove_if(thrust::device, bc_d, bc_d + npts, to_remove, cuda::std::identity{});
++		thrust::remove_if(thrust::device, grd0_d, grd0_d + npts, to_remove, cuda::std::identity{});
++		thrust::remove_if(thrust::device, is_surf_d, is_surf_d + npts, to_remove, cuda::std::identity{});
+ 
+ 		int* to_remove_h = NULL;
+ 		allocateArray_h((void**)&to_remove_h, npts * sizeof(int));
+ 		checkCudaErrors(cudaMemcpy(to_remove_h, to_remove, npts * sizeof(int), cudaMemcpyDeviceToHost));
+ 
+-		thrust::remove_if(thrust::host, m_h, m_h + npts, to_remove_h, thrust::identity<int>());
+-		thrust::remove_if(thrust::host, bc_h, bc_h + npts, to_remove_h, thrust::identity<int>());
++		thrust::remove_if(thrust::host, m_h, m_h + npts, to_remove_h, cuda::std::identity{});
++		thrust::remove_if(thrust::host, bc_h, bc_h + npts, to_remove_h, cuda::std::identity{});
+ 
+ 		freeArray_h(to_remove_h);
+ 
+--- a/dynbound.cuh
++++ b/dynbound.cuh
+@@ -55,24 +55,24 @@
+ 	}
+ };
+ 
+-struct vlenSqr : public thrust::unary_function<vect, double>
++struct vlenSqr
+ {
+ 	__host__ __device__
+ 		double operator()(vect x) { return lenSqr(x); }
+ };
+ 
+-struct unary_sqr : public thrust::unary_function<double, double>
++struct unary_sqr
+ {
+ 	__host__ __device__
+ 		double operator()(double x) { return x*x; }
+ };
+ 
+-struct unary_abs : public thrust::unary_function<double, double>
++struct unary_abs
+ {
+ 	__host__ __device__
+ 		double operator()(double x) { return fabs(x); }
+ };
+-struct unary_zero : public thrust::unary_function<double, double>
++struct unary_zero
+ {
+ 	__host__ __device__
+ 		double operator()(double x) { return 0.0; }
+@@ -87,7 +87,7 @@
+ 
+ 	typedef T result_type;
+ 
+-	__thrust_exec_check_disable__
++	_CCCL_EXEC_CHECK_DISABLE
+ 		__host__ __device__ T operator()(const T& lhs, const T& rhs) const { return abs(lhs) + abs(rhs); }
+ }; // end plus
+ 
+@@ -101,7 +101,7 @@
+ 
+ 	typedef T result_type;
+ 
+-	__thrust_exec_check_disable__
++	_CCCL_EXEC_CHECK_DISABLE
+ 		__host__ __device__ T operator()(const T& lhs, const T& rhs) const { return abs(lhs) + abs(rhs)*abs(rhs); }
+ }; // end plus
+ 
+--- a/stride_range.cuh
++++ b/stride_range.cuh
+@@ -18,7 +18,7 @@
+ 
+     typedef typename thrust::iterator_difference<Iterator>::type difference_type;
+ 
+-    struct stride_functor : public thrust::unary_function<difference_type, difference_type>
++    struct stride_functor
+     {
+         difference_type stride;
+ 
+--- a/rbf.h
++++ b/rbf.h
+@@ -1,3 +1,4 @@
++#include <cstdint>
+ /**********                   RBF PPoU Code                   **********/
+ /**********  Created by Joe De Courcy, University of Bristol  **********/
+ #ifndef RBF_H
+--- a/plotting.h
++++ b/plotting.h
+@@ -132,4 +132,5 @@
+ 
+ //void writeGasModelToFile(thrust::host_vector<vect> &grd, thrust::host_vector<double> &volRatio, thrust::host_vector<double> &rho, thrust::host_vector<double> &p, thrust::host_vector<int> &colour, double time);
+ 
+-#endif
+\ No newline at end of file
++#endif
++void reference_set_masses(const double* m, int n);
+--- a/common_functions.h
++++ b/common_functions.h
+@@ -1,3 +1,4 @@
++#include <cstdio>
+ #ifndef _COMMON_FUNCTIONS_H
+ #define _COMMON_FUNCTIONS_H
+ #include<vector>

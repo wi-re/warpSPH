@@ -94,9 +94,9 @@ class ArtificialCompressibilityParams:
     #:
     #: **Performance trap at this repo's default `float32` precision**
     #: (`CaseSpec.precision`): `convergenceMetric` normalizes the residual by
-    #: `1/N` particles, not `1/sqrt(N)`, so the target gets *stricter* at
-    #: higher resolution -- and float32 residual noise plus that scaling
-    #: together mean `-6.0` is often simply unreachable. Measured on the
+    #: `1/N` particles, not `1/sqrt(N)`: a fixed target permits a larger
+    #: per-particle RMS residual as N grows. At a given resolution, float32
+    #: residual noise can still make `-6.0` unreachable. Measured on the
     #: dam break at nx=70 (`ACSPH_PLAN.md`'s 2026-09-20 pass, item 3): the
     #: fixed point asymptotes at `eps_v ~ -5.8` and never reaches `-6.0`, so
     #: *every* real step burns the full `maxPseudoIterations` (200) budget --
