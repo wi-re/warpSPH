@@ -1,3 +1,4 @@
+from ...utils.adjacency import cooRows
 from typing import Optional
 
 import torch
@@ -173,7 +174,7 @@ class CompressibleWall:
         it the fluid gains exactly the wall's power `F . v_wall`."""
         if f_ij is None:
             return f_ij
-        i, j = (t.long() for t in (adjacency.paddedI, adjacency.paddedJ))   # padded like f_ij; the -1 tail gathers a harmless last row
+        i, j = (t.long() for t in (cooRows(adjacency), adjacency.paddedJ))   # padded like f_ij; the -1 tail gathers a harmless last row
         toWall = (currentState.kinds[i] == 0) & self.solid[j]
         return torch.where(toWall, torch.ones_like(f_ij), f_ij)
 

@@ -31,7 +31,7 @@ def adjacencyCheckpoint(system):
     if a is not None:
         names = ('paddedI', 'paddedJ', 'numNeighbors', 'edgeOffsets', 'queryPositions',
                  'referencePositions', 'querySupports', 'referenceSupports')
-        data['sourceAdjacency'] = {name: getattr(a, name).detach().cpu() for name in names}
+        data['sourceAdjacency'] = {name: getattr(a, name).detach().cpu() for name in names if getattr(a, name) is not None}
         data['sourceAdjacency'].update(numRows=a.numRows, numCols=a.numCols,
             numEdges=a.numEdges if a.numEdges is not None else a.paddedJ.numel(),
             samePositions=a.queryPositions is a.referencePositions,
@@ -39,7 +39,7 @@ def adjacencyCheckpoint(system):
     return data
 
 
-def restoreAdjacency(system, checkpoint):
+def restoreAdjacency(system, checkpoint, config=None):
     from warpSPHCore.dataTypes import AdjacencyList
     if checkpoint.attrs.get('checkpointAdjacencyVersion') != 1:
         raise ValueError('drivenTurbulence SPH checkpoint is missing native neighbor history')
@@ -60,4 +60,10 @@ def restoreAdjacency(system, checkpoint):
         args['referencePositions'] = args['queryPositions']
     if saved.attrs['sameSupports']:
         args['referenceSupports'] = args['querySupports']
+    args.setdefault('paddedI', None)  # CSR-only checkpoints omit the redundant array; old COO files remain valid.
     system.adjacency = AdjacencyList(**args)
+    omitI = getattr(getattr(config, 'compute', None), 'neighborOmitI', False)
+    if omitI:
+        system.adjacency.paddedI = None
+    elif system.adjacency.paddedI is None:
+        system.adjacency.paddedI = system.adjacency.cooRows()

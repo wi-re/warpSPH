@@ -67,7 +67,7 @@ def simulationParameters():
                            'densityCorrection', 'calibrateNormalization'},
         'time': {'dt', 'tLimit', 'adaptiveDt', 'cflFactor', 'minDt', 'maxDt', 'nSteps'},
         'runtime': {'precision', 'device', 'execution', 'cudaGraph', 'pipelineOutputs',
-                    'graphMaxParticles', 'iterationChecks', 'krylovCheckEvery'},
+                    'graphMaxParticles', 'iterationChecks', 'krylovCheckEvery', 'neighborOmitI'},
     }
     positive = {'nx', 'L', 'n_h', 'tLimit', 'dt', 'cflFactor', 'minDt', 'maxDt',
                 'exportInterval', 'plotInterval', 'storeInterval', 'verletScale',

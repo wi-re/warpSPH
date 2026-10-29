@@ -391,7 +391,7 @@ def computeCompSPHAccel_KernelTiled(
         dudt[i] = thermalTotal
 
 def _compSPHAccelPairShape(ctx, extras):
-    return ctx.adjacency.paddedI.shape[0] if extras.get('retainPairs',True) else 1   # per-edge outputs have the PADDED capacity (a fixed shape for a graph); the kernels fill the first numEdges
+    return ctx.adjacency.paddedJ.shape[0] if extras.get('retainPairs',True) else 1   # per-edge outputs have the PADDED capacity (a fixed shape for a graph); the kernels fill the first numEdges
 
 
 def _compSPHAccelDtype(ctx, extras):

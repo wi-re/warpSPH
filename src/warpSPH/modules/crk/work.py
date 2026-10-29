@@ -97,7 +97,7 @@ def accumulateCRKWork(system,state,update,config,scheme,adjacency,stage,index,dt
             return
         if not pw.consistent:return
     new=pw.work is None
-    work=state.positions.new_empty((1 if reducing else adjacency.paddedI.numel(),config.dim)) if new or reducing else pw.work
+    work=state.positions.new_empty((1 if reducing else adjacency.paddedJ.numel(),config.dim)) if new or reducing else pw.work
     half=state.velocities+.5*dt*update.dvdt
     table=materialRuntime(scheme,state.densities)
     ctx=SPHContext(query=state,properties=OperationProperties(kernel=config.kernel,supportMode=SupportScheme.KernelMeanSymmetric),domain=config.domain,adjacency=adjacency,

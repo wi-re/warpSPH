@@ -881,3 +881,26 @@ forced replay/thermal, actual CUDA graph/wall/material controls and recorded
 native Sod/Gresho nonregression pass. Baseline Gresho remains dissipative; timings
 contended. Current-step stage/list overlap remains; no neighbour-format/reuse
 change or long-run bound claimed. [Report](../compsph_work_lifetime_2026-10-29.md).
+
+
+### CSR-only neighbour storage (2026-10-29)
+
+User-selected next memory optimization is implemented: optional core `storeI=False`,
+frontend `compute.neighborOmitI` enabled by default for compressible runner contexts;
+other families retain COO pending audit. Matched96³ startup controls preserve all
+fields/forcing bitwise, positive native RHS and energy budgets. Peak live GiB:
+CRK10.159→8.292; GSPH8.124→4.390; MFM36-step10.391→5.782. MFM's larger saving
+removes overlapping I arrays. Verlet size and compatible-work storage are unchanged.
+
+Core prerequisite0.6.3 is committed separately as3c56e2f on
+`codex/compressible-csr-only`, in the sibling warpSPHCore worktree. Neither shared
+dev checkout was merged. Explicit COO compatibility and cross-format restart are
+qualified; ordinary periodic trajectories never reconstruct I. A reproduced
+pre-existing CRK eager-grid/graph routing mismatch was repaired with the same
+expanded-work grid restriction already used by CompSPH.
+
+Capacity correction: int64 CSR offsets alone cannot lift the core's signed-int32
+flat-array shape guard. Current padded neighbour arrays hit it around156³.
+Chunked lists/work or another backend addressing strategy is required before the
+previous176³–192³ VRAM projections can become runnable. No large probe launched.
+See [implementation and validation](../compressible_csr_neighbors_2026-10-29.md).

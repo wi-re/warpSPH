@@ -442,7 +442,7 @@ def computeCrkSPHAccel_KernelTiled(
 
 
 def _crkAccelPairShape(ctx, extras):
-    return ctx.adjacency.paddedI.shape[0] if extras['retainPairs'] else 1   # per-edge outputs have the PADDED capacity (a fixed shape for a graph); the kernels fill the first numEdges
+    return ctx.adjacency.paddedJ.shape[0] if extras['retainPairs'] else 1   # per-edge outputs have the PADDED capacity (a fixed shape for a graph); the kernels fill the first numEdges
 
 
 def _crkAccelDtype(ctx, extras):

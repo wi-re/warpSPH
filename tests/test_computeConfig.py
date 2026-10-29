@@ -36,7 +36,7 @@ def test_roundTripAndOldFiles():
     config, _ = buildConfig(compute={'execution': 'auto', 'graphMaxParticles': 123, 'iterationChecks': 'every', 'krylovCheckEvery': 3,
                                      'pipelineOutputs': False})
     d = configurationToDict(config)
-    assert d['compute'] == {'execution': 'auto', 'graphMaxParticles': 123, 'pipelineOutputs': False, 'iterationChecks': 'every', 'krylovCheckEvery': 3, 'neighborCollection': 'auto', 'neighborQueryOrder': 'auto', 'neighborGridBuild': 'scheme'}
+    assert d['compute'] == {'execution': 'auto', 'graphMaxParticles': 123, 'pipelineOutputs': False, 'iterationChecks': 'every', 'krylovCheckEvery': 3, 'neighborCollection': 'auto', 'neighborQueryOrder': 'auto', 'neighborGridBuild': 'scheme', 'neighborOmitI': None}
     back = dictToConfig(d)
     assert back.compute == config.compute
     del d['compute']                                                    # a file written before the field existed
@@ -125,9 +125,9 @@ def test_neighborOptionsRoundTripAndFactorySelection():
     config, _ = buildConfig(compute={'neighborCollection': 'fused', 'neighborQueryOrder': 'input', 'neighborGridBuild': 'eager'})
     assert dictToConfig(configurationToDict(config)).compute == config.compute
     factory = lambda: None
-    assert neighborSearchOptions(config, gridFactory=factory) == dict(collection='fused', queryOrder='input', gridFactory=None)
-    assert neighborSearchOptions(types.SimpleNamespace(), gridFactory=factory) == dict(collection='auto', queryOrder='auto', gridFactory=factory)
-    assert neighborSearchOptions(None) == dict(collection='auto', queryOrder='auto')
+    assert neighborSearchOptions(config, gridFactory=factory) == dict(collection='fused', queryOrder='input', gridFactory=None, storeI=True)
+    assert neighborSearchOptions(types.SimpleNamespace(), gridFactory=factory) == dict(collection='auto', queryOrder='auto', gridFactory=factory, storeI=True)
+    assert neighborSearchOptions(None) == dict(collection='auto', queryOrder='auto', storeI=True)
     config.compute.neighborQueryOrder = 'bad'
     with pytest.raises(ValueError, match='neighborQueryOrder'):
         neighborSearchOptions(config)

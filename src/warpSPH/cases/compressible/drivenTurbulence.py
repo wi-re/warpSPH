@@ -282,7 +282,7 @@ def restoreCheckpoint(ctx, system, checkpoint):
     system.sourceTerms.acceleration = field
     if not isinstance(ctx.schemeConfig, MeshlessConfig):
         from ...caseUtils.drivenTurbulence import restoreAdjacency
-        restoreAdjacency(system, checkpoint)
+        restoreAdjacency(system, checkpoint, ctx.config)
     system.state.UIDcounter = int(system.state.UIDcounter)
     ctx.spec.resumeStepOffset = completed
     # Preserve growth history while capping the new endpoint/forcing/cooling.

@@ -11,6 +11,7 @@ and an initial velocity field, and gets the rest.
 """
 
 from __future__ import annotations
+from ...utils.adjacency import cooRows
 
 import math
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -867,7 +868,7 @@ def particleDistributionMetricsDevice(ctx: RunContext, state) -> Optional[Dict[s
     # instability being measured is fluid particles collapsing onto each other.
     # The padded pair arrays go straight in: `_distributionCore` masks the -1 padding, self pairs and non-fluid
     # pairs on the device (fixed shapes, no boolean gather, no sync, no cache keyed on the edge list).
-    i, j = adjacency.paddedI, adjacency.paddedJ
+    i, j = cooRows(adjacency), adjacency.paddedJ
     domain = getattr(ctx.config, 'domain', None)
     span = per = None
     if domain is not None and getattr(domain, 'periodic', None) is not None:

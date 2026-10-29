@@ -7,6 +7,7 @@ reuse without reading GPU values. External callers retain the legacy one-slot AP
 from dataclasses import dataclass
 import torch
 from warpSPHCore.mfm import MeshlessWarp
+from ...configurations.compute import neighborSearchOptions
 
 
 @dataclass
@@ -15,7 +16,7 @@ class NeighborCache:
     adjacency: object = None
 
 
-def cachedAdjacency(positions, supports, domain, schemeConfig, *, owner=None):
+def cachedAdjacency(positions, supports, domain, schemeConfig, *, owner=None, storeI=True):
     """Exact current neighbors filtered from a validity-checked, padded list.
 
     The skin changes search work only. Every geometry recomputes moments and
@@ -31,12 +32,12 @@ def cachedAdjacency(positions, supports, domain, schemeConfig, *, owner=None):
     if cache is None:
         cache = owner._meshlessNeighbors = NeighborCache()
     signature = (id(domain), domain.dim, _versions(domain.min, domain.max, domain.periodic),
-                 positions.shape, positions.device, positions.dtype, skin)
+                 positions.shape, positions.device, positions.dtype, skin, storeI)
     prior = cache.adjacency if cache.signature == signature else None
     particles = ParticleState(positions=positions, supports=supports,
         masses=torch.ones_like(supports), kinds=torch.zeros_like(supports, dtype=torch.int32))
     padded = buildVerletList(particles, domain, verletScale=skin,
-        supportMode=SupportScheme.SuperSymmetric, priorNeighborhood=prior)
+        supportMode=SupportScheme.SuperSymmetric, priorNeighborhood=prior, storeI=storeI)
     if padded is not prior:
         # A baseline must survive later in-place changes to the public state.
         padded.queryPositions = padded.referencePositions = positions.clone()
@@ -114,7 +115,9 @@ def takeGeometry(positions, supports, domain, kernel, schemeConfig, *, owner=Non
 def buildGeometry(positions, supports, lam0, config, schemeConfig, domain, *, owner=None):
     return MeshlessWarp.build(
         positions, supports, domain, config.kernel,
-        adjacency=cachedAdjacency(positions, supports, domain, schemeConfig, owner=owner),
+        adjacency=cachedAdjacency(positions, supports, domain, schemeConfig, owner=owner,
+                                  storeI=neighborSearchOptions(config)['storeI']),
+        storeI=neighborSearchOptions(config)['storeI'],
         cond_max=schemeConfig.condMax, closure=schemeConfig.closure,
         closure_power=schemeConfig.closurePower, rtol=None, cg_tol=schemeConfig.cgTol,
         cg_iters=schemeConfig.cgIters, lam0=lam0, guards=True,

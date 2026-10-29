@@ -15,6 +15,8 @@ def useRecomputedWork(system, state, scheme, wall, stage, index):
             and getattr(scheme, 'crkViscosityGradient', 'current') == 'current'
             and getattr(scheme, 'materials', None) is None
             and getattr(scheme, 'stepMode', 'eager') in (None, 'eager')
+            and not getattr(scheme, 'supportSolveOnGrid', False)
+            and not getattr(scheme, 'inPlaceAdjacency', False)
             and system.pairWork is not None and system.pairWork.weights is not None
             and index is not None
             and not any(v.requires_grad or torch.autograd.forward_ad.unpack_dual(v).tangent is not None
