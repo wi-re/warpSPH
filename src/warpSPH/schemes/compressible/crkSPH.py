@@ -181,9 +181,13 @@ def crkSPH_step(
     stage = CRKStage(volumes = apparentVolume, crkState = crkState, velocityGradient = qGradient,
                      viscosityParams = crkViscosityParams)
 
+    from ...modules.crk.storage import useRecomputedWork, derivativeInputs
+    directWork = useRecomputedWork(currentSystem, currentState, schemeConfig, wall, stage, stageIndex)
     with record_function("[warpSPH] - [crkSPH - 12] pressure / viscosity acceleration"):
         dvdt, currentState.ap_ij, currentState.av_ij = computeCRKAccel(
-            currentState, config, schemeConfig, adjacency, stage, gradHState)
+            currentState, config, schemeConfig, adjacency, stage, gradHState, retainPairs=not directWork)
+        if directWork:
+            currentState.ap_ij = currentState.av_ij = None
 
     with record_function("[warpSPH] - [crkSPH - 13] dudt"):
         dudt = computeCRKdudt(currentState, config, schemeConfig, adjacency, stage, gradHState)
@@ -226,7 +230,13 @@ def crkSPH_step(
             wall.finishUpdate(update)
 
     with record_function("[warpSPH] - [crkSPH - 19] energy-partition f_ij"):
-        if schemeConfig.crkEnergyPartition == 'native':
+        if directWork and derivativeInputs(update.dvdt, dt):
+            # A differentiable external force can appear after the early state
+            # check. Rebuild reference pair outputs and preserve its AD path.
+            _, currentState.ap_ij, currentState.av_ij = computeCRKAccel(
+                currentState, config, schemeConfig, adjacency, stage, gradHState, retainPairs=True)
+            directWork = False
+        if schemeConfig.crkEnergyPartition == 'native' and not directWork:
             v_halfstep = currentState.velocities + 0.5 * dt * update.dvdt
             currentState.f_ij = computeCompSPHBalanceTerm(
                 currentState, config, schemeConfig, adjacency, v_halfstep, dt, gradHState)
@@ -242,7 +252,10 @@ def crkSPH_step(
     if schemeConfig.compatibleEnergy and currentSystem.pairWork is not None:
         with record_function("[warpSPH] - [crkSPH - 20] pair work -> running sum"):
             from ...modules.crk.energyControl import enabled as controlledEnergy, retain
-            if controlledEnergy(schemeConfig):
+            if directWork:
+                from ...modules.crk.work import accumulateCRKWork
+                accumulateCRKWork(currentSystem, currentState, update, config, schemeConfig, adjacency, stage, stageIndex, dt)
+            elif controlledEnergy(schemeConfig):
                 retain(currentSystem,currentState,update,adjacency,stageIndex,schemeConfig)
             else:
                 accumulateStage(currentSystem.pairWork, stageIndex, adjacency, currentState, schemeConfig.energyScheme)

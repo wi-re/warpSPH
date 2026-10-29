@@ -1,4 +1,4 @@
-"""Periodic 2D driven ideal-gas turbulence with explicit finite-time cooling.
+"""Periodic 2D/3D driven ideal-gas turbulence with explicit finite-time cooling.
 
 This is a developing-flow setup, not an exact-isothermal Hopkins benchmark.
 The forcing amplitude is an input; RMS Mach is measured, never feedback-clamped.
@@ -65,7 +65,7 @@ def buildSystem(ctx):
         scheme.gamma, labels, labels.clone(), torch.arange(len(pos), device=pos.device, dtype=torch.int32))
     state.lam = geometry.lam
     state.sourceEnergyBudget = mass.new_zeros(2, dtype=torch.float64)
-    field = FourierOU(dim=2, length=ctx.spec.L, kMin=ctx.param('kMin'), kMax=ctx.param('kMax'),
+    field = FourierOU(dim=ctx.spec.dim, length=ctx.spec.L, kMin=ctx.param('kMin'), kMax=ctx.param('kMax'),
         accelerationRMS=ctx.param('accelerationRMS'), correlationTime=ctx.param('correlationTime'),
         updateInterval=ctx.param('forcingInterval'), solenoidalWeight=ctx.param('solenoidalWeight'), seed=ctx.param('seed'))
     cooling = ctx.param('coolingTime') if ctx.param('thermalModel') == 'relaxation' else None
@@ -124,7 +124,7 @@ def buildSPHSystem(ctx):
     s.sourceEnergyBudget = s.masses.new_zeros(2, dtype=torch.float64)
     refreshEOS(s, scheme)
     s.totalEnergies = s.masses*s.internalEnergies
-    field = FourierOU(dim=2, length=ctx.spec.L, kMin=ctx.param('kMin'), kMax=ctx.param('kMax'),
+    field = FourierOU(dim=ctx.spec.dim, length=ctx.spec.L, kMin=ctx.param('kMin'), kMax=ctx.param('kMax'),
         accelerationRMS=ctx.param('accelerationRMS'), correlationTime=ctx.param('correlationTime'),
         updateInterval=ctx.param('forcingInterval'), solenoidalWeight=ctx.param('solenoidalWeight'), seed=ctx.param('seed'))
     cooling = ctx.param('coolingTime') if ctx.param('thermalModel') == 'relaxation' else None
@@ -245,6 +245,8 @@ def checkpointSignature(ctx):
         domain={name: getattr(ctx.spec, name) for name in ('dim', 'nx', 'L', 'periodic', 'kernel', 'n_h')},
         timestep={name: getattr(ctx.config, name) for name in ('adaptiveDt', 'minDt', 'maxDt', 'dtGrowthFactor')},
         integrator=ctx.integrator.identifier.name)
+    # Storage implementation does not change the physical restart policy.
+    signature['solver'].pop('crkPairStorage', None)
     # Preserve version-1 checkpoint compatibility for the unchanged default.
     # Opt-in search ordering is explicit metadata; its cache is scratch only.
     if signature['solver'].get('neighborSkin') == 1.:
@@ -298,7 +300,7 @@ drivenTurbulenceCase = registerCase(Case(
     name='drivenTurbulence', scheme='MFM', buildSystem=buildSystem,
     configureScheme=configureScheme, timestep=timestep, postStep=postStep,
     diagnostics=diagnostics, extraData=extraData, trajectoryData=trajectoryData, restoreCheckpoint=restoreCheckpoint, setupPlot=setupPlot, updatePlot=updatePlot,
-    description='Developing periodic 2D compressible turbulence with OU acceleration and named finite-time cooling.',
+    description='Developing periodic 2D/3D compressible turbulence with OU acceleration and named finite-time cooling.',
     defaults=dict(COMPRESSIBLE_DEFAULTS, caseName='drivenTurbulence', dim=2, nx=64, L=1.,
                   tLimit=4., cflFactor=.15, execution='eager', cudaGraph=False, maxDt=.01),
     params=dict(gamma=5/3, rho0=1., soundSpeed=1., accelerationRMS=.3,
@@ -307,7 +309,7 @@ drivenTurbulenceCase = registerCase(Case(
                 thermalModel='relaxation', coolingTime=.2),
     supportedSchemes=('MFM', 'MFV', 'CRKSPH', 'CompSPH', 'Monaghan', 'GSPH', 'InutsukaGSPH'), validateConfiguration=validateConfiguration,
     simulationParameters={
-        'dim': P('integer', 'This first turbulence case is two dimensional.', 'domain', choices=(2,)),
+        'dim': P('integer', 'Spatial dimension of the periodic turbulence box.', 'domain', choices=(2, 3)),
         'periodic': P('boolean', 'Periodic box on every axis.', 'domain', choices=(True,)),
     },
     parameterDefinitions={

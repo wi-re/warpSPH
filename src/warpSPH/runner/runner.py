@@ -558,6 +558,9 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
                             schemeConfig=ctx.schemeConfig,
                         )
         runningState = stepResult.state
+        # Keep only the accepted system here. Retaining the original system
+        # pins first-step scratch (e.g. CRK's pair-work vector) until run exit.
+        result.state = runningState
         # Scheme-specific extra step data that doesn't fit the state (e.g.
         # ACSPH's `update.pseudoIterations`/`.epsilonV`, set ad hoc on the
         # `ArtificialCompressibleSystemUpdate` `schemes/incompressible/artificialCompressible.py`
@@ -760,6 +763,9 @@ def _runPipelined(ctx, case, spec, result, stepGraph, steps, progress, runningSt
         stepMs = (time.perf_counter() - ts) * 1e3
         handle = None
         runningState = stepResult.state
+        # Keep only the accepted system here. Retaining the original system
+        # pins first-step scratch (e.g. CRK's pair-work vector) until run exit.
+        result.state = runningState
         ctx.scratch['lastStageUpdate'] = stepResult.stages[-1].update if stepResult.stages else None
         absStep = i + spec.resumeStepOffset
         callAudit.markStep()    # no-op unless the call audit is on (warpSPHCore/callAudit.py)

@@ -81,7 +81,7 @@ def test_sources_apply_actual_mass_and_compatible_work():
 
 
 @pytest.mark.parametrize('simulation,params,solver,message', [
-    ({'dim': 3}, {}, {}, 'dim'),
+    ({'dim': 4}, {}, {}, 'dim'),
     ({'adaptiveDt': False}, {}, {}, 'adaptiveDt'),
     ({}, {'kMin': 3, 'kMax': 2}, {}, 'kMin'),
     ({}, {'forcingInterval': 2.}, {}, 'forcingInterval'),

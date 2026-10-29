@@ -215,6 +215,7 @@ def solverParameters(scheme):
     out['diffusionParams.velocityPairPolicy'] = P('string', 'Pair velocity supplied to viscosity.',
                                                  'reconstruction', choices=tuple(m.name for m in policies))
     if scheme == 'CRKSPH':
+        out['crkPairStorage'] = P('string', 'Pair-data storage implementation; default recompute preserves native partition/fresh stages on single-gas eager steps. Walls, materials, experimental policies, AD and graph mode use expanded automatically.', 'compute', choices=('expanded','recompute'))
         out['crkDensityPolicy'] = P('string', 'CRK density sum; material policies are opt-in and retain all-material volume/moment/force support.',
             'fluid', choices=('legacy', 'sameMaterial', 'massReplacement'))
         out['crkEvolution'] = P('string', 'Density/volume scheduling: native summation, experimental current-Spheral stages or paper Eq75/76 stages. Support and pair force remain Warp.',

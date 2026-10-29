@@ -21,6 +21,7 @@ from typing import Optional, Union, Tuple
 from warpSPHCore import *
 
 from ..eos.materials import MaterialTable, uniformMaterialTable
+from ..crk.partition import crkEntropyFraction
 
 __all__ = ['computeCompSPHBalanceTermWarp']
 
@@ -168,33 +169,7 @@ def computeCompSPHBalanceTerm_Func_i(
             if gi != gj:
                 f_ij[jj] = scalar_t(0.5)
                 continue
-            s_i = P_i / wp.pow(rhoi, gi)
-            s_j = P_j / wp.pow(rhoj, gj)
-            s_min = wp.min(wp.abs(s_i), wp.abs(s_j))
-            s_max = wp.max(wp.abs(s_i), wp.abs(s_j))
-
-            f = scalar_t(0.5)
-            
-            maskA = wp.abs(s_i - s_j) == scalar_t(0.0)
-
-            # maskB = torch.logical_or(torch.logical_and(deltaE_thermal >= 0, s_i >= s_j), torch.logical_and(deltaE_thermal < 0, s_i < s_j))
-            maskB = (deltaE_thermal >= scalar_t(0.0) and s_i >= s_j) or (deltaE_thermal < scalar_t(0.0) and s_i < s_j)
-
-            # maskC = torch.logical_or(torch.logical_and(deltaE_thermal >= 0, s_i < s_j), torch.logical_and(deltaE_thermal < 0, s_i >= s_j))
-            maskC = (deltaE_thermal >= scalar_t(0.0) and s_i < s_j) or (deltaE_thermal < scalar_t(0.0) and s_i >= s_j)
-
-            f_ijA = scalar_t(0.5)
-            f_ijB = s_min / (s_min + s_max + scalar_t(1.0e-14))
-            f_ijC = s_max / (s_min + s_max + scalar_t(1.0e-14))
-                
-            # f_ij = torch.where(maskA, f_ijA, f_ij)
-            f = f_ijA if maskA else f
-            # f_ij = torch.where(torch.logical_and(torch.logical_not(maskA), maskB), f_ijB, f_ij)
-            f = f_ijB if (not maskA and maskB) else f
-            # f_ij = torch.where(torch.logical_and(torch.logical_and(torch.logical_not(maskA), torch.logical_not(maskB)), maskC), f_ijC, f_ij)
-            f = f_ijC if (not maskA and not maskB and maskC) else f
-
-            f = wp.max(scalar_t(0.0), wp.min(scalar_t(1.0), f))
+            f = crkEntropyFraction(P_i,rhoi,gi,P_j,rhoj,gj,deltaE_thermal)
 
         f_ij[jj] = f
 
