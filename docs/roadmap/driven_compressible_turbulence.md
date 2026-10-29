@@ -904,3 +904,22 @@ flat-array shape guard. Current padded neighbour arrays hit it around156³.
 Chunked lists/work or another backend addressing strategy is required before the
 previous176³–192³ VRAM projections can become runnable. No large probe launched.
 See [implementation and validation](../compressible_csr_neighbors_2026-10-29.md).
+
+
+### Tiled edge-storage scope (2026-10-29)
+
+Scoping complete:96 direct neighbour lookups across76 core/frontend files, plus
+search writers, type/conversion/output plumbing and cached workspace handling.
+Plan roughly100 production files for broad migration. Prefer flat Torch buffers
+with explicit typed Warp tile/slot views and int64 CSR addresses, retaining32-bit
+particle IDs/counts and unchanged pair ordering. Six bounded CPU ABI checks pass,
+including logical addresses beyond INT_MAX with tiny aliased storage; no physical
+large allocation, CUDA proof or production migration. A rank-only array-overload
+shortcut crashed and is rejected; the concrete edge-view descriptor works.
+
+Estimated effort is3–5 focused engineering days for useful eager compressible
+bring-up and roughly1–2working weeks including broad AD/graph/restart qualification.
+GSPH/Monaghan are simpler first addressability controls; MFM additionally needs
+kappa/closure workspace migration, CRKSPH/CompSPH need W and expanded fallbacks.
+Tiling adds addressability, not memory savings:256³ CRK/MFM remain over96GiB by
+current post-I-removal live estimates. See [scope and breakage map](../tiled_edge_storage_scope_2026-10-29.md).
