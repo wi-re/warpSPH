@@ -923,3 +923,46 @@ GSPH/Monaghan are simpler first addressability controls; MFM additionally needs
 kappa/closure workspace migration, CRKSPH/CompSPH need W and expanded fallbacks.
 Tiling adds addressability, not memory savings:256³ CRK/MFM remain over96GiB by
 current post-I-removal live estimates. See [scope and breakage map](../tiled_edge_storage_scope_2026-10-29.md).
+
+
+### Row-chunk and multi-GPU direction (2026-10-29)
+
+User proposes whole-particle-row CSR chunks selected by an edge budget, with
+replicated particle fields and distributed J/W on multiple GPUs. Source review
+supports this architecture for the gather kernels: ordinary flat arrays per
+chunk, explicit local/global particle indexing, no pair-tensor gather. CRK work
+remains owned with its rows across stages and is reduced locally against shared
+half velocities. Exchange particle/derived fields between dependent passes;
+global timestep and MFM closure collectives remain additional work. Variable
+row lengths imply unequal particle counts at equal edge budgets. Count stored
+Verlet/capacity edges, construct chunks directly, and preserve pair identity.
+
+Recommend single-GPU chunk construction/execution/parity first, then a replicated
+state multi-GPU backend; halo decomposition can follow later. Chunking resident
+arrays alone does not reduce single-GPU retained bytes, whereas sharding J/W
+reduces per-GPU retention. Check actual Isambard peer topology/bandwidth rather
+than interpreting CPU-GPU NVLink-C2C as a confirmed GPU-GPU fabric. Proposal only;
+no production migration or new GPU run. See the [extended scope](../tiled_edge_storage_scope_2026-10-29.md).
+
+Count/partition clarification: reuse the separate count pass on owned particle
+ranges, all-gather int32 counts, and independently scan in int64 on each GPU.
+Deterministic boundaries/ownership derive from that shared metadata; allocate and
+collect only locally owned chunks, retaining them until a coordinated rebuild.
+No full neighbour or pair-work tensor is allocated for partitioning. At256^3,
+count/prefix metadata is64MiB/~128MiB per GPU. Preserve the existing count/collect
+acceptance and CRK work-lifetime contracts across rebuilds.
+
+
+### Integration and separate infrastructure handoff (2026-10-29)
+
+User-selected logistics are recorded in the [pickup plan](../../CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md)
+and its separate PLANS row. Wait for a committed mergeable ACSPH checkpoint,
+integrate core0.6.3 first and this frontend branch into`dev` second, then create
+separate paired worktrees from the integrated baseline for row chunks/multi-GPU.
+The core has a companion pointer at`CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md`.
+
+Keep this turbulence checkout available for smaller single-GPU physics through128³
+once short memory/readiness gates pass;96³ startup is measured,128³ is not yet a
+completed qualification. Freeze each campaign's source runtime independently of
+infrastructure work. No merge, new worktree, implementation or simulation has
+been started by this planning update. The user's ACSPH Focus is unchanged.

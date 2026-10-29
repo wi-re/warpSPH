@@ -80,3 +80,106 @@ Evidence: `.tmp/tiled-storage-scope-20261029/inventory.json`, `final/abi-probe.j
 
 - Core: `dataTypes/adjacency_t.py`, `radiusSearch/{csr,compactHash/search,compactHash/wp_collectNeighbors,verlet/filter}.py`, `util/{cast,fieldRegistry,stateBundle}.py`, `autograd/{arg_extract,launcher,operator_spec,prepared,stateAwareWarpFunction}.py`, `coreOperations/_jvpCommon.py`, `mfm/{wp_mfm,wp_closure,warpBackend}.py`.
 - Frontend: `modules/{compSPH,crk}/{accel,work}.py`, `modules/compSPH/{balance,workReduction}.py`, `modules/meshless/flux.py`, `modules/reconstruction/meshless.py`, `utils/cudaGraph.py`, `caseUtils/drivenTurbulence.py`, `io/hdf5.py`.
+
+
+## Particle-row chunks and replicated-state multi-GPU proposal (2026-10-29)
+
+The user proposes partitioning complete CSR rows by an edge budget, and retaining
+only each GPU's owned rows of both J and compatible W. This is feasible in the
+surveyed gather kernels and is a stronger architectural candidate than uniform
+slot tiling alone. It remains a proposal, not an implemented or qualified backend.
+The earlier file counts describe a global direct-access inventory, largely
+mechanical edits; they do not imply rewriting flat Torch/CPU/output consumers.
+
+At a coordinated neighbour-list rebuild, each GPU counts neighbours for its
+assigned particle range against the same synchronized reference state/search
+configuration. All-gather those disjoint int32 count slices into one complete
+count vector on every GPU (not an all-reduce sum of duplicated full counts).
+Each GPU independently computes the same int64 prefix scan and deterministic
+chunk boundaries/device assignments from this shared source of truth. Exchange
+or verify a compact partition/version signature before allocation. At256^3,
+the replicated count vector is64MiB and an N+1 int64 prefix is approximately128MiB;
+no global edge tensor is needed. Count and collect must use the same positions,
+supports, periodic conventions, stored-neighbour acceptance and ordering contract.
+
+For a chunk starting at a and ending before b, its live edge count is P[b]-P[a]
+and its local row offsets are P[a:b]-P[a]. Allocate J and associated pair fields
+only for locally assigned chunks, including bounded capacity headroom, and
+collect their rows directly. Keep those lists resident and reuse them under the
+existing validity rules until the next coordinated rebuild; do not re-count or
+rebalance on each SPH operation. Multiple chunks may be assigned to one GPU.
+Any reassignment while compatible W is live must transfer matching J/W or use
+the existing scientifically equivalent replay path, rather than discarding work.
+
+Choose contiguous particle intervals
+whose summed stored row counts fit a configurable edge/byte budget. Each chunk
+has a global row start/count, local CSR offsets/counts, global J particle IDs,
+and ordinary flat Torch/Warp edge buffers. Rows do not straddle chunks. Equal
+edge work generally means unequal particle counts; equal particle counts cannot
+also guarantee a hard edge cap in an inhomogeneous flow. Account for Verlet
+storage, capacity headroom and the largest associated pair field, not just live
+physical neighbours. Empty rows still have owners; a row exceeding the budget
+needs an explicit oversized-row policy. Never silently truncate it.
+
+A launch over a chunk maps local row r to global particle i=rowStart+r; its local
+CSR offset addresses its flat J/W buffers. Particle fields remain globally
+indexed. This can preserve flat kernel array ranks and avoid per-edge tile/slot
+arithmetic, but the query/global-row mapping must be propagated explicitly:
+simply slicing query positions is insufficient for corrections, extras and outputs.
+Neighbour construction must collect owned rows directly; splitting a giant list
+after building it would retain the allocation limit and memory peak. Many logical
+chunks can belong to one GPU, and the scheduling/granularity is independent of
+the storage budget. Ten million edges is an example, not a selected default.
+
+For a first multi-GPU backend, replicate particle/stage/reference fields and the
+search grid, while distributing row-owned J, W and other edge workspaces. Gather
+owned particle outputs between dependency passes, not pair arrays. CRK force
+completion requires globally current stage half velocities before its work sweep;
+final compatible reduction needs globally current final half velocities. Each GPU
+retains and reduces only W for its owned rows. W need never be assembled on one
+GPU. Row ownership, pair identity and ordering stay stable throughout accumulation;
+rebalance at safe step boundaries, or explicitly migrate matching J/W together.
+Fresh-stage and changed-list replay semantics remain unchanged.
+
+Density, correction/gradient, force and source dependencies determine communication
+barriers. Global timestep/conservation reductions and MFM closure iterations need
+explicit collective handling; MFM is not just an independent final gather.
+Replicated-state communication scales with particle count rather than edge count,
+but includes derived fields (including matrices), not only the ~80-byte primary
+state. A global FP32 3D vector field at256^3 is192MiB before collective traffic
+accounting. Replication is a useful first single-node design, with spatial halo
+exchange a later scalability improvement.
+
+On one GPU, splitting resident J/W does not reduce their total bytes. It bounds
+scratch only when temporary lifetimes are actually processed chunk-by-chunk.
+Distributed retention does reduce pair bytes per GPU: CRK's current rough157GiB
+single-GPU256^3 live estimate suggests approximately39GiB of one-quarter work plus
+replication/communication/workspace overhead, not a measured fit or speedup.
+Do not divide the entire live estimate by four as a precise model: some terms
+replicate, others shard, and capacities/overlap change with execution.
+
+Recommended next scope is a row-chunk abstraction and single-GPU forced-chunk
+parity gates before a replicated-state multi-GPU runner. Include neighbour list
+construction, compatible W, rebuild/replay and memory accounting in that design.
+Uniform tile views remain an optional storage mechanism, not a prerequisite.
+Bitwise per-row parity and exact pair identity are appropriate first gates;
+distributed collective reductions can differ in rounding. No production changes,
+GPU allocation or additional simulation were made for this proposal.
+
+Hardware qualification: Isambard documents four96GB GH200 GPUs per node and
+NVLink-C2C, which is the Grace CPU/Hopper GPU link. That alone does not establish
+a four-GPU NVLink/NVSwitch domain. Inspect allocated-node topology and measure
+actual peer/collective bandwidth before predicting transfer cost. Sources:
+https://docs.isambard.ac.uk/specs/ and
+https://docs.nvidia.com/dccpu/grace-perf-tuning-guide/index.html .
+
+
+## Pickup plan and integration dependency
+
+The user selected separate-worktree development after merging the current paired
+work at a mergeable ACSPH checkpoint. The canonical [implementation and handoff
+plan](../../CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md) now owns phase checklists,
+integration/worktree logistics and acceptance gates. This scope remains the
+source inventory/design record; its earlier tile-only effort estimates are not
+an estimate for the expanded multi-GPU programme. Smaller turbulence investigations
+remain in the existing checkout; this update launches no production work.
