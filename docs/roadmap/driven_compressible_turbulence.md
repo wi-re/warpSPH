@@ -846,3 +846,16 @@ retained).28-job serial source-pinned GPU supervisor and finite CPU-only analysi
 companion are tracked under `.tmp/compressible-memory3d-20261029/`. Initial
 launch waits for unrelated ACSPH compute; no CUDA allocation into that work.
 [Protocol/status](../compressible_memory3d_2026-10-29.md).
+
+
+Cross-scheme3D memory sweep complete/reviewed2026-10-29:28/28 GPU jobs pass,
+1,596 raw RHS valid, no extra RHS, source pins intact, all7 capture/native step6
+stored fields bitwise.32³/64³/96³ scaling and all recordings reviewed.96³ live
+peaks: CRK10.333, CompSPH28.791, Monaghan8.333, GSPH/Inutsuka8.316,
+MFM/MFV10.533GiB. CompSPH retains expanded force/work transients; other SPH
+peaks include overlapping lists, meshless peaks include multiple geometry/list
+lifetimes. No pending frees in captures. Short startup viability/memory evidence,
+not turbulent accuracy or evolved-state memory bounds. User allows future
+accuracy/memory probes alongside other compute; label timing and shared-headroom
+limitations separately. Existing queue finished before that policy update, no
+reruns. [Results and limitations](../compressible_memory3d_2026-10-29.md).
