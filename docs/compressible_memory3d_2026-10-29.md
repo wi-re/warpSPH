@@ -1,5 +1,9 @@
 # Native 3D compressible memory scaling (2026-10-29)
 
+Follow-up: native CompSPH work recomputation and runner lifetime cleanup are now
+qualified. CompSPH96³ live peak is10.100GiB; other schemes save0.14–0.21GiB.
+Historical sweep values below are unchanged. [New implementation/results](compsph_work_lifetime_2026-10-29.md).
+
 User requests committing the completed turbulence/CRK work, then measuring memory at scale across the other compressible schemes. The completed work is committed as `931aca9`. This campaign changes instrumentation only.
 
 Seven supported driven-flow schemes: CRKSPH (recompute control), CompSPH, Monaghan, GSPH, InutsukaGSPH, MFM and MFV. PESPH is outside the current driven case’s supported-scheme contract; no new scheme/source support is inferred by this memory test.

@@ -14,6 +14,7 @@ p.add_argument('--out',type=Path,required=True)
 p.add_argument('--steps',type=int,default=36)
 p.add_argument('--discard',type=int,default=6)
 p.add_argument('--capture',action='store_true')
+p.add_argument('--save-fields',action='store_true',help='Archive final stored particle fields and live work samples for source-paired numerical comparisons')
 p.add_argument('--device',default='cuda:0')
 p.add_argument('--no-video',action='store_true',help='Only for tiny CPU smoke controls')
 a=p.parse_args();a.runtime=a.runtime.resolve();a.out=a.out.resolve();a.out.mkdir(parents=True,exist_ok=False)
@@ -126,6 +127,13 @@ try:
     geometry=getattr(ticket,'geometry',None)
     adjacencies={'accepted':adj,'geometry':getattr(geometry,'adjacency',None)}
     write(a.out/'neighbor-counts.json',{k:dict(edges=int(v.numEdges),capacity=int(v.paddedJ.numel()),indexDtype=str(v.paddedJ.dtype),ownership=inventory({'adjacency':v})) for k,v in adjacencies.items() if v is not None})
+    if a.save_fields:
+        state=result.state.state
+        np.savez_compressed(a.out/'final-fields.npz',t=np.asarray(float(result.state.t)),**{k:v.detach().cpu().numpy() for k,v in vars(state).items() if isinstance(v,torch.Tensor) and k not in ('ap_ij','av_ij','f_ij')})
+        pw=getattr(result.state,'pairWork',None)
+        if pw is not None and pw.work is not None:
+            live=int(pw.adjacency.numEdges);ids=torch.linspace(0,live-1,4096,device=pw.work.device).long().unique()
+            np.savez_compressed(a.out/'work-sample.npz',indices=ids.cpu().numpy(),work=pw.work[ids].cpu().numpy(),live=np.asarray(live))
     write(a.out/'final-ownership.json',inventory(groups(result.state)));write(a.out/'final-hashes.json',hashes(result.state));write(a.out/'history.json',history)
     write(a.out/'regions.json',regions);write(a.out/'peak-ownership.json',peakOwnership);write(a.out/'allocation-points.json',points)
     torch.save(result.state.sourceTerms.acceleration.state_dict(),a.out/'forcing.pt')

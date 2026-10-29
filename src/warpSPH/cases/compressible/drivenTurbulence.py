@@ -247,6 +247,7 @@ def checkpointSignature(ctx):
         integrator=ctx.integrator.identifier.name)
     # Storage implementation does not change the physical restart policy.
     signature['solver'].pop('crkPairStorage', None)
+    signature['solver'].pop('compPairStorage', None)
     # Preserve version-1 checkpoint compatibility for the unchanged default.
     # Opt-in search ordering is explicit metadata; its cache is scratch only.
     if signature['solver'].get('neighborSkin') == 1.:

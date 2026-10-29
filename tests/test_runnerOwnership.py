@@ -57,3 +57,24 @@ def test_pipelined_result_follows_accepted_state(monkeypatch):
     # This tests the pipelined runner loop even when graph capture falls back
     # to eager; graph replay itself has an independent existing regression.
     assert not value.diverged and len(calls)>2 and value.ctx.config.compute.pipelineOutputs
+
+
+@pytest.mark.parametrize('scheme',['CompSPH','CRKSPH','Monaghan','GSPH','InutsukaGSPH','MFM','MFV'])
+def test_previous_stage_result_is_released_before_next_rhs(scheme):
+    import sys
+    held={};checks=[]
+    def build(ctx):
+        system=base.buildSystem(ctx);native=ctx.stepFunction
+        def observed(s,dt,stageIndex=None,**kwargs):
+            if stageIndex==0 and 'previous' in held:
+                assert held['previous']() is None
+                checks.append(1)
+            return native(s,dt,stageIndex=stageIndex,**kwargs)
+        ctx.bundle=replace(ctx.bundle,stepFunction=observed);return system
+    def diagnostics(ctx,system):
+        if ctx.scratch['completedSteps']:
+            held['previous']=weakref.ref(sys._getframe(1).f_locals['stepResult'])
+        return base.diagnostics(ctx,system)
+    c=RunConfiguration('drivenTurbulence',simulation=dict(device='cpu',nx=12,nSteps=4,maxDt=.001,plot=False,video=False,store=False,progress=False,show=False,quiet=True),solver=dict(scheme=scheme,**(dict(temporalScheme='ssprk') if scheme in ['MFM','MFV'] else {})))
+    value=c.run(replace(base,buildSystem=build,diagnostics=diagnostics))
+    assert not value.diverged and len(checks)==3

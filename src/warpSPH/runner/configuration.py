@@ -214,6 +214,8 @@ def solverParameters(scheme):
             'Apply the existing matrix correction to the reconstructed velocity gradient.', 'reconstruction')
     out['diffusionParams.velocityPairPolicy'] = P('string', 'Pair velocity supplied to viscosity.',
                                                  'reconstruction', choices=tuple(m.name for m in policies))
+    if scheme == 'CompSPH':
+        out['compPairStorage'] = P('string', 'Pair work storage: native recomputation or expanded reference.', 'performance', choices=('expanded','recompute'))
     if scheme == 'CRKSPH':
         out['crkPairStorage'] = P('string', 'Pair-data storage implementation; default recompute preserves native partition/fresh stages on single-gas eager steps. Walls, materials, experimental policies, AD and graph mode use expanded automatically.', 'compute', choices=('expanded','recompute'))
         out['crkDensityPolicy'] = P('string', 'CRK density sum; material policies are opt-in and retain all-material volume/moment/force support.',

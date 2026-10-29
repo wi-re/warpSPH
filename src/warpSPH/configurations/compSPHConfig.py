@@ -51,6 +51,13 @@ class CompSPHConfig(CompressibleSPHConfig):
 
     schemeName: str = field(default='CompSPH', metadata={'description': 'Name of the compressible SPH scheme to use'})
 
+    compPairStorage: str = field(default='recompute', metadata={'description': 'Native eager compatible CRK-partition steps recompute pair work; expanded preserves reference pair arrays. Other contexts fall back.'})
+
+    def validate(self, config=None):
+        super().validate(config)
+        if self.compPairStorage not in ('expanded','recompute'):
+            raise ValueError('compPairStorage must be expanded or recompute')
+
     compatibleEnergy: bool = field(default=True, metadata={'description': 'Whether to use a compatible energy discretization (e.g. evolve total energy and compute internal energy from it) or not (e.g. evolve internal energy directly)'})
 
 
@@ -59,7 +66,8 @@ def compSPHConfigToDict(config: CompSPHConfig) -> Dict[str, Any]:
     baseDict = compressibleConfigToDict(config)
     baseDict.update({
         'energyScheme': config.energyScheme.name,
-        'compatibleEnergy': config.compatibleEnergy
+        'compatibleEnergy': config.compatibleEnergy,
+        'compPairStorage': config.compPairStorage
     })
     return baseDict
 
@@ -68,4 +76,5 @@ def dictToCompSPHConfig(configDict: Dict[str, Any]) -> CompSPHConfig:
     compSPHConfig = CompSPHConfig(**compressibleConfig.__dict__)
     compSPHConfig.energyScheme = EnergyScheme[configDict['energyScheme']] if isinstance(configDict['energyScheme'], str) else configDict['energyScheme']
     compSPHConfig.compatibleEnergy = configDict['compatibleEnergy']
+    compSPHConfig.compPairStorage = configDict.get('compPairStorage','recompute')
     return compSPHConfig

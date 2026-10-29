@@ -93,6 +93,13 @@ def test_compatible_replay_does_not_count_projection_twice(scheme,monkeypatch,tm
         if index==1 and system.pairWork.halfVelocity is None:
             system.pairWork.consistent,system.pairWork.work=False,None;count[0]+=1
     monkeypatch.setattr(crkWork,'accumulateCRKWork',spoiledShared)
+    import warpSPH.modules.compSPH.work as compWork
+    compShared=compWork.accumulateCompWork
+    def spoiledComp(system,state,update,config,schemeConfig,adjacency,gradH,index,dt):
+        compShared(system,state,update,config,schemeConfig,adjacency,gradH,index,dt)
+        if index==1 and system.pairWork.halfVelocity is None:
+            system.pairWork.consistent,system.pairWork.work=False,None;count[0]+=1
+    monkeypatch.setattr(compWork,'accumulateCompWork',spoiledComp)
     other=tmp_path/'replay';other.mkdir()
     replay=boundary_toy(scheme,None,16,.002,.004,'rungeKutta2','uniform',other)
     assert count[0]==2

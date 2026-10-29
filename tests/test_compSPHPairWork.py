@@ -36,6 +36,14 @@ def _run(scheme, steps=30, forceRerun=False, monkeypatch=None):
                 system.pairWork.consistent,system.pairWork.work=False,None
                 reruns[0]+=1
         monkeypatch.setattr(crkWork,'accumulateCRKWork',spoiledShared)
+        import warpSPH.modules.compSPH.work as compWork
+        compShared=compWork.accumulateCompWork
+        def spoiledComp(system,state,update,config,scheme,adjacency,gradH,index,dt):
+            compShared(system,state,update,config,scheme,adjacency,gradH,index,dt)
+            if index==1 and system.pairWork.halfVelocity is None:
+                system.pairWork.consistent,system.pairWork.work=False,None
+                reruns[0]+=1
+        monkeypatch.setattr(compWork,'accumulateCompWork',spoiledComp)
     result = run(getCase('sod2d'), quiet=True, progress=False, nSteps=steps, scheme=scheme)
     return result, reruns[0]
 

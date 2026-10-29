@@ -859,3 +859,25 @@ not turbulent accuracy or evolved-state memory bounds. User allows future
 accuracy/memory probes alongside other compute; label timing and shared-headroom
 limitations separately. Existing queue finished before that policy update, no
 reruns. [Results and limitations](../compressible_memory3d_2026-10-29.md).
+
+
+2026-10-29 user authorizes CompSPH shared pair physics/direct compatible work
+and removing unnecessary previous-step stage/list ownership. Isolate CompSPH
+operator/storage change from runner lifetime change; preserve force/predictor/
+partition formulas, fresh integrator stages, native list/replay/source semantics.
+Use frozen before/operator-only/lifetime-only/combined controls and matching
+32³/96³ memory windows, with compatibility and physical accuracy gates.
+
+
+CompSPH work/lifetime qualification complete2026-10-29: native compatible-energy
+single-gas eager path defaults to shared pair recomputation/direct W; expanded
+reference and wall/material/AD/other-energy/graph-grid fallbacks retained.
+Independent baseline/refactored-expanded/operator/lifetime/combined windows:
+96³ CompSPH28.791→10.100GiB live (64.9% saving),32³1.097→0.404GiB; other schemes'
+lifetime cleanup saves0.14–0.21GiB, bitwise fields. All30 campaign jobs pass,
+1,944 valid startup RHS, no extra RHS,5.33e-8 budget; all capture endpoints exact,
+32³ recomputation roundoff within unchanged screens. FP32/FP64 scientific/AD,
+forced replay/thermal, actual CUDA graph/wall/material controls and recorded
+native Sod/Gresho nonregression pass. Baseline Gresho remains dissipative; timings
+contended. Current-step stage/list overlap remains; no neighbour-format/reuse
+change or long-run bound claimed. [Report](../compsph_work_lifetime_2026-10-29.md).

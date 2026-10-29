@@ -535,6 +535,9 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         steps = ()
 
     for i in steps:
+        # Previous outputs have consumed their stage data. Release it before
+        # entering the next integrator call; the accepted system stays live.
+        stepResult = None
         with _Timer(ctx.device) as timer:
             with record_function("[runner] integrator step"):
                 if stepGraph is not None:
@@ -837,6 +840,9 @@ def _runPipelined(ctx, case, spec, result, stepGraph, steps, progress, runningSt
         handle = stepGraph.launch(runningState, ctx.config.dt, ctx.config, ctx.schemeConfig,
                                   verbose=spec.verbose)
         outputs(i, absStep, runningState, stepResult, stepMs, ready, final=False)
+        # The side-stream output dependency is registered by outputs().
+        # Terminal steps retain their stages for the final checkpoint below.
+        stepResult = None
 
     if handle is not None:
         stepGraph.finish(handle)
