@@ -828,3 +828,21 @@ captures show inactive cache, no pending frees: post-run cache release leaves
 3.790GiB inactive split blocks pinned within occupied segments. Brief unrelated
 compute makes the ~1% timing difference inconclusive. No full t4 rerun, neighbour
 representation change or allocator tuning. [Retention report](../crksph_retention_2026-10-29.md).
+
+
+2026-10-29 user authorizes cross-scheme3D memory scaling after committing results
+(commit931aca9). Planned seven supported schemes: CRKSPH control, CompSPH,
+Monaghan, GSPH, InutsukaGSPH, MFM, MFV. Serial32³/64³/96³36-step startup
+windows, independent warmup, then separate six-step96³ allocator/ownership
+captures. Preserve native scheme/kernel/support/timestep policies, same physical
+OU/bath setup; this measures implementation memory, not equal-error throughput
+or developed-turbulence high-water bounds. GPU-free gate, progress/source/RHS/
+positivity/energy guards, recorded slices and finite tracked supervisor.
+
+
+Cross-scheme sweep prepared2026-10-29: all seven tiny CPU controls and CRK/MFM
+capture-path controls pass after a meshless observer-only repair (failures
+retained).28-job serial source-pinned GPU supervisor and finite CPU-only analysis
+companion are tracked under `.tmp/compressible-memory3d-20261029/`. Initial
+launch waits for unrelated ACSPH compute; no CUDA allocation into that work.
+[Protocol/status](../compressible_memory3d_2026-10-29.md).
