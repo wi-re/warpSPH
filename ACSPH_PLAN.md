@@ -12,6 +12,17 @@ priority decision does not start new runs or change numerical defaults.
 ## Lobovsky comparison — 2026-10-27 (active)
 
 
+**Comparable Michel baseline movies (2026-10-30, user):** rendered the current
+00-michel-baseline (full_remap=false,bdf_shift=false) with the same VisPy
+renderer, camera bounds, ±8 kPa signed-log scale, dimensions and playback rates
+as the dynGPUSPH videos. Outputs under video-comparison/:
+warpsph-michel-baseline-pressure-full.mp4 (154 frames,0–1.530014 s,2560×1800,
+12 fps) and warpsph-michel-baseline-pressure-return-impact.mp4 (36 frames,
+1.180116–1.530014 s,2560×1440,6 fps). Source times exactly equal the matching
+prefixes of both dynGPUSPH movies; full decoder counts match receipts. Late
+pressure frame visually checked. Baseline trajectory ends at1.53 s; no new run.
+
+
 **dynGPUSPH pressure movies rendered (2026-10-30, user):** rendered retained
 FP64 snapshots with scripts/acsph_reference/render_pressure.py (VisPy/EGL,
 fixed ±8 kPa signed-log colors, timestamped, no temporal interpolation).
