@@ -12,7 +12,27 @@ priority decision does not start new runs or change numerical defaults.
 ## Lobovsky comparison — 2026-10-27 (active)
 
 
-**Daemon-requested viewer video — scoped (2026-10-30, user):** user proposes
+**Viewer recording jobs implemented and qualified (2026-10-30):**
+warpSPHRemote commit f2dbd2f on codex/viewer-recording-jobs adds authenticated
+recording intents, scene/preset/range/camera, capture window/step cadence,
+width/fps/bitrate, readiness before synchronized capture, durable state and
+cancel/failure paths. Viewer returns bounded chunks of WebM and exact frame
+provenance; CLI requests/status/cancels/fetches with SHA256 verification. No
+viewer lease takeover. Window requests require the updated videoWindow adapter.
+145 Python checks pass;133 viewer checks pass with1 existing GC skip; build
+passes. Browser controls:16-frame capture, cancel/reuse plus4-frame camera
+capture, then8-frame visually inspected pressure-particle export after fixing
+only the synthetic fixture's physical particle area. No numerical flow launched.
+[Workflow/limits](/home/lu26029/dev/warpSPHRemote/reports/REQUESTED_VIDEO.md).
+Evidence: /tmp/remote-requested-video-{verification,final,visual2}-20261030/.
+Normal daemon restarted idle at127.0.0.1:8766, preserving pairing,1015 run records
+and snapshot budget; local viewer127.0.0.1:5174 serves updated build (reload).
+Michel baseline complete; transport stopped at0.090236354s at user request.
+Remaining queue held by STOP; no numerical simulation restarted. Before future
+runs, re-freeze updated publisher/cadence and qualify original IC/runtime parity;
+queue the pressure video before the requested event and retain job/artifact IDs.
+
+**Daemon-requested viewer video — implementation authorized (2026-10-30, user):** user proposes
 an external recording intent relayed through the daemon to its connected viewer,
 including requested scene settings. Read-only inspection of warpSPHRemote confirms
 existing synchronized producer capture, per-step cadence, viewer ACK gating,
@@ -25,9 +45,10 @@ capture activates. Track queued/preparing/recording/saving/completed/failed or
 cancelled; expose recorded start/end times and missed requested start explicitly.
 Completed video and scene/time provenance should be retrievable by job ID. Reuse
 the existing attached viewer and encoder, preserving lease ownership and explicit
-capture-hold recovery. No viewer means visibly queued, not active capture. This
-is a design scope, not an implemented endpoint or started video; no companion
-code, daemon process or current simulation changed.
+capture-hold recovery. No viewer means visibly queued, not active capture. Implementation subsequently completed and qualified above. User explicitly stopped the
+short Michel transport trajectory; live root STOP prevents any remaining case
+from launching. Preserve its prefix and the completed Michel baseline. Qualify
+recording jobs before resuming numerical simulations.
 
 **Shifting consistency and event video (2026-10-30, user):** disorder may
 couple pressure waves back into particle motion if artificial displacement is

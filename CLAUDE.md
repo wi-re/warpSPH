@@ -94,6 +94,11 @@ These apply to **every** run, including throwaway inline probes that call
    never inject into a running solver. An explicit opt-out is allowed when the
    user requests it. Report registration failures rather than silently omitting
    the viewer on a long campaign.
+   For requested dense visualization, use daemon recording jobs with the attached
+   viewer (`python -m warpsph_remote.video_cli`); retain the job ID, WebM and frame
+   manifest. Configure scene/range/camera and queue before the event; freeze the
+   updated adapter with the run. Readiness activates synchronized capture. Check
+   decoded frames visually as well as the job status before qualifying output.
 6. **Look at performance.** Report wall time and ms/step with every run (the
    progress rows and the completion report give both) and compare with the last
    figure for the same case; reference: Marrone 3.1 nx 67 to t\* 7.68, video on,
