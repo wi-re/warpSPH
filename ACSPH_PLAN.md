@@ -12,6 +12,36 @@ priority decision does not start new runs or change numerical defaults.
 ## Lobovsky comparison — 2026-10-27 (active)
 
 
+**Convergence / pressure-mode hypothesis (2026-10-30, user):** investigate
+whether apparently persistent negative-pressure states are weakly constrained
+or underconverged modes rather than treating negative gauge pressure itself as
+a failure. Audit confirms all three recorded configs select nonConservative
+pressure force (the pair sum p_i+p_j), and frozen dualTime/wp_residual/metric/
+ablation-control sources match current files. Their accepted-state stop test
+is the global norm of v_bounced - BDF(x), epsilonV=-8; it does not directly gate
+final momentum or pressure-equation residuals, and epsilonP is unrecorded.
+Over 1.29–1.35 s baseline/Taylor/BDF hit 0/2/0 caps; over 1.46–1.49 s they hit
+2/3/2 caps. Few caps therefore cannot establish pressure convergence.
+
+At fixed interior geometry and density, adding constant C to all stencil
+pressures changes the current acceleration by
+-2 C / rho_i * sum_j V_j grad W_ij. The continuum gradient annihilates this
+offset, but the pair-sum discrete operator need not when the kernel-gradient
+sum is nonzero. The negative-pressure difference-gradient branch exists under
+Antuono, but these runs do not select it. Thus pressure-mode convergence and
+disordered-stencil sensitivity are separate hypotheses, potentially coupled.
+The free surface also constrains the physical pressure reference.
+
+Discriminating next diagnostic: capture identical pre-collapse solve inputs;
+continue pseudo-iterations past the existing stop while measuring accepted-state
+pressure residual, momentum residual, divergence and local/max norms. Compare
+different admissible initial pressure guesses against the same fixed problem;
+measure discrete constant-field gradient error at the damaged region. A benign
+constant bulk offset must be distinguished from spatial pressure modes and
+from multiple converged nonlinear branches. No new GPU run or model change
+made in this status/conceptual audit.
+
+
 **Pressure-wave video comparison (2026-10-30):** decoded every accepted-step
 frame over 1.179934–1.530014 s (1934 frames per row), with exact matching frame
 manifests, identical camera and fixed ±8 kPa symlog pressure colors. Offline
