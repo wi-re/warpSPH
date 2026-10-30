@@ -232,10 +232,18 @@ def static_pass(verbose: bool) -> list[Failure]:
                 )
                 continue
             for symbol in symbols:
-                if hasattr(mod, symbol):
-                    continue
-                # `from pkg import submodule` is legal even without a re-export.
-                if importlib.util.find_spec(f"{module}.{symbol}") is not None:
+                try:
+                    if hasattr(mod, symbol):
+                        continue
+                    # Only packages can contain importable child modules.
+                    # A missing attribute on a regular module is a normal
+                    # diagnostic, not a reason to call find_spec on a child
+                    # (which raises because the parent has no __path__).
+                    if hasattr(mod, "__path__") and importlib.util.find_spec(f"{module}.{symbol}") is not None:
+                        continue
+                except Exception as exc:
+                    failures.append(Failure(f"{rel}:{lineno}",
+                        f"cannot resolve {symbol!r} from {module}", f"{type(exc).__name__}: {exc}"))
                     continue
                 failures.append(
                     Failure(f"{rel}:{lineno}", f"cannot import {symbol!r} from {module}", "symbol missing")

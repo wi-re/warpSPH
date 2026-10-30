@@ -14,6 +14,21 @@ physical multi-GPU, Isambard and capacity/performance gates remain open.
 This document is the canonical implementation/handoff plan for both repositories;
 the core carries a short companion pointer, `CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md`.
 
+### Static import scanner issue resolved (2026-10-30)
+
+The previously recorded wp_alpha.computeAlpha `find_spec` traceback is fixed.
+Missing symbols on regular modules now produce normal diagnostics; only packages
+are searched for child modules, and child-lookup errors do not abort the scan.
+Three focused scanner regressions pass. The full check now imports566 modules
+and checks6063 first-party imports across1314 files with no failures.
+The five real stale imports exposed after fixing the exception were resolved:
+two old pressure-solver notebooks are clearly labeled archival source listings
+(their retired numerical APIs were not revived), and the Kidder regression calls
+the accepted-boundary helper now used by finalizers. Five affected Kidder checks
+also pass. Original notebook files are retained in ignored L3 evidence. Do not
+re-investigate the old scanner traceback; older notes below describe history.
+L3 communication work is now active. Evidence: `.tmp/l3-communication-20261030/`.
+
 ## Start here / next action
 
 1. The user authorized integration at ACSPH checkpoint `3d80e5e`. The paired
@@ -902,7 +917,7 @@ ACSPH contention means timing remains diagnostic. The ordering is deliberate.
    ROCm-enabled Torch builds; continue the local sequence on the existing stack.
    Distinguish MPI rank launching with NCCL payloads
    from an MPI data backend; do not replace/build shared packages for this task.
-3. [ ] **L3 — communication overhead.** Separate exhaustive replica hashing from
+3. [ ] **L3 — communication overhead (active; scanner prerequisite resolved).** Separate exhaustive replica hashing from
    normal validation, combine exchanges where dependencies allow, reuse metadata/
    particle scratch and reduce unnecessary host waits. Prove correctness, buffer
    lifetimes and fewer operations/allocations locally; defer throughput claims.
