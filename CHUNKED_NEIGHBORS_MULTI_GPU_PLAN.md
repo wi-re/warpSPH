@@ -2,7 +2,7 @@
 
 Plan index: [PLANS.md](PLANS.md). Parent physics programme: [driven compressible turbulence](docs/roadmap/driven_compressible_turbulence.md).
 
-Status, 2026-10-30: **Phase 4 bounded process proof of concept qualified; local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 filtering/redistribution qualified locally; L5 bounded stress qualified; L6 bounded compatibility matrix qualified**.
+Status, 2026-10-30: **Phase 4 bounded process proof of concept qualified; local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 filtering/redistribution qualified locally; L5 bounded stress qualified; L6 bounded compatibility matrix qualified; L7 actual wide-edge debug access qualified**.
 The count/scan/ownership design is agreed in discussion. Core/main and frontend/dev
 are integrated; see the [integration report](docs/chunked_integration_2026-10-30.md).
 The planner and opt-in standalone single-device chunk construction/lifecycle are
@@ -39,10 +39,12 @@ L3 control/hash and particle-packing work is now qualified locally. Evidence: `.
    qualified within the limits below. Use an explicit RowChunkProcessGroup with
    Gloo CPU or NCCL CUDA tensors; the isolated two-process/one-GPU runtime is
    available. J/W stay owned, with particle exchanges between dependent passes.
-   L1–L6 are qualified within their bounded local scopes; use the maintained
+   L1–L7 are qualified within their bounded local scopes; use the maintained
    [support matrix](docs/chunked_distributed_support.md). Broader compatibility,
    physical devices/topology/Isambard and capacity/performance remain open.
-   L7 waits for sufficient free GPU memory; MPI/ROCm builds remain deferred.
+   L7 actual wide-edge debugging is now qualified below. Continue with realistic
+   flow/capacity, broader compatibility and physical GPU/site gates; MPI/ROCm
+   builds remain deferred.
    Use `scripts/run_distributed.py` for the explicit experimental distributed
    launcher; ordinary runner setup still uses the Python neighborhood hook.
    Use explicit source paths; do not change global editable installs.
@@ -937,10 +939,11 @@ ACSPH contention means timing remains diagnostic. The ordering is deliberate.
    native restart. Explicitly test rejections for boundaries/materials, graphs,
    differentiation and unported schemes; retain native CRKSPH/CompSPH controls.
    This completes the bounded local milestone, not every Phase5 compatibility port.
-7. [ ] **L7 — actual wide-edge device access (when memory is free).** A total edge
+7. [x] **L7 — actual wide-edge device access (bounded debug scope qualified).** A total edge
    count above INT_MAX across bounded chunks is testable on one physical GPU.
    Require a memory/headroom check and actual device accesses; metadata/aliases
-   do not qualify it. Do not compete with ACSPH for a large allocation now.
+   do not qualify it. User authorizes large single-node/single-GPU multi-process
+   debugging on2026-10-30; perform a fresh free-memory check before allocations.
 
 Physical inter-device transport/topology, aggregate multi-GPU capacity and
 scaling remain separate gates. This sequence does not claim to complete them.
@@ -1551,8 +1554,10 @@ restart) and preserved old-path regressions; unsupported paths are visible.
 - [ ] Short fixed-step controls at32^3/64^3/96^3 before larger allocation gates;
   compare rebuild/steady time, kernels/host syncs, communication and memory against
   the integrated flat baseline. Separate allocator capture from timing runs.
-- [ ] Validate real physical device accesses for a total edge count>INT_MAX spread
-  across bounded chunks. Metadata-only/aliased probes do not establish this.
+- [x] Validate real physical device accesses for a total edge count>INT_MAX spread
+  across bounded chunks: L7 dense debug fixture qualifies2,209,000,000 real J/W
+  entries on one GPU, standalone and two NCCL ranks, both offset widths. Larger
+  spatial/flow capacity and physical multi-GPU remain separate unchecked gates.
 - [ ] Size128^3, then160^3/192^3 and ultimately256^3 from measured per-rank terms,
   leaving headroom for developed-flow neighbour growth and overlapping generations.
   Do not assume four GPUs make every live allocation exactly one quarter as large.
@@ -1615,3 +1620,96 @@ commands/configuration, passed/failed gates and the exact next action. First
 reviewable implementation deliverable: Phase1 planner plus Phase2 direct
 single-GPU chunk collection; first useful solver deliverable includes Phase3
 CRK retained work. Full multi-GPU completion requires real multiple GPUs.
+
+### L7 capacity/access authorization and qualification (2026-10-30)
+
+User reports the GPU is free and authorizes large local runs, multiple instances
+on the node/GPU and a genuine total neighbour count above INT_MAX for debugging.
+Initial nvidia-smi reports92,094 MiB free of97,887 MiB,3% utilization and no
+listed compute process. Start with a small independent-oracle control, then
+physically collect >2^31 neighbours into distinct bounded chunks, read every J,
+write/read real chunk-owned pair fields and execute production particle-output
+operators. Repeat with both local offset widths and two NCCL shared-GPU ranks,
+then exercise filtering/changed ownership within measured memory headroom.
+Record exact source hashes, counts, allocation extents, boundary probes, timings
+and memory; retain normal-size regressions. Synthetic all-neighbour geometry is
+a device addressing/debug test; physical flow capacity and multi-GPU scaling
+remain separate. No numerical formula/default changes are planned.
+
+The actual-device gate passes without a production library change. The durable
+core worker `tests/distributed/_wideRowChunkWorker.py` uses47,000 coincident
+particles with self-inclusive supports, producing2,209,000,000 stored neighbours
+(61,516,353 above INT_MAX). Search/count/scan/collection use the actual library.
+The int64 global prefix spans33 dedicated J chunks; all local capacities and
+three-component work scalar extents remain within the policy's int32 limit.
+The stored J allocations occupy8.229 GiB and the actual owned work24.687 GiB
+globally. No alias, metadata-only extent or global pair view stands in for them.
+
+Each row is checked against an independent single-row flat search: that O(N)
+reference must itself be a complete permutation of0..46,999. A CUDA audit reads
+every J and every written work vector. Work is stamped through prepared row
+dispatch with the global row, reference J and an exactly representable residue
+of the int64 global edge index. Actual device probes report:
+
+| Global edge index | J | Global query row |
+| --- | --- | --- |
+| 2,147,483,647 | 6,647 | 45,691 |
+| 2,147,483,648 | 6,648 | 45,691 |
+| 2,208,999,999 | 46,999 | 46,999 |
+
+The production Wendland2 density operator runs eager and prepared over every
+owned row and matches the independent flat reference exactly. Fixed scalar
+lanes qualify int32 local offsets; fixed32 lanes qualify int64 offsets. This
+cohort does not isolate an offset-width performance effect from lane choice.
+
+| Case | Result / Torch allocated peak |
+| --- | --- |
+| Standalone CUDA FP32/int32, scalar lanes | All2.209b J/work checked; filtering/repartition/source preservation and post-filter density pass;41.182 GiB |
+| Standalone CUDA FP32/int64,32 lanes | All2.209b J/work and eager/prepared density pass;32.940 GiB |
+| Two shared-GPU NCCL ranks FP32/int32, exact | All2.209b J/work across17+16 original chunks; filtering/redistribution/source preservation and density pass;21.380/20.306 GiB per rank |
+| Two shared-GPU NCCL ranks FP32/int64, contract,32 lanes | Same wide/filter coverage passes;21.380/20.307 GiB per rank |
+| Small CPU/Gloo oracle regression | Standalone/int32,2 ranks/int32,3 ranks/int64 pass;289 real neighbours, changed owner boundaries and retained work |
+| Small NCCL bring-up |2 ranks,1,048,576 real neighbours, empty-to-active owner and filtering pass |
+| Complete core process suite |14 passed in87.77s, including earlier stress/fatal cases and3 new oracle drivers |
+| Frontend runtime/static imports |567 modules,6092 imports,1316 source files; full scan passes |
+
+Large filtering changes the row cap1427→713, creating66 target chunks. With2
+ranks the owner boundary moves24,259→23,529:730 rows /34,310,000 real edges
+move from rank0 to rank1 through137,240,000 NCCL payload bytes. The other pair
+intervals copy locally. All98 intersection transfers are validated; both old
+J/work and every new J remain correct. W stays associated with its original
+adjacency, preserving the existing fresh-stage replay contract.
+
+The large cases ran serially through isolated NCCL2.32.3 on the same GPU UUID.
+Summed phase wall times (including setup/JIT/synchronization) were11.99s local
+int32,2.59s local int64,12.70s NCCL int32 and5.75s NCCL int64 at rank0. These
+are diagnostic debug costs; different lanes/filtering choices prevent a direct
+performance comparison. Per-rank peaks are Torch allocator peaks, not sampled
+aggregate process peaks. The worker checks an explicit64 GiB budget and8 GiB
+reserve before large allocations; all GPU contexts are released at process exit.
+No simulation/video or flow integration is involved in this device-access test.
+
+Three initial CPU driver failures were fixture issues (metadata versus container
+access); raw failures and successful reruns are preserved. No numerical failures
+or overflow were reproduced in the qualified paths. Every successful wide
+report pins all core package files and the worker source. The library contents
+are unchanged from the L6 checkpoint79944e7. Evidence/commands/source snapshots
+and final paired receipt: frontend `.tmp/l7-wide-20261030/`.
+
+L1–L7 meet their stated local exits. Realistic spatial/developed-flow capacity,
+full solver trajectories at wide edge counts, large single-chunk extents near
+INT_MAX, physical multi-GPU/site/scaling, wider physics/AD/graph ports and MPI/ROCm
+builds remain open. The maintained support guide distinguishes this debug gate
+from those broader qualifications.
+
+A second boundary fixture uses50,000 particles /2,500,000,000 real edges. Its
+38 original chunks include a final global edge base2,482,700,000, itself above
+INT_MAX. Standalone and two NCCL ranks pass with both offset widths, including
+full J/work audits, eager/prepared density and filtering to75 chunks. This
+explicitly checks a whole chunk starting above the signed32-bit limit, in
+addition to the earlier limit crossing inside a chunk. Boundary device probes
+report J33,647/33,648 at global edges2^31−1/2^31 and J49,999 at the final edge.
+The original J/work occupy37.253 GiB globally; standalone allocated peak46.578
+GiB including retained source storage and filtered J. All8 large cohorts /12
+rank reports pass. Source package bytes remain identical to L6; the raw report
+and `summary.json` retain separate costs/peaks for every case.

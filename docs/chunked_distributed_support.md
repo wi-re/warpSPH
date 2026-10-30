@@ -18,6 +18,7 @@ sequence, qualification evidence and remaining capacity/site gates.
 | Neighbour lanes | Fixed scalar and global 32-lane CUDA configurations | Existing tiled kernels are used where available; Godunov/Gaussian kernels use scalar fallback |
 | Native checkpoint | Accepted-step drivenTurbulence, all five schemes, FourierOU/ConservedSources | Canonical particle/time/source/search recipe; rebuild owned J, never serialize W or a global pair tensor |
 | Legacy checkpoint | Qualified version-1 CSR/COO import for Monaghan/CRKSPH/CompSPH | Godunov legacy import explicitly rejects; use the native format |
+| Actual wide-edge addressing | Up to2,500,000,000 real neighbours across38 bounded chunks; dedicated J/work; eager/prepared density; filtering and owner transfers | Dense debug geometry, one GPU, standalone/two NCCL ranks, both local offset widths; per-chunk extents remain bounded |
 | Process/rank changes | Gloo 1–5 ranks and tiny two-process/one-GPU NCCL controls | Physical device-count changes and multi-node topology remain unqualified |
 
 The dedicated launcher currently accepts `drivenTurbulence` with these five
@@ -122,7 +123,30 @@ Godunov prepared launches and save/resume. The integer global-row ABI change
 preserves normalized floating Warp ASTs and passes all 16 existing flat Godunov
 gradchecks. See the canonical plan for exact test counts and source variants.
 
-All CUDA evidence is from one contended physical GPU. Timings are diagnostic.
+L1–L6 CUDA evidence used one GPU under ACSPH contention; L7 ran after the GPU
+was released. All CUDA evidence still uses one physical device, and timings are
+diagnostic.
+L7 now qualifies real total-edge access above INT_MAX:47,000/50,000 coincident
+particles, up to2,500,000,000 stored neighbours and three-component work buffers are fully
+written/read, with explicit device probes across2^31. Production density matches
+an independent one-row flat reference. Filtering preserves old J/work and
+redistributes changed ownership through NCCL. The largest standalone allocated
+peak is46.58 GiB. Entire chunks starting above INT_MAX also pass. The durable core worker is
+`tests/distributed/_wideRowChunkWorker.py`; its small CPU/Gloo oracle controls run
+in the ordinary process suite. Run the hardware gate explicitly, for example:
+
+```bash
+# From the paired core checkout, using the selected Python environment.
+PYTHONPATH="$PWD/src" warpSPHCore_OFFSET_DTYPE=int32 \
+python tests/distributed/_wideRowChunkWorker.py \
+  --device cuda:0 --particles 47000 --edge-budget 67108864 --filter \
+  --require-wide --memory-budget-gib 64 --reserve-gib 8 --output /fresh/output
+```
+
+Use the isolated NCCL wrapper and torchrun with two processes to repeat on the
+shared GPU; set the shared-rank environment described above. Both ranks select
+`cuda:0` in this debug worker. Check headroom immediately before every large job.
 Physical multi-GPU/site topology, bandwidth/scaling, developed-flow capacity,
-large populations and real total-edge access above INT_MAX remain open. L7 needs
-an explicit free-memory/headroom check after the competing ACSPH work permits it.
+full wide-edge solver trajectories and very large individual chunk extents
+remain open. This debug fixture has no flow integration or video. Timings mix
+JIT, lanes and filtering choices and remain diagnostic.
