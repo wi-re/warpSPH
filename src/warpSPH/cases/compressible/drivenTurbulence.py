@@ -93,7 +93,7 @@ def configureScheme(ctx):
     scheme.adaptiveSupportCorrections = False
 
 
-def buildSPHSystem(ctx):
+def buildSPHSystem(ctx, *, neighborhoodFactory=None):
     from ...sample.compressible import setupBasicCompressibleInitialState
     from ...caseUtils.drivenTurbulence import DrivenCompSPHState, DrivenGasState
     from ...modules.forcing.primitive import applySources
@@ -115,7 +115,8 @@ def buildSPHSystem(ctx):
         update, *rest = native(system, dt, config, schemeConfig, **kw)
         return (applySources(system, update), *rest)
     ctx.bundle = replace(ctx.bundle, SimulationState=stateType, stepFunction=sourced)
-    system = setupBasicCompressibleInitialState(ctx.spec.nx, ctx.config, scheme, stateType, ctx.SimulationSystem)
+    system = setupBasicCompressibleInitialState(ctx.spec.nx, ctx.config, scheme, stateType, ctx.SimulationSystem,
+        neighborhoodFactory=neighborhoodFactory)
     s = system.state
     s.masses = s.masses*ctx.param('rho0')
     s.densities = s.densities*ctx.param('rho0')

@@ -25,6 +25,7 @@ def setupBasicCompressibleInitialState(
         config, schemeConfig,
         SimulationState, SimulationSystem,
         jitter=0.0,
+        *, neighborhoodFactory=None,
 ):
     particles_l = sampleRegularParticles(nx, config.domain, config.targetNeighbors, jitter = jitter)
     Pinitial = torch.zeros_like(particles_l.densities)
@@ -67,7 +68,8 @@ def setupBasicCompressibleInitialState(
         adaptiveSupportThreshold=1e-3,
         adaptiveSupportScheme=AdaptiveSupportScheme.NoScheme,
     )
-    rho_optimal, h_optimal, adjacency, rhos_iter, supports_iter = evaluateOptimalSupport(simulationState, config, supportScheme = SupportScheme.Gather, compParams = compressibleSPHConfigAdapt)
+    initialAdjacency = None if neighborhoodFactory is None else neighborhoodFactory(simulationState, config)
+    rho_optimal, h_optimal, adjacency, rhos_iter, supports_iter = evaluateOptimalSupport(simulationState, config, supportScheme = SupportScheme.Gather, compParams = compressibleSPHConfigAdapt, adjacency=initialAdjacency)
 
     simulationState.supports = h_optimal
     simulationState.densities = rho_optimal
@@ -75,7 +77,7 @@ def setupBasicCompressibleInitialState(
 
     compressibleSystem = SimulationSystem(
         state=simulationState, 
-        adjacency = None, 
+        adjacency = adjacency if neighborhoodFactory is not None else None,
         domain = config.domain
     )
         

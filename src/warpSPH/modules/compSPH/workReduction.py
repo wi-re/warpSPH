@@ -50,6 +50,16 @@ def _chunkPairWorkRows(velocity: wp.array2d(dtype=scalar_t), work: wp.array2d(dt
 
 
 def _reduceChunkedPairWork(adjacency, velocity, work):
+    communication = adjacency.communication
+    if communication is None:
+        return _reduceChunkedLocal(adjacency, velocity, work)
+    communication.assertReplicated('compatible:half-velocity', dict(velocity=velocity))
+    out = communication.localPhase('compatible:reduce-local-W', lambda: _reduceChunkedLocal(adjacency, velocity, work))
+    communication.exchangeParticleOutputs(adjacency, (out,), tag='compatible:reduce-owned-W')
+    return out
+
+
+def _reduceChunkedLocal(adjacency, velocity, work):
     if not isinstance(work, ChunkedPairField):
         raise TypeError('Chunked compatible reduction requires a ChunkedPairField; no flat pair fallback exists.')
     work.validate(adjacency)
@@ -58,7 +68,7 @@ def _reduceChunkedPairWork(adjacency, velocity, work):
         raise NotImplementedError('Chunked compatible reduction does not support AD.')
     if (velocity.shape != (adjacency.numRows, *work.trailingShape) or velocity.ndim != 2
         or adjacency.numRows != adjacency.numCols or adjacency.queryPositions is not adjacency.referencePositions
-        or adjacency.plan.numOwners != 1
+        or (adjacency.plan.numOwners != 1 and adjacency.communication is None)
         or velocity.device != adjacency.queryPositions.device or velocity.dtype != get_torch_precision()
         or work.dtype != velocity.dtype):
         raise ValueError('Chunked compatible reduction needs complete self rows and matching velocity/work layouts.')

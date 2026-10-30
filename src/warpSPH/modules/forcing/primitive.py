@@ -9,11 +9,19 @@ import torch
 
 def applySources(system, update):
     source, s = system.sourceTerms, system.state
+    from ...distributed import processGroup, validateSourceClock
+    communication = processGroup(system)
+    if communication is not None:
+        validateSourceClock(system, communication)
     momentum, work, heat = source.fields(s.masses, s.positions, s.velocities,
                                          s.internalEnergies, system.t)
+    if communication is not None:
+        communication.assertReplicated('source:fields', dict(momentum=momentum, work=work, heat=heat))
     update.sourceAcceleration = momentum/s.masses[:, None]
     update.sourceHeat = heat/s.masses
-    update.sourceEnergyRates = torch.stack((work.double().sum(), heat.double().sum()))
+    update.sourceEnergyRates = (torch.stack((work.double().sum(), heat.double().sum())) if communication is None else
+        torch.stack((communication.sumOwned(work, system.adjacency, tag='source:work'),
+                     communication.sumOwned(heat, system.adjacency, tag='source:heat'))))
     update.dvdt = update.dvdt + update.sourceAcceleration
     # Replace, don't mutate: CRK's retained native energy weights must continue
     # to see hydro dudt, not thermostat heating/cooling.
@@ -39,7 +47,12 @@ def finishSources(system, initial, updates, weights, dt, scheme, *, compatible=F
             totalAcceleration += w*u.dvdt
             externalAcceleration += w*u.sourceAcceleration
         half = s0.velocities + .5*totalAcceleration*dt
-        forceWork = (s0.masses.double()[:, None]*half.double()*externalAcceleration.double()).sum()
+        forceContributions = s0.masses.double()[:, None]*half.double()*externalAcceleration.double()
+        from ...distributed import processGroup
+        communication = processGroup(system)
+        forceWork = (forceContributions.sum() if communication is None else
+            communication.sumOwned(forceContributions, system.adjacency, tag='source:accepted-work'))
+        del forceContributions
         exchange = torch.stack((forceWork, exchange[1]))
     s.sourceEnergyBudget = s0.sourceEnergyBudget + dt*exchange
     # Public thermodynamics describe accepted u, using the native density policy.

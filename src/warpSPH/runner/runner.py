@@ -450,6 +450,10 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
             'config.dt is unset after case setup; set spec.dt or have the case '
             'derive it (e.g. via setupWeaklyCompressibleTimestep).'
         )
+    from ..distributed import distributedRunStart, distributedStepStart, distributedStepEnd
+    rowCommunication = distributedRunStart(ctx, runningState)
+    if rowCommunication is not None:
+        ctx.config.dt = distributedStepStart(ctx, runningState, rowCommunication)
     dt = _scalar(ctx.config.dt)
     # A case with a `timestep` hook re-picks dt every step, so a step count
     # derived from the initial dt would be wrong -- those runs are bounded by
@@ -536,6 +540,8 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         steps = ()
 
     for i in steps:
+        if rowCommunication is not None:
+            ctx.config.dt = distributedStepStart(ctx, runningState, rowCommunication)
         # Previous outputs have consumed their stage data. Release it before
         # entering the next integrator call; the accepted system stays live.
         stepResult = None
@@ -589,6 +595,8 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         if case.timestep is not None:
             with record_function("[runner] case timestep hook"):
                 ctx.config.dt = case.timestep(ctx, runningState)
+        if rowCommunication is not None:
+            distributedStepEnd(ctx, runningState, rowCommunication, absStep)
 
         # the step time and max |v| (non-finite check, velocity alarm) in one host transfer
         with record_function("[runner] read time + max speed (non-finite check, velocity alarm)"):

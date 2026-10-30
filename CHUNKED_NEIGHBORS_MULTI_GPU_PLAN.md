@@ -2,14 +2,15 @@
 
 Plan index: [PLANS.md](PLANS.md). Parent physics programme: [driven compressible turbulence](docs/roadmap/driven_compressible_turbulence.md).
 
-Status, 2026-10-30: **Phase 3 bounded native CRKSPH/CompSPH compatible work qualified; Phase 4 next**.
+Status, 2026-10-30: **Phase 4 bounded process proof of concept qualified; physical multi-GPU next**.
 The count/scan/ownership design is agreed in discussion. Core/main and frontend/dev
 are integrated; see the [integration report](docs/chunked_integration_2026-10-30.md).
 The planner and opt-in standalone single-device chunk construction/lifecycle are
 qualified on CPU/CUDA. Explicit row-mapped shared operators and a bounded eager
 Monaghan path pass flat parity. Native CRKSPH/CompSPH now retain compatible work
 in owned chunks and preserve changed-list replay in bounded CPU/CUDA fixtures.
-Distributed execution and physical multi-GPU qualification remain open.
+The bounded replicated-state Gloo/NCCL process path is now qualified locally;
+physical multi-GPU, Isambard and capacity/performance gates remain open.
 This document is the canonical implementation/handoff plan for both repositories;
 the core carries a short companion pointer, `CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md`.
 
@@ -19,14 +20,12 @@ the core carries a short companion pointer, `CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md
    merge and focused CPU/CUDA gates are complete; read the integration report.
 2. Use the active paired workspace below. Chunked neighbours first, then
    multi-GPU execution continue sequentially in these same checkouts.
-3. Phase1/2 and the bounded Phase3 native compatible-work checkpoint are qualified
-   within the limits below. Next implement Phase4 process groups, distributed
-   count/collect, and particle-field exchanges between dependent passes. Use
-   torch.distributed/NCCL, with Gloo CPU and the isolated two-process/one-GPU NCCL
-   runtime for debugging. Pair J/W must remain on their owners. Current operator
-   outputs/reduction still require a complete single owner, so distributed
-   scheduling must be explicit before relaxing that guard.
-   There is no runner chunk-budget CLI option yet; select the Python case hook.
+3. Phases1/2, bounded eager Phase3 and the Phase4 process proof of concept are
+   qualified within the limits below. Use an explicit RowChunkProcessGroup with
+   Gloo CPU or NCCL CUDA tensors; the isolated two-process/one-GPU runtime is
+   available. J/W stay owned, with particle exchanges between dependent passes.
+   Next qualify physical devices/topology/Isambard, then capacity/performance.
+   There is no runner chunk-budget CLI option; select the Python setup hook.
    Use explicit source paths; do not change global editable installs.
 4. Keep the existing turbulence worktree available for ordinary single-GPU
    physics through128^3, subject to a short readiness/memory check. No such
@@ -627,28 +626,31 @@ Implementation provenance: core 85b5ef9; frontend is the commit containing this 
 
 ## Phase 4 — replicated-state multi-GPU runner (two GPUs, then four)
 
-- [ ] Implement `torch.distributed` (c10d) process groups with NCCL for production
-  CUDA collectives, one process/rank per GPU. Use torchrun or the Isambard Slurm
-  launch environment; inspect topology and site network configuration before
-  transport tuning. Keep a Gloo CPU-tensor debug transport behind the same
-  communication interface. Single-rank/logical-owner fixtures do not qualify
-  physical distributed execution.
-- [ ] All-gather counts, replicated scan, deterministic assignment, local collect
-  and resident reuse. Replicate reference fields/grid; build identical grids or
-  synchronize their particle ordering. Exchange owned particle results, not pairs.
-- [ ] Document the dependency graph for each scheme: support/density -> corrections
-  and gradients -> forces -> half velocities -> W -> accepted update. Add required
-  collectives before every cross-owner read. Exchange source/limiter fields too.
-- [ ] Global min timestep, global rebuild/overflow decisions, positive-state and
-  failure flags, conservation/source reductions. Count each particle once; do not
-  reduce duplicated replicas as if they were independent contributions. Keep the
-  OU clock/coefficients/seed history synchronized and mean-force removal global.
-- [ ] Test cross-GPU neighbours, uneven/empty owners, asynchronous-stream ordering,
-  capacity changes and deliberate mismatched generations. A failed rank must
-  terminate the job with diagnostics rather than deadlock its peers.
-- [ ] Compare physical two-/four-GPU short steps against the same single-GPU
-  configuration. Declare collective floating-point tolerances in advance; log
-  partition/generation, bytes transferred and per-pass wait/compute times.
+User scope (2026-10-30): start the process proof of concept with two separate
+ranks sharing the existing GPU using isolated NCCL 2.32.3. ACSPH continues to
+use the device; keep fixtures bounded, qualify correctness/stability and treat
+all timings as diagnostic. Do not wait for an idle device or infer performance,
+physical interconnect behavior or multi-device memory fit from these runs.
+
+- [x] Explicit c10d process-group binding with NCCL CUDA and Gloo CPU under the
+  same interface; torchrun process correctness/failure tests. Production retains
+  one process per GPU; shared-GPU NCCL is an experimental debug exception.
+- [x] Disjoint local counts -> replicated int32 counts / int64 scan -> identical
+  plan/signature -> allocate/collect owned chunks only; coordinated resident
+  reuse/rebuild and reference-grid ordering agreement.
+- [x] Eager Monaghan/native CRKSPH/CompSPH dependent particle-field exchanges,
+  owned compatible W, global half velocities and changed-generation replay.
+- [x] Global timestep/rebuild/positive/failure and unique-owner source/work
+  reductions; exact replicated OU clock/history/mean-removal contract.
+- [x] Uneven/empty owners, unequal populations, nondefault streams, local capacity
+  changes, deliberate mismatches, two-/three-process CPU tests and two real
+  shared-GPU NCCL ranks. Fatal rank termination is tested with torchrun/Gloo.
+- [ ] Physical two-/four-GPU execution, actual cross-device neighbours and memory,
+  topology/Isambard Slurm bootstrap/network configuration, device-fault failure
+  behavior, conservation/positivity and short-step reference comparisons.
+- [ ] Large physical edge storage/capacity fit and target-network performance;
+  declare physical collective tolerances and measure wait/compute/device memory
+  on the target topology without shared-workload timing assumptions.
 
 Exit: no full J/W on any rank, correct synchronization and failure handling,
 per-device memory measured, physical conservation/positivity gates passed.
@@ -661,7 +663,8 @@ PyTorch provides the intended interaction layer. Production execution will use
 through Torch-backed device buffers, with explicit stream/event ordering before
 communication and dependent kernels. Collectives exchange counts and owned
 particle outputs plus global timestep/rebuild/failure/source reductions; pair
-J/W stay on their owners. No distributed runner has been implemented yet.
+J/W stay on their owners. The bounded eager process checkpoint below is now
+implemented; physical multi-GPU/site qualification remains open.
 
 Shared base package inspection: Torch 2.13.0+cu130, NCCL 2.29.7, both NCCL
 and Gloo backends available. Torch pins the NCCL wheel exactly to 2.29.7; that
@@ -684,7 +687,7 @@ a general compatibility qualification of every PyTorch/NCCL operation. No shared
 package installation is changed.
 
 Local debug choices now include the tested two-process/one-GPU NCCL 2.32.3
-runtime and a future Gloo CPU transport for device-independent process/failure
+runtime and a qualified Gloo CPU transport for device-independent process/failure
 tests. A single-rank NCCL smoke checks API plumbing only. Real two-/four-GPU NCCL
 qualification is still required for device separation, transport, stream ordering
 and performance on the target topology.
@@ -743,6 +746,135 @@ The same directory contains the wrapper, smoke/verifier/summary scripts,
 smoke.log, per-rank JSON, base/overlay provenance and summary.json with a library
 SHA256. This runtime is now available for the subsequent distributed backend work.
 The package source is [NVIDIA NCCL CUDA13 on PyPI](https://pypi.org/project/nvidia-nccl-cu13/2.32.3/).
+
+### Bounded replicated-state process checkpoint (2026-10-30)
+
+The opt-in eager process proof of concept now runs separate OS processes with
+Gloo CPU or NCCL CUDA tensors. Two real NCCL ranks sharing the existing GPU
+pass solver correctness and repeated rebuild/replay checks under ACSPH
+contention. This qualifies the process protocol locally; the physical two-/four-
+GPU and Isambard gates above remain open.
+
+Core `warpSPHCore.distributed.RowChunkProcessGroup` binds an existing, explicitly
+initialized c10d group to a device. The caller owns group initialization with a
+finite timeout, device selection and destruction. Construct `communication = RowChunkProcessGroup(dist.group.WORLD, device)`
+and pass `communication=communication` to `radiusSearchRowChunks` / `buildChunkedVerletList`; subsequent resident builds
+infer it from the prior adjacency. Logical owners without a group remain test
+fixtures and still cannot produce distributed particle results.
+
+Each rank counts only its balanced counting interval. Disjoint broadcasts
+assemble the replicated int32 counts; every rank builds its int64 prefix and
+the same deterministic plan. Configuration, generation, complete plan signature
+and reference-grid ordering agree **before owned pair allocation/collection**.
+Only owned flat J/I and W buffers exist in the distributed path; no pair gather
+or flattened compatibility buffer was added. Changing capacity/row boundaries
+rebuilds directly on the new owners. Filtering an existing partial-owner list
+remains explicitly unsupported; it would need a separate pair-migration design.
+
+The existing row-dispatch ABI runs only local chunks, then broadcasts disjoint
+particle-output intervals to every replica before returning. Query/reference
+roles, canonical corrections, output layouts, scalar controls and operation
+sequence are explicit; reference inputs are hashed exactly in this debug path.
+Prepared launches follow the same protocol. Unread one-element force scratch
+and chunk-local work buffers never enter particle collectives.
+
+The qualified eager dependency schedule is:
+
+1. Support/density outputs are exchanged before the next support iteration or
+   correction pass. CRK volume -> moments -> density, gradients/limiters and
+   optional grad-H fields therefore have complete reference inputs. Pointwise
+   correction algebra runs on complete replicas and is checked before use.
+2. Force/heating outputs are exchanged before either global half-velocity reads
+   or the compatible-work sweep. Native CRKSPH/CompSPH accumulate W only on their
+   owned chunks, in the existing row/edge/stage order.
+3. Final half velocities are complete replicas. Each owner reduces its W directly
+   to particle energy increments, which are exchanged before accepted updates.
+   A midstage generation change coordinates a rebuild and preserves the existing
+   full fresh-stage replay, including repartitioning.
+4. Global MIN selects the timestep, MAX coordinates rebuild/invalid-state flags,
+   and FP64 SUM counts uniquely owned source/work contributions once. Replicated
+   FourierOU fields retain the original global mean-removal summation order;
+   their clock, coefficients, generator and resulting fields must agree exactly.
+   No duplicated full-replica SUM is used. Distributed body sources currently
+   qualify `ConservedSources` with `FourierOU`; custom sources remain gated.
+
+The ordinary eager runner recognizes an explicitly bound adjacency. It validates
+configuration/initial replicas, picks a global timestep, and checks positive,
+finite, equal accepted states and time. An optional `neighborhoodFactory(state,
+config)` in the compressible sampler and driven case's `buildSPHSystem` lets the
+initial density/support setup use owned chunks too. The process solver fixture
+forbids monolithic search from before that setup. There is no default/CLI change,
+automatic process-group initialization, output/checkpoint support or promotion
+of unqualified AD/graph/material/wall/scheme contexts.
+
+Control handshakes propagate local exceptions and detect differing sequence,
+operation, layout, generation or replicated reference data before payload
+collectives. Hard process death/device faults rely on c10d's finite timeout and
+torchrun peer termination. Real two-/three-process CPU tests include fatal rank
+termination; two-rank NCCL tests cover eight recoverable contract failures.
+
+The longer run found a real time-precision bug in the first process adapter:
+converting a float32 tensor dt to Python float changed accumulated time after
+three steps (0.0005999999848427251 versus 0.0005999999702908099), with the same
+24 RHS evaluations. The global MIN now preserves the original tensor dtype and
+scalar representation. The three-step regression, longer run and forcing-clock
+crossings retain exact time/stage/particle/W/history checks; no tolerance was
+relaxed. Failed longer-run logs and the short CPU reproduction are retained.
+
+An existing source-replay regression still patched only legacy `accumulateStage`
+even though native recomputation already bypassed it before this work. Its hook
+now spoils both storage paths, so the default actually performs the requested
+replay. Both 20-step source controls and all 57 focused existing native/source
+checks pass; this repair changes the test injection, not solver arithmetic.
+
+Qualified controls and evidence:
+
+|Control|Result|
+|---|---|
+|Separate-process CPU regression drivers, FP32/int32 and FP64/int64|5 pass each: two-/three-rank core, fatal peer death, two-/three-step solver comparisons|
+|Existing chunk/planner/operator/native/Monaghan CPU controls, each local offset width|332 pass, 251 expected CUDA skips per width|
+|Extended eager solver matrix|8 fixtures / 68 fresh RHS per rank, with 2D/3D, RK2/RK4, adaptive supports, source forcing and forced replay; Gloo FP32/FP64 and shared-GPU NCCL offset controls recorded|
+|NCCL 32-lane controls|Native work/replay remains bitwise against the corresponding single-process lane configuration|
+|Longer NCCL control, int64 FP32|16 accepted steps and 128 RHS per native scheme per rank; 16 forced rebuilds per scheme; 15 OU knots at interval 0.00025|
+|Existing native/source CPU compatibility|57 pass, including repaired source replay injection|
+|Runtime imports|563 frontend modules pass; inherited static scanner `wp_alpha.computeAlpha` failure remains unchanged|
+
+Particle fields, live owned W/J order, fresh stage rates, replay increments,
+simulated time and complete OU knot/generator histories match the serial oracle
+bitwise. Only regrouped FP64 global source-budget sums use the predeclared
+`rtol=atol=2e-12`. Accepted positivity and the existing relative energy-budget
+gate of 2e-6 pass. Longer-run residuals were approximately 5.04e-9 (CRKSPH) and
+3.51e-9 (CompSPH), with both ranks identical. The largest fixture is 216 particles;
+videos are omitted for these tiny A/B loops, with progress/stall monitoring kept.
+
+For all 16 accepted samples, per-rank Torch allocated bytes were constant within
+each scheme (about 64.1 MiB). These counters exclude native/driver allocations
+and are not process peaks or large-memory-fit evidence. Logical J/W ownership
+is recorded separately: in the 64-particle initial CRK fixture, rank 0 owns 35
+rows and 9,856 J-capacity bytes / 19,712 W-capacity bytes; the other rank owns the
+remaining rows. Aggregate same-GPU memory still includes every owner's pairs
+plus extra process/communication resources. No capacity scaling claim follows.
+
+Telemetry includes cumulative logical particle payload/control bytes, generation,
+partition and a bounded last-512-event ring of host local/enqueue and control/
+collective wall times. Exact replica hashes add CPU transfers and synchronization;
+the debug broadcasts prioritize correctness and bounded particle scratch. These
+times are diagnostic under ACSPH contention, not GPU compute/transport benchmarks.
+
+Maintained regressions live in core `tests/distributed/` and frontend
+`tests/{test_distributed.py,distributed/_solverWorker.py}`. Tiny flat references
+are explicit test oracles, released before the distributed solver phase; only
+small CPU oracle snapshots remain. Logs, per-rank manifests, source fingerprints,
+runtime-library provenance, failure records and reusable launch commands are in
+frontend `.tmp/distributed-poc-20261030/`. This includes the isolated NCCL 2.32.3
+wrapper used without changing the shared environment or ACSPH sources.
+
+Implementation provenance: core `44bccb9`; frontend is the commit containing this checkpoint.
+
+Next: physical multi-GPU/device/topology and Isambard launch/network qualification,
+then larger storage/capacity and performance gates. Distributed filtering,
+checkpoint/restart, other schemes, AD/graphs and walls/materials remain gated.
+
 
 ## Phase 5 — remaining schemes and compatibility
 

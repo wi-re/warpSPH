@@ -7,6 +7,15 @@ from ...enumTypes import EnergyScheme
 def checkChunkedStage(system, state, config, scheme, index, dt, family):
     pw = system.pairWork
     adjacency = pw.latest if pw is not None and pw.latest is not None else system.adjacency
+    if isinstance(adjacency, ChunkedAdjacency) and adjacency.communication is not None:
+        return adjacency.communication.localPhase('compatible:stage-contract',
+            lambda: _checkChunkedStage(system, state, config, scheme, index, dt, family))
+    return _checkChunkedStage(system, state, config, scheme, index, dt, family)
+
+
+def _checkChunkedStage(system, state, config, scheme, index, dt, family):
+    pw = system.pairWork
+    adjacency = pw.latest if pw is not None and pw.latest is not None else system.adjacency
     if not isinstance(adjacency, ChunkedAdjacency):
         return
     from ..mdbc._util import stateHasBoundaryParticles
@@ -26,8 +35,10 @@ def checkChunkedStage(system, state, config, scheme, index, dt, family):
         raise NotImplementedError('Chunked compatible wall work is not qualified.')
     if derivativeInputs(*vars(state).values(), dt):
         raise NotImplementedError('Chunked compatible work does not support AD.')
-    if adjacency.plan.numOwners != 1:
-        raise NotImplementedError('Chunked compatible work requires a complete single-owner list.')
+    if adjacency.communication is not None:
+        adjacency.communication.validateAdjacency(adjacency)
+    elif adjacency.plan.numOwners != 1:
+        raise NotImplementedError('Chunked compatible work requires a complete list or an explicit distributed process group.')
     ChunkedPairField._checkLayout(adjacency, (state.positions.shape[1],), state.positions.dtype)
 
 

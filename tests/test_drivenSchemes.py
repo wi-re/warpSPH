@@ -154,6 +154,21 @@ def test_compatible_replay_commits_sources_once(scheme, monkeypatch):
             count[0] += 1
     monkeypatch.setattr(crk, 'accumulateStage', spoiled)
     monkeypatch.setattr(comp, 'accumulateStage', spoiled)
+    # Native recomputation bypasses accumulateStage and writes W directly.
+    # Spoil that path too, otherwise the default route never exercises replay.
+    import warpSPH.modules.crk.work as crkWork
+    import warpSPH.modules.compSPH.work as compWork
+    def spoilShared(module, name):
+        accumulate = getattr(module, name)
+        def wrapped(system, state, update, config, schemeConfig, adjacency, correction, stageIndex, dt):
+            accumulate(system, state, update, config, schemeConfig, adjacency, correction, stageIndex, dt)
+            pw = system.pairWork
+            if stageIndex == 1 and pw.halfVelocity is None:
+                pw.consistent, pw.work = False, None
+                count[0] += 1
+        monkeypatch.setattr(module, name, wrapped)
+    spoilShared(crkWork, 'accumulateCRKWork')
+    spoilShared(compWork, 'accumulateCompWork')
     replay = configuration(scheme, 20, accelerationRMS=6.).run()
     assert count[0] == 20 and not replay.diverged
     double = normal.state.state.masses.dtype == torch.float64
