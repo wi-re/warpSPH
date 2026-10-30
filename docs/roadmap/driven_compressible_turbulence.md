@@ -988,3 +988,9 @@ The next infrastructure workspace is one paired frontend/core checkout, used
 sequentially for row chunks and then multi-GPU execution. There are no separate
 worktrees per phase. Keep the existing turbulence checkout for smaller physics
 investigations; no new long flow or chunked backend was run during integration.
+
+Prepared workspace: `/home/lu26029/.codex/worktrees/chunked-neighbors-multigpu/`
+contains frontend/core checkouts on`codex/chunked-neighbors-multigpu`, verified
+against integrated frontend`b9df6a6` and core`04e126e`. Both phases use this same
+workspace.421 focused integration checks pass,129 CPU/CUDA skips, zero failures;
+Phase1 planner is next. The original physics worktrees remain unchanged.

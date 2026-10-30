@@ -71,8 +71,16 @@ source content and both parents are recorded separately.
 
 ## Next step
 
-Prepare one paired implementation workspace from these integrated commits,
-verify isolated imports, then start the count/prefix/chunk planner. Native
+One paired implementation workspace is now prepared from these integrated
+commits: `/home/lu26029/.codex/worktrees/chunked-neighbors-multigpu/warpSPH` and
+sibling `warpSPHCore`, both on `codex/chunked-neighbors-multigpu`. Frontend base
+is `b9df6a6` (plus this documentation follow-up); core base is `04e126e`. Explicit
+per-process import checks resolve to these checkouts and core0.6.3, with results
+in `workspace-imports.json`. An initial restricted import could not write Numba
+caches inside the new checkout; using `/tmp` cache directories resolves that
+environment issue without code changes or global installation changes.
+
+The next action is the count/prefix/chunk planner. Native
 chunked execution precedes multi-GPU work in the same checkouts. Leave the
 existing turbulence checkout available for smaller single-GPU physics through
 128^3 after readiness checks; no turbulence campaign is launched here.

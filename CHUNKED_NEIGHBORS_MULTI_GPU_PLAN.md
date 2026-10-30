@@ -2,7 +2,7 @@
 
 Plan index: [PLANS.md](PLANS.md). Parent physics programme: [driven compressible turbulence](docs/roadmap/driven_compressible_turbulence.md).
 
-Status, 2026-10-30: **paired integration qualified; implementation workspace next**.
+Status, 2026-10-30: **paired integration qualified; implementation workspace ready**.
 The count/scan/ownership design is agreed in discussion. Core/main and frontend/dev
 are integrated; see the [integration report](docs/chunked_integration_2026-10-30.md).
 No chunked production backend, distributed runner or new simulation has been started.
@@ -13,14 +13,36 @@ the core carries a short companion pointer, `CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md
 
 1. The user authorized integration at ACSPH checkpoint `3d80e5e`. The paired
    merge and focused CPU/CUDA gates are complete; read the integration report.
-2. Create one paired implementation workspace from the integrated commits: one
-   frontend worktree and one sibling core worktree. Chunked neighbours first,
-   then multi-GPU execution continue sequentially in these same checkouts.
-3. Verify per-process import paths and start Phase1 with the count/prefix/chunk
-   planner and forced-small-chunk controls. Do not change global editable installs.
+2. Use the prepared paired workspace below. Chunked neighbours first, then
+   multi-GPU execution continue sequentially in these same checkouts.
+3. Imports have been verified with explicit source paths. Start Phase1 with the
+   count/prefix/chunk planner and forced-small-chunk controls. Do not change
+   global editable installs.
 4. Keep the existing turbulence worktree available for ordinary single-GPU
    physics through128^3, subject to a short readiness/memory check. No such
    campaign is scheduled or launched by this integration.
+
+## Prepared implementation workspace (2026-10-30)
+
+One paired workspace, used for the full sequential effort:
+
+|Repository|Checkout|Branch|Integrated base|
+|---|---|---|---|
+|Frontend|`/home/lu26029/.codex/worktrees/chunked-neighbors-multigpu/warpSPH`|`codex/chunked-neighbors-multigpu`|`b9df6a6` plus documentation follow-up|
+|Core|`/home/lu26029/.codex/worktrees/chunked-neighbors-multigpu/warpSPHCore`|`codex/chunked-neighbors-multigpu`|`04e126e`|
+
+The frontend managed worktree is attached to this task. Both imports resolve to
+these paths when their `src` directories are supplied explicitly in `PYTHONPATH`;
+core reports0.6.3. Bootstrap does not select checkouts. For restricted read-only
+import checks, use writable `NUMBA_CACHE_DIR`/`MPLCONFIGDIR` under`/tmp` rather than
+requiring cache writes inside a new checkout. No editable installs were changed.
+Set int64 offsets before imports when starting the wide-offset implementation;
+the ordinary integration baseline retained its default int32 offsets.
+
+The previous `meshless-boundary-balance` frontend/core worktrees remain intact
+on their existing branches for the smaller-turbulence physics track. No worker
+was launched there during this integration. The two phases do not get separate
+implementation worktrees.
 
 ## Pre-integration repository snapshot (2026-10-29; historical)
 
@@ -131,13 +153,13 @@ be bounded chunk-by-chunk, and distribution reduces owned pair bytes per GPU.
   according to the existing main/dev integration cadence.
 - [x] Record merged frontend/core SHAs, core version, test results and remaining
   failures. Do not change global editable installs under active physics jobs.
-- [ ] Create one paired implementation workspace from those integrated commits. Suggested
+- [x] Create one paired implementation workspace from those integrated commits. Suggested
   branch names are `codex/chunked-neighbors-multigpu` in both repositories; choose
   one frontend checkout and one sibling core checkout; record their absolute paths.
   Use both sequentially for chunks and multi-GPU, not one worktree per phase.
   Use managed frontend worktree creation/attachment and a paired core checkout;
   these names/paths are proposals, not already-created resources.
-- [ ] Verify imports explicitly: `warpSPH.__file__`, `warpSPHCore.__file__`,
+- [x] Verify imports explicitly: `warpSPH.__file__`, `warpSPHCore.__file__`,
   versions, offset dtype and both source hashes. Use explicit per-process import
   paths or an isolated environment; bootstrap selects precision, not repo paths.
   Keep plotting/integrator dependencies pinned as well.
