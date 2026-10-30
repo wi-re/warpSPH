@@ -434,10 +434,13 @@ communication and dependent kernels. Collectives exchange counts and owned
 particle outputs plus global timestep/rebuild/failure/source reductions; pair
 J/W stay on their owners. No distributed runner has been implemented yet.
 
-Local package inspection: Torch 2.13.0+cu130, NCCL 2.29.7, both NCCL and Gloo
-backends available. This installed NCCL does not support sharing one GPU among
-multiple ranks of the same communicator. The ordinary production/PyTorch
-contract requires exclusive GPU access per process in a communicator.
+Shared base package inspection: Torch 2.13.0+cu130, NCCL 2.29.7, both NCCL
+and Gloo backends available. Torch pins the NCCL wheel exactly to 2.29.7; that
+base does not support sharing one GPU among multiple ranks of the communicator.
+The user subsequently authorized an NCCL upgrade if useful for debugging.
+An isolated NCCL 2.32.3 runtime overlay is now installed and smoke-qualified below;
+the shared conda environment and existing physics jobs retain their original
+libraries. Production retains one process per GPU.
 
 NCCL **2.30+** documents an experimental exception:
 `NCCL_MULTI_RANK_GPU_ENABLE=1`. Each separate process must explicitly select the
@@ -446,22 +449,71 @@ NVIDIA expects up to two ranks per GPU with the default resource configuration;
 more/larger ranks may require lower NCCL_MAX_CTAS and can exhaust resources or
 hang. NVLS is incompatible with same-GPU ranks; the default auto setting disables
 it, while forcing NVLS on fails initialization. Separate rank threads in one
-process sharing that GPU are not supported by this feature. A compatible isolated
-PyTorch/NCCL stack and bounded smoke tests are needed before relying on it; no
-shared package installation is changed by this decision.
+process sharing that GPU are not supported by this feature. The isolated
+2.32.3 runtime override below passes the bounded PyTorch/Warp smoke; this is not
+a general compatibility qualification of every PyTorch/NCCL operation. No shared
+package installation is changed.
 
-Debug progression: first genuine multiple OS processes with Gloo and CPU
-tensors; then, if desired, shared-GPU Warp compute with explicit CPU staging for
-Gloo exchanges; optionally test experimental same-GPU NCCL after a compatible
-stack is available. These exercise rank sequencing, uneven/empty ownership,
-collective payloads and failure handling. A single-rank NCCL smoke checks API
-plumbing only. Real two-/four-GPU NCCL qualification is still required for device
-separation, transport, stream ordering and performance on the target topology.
+Local debug choices now include the tested two-process/one-GPU NCCL 2.32.3
+runtime and a future Gloo CPU transport for device-independent process/failure
+tests. A single-rank NCCL smoke checks API plumbing only. Real two-/four-GPU NCCL
+qualification is still required for device separation, transport, stream ordering
+and performance on the target topology.
 
 Sources: [PyTorch distributed process groups](https://docs.pytorch.org/docs/stable/distributed.html),
 [NVIDIA same-GPU rank support and limits](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html#nccl-multi-rank-gpu-enable).
 The specific experimental switch qualifies the otherwise general prohibition in
 the communicator/PyTorch documentation; do not assume it exists in older stacks.
+
+### Isolated NCCL upgrade and shared-GPU smoke (2026-10-30)
+
+Installed the official `nvidia-nccl-cu13==2.32.3` wheel with `--no-deps --target`
+into frontend `.tmp/nccl-shared-gpu-20261030/overlay`. No shared Python or editable
+package was replaced. `with-nccl-2.32.sh` prepends that overlay to PYTHONPATH and
+preloads its `libnccl.so.2` for the launched Python process and its children.
+Both settings matter: PyTorch eagerly preloads native libraries by searching
+sys.path, so preloading alone also mapped the original NCCL. The final wrapper
+verifies/uses a single mapped NCCL library from the overlay. It selects the native
+runtime only; continue to set the paired frontend/core source paths explicitly
+in PYTHONPATH when running SPH code.
+
+`torch.cuda.nccl.version()` still reports the **build-time** 2.29.7 for this Torch
+binary. The real loaded runtime was independently verified with `ncclGetVersion`
+(23203), /proc/self/maps (one overlay library), and NCCL's communicator-init log
+(2.32.3). A fresh process without the wrapper still loads only base NCCL 2.29.7.
+The shared package dependency pin remains satisfied; this is an explicitly
+selected experimental native-runtime override, not a replacement Torch build.
+
+Ran torchrun with two separate OS processes, both explicitly selecting cuda:0.
+Distinct PIDs and the same physical GPU UUID are recorded. Settings were
+`NCCL_MULTI_RANK_GPU_ENABLE=1`, `NCCL_MIN_CTAS=1`, `NCCL_MAX_CTAS=2`, and
+`NCCL_NVLS_ENABLE=0`, with a 20-second process-group timeout and 60-second outer
+timeout. No MPS configuration or system library changes were made.
+
+Both ranks passed all seven check groups:
+
+- Uneven int32 count all-gather and replicated int64 prefix reconstruction.
+- Padded owned particle-field all-gather.
+- Global MIN timestep, MAX rebuild flag, SUM over unique owned particles.
+- Broadcast.
+- Int64 reduce-scatter.
+- Batched point-to-point send/receive.
+- Warp producer -> asynchronous NCCL all-reduce -> Warp consumer on a nondefault
+  Torch CUDA stream, five exact repetitions.
+
+Per-rank probe time was about 1.38 seconds excluding Python/torchrun startup;
+this is a correctness fixture, not a benchmark. Torch allocator counters in the
+reports exclude NCCL/native/driver allocations and are not process memory peaks.
+Local optional IB/RMA plugin warnings fell back successfully; this run does not
+test Isambard networking. No SPH solver or new flow campaign was run. The Phase4
+runner/collective scheduling and physical multi-GPU gates remain unimplemented.
+
+Re-run using the executable frontend
+`.tmp/nccl-shared-gpu-20261030/run-nccl-shared-gpu-smoke.sh`.
+The same directory contains the wrapper, smoke/verifier/summary scripts,
+smoke.log, per-rank JSON, base/overlay provenance and summary.json with a library
+SHA256. This runtime is now available for the subsequent distributed backend work.
+The package source is [NVIDIA NCCL CUDA13 on PyPI](https://pypi.org/project/nvidia-nccl-cu13/2.32.3/).
 
 ## Phase 5 — remaining schemes and compatibility
 
