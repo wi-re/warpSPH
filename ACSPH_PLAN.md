@@ -12,6 +12,17 @@ priority decision does not start new runs or change numerical defaults.
 ## Lobovsky comparison — 2026-10-27 (active)
 
 
+**First pressure-recorded full run complete (2026-10-30):** baseline
+reaches7641 steps /1.5300141245717327s, exits0 with no stop reason, in5735.77s
+(95.60min wall). Completed pressure video retrieved and SHA256 verified:
+7642 contiguous frames including t=0 and endpoint,1920px/60fps,115,682,869bytes,
+fixed±8kPa symlog. All7642 scalar progress rows match the previous completed
+baseline exactly, and the full endpoint binary snapshot is bitwise identical;
+recording did not change this trajectory. Receipt:00-michel-baseline/
+replay-parity.json. Automatic baseline analysis completed. Full-Taylor-remap
+row01 is now running at about t=0.975/1.530s with pressure recording active;
+row02 remap+BDF remains queued. No numerical settings changed.
+
 **Pressure-recorded campaign running (2026-10-30):** user initially
 reloaded fluids.dev, which still had the hosted build; switching the live
 connection to the updated local viewer resolved the queued job. All8 GPU gates
