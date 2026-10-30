@@ -12,6 +12,23 @@ priority decision does not start new runs or change numerical defaults.
 ## Lobovsky comparison — 2026-10-27 (active)
 
 
+**Daemon-requested viewer video — scoped (2026-10-30, user):** user proposes
+an external recording intent relayed through the daemon to its connected viewer,
+including requested scene settings. Read-only inspection of warpSPHRemote confirms
+existing synchronized producer capture, per-step cadence, viewer ACK gating,
+pressure presets and browser WebCodecs encoder. Missing pieces are an externally
+requestable recording job, viewer consumption/status of that job, and returning
+the encoded artifact to daemon storage rather than only a browser download.
+Proposed job binds run ID plus preset/range/camera, capture cadence/window and
+encoding settings; viewer acknowledges capability/readiness before synchronized
+capture activates. Track queued/preparing/recording/saving/completed/failed or
+cancelled; expose recorded start/end times and missed requested start explicitly.
+Completed video and scene/time provenance should be retrievable by job ID. Reuse
+the existing attached viewer and encoder, preserving lease ownership and explicit
+capture-hold recovery. No viewer means visibly queued, not active capture. This
+is a design scope, not an implemented endpoint or started video; no companion
+code, daemon process or current simulation changed.
+
 **Shifting consistency and event video (2026-10-30, user):** disorder may
 couple pressure waves back into particle motion if artificial displacement is
 not accompanied by field transport and consistent time history. This is the
