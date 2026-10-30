@@ -12,6 +12,18 @@ priority decision does not start new runs or change numerical defaults.
 ## Lobovsky comparison — 2026-10-27 (active)
 
 
+**dynGPUSPH pressure movies rendered (2026-10-30, user):** rendered retained
+FP64 snapshots with scripts/acsph_reference/render_pressure.py (VisPy/EGL,
+fixed ±8 kPa signed-log colors, timestamped, no temporal interpolation).
+Outputs under the pressure-recorded root's dyngpusph-pressure-fields/:
+dyngpusph-pressure-full.mp4 (0–1.700151 s,172 frames,2560×1800,12 fps) and
+dyngpusph-pressure-return-impact.mp4 (1.180116–1.700151 s,54 frames,2560×1440,
+6 fps). Per-frame source/time receipts accompany both. Full decoder frame counts
+match receipts; initial and return-impact frames inspected. Coplanar marker
+depth testing is disabled so antialiased sprite overlap does not create false
+holes. Native spatial cadence remains approximately10 ms; no new simulation.
+
+
 **Separate shared waves from excess breakup (2026-10-30, user):** shared
 negative-pressure wakes belong to the method/reference research question;
 priority is the much greater breakup introduced by full Taylor transport.
