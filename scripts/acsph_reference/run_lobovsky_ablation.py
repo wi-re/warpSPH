@@ -17,6 +17,7 @@ def main():
     ap.add_argument('--michel-trial',choices=('baseline','transport','bdf','oracle'))
     ap.add_argument('--steps',type=int,default=7641)
     ap.add_argument('--eager',action='store_true')
+    ap.add_argument('--daemon',action=argparse.BooleanOptionalAction,default=None,help='Native daemon publisher; default on for long runs')
     ap.add_argument('--plot-interval',type=int,default=10)
     args=ap.parse_args()
     if args.michel_trial:
@@ -115,7 +116,13 @@ def main():
                 assert torch.equal(system.state.ghostOffsets,ctx.scratch['ablationOffsets'])
             if args.steps>=100 and (step+1 in milestones or step+1==args.steps or (step+1>=6000 and (step+1)%200==0)):
                 checkpoint(ctx,system,step+1,archive=step+1 in milestones)
-        return original_run(replace(case,configureScheme=configured,initialConditions=initialized,postStep=after),**kwargs)
+        prepared=replace(case,configureScheme=configured,initialConditions=initialized,postStep=after)
+        from live_run import daemon_enabled,run_published
+        if daemon_enabled(args.steps,args.daemon):
+            import warpsph_remote
+            assert Path(warpsph_remote.__file__).resolve().is_relative_to(runtime)
+            return run_published(original_run,prepared,name='ACSPH Lobovsky '+row['id'],out=out,**kwargs)
+        return original_run(prepared,**kwargs)
     runner.run=run
     script=runtime/'scripts/acsph_reference/compare_lobovsky.py'
     sys.argv=[str(script),'--reference',str(args.reference.resolve()),'--out',str(out),

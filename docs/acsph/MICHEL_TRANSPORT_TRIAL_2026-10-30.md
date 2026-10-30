@@ -141,3 +141,47 @@ The original-IC Michel baseline has started. The unchanged supervisor then runs
 the full Taylor transport and BDF-corrected candidates serially, with per-row
 analysis, progress, videos, checkpoints and explicit failure receipts. Long-run
 outcomes remain pending. Current state is in the integrated root's status.json.
+
+## Native viewer daemon restart — 2026-10-30
+
+User requested daemon connection as the default for long runs and explicitly
+allowed restarting the elapsed baseline. The previous integrated campaign was
+cancelled through its owned supervisor and its accepted prefix through
+approximately0.147s remains unchanged. This is an intentional viewing restart,
+not a numerical failure. Its source, videos, snapshots and first qualification
+remain retained.
+
+New root: `.tmp/acsph-michel-live-2026-10-30/`. The runtime also freezes the
+native `warpsph_remote` adapter. Long fixture trajectories register by default
+(`--no-daemon` is an explicit opt-out); short preflights stay unregistered except
+for a dedicated daemon-on/off bitwise control. All old case hooks, physical
+settings, snapshots and VisPy recordings remain. No external observer injects
+into the solver and no restart checkpoint approximates the original IC.
+
+Native publication runs after accepted steps, supplies particle snapshots on
+viewer request and retains `daemon-run.json` (public ID/name/endpoint/PID only).
+A separate atomic status receipt lets the supervisor exclude viewer-paused time
+from its wall/stall budgets. Stop from the daemon cancels the campaign rather
+than silently launching the next candidate. Registration failures are explicit.
+The seven GPU controls include a daemon-on3-step baseline required to match
+its daemon-off snapshot bitwise.26 CPU checks pass. A temporary no-takeover
+viewer verification attempts a real numerical packet without displacing an
+existing viewer; it releases its own lease afterwards.
+
+The three live names are `ACSPH Lobovsky 00-michel-baseline`,
+`ACSPH Lobovsky 01-michel-transport` and `ACSPH Lobovsky 02-michel-bdf`.
+Each registers when its trajectory starts. The daemon runs at
+`http://127.0.0.1:8766`; use the viewer's Running simulations list. Enabling
+Automatically watch new simulations follows the next case. Existing browser
+pairing is reused; no credential is written to campaign receipts.
+
+The default-long-run policy is recorded in root CLAUDE.md.
+
+### Viewer connection verified
+
+All seven GPU gates pass, including daemon-on/off bitwise snapshot parity.
+The dedicated verification did not take over the existing viewer. The daemon
+subsequently reports the physical baseline active, visualized and publishing
+numerical frames; the user's viewer is already attached. Public run identity
+is retained in `00-michel-baseline/daemon-run.json`. The two following physical
+rows register automatically. No pairing/producer token is exposed in receipts.

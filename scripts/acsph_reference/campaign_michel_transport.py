@@ -39,6 +39,12 @@ def main():
                 status=subprocess.check_output(['git','status','--short'],cwd=path,text=True))
         assert Path(repositories['warpSPHCore']['path']).resolve()==repo.parent/'warpSPHCore'
         freeze_runtime(root)
+        remote=Path(importlib.util.find_spec('warpsph_remote').origin).parent
+        shutil.copytree(remote,root/'source/src/warpsph_remote',ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
+        remote_repo=remote.parent.parent
+        repositories['warpsph_remote']=dict(path=str(remote_repo),commit=subprocess.check_output(
+            ['git','rev-parse','HEAD'],cwd=remote_repo,text=True).strip(),
+            status=subprocess.check_output(['git','status','--short'],cwd=remote_repo,text=True))
         shutil.copy2(__file__,root/'controller.py')
         m=dict(prepared=now(),repo=str(repo),source=str(root/'source'),targetSteps=7641,
             targetTime=original['targetTime'],reference=original['reference'],native=original['native'],
@@ -73,23 +79,29 @@ def main():
     env=os.environ.copy();env.update(PYTHONUNBUFFERED='1',OMP_NUM_THREADS='4',OPENBLAS_NUM_THREADS='4',
         WARP_CACHE_PATH='/tmp/acsph-parity-repair-cache',MPLCONFIGDIR='/tmp/acsph-parity-mpl',
         PYTHONPATH=str(source/'src')+os.pathsep+str(source/'scripts/acsph_reference'))
-    def command(name,path,steps=7641,eager=False):
+    def command(name,path,steps=7641,eager=False,daemon=None):
         cmd=[py,'-u',source/'scripts/acsph_reference/run_lobovsky_ablation.py',
             '--runtime',source,'--reference',m['reference'],'--out',path,'--michel-trial',name,'--steps',steps]
         if eager:cmd.append('--eager')
+        if daemon is not None:cmd.append('--daemon' if daemon else '--no-daemon')
         return list(map(str,cmd))
     def run(name,cmd,path=None,physical=False,allow_failure=False):
         verify();check()
         if physical:
             while gpu_users():save(phase='waiting for GPU: '+name);check();time.sleep(15)
         phase=dict(name=name,command=list(map(str,cmd)),started=now());state['phases'].append(phase)
-        tick=last=time.monotonic();last_t=-1.;reason=None
+        tick=last=time.monotonic();last_t=-1.;reason=None;paused_seconds=0.;observed=tick
         with (root/(name+'.log')).open('xb') as log:
             child=subprocess.Popen(phase['command'],cwd=source,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
             phase['pid']=child.pid;save(phase=name,child_pid=child.pid)
             try:
                 while child.poll() is None:
-                    time.sleep(5);check();elapsed=time.monotonic()-tick
+                    time.sleep(5);check();moment=time.monotonic()
+                    remote=json.loads((path/'daemon-status.json').read_text()) if path and (path/'daemon-status.json').exists() else {}
+                    paused=remote.get('status')=='paused'
+                    if paused:paused_seconds+=moment-observed;last=moment
+                    observed=moment;elapsed=moment-tick
+                    phase['paused_seconds']=paused_seconds
                     if physical and path and (path/'progress.jsonl').exists():
                         p=path/'progress.jsonl'
                         with p.open('rb') as f:
@@ -101,8 +113,8 @@ def main():
                             if r['t']>last_t:last_t=r['t'];last=time.monotonic()
                             if not math.isfinite(r['t']) or not math.isfinite(r['maxVelocity']) or r['maxVelocity']>100:
                                 reason='nonfinite/speed>100m/s';break
-                    if elapsed>(14400 if physical else 1800):reason='wall limit';break
-                    if physical and time.monotonic()-last>300:reason='clock stalled300s';break
+                    if elapsed-paused_seconds>(14400 if physical else 1800):reason='wall limit';break
+                    if physical and not paused and time.monotonic()-last>300:reason='clock stalled300s';break
                     phase['wall_seconds']=elapsed;save()
             finally:
                 if child.poll() is None:phase['terminated_owned_pids']=terminate_owned_tree(child.pid)
@@ -136,12 +148,19 @@ def main():
         for row in m['rows'][1:]:
             path=q/(row['id']+'-eager');run('eager-'+row['id'],command(row['id'].split('-')[-1],path,3,True),path,True)
             assert (path/'snapshots/000003.bin').read_bytes()==(q/row['id']/'snapshots/000003.bin').read_bytes()
+        # Publication must preserve the exact accepted trajectory as well.
+        path=q/'daemon-baseline'
+        run('qualify-daemon-baseline',command('baseline',path,3,daemon=True),path,True);qualifies(path)
+        assert (path/'snapshots/000003.bin').read_bytes()==(q/m['rows'][0]['id']/'snapshots/000003.bin').read_bytes()
+        assert (path/'daemon-run.json').exists()
         atomic(root/'qualification.json',dict(complete=True,finished=now(),allPhysicalICsBitwise=True,
-            baselinePlumbingOracleBitwise=True,allGraphsActive=True,transportBDFGraphEagerBitwise=True))
+            baselinePlumbingOracleBitwise=True,allGraphsActive=True,transportBDFGraphEagerBitwise=True,daemonSnapshotBitwise=True))
         for row in m['rows']:
             path=root/row['id'];phase=run('physical-'+row['id'],command(row['id'].split('-')[-1],path),path,True,True)
             atomic(path/'campaign-row-status.json',phase)
             if phase['returncode'] or phase['stop_reason']:
+                remote=json.loads((path/'daemon-status.json').read_text()) if (path/'daemon-status.json').exists() else {}
+                if remote.get('status')=='stopped':raise InterruptedError('Campaign stopped from daemon')
                 result=json.loads((path/'result.json').read_text()) if (path/'result.json').exists() else {}
                 receipt=json.loads((path/'failure/receipt.json').read_text()) if (path/'failure/receipt.json').exists() else {}
                 known=bool(phase['stop_reason'] or result.get('diverged') or receipt.get('error','').startswith(('Reference solve exceeded certified candidate motion:','Nonfinite dynGPUSPH reference residual')))

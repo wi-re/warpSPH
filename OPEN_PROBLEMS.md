@@ -618,6 +618,18 @@ step (none found: `dambreak` and the other graph cases set theirs once); a gener
 
 ## 36. ACSPH Lobovsky local/native convergence gap (2026-10-27)
 
+**Native viewer verified (2026-10-30):**26 CPU/seven GPU gates pass, including
+daemon-on/off bitwise parity. Restarted baseline is registered, existing viewer
+attached and numerical frames delivered. Long-run daemon default and pause-aware
+watchdogs implemented; following transport/BDF rows register as they start.
+
+**Viewer restart (2026-10-30, user):** previous Michel prefix through~0.147s
+preserved; intentional restart with native daemon publication, not numerical
+failure.26 CPU checks pass; daemon-on/off bitwise GPU gate precedes original-IC
+long rows. New root .tmp/acsph-michel-live-2026-10-30/. Default long-run policy
+is in CLAUDE.md; pause-aware external watchdogs retain normal viewer controls.
+
+
 **Post-merge gates passed; Michel baseline running (2026-10-30):**22 CPU
 checks and all6 serial3-step GPU preflights pass. Integrated oracle snapshot
 matches retained accepted-fields endpoint bitwise; physical ICs identical;

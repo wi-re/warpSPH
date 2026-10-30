@@ -12,6 +12,27 @@ priority decision does not start new runs or change numerical defaults.
 ## Lobovsky comparison — 2026-10-27 (active)
 
 
+**Native daemon running and verified (2026-10-30):**26 focused CPU checks
+and all7 GPU preflights pass, including daemon-on/off bitwise snapshot parity.
+Native baseline restarted from original ICs, registered as
+`ACSPH Lobovsky 00-michel-baseline`; daemon confirms the existing viewer attached
+and frames delivered (no takeover). The next transport/BDF rows register when
+they start. Frozen runtime991 files includes the viewer adapter. Atomic status
+receipts suspend external watchdog budgets while paused; daemon stop cancels
+the campaign. Long fixture runs default to native publication, short fixtures
+opt-in; policy in CLAUDE.md. Public run ID/endpoint only in receipts. Previous
+prefix preserved; no new model/default/solve threshold changes. Live root:
+`.tmp/acsph-michel-live-2026-10-30/`.
+
+**Native daemon restart requested (2026-10-30, user):** register long runs
+by default and restart the short elapsed Michel baseline with the native
+completed-step publisher. Prior accepted prefix preserved through~0.147s;
+owned supervisor cancelled, no solver failure attribution. Add publication
+without runner recursion, freeze the adapter, retain public run IDs, and
+respect viewer pauses in external watchdogs. Requalify daemon-on versus
+daemon-off bitwise before the full original-IC three-row sequence. No numeric
+settings changed. Default recorded in CLAUDE.md.
+
 **Post-merge gates passed; Michel baseline running (2026-10-30):**22 CPU
 checks and all6 serial3-step GPU preflights pass. Integrated oracle snapshot
 matches retained accepted-fields endpoint bitwise; physical ICs identical;

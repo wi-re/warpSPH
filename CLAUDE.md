@@ -85,7 +85,16 @@ These apply to **every** run, including throwaway inline probes that call
    each other down. Chain them (`a; b; c`) in one tracked background task —
    no detached `( ... &)` children. Use `setsid nohup` only when a run must
    survive a session restart, and say so.
-5. **Look at performance.** Report wall time and ms/step with every run (the
+5. **Register long runs with the viewer daemon by default (user, 2026-10-30).**
+   Use the native `warpsph_remote.publisher` completed-step adapter, preserving
+   existing hooks, video and diagnostics. Register each trajectory as it starts;
+   retain its non-secret run ID/endpoint. Short numerical fixtures need not
+   register unless testing the adapter. Daemon pauses must suspend external
+   wall/stall budgets. Preserve frozen sources, including the viewer adapter;
+   never inject into a running solver. An explicit opt-out is allowed when the
+   user requests it. Report registration failures rather than silently omitting
+   the viewer on a long campaign.
+6. **Look at performance.** Report wall time and ms/step with every run (the
    progress rows and the completion report give both) and compare with the last
    figure for the same case; reference: Marrone 3.1 nx 67 to t\* 7.68, video on,
    defaults, 108.7 s (5.6 ms/step), `docs/historic_plans/SMALL_PROBLEM_PERFORMANCE.md` §1.
