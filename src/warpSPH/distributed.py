@@ -48,8 +48,8 @@ def distributedRunStart(ctx, system):
         if getattr(ctx.scheme, 'name', ctx.scheme) not in ('Monaghan','CRKSPH','CompSPH'):
             raise NotImplementedError('Distributed row chunks initially support eager Monaghan/CRKSPH/CompSPH only.')
         if (ctx.scratch.get('execution') != 'eager' or ctx.spec.store or ctx.spec.plot
-            or ctx.spec.video or ctx.spec.resumeFrom):
-            raise NotImplementedError('Distributed proof of concept requires eager execution with output/checkpoint hooks disabled.')
+            or ctx.spec.video or (ctx.spec.resumeFrom and not ctx.scratch.get('_rowChunkRestartVerified'))):
+            raise NotImplementedError('Distributed proof of concept requires eager execution, automatic output disabled and validated chunked resume.')
         return (getattr(ctx.scheme, 'name', ctx.scheme), ctx.spec.nSteps, ctx.spec.tLimit,
                 str(ctx.spec.integrationScheme), str(ctx.schemeConfig),
                 ctx.spec.stallDtSteps, ctx.spec.stallProgress)

@@ -348,13 +348,18 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         # The spec must describe the SAME configuration the checkpoint was
         # written under (nx, params, scheme, ...); a mismatch loads a state
         # whose shapes/geometry don't match what the rest of the run expects.
-        import h5py
-        from ..io.hdf5 import loadState
-        with h5py.File(spec.resumeFrom, 'r') as f:
-            system.state = loadState(f['state'], ctx.config.device, type(system.state))
-            system.t = float(f.attrs['time'])
-            if case.restoreCheckpoint is not None:
-                case.restoreCheckpoint(ctx, system, f)
+        from warpSPHCore.radiusSearch import ChunkedAdjacency
+        if isinstance(system.adjacency, ChunkedAdjacency):
+            from ..io.chunkCheckpoint import restoreChunkedCheckpoint
+            restoreChunkedCheckpoint(spec.resumeFrom, ctx, system)
+        else:
+            import h5py
+            from ..io.hdf5 import loadState
+            with h5py.File(spec.resumeFrom, 'r') as f:
+                system.state = loadState(f['state'], ctx.config.device, type(system.state))
+                system.t = float(f.attrs['time'])
+                if case.restoreCheckpoint is not None:
+                    case.restoreCheckpoint(ctx, system, f)
         if not spec.quiet:
             print(f'-- resumed from {spec.resumeFrom} '
                  f'(t={system.t:.6f}, step offset {spec.resumeStepOffset}) --')
@@ -540,6 +545,7 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         steps = ()
 
     for i in steps:
+        ctx.scratch.pop('_rowChunkAccepted', None)
         if rowCommunication is not None:
             ctx.config.dt = distributedStepStart(ctx, runningState, rowCommunication)
         # Previous outputs have consumed their stage data. Release it before
@@ -597,6 +603,8 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
                 ctx.config.dt = case.timestep(ctx, runningState)
         if rowCommunication is not None:
             distributedStepEnd(ctx, runningState, rowCommunication, absStep)
+        from ..io.chunkCheckpoint import markCheckpointBoundary
+        markCheckpointBoundary(ctx, runningState, absStep + 1)
 
         # the step time and max |v| (non-finite check, velocity alarm) in one host transfer
         with record_function("[runner] read time + max speed (non-finite check, velocity alarm)"):
