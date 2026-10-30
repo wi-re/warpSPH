@@ -12,6 +12,14 @@ priority decision does not start new runs or change numerical defaults.
 ## Lobovsky comparison — 2026-10-27 (active)
 
 
+**Side-by-side full pressure movie (2026-10-30, user):** combined dynGPUSPH
+FP64 (left) and current warpSPH Michel baseline, Taylor/BDF-shift off (right),
+in video-comparison/dyngpusph-vs-warpsph-baseline-full.mp4. Verified identical
+source-frame clocks and render settings, trimmed native to shared1.530014 s
+endpoint. Decoded154 frames at12 fps,5120×1800; late combined frame inspected.
+Source paths, clocks and decoder metadata retained in adjacent JSON. No new run.
+
+
 **Comparable Michel baseline movies (2026-10-30, user):** rendered the current
 00-michel-baseline (full_remap=false,bdf_shift=false) with the same VisPy
 renderer, camera bounds, ±8 kPa signed-log scale, dimensions and playback rates
