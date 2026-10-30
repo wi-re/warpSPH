@@ -2,10 +2,11 @@
 
 Plan index: [PLANS.md](PLANS.md). Parent physics programme: [driven compressible turbulence](docs/roadmap/driven_compressible_turbulence.md).
 
-Status, 2026-10-30: **paired integration qualified; implementation workspace ready**.
+Status, 2026-10-30: **Phase 1 CPU reference planner qualified; Phase 2 next**.
 The count/scan/ownership design is agreed in discussion. Core/main and frontend/dev
 are integrated; see the [integration report](docs/chunked_integration_2026-10-30.md).
-No chunked production backend, distributed runner or new simulation has been started.
+The CPU reference planner is implemented and tested. Production chunk collection,
+distributed execution and physical multi-GPU qualification remain open.
 This document is the canonical implementation/handoff plan for both repositories;
 the core carries a short companion pointer, `CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md`.
 
@@ -13,25 +14,29 @@ the core carries a short companion pointer, `CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md
 
 1. The user authorized integration at ACSPH checkpoint `3d80e5e`. The paired
    merge and focused CPU/CUDA gates are complete; read the integration report.
-2. Use the prepared paired workspace below. Chunked neighbours first, then
+2. Use the active paired workspace below. Chunked neighbours first, then
    multi-GPU execution continue sequentially in these same checkouts.
-3. Imports have been verified with explicit source paths. Start Phase1 with the
-   count/prefix/chunk planner and forced-small-chunk controls. Do not change
-   global editable installs.
+3. Phase1 is CPU-qualified. Start Phase2 with direct owned-row count/collection
+   and a chunked adjacency container, preserving traversal and acceptance rules.
+   Use explicit source paths; do not change global editable installs.
 4. Keep the existing turbulence worktree available for ordinary single-GPU
    physics through128^3, subject to a short readiness/memory check. No such
    campaign is scheduled or launched by this integration.
 
-## Prepared implementation workspace (2026-10-30)
+## Active implementation workspace (2026-10-30)
 
 One paired workspace, used for the full sequential effort:
 
 |Repository|Checkout|Branch|Integrated base|
 |---|---|---|---|
-|Frontend|`/home/lu26029/.codex/worktrees/chunked-neighbors-multigpu/warpSPH`|`codex/chunked-neighbors-multigpu`|`b9df6a6` plus documentation follow-up|
-|Core|`/home/lu26029/.codex/worktrees/chunked-neighbors-multigpu/warpSPHCore`|`codex/chunked-neighbors-multigpu`|`04e126e`|
+|Frontend|`/home/lu26029/.codex/worktrees/chunked-neighbor-planner/warpSPH`|`codex/chunked-neighbor-planner`|`8b58008`|
+|Core|`/home/lu26029/.codex/worktrees/chunked-neighbor-planner/warpSPHCore`|`codex/chunked-neighbor-planner`|`04e126e`|
 
-The frontend managed worktree is attached to this task. Both imports resolve to
+The originally prepared `chunked-neighbors-multigpu` workspace is owned by
+another chat and was left intact. The user requested a new worktree; this chat
+created the active managed frontend workspace and its paired core checkout from
+the same integrated commits. The frontend managed worktree is attached to this
+chat. Both imports resolve to
 these paths when their `src` directories are supplied explicitly in `PYTHONPATH`;
 core reports0.6.3. Bootstrap does not select checkouts. For restricted read-only
 import checks, use writable `NUMBA_CACHE_DIR`/`MPLCONFIGDIR` under`/tmp` rather than
@@ -170,19 +175,72 @@ Do not reverse-sync or archive it while a source-pinned physics worker is active
 
 ## Phase 1 — deterministic planner (core, CPU first)
 
-- [ ] Implement immutable generation/partition metadata and deterministic
+- [x] Implement immutable generation/partition metadata and deterministic
   whole-row boundary selection from C/P, with separate counting and compute owners.
   Ownership policy/version, edge/byte budget and capacity rules are explicit.
-- [ ] Test empty populations/rows, zero-work ranks, strongly uneven counts,
+- [x] Test empty populations/rows, zero-work ranks, strongly uneven counts,
   exact-budget boundaries, oversized rows, capacity padding and deterministic
   replica agreement. Exercise total prefixes>INT_MAX with metadata-only fixtures,
   without allocating billions of edges. Test exact local/global reconstruction.
-- [ ] Proposed configuration roles: backend flat|rowChunks, edge/byte budget,
-  device assignment and existing neighbour-lane setting. Final names follow
-  repository conventions; flat/default behaviour remains unchanged initially.
+- [x] Planner-local `RowChunkPolicy` exposes edge/byte budgets, exact rational
+  headroom, alignment, scalar work extents and optional row caps. Compute owners
+  are logical ranks. Production backend/device selection remains a Phase2/4 task;
+  the flat API, global defaults and existing neighbour lanes are unchanged.
 
 Exit: exhaustive row coverage once, no row split, bounded local capacity,
 identical partition on all replicas. This phase is independently reviewable.
+
+### Qualified implementation and limits (2026-10-30)
+
+Core `src/warpSPHCore/radiusSearch/rowChunks.py` provides `RowChunkGeneration`,
+`RowChunkPolicy`, `RowChunkPlan` and `buildRowChunkPlan`. Rebuild configuration
+signatures are supplied by the caller and must cover ordering, reference state,
+supports, domain, grid/search settings and stored-list acceptance. The plan digest
+also includes every count/prefix, generation, capacity policy and ownership map;
+`validateSignature` rejects disagreement before future local allocation.
+
+The CPU reference consumes an explicitly assembled CPU int32 count vector,
+snapshots its prefix into immutable Python integers and materializes CPU int64
+global/local offsets regardless of the flat default. It allocates no edge arrays.
+Counting ownership balances contiguous row intervals; compute ownership balances
+contiguous chunk counts (`contiguous-balanced-chunks-v1`), with empty owners
+allowed. This is deterministic, not a measured optimal load balancer. Greedy
+chunks retain zero-neighbour rows and never split an oversized row; such a row raises an
+explicit error. Budgets include ceil-rounded rational headroom and alignment,
+and conservatively bound the largest flattened scalar work array by INT_MAX.
+Callers must account for every colocated pair buffer in bytesPerEdge. Particle
+fields, row metadata, grids and communication staging need separate accounting.
+
+This is a host reference for the ownership contract, not the production replicated
+device scan or a large-N memory/performance qualification. No CLI/backend switch,
+chunked search, resident adjacency, graph/AD integration or distributed transport
+has been enabled. Physical CUDA accesses above INT_MAX remain unqualified.
+
+Validation: 59 planner controls (including 1024 exhaustive small count layouts)
+pass in both offset configurations. Combined with the existing index-width,
+CSR-only, split-collection, query-order and Verlet-validity suites, the int64 run
+passes 160/skips 89 in 2.75 s; default int32 passes 159/skips 90 in 2.76 s, zero failures.
+Skips are CUDA controls and int64-only cases. These are unit fixtures, not
+simulations; no video or GPU workload was started. Imports are explicitly pinned
+to this paired workspace; core remains 0.6.3, with shared installs unchanged.
+
+Reproduce from the core checkout with `/home/lu26029/miniconda3/envs/warp/bin/python`,
+`PYTHONPATH` set to the two active checkout `src` paths, `CUDA_VISIBLE_DEVICES=''`,
+`OMP_NUM_THREADS=2`, `PYTHONDONTWRITEBYTECODE=1`, writable `NUMBA_CACHE_DIR` and
+`MPLCONFIGDIR`, and `warpSPHCore_OFFSET_DTYPE=int32` or `int64` set before import:
+
+```bash
+python -m pytest -q -p no:cacheprovider \
+  tests/radiusSearch/test_rowChunks.py tests/radiusSearch/test_indexDtypes.py \
+  tests/radiusSearch/test_csrOnly.py tests/radiusSearch/test_splitCollection.py \
+  tests/radiusSearch/test_queryOrder.py tests/radiusSearch/test_verletValidity.py
+```
+
+Local evidence/provenance: frontend `.tmp/row-chunk-planner-20261030/`.
+Core implementation commit: `9a1057e` (on integrated base `04e126e`). Paired
+source pins are recorded in `workspace-imports.json`; frontend's handoff commit
+follows this core commit. Next: direct count/collect
+into per-chunk J, with exact flat-oracle row parity, reuse and invalidation gates.
 
 ## Phase 2 — direct chunk collection and lifecycle (core, one GPU)
 
