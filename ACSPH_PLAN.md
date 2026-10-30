@@ -12,6 +12,37 @@ priority decision does not start new runs or change numerical defaults.
 ## Lobovsky comparison — 2026-10-27 (active)
 
 
+**Pressure-wave video comparison (2026-10-30):** decoded every accepted-step
+frame over 1.179934–1.530014 s (1934 frames per row), with exact matching frame
+manifests, identical camera and fixed ±8 kPa symlog pressure colors. Offline
+artifacts and reproducible scripts are in the pressure-recorded root's
+video-comparison/: comparison-keyframes.png, matched-pressure-1.18-1.53.mp4,
+early-sequence.png, collapse-sequence.png and comparison.json. The comparison
+MP4 is independently decoded/count-checked: 1934 frames, 1632×362 at 60 fps;
+labels carry actual simulation time because accepted-step dt varies.
+
+Broad negative patches appear in both remapped runs during approximately
+1.30–1.34 s, before the baseline's broad fronts around 1.356 s. By 1.35 s onward,
+all three carry broad negative fronts through the curved sheet and lower bulk;
+phase differs, and BDF does not consistently suppress their spatial extent.
+As the large lower-right cavity closes around 1.46–1.48 s, both remapped runs
+develop a fragmented/void-filled patch visible by 1.476 s and growing markedly
+through 1.49–1.53 s. Baseline retains much more continuous fluid, with smaller
+residual voids. Taylor alone has the more extensive breakup at the endpoint;
+Taylor+BDF still breaks up despite near-baseline late sensor RMS. Therefore the
+prior sensor-only screen is insufficient to regard BDF as a physical remedy.
+
+These frames associate the damaged region with cavity closure and subsequent
+negative-pressure structure, but existing earlier fronts rule out this final
+collapse as the sole wave source. They do not measure wave amplification gain
+or resolve individual-neighbor disorder; original particle spacing is subpixel
+in this camera. Colors clip outside ±8 kPa. Rendered-blue coverage is retained
+only as a qualitative image diagnostic, not pressure/particle/volume data.
+No numerical defaults changed and no simulations launched. Next investigation:
+local collapse-region pressure/shift/update diagnostics, keeping baseline,
+Taylor and Taylor+BDF distinct; do not promote remapping+BDF from probe RMS.
+
+
 **Pressure-recorded campaign complete (2026-10-30):** all three frozen
 controls reached 7641 accepted steps / 1.5300141245717327 s, exited 0 with no
 stop reason; queue finished at 17:45 UTC. Wall times: Michel baseline 95.60 min,
