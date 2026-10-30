@@ -28,6 +28,7 @@ import torch
 from ...enumTypes import EnergyScheme
 from .workReduction import reducePairWork
 from warpSPHCore.profiling import record_function
+from warpSPHCore.radiusSearch import ChunkedPairField
 
 __all__ = ['PairWork', 'RerunRequest', 'beginPairWork', 'listFitsParticles', 'startFromLatest', 'startStage', 'stageRebuildSlack', 'weightedStages', 'accumulateStage', 'energyIncrement']
 
@@ -60,7 +61,7 @@ class PairWork:
     halfVelocity: Optional[torch.Tensor] = None
     #: first pass: the pair list `work` is laid out on, and the running `(E, dim)` sum of `k_s f (ap + av)`
     adjacency: Any = None
-    work: Optional[torch.Tensor] = None
+    work: Optional[torch.Tensor | ChunkedPairField] = None
     #: false once a stage ran on a different pair list than `adjacency`
     consistent: bool = True
     #: second pass: the running per-particle increment

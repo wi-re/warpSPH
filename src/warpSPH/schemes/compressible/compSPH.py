@@ -47,6 +47,8 @@ def compSPH_step(
     currentState = currentSystem.state
 
     t = currentSystem.t
+    from ...modules.compSPH.chunkedWork import checkChunkedStage
+    checkChunkedStage(currentSystem,currentState,config,schemeConfig,stageIndex,dt,'Comp')
     onGrid = solvesOnGrid(schemeConfig)
     rebuildSlack = stageRebuildSlack(currentSystem, stageIndex)
 

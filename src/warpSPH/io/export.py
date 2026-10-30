@@ -43,6 +43,9 @@ def exportSimulationSystem(
     exportStagesAdjacency = True,
     extraData = None,
 ):
+    from warpSPHCore.radiusSearch import ChunkedAdjacency
+    if isinstance(system.adjacency, ChunkedAdjacency):
+        raise NotImplementedError('Chunked neighbor checkpoint export is not implemented; pair data must remain chunk-local.')
     outFolderPath = f'{exportPath}/trajectory/'
     os.makedirs(outFolderPath, exist_ok=True)
     outFile = h5py.File(f'{exportPath}/trajectory/{tag}.h5', 'w')

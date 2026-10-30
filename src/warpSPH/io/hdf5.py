@@ -14,6 +14,8 @@ from warpSPHIntegrators.state import StageResult
 
 
 def dumpAdjacency(adjacency, adjacencyGroup):
+    if isinstance(adjacency, ChunkedAdjacency):
+        raise NotImplementedError('Chunked adjacency export requires a dedicated chunk-local checkpoint format.')
     liveI, liveJ = adjacency.livePairs()   # the real entries only: the capacity padding is not part of the data
     adjacencyGroup.create_dataset('i', data=liveI.cpu().numpy())
     adjacencyGroup.create_dataset('j', data=liveJ.cpu().numpy())
@@ -46,6 +48,8 @@ def dumpStage(stage, stageGroups, index, SimulationState, exportStagesAdjacency)
 
     auxGroup = stageGroups[index].create_group('aux')
     for auxIndex, aux in enumerate(stage.aux):
+        if isinstance(aux, ChunkedAdjacency) and exportStagesAdjacency:
+            raise NotImplementedError('Chunked stage adjacency export is not implemented.')
         if isinstance(aux, AdjacencyList):
             if exportStagesAdjacency:
                 auxAdjacencyGroup = auxGroup.create_group(f'{auxIndex}_adjacency')

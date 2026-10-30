@@ -2,13 +2,14 @@
 
 Plan index: [PLANS.md](PLANS.md). Parent physics programme: [driven compressible turbulence](docs/roadmap/driven_compressible_turbulence.md).
 
-Status, 2026-10-30: **Phase 3 shared operators and first eager Monaghan checkpoint qualified; compatible W next**.
+Status, 2026-10-30: **Phase 3 bounded native CRKSPH/CompSPH compatible work qualified; Phase 4 next**.
 The count/scan/ownership design is agreed in discussion. Core/main and frontend/dev
 are integrated; see the [integration report](docs/chunked_integration_2026-10-30.md).
 The planner and opt-in standalone single-device chunk construction/lifecycle are
 qualified on CPU/CUDA. Explicit row-mapped shared operators and a bounded eager
-Monaghan path now pass flat parity. Native CRK/CompSPH compatible pair work,
-distributed execution and physical multi-GPU qualification remain open.
+Monaghan path pass flat parity. Native CRKSPH/CompSPH now retain compatible work
+in owned chunks and preserve changed-list replay in bounded CPU/CUDA fixtures.
+Distributed execution and physical multi-GPU qualification remain open.
 This document is the canonical implementation/handoff plan for both repositories;
 the core carries a short companion pointer, `CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md`.
 
@@ -18,12 +19,14 @@ the core carries a short companion pointer, `CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md
    merge and focused CPU/CUDA gates are complete; read the integration report.
 2. Use the active paired workspace below. Chunked neighbours first, then
    multi-GPU execution continue sequentially in these same checkouts.
-3. Phase1/2 and the first Phase3 shared-operator/Monaghan checkpoint are qualified
-   within the limits below. Next implement chunk-owned CRK/CompSPH compatible W:
-   finish global force outputs before half velocities and work sweeps, then retain
-   pair identity across stages and replay changed-list steps. Preserve lanes and
-   fresh stages. The runner has no chunk-budget CLI option yet; the tested path
-   explicitly seeds a chunked list through the case's Python build hook.
+3. Phase1/2 and the bounded Phase3 native compatible-work checkpoint are qualified
+   within the limits below. Next implement Phase4 process groups, distributed
+   count/collect, and particle-field exchanges between dependent passes. Use
+   torch.distributed/NCCL, with Gloo CPU and the isolated two-process/one-GPU NCCL
+   runtime for debugging. Pair J/W must remain on their owners. Current operator
+   outputs/reduction still require a complete single owner, so distributed
+   scheduling must be explicit before relaxing that guard.
+   There is no runner chunk-budget CLI option yet; select the Python case hook.
    Use explicit source paths; do not change global editable installs.
 4. Keep the existing turbulence worktree available for ordinary single-GPU
    physics through128^3, subject to a short readiness/memory check. No such
@@ -375,8 +378,8 @@ Frontend gates: `test_compressibleCSR.py`, `test_crkSharedWork.py`,
 `test_drivenTurbulence3D.py`, plus `scripts/check_imports.py --runtime`.
 Evidence/provenance/commands: frontend `.tmp/chunked-search-20261030/`.
 Shared editable installs and the physics worktrees remain unchanged by this work.
-Next: shared operator dispatch with full query/reference mapping, then simple
-eager solver parity and native compatible W with pinned pair identity/stages.
+That Phase2 handoff led to the shared operators and native compatible-work
+checkpoints recorded below.
 
 ## Phase 3 — shared operators and native compatible work (both repos)
 
@@ -387,15 +390,15 @@ eager solver parity and native compatible W with pinned pair identity/stages.
 - [x] Bring up shared support/density/corrections/gradients and an explicit eager
   Monaghan path. Fixed lanes/tableau and full stored-field parity qualify the
   bounded checkpoint below, not every scheme/boundary/graph configuration.
-- [ ] Bring up native CRKSPH/CompSPH solver dispatch and compatible work. A CRK
+- [x] Bring up native CRKSPH/CompSPH solver dispatch and compatible work. A CRK
   correction-construction pass is not a CRKSPH compatible-energy solver gate.
-- [ ] Allocate/accumulate W per owned chunk across stages. First complete force
+- [x] Allocate/accumulate W per owned chunk across stages. First complete force
   outputs for all rows; then form stage half velocities and run work sweeps.
   Final energy reduction uses local W and global final half velocities.
-- [ ] Pin pair identity/ordering and ownership during W accumulation. At changed
+- [x] Pin pair identity/ordering and ownership during W accumulation. At changed
   lists or repartition, preserve existing replay semantics; explicitly migrate
   matching work if needed. Never silently discard work or use stale fields.
-- [ ] Force mid-stage list changes, multiple integrator weights and chunk-layout
+- [x] Force mid-stage list changes, multiple integrator weights and chunk-layout
   changes; compare full live W and all stored fields against the flat baseline.
   Require bitwise per-row parity where arithmetic order is unchanged. Keep earlier
   recomputation/lane roundoff failures visible; do not relax screens to force a pass.
@@ -504,8 +507,123 @@ The bounded tests run GPU suites sequentially. Timings include JIT and shared GP
 contention; no throughput, peak-memory saving, large-edge addressing or physical
 multi-GPU claim is made. Single-device resident chunks retain total J storage;
 this checkpoint bounds per-chunk addressing and operator scratch, not total J.
-Next: chunk-owned compatible W and native fresh-stage CRK/CompSPH parity before
-distributed scheduling. Paired implementation provenance: core c0b8cf7 (frontend is the commit containing this checkpoint).
+The next step at that checkpoint was chunk-owned native compatible work; it is
+now qualified in the following section. Paired implementation provenance: core c0b8cf7 (frontend is the commit containing this checkpoint).
+
+### Native chunk-owned compatible work (2026-10-30)
+
+This checkpoint adds eager, wall-free native recomputation for CRKSPH and CompSPH,
+with the original compatible-energy formula and fresh Butcher stages. It does
+not change forcing, support iteration/acceptance, EOS or integrator weights.
+The old flat path remains the default. Native special energy/material/AD/graph/
+wall controls are gated at entry for chunks rather than allocating expanded pairs.
+
+Core `radiusSearch/pairField.py` introduces `ChunkedPairField`: a frozen tuple of
+dedicated bounded buffers associated with one adjacency object/generation and
+its storage lease. It validates capacity, dtype, device, stride, disjoint storage
+and policy extents. Hidden larger backing allocations and shared buffers across
+chunks are rejected. There is no flat tensor view. `ExtraKind.CHUNK_TENSOR` and
+`RowRole.CHUNK` bind each work input to its matching chunk; `ROW_START` supplies
+global query identity for reads of replicated stage/final half velocities.
+Prepared launches use the same mapping. Only explicit one-element unread ABI
+scratch outputs are allowed beside query outputs; the first output must still
+define the query thread count.
+
+Force-only dispatch reuses the existing scalar/tiled force kernels with bounded
+one-element pair placeholders. It completes all query-force outputs before
+forming stage half velocities and starting the work sweep. Each chunk then
+accumulates its own W with the same pair formula, fraction and stage weight.
+Final reduction walks each local CSR row in order, reading global final half
+velocities and writing its disjoint global particle result. It never assembles W
+or edge-level velocity gathers on a device. Allocation/order audits in the test
+fixtures check these statements against actual launches and tensor storage.
+
+A changed adjacency identity or repartition triggers the existing `RerunRequest`:
+the first attempt computes the global final half velocity, then the integrator
+repeats all fresh stages and reduces each stage on its current list directly.
+The replay retains no W, only a one-element unread placeholder and particle
+increments. No implicit work migration or silent discard-and-accept was added.
+Tests force a generation/layout change at stage 1, including a row cap of 5 -> 2.
+Each two-step RK4 fixture performs the same 16 RHS calls as its flat replay;
+normal RK2/RK4 controls perform exactly 4/8 RHS calls.
+
+Policies must budget both J and W, including the scalar work extent. Example
+for a native compatible scheme in a Python case build hook:
+
+```python
+from warpSPHCore import SupportScheme
+from warpSPHCore.radiusSearch import RowChunkPolicy, buildChunkedVerletList
+dim = system.state.positions.shape[1]
+policy = RowChunkPolicy(
+    edgeBudget=1_000_000,
+    bytesPerEdge=4 + dim * system.state.positions.element_size(),
+    maxElementsPerEdge=dim)
+config.compute.neighborOmitI = True
+system.adjacency = buildChunkedVerletList(
+    system.state, config.domain, policy=policy,
+    verletScale=config.verletScale, supportMode=SupportScheme.SuperSymmetric,
+    storeI=False)
+```
+
+The four-byte ID term assumes omitted I; include another four bytes for stored I.
+A J-only policy fails before work allocation. This is a single-owner selection;
+partial-owner execution remains gated until the distributed exchange schedule
+exists. Native checkpoint/HDF5 export also fails explicitly, before creating a
+partial output file. Use the qualified `store=False, storeMode='trajectory'`
+fixture configuration until Phase5 implements a chunk-local checkpoint format.
+
+The new CUDA nondefault-stream control initially exposed an existing flat-path
+dependency bug: CRK terms and flat work reductions launched outside Torch's
+current stream. The first screen differed by one ULP; an isolated run could
+read uninitialized values and fail positivity even on the flat control. Those
+helpers now use the existing `torchWarpStream` context. Their floating kernels
+are unchanged. Strict 32-lane chunk/flat parity then passes for both schemes.
+Delayed-producer tests independently exercise terms, flat/chunk work reduction
+and reference entropy work; repaired flat helpers also capture/replay correctly.
+Chunked capture remains explicitly rejected. Failed initial logs/XML are kept;
+no numerical tolerance was relaxed to remove the failure.
+
+Qualification (fresh offset/precision processes, paired source paths):
+
+| Gate | Result |
+| --- | --- |
+| Core pair-field/row-operator matrix, CPU float32 int32/int64 | 59 passed per offset, 61 expected skips |
+| Core pair-field/row-operator matrix, CPU float64/int64 | 59 passed, 61 expected skips |
+| Core pair-field/row-operator matrix, CUDA float32 int32/int64 | 60 passed per offset, 1 CPU stream-test skip |
+| Native scalar-lane trajectory/work/replay cases, CPU int32/int64 and FP64/int64 | 8 cases pass per configuration |
+| Native trajectory/work/replay plus fixed 32 lanes/nondefault stream, CUDA int32/int64 | 10 cases pass per offset |
+| Padding/empty/generation/policy/unsupported-context/export/stream contracts | 15 CPU checks plus 16 CUDA checks per offset; capture/export included |
+| Existing core CPU/int64 focused regressions | 834 passed, 849 expected skips |
+| Existing frontend work/pair-work/Monaghan/graph-selection CPU controls | 57 passed, 18 CUDA skips |
+| Existing native flat work CUDA controls | 33 passed |
+| Runtime frontend imports | 562 modules pass |
+
+Every live W vector, its J identity/order, stage force/heating/increment and all
+stored final tensor fields match the native flat recomputation control bitwise.
+The native recomputation/expanded-control regressions retain their existing
+tolerances; they were not changed. All bounded accepted steps pass positivity
+and the existing source/energy-budget gate. The largest flow fixture is 216
+particles; these are two-step unit A/Bs with progress/stall monitoring, with the
+documented video exception. No new developed-flow campaign was launched.
+
+Measured storage example, 64-particle 2D RK4: both schemes retain 36,040 bytes of
+flat W capacity versus 36,048 bytes across chunks (padding), with identical live
+work. Largest force-kernel output storage is 784 bytes flat versus 76 bytes per
+chunk at the debug row cap of 5. The chunk adapter additionally assembles the
+full O(N) particle output, so this is **not a peak-memory saving**. Single-device
+resident chunks keep total J/W; distribution will reduce ownership per GPU.
+The allocation audit reports actual tensor storage separately from allocator/
+native/JIT/process memory. Tiny CPU RK4 examples took roughly 24 -> 112 ms/step
+(CRK) and 19 -> 82 ms/step (Comp); host-loop overhead is visible and expected at
+this debug chunk size. Logs include all wall/step times. JIT and shared workload
+contention prevent throughput conclusions; no performance default is promoted.
+
+Commands, test XML/logs, allocation/timing audits, failure records and paired
+source fingerprints: frontend `.tmp/chunked-compatible-work-20261030/`.
+The existing static-scanner issue remains recorded in Phase2. No physical
+>INT_MAX edge-buffer access, large-memory fit or physical multi-GPU claim follows
+from these fixtures. Next action is the Phase4 replicated-state process backend.
+Implementation provenance: core 85b5ef9; frontend is the commit containing this checkpoint.
 
 ## Phase 4 — replicated-state multi-GPU runner (two GPUs, then four)
 

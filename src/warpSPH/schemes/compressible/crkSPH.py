@@ -96,6 +96,8 @@ def crkSPH_step(
     currentSystem = system
     currentState = currentSystem.state
     t = currentSystem.t
+    from ...modules.compSPH.chunkedWork import checkChunkedStage
+    checkChunkedStage(currentSystem,currentState,config,schemeConfig,stageIndex,dt,'CRK')
     gradHState = None
 
     onGrid = solvesOnGrid(schemeConfig)             # stepMode 'graph' (or supportSolveOnGrid): the support solve on the fixed-shape grid
