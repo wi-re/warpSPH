@@ -12,6 +12,41 @@ priority decision does not start new runs or change numerical defaults.
 ## Lobovsky comparison — 2026-10-27 (active)
 
 
+**Lower-wall shear/negative-pressure sequence (2026-10-30, user):** around
+1.3s, two shearing flows with a free surface form a larger negative-pressure
+patch near the lower right wall. The supplied image pair shows localized
+particle disorder and a coherent patch, rather than only thin fluid fingers.
+User identifies this as a more unstable event potentially nearer the sensors.
+Probe locations are confirmed in export_viewer.py: right wall x=1.61m,
+y=0.003,0.015,0.030,0.080m. Screenshots have no coordinate/color legend or exact
+per-image times, so precise probe overlap, pressure magnitude and rate of change
+need numerical data/fixed color scale. Negative gauge pressure by itself is
+not proof of instability; distinguish shear/curvature-driven depression from
+numerical amplification, particle ordering/tensile sensitivity and pressure
+recovery during local sheet/film closure. Correlate patch position/extent/minimum,
+support anisotropy, pseudo-time convergence and P1–P4 on accepted clocks around
+1.3s, then check its relationship to the later1.44–1.53s ringing. Compare all
+three current controls and retained dynGPUSPH without changing models/settings.
+Sequence retained under .tmp/acsph-michel-live-2026-10-30/observations/
+`lower-wall-shear-around-1p3s-sequence-{a,b}.png`. No new simulation launched.
+
+**Back-wall return-stream observation (2026-10-30, user):** at approximately
+1.2s, the downward stream/film from the wall contact intersects the collapsing
+main bulk, producing fine fluid fingers with locally oscillating pressure.
+Candidate explanation for part of the sensor ringing: repeated sheet/film
+re-impact combined with poorly supported, anisotropic neighborhoods. The image
+alone does not establish temporal oscillation, pressure amplitude, causality,
+or whether the effect is physical or numerical; no quantitative color scale
+or run-variant identity is encoded in the screenshot. Retain the event as a
+hypothesis, not a new model choice. In the existing trajectory analysis, correlate
+local pressure/relative motion/support quality near the intersection with P1–P4
+signals, and distinguish event-forced pulses from ringing that persists after
+contact changes. Compare the same event across Michel/remap/BDF controls and
+the retained dynGPUSPH reference; do not tune to a single chaotic snapshot.
+Image retained under
+`.tmp/acsph-michel-live-2026-10-30/observations/back-wall-return-stream-around-1p2s.png`.
+No run/setting changed for this observation.
+
 **Native daemon running and verified (2026-10-30):**26 focused CPU checks
 and all7 GPU preflights pass, including daemon-on/off bitwise snapshot parity.
 Native baseline restarted from original ICs, registered as
