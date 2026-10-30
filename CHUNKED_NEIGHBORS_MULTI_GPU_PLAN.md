@@ -398,9 +398,12 @@ or missing RHS, and independently measured scratch/retained-memory changes.
 
 ## Phase 4 — replicated-state multi-GPU runner (two GPUs, then four)
 
-- [ ] Implement one rank per GPU with a transport abstraction selected after
-  topology checks; a single-rank reference and multiple logical owners on one
-  GPU can check sequencing but do not qualify physical distributed execution.
+- [ ] Implement `torch.distributed` (c10d) process groups with NCCL for production
+  CUDA collectives, one process/rank per GPU. Use torchrun or the Isambard Slurm
+  launch environment; inspect topology and site network configuration before
+  transport tuning. Keep a Gloo CPU-tensor debug transport behind the same
+  communication interface. Single-rank/logical-owner fixtures do not qualify
+  physical distributed execution.
 - [ ] All-gather counts, replicated scan, deterministic assignment, local collect
   and resident reuse. Replicate reference fields/grid; build identical grids or
   synchronize their particle ordering. Exchange owned particle results, not pairs.
@@ -420,6 +423,45 @@ or missing RHS, and independently measured scratch/retained-memory changes.
 
 Exit: no full J/W on any rank, correct synchronization and failure handling,
 per-device memory measured, physical conservation/positivity gates passed.
+
+### Transport decision and local debugging (2026-10-30)
+
+User preference: NCCL is the preferred communication library on Isambard and
+PyTorch provides the intended interaction layer. Production execution will use
+`torch.distributed`/c10d with NCCL, one process per GPU. Warp continues to compute
+through Torch-backed device buffers, with explicit stream/event ordering before
+communication and dependent kernels. Collectives exchange counts and owned
+particle outputs plus global timestep/rebuild/failure/source reductions; pair
+J/W stay on their owners. No distributed runner has been implemented yet.
+
+Local package inspection: Torch 2.13.0+cu130, NCCL 2.29.7, both NCCL and Gloo
+backends available. This installed NCCL does not support sharing one GPU among
+multiple ranks of the same communicator. The ordinary production/PyTorch
+contract requires exclusive GPU access per process in a communicator.
+
+NCCL **2.30+** documents an experimental exception:
+`NCCL_MULTI_RANK_GPU_ENABLE=1`. Each separate process must explicitly select the
+shared device (e.g. cuda:0), instead of selecting LOCAL_RANK as a device ordinal.
+NVIDIA expects up to two ranks per GPU with the default resource configuration;
+more/larger ranks may require lower NCCL_MAX_CTAS and can exhaust resources or
+hang. NVLS is incompatible with same-GPU ranks; the default auto setting disables
+it, while forcing NVLS on fails initialization. Separate rank threads in one
+process sharing that GPU are not supported by this feature. A compatible isolated
+PyTorch/NCCL stack and bounded smoke tests are needed before relying on it; no
+shared package installation is changed by this decision.
+
+Debug progression: first genuine multiple OS processes with Gloo and CPU
+tensors; then, if desired, shared-GPU Warp compute with explicit CPU staging for
+Gloo exchanges; optionally test experimental same-GPU NCCL after a compatible
+stack is available. These exercise rank sequencing, uneven/empty ownership,
+collective payloads and failure handling. A single-rank NCCL smoke checks API
+plumbing only. Real two-/four-GPU NCCL qualification is still required for device
+separation, transport, stream ordering and performance on the target topology.
+
+Sources: [PyTorch distributed process groups](https://docs.pytorch.org/docs/stable/distributed.html),
+[NVIDIA same-GPU rank support and limits](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html#nccl-multi-rank-gpu-enable).
+The specific experimental switch qualifies the otherwise general prohibition in
+the communicator/PyTorch documentation; do not assume it exists in older stacks.
 
 ## Phase 5 — remaining schemes and compatibility
 
