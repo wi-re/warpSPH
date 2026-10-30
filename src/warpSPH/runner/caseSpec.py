@@ -116,6 +116,8 @@ class CaseSpec:
     #: rows and frames; `stepTime_ms` becomes the per-step wall throughput.
     #: Off restores the one-thing-at-a-time loop (A/B timing, debugging). None = `ComputeConfig.pipelineOutputs` (on).
     pipelineOutputs: Optional[bool] = None
+    #: Omit COO row indices; None enables this for compressible runs only.
+    neighborOmitI: Optional[bool] = None
 
     # --- output -------------------------------------------------------------
     plot: bool = False
@@ -300,6 +302,7 @@ _FIELD_HELP = {
     'iterationChecks': "relaxed-Jacobi loops read their convergence test back every iteration ('every') or at learned checkpoints ('adaptive', default)",
     'krylovCheckEvery': 'Krylov solvers read their still-running flag every this many iterations; unset: 8',
     'cudaGraph': 'legacy spelling of --execution graph / eager',
+    'neighborOmitI': 'omit redundant COO row indices; default on for compressible schemes, off for other families pending qualification',
     'pipelineOutputs': 'with a whole-step graph, compute step n\'s diagnostics while step n+1 replays (default on)',
     # -- output --
     'plot': 'draw frames while the run proceeds',

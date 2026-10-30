@@ -6,6 +6,7 @@ step's initial state. Only the latest RHS is needed and is released after use.
 An entropy alternative evaluates the published weights with the same final
 pair-work sign as the dudt policy, separating formula and sign-estimator effects.
 """
+from ...utils.adjacency import cooRows
 from dataclasses import dataclass
 import torch
 from ..compSPH.pairWork import _pairVector
@@ -40,7 +41,7 @@ def retain(system,state,update,adjacency,index,config):
 
 
 def spheralRate(adjacency,pairAcceleration,rawDudt,baseVelocity,totalAcceleration,multiplier):
-    i,j=adjacency.paddedI,adjacency.paddedJ
+    i,j=cooRows(adjacency),adjacency.paddedJ
     half=baseVelocity+.5*multiplier*totalAcceleration
     work=torch.einsum('ij,ij->i',half[j]-half[i],pairAcceleration)
     # Pinned Spheral Scalar is double even when this control runs in float32.
@@ -53,7 +54,7 @@ def spheralRate(adjacency,pairAcceleration,rawDudt,baseVelocity,totalAcceleratio
 
 def entropyRate(adjacency,pairAcceleration,entropy,gamma,baseVelocity,totalAcceleration,multiplier):
     """Paper Eq.63 using the final compatible pair-work sign, not its RHS estimate."""
-    i,j=adjacency.paddedI,adjacency.paddedJ
+    i,j=cooRows(adjacency),adjacency.paddedJ
     half=baseVelocity+.5*multiplier*totalAcceleration
     work=torch.einsum('ij,ij->i',half[j]-half[i],pairAcceleration)
     si,sj=entropy[i],entropy[j];denom=si.abs()+sj.abs()+1e-14
@@ -76,6 +77,6 @@ def energyBeforeUpdate(system,update,spec,config):
     elif config.crkEnergyPartition=='entropy':
         rate=entropyRate(stage.adjacency,stage.pairVector,stage.entropy,stage.gamma,s.velocities,update.dvdt,h)
     else:
-        half=s.velocities+.5*h*update.dvdt;i,j=stage.adjacency.paddedI,stage.adjacency.paddedJ
+        half=s.velocities+.5*h*update.dvdt;i,j=cooRows(stage.adjacency),stage.adjacency.paddedJ
         rate=segment_sum(torch.einsum('ij,ij->i',half[j]-half[i],stage.pairVector),stage.adjacency.numNeighbors)
     return s.internalEnergies+h*rate

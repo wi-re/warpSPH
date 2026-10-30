@@ -126,12 +126,15 @@ class CRKSPHConfig(CompressibleSPHConfig):
     compatibleEnergy: bool = field(default=True, metadata={'description': 'Whether to use a compatible energy discretization (e.g. evolve total energy and compute internal energy from it) or not (e.g. evolve internal energy directly)'})
     crkDensityPolicy: str = field(default='legacy', metadata={'description': 'Opt-in CRK material density rule: legacy, sameMaterial (Spheral raw-kernel sum), or massReplacement (paper corrected-kernel mass rule). Volumes/moments retain all neighbours.'})
     crkEvolution: str = field(default='summation', metadata={'description': 'Default summation: density/volume every RHS. Experimental spheral: m/rho reset, same-material density, bounded continuity volume. Experimental paper: Eq76 reset once/step, continuity density, geometric Eq75 volume every RHS. Stage modes require midpoint.'})
+    crkPairStorage: str = field(default='recompute', metadata={'description': 'Recompute shared pair physics directly into X6 work by default on native eager single-gas steps; expanded selects reference storage and unsupported contexts fall back automatically.'})
     crkViscosityGradient: str = field(default='current', metadata={'description': 'Experimental AV timing control: current stage (default) or cached previous RHS gradient; cached requires spheral midpoint evolution.'})
     crkEnergyPartition: str = field(default='native', metadata={'description': 'Midpoint work partition: native entropy estimator, entropy with final compatible-work sign, or Spheral node dudt weights.'})
     crkEnergyPredictor: str = field(default='raw', metadata={'description': 'Experimental midpoint internal energy predictor: raw dudt (native) or compatible pair work.'})
 
     def validate(self, config=None):
         super().validate(config)
+        if self.crkPairStorage not in ('expanded','recompute'):
+            raise ValueError('crkPairStorage must be expanded or recompute')
         if self.crkEnergyPartition not in ('native', 'entropy', 'spheral') or self.crkEnergyPredictor not in ('raw', 'compatible'):
             raise ValueError('Invalid CRK energy partition/predictor')
         if self.crkEnergyPartition != 'native' or self.crkEnergyPredictor != 'raw':
@@ -174,6 +177,7 @@ def crkSPHConfigToDict(config: CRKSPHConfig) -> Dict[str, Any]:
         'crkDensityPolicy': config.crkDensityPolicy,
         'crkEvolution': config.crkEvolution,
         'crkViscosityGradient': config.crkViscosityGradient,
+        'crkPairStorage': config.crkPairStorage,
         'crkEnergyPartition': config.crkEnergyPartition,
         'crkEnergyPredictor': config.crkEnergyPredictor,
         'crkViscosityParams': {
@@ -199,6 +203,7 @@ def dictToCRKSPHConfig(configDict: Dict[str, Any]) -> CRKSPHConfig:
     crkSPHConfig.crkDensityPolicy = configDict.get('crkDensityPolicy', 'legacy')
     crkSPHConfig.crkEvolution = configDict.get('crkEvolution', 'summation')
     crkSPHConfig.crkViscosityGradient = configDict.get('crkViscosityGradient', 'current')
+    crkSPHConfig.crkPairStorage = configDict.get('crkPairStorage', 'recompute')
     crkSPHConfig.crkEnergyPartition = configDict.get('crkEnergyPartition', 'native')
     crkSPHConfig.crkEnergyPredictor = configDict.get('crkEnergyPredictor', 'raw')
     crkViscosityParamsDict = configDict['crkViscosityParams']

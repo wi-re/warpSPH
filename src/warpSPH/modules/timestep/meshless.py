@@ -14,6 +14,7 @@ an adaptive dt is a function of state, so the gradient back to state stays for
 anyone differentiating through a rollout.
 """
 
+from warpSPH.configurations.compute import neighborSearchOptions
 from typing import Optional, Union
 
 import torch
@@ -23,7 +24,7 @@ from ...configurations.simulationConfig import SimulationConfig
 from ...systems.meshless import MeshlessSystem
 from warpSPHCore.mfm import MeshlessWarp
 from ..meshless.primitives import primitives, particleGamma
-from ..meshless.geometry import stashGeometry, takeGeometry
+from ..meshless.geometry import stashGeometry, takeGeometry, cachedAdjacency
 
 __all__ = ['computeTimestep']
 
@@ -54,6 +55,9 @@ def computeTimestep(
         if g is None:
             g = MeshlessWarp.build(
                 state.positions, state.supports, system.domain, config.kernel,
+                adjacency=cachedAdjacency(state.positions, state.supports, system.domain, compParams, owner=state,
+                                          storeI=neighborSearchOptions(config)['storeI']),
+                storeI=neighborSearchOptions(config)['storeI'],
                 cond_max=compParams.condMax, closure="none", rtol=None, lam0=None,
                 guards=True, face_cond_max=compParams.faceCondMax,
                 centred_weights=True, area_cap=False)

@@ -73,6 +73,9 @@ class Field:
     midPoint: Optional[float] = 0.0
     #: Resolution of the interpolated-grid rendering; `None` scatters particles.
     gridResolution: Optional[int] = None
+    #: Optional physical plane for a grid-interpolated 3D field.
+    sliceAxis: Optional[int] = None
+    slicePosition: Optional[float] = None
     #: Title-to-plot spacing: matplotlib title padding in points, vispy a
     #: fraction of domain height. `None` keeps the backend default.
     plotTitleGap: Optional[float] = None
@@ -121,7 +124,9 @@ def _plotOptions(field: Field, markerSize: float):
         vMax=field.vMax,
         fluidVisualization=getattr(VisualizeOptions, field.fluid),
         boundaryVisualization=getattr(VisualizeOptions, field.boundary),
-        gridVisualization=(GridVisualization(resolution=field.gridResolution)
+        gridVisualization=(GridVisualization(resolution=field.gridResolution,
+                                               sliceAxis=field.sliceAxis,
+                                               slicePosition=field.slicePosition)
                            if field.gridResolution else None),
     )
 

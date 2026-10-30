@@ -117,9 +117,13 @@ def compSPH_step(
             SupportScheme.SuperSymmetric,
             adjacency)
 
+    from ...modules.compSPH.work import useRecomputedWork, derivativeInputs
+    directWork = useRecomputedWork(currentSystem,currentState,schemeConfig,wall,stageIndex)
     with record_function("[warpSPH] - [compSPH - 12] pressure / viscosity acceleration and dudt"):
         dvdt, currentState.ap_ij, currentState.av_ij, dudt = computeCompSPHAccel(
-            currentState, config, schemeConfig, adjacency, gradHState, returnDudt=True)
+            currentState, config, schemeConfig, adjacency, gradHState, returnDudt=True, retainPairs=not directWork)
+        if directWork:
+            currentState.ap_ij = currentState.av_ij = None
 
     with record_function("[warpSPH] - [compSPH - 14] viscosity-switch update"):
         currentState.alpha0s, switchState = updateViscositySwitch(
@@ -161,17 +165,29 @@ def compSPH_step(
             wall.finishUpdate(update)
 
     with record_function("[warpSPH] - [compSPH - 19] energy-partition f_ij"):
-        v_halfstep = currentState.velocities + 0.5 * dt * update.dvdt
-        currentState.f_ij = computeCompSPHBalanceTerm(
-            currentState, config, schemeConfig, adjacency, v_halfstep, dt, gradHState)
-        if wall is not None:
-            currentState.f_ij = wall.balanceFractions(currentState.f_ij, adjacency, currentState)
+        if directWork and derivativeInputs(update.dvdt,dt):
+            # Late differentiable sources retain the existing autograd route.
+            _,currentState.ap_ij,currentState.av_ij = computeCompSPHAccel(
+                currentState,config,schemeConfig,adjacency,gradHState,retainPairs=True)
+            directWork = False
+        if directWork:
+            currentState.f_ij = None
+        else:
+            v_halfstep = currentState.velocities + 0.5 * dt * update.dvdt
+            currentState.f_ij = computeCompSPHBalanceTerm(
+                currentState, config, schemeConfig, adjacency, v_halfstep, dt, gradHState)
+            if wall is not None:
+                currentState.f_ij = wall.balanceFractions(currentState.f_ij, adjacency, currentState)
 
     if currentSystem.pairWork is not None:
         currentSystem.pairWork.latest = adjacency
     if schemeConfig.compatibleEnergy and currentSystem.pairWork is not None:
         with record_function("[warpSPH] - [compSPH - 20] pair work -> running sum"):
-            accumulateStage(currentSystem.pairWork, stageIndex, adjacency, currentState, schemeConfig.energyScheme)
+            if directWork:
+                from ...modules.compSPH.work import accumulateCompWork
+                accumulateCompWork(currentSystem,currentState,update,config,schemeConfig,adjacency,gradHState,stageIndex,dt)
+            else:
+                accumulateStage(currentSystem.pairWork, stageIndex, adjacency, currentState, schemeConfig.energyScheme)
             # the pair arrays now live in the running sum: do not keep one set per stage on the returned state
             currentState.ap_ij = currentState.av_ij = currentState.f_ij = None
 

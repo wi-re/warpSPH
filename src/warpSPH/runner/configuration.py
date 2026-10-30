@@ -67,7 +67,7 @@ def simulationParameters():
                            'densityCorrection', 'calibrateNormalization'},
         'time': {'dt', 'tLimit', 'adaptiveDt', 'cflFactor', 'minDt', 'maxDt', 'nSteps'},
         'runtime': {'precision', 'device', 'execution', 'cudaGraph', 'pipelineOutputs',
-                    'graphMaxParticles', 'iterationChecks', 'krylovCheckEvery'},
+                    'graphMaxParticles', 'iterationChecks', 'krylovCheckEvery', 'neighborOmitI'},
     }
     positive = {'nx', 'L', 'n_h', 'tLimit', 'dt', 'cflFactor', 'minDt', 'maxDt',
                 'exportInterval', 'plotInterval', 'storeInterval', 'verletScale',
@@ -145,6 +145,7 @@ def solverParameters(scheme):
             'cfl': P('number', 'Meshless signal timestep CFL factor.', 'time', exclusiveMinimum=0),
             'cflLength': P('string', 'Length used in the CFL estimate.', 'time', choices=('particle', 'support')),
             'temporalScheme': P('string', 'Meshless time advance.', 'time', choices=('auto', 'ssprk', 'hancock', 'kdk')),
+            'neighborSkin': P('number', 'Validity-checked neighbor-search skin; 1 rebuilds, >1 caches padded lists and filters current pairs.', 'geometry', minimum=1),
             'closure': P('string', 'Effective-face closure treatment.', 'geometry', choices=('none', 'project')),
         }
     if scheme in ('deltaSPH', 'sun2017DeltaSPH'):
@@ -213,7 +214,10 @@ def solverParameters(scheme):
             'Apply the existing matrix correction to the reconstructed velocity gradient.', 'reconstruction')
     out['diffusionParams.velocityPairPolicy'] = P('string', 'Pair velocity supplied to viscosity.',
                                                  'reconstruction', choices=tuple(m.name for m in policies))
+    if scheme == 'CompSPH':
+        out['compPairStorage'] = P('string', 'Pair work storage: native recomputation or expanded reference.', 'performance', choices=('expanded','recompute'))
     if scheme == 'CRKSPH':
+        out['crkPairStorage'] = P('string', 'Pair-data storage implementation; default recompute preserves native partition/fresh stages on single-gas eager steps. Walls, materials, experimental policies, AD and graph mode use expanded automatically.', 'compute', choices=('expanded','recompute'))
         out['crkDensityPolicy'] = P('string', 'CRK density sum; material policies are opt-in and retain all-material volume/moment/force support.',
             'fluid', choices=('legacy', 'sameMaterial', 'massReplacement'))
         out['crkEvolution'] = P('string', 'Density/volume scheduling: native summation, experimental current-Spheral stages or paper Eq75/76 stages. Support and pair force remain Warp.',

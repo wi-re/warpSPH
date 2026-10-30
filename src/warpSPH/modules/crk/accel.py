@@ -29,6 +29,132 @@ from ..reconstruction import limitedPairPhi, linearPairVelocity
 __all__ = ['computeCrkSPHAccelWarp']
 
 @wp.func
+def computeCrkSPHPair(
+    i: wp.int32, j: wp.int32, dim: wp.int32,
+    xi: vector(dtype=scalar_t, length=Any), hi: scalar_t, mi: scalar_t, rhoi: scalar_t,
+    referenceState: Any, correctionData: Any, domainState: domainData, kernelProperties: kernelState,
+    useGradientRenormalization: wp.bool, Li: matrix(shape=(Any,Any),dtype=scalar_t),
+    Vi: scalar_t, Ai: scalar_t, Bi: vector(length=Any,dtype=scalar_t),
+    gradAi: vector(length=Any,dtype=scalar_t), gradBi: matrix(shape=(Any,Any),dtype=scalar_t),
+    vel_i: vector(length=Any,dtype=scalar_t), referenceVelocities: wp.array(dtype=vector(length=Any,dtype=scalar_t)),
+    individual_cs: wp.bool, cs_i: scalar_t, referenceCs: wp.array(dtype=scalar_t),
+    viscositySwitch: wp.bool, alpha_i: scalar_t, referenceAlphas: wp.array(dtype=scalar_t),
+    explicitPressure: wp.bool, P_i: scalar_t, referencePressures: wp.array(dtype=scalar_t),
+    viscosityParams: DiffusionParameters, crkViscosityParams: CRKViscosity,
+    gradV_i: matrix(shape=(Any,Any),dtype=scalar_t), referenceVelocityTensor: wp.array(dtype=matrix(shape=(Any,Any),dtype=scalar_t)),
+    calculateDudt: wp.bool,
+):
+    # One shared pair formula for expanded outputs, force-only and direct X6 work.
+    xj, hj, mj, rhoj, kj = getParticle(referenceState, j)
+    vel_j = referenceVelocities[j]
+
+    _, Vj = getVolume_j(correctionData, j)
+    P_j = access_optional(referencePressures, j, explicitPressure, scalar_t(0.0))
+    cs_j = access_optional(referenceCs, j, individual_cs, viscosityParams.c_s)
+
+
+    x_ij = computeDistanceVec(xi, xj, domainState)
+    r_ij = safe_sqrt(wp.dot(x_ij, x_ij))
+
+    gradV_j = referenceVelocityTensor[j]
+
+    # CRKSPH's limited midpoint reconstruction (`modules/reconstruction`, AV_PLAN Phase 3): phi_ij from the van Leer
+    # limiter times the close-pair taper, unless forced off (raw velocities) or on (unlimited linear). With
+    # x_ij = x_i - x_j: v_dot_i = v_i - phi/2 J_i x_ij, v_dot_j = v_j + phi/2 J_j x_ij (garciasenz2026 Eqs. 11-12)
+    phi_ij = limitedPairPhi(
+        x_ij, hi, hj, vel_i, vel_j, gradV_i, gradV_j,
+        kernelProperties.kernelFunction, dim,
+        crkViscosityParams.enableVanLeerLimiter, crkViscosityParams.enableCRKLimiter,
+        crkViscosityParams.eta_crit, crkViscosityParams.eta_fold, crkViscosityParams.limiterType)
+    if crkViscosityParams.forceVanLeerOff:
+        phi_ij = scalar_t(0.0)
+    if crkViscosityParams.forceVanLeerOn:
+        phi_ij = scalar_t(1.0)
+    phi_ij = wp.max(wp.min(phi_ij, scalar_t(1.0)), scalar_t(0.0)) # Ensure phi is between 0 and 1
+    vij_dot = linearPairVelocity(vel_i, vel_j, gradV_i, gradV_j, x_ij, phi_ij)
+
+    gradw_i = computeKernelGradientCRK(
+        xi, xj,
+        hj, hj, # forces gather
+        kernelProperties, domainState,
+        True, Ai, Bi, gradAi, gradBi
+    )
+    if useGradientRenormalization:
+        gradw_i = matmul(Li, gradw_i)
+
+    _, Aj, Bj, gradAj, gradBj = getCRK_j(correctionData, j)
+    gradw_j = -computeKernelGradientCRK(
+        xj, xi,
+        hi, hi, # forces scatter
+        kernelProperties, domainState,
+        True, Aj, Bj, gradAj, gradBj
+    )
+    if useGradientRenormalization:
+        gradw_j = matmul(Li, gradw_j)
+
+    # Frontiere et al. (2017) Eq. (69) one-sided viscous pressures Q_i, Q_j of the reconstructed pair velocity;
+    # the formula (mu with the particle's own h, eps^2 = 1e-2, min(0, .), switched alpha / BetaMode) lives once in the
+    # `Frontiere2017` term of `modules/dissipation/pi/terms.py`
+    alpha_j = access_optional(referenceAlphas, j, viscositySwitch, scalar_t(1.0))
+    Q_i = computeFrontiereQ(xi, xj, hi, hj, rhoi, rhoj, vij_dot, domainState, kernelProperties.kernelFunction,
+                            cs_i, cs_j, alpha_i, alpha_j, viscosityParams, False, crkViscosityParams.viscosityKernelScale)
+    Q_j = computeFrontiereQ(xi, xj, hi, hj, rhoi, rhoj, vij_dot, domainState, kernelProperties.kernelFunction,
+                            cs_i, cs_j, alpha_i, alpha_j, viscosityParams, True, crkViscosityParams.viscosityKernelScale)
+
+
+    gradw_ij = scalar_t(0.5) * (gradw_i + gradw_j)
+    # gradw_ij = gradw_i
+    # gradw_j = gradw_i # E.2 in crksph suggests using the super symmetric form
+
+
+    # omegaj = referenceOmegas[j] if useGradHTerms else scalar_t(1.0)
+    # pressureTerm_j = Pj / (rhoj*rhoj) / omegaj
+
+    mu_ij = scalar_t(1.0)
+    # mu_ij = ux_ij #/ (r_ij + scalar_t(1.0e-14) * hi)
+
+    # note that the term here should be multiplied with rho_i if it was a gradient operation
+    # however, because we are computing the pressure force this cancel out with the division by rho_i in the pressure term, so we do not include it here
+    # we do need to include the minus sign because the pressure force is -P gradW
+    # Vj = referenceVolumes[j]
+    # Vi = mi/rhoi
+    # Vj = mj/rhoj
+    pairWeight = Vi * Vj
+    if crkViscosityParams.meanVolumeWeights:
+        pairWeight = scalar_t(0.25) * (Vi + Vj) * (Vi + Vj)
+    pressureTerm_ij = -(P_i + P_j) * gradw_ij * pairWeight / mi
+    # pressureTerms_i = -P_i * gradw_i * Vi * Vj / mi
+    # pressureTerms_j = -P_j * gradw_j * Vi * Vj / mi
+
+
+    # pressureTerms_i = - P_i * gradw_i * Vi * Vj / mi
+    # pressureTerms_j = - P_j * gradw_j * Vi * Vj / mi
+    # pressureTerm_ij = (pressureTerms_i + pressureTerms_j)
+
+    rho_bar = scalar_t(0.5) * (rhoi + rhoj)
+    # Q_i = pi_i * rho_bar / rhoj * rhoi
+    # Q_j = pi_j * rho_bar
+
+    viscosityTerm_ij = -(Q_i + Q_j) * mu_ij * gradw_ij * pairWeight / mi
+    # viscosityTerms_i = - Q_i * Vj * mu_ij * gradw_i * Vi / mi
+    # viscosityTerms_j = - Q_j * Vj * mu_ij * gradw_j * Vi / mi
+    # viscosityTerm_ij = (viscosityTerms_i + viscosityTerms_j)
+    # viscosityTerm_ij = -(pi_i + pi_j) * gradw_ij * Vi * Vj / mi * mu_ij
+
+    heating = scalar_t(0.0)
+    if calculateDudt:
+        # Same raw predictor as dudt.py; reuse the pair geometry, corrected
+        # gradient and one-sided Q values already evaluated for momentum.
+        dot = wp.dot(vel_i - vel_j, gradw_ij)
+        pTerm = P_j * dot * pairWeight / mi
+        vTerm = scalar_t(0.5) * (Q_i + Q_j) * mu_ij * dot * pairWeight / mi
+        if crkViscosityParams.oneSidedWork:
+            vTerm = Q_j * mu_ij * dot * pairWeight / mi
+        heating = pTerm + vTerm
+    return pressureTerm_ij, viscosityTerm_ij, heating
+
+
+@wp.func
 def computeCrkSPHAccel_Func_i(
     # General Shape Parameters and indices
     i : wp.int32,  dim: wp.int32, 
@@ -75,7 +201,7 @@ def computeCrkSPHAccel_Func_i(
 
     gradV_i: matrix(shape=(Any, Any), dtype=scalar_t), referenceVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)),# type: ignore
 
-    calculateDudt: wp.bool,
+    calculateDudt: wp.bool, retainPairs: wp.bool,
     # Dummy value to allow allocation
     pressureAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     viscosityAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
@@ -83,7 +209,7 @@ def computeCrkSPHAccel_Func_i(
     pressureTerm_i = P_i / (rhoi*rhoi )/ (omega_i if useGradHTerms else scalar_t(1.0))
 
     # Initialize the output value
-    out = zero_like_warp(pressureAccel_ij[i])
+    out = zero_like_warp(vel_i)
     heating = scalar_t(0.0)
     # # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numIndices):
@@ -96,115 +222,17 @@ def computeCrkSPHAccel_Func_i(
         #   The core particle-particle interaction starts here   #
         ##########################################################
         
-        xj, hj, mj, rhoj, kj = getParticle(referenceState, j)
-        vel_j = referenceVelocities[j]
-        u_j = referenceEnergies[j]
-
-        _, Vj = getVolume_j(correctionData, j)
-        P_j = access_optional(referencePressures, j, explicitPressure, scalar_t(0.0))
-        cs_j = access_optional(referenceCs, j, individual_cs, viscosityParams.c_s)
-
-
-        x_ij = computeDistanceVec(xi, xj, domainState)
-        r_ij = safe_sqrt(wp.dot(x_ij, x_ij))
-
-        gradV_j = referenceVelocityTensor[j]
-
-        # CRKSPH's limited midpoint reconstruction (`modules/reconstruction`, AV_PLAN Phase 3): phi_ij from the van Leer
-        # limiter times the close-pair taper, unless forced off (raw velocities) or on (unlimited linear). With
-        # x_ij = x_i - x_j: v_dot_i = v_i - phi/2 J_i x_ij, v_dot_j = v_j + phi/2 J_j x_ij (garciasenz2026 Eqs. 11-12)
-        phi_ij = limitedPairPhi(
-            x_ij, hi, hj, vel_i, vel_j, gradV_i, gradV_j,
-            kernelProperties.kernelFunction, dim,
-            crkViscosityParams.enableVanLeerLimiter, crkViscosityParams.enableCRKLimiter,
-            crkViscosityParams.eta_crit, crkViscosityParams.eta_fold, crkViscosityParams.limiterType)
-        if crkViscosityParams.forceVanLeerOff:
-            phi_ij = scalar_t(0.0)
-        if crkViscosityParams.forceVanLeerOn:
-            phi_ij = scalar_t(1.0)
-        phi_ij = wp.max(wp.min(phi_ij, scalar_t(1.0)), scalar_t(0.0)) # Ensure phi is between 0 and 1
-        vij_dot = linearPairVelocity(vel_i, vel_j, gradV_i, gradV_j, x_ij, phi_ij)
-
-        gradw_i = computeKernelGradientCRK(
-            xi, xj, 
-            hj, hj, # forces gather
-            kernelProperties, domainState,    
-            True, Ai, Bi, gradAi, gradBi
-        )
-        if useGradientRenormalization:
-            gradw_i = matmul(Li, gradw_i)
-
-        _, Aj, Bj, gradAj, gradBj = getCRK_j(correctionData, j)
-        gradw_j = -computeKernelGradientCRK(
-            xj, xi,
-            hi, hi, # forces scatter
-            kernelProperties, domainState,    
-            True, Aj, Bj, gradAj, gradBj
-        )
-        if useGradientRenormalization:
-            gradw_j = matmul(Li, gradw_j)
-
-        # Frontiere et al. (2017) Eq. (69) one-sided viscous pressures Q_i, Q_j of the reconstructed pair velocity;
-        # the formula (mu with the particle's own h, eps^2 = 1e-2, min(0, .), switched alpha / BetaMode) lives once in the
-        # `Frontiere2017` term of `modules/dissipation/pi/terms.py`
-        alpha_j = access_optional(referenceAlphas, j, viscositySwitch, scalar_t(1.0))
-        Q_i = computeFrontiereQ(xi, xj, hi, hj, rhoi, rhoj, vij_dot, domainState, kernelProperties.kernelFunction,
-                                cs_i, cs_j, alpha_i, alpha_j, viscosityParams, False, crkViscosityParams.viscosityKernelScale)
-        Q_j = computeFrontiereQ(xi, xj, hi, hj, rhoi, rhoj, vij_dot, domainState, kernelProperties.kernelFunction,
-                                cs_i, cs_j, alpha_i, alpha_j, viscosityParams, True, crkViscosityParams.viscosityKernelScale)
-
-
-        gradw_ij = scalar_t(0.5) * (gradw_i + gradw_j)
-        # gradw_ij = gradw_i
-        # gradw_j = gradw_i # E.2 in crksph suggests using the super symmetric form
-
-
-        # omegaj = referenceOmegas[j] if useGradHTerms else scalar_t(1.0)
-        # pressureTerm_j = Pj / (rhoj*rhoj) / omegaj
-        
-        mu_ij = scalar_t(1.0)
-        # mu_ij = ux_ij #/ (r_ij + scalar_t(1.0e-14) * hi)
-
-        # note that the term here should be multiplied with rho_i if it was a gradient operation
-        # however, because we are computing the pressure force this cancel out with the division by rho_i in the pressure term, so we do not include it here
-        # we do need to include the minus sign because the pressure force is -P gradW
-        # Vj = referenceVolumes[j]
-        # Vi = mi/rhoi
-        # Vj = mj/rhoj
-        pairWeight = Vi * Vj
-        if crkViscosityParams.meanVolumeWeights:
-            pairWeight = scalar_t(0.25) * (Vi + Vj) * (Vi + Vj)
-        pressureTerm_ij = -(P_i + P_j) * gradw_ij * pairWeight / mi
-        # pressureTerms_i = -P_i * gradw_i * Vi * Vj / mi
-        # pressureTerms_j = -P_j * gradw_j * Vi * Vj / mi
-
-
-        # pressureTerms_i = - P_i * gradw_i * Vi * Vj / mi
-        # pressureTerms_j = - P_j * gradw_j * Vi * Vj / mi
-        # pressureTerm_ij = (pressureTerms_i + pressureTerms_j)
-
-        rho_bar = scalar_t(0.5) * (rhoi + rhoj)
-        # Q_i = pi_i * rho_bar / rhoj * rhoi
-        # Q_j = pi_j * rho_bar
-
-        viscosityTerm_ij = -(Q_i + Q_j) * mu_ij * gradw_ij * pairWeight / mi
-        # viscosityTerms_i = - Q_i * Vj * mu_ij * gradw_i * Vi / mi
-        # viscosityTerms_j = - Q_j * Vj * mu_ij * gradw_j * Vi / mi
-        # viscosityTerm_ij = (viscosityTerms_i + viscosityTerms_j)
-        # viscosityTerm_ij = -(pi_i + pi_j) * gradw_ij * Vi * Vj / mi * mu_ij
-
-        viscosityAccel_ij[jj] = viscosityTerm_ij
-        pressureAccel_ij[jj] = pressureTerm_ij
+        pressureTerm_ij, viscosityTerm_ij, thermal = computeCrkSPHPair(
+            i, j, dim, xi, hi, mi, rhoi, referenceState, correctionData, domainState, kernelProperties,
+            useGradientRenormalization, Li, Vi, Ai, Bi, gradAi, gradBi,
+            vel_i, referenceVelocities, individual_cs, cs_i, referenceCs,
+            viscositySwitch, alpha_i, referenceAlphas, explicitPressure, P_i, referencePressures,
+            viscosityParams, crkViscosityParams, gradV_i, referenceVelocityTensor, calculateDudt)
+        if retainPairs:
+            viscosityAccel_ij[jj] = viscosityTerm_ij
+            pressureAccel_ij[jj] = pressureTerm_ij
         out += pressureTerm_ij + viscosityTerm_ij
-        if calculateDudt:
-            # Same raw predictor as dudt.py; reuse the pair geometry, corrected
-            # gradient and one-sided Q values already evaluated for momentum.
-            dot = wp.dot(vel_i - vel_j, gradw_ij)
-            pTerm = P_j * dot * pairWeight / mi
-            vTerm = scalar_t(0.5) * (Q_i + Q_j) * mu_ij * dot * pairWeight / mi
-            if crkViscosityParams.oneSidedWork:
-                vTerm = Q_j * mu_ij * dot * pairWeight / mi
-            heating += pTerm + vTerm
+        heating += thermal
     return out, heating
 
 
@@ -234,7 +262,7 @@ def computeCrkSPHAccel_Func_Adjacency(
     crkViscosityParams: CRKViscosity,
 
     queryVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), referenceVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)),# type: ignore
-    calculateDudt: wp.bool,
+    calculateDudt: wp.bool, retainPairs: wp.bool,
     accel: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     pressureAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     viscosityAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)) # type: ignore
@@ -300,7 +328,7 @@ def computeCrkSPHAccel_Func_Adjacency(
             crkViscosityParams,
             gradV_i, referenceVelocityTensor,
 
-            calculateDudt, pressureAccel_ij, viscosityAccel_ij
+            calculateDudt, retainPairs, pressureAccel_ij, viscosityAccel_ij
         )
         out += partial
         heating += thermal
@@ -328,7 +356,7 @@ def computeCrkSPHAccel_Kernel(
     crkViscosityParams: CRKViscosity,
 
     queryVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), referenceVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)),# type: ignore
-    calculateDudt: wp.bool,
+    calculateDudt: wp.bool, retainPairs: wp.bool,
     # Outputs
     accel : wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     pressureAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
@@ -354,7 +382,7 @@ def computeCrkSPHAccel_Kernel(
         viscosityParams,
         crkViscosityParams,
         queryVelocityTensor, referenceVelocityTensor,
-        calculateDudt, accel, pressureAccel_ij, viscosityAccel_ij
+        calculateDudt, retainPairs, accel, pressureAccel_ij, viscosityAccel_ij
     )
 
     accel[i] = acceleration
@@ -380,7 +408,7 @@ def computeCrkSPHAccel_KernelTiled(
     crkViscosityParams: CRKViscosity,
 
     queryVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), referenceVelocityTensor: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)),# type: ignore
-    calculateDudt: wp.bool,
+    calculateDudt: wp.bool, retainPairs: wp.bool,
     # Outputs
     accel : wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     pressureAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
@@ -404,7 +432,7 @@ def computeCrkSPHAccel_KernelTiled(
         viscosityParams,
         crkViscosityParams,
         queryVelocityTensor, referenceVelocityTensor,
-        calculateDudt, accel, pressureAccel_ij, viscosityAccel_ij
+        calculateDudt, retainPairs, accel, pressureAccel_ij, viscosityAccel_ij
     )
     total = laneSum(partial)
     thermalTotal = laneSum(thermal)
@@ -414,7 +442,7 @@ def computeCrkSPHAccel_KernelTiled(
 
 
 def _crkAccelPairShape(ctx, extras):
-    return ctx.adjacency.paddedI.shape[0]   # per-edge outputs have the PADDED capacity (a fixed shape for a graph); the kernels fill the first numEdges
+    return ctx.adjacency.paddedJ.shape[0] if extras['retainPairs'] else 1   # per-edge outputs have the PADDED capacity (a fixed shape for a graph); the kernels fill the first numEdges
 
 
 def _crkAccelDtype(ctx, extras):
@@ -449,6 +477,7 @@ _CRK_ACCEL = OperatorSpec(
         ExtraSpec("queryVelocityTensor", ExtraKind.TENSOR),
         ExtraSpec("referenceVelocityTensor", ExtraKind.TENSOR),
         ExtraSpec("calculateDudt", ExtraKind.SCALAR),
+        ExtraSpec("retainPairs", ExtraKind.SCALAR),
     ),
 )
 
@@ -473,7 +502,7 @@ def computeCrkSPHAccelWarp(
     crkState: Optional[CRKState] = None,
     gradHState: Optional[Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor], GradHState]] = None,
     renormalizationState: Optional[Union[torch.Tensor,RenormalizationState]] = None,
-    *, returnDudt: bool = False,
+    *, returnDudt: bool = False, retainPairs: bool = True,
 ):
     if adjacency is None or isinstance(adjacency, CompactHashMap):
         raise ValueError("This module requires an adjacency structure.")
@@ -555,7 +584,7 @@ def computeCrkSPHAccelWarp(
                 conductivityParams=conductivityParams,
                 crkViscosityParams=crkViscosityParams,
                 queryVelocityTensor=queryVelocityTensor, referenceVelocityTensor=referenceVelocityTensor,
-                calculateDudt=returnDudt,
+                calculateDudt=returnDudt, retainPairs=retainPairs,
             )
             return result if returnDudt else result[:3]
 

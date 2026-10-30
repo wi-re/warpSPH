@@ -49,10 +49,10 @@ def _common(state, config, schemeConfig, adjacency, stage: CRKStage, gradH: Opti
     )
 
 
-def computeCRKAccel(state, config, schemeConfig, adjacency, stage: CRKStage, gradH: Optional[GradHState] = None):
+def computeCRKAccel(state, config, schemeConfig, adjacency, stage: CRKStage, gradH: Optional[GradHState] = None, *, retainPairs=True):
     """Pressure + CRK pseudo-viscosity acceleration; returns `(dvdt, ap_ij, av_ij)` (the pair terms the energy balance partitions)."""
     acceleration, pressure, viscosity, stage.dudt = computeCrkSPHAccelWarp(
-        **_common(state, config, schemeConfig, adjacency, stage, gradH), returnDudt=True)
+        **_common(state, config, schemeConfig, adjacency, stage, gradH), returnDudt=True, retainPairs=retainPairs)
     return acceleration, pressure, viscosity
 
 

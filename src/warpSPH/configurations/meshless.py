@@ -12,6 +12,7 @@ in `schemes/builder.py`.
 __all__ = ['MeshlessConfig', 'MFMConfig', 'MFVConfig', 'meshlessConfigToDict', 'dictToMeshlessConfig']
 
 from dataclasses import dataclass, field
+import math
 from typing import Optional, Dict, Any
 from .moduleConfigurations.materials import normalizeMaterials, materialsToDict
 
@@ -42,6 +43,8 @@ class MeshlessConfig:
 
     # The package-owned driver retains the D4-measured per-mode time map.
     temporalScheme: str = field(default='auto', metadata={"description": "the temporal scheme the step performs: 'auto' (per-mode default from the D4 measurement: MFM -> 'ssprk', MFV -> 'hancock'), 'hancock' (the core driver's single-stage MUSCL-Hancock + Euler; the G1 port-fidelity setting), 'ssprk' (two-stage SSPRK, rates evaluated at dt = 0), or 'kdk' (kick-drift-kick, rates at dt = 0)"})
+
+    neighborSkin: float = field(default=1.0, metadata={'description': 'Neighbor-search skin multiplier: 1 rebuilds each geometry; >1 reuses a validity-checked padded list and filters exact current pairs. Moments and fluxes remain fresh.'})
 
     # geometry / closure solve (warpSPHCore.mfm.MeshlessWarp.build)
     closure: str = field(default='none', metadata={"description": "face closure: 'none' (default; Hopkins 2015 / GIZMO -- the effective faces as the moment matrices give them, no projection; matches GIZMO on the Yee vortex and KH 256, COMPRESSIBLE_SPH_PLAN 2026-10-12) or 'project' (the core's graph-Laplacian projection enforcing sum_j A_ij = 0 exactly: not in GIZMO, lower velocity error on near-lattice flow but flips / amplifies faces on disordered roll-ups -- opt-in)"})
@@ -76,6 +79,8 @@ class MeshlessConfig:
 
     def validate(self, config=None):
         resolve_temporal_scheme(self)
+        if not math.isfinite(self.neighborSkin) or self.neighborSkin < 1.:
+            raise ValueError('neighborSkin must be finite and >= 1')
         self.materials = normalizeMaterials(self.materials)
         if self.mfvUpdate != 'conserved':
             raise ValueError('mfvUpdate must be conserved: the experimental primitive kick is a whole-step map, not a stage derivative')
@@ -96,6 +101,7 @@ class MFVConfig(MeshlessConfig):
 def meshlessConfigToDict(config: MeshlessConfig) -> Dict[str, Any]:
     return {
         'gamma': config.gamma,
+        'neighborSkin': config.neighborSkin,
         'materials': materialsToDict(config.materials),
         'mode': config.mode,
         'order': config.order,
@@ -129,6 +135,7 @@ def meshlessConfigToDict(config: MeshlessConfig) -> Dict[str, Any]:
 
 def dictToMeshlessConfig(configDict: Dict[str, Any]) -> MeshlessConfig:
     config = MeshlessConfig()
+    config.neighborSkin = configDict.get('neighborSkin', config.neighborSkin)
     config.gamma = configDict.get('gamma', config.gamma)
     config.materials = normalizeMaterials(configDict.get('materials'))
     config.mode = configDict.get('mode', config.mode)

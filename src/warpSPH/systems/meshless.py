@@ -29,6 +29,9 @@ class MeshlessState(ParticleIdentityState):
     UIDs: torch.Tensor = constant(tags=('particle_UID',))
     UIDcounter: int = constant(tags=('particle_UIDcounter',))
 
+    # Diagnostic integrals using the accepted driver's stage weights: force work, bath heat.
+    sourceEnergyBudget: Optional[torch.Tensor] = constant(tags=('source_energy_budget',), default=None)
+
     # the previous step's closure potential (N, dim): warm start for the CG solve
     lam: Optional[torch.Tensor] = constant(tags=('closure_lam',), default=None)
     # derived primitives (diagnostics), refreshed by the step and copied in finalize
@@ -41,11 +44,14 @@ class MeshlessState(ParticleIdentityState):
     pressures: torch.Tensor = copied(tags=('pressure',), default=None)
     soundspeeds: torch.Tensor = copied(tags=('soundSpeed',), default=None)
 
+    # Accepted driven-state projection: thermal and kinetic energy exchange.
+    boundaryProjectionBudget: Optional[torch.Tensor] = constant(default=None)
 
 @dataclass
 class MeshlessSystemUpdate:
     dxdt: torch.Tensor = tagged(tags=('position_derivative',))
     dQdt: torch.Tensor = tagged(tags=('conserved_derivative',))
+    sourceEnergyRates: Optional[torch.Tensor] = None
 
 
 @dataclass
@@ -57,9 +63,12 @@ class MeshlessSystem(BaseIntegrationSystem):
     meshlessStages: object = None
     drivenParticles: object = None
     inflowReservoir: object = None
+    sourceTerms: object = None
 
     def initialize(self, dt, *args, conservedIntegration=False, **kwargs):
         if conservedIntegration:
+            if self.sourceTerms is not None and self.state.sourceEnergyBudget is None:
+                self.state.sourceEnergyBudget = self.state.Q.new_zeros(2, dtype=torch.float64)
             from ..modules.meshless.stages import MeshlessStages
             self.meshlessStages = MeshlessStages()
         return super().initialize(dt, *args, **kwargs)
@@ -92,7 +101,7 @@ class MeshlessSystem(BaseIntegrationSystem):
                     setattr(newState, name, value.clone())
         from ..modules.meshless.geometry import inheritGeometry
         inheritGeometry(state, newState)
-        return MeshlessSystem(state=newState, adjacency=self.adjacency, t=self.t, domain=self.domain, meshlessStages=self.meshlessStages, drivenParticles=self.drivenParticles, inflowReservoir=self.inflowReservoir)
+        return MeshlessSystem(state=newState, adjacency=self.adjacency, t=self.t, domain=self.domain, meshlessStages=self.meshlessStages, drivenParticles=self.drivenParticles, inflowReservoir=self.inflowReservoir, sourceTerms=self.sourceTerms)
 
     def apply_position_update(self, update, spec: PositionUpdateSpec, **kwargs):
         # Legacy exact-delta callers apply the already time-centred net drift
@@ -126,6 +135,11 @@ class MeshlessSystem(BaseIntegrationSystem):
         self.adjacency = returnValues[-1][0]
         lastState = returnValues[-1][1]
         if kwargs.get('conservedIntegration', False):
+            if self.sourceTerms is not None:
+                # Bookkeeping only: use the accepted integrator weights, never
+                # mutate the initial or shared stage state on an RHS call.
+                rates = [weight*update.sourceEnergyRates for weight, update in zip(weights, updateValues)]
+                self.state.sourceEnergyBudget = initialState.state.sourceEnergyBudget + dt*sum(rates)
             # Time stepping has already accepted (x,Q). Preserve the support
             # update and closure warm start used by the historical method, but
             # never overwrite its diagnostics with a previous stage's (v,u,m).
@@ -140,9 +154,14 @@ class MeshlessSystem(BaseIntegrationSystem):
             geometry = (self.inflowReservoir.build(self.state, config, scheme, self.t)
                         if self.inflowReservoir is not None else
                         buildGeometry(self.state.positions, self.state.supports, self.state.lam,
-                                      config, scheme, self.domain))
+                                      config, scheme, self.domain, owner=self.state))
             if self.drivenParticles is not None:
+                from ..modules.boundaryConditions.thermal import caloricConserved
+                before = caloricConserved(self.state.Q)
                 self.drivenParticles.conserved(self.state, geometry, self.t, float(scheme.gamma))
+                exchange = caloricConserved(self.state.Q)-before
+                previous = self.state.boundaryProjectionBudget
+                self.state.boundaryProjectionBudget = (torch.zeros_like(exchange) if previous is None else previous)+exchange
             refreshPrimitives(self.state, geometry, particleGamma(self.state, scheme), scheme.nngb, config.dim,
                               updateSupports=False)
             if self.inflowReservoir is None:

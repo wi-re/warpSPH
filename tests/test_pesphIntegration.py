@@ -107,14 +107,11 @@ def test_driven_fluid_band_translates_prescribed_thermal_fields(variant):
             'velocities': lambda s, *args: torch.full_like(s.velocities, .2)})
     scheme.boundaryConditions = [bc]
     assert applyPESPHDirichlet(system, 1e-4, cfg, scheme, p)
-    if variant is PESPHVariant.PressureEnergy:
-        actual = state.totalEnergies
-        target = state.masses*(3.+.5*state.positions.shape[1]*.2**2)
-    else:
-        actual = state.entropies
-        target = torch.full_like(actual, (scheme.gamma-1)*3.*2.**(1-scheme.gamma))
-    assert torch.allclose(actual[mask], target[mask], atol=TOL, rtol=TOL)
+    actual = state.totalEnergies if variant is PESPHVariant.PressureEnergy else state.entropies
     assert torch.equal(actual[~mask], old[~mask])
+    refreshPESPHState(system, cfg, scheme, solveSupport=False)
+    assert torch.allclose(state.internalEnergies[mask], torch.full_like(state.masses[mask],3.),
+                          atol=TOL, rtol=TOL)
 
 
 @pytest.mark.parametrize('variant', VARIANTS)

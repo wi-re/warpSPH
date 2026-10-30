@@ -3,6 +3,7 @@
 One thread per CSR row visits edges in order, as torch.segment_reduce does.
 The Torch path retains automatic differentiation when inputs need a tape.
 """
+from ...utils.adjacency import cooRows
 import torch
 import warp as wp
 from warpSPHCore import scalar_t, index_t, offset_t, get_torch_precision
@@ -37,7 +38,7 @@ def reducePairWork(adjacency, velocity, work):
             or velocity.dtype != get_torch_precision() or not hasattr(adjacency, 'edgeOffsets')
             or adjacency.numNeighbors.dtype != torch.int32):
         count = getattr(adjacency, 'numEdges', work.shape[0])
-        i, j = adjacency.paddedI[:count], adjacency.paddedJ[:count]
+        i, j = cooRows(adjacency)[:count], adjacency.paddedJ[:count]
         return segment_sum(torch.einsum('ij,ij->i', velocity[j] - velocity[i], work[:count]), adjacency.numNeighbors)
     out = torch.empty(velocity.shape[0], dtype=velocity.dtype, device=velocity.device)
     w = lambda t: wp.from_torch(t.contiguous())
@@ -79,7 +80,7 @@ def reduceReferenceEntropyWork(adjacency, velocity, work, entropy):
             or velocity.dtype != get_torch_precision() or not hasattr(adjacency, 'edgeOffsets')
             or adjacency.numNeighbors.dtype != torch.int32):
         count = getattr(adjacency, 'numEdges', work.shape[0])
-        i, j = adjacency.paddedI[:count], adjacency.paddedJ[:count]
+        i, j = cooRows(adjacency)[:count], adjacency.paddedJ[:count]
         dot = torch.einsum('ij,ij->i', velocity[j] - velocity[i], work[:count])
         si, sj = entropy[i], entropy[j]
         fraction = torch.where(dot > 0., sj.abs(), si.abs()) / (si.abs() + sj.abs()).clamp_min(tiny)

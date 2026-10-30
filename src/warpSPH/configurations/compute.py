@@ -14,6 +14,7 @@ so existing cases and tests keep working (`stepMode`, `CaseSpec.cudaGraph` and a
   request a run cannot honour (no CUDA, stored trajectories, host-sized boundary conditions, ...) runs eagerly, with a warning for an explicit one.
   The crossover is where the step stops being limited by the host: below it the replay is faster, above it the eager path is, because the
   graphed variants (fixed-shape grid support solve, deferred checks) cost kernel time.
+* `neighborOmitI`: None resolves to true for compressible runner contexts, false for other families; bare low-level configs keep COO unless explicitly enabled. CSR-only searches do not allocate the redundant row array. Other families need a consumer audit before changing their default.
 * `neighborCollection`: `auto` selects split I/J collection on CUDA and fused collection on CPU; explicit `fused` or `split` overrides.
 * `neighborQueryOrder`: `auto` reuses the grid permutation for aliased self queries; `input` forces original execution order, `spatial` requires aliases.
   This schedules work only: particle state, original CSR rows and per-row neighbor order stay unchanged.
@@ -65,6 +66,7 @@ class ComputeConfig:
     iterationChecks: str = field(default='adaptive', metadata={'description': "relaxed-Jacobi style loops read their convergence test back after every iteration ('every') or at checkpoints learned from the previous solve ('adaptive')"})
     krylovCheckEvery: Optional[int] = field(default=None, metadata={'description': 'Krylov solvers read their still-running flag every this many iterations (None = DEFAULT_KRYLOV_CHECK_EVERY)'})
 
+    neighborOmitI: Optional[bool] = field(default=None, metadata={'description': 'omit the redundant COO row array at neighbour allocation; None defaults to on for compressible runs, off for other families pending consumer qualification'})
     neighborCollection: str = field(default='auto', metadata={'description': "neighbor pair collection: 'auto' uses split I/J on CUDA and fused on CPU; 'split' and 'fused' explicitly select either path"})
     neighborQueryOrder: str = field(default='auto', metadata={'description': "query traversal: 'auto' reuses the grid permutation for self searches; 'input' preserves execution order; 'spatial' requires aliased query/reference positions. Particle/CSR row order is always preserved"})
     neighborGridBuild: str = field(default='scheme', metadata={'description': "pair-list grid build: 'scheme' uses the scheme's grid factory when available; 'eager' bypasses it. Does not change adaptive-support/direct-grid operator traversal"})
@@ -73,6 +75,8 @@ class ComputeConfig:
         self.validate()
 
     def validate(self) -> None:
+        if self.neighborOmitI is not None and type(self.neighborOmitI) is not bool:
+            raise ValueError('compute.neighborOmitI must be bool or None')
         _validateNeighborChoices(self.neighborCollection, self.neighborQueryOrder, self.neighborGridBuild)
         if self.execution not in EXECUTION_MODES:
             raise ValueError(f"compute.execution must be one of {EXECUTION_MODES}, not {self.execution!r}")
@@ -142,7 +146,10 @@ def neighborSearchOptions(config, *, gridFactory=None) -> dict:
     order = getattr(compute, 'neighborQueryOrder', 'auto')
     build = getattr(compute, 'neighborGridBuild', 'scheme')
     _validateNeighborChoices(collection, order, build)
-    options = dict(collection=collection, queryOrder=order)
+    omitI = getattr(compute, 'neighborOmitI', None)
+    if omitI is not None and type(omitI) is not bool:
+        raise ValueError('compute.neighborOmitI must be bool or None')
+    options = dict(collection=collection, queryOrder=order, storeI=not bool(omitI))
     if gridFactory is not None:
         options['gridFactory'] = None if build == 'eager' else gridFactory
     return options

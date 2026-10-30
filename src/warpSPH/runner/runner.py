@@ -146,7 +146,8 @@ def buildContext(case: Case, spec: CaseSpec) -> RunContext:
         integrationScheme=resolveEnum(IntegrationSchemeType, integrationSchemeName),
         samplingScheme=resolveEnum(SamplingScheme, spec.samplingScheme),
         compute={k: v for k, v in dict(execution=spec.execution, graphMaxParticles=spec.graphMaxParticles, iterationChecks=spec.iterationChecks,
-                                      krylovCheckEvery=spec.krylovCheckEvery, pipelineOutputs=spec.pipelineOutputs).items() if v is not None},
+                                      krylovCheckEvery=spec.krylovCheckEvery, pipelineOutputs=spec.pipelineOutputs,
+                                      neighborOmitI=(isinstance(scheme, CompressibleSPHScheme) if spec.neighborOmitI is None else spec.neighborOmitI)).items() if v is not None},
         verletScale=spec.verletScale,
         device=device,
         dtype=dtype,
@@ -352,6 +353,8 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         with h5py.File(spec.resumeFrom, 'r') as f:
             system.state = loadState(f['state'], ctx.config.device, type(system.state))
             system.t = float(f.attrs['time'])
+            if case.restoreCheckpoint is not None:
+                case.restoreCheckpoint(ctx, system, f)
         if not spec.quiet:
             print(f'-- resumed from {spec.resumeFrom} '
                  f'(t={system.t:.6f}, step offset {spec.resumeStepOffset}) --')
@@ -371,6 +374,40 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         case = replace(case, timestep=pesphTimestep,
                        extraFields=tuple(dict.fromkeys((*case.extraFields, *CHECKPOINT_FIELDS))))
         ctx.config.dt = pesphTimestep(ctx, system)
+    def capPrescribedStartupTimestep():
+        # Re-evaluate safety after a prescribed-state change, preserving an
+        # initializer's deliberate step ceiling (e.g. RT's 2/3 startup factor).
+        previous = ctx.config.dt
+        proposed = (case.timestep(ctx, system) if case.timestep is not None else
+                    defaultTimestep(ctx, system))
+        if previous is None:
+            ctx.config.dt = proposed
+        elif isinstance(proposed, torch.Tensor):
+            ctx.config.dt = torch.minimum(torch.as_tensor(previous, device=proposed.device, dtype=proposed.dtype), proposed)
+        elif isinstance(previous, torch.Tensor):
+            ctx.config.dt = torch.minimum(previous, previous.new_tensor(proposed))
+        else:
+            ctx.config.dt = min(previous, proposed)
+
+    if getattr(system, 'drivenParticles', None) is not None:
+        if not spec.resumeFrom:
+            from ..modules.meshless.boundary import initializeDrivenParticles
+            initializeDrivenParticles(system, ctx.config, ctx.schemeConfig)
+            if ctx.config.adaptiveDt:
+                capPrescribedStartupTimestep()
+        elif system.state.boundaryProjectionBudget is None:
+            system.state.boundaryProjectionBudget = system.state.Q.new_zeros(2, dtype=torch.float64)
+    from ..modules.boundaryConditions.thermal import finishThermalDirichlet, hasThermalDirichlet
+    if not spec.resumeFrom and finishThermalDirichlet(system, 0., ctx.config, ctx.schemeConfig, account=False):
+        if ctx.config.adaptiveDt:
+            capPrescribedStartupTimestep()
+    if hasThermalDirichlet(ctx.schemeConfig):
+        # A thermal trajectory must contain the evolved thermal state as well
+        # as its exchange counter, including after checkpoint continuation.
+        case = replace(case, extraFields=tuple(dict.fromkeys((*case.extraFields,
+            'internalEnergies', 'supports', 'boundaryProjectionBudget'))))
+    elif getattr(system.state, 'boundaryProjectionBudget', None) is not None:
+        case = replace(case, extraFields=tuple(dict.fromkeys((*case.extraFields, 'boundaryProjectionBudget'))))
     runningState = system.initializeNewState()
     if isinstance(ctx.scheme, IncompressibleSPHScheme):
         # The loop calls the hook only AFTER a step. Cap the first step too,
@@ -434,11 +471,11 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         exportSimulationSystem(ctx.exportPath, 'initialState', ctx.scheme, runningState,
                                exportAdjacency=False, stages=None,
                                exportStagesAdjacency=False,
-                               extraData=dict(extraData, frame_num=0))
+                               extraData=dict(extraData, frame_num=spec.resumeStepOffset))
 
     result = RunResult(ctx=ctx, state=runningState, exportPath=ctx.exportPath)
     if case.diagnostics is not None:
-        result.trajectory.append(dict(case.diagnostics(ctx, runningState), step=-1, t=0.0,
+        result.trajectory.append(dict(case.diagnostics(ctx, runningState), step=spec.resumeStepOffset-1, t=_scalar(runningState.t),
                                       stepTime_ms=0.0))
 
     stepResult = None
@@ -499,6 +536,9 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         steps = ()
 
     for i in steps:
+        # Previous outputs have consumed their stage data. Release it before
+        # entering the next integrator call; the accepted system stays live.
+        stepResult = None
         with _Timer(ctx.device) as timer:
             with record_function("[runner] integrator step"):
                 if stepGraph is not None:
@@ -522,6 +562,9 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
                             schemeConfig=ctx.schemeConfig,
                         )
         runningState = stepResult.state
+        # Keep only the accepted system here. Retaining the original system
+        # pins first-step scratch (e.g. CRK's pair-work vector) until run exit.
+        result.state = runningState
         # Scheme-specific extra step data that doesn't fit the state (e.g.
         # ACSPH's `update.pseudoIterations`/`.epsilonV`, set ad hoc on the
         # `ArtificialCompressibleSystemUpdate` `schemes/incompressible/artificialCompressible.py`
@@ -645,7 +688,9 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         exportSimulationSystem(ctx.exportPath, 'finalState', ctx.scheme, runningState,
                                exportAdjacency=False, stages=stepResult.stages,
                                exportStagesAdjacency=True,
-                               extraData=dict(extraData, frame_num=result.nSteps))
+                               extraData=dict(extraData,
+                                              **(case.extraData(ctx, runningState) if case.extraData else {}),
+                                              frame_num=spec.resumeStepOffset+result.nSteps))
     if outFile is not None:
         outFile.close()
 
@@ -722,6 +767,9 @@ def _runPipelined(ctx, case, spec, result, stepGraph, steps, progress, runningSt
         stepMs = (time.perf_counter() - ts) * 1e3
         handle = None
         runningState = stepResult.state
+        # Keep only the accepted system here. Retaining the original system
+        # pins first-step scratch (e.g. CRK's pair-work vector) until run exit.
+        result.state = runningState
         ctx.scratch['lastStageUpdate'] = stepResult.stages[-1].update if stepResult.stages else None
         absStep = i + spec.resumeStepOffset
         callAudit.markStep()    # no-op unless the call audit is on (warpSPHCore/callAudit.py)
@@ -793,6 +841,9 @@ def _runPipelined(ctx, case, spec, result, stepGraph, steps, progress, runningSt
         handle = stepGraph.launch(runningState, ctx.config.dt, ctx.config, ctx.schemeConfig,
                                   verbose=spec.verbose)
         outputs(i, absStep, runningState, stepResult, stepMs, ready, final=False)
+        # The side-stream output dependency is registered by outputs().
+        # Terminal steps retain their stages for the final checkpoint below.
+        stepResult = None
 
     if handle is not None:
         stepGraph.finish(handle)
@@ -1007,7 +1058,8 @@ def _plotAndStore(ctx: RunContext, case: Case, spec: CaseSpec, state, stepResult
             writeFrame(groups, i, stepResult.state, stepResult.stages,
                        config=ctx.config, schemeConfig=ctx.schemeConfig,
                        uniqueParticles=True, writeStages=False,
-                       extraFields=case.extraFields)
+                       extraFields=case.extraFields,
+                       extraData=case.trajectoryData(ctx, state) if case.trajectoryData else None)
         else:
             exportSimulationSystem(ctx.exportPath, f'state_{i:04d}', ctx.scheme,
                                    state, exportAdjacency=False,

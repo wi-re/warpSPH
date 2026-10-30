@@ -28,9 +28,113 @@ __all__ = ['computeCompSPHAccelWarp']
 
 
 @wp.func
+def computeCompSPHPair(
+    i:wp.int32,j:wp.int32,dim:wp.int32,
+    xi:vector(length=Any,dtype=scalar_t),hi:scalar_t,mi:scalar_t,rhoi:scalar_t,
+    referenceState:Any,domainState:domainData,kernelProperties:kernelState,
+    useGradientRenormalization:wp.bool,Li:matrix(shape=(Any,Any),dtype=scalar_t),
+    useGradHTerms:wp.bool,omega_i:scalar_t,referenceOmegas:wp.array(dtype=scalar_t),
+    useVolume:wp.bool,Vi:scalar_t,referenceVolumes:wp.array(dtype=scalar_t),
+    useCRK:wp.bool,Ai:scalar_t,Bi:vector(length=Any,dtype=scalar_t),gradAi:vector(length=Any,dtype=scalar_t),gradBi:matrix(shape=(Any,Any),dtype=scalar_t),
+    vel_i:vector(length=Any,dtype=scalar_t),referenceVelocities:wp.array(dtype=vector(length=Any,dtype=scalar_t)),
+    u_i:scalar_t,referenceEnergies:wp.array(dtype=scalar_t),
+    individual_cs:wp.bool,cs_i:scalar_t,referenceCs:wp.array(dtype=scalar_t),
+    viscositySwitch:wp.bool,alpha_i:scalar_t,referenceAlphas:wp.array(dtype=scalar_t),
+    explicitPressure:wp.bool,P_i:scalar_t,referencePressures:wp.array(dtype=scalar_t),
+    viscosityParams:DiffusionParameters,calculateDudt:wp.bool,
+):
+    pressureTerm_i = P_i / (rhoi*rhoi )/ (omega_i if useGradHTerms else scalar_t(1.0))
+    heating = scalar_t(0.0)
+    xj, hj, mj, rhoj, kj = getParticle(referenceState, j)
+    vel_j = referenceVelocities[j]
+    u_j = referenceEnergies[j]
+
+    apparentVolume = access_optional(referenceVolumes, j, useVolume, mj / rhoj)
+
+
+    rho_bar = scalar_t(0.5) * (rhoi + rhoj)
+    rho_corr_i = rho_bar / rhoi
+    rho_corr_j = rho_bar / rhoj
+
+    pi_i = computePi_actual(
+        xi, xj,
+        hi, hj,
+        mi, mj,
+        rhoi, rhoj,
+        explicitPressure, P_i, access_optional(referencePressures, j, explicitPressure, scalar_t(0.0)),
+        vel_i, vel_j,
+        domainState,
+        kernelProperties.kernelFunction,
+        cs_i, access_optional(referenceCs, j, individual_cs, viscosityParams.c_s),
+        alpha_i, access_optional(referenceAlphas, j, viscositySwitch, scalar_t(1.0)),
+        viscosityParams,
+        False, False) * rho_corr_i
+    pi_j = computePi_actual(
+        xi, xj,
+        hi, hj,
+        mi, mj,
+        rhoi, rhoj,
+        explicitPressure, P_i, access_optional(referencePressures, j, explicitPressure, scalar_t(0.0)),
+        vel_i, vel_j,
+        domainState,
+        kernelProperties.kernelFunction,
+        cs_i, access_optional(referenceCs, j, individual_cs, viscosityParams.c_s),
+        alpha_i, access_optional(referenceAlphas, j, viscositySwitch, scalar_t(1.0)),
+        viscosityParams,
+        True, False) * rho_corr_j
+
+    gradw_i = computeKernelGradientCRK(
+        xi, xj,
+        hi, hi, # forces gather
+        kernelProperties, domainState,
+        useCRK, Ai, Bi, gradAi, gradBi
+    )
+    if useGradientRenormalization:
+        gradw_i = matmul(Li, gradw_i)
+    gradw_j = computeKernelGradientCRK(
+        xi, xj,
+        hj, hj, # forces scatter
+        kernelProperties, domainState,
+        useCRK, Ai, Bi, gradAi, gradBi
+    )
+    if useGradientRenormalization:
+        gradw_j = matmul(Li, gradw_j)
+
+    gatherGradient = gradw_i
+    gradw_i = scalar_t(0.5) * (gradw_i + gradw_j)
+    gradw_j = gradw_i # Current mean-gradient force policy; Eq.E.2 keeps the two gradients separate.
+
+
+    Pj = access_optional(referencePressures, j, explicitPressure, scalar_t(0.0))
+    omegaj = access_optional(referenceOmegas, j, useGradHTerms, scalar_t(1.0))
+    pressureTerm_j = Pj / (rhoj*rhoj) / omegaj
+
+    x_ij = computeDistanceVec(xi, xj, domainState)
+    r_ij = safe_sqrt(wp.dot(x_ij, x_ij))
+    u_ij = vel_j - vel_i
+    mu_ij = wp.dot(u_ij, x_ij) / (r_ij + scalar_t(1.0e-14) * hi)
+    # mu_ij = ux_ij #/ (r_ij + scalar_t(1.0e-14) * hi)
+
+    # note that the term here should be multiplied with rho_i if it was a gradient operation
+    # however, because we are computing the pressure force this cancel out with the division by rho_i in the pressure term, so we do not include it here
+    # we do need to include the minus sign because the pressure force is -P gradW
+    pressureTerm_ij = -(pressureTerm_i * gradw_i + pressureTerm_j * gradw_j) * mj
+
+    viscosityTerm_ij = -scalar_t(0.5) * (pi_i * gradw_i + pi_j * gradw_j) * apparentVolume * mu_ij
+
+    if calculateDudt:
+        # Preserve the gather predictor (not the mean force gradient).
+        dot = wp.dot(u_ij, gatherGradient)
+        pTerm = -apparentVolume * pressureTerm_i * rhoj * dot
+        vTerm = -scalar_t(0.5) * apparentVolume * pi_i * mu_ij * dot
+        heating += pTerm + vTerm
+    return pressureTerm_ij,viscosityTerm_ij,heating
+
+
+@wp.func
 def computeCompSPHAccel_Func_i(
     # General Shape Parameters and indices
-    i : wp.int32,  dim: wp.int32, 
+    i : wp.int32,  dim: wp.int32,
 
     # SPH properties for the query set (indexed by i)
     xi: vector(dtype = scalar_t, length=Any), hi: scalar_t, mi: scalar_t, rhoi: scalar_t, # type: ignore
@@ -42,10 +146,10 @@ def computeCompSPHAccel_Func_i(
     # periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = scalar_t), domainMax : wp.array(dtype = scalar_t), # type: ignore
     domainState: domainData,
     kernelProperties: kernelState,
-    
+
     # Operation specific parameters
      # type: ignore
-            
+
     beginIndex: offset_t, # type: ignore
     numIndices: wp.int32, # type: ignore
     offsetArray: wp.array(dtype = index_t), # type: ignore
@@ -62,7 +166,7 @@ def computeCompSPHAccel_Func_i(
     useVolume: bool, Vi: scalar_t, referenceVolumes: wp.array(dtype = scalar_t), # type: ignore
     # Whether to use CRK kernel correction for the computation, and the corresponding correction terms if needed.
     useCRK: bool, Ai: scalar_t, Bi: vector(length=Any, dtype=scalar_t), gradAi: vector(length=Any, dtype=scalar_t), gradBi: matrix(shape=(Any, Any), dtype=scalar_t), # type: ignore
-    
+
     vel_i: vector(length=Any, dtype=scalar_t), referenceVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     u_i: scalar_t, referenceEnergies: wp.array(dtype = scalar_t), # type: ignore
 
@@ -71,115 +175,32 @@ def computeCompSPHAccel_Func_i(
     explicitPressure: wp.bool, P_i: scalar_t, referencePressures: wp.array(dtype = scalar_t), # type: ignore
     viscosityParams: DiffusionParameters,
 
-    calculateDudt: wp.bool,
+    calculateDudt: wp.bool, retainPairs: wp.bool,
     # Dummy value to allow allocation
     pressureAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     viscosityAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
 ):
-    pressureTerm_i = P_i / (rhoi*rhoi )/ (omega_i if useGradHTerms else scalar_t(1.0))
-
-    # Initialize the output value
-    out = zero_like_warp(pressureAccel_ij[i])
+    out = zero_like_warp(xi)
     heating = scalar_t(0.0)
-    # # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numIndices):
         jj = beginIndex + offset_t(neighborIndex)
-        j  = wp.int32(offsetArray[jj])
+        j = wp.int32(offsetArray[jj])
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
-            if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
+            if not checkDirectionality_j(referenceKinds[j],kernelProperties.operationMode):
                 continue
-        ##########################################################
-        #   The core particle-particle interaction starts here   #
-        ##########################################################
-        
-        xj, hj, mj, rhoj, kj = getParticle(referenceState, j)
-        vel_j = referenceVelocities[j]
-        u_j = referenceEnergies[j]
-
-        apparentVolume = access_optional(referenceVolumes, j, useVolume, mj / rhoj)
-
-
-        rho_bar = scalar_t(0.5) * (rhoi + rhoj)
-        rho_corr_i = rho_bar / rhoi
-        rho_corr_j = rho_bar / rhoj
-
-        pi_i = computePi_actual(
-            xi, xj, 
-            hi, hj,
-            mi, mj,
-            rhoi, rhoj,
-            explicitPressure, P_i, access_optional(referencePressures, j, explicitPressure, scalar_t(0.0)),
-            vel_i, vel_j,
-            domainState,
-            kernelProperties.kernelFunction,
-            cs_i, access_optional(referenceCs, j, individual_cs, viscosityParams.c_s),
-            alpha_i, access_optional(referenceAlphas, j, viscositySwitch, scalar_t(1.0)),
-            viscosityParams, 
-            False, False) * rho_corr_i
-        pi_j = computePi_actual(
-            xi, xj, 
-            hi, hj,
-            mi, mj,
-            rhoi, rhoj,
-            explicitPressure, P_i, access_optional(referencePressures, j, explicitPressure, scalar_t(0.0)),
-            vel_i, vel_j,
-            domainState,
-            kernelProperties.kernelFunction,
-            cs_i, access_optional(referenceCs, j, individual_cs, viscosityParams.c_s),
-            alpha_i, access_optional(referenceAlphas, j, viscositySwitch, scalar_t(1.0)),
-            viscosityParams, 
-            True, False) * rho_corr_j
-        
-        gradw_i = computeKernelGradientCRK(
-            xi, xj, 
-            hi, hi, # forces gather
-            kernelProperties, domainState,    
-            useCRK, Ai, Bi, gradAi, gradBi
-        )
-        if useGradientRenormalization:
-            gradw_i = matmul(Li, gradw_i)
-        gradw_j = computeKernelGradientCRK(
-            xi, xj,
-            hj, hj, # forces scatter
-            kernelProperties, domainState,    
-            useCRK, Ai, Bi, gradAi, gradBi
-        )
-        if useGradientRenormalization:
-            gradw_j = matmul(Li, gradw_j)
-
-        gatherGradient = gradw_i
-        gradw_i = scalar_t(0.5) * (gradw_i + gradw_j)
-        gradw_j = gradw_i # Current mean-gradient force policy; Eq.E.2 keeps the two gradients separate.
-
-
-        Pj = access_optional(referencePressures, j, explicitPressure, scalar_t(0.0))
-        omegaj = access_optional(referenceOmegas, j, useGradHTerms, scalar_t(1.0))
-        pressureTerm_j = Pj / (rhoj*rhoj) / omegaj
-        
-        x_ij = computeDistanceVec(xi, xj, domainState)
-        r_ij = safe_sqrt(wp.dot(x_ij, x_ij))
-        u_ij = vel_j - vel_i
-        mu_ij = wp.dot(u_ij, x_ij) / (r_ij + scalar_t(1.0e-14) * hi)
-        # mu_ij = ux_ij #/ (r_ij + scalar_t(1.0e-14) * hi)
-
-        # note that the term here should be multiplied with rho_i if it was a gradient operation
-        # however, because we are computing the pressure force this cancel out with the division by rho_i in the pressure term, so we do not include it here
-        # we do need to include the minus sign because the pressure force is -P gradW
-        pressureTerm_ij = -(pressureTerm_i * gradw_i + pressureTerm_j * gradw_j) * mj
-
-        viscosityTerm_ij = -scalar_t(0.5) * (pi_i * gradw_i + pi_j * gradw_j) * apparentVolume * mu_ij
-
-        viscosityAccel_ij[jj] = viscosityTerm_ij
-        pressureAccel_ij[jj] = pressureTerm_ij
-        out += pressureTerm_ij + viscosityTerm_ij
-        if calculateDudt:
-            # Preserve the gather predictor (not the mean force gradient).
-            dot = wp.dot(u_ij, gatherGradient)
-            pTerm = -apparentVolume * pressureTerm_i * rhoj * dot
-            vTerm = -scalar_t(0.5) * apparentVolume * pi_i * mu_ij * dot
-            heating += pTerm + vTerm
-    return out, heating
-
+        ap,av,thermal = computeCompSPHPair(
+            i,j,dim,xi,hi,mi,rhoi,referenceState,domainState,kernelProperties,
+            useGradientRenormalization,Li,useGradHTerms,omega_i,referenceOmegas,
+            useVolume,Vi,referenceVolumes,useCRK,Ai,Bi,gradAi,gradBi,
+            vel_i,referenceVelocities,u_i,referenceEnergies,
+            individual_cs,cs_i,referenceCs,viscositySwitch,alpha_i,referenceAlphas,
+            explicitPressure,P_i,referencePressures,viscosityParams,calculateDudt)
+        if retainPairs:
+            pressureAccel_ij[jj] = ap
+            viscosityAccel_ij[jj] = av
+        out += ap + av
+        heating += thermal
+    return out,heating
 
 
 @wp.func
@@ -196,15 +217,15 @@ def computeCompSPHAccel_Func_Adjacency(
     gridState: gridData,
     numOffsets: wp.int32,
 
-    kernelProperties: kernelState, 
-    
+    kernelProperties: kernelState,
+
     queryVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     queryEnergies: wp.array(dtype = scalar_t), referenceEnergies: wp.array(dtype = scalar_t), # type: ignore
     individual_cs: wp.bool, queryCs: wp.array(dtype = scalar_t), referenceCs: wp.array(dtype = scalar_t), # type: ignore
     viscositySwitch: wp.bool, queryAlphas: wp.array(dtype = scalar_t), referenceAlphas: wp.array(dtype = scalar_t), # type: ignore
     explicitPressure: wp.bool, queryPressures: wp.array(dtype = scalar_t), referencePressures: wp.array(dtype = scalar_t), # type: ignore
     viscosityParams: DiffusionParameters,
-    calculateDudt: wp.bool,
+    calculateDudt: wp.bool, retainPairs: wp.bool,
     accel: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     pressureAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     viscosityAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)) # type: ignore
@@ -213,7 +234,7 @@ def computeCompSPHAccel_Func_Adjacency(
     if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
         if not checkDirectionality_i(ki, kernelProperties.operationMode):
             return zero_like_warp(accel[i]), scalar_t(0.0)
-        
+
     useGradientRenormalization, Li = getL_i(correctionData, i)
     useGradHTerms, omega_i = getGradH_i(correctionData, i)
     useVolume, Vi = getVolume_i(correctionData, i)
@@ -233,22 +254,22 @@ def computeCompSPHAccel_Func_Adjacency(
             continue
         beginIndex = offset_t(0)
         numIndices = wp.int32(0)
-        if useAdjacency:    
+        if useAdjacency:
             beginIndex = adjacencyState.neighborOffsets[i]
             numIndices = adjacencyState.numNeighbors[i]
         else:
             gridBegin, numIndices = checkOffset(
-                i, queryState.positions, gridState.numCells, gridState.D, 
+                i, queryState.positions, gridState.numCells, gridState.D,
                 o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
                 domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
             )
             beginIndex = offset_t(gridBegin)
             if beginIndex < 0:
                 continue
-        
+
         beginIndex, numIndices = laneSlice(beginIndex, numIndices, lane, lanes, useAdjacency)
         partial, thermal = computeCompSPHAccel_Func_i(
-            i, dim, 
+            i, dim,
             xi, hi, mi, rhoi,
             referenceState, domainState,
             kernelProperties,
@@ -267,7 +288,7 @@ def computeCompSPHAccel_Func_Adjacency(
             explicitPressure, P_i, referencePressures,
             viscosityParams,
 
-            calculateDudt, pressureAccel_ij, viscosityAccel_ij
+            calculateDudt, retainPairs, pressureAccel_ij, viscosityAccel_ij
         )
         out += partial
         heating += thermal
@@ -283,7 +304,7 @@ def computeCompSPHAccel_Kernel(
 
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
     correctionData: Any,
-    
+
     kernelProperties: kernelState,
     # Do not change the parameters above
     queryVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
@@ -292,20 +313,20 @@ def computeCompSPHAccel_Kernel(
     viscositySwitch: wp.bool, queryAlphas: wp.array(dtype = scalar_t), referenceAlphas: wp.array(dtype = scalar_t), # type: ignore
     explicitPressure: wp.bool, queryPressures: wp.array(dtype = scalar_t), referencePressures: wp.array(dtype = scalar_t), # type: ignore
     viscosityParams: DiffusionParameters,
-    calculateDudt: wp.bool,
+    calculateDudt: wp.bool, retainPairs: wp.bool,
     # Outputs
     accel : wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     pressureAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     viscosityAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     dudt: wp.array(dtype=scalar_t),
-):                                                                                    
+):
     i = wp.tid()
     numParticles = queryState.positions.shape[0]
     if i >= numParticles:
         return
 
     acceleration, heating = computeCompSPHAccel_Func_Adjacency(
-        i, domainState.dim, 0, 1, 
+        i, domainState.dim, 0, 1,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,  #queryKinds, referenceKinds,
@@ -316,7 +337,7 @@ def computeCompSPHAccel_Kernel(
         viscositySwitch, queryAlphas, referenceAlphas,
         explicitPressure, queryPressures, referencePressures,
         viscosityParams,
-        calculateDudt, accel, pressureAccel_ij, viscosityAccel_ij
+        calculateDudt, retainPairs, accel, pressureAccel_ij, viscosityAccel_ij
     )
 
     accel[i] = acceleration
@@ -330,7 +351,7 @@ def computeCompSPHAccel_KernelTiled(
 
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
     correctionData: Any,
-    
+
     kernelProperties: kernelState,
     # Do not change the parameters above
     queryVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
@@ -339,7 +360,7 @@ def computeCompSPHAccel_KernelTiled(
     viscositySwitch: wp.bool, queryAlphas: wp.array(dtype = scalar_t), referenceAlphas: wp.array(dtype = scalar_t), # type: ignore
     explicitPressure: wp.bool, queryPressures: wp.array(dtype = scalar_t), referencePressures: wp.array(dtype = scalar_t), # type: ignore
     viscosityParams: DiffusionParameters,
-    calculateDudt: wp.bool,
+    calculateDudt: wp.bool, retainPairs: wp.bool,
     # Outputs
     accel : wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     pressureAccel_ij: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
@@ -350,7 +371,7 @@ def computeCompSPHAccel_KernelTiled(
     # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
     i, lane = wp.tid()
     partial, thermal = computeCompSPHAccel_Func_Adjacency(
-        i, domainState.dim, lane, wp.block_dim(), 
+        i, domainState.dim, lane, wp.block_dim(),
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,  #queryKinds, referenceKinds,
@@ -361,7 +382,7 @@ def computeCompSPHAccel_KernelTiled(
         viscositySwitch, queryAlphas, referenceAlphas,
         explicitPressure, queryPressures, referencePressures,
         viscosityParams,
-        calculateDudt, accel, pressureAccel_ij, viscosityAccel_ij
+        calculateDudt, retainPairs, accel, pressureAccel_ij, viscosityAccel_ij
     )
     total = laneSum(partial)
     thermalTotal = laneSum(thermal)
@@ -370,7 +391,7 @@ def computeCompSPHAccel_KernelTiled(
         dudt[i] = thermalTotal
 
 def _compSPHAccelPairShape(ctx, extras):
-    return ctx.adjacency.paddedI.shape[0]   # per-edge outputs have the PADDED capacity (a fixed shape for a graph); the kernels fill the first numEdges
+    return ctx.adjacency.paddedJ.shape[0] if extras.get('retainPairs',True) else 1   # per-edge outputs have the PADDED capacity (a fixed shape for a graph); the kernels fill the first numEdges
 
 
 def _compSPHAccelDtype(ctx, extras):
@@ -402,6 +423,7 @@ _COMPSPH_ACCEL = OperatorSpec(
         ExtraSpec("referencePressures", ExtraKind.TENSOR),
         ExtraSpec("conductivityParams", ExtraKind.SCALAR),
         ExtraSpec("calculateDudt", ExtraKind.SCALAR),
+        ExtraSpec("retainPairs", ExtraKind.SCALAR),
     ),
 )
 
@@ -410,7 +432,7 @@ def computeCompSPHAccelWarp(
     queryParticles: ParticleState,
     operationProperties: OperationProperties,
     domain: DomainDescription,
-    
+
     conductivityParams: DiffusionParameters,
     queryEnergies: Optional[torch.Tensor] = None, referenceEnergies: Optional[torch.Tensor] = None,
     queryVelocities : Optional[torch.Tensor] = None, referenceVelocities: Optional[torch.Tensor] = None,
@@ -424,7 +446,7 @@ def computeCompSPHAccelWarp(
     crkState: Optional[CRKState] = None,
     gradHState: Optional[Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor], GradHState]] = None,
     renormalizationState: Optional[Union[torch.Tensor,RenormalizationState]] = None,
-    *, returnDudt: bool = False,
+    *, returnDudt: bool = False, retainPairs: bool = True,
 ):
     if adjacency is None or isinstance(adjacency, CompactHashMap):
         raise ValueError("This module requires an adjacency structure.")
@@ -451,7 +473,7 @@ def computeCompSPHAccelWarp(
             # )
 
             referenceParticles = referenceParticles if referenceParticles is not None else queryParticles
-            
+
             queryEnergies_ = queryEnergies if queryEnergies is not None else (queryParticles.internalEnergies if hasattr(queryParticles, 'internalEnergies') else None)
             queryVelocities_ = queryVelocities if queryVelocities is not None else (queryParticles.velocities if hasattr(queryParticles, 'velocities') else None)
             queryCs_ = queryCs if queryCs is not None else (queryParticles.soundspeeds if hasattr(queryParticles, 'soundspeeds') else getCachedDummyTensor((1,), dtype=get_torch_precision(), device=device))
@@ -470,7 +492,7 @@ def computeCompSPHAccelWarp(
                 viscositySwitch = False
             if queryCs is not None or (hasattr(queryParticles, 'soundspeeds') and queryParticles.soundspeeds is not None):
                 individual_cs = True
-            else:            
+            else:
                 individual_cs = False
 
             if queryPressures is not None or (hasattr(queryParticles, 'pressures') and queryParticles.pressures is not None):
@@ -499,7 +521,7 @@ def computeCompSPHAccelWarp(
                 individualCs=individual_cs, queryCs=queryCs_, referenceCs=referenceCs_,
                 viscositySwitch=viscositySwitch, queryAlphas=queryAlphas_, referenceAlphas=referenceAlphas_,
                 explicitPressure=explicitPressure, queryPressures=queryPressures_, referencePressures=referencePressures_,
-                conductivityParams=conductivityParams, calculateDudt=returnDudt,
+                conductivityParams=conductivityParams, calculateDudt=returnDudt, retainPairs=retainPairs,
             )
             return result if returnDudt else result[:3]
 

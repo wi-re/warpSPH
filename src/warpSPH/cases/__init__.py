@@ -43,6 +43,7 @@ CASE_MODULES = (
     'compressible.sod',
     'compressible.sodND',
     'compressible.linearWave',
+    'compressible.drivenTurbulence',
     'compressible.kidder',
     'compressible.noh',
     'compressible.woodwardColella',

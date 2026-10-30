@@ -30,7 +30,7 @@ def computeCompSPHAccel(
     schemeConfig,
     adjacency,
     gradH: Optional[GradHState] = None,
-    *, returnDudt: bool = False,
+    *, returnDudt: bool = False, retainPairs: bool = True,
 ) -> Tuple[torch.Tensor, ...]:
     """Pressure + artificial-viscosity acceleration (current mean-gradient policy).
 
@@ -40,7 +40,7 @@ def computeCompSPHAccel(
     predictor, evaluated using the same pair traversal.
     """
     return computeCompSPHAccelWarp(
-        returnDudt=returnDudt,
+        returnDudt=returnDudt, retainPairs=retainPairs,
         queryParticles = state,
         operationProperties = OperationProperties(
             kernel = config.kernel,
