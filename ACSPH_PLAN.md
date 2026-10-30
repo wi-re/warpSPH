@@ -12,6 +12,30 @@ priority decision does not start new runs or change numerical defaults.
 ## Lobovsky comparison — 2026-10-27 (active)
 
 
+**Separate shared waves from excess breakup (2026-10-30, user):** shared
+negative-pressure wakes belong to the method/reference research question;
+priority is the much greater breakup introduced by full Taylor transport.
+Focused code trace confirms all three controls use the same Michel displacement
+law. The remapped controls add both pressure and full-tensor velocity transport
+before the coordinate update; the third additionally changes BDF history.
+The displacement wrapper restores positions/densities and does not remap fields,
+so this trace finds no duplicate field remap. Both Taylor gradients are evaluated
+on the unshifted accepted state, and fields are assigned together afterward.
+The existing pair tests check tensor contraction/sign, constants and EOS
+correspondence, but do not establish robustness at a collapsing cavity.
+
+Reference comparison remains explicitly nonidentical: dynGPUSPH transports only
+diagonal velocity derivatives, adds near-surface cohesion and a smaller shift
+cap, and applies pressure guards absent from the full Taylor trial. These are
+known source/model differences, not newly established bugs or defaults to copy.
+Next bounded check is to isolate pressure versus velocity transport at the same
+pre-collapse state/displacement, including gradient support, remap increments,
+pressure extrema and kinetic-energy change; then check the BDF handoff if
+needed. Do not launch broad convergence studies or another full trajectory
+before locating the remap-specific failure. No model/code changes or runs in
+this trace.
+
+
 **Reference fields first (2026-10-30, user):** defer the proposed convergence
 research; inspect actual dynGPUSPH pressure wakes first. Completed offline check
 of retained FP64 reference snapshots, rendered with all three local controls on
