@@ -106,3 +106,38 @@ starting the three long trajectories. The failed physical-step count is zero.
 Checkpoint validation:142 ACSPH-focused CPU tests pass (including the receipt
 serialization regression),51 reference scripts compile, and diff whitespace
 checks pass. No new GPU run started during the integration hold.
+
+## Post-integration resume — 2026-10-30
+
+User lifted the hold after frontend8b58008 (integration mergeb9df6a6) and
+Core/main04e126e; Integrators1fea2a3 and Plotting05caeb3 are clean. The failed
+pre-merge root and STOP remain unchanged. New campaign root:
+`.tmp/acsph-michel-transport-integrated-2026-10-30/`.
+
+Preparation now freezes the current full frontend and all three resolved
+runtime dependency trees rather than cloning the old pre-integration runtime.
+The manifest pins969 files, repository revisions/status, original native
+inputs and repaired controller. Each child asserts and records that all four
+package imports resolve inside this copied runtime. Development in separate
+chunk/multi-GPU worktrees cannot change the running equations or kernels.
+
+The22 focused CPU checks pass in7.21s against the integrated frontend/Core.
+A persistent supervisor starts the serial GPU qualification then the original
+three long controls, with the same physical settings/endpoints/watchdogs.
+First oracle: warmup off, BDF on, compare the retained accepted-fields3-step
+snapshot bitwise. Remap/BDF eager and graph controls follow; actual graph
+capture/replay receipts are required. No completed long result is claimed
+by this resume entry.
+
+### Qualification outcome and physical dispatch
+
+All six serial3-step GPU gates pass. The integrated oracle matches its retained
+snapshot bitwise, all physical ICs match, each graphed control actually captures
+and replays, and transport/BDF eager snapshots are bitwise equal. Import receipts
+resolve all four packages inside the frozen source tree. Aggregate preflight
+wall155.02s includes startup/video/output and is not a step benchmark.
+
+The original-IC Michel baseline has started. The unchanged supervisor then runs
+the full Taylor transport and BDF-corrected candidates serially, with per-row
+analysis, progress, videos, checkpoints and explicit failure receipts. Long-run
+outcomes remain pending. Current state is in the integrated root's status.json.

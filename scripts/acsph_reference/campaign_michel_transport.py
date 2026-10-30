@@ -2,6 +2,7 @@
 """Frozen, serial original-IC Michel/remap/BDF comparison after the prior queue."""
 import argparse
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -27,14 +28,21 @@ def main():
         repo=Path(__file__).resolve().parents[2];prior=repo/'.tmp/acsph-ablation-2026-10-29'
         original=json.loads((prior/'manifest.json').read_text());root.mkdir(parents=True,exist_ok=False)
         for name,digest in original['sourceSHA256'].items():assert sha(prior/'source'/name)==digest,name
-        shutil.copytree(prior/'source',root/'source',ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
-        for name in ('run_lobovsky_ablation.py','ablation_controls.py','ablation_matrix.py','michel_trials.py',
-                     'analyze_lobovsky_ablation.py','campaign_late_ringing.py'):
-            shutil.copy2(Path(__file__).with_name(name),root/'source/scripts/acsph_reference'/name)
-        shutil.copy2(repo/'src/warpSPH/modules/shifting/transport.py',root/'source/src/warpSPH/modules/shifting/transport.py')
+        # Freeze the integrated checkouts, not the old pre-merge dependencies.
+        # Long runs must be insulated from concurrent chunk/multi-lane work.
+        from campaign_lobovsky import freeze_runtime
+        repositories={}
+        for name,path in [('warpSPH',repo)]+[(name,Path(importlib.util.find_spec(name).origin).parent.parent.parent)
+                for name in ('warpSPHCore','warpSPHIntegrators','warpSPHPlotting')]:
+            repositories[name]=dict(path=str(path),commit=subprocess.check_output(
+                ['git','rev-parse','HEAD'],cwd=path,text=True).strip(),
+                status=subprocess.check_output(['git','status','--short'],cwd=path,text=True))
+        assert Path(repositories['warpSPHCore']['path']).resolve()==repo.parent/'warpSPHCore'
+        freeze_runtime(root)
         shutil.copy2(__file__,root/'controller.py')
         m=dict(prepared=now(),repo=str(repo),source=str(root/'source'),targetSteps=7641,
             targetTime=original['targetTime'],reference=original['reference'],native=original['native'],
+            runtimeRepositories=repositories,runtimeOrigin='post-integration checkouts, copied in full before dispatch',
             baseline=original['baseline'],prior=str(prior),rows=rows(),reuse={},
             screening=original['screening'],scope='Michel baseline, +full Taylor p/v remap, +generic BDF correction',
             sourceSHA256={str(p.relative_to(root/'source')):sha(p) for p in (root/'source').rglob('*') if p.is_file()},
@@ -44,7 +52,7 @@ def main():
             limits=['Warmup and existing fixture source damper/wall diffusion/RK settings retained; not a fully paper-faithful solver.',
                 'Taylor transport uses shared unrenormalized difference gradients, not an assumed discrete product rule.',
                 'BDF candidate is the existing generic position-history correction, not source-specific duplicated-shift bookkeeping.'])
-        atomic(root/'manifest.json',m);shutil.copy2('/tmp/acsph-michel-tests.log',root/'cpu-tests.log')
+        atomic(root/'manifest.json',m);shutil.copy2('/tmp/acsph-michel-resume-tests.log',root/'cpu-tests.log')
         (root/'KEEP').write_text('Retain original-IC Michel/remap/BDF controls, failed outputs, sources and qualification.\n')
         atomic(root/'status.json',dict(phase='prepared',complete=False));print('PREPARED',root);return
     m=json.loads((root/'manifest.json').read_text());source=Path(m['source']);py=sys.executable

@@ -618,6 +618,26 @@ step (none found: `dambreak` and the other graph cases set theirs once); a gener
 
 ## 36. ACSPH Lobovsky local/native convergence gap (2026-10-27)
 
+**Post-merge gates passed; Michel baseline running (2026-10-30):**22 CPU
+checks and all6 serial3-step GPU preflights pass. Integrated oracle snapshot
+matches retained accepted-fields endpoint bitwise; physical ICs identical;
+actual graph capture/replay required; full-remap and BDF graph/eager snapshots
+bitwise. GPU preflights total155.02s including output, not a throughput
+benchmark. Full original-IC00-michel-baseline is now running;01 full p/v
+transport and02 BDF correction follow serially to7641/1.530014s. Fresh runtime
+pins969 frontend/Core/Integrators/Plotting files, checks all imports stay in
+snapshot, and records integrated revisions. Old failed/held root untouched.
+Live`.tmp/acsph-michel-transport-integrated-2026-10-30/status.json`.
+No long-run result or default promotion yet.
+
+**Post-integration resume (2026-10-30, user):** frontend8b58008/Core04e126e
+integrated. Fresh969-file frontend/Core/Integrators/Plotting runtime pinned
+under`.tmp/acsph-michel-transport-integrated-2026-10-30/`; old failed held root
+preserved.22 CPU checks pass; GPU qualification underway before the three
+Michel baseline/full p-v transport/BDF trajectories. Same physical controls,
+original ICs and1.530014s target; no model promotion or guard relaxation.
+
+
 **Integration checkpoint/hold (2026-10-30):** source ablation is terminal:
 8 completed intermediate rows and1 motion-guard stop. Row09 P1 RMS4.991kPa,
 P4 RMS4.390kPa,110 caps; full plateau/trim14.092/12.566kPa,48 caps. Michel

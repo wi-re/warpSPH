@@ -37,6 +37,11 @@ def main():
     from warpSPH.modules.artificialCompressible import dualTime as dual
     from warpSPH.modules.artificialCompressible import dyngpusphReference as ref
     from warpSPH.systems import artificialCompressible as systems
+    if args.michel_trial:
+        import importlib
+        imports={name:str(Path(importlib.import_module(name).__file__).resolve())
+            for name in ('warpSPH','warpSPHCore','warpSPHIntegrators','warpSPHPlotting')}
+        assert all(Path(path).is_relative_to(runtime) for path in imports.values()),imports
     clock=json.loads((args.reference/'result.json').read_text())['steps']
     assert 0<args.steps<=len(clock)
     milestones={next(i for i,r in enumerate(clock,1) if r['t']>=t)-1 for t in (1.25,1.44)}
@@ -82,6 +87,7 @@ def main():
         def configured(ctx):
             configure(ctx)
             if args.michel_trial:
+                (out/'runtime-imports.json').write_text(json.dumps(imports,indent=2)+'\n')
                 from michel_trials import install as install_trial,trial_parameters
                 ctx.schemeConfig.acParams.bdfShiftCorrection=row['options']['bdf_shift']
                 receipt=install_trial(row)

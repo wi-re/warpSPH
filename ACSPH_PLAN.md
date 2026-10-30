@@ -12,6 +12,28 @@ priority decision does not start new runs or change numerical defaults.
 ## Lobovsky comparison — 2026-10-27 (active)
 
 
+**Post-merge gates passed; Michel baseline running (2026-10-30):**22 CPU
+checks and all6 serial3-step GPU preflights pass. Integrated oracle snapshot
+matches retained accepted-fields endpoint bitwise; physical ICs identical;
+actual graph capture/replay required; full-remap and BDF graph/eager snapshots
+bitwise. GPU preflights total155.02s including output, not a throughput
+benchmark. Full original-IC00-michel-baseline is now running;01 full p/v
+transport and02 BDF correction follow serially to7641/1.530014s. Fresh runtime
+pins969 frontend/Core/Integrators/Plotting files, checks all imports stay in
+snapshot, and records integrated revisions. Old failed/held root untouched.
+Live`.tmp/acsph-michel-transport-integrated-2026-10-30/status.json`.
+No long-run result or default promotion yet.
+
+**Resume after integration (2026-10-30, user):** frontend dev8b58008 includes
+MFM/turbulence/memory mergeb9df6a6; shared Core/main04e126e integrated, paired
+chunk/multi-GPU workspace prepared separately. Resume the authorized three
+Michel/remap/BDF trajectories. Prepare a fresh root using the current full
+frontend/Core/Integrators/Plotting sources and record their revisions/status,
+not the pre-merge frozen dependencies. Keep the failed/held root unchanged.
+Re-run focused CPU checks, then exact-IC/plumbing/graph/eager GPU gates before
+long serial original-IC runs. Same controls and1.530014s endpoint; no guard or
+tolerance relaxation. Concurrent infrastructure work cannot alter this snapshot.
+
 **Checkpoint validation (2026-10-30):** all142 ACSPH-focused CPU tests pass,
 including the new enum-receipt regression. All51 reference scripts compile;
 `git diff --check` passes. No GPU simulation launched for cleanup.
