@@ -64,6 +64,13 @@ def run(args, scheme, dim, tableau, support, change, communication=None):
             accumulate(system,state,update,*a,**kw)
             records.append(snapshot(system,update))
         patch(workModule,function,capture)
+        if communication is not None and args.rhs_fault:
+            buffer=workModule.workBuffer
+            def failBuffer(*a,**kw):
+                if communication.rank==communication.size-1:
+                    raise MemoryError('injected RHS work allocation')
+                return buffer(*a,**kw)
+            patch(workModule,'workBuffer',failBuffer)
         schemeModule = importlib.import_module('warpSPH.schemes.compressible.'+('crkSPH' if scheme=='CRKSPH' else 'compSPH'))
         pairList = schemeModule.stagePairList
         def changing(system,state,config,sc,**kw):
@@ -230,6 +237,7 @@ def main():
     parser.add_argument('--output')
     parser.add_argument('--suite',choices=('basic','extended'),default='basic')
     parser.add_argument('--filter-replay',action='store_true',help='Force bounded filtering/repartition at the replay boundary.')
+    parser.add_argument('--rhs-fault',action='store_true',help='Reject one-rank work allocation, then retry a fresh solver run.')
     args=parser.parse_args()
     if args.device.startswith('cuda'):
         torch.cuda.set_device(torch.device(args.device))
@@ -249,6 +257,8 @@ def main():
     if args.filter_replay:
         variants=[('CRKSPH',2,'rungeKutta4','NoScheme',True),
                   ('CompSPH',2,'rungeKutta4','NoScheme',True)]
+    if args.rhs_fault:
+        variants=[('CRKSPH',2,'rungeKutta4','NoScheme',False),('CompSPH',2,'rungeKutta4','NoScheme',False)]
     # All flat oracle runs precede the process-group / distributed solver phase.
     references=[run(args,*variant) for variant in variants]
     dist.init_process_group('nccl' if args.device.startswith('cuda') else 'gloo',timeout=timedelta(seconds=45))
@@ -258,7 +268,21 @@ def main():
         stream=torch.cuda.Stream(device=communication.device) if communication.device.type=='cuda' else None
         with torch.cuda.stream(stream) if stream is not None else contextlib.nullcontext():
             for variant,reference in zip(variants,references):
-                actual=run(args,*variant,communication=communication)
+                if args.rhs_fault:
+                    from warpSPHCore.distributed import DistributedContractError
+                    try:run(args,*variant,communication=communication)
+                    except DistributedContractError as exc:assert 'injected RHS work allocation' in str(exc),str(exc)
+                    else:raise AssertionError('one-rank RHS allocation failure was not propagated')
+                    communication.agree('test:rhs-fault-recovered',variant)
+                    args.rhs_fault=False
+                    try:actual=run(args,*variant,communication=communication)
+                    finally:args.rhs_fault=True
+                    actual['rhsFaultsRecovered']=1
+                else:actual=run(args,*variant,communication=communication)
+                if args.device.startswith('cuda') and args.steps>=32:
+                    allocated=[row['torchAllocatedBytes'] for row in actual['acceptedMemory'][8:]]
+                    assert max(allocated)-min(allocated)<2*1024*1024,allocated
+                    actual['steadyAllocatedSpanBytes']=max(allocated)-min(allocated)
                 def parity():
                     try:
                         compare(actual,reference)

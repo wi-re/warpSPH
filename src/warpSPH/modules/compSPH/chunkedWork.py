@@ -53,3 +53,10 @@ def workBuffer(pairWork, state, adjacency, reducing):
     if isinstance(adjacency, ChunkedAdjacency):
         pairWork.work.validate(adjacency)
     return pairWork.work
+
+
+def workInputs(adjacency,function):
+    """Prepare local compatible-work storage before any peer enters its operator."""
+    if isinstance(adjacency,ChunkedAdjacency) and adjacency.communication is not None:
+        return adjacency.communication.localPhase('compatible:work-inputs',function)
+    return function()

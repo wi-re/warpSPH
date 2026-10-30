@@ -9,7 +9,7 @@ import warp as wp
 from typing import Any
 from warp.types import vector,matrix
 from warpSPHCore import *
-from ..compSPH.chunkedWork import workBuffer
+from ..compSPH.chunkedWork import workBuffer,workInputs
 from .accel import computeCrkSPHPair,_CRK_ACCEL
 from .partition import crkEntropyFraction
 from ..dissipation import DiffusionParameters
@@ -98,9 +98,14 @@ def accumulateCRKWork(system,state,update,config,scheme,adjacency,stage,index,dt
             return
         if not pw.consistent:return
     new=pw.work is None
-    work=workBuffer(pw,state,adjacency,reducing)
-    half=state.velocities+.5*dt*update.dvdt
-    table=materialRuntime(scheme,state.densities)
+    def prepare():
+        work=workBuffer(pw,state,adjacency,reducing)
+        half=state.velocities+.5*dt*update.dvdt
+        timestep=torch.as_tensor(dt,device=state.positions.device,dtype=state.positions.dtype).reshape(1)
+        table=materialRuntime(scheme,state.densities)
+        material=table.table if table is not None else uniformMaterialTable(state.positions.device)
+        return work,half,timestep,table,material
+    work,half,timestep,table,material=workInputs(adjacency,prepare)
     ctx=SPHContext(query=state,properties=OperationProperties(kernel=config.kernel,supportMode=SupportScheme.KernelMeanSymmetric),domain=config.domain,adjacency=adjacency,
         corrections=Corrections(volumes=(stage.volumes,None),crk=stage.crkState))
     rate=launchOperator(_SPEC,ctx,queryVelocities=state.velocities,referenceVelocities=state.velocities,
@@ -110,9 +115,9 @@ def accumulateCRKWork(system,state,update,config,scheme,adjacency,stage,index,dt
         conductivityParams=scheme.diffusionParams,crkViscosityParams=stage.viscosityParams,
         queryVelocityTensor=stage.velocityGradient,referenceVelocityTensor=stage.velocityGradient,
         calculateDudt=False,retainPairs=False,half=half,finalHalf=pw.halfVelocity if reducing else half,
-        dt=torch.as_tensor(dt,device=state.positions.device,dtype=state.positions.dtype).reshape(1),
+        dt=timestep,
         gamma=scalar_t(scheme.gamma),weight=scalar_t(weight),add=not new,reduce=reducing,work=work,rowStart=0,
-        materialTable=table.table if table is not None else uniformMaterialTable(state.positions.device),
+        materialTable=material,
         queryMaterials=state.materials if table is not None else state.kinds,
         referenceMaterials=state.materials if table is not None else state.kinds)
     if reducing:pw.deltaU=rate if pw.deltaU is None else pw.deltaU+rate

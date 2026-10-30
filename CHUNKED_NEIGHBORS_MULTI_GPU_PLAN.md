@@ -2,7 +2,7 @@
 
 Plan index: [PLANS.md](PLANS.md). Parent physics programme: [driven compressible turbulence](docs/roadmap/driven_compressible_turbulence.md).
 
-Status, 2026-10-30: **Phase 4 bounded process proof of concept qualified; local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 filtering/redistribution qualified locally; L5 stress active**.
+Status, 2026-10-30: **Phase 4 bounded process proof of concept qualified; local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 filtering/redistribution qualified locally; L5 bounded stress qualified; L6 compatibility active**.
 The count/scan/ownership design is agreed in discussion. Core/main and frontend/dev
 are integrated; see the [integration report](docs/chunked_integration_2026-10-30.md).
 The planner and opt-in standalone single-device chunk construction/lifecycle are
@@ -39,7 +39,7 @@ L3 control/hash and particle-packing work is now qualified locally. Evidence: `.
    qualified within the limits below. Use an explicit RowChunkProcessGroup with
    Gloo CPU or NCCL CUDA tensors; the isolated two-process/one-GPU runtime is
    available. J/W stay owned, with particle exchanges between dependent passes.
-   Continue with L5 stability/failure stress, then L6 compatibility below;
+   Continue with L6 compatibility expansion and the support matrix below;
    physical devices/topology/Isambard and capacity/performance remain open.
    Use `scripts/run_distributed.py` for the explicit experimental distributed
    launcher; ordinary runner setup still uses the Python neighborhood hook.
@@ -927,7 +927,7 @@ ACSPH contention means timing remains diagnostic. The ordering is deliberate.
 4. [x] **L4 — distributed filtering/redistribution (bounded local scope qualified).** Filter resident partial-owner
    lists and handle changed boundaries without a global pair intermediate. Preserve
    pair identity during accumulation or coordinate the existing fresh-stage replay.
-5. [ ] **L5 — stronger stability/failure controls.** Randomized partitions, skewed
+5. [x] **L5 — stronger stability/failure controls (bounded local scope qualified).** Randomized partitions, skewed
    counts, empty owners, repeated capacity changes, longer forcing histories,
    failures during solver/IO phases and bounded memory checks; use more CPU ranks.
 6. [ ] **L6 — compatibility expansion.** Explicit support matrix for other schemes,
@@ -1326,6 +1326,8 @@ locally, preserve source leases/J/W, and qualify existing fresh-stage compatible
 replay on list changes. Each local allocation/kernel/transfer contract must agree
 before payload, including empty/skewed owners, changed boundaries and failures.
 L5 extends randomized partition/capacity, memory, forcing and fault controls.
+RHS fault probes also cover native W/half-velocity/dt/material preparation; local
+allocation errors must agree before the work operator enters a payload.
 L6 records and tests an explicit support/rejection matrix, then expands compatible
 contexts as separately qualified changes. Physical devices/site/scaling, large
 L7 allocations and MPI/ROCm builds remain deferred. Tiny serial GPU controls only;
@@ -1388,6 +1390,66 @@ are unchanged by that local-walk correction. Evidence/reproduction/frozen files:
 `.tmp/l4-filtering-20261030/`; final paired heads in `commits.json`. L4 is locally
 qualified. Proceed to L5 seeded partition/capacity/lifetime and forcing/fault
 stress, then L6 compatibility. MPI/ROCm and large-memory L7 remain deferred.
+
+### L5 bounded stability/failure checkpoint (2026-10-30)
+
+A seeded process worker now changes populations (including zero/unequal sets),
+2D/3D, all support modes, skewed/isolated rows, periodicity, headroom/alignment,
+chunk capacities/row caps, stored-I layout and ownership repeatedly. Guaranteed
+transitions move all rows into one owner and split them back across owners.
+Every cycle compares exact filtered counts/prefix/owned J/I to a tiny independent
+flat filter, retains and checks old W/J, exercises safe in-place lease invalidation
+and bounded packet reuse, then uses weak references/GC to require that obsolete
+pair tensors have no remaining Python owners. One source-chunk scratch bound is
+checked each cycle. Packet scratch is a single stable 4 KiB allocation.
+
+Injected failures after target allocation but before a transfer contract's payload
+reject coherently, including an error on a nonparticipating rank. Retrying keeps
+source leases/work valid. Fatal sender and receiver probes exit after the transfer
+contract and require torchrun to terminate peers; ordinary Gloo peer death and
+all earlier protocol/filter/IO failure controls remain covered. No arbitrary
+post-device-fault recovery is promised; fatal/asynchronous faults still rely on
+process-group deadlines and launcher termination. NCCL fatal-participant probes
+were deliberately not added on the shared busy GPU.
+
+The RHS fault probe found native W/half-velocity/dt/material preparation outside
+a coordinated phase. `workInputs` now runs that local preparation behind one
+`localPhase` before either native work operator starts. A work allocation failure
+on only the last rank therefore reaches all live ranks before work payload, and
+a fresh solver attempt with the same communicator recovers with exact flat parity.
+This adds one control handshake per prepared weighted native work stage (also for
+replay), with no floating-function/formula, stage, reduction or hash-policy change.
+AST fingerprints of every existing Warp kernel/function in both touched work files
+are unchanged. Flat execution runs the same local preparation without a collective.
+
+|Qualification|Result|
+|---|---|
+|CPU process drivers|9 pass: prior2/3-rank controls plus4/5 ranks ×exact/contract stress,32 cycles/cohort,2 seeds,18 stress rank reports; fatal sender/receiver adds2 passing drivers|
+|CPU FP64/int64|5 ranks ×48 seeded cycles pass;3-rank native RHS allocation failure/retry passes both native schemes|
+|RHS/replay/compatible-work regressions|14 pass,2 expected skips:3-rank exact/contract work failure/retry,2/3-rank filtering replay, retained single-owner native controls|
+|Shared-GPU NCCL stress|Exact/contract ×2 ranks ×48 generations; no obsolete pair tensors, one stable4 KiB packet buffer,24 KiB span in sampled allocated memory across changing tiny populations|
+|Shared-GPU RHS faults|Both modes and both native schemes reject one-rank work allocation, then recover exact RHS/fields/time/forcing|
+|Shared-GPU long forcing/replay|64 steps each CRKSPH/CompSPH,512 fresh RHS per scheme/rank,54 OU knots; exact stage/W/fields/clock/history parity and declared2e-12 source-budget tolerance; steady allocated-memory span0 after step8|
+|Expanded checkpoint/fault lifecycle|Reference1 rank →save4 ranks with midstage/overwrite/interrupted-write cleanup and retry →resume5 ranks/int64 with empty owners; exact fresh rows/work/clock/forcing continuation passes,10 rank reports|
+|Full imports|566 modules /6066 first-party imports /1314 source files, all resolve|
+
+CPU process driver total81.83s, added fatal drivers and FP64 controls retain their
+raw wall logs; frontend RHS/replay/work suite66.01s. NCCL48-cycle stress rank-zero
+wall19.27s exact /21.27s contract. The64-step forced-filter/replay controls take
+108.00s CRKSPH (1687.5ms/step) and92.80s CompSPH (1450.0ms/step) on rank zero.
+The GPU sequence has10 rank reports and2,112 successful distributed solver RHS,
+plus deliberately rejected attempts and flat reference RHS. These are correctness
+controls under ACSPH contention, with tiny A/B video exceptions and progress/stall/
+velocity guards; no throughput claim follows. Reserved memory is sampled, not
+required to shrink. Logical bounds, weak-reference lifetime and Torch allocations
+do not measure all backend/driver/process memory or establish multi-hour stability.
+
+L5 is locally qualified within this bounded scope. L6 will expand compatible
+Godunov contexts and record/test supported and rejected schemes, walls/materials,
+AD/graphs and lane/prepared behavior, keeping native controls. Physical devices,
+site/topology/scaling, MPI/ROCm builds and large-memory L7 remain separate gates.
+Evidence/reproduction/frozen sources: `.tmp/l5-stability-20261030/`; paired heads
+are recorded in its `commits.json` after checkpoint commits.
 
 ## Phase 5 — remaining schemes and compatibility
 

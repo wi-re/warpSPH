@@ -9,7 +9,7 @@ import torch
 import warp as wp
 from warp.types import vector
 from warpSPHCore import *
-from ..compSPH.chunkedWork import workBuffer
+from ..compSPH.chunkedWork import workBuffer,workInputs
 from ..dissipation import DiffusionParameters
 from ..crk.partition import crkEntropyFraction
 from ..crk.storage import derivativeInputs
@@ -94,8 +94,12 @@ def accumulateCompWork(system,state,update,config,scheme,adjacency,gradH,index,d
             return
         if not pw.consistent:return
     new=pw.work is None
-    work=workBuffer(pw,state,adjacency,reducing)
-    half=state.velocities+.5*dt*update.dvdt
+    def prepare():
+        work=workBuffer(pw,state,adjacency,reducing)
+        half=state.velocities+.5*dt*update.dvdt
+        timestep=torch.as_tensor(dt,device=state.positions.device,dtype=state.positions.dtype).reshape(1)
+        return work,half,timestep
+    work,half,timestep=workInputs(adjacency,prepare)
     ctx=SPHContext(query=state,properties=OperationProperties(kernel=config.kernel,supportMode=SupportScheme.KernelMeanSymmetric),domain=config.domain,adjacency=adjacency,corrections=Corrections(gradH=gradH))
     alphas=state.alphas if state.alphas is not None else state.internalEnergies
     rate=launchOperator(_SPEC,ctx,queryVelocities=state.velocities,referenceVelocities=state.velocities,
@@ -105,7 +109,7 @@ def accumulateCompWork(system,state,update,config,scheme,adjacency,gradH,index,d
         explicitPressure=True,queryPressures=state.pressures,referencePressures=state.pressures,
         conductivityParams=scheme.diffusionParams,calculateDudt=False,retainPairs=False,
         half=half,finalHalf=pw.halfVelocity if reducing else half,
-        dt=torch.as_tensor(dt,device=state.positions.device,dtype=state.positions.dtype).reshape(1),
+        dt=timestep,
         gamma=scalar_t(scheme.gamma),weight=scalar_t(weight),add=not new,reduce=reducing,work=work,rowStart=0)
     if reducing:pw.deltaU=rate if pw.deltaU is None else pw.deltaU+rate
     else:pw.adjacency,pw.work=adjacency,work

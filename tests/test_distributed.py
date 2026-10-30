@@ -95,3 +95,16 @@ def test_launcher_outputs_and_restart_are_rank_owned(tmp_path,scheme):
         failed=_launch_document(tmp_path,'failed-capacity',document,2,edgeBudget=1,expectSuccess=False)
         assert json.loads((failed/'manifest.json').read_text())['status']=='failed'
         assert len(list(failed.glob('failure-*.json')))==2 and not (failed/'finalState.h5').exists()
+
+
+@pytest.mark.skipif(not dist.is_gloo_available(),reason='Gloo required')
+@pytest.mark.parametrize('checks',['exact','contract'])
+def test_native_rhs_allocation_failure_propagates_and_fresh_retry_recovers(tmp_path,checks):
+    worker=Path(__file__).with_name('distributed')/'_solverWorker.py'
+    env=dict(os.environ,CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='2',PYTHONDONTWRITEBYTECODE='1')
+    command=[sys.executable,'-m','torch.distributed.run','--standalone','--nproc-per-node=3',str(worker),
+        '--rhs-fault','--device','cpu','--replica-checks',checks,'--output',str(tmp_path),'--clock-interval','.00025']
+    result=subprocess.run(command,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=240)
+    (tmp_path/'run.log').write_text(result.stdout)
+    assert result.returncode==0,result.stdout
+    assert result.stdout.count('all solver checks passed')==3,result.stdout
