@@ -12,6 +12,17 @@ priority decision does not start new runs or change numerical defaults.
 ## Lobovsky comparison — 2026-10-27 (active)
 
 
+**Pressure-recorded relaunch authorized (2026-10-30, user):** relaunch
+three original-IC Michel/remap/BDF controls with the new recording mechanism.
+No active run or leased viewer at dispatch. Prepare a new frozen root; preserve
+completed baseline and stopped transport prefix in the old STOP-held root.
+Queue pressure-preset video for every accepted step, including the initial
+state, with common fixed±8kPa range,1920px/60fps/16Mbit/s. Hold each initialized
+case until the attached updated viewer has encoded/ACKed t=0, then resume
+through the daemon. Add a short real GPU/video bitwise qualification before
+long rows; download/verify each completed video and manifest before the next
+row. Native numerical setup, outputs and watchdogs remain unchanged.
+
 **Viewer recording jobs implemented and qualified (2026-10-30):**
 warpSPHRemote commit f2dbd2f on codex/viewer-recording-jobs adds authenticated
 recording intents, scene/preset/range/camera, capture window/step cadence,

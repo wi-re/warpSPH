@@ -18,6 +18,7 @@ def main():
     ap.add_argument('--steps',type=int,default=7641)
     ap.add_argument('--eager',action='store_true')
     ap.add_argument('--daemon',action=argparse.BooleanOptionalAction,default=None,help='Native daemon publisher; default on for long runs')
+    ap.add_argument('--video-job',type=Path,help='Viewer recording job settings; holds initial state until its video ACK')
     ap.add_argument('--plot-interval',type=int,default=10)
     args=ap.parse_args()
     if args.michel_trial:
@@ -121,7 +122,7 @@ def main():
         if daemon_enabled(args.steps,args.daemon):
             import warpsph_remote
             assert Path(warpsph_remote.__file__).resolve().is_relative_to(runtime)
-            return run_published(original_run,prepared,name='ACSPH Lobovsky '+row['id'],out=out,**kwargs)
+            return run_published(original_run,prepared,name='ACSPH Lobovsky '+row['id'],out=out,video_settings=json.loads(args.video_job.read_text()) if args.video_job else None,**kwargs)
         return original_run(prepared,**kwargs)
     runner.run=run
     script=runtime/'scripts/acsph_reference/compare_lobovsky.py'

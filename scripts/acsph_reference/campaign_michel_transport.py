@@ -23,6 +23,7 @@ def sha(path):
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--root',type=Path,required=True)
+    ap.add_argument('--pressure-video',action='store_true',help='Initial-state-gated pressure recording and verified video retrieval')
     ap.add_argument('--prepare',action='store_true');args=ap.parse_args();root=args.root.resolve()
     if args.prepare:
         repo=Path(__file__).resolve().parents[2];prior=repo/'.tmp/acsph-ablation-2026-10-29'
@@ -46,7 +47,17 @@ def main():
             ['git','rev-parse','HEAD'],cwd=remote_repo,text=True).strip(),
             status=subprocess.check_output(['git','status','--short'],cwd=remote_repo,text=True))
         shutil.copy2(__file__,root/'controller.py')
-        m=dict(prepared=now(),repo=str(repo),source=str(root/'source'),targetSteps=7641,
+        videoSettings={}
+        if args.pressure_video:
+            import struct
+            with (prior/'qualification/02-accepted-fields/snapshots/000003.bin').open('rb') as f:shortTime=struct.unpack('<id',f.read(12))[1]
+            full=dict(scene=dict(preset='pressure',range=[-8000,8000],background='dark',boundaries=True),
+                capture=dict(everySteps=1,startTime=0,endTime=original['targetTime']),
+                encoding=dict(fps=60,width=1920,bitrate=16_000_000))
+            short={**full,'capture':{**full['capture'],'endTime':shortTime}}
+            for name,settings in [('pressure-video-settings.json',full),('qualification-video-settings.json',short)]:
+                atomic(root/name,settings);videoSettings[name]=sha(root/name)
+        m=dict(pressureVideo=args.pressure_video,videoSettingsSHA256=videoSettings,prepared=now(),repo=str(repo),source=str(root/'source'),targetSteps=7641,
             targetTime=original['targetTime'],reference=original['reference'],native=original['native'],
             runtimeRepositories=repositories,runtimeOrigin='post-integration checkouts, copied in full before dispatch',
             baseline=original['baseline'],prior=str(prior),rows=rows(),reuse={},
@@ -58,7 +69,7 @@ def main():
             limits=['Warmup and existing fixture source damper/wall diffusion/RK settings retained; not a fully paper-faithful solver.',
                 'Taylor transport uses shared unrenormalized difference gradients, not an assumed discrete product rule.',
                 'BDF candidate is the existing generic position-history correction, not source-specific duplicated-shift bookkeeping.'])
-        atomic(root/'manifest.json',m);shutil.copy2('/tmp/acsph-michel-resume-tests.log',root/'cpu-tests.log')
+        atomic(root/'manifest.json',m);shutil.copy2('/tmp/acsph-pressure-video-tests-2026-10-30.log' if args.pressure_video else '/tmp/acsph-michel-resume-tests.log',root/'cpu-tests.log')
         (root/'KEEP').write_text('Retain original-IC Michel/remap/BDF controls, failed outputs, sources and qualification.\n')
         atomic(root/'status.json',dict(phase='prepared',complete=False));print('PREPARED',root);return
     m=json.loads((root/'manifest.json').read_text());source=Path(m['source']);py=sys.executable
@@ -75,15 +86,17 @@ def main():
     def verify():
         for name,digest in m['sourceSHA256'].items():assert sha(source/name)==digest,name
         for name,digest in m['referenceInputSHA256'].items():assert sha(Path(m['reference'])/name)==digest,name
+        for name,digest in m.get('videoSettingsSHA256',{}).items():assert sha(root/name)==digest,name
     def progress(path):return [json.loads(s) for s in (path/'progress.jsonl').read_text().splitlines()]
     env=os.environ.copy();env.update(PYTHONUNBUFFERED='1',OMP_NUM_THREADS='4',OPENBLAS_NUM_THREADS='4',
         WARP_CACHE_PATH='/tmp/acsph-parity-repair-cache',MPLCONFIGDIR='/tmp/acsph-parity-mpl',
         PYTHONPATH=str(source/'src')+os.pathsep+str(source/'scripts/acsph_reference'))
-    def command(name,path,steps=7641,eager=False,daemon=None):
+    def command(name,path,steps=7641,eager=False,daemon=None,video=False):
         cmd=[py,'-u',source/'scripts/acsph_reference/run_lobovsky_ablation.py',
             '--runtime',source,'--reference',m['reference'],'--out',path,'--michel-trial',name,'--steps',steps]
         if eager:cmd.append('--eager')
         if daemon is not None:cmd.append('--daemon' if daemon else '--no-daemon')
+        if video:cmd.extend(['--daemon','--video-job',root/('pressure-video-settings.json' if steps>=100 else 'qualification-video-settings.json')])
         return list(map(str,cmd))
     def run(name,cmd,path=None,physical=False,allow_failure=False):
         verify();check()
@@ -153,10 +166,19 @@ def main():
         run('qualify-daemon-baseline',command('baseline',path,3,daemon=True),path,True);qualifies(path)
         assert (path/'snapshots/000003.bin').read_bytes()==(q/m['rows'][0]['id']/'snapshots/000003.bin').read_bytes()
         assert (path/'daemon-run.json').exists()
+        if m.get('pressureVideo'):
+            path=q/'pressure-video-baseline'
+            run('qualify-pressure-video',command('baseline',path,3,video=True),path,True);qualifies(path)
+            assert (path/'snapshots/000003.bin').read_bytes()==(q/m['rows'][0]['id']/'snapshots/000003.bin').read_bytes()
+            video=json.loads((path/'pressure-video/manifest.json').read_text())
+            assert len(video['frames'])==4 and video['frames'][0]['time']==0
+            assert video['scene']['field']=='pressures' and video['scene']['options']['normalization']=='symlog'
+            assert all(frame['range']==[-8000,8000] for frame in video['frames'])
+            atomic(root/'pressure-video-qualification.json',dict(complete=True,initialTime=0,frames=4,snapshotBitwise=True))
         atomic(root/'qualification.json',dict(complete=True,finished=now(),allPhysicalICsBitwise=True,
             baselinePlumbingOracleBitwise=True,allGraphsActive=True,transportBDFGraphEagerBitwise=True,daemonSnapshotBitwise=True))
         for row in m['rows']:
-            path=root/row['id'];phase=run('physical-'+row['id'],command(row['id'].split('-')[-1],path),path,True,True)
+            path=root/row['id'];phase=run('physical-'+row['id'],command(row['id'].split('-')[-1],path,video=m.get('pressureVideo',False)),path,True,True)
             atomic(path/'campaign-row-status.json',phase)
             if phase['returncode'] or phase['stop_reason']:
                 remote=json.loads((path/'daemon-status.json').read_text()) if (path/'daemon-status.json').exists() else {}

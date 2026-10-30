@@ -12,7 +12,7 @@ def daemon_enabled(steps, requested=None):
     return steps >= 100 if requested is None else requested
 
 
-def run_published(run, case, *, name, out, publisher_factory=None, **kwargs):
+def run_published(run, case, *, name, out, publisher_factory=None, video_settings=None, **kwargs):
     if publisher_factory is None:
         from warpsph_remote.publisher import SimulationPublisher
         publisher_factory=SimulationPublisher
@@ -21,6 +21,14 @@ def run_published(run, case, *, name, out, publisher_factory=None, **kwargs):
     (out/'daemon-run.json').write_text(json.dumps(dict(id=publisher.id,name=name,
         endpoint=publisher.info['endpoint'],pid=__import__('os').getpid(),
         adapter='native completed-step publisher'),indent=2)+'\n')
+    video=None
+    if video_settings is not None:
+        try:
+            try:from .pressure_video import PressureVideo
+            except ImportError:from pressure_video import PressureVideo
+            video=PressureVideo(publisher,out,video_settings)
+        except BaseException as error:
+            publisher.close('failed',str(error));raise
     done=threading.Event()
     final={'status':None}
     def heartbeat():
@@ -30,6 +38,11 @@ def run_published(run, case, *, name, out, publisher_factory=None, **kwargs):
             meta['id']=publisher.id
             path=out/'daemon-status.json';pending=path.with_suffix('.pending')
             pending.write_text(json.dumps(meta)+'\n');pending.replace(path)
+            if video is not None and not video.done.is_set():
+                try:video.tick()
+                except (OSError,ValueError,KeyError) as error:
+                    video.error=str(error);video.done.set();publisher.stopping.set()
+                    (out/'pressure-video-error.json').write_text(json.dumps(dict(error=str(error)))+'\n')
             done.wait(.5)
     thread=threading.Thread(target=heartbeat,name='daemon-status-receipt',daemon=True);thread.start()
     try:
@@ -38,6 +51,9 @@ def run_published(run, case, *, name, out, publisher_factory=None, **kwargs):
         publisher.finish(result.ctx,result.state,result.nSteps)
         publisher.update(step=result.nSteps,time=float(result.state.t),
             dt=float(result.ctx.config.dt),particles=int(result.state.state.positions.shape[0]))
+        if video is not None:
+            if not video.done.wait(120):raise RuntimeError('Pressure video did not finish saving within120s.')
+            if video.error:raise RuntimeError('Pressure video failed: '+video.error)
         final['status']='failed' if result.diverged or result.stopReason else 'completed'
         publisher.close(final['status'],result.stopReason or '')
         return result
