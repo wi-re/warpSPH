@@ -12,6 +12,22 @@ priority decision does not start new runs or change numerical defaults.
 ## Lobovsky comparison — 2026-10-27 (active)
 
 
+**Pressure-recorded campaign complete (2026-10-30):** all three frozen
+controls reached 7641 accepted steps / 1.5300141245717327 s, exited 0 with no
+stop reason; queue finished at 17:45 UTC. Wall times: Michel baseline 95.60 min,
+full Taylor remapping 94.18 min, remapping + BDF 94.10 min. Each pressure job
+completed its window with 7642 frames including the initial state; WebM and
+manifest retrieved and SHA256 verified. Final automatic analysis is retained
+under .tmp/acsph-michel-pressure-video-2026-10-30/analysis-through-02-michel-bdf.
+For 1.44–1.53 s, pressure RMS after removing a 1 ms Gaussian trend is
+P1/P4 = 1.181/1.357 kPa (baseline), 2.408/2.486 kPa (Taylor), and
+1.220/1.368 kPa (Taylor + BDF). Taylor alone worsens this measured late ringing;
+BDF restores it close to baseline. This is descriptive screening of these
+trajectories, not evidence yet of cavity-wave causation or a remedy to adopt.
+Next: review the recorded collapse windows against raw probes and snapshots.
+No additional simulations launched.
+
+
 **First pressure-recorded full run complete (2026-10-30):** baseline
 reaches7641 steps /1.5300141245717327s, exits0 with no stop reason, in5735.77s
 (95.60min wall). Completed pressure video retrieved and SHA256 verified:
