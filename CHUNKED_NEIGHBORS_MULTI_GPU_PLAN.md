@@ -2,12 +2,13 @@
 
 Plan index: [PLANS.md](PLANS.md). Parent physics programme: [driven compressible turbulence](docs/roadmap/driven_compressible_turbulence.md).
 
-Status, 2026-10-30: **Phase 2 single-device construction/lifecycle qualified; Phase 3 next**.
+Status, 2026-10-30: **Phase 3 shared operators and first eager Monaghan checkpoint qualified; compatible W next**.
 The count/scan/ownership design is agreed in discussion. Core/main and frontend/dev
 are integrated; see the [integration report](docs/chunked_integration_2026-10-30.md).
 The planner and opt-in standalone single-device chunk construction/lifecycle are
-qualified on CPU/CUDA. Native solver dispatch, compatible pair work, distributed
-execution and physical multi-GPU qualification remain open.
+qualified on CPU/CUDA. Explicit row-mapped shared operators and a bounded eager
+Monaghan path now pass flat parity. Native CRK/CompSPH compatible pair work,
+distributed execution and physical multi-GPU qualification remain open.
 This document is the canonical implementation/handoff plan for both repositories;
 the core carries a short companion pointer, `CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md`.
 
@@ -17,10 +18,12 @@ the core carries a short companion pointer, `CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md
    merge and focused CPU/CUDA gates are complete; read the integration report.
 2. Use the active paired workspace below. Chunked neighbours first, then
    multi-GPU execution continue sequentially in these same checkouts.
-3. Phase1/2 are qualified within the limits below. Start Phase3 by threading
-   row ownership through shared operators and all query/reference field bundles;
-   bring up support/density/corrections/gradients and a simple eager scheme before
-   native CRK/CompSPH compatible work. Preserve lanes and fresh stages.
+3. Phase1/2 and the first Phase3 shared-operator/Monaghan checkpoint are qualified
+   within the limits below. Next implement chunk-owned CRK/CompSPH compatible W:
+   finish global force outputs before half velocities and work sweeps, then retain
+   pair identity across stages and replay changed-list steps. Preserve lanes and
+   fresh stages. The runner has no chunk-budget CLI option yet; the tested path
+   explicitly seeds a chunked list through the case's Python build hook.
    Use explicit source paths; do not change global editable installs.
 4. Keep the existing turbulence worktree available for ordinary single-GPU
    physics through128^3, subject to a short readiness/memory check. No such
@@ -377,11 +380,15 @@ eager solver parity and native compatible W with pinned pair identity/stages.
 
 ## Phase 3 — shared operators and native compatible work (both repos)
 
-- [ ] Thread row ownership through `adjacencyData`, range helpers, canonical
-  argument extraction/state bundles and prepared launchers. Handle grid sortIndex
-  as a particle permutation, not an edge list. Map all query/reference fields.
-- [ ] Bring up shared support/density/corrections/gradients and a simpler eager
-  gather scheme (Monaghan or GSPH), then CRKSPH/CompSPH. Freeze lanes/tableau.
+- [x] Map row ownership through host contexts before canonical extraction/state
+  bundles and prepared launchers. Reuse unchanged local-row adjacency/range/kernel
+  ABIs. Slice all query fields; keep references and J IDs global. Grid sortIndex
+  remains a particle permutation. Reject unported specs explicitly.
+- [x] Bring up shared support/density/corrections/gradients and an explicit eager
+  Monaghan path. Fixed lanes/tableau and full stored-field parity qualify the
+  bounded checkpoint below, not every scheme/boundary/graph configuration.
+- [ ] Bring up native CRKSPH/CompSPH solver dispatch and compatible work. A CRK
+  correction-construction pass is not a CRKSPH compatible-energy solver gate.
 - [ ] Allocate/accumulate W per owned chunk across stages. First complete force
   outputs for all rows; then form stage half velocities and run work sweeps.
   Final energy reduction uses local W and global final half velocities.
@@ -395,6 +402,110 @@ eager solver parity and native compatible W with pinned pair identity/stages.
 
 Exit: native fresh-stage correctness, energy/source budgets, positivity, no extra
 or missing RHS, and independently measured scratch/retained-memory changes.
+
+### Shared-operator and Monaghan checkpoint (2026-10-30)
+
+Core `autograd/row_dispatch.py` implements an explicit host adapter, without
+changing floating-point kernels or the canonical Warp struct ABI. For each
+resident chunk, positions, supports, masses, densities and kinds are sliced as
+query fields. Reference particle arrays remain global. Volumes, CRK A/B/gradA/
+gradB, grad-H and renormalization fields receive the same role mapping. Self
+aliases resolve before slicing. A single query CRK state is permitted for
+query-only consistency density; operators that read reference corrections
+validate their reference population independently.
+
+`OperatorSpec.rowChunked` opts a particle-output kernel into this contract.
+`ExtraSpec.rowRole` declares QUERY, REFERENCE or REPLICATED, optionally through a
+resolver following an actual enabled/disabled kernel branch. It never guesses
+identity from population size. Disabled reconstruction dummies stay replicated;
+active velocity Jacobians, Balsara factors and reconstructed state gradients
+are mapped as particle fields. Pair-shaped outputs, unannotated extras, partial
+owners, AD and deferred/captured execution are rejected. Per-query outputs are
+assembled by disjoint copies into O(N) particle arrays, without cross-chunk sums
+or a concatenated pair list. Local output scratch is released after each chunk.
+This host loop is a correctness implementation, not a throughput qualification.
+
+Prepared launchers hold a canonical prefix per chunk and use the same mapping.
+They must be rebuilt when state tensor bindings change, as for flat prepared
+prefixes. A private storage lease now invalidates old operator/prepared/filter/
+Verlet consumers when an in-place rebuild actually reuses CSR/J buffers. Default
+rebuilds leave old independent buffers valid. This makes buffer obsolescence
+explicit; it does not implement W migration or replay.
+
+Qualified core consumers: density, interpolation, gradient, divergence, curl,
+Brookshaw Laplacian, covariance (including count output), CRK volume/moments/
+consistency density and renormalization construction. Tests include self queries,
+distinct equal-sized and unequal populations, 2D/3D, full correction roles,
+periodic support/direction masks, empty populations, prepared extras refreshed
+between calls, unsafe-reference validation and obsolete-buffer failures. Scalar
+lanes are fixed for the full matrix; density/covariance also pass fixed 32-lane
+chunk-versus-flat checks on a nondefault CUDA stream. This does not qualify every
+Laplacian scheme, lane combination or AD path for chunks.
+
+Frontend enables Omega/Psi0 support operators and classic Monaghan dissipation
+operators. The ParticleState `buildVerletList` wrapper preserves an explicitly
+seeded chunked representation/policy through subsequent validity checks and
+rebuilds, rejecting flat capacity/grid-factory overrides. For an eager, wall-free
+Monaghan case, select the path in its Python `buildSystem` hook:
+
+```python
+from warpSPHCore.radiusSearch import buildChunkedVerletList, RowChunkPolicy
+config.compute.neighborOmitI = True
+system.adjacency = buildChunkedVerletList(
+    system.state, config.domain,
+    policy=RowChunkPolicy(edgeBudget=1_000_000, bytesPerEdge=4),
+    verletScale=config.verletScale, storeI=False)
+```
+
+No default or runner CLI selection changes. The fixtures use `store=False` and
+`storeMode='trajectory'` to avoid the checkpoint serializer. Chunked native
+checkpoint export raises explicitly; checkpoint/restart remains Phase5 work.
+Monaghan wall closure and per-side pressure reject at entry. The latter has a
+direct `i == j` check needing global query identity before it can be opted in.
+Other unported solver/spec contexts remain gated.
+
+Five two-step eager trajectory fixtures cover fixed support/RK2, Monaghan support
+with grad-H/RK4, 3D Owen support/RK2, active velocity/Balsara reconstruction, and
+active Riemann-state reconstruction. They compare every stored tensor exactly,
+time, expected 4/8 fresh RHS calls, positivity and the existing source/energy
+budget gate. Monolithic pair search is forbidden after the explicit seed. These
+are tiny unit A/B fixtures: no video or long flow campaign, with progress/stall
+monitoring enabled. They do not establish stationary turbulence or scaling.
+
+Qualification, using source-pinned paired worktrees and fresh offset processes:
+
+| Gate | Result |
+| --- | --- |
+| New core operators, CPU float32/int32 | 53 passed, 55 skipped |
+| New core operators, CPU float32/int64 | 53 passed, 55 skipped |
+| New core operators, CPU float64/int64 | 53 passed, 55 skipped |
+| New core operators, CUDA float32/int32 | 54 passed, 1 skipped; CPU cases deselected |
+| New core operators, CUDA float32/int64 | 54 passed, 1 skipped; CPU cases deselected |
+| Monaghan CPU float32, int32/int64 | 5 trajectories passed per offset |
+| Monaghan CUDA float32, int32/int64 | 5 trajectories passed per offset |
+| Existing core CPU/int64 focused regressions | 834 passed, 849 skipped |
+| Existing frontend CPU/int64 focused regressions | 73 passed, 2 skipped |
+| Frontend runtime import checker | 561 modules passed |
+
+The CUDA selection also matches the CPU parametrization of the test whose name
+contains "cuda"; that one CPU stream-test case skips as intended. All 54 actual
+CUDA parametrizations pass. CPU-only processes skip those 54 CUDA cases plus
+their CPU stream-test case.
+The existing static import-scanner crash from Phase2 remains recorded; runtime
+imports pass. One initial import attempt omitted NUMBA_CACHE_DIR and failed on a
+non-writable source cache; the corrected, source-pinned environment passes.
+Development also corrected a test return-type assumption, then declared CRK
+consistency density's genuinely query-only correction role; numerical tolerances
+were not relaxed. The initial native checkpoint AttributeError was replaced by
+the explicit unsupported export gate above.
+
+Evidence/commands/source provenance: frontend `.tmp/chunked-operators-20261030/`.
+The bounded tests run GPU suites sequentially. Timings include JIT and shared GPU
+contention; no throughput, peak-memory saving, large-edge addressing or physical
+multi-GPU claim is made. Single-device resident chunks retain total J storage;
+this checkpoint bounds per-chunk addressing and operator scratch, not total J.
+Next: chunk-owned compatible W and native fresh-stage CRK/CompSPH parity before
+distributed scheduling. Paired implementation provenance: core c0b8cf7 (frontend is the commit containing this checkpoint).
 
 ## Phase 4 — replicated-state multi-GPU runner (two GPUs, then four)
 

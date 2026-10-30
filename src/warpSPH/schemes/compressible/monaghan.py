@@ -45,6 +45,14 @@ def compressibleSPH_Monaghan(
     currentState = currentSystem.state
     t = currentSystem.t
 
+    from warpSPHCore.radiusSearch import ChunkedAdjacency
+    if isinstance(currentSystem.adjacency, ChunkedAdjacency):
+        if getattr(schemeConfig, 'pressureFormulation', 'meanKernel') == 'perSide':
+            raise NotImplementedError('Chunked Monaghan per-side pressure needs global query identity.')
+        from ...modules.mdbc._util import stateHasBoundaryParticles
+        if stateHasBoundaryParticles(currentState, config):
+            raise NotImplementedError('Chunked Monaghan wall closure is not qualified.')
+
     with record_function("[warpSPH] - [monaghan - 01] wall"):
         wall = beginCompressibleWall(currentState, config)
 

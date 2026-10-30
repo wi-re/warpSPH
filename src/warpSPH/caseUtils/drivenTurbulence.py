@@ -26,7 +26,10 @@ class DrivenGasState(ConservedOutput, CompressibleState):
 
 
 def adjacencyCheckpoint(system):
+    from warpSPHCore.radiusSearch import ChunkedAdjacency
     a = system.adjacency
+    if isinstance(a, ChunkedAdjacency):
+        raise NotImplementedError('Chunked neighbor checkpoint export is not implemented; pair data must remain chunk-local.')
     data = dict(checkpointAdjacencyVersion=1, checkpointAdjacencyPresent=a is not None)
     if a is not None:
         names = ('paddedI', 'paddedJ', 'numNeighbors', 'edgeOffsets', 'queryPositions',

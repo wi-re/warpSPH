@@ -336,6 +336,7 @@ def _psi0Dtype(ctx, extras):
 
 
 _PSI0 = OperatorSpec(
+    rowChunked=True,
     kernel=computePsi0_Kernel,
     tiledKernel=computePsi0_KernelTiled,
     outputs=(
