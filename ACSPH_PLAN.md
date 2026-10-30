@@ -12,6 +12,23 @@ priority decision does not start new runs or change numerical defaults.
 ## Lobovsky comparison — 2026-10-27 (active)
 
 
+**Reference fields first (2026-10-30, user):** defer the proposed convergence
+research; inspect actual dynGPUSPH pressure wakes first. Completed offline check
+of retained FP64 reference snapshots, rendered with all three local controls on
+identical ±8 kPa signed-log colors and exactly matched times. Artifacts:
+pressure-recorded root /dyngpusph-pressure-fields/{dyngpusph-sequence.png,
+matched-pressure-fields.png,comparison.json,matched-frame-stats.json}.
+dynGPUSPH does show broad negative fronts: left sheet at 1.440025 s and
+lower-right bulk at 1.510057–1.530014 s. At 1.510057 s native/baseline have
+7.039/6.537% of fluid below -1 kPa. Broad-front timing differs: at 1.360282 s
+native has only0.0025% below -1 kPa, versus baseline7.051%. These individual
+frames establish shared negative-front behavior, not equal amplitudes or
+whole-window quality. Native also retains cavities, but less extensive breakup
+than the two Taylor controls at1.53 s. Native spatial cadence is10 ms, so each
+fast reflection cannot be tracked. No simulations launched. Convergence
+mechanism remains unproven; prioritize reference timing/field comparison.
+
+
 **Convergence / pressure-mode hypothesis (2026-10-30, user):** investigate
 whether apparently persistent negative-pressure states are weakly constrained
 or underconverged modes rather than treating negative gauge pressure itself as
