@@ -100,7 +100,7 @@ def computeTimestep(
     state = system.state
     dim = state.positions.shape[1]
     kernelScale = float(sphKernelScale(config.kernel.value, dim))
-    xi = sphKernel_xi(config.kernel.value, dim)
+    xi = float(sphKernel_xi(config.kernel.value, dim))
     h = float(state.supports.min()) / xi
 
     def asTensor(value):

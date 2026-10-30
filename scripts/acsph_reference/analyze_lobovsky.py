@@ -46,7 +46,9 @@ def main():
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     fig,axes=plt.subplots(2,3,figsize=(17,9),layout='constrained')
-    colors=['black','#d55e00','#0072b2','#009e73','#cc79a7']
+    colors=['black','#d55e00','#0072b2','#009e73','#cc79a7','#56b4e9']
+    if len(data)>len(colors):
+        colors=[plt.get_cmap('tab10')(i%10) for i in range(len(data))]
     for (label,a),color in zip(data.items(),colors):
         for ax,mask,coordinate,title in (
             (axes[0,0],np.isclose(x0[:,1],0),0,'Bottom material row (initial y=0)'),

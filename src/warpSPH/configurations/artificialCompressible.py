@@ -141,6 +141,9 @@ class ArtificialCompressibilityParams:
     #: Point-implicit source treatment, `alpha_PI = 1 + alpha_s dtau alpha_t`
     #: (Eqs. 43-45). The paper reports `alpha_PI = 1` works fine here.
     usePointImplicit: bool = field(default=True, metadata={'description': 'point-implicit alpha_PI (Eq. 43)'})
+    incrementalPositions: bool = field(default=True, metadata={'description': 'Solve and retain position increments for cancellation-safe BDF arithmetic'})
+    fusedResidual: bool = field(default=True, metadata={'description': 'Fuse sampled-wall ACSPH spatial residual neighbour sums'})
+    referenceModel: str = field(default='none', metadata={'description': 'Explicit compiled-code model: none or dyngpusph-static-2d'})
     #: The `tilde v` material-derivative corrections, Eqs. (27)-(31). The paper
     #: concludes: leave them off (Sec. 4.2).
     useTildeVAdvection: bool = field(default=False, metadata={'description': 'tilde-v advective terms (Eqs. 27-31)'})
@@ -240,6 +243,8 @@ class ArtificialCompressibilityParams:
         """Refuse options that are declared but not implemented, and inconsistent
         combinations (each is gated by its config field and raises rather than silently
         no-opping)."""
+        if self.referenceModel not in ('none', 'dyngpusph-static-2d'):
+            raise ValueError(f'Unknown ACSPH referenceModel {self.referenceModel!r}')
         if self.useTildeVAdvection:
             raise NotImplementedError(
                 "acParams.useTildeVAdvection (Eqs. 27-31) is not implemented -- the "
@@ -369,6 +374,10 @@ def _acParamsToDict(p: ArtificialCompressibilityParams) -> Dict[str, Any]:
         'k2Factor': p.k2Factor, 'kappa2': p.kappa2, 'kappa4': p.kappa4,
         'jstUsePrintedMin': p.jstUsePrintedMin, 'k3': p.k3,
         'usePointImplicit': p.usePointImplicit,
+        'incrementalPositions': p.incrementalPositions,
+        'fusedResidual': p.fusedResidual,
+        'referenceModel': p.referenceModel,
+        'isolatedZeroPressure': p.isolatedZeroPressure,
         'useTildeVAdvection': p.useTildeVAdvection,
         'shiftInsidePseudoLoop': p.shiftInsidePseudoLoop,
         'cavitationProjection': p.cavitationProjection,
@@ -410,6 +419,10 @@ def _dictToAcParams(d: Optional[Dict[str, Any]]) -> ArtificialCompressibilityPar
         jstUsePrintedMin=bool(d.get('jstUsePrintedMin', defaults.jstUsePrintedMin)),
         k3=float(d.get('k3', defaults.k3)),
         usePointImplicit=bool(d.get('usePointImplicit', defaults.usePointImplicit)),
+        incrementalPositions=bool(d.get('incrementalPositions', defaults.incrementalPositions)),
+        fusedResidual=bool(d.get('fusedResidual', defaults.fusedResidual)),
+        referenceModel=str(d.get('referenceModel', defaults.referenceModel)),
+        isolatedZeroPressure=bool(d.get('isolatedZeroPressure', defaults.isolatedZeroPressure)),
         useTildeVAdvection=bool(d.get('useTildeVAdvection', defaults.useTildeVAdvection)),
         shiftInsidePseudoLoop=bool(d.get('shiftInsidePseudoLoop', defaults.shiftInsidePseudoLoop)),
         cavitationProjection=str(d.get('cavitationProjection', defaults.cavitationProjection)),

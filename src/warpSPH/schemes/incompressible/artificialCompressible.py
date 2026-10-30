@@ -70,6 +70,7 @@ from ...modules.artificialCompressible import (
 from ...modules.boundaryConditions import enforceDirichlet, enforceUpdates
 from ...modules.mdbc import computeBoundaryVelocities
 from ...systems.artificialCompressible import ArtificialCompressibleSystem
+from ...modules.artificialCompressible.dualTime import reconcilePositionUpdate
 
 __all__ = ['artificialCompressible_step', 'PHYSICS_IMPLEMENTED']
 
@@ -101,7 +102,8 @@ def artificialCompressible_step(
         system.adjacency = adjacency
 
     with record_function("[warpSPH] - [acsph - 02] - boundary velocities"):
-        state.velocities = computeBoundaryVelocities(state, config, schemeConfig, adjacency)
+        if schemeConfig.acParams.referenceModel == 'none':
+            state.velocities = computeBoundaryVelocities(state, config, schemeConfig, adjacency)
 
     with record_function("[warpSPH] - [acsph - 03] - enforce BCs"):
         enforceDirichlet(system, system.t, config.dt, config, schemeConfig)
@@ -112,6 +114,8 @@ def artificialCompressible_step(
     with record_function("[warpSPH] - [acsph - 05] - step parameters and BDF coefficients"):
         dtau, beta, k1, k2, nu = acParameters(state, config, schemeConfig, dt)
         alphaT, betaT, gammaT, bdfOrder = system.bdfCoefficients(dt)
+        if schemeConfig.acParams.referenceModel == 'dyngpusph-static-2d':
+            schemeConfig._dyngpusphBDFAlpha = alphaT
 
     with record_function("[warpSPH] - [acsph - 06] - forcing"):
         bodyForce, wallBodyForce = bodyForces(system, dt, config, schemeConfig, adjacency)
@@ -125,7 +129,8 @@ def artificialCompressible_step(
             state, config, schemeConfig, adjacency, dtau=dtau, k1=k1, k2=k2, nu=nu,
             bdf=(alphaT, betaT, gammaT), history=bdfHistory(system, state),
             bodyForce=bodyForce, wallBodyForce=wallBodyForce, surface=surface,
-            contact=contact, bounce=bounce)
+            contact=contact, bounce=bounce,
+            positionLow=system.positionLow, previousPositionStep=system.positionStep)
 
     with record_function("[warpSPH] - [acsph - 09] - dual-time loop"):
         result = solveDualTime(problem, state.positions, state.velocities, state.pressures, verbose)
@@ -141,5 +146,6 @@ def artificialCompressible_step(
     with record_function("[warpSPH] - [acsph - 11] - enforce updates"):
         enforceUpdates(update, system, config.dt, system.t, config, schemeConfig)
         zeroNonFluidRows(update, state)
+        reconcilePositionUpdate(update, dt)
 
     return update, adjacency, state

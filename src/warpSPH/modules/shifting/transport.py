@@ -6,6 +6,32 @@ from .wrapper import solveShifting
 from ..boundaryConditions.pinned import pinnedKeepWeight
 
 
+def taylorShiftFields(state, dx, config, adjacency, *, pressure=True, velocity=True):
+    """External-shift Taylor remap (De Courcy Eq58), before moving positions.
+
+    Reuse the shared difference-gradient operator: constants are preserved,
+    velocity uses its full component-by-coordinate tensor, and density remains
+    the physical volume weight even when transporting pressure. Evaluate both
+    fields on the same unshifted accepted state. Only fluid outputs change.
+    This is opt-in; the existing delta-SPH divergence-form transport is intact.
+    """
+    props = OperationProperties(operation=WarpOperation.Gradient,
+        kernel=config.kernel, supportMode=SupportScheme.Gather,
+        operationMode=OperationDirection.AllToAll,
+        gradientMode=GradientScheme.Difference)
+    p, v = state.pressures, state.velocities
+    fluid = state.kinds == 0
+    if pressure:
+        grad = warpOperation(state, operationProperties=props,
+            queryValues=p, domain=config.domain, adjacency=adjacency)
+        p = torch.where(fluid, p + torch.einsum('nd,nd->n', grad, dx), p)
+    if velocity:
+        grad = warpOperation(state, operationProperties=props,
+            queryValues=v, domain=config.domain, adjacency=adjacency)
+        v = torch.where(fluid[:, None], v + torch.einsum('ncd,nd->nc', grad, dx), v)
+    return p, v
+
+
 def shiftTransport(self, dt, config, schemeConfig):
     dx = drhodt_shift = dudt = duCross = None
     if schemeConfig.shiftProperties.active:

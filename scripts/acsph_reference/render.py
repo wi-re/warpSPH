@@ -29,7 +29,9 @@ def metrics(d):
             'xmin':x.min(0).tolist(),'xmax':x.max(0).tolist()}
 
 def main():
-    ap=argparse.ArgumentParser(description=__doc__); ap.add_argument('run',type=Path); args=ap.parse_args()
+    ap=argparse.ArgumentParser(description=__doc__); ap.add_argument('run',type=Path)
+    ap.add_argument('--label',default='dynGPUSPH 2dbc27a',help='Explicit implementation label for local comparison snapshots')
+    args=ap.parse_args()
     paths=sorted((args.run/'snapshots').glob('*.bin'))
     if not paths: raise SystemExit('No snapshots')
     stats=[metrics(read_snapshot(p)) for p in paths]
@@ -56,7 +58,7 @@ def main():
             d=read_snapshot(path); f=d['bc']==1; speed=np.linalg.norm(d['v'],axis=1)
             for marker,colors in zip(markers,(speedmap(speed/vmax),pmap(.5+.5*d['p']/pmax))):
                 colors[~f]=[.45,.5,.55,1]; marker.set_data(d['x'].astype('f4'),face_color=colors.astype('f4'),edge_width=0,size=2.0)
-            title.text=f'{args.run.name} | dynGPUSPH 2dbc27a | t={d["t"]:.6g} | fluid={int(f.sum())}'
+            title.text=f'{args.run.name} | {args.label} | t={d["t"]:.6g} | fluid={int(f.sum())}'
             frame=canvas.render(); writer.append_data(frame)
             if i in (0,len(paths)-1): imageio.imwrite(args.run/('initial.png' if i==0 else 'final.png'),frame)
     canvas.close()

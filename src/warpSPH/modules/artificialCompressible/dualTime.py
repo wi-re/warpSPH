@@ -21,7 +21,7 @@ form (`warpSPHIntegrators.getButcherTableau`; ACSPH_PLAN.md Sec. 5.2), `k2 D^p` 
 (Eq. 26 / Sec. 1.6).
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Optional, Tuple
 
 import torch
@@ -64,6 +64,10 @@ class DualTimeProblem:
     fluidRows: torch.Tensor
     fluidIndex: torch.Tensor
     nFluid: int
+    positionOrigin: Optional[torch.Tensor] = None
+    positionLow: Optional[torch.Tensor] = None
+    previousPositionStep: Optional[torch.Tensor] = None
+    preparedViscosity: bool = False
 
 
 @dataclass
@@ -73,17 +77,26 @@ class DualTimeResult:
     pressures: torch.Tensor
     iterations: int
     epsilonV: float
+    positionStep: Optional[torch.Tensor] = None
+    positionLow: Optional[torch.Tensor] = None
 
 
 def makeDualTimeProblem(state, config, schemeConfig, adjacency, *, dtau, k1, k2, nu, bdf, history,
-                        bodyForce, wallBodyForce, surface, contact, bounce) -> DualTimeProblem:
+                        bodyForce, wallBodyForce, surface, contact, bounce,
+                        positionLow=None, previousPositionStep=None) -> DualTimeProblem:
     fluid = state.kinds == 0
     fluidIndex = fluid.nonzero().squeeze(1)
+    # The topology is frozen for this real-step solve. Hoist the shared
+    # viscosity helper's first two guards before CUDA graph capture.
+    sampled = getattr(schemeConfig,'boundaryProvider',None) is None
+    prepared = sampled and (not bool((state.kinds==1).any()) or bool((state.kinds==2).any()))
     return DualTimeProblem(
         state, config, schemeConfig, adjacency, dtau, k1, k2, nu, tuple(bdf), tuple(history),
         bodyForce, wallBodyForce, surface, contact, bounce,
         getButcherTableau(schemeConfig.acParams.butcherTableauName),
-        fluid, fluid.unsqueeze(-1), fluidIndex, int(fluidIndex.numel()))
+        fluid, fluid.unsqueeze(-1), fluidIndex, int(fluidIndex.numel()),
+        positionLow=positionLow, previousPositionStep=previousPositionStep,
+        preparedViscosity=prepared)
 
 
 def bdfHistory(system, state):
@@ -118,7 +131,20 @@ def bdfSource(problem: DualTimeProblem, x, v):
     """The BDF source `alpha_t u + beta_t u^n + gamma_t u^{n-1}` for positions and velocities."""
     alphaT, betaT, gammaT = problem.bdf
     xPrev, xPrev2, vPrev, vPrev2 = problem.history
-    return alphaT * x + betaT * xPrev + gammaT * xPrev2, alphaT * v + betaT * vPrev + gammaT * vPrev2
+    if problem.positionOrigin is not None:
+        dx = alphaT * x - gammaT * problem.previousPositionStep
+        dv = alphaT * (v - vPrev) - gammaT * (vPrev - vPrev2)
+    else:
+        dx = alphaT * x + betaT * xPrev + gammaT * xPrev2
+        dv = alphaT * v + betaT * vPrev + gammaT * vPrev2
+    return dx, dv
+
+
+def positionCoordinates(problem, x):
+    """The neighbour operators see world coordinates; BDF can solve increments."""
+    if problem.positionOrigin is None:
+        return x
+    return problem.positionOrigin + (problem.positionLow + x)
 
 
 def pointImplicit(problem: DualTimeProblem, stageIndex: int) -> float:
@@ -152,16 +178,17 @@ def stageSlopes(problem: DualTimeProblem, stageIndex, stage0, slopes, diffusion,
 
     # D5: the velocity the position row sees; for target 'stage'/'both' it is also the velocity
     # this stage's residual reads
-    vsBounced = bounceVelocities(problem.bounce, xs, vs)
+    coordinates = positionCoordinates(problem, xs)
+    vsBounced = bounceVelocities(problem.bounce, coordinates, vs)
     vsResidual = vs if acParams.wallBounceTarget == 'position' else vsBounced
-    view = workingState(problem.state, xs, vsResidual, ps)
+    view = workingState(problem.state, coordinates, vsResidual, ps)
     view.pressures = closedWallPressure(problem, view, flags)
     # the wall velocity is a closure of the *current* fluid velocity, re-applied per stage
     view.velocities = computeBoundaryVelocities(view, problem.config, problem.schemeConfig, problem.adjacency)
     rP, rV = spatialResidual(view, problem.config, problem.schemeConfig, problem.adjacency,
                              problem.k1, problem.k2, diffusion, problem.bodyForce, problem.nu,
                              unilateralWall=acParams.cavitationProjection == 'wall',
-                             taper=flags.taper)
+                             taper=flags.taper, preparedViscosity=problem.preparedViscosity)
     alphaPI = pointImplicit(problem, stageIndex)
     zero = torch.zeros_like
     dxdtBdf, dvdtBdf = bdfRates
@@ -173,12 +200,10 @@ def stageSlopes(problem: DualTimeProblem, stageIndex, stage0, slopes, diffusion,
 def iterate(problem: DualTimeProblem, x, v, p):
     """One dual-time pseudo-iteration: `(x, v, p) -> (x, v, p, eps_v)`."""
     acParams, dtau = problem.schemeConfig.acParams, problem.dtau
-    alphaT, betaT, gammaT = problem.bdf
-    xPrev, xPrev2, _, _ = problem.history
     with record_function("[dualTime] stage-0 closures (BDF source, surface, wall pressure, diffusion)"):
         # the BDF source is evaluated at the FROZEN stage-0 value (Eq. 41's `u^{n+1,m+1,0}`)
         bdfRates = bdfSource(problem, x, v)
-        stage0 = workingState(problem.state, x, v, p)
+        stage0 = workingState(problem.state, positionCoordinates(problem, x), v, p)
         flags = surfaceAt(problem, stage0)
         stage0.pressures = closedWallPressure(problem, stage0, flags)
         diffusion = computePressureSmoothing(stage0, problem.config, problem.schemeConfig, problem.adjacency,
@@ -201,12 +226,12 @@ def iterate(problem: DualTimeProblem, x, v, p):
             pN = pN + dtau * b * kp[l]
         pN = projectPressure(problem.contact, pN)
         if problem.bounce is not None and acParams.wallBounceTarget == 'both':
-            vN = bounceVelocities(problem.bounce, xN, vN)
+            vN = bounceVelocities(problem.bounce, positionCoordinates(problem, xN), vN)
 
     with record_function("[dualTime] convergence metric (device)"):
         # `tilde v = v - Dx/Dt`: zero exactly when the position row holds at level n+1
-        vPos = bounceVelocities(problem.bounce, xN, vN)
-        tildeV = vPos - (alphaT * xN + betaT * xPrev + gammaT * xPrev2)
+        vPos = bounceVelocities(problem.bounce, positionCoordinates(problem, xN), vN)
+        tildeV = vPos - bdfSource(problem, xN, vN)[0]
         epsT = convergenceMetricDevice(tildeV, vN, problem.fluidIndex, problem.nFluid, problem.schemeConfig)
     return xN, vN, pN, epsT
 
@@ -229,9 +254,23 @@ def graphedIteration(problem: DualTimeProblem):
 def solveDualTime(problem: DualTimeProblem, x0, v0, p0, verbose=False) -> DualTimeResult:
     """Iterate to `eps_v < acParams.epsilonV` or `maxPseudoIterations`. `eps_v` stays on the device
     and is read back only at the check schedule's checkpoints (each read is a sync)."""
+    if problem.schemeConfig.acParams.referenceModel == 'dyngpusph-static-2d':
+        from .dyngpusphReference import solve
+        return solve(problem, x0, v0, p0, verbose)
     schemeConfig = problem.schemeConfig
     acParams = schemeConfig.acParams
     x, v, p = x0, v0, projectPressure(problem.contact, p0)
+    if acParams.incrementalPositions:
+        # Eq. (42), using alpha+beta+gamma=0: Dx/Dt =
+        # alpha*(x^{n+1}-x^n) - gamma*(x^n-x^{n-1}). Keep both
+        # displacements independently of rounded absolute coordinates.
+        low = problem.positionLow if problem.positionLow is not None else torch.zeros_like(x0)
+        previous = problem.previousPositionStep
+        if previous is None:
+            previous = problem.history[0] - problem.history[1]
+        problem = replace(problem, positionOrigin=x0, positionLow=low,
+                          previousPositionStep=previous)
+        x = torch.zeros_like(x0)
     schedule = ConvergenceCheckSchedule(
         schemeConfig, 'acsphDualTime', resolveCheckSchedule(acParams, problem.config),
         max(0, acParams.minPseudoIterations - 1), acParams.maxPseudoIterations, verbose)
@@ -258,14 +297,21 @@ def solveDualTime(problem: DualTimeProblem, x0, v0, p0, verbose=False) -> DualTi
     with record_function("[dualTime] eps history read (host)"):
         epsHost = torch.stack(epsHistory).cpu().tolist()
     schedule.record([e < acParams.epsilonV for e in epsHost])
+    if problem.positionOrigin is not None:
+        coordinates = positionCoordinates(problem, x)
+        low = (problem.positionOrigin - coordinates) + (problem.positionLow + x)
+        return DualTimeResult(coordinates, v, p, iterations, epsHost[-1], x, low)
     return DualTimeResult(x, v, p, iterations, epsHost[-1])
 
 
 def exactDeltaUpdate(result: DualTimeResult, state, dt, bdfOrder) -> ArtificialCompressibleSystemUpdate:
-    """The converged step as an exact delta, `(u^{n+1} - u^n)/dt`: forward Euler on it
-    is the identity, so the runner reproduces the converged state byte for byte."""
+    """Expose the solved step as a delta for the forward-Euler integration map.
+
+    Increment mode keeps the precise displacement in dxdt and carries the
+    rounded coordinate/low part separately for finalization.
+    """
     update = ArtificialCompressibleSystemUpdate(
-        dxdt=(result.positions - state.positions) / dt,
+        dxdt=((result.positions - state.positions) if result.positionStep is None else result.positionStep) / dt,
         dvdt=(result.velocities - state.velocities) / dt,
         dpdt=(result.pressures - state.pressures) / dt,
         passive=torch.zeros(state.pressures.shape, device=state.pressures.device, dtype=torch.bool),
@@ -273,7 +319,32 @@ def exactDeltaUpdate(result: DualTimeResult, state, dt, bdfOrder) -> ArtificialC
     update.pseudoIterations = result.iterations
     update.epsilonV = result.epsilonV
     update.bdfOrder = bdfOrder
+    update.positionStep = result.positionStep
+    update.positionLow = result.positionLow
+    update.positionTarget = result.positions if result.positionStep is not None else None
+    update.positionDxdt = update.dxdt.clone() if result.positionStep is not None else None
+    update.referenceFields = getattr(result, 'referenceFields', None)
+    update.epsilonP = getattr(result, 'epsilonP', None)
+    update.exitReason = getattr(result, 'exitReason', None)
     return update
+
+
+def reconcilePositionUpdate(update, dt):
+    """Honor update boundary conditions applied after the incremental solve.
+
+    `enforceUpdates` can modify dxdt in place. Apply that same displacement
+    change to the retained increment, rounded coordinate and low part.
+    """
+    if update.positionStep is None:
+        return
+    correction = dt * (update.dxdt - update.positionDxdt)
+    low = update.positionLow + correction
+    high = update.positionTarget
+    target = high + low
+    changed = (update.dxdt != update.positionDxdt).any(dim=-1,keepdim=True)
+    update.positionLow = torch.where(changed, (high - target) + low, update.positionLow)
+    update.positionTarget = torch.where(changed, target, high)
+    update.positionStep = update.positionStep + correction
 
 
 def zeroNonFluidRows(update, state) -> None:

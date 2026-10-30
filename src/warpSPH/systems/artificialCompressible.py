@@ -121,6 +121,10 @@ class ArtificialCompressibleSystem(BaseIntegrationSystem):
     velocitiesPrev2: Optional[torch.Tensor] = None
     #: `dt^{n-1}`, needed for Eq. (42)'s variable-step coefficients.
     dtPrev: Optional[float] = None
+    #: Precise real-step displacement and the low part of absolute position.
+    #: These avoid both BDF cancellation and losing sub-ULP motion between steps.
+    positionStep: Optional[torch.Tensor] = None
+    positionLow: Optional[torch.Tensor] = None
 
     def initializeNewState(self, *args, verbose=False, **kwargs):
         state = get_reference_state(self)
@@ -134,7 +138,7 @@ class ArtificialCompressibleSystem(BaseIntegrationSystem):
             t=self.t, domain=self.domain,
             positionsPrev=self.positionsPrev, velocitiesPrev=self.velocitiesPrev,
             positionsPrev2=self.positionsPrev2, velocitiesPrev2=self.velocitiesPrev2,
-            dtPrev=self.dtPrev)
+            dtPrev=self.dtPrev, positionStep=self.positionStep, positionLow=self.positionLow)
 
     def rollHistory(self, dt: float):
         """`(x^{n-1}, v^{n-1}) <- (x^n, v^n) <- (x^{n+1}, v^{n+1})`, and
@@ -186,12 +190,28 @@ class ArtificialCompressibleSystem(BaseIntegrationSystem):
         displacement *outside* the pseudo-time loop, and `finalize` is exactly
         that point -- the step owns the dual-time solve, and the shift by
         construction happens after it has converged. Same place
-        `WeaklyCompressibleSystem.finalize` runs `solveShifting`, minus that
-        system's `correctdrhodt`/`correctdvdt` (nothing to correct: density is
-        invariant here).
+        `WeaklyCompressibleSystem.finalize` runs `solveShifting`. Density is
+        invariant here, but velocity and independent pressure still require
+        transport after relabelling. The generic path below currently applies
+        displacement/history only; the opt-in Michel trial adds full Eq58
+        transport through the shared shifting gradient operators.
         """
         self.adjacency = returnValues[-1][0]
         lastState = returnValues[-1][1]
+        update = updateValues[-1]
+        referenceFields = getattr(update, 'referenceFields', None)
+        if referenceFields is not None:
+            # Reference solve is a full accepted-state map. Preserve its wall
+            # closure and avoid cancellation in the derivative roundtrip.
+            self.state.velocities = referenceFields['velocities']
+            self.state.pressures = referenceFields['pressures']
+        if getattr(update, 'positionTarget', None) is not None:
+            self.state.positions = update.positionTarget
+            self.positionStep = update.positionStep.detach().clone()
+            self.positionLow = update.positionLow.detach().clone()
+        else:
+            self.positionStep = None
+            self.positionLow = None
 
         self.state.supports.copy_(lastState.supports)
         for name in ('soundspeeds', 'surfaceIndicators', 'surfaceNormals',
@@ -206,23 +226,39 @@ class ArtificialCompressibleSystem(BaseIntegrationSystem):
 
         config = kwargs.get('config', None)
         schemeConfig = kwargs.get('schemeConfig', None)
+        if referenceFields is not None:
+            self.state.surfaceLambdas = referenceFields['lambdas']
+            self.state.surfaceNormals = referenceFields['normals']
+            self.state.surfaceIndicators = (referenceFields['edges'] > 0).to(torch.int32)
 
         if config is not None and schemeConfig is not None and schemeConfig.shiftProperties.active:
             # Eq. (58): the particle shift applied as a displacement outside
             # the pseudo-time loop -- see this method's own docstring. Unlike
-            # `WeaklyCompressibleSystem.finalize`, no `correctdrhodt`/
-            # `correctdvdt` here: those correct the shift's divergence
-            # contribution to density/momentum, and density is invariant in
-            # this scheme by construction (nothing for them to correct).
+            # `WeaklyCompressibleSystem.finalize`, the generic path does not
+            # yet wire field transport here. Constant density removes density
+            # transport, not the Eq58 pressure/velocity correction. The Michel
+            # trial applies that correction before this coordinate update.
             with record_function("[warpSPH] - [ACSPH] - solve shifting"):
-                dx = solveShifting(
-                    systemState=self.state,
-                    config=config,
-                    schemeConfig=schemeConfig,
-                    adjacency=self.adjacency,
-                    dt=dt,
-                )
-                self.state.positions = self.state.positions + dx
+                if schemeConfig.acParams.referenceModel == 'dyngpusph-static-2d':
+                    from ..modules.artificialCompressible.dyngpusphReference import external_shift
+                    dx = external_shift(self.state, config, schemeConfig, dt)
+                else:
+                    dx = solveShifting(
+                        systemState=self.state,
+                        config=config,
+                        schemeConfig=schemeConfig,
+                        adjacency=self.adjacency,
+                        dt=dt,
+                    )
+                if self.positionLow is not None:
+                    high = self.state.positions
+                    total = self.positionLow + dx
+                    self.state.positions = high + total
+                    self.positionLow = (high - self.state.positions) + total
+                    if not schemeConfig.acParams.bdfShiftCorrection:
+                        self.positionStep = self.positionStep + dx
+                else:
+                    self.state.positions = self.state.positions + dx
                 # Eq. (59): D(x)/Dt must stay Lagrangian across the shift.
                 # `rollHistory` below stores the *shifted* x^{n+1}, so without
                 # this the next BDF difference x^{n+1} - x^n reads the shift as
@@ -232,7 +268,11 @@ class ArtificialCompressibleSystem(BaseIntegrationSystem):
                 if schemeConfig.acParams.bdfShiftCorrection and self.positionsPrev is not None:
                     self.positionsPrev = self.positionsPrev + dx
 
-        if schemeConfig is not None:
+        # The qualified reference path has static walls. Reconstructing their
+        # world coordinates from COM-relative data introduces an extra FP32
+        # perturbation (measured up to one ulp) even at zero body velocity.
+        if (schemeConfig is not None
+                and schemeConfig.acParams.referenceModel != 'dyngpusph-static-2d'):
             for rigidBody in schemeConfig.rigidBodies:
                 rigidBody = integrateRigidBody(rigidBody, 0, 0, dt)
                 self.state = updateBodyParticlesWCSPH(self.state, rigidBody)

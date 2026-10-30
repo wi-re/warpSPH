@@ -10,7 +10,7 @@ from .wallClosure import unilateralWallDivergence, unilateralWallForce
 
 
 def spatialResidual(view, config, schemeConfig, adjacency, k1, k2, diffusion,
-                     bodyForce, nu, unilateralWall=False, taper=None):
+                     bodyForce, nu, unilateralWall=False, taper=None, preparedViscosity=False):
     """`(r_p, r_v)`: the right-hand sides of Eqs. (23) and (25) at `view`.
 
     Eq. (23):  Dp/Dtau = -k1 rho sum_j (v_j - v_i).gradW V_j + k2 D^p
@@ -23,6 +23,13 @@ def spatialResidual(view, config, schemeConfig, adjacency, k1, k2, diffusion,
     extrapolated wall values (`wallPressures`).
     """
     rho = view.densities
+
+    if (schemeConfig.acParams.fusedResidual and not unilateralWall
+            and getattr(schemeConfig, 'boundaryProvider', None) is None):
+        divV, pressure, visc, _ = fusedResidualTerms(view,config,schemeConfig,adjacency,nu,
+            referenceVelocities=view.velocities if preparedViscosity else None)
+        smoothing = diffusion if taper is None else diffusion*taper
+        return -k1*rho*divV + k2*smoothing, pressure + visc + bodyForce
 
     divV = warpOperation(
         view,
@@ -46,9 +53,28 @@ def spatialResidual(view, config, schemeConfig, adjacency, k1, k2, diffusion,
     else:
         rV = computePressureForceSurfaceAware(view, config, schemeConfig, adjacency)
 
-    rV = rV + viscosity(view, config, adjacency, nu)
+    rV = rV + viscosity(view, config, adjacency, nu,preparedViscosity=preparedViscosity)
 
     return rP, rV + bodyForce
+
+
+def fusedResidualTerms(view,config,schemeConfig,adjacency,nu,fluidDiv=None,referenceVelocities=None):
+    """Same separate sums as the existing operators, sharing their pair loop.
+
+    The optional fluidDiv is used only by an explicit acoustic-damper caller.
+    Analytic/unilateral wall closures stay on their existing path.
+    """
+    from .wp_residual import fusedPairSums
+    from ..mdbc.viscosityVelocity import computeViscosityBoundaryVelocities
+    rho0,nuScalar,nuVaries=viscosityScalars(view.densities,nu)
+    reference=referenceVelocities
+    if reference is None:
+        reference=computeViscosityBoundaryVelocities(view,config,schemeConfig,
+            adjacency=adjacency,boundaryVelocitiesPrepared=True)
+    div,pressure,visc,gradDiv=fusedPairSums(view,config,schemeConfig,adjacency,
+        nuScalar*rho0,reference,fluidDiv=fluidDiv)
+    if nuVaries:visc=visc*(nu/nuScalar).unsqueeze(-1)
+    return div,pressure,visc,gradDiv
 
 
 class ViscosityShim:
@@ -72,7 +98,7 @@ class ViscosityShim:
         self.fluid = self._Fluid()
 
 
-def viscosity(view, config, adjacency, nu):
+def viscosity(view, config, adjacency, nu,preparedViscosity=False):
     """Eq. (25)'s viscous term,
     `nu K sum_j (v_ij . x_ij)/|x_ij|^2 gradW_ij V_j` with `K = 2(dim+2)`.
 
@@ -92,7 +118,8 @@ def viscosity(view, config, adjacency, nu):
     unless it was derived from a varying `h`."""
     rho0, nuScalar, nuVaries = viscosityScalars(view.densities, nu)
     out = computeVelocityDiffusion(view, config, ViscosityShim(nuScalar * rho0),
-                                   adjacency, approachOnly=False)
+                                   adjacency, approachOnly=False,
+                                   wall=False if preparedViscosity else None)
     if nuVaries:
         out = out * (nu / nuScalar).unsqueeze(-1)
     return out

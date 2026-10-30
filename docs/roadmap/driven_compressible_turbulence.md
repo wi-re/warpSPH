@@ -291,3 +291,12 @@ Git-ignored .tmp directories. Commit supported reusable functionality, focused
 regressions and maintained documentation as each stage is qualified. This
 roadmap records future scope; HPC jobs and solver implementations are separate
 execution tasks.
+
+## Overnight qualification authorization — 2026-10-27
+
+The implementation and retained qualification evidence now live in the
+`codex/meshless-boundary-balance` worktree. User authorizes the deferred driven
+weak/subsonic GPU checks and other schemes after the corrected ACSPH replay.
+See [the campaign record](../acsph/OVERNIGHT_2026-10-27.md) for pinned sources,
+seven-scheme64²/128² cohort, native method differences and live status.
+This hydrodynamic campaign does not implement MHD or certify stationary data.

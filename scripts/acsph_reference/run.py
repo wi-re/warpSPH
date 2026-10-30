@@ -27,6 +27,8 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('preset', choices=PRESETS)
     ap.add_argument('--source',type=Path,default=Path.home()/'dev/dynGPUSPH')
+    ap.add_argument('--preset-directory',type=Path,
+                    help='Pinned copy of the six preset inputs, independent of checkout edits')
     ap.add_argument('--binary',type=Path,required=True)
     ap.add_argument('--out',type=Path,required=True)
     ap.add_argument('--steps',type=int,default=20)
@@ -34,9 +36,11 @@ def main():
     ap.add_argument('--wall-limit',type=float,default=600)
     ap.add_argument('--stall-seconds',type=float,default=90)
     ap.add_argument('--max-speed',type=float,default=100)
+    ap.add_argument('--accepted-probes', action='store_true',
+                    help='Observe accepted post-shift probes every step; requires observer-qualified build')
     args=ap.parse_args()
     out=args.out.resolve(); out.mkdir(parents=True,exist_ok=False)
-    preset=args.source/'tosend'/args.preset
+    preset=args.preset_directory or args.source/'tosend'/args.preset
     files=('input_values.dat','fluid.dat','boundaries.dat','fsi.dat','gas.dat','probe.dat')
     hashes={}
     for name in files:
@@ -49,12 +53,22 @@ def main():
     expected_binary='gpuSph2d-cavity' if args.preset.startswith('LDCAVITY') else 'gpuSph2d'
     if binary.name!=expected_binary or recipe.get('binaries',{}).get(binary.name)!=sha(binary):
         raise SystemExit('Binary or case-specific flags do not match the build receipt')
-    manifest={'preset':args.preset,'source_commit':subprocess.check_output(['git','-C',str(args.source),'rev-parse','HEAD'],text=True).strip(),
+    if args.accepted_probes and not recipe.get('observation_patch_sha256'):
+        raise SystemExit('Every-step accepted probes require an observation-qualified build')
+    manifest={'preset':args.preset,'preset_directory':str(preset.resolve()),'source_commit':subprocess.check_output(['git','-C',str(args.source),'rev-parse','HEAD'],text=True).strip(),
               'source_inputs':hashes,'run_inputs':{n:sha(out/n) for n in files},'binary':str(binary),'binary_sha256':sha(binary),
               'limits':{'steps':args.steps,'t_limit':args.t_limit,'wall_seconds':args.wall_limit,'stall_seconds':args.stall_seconds,'max_speed':args.max_speed},
-              'build_recipe':recipe, 'video':'pending'}
+              'build_recipe':recipe, 'video':'pending',
+              'accepted_probes': {'enabled':args.accepted_probes,
+                  'stage':'accepted post-shift', 'support':.003,
+                  'positions':[[1.61,y] for y in (.003,.015,.030,.080)],
+                  'method':'fluid-only normalized Wendland C2; dry=0, weight/count recorded'}
+                  if args.accepted_probes else {'enabled':False}}
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     env=os.environ.copy(); env['DYNGPU_MAX_STEPS']=str(args.steps); env['DYNGPU_MAX_SPEED']=str(args.max_speed)
+    env.pop('DYNGPU_ACCEPTED_PROBES',None)
+    if args.accepted_probes:
+        env['DYNGPU_ACCEPTED_PROBES']=str(out/'accepted-probes.csv')
     start=time.monotonic(); last=start; reason=None; progress=[]
     proc=subprocess.Popen([str(binary)],cwd=out,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,bufsize=0,start_new_session=True)
     selector=selectors.DefaultSelector(); selector.register(proc.stdout,selectors.EVENT_READ)

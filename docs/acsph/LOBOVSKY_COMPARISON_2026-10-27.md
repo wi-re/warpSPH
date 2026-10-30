@@ -194,7 +194,7 @@ pass afterwards. No shared boundary code changed. The physical rho fix has no
 effect at rho0=1, so it does not by itself resolve the older density-one
 matrix failures. The h conversion and BDF startup defaults are unchanged.
 
-## Verdict and next discriminator
+## Initial verdict and next discriminator
 
 **Keep the pressure-units correction** and FP64 host-scalar conversion.
 **Retain coefficient/history mappings as diagnostics**, without promoting
@@ -212,3 +212,237 @@ exact initial arrays and equal endpoint times, then produces `summary.json`
 and `comparison.png` with material-row pressure profiles, KE, peak speed and
 pressure-error comparisons. Artifacts are under the evidence root's
 `analysis/`; videos are in each local run's `recording/.../output.mp4`.
+
+## Follow-up: actual spatial operators and RK stages
+
+User follow-up: the ICs are identical, so continue tracing the remaining
+implementation differences. This audit keeps the density fix, mapped beta/k2
+and source-seeded history as the baseline. All changes below are **probe-only**
+options of `compare_lobovsky.py`; production solver and shared boundary code
+are unchanged.
+
+`audit_reference.py` copies the qualified isolated build, adds observations
+around `ResidualHash3`, and records the exact instrumentation diff, source
+hashes and new executable hash. It saves the first real step's iterations
+0, 1 and 199, all three stages, in both sorted and original UID order as
+appropriate. The local `--audit-stages` hook saves matching stage inputs and
+unscaled spatial residuals. It uses eager evaluation explicitly because host
+snapshots cannot be captured; the ordinary fixture already falls back to eager.
+The reference observation changes final floating-point rounding very slightly:
+max position 1.11e-16 m, velocity 2.35e-17 m/s, pressure 6.31e-12 Pa versus the
+qualified uninstrumented run. It is **not bitwise identical**. The local audited
+baseline is bitwise identical in x/v/p to its prior unaudited counterpart.
+
+### Wall-neighbour pressure smoothing breaks linear consistency
+
+At the first stage, both implementations have **identical fluid x/v/p**, with
+lambda agreeing to 1.11e-15. The reference pressure residual is at most
+8.11e-8 Pa/s: its AC-2L flux annihilates the initially linear hydrostatic field.
+The local residual instead reaches **7.8449e6 Pa/s**, RMS 202178 Pa/s over the
+fluid, concentrated at solid walls. At this stage v=0 everywhere, so this is
+pure pressure smoothing, not velocity divergence or physical acceleration.
+Reference k2 is twice the mapped local k2 in these first two iterations due
+to the reference's half-dtau warmup; rescaling that negligible reference
+residual cannot explain the discrepancy.
+
+The reason is the wall gradient in Eq. (33). Local `_biLaplacian` computes
+`gradP_wall` over the wall's own support and uses `gradP_i + gradP_wall` on
+fluid-wall pairs. Outer solid rows without fluid support have pressure zero;
+although the fluid's own wall neighbours carry the correct hydrostatic
+pressure, those neighbours' *gradient estimates* reach the unloaded outer
+rows. The resulting wall gradients contaminate an otherwise linear fluid
+field. The reference explicitly uses **2 gradP_i** for a solid neighbour
+(`sph.cuh`, `getContrib2`), and zero wall gradients are never read in that flux.
+The paper's Eqs. (33)-(34) require linear cancellation; they do not prescribe
+this particular solid-gradient extension. This is a boundary extension choice,
+not a change to the interior Antuono operator.
+
+The probe implements that difference without editing a shared kernel:
+
+```
+D_source_wall = D_current + Divergence_BoundaryToFluid_Difference(gradP)
+```
+
+The added term is precisely `sum_wall (gradP_wall - gradP_i).gradW V_wall`.
+On the flat bottom strip (initial y < 4 dx), initial max |rP| falls from
+7.8449e6 to **2.35e-8 Pa/s**. A small left/top contact-corner residual remains
+(max 64326 Pa/s over the whole fluid): local initial wall-pressure attenuation
+is already active, whereas the reference closes wall pressures before its
+first surface detection. Only eight fluid gradients differ visibly at that
+corner; this is separate from the false bed diffusion. Initial momentum
+residual RMS difference is only 0.00221 m/s², and is 2.26e-13 away from walls.
+
+Two focused invariants pass in both FP32 and FP64: a linear fluid pressure
+next to unloaded outer solid layers is preserved by the proposed flux, and
+its fluid-only operator remains bitwise unchanged. These tests exercise the
+opt-in probe; they do not change the production default.
+
+### The reference divergence damper is real, but does not close the gap alone
+
+The reference adds `beta*h * sum_fluid (divF_i + divF_j) gradW V_j` to the
+momentum residual, where `divF` itself sums **fluid neighbours only**. This is
+separate from its physical viscosity and momentum JST terms. A local replay
+of that operator on the actual reference RK states agrees to max 1.59e-12
+m/s² (RMS 1.75e-14) at the first iteration's second stage, and to max 5.33e-15
+at iteration 199's third stage. Thus the transcription is checked on identical
+fields, rather than inferred from different trajectories.
+
+At the first iteration's second stage, the reference horizontal component
+RMS is 58.83 m/s² for pressure, 30.54 for the acoustic damper, 0.0557 for
+physical viscosity and 0.1314 for momentum JST. By iteration 199's last stage,
+the damper's vector-component RMS is 0.0515 m/s²; physical viscosity is
+0.000550 and JST 0.00116. The large initial contribution is transient.
+The paper discusses divergence damping in Section 2, but this exact
+fluid-only operator is an extra in the executable source, absent from its
+published Eq. (25). It is retained as an explicit diagnostic option.
+
+Adding only this damper to the wall-flux trial changes final pressure RMS
+75.92 -> 78.55 Pa and KE/reference 1.1657 -> 1.1701. It does **not** fix the
+remaining difference, despite its sizeable first-stage contribution.
+
+### RK source placement differs structurally
+
+Both use the same SSPRK3 a/b tableau. Local code scales each source stage's
+slope by `1 + c_next*dtau*alpha_BDF` (last stage uses c=1). The reference
+instead scales each **destination stage row** by `1 + b_destination*dtau/dt`,
+and each final weight by `1 + b_source*dtau/dt`. Its C++ `(3/2)` evaluates to
+one, so this is not the paper's BDF coefficient. At dtau/dt=1/2 the reference
+reciprocal factors are 12/13, 12/13 and 3/4. Local first-step slope factors
+with source history are 22/39, 44/61 and 22/39. These are different iteration
+maps even before considering warmup, wall closure or momentum damping.
+
+`--rk-treatment source` reproduces the actual placement and integer-division
+quirk only inside the comparison harness. Agreement with a reference-code
+quirk is not grounds to promote it as the numerical model. The first two
+half-dtau pseudo-iterations, stopping norm/fallback, wall pair velocity
+closure and final shifting remain separately declared differences.
+
+### Frozen-field replay localizes a second wall difference
+
+The wall velocity is not equivalent between implementations. In the
+reference, the extrapolated fluid velocity is sampled **at the physical wall
+particle**, then reflected with a normal derived from wall-particle geometry.
+Local mDBC samples at a **reflected ghost location** and uses its SDF normal.
+Both are called free-slip, but they produce different wall velocities even
+when the fluid fields are identical.
+
+Replaying the exact first-step reference iteration 199 / last-stage fields:
+
+| Operator on identical native fields | Max difference | Component RMS difference |
+|---|---:|---:|
+| Pressure acceleration, local kernel vs native | 2.45e-12 m/s² | 2.57e-13 m/s² |
+| Divergence with local mDBC closure vs native | 0.3505 s⁻¹ | 0.003556 s⁻¹ |
+| Divergence with native wall values fed to local kernel | 2.43e-17 s⁻¹ | 9.08e-19 s⁻¹ |
+| Independently computed physical-wall Shepard/mirror | 9.71e-17 s⁻¹ | 1.02e-18 s⁻¹ |
+
+The native divergence itself has max 0.04039 s⁻¹ / RMS 0.002599 s⁻¹. Thus the
+wall-closure difference is larger than the residual being solved, rather than
+a tiny rounding discrepancy. At the first iteration's second stage the same
+local closure error reaches 2.912 s⁻¹, while the physical-wall implementation
+agrees to 1.78e-15. With beta=187.5 and rho=1000, the last-stage difference
+alone corresponds to **12.32 MPa/s maximum / 125 kPa/s RMS** in the pressure
+residual. This is a genuinely different incompressibility boundary operator.
+
+`--wall-velocity source` is scoped to the static Lobovsky fixture; it computes
+the wall-location Shepard value and particle normal with existing operations.
+It does not change mDBC or general moving-wall behavior. Both frozen replay
+fixtures use only one pseudo-iteration to obtain the initialized system;
+their advanced states are not convergence/trajectory evidence. Each has video.
+
+### Shifting is a separate discrepancy
+
+A second observational build records `ShiftHash` input/output. All first-step
+RK/operator dumps are **bitwise equal** to the first observational build, so
+adding shift observations leaves those evaluations unchanged. During the first
+reference step, the shift has RMS magnitude **7.28e-7 m** and max **6.01e-6 m
+(0.00801 dx)**. The local RK-aligned trial's Michel shift has RMS 3.78e-12 m /
+max 1.49e-9 m (0.00000199 dx). The reference's dt-independent surface-cohesion
+shift, wall collision shift and differing Michel coefficient are not the same
+particle regularization as the local implementation.
+
+Native remapping in this first shift changes pressure by RMS 0.0574 Pa / max
+1.877 Pa, and velocity by RMS magnitude 5.41e-9 m/s / max 3.68e-7 m/s.
+Therefore it is not responsible for the large initial wall pressure-flux
+error or the first-step wall-velocity discrepancy. Its geometry/history effects
+still matter to subsequent steps. A reference-matching shift and a physically
+qualified shifting model are separate decisions; neither is silently promoted.
+
+## Follow-up outcome: startup parity after matching the wall operator
+
+The completed static wall-velocity trial closes the remaining gap by roughly
+two orders of magnitude. Successive rows add **one choice at a time**, retaining
+exact physical ICs, viscosity, mass, FP64 precision and reference timesteps.
+All rows below finish three real steps at t=4.368e-5 s, with 200 iterations
+per real step. The starting row already has the pressure-unit fix and explicit
+h/coefficient/history mappings from the earlier section.
+
+| Successive probe | Pressure RMS vs reference [Pa] | KE/reference | Peak speed [m/s] | p_min / p_max [Pa] |
+|---|---:|---:|---:|---:|
+| Native reference | — | 1 | 0.00258609 | 0.07473 / 2936.04685 |
+| Local mapped/history baseline | 108.387 | 1.233645 | 0.00225577 | -46.817 / 3275.979 |
+| + fluid-side wall diffusion gradient | 75.917 | 1.165742 | 0.00215215 | -45.017 / 2936.113 |
+| + native divergence damper | 78.551 | 1.170089 | 0.00211714 | -57.644 / 2936.127 |
+| + native RK factor placement | 106.470 | 1.015709 | 0.00178854 | -24.585 / 2936.204 |
+| + native physical-wall velocity sampling | **1.084** | **1.001891** | **0.00259236** | **0.07056 / 2936.04563** |
+
+Final KE differs by +0.1891%, peak speed +0.2423%, mean pressure +0.3775 Pa,
+and velocity RMS error is 6.33e-7 m/s. Pressure RMS is 0.03684% of rho g H.
+The first-step comparison is still closer: KE +0.00682%, peak speed +0.0632%,
+mean pressure -0.00248 Pa, pressure RMS 0.05770 Pa and velocity RMS 1.06e-8 m/s.
+The first-step pressure RMS is nearly the reference's own shift-remapping RMS
+(0.05741 Pa); the much larger 108 Pa error is explained without changing ICs.
+
+The wall-gradient change is independently justified by linear consistency.
+The velocity change instead matches a *different discrete wall operator*:
+wall-point Shepard and ghost-point Shepard are distinct choices. The staged
+trajectory controls establish their combined contribution with RK/damper
+alignment; this is not a factorial attribution of every interaction. The
+near-exact first step and same-field replays give stronger localization than
+matching total KE alone. The reference's extra damping, integer RK quirk and
+dt-independent shift remain source-code choices, not automatically recommended
+production models.
+
+All runs retain 320000 fluid particles / 180 kg / 0.18 m² per unit breadth.
+Initial array identity, common endpoint times and finite fields are checked by
+`analyze_lobovsky.py`. Every video was decoded and the main trajectory final frames inspected;
+the early geometry barely changes, so material-row pressure curves and direct
+operator residuals are the useful diagnostics. The new wall-flux invariant
+checks pass **2 FP32 + 2 FP64**, CPU. No production solver or shared boundary
+implementation changed in this follow-up.
+
+| Follow-up run | Real steps | Wall seconds | Wall ms/step |
+|---|---:|---:|---:|
+| Instrumented native | 3 | 32.035 | 10678.2 |
+| Audited local baseline | 3 | 122.621 | 40873.6 |
+| + wall-gradient extension | 3 | 127.079 | 42359.6 |
+| + acoustic damper | 3 | 162.694 | 54231.3 |
+| + source RK placement | 3 | 159.108 | 53035.9 |
+| + source wall-velocity closure | 3 | 163.007 | 54335.8 |
+| Native shift observation | 1 | 11.573 | 11572.6 |
+| Frozen closure-value replay fixture (1 pseudo-iteration) | 1 | 4.695 | 4694.9 |
+| Frozen closure-implementation replay fixture (1 pseudo-iteration) | 1 | 4.607 | 4607.2 |
+
+These costs include stage dumps/setup/video. Local graph capture is explicitly
+disabled for the observational hook; the ordinary fixture's shared-boundary
+capture blocker remains. The unfused damper/closure probe is not a performance
+implementation, and native/local timing inclusion differs. The 200-iteration
+caps remain unresolved in both implementations. This establishes **bounded
+startup agreement**, not convergence or a validated wall-impact solution.
+
+**Verdict / next work:** retain these reproducible diagnostic controls. A clean
+ACSPH-local wall-flux/velocity closure implementation, preserving the shared
+boundary code, should be qualified with linear hydrostatic and static slip
+invariants before promoting it. Keep the reference RK integer quirk diagnostic;
+compare a justified point-implicit model and a common, fully reported stopping
+criterion. Then extend the exact-IC comparison toward impact, while measuring
+shifting/field transport separately. No full impact campaign was started.
+
+Regenerate the new analyses using `analyze_operators.py --root <evidence-root>`
+and `analyze_lobovsky.py` with the five successive local directories listed
+above. Retained artifacts: `operators-analysis/{summary.json,operators.png}`,
+`operators-trajectory-analysis/{summary.json,comparison.png}`, native raw
+operator/shift dumps, and each trial's video/config/log/snapshots. Final probe
+source copies/hashes are in `operator-probe-sources`; the comparison harness
+also fingerprints its own and the hook's source for future runs.
+
+Performance follow-up: [retained increments and fused residual results](PERFORMANCE_2026-10-27.md#implemented-retained-increments-fused-residual-and-production-graph-capture) qualify the production optimization separately from these diagnostic operator choices. Final runs use production graph capture without the process-local boundary benchmark patch.

@@ -11,6 +11,779 @@ priority decision does not start new runs or change numerical defaults.
 
 ## Lobovsky comparison — 2026-10-27 (active)
 
+
+**Checkpoint validation (2026-10-30):** all142 ACSPH-focused CPU tests pass,
+including the new enum-receipt regression. All51 reference scripts compile;
+`git diff --check` passes. No GPU simulation launched for cleanup.
+
+**Clean integration checkpoint (2026-10-30, user):** hold new Michel trials
+until the MFM worktree/core integration and subsequent branching can proceed.
+The source ablation campaign completed:8 new rows reached1.530014s, row08
+retained its motion-coverage guard stop. Row09 pressure gate has late P1 RMS
+4.991kPa/P4 RMS4.390kPa/caps110; full plateau/trim endpoint14.092/12.566/48,
+so the final adjacent comparison is now available, pending detailed followup.
+Michel preflight failed before any physical timestep because its new config
+receipt used raw dataclass enums. Repaired the working driver to use the
+existing JSON config schema and added a regression test. Preserve that frozen
+failed root unchanged, with STOP/merge-hold receipt; no automatic restart.
+Commit ACSPH implementation, tests, maintained analysis/figures and handoff
+notes on dev. Raw trajectories/frozen runtimes remain ignored under.tmp.
+Re-freeze the repaired driver in a fresh root and requalify after integration;
+long runs must stay independent of concurrent frontend/Core edits.
+
+**Michel controls implemented and queued (2026-10-30):** three frozen
+original-IC rows to7641/1.530014s: static/direct/warmup Michel with BDF off;
++full pressure/velocity Taylor remap with BDF off; +existing generic BDF
+correction. Shared difference-gradient operators preserve constants and full
+velocity cross terms; no delta-SPH behavior/default change.21 focused CPU
+checks pass, including existing compensated/BDF tests. Serial GPU preflights
+(plumbing oracle, exact ICs, actual captured/replayed graphs, eager parity)
+precede long rows, all after the current compatibility queue. Same physical
+setup/native clocks/FP32/nu/closure/solve thresholds; video/watchdogs/checkpoints
+and per-row pressure/KE/convergence/cost analysis. Results pending; explicit
+candidate, not default promotion. [Trial](docs/acsph/MICHEL_TRANSPORT_TRIAL_2026-10-30.md),
+root`.tmp/acsph-michel-transport-2026-10-30/`.
+
+**Michel transport trial authorized (2026-10-30, user):** baseline = generic
+consistent-closure solver + exact static geometry + direct accepted fields +
+first-two half-clock warmup + normal Michel displacement. Compare adding full
+velocity and pressure field transport, then enabling the external-shift BDF
+correction as a third original-IC candidate. Explicitly disable existing
+bdfShiftCorrection in the first two rows; same ICs/native clocks/FP32/nu/walls/
+solve controls throughout. Retain current source campaign unchanged and queue
+new serial trajectories after GPU idle. Verify field transport cross terms,
+constant preservation, EOS equivalence and initialization/graph invariants
+before long rows. Normal delta-SPH behavior and all defaults stay unchanged.
+
+**Paper/source distinction verified (2026-10-30):** §3.2 explicitly specifies
+Michel shifting (Eqs55–57), full Taylor field remapping (Eq58) and discusses
+external-shift BDF correction (Eq59). Source collision/cohesion/changed shift
+coefficient, diagonal-only velocity remap, warmup, pressure stopping gate and
+plateau/trim are not the published prescription. Spatial block is mixed;
+last-RK metric sampling is not explicitly specified. Baseline is closer on
+shifting but lacks general field remapping and already contains fixture
+code-specific alignments: no existing ladder row is a complete paper control.
+Stage-level mapping added to the ladder design. Preserve a distinct paper
+target; source agreement is compatibility evidence, not adoption evidence.
+
+**Intermediate ablation results (2026-10-30):** seven of nine new rows completed
+7641 steps/1.530014s. Static geometry and direct accepted-field handoff leave
+P1 late RMS near1.22kPa. First screening flag is source shift/history: RMS
+1.219→2.325kPa, swing14.883→43.411kPa, caps6→20 (cap criterion).
+Pressure remap→3.159kPa, velocity remap→5.540, warmup→2.772,
+coordinated spatial operators→5.300. Row08 last-stage metric stopped after
+7224/1.472653s: attempt7225 iteration9 motion2.256215mm exceeds existing
+2.250000mm certificate; saved guard exception precedes process signal11.
+No full-window score for this failed row. Row09 pressure-gate run still
+advancing; plateau/trim attribution remains pending. Retained full endpoint
+RMS14.092kPa. Completed new rows58.6–81.7min; solve362ms baseline→546ms
+spatial block→660ms retained full endpoint over7641 steps. Coupled shift
+needs subdivision/confirmation, not single-term blame or default promotion.
+[Intermediate report](docs/acsph/ABLATION_RESULTS_2026-10-30.md).
+
+**Ablation ladder qualified and launched (2026-10-29):**11 cumulative stages,
+9 new original-IC trajectories to7641/1.530014s; retained baseline/current
+anchors reused.11 focused CPU tests pass.14 serial3-step GPU controls pass:
+baseline matches historical diagnostics and independent old frozen-runtime
+snapshot bitwise; current endpoint matches retained snapshot/diagnostics
+bitwise; all physical ICs equal, graphs active; new warmup/operator graph and
+eager endpoints bitwise. Historical schema mismatch was only two missing
+nullable diagnostics; repaired with exact recorded-value comparison, failed
+receipt retained and all successful controls reused. Frozen numerical source
+unchanged. Intermediate rows now serial under persistent supervisor; video,
+100m/s/advancing-clock/wall watchdogs, complete late checkpoints, failure input/
+trial capture, per-row adjacent pressure/convergence/cost analysis. Unknown
+implementation/output errors halt; recognized numerical/budget stops remain
+explicit row outcomes. Smoke analysis handles pending rows without false
+adjacent claims. No shared-boundary/default change or geometric waiver.
+[Design](docs/acsph/ABLATION_LADDER_2026-10-29.md), live
+`.tmp/acsph-ablation-2026-10-29/status.json`. Intermediate results are recorded above.
+
+
+
+**Cumulative ablation requested (2026-10-29, user):** build a progressive ladder
+from the retained consistent-closure/Michel solver to current reference mode,
+separating geometry/arithmetic handoff, source shift/history, p remap, v remap,
+pseudo-time warmup, coordinated source operator block, metric location,
+pressure gate and plateau/trim. Pin all physical ICs/native clocks/FP32/nu/
+volume ghosts/ramp0.5. Bound first pass at7641steps/1.530014s, which covers
+completed late ringing window; baseline/current endpoint data are reusable.
+Preflight graph, endpoint equivalence and individual-switch behavior before
+long rows; all original-IC trajectories serial, video/progress/watchdogs,
+complete-history checkpoints, per-row automatic same-clock analysis and
+explicit numerical failures. No shared boundary/default edit or guard waiver.
+A coordinated operator block is an honest first-pass group, not an isolated
+single-formula attribution; subdivide if it produces the first notable jump.
+
+
+
+**Retained before/after comparison complete (2026-10-29):** all5 local physical
+IC arrays bitwise identical;8395 accepted clocks exact against each other and
+dense dynGPUSPH. Previous consistent-closure/Michel versus current reference
+solver/shift-remap:1.44–1.53s P1 swing22.996→232.297kPa (10.1x),1ms detrended
+RMS1.222→14.092kPa (11.5x),caps11→48. Over common8395 steps caps28→84,
+iterations15.264→21.098 (+38.2%), recorded solve379.97→712.94ms (+87.6%).
+All4 older trajectories completed10000/1.91842s; current guard stop remains.
+Additional pressure gate explains12/84 cap endpoints alone;72 also fail
+checked velocity. Current late shared-clock meanKE is+0.108% native versus
+old+3.794%, and common maximum speed26.07 versus35.06m/s, so do not call this
+uniform global velocity instability. Combined reference port clearly raises
+ringing/work despite better bulk reference agreement; guard-only fix is separate.
+[Report](docs/acsph/HISTORICAL_COMPARISON_2026-10-29.md). Preserve previous
+consistent run as baseline, current opt-in reference path without default
+promotion. Offline7.11s, plots inspected; no new physical run or model edit.
+
+
+
+**Historical trajectory comparison requested (2026-10-29, user):** compare
+retained original hard, mass-spacing ramp0.5, volume-spacing mixed-closure,
+and volume-spacing consistent-closure full Lobovsky trajectories directly
+against the current static reference solver and dense dynGPUSPH. Use exact
+common accepted-step clocks through8395/1.637500808s, separate pressure
+amplitude, convergence/cost, bulk dynamics and guard-only stops, retain all
+configuration/transport differences. Offline analysis first; no new physical
+run or changed safety threshold is authorized by this comparison task.
+
+
+
+**Second stop captured (2026-10-29):** checkpoint8300 replay reproduces all96
+accepted diagnostic rows (initial restart status fields excluded only at the
+initial row), then guarded attempt8396 exactly.225.42s diagnostic wall;
+trial finite at iteration12, maxspeed16.066m/s, endpointmotion2.250437mm,
+pressure range−17.590 to55.803kPa. Pair/bounce budgets still pass; separate
+sufficient cone bound fails by0.437micrometers. Saved exact solve input,
+trial fields and complete checkpoint8395 in `reproduce-cone-8396/`; further
+controls need only one physical-step solve. Native same accepted8395 speed
+15.732m/s versus local15.922, so speed itself is not uniquely local evidence.
+No physical continuation is active. Next: test actual stage-zero cone/stencil
+coverage and source-consistent handling, without waiving a safety bound.
+
+
+
+**Partial late comparison recovered (2026-10-29):** exact clocks through
+1.637500808s,8395 accepted steps. The fully covered1.44–1.53s window shows
+the large pulse/ringing in both dynGPUSPH and warpSPH. P1 raw peak-to-peak
+213.127kPa native versus232.297kPa local (+9%);1ms detrended RMS13.264 versus
+14.092kPa (+6%), caps45 versus48. Native peak21 contributors. This window
+does not support much larger local-only late ringing. Full target/windows
+remain incomplete. Plot/metrics in motion report; bounded checkpoint8300
+replay is capturing attempted8396 with exact accepted-state parity gates.
+
+
+
+**Continuation stopped again (2026-10-29; status follow-up):** 1907 accepted
+suffix steps,8395 total, end1.637500807764885s;356 steps remain to8751/1.70015s.
+After2861.15s physical wall, attempted8396 hits the separate surface-cone
+certificate at pseudo-iteration12:2.25043716mm versus2.25000002mm budget.
+This is a sufficient geometry-bound failure, not proof of a missing cone pair
+or nonfinite fields. Do not waive it or claim complete late coverage. Latest
+complete checkpoint8300 at1.6259203166616585s; original failure/suffix preserved.
+No physical run remains active. Recovering partial accepted prefix+suffix
+comparison through1.6375s; the1.44–1.53s window is complete,1.25–1.65 and
+1.59–1.68 are incomplete. Native dynGPUSPH remains fully complete. Next is
+capturing attempted8396 from the checkpoint and checking actual cone/stencil
+coverage before changing any bound or restarting.
+
+
+
+**Crash diagnosed and guard repaired (2026-10-29):** unchanged replay exactly
+reproduces all6489 diagnostic rows and the step6489 rejection. Trial converges
+in53 iterations, finite; maxmotion1.530606mm versus old1.500mm guard. Actual
+CSRcutoff8.485281mm includes sqrt(2)Verlet margin; all RK stages pass pair,
+surface-cone and bounce coverage. Searchsupport2/3/4 controls give maxpressure
+difference0.01404Pa. Replace fixed cutoff with all-stage geometric budgets
+(limit2.250mm here), preserving equations/candidate list and rejecting unsafe
+geometry before persistent surface commit. Old-history restart reproduces
+failure bitwise; repaired step accepts the captured trial bitwise.18 focused
+CPU checks pass, graph remains active; warm fixed53-iteration solve1.834s old
+versus1.825s repaired (no measurable overhead in3 warm pairs). User-authorized
+late trajectory resumed from complete step6488 checkpoint, source-pinned,
+video/watchdogs/rolling checkpoints, automatic merged late comparison/export.
+Early suffix has ringing/caps: crash repair does not resolve late amplitude.
+[Report](docs/acsph/MOTION_GUARD_2026-10-29.md), live
+`.tmp/acsph-motion-investigation-2026-10-29/continuation-status.json`.
+Original failed campaign preserved; dynGPUSPH8751-step reference complete.
+
+
+**Crash investigation started (2026-10-29, user):** dense dynGPUSPH completed
+8751steps/1.70015s; clocks exact, probe/snapshot difference7.28e-12Pa. Separate
+postprocessing variable shadowing stopped automatic analysis after both viewer
+exports; recover analysis without a physical rerun. Reproduce warpSPH's6489
+candidate-motion guard with captured entry, trial fields and complete restart
+history; diagnose candidate completeness before altering its safety contract.
+Preserve original failed trajectory and qualify any candidate-list repair on
+identical inputs. GPU is idle at investigation start.
+
+**Progress / guarded stop (2026-10-29):** repaired warpSPH exited1 after6488
+accepted steps, t=1.351960141s,3757.12s wall. Attempted step6489 raises
+`Reference solve exceeded the declared half-support candidate motion bound`.
+Last accepted maxspeed4.347m/s,29 pseudo-iterations, full-residual convergence,
+graphs active; the failing solve's fields/motion were not returned, so this
+does not establish whether its trial state is otherwise well behaved. Do not
+disable the guard or label the cause solved. Its fixed2R candidate pool and
+0.5R motion contract need a targeted reproduction/instrumentation review.
+The independent dynGPUSPH reference continues (about4590steps/0.936s at16:24
+UTC); queued exports/analysis must retain incomplete warpSPH coverage. No
+patched physical rerun has been queued. Late comparison remains incomplete.
+
+**Late comparison authorized (2026-10-29, user):** launch original-IC repaired
+warpSPH FP32 and dense accepted-state dynGPUSPH FP64 through1.70s, covering
+1.25–1.65s and the two earlier proposed late windows. Freeze the already
+qualified solver and observer builds; serialize GPU work, video/progress/
+velocity/stall/wall watchdogs, automatic amplitude/decay/dynamics comparison.
+No FP64 warpSPH branch or numerical/default changes are added. Preserve the
+named bounce/trim/precision differences and any failed trajectory.
+
+**Queue launched (2026-10-29):** persistent serial supervisor PID2683053,
+`.tmp/acsph-late-ringing-2026-10-29/status.json`. Repaired FP32 warpSPH is
+active; observed FP64 dynGPUSPH and automatic validation/exports/analysis are
+queued.8751 steps to1.700150835s each;934 previously qualified source hashes
+verified before copying, native observer/source/binary and all six preset
+inputs pinned. First14 diagnostics exactly reproduce the qualified short
+run; graphs active. Known-sinusoid amplitude and incomplete-coverage checks
+pass; analysis smoke correctly rejects0.460s as late coverage. Video,300s
+advancing-clock/100m/s/8h-phase watchdogs, periodic GPU occupancy and owned-
+descendant cancellation. Approx4–6h, potentially longer with late caps.
+No late result yet; no extra precision branch/model change. Root README
+documents artifacts and `STOP` cancellation.
+
+**Late-ringing scope clarification (2026-10-29, user):** the concern is the
+larger late long-run oscillations (not the first-impact pulse). Dense-reference
+agreement through0.460s does not resolve1.25–1.65s. Updated warpSPH has not run
+there, dense accepted-state dynGPUSPH data are unavailable there, and cancelled
+FP64-window controls provide no result. Keep the late discrepancy open and
+limit conclusions to the measured interval. No new physical run launched.
+
+**Dense dynGPUSPH reference complete (2026-10-29):**2113 steps to0.460049714s,
+1821.95s /862.26msstep; all clocks exact,48 saved fields bitwise identical to
+the original reference, probe/snapshot error1.82e-12Pa. Native FP64 P1 peak
+36.53kPa/rebound−3.92kPa versus repaired warpSPH FP32 35.92/−4.55kPa,
+at identical clocks. The native trace also spikes and rings; the old10ms
+curve missed it. Dense-reference P1 RMSE improves2619.98→522.39Pa (80.06%);
+P2–P4 also improve. Peak is first wet sample with just2fluid contributors;
+weight/count retained. Original hard/lagged bounce vs smooth/fresh ramp0.5,
+precision and trim differences remain named. No causal isolation or default
+promotion. Finite fields, mass/membership/static walls and video qualify;
+no queued run. [Dense report](docs/acsph/DYNGPUSPH_DENSE_PRESSURE_2026-10-29.md).
+
+**Dense dynGPUSPH reference requested (2026-10-29, user; completed above):** rerun the
+supplied Lobovsky IC through the same 2113-step first-pulse window, observing
+accepted post-shift pressure every step with the same fluid-only Wendland C2
+probes. Preserve the original reference equations and retain build/input/clock
+receipts; qualify observation against unchanged snapshots. Resolve the actual
+reference peak before drawing conclusions from the sparsely sampled curve.
+The hard dynGPUSPH bounce versus smooth warpSPH bounce remains a named control,
+not an implied equality of all numerical choices.
+
+**Reference repair / first-pulse replay complete (2026-10-29):** corrected
+static-wall path reaches2113 steps /0.460049714s,1194.08s /565.11msstep.
+All graphs active;17 startup caps,2086 full-residual exits and10 trimmed exits.
+934 frozen hashes verify;47 finite frames, fixed wall coordinates/zero wall
+velocity, no wall crossing, constant membership/mass,213 decoded video frames.
+Final FP64 fixed-operator/map gates and complete graph tensors pass. At the
+matched endpoint KE error improves+0.277%→+0.0136%, mean-pressure error
+−3.66%→−0.141%, pressure-field RMS52.9→32.3Pa. P1 spike persists/worsens
+32.37→35.92kPa, rebound−1.32→−4.55kPa; shared-frame P1 RMSE187.5→504.7Pa
+while P2–P4 improve. Static-wall reconstruction accounts for <0.5% of the
+repaired P1 peak, so it is not the primary cause. Smooth bounce/source-angle
+quirks remain explicit. Matched solve cost+44%, iterations+14.8%; performance
+follow-up remains. Keep named reference mode; no generic-default promotion,
+full-duration claim, or queued run. Source/evidence and remaining precision/
+dense-reference-probe discriminator: docs/acsph/DYNGPUSPH_COMPARISON.md.
+
+**Static-wall invariant follow-up (2026-10-29):** the first repaired replay
+was stopped after2399 accepted steps (~0.497s): routine rigid-body finalization
+reconstructs stationary walls and shifts18436rows by up to2.98e-8m in FP32.
+Its first pulse still spikes (P1 36.09kPa, rebound-4.59kPa); preserve this
+as a stopped control, not a completed qualification. The reference-only
+finalizer now keeps wall geometry fixed and rejects moving bodies. New unit
+regression passes; three-step graph/eager fields and static wall coordinates
+are bitwise exact. A fresh IC replay is bounded at2113 native steps,
+t=0.460049714s, sufficient for the first pulse and immediate ringing. Source
+root `.tmp/acsph-parity-repair-static-2026-10-29`; shared boundaries unchanged.
+
+**Reference repair qualified; bounded replay running (2026-10-29):** added
+explicit `acParams.referenceModel=dyngpusph-static-2d`, with physical/static wall
+fields, pair-dependent viscosity, source moment/lambda/gradient, frozen momentum
+JST, RK-stage surface union/closure lag, first-two half pseudo-clock, pressure
+and position stop metrics, and retained full diagnostics for trimmed/plateau
+exits. Frozen source cell membership is filtered against current queries, with
+a guarded candidate-motion bound. External remap consumes accepted last-RK wall
+p and physical v; reference full-state handoff avoids derivative cancellation.
+Smooth bounce0.5 remains the declared comparison control, and source mixed-index
+trim bookkeeping is deliberately not copied (stable physical fluid IDs instead).
+Captured FP64 force/diffusion operators pass roundoff gates; complete first
+pseudo-step x/v/p/wall-p matches at 1.2e-16m / 1.7e-16m/s / 6.1e-11Pa /
+2.3e-12Pa. All graph auxiliary outputs match eager bitwise. Three full FP32
+physical steps match eager bitwise, graph active. Focused tests36 pass in each
+precision plus78 production/fixture checks. FP64 adaptive-dt and isolated-zero
+serialization defects repaired/verified. Sources frozen under
+`.tmp/acsph-parity-repair-2026-10-29/source`; serial video-enabled FP32 replay
+from IC is running only3579 native steps to0.7001s, with watchdogs and analysis.
+Original cadence-check and harness/compile failures retained. No shared boundary
+edit, precision campaign or full-duration replay.
+
+**Parity repair authorized (2026-10-29):** user says go ahead with the audit
+priorities. Implement an explicit static-2D dynGPUSPH reference solve path,
+qualify closure/support/JST/RK/stopping on captured fields, and run only the
+FP32 first-impact/ring-down prefix after fixed-state and graph gates pass.
+Keep ramp0.5 as the declared bounce control; retain hard-cohesion/angle quirks,
+with no generic-default promotion or shared-boundary edits. Fix independently
+reproduced FP64 timestep/config serialization defects with focused checks.
+AC-4 and moving-body model changes remain separate from this AC-2L repair.
+
+**Detailed audit complete (2026-10-29):** fixed controls demonstrate a finite
+15 micrometre cohesion jump at the wide cutoff even in FP64, and invalid
+antiparallel `acos` inputs explain a separate normal-rounding sensitivity.
+The integrated reference-shift caller still supplies zero wall pressure and
+mirrored wall velocity, rather than closed pressure and physical velocity;
+fixed impact fields change remapped p by up to 403 Pa and v by 0.0081 m/s.
+Also confirmed: pair-dependent viscosity wall rule missing, active momentum
+JST omitted, first-two pseudo-step warmup and pressure stopping gate absent,
+and deficient-support lambda differs (isolated local 1 vs reference 0).
+Surface/closure timing, neighbor construction and intentional bounce choices
+remain distinct. Production AC-4 scaling, FP64 adaptive-dt failure and lost
+isolatedZeroPressure serialization are separately documented. Full source
+catalog, controls and priorities: [audit](docs/acsph/DYNGPUSPH_COMPARISON.md#2026-10-29--end-to-end-parity-and-precision-sensitivity-audit).
+The previous bounded replay is a partial-alignment experiment: its isolated
+operator qualification does not establish integrated parity. Correct these
+functional gaps before attributing ringing to precision. No numerical solver,
+default or shared-boundary source changed, and no physical run is queued.
+
+**Detailed parity/sensitivity audit authorized (2026-10-29):** user requests
+isolate the demonstrated FP32 cutoff/cohesion sensitivity, then re-read the
+actual compiled supplied dynGPUSPH and current warpSPH ACSPH paths end-to-end.
+Audit both production defaults and the explicit Lobovsky comparison hooks;
+classify missing/extra terms, arithmetic/stage/history/guard differences and
+intentional controls. Use fixed-input/synthetic non-evolving experiments for
+branch attribution, retain failed evidence; no new full physical trajectory or
+numerical-default promotion. Record source locations and executable evidence
+in docs/acsph/DYNGPUSPH_COMPARISON.md. Shared boundary source remains untouched.
+
+**Shift/remap gap closure authorized (user, 2026-10-29):** close the known
+dynGPUSPH/warpSPH external shifting and field-transport implementation gap,
+then FP32 from original IC only through first impact/ring-down (~0.70s),
+analyze before extending. Source audit includes Michel coefficient/cap/surface
+normal/cohesion, wall-collision displacement, p/v remap, pressure safeguards
+and shift-history treatment; no claim of complete parity from remap alone.
+Check paper Eq58/59 and Michel against the compiled supplied reference; retain
+explicit reference-code quirks (componentwise velocity remap, duplicated prior
+shift history) in a named comparison mode, not silently in published/default
+solver behavior. Require analytic pair oracles and same-state dynGPUSPH shift
+replay before evolved run. Shared boundary code stays untouched; video,
+progress, serial GPU and watchdogs. No full-duration/FP64 campaign queued.
+
+**Shift port qualification / bounded replay (2026-10-29):** named
+`dyngpusph-reference` external-shift mode ports raw pressure and diagonal
+velocity remapping, collision displacement, source cohesion/caps, pressure
+guards and shift-BDF history. Source-specific 0/1/2 tags, erroneous clamp call
+and threefold extended-stencil z wrapping are explicit compatibility behavior,
+not paper/default promotions. The fixed-input FP64 shift replay agrees to
+1.1e-16m / 4.8e-19m/s / 2.6e-12Pa. The shift's last-stage-zero lambda/color
+normal/short-cone inputs are also ported: lambda error1.3e-15, normal max2.9e-7;
+31/320000 collinear lattice surface tags differ under the source's strict
+abs(cos)<1 roundoff discontinuity. FP32 regressions18 pass, FP64 operator tests9
+pass. FP32 one-step with graph/video succeeds,19.77s including startup.
+Original-IC FP32 replay is now bounded at3579 native steps (~0.7001s), no full
+run, under `.tmp/acsph-shift-remap-2026-10-29/manifest.json` with913 source hashes,
+serial supervisor, watchdog, video and per-step remap/solve/probe diagnostics.
+First prefix stopped after identifying the first-step graph validation overwriting
+the Python surface hook; its evidence is retained in `stopped-stale-first-stage-hook`.
+Corrected hook preserves captured surface tensors. Complete one-step shifted
+state (x/v/p/rho/volume/kinds) matches eager bitwise; graph9.112s, eager9.029s
+including startup/video. Source re-sealed and bounded run restarted from IC.
+The old consistent-closure/Michel run is the declared baseline; shared boundary
+implementation and all prior solver controls remain unchanged. Analysis pending.
+
+**Bounded shift/remap replay complete (2026-10-29):**3579steps,
+t=0.700116863s,1477.06s/412.70msstep, all graphs, only16 startup caps.
+P1 peak40.37→32.37kPa and undershoot−4.61→−1.32kPa, but ringing persists:
+P1 tail highpassRMS9.73→20.13Pa. KE119.489→119.453J/m, dynGPUSPH119.283J/m.
+Shared-frame pressure envelope improvesP1–P3, slightly worsensP4; sparse
+reference frames cannot establish its true narrow impact peak. Mass constant,
+no physical-wall leakage,71frames/video verified. Additional fixed-input FP32
+strict parity gate fails at6micrometres: traced to cutoff membership toggling
+the source angular-cohesion veto; FP64 same-input port agrees to roundoff.
+Retain failed evidence and reference mode, no generic-default promotion. A
+short precision check was proposed here; the subsequent detailed audit above
+found further model gaps, so a same-model claim is premature. Full results
+in docs/acsph/PRESSURE_SPACING_COMPARISON_2026-10-28.md. No full run queued.
+
+**Precision campaign stopped by user (2026-10-29):** user does not want further
+comparisons while dynGPUSPH and current warpSPH have a known model gap. Stopped
+the identified serial supervisor and its FP32 checkpoint prefix; verified both
+inactive. All remaining precision windows/analysis jobs cancelled, with no
+automatic resume. Qualification and partial prefix evidence retained under
+`.tmp/acsph-ringing-precision-2026-10-29/user-stop-receipt.json`. No late FP64
+window result exists. The relevant gap is explicit: dynGPUSPH remaps pressure
+and velocity after shifting, while the current warpSPH Lobovsky configuration
+does not; native collision shifting is also absent from that warpSPH setup.
+These differences must be addressed/qualified before another cross-code
+comparison campaign. No numerical change or replacement physical run started.
+
+**Precision campaign restart gate passed (2026-10-29):** source-pinned wrapper
+captures/restores particle state, BDF histories, compensation, adjacency/domain
+and all non-callable rigid-body data. Three-step prefix matches retained full
+FP32 diagnostics bitwise; its2→3 restart matches every saved particle/history/
+rigid-body tensor bitwise and the prefix's physical snapshot. FP64 promotion
+preserves captured inputs exactly and completes the same one-step startup
+control with CUDA graph active. Videos decode. Qualification costs: prefix
+19.25s/6394.64msstep (3steps, capture overhead), FP32 restart9.07s/9006.07msstep,
+FP64 restart35.13s/35068.37msstep (1step each, initialization/compile included;
+not throughput benchmarks). Queue setup/helper packaging and snapshot-gate
+errors were repaired with failed receipts retained; successful physical
+qualification runs were reused. Long FP32 prefix to8055 now generates late
+checkpoints at6917/t1.440025 and8055/t~1.590s. Paired FP32/FP64 branches then
+run6917→7641 (to1.530014s) and8055→8650 (to1.680013s), followed by native/precision
+pressure plots and window metrics. Each FP32 branch must reproduce retained
+baseline diagnostics and physical snapshots. Serial, video/progress/watchdogs,
+same frozen consistent-closure runtime; no solver/shared-boundary change.
+Evidence `.tmp/acsph-ringing-precision-2026-10-29/launch-health.json`.
+
+**Late ringing precision controls authorized (user, 2026-10-29):** compare
+FP32/FP64 evolutions over the1.47s and1.625s ringing events with unchanged
+consistent closure, volume ghosts, ramp0.5, timestep sequence and solver
+tolerances. Existing trajectory snapshots lack BDF/compensated-position
+history, so generate complete checkpoints by exact source-pinned FP32 prefix
+replay and require restart parity before interpreting precision differences.
+Restore particle state, histories/position compensation, adjacency/order and
+static rigid-body geometry; FP64 promotes the same captured state and cannot
+undo prior FP32 error. Candidate mechanisms remain hypotheses: finite-precision
+pressure/moment arithmetic, stopping on the position equation while pressure/
+momentum remain unconverged, wall-bounce/contact stiffness and shifting without
+the native field-remap/collision terms. Record each separately; no model changes
+or new defaults during the precision test. Serial GPU with videos/progress and
+wall/silence/stall watchdogs.
+
+**Consistent-closure results reviewed (2026-10-29):** full10,000-step replay
+reached1.918419918s with no stop/divergence; all10,000 solves graphed,1001 video
+frames decoded. Allserial analysis jobs passed. Cost5539.67s (1h32m20s),
+553.97msstep versus636.49 prior mixed/volume; caps133→37 (16startup).
+The growing0.65–1.0s mode disappears: P1 native shared-frame RMS error over
+0.95–1.05s6.068→0.0172kPa, versus0.1458 original orange. Broad first-impact
+RMS also improves. Dense first P1 peak remains40.37kPa. Later impact ringing
+remains: P4 minimum over1.25–1.65s worsens−7.98→−19.19kPa; P1 late RMS error
+4.589→4.776kPa. MeanKE0.4–1.25s+0.32% native, late1.25–endpoint+6.54%;
+endpoint58.05 versus45.26J/m (+28.27%, prior volume+15.26%). Mixed closure
+strongly implicated in early regression; keep consistent fixture plumbing,
+but late dynamics/pressure remain unqualified. No new runs/default changes.
+Four-trajectory plot/metrics in
+`.tmp/acsph-lobovsky-consistent-closure-2026-10-28/closure-review`;
+[review](docs/acsph/PRESSURE_SPACING_COMPARISON_2026-10-28.md).
+
+**Consistent-closure full replay running (2026-10-28):**9 CPU regressions pass,
+including accepted-field closure refresh, repeated against the frozen runtime.
+The20-step physical preflight passed:90.36s/4518.20msstep,16 known startup caps,
+all20 solves graphed,20 video frames decoded and first frame inspected. A
+validation-only duplicate-video selection error was corrected, its failed
+receipt retained, and the passed physical preflight reused. Full10,000-step
+replay now running with source-consistent entry/RK/pre-shift closure, unchanged
+volume ghosts/ramp0.5 and all other controls. Source-pinned serial supervisor
+survives chat exit; full validation, H5 export, native analysis and pressure
+comparisons against previous blue and orange trajectories are queued. Evidence
+`.tmp/acsph-lobovsky-consistent-closure-2026-10-28/launch-health.json`.
+No shared boundary edits or numerical-default promotion; pressure outcome pending.
+
+**Consistent-closure replay authorized (user, 2026-10-28):** opt-in comparison
+fixture must use the source wall-velocity closure at step entry, all RK stages
+and freshly from the accepted fluid field before shifting. Retain volume ghost
+placement, ramp0.5, original IC/mass and all10,000 native timesteps; no collision
+shift or shared boundary edits. Qualify handoff then launch source-pinned serial
+replay with video/progress/watchdogs and automatic native/previous-run pressure
+comparisons. Previous trajectories remain evidence.
+
+**Mixed-closure sensitivity confirmed (2026-10-28):** source wall-velocity
+fixture hook affects only RK residual stages; step entry and therefore
+post-solve Michel shifting still receive ghost-sampled wall velocities. Two
+same-field/layout audits at0.8s (one per trajectory) change shifting up to
+0.232/0.247dx; using source closure reduces this to0.0000795/0.000159dx.
+Source-closed spatial operators barely change. Both fixed-field controls
+passed,~1s each,0physicalsteps/no video. P1 shared-frame native RMS error
+over0.95–1.05s worsens0.146→6.068kPa. Ringing cause remains unproven; separate
+normals-only from node placement and make wall closures consistent before
+another trajectory comparison. No shared-boundary/model-default change.
+[Details](docs/acsph/PRESSURE_SPACING_COMPARISON_2026-10-28.md).
+
+**Pressure regression investigation (user, 2026-10-28):** the old orange
+trajectory follows native more closely and lacks the new ringing. Separate the
+full ghost-layout change from the already-qualified bounce-normal correction:
+the fixture correction changes node depths as well as normals. Audit consumers
+and frozen geometry before proposing another trajectory run. Increasing pressure
+oscillation is already visible at0.65–0.95s with13–14 iterations and no caps;
+the41 capped steps at0.95–1.05s therefore do not explain its onset. Retain both
+trajectories; no shared-boundary edits or numerical-default promotion.
+
+
+**Pressure before/after plots (2026-10-28):** four wall probes plotted at shared
+193-frame cadence with native and separately at all10,001 local accepted-step
+observations, plus first/returning-impact zooms. First P1 peak51.22→40.31kPa;
+broad first-impact curves barely change. Corrected trajectory has new~1s pulse,
+later P4 minimum−3.15→−7.98kPa despite positive peak40.45→17.87kPa in1.25–1.65s.
+No blanket pressure-noise improvement claim. PNG/SVGs/metrics retained, allthree
+figures inspected. [Pressure comparison](docs/acsph/PRESSURE_SPACING_COMPARISON_2026-10-28.md).
+
+
+**Volume-spacing full replay complete (2026-10-28):** all10,000 steps reached
+t1.918419918 s with no stop/divergence, all10,000 solves graphed. Full run
+6364.86s (1h46m05s),636.49ms/step; caps214→133
+(native142), median13. EndpointKE52.163J/m versus native45.257, excess15.26%
+(previous ramp20.51%). H5 export and193-frame native analysis passed; GPU idle.
+Pressure/containment and phase-wise physical qualification still require review;
+no collision shift or shared boundary code/default change. Evidence
+`.tmp/acsph-lobovsky-volume-ghost-2026-10-28` and its completion-receipt.json.
+
+
+
+**Corrected-initialization replay launched (2026-10-28):** frozen full10,000-step
+Lobovsky job is running on previously idle GPU. Startup audit confirms volume
+spacing0.0007500000065m versus legacy mass spacing0.023717083m; hybrid placement
+preserved. Allnear-corner flat normals havezero component error (margin6mm),
+allFP32 physical IC checks pass,320,000 fluid particles/180kg unchanged. SixCPU
+regressions pass (gridsnap/hybrid density rescaling, flat geometry, hook cleanup).
+Only two comparison fixture files changed in the frozen914-file runtime; shared
+boundary sources, collision shift absence, ramp0.5 and allsolver controls retained.
+Supervisor and video/progress/watchdogs/export/native analysis survive chat exit.
+[Launch evidence](.tmp/acsph-lobovsky-volume-ghost-2026-10-28/launch-health.json).
+
+
+
+**Corrected-initialization full replay authorized (user, 2026-10-28):** rerun
+Lobovsky from original ICs through all10,000 native timesteps with ramp0.5 and
+volume-derived ghost spacing. Keep native collision shift out of this run to
+isolate geometry. Scope correction to opt-in comparison-fixture initialization;
+shared boundary implementation remains untouched. Same physical mass/ICs and
+all other mapped/source controls, frozen runtime, serial GPU, video/progress,
+wall/silence/stall watchdogs; export and compare with native automatically.
+Density-unit rescaling/flat-near-corner geometry and hook-restoration tests
+are the launch gate. Evidence `.tmp/acsph-lobovsky-volume-ghost-2026-10-28`.
+
+
+
+**Remaining-cap cause confirmed (2026-10-28):** exact1727-step smooth prefix
+matches all accepted diagnostics/counts; original graph/eager and fresh fixed-solve
+reload match allfive outputs bitwise. Ghost initializer takes sqrt(mass), not
+sqrt(volume): rho0=1000 gives dx0.0237171 instead of0.00075m (31.62x). This
+spreads false corner normals across centimetres; at1727 an almost tangential
+(3.33476,−0.000250)m/s velocity becomes−1.31385m/s along the bad normal.
+Correcting only captured D5 normals using proper dx makes both1707/1727 converge
+200→13. Broadening ramp1 fails1707; this is a geometry unit error, not a reason
+to loosen tolerance. Shared boundary code untouched; fix volume-based spacing
+with density-rescaling regression before corrected-initialization impact trials.
+Collision-only200-step control finishes0.0882s: at common0.08024s wall penetration
+1.098→0.454dx versus native0.134; KE−0.00293%, pressureRMS63.45→61.87Pa.
+Partial containment improvement, not full shift/late-flow qualification.
+Prefix842.83s/488.03msstep; collision164.16s/820.81msstep (startup/instrumentation
+included). All serial controls passed, videos174/21frames decoded; GPU idle.
+[Full investigation](docs/acsph/RAMP_QUALIFICATION_2026-10-28.md).
+No production/shared-boundary/default changes or further full replay.
+
+
+
+**Ramp offline qualification (2026-10-28):** three193-frame trajectories show
+ramp meanKE within0.5% native through1.35 s; late mean+6.79% versus hard+6.96%.
+Endpoint+20.5% does not isolate a new ramp energy defect. Broad first P1 impulse
+changes−0.58% hard→ramp but narrow peak36.8→51.2kPa; pressure unqualified.
+New wall lead: both local paths penetrate~2.1dx by0.4 s versus native0.134dx;
+full max0.296/2.714/3.813dx native/hard/ramp. Compiled native post-solve collision
+shift is active and absent locally; its BRPF force is explicitly zeroed. Same-input
+collision-term audit and independent pair oracle pass. Exact1727-step smooth
+prefix capturing1707/1727 is running; collision-only200-step early diagnostic
+queued after it, serial GPU. [Report](docs/acsph/RAMP_QUALIFICATION_2026-10-28.md).
+No production/shared-boundary/default changes or new full replay.
+
+
+**Ramp trajectory investigation started (user, 2026-10-28):** compare all three
+retained trajectories at common clocks, separate pre-impact/bulk/late behavior,
+pressure cadence, signed wall penetration and remaining cap groups. First smooth
+post-startup cap is1707/t0.41194, near first impact; classify from exact prefix
+solver entry if needed. Retain source-pinned numerical baseline; no default change.
+
+
+**Ramp0.5 full replay complete (2026-10-28):** all10,000 steps reached
+native endpoint t=1.918419918 s; no divergence/stop, all10,000 solves graphed.
+Wall6681.64 s (1h51m22s),668.16 ms/step versus prior hard-bounce ~5h17m;
+caps214 versus2748 (198 versus2732 after startup). Median13 iterations;
+final100 no caps. Viewer H5 export and193-frame native comparison passed.
+GPU idle at completion. Numerical/pressure/penetration qualification remains
+open: endpoint KE54.538 J versus native45.257 J (+20.5%); fewer caps do not
+establish trajectory agreement. Evidence `.tmp/acsph-lobovsky-ramp05-2026-10-28`.
+
+
+
+**Ramp0.5 handoff verified (2026-10-28, 09:13 UTC):** the CRKSPH192/256 runs
+and analyses all passed; upstream queue finished09:03:20 UTC. Ramp replay
+started09:03:38 with GPU idle, now ~1,250/10,000 steps at t≈0.328 s after9 min.
+Recent100 solves use13 iterations, ~332 ms/solve, no caps. Only the ACSPH child
+uses GPU. Full-impact behavior and total-cost qualification remain pending.
+
+
+
+**Full ramp0.5 replay authorized and queued (2026-10-28):** repeat all10,000
+recorded native timesteps (t=1.918419918 s), FP32 increment/fused corrected
+reference controls, with only `wallBounceRamp=0.5` changed. Wait for the entire
+active CRKSPH192²/256² turbulence queue including pending GPU jobs, then require
+GPU idle; source-pinned serial supervisor survives this chat. Runtime914 baseline
+files verified; only the fixture CLI changes, no production/shared boundary
+edits. Video/progress/physical stall and wall/silence watchdogs enabled; export
+viewer H5 and compare native automatically after successful endpoint validation.
+Retain hard-bounce comparison and all failures. Cost/cap/pressure/penetration
+qualification remains pending; no default promotion. Queue:
+`.tmp/acsph-lobovsky-ramp05-2026-10-28/{manifest,status}.json`.
+
+
+**Additional isolated caps confirmed (2026-10-28):** sampled475/510/606 in one
+unchanged606-step prefix; all607 physical diagnostic rows match overnight.
+Hard/eager are bitwise and cap200; off/existing smooth0.5 reach tolerance13 at
+all three. One leading wall row carries99.94–99.98% of residual. Steps510/606
+show period5/3 threshold cycles;475 is a near-threshold residual plateau whose
+substage details remain open. Same known D5 family as Marrone; Lobovsky probe
+explicitly uses hard0 while normal dam-break/sloshing presets use0.5. Broad
+late blocks remain unclassified and remedy trajectory qualification open.
+[Evidence](docs/acsph/SPORADIC_CAPS_2026-10-28.md). No defaults changed.
+
+
+**Sporadic-cap sampling (2026-10-28):** user asks whether other sporadic high
+iterations share the step468 cause. One pinned, unchanged physical prefix
+through606 samples475/510/606 with same-input hard/off/smooth controls; original
+hard result remains accepted. No long impact replay or default change. Early
+0.1–0.4 s has14 isolated cap events; later sustained blocks remain separate.
+
+
+**Step468 cause established (2026-10-28):** exact overnight prefix and fresh
+FP32 fixed-solve reload reproduce bitwise. Two flat-bottom particles carry
+99.95065% of position residual; the leading distance alternates across0.25 dx.
+Hard bounce caps200 in FP32 and promoted FP64; graph/eager are bitwise in both.
+Off/existing ramp0.5 reach unchanged position tolerance in13. Neighborhoods
+are populated; flat normals correct. Extra cap iterations change fluid pressure
+by66.1 Pa RMS vs the smooth control while KE is nearly unchanged. Next: bounded
+trajectory qualification of ramp0.5 for pressure/penetration and later-cap
+attribution; native's different evolved entry remains a separate question.
+No production/shared-boundary/tolerance changes. [Evidence](docs/acsph/STEP468_CONVERGENCE_2026-10-28.md).
+
+
+**Step468 investigation authorized (user, 2026-10-28):** reproduce the exact
+corrected overnight FP32 prefix from original ICs with pinned numerical sources,
+capture solver-entry topology/BDF/low-part history, compare graph/eager and
+hard/off/smooth bounce, then promote the same input into a fresh FP64 process.
+Track per-particle position and physical residuals and bounce threshold distance.
+No production default or shared boundary change is authorized by the probe.
+
+
+**Full comparison (user, 2026-10-28):** original mass/ICs and all10,000 dt
+values align;193 matched physical frames analyzed. Mean KE difference is+0.20%
+over0.4–1 s and+0.11% over1–1.35 s; local endpoint KE is16.9% higher. Later
+pressure pulses differ strongly, with explicit cadence/RK-stage caveats.
+First later cap is step468/t=0.163517 s (native15 versus local200), before
+opposite-wall impact. Capped steps consume80.46% of local measured solve time;
+allsteps remain graphed. Next bounded discriminator is exact solver-entry
+history/residual/bounce/precision at468; no new physical run or model change
+in this comparison. [Report/figures](docs/acsph/LOBOVSKY_RESULTS_2026-10-28.md).
+
+
+**Overnight completion reviewed2026-10-28:** corrected replay/export/analysis
+finished10,000 steps/t=1.918419918 s in5 h17 min (1,900 ms/step). Later numerical
+convergence remains unresolved:2,748 cap hits versus142 native, first later cap
+step468; endpoint pressure/KE still differ. All14 chained turbulence runs and
+analyses reached40 with zero invalid observed RHS; all12 timing windows finish.
+GPU checks have50 original passes plus5 exact export passes after fixing only
+the CPU/CUDA assertion mismatch in a separate test copy. Original failures and
+all frozen physical sources remain retained. See the overnight completion
+record and `completion-review.json`; GPU idle, no new long runs launched.
+
+
+**Overnight rerun now authorized and launched (user):** corrected GPU FP32
+Lobovsky replay from the original ICs, with flat-wall geometry preflight and
+unchanged hard bounce/reference controls; reuse the completed native 10,000-step
+trajectory to its actual1.918419918 s endpoint. Then chain deferred driven
+subsonic GPU checks, MFM/MFV timing controls and seven-scheme64²/128² comparisons
+from the meshless multiphysics worktree. Both Python runtimes are pinned; jobs
+are serial, watchdogs/videos on, independent failures retained. This new user
+instruction supersedes the earlier stop/no-automatic-restart instruction below.
+[Manifest, scope and live status](docs/acsph/OVERNIGHT_2026-10-27.md). User subsequently specified
+**1 →3 →2**: ACSPH, then all14 turbulence comparisons, then GPU source/restart
+checks and timing controls. The live ACSPH child was adopted without restarting
+it. GPU checks now assess the recorded cohort afterwards rather than gate its
+launch; live physical guards are unchanged.
+
+
+**Bounded correction result:** corrected236-step prefix to0.099947 s has0/212
+post-startup caps (old fixture29/212, native0/212), median13 vs native14.
+174.640 s wall /740.0 ms per step including startup/diagnostics; three CPU
+geometry regressions pass. Full long rerun remains stopped.
+[Investigation](docs/acsph/CONVERGENCE_GAP_2026-10-27.md).
+
+**Concrete fixture bug found:** the harness SDF returned a bare tensor instead
+of `(values, normals)`. Ghost construction silently broadcast the first corner
+value, producing 45-degree normals on flat walls. One particle dominated the
+first cap at step56; graph/eager agree bitwise and bounce controls converge13.
+The corrected tuple restores the original hard-bounce solve13 iterations at
+that step, with identical physical ICs. Added flat-wall geometry guard and
+three CPU regression checks. Full stopped local replay is invalid for ranking;
+only a bounded0.1 s prefix is being tested. Shared boundaries/numerical defaults
+are untouched; later-time behaviour remains to qualify.
+
+**User stop / investigation priority:** stop the long FP32 replay at t≈0.84 s
+and investigate its persistent cap200/epsilon≈-5 versus the native reference as
+an actual scheme/implementation gap. Preserve all evidence; no automatic long
+rerun. Track OPEN_PROBLEMS §36. First isolate onset and particle residuals;
+separate hard-bounce chatter (§33), precision, graph semantics and reference
+truncated stopping behavior. Do not attribute the gap to FP32 or bounce without
+a controlled replay.
+
+**Paper cost lookup:** Sec.4.5/Fig.34 expects roughly comparable 2D Lobovsky
+cost (visual endpoint ~85 min AC versus75 min delta on FP64 P100); 3D ~1.4x
+faster. Physical dt enlargement is offset by pseudo-iterations/RK stages
+(Eq.65). Table1 shows strong dt/dtau/CFL sensitivity. Frequent local cap200
+hits require investigation rather than interpreting AC as inherently faster.
+Details in the performance report.
+
+**Live-run guard correction:** native reached t≈1.85 s after >9400 steps;
+late splash motion shrinks dt, so the originally chosen 10000-step safety guard
+may end it before 2 s. Do not alter/restart the live solver or falsify clocks.
+A continuation observer lets the existing native process finish, then resumes
+the frozen local replay/export pipeline at its actual saved endpoint only if
+that guard stops an otherwise successful reference run. Short duration is
+explicit in status/report; actual native simulation failures remain failures.
+
+**Long trajectory authorized (user, 2026-10-27):** extend the exact supplied
+Lobovsky fixture to its original 2 s endpoint, then replay the native timestep
+sequence with optimized FP32 warpSPH and all explicitly aligned reference
+controls. Keep resolution/mass/tolerances/cap fixed, report convergence and
+precision limits, and compare KE, pressure probes and spatial fields through
+impact. Serialize both physical trajectories as lossless FP64, chunked HDF5
+readable by warpSPHRemote; FP32 local values are promoted without claiming
+additional precision. Initially queued behind the existing GPU workload; native/local phases run serially.
+User subsequently authorized GPU sharing with the ongoing runs: start immediately, keep the native/local phases serial, and label timings as contended. Do not edit shared boundary code or stop other tasks. Campaign receipts:
+`.tmp/acsph-lobovsky-long-2026-10-27/`; [campaign/format notes](docs/acsph/LOBOVSKY_TRAJECTORY_2026-10-27.md). The old startup-only gate is superseded
+by this explicit authorization; reference wall/RK controls remain diagnostic.
+
+**Performance follow-up (user):** profile the 54.3 s/step aligned fixture,
+separating audit I/O, pseudo-iteration GPU work, launches and host syncs.
+Check graph capture with an exact fixture-local specialization of the known
+viscosity guard; shared boundary code remains untouched.
+
+**Implementation authorized:** add cancellation-safe BDF/retained position
+increments, then fuse the principal stage neighbour operators. Keep legacy
+comparison controls, validate frozen residuals and FP64 trajectories, and
+measure the fixed Lobovsky workload before promoting precision changes.
+
+**Implemented and qualified:** default retained position increments/low parts,
+BDF differences and fused stage pair sums; per-step prepared-viscosity decision
+permits production graph capture without shared boundary edits. Three-step
+FP64 pressure RMS vs prior aligned result 1.49e-10 Pa; wall cost 163.0 ->104.3 s.
+FP32 costs20.0 s (6.66 s/step; warm solve5.4 s), pressure RMS vs FP64 .031 Pa,
+convergence metric restored to -6.88 rather than -2.38. All still cap200.
+89 FP32 /23 focused FP64 checks; update BCs, shifts, sub-ULP accumulated motion,
+cloned-state continuation, 3D/hash/list pressure formulations and adjoints
+covered. Precision unchanged globally; reference-only wall/RK choices remain
+probe controls. Next fusion target: stage-0 covariance/gradient/surface work.
+Detailed receipts and limits in the performance report.
+
+**Follow-up requested:** exact ICs do not explain the remaining discrepancy.
+Audit the first spatial residual and RK stages directly in both implementations,
+then isolate wall closure, pressure diffusion and pseudo-time integration before
+extending the trajectory. Record observational build hashes and parity checks.
+
 User: begin the warpSPH comparison with the supplied Lobovsky preset. Import
 its exact initial physical particle arrays (320,000 fluid + 32,176 wall),
 constant density/mass and hydrostatic pressure; do not resample, renormalize
@@ -36,6 +809,30 @@ promoted. CUDA graph fallback traced to a host bool in shared boundary
 viscosity; that code is untouched. Do not extend to the full impact until
 initial operators and the convergence-controlling rows are compared.
 
+
+**Performance spot check complete:** FP64 eager/graph solves 53.4/53.1 s,
+bitwise endpoint parity; stage dumps are not the bottleneck. Over 98% of CUDA
+time is neighbour kernels (~60 passes/iteration versus ~8 fused native passes).
+FP32 fixed-work graph solves in 7.37 s, steady iterations 7.2x faster, with
+pressure RMS difference 0.025 Pa at the first step. Its position stopping metric
+is limited by absolute-coordinate BDF cancellation (zero-motion RMS 0.00227
+m/s). No production/shared-boundary edits. Next: fuse stage residual kernels,
+qualify displacement-based BDF/position storage, then revisit precision and
+convergence. [Profile and costs](docs/acsph/PERFORMANCE_2026-10-27.md).
+
+**Follow-up operator audit complete:** on identical native RK fields, local
+pressure acceleration agrees to 2.45e-12 m/s², but mDBC changes divergence by
+up to 0.3505 s⁻¹. Wall-point Shepard/mirror restores roundoff agreement.
+The AC-2L solid-neighbour gradient also produces false 7.84 MPa/s hydrostatic
+diffusion; using the fluid-side gradient removes it on flat walls. Successive
+wall flux / acoustic damper / source RK placement / wall velocity probes
+reduce final three-step pressure RMS 108.4 -> 1.08 Pa, KE difference +0.189%,
+peak speed +0.242%. Two FP32 and two FP64 wall-flux invariant checks pass.
+Native shifting is separately measured (first shift max 0.008 dx); all solves
+still cap at 200. Probe-only options retained, shared boundaries and production
+defaults unchanged. Next qualify a clean ACSPH wall closure and common stopping
+criterion; then extend toward impact. Full report and costs in the linked
+Lobovsky comparison document.
 
 ## Reference bring-up — 2026-10-27
 

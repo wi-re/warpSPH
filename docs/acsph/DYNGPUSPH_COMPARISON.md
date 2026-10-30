@@ -1,8 +1,9 @@
 # ACSPH: our implementation vs the authors' original code (dynGPUSPH)
 
 > Plan: [ACSPH_PLAN.md](../../ACSPH_PLAN.md) (row in [PLANS.md](../../PLANS.md)). Written 2026-10-12.
-> Nothing here was run; this is a read-through of both code bases. Every claim about
-> the original code cites `file:line` at a named commit, so it can be re-checked.
+> The October12 sections below are historical source notes. The **October29 end-to-end audit**
+> at the end supersedes their parity claims and includes executable fixed-state controls.
+> The recent first-ring trajectory is a partial-alignment experiment, not complete port parity.
 
 ## 0. Which code is "the original"
 
@@ -43,8 +44,15 @@ Our `schemes/incompressible/artificialCompressible.py` is a faithful port of the
 - Adami wall pressure with the hydrostatic correction (`noSlipCell3`: `p_f + ρ_f (g + a_f − a_w)·r`).
   At the tip `a_f` is the surface-tension acceleration only (`Resv_wall = st`), so with ST
   off it is exactly our Eq. (61).
-- External shifting with `x^n` re-labelled by the shift (their `deltaU_BDF` ≡ our `bdfShiftCorrection`),
-  `v`, `p` projected to the shifted position with a renormalised gradient (`newP = p + δu·∇p`).
+- **Corrected 2026-10-29:** this read-through overstated external-shift parity.
+  The retained warpSPH Lobovsky path did not remap `p` or `v`, and its shift
+  law/history differed. The compiled dynGPUSPH uses **uncorrected** pressure
+  gradients and **diagonal, componentwise** velocity-gradient remapping,
+  rather than the full Taylor tensor in paper Eq58. Its BDF correction is not
+  generally equivalent to warpSPH's `bdfShiftCorrection`. The new named
+  `dyngpusph-reference` fixture mode ports those choices explicitly, including
+  collision/cohesion, source surface inputs and extended-stencil z duplication.
+  See [dated qualification](PRESSURE_SPACING_COMPARISON_2026-10-28.md).
 - Convergence metric is `‖ṽ‖₂ / N` with the **1/N** (not 1/√N): `getVectMagMinusError`,
   `HashFunctions.cu:1056-1076`. Plan §1.6 reproduced it verbatim; it is right.
 
@@ -376,3 +384,440 @@ at 54 %. Timings in this document taken while it is busy are inflated; check `nv
 - Whether `FSI_devel` is the exact code behind the paper's figures or a few commits past it.
   The Dec 2023 commits still touch shifting and the viscous BC, so a final check against the
   authors would settle it.
+
+
+## 2026-10-29 — end-to-end parity and precision-sensitivity audit
+
+### Scope and evidence
+
+User requested investigation of the cutoff/cohesion sensitivity and another
+full pass for missing or extra ACSPH behavior. The audit reads the actual
+qualified Lobovsky build at commit`2dbc27a5d19723f244b1f4f12b5a4ca881cbdf3f`,
+not an assumed paper configuration. Its numerical source root is
+`.tmp/dyngpusph-reference-2026-10-27/qualified/build/src`; native locations below
+are relative to that root. Build flags include DOF2=1, LINEARPG, O3,
+use_fast_math, sm120; no SINGLEP, NOSLIP, PGTIC, PGTIC_2, SFT_CSF,
+SHIFT_INSIDE or NOSHIFT. The cavity executable has separate NOSLIP/LDCAVITY
+flags and is not the Lobovsky oracle.
+
+Three warpSPH layers must be distinguished:
+
+1. **Production ACSPH** in `src/warpSPH`.
+2. **Lobovsky comparison fixture** (`compare_lobovsky.py` and `audit_local.py`),
+   overriding several production choices.
+3. **Named reference shift operator** (`dyngpusphShifting.py`), which agrees
+   with the captured compiled shift on identical FP64 inputs, but does not
+   by itself make the integrated fixture a complete dynGPUSPH port.
+
+The previous gap-closure claim was too broad. The fixed-input test qualified
+layer3, while the integration hook in layer2 still supplied different wall
+fields. The0.70s trajectory therefore does not isolate arithmetic alone.
+The same core/configuration/residual files were hash-checked against that
+trajectory's frozen source; the support and closure findings apply to it too.
+
+Reproducible non-evolving controls are retained in
+`.tmp/acsph-parity-audit-2026-10-29` (KEEP,51-file source manifest including
+core/integrator dependencies and the paper). New helpers:
+`scripts/acsph_reference/investigate_shift_sensitivity.py`,
+`audit_transport_inputs.py`, and`audit_configuration.py`.
+They advance no physical trajectory; video is deliberately omitted. No solver,
+shared-boundary implementation or numerical default was changed during this audit.
+
+### Sensitivity: two mechanisms, not just insufficient mantissa bits
+
+**S1 — unweighted angular veto at the wide cutoff.** Native
+`sph.cuh:351–365` takes a maximum normal angle over every raw-surface neighbor
+inside2R, including pairs whose kernel weight tends to zero. At
+`HashFunctions_cuda.cuh:1908–1916`, one angle above0.3pi cancels the entire
+finite cohesion displacement. Entering/leaving the radius thus has a finite
+jump even in exact arithmetic.
+
+The three-particle control holds velocity0, pressure100Pa, all masses and
+lambda fields fixed. A nearby interior particle supplies cohesion; a far
+surface particle has the same lambda as the query and contributes only the
+angular veto. Moving the far particle from2R−1e−11m to2R changes shift
+**0→15micrometres** in FP64. The jump also exists in FP32. It is independent
+of real dt, since this source cohesion displacement has no dt prefactor.
+That is a discontinuity in the compiled model, not ordinary smooth SPH
+truncation error.
+
+On the captured first-shift cloud (320000fluid rows):
+
+| Fixed-input evaluation | Max recorded-shift change from compiled FP64 | Fluid rows changing by >10nm |
+|---|---:|---:|
+| Original inputs, FP64 arithmetic |1.59e−17m|0|
+| Only positions rounded toFP32, evaluated inFP64 |6.0053micrometres|1|
+| Only lambda rounded toFP32, evaluated inFP64 |0.205nm|0|
+| Only normals rounded toFP32, evaluated inFP64 |6.0058micrometres|2|
+| All inputs rounded toFP32, evaluated inFP64 |6.0055micrometres|3|
+| Full FP32 input/storage/arithmetic |6.0058micrometres|1|
+
+Rounding positions alone reproduces the originally reported row near
+(0.59775,0.29325). A pair at0.005999999999789m falls outside the rounded
+0.006m cutoff: the raw-surface neighbor count changes17→16 and maximum angle
+1.54912→0.785398rad, toggling the veto. Full FP64 evaluation **after input
+rounding** cannot recover that lost geometric distinction.
+
+**S2 — invalid acos silently loses opposite normals.** Native computes
+`acos(dot(n_i,n_j))` without normalizing/clamping the dot product; CUDA fmax
+ignores a NaN angle. The compatibility kernel's range check reproduces that
+skip. For two captured rows, rounding only the normals and evaluating inFP64
+makes13 nearly antiparallel dots smaller than−1; all those large angles are
+ignored and finite~6micrometre cohesion appears. In fullyFP32 arithmetic those
+dots round back to−1 and the veto remains. Thus mixed precision can change
+branch decisions in either direction; it is not monotonically closer to the
+FP64 trajectory.
+
+A separate inherited cone-detector discontinuity remains: native
+`HashFunctions_cuda.cuh:1346–1356` requires abs(cos)<1 before accepting a forward
+neighbor. An exactly collinear forward neighbor is excluded, although one at
+an arbitrarily small nonzero angle can cancel a surface flag. This accounts
+for the earlier31-row surface-tag qualification sensitivity on the near-lattice
+cloud. The lambda/norm arithmetic errors are small; the downstream branches
+need not be.
+
+The port uses length<R where native spells the test distanceSquared<R².
+A28900-sample ULP sweep at the Lobovsky radius found no disagreement between
+those two predicates. Do not attribute the measured discontinuity to that
+rewrite; actual coordinate/normal rounding controls above explain it.
+
+**Potential remedies, not adopted:** normalize and clamp the angle input (or
+compare a valid normalized dot with a cosine threshold); include the collinear
+forward direction in the cone test; replace the unweighted hard-max veto with
+a continuous radial/angular influence that vanishes at the wide cutoff.
+A cutoff epsilon alone moves the discontinuity. Higher-precision coordinates
+can reduce crossings but cannot make the hard veto continuous. Such remedies
+change compiled-reference behavior and need separate, named tests rather than
+being hidden in a parity port. No remedy is claimed to have removed trajectory
+ringing here.
+
+### Confirmed differences still active in the Lobovsky comparison
+
+| ID | Difference | dynGPUSPH evidence | warpSPH evidence / consequence |
+|---|---|---|---|
+| A1 | **Wrong wall inputs to external field remapping** | `gpusph3d.cu:1520–1595`; `HashFunctions.cu:895–970` only launches shift, without re-closing velocities. Sorted wall velocity is physical, zero here; closed wall p persists from the last RK residual. `HashFunctions_cuda.cuh:3868–3899`,`:1970`. | `audit_local.py:248–280` refreshes a mirrored wall velocity, but never closes accepted wall pressure. Main solver wall closures live in temporary views and zero wall increments are returned (`dualTime.py:185–197,218–227`). Accepted wall p is0. The shift kernel itself can match while this hook does not. |
+| A2 | **Viscosity uses the wrong wall velocity rule** | `sph.cuh:631–658` uses DAMPING_SLIP for physical viscosity, while continuity uses FREE_SLIP at`:697`. `kernel.cuh:417–429`: wall normal velocity plus the querying fluid particle's tangential velocity. | The fixture stores the Shepard/mirrored FREE_SLIP vector and feeds it to both divergence and MG viscosity (`audit_local.py:reference_wall_velocities`, `wp_residual.py:79–83`). A single wall-row vector cannot reproduce the source pair-dependent viscosity. Tangential viscous coupling can be added and normal damping can differ. |
+| A3 | **Momentum JST dissipation missing** | `HashFunctions_cuda.cuh:2448–2469,2509–2529`; active even for pressure pmethod0/AC-2L. Switch J is captured at pseudo-iteration0/RK0 and held for the real step. | Both production residual and fixture source-damper hook omit the second/fourth velocity dissipation. Adding only the acoustic damper does not recover this term (`residual.py:spatialResidual`, `audit_local.py:135–152`). |
+| A4 | **Stopping test and sample state differ** | `gpusph3d.cu:1407–1444`: requires normalized pressure residual epsP<minres+1 as well as epsV<minres; epsV uses final RK-stage position residual. Stall path`:1446–1473` can trim worst5% and use a pressure plateau exit. | `dualTime.py:232–237,280–296` recomputes position residual after the full RK combination and tests only epsV. No pressure gate or source trim/plateau path; iteration caps can still return an unconverged state. Both use1/N and the same fixture Uchar floor/cap, but those alone do not make the tests equivalent. |
+| A5 | **First two pseudo-iterations have a different clock and coefficients** | `gpusph3d.cu:1105–1111` halves dtau for iterations0/1 of every real step. `HashFunctions_cuda.cuh:2419–2422` then doubles beta, quadruples k1 and doubles k2/acoustic strength. RK point-implicit factors use this smaller dtau. | `acParameters` is fixed per real step; `dualTime.py` uses that same problem throughout. `audit_local.py:iterate` hard-codes RK ratio1/R, not the first-two1/(2R). This is absent in production and in the current fixture. |
+| A6 | **Deficient-support moment/lambda policy differs inside the solve** | `deltaHash4D`,`:2135–2155`: invert if abs(det M)>1e−6; otherwise lambda0 and uncorrected gradient. Uses signed minimum eigenvalue. | Core `renorm.py:82–100` replaces covariance with identity for fewer than dim+2neighbors, then uses a relative-cutoff pseudoinverse. `surfaceDetection/wrapper.py` takes min(abs(eigenvalues)). This can give lambda1 to deficient rows and leave their diffusion taper fully on. The new reference-surface routine is used only by external shifting, not by the pseudo-loop. |
+| A7 | **Surface and wall-closure timing differ** | `ResidualHash3`, `HashFunctions.cu:706–797`: wall closure runs before the new RK0 lambda/raw detection; it reads previous surface fields. `HashFunctions_cuda.cuh:2617–2621` accumulates vicinity tags across the RK stages, clearing them at the next raw detection. | `dualTime.py:206–208` uses freshly detected current fields for stage0 wall closure. Default detector remains Barecasco/lambda-normal within the solve. `reference_surface` computes shift raw fields at final stage0 but vicinity at accepted combined geometry, rather than the source union across RK-stage geometries. |
+| A8 | **Bounce model, normals and timing differ** | Native position-only bounce uses particle-gradient wall normals and a hard0.25dx trigger (`particles.cu:632–661`). `walln_switch` is produced by the preceding residual (`HashFunctions_cuda.cuh:2624–2630`). | Fixture explicitly selects smooth ramp0.5, recomputes hit geometry for each current stage, and uses mDBC ghost-derived normals; tied nearest normals are summed (`wallClosure.py:145–200`). Flat-wall normals agree, corner normals/lag/ties need not. Ramp0.5 is an intentional previously chosen model control, not an exact native port. |
+| A9 | **Neighbor construction is not identical** | Main hash/sort occurs at real-step entry (`gpusph3d.cu:1044–1060`); cells are repopulated with those hash keys during the pseudo-loop and before shifting. Query positions change while cell membership keys remain fixed. Wide z stencil visits the populated plane3times for gz2. | A fixed Verlet candidate list is used in the solve; shifting rebuilds a fresh enlarged neighborhood. The named kernel reproduces3fold pair weights, but does not reproduce a stale native cell map. Same-input startup parity is not a proof of all later neighbor-list parity. |
+
+**A1 fixed-field measurement.** On the saved dynGPUSPH t=0.420056021s cloud,
+with all positions and lambda/norm/tag fields held fixed, using the diagnostic's
+common dt=12 microseconds (not a replay of that physical step's native dt):
+
+| Change in the input to the same shift kernel | Max fluid pressure change | Max fluid velocity-component change |
+|---|---:|---:|
+| Zero only wall pressure |402.756Pa|0|
+| Mirror only wall velocity |0|0.008081m/s|
+| Both (current wrapper behavior) |402.756Pa|0.008081m/s|
+
+At0.700116863s these maxima are19.321Pa and9.63e−5m/s. The first captured
+shift gives0.418Pa and4.57e−8m/s. Later saved-cloud tests compute common
+surface fields on the frozen accepted geometry; they are controlled operator
+comparisons, not claims to reproduce an unrecorded last-RK field. All
+shift-displacement differences across these controls are exactly0. The pressure
+and velocity differences are operator-control measurements, not measured
+per-step errors in either evolved trajectory.
+Actual H5 confirms native endpoint wall p has13521nonzero rows while warpSPH
+has none; native physical wall velocities are0. The caller's temporary
+mirrored velocities are reset by rigid-body finalization before output, so
+zero recorded wall velocities do not validate the remap's input.
+
+**A2 independent viscosity evidence.** Re-evaluating current warpSPH MG
+viscosity on identical captured native iteration199/RK2 fields gives component
+error max0.03512m/s², RMS7.676e−5m/s², against the compiled native viscosity
+max0.11368 and RMS5.502e−4. The zero-velocity initial field agrees exactly.
+The existing plain MG denominator also differs at sub0.01h separations: native
+skips those pairs, warpSPH regularizes and includes them. That guard cannot
+explain the initial lattice discrepancy, whose separations are far larger.
+
+**A3 is demonstrably nonzero.** The compiled captured iteration199/RK2
+momentum JST has componentRMS0.001163m/s² and max0.12416, versus physical
+viscosity RMS0.0005502 and max0.11368. Pressure acceleration RMS is10.2549.
+JST is not the dominant initial pressure force, but it is not absent or
+negligible relative to physical viscosity. Its later influence is not measured
+by these startup dumps; do not extrapolate that ratio to impact.
+
+**A4/A5 procedure mismatch is visible in retained runs.** Through the same
+3579native timesteps, dynGPUSPH averages15.9444iterations and warpSPH with the
+reference shift averages13.8785; counts differ on3563steps. Native has17cap
+steps, warpSPH16. Much of the~two-iteration difference is consistent with the
+warmup, but no attribution to pressure gating alone has been demonstrated.
+
+**A6 isolated controls, both precisions:** one isolated particle reports
+lambda1/taper1 in the shared warpSPH route versus0/0 in the compiled-formula
+reference routine. A three-particle right triangle reports1/1 versus
+0.0734382/0. A resolved lattice interior agrees atlambda0.9991993/taper1.
+The identity fallback is a shared safety policy, not automatically something
+to remove; ACSPH should not conflate its safe inverse with its physical
+support-quality indicator.
+
+### Production-only defaults, nondefault paths and extra behavior
+
+These do not all explain the retained Lobovsky run. The table explicitly states
+which the fixture already compensates or bypasses.
+
+| ID | Finding | Active in the recent bounded fixture? |
+|---|---|---|
+| B1 | Length convention: `parameters.py:45` uses h=R/xi; native h=R/2. For this C2 kernel xi=2.821384729, local h=0.00106331 versus reference0.0015m. Native beta/k2/nu are therefore not production defaults. | Fixture maps beta/k2 and explicitly sets native nu, so base coefficients agree after warmup. |
+| B2 | Production lacks the native acoustic divergence damper. The fixture adds it with native h=R/2 and fluid-only divergence. | Already compensated by `--acoustic-damper source`; **momentum JST still missing**. |
+| B3 | AC-2L wall correction uses two fluid-side gradients in native, rather than gradPi+gradPwall. Native wall renormalized gradient is0; the source flux is not simply the generic all-row gradient average. | Fixture compensates via `--wall-diffusion source`; production does not. |
+| B4 | Source general Butcher SSPRK3 is the same tableau. Point-implicit factors are placed on destination A rows/final b weights, with C++ integer(3/2)=1. Production instead divides stage slopes with its paper-oriented factor. | Fixture compensates the source factor placement at ordinary dtau, but not the first-two warmup ratio. |
+| B5 | Native seeds duplicate history and dtPrev=minDt, using BDF2 immediately. Production falls back to BDF1 until history is available. | Fixture `--history source` compensates startup. Ordinary variable-step BDF coefficients agree. |
+| B6 | Production shifting is off by default and generic Michel shifting is distinct from native coefficient0.2/cohesion/collision/guards. ACSPH finalization does not apply a general p/v Taylor remap; the generic projectQuantities field does not make that happen here. | Named reference mode adds the compiled operator, with A1/A7/A9 integration gaps. |
+| B7 | Source shift history literally calls BDF(deltaCurrent,deltaPrevious,deltaPrevious). The named hook copies that formula; production relabels history differently. Constant15micrometre shifts at dt1e−4 give source shift-BDF0 but leave a−0.075m/s position-BDF term at zero physical drift, requiring an extra5micrometre position adjustment. | Intentionally copied source behavior; not missing and not justified as the generally correct Eq59 discretization. |
+| B8 | Production real dt has a different h/xi/kernelScale length, optional acceleration bound, max fluid norm reduction, and different bound-clamp order. Native cfl.cu reduces **componentwise positive maxima** from zero then takes vector length; large negative components can be missed, and maxima from different rows can combine. | Fixture replays native dt exactly, so this does not create a different dt sequence in the bounded comparison. Avoid copying the componentwise source defect into defaults. |
+| B9 | AC-4: local `_biharmonic` uses R²; paper Eq35 and native use h²=(R/2)². Native pmethod3 additionally multiplies by0.1. At matched outer k2 and equal plain-Laplacian operator, local standalone strength is **40times** the compiled source (4times the paper length-square factor). Native outer P4 sum also excludes boundary neighbors, unlike the generic nested all-row operator. | Inactive: pmethod0/AC-2L. Earlier claims that standalone AC-4 instability proves a correct implementation are not justified until the scale/boundary differences are resolved. |
+| B10 | Pressure JST differs in its sensor (native unweighted Laplacian-difference vs local weighted pressure-ratio), sensor lifetime (whole real step vs re-evaluated), epsilon2 cap2 vs1, kappa4=0.1 vs1/32, and surface override (absent native; local forces AC-2L in the surface set). Local surfaceIndicators are step-entry fields even when per-iteration lambda is refreshed. | Inactive pressure option in Lobovsky. Distinct from the active missing momentum JST in A3. |
+| B11 | Native variables.h fixes positions and p/rho/m storage to double; SINGLEP only changes selected intermediate real_t/vect_t types. warpSPH FP32 uses float32 positions and fields, with compensated increments to retain some lost position motion. Arithmetic grouping, reductions and inverse policy differ. | Active precision difference. A same-model FP32/FP64 test still requires correcting the functional gaps first. |
+| B12 | Framework v/p exact-delta handoff is algebraic, not bitwise exact. `exactDeltaUpdate` makes dp=(target−old)/dt; generic update reconstructs old+dt dp. A tested FP32 pressure10000→0.0001Pa target is reconstructed as0. Position has a dedicated retained-target/low-part path; pressure/velocity do not. | Active possible rounding source, not a demonstrated explanation of the observed ringing. |
+| B13 | Cavitation projections, optional isolated-zero pressure, alternative pressure-force schemes, mDBC no-penetration force, case forcing and adaptive supports are extra controls. Tilde-v advection, internal shifting and nonzero k3 deliberately raise rather than silently no-op. | Projections/no-penetration/alternative force/adaptive support are off in the fixture. Compiled native tilde-v/k3/internal shift terms are also off, so their absence is **not** a missing active term. |
+| B14 | Moving-wall acceleration/FSI and optional CSF surface tension are not a complete ACSPH port. `forcing.py:18–31` passes gravity as wallBodyForce without per-wall acceleration. Native wall pressure includes−a_wall and its build supports prescribed/coupled motion. | Inactive for Lobovsky. Impact200 has FSIon1/type7 prescribed motion, so it needs its own explicit audit before treating its IC match as a matched model. |
+| B15 | Native raw pressure probes use final RK-stage arrays (`gpusph3d.cu:1665–1690`), not accepted post-shift fields. | Already handled by common post-shift H5 probes. Sparse saved frames still cannot establish the true between-frame first peak. |
+
+Two independently reproduced implementation defects also remain:
+
+- **FP64 adaptive timestep fails:** `modules/timestep/artificialCompressible.py:107–108`
+  divides a Python float by the core's Warp float64 xi wrapper. CPU control
+  raises `RuntimeError: Couldn't find a function 'div' compatible with ...
+  float,float64`. FP32 succeeds. The native-clock fixture bypasses this route.
+- **isolatedZeroPressure is lost on config roundtrip:** the dataclass field is
+  read by contactMasks but omitted by `_acParamsToDict`/`_dictToAcParams`
+  (`configurations/artificialCompressible.py:363–432`). True serializes without
+  the key and restoresFalse. The bounded case has itFalse, so it did not cause
+  that trajectory's result.
+
+### What does match, and limits of the conclusions
+
+Constant physical rho/volume and exact native IC/masses (with declared FP32
+rounding), the basic symmetric pressure force, fluid-fluid MG viscosity form,
+fluid divergence, density-invariant pressure equation, gravity/static Adami
+pressure correction, C2 lambda taper formula, SSPRK3 tableau, frozen AC-2L
+smoothing across RK stages, ordinary variable-step BDF coefficients, and the
+one-real-map integration order are aligned in the fixture. Base beta/k2, source
+wall diffusion, startup history, ordinary RK source placement and acoustic
+damping are explicit fixture alignments. The new shift kernel's identical-input
+FP64 parity remains valid. None of this establishes correct inputs, surface
+flags, stopping or all momentum terms for the integrated trajectory.
+
+The failed cross-precision equality gate and both successful and failed prior
+trajectory evidence remain retained. This audit does not show which remaining
+term dominates early or late ringing. In particular, scalar pressure envelopes
+or a lower peak cannot distinguish a closure error, missing dissipation,
+underconvergence and precision-driven branch changes.
+
+Recommended implementation order before another precision trajectory:
+
+1. Give divergence, physical viscosity and remapping their distinct source
+   wall fields; preserve last-stage wall pressure for external remap. Qualify
+   the integrated call inputs, not only the isolated shift kernel.
+2. Separate support-quality lambda from the shared inverse fallback, and
+   explicitly match raw/vicinity/closure timing for a reference mode.
+3. Add the native warmup clock and both residual diagnostics/stop gates;
+   retain visibility of pressure/momentum residuals and every outlier, even
+   if reproducing the source trimmed exit as a named option.
+4. Implement/qualify velocity JST as an explicit compiled-reference term,
+   independent of pressure smoothing selection and physical nu.
+5. Keep the chosen smooth bounce distinguished from native hard/lagged bounce;
+   align it in both implementations or measure it separately.
+6. Only then use short same-model FP32/FP64 windows. Sensitivity remedies and
+   paper-versus-source improvements require separate controls, not silent
+   changes to the compatibility mode.
+
+No further physical trajectory is queued by this audit. Fixed controls cost:
+FP64 detailed six-cloud/nine-toy suite1.003s after compilation, FP32 initial
+four-cloud/nine-toy suite4.361s, wall-input/viscosity controls26.652s including
+new kernel compilation, CPU configuration/support controls8.7–8.9s initially.
+These are operator-control costs; ms/physical-step is undefined because there
+is no evolution. Source hashes and final run receipts are retained beside the
+artifacts. No performance comparison against a physical simulation is inferred.
+
+![Fixed-operator cutoff and rounding sensitivity](../../.tmp/acsph-parity-audit-2026-10-29/sensitivity.png)
+
+Final verification: all 51 pinned source hashes are unchanged; the three new
+diagnostic scripts compile. Summary artifacts, plot generator and validation
+receipt are retained in the audit directory. No new physical trajectory was
+advanced.
+
+
+## 2026-10-29 — reference repair qualification and bounded replay
+
+The user authorized the repair priorities above. `referenceModel` now selects
+`dyngpusph-static-2d` explicitly; `none` preserves the existing production
+model. The new path currently accepts only stationary sampled walls,
+nonperiodic 2D, uniform support/density, AC-2L and SSPRK3. The Lobovsky fixture
+selects it with `--solver-model dyngpusph-static-2d` and checks the supplied
+hash-grid geometry. Existing partial-alignment hooks remain separate.
+
+The path implements A1–A7: native wall closure before raw-surface refresh;
+separate physical velocity, Shepard average, continuity mirror and pairwise
+viscosity slip; determinant-gated moment inverse and signed support lambda;
+frozen stage-zero pressure diffusion; first-real-step-iteration momentum JST
+sensor held for the real step; raw/vicinity union over RK stages; the first-two
+half pseudo-clock and coefficient changes; destination-row/final-weight RK
+factors; and last-stage pressure/position residual checks. The accepted wall
+pressure is carried into the external remap, with physical wall velocity.
+A dedicated accepted-field handoff also avoids the v/p derivative-roundtrip
+cancellation in this reference path (the generic default handoff is unchanged).
+
+A9 is handled by filtering current queries against the source's frozen
+physical-step cell membership. A once-per-step twice-support candidate list
+covers all contributing pairs while each particle moves less than half a
+support radius; the solve raises if that motion bound is exceeded. The wide
+shift uses its two-cell source stencil and the already-qualified z-plane
+multiplicity. There is no new boundary-library policy or shared inverse edit.
+
+**Explicit departures and limits:** the selected smooth bounce with ramp 0.5
+remains a local comparison control, rather than the native hard/lagged bounce.
+The native plateau/trim mechanism is implemented, but selects fluid particles
+by stable physical identity rather than copying its mixed sorted/unsorted
+boundary-mask indexing accident. Full residuals, checked residuals, trimmed
+status and exit reason are retained for every physical solve. These departures
+must remain visible when interpreting iteration counts and evolved differences.
+No restart equivalence or moving-body/analytic-wall support is claimed.
+The hard cohesion veto, unclamped-angle skip, componentwise shift velocity
+remap and duplicated shift history are retained as source-code behavior.
+AC-4 and the broader paper/default-model reconciliation remain separate work.
+
+Qualification artifacts live in `.tmp/acsph-parity-repair-2026-10-29`:
+
+- Nine captured FP64 RK states: max errors across all samples are pressure
+  acceleration 2.90e-12 m/s², viscosity 1.78e-15 m/s², momentum JST
+  2.30e-13 m/s², acoustic damping 1.82e-12 m/s², and complete pressure
+  residual 4.18e-7 Pa/s. All declared operator gates pass. Prior closure tags
+  are not saved in the old dumps, so isolated wall-p comparisons with guessed
+  prior flags are reported but excluded from exact-input gates.
+- Complete first pseudo-iteration, including closure inputs, warmup and RK
+  accumulation: position 1.12e-16 m, velocity 1.67e-16 m/s, pressure
+  6.01e-11 Pa and accepted last-stage wall pressure 2.28e-12 Pa maximum
+  difference from the next native dump. Every returned graph tensor,
+  including surface fields and sensor memory, matches eager bitwise.
+- Rounded FP32 first pseudo-map: pressure differs by up to 0.03492 Pa and
+  velocity by 2.50e-7 m/s from rounded FP64 output. This is a precision
+  measurement, not an FP64 equality gate. Dry/near-zero-weight wall closures
+  and normal signs are more sensitive; the full report retains those errors.
+- Three complete original-IC FP32 physical steps agree bitwise graph versus
+  eager, including all fields in the accepted snapshots. All graph solves
+  capture/replay successfully. Both runs produce video. Initial graph prefix
+  cost 40.16 s including cold compilation; eager prefix 23.18 s. The graph
+  solve itself costs about 6.1 s per 200-iteration startup step. These capped
+  startup controls are not steady-state throughput benchmarks.
+- Focused operator/increment tests: 36 pass in each precision; production and
+  fixture regression checks: 78 pass. Reproduced FP64 adaptive timestep now
+  succeeds; `isolatedZeroPressure=True` survives serialization. These two
+  implementation defects are repaired independently of the reference model.
+
+A serial source-pinned FP32 run now replays 3579 original native timesteps
+through approximately 0.7001 s, with video, progress, velocity/stall/wall
+watchdogs and automatic common-pressure/dynamics analysis. No full-duration
+trajectory or additional FP64 physical run is queued. Results are pending.
+
+
+### Static-wall invariant and completed first-pulse result
+
+**Follow-up supersedes the sparse-pressure interpretation:** the requested
+[every-step accepted dynGPUSPH rerun](DYNGPUSPH_DENSE_PRESSURE_2026-10-29.md)
+is complete. Native FP64 also reaches36.53kPa then−3.92kPa at the exact clocks
+of repaired warpSPH's35.92/−4.55kPa. The old10ms grey curve missed this pulse.
+Against the dense reference the repair improves P1 trace RMSE2.620→0.522kPa
+(80%), with improvements at P2–P4 too. First peak has just2fluid probe
+contributors. Bounce/precision/trim differences remain explicit; no physical
+pressure-accuracy or precision-only conclusion follows. The preceding
+qualification and endpoint metrics remain valid; the sparse measurements
+below are retained as historical evidence.
+
+The first repair trajectory was stopped after 2399 accepted steps,
+t≈0.497 s. A stronger invariant check found 18,436 stationary wall rows changed
+by up to 2.9802e-8 m: generic finalization reconstructs positions from
+COM-relative body data even at zero body velocity. The existing graph/eager
+check faithfully reproduced that unintended perturbation. The stopped run,
+video, source and partial viewer export remain under
+`.tmp/acsph-parity-repair-2026-10-29`; it is not a completed 0.70 s replay.
+
+The reference-only finalizer now preserves the fixed input geometry and
+rejects moving bodies. Shared rigid-body/boundary code and generic defaults
+are unchanged. A new regression fails if reference finalization calls the
+COM reconstruction; the three-step FP32 graph/eager gate now additionally
+requires bitwise unchanged physical wall coordinates. Both pass. At three
+steps, removing this perturbation changes fluid p by at most 0.07984 Pa and
+v by 5.67e-7 m/s; this is an isolated arithmetic/integration control.
+
+The corrected original-IC FP32 replay is complete under
+`.tmp/acsph-parity-repair-static-2026-10-29`. It is deliberately bounded at
+**2113 exact native timesteps, t=0.46004971449390497 s**, which contains the
+observed first pressure pulse and its immediate ringing. No 0.46–0.65 s tail
+metric or full-duration qualification is claimed. Numerical sources were
+frozen before this replay; the analysis endpoint was parameterized separately
+with its old/new source hashes retained before analysis ran.
+
+| Measurement | Previous warpSPH solver + reference shift | Repaired warpSPH reference solver | dynGPUSPH FP64 |
+|---|---:|---:|---:|
+| Endpoint kinetic energy, J/m |126.2222|125.8911|125.8740|
+| Endpoint maximum speed, m/s |4.06832|3.95632|3.95759|
+| Endpoint mean fluid pressure, Pa |716.193|742.341|743.390|
+| Endpoint material-row pressure RMS difference, Pa |52.905|32.297|reference|
+| P1 dense first peak, kPa |32.369|35.916|unresolved by saved cadence|
+| P1 dense rebound minimum, kPa |−1.321|−4.547|unresolved by saved cadence|
+
+Endpoint KE error falls from +0.277% to +0.0136%; peak-speed error from +2.80%
+to −0.0323%; mean-pressure error from −3.66% to −0.141%. Material positions
+still differ by RMS 1.119 mm, velocity by 0.01811 m/s; the common occupied
+1 cm-cell velocity RMS difference is 0.002329 m/s. These are evolved
+comparisons, not equality gates. Pre-impact fields are closer too: the
+repaired pressure RMS difference at 0.41014 s is 4.516 Pa.
+
+The point-pressure outcome is mixed. At shared saved clocks over
+0.38–0.46005 s, P1 RMSE worsens **187.5→504.7 Pa**, while P2 improves
+90.69→47.93 Pa, P3 38.69→29.70 Pa and P4 2.077→0.363 Pa. The P1 impact
+high-frequency metric also increases (2214→2760 Pa); it includes the narrow
+spike and must not be described as a pure noise/error estimate. The saved
+reference peak is only 7.959 kPa at 0.420056 s, with roughly 10 ms cadence:
+it cannot establish the native peak/rebound between frames. The raw native
+earlier-RK probe is still excluded.
+
+Removing wall reconstruction changes the P1 peak from 36.086 to 35.916 kPa
+(−0.47%) and its rebound from −4.586 to −4.547 kPa. It is a real invariant
+repair, but **does not explain or remove the large first pulse**. Hard
+cohesion/angle discontinuities remain in this reference model. The selected
+smooth bounce 0.5 and the stable-fluid-ID pressure trim remain explicit
+choices that differ from the native hard/lagged bounce and indexing accident.
+
+Qualification/validation: final fixed FP64 operators and complete first
+pseudo-map pass all declared gates; every graph tensor matches eager bitwise.
+The final static-wall unit regression also passes in FP64. In the physical
+replay all graphs remain active, with the same 17 startup cap steps; 2086 steps
+exit on full residuals, 10 on trimmed residuals, none on a pressure plateau.
+Mean iteration count is 16.625. Full and checked residuals remain recorded.
+All 934 pinned source hashes verify. All 47 saved frames are finite, wall
+coordinates are bitwise fixed, wall velocities are zero, membership/mass are
+constant, and no fluid crosses the physical wall midplanes. Stored FP32 mass
+promoted to FP64 is 180.00000637 kg/m; that is input rounding, not calibration
+or lost mass. Final wall pressure has 10,504 nonzero rows. Both video copies
+decode 213 frames; the final frame was visually checked.
+
+Cost: **1194.08 s / 565.11 ms per real step**, including startup/video.
+Matched-prefix mean solve cost rises 360.79→519.66 ms (+44.0%), while total
+pseudo-iterations rise 30,613→35,129 (+14.8%). Thus the additional iterations
+do not account for all the cost; the fuller reference operators/candidate
+filtering also need a performance pass. These are shared-system observations,
+not an isolated benchmark or a controlled hardware/precision comparison.
+The final non-evolving FP64 qualification costs 1.20 s after startup/cache.
+
+**Verdict:** retain the named reference path and the two general bug fixes
+(FP64 adaptive timestep and config roundtrip). The active Lobovsky force,
+closure, support and dual-time gaps now have executable qualifications. Bulk
+pressure and dynamics agreement improve substantially, but the early narrow
+pulse/ringing remains unresolved. Do not promote the reference model as a
+validated generic default or claim the pulse is solely FP32. A controlled
+within-warpSPH precision window and dense accepted-state dynGPUSPH probe
+observations are the next useful discriminators. No further run is queued.
+
+![Repaired first-pulse comparison](../../.tmp/acsph-parity-repair-static-2026-10-29/analysis/pressure-impact-detail.png)
+
+Artifacts: `analysis/summary.json`, `trajectory-analysis/summary.json`,
+`endpoint-comparison.json`, `validation-receipt.json`, `final-integrated-f64/`,
+`prefix-status.json`, videos and `warpSPH-lobovsky-reference-solver.h5`.
