@@ -71,7 +71,15 @@ def run(args, scheme, dim, tableau, support, change, communication=None):
             pw = system.pairWork
             pw._distributedTestVisits = getattr(pw, '_distributedTestVisits', 0) + 1
             if change and not pw.conservative and pw._distributedTestVisits == 2:
-                if communication is None:
+                if args.filter_replay:
+                    if communication is None:
+                        from warpSPHCore.radiusSearch.verlet.filter import filterVerletList
+                        adj=filterVerletList(state,config.domain,adj,supportMode=SupportScheme.SuperSymmetric,storeI=False)
+                    else:
+                        from warpSPHCore.radiusSearch import filterChunkedVerletList
+                        adj=filterChunkedVerletList(state,config.domain,adj,
+                            policy=replace(adj.plan.policy,maxRows=2),storeI=False)
+                elif communication is None:
                     from warpSPHCore import buildVerletList
                     adj = buildVerletList(state,config.domain,priorNeighborhood=adj,
                         supportMode=SupportScheme.SuperSymmetric,verletScale=config.verletScale,
@@ -221,6 +229,7 @@ def main():
     parser.add_argument('--lanes',type=int,default=1)
     parser.add_argument('--output')
     parser.add_argument('--suite',choices=('basic','extended'),default='basic')
+    parser.add_argument('--filter-replay',action='store_true',help='Force bounded filtering/repartition at the replay boundary.')
     args=parser.parse_args()
     if args.device.startswith('cuda'):
         torch.cuda.set_device(torch.device(args.device))
@@ -235,6 +244,9 @@ def main():
                      ('CompSPH',3,'rungeKutta2','Owen',False),
                      ('Monaghan',2,'rungeKutta4','Monaghan',False)]
     if args.steps>2:
+        variants=[('CRKSPH',2,'rungeKutta4','NoScheme',True),
+                  ('CompSPH',2,'rungeKutta4','NoScheme',True)]
+    if args.filter_replay:
         variants=[('CRKSPH',2,'rungeKutta4','NoScheme',True),
                   ('CompSPH',2,'rungeKutta4','NoScheme',True)]
     # All flat oracle runs precede the process-group / distributed solver phase.

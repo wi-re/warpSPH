@@ -2,7 +2,7 @@
 
 Plan index: [PLANS.md](PLANS.md). Parent physics programme: [driven compressible turbulence](docs/roadmap/driven_compressible_turbulence.md).
 
-Status, 2026-10-30: **Phase 4 bounded process proof of concept qualified; local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 filtering/redistribution next**.
+Status, 2026-10-30: **Phase 4 bounded process proof of concept qualified; local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 filtering/redistribution qualified locally; L5 stress active**.
 The count/scan/ownership design is agreed in discussion. Core/main and frontend/dev
 are integrated; see the [integration report](docs/chunked_integration_2026-10-30.md).
 The planner and opt-in standalone single-device chunk construction/lifecycle are
@@ -39,7 +39,7 @@ L3 control/hash and particle-packing work is now qualified locally. Evidence: `.
    qualified within the limits below. Use an explicit RowChunkProcessGroup with
    Gloo CPU or NCCL CUDA tensors; the isolated two-process/one-GPU runtime is
    available. J/W stay owned, with particle exchanges between dependent passes.
-   Continue with L4 distributed filtering/redistribution below;
+   Continue with L5 stability/failure stress, then L6 compatibility below;
    physical devices/topology/Isambard and capacity/performance remain open.
    Use `scripts/run_distributed.py` for the explicit experimental distributed
    launcher; ordinary runner setup still uses the Python neighborhood hook.
@@ -924,7 +924,7 @@ ACSPH contention means timing remains diagnostic. The ordering is deliberate.
    lifetimes and fewer operations/allocations locally; defer throughput claims.
    Cached controls/metadata, explicit exact/contract validation, compatible output
    packing and one bounded particle buffer now pass the qualification below.
-4. [ ] **L4 — distributed filtering/redistribution.** Filter resident partial-owner
+4. [x] **L4 — distributed filtering/redistribution (bounded local scope qualified).** Filter resident partial-owner
    lists and handle changed boundaries without a global pair intermediate. Preserve
    pair identity during accumulation or coordinate the existing fresh-stage replay.
 5. [ ] **L5 — stronger stability/failure controls.** Randomized partitions, skewed
@@ -1315,6 +1315,79 @@ Evidence/reproduction/frozen sources: `.tmp/l3-payload-20261030/`; draft results
 before the final alias/schedule guard are retained separately. Final core/front
 heads are recorded in its `commits.json` after the paired checkpoint commits.
 Implementation provenance: core `0513736`; frontend is the commit containing this checkpoint.
+
+### L4–L6 continuation (2026-10-30, active)
+
+User authorizes L4, then L5 and L6 in order if unblocked while away. L4 will count
+filtered rows on existing owners, agree the target partition, and stream bounded
+filtered J intervals directly into target chunk storage through c10d point-to-point
+transfers. One old-chunk temporary at a time; no global pair tensor. Generate I
+locally, preserve source leases/J/W, and qualify existing fresh-stage compatible
+replay on list changes. Each local allocation/kernel/transfer contract must agree
+before payload, including empty/skewed owners, changed boundaries and failures.
+L5 extends randomized partition/capacity, memory, forcing and fault controls.
+L6 records and tests an explicit support/rejection matrix, then expands compatible
+contexts as separately qualified changes. Physical devices/site/scaling, large
+L7 allocations and MPI/ROCm builds remain deferred. Tiny serial GPU controls only;
+no shared install/source changes and no throughput conclusions under ACSPH load.
+
+### L4 distributed filtering/redistribution checkpoint (2026-10-30)
+
+Distributed resident filtering now counts only existing owner rows, exchanges
+O(N) counts, agrees a new whole-row plan and allocates only new owned J/I.
+Existing count/filter kernels preserve source neighbour order. Each source owner
+filters one original chunk into a bounded live-J temporary, then `transferOwned`
+copies its contiguous row intersections directly into target chunks, with c10d
+send/recv between changed owners or a local copy for unchanged owners. Stored
+I is generated locally. No global pair tensor, pair gather or W transfer exists.
+
+Every live rank validates each transfer's source/target/count/dtype/plan before
+payload. Allocation, filtering and view failures propagate before their payload;
+zero-edge intervals skip traffic. Source lists and work buffers remain valid,
+independent and unchanged. New filtered adjacency identity triggers the existing
+native fresh-stage replay when used during compatible-work accumulation. It does
+not remap retained W or change integrator stages/reduction arithmetic. Filtering
+is explicit; ordinary eager native steps still use resident acceptance kernels.
+
+Peak storage includes the old and newly allocated owned lists, replicated current
+snapshots/counts/prefix, plus at most one original source chunk's filtered J and
+local offsets. `searchScratchBytes` reports that logical temporary bound, not
+allocator/backend peaks; scan/cast temporaries and reserved memory remain separate.
+Local filtering retains its original linear interval walk. Dynamic group size,
+physical multi-GPU transfer and asynchronous recovery remain unqualified.
+
+Qualification: final CPU core/search suite191 pass /187 expected skips (including
+5 process drivers:2/3 ranks ×exact/contract and fatal-peer termination);4 new
+frontend replay drivers pass across2/3 ranks ×exact/contract. Each core worker
+adds27 source/filter fixtures across all support modes,2D/3D, stored-I changes,
+source/target chunk splits/merges, periodic fields, zero populations/references
+and empty owners. Tiny flat filters verify exact counts, prefix, each owned J/I
+and padding. Retained J/W and leases survive; old W rejects the new list identity.
+Temporary logical bytes stay below one original owned chunk's live J/offset bound.
+
+Six added recoverable failures cover mismatched policy, capacity, target/source
+allocation, stale source and malformed transfer layout; no payload occurs after
+invalid preparation, and a subsequent valid filter recovers. CPU FP64/int64 and
+NCCL FP32/int32 plus FP32/int64 each run both modes for core/filter and3-step
+native filtering/replay:8 rank reports /108 filtering fixtures /192 distributed
+RHS per configuration. Actual shared-GPU NCCL23203 verified. Native CRKSPH and
+CompSPH each retain8 fresh RHS per accepted replay step and exact work/fields/
+time/OU parity, with the existing2e-12 source-budget tolerance only.
+
+Final core suite28.29s, frontend replay suite33.80s; rank-zero contract-mode filter
+matrix0.65s CPU FP64 and6.86/6.89s NCCL int32/int64. Contract solver totals for
+6 accepted steps/rank:1.92s CPU (320ms/step),9.90/10.00s NCCL (1649/1667ms/step).
+These tiny A/Bs omit video, retain progress/stall/velocity controls and run GPU
+jobs serially. Timings are diagnostic under ACSPH contention, with no speedup or
+physical-device claim. Full scanner passes566 modules /6065 imports /1314 files.
+
+An initial broad run failed only the obsolete single-owner rejection-message
+assertion; the corrected clean run passes. The pre-fix XML/log and the restored
+linear local-walk source variant are retained in evidence. Distributed code paths
+are unchanged by that local-walk correction. Evidence/reproduction/frozen files:
+`.tmp/l4-filtering-20261030/`; final paired heads in `commits.json`. L4 is locally
+qualified. Proceed to L5 seeded partition/capacity/lifetime and forcing/fault
+stress, then L6 compatibility. MPI/ROCm and large-memory L7 remain deferred.
 
 ## Phase 5 — remaining schemes and compatibility
 

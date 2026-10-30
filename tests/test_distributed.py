@@ -22,6 +22,21 @@ def test_replicated_eager_solver_ownership_and_replay(tmp_path, steps,checks):
     assert completed.stdout.count('all solver checks passed')==2,completed.stdout
 
 
+@pytest.mark.skipif(not dist.is_gloo_available(),reason='Gloo required')
+@pytest.mark.parametrize('ranks',[2,3])
+@pytest.mark.parametrize('checks',['exact','contract'])
+def test_filtered_owner_redistribution_replays_fresh_stages(tmp_path,ranks,checks):
+    worker=Path(__file__).with_name('distributed')/'_solverWorker.py'
+    env=dict(os.environ,CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='2',PYTHONDONTWRITEBYTECODE='1')
+    command=[sys.executable,'-m','torch.distributed.run','--standalone',f'--nproc-per-node={ranks}',
+        str(worker),'--replica-checks',checks,'--device','cpu','--output',str(tmp_path),
+        '--steps','2','--filter-replay','--clock-interval','.00025']
+    result=subprocess.run(command,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=240)
+    (tmp_path/'run.log').write_text(result.stdout)
+    assert result.returncode==0,result.stdout
+    assert result.stdout.count('all solver checks passed')==ranks,result.stdout
+
+
 def _launch_document(tmp_path,name,document,ranks,*,rows=3,edgeBudget=1024,expectSuccess=True,output=None):
     import json
     configuration=tmp_path/(name+'.json')
