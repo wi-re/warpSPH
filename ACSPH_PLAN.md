@@ -12,6 +12,22 @@ priority decision does not start new runs or change numerical defaults.
 ## Lobovsky comparison — 2026-10-27 (active)
 
 
+**Pressure-recorded campaign running (2026-10-30):** user initially
+reloaded fluids.dev, which still had the hosted build; switching the live
+connection to the updated local viewer resolved the queued job. All8 GPU gates
+pass. The real4-frame pressure-video gate downloads successfully at1920×1286,
+60fps; independent FFprobe counts4 VP8 frames, t=0 included, and the numerical
+endpoint matches no-video baseline bitwise. Pressure frame inspected visually.
+Qualification video/manifest/checksum are retained under the new root's
+qualification/pressure-video-baseline/pressure-video/.
+Full00-michel-baseline is now running, PID1290507, daemon run
+4099b67cb2284e04b15c211c970f9c3a, pressure job
+f82ba9ca1612410eab4968f033d255d8; initial-frame ACK confirmed and frames advancing.
+Then01 full Taylor remap and02 remap+BDF follow serially, with per-row video
+retrieval/verification. Root .tmp/acsph-michel-pressure-video-2026-10-30 remains
+frozen, supervised by1225912. Keep the connected local viewer open to encode.
+The hosted fluids.dev bundle has not been deployed by this work.
+
 **Pressure-video campaign dispatched (2026-10-30):** new root
 .tmp/acsph-michel-pressure-video-2026-10-30, supervisor1225912,994 frozen files
 at frontend20dfce4 / Remote f2dbd2f (Core/Integrators/Plotting unchanged).
