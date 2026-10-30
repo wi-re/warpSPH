@@ -12,6 +12,61 @@ priority decision does not start new runs or change numerical defaults.
 ## Lobovsky comparison — 2026-10-27 (active)
 
 
+**Shifting consistency and event video (2026-10-30, user):** disorder may
+couple pressure waves back into particle motion if artificial displacement is
+not accompanied by field transport and consistent time history. This is the
+purpose of the existing three controls: Michel only; full pressure/velocity
+Taylor remap; remap plus external-shift BDF correction. Code audit confirms
+Taylor transport evaluates both difference gradients before displacement and
+uses the full velocity tensor. Generic BDF correction excludes artificial
+shift from the precise physical position increment and relabels position
+history. It is a position/time-history correction, not a separate BDF derivative
+of pressure: the pressure pseudo-time residual uses velocity divergence plus
+pressure diffusion. Pressure responds through the coupled velocity/geometry
+solve. Do not equate this plumbing check with validated cavity stability.
+
+Use the daemon viewer's normal **Pressure · symmetric log** preset and
+synchronized high-quality video at every accepted step for event localization;
+keep mapping/range/camera consistent between controls and retain time/colorbar.
+User points out that compressed video permits much denser observations than raw
+snapshots. Keep sparse raw states and dense scalar probes for quantitative checks.
+Video rendering/ACK can affect wall time, so label capture cost separately. The
+current daemon supports synchronized step video; read-only inspection found
+video inactive. Encoding/export is performed by the connected browser, which is
+not exposed among this chat's controllable tabs. Do not activate daemon video
+without an encoder/ACK consumer or take over the user's existing viewer. No
+recording was started by this analysis and the running solver was not changed.
+
+**Cavity-window data check (2026-10-30):** current warpSPH Michel baseline,
+1.340249–1.399848s:255 accepted steps, zero200-iteration caps, epsilonV
+−8.334105…−8.000004, P4 minimum−5.091kPa and global particle minimum−21.936kPa.
+Thus the accepted scalar velocity gate passes during these oscillations; this
+is not a pressure-residual certificate. Seven spatial states about10ms apart
+show7.05% of all fluid and37.83% of lower-right ROI particles below−1kPa at
+1.360282s, but the intervening dense sensor troughs are missed. Fixed interior
+strip has no particles below−1kPa at these sparse sample times. This does not
+establish whole-bulk wave extent or disorder gain, and the screenshot frames
+are not precisely aligned. ROIs: lower-right x>1.45,y<0.25; interior strip
+0.8<x<1.4,0.02<y<0.25m (coordinate selections, not support-classified bulk).
+Retained CPU analysis, JSON and fixed-scale figure under live observations/
+`analyze_cavity.py`, `cavity-pressure-summary.json`, `cavity-pressure-window.png`.
+Next compare pressure excursions along fixed particle cohorts against support
+anisotropy/gradient closure, surface flags and pressure diffusion around each
+event; distinguish geometric focusing from numerical amplification. Denser
+video can locate those windows, but cannot alone measure numerical gain.
+
+**Cavity closure / disorder amplification (2026-10-30, user):** at about
+1.37s, a lower-right empty cavity closes into a distorted particle distribution,
+followed by a broad negative-pressure disturbance. User further observes that
+pre-existing disorder may amplify an arriving pressure wave. Track two separate
+hypotheses: closure as a source, and disorder as an amplifier. Inspect saved
+accepted states and dense probes without changing the ongoing controls; compare
+pressure extent, sampling/anisotropy and accepted convergence. Spatial snapshots
+are only about10ms apart, so cannot establish acoustic propagation or causal gain.
+This single-fluid simulation has an empty cavity, with no modeled gas cushion.
+Four screenshots retained under the live root observations/cavity-closure-around-
+1p37s-{a,b,c,d}.png. Initial offline check recorded above; do not promote a remedy from appearance.
+
 **Lower-wall shear/negative-pressure sequence (2026-10-30, user):** around
 1.3s, two shearing flows with a free surface form a larger negative-pressure
 patch near the lower right wall. The supplied image pair shows localized
