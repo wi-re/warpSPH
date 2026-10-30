@@ -55,7 +55,7 @@ def _launch_document(tmp_path,name,document,ranks,*,rows=3,edgeBudget=1024,expec
 
 
 @pytest.mark.skipif(not dist.is_gloo_available(),reason='Gloo required')
-@pytest.mark.parametrize('scheme',['CRKSPH','CompSPH','Monaghan'])
+@pytest.mark.parametrize('scheme',['CRKSPH','CompSPH','Monaghan','GSPH','InutsukaGSPH'])
 def test_launcher_outputs_and_restart_are_rank_owned(tmp_path,scheme):
     import json
     import h5py
@@ -108,3 +108,32 @@ def test_native_rhs_allocation_failure_propagates_and_fresh_retry_recovers(tmp_p
     (tmp_path/'run.log').write_text(result.stdout)
     assert result.returncode==0,result.stdout
     assert result.stdout.count('all solver checks passed')==3,result.stdout
+
+
+@pytest.mark.skipif(not dist.is_gloo_available(),reason='Gloo required')
+@pytest.mark.parametrize('ranks',[2,3])
+@pytest.mark.parametrize('checks',['exact','contract'])
+def test_godunov_prepared_and_unsupported_context_matrix(tmp_path,ranks,checks):
+    worker=Path(__file__).with_name('distributed')/'_compatibilityWorker.py'
+    env=dict(os.environ,CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='2',PYTHONDONTWRITEBYTECODE='1')
+    command=[sys.executable,'-m','torch.distributed.run','--standalone',f'--nproc-per-node={ranks}',str(worker),
+        '--device','cpu','--replica-checks',checks,'--output',str(tmp_path)]
+    result=subprocess.run(command,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=240)
+    (tmp_path/'run.log').write_text(result.stdout)
+    assert result.returncode==0,result.stdout
+    assert result.stdout.count('all compatibility checks passed')==ranks,result.stdout
+
+
+@pytest.mark.skipif(not dist.is_gloo_available(),reason='Gloo required')
+@pytest.mark.parametrize('order',[1,2])
+@pytest.mark.parametrize('checks',['exact','contract'])
+def test_native_and_godunov_solver_compatibility(tmp_path,order,checks):
+    worker=Path(__file__).with_name('distributed')/'_solverWorker.py'
+    env=dict(os.environ,CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='2',PYTHONDONTWRITEBYTECODE='1')
+    command=[sys.executable,'-m','torch.distributed.run','--standalone','--nproc-per-node=2',str(worker),
+        '--device','cpu','--replica-checks',checks,'--suite','compatibility','--godunov-order',str(order),
+        '--clock-interval','.00025','--output',str(tmp_path)]
+    result=subprocess.run(command,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=240)
+    (tmp_path/'run.log').write_text(result.stdout)
+    assert result.returncode==0,result.stdout
+    assert result.stdout.count('all solver checks passed')==2,result.stdout

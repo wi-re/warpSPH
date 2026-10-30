@@ -34,6 +34,7 @@ from typing import Any, Optional, Union
 import torch
 from warpSPHCore.profiling import record_function
 from warpSPHCore import *
+from .chunked import centredQueryRole,godunovInputs
 from ...configurations.moduleConfigurations.diffusionParameters import DiffusionParameters, StateLimiter
 from ..reconstruction import reconstructPairIncrements, reconstructPair1D
 from ..riemann import riemannStarState
@@ -144,9 +145,10 @@ def _scalarDtype(ctx, extras):
 
 
 _GAUSS_DENSITY = OperatorSpec(
+    rowChunked=True,
     kernel=gaussianDensity_Kernel,
     outputs=(OutputSpec(dtype=_vecDtype, shape=ShapeOf.QUERY), OutputSpec(dtype=_scalarDtype, shape=ShapeOf.QUERY)),
-    extras=(ExtraSpec("widthFactor", ExtraKind.SCALAR), ExtraSpec("queryH", ExtraKind.TENSOR), ExtraSpec("referenceH", ExtraKind.TENSOR)),
+    extras=(ExtraSpec("widthFactor", ExtraKind.SCALAR), ExtraSpec("queryH", ExtraKind.TENSOR,RowRole.QUERY), ExtraSpec("referenceH", ExtraKind.TENSOR,RowRole.REFERENCE)),
 )
 
 
@@ -166,7 +168,7 @@ def computeGaussianDensityWarp(
             adjacency=adjacency, reference=queryParticles,
             corrections=Corrections(volumes=(None, None), crk=None, gradH=None, renorm=None),
         )
-        hG = gaussianH if gaussianH is not None else queryParticles.supports / 3.0
+        hG = godunovInputs(adjacency,lambda:gaussianH if gaussianH is not None else queryParticles.supports / 3.0)
         return launchOperator(_GAUSS_DENSITY, ctx, widthFactor=scalar_t(widthFactor), queryH=hG, referenceH=hG)
 
 
@@ -211,7 +213,7 @@ def inutsuka_Func_Adjacency(
     queryVelocityTensor: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)), referenceVelocityTensor: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)),  # type: ignore
     queryStateGradients: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)), referenceStateGradients: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)),  # type: ignore
     queryAccelerations: wp.array(dtype=vector(length=Any, dtype=scalar_t)), halfDt: scalar_t,  # type: ignore
-    params: DiffusionParameters, gamma: scalar_t, order: wp.int32, cubic: wp.bool,
+    params: DiffusionParameters, gamma: scalar_t, order: wp.int32, cubic: wp.bool, rowStart: wp.int32,
     accelValue: Any,
 ):
     xi, hi, mi, rhoi, ki = getParticle(queryState, i)
@@ -256,7 +258,7 @@ def inutsuka_Func_Adjacency(
             if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
                 if not checkDirectionality_j(referenceState.kinds[j], kernelProperties.operationMode):
                     continue
-            if i == j:
+            if i + rowStart == j:
                 continue
             xj, hj, mj, rhoj, kj = getParticle(referenceState, j)
             hGj = referenceGaussianH[j]
@@ -335,7 +337,7 @@ def computeInutsuka_Kernel(
     queryVelocityTensor: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)), referenceVelocityTensor: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)),  # type: ignore
     queryStateGradients: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)), referenceStateGradients: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)),  # type: ignore
     queryAccelerations: wp.array(dtype=vector(length=Any, dtype=scalar_t)), halfDt: scalar_t,  # type: ignore
-    params: DiffusionParameters, gamma: scalar_t, order: wp.int32, cubic: wp.bool,
+    params: DiffusionParameters, gamma: scalar_t, order: wp.int32, cubic: wp.bool, rowStart: wp.int32,
     # outputs
     accel: wp.array(dtype=vector(length=Any, dtype=scalar_t)),  # type: ignore
     dudt: wp.array(dtype=scalar_t),  # type: ignore
@@ -351,7 +353,7 @@ def computeInutsuka_Kernel(
         queryGaussianH, referenceGaussianH,
         queryVelocityTensor, referenceVelocityTensor, queryStateGradients, referenceStateGradients,
         queryAccelerations, halfDt,
-        params, gamma, order, cubic,
+        params, gamma, order, cubic, rowStart,
         accel[i],
     )
     accel[i] = a
@@ -359,27 +361,29 @@ def computeInutsuka_Kernel(
 
 
 _INUTSUKA = OperatorSpec(
+    rowChunked=True,
     kernel=computeInutsuka_Kernel,
     outputs=(OutputSpec(dtype=_vecDtype, shape=ShapeOf.QUERY), OutputSpec(dtype=_scalarDtype, shape=ShapeOf.QUERY)),
     extras=(
-        ExtraSpec("queryVelocities", ExtraKind.TENSOR),
-        ExtraSpec("referenceVelocities", ExtraKind.TENSOR),
-        ExtraSpec("queryPressures", ExtraKind.TENSOR),
-        ExtraSpec("referencePressures", ExtraKind.TENSOR),
-        ExtraSpec("queryGradRho", ExtraKind.TENSOR),
-        ExtraSpec("referenceGradRho", ExtraKind.TENSOR),
-        ExtraSpec("queryGaussianH", ExtraKind.TENSOR),
-        ExtraSpec("referenceGaussianH", ExtraKind.TENSOR),
-        ExtraSpec("queryVelocityTensor", ExtraKind.TENSOR),
-        ExtraSpec("referenceVelocityTensor", ExtraKind.TENSOR),
-        ExtraSpec("queryStateGradients", ExtraKind.TENSOR),
-        ExtraSpec("referenceStateGradients", ExtraKind.TENSOR),
-        ExtraSpec("queryAccelerations", ExtraKind.TENSOR),
+        ExtraSpec("queryVelocities", ExtraKind.TENSOR,RowRole.QUERY),
+        ExtraSpec("referenceVelocities", ExtraKind.TENSOR,RowRole.REFERENCE),
+        ExtraSpec("queryPressures", ExtraKind.TENSOR,RowRole.QUERY),
+        ExtraSpec("referencePressures", ExtraKind.TENSOR,RowRole.REFERENCE),
+        ExtraSpec("queryGradRho", ExtraKind.TENSOR,RowRole.QUERY),
+        ExtraSpec("referenceGradRho", ExtraKind.TENSOR,RowRole.REFERENCE),
+        ExtraSpec("queryGaussianH", ExtraKind.TENSOR,RowRole.QUERY),
+        ExtraSpec("referenceGaussianH", ExtraKind.TENSOR,RowRole.REFERENCE),
+        ExtraSpec("queryVelocityTensor", ExtraKind.TENSOR,lambda ctx,e: RowRole.QUERY if e["order"]>=2 else RowRole.REPLICATED),
+        ExtraSpec("referenceVelocityTensor", ExtraKind.TENSOR,lambda ctx,e: RowRole.REFERENCE if e["order"]>=2 else RowRole.REPLICATED),
+        ExtraSpec("queryStateGradients", ExtraKind.TENSOR,lambda ctx,e: RowRole.QUERY if e["order"]>=2 else RowRole.REPLICATED),
+        ExtraSpec("referenceStateGradients", ExtraKind.TENSOR,lambda ctx,e: RowRole.REFERENCE if e["order"]>=2 else RowRole.REPLICATED),
+        ExtraSpec("queryAccelerations", ExtraKind.TENSOR,centredQueryRole),
         ExtraSpec("halfDt", ExtraKind.SCALAR),
         ExtraSpec("params", ExtraKind.SCALAR),
         ExtraSpec("gamma", ExtraKind.SCALAR),
         ExtraSpec("order", ExtraKind.SCALAR),
         ExtraSpec("cubic", ExtraKind.SCALAR),
+        ExtraSpec("rowStart",ExtraKind.SCALAR,RowRole.ROW_START),
     ),
 )
 
@@ -406,28 +410,31 @@ def computeInutsukaWarp(
     (`computeGaussianDensityWarp`); the particles' `supports` are the compact kernel's, the Gaussian's `h` is `supports / 3`. Order 2 needs the velocity
     Jacobian and the `(rho, P)` gradients (`G[:, 0]` is replaced by `gradRho`: the density gradient of the same Gaussian sum) and uses `params.stateLimiter`
     (not `PairRatio`) with the states evaluated at the interface `s*`."""
-    vel = queryVelocities if queryVelocities is not None else queryParticles.velocities
-    P = queryPressures if queryPressures is not None else queryParticles.pressures
-    dim = queryParticles.positions.shape[1]
-    dummyJ = getCachedDummyTensor((1, dim, dim), dtype=queryParticles.positions.dtype, device=queryParticles.positions.device)
-    dummyG = getCachedDummyTensor((1, 2, dim), dtype=queryParticles.positions.dtype, device=queryParticles.positions.device)
-    if order >= 2:
-        if queryVelocityTensor is None or queryStateGradients is None:
-            raise ValueError('order 2 needs the velocity Jacobian and the (rho, P) gradients')
-        if params.stateLimiter == StateLimiter.PairRatio.value:
-            raise ValueError('the Inutsuka scheme limits its states with a 1D limiter (StateLimiter other than PairRatio)')
-        G = queryStateGradients.clone()
-        G[:, 0] = gradRho
-    else:
-        G = dummyG
-    # the time-centred energy rate is evaluated in a second pass, with the accelerations of the first (halfDt = 0: the particle's own velocity)
-    centred = bool(params.timeCentredEnergy) and halfDt > 0.0
-    if centred and queryAccelerations is None:
-        raise ValueError('a time-centred energy rate (halfDt > 0) needs the accelerations of a first pass (queryAccelerations)')
-    dummyA = getCachedDummyTensor((1, dim), dtype=queryParticles.positions.dtype, device=queryParticles.positions.device)
-    accs = queryAccelerations if centred else dummyA
-    J = queryVelocityTensor if order >= 2 else dummyJ
-    hG = gaussianH if gaussianH is not None else queryParticles.supports / 3.0
+    def prepare():
+        vel = queryVelocities if queryVelocities is not None else queryParticles.velocities
+        P = queryPressures if queryPressures is not None else queryParticles.pressures
+        dim = queryParticles.positions.shape[1]
+        dummyJ = getCachedDummyTensor((1, dim, dim), dtype=queryParticles.positions.dtype, device=queryParticles.positions.device)
+        dummyG = getCachedDummyTensor((1, 2, dim), dtype=queryParticles.positions.dtype, device=queryParticles.positions.device)
+        if order >= 2:
+            if queryVelocityTensor is None or queryStateGradients is None:
+                raise ValueError('order 2 needs the velocity Jacobian and the (rho, P) gradients')
+            if params.stateLimiter == StateLimiter.PairRatio.value:
+                raise ValueError('the Inutsuka scheme limits its states with a 1D limiter (StateLimiter other than PairRatio)')
+            G = queryStateGradients.clone()
+            G[:, 0] = gradRho
+        else:
+            G = dummyG
+        # the time-centred energy rate is evaluated in a second pass, with the accelerations of the first (halfDt = 0: the particle's own velocity)
+        centred = bool(params.timeCentredEnergy) and halfDt > 0.0
+        if centred and queryAccelerations is None:
+            raise ValueError('a time-centred energy rate (halfDt > 0) needs the accelerations of a first pass (queryAccelerations)')
+        dummyA = getCachedDummyTensor((1, dim), dtype=queryParticles.positions.dtype, device=queryParticles.positions.device)
+        accs = queryAccelerations if centred else dummyA
+        J = queryVelocityTensor if order >= 2 else dummyJ
+        hG = gaussianH if gaussianH is not None else queryParticles.supports / 3.0
+        return vel,P,J,G,accs,hG
+    vel,P,J,G,accs,hG=godunovInputs(adjacency,prepare)
     with record_function("warpSPH[computeInutsuka]"):
         ctx = SPHContext(
             query=queryParticles, properties=operationProperties, domain=domain,
@@ -443,5 +450,5 @@ def computeInutsukaWarp(
             queryVelocityTensor=J, referenceVelocityTensor=J,
             queryStateGradients=G, referenceStateGradients=G,
             queryAccelerations=accs, halfDt=scalar_t(halfDt),
-            params=params, gamma=scalar_t(gamma), order=order, cubic=cubic,
+            params=params, gamma=scalar_t(gamma), order=order, cubic=cubic, rowStart=0,
         )

@@ -1,4 +1,5 @@
 """Native eager compatible work policy; pair buffers never leave their chunks."""
+import torch
 from warpSPHCore.radiusSearch import ChunkedAdjacency, ChunkedPairField
 from ..crk.storage import derivativeInputs
 from ...enumTypes import EnergyScheme
@@ -7,6 +8,7 @@ from ...enumTypes import EnergyScheme
 def checkChunkedStage(system, state, config, scheme, index, dt, family):
     pw = system.pairWork
     adjacency = pw.latest if pw is not None and pw.latest is not None else system.adjacency
+    _capture(adjacency)
     if isinstance(adjacency, ChunkedAdjacency) and adjacency.communication is not None:
         return adjacency.communication.localPhase('compatible:stage-contract',
             lambda: _checkChunkedStage(system, state, config, scheme, index, dt, family))
@@ -57,6 +59,12 @@ def workBuffer(pairWork, state, adjacency, reducing):
 
 def workInputs(adjacency,function):
     """Prepare local compatible-work storage before any peer enters its operator."""
+    _capture(adjacency)
     if isinstance(adjacency,ChunkedAdjacency) and adjacency.communication is not None:
         return adjacency.communication.localPhase('compatible:work-inputs',function)
     return function()
+
+
+def _capture(adjacency):
+    if isinstance(adjacency,ChunkedAdjacency) and adjacency.queryPositions.is_cuda and torch.cuda.is_current_stream_capturing():
+        raise NotImplementedError('Chunked compatible work requires eager execution outside CUDA graph capture.')

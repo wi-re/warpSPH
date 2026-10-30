@@ -18,6 +18,7 @@ import torch
 from warpSPHCore import get_torch_offset_dtype, get_torch_precision
 from warpSPHCore.radiusSearch import RowChunkPolicy, buildChunkedVerletList
 from .runner import RunConfiguration
+from .distributed import CHUNKED_SCHEMES
 from .io.chunkCheckpoint import writeChunkedCheckpoint
 
 
@@ -83,9 +84,9 @@ def runDistributed(configuration,communication,*,outputDirectory,edgeBudget,maxR
         if not isinstance(configuration,RunConfiguration) or configuration.case!='drivenTurbulence':
             raise ValueError('Distributed launcher currently supports drivenTurbulence only.')
         spec=configuration.resolve(drivenTurbulenceCase)
-        if (spec.scheme not in ('Monaghan','CRKSPH','CompSPH') or spec.execution!='eager'
+        if (spec.scheme not in CHUNKED_SCHEMES or spec.execution!='eager'
             or spec.cudaGraph or spec.pipelineOutputs or spec.store or spec.plot or spec.video):
-            raise ValueError('Distributed launcher requires eager Monaghan/CRKSPH/CompSPH with automatic store/plot/video disabled.')
+            raise ValueError('Distributed launcher requires a supported eager chunked scheme with automatic store/plot/video disabled.')
         if type(checkpointEvery) is not int or checkpointEvery<0:
             raise ValueError('checkpointEvery must be a nonnegative integer.')
         RowChunkPolicy(edgeBudget=edgeBudget,maxRows=maxRows)

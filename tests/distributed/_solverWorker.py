@@ -122,6 +122,11 @@ def run(args, scheme, dim, tableau, support, change, communication=None):
         sc=ctx.schemeConfig
         sc.adaptiveSupportScheme=getattr(AdaptiveSupportScheme,support)
         sc.adaptiveSupportIterations=4
+        if scheme in ('GSPH','InutsukaGSPH'):
+            from warpSPH.configurations.moduleConfigurations.diffusionParameters import VelocityPairPolicy,StateLimiter
+            sc.diffusionParams.velocityPairPolicy=(VelocityPairPolicy.Raw if args.godunov_order==1 else VelocityPairPolicy.Limited).value
+            sc.diffusionParams.riemannReconstruction=args.godunov_order==2
+            sc.diffusionParams.stateLimiter=StateLimiter.VanLeerMonotonized.value
         sc.adaptiveSupportCorrections=scheme=='CompSPH'
         s=system.state
         s.velocities[:,0]=.13*torch.sin(6.283*s.positions[:,1])
@@ -235,9 +240,10 @@ def main():
     parser.add_argument('--clock-interval',type=float,default=.125)
     parser.add_argument('--lanes',type=int,default=1)
     parser.add_argument('--output')
-    parser.add_argument('--suite',choices=('basic','extended'),default='basic')
+    parser.add_argument('--suite',choices=('basic','extended','compatibility'),default='basic')
     parser.add_argument('--filter-replay',action='store_true',help='Force bounded filtering/repartition at the replay boundary.')
     parser.add_argument('--rhs-fault',action='store_true',help='Reject one-rank work allocation, then retry a fresh solver run.')
+    parser.add_argument('--godunov-order',type=int,choices=(1,2),default=1)
     args=parser.parse_args()
     if args.device.startswith('cuda'):
         torch.cuda.set_device(torch.device(args.device))
@@ -251,6 +257,9 @@ def main():
         variants += [('CRKSPH',3,'rungeKutta2','Owen',False),
                      ('CompSPH',3,'rungeKutta2','Owen',False),
                      ('Monaghan',2,'rungeKutta4','Monaghan',False)]
+    if args.suite=='compatibility':
+        variants += [('GSPH',2,'rungeKutta2','NoScheme',False),('GSPH',3,'rungeKutta2','Monaghan',False),
+                     ('InutsukaGSPH',2,'rungeKutta2','NoScheme',False),('InutsukaGSPH',3,'rungeKutta2','NoScheme',False)]
     if args.steps>2:
         variants=[('CRKSPH',2,'rungeKutta4','NoScheme',True),
                   ('CompSPH',2,'rungeKutta4','NoScheme',True)]

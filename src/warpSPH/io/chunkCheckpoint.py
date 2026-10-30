@@ -1,6 +1,6 @@
 """Accepted-step native SPH checkpoints with no serialized pair arrays.
 
-Explicit Python API for the bounded driven Monaghan/CRKSPH/CompSPH path. One
+Explicit Python API for bounded eager driven SPH, including both Godunov forms. One
 rank publishes an atomic canonical file; every rank reconstructs only its own
 adjacency on restore. The file contains no communicator, device ordinal or W.
 """
@@ -20,6 +20,7 @@ import torch
 from warpSPHCore.radiusSearch import (ChunkedAdjacency, rowChunkCheckpointState,
                                      restoreRowChunkCheckpointState)
 from .hdf5 import dumpState, loadState
+from ..distributed import CHUNKED_SCHEMES
 
 __all__ = ['writeChunkedCheckpoint', 'restoreChunkedCheckpoint']
 
@@ -88,10 +89,10 @@ def _validateState(state):
 def _scope(ctx,system):
     from ..modules.meshless.sources import ConservedSources
     from ..modules.forcing import FourierOU
-    if (ctx.spec.caseName!='drivenTurbulence' or getattr(ctx.scheme,'name',ctx.scheme) not in ('Monaghan','CRKSPH','CompSPH')
+    if (ctx.spec.caseName!='drivenTurbulence' or getattr(ctx.scheme,'name',ctx.scheme) not in CHUNKED_SCHEMES
         or ctx.scratch.get('execution')!='eager' or not isinstance(system.adjacency,ChunkedAdjacency)
         or system.adjacency.kind!='verlet'):
-        raise NotImplementedError('Chunk checkpoints currently qualify eager driven Monaghan/CRKSPH/CompSPH with resident chunks.')
+        raise NotImplementedError('Chunk checkpoints require a supported eager driven scheme with resident chunks.')
     if not isinstance(system.sourceTerms,ConservedSources) or not isinstance(system.sourceTerms.acceleration,FourierOU):
         raise NotImplementedError('Chunk checkpoints currently require ConservedSources/FourierOU.')
     if getattr(system,'rerunRequest',None) is not None:

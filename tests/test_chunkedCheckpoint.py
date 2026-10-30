@@ -31,7 +31,7 @@ def launch(tmp_path,action,scheme,ranks,rows,offset,*,steps=2,checkpoint=None,ex
 
 
 @pytest.mark.skipif(not dist.is_gloo_available(),reason='Gloo required')
-@pytest.mark.parametrize('scheme,sourceRanks,targetRanks', [('CRKSPH',2,3),('CompSPH',1,2),('Monaghan',3,1)])
+@pytest.mark.parametrize('scheme,sourceRanks,targetRanks', [('CRKSPH',2,3),('CompSPH',1,2),('Monaghan',3,1),('GSPH',2,3),('InutsukaGSPH',3,2)])
 def test_accepted_restart_changes_budget_rank_count_and_offset(tmp_path,scheme,sourceRanks,targetRanks):
     launch(tmp_path,'reference',scheme,1,4,'int64',steps=4)
     launch(tmp_path,'save',scheme,sourceRanks,3,'int32',extra=('--contracts',) if scheme=='CRKSPH' else ())

@@ -2,7 +2,7 @@
 
 Plan index: [PLANS.md](PLANS.md). Parent physics programme: [driven compressible turbulence](docs/roadmap/driven_compressible_turbulence.md).
 
-Status, 2026-10-30: **Phase 4 bounded process proof of concept qualified; local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 filtering/redistribution qualified locally; L5 bounded stress qualified; L6 compatibility active**.
+Status, 2026-10-30: **Phase 4 bounded process proof of concept qualified; local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 filtering/redistribution qualified locally; L5 bounded stress qualified; L6 bounded compatibility matrix qualified**.
 The count/scan/ownership design is agreed in discussion. Core/main and frontend/dev
 are integrated; see the [integration report](docs/chunked_integration_2026-10-30.md).
 The planner and opt-in standalone single-device chunk construction/lifecycle are
@@ -19,8 +19,8 @@ the core carries a short companion pointer, `CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md
 The previously recorded wp_alpha.computeAlpha `find_spec` traceback is fixed.
 Missing symbols on regular modules now produce normal diagnostics; only packages
 are searched for child modules, and child-lookup errors do not abort the scan.
-Five focused scanner regressions pass. The full check now imports566 modules
-and checks6063 first-party imports across1314 files with no failures.
+Five focused scanner regressions pass. The full L6 check now imports567 modules
+and checks6092 first-party imports across1316 files with no failures.
 The five real stale imports exposed after fixing the exception were resolved:
 two old pressure-solver notebooks are clearly labeled archival source listings
 (their retired numerical APIs were not revived), and the Kidder regression calls
@@ -39,8 +39,10 @@ L3 control/hash and particle-packing work is now qualified locally. Evidence: `.
    qualified within the limits below. Use an explicit RowChunkProcessGroup with
    Gloo CPU or NCCL CUDA tensors; the isolated two-process/one-GPU runtime is
    available. J/W stay owned, with particle exchanges between dependent passes.
-   Continue with L6 compatibility expansion and the support matrix below;
+   L1–L6 are qualified within their bounded local scopes; use the maintained
+   [support matrix](docs/chunked_distributed_support.md). Broader compatibility,
    physical devices/topology/Isambard and capacity/performance remain open.
+   L7 waits for sufficient free GPU memory; MPI/ROCm builds remain deferred.
    Use `scripts/run_distributed.py` for the explicit experimental distributed
    launcher; ordinary runner setup still uses the Python neighborhood hook.
    Use explicit source paths; do not change global editable installs.
@@ -930,9 +932,11 @@ ACSPH contention means timing remains diagnostic. The ordering is deliberate.
 5. [x] **L5 — stronger stability/failure controls (bounded local scope qualified).** Randomized partitions, skewed
    counts, empty owners, repeated capacity changes, longer forcing histories,
    failures during solver/IO phases and bounded memory checks; use more CPU ranks.
-6. [ ] **L6 — compatibility expansion.** Explicit support matrix for other schemes,
-   boundaries/materials, graphs and differentiation; qualify each as a separate
-   change with existing native CRKSPH/CompSPH controls retained.
+6. [x] **L6 — compatibility expansion (bounded local scope qualified).** GSPH and
+   InutsukaGSPH join the eager five-scheme matrix, including prepared operators and
+   native restart. Explicitly test rejections for boundaries/materials, graphs,
+   differentiation and unported schemes; retain native CRKSPH/CompSPH controls.
+   This completes the bounded local milestone, not every Phase5 compatibility port.
 7. [ ] **L7 — actual wide-edge device access (when memory is free).** A total edge
    count above INT_MAX across bounded chunks is testable on one physical GPU.
    Require a memory/headroom check and actual device accesses; metadata/aliases
@@ -1316,7 +1320,7 @@ before the final alias/schedule guard are retained separately. Final core/front
 heads are recorded in its `commits.json` after the paired checkpoint commits.
 Implementation provenance: core `0513736`; frontend is the commit containing this checkpoint.
 
-### L4–L6 continuation (2026-10-30, active)
+### L4–L6 continuation authorization (2026-10-30; sequence locally qualified)
 
 User authorizes L4, then L5 and L6 in order if unblocked while away. L4 will count
 filtered rows on existing owners, agree the target partition, and stream bounded
@@ -1450,6 +1454,75 @@ AD/graphs and lane/prepared behavior, keeping native controls. Physical devices,
 site/topology/scaling, MPI/ROCm builds and large-memory L7 remain separate gates.
 Evidence/reproduction/frozen sources: `.tmp/l5-stability-20261030/`; paired heads
 are recorded in its `commits.json` after checkpoint commits.
+
+### L6 bounded compatibility checkpoint (2026-10-30)
+
+The maintained [support matrix](docs/chunked_distributed_support.md) now qualifies
+five eager schemes: Monaghan, CRKSPH, CompSPH, GSPH and InutsukaGSPH. The last two
+use explicit query/reference/dummy roles and a global row base solely for
+self-pair identity. Gaussian density and both Godunov force operators also work
+through prepared launches. Inutsuka's Gaussian reach is converted to an agreed
+host scalar only for chunked eager planning; the flat device-tensor path is
+unchanged. Both list variants remain distinct. No floating formula, reconstruction
+choice, integrator, fresh-stage rule or default was changed. Normalized Warp ASTs
+match L5 after removing only integer rowStart plumbing; all16 existing flat
+Godunov/Gaussian/Inutsuka FP64 reverse-gradchecks pass.
+
+The shared scheme gate now admits five schemes at distributed startup, the
+explicit launcher and native checkpoint IO. Native checkpoint/restart includes
+both Godunov forms; legacy version-1 CSR/COO remains qualified for the original
+three schemes only, with explicit Godunov rejection. Actual capture guards reject
+before callbacks/control/collectives, including native work preparation. Forward
+AD search inputs reject before detached snapshots. The operator contract now
+agrees the effective selected kernel and lanes, so different tiled reduction
+settings reject before compute; identical scalar fallbacks remain compatible.
+
+Qualification uses tiny serial A/B controls without video, retaining progress,
+stall and velocity monitoring. Every solver fixture compares fresh RHS values,
+J/W as applicable, accepted particle fields, time/dt and OU histories against the
+flat path; only the existing two-component source-budget comparison uses2e-12.
+
+| Gate | Result |
+| --- | --- |
+| CPU formal driver suites | 292 passed,245 expected CUDA skips across core search/operators,2/3-rank context/solver matrices,5 native checkpoint drivers,5 launcher lifecycles,legacy/scanner regressions and core process/stress/fatal controls; overlapping driver selections are counted as executions |
+| Existing flat Godunov reverse AD | All16 FP64 gradchecks pass after the integer ABI addition |
+| CPU FP64/int64 process cohort | Exact/contract × first/second order;12 rank reports including operators and544 solver RHS evaluations |
+| Shared-GPU NCCL FP32/int32 | Exact/contract × both orders plus global32-lane second-order control;14 rank reports and680 solver RHS evaluations |
+| Shared-GPU NCCL FP32/int64 | Exact/contract × both orders;12 rank reports and544 solver RHS evaluations |
+| Final prepared/operator/rejection matrix | 12 rank reports: CPU FP64/int64 and NCCL FP32/both offsets, exact/contract. Each report has24 configurations (2D/3D ×0/1/11 rows ×2 orders ×time-centred on/off), both stored-I layouts and all3 prepared operators. CPU rejects15 contexts; CUDA rejects26, including effective-lane mismatch and actual capture before callbacks |
+| Final effective-lane admission | Repeated full nine-variant second-order32-lane NCCL solver:2 rank reports,136 RHS; native controls and both Godunov forms pass. Godunov/Gaussian use scalar fallback, existing core/native specs select their tiled kernels |
+| Final-source launcher/native IO | All5 schemes pass15 serial NCCL jobs /20 rank reports: uninterrupted1-rank4-step reference versus2-rank2-step save +1-rank2-step resume; row cap3→1 and contract→exact, native files/state/clock/OU agree |
+| Runtime/static imports | 567 modules,6092 first-party imports,1316 source files; full check passes |
+
+Every two-step compatibility solver report includes nine variants and68 fresh
+RHS: the original three schemes, both native forced-filter replay controls, and
+GSPH/Inutsuka in2D/3D. Two matrix axes vary reconstruction order; scalar/global32
+controls compare each to its corresponding flat setting, not to a different
+reduction tree. There is no new tiled Godunov kernel or claim of bitwise parity
+between different lane settings. Native restart qualification here remains the
+small2D driven case;3D solver parity does not qualify3D restart.
+
+The formal checkpoint/process cohorts precede the final effective-lane metadata
+addition, and some initial CPU IO runs precede the last capture guard. Their
+manifests retain those source variants. Final operator/solver checks and all15
+repeated NCCL launcher jobs use the final source; their package file hashes are
+verified against the committed source contents. The first test helper-path error
+and its repair are retained in raw evidence. No numerical tolerance was relaxed.
+
+Wall times are diagnostic under ACSPH contention. Formal context/solver drivers
+were80.28s, context/native retry41.20s, core2.44s, checkpoint/launcher259.41s,
+legacy/scanner126.20s and core process/stress79.80s. After lane admission the four
+CPU FP64/int64 solver drivers took54.05s. Representative rank-zero contract/order2
+GSPH2D/3D takes0.82/1.67s for2 steps (408/834ms per step) on NCCL/int32;
+Inutsuka takes1.10/1.73s (551/863ms per step). These are correctness fixtures with
+control handshakes and a shared busy GPU, not throughput/scaling benchmarks.
+
+MFM/MFV/PESPH, walls/materials, chunked reverse/forward AD/JVP/HVP and graphs,
+physical multi-GPU/rank-to-device changes, site topology and capacity/scaling
+remain open. MPI/ROCm builds and L7 allocation/access gates remain deferred.
+L4–L6 have reached their bounded local exits. Broader Phase5/6 checkboxes below
+are deliberately still open. Evidence, commands, manifests, normalized ASTs,
+source snapshots and paired commit receipt: `.tmp/l6-compatibility-20261030/`.
 
 ## Phase 5 — remaining schemes and compatibility
 

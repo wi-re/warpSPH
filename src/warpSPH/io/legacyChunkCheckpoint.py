@@ -25,6 +25,8 @@ def fileFingerprint(path):
 def readLegacyCheckpoint(file,ctx,system,signature,device):
     """Read O(N) fields only; leave legacy J/I on disk for owned-slice checks."""
     from .chunkCheckpoint import _validateState
+    if getattr(ctx.scheme,'name',ctx.scheme) not in ('Monaghan','CRKSPH','CompSPH'):
+        raise NotImplementedError('Legacy chunk import currently qualifies Monaghan/CRKSPH/CompSPH only; use a native checkpoint for Godunov schemes.')
     from ..modules.forcing import FourierOU
     required=('checkpointVersion','checkpointSignature','checkpointCompletedSteps',
               'checkpointAdjacencyVersion','checkpointAdjacencyPresent','initialMass','initialEnergy','time')
