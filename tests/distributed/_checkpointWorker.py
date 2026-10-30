@@ -22,11 +22,19 @@ from warpSPH.enumTypes import AdaptiveSupportScheme
 from warpSPH.io.chunkCheckpoint import writeChunkedCheckpoint
 from warpSPHCore import SupportScheme,setNeighborLanes,get_torch_offset_dtype
 from warpSPHCore.distributed import RowChunkProcessGroup,DistributedContractError
-from warpSPHCore.radiusSearch import RowChunkPolicy,buildChunkedVerletList,ChunkedPairField
+from warpSPHCore.radiusSearch import RowChunkPolicy,buildChunkedVerletList,ChunkedPairField,ChunkedAdjacency
 
 
 def rowHashes(adjacency,communication,field=None):
     out=torch.zeros((adjacency.numRows,32),dtype=torch.uint8,device=communication.device)
+    if not isinstance(adjacency,ChunkedAdjacency):
+        assert communication.size==1,'flat legacy fixtures are serial only'
+        value=adjacency.paddedJ if field is None else field
+        for row in range(adjacency.numRows):
+            start,n=int(adjacency.edgeOffsets[row]),int(adjacency.numNeighbors[row])
+            raw=value[start:start+n].detach().cpu().contiguous().numpy().tobytes()
+            out[row]=torch.tensor(list(sha256(raw).digest()),dtype=torch.uint8,device=out.device)
+        return out.cpu()
     for index,chunk in enumerate(adjacency):
         a,m=chunk.adjacency,chunk.metadata
         value=a.paddedJ if field is None else field.buffers[index]
@@ -83,9 +91,13 @@ def run(args,communication):
                 supportMode=SupportScheme.SuperSymmetric,verletScale=config.verletScale)
         def forbidden(*a,**kw):
             raise AssertionError('restart constructed a monolithic neighbour list')
-        patch(importlib.import_module('warpSPHCore.radiusSearch.verlet.build'),'radiusSearchCompactHashMap_',forbidden)
-        patch(importlib.import_module('warpSPHCore.radiusSearch.compactHash.search'),'radiusSearchOnCompactHashMap',forbidden)
-        system=module.buildSPHSystem(ctx,neighborhoodFactory=factory)
+        if args.legacy:
+            assert communication.size==1
+            system=module.buildSPHSystem(ctx)
+        else:
+            patch(importlib.import_module('warpSPHCore.radiusSearch.verlet.build'),'radiusSearchCompactHashMap_',forbidden)
+            patch(importlib.import_module('warpSPHCore.radiusSearch.compactHash.search'),'radiusSearchOnCompactHashMap',forbidden)
+            system=module.buildSPHSystem(ctx,neighborhoodFactory=factory)
         sc=ctx.schemeConfig
         sc.adaptiveSupportScheme=AdaptiveSupportScheme.NoScheme
         sc.adaptiveSupportCorrections=args.scheme=='CompSPH'
@@ -104,7 +116,7 @@ def run(args,communication):
             result=native(system,*a,**kw)
             update=result[0]
             pw=getattr(system,'pairWork',None)
-            work=pw.work if pw is not None and isinstance(pw.work,ChunkedPairField) else None
+            work=pw.work if pw is not None and isinstance(pw.work,(ChunkedPairField,torch.Tensor)) else None
             communication.agree('test:work-present',work is not None)
             stages.append(dict(time=float(system.t),dvdt=update.dvdt.detach().cpu().clone(),
                 dudt=update.dudt.detach().cpu().clone(),rows=rowHashes(system.adjacency,communication),
@@ -116,8 +128,9 @@ def run(args,communication):
     if args.scheme in ('CRKSPH','CompSPH'):
         solver[('crk' if args.scheme=='CRKSPH' else 'comp')+'PairStorage']='recompute'
     simulation=dict(device=args.device,nx=8,dim=2,nSteps=args.steps,maxDt=.0002,
-        plot=False,video=False,store=False,storeMode='trajectory',quiet=True,show=False,
+        plot=False,video=False,store=False,storeMode='states' if args.legacy else 'trajectory',quiet=True,show=False,
         progress=True,velocityAlarmPlotInterval=1,stallProgress=1e-3,integrationScheme='rungeKutta4')
+    if args.legacy:simulation['neighborOmitI']=args.legacy=='csr'
     if args.action in ('resume','reject'):
         simulation['resumeFrom']=args.checkpoint
     configuration=RunConfiguration('drivenTurbulence',simulation=simulation,
@@ -128,7 +141,17 @@ def run(args,communication):
         for module,name,value in reversed(old):setattr(module,name,value)
     assert not result.diverged and result.nSteps==args.steps
     if args.action=='save':
-        writeChunkedCheckpoint(args.checkpoint,result.ctx,result.state)
+        if args.legacy:
+            from warpSPH.io.export import exportSimulationSystem
+            from warpSPH.cases.compressible.drivenTurbulence import checkpointSignature
+            result.ctx.scratch['checkpointSignature']=checkpointSignature(result.ctx)
+            path=Path(args.checkpoint)
+            export=path.parent/'legacy-export'
+            exportSimulationSystem(str(export),'checkpoint',result.ctx.scheme,result.state,
+                extraData=case.extraData(result.ctx,result.state))
+            (export/'trajectory/checkpoint.h5').replace(path)
+        else:
+            writeChunkedCheckpoint(args.checkpoint,result.ctx,result.state)
         if args.contracts:
             path=Path(args.checkpoint)
             before=sha256(path.read_bytes()).hexdigest()
@@ -176,6 +199,7 @@ def main():
     parser.add_argument('--checkpoint',required=True)
     parser.add_argument('--oracle',required=True)
     parser.add_argument('--output',required=True)
+    parser.add_argument('--legacy',choices=('csr','coo'))
     parser.add_argument('--contracts',action='store_true')
     parser.add_argument('--expect-error')
     parser.add_argument('--amplitude',type=float,default=.1)

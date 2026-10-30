@@ -537,6 +537,8 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         ctx.scratch['graphedDiagnostics'] = GraphedDiagnostics()
 
     if stepGraph is not None and ctx.config.compute.pipelineOutputs:
+        if case.acceptedStep is not None:
+            raise NotImplementedError('Accepted-step hooks require synchronous output; pipelined graph output is not qualified.')
         # Pipelined loop: step n+1 runs on the GPU while step n's diagnostics
         # and frame are computed (see `_runPipelined`); same values, same rows.
         runningState, stepResult = _runPipelined(
@@ -605,6 +607,8 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
             distributedStepEnd(ctx, runningState, rowCommunication, absStep)
         from ..io.chunkCheckpoint import markCheckpointBoundary
         markCheckpointBoundary(ctx, runningState, absStep + 1)
+        if case.acceptedStep is not None:
+            case.acceptedStep(ctx, runningState, absStep + 1)
 
         # the step time and max |v| (non-finite check, velocity alarm) in one host transfer
         with record_function("[runner] read time + max speed (non-finite check, velocity alarm)"):

@@ -218,8 +218,11 @@ def restoreChunkedCheckpoint(path,ctx,system):
     def read():
         from ..modules.forcing import FourierOU
         with h5py.File(path,'r') as file:
+            if 'rowChunkCheckpointVersion' not in file.attrs:
+                from .legacyChunkCheckpoint import readLegacyCheckpoint
+                return readLegacyCheckpoint(file,ctx,system,signature,device)
             if file.attrs.get('rowChunkCheckpointVersion')!=1 or file.attrs.get('complete')!=1:
-                raise ValueError('Unsupported or incomplete chunk checkpoint; legacy import is a separate gate.')
+                raise ValueError('Unsupported or incomplete native chunk checkpoint.')
             if file.attrs['physicalSignature']!=signature:
                 raise ValueError('Checkpoint physical/numerical configuration is incompatible.')
             if file.attrs['stateClass']!=type(system.state).__module__+'.'+type(system.state).__qualname__:
@@ -258,6 +261,9 @@ def restoreChunkedCheckpoint(path,ctx,system):
         communication.agree('checkpoint:read-content',(checksum,completed))
     adjacency=restoreRowChunkCheckpointState(recipe,device=device,policy=prior.plan.policy,
                                              communication=communication,storeI=prior.storeI)
+    if checksum.startswith('legacy:'):
+        from .legacyChunkCheckpoint import verifyLegacyPairs
+        _local(communication,'checkpoint:legacy-pairs',lambda:verifyLegacyPairs(path,adjacency,checksum))
     def install():
         system.state=state
         system.adjacency=adjacency

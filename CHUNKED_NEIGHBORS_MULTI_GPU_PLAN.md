@@ -2,7 +2,7 @@
 
 Plan index: [PLANS.md](PLANS.md). Parent physics programme: [driven compressible turbulence](docs/roadmap/driven_compressible_turbulence.md).
 
-Status, 2026-10-30: **Phase 4 bounded process proof of concept qualified; local L1 native restart qualified, legacy import next**.
+Status, 2026-10-30: **Phase 4 bounded process proof of concept qualified; local L1 restart and L2 launcher qualified; L3 communication overhead next**.
 The count/scan/ownership design is agreed in discussion. Core/main and frontend/dev
 are integrated; see the [integration report](docs/chunked_integration_2026-10-30.md).
 The planner and opt-in standalone single-device chunk construction/lifecycle are
@@ -24,7 +24,7 @@ the core carries a short companion pointer, `CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md
    qualified within the limits below. Use an explicit RowChunkProcessGroup with
    Gloo CPU or NCCL CUDA tensors; the isolated two-process/one-GPU runtime is
    available. J/W stay owned, with particle exchanges between dependent passes.
-   Continue L1 with legacy COO/CSR import, then L2 launcher/output below;
+   Continue L3 communication validation/overhead work below;
    physical devices/topology/Isambard and capacity/performance remain open.
    There is no runner chunk-budget CLI option; select the Python setup hook.
    Use explicit source paths; do not change global editable installs.
@@ -883,21 +883,24 @@ Complete these in the existing paired workspace while physical multi-GPU access
 is unavailable. Keep CPU/Gloo and bounded two-process shared-GPU NCCL controls;
 ACSPH contention means timing remains diagnostic. The ordering is deliberate.
 
-1. [ ] **L1 — accepted-step checkpoint/restart (native format qualified; legacy import open).** Save canonical particle,
+1. [x] **L1 — accepted-step checkpoint/restart (bounded native/legacy v1 scope qualified).** Save canonical particle,
    exact time/timestep, forcing/generator/budget state and sufficient frozen search
    history to reconstruct owned J without exporting global J/W. Qualify changed
    chunk budgets and 1/2/3 CPU ranks, plus 1/2 NCCL ranks on one GPU. Compare
    uninterrupted versus restarted fresh stages, physical fields, pair order and
    forcing history; cover interrupted/corrupt writes and physical-policy mismatch.
    The versioned native recipe and changed int32-to-int64 local offsets now pass.
-   Old COO/CSR import and its ordering/offset conversion remain explicit gates.
-2. [ ] **L2 — launcher/output.** Explicit rank/device/chunk configuration, rank-zero
+   Version-1 COO/CSR import and ordering/offset conversion now pass within the
+   qualified scope below; other legacy/search policies and physical devices remain gated.
+2. [x] **L2 — local launcher/output (site validation open).** Explicit rank/device/chunk configuration, rank-zero
    diagnostics/checkpoint output, source-pinned run manifests, meaningful failure
    reporting and locally checked Isambard submission templates. Final site launch
    validation still requires Isambard. Keep storage and solver code independent
    of the communicator. NCCL is implemented; optional MPI should require adapter/
    capability/failure tests rather than SPH kernel changes. The current Torch
-   build has no MPI backend. Distinguish MPI rank launching with NCCL payloads
+   build has no MPI backend. User decision (2026-10-30): defer MPI-enabled and
+   ROCm-enabled Torch builds; continue the local sequence on the existing stack.
+   Distinguish MPI rank launching with NCCL payloads
    from an MPI data backend; do not replace/build shared packages for this task.
 3. [ ] **L3 — communication overhead.** Separate exhaustive replica hashing from
    normal validation, combine exchanges where dependencies allow, reuse metadata/
@@ -1004,6 +1007,115 @@ open. This checkpoint does not qualify cross-device-type restarts, AD/graphs,
 walls/materials or schemes beyond the stated native driven scope.
 Implementation provenance: core `e740b76`; frontend is the commit containing this checkpoint.
 
+### L1 legacy import and L2 local launcher checkpoint (2026-10-30)
+
+User decision: MPI-enabled and ROCm-enabled Torch builds are deferred. The local
+sequence continues on the existing CPU/Gloo and isolated NCCL 2.32.3 stack; no
+shared packages or ACSPH sources/installs changed.
+
+L1 now imports version-1 driven SPH COO and CSR files into owned row chunks.
+`rowChunkCheckpointRecipe` encodes explicit frozen inputs without accepting pair
+arrays. The frontend legacy adapter reads O(N) snapshots/counts/offsets, validates
+the offset scan in int64, reconstructs under the target policy/group, and compares
+each owned J slice with the file before installing the state. Optional COO row IDs
+and padding sentinels are checked too. No global pair tensor, flat compatibility
+list or pair migration is constructed. Raw whole-file fingerprints use fixed
+host blocks to detect cross-rank/file changes during import; legacy files have
+no original checksum, so this does not detect arbitrary finite particle-state
+corruption that occurred before import. Expanded per-edge stage-state files,
+missing history, unknown formats and incompatible reconstructed ordering reject.
+
+These old files lack mode/Verlet-scale metadata. The caller must supply the
+matching original physical/search configuration, as in the existing flat restore
+path; target config supplies mode/scale and saved scaled supports remain frozen.
+Qualification uses the default search policy in bounded 2D controls. Other legacy
+policies/versions, physical multiple-device restart and broad 3D import remain
+separate qualifications. The seed-list startup overlap noted above remains.
+
+L2 adds `warpSPH.distributedRun.runDistributed(configuration, communication,
+outputDirectory=..., edgeBudget=..., maxRows=..., checkpointEvery=...)` and
+`scripts/run_distributed.py`. The Python API accepts an existing explicit group;
+the CLI initializes/destroys c10d with a finite timeout. Ordinary runner defaults
+and existing run documents remain unchanged. The adapter currently selects eager
+driven Monaghan/CRKSPH/CompSPH, with owned initialization/search from the start.
+Native numerical/support choices come from the run document, including the
+default Owen support policy; the adapter does not force a numerical preset.
+
+An optional appended `Case.acceptedStep` output hook runs after the case's
+postStep/timestep hooks and distributed accepted-state validation. Periodic and
+final native checkpoints use the existing accepted-boundary writer. Rank zero
+owns diagnostics JSONL and the global manifest; ranks write separate runtime,
+communication and failure reports. Output directories must be fresh and shared.
+Manifests include active frontend/core/integrator Python file hashes, available
+Git heads, input configuration, rank/device/PID/host placement, dtype/offset width,
+Torch/Warp/CUDA and actual loaded NCCL provenance. Git heads alone do not assert
+that an uncommitted working tree matches that commit; active file hashes identify
+what ran. The actual entrypoint path/hash is recorded in rank runtime metadata.
+Accepted-step hooks explicitly reject pipelined graph output rather than being
+silently skipped. Logical adjacency storage and sampled Torch allocation are not native/
+driver/process peaks. Hard rank death still relies on c10d timeouts and torchrun;
+no new collectives are entered in the failure-reporting exception path.
+
+Example local CPU launch, with paired `src` paths in PYTHONPATH and a versioned
+JSON RunConfiguration that disables ordinary store/plot/video and selects eager:
+
+```bash
+python -m torch.distributed.run --standalone --nproc-per-node=3 \
+  scripts/run_distributed.py --configuration case.json --backend gloo \
+  --output /absolute/fresh/shared-output --edge-budget 1048576 \
+  --max-rows 512 --checkpoint-every 100 --offset-dtype int64
+```
+
+Production NCCL maps LOCAL_RANK to a distinct visible GPU. The explicit
+`--shared-gpu` debug exception selects cuda:0 and requires NCCL >=2.30, the
+experimental enable environment variable and at most two local ranks. Continue
+to use the isolated overlay and low CTA/NVLS settings above for local shared-GPU
+checks. Set the input document's `simulation.precision` before launch (float32 or
+float64); the CLI selects it and the offset width before importing the stack.
+Set `simulation.resumeFrom` to a checkpoint and use a fresh output directory to
+continue with another budget/rank count. Launcher output overrides use its own
+checkpoint path and rank-zero progress, keeping the legacy serializer disabled.
+
+`scripts/slurm/chunked_driven.slurm` is a template with explicit environment
+inputs for paired source paths, target Python, configuration/output, GPU count
+and edge budget. It launches one torchrun parent per allocated node, quotes paths
+and derives rendezvous from the Slurm node list/job ID. It passes bash syntax and
+mocked remote argument-expansion checks including paths with spaces. No submission,
+site module/resource/network setup or Arm64/GH200 execution has been qualified.
+
+|Control|Result|
+|---|---|
+|Legacy COO/CSR CPU FP32|6 scheme/layout drivers pass; serial legacy files -> 3 owned ranks, int32/int64 source offsets; malformed scan/J/I reject|
+|Legacy CPU FP64|CRKSPH both layouts and 14 recipe checks pass; 14 expected CUDA skips|
+|Legacy shared-GPU NCCL FP32|6 serial jobs / 8 rank reports / 80 RHS evaluations pass; CRK CSR int32→int64 and Comp COO int64→int32, 1→2 ranks|
+|Recipe CUDA after encoder refactor|14 pass per offset width|
+|Native-format restart nonregression|3 scheme drivers + 14 core cases pass, 14 CUDA skips|
+|Launcher CPU FP32|3 scheme lifecycle drivers pass: 1-rank uninterrupted, 2-rank save, 3-rank resume under changed budgets; exact final particles/time/dt/OU, one diagnostics row per accepted step plus initial row|
+|Launcher shared-GPU NCCL FP32|9 serial jobs / 12 rank reports pass for all 3 schemes: 1-rank uninterrupted, 2-rank save, 1-rank resume; exact final particles/time/dt/OU; runtime23203 and shared UUID recorded|
+|Output/failure controls|Periodic accepted checkpoints, final save, preserved existing directory and coordinated capacity failure with rank error reports and no final checkpoint pass|
+|Existing chunked search/operators/native work|332 CPU passes, 251 expected skips|
+|Final hook / legacy old-runner regression|8 pass (launcher CRKSPH lifecycle and 7 old checkpoint tests); Case hook appended to preserve existing positional fields|
+|Runtime imports|566 modules pass; inherited static-scanner issue remains documented above|
+
+Tiny 64-particle A/Bs omit video, retain progress/stall/velocity controls and run
+serially on the GPU. CPU legacy drivers took154.88s total, launcher drivers94.68s;
+native restart/core82.23s and legacy FP64/core54.22s are overlapping controls.
+NCCL launcher rank-zero wall times are2.85–31.24s including setup/IO; all timings
+are diagnostic under contention, hashing and process/IO overhead. No throughput
+or physical capacity claim follows.
+
+L3 baseline: the two-step shared-GPU launcher fixtures recorded980 CRKSPH,
+740 CompSPH and1069 Monaghan control handshakes per rank at the report snapshot,
+including initialization, exhaustive hashing and checkpoint/output controls.
+Counters precede final report publication. This confirms substantial control/
+hash overhead to address next; timings must not be used to rank transports.
+Next: separate exhaustive replica hashing from normal validation, then combine
+metadata/particle exchanges and reuse buffers while retaining exact-mode failure
+and numerical controls. L4–L7 and physical-device/site gates remain open.
+
+Evidence and reproducible scripts: frontend `.tmp/local-continuation-20261030/`.
+Implementation provenance: core `7c09724`; frontend is the commit containing this checkpoint.
+
 ## Phase 5 — remaining schemes and compatibility
 
 - [ ] Inutsuka list variants and MFM/MFV geometry/kappa/closure workspaces, including
@@ -1012,8 +1124,10 @@ Implementation provenance: core `e740b76`; frontend is the commit containing thi
 - [x] Native accepted-step checkpoint/restart across chunk budgets and local
   process counts: canonical particle/forcing/time state, reconstructed owned
   adjacency and int32-to-int64 local offsets, within the L1 scope above.
-- [ ] Old COO/CSR checkpoint import and physical GPU-count changes; persist only
-  needed history metadata, never create a global pair tensor for checkpointing.
+- [x] Bounded version-1 COO/CSR import with owned pair-order verification and
+  int32/int64 local offsets. Other legacy policies/versions remain unqualified.
+- [ ] Physical GPU-count changes and larger/broader restart qualification; persist
+  only needed history metadata, never create a global pair tensor for checkpointing.
 - [ ] Legacy flat and all scheme families remain covered. Qualify graph cache keys,
   pointer stability, rebuild recapture, backward/JVP/HVP and prepared launches
   separately. Initially reject unsupported chunked AD/graph/wall contexts clearly

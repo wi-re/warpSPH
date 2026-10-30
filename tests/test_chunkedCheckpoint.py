@@ -50,3 +50,23 @@ def test_accepted_restart_changes_budget_rank_count_and_offset(tmp_path,scheme,s
             file['state/velocities'][0,0]+=.01
         launch(tmp_path,'reject',scheme,2,2,'int64',checkpoint=corrupt,extra=('--expect-error','checksum mismatch'))
         launch(tmp_path,'reject',scheme,2,2,'int64',extra=('--amplitude','.2','--expect-error','configuration is incompatible'))
+
+
+@pytest.mark.skipif(not dist.is_gloo_available(),reason='Gloo required')
+@pytest.mark.parametrize('scheme', ['CRKSPH','CompSPH','Monaghan'])
+@pytest.mark.parametrize('layout,sourceOffset', [('csr','int32'),('coo','int64')])
+def test_import_legacy_csr_coo_without_global_pair_read(tmp_path,scheme,layout,sourceOffset):
+    extra=('--legacy',layout)
+    launch(tmp_path,'reference',scheme,1,4,sourceOffset,steps=4,extra=extra)
+    launch(tmp_path,'save',scheme,1,3,sourceOffset,extra=extra)
+    launch(tmp_path,'resume',scheme,3,1,'int64')
+    if scheme=='CRKSPH' and layout=='coo':
+        for name,field,text in [('offsets','edgeOffsets','Invalid legacy CSR offsets'),
+                                ('pairs','paddedJ','pair order/content'),
+                                ('rows','paddedI','COO row IDs')]:
+            corrupt=tmp_path/(name+'.h5')
+            shutil.copy2(tmp_path/'checkpoint.h5',corrupt)
+            with h5py.File(corrupt,'r+') as file:
+                dataset=file['dict_sourceAdjacency/'+field]
+                dataset[0]=-1
+            launch(tmp_path,'reject',scheme,2,2,'int64',checkpoint=corrupt,extra=('--expect-error',text))

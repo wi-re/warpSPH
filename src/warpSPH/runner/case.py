@@ -155,6 +155,9 @@ class Case:
     #: Restore case-owned forcing, budget references and timestep history.
     restoreCheckpoint: Optional[Callable[[RunContext, Any, Any], None]] = None
 
+    #: (ctx, system, completedSteps) -> None, after postStep/timestep and
+    #: distributed accepted-state validation. Intended for accepted-state output.
+    acceptedStep: Optional[Callable[[RunContext, Any, int], None]] = None
 
 _REGISTRY: Dict[str, Case] = {}
 
