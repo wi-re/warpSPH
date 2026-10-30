@@ -12,6 +12,19 @@ priority decision does not start new runs or change numerical defaults.
 ## Lobovsky comparison — 2026-10-27 (active)
 
 
+**Pressure-video campaign dispatched (2026-10-30):** new root
+.tmp/acsph-michel-pressure-video-2026-10-30, supervisor1225912,994 frozen files
+at frontend20dfce4 / Remote f2dbd2f (Core/Integrators/Plotting unchanged).
+30 focused CPU checks pass. Existing7 GPU gates pass, including historical
+oracle, exact original ICs, graph/eager transport/BDF and publisher parity.
+Final real pressure-video gate is initialized/paused at t=0: run
+ ae118b2ca8724402a6dda88e38060fac, job0fe6e568c5094faba9bea0f8f6830957.
+Existing external viewer owns the connection but has not consumed the job.
+The new recording tab is connected with saved pairing/auto-watch; it reports a
+lease conflict and does not take over. Asked user to reload the existing local
+viewer or authorize recording-tab takeover. Queue waits safely on the initial
+frame; no full trajectory has started. Previous root/prefixes remain intact.
+
 **Pressure-recorded relaunch authorized (2026-10-30, user):** relaunch
 three original-IC Michel/remap/BDF controls with the new recording mechanism.
 No active run or leased viewer at dispatch. Prepare a new frozen root; preserve
