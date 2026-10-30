@@ -2,11 +2,12 @@
 
 Plan index: [PLANS.md](PLANS.md). Parent physics programme: [driven compressible turbulence](docs/roadmap/driven_compressible_turbulence.md).
 
-Status, 2026-10-30: **Phase 1 CPU reference planner qualified; Phase 2 next**.
+Status, 2026-10-30: **Phase 2 single-device construction/lifecycle qualified; Phase 3 next**.
 The count/scan/ownership design is agreed in discussion. Core/main and frontend/dev
 are integrated; see the [integration report](docs/chunked_integration_2026-10-30.md).
-The CPU reference planner is implemented and tested. Production chunk collection,
-distributed execution and physical multi-GPU qualification remain open.
+The planner and opt-in standalone single-device chunk construction/lifecycle are
+qualified on CPU/CUDA. Native solver dispatch, compatible pair work, distributed
+execution and physical multi-GPU qualification remain open.
 This document is the canonical implementation/handoff plan for both repositories;
 the core carries a short companion pointer, `CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md`.
 
@@ -16,8 +17,10 @@ the core carries a short companion pointer, `CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md
    merge and focused CPU/CUDA gates are complete; read the integration report.
 2. Use the active paired workspace below. Chunked neighbours first, then
    multi-GPU execution continue sequentially in these same checkouts.
-3. Phase1 is CPU-qualified. Start Phase2 with direct owned-row count/collection
-   and a chunked adjacency container, preserving traversal and acceptance rules.
+3. Phase1/2 are qualified within the limits below. Start Phase3 by threading
+   row ownership through shared operators and all query/reference field bundles;
+   bring up support/density/corrections/gradients and a simple eager scheme before
+   native CRK/CompSPH compatible work. Preserve lanes and fresh stages.
    Use explicit source paths; do not change global editable installs.
 4. Keep the existing turbulence worktree available for ordinary single-GPU
    physics through128^3, subject to a short readiness/memory check. No such
@@ -211,10 +214,11 @@ and conservatively bound the largest flattened scalar work array by INT_MAX.
 Callers must account for every colocated pair buffer in bytesPerEdge. Particle
 fields, row metadata, grids and communication staging need separate accounting.
 
-This is a host reference for the ownership contract, not the production replicated
-device scan or a large-N memory/performance qualification. No CLI/backend switch,
-chunked search, resident adjacency, graph/AD integration or distributed transport
-has been enabled. Physical CUDA accesses above INT_MAX remain unqualified.
+At the Phase1 checkpoint this was a host reference for the ownership contract.
+Phase2 adds standalone search and resident adjacency below. The production
+replicated device planner, large-N memory/performance, native solver dispatch,
+graph/AD and distributed transport remain open; physical CUDA accesses above
+INT_MAX remain unqualified.
 
 Validation: 59 planner controls (including 1024 exhaustive small count layouts)
 pass in both offset configurations. Combined with the existing index-width,
@@ -239,25 +243,137 @@ python -m pytest -q -p no:cacheprovider \
 Local evidence/provenance: frontend `.tmp/row-chunk-planner-20261030/`.
 Core implementation commit: `9a1057e` (on integrated base `04e126e`). Paired
 source pins are recorded in `workspace-imports.json`; frontend's handoff commit
-follows this core commit. Next: direct count/collect
-into per-chunk J, with exact flat-oracle row parity, reuse and invalidation gates.
+follows this core commit. The next direct count/collect and lifecycle milestone
+is qualified below.
 
 ## Phase 2 — direct chunk collection and lifecycle (core, one GPU)
 
-- [ ] Add owned-row/global-row-base inputs to count/collect without changing
+- [x] Add owned-row/global-row-base inputs to count/collect without changing
   neighbour acceptance or traversal order. Count first; allocate local buffers;
   collect directly. No monolithic intermediate J or reconstructed I.
-- [ ] Add a chunked adjacency container/iterator and connect validity, filters,
+- [x] Add a chunked adjacency container/iterator and connect validity, filters,
   capacity reuse, rebuild flags and generation tracking. Preserve the flat API
   for existing callers. Explicit diagnostics may request bounded/chunked export;
   do not hide a giant concatenation behind a compatibility property.
-- [ ] Force tiny budgets on ordinary2D/3D cases. Compare every live J/count/offset
+- [x] Force tiny budgets on ordinary2D/3D cases. Compare every live J/count/offset
   against the existing flat oracle, including periodic seams, unequal query/ref
   populations, all support modes and both stored-I/CSR-only contexts where supported.
   Use allocation/ownership checks to prove local construction and stable reuse.
 
 Exit: exact order/content and count/collect consistency, correct invalidation,
 no full-edge allocation, visible temporary/retained memory accounting.
+
+### Qualified standalone API and limits (2026-10-30)
+
+Core implementation: `31bc041`, following Phase1 `9a1057e`. New module
+`radiusSearch/chunked.py` exports `ChunkedAdjacency`, `OwnedRowChunk`,
+`radiusSearchRowChunks[_]`, `buildChunkedVerletList[_]`,
+`filterChunkedVerletList[_]` and `chunkedVerletStaleFlag_`. These APIs and the
+planner types are exported from the core root; they are explicitly opt-in.
+There is no frontend backend switch or automatic solver dispatch yet.
+
+The existing count/J-only collect/filter kernels receive query-position,
+query-support and CSR-row slices together; references and J IDs stay global.
+Host row bases define each owned interval. The only new Warp kernel fills optional
+stored I with global query IDs. Traversal, acceptance, periodic wrapping, support
+rules and per-row J ordering remain unchanged. Each generation freezes private
+particle/domain snapshots before counting and collection. Counts synchronize to
+the host reference planner at rebuild; the device also scans C into int64 P.
+Local offsets subtract their global base in int64 before conversion to the
+configured local offset width. Qualification uses int32 particle IDs/counts,
+int32/int64 local offsets, FP32 CPU/CUDA and FP64 CPU.
+
+`ChunkedAdjacency` has no global paddedJ/paddedI or implicit flattening property.
+Iterate its owned chunks explicitly. Chunk adjacency row metadata is local;
+source IDs and optional stored I are global. Do not pass these small adjacency
+objects to unmodified global-row operators. `numOwners`/`owner` on explicit
+search provide a single-device logical-owner fixture: all count intervals are
+evaluated on that device, and only the selected owner's J is allocated. This
+does not implement distributed counting or communication. Resident Verlet
+lifecycle and filtering currently require one complete owner.
+
+Resident lists return the same object while the existing motion/support validity
+reduction accepts them. Forced rebuilds, motion/support changes beyond the validity buffer, and changes
+to domain, support mode, scale, population, layout, budget or ordering key advance
+generation/configuration metadata. Default rebuilds preserve old buffers;
+explicit inPlace reuses pair/local-offset storage only for identical row intervals,
+capacities and compatible layouts. It obsoletes old pair/CSR views; snapshots are
+fresh. There is no maximal-capacity retention/shrink heuristic yet. Native W
+accumulation/replay/migration across a rebuild is still Phase3 work.
+
+Filtering checks validity first, then counts directly over source chunks and
+collects each source/destination row overlap into the destination's local J.
+It handles both merged and split chunk boundaries without assembling global pairs
+or reconstructing CSR-only I. Filtered views record the source signature and
+cannot be reused as resident Verlet supersets. A stale source fails before collect.
+Callers must advance orderingKey when externally changing particle identity/order.
+AD, deferred checks and CUDA graph capture fail explicitly; no flat fallback is
+selected. Tensor-valued Verlet scales and distributed lifecycle remain unsupported.
+
+Memory diagnostics report owned live/capacity pair bytes, policy-reserved pair
+bytes, replicated/per-chunk row metadata, unique snapshots, host prefix bytes and
+the grid/wrapped-query scratch frontier. These are logical storage measurements,
+not allocator/process peaks or every intermediate of grid construction. Allocation
+spies prove direct bounded J allocation and absent CSR-only I; resident and forced
+rebuild controls prove reuse. Single-GPU resident chunking still retains all its
+owned pair bytes; large-resolution fit and throughput remain Phase6 gates.
+
+Validation (zero test failures/errors in the final gates):
+
+|Gate|Passed|Skipped|Wall seconds|
+|---|---:|---:|---:|
+|Full core radiusSearch, CPU FP32/int32 offsets|487|521|5.10|
+|Full core radiusSearch, CPU FP32/int64 offsets|488|520|5.01|
+|New chunk search/lifecycle, CPU FP64/int64 offsets|186|187|7.19|
+|CUDA chunk matrix, int32 offsets|173|1|21.91|
+|CUDA chunk matrix, int64 offsets|173|1|40.80|
+|Final fresh-field/wrapper extension, CPU+CUDA/int32|28|0|4.12|
+|Final fresh-field/wrapper extension, CPU+CUDA/int64|28|0|3.84|
+|Frontend CSR/native-work/lanes/driving compatibility, CPU/int64|73|2|383.86|
+
+The CUDA matrix plus final extension cover 186 distinct CUDA cases per offset
+setting (the extension repeats one wrapper control). CPU-only suites skip CUDA
+controls; the CUDA matrix also selects the CPU variant of the CUDA-stream test,
+which intentionally skips. All six support modes, 2D/3D, periodic seams and
+out-of-domain images, unequal populations, empty rows/populations/owners,
+headroom, global row identity, input freezing, signature disagreement, source
+invalidity, capacity changes, fresh physical filter fields and nondefault CUDA
+streams are exercised. Existing flat operator/gradient contexts remain covered
+by the frontend compatibility controls. The new kernel is integer I fill; no
+floating numerical kernel or model formula changed. Chunked AD is rejected.
+
+These are bounded automated fixtures, without videos; no new flow campaign or
+solver throughput benchmark was run. CUDA jobs were serial and the GPU was shared
+with an existing workload; wall times include JIT/cache/test overhead and are
+not comparable solver performance measurements.
+
+Runtime import verification passes all 561 frontend modules against the paired
+sources. The combined/static scanner still crashes at
+`warpSPH.modules.incompressible.wp_alpha.computeAlpha` (`find_spec` on a module
+without __path__). The identical crash reproduces with untouched core `04e126e`;
+it is an inherited validation limitation, not a passing static check or a fix in
+this change. Its baseline traceback and the initial fixture-construction failure
+are retained with the final evidence.
+
+Reproduce with explicit paired source PYTHONPATH, the conda Python above,
+`OMP_NUM_THREADS=2`, `PYTHONDONTWRITEBYTECODE=1`, a writable `WARP_CACHE_PATH`,
+`NUMBA_CACHE_DIR` and `MPLCONFIGDIR`. Select offsets/precision before imports;
+set `CUDA_VISIBLE_DEVICES=''` for CPU-only gates. Main core commands:
+
+```bash
+python -m pytest -q -p no:cacheprovider tests/radiusSearch
+python -m pytest -q -p no:cacheprovider tests/radiusSearch/test_chunkedSearch.py -k cuda
+python -m pytest -q -p no:cacheprovider tests/radiusSearch/test_chunkedSearch.py \
+  -k 'fresh_particle_fields or particle_wrapper'
+```
+
+Frontend gates: `test_compressibleCSR.py`, `test_crkSharedWork.py`,
+`test_compSharedWork.py`, `test_compSPHPairWork.py`, `test_neighborLanes.py` and
+`test_drivenTurbulence3D.py`, plus `scripts/check_imports.py --runtime`.
+Evidence/provenance/commands: frontend `.tmp/chunked-search-20261030/`.
+Shared editable installs and the physics worktrees remain unchanged by this work.
+Next: shared operator dispatch with full query/reference mapping, then simple
+eager solver parity and native compatible W with pinned pair identity/stages.
 
 ## Phase 3 — shared operators and native compatible work (both repos)
 
