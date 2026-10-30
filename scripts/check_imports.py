@@ -188,6 +188,7 @@ def static_pass(verbose: bool) -> list[Failure]:
                 module_cache[module] = None
         return module_cache[module]
 
+    absentOptional: dict[str,bool] = {}
     checked = 0
     skippedOptional = 0
     for path in files:
@@ -209,18 +210,28 @@ def static_pass(verbose: bool) -> list[Failure]:
             checked += 1
             if verbose:
                 print(f"          {rel}:{lineno} {module} {symbols or ''}")
+            lookupError = None
             try:
                 spec = importlib.util.find_spec(module)
-            except (ImportError, AttributeError, ValueError) as exc:
+            except Exception as exc:
                 spec = None
-                if verbose:
-                    print(f"            find_spec raised: {exc}")
-            if spec is None and module.split(".")[0] in OPTIONAL_PACKAGES:
-                skippedOptional += 1
-                continue
+                lookupError = exc
+            root = module.split(".")[0]
+            if spec is None and root in OPTIONAL_PACKAGES:
+                if root not in absentOptional:
+                    try:
+                        absentOptional[root] = importlib.util.find_spec(root) is None
+                    except Exception:
+                        absentOptional[root] = False
+                # Missing children of an installed optional package are errors.
+                if absentOptional[root]:
+                    skippedOptional += 1
+                    continue
             if spec is None:
+                detail = (f"{type(lookupError).__name__}: {lookupError}"
+                          if lookupError is not None else "module not found")
                 failures.append(
-                    Failure(f"{rel}:{lineno}", f"no module named {module!r}", "module not found")
+                    Failure(f"{rel}:{lineno}", f"no module named {module!r}", detail)
                 )
                 continue
             if not symbols:

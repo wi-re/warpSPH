@@ -20,6 +20,7 @@ mapfile -t task_nodes < <(scontrol show hostnames "$SLURM_JOB_NODELIST")
 export MASTER_ADDR="${task_nodes[0]}"
 export MASTER_PORT="${MASTER_PORT:-$((20000 + SLURM_JOB_ID % 40000))}"
 export OFFSET_DTYPE="${OFFSET_DTYPE:-int32}"
+export REPLICA_CHECKS="${REPLICA_CHECKS:-exact}"
 export CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-0}"
 srun --ntasks="$SLURM_NNODES" --ntasks-per-node=1 bash -c '
   exec "$PYTHON" -m torch.distributed.run --nnodes "$SLURM_NNODES" \
@@ -28,5 +29,5 @@ srun --ntasks="$SLURM_NNODES" --ntasks-per-node=1 bash -c '
     --rdzv-endpoint "$MASTER_ADDR:$MASTER_PORT" \
     "$FRONTEND_ROOT/scripts/run_distributed.py" --configuration "$CONFIGURATION" \
     --backend nccl --output "$OUTPUT" --edge-budget "$EDGE_BUDGET" \
-    --offset-dtype "$OFFSET_DTYPE" --checkpoint-every "$CHECKPOINT_EVERY"
+    --offset-dtype "$OFFSET_DTYPE" --checkpoint-every "$CHECKPOINT_EVERY" --replica-checks "$REPLICA_CHECKS"
 '

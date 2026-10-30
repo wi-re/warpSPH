@@ -12,6 +12,8 @@ import sys
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--configuration',type=Path,required=True)
+    parser.add_argument('--replica-checks',choices=('exact','contract'),default='exact',
+                        help='Exact hashes at every operator, or layout contracts with exact boundary checks')
     parser.add_argument('--backend',choices=('gloo','nccl'),required=True)
     parser.add_argument('--output',type=Path,required=True,help='Fresh shared output directory')
     parser.add_argument('--edge-budget',type=int,required=True)
@@ -57,7 +59,7 @@ def main():
         device=torch.device('cpu')
     dist.init_process_group(args.backend,timeout=timedelta(seconds=args.timeout_seconds))
     try:
-        communication=RowChunkProcessGroup(dist.group.WORLD,device)
+        communication=RowChunkProcessGroup(dist.group.WORLD,device,replicaChecks=args.replica_checks)
         runDistributed(RunConfiguration.fromDict(document),communication,outputDirectory=args.output,
             edgeBudget=args.edge_budget,maxRows=args.max_rows,checkpointEvery=args.checkpoint_every)
     finally:

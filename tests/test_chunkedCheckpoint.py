@@ -40,7 +40,7 @@ def test_accepted_restart_changes_budget_rank_count_and_offset(tmp_path,scheme,s
         names=[]
         file.visit(names.append)
         assert not any(name.split('/')[-1] in ('paddedJ','paddedI','edgeOffsets','W','work') for name in names)
-    launch(tmp_path,'resume',scheme,targetRanks,1,'int64')
+    launch(tmp_path,'resume',scheme,targetRanks,1,'int64',extra=('--replica-checks','contract'))
     if scheme=='CRKSPH':
         # One large chunk -> two empty compute owners, including empty W buffers.
         launch(tmp_path,'resume',scheme,3,80,'int64',extra=('--edge-budget','8192'))

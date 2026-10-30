@@ -191,6 +191,7 @@ def run(args,communication):
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--action',choices=('reference','save','resume','reject'),required=True)
+    parser.add_argument('--replica-checks',choices=('exact','contract'),default='exact')
     parser.add_argument('--device',default='cpu')
     parser.add_argument('--scheme',default='CRKSPH')
     parser.add_argument('--steps',type=int,default=2)
@@ -206,7 +207,7 @@ def main():
     args=parser.parse_args()
     if args.device.startswith('cuda'):torch.cuda.set_device(torch.device(args.device))
     dist.init_process_group('nccl' if args.device.startswith('cuda') else 'gloo',timeout=timedelta(seconds=45))
-    communication=RowChunkProcessGroup(dist.group.WORLD,args.device)
+    communication=RowChunkProcessGroup(dist.group.WORLD,args.device,replicaChecks=args.replica_checks)
     setNeighborLanes(1)
     try:
         stream=torch.cuda.Stream(device=communication.device) if communication.device.type=='cuda' else None

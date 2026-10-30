@@ -2,7 +2,7 @@
 
 Plan index: [PLANS.md](PLANS.md). Parent physics programme: [driven compressible turbulence](docs/roadmap/driven_compressible_turbulence.md).
 
-Status, 2026-10-30: **Phase 4 bounded process proof of concept qualified; local L1 restart and L2 launcher qualified; L3 communication overhead next**.
+Status, 2026-10-30: **Phase 4 bounded process proof of concept qualified; local L1 restart and L2 launcher qualified; L3 control/hash reduction qualified; payload/workspace work next**.
 The count/scan/ownership design is agreed in discussion. Core/main and frontend/dev
 are integrated; see the [integration report](docs/chunked_integration_2026-10-30.md).
 The planner and opt-in standalone single-device chunk construction/lifecycle are
@@ -19,7 +19,7 @@ the core carries a short companion pointer, `CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md
 The previously recorded wp_alpha.computeAlpha `find_spec` traceback is fixed.
 Missing symbols on regular modules now produce normal diagnostics; only packages
 are searched for child modules, and child-lookup errors do not abort the scan.
-Three focused scanner regressions pass. The full check now imports566 modules
+Five focused scanner regressions pass. The full check now imports566 modules
 and checks6063 first-party imports across1314 files with no failures.
 The five real stale imports exposed after fixing the exception were resolved:
 two old pressure-solver notebooks are clearly labeled archival source listings
@@ -917,7 +917,7 @@ ACSPH contention means timing remains diagnostic. The ordering is deliberate.
    ROCm-enabled Torch builds; continue the local sequence on the existing stack.
    Distinguish MPI rank launching with NCCL payloads
    from an MPI data backend; do not replace/build shared packages for this task.
-3. [ ] **L3 — communication overhead (active; scanner prerequisite resolved).** Separate exhaustive replica hashing from
+3. [ ] **L3 — communication overhead (control/hash slice qualified; active).** Separate exhaustive replica hashing from
    normal validation, combine exchanges where dependencies allow, reuse metadata/
    particle scratch and reduce unnecessary host waits. Prove correctness, buffer
    lifetimes and fewer operations/allocations locally; defer throughput claims.
@@ -1130,6 +1130,100 @@ and numerical controls. L4–L7 and physical-device/site gates remain open.
 
 Evidence and reproducible scripts: frontend `.tmp/local-continuation-20261030/`.
 Implementation provenance: core `7c09724`; frontend is the commit containing this checkpoint.
+
+### L3 control/validation checkpoint (2026-10-30)
+
+The first L3 slice is qualified on CPU/Gloo and bounded shared-GPU NCCL. It
+reduces debug/coordination work without changing numerical kernels, payload
+broadcast order, scalar reduction arithmetic, Butcher stages or owned J/W.
+
+`RowChunkProcessGroup(..., replicaChecks='exact')` remains the default. Exact
+mode retains the existing operator-input fingerprints (owned pair buffers and
+unread scratch remain excluded). Explicit
+`replicaChecks='contract'` (CLI `--replica-checks contract`, Slurm
+`REPLICA_CHECKS=contract`) validates operator tensor layout/device/AD and operation
+contracts without copying every field to CPU for a content hash. Both modes
+force exact agreement at search/rebuild, initial/accepted-state and checkpoint
+boundaries, plus the existing source clock/generator contract. Select the same
+mode on every rank when constructing the group; the mode is part of every
+control digest. Checkpoints can resume under a different mode in a fresh job.
+
+Contract mode assumes the dependency schedule maintains replica contents during
+an RHS evaluation. It deliberately does not detect every transient corruption
+of a reference/correction field before owner outputs are mixed; exact mode is
+the debugging choice for that guarantee. Exact boundary checks are not a claim
+of equivalent fault detection inside each stage. AD/capture and other previously
+unsupported contexts remain rejected.
+
+Control send/receive storage is allocated once per group; CUDA also retains
+pinned host staging. Gathered packets share a contiguous receive tensor, with
+cached peer views and one explicit blocking device-to-host packet copy, replacing
+one allocating host copy per peer. The host read completes before a buffer can
+be reused on another current stream. This is a serial eager interface, not a
+concurrent-thread/async-control API. Persistent packet storage is1.5KiB on CPU or
+3KiB across CUDA/host for two ranks (native/backend workspace excluded).
+
+A fused local-validation/JSON-contract handshake preserves coordinated exceptions
+while removing redundant validation acknowledgements. Scalar validation and
+clone allocation now precede one handshake; operator metadata is similarly
+combined. All particle outputs from an operator are validated in one ordered
+batch before any broadcast. Payload broadcasts themselves retain their previous
+field/owner order; no floating reduction, dtype conversion or pair gather was
+introduced. An invalid last output cannot leave earlier fields partly exchanged.
+
+Matched measurement uses a frozen core source tree from `7c09724`, the same
+frontend numerical code/fixtures, two ranks, 8 solver variants / 68 RHS per rank.
+The frozen adapter shim only accepts the new exact keyword and counts existing
+hash input bytes; its original control/search/dispatch implementation runs.
+Explicit Python Torch factories inside control calls are instrumented in both
+implementations. Timings include instrumentation/contention and are diagnostic.
+
+|Per-rank quantity, FP32 CPU and NCCL (same counts)|Frozen exact|New exact|New contract|
+|---|---:|---:|---:|
+|Control handshakes|6,756|3,288|3,288|
+|Replica bytes hashed|7,860,720|7,860,720|222,528|
+|Explicit control Tensor factory calls after construction|20,268|0|0|
+|Logical particle/scalar payload bytes|608,960|608,960|608,960|
+
+This is51.3% fewer controls in either mode and97.2% less hashed data in contract
+mode. The factory count excludes native/backend allocations and other solver
+Tensors; the new group has two initial packet storage allocations on CPU/four on
+CUDA. CPU FP64/int64 repeats the same handshake/factory counts, with hashed bytes
+14,727,472 ->411,008 in contract mode. No throughput speedup is inferred.
+
+Qualification (tiny A/Bs omit video, preserve progress/stall/velocity controls;
+GPU jobs run serially under the existing isolated NCCL 2.32.3 runtime):
+
+|Control|Result|
+|---|---|
+|Real CPU process drivers|5 pass: exact/contract × 2/3 ranks, plus fatal-peer termination|
+|Core protocol fixtures|Self/unequal/empty populations, prepared density, covariance/gradients/CRK corrections, owned sums/rebuild/repartition and 8 existing recoverable failures pass; contract reference-content failure explicitly uses a forced exact boundary|
+|Added packet/batch failures|Forced exact mismatch, differing live-rank modes, invalid scalar and invalid last batch output reject coherently; next controls recover with stable buffer addresses|
+|Allocation/lifetime audit|12 warm controls invoke no explicit Tensor factories; cached addresses remain stable; GPU int64 cases alternate two CUDA streams for12 further controls in both modes|
+|Frozen/new solver comparisons|CPU FP32/int32, CPU FP64/int64 and NCCL FP32/int32: 3 variants of implementation/check policy × 8 solver fixtures pass exact stages/owned W/particles/time/OU; existing2e-12 source-budget tolerance only|
+|Long NCCL forcing/replay|16 accepted steps /128 fresh RHS per native scheme per rank, 256 RHS combined; every step forced changed-list replay, OU crossings, exact history/fields/work/time pass|
+|NCCL 32-lane control|3 steps /48 RHS per rank across native schemes, forced replay and nondefault stream pass|
+|CPU solver/launcher regressions|7 pass: two-/three-step exact/contract solver controls plus all3 scheme launcher lifecycles, 1/2/3 ranks; exact→contract→exact across jobs|
+|Native checkpoint drivers|3 pass: changed budgets/ranks/int32→int64 offsets, contract continuation, exact fresh RHS/J/W hashes/forcing and coordinated IO/corruption/policy controls|
+|NCCL launcher/checkpoint lifecycle|9 serial jobs /12 rank reports, all3 schemes exact→contract→exact with changed budgets/1/2 ranks and exact final particle/time/dt/OU parity|
+|Existing focused chunk regressions|349 CPU passes, 265 expected skips, including the initial3 scanner tests|
+|Static scanner follow-up|5 scanner regressions pass, including parent finder exceptions and installed-optional missing children; full runtime/static check passes566 modules /6063 imports /1314 files|
+|Slurm template|Syntax/mock remote quoting passes with explicit contract mode; actual submission/site qualification remains open|
+
+Core CPU process-driver wall total23.23s, solver/launcher134.79s, native checkpoint
+77.80s and overlapping focused regression15.31s. Raw progress and per-step times
+remain in the logs; the shared GPU and debug instrumentation invalidate transport
+performance conclusions. All numerical/protocol controls pass. Failed pre-fix
+scanner output and original retired notebooks are retained as evidence.
+
+L3 remains active: next combine compatible particle payloads and reuse bounded
+particle workspaces, with explicit scratch lifetime/memory and further operation
+counts. This checkpoint batches output contracts, not data payloads. Avoid
+removing exact boundaries or failure controls as a shortcut. L4 filtering,
+L5 stability expansion, L6 compatibility, L7 actual wide-edge accesses and physical
+multi-GPU/site/performance remain separate gates. MPI/ROCm builds remain deferred.
+Evidence/reproduction/source snapshots: `.tmp/l3-communication-20261030/`.
+Implementation provenance: core `3742f10`; frontend is the commit containing this checkpoint.
 
 ## Phase 5 — remaining schemes and compatibility
 

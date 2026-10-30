@@ -10,11 +10,12 @@ import torch.distributed as dist
 
 @pytest.mark.skipif(not dist.is_gloo_available(),reason='Gloo required')
 @pytest.mark.parametrize('steps', [2, 3])
-def test_replicated_eager_solver_ownership_and_replay(tmp_path, steps):
+@pytest.mark.parametrize('checks',['exact','contract'])
+def test_replicated_eager_solver_ownership_and_replay(tmp_path, steps,checks):
     worker=Path(__file__).with_name('distributed')/'_solverWorker.py'
     env=dict(os.environ,CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='2',PYTHONDONTWRITEBYTECODE='1')
     cmd=[sys.executable,'-m','torch.distributed.run','--standalone','--nproc-per-node=2',
-         str(worker),'--device','cpu','--output',str(tmp_path),'--steps',str(steps)]
+         str(worker),'--replica-checks',checks,'--device','cpu','--output',str(tmp_path),'--steps',str(steps)]
     completed=subprocess.run(cmd,env=env,text=True,stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT,timeout=240)
     assert completed.returncode==0,completed.stdout
@@ -30,7 +31,8 @@ def _launch_document(tmp_path,name,document,ranks,*,rows=3,edgeBudget=1024,expec
     env=dict(os.environ,CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='2',PYTHONDONTWRITEBYTECODE='1')
     command=[sys.executable,'-m','torch.distributed.run','--standalone',f'--nproc-per-node={ranks}',
         str(script),'--configuration',str(configuration),'--backend','gloo','--output',str(output),
-        '--edge-budget',str(edgeBudget),'--max-rows',str(rows),'--checkpoint-every','1','--timeout-seconds','45']
+        '--edge-budget',str(edgeBudget),'--max-rows',str(rows),'--checkpoint-every','1','--timeout-seconds','45',
+        '--replica-checks','contract' if name=='first' else 'exact']
     result=subprocess.run(command,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=240)
     (tmp_path/(name+'.log')).write_text(result.stdout)
     assert (result.returncode==0)==expectSuccess,result.stdout

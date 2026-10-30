@@ -214,6 +214,7 @@ def compare(actual,expected):
 
 def main():
     parser=argparse.ArgumentParser()
+    parser.add_argument('--replica-checks',choices=('exact','contract'),default='exact')
     parser.add_argument('--device',default='cpu')
     parser.add_argument('--steps',type=int,default=2)
     parser.add_argument('--clock-interval',type=float,default=.125)
@@ -239,7 +240,7 @@ def main():
     # All flat oracle runs precede the process-group / distributed solver phase.
     references=[run(args,*variant) for variant in variants]
     dist.init_process_group('nccl' if args.device.startswith('cuda') else 'gloo',timeout=timedelta(seconds=45))
-    communication=RowChunkProcessGroup(dist.group.WORLD,args.device)
+    communication=RowChunkProcessGroup(dist.group.WORLD,args.device,replicaChecks=args.replica_checks)
     summaries=[]
     try:
         stream=torch.cuda.Stream(device=communication.device) if communication.device.type=='cuda' else None

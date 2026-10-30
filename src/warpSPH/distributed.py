@@ -57,7 +57,7 @@ def distributedRunStart(ctx, system):
     # Domain tensors are already hashed by the neighbour builder. Avoid device
     # ordinals/pointers in cross-device metadata; ordinary scalar configs agree.
     communication.agree('runner:configuration', contract)
-    communication.assertReplicated('runner:initial-state', _stateTensors(system))
+    communication.assertReplicated('runner:initial-state', _stateTensors(system),exact=True)
     if system.sourceTerms is not None:
         validateSourceClock(system, communication)
     return communication
@@ -92,7 +92,7 @@ def distributedStepEnd(ctx, system, communication, step):
     bad = communication.localPhase('runner:state-local', invalid)
     if communication.any(bad, tag='runner:invalid-state'):
         raise RuntimeError(f'Distributed accepted step {step} has a nonfinite or nonpositive state.')
-    communication.assertReplicated('runner:accepted-state', _stateTensors(system))
+    communication.assertReplicated('runner:accepted-state', _stateTensors(system),exact=True)
     communication.agree('runner:accepted-time', (step, float(system.t), system.adjacency.plan.signature))
     if system.sourceTerms is not None:
         validateSourceClock(system, communication)

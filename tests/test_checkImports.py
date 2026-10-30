@@ -62,3 +62,23 @@ def test_broken_child_finder_reports_instead_of_aborting(scanner,monkeypatch):
     assert len(failures)==2
     assert failures[0].detail=='ValueError: broken finder metadata'
     assert failures[1].detail=='symbol missing'
+
+
+def test_parent_finder_exception_is_reported(scanner,monkeypatch):
+    module,root=scanner
+    (root/'use.py').write_text('import warpSPHScannerFixture.broken.child\n')
+    original=module.importlib.util.find_spec
+    def lookup(name):
+        if name=='warpSPHScannerFixture.broken.child':raise RuntimeError('broken parent initialization')
+        return original(name)
+    monkeypatch.setattr(module.importlib.util,'find_spec',lookup)
+    failures=module.static_pass(False)
+    assert len(failures)==1 and failures[0].detail=='RuntimeError: broken parent initialization'
+
+
+def test_installed_optional_package_missing_child_is_an_error(scanner,monkeypatch):
+    module,root=scanner
+    monkeypatch.setattr(module,'OPTIONAL_PACKAGES',{'warpSPHScannerFixture','warpSPHAbsentFixture'})
+    (root/'use.py').write_text('import warpSPHScannerFixture.absent\nimport warpSPHAbsentFixture.absent\n')
+    failures=module.static_pass(False)
+    assert len(failures)==1 and 'warpSPHScannerFixture.absent' in failures[0].what

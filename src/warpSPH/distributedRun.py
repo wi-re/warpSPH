@@ -50,7 +50,7 @@ def _sourcePins():
 def _runtime(communication):
     import warp
     data=dict(rank=communication.rank,ranks=communication.size,backend=communication.backend,
-        device=str(communication.device),host=socket.gethostname(),pid=os.getpid(),torch=torch.__version__,
+        replicaChecks=communication.replicaChecks,device=str(communication.device),host=socket.gethostname(),pid=os.getpid(),torch=torch.__version__,
         warp=warp.__version__,precision=str(get_torch_precision()),offsetDtype=str(get_torch_offset_dtype()))
     entry=getattr(sys.modules.get('__main__'),'__file__',None)
     if entry is not None and Path(entry).is_file():

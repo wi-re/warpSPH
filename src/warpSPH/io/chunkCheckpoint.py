@@ -150,8 +150,8 @@ def writeChunkedCheckpoint(path,ctx,system,*,overwrite=False):
     from ..distributed import validateSourceClock
     if communication is not None:
         communication.agree('checkpoint:write-contract',(str(path),completed,signature,recipe['checksum'],overwrite))
-        communication.assertReplicated('checkpoint:write-state',_stateTensors(system.state))
-        communication.assertReplicated('checkpoint:write-dt',dict(dt=torch.as_tensor(ctx.config.dt,device=communication.device)))
+        communication.assertReplicated('checkpoint:write-state',_stateTensors(system.state),exact=True)
+        communication.assertReplicated('checkpoint:write-dt',dict(dt=torch.as_tensor(ctx.config.dt,device=communication.device)),exact=True)
         validateSourceClock(system,communication)
     def write():
         if communication is not None and communication.rank!=0:
