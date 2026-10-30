@@ -2,7 +2,7 @@
 
 Plan index: [PLANS.md](PLANS.md). Parent physics programme: [driven compressible turbulence](docs/roadmap/driven_compressible_turbulence.md).
 
-Status, 2026-10-30: **Phase 4 bounded process proof of concept qualified; local L1 restart and L2 launcher qualified; L3 control/hash reduction qualified; payload/workspace work next**.
+Status, 2026-10-30: **Phase 4 bounded process proof of concept qualified; local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 filtering/redistribution next**.
 The count/scan/ownership design is agreed in discussion. Core/main and frontend/dev
 are integrated; see the [integration report](docs/chunked_integration_2026-10-30.md).
 The planner and opt-in standalone single-device chunk construction/lifecycle are
@@ -27,7 +27,7 @@ two old pressure-solver notebooks are clearly labeled archival source listings
 the accepted-boundary helper now used by finalizers. Five affected Kidder checks
 also pass. Original notebook files are retained in ignored L3 evidence. Do not
 re-investigate the old scanner traceback; older notes below describe history.
-L3 communication work is now active. Evidence: `.tmp/l3-communication-20261030/`.
+L3 control/hash and particle-packing work is now qualified locally. Evidence: `.tmp/l3-communication-20261030/` and `.tmp/l3-payload-20261030/`.
 
 ## Start here / next action
 
@@ -39,9 +39,10 @@ L3 communication work is now active. Evidence: `.tmp/l3-communication-20261030/`
    qualified within the limits below. Use an explicit RowChunkProcessGroup with
    Gloo CPU or NCCL CUDA tensors; the isolated two-process/one-GPU runtime is
    available. J/W stay owned, with particle exchanges between dependent passes.
-   Continue L3 communication validation/overhead work below;
+   Continue with L4 distributed filtering/redistribution below;
    physical devices/topology/Isambard and capacity/performance remain open.
-   There is no runner chunk-budget CLI option; select the Python setup hook.
+   Use `scripts/run_distributed.py` for the explicit experimental distributed
+   launcher; ordinary runner setup still uses the Python neighborhood hook.
    Use explicit source paths; do not change global editable installs.
 4. Keep the existing turbulence worktree available for ordinary single-GPU
    physics through128^3, subject to a short readiness/memory check. No such
@@ -917,10 +918,12 @@ ACSPH contention means timing remains diagnostic. The ordering is deliberate.
    ROCm-enabled Torch builds; continue the local sequence on the existing stack.
    Distinguish MPI rank launching with NCCL payloads
    from an MPI data backend; do not replace/build shared packages for this task.
-3. [ ] **L3 — communication overhead (control/hash slice qualified; active).** Separate exhaustive replica hashing from
+3. [x] **L3 — communication overhead (bounded local scope qualified).** Separate exhaustive replica hashing from
    normal validation, combine exchanges where dependencies allow, reuse metadata/
    particle scratch and reduce unnecessary host waits. Prove correctness, buffer
    lifetimes and fewer operations/allocations locally; defer throughput claims.
+   Cached controls/metadata, explicit exact/contract validation, compatible output
+   packing and one bounded particle buffer now pass the qualification below.
 4. [ ] **L4 — distributed filtering/redistribution.** Filter resident partial-owner
    lists and handle changed boundaries without a global pair intermediate. Preserve
    pair identity during accumulation or coordinate the existing fresh-stage replay.
@@ -1216,14 +1219,102 @@ remain in the logs; the shared GPU and debug instrumentation invalidate transpor
 performance conclusions. All numerical/protocol controls pass. Failed pre-fix
 scanner output and original retired notebooks are retained as evidence.
 
-L3 remains active: next combine compatible particle payloads and reuse bounded
-particle workspaces, with explicit scratch lifetime/memory and further operation
-counts. This checkpoint batches output contracts, not data payloads. Avoid
+At this control/hash checkpoint, particle payload packing/workspace reuse remained
+open; the following checkpoint qualifies them. These earlier changes batch output
+contracts, not data payloads. Avoid
 removing exact boundaries or failure controls as a shortcut. L4 filtering,
 L5 stability expansion, L6 compatibility, L7 actual wide-edge accesses and physical
 multi-GPU/site/performance remain separate gates. MPI/ROCm builds remain deferred.
 Evidence/reproduction/source snapshots: `.tmp/l3-communication-20261030/`.
 Implementation provenance: core `3742f10`; frontend is the commit containing this checkpoint.
+
+### L3 particle packing/workspace checkpoint (2026-10-30)
+
+L3 is qualified locally in the existing bounded eager process scope. Compatible
+nonempty operator outputs share dtype-specific row packets; particle fields keep
+their own storage and J/W remain owned. Packing/unpacking uses only same-dtype
+copies, preserves signed-zero/NaN bits and changes no floating kernels, scalar
+reduction arithmetic, fresh Butcher stages or exact-boundary policy. Exact input
+checks remain the default, with the same explicit contract-mode limits above.
+
+`RowChunkProcessGroup(..., particleWorkspaceBytes=4*1024*1024)` lazily allocates
+one fixed-capacity byte buffer for packing. The capacity is read-only after
+construction and included in the output contract on every rank; zero disables
+packing. Whole-row tiles fit the capacity. Singleton fields, rows wider than the
+buffer and groups whose tiling would not reduce broadcast calls use the direct
+path. No per-shape/tag/dtype cache, buffer growth or borrowed output storage is
+introduced. The default costs 4 MiB per process after first packed exchange, zero
+before it; a 127-byte audit exercises mixed types, alignment and multi-tile owners.
+This is additional communication scratch, separate from computational outputs,
+owned pair buffers and backend/allocator workspace. Releasing the group releases
+its retained scratch; the Torch caching allocator can retain reserved memory.
+
+Whole-batch layouts, exact-alias topology, capacity and allocation agree before
+any payload. Disjoint views of one storage and matching exact aliases are valid;
+partial/cross-row overlap, retyped overlap and different alias topology across
+ranks reject coherently. Allocation failure rejects before any field exchange;
+subsequent controls/exchanges recover. CUDA records an event after the final
+unpack and waits on it before reusing scratch, including another current stream.
+`record_stream` additionally registers allocator lifetime. This adds no explicit
+host synchronization; callers still own external producer/consumer dependencies.
+The interface remains serial eager, not concurrent-thread/async/capture/AD safe.
+
+Matched two-rank fixtures freeze the preceding control/hash core `3742f10`, use the
+same frontend and 8 solver variants / 68 fresh RHS per rank, then run packed exact
+and packed contract modes. A wrapper counts actual `dist.broadcast` calls; it
+changes no solver/transport logic. Both ranks show the same counts:
+
+|Per-rank quantity|Frozen 3742f10 exact|Packed exact|Packed contract|
+|---|---:|---:|---:|
+|Payload broadcasts, CPU FP32/FP64 and NCCL FP32|1,424|968|968|
+|Control handshakes|3,288|3,288|3,288|
+|Logical payload bytes, FP32|608,960|608,960|608,960|
+|Logical payload bytes, FP64|1,202,464|1,202,464|1,202,464|
+|Packed batches|0|116|116|
+|Persistent packing storage / allocations|0 /0|4 MiB /1|4 MiB /1|
+
+This removes 456 broadcasts per rank (32.0%) on these fixtures, without reducing
+logical data volume. Logical bytes include each rank's own interval and scalar
+payloads; they are not wire traffic. The earlier control/hash reductions remain
+in place. No native/backend allocation or throughput reduction is inferred.
+
+|Qualification|Result|
+|---|---|
+|CPU final process drivers|5 pass: exact/contract × 2/3 ranks plus fatal-peer termination; existing 8 recoverable faults and packet/batch audit retained|
+|New packing audit|All 5 payload dtypes, scalar/vector/matrix tails, exact aliases/disjoint storage views, signed zero/NaN bits, zero-channel fields, zero populations, empty owners, tiled rows and oversized/direct fallbacks pass bitwise|
+|Packing failures|Injected allocation failure, partial overlap, differing alias topology, retyped overlap and rank-budget mismatch reject before any payload; following controls recover|
+|Bounded storage/lifetime|One 127-byte storage allocation across changing shapes/types and repeated warm calls, no explicit Tensor storage factories in warmed exchanges, stable pointer and retained outputs; disabled/uneconomical packing allocate zero bytes|
+|Matched solver controls|CPU FP32/int32, CPU FP64/int64 and NCCL FP32/int32: frozen/exact/contract all pass exact stages, owned J/W, fields/time/OU; source-budget tolerance remains 2e-12|
+|NCCL streams/offsets|Both check modes and both offset widths pass 12 alternating streams with delayed producers/unpacks, retained outputs and event-fenced scratch reuse; actual NCCL 23203 /same shared GPU UUID verified|
+|NCCL replay/lanes|16-step native forced-replay controls retain 128 fresh RHS per scheme/rank and OU crossings; 3-step 32-lane controls also pass; 7 cohorts /14 rank reports /1,016 distributed RHS in the main GPU sequence|
+|CPU solver/launcher/native restart|10 final passes, including all 3 schemes,1/2/3 ranks, changed budgets/int32→int64 offsets and exact→contract→exact mode changes|
+|Broader first pass|16 solver/launcher/native/legacy driver passes (includes 6 COO/CSR imports); 351 focused chunk/scanner passes and 265 expected skips. These began before the final alias/schedule guard; final transport drivers/cohorts above qualify that guard|
+|NCCL launcher/restart|9 serial jobs /12 rank reports, all 3 schemes, changed budgets/1/2 ranks, exact→contract→exact; exact final particle/clock/dt/OU parity and source hashes pass|
+|Full import scanner|566 modules /6063 first-party imports /1314 files, no failures|
+
+CPU final process suite 24.78s and solver/launcher/native drivers 209.08s; focused
+chunk/scanner first pass 15.23s. Tiny A/Bs omit video and retain progress, stall and
+velocity controls. Timings include debugging/control/contended execution and are
+diagnostic only. For the 8 matched cases (16 accepted steps per rank), rank-zero
+aggregate wall time /ms per accepted step was:
+
+|Runtime|Frozen exact|Packed exact|Packed contract|
+|---|---:|---:|---:|
+|CPU FP32|3.66s /228.8ms|3.64s /227.4ms|3.30s /206.1ms|
+|CPU FP64|3.45s /215.8ms|3.40s /212.7ms|3.34s /208.7ms|
+|Shared-GPU NCCL FP32|17.34s /1083.8ms|16.35s /1021.8ms|15.65s /978.2ms|
+
+These figures do not establish a transport speedup or a regression under ACSPH
+contention. Physical devices/topology, aggregate capacity and scaling remain open.
+L3 does not recycle computational output tensors retained by later stages, reduce
+checkpoint seed/restored adjacency overlap, or migrate pair arrays. Next is L4
+distributed filtering/redistribution; L5 stability expansion, L6 compatibility and
+L7 actual wide-edge accesses remain ordered gates. MPI/ROCm builds stay deferred.
+
+Evidence/reproduction/frozen sources: `.tmp/l3-payload-20261030/`; draft results
+before the final alias/schedule guard are retained separately. Final core/front
+heads are recorded in its `commits.json` after the paired checkpoint commits.
+Implementation provenance: core `0513736`; frontend is the commit containing this checkpoint.
 
 ## Phase 5 — remaining schemes and compatibility
 
