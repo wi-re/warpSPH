@@ -2,7 +2,7 @@
 
 Plan index: [PLANS.md](PLANS.md). Parent physics programme: [driven compressible turbulence](docs/roadmap/driven_compressible_turbulence.md).
 
-Status, 2026-10-31: **Phase 4 bounded process proof of concept qualified; local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 filtering/redistribution qualified locally; L5 bounded stress qualified; L6 bounded compatibility matrix qualified; L7 actual wide-edge debug access qualified; overnight real-flow queue active**.
+Status, 2026-10-31: **Phase 4 bounded process proof of concept qualified; local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 filtering/redistribution qualified locally; L5 bounded stress qualified; L6 bounded compatibility matrix qualified; L7 actual wide-edge debug access qualified; overnight real-flow partial success; wide-flow memory guard failure**.
 The count/scan/ownership design is agreed in discussion. Core/main and frontend/dev
 are integrated; see the [integration report](docs/chunked_integration_2026-10-30.md).
 The planner and opt-in standalone single-device chunk construction/lifecycle are
@@ -1771,3 +1771,50 @@ This queue is running independently of the chat; it has not finished and does
 not yet qualify the larger real-flow capacity or statistical stationarity.
 
 Initial32³ measured loop: 38.715s, 39.304ms/step, 985accepted steps; Torch allocated peak0.506GiB. All run costs include declared observers and are retained in per-run JSON.
+
+### Overnight outcome audit (2026-10-31)
+
+The queue terminated03:17:38UTC after3h16min.32³/64³/96³/128³ all reached t4;
+164³ failed at its work-allocation headroom check near t0.104. The supervisor
+blocked the conditional t40 continuation after that failure; no continuation
+was launched. GPU is now idle. Original status/logs/results are preserved,
+with an independent audit in `.tmp/crksph-3d-overnight-20261030/outcome.json`.
+
+| Resolution | Accepted steps | Loop wall | ms/step | Torch allocated peak GiB |
+| --- | ---: | ---: | ---: | ---: |
+|32³|985|38.71s|39.30|0.506|
+|64³|2011|480.57s|238.97|3.817|
+|96³|3040|2475.63s|814.35|12.756|
+|128³|4079|8286.32s|2031.46|30.158|
+
+All four completed runs have zero invalid RHS states, unchanged mass and maximum
+relative energy-ledger residual below2.60e-8. Their native midpoint/final/rolling
+checkpoints were independently checked for completed publication, finite fields,
+positive thermodynamics/supports/masses and positive continuation dt. Final
+files have exact t4 and the correct accepted-step count. Videos and all941
+frozen executable/source hashes remain intact. Total campaign disk use is
+about951 MiB, including runtime copies and small controls.
+
+164³ physically built2,271,636,160 neighbours and executed245 full CRKSPH RHS
+evaluations above INT_MAX with no invalid RHS;122 accepted steps reached
+t=0.1037968248. Its maximum ledger residual was2.97e-8 and Torch allocated peak
+60.014 GiB. The recorded Python error is the campaign guard rejecting a new
+owned compatible-work allocation, before an actual CUDA allocation OOM was
+reported. Exit status is alsoSIGSEGV(-11), following the recorded guard error;
+cleanup requires investigation as well. This is an incomplete wide-flow run,
+not a passed t4 endpoint. No wide checkpoint was written before failure: it
+occurred before both the physical midpoint and the20min rolling-save cadence.
+
+The next investigation is peak work-buffer lifetime/allocation and the guard's
+accounting of free versus cached memory; the existing log does not identify
+which of its two headroom conditions fired. Do not claim a confirmed memory
+leak, actual device OOM or numerical instability from this trace alone. Preserve
+the failed runtime while reproducing a short large run with detailed allocation
+receipts and safe cleanup before retrying the full wide endpoint.
+
+For cost context, the old3D pilot loop times were35.12/376.19/1919.04s at
+32³/64³/96³, versus38.71/480.57/2475.63s here (about10/28/29% higher). This
+campaign uses chunked/int64 addressing and exhaustive raw-RHS observers, with
+different source revisions; these are not matched measurements isolating
+chunking cost. Larger flow costs and memory must be measured separately from
+the dense L7 debug fixture. No model/default was changed.
