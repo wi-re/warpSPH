@@ -338,5 +338,14 @@ def test_chunked_pesph_rejects_unqualified_contexts(context):
             with pytest.raises(NotImplementedError, match='differentiation'):
                 checkPESPHChunks(system, cfg, scheme)
     else:
-        with pytest.raises(NotImplementedError, match='differentiation' if context == 'reverse-ad' else 'eager periodic'):
+        with pytest.raises(NotImplementedError, match='differentiation' if context == 'reverse-ad' else 'ConservedSources' if context == 'source' else 'eager periodic'):
             checkPESPHChunks(system, cfg, scheme)
+
+
+def test_body_sources_require_an_integrator_visible_energy_budget():
+    from warpSPH.modules.meshless.sources import ConservedSources
+    from warpSPH.modules.pesph.sources import validatePESPHSource
+    state, cfg, scheme = setup()
+    system = PESPHSystem(state=state, domain=cfg.domain, sourceTerms=ConservedSources())
+    with pytest.raises(ValueError, match='sourceEnergyBudget'):
+        validatePESPHSource(system, scheme)

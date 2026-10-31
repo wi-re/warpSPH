@@ -5,6 +5,8 @@ import torch
 from warpSPHIntegrators.state import constant
 from ..systems.compSPH import CompSPHState
 from ..systems.compressibleMonaghan import CompressibleState
+from ..systems.pesph import PressureEnergyState, PressureEntropyState
+from ..enumTypes import PESPHVariant
 
 
 class ConservedOutput:
@@ -23,6 +25,24 @@ class DrivenCompSPHState(ConservedOutput, CompSPHState):
 @dataclass
 class DrivenGasState(ConservedOutput, CompressibleState):
     sourceEnergyBudget: Optional[torch.Tensor] = constant(tags=('source_energy_budget',), default=None)
+
+
+@dataclass
+class DrivenPressureEnergyState(ConservedOutput, PressureEnergyState):
+    sourceEnergyBudget: Optional[torch.Tensor] = constant(tags=('source_energy_budget',), default=None)
+
+
+@dataclass
+class DrivenPressureEntropyState(ConservedOutput, PressureEntropyState):
+    sourceEnergyBudget: Optional[torch.Tensor] = constant(tags=('source_energy_budget',), default=None)
+
+
+def drivenPESPHStateType(variant):
+    if variant is PESPHVariant.PressureEnergy:
+        return DrivenPressureEnergyState
+    if variant is PESPHVariant.PressureEntropy:
+        return DrivenPressureEntropyState
+    raise ValueError(f'Unknown PESPH variant {variant!r}')
 
 
 def adjacencyCheckpoint(system):

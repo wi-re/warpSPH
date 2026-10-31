@@ -20,9 +20,11 @@ def checkPESPHChunks(system, config, scheme, dt=None):
         if (getattr(scheme, 'materials', None) is not None or scheme.boundaryConditions
             or getattr(scheme, 'stepMode', 'eager') not in (None, 'eager')
             or getattr(getattr(config, 'compute', None), 'execution', 'eager') != 'eager'
-            or not bool(config.domain.periodic.all()) or not bool((system.state.kinds == 0).all())
-            or system.sourceTerms is not None):
-            raise NotImplementedError('Chunked PESPH currently requires eager periodic single-material flow without boundary or body sources.')
+            or not bool(config.domain.periodic.all()) or not bool((system.state.kinds == 0).all())):
+            raise NotImplementedError('Chunked PESPH currently requires eager periodic single-material flow without boundary sources.')
+        if system.sourceTerms is not None:
+            from .sources import validatePESPHSource
+            validatePESPHSource(system, scheme)
         if derivativeInputs(*vars(system.state).values(), dt):
             raise NotImplementedError('Chunked PESPH does not support differentiation.')
     pesphInputs(system.adjacency, validate)

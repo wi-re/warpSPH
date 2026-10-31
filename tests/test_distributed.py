@@ -55,8 +55,9 @@ def _launch_document(tmp_path,name,document,ranks,*,rows=3,edgeBudget=1024,expec
 
 
 @pytest.mark.skipif(not dist.is_gloo_available(),reason='Gloo required')
-@pytest.mark.parametrize('scheme',['CRKSPH','CompSPH','Monaghan','GSPH','InutsukaGSPH'])
-def test_launcher_outputs_and_restart_are_rank_owned(tmp_path,scheme):
+@pytest.mark.parametrize('scheme,variant', [('CRKSPH', None), ('CompSPH', None), ('Monaghan', None),
+    ('GSPH', None), ('InutsukaGSPH', None), ('PESPH', 'PressureEnergy'), ('PESPH', 'PressureEntropy')])
+def test_launcher_outputs_and_restart_are_rank_owned(tmp_path,scheme,variant):
     import json
     import h5py
     import torch
@@ -64,6 +65,9 @@ def test_launcher_outputs_and_restart_are_rank_owned(tmp_path,scheme):
         maxDt=.0002,plot=False,video=False,store=False,execution='eager',cudaGraph=False,
         progress=True,stallProgress=1e-3,velocityAlarmPlotInterval=1,integrationScheme='rungeKutta4'),
         params=dict(accelerationRMS=.1,forcingInterval=.00025),solver=dict(scheme=scheme))
+    if variant is not None:
+        document['solver'].update(variant=variant, dissipation=variant == 'PressureEnergy')
+        if variant == 'PressureEntropy': document['params']['thermalModel'] = 'adiabatic'
     reference=_launch_document(tmp_path,'reference',document,1,rows=4)
     document['simulation']['nSteps']=2
     first=_launch_document(tmp_path,'first',document,2)

@@ -49,6 +49,8 @@ def rowHashes(adjacency,communication,field=None):
 def compare(actual,expected):
     assert actual['time']==expected['time'],(actual['time'],expected['time'])
     assert actual['completed']==expected['completed']
+    if 'scalarState' in expected:
+        assert actual['scalarState'] == expected['scalarState']
     for name,value in expected['state'].items():
         tolerance=2e-12 if name=='sourceEnergyBudget' else 0
         torch.testing.assert_close(actual['state'][name],value,rtol=tolerance,atol=tolerance,msg=lambda m:name+': '+m)
@@ -86,7 +88,7 @@ def run(args,communication):
         module=importlib.import_module('warpSPH.cases.compressible.drivenTurbulence')
         def factory(state,config):
             policy=RowChunkPolicy(edgeBudget=args.edge_budget,maxRows=args.rows,
-                bytesPerEdge=4+state.positions.shape[1]*state.positions.element_size(),maxElementsPerEdge=2)
+                bytesPerEdge=4+state.positions.shape[1]*state.positions.element_size(),maxElementsPerEdge=state.positions.shape[1])
             return buildChunkedVerletList(state,config.domain,policy=policy,communication=communication,
                 supportMode=SupportScheme.SuperSymmetric,verletScale=config.verletScale)
         def forbidden(*a,**kw):
@@ -101,7 +103,16 @@ def run(args,communication):
         if args.action=='fail':
             def shouldFail():
                 return communication.rank==args.fail_rank and ctx.scratch.get('completedSteps')==2
-            if args.fail_site=='work':
+            if args.scheme == 'PESPH' and args.fail_site == 'work':
+                dispatch = importlib.import_module('warpSPHCore.autograd.row_dispatch')
+                launch = dispatch._launchLocal
+                def rejectedOutput(spec, *a, **kw):
+                    if shouldFail() and spec.kernel.key.endswith('_pressureForce'):
+                        ctx.scratch['driving'].accelerationBound(.2)
+                        raise torch.OutOfMemoryError('injected PESPH force output allocation')
+                    return launch(spec, *a, **kw)
+                patch(dispatch, '_launchLocal', rejectedOutput)
+            elif args.fail_site=='work':
                 empty=ChunkedPairField.empty
                 @classmethod
                 def rejectedWork(cls,adjacency,**kwargs):
@@ -115,19 +126,32 @@ def run(args,communication):
                     if shouldFail():raise MemoryError('injected neighbor allocation')
                     return allocate(*a,**kw)
                 patch(chunks,'_allocateChunks',rejectedNeighbors)
-                stage=importlib.import_module('warpSPH.schemes.compressible.'+('crkSPH' if args.scheme=='CRKSPH' else 'compSPH'))
-                nativePairs=stage.stagePairList
-                def rebuild(s,state,cfg,sc,**kw):
-                    adj=nativePairs(s,state,cfg,sc,**kw)
-                    if ctx.scratch.get('completedSteps')==2:
-                        return buildChunkedVerletList(state,cfg.domain,policy=adj.plan.policy,
-                            priorNeighborhood=adj,forceRebuild=True,communication=communication,
-                            supportMode=SupportScheme.SuperSymmetric,verletScale=cfg.verletScale)
-                    return adj
-                patch(stage,'stagePairList',rebuild)
+                if args.scheme == 'PESPH':
+                    support = importlib.import_module('warpSPH.modules.adaptiveSupport.stage')
+                    nativeSupport = support.solveStageSupport
+                    def rebuildSupport(s, state, cfg, sc, **kw):
+                        if ctx.scratch.get('completedSteps') == 2:
+                            s.adjacency = buildChunkedVerletList(state, cfg.domain, policy=s.adjacency.plan.policy,
+                                priorNeighborhood=s.adjacency, forceRebuild=True, communication=communication,
+                                supportMode=SupportScheme.SuperSymmetric, verletScale=cfg.verletScale)
+                        return nativeSupport(s, state, cfg, sc, **kw)
+                    # PESPH's stage module imports the callable directly.
+                    patch(importlib.import_module('warpSPH.modules.pesph.stage'), 'solveStageSupport', rebuildSupport)
+                else:
+                    stage=importlib.import_module('warpSPH.schemes.compressible.'+('crkSPH' if args.scheme=='CRKSPH' else 'compSPH'))
+                    nativePairs=stage.stagePairList
+                    def rebuild(s,state,cfg,sc,**kw):
+                        adj=nativePairs(s,state,cfg,sc,**kw)
+                        if ctx.scratch.get('completedSteps')==2:
+                            return buildChunkedVerletList(state,cfg.domain,policy=adj.plan.policy,
+                                priorNeighborhood=adj,forceRebuild=True,communication=communication,
+                                supportMode=SupportScheme.SuperSymmetric,verletScale=cfg.verletScale)
+                        return adj
+                    patch(stage,'stagePairList',rebuild)
         sc=ctx.schemeConfig
-        sc.adaptiveSupportScheme=AdaptiveSupportScheme.NoScheme
-        sc.adaptiveSupportCorrections=args.scheme=='CompSPH'
+        if args.scheme != 'PESPH':
+            sc.adaptiveSupportScheme=AdaptiveSupportScheme.NoScheme
+            sc.adaptiveSupportCorrections=args.scheme=='CompSPH'
         s=system.state
         s.velocities[:,0]=.13*torch.sin(6.283*s.positions[:,1])
         s.velocities[:,1]=.08*torch.cos(6.283*s.positions[:,0])
@@ -146,22 +170,25 @@ def run(args,communication):
             work=pw.work if pw is not None and isinstance(pw.work,(ChunkedPairField,torch.Tensor)) else None
             communication.agree('test:work-present',work is not None)
             stages.append(dict(time=float(system.t),dvdt=update.dvdt.detach().cpu().clone(),
-                dudt=update.dudt.detach().cpu().clone(),rows=rowHashes(system.adjacency,communication),
+                dudt=(update.dEdt if args.scheme == 'PESPH' else update.dudt).detach().cpu().clone(),rows=rowHashes(system.adjacency,communication),
                 work=None if work is None else rowHashes(pw.adjacency,communication,work)))
             return result
         ctx.bundle=replace(ctx.bundle,stepFunction=observed)
         return system
     solver=dict(scheme=args.scheme)
+    if args.scheme == 'PESPH':
+        solver.update(variant=args.pesph_variant, dissipation=args.pesph_variant == 'PressureEnergy')
     if args.scheme in ('CRKSPH','CompSPH'):
         solver[('crk' if args.scheme=='CRKSPH' else 'comp')+'PairStorage']='recompute'
-    simulation=dict(device=args.device,nx=8,dim=2,nSteps=args.steps,maxDt=.0002,
+    simulation=dict(device=args.device,nx=8,dim=args.dim,nSteps=args.steps,maxDt=.0002,
         plot=False,video=False,store=False,storeMode='states' if args.legacy else 'trajectory',quiet=True,show=False,
         exportRoot=args.output,progress=True,velocityAlarmPlotInterval=1,stallProgress=1e-3,integrationScheme='rungeKutta4')
     if args.legacy:simulation['neighborOmitI']=args.legacy=='csr'
     if args.action in ('resume','reject'):
         simulation['resumeFrom']=args.checkpoint
     configuration=RunConfiguration('drivenTurbulence',simulation=simulation,
-        params=dict(accelerationRMS=args.amplitude,forcingInterval=.00025),solver=solver)
+        params=dict(accelerationRMS=args.amplitude,forcingInterval=.00025,
+            **(dict(thermalModel='adiabatic') if args.scheme == 'PESPH' and args.pesph_variant == 'PressureEntropy' else {})),solver=solver)
     allocationFailure=None
     try:
         result=configuration.run(replace(case,buildSystem=build))
@@ -211,6 +238,9 @@ def run(args,communication):
         forcing=result.ctx.scratch['driving'].state_dict(),dt=torch.as_tensor(result.ctx.config.dt).detach().cpu(),
         dtKind='tensor' if isinstance(result.ctx.config.dt,torch.Tensor) else 'python',stages=stages,
         finalRows=rowHashes(result.state.adjacency,communication))
+    if args.scheme == 'PESPH':
+        data['scalarState'] = {name:value for name,value in vars(result.state.state).items()
+            if isinstance(value, (str, float, int, type(None)))}
     if args.action=='reference':
         def publish():
             if communication.rank==0:torch.save(data,args.oracle)
@@ -264,6 +294,8 @@ def main():
     parser.add_argument('--replica-checks',choices=('exact','contract'),default='exact')
     parser.add_argument('--device',default='cpu')
     parser.add_argument('--scheme',default='CRKSPH')
+    parser.add_argument('--pesph-variant', choices=('PressureEnergy','PressureEntropy'), default='PressureEnergy')
+    parser.add_argument('--dim', type=int, choices=(2,3), default=2)
     parser.add_argument('--steps',type=int,default=2)
     parser.add_argument('--rows',type=int,default=3)
     parser.add_argument('--edge-budget',type=int,default=1024)

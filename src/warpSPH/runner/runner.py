@@ -398,12 +398,19 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         if ctx.scratch['execution'] != 'eager':
             raise ValueError('PESPH currently supports eager execution only')
         if spec.resumeFrom:
-            refreshPESPHState(system, ctx.config, ctx.schemeConfig)
+            # Native managed checkpoints contain the accepted derived fields
+            # and exact search history. An extra support solve would advance
+            # the finite-tolerance Newton iteration on restart only.
+            if not ctx.scratch.get('_rowChunkRestartVerified'):
+                refreshPESPHState(system, ctx.config, ctx.schemeConfig)
         else:
             initializePESPHState(system, ctx.config, ctx.schemeConfig)
-        case = replace(case, timestep=pesphTimestep,
+        # Driven body-source cases cap the native PESPH signal limit inside
+        # their forcing/cooling clock hook. Retain it for startup and every step.
+        timestep = case.timestep if system.sourceTerms is not None and case.timestep is not None else pesphTimestep
+        case = replace(case, timestep=timestep,
                        extraFields=tuple(dict.fromkeys((*case.extraFields, *CHECKPOINT_FIELDS))))
-        ctx.config.dt = pesphTimestep(ctx, system)
+        ctx.config.dt = case.timestep(ctx, system)
     def capPrescribedStartupTimestep():
         # Re-evaluate safety after a prescribed-state change, preserving an
         # initializer's deliberate step ceiling (e.g. RT's 2/3 startup factor).

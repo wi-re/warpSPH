@@ -116,7 +116,7 @@ def guards(comm):
         for name in CHUNKED_SCHEMES:
             ctx.scheme=name
             assert distributedRunStart(ctx,system) is comm
-        for name in ('MFM','MFV','PESPH','acSPH','deltaSPH','iisph'):
+        for name in ('MFM','MFV','acSPH','deltaSPH','iisph'):
             ctx.scheme=name
             rejected(name,lambda:distributedRunStart(ctx,system),'support eager')
         ctx.scheme='GSPH';ctx.scratch['execution']='graph'

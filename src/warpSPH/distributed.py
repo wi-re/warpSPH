@@ -10,7 +10,7 @@ import torch
 
 from warpSPHCore.radiusSearch import ChunkedAdjacency
 
-CHUNKED_SCHEMES=('Monaghan','CRKSPH','CompSPH','GSPH','InutsukaGSPH')
+CHUNKED_SCHEMES=('Monaghan','CRKSPH','CompSPH','GSPH','InutsukaGSPH','PESPH')
 
 
 def processGroup(system):
@@ -48,7 +48,7 @@ def distributedRunStart(ctx, system):
     def validate():
         communication.validateAdjacency(system.adjacency)
         if getattr(ctx.scheme, 'name', ctx.scheme) not in CHUNKED_SCHEMES:
-            raise NotImplementedError('Distributed row chunks support eager Monaghan/CRKSPH/CompSPH/GSPH/InutsukaGSPH only.')
+            raise NotImplementedError('Distributed row chunks support eager '+'/'.join(CHUNKED_SCHEMES)+' only.')
         if (ctx.scratch.get('execution') != 'eager' or ctx.spec.store or ctx.spec.plot
             or ctx.spec.video or (ctx.spec.resumeFrom and not ctx.scratch.get('_rowChunkRestartVerified'))):
             raise NotImplementedError('Distributed proof of concept requires eager execution, automatic output disabled and validated chunked resume.')

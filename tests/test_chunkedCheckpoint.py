@@ -202,3 +202,21 @@ def test_failed_recovery_publication_keeps_original_error_and_accepted_particles
     torch.testing.assert_close(result.state.state.positions,accepted,rtol=0,atol=0)
     assert any('primary bulk rejection' in note for note in error.__notes__)
     assert not list(tmp_path.rglob('*.h5'))
+
+
+@pytest.mark.skipif(not dist.is_gloo_available(), reason='Gloo required')
+@pytest.mark.parametrize('variant', ['PressureEnergy', 'PressureEntropy'])
+def test_pesph_managed_checkpoint_and_failure_restart(tmp_path, variant):
+    extra = ('--pesph-variant', variant)
+    launch(tmp_path, 'reference', 'PESPH', 1, 4, 'int64', steps=4, extra=extra)
+    launch(tmp_path, 'save', 'PESPH', 2, 3, 'int32', extra=extra)
+    launch(tmp_path, 'resume', 'PESPH', 3, 1, 'int64', extra=(*extra, '--replica-checks', 'contract'))
+    for site in ('work', 'neighbors'):
+        failureRoot = tmp_path/('failure-'+site); failureRoot.mkdir()
+        # Recover a rejected trial, then change rank count, row budget and
+        # local offset width while retaining the exact native endpoint.
+        shutil.copy2(tmp_path/'oracle.pt', failureRoot/'oracle.pt')
+        launch(failureRoot, 'fail', 'PESPH', 2, 3, 'int32', steps=4,
+               extra=(*extra, '--fail-site', site))
+        recovery = next(failureRoot.rglob('allocationFailure.h5'))
+        launch(failureRoot, 'resume', 'PESPH', 3, 1, 'int64', checkpoint=recovery, extra=extra)

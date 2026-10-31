@@ -2,7 +2,7 @@
 
 Plan index: [PLANS.md](PLANS.md). Parent physics programme: [driven compressible turbulence](docs/roadmap/driven_compressible_turbulence.md).
 
-Status, 2026-10-31: **Bounded local L1–L7, allocation recovery and CRK work-launch fix qualified; long-flow/physical-device gates held; remaining scheme compatibility active, with native PESPH partially qualified**.
+Status, 2026-10-31: **Bounded local L1–L7, allocation recovery and CRK work-launch fix qualified; long-flow/physical-device gates held; remaining scheme compatibility active, with driven PESPH qualified and MFM/MFV geometry moments in progress**.
 The count/scan/ownership design is agreed in discussion. Core/main and frontend/dev
 are integrated; see the [integration report](docs/chunked_integration_2026-10-30.md).
 The planner and opt-in standalone single-device chunk construction/lifecycle are
@@ -61,7 +61,66 @@ An operator port alone does not admit an entire family to the distributed CLI.
 No numerical model, support defaults or ACSPH code changes are authorized by
 this compatibility work.
 
-### C1 bounded PESPH progress (2026-10-31)
+### C1 driven admission continuation (2026-10-31)
+
+User asks to keep going. Implement a native total-energy source adapter and
+retain source objects/budgets through PESPH stage cloning/finalization. Admit
+PressureEnergy to the existing finite-time bath; PressureEntropy initially
+requires adiabatic driving, retaining its Guarded thermal policy (no new entropy
+source law or automatic experimental-policy selection). Keep NumberDensity
+supports/grad-h defaults. Combine native signal-speed and case forcing/cooling
+limits instead of replacing the driven timestep hook. Qualify independent body
+source controls, native managed save/resume and accepted allocation rollback
+before extending the distributed CLI allowlist. Continue MFM/MFV afterward.
+
+### C1 driven admission result (2026-10-31)
+
+PESPH is admitted to the explicit eager periodic driven launcher and managed
+checkpoint/recovery path. PressureEnergy retains the existing finite-time bath;
+PressureEntropy requires explicit dissipation=False and adiabatic driving under
+its default Guarded policy. No entropy-bath policy/default was changed.
+Dedicated driven E/A state classes retain the two-entry source ledger, the
+source object survives native stage clones, and finalization updates only the
+ledger after native pressure-volume closure (no mass-density EOS overwrite).
+Both native signal and case forcing/cooling timestep limits are retained.
+
+Independent uniform acceleration/bath controls and exact flat/chunked stage
+clocks pass9 CPU checks perFP32/FP64; forcingInterval is deliberately tighter
+than maxDt. Shared source/PESPH regression set passes142 CPU checks. Actual
+Gloo launcher manifests, rank-owned output and1→2→3-rank continuation pass for
+both variants; the explicit native worker also requalifies in exact/contract.
+Managed failure tests preserve source generators/clocks, E/A, optional scalar
+switch histories and particle tensors after neighbour/force-output rejection,
+then resume across row budget, local offset width and process-count changes.
+Managed restore skips the extra finite-tolerance support solve on validated
+accepted state; ordinary non-native PESPH restart keeps its existing behavior.
+
+All20 serial NCCL debug jobs pass: both variants,2D/3D, independent one-rank
+four-step reference, two-rank step2 save, changed-row-budget continuation, force
+allocation failure after step2 and recovery continuation. Particle/stage/time/
+forcing fields match exactly; only the existing source-ledger2e-12 allowance
+applies. Very fine chunks make these correctness controls launch/control bound;
+job wall times include startup/compilation and are not flow performance figures.
+The temporary NCCL driver initially reused a checkpoint name for one fault
+control; the expected no-overwrite rejection is retained, the driver is fixed,
+and all successful jobs are retained rather than rerun. No solver fix for that
+orchestration error was needed. Evidence: `.tmp/scheme-compatibility-20261031/`.
+
+C1 bounded admission is complete within these thermal/eager/single-material
+limits. Final CUDA source/clock controls pass9 checks perFP32/FP64; scope/budget
+guards pass7 checks; the affected prior native/Godunov distributed source control
+also passes. Core MFM moments are committed as `4fbac54`:24 ordinary/prepared
+geometry controls perprecision across CPU/CUDA,69 existing CPU regressions
+(78 expected device/reference skips), four2/3-rank Gloo jobs and the complete
+two-rank NCCL ownership/error/packing/filter worker with four new moment fixtures
+all pass. Both NCCL ranks audit runtime2.32.3 and the same GPU UUID. No GPU job
+remains active after qualification. The frontend scanner passes570 modules,
+6149 first-party imports and1320 files. No held overnight job was launched.
+Default chunked meshless closure still rejects.
+Continue owned closure weights/matvec/preconditioner/coarse stencil, gradients,
+limiting and canonical flux identity before MFM/MFV solver admission.
+
+### C1 initial native checkpoint (`ea8534e`; superseded by driven admission above)
 
 Pressure sums and variational force now declare row roles. The force keeps
 local query and global reference velocity/weight/factor/grad-h views separate,
@@ -83,14 +142,17 @@ sources/boundaries/materials/graphs/AD; flat PESPH differentiation remains teste
 These are tiny repeated controls with video deliberately omitted; transport
 wall times include compilation/reference work and are not simulation benchmarks.
 
-C1 is **partially qualified**, not complete: the driven-flow state/source adapter,
-managed checkpoint and automatic failure-recovery admission remain gated. The
-current generic driven source adapter evolves dudt and refreshes a mass-density
-EOS; reusing it for authoritative PESPH E/A would overwrite the method. Preserve
-both existing PESPH variants and heating policies rather than selecting a new
-entropy-source model in a storage port. Distributed runner/CLI admission stays
-unchanged until this contract is qualified. Evidence and commands are indexed
-under ignored `.tmp/scheme-compatibility-20261031/`.
+At `ea8534e`, C1 was **partially qualified**: the driven source adapter,
+managed checkpoint and automatic recovery still required qualification. The
+generic driven source adapter evolves dudt and refreshes a mass-density EOS;
+reusing it directly would overwrite authoritative PESPH E/A. The dedicated
+adapter and admission gates have since passed as recorded above. This initial
+native evidence remains indexed under `.tmp/scheme-compatibility-20261031/`.
+
+C2 implementation starts with ordinary/prepared row-chunk geometry moments and
+explicit global self identity, retaining flat formulas and forward-only guards.
+Empty/single/nonuniform2D/3D populations pass ordinary/prepared exact moments/
+inversion parity on CPU/CUDA in FP32/FP64 and2/3-rank Gloo controls. Default chunked face closure explicitly rejects.
 
 C2 audit: frontend canonical-pair flux is already directed per row (no shared
 force scatter). Core geometry moments/gradients/limiters/timestep still need

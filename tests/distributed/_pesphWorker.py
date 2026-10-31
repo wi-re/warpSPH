@@ -120,7 +120,7 @@ def qualify(comm, folder):
             try:
                 checkPESPHChunks(resumed, cfg, scheme)
             except DistributedContractError as error:
-                assert 'without boundary or body sources' in str(error)
+                assert 'require ConservedSources' in str(error)
             else:
                 raise AssertionError('expected unsupported source rejection')
             resumed.sourceTerms = original
