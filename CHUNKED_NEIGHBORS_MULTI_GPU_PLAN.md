@@ -2,7 +2,7 @@
 
 Plan index: [PLANS.md](PLANS.md). Parent physics programme: [driven compressible turbulence](docs/roadmap/driven_compressible_turbulence.md).
 
-Status, 2026-10-30: **Phase 4 bounded process proof of concept qualified; local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 filtering/redistribution qualified locally; L5 bounded stress qualified; L6 bounded compatibility matrix qualified; L7 actual wide-edge debug access qualified**.
+Status, 2026-10-31: **Phase 4 bounded process proof of concept qualified; local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 filtering/redistribution qualified locally; L5 bounded stress qualified; L6 bounded compatibility matrix qualified; L7 actual wide-edge debug access qualified; overnight real-flow queue active**.
 The count/scan/ownership design is agreed in discussion. Core/main and frontend/dev
 are integrated; see the [integration report](docs/chunked_integration_2026-10-30.md).
 The planner and opt-in standalone single-device chunk construction/lifecycle are
@@ -1713,3 +1713,61 @@ The original J/work occupy37.253 GiB globally; standalone allocated peak46.578
 GiB including retained source storage and filtered J. All8 large cohorts /12
 rank reports pass. Source package bytes remain identical to L6; the raw report
 and `summary.json` retain separate costs/peaks for every case.
+
+### Overnight real-flow campaign (authorized2026-10-30; launched2026-10-31)
+
+User requests serial CRKSPH32³/64³/96³/128³ and an actual flow above INT_MAX
+neighbours. User chooses t=4 at every resolution, sparse continuation checkpoints
+and a conditional t=40 continuation at96³ or128³ if measured runtime fits a
+10–12+hour window. Use the established B7/nh4, seed1234, OU0.3 bands1–2, finite
+gamma cooling bath and fresh native midpoint model. Source copies are frozen
+under `.tmp/crksph-3d-overnight-20261030/runtime/`; no shared install changes.
+Use one process on the single GPU with chunk-owned J/W, int64 local offsets and
+normal qualified kernel lane defaults; full particle/video output has no peer
+collectives. Count-only metadata/memory gates precede large pair allocation.
+Require measured initial total edges>INT_MAX for the final resolution, selecting
+160³/164³/168³ from actual counts, without changing supports to force the count.
+Qualify3D resume on a small fixture before queue launch. Keep z=0 slice video,
+per-step scalar diagnostics, fresh RHS checks and sparse native checkpoints.
+A sequential detached supervisor monitors GPU/process memory and progress,
+stops failed dependencies, and chooses a t40 continuation only from passed
+96³/128³ runs when a1.5× measured-cost forecast fits the remaining12.5h budget.
+
+The detached serial supervisor launched at2026-10-31 00:01:30 UTC, PID3878944,
+with a12.5hour wall window. Both source packages and integrators/plotting are
+frozen in941 hashed files; subsequent checkout edits cannot affect these jobs.
+Small3D controls pass exact flat/chunked and changed-budget restart fields
+(existing2e-12 source-budget tolerance), including a time-limited endpoint save.
+Only its explicit endpoint time representation differs: the case snaps to its
+declared Python time; all particle fields still compare exactly. The driver
+saves the retained positive uncapped physical next dt for continuation, restores
+the capped runner dt afterward, and does not modify library/numerical sources.
+The vispy/EGL96² z=0 density/speed slice smoke video passes and was inspected.
+
+32³ already reaches t4 with no bad RHS; the full run writes native midpoint and
+final files plus a slice video.64³ is active at this checkpoint. Measured initial
+counts are16,875,520 at32³ and135,004,160 at64³ (515 stored neighbours/particle).
+At that occupancy160³ has2,109,440,000 edges, below INT_MAX;164³ is expected to
+qualify at2,271,636,160, subject to the scheduled actual count/memory gate. The
+wide flow must also report full native RHS calls above INT_MAX, rather than
+only a wide initialization recipe. Raw RHS positivity/finite checks and accepted
+energy/thermodynamic gates remain active throughout every stage.
+
+Storage policy: one midpoint and one final native checkpoint per simulation,
+with at most one overwritten `latest.h5` every20wall minutes; no global J/W or
+dense particle export sequence. Scalars are logged per accepted step. Videos
+use0.25 physical-time spacing to t4 and1.0 during a continuation. Watchdogs
+require accepted progress within20min and a graceful accepted-step checkpoint
+at the wall budget; only the supervisor's own process group can be terminated.
+No unrelated GPU process is terminated. Larger dependent runs stop on failure.
+
+After all five stages pass, the supervisor prefers128³→t40 if its measured t4
+loop cost×9×1.5 plus30min reserve fits the remaining window; otherwise it tests
+96³ against the same rule. It resumes the saved flow/OU clock. The choice and
+its forecast are recorded, including a clear decision if neither fits.
+Campaign configuration, executable scripts, pinned copies, controls, live
+status, GPU telemetry, results/videos/checkpoints: `.tmp/crksph-3d-overnight-20261030/`.
+This queue is running independently of the chat; it has not finished and does
+not yet qualify the larger real-flow capacity or statistical stationarity.
+
+Initial32³ measured loop: 38.715s, 39.304ms/step, 985accepted steps; Torch allocated peak0.506GiB. All run costs include declared observers and are retained in per-run JSON.
