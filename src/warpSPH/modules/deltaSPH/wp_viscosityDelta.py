@@ -48,6 +48,7 @@ from torch.profiler import profile, ProfilerActivity
 from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
+from warpSPHCore.autograd.operator_spec import RowRole
 
 __all__ = ['computeVelocityDiffusionDeltaSPH', 'nuToAlpha', 'alphaToNu']
 
@@ -331,16 +332,17 @@ def computeVelocityDiffusionDeltaSPH_KernelTiled(
 
 
 def _velocityDiffusionDtype(ctx, extras):
-    return castTorchToWarpAsBuiltins(ctx.query.velocities).dtype
+    return castTorchToWarpAsBuiltins(extras["queryVelocities"]).dtype
 
 
 _VELOCITY_DIFFUSION_DELTA_SPH = OperatorSpec(
+    rowChunked=True,
     kernel=computeVelocityDiffusionDeltaSPH_Kernel,
     tiledKernel=computeVelocityDiffusionDeltaSPH_KernelTiled,
     outputs=(OutputSpec(dtype=_velocityDiffusionDtype, shape=ShapeOf.QUERY),),
     extras=(
-        ExtraSpec("queryVelocities", ExtraKind.TENSOR),
-        ExtraSpec("referenceVelocities", ExtraKind.TENSOR),
+        ExtraSpec("queryVelocities", ExtraKind.TENSOR, RowRole.QUERY),
+        ExtraSpec("referenceVelocities", ExtraKind.TENSOR, RowRole.REFERENCE),
         ExtraSpec("inviscid", ExtraKind.SCALAR),
         ExtraSpec("alpha", ExtraKind.SCALAR),
         ExtraSpec("c_s", ExtraKind.SCALAR),

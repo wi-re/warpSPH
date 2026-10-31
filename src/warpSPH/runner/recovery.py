@@ -34,6 +34,8 @@ def captureBoundary(ctx, system):
         _scope(ctx, system)
     except (NotImplementedError, ValueError):
         return None
+    if not hasattr(system, 'sourceTerms'):
+        return (token[1], None, ctx.config.dt, system.deltaStages)
     return (token[1], system.sourceTerms.acceleration.state_dict(), ctx.config.dt)
 
 
@@ -51,7 +53,7 @@ def recoverAllocation(ctx, result, boundary, original):
     try:
         if boundary is None:
             raise RuntimeError('No qualified accepted chunked checkpoint boundary is available.')
-        completed, forcing, nextDt = boundary
+        completed, forcing, nextDt = boundary[:3]
         if torch.device(ctx.device).type == 'cuda':
             torch.cuda.synchronize(ctx.device)
         from ..modules.forcing import FourierOU
@@ -60,13 +62,18 @@ def recoverAllocation(ctx, result, boundary, original):
         # must not be treated as part of the accepted particle state.
         scratch = {name: None for name in ('pairWork', 'rerunRequest', 'supportGrid', 'listGrid', 'meshlessStages')
                    if hasattr(result.state, name)}
-        accepted = replace(result.state, **scratch, sourceTerms=replace(result.state.sourceTerms,
-                           acceleration=FourierOU.from_state_dict(forcing)))
+        if forcing is None:
+            scratch['deltaStages'] = boundary[3]
+            accepted = replace(result.state, **scratch)
+        else:
+            accepted = replace(result.state, **scratch, sourceTerms=replace(result.state.sourceTerms,
+                               acceleration=FourierOU.from_state_dict(forcing)))
         if hasattr(result.state, 'pairWork'):
             result.state.pairWork = None
         result.state = accepted
         result.nSteps = completed - ctx.spec.resumeStepOffset
-        ctx.scratch['driving'] = accepted.sourceTerms.acceleration
+        if forcing is not None:
+            ctx.scratch['driving'] = accepted.sourceTerms.acceleration
         ctx.scratch['completedSteps'] = completed
         ctx.config.dt = nextDt
         markCheckpointBoundary(ctx, accepted, completed)

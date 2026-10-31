@@ -28,6 +28,7 @@ __all__ = ['writeChunkedCheckpoint', 'restoreChunkedCheckpoint']
 def markCheckpointBoundary(ctx, system, completed):
     """Weak identity token: do not retain the previous system's pair buffers."""
     if isinstance(getattr(system,'adjacency',None), ChunkedAdjacency):
+        ctx.scratch['completedSteps'] = completed
         ctx.scratch['_rowChunkAccepted'] = (weakref.ref(system), completed, float(system.t))
 
 
@@ -87,6 +88,10 @@ def _validateState(state):
 
 
 def _scope(ctx,system):
+    from ..systems.weaklyCompressible import WeaklyCompressibleSystem
+    if isinstance(system, WeaklyCompressibleSystem):
+        from . import deltaChunkCheckpoint
+        return deltaChunkCheckpoint._scope(ctx,system)
     from ..modules.meshless.sources import ConservedSources
     from ..modules.forcing import FourierOU
     if (ctx.spec.caseName!='drivenTurbulence' or getattr(ctx.scheme,'name',ctx.scheme) not in CHUNKED_SCHEMES
@@ -130,6 +135,10 @@ def writeChunkedCheckpoint(path,ctx,system,*,overwrite=False):
     existing file. A failed write leaves no partially published checkpoint.
     Automatic output cadence is a separate launcher/output integration step.
     """
+    from ..systems.weaklyCompressible import WeaklyCompressibleSystem
+    if isinstance(system, WeaklyCompressibleSystem):
+        from . import deltaChunkCheckpoint
+        return deltaChunkCheckpoint.writeCheckpoint(path,ctx,system,overwrite=overwrite)
     communication=getattr(getattr(system,'adjacency',None),'communication',None)
     path=Path(path).expanduser().resolve()
     def validate():
@@ -206,6 +215,10 @@ def writeChunkedCheckpoint(path,ctx,system,*,overwrite=False):
 
 def restoreChunkedCheckpoint(path,ctx,system):
     """Collectively restore into an explicitly seeded target chunk policy/group."""
+    from ..systems.weaklyCompressible import WeaklyCompressibleSystem
+    if isinstance(system, WeaklyCompressibleSystem):
+        from . import deltaChunkCheckpoint
+        return deltaChunkCheckpoint.restoreCheckpoint(path,ctx,system)
     prior=system.adjacency
     communication=prior.communication
     path=Path(path).expanduser().resolve()

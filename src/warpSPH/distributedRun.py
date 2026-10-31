@@ -6,6 +6,7 @@ the ordinary runner are unchanged. MPI/ROCm and physical site setup are separate
 from dataclasses import replace
 from hashlib import sha256
 import json
+import math
 import os
 from pathlib import Path
 import socket
@@ -18,7 +19,7 @@ import torch
 from warpSPHCore import get_torch_offset_dtype, get_torch_precision
 from warpSPHCore.radiusSearch import RowChunkPolicy, buildChunkedVerletList
 from .runner import RunConfiguration, RunAllocationError
-from .distributed import CHUNKED_SCHEMES
+from .distributed import CHUNKED_SCHEMES,CHUNKED_WEAKLY_SCHEMES
 from .io.chunkCheckpoint import writeChunkedCheckpoint
 
 
@@ -78,13 +79,19 @@ def runDistributed(configuration,communication,*,outputDirectory,edgeBudget,maxR
     checkpoints use accepted-state native files; each rank writes its own runtime
     report. All live peers receive local setup/IO failures through the group.
     """
-    from .cases.compressible.drivenTurbulence import drivenTurbulenceCase,buildSystem
+    from .cases.compressible.drivenTurbulence import drivenTurbulenceCase
+    from .cases.periodic.tgvWeaklyCompressible import tgvWeaklyCompressibleCase
+    cases={'drivenTurbulence':drivenTurbulenceCase,'tgv-wc':tgvWeaklyCompressibleCase}
+    base=cases.get(getattr(configuration,'case',None))
     output=Path(outputDirectory).expanduser().resolve()
     def validate():
-        if not isinstance(configuration,RunConfiguration) or configuration.case!='drivenTurbulence':
-            raise ValueError('Distributed launcher currently supports drivenTurbulence only.')
-        spec=configuration.resolve(drivenTurbulenceCase)
-        if (spec.scheme not in CHUNKED_SCHEMES or spec.execution!='eager'
+        if not isinstance(configuration,RunConfiguration) or base is None:
+            raise ValueError('Distributed launcher supports drivenTurbulence and periodic tgv-wc.')
+        spec=configuration.resolve(base)
+        allowed=CHUNKED_SCHEMES if configuration.case=='drivenTurbulence' else CHUNKED_WEAKLY_SCHEMES
+        if configuration.case=='tgv-wc' and spec.samplingScheme!='regular':
+            raise NotImplementedError('Distributed tgv-wc currently qualifies regular sampling with native shuffle relaxation only.')
+        if (spec.scheme not in allowed or spec.execution!='eager'
             or spec.cudaGraph or spec.pipelineOutputs or spec.store or spec.plot or spec.video):
             raise ValueError('Distributed launcher requires a supported eager chunked scheme with automatic store/plot/video disabled.')
         if type(checkpointEvery) is not int or checkpointEvery<0:
@@ -120,17 +127,17 @@ def runDistributed(configuration,communication,*,outputDirectory,edgeBudget,maxR
         communication.localPhase('launcher:manifest-start',publishStart)
         configured=RunConfiguration.fromDict(document)
         configured.simulation.update(device=str(communication.device),quiet=True,progress=communication.rank==0,storeMode='trajectory',exportRoot=str(output))
-        base=drivenTurbulenceCase
         def build(ctx):
+            ctx.scratch.setdefault('completedSteps',ctx.spec.resumeStepOffset)
             def factory(state,config):
                 compatible=ctx.spec.scheme in ('CRKSPH','CompSPH')
                 meshless=ctx.spec.scheme in ('MFM','MFV')
                 dim=state.positions.shape[1] if compatible else 1
                 policy=RowChunkPolicy(edgeBudget=edgeBudget,maxRows=maxRows,
-                    bytesPerEdge=4+(dim*state.positions.element_size() if compatible else state.positions.element_size() if meshless else 0),maxElementsPerEdge=dim)
+                    bytesPerEdge=(8 if configured.case=='tgv-wc' else 4)+(dim*state.positions.element_size() if compatible else state.positions.element_size() if meshless else 0),maxElementsPerEdge=dim)
                 return buildChunkedVerletList(state,config.domain,policy=policy,communication=communication,
                     supportMode=config.supportMode,verletScale=config.verletScale)
-            return buildSystem(ctx,neighborhoodFactory=factory)
+            return base.buildSystem(ctx,neighborhoodFactory=factory)
         def accepted(ctx,system,completed):
             if checkpointEvery and completed%checkpointEvery==0:
                 writeChunkedCheckpoint(output/f'checkpoint-{completed:08d}.h5',ctx,system)
@@ -138,7 +145,13 @@ def runDistributed(configuration,communication,*,outputDirectory,edgeBudget,maxR
             values=communication.localPhase('launcher:diagnostics',lambda:base.diagnostics(ctx,system))
             def publish():
                 if communication.rank==0:
-                    row=dict(completed=ctx.scratch['completedSteps'],time=float(system.t),**values)
+                    # Native periodic diagnostics use NaN for wall-only
+                    # statistics that have no samples. JSON null retains that
+                    # unavailable value; accepted particle finiteness is checked
+                    # independently before diagnostics.
+                    exported={key:(None if key.startswith('nopenshift') and isinstance(value,float)
+                        and not math.isfinite(value) else value) for key,value in values.items()}
+                    row=dict(completed=ctx.scratch['completedSteps'],time=float(system.t),**exported)
                     with (output/'diagnostics.jsonl').open('a') as file:file.write(json.dumps(row,allow_nan=False)+'\n')
             communication.localPhase('launcher:diagnostics-output',publish)
             return values

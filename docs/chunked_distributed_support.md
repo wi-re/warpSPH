@@ -16,9 +16,10 @@ sequence, qualification evidence and remaining capacity/site gates.
 | InutsukaGSPH | Eager 2D/3D Gaussian density plus first/second-order force/energy | Compact and Gaussian lists remain distinct; Gaussian reach uses an agreed eager scalar |
 | PESPH | Eager periodic 2D/3D, both variants, number-density supports/grad-h, native RK2/RK4 and OU driving | Pressure-energy supports the existing relaxation bath; pressure-entropy driving requires adiabatic mode; no walls/materials/AD/graphs |
 | MFM/MFV | Eager native conserved stages, global canonical flux identity, projected CG/MG closure and owned face weights, OU sources | Native temporal defaults preserved; driven sources require SSPRK; no chunked walls/materials/AD/graphs |
-| Prepared operators | Shared opted-in operators, native work, PESPH pressure passes, MFM geometry/closure/fluxes, GSPH, Gaussian density and Inutsuka | Explicit query/reference/chunk/dummy roles; primal eager execution |
+| deltaSPH, Sun2017 | Eager periodic native density stages, diffusion, pressure-sign switch and delta shifting in 2D/3D; managed 2D tgv-wc case | Sun2017 frozen diffusion and full shifting strength retained; no walls/free surfaces/materials/AD/graphs or other shifting methods |
+| Prepared operators | Shared opted-in operators, native work, PESPH pressure passes, MFM geometry/closure/fluxes, delta operators, GSPH, Gaussian density and Inutsuka | Explicit query/reference/chunk/dummy roles; primal eager execution |
 | Neighbour lanes | Fixed scalar and global 32-lane CUDA configurations | Existing tiled kernels are used where available; Godunov/Gaussian kernels use scalar fallback |
-| Native checkpoint | Accepted-step drivenTurbulence, all eight compressible schemes with the PESPH thermal restriction, FourierOU/ConservedSources | Canonical particle/time/source/search recipe; rebuild owned J, never serialize W or a global pair tensor |
+| Native checkpoint | Accepted-step drivenTurbulence for eight compressible schemes; periodic 2D tgv-wc for delta/Sun2017 | Native particle/time/search history; driven cases retain FourierOU/source ledgers; delta uses its own density/mask-history schema and never stores frozen diffusion or pair arrays |
 | Legacy checkpoint | Qualified version-1 CSR/COO import for Monaghan/CRKSPH/CompSPH | Godunov legacy import explicitly rejects; use the native format |
 | Actual wide-edge addressing | Up to2,500,000,000 real neighbours across38 bounded chunks; dedicated J/work; eager/prepared density; filtering and owner transfers | Dense debug geometry, one GPU, standalone/two NCCL ranks, both local offset widths; per-chunk extents remain bounded |
 | Process/rank changes | Gloo 1–5 ranks and tiny two-process/one-GPU NCCL controls | Physical device-count changes and multi-node topology remain unqualified |
@@ -27,7 +28,7 @@ The dedicated launcher currently accepts `drivenTurbulence` with these eight
 compressible schemes. Qualified PESPH pressure-entropy driving uses `solver.variant=PressureEntropy`,
 `solver.dissipation=false` and `params.thermalModel=adiabatic`; no entropy-bath
 policy is selected automatically. Native checkpoint recovery additionally covers bounded 2D/3D CRKSPH,
-CompSPH, PESPH and MFM/MFV allocation failures; a bounded164³ failure/restart with more than two billion neighbours also passes.
+CompSPH, PESPH, MFM/MFV and delta/Sun2017 allocation failures; a bounded164³ failure/restart with more than two billion neighbours also passes.
 Full-duration large-flow stability remains a separate gate. GSPH/Inutsuka operator controls
 include reconstructed inputs and the existing optional time-centred energy
 second pass. This adds no new time-integration or time-centred RHS method.
@@ -107,7 +108,7 @@ and exact search history; it does not insert an extra support Newton solve.
 Two/three Gloo ranks qualify managed save/resume with changed chunk budgets,
 local offset widths and rank count, plus injected force-output and neighbour
 allocation failure. Two NCCL2.32.3 ranks sharing one GPU qualify both variants
-in2D/3D, with ordinary and failure-recovery continuation against independent
+in 2D/3D, with ordinary and failure-recovery continuation against independent
 four-step references. Accepted fields, stage clocks and forcing histories are
 exact; the existing source-budget roundoff tolerance remains2e-12. Allocation
 failures are injected, not deliberate device exhaustion. No long-flow or
@@ -253,3 +254,29 @@ the usual start-of-step closure, retaining finite-tolerance warm-start history.
 Neighbour and weight allocation failures preserve the accepted conserved state.
 Gloo/NCCL debug continuation changes rank count, row budget and local offset width.
 These short controls establish correctness, not physical multi-GPU performance.
+
+## Delta-SPH / Sun2017
+
+The launcher additionally accepts `case=tgv-wc` with `solver.scheme=deltaSPH` or
+`sun2017DeltaSPH`. The bounded case adapter is 2D, periodic and regularly sampled;
+it retains the native initial relaxation and its 128-iteration default. Optional
+`params.shuffleSeed` makes the jitter reproducible. Without a seed, rank0's
+jitter is replicated. Initial relaxation retains the original pair-list-free
+grid density pass on every replica and owns only the shift neighbour rows.
+Native 3D operator/step controls are separately qualified on Gloo/NCCL.
+
+Sun2017 retains its frozen diffusion within each RK step and fresh diffusion at
+stage 0 of the next step. Native shifting and its transport corrections remain
+active under their existing defaults. Weakly compressible pressure may be
+signed; accepted density must stay positive and all particle fields finite.
+Restart saves accepted density/particle fields, clock, edge-free search recipe
+and accepted mask history when present. It never saves a mid-step frozen RHS.
+RHS and post-step shifting allocation failures preserve the accepted input and
+publish an atomic checkpoint. Wall-only no-penetration statistics with no
+samples are JSON null in launcher diagnostics.
+
+The existing CPU `test_theUnrenormalizedVariantCancelsToo` threshold fails with
+RMS ratio 0.2218983918428421 against 0.2 on both pre-port and current source.
+This numerical validation issue is recorded in the canonical plan; the formula
+and tolerance were left unchanged. New storage/stage/restart controls pass.
+The broader wall/free-surface/other-shift/AD/graph and case-adapter gates remain.

@@ -852,7 +852,9 @@ def particleDistributionMetricsDevice(ctx: RunContext, state) -> Optional[Dict[s
     same count."""
     adjacency = getattr(state, 'adjacency', None)
     particles = state.state
-    if adjacency is None or not hasattr(adjacency, 'paddedI'):
+    from warpSPHCore.radiusSearch import ChunkedAdjacency
+    chunked = isinstance(adjacency, ChunkedAdjacency)
+    if adjacency is None or (not chunked and not hasattr(adjacency, 'paddedI')):
         return None
     fluidIndex = cachedKindIndex(particles.kinds, 0, ctx.config)
     if fluidIndex.numel() == 0:
@@ -868,6 +870,12 @@ def particleDistributionMetricsDevice(ctx: RunContext, state) -> Optional[Dict[s
     # instability being measured is fluid particles collapsing onto each other.
     # The padded pair arrays go straight in: `_distributionCore` masks the -1 padding, self pairs and non-fluid
     # pairs on the device (fixed shapes, no boolean gather, no sync, no cache keyed on the edge list).
+    if chunked:
+        from ...modules.diagnostics.distribution import distributionRows
+        nn, counts = distributionRows(particles, ctx.config, adjacency)
+        q = deviceConstant([0.5, 0.01], torch.float32, pos.device)
+        vals = _distributionParticles(nn, counts, fluidIndex, particles.densities, q)
+        return dict(zip(_DISTRIBUTION_KEYS + ('_nnFinite',), vals.unbind(0)))
     i, j = cooRows(adjacency), adjacency.paddedJ
     domain = getattr(ctx.config, 'domain', None)
     span = per = None
@@ -906,6 +914,11 @@ def _distributionCore(pos, iPad, jPad, fluid, fluidIndex, densities, span, per, 
     counts = torch.zeros(n, device=pos.device, dtype=dist.dtype)
     counts.scatter_add_(0, i, valid.to(dist.dtype))
 
+    return _distributionParticles(nn, counts, fluidIndex, densities, q)
+
+
+@compileGlue
+def _distributionParticles(nn, counts, fluidIndex, densities, q):
     # Normalise by the MEDIAN nearest-neighbour distance, not `config.dx`.
     # The samplers do not lay particles down at `config.dx`: measured on
     # `sloshingTank`, the achieved lattice spacing is ~0.6 dx at every

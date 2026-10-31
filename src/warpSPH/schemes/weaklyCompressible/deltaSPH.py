@@ -58,6 +58,8 @@ def deltaSPH_step(
     verbose = False,
     stageIndex = None,
 ):
+    from ...modules.deltaSPH.chunked import checkDeltaChunks
+    checkDeltaChunks(system, config, schemeConfig)
     currentSystem = system
     currentState = currentSystem.state
 

@@ -24,6 +24,7 @@ from torch.profiler import profile, ProfilerActivity
 from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
+from warpSPHCore.autograd.operator_spec import RowRole
 
 
 from ...enumTypes import PressureForceScheme
@@ -142,7 +143,7 @@ def computePressureSurfaceAware_Func_Adjacency(
     
     queryPressures: wp.array(dtype = scalar_t), referencePressures: wp.array(dtype = scalar_t), # type: ignore
     querySurfaceMask: wp.array(dtype = wp.int32), referenceSurfaceMask: wp.array(dtype = wp.int32), # type: ignore
-    pressureTerm: wp.int32, # type: ignore
+    queryMaskIsField: wp.int32, pressureTerm: wp.int32, # type: ignore
 
     outputValue : Any, # type: ignore
 ):
@@ -157,7 +158,7 @@ def computePressureSurfaceAware_Func_Adjacency(
     useCRK, Ai, Bi, gradA_i, gradB_i = getCRK_i(correctionData, i)
     
     P_i = access_optional(queryPressures, i, queryPressures.shape[0] > 1, queryPressures[0])
-    mask_i = access_optional(querySurfaceMask, i, querySurfaceMask.shape[0] > 1,0)
+    mask_i = access_optional(querySurfaceMask, i, queryMaskIsField != 0,0)
 
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
@@ -220,7 +221,7 @@ def computePressureSurfaceAware_Kernel(
     # Do not change the parameters above
     queryPressures: wp.array(dtype = scalar_t), referencePressures: wp.array(dtype = scalar_t), # type: ignore
     querySurfaceMask: wp.array(dtype = wp.int32), referenceSurfaceMask: wp.array(dtype = wp.int32), # type: ignore
-    pressureTerm: wp.int32, # type: ignore
+    queryMaskIsField: wp.int32, pressureTerm: wp.int32, # type: ignore
     # The last parameter is always the output array and should not be changed
     outputValues : wp.array(dtype = vector(length=Any, dtype=scalar_t)) # type: ignore
 ):                                                                                    
@@ -237,7 +238,7 @@ def computePressureSurfaceAware_Kernel(
         # The parameters above are default parameters and shold not be changed
         queryPressures, referencePressures,
         querySurfaceMask, referenceSurfaceMask,
-        pressureTerm,
+        queryMaskIsField, pressureTerm,
 
         zero_like_warp(outputValues)
     ) / queryState.densities[i]
@@ -256,7 +257,7 @@ def computePressureSurfaceAware_KernelTiled(
     # Do not change the parameters above
     queryPressures: wp.array(dtype = scalar_t), referencePressures: wp.array(dtype = scalar_t), # type: ignore
     querySurfaceMask: wp.array(dtype = wp.int32), referenceSurfaceMask: wp.array(dtype = wp.int32), # type: ignore
-    pressureTerm: wp.int32, # type: ignore
+    queryMaskIsField: wp.int32, pressureTerm: wp.int32, # type: ignore
     # The last parameter is always the output array and should not be changed
     outputValues : wp.array(dtype = vector(length=Any, dtype=scalar_t)) # type: ignore
 ):
@@ -271,7 +272,7 @@ def computePressureSurfaceAware_KernelTiled(
         kernelProperties,
         queryPressures, referencePressures,
         querySurfaceMask, referenceSurfaceMask,
-        pressureTerm,
+        queryMaskIsField, pressureTerm,
         zero_like_warp(outputValues)
     )
     total = laneSum(partial)
@@ -284,14 +285,16 @@ def _surfaceAwareDtype(ctx, extras):
 
 
 _PRESSURE_SURFACE_AWARE = OperatorSpec(
+    rowChunked=True,
     kernel=computePressureSurfaceAware_Kernel,
     tiledKernel=computePressureSurfaceAware_KernelTiled,
     outputs=(OutputSpec(dtype=_surfaceAwareDtype, shape=ShapeOf.QUERY),),
     extras=(
-        ExtraSpec("queryPressures", ExtraKind.TENSOR),
-        ExtraSpec("referencePressures", ExtraKind.TENSOR),
-        ExtraSpec("querySurfaceMask", ExtraKind.TENSOR),
-        ExtraSpec("referenceSurfaceMask", ExtraKind.TENSOR),
+        ExtraSpec("queryPressures", ExtraKind.TENSOR, lambda ctx, extras: RowRole.REPLICATED if extras["queryPressures"].shape[0] == 1 else RowRole.QUERY),
+        ExtraSpec("referencePressures", ExtraKind.TENSOR, lambda ctx, extras: RowRole.REPLICATED if extras["referencePressures"].shape[0] == 1 else RowRole.REFERENCE),
+        ExtraSpec("querySurfaceMask", ExtraKind.TENSOR, lambda ctx, extras: RowRole.REPLICATED if extras["querySurfaceMask"].shape[0] == 1 else RowRole.QUERY),
+        ExtraSpec("referenceSurfaceMask", ExtraKind.TENSOR, lambda ctx, extras: RowRole.REPLICATED if extras["referenceSurfaceMask"].shape[0] == 1 else RowRole.REFERENCE),
+        ExtraSpec("queryMaskIsField", ExtraKind.SCALAR),
         ExtraSpec("pressureTerm", ExtraKind.SCALAR),
     ),
 )
@@ -348,6 +351,7 @@ def computePressureSurfaceAwareWarp(
                 _PRESSURE_SURFACE_AWARE, ctx,
                 queryPressures=queryPressures, referencePressures=referencePressures,
                 querySurfaceMask=querySurfaceMask_, referenceSurfaceMask=referenceSurfaceMask_,
+                queryMaskIsField=wp.int32(querySurfaceMask_.shape[0] > 1),
                 pressureTerm=wp.int32(pressureTerm.value),
             )
 

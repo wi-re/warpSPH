@@ -181,9 +181,10 @@ def configureScheme(ctx: RunContext) -> None:
         ctx.schemeConfig.shiftProperties.active = bool(shifting)
 
 
-def buildSystem(ctx: RunContext):
+def buildSystem(ctx: RunContext, *, neighborhoodFactory=None):
     system = setupBasicWeaklyCompressibleInitialState(
-        ctx.spec.nx, ctx.config, ctx.schemeConfig, ctx.SimulationState, ctx.SimulationSystem)
+        ctx.spec.nx, ctx.config, ctx.schemeConfig, ctx.SimulationState, ctx.SimulationSystem,
+        neighborhoodFactory=neighborhoodFactory)
     if ctx.config.samplingScheme == SamplingScheme.regular:
         # A perfectly regular lattice is an unstable SPH equilibrium; the
         # shuffle is what keeps the early trajectory free of lattice noise.
@@ -200,7 +201,9 @@ def buildSystem(ctx: RunContext):
                 shuffleSchemeConfig.shiftProperties.sun2017Eq7Shift = bool(eq7)
             system.state.positions = shuffleParticles(
                 system.state, ctx.config, shuffleSchemeConfig, ctx.param('shuffleIters'),
-                jitterAmount=ctx.param('jitter'))
+                jitterAmount=ctx.param('jitter'), adjacency=system.adjacency,
+                generator=(torch.Generator(device=system.state.positions.device).manual_seed(ctx.param('shuffleSeed'))
+                           if ctx.param('shuffleSeed', None) is not None else None))
     else:
         # A non-regular `samplingScheme` is a complete initial-configuration
         # strategy dispatched by `sample.bySamplingScheme.sampleParticles`
@@ -212,6 +215,8 @@ def buildSystem(ctx: RunContext):
         # scheme's decorrelation step, and re-jittering a relaxed glass
         # would destroy it.
         system.state.positions = sampleParticles(ctx.spec.nx, ctx.config).positions
+    if neighborhoodFactory is not None:
+        system.adjacency = neighborhoodFactory(system.state, ctx.config)
     return system
 
 
@@ -282,6 +287,11 @@ def initialConditions(ctx: RunContext, system) -> None:
             torch.cos(2.0 * (k * positions[:, 0] + ph))
             + torch.cos(2.0 * (k * positions[:, 1] + ph)))
         system.state.densities = rho0 + p / (c0 ** 2)
+
+
+def restoreCheckpoint(ctx, system, checkpoint):
+    if 'deltaRowChunkCheckpointVersion' in checkpoint.attrs:
+        raise NotImplementedError('Delta chunk checkpoints require an explicit chunked target; use the distributed launcher or a neighborhoodFactory.')
 
 
 def tgvTimestep(ctx: RunContext, state) -> float:
@@ -405,6 +415,7 @@ tgvWeaklyCompressibleCase = registerCase(Case(
     updatePlot=updatePlot,
     extraData=paramExtraData,
     timestep=tgvTimestep,
+    restoreCheckpoint=restoreCheckpoint,
     defaults=dict(
         WEAKLY_COMPRESSIBLE_DEFAULTS,
         caseName='05-taylorGreenVortex',
@@ -423,6 +434,7 @@ tgvWeaklyCompressibleCase = registerCase(Case(
         'k': P('number', 'Twice the spatial wave number used by the initial field.', 'initial', exclusiveMinimum=0),
         'phase': P('number', 'Initial field phase; null uses the even-k centring rule.', 'initial', units='radian', nullable=True),
         'uMag': P('number', 'Initial peak velocity scale.', 'initial', units='velocity', exclusiveMinimum=0),
+        'shuffleSeed': P('integer', 'Optional reproducible initial jitter seed; null retains the caller RNG.', 'sampling', minimum=0, nullable=True),
         'shuffleIters': P('integer', 'Initial particle relaxation iterations; zero skips relaxation.', 'sampling', minimum=0),
         'jitter': P('number', 'Jitter for initial particle relaxation.', 'sampling', minimum=0),
         'shifting': P('boolean', 'Enable particle shifting; null keeps the solver default.', 'shifting', nullable=True),
@@ -446,6 +458,7 @@ tgvWeaklyCompressibleCase = registerCase(Case(
         phase=None,
         uMag=1.0,
         shuffleIters=128,
+        shuffleSeed=None,
         jitter=1.0,
         # None -> whatever the selected scheme defaults to (on, for deltaSPH);
         # False runs the plain delta-SPH leg of the PST A/B. See

@@ -2,7 +2,7 @@
 
 Plan index: [PLANS.md](PLANS.md). Parent physics programme: [driven compressible turbulence](docs/roadmap/driven_compressible_turbulence.md).
 
-Status, 2026-10-31: **Bounded local L1–L7, allocation recovery and CRK work-launch fix qualified; long-flow/physical-device gates held; compressible compatibility qualified through MFM/MFV; delta/Sun2017 continuation active**.
+Status, 2026-10-31: **Bounded local L1–L7, allocation recovery and CRK work-launch fix qualified; long-flow/physical-device gates held; compressible compatibility qualified through MFM/MFV; bounded delta/Sun2017 support qualified; incompressible compatibility next**.
 The count/scan/ownership design is agreed in discussion. Core/main and frontend/dev
 are integrated; see the [integration report](docs/chunked_integration_2026-10-30.md).
 The planner and opt-in standalone single-device chunk construction/lifecycle are
@@ -154,16 +154,16 @@ forcing history and clocks and clears trial stage scratch.
 CPU/CUDA native 2D/3D parity, sources, restart and neighbour/weight allocation
 failures pass. Default MFM SSPRK / MFV Hancock controls pass. CPU FP64 checks and
 actual Gloo CLI save/resume across1→2→3 ranks pass. Core CG/MG/capped-closure
-controls pass on CPU/CUDA and two Gloo/NCCL ranks. All24 independent managed
+controls pass on CPU/CUDA and two Gloo/NCCL ranks. All 24 independent managed
 reference/save/resume jobs pass across Gloo/NCCL, MFM/MFV, none/project closure
-and2D/3D, changing1→2→3 ranks, row budgets and local offset widths. Eight more
+and 2D/3D, changing1→2→3 ranks, row budgets and local offset widths. Eight more
 managed neighbour-failure/recovery jobs pass across both transports and modes.
 Closure-weight allocation failures are coordinated in the core worker and
 preserve accepted native state in frontend CPU/CUDA tests. The affected CPU
 regression set passes159 checks (three device-only skips); native FP64 CPU
-controls pass18 checks, and core FP64 CUDA controls pass40. Actual Gloo CLI
+controls pass 18 checks, and core FP64 CUDA controls pass 40. Actual Gloo CLI
 output/manifests/save/resume pass for both modes. C2 bounded admission is
-complete; additional final FP64 CUDA frontend checks are running. Evidence: `.tmp/meshless-delta-20261031/`.
+complete. Final FP64 CUDA frontend checks pass 21 controls. Evidence: `.tmp/meshless-delta-20261031/`.
 
 ### W1 delta/Sun2017 continuation (2026-10-31)
 
@@ -174,10 +174,71 @@ surface-aware pressure and delta shifting with explicit row roles. Initial
 shuffle must use the explicit chunk factory, coordinate its random perturbation
 across ranks and retain ordinary random/default behavior. Saved accepted density
 and surface history are separate from ephemeral per-step frozen diffusion;
-restart must recompute stage0 diffusion for the next real step. Qualify failure
+restart must recompute stage 0 diffusion for the next real step. Qualify failure
 inside post-step shifting as well as the RHS; do not let shared constant
 thermodynamic diagnostics mutate the accepted input state on a failed finalize.
 Keep walls/free surfaces/materials/graphs/AD and ACSPH outside W1 admission.
+
+### W1 bounded result and remaining gates (2026-10-31)
+
+Delta-SPH and Sun2017 now retain native density continuity, pressure sign switch,
+explicit shifting and their RK stage policy on owned rows. Density/velocity
+diffusion, surface-aware pressure and delta shifting declare query/reference
+identity. The pressure pass carries the global field/dummy mask distinction into
+one-row chunks, preserving the original singleton-field behavior. Native
+nearest-neighbour diagnostics now reduce per row, without global pair expansion.
+
+The periodic `tgv-wc` launcher uses the explicit chunk factory through initial
+relaxation. A fresh post-jitter search and a fresh final seed preserve the native
+per-row neighbour order; density during initial relaxation retains its original
+pair-list-free grid traversal on each replica. The ordinary RNG/defaults are
+unchanged, optional shuffleSeed makes initialization reproducible, and rank0's
+jitter is replicated for unseeded distributed initialization. The default 128
+relaxation iterations and full Sun shifting strength pass an exact CPU A/B.
+No solver parameter or default was weakened for admission.
+
+The dedicated accepted delta checkpoint saves native density/particle fields,
+clock and edge-free frozen search history, plus accepted mask history when used.
+It never saves the ephemeral frozen RHS: the next step computes fresh stage 0
+diffusion. Pressure may be signed; accepted density must be positive and every
+particle tensor finite. Failure during an RHS row allocation or post-step shift
+preserves the accepted state, including its diagnostic tensors, and publishes
+an atomic resumable checkpoint. The chunked finalizer owns diagnostic destinations
+before copying, so a rejected shift cannot overwrite the input's constant fields.
+Not-applicable wall-only diagnostic statistics appear as JSON null in launcher
+output, retaining the native unavailable value without allowing nonfinite state.
+
+All 28 independent managed Gloo/NCCL jobs pass: both schemes, one-rank reference,
+two-rank save, changed rows/offsets and up to three Gloo ranks on resume, injected
+RHS/shift failure after step 2 and recovery continuation. Native final fields,
+fresh stage rates, time and next dt match exactly. Four extra two-rank jobs
+qualify native 3D steps against the flat path on Gloo/NCCL. Native 2D/3D CUDA
+controls pass 13 checks in FP32 and15 in FP64 (one CPU-only default-initialization
+skip); FP64 CPU native controls pass 13, plus separate reverse-AD and initialization
+controls. Flat pressure/viscosity reverse derivatives match finite differences;
+their existing unregistered-JVP rejection is retained, and chunked AD rejects.
+Actual Gloo CLI manifests/output/save/resume pass for both schemes. The import
+scanner passes 574 modules and 6231 first-party imports across 1327 source files.
+Evidence: `.tmp/meshless-delta-20261031/`.
+
+**Known pre-existing CPU test failure; do not re-investigate as this port:**
+`test_deltaSPHDiffusion.py::test_theUnrenormalizedVariantCancelsToo` measures
+corrected/uncorrected RMS 0.2218983918428421 against a 0.2 threshold. The same
+failure and exact ratio reproduce using isolated pre-W1 frontend source
+`f700c56` with core`dcc62cf`; only row metadata changed in that diffusion
+operator. Its formula/tolerance were not altered. The other affected delta
+regressions pass 27 checks (six device-only skips). Configuration/catalogue,
+padded diagnostics and meshless integration regressions pass 126 checks on the
+GPU-capable stack; prior CRK neighbour-failure recovery passes two checks. Logs include the isolated
+baseline and current result. This is an existing numerical validation issue,
+separate from storage parity and continuation qualification.
+
+W1 admission is eager, periodic, one fluid material, native delta shifting;
+the managed launcher/checkpoint case is 2D `tgv-wc` with regular sampling/native
+relaxation. Native 3D operators/steps are qualified separately. Walls, free
+surfaces, other shifting schemes, AD/graphs and additional case adapters remain
+explicit gates. C2 and W1 bounded continuation are complete. I1 incompressible
+compatibility is next; ACSPH remains excluded and all overnight holds remain.
 
 ### C1 initial native checkpoint (`ea8534e`; superseded by driven admission above)
 
