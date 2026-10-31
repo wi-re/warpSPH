@@ -15,19 +15,19 @@ sequence, qualification evidence and remaining capacity/site gates.
 | GSPH | Eager 2D/3D self queries; first/second-order reconstruction | Global self-pair identity is supplied separately from local query indexing |
 | InutsukaGSPH | Eager 2D/3D Gaussian density plus first/second-order force/energy | Compact and Gaussian lists remain distinct; Gaussian reach uses an agreed eager scalar |
 | PESPH | Eager periodic 2D/3D, both variants, number-density supports/grad-h, native RK2/RK4 and OU driving | Pressure-energy supports the existing relaxation bath; pressure-entropy driving requires adiabatic mode; no walls/materials/AD/graphs |
-| MFM/MFV geometry moments | Ordinary/prepared row-owned moments and replicated inversion, empty/single/nonuniform 2D/3D controls | Face closure, gradients, fluxes and solver admission remain unported; default chunked closure explicitly rejects |
-| Prepared operators | Shared opted-in operators, native work, PESPH pressure passes, MFM moments, GSPH, Gaussian density and Inutsuka | Explicit query/reference/chunk/dummy roles; primal eager execution |
+| MFM/MFV | Eager native conserved stages, global canonical flux identity, projected CG/MG closure and owned face weights, OU sources | Native temporal defaults preserved; driven sources require SSPRK; no chunked walls/materials/AD/graphs |
+| Prepared operators | Shared opted-in operators, native work, PESPH pressure passes, MFM geometry/closure/fluxes, GSPH, Gaussian density and Inutsuka | Explicit query/reference/chunk/dummy roles; primal eager execution |
 | Neighbour lanes | Fixed scalar and global 32-lane CUDA configurations | Existing tiled kernels are used where available; Godunov/Gaussian kernels use scalar fallback |
-| Native checkpoint | Accepted-step drivenTurbulence, all six schemes with the PESPH thermal restriction, FourierOU/ConservedSources | Canonical particle/time/source/search recipe; rebuild owned J, never serialize W or a global pair tensor |
+| Native checkpoint | Accepted-step drivenTurbulence, all eight compressible schemes with the PESPH thermal restriction, FourierOU/ConservedSources | Canonical particle/time/source/search recipe; rebuild owned J, never serialize W or a global pair tensor |
 | Legacy checkpoint | Qualified version-1 CSR/COO import for Monaghan/CRKSPH/CompSPH | Godunov legacy import explicitly rejects; use the native format |
 | Actual wide-edge addressing | Up to2,500,000,000 real neighbours across38 bounded chunks; dedicated J/work; eager/prepared density; filtering and owner transfers | Dense debug geometry, one GPU, standalone/two NCCL ranks, both local offset widths; per-chunk extents remain bounded |
 | Process/rank changes | Gloo 1–5 ranks and tiny two-process/one-GPU NCCL controls | Physical device-count changes and multi-node topology remain unqualified |
 
-The dedicated launcher currently accepts `drivenTurbulence` with these six
-schemes. Qualified PESPH pressure-entropy driving uses `solver.variant=PressureEntropy`,
+The dedicated launcher currently accepts `drivenTurbulence` with these eight
+compressible schemes. Qualified PESPH pressure-entropy driving uses `solver.variant=PressureEntropy`,
 `solver.dissipation=false` and `params.thermalModel=adiabatic`; no entropy-bath
 policy is selected automatically. Native checkpoint recovery additionally covers bounded 2D/3D CRKSPH,
-CompSPH and PESPH allocation failures; a bounded164³ failure/restart with more than two billion neighbours also passes.
+CompSPH, PESPH and MFM/MFV allocation failures; a bounded164³ failure/restart with more than two billion neighbours also passes.
 Full-duration large-flow stability remains a separate gate. GSPH/Inutsuka operator controls
 include reconstructed inputs and the existing optional time-centred energy
 second pass. This adds no new time-integration or time-centred RHS method.
@@ -234,3 +234,22 @@ history. ACSPH is excluded. MFM/MFV already accumulate canonical face fluxes by
 row; their closure weights, CSR matvec shortcut and multigrid/preconditioner
 selection need explicit owned storage and dependent particle exchanges. Turning
 off closure or changing the selected preconditioner is not a compatibility port.
+
+## MFM/MFV closure and continuation
+
+Meshless execution keeps its native conserved Q, support policy and closure warm
+start. The default unprojected faces remain the default; opt-in projection keeps
+CG and auto/explicit multigrid, coarse stencils, stopping norms and bounded outer
+passes. Each owner retains dedicated scalar face-weight buffers and, for capped
+closure, an additional scalar scale field. Budget these pair fields with J/I;
+one bounded weight-output scratch chunk can coexist during construction. Matvec
+and stencil outputs are exchanged as particle fields before dependent reads.
+The chunk path runs eagerly; the flat CSR graph optimization is unchanged.
+
+Native MFM SSPRK and MFV Hancock defaults pass separate controls. The driven case
+already requires explicit SSPRK for its stage sources, including MFV. Restart
+rebuilds moments from the edge-free search recipe and supplies saved state.lam to
+the usual start-of-step closure, retaining finite-tolerance warm-start history.
+Neighbour and weight allocation failures preserve the accepted conserved state.
+Gloo/NCCL debug continuation changes rank count, row budget and local offset width.
+These short controls establish correctness, not physical multi-GPU performance.

@@ -56,7 +56,7 @@ def _launch_document(tmp_path,name,document,ranks,*,rows=3,edgeBudget=1024,expec
 
 @pytest.mark.skipif(not dist.is_gloo_available(),reason='Gloo required')
 @pytest.mark.parametrize('scheme,variant', [('CRKSPH', None), ('CompSPH', None), ('Monaghan', None),
-    ('GSPH', None), ('InutsukaGSPH', None), ('PESPH', 'PressureEnergy'), ('PESPH', 'PressureEntropy')])
+    ('GSPH', None), ('InutsukaGSPH', None), ('PESPH', 'PressureEnergy'), ('PESPH', 'PressureEntropy'), ('MFM', None), ('MFV', None)])
 def test_launcher_outputs_and_restart_are_rank_owned(tmp_path,scheme,variant):
     import json
     import h5py
@@ -65,6 +65,8 @@ def test_launcher_outputs_and_restart_are_rank_owned(tmp_path,scheme,variant):
         maxDt=.0002,plot=False,video=False,store=False,execution='eager',cudaGraph=False,
         progress=True,stallProgress=1e-3,velocityAlarmPlotInterval=1,integrationScheme='rungeKutta4'),
         params=dict(accelerationRMS=.1,forcingInterval=.00025),solver=dict(scheme=scheme))
+    if scheme in ('MFM','MFV'):
+        document['solver']['temporalScheme']='ssprk'
     if variant is not None:
         document['solver'].update(variant=variant, dissipation=variant == 'PressureEnergy')
         if variant == 'PressureEntropy': document['params']['thermalModel'] = 'adiabatic'

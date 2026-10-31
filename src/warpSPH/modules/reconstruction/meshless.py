@@ -6,6 +6,7 @@ import warp as wp
 from typing import Any
 from warpSPHCore.type_config import *
 from warpSPHCore.autograd import *
+from warpSPHCore.autograd.operator_spec import RowRole
 from warpSPHCore.dataTypes import *
 from warpSPHCore.radiusSearch.grid_util import getIndexRangeLane
 from warpSPHCore.math import *
@@ -114,21 +115,23 @@ def mfmLimiter_Kernel(
     gRho: wp.array(dtype=Any), gVel: wp.array(dtype=Any), gP: wp.array(dtype=Any),  # type: ignore
     cond: wp.array(dtype=scalar_t), betaMin: scalar_t, betaMax: scalar_t, condCrit: scalar_t,
 
+    rowStart: wp.int32,
     output_aRho: wp.array(dtype=scalar_t), output_aVel: wp.array(dtype=Any), output_aP: wp.array(dtype=scalar_t),  # type: ignore
 ):
     i = wp.tid()
     if i >= queryState.positions.shape[0]:
         return
+    gi = i + rowStart
     iPtcl = getParticleData(queryState, i)
-    vi = vel[i]
-    nbHiRho = rho[i]
-    nbLoRho = rho[i]
-    mdHiRho = rho[i]
-    mdLoRho = rho[i]
-    nbHiP = pres[i]
-    nbLoP = pres[i]
-    mdHiP = pres[i]
-    mdLoP = pres[i]
+    vi = vel[gi]
+    nbHiRho = rho[gi]
+    nbLoRho = rho[gi]
+    mdHiRho = rho[gi]
+    mdLoRho = rho[gi]
+    nbHiP = pres[gi]
+    nbLoP = pres[gi]
+    mdHiP = pres[gi]
+    mdLoP = pres[gi]
     nbHiV = vi
     nbLoV = vi
     mdHiV = vi
@@ -139,13 +142,13 @@ def mfmLimiter_Kernel(
         if beginIndex < 0:
             continue
         nbHiRho, nbLoRho, mdHiRho, mdLoRho, nbHiP, nbLoP, mdHiP, mdLoP, nbHiV, nbLoV, mdHiV, mdLoV = mfmLimiter_Func_i(
-            i, iPtcl, referenceState, domainState, kernelProperties, beginIndex, numIndices,
+            gi, iPtcl, referenceState, domainState, kernelProperties, beginIndex, numIndices,
             adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
             rho, vel, pres, gRho, gVel, gP,
             nbHiRho, nbLoRho, mdHiRho, mdLoRho, nbHiP, nbLoP, mdHiP, mdLoP, nbHiV, nbLoV, mdHiV, mdLoV)
-    b = wp.max(betaMin, betaMax * wp.min(scalar_t(1.), condCrit / cond[i]))
-    output_aRho[i] = alphaScalar(rho[i], nbHiRho, nbLoRho, mdHiRho, mdLoRho, b)
-    output_aP[i] = alphaScalar(pres[i], nbHiP, nbLoP, mdHiP, mdLoP, b)
+    b = wp.max(betaMin, betaMax * wp.min(scalar_t(1.), condCrit / cond[gi]))
+    output_aRho[i] = alphaScalar(rho[gi], nbHiRho, nbLoRho, mdHiRho, mdLoRho, b)
+    output_aP[i] = alphaScalar(pres[gi], nbHiP, nbLoP, mdHiP, mdLoP, b)
     aV = zero_like_warp(vi)
     for c in range(vi.length):
         aV[c] = alphaScalar(vi[c], nbHiV[c], nbLoV[c], mdHiV[c], mdLoV[c], b)
@@ -153,12 +156,13 @@ def mfmLimiter_Kernel(
 
 
 _LIMITER_SPEC = OperatorSpec(
+    rowChunked=True,
     kernel=mfmLimiter_Kernel,
     outputs=(OutputSpec(dtype=scalar_t), OutputSpec(dtype=_vecDtype), OutputSpec(dtype=scalar_t)),
-    extras=(ExtraSpec("rho", ExtraKind.TENSOR), ExtraSpec("vel", ExtraKind.TENSOR), ExtraSpec("pres", ExtraKind.TENSOR),
-            ExtraSpec("gRho", ExtraKind.TENSOR), ExtraSpec("gVel", ExtraKind.TENSOR), ExtraSpec("gP", ExtraKind.TENSOR),
-            ExtraSpec("cond", ExtraKind.TENSOR), ExtraSpec("betaMin", ExtraKind.SCALAR),
-            ExtraSpec("betaMax", ExtraKind.SCALAR), ExtraSpec("condCrit", ExtraKind.SCALAR)),
+    extras=(ExtraSpec("rho", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("vel", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("pres", ExtraKind.TENSOR, RowRole.REFERENCE),
+            ExtraSpec("gRho", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("gVel", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("gP", ExtraKind.TENSOR, RowRole.REFERENCE),
+            ExtraSpec("cond", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("betaMin", ExtraKind.SCALAR),
+            ExtraSpec("betaMax", ExtraKind.SCALAR), ExtraSpec("condCrit", ExtraKind.SCALAR), ExtraSpec("rowStart", ExtraKind.SCALAR, RowRole.ROW_START)),
 )
 @wp.func
 def sideTimeDerivative(rho: scalar_t, vBoost: Any, pres: scalar_t, gRho: Any, gVel: Any, gP: Any, gamma: scalar_t):

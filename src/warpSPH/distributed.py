@@ -10,7 +10,7 @@ import torch
 
 from warpSPHCore.radiusSearch import ChunkedAdjacency
 
-CHUNKED_SCHEMES=('Monaghan','CRKSPH','CompSPH','GSPH','InutsukaGSPH','PESPH')
+CHUNKED_SCHEMES=('Monaghan','CRKSPH','CompSPH','GSPH','InutsukaGSPH','PESPH','MFM','MFV')
 
 
 def processGroup(system):

@@ -16,6 +16,8 @@ class MeshlessStages:
 
 
 def prepareStage(system, dt, config, schemeConfig, stageIndex):
+    from .chunked import checkMeshlessChunks
+    checkMeshlessChunks(system, config, schemeConfig)
     state = system.state
     if system.drivenParticles is not None:
         system.drivenParticles.position(state, system.t)
@@ -33,6 +35,10 @@ def prepareStage(system, dt, config, schemeConfig, stageIndex):
         else:
             # Supports and public diagnostics retain their start-of-step policy.
             rho, vel, pressure, energy = primitives(state.Q, geom.volume, gamma, returnEnergy=True)
+    from warpSPHCore.radiusSearch import ChunkedAdjacency
+    if isinstance(geom.adjacency, ChunkedAdjacency):
+        system.adjacency = geom.adjacency
+        checkMeshlessChunks(system, config, schemeConfig)
     state.lam = geom.lam
     system.meshlessContext = StepContext(dt=dt, gamma=gamma, config=config, schemeConfig=schemeConfig,
         domain=system.domain, pos=state.positions, supports=state.supports, Q=state.Q,

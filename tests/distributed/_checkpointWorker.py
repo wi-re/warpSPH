@@ -99,7 +99,7 @@ def run(args,communication):
         else:
             patch(importlib.import_module('warpSPHCore.radiusSearch.verlet.build'),'radiusSearchCompactHashMap_',forbidden)
             patch(importlib.import_module('warpSPHCore.radiusSearch.compactHash.search'),'radiusSearchOnCompactHashMap',forbidden)
-            system=module.buildSPHSystem(ctx,neighborhoodFactory=factory)
+            system=module.buildSystem(ctx,neighborhoodFactory=factory)
         if args.action=='fail':
             def shouldFail():
                 return communication.rank==args.fail_rank and ctx.scratch.get('completedSteps')==2
@@ -137,7 +137,7 @@ def run(args,communication):
                         return nativeSupport(s, state, cfg, sc, **kw)
                     # PESPH's stage module imports the callable directly.
                     patch(importlib.import_module('warpSPH.modules.pesph.stage'), 'solveStageSupport', rebuildSupport)
-                else:
+                elif args.scheme not in ('MFM','MFV'):
                     stage=importlib.import_module('warpSPH.schemes.compressible.'+('crkSPH' if args.scheme=='CRKSPH' else 'compSPH'))
                     nativePairs=stage.stagePairList
                     def rebuild(s,state,cfg,sc,**kw):
@@ -149,7 +149,7 @@ def run(args,communication):
                         return adj
                     patch(stage,'stagePairList',rebuild)
         sc=ctx.schemeConfig
-        if args.scheme != 'PESPH':
+        if args.scheme not in ('PESPH','MFM','MFV'):
             sc.adaptiveSupportScheme=AdaptiveSupportScheme.NoScheme
             sc.adaptiveSupportCorrections=args.scheme=='CompSPH'
         s=system.state
@@ -158,6 +158,9 @@ def run(args,communication):
         s.internalEnergies*=1+.08*torch.cos(6.283*s.positions[:,0])
         from warpSPH.modules.eos import refreshEOS
         refreshEOS(s,sc)
+        if args.scheme in ('MFM','MFV'):
+            s.Q = torch.cat((s.masses[:,None], s.masses[:,None]*s.velocities,
+                (s.masses*(s.internalEnergies+.5*s.velocities.square().sum(-1)))[:,None]),1)
         ctx.scratch['initialEnergy']=(s.masses.double()*(s.internalEnergies.double()+.5*s.velocities.double().square().sum(-1))).sum()
         native=ctx.bundle.stepFunction
         @wraps(native)
@@ -169,13 +172,15 @@ def run(args,communication):
             pw=getattr(system,'pairWork',None)
             work=pw.work if pw is not None and isinstance(pw.work,(ChunkedPairField,torch.Tensor)) else None
             communication.agree('test:work-present',work is not None)
-            stages.append(dict(time=float(system.t),dvdt=update.dvdt.detach().cpu().clone(),
-                dudt=(update.dEdt if args.scheme == 'PESPH' else update.dudt).detach().cpu().clone(),rows=rowHashes(system.adjacency,communication),
+            stages.append(dict(time=float(system.t),dvdt=(update.dQdt if args.scheme in ('MFM','MFV') else update.dvdt).detach().cpu().clone(),
+                dudt=(update.sourceEnergyRates if args.scheme in ('MFM','MFV') else update.dEdt if args.scheme == 'PESPH' else update.dudt).detach().cpu().clone(),rows=rowHashes(system.adjacency,communication),
                 work=None if work is None else rowHashes(pw.adjacency,communication,work)))
             return result
         ctx.bundle=replace(ctx.bundle,stepFunction=observed)
         return system
     solver=dict(scheme=args.scheme)
+    if args.scheme in ('MFM','MFV'):
+        solver.update(temporalScheme='ssprk',closure=args.closure)
     if args.scheme == 'PESPH':
         solver.update(variant=args.pesph_variant, dissipation=args.pesph_variant == 'PressureEnergy')
     if args.scheme in ('CRKSPH','CompSPH'):
@@ -294,6 +299,7 @@ def main():
     parser.add_argument('--replica-checks',choices=('exact','contract'),default='exact')
     parser.add_argument('--device',default='cpu')
     parser.add_argument('--scheme',default='CRKSPH')
+    parser.add_argument('--closure',choices=('none','project'),default='none')
     parser.add_argument('--pesph-variant', choices=('PressureEnergy','PressureEntropy'), default='PressureEnergy')
     parser.add_argument('--dim', type=int, choices=(2,3), default=2)
     parser.add_argument('--steps',type=int,default=2)

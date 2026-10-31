@@ -46,7 +46,7 @@ def validateConfiguration(spec):
         raise ValueError('drivenTurbulence currently uses a single ideal gas')
 
 
-def buildSystem(ctx):
+def buildSystem(ctx, *, neighborhoodFactory=None):
     from ...sample.regular import sampleRegularParticles
     from ...caseUtils.meshless import buildMeshlessState
     from ...modules.meshless.geometry import buildGeometry, stashGeometry
@@ -54,12 +54,14 @@ def buildSystem(ctx):
 
     cfg, scheme = ctx.config, ctx.schemeConfig
     if not isinstance(scheme, MeshlessConfig):
-        return buildSPHSystem(ctx)
+        return buildSPHSystem(ctx, neighborhoodFactory=neighborhoodFactory)
     if resolve_temporal_scheme(scheme) != 'ssprk':
         raise ValueError('drivenTurbulence requires SSPRK sources')
     particles = sampleRegularParticles(ctx.spec.nx, cfg.domain, cfg.targetNeighbors)
     pos, supports = particles.positions, particles.supports
-    geometry = buildGeometry(pos, supports, None, cfg, scheme, cfg.domain)
+    from types import SimpleNamespace
+    owner = SimpleNamespace(_meshlessNeighborhoodFactory=neighborhoodFactory)
+    geometry = buildGeometry(pos, supports, None, cfg, scheme, cfg.domain, owner=owner)
     mass = ctx.param('rho0')*particles.masses
     density = mass/geometry.volume
     u0 = ctx.param('soundSpeed')**2/(scheme.gamma*(scheme.gamma-1))
@@ -67,6 +69,7 @@ def buildSystem(ctx):
     labels = torch.zeros(len(pos), device=pos.device, dtype=torch.int32)
     state = buildMeshlessState(pos, supports, mass, density, torch.zeros_like(pos), pressure,
         scheme.gamma, labels, labels.clone(), torch.arange(len(pos), device=pos.device, dtype=torch.int32))
+    state._meshlessNeighborhoodFactory = neighborhoodFactory
     state.lam = geometry.lam
     state.sourceEnergyBudget = mass.new_zeros(2, dtype=torch.float64)
     field = FourierOU(dim=ctx.spec.dim, length=ctx.spec.L, kMin=ctx.param('kMin'), kMax=ctx.param('kMax'),
@@ -74,7 +77,9 @@ def buildSystem(ctx):
         updateInterval=ctx.param('forcingInterval'), solenoidalWeight=ctx.param('solenoidalWeight'), seed=ctx.param('seed'))
     cooling = ctx.param('coolingTime') if ctx.param('thermalModel') == 'relaxation' else None
     source = ConservedSources(field, ctx.param('removeMeanAcceleration'), u0, cooling)
-    system = MeshlessSystem(state=state, domain=cfg.domain, sourceTerms=source)
+    from warpSPHCore.radiusSearch import ChunkedAdjacency
+    system = MeshlessSystem(state=state, domain=cfg.domain, sourceTerms=source,
+        adjacency=geometry.adjacency if isinstance(geometry.adjacency, ChunkedAdjacency) else None)
     stashGeometry(pos, supports, cfg.domain, cfg.kernel, scheme, geometry, owner=state)
     ctx.scratch.update(driving=field, initialMass=mass.double().sum(),
                        initialEnergy=state.Q[:, -1].double().sum())

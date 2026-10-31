@@ -37,7 +37,7 @@ def computeRates(geometry, rho: torch.Tensor, vel: torch.Tensor, pres: torch.Ten
             gRho, gVel, gP = geometry.gradients(rho, vel, pres)
             aRho, aVel, aP = geometry._fast.launch(_LIMITER_SPEC, rho=rho, vel=vel, pres=pres, gRho=gRho, gVel=gVel,
                                                gP=gP, cond=geometry.cond, betaMin=scalar_t(beta_min),
-                                               betaMax=scalar_t(beta_max), condCrit=scalar_t(cond_crit))
+                                               betaMax=scalar_t(beta_max), condCrit=scalar_t(cond_crit), rowStart=0)
         else:
             gRho = torch.zeros(N, dim, dtype=rho.dtype, device=rho.device)
             gVel = torch.zeros(N, dim, dim, dtype=rho.dtype, device=rho.device)
@@ -51,6 +51,6 @@ def computeRates(geometry, rho: torch.Tensor, vel: torch.Tensor, pres: torch.Ten
             mode=int(0 if mode.upper() == "MFM" else 1), order=int(order), psi1=scalar_t(psi1), psi2=scalar_t(psi2),
             power=scalar_t(geometry.closure_power), timeCentred=int(timeCentredFrame), centred=int(geometry.centred),
             areaCap=int(geometry.areaCap), retry=int(retry), massLimit=scalar_t(massFluxLimit),
-            faceGuard=int(faceGuard), closureCap=scalar_t(geometry.closure_cap))
+            faceGuard=int(faceGuard), closureCap=scalar_t(geometry.closure_cap), rowStart=0)
     return torch.cat([dm[:, None], dp, de[:, None]], dim=-1)
 

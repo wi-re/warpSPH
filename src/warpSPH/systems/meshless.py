@@ -155,6 +155,9 @@ class MeshlessSystem(BaseIntegrationSystem):
                         if self.inflowReservoir is not None else
                         buildGeometry(self.state.positions, self.state.supports, self.state.lam,
                                       config, scheme, self.domain, owner=self.state))
+            from warpSPHCore.radiusSearch import ChunkedAdjacency
+            if isinstance(geometry.adjacency, ChunkedAdjacency):
+                self.adjacency = geometry.adjacency
             if self.drivenParticles is not None:
                 from ..modules.boundaryConditions.thermal import caloricConserved
                 before = caloricConserved(self.state.Q)

@@ -2,7 +2,7 @@
 
 Plan index: [PLANS.md](PLANS.md). Parent physics programme: [driven compressible turbulence](docs/roadmap/driven_compressible_turbulence.md).
 
-Status, 2026-10-31: **Bounded local L1–L7, allocation recovery and CRK work-launch fix qualified; long-flow/physical-device gates held; remaining scheme compatibility active, with driven PESPH qualified and MFM/MFV geometry moments in progress**.
+Status, 2026-10-31: **Bounded local L1–L7, allocation recovery and CRK work-launch fix qualified; long-flow/physical-device gates held; compressible compatibility qualified through MFM/MFV; delta/Sun2017 continuation active**.
 The count/scan/ownership design is agreed in discussion. Core/main and frontend/dev
 are integrated; see the [integration report](docs/chunked_integration_2026-10-30.md).
 The planner and opt-in standalone single-device chunk construction/lifecycle are
@@ -28,6 +28,17 @@ the accepted-boundary helper now used by finalizers. Five affected Kidder checks
 also pass. Original notebook files are retained in ignored L3 evidence. Do not
 re-investigate the old scanner traceback; older notes below describe history.
 L3 control/hash and particle-packing work is now qualified locally. Evidence: `.tmp/l3-communication-20261030/` and `.tmp/l3-payload-20261030/`.
+
+## Current instruction: finish compressible, then delta (2026-10-31)
+
+The user explicitly requests completion of C2 MFM/MFV, then W1 delta/Sun2017
+in this continuation. Preserve frontend closure='none' default and all native
+temporal defaults; qualify the opt-in projected CG/MG closure as well. Chunked
+execution is eager: graph optimization is not required to preserve the solver,
+but switching its preconditioner or disabling projection is not permitted.
+Cover source clocks, native state/warm starts, managed restart and memory
+failure recovery before admitting each family. Keep long-run holds and ACSPH
+exclusion unchanged.
 
 ## Active continuation: remaining scheme families (2026-10-31)
 
@@ -119,6 +130,54 @@ remains active after qualification. The frontend scanner passes570 modules,
 Default chunked meshless closure still rejects.
 Continue owned closure weights/matvec/preconditioner/coarse stencil, gradients,
 limiting and canonical flux identity before MFM/MFV solver admission.
+
+### C2 implementation and qualification (2026-10-31)
+
+MFM/MFV now keep global particle identity through moments, gradients, limiters,
+closure residuals, timestep and canonical pair fluxes. Projected closure retains
+CG, the existing auto/explicit multigrid hierarchy and its coarse stencil, warm
+starts, convergence norms and bounded outer passes. Kappa and capped-closure
+scale use dedicated owned pair buffers; dependent particle matvec/stencil results
+are exchanged before reuse. Replicated CG vector norms are evaluated once on the
+replicated field, never summed once per rank. The chunk path is eager; the flat
+CSR graph optimization remains unchanged. A flat capped-closure padding mismatch
+was repaired without changing any live-pair arithmetic.
+
+The frontend uses an explicit neighbourhood factory through native state clones,
+retains the ConservedLagrangian stages and each mode's temporal default, and
+keeps accepted geometry/search history attached to the accepted state. Sources
+use current conserved-stage primitives and uniquely owned work/heat sums. Managed
+restart reconstructs moments and restores the native closure warm start without
+an extra closure solve. Failure recovery retains accepted Q, supports, warm start,
+forcing history and clocks and clears trial stage scratch.
+
+CPU/CUDA native 2D/3D parity, sources, restart and neighbour/weight allocation
+failures pass. Default MFM SSPRK / MFV Hancock controls pass. CPU FP64 checks and
+actual Gloo CLI save/resume across1→2→3 ranks pass. Core CG/MG/capped-closure
+controls pass on CPU/CUDA and two Gloo/NCCL ranks. All24 independent managed
+reference/save/resume jobs pass across Gloo/NCCL, MFM/MFV, none/project closure
+and2D/3D, changing1→2→3 ranks, row budgets and local offset widths. Eight more
+managed neighbour-failure/recovery jobs pass across both transports and modes.
+Closure-weight allocation failures are coordinated in the core worker and
+preserve accepted native state in frontend CPU/CUDA tests. The affected CPU
+regression set passes159 checks (three device-only skips); native FP64 CPU
+controls pass18 checks, and core FP64 CUDA controls pass40. Actual Gloo CLI
+output/manifests/save/resume pass for both modes. C2 bounded admission is
+complete; additional final FP64 CUDA frontend checks are running. Evidence: `.tmp/meshless-delta-20261031/`.
+
+### W1 delta/Sun2017 continuation (2026-10-31)
+
+Proceed with the native periodic `tgv-wc` case. Retain the native initialization
+relaxation, explicit shifting constants, density-continuity stages, pressure
+sign switch and Sun2017 frozen diffusion. Port density/velocity diffusion,
+surface-aware pressure and delta shifting with explicit row roles. Initial
+shuffle must use the explicit chunk factory, coordinate its random perturbation
+across ranks and retain ordinary random/default behavior. Saved accepted density
+and surface history are separate from ephemeral per-step frozen diffusion;
+restart must recompute stage0 diffusion for the next real step. Qualify failure
+inside post-step shifting as well as the RHS; do not let shared constant
+thermodynamic diagnostics mutate the accepted input state on a failed finalize.
+Keep walls/free surfaces/materials/graphs/AD and ACSPH outside W1 admission.
 
 ### C1 initial native checkpoint (`ea8534e`; superseded by driven admission above)
 

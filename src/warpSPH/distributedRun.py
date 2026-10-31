@@ -78,7 +78,7 @@ def runDistributed(configuration,communication,*,outputDirectory,edgeBudget,maxR
     checkpoints use accepted-state native files; each rank writes its own runtime
     report. All live peers receive local setup/IO failures through the group.
     """
-    from .cases.compressible.drivenTurbulence import drivenTurbulenceCase,buildSPHSystem
+    from .cases.compressible.drivenTurbulence import drivenTurbulenceCase,buildSystem
     output=Path(outputDirectory).expanduser().resolve()
     def validate():
         if not isinstance(configuration,RunConfiguration) or configuration.case!='drivenTurbulence':
@@ -124,12 +124,13 @@ def runDistributed(configuration,communication,*,outputDirectory,edgeBudget,maxR
         def build(ctx):
             def factory(state,config):
                 compatible=ctx.spec.scheme in ('CRKSPH','CompSPH')
+                meshless=ctx.spec.scheme in ('MFM','MFV')
                 dim=state.positions.shape[1] if compatible else 1
                 policy=RowChunkPolicy(edgeBudget=edgeBudget,maxRows=maxRows,
-                    bytesPerEdge=4+(dim*state.positions.element_size() if compatible else 0),maxElementsPerEdge=dim)
+                    bytesPerEdge=4+(dim*state.positions.element_size() if compatible else state.positions.element_size() if meshless else 0),maxElementsPerEdge=dim)
                 return buildChunkedVerletList(state,config.domain,policy=policy,communication=communication,
                     supportMode=config.supportMode,verletScale=config.verletScale)
-            return buildSPHSystem(ctx,neighborhoodFactory=factory)
+            return buildSystem(ctx,neighborhoodFactory=factory)
         def accepted(ctx,system,completed):
             if checkpointEvery and completed%checkpointEvery==0:
                 writeChunkedCheckpoint(output/f'checkpoint-{completed:08d}.h5',ctx,system)

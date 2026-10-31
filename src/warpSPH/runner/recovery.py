@@ -58,7 +58,7 @@ def recoverAllocation(ctx, result, boundary, original):
         from ..io.chunkCheckpoint import markCheckpointBoundary, writeChunkedCheckpoint
         # initialize() replaces pairWork on the input system. Its trial scratch
         # must not be treated as part of the accepted particle state.
-        scratch = {name: None for name in ('pairWork', 'rerunRequest', 'supportGrid', 'listGrid')
+        scratch = {name: None for name in ('pairWork', 'rerunRequest', 'supportGrid', 'listGrid', 'meshlessStages')
                    if hasattr(result.state, name)}
         accepted = replace(result.state, **scratch, sourceTerms=replace(result.state.sourceTerms,
                            acceleration=FourierOU.from_state_dict(forcing)))

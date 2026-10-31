@@ -56,7 +56,7 @@ def computeTimestep(
             g = MeshlessWarp.build(
                 state.positions, state.supports, system.domain, config.kernel,
                 adjacency=cachedAdjacency(state.positions, state.supports, system.domain, compParams, owner=state,
-                                          storeI=neighborSearchOptions(config)['storeI']),
+                                          storeI=neighborSearchOptions(config)['storeI'], config=config),
                 storeI=neighborSearchOptions(config)['storeI'],
                 cond_max=compParams.condMax, closure="none", rtol=None, lam0=None,
                 guards=True, face_cond_max=compParams.faceCondMax,

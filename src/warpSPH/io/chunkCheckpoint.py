@@ -270,13 +270,34 @@ def restoreChunkedCheckpoint(path,ctx,system):
         system.adjacency=adjacency
         system.t=time
         system.sourceTerms=replace(system.sourceTerms,acceleration=source)
-        for name in ('pairWork','rerunRequest','supportGrid','listGrid'):
+        for name in ('pairWork','rerunRequest','supportGrid','listGrid','meshlessStages','meshlessContext'):
             if hasattr(system,name):
                 setattr(system,name,None)
+        from ..systems.meshless import MeshlessSystem
+        if isinstance(system, MeshlessSystem):
+            from warpSPHCore.radiusSearch import buildChunkedVerletList
+            from warpSPHCore.mfm import MeshlessWarp
+            from ..modules.meshless.geometry import stashGeometry
+            # Restore the explicit execution hook, not a serialized communicator.
+            state._meshlessNeighborhoodFactory = lambda particles, config: buildChunkedVerletList(
+                particles, config.domain, policy=prior.plan.policy, communication=communication,
+                supportMode=config.supportMode, verletScale=config.verletScale, storeI=prior.storeI)
+            # A timestep ticket only needs moments. startOfStepGeometry performs
+            # the usual closure from the saved state.lam, exactly once as before.
+            geometry = MeshlessWarp.build(state.positions, state.supports, system.domain, ctx.config.kernel,
+                adjacency=adjacency, closure='none', cond_max=ctx.schemeConfig.condMax,
+                face_cond_max=ctx.schemeConfig.faceCondMax, closure_power=ctx.schemeConfig.closurePower,
+                closure_cap=ctx.schemeConfig.closureCap)
+            stashGeometry(state.positions, state.supports, system.domain, ctx.config.kernel,
+                          ctx.schemeConfig, geometry, owner=state)
         ctx.config.dt=dt
         ctx.scratch.update(context,driving=source,completedSteps=completed,nextPhysicalDt=dt,
                            checkpointSignature=signature,_rowChunkRestartVerified=True)
         ctx.scratch.pop('_rowChunkAccepted',None)
         ctx.spec.resumeStepOffset=completed
-    _local(communication,'checkpoint:install',install)
+    from ..systems.meshless import MeshlessSystem
+    if isinstance(system, MeshlessSystem):
+        install()  # geometry dispatch coordinates its own collective phases
+    else:
+        _local(communication,'checkpoint:install',install)
     return str(path)
