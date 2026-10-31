@@ -150,3 +150,17 @@ def test_launcher_allocation_failure_records_accepted_recovery_path(tmp_path):
     (tmp_path/'run.log').write_text(result.stdout)
     assert result.returncode==0,result.stdout
     assert result.stdout.count('fail CRKSPH: passed')==2,result.stdout
+
+
+@pytest.mark.skipif(not dist.is_gloo_available(), reason='Gloo required')
+@pytest.mark.parametrize('checks', ['exact', 'contract'])
+def test_pesph_native_steps_restart_and_allocation_failure(tmp_path, checks):
+    worker = Path(__file__).with_name('distributed')/'_pesphWorker.py'
+    env = dict(os.environ, CUDA_VISIBLE_DEVICES='', OMP_NUM_THREADS='2', PYTHONDONTWRITEBYTECODE='1')
+    command = [sys.executable, '-m', 'torch.distributed.run', '--standalone', '--nproc-per-node=2',
+        str(worker), '--device', 'cpu', '--replica-checks', checks, '--output', str(tmp_path)]
+    result = subprocess.run(command, env=env, text=True, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, timeout=300)
+    (tmp_path/'run.log').write_text(result.stdout)
+    assert result.returncode == 0, result.stdout
+    assert result.stdout.count('all PESPH checks passed') == 2, result.stdout

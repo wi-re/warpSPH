@@ -12,7 +12,7 @@ import warp as wp
 from warp.types import vector
 from warpSPHCore import (
     Corrections, ExtraKind, ExtraSpec, OperationProperties, OperatorSpec,
-    OutputSpec, ShapeOf, SPHContext, SupportScheme, adjacencyData,
+    OutputSpec, RowRole, ShapeOf, SPHContext, SupportScheme, adjacencyData,
     castTorchToWarpAsBuiltins, checkOffset, domainData, getParticle, gridData,
     kernelState, launchOperator, scalar_t, sphKernel, sphKernelDkDh,
     sphKernelGradient, zero_like_warp,
@@ -21,6 +21,7 @@ from warpSPHCore.type_config import offset_t
 from warpSPHCore.profiling import record_function
 
 from .thermodynamics import PressureSums, closePressure, pressureWeights
+from .chunked import pesphInputs
 
 
 @wp.func
@@ -90,9 +91,12 @@ def _pressureForce(
     queryState: Any, referenceState: Any, domainState: domainData,
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
     correctionData: Any, kernelProperties: kernelState,
-    velocities: wp.array(dtype=vector(length=Any, dtype=scalar_t)),
-    weights: wp.array(dtype=scalar_t), factors: wp.array(dtype=scalar_t),
-    gradH: wp.array(dtype=scalar_t),
+    queryVelocities: wp.array(dtype=vector(length=Any, dtype=scalar_t)),
+    referenceVelocities: wp.array(dtype=vector(length=Any, dtype=scalar_t)),
+    queryWeights: wp.array(dtype=scalar_t), referenceWeights: wp.array(dtype=scalar_t),
+    queryFactors: wp.array(dtype=scalar_t), referenceFactors: wp.array(dtype=scalar_t),
+    queryGradH: wp.array(dtype=scalar_t), referenceGradH: wp.array(dtype=scalar_t),
+    rowStart: wp.int32,
     acceleration: wp.array(dtype=vector(length=Any, dtype=scalar_t)),
     thermalWork: wp.array(dtype=scalar_t),
 ):
@@ -114,16 +118,16 @@ def _pressureForce(
                 j = wp.int32(adjacencyState.neighborList[begin + offset_t(k)])
             else:
                 j = wp.int32(gridState.sortIndex[begin + offset_t(k)])
-            if i == j:
+            if i + rowStart == j:
                 continue
             xj, hj, mj, rhoj, kj = getParticle(referenceState, j)
             gradWi = sphKernelGradient(xi, xj, hi, hi, kernelProperties, domainState)
             gradWj = sphKernelGradient(xi, xj, hj, hj, kernelProperties, domainState)
             # w_i*w_j*fH_ij = w_i*(w_j-b_i): avoid a division by w_j.
-            left = weights[i] * (weights[j] - gradH[i]) * factors[i] / mi
-            right = weights[j] * (weights[i] - gradH[j]) * factors[j] / mi
+            left = queryWeights[i] * (referenceWeights[j] - queryGradH[i]) * queryFactors[i] / mi
+            right = referenceWeights[j] * (queryWeights[i] - referenceGradH[j]) * referenceFactors[j] / mi
             acc -= left * gradWi + right * gradWj
-            work += left * wp.dot(velocities[i] - velocities[j], gradWi)
+            work += left * wp.dot(queryVelocities[i] - referenceVelocities[j], gradWi)
     acceleration[i] = acc
     thermalWork[i] = work
 
@@ -137,16 +141,20 @@ def _vectorDtype(ctx, extras):
 
 
 _SUMS = OperatorSpec(
+    rowChunked=True,
     kernel=_pressureSums,
     outputs=tuple(OutputSpec(dtype=_scalarDtype, shape=ShapeOf.QUERY) for _ in range(5)),
-    extras=(ExtraSpec('weights', ExtraKind.TENSOR),),
+    extras=(ExtraSpec('weights', ExtraKind.TENSOR, RowRole.REFERENCE),),
 )
 _FORCE = OperatorSpec(
+    rowChunked=True,
     kernel=_pressureForce,
     outputs=(OutputSpec(dtype=_vectorDtype, shape=ShapeOf.QUERY),
              OutputSpec(dtype=_scalarDtype, shape=ShapeOf.QUERY)),
-    extras=tuple(ExtraSpec(name, ExtraKind.TENSOR)
-                 for name in ('velocities', 'weights', 'factors', 'gradH')),
+    extras=tuple(ExtraSpec(prefix + name, ExtraKind.TENSOR, role)
+                 for name in ('Velocities', 'Weights', 'Factors', 'GradH')
+                 for prefix, role in (('query', RowRole.QUERY), ('reference', RowRole.REFERENCE)))
+           + (ExtraSpec('rowStart', ExtraKind.SCALAR, RowRole.ROW_START),),
 )
 
 
@@ -168,15 +176,18 @@ def computePressureSums(state, config, weights, adjacency=None):
 
 def computePressureState(state, config, schemeConfig, adjacency=None):
     """One shared sum pass and variant-specific thermodynamic closure."""
-    weights = pressureWeights(state, schemeConfig.variant, schemeConfig.gamma)
+    weights = pesphInputs(adjacency, lambda: pressureWeights(state, schemeConfig.variant, schemeConfig.gamma))
     sums = computePressureSums(state, config, weights, adjacency)
-    return closePressure(state, sums, weights, schemeConfig.variant, schemeConfig.gamma,
-                         adaptive=schemeConfig.adaptiveSupportCorrections)
+    return pesphInputs(adjacency, lambda: closePressure(
+        state, sums, weights, schemeConfig.variant, schemeConfig.gamma,
+        adaptive=schemeConfig.adaptiveSupportCorrections))
 
 
 def computePressureForce(state, pressure, config, adjacency=None):
     """Return conservative acceleration and specific pdV work for either variant."""
     with record_function('warpSPH[PESPH pressure force]'):
         return launchOperator(_FORCE, _context(state, config, adjacency, SupportScheme.SuperSymmetric),
-                              velocities=state.velocities, weights=pressure.weights,
-                              factors=pressure.pressureFactors, gradH=pressure.gradH)
+                              queryVelocities=state.velocities, referenceVelocities=state.velocities,
+                              queryWeights=pressure.weights, referenceWeights=pressure.weights,
+                              queryFactors=pressure.pressureFactors, referenceFactors=pressure.pressureFactors,
+                              queryGradH=pressure.gradH, referenceGradH=pressure.gradH, rowStart=0)

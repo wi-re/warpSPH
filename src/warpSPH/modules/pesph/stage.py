@@ -9,19 +9,23 @@ from ...systems.pesph import pesphStateType
 from ..adaptiveSupport import solveStageSupport
 from .operators import computePressureState
 from .thermodynamics import requirePositive
+from .chunked import checkPESPHChunks, pesphInputs
 
 
 def refreshPESPHState(system, config, schemeConfig, *, solveSupport=True):
     """Refresh derived fields without replacing the authoritative E or A."""
-    schemeConfig.validate(config)
+    checkPESPHChunks(system, config, schemeConfig)
     state = system.state
-    if not isinstance(state, pesphStateType(schemeConfig.variant)):
-        raise ValueError('PESPH state type does not match the configured variant')
-    expected = 'energy' if schemeConfig.variant is PESPHVariant.PressureEnergy else 'entropy'
-    if state.thermodynamicVariable != expected:
-        raise ValueError('PESPH checkpoint thermodynamic variable does not match the configured variant')
-    requirePositive(state.supports, 'supports')
-    torch._assert_async(torch.all(state.kinds == 0), 'PESPH solid walls are not implemented')
+    def validate():
+        schemeConfig.validate(config)
+        if not isinstance(state, pesphStateType(schemeConfig.variant)):
+            raise ValueError('PESPH state type does not match the configured variant')
+        expected = 'energy' if schemeConfig.variant is PESPHVariant.PressureEnergy else 'entropy'
+        if state.thermodynamicVariable != expected:
+            raise ValueError('PESPH checkpoint thermodynamic variable does not match the configured variant')
+        requirePositive(state.supports, 'supports')
+        torch._assert_async(torch.all(state.kinds == 0), 'PESPH solid walls are not implemented')
+    pesphInputs(system.adjacency, validate)
     if solveSupport:
         solveStageSupport(system, state, config, schemeConfig)
     pressure = computePressureState(state, config, schemeConfig, system.adjacency)

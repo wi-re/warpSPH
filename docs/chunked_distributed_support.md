@@ -14,6 +14,7 @@ sequence, qualification evidence and remaining capacity/site gates.
 | CRKSPH, CompSPH | Eager native compatible work; chunk-owned W; fresh-stage replay after a list change | Native uniform-material controls; no expanded global pair fallback |
 | GSPH | Eager 2D/3D self queries; first/second-order reconstruction | Global self-pair identity is supplied separately from local query indexing |
 | InutsukaGSPH | Eager 2D/3D Gaussian density plus first/second-order force/energy | Compact and Gaussian lists remain distinct; Gaussian reach uses an agreed eager scalar |
+| PESPH | Explicit native Python path: both pressure-energy and pressure-entropy, eager periodic 2D/3D; adaptive number-density supports and native RK2 controls | No body/boundary sources, walls/materials/AD/graphs; driven launcher and managed recovery remain gated |
 | Prepared operators | Shared opted-in operators, native work, GSPH, Gaussian density and Inutsuka | Explicit query/reference/chunk/dummy roles; primal eager execution |
 | Neighbour lanes | Fixed scalar and global 32-lane CUDA configurations | Existing tiled kernels are used where available; Godunov/Gaussian kernels use scalar fallback |
 | Native checkpoint | Accepted-step drivenTurbulence, all five schemes, FourierOU/ConservedSources | Canonical particle/time/source/search recipe; rebuild owned J, never serialize W or a global pair tensor |
@@ -92,7 +93,16 @@ the launcher to terminate peers; this is not communicator fault recovery.
 
 ## Unsupported contexts
 
-MFM/MFV/PESPH and other unported scheme families reject at distributed startup.
+MFM/MFV and other unported scheme families reject at distributed startup.
+PESPH now has a bounded explicit native Python path, but still rejects in the
+driven-flow runner/CLI: its authoritative total-energy/entropy fields require
+a dedicated source adapter and managed checkpoint/recovery qualification.
+Its native particle HDF5 roundtrip plus core search-recipe reconstruction
+preserves E/A and switch histories under a changed chunk layout; this is not
+admission to the driven-flow checkpoint format. Two Gloo processes and two
+NCCL2.32.3 processes sharing one GPU pass four-step 2D/3D controls for both
+variants, including coordinated force-output allocation failure. Accepted
+fields remain exact against flat storage; no long-flow/performance claim follows.
 Meshless geometry, closure reserves and iterative exchanges require their own
 ports and qualification. Wall closure and material paths also remain gated.
 
@@ -202,3 +212,12 @@ to30.47ms/step. FP32/FP64 compatible-work/replay and nondefault-stream controls 
 CUDA block/prepared/reverse tests and NCCL launch agreement/recovery.
 This is a local launch qualification, not a physical multi-GPU
 performance claim; arithmetic, neighbour traversal and fresh stages are fixed.
+
+
+The authorized continuation order is PESPH admission/source completion and
+MFM/MFV, then delta-SPH/Sun2017, then IISPH and DFSPH variants. Preserve each
+scheme's thermodynamic variables, native integration, pressure iteration and
+history. ACSPH is excluded. MFM/MFV already accumulate canonical face fluxes by
+row; their closure weights, CSR matvec shortcut and multigrid/preconditioner
+selection need explicit owned storage and dependent particle exchanges. Turning
+off closure or changing the selected preconditioner is not a compatibility port.

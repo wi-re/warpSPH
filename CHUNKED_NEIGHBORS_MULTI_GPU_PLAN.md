@@ -2,7 +2,7 @@
 
 Plan index: [PLANS.md](PLANS.md). Parent physics programme: [driven compressible turbulence](docs/roadmap/driven_compressible_turbulence.md).
 
-Status, 2026-10-31: **Phase 4 bounded process proof of concept qualified; local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 filtering/redistribution qualified locally; L5 bounded stress qualified; L6 bounded compatibility matrix qualified; L7 actual wide-edge debug access qualified; overnight real-flow partial success; wide-flow memory guard failure**.
+Status, 2026-10-31: **Bounded local L1–L7, allocation recovery and CRK work-launch fix qualified; long-flow/physical-device gates held; remaining scheme compatibility active, with native PESPH partially qualified**.
 The count/scan/ownership design is agreed in discussion. Core/main and frontend/dev
 are integrated; see the [integration report](docs/chunked_integration_2026-10-30.md).
 The planner and opt-in standalone single-device chunk construction/lifecycle are
@@ -28,6 +28,78 @@ the accepted-boundary helper now used by finalizers. Five affected Kidder checks
 also pass. Original notebook files are retained in ignored L3 evidence. Do not
 re-investigate the old scanner traceback; older notes below describe history.
 L3 control/hash and particle-packing work is now qualified locally. Evidence: `.tmp/l3-communication-20261030/` and `.tmp/l3-payload-20261030/`.
+
+## Active continuation: remaining scheme families (2026-10-31)
+
+The user authorizes extending this setup through the remaining compressible
+schemes, then delta-SPH, then incompressible schemes, explicitly excluding
+ACSPH. The completed recovery/CRK launch work is no longer a local blocker.
+Keep full164³/196³t4 and96³→t40 as overnight holds while development remains;
+physical multi-GPU/site/performance and MPI/ROCm builds remain separate gates.
+
+1. **C1 PESPH:** preserve both PressureEnergy and PressureEntropy authoritative
+   variables, support calibration, dissipation and native fresh-stage integration.
+   Port custom gathers/force with explicit query/reference roles and global self
+   identity; preserve chunk residency during initialization. Qualify flat/chunked
+   operators and native steps before widening startup admission. Driven forcing,
+   native restart and failure recovery require their own state/source audit.
+2. **C2 MFM/MFV:** preserve ConservedLagrangian/SSPRK stage geometry, face fluxes
+   and MFV mass limiting. Audit geometry and flux ownership before porting; do
+   not route these through the SPH RHS driver or change flux formulas.
+3. **W1 delta-SPH / Sun2017:** use the native periodic case and density state;
+   preserve Sun2017 frozen diffusion and fresh RK stages. Audit custom operators,
+   initialization and restart rather than reusing ideal-gas driven sources.
+4. **I1 IISPH, then DFSPH / predictor / shift:** preserve pressure iterations,
+   projection ordering, warm starts and stopping norms. Qualify dependent particle
+   exchanges and accepted-state rollback before claiming failure recovery.
+
+Initial admission for each family is eager, periodic, single-material 2D/3D.
+Walls, free surfaces, materials, AD and graphs remain explicit later gates.
+Per-family completion requires native flat/chunked parity, compatible saved
+state/restart, allocation-failure controls and serial Gloo/NCCL qualification.
+An operator port alone does not admit an entire family to the distributed CLI.
+No numerical model, support defaults or ACSPH code changes are authorized by
+this compatibility work.
+
+### C1 bounded PESPH progress (2026-10-31)
+
+Pressure sums and variational force now declare row roles. The force keeps
+local query and global reference velocity/weight/factor/grad-h views separate,
+with global self identity supplied by the row base; formulas/order are fixed.
+Initialization retains chunk policy/communication and lets the existing support
+solver rebuild Gather to SuperSymmetric, rather than discarding it for flat J.
+The default dissipative energy variant also needed the shared Cullen-Dehnen
+matrix and signal-speed passes ported. Signal-speed support masking now receives
+the global row ID, preserving the existing flat formula and reverse AD split.
+
+Both variants pass exact flat/chunked operator and two-step native field
+controls in2D/3D with fixed/adaptive support. Four-step two-process Gloo and
+shared-GPU NCCL controls pass in exact/contract modes: step2 native particle HDF5
+roundtrip, edge-free search reconstruction with changed row budget, continuation
+to4 and injected force-output allocation failure. Native accepted fields match
+flat storage bitwise. The failure preserves accepted particles and switch
+history and leaves the communicator usable. Explicit guards reject chunked
+sources/boundaries/materials/graphs/AD; flat PESPH differentiation remains tested.
+These are tiny repeated controls with video deliberately omitted; transport
+wall times include compilation/reference work and are not simulation benchmarks.
+
+C1 is **partially qualified**, not complete: the driven-flow state/source adapter,
+managed checkpoint and automatic failure-recovery admission remain gated. The
+current generic driven source adapter evolves dudt and refreshes a mass-density
+EOS; reusing it for authoritative PESPH E/A would overwrite the method. Preserve
+both existing PESPH variants and heating policies rather than selecting a new
+entropy-source model in a storage port. Distributed runner/CLI admission stays
+unchanged until this contract is qualified. Evidence and commands are indexed
+under ignored `.tmp/scheme-compatibility-20261031/`.
+
+C2 audit: frontend canonical-pair flux is already directed per row (no shared
+force scatter). Core geometry moments/gradients/limiters/timestep still need
+row roles; closure kappa is a global per-edge output and the optimized CSR
+matvec directly reads global J/kappa. Port kappa as owned chunks, exchange
+matvec particle outputs before the next CG read, and keep replicated-global
+stopping norms from being summed once per rank. Preserve default auto multigrid,
+coarse-stencil ownership and ConservedLagrangian/SSPRK lifecycle. Do not disable
+closure/MG or silently select Jacobi merely to get a small fixture running.
 
 ## Start here / next action
 

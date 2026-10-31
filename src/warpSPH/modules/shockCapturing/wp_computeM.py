@@ -206,6 +206,7 @@ def _computeMDtype(ctx, extras):
 
 
 _COMPUTE_M = OperatorSpec(
+    rowChunked=True,
     kernel=computeM_Kernel,
     outputs=(OutputSpec(dtype=_computeMDtype, shape=ShapeOf.QUERY),),
 )

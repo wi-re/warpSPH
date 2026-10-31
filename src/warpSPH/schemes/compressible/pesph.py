@@ -6,6 +6,7 @@ from warpSPHCore.profiling import record_function
 from ...enumTypes import PESPHVariant
 from ...modules.pesph import computePressureForce
 from ...modules.pesph.stage import refreshPESPHState
+from ...modules.pesph.chunked import checkPESPHChunks
 from ...systems.pesph import PESPHSystemUpdate
 from ...modules.boundaryConditions import computeForcing, enforceUpdates
 from ...modules.pesph.boundaries import applyPESPHDirichlet
@@ -23,6 +24,7 @@ def pesphStep(system, dt, config, schemeConfig, verbose=False):
 
 
 def _step(system, dt, config, schemeConfig, *, dissipative):
+    checkPESPHChunks(system, config, schemeConfig, dt)
     for bc in schemeConfig.boundaryConditions:
         if set(bc.updateFunctions or {}) - {'dxdt', 'dvdt'}:
             raise ValueError('PESPH driven bands support position/velocity derivative overrides only')
