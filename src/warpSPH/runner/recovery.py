@@ -35,7 +35,8 @@ def captureBoundary(ctx, system):
     except (NotImplementedError, ValueError):
         return None
     if not hasattr(system, 'sourceTerms'):
-        return (token[1], None, ctx.config.dt, system.deltaStages)
+        return (token[1], None, ctx.config.dt,
+                {'deltaStages': system.deltaStages} if hasattr(system, 'deltaStages') else {})
     return (token[1], system.sourceTerms.acceleration.state_dict(), ctx.config.dt)
 
 
@@ -63,7 +64,7 @@ def recoverAllocation(ctx, result, boundary, original):
         scratch = {name: None for name in ('pairWork', 'rerunRequest', 'supportGrid', 'listGrid', 'meshlessStages')
                    if hasattr(result.state, name)}
         if forcing is None:
-            scratch['deltaStages'] = boundary[3]
+            scratch.update(boundary[3])
             accepted = replace(result.state, **scratch)
         else:
             accepted = replace(result.state, **scratch, sourceTerms=replace(result.state.sourceTerms,

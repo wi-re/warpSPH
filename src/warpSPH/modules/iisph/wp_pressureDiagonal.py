@@ -6,7 +6,7 @@ import warp as wp
 from warp.types import vector
 from warpSPHCore import (
     ParticleState, OperationProperties, DomainDescription, SPHContext,
-    OperatorSpec, OutputSpec, ExtraSpec, ExtraKind, ShapeOf, launchOperator,
+    OperatorSpec, OutputSpec, ExtraSpec, ExtraKind, RowRole, ShapeOf, launchOperator,
     domainData, adjacencyData, gridData, kernelState, getParticle, checkOffset,
     zero_like_warp, computeDistanceVec,
     sphKernelGradient_ij,
@@ -22,6 +22,7 @@ def computeIISPHPressureDiagonal_Func_i(
     beginIndex: offset_t, numIndices: wp.int32,
     offsetArray: wp.array(dtype=index_t),
     restVolumes: wp.array(dtype=scalar_t),
+    rowStart: wp.int32,
     outputValue: Any,
 ):
     xi, hi, mi, rhoi, ki = getParticle(queryState, i)
@@ -47,6 +48,7 @@ def computeIISPHPressureDiagonal_Func_Adjacency(
     restVolumes: wp.array(dtype=scalar_t),
     densityRatio: wp.array(dtype=scalar_t),
     gradientSum: wp.array(dtype=vector(length=Any, dtype=scalar_t)),
+    rowStart: wp.int32,
     outputValue: Any,
 ):
     if queryState.kinds[i] != 0:
@@ -72,7 +74,7 @@ def computeIISPHPressureDiagonal_Func_Adjacency(
             i, queryState, referenceState, domainState, kernelProperties,
             beginIndex, numIndices,
             adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
-            restVolumes, outputValue,
+            restVolumes, rowStart, outputValue,
         )
     return out
 
@@ -85,6 +87,7 @@ def computeIISPHPressureDiagonal_Kernel(
     restVolumes: wp.array(dtype=scalar_t),
     densityRatio: wp.array(dtype=scalar_t),
     gradientSum: wp.array(dtype=vector(length=Any, dtype=scalar_t)),
+    rowStart: wp.int32,
     outputValues: wp.array(dtype=scalar_t),
 ):
     i = wp.tid()
@@ -93,23 +96,25 @@ def computeIISPHPressureDiagonal_Kernel(
     gradientSquares = computeIISPHPressureDiagonal_Func_Adjacency(
         i, queryState, referenceState, domainState,
         useAdjacency, adjacencyState, gridState, kernelProperties,
-        restVolumes, densityRatio, gradientSum, zero_like_warp(outputValues),
+        restVolumes, densityRatio, gradientSum, rowStart, zero_like_warp(outputValues),
     )
     diagonal = scalar_t(0.0)
     if queryState.kinds[i] == 0:
         # Apply the self-volume factor outside the reduction to preserve its adjoint.
-        diagonal = -(wp.dot(gradientSum[i], gradientSum[i]) + restVolumes[i] * gradientSquares) / (
-            densityRatio[i] * densityRatio[i])
+        diagonal = -(wp.dot(gradientSum[i + rowStart], gradientSum[i + rowStart]) + restVolumes[i + rowStart] * gradientSquares) / (
+            densityRatio[i + rowStart] * densityRatio[i + rowStart])
     outputValues[i] = diagonal
 
 
 _PRESSURE_DIAGONAL = OperatorSpec(
     kernel=computeIISPHPressureDiagonal_Kernel,
     outputs=(OutputSpec(dtype=scalar_t, shape=ShapeOf.QUERY),),
+    rowChunked=True,
     extras=(
-        ExtraSpec("restVolumes", ExtraKind.TENSOR),
-        ExtraSpec("densityRatio", ExtraKind.TENSOR),
-        ExtraSpec("gradientSum", ExtraKind.TENSOR),
+        ExtraSpec("restVolumes", ExtraKind.TENSOR, RowRole.REFERENCE),
+        ExtraSpec("densityRatio", ExtraKind.TENSOR, RowRole.REFERENCE),
+        ExtraSpec("gradientSum", ExtraKind.TENSOR, RowRole.REFERENCE),
+        ExtraSpec("rowStart", ExtraKind.SCALAR, RowRole.ROW_START),
     ),
 )
 
@@ -133,6 +138,7 @@ def computeIISPHPressureDiagonalWarp(
     return launchOperator(
         _PRESSURE_DIAGONAL, ctx,
         restVolumes=restVolumes, densityRatio=densityRatio, gradientSum=gradientSum,
+        rowStart=0,
     )
 
 

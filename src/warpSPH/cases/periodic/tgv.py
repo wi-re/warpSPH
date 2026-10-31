@@ -12,6 +12,7 @@ import torch
 from ...caseUtils.incompressible import relaxLattice
 from ...modules import computeDensities
 from ...runner import Case, RunContext, caseMain, registerCase
+from ...runner.parameters import Parameter as P
 from ...sample.weaklyCompressible import setupBasicWeaklyCompressibleInitialState
 from ..common.weaklyCompressible import particleDistributionMetrics
 from ..common.plotting import Field, particlePlot
@@ -41,9 +42,10 @@ def configureScheme(ctx: RunContext) -> None:
     ctx.schemeConfig.dfsph.divergence.clampPressure = False
 
 
-def buildSystem(ctx: RunContext):
+def buildSystem(ctx: RunContext, *, neighborhoodFactory=None):
     system = setupBasicWeaklyCompressibleInitialState(
-        ctx.spec.nx, ctx.config, ctx.schemeConfig, ctx.SimulationState, ctx.SimulationSystem)
+        ctx.spec.nx, ctx.config, ctx.schemeConfig, ctx.SimulationState, ctx.SimulationSystem,
+        neighborhoodFactory=neighborhoodFactory)
 
     # Normalise the mass so the sampled density lands on rho0 rather than on
     # whatever the regular lattice happens to integrate to.
@@ -77,6 +79,11 @@ def initialConditions(ctx: RunContext, system) -> None:
         uMag * torch.cos(kTgv * positions[:, 0] + phase) * torch.sin(kTgv * positions[:, 1] + phase))
     system.state.velocities[:, 1] = (
         -uMag * torch.sin(kTgv * positions[:, 0] + phase) * torch.cos(kTgv * positions[:, 1] + phase))
+
+
+def restoreCheckpoint(ctx, system, checkpoint):
+    if 'projectionRowChunkCheckpointVersion' in checkpoint.attrs:
+        raise NotImplementedError('Projection chunk checkpoints require an explicit chunked target; use the distributed launcher or a neighborhoodFactory.')
 
 
 def diagnostics(ctx: RunContext, state) -> Dict[str, float]:
@@ -122,6 +129,7 @@ tgvCase = registerCase(Case(
     configureScheme=configureScheme,
     initialConditions=initialConditions,
     diagnostics=diagnostics,
+    restoreCheckpoint=restoreCheckpoint,
     setupPlot=setupPlot,
     updatePlot=updatePlot,
     extraData=extraData,
@@ -141,6 +149,23 @@ tgvCase = registerCase(Case(
         cflFactor=0.3,
         minDt=1e-8,
     ),
+    supportedSchemes=('iisph','dfsph','dfsphPredictor','dfsphShift'),
+    simulationParameters={
+        'dim': P('integer', 'The Taylor-Green initial field is two-dimensional.', choices=(2,)),
+        'periodic': P('boolean', 'The Taylor-Green box is periodic.', choices=(True,)),
+    },
+    parameterDefinitions={
+        'rho0': P('number', 'Reference fluid density.', 'fluid', exclusiveMinimum=0),
+        'nu': P('number', 'Physical kinematic viscosity.', 'viscosity', minimum=0),
+        'k': P('number', 'Twice the spatial wave number.', 'initial', exclusiveMinimum=0),
+        'uMag': P('number', 'Initial velocity scale.', 'initial', exclusiveMinimum=0),
+        'freeSurface': P('boolean', 'Enable free-surface detection.', 'surface'),
+        'shifting': P('boolean', 'Enable external particle shifting.', 'shifting'),
+        'relaxSteps': P('integer', 'Native initial pressure relaxation iterations.', 'sampling', minimum=0),
+        'relaxDt': P('number', 'Initial relaxation timestep.', 'sampling', exclusiveMinimum=0),
+        'jitter': P('number', 'Initial relative jitter.', 'sampling', minimum=0),
+        'shuffleSeed': P('integer', 'Optional reproducible jitter seed; null retains the caller RNG.', 'sampling', minimum=0, nullable=True),
+    },
     params=dict(
         rho0=1.0,
         nu=0.01,
@@ -151,6 +176,7 @@ tgvCase = registerCase(Case(
         relaxSteps=32,
         relaxDt=1e-3,
         jitter=0.01,
+        shuffleSeed=None,
     ),
 ))
 

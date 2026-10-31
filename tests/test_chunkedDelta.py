@@ -73,7 +73,18 @@ def test_native_checkpoint_restores_density_and_fresh_next_step_diffusion(tmp_pa
     full=configuration(scheme).run(chunkedCase())
     first=configuration(scheme,steps=2).run(chunkedCase())
     path=writeChunkedCheckpoint(tmp_path/'state.h5',first.ctx,first.state)
-    resumed=configuration(scheme,steps=2,resume=path).run(chunkedCase(rows=1))
+    resumedCase=chunkedCase(rows=1)
+    build=resumedCase.buildSystem
+    def checkedBuild(ctx):
+        system=build(ctx);native=ctx.stepFunction
+        @wraps(native)
+        def checked(system,*args,**kwargs):
+            from warpSPH.configurations.compute import neighborSearchOptions
+            assert system.adjacency.storeI==neighborSearchOptions(ctx.config)['storeI']
+            return native(system,*args,**kwargs)
+        ctx.bundle=replace(ctx.bundle,stepFunction=checked)
+        return system
+    resumed=configuration(scheme,steps=2,resume=path).run(replace(resumedCase,buildSystem=checkedBuild))
     assert not resumed.diverged and resumed.ctx.scratch['completedSteps']==4
     assert float(full.state.t)==float(resumed.state.t)
     for name,value in vars(full.state.state).items():

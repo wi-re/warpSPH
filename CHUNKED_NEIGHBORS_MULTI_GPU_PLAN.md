@@ -29,16 +29,15 @@ also pass. Original notebook files are retained in ignored L3 evidence. Do not
 re-investigate the old scanner traceback; older notes below describe history.
 L3 control/hash and particle-packing work is now qualified locally. Evidence: `.tmp/l3-communication-20261030/` and `.tmp/l3-payload-20261030/`.
 
-## Current instruction: finish compressible, then delta (2026-10-31)
+## Current instruction: I1 incompressible continuation (2026-10-31)
 
-The user explicitly requests completion of C2 MFM/MFV, then W1 delta/Sun2017
-in this continuation. Preserve frontend closure='none' default and all native
-temporal defaults; qualify the opt-in projected CG/MG closure as well. Chunked
-execution is eager: graph optimization is not required to preserve the solver,
-but switching its preconditioner or disabling projection is not permitted.
-Cover source clocks, native state/warm starts, managed restart and memory
-failure recovery before admitting each family. Keep long-run holds and ACSPH
-exclusion unchanged.
+The user authorizes IISPH first, followed by DFSPH, predictor-first and
+shift/resample compositions when the preceding gate passes. C2 and W1 are
+complete in the bounded scope below. Preserve native pressure iterations,
+stopping norms, warm starts and projection ordering. Qualify dependent field
+exchanges, accepted-state allocation recovery and exact managed restart before
+admitting each family. Eager periodic single-material execution remains the
+initial scope; long overnight holds and ACSPH exclusion remain unchanged.
 
 ## Active continuation: remaining scheme families (2026-10-31)
 
@@ -239,6 +238,71 @@ relaxation. Native 3D operators/steps are qualified separately. Walls, free
 surfaces, other shifting schemes, AD/graphs and additional case adapters remain
 explicit gates. C2 and W1 bounded continuation are complete. I1 incompressible
 compatibility is next; ACSPH remains excluded and all overnight holds remain.
+
+### I1 native projection continuation (2026-10-31)
+
+IISPH's C/F, wall/total gradient and exact diagonal now opt into owned whole
+rows. Particle extras retain global reference indexing and receive the explicit
+row origin for self terms; local query/CSR/output indexing stays local. Each
+particle result is exchanged before a dependent pressure pass. Native Jacobi,
+independent DF/CD histories, iteration budgets, residual norms, pressure clamp
+and all three projection orderings remain unchanged. Replicated vector norms
+and periodic source means are evaluated once per replica, without multiplying
+sums by rank count. Neighbour counts and post-drift velocity resampling use
+owned rows too; no global pair compatibility tensor is introduced.
+
+The explicit managed case is periodic 2D `tgv`, through the same caller-owned
+Gloo/NCCL interface. Its versioned parameter/solver descriptors and optional
+`shuffleSeed` are now present. Initial pressure relaxation retains chunk
+residency, rank0 jitter agreement and native search ordering; ordinary unseeded
+sampling/default32 initial iterations are unchanged. Native 3D maps are checked
+separately. Admission excludes walls, free surfaces, materials, external
+shifting, experimental Band pressure geometry, AD and graphs; ACSPH is excluded.
+
+`projectionRowChunkCheckpointVersion=1` saves accepted native particle fields,
+physical IISPH pressure, DF/CD pressures and timestep-scaled impulses (including
+optional fields), exact edge-free search history, time, next dt and the nominal
+timestep ceiling. It checks configuration/state class/content before rebuilding
+owned rows. Restart does not apply the adaptive growth rule twice. Ordinary
+flat resume refuses this file. Source-less recovery now preserves only the
+family's explicit metadata; projection histories are already immutable accepted
+state fields. One-rank failures in the dependent C(F(q)) pass and post-drift
+shift retain the accepted state and publish an atomic checkpoint.
+
+CPU qualification passes the native field/iteration/source/order comparisons,
+FP64 3D and five reverse-derivative controls, changing-timestep restart and
+checkpoint rejection guards. Actual Gloo CLI save/resume passes all four
+variants over1→2→3 ranks. Separate Gloo controls pass46 jobs:26 native stress/
+3D/empty-owner/recovery jobs plus20 active-pressure continuation/fault jobs.
+Local rows and offsets change across restart (including int32→int64); all
+recorded particle fields, pressure iterates, stopping statistics, dt/time and
+warm histories match the uninterrupted oracle exactly. CUDA/NCCL final gates
+are still running; append the final receipt here before claiming completion.
+
+**Restart ordering repair found by FP64 CUDA active control:** the disposable
+seed omitted I, whereas native projection/delta RHS requires I by default.
+Restore inherited the seed setting, so the next RHS forced a fresh spatial
+search and changed J reduction order. The first density changed4.44e-16,
+subsequently amplified to~1.19e-9 pressure. All saved particle bits and
+reconstructed per-row J were exact before that unnecessary rebuild. Both
+family adapters now reconstruct using the next native RHS's storeI contract;
+the launcher seeds that contract too. FP64 CUDA active four-family continuation
+now matches bitwise. Focused tests inspect storage before the first resumed RHS.
+No pressure formula/tolerance or rounding allowance was changed.
+
+**Native numerical limits retained, not fixed by this storage port:** the tiny
+nx8 absolute-source/default-relaxation control can hit native100-iteration caps
+and has degenerate IISPH pressure geometry after relaxation. Active pressure
+coverage therefore additionally uses the existing explicit periodicMeanFree
+control, nx12, no initial relaxation and native IISPH omega=.25; all four
+variants converge with nonzero pressure and exact restart. These are labelled
+controls, not new defaults. On CUDA FP64 the nx8 IISPH stress stops at the
+physical dt guard (1.29715e-11 < minDt1e-8). The same failure/value reproduces
+on isolated pre-I1 frontend7fa1ba7 with the unchanged paired core. Preserve it
+as a strict expected failure in that stress fixture; healthy active/3D gates
+stay independent. Evidence includes the source archive receipt and both logs
+under `.tmp/projection-20261031/`. This admits bounded execution/communication,
+not long-time TGV convergence or pressure accuracy.
 
 ### C1 initial native checkpoint (`ea8534e`; superseded by driven admission above)
 
@@ -2202,3 +2266,12 @@ needs an independent capacity gate. No long simulation is launched.
 Paired core implementation is committed as f4fe38c on
 codex/chunked-neighbor-planner. Frontend commit carries accepted-state recovery,
 launcher recovery manifests, the CRK128-thread selection and regressions.
+
+### I1 regression admission notes (2026-10-31)
+
+Initial affected CPU sweep found guard ordering before native invalid-driver
+validation (three DFSPH controls), and the earlier L6 Godunov guard preceding
+native unsupported finite-step energy validation (two controls). Restore native
+validation priority before backend inspection; no formulas/defaults change.
+Six rest-density fixtures unconditionally allocate CUDA and require a
+CUDA-visible rerun; CPU-hidden failures are not numerical evidence.

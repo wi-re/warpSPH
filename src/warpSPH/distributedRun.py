@@ -19,7 +19,7 @@ import torch
 from warpSPHCore import get_torch_offset_dtype, get_torch_precision
 from warpSPHCore.radiusSearch import RowChunkPolicy, buildChunkedVerletList
 from .runner import RunConfiguration, RunAllocationError
-from .distributed import CHUNKED_SCHEMES,CHUNKED_WEAKLY_SCHEMES
+from .distributed import CHUNKED_SCHEMES,CHUNKED_WEAKLY_SCHEMES,CHUNKED_PROJECTION_SCHEMES
 from .io.chunkCheckpoint import writeChunkedCheckpoint
 
 
@@ -81,16 +81,17 @@ def runDistributed(configuration,communication,*,outputDirectory,edgeBudget,maxR
     """
     from .cases.compressible.drivenTurbulence import drivenTurbulenceCase
     from .cases.periodic.tgvWeaklyCompressible import tgvWeaklyCompressibleCase
-    cases={'drivenTurbulence':drivenTurbulenceCase,'tgv-wc':tgvWeaklyCompressibleCase}
+    from .cases.periodic.tgv import tgvCase
+    cases={'drivenTurbulence':drivenTurbulenceCase,'tgv-wc':tgvWeaklyCompressibleCase,'tgv':tgvCase}
     base=cases.get(getattr(configuration,'case',None))
     output=Path(outputDirectory).expanduser().resolve()
     def validate():
         if not isinstance(configuration,RunConfiguration) or base is None:
-            raise ValueError('Distributed launcher supports drivenTurbulence and periodic tgv-wc.')
+            raise ValueError('Distributed launcher supports drivenTurbulence and periodic tgv-wc/tgv.')
         spec=configuration.resolve(base)
-        allowed=CHUNKED_SCHEMES if configuration.case=='drivenTurbulence' else CHUNKED_WEAKLY_SCHEMES
-        if configuration.case=='tgv-wc' and spec.samplingScheme!='regular':
-            raise NotImplementedError('Distributed tgv-wc currently qualifies regular sampling with native shuffle relaxation only.')
+        allowed=CHUNKED_SCHEMES if configuration.case=='drivenTurbulence' else CHUNKED_WEAKLY_SCHEMES if configuration.case=='tgv-wc' else CHUNKED_PROJECTION_SCHEMES
+        if configuration.case in ('tgv-wc','tgv') and spec.samplingScheme!='regular':
+            raise NotImplementedError('Distributed periodic TGV currently qualifies regular sampling with native shuffle relaxation only.')
         if (spec.scheme not in allowed or spec.execution!='eager'
             or spec.cudaGraph or spec.pipelineOutputs or spec.store or spec.plot or spec.video):
             raise ValueError('Distributed launcher requires a supported eager chunked scheme with automatic store/plot/video disabled.')
@@ -130,13 +131,15 @@ def runDistributed(configuration,communication,*,outputDirectory,edgeBudget,maxR
         def build(ctx):
             ctx.scratch.setdefault('completedSteps',ctx.spec.resumeStepOffset)
             def factory(state,config):
+                from .configurations.compute import neighborSearchOptions
                 compatible=ctx.spec.scheme in ('CRKSPH','CompSPH')
                 meshless=ctx.spec.scheme in ('MFM','MFV')
                 dim=state.positions.shape[1] if compatible else 1
                 policy=RowChunkPolicy(edgeBudget=edgeBudget,maxRows=maxRows,
-                    bytesPerEdge=(8 if configured.case=='tgv-wc' else 4)+(dim*state.positions.element_size() if compatible else state.positions.element_size() if meshless else 0),maxElementsPerEdge=dim)
+                    bytesPerEdge=(8 if configured.case in ('tgv-wc','tgv') else 4)+(dim*state.positions.element_size() if compatible else state.positions.element_size() if meshless else 0),maxElementsPerEdge=dim)
                 return buildChunkedVerletList(state,config.domain,policy=policy,communication=communication,
-                    supportMode=config.supportMode,verletScale=config.verletScale)
+                    supportMode=config.supportMode,verletScale=config.verletScale,
+                    storeI=neighborSearchOptions(config)['storeI'] if configured.case in ('tgv-wc','tgv') else False)
             return base.buildSystem(ctx,neighborhoodFactory=factory)
         def accepted(ctx,system,completed):
             if checkpointEvery and completed%checkpointEvery==0:

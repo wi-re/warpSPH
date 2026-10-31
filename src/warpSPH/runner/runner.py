@@ -446,7 +446,9 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
     elif getattr(system.state, 'boundaryProjectionBudget', None) is not None:
         case = replace(case, extraFields=tuple(dict.fromkeys((*case.extraFields, 'boundaryProjectionBudget'))))
     runningState = system.initializeNewState()
-    if isinstance(ctx.scheme, IncompressibleSPHScheme):
+    if isinstance(ctx.scheme, IncompressibleSPHScheme) and not ctx.scratch.get('_rowChunkRestartVerified'):
+        # A validated projection restart already saved the capped next dt.
+        # Reapplying the growth rule here would advance that rule twice.
         # The loop calls the hook only AFTER a step. Cap the first step too,
         # after case initialization (or checkpoint restore) sets the actual
         # velocities, supports and viscosity. Setup dt is only a ceiling.

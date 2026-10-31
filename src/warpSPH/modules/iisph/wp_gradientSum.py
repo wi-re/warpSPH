@@ -6,7 +6,7 @@ import warp as wp
 from warp.types import vector
 from warpSPHCore import (
     ParticleState, OperationProperties, DomainDescription, SPHContext,
-    OperatorSpec, OutputSpec, ExtraSpec, ExtraKind, ShapeOf, launchOperator,
+    OperatorSpec, OutputSpec, ExtraSpec, ExtraKind, RowRole, ShapeOf, launchOperator,
     domainData, adjacencyData, gridData, kernelState, getParticle, checkOffset,
     zero_like_warp, castTorchToWarpAsBuiltins, computeDistanceVec,
     sphKernelGradient_ij,
@@ -22,6 +22,7 @@ def computeIISPHGradientSum_Func_i(
     beginIndex: offset_t, numIndices: wp.int32,
     offsetArray: wp.array(dtype=index_t),
     restVolumes: wp.array(dtype=scalar_t),
+    rowStart: wp.int32,
     outputValue: Any,
 ):
     xi, hi, mi, rhoi, ki = getParticle(queryState, i)
@@ -46,6 +47,7 @@ def computeIISPHGradientSum_Func_Adjacency(
     kernelProperties: kernelState,
     restVolumes: wp.array(dtype=scalar_t),
     wallGradient: wp.array(dtype=vector(length=Any, dtype=scalar_t)),
+    rowStart: wp.int32,
     outputValue: Any,
 ):
     out = zero_like_warp(outputValue)
@@ -69,9 +71,9 @@ def computeIISPHGradientSum_Func_Adjacency(
             i, queryState, referenceState, domainState, kernelProperties,
             beginIndex, numIndices,
             adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
-            restVolumes, outputValue,
+            restVolumes, rowStart, outputValue,
         )
-    return out + wallGradient[i]
+    return out + wallGradient[i + rowStart]
 
 
 @wp.kernel
@@ -81,6 +83,7 @@ def computeIISPHGradientSum_Kernel(
     correctionData: Any, kernelProperties: kernelState,
     restVolumes: wp.array(dtype=scalar_t),
     wallGradient: wp.array(dtype=vector(length=Any, dtype=scalar_t)),
+    rowStart: wp.int32,
     outputValues: wp.array(dtype=vector(length=Any, dtype=scalar_t)),
 ):
     i = wp.tid()
@@ -89,7 +92,7 @@ def computeIISPHGradientSum_Kernel(
     outputValues[i] = computeIISPHGradientSum_Func_Adjacency(
         i, queryState, referenceState, domainState,
         useAdjacency, adjacencyState, gridState, kernelProperties,
-        restVolumes, wallGradient, zero_like_warp(outputValues),
+        restVolumes, wallGradient, rowStart, zero_like_warp(outputValues),
     )
 
 
@@ -100,9 +103,11 @@ def _outputDtype(ctx, extras):
 _GRADIENT_SUM = OperatorSpec(
     kernel=computeIISPHGradientSum_Kernel,
     outputs=(OutputSpec(dtype=_outputDtype, shape=ShapeOf.QUERY),),
+    rowChunked=True,
     extras=(
-        ExtraSpec("restVolumes", ExtraKind.TENSOR),
-        ExtraSpec("wallGradient", ExtraKind.TENSOR),
+        ExtraSpec("restVolumes", ExtraKind.TENSOR, RowRole.REFERENCE),
+        ExtraSpec("wallGradient", ExtraKind.TENSOR, RowRole.REFERENCE),
+        ExtraSpec("rowStart", ExtraKind.SCALAR, RowRole.ROW_START),
     ),
 )
 
@@ -125,6 +130,7 @@ def computeIISPHGradientSumWarp(
     return launchOperator(
         _GRADIENT_SUM, ctx,
         restVolumes=restVolumes, wallGradient=wallGradient,
+        rowStart=0,
     )
 
 

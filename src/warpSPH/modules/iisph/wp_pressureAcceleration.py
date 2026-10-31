@@ -6,7 +6,7 @@ import warp as wp
 from warp.types import vector
 from warpSPHCore import (
     ParticleState, OperationProperties, DomainDescription, SPHContext,
-    OperatorSpec, OutputSpec, ExtraSpec, ExtraKind, ShapeOf, launchOperator,
+    OperatorSpec, OutputSpec, ExtraSpec, ExtraKind, RowRole, ShapeOf, launchOperator,
     domainData, adjacencyData, gridData, kernelState, getParticle, checkOffset,
     zero_like_warp, castTorchToWarpAsBuiltins, computeDistanceVec,
     sphKernelGradient_ij,
@@ -26,6 +26,7 @@ def computeIISPHPressureAcceleration_Func_i(
     restVolumes: wp.array(dtype=scalar_t),
     densityRatio: wp.array(dtype=scalar_t),
     normalizedPressure: wp.array(dtype=scalar_t),
+    rowStart: wp.int32,
     outputValue: Any,
 ):
     xi, hi, mi, rhoi, ki = getParticle(queryState, i)
@@ -55,6 +56,7 @@ def computeIISPHPressureAcceleration_Func_Adjacency(
     wallGradient: wp.array(dtype=vector(length=Any, dtype=scalar_t)),
     contactPressure: wp.array(dtype=scalar_t),
     normalizedPressure: wp.array(dtype=scalar_t),
+    rowStart: wp.int32,
     outputValue: Any,
 ):
     if queryState.kinds[i] != 0:
@@ -80,10 +82,10 @@ def computeIISPHPressureAcceleration_Func_Adjacency(
             i, queryState, referenceState, domainState, kernelProperties,
             beginIndex, numIndices,
             adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
-            restVolumes, densityRatio, normalizedPressure, outputValue,
+            restVolumes, densityRatio, normalizedPressure, rowStart, outputValue,
         )
-    return (-gradientSum[i] * normalizedPressure[i] / (densityRatio[i] * densityRatio[i])
-            - wallGradient[i] * contactPressure[i]) + out
+    return (-gradientSum[i + rowStart] * normalizedPressure[i + rowStart] / (densityRatio[i + rowStart] * densityRatio[i + rowStart])
+            - wallGradient[i + rowStart] * contactPressure[i + rowStart]) + out
 
 
 @wp.kernel
@@ -97,6 +99,7 @@ def computeIISPHPressureAcceleration_Kernel(
     wallGradient: wp.array(dtype=vector(length=Any, dtype=scalar_t)),
     contactPressure: wp.array(dtype=scalar_t),
     normalizedPressure: wp.array(dtype=scalar_t),
+    rowStart: wp.int32,
     outputValues: wp.array(dtype=vector(length=Any, dtype=scalar_t)),
 ):
     i = wp.tid()
@@ -105,7 +108,7 @@ def computeIISPHPressureAcceleration_Kernel(
     outputValues[i] = computeIISPHPressureAcceleration_Func_Adjacency(
         i, queryState, referenceState, domainState,
         useAdjacency, adjacencyState, gridState, kernelProperties,
-        restVolumes, densityRatio, gradientSum, wallGradient, contactPressure, normalizedPressure, zero_like_warp(outputValues),
+        restVolumes, densityRatio, gradientSum, wallGradient, contactPressure, normalizedPressure, rowStart, zero_like_warp(outputValues),
     )
 
 
@@ -116,13 +119,15 @@ def _outputDtype(ctx, extras):
 _PRESSURE_ACCELERATION = OperatorSpec(
     kernel=computeIISPHPressureAcceleration_Kernel,
     outputs=(OutputSpec(dtype=_outputDtype, shape=ShapeOf.QUERY),),
+    rowChunked=True,
     extras=(
-        ExtraSpec("restVolumes", ExtraKind.TENSOR),
-        ExtraSpec("densityRatio", ExtraKind.TENSOR),
-        ExtraSpec("gradientSum", ExtraKind.TENSOR),
-        ExtraSpec("wallGradient", ExtraKind.TENSOR),
-        ExtraSpec("contactPressure", ExtraKind.TENSOR),
-        ExtraSpec("normalizedPressure", ExtraKind.TENSOR),
+        ExtraSpec("restVolumes", ExtraKind.TENSOR, RowRole.REFERENCE),
+        ExtraSpec("densityRatio", ExtraKind.TENSOR, RowRole.REFERENCE),
+        ExtraSpec("gradientSum", ExtraKind.TENSOR, RowRole.REFERENCE),
+        ExtraSpec("wallGradient", ExtraKind.TENSOR, RowRole.REFERENCE),
+        ExtraSpec("contactPressure", ExtraKind.TENSOR, RowRole.REFERENCE),
+        ExtraSpec("normalizedPressure", ExtraKind.TENSOR, RowRole.REFERENCE),
+        ExtraSpec("rowStart", ExtraKind.SCALAR, RowRole.ROW_START),
     ),
 )
 
@@ -149,6 +154,7 @@ def computeIISPHPressureAccelerationWarp(
     return launchOperator(
         _PRESSURE_ACCELERATION, ctx,
         restVolumes=restVolumes, densityRatio=densityRatio, gradientSum=gradientSum, wallGradient=wallGradient, contactPressure=contactPressure, normalizedPressure=normalizedPressure,
+        rowStart=0,
     )
 
 

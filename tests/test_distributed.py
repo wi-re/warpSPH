@@ -208,3 +208,27 @@ def test_delta_native_three_dimensional_process_steps(tmp_path,scheme):
     (tmp_path/'run.log').write_text(result.stdout)
     assert result.returncode==0,result.stdout
     assert result.stdout.count(f'{scheme} save: passed')==2,result.stdout
+
+
+@pytest.mark.parametrize('scheme',['iisph','dfsph','dfsphPredictor','dfsphShift'])
+def test_projection_launcher_preserves_native_case_pressure_history_and_restart(tmp_path,scheme):
+    import json,h5py,torch
+    from test_chunkedProjection import configuration
+    document=configuration(scheme).toDict()
+    document['simulation'].update(execution='eager',pipelineOutputs=False,cudaGraph=False)
+    reference=_launch_document(tmp_path,'reference',document,1,rows=4,edgeBudget=4096)
+    document['simulation']['nSteps']=2
+    first=_launch_document(tmp_path,'first',document,2,edgeBudget=4096)
+    document['simulation']['resumeFrom']=str(first/'finalState.h5')
+    resumed=_launch_document(tmp_path,'resumed',document,3,rows=1,edgeBudget=4096)
+    for folder,ranks,completed in ((reference,1,4),(first,2,2),(resumed,3,4)):
+        manifest=json.loads((folder/'manifest.json').read_text())
+        assert manifest['status']=='complete' and manifest['completed']==completed
+        assert len(manifest['placement'])==ranks
+    with h5py.File(reference/'finalState.h5') as a,h5py.File(resumed/'finalState.h5') as b:
+        assert a.attrs['projectionRowChunkCheckpointVersion']==1
+        for name in a['state']:
+            torch.testing.assert_close(torch.as_tensor(a['state'][name][()]),torch.as_tensor(b['state'][name][()]),rtol=0,atol=0,msg=name)
+        assert set(a.keys())=={'state','neighborHistory','clock','context'}
+        if scheme!='iisph':
+            assert {'densityPressureImpulse','divergencePressureImpulse','divergencePressures'}<=set(a['state'])

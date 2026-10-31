@@ -238,6 +238,7 @@ def countNeighbors_KernelTiled(
 
 _COUNT_NEIGHBORS = OperatorSpec(
     kernel=countNeighbors_Kernel,
+    rowChunked=True,
     tiledKernel=countNeighbors_KernelTiled,
     outputs=(OutputSpec(dtype=wp.int32, shape=ShapeOf.QUERY),),
 )

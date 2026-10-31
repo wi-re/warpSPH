@@ -88,6 +88,11 @@ def _validateState(state):
 
 
 def _scope(ctx,system):
+    from ..systems.incompressible import IISPHSystem, DFSPHSystem
+    if isinstance(system, (IISPHSystem, DFSPHSystem)):
+        from . import projectionChunkCheckpoint
+        return projectionChunkCheckpoint._scope(ctx,system)
+
     from ..systems.weaklyCompressible import WeaklyCompressibleSystem
     if isinstance(system, WeaklyCompressibleSystem):
         from . import deltaChunkCheckpoint
@@ -135,6 +140,10 @@ def writeChunkedCheckpoint(path,ctx,system,*,overwrite=False):
     existing file. A failed write leaves no partially published checkpoint.
     Automatic output cadence is a separate launcher/output integration step.
     """
+    from ..systems.incompressible import IISPHSystem, DFSPHSystem
+    if isinstance(system, (IISPHSystem, DFSPHSystem)):
+        from . import projectionChunkCheckpoint
+        return projectionChunkCheckpoint.writeCheckpoint(path,ctx,system,overwrite=overwrite)
     from ..systems.weaklyCompressible import WeaklyCompressibleSystem
     if isinstance(system, WeaklyCompressibleSystem):
         from . import deltaChunkCheckpoint
@@ -215,6 +224,10 @@ def writeChunkedCheckpoint(path,ctx,system,*,overwrite=False):
 
 def restoreChunkedCheckpoint(path,ctx,system):
     """Collectively restore into an explicitly seeded target chunk policy/group."""
+    from ..systems.incompressible import IISPHSystem, DFSPHSystem
+    if isinstance(system, (IISPHSystem, DFSPHSystem)):
+        from . import projectionChunkCheckpoint
+        return projectionChunkCheckpoint.restoreCheckpoint(path,ctx,system)
     from ..systems.weaklyCompressible import WeaklyCompressibleSystem
     if isinstance(system, WeaklyCompressibleSystem):
         from . import deltaChunkCheckpoint

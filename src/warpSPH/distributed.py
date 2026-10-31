@@ -10,6 +10,8 @@ import torch
 
 from warpSPHCore.radiusSearch import ChunkedAdjacency
 
+CHUNKED_PROJECTION_SCHEMES=('iisph','dfsph','dfsphPredictor','dfsphShift')
+
 CHUNKED_WEAKLY_SCHEMES=('deltaSPH','sun2017DeltaSPH')
 
 CHUNKED_SCHEMES=('Monaghan','CRKSPH','CompSPH','GSPH','InutsukaGSPH','PESPH','MFM','MFV')
@@ -49,8 +51,8 @@ def distributedRunStart(ctx, system):
         return None
     def validate():
         communication.validateAdjacency(system.adjacency)
-        if getattr(ctx.scheme, 'name', ctx.scheme) not in CHUNKED_SCHEMES+CHUNKED_WEAKLY_SCHEMES:
-            raise NotImplementedError('Distributed row chunks support eager '+'/'.join(CHUNKED_SCHEMES+CHUNKED_WEAKLY_SCHEMES)+' only.')
+        if getattr(ctx.scheme, 'name', ctx.scheme) not in CHUNKED_SCHEMES+CHUNKED_WEAKLY_SCHEMES+CHUNKED_PROJECTION_SCHEMES:
+            raise NotImplementedError('Distributed row chunks support eager '+'/'.join(CHUNKED_SCHEMES+CHUNKED_WEAKLY_SCHEMES+CHUNKED_PROJECTION_SCHEMES)+' only.')
         if (ctx.scratch.get('execution') != 'eager' or ctx.spec.store or ctx.spec.plot
             or ctx.spec.video or (ctx.spec.resumeFrom and not ctx.scratch.get('_rowChunkRestartVerified'))):
             raise NotImplementedError('Distributed proof of concept requires eager execution, automatic output disabled and validated chunked resume.')
@@ -93,7 +95,7 @@ def distributedStepEnd(ctx, system, communication, step):
         s = system.state
         return (not all(bool(torch.isfinite(t).all()) for t in _stateTensors(system).values())
                 or any(bool((getattr(s,k) <= 0).any()) for k in
-                    (('densities',) if ctx.spec.scheme in CHUNKED_WEAKLY_SCHEMES else ('densities','internalEnergies','pressures'))))
+                    (('densities',) if ctx.spec.scheme in CHUNKED_WEAKLY_SCHEMES+CHUNKED_PROJECTION_SCHEMES else ('densities','internalEnergies','pressures'))))
     bad = communication.localPhase('runner:state-local', invalid)
     if communication.any(bad, tag='runner:invalid-state'):
         raise RuntimeError(f'Distributed accepted step {step} has a nonfinite or nonpositive state.')

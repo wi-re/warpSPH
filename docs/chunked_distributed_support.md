@@ -17,9 +17,10 @@ sequence, qualification evidence and remaining capacity/site gates.
 | PESPH | Eager periodic 2D/3D, both variants, number-density supports/grad-h, native RK2/RK4 and OU driving | Pressure-energy supports the existing relaxation bath; pressure-entropy driving requires adiabatic mode; no walls/materials/AD/graphs |
 | MFM/MFV | Eager native conserved stages, global canonical flux identity, projected CG/MG closure and owned face weights, OU sources | Native temporal defaults preserved; driven sources require SSPRK; no chunked walls/materials/AD/graphs |
 | deltaSPH, Sun2017 | Eager periodic native density stages, diffusion, pressure-sign switch and delta shifting in 2D/3D; managed 2D tgv-wc case | Sun2017 frozen diffusion and full shifting strength retained; no walls/free surfaces/materials/AD/graphs or other shifting methods |
+| IISPH, DFSPH / predictor / shift | Eager periodic native C/F/diagonal, dependent pressure passes and post-drift resampling; managed 2D tgv and separate native 3D controls | Native budgets, warm starts and stopping norms retained; no walls/free surfaces/materials/external shifting/Band geometry/AD/graphs |
 | Prepared operators | Shared opted-in operators, native work, PESPH pressure passes, MFM geometry/closure/fluxes, delta operators, GSPH, Gaussian density and Inutsuka | Explicit query/reference/chunk/dummy roles; primal eager execution |
 | Neighbour lanes | Fixed scalar and global 32-lane CUDA configurations | Existing tiled kernels are used where available; Godunov/Gaussian kernels use scalar fallback |
-| Native checkpoint | Accepted-step drivenTurbulence for eight compressible schemes; periodic 2D tgv-wc for delta/Sun2017 | Native particle/time/search history; driven cases retain FourierOU/source ledgers; delta uses its own density/mask-history schema and never stores frozen diffusion or pair arrays |
+| Native checkpoint | Accepted-step drivenTurbulence for eight compressible schemes; periodic 2D tgv-wc for delta/Sun2017 and tgv for four native projections | Native particle/time/search history; driven cases retain FourierOU/source ledgers; delta uses its own density/mask-history schema and never stores frozen diffusion or pair arrays; projections save native pressure impulses and nominal/next timestep clocks |
 | Legacy checkpoint | Qualified version-1 CSR/COO import for Monaghan/CRKSPH/CompSPH | Godunov legacy import explicitly rejects; use the native format |
 | Actual wide-edge addressing | Up to2,500,000,000 real neighbours across38 bounded chunks; dedicated J/work; eager/prepared density; filtering and owner transfers | Dense debug geometry, one GPU, standalone/two NCCL ranks, both local offset widths; per-chunk extents remain bounded |
 | Process/rank changes | Gloo 1–5 ranks and tiny two-process/one-GPU NCCL controls | Physical device-count changes and multi-node topology remain unqualified |
@@ -280,3 +281,33 @@ RMS ratio 0.2218983918428421 against 0.2 on both pre-port and current source.
 This numerical validation issue is recorded in the canonical plan; the formula
 and tolerance were left unchanged. New storage/stage/restart controls pass.
 The broader wall/free-surface/other-shift/AD/graph and case-adapter gates remain.
+
+## Native incompressible projections
+
+Use `case=tgv` with `solver.scheme=iisph`, `dfsph`, `dfsphPredictor` or
+`dfsphShift`. The managed adapter is eager, periodic, regularly sampled, 2D and
+one fluid material. Initial relaxation owns only its neighbour rows; optional
+`params.shuffleSeed` makes jitter reproducible, otherwise rank0 supplies it.
+The four native integration/projection orders, pressure signs, iteration
+budgets, residual norms and warm-start policies are retained. Each owned
+particle result is exchanged before a dependent pressure read; replicated
+means/norms are not summed again across ranks.
+
+Accepted checkpoints contain the native physical pressures, independent DF/CD
+impulses, exact edge-free search history and both nominal and next timestep
+clocks. They can rebuild different row ownership/local offset widths on resume.
+Restore matches the native next RHS I-storage contract to retain saved J
+reduction order; a disposable seed cannot force a fresh spatial search.
+Bulk allocation failures inside pressure iterations or after shift's drift keep
+the preceding accepted state dumpable. Device/communicator faults remain outside
+this recovery promise. Use the explicit chunked target to load a native managed
+file; an ordinary flat resume is rejected.
+
+These are storage/execution qualifications. Existing native numerical limits
+remain: the coarse nx8 absolute-source/default-relaxation stress hits pressure
+budgets, and CUDA FP64 IISPH stops at the same timestep guard on pre-port source.
+The separate existing mean-free periodic control exercises converged nonzero
+pressure and warm starts; it does not replace defaults. See the canonical I1
+receipt for exact controls and retained failures. Long-time pressure accuracy,
+wall/free-surface coupling, experimental Band geometry, other case adapters,
+AD/graphs and physical multi-GPU/site performance remain separate gates.

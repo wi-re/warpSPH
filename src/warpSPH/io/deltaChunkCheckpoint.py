@@ -133,7 +133,12 @@ def restoreCheckpoint(path,ctx,system):
             return state,recipe,time,dt,completed,history,stats,file.attrs['contentChecksum']
     state,recipe,time,dt,completed,history,stats,checksum=_local(comm,'delta:checkpoint:read',read)
     if comm is not None:comm.agree('delta:checkpoint:read-content',(checksum,completed))
-    adjacency=restoreRowChunkCheckpointState(recipe,device=device,policy=prior.plan.policy,communication=comm,storeI=prior.storeI)
+    from ..configurations.compute import neighborSearchOptions
+    # The next native RHS, rather than the disposable seed, owns this storage
+    # contract. A mismatch would force a fresh spatial search and lose saved J
+    # reduction order even though particle values and geometry were exact.
+    adjacency=restoreRowChunkCheckpointState(recipe,device=device,policy=prior.plan.policy,
+        communication=comm,storeI=neighborSearchOptions(ctx.config)['storeI'])
     def install():
         from ..modules.deltaSPH.stages import DeltaStages
         system.state=state;system.adjacency=adjacency;system.t=time

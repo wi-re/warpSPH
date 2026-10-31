@@ -6,7 +6,7 @@ import warp as wp
 from warp.types import vector
 from warpSPHCore import (
     ParticleState, OperationProperties, DomainDescription, SPHContext,
-    OperatorSpec, OutputSpec, ExtraSpec, ExtraKind, ShapeOf, launchOperator,
+    OperatorSpec, OutputSpec, ExtraSpec, ExtraKind, RowRole, ShapeOf, launchOperator,
     domainData, adjacencyData, gridData, kernelState, getParticle, checkOffset,
     zero_like_warp, computeDistanceVec,
     sphKernelGradient_ij,
@@ -23,6 +23,7 @@ def computeIISPHDensityRate_Func_i(
     offsetArray: wp.array(dtype=index_t),
     restVolumes: wp.array(dtype=scalar_t),
     field: wp.array(dtype=vector(length=Any, dtype=scalar_t)),
+    rowStart: wp.int32,
     outputValue: Any,
 ):
     xi, hi, mi, rhoi, ki = getParticle(queryState, i)
@@ -34,7 +35,7 @@ def computeIISPHDensityRate_Func_i(
         if kj == 0:
             gradient = sphKernelGradient_ij(computeDistanceVec(xi, xj, domainState),
                                             hi, hj, kernelProperties, domainState)
-            out += restVolumes[j] * wp.dot(field[i] - field[j], gradient)
+            out += restVolumes[j] * wp.dot(field[i + rowStart] - field[j], gradient)
     return out
 
 
@@ -48,6 +49,7 @@ def computeIISPHDensityRate_Func_Adjacency(
     restVolumes: wp.array(dtype=scalar_t),
     wallGradient: wp.array(dtype=vector(length=Any, dtype=scalar_t)),
     field: wp.array(dtype=vector(length=Any, dtype=scalar_t)),
+    rowStart: wp.int32,
     outputValue: Any,
 ):
     if queryState.kinds[i] != 0:
@@ -73,9 +75,9 @@ def computeIISPHDensityRate_Func_Adjacency(
             i, queryState, referenceState, domainState, kernelProperties,
             beginIndex, numIndices,
             adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
-            restVolumes, field, outputValue,
+            restVolumes, field, rowStart, outputValue,
         )
-    return out + wp.dot(field[i], wallGradient[i])
+    return out + wp.dot(field[i + rowStart], wallGradient[i + rowStart])
 
 
 @wp.kernel
@@ -86,6 +88,7 @@ def computeIISPHDensityRate_Kernel(
     restVolumes: wp.array(dtype=scalar_t),
     wallGradient: wp.array(dtype=vector(length=Any, dtype=scalar_t)),
     field: wp.array(dtype=vector(length=Any, dtype=scalar_t)),
+    rowStart: wp.int32,
     outputValues: wp.array(dtype=scalar_t),
 ):
     i = wp.tid()
@@ -94,17 +97,19 @@ def computeIISPHDensityRate_Kernel(
     outputValues[i] = computeIISPHDensityRate_Func_Adjacency(
         i, queryState, referenceState, domainState,
         useAdjacency, adjacencyState, gridState, kernelProperties,
-        restVolumes, wallGradient, field, zero_like_warp(outputValues),
+        restVolumes, wallGradient, field, rowStart, zero_like_warp(outputValues),
     )
 
 
 _DENSITY_RATE = OperatorSpec(
     kernel=computeIISPHDensityRate_Kernel,
     outputs=(OutputSpec(dtype=scalar_t, shape=ShapeOf.QUERY),),
+    rowChunked=True,
     extras=(
-        ExtraSpec("restVolumes", ExtraKind.TENSOR),
-        ExtraSpec("wallGradient", ExtraKind.TENSOR),
-        ExtraSpec("field", ExtraKind.TENSOR),
+        ExtraSpec("restVolumes", ExtraKind.TENSOR, RowRole.REFERENCE),
+        ExtraSpec("wallGradient", ExtraKind.TENSOR, RowRole.REFERENCE),
+        ExtraSpec("field", ExtraKind.TENSOR, RowRole.REFERENCE),
+        ExtraSpec("rowStart", ExtraKind.SCALAR, RowRole.ROW_START),
     ),
 )
 
@@ -128,6 +133,7 @@ def computeIISPHDensityRateWarp(
     return launchOperator(
         _DENSITY_RATE, ctx,
         restVolumes=restVolumes, wallGradient=wallGradient, field=field,
+        rowStart=0,
     )
 
 

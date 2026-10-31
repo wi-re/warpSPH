@@ -14,7 +14,7 @@ from warpSPH.runner import (CaseSpec, Parameter, RunConfiguration, configuration
 importAll()
 COMPRESSIBLE = [getCase(n) for n in listCases()
                 if '.cases.compressible.' in getCase(n).buildSystem.__module__]
-MIGRATED = COMPRESSIBLE + [getCase('tgv-wc'), getCase('randomFlow')]
+MIGRATED = COMPRESSIBLE + [getCase('tgv-wc'), getCase('randomFlow'), getCase('tgv')]
 
 
 @pytest.mark.parametrize('case', MIGRATED, ids=lambda c: c.name)

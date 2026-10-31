@@ -132,6 +132,31 @@ def solverParameters(scheme):
             'acParams.convergenceCheckSchedule': P('string', 'Convergence readback schedule.', 'convergence', choices=('auto', 'every', 'adaptive')),
             'acParams.k2Factor': P('number', 'Pressure-smoothing coefficient factor.', 'diffusion', minimum=0, maximum=.2),
         }
+    if scheme in ('iisph', 'dfsph', 'dfsphPredictor', 'dfsphShift'):
+        out = {
+            'iisph.densitySourcePolicy': P('string', 'Native density constraint.', 'projection', choices=('absolute', 'periodicMeanFree')),
+            'iisph.boundaryRepresentation': P('string', 'Native static boundary representation.', 'boundary', choices=('auto', 'particles', 'analytic')),
+            'iisph.boundaryPressure': P('string', 'Native boundary pressure closure.', 'boundary', choices=('self', 'contactShepard')),
+            'iisph.contactGravity': P('boolean', 'Include native wall gravity extension.', 'boundary'),
+        }
+        prefixes = ('iisph',) if scheme == 'iisph' else ('dfsph.density', 'dfsph.divergence')
+        for prefix in prefixes:
+            out.update({
+                prefix+'.minIterations': P('integer', 'Minimum native pressure iterations.', 'projection', minimum=2 if prefix in ('iisph', 'dfsph.density') else 1),
+                prefix+'.maxIterations': P('integer', 'Maximum native pressure iterations.', 'projection', minimum=2),
+                prefix+'.maxErrorPercent': P('number', 'Native pressure stopping tolerance, percent.', 'projection', minimum=0),
+                prefix+'.relaxationFactor': P('number', 'Native Jacobi relaxation.', 'projection', exclusiveMinimum=0, maximum=1),
+                prefix+'.clampPressure': P('boolean', 'Use nonnegative native pressure.', 'projection'),
+            })
+        if scheme != 'iisph':
+            out.update({
+                'dfsph.warmStart': P('boolean', 'Reuse independent density/divergence pressure impulses.', 'projection'),
+                'dfsph.deficiencyGuard': P('boolean', 'Retain native deficient-row stopping policy.', 'projection'),
+                'dfsph.weakFactorThreshold': P('number', 'Native unscaled weak-factor cutoff.', 'projection', minimum=0),
+                'dfsph.minDivergenceDensityRatio': P('number', 'Native clamped divergence sampling gate.', 'projection', minimum=0, maximum=1),
+                'dfsph.pressureBoundary': P('string', 'Native or experimental pressure geometry.', 'boundary', choices=('native', 'band2018')),
+            })
+        return out
     if scheme in ('MFM', 'MFV'):
         return {
             'materials': P('array', 'Pure-material EOS table; list position is the fluid material ID. Null uses global gamma.',

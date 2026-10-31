@@ -30,8 +30,8 @@ def compressibleSPH_InutsukaGSPH(
     schemeConfig: InutsukaGSPHConfig,
     verbose = False,
 ):
-    checkGodunovChunks(system,config,schemeConfig,dt)
     schemeConfig.validateRHS()
+    checkGodunovChunks(system,config,schemeConfig,dt)
     currentSystem = system
     currentState = currentSystem.state
     t = currentSystem.t
