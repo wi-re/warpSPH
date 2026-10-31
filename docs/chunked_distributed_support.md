@@ -29,7 +29,7 @@ The dedicated launcher currently accepts `drivenTurbulence` with these eight
 compressible schemes. Qualified PESPH pressure-entropy driving uses `solver.variant=PressureEntropy`,
 `solver.dissipation=false` and `params.thermalModel=adiabatic`; no entropy-bath
 policy is selected automatically. Native checkpoint recovery additionally covers bounded 2D/3D CRKSPH,
-CompSPH, PESPH, MFM/MFV and delta/Sun2017 allocation failures; a bounded164³ failure/restart with more than two billion neighbours also passes.
+CompSPH, PESPH, MFM/MFV, delta/Sun2017 and four native projection allocation failures; a bounded164³ failure/restart with more than two billion neighbours also passes.
 Full-duration large-flow stability remains a separate gate. GSPH/Inutsuka operator controls
 include reconstructed inputs and the existing optional time-centred energy
 second pass. This adds no new time-integration or time-centred RHS method.
@@ -311,3 +311,10 @@ pressure and warm starts; it does not replace defaults. See the canonical I1
 receipt for exact controls and retained failures. Long-time pressure accuracy,
 wall/free-surface coupling, experimental Band geometry, other case adapters,
 AD/graphs and physical multi-GPU/site performance remain separate gates.
+
+Final I1 receipt:58 Gloo and66 shared-GPU NCCL2.32.3 jobs pass, including active
+FP32/FP64 pressure, 3D maps, empty owners, changed row/rank/local offset layouts
+and dependent-pass/shift allocation recovery. Final import checks are clean.
+Native numerical failures are retained separately from communication/stored-state
+correctness. The full commands, runtime/source pins and limits are in the
+canonical plan and local `.tmp/projection-20261031/` evidence index.

@@ -2,7 +2,7 @@
 
 Plan index: [PLANS.md](PLANS.md). Parent physics programme: [driven compressible turbulence](docs/roadmap/driven_compressible_turbulence.md).
 
-Status, 2026-10-31: **Bounded local L1–L7, allocation recovery and CRK work-launch fix qualified; long-flow/physical-device gates held; compressible compatibility qualified through MFM/MFV; bounded delta/Sun2017 support qualified; incompressible compatibility next**.
+Status, 2026-10-31: **Bounded local L1–L7, allocation recovery and CRK work-launch fix qualified; long-flow/physical-device gates held; compressible compatibility qualified through MFM/MFV; bounded delta/Sun2017 and four native incompressible variants qualified**.
 The count/scan/ownership design is agreed in discussion. Core/main and frontend/dev
 are integrated; see the [integration report](docs/chunked_integration_2026-10-30.md).
 The planner and opt-in standalone single-device chunk construction/lifecycle are
@@ -29,17 +29,16 @@ also pass. Original notebook files are retained in ignored L3 evidence. Do not
 re-investigate the old scanner traceback; older notes below describe history.
 L3 control/hash and particle-packing work is now qualified locally. Evidence: `.tmp/l3-communication-20261030/` and `.tmp/l3-payload-20261030/`.
 
-## Current instruction: I1 incompressible continuation (2026-10-31)
+## Current checkpoint: bounded I1 complete (2026-10-31)
 
-The user authorizes IISPH first, followed by DFSPH, predictor-first and
-shift/resample compositions when the preceding gate passes. C2 and W1 are
-complete in the bounded scope below. Preserve native pressure iterations,
+The authorized IISPH → DFSPH → predictor-first → shift/resample sequence is
+complete in the bounded periodic scope below, alongside C2 and W1. Preserve native pressure iterations,
 stopping norms, warm starts and projection ordering. Qualify dependent field
 exchanges, accepted-state allocation recovery and exact managed restart before
 admitting each family. Eager periodic single-material execution remains the
 initial scope; long overnight holds and ACSPH exclusion remain unchanged.
 
-## Active continuation: remaining scheme families (2026-10-31)
+## Authorized continuation sequence: remaining scheme families (2026-10-31)
 
 The user authorizes extending this setup through the remaining compressible
 schemes, then delta-SPH, then incompressible schemes, explicitly excluding
@@ -237,7 +236,8 @@ the managed launcher/checkpoint case is 2D `tgv-wc` with regular sampling/native
 relaxation. Native 3D operators/steps are qualified separately. Walls, free
 surfaces, other shifting schemes, AD/graphs and additional case adapters remain
 explicit gates. C2 and W1 bounded continuation are complete. I1 incompressible
-compatibility is next; ACSPH remains excluded and all overnight holds remain.
+compatibility is qualified in the following I1 receipt; ACSPH remains excluded
+and all overnight holds remain.
 
 ### I1 native projection continuation (2026-10-31)
 
@@ -276,8 +276,27 @@ variants over1→2→3 ranks. Separate Gloo controls pass46 jobs:26 native stres
 3D/empty-owner/recovery jobs plus20 active-pressure continuation/fault jobs.
 Local rows and offsets change across restart (including int32→int64); all
 recorded particle fields, pressure iterates, stopping statistics, dt/time and
-warm histories match the uninterrupted oracle exactly. CUDA/NCCL final gates
-are still running; append the final receipt here before claiming completion.
+warm histories match the uninterrupted oracle exactly. Final CUDA/NCCL gates pass. The process receipt contains124 successful jobs:
+58 Gloo (including12 tightened dependent-pressure fault/replay controls) and66
+shared-GPU NCCL2.32.3 (26 native stress/3D/empty-owner/recovery,20 active FP32
+and20 active FP64 continuation/fault jobs). Every live rank reports success;
+physical fields, independent pressure impulses, iterative outputs/stopping
+statistics and dt/time replay exactly. Nondefault CUDA streams are covered.
+No new base NCCL installation or physical multi-GPU claim is made.
+
+Additional final checks: actual delta/projection Gloo CLI6 passes; CUDA delta
+storage/recovery6, CUDA native rest-density10, corrected CUDA pressure-fault
+recovery4, CPU FP64 final storage/recovery/scope13, configuration metadata95,
+CUDA-only configured-flow/manifest9 and native one-sweep descriptor3 passes.
+The initial broad affected sweep had285 passes/18 expected device skips; its
+five validation-priority failures pass after repair, and six CUDA-required
+fixtures pass on the CUDA-visible rerun. CPU/CUDA FP32/FP64 native/3D/reverse
+and active-pressure controls pass, retaining the independently reproduced
+native FP64 stress stop described below. Final import scanner:576 runtime
+modules,6282 first-party imports across1331 files, all clean. Raw attempts,
+commands, source/runtime pins and diagnostic wall/step timings remain under
+`.tmp/projection-20261031/`; timings include debug checks/contention and are
+not performance results.
 
 **Restart ordering repair found by FP64 CUDA active control:** the disposable
 seed omitted I, whereas native projection/delta RHS requires I by default.
@@ -2273,5 +2292,17 @@ Initial affected CPU sweep found guard ordering before native invalid-driver
 validation (three DFSPH controls), and the earlier L6 Godunov guard preceding
 native unsupported finite-step energy validation (two controls). Restore native
 validation priority before backend inspection; no formulas/defaults change.
-Six rest-density fixtures unconditionally allocate CUDA and require a
-CUDA-visible rerun; CPU-hidden failures are not numerical evidence.
+Six rest-density fixtures unconditionally allocate CUDA; their CUDA-visible
+rerun passes10 controls. CPU-hidden failures are not numerical evidence. Final
+metadata review also preserves native one-iteration divergence budgets in the
+new configuration descriptors; density/IISPH retain their native two minimum.
+
+### I1 completion / next gate
+
+Bounded eager compatibility now covers eight compressible schemes, both delta
+variants and all four public native incompressible variants. No ACSPH changes.
+Additional case adapters, walls/free surfaces/materials, experimental pressure
+geometry, AD/graphs and physical multi-GPU/site/capacity/performance remain
+explicit gates. Native pressure accuracy/long-time robustness is not upgraded
+by storage parity. Full164³/196³t4 and96³→t40 remain overnight-only; none was
+launched during this continuation. MPI/ROCm builds remain deferred.

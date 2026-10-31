@@ -143,7 +143,7 @@ def solverParameters(scheme):
         for prefix in prefixes:
             out.update({
                 prefix+'.minIterations': P('integer', 'Minimum native pressure iterations.', 'projection', minimum=2 if prefix in ('iisph', 'dfsph.density') else 1),
-                prefix+'.maxIterations': P('integer', 'Maximum native pressure iterations.', 'projection', minimum=2),
+                prefix+'.maxIterations': P('integer', 'Maximum native pressure iterations.', 'projection', minimum=2 if prefix in ('iisph', 'dfsph.density') else 1),
                 prefix+'.maxErrorPercent': P('number', 'Native pressure stopping tolerance, percent.', 'projection', minimum=0),
                 prefix+'.relaxationFactor': P('number', 'Native Jacobi relaxation.', 'projection', exclusiveMinimum=0, maximum=1),
                 prefix+'.clampPressure': P('boolean', 'Use nonnegative native pressure.', 'projection'),
