@@ -42,9 +42,10 @@ from .caseSpec import CaseSpec
 from .display import closeWindow, holdWindow
 from .media import encodeFrames
 from .report import describeRun, quietedWarp, reportRun
+from .recovery import RunAllocationError, captureBoundary, recoverAllocation
 from .velocityAlarm import VelocityAlarm, maxSpeed
 
-__all__ = ['RunResult', 'run', 'buildContext', 'resolveEnum']
+__all__ = ['RunResult', 'RunAllocationError', 'run', 'buildContext', 'resolveEnum']
 
 #: Window of the `CaseSpec.stallProgress` sim-time watchdog, in steps.
 STALL_WINDOW_STEPS = 1000
@@ -207,13 +208,18 @@ class _Timer:
         return self
 
     def __exit__(self, *exc):
-        if self.cuda:
-            self._end.record()
-            with record_function("[runner] step timer (cuda synchronize)"):
-                torch.cuda.synchronize()
-            self.elapsed_ms = self._begin.elapsed_time(self._end)
-        else:
-            self.elapsed_ms = (time.perf_counter() - self._begin) * 1000.0
+        try:
+            if self.cuda:
+                self._end.record()
+                with record_function("[runner] step timer (cuda synchronize)"):
+                    torch.cuda.synchronize()
+                self.elapsed_ms = self._begin.elapsed_time(self._end)
+            else:
+                self.elapsed_ms = (time.perf_counter() - self._begin) * 1000.0
+        except Exception as secondary:
+            if exc[1] is None:
+                raise
+            exc[1].add_note(f'Step timer cleanup: {type(secondary).__name__}: {secondary}')
         return False
 
 
@@ -269,14 +275,33 @@ def prepareContext(case: Case, spec: CaseSpec) -> RunContext:
 
 def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> RunResult:
     ctx = prepareContext(case, spec)
+    primary = None
     try:
         return _runContext(ctx, case, spec, startedAt, onVelocityAlarm)
+    except BaseException as error:
+        primary = error
+        # Failure exits used to bypass renderer/PNG cleanup, leaving a live EGL
+        # context at interpreter teardown. Each cleanup is independent and may
+        # never replace the simulation's original exception.
+        for cleanup in (lambda: _closeProgress(ctx),
+                        lambda: torch.cuda.synchronize(ctx.device) if ctx.device.type == 'cuda' else None,
+                        lambda: _drainFrameWrites(), lambda: _teardownPlot(ctx, failed=True)):
+            try:
+                cleanup()
+            except Exception as secondary:
+                error.add_note(f'Failure cleanup: {type(secondary).__name__}: {secondary}')
+        raise
     finally:
         # Optional adapters may stop at a safe hook boundary by raising. Always
         # finish the recording before they report a terminal run state.
         outFile = ctx.scratch.pop('trajectoryFile', None)
         if outFile is not None:
-            outFile.close()
+            try:
+                outFile.close()
+            except Exception as secondary:
+                if primary is None:
+                    raise
+                primary.add_note(f'Trajectory cleanup: {type(secondary).__name__}: {secondary}')
 
 
 def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
@@ -501,6 +526,7 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
     showProgress = spec.progress if spec.progress is not None else (
         sys.stderr.isatty() and not spec.quiet)
     steps, progress = _stepIterator(nSteps, spec.tLimit, timeLimited, showProgress)
+    ctx.scratch['_progress'] = progress
     # Everything the loop says mid-run (stop reasons, the velocity alarm) goes
     # through `say`: with a bar up, a bare print lands on the end of the bar's
     # unfinished line (and a log shows it buried in a progress row).
@@ -547,34 +573,44 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         steps = ()
 
     for i in steps:
+        recoveryBoundary = captureBoundary(ctx, runningState)
         ctx.scratch.pop('_rowChunkAccepted', None)
         if rowCommunication is not None:
             ctx.config.dt = distributedStepStart(ctx, runningState, rowCommunication)
         # Previous outputs have consumed their stage data. Release it before
         # entering the next integrator call; the accepted system stays live.
         stepResult = None
-        with _Timer(ctx.device) as timer:
-            with record_function("[runner] integrator step"):
-                if stepGraph is not None:
-                    stepResult = stepGraph(runningState, ctx.config.dt, ctx.config, ctx.schemeConfig,
-                                           verbose=spec.verbose)
-                else:
-                    # A device dt would make the integrator read every stage time
-                    # back (`float(t + c dt)`, a sync each); the runner reads the
-                    # step time once below anyway, so the stage times stay tensors.
-                    # Only for the schemes whose step was checked not to need a host
-                    # time (the delta-SPH right-hand-side graph does).
-                    with (deferHostTime() if deferStageTimes else contextlib.nullcontext()):
-                        stepResult = ctx.integrator.function(
-                            state=runningState,
-                            f=ctx.stepFunction,
-                            dt=ctx.config.dt,
-                            config=ctx.config,
-                            # Forwarded to the step function *and* to `system.finalize`, so
-                            # this is what makes --verbose reach the scheme's own reporting.
-                            verbose=spec.verbose,
-                            schemeConfig=ctx.schemeConfig,
-                        )
+        try:
+            with _Timer(ctx.device) as timer:
+                with record_function("[runner] integrator step"):
+                    if stepGraph is not None:
+                        stepResult = stepGraph(runningState, ctx.config.dt, ctx.config, ctx.schemeConfig,
+                                               verbose=spec.verbose)
+                    else:
+                        # A device dt would make the integrator read every stage time
+                        # back (`float(t + c dt)`, a sync each); the runner reads the
+                        # step time once below anyway, so the stage times stay tensors.
+                        # Only for the schemes whose step was checked not to need a host
+                        # time (the delta-SPH right-hand-side graph does).
+                        with (deferHostTime() if deferStageTimes else contextlib.nullcontext()):
+                            stepResult = ctx.integrator.function(
+                                state=runningState,
+                                f=ctx.stepFunction,
+                                dt=ctx.config.dt,
+                                config=ctx.config,
+                                # Forwarded to the step function *and* to `system.finalize`, so
+                                # this is what makes --verbose reach the scheme's own reporting.
+                                verbose=spec.verbose,
+                                schemeConfig=ctx.schemeConfig,
+                            )
+        except (MemoryError, torch.OutOfMemoryError) as original:
+            if recoveryBoundary is None:
+                original.add_note('No qualified accepted eager chunked checkpoint boundary; original allocation error preserved.')
+                raise
+            result.state = runningState
+            failure = recoverAllocation(ctx, result, recoveryBoundary, original)
+            result.wallTime = time.perf_counter() - startedAt
+            raise failure from original
         runningState = stepResult.state
         # Keep only the accepted system here. Retaining the original system
         # pins first-step scratch (e.g. CRK's pair-work vector) until run exit.
@@ -692,8 +728,7 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
             result.stopReason = alarm.stopReason
             break
 
-    if progress is not None:
-        progress.close()
+    _closeProgress(ctx)
     if ctx.scratch.get('renderThread') is not None:
         ctx.scratch['renderThread'].drain()
     if spec.plot:
@@ -1008,7 +1043,13 @@ def _drainFrameWrites() -> None:
     waitForExports()
 
 
-def _teardownPlot(ctx: RunContext) -> None:
+def _closeProgress(ctx):
+    progress = ctx.scratch.pop('_progress', None)
+    if progress is not None:
+        progress.close()
+
+
+def _teardownPlot(ctx: RunContext, *, failed=False) -> None:
     """Hold the final figure if asked, then release it.
 
     Releasing matters because the figures are pyplot-managed: a process that
@@ -1017,13 +1058,16 @@ def _teardownPlot(ctx: RunContext) -> None:
     handle = ctx.scratch.pop('plot', None)
     renderer = ctx.scratch.pop('renderThread', None)
     if renderer is not None:
-        if handle is not None:
-            renderer.call(closeWindow, handle)
-        renderer.close()
+        try:
+            if handle is not None:
+                renderer.call(closeWindow, handle)
+        finally:
+            renderer.close()
         return
     if handle is None:
         return
-    holdWindow(ctx, handle)
+    if not failed:
+        holdWindow(ctx, handle)
     closeWindow(handle)
 
 

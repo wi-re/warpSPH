@@ -17,7 +17,7 @@ import torch
 
 from warpSPHCore import get_torch_offset_dtype, get_torch_precision
 from warpSPHCore.radiusSearch import RowChunkPolicy, buildChunkedVerletList
-from .runner import RunConfiguration
+from .runner import RunConfiguration, RunAllocationError
 from .distributed import CHUNKED_SCHEMES
 from .io.chunkCheckpoint import writeChunkedCheckpoint
 
@@ -119,7 +119,7 @@ def runDistributed(configuration,communication,*,outputDirectory,edgeBudget,maxR
             _atomicJson(output/'manifest.json',manifest)
         communication.localPhase('launcher:manifest-start',publishStart)
         configured=RunConfiguration.fromDict(document)
-        configured.simulation.update(device=str(communication.device),quiet=True,progress=communication.rank==0,storeMode='trajectory')
+        configured.simulation.update(device=str(communication.device),quiet=True,progress=communication.rank==0,storeMode='trajectory',exportRoot=str(output))
         base=drivenTurbulenceCase
         def build(ctx):
             def factory(state,config):
@@ -164,11 +164,15 @@ def runDistributed(configuration,communication,*,outputDirectory,edgeBudget,maxR
     except Exception as error:
         # Do not enter new collectives here: a hard peer failure may have left
         # other ranks inside c10d. The finite timeout/launcher terminates peers.
+        recovery = None
+        if isinstance(error, RunAllocationError):
+            recovery = dict(checkpointPath=error.checkpointPath, recoveryError=error.recoveryError,
+                completed=error.result.ctx.scratch['completedSteps'], time=float(error.result.state.t))
         try:
             _atomicJson(output/f'failure-{communication.rank:05d}.json',dict(status='failed',rank=communication.rank,
-                error=type(error).__name__+': '+str(error)))
+                error=type(error).__name__+': '+str(error), recovery=recovery))
             if communication.rank==0 and manifest is not None:
-                manifest.update(status='failed',error=type(error).__name__+': '+str(error))
+                manifest.update(status='failed',error=type(error).__name__+': '+str(error),recovery=recovery)
                 _atomicJson(output/'manifest.json',manifest)
         except OSError:pass
         raise

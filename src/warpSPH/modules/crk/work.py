@@ -80,7 +80,10 @@ def _crkWorkKernel(
     rate[i]=energy
 
 
-_SPEC=OperatorSpec(rowChunked=True,kernel=_crkWorkKernel,outputs=(OutputSpec(dtype=scalar_t,shape=ShapeOf.QUERY),),extras=_CRK_ACCEL.extras+(
+# The scalar pair sweep is register-heavy (149 registers/thread in the 3D
+# FP32 CUDA profile). 128-thread blocks avoid the 256-thread occupancy cliff
+# on bounded row chunks without changing per-row arithmetic or traversal.
+_SPEC=OperatorSpec(blockDim=128,rowChunked=True,kernel=_crkWorkKernel,outputs=(OutputSpec(dtype=scalar_t,shape=ShapeOf.QUERY),),extras=_CRK_ACCEL.extras+(
     ExtraSpec('half',ExtraKind.TENSOR,RowRole.REFERENCE),ExtraSpec('finalHalf',ExtraKind.TENSOR,RowRole.REFERENCE),ExtraSpec('dt',ExtraKind.TENSOR,RowRole.REPLICATED),
     ExtraSpec('gamma',ExtraKind.SCALAR),ExtraSpec('weight',ExtraKind.SCALAR),ExtraSpec('add',ExtraKind.SCALAR),ExtraSpec('reduce',ExtraKind.SCALAR),
     ExtraSpec('work',ExtraKind.CHUNK_TENSOR,lambda ctx,e: RowRole.REPLICATED if e['reduce'] else RowRole.CHUNK),ExtraSpec('materialTable',ExtraKind.SCALAR),

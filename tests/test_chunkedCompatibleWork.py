@@ -50,7 +50,7 @@ def _run(monkeypatch, scheme, dim, tableau, support, chunked, change=False, lane
         forceModule = importlib.import_module('warpSPH.modules.' + ('crk' if scheme == 'CRKSPH' else 'compSPH') + '.accel')
         forceSpec = forceModule._CRK_ACCEL if scheme == 'CRKSPH' else forceModule._COMPSPH_ACCEL
         launch = launcher._launchMaybeTiled
-        def allocationAudit(kernel, n, inputs, device, lanes):
+        def allocationAudit(kernel, n, inputs, device, lanes, **kwargs):
             if kernel in (forceSpec.kernel, forceSpec.tiledKernel):
                 outputs = inputs[-4:]
                 assert outputs[1].shape == outputs[2].shape == (1,)
@@ -60,7 +60,7 @@ def _run(monkeypatch, scheme, dim, tableau, support, chunked, change=False, lane
                 launches.append(('F', n, sum(sizes)))
             elif kernel is workModule._SPEC.kernel:
                 launches.append(('W', n, inputs[-1]._tensor.untyped_storage().nbytes()))
-            return launch(kernel, n, inputs, device, lanes)
+            return launch(kernel, n, inputs, device, lanes, **kwargs)
         patch.setattr(launcher, '_launchMaybeTiled', allocationAudit)
         patch.setattr(workModule, fn, capture)
         schemeModule = importlib.import_module('warpSPH.schemes.compressible.' + ('crkSPH' if scheme == 'CRKSPH' else 'compSPH'))

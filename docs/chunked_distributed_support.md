@@ -22,8 +22,9 @@ sequence, qualification evidence and remaining capacity/site gates.
 | Process/rank changes | Gloo 1–5 ranks and tiny two-process/one-GPU NCCL controls | Physical device-count changes and multi-node topology remain unqualified |
 
 The dedicated launcher currently accepts `drivenTurbulence` with these five
-schemes. Native checkpoint qualification is the small 2D driven case; 3D solver
-controls do not establish 3D restart qualification. GSPH/Inutsuka operator controls
+schemes. Native checkpoint recovery additionally covers bounded 2D/3D CRKSPH and
+CompSPH allocation failures; a bounded164³ failure/restart with more than two billion neighbours also passes.
+Full-duration large-flow stability remains a separate gate. GSPH/Inutsuka operator controls
 include reconstructed inputs and the existing optional time-centred energy
 second pass. This adds no new time-integration or time-centred RHS method.
 
@@ -150,3 +151,54 @@ Physical multi-GPU/site topology, bandwidth/scaling, developed-flow capacity,
 full wide-edge solver trajectories and very large individual chunk extents
 remain open. This debug fixture has no flow integration or video. Timings mix
 JIT, lanes and filtering choices and remain diagnostic.
+
+## Allocation failure recovery
+
+For an eager chunked driven flow, an allocation failure during an integrator
+attempt raises `warpSPH.runner.RunAllocationError`. Its `result` retains the
+last accepted particle state and completed-step count; `checkpointPath` names
+the native `allocationFailure.h5` if publication succeeded. The original error
+is preserved as `__cause__`. `recoveryError` records a secondary sync/write
+failure without replacing the allocation evidence. Recovery does not accept
+the failed stage or change the timestep/integration method.
+
+The runner retains particles while saving small forcing-clock metadata at each
+accepted boundary. After failure it releases trial frames/partial buffers,
+synchronizes CUDA, restores the accepted forcing history and atomically writes
+particles plus the neighbour reconstruction recipe. J/W are never exported.
+Recovery needs at least one qualified accepted step, a working CUDA context and
+writable storage. Device faults, process death, graph replay and failures in
+partially completed post-step hooks do not establish a recoverable boundary.
+If saving fails, the exception still retains the accepted result for inspection.
+
+A coordinated local-phase allocation error is propagated to every live rank as
+`DistributedAllocationError` (also a `DistributedContractError` and `MemoryError`).
+This classification uses the existing fixed control packet. Canonical native
+publication stays collective; process death or failed communication is not a
+checkpoint-recovery mechanism. Automatic output remains disabled for distributed
+proof-of-concept runs.
+
+Core bulk J/pair-field allocation failures include requested batch capacity,
+completed chunks and CUDA live/reserved/free memory in exception notes. Failed
+partial allocations are released. Guards must distinguish live memory from
+Torch's cached reservation: raw device-free memory alone can reject a request
+that the allocator can satisfy from its cache. Cache plus free bytes are an
+admission estimate, not a fragmentation guarantee; actual allocator failure
+still follows the recovery path. No per-step cache flush is introduced.
+
+## Scalar launch geometry
+
+`OperatorSpec.blockDim` optionally selects scalar CUDA threads per block;
+`None` keeps Warp's256-thread default. Values must be Python integers1–1024.
+The setting is forwarded by ordinary and prepared launches and is part of
+distributed effective-launch agreement. CPU uses one thread and cooperating
+tiled kernels keep their lane block size.
+
+The CRK compatible-work sweep selects128threads. Its register-heavy3D FP32
+kernel admitted only one resident256-thread block per SM on the local GPU;
+128threads admit three and remove most of the small-chunk utilization penalty.
+Matched64³ controls retain bitwise particle values while work falls from51.47
+to30.47ms/step. FP32/FP64 compatible-work/replay and nondefault-stream controls pass, as do
+CUDA block/prepared/reverse tests and NCCL launch agreement/recovery.
+This is a local launch qualification, not a physical multi-GPU
+performance claim; arithmetic, neighbour traversal and fresh stages are fixed.

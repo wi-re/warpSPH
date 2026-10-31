@@ -137,3 +137,16 @@ def test_native_and_godunov_solver_compatibility(tmp_path,order,checks):
     (tmp_path/'run.log').write_text(result.stdout)
     assert result.returncode==0,result.stdout
     assert result.stdout.count('all solver checks passed')==2,result.stdout
+
+
+@pytest.mark.skipif(not dist.is_gloo_available(),reason='Gloo required')
+def test_launcher_allocation_failure_records_accepted_recovery_path(tmp_path):
+    worker=Path(__file__).with_name('distributed')/'_checkpointWorker.py'
+    env=dict(os.environ,CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='2',PYTHONDONTWRITEBYTECODE='1')
+    command=[sys.executable,'-m','torch.distributed.run','--standalone','--nproc-per-node=2',str(worker),
+        '--launcher-failure','--action','fail','--output',str(tmp_path/'run'),
+        '--checkpoint',str(tmp_path/'unused.h5'),'--oracle',str(tmp_path/'unused.pt')]
+    result=subprocess.run(command,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=180)
+    (tmp_path/'run.log').write_text(result.stdout)
+    assert result.returncode==0,result.stdout
+    assert result.stdout.count('fail CRKSPH: passed')==2,result.stdout

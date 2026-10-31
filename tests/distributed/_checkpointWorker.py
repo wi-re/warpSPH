@@ -16,12 +16,12 @@ from pathlib import Path
 import torch
 import torch.distributed as dist
 
-from warpSPH.runner import RunConfiguration
+from warpSPH.runner import RunConfiguration, RunAllocationError
 from warpSPH.cases.compressible.drivenTurbulence import drivenTurbulenceCase as case
 from warpSPH.enumTypes import AdaptiveSupportScheme
 from warpSPH.io.chunkCheckpoint import writeChunkedCheckpoint
 from warpSPHCore import SupportScheme,setNeighborLanes,get_torch_offset_dtype
-from warpSPHCore.distributed import RowChunkProcessGroup,DistributedContractError
+from warpSPHCore.distributed import RowChunkProcessGroup,DistributedContractError,DistributedAllocationError
 from warpSPHCore.radiusSearch import RowChunkPolicy,buildChunkedVerletList,ChunkedPairField,ChunkedAdjacency
 
 
@@ -98,6 +98,33 @@ def run(args,communication):
             patch(importlib.import_module('warpSPHCore.radiusSearch.verlet.build'),'radiusSearchCompactHashMap_',forbidden)
             patch(importlib.import_module('warpSPHCore.radiusSearch.compactHash.search'),'radiusSearchOnCompactHashMap',forbidden)
             system=module.buildSPHSystem(ctx,neighborhoodFactory=factory)
+        if args.action=='fail':
+            def shouldFail():
+                return communication.rank==args.fail_rank and ctx.scratch.get('completedSteps')==2
+            if args.fail_site=='work':
+                empty=ChunkedPairField.empty
+                @classmethod
+                def rejectedWork(cls,adjacency,**kwargs):
+                    if shouldFail():raise torch.OutOfMemoryError('injected owned work allocation')
+                    return empty(adjacency,**kwargs)
+                patch(ChunkedPairField,'empty',rejectedWork)
+            else:
+                chunks=importlib.import_module('warpSPHCore.radiusSearch.chunked')
+                allocate=chunks._allocateChunks
+                def rejectedNeighbors(*a,**kw):
+                    if shouldFail():raise MemoryError('injected neighbor allocation')
+                    return allocate(*a,**kw)
+                patch(chunks,'_allocateChunks',rejectedNeighbors)
+                stage=importlib.import_module('warpSPH.schemes.compressible.'+('crkSPH' if args.scheme=='CRKSPH' else 'compSPH'))
+                nativePairs=stage.stagePairList
+                def rebuild(s,state,cfg,sc,**kw):
+                    adj=nativePairs(s,state,cfg,sc,**kw)
+                    if ctx.scratch.get('completedSteps')==2:
+                        return buildChunkedVerletList(state,cfg.domain,policy=adj.plan.policy,
+                            priorNeighborhood=adj,forceRebuild=True,communication=communication,
+                            supportMode=SupportScheme.SuperSymmetric,verletScale=cfg.verletScale)
+                    return adj
+                patch(stage,'stagePairList',rebuild)
         sc=ctx.schemeConfig
         sc.adaptiveSupportScheme=AdaptiveSupportScheme.NoScheme
         sc.adaptiveSupportCorrections=args.scheme=='CompSPH'
@@ -129,18 +156,28 @@ def run(args,communication):
         solver[('crk' if args.scheme=='CRKSPH' else 'comp')+'PairStorage']='recompute'
     simulation=dict(device=args.device,nx=8,dim=2,nSteps=args.steps,maxDt=.0002,
         plot=False,video=False,store=False,storeMode='states' if args.legacy else 'trajectory',quiet=True,show=False,
-        progress=True,velocityAlarmPlotInterval=1,stallProgress=1e-3,integrationScheme='rungeKutta4')
+        exportRoot=args.output,progress=True,velocityAlarmPlotInterval=1,stallProgress=1e-3,integrationScheme='rungeKutta4')
     if args.legacy:simulation['neighborOmitI']=args.legacy=='csr'
     if args.action in ('resume','reject'):
         simulation['resumeFrom']=args.checkpoint
     configuration=RunConfiguration('drivenTurbulence',simulation=simulation,
         params=dict(accelerationRMS=args.amplitude,forcingInterval=.00025),solver=solver)
+    allocationFailure=None
     try:
         result=configuration.run(replace(case,buildSystem=build))
+    except RunAllocationError as error:
+        if args.action!='fail':raise
+        assert isinstance(error.__cause__,DistributedAllocationError)
+        assert error.recoveryError is None,error.recoveryError
+        assert error.checkpointPath and Path(error.checkpointPath).is_file()
+        assert error.result.nSteps==2 and error.result.ctx.scratch['completedSteps']==2
+        allocationFailure=dict(checkpoint=error.checkpointPath,primary=str(error.__cause__))
+        communication.agree('test:recovery-published',error.checkpointPath)
+        result=error.result
     finally:
         for module,name,value in reversed(old):setattr(module,name,value)
-    assert not result.diverged and result.nSteps==args.steps
-    if args.action=='save':
+    assert (allocationFailure is not None and result.diverged) if args.action=='fail' else (not result.diverged and result.nSteps==args.steps)
+    if args.action in ('save','fail'):
         if args.legacy:
             from warpSPH.io.export import exportSimulationSystem
             from warpSPH.cases.compressible.drivenTurbulence import checkpointSignature
@@ -184,13 +221,46 @@ def run(args,communication):
     report=dict(status='passed',action=args.action,scheme=args.scheme,rank=communication.rank,
         ranks=communication.size,offsetDtype=str(get_torch_offset_dtype()),steps=args.steps,
         completed=data['completed'],rhs=len(stages),contracts=contracts,time=data['time'],
-        checkpoint=args.checkpoint,rows=args.rows,edgeBudget=args.edge_budget)
+        checkpoint=args.checkpoint,rows=args.rows,edgeBudget=args.edge_budget,allocationFailure=allocationFailure)
     return report
+
+
+def launcherFailure(args, communication):
+    from warpSPH.distributedRun import runDistributed
+    empty=ChunkedPairField.empty
+    calls=0
+    @classmethod
+    def failing(cls,adjacency,**kwargs):
+        nonlocal calls
+        calls+=1
+        if calls==3 and communication.rank==0:
+            raise torch.OutOfMemoryError('injected launcher allocation')
+        return empty(adjacency,**kwargs)
+    ChunkedPairField.empty=failing
+    configuration=RunConfiguration('drivenTurbulence',simulation=dict(nx=8,dim=2,nSteps=4,maxDt=.0002,
+        plot=False,video=False,store=False,execution='eager',cudaGraph=False,integrationScheme='rungeKutta2'),
+        solver=dict(scheme='CRKSPH'))
+    try:
+        runDistributed(configuration,communication,outputDirectory=args.output,edgeBudget=1024,maxRows=3)
+    except RunAllocationError as error:
+        assert error.recoveryError is None,error.recoveryError
+        manifest=json.loads((Path(args.output)/'manifest.json').read_text()) if communication.rank==0 else None
+        failure=json.loads((Path(args.output)/f'failure-{communication.rank:05d}.json').read_text())
+        for value in (failure, manifest) if manifest is not None else (failure,):
+            assert value['status']=='failed' and value['recovery']['completed']==2
+            assert value['recovery']['checkpointPath']==error.checkpointPath
+        assert Path(error.checkpointPath).is_relative_to(Path(args.output).resolve())
+        assert Path(error.checkpointPath).is_file()
+        return dict(status='passed',action='launcher allocation failure',rank=communication.rank,recovery=failure['recovery'])
+    else:
+        raise AssertionError('launcher allocation failure was not injected')
+    finally:
+        ChunkedPairField.empty=empty
 
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument('--action',choices=('reference','save','resume','reject'),required=True)
+    parser.add_argument('--action',choices=('reference','save','resume','reject','fail'),required=True)
     parser.add_argument('--replica-checks',choices=('exact','contract'),default='exact')
     parser.add_argument('--device',default='cpu')
     parser.add_argument('--scheme',default='CRKSPH')
@@ -204,6 +274,9 @@ def main():
     parser.add_argument('--contracts',action='store_true')
     parser.add_argument('--expect-error')
     parser.add_argument('--amplitude',type=float,default=.1)
+    parser.add_argument('--fail-site',choices=('work','neighbors'),default='work')
+    parser.add_argument('--fail-rank',type=int,default=0)
+    parser.add_argument('--launcher-failure',action='store_true')
     args=parser.parse_args()
     if args.device.startswith('cuda'):torch.cuda.set_device(torch.device(args.device))
     dist.init_process_group('nccl' if args.device.startswith('cuda') else 'gloo',timeout=timedelta(seconds=45))
@@ -213,7 +286,7 @@ def main():
         stream=torch.cuda.Stream(device=communication.device) if communication.device.type=='cuda' else None
         with torch.cuda.stream(stream) if stream is not None else contextlib.nullcontext():
             try:
-                report=run(args,communication)
+                report=launcherFailure(args,communication) if args.launcher_failure else run(args,communication)
             except (DistributedContractError,ValueError,OSError) as exc:
                 if args.expect_error is None:raise
                 assert args.expect_error in str(exc),str(exc)

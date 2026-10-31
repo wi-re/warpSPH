@@ -1818,3 +1818,133 @@ campaign uses chunked/int64 addressing and exhaustive raw-RHS observers, with
 different source revisions; these are not matched measurements isolating
 chunking cost. Larger flow costs and memory must be measured separately from
 the dense L7 debug fixture. No model/default was changed.
+
+### Local continuation after overnight campaign (2026-10-31)
+
+User authorizes this order: allocation receipts and work/list lifetime accounting;
+graceful allocation failure with last-accepted particle checkpoint and safe
+CUDA/renderer shutdown; short164³ retry beyond122 accepted steps with early
+save/restart, then t4; matched flat/chunked profiling; longer96³ flow and real
+shared-GPU NCCL flow/restart. Preserve failed frozen runtime and raw evidence.
+An allocation failure must not publish a partially advanced state as accepted.
+Qualify recovery at neighbour/work allocation sites and retain the original error
+if synchronization or checkpoint publication also fails. Physical multi-GPU
+performance and MPI/ROCm builds remain deferred. Work in isolated paired trees.
+
+User clarification2026-10-31: hold full large t4 and96³→t40 for overnight
+when development work is exhausted.196³ projects~13h (capacity unqualified);
+96³ continuation~6–8h. During development use short wide runs, fault injection,
+restart controls and matched profiling only. Do not automatically launch either
+long campaign while there is useful development work.
+
+Allocation receipt reproduction: at accepted step122 the requested W is
+29,932,714,800bytes, live23,597,358,592, reserved65,678,606,336, cached
+42,081,247,744 and device free30,071,390,208. The live78GiB limit passes;
+raw-free-only reserve check fails. This reproduces the original rejection
+without a leak or allocator OOM. Revised experiment admits free+cached while
+keeping the live cap/reserve and real allocator-error handling; no cache flush.
+
+A32³ injected failure reproducesSIGSEGV in tqdm.__del__ →close →format_meter
+at interpreter teardown even after CUDA/plot cleanup. The runner now explicitly
+closes progress on failure and preserves the primary exception if timer, frame,
+renderer or trajectory cleanup also fails. Repaired32³ publishes its accepted
+step2 native checkpoint and exits2 normally. Production code adds failure-only
+J/W receipts and typed allocation propagation through existing control packets.
+CPU2D/3D CRK/Comp work/neighbour rejection, forcing rollback and restart controls
+pass; coordinated two-rank errors on either owner and three-rank continuation
+pass. Bounded164³ fault/restart and matched profiling are in progress.
+
+Bounded wide recovery now passes:164³ crosses the old step122 rejection, then
+an injected work rejection after124 accepted steps atomically saves the
+accepted state at t0.1054982841 and exits2 withoutSIGSEGV. Peak allocated
+60.014GiB;249 completed wide RHS with zero invalid states. Continuation for
+6 steps from that recovery file and10 steps from the earlier step120 checkpoint
+both reach step130/t0.11060260981321335. Independent HDF5 comparison of29
+datasets finds identical particles, forcing, clocks, context and neighbour
+history, including exactly equal source budget. This qualifies bounded
+wide3D failure/restart/rebuild; t4 stability remains an overnight gate.
+CPU regressions:55 frontend passes/1skip;270 core passes/212skip; six focused
+core failure/control passes (including4 real Gloo jobs); scanner passes568
+runtime modules/6100 first-party imports/1317 files. Eight CUDA2D/3D CRK/Comp
+work/search failure/restart controls pass. Shared-GPU NCCL recovery/profile
+qualification follows serially.
+
+User flags the compatible-work timing increase for investigation (2026-10-31).
+The9.8% matched64³ total overhead is single process versus single process,
+serial on an idle GPU, not shared-rank contention. Raw CUDA kernels show work
+38.88→51.47ms/step (+32.4%),8→32 launches in the8-step profile; force is
+59.94→59.52ms. Vary chunk granularity with fixed physics/observers and exact
+endpoint checks, then inspect indexing/memory behavior if the gap persists.
+Keep this separate from diagnostic shared-GPU NCCL timings.
+
+Granularity diagnosis:8/4/3/1-chunk64³ profiles use the same compiled work
+kernel; one chunk recovers38.43ms/step versus flat38.88. CUDA traces report
+149registers/thread,256threads/block and one resident block/SM (register
+limited). Four65,536-row chunks each launch256blocks on188SMs, wasting much
+of the second wave; the flat1,024block launch amortizes that tail. This is
+GPU kernel utilization, not just CPU launch latency or NCCL contention.
+Test smaller work-kernel blocks without changing formulas, stages or row order.
+
+### Compatible-work launch diagnosis and fix (2026-10-31)
+
+The controlled32k/64k/128k/256k row-limit runs (8/4/3/1 chunks at64³)
+all preserve every saved particle tensor bitwise. Work GPU time is
+53.21/51.47/45.10/38.43ms per step. One chunk matches the flat38.88ms.
+CUDA traces identify149registers/thread and256threads/block, allowing only
+one resident block/SM; the small-chunk grid has poor wave utilization.
+This supports a launch-geometry explanation without an arithmetic/indexing
+change. The initial module-option experiment proved ineffective (traces still
+show256threads); those raw controls remain and are excluded from block tuning.
+
+Explicit128/64-thread trials both reduce work to~31ms/step and retain bitwise
+particle/source-budget parity.128threads is selected: the trace permits three
+resident blocks/SM. Core OperatorSpec now exposes an optional validated
+blockDim, forwarded through ordinary/prepared launches and included in the
+effective distributed contract. None preserves the256-thread scalar default;
+tiled operators retain their cooperating-lane block size. Only the frontend
+CRK work spec selects128; floating kernel AST/formulas/stages are unchanged.
+
+| Matched64³ fixture | Steady wall ms/step | Work kernel ms/step |
+| --- | ---: | ---: |
+| Flat,256threads |168.54|38.88|
+| Four chunks,256threads |185.08|51.47|
+| Flat,128threads (controlled trial) |162.22|30.45|
+| Four chunks,128threads (production path) |163.90|30.47|
+
+All cases use the same early-flow100-step physical model/diagnostics/video;
+first20steps are excluded from steady timings, and separate8-step profiles
+provide raw CUDA kernel times. Production128-thread fields match the original
+256-thread baseline bitwise. This removes the suspicious work-kernel gap and
+reduces this fixture's steady step cost~11.4%; late t4/t40 and physical multi-GPU
+performance are not remeasured. No chunk-size/global-pair expansion is needed.
+
+Production wide recovery requalifies at164³: inject failure after accepted
+step131, save safely and resume to132/t0.11230403185. All29 native datasets
+match the original256-thread two-step control exactly. Frozen old/optimized
+runtimes and hashes remain intact. Independent evidence: ignored
+`.tmp/allocation-recovery-20261031/work-launch-audit.json`.
+
+Real distributed flow gate:64³ adaptive3D CRKSPH reaches64accepted steps on
+two NCCL ranks sharing one GPU, with a step32 checkpoint/restart and changed
+chunk edge budget. Independent comparison to a one-rank64-step reference
+passes23 datasets; particle/forcing/clock fields are exact, source-budget
+roundoff is1.09e-19. Loaded runtime2.32.3 and a single GPU UUID are audited.
+This is correctness/stability only. Full large-resolution t4/t40 runs remain
+held for overnight, per user; no long job is active. Structured launcher
+failure manifests now record the recovery path, accepted step/time and any
+secondary write error; recovery files stay inside the run output directory.
+
+Final admission: CUDA block ABI17passes (ordinary/prepared/reverse and invalid
+declarations); native compatible-work/replay8passes in each FP32/FP64, plus
+two nondefault-stream/32-lane passes in each precision. Two NCCL ranks pass
+the core ownership/operator/error matrix including effective block mismatch;
+native NCCL reference/failure/restart passes with the128-thread work selection.
+The scanner resolves568modules/6105imports across1317files. Final primary-error
+cleanup controls pass. Ordinary pipelined ownership also passes its existing
+eager fallback; this does not newly qualify graphs. Both paired trees are
+ready to commit. Full164³/196³t4 and96³→t40 remain overnight-only;196³ also
+needs an independent capacity gate. No long simulation is launched.
+
+Paired core implementation is committed as f4fe38c on
+codex/chunked-neighbor-planner. Frontend commit carries accepted-state recovery,
+launcher recovery manifests, the CRK128-thread selection and regressions.
