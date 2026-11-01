@@ -1,3 +1,5 @@
 *.ipynb filter=nbstripout
 *.zpln filter=nbstripout
 *.ipynb diff=ipynb
+# Unified diff context preserves the reference source's indentation and blanks.
+scripts/acsph_reference/*.patch whitespace=-blank-at-eol,-space-before-tab

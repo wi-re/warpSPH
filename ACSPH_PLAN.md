@@ -12,6 +12,23 @@ priority decision does not start new runs or change numerical defaults.
 ## Lobovsky comparison — 2026-10-27 (active)
 
 
+**Merge-ready cleanup checkpoint (2026-11-01, user):** dev was already fully
+committed; local main is an ancestor (42 commits behind the pre-cleanup head),
+so promotion is a fast-forward. Core/Integrators/Plotting/Remote working trees
+are clean and their heads are retained in .tmp/merge-ready-2026-11-01/summary.json.
+Scoped reference-patch whitespace attributes suppress false positives from
+literal unified-diff source context; cuda13.patch bytes/SHA are unchanged.
+Both working-tree and main-to-dev whitespace checks pass. All184 changed Python
+files parse; wheel build succeeds. Focused ACSPH/reference/increment/remap/
+recorder suite:150 passed in55.61 s on CPU. Initial3 failures were sandbox
+read-only Warp-cache errors; rerun with WARP_CACHE_PATH under /tmp passes all.
+JUnit, wheel, build log and dependency metadata remain in the checkpoint root.
+No numerical model/default changes; existing shared pressure wakes and excess
+Taylor-remap breakup remain documented, unresolved experimental findings.
+Recordings and ignored campaign evidence are preserved. This prepares the
+checkout for merging; no branch merge, push or long simulation was performed.
+
+
 **Side-by-side full pressure movie (2026-10-30, user):** combined dynGPUSPH
 FP64 (left) and current warpSPH Michel baseline, Taylor/BDF-shift off (right),
 in video-comparison/dyngpusph-vs-warpsph-baseline-full.mp4. Verified identical
