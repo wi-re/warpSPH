@@ -125,6 +125,8 @@ def test_apptainer_preserves_comma_separated_gpu_list(tmp_path):
     invocation = json.loads(result.stdout)
     assert invocation['devices'] == '0,2,3'
     assert not any('CUDA_VISIBLE_DEVICES=' in arg for arg in invocation['args'])
+    env_values = [invocation['args'][index+1] for index, arg in enumerate(invocation['args']) if arg == '--env']
+    assert all(not entry.startswith('HOME=') for value in env_values for entry in value.split(','))
 
 
 def test_one_torchrun_parent_per_node_and_no_cpu_site_pass():

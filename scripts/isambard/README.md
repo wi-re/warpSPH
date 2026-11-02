@@ -275,6 +275,31 @@ source drift, corrupt checkpoint or numerical mismatch **fails** the stage.
 All NCCL logs remain available when a site/plugin version uses a different log
 format; review the evidence rather than treating absence of proof as a pass.
 
+## Startup messages observed on Isambard
+
+Returned job7986156 passes native ARM64/GH200 single-GPU execution, checkpoint
+continuation and offline artifact/state checks. Its repeated startup messages
+have separate causes:
+
+- `Overriding HOME ... not permitted`: the original wrapper redundantly passed
+  HOME using `--env`. Current `node.sh` removes that unsupported argument;
+  `container.sh` already sets HOME and explicit cache paths before Python.
+  An already-uploaded old wrapper can still print this warning. No image rebuild
+  or rerun of a passing stage is needed solely for this message.
+- Missing `fuse2fs`/`gocryptfs`: optional helpers for EXT3 and encrypted filesystems.
+  The tested ordinary SIF does not use these formats; no installation is needed
+  for the passing fixture.
+- `rm ... /usr/local/cuda/compat/lib ... Read-only file system`: consistent with
+  NGC CUDA compatibility startup attempting to replace its symlink in a read-only
+  SIF. The matching base release's startup script explicitly supports a non-writable
+  compatibility directory by prepending its real library directory. Successful
+  GPU kernels, collectives and solver/checkpoint checks establish that these
+  messages did not prevent this run. Keep CUDA compatibility setup and stderr
+  visible; do not make the image writable merely to remove the messages.
+- NCCL INFO failed IB plugin initialization followed by `Using network Socket`:
+  no network qualification is claimed for one rank. Multi-node must still prove
+  AWS Libfabric/CXI; socket fallback cannot pass that stage.
+
 ## Validation boundary and local development
 
 Local qualification on 2026-11-02 passed all three available CPU/Gloo stages
@@ -284,9 +309,12 @@ passed inside the existing Docker image on one CUDA GPU with NCCL. Focused tests
 cover corrupt checkpoints, numerical/RNG drift, retrieval damage, wrong topology,
 socket transport fallback and Slurm submission/environment handling.
 
-Actual Isambard ARM64, Apptainer, multi-GPU and multi-node execution can
-only be certified from your returned site reports. The first action on Isambard
-should be the ARM64 build followed by **only** `single`.
+Returned Isambard job7986156 now qualifies native ARM64/Apptainer/GH200
+single-GPU execution and restart:23 artifacts verified,23 saved physical/clock/
+forcing/context fields byte-identical after continuation, and diagnostic histories
+matching step-for-step. Physical multi-GPU and multi-node execution remain
+unqualified. For this campaign, continue with **only** `same-node` after reviewing
+the accepted single-stage results. New campaigns still start with the build/single gates.
 
 ```bash
 python -m pytest tests/test_isambard_qualification.py
@@ -304,4 +332,6 @@ Primary references: [Slurm submission troubleshooting](https://docs.isambard.ac.
 [NCCL/custom runtime builds](https://docs.isambard.ac.uk/user-documentation/guides/nccl/#build-nccl-in-a-container),
 [SSH file transfer](https://docs.isambard.ac.uk/user-documentation/guides/file_transfer/local/),
 [Slurm](https://docs.isambard.ac.uk/user-documentation/guides/slurm/),
-[Apptainer environment](https://apptainer.org/docs/user/latest/environment_and_metadata.html).
+[Apptainer environment](https://apptainer.org/docs/user/latest/environment_and_metadata.html),
+[filesystem helpers](https://apptainer.org/docs/admin/main/configfiles.html),
+[HOME override restriction](https://github.com/apptainer/apptainer/issues/388).

@@ -28,8 +28,9 @@ are recorded in the evidence. This NCCL version does not qualify our experimenta
 two-rank/same-GPU debug mode; the CUDA check used one rank on one physical GPU.
 
 These tiny correctness runs include cold compilation and are not performance
-benchmarks. Native ARM64/Hopper, Apptainer, Isambard Slingshot, physical multi-GPU
-and a browser renderer session remain separate qualification gates. The existing
+benchmarks. Returned Isambard job7986156 now qualifies native ARM64/Apptainer
+GH200 single-GPU execution, restart and retrieval. Isambard Slingshot, physical
+multi-GPU and a browser renderer session remain separate qualification gates. The existing
 viewer protocol was exercised over the published Docker port; browser graphics
 were not retested. ROCm and an MPI-enabled Torch build remain deferred.
 
@@ -171,8 +172,10 @@ Use the [Isambard harness guide](../scripts/isambard/README.md) to export a nati
 ARM64 source bundle, build it through Slurm, and qualify one GPU, several GPUs,
 cross-job restart, retrieval and multiple nodes in separate submissions. Each
 stage retains native checkpoints and a machine-readable report; verify downloaded
-artifacts before advancing. Actual site execution remains pending. The local
-x86-64 image is not an Isambard deployment artifact.
+artifacts before advancing. Native ARM64/GH200 single-GPU execution, checkpoint
+continuation and23 retrieved artifacts passed in returned job7986156. Same-node
+multiple GPUs and multi-node fabric remain pending. The local x86-64 image is not
+an Isambard deployment artifact.
 
 ## Simulation commands and HPC scope
 

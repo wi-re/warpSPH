@@ -133,9 +133,10 @@ Local evidence under `.tmp/isambard-qa-20261102/`:
   Torch stream and real NCCL collectives. An initially untyped Warp scalar literal
   failed compilation; explicit `wp.float64(2.0)` fixes it and the final probe passes.
 
-Native ARM64/SIF build, GH200, physical multi-GPU, Slurm placement and Slingshot
-transport remain **unqualified until returned site reports pass**. Start at the
-ARM64 build and only the `single` stage; no automatic campaign is launched.
+Returned job7986156 now qualifies native ARM64/Apptainer/GH200 single-GPU
+execution, restart and retrieval (audit below). Physical multi-GPU and Slingshot
+transport remain unqualified. Continue with only `same-node`; no automatic
+campaign is launched.
 
 Path configuration follow-up (2026-11-02): use `QA_ROOT` as the single remote
 base (default `$HOME`, with the user's Isambard HOME at
@@ -164,6 +165,53 @@ The build log under `$QA_ROOT/logs` and test logs under `$QA_RESULTS_ROOT/logs`
 are separate paths. User home listing confirms `images`, `logs`, `qualification`
 and `warpsph-isambard` are directly in HOME, so QA_ROOT is HOME itself. Guide
 defaults now match that layout on both local transfers and remote submissions.
+
+Returned Isambard single-GPU evidence review (2026-11-02, complete):
+
+- Job7986156, `I-AI_P2`, host `nid010010`, native `aarch64`, GH200120GB,
+  Torch2.10.0a0/NVIDIA26.1, CUDA13.1, Warp1.17 and NCCL2.29.2. Native NCCL
+  library `/usr/lib/aarch64-linux-gnu/libnccl.so.2.29.2`; SIF SHA256
+  `9f0bb994ce8c2e6aebaf99fcab0c392422c2afa937ed22b7e599db77b2c7c04d`.
+- Independent offline verification passes23 artifacts. Continuous step4 versus
+  2+restart+2, and continuous step2 versus independent prefix step2, each have
+  **23 physical/clock/forcing/context datasets byte-identical**, maximum
+  difference0. Diagnostics match step-for-step; mass1 unchanged; all state
+  finite, positive density/pressure/energy/support and advancing clocks.
+  Maximum absolute relative energy-budget residual3.346e-12 for this tiny fixture.
+- Checked904 installed source files against the frozen ARM64 build context for
+  each of the three solver launches. Same source digest/device across all runs;
+  real resumed int32→int64 offset and maxRows4→3 transition confirmed.
+- Solver process wall times: reference141.085s, prefix32.396s, resumed122.604s
+  (296.085s total, excluding probe/check/seal). Cold first steps117.634s and
+  103.292s for the changed layout; warm steps418–525ms. Tiny/JIT correctness
+  evidence only; video deliberately omitted. No CUDA errors, NCCL WARN/ERROR,
+  nonfinite diagnostics or velocity/stall alarm in returned logs.
+- NCCL initializes successfully but selects `Socket`; INFO reports failed
+  optional IB plugin initialization. One rank cannot exercise inter-GPU traffic.
+  This is **not** Slingshot/RDMA evidence; multi-node still requires per-rank
+  AWS Libfabric/CXI proof. Next gate is one node/two distinct GPUs.
+- Six repeated HOME warnings trace to our redundant `--env HOME=/work` argument.
+  Removed that unsupported override from current `node.sh`; the existing
+  container bootstrap already sets HOME and caches before Python. Existing
+  wrapper argument regression now rejects the unsupported HOME argument.
+  Eleven focused tests, shell syntax and full imports pass (576 modules,
+  6283 imports,1340 files). Deployed old wrapper may still warn; no SIF rebuild
+  or rerun of this accepted single stage is needed for that warning alone.
+- Missing `fuse2fs`/`gocryptfs` are optional EXT3/encrypted-filesystem helper
+  notices, not failures mounting this SIF. Repeated CUDA compat `rm` errors
+  match `/etc/shinit_v2` in the same local NGC release: it tries removing/replacing
+  a compatibility symlink and explicitly falls back to adding `lib.real` to
+  LD_LIBRARY_PATH when the image is not writable. Direct source inspected was
+  the matching amd64 image, so the precise ARM startup implementation is inferred
+  from matching errors; successful actual Warp/NCCL/solver execution is verified.
+  Do not bypass compat setup, delete CUDA libraries, add writable images or
+  suppress stderr to hide those messages. Barrier device-context warning is
+  informational; local device binding and GPU UUID are verified.
+
+Read-only retrieved campaign is preserved in the main workspace at
+`.tmp/isambard-retrieved/single-7986156/`. Adjacent `audit_single.py`,
+`audit-single-7986156.json` and `ngc-shinit_v2-amd64.txt` reproduce/index the audit
+without modifying sealed results. Original uploaded source archive unchanged.
 
 ### Static import scanner issue resolved (2026-10-30)
 

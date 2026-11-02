@@ -14,8 +14,9 @@ if [[ ${QA_NETWORK:-none} == custom ]]; then
 fi
 # Preserve comma-separated GPU lists literally; --env itself parses commas.
 export APPTAINERENV_CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:?Slurm did not expose the allocated GPUs}"
+# HOME is set by container.sh; Apptainer rejects HOME in --env.
 args=(exec --nv --cleanenv --no-home --pwd /work "${binds[@]}"
-  --env "HOME=/work,QA_NETWORK=${QA_NETWORK:-none},QA_WORLD_NODES=$nodes,QA_NODE_RANK=${SLURM_NODEID:-0}"
+  --env "QA_NETWORK=${QA_NETWORK:-none},QA_WORLD_NODES=$nodes,QA_NODE_RANK=${SLURM_NODEID:-0}"
   --env "QA_MASTER_ADDR=$QA_MASTER_ADDR,QA_MASTER_PORT=$QA_MASTER_PORT,QA_JOB_ID=${SLURM_JOB_ID:-local}"
   "$image" bash /qualification/container.sh "$mode" "$nodes" "$workers" "$label" "$script")
 exec apptainer "${args[@]}" "$@"
