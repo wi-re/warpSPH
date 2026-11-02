@@ -9,7 +9,7 @@
       "warpSPHIntegrators": "0.7.0"
     },
     "sources": {
-      "warpSPH": "b669d918300ba703fb30076ab6fdbc45b6fed1b8d51f341c67f129ac06e8afb9",
+      "warpSPH": "e44ba6effc2dad26e0b1be7e9c5e0a566094cea9dff6921fe979e737719efef7",
       "warpSPHCore": "5dad931b18fbf908dca276953fa16bddabc62fd14c001de98e2ece07fd4b7ed3",
       "warpSPHIntegrators": "f4c1cb30d7ae020f0be485e716bba73dce006a3e9019570e2aaf5cdd1b677b0e"
     }
@@ -62,17 +62,52 @@
   "formatVersion": 1,
   "image": {
     "architecture": "aarch64",
-    "baseImage": "nvcr.io/nvidia/pytorch:26.01-py3",
+    "baseImage": "nvcr.io/nvidia/pytorch@sha256:1b6dd8dc60741fb99b9aa343fa03fc897fbb64fbdcb1c8afcbd48c75cba57255",
     "cuda": "13.1",
     "ncclRuntime": 22902,
-    "relativePath": "images/warpsph-arm64.sif",
-    "sha256": "9f0bb994ce8c2e6aebaf99fcab0c392422c2afa937ed22b7e599db77b2c7c04d"
+    "relativePath": "images/warpsph-arm64-io-repair-2ecb382.sif",
+    "sha256": "4ef5027e120d8d9065965405077ea942517403e54b7c50fb07b9421e24c1d518"
   },
-  "name": "isambard-ai-ngc26.01-ofi1.18.0",
+  "name": "isambard-ai-ngc26.01-ofi1.18.0-io-repair",
+  "qualification": {
+    "buildHost": "it111636",
+    "fixture": "Four-step nx8 2D CRKSPH; correctness only, not a performance or broad-scheme qualification",
+    "oldReferenceFieldsBitExact": 23,
+    "priorFailedMultiNodeJob": "8001638",
+    "sourceChange": "NFS shared-path visibility only; numerical source unchanged",
+    "sourceCommit": "2ecb382",
+    "stages": [
+      {
+        "elapsed": "00:05:55",
+        "filesVerified": 24,
+        "jobId": "8004381",
+        "stage": "single"
+      },
+      {
+        "elapsed": "00:04:19",
+        "filesVerified": 21,
+        "jobId": "8004781",
+        "stage": "same-node"
+      },
+      {
+        "elapsed": "00:07:20",
+        "filesVerified": 33,
+        "jobId": "8005076",
+        "stage": "restart"
+      },
+      {
+        "elapsed": "00:08:31",
+        "filesVerified": 35,
+        "jobId": "8005442",
+        "stage": "multi-node"
+      }
+    ],
+    "status": "passed"
+  },
   "restrictions": [
     "Retain image NCCL/CUDA; do not load brics/apptainer-multi-node or source /host/adapt.sh.",
     "Torchrun uses one parent per node and one worker per physical GPU; no MPI Torch build required.",
-    "Reference and restart are the original frozen application; new solver source requires a new image and qualification.",
+    "Frozen application snapshots plus shared-filesystem visibility repair; changed source/image/runtime requires renewed qualification.",
     "Tiny QA fixtures qualify correctness only; inter-node and large-run performance are separate."
   ]
 }

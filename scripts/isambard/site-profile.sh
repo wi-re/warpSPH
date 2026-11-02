@@ -3,7 +3,7 @@
 # Shared root may move if the pinned image/build are copied intact.
 export QA_ROOT=${QA_ROOT:-$HOME}
 export QA_BUNDLE=${QA_BUNDLE:-$QA_ROOT/warpsph-isambard}
-export QA_IMAGE=${QA_IMAGE:-$QA_ROOT/images/warpsph-arm64.sif}
+export QA_IMAGE=${QA_IMAGE:-$QA_ROOT/images/warpsph-arm64-io-repair-2ecb382.sif}
 export QA_COMM_ROOT=${QA_COMM_ROOT:-$QA_ROOT/communication/ofi-7999853}
 export QA_LIBFABRIC_HOST=${QA_LIBFABRIC_HOST:-/opt/cray/libfabric/2.3.1}
 export QA_NETWORK_SETUP=${QA_NETWORK_SETUP:-$QA_COMM_ROOT/network-setup.sh}

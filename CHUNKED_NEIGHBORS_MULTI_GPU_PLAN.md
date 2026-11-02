@@ -2,7 +2,7 @@
 
 Plan index: [PLANS.md](PLANS.md). Parent physics programme: [driven compressible turbulence](docs/roadmap/driven_compressible_turbulence.md).
 
-Status, 2026-10-31: **Bounded local L1–L7, allocation recovery and CRK work-launch fix qualified; long-flow/physical-device gates held; compressible compatibility qualified through MFM/MFV; bounded delta/Sun2017 and four native incompressible variants qualified**.
+Status, 2026-11-02: **Bounded local L1–L7, allocation recovery and CRK work-launch fix qualified; compressible/delta/native incompressible compatibility qualified in bounded fixtures; local ARM64 build and Isambard single/two-GPU, cross-job/rank-count restart and two-node/CXI correctness accepted. Four GPUs, broader site cases, capacity/performance and held long-flow runs remain open.**
 The count/scan/ownership design is agreed in discussion. Core/main and frontend/dev
 are integrated; see the [integration report](docs/chunked_integration_2026-10-30.md).
 The planner and opt-in standalone single-device chunk construction/lifecycle are
@@ -10,7 +10,8 @@ qualified on CPU/CUDA. Explicit row-mapped shared operators and a bounded eager
 Monaghan path pass flat parity. Native CRKSPH/CompSPH now retain compatible work
 in owned chunks and preserve changed-list replay in bounded CPU/CUDA fixtures.
 The bounded replicated-state Gloo/NCCL process path is now qualified locally;
-physical multi-GPU, Isambard and capacity/performance gates remain open.
+native GH200 single/two-GPU and two-node/CXI correctness now pass. Four-GPU,
+broader capacity/performance and long-flow gates remain open.
 This document is the canonical implementation/handoff plan for both repositories;
 the core carries a short companion pointer, `CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md`.
 
@@ -388,7 +389,7 @@ archives, initial scanner logs and build-source notes are indexed in
 `.tmp/isambard-ofi-sources/README.md`. The audit checks receipts/source hashes,
 shared-library hashes, final accounting, fingerprint, live maps and raw logs.
 
-Inter-node continuation (2026-11-02, in progress): user explicitly authorizes
+Inter-node continuation (2026-11-02, completed; final acceptance below): user explicitly authorizes
 recording all accepted site setup requirements for later simulations and running
 the two-node/one-GPU qualification. Retain image/build/profile/checksum provenance,
 exact launch/environment/bind settings, then dispatch one bounded multi-node
@@ -407,15 +408,15 @@ imports (576 modules/6283 imports/1341 files) pass. Tiny four-step qualification
 fixture omits video deliberately; no physical/model/source-image changes.
 Initial inter-node job8001638 submitted using harness e43340f. Primary CXI
 documentation requires per-step SLINGSHOT_VNIS/DEVICES/SVC_IDS for explicit
-Slurm-assigned authorization; cleanenv currently drops them. Audit forwarding
-and preserve each node's own assigned lists before accepting a reusable launch.
+Slurm-assigned authorization; the original cleanenv dropped them. The repaired
+wrapper preserves each node's own lists, verified on two hosts in8005442.
 User decision: future ARM64 OCI/SIF builds must run on the local development
 machine, with ready-built artifacts uploaded to Isambard. Use Buildx ARM64
 emulation first (or a verified cross toolchain), then local SIF conversion without
 executing target GPU code. Bring pinned host Libfabric headers/libraries into a
 local ARM64 sysroot for OFI; no build-only Slurm allocation by default. Preserve
-the current accepted SIF for this ongoing test. Local build plumbing remains a
-follow-up; hardware execution/fabric qualification still runs on Isambard.
+the current accepted SIF for this ongoing test. Local build plumbing is now completed below; hardware execution/fabric
+qualification still runs on Isambard.
 Job8001638 FAILED1:0 after3m28s on nid011241/nid011264. Two-host Warp/Torch/
 NCCL collective/stream/storage probe passes with AWS Libfabric/CXI; one-GPU
 reference completes4 steps. Distributed solver fails before stepping at
@@ -424,8 +425,8 @@ after rank0 creates the fresh directory. Investigate/repair bounded shared-file
 visibility at launcher startup, retaining failure and numerical source baseline.
 A deployable source fix requires a fresh locally built ARM64 image and renewed
 source-fingerprint qualification; do not silently patch the accepted SIF or
-loosen existing source guards. Current tool identity cannot access local Docker
-socket; user diagnostic requested while preparing fix/build recipe.
+loosen existing source guards. The initial tool session lacked the new Docker group. Using existing membership
+via sg docker restored access; no daemon/socket/group changes were needed.
 
 ### Static import scanner issue resolved (2026-10-30)
 
@@ -2780,3 +2781,38 @@ matching prior accepted partition rounding. No NCCL warnings. Reference launch
 Restart8005076 COMPLETED0:0 in7m20s on nid010754,33 artifacts locally verified,
 2→1 cross-job and fresh1→2 transitions exact in all23 fields; no warnings.
 Renewed two-node/oneGPU-per-node8005442 running on nid010558/nid010626.
+
+### Renewed Isambard multi-node acceptance (2026-11-02)
+
+All four strict stages pass on local-built ARM64 SIF4ef5027e...c1d518: single
+8004381 (5m55s,24 artifacts), same-node8004781 (4m19s,21), restart8005076
+(7m20s,33), two-node8005442 (8m31s,35). All113 stable artifacts and native
+checkpoint checksums verified locally. Every fresh reference matches the old
+accepted image bit-for-bit in all23 fields. Fresh two-rank same/inter-node
+solves preserve particle fields exactly; only global sourceEnergyBudget differs
+4.1359030627651384e-25 (oneULP). All restart continuations are exact.
+
+Job8005442 used nid010558/nid010626 and two distinct GH200 UUIDs. Probe and both
+distributed solver processes evidence real NET/AWS Libfabric/CXI channels. Each
+node receives its own Slingshot service-ID list through cleanenv; comma lists
+are preserved. All solver ranks load image NCCL22902/CUDA13.1. No NCCL warnings
+or errors found. Reference/distributed/multi-prefix/single-resume launch walls
+164.675/56.122/77.139/140.155s include startup/JIT/NFS waits and are correctness
+measurements only, not throughput comparisons.
+
+The original8001638 failure,15 sealed partial artifacts and failed status remain
+untouched. New image changes only frontend distributedRun.py over frozen app
+snapshots; no kernel/model change. Actual two-node startup/checkpoint publication
+now passes, as do injected visibility/error and full CRKSPH restart regressions.
+Reused OFI7999853 artifacts retain their original build-image hash separately.
+
+Accepted parametric profile/defaults and actual-simulation recipe:
+scripts/isambard/site-profile.{json,sh} and scripts/isambard/README.md. Remote
+release directory: $HOME/warpsph-deployment-arm64-2ecb382; source its profile to
+select images/warpsph-arm64-io-repair-2ecb382.sif. Source/image/runtime changes
+require renewed qualification. Four GPUs, additional site scheme/boundary/3D
+cases, capacity/performance, MPI/ROCm and held overnight flows remain open.
+No larger topology or long simulation was launched. Evidence/build contexts,
+receipts, raw logs, failed result, per-field audits and complete native states
+are indexed in development .tmp/arm64-local-20261102/README.md and
+.tmp/isambard-retrieved/README.md. Focus remains user-owned.

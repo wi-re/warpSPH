@@ -20,6 +20,49 @@ matching image, application/runtime fingerprint and precision. No chain of jobs
 is submitted automatically. Results are a new directory for every job. A failed
 probe/comparison exits nonzero and retains a failure report and available output.
 
+## Accepted deployment (2026-11-02)
+
+The repaired ARM64 image was built on it111636 with Buildx/QEMU and converted to
+SIF locally with user-owned Apptainer1.5.5. No build-only Slurm job was used.
+The fresh deployment is `$HOME/warpsph-deployment-arm64-2ecb382`; it selects
+`$HOME/images/warpsph-arm64-io-repair-2ecb382.sif`. Full SHA256, application/runtime
+fingerprint, communication hashes and accepted jobs are pinned in `site-profile.json`.
+Original images, source bundle and failed results remain intact.
+
+| Stage | Job | Wall time including JIT | Artifacts verified locally |
+|---|---|---|---|
+| Single GPU | 8004381 | 5m55s | 24 |
+| Two GPUs, one node | 8004781 | 4m19s | 21 |
+| Cross-job/rank-count restart | 8005076 | 7m20s | 33 |
+| Two nodes, one GPU each | 8005442 | 8m31s | 35 |
+
+All113 sealed artifacts/checkpoints verified. Each reference matches the original
+accepted image in all23 saved fields. Particle fields and restart continuations
+are bit exact; fresh two-rank runs differ only in sourceEnergyBudget by one
+float64 ULP (4.1359e-25). Both inter-node solver launches prove NET/AWS Libfabric/CXI
+channels, and per-node Slingshot service lists survive cleanenv correctly. No
+NCCL warnings were found. These four-step nx8 fixtures qualify correctness,
+not throughput, larger resolutions, four GPUs or additional schemes.
+
+Initial inter-node8001638 passed the network probe but failed before stepping
+when rank1 could not see rank0's fresh output directory on NFS. The replacement
+changes only distributedRun.py over frozen application sources: ENOENT-only
+visibility waits, bounded at120s, precede rank metadata publication and reads.
+Permission/other IO errors remain immediate. The new image passes the full
+sequence; the failed result is preserved. Communication build7999853 is reused
+byte-for-byte, retaining its separate original build-image provenance.
+
+For later simulations on the login node:
+
+```bash
+unset QA_IMAGE QA_DEPLOYMENT_PROFILE  # clear an earlier release selection
+source "$HOME/warpsph-deployment-arm64-2ecb382/site-profile.sh"
+```
+
+The actual batch-body recipe is in [Reusing the accepted deployment](#reusing-the-accepted-deployment-for-simulations).
+Fresh source releases should follow the local build path below and renew the
+stages in order. The original native-build commands remain for legacy recovery.
+
 ## 1. Prepare the native ARM64 bundle locally
 
 The existing `warpsph:local-cuda-20261102` image is **x86-64**. Do not transfer it
@@ -88,7 +131,7 @@ base digest for a release. Upload the finished SIF under a fresh release filenam
 plus its checksum, source/build manifests, harness and communication artifacts.
 Never replace a currently accepted image in place. A new image hash requires an
 updated deployment profile and renewed qualification; the current accepted SIF
-stays fixed during the ongoing inter-node test.
+stays available alongside the new qualified release.
 
 On it111636, an older terminal session may lack the newly granted docker group.
 `sg docker -c 'docker version'` uses existing membership without changing socket
@@ -375,6 +418,11 @@ prior solver-stage results.
 
 ### Build only the compatible OFI plugin
 
+The following native Slurm recipe is retained to reproduce build7999853. Future
+communication rebuilds should use the local ARM64/site-sysroot path described
+above. The IO-only repaired release reuses the exact accepted binaries; it does
+not require another communication build.
+
 `build_network.slurm` builds aws-ofi-nccl 1.18.0 and hwloc 2.13.0 natively inside
 this campaign's unchanged SIF. The [site guide](https://docs.isambard.ac.uk/user-documentation/guides/nccl/)
 describes this approach; the [OFI release](https://github.com/aws/aws-ofi-nccl/releases/tag/v1.18.0)
@@ -443,7 +491,8 @@ For this campaign, **build 7999853** and **custom preflight 8000996** now pass
 unchanged SIF/application fingerprint and actual NCCL2.29.2/CUDA13.1. Live maps
 show the new OFI plugin, host Libfabric2.3.1 and libcxi; NCCL logs select AWS
 Libfabric/CXI, SENDRECV and discover 4 NICs with no NCCL warnings. One-GPU kernel,
-stream and collective checks pass. Inter-node traffic/performance remain untested.
+stream and collective checks pass. The renewed release above additionally passes
+inter-node solver/checkpoint correctness; inter-node performance remains untested.
 Use `$QA_ROOT/communication/ofi-7999853` and its `network-setup.sh` for the next
 reviewed two-node/one-GPU gate; no second build is needed for this accepted SIF.
 
@@ -504,8 +553,9 @@ directory so Slurm spool paths never select helper files. The current image uses
 NGC26.01, CUDA13.1, NCCL2.29.2, OFI1.18.0/hwloc2.13.0 and host Libfabric2.3.1.
 
 ```bash
-source "$HOME/warpsph-runtime-COMMIT/site-profile.sh"
-export QA_PREVIOUS="$QA_RESULTS_ROOT/restart-7989645"
+unset QA_IMAGE QA_DEPLOYMENT_PROFILE  # clear an earlier release selection
+source "$HOME/warpsph-deployment-arm64-2ecb382/site-profile.sh"
+export QA_PREVIOUS="$QA_RESULTS_ROOT/restart-8005076"
 export QA_NODES=2 QA_GPUS_PER_NODE=1
 export QA_TIME=00:30:00 QA_CPUS_PER_NODE=16
 bash "$QA_HARNESS_ROOT/submit.sh" multi-node
@@ -548,6 +598,7 @@ from Slurm's spooled batch script.
 set -euo pipefail
 : "${QA_HARNESS_ROOT:?Source the versioned site-profile.sh before sbatch}"
 source "$QA_HARNESS_ROOT/site-profile.sh"
+command -v apptainer >/dev/null || module load apptainer
 : "${SLURM_JOB_ID:?Submit through sbatch}"
 : "${SIM_CONFIGURATION:?Absolute saved RunConfiguration JSON}"
 : "${SIM_OUTPUT:?Fresh shared output directory}"
@@ -633,10 +684,10 @@ context fields byte-identical to uninterrupted execution. Diagnostics exactly
 match. Three reviewed RAS listener-port conflicts are recorded as diagnostic
 advisories; there are no failed GPU/solver comparisons.
 
-For this campaign, the custom one-GPU compatibility gate has passed. Next is
-the two-node/one-GPU stage using the accepted communication root above. Four
-GPUs and multi-node fabric remain pending. New campaigns still start with the
-build/single gates.
+The renewed local-built release passes all four stages above, including actual
+two-node/CXI solver traffic and two-node→single checkpoint continuation. Four
+GPUs, broader cases and capacity/performance remain separate gates. New source
+releases still start with the local build/single gates.
 
 ```bash
 python -m pytest tests/test_isambard_qualification.py

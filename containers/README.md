@@ -32,7 +32,11 @@ benchmarks. Returned Isambard job7986156 now qualifies native ARM64/Apptainer
 GH200 single-GPU execution, restart and retrieval. Returned job7988602 additionally
 qualifies same-node two-GPU correctness with NCCL peer channels. Job7989645 also
 qualifies cross-job/two→one and one→two continuation with exact saved-state agreement.
-Four GPUs, Isambard Slingshot and browser renderer sessions remain separate gates. The existing
+The repaired ARM64 image built and converted locally on it111636 now also passes
+two-node/one-GPU-per-node Slingshot/CXI solver and checkpoint qualification
+(job8005442); its renewed single/two-GPU/restart jobs8004381/8004781/8005076
+also pass. Exact release identity/setup are in the [accepted deployment profile](../scripts/isambard/site-profile.json).
+Four GPUs, performance/capacity studies and browser renderer sessions remain separate gates. The existing
 viewer protocol was exercised over the published Docker port; browser graphics
 were not retested. ROCm and an MPI-enabled Torch build remain deferred.
 
@@ -180,10 +184,11 @@ stage retains native checkpoints and a machine-readable report; verify downloade
 artifacts before advancing. Native ARM64/GH200 single-GPU execution, checkpoint
 continuation and23 retrieved artifacts passed in returned job7986156. Returned
 job7988602 passes20 retrieved artifacts and one-vs-two GH200 consistency (all
-particle fields byte-identical, one-ULP global work-budget difference). Next is
-the one-GPU network compatibility preflight after accepted restart job7989645;
-four GPUs and multi-node fabric remain pending. The local x86-64 image is not
-an Isambard deployment artifact.
+particle fields byte-identical, one-ULP global work-budget difference). The repaired
+local-built ARM64 SIF renews these gates and adds accepted cross-job/rank-count
+restart and real two-node/CXI solver/checkpoint checks in jobs8004381/8004781/
+8005076/8005442 (113 artifacts verified). Four GPUs and capacity/performance
+remain separate gates. The local x86-64 image is not an Isambard deployment artifact.
 
 ## Simulation commands and HPC scope
 
