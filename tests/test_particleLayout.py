@@ -16,8 +16,8 @@ from warpSPH.utils.domain import buildDomainDescription
 from test_spatialEvaluationResources import setup
 
 
-def shuffled(method='CompSPH', *, compatible=True, adaptive=True):
-    ctx, system = setup(method, compatible=compatible, adaptive=adaptive)
+def shuffled(method='CompSPH', *, compatible=True, adaptive=True, device='cpu'):
+    ctx, system = setup(method, compatible=compatible, adaptive=adaptive,device=device)
     order = torch.randperm(system.state.UIDs.numel(), generator=torch.Generator().manual_seed(17))
     system.state = permute_state(system.state, order)
     system.adjacency = None

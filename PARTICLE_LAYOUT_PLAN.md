@@ -2,7 +2,31 @@
 
 Progress and priorities: [PLANS.md](PLANS.md).
 
-Current implementation: fixed-count continuation adapters are CPU-qualified;
+2026-11-02 user direction: execute the next phases in order **1, 2, 4, 3**:
+commit the qualified frontend adapters (done as `24d7a92`), persist numerical
+continuation, extend boundary/ghost/source and remaining integrator-input adapters,
+then qualify on the machine's GPU outside the sandbox using its normal Warp
+environment. Changing particle counts/emitters/outlets remain the following phase.
+
+Current implementation (2026-11-02): numerical continuation checkpoints,
+declared Adams/NDF contexts, implicit warm/preconditioner inputs, pure UID forcing
+and boundary/ghost/body adapters are implemented and qualified. See the
+[restart/input and GPU report](docs/particle_layout/RESTART_AND_INPUTS_2026-11-02.md).
+Final gates: 547 CPU passes / 46 skips (ten hard-CUDA cases deselected), 283 FP64
+passes, 52 GPU passes, 44 GPU FP64 passes; all ten CUDA configuration cases pass
+outside the sandbox in the normal `warp` conda environment. Paired 2D GPU timing
+at 1,048,576 particles improves CompSPH from 79.435 to 58.237 ms/step and CRKSPH
+from 125.321 to 94.668 ms/step. Small problems pay adapter overhead; input-order
+defaults remain selected. CPU-pinned paired native controls show no consistent
+regression beyond observed variation. Frontend remains on `dev`; integrator
+main/worktree remain aligned at `cdbbc52`, core at `04e126e`.
+
+Next: accepted-boundary fluid population events, history reset and variable-roster
+output before emitters/outlets. Stateful source transactions, automatic WCSPH
+runner/export integration, analytic providers, graph execution and exact JVP
+remain separate gates. Low-level ghost/body utilities do not enable those paths.
+
+Previous checkpoint: fixed-count continuation adapters were CPU-qualified;
 see [the latest report](docs/particle_layout/CONTINUATION_ADAPTERS_2026-11-02.md)
 and the preceding [renewal/persistence checkpoint](docs/particle_layout/RENEWAL_AND_PERSISTENCE_2026-11-02.md).
 User direction (2026-11-02): commit that checkpoint, then implement continuation

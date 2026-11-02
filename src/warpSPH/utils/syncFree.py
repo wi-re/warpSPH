@@ -74,10 +74,10 @@ def scatterRows(base: torch.Tensor, target: torch.Tensor, values: torch.Tensor) 
 
 def cachedKindIndex(kinds: torch.Tensor, kind: int, config) -> torch.Tensor:
     """``(kinds == kind).nonzero()`` computed once per run and cached on
-    `config`. `kinds` is a run-constant field (assigned at particle generation,
-    never mutated -- the same assumption `mdbc._util.stateHasBoundaryParticles`
-    makes), so after the first call gathers of that particle subset need no
-    host sync. The row order is ascending, exactly as boolean-mask indexing."""
+    `config`. `kinds` stays constant within a particle layout. Explicit accepted
+    layout adapters return a private config with this cache cleared; ordinary
+    runs retain their once-per-run cache. Subsequent gathers need no host sync.
+    The row order is ascending, exactly as boolean-mask indexing."""
     cache = getattr(config, '_kindIndexCache', None)
     if cache is None:
         cache = {}

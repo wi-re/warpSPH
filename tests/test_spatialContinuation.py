@@ -16,9 +16,9 @@ from warpSPHIntegrators.state.history import StepHistory
 from test_particleLayout import shuffled, particle_pairs
 
 
-def fixture(method='CompSPH', *, fsal=False):
-    ctx, state = shuffled(method, compatible=False, adaptive=not fsal)
-    state.state.UIDs = (2**35 + 13 * torch.randperm(32, generator=torch.Generator().manual_seed(8))).long()
+def fixture(method='CompSPH', *, fsal=False, device='cpu'):
+    ctx, state = shuffled(method, compatible=False, adaptive=not fsal,device=device)
+    state.state.UIDs = (2**35 + 13 * torch.randperm(32, generator=torch.Generator().manual_seed(8))).long().to(device)
     state.state.velocities += .03 * torch.sin(2*torch.pi*state.state.positions)
     if fsal:
         ctx.schemeConfig.viscositySwitchParams.scheme = ViscositySwitch.NoneSwitch
@@ -39,7 +39,9 @@ def input_order_step(scheme,state,history,kwargs):
     for _ in range(17):
         try:
             with CompressibleSpatialResources().session(coverage=coverage):
-                return scheme(state.initializeNewState(),1e-4,rhs,history=history,**kwargs)
+                owned=state.initializeNewState()
+                if getattr(state,'ndf_compatible',False):owned.ndf_compatible=True
+                return scheme(owned,1e-4,rhs,history=history,**kwargs)
         except CoverageInvalidated as failure:
             envelope=failure.renewal.envelope
             coverage[envelope.stage_path]=(envelope,envelope.build(kwargs['config']))
@@ -255,13 +257,14 @@ def test_runner_physical_hook_restarts_history_and_state_only_restart_is_rejecte
                                store=True,exportRoot=str(tmp_path))
     result=run(case,**args)
     assert len(result.ctx.scratch['stepHistory'])==0
-    args.update(resumeFrom=str(tmp_path/'not-used.h5'))
-    # Preflight directly: the existing state checkpoint format has no numerical
-    # history. Do not silently turn a resumed multistep run into a cold startup.
-    from warpSPH.runner.runner import _spatialStepper
-    from warpSPH.runner import CaseSpec
+    from pathlib import Path
+    import h5py
+    checkpoint=Path(result.exportPath)/'trajectory/finalState.h5'
+    with h5py.File(checkpoint,'r+') as f:
+        del f['integration']
+    args.update(resumeFrom=str(checkpoint))
     with pytest.raises(ValueError,match='persisted integrator history'):
-        _spatialStepper(result.ctx,CaseSpec(**args),result.state)
+        run(case,**args)
 
 
 @pytest.mark.parametrize('name',['ab2','abm3'])

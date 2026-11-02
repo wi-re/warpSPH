@@ -288,9 +288,17 @@ def _spatialStepper(ctx, spec, system):
         raise ValueError('Morton runner requires eager execution')
     stepper = MortonStepper(ctx.integrator,max_coverage_retries=spec.coverageRetries)
     stepper.validate(system, config=ctx.config, schemeConfig=ctx.schemeConfig)
-    if stepper.history_method and spec.resumeFrom:
-        raise ValueError('multistep Morton restart requires persisted integrator history; state-only resume is unsupported')
     return stepper
+
+
+def _checkpointOptions(ctx,state):
+    """Accepted numerical memory; ordinary input-order exports stay unchanged."""
+    if ctx.spec.particleOrder != 'morton':
+        return {}
+    from warpSPHIntegrators.runtime import Continuation
+    return dict(continuation=Continuation(state,ctx.scratch.get('checkpointHistory'),ctx.scratch.get('checkpointPrior')),
+                integrator=ctx.integrator,config=ctx.config,schemeConfig=ctx.schemeConfig,
+                last_dt=ctx.scratch.get('integratorLastDt'),next_dt=ctx.config.dt)
 
 
 def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> RunResult:
@@ -380,6 +388,15 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
             if spec.particleOrder == 'morton':
                 from ..io.particleLayout import restoreCheckpoint
                 restoreCheckpoint(f,system,ctx.config,ctx.scheme)
+                if 'integration' in f:
+                    from ..io.continuation import readContinuation
+                    memory,last_dt,next_dt=readContinuation(f['integration'],system,
+                        integrator=ctx.integrator,config=ctx.config,schemeConfig=ctx.schemeConfig)
+                    ctx.scratch.update(checkpointHistory=memory.history,checkpointPrior=memory.prior_step,
+                                       integratorLastDt=last_dt)
+                    ctx.config.dt=next_dt
+                elif ctx.integrator.metadata.history_length and float(system.t) != 0:
+                    raise ValueError('multistep restart requires persisted integrator history')
             else:
                 system.state = loadState(f['state'], ctx.config.device, type(system.state))
                 system.t = float(f.attrs['time'])
@@ -508,7 +525,8 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         exportSimulationSystem(ctx.exportPath, 'initialState', ctx.scheme, runningState,
                                exportAdjacency=False, stages=None,
                                exportStagesAdjacency=False,
-                               extraData=dict(extraData, frame_num=spec.resumeStepOffset))
+                               extraData=dict(extraData, frame_num=spec.resumeStepOffset),
+                               **_checkpointOptions(ctx,runningState))
 
     result = RunResult(ctx=ctx, state=runningState, exportPath=ctx.exportPath)
     if case.diagnostics is not None:
@@ -572,14 +590,16 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
             timeLimited, extraData, groups, storeSteps, recentTimes, alarm, say)
         steps = ()
 
-    spatialHistory = None
+    spatialHistory = ctx.scratch.get('checkpointHistory') if spatialStepper is not None else None
     if spatialStepper is not None and spatialStepper.history_method:
         from warpSPHIntegrators.state.history import StepHistory
-        spatialHistory = StepHistory(maxlen=max(1, ctx.integrator.metadata.history_length))
+        if spatialHistory is None:
+            spatialHistory = StepHistory(maxlen=max(1, ctx.integrator.metadata.history_length))
     for i in steps:
         # Previous outputs have consumed their stage data. Release it before
         # entering the next integrator call; the accepted system stays live.
         stepResult = None
+        step_dt=ctx.config.dt
         with _Timer(ctx.device) as timer:
             with record_function("[runner] integrator step"):
                 if stepGraph is not None:
@@ -660,6 +680,14 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         if case.timestep is not None:
             with record_function("[runner] case timestep hook"):
                 ctx.config.dt = case.timestep(ctx, runningState)
+        if spatialStepper is not None:
+            checkpointHistory=stepResult.history
+            if discardSpatialHistory:
+                from warpSPHIntegrators.state.history import StepHistory
+                checkpointHistory=StepHistory(max(1,ctx.integrator.metadata.history_length))
+            ctx.scratch.update(checkpointHistory=checkpointHistory,
+                checkpointPrior=None if discardSpatialHistory or not stepResult.stages else stepResult.stages[-1],
+                integratorLastDt=step_dt)
 
         # the step time and max |v| (non-finite check, velocity alarm) in one host transfer
         with record_function("[runner] read time + max speed (non-finite check, velocity alarm)"):
@@ -761,6 +789,7 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
                     from warpSPHIntegrators.state.history import StepHistory
                     spatialHistory = StepHistory(maxlen=spatialHistory.maxlen)
                 ctx.scratch['stepHistory'] = spatialHistory
+                ctx.scratch['checkpointHistory'] = spatialHistory
                 result.state = runningState
                 if not layout.identity and ctx.scratch['lastStageUpdate'] is not None:
                     ctx.scratch['lastStageUpdate'] = permute_update(ctx.scratch['lastStageUpdate'], layout.p)
@@ -791,7 +820,8 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
                                exportStagesAdjacency=True,
                                extraData=dict(extraData,
                                               **(case.extraData(ctx, runningState) if case.extraData else {}),
-                                              frame_num=spec.resumeStepOffset+result.nSteps))
+                                              frame_num=spec.resumeStepOffset+result.nSteps),
+                               **_checkpointOptions(ctx,runningState))
     if outFile is not None:
         outFile.close()
 
@@ -1165,7 +1195,8 @@ def _plotAndStore(ctx: RunContext, case: Case, spec: CaseSpec, state, stepResult
             exportSimulationSystem(ctx.exportPath, f'state_{i:04d}', ctx.scheme,
                                    state, exportAdjacency=False,
                                    stages=stepResult.stages,
-                                   exportStagesAdjacency=True, extraData=frameExtra)
+                                   exportStagesAdjacency=True, extraData=frameExtra,
+                                   **_checkpointOptions(ctx,state))
 
 
 def _showStep(progress, i: int, nSteps: Optional[int], row: Dict[str, float],

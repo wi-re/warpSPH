@@ -1,4 +1,4 @@
-"""Explicit fixed-count particle axes and stable periodic Morton permutations.
+"""Explicit fixed-count particle axes and stable mixed-domain Morton permutations.
 
 Only the audited CompSPH state/update schema is supported. Edge work is never
 inferred from its length (E can equal N); it stays with its compute adjacency.
@@ -16,11 +16,13 @@ from warpSPHCore.radiusSearch.compactHash.morton import computeZOrderIndex64
 PARTICLE_FIELDS = frozenset('''emitters bodyIDs positions velocities supports masses densities
 kinds materials UIDs internalEnergies crkMassDensities crkVolumes crkQGradient totalEnergies
 entropies pressures soundspeeds divergence alpha0s alphas entropiesPrev entropyRates
-divergencePrevStep wadsleyD wadsleyXi wadsleyVsig wadsleyDPrev wallNormals'''.split())
+divergencePrevStep wadsleyD wadsleyXi wadsleyVsig wadsleyDPrev wallNormals wallVolumes'''.split())
 GLOBAL_FIELDS = frozenset(('UIDcounter', 'entropiesPrevTime', 'divergencePrevStepTime',
                            'wadsleyDPrevTime', 'boundaryProjectionBudget'))
 EDGE_FIELDS = frozenset(('ap_ij', 'av_ij', 'f_ij'))
-UPDATE_FIELDS = frozenset('dxdt dvdt dudt dEdt drhodt passive dVdt sourceAcceleration sourceHeat sourceEnergyRates'.split())
+ROW_UPDATE_FIELDS = frozenset('dxdt dvdt dudt dEdt drhodt passive dVdt sourceAcceleration sourceHeat'.split())
+GLOBAL_UPDATE_FIELDS = frozenset(('sourceEnergyRates',))
+UPDATE_FIELDS = ROW_UPDATE_FIELDS | GLOBAL_UPDATE_FIELDS
 
 
 def validate_permutation(order, n, device):
@@ -65,10 +67,12 @@ def validate_update_schema(update, n):
     if (type(update) is not CompressibleSystemUpdate or {f.name for f in fields(update)} != UPDATE_FIELDS
             or set(vars(update)) != UPDATE_FIELDS):
         raise TypeError('particle layout requires the audited compressible update schema')
-    for name in UPDATE_FIELDS:
+    for name in ROW_UPDATE_FIELDS:
         value = getattr(update,name)
         if value is not None and (not isinstance(value,torch.Tensor) or not value.ndim or value.shape[0] != n):
             raise ValueError(f'update {name} must have one value per particle')
+    if update.sourceEnergyRates is not None and (not isinstance(update.sourceEnergyRates,torch.Tensor) or update.sourceEnergyRates.shape != (2,)):
+        raise ValueError('sourceEnergyRates must be the global work/heat vector')
 
 
 def permute_update(update, order, *, identity=False):
@@ -78,7 +82,9 @@ def permute_update(update, order, *, identity=False):
         value = getattr(update, f.name)
         if value is None:
             values[f.name] = None
-        elif isinstance(value, torch.Tensor) and value.ndim and value.shape[0] == order.numel():
+        elif f.name in GLOBAL_UPDATE_FIELDS:
+            values[f.name] = value.clone()
+        elif f.name in ROW_UPDATE_FIELDS:
             values[f.name] = value.clone() if identity else value[order]
         else:
             raise ValueError(f'update {f.name} must have one value per particle')
@@ -119,26 +125,28 @@ class ParticleLayout:
 @wp.kernel
 def _morton(positions: wp.array(dtype=vector(length=Any, dtype=scalar_t)),
             lower: wp.array(dtype=scalar_t), upper: wp.array(dtype=scalar_t),
+            periodic: wp.array(dtype=wp.bool),
             dim: wp.int32, bits: wp.int32, keys: wp.array(dtype=wp.int64)):
     i = wp.tid()
     cell = wp.vec3i(0)
     resolution = wp.int32(1) << bits
     for d in range(dim):
         unit = (positions[i][d] - lower[d]) / (upper[d] - lower[d])
-        unit = unit - wp.floor(unit)
+        if periodic[d]:
+            unit = unit - wp.floor(unit)
         cell[d] = wp.clamp(wp.int32(wp.floor(unit * scalar_t(resolution))), 0, resolution-1)
     keys[i] = computeZOrderIndex64(cell)
 
 
 def morton_order(positions, domain, *, bits=21):
-    """Stable 1–3D periodic Z-order; ties preserve the incoming compute order."""
+    """Stable 1–3D Z-order, wrapped periodic axes and clamped open axes."""
     if type(bits) is not int or not 1 <= bits <= 21:
         raise ValueError('Morton precision must be an integer between 1 and 21 bits')
     if positions.ndim != 2 or positions.shape[1] not in (1, 2, 3) or domain.dim != positions.shape[1]:
         raise ValueError('Morton positions must be an N by dim tensor, dim in 1..3')
     extent = domain.max-domain.min
-    if not bool(domain.periodic.all()) or not bool(((extent > 0) & torch.isfinite(extent)).all()):
-        raise ValueError('Morton prototype requires a finite periodic box with positive extents')
+    if not bool(((extent > 0) & torch.isfinite(extent)).all()):
+        raise ValueError('Morton sorting requires a finite box with positive extents')
     if not bool(torch.isfinite(positions).all() & torch.isfinite(domain.min).all() & torch.isfinite(domain.max).all()):
         raise ValueError('Morton coordinates and bounds must be finite')
     keys = torch.empty(positions.shape[0], dtype=torch.int64, device=positions.device)
@@ -147,6 +155,7 @@ def morton_order(positions, domain, *, bits=21):
         wp.launch(_morton, dim=keys.numel(), inputs=[
             wp.from_torch(positions.contiguous(), dtype=vector(length=domain.dim, dtype=scalar_t), requires_grad=False),
             wp.from_torch(domain.min, requires_grad=False), wp.from_torch(domain.max, requires_grad=False),
+            wp.from_torch(domain.periodic,requires_grad=False),
             domain.dim, bits, wp.from_torch(keys)], device=str(positions.device), stream=stream)
     return torch.argsort(keys, stable=True)
 

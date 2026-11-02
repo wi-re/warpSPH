@@ -85,36 +85,40 @@ def stage_view(stage, target_ids, *, native=False):
     return stage._replace(update=update, aux=(adjacency if layout.identity else None, values, metadata))
 
 
-def history_view(history, target_ids, *, native=False):
+def history_view(history, target_ids, *, native=False, source_ids=None):
     """Fixed-coefficient Adams/BDF and RK bookkeeping; no inferred tensor axes."""
     from warpSPHIntegrators.state.history import StepHistory
     from warpSPHIntegrators.state import StageResult
     from .sortedStep import _system_view
     if history is None:
         return None
-    if type(history) is not StepHistory or history.context is not None:
-        raise ValueError('history/reuse requires StepHistory without unaudited method-owned context')
+    if type(history) is not StepHistory:
+        raise ValueError('history/reuse requires StepHistory')
+    from .solverInputs import context_view
+    context=context_view(history.context,target_ids,source_ids=source_ids)
     entries = []
     for entry in history:
-        stage = stage_view(StageResult(aux=entry.aux, update=entry.update), target_ids, native=native)
+        stage = None if entry.update is None else stage_view(StageResult(aux=entry.aux, update=entry.update), target_ids, native=native)
+        if stage is None and (entry.aux is not None or context is None or context['method'] != 'ndf.v1'):
+            raise ValueError('only audited NDF differences may omit derivative/auxiliary history')
         snapshot = entry.state
         if snapshot is not None:
             from ..systems.compSPH import CompSPHSystem
             if type(snapshot) is not CompSPHSystem:
                 raise TypeError('history snapshots require CompSPHSystem')
-            if not torch.equal(snapshot.state.UIDs, entry.aux[1].UIDs):
+            if entry.aux is not None and not torch.equal(snapshot.state.UIDs, entry.aux[1].UIDs):
                 raise ValueError('history update and state snapshot particle order differs')
             validate_state_schema(snapshot.state)
             if not torch.equal(snapshot.state.UIDs,target_ids):
                 snapshot = _system_view(snapshot, permute_state(snapshot.state, uid_order(snapshot.state.UIDs, target_ids)))
             elif snapshot.adjacency is not None or snapshot.spatialContext is not None or snapshot.pairWork is not None:
                 snapshot = _system_view(snapshot,permute_state(snapshot.state,torch.arange(target_ids.numel(),device=target_ids.device),identity=True))
-        entries.append(entry._replace(update=stage.update, aux=stage.aux, state=snapshot))
+        entries.append(entry._replace(update=None if stage is None else stage.update, aux=None if stage is None else stage.aux, state=snapshot))
     # The old pointer guard cannot describe newly allocated UID storage. These
     # drivers do not pass uid to pushed(); use the target's actual identity if
     # the caller supplied that optional guard. Membership was checked above.
     fingerprint = None if history._uid_fingerprint is None else (target_ids.data_ptr(), tuple(target_ids.shape))
-    return StepHistory(history.maxlen, entries, _uid_fingerprint=fingerprint)
+    return StepHistory(history.maxlen, entries, _uid_fingerprint=fingerprint,context=context)
 
 
 def _configuration(value):
@@ -161,6 +165,8 @@ def reuse_stamp(integrator, state, dt, config, schemeConfig):
     """FSAL is valid here only for a fixed-support, memoryless native RHS."""
     from ..enumTypes import AdaptiveSupportScheme, ViscositySwitch
     if (not integrator.fsal or integrator.implicit or schemeConfig.compatibleEnergy
+            or schemeConfig.boundaryConditions or state.sourceTerms is not None
+            or state.state.wallVolumes is not None
             or schemeConfig.adaptiveSupportScheme != AdaptiveSupportScheme.NoScheme
             or schemeConfig.viscositySwitchParams.scheme != ViscositySwitch.NoneSwitch
             or getattr(schemeConfig, 'crkViscosityGradient', 'current') != 'current'):

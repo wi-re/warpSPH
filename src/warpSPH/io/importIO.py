@@ -81,7 +81,7 @@ def importSimulationSystem(
 
     extraData = {}
     for key, value in inFile.items():
-        if key in ['adjacency', 'state', 'stages']:
+        if key in ['adjacency', 'state', 'stages'] or (uidLayout and key == 'integration' and isinstance(value,h5py.Group)):
             continue
         if key.startswith('dict_'):
             continue

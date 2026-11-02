@@ -18,10 +18,14 @@ def _wallVolumes(currentState, config) -> torch.Tensor:
     """`m / rho` of every row at the first call (the initial state), cached on `config`.
 
     Re-derived when the row count changes (a new run reusing the config)."""
+    owned = getattr(currentState, 'wallVolumes', None)
+    if owned is not None:
+        return owned
     volumes = getattr(config, '_wallVolumes', None)
     if volumes is None or volumes.shape != currentState.masses.shape:
         volumes = currentState.masses / currentState.densities
         config._wallVolumes = volumes
+        config._wallVolumeUIDs = currentState.UIDs.clone()
     return volumes
 
 

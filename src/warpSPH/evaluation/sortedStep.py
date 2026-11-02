@@ -48,12 +48,13 @@ def _settings(state, config, bits):
 
 
 class MortonStepper:
-    """Audited eager periodic CompSPH/CRK tableaus and fixed-step Adams/BDF.
+    """Audited eager CompSPH/CRK tableaus and declared multistep families.
 
     Construct with a registered RK/DIRK/coupled integrator. Call with state, dt,
     config and schemeConfig (the native RHS is selected from schemeName).
-    History and explicit FSAL inputs are UID-adapted. Custom RHS, external
-    row-indexed inputs and topology changes are not admitted. Resources are per call; failed
+    History, implicit seeds, declared preconditioners/boundaries and explicit
+    FSAL inputs are UID-adapted. Custom RHS, unlabelled row inputs and topology
+    changes are not admitted. Resources are per call; failed
     or rejected calls publish no cache on their input or on this stepper.
 
     Sorting occurs at the first boundary, then only at an already-stale boundary
@@ -66,12 +67,19 @@ class MortonStepper:
         from warpSPHIntegrators.schemes.definitions.explicit import ExplicitDefinition
         from warpSPHIntegrators.schemes.definitions.dirk import DIRKDefinition
         from warpSPHIntegrators.schemes.definitions.coupled import CoupledDefinition
+        from warpSPHIntegrators.schemes.families.ndf import NDF
+        from warpSPHIntegrators.schemes.families.adaptive_ndf import AdaptiveNDF
+        from warpSPHIntegrators.schemes.families.variable_adams import VariableAdams
+        from warpSPHIntegrators.schemes.families.adaptive_adams import AdaptiveAdams
+        self.context_method=('ndf.v1' if type(integrator) in (NDF,AdaptiveNDF) else
+                             'variable_adams.v1' if type(integrator) in (VariableAdams,AdaptiveAdams) else None)
         self.history_method = (getattr(integrator, 'identifier', None) is not None
             and integrator.identifier.name in {*(f'ab{i}' for i in range(2,6)),
                 *(f'abm{i}' for i in range(2,6)), *(f'am{i}' for i in range(2,5)),
                 *(f'bdf{i}' for i in range(1,6))}
             and getattr(integrator.function, '__module__', '') in {
                 'warpSPHIntegrators.drivers.history.adams', 'warpSPHIntegrators.drivers.history.bdf'})
+        self.history_method=self.history_method or self.context_method is not None
         if not self.history_method and not isinstance(getattr(integrator, 'definition', None), (ExplicitDefinition, DIRKDefinition, CoupledDefinition)):
             raise ValueError('MortonStepper requires an audited RK/DIRK/coupled tableau or fixed-step Adams/BDF method')
         if type(bits) is not int or not 1 <= bits <= 21 or type(sort_on_rebuild) is not bool:
@@ -90,10 +98,14 @@ class MortonStepper:
         if type(state) is not CompSPHSystem or not state.state.positions.shape[0]:
             raise TypeError('MortonStepper requires a nonempty CompSPHSystem')
         validate_state_schema(state.state)
-        if not bool(config.domain.periodic.all()) or bool((state.state.kinds != 0).any()):
-            raise ValueError('MortonStepper currently requires periodic fluid-only particles')
-        if state.sourceTerms is not None or schemeConfig.boundaryConditions or getattr(schemeConfig, 'rigidBodies', None):
+        if bool(((state.state.kinds != 0)&(state.state.kinds != 1)).any()):
+            raise ValueError('compressible Morton stepping admits fluid and solid wall particles only')
+        if state.sourceTerms is not None or getattr(schemeConfig, 'rigidBodies', None):
             raise ValueError('external sources/boundaries require explicit particle input adapters before sorting')
+        from .boundaryInputs import validate_boundaries
+        validate_boundaries(schemeConfig.boundaryConditions,state.state)
+        if self.context_method == 'ndf.v1' and (schemeConfig.boundaryConditions or bool((state.state.kinds != 0).any())):
+            raise ValueError('NDF requires fluid-only evolution without boundary projections')
         if solvesOnGrid(schemeConfig) or getattr(schemeConfig, 'inPlaceAdjacency', False):
             raise ValueError('MortonStepper currently requires eager list mode')
         if getattr(schemeConfig, 'crkEvolution', 'summation') != 'summation':
@@ -113,7 +125,9 @@ class MortonStepper:
         # Generic runtime dense output consumes mathematical stage derivatives,
         # whereas the legacy frontend exposes a step-average diagnostic dudt.
         stepper.retain_stage_derivatives = True
-        return self.integrator._replace(function=_SpatialDriver(stepper))
+        if hasattr(self.integrator,'_replace'):
+            return self.integrator._replace(function=_SpatialDriver(stepper))
+        return _SpatialMethod(stepper)
 
     def __call__(self, state, dt, *, config, schemeConfig, **kwargs):
         from ..schemes.compressible.compSPH import compSPH_step
@@ -122,6 +136,25 @@ class MortonStepper:
         self.validate(state, config=config, schemeConfig=schemeConfig)
         from .continuation import EndpointDerivative, history_view, stage_view, reusable_prior, reuse_stamp
         history = history_view(kwargs.pop('history', None), state.state.UIDs)
+        if history is None and self.history_method:
+            from warpSPHIntegrators.state.history import StepHistory
+            history=StepHistory(max(1,self.integrator.metadata.history_length))
+        if history is not None and history.context is not None and history.context['method'] != self.context_method:
+            raise ValueError('method-owned history does not match the selected solver')
+        warm=kwargs.pop('warmStart',None)
+        if warm is not None:
+            from warpSPHIntegrators.schemes.definitions.dirk import DIRKDefinition
+            from warpSPHIntegrators.schemes.definitions.coupled import CoupledDefinition
+            definition=getattr(self.integrator,'definition',None)
+            if not isinstance(definition,(DIRKDefinition,CoupledDefinition)):
+                raise ValueError('warmStart requires a supported implicit tableau')
+            if isinstance(definition,CoupledDefinition):
+                if not isinstance(warm,list) or len(warm) != len(definition.tableau.c):
+                    raise ValueError('coupled warmStart needs one StageResult per stage')
+            elif isinstance(warm,list) or definition.tableau.a[0][0] == 0:
+                raise ValueError('DIRK warmStart requires one StageResult and an implicit first stage')
+            warm=([stage_view(s,state.state.UIDs) for s in warm] if isinstance(warm,list)
+                  else stage_view(warm,state.state.UIDs))
         prior = kwargs.pop('priorStep', None)
         if prior is not None:
             from warpSPHIntegrators.state import StageResult
@@ -130,9 +163,9 @@ class MortonStepper:
             if not self.integrator.fsal or self.integrator.implicit:
                 raise ValueError('spatial priorStep reuse requires an explicit FSAL tableau')
             prior = stage_view(prior, state.state.UIDs)
-        forbidden = [kwargs.pop(k, None) for k in ('warmStart', 'f')]
+        forbidden = [kwargs.pop(k, None) for k in ('f',)]
         if any(value is not None for value in forbidden):
-            raise ValueError('MortonStepper does not yet adapt warmStart or custom RHS')
+            raise ValueError('MortonStepper requires the audited native RHS')
         if history is not None and history.maxlen < self.integrator.metadata.history_length:
             raise ValueError('insufficient continuation history capacity')
         solver, options = kwargs.get('solver'), kwargs.get('solver_opts') or {}
@@ -140,8 +173,8 @@ class MortonStepper:
             from warpSPHIntegrators.solvers import JFNKSolver
             if solver is not None and not isinstance(solver, JFNKSolver):
                 raise ValueError('MortonStepper implicit qualification currently requires FD-JFNK')
-            if getattr(solver, 'preconditioner', None) is not None or options.get('preconditioner') is not None:
-                raise ValueError('preconditioners need an explicit vector/input layout adapter')
+            from .solverInputs import solver_view
+            solver_view(solver,options,state.state.UIDs)
         if any(isinstance(kwargs.get(k), torch.Tensor) and kwargs[k].ndim for k in ('rtol', 'atol')):
             raise ValueError('particle-valued tolerances need an explicit layout adapter')
         if any(name.startswith('_') for name in kwargs):
@@ -160,6 +193,16 @@ class MortonStepper:
         # Audited native initializers only assign metadata on this object; their
         # numerical stages clone buffers. Identity continuation needs no gather.
         computeState = copy(state.state) if layout.identity else permute_state(state.state, layout.p)
+        if computeState.wallVolumes is None and bool((computeState.kinds == 1).any()):
+            cached=getattr(config,'_wallVolumes',None)
+            if cached is None:
+                computeState.wallVolumes=computeState.masses/computeState.densities
+            else:
+                from .continuation import uid_order
+                owner=getattr(config,'_wallVolumeUIDs',None)
+                if owner is None:
+                    raise ValueError('cached wall volumes need a UID owner or explicit state.wallVolumes')
+                computeState.wallVolumes=cached[uid_order(owner,computeState.UIDs)]
         if old is not None and self.sort_on_rebuild and (adjacency is None or bool(verletStaleFlag(
                 computeState.positions, computeState.supports, adjacency, config.domain, config.verletScale))):
             order = morton_order(computeState.positions, config.domain, bits=self.bits)
@@ -172,13 +215,19 @@ class MortonStepper:
         # physical state, never the failed Newton iterate or a partial RK result.
         # Candidate search envelopes and their UIDs are the only retained data.
         from .coverage import CoverageInvalidated, CoverageRetryExhausted
+        from .boundaryInputs import layout_config
+        # Every stage in this attempt shares one index cache. The caller's
+        # cached masks may still describe its public input order.
+        computeConfig=layout_config(config)
         coverage, renewals = {}, 0
         while True:
             endpoint = None
             capture_endpoint = reuse_stamp(self.integrator, state, dt, config, schemeConfig) is not None
             native_rhs = functions[schemeConfig.schemeName]
-            def rhs(system, dt, config, schemeConfig, verbose=False, stageIndex=None):
+            def rhs(system, dt, config, schemeConfig, verbose=False, stageIndex=None, **numericOptions):
                 nonlocal endpoint
+                if set(numericOptions)-{'solver_opts'}:
+                    raise ValueError('unadapted options reached the native particle RHS')
                 value = native_rhs(system, dt, config, schemeConfig, verbose=verbose, stageIndex=stageIndex)
                 if capture_endpoint:
                     # Finalization may replace fields on the update object.
@@ -187,7 +236,17 @@ class MortonStepper:
             attemptState = computeState.initializeNewState() if self.integrator.implicit else computeState
             private = _system_view(state, attemptState, adjacency)
             private.retainStageDerivatives = self.history_method or self.retain_stage_derivatives
+            if self.context_method == 'ndf.v1':
+                private.ndf_compatible=True
             inputs = dict(kwargs)
+            if warm is not None:
+                inputs['warmStart']=([stage_view(s,computeState.UIDs,native=True) for s in warm] if isinstance(warm,list)
+                                     else stage_view(warm,computeState.UIDs,native=True))
+            if self.integrator.implicit:
+                mapped_solver,mapped_options=solver_view(solver,options,computeState.UIDs)
+                inputs['solver']=mapped_solver
+                if mapped_options:
+                    inputs['solver_opts']=mapped_options
             if history is not None:
                 inputs['history'] = history_view(history, computeState.UIDs, native=True)
             if prior is not None:
@@ -196,8 +255,8 @@ class MortonStepper:
                     inputs['priorStep'] = stage_view(candidate, computeState.UIDs, native=True)
             try:
                 with self.resources.session(coverage=coverage):
-                    result = self.integrator(private, dt, rhs if capture_endpoint else native_rhs,
-                                             config=config, schemeConfig=schemeConfig, **inputs)
+                    result = self.integrator(private, dt, rhs if capture_endpoint or 'solver_opts' in inputs else native_rhs,
+                                             config=computeConfig, schemeConfig=schemeConfig, **inputs)
                 break
             except CoverageInvalidated as failure:
                 if not self.integrator.implicit:
@@ -209,7 +268,8 @@ class MortonStepper:
                     raise ValueError('cannot renew coverage in a different particle layout') from failure
                 coverage[envelope.stage_path] = (envelope, envelope.build(config))
                 renewals += 1
-        if result.quadrature is not None or result.transition is not None:
+        from warpSPHIntegrators.schemes.families.ndf import NDFQuadrature
+        if (result.quadrature is not None and type(result.quadrature) is not NDFQuadrature) or result.transition is not None:
             raise ValueError('MortonStepper cannot publish unadapted quadrature/transition data')
         if result.state.rerunRequest is not None:
             raise RuntimeError('unfinished compatible-energy replay cannot publish a spatial context')
@@ -231,7 +291,12 @@ class MortonStepper:
         error = result.error
         if error is not None and not layout.identity:
             error = _system_view(error, permute_state(error.state, layout.q))
-        public_history = history_view(result.history, publicState.UIDs)
+        public_history = history_view(result.history, publicState.UIDs,source_ids=computeState.UIDs)
+        quadrature=result.quadrature
+        if quadrature is not None:
+            anchor=quadrature.known_state
+            quadrature=replace(quadrature,known_state=_system_view(anchor,
+                anchor.state if layout.identity else permute_state(anchor.state,layout.q)))
         if public_history is not None and public_history.latest is not None and reuse is not None:
             # RK bookkeeping records the last stage, the same endpoint used by
             # explicit priorStep. Adams/BDF never receive an FSAL stamp.
@@ -241,7 +306,7 @@ class MortonStepper:
             latest = latest._replace(aux=(*aux[:2], replace(aux[2], reuse=reuse)))
             public_history = StepHistory(public_history.maxlen, (*public_history.entries[:-1], latest),
                                          _uid_fingerprint=public_history._uid_fingerprint)
-        return replace(result, state=public, stages=stages, error=error, history=public_history)
+        return replace(result, state=public, stages=stages, error=error, history=public_history,quadrature=quadrature)
 
 
 class _SpatialDriver:
@@ -261,6 +326,23 @@ class _SpatialDriver:
         if kwargs['schemeConfig'].compatibleEnergy:
             raise ValueError('spatial runtime integration requires compatibleEnergy=False')
         return self.stepper(state, dt, **kwargs)
+
+
+class _SpatialMethod(_SpatialDriver):
+    """Explicit structural Stepper properties for non-tableau library methods."""
+    @property
+    def name(self):return self.stepper.integrator.name
+    @property
+    def identifier(self):return self.stepper.integrator.identifier
+    @property
+    def order(self):return self.stepper.integrator.order
+    @property
+    def implicit(self):return self.stepper.integrator.implicit
+    @property
+    def fsal(self):return self.stepper.integrator.fsal
+    @property
+    def metadata(self):return self.stepper.integrator.metadata
+    def __getattr__(self,name):return getattr(self.stepper.integrator,name)
 
 
 def _adopt_state(accepted_state):
@@ -292,7 +374,8 @@ def adopt_spatial_layout(accepted_result):
     from warpSPHIntegrators.state import IntegrationResult
     if not isinstance(accepted_result, IntegrationResult) or not accepted_result.step_status.successful:
         raise ValueError('layout adoption requires a successful accepted step result')
-    if accepted_result.quadrature is not None or accepted_result.transition is not None:
+    from warpSPHIntegrators.schemes.families.ndf import NDFQuadrature
+    if (accepted_result.quadrature is not None and type(accepted_result.quadrature) is not NDFQuadrature) or accepted_result.transition is not None:
         raise ValueError('layout adoption does not yet adapt quadrature/transition')
     state = accepted_result.state
     context = state.spatialContext

@@ -8,6 +8,23 @@ from ..evaluation import canonical_view
 from ..evaluation.layout import EDGE_FIELDS, GLOBAL_FIELDS, PARTICLE_FIELDS, validate_state_schema
 
 VERSION = 1
+INTEGER_FIELDS=frozenset(('UIDs','kinds','materials','emitters','bodyIDs'))
+
+
+def validatePrecision(state,config):
+    """Declared numeric types, including integer-corrupted floating datasets."""
+    for name in PARTICLE_FIELDS:
+        value=getattr(state,name)
+        if value is None:continue
+        if name in INTEGER_FIELDS:
+            if value.dtype not in (torch.int32,torch.int64):
+                raise ValueError(f'checkpoint {name} must have integer particle labels')
+        elif value.dtype != config.dtype or not bool(torch.isfinite(value).all()):
+            raise ValueError(f'checkpoint {name} has invalid precision or non-finite data')
+    for name in GLOBAL_FIELDS:
+        value=getattr(state,name)
+        if isinstance(value,torch.Tensor) and not bool(torch.isfinite(value).all()):
+            raise ValueError(f'checkpoint {name} has non-finite global data')
 
 
 def validateRoster(state):
@@ -16,8 +33,8 @@ def validateRoster(state):
     if (ids.ndim != 1 or ids.dtype not in (torch.int32, torch.int64)
             or bool((ids < 0).any()) or torch.unique(ids).numel() != ids.numel()):
         raise ValueError('UID trajectory/checkpoint requires unique nonnegative integer particle IDs')
-    if bool((state.kinds != 0).any()):
-        raise ValueError('UID trajectory/checkpoint currently requires fluid-only particles')
+    if bool(((state.kinds != 0)&(state.kinds != 1)).any()):
+        raise ValueError('UID compressible checkpoint requires fluid or solid wall particles')
 
 
 def validateFields(names):
@@ -104,14 +121,14 @@ def restoreCheckpoint(outFile, template, config, scheme):
         raise ValueError('checkpoint UID roster differs from the sampled configuration')
     for name in ('masses','kinds','materials','emitters','bodyIDs'):
         before, after = getattr(template.state,name),getattr(restored,name)
-        if (before is None) != (after is None) or (before is not None
-                and not torch.equal(before[expectedIDs],after[actualIDs])):
+        a,b=(before[expectedIDs],after[actualIDs]) if before is not None and after is not None else (before,after)
+        if name == 'masses' and a is not None and b is not None:
+            # Solid masses follow the native fixed-volume wall density update.
+            fluid=template.state.kinds[expectedIDs] == 0
+            a,b=a[fluid],b[fluid]
+        if (a is None) != (b is None) or (a is not None and not torch.equal(a,b)):
             raise ValueError(f'checkpoint {name} differs from the sampled configuration')
-    for name in PARTICLE_FIELDS:
-        value = getattr(restored,name)
-        if isinstance(value,torch.Tensor) and value.is_floating_point():
-            if value.dtype != config.dtype or not bool(torch.isfinite(value).all()):
-                raise ValueError(f'checkpoint {name} has invalid precision or non-finite data')
+    validatePrecision(restored,config)
     if not bool((restored.supports > 0).all()):
         raise ValueError('checkpoint supports must be positive')
     if int(restored.UIDcounter) <= int(restored.UIDs.max()):

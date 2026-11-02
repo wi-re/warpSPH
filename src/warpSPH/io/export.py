@@ -2,6 +2,8 @@
 
 import json
 import os
+from contextlib import contextmanager
+from uuid import uuid4
 from typing import Any
 
 import h5py
@@ -35,13 +37,27 @@ def schemeAttribute(scheme) -> str:
 
 def validateSortedExtraData(extraData):
     """Scalars have no particle axis; arrays/nested data require an explicit adapter."""
-    reserved = {'scheme','time','particleLayoutVersion','particleLayoutFormat','particleOrder','particlePrecision',
+    reserved = {'scheme','time','integration','particleLayoutVersion','particleLayoutFormat','particleOrder','particlePrecision',
                 'particleDomain_min','particleDomain_max','particleDomain_periodic','particleUIDcounter'}
     if reserved.intersection(extraData or {}):
         raise ValueError('extraData cannot replace reserved layout metadata')
     if any(value is not None and not isinstance(value, (str, bool, int, float, np.number, np.bool_, np.str_))
            for value in (extraData or {}).values()):
         raise ValueError('sorted frame extraData needs explicit axes; use canonical_view and transform extras first')
+
+
+@contextmanager
+def _stateFile(path,*,atomic=False):
+    """A failed numerical checkpoint must not replace an earlier complete one."""
+    temporary=f'{path}.tmp-{uuid4().hex}' if atomic else path
+    try:
+        with h5py.File(temporary,'w') as outFile:
+            yield outFile
+        if atomic:
+            os.replace(temporary,path)
+    finally:
+        if atomic and os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def exportSimulationSystem(
@@ -53,7 +69,17 @@ def exportSimulationSystem(
     stages = None,
     exportStagesAdjacency = True,
     extraData = None,
+    continuation = None,
+    integrator = None,
+    config = None,
+    schemeConfig = None,
+    last_dt = None,
+    next_dt = None,
 ):
+    if continuation is not None:
+        from .continuation import validateFrame,signature
+        validateFrame(continuation,system)
+        signature(config,schemeConfig)
     uidLayout = getattr(system, 'spatialContext', None) is not None or getattr(system, 'canonicalExport', False)
     if uidLayout:
         validateSortedExtraData(extraData)
@@ -63,72 +89,78 @@ def exportSimulationSystem(
                                          include_stage_adjacency=exportStagesAdjacency)
     outFolderPath = f'{exportPath}/trajectory/'
     os.makedirs(outFolderPath, exist_ok=True)
-    outFile = h5py.File(f'{exportPath}/trajectory/{tag}.h5', 'w')
+    with _stateFile(f'{exportPath}/trajectory/{tag}.h5',atomic=continuation is not None) as outFile:
 
-    outFile.attrs['scheme'] = schemeAttribute(scheme)
-    if uidLayout:
-        from .particleLayout import writeLayoutMetadata
-        writeLayoutMetadata(outFile, system, kind='state')
-    outFile.attrs['time'] = system.t if isinstance(system.t, float) else system.t.cpu().item()
+        outFile.attrs['scheme'] = schemeAttribute(scheme)
+        if uidLayout:
+            from .particleLayout import writeLayoutMetadata
+            writeLayoutMetadata(outFile, system, kind='state')
+        outFile.attrs['time'] = system.t if isinstance(system.t, float) else system.t.cpu().item()
 
-    if system.adjacency is not None:
-        adjacencyGroup = outFile.create_group('adjacency')
-        dumpAdjacency(system.adjacency, adjacencyGroup)
+        if system.adjacency is not None:
+            adjacencyGroup = outFile.create_group('adjacency')
+            dumpAdjacency(system.adjacency, adjacencyGroup)
 
-    stateGroup = outFile.create_group('state')
-    dumpState(system.state, stateGroup)
+        stateGroup = outFile.create_group('state')
+        dumpState(system.state, stateGroup)
 
-    if stages is not None:
-        stageGroups = outFile.create_group('stages')
-        stageGroupList = []
-        for stageIndex, stage in enumerate(stages):
-            stageGroupList.append(stageGroups.create_group(f'stage_{stageIndex}'))
-            # dumpState(stage, stageGroup)
-            dumpStage(stages[stageIndex], stageGroupList, stageIndex, type(system.state), exportStagesAdjacency)
+        if continuation is not None:
+            from .continuation import writeContinuation
+            writeContinuation(outFile.create_group('integration'),continuation,
+                integrator=integrator,config=config,schemeConfig=schemeConfig,
+                last_dt=last_dt,next_dt=config.dt if next_dt is None else next_dt)
 
-    for key, value in extraData.items() if extraData is not None else {}:
-        if isinstance(value, dict):
-            extraGroup = outFile.create_group(f'dict_{key}')
-            for subKey, subValue in value.items():
-                # print(f'Exporting extra data key {key}[{subKey}] with value {subValue} of type {type(subValue)}')
-                if isinstance(subValue, torch.Tensor):
-                    extraGroup.create_dataset(subKey, data=subValue.cpu().numpy())
-                else:
-                    extraGroup.attrs[subKey] = subValue
-            outFile.attrs[key] = 'dict'
-        elif isinstance(value, list):
-            extraGroup = outFile.create_group(f'dict_{key}')
-            for subIndex, subValue in enumerate(value):
-                if isinstance(subValue, torch.Tensor):
-                    extraGroup.create_dataset(f'{subIndex}', data=subValue.cpu().numpy())
-                elif isinstance(subValue, dict):
-                    subGroup = extraGroup.create_group(f'{subIndex}')
-                    for subSubKey, subSubValue in subValue.items():
-                        if isinstance(subSubValue, torch.Tensor):
-                            subGroup.create_dataset(subSubKey, data=subSubValue.cpu().numpy())
-                        else:
-                            # print(f'Exporting extra data key {key}[{subIndex}][{subSubKey}] with value {subSubValue} of type {type(subSubValue)}')
-                            subGroup.attrs[subSubKey] = subSubValue
-                else:
-                    # print(f'Exporting extra data key {key}[{subIndex}] with value {subValue} of type {type(subValue)}')
-                    extraGroup.attrs[f'{subIndex}'] = subValue
-            outFile.attrs[key] = 'list'
-        elif isinstance(value, torch.Tensor):
-            outFile.create_dataset(key, data=value.cpu().numpy())
-        elif value is None:
-            # An unset optional case parameter. `None` maps to numpy object
-            # dtype, which h5py rejects ("no native HDF5 equivalent"), and that
-            # aborted the *whole* state write -- so any case carrying an unset
-            # optional in `extraData` could not be checkpointed at all
-            # (`sloshingTank`'s `noPenShift`). Record the key as an explicit
-            # sentinel instead of dropping it, so a reader can tell "unset"
-            # apart from "absent".
-            outFile.attrs[key] = 'None'
-        else:
-            # print(f'Exporting extra data key {key} with value {value} of type {type(value)}')
-            outFile.attrs[key] = value
+        if stages is not None:
+            stageGroups = outFile.create_group('stages')
+            stageGroupList = []
+            for stageIndex, stage in enumerate(stages):
+                stageGroupList.append(stageGroups.create_group(f'stage_{stageIndex}'))
+                # dumpState(stage, stageGroup)
+                dumpStage(stages[stageIndex], stageGroupList, stageIndex, type(system.state), exportStagesAdjacency)
 
-    outFile.close()
+        for key, value in extraData.items() if extraData is not None else {}:
+            if isinstance(value, dict):
+                extraGroup = outFile.create_group(f'dict_{key}')
+                for subKey, subValue in value.items():
+                    # print(f'Exporting extra data key {key}[{subKey}] with value {subValue} of type {type(subValue)}')
+                    if isinstance(subValue, torch.Tensor):
+                        extraGroup.create_dataset(subKey, data=subValue.cpu().numpy())
+                    else:
+                        extraGroup.attrs[subKey] = subValue
+                outFile.attrs[key] = 'dict'
+            elif isinstance(value, list):
+                extraGroup = outFile.create_group(f'dict_{key}')
+                for subIndex, subValue in enumerate(value):
+                    if isinstance(subValue, torch.Tensor):
+                        extraGroup.create_dataset(f'{subIndex}', data=subValue.cpu().numpy())
+                    elif isinstance(subValue, dict):
+                        subGroup = extraGroup.create_group(f'{subIndex}')
+                        for subSubKey, subSubValue in subValue.items():
+                            if isinstance(subSubValue, torch.Tensor):
+                                subGroup.create_dataset(subSubKey, data=subSubValue.cpu().numpy())
+                            else:
+                                # print(f'Exporting extra data key {key}[{subIndex}][{subSubKey}] with value {subSubValue} of type {type(subSubValue)}')
+                                subGroup.attrs[subSubKey] = subSubValue
+                    else:
+                        # print(f'Exporting extra data key {key}[{subIndex}] with value {subValue} of type {type(subValue)}')
+                        extraGroup.attrs[f'{subIndex}'] = subValue
+                outFile.attrs[key] = 'list'
+            elif isinstance(value, torch.Tensor):
+                outFile.create_dataset(key, data=value.cpu().numpy())
+            elif value is None:
+                # An unset optional case parameter. `None` maps to numpy object
+                # dtype, which h5py rejects ("no native HDF5 equivalent"), and that
+                # aborted the *whole* state write -- so any case carrying an unset
+                # optional in `extraData` could not be checkpointed at all
+                # (`sloshingTank`'s `noPenShift`). Record the key as an explicit
+                # sentinel instead of dropping it, so a reader can tell "unset"
+                # apart from "absent".
+                outFile.attrs[key] = 'None'
+            else:
+                # print(f'Exporting extra data key {key} with value {value} of type {type(value)}')
+                outFile.attrs[key] = value
+
+
 
 
 def exportDirName(caseName, timestamp):

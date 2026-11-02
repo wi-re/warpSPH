@@ -536,7 +536,7 @@ def _hybridGhostOffsets(bpos, solidSdfs, dx, hMean):
     return torch.where(inSolid.unsqueeze(-1), alt, base)
 
 
-def addBoundaryGhostParticles(regions, particleState : Any):
+def addBoundaryGhostParticles(regions, particleState : Any, *, persistent_ids=False):
     device = particleState.positions.device
     dtype = particleState.positions.dtype
     
@@ -609,7 +609,6 @@ def addBoundaryGhostParticles(regions, particleState : Any):
 
             bIndices = relevantParticles
             boundaryIndices.append(bIndices)
-            gUIDs = particleState.UIDs[relevantParticles]
             gIndices = torch.arange(numParticles, numParticles + offsets.shape[0], device = device, dtype = torch.int64)
             ghostIndices[bIndices] = gIndices
             ghostOffsets[bIndices] = offsets
@@ -627,6 +626,21 @@ def addBoundaryGhostParticles(regions, particleState : Any):
             # print(f"Added {offsets.shape[0]} ghost particles for boundary region {region}.")
             
     boundaryIndices = torch.cat(boundaryIndices, dim = 0)
+    if persistent_ids:
+        # Persistent identity is independent of the boundary/ghost row map.
+        # The legacy -UID convention collides at boundary UID zero.
+        from ..evaluation.layout import ParticleLayout
+        ParticleLayout.create(particleState.UIDs,torch.arange(len(particleState.UIDs),device=device))
+        first=int(particleState.UIDcounter)
+        if first <= int(particleState.UIDs.max()):raise ValueError('UID counter does not cover the boundary roster')
+        count=len(boundaryIndices)
+        id_dtype=particleState.UIDs.dtype
+        if first+count > torch.iinfo(id_dtype).max:id_dtype=torch.int64
+        ids=torch.cat([particleState.UIDs.to(id_dtype),torch.arange(first,first+count,dtype=id_dtype,device=device)])
+        next_uid=first+count
+    else:
+        ids=torch.cat([particleState.UIDs,-particleState.UIDs[boundaryIndices]])
+        next_uid=particleState.UIDcounter
     WeaklyCompressibleState = type(particleState)
     return WeaklyCompressibleState(
         positions = torch.cat([particleState.positions, torch.cat(ghostPositions, dim = 0)], dim = 0),
@@ -644,11 +658,11 @@ def addBoundaryGhostParticles(regions, particleState : Any):
                     if particleState.emitters is not None else None),
         bodyIDs = (torch.cat([particleState.bodyIDs, particleState.bodyIDs[boundaryIndices]])
                    if particleState.bodyIDs is not None else None),
-        UIDs = torch.cat([particleState.UIDs, -particleState.UIDs[boundaryIndices]], dim = 0),
+        UIDs = ids,
         
         ghostIndices = torch.cat([ghostIndices, boundaryIndices], dim = 0),
         ghostOffsets= torch.cat([ghostOffsets, -ghostOffsets[boundaryIndices]], dim = 0),
         
-        UIDcounter = particleState.UIDcounter
+        UIDcounter = next_uid
     )
             

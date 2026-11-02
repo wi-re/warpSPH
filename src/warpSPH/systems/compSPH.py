@@ -76,6 +76,9 @@ class CompSPHState(ParticleIdentityState):
     # unit wall normals (fluid -> wall) of the solid rows, zero on fluid rows; None
     # when the case gives no geometry (modules/compressibleWall then estimates them)
     wallNormals: torch.Tensor = constant(tags=('wall_normal',), default=None)
+    # Opt-in layout route owns fixed wall volumes with the particle, so a
+    # config's old row cache cannot follow a new order or a restart.
+    wallVolumes: Optional[torch.Tensor] = constant(default=None)
 
     # Accepted prescribed-state projection: thermal and kinetic energy exchange.
     boundaryProjectionBudget: Optional[torch.Tensor] = constant(default=None)
