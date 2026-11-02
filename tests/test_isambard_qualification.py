@@ -180,3 +180,52 @@ def test_arm_bundle_rejects_x86_and_generates_native_definition(tmp_path):
     assert 'From: nvcr.io/nvidia/pytorch:26.01-py3' in definition
     compile(definition.split("python - <<'PY'\n",1)[1].split('\nPY\n',1)[0], '<definition>', 'exec')
     assert (bundle/'harness/submit.sh').is_file() and (tmp_path/'bundle.tar.gz').is_file()
+
+
+@pytest.mark.parametrize('scenario,expected', [('valid', 'passed'), ('old-nccl', 'failed'),
+                                               ('socket', 'failed'), ('probe-failure', 'failed')])
+def test_network_preflight_requires_unchanged_runtime_and_cxi_evidence(tmp_path, scenario, expected):
+    import hashlib
+    output, previous = tmp_path/'output', tmp_path/'previous'
+    for path in (output/'logs', output/'probes', previous/'probes', previous/'runs/reference'):
+        path.mkdir(parents=True)
+    image = tmp_path/'image.sif'
+    image.write_bytes(b'fixture image identity')
+    fingerprint = dict(sources={'fixture':'source hash'}, packages={'fixture':'version'}, architecture='aarch64')
+    (previous/'report.json').write_text(json.dumps(dict(stage='restart', status='passed', jobId='7989645',
+        imageSha256=hashlib.sha256(image.read_bytes()).hexdigest(), fingerprint=fingerprint)))
+    (previous/'probes/probe.json').write_text(json.dumps({'ranks':[{'nccl':[2,29,2]}]}))
+    (previous/'runs/reference/manifest.json').write_text(json.dumps({'placement':[{'ncclRuntime':22902}]}))
+    (output/'probes/runtime-libraries.json').write_text(json.dumps(dict(ncclRuntime=22606 if scenario=='old-nccl' else 22902,
+        ncclLibraries=['/loaded/libnccl.so.2'])))
+    rank = dict(fingerprint, backend='nccl', gpuUuid='GPU-distinct', nccl=[2,29,2],
+                network={'FI_PROVIDER':'cxi'}, host='nodeA', pid=123)
+    (output/'probes/probe.json').write_text(json.dumps({'status':'passed','ranks':[rank]}))
+    network = 'Socket' if scenario=='socket' else 'AWS Libfabric'
+    (output/'logs/nccl-probe-nodeA-123.log').write_text('Using network '+network+'\nNET/OFI Selected Provider is cxi\n')
+    script = (HARNESS/'network_preflight.slurm').read_text()
+    compile(script.split("<<'RUNTIME_PY'\n",1)[1].split('\nRUNTIME_PY\n',1)[0], '<runtime-capture>', 'exec')
+    embedded = script.split("<<'PY'\n",1)[1].split('\nPY\n',1)[0]
+    result = subprocess.run([sys.executable,'-',str(output),str(previous),str(image),str(HARNESS),
+                             '2' if scenario=='probe-failure' else '0','host'],
+                            input=embedded,text=True,capture_output=True)
+    report = json.loads((output/'report.json').read_text())
+    assert report['status'] == expected, result.stdout+result.stderr
+    assert result.returncode == (0 if expected=='passed' else 1)
+    if scenario == 'old-nccl':
+        assert 'Loaded NCCL changed' in report['error']
+    if scenario == 'valid':
+        assert report['transportLogs'] == ['nccl-probe-nodeA-123.log']
+
+
+def test_host_adaptation_does_not_exec_probe_arguments(tmp_path):
+    import shlex
+    adapter = tmp_path/'adapt.sh'
+    adapter.write_text('export ADAPT_SENTINEL=active\nexec "$@"\n')
+    branch = (HARNESS/'container.sh').read_text().split('  host)',1)[1].split(';;',1)[0]
+    branch = branch.replace('/host/adapt.sh', shlex.quote(str(adapter)))
+    script = ('set -e\nset -- --output /work/probes\n'+branch+'\n'+shlex.quote(sys.executable)+
+              ' -c '+shlex.quote('import json,os,sys; print(json.dumps(dict(args=sys.argv[1:], adapted=os.environ.get("ADAPT_SENTINEL"))))')+' "$@"')
+    result = subprocess.run(['bash','-c',script],text=True,capture_output=True)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == dict(args=['--output','/work/probes'],adapted='active')

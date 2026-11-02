@@ -68,7 +68,7 @@ For a fresh upload, on your local machine with your normal Clifton certificate
 and SSH configuration:
 
 ```bash
-export ISAMBARD_SSH=PROJECT.aip2.isambard  # your existing SSH alias
+export ISAMBARD_SSH="${ISAMBARD_SSH:-b6ez.aip2.isambard}"
 export ISAMBARD_ROOT="${ISAMBARD_ROOT:-/home/b6ez/wire.b6ez}"
 export QA_ARCHIVE="${QA_ARCHIVE:-.tmp/warpsph-isambard.tar.gz}"
 ssh "$ISAMBARD_SSH" "mkdir -p '$ISAMBARD_ROOT'"
@@ -141,7 +141,9 @@ analysis for submitted jobs runs inside the image.
 
 Watch `squeue -u "$USER"` and the build log. Do not run image builds/simulations
 on login nodes. Review commands before running them yourself; these tools do
-not establish or retain an SSH connection.
+not establish or retain an SSH connection automatically. Direct read-only SSH
+execution from the local workspace has also been verified through
+`b6ez.aip2.isambard`; site commands can use that alias when authorized.
 
 ## 3. Submit only the single-GPU stage first
 
@@ -179,7 +181,7 @@ export ISAMBARD_RESULTS="$ISAMBARD_ROOT/qualification"
 ```
 
 ```bash
-export ISAMBARD_SSH=PROJECT.aip2.isambard
+export ISAMBARD_SSH="${ISAMBARD_SSH:-b6ez.aip2.isambard}"
 export ISAMBARD_ROOT="${ISAMBARD_ROOT:-/home/b6ez/wire.b6ez}"
 export ISAMBARD_RESULTS="${ISAMBARD_RESULTS:-$ISAMBARD_ROOT/qualification}"
 export QA_DOWNLOADS="${QA_DOWNLOADS:-$PWD/downloaded-qa}"
@@ -238,6 +240,55 @@ Libfabric provider. A newer CUDA/NGC image may require communication libraries
 built against that image's runtime. Follow the site's current NCCL container
 guide before this stage; native MPI-enabled Torch remains unnecessary here.
 
+Your returned module inventory shows host NCCL2.26.6/CUDA12.6 and OFI plugin1.8.1,
+versus the tested image's NCCL2.29.2/CUDA13.1. Direct inspection confirms
+`adapt.sh` prepends the host NCCL library directory. The installed host Libfabric prefix
+is `/opt/cray/libfabric/2.3.1`. Check actual runtime/provider loading before two
+nodes; do not assume that injecting the host module preserves the tested stack.
+
+### One-GPU network preflight for this campaign
+
+This new file works with the existing uploaded bundle and unchanged SIF. Copy
+only the small job file from this checkout on your local machine:
+
+```bash
+scp scripts/isambard/network_preflight.slurm \
+  "$ISAMBARD_SSH:/home/b6ez/wire.b6ez/warpsph-isambard/harness/"
+```
+
+On the Isambard login node:
+
+```bash
+export QA_ROOT="$HOME"
+export QA_BUNDLE="$QA_ROOT/warpsph-isambard"
+export QA_IMAGE="$QA_ROOT/images/warpsph-arm64.sif"
+export QA_RESULTS_ROOT="$QA_ROOT/qualification"
+export QA_PREVIOUS="$QA_RESULTS_ROOT/restart-7989645"
+export QA_PREFLIGHT_NETWORK=host
+sbatch --account=brics.b6ez --output="$QA_ROOT/logs/network-preflight-%j.out" \
+  "$QA_BUNDLE/harness/network_preflight.slurm"
+```
+
+The job uses one GPU for at most15 minutes. It forces AWS Libfabric/CXI and runs
+the real GPU probe, requiring the same SIF, source/package fingerprint and loaded
+NCCL runtime version as the accepted restart stage. It queries the already-loaded
+library directly and saves its mapped path plus CUDA/fabric library paths; Torch
+package/build metadata alone is insufficient. Runtime downgrade, import/plugin
+failure or Socket fallback fails; inspect `network-preflight-JOB_ID/report.json`
+and logs. A successful preflight certifies library/provider loading only.
+Its private harness copy also handles the site's `adapt.sh` trailing `exec "$@"`
+without consuming the probe arguments; the original uploaded scripts stay intact.
+Keep its output to review before submitting two nodes. It is a preparatory job,
+not a sealed solver stage; do not use `check.py verify` on this directory.
+
+It preserves RAS and chooses a job-derived loopback diagnostic port instead of
+fixed28028; `QA_RAS_PORT` can select another unused port. For an already-prepared
+custom communication stack, set `QA_PREFLIGHT_NETWORK=custom` and the three
+custom-path variables below. A failed host preflight identifies whether a
+compatible OFI plugin/build is needed; it does not modify the image or libraries.
+
+### Host and custom profiles
+
 Two explicit profiles are supported:
 
 - `QA_NETWORK=host`: loads `brics/apptainer-multi-node` and sources
@@ -254,10 +305,10 @@ Set `QA_COMM_ROOT` to an existing compatible build and `QA_NETWORK_SETUP` to
 your reviewed setup file; the defaults below place them under `QA_ROOT`. Then:
 
 ```bash
-export QA_PREVIOUS="$QA_RESULTS_ROOT/restart-RESTART_JOB_ID"
+export QA_PREVIOUS="$QA_RESULTS_ROOT/restart-7989645"
 export QA_NETWORK=custom
 export QA_COMM_ROOT="${QA_COMM_ROOT:-$QA_ROOT/communication}"
-export QA_LIBFABRIC_HOST=/opt/cray/libfabric/1.22.0
+export QA_LIBFABRIC_HOST=/opt/cray/libfabric/2.3.1
 export QA_NETWORK_SETUP="${QA_NETWORK_SETUP:-$QA_ROOT/network-setup.sh}"
 export QA_NODES=2 QA_GPUS_PER_NODE=1
 bash "$QA_BUNDLE/harness/submit.sh" multi-node
@@ -296,6 +347,12 @@ have separate causes:
   GPU kernels, collectives and solver/checkpoint checks establish that these
   messages did not prevent this run. Keep CUDA compatibility setup and stderr
   visible; do not make the image writable merely to remove the messages.
+- RAS `Call to bind failed: Address already in use`, accompanied by failed client
+  listening socket at localhost28028: observed three times in restart7989645.
+  The RAS diagnostic listener was unavailable; initialization, GPU transfers and
+  exact continuation comparisons still completed. The network preflight uses
+  a job-derived loopback RAS address, as recommended for jobs sharing nodes,
+  and retains warning logs. This is distinct from a failed collective.
 - NCCL INFO failed IB plugin initialization followed by `Using network Socket`:
   no network qualification is claimed for one rank. Multi-node must still prove
   AWS Libfabric/CXI; socket fallback cannot pass that stage.
@@ -319,10 +376,15 @@ alone differs by one float64 ULP (4.136e-25). The new one-rank reference also ma
 the earlier job byte for byte. These tiny cold/cache-dependent fixtures do not
 qualify performance.
 
-For this campaign, continue with **only** `restart`, setting
-`QA_PREVIOUS="$QA_RESULTS_ROOT/same-node-7988602"` and `QA_GPUS_PER_NODE=2`.
-Cross-job/rank-count continuation, four GPUs and multi-node fabric remain pending.
-New campaigns still start with the build/single gates.
+Returned job7989645 now also passes both prior-job two→one and fresh one→two
+continuation on a new node:32 artifacts verified and all23 physical/clock/forcing/
+context fields byte-identical to uninterrupted execution. Diagnostics exactly
+match. Three reviewed RAS listener-port conflicts are recorded as diagnostic
+advisories; there are no failed GPU/solver comparisons.
+
+For this campaign, continue with the **one-GPU network preflight** above before
+the two-node stage. Four GPUs and multi-node fabric remain pending. New campaigns
+still start with the build/single gates.
 
 ```bash
 python -m pytest tests/test_isambard_qualification.py
@@ -342,4 +404,5 @@ Primary references: [Slurm submission troubleshooting](https://docs.isambard.ac.
 [Slurm](https://docs.isambard.ac.uk/user-documentation/guides/slurm/),
 [Apptainer environment](https://apptainer.org/docs/user/latest/environment_and_metadata.html),
 [filesystem helpers](https://apptainer.org/docs/admin/main/configfiles.html),
-[HOME override restriction](https://github.com/apptainer/apptainer/issues/388).
+[HOME override restriction](https://github.com/apptainer/apptainer/issues/388),
+[NCCL RAS address](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html#nccl-ras-addr).

@@ -100,8 +100,8 @@ at a time. SSH is the login/transfer route. Implement a self-contained harness
 with explicit stage submission, an ARM64 source-container build job, rank/device
 and collective probes, one-rank vs distributed state comparisons, separate-process
 restart with changed rank/row layouts, stable artifact hashes and offline retrieval
-verification. Stop between stages; do not auto-submit a whole campaign or connect
-to the user's SSH endpoint. Multi-node must verify distinct hosts and the expected
+verification. Stop between stages; do not auto-submit a whole campaign. Direct
+SSH read-only diagnostics were subsequently authorized and verified below. Multi-node must verify distinct hosts and the expected
 Slingshot NCCL transport. Native ARM64/Slurm/fabric validation stays pending until
 user execution; exercise the harness locally and test failure detection first.
 
@@ -134,9 +134,10 @@ Local evidence under `.tmp/isambard-qa-20261102/`:
   failed compilation; explicit `wp.float64(2.0)` fixes it and the final probe passes.
 
 Returned jobs7986156/7988602 qualify native ARM64/Apptainer/GH200 single-
-and same-node two-GPU execution, single-rank restart, peer communication and
-retrieval (audits below). Cross-job/rank-count restart, four GPUs and Slingshot
-remain unqualified. Continue with only `restart`; no automatic campaign is launched.
+and same-node two-GPU execution, both cross-job/rank-count restart directions,
+peer communication and retrieval (audits below). Four GPUs and Slingshot remain
+unqualified. Next is the one-GPU network compatibility preflight before two nodes;
+no automatic campaign is launched.
 
 Path configuration follow-up (2026-11-02): use `QA_ROOT` as the single remote
 base (default `$HOME`, with the user's Isambard HOME at
@@ -249,6 +250,72 @@ Next manual gate: `QA_PREVIOUS=$HOME/qualification/same-node-7988602`,
 step2 checkpoint on one GPU in a new allocation and tests a fresh one→two rank
 continuation; both compare to a new uninterrupted reference. Four GPUs, longer/
 larger runs and multi-node AWS Libfabric/CXI remain subsequent gates.
+
+Returned restart review (2026-11-02, accepted with RAS advisory):
+
+- Job7989645 on `nid010330`/two distinct GH200s, different from checkpoint
+  producer job7988602 on `nid010156`. Same validated SIF, packages and source
+  fingerprints. All32 artifacts/native HDF5 checksums independently verify.
+- Five independent23-field comparisons are **byte-identical**: uninterrupted
+  reference vs prior-job two→one continuation; vs fresh one→two continuation;
+  prior-job two-rank checkpoint vs new reference at step2; new prefix vs step2;
+  previous-job one-rank reference vs new reference. Clocks, forcing/RNG, all
+  particle/physical context fields and work budgets agree with zero difference.
+- Previous native checkpoint is complete step2/sourceRanks2 at t0.0004, SHA256
+  `ceca76a7873b681a9deb8ae71a7e798aef57851147c20742fbe9de4067c435a5`.
+  Config points to `/previous/runs/distributed/checkpoint-00000002.h5`; initial
+  resumed diagnostics restore completed2/time0.0004 and finish4/time0.0008.
+  One→two uses the new prefix native checkpoint. Both change int32→int64 offsets
+  and maxRows4→3; output sourceRanks1/2 and native rank reports confirm transitions.
+- All diagnostic histories exactly match reference by completed step; mass1
+  unchanged, positive thermodynamic/support state, no nonfinite/CUDA/collective
+  execution failures. Max absolute relative energy-budget residual3.346e-12.
+  Checked904 installed source files per four solver invocations (3616 checks).
+- Three NCCL WARN lines are specifically RAS client listener bind failures at
+  default `localhost:28028`, with corresponding failed-listener INFO. Successful
+  NCCL init/rings and P2P/CUMEM channels follow. Those diagnostic endpoints were
+  unavailable; solver correctness passes. The audit explicitly records only
+  this reviewed warning pattern and rejects other warnings, rather than claiming
+  the logs are warning-free. NVIDIA documents per-job RAS addresses when nodes
+  are shared; the owner of the conflicting listener is not established here.
+- Launch wall times: reference139.958s, cross-job139.199s, prefix21.007s,
+  two-rank continuation39.513s. Reference cold first step115.313s, warm420–428ms;
+  cross-job changed-layout first step102.257s, warm522.4ms; prefix1105.5/426.6ms;
+  two-rank continuation4431.0/353.2ms. No performance claim from this tiny/JIT
+  fixture; video deliberately omitted. No new GPU runs performed locally.
+- Independent audit: main workspace ignored `.tmp/isambard-retrieved/audit_restart.py`
+  and `audit-restart-7989645.json`, alongside unchanged sealed campaign.
+
+Networking prerequisite (2026-11-02): user module inventory shows
+apptainer-multi-node0.3.2 injecting host NCCL2.26.6, OFI plugin1.8.1 and CUDA12.6
+libraries, while the accepted image uses NCCL2.29.2/CUDA13.1. Actual host Libfabric
+prefix is `/opt/cray/libfabric/2.3.1`, not the documentation's example1.22.0.
+Added standalone `scripts/isambard/network_preflight.slurm`: one GPU, host/custom
+profile, same SIF/fingerprint requirement, unchanged loaded NCCL version, real
+Warp/Torch/NCCL probe and AWS Libfabric/CXI log evidence. It fails explicitly on
+runtime replacement, socket fallback or probe failure, before two-node allocation.
+RAS remains enabled with a job-derived loopback port; QA_RAS_PORT can override
+it. This qualifies library/provider loading only, not inter-node transfers.
+The runtime extension queries `ncclGetVersion` on the already-loaded library via
+RTLD_NOLOAD and records `/proc/self/maps` library paths; it does not infer the
+runtime from a Torch build-time/package version. Negative regression keeps the
+Torch-reported version unchanged while replacing the actual NCCL runtime.
+Sixteen focused tests, shell syntax and full imports pass; a real single-GPU
+Docker probe also validates the exact appended runtime capture (22902 and one
+mapped native NCCL library). Actual site preflight is pending. Only this small Slurm file needs copying into the existing harness;
+no container rebuild or replacement of the accepted source archive is required.
+
+Direct SSH authorized/verified (2026-11-02): user supplies `b6ez.aip2.isambard`.
+BatchMode/strict host-key read-only commands succeed on login40 as wire.b6ez;
+`sbatch` and `squeue` resolve to /usr/bin. No remote job or write was performed
+in the connection check. Directly inspected the site's adapt.sh: it prepends
+/host/nccl/lib (so the older host NCCL can replace the validated one) and ends
+with `exec "$@"`. Existing container.sh sourced it while probe arguments were
+still positional parameters, which could execute those options. Current wrapper
+now sources it in an empty-argument function scope; regression confirms exported
+environment and caller arguments survive. The standalone preflight repairs this
+only in its private copy of old uploaded wrappers, preserving original/image
+sources. No additional source-bundle transfer is needed.
 
 ### Static import scanner issue resolved (2026-10-30)
 

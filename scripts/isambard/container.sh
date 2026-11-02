@@ -5,7 +5,12 @@ mode=$1; nodes=$2; workers=$3; label=$4; script=$5
 shift 5
 case ${QA_NETWORK:-none} in
   none) ;;
-  host) source /host/adapt.sh ;;
+  host)
+    # Site adapt.sh ends with exec "$@". Give it an empty positional scope.
+    adapt_host_environment() { source /host/adapt.sh; }
+    adapt_host_environment
+    unset -f adapt_host_environment
+    ;;
   custom) source /network-setup.sh ;;
   *) echo 'Unknown network profile' >&2; exit 2 ;;
 esac
