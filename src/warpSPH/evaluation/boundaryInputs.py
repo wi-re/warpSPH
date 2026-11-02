@@ -59,8 +59,9 @@ class UIDValues:
 
 def validate_boundaries(boundaries,state):
     from ..configurations.moduleConfigurations.boundaryConditions import BoundaryCondition
+    from ..modules.boundaryConditions.pinned import PinnedBandSdf
     for bc in boundaries:
-        if type(bc) is not BoundaryCondition or type(bc.sdf) not in (AllParticles,PlaneRegion):
+        if type(bc) is not BoundaryCondition or type(bc.sdf) not in (AllParticles,PlaneRegion,PinnedBandSdf):
             raise ValueError('boundaries need an explicit pointwise geometry adapter')
         if type(bc.sdf) is PlaneRegion and len(bc.sdf.normal) != state.positions.shape[1]:
             raise ValueError('boundary plane dimension differs from the state')

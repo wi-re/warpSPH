@@ -118,6 +118,8 @@ def loadState(stateGroup, device, SimulationState):
     # same reconstruction the trajectory importer already uses (`importIO.py`).
     if 'UIDcounter' not in stateDict and 'UIDs' in stateDict:
         stateDict['UIDcounter'] = int(stateDict['UIDs'].max().item()) + 1
+    elif 'UIDcounter' in stateDict:
+        stateDict['UIDcounter']=int(stateDict['UIDcounter'])
     return SimulationState(**stateDict)
 
 def loadStage(stageGroup, device, SimulationState, SimulationUpdate):
@@ -138,7 +140,15 @@ def loadStage(stageGroup, device, SimulationState, SimulationUpdate):
             continue
         updateDict[updateKey] = torch.from_numpy(updateValue[:]).to(device).to(hdfDtypeToTorchDtype(updateValue.dtype)) if updateValue.shape else torch.tensor(updateValue[()], device=device, dtype=hdfDtypeToTorchDtype(updateValue.dtype))
 
-    return StageResult(aux=aux, update=SimulationUpdate(**updateDict))
+    declared={f.name for f in fields(SimulationUpdate)}
+    extras=set(updateDict)-declared
+    if extras:
+        from ..systems.artificialCompressible import ArtificialCompressibleSystemUpdate
+        if SimulationUpdate is not ArtificialCompressibleSystemUpdate or extras-{'positionStep','positionLow','positionTarget','positionDxdt'}:
+            raise ValueError('stage update has undeclared tensor axes')
+    update=SimulationUpdate(**{k:v for k,v in updateDict.items() if k in declared})
+    for name in extras:setattr(update,name,updateDict[name])
+    return StageResult(aux=aux, update=update)
 
 
 def _encode_callable(fn):

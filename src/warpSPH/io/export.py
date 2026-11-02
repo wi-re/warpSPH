@@ -37,11 +37,12 @@ def schemeAttribute(scheme) -> str:
 
 def validateSortedExtraData(extraData):
     """Scalars have no particle axis; arrays/nested data require an explicit adapter."""
-    reserved = {'scheme','time','integration','particleLayoutVersion','particleLayoutFormat','particleOrder','particlePrecision',
+    reserved = {'scheme','time','integration','nativeMemory','particleLayoutVersion','particleLayoutFormat','particleOrder','particlePrecision',
                 'particleDomain_min','particleDomain_max','particleDomain_periodic','particleUIDcounter'}
     if reserved.intersection(extraData or {}):
         raise ValueError('extraData cannot replace reserved layout metadata')
     if any(value is not None and not isinstance(value, (str, bool, int, float, np.number, np.bool_, np.str_))
+               and not (isinstance(value,torch.Tensor) and value.ndim==0)
            for value in (extraData or {}).values()):
         raise ValueError('sorted frame extraData needs explicit axes; use canonical_view and transform extras first')
 
@@ -81,6 +82,9 @@ def exportSimulationSystem(
         validateFrame(continuation,system)
         signature(config,schemeConfig)
     uidLayout = getattr(system, 'spatialContext', None) is not None or getattr(system, 'canonicalExport', False)
+    from ..systems.compSPH import CompSPHSystem
+    nativeMemory=uidLayout and type(system) is not CompSPHSystem and config is not None
+    nativeSource=system
     if uidLayout:
         validateSortedExtraData(extraData)
         # Optional private sorting is invisible to the particle/stage file order.
@@ -89,7 +93,7 @@ def exportSimulationSystem(
                                          include_stage_adjacency=exportStagesAdjacency)
     outFolderPath = f'{exportPath}/trajectory/'
     os.makedirs(outFolderPath, exist_ok=True)
-    with _stateFile(f'{exportPath}/trajectory/{tag}.h5',atomic=continuation is not None) as outFile:
+    with _stateFile(f'{exportPath}/trajectory/{tag}.h5',atomic=continuation is not None or nativeMemory) as outFile:
 
         outFile.attrs['scheme'] = schemeAttribute(scheme)
         if uidLayout:
@@ -109,6 +113,10 @@ def exportSimulationSystem(
             writeContinuation(outFile.create_group('integration'),continuation,
                 integrator=integrator,config=config,schemeConfig=schemeConfig,
                 last_dt=last_dt,next_dt=config.dt if next_dt is None else next_dt)
+        if nativeMemory:
+            from .nativeMemory import writeNativeMemory
+            writeNativeMemory(outFile.create_group('nativeMemory'),nativeSource,config=config,
+                schemeConfig=schemeConfig,integrator=integrator,next_dt=config.dt if next_dt is None else next_dt)
 
         if stages is not None:
             stageGroups = outFile.create_group('stages')
@@ -322,7 +330,11 @@ def writeInitialData(
     copy_dict_to_h5(outFile['config'], loadedConfig)
 
     rigidBodyGroup = outFile.create_group('rigidBodies')
-    for r, rigidBody in enumerate(getattr(schemeConfig, 'rigidBodies', []) or []):
+    bodies=getattr(schemeConfig, 'rigidBodies', []) or []
+    if uidLayout and bodies:
+        from ..evaluation.nativeLayout import bodies_view
+        bodies=bodies_view(bodies,runningState.state)
+    for r, rigidBody in enumerate(bodies):
         cGroup = rigidBodyGroup.create_group(f'rigidBody_{r:02d}')
         cGroup.attrs['centerOfMass'] = rigidBody.centerOfMass.cpu().numpy()
         cGroup.attrs['orientation'] = rigidBody.orientation.cpu().numpy()
@@ -374,7 +386,7 @@ def writeInitialData(
     outFile.create_dataset('boundaryUIDs', data=boundaryUIDs.detach().cpu().numpy(), dtype=uidDtype)
     outFile.create_dataset('boundaryKinds', data=boundaryKinds.detach().cpu().numpy(), dtype=np.int32)
     if boundaryOffsets is not None:
-        outFile.create_dataset('boundaryOffsets', data=boundaryOffsets.detach().cpu().numpy(), dtype=np.int32)
+        outFile.create_dataset('boundaryOffsets', data=boundaryOffsets.detach().cpu().numpy(), dtype=particleFloat if uidLayout else np.int32)
 
     fluidMask = kinds == 0
     fluidPositions = initialState.positions[fluidMask]
@@ -430,13 +442,14 @@ def writeInitialData(
             outFile.create_group(name)
 
     if uidLayout:
-        from .particleLayout import PARTICLE_FIELDS, writeLayoutMetadata
+        from .particleLayout import stateAxes, writeLayoutMetadata
+        particleFields=stateAxes(initialState)[0]
         writeLayoutMetadata(outFile,runningState,kind='trajectory')
         outFile.create_group('frameUIDs')
         for group in (positionGroup,velocityGroup,densityGroup,*extraGroups):
             name = group.name.rsplit('/',1)[-1]
-            group.attrs['axis'] = 'particle' if name in PARTICLE_FIELDS else 'global'
-            if name in PARTICLE_FIELDS:
+            group.attrs['axis'] = 'particle' if name in particleFields else 'global'
+            if name in particleFields:
                 group.attrs['uidDataset'] = '/combinedUIDs'
     return (positionGroup, velocityGroup, densityGroup, timeGroup, rigidBodyGroup) + extraGroups
 

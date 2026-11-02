@@ -73,13 +73,14 @@ class IncompressibleSystem(BaseIntegrationSystem):
     adjacency: Optional[AdjacencyList] = None
     domain: Optional[DomainDescription] = None
     t: float = 0.0
+    canonicalExport: bool = False
 
     def initializeNewState(self, *args, verbose=False, **kwargs):
         state = get_reference_state(self)
         if verbose:  # self.t may be a device tensor: format it only when printing
             print(f"Initializing new state [t={self.t}]")
         return type(self)(
-            state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain
+            state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain, canonicalExport=self.canonicalExport
         )
 
     def apply_position_update(self, update, spec: PositionUpdateSpec, **kwargs):
@@ -159,7 +160,7 @@ class ProjectedSystem(IncompressibleSystem):
         if verbose:  # self.t may be a device tensor: format it only when printing
             print(f"Initializing new state [t={self.t}]")
         return type(self)(
-            state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain
+            state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain, canonicalExport=self.canonicalExport
         )
 
     # The step already integrated x, v and rho; the integrator must not add

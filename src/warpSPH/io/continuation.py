@@ -23,6 +23,7 @@ def portable(value):
     """Numerical configuration identity independent of device/pointers/process."""
     if value is None or isinstance(value,(str,bool,int,float)):
         return value
+    if isinstance(value,np.generic):return portable(value.item())
     if isinstance(value,Enum):
         return [type(value).__module__,type(value).__qualname__,value.name]
     if isinstance(value,torch.Tensor):
@@ -33,6 +34,9 @@ def portable(value):
     if type(value) is UIDValues:
         p=torch.argsort(value.ids,stable=True)
         return ['UIDValues',portable(value.ids[p]),portable(value.values[p])]
+    from ..modules.boundaryConditions.pinned import PinnedBandSdf
+    if type(value) is PinnedBandSdf:
+        return ['PinnedBandSdf',portable(value.band)]
     from ..configurations.moduleConfigurations.diffusionParameters import DiffusionParameters
     from ..configurations.crkSPH import CRKViscosity
     for schema in (DiffusionParameters,CRKViscosity):

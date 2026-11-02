@@ -19,9 +19,11 @@ def computeViscosityBoundaryVelocities(state, config, schemeConfig, *,
     sampling geometry from the contour or the stored boundary-to-ghost offset.
     Stored particle velocities continue to describe the rigid body's motion.
     """
-    if not bool((state.kinds == 1).any()):
+    from ._util import stateHasBoundaryParticles
+    from ...utils.syncFree import cachedKindIndex
+    if not stateHasBoundaryParticles(state,config):
         return state.velocities
-    if bool((state.kinds == 2).any()):
+    if cachedKindIndex(state.kinds,2,config).numel():
         if boundaryVelocitiesPrepared:
             return state.velocities
         from .velocity import computeBoundaryVelocities

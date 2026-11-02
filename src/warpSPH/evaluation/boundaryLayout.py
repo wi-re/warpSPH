@@ -60,7 +60,7 @@ def permute_boundary_state(state,order):
 
 
 def _body_rows(ids,target):
-    if ids.ndim != 1 or ids.dtype != target.dtype or ids.device != target.device or ids.unique().numel() != ids.numel():
+    if ids.ndim != 1 or ids.dtype not in (torch.int32,torch.int64) or ids.device != target.device or ids.unique().numel() != ids.numel():
         raise ValueError('body IDs must be unique particle IDs on the state device')
     p=torch.argsort(target)
     loc=torch.searchsorted(target[p],ids)

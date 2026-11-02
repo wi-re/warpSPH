@@ -90,8 +90,11 @@ def interpolateLiuLiu(
         determinantThreshold = _DETERMINANT_THRESHOLDS.get(
             config.kernel, _DEFAULT_DETERMINANT_THRESHOLD)
     with record_function("[warpSPH] - interpolateLiuLiu"):
-        h = referenceParticles.supports.clone()
-        referenceParticles.supports = h * supportScale
+        # Observation queries own their support view; replacing the physical
+        # state's tensor invalidates layout/graph ownership even at scale 1.
+        from copy import copy
+        referenceParticles=copy(referenceParticles)
+        referenceParticles.supports = referenceParticles.supports * supportScale
 
         _, b, A_g, neighCounts = computeLiuMatricesWarp(
             queryPositions = queryPositions,
@@ -105,7 +108,6 @@ def interpolateLiuLiu(
             domain = config.domain,
             adjacency = adjacency
         )
-        referenceParticles.supports = h
 
         determinant = torch.linalg.det(A_g)
         wellConditioned = torch.logical_and(

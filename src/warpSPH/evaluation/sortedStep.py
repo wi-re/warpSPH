@@ -399,6 +399,11 @@ def canonical_view(system, stages=None, *, include_adjacency=True, include_stage
     """
     if type(include_adjacency) is not bool or type(include_stage_adjacency) is not bool:
         raise TypeError('adjacency export choices must be bool')
+    from ..systems.compSPH import CompSPHSystem
+    if type(system) is not CompSPHSystem:
+        from .nativeLayout import canonical_native_view
+        return canonical_native_view(system,stages,include_adjacency=include_adjacency,
+            include_stage_adjacency=include_stage_adjacency)
     order = torch.argsort(system.state.UIDs, stable=True)
     context = system.spatialContext
     layout = context.layout.for_input(system.state.UIDs) if context is not None else None

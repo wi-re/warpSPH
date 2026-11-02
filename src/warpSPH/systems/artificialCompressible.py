@@ -111,6 +111,7 @@ class ArtificialCompressibleSystem(BaseIntegrationSystem):
     adjacency: Optional[AdjacencyList] = None
     domain: Optional[DomainDescription] = None
     t: float = 0.0
+    canonicalExport: bool = False
 
     #: BDF2 history: `u^n` (the state at the start of the current real step) and
     #: `u^{n-1}` (the step before). `None` until `rollHistory` has run; the
@@ -135,7 +136,7 @@ class ArtificialCompressibleSystem(BaseIntegrationSystem):
         # stage would be pure waste. `rollHistory` is the only writer.
         return ArtificialCompressibleSystem(
             state=state.initializeNewState(), adjacency=self.adjacency,
-            t=self.t, domain=self.domain,
+            t=self.t, domain=self.domain, canonicalExport=self.canonicalExport,
             positionsPrev=self.positionsPrev, velocitiesPrev=self.velocitiesPrev,
             positionsPrev2=self.positionsPrev2, velocitiesPrev2=self.velocitiesPrev2,
             dtPrev=self.dtPrev, positionStep=self.positionStep, positionLow=self.positionLow)

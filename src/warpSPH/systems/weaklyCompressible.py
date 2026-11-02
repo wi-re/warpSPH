@@ -76,6 +76,7 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
     domain: Optional[DomainDescription] = None
     t: float = 0.0
     deltaStages: object = None
+    canonicalExport: bool = False
     def initialize(self, dt, *args, **kwargs):
         config = kwargs.get('schemeConfig')
         if any(getattr(config, name, False) for name in ('freezeDiffusionAcrossStages', 'freezeSurfaceMaskAcrossStages', 'surfaceMaskDiagnostics')):
@@ -90,7 +91,7 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
         state = get_reference_state(self)
         if verbose:   # self.t may be a device tensor: format it only when printing
             print(f'Initializing new state [t={self.t}]')
-        return WeaklyCompressibleSystem(state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain, deltaStages=self.deltaStages)
+        return WeaklyCompressibleSystem(state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain, deltaStages=self.deltaStages, canonicalExport=self.canonicalExport)
 
     def apply_position_update(self, update, spec: PositionUpdateSpec, **kwargs):
         return update_position(self, update, spec, 'position', 'position_derivative', 'velocity', 'velocity_derivative')

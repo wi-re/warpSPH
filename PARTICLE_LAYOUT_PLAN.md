@@ -6,9 +6,10 @@ Progress and priorities: [PLANS.md](PLANS.md).
 commit the qualified frontend adapters (done as `24d7a92`), persist numerical
 continuation, extend boundary/ghost/source and remaining integrator-input adapters,
 then qualify on the machine's GPU outside the sandbox using its normal Warp
-environment. Changing particle counts/emitters/outlets remain the following phase.
+environment. Population machinery and physical inlet/outlet conditions are now
+deferred separately, per the user clarification below.
 
-Current implementation (2026-11-02): numerical continuation checkpoints,
+Earlier implementation checkpoint (2026-11-02): numerical continuation checkpoints,
 declared Adams/NDF contexts, implicit warm/preconditioner inputs, pure UID forcing
 and boundary/ghost/body adapters are implemented and qualified. See the
 [restart/input and GPU report](docs/particle_layout/RESTART_AND_INPUTS_2026-11-02.md).
@@ -21,10 +22,51 @@ defaults remain selected. CPU-pinned paired native controls show no consistent
 regression beyond observed variation. Frontend remains on `dev`; integrator
 main/worktree remain aligned at `cdbbc52`, core at `04e126e`.
 
-Next: accepted-boundary fluid population events, history reset and variable-roster
-output before emitters/outlets. Stateful source transactions, automatic WCSPH
-runner/export integration, analytic providers, graph execution and exact JVP
-remain separate gates. Low-level ghost/body utilities do not enable those paths.
+User clarification (2026-11-02): inlets/outlets are new physical boundary
+features, requiring substantially more than insertion/removal. Keep their
+physical formulation and validation separate from population/storage machinery;
+neither is required to finish fixed-count particle sorting.
+
+2026-11-02 user approval: implement fixed-count production coverage. Work starts
+with an accepted-boundary layout manager for native solver paths: it transforms
+the complete next system/config before the next attempt, leaves every native
+stage in its input order, and retains order throughout a neighbor-list lifetime.
+This permits the existing graph wrappers to execute the unchanged numerical step.
+No inlet/outlet or population-change implementation is included.
+
+Implemented in this follow-up: native accepted-boundary layouts for
+WCSPH/ACSPH/IISPH/DFSPH (including compositions), UID stage/trajectory export,
+ACSPH BDF and convergence-schedule persistence, body/ghost/provider rebinding,
+pinned/UID callbacks, and graph recapture with pipelined-output views. The
+existing CompSPH/CRKSPH graph route remains active. CPU regressions pass 454
+checks (9 CUDA skips), with 92 FP64 CPU checks. Float32 GPU qualification passes
+18 checks including existing default graph regressions; the 12 native/adaptive-H/
+compatible-energy 2D/3D cases also pass in float64. See
+[native solver/graph qualification](docs/particle_layout/NATIVE_SOLVERS_2026-11-02.md).
+
+Recommended next work is fixed-count production coverage:
+
+1. The native runner/history/export slice is implemented. Extend end-to-end
+   case qualification for moving/analytic walls beyond the adapter fixtures,
+   and port additional case callbacks or CRK evolution/energy options when
+   needed. Unknown callbacks/providers still require declared adapters.
+2. Graph preservation is implemented and GPU-qualified, including recapture
+   across a forced resort and pipelined outputs. Retain the input-order default;
+   use paired timing evidence before promoting sorting or changing graph policy.
+3. Extend evolving GPU qualification: adaptive supports, compatible-energy
+   replays, 3D, density changes, repeated list rebuilds, moving walls, timestep
+   changes, and rejection/restart. Evolving adaptive-H/compatible-energy 2D/3D
+   GPU fixtures now pass; the earlier large timing still uses smooth 2D,
+   fixed supports and compatibleEnergy=False. Profile large multistep/JFNK
+   history/preconditioner costs, including avoidable gathers and host syncs.
+4. Audit remaining integrator inputs/families when needed: particle-valued
+   tolerances, structured preconditioner contexts, additional derivative seeds,
+   and exact JVP/implicit differentiation. FD-JFNK currently has the qualified
+   simulator resource path; its unsupported inputs must remain guarded.
+
+Population events, history reset and variable-roster output remain deferred
+infrastructure. Physically consistent inlets/outlets need a separately scoped
+model and validation plan. No fixed-count default is changed by this reprioritization.
 
 Previous checkpoint: fixed-count continuation adapters were CPU-qualified;
 see [the latest report](docs/particle_layout/CONTINUATION_ADAPTERS_2026-11-02.md)

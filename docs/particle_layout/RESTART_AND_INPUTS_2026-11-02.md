@@ -200,7 +200,20 @@ source transactions, additional simulator families' histories/export adapters,
 graph execution and exact implicit JVP remain subsequent work. Large-scale
 history/preconditioner costs have not been benchmarked.
 
-## Next phase
+## Remaining fixed-count work
+
+User clarification (2026-11-02): inlet/outlet conditions are new physics and
+require their own formulation and validation; insertion/removal machinery alone
+does not implement them. Neither is a prerequisite for finishing fixed-count
+sorting. Recommended follow-up is existing solver runner/history/export coverage,
+moving/analytic boundary and case-input adapters, CUDA-graph integration, and
+evolving GPU tests with adaptive supports, compatible energy, 3D and repeated
+rebuilds. The large timing workload above exercises fixed supports and disables
+compatible energy. Large history/preconditioner costs and remaining solver-input
+adapters also need qualification. See the current priorities in
+`PARTICLE_LAYOUT_PLAN.md`.
+
+## Deferred population infrastructure
 
 Implement accepted-boundary population events for the fluid CompSPH/CRKSPH
 route first. A step attempt keeps a fixed dimension and roster, including every
@@ -208,5 +221,6 @@ JFNK probe and rejected attempt. After acceptance, one event transaction creates
 and removes all declared fields, allocates fresh UIDs, updates relations and
 invalidates search resources. Initially restart multistep/FSAL memory after a
 population change. Introduce variable-roster output frames with explicit IDs
-and event provenance before enabling emitters/outlets in the runner. Preserve
-the existing fixed-roster format and input-order default.
+and event provenance. These provide storage/lifecycle infrastructure for future
+features; physical inlet/outlet conditions remain separate work. Preserve the
+existing fixed-roster format and input-order default.

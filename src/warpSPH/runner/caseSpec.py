@@ -118,8 +118,8 @@ class CaseSpec:
     pipelineOutputs: Optional[bool] = None
     #: Omit COO row indices; None enables this for compressible runs only.
     neighborOmitI: Optional[bool] = None
-    #: Storage order between accepted steps. Morton is opt-in, eager, fixed-count
-    #: periodic CompSPH/CRK only; hooks must associate persistent row data by UID.
+    #: Storage order between accepted steps. Morton is opt-in and fixed-count;
+    #: hooks must associate persistent rows by UID. Native maps retain graphs.
     particleOrder: str = 'input'
     #: Complete implicit-step retries after spatial coverage loss, for Morton mode.
     coverageRetries: int = 2
@@ -308,7 +308,7 @@ _FIELD_HELP = {
     'krylovCheckEvery': 'Krylov solvers read their still-running flag every this many iterations; unset: 8',
     'cudaGraph': 'legacy spelling of --execution graph / eager',
     'coverageRetries': 'Morton mode: maximum complete implicit-step retries after coverage loss (0 disables retries)',
-    'particleOrder': 'input (default) or morton: reorder accepted periodic CompSPH/CRK steps; audited eager RK/Adams/BDF methods',
+    'particleOrder': 'input (default) or morton: fixed-count accepted layouts for audited CompSPH/CRK and native WCSPH/ACSPH/IISPH/DFSPH routes',
     'neighborOmitI': 'omit redundant COO row indices; default on for compressible schemes, off for other families pending qualification',
     'pipelineOutputs': 'with a whole-step graph, compute step n\'s diagnostics while step n+1 replays (default on)',
     # -- output --

@@ -251,6 +251,7 @@ def prepareContext(case: Case, spec: CaseSpec) -> RunContext:
     if type(spec.coverageRetries) is not int or spec.coverageRetries < 0:
         raise ValueError('coverageRetries must be a nonnegative integer')
     ctx = buildContext(case, spec)
+    ctx.config._persistentParticleIDs = spec.particleOrder == 'morton'
     if case.configureScheme is not None:
         case.configureScheme(ctx)
     from .configuration import applySchemeOverrides
@@ -275,19 +276,27 @@ def _spatialStepper(ctx, spec, system):
     """Admit the optional fixed-count layout route before creating output files."""
     if spec.particleOrder == 'input':
         return None
-    from ..configurations.compute import requestedExecution
     from ..evaluation import MortonStepper
     if ctx.scheme not in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH):
-        raise ValueError('Morton runner requires CompSPH or CRKSPH')
+        if not isinstance(ctx.scheme,(WeaklyCompressibleSPHScheme,IncompressibleSPHScheme,ArtificialCompressibleSPHScheme)):
+            raise ValueError('Morton runner requires CompSPH or CRKSPH, or an audited native boundary solver')
+        if ctx.stepFunction is not buildScheme(ctx.scheme).configured(ctx.schemeConfig).stepFunction:
+            raise ValueError('Morton runner custom RHS requires an explicit input adapter')
+        from ..evaluation.nativeLayout import NativeMortonLayout
+        ctx.scratch['nativeLayout']=NativeMortonLayout(system,ctx.integrator,ctx.schemeConfig,
+            retain_initial_order=ctx.scratch.get('nativeRestart',False))
+        return None
     from ..schemes.compressible.compSPH import compSPH_step
     from ..schemes.compressible.crkSPH import crkSPH_step
     native = compSPH_step if ctx.scheme is CompressibleSPHScheme.CompSPH else crkSPH_step
     if ctx.stepFunction is not native:
         raise ValueError('Morton runner custom RHS requires an explicit input adapter')
-    if requestedExecution(ctx.config, ctx.schemeConfig, spec) != 'eager':
-        raise ValueError('Morton runner requires eager execution')
     stepper = MortonStepper(ctx.integrator,max_coverage_retries=spec.coverageRetries)
     stepper.validate(system, config=ctx.config, schemeConfig=ctx.schemeConfig)
+    if ctx.scratch['execution'] == 'graph':
+        from ..evaluation.nativeLayout import NativeMortonLayout
+        ctx.scratch['nativeLayout']=NativeMortonLayout(system,ctx.integrator,ctx.schemeConfig)
+        return None
     return stepper
 
 
@@ -295,6 +304,10 @@ def _checkpointOptions(ctx,state):
     """Accepted numerical memory; ordinary input-order exports stay unchanged."""
     if ctx.spec.particleOrder != 'morton':
         return {}
+    from ..systems.compSPH import CompSPHSystem
+    if type(state) is not CompSPHSystem:
+        return dict(config=ctx.config,schemeConfig=ctx.schemeConfig,integrator=ctx.integrator,
+                    next_dt=ctx.config.dt)
     from warpSPHIntegrators.runtime import Continuation
     return dict(continuation=Continuation(state,ctx.scratch.get('checkpointHistory'),ctx.scratch.get('checkpointPrior')),
                 integrator=ctx.integrator,config=ctx.config,schemeConfig=ctx.schemeConfig,
@@ -388,6 +401,10 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
             if spec.particleOrder == 'morton':
                 from ..io.particleLayout import restoreCheckpoint
                 restoreCheckpoint(f,system,ctx.config,ctx.scheme)
+                from ..systems.compSPH import CompSPHSystem
+                if type(system) is not CompSPHSystem:
+                    from ..io.nativeMemory import readNativeMemory
+                    ctx.scratch['nativeRestart']=readNativeMemory(f,system,config=ctx.config,schemeConfig=ctx.schemeConfig,integrator=ctx.integrator)
                 if 'integration' in f:
                     from ..io.continuation import readContinuation
                     memory,last_dt,next_dt=readContinuation(f['integration'],system,
@@ -457,6 +474,9 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         case = replace(case, extraFields=tuple(dict.fromkeys((*case.extraFields, 'boundaryProjectionBudget'))))
     spatialStepper = _spatialStepper(ctx, spec, system)
     runningState = system.initializeNewState()
+    nativeLayout=ctx.scratch.get('nativeLayout')
+    if nativeLayout is not None:
+        runningState,ctx.config,ctx.schemeConfig,_=nativeLayout.prepare(runningState,ctx.config,ctx.schemeConfig)
     if spatialStepper is not None:
         # Canonicalize the initial frame too, so all state files share a UID order.
         runningState.canonicalExport = True
@@ -573,8 +593,9 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         graphWanted = ctx.scratch['compSPHStepMode'] == 'graph'
     if spatialStepper is None and graphWanted and not spec.store and _stepGraphable(ctx, runningState):
         from ..utils.cudaGraph import GraphedDiagnostics, GraphedIntegratorStep
-        stepGraph = GraphedIntegratorStep(ctx.integrator.function, ctx.stepFunction)
-        if case.timestep is None and not isinstance(ctx.config.dt, torch.Tensor) and ctx.config.dt is not None and ctx.device != 'cpu':
+        stepGraph = GraphedIntegratorStep(ctx.integrator.function, ctx.stepFunction,
+            afterStep=None if nativeLayout is None else nativeLayout.capture_observation)
+        if (case.timestep is None or nativeLayout is not None) and not isinstance(ctx.config.dt, torch.Tensor) and ctx.config.dt is not None and ctx.device != 'cpu':
             # a case with a FIXED host-float step (`soundSpeed` + `targetDt`, the analytic-wall cases; no `timestep` hook): the replay reads dt from the device, as the adaptive cases already do (theirs becomes a tensor from the hook, the first step stays as eager)
             ctx.config.dt = torch.tensor(float(ctx.config.dt), dtype=ctx.dtype, device=ctx.device)
         ctx.scratch['stepGraph'] = stepGraph
@@ -599,8 +620,13 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         # Previous outputs have consumed their stage data. Release it before
         # entering the next integrator call; the accepted system stays live.
         stepResult = None
+        if nativeLayout is not None and stepGraph is not None and not isinstance(ctx.config.dt,torch.Tensor):
+            ctx.config.dt=torch.tensor(ctx.config.dt,device=ctx.device,dtype=ctx.dtype)
         step_dt=ctx.config.dt
         with _Timer(ctx.device) as timer:
+            if nativeLayout is not None:
+                runningState,ctx.config,ctx.schemeConfig,changed=nativeLayout.prepare(runningState,ctx.config,ctx.schemeConfig)
+                if changed and stepGraph is not None:stepGraph.invalidateLayout()
             with record_function("[runner] integrator step"):
                 if stepGraph is not None:
                     stepResult = stepGraph(runningState, ctx.config.dt, ctx.config, ctx.schemeConfig,
@@ -628,13 +654,14 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
                             verbose=spec.verbose,
                             schemeConfig=ctx.schemeConfig,
                         )
-        if spatialStepper is not None and not stepResult.step_status.successful:
+        if (spatialStepper is not None or nativeLayout is not None) and not stepResult.step_status.successful:
             say(f'unsuccessful integrator step {i + spec.resumeStepOffset}; stopping before layout adoption.')
             result.diverged = True
             result.stopReason = 'unsuccessful integrator step'
             stepResult = None
             break
         runningState = stepResult.state
+        if nativeLayout is not None:nativeLayout.trust_native_output(runningState)
         # Keep only the accepted system here. Retaining the original system
         # pins first-step scratch (e.g. CRK's pair-work vector) until run exit.
         result.state = runningState
@@ -691,10 +718,16 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
 
         # the step time and max |v| (non-finite check, velocity alarm) in one host transfer
         with record_function("[runner] read time + max speed (non-finite check, velocity alarm)"):
-            t, vmax = _scalars(runningState.t, maxSpeed(runningState))
+            if nativeLayout is None:
+                t, vmax = _scalars(runningState.t, maxSpeed(runningState))
+            else:
+                t,vmax,stale=_scalars(runningState.t,maxSpeed(runningState),nativeLayout.flags(runningState,ctx.config))
+                nativeLayout.remember(runningState,ctx.config,stale)
         row = {'step': absStep, 't': t, 'stepTime_ms': timer.elapsed_ms}
         if spatialStepper is not None:
             row['coverageRenewals'] = runningState.spatialContext.coverage_renewals
+        if nativeLayout is not None:
+            row.update(layoutGeneration=nativeLayout.generation,layoutSorts=nativeLayout.sorts)
         if case.diagnostics is not None:
             with record_function("[runner] case diagnostics"):
                 row.update(case.diagnostics(ctx, runningState))
@@ -868,8 +901,9 @@ def _runPipelined(ctx, case, spec, result, stepGraph, steps, progress, runningSt
     handle = None
     ts = time.perf_counter()
 
-    def outputs(i, absStep, state, stepRes, stepMs, ready, final):
+    def outputs(i, absStep, state, stepRes, stepMs, ready, final, outputCtx=None):
         """Diagnostics row + progress + frame for one finished step."""
+        observed=ctx if outputCtx is None else outputCtx
         from ..utils.cudaGraph import applyWallLoadSnapshot
         applyWallLoadSnapshot(stepRes)                     # this step's wall loads (a later replay has been launched: the bodies' own tensors may already hold the next step's)
         with torch.cuda.stream(side), wp.ScopedStream(wside, sync_enter=False, sync_exit=False):
@@ -877,12 +911,12 @@ def _runPipelined(ctx, case, spec, result, stepGraph, steps, progress, runningSt
                 side.wait_event(ready)
             row = {'step': absStep, 't': _scalar(state.t), 'stepTime_ms': stepMs}
             if case.diagnostics is not None:
-                row.update(case.diagnostics(ctx, state))
+                row.update(case.diagnostics(observed, state))
             result.trajectory.append(row)
             if progress is not None:
                 _showStep(progress, i, None if timeLimited else nSteps, row, spec.tLimit,
                           force=final)
-            _plotAndStore(ctx, case, spec, state, stepRes, absStep, extraData,
+            _plotAndStore(observed, case, spec, state, stepRes, absStep, extraData,
                           groups, storeSteps, final=final)
         # the next step (default stream) may reuse memory the side stream
         # read from; make the default stream wait for it
@@ -898,6 +932,8 @@ def _runPipelined(ctx, case, spec, result, stepGraph, steps, progress, runningSt
         stepMs = (time.perf_counter() - ts) * 1e3
         handle = None
         runningState = stepResult.state
+        nativeLayout=ctx.scratch.get('nativeLayout')
+        if nativeLayout is not None:nativeLayout.trust_native_output(runningState)
         # Keep only the accepted system here. Retaining the original system
         # pins first-step scratch (e.g. CRK's pair-work vector) until run exit.
         result.state = runningState
@@ -935,7 +971,12 @@ def _runPipelined(ctx, case, spec, result, stepGraph, steps, progress, runningSt
                 result.stopReason = 'stallProgress: simulated time frozen'
         # one host read: the non-finite check (max propagates NaN/inf) and
         # the velocity alarm's input
-        vmax = _scalar(maxSpeed(runningState))
+        nativeLayout=ctx.scratch.get('nativeLayout')
+        if nativeLayout is None:
+            vmax = _scalar(maxSpeed(runningState))
+        else:
+            vmax,stale=_scalars(maxSpeed(runningState),nativeLayout.flags(runningState,ctx.config))
+            nativeLayout.remember(runningState,ctx.config,stale)
         nonFinite = not math.isfinite(vmax)
         if stop is None and not nonFinite and alarm.check(ctx, runningState, vmax, absStep, t):
             stop = (f'velocity alarm stops the run at step {absStep} (t={t:g}): '
@@ -969,9 +1010,20 @@ def _runPipelined(ctx, case, spec, result, stepGraph, steps, progress, runningSt
         ready = torch.cuda.Event()
         ready.record(torch.cuda.current_stream(ctx.device))
         ts = time.perf_counter()
-        handle = stepGraph.launch(runningState, ctx.config.dt, ctx.config, ctx.schemeConfig,
+        nextState=runningState
+        outputCtx=None
+        nativeLayout=ctx.scratch.get('nativeLayout')
+        if nativeLayout is not None:
+            # Output of n retains its configuration/body scatter maps even if
+            # n+1 adopts a different layout. Both states own their row arrays.
+            outputCtx=replace(ctx)
+            nextState,ctx.config,ctx.schemeConfig,changed=nativeLayout.prepare(runningState,ctx.config,ctx.schemeConfig)
+            if changed:stepGraph.invalidateLayout()
+            if not isinstance(ctx.config.dt,torch.Tensor):
+                ctx.config.dt=torch.tensor(ctx.config.dt,device=ctx.device,dtype=ctx.dtype)
+        handle = stepGraph.launch(nextState, ctx.config.dt, ctx.config, ctx.schemeConfig,
                                   verbose=spec.verbose)
-        outputs(i, absStep, runningState, stepResult, stepMs, ready, final=False)
+        outputs(i, absStep, runningState, stepResult, stepMs, ready, final=False,outputCtx=outputCtx)
         # The side-stream output dependency is registered by outputs().
         # Terminal steps retain their stages for the final checkpoint below.
         stepResult = None

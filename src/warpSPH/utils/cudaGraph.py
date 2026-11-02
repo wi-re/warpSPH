@@ -610,8 +610,9 @@ class GraphedIntegratorStep:
     capture error turns this off for the run (warning).
     """
 
-    def __init__(self, integratorFn, stepFunction, name='integrator step'):
+    def __init__(self, integratorFn, stepFunction, name='integrator step', *, afterStep=None):
         self.integratorFn, self.stepFunction, self.name = integratorFn, stepFunction, name
+        self.afterStep=afterStep
         self.disabled: Optional[str] = None
         self._entry = None
         self._validated = False
@@ -630,6 +631,12 @@ class GraphedIntegratorStep:
         self.disabled = reason
         self._entry = None
         warnings.warn(f'[warpSPH] CUDA graph for {self.name} disabled, running eagerly: {reason}', stacklevel=3)
+
+    def invalidateLayout(self):
+        """Drop captured row addresses before adopting an application layout."""
+        self._entry = None
+        self._validated = False
+        self._warm = False
 
     def _eager(self, state, dt, config, schemeConfig, verbose):
         res = self.integratorFn(state=state, f=self.stepFunction, dt=dt, config=config,
@@ -729,6 +736,7 @@ class GraphedIntegratorStep:
                     torch.cuda.graph(graph, stream=stream, capture_error_mode=_CAPTURE_MODE), \
                     wp.ScopedStream(wstream, sync_enter=False, sync_exit=False):
                 result = self._eager(staticSys, staticDt, config, schemeConfig, False)
+                if self.afterStep is not None:self.afterStep(result.state,config)
                 flag = (torch.stack([f.reshape(()) for f in flags]).any() if flags
                         else torch.zeros((), dtype=torch.bool, device=staticDt.device))
                 nChecks = len(flags)

@@ -247,7 +247,8 @@ def initializeSimulation(regions, config, schemeConfig, SimulationSystem, Simula
     particleState = initializeState(regions, config, schemeConfig, SimulationState, verbose = verbose)
 
 
-    particleState = addBoundaryGhostParticles(regions, particleState)
+    particleState = addBoundaryGhostParticles(regions, particleState,
+        persistent_ids=getattr(config, '_persistentParticleIDs', False))
     # particleState, emitted = processInlets(particleState, config, config['domain'])
     # particleState.densities[:] = config['fluid']['rho0']
     # particleState.velocities = forcing(particleState.positions)
