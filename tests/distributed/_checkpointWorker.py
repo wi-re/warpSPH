@@ -293,6 +293,38 @@ def launcherFailure(args, communication):
         ChunkedPairField.empty=empty
 
 
+def launcherVisibility(args,communication):
+    from unittest.mock import patch
+    import warpSPH.distributedRun as launcher
+    output=Path(args.output).resolve()
+    state=dict(directoryMisses=0,reportMisses=0,visible=communication.rank==0)
+    originalStat,originalOpen=Path.stat,Path.open
+    def delayedStat(path,*a,**kw):
+        if communication.rank==1 and path==output:
+            if state['directoryMisses']<2:
+                state['directoryMisses']+=1
+                raise FileNotFoundError('injected remote directory visibility lag')
+            state['visible']=True
+        return originalStat(path,*a,**kw)
+    def delayedOpen(path,mode='r',*a,**kw):
+        if communication.rank==1 and path.parent==output and 'w' in mode and not state['visible']:
+            raise FileNotFoundError('remote output directory is not visible yet')
+        if communication.rank==0 and path==output/'rank-00001.json' and 'r' in mode and state['reportMisses']<2:
+            state['reportMisses']+=1
+            raise FileNotFoundError('injected remote atomic rename visibility lag')
+        return originalOpen(path,mode,*a,**kw)
+    configuration=RunConfiguration.fromDict(dict(schemaVersion=1,case='drivenTurbulence',
+        simulation=dict(nx=8,dim=2,nSteps=1,maxDt=.0002,plot=False,video=False,store=False,
+                        execution='eager',cudaGraph=False,integrationScheme='rungeKutta4'),
+        params=dict(accelerationRMS=.1,forcingInterval=.00025),solver=dict(scheme='CRKSPH')))
+    with patch.object(Path,'stat',delayedStat),patch.object(Path,'open',delayedOpen):
+        result=launcher.runDistributed(configuration,communication,outputDirectory=output,edgeBudget=1024,maxRows=3)
+    assert not result.diverged
+    assert state['directoryMisses']==(2 if communication.rank==1 else 0),state
+    assert state['reportMisses']==(2 if communication.rank==0 else 0),state
+    return dict(status='passed',action='shared visibility',rank=communication.rank,visibility=state)
+
+
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--action',choices=('reference','save','resume','reject','fail'),required=True)
@@ -315,6 +347,7 @@ def main():
     parser.add_argument('--fail-site',choices=('work','neighbors'),default='work')
     parser.add_argument('--fail-rank',type=int,default=0)
     parser.add_argument('--launcher-failure',action='store_true')
+    parser.add_argument('--launcher-visibility',action='store_true')
     args=parser.parse_args()
     if args.device.startswith('cuda'):torch.cuda.set_device(torch.device(args.device))
     dist.init_process_group('nccl' if args.device.startswith('cuda') else 'gloo',timeout=timedelta(seconds=45))
@@ -324,7 +357,8 @@ def main():
         stream=torch.cuda.Stream(device=communication.device) if communication.device.type=='cuda' else None
         with torch.cuda.stream(stream) if stream is not None else contextlib.nullcontext():
             try:
-                report=launcherFailure(args,communication) if args.launcher_failure else run(args,communication)
+                report=(launcherVisibility(args,communication) if args.launcher_visibility else
+                        launcherFailure(args,communication) if args.launcher_failure else run(args,communication))
             except (DistributedContractError,ValueError,OSError) as exc:
                 if args.expect_error is None:raise
                 assert args.expect_error in str(exc),str(exc)

@@ -23,6 +23,7 @@
     "runDirectory": "/work"
   },
   "communication": {
+    "buildImageSha256": "9f0bb994ce8c2e6aebaf99fcab0c392422c2afa937ed22b7e599db77b2c7c04d",
     "buildJobId": "7999853",
     "libfabricHost": "/opt/cray/libfabric/2.3.1",
     "librarySha256": {

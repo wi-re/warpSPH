@@ -207,6 +207,8 @@ def run(args):
         probe = json.loads((probe_output/'probe.json').read_text())
         first = probe['ranks'][0]
         report['fingerprint'] = {name: first[name] for name in ('sources', 'packages', 'architecture')}
+        if environment.get('QA_DEPLOYMENT_PROFILE') and captured['profile']['applicationFingerprint'] != report['fingerprint']:
+            raise ValueError('Application/runtime fingerprint differs from pinned deployment profile')
         if previous and previous['fingerprint'] != report['fingerprint']:
             raise ValueError('Application/runtime fingerprint differs from preceding stage')
         if args.stage == 'multi-node':

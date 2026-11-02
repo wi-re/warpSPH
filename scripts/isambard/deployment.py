@@ -45,7 +45,7 @@ def capture(profile_path, *, image=None, image_sha256=None, environment=None):
     native = json.loads((comm/'native-build.json').read_text())
     if (native['ncclRuntime'] != profile['image']['ncclRuntime'] or
             native['sources'] != profile['communication']['sources'] or
-            native['acceptedImage']['imageSha256'] != image_sha256):
+            native['acceptedImage']['imageSha256'] != profile['communication'].get('buildImageSha256',image_sha256)):
         raise ValueError('Communication build provenance differs')
     if not (fabric/'lib64/libfabric.so').is_file() or not (fabric/'include/rdma/fabric.h').is_file():
         raise ValueError('Host Libfabric installation missing')
@@ -65,6 +65,7 @@ def capture(profile_path, *, image=None, image_sha256=None, environment=None):
             ('SLURM_JOB_ID','SLURM_JOB_NODELIST','SLURM_NNODES','SLURM_CPUS_PER_TASK','SLURM_JOB_GPUS','SLURM_NETWORK','LOADEDMODULES')},
         bootstrap=dict(apptainer=['--nv','--cleanenv','--no-home'],
             cudaDevices='Literal Slurm CUDA_VISIBLE_DEVICES forwarded via APPTAINERENV_CUDA_VISIBLE_DEVICES',
+            slingshot='Per-node srun SLINGSHOT_VNIS/DEVICES/SVC_IDS and FI_CXI_DEFAULT_VNI forwarded literally via APPTAINERENV; per-rank probe records actual values',
             rendezvous='first allocated host, port 20000 + jobId % 35000',
             ras='loopback, port 10000 + jobId % 10000; QA_RAS_PORT overrides',
             processes='one torchrun parent per node, one worker per physical GPU'))

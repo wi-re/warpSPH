@@ -51,6 +51,49 @@ SSH credential or large prebuilt image. The optional Remote daemon is installed
 by the generated definition when the context selects `--with-remote`; the site
 tests below do not expose a daemon or claim live-viewer connectivity.
 
+### Future releases: build ARM64 OCI and SIF locally
+
+User-selected workflow: build finished ARM64 artifacts on the development
+machine, then upload them. Build-only Slurm jobs are a legacy fallback, not the
+default. Buildx can run ARM64 build commands under QEMU on amd64; this is emulated
+native compilation, distinct from a pure cross toolchain. See [Docker's build
+strategies](https://docs.docker.com/build/building/multi-platform/) and
+[Apptainer architecture/conversion support](https://apptainer.org/docs/user/latest/build_a_container.html).
+The local builder needs ARM64-capable BuildKit/QEMU and Apptainer. Building and
+converting need no target GPU; execution/fabric qualification still uses GH200s.
+
+After the source context above is prepared, the local recipe is:
+
+```bash
+docker buildx inspect --bootstrap
+docker buildx build --platform linux/arm64 \
+  --build-arg BASE_IMAGE=nvcr.io/nvidia/pytorch:26.01-py3 \
+  --build-arg WARP_VERSION=1.17.0 --target with-remote \
+  --metadata-file .tmp/warpsph-arm64-build.json \
+  --output type=docker,dest=.tmp/warpsph-arm64.docker.tar \
+  -t warpsph:arm64 -f .tmp/isambard-arm-context/containers/Dockerfile \
+  .tmp/isambard-arm-context
+apptainer build .tmp/warpsph-arm64.sif docker-archive:.tmp/warpsph-arm64.docker.tar
+sha256sum .tmp/warpsph-arm64.sif
+apptainer inspect --json .tmp/warpsph-arm64.sif > .tmp/warpsph-arm64-inspect.json
+```
+
+Use the target/versions/base recorded by the context; resolve and pin the ARM64
+base digest for a release. Upload the finished SIF under a fresh release filename,
+plus its checksum, source/build manifests, harness and communication artifacts.
+Never replace a currently accepted image in place. A new image hash requires an
+updated deployment profile and renewed qualification; the current accepted SIF
+stays fixed during the ongoing inter-node test.
+
+For future local OFI builds, stage the exact site Libfabric2.3.1 ARM64 headers,
+libraries and required libcxi dependencies as a versioned local sysroot, retaining
+hashes. Compile OFI/hwloc against the target image's CUDA under ARM64 emulation,
+or a verified cross toolchain, and export the communication root for bind mounting.
+This local OFI/sysroot build path has not yet been exercised; existing native
+build7999853 remains the accepted communication artifact. Do not assume an amd64
+library or a host-native linker produces an ARM64 artifact. This recipe documents
+the required future workflow; it is not a claim of a completed local ARM64 build.
+
 ## 2. Upload over your normal SSH connection
 
 All remote working paths derive from one base directory, `QA_ROOT`. On your
@@ -105,8 +148,6 @@ mkdir -p "$QA_BUILD_LOGS"
 cd "$QA_ROOT"
 sha256sum warpsph-isambard.tar.gz       # compare with the local archive hash
 tar -xzf warpsph-isambard.tar.gz       # extract once; keep an existing extraction
-sbatch --account="$QA_ACCOUNT" --output="$QA_BUILD_LOGS/build-%j.out" \
-  "$QA_BUNDLE/harness/build.slurm"
 ```
 
 Keep these exports in your shell or in a small settings file you source after
@@ -129,7 +170,16 @@ changing `QA_ROOT` alone does not change an already-exported results root.
 Build logs are under `QA_BUILD_LOGS`; test Slurm logs are under
 `$QA_RESULTS_ROOT/logs`. Keep the running job's existing output directory.
 
-The build job verifies all uploaded files, requires native `aarch64`, then builds
+The old uploaded source-only tarball remains usable with its accepted SIF. For
+new releases, upload the locally built SIF and point QA_IMAGE to that fresh file.
+The legacy native builder remains available only when deliberately selected:
+
+```bash
+sbatch --account="$QA_ACCOUNT" --output="$QA_BUILD_LOGS/build-%j.out" \
+  "$QA_BUNDLE/harness/build.slurm"
+```
+
+The legacy build job verifies all uploaded files, requires native `aarch64`, then builds
 with Apptainer fakeroot **on a compute allocation**. Its defaults are one GPU,
 16 CPU cores and one hour; override account/partition/time as needed. It retains
 the SIF, SHA256 and inspection metadata. GPU access for the build allocation is
@@ -442,7 +492,12 @@ libraries, keeping `/host/usr/lib64` last. Do not load the incompatible
 `network-setup.sh` contains every NCCL/FI tuning variable; its hash and full text
 are captured, alongside explicit bind destinations, GPU visibility handling,
 rendezvous/RAS rules, host fabric/CXI binary hashes and selected Slurm settings.
-No SSH credentials or unrelated environment variables are recorded.
+The node wrapper forwards each srun task's SLINGSHOT_VNIS, SLINGSHOT_DEVICES and
+SLINGSHOT_SVC_IDS literally through cleanenv (also FI_CXI_DEFAULT_VNI if supplied).
+These IDs can differ by node; never reuse the launch node's service-ID list on
+its peers. Per-rank probe records retain actual values. See the [CXI authorization
+contract](https://ofiwg.github.io/libfabric/main/man/fi_cxi.7.html). No SSH
+credentials or unrelated environment variables are recorded.
 
 With this profile selected, qualification saves `probes/deployment.json`, pins
 its digest in `report.json`, and seals it with the other retrieved artifacts.

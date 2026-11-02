@@ -232,3 +232,32 @@ def test_projection_launcher_preserves_native_case_pressure_history_and_restart(
         assert set(a.keys())=={'state','neighborHistory','clock','context'}
         if scheme!='iisph':
             assert {'densityPressureImpulse','divergencePressureImpulse','divergencePressures'}<=set(a['state'])
+
+
+@pytest.mark.parametrize('failure',[FileNotFoundError,PermissionError,ValueError])
+def test_shared_metadata_wait_is_bounded_and_preserves_other_errors(tmp_path, failure):
+    from warpSPH.distributedRun import _sharedOperation
+    attempts=[]
+    def unavailable():
+        attempts.append(1)
+        raise failure('injected metadata error')
+    expected=TimeoutError if failure is FileNotFoundError else failure
+    with pytest.raises(expected):
+        _sharedOperation(tmp_path/'missing',unavailable,timeout=0)
+    assert len(attempts)==1
+
+
+@pytest.mark.skipif(not dist.is_gloo_available(),reason='Gloo required')
+def test_launcher_tolerates_remote_directory_and_rank_report_visibility_lag(tmp_path):
+    import json
+    worker=Path(__file__).with_name('distributed')/'_checkpointWorker.py'
+    env=dict(os.environ,CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='2',PYTHONDONTWRITEBYTECODE='1')
+    command=[sys.executable,'-m','torch.distributed.run','--standalone','--nproc-per-node=2',str(worker),
+        '--launcher-visibility','--action','reference','--output',str(tmp_path/'run'),
+        '--checkpoint',str(tmp_path/'unused.h5'),'--oracle',str(tmp_path/'unused.pt')]
+    result=subprocess.run(command,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=180)
+    (tmp_path/'run.log').write_text(result.stdout)
+    assert result.returncode==0,result.stdout
+    manifest=json.loads((tmp_path/'run/manifest.json').read_text())
+    assert manifest['status']=='complete' and len(manifest['placement'])==2
+    assert all(json.loads((tmp_path/'run'/f'rank-{rank:05d}.json').read_text())['status']=='complete' for rank in (0,1))

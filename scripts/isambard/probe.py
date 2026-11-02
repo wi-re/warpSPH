@@ -80,7 +80,7 @@ def main():
                       cuda=torch.version.cuda, gpuUuid=str(torch.cuda.get_device_properties(device).uuid) if gpu else None,
                       gpuName=torch.cuda.get_device_name(device) if gpu else None,
                       nccl=list(torch.cuda.nccl.version()) if gpu else None,
-                      network={key: value for key, value in os.environ.items() if key.startswith(('NCCL_', 'FI_'))})
+                      network={key: value for key, value in os.environ.items() if key.startswith(('NCCL_', 'FI_', 'SLINGSHOT_'))})
         records = [None] * size
         dist.all_gather_object(records, record)
         if any(row['sources'] != records[0]['sources'] or row['packages'] != records[0]['packages']

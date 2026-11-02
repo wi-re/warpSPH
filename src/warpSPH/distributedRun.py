@@ -36,6 +36,24 @@ def _atomicJson(path,value):
         temporary.unlink(missing_ok=True)
 
 
+def _sharedOperation(path,operation,*,timeout=30.):
+    """Bound metadata visibility lag after a peer's create/atomic rename.
+
+    A process-group handshake orders the writers, but does not invalidate a
+    different filesystem client's negative dentries. Retry only ENOENT; real
+    permission/format/IO errors retain their original immediate failure.
+    """
+    deadline=time.monotonic()+timeout
+    while True:
+        try:
+            return operation()
+        except FileNotFoundError as error:
+            remaining=deadline-time.monotonic()
+            if remaining<=0:
+                raise TimeoutError(f'Shared path did not become visible within {timeout:g}s: {path}') from error
+            time.sleep(min(.05,remaining))
+
+
 def _sourcePins():
     import warpSPH,warpSPHCore,warpSPHIntegrators
     pins={}
@@ -111,6 +129,7 @@ def runDistributed(configuration,communication,*,outputDirectory,edgeBudget,maxR
     started=time.perf_counter()
     manifest=None
     try:
+        communication.localPhase('launcher:output-visible',lambda:_sharedOperation(output,output.stat))
         pins=communication.localPhase('launcher:source-pins',_sourcePins)
         communication.agree('launcher:sources',{name:pin['digest'] for name,pin in pins.items()})
         runtime=communication.localPhase('launcher:runtime',lambda:_runtime(communication))
@@ -120,7 +139,10 @@ def runDistributed(configuration,communication,*,outputDirectory,edgeBudget,maxR
         def publishStart():
             nonlocal manifest
             if communication.rank!=0:return
-            placement=[json.loads((output/f'rank-{rank:05d}.json').read_text())['runtime'] for rank in range(communication.size)]
+            placement=[]
+            for rank in range(communication.size):
+                path=output/f'rank-{rank:05d}.json'
+                placement.append(json.loads(_sharedOperation(path,path.read_text))['runtime'])
             manifest=dict(formatVersion=1,status='running',configuration=document,sources=pins,placement=placement,
                 chunks=dict(edgeBudget=edgeBudget,maxRows=maxRows),checkpointEvery=checkpointEvery,
                 timingPolicy='diagnostic; physical topology/capacity/performance require separate qualification')

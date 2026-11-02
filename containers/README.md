@@ -89,8 +89,10 @@ docker build --platform linux/amd64 \
 ```
 
 Use the same base/platform/Warp version recorded by context preparation. For
-ARM64, change both platform arguments and use a base supporting ARM64. Prefer
-native builds and run validation on the target GPU architecture. Remove
+ARM64, use a supporting base and build locally through Buildx/QEMU or a verified
+cross toolchain, then convert the finished ARM64 OCI archive to SIF locally.
+Target-GPU validation still runs on Isambard; build-only Slurm jobs are a legacy
+fallback. See the [local ARM64 build recipe](../scripts/isambard/README.md#future-releases-build-arm64-oci-and-sif-locally). Remove
 `--with-remote` and select target `simulation` for an image without the installed
 companion/proxy. Each architecture produces a separate image; validated variants
 can subsequently be published under a multi-platform OCI manifest. Publication
@@ -171,7 +173,8 @@ This is container-local process management, not a Slurm submission service.
 ## Staged Isambard qualification
 
 Use the [Isambard harness guide](../scripts/isambard/README.md) to export a native
-ARM64 source bundle, build it through Slurm, and qualify one GPU, several GPUs,
+ARM64 source context, build/export the image locally, upload the finished SIF
+and communication artifacts, and qualify one GPU, several GPUs,
 cross-job restart, retrieval and multiple nodes in separate submissions. Each
 stage retains native checkpoints and a machine-readable report; verify downloaded
 artifacts before advancing. Native ARM64/GH200 single-GPU execution, checkpoint

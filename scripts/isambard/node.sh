@@ -20,6 +20,13 @@ if [[ -z ${APPTAINERENV_NCCL_RAS_ADDR:-} && ${SLURM_JOB_ID:-} =~ ^[0-9]+$ ]]; th
   [[ $ras_port =~ ^[0-9]+$ ]] && (( ras_port >= 1024 && ras_port <= 65535 && ras_port != QA_MASTER_PORT )) || { echo 'Invalid RAS port or rendezvous collision.' >&2; exit 2; }
   export APPTAINERENV_NCCL_RAS_ADDR="127.0.0.1:$ras_port"
 fi
+# srun assigns these per step and per node. Preserve literal comma-separated
+# lists through cleanenv; never broadcast the launch node's service IDs.
+for key in SLINGSHOT_VNIS SLINGSHOT_DEVICES SLINGSHOT_SVC_IDS FI_CXI_DEFAULT_VNI; do
+  if [[ -n ${!key:-} ]]; then
+    export "APPTAINERENV_$key=${!key}"
+  fi
+done
 # HOME is set by container.sh; Apptainer rejects HOME in --env.
 args=(exec --nv --cleanenv --no-home --pwd /work "${binds[@]}"
   --env "QA_NETWORK=${QA_NETWORK:-none},QA_WORLD_NODES=$nodes,QA_NODE_RANK=${SLURM_NODEID:-0}"

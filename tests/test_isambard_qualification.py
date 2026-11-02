@@ -109,15 +109,17 @@ def test_multinode_cannot_pass_on_socket_transport_or_missing_rank_logs(tmp_path
     assert qualify.check_transport(tmp_path, record) == [log.name]
 
 
-def test_apptainer_preserves_comma_separated_gpu_list(tmp_path):
+@pytest.mark.parametrize('services', ['5,6', '21,22'])
+def test_apptainer_preserves_comma_separated_gpu_list(tmp_path, services):
     binary = tmp_path/'bin'
     binary.mkdir()
     mock = binary/'apptainer'
-    mock.write_text(f'#!{sys.executable}\nimport os,json,sys\nprint(json.dumps(dict(args=sys.argv[1:],devices=os.environ.get("APPTAINERENV_CUDA_VISIBLE_DEVICES"),ras=os.environ.get("APPTAINERENV_NCCL_RAS_ADDR"))))\n')
+    mock.write_text(f'#!{sys.executable}\nimport os,json,sys\nprint(json.dumps(dict(args=sys.argv[1:],devices=os.environ.get("APPTAINERENV_CUDA_VISIBLE_DEVICES"),ras=os.environ.get("APPTAINERENV_NCCL_RAS_ADDR"),slingshot={{key:os.environ.get("APPTAINERENV_"+key) for key in ("SLINGSHOT_VNIS","SLINGSHOT_DEVICES","SLINGSHOT_SVC_IDS")}})))\n')
     mock.chmod(0o700)
     environment = dict(os.environ, PATH=str(binary)+':'+os.environ['PATH'],
                        CUDA_VISIBLE_DEVICES='0,2,3', QA_NETWORK='none',
-                       QA_MASTER_ADDR='nodeA', QA_MASTER_PORT='29000', SLURM_JOB_ID='8000996', QA_RAS_PORT='13000')
+                       QA_MASTER_ADDR='nodeA', QA_MASTER_PORT='29000', SLURM_JOB_ID='8000996', QA_RAS_PORT='13000',
+                       SLINGSHOT_VNIS='234,235', SLINGSHOT_DEVICES='cxi0,cxi1', SLINGSHOT_SVC_IDS=services)
     result = subprocess.run(['bash',str(HARNESS/'node.sh'),'/image.sif',str(tmp_path),
                              'torchrun','1','3','probe','probe.py'],
                             env=environment,capture_output=True,text=True)
@@ -125,6 +127,7 @@ def test_apptainer_preserves_comma_separated_gpu_list(tmp_path):
     invocation = json.loads(result.stdout)
     assert invocation['devices'] == '0,2,3'
     assert invocation['ras'] == '127.0.0.1:13000'
+    assert invocation['slingshot'] == dict(SLINGSHOT_VNIS='234,235',SLINGSHOT_DEVICES='cxi0,cxi1',SLINGSHOT_SVC_IDS=services)
     assert not any('CUDA_VISIBLE_DEVICES=' in arg for arg in invocation['args'])
     env_values = [invocation['args'][index+1] for index, arg in enumerate(invocation['args']) if arg == '--env']
     assert all(not entry.startswith('HOME=') for value in env_values for entry in value.split(','))
@@ -320,7 +323,7 @@ print(json.dumps(builtins.events))
     assert json.loads(result.stdout) == ['probe','capture','destroy']
 
 
-@pytest.mark.parametrize('scenario', ['valid','image','library','setup','host-module','network','implicit-bind'])
+@pytest.mark.parametrize('scenario', ['valid','image','library','setup','host-module','network','implicit-bind','reused-build-image','wrong-build-image'])
 def test_pinned_deployment_rejects_runtime_or_setup_drift(tmp_path, scenario):
     import hashlib
     deployment = load('deployment')
@@ -341,6 +344,9 @@ def test_pinned_deployment_rejects_runtime_or_setup_drift(tmp_path, scenario):
                            librarySha256={'library.so':sha(comm/'library.so')},sources={'ofi':'pinned'},libfabricHost=str(fabric)),
         defaults=dict(slurmNetwork='disable_rdzv_get'))
     native = dict(ncclRuntime=22902,sources={'ofi':'pinned'},acceptedImage=dict(imageSha256=sha(image)))
+    if scenario in ('reused-build-image','wrong-build-image'):
+        profile['communication']['buildImageSha256']='f'*64
+        native['acceptedImage']['imageSha256']=('f' if scenario=='reused-build-image' else 'e')*64
     (comm/'native-build.json').write_text(json.dumps(native))
     lock = tmp_path/'profile.json'
     lock.write_text(json.dumps(profile))
@@ -353,7 +359,7 @@ def test_pinned_deployment_rejects_runtime_or_setup_drift(tmp_path, scenario):
         env['QA_SLURM_NETWORK'] = ''
     if scenario == 'implicit-bind':
         env['APPTAINER_BINDPATH'] = '/host/nccl:/injected'
-    if scenario != 'valid':
+    if scenario not in ('valid','reused-build-image'):
         with pytest.raises(ValueError):
             deployment.capture(lock,environment=env)
     else:

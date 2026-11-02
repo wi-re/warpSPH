@@ -405,6 +405,27 @@ node wrapper uses job-derived RAS address while preserving an explicit override.
 Thirty-two focused checks, shell/embedded Python/guide syntax and full paired
 imports (576 modules/6283 imports/1341 files) pass. Tiny four-step qualification
 fixture omits video deliberately; no physical/model/source-image changes.
+Initial inter-node job8001638 submitted using harness e43340f. Primary CXI
+documentation requires per-step SLINGSHOT_VNIS/DEVICES/SVC_IDS for explicit
+Slurm-assigned authorization; cleanenv currently drops them. Audit forwarding
+and preserve each node's own assigned lists before accepting a reusable launch.
+User decision: future ARM64 OCI/SIF builds must run on the local development
+machine, with ready-built artifacts uploaded to Isambard. Use Buildx ARM64
+emulation first (or a verified cross toolchain), then local SIF conversion without
+executing target GPU code. Bring pinned host Libfabric headers/libraries into a
+local ARM64 sysroot for OFI; no build-only Slurm allocation by default. Preserve
+the current accepted SIF for this ongoing test. Local build plumbing remains a
+follow-up; hardware execution/fabric qualification still runs on Isambard.
+Job8001638 FAILED1:0 after3m28s on nid011241/nid011264. Two-host Warp/Torch/
+NCCL collective/stream/storage probe passes with AWS Libfabric/CXI; one-GPU
+reference completes4 steps. Distributed solver fails before stepping at
+launcher:rank-start: rank1 cannot open /work/runs/distributed/.rank-00001.json.tmp
+after rank0 creates the fresh directory. Investigate/repair bounded shared-file
+visibility at launcher startup, retaining failure and numerical source baseline.
+A deployable source fix requires a fresh locally built ARM64 image and renewed
+source-fingerprint qualification; do not silently patch the accepted SIF or
+loosen existing source guards. Current tool identity cannot access local Docker
+socket; user diagnostic requested while preparing fix/build recipe.
 
 ### Static import scanner issue resolved (2026-10-30)
 
@@ -2698,3 +2719,29 @@ geometry, AD/graphs and physical multi-GPU/site/capacity/performance remain
 explicit gates. Native pressure accuracy/long-time robustness is not upgraded
 by storage parity. Full164³/196³t4 and96³→t40 remain overnight-only; none was
 launched during this continuation. MPI/ROCm builds remain deferred.
+
+
+Local repair/build progress (2026-11-02): shared-path ENOENT visibility waits
+bounded at30s now cover output directory and peer runtime JSON publication;
+permission/format/other IO failures remain immediate. Fault-injected two-rank
+CPU/Gloo regression and serial/two/three-rank CRKSPH continuous/restart/freshness/
+allocation-failure tests pass (5 targeted checks). First sandbox attempt blocked
+TCP sockets; approved local-network rerun passes. No kernel/model change.
+Docker access on it111636 works with sg docker after stale session groups were
+refreshed. Isolated BuildKit builder warpsph-arm64-20261102 uses host networking
+for DNS and bundled userspace qemu helpers; no host binfmt registration. Official
+Apptainer1.5.5 non-setuid package and libsubid4 extracted into owned .tmp tools,
+no system installation. Local ARM64 image and SIF pipeline in preparation.
+Communication profiles now distinguish build-image provenance from target-image
+identity to permit explicitly pinned reuse of identical OFI binaries; actual
+application/runtime fingerprint is checked against the profile even on single.
+
+Local build prerequisites verified: BuildKit's ARM64 ELF/uname smoke runs under
+its bundled qemu, and the x86_64 userspace Apptainer converts that OCI archive
+into a SIF whose system partition reports arm64. Scratch-only smoke cannot
+supply ELF architecture evidence and was replaced by an Alpine ARM64 smoke.
+No system Apptainer installation, host binfmt change or remote build allocation
+is needed. Harness35 checks plus5 targeted distributed IO/CRKSPH checks pass;
+full imports576/6285/1341 pass. Freeze only the IO-fix frontend delta over the
+accepted ARM64 package snapshot, pin the resolved NGC ARM64 digest, and build
+locally. The previous inter-node stage stays failed until a new image qualifies.
