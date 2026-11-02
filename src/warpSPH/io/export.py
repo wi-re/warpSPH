@@ -33,6 +33,17 @@ def schemeAttribute(scheme) -> str:
                  WaveEquationScheme)) else scheme
 
 
+def validateSortedExtraData(extraData):
+    """Scalars have no particle axis; arrays/nested data require an explicit adapter."""
+    reserved = {'scheme','time','particleLayoutVersion','particleLayoutFormat','particleOrder','particlePrecision',
+                'particleDomain_min','particleDomain_max','particleDomain_periodic','particleUIDcounter'}
+    if reserved.intersection(extraData or {}):
+        raise ValueError('extraData cannot replace reserved layout metadata')
+    if any(value is not None and not isinstance(value, (str, bool, int, float, np.number, np.bool_, np.str_))
+           for value in (extraData or {}).values()):
+        raise ValueError('sorted frame extraData needs explicit axes; use canonical_view and transform extras first')
+
+
 def exportSimulationSystem(
     exportPath,
     tag,
@@ -43,9 +54,9 @@ def exportSimulationSystem(
     exportStagesAdjacency = True,
     extraData = None,
 ):
-    if getattr(system, 'spatialContext', None) is not None or getattr(system, 'canonicalExport', False):
-        if extraData:
-            raise ValueError('sorted frame extraData needs explicit axes; use canonical_view and transform extras first')
+    uidLayout = getattr(system, 'spatialContext', None) is not None or getattr(system, 'canonicalExport', False)
+    if uidLayout:
+        validateSortedExtraData(extraData)
         # Optional private sorting is invisible to the particle/stage file order.
         from ..evaluation import canonical_view
         system, stages = canonical_view(system, stages, include_adjacency=exportAdjacency,
@@ -55,6 +66,9 @@ def exportSimulationSystem(
     outFile = h5py.File(f'{exportPath}/trajectory/{tag}.h5', 'w')
 
     outFile.attrs['scheme'] = schemeAttribute(scheme)
+    if uidLayout:
+        from .particleLayout import writeLayoutMetadata
+        writeLayoutMetadata(outFile, system, kind='state')
     outFile.attrs['time'] = system.t if isinstance(system.t, float) else system.t.cpu().item()
 
     if system.adjacency is not None:
@@ -232,8 +246,10 @@ def writeInitialData(
     extraData: dict | None = None,
     extraFields: tuple = (),
 ):
-    if getattr(runningState, 'spatialContext', None) is not None or getattr(runningState, 'canonicalExport', False):
-        raise ValueError('sorted fixed-roster trajectory export needs an ID/schema adapter; use exportSimulationSystem frames')
+    uidLayout = getattr(runningState, 'spatialContext', None) is not None or getattr(runningState, 'canonicalExport', False)
+    if uidLayout:
+        from .particleLayout import initialView
+        runningState = initialView(runningState,extraData,extraFields,outFile)
     if extraData is None:
         extraData = {}
 
@@ -303,8 +319,12 @@ def writeInitialData(
         cGroup.attrs['sdf'] = _encode_callable(rigidBody.sdf)
 
     initialState = runningState.state
+    uidDtype = np.int64 if uidLayout else np.int32
+    particleFloat = initialState.positions.detach().cpu().numpy().dtype if uidLayout else np.float32
     storedFloat = np.float64 if (hasattr(initialState, 'thermodynamicVariable')
                                  and initialState.positions.dtype == torch.float64) else np.float32
+    if uidLayout:
+        storedFloat = particleFloat
     kinds = initialState.kinds
 
     boundaryMask = kinds == 1
@@ -316,10 +336,10 @@ def writeInitialData(
     stateGhostOffsets = getattr(initialState, 'ghostOffsets', None)
     boundaryOffsets = stateGhostOffsets[boundaryMask] if stateGhostOffsets is not None else None
 
-    outFile.create_dataset('boundaryPositions', data=boundaryPositions.detach().cpu().numpy(), dtype=np.float32)
-    outFile.create_dataset('boundaryMasses', data=boundaryMasses.detach().cpu().numpy(), dtype=np.float32)
-    outFile.create_dataset('boundarySupports', data=boundarySupports.detach().cpu().numpy(), dtype=np.float32)
-    outFile.create_dataset('boundaryUIDs', data=boundaryUIDs.detach().cpu().numpy(), dtype=np.int32)
+    outFile.create_dataset('boundaryPositions', data=boundaryPositions.detach().cpu().numpy(), dtype=particleFloat)
+    outFile.create_dataset('boundaryMasses', data=boundaryMasses.detach().cpu().numpy(), dtype=particleFloat)
+    outFile.create_dataset('boundarySupports', data=boundarySupports.detach().cpu().numpy(), dtype=particleFloat)
+    outFile.create_dataset('boundaryUIDs', data=boundaryUIDs.detach().cpu().numpy(), dtype=uidDtype)
     outFile.create_dataset('boundaryKinds', data=boundaryKinds.detach().cpu().numpy(), dtype=np.int32)
     if boundaryOffsets is not None:
         outFile.create_dataset('boundaryOffsets', data=boundaryOffsets.detach().cpu().numpy(), dtype=np.int32)
@@ -331,10 +351,10 @@ def writeInitialData(
     fluidUIDs = initialState.UIDs[fluidMask]
     fluidKinds = initialState.kinds[fluidMask]
 
-    outFile.create_dataset('fluidPositions', data=fluidPositions.detach().cpu().numpy(), dtype=np.float32)
-    outFile.create_dataset('fluidMasses', data=fluidMasses.detach().cpu().numpy(), dtype=np.float32)
-    outFile.create_dataset('fluidSupports', data=fluidSupports.detach().cpu().numpy(), dtype=np.float32)
-    outFile.create_dataset('fluidUIDs', data=fluidUIDs.detach().cpu().numpy(), dtype=np.int32)
+    outFile.create_dataset('fluidPositions', data=fluidPositions.detach().cpu().numpy(), dtype=particleFloat)
+    outFile.create_dataset('fluidMasses', data=fluidMasses.detach().cpu().numpy(), dtype=particleFloat)
+    outFile.create_dataset('fluidSupports', data=fluidSupports.detach().cpu().numpy(), dtype=particleFloat)
+    outFile.create_dataset('fluidUIDs', data=fluidUIDs.detach().cpu().numpy(), dtype=uidDtype)
     outFile.create_dataset('fluidKinds', data=fluidKinds.detach().cpu().numpy(), dtype=np.int32)
 
     ghostMask = kinds == 2
@@ -343,27 +363,28 @@ def writeInitialData(
     ghostSupports = initialState.supports[ghostMask]
     ghostUIDs = initialState.UIDs[ghostMask]
     ghostKinds = initialState.kinds[ghostMask]
-    outFile.create_dataset('ghostPositions', data=ghostPositions.detach().cpu().numpy(), dtype=np.float32)
-    outFile.create_dataset('ghostMasses', data=ghostMasses.detach().cpu().numpy(), dtype=np.float32)
-    outFile.create_dataset('ghostSupports', data=ghostSupports.detach().cpu().numpy(), dtype=np.float32)
-    outFile.create_dataset('ghostUIDs', data=ghostUIDs.detach().cpu().numpy(), dtype=np.int32)
+    outFile.create_dataset('ghostPositions', data=ghostPositions.detach().cpu().numpy(), dtype=particleFloat)
+    outFile.create_dataset('ghostMasses', data=ghostMasses.detach().cpu().numpy(), dtype=particleFloat)
+    outFile.create_dataset('ghostSupports', data=ghostSupports.detach().cpu().numpy(), dtype=particleFloat)
+    outFile.create_dataset('ghostUIDs', data=ghostUIDs.detach().cpu().numpy(), dtype=uidDtype)
     outFile.create_dataset('ghostKinds', data=ghostKinds.detach().cpu().numpy(), dtype=np.int32)
 
     outFile.create_dataset('combinedPositions', data=initialState.positions.detach().cpu().numpy(), dtype=storedFloat)
     outFile.create_dataset('combinedMasses', data=initialState.masses.detach().cpu().numpy(), dtype=storedFloat)
     outFile.create_dataset('combinedSupports', data=initialState.supports.detach().cpu().numpy(), dtype=storedFloat)
-    outFile.create_dataset('combinedUIDs', data=initialState.UIDs.detach().cpu().numpy(), dtype=np.int32)
+    outFile.create_dataset('combinedUIDs', data=initialState.UIDs.detach().cpu().numpy(), dtype=uidDtype)
     outFile.create_dataset('combinedKinds', data=initialState.kinds.detach().cpu().numpy(), dtype=np.int32)
-    outFile.create_dataset('combinedDensities', data=initialState.densities.detach().cpu().numpy(), dtype=np.float32)
-    outFile.create_dataset('combinedVelocities', data=initialState.velocities.detach().cpu().numpy(), dtype=np.float32)
+    outFile.create_dataset('combinedDensities', data=initialState.densities.detach().cpu().numpy(), dtype=particleFloat)
+    outFile.create_dataset('combinedVelocities', data=initialState.velocities.detach().cpu().numpy(), dtype=particleFloat)
     outFile.create_dataset('combinedMaterials', data=initialState.materials.detach().cpu().numpy(), dtype=np.int32)
     # Provenance and body membership are independent of physical materials.
     for field, dataset in (('emitters', 'combinedEmitters'), ('bodyIDs', 'combinedBodyIDs')):
         ids = getattr(initialState, field, None)
         if ids is not None:
-            outFile.create_dataset(dataset, data=ids.detach().cpu().numpy(), dtype=np.int32)
+            outFile.create_dataset(dataset, data=ids.detach().cpu().numpy(),
+                                   dtype=ids.detach().cpu().numpy().dtype if uidLayout else np.int32)
     if stateGhostOffsets is not None:
-        outFile.create_dataset('combinedGhostOffsets', data=stateGhostOffsets.detach().cpu().numpy(), dtype=np.float32)
+        outFile.create_dataset('combinedGhostOffsets', data=stateGhostOffsets.detach().cpu().numpy(), dtype=particleFloat)
         outFile.create_dataset('combinedGhostIndices', data=initialState.ghostIndices.detach().cpu().numpy(), dtype=np.int32)
 
     positionGroup = outFile.create_group('positions')
@@ -376,6 +397,15 @@ def writeInitialData(
         if getattr(initialState, name, None) is not None and name not in outFile:
             outFile.create_group(name)
 
+    if uidLayout:
+        from .particleLayout import PARTICLE_FIELDS, writeLayoutMetadata
+        writeLayoutMetadata(outFile,runningState,kind='trajectory')
+        outFile.create_group('frameUIDs')
+        for group in (positionGroup,velocityGroup,densityGroup,*extraGroups):
+            name = group.name.rsplit('/',1)[-1]
+            group.attrs['axis'] = 'particle' if name in PARTICLE_FIELDS else 'global'
+            if name in PARTICLE_FIELDS:
+                group.attrs['uidDataset'] = '/combinedUIDs'
     return (positionGroup, velocityGroup, densityGroup, timeGroup, rigidBodyGroup) + extraGroups
 
 
@@ -393,9 +423,19 @@ def _writeFrameData(group, values):
 
 def writeFrame(groups, i, state, stages, config, schemeConfig, uniqueParticles=True, writeStages=False,
               extraFields: tuple = (), extraData: dict | None = None):
-    if getattr(state, 'spatialContext', None) is not None or getattr(state, 'canonicalExport', False):
-        raise ValueError('sorted fixed-roster trajectory export needs an ID/schema adapter; use exportSimulationSystem frames')
+    uidLayout = getattr(state, 'spatialContext', None) is not None or getattr(state, 'canonicalExport', False)
+    uidLayout = uidLayout or bool(groups and groups[0].file.attrs.get('particleLayoutVersion'))
+    if uidLayout:
+        from .particleLayout import trajectoryView
+        state, stages = trajectoryView(groups,state,stages,extraFields,extraData,writeStages)
     positionGroup, velocityGroup, densityGroup, timeGroup, rigidBodyGroup, *extraGroups = groups
+    if uidLayout:
+        positionGroup.file['frameUIDs'][f'frame_{i:05d}'] = positionGroup.file['combinedUIDs']
+        if writeStages and stages:
+            group = positionGroup.file['stages'].create_group(f'frame_{i:05d}')
+            stageGroups = [group.create_group(f'stage_{j}') for j in range(len(stages))]
+            for j,stage in enumerate(stages):
+                dumpStage(stage,stageGroups,j,type(state.state),True)
 
     positionGroup.create_dataset(f'frame_{i:05d}', data=state.state.positions.cpu().numpy())
     velocityGroup.create_dataset(f'frame_{i:05d}', data=state.state.velocities.cpu().numpy())

@@ -23,7 +23,7 @@ __all__ = ['solveStageSupport']
 
 
 def solveStageSupport(system, state, config, schemeConfig, *, onGrid: bool = False, rebuildSlack: float = 0.0,
-                      computeDensity: bool = False) -> None:
+                      computeDensity: bool = False, listBuilder=None) -> None:
     """Solve for the stage's supports; sets `state.supports` / `state.densities` (and, in list mode, `system.adjacency`).
     `computeDensity=True` also returns the closing summation density (for a step that builds on it, e.g. Inutsuka's Gaussian h)."""
     if onGrid:
@@ -36,7 +36,13 @@ def solveStageSupport(system, state, config, schemeConfig, *, onGrid: bool = Fal
         noteOutgrown(holder, info)
         state.supports, state.densities = h, rho
         return
+    if listBuilder is not None:
+        # Select/validate the pinned candidate after startStage's latest-list
+        # handoff, before any speculative support iteration uses it.
+        system.adjacency = listBuilder(state, domain=config.domain, verletScale=config.verletScale,
+            supportMode=SupportScheme.SuperSymmetric, priorNeighborhood=system.adjacency,
+            verbose=False, **neighborSearchOptions(config))
     rho, h, system.adjacency, *_ = evaluateOptimalSupport(
         state, config, schemeConfig, SupportScheme.Gather, system.adjacency,
-        validateOnce=True, rebuildSlack=rebuildSlack, computeDensity=computeDensity)
+        validateOnce=True, rebuildSlack=rebuildSlack, computeDensity=computeDensity, listBuilder=listBuilder)
     state.supports, state.densities = h, rho

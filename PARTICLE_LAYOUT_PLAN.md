@@ -2,7 +2,11 @@
 
 Progress and priorities: [PLANS.md](PLANS.md).
 
-Status: scope and proposed implementation sequence complete, 2026-11-01.
+Current implementation: fixed-count runner renewal and UID persistence are CPU-qualified;
+see [the latest report](docs/particle_layout/RENEWAL_AND_PERSISTENCE_2026-11-02.md).
+The following audit introduction records the original scoping baseline.
+
+Original audit: scope and proposed implementation sequence complete, 2026-11-01.
 The 2026-11-01 scoping session changed only planning documents; the separate
 integrator implementation checkpoint is recorded below.
 Revised after the user's follow-up: keep compute order for a neighbor list's
@@ -682,16 +686,14 @@ not a change to the user's current Focus or authorization for new runs.
 
 ## Immediate next implementation slice
 
-The generic integrator compatibility fixes and initial CompSPH/CRK stage-preparation
-adapter are qualified; see the checkpoint below. Next settle the application's
-coverage-renewal/envelope policy and remaining specialized-driver requirements.
-Build identity/layout adapters and a fixed-count eager periodic CompSPH/CRK
-one-step RK fixture with sorted compute contexts on selected list builds,
-input-order updates, aux-carried context and safe adoption at step end. Preserve and test the support/list retry
-path and canonical export. Measure transition-stage mapping and amortized locality
-before considering generic retained-list remapping or broader integrator hooks.
-This gives a reviewable locality change without coupling its first correctness
-gate to emitters, BDF startup, graph reuse or distributed ownership.
+The first eager fixed-count runner phase is CPU-qualified: whole-step Morton
+order, accepted adoption, bounded structured coverage renewal, UID64 trajectory
+axes and physical checkpoint/cache rebuilding. Integrator main contains the
+resource/continuation APIs at `28d8bdd`; the simulator runner work remains on dev.
+Next adapt history/prior/FSAL continuation before enabling reuse or multistep
+methods. CUDA eager qualification remains blocked by the unavailable driver.
+Boundary/ghost relations, sources, population events and graph capture follow
+those gates. See the [current report](docs/particle_layout/RENEWAL_AND_PERSISTENCE_2026-11-02.md).
 
 ## Simulator preparation checkpoint 2 November 2026
 
@@ -825,3 +827,112 @@ CUDA eager behavior and host-control overhead before larger locality cases or
 production policy. Boundaries/ghosts, external sources, topology events and graph
 capture remain separate gates. The prototype is available through the direct
 step adapter; it is not yet a runner/CLI option.
+
+
+## Runner acceptance bridge 2 November 2026
+
+User instruction: commit the qualified state, then start the next phase. Both
+checkpoints were committed locally; no branches were pushed. The new work stays
+on frontend `dev` and uses the isolated integrator branch explicitly in tests.
+
+Implemented and CPU-qualified: `CaseSpec.particleOrder` defaults to
+`input`; `morton` admits only eager periodic fluid-only CompSPH/CRK with registered
+one-step tableaus and native RHS functions. The adapter is selected before output
+creation. Initial and later state files use UID order, with Python/NumPy scalar
+metadata allowed and unlabelled arrays still refused. Hooks/timestep/diagnostics,
+frame consumers and stop checks consume the current input order before accepted
+adoption. Exposed `lastStageUpdate` follows the adopted state's rows; historical
+stage snapshots retain their actual evaluated order. Reported step time includes
+layout adoption. The CFL runner does not perform embedded-error rejection;
+resource invalidation still unwinds the whole attempt rather than auto-retrying.
+
+Trajectory output, checkpoint restart, graphs/pipelining and multistep/reuse
+histories remain guarded. Case hooks that retain particle columns must join by UID
+when opting in. This is data lifetime work; no numerical formula/default changes.
+
+
+Final qualification: 90 passes in each precision for the runner/layout/resource
+suite, including 19 runner cases. The broader selection produced 317 passes,
+25 skips and 10 existing hard-CUDA initialization failures (driver unavailable).
+Ordinary runner/contract controls with unchanged integrators 0.7.0 passed 87 tests
+with 24 skips. Final tiny CPU runner medians include adoption: CompSPH input/Morton
+7.934/8.501ms (N=32), 39.389/38.935ms (N=1024); CRK 10.616/11.012ms and
+49.661/48.569ms respectively. The smaller case has overhead and larger CPU gains
+are modest/variable; CUDA and the motivating large-scale benefit remain unproven.
+Small repeated fixtures omit video and retain streamed progress, not a campaign.
+
+[Runner usage, ownership, measurements and outstanding gates](docs/particle_layout/RUNNER_2026-11-02.md).
+Evidence: `.tmp/particle-layout-2026-11-02/runner/`. Current runner work is
+uncommitted; the requested preceding checkpoints are committed. Next implement
+structured renewal envelopes/whole-attempt retry, then trajectory UID axes and
+checkpoint cache rebuilding before history/reuse or topology changes.
+
+
+## Integrator main synchronization 2 November 2026
+
+The user requested merging the isolated integrator branch because the simulator
+work on `dev` otherwise expected APIs absent from the active dependency.
+`/home/lu26029/dev/warpSPHIntegrators` was clean on `main` at `1fea2a3`; it was
+fast-forwarded to `28d8bdd`. The isolated branch/worktree is retained. The warp
+conda environment already installs the main checkout in editable mode, so its
+resource/continuation APIs now update with the merge without reinstalling.
+No remote push or package publication was performed. Earlier old-release gates
+above refer to pre-resource source at `1fea2a3`, rather than the now-updated main
+checkout. Frontend runtime verification uses the normal environment with
+`PYTHONPATH` removed.
+
+Post-merge normal-environment validation (no `PYTHONPATH` overrides): **90 passed**,
+covering runner, layout and spatial resources. Imports resolve to the main
+integrator checkout. Evidence: `.tmp/particle-layout-2026-11-02/integrator-main-merge/`.
+
+
+## Renewal and UID persistence implementation 2 November 2026
+
+User direction: return to the next implementation steps after aligning integrator
+main. Bounded whole-step coverage renewal is implemented outside integrator
+scopes. Per-stage envelopes own UID order, anchor positions and candidate radii;
+FD/line-search/materialization and support-iteration peak checks cannot replace
+an active candidate. Insufficient reach carries structured evidence and unwinds
+the full step; retry starts from private incoming state with no retained Krylov
+basis. Two renewals are allowed by default, configured with coverageRetries or
+MortonStepper.max_coverage_retries. Generic ResourceInvalidated exceptions remain
+unhandled by this policy. No equation, support convergence rule or default
+particle-order policy was changed.
+
+Fixed-roster trajectory files now canonicalize particle rows by UID and label
+particle/global axes, preserving UID64 and scalar/array precision. Frame UID
+links refer to the header roster; counts/membership and extra-field axis changes
+are rejected. Stage export has independently canonical particle/update/CSR views.
+Scalar extras cannot replace layout metadata. Unknown row arrays remain guarded.
+
+Sorted state checkpoints record layout version, scheme, domain and precision.
+Restart checks roster/static fields and physical state before output creation,
+restores time/history/counters, and discards every list/grid/pair-work/layout
+cache. It then builds fresh compute order/resources on the first continuation.
+These checks do not replace case-specific parameter/forcing restoration; external
+source/boundary/history/reuse eligibility remains restricted.
+
+Qualification in progress: renewed real FD-JFNK across all four support modes,
+runner retry-budget behavior, UID64 trajectory/stages and global E=N fields,
+checkpoint continuation with viscosity history and renewed implicit solves,
+ordinary runner/default controls and small paired CPU overhead probes.
+
+
+Final renewal/persistence qualification: **403 passed / 25 skipped** on the broad
+CPU selection (10 hard-CUDA tests deselected); **138 FP64 passes**; **123 passes /
+24 skips** against archived pre-resource integrators `1fea2a3`. There are 31
+coverage and 17 persistence cases. Exploratory FP64 failures from float32-hardcoded
+legacy support fixtures and a tight-tolerance FP32 benchmark are retained, with
+final supported gates and independent controls described in the report. No
+numerical equation, physical convergence tolerance or default order was changed.
+
+Three paired CPU timing processes show small differences (-5% to +3.6% across
+controls/routes), including comparable variation in unchanged native controls;
+no large-scale/GPU promotion. `nvidia-smi` remains unavailable. Small fixture/A/B
+loops omit video and keep streamed progress. Sources/results are frozen in
+`.tmp/particle-layout-2026-11-02/next-phase/`.
+
+[Renewal policy, UID schema, restart checks and qualification](docs/particle_layout/RENEWAL_AND_PERSISTENCE_2026-11-02.md).
+Next: history/prior/FSAL adapters, CUDA eager qualification, then external/boundary
+and changing-population contracts. This simulator slice remains uncommitted on dev;
+integrator main stays clean at the previously merged commit.

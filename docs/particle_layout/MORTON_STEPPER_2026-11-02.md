@@ -164,3 +164,8 @@ These measurements do not establish a large-scale gain or the motivating 2× GPU
 claim. Canonical timings are state-only view construction, excluding stage views and HDF5 I/O. CUDA validation
 was unavailable because the NVIDIA driver could not be reached. No default or
 production performance promotion is made.
+
+
+The subsequent [runner acceptance bridge](RUNNER_2026-11-02.md) exposes the opt-in
+policy through CaseSpec/CLI/configuration and permits scalar frame metadata.
+The direct-adapter checkpoint above records the earlier qualification boundary.

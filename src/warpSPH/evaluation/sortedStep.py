@@ -19,6 +19,7 @@ class SpatialContext:
     layout: ParticleLayout
     adjacency: object
     settings: tuple
+    coverage_renewals: int = 0
 
 
 @dataclass(frozen=True, eq=False)
@@ -57,8 +58,10 @@ class MortonStepper:
     Sorting occurs at the first boundary, then only at an already-stale boundary
     list when sort_on_rebuild=True. Mid-step support/list renewals keep the chosen
     order. Pass sort_on_rebuild=False to retain the first compute order indefinitely.
+    Implicit coverage loss may renew search envelopes and restart the complete
+    step up to max_coverage_retries times (default 2); no Krylov basis is resumed.
     """
-    def __init__(self, integrator, *, bits=21, sort_on_rebuild=True, observe=None):
+    def __init__(self, integrator, *, bits=21, sort_on_rebuild=True, observe=None, max_coverage_retries=2):
         from warpSPHIntegrators.schemes.definitions.explicit import ExplicitDefinition
         from warpSPHIntegrators.schemes.definitions.dirk import DIRKDefinition
         from warpSPHIntegrators.schemes.definitions.coupled import CoupledDefinition
@@ -66,18 +69,39 @@ class MortonStepper:
             raise ValueError('MortonStepper requires a registered one-step RK, DIRK or coupled tableau')
         if type(bits) is not int or not 1 <= bits <= 21 or type(sort_on_rebuild) is not bool:
             raise ValueError('bits must be in 1..21 and sort_on_rebuild must be bool')
+        if type(max_coverage_retries) is not int or max_coverage_retries < 0:
+            raise ValueError('max_coverage_retries must be a nonnegative integer')
+        self.max_coverage_retries = max_coverage_retries
         self.integrator, self.bits, self.sort_on_rebuild = integrator, bits, sort_on_rebuild
         self.resources = CompressibleSpatialResources(observe=observe)
 
-    def __call__(self, state, dt, *, config, schemeConfig, **kwargs):
+    def validate(self, state, *, config, schemeConfig):
+        """Check fixed-layout eligibility without sorting or publishing resources."""
         from ..systems.compSPH import CompSPHSystem
-        from ..schemes.compressible.compSPH import compSPH_step
-        from ..schemes.compressible.crkSPH import crkSPH_step
         from ..modules.compSPH.supportGrid import solvesOnGrid
-        from warpSPHCore import verletStaleFlag
         if type(state) is not CompSPHSystem or not state.state.positions.shape[0]:
             raise TypeError('MortonStepper requires a nonempty CompSPHSystem')
         validate_state_schema(state.state)
+        if not bool(config.domain.periodic.all()) or bool((state.state.kinds != 0).any()):
+            raise ValueError('MortonStepper currently requires periodic fluid-only particles')
+        if state.sourceTerms is not None or schemeConfig.boundaryConditions or getattr(schemeConfig, 'rigidBodies', None):
+            raise ValueError('external sources/boundaries require explicit particle input adapters before sorting')
+        if solvesOnGrid(schemeConfig) or getattr(schemeConfig, 'inPlaceAdjacency', False):
+            raise ValueError('MortonStepper currently requires eager list mode')
+        if getattr(schemeConfig, 'crkEvolution', 'summation') != 'summation':
+            raise ValueError('MortonStepper currently requires summation CRK evolution')
+        if getattr(schemeConfig, 'crkEnergyPartition', 'native') != 'native' or getattr(schemeConfig, 'crkEnergyPredictor', 'raw') != 'raw':
+            raise ValueError('special CRK energy controls require separate sorting qualification')
+        if schemeConfig.schemeName not in ('CompSPH', 'CRKSPH'):
+            raise ValueError('MortonStepper supports CompSPH and CRKSPH only')
+        if self.integrator.implicit and schemeConfig.compatibleEnergy:
+            raise ValueError('implicit spatial evaluations require compatibleEnergy=False')
+
+    def __call__(self, state, dt, *, config, schemeConfig, **kwargs):
+        from ..schemes.compressible.compSPH import compSPH_step
+        from ..schemes.compressible.crkSPH import crkSPH_step
+        from warpSPHCore import verletStaleFlag
+        self.validate(state, config=config, schemeConfig=schemeConfig)
         forbidden = [kwargs.pop(k, None) for k in ('history', 'priorStep', 'warmStart', 'f')]
         if any(value is not None for value in forbidden):
             raise ValueError('MortonStepper does not yet adapt history/reuse/warmStart or custom RHS')
@@ -92,19 +116,7 @@ class MortonStepper:
             raise ValueError('particle-valued tolerances need an explicit layout adapter')
         if any(name.startswith('_') for name in kwargs):
             raise ValueError('MortonStepper requires a complete outer step')
-        if not bool(config.domain.periodic.all()) or bool((state.state.kinds != 0).any()):
-            raise ValueError('MortonStepper currently requires periodic fluid-only particles')
-        if state.sourceTerms is not None or schemeConfig.boundaryConditions or getattr(schemeConfig, 'rigidBodies', None):
-            raise ValueError('external sources/boundaries require explicit particle input adapters before sorting')
-        if solvesOnGrid(schemeConfig) or getattr(schemeConfig, 'inPlaceAdjacency', False):
-            raise ValueError('MortonStepper currently requires eager list mode')
-        if getattr(schemeConfig, 'crkEvolution', 'summation') != 'summation':
-            raise ValueError('MortonStepper currently requires summation CRK evolution')
-        if getattr(schemeConfig, 'crkEnergyPartition', 'native') != 'native' or getattr(schemeConfig, 'crkEnergyPredictor', 'raw') != 'raw':
-            raise ValueError('special CRK energy controls require separate sorting qualification')
         functions = {'CompSPH': compSPH_step, 'CRKSPH': crkSPH_step}
-        if schemeConfig.schemeName not in functions:
-            raise ValueError('MortonStepper supports CompSPH and CRKSPH only')
         settings = _settings(state.state, config, self.bits)
         old = state.spatialContext
         if old is not None and old.settings != settings:
@@ -126,15 +138,34 @@ class MortonStepper:
                 layout = ParticleLayout.create(state.state.UIDs, layout.p[order])
                 computeState = permute_state(state.state, layout.p, identity=layout.identity)
                 adjacency = None
-        private = _system_view(state, computeState, adjacency)
-        with self.resources.session():
-            result = self.integrator(private, dt, functions[schemeConfig.schemeName],
-                                     config=config, schemeConfig=schemeConfig, **kwargs)
+        # Renewal is outside every solver/stage scope. Retry from the incoming
+        # physical state, never the failed Newton iterate or a partial RK result.
+        # Candidate search envelopes and their UIDs are the only retained data.
+        from .coverage import CoverageInvalidated, CoverageRetryExhausted
+        coverage, renewals = {}, 0
+        while True:
+            attemptState = computeState.initializeNewState() if self.integrator.implicit else computeState
+            private = _system_view(state, attemptState, adjacency)
+            try:
+                with self.resources.session(coverage=coverage):
+                    result = self.integrator(private, dt, functions[schemeConfig.schemeName],
+                                             config=config, schemeConfig=schemeConfig, **kwargs)
+                break
+            except CoverageInvalidated as failure:
+                if not self.integrator.implicit:
+                    raise
+                if renewals >= self.max_coverage_retries:
+                    raise CoverageRetryExhausted(failure, renewals + 1) from failure
+                envelope = failure.renewal.envelope
+                if not torch.equal(envelope.input_ids, computeState.UIDs):
+                    raise ValueError('cannot renew coverage in a different particle layout') from failure
+                coverage[envelope.stage_path] = (envelope, envelope.build(config))
+                renewals += 1
         if result.history is not None or result.quadrature is not None or result.transition is not None:
             raise ValueError('MortonStepper cannot publish unadapted history/quadrature/transition data')
         if result.state.rerunRequest is not None:
             raise RuntimeError('unfinished compatible-energy replay cannot publish a spatial context')
-        context = SpatialContext(layout, result.state.adjacency, settings)
+        context = SpatialContext(layout, result.state.adjacency, settings, renewals)
         publicState = result.state.state if layout.identity else permute_state(result.state.state, layout.q)
         public = _system_view(result.state, publicState,
                               result.state.adjacency if layout.identity else None, context)
@@ -168,7 +199,7 @@ def _adopt_state(accepted_state):
     state = permute_state(accepted_state.state, layout.p)
     identity = ParticleLayout.create(state.UIDs, torch.arange(state.UIDs.numel(), device=state.UIDs.device))
     return _system_view(accepted_state, state, context.adjacency,
-                        SpatialContext(identity, context.adjacency, context.settings))
+                        replace(context, layout=identity))
 
 
 def adopt_spatial_layout(accepted_result):

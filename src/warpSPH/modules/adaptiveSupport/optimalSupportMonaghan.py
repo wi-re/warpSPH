@@ -55,6 +55,7 @@ def evaluateOptimalSupportMonaghan(
         validateOnce: bool = False,
         rebuildSlack: float = 0.0,
         computeDensity: bool = True,
+        listBuilder = None,
 ):
     """Validate all Newton iterates once when requested, retaining eager fallback.
 
@@ -64,13 +65,14 @@ def evaluateOptimalSupportMonaghan(
     per-iteration validation. No state from an invalid list is accepted.
     computeDensity=False skips only the closing sum, not the Newton densities.
     """
+    buildList = buildVerletList if listBuilder is None else listBuilder
     if numberDensity:
         realMasses = particleState.masses
         particleState.masses = torch.ones_like(realMasses)
         try:
             n, h, adjacency, ns, supports = evaluateOptimalSupportMonaghan(
                 particleState, config, compParams, supportScheme, adjacency,
-                validateOnce=validateOnce, rebuildSlack=rebuildSlack, computeDensity=computeDensity)
+                validateOnce=validateOnce, rebuildSlack=rebuildSlack, computeDensity=computeDensity, listBuilder=listBuilder)
         finally:
             particleState.masses = realMasses
         return (realMasses * n if computeDensity else n), h, adjacency, ns, supports
@@ -83,7 +85,7 @@ def evaluateOptimalSupportMonaghan(
         suppliedSupports = iterState.supports
         speculative = validateOnce
         if speculative and not listFits(adjacency, iterState):
-            adjacency = buildVerletList(
+            adjacency = buildList(
                 iterState, domain=config.domain, verletScale=verletScale,
                 supportMode=SupportScheme.SuperSymmetric, priorNeighborhood=adjacency,
                 verbose=False, **neighborSearchOptions(config))
@@ -99,7 +101,7 @@ def evaluateOptimalSupportMonaghan(
                 with record_function(f"[evalOS] Iteration {i}"):
                     if not speculative:
                         with record_function("[evalOS] buildVerletList"):
-                            adjacency = buildVerletList(
+                            adjacency = buildList(
                                 iterState,
                                 domain=config.domain,
                                 verletScale=verletScale,
@@ -168,7 +170,7 @@ def evaluateOptimalSupportMonaghan(
             if retryEager:
                 speculative = False
                 continue
-            checked = buildVerletList(
+            checked = buildList(
                 SimpleNamespace(positions=iterState.positions,
                                 supports=peakSupports if speculative else iterState.supports),
                 domain=config.domain, verletScale=verletScale,

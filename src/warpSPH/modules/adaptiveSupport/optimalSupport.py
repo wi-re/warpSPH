@@ -34,13 +34,17 @@ def evaluateOptimalSupport(
         grid = None,
         gridRadius: Optional[float] = None,
         info: Optional[dict] = None,
+        listBuilder = None,
 ):
     """`validateOnce` / `rebuildSlack`: the Owen solver validates the neighbour list once per solve instead of once
     per iteration (see `evaluateOptimalSupportOwen`); the Newton solvers also validate once, with an eager retry when needed. `grid` / `gridRadius` / `info` (Owen
     only): run on a fixed-shape hash-map grid and look at no neighbour list at all, see `evaluateOptimalSupportOwen`.
+    `listBuilder` optionally checks/renews candidate coverage, including peak iterates,
+    without changing the support equations; None retains native list handling.
     `computeDensity=False` skips the closing summation density: the returned densities are then the particles' current ones --
     for a caller that computes its own density next. (The wall cases' support volume clamp is no longer applied here:
     `modules/compressibleWall/supportClamp.py`, called by the step after the list.)"""
+    buildList = buildVerletList if listBuilder is None else listBuilder
     with record_function("[warpSPH] - evaluateOptimalSupport"):
         if compParams.adaptiveSupportScheme == AdaptiveSupportScheme.Owen:
             result = evaluateOptimalSupportOwen(
@@ -53,7 +57,7 @@ def evaluateOptimalSupport(
                 verbose = False,
                 validateOnce = validateOnce,
                 rebuildSlack = rebuildSlack,
-                computeDensity = computeDensity,
+                computeDensity = computeDensity, listBuilder=listBuilder,
                 grid = grid, gridRadius = gridRadius, info = info,
             )
         elif compParams.adaptiveSupportScheme == AdaptiveSupportScheme.Monaghan:
@@ -63,7 +67,7 @@ def evaluateOptimalSupport(
                 compParams = compParams,
                 supportScheme = supportScheme,
                 adjacency = adjacency,
-                validateOnce=validateOnce, rebuildSlack=rebuildSlack, computeDensity=computeDensity,
+                validateOnce=validateOnce, rebuildSlack=rebuildSlack, computeDensity=computeDensity, listBuilder=listBuilder,
             )
         elif compParams.adaptiveSupportScheme == AdaptiveSupportScheme.NumberDensity:
             result = evaluateOptimalSupportMonaghan(
@@ -73,7 +77,7 @@ def evaluateOptimalSupport(
                 supportScheme = supportScheme,
                 adjacency = adjacency,
                 numberDensity = True,
-                validateOnce=validateOnce, rebuildSlack=rebuildSlack, computeDensity=computeDensity,
+                validateOnce=validateOnce, rebuildSlack=rebuildSlack, computeDensity=computeDensity, listBuilder=listBuilder,
             )
         elif compParams.adaptiveSupportScheme == AdaptiveSupportScheme.NoScheme:
 
@@ -81,7 +85,7 @@ def evaluateOptimalSupport(
             if validateOnce:
                 # the contract of `validateOnce`: the returned list is valid for the returned supports and the current
                 # positions, whichever scheme produced the supports (here: the ones the particles already have)
-                adjacency = buildVerletList(
+                adjacency = buildList(
                     particleState,
                     domain=config.domain,
                     verletScale=config.verletScale,

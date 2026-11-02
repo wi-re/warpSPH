@@ -67,7 +67,7 @@ def simulationParameters():
                            'densityCorrection', 'calibrateNormalization'},
         'time': {'dt', 'tLimit', 'adaptiveDt', 'cflFactor', 'minDt', 'maxDt', 'nSteps'},
         'runtime': {'precision', 'device', 'execution', 'cudaGraph', 'pipelineOutputs',
-                    'graphMaxParticles', 'iterationChecks', 'krylovCheckEvery', 'neighborOmitI'},
+                    'graphMaxParticles', 'iterationChecks', 'krylovCheckEvery', 'neighborOmitI', 'particleOrder', 'coverageRetries'},
     }
     positive = {'nx', 'L', 'n_h', 'tLimit', 'dt', 'cflFactor', 'minDt', 'maxDt',
                 'exportInterval', 'plotInterval', 'storeInterval', 'verletScale',
@@ -102,7 +102,7 @@ def simulationParameters():
         group = next((g for g, names in groups.items() if f.name in names), 'output')
         out[f.name] = P(kind, _FIELD_HELP.get(f.name, f.name), group,
                         exclusiveMinimum=0 if f.name in positive else None,
-                        minimum=0 if f.name in ('nSteps', 'resumeStepOffset') else None,
+                        minimum=0 if f.name in ('nSteps', 'resumeStepOffset', 'coverageRetries') else None,
                         choices=allowed, nullable=nullable)
     return out
 

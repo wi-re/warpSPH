@@ -82,6 +82,7 @@ def evaluateOptimalSupportOwen(
         grid = None,
         gridRadius: Optional[float] = None,
         info: Optional[dict] = None,
+        listBuilder = None,
         ):
     """`validateOnce=False` (default): the neighbour list is validated, and rebuilt if needed, at the start of
     every iteration. `validateOnce=True`: the iterations run on the incoming list without a check (the particles do
@@ -96,6 +97,7 @@ def evaluateOptimalSupportOwen(
     when that limit was binding (the caller then makes a grid for a larger radius).
     Also: the early stop on the support change is evaluated on the device (a finished iteration freezes `h`)
     instead of a host read per iteration."""
+    buildList = buildVerletList if listBuilder is None else listBuilder
     with record_function("[warpSPH] - evaluateOptimalSupport - Owen"):
         kernel = kernel_ if kernel_ is not None else config.kernel
         # Note `kernel`, not `kernel_`: the table is built from whichever kernel
@@ -145,7 +147,7 @@ def evaluateOptimalSupportOwen(
             if onGrid:
                 adjacency_ = grid
             elif not validateOnce or not _listFits(adjacency, particles):
-                adjacency = buildVerletList(
+                adjacency = buildList(
                     particles,
                     domain=config.domain,
                     verletScale=verletScale,
@@ -217,7 +219,7 @@ def evaluateOptimalSupportOwen(
             i += 1
             if validateOnce and not onGrid and i == nIter and attempt == 0:
                 # one validation for the whole solve: the particles with the largest support any iteration used
-                checked = buildVerletList(
+                checked = buildList(
                     SimpleNamespace(positions=particles.positions, supports=peakSupports),
                     domain=config.domain,
                     verletScale=verletScale,

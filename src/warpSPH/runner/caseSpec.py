@@ -118,6 +118,11 @@ class CaseSpec:
     pipelineOutputs: Optional[bool] = None
     #: Omit COO row indices; None enables this for compressible runs only.
     neighborOmitI: Optional[bool] = None
+    #: Storage order between accepted steps. Morton is opt-in, eager, fixed-count
+    #: periodic CompSPH/CRK only; hooks must associate persistent row data by UID.
+    particleOrder: str = 'input'
+    #: Complete implicit-step retries after spatial coverage loss, for Morton mode.
+    coverageRetries: int = 2
 
     # --- output -------------------------------------------------------------
     plot: bool = False
@@ -302,6 +307,8 @@ _FIELD_HELP = {
     'iterationChecks': "relaxed-Jacobi loops read their convergence test back every iteration ('every') or at learned checkpoints ('adaptive', default)",
     'krylovCheckEvery': 'Krylov solvers read their still-running flag every this many iterations; unset: 8',
     'cudaGraph': 'legacy spelling of --execution graph / eager',
+    'coverageRetries': 'Morton mode: maximum complete implicit-step retries after coverage loss (0 disables retries)',
+    'particleOrder': 'input (default) or morton: reorder accepted periodic CompSPH/CRK steps; eager one-step only',
     'neighborOmitI': 'omit redundant COO row indices; default on for compressible schemes, off for other families pending qualification',
     'pipelineOutputs': 'with a whole-step graph, compute step n\'s diagnostics while step n+1 replays (default on)',
     # -- output --
@@ -327,7 +334,7 @@ _FIELD_HELP = {
 }
 
 def enumChoices() -> Dict[str, List[str]]:
-    """Accepted values for each enum-valued field, read off the enums themselves.
+    """Accepted enum values and fixed string policy options.
 
     The enums are the authority on what is accepted, so ``--help`` reports their
     members rather than repeating a list here that would drift out of date.
@@ -348,7 +355,8 @@ def enumChoices() -> Dict[str, List[str]]:
         'samplingScheme': SamplingScheme,
         'integrationScheme': IntegrationSchemeType,
     }
-    return {name: [m.name for m in enumClass] for name, enumClass in byField.items()}
+    return {**{name: [m.name for m in enumClass] for name, enumClass in byField.items()},
+            'particleOrder': ['input', 'morton']}
 
 
 def _addField(parser: argparse.ArgumentParser, name: str, default: Any, annotation: Any, help: str):

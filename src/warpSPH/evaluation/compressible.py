@@ -7,11 +7,15 @@ Sorting, population changes, graph capture and differentiable implicit support
 solves are separate qualification gates.
 """
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 from ..modules.compressibleStage import _ACTIVE, _prepare
 from ..modules.compSPH.pairWork import beginPairWork
 from ..modules.compSPH.supportGrid import solvesOnGrid
+
+
+_COVERAGE = ContextVar('warpsph_attempt_coverage', default=None)
 
 
 @dataclass
@@ -50,8 +54,21 @@ class _Evaluation:
         pinned = pins.get(key) if pins is not None else None
         if pinned is not None:
             system.adjacency = pinned
+        options = {}
+        if implicit:
+            from .coverage import CoverageBuilder
+            renewed = (_COVERAGE.get() or {}).get(key)
+            if renewed is not None:
+                envelope, candidate = renewed
+                import torch
+                if not torch.equal(envelope.input_ids, system.state.UIDs):
+                    raise ValueError('coverage envelope particle identity/order changed')
+            else:
+                candidate = None
+            fixed = pinned if pinned is not None else candidate
+            options['listBuilder'] = CoverageBuilder(fixed, request, system.state.UIDs)
         label = 'crkSPH' if getattr(schemeConfig, 'schemeName', '') == 'CRKSPH' else 'compSPH'
-        prepared = _prepare(system, config, schemeConfig, stageIndex, label)
+        prepared = _prepare(system, config, schemeConfig, stageIndex, label, **options)
         if pinned is not None and prepared.adjacency is not pinned:
             raise ResourceInvalidated(
                 f'neighbor coverage changed in stage {key}; renew coverage and retry the complete solve')
@@ -90,11 +107,15 @@ class CompressibleSpatialResources:
         self.observe = observe
 
     @contextmanager
-    def session(self):
+    def session(self, *, coverage=None):
         # Lazy dependency: existing simulations still work with integrators 0.7.
         from warpSPHIntegrators.state import evaluation_resources
-        with evaluation_resources(self):
-            yield self
+        token = _COVERAGE.set(coverage)
+        try:
+            with evaluation_resources(self):
+                yield self
+        finally:
+            _COVERAGE.reset(token)
 
     @contextmanager
     def scope(self, request):

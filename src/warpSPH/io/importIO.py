@@ -70,11 +70,13 @@ def importSimulationSystem(
 
     adjacency = loadAdjacency(inFile['adjacency'], device) if 'adjacency' in inFile else None
     state = loadState(inFile['state'], device, SimulationState)
+    uidLayout = inFile.attrs.get('particleLayoutVersion') == 1
 
     stageGroups = inFile['stages'] if 'stages' in inFile else None
     stages = []
     if stageGroups is not None:
-        for stageKey in stageGroups.keys():
+        stageKeys = sorted(stageGroups, key=lambda k:int(stageGroups[k].attrs['index'])) if uidLayout else stageGroups.keys()
+        for stageKey in stageKeys:
             stages.append(loadStage(stageGroups[stageKey], device, SimulationState, SimulationUpdate))
 
     extraData = {}
@@ -86,8 +88,10 @@ def importSimulationSystem(
         else:
             extraData[key] = torch.from_numpy(value[:]).to(device).to(hdfDtypeToTorchDtype(value.dtype)) if value.shape else torch.tensor(value[()], device=device, dtype=hdfDtypeToTorchDtype(value.dtype))
 
+    layoutKeys = {'particleLayoutVersion','particleLayoutFormat','particleOrder','particlePrecision',
+                  'particleDomain_min','particleDomain_max','particleDomain_periodic','particleUIDcounter'}
     for key, value in inFile.attrs.items():
-        if key in ['scheme', 'time']:
+        if key in ['scheme', 'time'] or (uidLayout and key in layoutKeys):
             continue
         if value == 'dict':
             dictKey = key[len('dict_'):] if key.startswith('dict_') else key
@@ -118,9 +122,14 @@ def importSimulationSystem(
         else:
             extraData[key] = value
 
+    system = SimulationSystem(state=state, adjacency=adjacency, t=t)
+    if uidLayout and hasattr(system,'canonicalExport'):
+        from .particleLayout import readLayoutDomain
+        system.canonicalExport = True
+        system.domain = readLayoutDomain(inFile.attrs,device)
     inFile.close()
 
-    return SimulationSystem(state=state, adjacency=adjacency, t = t), stages, schemeEnum, extraData
+    return system, stages, schemeEnum, extraData
 
 
 def importConfigs(configPath, import_fn):
@@ -189,8 +198,10 @@ def loadTrajectory(
         'materials': _toTensor(trajectoryFile['combinedMaterials'], device),
         'UIDs': _toTensor(trajectoryFile['combinedUIDs'], device),
     }
+    uidLayout = trajectoryFile.attrs.get('particleLayoutVersion') == 1
     for field, dataset in (('emitters', 'combinedEmitters'), ('bodyIDs', 'combinedBodyIDs')):
-        static[field] = _toTensor(trajectoryFile[dataset], device).to(torch.int32) if dataset in trajectoryFile else None
+        value = _toTensor(trajectoryFile[dataset], device) if dataset in trajectoryFile else None
+        static[field] = value if uidLayout or value is None else value.to(torch.int32)
 
     storedFields = ('crkMassDensities', 'crkVolumes', 'boundaryProjectionBudget')
     if schemeEnum is CompressibleSPHScheme.PESPH:
@@ -210,6 +221,12 @@ def loadTrajectory(
         frameKeys=sorted(trajectoryFile['positions'].keys(), key=lambda name: int(name.rsplit('_', 1)[-1])),
         extraFields=tuple(dict.fromkeys(name for name in (*extraFields, *storedFields) if name in trajectoryFile)),
     )
+    if uidLayout:
+        from .particleLayout import readLayoutDomain, validateFields
+        validateFields(meta['extraFields'])
+        meta['particleLayoutVersion'] = 1
+        meta['UIDcounter'] = int(trajectoryFile.attrs['particleUIDcounter'])
+        meta['domain'] = readLayoutDomain(trajectoryFile.attrs,device)
     return trajectoryFile, meta
 
 
@@ -244,7 +261,7 @@ def loadTrajectoryFrame(trajectoryFile, meta, frameIndex: int, schemeConfig=None
         positions=positions, velocities=velocities, densities=densities, supports=supports,
         masses=static['masses'], kinds=static['kinds'], materials=static['materials'], UIDs=static['UIDs'],
         emitters=static.get('emitters'), bodyIDs=static.get('bodyIDs'),
-        UIDcounter=int(static['UIDs'].max().item()) + 1,
+        UIDcounter=meta.get('UIDcounter',int(static['UIDs'].max().item()) + 1),
         # Matches the case IC builders (e.g. buildSod1D): a fresh state always
         # starts divergence at zero and alpha0s/alphas at one -- a resumed
         # state needs the same starting point, not the `None` a scheme
@@ -257,6 +274,13 @@ def loadTrajectoryFrame(trajectoryFile, meta, frameIndex: int, schemeConfig=None
         if name in frameFields:
             stateKwargs[name] = frameFields[name]
 
+    if meta.get('particleLayoutVersion') == 1:
+        # Axes were declared by the UID writer; restore all explicitly requested
+        # fields, including global vectors and per-particle switch observations.
+        stateKwargs.update(frameFields)
+        ids = trajectoryFile['frameUIDs'][key][:]
+        if not torch.equal(torch.as_tensor(ids,device=device),static['UIDs']):
+            raise ValueError('trajectory frame UID association differs from its header')
     if meta['scheme'] is CompressibleSPHScheme.PESPH:
         if gamma is not None:
             raise ValueError('PESPH authoritative E/A cannot be loaded with a gamma override')
@@ -287,7 +311,8 @@ def loadTrajectoryFrame(trajectoryFile, meta, frameIndex: int, schemeConfig=None
         # above), but it is still a required field for a scheme's `finalize`
         # step, so it has to be filled in here rather than left None.
         kineticEnergy = torch.linalg.norm(velocities, dim=-1) ** 2 / 2
-        totalEnergies = (u_ + kineticEnergy) * static['masses']
+        masses = stateKwargs['masses'] if meta.get('particleLayoutVersion') == 1 else static['masses']
+        totalEnergies = (u_ + kineticEnergy) * masses
         stateKwargs.update(internalEnergies=u_, pressures=P_, soundspeeds=c_s, entropies=A_,
                           totalEnergies=totalEnergies)
 
@@ -296,6 +321,8 @@ def loadTrajectoryFrame(trajectoryFile, meta, frameIndex: int, schemeConfig=None
         from ..modules.eos import validateMaterialState
         validateMaterialState(state, schemeConfig)
     system = meta['SimulationSystem'](state=state, adjacency=None, t=t)
+    if meta.get('particleLayoutVersion') == 1 and hasattr(system,'canonicalExport'):
+        system.canonicalExport, system.domain = True,meta['domain']
     return system, t
 
 

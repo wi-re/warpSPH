@@ -253,6 +253,8 @@ def describeRun(ctx, state, nSteps: int, timeLimited: bool) -> None:
                          f'({type(ctx.scheme).__name__}) | solver {solver}'))
     print(_row('device', f'{_deviceDescription(ctx.device)} | {spec.precision}'))
     print(_row('particles', f'{particles:,} | dim {spec.dim} | nx {spec.nx}'))
+    if getattr(spec, 'particleOrder', 'input') == 'morton':
+        print(_row('particle order', 'Morton after accepted steps | UID-ordered state files'))
     print(_row('domain', _domainDescription(config.domain)))
     print(_row('kernel', f'{_enumName(config.kernel)} | n_h {spec.n_h:g} | '
                          f'targetNeighbors {float(config.targetNeighbors):.1f}'))

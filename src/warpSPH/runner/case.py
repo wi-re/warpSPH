@@ -118,6 +118,8 @@ class Case:
     #: (ctx, state, step) -> None, called after every integrator step. This is
     #: where a case re-imposes something the step function does not know about
     #: -- Kidder drives its boundary bands from the analytic solution this way.
+    #: With opt-in particleOrder='morton', rows may change between steps. Join
+    #: persistent per-particle hook data by state.UIDs; storage indices are local.
     postStep: Optional[Callable[[RunContext, Any, int], None]] = None
 
     #: (ctx, state) -> float, called after every step to pick the next `dt`.

@@ -24,7 +24,7 @@ class PreparedCompressibleStage:
     adjacency: object
 
 
-def _prepare(system, config, schemeConfig, stageIndex, label):
+def _prepare(system, config, schemeConfig, stageIndex, label, *, listBuilder=None):
     state = system.state
     onGrid = solvesOnGrid(schemeConfig)
     slack = stageRebuildSlack(system, stageIndex)
@@ -33,7 +33,8 @@ def _prepare(system, config, schemeConfig, stageIndex, label):
         wall = beginCompressibleWall(state, config)
         startStage(system, state, config, stageIndex)
     with record_function(f'[warpSPH] - [{label} - {supportLabel}] optimal support'):
-        solveStageSupport(system, state, config, schemeConfig, onGrid=onGrid, rebuildSlack=slack)
+        options = {} if listBuilder is None else dict(listBuilder=listBuilder)
+        solveStageSupport(system, state, config, schemeConfig, onGrid=onGrid, rebuildSlack=slack, **options)
     with record_function(f'[warpSPH] - [{label} - {pairLabel}] adjacency'):
         adjacency = stagePairList(system, state, config, schemeConfig, onGrid=onGrid, rebuildSlack=slack)
     return PreparedCompressibleStage(wall, adjacency)

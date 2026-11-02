@@ -246,6 +246,10 @@ def run(case: Case, spec: Optional[CaseSpec] = None, *, onVelocityAlarm=None,
 
 def prepareContext(case: Case, spec: CaseSpec) -> RunContext:
     """Configure/validate a case without sampling particles or advancing time."""
+    if spec.particleOrder not in ('input', 'morton'):
+        raise ValueError("particleOrder must be 'input' or 'morton'")
+    if type(spec.coverageRetries) is not int or spec.coverageRetries < 0:
+        raise ValueError('coverageRetries must be a nonnegative integer')
     ctx = buildContext(case, spec)
     if case.configureScheme is not None:
         case.configureScheme(ctx)
@@ -265,6 +269,26 @@ def prepareContext(case: Case, spec: CaseSpec) -> RunContext:
         ctx.schemeConfig.validate(ctx.config)
     ctx.bundle = ctx.bundle.configured(ctx.schemeConfig)
     return ctx
+
+
+def _spatialStepper(ctx, spec, system):
+    """Admit the optional fixed-count layout route before creating output files."""
+    if spec.particleOrder == 'input':
+        return None
+    from ..configurations.compute import requestedExecution
+    from ..evaluation import MortonStepper
+    if ctx.scheme not in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH):
+        raise ValueError('Morton runner requires CompSPH or CRKSPH')
+    from ..schemes.compressible.compSPH import compSPH_step
+    from ..schemes.compressible.crkSPH import crkSPH_step
+    native = compSPH_step if ctx.scheme is CompressibleSPHScheme.CompSPH else crkSPH_step
+    if ctx.stepFunction is not native:
+        raise ValueError('Morton runner custom RHS requires an explicit input adapter')
+    if requestedExecution(ctx.config, ctx.schemeConfig, spec) != 'eager':
+        raise ValueError('Morton runner requires eager execution')
+    stepper = MortonStepper(ctx.integrator,max_coverage_retries=spec.coverageRetries)
+    stepper.validate(system, config=ctx.config, schemeConfig=ctx.schemeConfig)
+    return stepper
 
 
 def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> RunResult:
@@ -351,8 +375,12 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         import h5py
         from ..io.hdf5 import loadState
         with h5py.File(spec.resumeFrom, 'r') as f:
-            system.state = loadState(f['state'], ctx.config.device, type(system.state))
-            system.t = float(f.attrs['time'])
+            if spec.particleOrder == 'morton':
+                from ..io.particleLayout import restoreCheckpoint
+                restoreCheckpoint(f,system,ctx.config,ctx.scheme)
+            else:
+                system.state = loadState(f['state'], ctx.config.device, type(system.state))
+                system.t = float(f.attrs['time'])
             if case.restoreCheckpoint is not None:
                 case.restoreCheckpoint(ctx, system, f)
         if not spec.quiet:
@@ -408,7 +436,14 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
             'internalEnergies', 'supports', 'boundaryProjectionBudget'))))
     elif getattr(system.state, 'boundaryProjectionBudget', None) is not None:
         case = replace(case, extraFields=tuple(dict.fromkeys((*case.extraFields, 'boundaryProjectionBudget'))))
+    spatialStepper = _spatialStepper(ctx, spec, system)
     runningState = system.initializeNewState()
+    if spatialStepper is not None:
+        # Canonicalize the initial frame too, so all state files share a UID order.
+        runningState.canonicalExport = True
+        if spec.store:
+            from ..io.export import validateSortedExtraData
+            validateSortedExtraData(case.extraData(ctx, runningState) if case.extraData else {})
     if isinstance(ctx.scheme, IncompressibleSPHScheme):
         # The loop calls the hook only AFTER a step. Cap the first step too,
         # after case initialization (or checkpoint restore) sets the actual
@@ -511,12 +546,12 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         and ctx.dtype == torch.float64 and torch.device(ctx.device).type == 'cuda')
     stepGraph = None
     graphWanted = ctx.scratch['execution'] == 'graph'
-    if ctx.scheme in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH):
+    if spatialStepper is None and ctx.scheme in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH):
         # CompSPH / CRKSPH have their own switch, `stepMode`, instead of the spec's flag
         from ..modules.compSPH.stepMode import resolveStepMode
         ctx.scratch['compSPHStepMode'] = resolveStepMode(ctx, runningState, spec)
         graphWanted = ctx.scratch['compSPHStepMode'] == 'graph'
-    if graphWanted and not spec.store and _stepGraphable(ctx, runningState):
+    if spatialStepper is None and graphWanted and not spec.store and _stepGraphable(ctx, runningState):
         from ..utils.cudaGraph import GraphedDiagnostics, GraphedIntegratorStep
         stepGraph = GraphedIntegratorStep(ctx.integrator.function, ctx.stepFunction)
         if case.timestep is None and not isinstance(ctx.config.dt, torch.Tensor) and ctx.config.dt is not None and ctx.device != 'cpu':
@@ -544,6 +579,11 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
                 if stepGraph is not None:
                     stepResult = stepGraph(runningState, ctx.config.dt, ctx.config, ctx.schemeConfig,
                                            verbose=spec.verbose)
+                elif spatialStepper is not None:
+                    with (deferHostTime() if deferStageTimes else contextlib.nullcontext()):
+                        stepResult = spatialStepper(
+                            runningState, ctx.config.dt, config=ctx.config,
+                            schemeConfig=ctx.schemeConfig, verbose=spec.verbose)
                 else:
                     # A device dt would make the integrator read every stage time
                     # back (`float(t + c dt)`, a sync each); the runner reads the
@@ -561,6 +601,12 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
                             verbose=spec.verbose,
                             schemeConfig=ctx.schemeConfig,
                         )
+        if spatialStepper is not None and not stepResult.step_status.successful:
+            say(f'unsuccessful integrator step {i + spec.resumeStepOffset}; stopping before layout adoption.')
+            result.diverged = True
+            result.stopReason = 'unsuccessful integrator step'
+            stepResult = None
+            break
         runningState = stepResult.state
         # Keep only the accepted system here. Retaining the original system
         # pins first-step scratch (e.g. CRK's pair-work vector) until run exit.
@@ -594,6 +640,8 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         with record_function("[runner] read time + max speed (non-finite check, velocity alarm)"):
             t, vmax = _scalars(runningState.t, maxSpeed(runningState))
         row = {'step': absStep, 't': t, 'stepTime_ms': timer.elapsed_ms}
+        if spatialStepper is not None:
+            row['coverageRenewals'] = runningState.spatialContext.coverage_renewals
         if case.diagnostics is not None:
             with record_function("[runner] case diagnostics"):
                 row.update(case.diagnostics(ctx, runningState))
@@ -634,12 +682,12 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
                 result.stopReason = 'stallProgress: simulated time frozen'
                 break
 
-        if progress is not None:
+        if progress is not None and spatialStepper is None:
             with record_function("[runner] progress bar"):
                 _showStep(progress, i, None if timeLimited else nSteps, row, spec.tLimit,
                           force=(timeLimited and t >= spec.tLimit) or (not timeLimited and i == nSteps - 1))
 
-        if timeLimited and t >= spec.tLimit:
+        if timeLimited and t >= spec.tLimit and spatialStepper is None:
             with record_function("[runner] plot and store"):
                 _plotAndStore(ctx, case, spec, runningState, stepResult, absStep, extraData,
                               groups, storeSteps, final=True)
@@ -647,7 +695,8 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
 
         with record_function("[runner] plot and store"):
             _plotAndStore(ctx, case, spec, runningState, stepResult, absStep, extraData,
-                          groups, storeSteps, final=(not timeLimited and i == nSteps - 1))
+                          groups, storeSteps, final=(timeLimited and t >= spec.tLimit)
+                          or (not timeLimited and i == nSteps - 1))
 
         # Read by tag rather than the `velocities` field name: every fluid
         # scheme's velocity field happens to be named that, but the wave
@@ -671,6 +720,28 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
             result.diverged = True
             result.stopReason = alarm.stopReason
             break
+
+        if spatialStepper is not None:
+            # Every hook/output above consumed this step in its evaluated input
+            # order. Only the next continuation adopts the compute layout. The
+            # runner uses CFL dt selection; it has no embedded-error accept loop.
+            from ..evaluation import adopt_spatial_layout
+            from ..evaluation.layout import permute_update
+            with _Timer(ctx.device) as adoptionTimer:
+                layout = runningState.spatialContext.layout.for_input(runningState.state.UIDs)
+                stepResult = adopt_spatial_layout(stepResult)
+                runningState = stepResult.state
+                result.state = runningState
+                if not layout.identity and ctx.scratch['lastStageUpdate'] is not None:
+                    ctx.scratch['lastStageUpdate'] = permute_update(ctx.scratch['lastStageUpdate'], layout.p)
+            row['layoutAdoption_ms'] = adoptionTimer.elapsed_ms
+            row['stepTime_ms'] += adoptionTimer.elapsed_ms
+            if progress is not None:
+                _showStep(progress, i, None if timeLimited else nSteps, row, spec.tLimit,
+                          force=(timeLimited and t >= spec.tLimit)
+                          or (not timeLimited and i == nSteps - 1))
+            if timeLimited and t >= spec.tLimit:
+                break
 
     if progress is not None:
         progress.close()
