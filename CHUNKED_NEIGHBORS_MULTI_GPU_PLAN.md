@@ -801,15 +801,27 @@ this compatibility scope.
    changed row budgets/offset widths/rank counts, native checkpoint continuation
    and injected allocation failures preserving the last accepted state. Preserve
    method/stage/timestep semantics and use existing native references.
-4. Use CPU/Gloo and bounded local CUDA/NCCL checks where each exercises the
-   relevant path. Any newly exposed unsupported operator/case needs explicit
-   admission and focused qualification; do not silently widen wall/material/AD/
-   graph support. Small physical multi-GPU checks can validate new asynchronous
-   paths once local coverage passes, without starting a scaling campaign.
-5. Return to four-GPU/multi-GPU-per-node qualification, realistic 3D capacity/
-   performance and held overnight164³/196³t4 or96³→t40 only after this functional
-   coverage. MPI/ROCm remain deferred. Use the isolated paired workspace and
-   preserve accepted source/image fingerprints; changed images renew site gates.
+4. Keep qualification local: CPU/Gloo and bounded one-device CUDA checks,
+   including the already-supported shared-GPU NCCL debug mode when appropriate.
+   Any newly exposed unsupported operator/case needs explicit admission and
+   focused qualification; do not silently widen wall/material/AD/graph support.
+5. Once local scheme support is consistent, integrate this worktree with the
+   fixed-count particle-reordering work described in PARTICLE_LAYOUT_PLAN.md
+   in the main development checkout. Pin the frontend/core/integrator inputs
+   and preserve both accepted baselines before merging; do not merge unfinished
+   support or modify the other active worktree prematurely.
+6. Debug and qualify the combined implementation locally before any new physical
+   multi-GPU/site testing. Check persistent UIDs versus storage rows, global
+   reference J indices, history/warm-start/source permutations, layout-generation
+   invalidation, deterministic row repartition and owned W lifetime, accepted
+   state/restart and failure rollback. Initially rebuild/repartition after a
+   reorder, without gathering global J/W. Use UID-aligned native references and
+   declare reduction-order tolerances explicitly.
+7. Only after the merged implementation passes local checks, resume physical
+   multi-GPU constellations, then capacity/performance and held overnight flows.
+   Existing Isambard qualification stays a frozen baseline; no new site jobs or
+   early physical multi-GPU detour. Changed merged sources require a fresh image
+   and renewed site gates. MPI/ROCm and ACSPH remain deferred/excluded as above.
 
 ## Active implementation workspace (2026-10-30)
 
@@ -864,6 +876,11 @@ those investigations:
 - [Storage scope and row-chunk discussion](docs/tiled_edge_storage_scope_2026-10-29.md)
 
 ## User decisions and boundaries
+
+- 2026-11-02: keep this continuation local until scheme support is consistent;
+  then merge with particle-reordering support, debug/qualify the combination
+  locally, and only then return to physical multi-GPU constellations. Preserve
+  current accepted branches/images as baselines until the integration gate.
 
 - 2026-11-02: prioritize broader local scheme/case functionality and lifecycle
   coverage before larger hardware/scaling/long-run campaigns; bounded CUDA/NCCL
