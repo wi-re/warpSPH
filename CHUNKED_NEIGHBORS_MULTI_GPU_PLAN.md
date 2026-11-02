@@ -145,6 +145,15 @@ archive/download directory. The already-uploaded archive remains valid: these
 are guide/environment changes only, with no runtime or image rebuild required
 because of the path update. Keep the original frozen upload artifact unchanged.
 
+Slurm account follow-up (2026-11-02): user submission with `wire` or `wire.b6ez`
+failed before job creation. Official site troubleshooting recommends
+`sacctmgr show user "$(id -un)" withassoc`; returned user output confirms default
+and associated account **`brics.b6ez`**, cluster displayed `gracehopp+`, no
+partition-specific association, QOS `normal`. Use that account with the default
+partition initially; do not infer the scheduler account from the login name or
+home path. Updated guide includes discovery and the confirmed account. The old
+archive remains compatible; actual build/execution is still pending.
+
 ### Static import scanner issue resolved (2026-10-30)
 
 The previously recorded wp_alpha.computeAlpha `find_spec` traceback is fixed.

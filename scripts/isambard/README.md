@@ -76,8 +76,22 @@ scp "$QA_ARCHIVE" "$ISAMBARD_SSH:$ISAMBARD_ROOT/"
 ssh "$ISAMBARD_SSH"
 ```
 
-On the login node (use the same base as `ISAMBARD_ROOT` above, or the location
-of your existing upload):
+On the login node, check your scheduler account before submitting:
+
+```bash
+sacctmgr show user "$(id -un)" withassoc
+```
+
+For your `wire.b6ez` login, the returned default and associated Slurm account is
+**`brics.b6ez`**. Use the `Account` column from this command if using another
+allocation; the login name and home-directory name do not identify a Slurm
+account. Your returned association has no partition-specific entry, so start
+with the default partition. If an explicit partition is needed, check `sinfo`
+and the association output before setting `QA_PARTITION` for the test wrapper
+or adding `--partition=...` to the build submission.
+
+Use the same base as `ISAMBARD_ROOT` above, or the location of your existing
+upload:
 
 ```bash
 export QA_ROOT="${QA_ROOT:-$HOME/warpsph-qa}"
@@ -86,7 +100,7 @@ export QA_SIF="${QA_SIF:-$QA_ROOT/images/warpsph-arm64.sif}"
 export QA_IMAGE="${QA_IMAGE:-$QA_SIF}"
 export QA_RESULTS_ROOT="${QA_RESULTS_ROOT:-$QA_ROOT/qualification}"
 export QA_BUILD_LOGS="${QA_BUILD_LOGS:-$QA_ROOT/logs}"
-export QA_ACCOUNT=YOUR_ACCOUNT
+export QA_ACCOUNT=brics.b6ez             # confirmed by your sacctmgr association
 mkdir -p "$QA_BUILD_LOGS"
 cd "$QA_ROOT"
 sha256sum warpsph-isambard.tar.gz       # compare with the local archive hash
@@ -263,7 +277,8 @@ Local reports explicitly say `local-cpu-debug` and cannot substitute for site
 reports. This suite checks checkpoint/file retrieval; interactive daemon routing
 through Isambard SSH/Jupyter remains a later, separate connection test.
 
-Primary references: [Isambard Apptainer multi-node](https://docs.isambard.ac.uk/user-documentation/guides/containers/apptainer-multi-node/),
+Primary references: [Slurm submission troubleshooting](https://docs.isambard.ac.uk/user-documentation/guides/slurm-troubleshooting/),
+[Isambard Apptainer multi-node](https://docs.isambard.ac.uk/user-documentation/guides/containers/apptainer-multi-node/),
 [native Apptainer builds](https://docs.isambard.ac.uk/user-documentation/guides/containers/apptainer/),
 [NCCL/custom runtime builds](https://docs.isambard.ac.uk/user-documentation/guides/nccl/#build-nccl-in-a-container),
 [SSH file transfer](https://docs.isambard.ac.uk/user-documentation/guides/file_transfer/local/),
