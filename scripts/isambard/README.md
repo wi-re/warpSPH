@@ -53,24 +53,54 @@ tests below do not expose a daemon or claim live-viewer connectivity.
 
 ## 2. Upload over your normal SSH connection
 
-With a valid Clifton certificate and your existing SSH configuration:
+All remote working paths derive from one base directory, `QA_ROOT`. On your
+Isambard account, `$HOME` is `/home/b6ez/wire.b6ez`, so the default below becomes
+`/home/b6ez/wire.b6ez/warpsph-qa`. Set a different absolute base to use another
+shared filesystem location. Bundle, image, results and build logs can also be
+overridden individually.
+
+**The previously uploaded archive remains usable.** These path settings already
+work with its scripts. Skip the upload commands if it is already on Isambard;
+set `QA_ROOT` to the directory containing that archive. For example, use
+`export QA_ROOT="$HOME"` if you copied it directly into your home directory.
+
+For a fresh upload, on your local machine with your normal Clifton certificate
+and SSH configuration:
 
 ```bash
-scp .tmp/warpsph-isambard.tar.gz PROJECT.aip2.isambard:/absolute/shared/work/
-ssh PROJECT.aip2.isambard
+export ISAMBARD_SSH=PROJECT.aip2.isambard  # your existing SSH alias
+export ISAMBARD_ROOT="${ISAMBARD_ROOT:-/home/b6ez/wire.b6ez/warpsph-qa}"
+export QA_ARCHIVE="${QA_ARCHIVE:-.tmp/warpsph-isambard.tar.gz}"
+ssh "$ISAMBARD_SSH" "mkdir -p '$ISAMBARD_ROOT'"
+scp "$QA_ARCHIVE" "$ISAMBARD_SSH:$ISAMBARD_ROOT/"
+ssh "$ISAMBARD_SSH"
 ```
 
-On the login node:
+On the login node (use the same base as `ISAMBARD_ROOT` above, or the location
+of your existing upload):
 
 ```bash
-cd /absolute/shared/work
+export QA_ROOT="${QA_ROOT:-$HOME/warpsph-qa}"
+export QA_BUNDLE="${QA_BUNDLE:-$QA_ROOT/warpsph-isambard}"
+export QA_SIF="${QA_SIF:-$QA_ROOT/images/warpsph-arm64.sif}"
+export QA_IMAGE="${QA_IMAGE:-$QA_SIF}"
+export QA_RESULTS_ROOT="${QA_RESULTS_ROOT:-$QA_ROOT/qualification}"
+export QA_BUILD_LOGS="${QA_BUILD_LOGS:-$QA_ROOT/logs}"
+export QA_ACCOUNT=YOUR_ACCOUNT
+mkdir -p "$QA_BUILD_LOGS"
+cd "$QA_ROOT"
 sha256sum warpsph-isambard.tar.gz       # compare with the local archive hash
-tar -xzf warpsph-isambard.tar.gz
-export QA_BUNDLE=/absolute/shared/work/warpsph-isambard
-export QA_SIF=/absolute/shared/work/images/warpsph-arm64.sif
-sbatch --account=YOUR_ACCOUNT --output=/absolute/shared/work/build-%j.out \
+tar -xzf warpsph-isambard.tar.gz       # extract once; keep an existing extraction
+sbatch --account="$QA_ACCOUNT" --output="$QA_BUILD_LOGS/build-%j.out" \
   "$QA_BUNDLE/harness/build.slurm"
 ```
+
+Keep these exports in your shell or in a small settings file you source after
+logging in. All derived directories are siblings under `QA_ROOT`; changing the
+base requires re-evaluating the derived exports in a fresh shell, or explicitly
+setting their overrides. An existing extracted bundle can live elsewhere: set
+`QA_BUNDLE` to its actual location before the block. The SIF output must be a
+fresh filename; keep a previously successful image for subsequent test jobs.
 
 The build job verifies all uploaded files, requires native `aarch64`, then builds
 with Apptainer fakeroot **on a compute allocation**. Its defaults are one GPU,
@@ -91,9 +121,6 @@ not establish or retain an SSH connection.
 After the build succeeds, on the login node:
 
 ```bash
-export QA_IMAGE="$QA_SIF"
-export QA_RESULTS_ROOT=/absolute/shared/work/qualification
-export QA_ACCOUNT=YOUR_ACCOUNT
 export QA_NETWORK=none
 bash "$QA_BUNDLE/harness/submit.sh" single
 ```
@@ -112,15 +139,21 @@ PIDs, package versions, loaded source identities and network settings.
 
 ## 4. Retrieve and verify before progressing
 
-From your local machine:
+From your local machine, set the SSH alias and remote base as in step2. Match
+`ISAMBARD_ROOT` to the `QA_ROOT` actually used on the login node; if you overrode
+`QA_RESULTS_ROOT` remotely, set `ISAMBARD_RESULTS` to that same absolute path.
 
 ```bash
-mkdir -p downloaded-qa
-rsync -a PROJECT.aip2.isambard:/absolute/shared/work/qualification/single-JOB_ID/ \
-  downloaded-qa/single-JOB_ID/
-rsync -a PROJECT.aip2.isambard:/absolute/shared/work/qualification/logs/single-JOB_ID.out \
-  downloaded-qa/single-JOB_ID/logs/slurm.out
-python scripts/isambard/check.py verify downloaded-qa/single-JOB_ID
+export ISAMBARD_SSH=PROJECT.aip2.isambard
+export ISAMBARD_ROOT="${ISAMBARD_ROOT:-/home/b6ez/wire.b6ez/warpsph-qa}"
+export ISAMBARD_RESULTS="${ISAMBARD_RESULTS:-$ISAMBARD_ROOT/qualification}"
+export QA_DOWNLOADS="${QA_DOWNLOADS:-$PWD/downloaded-qa}"
+export QA_RUN=single-JOB_ID             # replace with the actual stage/job ID
+mkdir -p "$QA_DOWNLOADS"
+rsync -a "$ISAMBARD_SSH:$ISAMBARD_RESULTS/$QA_RUN/" "$QA_DOWNLOADS/$QA_RUN/"
+rsync -a "$ISAMBARD_SSH:$ISAMBARD_RESULTS/logs/$QA_RUN.out" \
+  "$QA_DOWNLOADS/$QA_RUN/logs/slurm.out"
+python scripts/isambard/check.py verify "$QA_DOWNLOADS/$QA_RUN"
 ```
 
 Verification needs only NumPy/h5py, not a GPU or Torch. `artifacts.json` checks
@@ -182,14 +215,15 @@ Two explicit profiles are supported:
   mounts `/usr/lib64` for libcxi. Adjust provider paths/settings to the installed
   site versions. This suite does not silently rebuild or replace network libraries.
 
-Then, for example:
+Set `QA_COMM_ROOT` to an existing compatible build and `QA_NETWORK_SETUP` to
+your reviewed setup file; the defaults below place them under `QA_ROOT`. Then:
 
 ```bash
 export QA_PREVIOUS="$QA_RESULTS_ROOT/restart-RESTART_JOB_ID"
 export QA_NETWORK=custom
-export QA_COMM_ROOT=/absolute/shared/compatible-arm64-communication-build
+export QA_COMM_ROOT="${QA_COMM_ROOT:-$QA_ROOT/communication}"
 export QA_LIBFABRIC_HOST=/opt/cray/libfabric/1.22.0
-export QA_NETWORK_SETUP=/absolute/shared/network-setup.sh
+export QA_NETWORK_SETUP="${QA_NETWORK_SETUP:-$QA_ROOT/network-setup.sh}"
 export QA_NODES=2 QA_GPUS_PER_NODE=1
 bash "$QA_BUNDLE/harness/submit.sh" multi-node
 ```

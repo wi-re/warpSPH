@@ -137,6 +137,14 @@ Native ARM64/SIF build, GH200, physical multi-GPU, Slurm placement and Slingshot
 transport remain **unqualified until returned site reports pass**. Start at the
 ARM64 build and only the `single` stage; no automatic campaign is launched.
 
+Path configuration follow-up (2026-11-02): use `QA_ROOT` as the single remote
+base (default `$HOME/warpsph-qa`, with the user's Isambard HOME at
+`/home/b6ez/wire.b6ez`), deriving bundle, image, result and build-log paths.
+Local SSH/transfer examples use `ISAMBARD_SSH`, `ISAMBARD_ROOT` and a selectable
+archive/download directory. The already-uploaded archive remains valid: these
+are guide/environment changes only, with no runtime or image rebuild required
+because of the path update. Keep the original frozen upload artifact unchanged.
+
 ### Static import scanner issue resolved (2026-10-30)
 
 The previously recorded wp_alpha.computeAlpha `find_spec` traceback is fixed.
