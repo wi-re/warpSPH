@@ -292,9 +292,9 @@ The host-profile trial **7998167** completed on `nid010291` in 37 s and failed a
 Torch import with `undefined symbol: ncclCommWindowDeregister`. The inspected
 adapter prepends host NCCL 2.26.6 over the accepted image's 2.29.2. Runtime/provider
 capture was not reached. Upload, submission, failure reporting and retrieval
-worked; this result does not qualify GPU networking. Prepare a compatible
-OFI/custom profile retaining the image's NCCL/CUDA and repeat this gate before
-two nodes. The accepted image and prior solver-stage results remain unchanged.
+worked; this host-profile result does not qualify GPU networking. The custom
+profile described below now passes without replacing the accepted image or
+prior solver-stage results.
 
 ### Build only the compatible OFI plugin
 
@@ -361,6 +361,22 @@ fingerprints and actual NCCL version. Build/load success alone does not qualify
 collectives or inter-node traffic. Retrieve and review the one-GPU result before
 two nodes. Keep failed builds in their separate directories for diagnosis.
 
+For this campaign, **build 7999853** and **custom preflight 8000996** now pass
+(3m45s and 1m12s). The retrieved audit verifies all 3 built shared-library hashes,
+unchanged SIF/application fingerprint and actual NCCL2.29.2/CUDA13.1. Live maps
+show the new OFI plugin, host Libfabric2.3.1 and libcxi; NCCL logs select AWS
+Libfabric/CXI, SENDRECV and discover 4 NICs with no NCCL warnings. One-GPU kernel,
+stream and collective checks pass. Inter-node traffic/performance remain untested.
+Use `$QA_ROOT/communication/ofi-7999853` and its `network-setup.sh` for the next
+reviewed two-node/one-GPU gate; no second build is needed for this accepted SIF.
+
+The first build 7999738 failed before compilation because Slurm spools scripts;
+`QA_BUILD_HARNESS` now resolves the helper directory explicitly. First custom
+preflight 8000492 passed GPU/transport work but its final map check ran after
+NCCL unloaded the plugin. Current preflight captures before teardown, always
+cleans up the group, and retains the actual executed batch script. Both failed
+results remain preserved; final acceptance uses 8000996.
+
 ### Host and custom profiles
 
 Two explicit profiles are supported:
@@ -381,9 +397,9 @@ your reviewed setup file; the defaults below place them under `QA_ROOT`. Then:
 ```bash
 export QA_PREVIOUS="$QA_RESULTS_ROOT/restart-7989645"
 export QA_NETWORK=custom
-export QA_COMM_ROOT="${QA_COMM_ROOT:-$QA_ROOT/communication}"
+export QA_COMM_ROOT="${QA_COMM_ROOT:-$QA_ROOT/communication/ofi-7999853}"
 export QA_LIBFABRIC_HOST=/opt/cray/libfabric/2.3.1
-export QA_NETWORK_SETUP="${QA_NETWORK_SETUP:-$QA_ROOT/network-setup.sh}"
+export QA_NETWORK_SETUP="${QA_NETWORK_SETUP:-$QA_COMM_ROOT/network-setup.sh}"
 export QA_NODES=2 QA_GPUS_PER_NODE=1
 bash "$QA_BUNDLE/harness/submit.sh" multi-node
 ```
@@ -456,8 +472,8 @@ context fields byte-identical to uninterrupted execution. Diagnostics exactly
 match. Three reviewed RAS listener-port conflicts are recorded as diagnostic
 advisories; there are no failed GPU/solver comparisons.
 
-For this campaign, prepare the compatible custom communication profile and
-repeat the **one-GPU network preflight** above before the two-node stage. Four
+For this campaign, the custom one-GPU compatibility gate has passed. Next is
+the two-node/one-GPU stage using the accepted communication root above. Four
 GPUs and multi-node fabric remain pending. New campaigns still start with the
 build/single gates.
 

@@ -136,9 +136,9 @@ Local evidence under `.tmp/isambard-qa-20261102/`:
 Returned jobs7986156/7988602 qualify native ARM64/Apptainer/GH200 single-
 and same-node two-GPU execution, both cross-job/rank-count restart directions,
 peer communication and retrieval (audits below). Four GPUs and Slingshot remain
-unqualified. Host-network preflight 7998167 failed at Torch import; prepare a
-compatible OFI/custom profile and repeat the one-GPU gate before two nodes.
-No automatic campaign is launched.
+unqualified. Custom OFI build 7999853 and one-GPU preflight 8000996 now pass
+with the unchanged SIF/NCCL/CUDA; next is two nodes/one GPU each, after review.
+No two-node job or automatic campaign has been launched.
 
 Path configuration follow-up (2026-11-02): use `QA_ROOT` as the single remote
 base (default `$HOME`, with the user's Isambard HOME at
@@ -334,45 +334,59 @@ was not reached, so no successful GPU/provider test or loaded-version capture is
 claimed. Adapter argument handling reached the intended Torch entrypoint.
 Report correctly retains profile=host, previousJobId=7989645, probeExitCode=1 and
 status=failed. No two-node job launched, no image/archive or prior stage replaced.
-Next: prepare a compatible OFI/custom communication profile retaining the image's
-NCCL/CUDA, then repeat the one-GPU gate before allocating two nodes. Earlier
+Compatible OFI/custom follow-up is now completed below, retaining the image's
+NCCL/CUDA; two-node execution remains pending. Earlier
 single/two-GPU/restart qualifications remain accepted. Ignored local evidence:
 `.tmp/isambard-retrieved/network-preflight-7998167/`, submission receipt,
 `audit_network_preflight.py` and `audit-network-preflight-7998167.json` in the
 main workspace; audit status `dispatcher-passed-preflight-failed`. Hash inventory
 covers local retrieved files, not a sealed remote solver-stage inventory.
 
-Custom communication continuation (2026-11-02, in progress): user authorizes
-preparing a compatible OFI profile and repeating the one-GPU gate. Follow the
-site's container-build guidance with pinned OFI/hwloc sources, the unchanged
-accepted ARM64 SIF and actual Libfabric2.3.1. Preserve image NCCL2.29.2/CUDA13.1;
-record build provenance/dependency loading and submit only the bounded build
-and one-GPU compatibility preflight. Retrieve/audit results before two nodes.
+Custom communication continuation completed (2026-11-02): native build 7999853
+and corrected one-GPU custom preflight 8000996 both pass, with independent local
+retrieval/audit. Build:3m45s, nid010043; preflight:1m12s, nid010515, one physical
+GH200. Exact accepted SIF SHA and application/package fingerprints retained;
+actual loaded NCCL22902 at `/usr/lib/aarch64-linux-gnu/libnccl.so.2.29.2`, image
+CUDA13.1. No NCCL warnings in the final preflight. Warp/Torch nondefault-stream
+kernel work, collectives, placement and shared-file visibility pass.
+
 Added `build_network.slurm`/`build_network.sh` and a published-checksum source
-lock: OFI1.18.0/hwloc2.13.0, no new NCCL build, explicit host Libfabric, separate
-communication root and failure reports. Custom preflight now rejects embedded
-OFI/fabric fallback and requires loaded libcxi. Twenty-two focused harness checks
-pass; all shell/embedded Python parses. Full paired-checkout scan passes576
-modules/6283 imports/1340 files with explicit writable cache paths and paired
-PYTHONPATH. Initial unpaired/read-only-cache attempts failed on environment
-mismatch; no library fixes or production-source changes were needed.
-First build7999738 stopped before compilation (FAILED2:0,0s,nid010111): Slurm
-spools batch scripts, so BASH_SOURCE's parent is not the uploaded harness. Fixed
-with explicit QA_BUILD_HARNESS (default QA_BUNDLE/harness), added a spooled-script
-regression and retained the failed submission/log/accounting. Twenty-three
-focused checks now pass. Corrected source87e0e0a submitted as build7999853
-on nid010043; archives verified, hwloc compiled, OFI configured, native build
-completed in3m45s, COMPLETED0:0. Retrieved native build report/provenance and
-all3 shared-library hashes verify independently; mapped OFI1.18.0, custom hwloc,
-host Libfabric2.3.1/libcxi retain image CUDA13.1/NCCL22902 and exact SIF SHA.
-Custom preflight8000492 on nid010028 passes the real GPU probe and logs loaded
-plugin v11, AWS Libfabric, cxi/4 NICs and SENDRECV. Final report fails because the
-original appended map snapshot ran after destroy_process_group unloaded the
-plugin. Failed result remains preserved; observer moved into the probe's live
-teardown path before destruction, with finally-protected cleanup. Added positive
-and capture-failure ordering regressions;25 focused checks pass. Preflight also
-snapshots its actual executed Slurm script, rather than an older bundle copy.
-Repeat only the one-GPU preflight using the existing passed build.
+lock: aws-ofi-nccl1.18.0 (86ebeaf59a2348b22780023effdb682503747de7),
+hwloc2.13.0 (32b399232a27ee04f317d743db44e7ba3e154d05). Built inside the same
+ARM64 SIF against host Libfabric2.3.1, without rebuilding NCCL/CUDA or replacing
+the image/archive. All3 installed shared-library hashes independently verified.
+Final live maps prove custom OFI, bound host Libfabric/libcxi and image NCCL/CUDA.
+Logs prove net plugin v11, AWS Libfabric, CXI/4 discovered NICs and SENDRECV.
+This establishes provider loading only; no inter-node traffic, RDMA bandwidth
+or throughput qualification is claimed. Next is two nodes/one GPU each.
+
+Remote deployment for the next gate:
+`QA_COMM_ROOT=/home/b6ez/wire.b6ez/communication/ofi-7999853`,
+`QA_NETWORK_SETUP=$QA_COMM_ROOT/network-setup.sh`,
+`QA_LIBFABRIC_HOST=/opt/cray/libfabric/2.3.1`, `QA_NETWORK=custom`;
+previous accepted restart7989645 remains the solver-stage predecessor.
+No two-node job was launched in this continuation. Four GPUs, broader schemes,
+capacity and held overnight simulations remain open.
+
+Two retained harness failures were repaired before acceptance: build 7999738
+(FAILED2:0,0s,nid010111) resolved helpers relative to Slurm's spool; explicit
+QA_BUILD_HARNESS now selects the uploaded harness. Preflight8000492 (FAILED1:0,
+1m04s,nid010028) passed GPU/OFI/CXI work but took its library snapshot after
+process-group teardown unloaded the plugin. Capture now runs before teardown,
+with finally-protected cleanup and positive/failing-capture lifecycle regressions.
+The actual executed preflight Slurm copy is retained in the private harness.
+Twenty-five focused harness checks pass; shell/embedded Python and guide snippets
+parse. Full paired import scan:576 modules/6283 imports/1340 files pass with paired
+PYTHONPATH and writable Numba/Matplotlib caches. Initial unpaired/default
+read-only-cache attempts are recorded as environment failures, not library fixes.
+
+Ignored main-workspace evidence: `.tmp/isambard-retrieved/network-build-7999853/`,
+`communication-ofi-7999853/`, `network-preflight-8000996/`, both failed attempts,
+submission receipts and `audit_custom_network.py`. Reproduce with arguments
+`7999853 8000996`; `audit-custom-network-7999853.json` reports passed. Pinned
+archives, initial scanner logs and build-source notes are indexed in
+`.tmp/isambard-ofi-sources/README.md`. The audit checks receipts/source hashes,
+shared-library hashes, final accounting, fingerprint, live maps and raw logs.
 
 ### Static import scanner issue resolved (2026-10-30)
 
@@ -1910,9 +1924,9 @@ GPU jobs run serially under the existing isolated NCCL 2.32.3 runtime):
 |Frozen/new solver comparisons|CPU FP32/int32, CPU FP64/int64 and NCCL FP32/int32: 3 variants of implementation/check policy × 8 solver fixtures pass exact stages/owned W/particles/time/OU; existing2e-12 source-budget tolerance only|
 |Long NCCL forcing/replay|16 accepted steps /128 fresh RHS per native scheme per rank, 256 RHS combined; every step forced changed-list replay, OU crossings, exact history/fields/work/time pass|
 |NCCL 32-lane control|3 steps /48 RHS per rank across native schemes, forced replay and nondefault stream pass|
-|CPU solver/launcher regressions|7 pass: two-/three-step exact/contract solver controls plus all3 scheme launcher lifecycles, 1/2/3 ranks; exact→contract→exact across jobs|
+|CPU solver/launcher regressions|7 pass: two-/three-step exact/contract solver controls plus all 3 scheme launcher lifecycles, 1/2/3 ranks; exact→contract→exact across jobs|
 |Native checkpoint drivers|3 pass: changed budgets/ranks/int32→int64 offsets, contract continuation, exact fresh RHS/J/W hashes/forcing and coordinated IO/corruption/policy controls|
-|NCCL launcher/checkpoint lifecycle|9 serial jobs /12 rank reports, all3 schemes exact→contract→exact with changed budgets/1/2 ranks and exact final particle/time/dt/OU parity|
+|NCCL launcher/checkpoint lifecycle|9 serial jobs /12 rank reports, all 3 schemes exact→contract→exact with changed budgets/1/2 ranks and exact final particle/time/dt/OU parity|
 |Existing focused chunk regressions|349 CPU passes, 265 expected skips, including the initial3 scanner tests|
 |Static scanner follow-up|5 scanner regressions pass, including parent finder exceptions and installed-optional missing children; full runtime/static check passes566 modules /6063 imports /1314 files|
 |Slurm template|Syntax/mock remote quoting passes with explicit contract mode; actual submission/site qualification remains open|
@@ -2189,7 +2203,7 @@ flat path; only the existing two-component source-budget comparison uses2e-12.
 | CPU FP64/int64 process cohort | Exact/contract × first/second order;12 rank reports including operators and544 solver RHS evaluations |
 | Shared-GPU NCCL FP32/int32 | Exact/contract × both orders plus global32-lane second-order control;14 rank reports and680 solver RHS evaluations |
 | Shared-GPU NCCL FP32/int64 | Exact/contract × both orders;12 rank reports and544 solver RHS evaluations |
-| Final prepared/operator/rejection matrix | 12 rank reports: CPU FP64/int64 and NCCL FP32/both offsets, exact/contract. Each report has24 configurations (2D/3D ×0/1/11 rows ×2 orders ×time-centred on/off), both stored-I layouts and all3 prepared operators. CPU rejects15 contexts; CUDA rejects26, including effective-lane mismatch and actual capture before callbacks |
+| Final prepared/operator/rejection matrix | 12 rank reports: CPU FP64/int64 and NCCL FP32/both offsets, exact/contract. Each report has24 configurations (2D/3D ×0/1/11 rows ×2 orders ×time-centred on/off), both stored-I layouts and all 3 prepared operators. CPU rejects15 contexts; CUDA rejects26, including effective-lane mismatch and actual capture before callbacks |
 | Final effective-lane admission | Repeated full nine-variant second-order32-lane NCCL solver:2 rank reports,136 RHS; native controls and both Godunov forms pass. Godunov/Gaussian use scalar fallback, existing core/native specs select their tiled kernels |
 | Final-source launcher/native IO | All5 schemes pass15 serial NCCL jobs /20 rank reports: uninterrupted1-rank4-step reference versus2-rank2-step save +1-rank2-step resume; row cap3→1 and contract→exact, native files/state/clock/OU agree |
 | Runtime/static imports | 567 modules,6092 first-party imports,1316 source files; full check passes |
@@ -2433,7 +2447,7 @@ stops failed dependencies, and chooses a t40 continuation only from passed
 The detached serial supervisor launched at2026-10-31 00:01:30 UTC, PID3878944,
 with a12.5hour wall window. Both source packages and integrators/plotting are
 frozen in941 hashed files; subsequent checkout edits cannot affect these jobs.
-Small3D controls pass exact flat/chunked and changed-budget restart fields
+Small 3D controls pass exact flat/chunked and changed-budget restart fields
 (existing2e-12 source-budget tolerance), including a time-limited endpoint save.
 Only its explicit endpoint time representation differs: the case snaps to its
 declared Python time; all particle fields still compare exactly. The driver
