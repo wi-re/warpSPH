@@ -1,0 +1,16 @@
+{
+  "aws-ofi-nccl": {
+    "version": "1.18.0",
+    "revision": "86ebeaf59a2348b22780023effdb682503747de7",
+    "file": "aws-ofi-nccl-1.18.0.tar.gz",
+    "url": "https://github.com/aws/aws-ofi-nccl/releases/download/v1.18.0/aws-ofi-nccl-1.18.0.tar.gz",
+    "sha512": "768767b93d07b4200a2b080ee687881328d8aef5b7428d9e9cdb4c8c6e3b79808c4f31574266612506b144dc1ce508dea46659302d6211f49ca1082ae3e14771"
+  },
+  "hwloc": {
+    "version": "2.13.0",
+    "revision": "32b399232a27ee04f317d743db44e7ba3e154d05",
+    "file": "hwloc-2.13.0.tar.gz",
+    "url": "https://download.open-mpi.org/release/hwloc/v2.13/hwloc-2.13.0.tar.gz",
+    "sha256": "1514a5253f0a5c23bc006d3bdd30a6f6125c9a8dc9b5fa4984913d1fff45315d"
+  }
+}

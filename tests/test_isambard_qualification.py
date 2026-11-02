@@ -183,7 +183,9 @@ def test_arm_bundle_rejects_x86_and_generates_native_definition(tmp_path):
 
 
 @pytest.mark.parametrize('scenario,expected', [('valid', 'passed'), ('old-nccl', 'failed'),
-                                               ('socket', 'failed'), ('probe-failure', 'failed')])
+                                               ('socket', 'failed'), ('probe-failure', 'failed'),
+                                               ('custom-valid', 'passed'), ('custom-wrong-plugin', 'failed'),
+                                               ('custom-wrong-fabric', 'failed'), ('custom-no-cxi', 'failed')])
 def test_network_preflight_requires_unchanged_runtime_and_cxi_evidence(tmp_path, scenario, expected):
     import hashlib
     output, previous = tmp_path/'output', tmp_path/'previous'
@@ -197,7 +199,10 @@ def test_network_preflight_requires_unchanged_runtime_and_cxi_evidence(tmp_path,
     (previous/'probes/probe.json').write_text(json.dumps({'ranks':[{'nccl':[2,29,2]}]}))
     (previous/'runs/reference/manifest.json').write_text(json.dumps({'placement':[{'ncclRuntime':22902}]}))
     (output/'probes/runtime-libraries.json').write_text(json.dumps(dict(ncclRuntime=22606 if scenario=='old-nccl' else 22902,
-        ncclLibraries=['/loaded/libnccl.so.2'])))
+        ncclLibraries=['/loaded/libnccl.so.2'], mappedCommunicationLibraries=[
+            '/image/libnccl-net.so' if scenario=='custom-wrong-plugin' else '/opt/slingshot/aws-ofi-nccl/lib/libnccl-net.so.0',
+            '/image/libfabric.so.1' if scenario=='custom-wrong-fabric' else '/host/libfabric/lib64/libfabric.so.1',
+            '/image/libunrelated.so' if scenario=='custom-no-cxi' else '/host/usr/lib64/libcxi.so.1'])))
     rank = dict(fingerprint, backend='nccl', gpuUuid='GPU-distinct', nccl=[2,29,2],
                 network={'FI_PROVIDER':'cxi'}, host='nodeA', pid=123)
     (output/'probes/probe.json').write_text(json.dumps({'status':'passed','ranks':[rank]}))
@@ -207,7 +212,7 @@ def test_network_preflight_requires_unchanged_runtime_and_cxi_evidence(tmp_path,
     compile(script.split("<<'RUNTIME_PY'\n",1)[1].split('\nRUNTIME_PY\n',1)[0], '<runtime-capture>', 'exec')
     embedded = script.split("<<'PY'\n",1)[1].split('\nPY\n',1)[0]
     result = subprocess.run([sys.executable,'-',str(output),str(previous),str(image),str(HARNESS),
-                             '2' if scenario=='probe-failure' else '0','host'],
+                             '2' if scenario=='probe-failure' else '0','custom' if scenario.startswith('custom-') else 'host'],
                             input=embedded,text=True,capture_output=True)
     report = json.loads((output/'report.json').read_text())
     assert report['status'] == expected, result.stdout+result.stderr
@@ -229,3 +234,24 @@ def test_host_adaptation_does_not_exec_probe_arguments(tmp_path):
     result = subprocess.run(['bash','-c',script],text=True,capture_output=True)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == dict(args=['--output','/work/probes'],adapted='active')
+
+
+@pytest.mark.parametrize('corrupt', [False, True])
+def test_communication_build_checks_sources_before_extraction(tmp_path, corrupt):
+    import hashlib
+    sources = tmp_path/'sources'
+    sources.mkdir()
+    archive = sources/'fixture.tar.gz'
+    archive.write_bytes(b'published release fixture')
+    digest = hashlib.sha512(archive.read_bytes()).hexdigest()
+    lock = tmp_path/'source-lock.json'
+    lock.write_text(json.dumps({'fixture': {'file': archive.name, 'sha512': digest}}))
+    if corrupt:
+        archive.write_bytes(b'changed release')
+    script = (HARNESS/'build_network.sh').read_text()
+    embedded = script.split("<<'SOURCES_PY'\n", 1)[1].split('\nSOURCES_PY\n', 1)[0]
+    embedded = embedded.replace('/opt/slingshot/source-lock.json', str(lock)).replace('/sources', str(sources))
+    result = subprocess.run([sys.executable, '-'], input=embedded, text=True, capture_output=True)
+    assert result.returncode == (1 if corrupt else 0), result.stdout+result.stderr
+    if corrupt:
+        assert 'Source checksum mismatch' in result.stderr

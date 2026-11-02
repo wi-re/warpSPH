@@ -342,6 +342,21 @@ single/two-GPU/restart qualifications remain accepted. Ignored local evidence:
 main workspace; audit status `dispatcher-passed-preflight-failed`. Hash inventory
 covers local retrieved files, not a sealed remote solver-stage inventory.
 
+Custom communication continuation (2026-11-02, in progress): user authorizes
+preparing a compatible OFI profile and repeating the one-GPU gate. Follow the
+site's container-build guidance with pinned OFI/hwloc sources, the unchanged
+accepted ARM64 SIF and actual Libfabric2.3.1. Preserve image NCCL2.29.2/CUDA13.1;
+record build provenance/dependency loading and submit only the bounded build
+and one-GPU compatibility preflight. Retrieve/audit results before two nodes.
+Added `build_network.slurm`/`build_network.sh` and a published-checksum source
+lock: OFI1.18.0/hwloc2.13.0, no new NCCL build, explicit host Libfabric, separate
+communication root and failure reports. Custom preflight now rejects embedded
+OFI/fabric fallback and requires loaded libcxi. Twenty-two focused harness checks
+pass; all shell/embedded Python parses. Full paired-checkout scan passes576
+modules/6283 imports/1340 files with explicit writable cache paths and paired
+PYTHONPATH. Initial unpaired/read-only-cache attempts failed on environment
+mismatch; no library fixes or production-source changes were needed.
+
 ### Static import scanner issue resolved (2026-10-30)
 
 The previously recorded wp_alpha.computeAlpha `find_spec` traceback is fixed.

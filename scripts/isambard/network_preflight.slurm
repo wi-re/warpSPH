@@ -120,6 +120,14 @@ try:
         raise ValueError(f'Loaded NCCL changed: expected {expected_nccl}, found {loaded["ncclRuntime"]}; build a compatible OFI plugin instead of replacing the validated runtime')
     if len(loaded['ncclLibraries']) != 1:
         raise ValueError('Could not identify one loaded NCCL library')
+    if report['profile'] == 'custom':
+        mapped = loaded.get('mappedCommunicationLibraries', [])
+        if not any(path.startswith('/opt/slingshot/aws-ofi-nccl/lib/libnccl-net') for path in mapped):
+            raise ValueError('Custom OFI plugin was not loaded from the communication build')
+        if not any(path.startswith('/host/libfabric/lib64/libfabric.so') for path in mapped):
+            raise ValueError('Custom profile did not load the bound host Libfabric')
+        if not any(Path(path).name.startswith('libcxi.so') for path in mapped):
+            raise ValueError('CXI library was not loaded')
     if rank['network'].get('FI_PROVIDER') != 'cxi':
         raise ValueError('CXI provider was not explicitly selected')
     spec = importlib.util.spec_from_file_location('network_qualification', harness/'qualify.py')

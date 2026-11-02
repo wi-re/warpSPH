@@ -2,7 +2,8 @@
 # builds to /opt/slingshot, host libfabric to /host/libfabric and libcxi support
 # to /host/usr/lib64. Build against this image's CUDA/NCCL per the Isambard guide.
 # Do not point this at x86-64 libraries or the local shared-GPU debugging overlay.
-export LD_LIBRARY_PATH="/opt/slingshot/nccl/lib:/opt/slingshot/aws-ofi-nccl/lib:/opt/slingshot/hwloc/lib:/host/libfabric/lib64:/host/usr/lib64:${LD_LIBRARY_PATH:-}"
+# Retain the image NCCL/CUDA. Only the plugin, hwloc and host fabric are added.
+export LD_LIBRARY_PATH="/opt/slingshot/aws-ofi-nccl/lib:/opt/slingshot/hwloc/lib:/host/libfabric/lib64:${LD_LIBRARY_PATH:-}:/host/usr/lib64"
 export NCCL_NET='AWS Libfabric' NCCL_SOCKET_IFNAME=hsn FI_PROVIDER=cxi
 export FI_PROVIDER_PATH="${FI_PROVIDER_PATH:-/host/libfabric/lib64/libfabric}"
 export NCCL_NET_GDR_LEVEL=PHB NCCL_CROSS_NIC=1 NCCL_MIN_NCHANNELS=4

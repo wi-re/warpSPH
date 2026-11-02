@@ -295,6 +295,70 @@ worked; this result does not qualify GPU networking. Prepare a compatible
 OFI/custom profile retaining the image's NCCL/CUDA and repeat this gate before
 two nodes. The accepted image and prior solver-stage results remain unchanged.
 
+### Build only the compatible OFI plugin
+
+`build_network.slurm` builds aws-ofi-nccl 1.18.0 and hwloc 2.13.0 natively inside
+this campaign's unchanged SIF. The [site guide](https://docs.isambard.ac.uk/user-documentation/guides/nccl/)
+describes this approach; the [OFI release](https://github.com/aws/aws-ofi-nccl/releases/tag/v1.18.0)
+supports NCCL 2.29.2. Published release checksums and source revisions are pinned
+in `communication-sources.json`. The build verifies checksums before extraction,
+uses host Libfabric 2.3.1, disables AWS-specific platform tuning, records dependency
+paths/library hashes and checks the loaded NCCL against the accepted restart.
+It does not rebuild NCCL, CUDA or the SIF. Build tools must already exist in the
+image; failures retain logs and `network-build-JOB_ID/report.json`.
+
+Download the pinned release archives on the local upload machine:
+
+```bash
+export QA_COMM_SOURCES_LOCAL=/fresh/local/communication-sources
+python - "$QA_COMM_SOURCES_LOCAL" <<'PY'
+import hashlib, json, sys, urllib.request
+from pathlib import Path
+root = Path(sys.argv[1])
+root.mkdir(parents=True, exist_ok=False)
+lock = json.loads(Path('scripts/isambard/communication-sources.json').read_text())
+for package in lock.values():
+    with urllib.request.urlopen(package['url'], timeout=90) as response:
+        data = response.read()
+    algorithm = 'sha512' if 'sha512' in package else 'sha256'
+    if hashlib.new(algorithm, data).hexdigest() != package[algorithm]:
+        raise ValueError('Release checksum mismatch: '+package['file'])
+    (root/package['file']).write_bytes(data)
+PY
+ssh "$ISAMBARD_SSH" 'mkdir -p "$HOME/communication-sources" "$HOME/warpsph-communication-build/harness"'
+scp "$QA_COMM_SOURCES_LOCAL/"*.tar.gz "$ISAMBARD_SSH:$ISAMBARD_ROOT/communication-sources/"
+scp scripts/isambard/{build_network.slurm,build_network.sh,communication-sources.json,network-custom.example.sh,network_preflight.slurm} \
+  "$ISAMBARD_SSH:$ISAMBARD_ROOT/warpsph-communication-build/harness/"
+```
+
+On the login node, with the usual QA paths exported and the incompatible host
+injection module unloaded:
+
+```bash
+export QA_PREVIOUS="$QA_RESULTS_ROOT/restart-7989645"
+export QA_COMM_SOURCES="$QA_ROOT/communication-sources"
+export QA_LIBFABRIC_HOST=/opt/cray/libfabric/2.3.1
+sbatch --account=brics.b6ez --output="$QA_ROOT/logs/network-build-%j.out" \
+  "$QA_ROOT/warpsph-communication-build/harness/build_network.slurm"
+```
+
+Inspect the build report before the next submission. Its `communicationRoot`
+defaults to `$QA_ROOT/communication/ofi-BUILD_JOB_ID`. After a successful build:
+
+```bash
+export QA_COMM_ROOT="$QA_ROOT/communication/ofi-BUILD_JOB_ID"
+export QA_NETWORK_SETUP="$QA_COMM_ROOT/network-setup.sh"
+export QA_PREFLIGHT_NETWORK=custom
+sbatch --account=brics.b6ez --output="$QA_ROOT/logs/network-preflight-%j.out" \
+  "$QA_ROOT/warpsph-communication-build/harness/network_preflight.slurm"
+```
+
+The custom preflight additionally requires the mapped plugin from this build,
+bound host Libfabric and a loaded libcxi, alongside unchanged application/runtime
+fingerprints and actual NCCL version. Build/load success alone does not qualify
+collectives or inter-node traffic. Retrieve and review the one-GPU result before
+two nodes. Keep failed builds in their separate directories for diagnosis.
+
 ### Host and custom profiles
 
 Two explicit profiles are supported:
