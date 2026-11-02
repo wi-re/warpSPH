@@ -2722,7 +2722,7 @@ launched during this continuation. MPI/ROCm builds remain deferred.
 
 
 Local repair/build progress (2026-11-02): shared-path ENOENT visibility waits
-bounded at30s now cover output directory and peer runtime JSON publication;
+bounded at120s now cover output directory and peer runtime JSON publication;
 permission/format/other IO failures remain immediate. Fault-injected two-rank
 CPU/Gloo regression and serial/two/three-rank CRKSPH continuous/restart/freshness/
 allocation-failure tests pass (5 targeted checks). First sandbox attempt blocked
@@ -2745,3 +2745,9 @@ is needed. Harness35 checks plus5 targeted distributed IO/CRKSPH checks pass;
 full imports576/6285/1341 pass. Freeze only the IO-fix frontend delta over the
 accepted ARM64 package snapshot, pin the resolved NGC ARM64 digest, and build
 locally. The previous inter-node stage stays failed until a new image qualifies.
+
+NFS mount inspection confirms qualification is on nfs4 /home, with no acdir
+override. The Linux nfs-utils defaults allow cached directory attributes for
+up to60s, including negative lookups. Extend the bounded visibility wait from
+30s to120s before qualification; source: https://man7.org/linux/man-pages/man5/nfs.5.html .
+Per-release QA_DEPLOYMENT_PROFILE overrides are preserved by site-profile.sh.

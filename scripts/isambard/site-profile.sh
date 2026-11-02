@@ -14,4 +14,4 @@ export QA_NETWORK=custom QA_PREFLIGHT_NETWORK=custom QA_SLURM_NETWORK=disable_rd
 # Use the directory containing this profile, rather than Slurm's spool directory.
 export QA_HARNESS_ROOT
 QA_HARNESS_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-export QA_DEPLOYMENT_PROFILE="$QA_HARNESS_ROOT/site-profile.json"
+export QA_DEPLOYMENT_PROFILE=${QA_DEPLOYMENT_PROFILE:-$QA_HARNESS_ROOT/site-profile.json}

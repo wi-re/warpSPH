@@ -36,7 +36,7 @@ def _atomicJson(path,value):
         temporary.unlink(missing_ok=True)
 
 
-def _sharedOperation(path,operation,*,timeout=30.):
+def _sharedOperation(path,operation,*,timeout=120.):
     """Bound metadata visibility lag after a peer's create/atomic rename.
 
     A process-group handshake orders the writers, but does not invalidate a

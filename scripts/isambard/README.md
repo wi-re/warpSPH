@@ -65,15 +65,20 @@ converting need no target GPU; execution/fabric qualification still uses GH200s.
 After the source context above is prepared, the local recipe is:
 
 ```bash
-docker buildx inspect --bootstrap
-docker buildx build --platform linux/arm64 \
+# Dedicated builder; leaves the default builder unchanged.
+# On it111636 host networking is needed for the builder's registry DNS.
+docker buildx create --name warpsph-arm64 --driver docker-container \
+  --driver-opt network=host --bootstrap
+docker buildx build --builder warpsph-arm64 --platform linux/arm64 \
   --build-arg BASE_IMAGE=nvcr.io/nvidia/pytorch:26.01-py3 \
   --build-arg WARP_VERSION=1.17.0 --target with-remote \
   --metadata-file .tmp/warpsph-arm64-build.json \
   --output type=docker,dest=.tmp/warpsph-arm64.docker.tar \
   -t warpsph:arm64 -f .tmp/isambard-arm-context/containers/Dockerfile \
   .tmp/isambard-arm-context
-apptainer build .tmp/warpsph-arm64.sif docker-archive:.tmp/warpsph-arm64.docker.tar
+apptainer build --arch arm64 --mksquashfs-args "-processors 8" \
+  .tmp/warpsph-arm64.sif docker-archive:.tmp/warpsph-arm64.docker.tar
+apptainer sif list .tmp/warpsph-arm64.sif  # system partition must say arm64
 sha256sum .tmp/warpsph-arm64.sif
 apptainer inspect --json .tmp/warpsph-arm64.sif > .tmp/warpsph-arm64-inspect.json
 ```
@@ -84,6 +89,25 @@ plus its checksum, source/build manifests, harness and communication artifacts.
 Never replace a currently accepted image in place. A new image hash requires an
 updated deployment profile and renewed qualification; the current accepted SIF
 stays fixed during the ongoing inter-node test.
+
+On it111636, an older terminal session may lack the newly granted docker group.
+`sg docker -c 'docker version'` uses existing membership without changing socket
+permissions. Apply that wrapper to Docker commands until the session is refreshed.
+The tested BuildKit image includes its own QEMU executables: an ARM64 Alpine
+`RUN uname -m` smoke must print `aarch64`. No host-wide binfmt registration was
+needed. An advertised amd64-only builder platform list does not substitute for
+that executable smoke test.
+
+Apptainer can be installed without system changes: extract the official non-setuid
+amd64 Debian package and its libsubid4 dependency into an owned tools directory
+with `dpkg-deb -x`. For the tested1.5.5 package, add relocation symlinks
+`usr/etc -> ../etc` and `usr/var -> ../var`, and include the extracted
+`usr/lib/x86_64-linux-gnu` in `LD_LIBRARY_PATH`. Use the extracted
+`usr/bin/apptainer`; set `APPTAINER_CACHEDIR` and `APPTAINER_TMPDIR` to owned paths.
+System `mksquashfs`/`unsquashfs` are required. ARM64 OCI-to-SIF conversion runs on
+the amd64 host without a GPU; verify the SIF's system-partition architecture.
+Keep the tool versions, build log/metadata, constraints, frozen context, checksum
+and target runtime/source fingerprints with the release.
 
 For future local OFI builds, stage the exact site Libfabric2.3.1 ARM64 headers,
 libraries and required libcxi dependencies as a versioned local sysroot, retaining
