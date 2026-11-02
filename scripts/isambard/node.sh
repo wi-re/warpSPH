@@ -14,6 +14,12 @@ if [[ ${QA_NETWORK:-none} == custom ]]; then
 fi
 # Preserve comma-separated GPU lists literally; --env itself parses commas.
 export APPTAINERENV_CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:?Slurm did not expose the allocated GPUs}"
+# Job-derived RAS listener, preserving an explicit preflight/user override.
+if [[ -z ${APPTAINERENV_NCCL_RAS_ADDR:-} && ${SLURM_JOB_ID:-} =~ ^[0-9]+$ ]]; then
+  ras_port=${QA_RAS_PORT:-$((10000 + SLURM_JOB_ID % 10000))}
+  [[ $ras_port =~ ^[0-9]+$ ]] && (( ras_port >= 1024 && ras_port <= 65535 && ras_port != QA_MASTER_PORT )) || { echo 'Invalid RAS port or rendezvous collision.' >&2; exit 2; }
+  export APPTAINERENV_NCCL_RAS_ADDR="127.0.0.1:$ras_port"
+fi
 # HOME is set by container.sh; Apptainer rejects HOME in --env.
 args=(exec --nv --cleanenv --no-home --pwd /work "${binds[@]}"
   --env "QA_NETWORK=${QA_NETWORK:-none},QA_WORLD_NODES=$nodes,QA_NODE_RANK=${SLURM_NODEID:-0}"

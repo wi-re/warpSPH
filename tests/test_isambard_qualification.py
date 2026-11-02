@@ -113,27 +113,30 @@ def test_apptainer_preserves_comma_separated_gpu_list(tmp_path):
     binary = tmp_path/'bin'
     binary.mkdir()
     mock = binary/'apptainer'
-    mock.write_text(f'#!{sys.executable}\nimport os,json,sys\nprint(json.dumps(dict(args=sys.argv[1:],devices=os.environ.get("APPTAINERENV_CUDA_VISIBLE_DEVICES"))))\n')
+    mock.write_text(f'#!{sys.executable}\nimport os,json,sys\nprint(json.dumps(dict(args=sys.argv[1:],devices=os.environ.get("APPTAINERENV_CUDA_VISIBLE_DEVICES"),ras=os.environ.get("APPTAINERENV_NCCL_RAS_ADDR"))))\n')
     mock.chmod(0o700)
     environment = dict(os.environ, PATH=str(binary)+':'+os.environ['PATH'],
                        CUDA_VISIBLE_DEVICES='0,2,3', QA_NETWORK='none',
-                       QA_MASTER_ADDR='nodeA', QA_MASTER_PORT='29000')
+                       QA_MASTER_ADDR='nodeA', QA_MASTER_PORT='29000', SLURM_JOB_ID='8000996', QA_RAS_PORT='13000')
     result = subprocess.run(['bash',str(HARNESS/'node.sh'),'/image.sif',str(tmp_path),
                              'torchrun','1','3','probe','probe.py'],
                             env=environment,capture_output=True,text=True)
     assert result.returncode == 0, result.stderr
     invocation = json.loads(result.stdout)
     assert invocation['devices'] == '0,2,3'
+    assert invocation['ras'] == '127.0.0.1:13000'
     assert not any('CUDA_VISIBLE_DEVICES=' in arg for arg in invocation['args'])
     env_values = [invocation['args'][index+1] for index, arg in enumerate(invocation['args']) if arg == '--env']
     assert all(not entry.startswith('HOME=') for value in env_values for entry in value.split(','))
 
 
-def test_one_torchrun_parent_per_node_and_no_cpu_site_pass():
+def test_one_torchrun_parent_per_node_and_no_cpu_site_pass(monkeypatch):
+    monkeypatch.setenv("QA_SLURM_NETWORK", "disable_rdzv_get")
     qualify = load('qualify')
     args = SimpleNamespace(launcher='slurm', gpus_per_node=4, hosts=['nodeA','nodeB'],
                            image=Path('/image.sif'), output=Path('/shared/results'))
     argv = qualify.command(args, 2, 4, 'probe', 'torchrun', HARNESS/'probe.py', [])
+    assert '--network=disable_rdzv_get' in argv
     assert '--ntasks=2' in argv and '--ntasks-per-node=1' in argv and '--gpus-per-task=4' in argv
     with pytest.raises(ValueError, match='NCCL'):
         qualify.validate_layout('single', 1, 1, 'slurm', 'gloo', 'none')
@@ -152,12 +155,13 @@ def test_submit_exports_harness_path_and_rejects_failed_previous_stage(tmp_path)
     image = tmp_path/'image.sif'
     image.touch()
     env = dict(os.environ, PATH=str(binary)+':'+os.environ['PATH'], QA_IMAGE=str(image),
-               QA_RESULTS_ROOT=str(tmp_path/'results'), QA_PYTHON=sys.executable)
+               QA_RESULTS_ROOT=str(tmp_path/'results'), QA_PYTHON=sys.executable, QA_SLURM_NETWORK='disable_rdzv_get')
     result = subprocess.run(['bash',str(HARNESS/'submit.sh'),'single'], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     submitted = json.loads(result.stdout)
     assert submitted['harness'] == str(HARNESS)
     assert '--gpus-per-node=1' in submitted['args']
+    assert '--network=disable_rdzv_get' in submitted['args']
     previous = tmp_path/'previous'
     previous.mkdir()
     (previous/'report.json').write_text(json.dumps({'status':'failed','stage':'single'}))
@@ -314,3 +318,47 @@ print(json.dumps(builtins.events))
     result = subprocess.run([sys.executable,str(probe)],text=True,capture_output=True)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == ['probe','capture','destroy']
+
+
+@pytest.mark.parametrize('scenario', ['valid','image','library','setup','host-module','network','implicit-bind'])
+def test_pinned_deployment_rejects_runtime_or_setup_drift(tmp_path, scenario):
+    import hashlib
+    deployment = load('deployment')
+    image = tmp_path/'image.sif'
+    image.write_bytes(b'accepted image')
+    comm, fabric = tmp_path/'communication', tmp_path/'libfabric'
+    comm.mkdir()
+    (fabric/'lib64').mkdir(parents=True)
+    (fabric/'include/rdma').mkdir(parents=True)
+    (fabric/'lib64/libfabric.so').write_bytes(b'fabric')
+    (fabric/'include/rdma/fabric.h').write_text('fixture')
+    (comm/'library.so').write_bytes(b'accepted ARM64 plugin')
+    setup = comm/'network-setup.sh'
+    setup.write_text("export NCCL_NET='AWS Libfabric'\n")
+    sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+    profile = dict(formatVersion=1,image=dict(relativePath='image.sif',sha256=sha(image),ncclRuntime=22902),
+        communication=dict(relativePath='communication',setupSha256=sha(setup),
+                           librarySha256={'library.so':sha(comm/'library.so')},sources={'ofi':'pinned'},libfabricHost=str(fabric)),
+        defaults=dict(slurmNetwork='disable_rdzv_get'))
+    native = dict(ncclRuntime=22902,sources={'ofi':'pinned'},acceptedImage=dict(imageSha256=sha(image)))
+    (comm/'native-build.json').write_text(json.dumps(native))
+    lock = tmp_path/'profile.json'
+    lock.write_text(json.dumps(profile))
+    env = dict(QA_ROOT=str(tmp_path),QA_NETWORK='custom',QA_SLURM_NETWORK='disable_rdzv_get',QA_SECRET='excluded')
+    if scenario in ('image','library','setup'):
+        {'image':image,'library':comm/'library.so','setup':setup}[scenario].write_bytes(b'changed')
+    if scenario == 'host-module':
+        env['LOADEDMODULES'] = 'brics/apptainer-multi-node/0.3.2'
+    if scenario == 'network':
+        env['QA_SLURM_NETWORK'] = ''
+    if scenario == 'implicit-bind':
+        env['APPTAINER_BINDPATH'] = '/host/nccl:/injected'
+    if scenario != 'valid':
+        with pytest.raises(ValueError):
+            deployment.capture(lock,environment=env)
+    else:
+        captured = deployment.capture(lock,environment=env)
+        assert captured['image']['sha256'] == sha(image)
+        assert captured['networkSetup']['text'] == setup.read_text()
+        assert captured['profileSha256'] == sha(lock)
+        assert 'QA_SECRET' not in captured['launchEnvironment']

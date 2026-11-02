@@ -416,6 +416,85 @@ source drift, corrupt checkpoint or numerical mismatch **fails** the stage.
 All NCCL logs remain available when a site/plugin version uses a different log
 format; review the evidence rather than treating absence of proof as a pass.
 
+## Reusing the accepted deployment for simulations
+
+`site-profile.json` pins the accepted SIF SHA256, application/package fingerprint,
+CUDA/NCCL versions, OFI/hwloc sources and installed shared-library hashes. Its
+companion `site-profile.sh` exports paths relative to `QA_ROOT` (default `$HOME`),
+account `brics.b6ez`, the custom profile and Slurm network option. Keep the whole
+harness together in a versioned shared directory; source the profile from that
+directory so Slurm spool paths never select helper files. The current image uses
+NGC26.01, CUDA13.1, NCCL2.29.2, OFI1.18.0/hwloc2.13.0 and host Libfabric2.3.1.
+
+```bash
+source "$HOME/warpsph-runtime-COMMIT/site-profile.sh"
+export QA_PREVIOUS="$QA_RESULTS_ROOT/restart-7989645"
+export QA_NODES=2 QA_GPUS_PER_NODE=1
+export QA_TIME=00:30:00 QA_CPUS_PER_NODE=16
+bash "$QA_HARNESS_ROOT/submit.sh" multi-node
+```
+
+`disable_rdzv_get` is passed to both the allocation and each `srun` step, following
+the [site NCCL examples](https://docs.isambard.ac.uk/user-documentation/guides/nccl/).
+The custom profile adds only OFI/hwloc/host fabric paths ahead of the image's
+libraries, keeping `/host/usr/lib64` last. Do not load the incompatible
+`brics/apptainer-multi-node` module or inherit implicit Apptainer bind paths.
+`network-setup.sh` contains every NCCL/FI tuning variable; its hash and full text
+are captured, alongside explicit bind destinations, GPU visibility handling,
+rendezvous/RAS rules, host fabric/CXI binary hashes and selected Slurm settings.
+No SSH credentials or unrelated environment variables are recorded.
+
+With this profile selected, qualification saves `probes/deployment.json`, pins
+its digest in `report.json`, and seals it with the other retrieved artifacts.
+Image, communication-library, setup-script or Slurm-network drift fails before
+the GPU probe. `deployment.py` can write the same receipt for real simulations.
+New application code requires a new source-pinned image and qualification; moving
+intact accepted artifacts to another shared root is supported through path exports.
+
+For an actual simulation, save a supported eager distributed `RunConfiguration`
+JSON and use this batch-body pattern with the same node/container wrappers. Set
+`SIM_CONFIGURATION` to its absolute host path, `SIM_OUTPUT` to a fresh shared
+directory, `SIM_EDGE_BUDGET` to the chosen edge budget, `SIM_GPUS_PER_NODE` to the
+allocated GPU count, and `SIM_CHECKPOINT_EVERY` to the desired checkpoint cadence.
+Select node/GPU/time/CPU resources at submission, matching those worker settings;
+include `--network=disable_rdzv_get`. Source the profile on the login node and
+export these variables before `sbatch`; the exported QA_HARNESS_ROOT locates it
+from Slurm's spooled batch script.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+: "${QA_HARNESS_ROOT:?Source the versioned site-profile.sh before sbatch}"
+source "$QA_HARNESS_ROOT/site-profile.sh"
+: "${SLURM_JOB_ID:?Submit through sbatch}"
+: "${SIM_CONFIGURATION:?Absolute saved RunConfiguration JSON}"
+: "${SIM_OUTPUT:?Fresh shared output directory}"
+: "${SIM_EDGE_BUDGET:?Choose the edge budget}"
+: "${SIM_GPUS_PER_NODE:?Match the Slurm GPU allocation}"
+: "${SIM_CHECKPOINT_EVERY:?Choose checkpoint cadence in steps}"
+mkdir "$SIM_OUTPUT"
+cp -- "$SIM_CONFIGURATION" "$SIM_OUTPUT/configuration.json"
+export QA_NODES=$SLURM_NNODES QA_GPUS_PER_NODE=$SIM_GPUS_PER_NODE
+export QA_MASTER_ADDR QA_MASTER_PORT=$((20000 + SLURM_JOB_ID % 35000))
+mapfile -t hosts < <(scontrol show hostnames "$SLURM_JOB_NODELIST")
+QA_MASTER_ADDR=${hosts[0]}
+"$QA_PYTHON" "$QA_HARNESS_ROOT/deployment.py" --profile "$QA_DEPLOYMENT_PROFILE" \
+  --output "$SIM_OUTPUT/deployment.json"
+srun --network="$QA_SLURM_NETWORK" --nodes="$QA_NODES" --ntasks="$QA_NODES" \
+  --ntasks-per-node=1 --gpus-per-task="$SIM_GPUS_PER_NODE" --kill-on-bad-exit=1 --unbuffered \
+  bash "$QA_HARNESS_ROOT/node.sh" "$QA_IMAGE" "$SIM_OUTPUT" torchrun \
+  "$QA_NODES" "$SIM_GPUS_PER_NODE" simulation run_distributed.py \
+  --configuration /work/configuration.json --output /work/run --backend nccl \
+  --edge-budget "$SIM_EDGE_BUDGET" --offset-dtype int64 --replica-checks exact \
+  --checkpoint-every "$SIM_CHECKPOINT_EVERY" --timeout-seconds 600
+```
+
+Keep `deployment.json`, copied configuration, native manifests/checkpoints and
+logs with the simulation data. The example reuses the qualified bootstrap; larger
+resolutions, longer integrations and additional GPU counts require their own
+capacity/numerical/performance checks. `--shared-gpu` is a local debugging mode
+and is excluded from physical-node deployment.
+
 ## Startup messages observed on Isambard
 
 Returned job7986156 passes native ARM64/GH200 single-GPU execution, checkpoint

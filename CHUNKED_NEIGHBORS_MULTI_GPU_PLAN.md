@@ -388,6 +388,24 @@ archives, initial scanner logs and build-source notes are indexed in
 `.tmp/isambard-ofi-sources/README.md`. The audit checks receipts/source hashes,
 shared-library hashes, final accounting, fingerprint, live maps and raw logs.
 
+Inter-node continuation (2026-11-02, in progress): user explicitly authorizes
+recording all accepted site setup requirements for later simulations and running
+the two-node/one-GPU qualification. Retain image/build/profile/checksum provenance,
+exact launch/environment/bind settings, then dispatch one bounded multi-node
+stage against accepted restart7989645. Retrieve and independently audit topology,
+actual CXI traffic evidence, numerical parity, restart and transfer integrity.
+Do not auto-start a larger GPU count or long simulation campaign.
+Added pinned `site-profile.json`, parametric `site-profile.sh`, and stdlib
+`deployment.py` receipts: SIF/app/runtime identity, OFI/hwloc library hashes and
+provenance, full setup-script text/hash, host Libfabric/CXI binary hashes,
+explicit binds and selected launch settings. Qualification seals the deployment
+receipt and records its digest; a documented real-simulation batch recipe uses
+the same bootstrap. Slurm network disable_rdzv_get reaches allocation and steps;
+node wrapper uses job-derived RAS address while preserving an explicit override.
+Thirty-two focused checks, shell/embedded Python/guide syntax and full paired
+imports (576 modules/6283 imports/1341 files) pass. Tiny four-step qualification
+fixture omits video deliberately; no physical/model/source-image changes.
+
 ### Static import scanner issue resolved (2026-10-30)
 
 The previously recorded wp_alpha.computeAlpha `find_spec` traceback is fixed.

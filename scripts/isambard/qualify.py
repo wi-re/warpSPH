@@ -59,7 +59,8 @@ def command(args, nodes, ranks_per_node, label, mode, script, script_args):
             return [sys.executable, '-m', 'torch.distributed.run', '--standalone',
                     '--max-restarts=0', f'--nproc-per-node={ranks_per_node}', str(script), *script_args]
         return [sys.executable, str(script), *script_args]
-    return ['srun', '--kill-on-bad-exit=1', '--unbuffered', f'--nodes={nodes}',
+    network = ['--network='+os.environ['QA_SLURM_NETWORK']] if os.environ.get('QA_SLURM_NETWORK') else []
+    return ['srun', *network, '--kill-on-bad-exit=1', '--unbuffered', f'--nodes={nodes}',
             f'--ntasks={nodes}', '--ntasks-per-node=1', f'--gpus-per-task={args.gpus_per_node}',
             '--time=00:20:00', '--nodelist=' + ','.join(args.hosts[:nodes]),
             'bash', str(HERE / 'node.sh'), str(args.image), str(args.output), mode,
@@ -186,6 +187,18 @@ def run(args):
                  mapped(args.output/'runs'/second/'finalState.h5'), '--output', mapped(output))
         report['comparisons'].append(json.loads(output.read_text()))
     try:
+        if environment.get('QA_DEPLOYMENT_PROFILE'):
+            import importlib.util
+            spec = importlib.util.spec_from_file_location('site_deployment', HERE/'deployment.py')
+            deployment = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(deployment)
+            captured = deployment.capture(environment['QA_DEPLOYMENT_PROFILE'], image=args.image,
+                                          image_sha256=report['imageSha256'], environment=environment)
+            atomic_json(args.output/'probes/deployment.json', captured)
+            report['deployment'] = dict(profileSha256=captured['profileSha256'],
+                                        receipt='probes/deployment.json',
+                                        receiptSha256=digest(args.output/'probes/deployment.json'))
+            atomic_json(args.output/'report.json', report)
         if previous and any(previous.get(key) != report.get(key) for key in ('target', 'imageSha256', 'precision', 'backend')):
             raise ValueError('Previous stage used a different target/image/precision/backend; restart at single')
         probe_output = args.output/'probes'

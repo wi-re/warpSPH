@@ -35,6 +35,7 @@ mkdir -p "$QA_RESULTS_ROOT/logs"
 resources=(--parsable --job-name="wsph-$stage" --nodes="$nodes" --ntasks-per-node=1
   --gpus-per-node="$gpus" --cpus-per-task="${QA_CPUS_PER_NODE:-16}" --time="${QA_TIME:-00:45:00}"
   --output="$QA_RESULTS_ROOT/logs/$stage-%j.out")
+[[ -z "${QA_SLURM_NETWORK:-}" ]] || resources+=(--network="$QA_SLURM_NETWORK")
 [[ -z "${QA_ACCOUNT:-}" ]] || resources+=(--account="$QA_ACCOUNT")
 [[ -z "${QA_PARTITION:-}" ]] || resources+=(--partition="$QA_PARTITION")
 sbatch "${resources[@]}" "$here/job.slurm" "$stage"
