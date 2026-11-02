@@ -154,6 +154,15 @@ partition initially; do not infer the scheduler account from the login name or
 home path. Updated guide includes discovery and the confirmed account. The old
 archive remains compatible; actual build/execution is still pending.
 
+Results-path follow-up (2026-11-02): user confirms the running campaign uses
+`QA_RESULTS_ROOT=/home/b6ez/wire.b6ez/qualification`. Inspected submit/job,
+previous-checkpoint binding and retrieval paths: later stages honor the explicit
+results root and `QA_PREVIOUS`; no runtime path fix or relocation is required.
+Keep that value in subsequent login shells. Local download examples must set
+`ISAMBARD_RESULTS` to the same directory instead of the fresh-campaign default.
+The build log under `$QA_ROOT/logs` and test logs under `$QA_RESULTS_ROOT/logs`
+are separate paths. Updated guide spells out current-campaign settings.
+
 ### Static import scanner issue resolved (2026-10-30)
 
 The previously recorded wp_alpha.computeAlpha `find_spec` traceback is fixed.

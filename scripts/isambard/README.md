@@ -116,6 +116,19 @@ setting their overrides. An existing extracted bundle can live elsewhere: set
 `QA_BUNDLE` to its actual location before the block. The SIF output must be a
 fresh filename; keep a previously successful image for subsequent test jobs.
 
+For your current uploaded campaign, the confirmed results directory is
+`/home/b6ez/wire.b6ez/qualification`. Keep it explicitly in subsequent login
+shells:
+
+```bash
+export QA_RESULTS_ROOT="$HOME/qualification"
+```
+
+Later stage submissions and `QA_PREVIOUS` examples use this variable directly;
+changing `QA_ROOT` alone does not change an already-exported results root.
+Build logs are under `QA_BUILD_LOGS`; test Slurm logs are under
+`$QA_RESULTS_ROOT/logs`. Keep the running job's existing output directory.
+
 The build job verifies all uploaded files, requires native `aarch64`, then builds
 with Apptainer fakeroot **on a compute allocation**. Its defaults are one GPU,
 16 CPU cores and one hour; override account/partition/time as needed. It retains
@@ -156,6 +169,14 @@ PIDs, package versions, loaded source identities and network settings.
 From your local machine, set the SSH alias and remote base as in step2. Match
 `ISAMBARD_ROOT` to the `QA_ROOT` actually used on the login node; if you overrode
 `QA_RESULTS_ROOT` remotely, set `ISAMBARD_RESULTS` to that same absolute path.
+
+For the current campaign under your home directory, set these **locally** before
+the retrieval commands, overriding any earlier fresh-campaign defaults:
+
+```bash
+export ISAMBARD_ROOT=/home/b6ez/wire.b6ez
+export ISAMBARD_RESULTS="$ISAMBARD_ROOT/qualification"
+```
 
 ```bash
 export ISAMBARD_SSH=PROJECT.aip2.isambard
