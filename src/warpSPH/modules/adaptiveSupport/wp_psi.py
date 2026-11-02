@@ -118,6 +118,7 @@ def computePsi(
     
 import torch
 from warpSPHCore import KernelFunctions
+from warpSPHCore.autograd.stream import torchWarpStream
 from warpSPHCore import *
 def generatePSILut_warp(
         
@@ -127,7 +128,8 @@ def generatePSILut_warp(
     nLut: int,
     table: str = 'lattice',
 ):
-    device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+    device = torch.device('cuda',torch.cuda.current_device()) if torch.cuda.is_available() else torch.device('cpu')
+    warpDevice = wp.device_from_torch(device)
     # torch_t = get_torch_precision()
 
     torch_t = torch.float64
@@ -137,32 +139,36 @@ def generatePSILut_warp(
     N_Hs = torch.zeros((nLut,3), dtype=torch_t, device=device)
     psiHLats = torch.zeros((nLut,3), dtype=torch_t, device=device)
 
-    for d in range(1, 4):
-        # print(f'Generating LUT for dim {d}...')
-        n_out_wp = wp.zeros(nLut, dtype=scalar_t)
-        psi_wp = wp.zeros(nLut, dtype=scalar_t)
-        psiH_wp = wp.zeros(nLut, dtype=scalar_t)
-        N_H_wp = wp.zeros(nLut, dtype=scalar_t)
-        psiHLat_wp = wp.zeros(nLut, dtype=scalar_t)
+    # Kernel outputs feed Torch clones immediately; use its current stream
+    # even on a cold lookup-table cache and respect the selected rank device.
+    with torchWarpStream(device):
+        for d in range(1, 4):
+            # print(f'Generating LUT for dim {d}...')
+            n_out_wp = wp.zeros(nLut, dtype=scalar_t, device=warpDevice)
+            psi_wp = wp.zeros(nLut, dtype=scalar_t, device=warpDevice)
+            psiH_wp = wp.zeros(nLut, dtype=scalar_t, device=warpDevice)
+            N_H_wp = wp.zeros(nLut, dtype=scalar_t, device=warpDevice)
+            psiHLat_wp = wp.zeros(nLut, dtype=scalar_t, device=warpDevice)
 
-        wp.launch(
-            computePsi,
-            dim = nLut,
-            inputs = [
-                kernel.value,
-                d,
-                n_min,
-                n_max,
-                nLut,
-                n_out_wp,
-                psi_wp,
-                psiH_wp,
-                N_H_wp,
-                psiHLat_wp
-            ]
-        )
-        psis[:, d-1] = wp.to_torch(psi_wp).clone().to(device)
-        psiHs[:, d-1] = wp.to_torch(psiH_wp).clone().to(device)
-        N_Hs[:, d-1] = wp.to_torch(N_H_wp).clone().to(device)
-        psiHLats[:, d-1] = wp.to_torch(psiHLat_wp).clone().to(device)
-    return wp.to_torch(n_out_wp).clone().to(device), psis, (psiHLats if table == 'lattice' else psiHs), N_Hs
+            wp.launch(
+                computePsi,
+                dim = nLut,
+                device = warpDevice,
+                inputs = [
+                    kernel.value,
+                    d,
+                    n_min,
+                    n_max,
+                    nLut,
+                    n_out_wp,
+                    psi_wp,
+                    psiH_wp,
+                    N_H_wp,
+                    psiHLat_wp
+                ]
+            )
+            psis[:, d-1] = wp.to_torch(psi_wp).clone().to(device)
+            psiHs[:, d-1] = wp.to_torch(psiH_wp).clone().to(device)
+            N_Hs[:, d-1] = wp.to_torch(N_H_wp).clone().to(device)
+            psiHLats[:, d-1] = wp.to_torch(psiHLat_wp).clone().to(device)
+        return wp.to_torch(n_out_wp).clone().to(device), psis, (psiHLats if table == 'lattice' else psiHs), N_Hs

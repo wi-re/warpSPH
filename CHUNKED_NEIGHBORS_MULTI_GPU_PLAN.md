@@ -2309,9 +2309,9 @@ source snapshots and paired commit receipt: `.tmp/l6-compatibility-20261030/`.
 
 ## Phase 5 — remaining schemes and compatibility
 
-- [ ] Inutsuka list variants and MFM/MFV geometry/kappa/closure workspaces, including
-  the independent closure reserve and iterative matvec/vector exchanges/global
-  reductions. Do not claim meshless support from flux-kernel parity alone.
+- [x] Bounded Inutsuka list variants and MFM/MFV geometry/kappa/closure workspaces,
+  including independent closure reserve and iterative matvec/vector exchanges/
+  global reductions (C2). Wider boundary/material/temporal contexts stay gated.
 - [x] Native accepted-step checkpoint/restart across chunk budgets and local
   process counts: canonical particle/forcing/time state, reconstructed owned
   adjacency and int32-to-int64 local offsets, within the L1 scope above.
@@ -2854,3 +2854,35 @@ examples/helpers parse, default and explicit profile overrides pass. Source
 scanner576/6285/1341 and IO/CRKSPH regressions passed before source freeze; only
 docs/profile metadata changed subsequently. Harness commit e7627d3; isolated
 frontend branch clean after coherent commits. No push or source/core merge.
+
+### Local support step1: native empty-owner lifecycle audit (2026-11-02)
+
+User authorizes step1; retain local-only scope, no particle-layout integration
+or new physical GPU/site campaign. Audit confirms bounded C1/C2/W1/I1 native
+stage/restart coverage exists. Genuine gap: core empty-owner transport tests
+are not an end-to-end empty-owner scheme qualification. Current managed solver
+tests use small row caps, leaving every rank active. Add native flat versus
+all-work-on-one-rank checks, checkpoint, and finer-partition resume that activates
+the idle rank across admitted compressible/delta/projection families. Check
+particle state/history, forcing/source clocks and ownership, without global J/W
+fallbacks or model/default changes. Tight repeated fixtures omit video and keep
+progress/timing. Evidence indexed in development .tmp/local-scheme-support-20261102/.
+
+Local CUDA empty-owner audit exposes a cold Owen LUT producer/consumer stream
+race: positions match but supports diverge across ranks before the next operator.
+wp_psi.generatePSILut_warp allocates/launches on implicit Warp device/stream and
+immediately clones through Torch current stream; cache warmup can hide it.
+A default-stream warmup followed by nondefault flat run passes, while two cold
+nondefault ranks produce different supports. Preserve raw CUDA contract/field
+captures. Fix only device/current-stream ordering, not LUT kernel/formulas; add
+a cold-cache local regression and repeat affected scheme coverage.
+
+Cold LUT stream regression fails before the repair and passes afterwards;
+wp_psi.computePsi numerical kernel is unchanged. The generator now selects
+Torch current CUDA device (instead of fixed cuda0) and bridges Warp allocation/
+launch plus consuming Torch clones through torchWarpStream. No device-wide fence
+or method/default change. All17 2D native configurations pass local CUDA/NCCL
+empty-owner/restart checks after the repair; all28 2D/3D configurations pass
+CPU/Gloo. Final3D CUDA, existing native regression and import gates in progress.
+Documentation audit also removes obsolete claims that MFM/MFV are unported and
+that physical CRKSPH rank changes remain unqualified; site baseline is frozen.

@@ -23,7 +23,7 @@ sequence, qualification evidence and remaining capacity/site gates.
 | Native checkpoint | Accepted-step drivenTurbulence for eight compressible schemes; periodic 2D tgv-wc for delta/Sun2017 and tgv for four native projections | Native particle/time/search history; driven cases retain FourierOU/source ledgers; delta uses its own density/mask-history schema and never stores frozen diffusion or pair arrays; projections save native pressure impulses and nominal/next timestep clocks |
 | Legacy checkpoint | Qualified version-1 CSR/COO import for Monaghan/CRKSPH/CompSPH | Godunov legacy import explicitly rejects; use the native format |
 | Actual wide-edge addressing | Up to2,500,000,000 real neighbours across38 bounded chunks; dedicated J/work; eager/prepared density; filtering and owner transfers | Dense debug geometry, one GPU, standalone/two NCCL ranks, both local offset widths; per-chunk extents remain bounded |
-| Process/rank changes | Gloo 1–5 ranks and tiny two-process/one-GPU NCCL controls | Physical device-count changes and multi-node topology remain unqualified |
+| Process/rank changes | Gloo 1–5 ranks and two-process/one-GPU NCCL controls; frozen CRKSPH Isambard baseline also passes 1/2 physical GPUs and two nodes | Site coverage is the tiny CRKSPH fixture; broader scheme functionality is qualified locally before particle-layout integration and renewed physical tests |
 
 The dedicated launcher currently accepts `drivenTurbulence` with these eight
 compressible schemes. Qualified PESPH pressure-entropy driving uses `solver.variant=PressureEntropy`,
@@ -117,9 +117,11 @@ performance claim follows from these controls.
 
 ## Unsupported contexts
 
-MFM/MFV and other unported scheme families reject at distributed startup.
-Meshless geometry, closure reserves and iterative exchanges require their own
-ports and qualification. Wall closure and material paths also remain gated.
+The admitted families and configurations are listed above; MFM/MFV geometry,
+closure reserves and iterative exchanges have been ported and locally qualified.
+Additional case adapters, wall/free-surface/material paths and configurations
+outside the declared scope remain gated. A family admission does not imply
+support for every boundary, source, temporal method or physics option.
 
 Chunked reverse/forward AD, JVP/HVP, deferred search and CUDA graph execution are
 unsupported. Search rejects dual tensors before detached snapshots can discard
@@ -150,8 +152,12 @@ preserves normalized floating Warp ASTs and passes all 16 existing flat Godunov
 gradchecks. See the canonical plan for exact test counts and source variants.
 
 L1–L6 CUDA evidence used one GPU under ACSPH contention; L7 ran after the GPU
-was released. All CUDA evidence still uses one physical device, and timings are
-diagnostic.
+was released. Those local cohorts use one physical device, and their timings are diagnostic.
+Subsequent Isambard CRKSPH jobs8004381/8004781/8005076/8005442 qualify native
+GH200 single/two-GPU, cross-job restart and real two-node/CXI traffic on a frozen
+image; all113 artifacts were independently verified. Current broader functional
+continuation stays local until particle-reordering integration and local debugging
+are complete. See the canonical plan and scripts/isambard/README.md.
 L7 now qualifies real total-edge access above INT_MAX:47,000/50,000 coincident
 particles, up to2,500,000,000 stored neighbours and three-component work buffers are fully
 written/read, with explicit device probes across2^31. Production density matches
