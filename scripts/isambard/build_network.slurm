@@ -16,11 +16,12 @@ export QA_RESULTS_ROOT=${QA_RESULTS_ROOT:-$QA_ROOT/qualification}
 export QA_COMM_SOURCES=${QA_COMM_SOURCES:-$QA_ROOT/communication-sources}
 export QA_LIBFABRIC_HOST=${QA_LIBFABRIC_HOST:-/opt/cray/libfabric/2.3.1}
 export QA_COMM_ROOT=${QA_COMM_ROOT:-$QA_ROOT/communication/ofi-$SLURM_JOB_ID}
-here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# Slurm executes a spooled copy; sibling files must use the uploaded harness path.
+here=${QA_BUILD_HARNESS:-$QA_BUNDLE/harness}
 for path in "$QA_IMAGE" "$QA_PREVIOUS" "$QA_COMM_SOURCES" "$QA_LIBFABRIC_HOST" "$QA_COMM_ROOT"; do
   [[ $path = /* && $path != *:* && $path != *,* ]] || { echo 'Use absolute bind paths without colons or commas.' >&2; exit 2; }
 done
-[[ -f $QA_IMAGE && -f $here/build_network.sh && -f $here/communication-sources.json && -f $here/network-custom.example.sh ]] || exit 2
+[[ -f $QA_IMAGE && -f $here/build_network.sh && -f $here/communication-sources.json && -f $here/network-custom.example.sh ]] || { echo "Missing image/build inputs; QA_BUILD_HARNESS=$here" >&2; exit 2; }
 [[ -d $QA_COMM_SOURCES && -d $QA_LIBFABRIC_HOST ]] || exit 2
 # Exclude the incompatible site's automatic NCCL/CUDA injection, even if loaded by caller.
 if [[ ${LOADEDMODULES:-} == *brics/apptainer-multi-node* ]]; then

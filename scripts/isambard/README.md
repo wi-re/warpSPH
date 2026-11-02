@@ -336,6 +336,7 @@ injection module unloaded:
 
 ```bash
 export QA_PREVIOUS="$QA_RESULTS_ROOT/restart-7989645"
+export QA_BUILD_HARNESS="$QA_ROOT/warpsph-communication-build/harness"
 export QA_COMM_SOURCES="$QA_ROOT/communication-sources"
 export QA_LIBFABRIC_HOST=/opt/cray/libfabric/2.3.1
 sbatch --account=brics.b6ez --output="$QA_ROOT/logs/network-build-%j.out" \

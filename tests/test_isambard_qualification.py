@@ -255,3 +255,28 @@ def test_communication_build_checks_sources_before_extraction(tmp_path, corrupt)
     assert result.returncode == (1 if corrupt else 0), result.stdout+result.stderr
     if corrupt:
         assert 'Source checksum mismatch' in result.stderr
+
+
+def test_network_build_resolves_harness_when_slurm_spools_script(tmp_path):
+    import os
+    harness = tmp_path/'uploaded-harness'
+    harness.mkdir()
+    for name in ('build_network.sh', 'communication-sources.json', 'network-custom.example.sh'):
+        (harness/name).write_text('fixture')
+    image = tmp_path/'accepted.sif'
+    image.write_text('fixture')
+    bindir = tmp_path/'bin'
+    bindir.mkdir()
+    (bindir/'apptainer').write_text('#!/bin/sh\nexit 0\n')
+    (bindir/'apptainer').chmod(0o755)
+    spool = tmp_path/'spool/job'
+    spool.mkdir(parents=True)
+    script = (HARNESS/'build_network.slurm').read_text().split('output=', 1)[0]
+    (spool/'slurm_script').write_text(script+'\necho "harness resolved"\n')
+    environment = dict(os.environ, SLURM_JOB_ID='123', QA_ROOT=str(tmp_path),
+        QA_IMAGE=str(image), QA_PREVIOUS=str(tmp_path), QA_COMM_SOURCES=str(tmp_path),
+        QA_LIBFABRIC_HOST=str(tmp_path), QA_BUILD_HARNESS=str(harness), LOADEDMODULES='',
+        PATH=str(bindir)+':'+os.environ['PATH'])
+    result = subprocess.run(['bash',str(spool/'slurm_script')],env=environment,text=True,capture_output=True)
+    assert result.returncode == 0, result.stdout+result.stderr
+    assert 'harness resolved' in result.stdout

@@ -356,6 +356,11 @@ pass; all shell/embedded Python parses. Full paired-checkout scan passes576
 modules/6283 imports/1340 files with explicit writable cache paths and paired
 PYTHONPATH. Initial unpaired/read-only-cache attempts failed on environment
 mismatch; no library fixes or production-source changes were needed.
+First build7999738 stopped before compilation (FAILED2:0,0s,nid010111): Slurm
+spools batch scripts, so BASH_SOURCE's parent is not the uploaded harness. Fixed
+with explicit QA_BUILD_HARNESS (default QA_BUNDLE/harness), added a spooled-script
+regression and retained the failed submission/log/accounting. Twenty-three
+focused checks now pass; corrected build will be resubmitted separately.
 
 ### Static import scanner issue resolved (2026-10-30)
 
