@@ -280,3 +280,37 @@ def test_network_build_resolves_harness_when_slurm_spools_script(tmp_path):
     result = subprocess.run(['bash',str(spool/'slurm_script')],env=environment,text=True,capture_output=True)
     assert result.returncode == 0, result.stdout+result.stderr
     assert 'harness resolved' in result.stdout
+
+
+@pytest.mark.parametrize('capture_failure', [False, True])
+def test_preflight_captures_live_libraries_and_always_destroys_group(tmp_path, capture_failure):
+    container = tmp_path/'container.sh'
+    container.write_text('host) source /host/adapt.sh ;;')
+    probe = tmp_path/'probe.py'
+    probe.write_text("""import builtins, json
+builtins.events = []
+class Dist:
+    def destroy_process_group(self):
+        builtins.events.append('destroy')
+dist = Dist()
+def main():
+    try:
+        builtins.events.append('probe')
+    finally:
+        dist.destroy_process_group()
+try:
+    main()
+except RuntimeError:
+    pass
+print(json.dumps(builtins.events))
+""")
+    helper = "import builtins\ndef capture_runtime_libraries():\n    builtins.events.append('capture')\n"
+    if capture_failure:
+        helper += "    raise RuntimeError('capture failed')\n"
+    (tmp_path/'runtime_libraries.py').write_text(helper)
+    script = (HARNESS/'network_preflight.slurm').read_text()
+    embedded = script.split("<<'BOOTSTRAP_PY'\n",1)[1].split('\nBOOTSTRAP_PY\n',1)[0]
+    subprocess.run([sys.executable,'-',str(container)],input=embedded,text=True,check=True)
+    result = subprocess.run([sys.executable,str(probe)],text=True,capture_output=True)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == ['probe','capture','destroy']

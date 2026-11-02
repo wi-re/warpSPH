@@ -272,7 +272,8 @@ sbatch --account=brics.b6ez --output="$QA_ROOT/logs/network-preflight-%j.out" \
 The job uses one GPU for at most15 minutes. It forces AWS Libfabric/CXI and runs
 the real GPU probe, requiring the same SIF, source/package fingerprint and loaded
 NCCL runtime version as the accepted restart stage. It queries the already-loaded
-library directly and saves its mapped path plus CUDA/fabric library paths; Torch
+library directly before process-group teardown and saves its mapped path plus
+CUDA/fabric library paths; Torch
 package/build metadata alone is insufficient. Runtime downgrade, import/plugin
 failure or Socket fallback fails; inspect `network-preflight-JOB_ID/report.json`
 and logs. A successful preflight certifies library/provider loading only.

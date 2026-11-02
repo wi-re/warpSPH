@@ -30,6 +30,8 @@ mkdir "$output"
 mkdir "$output/logs" "$output/probes"
 # Keep the uploaded/image sources unchanged. Extend only a private probe copy.
 cp -R -- "$QA_BUNDLE/harness" "$output/harness"
+# Preserve the executed Slurm copy, including when the original bundle is older.
+cp -- "${BASH_SOURCE[0]}" "$output/harness/network_preflight.slurm"
 # Older uploaded wrappers source adapt.sh with probe arguments still in scope.
 "${QA_PYTHON:-python3}" - "$output/harness/container.sh" <<'BOOTSTRAP_PY'
 from pathlib import Path
@@ -38,10 +40,21 @@ path = Path(sys.argv[1])
 old = 'host) source /host/adapt.sh ;;'
 new = 'host) adapt_host_environment() { source /host/adapt.sh; }; adapt_host_environment ;;'
 path.write_text(path.read_text().replace(old, new, 1))
+probe = path.parent/'probe.py'
+old = '    finally:\n        dist.destroy_process_group()'
+new = ('    finally:\n        try:\n'
+       '            from runtime_libraries import capture_runtime_libraries\n'
+       '            capture_runtime_libraries()\n'
+       '        finally:\n            dist.destroy_process_group()')
+text = probe.read_text()
+if text.count(old) != 1:
+    raise RuntimeError('Probe teardown changed; cannot install runtime capture safely')
+probe.write_text(text.replace(old, new, 1))
 BOOTSTRAP_PY
-cat >> "$output/harness/probe.py" <<'RUNTIME_PY'
+cat > "$output/harness/runtime_libraries.py" <<'RUNTIME_PY'
 
-if __name__ == '__main__':
+def capture_runtime_libraries():
+    # NCCL unloads its network plugin during destroy_process_group.
     import ctypes
     import json
     import os

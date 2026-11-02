@@ -360,7 +360,19 @@ First build7999738 stopped before compilation (FAILED2:0,0s,nid010111): Slurm
 spools batch scripts, so BASH_SOURCE's parent is not the uploaded harness. Fixed
 with explicit QA_BUILD_HARNESS (default QA_BUNDLE/harness), added a spooled-script
 regression and retained the failed submission/log/accounting. Twenty-three
-focused checks now pass; corrected build will be resubmitted separately.
+focused checks now pass. Corrected source87e0e0a submitted as build7999853
+on nid010043; archives verified, hwloc compiled, OFI configured, native build
+completed in3m45s, COMPLETED0:0. Retrieved native build report/provenance and
+all3 shared-library hashes verify independently; mapped OFI1.18.0, custom hwloc,
+host Libfabric2.3.1/libcxi retain image CUDA13.1/NCCL22902 and exact SIF SHA.
+Custom preflight8000492 on nid010028 passes the real GPU probe and logs loaded
+plugin v11, AWS Libfabric, cxi/4 NICs and SENDRECV. Final report fails because the
+original appended map snapshot ran after destroy_process_group unloaded the
+plugin. Failed result remains preserved; observer moved into the probe's live
+teardown path before destruction, with finally-protected cleanup. Added positive
+and capture-failure ordering regressions;25 focused checks pass. Preflight also
+snapshots its actual executed Slurm script, rather than an older bundle copy.
+Repeat only the one-GPU preflight using the existing passed build.
 
 ### Static import scanner issue resolved (2026-10-30)
 
