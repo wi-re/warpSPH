@@ -115,8 +115,15 @@ class CompSPHSystem(BaseIntegrationSystem):
     rerunRequest: Optional[torch.Tensor] = None
     #: Optional body sources; appended to preserve positional construction.
     sourceTerms: object = None
+    #: Optional private compute-list/layout ownership, installed only by MortonStepper.
+    spatialContext: object = None
+    #: Keep UID-ordered frame export after leaving the optional compute cache.
+    canonicalExport: bool = False
 
     def initialize(self, dt, *args, stageWeights=None, rerun=None, **kwargs):
+        # A plain driver can safely leave the optional adapter: public adjacency
+        # is either in this state order or None. Never carry an old private cache.
+        self.spatialContext = None
         schemeConfig = kwargs.get('schemeConfig')
         if getattr(schemeConfig, 'crkEvolution', 'summation') in ('spheral', 'paper') and rerun is None:
             from ..modules.crk.evolution import prepareStep
@@ -137,12 +144,17 @@ class CompSPHSystem(BaseIntegrationSystem):
             self.supportGrid.pending, self.listGrid.pending = [], []
         return super().initialize(dt, *args, **kwargs)
 
+    def preprocess(self, initialState, dt, *args, **kwargs):
+        from ..modules.compressibleStage import preprocessCompressibleStage
+        preprocessCompressibleStage(self, kwargs.get('config'), kwargs.get('schemeConfig'), kwargs.get('stageIndex'))
+        return super().preprocess(initialState, dt, *args, **kwargs)
+
     def initializeNewState(self, *args, verbose=False, **kwargs):
         state = get_reference_state(self)
         if verbose:   # self.t may be a device tensor: format it only when printing
             print(f'Initializing new state [t={self.t}]')
         return CompSPHSystem(state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain,
-                             pairWork=self.pairWork, supportGrid=self.supportGrid, listGrid=self.listGrid, sourceTerms=self.sourceTerms)
+                             pairWork=self.pairWork, supportGrid=self.supportGrid, listGrid=self.listGrid, sourceTerms=self.sourceTerms, spatialContext=self.spatialContext, canonicalExport=self.canonicalExport)
     
     def apply_position_update(self, update, spec: PositionUpdateSpec, **kwargs):
         return update_position(self, update, spec, 'position', 'position_derivative', 'velocity', 'velocity_derivative')

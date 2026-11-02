@@ -47,7 +47,8 @@ def test_replacement_targets_follow_real_midpoint_updates_without_derivative_reu
     import warpSPHCore
     import crkIdealH
     module=importlib.import_module('warpSPH.schemes.compressible.crkSPH')
-    monkeypatch.setattr(module,'solveStageSupport',lambda *a,**k:None)
+    preparation=importlib.import_module('warpSPH.modules.compressibleStage')
+    monkeypatch.setattr(preparation,'solveStageSupport',lambda *a,**k:None)
     monkeypatch.setattr(module,'computeCRKdudt',lambda state,*a:torch.zeros_like(state.densities))
     monkeypatch.setattr(warpSPHCore,'buildVerletList',lambda *a,**k:NS())
     monkeypatch.setattr(crkIdealH,'ideal_support',lambda state,*a,**k:(.5*state.supports+state.positions[:,0],None,None))
@@ -68,7 +69,7 @@ def test_replacement_targets_follow_real_midpoint_updates_without_derivative_reu
     import warpSPH.configurations.compute as compute
     monkeypatch.setattr(compute,'neighborSearchOptions',lambda c:{})
     def rhs(system,dt,**kwargs):
-        module.solveStageSupport(system,system.state,c,sc);s=system.state;seen.append(s.supports.clone())
+        preparation.solveStageSupport(system,system.state,c,sc);s=system.state;seen.append(s.supports.clone())
         module.computeCRKdudt(s,c,sc,system.adjacency,None)
         return CompressibleSystemUpdate(dxdt=s.velocities,dvdt=torch.zeros_like(v),dudt=0*one,drhodt=0*one,dEdt=0*one),system.adjacency,s
     tableau=NS(a=np.array([[0.,0.],[.5,0.]]),b=np.array([0.,1.]),c=np.array([0.,.5]));dt=.2

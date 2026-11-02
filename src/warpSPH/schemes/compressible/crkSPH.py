@@ -10,13 +10,11 @@ energy-balance term `f_ij`. `gradHState` is unconditionally `None` (the grad-h f
 read; the torch version stays in the core for the forward-mode tangent path).
 """
 
-from ...modules.adaptiveSupport import solveStageSupport
 from ...modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
-from ...modules.compressibleWall import beginCompressibleWall, clampSupportsToVolume
+from ...modules.compressibleWall import clampSupportsToVolume
 from ...modules.compSPH.operators import computeCompSPHBalanceTerm
-from ...modules.compSPH.pairWork import accumulateStage, startStage, stageRebuildSlack
-from ...modules.compSPH.supportGrid import solvesOnGrid
-from ...utils.pairList import stagePairList
+from ...modules.compSPH.pairWork import accumulateStage
+from ...modules.compressibleStage import prepareCompressibleStage
 from ...modules.crk import CRKStage, computeCRKAccel, computeCRKdudt, crkFactors
 from ...modules.eos import refreshEOS
 from ...modules.momentum import computeMomentumConsistent
@@ -98,20 +96,8 @@ def crkSPH_step(
     t = currentSystem.t
     gradHState = None
 
-    onGrid = solvesOnGrid(schemeConfig)             # stepMode 'graph' (or supportSolveOnGrid): the support solve on the fixed-shape grid
-    rebuildSlack = stageRebuildSlack(currentSystem, stageIndex)
-
-    with record_function("[warpSPH] - [crkSPH - 01] wall"):
-        wall = beginCompressibleWall(currentState, config)
-        startStage(currentSystem, currentState, config, stageIndex)
-
-    with record_function("[warpSPH] - [crkSPH - 02] optimal support"):
-        solveStageSupport(currentSystem, currentState, config, schemeConfig, onGrid=onGrid, rebuildSlack=rebuildSlack)
-
-    with record_function("[warpSPH] - [crkSPH - 02b] adjacency"):
-        # list mode: the solver validated the list against the particles and every support it used (and rebuilt it if needed);
-        # grid mode: an optimistic stage with a deferred device flag, or the explicit check / rebuild (utils/pairList.py)
-        adjacency = stagePairList(currentSystem, currentState, config, schemeConfig, onGrid=onGrid, rebuildSlack=rebuildSlack)
+    prepared = prepareCompressibleStage(currentSystem, config, schemeConfig, stageIndex, label='crkSPH')
+    wall, adjacency = prepared.wall, prepared.adjacency
 
     with record_function("[warpSPH] - [crkSPH - 03] support clamp"):
         # only reduces h, so the list stays valid; wall cases only (modules/compressibleWall/supportClamp.py)

@@ -42,7 +42,7 @@ def prepare(root):
     for name in (__file__,'scripts/crkIdealH.py','scripts/study_densityEvolution.py','scripts/study_blobThermal.py',
         'scripts/compare_spheralMaterials.py','src/warpSPH/modules/adaptiveSupport/optimalSupportOwen.py',
         'src/warpSPH/modules/adaptiveSupport/owenLUT.py','src/warpSPH/modules/adaptiveSupport/wp_psi.py',
-        'src/warpSPH/modules/crk/evolution.py','src/warpSPH/systems/compSPH.py','src/warpSPH/schemes/compressible/crkSPH.py'):
+        'src/warpSPH/modules/compressibleStage.py','src/warpSPH/modules/crk/evolution.py','src/warpSPH/systems/compSPH.py','src/warpSPH/schemes/compressible/crkSPH.py'):
         p=Path(name);h=hashlib.sha256(p.read_bytes()).hexdigest();shutil.copyfile(p,root/'sources'/f'{p.stem}_{h[:12]}{p.suffix}');sources[str(p)]=h
     save(root/'provenance.json',dict(rows=rows,sources=sources,parent=str(parent),tableSHA256=hashlib.sha256((root/'tables.npz').read_bytes()).hexdigest(),
         policies=POLICIES,references=json.loads((parent/'provenance.json').read_text())['references'],
@@ -54,8 +54,9 @@ def install_support(s):
     from warpSPHCore import buildVerletList,SupportScheme
     from warpSPH.configurations.compute import neighborSearchOptions
     from crkIdealH import ideal_support
-    module=importlib.import_module('warpSPH.schemes.compressible.crkSPH');systems=importlib.import_module('warpSPH.systems.compSPH')
-    solve,du,apply,finalize=module.solveStageSupport,module.computeCRKdudt,systems.CompSPHSystem.apply_state_update,systems.CompSPHSystem.finalize
+    module=importlib.import_module('warpSPH.schemes.compressible.crkSPH')
+    preparation=importlib.import_module('warpSPH.modules.compressibleStage');systems=importlib.import_module('warpSPH.systems.compSPH')
+    solve,du,apply,finalize=preparation.solveStageSupport,module.computeCRKdudt,systems.CompSPHSystem.apply_state_update,systems.CompSPHSystem.finalize
     policy=s['supportPolicy'];audit=dict(rhs=0,replacements=0,finalReplacements=0,absoluteBoundCount=0,minimumSupport=None,maximumSupport=0.,samples=[]);latest={}
     def observe(state):
         lo=float(state.supports.min());hi=float(state.supports.max())
@@ -108,7 +109,7 @@ def install_support(s):
             # The normal Warp finalizer otherwise restores the midpoint RHS H.
             system.state.supports=accepted;audit['finalReplacements']+=1
         return result
-    module.solveStageSupport=solve_support;module.computeCRKdudt=derivative
+    preparation.solveStageSupport=solve_support;module.computeCRKdudt=derivative
     systems.CompSPHSystem.apply_state_update=state_update;systems.CompSPHSystem.finalize=finish
     return audit
 

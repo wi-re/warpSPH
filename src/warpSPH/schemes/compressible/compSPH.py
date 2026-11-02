@@ -11,12 +11,11 @@ persist it).
 in call order): every region does one thing, so a profile or a call audit names it.
 """
 
-from ...modules.adaptiveSupport import computeOmega, solveStageSupport
+from ...modules.adaptiveSupport import computeOmega
 from ...modules.boundaryConditions import computeForcing, enforceDirichlet, enforceUpdates
-from ...modules.compressibleWall import beginCompressibleWall, clampSupportsToVolume
+from ...modules.compressibleWall import clampSupportsToVolume
 from ...modules.compSPH.operators import computeCompSPHAccel, computeCompSPHBalanceTerm
-from ...modules.compSPH.pairWork import accumulateStage, startStage, stageRebuildSlack
-from ...modules.compSPH.supportGrid import solvesOnGrid
+from ...modules.compSPH.pairWork import accumulateStage
 from ...modules.density import computeDensities
 from ...modules.eos import refreshEOS
 from ...modules.momentum import computeMomentumConsistent
@@ -26,7 +25,7 @@ from ...systems.compSPH import CompSPHSystem
 from ...systems.compressibleMonaghan import CompressibleSystemUpdate
 from ...configurations.compSPHConfig import CompSPHConfig
 from ...configurations.simulationConfig import SimulationConfig
-from ...utils.pairList import stagePairList
+from ...modules.compressibleStage import prepareCompressibleStage
 from warpSPHCore import GradHState, OperationProperties, SupportScheme
 from warpSPHCore.profiling import record_function
 import torch
@@ -47,18 +46,8 @@ def compSPH_step(
     currentState = currentSystem.state
 
     t = currentSystem.t
-    onGrid = solvesOnGrid(schemeConfig)
-    rebuildSlack = stageRebuildSlack(currentSystem, stageIndex)
-
-    with record_function("[warpSPH] - [compSPH - 01] wall"):
-        wall = beginCompressibleWall(currentState, config)
-        startStage(currentSystem, currentState, config, stageIndex)
-
-    with record_function("[warpSPH] - [compSPH - 02] optimal support"):
-        solveStageSupport(currentSystem, currentState, config, schemeConfig, onGrid=onGrid, rebuildSlack=rebuildSlack)
-
-    with record_function("[warpSPH] - [compSPH - 03] adjacency"):
-        adjacency = stagePairList(currentSystem, currentState, config, schemeConfig, onGrid=onGrid, rebuildSlack=rebuildSlack)
+    prepared = prepareCompressibleStage(currentSystem, config, schemeConfig, stageIndex, label='compSPH')
+    wall, adjacency = prepared.wall, prepared.adjacency
 
     with record_function("[warpSPH] - [compSPH - 04] support clamp"):
         # only reduces h, so the list stays valid; wall cases only (modules/compressibleWall/supportClamp.py)

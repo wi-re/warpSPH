@@ -43,6 +43,13 @@ def exportSimulationSystem(
     exportStagesAdjacency = True,
     extraData = None,
 ):
+    if getattr(system, 'spatialContext', None) is not None or getattr(system, 'canonicalExport', False):
+        if extraData:
+            raise ValueError('sorted frame extraData needs explicit axes; use canonical_view and transform extras first')
+        # Optional private sorting is invisible to the particle/stage file order.
+        from ..evaluation import canonical_view
+        system, stages = canonical_view(system, stages, include_adjacency=exportAdjacency,
+                                         include_stage_adjacency=exportStagesAdjacency)
     outFolderPath = f'{exportPath}/trajectory/'
     os.makedirs(outFolderPath, exist_ok=True)
     outFile = h5py.File(f'{exportPath}/trajectory/{tag}.h5', 'w')
@@ -225,6 +232,8 @@ def writeInitialData(
     extraData: dict | None = None,
     extraFields: tuple = (),
 ):
+    if getattr(runningState, 'spatialContext', None) is not None or getattr(runningState, 'canonicalExport', False):
+        raise ValueError('sorted fixed-roster trajectory export needs an ID/schema adapter; use exportSimulationSystem frames')
     if extraData is None:
         extraData = {}
 
@@ -384,6 +393,8 @@ def _writeFrameData(group, values):
 
 def writeFrame(groups, i, state, stages, config, schemeConfig, uniqueParticles=True, writeStages=False,
               extraFields: tuple = (), extraData: dict | None = None):
+    if getattr(state, 'spatialContext', None) is not None or getattr(state, 'canonicalExport', False):
+        raise ValueError('sorted fixed-roster trajectory export needs an ID/schema adapter; use exportSimulationSystem frames')
     positionGroup, velocityGroup, densityGroup, timeGroup, rigidBodyGroup, *extraGroups = groups
 
     positionGroup.create_dataset(f'frame_{i:05d}', data=state.state.positions.cpu().numpy())

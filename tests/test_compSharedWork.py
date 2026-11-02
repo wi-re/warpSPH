@@ -26,7 +26,7 @@ def test_work_matches_expanded(dim,integrator,gradH):
 
 
 def test_changed_list_replay_matches_expanded(monkeypatch):
-    module=importlib.import_module('warpSPH.schemes.compressible.compSPH');original=module.stagePairList
+    module=importlib.import_module('warpSPH.modules.compressibleStage');original=module.stagePairList
     def changed(system,*args,**kw):
         adjacency=original(system,*args,**kw)
         return adjacency if system.pairWork.conservative else replace(adjacency)

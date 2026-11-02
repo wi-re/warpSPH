@@ -29,6 +29,7 @@ SOURCES = (__file__, 'scripts/study_crkEnergySuite.py', 'scripts/study_densityEv
     'src/warpSPH/modules/adaptiveSupport/wp_materialPsi.py',
     'src/warpSPH/modules/adaptiveSupport/optimalSupportOwen.py',
     'src/warpSPH/modules/crk/evolution.py', 'src/warpSPH/schemes/compressible/crkSPH.py',
+    'src/warpSPH/modules/compressibleStage.py',
     'src/warpSPH/systems/compSPH.py', 'src/warpSPH/configurations/crkSPH.py',
     'src/warpSPH/configurations/compressibleConfig.py', 'src/warpSPH/runner/configuration.py')
 
@@ -165,7 +166,7 @@ def run_row(args):
     expected = json.loads((args.output.parent/'provenance.json').read_text())['sources']
     assert source_hashes() == expected, 'Numerical source changed since preparation'
     density = install_density_audit(s)
-    module = importlib.import_module('warpSPH.schemes.compressible.crkSPH')
+    module = importlib.import_module('warpSPH.modules.compressibleStage')
     solve = module.solveStageSupport
     support = dict(calls=0, table=s['table'], materialWeights=True, absoluteBounds=False, timing='before each fresh RHS')
     def observed(system, state, c, sc, **kwargs):

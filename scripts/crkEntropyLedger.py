@@ -137,10 +137,11 @@ def install(settings):
     ledger=EntropyLedger(settings)
     evolution=importlib.import_module('warpSPH.modules.crk.evolution')
     module=importlib.import_module('warpSPH.schemes.compressible.crkSPH')
+    preparation=importlib.import_module('warpSPH.modules.compressibleStage')
     system=importlib.import_module('warpSPH.systems.compSPH')
     eos=importlib.import_module('warpSPH.modules.eos.materials')
     prepare,du,apply,finalize,evaluate,solve=(evolution.prepareStep,module.computeCRKdudt,system.CompSPHSystem.apply_state_update,
-        system.CompSPHSystem.finalize,eos.evaluateEOS,module.solveStageSupport)
+        system.CompSPHSystem.finalize,eos.evaluateEOS,preparation.solveStageSupport)
     def reset(host,*args,**kwargs):
         ledger.begin(host);result=prepare(host,*args,**kwargs);ledger.reset(host);return result
     def derivative(state,c,sc,adj,stage,*args):
@@ -163,5 +164,5 @@ def install(settings):
         ledger.counters['supportCalls']+=1;return solve(host,state,c,sc,**kwargs)
     evolution.prepareStep=reset;module.computeCRKdudt=derivative
     system.CompSPHSystem.apply_state_update=updated;system.CompSPHSystem.finalize=finished
-    eos.evaluateEOS=observed_eos;module.solveStageSupport=observed_support
+    eos.evaluateEOS=observed_eos;preparation.solveStageSupport=observed_support
     return ledger

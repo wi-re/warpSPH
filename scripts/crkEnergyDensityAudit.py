@@ -16,10 +16,11 @@ def install(settings,folder):
     l=EntropyLedger(settings);l.shadowRows=[];l.frozen=[]
     evolution=importlib.import_module('warpSPH.modules.crk.evolution')
     module=importlib.import_module('warpSPH.schemes.compressible.crkSPH')
+    preparation=importlib.import_module('warpSPH.modules.compressibleStage')
     system=importlib.import_module('warpSPH.systems.compSPH')
     eos=importlib.import_module('warpSPH.modules.eos.materials')
     prepare,du,apply,finalize,evaluate,solve,balance=(evolution.prepareStep,module.computeCRKdudt,system.CompSPHSystem.apply_state_update,
-        system.CompSPHSystem.finalize,eos.evaluateEOS,module.solveStageSupport,module.computeCompSPHBalanceTerm)
+        system.CompSPHSystem.finalize,eos.evaluateEOS,preparation.solveStageSupport,module.computeCompSPHBalanceTerm)
     choice=settings['choice'];folder=Path(folder);(folder/'frozenStates').mkdir()
     def reset(h,*args,**kwargs):
         l.begin(h);result=prepare(h,*args,**kwargs);l.reset(h)
@@ -82,5 +83,5 @@ def install(settings,folder):
         l.counters['supportCalls']+=1;return solve(h,state,c,sc,**kwargs)
     evolution.prepareStep=reset;module.computeCRKdudt=derivative;module.computeCompSPHBalanceTerm=observed_balance
     system.CompSPHSystem.apply_state_update=updated;system.CompSPHSystem.finalize=finished
-    eos.evaluateEOS=observed_eos;module.solveStageSupport=observed_support
+    eos.evaluateEOS=observed_eos;preparation.solveStageSupport=observed_support
     return l
