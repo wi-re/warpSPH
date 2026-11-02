@@ -2816,3 +2816,12 @@ No larger topology or long simulation was launched. Evidence/build contexts,
 receipts, raw logs, failed result, per-field audits and complete native states
 are indexed in development .tmp/arm64-local-20261102/README.md and
 .tmp/isambard-retrieved/README.md. Focus remains user-owned.
+
+Final deployment activation verified over SSH without another Slurm allocation:
+all release-file hashes/default paths, final profile/SIF and exact communication
+hashes match. Receipt retained locally and under remote release provenance/.
+No jobs remain queued/running. Final35 harness checks pass, all21 guide shell
+examples/helpers parse, default and explicit profile overrides pass. Source
+scanner576/6285/1341 and IO/CRKSPH regressions passed before source freeze; only
+docs/profile metadata changed subsequently. Harness commit e7627d3; isolated
+frontend branch clean after coherent commits. No push or source/core merge.
