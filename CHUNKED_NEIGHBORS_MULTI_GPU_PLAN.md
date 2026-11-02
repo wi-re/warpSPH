@@ -2765,3 +2765,18 @@ New immutable harness warpsph-runtime-2ecb382-local-arm64 records candidate
 profile separately from old OFI build-image provenance. Renew strict single,
 same-node2GPU, restart, then2node/1GPU inter-node, retrieving/independently auditing
 each before successor; failed job/audit/warnings stop. No four-GPU or long run.
+
+Renewed single8004381 COMPLETED0:0 in5m55s on nid010476. Local audit verifies24
+stable artifacts, runtime/image/harness pins and all23 reference fields bit exact
+against old7989645. Checkpoint continuation exact, no NCCL/error warnings.
+Reference launch136.413s, prefix37.554s, int64-offset resumed launch133.070s; cold
+JIT/import/checkpoint qualification, not a benchmark. Same-node2GPU8004781 running.
+
+Renewed same-node8004781 COMPLETED0:0 in4m19s,21 artifacts locally verified.
+Two GH200s on nid010516; solver/probe logs prove P2P/CUMEM channels. All particle
+fields exact; sourceEnergyBudget differs only4.1359030627651384e-25 (oneULP),
+matching prior accepted partition rounding. No NCCL warnings. Reference launch
+144.158s; two-rank four-step launch25.658s (warm cache; not comparable throughput).
+Restart8005076 COMPLETED0:0 in7m20s on nid010754,33 artifacts locally verified,
+2→1 cross-job and fresh1→2 transitions exact in all23 fields; no warnings.
+Renewed two-node/oneGPU-per-node8005442 running on nid010558/nid010626.
