@@ -2881,8 +2881,36 @@ Cold LUT stream regression fails before the repair and passes afterwards;
 wp_psi.computePsi numerical kernel is unchanged. The generator now selects
 Torch current CUDA device (instead of fixed cuda0) and bridges Warp allocation/
 launch plus consuming Torch clones through torchWarpStream. No device-wide fence
-or method/default change. All17 2D native configurations pass local CUDA/NCCL
-empty-owner/restart checks after the repair; all28 2D/3D configurations pass
-CPU/Gloo. Final3D CUDA, existing native regression and import gates in progress.
+or method/default change. All 28 configurations pass CPU/Gloo and shared-GPU
+CUDA/NCCL in both FP32 and FP64: 112 configuration/backend/precision controls,
+224 rank-level continuations. The matrix contains 17 managed 2D configurations
+and the 11 compressible configurations in 3D; it does not widen managed delta/
+projection cases beyond 2D. State/history tensors, time/next dt and OU parameters/
+knots/RNG match exactly; only the existing global sourceEnergyBudget comparison
+uses tolerance 2e-12. Every idle owner has zero J capacity/native W buffers and
+becomes active after restart. Exact replica checks remain enabled.
+
+Existing native checkpoint/stage/recovery/filter/support regressions pass 208
+with two expected skips; CUDA support regressions pass 104 with one optional-table
+skip, and the focused cold lookup-stream regression also passes in FP64. Full
+imports pass 576 runtime modules, 6298 imports and 1342 source files.
+Independent verify_receipts.py checks all 32 rank receipts against the exact
+matrix, source digests, worker hash, ownership and actual runtime. Results and
+phase wall times/derived ms per step are indexed in development
+.tmp/local-scheme-support-20261102/{README.md,verified-summary.json,timings.json}.
+Timings include cold compilation and shared-device contention; no performance
+claim follows from these tiny correctness fixtures. The actual NCCL runtime is
+23203; both ranks use the same GPU UUID. Explicit PYTHONPATH pins this frontend,
+paired core179df45 and the accepted pre-layout Integrators snapshot1fea2a3, whose
+source digest is f4c1cb30…. Do not accidentally pick up the concurrently advanced
+editable Integrators before the planned integration.
+
+Step1 is complete within the documented eager periodic single-material support
+boundary. Existing operator, moving/filter/repartition, rank/offset-change and
+allocation-recovery gates remain accepted; no further port is needed for the
+currently admitted families. Next is the separately ordered source-pinned merge
+with fixed-count particle layout and local combined debugging; physical GPU/site,
+long-run and explicitly unsupported wall/material/graph/AD gates remain separate.
+No merge, main-checkout edit, site job or image replacement occurred in step1.
 Documentation audit also removes obsolete claims that MFM/MFV are unported and
 that physical CRKSPH rank changes remain unqualified; site baseline is frozen.

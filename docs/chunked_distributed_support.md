@@ -34,6 +34,35 @@ Full-duration large-flow stability remains a separate gate. GSPH/Inutsuka operat
 include reconstructed inputs and the existing optional time-centred energy
 second pass. This adds no new time-integration or time-centred RHS method.
 
+## Native empty-owner continuation
+
+`tests/test_distributed.py::test_native_schemes_restart_from_empty_to_active_owner`
+runs six grouped CPU/Gloo controls. The matrix has 17 configurations in 2D:
+Monaghan, CRKSPH, CompSPH, GSPH, InutsukaGSPH, both PESPH variants,
+MFM/MFV with native none/project closure, delta/Sun2017, and the four native
+projections. The 11 compressible configurations also run in 3D. Delta/projection
+managed fixtures retain their 2D case boundary; their separate native 3D controls
+remain as documented above.
+
+Each control compares a four-step flat native reference against two accepted
+steps with all chunks on one rank, then a native checkpoint and finer-partition
+restart that gives the idle rank work. The idle rank must retain zero J capacity
+and no native W buffers. Particle tensors/history, time/next timestep and OU
+parameters/knots/RNG match exactly; only the existing global source-work budget
+comparison uses tolerance 2e-12. Replica checks stay exact throughout. This adds
+no new wall/material/graph/AD admission.
+
+Run the grouped controls with `python -m pytest tests/test_distributed.py -k empty_to_active`;
+set `warpSPHCore_PRECISION=float64` before Python starts for FP64. The shared worker
+`tests/distributed/_emptyOwnerWorker.py` also accepts `--device cuda:0`, `--dim 2` or `--dim 3`
+and `--schemes ...` under torchrun with the qualified single-GPU NCCL debug runtime.
+Its per-rank receipts retain source hashes, actual runtime, ownership and phase
+timings. All 28 configurations pass CPU/Gloo and two-rank single-GPU NCCL 2.32.3
+in FP32 and FP64. The latter is a local correctness result; broader physical GPU
+coverage follows particle-layout integration and local combined qualification. Cold adaptive-support lookup generation follows Torch current device/
+stream through `torchWarpStream`; its focused regression does not rely on a warm
+lookup cache. These tiny repeated numerical controls omit video but keep progress.
+
 ## Selection and execution
 
 Use an explicit `RowChunkPolicy`/`buildChunkedVerletList` Python neighbourhood

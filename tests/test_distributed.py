@@ -261,3 +261,23 @@ def test_launcher_tolerates_remote_directory_and_rank_report_visibility_lag(tmp_
     manifest=json.loads((tmp_path/'run/manifest.json').read_text())
     assert manifest['status']=='complete' and len(manifest['placement'])==2
     assert all(json.loads((tmp_path/'run'/f'rank-{rank:05d}.json').read_text())['status']=='complete' for rank in (0,1))
+
+
+@pytest.mark.skipif(not dist.is_gloo_available(),reason='Gloo required')
+@pytest.mark.parametrize('schemes,dim',[
+    pytest.param(('Monaghan','CRKSPH','CompSPH','GSPH','InutsukaGSPH'),2,id='sph-2d'),
+    pytest.param(('PESPH:PressureEnergy','PESPH:PressureEntropy','MFM','MFV','MFM:project','MFV:project'),2,id='conserved-2d'),
+    pytest.param(('deltaSPH','sun2017DeltaSPH'),2,id='delta-2d'),
+    pytest.param(('iisph','dfsph','dfsphPredictor','dfsphShift'),2,id='projection-2d'),
+    pytest.param(('Monaghan','CRKSPH','CompSPH','GSPH','InutsukaGSPH'),3,id='sph-3d'),
+    pytest.param(('PESPH:PressureEnergy','PESPH:PressureEntropy','MFM','MFV','MFM:project','MFV:project'),3,id='conserved-3d'),
+])
+def test_native_schemes_restart_from_empty_to_active_owner(tmp_path,schemes,dim):
+    worker=Path(__file__).with_name('distributed')/'_emptyOwnerWorker.py'
+    env=dict(os.environ,CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='2',PYTHONDONTWRITEBYTECODE='1')
+    command=[sys.executable,'-m','torch.distributed.run','--standalone','--nproc-per-node=2',str(worker),
+        '--device','cpu','--dim',str(dim),'--output',str(tmp_path),'--schemes',*schemes]
+    result=subprocess.run(command,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=600)
+    (tmp_path/'run.log').write_text(result.stdout)
+    assert result.returncode==0,result.stdout
+    assert result.stdout.count('all lifecycle checks passed')==2,result.stdout
