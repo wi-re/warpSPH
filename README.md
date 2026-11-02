@@ -30,6 +30,7 @@ and the visualisation in [`warpSPHPlotting`](https://github.com/wi-re/warpSPHPlo
 ## Contents
 
 - [Install](#install)
+- [Container images and optional Remote companion](containers/README.md)
 - [Quick start](#quick-start)
 - [Running cases](#running-cases) — the CLI, config files, output, plots, reports,
   [watching a run](#watching-a-run) (velocity alarm, stall watchdogs)
@@ -71,6 +72,11 @@ pip install tqdm seaborn pandas pyglet dill numba scipy scikit-image h5py ipyker
 pip install -e warpSPHCore/ warpSPHIntegrators/ warpSPHPlotting/
 pip install -e warpSPH/
 ```
+
+For a shippable stack with pinned source snapshots and an optional browser-viewer
+companion, see [container build and local Docker use](containers/README.md).
+Linux amd64/CUDA image checks pass locally; ARM64 and Isambard validation remain
+separate gates.
 
 A CUDA device is required for anything beyond imports. `ffmpeg` is optional —
 without it, `--video` is skipped rather than failing a run that already produced

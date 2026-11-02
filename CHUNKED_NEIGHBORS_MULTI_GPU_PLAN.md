@@ -37,14 +37,60 @@ changing the shared environment. The import scanner passes576 modules and6282
 imports across1335 files. Temporary evidence/context/wheels are indexed under
 `.tmp/container-packaging-20261102/`.
 
-Remaining gates: actual OCI build/dependency resolution and container GPU/viewer
-checks on this x86-64 host; native ARM64/Hopper; Isambard Slingshot and physical
-multi-GPU execution. No container engine is installed locally. This Ubuntu24.04
-host has a working RTX PRO6000/driver610.43.02; Docker Engine plus NVIDIA Container
-Toolkit is a suitable local qualification route but needs administrator installation
-(passwordless sudo is unavailable; rootless UID/GID mappings/helpers are absent).
-Do not describe native wheel/proxy checks as image/GPU qualification. Base digests
-and transitive dependency locks must be selected and retained for a release.
+The local Docker gate is now qualified below. Native ARM64/Hopper, Apptainer,
+Isambard Slingshot and physical multi-GPU execution remain open. The actual
+image, base digest and resolved dependency constraints are retained locally;
+no registry publication occurred.
+
+### Local Docker image qualification (2026-11-02)
+
+The user has installed Docker29.9.2/NVIDIA Container Toolkit1.20.1 and enabled
+Docker group access. The private x86-64/CUDA image now builds and passes the
+bounded runtime and companion gate. Frozen source/context/image identities,
+build logs and dependency inventories/constraints are retained under
+`.tmp/container-packaging-20261102/`; `docker-qualification.json` is the result index.
+Do not claim ARM64/Hopper, Slingshot or physical multi-GPU qualification from
+these single-GPU checks. Keep runs small/sequential; no overnight simulation.
+
+First actual build passed, but a non-root run exposed inherited private permissions
+on copied image code. Normalize image application read/traverse permissions while
+retaining the host build context's privacy; qualify using an arbitrary non-root UID.
+The next arbitrary-UID import exposed Torch's getpass-based default compiler
+cache lookup (host UID absent from image /etc/passwd). Supply an explicit writable
+Torch compiler cache and stable USER/LOGNAME environment, and include installed
+stack import/cache initialization in the non-root image regression. Also remove
+root-owned build-time pip caches from /work in both targets, so a fresh work
+volume lets the runtime UID create its own NumPy/Numba/Torch/Warp cache tree. This is
+packaging only; no solver model or application source changes.
+
+Passed local checks:
+
+- Image `warpsph:local-cuda-20261102`, identity
+  `sha256:9314ee4823a1435efa13c0f831f117c3a0cc747aa244a1e10f077599e6095b45`,
+  approximately32.3GB uncompressed. Pinned NGC base digest38ed2ecb2c16...41007e;
+  exact Torch2.10.0a0/NVIDIA26.1, CUDA13.1, NCCL2.29.2 and Warp1.17.0 versions recorded.
+- Six packaging regressions pass; the arbitrary UID65001 absent from /etc/passwd
+  can run the entrypoint, import the installed stack and create fresh-volume
+  caches. Source scanner passes576 modules/6282 imports/1335 files.
+- CUDA Warp/Torch interoperability kernel passes. CRKSPH8² runs two NCCL steps
+  on one physical GPU, checkpoints, then resumes for two more steps with changed
+  row cap8→4. Two CPU Gloo ranks independently complete two steps. All run
+  manifests complete; this is not a two-GPU or shared-GPU multi-rank NCCL check.
+- The real companion/proxy through a localhost-published Docker port passes
+  token/Origin checks, private producer isolation, installed case discovery,
+  Gresho/Monaghan8² live WPR1 frames (2832 dynamic +1008 static bytes), acknowledged
+  pause/resume and four-step completion to t.04. Pairing and run history persist
+  across recreation with the same hostname/user/work mount. Test containers stop.
+  Browser graphics were not retested; this validates the live HTTP/protocol path.
+- Timings are startup/JIT/contended correctness diagnostics: cold CRK two steps
+  57.87s container /51.78s runner (first step47.038s compilation; next132.1ms);
+  checkpoint continuation7.93s /1.071s runner; CPU Gloo21.52s /15.77s runner.
+  Remote Monaghan four steps45.97s, mean11354.9ms, min7.1ms/max45396.4ms, dominated
+  by fresh kernel compilation. No matched performance claim or overnight flow.
+
+Keep actual base dependencies intact; NCCL2.29.2 here does not satisfy the >=2.30
+experimental same-GPU multi-rank debug gate. MPI/ROCm, native ARM64/Hopper,
+Apptainer/Isambard networking and physical multi-GPU remain separate work.
 
 ### Static import scanner issue resolved (2026-10-30)
 

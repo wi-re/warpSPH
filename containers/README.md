@@ -8,12 +8,30 @@ companion, allowing the existing browser viewer to launch/view ordinary local
 simulations inside a Docker allocation. Rendering happens in the browser; the
 image does not need a desktop or a Node development server.
 
-**Qualification:** source snapshot/wheel packaging and native daemon/proxy HTTP
-checks can run without Docker or a GPU. No Docker/Apptainer engine is installed
-in the development environment, so complete image builds, container GPU access,
-ARM64 execution and Isambard networking remain target-machine gates. A prepared
-context is not evidence that an image has built or run. ROCm and an MPI-enabled
-Torch build remain deferred.
+**Local qualification, 2026-11-02:** `warpsph:local-cuda-20261102` is a locally
+built Linux amd64 image, based on NGC PyTorch26.01 and Warp1.17.0. It passes
+arbitrary-UID imports/fresh-volume access, a CUDA Warp/Torch kernel, short CRKSPH
+NCCL execution/checkpoint continuation, two-rank CPU Gloo execution, and the real
+companion HTTP path including a live GPU frame, pause/resume and persistent
+pairing/history across container recreation. Six packaging checks and the full
+source import scanner pass. The image is approximately32.3GB uncompressed,
+including the large NGC base; it has not been uploaded to a registry.
+
+The tested base digest is
+`nvcr.io/nvidia/pytorch@sha256:38ed2ecb2c16d10677006d73fb0a150855d6ec81db8fc66e800b5ae92741007e`.
+The local image identity is
+`sha256:9314ee4823a1435efa13c0f831f117c3a0cc747aa244a1e10f077599e6095b45`.
+Evidence, pinned context, inventories and a target-specific constraints export
+are retained in `.tmp/container-packaging-20261102/` in the development checkout.
+The runtime reports Torch2.10.0a0/NVIDIA26.1, CUDA13.1 and NCCL2.29.2; exact versions
+are recorded in the evidence. This NCCL version does not qualify our experimental
+two-rank/same-GPU debug mode; the CUDA check used one rank on one physical GPU.
+
+These tiny correctness runs include cold compilation and are not performance
+benchmarks. Native ARM64/Hopper, Apptainer, Isambard Slingshot, physical multi-GPU
+and a browser renderer session remain separate qualification gates. The existing
+viewer protocol was exercised over the published Docker port; browser graphics
+were not retested. ROCm and an MPI-enabled Torch build remain deferred.
 
 ## Build from private local repositories
 
@@ -46,9 +64,10 @@ silently substituted by its public release. The distributed launch script comes
 from this frontend checkout and is recorded separately; public stack versions
 must actually support that script before using distributed execution.
 
-The base tag above is an **example from Isambard's NCCL documentation**, not a
-qualified choice for this stack. Select a compatible Torch/CUDA/driver combination
-and pin the base by OCI digest for releases. `--warp-version` defaults to 1.17.0;
+The base tag above comes from Isambard's NCCL documentation and has now been
+exercised locally at the pinned amd64 digest above. Other target architectures,
+GPUs and network profiles still require qualification. Select a compatible
+Torch/CUDA/driver combination and pin the base by OCI digest for releases. `--warp-version` defaults to 1.17.0;
 `--constraints target-constraints.txt` adds dependency constraints for the selected
 platform. The base's exact Torch version is constrained during installation so
 pip cannot silently replace its CUDA-enabled Torch build. Builds fail on dependency
@@ -82,7 +101,10 @@ WARPSPH_TEST_REMOTE_ROOT=/path/to/warpSPHRemote \
 ```
 
 `WARPSPH_TEST_NGINX=/path/to/nginx` can select a non-installed test binary. Without
-the optional dependencies, the HTTP check is explicitly skipped. These tests
+the optional dependencies, the HTTP check is explicitly skipped. Set
+`WARPSPH_TEST_IMAGE=warpsph:local-cuda-20261102` with Docker access to also check
+an arbitrary non-root UID, full installed-stack imports and a fresh work volume.
+These tests
 exercise dirty-source capture, excluded files/symlinks, mixed public/local context
 preparation, same-version private-wheel replacement, authenticated viewer access,
 Origin/Host gates, private producer registration and service shutdown.
@@ -131,7 +153,9 @@ docker exec warpsph warpsph-companion --show-token
 `/work` holds pairing state, run history/exports and architecture-specific caches.
 Keep the same user and hostname to retain pairing across container recreation.
 For bind mounts, create a directory writable by that user; existing private
-state must retain its owning UID and private permissions. Mount input directories
+state must retain its owning UID and private permissions. Copied image code is
+readable/traversable by arbitrary UIDs; build-time root caches are removed, and
+Torch's compiler cache uses `/work/cache/torchinductor` explicitly. Mount input directories
 read-only under `/inputs` as needed. For another simultaneous container, use a
 different host port, hostname and work volume. A different published host port
 is accepted; no daemon configuration change is needed.

@@ -140,6 +140,28 @@ def test_install_replaces_same_version_from_custom_base(tmp_path):
     assert len(json.loads((context / 'wheel-hashes.json').read_text())) == 1
 
 
+def test_built_image_supports_arbitrary_uid_and_fresh_volume():
+    image = os.environ.get('WARPSPH_TEST_IMAGE')
+    if not image:
+        pytest.skip('Set WARPSPH_TEST_IMAGE to test a locally built image')
+    result = subprocess.run(['docker', 'run', '--rm', '--user', '65001:65001', image, 'help'],
+                            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+    assert result.returncode == 0, result.stdout
+    assert 'Commands:' in result.stdout
+    result = subprocess.run(['docker', 'run', '--rm', '--user', '65001:65001', image,
+                             'exec', 'python', '-c',
+                             'import warpSPH; from torch._inductor.runtime.cache_dir_utils import cache_dir; print(cache_dir())'],
+                            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
+    assert result.returncode == 0, result.stdout
+    assert '/work/cache/torchinductor' in result.stdout
+    result = subprocess.run(['docker', 'run', '--rm', '--user', '65001:65001',
+                             '--volume', '/work', image, 'exec', 'python', '-c',
+                             "from pathlib import Path; import os; p=Path('/work/cache/volume-check'); "
+                             "p.mkdir(parents=True); assert p.stat().st_uid==os.getuid()"],
+                            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+    assert result.returncode == 0, result.stdout
+
+
 def request(port, path, token=None, *, method='GET', origin='https://fluids.dev', host=None, body=None):
     connection = http.client.HTTPConnection('127.0.0.1', port, timeout=3)
     headers = {'Origin': origin}
