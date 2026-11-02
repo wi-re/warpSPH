@@ -782,26 +782,34 @@ closure/MG or silently select Jacobi merely to get a small fixture running.
 
 ## Start here / next action
 
-1. The user authorized integration at ACSPH checkpoint `3d80e5e`. The paired
-   merge and focused CPU/CUDA gates are complete; read the integration report.
-2. Use the active paired workspace below. Chunked neighbours first, then
-   multi-GPU execution continue sequentially in these same checkouts.
-3. Phases1/2, bounded eager Phase3 and the Phase4 process proof of concept are
-   qualified within the limits below. Use an explicit RowChunkProcessGroup with
-   Gloo CPU or NCCL CUDA tensors; the isolated two-process/one-GPU runtime is
-   available. J/W stay owned, with particle exchanges between dependent passes.
-   L1–L7 are qualified within their bounded local scopes; use the maintained
-   [support matrix](docs/chunked_distributed_support.md). Broader compatibility,
-   physical devices/topology/Isambard and capacity/performance remain open.
-   L7 actual wide-edge debugging is now qualified below. Continue with realistic
-   flow/capacity, broader compatibility and physical GPU/site gates; MPI/ROCm
-   builds remain deferred.
-   Use `scripts/run_distributed.py` for the explicit experimental distributed
-   launcher; ordinary runner setup still uses the Python neighborhood hook.
-   Use explicit source paths; do not change global editable installs.
-4. Keep the existing turbulence worktree available for ordinary single-GPU
-   physics through128^3, subject to a short readiness/memory check. No such
-   campaign is scheduled or launched by this integration.
+Priority decision (user,2026-11-02): broader scheme/case coverage that exercises
+core functionality comes before larger GPU counts, capacity campaigns or more
+long trajectories. Establish solid local behavior first. Existing bounded
+C1/C2/W1/I1 ports and Isambard single/two-GPU/two-node receipts stay accepted;
+do not repeat those investigations or mistake stale historical checkboxes for
+missing implementations. ACSPH and numerical-model/default changes remain outside
+this compatibility scope.
+
+1. Audit the actual supported scheme/case/configuration matrix against the
+   existing regressions. Separate implemented bounded coverage, genuinely
+   unsupported paths and documentation drift; MFM/MFV are already locally admitted.
+2. Broaden short local native flat-versus-chunked and multi-rank cases across
+   compressible, delta and native incompressible families. Exercise meaningful
+   2D/3D configurations and scheme-specific stage state, dependent exchanges,
+   switches/shifting/projection warm starts and convergence, as applicable.
+3. Cover moving/rebuilt lists, filtering/repartition, uneven/empty owners,
+   changed row budgets/offset widths/rank counts, native checkpoint continuation
+   and injected allocation failures preserving the last accepted state. Preserve
+   method/stage/timestep semantics and use existing native references.
+4. Use CPU/Gloo and bounded local CUDA/NCCL checks where each exercises the
+   relevant path. Any newly exposed unsupported operator/case needs explicit
+   admission and focused qualification; do not silently widen wall/material/AD/
+   graph support. Small physical multi-GPU checks can validate new asynchronous
+   paths once local coverage passes, without starting a scaling campaign.
+5. Return to four-GPU/multi-GPU-per-node qualification, realistic 3D capacity/
+   performance and held overnight164³/196³t4 or96³→t40 only after this functional
+   coverage. MPI/ROCm remain deferred. Use the isolated paired workspace and
+   preserve accepted source/image fingerprints; changed images renew site gates.
 
 ## Active implementation workspace (2026-10-30)
 
@@ -856,6 +864,10 @@ those investigations:
 - [Storage scope and row-chunk discussion](docs/tiled_edge_storage_scope_2026-10-29.md)
 
 ## User decisions and boundaries
+
+- 2026-11-02: prioritize broader local scheme/case functionality and lifecycle
+  coverage before larger hardware/scaling/long-run campaigns; bounded CUDA/NCCL
+  checks remain part of functional qualification. Preserve the accepted site baseline.
 
 - Integrate the current paired work into the main development checkouts after
   ACSPH reaches a mergeable checkpoint; develop this architecture separately.
