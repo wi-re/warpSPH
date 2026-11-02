@@ -14,6 +14,38 @@ physical multi-GPU, Isambard and capacity/performance gates remain open.
 This document is the canonical implementation/handoff plan for both repositories;
 the core carries a short companion pointer, `CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md`.
 
+### Portable container and optional Remote companion (2026-11-02)
+
+User decisions: ship a configurable simulation-stack image for Linux x86-64 and
+ARM64/CUDA, including pinned public dependencies and exact local/unpushed source
+snapshots. Bundle the Remote companion as an optional service so Docker users
+can connect from their own browser. Keep Isambard transport and distributed
+viewer/control qualification separate; MPI/ROCm remain deferred.
+
+Implemented: configurable OCI recipes and [build/use instructions](containers/README.md),
+public distributions or exact local source snapshots with file hashes, packaged
+launch scripts and an optional Remote target. A viewer-only nginx proxy bridges
+Docker port publishing to the unchanged private loopback daemon; producer APIs
+remain private. Persistent state/cache/output mounts and service lifecycle are
+explicit. No distributed solver admission or rank-local controls changed.
+
+Validation: five focused checks pass, including real nginx/companion HTTP auth,
+Host/Origin checks, private producer registration, shutdown and replacement of
+an installed distribution by different private source at the same release number.
+All five actual local stack snapshots build as wheels without installing into or
+changing the shared environment. The import scanner passes576 modules and6282
+imports across1335 files. Temporary evidence/context/wheels are indexed under
+`.tmp/container-packaging-20261102/`.
+
+Remaining gates: actual OCI build/dependency resolution and container GPU/viewer
+checks on this x86-64 host; native ARM64/Hopper; Isambard Slingshot and physical
+multi-GPU execution. No container engine is installed locally. This Ubuntu24.04
+host has a working RTX PRO6000/driver610.43.02; Docker Engine plus NVIDIA Container
+Toolkit is a suitable local qualification route but needs administrator installation
+(passwordless sudo is unavailable; rootless UID/GID mappings/helpers are absent).
+Do not describe native wheel/proxy checks as image/GPU qualification. Base digests
+and transitive dependency locks must be selected and retained for a release.
+
 ### Static import scanner issue resolved (2026-10-30)
 
 The previously recorded wp_alpha.computeAlpha `find_spec` traceback is fixed.
