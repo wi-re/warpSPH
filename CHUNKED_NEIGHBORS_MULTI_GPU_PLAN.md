@@ -138,7 +138,7 @@ transport remain **unqualified until returned site reports pass**. Start at the
 ARM64 build and only the `single` stage; no automatic campaign is launched.
 
 Path configuration follow-up (2026-11-02): use `QA_ROOT` as the single remote
-base (default `$HOME/warpsph-qa`, with the user's Isambard HOME at
+base (default `$HOME`, with the user's Isambard HOME at
 `/home/b6ez/wire.b6ez`), deriving bundle, image, result and build-log paths.
 Local SSH/transfer examples use `ISAMBARD_SSH`, `ISAMBARD_ROOT` and a selectable
 archive/download directory. The already-uploaded archive remains valid: these
@@ -161,7 +161,9 @@ results root and `QA_PREVIOUS`; no runtime path fix or relocation is required.
 Keep that value in subsequent login shells. Local download examples must set
 `ISAMBARD_RESULTS` to the same directory instead of the fresh-campaign default.
 The build log under `$QA_ROOT/logs` and test logs under `$QA_RESULTS_ROOT/logs`
-are separate paths. Updated guide spells out current-campaign settings.
+are separate paths. User home listing confirms `images`, `logs`, `qualification`
+and `warpsph-isambard` are directly in HOME, so QA_ROOT is HOME itself. Guide
+defaults now match that layout on both local transfers and remote submissions.
 
 ### Static import scanner issue resolved (2026-10-30)
 

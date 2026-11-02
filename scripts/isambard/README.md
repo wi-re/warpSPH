@@ -55,7 +55,7 @@ tests below do not expose a daemon or claim live-viewer connectivity.
 
 All remote working paths derive from one base directory, `QA_ROOT`. On your
 Isambard account, `$HOME` is `/home/b6ez/wire.b6ez`, so the default below becomes
-`/home/b6ez/wire.b6ez/warpsph-qa`. Set a different absolute base to use another
+`/home/b6ez/wire.b6ez` itself. Set a different absolute base to use another
 shared filesystem location. Bundle, image, results and build logs can also be
 overridden individually.
 
@@ -69,7 +69,7 @@ and SSH configuration:
 
 ```bash
 export ISAMBARD_SSH=PROJECT.aip2.isambard  # your existing SSH alias
-export ISAMBARD_ROOT="${ISAMBARD_ROOT:-/home/b6ez/wire.b6ez/warpsph-qa}"
+export ISAMBARD_ROOT="${ISAMBARD_ROOT:-/home/b6ez/wire.b6ez}"
 export QA_ARCHIVE="${QA_ARCHIVE:-.tmp/warpsph-isambard.tar.gz}"
 ssh "$ISAMBARD_SSH" "mkdir -p '$ISAMBARD_ROOT'"
 scp "$QA_ARCHIVE" "$ISAMBARD_SSH:$ISAMBARD_ROOT/"
@@ -94,7 +94,7 @@ Use the same base as `ISAMBARD_ROOT` above, or the location of your existing
 upload:
 
 ```bash
-export QA_ROOT="${QA_ROOT:-$HOME/warpsph-qa}"
+export QA_ROOT="${QA_ROOT:-$HOME}"
 export QA_BUNDLE="${QA_BUNDLE:-$QA_ROOT/warpsph-isambard}"
 export QA_SIF="${QA_SIF:-$QA_ROOT/images/warpsph-arm64.sif}"
 export QA_IMAGE="${QA_IMAGE:-$QA_SIF}"
@@ -180,7 +180,7 @@ export ISAMBARD_RESULTS="$ISAMBARD_ROOT/qualification"
 
 ```bash
 export ISAMBARD_SSH=PROJECT.aip2.isambard
-export ISAMBARD_ROOT="${ISAMBARD_ROOT:-/home/b6ez/wire.b6ez/warpsph-qa}"
+export ISAMBARD_ROOT="${ISAMBARD_ROOT:-/home/b6ez/wire.b6ez}"
 export ISAMBARD_RESULTS="${ISAMBARD_RESULTS:-$ISAMBARD_ROOT/qualification}"
 export QA_DOWNLOADS="${QA_DOWNLOADS:-$PWD/downloaded-qa}"
 export QA_RUN=single-JOB_ID             # replace with the actual stage/job ID
