@@ -136,8 +136,9 @@ Local evidence under `.tmp/isambard-qa-20261102/`:
 Returned jobs7986156/7988602 qualify native ARM64/Apptainer/GH200 single-
 and same-node two-GPU execution, both cross-job/rank-count restart directions,
 peer communication and retrieval (audits below). Four GPUs and Slingshot remain
-unqualified. Next is the one-GPU network compatibility preflight before two nodes;
-no automatic campaign is launched.
+unqualified. Host-network preflight 7998167 failed at Torch import; prepare a
+compatible OFI/custom profile and repeat the one-GPU gate before two nodes.
+No automatic campaign is launched.
 
 Path configuration follow-up (2026-11-02): use `QA_ROOT` as the single remote
 base (default `$HOME`, with the user's Isambard HOME at
@@ -302,7 +303,8 @@ runtime from a Torch build-time/package version. Negative regression keeps the
 Torch-reported version unchanged while replacing the actual NCCL runtime.
 Sixteen focused tests, shell syntax and full imports pass; a real single-GPU
 Docker probe also validates the exact appended runtime capture (22902 and one
-mapped native NCCL library). Actual site preflight is pending. Only this small Slurm file needs copying into the existing harness;
+mapped native NCCL library). Site execution is recorded below. Only this small
+Slurm file needs copying into the existing harness;
 no container rebuild or replacement of the accepted source archive is required.
 
 Direct SSH authorized/verified (2026-11-02): user supplies `b6ez.aip2.isambard`.
@@ -316,6 +318,29 @@ now sources it in an empty-argument function scope; regression confirms exported
 environment and caller arguments survive. The standalone preflight repairs this
 only in its private copy of old uploaded wrappers, preserving original/image
 sources. No additional source-bundle transfer is needed.
+
+Direct network preflight dispatch completed (2026-11-02): user authorized one
+host-profile/one-GPU submission over SSH. Job 7998167 under brics.b6ez ran on
+nid010291 for 37 s, then exited FAILED/1:0. Uploaded/private script SHA256 matches
+`2fb6e18b8a332f6ba1ef50006751d4302abc01df774bb9ba98f8646fb9d4d293`.
+Submission receipt, final Slurm accounting, probe/Slurm logs and failure report
+were retrieved and independently audited. SSH upload/hash verification → sbatch
+→ compute execution → failure reporting → local retrieval all work.
+
+The host profile fails at Torch import with `undefined symbol:
+ncclCommWindowDeregister`. This is consistent with the inspected adapter
+prepending NCCL 2.26.6 to an image qualified with 2.29.2; the runtime-capture probe
+was not reached, so no successful GPU/provider test or loaded-version capture is
+claimed. Adapter argument handling reached the intended Torch entrypoint.
+Report correctly retains profile=host, previousJobId=7989645, probeExitCode=1 and
+status=failed. No two-node job launched, no image/archive or prior stage replaced.
+Next: prepare a compatible OFI/custom communication profile retaining the image's
+NCCL/CUDA, then repeat the one-GPU gate before allocating two nodes. Earlier
+single/two-GPU/restart qualifications remain accepted. Ignored local evidence:
+`.tmp/isambard-retrieved/network-preflight-7998167/`, submission receipt,
+`audit_network_preflight.py` and `audit-network-preflight-7998167.json` in the
+main workspace; audit status `dispatcher-passed-preflight-failed`. Hash inventory
+covers local retrieved files, not a sealed remote solver-stage inventory.
 
 ### Static import scanner issue resolved (2026-10-30)
 

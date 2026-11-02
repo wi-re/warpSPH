@@ -287,6 +287,14 @@ custom communication stack, set `QA_PREFLIGHT_NETWORK=custom` and the three
 custom-path variables below. A failed host preflight identifies whether a
 compatible OFI plugin/build is needed; it does not modify the image or libraries.
 
+The host-profile trial **7998167** completed on `nid010291` in 37 s and failed at
+Torch import with `undefined symbol: ncclCommWindowDeregister`. The inspected
+adapter prepends host NCCL 2.26.6 over the accepted image's 2.29.2. Runtime/provider
+capture was not reached. Upload, submission, failure reporting and retrieval
+worked; this result does not qualify GPU networking. Prepare a compatible
+OFI/custom profile retaining the image's NCCL/CUDA and repeat this gate before
+two nodes. The accepted image and prior solver-stage results remain unchanged.
+
 ### Host and custom profiles
 
 Two explicit profiles are supported:
@@ -382,9 +390,10 @@ context fields byte-identical to uninterrupted execution. Diagnostics exactly
 match. Three reviewed RAS listener-port conflicts are recorded as diagnostic
 advisories; there are no failed GPU/solver comparisons.
 
-For this campaign, continue with the **one-GPU network preflight** above before
-the two-node stage. Four GPUs and multi-node fabric remain pending. New campaigns
-still start with the build/single gates.
+For this campaign, prepare the compatible custom communication profile and
+repeat the **one-GPU network preflight** above before the two-node stage. Four
+GPUs and multi-node fabric remain pending. New campaigns still start with the
+build/single gates.
 
 ```bash
 python -m pytest tests/test_isambard_qualification.py
