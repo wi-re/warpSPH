@@ -312,9 +312,17 @@ socket transport fallback and Slurm submission/environment handling.
 Returned Isambard job7986156 now qualifies native ARM64/Apptainer/GH200
 single-GPU execution and restart:23 artifacts verified,23 saved physical/clock/
 forcing/context fields byte-identical after continuation, and diagnostic histories
-matching step-for-step. Physical multi-GPU and multi-node execution remain
-unqualified. For this campaign, continue with **only** `same-node` after reviewing
-the accepted single-stage results. New campaigns still start with the build/single gates.
+matching step-for-step. Returned job7988602 now also qualifies two physical GH200s
+on one node:20 artifacts verified, NCCL P2P/CUMEM channel evidence, and all particle/
+clock/forcing/context fields byte-identical to one rank. The global work budget
+alone differs by one float64 ULP (4.136e-25). The new one-rank reference also matches
+the earlier job byte for byte. These tiny cold/cache-dependent fixtures do not
+qualify performance.
+
+For this campaign, continue with **only** `restart`, setting
+`QA_PREVIOUS="$QA_RESULTS_ROOT/same-node-7988602"` and `QA_GPUS_PER_NODE=2`.
+Cross-job/rank-count continuation, four GPUs and multi-node fabric remain pending.
+New campaigns still start with the build/single gates.
 
 ```bash
 python -m pytest tests/test_isambard_qualification.py

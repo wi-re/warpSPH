@@ -29,8 +29,9 @@ two-rank/same-GPU debug mode; the CUDA check used one rank on one physical GPU.
 
 These tiny correctness runs include cold compilation and are not performance
 benchmarks. Returned Isambard job7986156 now qualifies native ARM64/Apptainer
-GH200 single-GPU execution, restart and retrieval. Isambard Slingshot, physical
-multi-GPU and a browser renderer session remain separate qualification gates. The existing
+GH200 single-GPU execution, restart and retrieval. Returned job7988602 additionally
+qualifies same-node two-GPU correctness with NCCL peer channels. Cross-job/rank-count
+restart, four GPUs, Isambard Slingshot and browser renderer sessions remain separate gates. The existing
 viewer protocol was exercised over the published Docker port; browser graphics
 were not retested. ROCm and an MPI-enabled Torch build remain deferred.
 
@@ -173,8 +174,10 @@ ARM64 source bundle, build it through Slurm, and qualify one GPU, several GPUs,
 cross-job restart, retrieval and multiple nodes in separate submissions. Each
 stage retains native checkpoints and a machine-readable report; verify downloaded
 artifacts before advancing. Native ARM64/GH200 single-GPU execution, checkpoint
-continuation and23 retrieved artifacts passed in returned job7986156. Same-node
-multiple GPUs and multi-node fabric remain pending. The local x86-64 image is not
+continuation and23 retrieved artifacts passed in returned job7986156. Returned
+job7988602 passes20 retrieved artifacts and one-vs-two GH200 consistency (all
+particle fields byte-identical, one-ULP global work-budget difference). Next is
+cross-job/rank-count restart; four GPUs and multi-node fabric remain pending. The local x86-64 image is not
 an Isambard deployment artifact.
 
 ## Simulation commands and HPC scope

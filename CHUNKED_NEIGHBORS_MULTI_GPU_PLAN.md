@@ -133,10 +133,10 @@ Local evidence under `.tmp/isambard-qa-20261102/`:
   Torch stream and real NCCL collectives. An initially untyped Warp scalar literal
   failed compilation; explicit `wp.float64(2.0)` fixes it and the final probe passes.
 
-Returned job7986156 now qualifies native ARM64/Apptainer/GH200 single-GPU
-execution, restart and retrieval (audit below). Physical multi-GPU and Slingshot
-transport remain unqualified. Continue with only `same-node`; no automatic
-campaign is launched.
+Returned jobs7986156/7988602 qualify native ARM64/Apptainer/GH200 single-
+and same-node two-GPU execution, single-rank restart, peer communication and
+retrieval (audits below). Cross-job/rank-count restart, four GPUs and Slingshot
+remain unqualified. Continue with only `restart`; no automatic campaign is launched.
 
 Path configuration follow-up (2026-11-02): use `QA_ROOT` as the single remote
 base (default `$HOME`, with the user's Isambard HOME at
@@ -212,6 +212,43 @@ Read-only retrieved campaign is preserved in the main workspace at
 `.tmp/isambard-retrieved/single-7986156/`. Adjacent `audit_single.py`,
 `audit-single-7986156.json` and `ngc-shinit_v2-amd64.txt` reproduce/index the audit
 without modifying sealed results. Original uploaded source archive unchanged.
+
+Returned same-node two-GPU review (2026-11-02, accepted):
+
+- Job7988602, host `nid010156`, two independent ranks/processes and distinct
+  GH200 UUIDs (`29de7ce5-…`, `79b8c5a3-…`). Native ARM64/NCCL2.29.2, same
+  source/runtime fingerprints and SIF SHA256 as accepted job7986156. All20
+  transferred artifacts/native checkpoints independently reverified.
+- Recomputed full23-field comparisons locally at completed steps2 and4.
+  Step2 is byte-identical across every field. Step4: all particle arrays,
+  clocks, forcing/RNG and physical context are byte-identical; the only saved
+  difference is global `sourceEnergyBudget[0]`, one float64 ULP (4.136e-25).
+  The new one-rank reference is byte-identical across all23 fields to the
+  earlier job's one-rank reference on a different node.
+- Diagnostic times, particle/thermodynamic statistics and mass match exactly.
+  Only last-step `forceWork` and relative energy-budget residual differ, by
+  4.136e-25/4.596e-25 respectively. All values finite, density/pressure/energy/
+  support positive, mass1 unchanged. Max absolute relative energy residual
+  3.346e-12. Checked904 source files per solver invocation against frozen context.
+- Probe logs16 P2P/CUMEM channel entries per rank; distributed solver logs8 per
+  rank, with successful NCCL init/rings and no NCCL WARN/ERROR or CUDA/stall/
+  nonfinite failure. Optional network plugin selection still says Socket;
+  actual local peer-channel evidence is present. No inter-node RDMA claim.
+- Solver launch wall times: reference148.657s, distributed33.029s. Reference
+  first step118.761s, warm465.5–471.6ms; distributed first step6.484s,
+  warm295.8–299.4ms. Shared compilation/cache state and tiny four-step fixture
+  prevent treating these differences as a performance/scaling benchmark.
+  Video omitted for this repeated correctness fixture.
+- Independent CPU audit and summary: main workspace ignored
+  `.tmp/isambard-retrieved/audit_same_node.py`, `audit-same-node-7988602.json`
+  and `.out`, alongside unchanged sealed campaign `same-node-7988602/`.
+  No solver/harness/image changes or extra GPU runs needed for this acceptance.
+
+Next manual gate: `QA_PREVIOUS=$HOME/qualification/same-node-7988602`,
+`QA_GPUS_PER_NODE=2`, stage `restart`. It resumes the preceding job's distributed
+step2 checkpoint on one GPU in a new allocation and tests a fresh one→two rank
+continuation; both compare to a new uninterrupted reference. Four GPUs, longer/
+larger runs and multi-node AWS Libfabric/CXI remain subsequent gates.
 
 ### Static import scanner issue resolved (2026-10-30)
 
