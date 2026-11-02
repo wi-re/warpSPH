@@ -165,6 +165,15 @@ container processes. The image supervisor propagates termination to both service
 groups and exits if either service dies. Use `--init` to reap orphaned workers.
 This is container-local process management, not a Slurm submission service.
 
+## Staged Isambard qualification
+
+Use the [Isambard harness guide](../scripts/isambard/README.md) to export a native
+ARM64 source bundle, build it through Slurm, and qualify one GPU, several GPUs,
+cross-job restart, retrieval and multiple nodes in separate submissions. Each
+stage retains native checkpoints and a machine-readable report; verify downloaded
+artifacts before advancing. Actual site execution remains pending. The local
+x86-64 image is not an Isambard deployment artifact.
+
 ## Simulation commands and HPC scope
 
 The entrypoint accepts:

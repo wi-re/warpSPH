@@ -92,6 +92,51 @@ Keep actual base dependencies intact; NCCL2.29.2 here does not satisfy the >=2.3
 experimental same-GPU multi-rank debug gate. MPI/ROCm, native ARM64/Hopper,
 Apptainer/Isambard networking and physical multi-GPU remain separate work.
 
+### Staged Isambard deployment qualification (2026-11-02)
+
+User requests a deployable Slurm test suite for single GPU, consistency across
+physical GPUs, restart, data retrieval and multiple nodes, progressing one stage
+at a time. SSH is the login/transfer route. Implement a self-contained harness
+with explicit stage submission, an ARM64 source-container build job, rank/device
+and collective probes, one-rank vs distributed state comparisons, separate-process
+restart with changed rank/row layouts, stable artifact hashes and offline retrieval
+verification. Stop between stages; do not auto-submit a whole campaign or connect
+to the user's SSH endpoint. Multi-node must verify distinct hosts and the expected
+Slingshot NCCL transport. Native ARM64/Slurm/fabric validation stays pending until
+user execution; exercise the harness locally and test failure detection first.
+
+Implemented [staged harness and deployment guide](scripts/isambard/README.md):
+ARM64 source archive/native Apptainer build job; manual `single`, `same-node`,
+`restart`, `multi-node` submissions; physical rank/GPU/storage/collective probe;
+seeded CRKSPH four-step comparisons; previous-job checkpoint continuation and
+1↔N rank/row-cap/offset-width changes; SHA256 and native-checksum retrieval checks.
+The multi-node gate requires per-rank AWS Libfabric/CXI evidence and distinct
+hosts; socket fallback cannot pass. Optional Remote is packaged but no service
+is exposed by these jobs. No model changes, SSH connection or remote job submitted.
+
+Local evidence under `.tmp/isambard-qa-20261102/`:
+
+- Eleven focused acceptance/failure-detection tests pass. Four existing packaging
+  tests also pass; optional Docker/proxy tests were skipped in this focused run
+  (their six-test qualification is recorded above). Shell syntax and full imports
+  pass: 576 modules, 6283 first-party imports across1340 source files.
+- Actual CPU/Gloo `single`, two-rank `same-node` and `restart` stages all pass:
+  3/2/4 solver launches, 1/1/2 comparisons, 23/20/32 sealed files respectively.
+  Solver launch wall-time sums are51.60/17.77/34.06s; the latter controllers take
+  23.04/39.40s including probes and checks. These tiny cold/JIT fixtures are
+  correctness evidence, not performance measurements. Video omitted deliberately.
+- Independently copied `single` output verifies all23 stable artifacts and native
+  checksums offline. Unit failures detect corrupted transfer/checksum, nonfinite
+  state, physical/RNG drift, socket transport and wrong topology.
+- The shipped probe passes in `warpsph:local-cuda-20261102` with one physical
+  RTX PRO6000 Blackwell GPU/NCCL2.29.2, including float64 Warp work on a nondefault
+  Torch stream and real NCCL collectives. An initially untyped Warp scalar literal
+  failed compilation; explicit `wp.float64(2.0)` fixes it and the final probe passes.
+
+Native ARM64/SIF build, GH200, physical multi-GPU, Slurm placement and Slingshot
+transport remain **unqualified until returned site reports pass**. Start at the
+ARM64 build and only the `single` stage; no automatic campaign is launched.
+
 ### Static import scanner issue resolved (2026-10-30)
 
 The previously recorded wp_alpha.computeAlpha `find_spec` traceback is fixed.

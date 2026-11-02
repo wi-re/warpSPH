@@ -31,6 +31,7 @@ and the visualisation in [`warpSPHPlotting`](https://github.com/wi-re/warpSPHPlo
 
 - [Install](#install)
 - [Container images and optional Remote companion](containers/README.md)
+- [Staged Isambard Slurm checks and SSH retrieval](scripts/isambard/README.md)
 - [Quick start](#quick-start)
 - [Running cases](#running-cases) — the CLI, config files, output, plots, reports,
   [watching a run](#watching-a-run) (velocity alarm, stall watchdogs)
