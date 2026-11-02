@@ -2751,3 +2751,17 @@ override. The Linux nfs-utils defaults allow cached directory attributes for
 up to60s, including negative lookups. Extend the bounded visibility wait from
 30s to120s before qualification; source: https://man7.org/linux/man-pages/man5/nfs.5.html .
 Per-release QA_DEPLOYMENT_PROFILE overrides are preserved by site-profile.sh.
+
+Local ARM64 release candidate completed (2026-11-02): commit2ecb382, only
+distributedRun.py differs from frozen accepted app; target fingerprint e44ba6e.
+BuildKit QEMU validates ARM64/CUDA13.1/NCCL22902, then userspace Apptainer1.5.5
+converts locally to9,494,970,368-byte SIF. SHA256:
+4ef5027e120d8d9065965405077ea942517403e54b7c50fb07b9421e24c1d518 .
+Uploaded in2m10s and remotely checksum-verified under fresh images/warpsph-arm64-io-repair-2ecb382.sif;
+old image unchanged. Full context,249 constraints, metadata, tool hashes, archive
+and SIF retained in development checkout .tmp/arm64-local-20261102 with index.
+No build-only Slurm allocation; no system Apptainer/binfmt installation.
+New immutable harness warpsph-runtime-2ecb382-local-arm64 records candidate
+profile separately from old OFI build-image provenance. Renew strict single,
+same-node2GPU, restart, then2node/1GPU inter-node, retrieving/independently auditing
+each before successor; failed job/audit/warnings stop. No four-GPU or long run.

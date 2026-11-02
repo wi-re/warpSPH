@@ -80,7 +80,7 @@ apptainer build --arch arm64 --mksquashfs-args "-processors 8" \
   .tmp/warpsph-arm64.sif docker-archive:.tmp/warpsph-arm64.docker.tar
 apptainer sif list .tmp/warpsph-arm64.sif  # system partition must say arm64
 sha256sum .tmp/warpsph-arm64.sif
-apptainer inspect --json .tmp/warpsph-arm64.sif > .tmp/warpsph-arm64-inspect.json
+apptainer sif dump 2 .tmp/warpsph-arm64.sif > .tmp/warpsph-arm64-metadata.json
 ```
 
 Use the target/versions/base recorded by the context; resolve and pin the ARM64
@@ -104,7 +104,10 @@ with `dpkg-deb -x`. For the tested1.5.5 package, add relocation symlinks
 `usr/etc -> ../etc` and `usr/var -> ../var`, and include the extracted
 `usr/lib/x86_64-linux-gnu` in `LD_LIBRARY_PATH`. Use the extracted
 `usr/bin/apptainer`; set `APPTAINER_CACHEDIR` and `APPTAINER_TMPDIR` to owned paths.
-System `mksquashfs`/`unsquashfs` are required. ARM64 OCI-to-SIF conversion runs on
+The tested package bundles its SquashFS helpers; distro tools are also installed.
+`apptainer inspect` checks execution architecture, so use `sif list`/`sif dump`
+for local ARM64 metadata, or run `inspect --json` on a native ARM64 host.
+ARM64 OCI-to-SIF conversion runs on
 the amd64 host without a GPU; verify the SIF's system-partition architecture.
 Keep the tool versions, build log/metadata, constraints, frozen context, checksum
 and target runtime/source fingerprints with the release.
@@ -115,8 +118,8 @@ hashes. Compile OFI/hwloc against the target image's CUDA under ARM64 emulation,
 or a verified cross toolchain, and export the communication root for bind mounting.
 This local OFI/sysroot build path has not yet been exercised; existing native
 build7999853 remains the accepted communication artifact. Do not assume an amd64
-library or a host-native linker produces an ARM64 artifact. This recipe documents
-the required future workflow; it is not a claim of a completed local ARM64 build.
+library or a host-native linker produces an ARM64 artifact. Local ARM64 OCI/SIF conversion has now passed on it111636; the unexercised
+part of this recipe is rebuilding OFI with a local site sysroot.
 
 ## 2. Upload over your normal SSH connection
 
