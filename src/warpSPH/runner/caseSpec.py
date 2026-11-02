@@ -308,7 +308,7 @@ _FIELD_HELP = {
     'krylovCheckEvery': 'Krylov solvers read their still-running flag every this many iterations; unset: 8',
     'cudaGraph': 'legacy spelling of --execution graph / eager',
     'coverageRetries': 'Morton mode: maximum complete implicit-step retries after coverage loss (0 disables retries)',
-    'particleOrder': 'input (default) or morton: reorder accepted periodic CompSPH/CRK steps; eager one-step only',
+    'particleOrder': 'input (default) or morton: reorder accepted periodic CompSPH/CRK steps; audited eager RK/Adams/BDF methods',
     'neighborOmitI': 'omit redundant COO row indices; default on for compressible schemes, off for other families pending qualification',
     'pipelineOutputs': 'with a whole-step graph, compute step n\'s diagnostics while step n+1 replays (default on)',
     # -- output --

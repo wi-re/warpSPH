@@ -133,7 +133,7 @@ def test_input_default_does_not_construct_optional_stepper(monkeypatch):
 @pytest.mark.parametrize('override, message', [
     ({'execution':'graph'}, 'eager execution'),
     ({'execution':'auto'}, 'eager execution'),
-    ({'integrationScheme':'ab2'}, 'one-step'),
+    ({'integrationScheme':'ab2'}, 'compatibleEnergy=False'),
     ({'scheme':'Monaghan'}, 'CompSPH or CRKSPH'),
 ])
 def test_unsupported_runner_modes_fail_before_output_or_sort(override, message, tmp_path, monkeypatch):

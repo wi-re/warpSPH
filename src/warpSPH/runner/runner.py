@@ -288,6 +288,8 @@ def _spatialStepper(ctx, spec, system):
         raise ValueError('Morton runner requires eager execution')
     stepper = MortonStepper(ctx.integrator,max_coverage_retries=spec.coverageRetries)
     stepper.validate(system, config=ctx.config, schemeConfig=ctx.schemeConfig)
+    if stepper.history_method and spec.resumeFrom:
+        raise ValueError('multistep Morton restart requires persisted integrator history; state-only resume is unsupported')
     return stepper
 
 
@@ -570,6 +572,10 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
             timeLimited, extraData, groups, storeSteps, recentTimes, alarm, say)
         steps = ()
 
+    spatialHistory = None
+    if spatialStepper is not None and spatialStepper.history_method:
+        from warpSPHIntegrators.state.history import StepHistory
+        spatialHistory = StepHistory(maxlen=max(1, ctx.integrator.metadata.history_length))
     for i in steps:
         # Previous outputs have consumed their stage data. Release it before
         # entering the next integrator call; the accepted system stays live.
@@ -583,7 +589,8 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
                     with (deferHostTime() if deferStageTimes else contextlib.nullcontext()):
                         stepResult = spatialStepper(
                             runningState, ctx.config.dt, config=ctx.config,
-                            schemeConfig=ctx.schemeConfig, verbose=spec.verbose)
+                            schemeConfig=ctx.schemeConfig, verbose=spec.verbose,
+                            history=spatialHistory)
                 else:
                     # A device dt would make the integrator read every stage time
                     # back (`float(t + c dt)`, a sync each); the runner reads the
@@ -629,9 +636,27 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         absStep = i + spec.resumeStepOffset
         callAudit.markStep()    # no-op unless the call audit is on (warpSPHCore/callAudit.py)
 
+        discardSpatialHistory = False
         if case.postStep is not None:
             with record_function("[runner] case postStep hook"):
+                # A hook may impose a physical jump. Its old derivatives are
+                # no longer a continuous multistep trajectory. Metadata checks
+                # detect ordinary in-place edits/replacements without device reads.
+                if spatialStepper is not None and spatialStepper.history_method:
+                    from ..evaluation.continuation import _configuration
+                    try:
+                        beforeHook = tuple(_configuration(value) for value in
+                                           (runningState.state,ctx.config,ctx.schemeConfig))
+                    except TypeError:
+                        beforeHook = None
                 case.postStep(ctx, runningState, absStep)
+                if spatialStepper is not None and spatialStepper.history_method:
+                    try:
+                        afterHook = tuple(_configuration(value) for value in
+                                          (runningState.state,ctx.config,ctx.schemeConfig))
+                    except TypeError:
+                        afterHook = None
+                    discardSpatialHistory = beforeHook is None or beforeHook != afterHook
         if case.timestep is not None:
             with record_function("[runner] case timestep hook"):
                 ctx.config.dt = case.timestep(ctx, runningState)
@@ -731,6 +756,11 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
                 layout = runningState.spatialContext.layout.for_input(runningState.state.UIDs)
                 stepResult = adopt_spatial_layout(stepResult)
                 runningState = stepResult.state
+                spatialHistory = stepResult.history
+                if discardSpatialHistory:
+                    from warpSPHIntegrators.state.history import StepHistory
+                    spatialHistory = StepHistory(maxlen=spatialHistory.maxlen)
+                ctx.scratch['stepHistory'] = spatialHistory
                 result.state = runningState
                 if not layout.identity and ctx.scratch['lastStageUpdate'] is not None:
                     ctx.scratch['lastStageUpdate'] = permute_update(ctx.scratch['lastStageUpdate'], layout.p)

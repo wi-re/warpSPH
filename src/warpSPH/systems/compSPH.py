@@ -119,6 +119,9 @@ class CompSPHSystem(BaseIntegrationSystem):
     spatialContext: object = None
     #: Keep UID-ordered frame export after leaving the optional compute cache.
     canonicalExport: bool = False
+    #: Opt-in continuation adapters retain raw derivatives needed by Adams
+    #: history; the legacy path keeps its step-average diagnostic replacement.
+    retainStageDerivatives: bool = False
 
     def initialize(self, dt, *args, stageWeights=None, rerun=None, **kwargs):
         # A plain driver can safely leave the optional adapter: public adjacency
@@ -154,7 +157,7 @@ class CompSPHSystem(BaseIntegrationSystem):
         if verbose:   # self.t may be a device tensor: format it only when printing
             print(f'Initializing new state [t={self.t}]')
         return CompSPHSystem(state=state.initializeNewState(), adjacency=self.adjacency, t=self.t, domain=self.domain,
-                             pairWork=self.pairWork, supportGrid=self.supportGrid, listGrid=self.listGrid, sourceTerms=self.sourceTerms, spatialContext=self.spatialContext, canonicalExport=self.canonicalExport)
+                             pairWork=self.pairWork, supportGrid=self.supportGrid, listGrid=self.listGrid, sourceTerms=self.sourceTerms, spatialContext=self.spatialContext, canonicalExport=self.canonicalExport, retainStageDerivatives=self.retainStageDerivatives)
     
     def apply_position_update(self, update, spec: PositionUpdateSpec, **kwargs):
         return update_position(self, update, spec, 'position', 'position_derivative', 'velocity', 'velocity_derivative')
@@ -245,7 +248,14 @@ class CompSPHSystem(BaseIntegrationSystem):
 
         return StepDecision(values=values, redo=redo, apply=apply, hostState=hostState)
 
-    def finalize(self, initialState, dt, returnValues, updateValues, weights, config, schemeConfig, *args, **kwargs):
+    def finalize(self, initialState, dt, returnValues, updateValues, weights=None, config=None, schemeConfig=None, *args, **kwargs):
+        # Implicit history drivers finalize one endpoint instead of an RK stage
+        # combination. Their native-energy path needs the same last-stage carry
+        # and switch hooks; compatible pair work requires explicit RK weights.
+        if weights is None:
+            if schemeConfig.compatibleEnergy:
+                raise ValueError('endpoint-only finalization requires compatibleEnergy=False')
+            returnValues, updateValues = [returnValues], [updateValues]
         self.adjacency = returnValues[-1][0]  # Assuming the adjacency list is the last return value from the derivative function
         # Copy the last substeps values into the current state to ensure the final state is correct
         lastState = returnValues[-1][1]  # Assuming the state is the second return value from the derivative function
@@ -352,6 +362,7 @@ class CompSPHSystem(BaseIntegrationSystem):
                     capacity=pairListCapacity(schemeConfig),
                     **neighborSearchOptions(config, gridFactory=pairListGridFactory(self.listGrid, rebuilt, config)))
 
-        updateValues[-1].dudt = (self.state.internalEnergies - initialState.state.internalEnergies) /dt
+        if not self.retainStageDerivatives:
+            updateValues[-1].dudt = (self.state.internalEnergies - initialState.state.internalEnergies) /dt
 
         return super().finalize(initialState, dt, returnValues, updateValues, weights, config, schemeConfig, *args, **kwargs)

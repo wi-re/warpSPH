@@ -60,11 +60,19 @@ def permute_state(state, order, *, identity=False):
     return type(state)(**values)
 
 
-def permute_update(update, order, *, identity=False):
+def validate_update_schema(update, n):
     from ..systems.compressibleMonaghan import CompressibleSystemUpdate
     if (type(update) is not CompressibleSystemUpdate or {f.name for f in fields(update)} != UPDATE_FIELDS
             or set(vars(update)) != UPDATE_FIELDS):
         raise TypeError('particle layout requires the audited compressible update schema')
+    for name in UPDATE_FIELDS:
+        value = getattr(update,name)
+        if value is not None and (not isinstance(value,torch.Tensor) or not value.ndim or value.shape[0] != n):
+            raise ValueError(f'update {name} must have one value per particle')
+
+
+def permute_update(update, order, *, identity=False):
+    validate_update_schema(update,order.numel())
     values = {}
     for f in fields(update):
         value = getattr(update, f.name)

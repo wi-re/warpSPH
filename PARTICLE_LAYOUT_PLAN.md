@@ -2,8 +2,24 @@
 
 Progress and priorities: [PLANS.md](PLANS.md).
 
-Current implementation: fixed-count runner renewal and UID persistence are CPU-qualified;
-see [the latest report](docs/particle_layout/RENEWAL_AND_PERSISTENCE_2026-11-02.md).
+Current implementation: fixed-count continuation adapters are CPU-qualified;
+see [the latest report](docs/particle_layout/CONTINUATION_ADAPTERS_2026-11-02.md)
+and the preceding [renewal/persistence checkpoint](docs/particle_layout/RENEWAL_AND_PERSISTENCE_2026-11-02.md).
+User direction (2026-11-02): commit that checkpoint, then implement continuation
+adapters. Committed locally as `ffcd152` on `dev`, without a push. The next slice
+adapts fixed-step Adams/BDF history and explicit FSAL input/output by UID, plus the
+generic runtime's accepted `Continuation`. Qualification is complete on CPU. Raw
+derivatives must survive SPH's step-average diagnostic replacement; physical
+hook changes restart history, and unsupported method-owned contexts fail closed.
+Final frontend gates: 493 passes / 25 skips (ten hard-CUDA configuration cases
+deselected), 231 FP64 passes; archived old-backend default-route gate 128 passes /
+six skips. Raw thermal derivatives, every admitted Adams/BDF order, accepted
+runtime memory/dense/rejected-step behavior and in-memory checkpoint continuation
+are covered. The isolated integrator quiet-reuse formatting fix `cdbbc52` passed
+759 tests / 415 skips and is fast-forwarded into main; no push. CPU FSAL fixtures
+save about 7–13%, while UID/history adaptation adds about 0.7–0.8 ms to small
+AB3 steps. GPU throughput remains unqualified. Next: persisted numerical history,
+additional method-owned contexts, CUDA, then boundary/ghost/source/topology adapters.
 The following audit introduction records the original scoping baseline.
 
 Original audit: scope and proposed implementation sequence complete, 2026-11-01.
