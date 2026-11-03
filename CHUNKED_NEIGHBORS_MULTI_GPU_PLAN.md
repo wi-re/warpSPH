@@ -2940,5 +2940,5 @@ Final local gates pass: 54 FP64 CPU runner/history controls, 13 combined CUDA
 controls against the native tree's Warp backend, 1,751 native C++ CPU and 1,752
 native C++/CUDA checks, and the actual Morton CompSPH/CRKSPH launcher with
 1→2→3-rank reference/save/resume (2 controls). Accepted Isambard deployment is
-unchanged. Both merges are ready to commit; no further qualification is pending
-within this bounded local integration scope.
+unchanged. Frontend merge85ae913 and native development merge82dac97 are committed; no
+further qualification is pending within this bounded local integration scope.

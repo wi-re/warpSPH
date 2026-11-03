@@ -12,6 +12,7 @@ integration.
 - Frontend pre-integration checkpoint: `825f9e0`, preserving layout `6a067df`.
 - Multi-GPU inputs: frontend `2b57b59`, core `179df45`.
 - Core/main merge: `a2c85b5` (parent/main `04e126e`).
+- Frontend/dev merge: `85ae913`; native development merge: `82dac97`.
 - Integrators/main: `cdbbc52`, pinned explicitly for all new checks. The prior
   multi-GPU cohort used pre-layout `1fea2a3`; that result was not treated as a
   substitute for checking the current integrator.
