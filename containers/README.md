@@ -2,6 +2,10 @@
 
 Plan: [whole-row chunks and multi-GPU](../CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md).
 
+The [0.7.1 release handoff](releases/0.7.1.md) records the fresh amd64 Docker
+archive, ARM64 SIF/deployment bundle, pinned sources and qualification limits.
+The older accepted Isambard artifacts below remain available.
+
 The image recipes package the paired simulation stack for Linux x86-64/CUDA or
 ARM64/CUDA. The optional `with-remote` target installs warpSPHRemote's Python
 companion, allowing the existing browser viewer to launch/view ordinary local
