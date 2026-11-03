@@ -332,3 +332,17 @@ commands/configuration, passed/failed gates and the exact next action. First
 reviewable implementation deliverable: Phase1 planner plus Phase2 direct
 single-GPU chunk collection; first useful solver deliverable includes Phase3
 CRK retained work. Full multi-GPU completion requires real multiple GPUs.
+
+## Paired multi-GPU / particle-layout integration (2026-11-03)
+
+User authorizes checkpointing the current repository states, then merging the
+qualified multi-GPU core into core/main and frontend into dev. Qualify the
+combined fixed-count layout, restart/ownership and current integrator contracts
+locally before merging the core baseline into codex/native-cluster-pairs.
+Accepted Isambard artifacts remain frozen; this integration starts no site jobs.
+
+Starting pins: frontend dev 6a067df, multi-GPU frontend 2b57b59; core/main
+04e126e, multi-GPU core 179df45; integrators/main cdbbc52; native backend
+430aef7 plus the existing untracked operator survey to checkpoint separately.
+Native source and survey artifacts are preserved; the unrelated Isambard archive
+in the frontend checkout is not part of the code checkpoint.
