@@ -59,7 +59,7 @@ def snapshot(root, destination):
 
 
 def prepare(context, sources, requirements, *, with_remote, base_image, platform,
-            warp_version, constraints=None):
+            warp_version, constraints=None, runtime_image=None):
     context = context.resolve()
     if context.exists():
         raise ValueError('Use a fresh build-context directory; existing contents are never overwritten.')
@@ -89,6 +89,9 @@ def prepare(context, sources, requirements, *, with_remote, base_image, platform
                         baseImage=base_image, platform=platform, warpVersion=warp_version,
                         target='with-remote' if with_remote else 'simulation', packages=packages,
                         qualification='Build recipe only; validate each CPU/GPU/site target before production.')
+        if runtime_image:
+            manifest['runtimeImage'] = runtime_image
+            manifest['dockerfile'] = 'containers/Dockerfile.runtime'
         manifest['buildFiles'] = {
             str(path.relative_to(staging)): hashlib.sha256(path.read_bytes()).hexdigest()
             for path in sorted(staging.rglob('*')) if path.is_file() and 'sources' not in path.relative_to(staging).parts
@@ -106,6 +109,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--context', type=Path, required=True, help='Fresh private output directory')
     parser.add_argument('--base-image', required=True, help='CUDA/PyTorch OCI base; pin a digest for releases')
+    parser.add_argument('--runtime-image', help='Clean Ubuntu 24.04 final base for the NGC 26.01 runtime recipe; pin a digest for releases')
     parser.add_argument('--platform', choices=('linux/amd64', 'linux/arm64'), required=True)
     parser.add_argument('--source', action='append', default=[], metavar='NAME=PATH',
                         help='Exact local repository, including uncommitted package files')
@@ -137,7 +141,8 @@ def main():
     try:
         manifest = prepare(args.context, sources, requirements, with_remote=args.with_remote,
                            base_image=args.base_image, platform=args.platform,
-                           warp_version=args.warp_version, constraints=args.constraints)
+                           warp_version=args.warp_version, constraints=args.constraints,
+                           runtime_image=args.runtime_image)
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
         parser.error(str(error))
     print(f'Prepared {args.context.resolve()} ({manifest["target"]}, {args.platform})', flush=True)
@@ -145,7 +150,8 @@ def main():
         subprocess.run(['docker', 'build', '--platform', args.platform,
                         '--build-arg', 'BASE_IMAGE=' + args.base_image,
                         '--build-arg', 'WARP_VERSION=' + args.warp_version,
-                        '--target', manifest['target'], '-f', str(args.context / 'containers' / 'Dockerfile'),
+                        *(['--build-arg', 'RUNTIME_IMAGE=' + args.runtime_image] if args.runtime_image else []),
+                        '--target', manifest['target'], '-f', str(args.context / manifest.get('dockerfile', 'containers/Dockerfile')),
                         '-t', args.image, str(args.context)], check=True)
 
 

@@ -48,3 +48,33 @@ checks, local Docker networking limits and remaining site gates.
 Hosted documentation builds passed. Hosted test workflows were still running
 at the artifact handoff; local full integrator and paired image gates passed.
 No PyPI/registry upload or site jobs. C++ development remains separate.
+
+## Runtime image size follow-up (3 November 2026)
+
+User rejected the initial download size as impractical for hosting. The first
+Docker archive is 9.63 GB compressed; Docker initially reported 32.29 GB of
+local image storage, dominated by its NGC development base. Build a fresh runtime-only final stage, retain
+CUDA/Torch/NCCL provenance, measure transfer size and rerun deployment controls.
+Keep previous artifacts and the accepted site baseline. Do not silently reuse
+the Isambard communication payload with an incompatible CUDA/NCCL runtime.
+
+The replacement recipe copies the pinned NGC Torch/CUDA/NCCL binaries into a
+clean Ubuntu 24.04 final stage. Keep matching functorch/Triton, CUDA/Python
+headers and g++ for compilation operators, visualization/video and Remote.
+Preserve NVIDIA's forward-compat bundle and activation check: accepted Isambard
+communication provenance maps its libcuda. Exclude that bundle from global
+ldconfig and leave its driver selection to NVIDIA's check. Strip other native
+symbols only when allocated ELF section bytes/addresses remain identical; retain
+original and runtime SHA256 hashes. Physical site qualification stays pending.
+
+Runtime follow-up completed: general Docker archive4.031GB (58.1% smaller),
+ARM64 SIF3.443GB (63.7% smaller), self-contained Isambard tar3.506GB. Same
+CPU/CUDA/resumed numerical states bit-for-bit across29datasets. Runtime compiler,
+graph, NCCL/Gloo and real companion lifecycle gates pass;7packaging tests pass
+(2optional host HTTP tests skipped). ARM64 QEMU source/runtime and SIF metadata,
+bundle files/links and archive contents are checked. Preserve original numerical
+flags (notably TF32), CUDA aliases/forward compatibility and copied venv Python.
+The reusable exporter is also exercised against the full source image.
+Receipts and failures are in .tmp/runtime-slim-20261103/. Smaller artifacts are
+primary local tags; previous images/accepted site baseline remain intact.
+See containers/releases/0.7.1-runtime.md. Physical site gates remain pending.

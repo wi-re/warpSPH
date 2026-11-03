@@ -46,6 +46,33 @@ were not retested. ROCm and an MPI-enabled Torch build remain deferred.
 
 ## Build from private local repositories
 
+For deployment with NGC 26.01, add `--runtime-image ubuntu:24.04` (pin its
+multi-platform digest for a release). This selects `Dockerfile.runtime`: NGC
+supplies the exact Torch/CUDA/NCCL binaries in an intermediate stage, while the
+final image inherits only the clean OS layers. It retains CPU/CUDA numerical
+libraries, MKL hardware dispatch, CUDA JIT libraries, HPC runtime plugins,
+visualization/video dependencies and the optional Remote companion. The
+CUDA forward-compatibility bundle and NVIDIA's activation check are retained;
+compatibility driver libraries are excluded from the global linker cache and
+selected only by that check. This preserves the path used on Isambard.
+The exported library inventory and hashes are in `/opt/warpsph/runtime-export.json`.
+Native symbol tables are stripped only if every allocated ELF section keeps
+identical contents and addresses; original hashes and byte savings are recorded.
+The source/final OS pair must both be Ubuntu 24.04 with Python 3.12.
+
+Unrelated ML training extensions, TensorRT, profilers, nvcc/static CUDA archives
+and the Intel SYCL backend are excluded. Torch's bundled functorch, matching
+Triton, the PTX assembler, CUDA/Python headers and a host C++ compiler remain
+for `torch.compile` operators. Venv interpreters use copies so companion workers
+that resolve the executable path retain the same environment. Numerical and
+communication runtime defaults from NGC, including its TF32 override, are
+preserved. Canonical relative CUDA links avoid dependence on OS alternatives.
+Native C++ backend development still uses its separate development environment.
+The original `Dockerfile` remains available for custom CUDA/Torch bases.
+Selecting a runtime image is explicit and leaves existing build invocations
+unchanged. When building a transferred runtime context, use the manifest's
+`dockerfile` and pass both `BASE_IMAGE` and `RUNTIME_IMAGE` build arguments.
+
 Run with Python 3.11 or newer from the frontend repository:
 
 ```bash
@@ -53,6 +80,7 @@ python scripts/build_container.py \
   --context .tmp/image-context --prepare-only \
   --platform linux/amd64 \
   --base-image nvcr.io/nvidia/pytorch:26.01-py3 \
+  --runtime-image ubuntu:24.04 \
   --source warpSPHCore=/path/to/warpSPHCore \
   --source warpSPHIntegrators=/path/to/warpSPHIntegrators \
   --source warpSPHPlotting=/path/to/warpSPHPlotting \
@@ -91,8 +119,9 @@ To build immediately on a Docker-capable machine, omit `--prepare-only` and add
 ```bash
 docker build --platform linux/amd64 \
   --build-arg BASE_IMAGE=nvcr.io/nvidia/pytorch:26.01-py3 \
+  --build-arg RUNTIME_IMAGE=ubuntu:24.04 \
   --build-arg WARP_VERSION=1.17.0 \
-  --target with-remote -f .tmp/image-context/containers/Dockerfile \
+  --target with-remote -f .tmp/image-context/containers/Dockerfile.runtime \
   -t warpsph:local .tmp/image-context
 ```
 

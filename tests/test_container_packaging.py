@@ -73,7 +73,8 @@ def test_source_symlinks_cannot_copy_files_outside_repository(tmp_path):
         builder.snapshot(source, tmp_path / 'snapshot')
 
 
-def test_mixed_public_local_context_is_atomic_and_keeps_exact_sources(tmp_path):
+@pytest.mark.parametrize('runtime_image', [None, 'ubuntu@sha256:runtime-fixture'])
+def test_mixed_public_local_context_is_atomic_and_keeps_exact_sources(tmp_path, runtime_image):
     builder = load('scripts/build_container.py')
     source = repository(tmp_path / 'core')
     builder.ROOT = ROOT
@@ -81,11 +82,18 @@ def test_mixed_public_local_context_is_atomic_and_keeps_exact_sources(tmp_path):
     context = tmp_path / 'context'
     manifest = builder.prepare(context, {'warpSPHCore': source}, public,
                                with_remote=True, base_image='base@sha256:fixture',
-                               platform='linux/arm64', warp_version='1.17.0')
+                               platform='linux/arm64', warp_version='1.17.0', runtime_image=runtime_image)
     assert manifest['packages']['warpSPHCore']['kind'] == 'source'
     assert manifest['packages']['warpSPHRemote']['requirement'] == 'warpSPHRemote==0.1.0'
     assert manifest['platform'] == 'linux/arm64'
     assert (context / 'scripts/run_distributed.py').is_file()
+    if runtime_image:
+        assert manifest['runtimeImage'] == runtime_image
+        recipe = manifest['dockerfile']
+        assert hashlib.sha256((context / recipe).read_bytes()).hexdigest() == manifest['buildFiles'][recipe]
+        assert 'containers/export_runtime.py' in manifest['buildFiles']
+    else:
+        assert 'runtimeImage' not in manifest
     with pytest.raises(ValueError, match='fresh'):
         builder.prepare(context, {}, {}, with_remote=False, base_image='base',
                         platform='linux/amd64', warp_version='1.17.0')
@@ -95,6 +103,57 @@ def test_mixed_public_local_context_is_atomic_and_keeps_exact_sources(tmp_path):
                         {name: name + '==0.1.0' for name in builder.PACKAGES if name != 'warpSPH'},
                         with_remote=False, base_image='base', platform='linux/amd64', warp_version='1.17.0')
     assert not wrong.exists()
+
+
+def test_runtime_symbol_strip_guard_detects_loadable_code_changes(tmp_path):
+    import ctypes
+    import struct
+    compiler, strip = shutil.which('cc'), shutil.which('strip')
+    if not compiler or not strip:
+        pytest.skip('Host C compiler and binutils required')
+    runtime = load('containers/export_runtime.py')
+    source = tmp_path / 'fixture.c'
+    source.write_text('int runtime_answer(void) { return 42; }\n')
+    original, stripped = tmp_path / 'original.so', tmp_path / 'stripped.so'
+    subprocess.run([compiler, '-g', '-shared', '-fPIC', str(source), '-o', str(original)], check=True)
+    shutil.copy2(original, stripped)
+    subprocess.run([strip, '--strip-unneeded', str(stripped)], check=True)
+    assert stripped.stat().st_size < original.stat().st_size
+    assert runtime.allocated_sections(original) == runtime.allocated_sections(stripped)
+    assert ctypes.CDLL(str(stripped)).runtime_answer() == 42
+    content = bytearray(stripped.read_bytes())
+    table = struct.unpack_from('<Q', content, 40)[0]
+    size, count, names_index = struct.unpack_from('<HHH', content, 58)
+    sections = [struct.unpack_from('<IIQQQQIIQQ', content, table + i * size) for i in range(count)]
+    names = sections[names_index]
+    strings = content[names[4]:names[4] + names[5]]
+    text = next(section for section in sections if strings[section[0]:].split(b'\0', 1)[0] == b'.text')
+    content[text[4]] ^= 1
+    changed = tmp_path / 'changed.so'
+    changed.write_bytes(content)
+    assert runtime.allocated_sections(original) != runtime.allocated_sections(changed)
+
+
+def test_runtime_cuda_alias_does_not_depend_on_unexported_alternatives(tmp_path):
+    runtime = load('containers/export_runtime.py')
+    source = tmp_path / 'base'
+    (source / 'cuda-13/include').mkdir(parents=True)
+    (source / 'alternatives').mkdir()
+    (source / 'cuda-13/include/cuda.h').write_text('runtime header\n')
+    (source / 'alternatives/cuda').symlink_to(source / 'cuda-13')
+    (source / 'cuda').symlink_to(source / 'alternatives/cuda')
+    destination = tmp_path / 'runtime'
+    target = destination / str(source / 'cuda-13').lstrip('/')
+    shutil.copytree(source / 'cuda-13', target)
+    runtime.export_alias(source / 'cuda', destination)
+    alias = destination / str(source / 'cuda').lstrip('/')
+    assert alias.is_symlink() and not alias.readlink().is_absolute()
+    assert alias.resolve() == target
+    moved = tmp_path / 'relocated'
+    destination.rename(moved)
+    relocated = moved / alias.relative_to(destination)
+    assert (relocated / 'include/cuda.h').read_text() == 'runtime header\n'
+    assert relocated.resolve().is_relative_to(moved)
 
 
 def free_port():

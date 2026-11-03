@@ -1,0 +1,74 @@
+# syntax=docker/dockerfile:1
+# The NGC image supplies qualified binaries, never final filesystem layers.
+ARG BASE_IMAGE
+ARG RUNTIME_IMAGE=ubuntu:24.04
+FROM ${BASE_IMAGE} AS runtime-export
+COPY containers/export_runtime.py /export_runtime.py
+RUN python /export_runtime.py /runtime
+
+FROM ${RUNTIME_IMAGE} AS simulation
+ARG WARP_VERSION=1.17.0
+ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 MPLBACKEND=Agg \
+    HOME=/work XDG_STATE_HOME=/work/state XDG_CACHE_HOME=/work/cache \
+    WARPSPH_REMOTE_DATA=/work/remote-library \
+    WARP_CACHE_PATH=/work/cache/warp NUMBA_CACHE_DIR=/work/cache/numba \
+    MPLCONFIGDIR=/work/cache/matplotlib \
+    TORCHINDUCTOR_CACHE_DIR=/work/cache/torchinductor USER=warpsph LOGNAME=warpsph \
+    PATH=/opt/venv/bin:$PATH \
+    LD_LIBRARY_PATH=/opt/venv/lib/python3.12/site-packages/torch/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64 \
+    NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility,video \
+    BASH_ENV=/etc/shinit_v2 ENV=/etc/shinit_v2 CUDA_VERSION=13.1
+COPY --from=runtime-export /runtime-os-packages.txt /tmp/runtime-os-packages.txt
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        $(cat /tmp/runtime-os-packages.txt) \
+        python3 python3-venv python3-dev ca-certificates git g++ libgomp1 libnuma1 libibverbs1 librdmacm1 \
+        libgl1 libegl1 libglib2.0-0 ffmpeg xvfb \
+    && python3 -m venv --copies /opt/venv \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /work && chmod 1777 /work
+COPY --from=runtime-export /runtime/ /
+# Shared-library lookup includes CUDA and optional UCX/UCC/MPI runtime plugins.
+RUN find /usr/lib /usr/local /opt/hpcx -path '*/compat/*' -prune -o -type f -name '*.so*' -printf '%h\n' \
+      | sort -u > /etc/ld.so.conf.d/warpsph-runtime.conf && ldconfig
+WORKDIR /opt/warpsph
+COPY . /opt/warpsph/
+RUN chmod -R a+rX /opt/warpsph \
+    && python -c "import importlib.metadata as m; open('base-constraints.txt','w').write('torch=='+m.version('torch')+'\n')" \
+    && python -m pip install --no-cache-dir -c base-constraints.txt -c constraints.txt "warp-lang==${WARP_VERSION}" setuptools wheel \
+    && python containers/install_stack.py simulation \
+    && python -m pip check \
+    && python -c "import torch, warp, warpSPH; assert torch.version.cuda == '13.1'" \
+    && python -m pip freeze > installed-simulation.txt \
+    && rm -rf /work/cache
+ENV CUDA_HOME=/usr/local/cuda \
+    TRITON_CUDACRT_PATH=/usr/local/cuda/include \
+    TRITON_CUDART_PATH=/usr/local/cuda/include \
+    TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
+WORKDIR /work
+ENV TORCH_ALLOW_TF32_CUBLAS_OVERRIDE="1" \
+    NVPL_LAPACK_MATH_MODE="PEDANTIC" \
+    TORCH_NCCL_USE_COMM_NONBLOCKING="0" \
+    TORCHINDUCTOR_LOOP_ORDERING_AFTER_FUSION="0" \
+    CUDA_BINARY_LOADER_THREAD_COUNT="8" \
+    CUDA_MODULE_LOADING="LAZY" \
+    OMPI_MCA_coll_hcoll_enable="0" \
+    UCC_CL_BASIC_TLS="^sharp" \
+    UCC_EC_CUDA_EXEC_NUM_THREADS="256" \
+    TRITON_CUPTI_LIB_PATH="/usr/local/cuda/lib64" \
+    TRITON_CUPTI_INCLUDE_PATH="/usr/local/cuda/include" \
+    PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION="python" \
+    PYTHONIOENCODING="utf-8" \
+    LC_ALL="C.UTF-8"
+# Bash activates the vendor's checked CUDA forward-compat path when needed.
+ENTRYPOINT ["/bin/bash", "-c", "exec python /opt/warpsph/containers/entrypoint.py \"$@\"", "--"]
+CMD ["help"]
+
+FROM simulation AS with-remote
+WORKDIR /opt/warpsph
+RUN python containers/install_stack.py remote && python -m pip check \
+    && python -m pip freeze > installed-remote.txt \
+    && apt-get update && apt-get install -y --no-install-recommends nginx-light \
+    && rm -rf /var/lib/apt/lists/* /work/cache
+EXPOSE 8767
+WORKDIR /work
+CMD ["companion"]
