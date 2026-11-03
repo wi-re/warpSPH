@@ -1,4 +1,10 @@
-# Benchmarks: wave-case integrator comparison
+# Benchmarks
+
+For CPU/GPU operators, neighbour search, memory controls, RHS and real solver
+steps, including input/Morton storage and compute-flag sweeps, see
+[the single-device performance suite](performance/README.md).
+
+## Wave-case integrator comparison
 
 Benchmark suites that compare the **explicit and implicit time integrators**
 of `warpSPHIntegrators` on the registered `waveEquation` case, across the
