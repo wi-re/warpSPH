@@ -104,60 +104,90 @@ def mfmLimiter_Func_i(
     return nbHiRho, nbLoRho, mdHiRho, mdLoRho, nbHiP, nbLoP, mdHiP, mdLoP, nbHiV, nbLoV, mdHiV, mdLoV
 
 
-@wp.kernel(enable_backward=False)
-def mfmLimiter_Kernel(
-    queryState: Any, referenceState: Any, domainState: domainData,
-    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
-    correctionData: Any, kernelProperties: kernelState,
-    # canonical ABI prefix -- do not change
+def _makeLimiterKernel(tiled: bool):
+    @wp.kernel(name="mfmLimiter_KernelTiled" if tiled else "mfmLimiter_Kernel", enable_backward=False)
+    def mfmLimiter_Kernel(
+        queryState: Any, referenceState: Any, domainState: domainData,
+        useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+        correctionData: Any, kernelProperties: kernelState,
+        # canonical ABI prefix -- do not change
 
-    rho: wp.array(dtype=scalar_t), vel: wp.array(dtype=Any), pres: wp.array(dtype=scalar_t),  # type: ignore
-    gRho: wp.array(dtype=Any), gVel: wp.array(dtype=Any), gP: wp.array(dtype=Any),  # type: ignore
-    cond: wp.array(dtype=scalar_t), betaMin: scalar_t, betaMax: scalar_t, condCrit: scalar_t,
+        rho: wp.array(dtype=scalar_t), vel: wp.array(dtype=Any), pres: wp.array(dtype=scalar_t),  # type: ignore
+        gRho: wp.array(dtype=Any), gVel: wp.array(dtype=Any), gP: wp.array(dtype=Any),  # type: ignore
+        cond: wp.array(dtype=scalar_t), betaMin: scalar_t, betaMax: scalar_t, condCrit: scalar_t,
 
-    rowStart: wp.int32,
-    output_aRho: wp.array(dtype=scalar_t), output_aVel: wp.array(dtype=Any), output_aP: wp.array(dtype=scalar_t),  # type: ignore
-):
-    i = wp.tid()
-    if i >= queryState.positions.shape[0]:
-        return
-    gi = i + rowStart
-    iPtcl = getParticleData(queryState, i)
-    vi = vel[gi]
-    nbHiRho = rho[gi]
-    nbLoRho = rho[gi]
-    mdHiRho = rho[gi]
-    mdLoRho = rho[gi]
-    nbHiP = pres[gi]
-    nbLoP = pres[gi]
-    mdHiP = pres[gi]
-    mdLoP = pres[gi]
-    nbHiV = vi
-    nbLoV = vi
-    mdHiV = vi
-    mdLoV = vi
-    numOffsets = gridState.numOffsets if not useAdjacency else 1
-    for o in range(numOffsets):
-        beginIndex, numIndices = getIndexRangeLane(i, o, 0, 1, useAdjacency, adjacencyState, gridState, queryState, domainState)
-        if beginIndex < 0:
-            continue
-        nbHiRho, nbLoRho, mdHiRho, mdLoRho, nbHiP, nbLoP, mdHiP, mdLoP, nbHiV, nbLoV, mdHiV, mdLoV = mfmLimiter_Func_i(
-            gi, iPtcl, referenceState, domainState, kernelProperties, beginIndex, numIndices,
-            adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
-            rho, vel, pres, gRho, gVel, gP,
-            nbHiRho, nbLoRho, mdHiRho, mdLoRho, nbHiP, nbLoP, mdHiP, mdLoP, nbHiV, nbLoV, mdHiV, mdLoV)
-    b = wp.max(betaMin, betaMax * wp.min(scalar_t(1.), condCrit / cond[gi]))
-    output_aRho[i] = alphaScalar(rho[gi], nbHiRho, nbLoRho, mdHiRho, mdLoRho, b)
-    output_aP[i] = alphaScalar(pres[gi], nbHiP, nbLoP, mdHiP, mdLoP, b)
-    aV = zero_like_warp(vi)
-    for c in range(vi.length):
-        aV[c] = alphaScalar(vi[c], nbHiV[c], nbLoV[c], mdHiV[c], mdLoV[c], b)
-    output_aVel[i] = aV
+        rowStart: wp.int32,
+        output_aRho: wp.array(dtype=scalar_t), output_aVel: wp.array(dtype=Any), output_aP: wp.array(dtype=scalar_t),  # type: ignore
+    ):
+        lane = wp.int32(0)
+        lanes = wp.int32(1)
+        if wp.static(tiled):
+            i, lane = wp.tid()
+            lanes = wp.block_dim()
+        else:
+            i = wp.tid()
+        if i >= queryState.positions.shape[0]:
+            return
+        gi = i + rowStart
+        iPtcl = getParticleData(queryState, i)
+        vi = vel[gi]
+        nbHiRho = rho[gi]
+        nbLoRho = rho[gi]
+        mdHiRho = rho[gi]
+        mdLoRho = rho[gi]
+        nbHiP = pres[gi]
+        nbLoP = pres[gi]
+        mdHiP = pres[gi]
+        mdLoP = pres[gi]
+        nbHiV = vi
+        nbLoV = vi
+        mdHiV = vi
+        mdLoV = vi
+        numOffsets = gridState.numOffsets if not useAdjacency else 1
+        for o in range(numOffsets):
+            beginIndex, numIndices = getIndexRangeLane(i, o, lane, lanes, useAdjacency, adjacencyState, gridState, queryState, domainState)
+            if beginIndex < 0:
+                continue
+            nbHiRho, nbLoRho, mdHiRho, mdLoRho, nbHiP, nbLoP, mdHiP, mdLoP, nbHiV, nbLoV, mdHiV, mdLoV = mfmLimiter_Func_i(
+                gi, iPtcl, referenceState, domainState, kernelProperties, beginIndex, numIndices,
+                adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
+                rho, vel, pres, gRho, gVel, gP,
+                nbHiRho, nbLoRho, mdHiRho, mdLoRho, nbHiP, nbLoP, mdHiP, mdLoP, nbHiV, nbLoV, mdHiV, mdLoV)
+        if wp.static(tiled):
+            nbHiRho = wp.tile_max(wp.tile(nbHiRho, preserve_type=True))[0]
+            nbLoRho = wp.tile_min(wp.tile(nbLoRho, preserve_type=True))[0]
+            mdHiRho = wp.tile_max(wp.tile(mdHiRho, preserve_type=True))[0]
+            mdLoRho = wp.tile_min(wp.tile(mdLoRho, preserve_type=True))[0]
+            nbHiP = wp.tile_max(wp.tile(nbHiP, preserve_type=True))[0]
+            nbLoP = wp.tile_min(wp.tile(nbLoP, preserve_type=True))[0]
+            mdHiP = wp.tile_max(wp.tile(mdHiP, preserve_type=True))[0]
+            mdLoP = wp.tile_min(wp.tile(mdLoP, preserve_type=True))[0]
+            for axis in range(vi.length):
+                nbHiV[axis] = wp.tile_max(wp.tile(nbHiV[axis], preserve_type=True))[0]
+                nbLoV[axis] = wp.tile_min(wp.tile(nbLoV[axis], preserve_type=True))[0]
+                mdHiV[axis] = wp.tile_max(wp.tile(mdHiV[axis], preserve_type=True))[0]
+                mdLoV[axis] = wp.tile_min(wp.tile(mdLoV[axis], preserve_type=True))[0]
+        if lane != 0:
+            return
+        b = wp.max(betaMin, betaMax * wp.min(scalar_t(1.), condCrit / cond[gi]))
+        output_aRho[i] = alphaScalar(rho[gi], nbHiRho, nbLoRho, mdHiRho, mdLoRho, b)
+        output_aP[i] = alphaScalar(pres[gi], nbHiP, nbLoP, mdHiP, mdLoP, b)
+        aV = zero_like_warp(vi)
+        for c in range(vi.length):
+            aV[c] = alphaScalar(vi[c], nbHiV[c], nbLoV[c], mdHiV[c], mdLoV[c], b)
+        output_aVel[i] = aV
+    return mfmLimiter_Kernel
 
+
+mfmLimiter_Kernel = _makeLimiterKernel(False)
+mfmLimiter_KernelTiled = _makeLimiterKernel(True)
 
 _LIMITER_SPEC = OperatorSpec(
     rowChunked=True,
     kernel=mfmLimiter_Kernel,
+    tiledKernel=mfmLimiter_KernelTiled,
+    defaultNeighborLanes=1,
+    chunkedNeighborLanes=32,
     outputs=(OutputSpec(dtype=scalar_t), OutputSpec(dtype=_vecDtype), OutputSpec(dtype=scalar_t)),
     extras=(ExtraSpec("rho", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("vel", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("pres", ExtraKind.TENSOR, RowRole.REFERENCE),
             ExtraSpec("gRho", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("gVel", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("gP", ExtraKind.TENSOR, RowRole.REFERENCE),

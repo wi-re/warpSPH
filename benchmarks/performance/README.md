@@ -138,11 +138,19 @@ traffic requires separate hardware-counter profiling.
   The benchmark pins `--lanes 1` by default for a stable scalar baseline.
   Use `--lanes default` to measure the production selection, inheriting the
   environment and per-operator defaults. Qualified CUDA kernels normally use
-  32 lanes; CRK volume and compatible work retain scalar defaults on flat/grid
-  inputs and use 32 lanes on bounded chunks. Large flat lists can be slower
-  when these two kernels are forced to 32 lanes. Use `--lanes default 1 32`
+  32 lanes; CRK volume/work and MFM/MFV gradients, limiters, fluxes
+  and timesteps retain scalar defaults on flat/grid inputs and use 32 lanes
+  on bounded chunks. Large flat lists can be slower when these kernels are
+  forced to 32 lanes. Use `--lanes default 1 32`
   to compare all three selections; the requested default is recorded as JSON
   `null`, distinct from either forced override. CPU kernels stay scalar.
+  MFM/MFV moments retain scalar defaults pending multigrid closure qualification;
+  an explicit lane setting can select their cooperative variant.
+  CUDA chunked collection batches queries across the independent bounded J
+  buffers automatically; the edge/row budgets still constrain each buffer.
+  Short step windows can include different rebuild counts across resolutions.
+  Inspect per-step samples and use a longer `--steps` window before attributing
+  a size trend to operator scaling.
 - Custom versioned configurations keep case physics and solver settings. The
   benchmark overrides scheme, size, dimension, device/precision, kernel, compute
   options, accepted-step count and output controls. Fresh starts only; arbitrary

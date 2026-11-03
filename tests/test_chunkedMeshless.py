@@ -63,6 +63,40 @@ def test_native_conserved_stages_match_flat(scheme,closure,dim):
     assert abs(chunks.trajectory[-1]['relativeEnergyBudgetResidual'])<5e-6
 
 
+@pytest.mark.parametrize('lanes', [None, 1])
+def test_chunked_meshless_flux_and_limiter_honor_lane_selection(monkeypatch, lanes):
+    if not torch.cuda.is_available() or not os.environ.get('WARPSPH_TEST_DEVICE', 'cpu').startswith('cuda'):
+        pytest.skip('CUDA required')
+    from warpSPHCore import setNeighborLanes
+    launcher = importlib.import_module('warpSPHCore.autograd.launcher')
+    laneModule = importlib.import_module('warpSPHCore.autograd.lanes')
+    flux = importlib.import_module('warpSPH.modules.meshless.flux')._FLUX_SPEC
+    limiter = importlib.import_module('warpSPH.modules.reconstruction.meshless')._LIMITER_SPEC
+    monkeypatch.setattr(laneModule, '_envLanes', None)
+    launch = launcher._launchMaybeTiled
+    seen = set()
+
+    def audit(kernel, n, inputs, device, selected, **kwargs):
+        for spec in (flux, limiter):
+            if kernel in (spec.kernel, spec.tiledKernel):
+                expected = spec.tiledKernel if lanes is None else spec.kernel
+                assert kernel is expected
+                assert (selected or 1) == (32 if lanes is None else 1)
+                seen.add(spec.kernel.key)
+        return launch(kernel, n, inputs, device, selected, **kwargs)
+
+    monkeypatch.setattr(launcher, '_launchMaybeTiled', audit)
+    monkeypatch.setattr(importlib.import_module('warpSPHCore.autograd.prepared'), '_launchMaybeTiled', audit)
+    setNeighborLanes(lanes)
+    try:
+        result = configuration('MFV', steps=2).run(chunkedCase())
+    finally:
+        setNeighborLanes(None)
+    assert not result.diverged
+    assert seen == {flux.kernel.key, limiter.kernel.key}
+    assert abs(result.trajectory[-1]['relativeEnergyBudgetResidual']) < 5e-6
+
+
 @pytest.mark.parametrize('scheme',['MFM','MFV'])
 @pytest.mark.parametrize('closure',['none','project'])
 def test_checkpoint_restarts_native_warm_start_and_budget(tmp_path,scheme,closure):

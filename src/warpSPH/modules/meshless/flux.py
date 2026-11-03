@@ -9,7 +9,7 @@ from warpSPHCore.type_config import *
 from warpSPHCore.autograd import *
 from warpSPHCore.autograd.operator_spec import RowRole
 from warpSPHCore.dataTypes import *
-from warpSPHCore.radiusSearch.grid_util import getIndexRangeLane
+from warpSPHCore.radiusSearch.grid_util import getIndexRangeLane, laneSum
 from warpSPHCore.math import *
 from warpSPHCore.kernels import *
 from warpSPHCore.util import *
@@ -183,15 +183,15 @@ def mfmFlux_Func_i(
     return dm, dp, de
 
 
-def _makeFluxKernel(listMode: bool):
+def _makeFluxKernel(listMode: bool, tiled: bool = False):
     """One pair implementation, separate grid and neighbour traversal kernels."""
-    @wp.kernel(name="mfmFlux_neighbors" if listMode else "mfmFlux_grid", enable_backward=False)
+    @wp.kernel(name=("mfmFlux_neighbors_tiled" if listMode else "mfmFlux_grid_tiled") if tiled else ("mfmFlux_neighbors" if listMode else "mfmFlux_grid"), enable_backward=False)
     def flux(
         queryState: Any, referenceState: Any, domainState: domainData,
         useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
         correctionData: Any, kernelProperties: kernelState,
         # canonical ABI prefix -- do not change
-    
+
         rho: wp.array(dtype=scalar_t), vel: wp.array(dtype=Any), pres: wp.array(dtype=scalar_t),  # type: ignore
         gRho: wp.array(dtype=Any), gVel: wp.array(dtype=Any), gP: wp.array(dtype=Any),  # type: ignore
         aRho: wp.array(dtype=scalar_t), aVel: wp.array(dtype=Any), aP: wp.array(dtype=scalar_t),  # type: ignore
@@ -199,11 +199,17 @@ def _makeFluxKernel(listMode: bool):
         gamma: wp.array(dtype=scalar_t), materials: wp.array(dtype=wp.int32), dt: wp.array(dtype=scalar_t), mode: wp.int32, order: wp.int32, psi1: scalar_t, psi2: scalar_t,
         power: scalar_t, timeCentred: wp.int32, centred: wp.int32, areaCap: wp.int32, retry: wp.int32, massLimit: scalar_t,
         faceGuard: wp.int32, closureCap: scalar_t,
-    
+
         rowStart: wp.int32,
         output_dm: wp.array(dtype=scalar_t), output_dp: wp.array(dtype=Any), output_de: wp.array(dtype=scalar_t),  # type: ignore
     ):
-        i = wp.tid()
+        lane = wp.int32(0)
+        lanes = wp.int32(1)
+        if wp.static(tiled):
+            i, lane = wp.tid()
+            lanes = wp.block_dim()
+        else:
+            i = wp.tid()
         if i >= queryState.positions.shape[0]:
             return
         gi = i + rowStart
@@ -215,7 +221,7 @@ def _makeFluxKernel(listMode: bool):
         stepDt = dt[0]
         numOffsets = gridState.numOffsets if not traversal else 1
         for o in range(numOffsets):
-            beginIndex, numIndices = getIndexRangeLane(i, o, 0, 1, traversal, adjacencyState, gridState, queryState, domainState)
+            beginIndex, numIndices = getIndexRangeLane(i, o, lane, lanes, traversal, adjacencyState, gridState, queryState, domainState)
             if beginIndex < 0:
                 continue
             dm, dp, de = mfmFlux_Func_i(
@@ -223,6 +229,12 @@ def _makeFluxKernel(listMode: bool):
                 adjacencyState.neighborList if traversal else gridState.sortIndex,
                 rho, vel, pres, gRho, gVel, gP, aRho, aVel, aP, vol, Einv, lam, condBad,
                 gamma, materials, stepDt, mode, order, psi1, psi2, power, timeCentred, centred, areaCap, retry, massLimit, faceGuard, closureCap, dm, dp, de)
+        if wp.static(tiled):
+            dm = laneSum(dm)
+            dp = laneSum(dp)
+            de = laneSum(de)
+        if lane != 0:
+            return
         # rates dQ/dt = -sum_j |A| F with the sign convention folded into the accumulation above
         output_dm[i] = dm
         output_dp[i] = dp
@@ -233,6 +245,9 @@ def _makeFluxKernel(listMode: bool):
 _FLUX_SPEC = OperatorSpec(
     rowChunked=True,
     kernel=_makeFluxKernel(True),
+    tiledKernel=_makeFluxKernel(True, True),
+    defaultNeighborLanes=1,
+    chunkedNeighborLanes=32,
     outputs=(OutputSpec(dtype=scalar_t), OutputSpec(dtype=_vecDtype), OutputSpec(dtype=scalar_t)),
     extras=(ExtraSpec("rho", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("vel", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("pres", ExtraKind.TENSOR, RowRole.REFERENCE),
             ExtraSpec("gRho", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("gVel", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("gP", ExtraKind.TENSOR, RowRole.REFERENCE),
@@ -256,5 +271,5 @@ def fluxSpec(useAdjacency):
     from dataclasses import replace
     useAdjacency = bool(useAdjacency)
     if useAdjacency not in _TRAVERSAL_SPECS:
-        _TRAVERSAL_SPECS[useAdjacency] = replace(_FLUX_SPEC, kernel=_makeFluxKernel(useAdjacency))
+        _TRAVERSAL_SPECS[useAdjacency] = replace(_FLUX_SPEC, kernel=_makeFluxKernel(useAdjacency), tiledKernel=_makeFluxKernel(useAdjacency, True))
     return _TRAVERSAL_SPECS[useAdjacency]
