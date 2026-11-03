@@ -78,3 +78,21 @@ The reusable exporter is also exercised against the full source image.
 Receipts and failures are in .tmp/runtime-slim-20261103/. Smaller artifacts are
 primary local tags; previous images/accepted site baseline remain intact.
 See containers/releases/0.7.1-runtime.md. Physical site gates remain pending.
+
+## Remote layout follow-up (3 November 2026)
+
+User authorized reorganizing the idle Isambard home under `$HOME/warpsph/`:
+versioned immutable releases, explicit environment selectors, separate tools,
+inputs, qualification results, runs, staging and archive. Preserve the qualified
+2ecb382 deployment as `current`; 0.7.1 remains pending site qualification.
+Completed 15 same-filesystem, inode-preserving moves. Image/profile/communication
+hashes match before and after; all 113 accepted artifacts/checkpoints verify.
+Submission paths pass with sbatch replaced by a stub; queue remains empty.
+Original Conda interpreter retained for batches; fresh Python3.11 maintenance
+venv added. Conda files live under tools/miniforge3 with a home compatibility
+symlink preserving embedded prefixes; ~/dev is unchanged. User follow-up adds
+an interactive-only .bashrc selector with backup, preserving existing Conda/mamba
+initialization and noninteractive exported paths; fresh login checks pass.
+Historical receipts/results remain unchanged; move map and verification records
+are under archive/migration-20261103. No jobs or 0.7.1 upload.
+See [remote layout](scripts/isambard/REMOTE_LAYOUT.md).

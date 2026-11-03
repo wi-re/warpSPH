@@ -24,10 +24,13 @@ probe/comparison exits nonzero and retains a failure report and available output
 
 The repaired ARM64 image was built on it111636 with Buildx/QEMU and converted to
 SIF locally with user-owned Apptainer1.5.5. No build-only Slurm job was used.
-The fresh deployment is `$HOME/warpsph-deployment-arm64-2ecb382`; it selects
-`$HOME/images/warpsph-arm64-io-repair-2ecb382.sif`. Full SHA256, application/runtime
-fingerprint, communication hashes and accepted jobs are pinned in `site-profile.json`.
-Original images, source bundle and failed results remain intact.
+After the 2026-11-03 home reorganization, the deployment is
+`$HOME/warpsph/releases/accepted-2ecb382/`, with its original harness under
+`harness/` and pinned SIF under `images/`. Full SHA256, application/runtime
+fingerprint, communication hashes and accepted jobs remain pinned in the unchanged
+`site-profile.json`. Original images, source bundle and failed results are retained.
+See [remote layout and migration](REMOTE_LAYOUT.md) for the directory map and
+Conda prefix compatibility link.
 
 | Stage | Job | Wall time including JIT | Artifacts verified locally |
 |---|---|---|---|
@@ -55,8 +58,7 @@ byte-for-byte, retaining its separate original build-image provenance.
 For later simulations on the login node:
 
 ```bash
-unset QA_IMAGE QA_DEPLOYMENT_PROFILE  # clear an earlier release selection
-source "$HOME/warpsph-deployment-arm64-2ecb382/site-profile.sh"
+source "$HOME/warpsph/environments/current.sh"
 ```
 
 The actual batch-body recipe is in [Reusing the accepted deployment](#reusing-the-accepted-deployment-for-simulations).
@@ -546,15 +548,17 @@ format; review the evidence rather than treating absence of proof as a pass.
 
 `site-profile.json` pins the accepted SIF SHA256, application/package fingerprint,
 CUDA/NCCL versions, OFI/hwloc sources and installed shared-library hashes. Its
-companion `site-profile.sh` exports paths relative to `QA_ROOT` (default `$HOME`),
-account `brics.b6ez`, the custom profile and Slurm network option. Keep the whole
+companion `site-profile.sh` retains the original `$HOME` defaults. The installed
+`environments/current.sh` selector explicitly resets all derived paths and then
+sources that frozen profile, selecting account `brics.b6ez`, the custom network
+profile and Slurm network option. Source the selector before setting run-specific
+resource options or `QA_PREVIOUS`. Keep the whole
 harness together in a versioned shared directory; source the profile from that
 directory so Slurm spool paths never select helper files. The current image uses
 NGC26.01, CUDA13.1, NCCL2.29.2, OFI1.18.0/hwloc2.13.0 and host Libfabric2.3.1.
 
 ```bash
-unset QA_IMAGE QA_DEPLOYMENT_PROFILE  # clear an earlier release selection
-source "$HOME/warpsph-deployment-arm64-2ecb382/site-profile.sh"
+source "$HOME/warpsph/environments/current.sh"
 export QA_PREVIOUS="$QA_RESULTS_ROOT/restart-8005076"
 export QA_NODES=2 QA_GPUS_PER_NODE=1
 export QA_TIME=00:30:00 QA_CPUS_PER_NODE=16
