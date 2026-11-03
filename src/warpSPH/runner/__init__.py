@@ -11,14 +11,14 @@ from .caseSpec import CaseSpec, buildArgumentParser, specFromArgs
 from .cli import caseMain
 from .display import closeWindow, figureOf, holdWindow, openWindow, pumpEvents
 from .media import encodeFrames
-from .runner import RunResult, buildContext, prepareContext, resolveEnum, run
+from .runner import RunAllocationError, RunResult, buildContext, prepareContext, resolveEnum, run
 from .parameters import Parameter
 from .configuration import RunConfiguration, configurationSchema, parameterReference, resolvedConfiguration, configurationCatalogue
 
 __all__ = [
     'Case', 'RunContext', 'registerCase', 'getCase', 'listCases',
     'CaseSpec', 'buildArgumentParser', 'specFromArgs', 'caseMain',
-    'RunResult', 'run', 'buildContext', 'prepareContext', 'resolveEnum',
+    'RunResult', 'RunAllocationError', 'run', 'buildContext', 'prepareContext', 'resolveEnum',
     'Parameter', 'RunConfiguration', 'configurationSchema', 'parameterReference', 'resolvedConfiguration', 'configurationCatalogue',
     'encodeFrames',
     'openWindow', 'pumpEvents', 'holdWindow', 'closeWindow', 'figureOf',

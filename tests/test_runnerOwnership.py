@@ -78,3 +78,40 @@ def test_previous_stage_result_is_released_before_next_rhs(scheme):
     c=RunConfiguration('drivenTurbulence',simulation=dict(device='cpu',nx=12,nSteps=4,maxDt=.001,plot=False,video=False,store=False,progress=False,show=False,quiet=True),solver=dict(scheme=scheme,**(dict(temporalScheme='ssprk') if scheme in ['MFM','MFV'] else {})))
     value=c.run(replace(base,buildSystem=build,diagnostics=diagnostics))
     assert not value.diverged and len(checks)==3
+
+
+def test_failure_cleanup_preserves_primary_error_and_attempts_every_resource(monkeypatch):
+    """Even a broken renderer/trajectory close cannot hide allocation evidence."""
+    from types import SimpleNamespace
+    module=importlib.import_module('warpSPH.runner.runner')
+    events=[]; primary=MemoryError('bulk allocation rejected')
+    class File:
+        def close(self):
+            events.append('file');raise OSError('file close failed')
+    ctx=SimpleNamespace(device=torch.device('cpu'),scratch={'trajectoryFile':File()})
+    monkeypatch.setattr(module,'prepareContext',lambda *a:ctx)
+    def fail(*a):raise primary
+    monkeypatch.setattr(module,'_runContext',fail)
+    monkeypatch.setattr(module,'_closeProgress',lambda ctx:events.append('progress'))
+    def drain():
+        events.append('frames');raise OSError('PNG writer failed')
+    monkeypatch.setattr(module,'_drainFrameWrites',drain)
+    monkeypatch.setattr(module,'_teardownPlot',lambda ctx,**kw:events.append(('plot',kw['failed'])))
+    with pytest.raises(MemoryError) as caught:module._run(None,None,0)
+    assert caught.value is primary
+    assert events==['progress','frames',('plot',True),'file']
+    assert any('PNG writer failed' in note for note in primary.__notes__)
+    assert any('file close failed' in note for note in primary.__notes__)
+
+
+def test_timer_cleanup_does_not_replace_an_allocation_failure(monkeypatch):
+    module=importlib.import_module('warpSPH.runner.runner')
+    primary=MemoryError('bulk allocation rejected')
+    timer=module._Timer(torch.device('cpu'));timer.cuda=True
+    class Event:
+        def record(self):raise RuntimeError('device synchronization failed')
+    timer._end=Event()
+    assert timer.__exit__(MemoryError,primary,None) is False
+    assert 'device synchronization failed' in primary.__notes__[0]
+    with pytest.raises(RuntimeError,match='device synchronization failed'):
+        timer.__exit__(None,None,None)

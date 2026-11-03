@@ -142,6 +142,14 @@ class WeaklyCompressibleSystem(BaseIntegrationSystem):
     def finalize(self, initialState, dt, returnValues, updateValues, weights = ..., *args, **kwargs):
         self.adjacency = returnValues[-1][0]  # Assuming the adjacency list is the last return value from the derivative function
         lastState = returnValues[-1][1]  # Assuming the state is the second return value from the derivative function
+        from warpSPHCore.radiusSearch import ChunkedAdjacency
+        if isinstance(self.adjacency, ChunkedAdjacency):
+            # Constant diagnostics may alias the accepted input. Finalization
+            # must own its destinations before shifting can allocate/fail.
+            for name in ('supports','pressures','soundspeeds','surfaceIndicators','surfaceNormals','surfaceLambdas'):
+                value = getattr(self.state, name)
+                if value is not None:
+                    setattr(self.state, name, value.clone())
         self.state.supports.copy_(lastState.supports)
 
         if self.state.pressures is not None and lastState.pressures is not None:

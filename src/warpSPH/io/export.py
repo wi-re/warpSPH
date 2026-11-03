@@ -77,6 +77,9 @@ def exportSimulationSystem(
     last_dt = None,
     next_dt = None,
 ):
+    from warpSPHCore.radiusSearch import ChunkedAdjacency
+    if isinstance(system.adjacency, ChunkedAdjacency):
+        raise NotImplementedError('Chunked neighbor checkpoint export is not implemented; pair data must remain chunk-local.')
     if continuation is not None:
         from .continuation import validateFrame,signature
         validateFrame(continuation,system)

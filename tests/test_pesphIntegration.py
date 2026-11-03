@@ -274,3 +274,78 @@ def test_trajectory_preserves_uninitialized_and_scalar_history(tmp_path):
         for name, expected in zip(names, (.007, .125)):
             assert _frameValue(f[name], 'frame_00000', cfg.device) is None
             assert float(_frameValue(f[name], 'frame_00001', cfg.device)) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize('variant', VARIANTS)
+@pytest.mark.parametrize('dim,nx', [(2, 6), (3, 5)])
+@pytest.mark.parametrize('support', ['NoScheme', 'NumberDensity'])
+def test_chunked_initialization_and_native_steps_preserve_fields(variant, dim, nx, support):
+    """Tiny repeated parity controls intentionally omit video; no timing claim."""
+    from warpSPH.modules.pesph.initialization import initializePESPHState
+    from warpSPHCore.radiusSearch import buildChunkedVerletList, ChunkedAdjacency, RowChunkPolicy
+    from warpSPHCore import SupportScheme
+    from warpSPHIntegrators.schemes import get_scheme, IntegrationSchemeType
+    initial, cfg, scheme = setup(dim=dim, nx=nx, variant=variant, uniform=True)
+    initial.velocities *= .05
+    scheme = replace(scheme, adaptiveSupportScheme=getattr(AdaptiveSupportScheme, support),
+        adaptiveSupportCorrections=support == 'NumberDensity', adaptiveSupportIterations=60,
+        dissipation=variant is PESPHVariant.PressureEnergy)
+    systems = []
+    for chunked in (False, True):
+        state = initial.clone()
+        # Start from a Gather list, as samplers do. Initialization must rebuild
+        # union support while preserving the selected resident representation.
+        adj = buildChunkedVerletList(state, cfg.domain,
+            policy=RowChunkPolicy(edgeBudget=4096, maxRows=3, bytesPerEdge=8), verletScale=cfg.verletScale,
+            supportMode=SupportScheme.Gather) if chunked else None
+        system = PESPHSystem(state=state, domain=cfg.domain, adjacency=adj)
+        initializePESPHState(system, cfg, scheme)
+        assert isinstance(system.adjacency, ChunkedAdjacency) is chunked
+        if chunked:
+            assert system.adjacency.mode is SupportScheme.SuperSymmetric
+        integrator = get_scheme(IntegrationSchemeType.rungeKutta2)
+        for _ in range(2):
+            system = integrator.function(state=system, dt=1e-5, f=pesphStep, config=cfg, schemeConfig=scheme).state
+            assert isinstance(system.adjacency, ChunkedAdjacency) is chunked
+        systems.append(system)
+    assertSameState(systems[0].state, systems[1].state, exact=True)
+    assert float(systems[0].t) == float(systems[1].t)
+
+
+@pytest.mark.parametrize('context', ['materials', 'boundary', 'source', 'reverse-ad', 'forward-ad', 'graph'])
+def test_chunked_pesph_rejects_unqualified_contexts(context):
+    from warpSPH.modules.pesph.chunked import checkPESPHChunks
+    from warpSPHCore.radiusSearch import buildChunkedVerletList, RowChunkPolicy
+    from warpSPHCore import SupportScheme
+    state, cfg, scheme = setup(dim=2, nx=6, uniform=True)
+    adj = buildChunkedVerletList(state, cfg.domain,
+        policy=RowChunkPolicy(edgeBudget=4096, maxRows=3, bytesPerEdge=8),
+        supportMode=SupportScheme.SuperSymmetric)
+    system = PESPHSystem(state=state, domain=cfg.domain, adjacency=adj)
+    if context == 'materials':
+        scheme.materials = [object()]
+    elif context == 'boundary':
+        scheme.boundaryConditions = [object()]
+    elif context == 'source':
+        system.sourceTerms = object()
+    elif context == 'reverse-ad':
+        state.velocities.requires_grad_()
+    elif context == 'graph':
+        cfg.compute.execution = 'graph'
+    if context == 'forward-ad':
+        with torch.autograd.forward_ad.dual_level():
+            state.velocities = torch.autograd.forward_ad.make_dual(state.velocities, torch.ones_like(state.velocities))
+            with pytest.raises(NotImplementedError, match='differentiation'):
+                checkPESPHChunks(system, cfg, scheme)
+    else:
+        with pytest.raises(NotImplementedError, match='differentiation' if context == 'reverse-ad' else 'ConservedSources' if context == 'source' else 'eager periodic'):
+            checkPESPHChunks(system, cfg, scheme)
+
+
+def test_body_sources_require_an_integrator_visible_energy_budget():
+    from warpSPH.modules.meshless.sources import ConservedSources
+    from warpSPH.modules.pesph.sources import validatePESPHSource
+    state, cfg, scheme = setup()
+    system = PESPHSystem(state=state, domain=cfg.domain, sourceTerms=ConservedSources())
+    with pytest.raises(ValueError, match='sourceEnergyBudget'):
+        validatePESPHSource(system, scheme)

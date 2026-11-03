@@ -1018,3 +1018,14 @@ loops omit video and keep streamed progress. Sources/results are frozen in
 Next: history/prior/FSAL adapters, CUDA eager qualification, then external/boundary
 and changing-population contracts. This simulator slice remains uncommitted on dev;
 integrator main stays clean at the previously merged commit.
+
+### Owned-row integration checkpoint (2026-11-03)
+
+User authorizes checkpointing the current repositories and integrating the
+paired multi-GPU implementation before feeding that baseline into native code.
+The eager accepted-boundary path now keeps chunk policy/communicator/ownership
+through sorting and restart. Current integrators are pinned to cdbbc52.
+Short exact-replica CPU/Gloo and CUDA/NCCL controls cover empty owners becoming
+active after restart, repeated resorts and declared source/history axes. See
+[qualification and limits](docs/particle_layout/MULTIGPU_INTEGRATION_2026-11-03.md).
+Population and physical inlet/outlet work remains separate.

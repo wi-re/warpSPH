@@ -34,6 +34,8 @@ from warpSPHCore import *
 from ...configurations.moduleConfigurations.diffusionParameters import DiffusionParameters, StateLimiter, VelocityPairPolicy
 from ..reconstruction import limitedPairPhi, pairRiemannStates, reconstructPairIncrements, reconstructPair1D
 from ..riemann import riemannStarState
+from .chunked import centredQueryRole,godunovInputs
+from warpSPHCore.radiusSearch import ChunkedAdjacency
 
 __all__ = ['computeGodunovWarp']
 
@@ -149,7 +151,7 @@ def godunov_Func_Adjacency(
     queryVelocityTensor: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)), referenceVelocityTensor: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)),  # type: ignore
     queryStateGradients: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)), referenceStateGradients: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)),  # type: ignore
     queryAccelerations: wp.array(dtype=vector(length=Any, dtype=scalar_t)), halfDt: scalar_t,  # type: ignore
-    params: DiffusionParameters, gamma: scalar_t, order: wp.int32,
+    params: DiffusionParameters, gamma: scalar_t, order: wp.int32, rowStart: wp.int32,
     accelValue: Any,
 ):
     xi, hi, mi, rhoi, ki = getParticle(queryState, i)
@@ -184,7 +186,7 @@ def godunov_Func_Adjacency(
             if beginIndex < 0:
                 continue
         a_o, w_o = godunov_Func_i(
-            i, xi, hi, mi, rhoi, referenceState, domainState, kernelProperties, dim,
+            i + rowStart, xi, hi, mi, rhoi, referenceState, domainState, kernelProperties, dim,
             beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
             ki, referenceState.kinds,
             queryVelocities[i], referenceVelocities,
@@ -210,7 +212,7 @@ def computeGodunov_Kernel(
     queryVelocityTensor: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)), referenceVelocityTensor: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)),  # type: ignore
     queryStateGradients: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)), referenceStateGradients: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)),  # type: ignore
     queryAccelerations: wp.array(dtype=vector(length=Any, dtype=scalar_t)), halfDt: scalar_t,  # type: ignore
-    params: DiffusionParameters, gamma: scalar_t, order: wp.int32,
+    params: DiffusionParameters, gamma: scalar_t, order: wp.int32, rowStart: wp.int32,
     # outputs
     accel: wp.array(dtype=vector(length=Any, dtype=scalar_t)),  # type: ignore
     dudt: wp.array(dtype=scalar_t),  # type: ignore
@@ -225,7 +227,7 @@ def computeGodunov_Kernel(
         queryVelocities, referenceVelocities, queryPressures, referencePressures,
         queryVelocityTensor, referenceVelocityTensor, queryStateGradients, referenceStateGradients,
         queryAccelerations, halfDt,
-        params, gamma, order,
+        params, gamma, order, rowStart,
         accel[i],
     )
     accel[i] = a
@@ -241,23 +243,25 @@ def _scalarDtype(ctx, extras):
 
 
 _GODUNOV = OperatorSpec(
+    rowChunked=True,
     kernel=computeGodunov_Kernel,
     outputs=(OutputSpec(dtype=_accelDtype, shape=ShapeOf.QUERY),
              OutputSpec(dtype=_scalarDtype, shape=ShapeOf.QUERY)),
     extras=(
-        ExtraSpec("queryVelocities", ExtraKind.TENSOR),
-        ExtraSpec("referenceVelocities", ExtraKind.TENSOR),
-        ExtraSpec("queryPressures", ExtraKind.TENSOR),
-        ExtraSpec("referencePressures", ExtraKind.TENSOR),
-        ExtraSpec("queryVelocityTensor", ExtraKind.TENSOR),
-        ExtraSpec("referenceVelocityTensor", ExtraKind.TENSOR),
-        ExtraSpec("queryStateGradients", ExtraKind.TENSOR),
-        ExtraSpec("referenceStateGradients", ExtraKind.TENSOR),
-        ExtraSpec("queryAccelerations", ExtraKind.TENSOR),
+        ExtraSpec("queryVelocities", ExtraKind.TENSOR,RowRole.QUERY),
+        ExtraSpec("referenceVelocities", ExtraKind.TENSOR,RowRole.REFERENCE),
+        ExtraSpec("queryPressures", ExtraKind.TENSOR,RowRole.QUERY),
+        ExtraSpec("referencePressures", ExtraKind.TENSOR,RowRole.REFERENCE),
+        ExtraSpec("queryVelocityTensor", ExtraKind.TENSOR,lambda ctx,e: RowRole.QUERY if e["order"]>=2 else RowRole.REPLICATED),
+        ExtraSpec("referenceVelocityTensor", ExtraKind.TENSOR,lambda ctx,e: RowRole.REFERENCE if e["order"]>=2 else RowRole.REPLICATED),
+        ExtraSpec("queryStateGradients", ExtraKind.TENSOR,lambda ctx,e: RowRole.QUERY if e["order"]>=2 and e["params"].riemannReconstruction else RowRole.REPLICATED),
+        ExtraSpec("referenceStateGradients", ExtraKind.TENSOR,lambda ctx,e: RowRole.REFERENCE if e["order"]>=2 and e["params"].riemannReconstruction else RowRole.REPLICATED),
+        ExtraSpec("queryAccelerations", ExtraKind.TENSOR,centredQueryRole),
         ExtraSpec("halfDt", ExtraKind.SCALAR),
         ExtraSpec("params", ExtraKind.SCALAR),
         ExtraSpec("gamma", ExtraKind.SCALAR),
         ExtraSpec("order", ExtraKind.SCALAR),
+        ExtraSpec("rowStart",ExtraKind.SCALAR,RowRole.ROW_START),
     ),
 )
 
@@ -284,24 +288,29 @@ def computeGodunovWarp(
     `queryStateGradients` (required then). `params` supplies `riemannSolver`, `limiterType` and the taper constants (resolved, see
     `resolveReconstructionLimiter`)."""
     referenceParticles = referenceParticles if referenceParticles is not None else queryParticles
-    vel = queryVelocities if queryVelocities is not None else queryParticles.velocities
-    P = queryPressures if queryPressures is not None else queryParticles.pressures
-    dim = queryParticles.positions.shape[1]
-    dummyJ = getCachedDummyTensor((1, dim, dim), dtype=queryParticles.positions.dtype, device=queryParticles.positions.device)
-    dummyG = getCachedDummyTensor((1, 2, dim), dtype=queryParticles.positions.dtype, device=queryParticles.positions.device)
-    if order >= 2:
-        if queryVelocityTensor is None:
-            raise ValueError('order 2 needs the velocity Jacobian (queryVelocityTensor, see reconstruction.computeVelocityJacobian)')
-        if params.riemannReconstruction and queryStateGradients is None:
-            raise ValueError('riemannReconstruction needs the (rho, P) gradients (queryStateGradients, see reconstruction.computeStateGradients)')
-    # the time-centred energy rate is evaluated in a second pass, with the accelerations of the first (halfDt = 0: the particle's own velocity)
-    centred = bool(params.timeCentredEnergy) and halfDt > 0.0
-    if centred and queryAccelerations is None:
-        raise ValueError('a time-centred energy rate (halfDt > 0) needs the accelerations of a first pass (queryAccelerations)')
-    dummyA = getCachedDummyTensor((1, dim), dtype=queryParticles.positions.dtype, device=queryParticles.positions.device)
-    accs = queryAccelerations if centred else dummyA
-    J = queryVelocityTensor if order >= 2 else dummyJ
-    G = queryStateGradients if (order >= 2 and params.riemannReconstruction) else dummyG
+    def prepare():
+        if isinstance(adjacency,ChunkedAdjacency) and referenceParticles is not queryParticles:
+            raise NotImplementedError('Chunked Godunov currently requires self-population inputs.')
+        vel = queryVelocities if queryVelocities is not None else queryParticles.velocities
+        P = queryPressures if queryPressures is not None else queryParticles.pressures
+        dim = queryParticles.positions.shape[1]
+        dummyJ = getCachedDummyTensor((1, dim, dim), dtype=queryParticles.positions.dtype, device=queryParticles.positions.device)
+        dummyG = getCachedDummyTensor((1, 2, dim), dtype=queryParticles.positions.dtype, device=queryParticles.positions.device)
+        if order >= 2:
+            if queryVelocityTensor is None:
+                raise ValueError('order 2 needs the velocity Jacobian (queryVelocityTensor, see reconstruction.computeVelocityJacobian)')
+            if params.riemannReconstruction and queryStateGradients is None:
+                raise ValueError('riemannReconstruction needs the (rho, P) gradients (queryStateGradients, see reconstruction.computeStateGradients)')
+        # the time-centred energy rate is evaluated in a second pass, with the accelerations of the first (halfDt = 0: the particle's own velocity)
+        centred = bool(params.timeCentredEnergy) and halfDt > 0.0
+        if centred and queryAccelerations is None:
+            raise ValueError('a time-centred energy rate (halfDt > 0) needs the accelerations of a first pass (queryAccelerations)')
+        dummyA = getCachedDummyTensor((1, dim), dtype=queryParticles.positions.dtype, device=queryParticles.positions.device)
+        accs = queryAccelerations if centred else dummyA
+        J = queryVelocityTensor if order >= 2 else dummyJ
+        G = queryStateGradients if (order >= 2 and params.riemannReconstruction) else dummyG
+        return vel,P,J,G,accs
+    vel,P,J,G,accs=godunovInputs(adjacency,prepare)
     with record_function("warpSPH[computeGodunov]"):
         ctx = SPHContext(
             query=queryParticles, properties=operationProperties, domain=domain,
@@ -315,5 +324,5 @@ def computeGodunovWarp(
             queryVelocityTensor=J, referenceVelocityTensor=J,
             queryStateGradients=G, referenceStateGradients=G,
             queryAccelerations=accs, halfDt=scalar_t(halfDt),
-            params=params, gamma=scalar_t(gamma), order=order,
+            params=params, gamma=scalar_t(gamma), order=order, rowStart=0,
         )

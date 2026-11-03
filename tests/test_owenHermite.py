@@ -113,3 +113,33 @@ def test_runner_rejects_invalid_owen_configuration(values,match):
     from warpSPH.cases.compressible.sod import sodCase
     with pytest.raises(ValueError,match=match):
         RunConfiguration('sod',solver=dict(scheme='CRKSPH',**values)).prepare(sodCase)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(),reason='CUDA stream ordering')
+def test_cold_lattice_lookup_generation_uses_current_torch_stream(monkeypatch):
+    import warp as wp
+    from warpSPH.modules.adaptiveSupport.wp_psi import generatePSILut_warp,computePsi
+    from warpSPHCore.autograd.stream import torchWarpStream
+    wp.init()
+    device=torch.device('cuda',torch.cuda.current_device())
+    with torchWarpStream(device):
+        reference=generatePSILut_warp(KernelFunctions.Wendland2,2.,6.,65)
+    torch.cuda.synchronize(device)
+    launch=wp.launch
+    observed=[]
+    def checked(kernel,*args,**kwargs):
+        if kernel==computePsi:
+            selected=kwargs.get('stream') or wp.get_stream(wp.device_from_torch(device))
+            # The consumer copies use Torch's current stream. A different
+            # producer stream needs an explicit dependency; this generator
+            # promises the current-stream contract, without a global fence.
+            assert selected.cuda_stream==torch.cuda.current_stream(device).cuda_stream
+            observed.append(1)
+        return launch(kernel,*args,**kwargs)
+    monkeypatch.setattr(wp,'launch',checked)
+    stream=torch.cuda.Stream(device=device)
+    with torch.cuda.stream(stream):
+        actual=generatePSILut_warp(KernelFunctions.Wendland2,2.,6.,65)
+    stream.synchronize()
+    assert len(observed)==3
+    for a,b in zip(actual,reference):torch.testing.assert_close(a,b,rtol=0,atol=0)

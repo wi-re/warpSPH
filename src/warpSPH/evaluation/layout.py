@@ -35,11 +35,15 @@ def validate_permutation(order, n, device):
 
 def validate_state_schema(state):
     from ..systems.compSPH import CompSPHState
-    if type(state) is not CompSPHState:
+    from ..caseUtils.drivenTurbulence import DrivenCompSPHState
+    if type(state) not in (CompSPHState, DrivenCompSPHState):
         raise TypeError('particle layout currently requires the audited CompSPHState schema')
     names = {f.name for f in fields(state)}
-    if names != PARTICLE_FIELDS | GLOBAL_FIELDS | EDGE_FIELDS or set(vars(state)) != names:
+    extra = {'sourceEnergyBudget'} if type(state) is DrivenCompSPHState else set()
+    if names != PARTICLE_FIELDS | GLOBAL_FIELDS | EDGE_FIELDS | extra or set(vars(state)) != names:
         raise TypeError('particle fields changed: declare particle/global/edge axes before sorting')
+    if extra and (not isinstance(state.sourceEnergyBudget, torch.Tensor) or state.sourceEnergyBudget.shape != (2,)):
+        raise ValueError('sourceEnergyBudget must be the global work/heat vector')
     n = state.positions.shape[0]
     for name in PARTICLE_FIELDS:
         value = getattr(state, name)

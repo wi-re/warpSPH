@@ -17,6 +17,8 @@ from torch.profiler import profile, ProfilerActivity
 from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
+from warpSPHCore.autograd import RowRole
+from ..reconstruction.gradient import needsJacobian, needsBalsara, needsStateGradients
 
 from .pi import computePi_pair
 from ..reconstruction import rawPairVelocity, reconstructPairVelocity, pairRiemannStates, velocityTensorArguments, stateGradientArguments
@@ -302,27 +304,28 @@ def _viscosityDtype(ctx, extras):
 
 
 _VISCOSITY = OperatorSpec(
+    rowChunked=True,
     kernel=computeViscosity_Kernel,
     outputs=(OutputSpec(dtype=_viscosityDtype, shape=ShapeOf.QUERY),),
     extras=(
-        ExtraSpec("queryVelocities", ExtraKind.TENSOR),
-        ExtraSpec("referenceVelocities", ExtraKind.TENSOR),
+        ExtraSpec("queryVelocities", ExtraKind.TENSOR, RowRole.QUERY),
+        ExtraSpec("referenceVelocities", ExtraKind.TENSOR, RowRole.REFERENCE),
         ExtraSpec("individualCs", ExtraKind.SCALAR),
-        ExtraSpec("queryCs", ExtraKind.TENSOR),
-        ExtraSpec("referenceCs", ExtraKind.TENSOR),
+        ExtraSpec("queryCs", ExtraKind.TENSOR, lambda ctx, e: RowRole.QUERY if e['individualCs'] else RowRole.REPLICATED),
+        ExtraSpec("referenceCs", ExtraKind.TENSOR, lambda ctx, e: RowRole.REFERENCE if e['individualCs'] else RowRole.REPLICATED),
         ExtraSpec("viscositySwitch", ExtraKind.SCALAR),
-        ExtraSpec("queryAlphas", ExtraKind.TENSOR),
-        ExtraSpec("referenceAlphas", ExtraKind.TENSOR),
+        ExtraSpec("queryAlphas", ExtraKind.TENSOR, lambda ctx, e: RowRole.QUERY if e['viscositySwitch'] else RowRole.REPLICATED),
+        ExtraSpec("referenceAlphas", ExtraKind.TENSOR, lambda ctx, e: RowRole.REFERENCE if e['viscositySwitch'] else RowRole.REPLICATED),
         ExtraSpec("explicitPressure", ExtraKind.SCALAR),
-        ExtraSpec("queryPressures", ExtraKind.TENSOR),
-        ExtraSpec("referencePressures", ExtraKind.TENSOR),
+        ExtraSpec("queryPressures", ExtraKind.TENSOR, lambda ctx, e: RowRole.QUERY if e['explicitPressure'] else RowRole.REPLICATED),
+        ExtraSpec("referencePressures", ExtraKind.TENSOR, lambda ctx, e: RowRole.REFERENCE if e['explicitPressure'] else RowRole.REPLICATED),
         ExtraSpec("viscosityParams", ExtraKind.SCALAR),
-        ExtraSpec("queryVelocityTensor", ExtraKind.TENSOR),
-        ExtraSpec("referenceVelocityTensor", ExtraKind.TENSOR),
-        ExtraSpec("queryBalsara", ExtraKind.TENSOR),
-        ExtraSpec("referenceBalsara", ExtraKind.TENSOR),
-        ExtraSpec("queryStateGradients", ExtraKind.TENSOR),
-        ExtraSpec("referenceStateGradients", ExtraKind.TENSOR),
+        ExtraSpec("queryVelocityTensor", ExtraKind.TENSOR, lambda ctx, e: RowRole.QUERY if needsJacobian(e['viscosityParams']) else RowRole.REPLICATED),
+        ExtraSpec("referenceVelocityTensor", ExtraKind.TENSOR, lambda ctx, e: RowRole.REFERENCE if needsJacobian(e['viscosityParams']) else RowRole.REPLICATED),
+        ExtraSpec("queryBalsara", ExtraKind.TENSOR, lambda ctx, e: RowRole.QUERY if needsBalsara(e['viscosityParams']) else RowRole.REPLICATED),
+        ExtraSpec("referenceBalsara", ExtraKind.TENSOR, lambda ctx, e: RowRole.REFERENCE if needsBalsara(e['viscosityParams']) else RowRole.REPLICATED),
+        ExtraSpec("queryStateGradients", ExtraKind.TENSOR, lambda ctx, e: RowRole.QUERY if needsStateGradients(e['viscosityParams']) else RowRole.REPLICATED),
+        ExtraSpec("referenceStateGradients", ExtraKind.TENSOR, lambda ctx, e: RowRole.REFERENCE if needsStateGradients(e['viscosityParams']) else RowRole.REPLICATED),
     ),
 )
 

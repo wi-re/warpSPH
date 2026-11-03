@@ -63,7 +63,9 @@ def solve(st,cfg,sc,dt,g,mode,velocity,history):
 def advanceDFSPH(system,dt,cfg,sc,order,*,fluidOnlyViscosity=False):
     if order not in ('df_np_cd', 'np_df_cd', 'np_df_shift'):
         raise ValueError(f'Unknown DFSPH composition: {order}')
+    from warpSPH.modules.incompressible.chunked import checkProjectionChunks
     requireProjectedStep(system,cfg,'dfsph')
+    checkProjectionChunks(system, cfg, sc)
     st=system.state;fluid=st.kinds==0;mask=fluid[:,None]
     g=geometry(system,cfg,sc,dt=dt)
     events=[]

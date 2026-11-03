@@ -20,6 +20,8 @@ from torch.profiler import profile, ProfilerActivity
 from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
+from warpSPHCore.radiusSearch import ChunkedAdjacency
+from dataclasses import replace
 
 from ...configurations.crkSPH import CRKViscosity
 from ..dissipation import DiffusionParameters, computeFrontiereQ
@@ -459,27 +461,33 @@ _CRK_ACCEL = OperatorSpec(
         OutputSpec(dtype=scalar_t, shape=ShapeOf.QUERY),
     ),
     extras=(
-        ExtraSpec("queryVelocities", ExtraKind.TENSOR),
-        ExtraSpec("referenceVelocities", ExtraKind.TENSOR),
-        ExtraSpec("queryEnergies", ExtraKind.TENSOR),
-        ExtraSpec("referenceEnergies", ExtraKind.TENSOR),
+        ExtraSpec("queryVelocities", ExtraKind.TENSOR, RowRole.QUERY),
+        ExtraSpec("referenceVelocities", ExtraKind.TENSOR, RowRole.REFERENCE),
+        ExtraSpec("queryEnergies", ExtraKind.TENSOR, RowRole.QUERY),
+        ExtraSpec("referenceEnergies", ExtraKind.TENSOR, RowRole.REFERENCE),
         ExtraSpec("individualCs", ExtraKind.SCALAR),
-        ExtraSpec("queryCs", ExtraKind.TENSOR),
-        ExtraSpec("referenceCs", ExtraKind.TENSOR),
+        ExtraSpec("queryCs", ExtraKind.TENSOR, lambda ctx, e: RowRole.QUERY if e['individualCs'] else RowRole.REPLICATED),
+        ExtraSpec("referenceCs", ExtraKind.TENSOR, lambda ctx, e: RowRole.REFERENCE if e['individualCs'] else RowRole.REPLICATED),
         ExtraSpec("viscositySwitch", ExtraKind.SCALAR),
-        ExtraSpec("queryAlphas", ExtraKind.TENSOR),
-        ExtraSpec("referenceAlphas", ExtraKind.TENSOR),
+        ExtraSpec("queryAlphas", ExtraKind.TENSOR, lambda ctx, e: RowRole.QUERY if e['viscositySwitch'] else RowRole.REPLICATED),
+        ExtraSpec("referenceAlphas", ExtraKind.TENSOR, lambda ctx, e: RowRole.REFERENCE if e['viscositySwitch'] else RowRole.REPLICATED),
         ExtraSpec("explicitPressure", ExtraKind.SCALAR),
-        ExtraSpec("queryPressures", ExtraKind.TENSOR),
-        ExtraSpec("referencePressures", ExtraKind.TENSOR),
+        ExtraSpec("queryPressures", ExtraKind.TENSOR, lambda ctx, e: RowRole.QUERY if e['explicitPressure'] else RowRole.REPLICATED),
+        ExtraSpec("referencePressures", ExtraKind.TENSOR, lambda ctx, e: RowRole.REFERENCE if e['explicitPressure'] else RowRole.REPLICATED),
         ExtraSpec("conductivityParams", ExtraKind.SCALAR),
         ExtraSpec("crkViscosityParams", ExtraKind.SCALAR),
-        ExtraSpec("queryVelocityTensor", ExtraKind.TENSOR),
-        ExtraSpec("referenceVelocityTensor", ExtraKind.TENSOR),
+        ExtraSpec("queryVelocityTensor", ExtraKind.TENSOR, RowRole.QUERY),
+        ExtraSpec("referenceVelocityTensor", ExtraKind.TENSOR, RowRole.REFERENCE),
         ExtraSpec("calculateDudt", ExtraKind.SCALAR),
         ExtraSpec("retainPairs", ExtraKind.SCALAR),
     ),
 )
+
+
+# Same floating kernel/pair function; unread ABI pair outputs stay one element.
+_CHUNK_FORCE = replace(_CRK_ACCEL, rowChunked=True, outputs=(
+    _CRK_ACCEL.outputs[0], OutputSpec(dtype=_crkAccelDtype, shape=1, chunkScratch=True),
+    OutputSpec(dtype=_crkAccelDtype, shape=1, chunkScratch=True), _CRK_ACCEL.outputs[3]))
 
 
 def computeCrkSPHAccelWarp(
@@ -504,6 +512,9 @@ def computeCrkSPHAccelWarp(
     renormalizationState: Optional[Union[torch.Tensor,RenormalizationState]] = None,
     *, returnDudt: bool = False, retainPairs: bool = True,
 ):
+    if isinstance(adjacency, ChunkedAdjacency) and retainPairs:
+        raise NotImplementedError('Chunked force dispatch requires retainPairs=False; expanded pair arrays are not supported.')
+
     if adjacency is None or isinstance(adjacency, CompactHashMap):
         raise ValueError("This module requires an adjacency structure.")
     if referenceVelocities is None:
@@ -575,7 +586,7 @@ def computeCrkSPHAccelWarp(
                 ),
             )
             result = launchOperator(
-                _CRK_ACCEL, ctx,
+                _CHUNK_FORCE if isinstance(adjacency, ChunkedAdjacency) else _CRK_ACCEL, ctx,
                 queryVelocities=queryVelocities_, referenceVelocities=referenceVelocities_,
                 queryEnergies=queryEnergies_, referenceEnergies=referenceEnergies_,
                 individualCs=individual_cs, queryCs=queryCs_, referenceCs=referenceCs_,

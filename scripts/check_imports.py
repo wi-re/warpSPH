@@ -188,6 +188,7 @@ def static_pass(verbose: bool) -> list[Failure]:
                 module_cache[module] = None
         return module_cache[module]
 
+    absentOptional: dict[str,bool] = {}
     checked = 0
     skippedOptional = 0
     for path in files:
@@ -209,18 +210,28 @@ def static_pass(verbose: bool) -> list[Failure]:
             checked += 1
             if verbose:
                 print(f"          {rel}:{lineno} {module} {symbols or ''}")
+            lookupError = None
             try:
                 spec = importlib.util.find_spec(module)
-            except (ImportError, AttributeError, ValueError) as exc:
+            except Exception as exc:
                 spec = None
-                if verbose:
-                    print(f"            find_spec raised: {exc}")
-            if spec is None and module.split(".")[0] in OPTIONAL_PACKAGES:
-                skippedOptional += 1
-                continue
+                lookupError = exc
+            root = module.split(".")[0]
+            if spec is None and root in OPTIONAL_PACKAGES:
+                if root not in absentOptional:
+                    try:
+                        absentOptional[root] = importlib.util.find_spec(root) is None
+                    except Exception:
+                        absentOptional[root] = False
+                # Missing children of an installed optional package are errors.
+                if absentOptional[root]:
+                    skippedOptional += 1
+                    continue
             if spec is None:
+                detail = (f"{type(lookupError).__name__}: {lookupError}"
+                          if lookupError is not None else "module not found")
                 failures.append(
-                    Failure(f"{rel}:{lineno}", f"no module named {module!r}", "module not found")
+                    Failure(f"{rel}:{lineno}", f"no module named {module!r}", detail)
                 )
                 continue
             if not symbols:
@@ -232,10 +243,18 @@ def static_pass(verbose: bool) -> list[Failure]:
                 )
                 continue
             for symbol in symbols:
-                if hasattr(mod, symbol):
-                    continue
-                # `from pkg import submodule` is legal even without a re-export.
-                if importlib.util.find_spec(f"{module}.{symbol}") is not None:
+                try:
+                    if hasattr(mod, symbol):
+                        continue
+                    # Only packages can contain importable child modules.
+                    # A missing attribute on a regular module is a normal
+                    # diagnostic, not a reason to call find_spec on a child
+                    # (which raises because the parent has no __path__).
+                    if hasattr(mod, "__path__") and importlib.util.find_spec(f"{module}.{symbol}") is not None:
+                        continue
+                except Exception as exc:
+                    failures.append(Failure(f"{rel}:{lineno}",
+                        f"cannot resolve {symbol!r} from {module}", f"{type(exc).__name__}: {exc}"))
                     continue
                 failures.append(
                     Failure(f"{rel}:{lineno}", f"cannot import {symbol!r} from {module}", "symbol missing")

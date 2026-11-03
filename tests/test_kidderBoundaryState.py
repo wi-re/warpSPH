@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from warpSPH.cases.compressible.kidder import postStep
+from warpSPH.modules.boundaryConditions.thermal import finishThermalDirichlet
 from warpSPH.caseUtils.compressible.kidder.bc import buildKidderBCs
 from warpSPH.configurations import CRKSPHConfig, CompSPHConfig
 from warpSPHCore import DomainDescription
@@ -28,6 +28,7 @@ def test_accepted_boundary_restores_density_energy_velocity_and_eos(configuratio
     x=torch.linspace(.9, 1., 12, dtype=dtype)[:,None]
     state=SimpleNamespace(positions=x, velocities=torch.zeros_like(x),
         densities=torch.full((12,), 3., dtype=dtype),
+        masses=torch.ones(12,dtype=dtype), boundaryProjectionBudget=None,
         internalEnergies=torch.full((12,), 7., dtype=dtype),
         pressures=torch.zeros(12,dtype=dtype), entropies=torch.zeros(12,dtype=dtype),
         soundspeeds=torch.zeros(12,dtype=dtype), materials=torch.zeros(12,dtype=torch.int32))
@@ -40,7 +41,7 @@ def test_accepted_boundary_restores_density_energy_velocity_and_eos(configuratio
     ctx=SimpleNamespace(config=config,schemeConfig=scheme)
     system=SimpleNamespace(state=state,t=.2)
     before={key:getattr(state,key)[2:-2].clone() for key in ('positions','velocities','densities','internalEnergies')}
-    postStep(ctx,system,0)
+    assert finishThermalDirichlet(system,0.,ctx.config,ctx.schemeConfig,account=False)
     mask=torch.tensor([True,True]+[False]*8+[True,True])
     radius=x[:,0]
     rho=2.+system.t+radius;pressure=5.+2*system.t+radius

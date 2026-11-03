@@ -6,7 +6,7 @@ import warp as wp
 from warp.types import vector
 from warpSPHCore import (
     ParticleState, OperationProperties, DomainDescription, SPHContext,
-    OperatorSpec, OutputSpec, ExtraSpec, ExtraKind, ShapeOf, launchOperator,
+    OperatorSpec, OutputSpec, ExtraSpec, ExtraKind, RowRole, ShapeOf, launchOperator,
     domainData, adjacencyData, gridData, kernelState, getParticle, checkOffset,
     zero_like_warp, castTorchToWarpAsBuiltins, computeDistanceVec,
     sphKernelGradient_ij,
@@ -22,6 +22,7 @@ def computeIISPHWallGradient_Func_i(
     beginIndex: offset_t, numIndices: wp.int32,
     offsetArray: wp.array(dtype=index_t),
     restVolumes: wp.array(dtype=scalar_t),
+    rowStart: wp.int32,
     outputValue: Any,
 ):
     xi, hi, mi, rhoi, ki = getParticle(queryState, i)
@@ -45,6 +46,7 @@ def computeIISPHWallGradient_Func_Adjacency(
     adjacencyState: adjacencyData, gridState: gridData,
     kernelProperties: kernelState,
     restVolumes: wp.array(dtype=scalar_t),
+    rowStart: wp.int32,
     outputValue: Any,
 ):
     out = zero_like_warp(outputValue)
@@ -68,7 +70,7 @@ def computeIISPHWallGradient_Func_Adjacency(
             i, queryState, referenceState, domainState, kernelProperties,
             beginIndex, numIndices,
             adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
-            restVolumes, outputValue,
+            restVolumes, rowStart, outputValue,
         )
     return out
 
@@ -79,6 +81,7 @@ def computeIISPHWallGradient_Kernel(
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
     correctionData: Any, kernelProperties: kernelState,
     restVolumes: wp.array(dtype=scalar_t),
+    rowStart: wp.int32,
     outputValues: wp.array(dtype=vector(length=Any, dtype=scalar_t)),
 ):
     i = wp.tid()
@@ -87,7 +90,7 @@ def computeIISPHWallGradient_Kernel(
     outputValues[i] = computeIISPHWallGradient_Func_Adjacency(
         i, queryState, referenceState, domainState,
         useAdjacency, adjacencyState, gridState, kernelProperties,
-        restVolumes, zero_like_warp(outputValues),
+        restVolumes, rowStart, zero_like_warp(outputValues),
     )
 
 
@@ -98,8 +101,10 @@ def _outputDtype(ctx, extras):
 _WALL_GRADIENT = OperatorSpec(
     kernel=computeIISPHWallGradient_Kernel,
     outputs=(OutputSpec(dtype=_outputDtype, shape=ShapeOf.QUERY),),
+    rowChunked=True,
     extras=(
-        ExtraSpec("restVolumes", ExtraKind.TENSOR),
+        ExtraSpec("restVolumes", ExtraKind.TENSOR, RowRole.REFERENCE),
+        ExtraSpec("rowStart", ExtraKind.SCALAR, RowRole.ROW_START),
     ),
 )
 
@@ -121,6 +126,7 @@ def computeIISPHWallGradientWarp(
     return launchOperator(
         _WALL_GRADIENT, ctx,
         restVolumes=restVolumes,
+        rowStart=0,
     )
 
 

@@ -20,6 +20,7 @@ from ...modules.godunov import computeGodunovWarp, godunovReconstruction
 from ...modules.momentum import computeMomentumConsistent
 from warpSPHCore import GradHState, OperationProperties, SupportScheme
 from warpSPHCore.profiling import record_function
+from ...modules.godunov.chunked import checkGodunovChunks,chunkedVerletScale
 
 __all__ = ['compressibleSPH_GSPH']
 
@@ -32,6 +33,7 @@ def compressibleSPH_GSPH(
     verbose = False,
 ):
     schemeConfig.validateRHS()
+    checkGodunovChunks(system,config,schemeConfig,dt)
     currentSystem = system
     currentState = currentSystem.state
     t = currentSystem.t

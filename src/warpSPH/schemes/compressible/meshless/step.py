@@ -28,8 +28,23 @@ def runMeshlessStep(system, dt, config, schemeConfig, *, mode,
         if temporalScheme != 'ssprk':
             raise ValueError('meshless source terms currently require solver.temporalScheme=ssprk')
         with record_function('[warpSPH] - [meshless - external sources]'):
-            source, source_energy = system.sourceTerms.rates(ctx, system.t)
+            from ....distributed import processGroup, validateSourceClock
+            import torch
+            communication = processGroup(system)
+            if communication is not None:
+                validateSourceClock(system, communication)
+            evaluate = lambda: system.sourceTerms.fields(ctx.Q[:, 0], ctx.pos, ctx.vel, ctx.u, system.t)
+            momentum, work, heat = (evaluate() if communication is None else
+                communication.localPhase('meshless:source:fields', evaluate))
+            source = torch.cat((torch.zeros_like(ctx.Q[:, :1]), momentum, (work+heat)[:, None]), 1)
+            if communication is None:
+                source_energy = torch.stack((work.double().sum(), heat.double().sum()))
+            else:
+                communication.assertReplicated('meshless:source:fields', dict(source=source))
+                source_energy = torch.stack((communication.sumOwned(work, system.adjacency, tag='source:work'),
+                    communication.sumOwned(heat, system.adjacency, tag='source:heat')))
             rate = rate+source
     with record_function(f"[warpSPH] - [{mode.lower()} - 04] stage derivative"):
         update = MeshlessSystemUpdate(dxdt=ctx.vel, dQdt=rate, sourceEnergyRates=source_energy)
-    return update, None, system.state
+    from warpSPHCore.radiusSearch import ChunkedAdjacency
+    return update, (ctx.geom.adjacency if isinstance(ctx.geom.adjacency, ChunkedAdjacency) else None), system.state

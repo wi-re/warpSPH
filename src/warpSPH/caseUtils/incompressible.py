@@ -53,18 +53,22 @@ def relaxLattice(ctx, system, steps: int, dt: float, jitter: float) -> None:
     # Region-built states have not yet allocated a pressure carry.
     if state.state.pressures is None:
         state.state.pressures = torch.zeros_like(state.state.densities)
+    seed = ctx.spec.params.get('shuffleSeed')
+    generator = None if seed is None else torch.Generator(device=state.state.positions.device).manual_seed(seed)
     state.state.positions = shuffleParticles(state.state, ctx.config, ctx.schemeConfig, 0,
-                                             jitterAmount=jitter)
+        jitterAmount=jitter, adjacency=system.adjacency, generator=generator)
     state.state.velocities = torch.zeros_like(state.state.velocities)
 
-    adjacency = buildVerletList(
-        state.state,
-        ctx.config.domain,
-        verletScale=1.4,
-        supportMode=SupportScheme.SuperSymmetric,
-        priorNeighborhood=None,
-        verbose=False,
-        **neighborSearchOptions(ctx.config))
+    from warpSPHCore.radiusSearch import ChunkedAdjacency, buildChunkedVerletList
+    if isinstance(system.adjacency, ChunkedAdjacency):
+        adjacency = buildChunkedVerletList(state.state, ctx.config.domain,
+            policy=system.adjacency.plan.policy, communication=system.adjacency.communication,
+            verletScale=1.4, supportMode=SupportScheme.SuperSymmetric,
+            storeI=neighborSearchOptions(ctx.config)['storeI'])
+    else:
+        adjacency = buildVerletList(state.state, ctx.config.domain, verletScale=1.4,
+            supportMode=SupportScheme.SuperSymmetric, priorNeighborhood=None,
+            verbose=False, **neighborSearchOptions(ctx.config))
     state.state.densities = computeDensities(state.state, ctx.config, ctx.schemeConfig,
                                              adjacency)
     rho0 = ctx.schemeConfig.fluid.restDensity
@@ -116,3 +120,9 @@ def relaxLattice(ctx, system, steps: int, dt: float, jitter: float) -> None:
         state.state.positions = state.state.positions + dt * dt * accel
 
     system.state.positions = state.state.positions.clone()
+    if isinstance(system.adjacency, ChunkedAdjacency):
+        # Ordinary initialization leaves no frozen search history for the RHS.
+        system.adjacency = buildChunkedVerletList(system.state, ctx.config.domain,
+            policy=system.adjacency.plan.policy, communication=system.adjacency.communication,
+            verletScale=ctx.config.verletScale, supportMode=SupportScheme.SuperSymmetric,
+            storeI=neighborSearchOptions(ctx.config)['storeI'])

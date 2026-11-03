@@ -14,7 +14,7 @@ from warpSPH.runner import (CaseSpec, Parameter, RunConfiguration, configuration
 importAll()
 COMPRESSIBLE = [getCase(n) for n in listCases()
                 if '.cases.compressible.' in getCase(n).buildSystem.__module__]
-MIGRATED = COMPRESSIBLE + [getCase('tgv-wc'), getCase('randomFlow')]
+MIGRATED = COMPRESSIBLE + [getCase('tgv-wc'), getCase('randomFlow'), getCase('tgv')]
 
 
 @pytest.mark.parametrize('case', MIGRATED, ids=lambda c: c.name)
@@ -211,3 +211,13 @@ def test_meshless_initial_sampling_accepts_its_consumed_support_control(name):
     spec = RunConfiguration(name, params={'adaptiveSupportScheme': 'Owen'},
                             solver={'scheme': 'MFM'}).resolve(getCase(name))
     assert spec.params['adaptiveSupportScheme'] == 'Owen'
+
+
+@pytest.mark.parametrize('scheme',['dfsph','dfsphPredictor','dfsphShift'])
+def test_native_projection_configuration_preserves_one_iteration_divergence_budget(scheme):
+    # Native divergence permits a one-sweep budget; density still requires two.
+    config=RunConfiguration('tgv',solver={'scheme':scheme,'dfsph':{'divergence':{'minIterations':1,'maxIterations':1}}})
+    ctx=config.prepare()
+    assert ctx.schemeConfig.dfsph.divergence.maxIterations==1
+    with pytest.raises(ValueError,match='maxIterations'):
+        RunConfiguration('tgv',solver={'scheme':scheme,'dfsph':{'density':{'maxIterations':1}}}).resolve()

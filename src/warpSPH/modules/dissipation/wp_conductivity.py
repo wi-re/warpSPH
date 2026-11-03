@@ -18,6 +18,8 @@ from torch.profiler import profile, ProfilerActivity
 from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
+from warpSPHCore.autograd import RowRole
+from ..reconstruction.gradient import needsJacobian, needsBalsara, needsStateGradients
 
 from .pi import computePi_actual
 from ...configurations.moduleConfigurations.diffusionParameters import DiffusionParameters
@@ -264,22 +266,23 @@ def _conductivityDtype(ctx, extras):
 
 
 _CONDUCTIVITY = OperatorSpec(
+    rowChunked=True,
     kernel=computeConductivity_Kernel,
     outputs=(OutputSpec(dtype=_conductivityDtype, shape=ShapeOf.QUERY),),
     extras=(
-        ExtraSpec("queryVelocities", ExtraKind.TENSOR),
-        ExtraSpec("referenceVelocities", ExtraKind.TENSOR),
-        ExtraSpec("queryEnergies", ExtraKind.TENSOR),
-        ExtraSpec("referenceEnergies", ExtraKind.TENSOR),
+        ExtraSpec("queryVelocities", ExtraKind.TENSOR, RowRole.QUERY),
+        ExtraSpec("referenceVelocities", ExtraKind.TENSOR, RowRole.REFERENCE),
+        ExtraSpec("queryEnergies", ExtraKind.TENSOR, RowRole.QUERY),
+        ExtraSpec("referenceEnergies", ExtraKind.TENSOR, RowRole.REFERENCE),
         ExtraSpec("individualCs", ExtraKind.SCALAR),
-        ExtraSpec("queryCs", ExtraKind.TENSOR),
-        ExtraSpec("referenceCs", ExtraKind.TENSOR),
+        ExtraSpec("queryCs", ExtraKind.TENSOR, lambda ctx, e: RowRole.QUERY if e['individualCs'] else RowRole.REPLICATED),
+        ExtraSpec("referenceCs", ExtraKind.TENSOR, lambda ctx, e: RowRole.REFERENCE if e['individualCs'] else RowRole.REPLICATED),
         ExtraSpec("viscositySwitch", ExtraKind.SCALAR),
-        ExtraSpec("queryAlphas", ExtraKind.TENSOR),
-        ExtraSpec("referenceAlphas", ExtraKind.TENSOR),
+        ExtraSpec("queryAlphas", ExtraKind.TENSOR, lambda ctx, e: RowRole.QUERY if e['viscositySwitch'] else RowRole.REPLICATED),
+        ExtraSpec("referenceAlphas", ExtraKind.TENSOR, lambda ctx, e: RowRole.REFERENCE if e['viscositySwitch'] else RowRole.REPLICATED),
         ExtraSpec("explicitPressure", ExtraKind.SCALAR),
-        ExtraSpec("queryPressures", ExtraKind.TENSOR),
-        ExtraSpec("referencePressures", ExtraKind.TENSOR),
+        ExtraSpec("queryPressures", ExtraKind.TENSOR, lambda ctx, e: RowRole.QUERY if e['explicitPressure'] else RowRole.REPLICATED),
+        ExtraSpec("referencePressures", ExtraKind.TENSOR, lambda ctx, e: RowRole.REFERENCE if e['explicitPressure'] else RowRole.REPLICATED),
         ExtraSpec("conductivityParams", ExtraKind.SCALAR),
     ),
 )

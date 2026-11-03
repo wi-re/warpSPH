@@ -21,41 +21,27 @@ from ..shifting.delta import computeDeltaShift
 
 __all__ = ['shuffleParticles']
 
-# def shuffleParticles(state, config, schemeConfig, shiftIters, jitterAmount = 0.01):
-#     priorPositions = state.positions.clone()
-
-#     state.positions[state.kinds == 0] += torch.randn_like(state.positions)[state.kinds == 0] * state.supports[state.kinds == 0].view(-1,1) * jitterAmount
-
-#     adjacency = None
-#     for i in range(shiftIters):
-#         adjacency = buildVerletList(
-#             state, 
-#             config.domain, verletScale = config.verletScale, supportMode = SupportScheme.SuperSymmetric,
-#             priorNeighborhood = adjacency,
-#             verbose = False)
-        
-#         shiftVector, adjacency = computeDeltaShift(
-#             currentState = state,
-#             config = config,
-#             schemeConfig = schemeConfig,
-#             domain = config.domain,
-#             adjacency = adjacency,
-#         )
-#         state.positions[state.kinds == 0] += shiftVector[state.kinds == 0]
-    
-#     newPositions = state.positions.clone()
-#     state.positions = priorPositions
-#     return newPositions
-
-
-def shuffleParticles(state, config, schemeConfig, shiftIters, jitterAmount = 0.01):
+def shuffleParticles(state, config, schemeConfig, shiftIters, jitterAmount = 0.01, *, adjacency=None, generator=None):
     priorPositions = state.positions.clone()
 
-    state.positions[state.kinds == 0] += torch.randn_like(state.positions)[state.kinds == 0] * state.supports[state.kinds == 0].view(-1,1) * jitterAmount
+    jitter = (torch.randn_like(state.positions) if generator is None else
+        torch.randn(state.positions.shape, dtype=state.positions.dtype, device=state.positions.device, generator=generator))
+    communication = getattr(adjacency, 'communication', None)
+    if communication is not None:
+        n = len(state.positions)
+        ranges = ((0,n),) + ((n,n),)*(communication.size-1)
+        communication.exchangeRows(jitter, ranges, tag='delta:shuffle:jitter', signature=(n, config.dim))
+    state.positions[state.kinds == 0] += jitter[state.kinds == 0] * state.supports[state.kinds == 0].view(-1,1) * jitterAmount
 
+    if neighborhoodIsChunked(adjacency):
+        from warpSPHCore.radiusSearch import buildChunkedVerletList
+        # The ordinary shuffle starts a fresh search after jitter. Reuse only
+        # the explicit execution policy/group, not the pre-jitter neighbour order.
+        adjacency = buildChunkedVerletList(state, config.domain, policy=adjacency.plan.policy,
+            communication=communication, supportMode=SupportScheme.SuperSymmetric,
+            verletScale=config.verletScale, storeI=neighborSearchOptions(config)['storeI'])
     initialDensities = state.densities.clone()
 
-    adjacency = None
     for i in range(shiftIters):
         adjacency = buildVerletList(
             state,
@@ -90,3 +76,7 @@ def shuffleParticles(state, config, schemeConfig, shiftIters, jitterAmount = 0.0
     state.positions = priorPositions
     state.densities = initialDensities
     return newPositions
+
+def neighborhoodIsChunked(adjacency):
+    from warpSPHCore.radiusSearch import ChunkedAdjacency
+    return isinstance(adjacency, ChunkedAdjacency)

@@ -12,6 +12,7 @@ import torch
 from ...runner import Case, registerCase, caseMain
 from ...runner.parameters import Parameter as P
 from ...configurations.meshless import MeshlessConfig, resolve_temporal_scheme
+from ...configurations.pesph import PESPHConfig
 from ...modules.forcing import FourierOU
 from ...modules.meshless.sources import ConservedSources
 from .common import COMPRESSIBLE_DEFAULTS, configureCompressible, compressibleTimestep
@@ -34,6 +35,9 @@ def validateConfiguration(spec):
             raise ValueError('drivenTurbulence requires solver.temporalScheme=ssprk for stage-consistent sources')
     elif str(getattr(spec.integrationScheme, 'name', spec.integrationScheme)) not in ('rungeKutta2', 'rungeKutta4'):
         raise ValueError('drivenTurbulence SPH sources require native rungeKutta2 or rungeKutta4')
+    if (spec.scheme == 'PESPH' and spec.schemeOverrides.get('variant', 'PressureEnergy') == 'PressureEntropy'
+        and p['thermalModel'] != 'adiabatic'):
+        raise ValueError('Driven pressure-entropy PESPH requires adiabatic thermalModel; bath entropy allocation remains unqualified')
     if spec.cudaGraph or spec.execution not in (None, 'eager'):
         raise ValueError('drivenTurbulence currently requires eager execution')
     if not spec.adaptiveDt:
@@ -42,7 +46,7 @@ def validateConfiguration(spec):
         raise ValueError('drivenTurbulence currently uses a single ideal gas')
 
 
-def buildSystem(ctx):
+def buildSystem(ctx, *, neighborhoodFactory=None):
     from ...sample.regular import sampleRegularParticles
     from ...caseUtils.meshless import buildMeshlessState
     from ...modules.meshless.geometry import buildGeometry, stashGeometry
@@ -50,12 +54,14 @@ def buildSystem(ctx):
 
     cfg, scheme = ctx.config, ctx.schemeConfig
     if not isinstance(scheme, MeshlessConfig):
-        return buildSPHSystem(ctx)
+        return buildSPHSystem(ctx, neighborhoodFactory=neighborhoodFactory)
     if resolve_temporal_scheme(scheme) != 'ssprk':
         raise ValueError('drivenTurbulence requires SSPRK sources')
     particles = sampleRegularParticles(ctx.spec.nx, cfg.domain, cfg.targetNeighbors)
     pos, supports = particles.positions, particles.supports
-    geometry = buildGeometry(pos, supports, None, cfg, scheme, cfg.domain)
+    from types import SimpleNamespace
+    owner = SimpleNamespace(_meshlessNeighborhoodFactory=neighborhoodFactory)
+    geometry = buildGeometry(pos, supports, None, cfg, scheme, cfg.domain, owner=owner)
     mass = ctx.param('rho0')*particles.masses
     density = mass/geometry.volume
     u0 = ctx.param('soundSpeed')**2/(scheme.gamma*(scheme.gamma-1))
@@ -63,6 +69,7 @@ def buildSystem(ctx):
     labels = torch.zeros(len(pos), device=pos.device, dtype=torch.int32)
     state = buildMeshlessState(pos, supports, mass, density, torch.zeros_like(pos), pressure,
         scheme.gamma, labels, labels.clone(), torch.arange(len(pos), device=pos.device, dtype=torch.int32))
+    state._meshlessNeighborhoodFactory = neighborhoodFactory
     state.lam = geometry.lam
     state.sourceEnergyBudget = mass.new_zeros(2, dtype=torch.float64)
     field = FourierOU(dim=ctx.spec.dim, length=ctx.spec.L, kMin=ctx.param('kMin'), kMax=ctx.param('kMax'),
@@ -70,7 +77,9 @@ def buildSystem(ctx):
         updateInterval=ctx.param('forcingInterval'), solenoidalWeight=ctx.param('solenoidalWeight'), seed=ctx.param('seed'))
     cooling = ctx.param('coolingTime') if ctx.param('thermalModel') == 'relaxation' else None
     source = ConservedSources(field, ctx.param('removeMeanAcceleration'), u0, cooling)
-    system = MeshlessSystem(state=state, domain=cfg.domain, sourceTerms=source)
+    from warpSPHCore.radiusSearch import ChunkedAdjacency
+    system = MeshlessSystem(state=state, domain=cfg.domain, sourceTerms=source,
+        adjacency=geometry.adjacency if isinstance(geometry.adjacency, ChunkedAdjacency) else None)
     stashGeometry(pos, supports, cfg.domain, cfg.kernel, scheme, geometry, owner=state)
     ctx.scratch.update(driving=field, initialMass=mass.double().sum(),
                        initialEnergy=state.Q[:, -1].double().sum())
@@ -88,12 +97,15 @@ def configureScheme(ctx):
     from ...enumTypes import AdaptiveSupportScheme
     scheme = ctx.schemeConfig
     scheme.gamma, scheme.rho0 = ctx.param('gamma'), ctx.param('rho0')
+    if isinstance(scheme, PESPHConfig):
+        # Preserve native NumberDensity/grad-h defaults and explicit overrides.
+        return
     # Same declared support policy as the other fully compressible examples.
     scheme.adaptiveSupportScheme = AdaptiveSupportScheme.Owen
     scheme.adaptiveSupportCorrections = False
 
 
-def buildSPHSystem(ctx):
+def buildSPHSystem(ctx, *, neighborhoodFactory=None):
     from ...sample.compressible import setupBasicCompressibleInitialState
     from ...caseUtils.drivenTurbulence import DrivenCompSPHState, DrivenGasState
     from ...modules.forcing.primitive import applySources
@@ -105,7 +117,12 @@ def buildSPHSystem(ctx):
     if any(getattr(scheme, name, default) != default for name, default in
            [('crkEnergyPartition', 'native'), ('crkEnergyPredictor', 'raw'), ('crkEvolution', 'summation')]):
         raise ValueError('drivenTurbulence initially supports the native CRK energy and summation-density policy')
-    stateType = DrivenCompSPHState if issubclass(ctx.SimulationSystem, CompSPHSystem) else DrivenGasState
+    pesph = isinstance(scheme, PESPHConfig)
+    if pesph:
+        from ...caseUtils.drivenTurbulence import drivenPESPHStateType
+        stateType = drivenPESPHStateType(scheme.variant)
+    else:
+        stateType = DrivenCompSPHState if issubclass(ctx.SimulationSystem, CompSPHSystem) else DrivenGasState
     native = ctx.stepFunction
     wantsIndex = 'stageIndex' in inspect.signature(native).parameters
     def sourced(system, dt, config, schemeConfig, verbose=False, stageIndex=None):
@@ -113,9 +130,16 @@ def buildSPHSystem(ctx):
         if wantsIndex:
             kw['stageIndex'] = stageIndex
         update, *rest = native(system, dt, config, schemeConfig, **kw)
+        if pesph:
+            from ...modules.pesph.sources import applyPESPHSource
+            return (applyPESPHSource(system, update, schemeConfig), *rest)
         return (applySources(system, update), *rest)
+    # Audited coordinate-based source wrapper: the accepted-layout adapter may
+    # preserve this callable after validating ConservedSources/FourierOU.
+    sourced._particleLayoutNativeRHS = native
     ctx.bundle = replace(ctx.bundle, SimulationState=stateType, stepFunction=sourced)
-    system = setupBasicCompressibleInitialState(ctx.spec.nx, ctx.config, scheme, stateType, ctx.SimulationSystem)
+    system = setupBasicCompressibleInitialState(ctx.spec.nx, ctx.config, scheme, stateType, ctx.SimulationSystem,
+        neighborhoodFactory=neighborhoodFactory)
     s = system.state
     s.masses = s.masses*ctx.param('rho0')
     s.densities = s.densities*ctx.param('rho0')
@@ -133,12 +157,18 @@ def buildSPHSystem(ctx):
         initialEnergy=(s.masses.double()*s.internalEnergies.double()).sum(), completedSteps=0)
     ctx.velocityScale, ctx.velocityScaleSource = ctx.param('soundSpeed'), 'drivenTurbulence reference sound speed'
     ctx.scratch['checkpointSignature'] = checkpointSignature(ctx)
+    if pesph:
+        ctx.scratch['_pesphInitialEnergyPending'] = True
     ctx.config.dt = timestep(ctx, system)
     return system
 
 
 def timestep(ctx, system):
-    dt = compressibleTimestep(ctx, system)
+    if isinstance(ctx.schemeConfig, PESPHConfig):
+        from ...modules.timestep.pesph import pesphTimestep
+        dt = pesphTimestep(ctx, system)
+    else:
+        dt = compressibleTimestep(ctx, system)
     field = ctx.scratch['driving']
     # Resolve the prescribed clock and explicit relaxation, including the first step.
     limit = ctx.param('forcingInterval')
@@ -204,13 +234,19 @@ def diagnostics(ctx, system):
 
 
 def extraData(ctx, system):
+    # Called after native PESPH initialization/restore and before the initial
+    # diagnostics/export. Number-density volume calibration can change u.
+    if ctx.scratch.pop('_pesphInitialEnergyPending', False) and not ctx.spec.resumeFrom:
+        s = system.state
+        ctx.scratch['initialEnergy'] = (s.masses.double() *
+            (s.internalEnergies.double()+.5*s.velocities.double().square().sum(-1))).sum()
     field = ctx.scratch['driving']
     data = dict(ctx.spec.params, forcingParameters=dict(field.parameters),
                 forcingModes=field.modes, forcingCoefficients=field.coefficients(float(system.t)),
                 forcingTime=float(system.t), sourceEnergyBudget=system.state.sourceEnergyBudget.detach().cpu(),
                 initialEnergy=float(ctx.scratch['initialEnergy']), initialMass=float(ctx.scratch['initialMass']))
     data.update(conservedOutputPolicy=('integrated' if isinstance(ctx.schemeConfig, MeshlessConfig) else 'derived'),
-        sourceWorkPolicy=('compatibleHalfKick' if getattr(ctx.schemeConfig, 'compatibleEnergy', False) else 'stagePowerRK'),
+        sourceWorkPolicy=('compatibleHalfKick' if not isinstance(ctx.schemeConfig, PESPHConfig) and getattr(ctx.schemeConfig, 'compatibleEnergy', False) else 'stagePowerRK'),
         densityOutputPolicy=('acceptedMeshlessGeometry' if isinstance(ctx.schemeConfig, MeshlessConfig) else 'nativeSPHStageDensity'))
     if ctx.spec.storeMode == 'states':
         state = field.state_dict()
@@ -308,7 +344,7 @@ drivenTurbulenceCase = registerCase(Case(
                 correlationTime=.5, forcingInterval=.05, kMin=1, kMax=2,
                 solenoidalWeight=1., seed=1234, removeMeanAcceleration=True,
                 thermalModel='relaxation', coolingTime=.2),
-    supportedSchemes=('MFM', 'MFV', 'CRKSPH', 'CompSPH', 'Monaghan', 'GSPH', 'InutsukaGSPH'), validateConfiguration=validateConfiguration,
+    supportedSchemes=('MFM', 'MFV', 'CRKSPH', 'CompSPH', 'Monaghan', 'GSPH', 'InutsukaGSPH', 'PESPH'), validateConfiguration=validateConfiguration,
     simulationParameters={
         'dim': P('integer', 'Spatial dimension of the periodic turbulence box.', 'domain', choices=(2, 3)),
         'periodic': P('boolean', 'Periodic box on every axis.', 'domain', choices=(True,)),

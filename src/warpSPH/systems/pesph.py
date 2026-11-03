@@ -48,6 +48,7 @@ class PESPHSystemUpdate:
     dvdt: torch.Tensor = tagged(tags=('velocity_derivative',))
     dEdt: torch.Tensor = tagged(tags=('totalEnergy_derivative',), default=None)
     dAdt: torch.Tensor = tagged(tags=('entropy_derivative',), default=None)
+    sourceEnergyRates: torch.Tensor = None
 
 
 @dataclass
@@ -57,7 +58,7 @@ class PESPHSystem(CompressibleSystem):
 
     def initializeNewState(self, *args, **kwargs):
         return type(self)(state=self.state.initializeNewState(), adjacency=self.adjacency,
-                          domain=self.domain, t=self.t)
+                          domain=self.domain, t=self.t, sourceTerms=self.sourceTerms)
 
     def apply_quantity_update(self, update, spec, **kwargs):
         if isinstance(self.state, PressureEntropyState):
@@ -85,6 +86,8 @@ class PESPHSystem(CompressibleSystem):
         if schemeConfig.dissipation:
             from ..modules.shockCapturing.wrapper import advanceViscositySwitchStep
             advanceViscositySwitchStep(self, initialState, returnValues, schemeConfig, config)
+        from ..modules.pesph.sources import finishPESPHSource
+        finishPESPHSource(self, initialState, updateValues, weights, dt)
         self.state.previousTimestep = dt
         # Bypass the Monaghan finalizer: it overwrites integrated A and applies
         # a mass-density EOS. Derived values above use the accepted q/E/A.

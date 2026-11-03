@@ -328,3 +328,39 @@ def test_float64():
                              '-k', 'not float64', __file__], cwd=Path(__file__).resolve().parents[1],
                             env=env, text=True, capture_output=True, timeout=600)
     assert result.returncode == 0, result.stdout[-6000:] + result.stderr[-2000:]
+
+
+@pytest.mark.parametrize('variant', VARIANTS)
+@pytest.mark.parametrize('dim,nx', [(2, 6), (3, 5)])
+@pytest.mark.parametrize('storeI', [False, True])
+def test_chunked_pressure_passes_preserve_global_rows(monkeypatch, variant, dim, nx, storeI):
+    from warpSPHCore.radiusSearch import buildChunkedVerletList, RowChunkPolicy
+    state, cfg, scheme = setup(dim=dim, nx=nx, variant=variant)
+    scheme.adaptiveSupportCorrections = True
+    flat = adjacency(state, cfg)
+    chunked = buildChunkedVerletList(state, cfg.domain,
+        policy=RowChunkPolicy(edgeBudget=4096, maxRows=3, bytesPerEdge=8), verletScale=1.0,
+        supportMode=SupportScheme.SuperSymmetric, storeI=storeI)
+    assert len(chunked.chunks) > 1
+    expected = computePressureState(state, cfg, scheme, flat)
+    from warpSPHCore.autograd import PreparedLauncher
+    from warpSPH.modules.pesph import operators
+    launch = operators.launchOperator
+    calls = []
+    def observe(spec, ctx, **extras):
+        result = launch(spec, ctx, **extras)
+        if ctx.adjacency is chunked:
+            calls.append((spec, ctx, extras, result))
+        return result
+    monkeypatch.setattr(operators, 'launchOperator', observe)
+    actual = computePressureState(state, cfg, scheme, chunked)
+    for f in fields(actual.sums):
+        torch.testing.assert_close(getattr(actual.sums, f.name), getattr(expected.sums, f.name), rtol=0, atol=0)
+    for a, b in zip(computePressureForce(state, actual, cfg, chunked),
+                    computePressureForce(state, expected, cfg, flat)):
+        torch.testing.assert_close(a, b, rtol=0, atol=0)
+    assert len(calls) == 2
+    for spec, ctx, extras, expectedOutputs in calls:
+        outputs = PreparedLauncher(ctx).launch(spec, **extras)
+        for actualOutput, expectedOutput in zip(outputs, expectedOutputs):
+            torch.testing.assert_close(actualOutput, expectedOutput, rtol=0, atol=0)

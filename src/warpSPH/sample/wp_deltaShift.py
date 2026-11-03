@@ -308,6 +308,7 @@ def _deltaShiftDtype(ctx, extras):
 
 
 _DELTA_SHIFT = OperatorSpec(
+    rowChunked=True,
     kernel=computeDeltaShift_Kernel,
     tiledKernel=computeDeltaShift_KernelTiled,
     outputs=(OutputSpec(dtype=_deltaShiftDtype, shape=ShapeOf.QUERY),),

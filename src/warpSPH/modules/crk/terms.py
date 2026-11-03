@@ -23,6 +23,7 @@ import warp as wp
 
 from warpSPHCore import scalar_t
 from warpSPHCore.crk import computeCRKTermsWarp as computeCRKTermsTorch
+from warpSPHCore.autograd.stream import torchWarpStream
 
 from ...linalg import loadPadded3x3, symmetricPinv3
 
@@ -107,10 +108,11 @@ def computeCRKTerms(m_0, m_1, m_2, dm_0dgamma, dm_1dgamma, dm_2dgamma, num_nbrs,
     gradB = torch.empty(n, dim, dim, dtype=m_0.dtype, device=m_0.device)
     w = lambda t, shape=None: wp.from_torch((t if shape is None else t.reshape(shape)).contiguous())
     nn = num_nbrs if num_nbrs.dtype == torch.int32 else num_nbrs.to(torch.int32)
-    wp.launch(_crkTermsKernel, dim=n, device=wp.device_from_torch(m_0.device),
-              inputs=[w(m_0), w(m_1), w(m_2, (n, dim * dim)), w(dm_0dgamma), w(dm_1dgamma, (n, dim * dim)),
-                      w(dm_2dgamma, (n, dim ** 3)), w(nn), dim, dim * torch.finfo(m_0.dtype).eps,
-                      w(A), w(B), w(gradA), w(gradB.view(n, dim * dim))])
+    with torchWarpStream(m_0.device):
+        wp.launch(_crkTermsKernel, dim=n, device=wp.device_from_torch(m_0.device),
+                  inputs=[w(m_0), w(m_1), w(m_2, (n, dim * dim)), w(dm_0dgamma), w(dm_1dgamma, (n, dim * dim)),
+                          w(dm_2dgamma, (n, dim ** 3)), w(nn), dim, dim * torch.finfo(m_0.dtype).eps,
+                          w(A), w(B), w(gradA), w(gradB.view(n, dim * dim))])
     return A, B, gradA, gradB
 
 

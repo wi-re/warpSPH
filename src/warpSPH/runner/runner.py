@@ -42,9 +42,10 @@ from .caseSpec import CaseSpec
 from .display import closeWindow, holdWindow
 from .media import encodeFrames
 from .report import describeRun, quietedWarp, reportRun
+from .recovery import RunAllocationError, captureBoundary, recoverAllocation
 from .velocityAlarm import VelocityAlarm, maxSpeed
 
-__all__ = ['RunResult', 'run', 'buildContext', 'resolveEnum']
+__all__ = ['RunResult', 'RunAllocationError', 'run', 'buildContext', 'resolveEnum']
 
 #: Window of the `CaseSpec.stallProgress` sim-time watchdog, in steps.
 STALL_WINDOW_STEPS = 1000
@@ -207,13 +208,18 @@ class _Timer:
         return self
 
     def __exit__(self, *exc):
-        if self.cuda:
-            self._end.record()
-            with record_function("[runner] step timer (cuda synchronize)"):
-                torch.cuda.synchronize()
-            self.elapsed_ms = self._begin.elapsed_time(self._end)
-        else:
-            self.elapsed_ms = (time.perf_counter() - self._begin) * 1000.0
+        try:
+            if self.cuda:
+                self._end.record()
+                with record_function("[runner] step timer (cuda synchronize)"):
+                    torch.cuda.synchronize()
+                self.elapsed_ms = self._begin.elapsed_time(self._end)
+            else:
+                self.elapsed_ms = (time.perf_counter() - self._begin) * 1000.0
+        except Exception as secondary:
+            if exc[1] is None:
+                raise
+            exc[1].add_note(f'Step timer cleanup: {type(secondary).__name__}: {secondary}')
         return False
 
 
@@ -276,6 +282,23 @@ def _spatialStepper(ctx, spec, system):
     """Admit the optional fixed-count layout route before creating output files."""
     if spec.particleOrder == 'input':
         return None
+    from warpSPHCore.radiusSearch import ChunkedAdjacency
+    if isinstance(system.adjacency, ChunkedAdjacency):
+        from ..evaluation.chunkedLayout import ChunkedMortonLayout
+        def prepare():
+            from ..schemes.compressible.compSPH import compSPH_step
+            from ..schemes.compressible.crkSPH import crkSPH_step
+            native = (compSPH_step if ctx.scheme is CompressibleSPHScheme.CompSPH else
+                      crkSPH_step if ctx.scheme is CompressibleSPHScheme.CRKSPH else
+                      buildScheme(ctx.scheme).configured(ctx.schemeConfig).stepFunction)
+            actual = getattr(ctx.stepFunction, '_particleLayoutNativeRHS', ctx.stepFunction)
+            if actual is not native:
+                raise ValueError('Morton runner custom RHS requires an explicit input adapter')
+            return ChunkedMortonLayout(system, ctx.integrator, ctx.schemeConfig,
+                retain_initial_order=ctx.scratch.get('_rowChunkRestartVerified', False))
+        comm = system.adjacency.communication
+        ctx.scratch['nativeLayout'] = prepare() if comm is None else comm.localPhase('layout:admission', prepare)
+        return None
     from ..evaluation import MortonStepper
     if ctx.scheme not in (CompressibleSPHScheme.CompSPH, CompressibleSPHScheme.CRKSPH):
         if not isinstance(ctx.scheme,(WeaklyCompressibleSPHScheme,IncompressibleSPHScheme,ArtificialCompressibleSPHScheme)):
@@ -316,14 +339,33 @@ def _checkpointOptions(ctx,state):
 
 def _run(case: Case, spec: CaseSpec, startedAt: float, onVelocityAlarm=None) -> RunResult:
     ctx = prepareContext(case, spec)
+    primary = None
     try:
         return _runContext(ctx, case, spec, startedAt, onVelocityAlarm)
+    except BaseException as error:
+        primary = error
+        # Failure exits used to bypass renderer/PNG cleanup, leaving a live EGL
+        # context at interpreter teardown. Each cleanup is independent and may
+        # never replace the simulation's original exception.
+        for cleanup in (lambda: _closeProgress(ctx),
+                        lambda: torch.cuda.synchronize(ctx.device) if ctx.device.type == 'cuda' else None,
+                        lambda: _drainFrameWrites(), lambda: _teardownPlot(ctx, failed=True)):
+            try:
+                cleanup()
+            except Exception as secondary:
+                error.add_note(f'Failure cleanup: {type(secondary).__name__}: {secondary}')
+        raise
     finally:
         # Optional adapters may stop at a safe hook boundary by raising. Always
         # finish the recording before they report a terminal run state.
         outFile = ctx.scratch.pop('trajectoryFile', None)
         if outFile is not None:
-            outFile.close()
+            try:
+                outFile.close()
+            except Exception as secondary:
+                if primary is None:
+                    raise
+                primary.add_note(f'Trajectory cleanup: {type(secondary).__name__}: {secondary}')
 
 
 def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
@@ -395,30 +437,35 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         # The spec must describe the SAME configuration the checkpoint was
         # written under (nx, params, scheme, ...); a mismatch loads a state
         # whose shapes/geometry don't match what the rest of the run expects.
-        import h5py
-        from ..io.hdf5 import loadState
-        with h5py.File(spec.resumeFrom, 'r') as f:
-            if spec.particleOrder == 'morton':
-                from ..io.particleLayout import restoreCheckpoint
-                restoreCheckpoint(f,system,ctx.config,ctx.scheme)
-                from ..systems.compSPH import CompSPHSystem
-                if type(system) is not CompSPHSystem:
-                    from ..io.nativeMemory import readNativeMemory
-                    ctx.scratch['nativeRestart']=readNativeMemory(f,system,config=ctx.config,schemeConfig=ctx.schemeConfig,integrator=ctx.integrator)
-                if 'integration' in f:
-                    from ..io.continuation import readContinuation
-                    memory,last_dt,next_dt=readContinuation(f['integration'],system,
-                        integrator=ctx.integrator,config=ctx.config,schemeConfig=ctx.schemeConfig)
-                    ctx.scratch.update(checkpointHistory=memory.history,checkpointPrior=memory.prior_step,
-                                       integratorLastDt=last_dt)
-                    ctx.config.dt=next_dt
-                elif ctx.integrator.metadata.history_length and float(system.t) != 0:
-                    raise ValueError('multistep restart requires persisted integrator history')
-            else:
-                system.state = loadState(f['state'], ctx.config.device, type(system.state))
-                system.t = float(f.attrs['time'])
-            if case.restoreCheckpoint is not None:
-                case.restoreCheckpoint(ctx, system, f)
+        from warpSPHCore.radiusSearch import ChunkedAdjacency
+        if isinstance(system.adjacency, ChunkedAdjacency):
+            from ..io.chunkCheckpoint import restoreChunkedCheckpoint
+            restoreChunkedCheckpoint(spec.resumeFrom, ctx, system)
+        else:
+            import h5py
+            from ..io.hdf5 import loadState
+            with h5py.File(spec.resumeFrom, 'r') as f:
+                if spec.particleOrder == 'morton':
+                    from ..io.particleLayout import restoreCheckpoint
+                    restoreCheckpoint(f,system,ctx.config,ctx.scheme)
+                    from ..systems.compSPH import CompSPHSystem
+                    if type(system) is not CompSPHSystem:
+                        from ..io.nativeMemory import readNativeMemory
+                        ctx.scratch['nativeRestart']=readNativeMemory(f,system,config=ctx.config,schemeConfig=ctx.schemeConfig,integrator=ctx.integrator)
+                    if 'integration' in f:
+                        from ..io.continuation import readContinuation
+                        memory,last_dt,next_dt=readContinuation(f['integration'],system,
+                            integrator=ctx.integrator,config=ctx.config,schemeConfig=ctx.schemeConfig)
+                        ctx.scratch.update(checkpointHistory=memory.history,checkpointPrior=memory.prior_step,
+                                           integratorLastDt=last_dt)
+                        ctx.config.dt=next_dt
+                    elif ctx.integrator.metadata.history_length and float(system.t) != 0:
+                        raise ValueError('multistep restart requires persisted integrator history')
+                else:
+                    system.state = loadState(f['state'], ctx.config.device, type(system.state))
+                    system.t = float(f.attrs['time'])
+                if case.restoreCheckpoint is not None:
+                    case.restoreCheckpoint(ctx, system, f)
         if not spec.quiet:
             print(f'-- resumed from {spec.resumeFrom} '
                  f'(t={system.t:.6f}, step offset {spec.resumeStepOffset}) --')
@@ -432,12 +479,19 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         if ctx.scratch['execution'] != 'eager':
             raise ValueError('PESPH currently supports eager execution only')
         if spec.resumeFrom:
-            refreshPESPHState(system, ctx.config, ctx.schemeConfig)
+            # Native managed checkpoints contain the accepted derived fields
+            # and exact search history. An extra support solve would advance
+            # the finite-tolerance Newton iteration on restart only.
+            if not ctx.scratch.get('_rowChunkRestartVerified'):
+                refreshPESPHState(system, ctx.config, ctx.schemeConfig)
         else:
             initializePESPHState(system, ctx.config, ctx.schemeConfig)
-        case = replace(case, timestep=pesphTimestep,
+        # Driven body-source cases cap the native PESPH signal limit inside
+        # their forcing/cooling clock hook. Retain it for startup and every step.
+        timestep = case.timestep if system.sourceTerms is not None and case.timestep is not None else pesphTimestep
+        case = replace(case, timestep=timestep,
                        extraFields=tuple(dict.fromkeys((*case.extraFields, *CHECKPOINT_FIELDS))))
-        ctx.config.dt = pesphTimestep(ctx, system)
+        ctx.config.dt = case.timestep(ctx, system)
     def capPrescribedStartupTimestep():
         # Re-evaluate safety after a prescribed-state change, preserving an
         # initializer's deliberate step ceiling (e.g. RT's 2/3 startup factor).
@@ -483,7 +537,7 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         if spec.store:
             from ..io.export import validateSortedExtraData
             validateSortedExtraData(case.extraData(ctx, runningState) if case.extraData else {})
-    if isinstance(ctx.scheme, IncompressibleSPHScheme):
+    if isinstance(ctx.scheme, IncompressibleSPHScheme) and not ctx.scratch.get('_rowChunkRestartVerified'):
         # The loop calls the hook only AFTER a step. Cap the first step too,
         # after case initialization (or checkpoint restore) sets the actual
         # velocities, supports and viscosity. Setup dt is only a ceiling.
@@ -524,6 +578,10 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
             'config.dt is unset after case setup; set spec.dt or have the case '
             'derive it (e.g. via setupWeaklyCompressibleTimestep).'
         )
+    from ..distributed import distributedRunStart, distributedStepStart, distributedStepEnd
+    rowCommunication = distributedRunStart(ctx, runningState)
+    if rowCommunication is not None:
+        ctx.config.dt = distributedStepStart(ctx, runningState, rowCommunication)
     dt = _scalar(ctx.config.dt)
     # A case with a `timestep` hook re-picks dt every step, so a step count
     # derived from the initial dt would be wrong -- those runs are bounded by
@@ -567,6 +625,7 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
     showProgress = spec.progress if spec.progress is not None else (
         sys.stderr.isatty() and not spec.quiet)
     steps, progress = _stepIterator(nSteps, spec.tLimit, timeLimited, showProgress)
+    ctx.scratch['_progress'] = progress
     # Everything the loop says mid-run (stop reasons, the velocity alarm) goes
     # through `say`: with a bar up, a bare print lands on the end of the bar's
     # unfinished line (and a log shows it buried in a progress row).
@@ -604,6 +663,8 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         ctx.scratch['graphedDiagnostics'] = GraphedDiagnostics()
 
     if stepGraph is not None and ctx.config.compute.pipelineOutputs:
+        if case.acceptedStep is not None:
+            raise NotImplementedError('Accepted-step hooks require synchronous output; pipelined graph output is not qualified.')
         # Pipelined loop: step n+1 runs on the GPU while step n's diagnostics
         # and frame are computed (see `_runPipelined`); same values, same rows.
         runningState, stepResult = _runPipelined(
@@ -617,43 +678,60 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
         if spatialHistory is None:
             spatialHistory = StepHistory(maxlen=max(1, ctx.integrator.metadata.history_length))
     for i in steps:
+        recoveryBoundary = captureBoundary(ctx, runningState)
+        ctx.scratch.pop('_rowChunkAccepted', None)
+        if rowCommunication is not None:
+            ctx.config.dt = distributedStepStart(ctx, runningState, rowCommunication)
         # Previous outputs have consumed their stage data. Release it before
         # entering the next integrator call; the accepted system stays live.
         stepResult = None
         if nativeLayout is not None and stepGraph is not None and not isinstance(ctx.config.dt,torch.Tensor):
             ctx.config.dt=torch.tensor(ctx.config.dt,device=ctx.device,dtype=ctx.dtype)
         step_dt=ctx.config.dt
-        with _Timer(ctx.device) as timer:
-            if nativeLayout is not None:
-                runningState,ctx.config,ctx.schemeConfig,changed=nativeLayout.prepare(runningState,ctx.config,ctx.schemeConfig)
-                if changed and stepGraph is not None:stepGraph.invalidateLayout()
-            with record_function("[runner] integrator step"):
-                if stepGraph is not None:
-                    stepResult = stepGraph(runningState, ctx.config.dt, ctx.config, ctx.schemeConfig,
-                                           verbose=spec.verbose)
-                elif spatialStepper is not None:
-                    with (deferHostTime() if deferStageTimes else contextlib.nullcontext()):
-                        stepResult = spatialStepper(
-                            runningState, ctx.config.dt, config=ctx.config,
-                            schemeConfig=ctx.schemeConfig, verbose=spec.verbose,
-                            history=spatialHistory)
-                else:
-                    # A device dt would make the integrator read every stage time
-                    # back (`float(t + c dt)`, a sync each); the runner reads the
-                    # step time once below anyway, so the stage times stay tensors.
-                    # Only for the schemes whose step was checked not to need a host
-                    # time (the delta-SPH right-hand-side graph does).
-                    with (deferHostTime() if deferStageTimes else contextlib.nullcontext()):
-                        stepResult = ctx.integrator.function(
-                            state=runningState,
-                            f=ctx.stepFunction,
-                            dt=ctx.config.dt,
-                            config=ctx.config,
-                            # Forwarded to the step function *and* to `system.finalize`, so
-                            # this is what makes --verbose reach the scheme's own reporting.
-                            verbose=spec.verbose,
-                            schemeConfig=ctx.schemeConfig,
-                        )
+        try:
+            with _Timer(ctx.device) as timer:
+                if nativeLayout is not None:
+                    runningState,ctx.config,ctx.schemeConfig,changed=nativeLayout.prepare(runningState,ctx.config,ctx.schemeConfig)
+                    if changed and stepGraph is not None:stepGraph.invalidateLayout()
+                    if changed and recoveryBoundary is not None:
+                        from ..io.chunkCheckpoint import markCheckpointBoundary
+                        markCheckpointBoundary(ctx, runningState, recoveryBoundary[0])
+                        recoveryBoundary = captureBoundary(ctx, runningState)
+                with record_function("[runner] integrator step"):
+                    if stepGraph is not None:
+                        stepResult = stepGraph(runningState, ctx.config.dt, ctx.config, ctx.schemeConfig,
+                                               verbose=spec.verbose)
+                    elif spatialStepper is not None:
+                        with (deferHostTime() if deferStageTimes else contextlib.nullcontext()):
+                            stepResult = spatialStepper(
+                                runningState, ctx.config.dt, config=ctx.config,
+                                schemeConfig=ctx.schemeConfig, verbose=spec.verbose,
+                                history=spatialHistory)
+                    else:
+                        # A device dt would make the integrator read every stage time
+                        # back (`float(t + c dt)`, a sync each); the runner reads the
+                        # step time once below anyway, so the stage times stay tensors.
+                        # Only for the schemes whose step was checked not to need a host
+                        # time (the delta-SPH right-hand-side graph does).
+                        with (deferHostTime() if deferStageTimes else contextlib.nullcontext()):
+                            stepResult = ctx.integrator.function(
+                                state=runningState,
+                                f=ctx.stepFunction,
+                                dt=ctx.config.dt,
+                                config=ctx.config,
+                                # Forwarded to the step function *and* to `system.finalize`, so
+                                # this is what makes --verbose reach the scheme's own reporting.
+                                verbose=spec.verbose,
+                                schemeConfig=ctx.schemeConfig,
+                            )
+        except (MemoryError, torch.OutOfMemoryError) as original:
+            if recoveryBoundary is None:
+                original.add_note('No qualified accepted eager chunked checkpoint boundary; original allocation error preserved.')
+                raise
+            result.state = runningState
+            failure = recoverAllocation(ctx, result, recoveryBoundary, original)
+            result.wallTime = time.perf_counter() - startedAt
+            raise failure from original
         if (spatialStepper is not None or nativeLayout is not None) and not stepResult.step_status.successful:
             say(f'unsuccessful integrator step {i + spec.resumeStepOffset}; stopping before layout adoption.')
             result.diverged = True
@@ -715,6 +793,12 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
             ctx.scratch.update(checkpointHistory=checkpointHistory,
                 checkpointPrior=None if discardSpatialHistory or not stepResult.stages else stepResult.stages[-1],
                 integratorLastDt=step_dt)
+        if rowCommunication is not None:
+            distributedStepEnd(ctx, runningState, rowCommunication, absStep)
+        from ..io.chunkCheckpoint import markCheckpointBoundary
+        markCheckpointBoundary(ctx, runningState, absStep + 1)
+        if case.acceptedStep is not None:
+            case.acceptedStep(ctx, runningState, absStep + 1)
 
         # the step time and max |v| (non-finite check, velocity alarm) in one host transfer
         with record_function("[runner] read time + max speed (non-finite check, velocity alarm)"):
@@ -835,8 +919,7 @@ def _runContext(ctx, case, spec, startedAt, onVelocityAlarm=None):
             if timeLimited and t >= spec.tLimit:
                 break
 
-    if progress is not None:
-        progress.close()
+    _closeProgress(ctx)
     if ctx.scratch.get('renderThread') is not None:
         ctx.scratch['renderThread'].drain()
     if spec.plot:
@@ -1171,7 +1254,13 @@ def _drainFrameWrites() -> None:
     waitForExports()
 
 
-def _teardownPlot(ctx: RunContext) -> None:
+def _closeProgress(ctx):
+    progress = ctx.scratch.pop('_progress', None)
+    if progress is not None:
+        progress.close()
+
+
+def _teardownPlot(ctx: RunContext, *, failed=False) -> None:
     """Hold the final figure if asked, then release it.
 
     Releasing matters because the figures are pyplot-managed: a process that
@@ -1180,13 +1269,16 @@ def _teardownPlot(ctx: RunContext) -> None:
     handle = ctx.scratch.pop('plot', None)
     renderer = ctx.scratch.pop('renderThread', None)
     if renderer is not None:
-        if handle is not None:
-            renderer.call(closeWindow, handle)
-        renderer.close()
+        try:
+            if handle is not None:
+                renderer.call(closeWindow, handle)
+        finally:
+            renderer.close()
         return
     if handle is None:
         return
-    holdWindow(ctx, handle)
+    if not failed:
+        holdWindow(ctx, handle)
     closeWindow(handle)
 
 

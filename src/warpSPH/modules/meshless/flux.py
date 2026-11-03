@@ -7,6 +7,7 @@ import warp as wp
 from typing import Any
 from warpSPHCore.type_config import *
 from warpSPHCore.autograd import *
+from warpSPHCore.autograd.operator_spec import RowRole
 from warpSPHCore.dataTypes import *
 from warpSPHCore.radiusSearch.grid_util import getIndexRangeLane
 from warpSPHCore.math import *
@@ -199,11 +200,13 @@ def _makeFluxKernel(listMode: bool):
         power: scalar_t, timeCentred: wp.int32, centred: wp.int32, areaCap: wp.int32, retry: wp.int32, massLimit: scalar_t,
         faceGuard: wp.int32, closureCap: scalar_t,
     
+        rowStart: wp.int32,
         output_dm: wp.array(dtype=scalar_t), output_dp: wp.array(dtype=Any), output_de: wp.array(dtype=scalar_t),  # type: ignore
     ):
         i = wp.tid()
         if i >= queryState.positions.shape[0]:
             return
+        gi = i + rowStart
         iPtcl = getParticleData(queryState, i)
         dm = scalar_t(0.0)
         dp = zero_like_warp(output_dp[i])
@@ -216,7 +219,7 @@ def _makeFluxKernel(listMode: bool):
             if beginIndex < 0:
                 continue
             dm, dp, de = mfmFlux_Func_i(
-                i, iPtcl, referenceState, domainState, kernelProperties, beginIndex, numIndices,
+                gi, iPtcl, referenceState, domainState, kernelProperties, beginIndex, numIndices,
                 adjacencyState.neighborList if traversal else gridState.sortIndex,
                 rho, vel, pres, gRho, gVel, gP, aRho, aVel, aP, vol, Einv, lam, condBad,
                 gamma, materials, stepDt, mode, order, psi1, psi2, power, timeCentred, centred, areaCap, retry, massLimit, faceGuard, closureCap, dm, dp, de)
@@ -228,19 +231,20 @@ def _makeFluxKernel(listMode: bool):
 
 
 _FLUX_SPEC = OperatorSpec(
+    rowChunked=True,
     kernel=_makeFluxKernel(True),
     outputs=(OutputSpec(dtype=scalar_t), OutputSpec(dtype=_vecDtype), OutputSpec(dtype=scalar_t)),
-    extras=(ExtraSpec("rho", ExtraKind.TENSOR), ExtraSpec("vel", ExtraKind.TENSOR), ExtraSpec("pres", ExtraKind.TENSOR),
-            ExtraSpec("gRho", ExtraKind.TENSOR), ExtraSpec("gVel", ExtraKind.TENSOR), ExtraSpec("gP", ExtraKind.TENSOR),
-            ExtraSpec("aRho", ExtraKind.TENSOR), ExtraSpec("aVel", ExtraKind.TENSOR), ExtraSpec("aP", ExtraKind.TENSOR),
-            ExtraSpec("vol", ExtraKind.TENSOR), ExtraSpec("Einv", ExtraKind.TENSOR), ExtraSpec("lam", ExtraKind.TENSOR),
-            ExtraSpec("condBad", ExtraKind.TENSOR),
-            ExtraSpec("gamma", ExtraKind.TENSOR), ExtraSpec("materials", ExtraKind.TENSOR), ExtraSpec("dt", ExtraKind.TENSOR), ExtraSpec("mode", ExtraKind.SCALAR),
+    extras=(ExtraSpec("rho", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("vel", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("pres", ExtraKind.TENSOR, RowRole.REFERENCE),
+            ExtraSpec("gRho", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("gVel", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("gP", ExtraKind.TENSOR, RowRole.REFERENCE),
+            ExtraSpec("aRho", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("aVel", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("aP", ExtraKind.TENSOR, RowRole.REFERENCE),
+            ExtraSpec("vol", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("Einv", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("lam", ExtraKind.TENSOR, RowRole.REFERENCE),
+            ExtraSpec("condBad", ExtraKind.TENSOR, RowRole.REFERENCE),
+            ExtraSpec("gamma", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("materials", ExtraKind.TENSOR, RowRole.REFERENCE), ExtraSpec("dt", ExtraKind.TENSOR, RowRole.REPLICATED), ExtraSpec("mode", ExtraKind.SCALAR),
             ExtraSpec("order", ExtraKind.SCALAR), ExtraSpec("psi1", ExtraKind.SCALAR), ExtraSpec("psi2", ExtraKind.SCALAR),
             ExtraSpec("power", ExtraKind.SCALAR), ExtraSpec("timeCentred", ExtraKind.SCALAR),
             ExtraSpec("centred", ExtraKind.SCALAR), ExtraSpec("areaCap", ExtraKind.SCALAR), ExtraSpec("retry", ExtraKind.SCALAR),
             ExtraSpec("massLimit", ExtraKind.SCALAR), ExtraSpec("faceGuard", ExtraKind.SCALAR),
-            ExtraSpec("closureCap", ExtraKind.SCALAR)),
+            ExtraSpec("closureCap", ExtraKind.SCALAR), ExtraSpec("rowStart", ExtraKind.SCALAR, RowRole.ROW_START)),
 )
 
 

@@ -46,6 +46,8 @@ def compSPH_step(
     currentState = currentSystem.state
 
     t = currentSystem.t
+    from ...modules.compSPH.chunkedWork import checkChunkedStage
+    checkChunkedStage(currentSystem,currentState,config,schemeConfig,stageIndex,dt,'Comp')
     prepared = prepareCompressibleStage(currentSystem, config, schemeConfig, stageIndex, label='compSPH')
     wall, adjacency = prepared.wall, prepared.adjacency
 

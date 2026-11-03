@@ -7,6 +7,8 @@ from ..adaptiveSupport import solveStageSupport
 from .operators import computePressureSums
 from .stage import refreshPESPHState
 from .thermodynamics import requirePositive
+from .chunked import checkPESPHChunks, pesphInputs
+from warpSPHCore.radiusSearch import ChunkedAdjacency
 
 # All integration/switch history required to resume, including scalar/optional
 # history. Generic trajectory I/O handles optional fields without rebuilding A/E.
@@ -28,13 +30,18 @@ def initializePESPHState(system, config, schemeConfig):
     A constant-pressure regular lattice remains balanced for unequal masses.
     """
     state = system.state
-    requirePositive(state.pressures, 'initial pressure')
-    requirePositive(state.densities, 'initial density')
-    schemeConfig.validate(config)
+    checkPESPHChunks(system, config, schemeConfig)
+    def validate():
+        requirePositive(state.pressures, 'initial pressure')
+        requirePositive(state.densities, 'initial density')
+        schemeConfig.validate(config)
+    pesphInputs(system.adjacency, validate)
     # Samplers can return a Gather/mean-support list. The Verlet cache does
     # not record that mode, so it cannot certify the union-support list our
-    # pair force needs. Start this scheme's own SuperSymmetric cache once.
-    system.adjacency = None
+    # pair force needs. Chunked caches record their mode and rebuild through
+    # solveStageSupport when it changes; keep their policy and communication.
+    if not isinstance(system.adjacency, ChunkedAdjacency):
+        system.adjacency = None
     solveStageSupport(system, state, config, schemeConfig)
     sums = computePressureSums(state, config, state.masses, system.adjacency)
     rhoVolume = state.masses*sums.numberDensity

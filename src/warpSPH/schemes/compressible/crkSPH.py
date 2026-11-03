@@ -94,6 +94,8 @@ def crkSPH_step(
     currentSystem = system
     currentState = currentSystem.state
     t = currentSystem.t
+    from ...modules.compSPH.chunkedWork import checkChunkedStage
+    checkChunkedStage(currentSystem,currentState,config,schemeConfig,stageIndex,dt,'CRK')
     gradHState = None
 
     prepared = prepareCompressibleStage(currentSystem, config, schemeConfig, stageIndex, label='crkSPH')

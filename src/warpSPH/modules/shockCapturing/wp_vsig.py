@@ -169,6 +169,7 @@ def computeVsig_Func_Adjacency_argmax(
 
     queryVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     individual_cs: wp.bool, queryCs: wp.array(dtype = scalar_t), referenceCs: wp.array(dtype = scalar_t), # type: ignore
+    rowStart: wp.int32,
 ):
     # Forward-only, mirrors computeVsig_Func_i_argmax's own argmax approach, but one
     # level up: finds the single neighbor with the globally largest vsig across
@@ -211,7 +212,7 @@ def computeVsig_Func_Adjacency_argmax(
                 continue
 
         found, bestVal, bestJ = computeVsig_Func_i_argmax(
-            i, dim,
+            i + rowStart, dim,
             xi, hi, mi, rhoi,
             referenceState, domainState,
             kernelProperties,
@@ -244,6 +245,7 @@ def computeVsig_Kernel(
     # Do not change the parameters above
     queryVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), referenceVelocities: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
     individual_cs: wp.bool, queryCs: wp.array(dtype = scalar_t), referenceCs: wp.array(dtype = scalar_t), # type: ignore
+    rowStart: wp.int32,
     # The last parameter is always the output array and should not be changed
     outputValues : wp.array(dtype = scalar_t) # type: ignore
 ):                                                                                    
@@ -259,7 +261,7 @@ def computeVsig_Kernel(
         kernelProperties,  #queryKinds, referenceKinds,
         # The parameters above are default parameters and shold not be changed
         queryVelocities, referenceVelocities,
-        individual_cs, queryCs, referenceCs,
+        individual_cs, queryCs, referenceCs, rowStart,
     )
 
     if found:
@@ -284,14 +286,16 @@ def _vsigDtype(ctx, extras):
 
 
 _VSIG = OperatorSpec(
+    rowChunked=True,
     kernel=computeVsig_Kernel,
     outputs=(OutputSpec(dtype=_vsigDtype, shape=ShapeOf.QUERY),),
     extras=(
-        ExtraSpec("queryVelocities", ExtraKind.TENSOR),
-        ExtraSpec("referenceVelocities", ExtraKind.TENSOR),
+        ExtraSpec("queryVelocities", ExtraKind.TENSOR, RowRole.QUERY),
+        ExtraSpec("referenceVelocities", ExtraKind.TENSOR, RowRole.REFERENCE),
         ExtraSpec("individualCs", ExtraKind.SCALAR),
-        ExtraSpec("queryCs", ExtraKind.TENSOR),
-        ExtraSpec("referenceCs", ExtraKind.TENSOR),
+        ExtraSpec("queryCs", ExtraKind.TENSOR, lambda ctx, e: RowRole.QUERY if e["individualCs"] else RowRole.REPLICATED),
+        ExtraSpec("referenceCs", ExtraKind.TENSOR, lambda ctx, e: RowRole.REFERENCE if e["individualCs"] else RowRole.REPLICATED),
+        ExtraSpec("rowStart", ExtraKind.SCALAR, RowRole.ROW_START),
     ),
 )
 
@@ -356,7 +360,7 @@ def computeVsigWarp(
             return launchOperator(
                 _VSIG, ctx,
                 queryVelocities=queryVelocities_, referenceVelocities=referenceVelocities_,
-                individualCs=individual_cs, queryCs=queryCs_, referenceCs=referenceCs_,
+                individualCs=individual_cs, queryCs=queryCs_, referenceCs=referenceCs_, rowStart=0,
             )
 
         # with record_function("warpSPH[CRKVolume] - Kernel Execution"):

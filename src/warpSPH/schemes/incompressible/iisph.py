@@ -22,6 +22,8 @@ def iisph_step(
     schemeConfig: IncompressibleSPHConfig,
     verbose=False,
 ):
+    from warpSPH.modules.incompressible.chunked import checkProjectionChunks
+    checkProjectionChunks(system, config, schemeConfig)
     currentState = system.state
 
     with record_function('[warpSPH] - [IISPH - 01] adjacency'):

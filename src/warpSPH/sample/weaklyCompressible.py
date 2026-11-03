@@ -19,7 +19,7 @@ __all__ = ['setupBasicWeaklyCompressibleInitialState']
 def setupBasicWeaklyCompressibleInitialState(
         nx,
         config, schemeConfig,
-        SimulationState, SimulationSystem,
+        SimulationState, SimulationSystem, *, neighborhoodFactory=None,
 ):
     particles_l = sampleRegularParticles(nx, config.domain, config.targetNeighbors, jitter = 0.0)
     Pinitial = torch.zeros_like(particles_l.densities)
@@ -50,6 +50,9 @@ def setupBasicWeaklyCompressibleInitialState(
         domain = config.domain
     )
         
+    if neighborhoodFactory is not None:
+        compressibleSystem.adjacency = neighborhoodFactory(simulationState, config)
+
     dx = simulationState.masses.min() ** (1.0 / config.dim)
     config.dx = dx
     # config.dt = computeTimestep(compressibleSystem, config, schemeConfig, dt = config.dt)

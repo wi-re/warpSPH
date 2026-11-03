@@ -46,7 +46,11 @@ def initializeProjectionDensity(ctx, system):
         from ..modules.iisph import initializeIISPHBoundaries
         (system.boundarySupport, system.analyticBoundaryProvider,
          system.contactBoundaryProvider) = initializeIISPHBoundaries(state, schemeConfig)
-        state.densities = computeDensities(state, config, schemeConfig, system.adjacency,
+        from warpSPHCore.radiusSearch import ChunkedAdjacency
+        # Native periodic initialization uses direct grid traversal, preserving
+        # its reduction order without ever allocating a global pair list.
+        adjacency = None if isinstance(system.adjacency, ChunkedAdjacency) and ctx.case.name == 'tgv' else system.adjacency
+        state.densities = computeDensities(state, config, schemeConfig, adjacency,
             boundaryRepresentation=schemeConfig.iisph.boundaryRepresentation,
             wallMassDensity=schemeConfig.fluid.restDensity, wallSupport=system.boundarySupport)
     else:

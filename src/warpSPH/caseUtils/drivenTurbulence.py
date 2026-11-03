@@ -5,6 +5,8 @@ import torch
 from warpSPHIntegrators.state import constant
 from ..systems.compSPH import CompSPHState
 from ..systems.compressibleMonaghan import CompressibleState
+from ..systems.pesph import PressureEnergyState, PressureEntropyState
+from ..enumTypes import PESPHVariant
 
 
 class ConservedOutput:
@@ -25,8 +27,29 @@ class DrivenGasState(ConservedOutput, CompressibleState):
     sourceEnergyBudget: Optional[torch.Tensor] = constant(tags=('source_energy_budget',), default=None)
 
 
+@dataclass
+class DrivenPressureEnergyState(ConservedOutput, PressureEnergyState):
+    sourceEnergyBudget: Optional[torch.Tensor] = constant(tags=('source_energy_budget',), default=None)
+
+
+@dataclass
+class DrivenPressureEntropyState(ConservedOutput, PressureEntropyState):
+    sourceEnergyBudget: Optional[torch.Tensor] = constant(tags=('source_energy_budget',), default=None)
+
+
+def drivenPESPHStateType(variant):
+    if variant is PESPHVariant.PressureEnergy:
+        return DrivenPressureEnergyState
+    if variant is PESPHVariant.PressureEntropy:
+        return DrivenPressureEntropyState
+    raise ValueError(f'Unknown PESPH variant {variant!r}')
+
+
 def adjacencyCheckpoint(system):
+    from warpSPHCore.radiusSearch import ChunkedAdjacency
     a = system.adjacency
+    if isinstance(a, ChunkedAdjacency):
+        raise NotImplementedError('Chunked neighbor checkpoint export is not implemented; pair data must remain chunk-local.')
     data = dict(checkpointAdjacencyVersion=1, checkpointAdjacencyPresent=a is not None)
     if a is not None:
         names = ('paddedI', 'paddedJ', 'numNeighbors', 'edgeOffsets', 'queryPositions',

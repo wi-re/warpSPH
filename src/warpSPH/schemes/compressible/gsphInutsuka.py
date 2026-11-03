@@ -18,6 +18,7 @@ from ...modules.eos import idealGasEOS
 from ...modules.godunov import computeGaussianDensityWarp, computeInutsukaWarp, godunovReconstruction
 from warpSPHCore import OperationProperties, SupportScheme, buildVerletList
 from warpSPHCore.profiling import record_function
+from ...modules.godunov.chunked import checkGodunovChunks,chunkedVerletScale
 
 __all__ = ['compressibleSPH_InutsukaGSPH']
 
@@ -30,6 +31,7 @@ def compressibleSPH_InutsukaGSPH(
     verbose = False,
 ):
     schemeConfig.validateRHS()
+    checkGodunovChunks(system,config,schemeConfig,dt)
     currentSystem = system
     currentState = currentSystem.state
     t = currentSystem.t
@@ -44,7 +46,7 @@ def compressibleSPH_InutsukaGSPH(
         adjacency = buildVerletList(
             currentState,
             config.domain,
-            verletScale=torch.clamp(1.05 * reach, min=config.verletScale),
+            verletScale=chunkedVerletScale(currentSystem.adjacency,torch.clamp(1.05 * reach, min=config.verletScale)),
             supportMode=SupportScheme.SuperSymmetric,
             priorNeighborhood=currentSystem.adjacency,
             verbose=False,

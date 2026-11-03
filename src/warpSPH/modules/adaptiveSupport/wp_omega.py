@@ -194,6 +194,7 @@ def _omegaDtype(ctx, extras):
 
 
 _OMEGA = OperatorSpec(
+    rowChunked=True,
     kernel=computeOmega_Kernel,
     outputs=(OutputSpec(dtype=_omegaDtype, shape=ShapeOf.QUERY),),
 )

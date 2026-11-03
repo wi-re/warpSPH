@@ -8,6 +8,9 @@ import torch
 import warp as wp
 from warpSPHCore import scalar_t, index_t, offset_t, get_torch_precision
 from ...math.scatter import segment_sum
+from warpSPHCore.radiusSearch import ChunkedAdjacency, ChunkedPairField
+from warpSPHCore.autograd.stream import torchWarpStream
+
 
 
 @wp.func
@@ -32,8 +35,60 @@ def _pairWorkRows(velocity: wp.array2d(dtype=scalar_t), work: wp.array2d(dtype=s
     output[i] = total
 
 
+@wp.kernel
+def _chunkPairWorkRows(velocity: wp.array2d(dtype=scalar_t), work: wp.array2d(dtype=scalar_t),
+                      counts: wp.array(dtype=wp.int32), offsets: wp.array(dtype=offset_t),
+                      neighbors: wp.array(dtype=index_t), rowStart: wp.int32,
+                      output: wp.array(dtype=scalar_t)):
+    local = wp.tid()
+    total = scalar_t(0.)
+    for edge in range(counts[local]):
+        at = offsets[local] + offset_t(edge)
+        j = wp.int32(neighbors[at])
+        total += _pairDot(velocity, work, local + rowStart, j, at)
+    output[local + rowStart] = total
+
+
+def _reduceChunkedPairWork(adjacency, velocity, work):
+    communication = adjacency.communication
+    if communication is None:
+        return _reduceChunkedLocal(adjacency, velocity, work)
+    communication.assertReplicated('compatible:half-velocity', dict(velocity=velocity))
+    out = communication.localPhase('compatible:reduce-local-W', lambda: _reduceChunkedLocal(adjacency, velocity, work))
+    communication.exchangeParticleOutputs(adjacency, (out,), tag='compatible:reduce-owned-W')
+    return out
+
+
+def _reduceChunkedLocal(adjacency, velocity, work):
+    if not isinstance(work, ChunkedPairField):
+        raise TypeError('Chunked compatible reduction requires a ChunkedPairField; no flat pair fallback exists.')
+    work.validate(adjacency)
+    tensors = (velocity, *work.buffers)
+    if any(t.requires_grad or torch.autograd.forward_ad.unpack_dual(t).tangent is not None for t in tensors):
+        raise NotImplementedError('Chunked compatible reduction does not support AD.')
+    if (velocity.shape != (adjacency.numRows, *work.trailingShape) or velocity.ndim != 2
+        or adjacency.numRows != adjacency.numCols or adjacency.queryPositions is not adjacency.referencePositions
+        or (adjacency.plan.numOwners != 1 and adjacency.communication is None)
+        or velocity.device != adjacency.queryPositions.device or velocity.dtype != get_torch_precision()
+        or work.dtype != velocity.dtype):
+        raise ValueError('Chunked compatible reduction needs complete self rows and matching velocity/work layouts.')
+    if velocity.is_cuda and torch.cuda.is_current_stream_capturing():
+        raise NotImplementedError('Chunked compatible reduction does not support capture.')
+    out = torch.empty(len(velocity), dtype=velocity.dtype, device=velocity.device)
+    w = lambda t: wp.from_torch(t.contiguous())
+    with torchWarpStream(velocity.device):
+        v, output = w(velocity), w(out)
+        for chunk, buffer in zip(adjacency, work.buffers):
+            a, m = chunk.adjacency, chunk.metadata
+            wp.launch(_chunkPairWorkRows, dim=m.rowCount, device=wp.device_from_torch(out.device),
+                      inputs=[v, w(buffer), w(a.numNeighbors), w(a.edgeOffsets), w(a.paddedJ), m.rowStart, output])
+    return out
+
+
 def reducePairWork(adjacency, velocity, work):
     """sum_j (v_j-v_i).work_ij over live edges only, including empty rows."""
+    if isinstance(adjacency, ChunkedAdjacency):
+        return _reduceChunkedPairWork(adjacency, velocity, work)
     if (velocity.requires_grad or work.requires_grad or velocity.shape[0] == 0
             or velocity.dtype != get_torch_precision() or not hasattr(adjacency, 'edgeOffsets')
             or adjacency.numNeighbors.dtype != torch.int32):
@@ -42,9 +97,10 @@ def reducePairWork(adjacency, velocity, work):
         return segment_sum(torch.einsum('ij,ij->i', velocity[j] - velocity[i], work[:count]), adjacency.numNeighbors)
     out = torch.empty(velocity.shape[0], dtype=velocity.dtype, device=velocity.device)
     w = lambda t: wp.from_torch(t.contiguous())
-    wp.launch(_pairWorkRows, dim=len(out), device=wp.device_from_torch(out.device),
-              inputs=[w(velocity), w(work), w(adjacency.numNeighbors), w(adjacency.edgeOffsets),
-                      w(adjacency.paddedJ), w(out)])
+    with torchWarpStream(velocity.device):
+        wp.launch(_pairWorkRows, dim=len(out), device=wp.device_from_torch(out.device),
+                  inputs=[w(velocity), w(work), w(adjacency.numNeighbors), w(adjacency.edgeOffsets),
+                          w(adjacency.paddedJ), w(out)])
     return out
 
 
@@ -88,7 +144,8 @@ def reduceReferenceEntropyWork(adjacency, velocity, work, entropy):
         return segment_sum(fraction * dot, adjacency.numNeighbors)
     out = torch.empty(len(velocity), dtype=velocity.dtype, device=velocity.device)
     w = lambda t: wp.from_torch(t.contiguous())
-    wp.launch(_referenceEntropyRows, dim=len(out), device=wp.device_from_torch(out.device),
-              inputs=[w(velocity), w(work), w(entropy), tiny, w(adjacency.numNeighbors),
-                      w(adjacency.edgeOffsets), w(adjacency.paddedJ), w(out)])
+    with torchWarpStream(velocity.device):
+        wp.launch(_referenceEntropyRows, dim=len(out), device=wp.device_from_torch(out.device),
+                  inputs=[w(velocity), w(work), w(entropy), tiny, w(adjacency.numNeighbors),
+                          w(adjacency.edgeOffsets), w(adjacency.paddedJ), w(out)])
     return out

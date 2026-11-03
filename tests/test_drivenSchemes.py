@@ -1,6 +1,7 @@
 """Source coupling controls, separate from long turbulent-flow qualification."""
 from dataclasses import replace
 import math
+import os
 from pathlib import Path
 from types import SimpleNamespace
 import h5py
@@ -14,7 +15,7 @@ SCHEMES = ['CRKSPH', 'CompSPH', 'Monaghan', 'GSPH', 'InutsukaGSPH']
 
 
 def configuration(scheme, steps=20, **params):
-    return RunConfiguration('drivenTurbulence', simulation=dict(device='cpu', nx=12,
+    return RunConfiguration('drivenTurbulence', simulation=dict(device=os.environ.get('WARPSPH_TEST_DEVICE', 'cpu'), nx=12,
         nSteps=steps, maxDt=.002, plot=False, video=False, store=False, show=False,
         quiet=True, progress=False), params=params, solver=dict(scheme=scheme))
 
@@ -154,6 +155,21 @@ def test_compatible_replay_commits_sources_once(scheme, monkeypatch):
             count[0] += 1
     monkeypatch.setattr(crk, 'accumulateStage', spoiled)
     monkeypatch.setattr(comp, 'accumulateStage', spoiled)
+    # Native recomputation bypasses accumulateStage and writes W directly.
+    # Spoil that path too, otherwise the default route never exercises replay.
+    import warpSPH.modules.crk.work as crkWork
+    import warpSPH.modules.compSPH.work as compWork
+    def spoilShared(module, name):
+        accumulate = getattr(module, name)
+        def wrapped(system, state, update, config, schemeConfig, adjacency, correction, stageIndex, dt):
+            accumulate(system, state, update, config, schemeConfig, adjacency, correction, stageIndex, dt)
+            pw = system.pairWork
+            if stageIndex == 1 and pw.halfVelocity is None:
+                pw.consistent, pw.work = False, None
+                count[0] += 1
+        monkeypatch.setattr(module, name, wrapped)
+    spoilShared(crkWork, 'accumulateCRKWork')
+    spoilShared(compWork, 'accumulateCompWork')
     replay = configuration(scheme, 20, accelerationRMS=6.).run()
     assert count[0] == 20 and not replay.diverged
     double = normal.state.state.masses.dtype == torch.float64
@@ -176,3 +192,74 @@ def test_checkpoint_refuses_missing_native_neighbor_history(scheme, tmp_path):
     resume.simulation['resumeFrom'] = str(path)
     with pytest.raises(ValueError,match='missing native neighbor history'):
         resume.run()
+
+
+@pytest.mark.parametrize('variant,thermal', [('PressureEnergy', 'relaxation'), ('PressureEntropy', 'adiabatic')])
+@pytest.mark.parametrize('tableau', ['rungeKutta2', 'rungeKutta4'])
+def test_pesph_uniform_body_source_matches_analytic_solution(variant, thermal, tableau):
+    """Tiny repeated analytic controls intentionally omit video."""
+    def build(ctx):
+        system = case.buildSystem(ctx)
+        # Initialize from prescribed pressure through the native PESPH path.
+        system.state.pressures *= 1.4
+        system.sourceTerms.acceleration = lambda x, t: x.new_tensor([.3, 0.]).expand_as(x)
+        system.sourceTerms.removeMeanAcceleration = False
+        return system
+    cfg = configuration('PESPH', 12, accelerationRMS=0., thermalModel=thermal)
+    cfg.solver.update(variant=variant, dissipation=variant == 'PressureEnergy')
+    cfg.simulation.update(integrationScheme=tableau)
+    result = cfg.run(replace(case, buildSystem=build))
+    assert not result.diverged
+    s, t = result.state.state, float(result.state.t)
+    mass = result.trajectory[0]['mass']
+    initialU = result.trajectory[0]['thermalEnergy']/mass
+    target = result.state.sourceTerms.targetInternalEnergy
+    expectedU = target+(initialU-target)*math.exp(-t/.2) if thermal == 'relaxation' else initialU
+    torch.testing.assert_close(s.internalEnergies, torch.full_like(s.internalEnergies, expectedU), rtol=3e-5, atol=2e-6)
+    torch.testing.assert_close(s.velocities, s.velocities.new_tensor([.3*t, 0.]).expand_as(s.velocities), rtol=3e-4, atol=2e-6)
+    assert abs(float(s.sourceEnergyBudget[0])-.5*mass*(.3*t)**2) < 1e-7
+    assert abs(float(s.sourceEnergyBudget[1])-mass*(expectedU-initialU)) < 3e-6
+    assert abs(result.trajectory[-1]['relativeEnergyBudgetResidual']) < 5e-6
+    assert result.state.sourceTerms is not None
+    assert s.thermodynamicVariable == ('energy' if variant == 'PressureEnergy' else 'entropy')
+
+
+@pytest.mark.parametrize('variant,thermal', [('PressureEnergy', 'relaxation'), ('PressureEntropy', 'adiabatic')])
+@pytest.mark.parametrize('dim', [2, 3])
+def test_pesph_driven_chunked_fields_and_stage_clocks_match_flat(variant, thermal, dim):
+    from warpSPHCore.radiusSearch import buildChunkedVerletList, RowChunkPolicy, ChunkedAdjacency
+    from warpSPHCore import SupportScheme
+    records = []
+    def solve(chunked):
+        def build(ctx):
+            from warpSPH.cases.compressible.drivenTurbulence import buildSPHSystem
+            factory = (lambda state, cfg: buildChunkedVerletList(state, cfg.domain,
+                policy=RowChunkPolicy(edgeBudget=4096, maxRows=4, bytesPerEdge=8),
+                supportMode=SupportScheme.Gather, verletScale=cfg.verletScale)) if chunked else None
+            system = buildSPHSystem(ctx, neighborhoodFactory=factory)
+            native = ctx.stepFunction
+            def observed(system, *args, **kwargs):
+                records.append((chunked, float(system.t)))
+                return native(system, *args, **kwargs)
+            ctx.bundle = replace(ctx.bundle, stepFunction=observed)
+            return system
+        cfg = configuration('PESPH', 4, thermalModel=thermal, forcingInterval=.000025)
+        cfg.solver.update(variant=variant, dissipation=variant == 'PressureEnergy')
+        cfg.simulation.update(nx=6, dim=dim, maxDt=.0002, integrationScheme='rungeKutta4', storeMode='trajectory')
+        return cfg.run(replace(case, buildSystem=build))
+    flat, chunked = solve(False), solve(True)
+    assert not flat.diverged and not chunked.diverged
+    assert isinstance(chunked.state.adjacency, ChunkedAdjacency)
+    assert [t for isChunk,t in records if not isChunk] == [t for isChunk,t in records if isChunk]
+    assert len(records) == 32
+    for name, value in vars(flat.state.state).items():
+        if isinstance(value, torch.Tensor):
+            torch.testing.assert_close(getattr(chunked.state.state, name), value, rtol=0, atol=0, msg=name)
+    assert float(chunked.state.t) == float(flat.state.t)
+    assert float(chunked.ctx.config.dt) <= .000025*(1+1e-6)
+    assert float(chunked.state.t) <= 4*.000025*(1+1e-6)
+
+
+def test_pressure_entropy_driving_keeps_thermal_heating_guard():
+    with pytest.raises(ValueError, match='adiabatic'):
+        RunConfiguration('drivenTurbulence', solver=dict(scheme='PESPH', variant='PressureEntropy')).resolve()

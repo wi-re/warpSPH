@@ -100,6 +100,7 @@ from torch.profiler import profile, ProfilerActivity
 from warpSPHCore.profiling import record_function
 from typing import Optional, Union, Tuple
 from warpSPHCore import *
+from warpSPHCore.autograd.operator_spec import RowRole
 
 __all__ = ['computeDensityDiffusionDeltaSPH']
 
@@ -453,22 +454,23 @@ def _densityDiffusionDtype(ctx, extras):
 
 
 _DENSITY_DIFFUSION_DELTA_SPH = OperatorSpec(
+    rowChunked=True,
     kernel=computeDensityDiffusionDeltaSPH_Kernel,
     tiledKernel=computeDensityDiffusionDeltaSPH_KernelTiled,
     outputs=(OutputSpec(dtype=_densityDiffusionDtype, shape=ShapeOf.QUERY),),
     extras=(
-        ExtraSpec("queryGradRho", ExtraKind.TENSOR),
-        ExtraSpec("referenceGradRho", ExtraKind.TENSOR),
-        ExtraSpec("queryGradRhoL", ExtraKind.TENSOR),
-        ExtraSpec("referenceGradRhoL", ExtraKind.TENSOR),
+        ExtraSpec("queryGradRho", ExtraKind.TENSOR, RowRole.QUERY),
+        ExtraSpec("referenceGradRho", ExtraKind.TENSOR, RowRole.REFERENCE),
+        ExtraSpec("queryGradRhoL", ExtraKind.TENSOR, RowRole.QUERY),
+        ExtraSpec("referenceGradRhoL", ExtraKind.TENSOR, RowRole.REFERENCE),
         ExtraSpec("useField", ExtraKind.SCALAR),
-        ExtraSpec("queryField", ExtraKind.TENSOR),
-        ExtraSpec("referenceField", ExtraKind.TENSOR),
+        ExtraSpec("queryField", ExtraKind.TENSOR, RowRole.QUERY),
+        ExtraSpec("referenceField", ExtraKind.TENSOR, RowRole.REFERENCE),
         ExtraSpec("densityScheme", ExtraKind.SCALAR),
         # Only `moltenicolagrossi2009`/`fourtakas2019` read these.
         ExtraSpec("rho0", ExtraKind.SCALAR),
         ExtraSpec("c0", ExtraKind.SCALAR),
-        ExtraSpec("queryGravity", ExtraKind.TENSOR),
+        ExtraSpec("queryGravity", ExtraKind.TENSOR, RowRole.QUERY),
     ),
 )
 

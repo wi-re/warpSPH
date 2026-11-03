@@ -26,7 +26,9 @@ __all__ = ['dfsph_step']
 
 
 def dfsph_step(system, dt, config, schemeConfig, verbose=False):
+    from warpSPH.modules.incompressible.chunked import checkProjectionChunks
     requireProjectedStep(system, config, 'dfsph')
+    checkProjectionChunks(system, config, schemeConfig)
     if schemeConfig.dfsph.ordering != 'df_np_cd':
         from ...modules.dfsph.composition import advanceDFSPH
         return advanceDFSPH(system, dt, config, schemeConfig, schemeConfig.dfsph.ordering)

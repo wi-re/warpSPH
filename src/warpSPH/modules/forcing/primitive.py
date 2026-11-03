@@ -7,13 +7,30 @@ RK quadrature of instantaneous power. Bath heat is additional internal energy.
 import torch
 
 
-def applySources(system, update):
+def sourceFields(system):
+    """Fresh momentum/work/heat and owned energy rates for one native stage."""
     source, s = system.sourceTerms, system.state
-    momentum, work, heat = source.fields(s.masses, s.positions, s.velocities,
-                                         s.internalEnergies, system.t)
+    from ...distributed import processGroup, validateSourceClock
+    communication = processGroup(system)
+    if communication is not None:
+        validateSourceClock(system, communication)
+    def evaluate():
+        return source.fields(s.masses, s.positions, s.velocities, s.internalEnergies, system.t)
+    momentum, work, heat = evaluate() if communication is None else communication.localPhase('source:fields-local', evaluate)
+    if communication is not None:
+        communication.assertReplicated('source:fields', dict(momentum=momentum, work=work, heat=heat))
+    rates = (torch.stack((work.double().sum(), heat.double().sum())) if communication is None else
+        torch.stack((communication.sumOwned(work, system.adjacency, tag='source:work'),
+                     communication.sumOwned(heat, system.adjacency, tag='source:heat'))))
+    return momentum, work, heat, rates
+
+
+def applySources(system, update):
+    s = system.state
+    momentum, work, heat, rates = sourceFields(system)
     update.sourceAcceleration = momentum/s.masses[:, None]
     update.sourceHeat = heat/s.masses
-    update.sourceEnergyRates = torch.stack((work.double().sum(), heat.double().sum()))
+    update.sourceEnergyRates = rates
     update.dvdt = update.dvdt + update.sourceAcceleration
     # Replace, don't mutate: CRK's retained native energy weights must continue
     # to see hydro dudt, not thermostat heating/cooling.
@@ -39,7 +56,12 @@ def finishSources(system, initial, updates, weights, dt, scheme, *, compatible=F
             totalAcceleration += w*u.dvdt
             externalAcceleration += w*u.sourceAcceleration
         half = s0.velocities + .5*totalAcceleration*dt
-        forceWork = (s0.masses.double()[:, None]*half.double()*externalAcceleration.double()).sum()
+        forceContributions = s0.masses.double()[:, None]*half.double()*externalAcceleration.double()
+        from ...distributed import processGroup
+        communication = processGroup(system)
+        forceWork = (forceContributions.sum() if communication is None else
+            communication.sumOwned(forceContributions, system.adjacency, tag='source:accepted-work'))
+        del forceContributions
         exchange = torch.stack((forceWork, exchange[1]))
     s.sourceEnergyBudget = s0.sourceEnergyBudget + dt*exchange
     # Public thermodynamics describe accepted u, using the native density policy.

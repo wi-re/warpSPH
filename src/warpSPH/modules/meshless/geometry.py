@@ -16,13 +16,25 @@ class NeighborCache:
     adjacency: object = None
 
 
-def cachedAdjacency(positions, supports, domain, schemeConfig, *, owner=None, storeI=True):
+def cachedAdjacency(positions, supports, domain, schemeConfig, *, owner=None, storeI=True, config=None):
     """Exact current neighbors filtered from a validity-checked, padded list.
 
     The skin changes search work only. Every geometry recomputes moments and
     filters pairs at the current supports. Baseline search remains the default.
     """
     skin = schemeConfig.neighborSkin
+    factory = getattr(owner, '_meshlessNeighborhoodFactory', None)
+    if factory is not None:
+        from dataclasses import replace
+        from warpSPHCore.dataTypes import ParticleState
+        from warpSPHCore.enumTypes import SupportScheme
+        from warpSPHCore.radiusSearch.verlet import filterVerletList
+        particles = ParticleState(positions=positions, supports=supports,
+            masses=torch.ones_like(supports), densities=torch.ones_like(supports),
+            kinds=torch.zeros_like(supports, dtype=torch.int32))
+        adjacency = factory(particles, replace(config, supportMode=SupportScheme.SuperSymmetric, verletScale=skin))
+        return adjacency if skin == 1. else filterVerletList(particles, domain, adjacency,
+            supportMode=SupportScheme.SuperSymmetric)
     if skin == 1. or owner is None:
         return None
     from warpSPHCore.dataTypes import ParticleState
@@ -86,6 +98,8 @@ def stashGeometry(positions, supports, domain, kernel, schemeConfig, geometry, *
 
 def inheritGeometry(source, target):
     """Register an exact clone; later in-place writes invalidate its ticket."""
+    if hasattr(source, '_meshlessNeighborhoodFactory'):
+        target._meshlessNeighborhoodFactory = source._meshlessNeighborhoodFactory
     if hasattr(source, '_meshlessNeighbors'):
         target._meshlessNeighbors = source._meshlessNeighbors
     ticket = getattr(source, '_meshlessGeometry', None)
@@ -116,7 +130,7 @@ def buildGeometry(positions, supports, lam0, config, schemeConfig, domain, *, ow
     return MeshlessWarp.build(
         positions, supports, domain, config.kernel,
         adjacency=cachedAdjacency(positions, supports, domain, schemeConfig, owner=owner,
-                                  storeI=neighborSearchOptions(config)['storeI']),
+                                  storeI=neighborSearchOptions(config)['storeI'], config=config),
         storeI=neighborSearchOptions(config)['storeI'],
         cond_max=schemeConfig.condMax, closure=schemeConfig.closure,
         closure_power=schemeConfig.closurePower, rtol=None, cg_tol=schemeConfig.cgTol,
