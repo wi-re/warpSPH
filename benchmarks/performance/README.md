@@ -3,8 +3,12 @@
 Run from the **warpSPH source checkout**, using the same Python environment as
 the editable `warpSPHCore`, `warpSPHIntegrators` and `warpSPHPlotting` checkouts.
 Update both frontend and core to the benchmark commits. No new Python dependency
-is required. These scripts work on the current Warp backend; C++ stays on its
-separate branch. A native request cannot silently run Warp under a native label.
+is required. The simulator fixtures use the Warp runtime. After the native core
+merge, `--operator-backend native` selects native core operators inside that
+runtime; this is a hybrid run, and both selections are recorded. A native request
+cannot silently run Warp under a native label. Native-only operator/chunk tests
+are available in the core's `scripts/benchmarks/bench_chunking.py`; see its
+`CHUNKING.md`. The older flat operator/search fixtures still qualify Warp only.
 The initial CPU/CUDA/FP64, layout, solver-family and graph checks are recorded in
 [QUALIFICATION.md](QUALIFICATION.md).
 
@@ -111,6 +115,11 @@ traffic requires separate hardware-counter profiling.
   the useful baseline for the distributed path used on Isambard.
   MFM/MFV currently have no audited single-device Morton adapter, including the
   chunked route; both Morton entries are recorded as unsupported.
+  Use the core chunking diagnostic to isolate identical fixed neighbour lists
+  split into 1/2/4/8 pieces. The original flat operator microbenchmarks do not
+  exercise chunk dispatch. Sweep `--edge-budget` and `--max-rows` in separate
+  solver runs: their values can strongly affect GPU utilisation. Native operator
+  selection does not switch the MFM/MFV controller, which follows the runtime.
 - `--execution eager auto graph` is an optional sweep. The driven-turbulence case
   currently requires eager execution. Supply another migrated case with
   `--configuration path/to/RunConfiguration.json` for graph tests, choosing a
@@ -176,7 +185,9 @@ numerical failures remain failures. A 128³ full CRKSPH run previously exceeded
 24 GiB locally, so use smaller sizes for the 3090 and compare only common cases.
 Workers have a configurable compilation-inclusive timeout (default 900 seconds);
 errors and logs survive, and a failed case makes the sweep exit nonzero. Later
-multi-GPU strong/weak scaling and C++ harness integration remain separate phases.
+multi-GPU strong/weak scaling and native-only simulator qualification remain
+separate phases. Core native fixed-topology timings must not be presented as
+native end-to-end simulator timings.
 
 Harness-only checks (no runtime/GPU imports):
 

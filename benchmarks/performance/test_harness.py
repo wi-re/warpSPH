@@ -32,6 +32,18 @@ class HarnessTests(unittest.TestCase):
         requests = self.request('--suite', 'memory', '--nx', '16', '32', '--particle-order', 'input', 'morton', '--execution', 'auto', 'graph')
         self.assertEqual(len(requests), 3)
 
+    def test_operator_backend_defaults_and_legacy_matching(self):
+        default = self.request('--suite', 'steps', '--schemes', 'CRKSPH')[0]
+        self.assertEqual(default['operator_backend'], 'warp')
+        legacy = {k: v for k, v in default.items() if k != 'operator_backend'}
+        self.assertEqual(analyze.key(default), analyze.key(legacy))
+        hybrid = self.request('--suite', 'steps', '--schemes', 'CRKSPH',
+                              '--operator-backend', 'native')[0]
+        self.assertEqual(hybrid['backend'], 'warp')
+        self.assertNotEqual(analyze.key(default), analyze.key(hybrid))
+        self.assertEqual(analyze.key(default, allow_backend_change=True),
+                         analyze.key(hybrid, allow_backend_change=True))
+
     def test_match_devices_but_not_numerics_or_layout(self):
         r = self.request('--suite', 'operators', '--operators', 'gradient')[0]
         self.assertEqual(analyze.key(r), analyze.key(dict(r, device='cuda:0', repeats=99, profile=True)))

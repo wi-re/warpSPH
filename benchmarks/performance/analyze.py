@@ -18,8 +18,10 @@ def key(request, *, allow_backend_change=False):
                'particle_order', 'verlet_scale', 'configuration', 'neighbors', 'kernel',
                'lanes', 'traversal', 'dim', 'nx'}
     kept = {k: v for k, v in request.items() if k not in ignored}
+    kept['operator_backend'] = request.get('operator_backend', request['backend'])
     if allow_backend_change:
         kept.pop('backend', None)
+        kept.pop('operator_backend', None)
     if request['kind'] == 'memory':
         kept.update(memory_mib=request['memory_mib'], calls=request['calls'], warmup=request['warmup'])
     else:
@@ -55,6 +57,7 @@ def flatten(label, result):
     return dict(run=label, status=result['status'], kind=r['kind'], operation=r['operation'],
                 precision=r['precision'], device=r['device'], threads=r['threads'], nx=r['nx'], dim=r['dim'],
                 backend=machine.get('backend', r['backend']), lanes=r['lanes'], traversal=r['traversal'],
+                operator_backend=machine.get('operator_backend', r.get('operator_backend', r['backend'])),
                 particle_order=r.get('particle_order', 'input'), execution=r.get('execution', 'eager'),
                 neighborhood=r.get('neighborhood', 'csr'), iteration_checks=r.get('iteration_checks'),
                 effective_compute=json.dumps(work.get('effective_compute', {}), sort_keys=True),

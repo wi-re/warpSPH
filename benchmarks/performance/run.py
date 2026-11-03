@@ -63,6 +63,7 @@ def parser():
     p.add_argument('--query-order', choices=('auto', 'input', 'spatial'), default='auto')
     p.add_argument('--verlet-scale', type=float, help='optional simulator neighbour-list skin; same value in every comparison')
     p.add_argument('--backend', choices=('warp', 'native'), default='warp')
+    p.add_argument('--operator-backend', choices=('warp', 'native'), help='core operators inside the selected runtime; native operators can run in the Warp simulator')
     p.add_argument('--index-dtype', choices=('int32', 'int64'), default='int32')
     p.add_argument('--offset-dtype', choices=('int32', 'int64'), default='int64')
     p.add_argument('--configuration', type=Path, help='optional versioned RunConfiguration JSON for step/RHS cases; benchmark runtime overrides apply')
@@ -83,6 +84,7 @@ def requests(args):
     for precision, threads in itertools.product(dict.fromkeys(args.precision), dict.fromkeys(args.threads)):
         base = dict(device=args.device, precision=precision, threads=threads, dim=args.dim, neighbors=args.neighbors,
                     kernel=args.kernel, lanes=1, traversal='adjacency', backend=args.backend,
+                    operator_backend=args.operator_backend or args.backend,
                     index_dtype=args.index_dtype, offset_dtype=args.offset_dtype,
                     memory_mib=args.memory_mib, warmup=args.warmup, repeats=args.repeats, calls=args.calls,
                     steps=args.steps, particle_order='input', verlet_scale=args.verlet_scale,
