@@ -8,7 +8,7 @@ import torch
 import warp as wp
 from warpSPHCore.autograd.stream import torchWarpStream
 from warpSPHCore import scalar_t
-from warpSPHCore.mfm.warpBackend import _forwardOnly
+from warpSPHCore.mfm.backend import _forwardOnly
 from ..eos.conserved import idealGasPrimitives
 
 wp.set_module_options({'enable_backward': False, 'fuse_fp': False})
