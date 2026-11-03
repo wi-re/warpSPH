@@ -28,6 +28,13 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(len(requests), 16)
         self.assertEqual(len({analyze.key(r) for r in requests}), 16)
 
+    def test_default_lanes_remain_distinct_from_forced_overrides(self):
+        requests = self.request('--suite', 'operators', '--operators', 'crk_volume',
+                                '--particle-order', 'input', '--lanes', 'default', '1', '32')
+        self.assertEqual([r['lanes'] for r in requests], [None, 1, 32])
+        self.assertEqual(len({analyze.key(r) for r in requests}), 3)
+        self.assertIsNone(json.loads(json.dumps(requests))[0]['lanes'])
+
     def test_irrelevant_memory_axes_dont_duplicate_cases(self):
         requests = self.request('--suite', 'memory', '--nx', '16', '32', '--particle-order', 'input', 'morton', '--execution', 'auto', 'graph')
         self.assertEqual(len(requests), 3)

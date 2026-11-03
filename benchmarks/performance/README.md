@@ -135,6 +135,14 @@ traffic requires separate hardware-counter profiling.
   flag. Graph captures cannot be counted by Python RHS calls, and Morton adapters
   require audited RHS identities: per-call RHS instrumentation is therefore
   input/eager only. Full-step timing and core-section traces support Morton.
+  The benchmark pins `--lanes 1` by default for a stable scalar baseline.
+  Use `--lanes default` to measure the production selection, inheriting the
+  environment and per-operator defaults. Qualified CUDA kernels normally use
+  32 lanes; CRK volume and compatible work retain scalar defaults on flat/grid
+  inputs and use 32 lanes on bounded chunks. Large flat lists can be slower
+  when these two kernels are forced to 32 lanes. Use `--lanes default 1 32`
+  to compare all three selections; the requested default is recorded as JSON
+  `null`, distinct from either forced override. CPU kernels stay scalar.
 - Custom versioned configurations keep case physics and solver settings. The
   benchmark overrides scheme, size, dimension, device/precision, kernel, compute
   options, accepted-step count and output controls. Fresh starts only; arbitrary

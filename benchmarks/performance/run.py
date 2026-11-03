@@ -29,6 +29,18 @@ def positive(value):
     return n
 
 
+def neighbor_lanes(value):
+    if value == 'default':
+        return None
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError('use default or 1, 2, 4, 8, 16, 32')
+    if n not in (1, 2, 4, 8, 16, 32):
+        raise argparse.ArgumentTypeError('use default or 1, 2, 4, 8, 16, 32')
+    return n
+
+
 def parser():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--device', default='cpu', help='cpu or cuda:N; one device per invocation')
@@ -43,7 +55,8 @@ def parser():
     p.add_argument('--schemes', nargs='+', choices=SCHEMES, default=['CRKSPH', 'CompSPH', 'MFM', 'MFV'])
     p.add_argument('--neighbors', type=positive, default=55, help='requested microbenchmark lattice degree (actual count is reported)')
     p.add_argument('--kernel', default='Wendland2')
-    p.add_argument('--lanes', type=int, choices=(1, 2, 4, 8, 16, 32), nargs='+', default=[1])
+    p.add_argument('--lanes', type=neighbor_lanes, nargs='+', default=[1],
+                   help='default inherits environment/per-operator choices; integers force an override')
     p.add_argument('--traversal', choices=('adjacency', 'grid', 'rebuild'), nargs='+', default=['adjacency'])
     p.add_argument('--memory-mib', type=positive, default=256, help='elements in each memory-control floating array, in MiB')
     p.add_argument('--budget-gib', type=float, default=8., help='conservative estimated working-set ceiling; not an allocator limit')

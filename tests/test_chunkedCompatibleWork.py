@@ -58,7 +58,7 @@ def _run(monkeypatch, scheme, dim, tableau, support, chunked, change=False, lane
                     assert n <= 5
                 sizes = [a._tensor.untyped_storage().nbytes() for a in outputs]
                 launches.append(('F', n, sum(sizes)))
-            elif kernel is workModule._SPEC.kernel:
+            elif kernel in (workModule._SPEC.kernel, workModule._SPEC.tiledKernel):
                 launches.append(('W', n, inputs[-1]._tensor.untyped_storage().nbytes()))
             return launch(kernel, n, inputs, device, lanes, **kwargs)
         patch.setattr(launcher, '_launchMaybeTiled', allocationAudit)
@@ -200,3 +200,56 @@ def test_chunk_work_on_nondefault_stream_with_32_neighbor_lanes(monkeypatch, sch
         chunks, other = _run(monkeypatch, scheme, 2, 'rungeKutta4', 'NoScheme', True, lanes=32)
         _compare(flat, chunks, history, other)
     stream.synchronize()
+
+
+@pytest.mark.parametrize('dim,tableau,change', [(2, 'rungeKutta2', False),
+    (3, 'rungeKutta2', False), (2, 'rungeKutta4', True)])
+def test_crk_cooperative_work_matches_scalar_and_replay(monkeypatch, dim, tableau, change):
+    if not torch.cuda.is_available() or not os.environ.get('WARPSPH_TEST_DEVICE', 'cpu').startswith('cuda'):
+        pytest.skip('CUDA required')
+    scalar, history = _run(monkeypatch, 'CRKSPH', dim, tableau, 'NoScheme', True, change=change, lanes=1)
+    tiled, other = _run(monkeypatch, 'CRKSPH', dim, tableau, 'NoScheme', True, change=change, lanes=32)
+    assert len(history) == len(other)
+    tol = 3e-5 if scalar.state.state.positions.dtype == torch.float32 else 2e-11
+    for name in ('positions', 'velocities', 'internalEnergies', 'densities', 'supports', 'alphas'):
+        torch.testing.assert_close(getattr(tiled.state.state, name), getattr(scalar.state.state, name),
+                                   rtol=tol, atol=tol*.01)
+    # Stage rates and replayed work reductions need agreement before the small
+    # timestep can hide errors in the final physical fields.
+    for a, b in zip(history, other):
+        assert a['reducing'] == b['reducing']
+        for name in ('dvdt', 'dudt', 'delta'):
+            if a[name] is None:
+                assert b[name] is None
+                continue
+            scale = a[name].abs().max().clamp_min(torch.finfo(a[name].dtype).tiny)
+            assert float((a[name]-b[name]).abs().max()/scale) < tol*4
+
+
+def test_crk_default_kernel_selection_and_energy_budget(monkeypatch):
+    if not torch.cuda.is_available() or not os.environ.get('WARPSPH_TEST_DEVICE', 'cpu').startswith('cuda'):
+        pytest.skip('CUDA required')
+    launcher = importlib.import_module('warpSPHCore.autograd.launcher')
+    volume = importlib.import_module('warpSPHCore.crk.crk_volume')
+    work = importlib.import_module('warpSPH.modules.crk.work')
+    laneModule = importlib.import_module('warpSPHCore.autograd.lanes')
+    monkeypatch.setattr(laneModule, '_envLanes', None)
+    launch = launcher._launchMaybeTiled
+    seen = []
+
+    def audit(kernel, *args, **kwargs):
+        if kernel in (volume._CRK_VOLUME_SPEC.kernel, volume._CRK_VOLUME_SPEC.tiledKernel,
+                      work._SPEC.kernel, work._SPEC.tiledKernel):
+            seen.append(kernel)
+        return launch(kernel, *args, **kwargs)
+
+    monkeypatch.setattr(launcher, '_launchMaybeTiled', audit)
+    flat, _ = _run(monkeypatch, 'CRKSPH', 2, 'rungeKutta2', 'NoScheme', False, lanes=None)
+    assert set(seen) == {volume._CRK_VOLUME_SPEC.kernel, work._SPEC.kernel}
+    seen.clear()
+    chunks, _ = _run(monkeypatch, 'CRKSPH', 2, 'rungeKutta2', 'NoScheme', True, lanes=None)
+    assert set(seen) == {volume._CRK_VOLUME_SPEC.tiledKernel, work._SPEC.tiledKernel}
+    tol = 3e-5 if flat.state.state.positions.dtype == torch.float32 else 2e-11
+    for name in ('positions', 'velocities', 'internalEnergies', 'densities', 'supports', 'alphas'):
+        torch.testing.assert_close(getattr(chunks.state.state, name), getattr(flat.state.state, name),
+                                   rtol=tol, atol=tol*.01)

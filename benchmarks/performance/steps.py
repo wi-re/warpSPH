@@ -207,6 +207,7 @@ def trajectory(request, device, *, instrument_rhs=False, profile_path=None):
                          whole_step_graph=result.ctx.scratch.get('stepGraph') is not None,
                          solver_cuda_graph=getattr(result.ctx.schemeConfig, 'cudaGraph', None),
                          neighbor_lanes=request['lanes'], particle_order=result.ctx.spec.particleOrder,
+                         neighbor_lane_selection='environment/per-operator defaults' if request['lanes'] is None else 'forced override',
                          topology_type=type(adjacency).__name__,
                          layout_sorts=[row.get('layoutSorts') for row in rows],
                          coverage_renewals=[row.get('coverageRenewals') for row in rows])
